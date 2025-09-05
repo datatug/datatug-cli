@@ -6,7 +6,7 @@ require (
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.6
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/datatug/datatug-core v0.8.0
+	github.com/datatug/datatug-core v0.8.3
 	github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.9.0
@@ -44,7 +44,7 @@ require (
 	github.com/cloudflare/circl v1.6.1 // indirect
 	github.com/crediterra/money v0.3.0 // indirect
 	github.com/cyphar/filepath-securejoin v0.4.1 // indirect
-	github.com/dal-go/dalgo v0.26.3 // indirect
+	github.com/dal-go/dalgo v0.26.5 // indirect
 	github.com/danieljoos/wincred v1.2.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -83,12 +83,12 @@ require (
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.1 // indirect
-	github.com/sneat-co/sneat-go-core v0.54.2 // indirect
+	github.com/sneat-co/sneat-go-core v0.54.4 // indirect
 	github.com/strongo/analytics v0.2.2 // indirect
 	github.com/strongo/decimal v0.1.1 // indirect
 	github.com/strongo/random v0.0.1 // indirect
-	github.com/strongo/slice v0.3.1 // indirect
-	github.com/strongo/strongoapp v0.31.8 // indirect
+	github.com/strongo/slice v0.3.3 // indirect
+	github.com/strongo/strongoapp v0.31.9 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect

@@ -1,6 +1,6 @@
 version: 2
 
-project_name: datatug-cli
+project_name: datatug
 
 before:
   hooks:

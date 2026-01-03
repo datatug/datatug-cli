@@ -26,7 +26,7 @@ func testCommandArgs() *cli.Command {
 	}
 }
 
-func validateAction(ctx context.Context, c *cli.Command) (err error) {
+func validateAction(_ context.Context, c *cli.Command) (err error) {
 	var v projectBaseCommand
 	v.ProjectDir = c.String(dirFlag.Name)
 	log.Println("Project path:", v.ProjectDir)
@@ -35,14 +35,29 @@ func validateAction(ctx context.Context, c *cli.Command) (err error) {
 		return err
 	}
 
+	log.Printf("Project: ID=%s, path=%s", v.projectID, v.ProjectDir)
+
+	store := v.store.GetProjectStore(v.projectID)
+
+	if store == nil {
+		return fmt.Errorf("project store is nil for project ID=%s", v.projectID)
+	}
+
+	ctx := context.Background()
+
 	var project *datatug.Project
-	if project, err = v.store.GetProjectStore(v.projectID).LoadProject(context.Background()); err != nil {
-		return fmt.Errorf("failed to load project from [%v]: %w", v.ProjectDir, err)
+
+	log.Println("Loading DataTug project...")
+	if project, err = store.LoadProject(ctx); err != nil {
+		return fmt.Errorf("failed to load project from [%s]: %w", v.ProjectDir, err)
 	}
-	fmt.Println("Validating loaded project...")
-	if err := project.Validate(); err != nil {
-		return err
+
+	log.Println("Validating loaded project...")
+	if err = project.Validate(); err != nil {
+		return fmt.Errorf("DataTug project is not valid: %w", err)
 	}
-	fmt.Println("GetProjectStore is valid.")
+
+	log.Println("DataTug project is valid.")
+
 	return nil
 }

@@ -80,6 +80,8 @@ github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMF
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/datatug-core v0.16.2 h1:+GIdLUjRjkqKYISD1kw2jFDayj+5Lp8HN711nLetqpY=
 github.com/datatug/datatug-core v0.16.2/go.mod h1:HG/R1nj/VM51cd1CQWRERNM4SgEWX2ezms+fLtt2i0U=
+github.com/datatug/datatug-core v0.16.3 h1:jKQxXvXZKcj9+PQu55SdddeThmRl+zzwWLz2lLpA9yw=
+github.com/datatug/datatug-core v0.16.3/go.mod h1:HG/R1nj/VM51cd1CQWRERNM4SgEWX2ezms+fLtt2i0U=
 github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2 h1:9iN4YNV3PIGMU7Wh4hU0AjuI/mMwgbVXaV4YqHoE0ZU=
 github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2/go.mod h1:8mhg6DTTobWkm+Xfyts3nwJ7ZmxWMWWboguVH1INkc8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

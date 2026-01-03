@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/urfave/cli/v3"
 )
 
@@ -27,10 +30,32 @@ func testCommandArgs() *cli.Command {
 }
 
 func validateAction(_ context.Context, c *cli.Command) (err error) {
-	var v projectBaseCommand
-	v.ProjectDir = c.String(dirFlag.Name)
-	log.Println("Project path:", v.ProjectDir)
+	dirPath := c.String(dirFlag.Name)
+	log.Println("Project path:", dirPath)
 
+	var repoRootFile *datatug.RepoRootFile
+
+	repoRootFile, err = filestore.LoadRootDatatugFile(dirPath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to load root repo file: %w", err)
+	}
+
+	if os.IsNotExist(err) {
+		return validateProject(dirPath)
+	}
+
+	for i, projPath := range repoRootFile.Projects {
+		err = validateProject(filepath.Join(dirPath, projPath))
+		if err != nil {
+			return fmt.Errorf("failed to validate project #%d @ %s: %w", i+1, projPath, err)
+		}
+	}
+	return nil
+}
+
+func validateProject(projDir string) (err error) {
+	var v projectBaseCommand
+	v.ProjectDir = projDir
 	if err = v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
 	}
@@ -59,5 +84,5 @@ func validateAction(_ context.Context, c *cli.Command) (err error) {
 
 	log.Println("DataTug project is valid.")
 
-	return nil
+	return err
 }

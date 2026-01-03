@@ -53,53 +53,57 @@ func (v *showProjectCommand) Execute(_ []string) error {
 			}
 		}
 	}
-	_, _ = fmt.Fprintln(w, "DB servers: ", len(project.DbServers))
-	for _, dbServer := range project.DbServers {
-		_, _ = fmt.Fprintf(w, "\t🛢️🛢️ %v: %v\n", dbServer.Server.Driver, dbServer.Server.Address())
-		for _, db := range dbServer.Catalogs {
-			_, _ = fmt.Fprintln(w, "\t\t🛢️ Database: ", db.ID)
-			for _, schema := range db.Schemas {
-				_, _ = fmt.Fprintln(w, "\t\t\t schema: ", db.ID)
-				printCols := func(t *datatug.CollectionInfo) {
-					if len(t.Columns) > 0 {
-						table := uitable.New()
-						for _, c := range t.Columns {
-							s := strings.ToUpper(c.DbType)
-							if c.CharMaxLength != nil && c.DbType != "text" {
-								s = fmt.Sprintf("%v(%v)", s, *c.CharMaxLength)
+	_, _ = fmt.Fprintln(w, "DB drivers: ", len(project.DbDrivers))
+	for _, dbDriver := range project.DbDrivers {
+		_, _ = fmt.Fprintln(w, "\t\t🛢️ Driver: ", dbDriver.ID)
+		for _, dbServer := range dbDriver.Servers {
+			_, _ = fmt.Fprintf(w, "\t🛢️🛢️ %v: %v\n", dbServer.Server.Driver, dbServer.Server.Address())
+			for _, db := range dbServer.Catalogs {
+				_, _ = fmt.Fprintln(w, "\t\t🛢️ Server: ", db.ID)
+				for _, schema := range db.Schemas {
+					_, _ = fmt.Fprintln(w, "\t\t\t schema: ", db.ID)
+					printCols := func(t *datatug.CollectionInfo) {
+						if len(t.Columns) > 0 {
+							table := uitable.New()
+							for _, c := range t.Columns {
+								s := strings.ToUpper(c.DbType)
+								if c.CharMaxLength != nil && c.DbType != "text" {
+									s = fmt.Sprintf("%v(%v)", s, *c.CharMaxLength)
+								}
+								table.AddRow("\t\t\t\t\t\t"+c.Name, s)
 							}
-							table.AddRow("\t\t\t\t\t\t"+c.Name, s)
-						}
-						_, _ = fmt.Fprintf(w, "\t\t\t\t\tColumns (%v):\n", len(t.Columns))
-						_, _ = fmt.Fprintln(w, table.String())
-					}
-				}
-				printTable := func(singular string, t *datatug.CollectionInfo) {
-					_, _ = fmt.Fprintf(w, "\t\t\t\t📄 %v: %s.%s\n", singular, t.Schema(), t.Name())
-					if t.PrimaryKey != nil {
-						_, _ = fmt.Fprintf(w, "\t\t\t\t\t🔑 Primary key: %s (%s)\n", t.PrimaryKey.Name, strings.Join(t.PrimaryKey.Columns, ", "))
-					}
-					if len(t.ForeignKeys) > 0 {
-						_, _ = fmt.Fprintf(w, "\t\t\t\t\t🔗 Foreign keys (%d):", len(t.ForeignKeys))
-						for _, fk := range t.ForeignKeys {
-							_, _ = fmt.Fprintf(w, "\t\t\t\t\t\t (%v) %s.%s @ %v\n", strings.Join(fk.Columns, ", "), fk.RefTable.Schema(), fk.RefTable.Name(), fk.Name)
+							_, _ = fmt.Fprintf(w, "\t\t\t\t\tColumns (%v):\n", len(t.Columns))
+							_, _ = fmt.Fprintln(w, table.String())
 						}
 					}
-					for _, refBy := range t.ReferencedBy {
-						for _, fk := range refBy.ForeignKeys {
-							_, _ = fmt.Fprintf(w, "\t\t\t\t\t📎 Referenced by: %s.%s (%s) @ %v\n", refBy.Schema(), refBy.Name(), strings.Join(fk.Columns, ", "), fk.Name)
+					printTable := func(singular string, t *datatug.CollectionInfo) {
+						_, _ = fmt.Fprintf(w, "\t\t\t\t📄 %v: %s.%s\n", singular, t.Schema(), t.Name())
+						if t.PrimaryKey != nil {
+							_, _ = fmt.Fprintf(w, "\t\t\t\t\t🔑 Primary key: %s (%s)\n", t.PrimaryKey.Name, strings.Join(t.PrimaryKey.Columns, ", "))
 						}
+						if len(t.ForeignKeys) > 0 {
+							_, _ = fmt.Fprintf(w, "\t\t\t\t\t🔗 Foreign keys (%d):", len(t.ForeignKeys))
+							for _, fk := range t.ForeignKeys {
+								_, _ = fmt.Fprintf(w, "\t\t\t\t\t\t (%v) %s.%s @ %v\n", strings.Join(fk.Columns, ", "), fk.RefTable.Schema(), fk.RefTable.Name(), fk.Name)
+							}
+						}
+						for _, refBy := range t.ReferencedBy {
+							for _, fk := range refBy.ForeignKeys {
+								_, _ = fmt.Fprintf(w, "\t\t\t\t\t📎 Referenced by: %s.%s (%s) @ %v\n", refBy.Schema(), refBy.Name(), strings.Join(fk.Columns, ", "), fk.Name)
+							}
+						}
+						printCols(t)
 					}
-					printCols(t)
-				}
-				for _, t := range schema.Tables {
-					printTable("Table", t)
-				}
-				for _, t := range schema.Views {
-					printTable("View", t)
+					for _, t := range schema.Tables {
+						printTable("Table", t)
+					}
+					for _, t := range schema.Views {
+						printTable("View", t)
+					}
 				}
 			}
 		}
 	}
+
 	return err
 }

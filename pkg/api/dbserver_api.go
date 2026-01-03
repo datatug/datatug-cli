@@ -15,7 +15,7 @@ func AddDbServer(ctx context.Context, ref dto.ProjectRef, projDbServer datatug.P
 	if err != nil {
 		return err
 	}
-	return store.SaveProjDbServer(ctx, &projDbServer)
+	return store.DbServersStore(projDbServer.Server.Driver).SaveProjDbServer(ctx, &projDbServer)
 }
 
 // UpdateDbServer adds db server to project
@@ -26,20 +26,20 @@ func UpdateDbServer(ctx context.Context, ref dto.ProjectRef, projDbServer datatu
 	if err != nil {
 		return err
 	}
-	return store.SaveProjDbServer(ctx, &projDbServer)
+	return store.DbServersStore(projDbServer.Server.Driver).SaveProjDbServer(ctx, &projDbServer)
 }
 
 // DeleteDbServer adds db server to project
-func DeleteDbServer(ctx context.Context, ref dto.ProjectRef, dbServer datatug.ServerReference) (err error) {
+func DeleteDbServer(ctx context.Context, ref dto.ProjectRef, dbServer datatug.ServerRef) (err error) {
 	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return err
 	}
-	return store.DeleteProjDbServer(ctx, dbServer.GetID())
+	return store.DbServersStore(dbServer.Driver).DeleteProjDbServer(ctx, dbServer.GetID())
 }
 
 // GetDbServerSummary returns summary on DB server
-func GetDbServerSummary(ctx context.Context, ref dto.ProjectRef, dbServer datatug.ServerReference) (*datatug.ProjDbServerSummary, error) {
+func GetDbServerSummary(ctx context.Context, ref dto.ProjectRef, dbServer datatug.ServerRef) (*datatug.ProjDbServer, error) {
 	if err := dbServer.Validate(); err != nil {
 		err = validation.NewBadRequestError(err)
 		return nil, err
@@ -48,5 +48,5 @@ func GetDbServerSummary(ctx context.Context, ref dto.ProjectRef, dbServer datatu
 	if err != nil {
 		return nil, err
 	}
-	return store.LoadProjDbServerSummary(ctx, dbServer.GetID())
+	return store.DbServersStore(dbServer.Driver).LoadProjDbServer(ctx, dbServer.GetID())
 }

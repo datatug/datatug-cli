@@ -21,13 +21,13 @@ import (
 // Executor executes DataTug commands
 type Executor struct {
 	getDbByID         func(envID, dbID string) (*datatug.EnvDb, error)
-	getCatalogSummary func(server datatug.ServerReference, catalogID string) (*datatug.DbCatalogSummary, error)
+	getCatalogSummary func(server datatug.ServerRef, catalogID string) (*datatug.DbCatalogSummary, error)
 }
 
 // NewExecutor creates new executor
 func NewExecutor(
 	getDbByID func(envID, dbID string) (*datatug.EnvDb, error),
-	getCatalogSummary func(server datatug.ServerReference, catalogID string) (*datatug.DbCatalogSummary, error),
+	getCatalogSummary func(server datatug.ServerRef, catalogID string) (*datatug.DbCatalogSummary, error),
 ) Executor {
 	return Executor{
 		getDbByID:         getDbByID,
@@ -99,7 +99,7 @@ var reParameter = regexp.MustCompile(`@\w+`)
 
 func (e Executor) executeCommand(command RequestCommand) (recordset datatug.Recordset, err error) {
 
-	var dbServer datatug.ServerReference
+	var dbServer datatug.ServerRef
 
 	if e.getDbByID != nil {
 		var envDb *datatug.EnvDb
@@ -109,7 +109,7 @@ func (e Executor) executeCommand(command RequestCommand) (recordset datatug.Reco
 		dbServer = envDb.Server
 	} else {
 		strings.Split(command.DB, ":")
-		dbServer = datatug.ServerReference{Host: command.Host, Port: command.Port, Driver: command.Driver}
+		dbServer = datatug.ServerRef{Host: command.Host, Port: command.Port, Driver: command.Driver}
 		if err = dbServer.Validate(); err != nil {
 			return recordset, fmt.Errorf("execute command does not have valid server parameters: %w", err)
 		}
@@ -149,7 +149,7 @@ func (e Executor) executeCommand(command RequestCommand) (recordset datatug.Reco
 	}
 
 	fmt.Println(connParams)
-	//fmt.Println(envDb.ServerReference.driver, connParams.String())
+	//fmt.Println(envDb.ServerRef.driver, connParams.String())
 	//fmt.Println(command.Text)
 	var db *sql.DB
 	if db, err = sql.Open(dbServer.Driver, connParams.ConnectionString()); err != nil {

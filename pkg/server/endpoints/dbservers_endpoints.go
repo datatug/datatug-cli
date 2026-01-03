@@ -25,7 +25,7 @@ func addDbServer(w http.ResponseWriter, r *http.Request) {
 func getDbServerSummary(w http.ResponseWriter, r *http.Request) {
 	log.Println(r.Method, r.RequestURI)
 	q := r.URL.Query()
-	dbServer := datatug.ServerReference{
+	dbServer := datatug.ServerRef{
 		Driver: q.Get("driver"),
 		Host:   q.Get("host"),
 	}

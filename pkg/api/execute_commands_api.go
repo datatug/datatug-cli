@@ -32,7 +32,7 @@ func ExecuteCommands(ctx context.Context, storeID string, request sqlexecute.Req
 	//	//return
 	//}
 	//
-	//var getCatalog = func(server datatug.ServerReference, catalogID string) (*datatug.DbCatalogSummary, error) {
+	//var getCatalog = func(server datatug.ServerRef, catalogID string) (*datatug.DbCatalogSummary, error) {
 	//	panic("not implemented yet")
 	//	//serverStore := dal.GetProjectStore(request.Project).DbServers().DbServer(server)
 	//	//return serverStore.Catalogs().DbCatalog(catalogID).LoadDbCatalogSummary(context.Background())

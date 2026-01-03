@@ -49,7 +49,7 @@ func (v Request) Validate() error {
 // RequestCommand holds parameters for command to be executed
 type RequestCommand struct {
 	datatug.Credentials // holds username & password, if not provided trusted connection
-	datatug.ServerReference
+	datatug.ServerRef
 	Env        string              `json:"env"`
 	DB         string              `json:"db"`
 	Text       string              `json:"text"`
@@ -64,7 +64,7 @@ func (v RequestCommand) Validate() error {
 	if v.Text == "" {
 		return validation.NewErrRequestIsMissingRequiredField("text")
 	}
-	if err := v.ServerReference.Validate(); err != nil {
+	if err := v.ServerRef.Validate(); err != nil {
 		return err
 	}
 	if v.DB != "" {

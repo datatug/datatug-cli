@@ -58,7 +58,7 @@ func scanCommandAction(_ context.Context, _ *cli.Command) error {
 	case "sqlite3":
 		panic("not implemented yet")
 		//ctx := context.Background()
-		//serverRef := datatug.ServerReference{Driver: v.Driver, Host: "localhost"}
+		//serverRef := datatug.ServerRef{Driver: v.Driver, Host: "localhost"}
 		//store := v.store.GetProjectStore(v.projectID)
 		//dbCatalog, err := .DbServers().DbServer(serverRef).Catalogs().DbCatalog(v.Database).LoadDbCatalogSummary(ctx)
 		//if err != nil {

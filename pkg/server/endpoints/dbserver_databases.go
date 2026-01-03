@@ -23,7 +23,7 @@ func getServerDatabases(w http.ResponseWriter, r *http.Request) {
 		Environment: q.Get("env"),
 	}
 	var err error
-	if request.ServerReference, err = newDbServerFromQueryParams(q); err != nil {
+	if request.ServerRef, err = newDbServerFromQueryParams(q); err != nil {
 		handleError(err, w, r)
 		return
 	}
@@ -31,7 +31,7 @@ func getServerDatabases(w http.ResponseWriter, r *http.Request) {
 	returnJSON(w, r, http.StatusOK, err, databases)
 }
 
-func newDbServerFromQueryParams(query url.Values) (dbServer datatug.ServerReference, err error) {
+func newDbServerFromQueryParams(query url.Values) (dbServer datatug.ServerRef, err error) {
 	dbServer.Driver = query.Get("driver")
 	dbServer.Host = query.Get("host")
 	if port := strings.TrimSpace(query.Get("port")); port != "" {

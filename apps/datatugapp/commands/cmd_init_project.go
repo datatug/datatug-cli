@@ -67,7 +67,7 @@ func initCommandAction(ctx context.Context, c *cli.Command) (err error) {
 	//// Close the database connection pool after consoleCommand executes
 	//defer func() { _ = db.Close() }()
 	//
-	//server := datatug.ServerReference{driver: v.driver, Host: v.Host, Port: port}
+	//server := datatug.ServerRef{driver: v.driver, Host: v.Host, Port: port}
 	//informationSchema := schemer.NewInformationSchema(server, db)
 	//
 	//var database *datatug.Database

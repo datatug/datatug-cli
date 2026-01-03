@@ -84,7 +84,7 @@ func (s *collectionsReader) NextCollection() (c *datatug.CollectionInfo, err err
 	}
 	c = &datatug.CollectionInfo{
 		DBCollectionKey: datatug.NewCollectionKey(collectionType, name, "", "", nil),
-		SQL:             sqlText,
+		DDL:             sqlText,
 	}
 	return
 }

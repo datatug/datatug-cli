@@ -15,17 +15,17 @@ import (
 // InformationSchema provides API to retrieve information about a database
 type InformationSchema struct {
 	db     *sql.DB
-	server datatug.ServerReference
+	server datatug.ServerRef
 }
 
 // NewInformationSchema creates new InformationSchema
-func NewInformationSchema(server datatug.ServerReference /*, db *sql.DB*/) InformationSchema {
+func NewInformationSchema(server datatug.ServerRef /*, db *sql.DB*/) InformationSchema {
 	return InformationSchema{server: server /*, db: db*/}
 }
 
 // GetDatabase returns complete information about a database
-func (s InformationSchema) GetDatabase(name string) (database *datatug.EnvDbCatalog, err error) {
-	database = new(datatug.EnvDbCatalog)
+func (s InformationSchema) GetDatabase(name string) (database *datatug.DbCatalog, err error) {
+	database = new(datatug.DbCatalog)
 	database.ID = name
 	var tables []*datatug.CollectionInfo
 	if tables, err = s.getTables(name); err != nil {
@@ -193,14 +193,14 @@ ORDER BY tc.TABLE_SCHEMA, tc.TABLE_NAME, tc.CONSTRAINT_TYPE, kcu.CONSTRAINT_NAME
 						if refTable == nil {
 							return fmt.Errorf("reference table not found: %v.%v.%v", constraint.RefTableCatalog, constraint.RefTableSchema, constraint.RefTableName)
 						}
-						var refByTable *datatug.TableReferencedBy
+						var refByTable *datatug.ReferencedBy
 						for _, refByTable = range refTable.ReferencedBy {
 							if refByTable.Catalog() == catalog && refByTable.Schema() == constraint.SchemaName && refByTable.Name() == constraint.TableName {
 								break
 							}
 						}
 						if refByTable == nil || refByTable.Catalog() != catalog || refByTable.Schema() != constraint.SchemaName || refByTable.Name() != constraint.TableName {
-							refByTable = &datatug.TableReferencedBy{
+							refByTable = &datatug.ReferencedBy{
 								DBCollectionKey: table.DBCollectionKey,
 								ForeignKeys:     make([]*datatug.RefByForeignKey, 0, 1),
 							}

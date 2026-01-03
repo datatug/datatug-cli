@@ -65,5 +65,11 @@ func GetQuery(ctx context.Context, ref dto.ProjectItemRef) (query *datatug.Query
 	if err != nil {
 		return nil, err
 	}
-	return store.LoadQuery(ctx, ref.ID)
+	queryDef, err := store.LoadQuery(ctx, ref.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &datatug.QueryDefWithFolderPath{
+		QueryDef: *queryDef,
+	}, nil
 }

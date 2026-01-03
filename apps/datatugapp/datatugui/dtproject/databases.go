@@ -19,8 +19,8 @@ func goDatabasesScreen(ctx ProjectContext, focusTo sneatnav.FocusTo) {
 
 func newDatabasesPanel(ctx ProjectContext) sneatnav.Panel {
 	project := ctx.Project()
-	dbServers, err := project.GetDbServers(ctx)
-	return newListPanel(ctx.TUI(), "Databases", dbServers, func(s *datatug.ProjDbServer) (string, string) {
+	dbs, err := project.GetDBs(ctx)
+	return newListPanel(ctx.TUI(), "Databases", dbs, func(s *datatug.ProjDbDriver) (string, string) {
 		return s.ID, s.Title
 	}, err)
 }

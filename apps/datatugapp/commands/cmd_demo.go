@@ -97,7 +97,8 @@ func (c demoCommand) Execute() error {
 		{path: dbFilePaths[0], env: "local", model: chinookDbModel},
 		{path: dbFilePaths[1], env: "prod", model: chinookDbModel},
 	}
-	if err = c.createOrUpdateDemoProject(demoProjectPath, demoDbFiles); err != nil {
+	ctx := context.Background()
+	if err = c.createOrUpdateDemoProject(ctx, demoProjectPath, demoDbFiles); err != nil {
 		return fmt.Errorf("failed to create or update demo project: %w", err)
 	}
 	if err = c.addDemoProjectToDatatugConfig(datatugUserDirPath, demoProjectPath); err != nil {
@@ -244,7 +245,7 @@ type demoDbFile struct {
 	model string
 }
 
-func (c demoCommand) createOrUpdateDemoProject(demoProjectPath string, demoDbFiles []demoDbFile) error {
+func (c demoCommand) createOrUpdateDemoProject(ctx context.Context, demoProjectPath string, demoDbFiles []demoDbFile) error {
 	fileInfo, err := os.Stat(demoProjectPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -257,7 +258,7 @@ func (c demoCommand) createOrUpdateDemoProject(demoProjectPath string, demoDbFil
 	if fileInfo != nil && !fileInfo.IsDir() {
 		return fmt.Errorf("expected to have a directory at path %v", demoProjectPath)
 	}
-	if err = c.updateDemoProject(demoProjectPath, demoDbFiles); err != nil {
+	if err = c.updateDemoProject(ctx, demoProjectPath, demoDbFiles); err != nil {
 		return fmt.Errorf("failed to update demo project: %w", err)
 	}
 	return nil
@@ -305,7 +306,7 @@ func (c demoCommand) creatDemoProject(demoProjectPath string) error {
 	return nil
 }
 
-func (c demoCommand) updateDemoProject(demoProjectPath string, demoDbFiles []demoDbFile) error {
+func (c demoCommand) updateDemoProject(ctx context.Context, demoProjectPath string, demoDbFiles []demoDbFile) error {
 	log.Println("Updating demo project...")
 	storage.Current, _ = filestore.NewSingleProjectStore(demoProjectPath, demoProjectID)
 	project, err := api.GetProjectFull(context.Background(), dto.ProjectRef{
@@ -315,7 +316,7 @@ func (c demoCommand) updateDemoProject(demoProjectPath string, demoDbFiles []dem
 		return fmt.Errorf("failed to load demo project: %w", err)
 	}
 
-	projDbServer, err := c.updateDemoProjectDbServer(project)
+	projDbServer, err := c.updateDemoProjectDbServer(ctx, project)
 	if err != nil {
 		return fmt.Errorf("failed to updated DB server: %w", err)
 	}
@@ -336,7 +337,6 @@ func (c demoCommand) updateDemoProject(demoProjectPath string, demoDbFiles []dem
 	if dal, err = storage.NewDatatugStore(""); err != nil {
 		return err
 	}
-	ctx := context.Background()
 	store := dal.GetProjectStore(project.ID)
 	if err = store.SaveProject(ctx, project); err != nil {
 		return fmt.Errorf("faield to save project: %w", err)
@@ -344,28 +344,33 @@ func (c demoCommand) updateDemoProject(demoProjectPath string, demoDbFiles []dem
 	return nil
 }
 
-func (c demoCommand) updateDemoProjectDbServer(project *datatug.Project) (projDbServer *datatug.ProjDbServer, err error) {
-	projDbServer = project.DbServers.GetProjDbServer(datatug.ServerReference{Driver: demoDriver, Host: localhost, Port: 0})
+func (c demoCommand) updateDemoProjectDbServer(ctx context.Context, project *datatug.Project) (projDbServer *datatug.ProjDbServer, err error) {
+	projDbServer, err = project.GetProjDbServer(ctx, datatug.ServerRef{Driver: demoDriver, Host: localhost, Port: 0})
+	if err != nil {
+		return
+	}
 	if projDbServer == nil {
 		projDbServer = &datatug.ProjDbServer{
 			ProjectItem: datatug.ProjectItem{
 				ProjItemBrief: datatug.ProjItemBrief{ID: localhost},
 			},
-			Server: datatug.ServerReference{
+			Server: datatug.ServerRef{
 				Driver: demoDriver,
 				Host:   localhost,
 			},
 		}
-		project.DbServers = append(project.DbServers, projDbServer)
+		if err = project.AddProjDbServer(ctx, projDbServer); err != nil {
+			return
+		}
 		log.Printf("Added new DB server: %v", projDbServer.ID)
 	}
 	return
 }
 
 func (c demoCommand) updateDemoProjectCatalog(projDbServer *datatug.ProjDbServer, catalogID string, demoDb demoDbFile) error {
-	catalog := projDbServer.Catalogs.GetDbByID(catalogID)
+	catalog := projDbServer.Catalogs.GetByID(catalogID)
 	if catalog == nil {
-		catalog = new(datatug.EnvDbCatalog)
+		catalog = new(datatug.DbCatalog)
 		catalog.ID = catalogID
 		catalog.Driver = "sqlite3"
 		catalog.Path = demoDb.path
@@ -383,7 +388,7 @@ func (c demoCommand) updateDemoProjectCatalog(projDbServer *datatug.ProjDbServer
 }
 
 func (c demoCommand) updateDemoProjectDbModel(project *datatug.Project, catalogID string, demoDb demoDbFile) error {
-	dbModel := project.DbModels.GetDbModelByID(demoDb.model)
+	dbModel := project.DbModels.GetByID(demoDb.model)
 	if dbModel == nil {
 		dbModel = new(datatug.DbModel)
 		dbModel.ID = demoDb.model

@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewInformationSchema(t *testing.T) {
-	var server = datatug.ServerReference{Driver: "sql"}
+	var server = datatug.ServerRef{Driver: "sql"}
 	v := NewInformationSchema(server)
 	assert.EqualValues(t, server, v.server)
 }

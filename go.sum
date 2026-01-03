@@ -78,12 +78,6 @@ github.com/dal-go/dalgo2sql v0.4.18 h1:V9otuTurFeTRY5biWMGkD/4kNcsofKGjydNwa73Xi
 github.com/dal-go/dalgo2sql v0.4.18/go.mod h1:B5iXVVTMz6BIl7YAPCyph3iCsJZgdlxGdjRimcaneyc=
 github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
-github.com/datatug/datatug-core v0.15.12 h1:BcSCkHFpjatGJb0PcAf7TMOHTjGlfJJwpoQV3zYDWmQ=
-github.com/datatug/datatug-core v0.15.12/go.mod h1:uOru1GVZKlB/KOSMP6gyweu0iTIkxRRqTVGgVDweTwg=
-github.com/datatug/datatug-core v0.16.0 h1:6UKZtLiEYmTind15u5GZC0i0v5JsEdlFqJKAK/A5Ec0=
-github.com/datatug/datatug-core v0.16.0/go.mod h1:HG/R1nj/VM51cd1CQWRERNM4SgEWX2ezms+fLtt2i0U=
-github.com/datatug/datatug-core v0.16.1 h1:4tST7smkF06Otqk81ZiVnV8B/mhQps7rlelqyA8E7Ow=
-github.com/datatug/datatug-core v0.16.1/go.mod h1:HG/R1nj/VM51cd1CQWRERNM4SgEWX2ezms+fLtt2i0U=
 github.com/datatug/datatug-core v0.16.2 h1:+GIdLUjRjkqKYISD1kw2jFDayj+5Lp8HN711nLetqpY=
 github.com/datatug/datatug-core v0.16.2/go.mod h1:HG/R1nj/VM51cd1CQWRERNM4SgEWX2ezms+fLtt2i0U=
 github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2 h1:9iN4YNV3PIGMU7Wh4hU0AjuI/mMwgbVXaV4YqHoE0ZU=
@@ -248,8 +242,6 @@ github.com/sergi/go-diff v1.4.0/go.mod h1:A0bzQcvG0E7Rwjx0REVgAGH58e96+X0MeOfepq
 github.com/sirupsen/logrus v1.7.0/go.mod h1:yWOB1SBYBC5VeMP7gHvWumXLIWorT60ONWic61uBYv0=
 github.com/skeema/knownhosts v1.3.2 h1:EDL9mgf4NzwMXCTfaxSD/o/a5fxDw/xL9nkU28JjdBg=
 github.com/skeema/knownhosts v1.3.2/go.mod h1:bEg3iQAuw+jyiw+484wwFJoKSLwcfd7fqRy+N0QTiow=
-github.com/sneat-co/sneat-go-core v0.54.10 h1:iIGO6jJYfWtHPAnjG+/jsT2PDoKiRUXhdyTXktuk7V4=
-github.com/sneat-co/sneat-go-core v0.54.10/go.mod h1:6sAqViZtgIs3VJOwBpHypACNJmINwvLjZFrphZd0Duk=
 github.com/sneat-co/sneat-go-core v0.54.11 h1:oaUFmy70we5BBlCKLHC/tfVnT/sP9TRXa6NO1upV5kI=
 github.com/sneat-co/sneat-go-core v0.54.11/go.mod h1:/FgXylNgJDXlhAIWoB06JsW2TWsf7pJkYagwvDXYapc=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

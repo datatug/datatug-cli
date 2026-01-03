@@ -3,30 +3,34 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/urfave/cli/v3"
 )
 
+var dirFlag = cli.StringFlag{
+	Name:    "dir",
+	Aliases: []string{"d"},
+}
+
 func testCommandArgs() *cli.Command {
 	return &cli.Command{
-		Name:        "test",
+		Name:        "validate",
 		Usage:       "Runs validation scripts",
 		Description: "The `test` consoleCommand executes validation scripts.",
-		Action: func(ctx context.Context, c *cli.Command) error {
-			v := &validateCommand{}
-			return v.Execute(nil)
+		Flags: []cli.Flag{
+			&dirFlag,
 		},
+		Action: validateAction,
 	}
 }
 
-// validateCommand defines parameters for test consoleCommand
-type validateCommand struct {
-	projectBaseCommand
-}
+func validateAction(ctx context.Context, c *cli.Command) (err error) {
+	var v projectBaseCommand
+	v.ProjectDir = c.String(dirFlag.Name)
+	log.Println("Project path:", v.ProjectDir)
 
-// Execute executes test consoleCommand
-func (v *validateCommand) Execute(_ []string) (err error) {
 	if err = v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
 	}

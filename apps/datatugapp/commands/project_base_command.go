@@ -2,6 +2,7 @@ package commands
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/datatug/datatug-core/pkg/dtconfig"
@@ -35,10 +36,16 @@ func (v *projectBaseCommand) initProjectCommand(o projectCommandOptions) error {
 	if o.projNameOrDirRequired && v.ProjectName == "" && v.ProjectDir == "" {
 		return errors.New("either project name or project directory is required")
 	}
+	if v.ProjectDir != "" && v.projectID == "" {
+		v.store, v.projectID = filestore.NewSingleProjectStore(v.ProjectDir, v.projectID)
+		return nil
+	}
+
 	config, err := dtconfig.GetSettings()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get user's DataTug settings: %w", err)
 	}
+
 	if v.ProjectName != "" {
 		v.projectID = strings.ToLower(v.ProjectName)
 		project := config.GetProjectConfig(v.projectID)
@@ -47,14 +54,11 @@ func (v *projectBaseCommand) initProjectCommand(o projectCommandOptions) error {
 		}
 		v.ProjectDir = project.Url
 	}
-	if v.ProjectDir != "" && v.projectID == "" {
-		v.store, v.projectID = filestore.NewSingleProjectStore(v.ProjectDir, v.projectID)
-	} else {
-		pathsByID := getProjPathsByID(config)
-		v.store, err = filestore.NewStore("local_file_store_from_user_config", pathsByID)
-		if err != nil {
-			return err
-		}
+
+	pathsByID := getProjPathsByID(config)
+	v.store, err = filestore.NewStore("local_file_store_from_user_config", pathsByID)
+	if err != nil {
+		return err
 	}
 
 	return nil

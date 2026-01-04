@@ -53,6 +53,18 @@ release:
 
 brews:
   - name: datatug
-    tap:
+    description: "DataTug – versioned database and project validator"
+    homepage: https://github.com/datatug/datatug-cli
+    license: MIT
+
+    repository:
       owner: datatug
-      name: tap
+      name: homebrew-tap
+
+    binary: datatug
+
+    install: |
+      bin.install "datatug"
+
+    test: |
+      system "#{bin}/datatug", "--version"

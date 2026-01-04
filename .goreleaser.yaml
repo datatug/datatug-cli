@@ -53,15 +53,15 @@ release:
 
 brews:
   - name: datatug
-    description: "DataTug – versioned database and project validator"
+    ids:
+      - datatug-unix
+    description: "DataTug – Context-aware data viewer & collaborative query manager for effortless exploration of related data — CLI + Web UI"
     homepage: https://github.com/datatug/datatug-cli
     license: MIT
 
     repository:
       owner: datatug
       name: homebrew-tap
-
-    binary: datatug
 
     install: |
       bin.install "datatug"

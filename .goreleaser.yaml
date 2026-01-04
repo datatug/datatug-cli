@@ -62,6 +62,7 @@ brews:
     repository:
       owner: datatug
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
 
     install: |
       bin.install "datatug"

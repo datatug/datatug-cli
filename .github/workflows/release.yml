@@ -18,6 +18,8 @@ jobs:
           go-version: stable
 
       - name: Debug Homebrew token
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
           if [ -z "${HOMEBREW_TAP_GITHUB_TOKEN:-}" ]; then
             echo "❌ HOMEBREW_TAP_GITHUB_TOKEN is NOT set"
@@ -25,7 +27,7 @@ jobs:
           else
             echo "✅ HOMEBREW_TAP_GITHUB_TOKEN is set"
           fi
-          
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: v2

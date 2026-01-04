@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/datatug/datatug/pkg/auth/gauth"
+	"github.com/datatug/datatug-cli/pkg/auth/gauth"
 )
 
 func TestServiceAccountValidate(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/datatug/datatug/pkg/bubbles/panel"
+	"github.com/datatug/datatug-cli/pkg/bubbles/panel"
 )
 
 type BaseAppModel struct {

@@ -5,9 +5,9 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
-	"github.com/datatug/datatug/pkg/api"
 	"github.com/sneat-co/sneat-go-core/apicore"
 )
 

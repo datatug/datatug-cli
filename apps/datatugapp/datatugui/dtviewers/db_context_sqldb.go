@@ -7,9 +7,9 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2sql"
+	"github.com/datatug/datatug-cli/pkg/schemers/sqliteschema"
 	"github.com/datatug/datatug-core/pkg/schemer"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
-	"github.com/datatug/datatug/pkg/schemers/sqliteschema"
 )
 
 type SqlDBGetter func(ctx context.Context, driverName string) (sqlDB *sql.DB, err error)

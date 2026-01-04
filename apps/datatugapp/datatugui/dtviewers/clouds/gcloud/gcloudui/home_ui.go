@@ -1,9 +1,9 @@
 package gcloudui
 
 import (
-	"github.com/datatug/datatug/apps/datatugapp/datatugui/dtviewers"
-	"github.com/datatug/datatug/apps/datatugapp/datatugui/dtviewers/clouds"
-	"github.com/datatug/datatug/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 )
 
 const viewerID dtviewers.ViewerID = "gc"

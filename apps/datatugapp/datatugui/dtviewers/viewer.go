@@ -1,6 +1,6 @@
 package dtviewers
 
-import "github.com/datatug/datatug/pkg/sneatview/sneatnav"
+import "github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 
 type Viewer struct {
 	ID          ViewerID

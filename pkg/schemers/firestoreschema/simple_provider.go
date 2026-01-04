@@ -7,7 +7,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/dal-go/dalgo/dal"
-	"github.com/datatug/datatug/pkg/schemers"
+	"github.com/datatug/datatug-cli/pkg/schemers"
 	"google.golang.org/api/iterator"
 )
 

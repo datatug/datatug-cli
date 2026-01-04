@@ -3,7 +3,7 @@ package datatugapp
 import (
 	"testing"
 
-	"github.com/datatug/datatug/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/stretchr/testify/assert"
 )
 

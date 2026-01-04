@@ -3,7 +3,7 @@ package endpoints
 import (
 	"net/http"
 
-	"github.com/datatug/datatug/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/api"
 )
 
 // AgentInfo returns version of the agent

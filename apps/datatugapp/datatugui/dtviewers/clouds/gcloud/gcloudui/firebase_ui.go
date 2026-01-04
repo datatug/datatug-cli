@@ -1,7 +1,7 @@
 package gcloudui
 
 //import (
-//	"github.com/datatug/datatug/pkg/sneatview/sneatnav"
+//	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 //)
 //
 //func goFirebase(tui *sneatnav.TUI, cContext *GCloudContext) error {

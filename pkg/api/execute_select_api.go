@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/sqlexecute"
 	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug/pkg/sqlexecute"
 	"github.com/strongo/validation"
 )
 

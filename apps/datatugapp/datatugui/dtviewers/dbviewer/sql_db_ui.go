@@ -1,8 +1,8 @@
 package dbviewer
 
 import (
-	"github.com/datatug/datatug/apps/datatugapp/datatugui/dtviewers"
-	"github.com/datatug/datatug/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	_ "github.com/mattn/go-sqlite3"
 )
 

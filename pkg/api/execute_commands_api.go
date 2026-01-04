@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 
-	"github.com/datatug/datatug/pkg/sqlexecute"
+	"github.com/datatug/datatug-cli/pkg/sqlexecute"
 )
 
 // ExecuteCommands executes command

@@ -1,4 +1,4 @@
-module github.com/datatug/datatug
+module github.com/datatug/datatug-cli
 
 go 1.25.4
 

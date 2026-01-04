@@ -7,11 +7,11 @@ import (
 	"io"
 	"strings"
 
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
+	"github.com/datatug/datatug-cli/pkg/sneatcolors"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug/apps/datatugapp/datatugui/dtviewers"
-	"github.com/datatug/datatug/pkg/sneatcolors"
-	"github.com/datatug/datatug/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )

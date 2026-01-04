@@ -3,7 +3,7 @@ package dtproject
 import (
 	"fmt"
 
-	"github.com/datatug/datatug/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )

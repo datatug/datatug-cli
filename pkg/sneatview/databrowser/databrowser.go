@@ -1,7 +1,7 @@
 package databrowser
 
 import (
-	"github.com/datatug/datatug/pkg/sneatview/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/rivo/tview"
 )
 

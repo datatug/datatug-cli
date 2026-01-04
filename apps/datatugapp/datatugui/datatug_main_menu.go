@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/datatug/datatug/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug/pkg/sneatview/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/strongo/logus"
 )

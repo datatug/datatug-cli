@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/datatug/datatug/apps/datatugapp/commands"
+	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
 	_ "github.com/denisenkom/go-mssqldb"
 
 	//_ "github.com/jackc/pgx/v5"

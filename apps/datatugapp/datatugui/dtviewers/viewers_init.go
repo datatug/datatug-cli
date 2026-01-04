@@ -1,7 +1,7 @@
 package dtviewers
 
 import (
-	"github.com/datatug/datatug/apps/datatugapp/datatugui"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 )
 
 var viewers []Viewer

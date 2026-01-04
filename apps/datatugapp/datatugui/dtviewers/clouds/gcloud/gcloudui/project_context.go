@@ -5,10 +5,10 @@ import (
 	"sync"
 
 	"cloud.google.com/go/firestore"
-	"github.com/datatug/datatug/apps/datatugapp/datatugui/dtviewers/clouds"
-	"github.com/datatug/datatug/pkg/auth/gauth"
-	"github.com/datatug/datatug/pkg/schemers"
-	"github.com/datatug/datatug/pkg/schemers/firestoreschema"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds"
+	"github.com/datatug/datatug-cli/pkg/auth/gauth"
+	"github.com/datatug/datatug-cli/pkg/schemers"
+	"github.com/datatug/datatug-cli/pkg/schemers/firestoreschema"
 	"google.golang.org/api/cloudresourcemanager/v3"
 )
 

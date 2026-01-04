@@ -1,8 +1,8 @@
 package dtviewers
 
 import (
-	"github.com/datatug/datatug/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug/pkg/sneatview/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 )
 
 func GetViewersBreadcrumbs(tui *sneatnav.TUI) sneatnav.Breadcrumbs {

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/server"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
-	"github.com/datatug/datatug/pkg/server"
 	"github.com/pkg/browser"
 	"github.com/urfave/cli/v3"
 )

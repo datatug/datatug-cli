@@ -1,9 +1,9 @@
 package datatugapp
 
 import (
-	"github.com/datatug/datatug/apps/datatugapp/datatugui/dtproject"
-	"github.com/datatug/datatug/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug/pkg/sneatview/sneatv"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtproject"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/rivo/tview"
 )
 

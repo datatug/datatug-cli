@@ -3,9 +3,9 @@ package commands
 import (
 	"context"
 
-	"github.com/datatug/datatug/apps"
-	"github.com/datatug/datatug/apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudcmds"
-	"github.com/datatug/datatug/pkg/auth"
+	"github.com/datatug/datatug-cli/apps"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudcmds"
+	"github.com/datatug/datatug-cli/pkg/auth"
 	"github.com/urfave/cli/v3"
 )
 

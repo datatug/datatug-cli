@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/datatug/datatug/pkg/server/endpoints"
+	"github.com/datatug/datatug-cli/pkg/server/endpoints"
 )
 
 // globalOptionsHandler handles OPTIONS requests

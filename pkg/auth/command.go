@@ -1,7 +1,7 @@
 package auth
 
 import (
-	"github.com/datatug/datatug/pkg/auth/gauth"
+	"github.com/datatug/datatug-cli/pkg/auth/gauth"
 	"github.com/urfave/cli/v3"
 )
 

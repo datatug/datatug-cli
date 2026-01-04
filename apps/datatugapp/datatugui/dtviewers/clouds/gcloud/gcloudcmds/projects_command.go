@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/datatug/datatug/apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudui"
-	"github.com/datatug/datatug/pkg/auth/gauth"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudui"
+	"github.com/datatug/datatug-cli/pkg/auth/gauth"
 	"github.com/urfave/cli/v3"
 )
 

@@ -3,8 +3,8 @@ package mssqlschema
 import (
 	"context"
 
+	"github.com/datatug/datatug-cli/pkg/schemers/sqlinfoschema"
 	"github.com/datatug/datatug-core/pkg/schemer"
-	"github.com/datatug/datatug/pkg/schemers/sqlinfoschema"
 )
 
 var _ schemer.IndexesProvider = (*indexesProvider)(nil)

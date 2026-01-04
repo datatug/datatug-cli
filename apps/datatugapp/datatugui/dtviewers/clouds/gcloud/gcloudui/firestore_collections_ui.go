@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/firestore"
-	"github.com/datatug/datatug/pkg/auth/gauth"
-	"github.com/datatug/datatug/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug/pkg/sneatview/sneatv"
+	"github.com/datatug/datatug-cli/pkg/auth/gauth"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"golang.org/x/oauth2"

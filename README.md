@@ -13,6 +13,11 @@ Help wanted to [get test coverage to 100%](https://github.com/datatug/datatug-cl
 
 ## Installation
 
+### From source codes
+```bash
+go install github.com/datatug/datatug-cli@latest -o datatug
+```
+
 ### macOS ([Homebrew](https://github.com/datatug/homebrew-tap))
 ```bash
 brew tap datatug/tap

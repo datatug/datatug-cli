@@ -7,14 +7,17 @@ different systems — so you can move naturally between datasets, queries, and r
 Free for personal use, DataTug keeps your workflows transparent, versioned, and portable, whether you work locally, in
 GitHub, or in the cloud.
 
-## ♺ Continuous Integration
+## ♺ Continuous Integration [![Build and Test](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml/badge.svg)](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/datatug/datatug-cli?cache=1)](https://goreportcard.com/report/github.com/datatug/datatug-cli) [![GoDoc](https://godoc.org/github.com/datatug/datatug-cli?status.svg)](https://godoc.org/github.com/datatug/datatug-cli) [![Coverage Status](https://coveralls.io/repos/github/datatug/datatug-cli/badge.svg?branch=main)](https://coveralls.io/github/datatug/datatug-cli?branch=main) 
 
 Help wanted to [get test coverage to 100%](https://github.com/datatug/datatug-cli/issues/64).
 
-| Repo                                                      | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-|-----------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `datatug-cli`                                             | [![Build and Test](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml/badge.svg)](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/datatug/datatug-cli?cache=1)](https://goreportcard.com/report/github.com/datatug/datatug-cli) [![GoDoc](https://godoc.org/github.com/datatug/datatug-cli?status.svg)](https://godoc.org/github.com/datatug/datatug-cli) [![Coverage Status](https://coveralls.io/repos/github/datatug/datatug-cli/badge.svg?branch=main)](https://coveralls.io/github/datatug/datatug-cli?branch=main)         |
-| [`datatug-core`](https://github.com/datatug/datatug-core) | [![Build and Test](https://github.com/datatug/datatug-core/actions/workflows/golangci.yml/badge.svg)](https://github.com/datatug/datatug-core/actions/workflows/golangci.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/datatug/datatug-core?cache=1)](https://goreportcard.com/report/github.com/datatug/datatug-core) [![GoDoc](https://godoc.org/github.com/datatug/datatug-core?status.svg)](https://godoc.org/github.com/datatug/datatug-core) [![Coverage Status](https://coveralls.io/repos/github/datatug/datatug-core/badge.svg?branch=main)](https://coveralls.io/github/datatug/datatug-core?branch=main) |
+## Installation
+
+### macOS ([Homebrew](https://github.com/datatug/homebrew-tap))
+```bash
+brew tap datatug/tap
+brew install datatug
+```
 
 ## What you can do with DataTug
 

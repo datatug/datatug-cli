@@ -50,3 +50,9 @@ release:
   github:
     owner: datatug
     name: datatug-cli
+
+brews:
+  - name: datatug
+    tap:
+      owner: datatug
+      name: tap

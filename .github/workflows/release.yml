@@ -17,6 +17,15 @@ jobs:
         with:
           go-version: stable
 
+      - name: Debug Homebrew token
+        run: |
+          if [ -z "${HOMEBREW_TAP_GITHUB_TOKEN:-}" ]; then
+            echo "❌ HOMEBREW_TAP_GITHUB_TOKEN is NOT set"
+            exit 1
+          else
+            echo "✅ HOMEBREW_TAP_GITHUB_TOKEN is set"
+          fi
+          
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: v2

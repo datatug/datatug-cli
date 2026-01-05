@@ -64,11 +64,9 @@ func Close() {
 func getPostHogClient() posthog.Client {
 	_, _ = fmt.Println("Initializing PostHog client...")
 	config := readPostHogConfig()
-	var configChanged bool
-	if apiKey := os.Getenv("POSTHOG_API_KEY"); apiKey != "" {
-		config.ApiKey = apiKey
-	}
-	if !config.LockApiKey && time.Now().After(config.ApiKeyTimestamp.Add(24*time.Hour)) {
+	var isConfigNeedToBeSaved bool
+	config.ApiKey = os.Getenv("DATATUG_POSTHOG_API_KEY")
+	if config.ApiKey == "" && !config.LockApiKey && time.Now().After(config.ApiKeyTimestamp.Add(24*time.Hour)) {
 		apiKey, err := getPostHogApiKeyFromServer()
 		if err != nil {
 			ctx := context.Background()
@@ -76,7 +74,7 @@ func getPostHogClient() posthog.Client {
 		} else {
 			config.ApiKey = apiKey
 			config.ApiKeyTimestamp = time.Now()
-			configChanged = true
+			isConfigNeedToBeSaved = true
 		}
 	}
 	if config.ApiKey == "" {
@@ -84,9 +82,9 @@ func getPostHogClient() posthog.Client {
 	}
 	if config.DistinctID == "" {
 		config.DistinctID = random.ID(16)
-		configChanged = true
+		isConfigNeedToBeSaved = true
 	}
-	if configChanged {
+	if isConfigNeedToBeSaved {
 		ctx := context.Background()
 		if err := writePostHogConfigToFile(ctx, config); err != nil {
 			logus.Errorf(ctx, "Failed to write PostHog config file: %v", err)

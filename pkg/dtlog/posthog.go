@@ -156,6 +156,9 @@ func DistinctID() string {
 }
 
 func withSession(p posthog.Properties) posthog.Properties {
+	if p == nil {
+		p = posthog.NewProperties()
+	}
 	return p.
 		Set("$session_id", sessionID).
 		Set("$session_start_time", sessionStarted).

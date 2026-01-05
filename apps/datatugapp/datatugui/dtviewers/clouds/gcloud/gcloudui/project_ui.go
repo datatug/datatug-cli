@@ -7,15 +7,15 @@ import (
 	"github.com/rivo/tview"
 )
 
-func newProjectBreadcrumbs(gcProjectCtx *CGProjectContext) sneatnav.Breadcrumbs {
+func newGCloudProjectBreadcrumbs(gcProjectCtx *CGProjectContext) sneatnav.Breadcrumbs {
 	breadcrumbs := newBreadcrumbsProjects(gcProjectCtx.GCloudContext)
 	breadcrumbs.Push(sneatv.NewBreadcrumb(gcProjectCtx.Project.DisplayName, func() error {
-		return goProject(gcProjectCtx)
+		return goGCloudProject(gcProjectCtx)
 	}))
 	return breadcrumbs
 }
 
-func newGProjectMenu(gcProjCtx *CGProjectContext) sneatnav.Panel {
+func newGCloudProjectMenu(gcProjCtx *CGProjectContext) sneatnav.Panel {
 	list := tview.NewList()
 	sneatv.DefaultBorderWithPadding(list.Box)
 	list.SetTitle(gcProjCtx.Project.DisplayName)
@@ -49,11 +49,11 @@ func newGProjectMenu(gcProjCtx *CGProjectContext) sneatnav.Panel {
 	return sneatnav.NewPanel(gcProjCtx.TUI, sneatnav.WithBox(list, list.Box))
 }
 
-func goProject(gcProjCtx *CGProjectContext) error {
-	_ = newProjectBreadcrumbs(gcProjCtx)
+func goGCloudProject(gcProjCtx *CGProjectContext) error {
+	_ = newGCloudProjectBreadcrumbs(gcProjCtx)
 
 	//menu := newMenuWithProjects(gcProjCtx.GCloudContext)
-	menu := newGProjectMenu(gcProjCtx)
+	menu := newGCloudProjectMenu(gcProjCtx)
 
 	content := firestoreMainMenu(gcProjCtx, firestoreScreenCollections, "")
 	gcProjCtx.TUI.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToMenu))

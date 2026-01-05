@@ -15,7 +15,7 @@ const (
 )
 
 func firestoreBreadcrumbs(gcProjCtx *CGProjectContext) sneatnav.Breadcrumbs {
-	breadcrumbs := newProjectBreadcrumbs(gcProjCtx)
+	breadcrumbs := newGCloudProjectBreadcrumbs(gcProjCtx)
 	breadcrumbs.Push(sneatv.NewBreadcrumb("Firestore", nil))
 	return breadcrumbs
 }

@@ -54,7 +54,7 @@ func (v *uiCommand) Execute(filePath string) error {
 		if err := openFile(filePath, tui); err != nil {
 			panic(err)
 		}
-	} else if err := dtproject.GoProjectsScreen(tui, sneatnav.FocusToMenu); err != nil {
+	} else if err := dtproject.GoDataTugProjectsScreen(tui, sneatnav.FocusToMenu); err != nil {
 		panic(err)
 	}
 

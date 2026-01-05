@@ -16,7 +16,7 @@ import (
 )
 
 func goFirestoreCollections(gcProjCtx *CGProjectContext) error {
-	breadcrumbs := newProjectBreadcrumbs(gcProjCtx)
+	breadcrumbs := newGCloudProjectBreadcrumbs(gcProjCtx)
 	breadcrumbs.Push(sneatv.NewBreadcrumb("Firestore", nil))
 	menu := firestoreMainMenu(gcProjCtx, firestoreScreenCollections, "")
 

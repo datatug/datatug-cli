@@ -105,7 +105,7 @@ func ShowAddToGitHubRepo(tui *sneatnav.TUI) {
 						}()
 					}).
 					AddButton("Cancel", func() {
-						_ = GoProjectsScreen(tui, sneatnav.FocusToContent)
+						_ = GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)
 					})
 				form.SetButtonsAlign(tview.AlignCenter).
 					SetButtonBackgroundColor(tcell.ColorDarkBlue).
@@ -206,7 +206,7 @@ func showRepoSelection(tui *sneatnav.TUI, client *github.Client, repos []*github
 		SetReference("cancel").
 		SetColor(tcell.ColorRed).
 		SetSelectedFunc(func() {
-			_ = GoProjectsScreen(tui, sneatnav.FocusToContent)
+			_ = GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)
 		})
 	root.AddChild(cancelNode)
 
@@ -274,7 +274,7 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 		if repos != nil {
 			showRepoSelection(tui, client, repos, reauth)
 		} else {
-			_ = GoProjectsScreen(tui, sneatnav.FocusToContent)
+			_ = GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)
 		}
 	})
 
@@ -536,7 +536,7 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 			}
 			projStore := store.GetProjectStore(projectID)
 			projectCtx := NewProjectContext(tui, projStore, projectRef)
-			GoProjectScreen(projectCtx)
+			GoDataTugProjectScreen(projectCtx)
 		})
 	}()
 	return nil

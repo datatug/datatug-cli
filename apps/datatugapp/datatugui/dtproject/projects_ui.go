@@ -41,14 +41,14 @@ func projectsBreadcrumbs(tui *sneatnav.TUI) sneatnav.Breadcrumbs {
 	breadcrumbs := tui.Header.Breadcrumbs()
 	breadcrumbs.Clear()
 	breadcrumbs.Push(sneatv.NewBreadcrumb("Projects", func() error {
-		return GoProjectsScreen(tui, sneatnav.FocusToContent)
+		return GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)
 	}))
 	return breadcrumbs
 }
 
-func GoProjectsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
+func GoDataTugProjectsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	_ = projectsBreadcrumbs(tui)
-	content, err := newProjectsPanel(tui)
+	content, err := newDataTugProjectsPanel(tui)
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func GoProjectsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 //	nodeType nodeType
 //}
 
-func newProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
+func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	ctx := context.Background()
 
 	// Create 3 separate trees
@@ -104,14 +104,15 @@ func newProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		if projectConfig.ID == datatugDemoProjectFullID {
 			openDatatugDemoProject(tui)
 		} else {
-			store := filestore.NewProjectStore(projectConfig.Path, projectConfig.ID)
+			projectPath := filestore.ExpandHome(projectConfig.Path)
+			store := filestore.NewProjectStore(projectConfig.ID, projectPath)
 			_, err = store.LoadProjectFile(ctx)
 			if errors.Is(err, datatug.ErrProjectDoesNotExist) {
 				tui.ShowAlert("Not able to open DataTug project", err.Error(), 0, localTree)
 				return
 			}
 			projectCtx := NewProjectContext(tui, store, projectConfig)
-			GoProjectScreen(projectCtx)
+			GoDataTugProjectScreen(projectCtx)
 		}
 	}
 
@@ -360,7 +361,7 @@ func newProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 			//		switch ref := reference.(type) {
 			//		case *dtconfig.ProjectRef:
 			//			// Call goProjectDashboards when ENTER is pressed on a project node
-			//			GoProjectScreen(tui, ref)
+			//			GoDataTugProjectScreen(tui, ref)
 			//			return nil
 			//		}
 			//	}

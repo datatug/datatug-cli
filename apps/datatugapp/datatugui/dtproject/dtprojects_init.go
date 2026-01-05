@@ -9,6 +9,6 @@ func RegisterModule() {
 		datatugui.MainMenuItem{
 			Text:     "Projects",
 			Shortcut: 'p',
-			Action:   GoProjectsScreen,
+			Action:   GoDataTugProjectsScreen,
 		})
 }

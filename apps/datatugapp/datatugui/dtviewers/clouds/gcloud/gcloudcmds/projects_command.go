@@ -38,7 +38,7 @@ func projectsCommand() *cli.Command {
 					fmt.Println(project.ProjectId)
 				}
 			case "":
-				return gcloudui.OpenProjectsScreen(projects)
+				return gcloudui.OpenGCloudProjectsScreen(projects)
 			default:
 				return fmt.Errorf("invalid flag: --format=%s", format)
 			}

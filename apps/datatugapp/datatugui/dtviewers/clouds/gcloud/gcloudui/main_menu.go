@@ -19,7 +19,7 @@ func newMainMenu(cContext *GCloudContext, active Screen, isInContent bool) (menu
 	sneatv.DefaultBorderWithPadding(list.Box)
 
 	list.AddItem("Projects", "", 'p', func() {
-		_ = GoProjects(cContext, sneatnav.FocusToMenu)
+		_ = GoGCloudProjects(cContext, sneatnav.FocusToMenu)
 	})
 	list.AddItem("Credentials", "", 'c', func() {
 		_ = GoCredentials(cContext, sneatnav.FocusToMenu)
@@ -30,7 +30,7 @@ func newMainMenu(cContext *GCloudContext, active Screen, isInContent bool) (menu
 	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
 		switch index { // Not ideal
 		case 0:
-			_ = GoProjects(cContext, sneatnav.FocusToMenu)
+			_ = GoGCloudProjects(cContext, sneatnav.FocusToMenu)
 		case 1:
 			_ = GoCredentials(cContext, sneatnav.FocusToMenu)
 		}

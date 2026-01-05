@@ -17,7 +17,7 @@ func NewProjectPanel(tui *sneatnav.TUI, projectConfig *dtconfig.ProjectRef) snea
 	return sneatnav.NewPanel(tui, sneatnav.WithBox(content, content.Box))
 }
 
-func GoProjectScreen(projectCtx ProjectContext) {
+func GoDataTugProjectScreen(projectCtx ProjectContext) {
 	tui := projectCtx.TUI()
 	pConfig := projectCtx.Config()
 	breadcrumbs := projectsBreadcrumbs(tui)

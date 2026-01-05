@@ -11,23 +11,23 @@ import (
 	"google.golang.org/api/cloudresourcemanager/v3"
 )
 
-func GoProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error {
-	return showProjects(cContext, focusTo)
+func GoGCloudProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error {
+	return showGCloudProjects(cContext, focusTo)
 }
 
-func OpenProjectsScreen(projects []*cloudresourcemanager.Project) error {
+func OpenGCloudProjectsScreen(projects []*cloudresourcemanager.Project) error {
 	cContext := &GCloudContext{
 		projects: projects,
 	}
 	cContext.TUI = datatug.NewDatatugTUI()
-	return showProjects(cContext, sneatnav.FocusToContent)
+	return showGCloudProjects(cContext, sneatnav.FocusToContent)
 }
 
-func showProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error {
+func showGCloudProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error {
 	breadcrumbs := NewGoogleCloudBreadcrumbs(cContext)
 
 	breadcrumbs.Push(sneatv.NewBreadcrumb("Projects", func() error {
-		return showProjects(cContext, sneatnav.FocusToContent)
+		return showGCloudProjects(cContext, sneatnav.FocusToContent)
 	}))
 	menu := newMainMenu(cContext, ScreenProjects, false)
 
@@ -185,7 +185,7 @@ func showProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error {
 		}
 		if ref := cell.GetReference(); ref != nil {
 			if ctx, ok := ref.(*CGProjectContext); ok {
-				if err := goProject(ctx); err != nil {
+				if err := goGCloudProject(ctx); err != nil {
 					panic(err)
 				}
 			} else {

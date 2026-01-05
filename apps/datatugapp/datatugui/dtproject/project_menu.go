@@ -33,7 +33,8 @@ func (p *projectMenuPanel) SetProject(project *datatug.Project) {
 		return
 	}
 	project.Environments = nil // force reload
-	environments, err := project.GetEnvironments(context.Background())
+	ctx := context.Background()
+	environments, err := project.GetEnvironments(ctx)
 
 	p.app.QueueUpdateDraw(func() {
 		if err != nil {
@@ -72,7 +73,7 @@ func newProjectMenuPanel(ctx ProjectContext, currentScreen ProjectScreenID) *pro
 	projectNode := tview.NewTreeNode(projectTitle).SetSelectable(true)
 	tree.SetRoot(projectNode)
 	projectNode.SetSelectedFunc(func() {
-		GoProjectScreen(ctx)
+		GoDataTugProjectScreen(ctx)
 	})
 
 	tree.SetCurrentNode(projectNode)

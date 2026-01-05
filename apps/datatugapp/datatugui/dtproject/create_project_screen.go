@@ -195,7 +195,7 @@ func showCreateProjectScreen(tui *sneatnav.TUI) {
 			handleCreateProject(tui, name, createAt, location, repoName, projectVisibility)
 		})
 		form.AddButton("Cancel", func() {
-			_ = GoProjectsScreen(tui, sneatnav.FocusToContent)
+			_ = GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)
 		})
 	}
 
@@ -322,7 +322,7 @@ func createLocalProject(tui *sneatnav.TUI, name, location string) (projectRef dt
 func openProject(tui *sneatnav.TUI, projectRef dtconfig.ProjectRef) {
 	store := filestore.NewProjectStore(projectRef.ID, projectRef.Path)
 	projectCtx := NewProjectContext(tui, store, projectRef)
-	GoProjectScreen(projectCtx)
+	GoDataTugProjectScreen(projectCtx)
 }
 
 func createGitHubProject(tui *sneatnav.TUI, title string, visibility datatug.ProjectVisibility) (projectRef dtconfig.ProjectRef, err error) {

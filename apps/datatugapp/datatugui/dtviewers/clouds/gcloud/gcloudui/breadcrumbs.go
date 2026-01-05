@@ -17,7 +17,7 @@ func NewGoogleCloudBreadcrumbs(cContext *GCloudContext) sneatnav.Breadcrumbs {
 func newBreadcrumbsProjects(cContext *GCloudContext) sneatnav.Breadcrumbs {
 	breadcrumbs := NewGoogleCloudBreadcrumbs(cContext)
 	breadcrumbs.Push(sneatv.NewBreadcrumb("Projects", func() error {
-		return GoProjects(cContext, sneatnav.FocusToContent)
+		return GoGCloudProjects(cContext, sneatnav.FocusToContent)
 	}))
 	return breadcrumbs
 }

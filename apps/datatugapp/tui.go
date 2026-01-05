@@ -17,4 +17,4 @@ func NewDatatugTUI() (tui *sneatnav.TUI) {
 	return
 }
 
-var goProjectScreen = dtproject.GoProjectsScreen
+var goProjectScreen = dtproject.GoDataTugProjectsScreen

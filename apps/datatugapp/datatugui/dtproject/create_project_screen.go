@@ -320,8 +320,8 @@ func createLocalProject(tui *sneatnav.TUI, name, location string) (projectRef dt
 }
 
 func openProject(tui *sneatnav.TUI, projectRef dtconfig.ProjectRef) {
-	loader := filestore.NewProjectsLoader(filepath.Dir(projectRef.Path))
-	projectCtx := NewProjectContext(tui, loader, projectRef)
+	store := filestore.NewProjectStore(projectRef.ID, projectRef.Path)
+	projectCtx := NewProjectContext(tui, store, projectRef)
 	GoProjectScreen(projectCtx)
 }
 

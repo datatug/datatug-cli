@@ -528,13 +528,14 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 		}
 
 		tui.App.QueueUpdateDraw(func() {
-			loader := filestore.NewProjectsLoader("~/datatug")
+			store, _ := filestore.NewSingleProjectStore("~/datatug/"+projectID, projectID)
 			projectRef := dtconfig.ProjectRef{
 				ID:    projectID,
 				Title: projectTitle,
 				Path:  projectID,
 			}
-			projectCtx := NewProjectContext(tui, loader, projectRef)
+			projStore := store.GetProjectStore(projectID)
+			projectCtx := NewProjectContext(tui, projStore, projectRef)
 			GoProjectScreen(projectCtx)
 		})
 	}()

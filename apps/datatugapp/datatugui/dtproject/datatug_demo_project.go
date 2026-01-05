@@ -36,12 +36,13 @@ func openDatatugDemoProject(tui *sneatnav.TUI) {
 		panic(err)
 	}
 	openDemoProject := func() {
-		pConfig := dtconfig.ProjectRef{
-			ID:  datatugDemoProjectFullID,
-			Url: datatugDemoProjectGitHubURL,
+		projRef := dtconfig.ProjectRef{
+			ID:   datatugDemoProjectFullID,
+			Url:  datatugDemoProjectGitHubURL,
+			Path: projectDir,
 		}
-		loader := filestore.NewProjectsLoader("~/datatug")
-		projectCtx := NewProjectContext(tui, loader, pConfig)
+		loader := filestore.NewProjectStore(projRef.ID, projRef.Path)
+		projectCtx := NewProjectContext(tui, loader, projRef)
 		GoProjectScreen(projectCtx)
 	}
 

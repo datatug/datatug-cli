@@ -2,6 +2,7 @@ package dtproject
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/sneatcolors"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/gdamore/tcell/v2"
@@ -102,8 +104,13 @@ func newProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		if projectConfig.ID == datatugDemoProjectFullID {
 			openDatatugDemoProject(tui)
 		} else {
-			loader := filestore.NewProjectsLoader("~/datatug")
-			projectCtx := NewProjectContext(tui, loader, projectConfig)
+			store := filestore.NewProjectStore(projectConfig.Path, projectConfig.ID)
+			_, err = store.LoadProjectFile(ctx)
+			if errors.Is(err, datatug.ErrProjectDoesNotExist) {
+				tui.ShowAlert("Not able to open DataTug project", err.Error(), 0, localTree)
+				return
+			}
+			projectCtx := NewProjectContext(tui, store, projectConfig)
 			GoProjectScreen(projectCtx)
 		}
 	}
@@ -119,6 +126,14 @@ func newProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		SetColor(tcell.ColorLightBlue).
 		SetSelectable(false)
 	localTree.SetRoot(localRoot)
+	localTree.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEnter:
+			localTree.GetSelectedFunc()(localTree.GetCurrentNode())
+			return nil
+		}
+		return event
+	})
 
 	// Add existing projects under Local projects
 	for _, p := range panel.projects {

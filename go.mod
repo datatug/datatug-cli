@@ -14,7 +14,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/dal-go/dalgo2sql v0.4.19
-	github.com/datatug/datatug-core v0.16.3
+	github.com/datatug/datatug-core v0.16.4
 	github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.5
@@ -25,6 +25,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
+	github.com/posthog/posthog-go v1.8.2
 	github.com/rivo/tview v0.42.0
 	github.com/stretchr/testify v1.11.1
 	github.com/strongo/logus v0.4.0
@@ -44,7 +45,6 @@ require (
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
-	github.com/posthog/posthog-go v1.8.2 // indirect
 	go.uber.org/mock v0.6.0 // indirect
 )
 

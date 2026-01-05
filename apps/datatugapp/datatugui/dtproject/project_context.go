@@ -15,7 +15,7 @@ type projectContext struct {
 	context.Context
 	tui     *sneatnav.TUI
 	config  *dtconfig.ProjectRef
-	loader  datatug.ProjectsLoader
+	store   datatug.ProjectStore
 	project *datatug.Project
 	projErr chan error
 }
@@ -46,7 +46,7 @@ type ProjectContext interface {
 
 func NewProjectContext(
 	tui *sneatnav.TUI,
-	loader datatug.ProjectsLoader,
+	store datatug.ProjectStore,
 	config dtconfig.ProjectRef,
 ) ProjectContext {
 	if tui == nil {
@@ -55,18 +55,18 @@ func NewProjectContext(
 	if err := config.Validate(); err != nil {
 		panic(fmt.Sprintf("invalid project ref: %v", err))
 	}
-	if loader == nil {
-		panic("loader cannot be nil")
+	if store == nil {
+		panic("store cannot be nil")
 	}
 
 	ctx := &projectContext{
 		tui:     tui,
 		config:  &config,
-		loader:  loader,
+		store:   store,
 		projErr: make(chan error, 1),
 	}
 	go func() {
-		project, err := loader.LoadProject(ctx, config.ID)
+		project, err := store.LoadProject(ctx)
 		if project != nil {
 			ctx.project = project
 		}

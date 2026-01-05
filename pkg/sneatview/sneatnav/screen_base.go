@@ -36,6 +36,6 @@ func (screen *ScreenBase) Activate() error {
 //}
 
 func (screen *ScreenBase) Close() error {
-	screen.Tui.PopScreen()
+	//screen.Tui.PopScreen()
 	return nil
 }

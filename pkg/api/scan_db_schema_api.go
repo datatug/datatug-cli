@@ -20,9 +20,7 @@ import (
 
 // ProjectLoader defines an interface to load project info
 type ProjectLoader interface {
-	// LoadProjectSummary loads project summary
-	LoadProjectSummary(ctx context.Context) (projectSummary datatug.ProjectSummary, err error)
-	// LoadProject loads the whole project
+	LoadProjectFile(ctx context.Context) (projectFile datatug.ProjectFile, err error)
 	LoadProject(ctx context.Context, o ...datatug.StoreOption) (project *datatug.Project, err error)
 }
 
@@ -52,11 +50,11 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 	var (
 		dbCatalog *datatug.DbCatalog
 	)
-	var projSummaryErr error
+	var projFileErr error
 	getProjectSummaryWorker := func() error {
-		_, projSummaryErr = projectLoader.LoadProjectSummary(ctx)
+		_, projFileErr = projectLoader.LoadProjectFile(ctx)
 		if err != nil {
-			if datatug.ProjectDoesNotExist(projSummaryErr) {
+			if datatug.ProjectDoesNotExist(projFileErr) {
 				return nil
 			}
 			return fmt.Errorf("failed to load project summary: %w", err)
@@ -93,7 +91,7 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 	} else if dbCatalog.DbModel == "" {
 		dbCatalog.DbModel = dbCatalog.ID
 	}
-	if datatug.ProjectDoesNotExist(projSummaryErr) {
+	if datatug.ProjectDoesNotExist(projFileErr) {
 		log.Println("Creating a new DataTug project...")
 		if project, err = newProjectWithDatabase(environment, dbServer, dbCatalog); err != nil {
 			return project, err

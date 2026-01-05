@@ -27,7 +27,7 @@ func GetProjects(ctx context.Context, storeID string) ([]datatug.ProjectBrief, e
 }
 
 // GetProjectSummary returns project summary
-func GetProjectSummary(ctx context.Context, ref dto.ProjectRef) (*datatug.ProjectSummary, error) {
+func GetProjectSummary(ctx context.Context, ref dto.ProjectRef) (projSummary *datatug.ProjectSummary, err error) {
 	if ref.ProjectID == "" {
 		return nil, validation.NewErrRequestIsMissingRequiredField("id")
 	}
@@ -37,8 +37,11 @@ func GetProjectSummary(ctx context.Context, ref dto.ProjectRef) (*datatug.Projec
 	}
 	//goland:noinspection GoNilness
 	project := store.GetProjectStore(ref.ProjectID)
-	projectSummary, err := project.LoadProjectSummary(ctx)
-	return &projectSummary, err
+	projectFile, err := project.LoadProjectFile(ctx)
+	if err != nil {
+		return projSummary, fmt.Errorf("failed to load project file: %w", err)
+	}
+	return &datatug.ProjectSummary{ProjectFile: projectFile}, err
 }
 
 // CreateProject create a new DataTug project using requested store

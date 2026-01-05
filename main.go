@@ -8,14 +8,27 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
+	"github.com/datatug/datatug-cli/pkg/dtlog"
 	_ "github.com/denisenkom/go-mssqldb"
-
+	"github.com/posthog/posthog-go"
 	//_ "github.com/jackc/pgx/v5"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/urfave/cli/v3"
 )
 
 func main() {
+
+	// Capture an event
+	dtlog.Enqueue(posthog.Capture{
+		Event: "DataTug CLI started",
+	})
+
+	defer func() {
+		dtlog.Enqueue(posthog.Capture{
+			Event: "DataTug CLI exited",
+		})
+	}()
+
 	cmd := getCommand()
 	args := os.Args
 	// When running under `go test`, os.Args contains testing flags that urfave/cli doesn't recognize.

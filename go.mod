@@ -42,7 +42,9 @@ require (
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
 	github.com/georgysavva/scany/v2 v2.1.4 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
+	github.com/posthog/posthog-go v1.8.2 // indirect
 	go.uber.org/mock v0.6.0 // indirect
 )
 

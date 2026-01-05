@@ -2,10 +2,12 @@ package dtlog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -21,6 +23,12 @@ var posthogDistinctID string
 var sessionID string
 var sessionStarted time.Time
 
+var (
+	mu          sync.Mutex
+	queue       []posthog.Message
+	initialized bool
+)
+
 type posthogConfig struct {
 	ApiKey          string    `yaml:"api_key"`
 	ApiKeyTimestamp time.Time `yaml:"api_key_timestamp"`
@@ -29,14 +37,28 @@ type posthogConfig struct {
 }
 
 func init() {
-	ph = getPostHogClient()
 	sessionID = uuid.NewString()
 	sessionStarted = time.Now()
+	go func() {
+		client := getPostHogClient()
+		mu.Lock()
+		defer mu.Unlock()
+		ph = client
+		initialized = true
+		for _, msg := range queue {
+			enqueue(msg)
+		}
+		queue = nil
+	}()
 }
 
 func Close() {
-	_ = ph.Close()
-	ph = nil
+	mu.Lock()
+	defer mu.Unlock()
+	if ph != nil {
+		_ = ph.Close()
+		ph = nil
+	}
 }
 
 func getPostHogClient() posthog.Client {
@@ -99,9 +121,23 @@ func writePostHogConfigToFile(ctx context.Context, config posthogConfig) error {
 
 func getPostHogApiKeyFromServer() (string, error) {
 	const url = "https://raw.githubusercontent.com/datatug/datatug-cli/refs/heads/main/envs/prod/posthog-api-key.txt"
-	resp, err := http.Get(url)
+	timeout := 5 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch posthog api key from server: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		ctx = context.Background()
+		if errors.Is(err, context.DeadlineExceeded) {
+			logus.Warningf(ctx, "Request to GitHub server for PostHog API Key timed out %v", timeout)
+		} else {
+			logus.Errorf(ctx, "failed to fetch posthog api key from %s: %w", url, err)
+		}
 	}
 	defer func() {
 		_ = resp.Body.Close()
@@ -166,6 +202,17 @@ func withSession(p posthog.Properties) posthog.Properties {
 }
 
 func Enqueue(msg posthog.Message) {
+	mu.Lock()
+	if !initialized {
+		queue = append(queue, msg)
+		mu.Unlock()
+		return
+	}
+	mu.Unlock()
+	enqueue(msg)
+}
+
+func enqueue(msg posthog.Message) {
 	if ph == nil {
 		return
 	}

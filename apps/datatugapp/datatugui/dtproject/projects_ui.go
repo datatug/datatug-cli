@@ -76,7 +76,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	localTree := tview.NewTreeView()
 	cloudTree := tview.NewTreeView()
 
-	// Create layout to hold all 3 trees horizontally
+	// Create a layout to hold both trees horizontally
 	layout := tview.NewFlex().SetDirection(tview.FlexColumn)
 
 	panel := &projectsPanel{

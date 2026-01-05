@@ -10,7 +10,7 @@ const DefaultBlurBorderColor = tcell.ColorGray
 
 func DefaultBorderWithPadding(box *tview.Box) {
 	DefaultBorderWithoutPadding(box)
-	box.SetBorderPadding(1, 0, 1, 1)
+	box.SetBorderPadding(1, 1, 2, 2)
 }
 
 func DefaultBorderWithoutPadding(box *tview.Box) {

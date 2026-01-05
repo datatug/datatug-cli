@@ -22,9 +22,6 @@ func GoDataTugProjectScreen(projectCtx ProjectContext) {
 	pConfig := projectCtx.Config()
 	breadcrumbs := projectsBreadcrumbs(tui)
 	title := GetProjectTitle(pConfig)
-	if parts := strings.Split(title, "/"); len(parts) > 1 {
-		title = parts[len(parts)-1]
-	}
 	breadcrumbs.Push(sneatv.NewBreadcrumb(title, nil))
 	menu := getOrCreateProjectMenuPanel(projectCtx, "project")
 	content := NewProjectPanel(tui, pConfig)
@@ -39,6 +36,12 @@ func GoDataTugProjectScreen(projectCtx ProjectContext) {
 		menu.SetProject(project)
 	}()
 
+}
+
+type ProjectTitle struct {
+	Host   string // github.com
+	Owner  string
+	RepoID string
 }
 
 func GetProjectTitle(p *dtconfig.ProjectRef) (projectTitle string) {

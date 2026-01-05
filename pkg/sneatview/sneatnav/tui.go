@@ -53,6 +53,8 @@ type TUI struct {
 	stack       []Screen
 	actionsMenu ActionsMenu
 	pages       *tview.Pages
+	//
+	setPanelsCounter int
 }
 
 func (tui *TUI) StackDepth() int {
@@ -86,20 +88,25 @@ func WithFocusTo(focusTo FocusTo) func(o *setPanelsOptions) {
 }
 
 func (tui *TUI) SetPanels(menu, content Panel, options ...func(panelsOptions *setPanelsOptions)) {
+
+	if tui.setPanelsCounter++; tui.setPanelsCounter > 1000 {
+		panic("tui.setPanelsCounter overflow")
+	}
+
 	if content != nil {
 		tui.Content = content
+		tui.Layout.SetContent(content)
 	}
 	if menu != nil {
 		tui.Menu = menu
+		tui.Layout.SetMenu(menu)
 		tui.Header.breadcrumbs.SetNextFocusTarget(menu)
 	}
 	//tui.Layout = newLayout(tui.Header, menu, content, tui.actionsMenu.flex)
-	tui.Layout.SetMenu(menu)
-	tui.Layout.SetContent(content)
 
-	tui.pages.RemovePage(mainPage)
-	tui.pages.AddPage(mainPage, tui.Layout, true, true)
-	tui.App.SetRoot(tui.pages, true)
+	//tui.pages.RemovePage(mainPage)
+	//tui.pages.AddPage(mainPage, tui.Layout, true, true)
+	//tui.App.SetRoot(tui.pages, true)
 	spo := &setPanelsOptions{
 		focusTo: FocusToContent,
 	}

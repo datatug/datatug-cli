@@ -14,17 +14,25 @@ func goViewersScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	breadcrumbs.Push(sneatv.NewBreadcrumb("Viewers", nil))
 
 	menu := datatugui.NewDataTugMainMenu(tui, datatugui.RootScreenViewers)
-	content := GetViewersListPanel(tui, " Viewers ", focusTo)
+	content := GetViewersListPanel(tui, " Viewers ", focusTo, ViewersListOptions{WithDescription: true})
 
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
 	return nil
 }
 
-func GetViewersListPanel(tui *sneatnav.TUI, title string, focusTo sneatnav.FocusTo) sneatnav.Panel {
+type ViewersListOptions struct {
+	WithDescription bool
+}
+
+func GetViewersListPanel(tui *sneatnav.TUI, title string, focusTo sneatnav.FocusTo, o ViewersListOptions) sneatnav.Panel {
 	list := tview.NewList()
 
 	for _, viewer := range viewers {
-		list.AddItem(viewer.Name, viewer.Description, viewer.Shortcut, func() {
+		var description string
+		if o.WithDescription {
+			description = viewer.Description
+		}
+		list.AddItem(viewer.Name, description, viewer.Shortcut, func() {
 			_ = viewer.Action(tui, focusTo)
 		})
 	}

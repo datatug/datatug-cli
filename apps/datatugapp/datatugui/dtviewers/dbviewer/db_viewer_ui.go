@@ -22,13 +22,18 @@ func GetDbViewersBreadcrumbs(tui *sneatnav.TUI) sneatnav.Breadcrumbs {
 
 func GoDbViewerSelector(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 
+	const dbViewersTitle = "DB Viewers"
 	breadcrumbs := dtviewers.GetViewersBreadcrumbs(tui)
-	breadcrumbs.Push(sneatv.NewBreadcrumb("DB Viewers", nil))
+	breadcrumbs.Push(sneatv.NewBreadcrumb(dbViewersTitle, nil))
 
-	menu := getDbViewerMenu(tui, focusTo, "DB Viewers")
+	dbViewerMenu := getDbViewerMenu(tui, focusTo, dbViewersTitle)
 
-	content := sneatnav.NewPanel(tui, sneatnav.WithBox(menu, menu.Box))
-	tui.SetPanels(tui.Menu, content, sneatnav.WithFocusTo(focusTo))
+	mainMenu := dtviewers.GetViewersListPanel(tui, " Viewers ", focusTo, dtviewers.ViewersListOptions{
+		WithDescription: false,
+	})
+
+	content := sneatnav.NewPanel(tui, sneatnav.WithBox(dbViewerMenu, dbViewerMenu.Box))
+	tui.SetPanels(mainMenu, content, sneatnav.WithFocusTo(focusTo))
 	return nil
 }
 
@@ -37,10 +42,16 @@ func getDbViewerMenu(tui *sneatnav.TUI, focusTo sneatnav.FocusTo, title string) 
 	if title != "" {
 		list.SetTitle(title)
 	}
+
 	list.AddItem("SQLLite", "", 'l', func() {
 		_ = goSqliteHome(tui, focusTo)
 	})
+	list.AddItem("inGitDB", "", 'g', func() {
+		_ = goIngitdbBHome(tui, focusTo)
+	})
+
 	list.AddItem("PostgreSQL", "", 'p', nil)
+
 	setDefaultInputCaptureForList(tui, list)
 	return list
 }

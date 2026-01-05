@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/posthog/posthog-go"
+	"github.com/strongo/logus"
+
 	//_ "github.com/jackc/pgx/v5"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/urfave/cli/v3"
@@ -19,13 +22,30 @@ import (
 
 func main() {
 
-	// Capture an event
+	// Enqueue an event
 	dtlog.Enqueue(posthog.Capture{Event: "DataTug CLI started"})
 
 	defer func() {
+		r := recover()
+		if r != nil {
+			rText := fmt.Sprintf("%v", r)
+			ctx := context.Background()
+			logus.Errorf(ctx, "panic: %s", rText)
+			timestamp := time.Now()
+			distinctID := dtlog.DistinctID()
+			dtlog.Enqueue(posthog.NewDefaultException(
+				timestamp,
+				distinctID,
+				"panic",
+				rText,
+			))
+		}
 		dtlog.Enqueue(posthog.Capture{Event: "DataTug CLI exited"})
-		time.Sleep(time.Millisecond) // Do we really need this?
 		dtlog.Close()
+		time.Sleep(time.Millisecond) // Do we really need this?
+		if r != nil {
+			panic(r)
+		}
 	}()
 
 	cmd := getCommand()

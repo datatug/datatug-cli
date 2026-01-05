@@ -30,6 +30,7 @@ func init() {
 
 func Close() {
 	_ = ph.Close()
+	ph = nil
 }
 
 var posthogDistinctID string
@@ -146,17 +147,33 @@ func ScreenOpened(id, name string) {
 	Enqueue(m)
 }
 
-func Enqueue(m posthog.Capture) {
+func DistinctID() string {
+	return posthogDistinctID
+}
+
+func Enqueue(msg posthog.Message) {
 	if ph == nil {
 		return
 	}
-	if m.DistinctId == "" {
-		m.DistinctId = posthogDistinctID
+	switch m := msg.(type) {
+	case posthog.Capture:
+		if m.DistinctId == "" {
+			m.DistinctId = posthogDistinctID
+		}
+		if m.Timestamp.IsZero() {
+			m.Timestamp = time.Now()
+		}
+		msg = m
+	case posthog.Exception:
+		if m.DistinctId == "" {
+			m.DistinctId = posthogDistinctID
+		}
+		if m.Timestamp.IsZero() {
+			m.Timestamp = time.Now()
+		}
+		msg = m
 	}
-	if m.Timestamp.IsZero() {
-		m.Timestamp = time.Now()
-	}
-	if err := ph.Enqueue(m); err != nil {
+	if err := ph.Enqueue(msg); err != nil {
 		ctx := context.Background()
 		logus.Errorf(ctx, "posthog.enqueue failed: %v", err)
 	}

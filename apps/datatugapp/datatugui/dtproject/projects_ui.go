@@ -267,7 +267,7 @@ func newProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 
 	// Set up focus and blur handlers for each tree to manage selected item styling
 	for i, tree := range panel.trees {
-		treeIndex := i // Capture loop variable
+		treeIndex := i // Enqueue loop variable
 
 		tree.SetFocusFunc(func() {
 			// When tree gains focus, update styling for active state

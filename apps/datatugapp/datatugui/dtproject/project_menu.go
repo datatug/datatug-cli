@@ -139,6 +139,12 @@ func newProjectMenuPanel(ctx ProjectContext, currentScreen ProjectScreenID) *pro
 	entitiesNode := tview.NewTreeNode("Entities").SetSelectable(true)
 	projectNode.AddChild(entitiesNode)
 
+	queriesNode := tview.NewTreeNode("Queries").SetSelectable(true)
+	projectNode.AddChild(queriesNode)
+	queriesNode.SetSelectedFunc(func() {
+		goProjectQueries(ctx)
+	})
+
 	logsNode := tview.NewTreeNode("Logs").SetSelectable(true)
 	projectNode.AddChild(logsNode)
 

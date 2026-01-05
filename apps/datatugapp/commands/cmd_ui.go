@@ -48,7 +48,7 @@ func (v *uiCommand) Execute(filePath string) error {
 
 	registerModules()
 
-	tui.App.SetRoot(tui.Grid, true)
+	tui.App.SetRoot(tui.Layout, true)
 
 	if filePath != "" {
 		if err := openFile(filePath, tui); err != nil {

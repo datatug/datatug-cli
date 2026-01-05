@@ -28,6 +28,10 @@ func init() {
 	ph = getPostHogClient()
 }
 
+func Close() {
+	_ = ph.Close()
+}
+
 var posthogDistinctID string
 
 func getPostHogClient() posthog.Client {
@@ -44,6 +48,7 @@ func getPostHogClient() posthog.Client {
 			logus.Warningf(ctx, "Failed to get PostHog API key from server: %v", err)
 		} else {
 			config.ApiKey = apiKey
+			config.ApiKeyTimestamp = time.Now()
 			configChanged = true
 		}
 	}
@@ -60,7 +65,14 @@ func getPostHogClient() posthog.Client {
 			logus.Errorf(ctx, "Failed to write PostHog config file: %v", err)
 		}
 	}
-	return posthog.New(config.ApiKey)
+	posthogDistinctID = config.DistinctID
+	client, err := posthog.NewWithConfig(config.ApiKey, posthog.Config{Endpoint: "https://eu.i.posthog.com"})
+	if err != nil {
+		ctx := context.Background()
+		logus.Errorf(ctx, "Failed to initialize PostHog client: %v", err)
+		return nil
+	}
+	return client
 }
 
 func writePostHogConfigToFile(ctx context.Context, config posthogConfig) error {
@@ -114,12 +126,35 @@ func getPosthogConfigFilePath() string {
 	return filestore.ExpandHome("~/datatug/.posthog.yaml")
 }
 
+func ScreenOpened(id, name string) {
+	if id == "" {
+		panic("id is empty")
+	}
+	props := posthog.NewProperties().
+		Set("$app_name", "DataTug").
+		Set("$app_version", version).
+		Set("$screen_id", id)
+
+	if name != "" {
+		props.Set("$screen_name", name)
+	}
+
+	m := posthog.Capture{
+		Event:      "Screen opened",
+		Properties: props,
+	}
+	Enqueue(m)
+}
+
 func Enqueue(m posthog.Capture) {
 	if ph == nil {
 		return
 	}
 	if m.DistinctId == "" {
 		m.DistinctId = posthogDistinctID
+	}
+	if m.Timestamp.IsZero() {
+		m.Timestamp = time.Now()
 	}
 	if err := ph.Enqueue(m); err != nil {
 		ctx := context.Background()

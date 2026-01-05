@@ -2,6 +2,7 @@ package dtviewers
 
 import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
+	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
@@ -17,6 +18,7 @@ func goViewersScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	content := GetViewersListPanel(tui, " Viewers ", focusTo, ViewersListOptions{WithDescription: true})
 
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
+	dtlog.ScreenOpened("viewers", "Viewers")
 	return nil
 }
 

@@ -2,6 +2,7 @@ package dtapiservice
 
 import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
+	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
@@ -45,5 +46,6 @@ func goApiServiceMonitor(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	content := sneatnav.NewPanel(tui, sneatnav.WithBox(textView, textView.Box))
 
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
+	dtlog.ScreenOpened("api_monitor", "API Monitor")
 	return nil
 }

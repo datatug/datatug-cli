@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
+	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -83,6 +84,7 @@ func goSqliteHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	content := sneatnav.NewPanel(tui, sneatnav.WithBox(tree, tree.Box))
 
 	tui.SetPanels(menuPanel, content, sneatnav.WithFocusTo(focusTo))
+	dtlog.ScreenOpened("viewers/sqlite", "SQLite DB Viewer")
 	return nil
 }
 

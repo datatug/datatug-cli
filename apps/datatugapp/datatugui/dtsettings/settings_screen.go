@@ -2,6 +2,7 @@ package dtsettings
 
 import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
+	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
@@ -73,5 +74,6 @@ func goSettingsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	if focusTo == sneatnav.FocusToContent {
 		tui.App.SetFocus(content)
 	}
+	dtlog.ScreenOpened("settings", "Settings")
 	return nil
 }

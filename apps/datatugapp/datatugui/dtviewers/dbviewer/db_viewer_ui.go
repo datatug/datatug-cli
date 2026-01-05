@@ -2,6 +2,7 @@ package dbviewer
 
 import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
+	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/rivo/tview"
@@ -22,7 +23,7 @@ func GetDbViewersBreadcrumbs(tui *sneatnav.TUI) sneatnav.Breadcrumbs {
 
 func GoDbViewerSelector(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 
-	const dbViewersTitle = "DB Viewers"
+	const dbViewersTitle = "Choose DB"
 	breadcrumbs := dtviewers.GetViewersBreadcrumbs(tui)
 	breadcrumbs.Push(sneatv.NewBreadcrumb(dbViewersTitle, nil))
 
@@ -34,6 +35,7 @@ func GoDbViewerSelector(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 
 	content := sneatnav.NewPanel(tui, sneatnav.WithBox(dbViewerMenu, dbViewerMenu.Box))
 	tui.SetPanels(mainMenu, content, sneatnav.WithFocusTo(focusTo))
+	dtlog.ScreenOpened("db_viewer", "DB Viewer")
 	return nil
 }
 

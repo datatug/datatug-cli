@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
@@ -19,14 +20,12 @@ import (
 func main() {
 
 	// Capture an event
-	dtlog.Enqueue(posthog.Capture{
-		Event: "DataTug CLI started",
-	})
+	dtlog.Enqueue(posthog.Capture{Event: "DataTug CLI started"})
 
 	defer func() {
-		dtlog.Enqueue(posthog.Capture{
-			Event: "DataTug CLI exited",
-		})
+		dtlog.Enqueue(posthog.Capture{Event: "DataTug CLI exited"})
+		time.Sleep(time.Millisecond) // Do we really need this?
+		dtlog.Close()
 	}()
 
 	cmd := getCommand()

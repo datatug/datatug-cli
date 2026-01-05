@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
+	"github.com/google/uuid"
 	"github.com/posthog/posthog-go"
 	"github.com/strongo/logus"
 	"github.com/strongo/random"
@@ -16,6 +17,9 @@ import (
 )
 
 var ph posthog.Client
+var posthogDistinctID string
+var sessionID string
+var sessionStarted time.Time
 
 type posthogConfig struct {
 	ApiKey          string    `yaml:"api_key"`
@@ -26,14 +30,14 @@ type posthogConfig struct {
 
 func init() {
 	ph = getPostHogClient()
+	sessionID = uuid.NewString()
+	sessionStarted = time.Now()
 }
 
 func Close() {
 	_ = ph.Close()
 	ph = nil
 }
-
-var posthogDistinctID string
 
 func getPostHogClient() posthog.Client {
 	_, _ = fmt.Println("Initializing PostHog client...")
@@ -151,6 +155,12 @@ func DistinctID() string {
 	return posthogDistinctID
 }
 
+func withSession(p posthog.Properties) posthog.Properties {
+	return p.
+		Set("$session_id", sessionID).
+		Set("$session_start_time", sessionStarted)
+}
+
 func Enqueue(msg posthog.Message) {
 	if ph == nil {
 		return
@@ -163,6 +173,7 @@ func Enqueue(msg posthog.Message) {
 		if m.Timestamp.IsZero() {
 			m.Timestamp = time.Now()
 		}
+		m.Properties = withSession(m.Properties)
 		msg = m
 	case posthog.Exception:
 		if m.DistinctId == "" {

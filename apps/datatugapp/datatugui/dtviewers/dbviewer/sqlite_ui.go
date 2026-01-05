@@ -21,6 +21,8 @@ import (
 )
 
 func goSqliteHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
+	const screenTitle = "SQLite Viewer"
+
 	breadcrumbs := GetDbViewersBreadcrumbs(tui)
 	breadcrumbs.Push(sneatv.NewBreadcrumb("SQLite", nil))
 
@@ -28,8 +30,8 @@ func goSqliteHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	menuPanel := sneatnav.NewPanel(tui, sneatnav.WithBox(menu, menu.Box))
 
 	tree := tview.NewTreeView()
-	tree.SetTitle("SQLite DB viewer")
-	root := tview.NewTreeNode("SQLite DB viewer")
+	tree.SetTitle(screenTitle)
+	root := tview.NewTreeNode(screenTitle)
 	root.SetSelectable(false)
 
 	tree.SetRoot(root)
@@ -84,7 +86,7 @@ func goSqliteHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	content := sneatnav.NewPanel(tui, sneatnav.WithBox(tree, tree.Box))
 
 	tui.SetPanels(menuPanel, content, sneatnav.WithFocusTo(focusTo))
-	dtlog.ScreenOpened("viewers/sqlite", "SQLite DB Viewer")
+	dtlog.ScreenOpened("viewers/sqlite", screenTitle)
 	return nil
 }
 

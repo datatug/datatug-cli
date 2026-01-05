@@ -158,7 +158,8 @@ func DistinctID() string {
 func withSession(p posthog.Properties) posthog.Properties {
 	return p.
 		Set("$session_id", sessionID).
-		Set("$session_start_time", sessionStarted)
+		Set("$session_start_time", sessionStarted).
+		Set("$session_duration", time.Since(sessionStarted).Milliseconds())
 }
 
 func Enqueue(msg posthog.Message) {

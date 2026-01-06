@@ -10,7 +10,8 @@ import (
 func TestNewDatatugTUI(t *testing.T) {
 	tui := NewDatatugTUI()
 	if tui == nil {
-		t.Fatal("expected tui to be not nil")
+		t.Fatalf("NewDatatugTUI() returned nil")
+		return
 	}
 	if tui.App == nil {
 		t.Fatal("expected tui.App to be not nil")

@@ -35,19 +35,19 @@ func newLayout(header, menu, content, actionsMenu tview.Primitive) (lo *layout) 
 			SetBorders(false)
 
 	// Adds header and footer to the grid.
-	lo.Grid.AddItem(header, 0, 0, 1, 2, 0, 0, false)
+	lo.AddItem(header, 0, 0, 1, 2, 0, 0, false)
 
 	// Layout for screens narrower than 100 cells (menu and sidebar are hidden).
-	lo.Grid.
+	lo.
 		AddItem(lo.menu, 0, 0, 0, 0, 0, 0, false).
 		AddItem(lo.content, 1, 0, 1, 3, 0, 0, false)
 
 	// Layout for screens wider than 100 cells.
-	lo.Grid.
+	lo.
 		AddItem(lo.menu, 1, 0, 1, 1, 0, 100, true).
 		AddItem(lo.content, 1, 1, 1, 1, 0, 100, false)
 
-	lo.Grid.AddItem(actionsMenu, 2, 0, 1, 1, 0, 0, true)
+	lo.AddItem(actionsMenu, 2, 0, 1, 1, 0, 0, true)
 
 	return
 }

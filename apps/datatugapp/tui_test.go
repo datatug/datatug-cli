@@ -11,10 +11,12 @@ func TestNewDatatugTUI(t *testing.T) {
 	tui := NewDatatugTUI()
 	if tui == nil {
 		t.Fatal("expected tui to be not nil")
-		return
 	}
 	if tui.App == nil {
-		t.Error("expected tui.App to be not nil")
+		t.Fatal("expected tui.App to be not nil")
+	}
+	if tui.Header == nil {
+		t.Fatal("expected tui.Header to be not nil")
 	}
 	called := false
 	goProjectScreen = func(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {

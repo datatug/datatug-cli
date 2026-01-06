@@ -25,6 +25,10 @@ func getTableSchema(t *testing.T, scanner Scanner, catalogID, schemaID string, t
 		t.Fatalf("schema %v not found", schemaID)
 	}
 
+	if schema.Tables == nil {
+		t.Fatalf("schema %v tables is nil", schemaID)
+	}
+
 	table := datatug.Tables(schema.Tables).GetByKey(tableKey)
 	if table == nil {
 		t.Fatalf("table %v not found", tableKey)

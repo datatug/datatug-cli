@@ -20,11 +20,14 @@ func getTableSchema(t *testing.T, scanner Scanner, catalogID, schemaID string, t
 		t.Errorf("expected catalog GetID %v, got %v", catalogID, catalog.ID)
 	}
 
-	schema := catalog.Schemas.GetByID(schemaID)
+	var schema *datatug.DbSchema
+	if catalog.Schemas != nil {
+		schema = catalog.Schemas.GetByID(schemaID)
+	}
+
 	if schema == nil {
 		t.Fatalf("schema %v not found", schemaID)
 	}
-
 	if schema.Tables == nil {
 		t.Fatalf("schema %v tables is nil", schemaID)
 	}

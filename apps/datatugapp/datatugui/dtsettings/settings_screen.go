@@ -1,6 +1,10 @@
 package dtsettings
 
 import (
+	"strings"
+
+	"github.com/alecthomas/chroma/lexers"
+	"github.com/alecthomas/chroma/styles"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
@@ -44,7 +48,16 @@ func goSettingsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	}
 
 	const fileName = " Config File: ~/.datatug.yaml"
-	textView.SetText(settingsStr)
+
+	settingsStr, err = ColorizeYAMLForTview(settingsStr)
+	if err != nil {
+		return err
+	}
+
+	textView.
+		SetDynamicColors(true).
+		SetScrollable(true).
+		SetText(settingsStr)
 
 	content := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(textView, textView.Box))
 
@@ -76,4 +89,38 @@ func goSettingsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	}
 	dtlog.ScreenOpened("settings", "Settings")
 	return nil
+}
+
+func ColorizeYAMLForTview(yamlStr string) (string, error) {
+	lexer := lexers.Get("yaml")
+	if lexer == nil {
+		lexer = lexers.Fallback
+	}
+
+	iterator, err := lexer.Tokenise(nil, yamlStr)
+	if err != nil {
+		return "", err
+	}
+
+	style := styles.Get("dracula")
+	if style == nil {
+		style = styles.Fallback
+	}
+
+	var sb strings.Builder
+	for _, token := range iterator.Tokens() {
+		color := style.Get(token.Type)
+		if color.IsZero() {
+			sb.WriteString(token.Value)
+			continue
+		}
+
+		// Map Chroma color to tview [color] tag
+		// simple approximation: use hex
+		sb.WriteString("[" + color.Colour.String() + "]")
+		sb.WriteString(token.Value)
+		sb.WriteString("[-]")
+	}
+
+	return sb.String(), nil
 }

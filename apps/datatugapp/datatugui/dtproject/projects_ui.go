@@ -67,10 +67,6 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 
 	layout := tview.NewFlex().SetDirection(tview.FlexColumn)
 
-	layout.SetFocusFunc(func() {
-		tui.App.SetFocus(tree)
-	})
-
 	// Create a layout to hold both trees horizontally
 
 	panel := &projectsPanel{
@@ -80,6 +76,11 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		tree:      tree,
 		details:   tview.NewFlex(),
 	}
+
+	layout.SetFocusFunc(func() {
+		panel.ensureTreeHasCurrentNode(tree)
+		tui.App.SetFocus(tree)
+	})
 
 	projRefText := tview.NewTextView()
 	panel.details.AddItem(projRefText, 0, 1, false)
@@ -361,6 +362,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		}
 	})
 
+	rootNode.AddChild(getRecentNode())
 	rootNode.AddChild(localProjectsNode)
 	rootNode.AddChild(githubNode)
 

@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/datatug/datatug-core/pkg/dbconnection"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dbconnection"
 	"github.com/datatug/sql2csv"
 	"github.com/google/uuid"
 	"github.com/gosuri/uitable"

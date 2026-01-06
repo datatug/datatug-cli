@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/strongo/validation"
 )
 

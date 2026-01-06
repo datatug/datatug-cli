@@ -3,8 +3,8 @@ package mssqlschema
 import (
 	"context"
 
+	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 	"github.com/datatug/datatug-cli/pkg/schemers/sqlinfoschema"
-	"github.com/datatug/datatug-core/pkg/schemer"
 )
 
 var _ schemer.ConstraintsProvider = (*constraintsProvider)(nil)

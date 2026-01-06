@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/datatug/datatug-core/pkg/schemer"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 )
 
 func TestGetForeignKeys(t *testing.T) {

@@ -12,12 +12,12 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/datatug/datatug-core/pkg/dto"
-	"github.com/datatug/datatug-core/pkg/parallel"
-	"github.com/datatug/datatug-core/pkg/storage"
-	"github.com/datatug/datatug-core/pkg/storage/filestore"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dto"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/parallel"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/go-git/go-git/v5"
 	"github.com/urfave/cli/v3"
 )

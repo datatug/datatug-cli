@@ -3,7 +3,7 @@ package sqlinfoschema
 import (
 	"testing"
 
-	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/stretchr/testify/assert"
 )
 

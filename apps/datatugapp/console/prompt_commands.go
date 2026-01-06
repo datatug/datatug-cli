@@ -2,7 +2,7 @@ package console
 
 //
 //import (
-//	"github.com/datatug/datatug-core/pkg/cli"
+//	"github.com/datatug/datatug-cli/pkg/datatug-core/cli"
 //	"github.com/c-bata/go-prompt"
 //	"github.com/jessevdk/go-flags"
 //	"golang.org/x/sys/windows" // replaced syscall

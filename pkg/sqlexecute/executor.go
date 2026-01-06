@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/dbconnection"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dbconnection"
 	"github.com/google/uuid"
 	"github.com/mitchellh/go-homedir"
 	"github.com/strongo/slice"

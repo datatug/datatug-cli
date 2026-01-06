@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/datatug/datatug-core/pkg/dtconfig"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/urfave/cli/v3"
 	"gopkg.in/yaml.v3"
 )

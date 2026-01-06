@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/dtconfig"
 )
 
 var _ ProjectContext = (*projectContext)(nil)

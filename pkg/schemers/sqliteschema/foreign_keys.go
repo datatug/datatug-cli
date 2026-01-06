@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/datatug/datatug-core/pkg/schemer"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 )
 
 func (s schemaProvider) GetForeignKeysReader(_ context.Context, schema, table string) (r schemer.ForeignKeysReader, err error) {

@@ -9,7 +9,7 @@ import (
 	"strconv"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dto"
 	"github.com/sneat-co/sneat-go-core/apicore"
 	"github.com/strongo/validation"
 )

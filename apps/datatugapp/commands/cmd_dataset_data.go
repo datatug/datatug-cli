@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/urfave/cli/v3"
 	"gopkg.in/yaml.v3"
 )

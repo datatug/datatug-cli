@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/schemer"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 )
 
 type collectionsFilter struct {

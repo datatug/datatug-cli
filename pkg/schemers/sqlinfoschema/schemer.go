@@ -7,9 +7,9 @@ import (
 	"log"
 	"strings"
 
-	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/parallel"
-	"github.com/datatug/datatug-core/pkg/schemer"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/parallel"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 )
 
 // InformationSchema provides API to retrieve information about a database

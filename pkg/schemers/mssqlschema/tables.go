@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/schemer"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 )
 
 var _ schemer.CollectionsProvider = (*collectionsProvider)(nil)

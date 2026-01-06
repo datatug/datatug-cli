@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/datatug/datatug-core/pkg/schemer"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 )
 
 func TestTablesProvider_GetTables(t *testing.T) {

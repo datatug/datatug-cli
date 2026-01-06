@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/datatug/datatug-core/pkg/storage/dtprojcreator"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/dtprojcreator"
 	"github.com/google/go-github/v80/github"
 )
 

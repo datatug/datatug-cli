@@ -6,8 +6,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/datatug/datatug-core/pkg/storage"
-	"github.com/datatug/datatug-core/pkg/storage/filestore"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/urfave/cli/v3"
 )
 

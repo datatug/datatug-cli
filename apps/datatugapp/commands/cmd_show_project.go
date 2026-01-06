@@ -7,7 +7,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/gosuri/uitable"
 	"github.com/urfave/cli/v3"
 )

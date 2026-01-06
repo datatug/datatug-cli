@@ -24,7 +24,8 @@
 go.work
 
 # Executables
-datatug
+./datatug
+./datatug-cli
 
 # Downloadable files
 demo-dbs/

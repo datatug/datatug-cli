@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/dto"
-	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dto"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/strongo/validation"
 )
 

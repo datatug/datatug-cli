@@ -8,10 +8,10 @@ import (
 	"strconv"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/dbconnection"
-	"github.com/datatug/datatug-core/pkg/storage"
-	"github.com/datatug/datatug-core/pkg/storage/filestore"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dbconnection"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/urfave/cli/v3"
 )
 

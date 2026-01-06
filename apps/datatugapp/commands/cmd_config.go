@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/datatug/datatug-core/pkg/dtconfig"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/urfave/cli/v3"
 )
 

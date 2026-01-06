@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/datatug/datatug-core/pkg/schemer"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 )
 
 var _ schemer.ColumnsProvider = (*columnsProvider)(nil)

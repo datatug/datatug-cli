@@ -3,7 +3,7 @@ package api
 import (
 	"testing"
 
-	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dto"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -1,8 +1,8 @@
 package dtproject
 
 import (
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
 func newEnvironmentsPanel(ctx ProjectContext) sneatnav.Panel {

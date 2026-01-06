@@ -10,11 +10,11 @@ go 1.25.4
 
 require (
 	cloud.google.com/go/firestore v1.20.0
+	github.com/alecthomas/chroma v0.10.0
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/dal-go/dalgo2sql v0.4.19
-	github.com/datatug/datatug-core v0.16.5
 	github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.5
@@ -33,6 +33,7 @@ require (
 	github.com/urfave/cli/v3 v3.6.1
 	github.com/xo/dburl v0.24.2
 	github.com/zalando/go-keyring v0.2.6
+	go.uber.org/mock v0.6.0
 	golang.org/x/oauth2 v0.34.0
 	google.golang.org/api v0.258.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -40,14 +41,12 @@ require (
 
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.14.4 // indirect
-	github.com/alecthomas/chroma v0.10.0 // indirect
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
-	github.com/dlclark/regexp2 v1.4.0 // indirect
+	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/georgysavva/scany/v2 v2.1.4 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
-	go.uber.org/mock v0.6.0 // indirect
 )
 
 require (
@@ -109,7 +108,7 @@ require (
 	github.com/pjbgf/sha1cd v0.5.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/qri-io/jsonpointer v0.1.1 // indirect
-	github.com/qri-io/jsonschema v0.2.1 // indirect
+	github.com/qri-io/jsonschema v0.2.1
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect

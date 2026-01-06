@@ -5,7 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/datatug/datatug-core/pkg/schemer"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 )
 
 // NewSchemaProvider creates a new SchemaProvider for MS SQL Server

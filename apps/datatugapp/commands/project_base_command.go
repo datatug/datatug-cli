@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/datatug/datatug-core/pkg/storage"
-	"github.com/datatug/datatug-core/pkg/storage/filestore"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 )
 
 type projectDirCommand struct {

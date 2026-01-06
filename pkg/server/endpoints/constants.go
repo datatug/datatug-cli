@@ -3,7 +3,7 @@ package endpoints
 import (
 	"net/url"
 
-	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/dto"
 )
 
 const (

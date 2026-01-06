@@ -46,7 +46,7 @@ func newGCloudProjectMenu(gcProjCtx *CGProjectContext) sneatnav.Panel {
 			return event
 		}
 	})
-	return sneatnav.NewPanel(gcProjCtx.TUI, sneatnav.WithBox(list, list.Box))
+	return sneatnav.NewPanel(gcProjCtx.TUI, sneatv.WithDefaultBorders(list, list.Box))
 }
 
 func goGCloudProject(gcProjCtx *CGProjectContext) error {

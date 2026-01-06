@@ -1,7 +1,6 @@
-package sneatnav
+package sneatv
 
 import (
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/rivo/tview"
 )
 
@@ -14,35 +13,35 @@ var _ PrimitiveWithBox = (*WithBoxType[tview.Primitive])(nil)
 
 type WithBoxType[T tview.Primitive] struct {
 	tview.Primitive
-	box *tview.Box
+	Box *tview.Box
 }
 
 func (p WithBoxType[T]) GetBox() *tview.Box {
-	return p.box
+	return p.Box
 }
 func (p WithBoxType[T]) GetPrimitive() T {
 	return p.Primitive.(T)
 }
 
-func WithBox[T tview.Primitive](p T, box *tview.Box) WithBoxType[T] {
-	sneatv.DefaultBorderWithPadding(box)
+func WithDefaultBorders[T tview.Primitive](p T, box *tview.Box) WithBoxType[T] {
+	DefaultBorderWithPadding(box)
 	return WithBoxType[T]{
 		Primitive: p,
-		box:       box,
+		Box:       box,
 	}
 }
 
-func WithBoxWithoutPadding[T tview.Primitive](p T, box *tview.Box) WithBoxType[T] {
-	sneatv.DefaultBorderWithoutPadding(box)
+func WithBordersWithoutPadding[T tview.Primitive](p T, box *tview.Box) WithBoxType[T] {
+	DefaultBorderWithoutPadding(box)
 	return WithBoxType[T]{
 		Primitive: p,
-		box:       box,
+		Box:       box,
 	}
 }
 
 func WithBoxWithoutBorder[T tview.Primitive](p T, box *tview.Box) WithBoxType[T] {
 	return WithBoxType[T]{
 		Primitive: p,
-		box:       box,
+		Box:       box,
 	}
 }

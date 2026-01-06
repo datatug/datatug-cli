@@ -203,8 +203,8 @@ func showCreateProjectScreen(tui *sneatnav.TUI) {
 
 	flex.AddItem(form, 0, 1, true)
 
-	menuPanel := sneatnav.NewPanel(tui, sneatnav.WithBox(list, list.Box))
-	contentPanel := sneatnav.NewPanel(tui, sneatnav.WithBox(flex, flex.Box))
+	menuPanel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(list, list.Box))
+	contentPanel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(flex, flex.Box))
 	tui.SetPanels(menuPanel, contentPanel)
 }
 
@@ -242,7 +242,7 @@ func authenticateGitHub(tui *sneatnav.TUI, onSuccess func(owner string)) {
 				AddItem(form, 3, 1, true)
 			flex.SetBorder(true).SetTitle("GitHub Device Activation")
 
-			panel := sneatnav.NewPanel(tui, sneatnav.WithBox(flex, flex.Box))
+			panel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(flex, flex.Box))
 			tui.SetPanels(nil, panel)
 
 			go func() {

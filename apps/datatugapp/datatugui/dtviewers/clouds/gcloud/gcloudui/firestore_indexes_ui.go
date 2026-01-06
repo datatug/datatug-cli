@@ -15,7 +15,7 @@ func goFirestoreIndexes(gcProjCtx *CGProjectContext) error {
 	list := tview.NewList()
 	sneatv.DefaultBorderWithPadding(list.Box)
 	list.SetTitle("Firestore Indexes")
-	content := sneatnav.NewPanel(gcProjCtx.TUI, sneatnav.WithBox(list, list.Box))
+	content := sneatnav.NewPanel(gcProjCtx.TUI, sneatv.WithDefaultBorders(list, list.Box))
 
 	list.AddItem("Loading...", "(not implemented yet)", 0, nil)
 

@@ -26,7 +26,7 @@ func GoCredentials(cContext *GCloudContext, focusTo sneatnav.FocusTo) error {
 		}
 	})
 
-	content := sneatnav.NewPanel(cContext.TUI, sneatnav.WithBox(list, list.Box))
+	content := sneatnav.NewPanel(cContext.TUI, sneatv.WithDefaultBorders(list, list.Box))
 
 	cContext.TUI.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
 	return nil

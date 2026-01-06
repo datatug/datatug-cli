@@ -27,7 +27,7 @@ func goSqliteHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	breadcrumbs.Push(sneatv.NewBreadcrumb("SQLite", nil))
 
 	menu := getDbViewerMenu(tui, focusTo, "")
-	menuPanel := sneatnav.NewPanel(tui, sneatnav.WithBox(menu, menu.Box))
+	menuPanel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(menu, menu.Box))
 
 	tree := tview.NewTreeView()
 	tree.SetTitle(screenTitle)
@@ -83,7 +83,7 @@ func goSqliteHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 		}
 	})
 
-	content := sneatnav.NewPanel(tui, sneatnav.WithBox(tree, tree.Box))
+	content := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(tree, tree.Box))
 
 	tui.SetPanels(menuPanel, content, sneatnav.WithFocusTo(focusTo))
 	dtlog.ScreenOpened("viewers/sqlite", screenTitle)
@@ -154,7 +154,7 @@ func downloadFile(tui *sneatnav.TUI, from, to string) error {
 	container.AddItem(btnRow, 3, 0, false)
 
 	// Show initial content panel with progress + button
-	boxed := sneatnav.WithBox(container, container.Box)
+	boxed := sneatv.WithDefaultBorders(container, container.Box)
 	progressPanel := sneatnav.NewPanel(tui, boxed)
 
 	// Use a channel to wait for the download to complete

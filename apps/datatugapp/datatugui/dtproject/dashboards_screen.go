@@ -17,5 +17,5 @@ func newDashboardsPanel(ctx ProjectContext) sneatnav.Panel {
 
 	sneatv.DefaultBorderWithPadding(content.Box)
 
-	return sneatnav.NewPanel(ctx.TUI(), sneatnav.WithBox(content, content.Box))
+	return sneatnav.NewPanel(ctx.TUI(), sneatv.WithDefaultBorders(content, content.Box))
 }

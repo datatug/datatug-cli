@@ -43,7 +43,7 @@ func goApiServiceMonitor(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 		return event
 	})
 
-	content := sneatnav.NewPanel(tui, sneatnav.WithBox(textView, textView.Box))
+	content := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(textView, textView.Box))
 
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
 	dtlog.ScreenOpened("api_monitor", "API Monitor")

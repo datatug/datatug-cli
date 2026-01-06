@@ -39,7 +39,7 @@ func goFirestoreCollection(gcProjCtx *CGProjectContext, collection *schemers.Col
 	// Loading placeholder
 	b.Table.SetCell(1, 0, tview.NewTableCell("Loading...").SetSelectable(false))
 
-	content := sneatnav.NewPanel(gcProjCtx.TUI, sneatnav.WithBox(b, b.Box))
+	content := sneatnav.NewPanel(gcProjCtx.TUI, sneatv.WithDefaultBorders(b, b.Box))
 
 	// Unified input handler:
 	// - Up: move focus to header breadcrumbs only if the first data row is selected (row == 1).

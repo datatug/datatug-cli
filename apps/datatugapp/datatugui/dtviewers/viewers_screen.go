@@ -70,5 +70,5 @@ func GetViewersListPanel(tui *sneatnav.TUI, title string, focusTo sneatnav.Focus
 	list.SetTitle(title)
 	list.SetTitleAlign(tview.AlignLeft)
 
-	return sneatnav.NewPanel(tui, sneatnav.WithBox(list, list.Box))
+	return sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(list, list.Box))
 }

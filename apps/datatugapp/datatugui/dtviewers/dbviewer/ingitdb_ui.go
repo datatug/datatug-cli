@@ -12,7 +12,7 @@ func goIngitdbBHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	breadcrumbs.Push(sneatv.NewBreadcrumb("inGitDB", nil))
 
 	menu := getDbViewerMenu(tui, focusTo, "")
-	menuPanel := sneatnav.NewPanel(tui, sneatnav.WithBox(menu, menu.Box))
+	menuPanel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(menu, menu.Box))
 
 	tree := tview.NewTreeView()
 	tree.SetTitle("inGitDB viewer")
@@ -68,7 +68,7 @@ func goIngitdbBHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 		}
 	})
 
-	content := sneatnav.NewPanel(tui, sneatnav.WithBox(tree, tree.Box))
+	content := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(tree, tree.Box))
 
 	tui.SetPanels(menuPanel, content, sneatnav.WithFocusTo(focusTo))
 	return nil

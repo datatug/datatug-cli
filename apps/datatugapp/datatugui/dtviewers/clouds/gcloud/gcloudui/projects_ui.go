@@ -204,7 +204,7 @@ func showGCloudProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error
 		cContext.TUI.App.SetFocus(table)
 	})
 
-	content := sneatnav.NewPanel(cContext.TUI, sneatnav.WithBox(flex, flex.Box))
+	content := sneatnav.NewPanel(cContext.TUI, sneatv.WithDefaultBorders(flex, flex.Box))
 
 	cContext.TUI.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
 

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/go-git/go-git/v5"
@@ -53,7 +54,7 @@ func openDatatugDemoProject(tui *sneatnav.TUI) {
 
 	progressText := tview.NewTextView()
 	progressText.SetTitle("Cloning project...")
-	progressPanel := sneatnav.NewPanel(tui, sneatnav.WithBox(progressText, progressText.Box))
+	progressPanel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(progressText, progressText.Box))
 	tui.SetPanels(tui.Menu, progressPanel, sneatnav.WithFocusTo(sneatnav.FocusToContent))
 
 	go func() {

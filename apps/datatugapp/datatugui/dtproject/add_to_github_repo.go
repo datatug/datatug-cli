@@ -14,6 +14,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/datatug/datatug-cli/pkg/auth/ghauth"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -119,7 +120,7 @@ func ShowAddToGitHubRepo(tui *sneatnav.TUI) {
 
 				flex.SetBorder(true).SetTitle("GitHub Device Activation")
 
-				panel := sneatnav.NewPanel(tui, sneatnav.WithBox(flex, flex.Box))
+				panel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(flex, flex.Box))
 				tui.SetPanels(nil, panel)
 
 				// Update polling message
@@ -250,7 +251,7 @@ func showRepoSelection(tui *sneatnav.TUI, client *github.Client, repos []*github
 		tree.SetCurrentNode(root.GetChildren()[0])
 	}
 
-	panel := sneatnav.NewPanel(tui, sneatnav.WithBox(tree, tree.Box))
+	panel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(tree, tree.Box))
 	tui.SetPanels(nil, panel)
 }
 
@@ -283,7 +284,7 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 		AddItem(progressView, 0, 1, false).
 		AddItem(cancelButton, 1, 0, true)
 
-	panel := sneatnav.NewPanel(tui, sneatnav.WithBox(layout, layout.Box))
+	panel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(layout, layout.Box))
 	tui.SetPanels(nil, panel)
 
 	steps := []string{

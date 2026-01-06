@@ -194,7 +194,7 @@ func goTable(tui *sneatnav.TUI, collectionCtx dtviewers.CollectionContext) {
 
 	rsUI := newRecordsetUI(tui, collectionCtx)
 
-	content := sneatnav.NewPanel(tui, sneatnav.WithBoxWithoutPadding(rsUI, rsUI.Box))
+	content := sneatnav.NewPanel(tui, sneatv.WithBordersWithoutPadding(rsUI, rsUI.Box))
 
 	tui.SetPanels(menu, content)
 }

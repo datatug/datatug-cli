@@ -34,7 +34,7 @@ func GoCloudPlaceholderHome(cContext *CloudContext, viewerID dtviewers.ViewerID,
 		}
 	})
 
-	content := sneatnav.NewPanel(cContext.TUI, sneatnav.WithBox(textView, textView.Box))
+	content := sneatnav.NewPanel(cContext.TUI, sneatv.WithDefaultBorders(textView, textView.Box))
 	cContext.TUI.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
 
 	return nil

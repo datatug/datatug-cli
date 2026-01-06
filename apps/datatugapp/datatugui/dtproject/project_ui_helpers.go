@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -13,7 +14,7 @@ func newListPanel[T any](tui *sneatnav.TUI, title string, items []T, getIDTitle 
 		textView := tview.NewTextView()
 		textView.SetText(err.Error())
 		textView.SetTextColor(tcell.ColorRed)
-		return sneatnav.NewPanel(tui, sneatnav.WithBox(textView, textView.Box))
+		return sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(textView, textView.Box))
 	}
 
 	list := tview.NewList()
@@ -27,5 +28,5 @@ func newListPanel[T any](tui *sneatnav.TUI, title string, items []T, getIDTitle 
 		list.AddItem(itemID, itemTitle, rune(itemID[0]), nil)
 	}
 
-	return sneatnav.NewPanel(tui, sneatnav.WithBox(list, list.Box))
+	return sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(list, list.Box))
 }

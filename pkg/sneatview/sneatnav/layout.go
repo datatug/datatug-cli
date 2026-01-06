@@ -56,6 +56,14 @@ func (lo *layout) SetMenu(menu tview.Primitive) {
 	lo.menu.Primitive = menu
 }
 
-func (lo *layout) SetContent(content tview.Primitive) {
-	lo.content.Primitive = content
+func (lo *layout) SetContent(content ...tview.Primitive) {
+	if len(content) == 1 {
+		lo.content.Primitive = content[0]
+		return
+	}
+	flex := tview.NewFlex().SetDirection(tview.FlexRow)
+	for _, c := range content {
+		flex.AddItem(c, 0, 1, false)
+	}
+	lo.content.Primitive = flex
 }

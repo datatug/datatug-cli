@@ -13,18 +13,18 @@ import (
 //		cells: cells,
 //	}
 //	for _, cell := range cells {
-//		box := cell.GetBox()
-//		box.SetFocusFunc(func() {
-//			box.SetBorderAttributes(tcell.AttrNone)
+//		Box := cell.GetBox()
+//		Box.SetFocusFunc(func() {
+//			Box.SetBorderAttributes(tcell.AttrNone)
 //			for i, c := range cells {
-//				if c.GetBox() == box {
+//				if c.GetBox() == Box {
 //					row.activeCell = i
 //					break
 //				}
 //			}
 //		})
-//		box.SetBlurFunc(func() {
-//			box.SetBorderAttributes(tcell.AttrDim)
+//		Box.SetBlurFunc(func() {
+//			Box.SetBorderAttributes(tcell.AttrDim)
 //		})
 //	}
 //	row.setKeyboardCapture()

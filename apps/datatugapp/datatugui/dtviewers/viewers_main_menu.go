@@ -51,5 +51,5 @@ func NewCloudsMenu(tui *sneatnav.TUI, active ViewerID) (menu sneatnav.Panel) {
 		return event
 	})
 
-	return sneatnav.NewPanel(tui, sneatnav.WithBox(list, list.Box))
+	return sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(list, list.Box))
 }

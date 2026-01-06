@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
@@ -73,14 +74,27 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	ctx := context.Background()
 
 	// Create 3 separate trees
-	localTree := tview.NewTreeView()
-	cloudTree := tview.NewTreeView()
+	localTree := tview.NewTreeView().SetTopLevel(1)
+	localTree.SetBorder(true).SetTitle("Local Projects")
+	localTree.SetBorderPadding(1, 1, 2, 2)
 
-	// Create a layout to hold both trees horizontally
+	cloudTree := tview.NewTreeView().SetTopLevel(1)
+	cloudTree.SetBorder(true).SetTitle("Cloud Projects")
+	cloudTree.SetBorderPadding(1, 1, 2, 2)
+
+	//localTree.SetBorderPadding(1, 1, 4, 1)
+	//cloudTree.SetBorderPadding(1, 1, 1, 2)
+
 	layout := tview.NewFlex().SetDirection(tview.FlexColumn)
 
+	layout.SetFocusFunc(func() {
+		tui.App.SetFocus(localTree)
+	})
+
+	// Create a layout to hold both trees horizontally
+
 	panel := &projectsPanel{
-		PanelBase: sneatnav.NewPanelBase(tui, sneatnav.WithBox(layout, layout.Box)),
+		PanelBase: sneatnav.NewPanelBase(tui, sneatv.WithBoxWithoutBorder(layout, layout.Box)),
 		tui:       tui,
 		localTree: localTree,
 		cloudTree: cloudTree,
@@ -92,7 +106,13 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		layout.AddItem(tree, 0, 1, false)
 	}
 
-	sneatv.SetPanelTitle(panel.GetBox(), "Projects")
+	//box := layout.Box
+	//box.SetBorder(false)
+	//box.SetBorderPadding(0, 0, 5, 0)
+	//box.SetTitle("Projects")
+
+	//sneatv.SetPanelTitle(panel.GetBox(), "Projects")
+	//sneatv.DefaultBorderWithoutPadding(panel.GetBox())
 
 	settings, err := dtconfig.GetSettings()
 	if err != nil {
@@ -122,6 +142,20 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		return panel.projects[i].ID < panel.projects[j].ID
 	})
 
+	// === DATATUG CLOUD PROJECTS TREE ===
+	cloudsRoot := tview.NewTreeNode("Cloud projects").
+		SetColor(tcell.ColorLightBlue).
+		SetSelectable(false)
+	cloudTree.SetRoot(cloudsRoot)
+
+	githubNode := tview.NewTreeNode("🐙 GitHub.com").SetColor(tcell.ColorLightBlue)
+	githubNode.SetSelectable(false)
+	cloudsRoot.AddChild(githubNode)
+
+	//datatugCloud := tview.NewTreeNode("DataTug Cloud")
+	//datatugCloud.SetColor(tcell.ColorLightBlue).SetSelectable(false)
+	//cloudsRoot.AddChild(datatugCloud)
+
 	// === LOCAL PROJECTS TREE ===
 	localRoot := tview.NewTreeNode("Local projects").
 		SetColor(tcell.ColorLightBlue).
@@ -136,15 +170,54 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		return event
 	})
 
+	const folder = "📁 "
+
 	// Add existing projects under Local projects
 	for _, p := range panel.projects {
+		if strings.HasPrefix(p.ID, "github.com/") {
+			ids := strings.Split(strings.TrimPrefix(p.ID, "github.com/"), "/")
+			if len(ids) < 2 {
+				continue
+			}
+			owner, repo := ids[0], ids[1]
+			var ownerNode *tview.TreeNode
+			for _, node := range githubNode.GetChildren() {
+				if node.GetText() == folder+owner {
+					ownerNode = node
+					break
+				}
+			}
+			if ownerNode == nil {
+				ownerNode = tview.NewTreeNode(folder + owner).SetColor(tcell.ColorLightBlue).SetSelectable(false)
+				githubNode.AddChild(ownerNode)
+			}
+			repoNode := tview.NewTreeNode("📦 " + repo + " ")
+			ownerNode.AddChild(repoNode)
+			repoNode.SetReference(p)
+			continue
+		}
 		//title := " 📁 " + GetProjectTitle(p) + " "
 		title := GetProjectTitle(p)
-		projectNode := tview.NewTreeNode(" " + title + " ").
-			SetReference(p).
-			SetColor(tcell.ColorWhite)
+
+		projectNode := tview.NewTreeNode(" " + title + " ").SetReference(p)
 		localRoot.AddChild(projectNode)
 	}
+
+	addToGithubRepoNode := tview.NewTreeNode(" Add DataTug project to existing GitHub Repo ").
+		SetReference("local-create").
+		SetColor(sneatcolors.TreeNodeLink).
+		SetSelectedFunc(func() {
+			ShowAddToGitHubRepo(tui)
+		})
+	githubNode.AddChild(addToGithubRepoNode)
+
+	selectGithubRepoNode := tview.NewTreeNode(" Add GitHub repo with DataTug project ").
+		SetReference("local-create").
+		SetColor(sneatcolors.TreeNodeLink).
+		SetSelectedFunc(func() {
+			ShowAddToGitHubRepo(tui)
+		})
+	githubNode.AddChild(selectGithubRepoNode)
 
 	// Add a demo project first
 	localDemoProjectConfig := newLocalDemoProjectConfig()
@@ -187,46 +260,24 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	localRoot.SetExpanded(true)
 	localTree.SetCurrentNode(localRoot.GetChildren()[0])
 
-	// === DATATUG CLOUD PROJECTS TREE ===
-	cloudsRoot := tview.NewTreeNode("Cloud projects").
-		SetColor(tcell.ColorLightBlue).
-		SetSelectable(false)
-	cloudTree.SetRoot(cloudsRoot)
+	//// DataTug demo project
+	//datatugDemoProject := &dtconfig.ProjectRef{
+	//	ID:  datatugDemoProjectRepoID,
+	//	Url: "cloud",
+	//}
+	//cloudDemoProjectNode := tview.NewTreeNode(" DataTug demo project ").
+	//	SetReference(datatugDemoProject) //.
+	////SetColor(tcell.ColorWhite)
+	//datatugCloud.AddChild(cloudDemoProjectNode)
+	//
+	//// Login to view action (moved to end)
+	//loginNode := tview.NewTreeNode(" Login to view personal or work projects ").
+	//	SetReference("login").
+	//	SetColor(sneatcolors.TreeNodeLink)
+	//datatugCloud.AddChild(loginNode)
+	//
+	//datatugCloud.SetExpanded(true)
 
-	githubNode := tview.NewTreeNode("GitHub")
-	githubNode.SetSelectable(false)
-	cloudsRoot.AddChild(githubNode)
-
-	addToGithubRepoNode := tview.NewTreeNode(" Add to existing GitHub Repo ").
-		SetReference("local-create").
-		SetColor(sneatcolors.TreeNodeLink).
-		SetSelectedFunc(func() {
-			ShowAddToGitHubRepo(tui)
-		})
-
-	githubNode.AddChild(addToGithubRepoNode)
-
-	datatugCloud := tview.NewTreeNode("Datatug Cloud")
-	datatugCloud.SetColor(tcell.ColorLightBlue).SetSelectable(false)
-	cloudsRoot.AddChild(datatugCloud)
-
-	// DataTug demo project
-	datatugDemoProject := &dtconfig.ProjectRef{
-		ID:  datatugDemoProjectRepoID,
-		Url: "cloud",
-	}
-	cloudDemoProjectNode := tview.NewTreeNode(" DataTug demo project ").
-		SetReference(datatugDemoProject) //.
-	//SetColor(tcell.ColorWhite)
-	datatugCloud.AddChild(cloudDemoProjectNode)
-
-	// Login to view action (moved to end)
-	loginNode := tview.NewTreeNode(" Login to view personal or work projects ").
-		SetReference("login").
-		SetColor(sneatcolors.TreeNodeLink)
-	datatugCloud.AddChild(loginNode)
-
-	datatugCloud.SetExpanded(true)
 	cloudsRoot.SetExpanded(true)
 
 	// Create a selection handler function
@@ -263,10 +314,13 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		}
 	}
 
+	for _, tree := range panel.trees {
+		tree.SetSelectedFunc(selectionHandler)
+	}
+
 	// Function to update visual styling based on active tree
 	updateTreeStyling := func() {
 		for i, tree := range panel.trees {
-			tree.SetSelectedFunc(selectionHandler)
 			// Remove titles as requested - no SetTitle calls
 
 			// Use available TreeView styling methods for highlighting

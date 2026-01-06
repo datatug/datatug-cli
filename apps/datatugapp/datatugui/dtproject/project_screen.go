@@ -14,7 +14,7 @@ func NewProjectPanel(tui *sneatnav.TUI, projectConfig *dtconfig.ProjectRef) snea
 	content := tview.NewTextView().SetTextAlign(tview.AlignCenter)
 	projectTitle := GetProjectTitle(projectConfig)
 	sneatv.SetPanelTitle(content.Box, fmt.Sprintf("Project: %s", projectTitle))
-	return sneatnav.NewPanel(tui, sneatnav.WithBox(content, content.Box))
+	return sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(content, content.Box))
 }
 
 func GoDataTugProjectScreen(projectCtx ProjectContext) {

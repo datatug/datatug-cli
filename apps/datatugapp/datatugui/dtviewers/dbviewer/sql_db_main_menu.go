@@ -3,6 +3,7 @@ package dbviewer
 import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -53,5 +54,5 @@ func newSqlDbMenu(tui *sneatnav.TUI, selectedScreen SqlDbRootScreen, dbContext d
 		}
 	})
 
-	return sneatnav.NewPanel(tui, sneatnav.WithBox(list, list.Box))
+	return sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(list, list.Box))
 }

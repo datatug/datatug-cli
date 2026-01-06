@@ -82,7 +82,7 @@ func showCollections(tui *sneatnav.TUI, focusTo sneatnav.FocusTo, dbContext dtvi
 		referrers.SetCollectionContext(ctx, collectionCtx)
 	})
 
-	content := sneatnav.NewPanel(tui, sneatnav.WithBoxWithoutBorder(flex, flex.Box))
+	content := sneatnav.NewPanel(tui, sneatv.WithBoxWithoutBorder(flex, flex.Box))
 
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
 

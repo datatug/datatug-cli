@@ -33,7 +33,7 @@ func GoDbViewerSelector(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 		WithDescription: false,
 	})
 
-	content := sneatnav.NewPanel(tui, sneatnav.WithBox(dbViewerMenu, dbViewerMenu.Box))
+	content := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(dbViewerMenu, dbViewerMenu.Box))
 	tui.SetPanels(mainMenu, content, sneatnav.WithFocusTo(focusTo))
 	dtlog.ScreenOpened("db_viewer", "DB Viewer")
 	return nil

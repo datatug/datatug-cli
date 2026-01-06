@@ -10,33 +10,42 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 )
 
-func getTableSchema(t *testing.T, scanner Scanner, catalogID, schemaID string, tableKey datatug.DBCollectionKey) (*datatug.CollectionInfo, *datatug.DbSchema) {
+func getTableSchema(t *testing.T, scanner Scanner, catalogID, schemaID string, tableKey datatug.DBCollectionKey) (table *datatug.CollectionInfo, schema *datatug.DbSchema) {
 	catalog, err := scanner.ScanCatalog(context.Background(), catalogID)
 	if err != nil {
-		t.Fatalf("ScanCatalog failed: %v", err)
+		t.Fatal(err)
+		return
+	}
+	if catalog == nil {
+		t.Fatal("catalog not found")
+		return
 	}
 
 	if catalog.ID != catalogID {
-		t.Errorf("expected catalog GetID %v, got %v", catalogID, catalog.ID)
+		t.Fatalf("expected catalog GetID %s, got %s", catalogID, catalog.ID)
+		return
 	}
 
-	var schema *datatug.DbSchema
-	if catalog.Schemas != nil {
-		schema = catalog.Schemas.GetByID(schemaID)
+	if catalog.Schemas == nil {
+		t.Fatal("catalog.Schemas == nil")
+		return
 	}
 
-	if schema == nil {
-		t.Fatalf("schema %v not found", schemaID)
+	if schema = catalog.Schemas.GetByID(schemaID); schema == nil {
+		t.Fatal("schema not found by ID=" + schemaID)
+		return
 	}
+
 	if schema.Tables == nil {
-		t.Fatalf("schema %v tables is nil", schemaID)
+		t.Fatalf("schema %s tables is nil", schemaID)
+		return
 	}
 
-	table := datatug.Tables(schema.Tables).GetByKey(tableKey)
-	if table == nil {
+	if table = datatug.Tables(schema.Tables).GetByKey(tableKey); table == nil {
 		t.Fatalf("table %v not found", tableKey)
 	}
-	return table, schema
+
+	return
 }
 
 func TestScanCatalog_Bulk(t *testing.T) {

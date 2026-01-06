@@ -6,7 +6,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/mitchellh/go-homedir"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"gopkg.in/yaml.v3"
 )
 
@@ -71,16 +71,10 @@ func (v ProjectRef) Validate() error {
 	return nil
 }
 
-const ConfigFileName = ".datatug.yaml"
-
-var homedirDir = homedir.Dir
+const fileName = ".datatug.yaml"
 
 func GetConfigFilePath() string {
-	configFilePath, err := homedirDir()
-	if err != nil {
-		panic(fmt.Errorf("failed to get user's home dir: %w", err))
-	}
-	return path.Join(configFilePath, ConfigFileName)
+	return path.Join(datatug.Dir(), fileName)
 }
 
 var standardOsOpen = func(name string) (io.ReadCloser, error) {

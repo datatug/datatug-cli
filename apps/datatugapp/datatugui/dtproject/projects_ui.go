@@ -12,6 +12,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
+	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/datatug/datatug-cli/pkg/sneatcolors"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
@@ -31,6 +32,7 @@ func GoDataTugProjectsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error 
 	}
 	menu := datatugui.NewDataTugMainMenu(tui, datatugui.RootScreenProjects)
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
+	dtstate.SaveCurrentScreePath("projects")
 	dtlog.ScreenOpened("projects", "Projects")
 	return nil
 }
@@ -130,20 +132,17 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		SetSelectable(false)
 	tree.SetRoot(rootNode)
 
-	githubNode := tview.NewTreeNode("🐙 GitHub.com").SetColor(tcell.ColorLightBlue)
+	githubNode := tview.NewTreeNode("🐙 GitHub.com").SetColor(tcell.ColorLightYellow)
 	githubNode.SetSelectable(false)
 
 	//datatugCloud := tview.NewTreeNode("DataTug Cloud")
 	//datatugCloud.SetColor(tcell.ColorLightBlue).SetSelectable(false)
 	//rootNode.AddChild(datatugCloud)
 
-	rootNode.AddChild(tview.NewTreeNode("").SetSelectable(false))
-
 	// === LOCAL PROJECTS TREE ===
 	localProjectsNode := tview.NewTreeNode("🖥️ Local projects").
 		SetColor(tcell.ColorLightYellow).
 		SetSelectable(false)
-	rootNode.AddChild(localProjectsNode)
 	tree.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyEnter:
@@ -362,15 +361,19 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		}
 	})
 
-	rootNode.AddChild(getRecentNode())
+	addRecent(rootNode)
+	rootNode.AddChild(tview.NewTreeNode("").SetSelectable(false))
 	rootNode.AddChild(localProjectsNode)
 	rootNode.AddChild(githubNode)
 
 	return panel, nil
 }
 
-func getRecentNode() (recentNode *tview.TreeNode) {
-	recentNode = tview.NewTreeNode("🕘 Recent projects")
+func addRecent(rootNode *tview.TreeNode) {
+	recentNode := tview.NewTreeNode("🕘 Recent projects")
+	recentNode.SetSelectable(false)
+	recentNode.AddChild(tview.NewTreeNode(" No recent projects").SetSelectable(false).SetColor(tcell.ColorGray))
+	rootNode.AddChild(recentNode)
 	return
 }
 

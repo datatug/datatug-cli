@@ -374,7 +374,6 @@ func addRecent(rootNode *tview.TreeNode) {
 	recentNode.SetSelectable(false)
 	recentNode.AddChild(tview.NewTreeNode(" No recent projects").SetSelectable(false).SetColor(tcell.ColorGray))
 	rootNode.AddChild(recentNode)
-	return
 }
 
 func (p *projectsPanel) Draw(screen tcell.Screen) {

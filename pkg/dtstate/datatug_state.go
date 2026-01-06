@@ -48,7 +48,6 @@ func SaveCurrentScreePath(currentScreenPath string) {
 			logus.Errorf(ctx, "failed to save currentScreenPath to state file: %v", err)
 		}
 	}()
-	return
 }
 
 func saveSate(state *DatatugState) (err error) {

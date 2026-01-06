@@ -73,8 +73,10 @@ func (v ProjectRef) Validate() error {
 
 const fileName = ".datatug.yaml"
 
+var datatugDir = datatug.Dir
+
 func GetConfigFilePath() string {
-	return path.Join(datatug.Dir(), fileName)
+	return path.Join(datatugDir(), fileName)
 }
 
 var standardOsOpen = func(name string) (io.ReadCloser, error) {

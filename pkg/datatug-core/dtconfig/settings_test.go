@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mitchellh/go-homedir"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
 )
@@ -118,10 +118,10 @@ func TestGetConfigFilePath(t *testing.T) {
 	})
 	t.Run("panic", func(t *testing.T) {
 		defer func() {
-			homedirDir = homedir.Dir
+			datatugDir = datatug.Dir
 		}()
-		homedirDir = func() (string, error) {
-			return "", errors.New("test error")
+		datatugDir = func() string {
+			panic("test error")
 		}
 		defer func() {
 			if r := recover(); r == nil {

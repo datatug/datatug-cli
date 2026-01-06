@@ -11,6 +11,7 @@ func TestNewDatatugTUI(t *testing.T) {
 	tui := NewDatatugTUI()
 	if tui == nil {
 		t.Fatal("expected tui to be not nil")
+		return
 	}
 	if tui.App == nil {
 		t.Error("expected tui.App to be not nil")

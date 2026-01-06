@@ -50,7 +50,7 @@ func GetProjectTitle(p *dtconfig.ProjectRef) (projectTitle string) {
 		projectTitle = p.ID
 	}
 	if projectTitle == "" {
-		projectTitle = p.Url
+		projectTitle = p.Origin
 	}
 	return projectTitle
 }

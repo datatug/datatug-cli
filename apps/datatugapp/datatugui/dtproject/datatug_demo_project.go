@@ -21,10 +21,10 @@ const datatugDemoProjectDir = "~/datatug/" + datatugDemoProjectFullID
 
 func newLocalDemoProjectConfig() *dtconfig.ProjectRef {
 	return &dtconfig.ProjectRef{
-		ID:    datatugDemoProjectFullID,
-		Path:  datatugDemoProjectDir,
-		Url:   datatugDemoProjectGitHubURL,
-		Title: datatugDemoProjectTitle,
+		ID:     datatugDemoProjectFullID,
+		Path:   datatugDemoProjectDir,
+		Origin: datatugDemoProjectFullID,
+		Title:  datatugDemoProjectTitle,
 	}
 }
 
@@ -38,9 +38,9 @@ func openDatatugDemoProject(tui *sneatnav.TUI) {
 	}
 	openDemoProject := func() {
 		projRef := dtconfig.ProjectRef{
-			ID:   datatugDemoProjectFullID,
-			Url:  datatugDemoProjectGitHubURL,
-			Path: projectDir,
+			ID:     datatugDemoProjectFullID,
+			Origin: datatugDemoProjectFullID,
+			Path:   projectDir,
 		}
 		loader := filestore.NewProjectStore(projRef.ID, projRef.Path)
 		projectCtx := NewProjectContext(tui, loader, projRef)

@@ -33,8 +33,8 @@ func projectsCommandAction(_ context.Context, _ *cli.Command) error {
 			switch field {
 			case "id":
 				line = append(line, project.ID)
-			case "url":
-				line = append(line, project.Url)
+			case "origin":
+				line = append(line, project.Origin)
 			case "title":
 				line = append(line, project.Title)
 			default:
@@ -67,7 +67,7 @@ type projectsCommand struct {
 func getProjPathsByID(config dtconfig.Settings) (pathsByID map[string]string) {
 	pathsByID = make(map[string]string, len(config.Projects))
 	for _, p := range config.Projects {
-		pathsByID[p.ID] = p.Url
+		pathsByID[p.ID] = p.Origin
 	}
 	return
 }

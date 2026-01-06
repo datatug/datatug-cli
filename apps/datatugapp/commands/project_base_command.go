@@ -52,7 +52,7 @@ func (v *projectBaseCommand) initProjectCommand(o projectCommandOptions) error {
 		if project == nil {
 			return ErrUnknownProjectName
 		}
-		v.ProjectDir = project.Url
+		v.ProjectDir = project.Origin
 	}
 
 	pathsByID := getProjPathsByID(config)

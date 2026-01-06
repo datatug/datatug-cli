@@ -3,6 +3,7 @@ package dtapiservice
 import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
+	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
@@ -14,15 +15,15 @@ func RegisterModule() {
 		datatugui.MainMenuItem{
 			Text:     "API Monitor",
 			Shortcut: 'w',
-			Action:   goApiServiceMonitor,
+			Action:   GoApiServiceMonitor,
 		})
 }
 
-func goApiServiceMonitor(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
+func GoApiServiceMonitor(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	breadcrumbs := tui.Header.Breadcrumbs()
 	breadcrumbs.Clear()
 	breadcrumbs.Push(sneatv.NewBreadcrumb("API Monitor", func() error {
-		return goApiServiceMonitor(tui, sneatnav.FocusToContent)
+		return GoApiServiceMonitor(tui, sneatnav.FocusToContent)
 	}))
 
 	menu := datatugui.NewDataTugMainMenu(tui, datatugui.RootScreenWebUI)
@@ -47,5 +48,6 @@ func goApiServiceMonitor(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
 	dtlog.ScreenOpened("api_monitor", "API Monitor")
+	dtstate.SaveCurrentScreePath("api_monitor")
 	return nil
 }

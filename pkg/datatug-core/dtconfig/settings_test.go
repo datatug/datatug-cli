@@ -203,19 +203,36 @@ func TestProjectConfig_Validate(t *testing.T) {
 		{
 			name:    "title_only",
 			p:       ProjectRef{Title: "Project 1"},
-			wantErr: "at least one of key fields must be set",
+			wantErr: "bad value for field [id]: missing required field",
 		},
 		{
-			name: "id_only",
-			p:    ProjectRef{ID: "project1"},
+			name:    "id_only",
+			p:       ProjectRef{ID: "project1"},
+			wantErr: "bad value for field [path|origin]: missing required field",
+		},
+		{
+			name: "id_and_path",
+			p: ProjectRef{
+				ID:    "project1",
+				Path:  "~/datatug/project1",
+				Title: "Project 1",
+			},
+		},
+		{
+			name: "id_and_origin",
+			p: ProjectRef{
+				ID:     "project1",
+				Origin: "github.com/datatug/project1",
+				Title:  "Project 1",
+			},
 		},
 		{
 			name: "full_success",
 			p: ProjectRef{
-				ID:    "project1",
-				Path:  "~/datatug/github.com/datatug/project1",
-				Url:   "http://github.com/datatug/project1",
-				Title: "Project 1",
+				ID:     "project1",
+				Path:   "~/datatug/github.com/datatug/project1",
+				Origin: "github.com/datatug/project1",
+				Title:  "Project 1",
 			},
 		},
 	}

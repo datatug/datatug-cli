@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"strings"
 
 	datatug "github.com/datatug/datatug-cli/apps/datatugapp"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtapiservice"
@@ -14,7 +15,9 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudui"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/dbviewer"
 	"github.com/datatug/datatug-cli/pkg/dtio"
+	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/strongo/logus"
 	"github.com/urfave/cli/v3"
 )
 
@@ -54,8 +57,31 @@ func (v *uiCommand) Execute(filePath string) error {
 		if err := openFile(filePath, tui); err != nil {
 			panic(err)
 		}
-	} else if err := dtproject.GoDataTugProjectsScreen(tui, sneatnav.FocusToMenu); err != nil {
-		panic(err)
+	}
+
+	state, err := dtstate.GetDatatugState()
+	if err != nil {
+		ctx := context.Background()
+		logus.Errorf(ctx, "Failed to get DataTug state: %v", err)
+		err = nil
+	}
+
+	goScreen := func(f func(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error) {
+		if err = f(tui, sneatnav.FocusToMenu); err != nil {
+			panic(err)
+		}
+	}
+
+	currentScreenPath := strings.Split(state.CurrentScreenPath, "/")
+	switch currentScreenPath[0] {
+	case "viewers":
+		goScreen(dtviewers.GoViewersScreen)
+	case "settings":
+		goScreen(dtsettings.GoSettingsScreen)
+	case "api_monitor":
+		goScreen(dtapiservice.GoApiServiceMonitor)
+	default:
+		goScreen(dtproject.GoDataTugProjectsScreen)
 	}
 
 	return tui.App.Run()

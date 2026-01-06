@@ -43,7 +43,7 @@ func (v *addProjectCommand) Execute(_ []string) error {
 		if project.Path == v.ProjectDir { // Attempt to add the same project with same path
 			return nil // No problem, just do nothing.
 		}
-		return fmt.Errorf("project with name [%v] already added to settings with path: %v", projectID, project.Url)
+		return fmt.Errorf("project with id=%s already added to settings with path: %s", projectID, project.Path)
 	}
 	projectConfig := dtconfig.ProjectRef{ID: projectID, Path: v.ProjectDir}
 

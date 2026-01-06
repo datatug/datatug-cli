@@ -21,12 +21,30 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// showCreateProjectScreen shows a modal to create a new project
-func showCreateProjectScreen(tui *sneatnav.TUI) {
+// goCreateProjectScreen shows a modal to create a new project
+func goCreateProjectScreen(tui *sneatnav.TUI) {
+	/*
+		The modal should be defined in separate file
+		The modal initially consist of 2 fields:
+		Name: string (max 50 chars)
+		Create at: (radio group: local, GitHub)
+		If GitHub is choosen an addiional "Repository title" field shown
+		If Local is choose an additional "Location" text field shown with default value of "~/datatug"
+		At bottom of the modal 2 buttons: "Create" and "Cancel"
+		Cancel closes dialog and nothing happens
+		If "Create" button selected:
+		   1) creates a `datatug.Project` with provided title
+		   2) If local chosen safes to files store,
+		      otherwise create repo using GitHub API `client.Repositories.Create`,
+			  clones it to the "~/datatug/github.com/{owner}/{repo}" directory.
+		      See example at `openDatatugDemoProject` and refactor code to reuse logic.
+		   3) Once project created and if a Github one has local copy open the project (see how in `openDatatugDemoProject`)
+	*/
+
 	b := projectsBreadcrumbs(tui)
 	b.Push(sneatv.NewBreadcrumb("New project", nil))
 
-	var name, location string
+	var title, location string
 	var githubOwner string
 	var visibility = "Public"
 	createAt := "GitHub"
@@ -85,7 +103,7 @@ func showCreateProjectScreen(tui *sneatnav.TUI) {
 		if region == "owner" {
 			url = fmt.Sprintf("https://github.com/%s", githubOwner)
 		} else if region == "repo" && repoExists {
-			url = fmt.Sprintf("https://github.com/%s/%s", githubOwner, normalizeRepoName(name))
+			url = fmt.Sprintf("https://github.com/%s/%s", githubOwner, normalizeRepoName(title))
 		}
 		if url != "" {
 			_ = browser.OpenURL(url)
@@ -98,7 +116,7 @@ func showCreateProjectScreen(tui *sneatnav.TUI) {
 
 	updateGithubPath = func() {
 		if githubOwner != "" {
-			repoName := normalizeRepoName(name)
+			repoName := normalizeRepoName(title)
 			go func() {
 				token, _ := ghauth.GetToken()
 				if token != nil {
@@ -131,8 +149,8 @@ func showCreateProjectScreen(tui *sneatnav.TUI) {
 
 	refreshForm = func() {
 		form.Clear(true)
-		form.AddInputField("Name", name, 50, nil, func(text string) {
-			name = text
+		form.AddInputField("Title", title, 50, nil, func(text string) {
+			title = text
 			if createAt != "Local" {
 				updateGithubPath()
 			}
@@ -158,7 +176,7 @@ func showCreateProjectScreen(tui *sneatnav.TUI) {
 				})
 			} else {
 				if githubOwner == "" {
-					// Fetch owner name
+					// Fetch owner title
 					go func() {
 						client := github.NewClient(oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token)))
 						user, _, err := client.Users.Get(context.Background(), "")
@@ -176,13 +194,13 @@ func showCreateProjectScreen(tui *sneatnav.TUI) {
 		}
 
 		form.AddButton("Create", func() {
-			if strings.TrimSpace(name) == "" {
-				sneatnav.ShowErrorModal(tui, fmt.Errorf("project name is required"))
+			if strings.TrimSpace(title) == "" {
+				sneatnav.ShowErrorModal(tui, fmt.Errorf("project title is required"))
 				return
 			}
-			repoName := name
+			repoName := title
 			if createAt == "GitHub" {
-				repoName = normalizeRepoName(name)
+				repoName = normalizeRepoName(title)
 			}
 			var projectVisibility datatug.ProjectVisibility
 			switch visibility {
@@ -192,7 +210,7 @@ func showCreateProjectScreen(tui *sneatnav.TUI) {
 				projectVisibility = datatug.PublicProject
 			default:
 			}
-			handleCreateProject(tui, name, createAt, location, repoName, projectVisibility)
+			handleCreateProject(tui, title, createAt, location, repoName, projectVisibility)
 		})
 		form.AddButton("Cancel", func() {
 			_ = GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)
@@ -233,7 +251,7 @@ func authenticateGitHub(tui *sneatnav.TUI, onSuccess func(owner string)) {
 
 			form := tview.NewForm().
 				AddButton("Cancel", func() {
-					showCreateProjectScreen(tui)
+					goCreateProjectScreen(tui)
 				})
 			form.SetButtonsAlign(tview.AlignCenter)
 
@@ -260,7 +278,7 @@ func authenticateGitHub(tui *sneatnav.TUI, onSuccess func(owner string)) {
 
 				tui.App.QueueUpdateDraw(func() {
 					onSuccess(user.GetLogin())
-					showCreateProjectScreen(tui)
+					goCreateProjectScreen(tui)
 				})
 			}()
 		})

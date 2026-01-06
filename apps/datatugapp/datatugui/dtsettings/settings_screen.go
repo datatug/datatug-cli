@@ -8,6 +8,7 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
+	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
@@ -20,15 +21,15 @@ func RegisterModule() {
 		datatugui.MainMenuItem{
 			Text:     "Settings",
 			Shortcut: 's',
-			Action:   goSettingsScreen,
+			Action:   GoSettingsScreen,
 		})
 }
 
-func goSettingsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
+func GoSettingsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	breadcrumbs := tui.Header.Breadcrumbs()
 	breadcrumbs.Clear()
 	breadcrumbs.Push(sneatv.NewBreadcrumb("Settings", func() error {
-		return goSettingsScreen(tui, sneatnav.FocusToContent)
+		return GoSettingsScreen(tui, sneatnav.FocusToContent)
 	}))
 
 	textView := tview.NewTextView()
@@ -88,6 +89,7 @@ func goSettingsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 		tui.App.SetFocus(content)
 	}
 	dtlog.ScreenOpened("settings", "Settings")
+	dtstate.SaveCurrentScreePath("settings")
 	return nil
 }
 

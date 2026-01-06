@@ -3,13 +3,14 @@ package dtviewers
 import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
+	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
-func goViewersScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
+func GoViewersScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	breadcrumbs := tui.Header.Breadcrumbs()
 	breadcrumbs.Clear()
 	breadcrumbs.Push(sneatv.NewBreadcrumb("Viewers", nil))
@@ -19,6 +20,7 @@ func goViewersScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
 	dtlog.ScreenOpened("viewers", "Viewers")
+	dtstate.SaveCurrentScreePath("viewers")
 	return nil
 }
 

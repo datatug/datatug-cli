@@ -8,7 +8,7 @@ import (
 
 var homedirDir = homedir.Dir
 
-const dir = "DataTug"
+const dir = "datatug"
 
 func Dir() string {
 	homeDir, err := homedirDir()

@@ -15,6 +15,6 @@ func RegisterModule() {
 		datatugui.MainMenuItem{
 			Text:     "Viewers",
 			Shortcut: 'v',
-			Action:   goViewersScreen,
+			Action:   GoViewersScreen,
 		})
 }

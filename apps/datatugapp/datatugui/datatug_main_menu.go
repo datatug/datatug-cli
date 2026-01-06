@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
@@ -47,6 +48,7 @@ func NewDataTugMainMenu(tui *sneatnav.TUI, active RootScreen) (menu sneatnav.Pan
 	}
 
 	list.AddItem("Exit", "", 'q', func() {
+		dtstate.SaveCurrentScreePathSync("")
 		tui.App.Stop()
 	})
 

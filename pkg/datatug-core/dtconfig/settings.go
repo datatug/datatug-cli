@@ -52,25 +52,6 @@ type StoreType string
 
 //const FileStoreUrlPrefix = "file:"
 
-// ProjectRef hold project configuration, specifically path to project directory
-type ProjectRef struct {
-	ID    string `yaml:"id"`
-	Path  string `yaml:"path,omitempty"` // Local path
-	Url   string `yaml:"url,omitempty"`
-	Title string `yaml:"title,omitempty"`
-}
-
-func (v ProjectRef) Validate() error {
-	var empty ProjectRef
-	if v == empty {
-		return fmt.Errorf("is empty")
-	}
-	if v.ID == "" && v.Path == "" && v.Url == "" {
-		return fmt.Errorf("at least one of key fields must be set: id, path, url")
-	}
-	return nil
-}
-
 const fileName = ".datatug.yaml"
 
 var datatugDir = datatug.Dir

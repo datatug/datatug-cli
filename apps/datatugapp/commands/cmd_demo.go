@@ -273,12 +273,12 @@ func (c demoCommand) addDemoProjectToDatatugConfig(datatugUserDir, demoProjectPa
 		}
 	}
 	demoProjConfig := settings.GetProjectConfig(demoProjectAlias)
-	if demoProjConfig != nil && demoProjConfig.Url != demoProjectPath {
+	if demoProjConfig != nil && demoProjConfig.Origin != demoProjectPath {
 		return fmt.Errorf("demo project expected to be located at %v but is pointing to unexpected path: %v",
-			demoProjectPath, demoProjConfig.Url)
+			demoProjectPath, demoProjConfig.Origin)
 	}
 	if demoProjConfig != nil {
-		demoProjConfig.Url = demoProjectPath
+		demoProjConfig.Origin = demoProjectPath
 		settings.Projects = append(settings.Projects, demoProjConfig)
 		if err = saveConfig(settings); err != nil {
 			return fmt.Errorf("failed to save settings: %w", err)

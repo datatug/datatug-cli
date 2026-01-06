@@ -143,14 +143,14 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	localProjectsNode := tview.NewTreeNode("🖥️ Local projects").
 		SetColor(tcell.ColorLightYellow).
 		SetSelectable(false)
-	tree.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyEnter:
-			tree.GetSelectedFunc()(tree.GetCurrentNode())
-			return nil
-		}
-		return event
-	})
+	//tree.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+	//	switch event.Key() {
+	//	case tcell.KeyEnter:
+	//		tree.GetSelectedFunc()(tree.GetCurrentNode())
+	//		return nil
+	//	}
+	//	return event
+	//})
 
 	const folderEmoji = "📁 "
 	const repoEmoji = "📦 "
@@ -215,30 +215,14 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		SetColor(sneatcolors.TreeNodeLink)
 	localProjectsNode.AddChild(localAddNode)
 
-	localCreateNode := tview.NewTreeNode(" Create new ").
+	createNewLocalProjectNode := tview.NewTreeNode(" Create new local project ").
 		SetReference("local-create").
 		SetColor(sneatcolors.TreeNodeLink).
 		SetSelectedFunc(func() {
-			/* TODO: Open modal and ask for project name
-			The modal should be defined in separate file
-			The modal initially consist of 2 fields:
-			Name: string (max 50 chars)
-			Create at: (radio group: local, GitHub)
-			If GitHub is choosen an addiional "Repository name" field shown
-			If Local is choose an additional "Location" text field shown with default value of "~/datatug"
-			At bottom of the modal 2 buttons: "Create" and "Cancel"
-			Cancel closes dialog and nothing happens
-			If "Create" button selected:
-			   1) creates a `datatug.Project` with provided name
-			   2) If local chosen safes to files store,
-			      otherwise create repo using GitHub API `client.Repositories.Create`,
-				  clones it to the "~/datatug/github.com/{owner}/{repo}" directory.
-			      See example at `openDatatugDemoProject` and refactor code to reuse logic.
-			   3) Once project created and if a Github one has local copy open the project (see how in `openDatatugDemoProject`)
-			*/
-			showCreateProjectScreen(tui)
+			goCreateProjectScreen(tui)
+			//panic("suxx")
 		})
-	localProjectsNode.AddChild(localCreateNode)
+	localProjectsNode.AddChild(createNewLocalProjectNode)
 
 	localProjectsNode.SetExpanded(true)
 	tree.SetCurrentNode(localProjectsNode.GetChildren()[0])
@@ -246,7 +230,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	//// DataTug demo project
 	//datatugDemoProject := &dtconfig.ProjectRef{
 	//	ID:  datatugDemoProjectRepoID,
-	//	Url: "cloud",
+	//	Origin: "cloud",
 	//}
 	//cloudDemoProjectNode := tview.NewTreeNode(" DataTug demo project ").
 	//	SetReference(datatugDemoProject) //.
@@ -341,21 +325,21 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 			return event
 		case tcell.KeyDown:
 			return event // Normal DOWN navigation within a tree
-		case tcell.KeyEnter:
-			// Handle ENTER key press on project nodes
-			//currentNode := tree.GetCurrentNode()
-			//if currentNode != nil {
-			//	reference := currentNode.GetReference()
-			//	if reference != nil {
-			//		switch ref := reference.(type) {
-			//		case *dtconfig.ProjectRef:
-			//			// Call goProjectDashboards when ENTER is pressed on a project node
-			//			GoDataTugProjectScreen(tui, ref)
-			//			return nil
-			//		}
-			//	}
-			//}
-			return event
+		//case tcell.KeyEnter:
+		//	//Handle ENTER key press on project nodes
+		//	currentNode := tree.GetCurrentNode()
+		//	if currentNode != nil {
+		//		reference := currentNode.GetReference()
+		//		if reference != nil {
+		//			switch ref := reference.(type) {
+		//			case *dtconfig.ProjectRef:
+		//				// Call goProjectDashboards when ENTER is pressed on a project node
+		//				GoDataTugProjectScreen(tui, ref)
+		//				return nil
+		//			}
+		//		}
+		//	}
+		//	return event
 		default:
 			return event
 		}
@@ -364,6 +348,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	addRecent(rootNode)
 	rootNode.AddChild(tview.NewTreeNode("").SetSelectable(false))
 	rootNode.AddChild(localProjectsNode)
+	rootNode.AddChild(tview.NewTreeNode("").SetSelectable(false))
 	rootNode.AddChild(githubNode)
 
 	return panel, nil

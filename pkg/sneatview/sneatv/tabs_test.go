@@ -7,6 +7,6 @@ import (
 )
 
 func TestNewTabs(t *testing.T) {
-	tabs := NewTabs()
+	tabs := NewTabs(nil, DefaultTabsStyle)
 	assert.NotNil(t, tabs)
 }

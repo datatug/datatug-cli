@@ -59,22 +59,24 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 
 	flex := tview.NewFlex().SetDirection(tview.FlexRow)
 
-	tabs := sneatv.NewTabs(sneatv.WithRadio(), sneatv.WithLabel("Save to: "))
-	tabs.AddTab(&sneatv.Tab{
-		ID:        "GitHub",
-		Title:     "GitHub",
-		Primitive: tview.NewTextView().SetText("GitHub content"),
-	})
-	tabs.AddTab(&sneatv.Tab{
-		ID:        "BitBucket",
-		Title:     "BitBucket",
-		Primitive: tview.NewTextView().SetText("BitBucket content"),
-	})
-	tabs.AddTab(&sneatv.Tab{
-		ID:        "local",
-		Title:     "Locally",
-		Primitive: tview.NewTextView().SetText("Local content"),
-	})
+	tabs := sneatv.NewTabs(tui.App, sneatv.RadioTabsStyle, sneatv.WithLabel("Save to: "))
+	tabs.AddTabs(
+		&sneatv.Tab{
+			ID:        "GitHub",
+			Title:     "GitHub",
+			Primitive: tview.NewTextView().SetText("GitHub content"),
+		},
+		&sneatv.Tab{
+			ID:        "BitBucket",
+			Title:     "BitBucket",
+			Primitive: tview.NewTextView().SetText("BitBucket content"),
+		},
+		&sneatv.Tab{
+			ID:        "local",
+			Title:     "Locally",
+			Primitive: tview.NewTextView().SetText("Local content"),
+		},
+	)
 
 	flex.AddItem(tabs, 3, 0, true)
 

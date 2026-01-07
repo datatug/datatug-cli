@@ -8,6 +8,20 @@ import (
 	"github.com/rivo/tview"
 )
 
+type TabStyles struct {
+	Foreground string
+	Background string
+}
+
+type TabsStyle struct {
+	Radio      bool
+	Underscore bool
+
+	ActiveFocused TabStyles
+	ActiveBlur    TabStyles
+	Inactive      TabStyles
+}
+
 // Tab represents a single tab.
 type Tab struct {
 	ID    string
@@ -19,9 +33,12 @@ type Tab struct {
 type Tabs struct {
 	*tview.Flex
 	tabsOptions
+	TabsStyle
 
 	textView *tview.TextView
 	pages    *tview.Pages
+
+	isFocused bool
 
 	tabs   []*Tab
 	active int
@@ -29,16 +46,9 @@ type Tabs struct {
 
 type tabsOptions struct {
 	label string
-	radio bool
 }
 
 type TabsOption func(*tabsOptions)
-
-func WithRadio() TabsOption {
-	return func(o *tabsOptions) {
-		o.radio = true
-	}
-}
 
 func WithLabel(label string) TabsOption {
 	return func(o *tabsOptions) {
@@ -46,13 +56,45 @@ func WithLabel(label string) TabsOption {
 	}
 }
 
+var DefaultTabsStyle = TabsStyle{
+	Radio:      false,
+	Underscore: true,
+	ActiveFocused: TabStyles{
+		Foreground: "black",
+		Background: "lightgray",
+	},
+	Inactive: TabStyles{
+		Foreground: "black",
+		Background: "lightgray",
+	},
+}
+
+var RadioTabsStyle = TabsStyle{
+	Radio:      true,
+	Underscore: false,
+	ActiveFocused: TabStyles{
+		Foreground: "white",
+		Background: "black",
+	},
+	ActiveBlur: TabStyles{
+		Foreground: "lightgray",
+		Background: "black",
+	},
+	Inactive: TabStyles{
+		Foreground: "lightgray",
+		Background: "black",
+	},
+}
+
 // NewTabs creates a new tab container.
-func NewTabs(options ...TabsOption) *Tabs {
+func NewTabs(app *tview.Application, style TabsStyle, options ...TabsOption) *Tabs {
 	pages := tview.NewPages()
 
 	t := &Tabs{
-		pages: pages,
-		Flex:  tview.NewFlex().SetDirection(tview.FlexRow),
+		active:    -1,
+		TabsStyle: style,
+		pages:     pages,
+		Flex:      tview.NewFlex().SetDirection(tview.FlexRow),
 		textView: tview.NewTextView().
 			SetDynamicColors(true).
 			SetRegions(true).
@@ -63,6 +105,21 @@ func NewTabs(options ...TabsOption) *Tabs {
 	}
 
 	t.textView.SetInputCapture(t.handleInput)
+
+	t.textView.SetFocusFunc(func() {
+		t.isFocused = true
+		//app.QueueUpdate(func() {
+		//	t.renderTabs()
+		//})
+		//app.QueueUpdate(func() {
+		//	t.renderTabs()
+		//})
+	})
+
+	t.textView.SetBlurFunc(func() {
+		t.isFocused = false
+		t.renderTabs()
+	})
 
 	t.textView.SetHighlightedFunc(func(added, removed, remaining []string) {
 		if len(added) == 0 {
@@ -86,24 +143,23 @@ func NewTabs(options ...TabsOption) *Tabs {
 	return t
 }
 
-// AddTab adds a new tab.
-func (t *Tabs) AddTab(tab *Tab) {
-	index := len(t.tabs)
-	t.tabs = append(t.tabs, tab)
+// AddTabs adds new tabs.
+func (t *Tabs) AddTabs(tabs ...*Tab) {
+	is1stTab := len(t.tabs) == 0
+	t.tabs = append(t.tabs, tabs...)
 
-	t.pages.AddPage(
-		tab.ID,
-		tab.Primitive,
-		true,
-		index == 0,
-	)
-
-	if index == 0 {
-		t.active = 0
-		t.textView.Highlight(tab.ID)
+	for _, tab := range tabs {
+		t.pages.AddPage(
+			tab.ID,
+			tab.Primitive,
+			true,
+			is1stTab,
+		)
 	}
 
-	t.renderTabs()
+	if is1stTab {
+		t.SwitchTo(0)
+	}
 }
 
 // SwitchTo switches to a tab by index.
@@ -115,9 +171,9 @@ func (t *Tabs) SwitchTo(index int) {
 		return
 	}
 	t.active = index
-	t.textView.Highlight("tab-" + strconv.Itoa(index))
 	t.pages.SwitchToPage(t.tabs[index].ID)
 	t.renderTabs()
+	t.textView.Highlight("tab-" + strconv.Itoa(index))
 }
 
 // renderTabs redraws the tab bar.
@@ -130,7 +186,7 @@ func (t *Tabs) renderTabs() {
 
 	for i, tab := range t.tabs {
 		var title string
-		if t.radio {
+		if t.Radio {
 			if i == t.active {
 				title = "◉ " + tab.Title
 			} else {
@@ -141,19 +197,46 @@ func (t *Tabs) renderTabs() {
 		}
 		region := fmt.Sprintf("tab-%d", i)
 		if i == t.active {
-			_, _ = fmt.Fprintf(
-				t.textView,
-				`["%s"][blue:white] %s [-:-][""] `,
-				region,
-				title,
-			)
+			if t.isFocused {
+				_, _ = fmt.Fprintf(
+					t.textView,
+					`["%s"][%s:%s:b] %s [-:-:B][""]`,
+					region,
+					t.ActiveFocused.Background,
+					t.ActiveFocused.Foreground,
+					title,
+				)
+			} else {
+				_, _ = fmt.Fprintf(
+					t.textView,
+					`["%s"][%s:%s] %s [-:-][""]`,
+					region,
+					t.ActiveBlur.Background,
+					t.ActiveBlur.Foreground,
+					title,
+				)
+
+			}
 		} else {
-			_, _ = fmt.Fprintf(
-				t.textView,
-				`["%s"][lightgray:black:u] %s [-:-:U][""] `,
-				region,
-				title,
-			)
+			if t.TabsStyle.Underscore {
+				_, _ = fmt.Fprintf(
+					t.textView,
+					`["%s"][%s:%s:u] %s [-:-:U][""]`,
+					region,
+					t.Inactive.Background,
+					t.Inactive.Foreground,
+					title,
+				)
+			} else {
+				_, _ = fmt.Fprintf(
+					t.textView,
+					`["%s"][%s:%s] %s [-:-][""]`,
+					region,
+					t.Inactive.Foreground,
+					t.Inactive.Background,
+					title,
+				)
+			}
 		}
 	}
 }

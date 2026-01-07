@@ -73,7 +73,7 @@ func newProjectMenuPanel(ctx ProjectContext, currentScreen ProjectScreenID) *pro
 	projectNode := tview.NewTreeNode(projectTitle).SetSelectable(true)
 	tree.SetRoot(projectNode)
 	projectNode.SetSelectedFunc(func() {
-		GoDataTugProjectScreen(ctx)
+		GoDatatugProjectScreen(ctx)
 	})
 
 	tree.SetCurrentNode(projectNode)

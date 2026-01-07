@@ -15,14 +15,22 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dtgithub"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
+	"github.com/gdamore/tcell/v2"
 	"github.com/google/go-github/v80/github"
 	"github.com/pkg/browser"
 	"github.com/rivo/tview"
 	"golang.org/x/oauth2"
 )
 
+type createTarget string
+
+const (
+	createAtLocal  createTarget = "Local"
+	createAtGitHub createTarget = "GitHub"
+)
+
 // goCreateProjectScreen shows a modal to create a new project
-func goCreateProjectScreen(tui *sneatnav.TUI) {
+func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 	/*
 		The modal should be defined in separate file
 		The modal initially consist of 2 fields:
@@ -47,11 +55,32 @@ func goCreateProjectScreen(tui *sneatnav.TUI) {
 	var title, location string
 	var githubOwner string
 	var visibility = "Public"
-	createAt := "GitHub"
 	location = "~/datatug"
 
 	flex := tview.NewFlex().SetDirection(tview.FlexRow)
-	flex.SetTitle(" New Project ").SetBorder(true)
+
+	tabs := sneatv.NewTabs(sneatv.WithRadio(), sneatv.WithLabel("Save to: "))
+	tabs.AddTab(&sneatv.Tab{
+		ID:        "GitHub",
+		Title:     "GitHub",
+		Primitive: tview.NewTextView().SetText("GitHub content"),
+	})
+	tabs.AddTab(&sneatv.Tab{
+		ID:        "BitBucket",
+		Title:     "BitBucket",
+		Primitive: tview.NewTextView().SetText("BitBucket content"),
+	})
+	tabs.AddTab(&sneatv.Tab{
+		ID:        "local",
+		Title:     "Locally",
+		Primitive: tview.NewTextView().SetText("Local content"),
+	})
+
+	flex.AddItem(tabs, 3, 0, true)
+
+	//sneatv.DefaultBorderWithoutPadding(flex.Box)
+	//flex.AddItem(tview.NewTextView(), 1, 0, false)
+	flex.SetTitle("New Project")
 
 	// --- Form ---
 	form := tview.NewForm()
@@ -193,6 +222,7 @@ func goCreateProjectScreen(tui *sneatnav.TUI) {
 			}
 		}
 
+		form.SetButtonBackgroundColor(tcell.ColorCornflowerBlue)
 		form.AddButton("Create", func() {
 			if strings.TrimSpace(title) == "" {
 				sneatnav.ShowErrorModal(tui, fmt.Errorf("project title is required"))
@@ -210,7 +240,7 @@ func goCreateProjectScreen(tui *sneatnav.TUI) {
 				projectVisibility = datatug.PublicProject
 			default:
 			}
-			handleCreateProject(tui, title, createAt, location, repoName, projectVisibility)
+			handleCreateProject(tui, createAt, title, location, repoName, projectVisibility)
 		})
 		form.AddButton("Cancel", func() {
 			_ = GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)
@@ -222,7 +252,7 @@ func goCreateProjectScreen(tui *sneatnav.TUI) {
 	flex.AddItem(form, 0, 1, true)
 
 	menuPanel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(list, list.Box))
-	contentPanel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(flex, flex.Box))
+	contentPanel := sneatnav.NewPanel(tui, sneatv.WithBordersWithoutPadding(flex, flex.Box))
 	tui.SetPanels(menuPanel, contentPanel)
 }
 
@@ -251,7 +281,7 @@ func authenticateGitHub(tui *sneatnav.TUI, onSuccess func(owner string)) {
 
 			form := tview.NewForm().
 				AddButton("Cancel", func() {
-					goCreateProjectScreen(tui)
+					goCreateProjectScreen(tui, createAtGitHub)
 				})
 			form.SetButtonsAlign(tview.AlignCenter)
 
@@ -278,19 +308,20 @@ func authenticateGitHub(tui *sneatnav.TUI, onSuccess func(owner string)) {
 
 				tui.App.QueueUpdateDraw(func() {
 					onSuccess(user.GetLogin())
-					goCreateProjectScreen(tui)
+					goCreateProjectScreen(tui, createAtGitHub)
 				})
 			}()
 		})
 	}()
 }
 
-func handleCreateProject(tui *sneatnav.TUI, title, createAt, location, repoName string, visibility datatug.ProjectVisibility) {
+func handleCreateProject(tui *sneatnav.TUI, createAt createTarget, title, location, repoName string, visibility datatug.ProjectVisibility) {
 	var projectRef dtconfig.ProjectRef
 	var err error
-	if createAt == "Local" {
+	switch createAt {
+	case createAtLocal:
 		projectRef, err = createLocalProject(tui, title, location)
-	} else {
+	case createAtGitHub:
 		projectRef, err = createGitHubProject(tui, repoName, visibility)
 	}
 	if err != nil {
@@ -340,7 +371,7 @@ func createLocalProject(tui *sneatnav.TUI, name, location string) (projectRef dt
 func openProject(tui *sneatnav.TUI, projectRef dtconfig.ProjectRef) {
 	store := filestore.NewProjectStore(projectRef.ID, projectRef.Path)
 	projectCtx := NewProjectContext(tui, store, projectRef)
-	GoDataTugProjectScreen(projectCtx)
+	GoDatatugProjectScreen(projectCtx)
 }
 
 func createGitHubProject(tui *sneatnav.TUI, title string, visibility datatug.ProjectVisibility) (projectRef dtconfig.ProjectRef, err error) {

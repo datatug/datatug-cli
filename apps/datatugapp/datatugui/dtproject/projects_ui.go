@@ -44,6 +44,7 @@ type projectsPanel struct {
 	selectProjectID string
 	layout          *tview.Flex
 	tree            *tview.TreeView
+	projectNodes    []*tview.TreeNode
 	details         *tview.Flex
 }
 
@@ -66,6 +67,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	tree := tview.NewTreeView().SetTopLevel(1)
 	tree.SetBorder(true).SetTitle("Projects")
 	tree.SetBorderPadding(1, 1, 2, 2)
+	sneatv.DefaultBorderWithPadding(tree.Box)
 
 	layout := tview.NewFlex().SetDirection(tview.FlexColumn)
 
@@ -80,7 +82,6 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	}
 
 	layout.SetFocusFunc(func() {
-		panel.ensureTreeHasCurrentNode(tree)
 		tui.App.SetFocus(tree)
 	})
 
@@ -116,7 +117,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 				return
 			}
 			projectCtx := NewProjectContext(tui, store, projectConfig)
-			GoDataTugProjectScreen(projectCtx)
+			GoDatatugProjectScreen(projectCtx)
 		}
 	}
 
@@ -155,10 +156,40 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	const folderEmoji = "📁 "
 	const repoEmoji = "📦 "
 
+	recentNode := tview.NewTreeNode("🕘 Recent projects").
+		SetSelectable(false).
+		SetColor(tcell.ColorLightYellow)
+
+	state, _ := dtstate.GetDatatugState()
+	if len(state.RecentProjects) == 0 {
+		recentNode.AddChild(tview.NewTreeNode(" No recent projects").SetSelectable(false).SetColor(tcell.ColorGray))
+	} else {
+		for _, recentProject := range state.RecentProjects {
+			for _, p := range panel.projects {
+				if p.ID == recentProject.ID {
+					pNode := tview.NewTreeNode(" " + p.Title)
+					pNode.SetReference(p)
+					recentNode.AddChild(pNode)
+					panel.projectNodes = append(panel.projectNodes, pNode)
+				}
+			}
+		}
+	}
+
+	var defaultGithubProjPathPrefix = fmt.Sprintf("~/%s/github.com/", datatug.Dir)
+
 	// Add existing projects under Local projects
 	for _, p := range panel.projects {
-		if strings.HasPrefix(p.ID, "github.com/") {
-			ids := strings.Split(strings.TrimPrefix(p.ID, "github.com/"), "/")
+		if strings.HasPrefix(p.Origin, "github.com/") ||
+			strings.HasPrefix(p.Path, defaultGithubProjPathPrefix) {
+			var origin string
+			if strings.HasPrefix(p.Origin, "github.com/") {
+				origin = strings.TrimPrefix(p.Origin, "github.com/")
+			} else {
+				origin = strings.TrimPrefix(p.Path, defaultGithubProjPathPrefix)
+			}
+
+			ids := strings.Split(strings.TrimPrefix(origin, "github.com/"), "/")
 			if len(ids) < 2 {
 				continue
 			}
@@ -176,6 +207,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 			}
 			repoNode := tview.NewTreeNode(repoEmoji + repo + " ")
 			ownerNode.AddChild(repoNode)
+			panel.projectNodes = append(panel.projectNodes, repoNode)
 			repoNode.SetReference(p)
 			continue
 		}
@@ -183,6 +215,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		title := GetProjectTitle(p)
 
 		projectNode := tview.NewTreeNode(repoEmoji + title + " ").SetReference(p)
+		panel.projectNodes = append(panel.projectNodes, projectNode)
 		localProjectsNode.AddChild(projectNode)
 	}
 
@@ -205,9 +238,11 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	// Add a demo project first
 	localDemoProjectConfig := newLocalDemoProjectConfig()
 
-	localProjectsNode.AddChild(tview.NewTreeNode(
+	demoProjectNode := tview.NewTreeNode(
 		repoEmoji + fmt.Sprintf("%s [gray]@ %s[i]", localDemoProjectConfig.Title, datatugDemoProjectFullID),
-	).SetReference(localDemoProjectConfig))
+	).SetReference(localDemoProjectConfig)
+	localProjectsNode.AddChild(demoProjectNode)
+	panel.projectNodes = append(panel.projectNodes, demoProjectNode)
 
 	// Add actions to Local projects
 	localAddNode := tview.NewTreeNode(" Add exising ").
@@ -219,13 +254,12 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		SetReference("local-create").
 		SetColor(sneatcolors.TreeNodeLink).
 		SetSelectedFunc(func() {
-			goCreateProjectScreen(tui)
+			goCreateProjectScreen(tui, createAtLocal)
 			//panic("suxx")
 		})
 	localProjectsNode.AddChild(createNewLocalProjectNode)
 
 	localProjectsNode.SetExpanded(true)
-	tree.SetCurrentNode(localProjectsNode.GetChildren()[0])
 
 	//// DataTug demo project
 	//datatugDemoProject := &dtconfig.ProjectRef{
@@ -286,12 +320,15 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	// Set up focus and blur handlers for each tree to manage selected item styling
 	{
 		tree.SetFocusFunc(func() {
+			panel.ensureTreeHasCurrentNode(tree)
 			tree.SetGraphicsColor(tcell.ColorWhite) // tree lines
+			tree.SetBorderColor(sneatv.DefaultFocusedBorderColor)
 			// Apply active styling to current node
 			panel.applyNodeStyling(tree, true)
 		})
 
 		tree.SetBlurFunc(func() {
+			tree.SetBorderColor(sneatv.DefaultBlurBorderColor)
 			tree.SetGraphicsColor(tcell.ColorGrey) // tree lines
 			// When tree loses focus, apply dimmed styling to current node
 			panel.applyNodeStyling(tree, false)
@@ -317,7 +354,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		case tcell.KeyUp:
 			// Check if we're on the first non-root item
 			currentNode := tree.GetCurrentNode()
-			if currentNode != nil && currentNode == tree.GetRoot().GetChildren()[0] {
+			if currentNode != nil && currentNode == panel.projectNodes[0] {
 				tui.Header.SetFocus(sneatnav.ToBreadcrumbs, tree)
 				return nil
 			}
@@ -334,7 +371,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		//			switch ref := reference.(type) {
 		//			case *dtconfig.ProjectRef:
 		//				// Call goProjectDashboards when ENTER is pressed on a project node
-		//				GoDataTugProjectScreen(tui, ref)
+		//				GoDatatugProjectScreen(tui, ref)
 		//				return nil
 		//			}
 		//		}
@@ -345,20 +382,14 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		}
 	})
 
-	addRecent(rootNode)
+	rootNode.AddChild(recentNode)
 	rootNode.AddChild(tview.NewTreeNode("").SetSelectable(false))
 	rootNode.AddChild(localProjectsNode)
 	rootNode.AddChild(tview.NewTreeNode("").SetSelectable(false))
 	rootNode.AddChild(githubNode)
 
+	panel.ensureTreeHasCurrentNode(tree)
 	return panel, nil
-}
-
-func addRecent(rootNode *tview.TreeNode) {
-	recentNode := tview.NewTreeNode("🕘 Recent projects")
-	recentNode.SetSelectable(false)
-	recentNode.AddChild(tview.NewTreeNode(" No recent projects").SetSelectable(false).SetColor(tcell.ColorGray))
-	rootNode.AddChild(recentNode)
 }
 
 func (p *projectsPanel) Draw(screen tcell.Screen) {
@@ -367,9 +398,8 @@ func (p *projectsPanel) Draw(screen tcell.Screen) {
 
 func (p *projectsPanel) ensureTreeHasCurrentNode(tree *tview.TreeView) {
 	if tree.GetCurrentNode() == nil {
-		root := tree.GetRoot()
-		if root != nil && len(root.GetChildren()) > 0 {
-			tree.SetCurrentNode(root.GetChildren()[0])
+		if len(p.projectNodes) > 0 {
+			tree.SetCurrentNode(p.projectNodes[0])
 		}
 	}
 }
@@ -385,6 +415,17 @@ func (p *projectsPanel) applyNodeStyling(tree *tview.TreeView, isActive bool) {
 	reference := currentNode.GetReference()
 	if reference == nil {
 		return
+	}
+
+	for _, pNode := range p.projectNodes {
+		if pNode == currentNode {
+			continue
+		}
+		if isActive {
+			pNode.SetColor(tcell.ColorWhite)
+		} else {
+			pNode.SetColor(tcell.ColorLightGray)
+		}
 	}
 
 	// Check node reference for *dtconfig.ProjectRef to determine node type

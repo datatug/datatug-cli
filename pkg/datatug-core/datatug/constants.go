@@ -8,12 +8,12 @@ import (
 
 var homedirDir = homedir.Dir
 
-const dir = "datatug"
+const Dir = "datatug"
 
-func Dir() string {
+func DirPath() string {
 	homeDir, err := homedirDir()
 	if err != nil {
-		panic("could not get home dir: " + err.Error())
+		panic("could not get home Dir: " + err.Error())
 	}
-	return filepath.Join(homeDir, dir)
+	return filepath.Join(homeDir, Dir)
 }

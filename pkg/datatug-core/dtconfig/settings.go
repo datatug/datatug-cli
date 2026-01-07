@@ -54,7 +54,7 @@ type StoreType string
 
 const fileName = ".datatug.yaml"
 
-var datatugDir = datatug.Dir
+var datatugDir = datatug.DirPath
 
 func GetConfigFilePath() string {
 	return path.Join(datatugDir(), fileName)

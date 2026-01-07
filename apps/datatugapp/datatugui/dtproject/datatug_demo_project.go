@@ -44,7 +44,7 @@ func openDatatugDemoProject(tui *sneatnav.TUI) {
 		}
 		loader := filestore.NewProjectStore(projRef.ID, projRef.Path)
 		projectCtx := NewProjectContext(tui, loader, projRef)
-		GoDataTugProjectScreen(projectCtx)
+		GoDatatugProjectScreen(projectCtx)
 	}
 
 	if projectDirExists {

@@ -84,7 +84,7 @@ func TestFsEnvironmentsStore(t *testing.T) {
 		err := store.DeleteEnvironment(ctx, "env1")
 		assert.NoError(t, err)
 
-		// If it's stored as Dir, DeleteEnvironment should probably delete the directory,
+		// If it's stored as DirPath, DeleteEnvironment should probably delete the directory,
 		// but currently it seems it tries to delete a file.
 	})
 }

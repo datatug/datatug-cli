@@ -2,6 +2,7 @@ package sneatv
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -9,6 +10,7 @@ import (
 
 // Tab represents a single tab.
 type Tab struct {
+	ID    string
 	Title string
 	tview.Primitive
 }
@@ -16,45 +18,81 @@ type Tab struct {
 // Tabs is a tab container implemented using tview.Pages.
 type Tabs struct {
 	*tview.Flex
+	tabsOptions
 
-	tabBar *tview.TextView
-	pages  *tview.Pages
+	textView *tview.TextView
+	pages    *tview.Pages
 
-	tabs   []Tab
+	tabs   []*Tab
 	active int
 }
 
-// NewTabs creates a new tab container.
-func NewTabs() *Tabs {
-	tabBar := tview.NewTextView().
-		SetDynamicColors(true).
-		SetRegions(true).
-		SetWrap(false)
+type tabsOptions struct {
+	label string
+	radio bool
+}
 
+type TabsOption func(*tabsOptions)
+
+func WithRadio() TabsOption {
+	return func(o *tabsOptions) {
+		o.radio = true
+	}
+}
+
+func WithLabel(label string) TabsOption {
+	return func(o *tabsOptions) {
+		o.label = label
+	}
+}
+
+// NewTabs creates a new tab container.
+func NewTabs(options ...TabsOption) *Tabs {
 	pages := tview.NewPages()
 
 	t := &Tabs{
-		Flex:   tview.NewFlex().SetDirection(tview.FlexRow),
-		tabBar: tabBar,
-		pages:  pages,
+		pages: pages,
+		Flex:  tview.NewFlex().SetDirection(tview.FlexRow),
+		textView: tview.NewTextView().
+			SetDynamicColors(true).
+			SetRegions(true).
+			SetWrap(false),
+	}
+	for _, set := range options {
+		set(&t.tabsOptions)
 	}
 
-	tabBar.SetInputCapture(t.handleInput)
+	t.textView.SetInputCapture(t.handleInput)
+
+	t.textView.SetHighlightedFunc(func(added, removed, remaining []string) {
+		if len(added) == 0 {
+			return
+		}
+
+		region := added[0]
+
+		var index int
+		if _, err := fmt.Sscanf(region, "tab-%d", &index); err != nil {
+			return
+		}
+		//t.tabs[index].Title = fmt.Sprintf("Tab %d", index)
+		t.SwitchTo(index)
+	})
 
 	t.
-		AddItem(tabBar, 1, 0, false).
+		AddItem(t.textView, 1, 0, false).
 		AddItem(pages, 0, 1, true)
 
 	return t
 }
 
 // AddTab adds a new tab.
-func (t *Tabs) AddTab(tab Tab) {
+func (t *Tabs) AddTab(tab *Tab) {
 	index := len(t.tabs)
 	t.tabs = append(t.tabs, tab)
 
 	t.pages.AddPage(
-		tab.Title,
+		tab.ID,
 		tab.Primitive,
 		true,
 		index == 0,
@@ -62,6 +100,7 @@ func (t *Tabs) AddTab(tab Tab) {
 
 	if index == 0 {
 		t.active = 0
+		t.textView.Highlight(tab.ID)
 	}
 
 	t.renderTabs()
@@ -72,30 +111,48 @@ func (t *Tabs) SwitchTo(index int) {
 	if index < 0 || index >= len(t.tabs) {
 		return
 	}
-
+	if t.active == index {
+		return
+	}
 	t.active = index
-	t.pages.SwitchToPage(t.tabs[index].Title)
+	t.textView.Highlight("tab-" + strconv.Itoa(index))
+	t.pages.SwitchToPage(t.tabs[index].ID)
 	t.renderTabs()
 }
 
 // renderTabs redraws the tab bar.
 func (t *Tabs) renderTabs() {
-	t.tabBar.Clear()
+	t.textView.Clear()
+
+	if t.label != "" {
+		_, _ = t.textView.Write([]byte(t.label))
+	}
 
 	for i, tab := range t.tabs {
+		var title string
+		if t.radio {
+			if i == t.active {
+				title = "◉ " + tab.Title
+			} else {
+				title = "○ " + tab.Title
+			}
+		} else {
+			title = tab.Title
+		}
+		region := fmt.Sprintf("tab-%d", i)
 		if i == t.active {
 			_, _ = fmt.Fprintf(
-				t.tabBar,
-				`["%d"][black:white] %s [-:-][""] `,
-				i,
-				tab.Title,
+				t.textView,
+				`["%s"][blue:white] %s [-:-][""] `,
+				region,
+				title,
 			)
 		} else {
 			_, _ = fmt.Fprintf(
-				t.tabBar,
-				`["%d"] %s [""] `,
-				i,
-				tab.Title,
+				t.textView,
+				`["%s"][lightgray:black:u] %s [-:-:U][""] `,
+				region,
+				title,
 			)
 		}
 	}

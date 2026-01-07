@@ -3,7 +3,6 @@ package dtconfig
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/strongo/validation"
 )
@@ -28,8 +27,8 @@ func (v ProjectRef) Validate() error {
 		return fmt.Errorf("at least one of this fields must be set: %w",
 			validation.NewErrRecordIsMissingRequiredField("path|origin"))
 	}
-	if strings.TrimSpace(v.Title) == "" {
-		return validation.NewErrRecordIsMissingRequiredField("title")
-	}
+	//if strings.TrimSpace(v.Title) == "" {
+	//	return validation.NewErrRecordIsMissingRequiredField("title")
+	//}
 	return nil
 }

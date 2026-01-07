@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
+	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/rivo/tview"
@@ -17,7 +18,7 @@ func NewProjectPanel(tui *sneatnav.TUI, projectConfig *dtconfig.ProjectRef) snea
 	return sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(content, content.Box))
 }
 
-func GoDataTugProjectScreen(projectCtx ProjectContext) {
+func GoDatatugProjectScreen(projectCtx ProjectContext) {
 	tui := projectCtx.TUI()
 	pConfig := projectCtx.Config()
 	breadcrumbs := projectsBreadcrumbs(tui)
@@ -26,6 +27,8 @@ func GoDataTugProjectScreen(projectCtx ProjectContext) {
 	menu := getOrCreateProjectMenuPanel(projectCtx, "project")
 	content := NewProjectPanel(tui, pConfig)
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToMenu))
+
+	dtstate.BumpRecentProject(pConfig.ID)
 
 	go func() {
 		err := <-projectCtx.WatchProject()

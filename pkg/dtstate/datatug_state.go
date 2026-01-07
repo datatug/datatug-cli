@@ -4,25 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/strongo/logus"
 )
 
-const cliStateFileName = ".datatug-cli-state.json"
+const cliStateFileName = ".datatug-cli.json"
 
 //const recentDir = ".recent"
 
 type RecentProject struct {
-	CurrentScreePath string `json:"current_screen_path"`
+	ID        string `json:"id"`
+	Timestamp string `json:"timestamp"`
 }
 
 type DatatugState struct {
-	CurrentScreenPath string `yaml:"current_screen_path,omitempty" json:"current_screen_path,omitempty"`
+	RecentProjects    []*RecentProject `json:"recent_projects"`
+	CurrentScreenPath string           `yaml:"current_screen_path,omitempty" json:"current_screen_path,omitempty"`
 }
+
+var saveState = SaveState
+var getState = GetDatatugState
 
 func GetDatatugState() (state *DatatugState, err error) {
 	state = new(DatatugState)
@@ -48,8 +55,58 @@ func GetDatatugState() (state *DatatugState, err error) {
 	return
 }
 
+func BumpRecentProject(projectID string) {
+	go func() {
+		if err := bumpRecentProject(projectID); err != nil {
+			ctx := context.Background()
+			logus.Errorf(ctx, "failed to bump recent project '%s': %v", projectID, err)
+		}
+	}()
+}
+
+// bumpRecentProject reads DatatugState using `getState` and:
+// - removes the current entry with the same ID from DatatugState.RecentProjects (if exists)
+// - inserts a new entry with the same ID to the beginning of DatatugState.RecentProjects
+// - Truncates DatatugState.RecentProjects to max 3 items
+// - Saves the updated DatatugState using `saveState` func
+func bumpRecentProject(projectID string) error {
+	state, err := getState()
+
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("failed to get datatug state: %w", err)
+		}
+		state = new(DatatugState)
+	}
+
+	// Remove existing entry with the same ID
+	for i, p := range state.RecentProjects {
+		if p.ID == projectID {
+			state.RecentProjects = append(state.RecentProjects[:i], state.RecentProjects[i+1:]...)
+			break
+		}
+	}
+
+	// Insert new entry at the beginning
+	newEntry := &RecentProject{
+		ID:        projectID,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	state.RecentProjects = append([]*RecentProject{newEntry}, state.RecentProjects...)
+
+	// Truncate to max 3 items
+	if len(state.RecentProjects) > 3 {
+		state.RecentProjects = state.RecentProjects[:3]
+	}
+
+	if err = saveState(state); err != nil {
+		return fmt.Errorf("failed to save datatug state: %w", err)
+	}
+	return nil
+}
+
 func SaveCurrentScreePathSync(currentScreenPath string) {
-	state, err := GetDatatugState()
+	state, err := getState()
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
 			ctx := context.Background()
@@ -59,16 +116,17 @@ func SaveCurrentScreePathSync(currentScreenPath string) {
 		state = new(DatatugState)
 	}
 	state.CurrentScreenPath = currentScreenPath
-	if err = saveSate(state); err != nil {
+	if err = saveState(state); err != nil {
 		ctx := context.Background()
 		logus.Errorf(ctx, "failed to save currentScreenPath to state file: %v", err)
 	}
 }
+
 func SaveCurrentScreePath(currentScreenPath string) {
 	go SaveCurrentScreePathSync(currentScreenPath)
 }
 
-func saveSate(state *DatatugState) (err error) {
+func SaveState(state *DatatugState) (err error) {
 	filePath := getFilePath()
 	var f *os.File
 	if f, err = os.Create(filePath); err != nil {
@@ -90,5 +148,5 @@ func saveSate(state *DatatugState) (err error) {
 }
 
 func getFilePath() string {
-	return filepath.Join(datatug.Dir(), cliStateFileName)
+	return filepath.Join(datatug.DirPath(), cliStateFileName)
 }

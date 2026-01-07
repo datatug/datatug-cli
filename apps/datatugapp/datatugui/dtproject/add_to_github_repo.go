@@ -537,7 +537,7 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 			}
 			projStore := store.GetProjectStore(projectID)
 			projectCtx := NewProjectContext(tui, projStore, projectRef)
-			GoDataTugProjectScreen(projectCtx)
+			GoDatatugProjectScreen(projectCtx)
 		})
 	}()
 	return nil

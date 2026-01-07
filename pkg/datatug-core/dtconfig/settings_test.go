@@ -118,7 +118,7 @@ func TestGetConfigFilePath(t *testing.T) {
 	})
 	t.Run("panic", func(t *testing.T) {
 		defer func() {
-			datatugDir = datatug.Dir
+			datatugDir = datatug.DirPath
 		}()
 		datatugDir = func() string {
 			panic("test error")

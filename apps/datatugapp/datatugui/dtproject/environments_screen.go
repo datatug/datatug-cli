@@ -4,7 +4,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 )
 
-func goEnvironmentsScreen(ctx ProjectContext, focusTo sneatnav.FocusTo) {
+func goEnvironmentsScreen(ctx *ProjectContext, focusTo sneatnav.FocusTo) {
 
 	menu := getOrCreateProjectMenuPanel(ctx, "environments")
 

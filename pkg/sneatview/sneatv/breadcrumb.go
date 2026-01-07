@@ -2,6 +2,7 @@ package sneatv
 
 type Breadcrumb interface {
 	GetTitle() string
+	SetTitle(string)
 	Action() error
 }
 
@@ -12,6 +13,10 @@ type breadcrumb struct {
 
 func (b *breadcrumb) GetTitle() string {
 	return b.title
+}
+
+func (b *breadcrumb) SetTitle(title string) {
+	b.title = title
 }
 
 func (b *breadcrumb) Action() error {

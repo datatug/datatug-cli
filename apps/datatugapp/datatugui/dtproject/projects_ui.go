@@ -106,8 +106,8 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	}
 
 	openProjectByRef := func(projectConfig dtconfig.ProjectRef) {
-		if projectConfig.ID == datatugDemoProjectFullID {
-			openDatatugDemoProject(tui)
+		if projectConfig.ID == demoProject1LocalID {
+			openDatatugDemoProject(tui, projectConfig)
 		} else {
 			projectPath := filestore.ExpandHome(projectConfig.Path)
 			store := filestore.NewProjectStore(projectConfig.ID, projectPath)
@@ -236,11 +236,11 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	githubNode.AddChild(selectGithubRepoNode)
 
 	// Add a demo project first
-	localDemoProjectConfig := newLocalDemoProjectConfig()
+	demoProject1Ref := newDemoProject1Ref()
 
 	demoProjectNode := tview.NewTreeNode(
-		repoEmoji + fmt.Sprintf("%s [gray]@ %s[i]", localDemoProjectConfig.Title, datatugDemoProjectFullID),
-	).SetReference(localDemoProjectConfig)
+		repoEmoji + fmt.Sprintf("%s [gray]@ %s[i]", demoProject1Ref.Title, demoProject1FullID),
+	).SetReference(demoProject1Ref)
 	localProjectsNode.AddChild(demoProjectNode)
 	panel.projectNodes = append(panel.projectNodes, demoProjectNode)
 
@@ -263,7 +263,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 
 	//// DataTug demo project
 	//datatugDemoProject := &dtconfig.ProjectRef{
-	//	ID:  datatugDemoProjectRepoID,
+	//	ID:  demoProjectsRepoID,
 	//	Origin: "cloud",
 	//}
 	//cloudDemoProjectNode := tview.NewTreeNode(" DataTug demo project ").
@@ -288,8 +288,8 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 			switch ref := reference.(type) {
 			case *dtconfig.ProjectRef:
 				panel.selectProjectID = ref.ID
-				if ref.ID == datatugDemoProjectFullID {
-					openDatatugDemoProject(tui)
+				if ref.ID == demoProject1LocalID {
+					openDatatugDemoProject(tui, *ref)
 					return
 				}
 				openProjectByRef(*ref)
@@ -352,9 +352,19 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 			panel.tui.SetFocus(panel.details)
 			return event
 		case tcell.KeyUp:
+			topNodes := recentNode.GetChildren()
+			if len(topNodes) == 0 {
+				topNodes = localProjectsNode.GetChildren()
+				if len(topNodes) == 0 {
+					topNodes = githubNode.GetChildren()
+					if len(topNodes) > 0 {
+						topNodes = topNodes[0].GetChildren()
+					}
+				}
+			}
 			// Check if we're on the first non-root item
 			currentNode := tree.GetCurrentNode()
-			if currentNode != nil && currentNode == panel.projectNodes[0] {
+			if currentNode != nil && currentNode == topNodes[0] {
 				tui.Header.SetFocus(sneatnav.ToBreadcrumbs, tree)
 				return nil
 			}

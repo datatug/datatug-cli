@@ -1,6 +1,7 @@
 package dtproject
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -12,25 +13,36 @@ import (
 	"github.com/rivo/tview"
 )
 
-const datatugDemoProjectRepoID = "datatug-demo-project"
-const datatugDemoProjectOrg = "datatug"
-const datatugDemoProjectTitle = "Demo Project"
-const datatugDemoProjectFullID = "github.com/" + datatugDemoProjectOrg + "/" + datatugDemoProjectRepoID
-const datatugDemoProjectGitHubURL = "https://" + datatugDemoProjectFullID
-const datatugDemoProjectDir = "~/datatug/" + datatugDemoProjectFullID
+const demoProjectsRepoID = "datatug-demo-projects"
+const datatugOrg = "datatug"
+const demoProjectOrigin = "github.com/" + datatugOrg + "/" + demoProjectsRepoID
 
-func newLocalDemoProjectConfig() *dtconfig.ProjectRef {
+const demoProject1DirName = "demo-project-1"
+const demoProject1LocalID = "github.com~" + datatugOrg + "~" + demoProjectsRepoID + "~" + demoProject1DirName
+const demoProject1Title = "Demo Project 1"
+
+const demoProject1FullID = demoProjectOrigin + "/" + demoProject1LocalID
+
+const datatugDemoProjectsGitURL = "https://" + demoProjectOrigin
+
+const datatugDemoProjectsDir = "~/datatug/" + demoProjectOrigin
+const demoProjectDir = datatugDemoProjectsDir + "/" + demoProject1DirName
+
+// const ghContentUrlPrefix = "/tree/main/"
+// const demoProject1WebURL = "https://" + demoProjectOrigin + ghContentUrlPrefix + demoProject1LocalID
+
+func newDemoProject1Ref() *dtconfig.ProjectRef {
 	return &dtconfig.ProjectRef{
-		ID:     datatugDemoProjectFullID,
-		Path:   datatugDemoProjectDir,
-		Origin: datatugDemoProjectFullID,
-		Title:  datatugDemoProjectTitle,
+		ID:     demoProject1LocalID,
+		Path:   demoProjectDir,
+		Origin: demoProjectOrigin,
+		Title:  demoProject1Title,
 	}
 }
 
-func openDatatugDemoProject(tui *sneatnav.TUI) {
+func openDatatugDemoProject(tui *sneatnav.TUI, projectRef dtconfig.ProjectRef) {
 	// Expand home in path like ~/...
-	projectDir := filestore.ExpandHome(datatugDemoProjectDir)
+	projectDir := filestore.ExpandHome(projectRef.Path)
 
 	projectDirExists, err := filestore.DirExists(projectDir)
 	if err != nil {
@@ -38,8 +50,8 @@ func openDatatugDemoProject(tui *sneatnav.TUI) {
 	}
 	openDemoProject := func() {
 		projRef := dtconfig.ProjectRef{
-			ID:     datatugDemoProjectFullID,
-			Origin: datatugDemoProjectFullID,
+			ID:     demoProject1LocalID,
+			Origin: demoProjectOrigin,
 			Path:   projectDir,
 		}
 		loader := filestore.NewProjectStore(projRef.ID, projRef.Path)
@@ -59,17 +71,21 @@ func openDatatugDemoProject(tui *sneatnav.TUI) {
 
 	go func() {
 		// Ensure parent directory exists
-		parent := filepath.Dir(projectDir)
+		parent := filepath.Dir(datatugDemoProjectsDir)
+		parent = filestore.ExpandHome(parent)
 		if err = os.MkdirAll(parent, 0o755); err != nil {
 			panic(err)
 		}
-		// Clone public GitHub repository datatugDemoProjectGitHubRepoID into datatugDemoProjectDir using go-git
-		if _, err = git.PlainClone(projectDir, false, &git.CloneOptions{
-			URL:      datatugDemoProjectGitHubURL,
+		// Clone public GitHub repository datatugDemoProjectGitHubRepoID into demoProjectDir using go-git
+		cloneOptions := git.CloneOptions{
+			URL:      datatugDemoProjectsGitURL,
 			Progress: NewTviewProgressWriter(tui, progressText),
 			// Depth: 1, // uncomment for shallow clone if desired
-		}); err != nil {
-			panic("git clone failed: " + err.Error())
+		}
+		targetDir := filestore.ExpandHome(datatugDemoProjectsDir)
+		if _, err = git.PlainClone(targetDir, false, &cloneOptions); err != nil {
+			tui.App.Stop()
+			panic(fmt.Sprintf("failed to git clone %s into %s: %v", cloneOptions.URL, projectDir, err))
 		}
 		tui.App.QueueUpdateDraw(func() {
 			openDemoProject()

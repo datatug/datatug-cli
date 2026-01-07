@@ -6,14 +6,14 @@ import (
 	"github.com/rivo/tview"
 )
 
-func goProjectQueries(ctx ProjectContext) {
+func goProjectQueries(ctx *ProjectContext) {
 	menu := getOrCreateProjectMenuPanel(ctx, "queries")
 	content := newQueriesPanel(ctx)
 	tui := ctx.TUI()
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToMenu))
 }
 
-func newQueriesPanel(ctx ProjectContext) sneatnav.Panel {
+func newQueriesPanel(ctx *ProjectContext) sneatnav.Panel {
 	content := tview.NewTextView().SetTextAlign(tview.AlignCenter).SetText("List of queries here")
 
 	sneatv.DefaultBorderWithPadding(content.Box)

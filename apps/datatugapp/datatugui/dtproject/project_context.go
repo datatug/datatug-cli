@@ -9,9 +9,9 @@ import (
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 )
 
-var _ ProjectContext = (*projectContext)(nil)
+//var _ ProjectContext = (*ProjectContext)(nil)
 
-type projectContext struct {
+type ProjectContext struct {
 	context.Context
 	tui     *sneatnav.TUI
 	config  *dtconfig.ProjectRef
@@ -20,35 +20,35 @@ type projectContext struct {
 	projErr chan error
 }
 
-func (p projectContext) WatchProject() <-chan error {
+func (p ProjectContext) WatchProject() <-chan error {
 	return p.projErr
 }
 
-func (p projectContext) TUI() *sneatnav.TUI {
+func (p ProjectContext) TUI() *sneatnav.TUI {
 	return p.tui
 }
 
-func (p projectContext) Config() *dtconfig.ProjectRef {
+func (p ProjectContext) Config() *dtconfig.ProjectRef {
 	return p.config
 }
 
-func (p projectContext) Project() *datatug.Project {
+func (p ProjectContext) Project() *datatug.Project {
 	return p.project
 }
 
-type ProjectContext interface {
-	context.Context
-	TUI() *sneatnav.TUI
-	Config() *dtconfig.ProjectRef
-	Project() *datatug.Project
-	WatchProject() <-chan error
-}
+//type ProjectContext interface {
+//	context.Context
+//	TUI() *sneatnav.TUI
+//	Config() *dtconfig.ProjectRef
+//	Project() *datatug.Project
+//	WatchProject() <-chan error
+//}
 
 func NewProjectContext(
 	tui *sneatnav.TUI,
 	store datatug.ProjectStore,
 	config dtconfig.ProjectRef,
-) ProjectContext {
+) *ProjectContext {
 	if tui == nil {
 		panic("tui cannot be nil")
 	}
@@ -59,7 +59,7 @@ func NewProjectContext(
 		panic("store cannot be nil")
 	}
 
-	ctx := &projectContext{
+	ctx := &ProjectContext{
 		tui:     tui,
 		config:  &config,
 		store:   store,

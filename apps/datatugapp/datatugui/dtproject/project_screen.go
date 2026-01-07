@@ -18,12 +18,13 @@ func NewProjectPanel(tui *sneatnav.TUI, projectConfig *dtconfig.ProjectRef) snea
 	return sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(content, content.Box))
 }
 
-func GoDatatugProjectScreen(projectCtx ProjectContext) {
+func GoDatatugProjectScreen(projectCtx *ProjectContext) {
 	tui := projectCtx.TUI()
 	pConfig := projectCtx.Config()
 	breadcrumbs := projectsBreadcrumbs(tui)
 	title := GetProjectTitle(pConfig)
-	breadcrumbs.Push(sneatv.NewBreadcrumb(title, nil))
+	projectBreadcrumb := sneatv.NewBreadcrumb(title, nil)
+	breadcrumbs.Push(projectBreadcrumb)
 	menu := getOrCreateProjectMenuPanel(projectCtx, "project")
 	content := NewProjectPanel(tui, pConfig)
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToMenu))
@@ -33,9 +34,12 @@ func GoDatatugProjectScreen(projectCtx ProjectContext) {
 	go func() {
 		err := <-projectCtx.WatchProject()
 		if err != nil {
+			tui.App.Stop()
 			panic(fmt.Errorf("watch project error: %w", err))
 		}
 		project := projectCtx.Project()
+		projectBreadcrumb.SetTitle(project.Title)
+		sneatv.SetPanelTitle(content.GetBox(), fmt.Sprintf("Project: %s", project.Title))
 		menu.SetProject(project)
 	}()
 

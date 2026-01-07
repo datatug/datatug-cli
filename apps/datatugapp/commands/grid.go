@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 
+	"github.com/datatug/datatug-cli/apps/global"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 
 	"github.com/gdamore/tcell/v2"
@@ -11,6 +12,7 @@ import (
 
 func showRecordsetInGrid(recordset datatug.Recordset) error {
 	app := tview.NewApplication()
+	global.App = app
 	table := tview.NewTable()
 	table.SetBorders(true)
 	table.SetBordersColor(tcell.ColorLightGrey)

@@ -2,16 +2,17 @@ package datatugapp
 
 import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtproject"
+	"github.com/datatug/datatug-cli/apps/global"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/rivo/tview"
 )
 
 func NewDatatugTUI() (tui *sneatnav.TUI) {
-	app := tview.NewApplication()
-	app.EnableMouse(true)
+	global.App = tview.NewApplication()
+	global.App.EnableMouse(true)
 
-	tui = sneatnav.NewTUI(app, sneatv.NewBreadcrumb(" ⛴ DataTug", func() error {
+	tui = sneatnav.NewTUI(global.App, sneatv.NewBreadcrumb(" ⛴ DataTug", func() error {
 		return goProjectScreen(tui, sneatnav.FocusToMenu)
 	}))
 	return

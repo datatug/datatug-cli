@@ -138,7 +138,7 @@ func NewTabs(app *tview.Application, style TabsStyle, options ...TabsOption) *Ta
 			SetRegions(true).
 			SetWrap(false),
 	}
-	t.Flex.SetFocusFunc(func() {
+	t.SetFocusFunc(func() {
 		t.app.SetFocus(t.TextView)
 	})
 	for _, set := range options {
@@ -272,7 +272,7 @@ func (t *Tabs) updateTextView() {
 				fg = t.InactiveBlur.Foreground
 				bg = t.InactiveBlur.Background
 			}
-			if t.TabsStyle.Underscore {
+			if t.Underscore {
 				fontStyle = underline
 			}
 		}

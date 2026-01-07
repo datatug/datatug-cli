@@ -106,19 +106,19 @@ func NewTabs(app *tview.Application, style TabsStyle, options ...TabsOption) *Ta
 
 	t.textView.SetInputCapture(t.handleInput)
 
+	setIsFocused := func(isFocused bool) {
+		t.isFocused = isFocused
+		go app.QueueUpdateDraw(func() {
+			t.renderTabs()
+		})
+	}
+
 	t.textView.SetFocusFunc(func() {
-		t.isFocused = true
-		//app.QueueUpdate(func() {
-		//	t.renderTabs()
-		//})
-		//app.QueueUpdate(func() {
-		//	t.renderTabs()
-		//})
+		setIsFocused(true)
 	})
 
 	t.textView.SetBlurFunc(func() {
-		t.isFocused = false
-		t.renderTabs()
+		setIsFocused(false)
 	})
 
 	t.textView.SetHighlightedFunc(func(added, removed, remaining []string) {

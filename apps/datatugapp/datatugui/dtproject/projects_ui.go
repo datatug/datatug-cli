@@ -157,7 +157,8 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	const repoEmoji = "📦 "
 
 	recentNode := tview.NewTreeNode("🕘 Recent projects").
-		SetSelectable(false).
+		// The recentNode is not really selectable, but we keep it selectable to allow scroll to top
+		//SetSelectable(false).
 		SetColor(tcell.ColorLightYellow)
 
 	state, _ := dtstate.GetDatatugState()
@@ -366,6 +367,14 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 			currentNode := tree.GetCurrentNode()
 			if currentNode != nil && currentNode == topNodes[0] {
 				tui.Header.SetFocus(sneatnav.ToBreadcrumbs, tree)
+				tree.SetCurrentNode(recentNode) // Scroll to the top in case if top of the tree is out of view
+				go func() {
+					tui.App.QueueUpdateDraw(func() {
+						// Restore the 1st selectable node
+						// The recentNode is not really selectable, but we keep it selectable to allow scrolling
+						tree.SetCurrentNode(currentNode)
+					})
+				}()
 				return nil
 			}
 			// Normal UP navigation within a tree

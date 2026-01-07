@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
+	"github.com/datatug/datatug-cli/apps/global"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/posthog/posthog-go"
@@ -28,6 +30,9 @@ func main() {
 	defer func() {
 		r := recover()
 		if r != nil {
+			if global.App != nil {
+				global.App.Stop() // VERY IMPORTANT: restore terminal
+			}
 			rText := fmt.Sprintf("%v", r)
 			ctx := context.Background()
 			logus.Errorf(ctx, "panic: %s", rText)
@@ -39,12 +44,14 @@ func main() {
 				"panic",
 				rText,
 			))
+			_, _ = fmt.Fprintln(os.Stderr, "panic:", r)
+			debug.PrintStack()
 		}
 		dtlog.Enqueue(posthog.Capture{Event: "DataTug CLI exited"})
 		dtlog.Close()
-		time.Sleep(time.Millisecond) // Do we really need this?
+		//time.Sleep(10 * time.Millisecond) // Allow some time for event to be sent
 		if r != nil {
-			panic(r)
+			os.Exit(1)
 		}
 	}()
 

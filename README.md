@@ -1,11 +1,24 @@
 # DataTug CLI & agent for web UI
 
-DataTug is an open-source, CLI-first data exploration platform with a Web UI, designed to help you explore, query, and
-connect data across multiple sources without losing context. It automatically surfaces related data — even across
-different systems — so you can move naturally between datasets, queries, and results.
+<table border=0>
+    <tr>
+        <td><img src="https://github.com/datatug/.github/raw/main/datatug-logo-3.2.png"></td>
+        <td>
+            <p>
+                DataTug is an open-source, CLI-first data exploration platform with a Web UI, designed to help you explore, query, and
+                connect data across multiple sources without losing context. It automatically surfaces related data — even across
+                different systems — so you can move naturally between datasets, queries, and results.
+            </p>
+            <p>
+                Free for personal use, DataTug keeps your workflows transparent, versioned, and portable, whether you work locally, in
+                GitHub, or in the cloud.                
+            </p>
+        </td>
+    </tr>
+    
+</table>
 
-Free for personal use, DataTug keeps your workflows transparent, versioned, and portable, whether you work locally, in
-GitHub, or in the cloud.
+
 
 ## ♺ Continuous Integration — [![Build and Test](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml/badge.svg)](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/datatug/datatug-cli?cache=1)](https://goreportcard.com/report/github.com/datatug/datatug-cli) [![GoDoc](https://godoc.org/github.com/datatug/datatug-cli?status.svg)](https://godoc.org/github.com/datatug/datatug-cli) [![Coverage Status](https://coveralls.io/repos/github/datatug/datatug-cli/badge.svg?branch=main)](https://coveralls.io/github/datatug/datatug-cli?branch=main) 
 

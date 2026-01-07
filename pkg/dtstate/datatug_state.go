@@ -37,8 +37,9 @@ func GetDatatugState() (state *DatatugState, err error) {
 	var fileInfo fs.FileInfo
 	if fileInfo, err = os.Stat(filePath); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return
+			err = nil
 		}
+		return
 	}
 	if fileInfo.Size() == 0 {
 		return
@@ -49,9 +50,15 @@ func GetDatatugState() (state *DatatugState, err error) {
 		return
 	}
 	defer func() {
-		_ = f.Close()
+		closeErr := f.Close()
+		if err == nil {
+			err = closeErr
+		}
 	}()
 	err = json.NewDecoder(f).Decode(&state)
+	if len(state.RecentProjects) > 0 {
+		hadRecentProjects = true
+	}
 	return
 }
 
@@ -109,9 +116,10 @@ func SaveCurrentScreePathSync(currentScreenPath string) {
 	state, err := getState()
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			ctx := context.Background()
-			logus.Errorf(ctx, "failed to get datatug state file: %v", err)
-			return
+			panic(err)
+			//ctx := context.Background()
+			//logus.Errorf(ctx, "failed to get datatug state file: %v", err)
+			//return
 		}
 		state = new(DatatugState)
 	}
@@ -122,11 +130,17 @@ func SaveCurrentScreePathSync(currentScreenPath string) {
 	}
 }
 
+var hadRecentProjects = false
+
 func SaveCurrentScreePath(currentScreenPath string) {
 	go SaveCurrentScreePathSync(currentScreenPath)
 }
 
 func SaveState(state *DatatugState) (err error) {
+	if hadRecentProjects && len(state.RecentProjects) == 0 {
+		panic("no recent projects found")
+		return
+	}
 	filePath := getFilePath()
 	var f *os.File
 	if f, err = os.Create(filePath); err != nil {

@@ -63,7 +63,7 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 	form := tview.NewForm()
 
 	tabs := sneatv.NewTabs(tui.App,
-		sneatv.RadioTabsStyle,
+		sneatv.UnderlineTabsStyle,
 		sneatv.WithLabel("[gray]Save to:[-] "),
 		sneatv.FocusDown(func(tview.Primitive) {
 			tui.App.SetFocus(form)
@@ -84,6 +84,7 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 		&sneatv.Tab{
 			ID:        "BitBucket",
 			Title:     "BitBucket",
+			Closable:  true,
 			Primitive: tview.NewTextView().SetText("BitBucket content"),
 		},
 		&sneatv.Tab{

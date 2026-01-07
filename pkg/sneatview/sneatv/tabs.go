@@ -2,7 +2,7 @@ package sneatv
 
 import (
 	"fmt"
-	"strconv"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -17,15 +17,17 @@ type TabsStyle struct {
 	Radio      bool
 	Underscore bool
 
-	ActiveFocused TabStyles
-	ActiveBlur    TabStyles
-	Inactive      TabStyles
+	ActiveFocused   TabStyles
+	ActiveBlur      TabStyles
+	InactiveFocused TabStyles
+	InactiveBlur    TabStyles
 }
 
 // Tab represents a single tab.
 type Tab struct {
-	ID    string
-	Title string
+	ID       string
+	Title    string
+	Closable bool
 	tview.Primitive
 }
 
@@ -79,16 +81,24 @@ func FocusLeft(f func(current tview.Primitive)) TabsOption {
 	}
 }
 
-var DefaultTabsStyle = TabsStyle{
+var UnderlineTabsStyle = TabsStyle{
 	Radio:      false,
 	Underscore: true,
 	ActiveFocused: TabStyles{
 		Foreground: "black",
 		Background: "lightgray",
 	},
-	Inactive: TabStyles{
+	ActiveBlur: TabStyles{
 		Foreground: "black",
-		Background: "lightgray",
+		Background: "darkgray",
+	},
+	InactiveFocused: TabStyles{
+		Foreground: "lightgray",
+		Background: "black",
+	},
+	InactiveBlur: TabStyles{
+		Foreground: "gray",
+		Background: "black",
 	},
 }
 
@@ -103,7 +113,7 @@ var RadioTabsStyle = TabsStyle{
 		Foreground: "lightgray",
 		Background: "black",
 	},
-	Inactive: TabStyles{
+	InactiveFocused: TabStyles{
 		Foreground: "lightgray",
 		Background: "black",
 	},
@@ -140,7 +150,7 @@ func NewTabs(app *tview.Application, style TabsStyle, options ...TabsOption) *Ta
 	setIsFocused := func(isFocused bool) {
 		t.isFocused = isFocused
 		go app.QueueUpdateDraw(func() {
-			t.renderTabs()
+			t.updateTextView()
 		})
 	}
 
@@ -203,19 +213,31 @@ func (t *Tabs) SwitchTo(index int) {
 	}
 	t.active = index
 	t.pages.SwitchToPage(t.tabs[index].ID)
-	t.renderTabs()
-	t.TextView.Highlight("tab-" + strconv.Itoa(index))
+	t.updateTextView()
+	t.TextView.Highlight()
+	//tab := t.tabs[index]
+	//i := strconv.Itoa(index)
+	//if tab.Closable {
+	//
+	//	t.TextView.Highlight("tab-"+i, "close-"+i, "l-"+i)
+	//} else {
+	//	t.TextView.Highlight("tab-" + i)
+	//}
 }
 
-// renderTabs redraws the tab bar.
-func (t *Tabs) renderTabs() {
+// updateTextView redraws the tab bar.
+func (t *Tabs) updateTextView() {
 	t.TextView.Clear()
 
 	if t.label != "" {
 		_, _ = t.TextView.Write([]byte(t.label))
 	}
 
+	const bold = "b"
+	const underline = "u"
+
 	for i, tab := range t.tabs {
+		isActive := i == t.active
 		var title string
 		if t.Radio {
 			if i == t.active {
@@ -226,47 +248,49 @@ func (t *Tabs) renderTabs() {
 		} else {
 			title = tab.Title
 		}
-		region := fmt.Sprintf("tab-%d", i)
-		if i == t.active {
-			if t.isFocused {
-				_, _ = fmt.Fprintf(
-					t.TextView,
-					`["%s"][%s:%s:b] %s [-:-:B][""]`,
-					region,
-					t.ActiveFocused.Background,
-					t.ActiveFocused.Foreground,
-					title,
-				)
-			} else {
-				_, _ = fmt.Fprintf(
-					t.TextView,
-					`["%s"][%s:%s] %s [-:-][""]`,
-					region,
-					t.ActiveBlur.Background,
-					t.ActiveBlur.Foreground,
-					title,
-				)
 
+		region := fmt.Sprintf("tab-%d", i)
+
+		var fontStyle string
+		var fg string
+		var bg string
+
+		if isActive {
+			if t.isFocused {
+				fontStyle = bold
+				fg = t.ActiveFocused.Foreground
+				bg = t.ActiveFocused.Background
+			} else {
+				fg = t.ActiveBlur.Foreground
+				bg = t.ActiveBlur.Background
 			}
 		} else {
-			if t.TabsStyle.Underscore {
-				_, _ = fmt.Fprintf(
-					t.TextView,
-					`["%s"][%s:%s:u] %s [-:-:U][""]`,
-					region,
-					t.Inactive.Background,
-					t.Inactive.Foreground,
-					title,
-				)
+			if t.isFocused {
+				fg = t.InactiveFocused.Foreground
+				bg = t.InactiveFocused.Background
 			} else {
-				_, _ = fmt.Fprintf(
-					t.TextView,
-					`["%s"][%s:%s] %s [-:-][""]`,
-					region,
-					t.Inactive.Foreground,
-					t.Inactive.Background,
-					title,
-				)
+				fg = t.InactiveBlur.Foreground
+				bg = t.InactiveBlur.Background
+			}
+			if t.TabsStyle.Underscore {
+				fontStyle = underline
+			}
+		}
+		if fontStyle == "" {
+			_, _ = fmt.Fprintf(t.TextView, `["%s"][%s:%s] %s [-:-][""]`, region, fg, bg, title)
+		} else {
+			_, _ = fmt.Fprintf(t.TextView, `["%s"][%s:%s:%s] %s [-:-:%s][""]`,
+				region, fg, bg, fontStyle, title, strings.ToUpper(fontStyle))
+		}
+		if tab.Closable {
+			if t.Underscore {
+				if isActive {
+					_, _ = fmt.Fprintf(t.TextView, `["close-%d"][%s:%s]✖ [-:-][""][::u] [::U]`, i, fg, bg)
+				} else {
+					_, _ = fmt.Fprintf(t.TextView, `["close-%d"][%s:%s:u]✖  [-:-:U][""]`, i, fg, bg)
+				}
+			} else {
+				_, _ = fmt.Fprintf(t.TextView, `["close-%d"][%s:%s]✖ [-:-][""] `, i, fg, bg)
 			}
 		}
 	}

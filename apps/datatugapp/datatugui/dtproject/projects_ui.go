@@ -436,7 +436,7 @@ func (p *projectsPanel) applyNodeStyling(tree *tview.TreeView, isActive bool) {
 			currentNode.SetColor(tcell.ColorWhite)
 			currentNode.SetSelectedTextStyle(currentNode.GetSelectedTextStyle().Foreground(tcell.ColorBlack))
 		} else {
-			// Inactive project link nodes have different color than action nodes
+			// InactiveFocused project link nodes have different color than action nodes
 			currentNode.SetColor(dimGray)
 			currentNode.SetSelectedTextStyle(currentNode.GetSelectedTextStyle().Foreground(tcell.ColorWhite))
 
@@ -446,7 +446,7 @@ func (p *projectsPanel) applyNodeStyling(tree *tview.TreeView, isActive bool) {
 		if isActive {
 			currentNode.SetColor(sneatcolors.TreeNodeLink)
 		} else {
-			// Inactive action nodes have different color than project link nodes
+			// InactiveFocused action nodes have different color than project link nodes
 			currentNode.SetColor(dimGray)
 			currentNode.SetSelectedTextStyle(currentNode.GetSelectedTextStyle().Foreground(tcell.ColorWhite))
 		}

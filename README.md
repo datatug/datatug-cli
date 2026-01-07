@@ -18,7 +18,7 @@
     
 </table>
 
-![datatug-cli-employees-2.png](datatug-cli-employees-2.png)
+![datatug-cli-employees-2.png](docs/screenshots/datatug-cli-employees-2.png)
 
 ## ♺ Continuous Integration — [![Build and Test](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml/badge.svg)](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/datatug/datatug-cli?cache=1)](https://goreportcard.com/report/github.com/datatug/datatug-cli) [![GoDoc](https://godoc.org/github.com/datatug/datatug-cli?status.svg)](https://godoc.org/github.com/datatug/datatug-cli) [![Coverage Status](https://coveralls.io/repos/github/datatug/datatug-cli/badge.svg?branch=main)](https://coveralls.io/github/datatug/datatug-cli?branch=main) 
 

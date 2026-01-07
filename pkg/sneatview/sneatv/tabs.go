@@ -35,7 +35,9 @@ type Tabs struct {
 	tabsOptions
 	TabsStyle
 
-	textView *tview.TextView
+	app *tview.Application
+
+	TextView *tview.TextView // TODO(help-wanted): exported as a workaround to set focus - needs fix!
 	pages    *tview.Pages
 
 	isFocused bool
@@ -45,7 +47,10 @@ type Tabs struct {
 }
 
 type tabsOptions struct {
-	label string
+	label     string
+	focusDown func(current tview.Primitive)
+	focusLeft func(current tview.Primitive)
+	focusUp   func(current tview.Primitive)
 }
 
 type TabsOption func(*tabsOptions)
@@ -53,6 +58,24 @@ type TabsOption func(*tabsOptions)
 func WithLabel(label string) TabsOption {
 	return func(o *tabsOptions) {
 		o.label = label
+	}
+}
+
+func FocusDown(f func(current tview.Primitive)) TabsOption {
+	return func(o *tabsOptions) {
+		o.focusDown = f
+	}
+}
+
+func FocusUp(f func(current tview.Primitive)) TabsOption {
+	return func(o *tabsOptions) {
+		o.focusUp = f
+	}
+}
+
+func FocusLeft(f func(current tview.Primitive)) TabsOption {
+	return func(o *tabsOptions) {
+		o.focusLeft = f
 	}
 }
 
@@ -86,25 +109,33 @@ var RadioTabsStyle = TabsStyle{
 	},
 }
 
+//func (t *Tabs) TakeFocus() {
+//	t.app.SetFocus(t.TextView)
+//}
+
 // NewTabs creates a new tab container.
 func NewTabs(app *tview.Application, style TabsStyle, options ...TabsOption) *Tabs {
 	pages := tview.NewPages()
 
 	t := &Tabs{
+		app:       app,
 		active:    -1,
 		TabsStyle: style,
 		pages:     pages,
 		Flex:      tview.NewFlex().SetDirection(tview.FlexRow),
-		textView: tview.NewTextView().
+		TextView: tview.NewTextView().
 			SetDynamicColors(true).
 			SetRegions(true).
 			SetWrap(false),
 	}
+	t.Flex.SetFocusFunc(func() {
+		t.app.SetFocus(t.TextView)
+	})
 	for _, set := range options {
 		set(&t.tabsOptions)
 	}
 
-	t.textView.SetInputCapture(t.handleInput)
+	t.TextView.SetInputCapture(t.handleInput)
 
 	setIsFocused := func(isFocused bool) {
 		t.isFocused = isFocused
@@ -113,15 +144,15 @@ func NewTabs(app *tview.Application, style TabsStyle, options ...TabsOption) *Ta
 		})
 	}
 
-	t.textView.SetFocusFunc(func() {
+	t.TextView.SetFocusFunc(func() {
 		setIsFocused(true)
 	})
 
-	t.textView.SetBlurFunc(func() {
+	t.TextView.SetBlurFunc(func() {
 		setIsFocused(false)
 	})
 
-	t.textView.SetHighlightedFunc(func(added, removed, remaining []string) {
+	t.TextView.SetHighlightedFunc(func(added, removed, remaining []string) {
 		if len(added) == 0 {
 			return
 		}
@@ -137,7 +168,7 @@ func NewTabs(app *tview.Application, style TabsStyle, options ...TabsOption) *Ta
 	})
 
 	t.
-		AddItem(t.textView, 1, 0, false).
+		AddItem(t.TextView, 1, 0, false).
 		AddItem(pages, 0, 1, true)
 
 	return t
@@ -173,15 +204,15 @@ func (t *Tabs) SwitchTo(index int) {
 	t.active = index
 	t.pages.SwitchToPage(t.tabs[index].ID)
 	t.renderTabs()
-	t.textView.Highlight("tab-" + strconv.Itoa(index))
+	t.TextView.Highlight("tab-" + strconv.Itoa(index))
 }
 
 // renderTabs redraws the tab bar.
 func (t *Tabs) renderTabs() {
-	t.textView.Clear()
+	t.TextView.Clear()
 
 	if t.label != "" {
-		_, _ = t.textView.Write([]byte(t.label))
+		_, _ = t.TextView.Write([]byte(t.label))
 	}
 
 	for i, tab := range t.tabs {
@@ -199,7 +230,7 @@ func (t *Tabs) renderTabs() {
 		if i == t.active {
 			if t.isFocused {
 				_, _ = fmt.Fprintf(
-					t.textView,
+					t.TextView,
 					`["%s"][%s:%s:b] %s [-:-:B][""]`,
 					region,
 					t.ActiveFocused.Background,
@@ -208,7 +239,7 @@ func (t *Tabs) renderTabs() {
 				)
 			} else {
 				_, _ = fmt.Fprintf(
-					t.textView,
+					t.TextView,
 					`["%s"][%s:%s] %s [-:-][""]`,
 					region,
 					t.ActiveBlur.Background,
@@ -220,7 +251,7 @@ func (t *Tabs) renderTabs() {
 		} else {
 			if t.TabsStyle.Underscore {
 				_, _ = fmt.Fprintf(
-					t.textView,
+					t.TextView,
 					`["%s"][%s:%s:u] %s [-:-:U][""]`,
 					region,
 					t.Inactive.Background,
@@ -229,7 +260,7 @@ func (t *Tabs) renderTabs() {
 				)
 			} else {
 				_, _ = fmt.Fprintf(
-					t.textView,
+					t.TextView,
 					`["%s"][%s:%s] %s [-:-][""]`,
 					region,
 					t.Inactive.Foreground,
@@ -248,7 +279,17 @@ func (t *Tabs) handleInput(ev *tcell.EventKey) *tcell.EventKey {
 		t.SwitchTo((t.active + 1) % len(t.tabs))
 		return nil
 	case tcell.KeyLeft:
+		if t.active == 0 {
+			t.focusLeft(t.TextView)
+			return nil
+		}
 		t.SwitchTo((t.active - 1 + len(t.tabs)) % len(t.tabs))
+		return nil
+	case tcell.KeyUp:
+		t.focusUp(t.TextView)
+		return nil
+	case tcell.KeyDown:
+		t.focusDown(t.TextView)
 		return nil
 	default:
 		if ev.Modifiers() == tcell.ModAlt {

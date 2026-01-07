@@ -59,7 +59,22 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 
 	flex := tview.NewFlex().SetDirection(tview.FlexRow)
 
-	tabs := sneatv.NewTabs(tui.App, sneatv.RadioTabsStyle, sneatv.WithLabel("Save to: "))
+	// --- Form ---
+	form := tview.NewForm()
+
+	tabs := sneatv.NewTabs(tui.App,
+		sneatv.RadioTabsStyle,
+		sneatv.WithLabel("[gray]Save to:[-] "),
+		sneatv.FocusDown(func(tview.Primitive) {
+			tui.App.SetFocus(form)
+		}),
+		sneatv.FocusUp(func(current tview.Primitive) {
+			tui.Header.SetFocus(sneatnav.ToBreadcrumbs, current)
+		}),
+		sneatv.FocusLeft(func(current tview.Primitive) {
+			tui.App.SetFocus(tui.Menu)
+		}),
+	)
 	tabs.AddTabs(
 		&sneatv.Tab{
 			ID:        "GitHub",
@@ -84,29 +99,7 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 	//flex.AddItem(tview.NewTextView(), 1, 0, false)
 	flex.SetTitle("New Project")
 
-	// --- Form ---
-	form := tview.NewForm()
-
 	var refreshForm func()
-
-	// --- Menu List for "Create at" ---
-	list := tview.NewList()
-	list.SetTitle(" Create at ").SetBorder(true)
-	list.AddItem("GitHub", "", 'g', func() {
-		createAt = "GitHub"
-		refreshForm()
-	})
-	list.AddItem("Local", "", 'l', func() {
-		createAt = "Local"
-		refreshForm()
-	})
-
-	// Set current selection based on default
-	if createAt == "GitHub" {
-		list.SetCurrentItem(0)
-	} else {
-		list.SetCurrentItem(1)
-	}
 
 	// GitHub info components
 	githubRepoPath := tview.NewTextView().
@@ -185,6 +178,26 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 			if createAt != "Local" {
 				updateGithubPath()
 			}
+		}).SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			switch event.Key() {
+			case tcell.KeyUp:
+				focusedItemIndex, _ := form.GetFocusedItemIndex()
+				if focusedItemIndex == 0 {
+					tui.App.SetFocus(tabs.TextView)
+				} else if focusedItemIndex > 0 {
+					tui.App.SetFocus(form.GetFormItem(focusedItemIndex - 1))
+				}
+				return nil
+			case tcell.KeyDown:
+				focusedItemIndex, _ := form.GetFocusedItemIndex()
+				if focusedItemIndex < form.GetFormItemCount()-1 {
+					tui.App.SetFocus(form.GetFormItem(1))
+					return nil
+				}
+				return event
+			default:
+				return event
+			}
 		})
 
 		if createAt == "Local" {
@@ -253,9 +266,14 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 
 	flex.AddItem(form, 0, 1, true)
 
-	menuPanel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(list, list.Box))
 	contentPanel := sneatnav.NewPanel(tui, sneatv.WithBordersWithoutPadding(flex, flex.Box))
-	tui.SetPanels(menuPanel, contentPanel)
+	tui.SetPanels(nil, contentPanel)
+	tui.App.SetFocus(tabs.TextView)
+
+	// TODO(help-wanted): This is not called :(, we need to activate tabs when coming from the left menu
+	flex.SetFocusFunc(func() {
+		tui.App.SetFocus(tabs.TextView)
+	})
 }
 
 func authenticateGitHub(tui *sneatnav.TUI, onSuccess func(owner string)) {

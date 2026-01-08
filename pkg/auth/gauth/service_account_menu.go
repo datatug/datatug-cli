@@ -7,63 +7,61 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-
 	firebase "google.golang.org/api/firebase/v1beta1"
 )
 
 type serviceAccountMenu struct {
-	acc  ServiceAccountDbo
-	list list.Model
+	acc ServiceAccountDbo
+	//list list.Model
 }
 
 // newServiceAccountMenu creates a list of Firebase projects available to the service account.
 // For now, we derive the project list from the service account JSON (field project_id),
 // which provides at least one project ID without external API calls.
-func newServiceAccountMenu(acc ServiceAccountDbo) tea.Model {
-	var items []list.Item
-	if projects, err := projectsFromServiceAccount(acc.Path); err == nil {
-		for _, project := range projects {
-			items = append(items, menuItem{title: project.Name, id: project.ProjectId})
-		}
-	} else {
-		// Show an inline error entry to inform the user, but keep navigation intact.
-		items = append(items, menuItem{title: "Error loading projects", description: err.Error()})
-	}
-	l := list.New(items, list.NewDefaultDelegate(), 60, 18)
-	l.Title = fmt.Sprintf("%s — Projects", acc.Name)
-	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(true)
-	l.SetShowHelp(true)
-	l.DisableQuitKeybindings() // prevent Esc from quitting; parent handles Esc to go back
-	l.Styles.Title = lipgloss.NewStyle().Bold(true)
-	return &serviceAccountMenu{acc: acc, list: l}
+func newServiceAccountMenu(acc ServiceAccountDbo) *serviceAccountMenu {
+	//var items []list.Item
+	//if projects, err := projectsFromServiceAccount(acc.Path); err == nil {
+	//	for _, project := range projects {
+	//		items = append(items, menuItem{title: project.Name, id: project.ProjectId})
+	//	}
+	//} else {
+	//	// Show an inline error entry to inform the user, but keep navigation intact.
+	//	items = append(items, menuItem{title: "Error loading projects", description: err.Error()})
+	//}
+	//l := list.New(items, list.NewDefaultDelegate(), 60, 18)
+	//l.Title = fmt.Sprintf("%s — Projects", acc.Name)
+	//l.SetShowStatusBar(false)
+	//l.SetFilteringEnabled(true)
+	//l.SetShowHelp(true)
+	//l.DisableQuitKeybindings() // prevent Esc from quitting; parent handles Esc to go back
+	//l.Styles.Title = lipgloss.NewStyle().Bold(true)
+	return &serviceAccountMenu{acc: acc} //list: l
+
 }
 
 func (m *serviceAccountMenu) Validate() error { return nil }
-func (m *serviceAccountMenu) Init() tea.Cmd   { return nil }
 
-func (m *serviceAccountMenu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch mm := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.list.SetSize(mm.Width, mm.Height)
-		return m, nil
-	case tea.KeyMsg:
-		// Let parent handle Esc navigation; ensure list doesn't quit.
-		if mm.Type == tea.KeyEsc {
-			return m, nil
-		}
-	}
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-	return m, cmd
-}
+//func (m *serviceAccountMenu) Init() tea.Cmd   { return nil }
 
-func (m *serviceAccountMenu) View() string {
-	return m.list.View() + "\n[Esc] back"
-}
+//func (m *serviceAccountMenu) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+//	switch mm := msg.(type) {
+//	case tea.WindowSizeMsg:
+//		//m.list.SetSize(mm.Width, mm.Height)
+//		return m, nil
+//	case tea.KeyMsg:
+//		// Let parent handle Esc navigation; ensure list doesn't quit.
+//		if mm.Type == tea.KeyEsc {
+//			return m, nil
+//		}
+//	}
+//	var cmd tea.Cmd
+//	m.list, cmd = m.list.Update(msg)
+//	return m, cmd
+//}
+
+//func (m *serviceAccountMenu) View() string {
+//	return m.list.View() + "\n[Esc] back"
+//}
 
 // projectsFromServiceAccount reads the credentials JSON and extracts project IDs.
 // For tests and offline mode, we only parse the local JSON and return a single

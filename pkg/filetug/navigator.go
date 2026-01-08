@@ -264,10 +264,13 @@ func (nav *Navigator) goDir(dir string) {
 			n := tview.NewTreeNode("📁" + name).SetReference(path.Join(nodePath, name))
 			parentNode.AddChild(n)
 		} else {
-			nav.table.SetCell(fileIndex, 0, tview.NewTableCell(name))
+			tdName := tview.NewTableCell(name)
+			color := GetColorByFileName(name)
+			tdName.SetTextColor(color)
+			nav.table.SetCell(fileIndex, 0, tdName)
 			if fi, err := child.Info(); err == nil {
-				nav.table.SetCell(fileIndex, 1,
-					tview.NewTableCell(strconv.FormatInt(fi.Size(), 10)).SetAlign(tview.AlignRight))
+				td := tview.NewTableCell(strconv.FormatInt(fi.Size(), 10)).SetAlign(tview.AlignRight)
+				nav.table.SetCell(fileIndex, 1, td)
 			}
 			fileIndex++
 		}

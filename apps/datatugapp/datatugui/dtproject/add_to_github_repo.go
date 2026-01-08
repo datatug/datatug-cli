@@ -14,6 +14,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/datatug/datatug-cli/pkg/auth/ghauth"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
@@ -482,8 +483,8 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 
 		// 3. Cloning project repository
 		updateProgress(3, "cloning...")
-		localDir := filestore.ExpandHome(projectDir)
-		dirExists, _ := filestore.DirExists(localDir)
+		localDir := fsutils.ExpandHome(projectDir)
+		dirExists, _ := fsutils.DirExists(localDir)
 		if !dirExists {
 			parent := filepath.Dir(localDir)
 			_ = os.MkdirAll(parent, 0o755)

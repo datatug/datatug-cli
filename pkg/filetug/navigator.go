@@ -1,4 +1,4 @@
-package fsmanager
+package filetug
 
 import (
 	"fmt"
@@ -7,15 +7,15 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
 type Navigator struct {
-	tui *sneatnav.TUI
+	app *tview.Application
+	o   navigatorOptions
 	*tview.Flex
 	tree      *Tree
 	favorites *favorites
@@ -23,11 +23,31 @@ type Navigator struct {
 	table     *tview.Table
 }
 
-func NewNavigator(tui *sneatnav.TUI) *Navigator {
+func (n *Navigator) SetFocus() {
+	n.app.SetFocus(n.tree.TreeView)
+}
+
+type navigatorOptions struct {
+	moveFocusUp func(source tview.Primitive)
+}
+
+type NavigatorOption func(o *navigatorOptions)
+
+func OnMoveFocusUp(f func(source tview.Primitive)) NavigatorOption {
+	return func(o *navigatorOptions) {
+		o.moveFocusUp = f
+	}
+}
+
+func NewNavigator(app *tview.Application, options ...NavigatorOption) *Navigator {
 
 	nav := new(Navigator)
 
-	nav.tui = tui
+	for _, option := range options {
+		option(&nav.o)
+	}
+
+	nav.app = app
 
 	nav.tree = NewTree()
 
@@ -40,7 +60,7 @@ func NewNavigator(tui *sneatnav.TUI) *Navigator {
 	nav.table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyLeft:
-			tui.App.SetFocus(nav.tree)
+			app.SetFocus(nav.tree)
 			return nil
 		default:
 			return nil
@@ -59,7 +79,7 @@ func NewNavigator(tui *sneatnav.TUI) *Navigator {
 	nav.left.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyRight:
-			nav.tui.App.SetFocus(nav.table)
+			nav.app.SetFocus(nav.table)
 			return nil
 		default:
 			return event
@@ -112,7 +132,7 @@ func NewNavigator(tui *sneatnav.TUI) *Navigator {
 				rootNode := nav.favorites.GetRoot()
 				current := nav.favorites.GetCurrentNode()
 				if current == rootNode || current == rootNode.GetChildren()[0] {
-					nav.tui.Header.SetFocus(sneatnav.ToBreadcrumbs, nav.favorites.TreeView)
+					nav.o.moveFocusUp(nav.favorites.TreeView)
 					nav.favorites.SetCurrentNode(nil)
 					return nil
 				}
@@ -122,7 +142,7 @@ func NewNavigator(tui *sneatnav.TUI) *Navigator {
 				if nav.favorites.GetCurrentNode() == favNodes[len(favNodes)-1] {
 					nav.favorites.SetCurrentNode(nil)
 					nav.tree.SetCurrentNode(nav.tree.GetRoot())
-					nav.tui.App.SetFocus(nav.tree.TreeView)
+					nav.app.SetFocus(nav.tree.TreeView)
 					return nil
 				}
 				return event
@@ -137,7 +157,7 @@ func NewNavigator(tui *sneatnav.TUI) *Navigator {
 				children := nav.favorites.GetRoot().GetChildren()
 				nav.favorites.SetCurrentNode(children[len(children)-1])
 				nav.tree.SetCurrentNode(nil)
-				nav.tui.App.SetFocus(nav.favorites.TreeView)
+				nav.app.SetFocus(nav.favorites.TreeView)
 				return nil
 			}
 			return event
@@ -146,7 +166,7 @@ func NewNavigator(tui *sneatnav.TUI) *Navigator {
 
 	nav.left.SetFocusFunc(func() {
 		nav.left.SetBorderColor(sneatv.DefaultFocusedBorderColor)
-		nav.tui.App.SetFocus(nav.favorites.TreeView)
+		nav.app.SetFocus(nav.favorites.TreeView)
 	})
 
 	nav.left.SetBlurFunc(func() {
@@ -223,7 +243,7 @@ func (nav *Navigator) goDir(dir string) {
 		}
 	}
 
-	dirPath := filestore.ExpandHome(nodePath)
+	dirPath := fsutils.ExpandHome(nodePath)
 	children, err := os.ReadDir(dirPath)
 	if err != nil {
 		parentNode.AddChild(tview.NewTreeNode(fmt.Sprintf("Error for %s: %s", dirPath, err.Error())))
@@ -255,5 +275,5 @@ func (nav *Navigator) goDir(dir string) {
 		}
 	}
 	t.SetCurrentNode(parentNode)
-	nav.tui.App.SetFocus(t)
+	nav.app.SetFocus(t)
 }

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 )
 
@@ -20,7 +21,7 @@ func loadEnvServers(dirPath string, env *datatug.Environment) error {
 			return nil
 		}
 		servers := make([]*datatug.EnvDbServer, 0, 1)
-		if err := readJSONFile(path.Join(dirPath, fileName), false, &servers); err != nil {
+		if err := fsutils.ReadJSONFile(path.Join(dirPath, fileName), false, &servers); err != nil {
 			return err
 		}
 		for i, server := range servers {

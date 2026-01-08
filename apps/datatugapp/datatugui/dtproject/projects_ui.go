@@ -10,6 +10,7 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
@@ -109,7 +110,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		if projectConfig.ID == demoProject1LocalID {
 			openDatatugDemoProject(tui, projectConfig)
 		} else {
-			projectPath := filestore.ExpandHome(projectConfig.Path)
+			projectPath := fsutils.ExpandHome(projectConfig.Path)
 			store := filestore.NewProjectStore(projectConfig.ID, projectPath)
 			_, err = store.LoadProjectFile(ctx)
 			if errors.Is(err, datatug.ErrProjectDoesNotExist) {

@@ -16,7 +16,6 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/dbviewer"
 	"github.com/datatug/datatug-cli/pkg/dtio"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/datatug/datatug-cli/pkg/fsmanager"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/strongo/logus"
 	"github.com/urfave/cli/v3"
@@ -101,7 +100,7 @@ func registerModules() {
 	dtproject.RegisterModule()
 
 	dbviewer.RegisterAsViewer()
-	fsmanager.RegisterAsViewer()
+	RegisterAsViewer()
 	gcloudui.RegisterAsViewer()
 	awsui.RegisterAsViewer()
 	azureui.RegisterAsViewer()

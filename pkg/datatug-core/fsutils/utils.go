@@ -1,4 +1,4 @@
-package filestore
+package fsutils
 
 import (
 	"encoding/json"
@@ -14,14 +14,14 @@ type Decoder interface {
 	Decode(o interface{}) error
 }
 
-func readJSONFile(filePath string, required bool, o interface{}) (err error) {
+func ReadJSONFile(filePath string, required bool, o interface{}) (err error) {
 	jsonDecoderFactory := func(r io.Reader) Decoder {
 		return json.NewDecoder(r)
 	}
-	return readFile(filePath, required, o, jsonDecoderFactory)
+	return ReadFile(filePath, required, o, jsonDecoderFactory)
 }
 
-func readFile(filePath string, required bool, o interface{}, newDecoder func(r io.Reader) Decoder) (err error) {
+func ReadFile(filePath string, required bool, o interface{}, newDecoder func(r io.Reader) Decoder) (err error) {
 	var file *os.File
 	if file, err = os.Open(filePath); err != nil {
 		if os.IsNotExist(err) && !required {

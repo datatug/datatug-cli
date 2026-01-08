@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 )
 
@@ -80,7 +81,7 @@ func (s fsProjectItemsStore[TSlice, TItemPtr, TItem]) loadProjectItem(
 	}
 	filePath := path.Join(dirPath, fileName)
 	item = new(TItem)
-	if err = readJSONFile(filePath, true, &item); err != nil {
+	if err = fsutils.ReadJSONFile(filePath, true, &item); err != nil {
 		return item, fmt.Errorf("failed to load %T[%s] from project: %w", item, id, err)
 	}
 	item.SetID(id)

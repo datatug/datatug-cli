@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
@@ -42,9 +43,9 @@ func newDemoProject1Ref() *dtconfig.ProjectRef {
 
 func openDatatugDemoProject(tui *sneatnav.TUI, projectRef dtconfig.ProjectRef) {
 	// Expand home in path like ~/...
-	projectDir := filestore.ExpandHome(projectRef.Path)
+	projectDir := fsutils.ExpandHome(projectRef.Path)
 
-	projectDirExists, err := filestore.DirExists(projectDir)
+	projectDirExists, err := fsutils.DirExists(projectDir)
 	if err != nil {
 		panic(err)
 	}
@@ -72,7 +73,7 @@ func openDatatugDemoProject(tui *sneatnav.TUI, projectRef dtconfig.ProjectRef) {
 	go func() {
 		// Ensure parent directory exists
 		parent := filepath.Dir(datatugDemoProjectsDir)
-		parent = filestore.ExpandHome(parent)
+		parent = fsutils.ExpandHome(parent)
 		if err = os.MkdirAll(parent, 0o755); err != nil {
 			panic(err)
 		}
@@ -82,7 +83,7 @@ func openDatatugDemoProject(tui *sneatnav.TUI, projectRef dtconfig.ProjectRef) {
 			Progress: NewTviewProgressWriter(tui, progressText),
 			// Depth: 1, // uncomment for shallow clone if desired
 		}
-		targetDir := filestore.ExpandHome(datatugDemoProjectsDir)
+		targetDir := fsutils.ExpandHome(datatugDemoProjectsDir)
 		if _, err = git.PlainClone(targetDir, false, &cloneOptions); err != nil {
 			tui.App.Stop()
 			panic(fmt.Sprintf("failed to git clone %s into %s: %v", cloneOptions.URL, projectDir, err))

@@ -12,8 +12,8 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/dtprojcreator"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/google/go-github/v80/github"
 )
 
@@ -222,8 +222,8 @@ func (c *projectCreator) addDatatugSectionToRootReadmeFile(ctx context.Context, 
 //}
 
 func (c *projectCreator) cloneRepo() (err error) {
-	localDir := filestore.ExpandHome("projectPath")
-	dirExists, _ := filestore.DirExists(localDir)
+	localDir := fsutils.ExpandHome("projectPath")
+	dirExists, _ := fsutils.DirExists(localDir)
 	if !dirExists {
 		parent := filepath.Dir(localDir)
 		_ = os.MkdirAll(parent, 0o755)

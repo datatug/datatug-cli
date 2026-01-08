@@ -8,13 +8,14 @@ import (
 	"sync"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/parallel"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 )
 
 func loadProjectFile(projPath string, project *datatug.Project) (err error) {
 	filePath := path.Join(projPath, storage.ProjectSummaryFileName)
-	if err = readJSONFile(filePath, true, project); err != nil {
+	if err = fsutils.ReadJSONFile(filePath, true, project); err != nil {
 		err = fmt.Errorf("failed to load project file %s: %w", filePath, err)
 	}
 	return
@@ -102,7 +103,7 @@ func loadDbModel(dbModelsDirPath, id string) (dbModel *datatug.DbModel, err erro
 	return dbModel, parallel.Run(
 		func() (err error) {
 			fileName := path.Join(dbModelDirPath, storage.JsonFileName(id, storage.DbModelFileSuffix))
-			if err = readJSONFile(fileName, true, dbModel); err != nil {
+			if err = fsutils.ReadJSONFile(fileName, true, dbModel); err != nil {
 				//log.Printf("failed to load db model from [%v]: %v", fileName, err)
 				return err
 			}
@@ -163,7 +164,7 @@ func loadSchemaModel(dbModelDirPath, schemaID string) (schemaModel *datatug.Sche
 func loadEnvFile(envDirPath, envID string) (envSummary *datatug.EnvironmentSummary, err error) {
 	filePath := path.Join(envDirPath, envID, storage.EnvironmentSummaryFileName)
 	envSummary = new(datatug.EnvironmentSummary)
-	if err = readJSONFile(filePath, true, envSummary); err != nil {
+	if err = fsutils.ReadJSONFile(filePath, true, envSummary); err != nil {
 		return
 	}
 	if envSummary.ID == "" {
@@ -192,7 +193,7 @@ func loadDbCatalogs(dirPath string, dbServer *datatug.ProjDbServer) (err error) 
 func loadDbCatalog(dirPath string, dbCatalog *datatug.DbCatalog) (err error) {
 	//log.Printf("Loading DB catalog: %v from %v...\n", dbCatalog.ID, dirPath)
 	filePath := path.Join(dirPath, storage.JsonFileName(dbCatalog.ID, storage.DbCatalogFileSuffix))
-	if err = readJSONFile(filePath, false, dbCatalog); err != nil {
+	if err = fsutils.ReadJSONFile(filePath, false, dbCatalog); err != nil {
 		log.Printf("failed to read DB catalog file [%v]: %v", filePath, err)
 		return err
 	}
@@ -304,7 +305,7 @@ func loadTable(dirPath, schema, tableName string) (table *datatug.CollectionInfo
 	loadTableFile := func(suffix string, required bool) (err error) {
 		filePath := path.Join(tableDirPath, prefix+suffix)
 		//log.Printf("loadTableFile: path=%v, required=%v", filePath, required)
-		return readJSONFile(filePath, required, table)
+		return fsutils.ReadJSONFile(filePath, required, table)
 	}
 	suffixes := []string{
 		"json",

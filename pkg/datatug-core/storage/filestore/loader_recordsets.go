@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/strongo/validation"
 )
@@ -88,7 +89,7 @@ func (loader fileSystemLoader) LoadRecordsetDefinition(projectID, recordsetID st
 func (loader fileSystemLoader) loadRecordsetDefinition(dirPath, folder, recordsetID, projectID string) (dataset *datatug.RecordsetDefinition, err error) {
 	dataset = new(datatug.RecordsetDefinition)
 	filePath := path.Join(dirPath, recordsetID, storage.JsonFileName(recordsetID, storage.RecordsetFileSuffix))
-	if err = readJSONFile(filePath, true, dataset); err != nil {
+	if err = fsutils.ReadJSONFile(filePath, true, dataset); err != nil {
 		err = fmt.Errorf("failed to load dataset [%v] from project [%v]: %w", recordsetID, projectID, err)
 		return nil, err
 	}
@@ -115,7 +116,7 @@ func (loader fileSystemLoader) LoadRecordsetData(projectID, datasetName, fileNam
 	filePath := path.Join(projPath, storage.DataFolder, datasetName, fileName)
 	var recordset datatug.Recordset
 	rows := make([]interface{}, 0)
-	if err := readJSONFile(filePath, true, &rows); err != nil {
+	if err := fsutils.ReadJSONFile(filePath, true, &rows); err != nil {
 		return nil, err
 	}
 

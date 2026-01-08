@@ -10,6 +10,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/auth/ghauth"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/datatug/datatug-cli/pkg/dtgithub"
@@ -354,7 +355,7 @@ func handleCreateProject(tui *sneatnav.TUI, createAt createTarget, title, locati
 }
 
 func createLocalProject(tui *sneatnav.TUI, name, location string) (projectRef dtconfig.ProjectRef, err error) {
-	fullPath := filestore.ExpandHome(location)
+	fullPath := fsutils.ExpandHome(location)
 	projectPath := filepath.Join(fullPath, name)
 
 	if err = os.MkdirAll(projectPath, 0755); err != nil {

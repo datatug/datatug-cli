@@ -1,4 +1,4 @@
-package fsmanager
+package filetug
 
 import (
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"

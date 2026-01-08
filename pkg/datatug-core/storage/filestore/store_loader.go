@@ -7,6 +7,7 @@ import (
 	"path"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/parallel"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/strongo/validation"
@@ -88,7 +89,7 @@ func (s fsProjectStore) LoadProjectFile(context.Context) (projectFile datatug.Pr
 // LoadProjectFile loads project file
 func LoadProjectFile(projPath string) (v datatug.ProjectFile, err error) {
 	fileName := path.Join(projPath, storage.ProjectSummaryFileName)
-	if err = readJSONFile(fileName, true, &v); os.IsNotExist(err) {
+	if err = fsutils.ReadJSONFile(fileName, true, &v); os.IsNotExist(err) {
 		err = fmt.Errorf("%w: %v", datatug.ErrProjectDoesNotExist, err)
 	}
 	return

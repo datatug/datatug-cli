@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
@@ -95,7 +95,7 @@ const northwindSqliteDbFileName = "northwind.sqlite"
 const northwindSqliteDbUrl = "https://raw.githubusercontent.com/jpwhite3/northwind-SQLite3/refs/heads/main/dist/northwind.db"
 
 func fileExists(path string) bool {
-	path = filestore.ExpandHome(path)
+	path = fsutils.ExpandHome(path)
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
 }
@@ -126,7 +126,7 @@ func downloadFile(tui *sneatnav.TUI, from, to string) error {
 		return errors.New("tui is nil")
 	}
 
-	dst := filestore.ExpandHome(to)
+	dst := fsutils.ExpandHome(to)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("failed to create dir: %w", err)
 	}

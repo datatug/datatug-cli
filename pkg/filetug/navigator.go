@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -56,21 +55,21 @@ func NewNavigator(app *tview.Application, options ...NavigatorOption) *Navigator
 	nav.table = tview.NewTable()
 	nav.table.SetSelectable(true, false)
 	nav.table.SetFixed(1, 1)
-	nav.table.SetBorderColor(sneatv.DefaultBlurBorderColor)
+	nav.table.SetBorderColor(Style.BlurBorderColor)
 	nav.table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyLeft:
 			app.SetFocus(nav.tree)
 			return nil
 		default:
-			return nil
+			return event
 		}
 	})
 	nav.table.SetFocusFunc(func() {
-		nav.table.SetBorderColor(sneatv.DefaultFocusedBorderColor)
+		nav.table.SetBorderColor(Style.FocusedBorderColor)
 	})
 	nav.table.SetBlurFunc(func() {
-		nav.table.SetBorderColor(sneatv.DefaultBlurBorderColor)
+		nav.table.SetBorderColor(Style.BlurBorderColor)
 	})
 
 	nav.left = tview.NewFlex().SetDirection(tview.FlexRow)
@@ -165,17 +164,17 @@ func NewNavigator(app *tview.Application, options ...NavigatorOption) *Navigator
 	})
 
 	nav.left.SetFocusFunc(func() {
-		nav.left.SetBorderColor(sneatv.DefaultFocusedBorderColor)
+		nav.left.SetBorderColor(Style.FocusedBorderColor)
 		nav.app.SetFocus(nav.favorites.TreeView)
 	})
 
 	nav.left.SetBlurFunc(func() {
-		nav.left.SetBorderColor(sneatv.DefaultBlurBorderColor)
+		nav.left.SetBorderColor(Style.BlurBorderColor)
 	})
 
 	onLeftTreeViewFocus := func(t *tview.TreeView) {
 		t.SetGraphicsColor(tcell.ColorWhite)
-		nav.left.SetBorderColor(sneatv.DefaultFocusedBorderColor)
+		nav.left.SetBorderColor(Style.FocusedBorderColor)
 		if t.GetCurrentNode() == nil {
 			children := t.GetRoot().GetChildren()
 			if len(children) > 0 {
@@ -185,9 +184,8 @@ func NewNavigator(app *tview.Application, options ...NavigatorOption) *Navigator
 	}
 
 	onLeftTreeViewBlur := func(t *tview.TreeView) {
-		t.SetGraphicsColor(tcell.ColorDarkGray)
-		nav.left.SetBorderColor(sneatv.DefaultBlurBorderColor)
-		//t.SetBorderColor(sneatv.DefaultBlurBorderColor)
+		t.SetGraphicsColor(Style.BlurGraphicsColor)
+		nav.left.SetBorderColor(Style.BlurBorderColor)
 	}
 
 	nav.favorites.SetFocusFunc(func() {

@@ -17,6 +17,10 @@ func TestMainFunc(t *testing.T) {
 	})
 	t.Run("getCommand_nil", func(t *testing.T) {
 		getCommand = func() *cli.Command { return nil }
+		osExitBackup := osExit
+		defer func() {
+			osExit = osExitBackup
+		}()
 		var exitCode int
 		osExit = func(i int) {
 			exitCode = i

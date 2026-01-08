@@ -15,23 +15,25 @@
             </p>
         </td>
     </tr>
-    
+
 </table>
 
 ![datatug-cli-employees-2.png](docs/screenshots/datatug-cli-employees-2.png)
 
-## ♺ Continuous Integration — [![Build and Test](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml/badge.svg)](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/datatug/datatug-cli?cache=1)](https://goreportcard.com/report/github.com/datatug/datatug-cli) [![GoDoc](https://godoc.org/github.com/datatug/datatug-cli?status.svg)](https://godoc.org/github.com/datatug/datatug-cli) [![Coverage Status](https://coveralls.io/repos/github/datatug/datatug-cli/badge.svg?branch=main)](https://coveralls.io/github/datatug/datatug-cli?branch=main) 
+## ♺ Continuous Integration — [![Build and Test](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml/badge.svg)](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/datatug/datatug-cli?cache=1)](https://goreportcard.com/report/github.com/datatug/datatug-cli) [![GoDoc](https://godoc.org/github.com/datatug/datatug-cli?status.svg)](https://godoc.org/github.com/datatug/datatug-cli) [![Coverage Status](https://coveralls.io/repos/github/datatug/datatug-cli/badge.svg?branch=main)](https://coveralls.io/github/datatug/datatug-cli?branch=main)
 
 Help wanted to [get test coverage to 100%](https://github.com/datatug/datatug-cli/issues/64).
 
 ## Installation
 
 ### From source codes
+
 ```bash
 go install github.com/datatug/datatug-cli@latest -o datatug
 ```
 
 ### macOS ([Homebrew](https://github.com/datatug/homebrew-tap))
+
 ```bash
 brew tap datatug/tap
 brew install datatug
@@ -141,11 +143,6 @@ We are open for pull requests to support other `sql` DBs.
 
 Read [README-dev.md](docs/README-dev.md) for details on how to setup, debug, and contribute.
 
-## Dependencies & Credits
-
-- https://github.com/denisenkom/go-mssqldb - Go language driver to connect to MS SQL Server
-- https://gihub.com/strongo/validation - helpers for requests & models validations
-
 ## Sample Databases
 
 ### By Database Platform
@@ -166,8 +163,9 @@ Read [README-dev.md](docs/README-dev.md) for details on how to setup, debug, and
 
 ## Open Source Libraries we use
 
+- [tview](https://github.com/rivo/tview) - Terminal UI library with rich, interactive widgets — written in Golang
 - [DALgo](https://github.com/dal-go/dalgo) - Database Abstraction Layer for Go
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) - A Go framework for TUI apps
+- https://gihub.com/strongo/validation - helpers for requests & models validations
 
 ## Contributing
 

@@ -6,7 +6,9 @@ import (
 )
 
 type Panel interface {
-	sneatv.PrimitiveWithBox
+	//sneatv.PrimitiveWithBox
+	tview.Primitive
+	//GetBox() *tview.Box
 	TakeFocus()
 	Close()
 }
@@ -41,6 +43,17 @@ func (p panel[T]) TakeFocus() {
 func NewPanel[T tview.Primitive](tui *TUI, p sneatv.WithBoxType[T]) Panel {
 	return &panel[sneatv.WithBoxType[T]]{
 		PrimitiveWithBox: p,
+		tui:              tui,
+	}
+}
+
+func NewPanelWithoutBorders[T tview.Primitive](tui *TUI, p tview.Primitive, b *tview.Box) Panel {
+	pvb := sneatv.WithBoxType[T]{
+		Primitive: p,
+		Box:       b,
+	}
+	return &panel[sneatv.WithBoxType[T]]{
+		PrimitiveWithBox: pvb,
 		tui:              tui,
 	}
 }

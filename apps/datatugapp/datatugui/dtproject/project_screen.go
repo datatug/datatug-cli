@@ -11,11 +11,25 @@ import (
 	"github.com/rivo/tview"
 )
 
-func NewProjectPanel(tui *sneatnav.TUI, projectConfig *dtconfig.ProjectRef) sneatnav.Panel {
-	content := tview.NewTextView().SetTextAlign(tview.AlignCenter)
+var _ sneatnav.Panel = (*projectPanel)(nil)
+
+type projectPanel struct {
+	*tview.TextView
+}
+
+func (p *projectPanel) GetBox() *tview.Box {
+	return p.Box
+}
+func (p *projectPanel) Close()     {}
+func (p *projectPanel) TakeFocus() {}
+
+func newProjectPanel(projectConfig *dtconfig.ProjectRef) *projectPanel {
+	p := &projectPanel{
+		TextView: tview.NewTextView().SetTextAlign(tview.AlignCenter),
+	}
 	projectTitle := GetProjectTitle(projectConfig)
-	sneatv.SetPanelTitle(content.Box, fmt.Sprintf("Project: %s", projectTitle))
-	return sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(content, content.Box))
+	sneatv.SetPanelTitle(p.TextView.Box, fmt.Sprintf("Project: %s", projectTitle))
+	return p
 }
 
 func GoDatatugProjectScreen(projectCtx *ProjectContext) {
@@ -26,7 +40,7 @@ func GoDatatugProjectScreen(projectCtx *ProjectContext) {
 	projectBreadcrumb := sneatv.NewBreadcrumb(title, nil)
 	breadcrumbs.Push(projectBreadcrumb)
 	menu := getOrCreateProjectMenuPanel(projectCtx, "project")
-	content := NewProjectPanel(tui, pConfig)
+	content := newProjectPanel(pConfig)
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToMenu))
 
 	dtstate.BumpRecentProject(pConfig.ID)

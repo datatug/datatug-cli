@@ -17,8 +17,9 @@ func RegisterAsViewer() {
 }
 
 func GoFilesManager(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
-	n := NewNavigator()
+	n := NewNavigator(tui)
 	navigatorPanel := sneatnav.NewPanelWithoutBorders[Navigator](tui, n, n.Box)
 	tui.SetPanels(nil, navigatorPanel, sneatnav.WithFocusTo(focusTo))
+	tui.App.SetFocus(n.tree.TreeView)
 	return nil
 }

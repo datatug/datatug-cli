@@ -9,7 +9,6 @@ var _ sneatv.PrimitiveWithBox = (*Tree)(nil)
 
 type Tree struct {
 	*tview.TreeView
-	root        *tview.TreeNode
 	currDirRoot *tview.TreeNode
 }
 
@@ -21,24 +20,9 @@ func NewTree() *Tree {
 	t := &Tree{
 		TreeView: tview.NewTreeView(),
 	}
-	t.SetBorder(true)
-
-	t.root = tview.NewTreeNode("").SetSelectable(false)
-	t.SetRoot(t.root)
-	t.SetTopLevel(1)
-
-	favoritesNode := tview.NewTreeNode("Favorites").SetSelectable(false)
-	t.root.AddChild(favoritesNode)
-
-	addFavNode := func(text, dir string) {
-		favoritesNode.AddChild(tview.NewTreeNode(text).SetReference(dir))
-	}
-
-	addFavNode(" ~ [gray]Home[-]", "~")
-	addFavNode(" / [gray]Root[-]", "/")
 
 	t.currDirRoot = tview.NewTreeNode("~")
-	t.root.AddChild(t.currDirRoot)
+	t.SetRoot(t.currDirRoot)
 
 	return t
 }

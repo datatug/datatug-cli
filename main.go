@@ -22,6 +22,8 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+var osExit = os.Exit
+
 func main() {
 
 	// Enqueue an event
@@ -51,7 +53,7 @@ func main() {
 		dtlog.Close()
 		//time.Sleep(10 * time.Millisecond) // Allow some time for event to be sent
 		if r != nil {
-			os.Exit(1)
+			osExit(1)
 		}
 	}()
 

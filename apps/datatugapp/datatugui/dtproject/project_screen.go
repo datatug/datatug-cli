@@ -28,7 +28,7 @@ func newProjectPanel(projectConfig *dtconfig.ProjectRef) *projectPanel {
 		TextView: tview.NewTextView().SetTextAlign(tview.AlignCenter),
 	}
 	projectTitle := GetProjectTitle(projectConfig)
-	sneatv.SetPanelTitle(p.TextView.Box, fmt.Sprintf("Project: %s", projectTitle))
+	sneatv.SetPanelTitle(p.Box, fmt.Sprintf("Project: %s", projectTitle))
 	return p
 }
 

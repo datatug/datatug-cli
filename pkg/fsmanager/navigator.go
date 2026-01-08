@@ -84,7 +84,7 @@ func (m *Navigator) goDir(dir string) {
 		}
 	}
 
-	t.TreeView.SetCurrentNode(parentNode)
+	t.SetCurrentNode(parentNode)
 
 	dirPath := filestore.ExpandHome(nodePath)
 	children, err := os.ReadDir(dirPath)

@@ -24,8 +24,8 @@ func NewTree() *Tree {
 	t.SetBorder(true)
 
 	t.root = tview.NewTreeNode("").SetSelectable(false)
-	t.TreeView.SetRoot(t.root)
-	t.TreeView.SetTopLevel(1)
+	t.SetRoot(t.root)
+	t.SetTopLevel(1)
 
 	favoritesNode := tview.NewTreeNode("Favorites").SetSelectable(false)
 	t.root.AddChild(favoritesNode)

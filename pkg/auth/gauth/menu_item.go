@@ -1,12 +1,12 @@
 package gauth
 
 // menuItem implements list.Item
-type menuItem struct {
-	id          string
-	title       string
-	description string
-}
-
-func (i menuItem) Title() string       { return i.title }
-func (i menuItem) Description() string { return i.description }
-func (i menuItem) FilterValue() string { return i.title }
+//type menuItem struct {
+//	id          string
+//	title       string
+//	description string
+//}
+//
+//func (i menuItem) Title() string       { return i.title }
+//func (i menuItem) Description() string { return i.description }
+//func (i menuItem) FilterValue() string { return i.title }

@@ -10,36 +10,36 @@ import (
 	firebase "google.golang.org/api/firebase/v1beta1"
 )
 
-type serviceAccountMenu struct {
-	acc ServiceAccountDbo
-	//list list.Model
-}
+//type serviceAccountMenu struct {
+//	acc ServiceAccountDbo
+//	//list list.Model
+//}
+//
+//// newServiceAccountMenu creates a list of Firebase projects available to the service account.
+//// For now, we derive the project list from the service account JSON (field project_id),
+//// which provides at least one project ID without external API calls.
+//func newServiceAccountMenu(acc ServiceAccountDbo) *serviceAccountMenu {
+//	//var items []list.Item
+//	//if projects, err := projectsFromServiceAccount(acc.Path); err == nil {
+//	//	for _, project := range projects {
+//	//		items = append(items, menuItem{title: project.Name, id: project.ProjectId})
+//	//	}
+//	//} else {
+//	//	// Show an inline error entry to inform the user, but keep navigation intact.
+//	//	items = append(items, menuItem{title: "Error loading projects", description: err.Error()})
+//	//}
+//	//l := list.New(items, list.NewDefaultDelegate(), 60, 18)
+//	//l.Title = fmt.Sprintf("%s — Projects", acc.Name)
+//	//l.SetShowStatusBar(false)
+//	//l.SetFilteringEnabled(true)
+//	//l.SetShowHelp(true)
+//	//l.DisableQuitKeybindings() // prevent Esc from quitting; parent handles Esc to go back
+//	//l.Styles.Title = lipgloss.NewStyle().Bold(true)
+//	return &serviceAccountMenu{acc: acc} //list: l
+//
+//}
 
-// newServiceAccountMenu creates a list of Firebase projects available to the service account.
-// For now, we derive the project list from the service account JSON (field project_id),
-// which provides at least one project ID without external API calls.
-func newServiceAccountMenu(acc ServiceAccountDbo) *serviceAccountMenu {
-	//var items []list.Item
-	//if projects, err := projectsFromServiceAccount(acc.Path); err == nil {
-	//	for _, project := range projects {
-	//		items = append(items, menuItem{title: project.Name, id: project.ProjectId})
-	//	}
-	//} else {
-	//	// Show an inline error entry to inform the user, but keep navigation intact.
-	//	items = append(items, menuItem{title: "Error loading projects", description: err.Error()})
-	//}
-	//l := list.New(items, list.NewDefaultDelegate(), 60, 18)
-	//l.Title = fmt.Sprintf("%s — Projects", acc.Name)
-	//l.SetShowStatusBar(false)
-	//l.SetFilteringEnabled(true)
-	//l.SetShowHelp(true)
-	//l.DisableQuitKeybindings() // prevent Esc from quitting; parent handles Esc to go back
-	//l.Styles.Title = lipgloss.NewStyle().Bold(true)
-	return &serviceAccountMenu{acc: acc} //list: l
-
-}
-
-func (m *serviceAccountMenu) Validate() error { return nil }
+//func (m *serviceAccountMenu) Validate() error { return nil }
 
 //func (m *serviceAccountMenu) Init() tea.Cmd   { return nil }
 

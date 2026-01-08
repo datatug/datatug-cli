@@ -1,9 +1,5 @@
 package gauth
 
-import "github.com/charmbracelet/bubbles/list"
-
-var _ list.Item = (*menuItem)(nil)
-
 // menuItem implements list.Item
 type menuItem struct {
 	id          string

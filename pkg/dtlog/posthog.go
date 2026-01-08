@@ -161,7 +161,7 @@ func readPostHogConfig() (c posthogConfig) {
 	return
 }
 
-func getPosthogConfigFilePath() string {
+var getPosthogConfigFilePath = func() string {
 	return filestore.ExpandHome("~/datatug/.posthog.yaml")
 }
 

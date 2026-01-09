@@ -6,7 +6,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
+	"github.com/datatug/filetug/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/strongo/logus"
 )

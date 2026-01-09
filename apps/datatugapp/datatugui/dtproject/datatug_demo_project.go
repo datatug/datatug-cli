@@ -8,8 +8,8 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/datatug/filetug/pkg/fsutils"
+	"github.com/datatug/filetug/pkg/sneatv"
 	"github.com/go-git/go-git/v5"
 	"github.com/rivo/tview"
 )

@@ -10,12 +10,12 @@ go 1.25.5
 
 require (
 	cloud.google.com/go/firestore v1.20.0
-	github.com/alecthomas/chroma/v2 v2.21.1
+	github.com/alecthomas/chroma/v2 v2.22.0
 	github.com/dal-go/dalgo2sql v0.4.19
-	github.com/datatug/filetug v0.0.17
+	github.com/datatug/filetug v0.0.19
 	github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2
 	github.com/denisenkom/go-mssqldb v0.12.3
-	github.com/gdamore/tcell/v2 v2.13.5
+	github.com/gdamore/tcell/v2 v2.13.6
 	github.com/go-git/go-git/v5 v5.16.4
 	github.com/google/go-github/v80 v80.0.0
 	github.com/google/uuid v1.6.0
@@ -115,8 +115,8 @@ require (
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/term v0.38.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/term v0.39.0 // indirect
+	golang.org/x/text v0.33.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/genproto v0.0.0-20251222181119-0a764e51fe1b // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20251222181119-0a764e51fe1b // indirect

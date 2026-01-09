@@ -5,7 +5,7 @@ import (
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
+	"github.com/datatug/filetug/pkg/sneatv"
 )
 
 func getSqlDbBreadcrumbs(tui *sneatnav.TUI, dbContext dtviewers.DbContext) sneatnav.Breadcrumbs {

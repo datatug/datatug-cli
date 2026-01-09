@@ -5,7 +5,7 @@ import (
 
 	datatug "github.com/datatug/datatug-cli/apps/datatugapp"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
+	"github.com/datatug/filetug/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"google.golang.org/api/cloudresourcemanager/v3"

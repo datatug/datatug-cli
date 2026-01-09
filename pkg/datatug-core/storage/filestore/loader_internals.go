@@ -10,7 +10,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/parallel"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
-	"github.com/datatug/datatug-cli/pkg/filetug/fsutils"
+	"github.com/datatug/filetug/pkg/fsutils"
 )
 
 func loadProjectFile(projPath string, project *datatug.Project) (err error) {

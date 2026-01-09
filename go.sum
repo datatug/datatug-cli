@@ -62,6 +62,8 @@ github.com/dal-go/dalgo2sql v0.4.19 h1:n0OqzrSDoRgGliWQ7u/JuNiSg4/tk4yYQJ+Pjrd02
 github.com/dal-go/dalgo2sql v0.4.19/go.mod h1:B5iXVVTMz6BIl7YAPCyph3iCsJZgdlxGdjRimcaneyc=
 github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
+github.com/datatug/filetug v0.0.17 h1:/BH1kWcBbGgkQef/9+1AaJyuIcLljaKB5egKHYt8M9I=
+github.com/datatug/filetug v0.0.17/go.mod h1:lh8C5erGsuihLva/6CtfDrCfC+p836ULEdvr+KMPdgU=
 github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2 h1:9iN4YNV3PIGMU7Wh4hU0AjuI/mMwgbVXaV4YqHoE0ZU=
 github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2/go.mod h1:8mhg6DTTobWkm+Xfyts3nwJ7ZmxWMWWboguVH1INkc8=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

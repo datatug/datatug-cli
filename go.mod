@@ -1,6 +1,6 @@
 module github.com/datatug/datatug-cli
 
-go 1.25.4
+go 1.25.5
 
 //replace github.com/datatug/datatug-core => ../datatug-core
 
@@ -39,6 +39,7 @@ require (
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.14.4 // indirect
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
+	github.com/datatug/filetug v0.0.17 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/georgysavva/scany/v2 v2.1.4 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect

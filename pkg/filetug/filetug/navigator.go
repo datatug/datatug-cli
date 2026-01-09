@@ -78,10 +78,10 @@ var defaultProportions = []int{6, 10, 8}
 
 func (nav *Navigator) createColumns() {
 	nav.Flex = tview.NewFlex()
-	nav.Flex.AddItem(nav.left, 0, nav.proportions[0], true)
-	nav.Flex.AddItem(nav.files, 0, nav.proportions[1], true)
-	nav.Flex.AddItem(nav.previewer, 0, nav.proportions[2], true)
-	nav.Flex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+	nav.AddItem(nav.left, 0, nav.proportions[0], true)
+	nav.AddItem(nav.files, 0, nav.proportions[1], true)
+	nav.AddItem(nav.previewer, 0, nav.proportions[2], true)
+	nav.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Modifiers()&tcell.ModAlt != 0 {
 			if event.Key() == tcell.KeyRune {
 				switch r := event.Rune(); r {

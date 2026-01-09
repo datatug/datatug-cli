@@ -3,6 +3,7 @@ package filetug
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -66,6 +67,11 @@ func newPreviewer(nav *Navigator) *previewer {
 
 func (p *previewer) PreviewFile(name, fullName string) {
 	data, err := os.ReadFile(fullName)
+	if err != nil {
+		p.textView.SetText(fmt.Sprintf("Error reading file %s: %s", fullName, err.Error()))
+		p.textView.SetTextColor(tcell.ColorRed)
+		return
+	}
 	if name == "" {
 		_, name = path.Split(fullName)
 	}

@@ -12,6 +12,7 @@ require (
 	cloud.google.com/go/firestore v1.20.0
 	github.com/alecthomas/chroma/v2 v2.21.1
 	github.com/dal-go/dalgo2sql v0.4.19
+	github.com/datatug/filetug v0.0.17
 	github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.5
@@ -39,7 +40,6 @@ require (
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.14.4 // indirect
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
-	github.com/datatug/filetug v0.0.17 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/georgysavva/scany/v2 v2.1.4 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect

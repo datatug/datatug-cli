@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
+	"github.com/datatug/datatug-cli/pkg/filetug/fsutils"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/go-git/go-git/v5"

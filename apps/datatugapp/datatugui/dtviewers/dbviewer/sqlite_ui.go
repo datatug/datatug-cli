@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
+	"github.com/datatug/datatug-cli/pkg/filetug/fsutils"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"

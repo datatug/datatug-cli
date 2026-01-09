@@ -7,8 +7,8 @@ import (
 	"sync"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
+	"github.com/datatug/datatug-cli/pkg/filetug/fsutils"
 )
 
 func loadEnvServers(dirPath string, env *datatug.Environment) error {

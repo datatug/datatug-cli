@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/alecthomas/chroma/v2/lexers"
-	"github.com/datatug/datatug-cli/pkg/chroma2tcell"
+	"github.com/datatug/datatug-cli/pkg/filetug/chroma2tcell"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )

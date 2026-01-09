@@ -2,10 +2,10 @@ package dtsettings
 
 import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
-	"github.com/datatug/datatug-cli/pkg/chroma2tcell"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
+	"github.com/datatug/datatug-cli/pkg/filetug/chroma2tcell"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/gdamore/tcell/v2"

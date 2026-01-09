@@ -1,11 +1,8 @@
 package filetug
 
 import (
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatv"
 	"github.com/rivo/tview"
 )
-
-var _ sneatv.PrimitiveWithBox = (*Tree)(nil)
 
 type Tree struct {
 	*tview.TreeView

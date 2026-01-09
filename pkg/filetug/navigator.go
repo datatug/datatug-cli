@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
+	"github.com/datatug/datatug-cli/pkg/filetug/fsutils"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )

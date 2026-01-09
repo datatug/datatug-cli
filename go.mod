@@ -10,7 +10,7 @@ go 1.25.4
 
 require (
 	cloud.google.com/go/firestore v1.20.0
-	github.com/alecthomas/chroma v0.10.0
+	github.com/alecthomas/chroma/v2 v2.21.1
 	github.com/dal-go/dalgo2sql v0.4.19
 	github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2
 	github.com/denisenkom/go-mssqldb v0.12.3

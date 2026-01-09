@@ -1,7 +1,6 @@
 package filetug
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -61,14 +60,7 @@ func newFiles(nav *Navigator) *tview.Table {
 		cell := files.GetCell(row, 0)
 		name := cell.Text[1:]
 		fullName := filepath.Join(nav.currentDir, name)
-		data, err := os.ReadFile(fullName)
-		if err != nil {
-			nav.previewer.textView.SetTextColor(tcell.ColorOrangeRed)
-			nav.previewer.textView.SetText(err.Error())
-			return
-		}
-		nav.previewer.textView.SetText(string(data))
-		nav.previewer.textView.SetTextColor(tcell.ColorWhiteSmoke)
+		nav.previewer.PreviewFile(name, fullName)
 	})
 	return files
 }

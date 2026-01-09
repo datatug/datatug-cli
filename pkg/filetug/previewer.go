@@ -1,24 +1,37 @@
 package filetug
 
 import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
+
+	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/datatug/datatug-cli/pkg/chroma2tcell"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
 type previewer struct {
 	*tview.Flex
+	nav      *Navigator
 	textView *tview.TextView
 }
 
 func newPreviewer(nav *Navigator) *previewer {
 	p := previewer{
 		Flex: tview.NewFlex(),
+		nav:  nav,
 	}
 	p.SetTitle("Preview")
 	p.SetBorder(true)
 	p.SetBorderColor(Style.BlurBorderColor)
 
 	p.textView = tview.NewTextView()
+	p.textView.SetWrap(false)
+	p.textView.SetDynamicColors(true)
 	p.textView.SetText("To be implemented.")
 	p.textView.SetFocusFunc(func() {
 		nav.activeCol = 2
@@ -49,4 +62,43 @@ func newPreviewer(nav *Navigator) *previewer {
 	})
 
 	return &p
+}
+
+func (p *previewer) PreviewFile(name, fullName string) {
+	data, err := os.ReadFile(fullName)
+	if name == "" {
+		_, name = path.Split(fullName)
+	}
+	lexer := lexers.Match(name)
+	if lexer == nil {
+		p.textView.SetWrap(false)
+		p.textView.SetText(string(data))
+		p.nav.previewer.textView.SetTextColor(tcell.ColorWhiteSmoke)
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext == ".json" {
+		str, err := prettyJSON(string(data))
+		if err == nil {
+			data = []byte(str)
+		}
+	}
+	colorized, err := chroma2tcell.Colorize(string(data), "dracula", lexer)
+	if err != nil {
+		p.textView.SetText("Failed to format file: " + err.Error())
+		p.textView.SetTextColor(tcell.ColorRed)
+		return
+	}
+	p.textView.SetText(colorized)
+	p.textView.SetWrap(true)
+	//p.textView.SetTextColor(tcell.ColorWhiteSmoke)
+}
+
+func prettyJSON(input string) (string, error) {
+	var out bytes.Buffer
+	err := json.Indent(&out, []byte(input), "", "  ") // 2-space indent
+	if err != nil {
+		return "", err
+	}
+	return out.String(), nil
 }

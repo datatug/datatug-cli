@@ -10,6 +10,8 @@ type Styles struct {
 
 	BlurBorderColor   tcell.Color
 	BlurGraphicsColor tcell.Color
+
+	TableHeaderColor tcell.Color
 }
 
 var Style = Styles{
@@ -18,4 +20,6 @@ var Style = Styles{
 
 	BlurBorderColor:   tcell.ColorGray,
 	BlurGraphicsColor: tcell.ColorGray,
+
+	TableHeaderColor: tcell.ColorWhiteSmoke,
 }

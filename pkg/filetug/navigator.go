@@ -6,6 +6,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/fsutils"
 	"github.com/gdamore/tcell/v2"
@@ -15,15 +16,24 @@ import (
 type Navigator struct {
 	app *tview.Application
 	o   navigatorOptions
+
 	*tview.Flex
-	tree      *Tree
-	favorites *favorites
+
+	currentDir  string
+	activeCol   int
+	proportions []int
+
 	left      *tview.Flex
-	table     *tview.Table
+	dirs      *Tree
+	favorites *favorites
+
+	files *tview.Table
+
+	previewer *previewer
 }
 
-func (n *Navigator) SetFocus() {
-	n.app.SetFocus(n.tree.TreeView)
+func (nav *Navigator) SetFocus() {
+	nav.app.SetFocus(nav.dirs.TreeView)
 }
 
 type navigatorOptions struct {
@@ -40,180 +50,102 @@ func OnMoveFocusUp(f func(source tview.Primitive)) NavigatorOption {
 
 func NewNavigator(app *tview.Application, options ...NavigatorOption) *Navigator {
 
-	nav := new(Navigator)
+	nav := &Navigator{
+		app:         app,
+		dirs:        NewTree(),
+		favorites:   newFavorites(),
+		proportions: make([]int, 3),
+	}
+	copy(nav.proportions, defaultProportions)
+
+	nav.files = newFiles(nav)
+	nav.previewer = newPreviewer(nav)
 
 	for _, option := range options {
 		option(&nav.o)
 	}
 
-	nav.app = app
+	createLeft(nav)
 
-	nav.tree = NewTree()
-
-	nav.favorites = newFavorites()
-
-	nav.table = tview.NewTable()
-	nav.table.SetSelectable(true, false)
-	nav.table.SetFixed(1, 1)
-	nav.table.SetBorderColor(Style.BlurBorderColor)
-	nav.table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyLeft:
-			app.SetFocus(nav.tree)
-			return nil
-		default:
-			return event
-		}
-	})
-	nav.table.SetFocusFunc(func() {
-		nav.table.SetBorderColor(Style.FocusedBorderColor)
-	})
-	nav.table.SetBlurFunc(func() {
-		nav.table.SetBorderColor(Style.BlurBorderColor)
-	})
-
-	nav.left = tview.NewFlex().SetDirection(tview.FlexRow)
-	nav.left.AddItem(nav.favorites, 3, 0, false)
-	nav.left.AddItem(nav.tree, 0, 1, true)
-	nav.left.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyRight:
-			nav.app.SetFocus(nav.table)
-			return nil
-		default:
-			return event
-		}
-	})
-
-	flex := tview.NewFlex()
-	nav.Flex = flex
-	flex.AddItem(nav.left, 0, 4, true)
-	flex.AddItem(nav.table, 0, 8, true)
-
-	flex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Modifiers()&tcell.ModAlt != 0 && event.Key() == tcell.KeyRune {
-			switch r := event.Rune(); r {
-			case '/', 'r', 'R':
-				nav.goDir("/")
-				return nil
-			case '~', 'h', 'H':
-				nav.goDir("~")
-				return nil
-			default:
-				return event
-			}
-		}
-		return event
-	})
-
-	nav.left.SetBorder(true)
-	nav.table.SetBorder(true)
-
-	treeViewInputCapture := func(t *tview.TreeView, event *tcell.EventKey, f func(*tcell.EventKey) *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyEnter:
-			ref := t.GetCurrentNode().GetReference()
-			if ref != nil {
-				dir := ref.(string)
-				nav.goDir(dir)
-				return nil
-			}
-		}
-		if f != nil {
-			return f(event)
-		}
-		return event
-	}
-	nav.favorites.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		return treeViewInputCapture(nav.favorites.TreeView, event, func(key *tcell.EventKey) *tcell.EventKey {
-			switch event.Key() {
-			case tcell.KeyUp:
-				rootNode := nav.favorites.GetRoot()
-				current := nav.favorites.GetCurrentNode()
-				if current == rootNode || current == rootNode.GetChildren()[0] {
-					nav.o.moveFocusUp(nav.favorites.TreeView)
-					nav.favorites.SetCurrentNode(nil)
-					return nil
-				}
-				return event
-			case tcell.KeyDown:
-				favNodes := nav.favorites.GetRoot().GetChildren()
-				if nav.favorites.GetCurrentNode() == favNodes[len(favNodes)-1] {
-					nav.favorites.SetCurrentNode(nil)
-					nav.tree.SetCurrentNode(nav.tree.GetRoot())
-					nav.app.SetFocus(nav.tree.TreeView)
-					return nil
-				}
-				return event
-			default:
-				return event
-			}
-		})
-	})
-	nav.tree.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		return treeViewInputCapture(nav.tree.TreeView, event, func(key *tcell.EventKey) *tcell.EventKey {
-			if event.Key() == tcell.KeyUp && nav.tree.GetCurrentNode() == nav.tree.GetRoot() {
-				children := nav.favorites.GetRoot().GetChildren()
-				nav.favorites.SetCurrentNode(children[len(children)-1])
-				nav.tree.SetCurrentNode(nil)
-				nav.app.SetFocus(nav.favorites.TreeView)
-				return nil
-			}
-			return event
-		})
-	})
-
-	nav.left.SetFocusFunc(func() {
-		nav.left.SetBorderColor(Style.FocusedBorderColor)
-		nav.app.SetFocus(nav.favorites.TreeView)
-	})
-
-	nav.left.SetBlurFunc(func() {
-		nav.left.SetBorderColor(Style.BlurBorderColor)
-	})
-
-	onLeftTreeViewFocus := func(t *tview.TreeView) {
-		t.SetGraphicsColor(tcell.ColorWhite)
-		nav.left.SetBorderColor(Style.FocusedBorderColor)
-		if t.GetCurrentNode() == nil {
-			children := t.GetRoot().GetChildren()
-			if len(children) > 0 {
-				t.SetCurrentNode(children[0])
-			}
-		}
-	}
-
-	onLeftTreeViewBlur := func(t *tview.TreeView) {
-		t.SetGraphicsColor(Style.BlurGraphicsColor)
-		nav.left.SetBorderColor(Style.BlurBorderColor)
-	}
-
-	nav.favorites.SetFocusFunc(func() {
-		if nav.favorites.GetCurrentNode() == nil {
-			nav.favorites.SetCurrentNode(nav.tree.GetRoot().GetChildren()[0])
-		}
-		onLeftTreeViewFocus(nav.favorites.TreeView)
-	})
-	nav.tree.SetFocusFunc(func() {
-		onLeftTreeViewFocus(nav.tree.TreeView)
-	})
-	nav.favorites.SetBlurFunc(func() {
-		onLeftTreeViewBlur(nav.favorites.TreeView)
-	})
-	nav.tree.SetBlurFunc(func() {
-		onLeftTreeViewBlur(nav.tree.TreeView)
-	})
+	nav.createColumns()
 
 	nav.goDir("~")
 
 	return nav
 }
 
+var defaultProportions = []int{6, 10, 8}
+
+func (nav *Navigator) createColumns() {
+	nav.Flex = tview.NewFlex()
+	nav.Flex.AddItem(nav.left, 0, nav.proportions[0], true)
+	nav.Flex.AddItem(nav.files, 0, nav.proportions[1], true)
+	nav.Flex.AddItem(nav.previewer, 0, nav.proportions[2], true)
+	nav.Flex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Modifiers()&tcell.ModAlt != 0 {
+			if event.Key() == tcell.KeyRune {
+				switch r := event.Rune(); r {
+				case '0':
+					copy(nav.proportions, defaultProportions)
+					nav.createColumns()
+				case '+', '=':
+					switch nav.activeCol {
+					case 0:
+						nav.proportions[0] += 2
+						nav.proportions[1] -= 1
+						nav.proportions[2] -= 1
+					case 1:
+						nav.proportions[0] -= 1
+						nav.proportions[1] += 2
+						nav.proportions[2] -= 1
+					case 2:
+						nav.proportions[0] -= 1
+						nav.proportions[1] -= 1
+						nav.proportions[2] += 2
+					default:
+						return event
+					}
+					nav.createColumns()
+					return nil
+				case '-', '_':
+					switch nav.activeCol {
+					case 0:
+						nav.proportions[0] -= 2
+						nav.proportions[1] += 1
+						nav.proportions[2] += 1
+					case 1:
+						nav.proportions[0] += 1
+						nav.proportions[1] -= 2
+						nav.proportions[2] += 1
+					case 2:
+						nav.proportions[0] += 1
+						nav.proportions[1] += 1
+						nav.proportions[2] -= 2
+					default:
+						return event
+					}
+					nav.createColumns()
+					return nil
+				case '/', 'r', 'R':
+					nav.goDir("/")
+					return nil
+				case '~', 'h', 'H':
+					nav.goDir("~")
+					return nil
+				default:
+					return event
+				}
+			}
+		}
+		return event
+	})
+}
+
 func (nav *Navigator) goDir(dir string) {
 
 	nav.favorites.SetCurrentNode(nil)
 
-	t := nav.tree
+	t := nav.dirs
 	t.currDirRoot.ClearChildren()
 
 	parentNode := t.currDirRoot
@@ -241,18 +173,22 @@ func (nav *Navigator) goDir(dir string) {
 		}
 	}
 
-	dirPath := fsutils.ExpandHome(nodePath)
-	children, err := os.ReadDir(dirPath)
+	nav.currentDir = fsutils.ExpandHome(nodePath)
+	children, err := os.ReadDir(nav.currentDir)
 	if err != nil {
-		parentNode.AddChild(tview.NewTreeNode(fmt.Sprintf("Error for %s: %s", dirPath, err.Error())))
+		parentNode.AddChild(tview.NewTreeNode(fmt.Sprintf("Error for %s: %s", nav.currentDir, err.Error())))
 		return
 	}
 	fileIndex := 0
 
-	nav.table.SetTitle(fmt.Sprintf(" Files: %s ", dir))
-	nav.table.Clear()
-	nav.table.SetCell(0, 0, tview.NewTableCell("File name"))
-	nav.table.SetCell(0, 1, tview.NewTableCell("Size").SetAlign(tview.AlignRight))
+	nav.files.SetTitle(fmt.Sprintf(" Files: %s ", dir))
+	nav.files.Clear()
+	nav.files.SetCell(0, 0, tview.NewTableCell("File name").SetTextColor(Style.TableHeaderColor).SetExpansion(1))
+	nav.files.SetCell(0, 1, tview.NewTableCell("Size").SetTextColor(Style.TableHeaderColor).SetAlign(tview.AlignRight))
+	nav.files.SetCell(0, 2, tview.NewTableCell("Modified").SetTextColor(Style.TableHeaderColor).SetAlign(tview.AlignRight))
+	nav.files.SetFixed(1, 0)
+	nav.files.SetSelectable(true, false)
+	//nav.files.Select(1, 0)
 
 	fileIndex++
 	for _, child := range children {
@@ -264,13 +200,22 @@ func (nav *Navigator) goDir(dir string) {
 			n := tview.NewTreeNode("📁" + name).SetReference(path.Join(nodePath, name))
 			parentNode.AddChild(n)
 		} else {
-			tdName := tview.NewTableCell(name)
+			tdName := tview.NewTableCell(" " + name)
 			color := GetColorByFileName(name)
 			tdName.SetTextColor(color)
-			nav.table.SetCell(fileIndex, 0, tdName)
+			nav.files.SetCell(fileIndex, 0, tdName)
 			if fi, err := child.Info(); err == nil {
 				td := tview.NewTableCell(strconv.FormatInt(fi.Size(), 10)).SetAlign(tview.AlignRight)
-				nav.table.SetCell(fileIndex, 1, td)
+				nav.files.SetCell(fileIndex, 1, td)
+				modTime := fi.ModTime()
+				var modStr string
+				if modTime.After(time.Now().Add(24 * time.Hour)) {
+					modStr = modTime.Format("15:04:05")
+				} else {
+					modStr = modTime.Format("2006-01-02")
+				}
+				td = tview.NewTableCell(modStr).SetAlign(tview.AlignRight)
+				nav.files.SetCell(fileIndex, 2, td)
 			}
 			fileIndex++
 		}

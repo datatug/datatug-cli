@@ -13,9 +13,9 @@ const viewerID dtviewers.ViewerID = "fsm"
 func RegisterAsViewer() {
 	dtviewers.RegisterViewer(dtviewers.Viewer{
 		ID:       viewerID,
-		Name:     "FSM - Files Navigator",
+		Name:     "FileTug - files viewer",
 		Shortcut: '2',
-		Action:   goFilesManager,
+		Action:   goFileTug,
 	})
 }
 

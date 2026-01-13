@@ -2,5 +2,17 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>dal-go/dalgo-renovate-config"
+  ],
+  "packageRules": [
+    {
+      "groupName": "tcell-major",
+      "matchPackagePatterns": [
+        "github.com/gdamore/tcell"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false
+    }
   ]
 }

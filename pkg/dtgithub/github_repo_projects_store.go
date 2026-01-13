@@ -92,7 +92,7 @@ func (c *projectCreator) CreateProject(
 	// 1. Get the latest commit of the branch
 	if storage.ref, _, err = c.client.Git.GetRef(ctx, c.repoOwner, c.repoName, "heads/"+c.branch); err != nil {
 		// If the repository is empty, we need to create the first commit
-		gErr := new(github.ErrorResponse)
+		var gErr *github.ErrorResponse
 		if errors.As(err, &gErr) && (gErr.Response.StatusCode == 404 || gErr.Response.StatusCode == 409) {
 			// Create initial README.md to initialize the repository
 			_, _, err = c.client.Repositories.CreateFile(ctx, c.repoOwner, c.repoName, "README.md", &github.RepositoryContentFileOptions{

@@ -341,7 +341,7 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 		ref, _, err := client.Git.GetRef(ctx, repoOwner, repoName, "heads/"+branch)
 		if err != nil {
 			// If the repository is empty, we need to create the first commit
-			gErr := new(github.ErrorResponse)
+			var gErr *github.ErrorResponse
 			if errors.As(err, &gErr) && (gErr.Response.StatusCode == 404 || gErr.Response.StatusCode == 409) {
 				// Create initial README.md to initialize the repository
 				updateProgress(0, "initializing repository...")

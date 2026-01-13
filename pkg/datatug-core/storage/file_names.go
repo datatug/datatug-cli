@@ -66,13 +66,13 @@ const (
 	DbCatalogObjectFileSuffix = "objects"
 	DbCatalogRefsFileSuffix   = "refs"
 	DbModelFileSuffix         = "dbmodel"
+	DbServerFileSuffix        = "dbserver"
+	RecordsetFileSuffix       = "recordset"
+	EntityFileSuffix          = "entity"
+	ServerFileSuffix          = "server"
+	ColumnsFileSuffix         = "columns"
+	QueryFileSuffix           = "query"
 	//DbSchemaFileSuffix        = "schema"
-	DbServerFileSuffix  = "dbserver"
-	RecordsetFileSuffix = "recordset"
-	EntityFileSuffix    = "entity"
-	ServerFileSuffix    = "server"
-	ColumnsFileSuffix   = "columns"
-	QueryFileSuffix     = "query"
 )
 
 const (

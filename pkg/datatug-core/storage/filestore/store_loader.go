@@ -77,7 +77,7 @@ func (s fsProjectStore) LoadProject(ctx context.Context, o ...datatug.StoreOptio
 	return project, nil
 }
 
-// LoadProjectSummary loads project summary
+// LoadProjectFile loads project summary
 func (s fsProjectStore) LoadProjectFile(context.Context) (projectFile datatug.ProjectFile, err error) {
 	if projectFile, err = LoadProjectFile(s.projectPath); err != nil {
 		return projectFile, fmt.Errorf("failed to load project file: %w", err)

@@ -51,37 +51,8 @@ func goSqliteHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	})
 	demoNode.AddChild(northwindNode)
 
-	menu.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyRight:
-			tui.App.SetFocus(tree)
-			return nil
-		case tcell.KeyUp:
-			if menu.GetCurrentItem() == 0 {
-				tui.Header.SetFocus(sneatnav.ToBreadcrumbs, menu)
-				return nil
-			}
-			return event
-		default:
-			return event
-		}
-	})
-
-	tree.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyLeft:
-			tui.App.SetFocus(tui.Menu)
-			return nil
-		case tcell.KeyUp:
-			if tree.GetCurrentNode() == openNode {
-				tui.Header.SetFocus(sneatnav.ToBreadcrumbs, tree)
-				return nil
-			}
-			return event
-		default:
-			return event
-		}
-	})
+	setDbHomeMenuInputCapture(tui, menu, tree)
+	setDbHomeTreeInputCapture(tui, tree, openNode)
 
 	content := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(tree, tree.Box))
 

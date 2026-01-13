@@ -36,22 +36,16 @@ func goIngitdbBHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	})
 	demoNode.AddChild(northwindNode)
 
-	menu.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyRight:
-			tui.App.SetFocus(tree)
-			return nil
-		case tcell.KeyUp:
-			if menu.GetCurrentItem() == 0 {
-				tui.Header.SetFocus(sneatnav.ToBreadcrumbs, menu)
-				return nil
-			}
-			return event
-		default:
-			return event
-		}
-	})
+	setDbHomeMenuInputCapture(tui, menu, tree)
+	setDbHomeTreeInputCapture(tui, tree, openNode)
 
+	content := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(tree, tree.Box))
+
+	tui.SetPanels(menuPanel, content, sneatnav.WithFocusTo(focusTo))
+	return nil
+}
+
+func setDbHomeTreeInputCapture(tui *sneatnav.TUI, tree *tview.TreeView, openNode *tview.TreeNode) {
 	tree.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyLeft:
@@ -67,9 +61,21 @@ func goIngitdbBHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 			return event
 		}
 	})
-
-	content := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(tree, tree.Box))
-
-	tui.SetPanels(menuPanel, content, sneatnav.WithFocusTo(focusTo))
-	return nil
+}
+func setDbHomeMenuInputCapture(tui *sneatnav.TUI, menu *tview.List, tree *tview.TreeView) {
+	menu.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyRight:
+			tui.App.SetFocus(tree)
+			return nil
+		case tcell.KeyUp:
+			if menu.GetCurrentItem() == 0 {
+				tui.Header.SetFocus(sneatnav.ToBreadcrumbs, menu)
+				return nil
+			}
+			return event
+		default:
+			return event
+		}
+	})
 }

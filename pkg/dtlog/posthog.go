@@ -134,7 +134,7 @@ func getPostHogApiKeyFromServer() (string, error) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			logus.Warningf(ctx, "Request to GitHub server for PostHog API Key timed out %v", timeout)
 		} else {
-			logus.Errorf(ctx, "failed to fetch posthog api key from %s: %w", url, err)
+			logus.Errorf(ctx, "failed to fetch posthog api key from %s: %v", url, err)
 		}
 	}
 	defer func() {

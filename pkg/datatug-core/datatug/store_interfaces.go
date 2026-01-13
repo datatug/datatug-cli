@@ -35,7 +35,6 @@ type ProjectsStore interface {
 type ProjectStore interface {
 	ProjectID() string
 	LoadProjectFile(ctx context.Context) (ProjectFile, error)
-	//LoadProjectSummary(ctx context.Context) (ProjectSummary, error)
 	LoadProject(ctx context.Context, o ...StoreOption) (p *Project, err error)
 	SaveProject(ctx context.Context, p *Project) error
 
@@ -48,6 +47,8 @@ type ProjectStore interface {
 	EnvDbCatalogStore
 	ProjDbDriversStore
 	RecordsetDefinitionsStore
+
+	//LoadProjectSummary(ctx context.Context) (ProjectSummary, error)
 }
 
 type EnvironmentsStore interface {

@@ -6,11 +6,11 @@ import (
 )
 
 type Panel interface {
-	//sneatv.PrimitiveWithBox
 	tview.Primitive
-	//GetBox() *tview.Box
 	TakeFocus()
 	Close()
+	//sneatv.PrimitiveWithBox
+	//GetBox() *tview.Box
 }
 
 type PanelPrimitive interface {

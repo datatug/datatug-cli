@@ -23,7 +23,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/posthog/posthog-go v1.8.2
+	github.com/posthog/posthog-go v1.9.0
 	github.com/rivo/tview v0.42.0
 	github.com/stretchr/testify v1.11.1
 	github.com/strongo/logus v0.4.0
@@ -42,6 +42,7 @@ require (
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/georgysavva/scany/v2 v2.1.4 // indirect
+	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect

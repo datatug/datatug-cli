@@ -9,8 +9,8 @@ go 1.25.5
 //replace github.com/dal-go/dalgo2sql => ../../dal-go/dalgo2sql
 
 require (
-	cloud.google.com/go/firestore v1.20.0
-	github.com/alecthomas/chroma/v2 v2.22.0
+	cloud.google.com/go/firestore v1.21.0
+	github.com/alecthomas/chroma/v2 v2.23.0
 	github.com/dal-go/dalgo2sql v0.4.19
 	github.com/datatug/filetug v0.0.21
 	github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2
@@ -33,7 +33,7 @@ require (
 	github.com/zalando/go-keyring v0.2.6
 	go.uber.org/mock v0.6.0
 	golang.org/x/oauth2 v0.34.0
-	google.golang.org/api v0.259.0
+	google.golang.org/api v0.260.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

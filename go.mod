@@ -28,7 +28,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/strongo/logus v0.4.0
 	github.com/strongo/validation v0.0.7
-	github.com/urfave/cli/v3 v3.6.1
+	github.com/urfave/cli/v3 v3.6.2
 	github.com/xo/dburl v0.24.2
 	github.com/zalando/go-keyring v0.2.6
 	go.uber.org/mock v0.6.0

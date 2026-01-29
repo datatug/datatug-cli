@@ -17,7 +17,7 @@ require (
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.8
 	github.com/go-git/go-git/v5 v5.16.4
-	github.com/google/go-github/v82 v82.0.0
+	github.com/google/go-github/v81 v81.0.0
 	github.com/google/go-github/v82 v82.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
@@ -34,7 +34,7 @@ require (
 	github.com/zalando/go-keyring v0.2.6
 	go.uber.org/mock v0.6.0
 	golang.org/x/oauth2 v0.34.0
-	google.golang.org/api v0.263.0
+	google.golang.org/api v0.264.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

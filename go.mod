@@ -17,14 +17,14 @@ require (
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.8
 	github.com/go-git/go-git/v5 v5.16.4
-	github.com/google/go-github/v82 v82.0.0
+	github.com/google/go-github/v81 v81.0.0
 	github.com/google/go-github/v82 v82.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
 	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/posthog/posthog-go v1.9.1
+	github.com/posthog/posthog-go v1.10.0
 	github.com/rivo/tview v0.42.0
 	github.com/stretchr/testify v1.11.1
 	github.com/strongo/logus v0.4.0
@@ -34,7 +34,7 @@ require (
 	github.com/zalando/go-keyring v0.2.6
 	go.uber.org/mock v0.6.0
 	golang.org/x/oauth2 v0.34.0
-	google.golang.org/api v0.264.0
+	google.golang.org/api v0.265.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -122,7 +122,7 @@ require (
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/genproto v0.0.0-20260112192933-99fd39fd28a9 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260112192933-99fd39fd28a9 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260122232226-8e98ce8d340d // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409 // indirect
 	google.golang.org/grpc v1.78.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect

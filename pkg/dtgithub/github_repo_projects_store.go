@@ -93,7 +93,7 @@ func (c *projectCreator) CreateProject(
 	if storage.ref, _, err = c.client.Git.GetRef(ctx, c.repoOwner, c.repoName, "heads/"+c.branch); err != nil {
 		// If the repository is empty, we need to create the first commit
 		var gErr *github.ErrorResponse
-		if errors.As(err, &gErr) && (gErr.Response.StatusCode == 404 || gErr.Response.StatusCode == 409) {
+		if errors.As(err, &gErr) && gErr.Response != nil && (gErr.Response.StatusCode == 404 || gErr.Response.StatusCode == 409) {
 			// Create initial README.md to initialize the repository
 			_, _, err = c.client.Repositories.CreateFile(ctx, c.repoOwner, c.repoName, "README.md", &github.RepositoryContentFileOptions{
 				Message: github.Ptr("feat: initial commit"),

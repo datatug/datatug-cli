@@ -9,11 +9,11 @@ import (
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
-	"github.com/datatug/datatug-cli/pkg/sneatcolors"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/filetug/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/strongo/strongo-tui/pkg/colors"
 )
 
 type columnsBox struct {
@@ -72,7 +72,7 @@ func (b columnsBox) SetCollectionContext(ctx context.Context, collectionCtx dtvi
 				if col.PrimaryKeyPosition > 0 {
 					b.SetCell(i+1, 2,
 						tview.NewTableCell(strconv.Itoa(col.PrimaryKeyPosition)).
-							SetTextColor(sneatcolors.TableTertiaryText).
+							SetTextColor(colors.TableTertiaryText).
 							SetAlign(tview.AlignRight))
 				} else {
 					b.SetCell(i+1, 2, tview.NewTableCell(""))
@@ -96,10 +96,10 @@ func (b columnsBox) SetCollectionContext(ctx context.Context, collectionCtx dtvi
 }
 
 func (b columnsBox) addHeader() {
-	b.SetCell(0, 0, tview.NewTableCell("Name").SetTextColor(sneatcolors.TableColumnTitle).SetExpansion(1))
-	b.SetCell(0, 1, tview.NewTableCell("Type").SetTextColor(sneatcolors.TableColumnTitle))
-	b.SetCell(0, 2, tview.NewTableCell("PK").SetTextColor(sneatcolors.TableColumnTitle).SetAlign(tview.AlignRight))
-	b.SetCell(0, 3, tview.NewTableCell("FKs").SetTextColor(sneatcolors.TableColumnTitle))
+	b.SetCell(0, 0, tview.NewTableCell("Name").SetTextColor(colors.TableColumnTitle).SetExpansion(1))
+	b.SetCell(0, 1, tview.NewTableCell("Type").SetTextColor(colors.TableColumnTitle))
+	b.SetCell(0, 2, tview.NewTableCell("PK").SetTextColor(colors.TableColumnTitle).SetAlign(tview.AlignRight))
+	b.SetCell(0, 3, tview.NewTableCell("FKs").SetTextColor(colors.TableColumnTitle))
 	b.SetFixed(1, 1)
 }
 

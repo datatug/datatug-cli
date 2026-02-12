@@ -9,11 +9,11 @@ import (
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/sneatcolors"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/filetug/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/strongo/strongo-tui/pkg/colors"
 )
 
 type TablesBox struct {
@@ -91,7 +91,7 @@ func NewTablesBox(tui *sneatnav.TUI, dbContext dtviewers.DbContext, collectionTy
 				SetSelectable(false).
 				SetAlign(align).
 				SetExpansion(expansion).
-				SetTextColor(sneatcolors.TableColumnTitle)
+				SetTextColor(colors.TableColumnTitle)
 			table.SetCell(0, colIndex, cell)
 			colIndex++
 		}

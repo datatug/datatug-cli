@@ -17,8 +17,7 @@ require (
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.8
 	github.com/go-git/go-git/v5 v5.16.5
-	github.com/google/go-github/v82 v82.0.0
-	github.com/google/go-github/v82 v82.0.0
+	github.com/google/go-github/v81 v81.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
 	github.com/mattn/go-sqlite3 v1.14.34
@@ -28,6 +27,7 @@ require (
 	github.com/rivo/tview v0.42.0
 	github.com/stretchr/testify v1.11.1
 	github.com/strongo/logus v0.4.0
+	github.com/strongo/strongo-tui v0.0.0-20260212115849-b2ccb1e586b1
 	github.com/strongo/validation v0.0.7
 	github.com/urfave/cli/v3 v3.6.2
 	github.com/xo/dburl v0.24.2

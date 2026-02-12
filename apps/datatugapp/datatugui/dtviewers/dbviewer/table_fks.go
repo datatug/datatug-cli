@@ -8,11 +8,11 @@ import (
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
-	"github.com/datatug/datatug-cli/pkg/sneatcolors"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/filetug/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/strongo/strongo-tui/pkg/colors"
 )
 
 type foreignKeysBox struct {
@@ -37,7 +37,7 @@ func (b foreignKeysBox) SetCollectionContext(ctx context.Context, collectionCtx 
 				return
 			}
 			for i, fk := range fks {
-				b.SetCell(i, 0, tview.NewTableCell(strings.Join(fk.From.Columns, ",")).SetTextColor(sneatcolors.TableColumnTitle))
+				b.SetCell(i, 0, tview.NewTableCell(strings.Join(fk.From.Columns, ",")).SetTextColor(colors.TableColumnTitle))
 				b.SetCell(i, 1, tview.NewTableCell("—>"))
 				b.SetCell(i, 2, tview.NewTableCell(fk.To.Name))
 				if !slices.Equal(fk.To.Columns, fk.From.Columns) {

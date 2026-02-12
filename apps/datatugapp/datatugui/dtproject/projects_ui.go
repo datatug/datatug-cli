@@ -13,13 +13,13 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/datatug/datatug-cli/pkg/sneatcolors"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/filetug/pkg/fsutils"
 	"github.com/datatug/filetug/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/strongo/logus"
+	"github.com/strongo/strongo-tui/pkg/colors"
 )
 
 var _ tview.Primitive = (*projectsPanel)(nil)
@@ -223,7 +223,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 
 	addToGithubRepoNode := tview.NewTreeNode(" Add DataTug project to existing GitHub Repo ").
 		SetReference("local-create").
-		SetColor(sneatcolors.TreeNodeLink).
+		SetColor(colors.TreeNodeLink).
 		SetSelectedFunc(func() {
 			ShowAddToGitHubRepo(tui)
 		})
@@ -231,7 +231,7 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 
 	selectGithubRepoNode := tview.NewTreeNode(" Add GitHub repo with DataTug project ").
 		SetReference("local-create").
-		SetColor(sneatcolors.TreeNodeLink).
+		SetColor(colors.TreeNodeLink).
 		SetSelectedFunc(func() {
 			ShowAddToGitHubRepo(tui)
 		})
@@ -249,12 +249,12 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 	// Add actions to Local projects
 	localAddNode := tview.NewTreeNode(" Add exising ").
 		SetReference("local-add").
-		SetColor(sneatcolors.TreeNodeLink)
+		SetColor(colors.TreeNodeLink)
 	localProjectsNode.AddChild(localAddNode)
 
 	createNewLocalProjectNode := tview.NewTreeNode(" Create new local project ").
 		SetReference("local-create").
-		SetColor(sneatcolors.TreeNodeLink).
+		SetColor(colors.TreeNodeLink).
 		SetSelectedFunc(func() {
 			goCreateProjectScreen(tui, createAtLocal)
 			//panic("suxx")
@@ -464,7 +464,7 @@ func (p *projectsPanel) applyNodeStyling(tree *tview.TreeView, isActive bool) {
 	default:
 		// Action node - all other nodes (string references, etc.)
 		if isActive {
-			currentNode.SetColor(sneatcolors.TreeNodeLink)
+			currentNode.SetColor(colors.TreeNodeLink)
 		} else {
 			// InactiveFocused action nodes have different color than project link nodes
 			currentNode.SetColor(dimGray)

@@ -2,6 +2,11 @@
 
 This directory contains configuration for GitHub Copilot agents with Model Context Protocol (MCP) support.
 
+## Quick Start
+
+1. **Configure MCP Server**: Follow the [MCP Configuration Guide](./MCP_CONFIGURATION.md) to set up the gopls MCP server in repository settings
+2. **Use the Agent**: Start using the `@go-expert` agent in GitHub Copilot for Go development tasks
+
 ## gopls MCP Server
 
 This repository is configured to use the [gopls MCP server](https://go.dev/gopls/features/mcp) for enhanced Go language support in GitHub Copilot coding agents.
@@ -18,8 +23,9 @@ The gopls MCP (Model Context Protocol) server exposes gopls language server feat
 
 ### Configuration Files
 
-- **go-expert.yml**: Custom agent configuration with gopls MCP server
-- **gopls-mcp-instructions.md**: Full instructions for using gopls MCP tools effectively
+- **go-expert.md**: Custom agent profile for Go development with gopls MCP integration
+- **MCP_CONFIGURATION.md**: Step-by-step guide to configure the gopls MCP server in repository settings
+- **gopls-mcp-instructions.md**: Full reference for using gopls MCP tools effectively
 
 ### Using the go-expert Agent
 

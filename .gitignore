@@ -27,6 +27,7 @@ go.work
 # Executables
 ./datatug
 ./datatug-cli
+test_gopls_mcp
 
 # Downloadable files
 demo-dbs/

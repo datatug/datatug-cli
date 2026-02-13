@@ -39,7 +39,7 @@ go build -o test_gopls_mcp ./cmd/test_gopls_mcp
 
 ## Go Packages in datatug-cli Repository
 
-The repository contains **48 Go packages** organized into the following categories:
+The repository contains **49 Go packages** organized into the following categories:
 
 ### Core Packages
 - `pkg/datatug-core/datatug` - Core data structures

@@ -2,7 +2,7 @@
 
 This document provides a comprehensive list of all Go packages in the datatug-cli repository, discovered using the gopls MCP server.
 
-## Total: 48 Go Packages
+## Total: 49 Go Packages
 
 ### Main Package
 1. `github.com/datatug/datatug-cli` - Main entry point

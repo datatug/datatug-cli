@@ -15,10 +15,13 @@ The following gopls MCP tools were successfully validated:
 1. **go_workspace** - Retrieved workspace information
 2. **go_search** - Searched for symbols across workspace
 3. **go_package_api** - Retrieved package API summaries
+4. **go_diagnostics** - Checked for parse and build errors
+5. **go_file_context** - Retrieved file dependencies and API usage
+6. **go_symbol_references** - Found all references to symbols
 
 ## Test Program
 
-A test program was created at `test_gopls_mcp.go` that:
+A test program was created at `cmd/test_gopls_mcp/main.go` that:
 - Imports multiple packages from the repository
 - Accesses and displays symbols from imported packages
 - Lists all main packages in the repository
@@ -28,7 +31,7 @@ A test program was created at `test_gopls_mcp.go` that:
 
 ```bash
 # Build the test program
-go build -o test_gopls_mcp test_gopls_mcp.go
+go build -o test_gopls_mcp ./cmd/test_gopls_mcp
 
 # Run the validation
 ./test_gopls_mcp
@@ -109,11 +112,40 @@ Retrieves API summaries for packages. Validated packages:
   - `NewDatatugTUI` function
 
 ### 4. Additional Tools Available (Not tested but available)
-- `go_diagnostics` - Get parse and build errors
-- `go_file_context` - Summarize file dependencies
+- `go_diagnostics` - Get parse and build errors ✅ TESTED
+- `go_file_context` - Summarize file dependencies ✅ TESTED
 - `go_rename_symbol` - Rename symbols across workspace
-- `go_symbol_references` - Find symbol references
+- `go_symbol_references` - Find symbol references ✅ TESTED
 - `go_vulncheck` - Run vulnerability checks
+
+## Detailed Tool Testing Results
+
+### go_diagnostics
+Successfully identified that the test file initially had a `main` function conflict when placed in the root package. This was resolved by moving the test to `cmd/test_gopls_mcp/`.
+
+### go_file_context
+Retrieved comprehensive file context for `cmd/test_gopls_mcp/main.go`, showing:
+- Package membership: `github.com/datatug/datatug-cli`
+- Referenced declarations from `fmt` package (Printf, Println)
+- Referenced declarations from `strings` package (Split)
+- Referenced declarations from `os` package (Exit)
+- Referenced custom types:
+  - `api.DataTugAgentVersion` constant
+  - `api.AgentInfo` type
+  - `server.HttpServer` type
+  - `datatugapp.NewDatatugTUI` function
+
+### go_symbol_references
+Successfully traced all 3 references to `DataTugAgentVersion`:
+1. Definition in `/pkg/api/agent_info_api.go` (line 5)
+2. Usage in `/cmd/test_gopls_mcp/main.go` (line 28)
+3. Usage in GetAgentInfo function (line 18)
+
+### go_search
+Performed fuzzy symbol search with excellent results:
+- Query "pkg" returned 100 symbols across the codebase
+- Query "DataTugAgentVersion" correctly identified the constant and related symbols
+- Search works across all files in the workspace
 
 ## Sample API from pkg/api Package
 

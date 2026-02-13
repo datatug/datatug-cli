@@ -27,6 +27,7 @@ require (
 	github.com/rivo/tview v0.42.0
 	github.com/stretchr/testify v1.11.1
 	github.com/strongo/logus v0.4.0
+	github.com/strongo/strongo-tui v0.0.0-20260212115849-b2ccb1e586b1
 	github.com/strongo/validation v0.0.7
 	github.com/urfave/cli/v3 v3.6.2
 	github.com/xo/dburl v0.24.2

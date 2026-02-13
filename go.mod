@@ -17,8 +17,7 @@ require (
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.8
 	github.com/go-git/go-git/v5 v5.16.5
-	github.com/google/go-github/v82 v82.0.0
-	github.com/google/go-github/v82 v82.0.0
+	github.com/google/go-github/v81 v81.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
 	github.com/mattn/go-sqlite3 v1.14.34
@@ -28,7 +27,6 @@ require (
 	github.com/rivo/tview v0.42.0
 	github.com/stretchr/testify v1.11.1
 	github.com/strongo/logus v0.4.0
-	github.com/strongo/strongo-tui v0.0.0-20260212115849-b2ccb1e586b1
 	github.com/strongo/validation v0.0.7
 	github.com/urfave/cli/v3 v3.6.2
 	github.com/xo/dburl v0.24.2
@@ -62,9 +60,8 @@ require (
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
 	github.com/atotto/clipboard v0.1.4
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/clipperhouse/stringish v0.1.1 // indirect
-	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
-	github.com/cloudflare/circl v1.6.2 // indirect
+	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
+	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/crediterra/money v0.3.0 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
 	github.com/dal-go/dalgo v0.41.1
@@ -83,7 +80,7 @@ require (
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.11 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.12 // indirect
 	github.com/googleapis/gax-go/v2 v2.17.0 // indirect
 	//github.com/jackc/pgx/v5 v5.7.6 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
@@ -109,22 +106,22 @@ require (
 	github.com/strongo/strongoapp v0.31.13 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.64.0 // indirect
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.64.0 // indirect
-	go.opentelemetry.io/otel v1.39.0 // indirect
-	go.opentelemetry.io/otel/metric v1.39.0 // indirect
-	go.opentelemetry.io/otel/trace v1.39.0 // indirect
-	golang.org/x/crypto v0.47.0 // indirect
-	golang.org/x/net v0.49.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.65.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0 // indirect
+	go.opentelemetry.io/otel v1.40.0 // indirect
+	go.opentelemetry.io/otel/metric v1.40.0 // indirect
+	go.opentelemetry.io/otel/trace v1.40.0 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
+	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/term v0.39.0 // indirect
-	golang.org/x/text v0.33.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/term v0.40.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
-	google.golang.org/genproto v0.0.0-20260128011058-8636f8732409 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260203192932-546029d2fa20 // indirect
-	google.golang.org/grpc v1.78.0 // indirect
+	google.golang.org/genproto v0.0.0-20260209200024-4cfbd4190f57 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260209200024-4cfbd4190f57 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260209200024-4cfbd4190f57 // indirect
+	google.golang.org/grpc v1.79.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )

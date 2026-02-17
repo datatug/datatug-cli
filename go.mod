@@ -17,7 +17,6 @@ require (
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.8
 	github.com/go-git/go-git/v5 v5.16.5
-	github.com/google/go-github/v82 v82.0.0
 	github.com/google/go-github/v83 v83.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4

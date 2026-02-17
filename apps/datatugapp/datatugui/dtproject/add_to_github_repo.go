@@ -21,7 +21,7 @@ import (
 	"github.com/datatug/filetug/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/go-git/go-git/v5"
-	"github.com/google/go-github/v82/github"
+	"github.com/google/go-github/v83/github"
 	"github.com/rivo/tview"
 	"golang.org/x/oauth2"
 )

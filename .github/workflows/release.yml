@@ -28,7 +28,7 @@ jobs:
             echo "✅ HOMEBREW_TAP_GITHUB_TOKEN is set"
           fi
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           version: v2
           args: release --clean

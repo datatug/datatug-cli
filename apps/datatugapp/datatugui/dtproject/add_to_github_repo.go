@@ -300,11 +300,11 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 			var sb strings.Builder
 			for i, step := range steps {
 				if i < currentStep {
-					sb.WriteString(fmt.Sprintf("- %s - [green]done[-]\n", step))
+					fmt.Fprintf(&sb, "- %s - [green]done[-]\n", step)
 				} else if i == currentStep {
-					sb.WriteString(fmt.Sprintf("- %s - [yellow]%s[-]\n", step, status))
+					fmt.Fprintf(&sb, "- %s - [yellow]%s[-]\n", step, status)
 				} else {
-					sb.WriteString(fmt.Sprintf("- %s\n", step))
+					fmt.Fprintf(&sb, "- %s\n", step)
 				}
 			}
 			progressView.SetText(sb.String())

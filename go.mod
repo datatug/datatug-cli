@@ -16,7 +16,7 @@ require (
 	github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.8
-	github.com/go-git/go-git/v5 v5.16.5
+	github.com/go-git/go-git/v5 v5.17.0
 	github.com/google/go-github/v83 v83.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
@@ -34,7 +34,7 @@ require (
 	github.com/zalando/go-keyring v0.2.6
 	go.uber.org/mock v0.6.0
 	golang.org/x/oauth2 v0.35.0
-	google.golang.org/api v0.268.0
+	google.golang.org/api v0.269.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -73,7 +73,7 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
-	github.com/go-git/go-billy/v5 v5.7.0 // indirect
+	github.com/go-git/go-billy/v5 v5.8.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect

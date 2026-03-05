@@ -62,6 +62,8 @@ github.com/dal-go/dalgo v0.41.5 h1:9cZJyO+ReRBwTgnnUZ5I4UCh900ezefhiQqjcxeG8rQ=
 github.com/dal-go/dalgo v0.41.5/go.mod h1:Y7CDkUTABhzyyWQpu3Ju6JQIke2MU7i7exK/fHAgzPM=
 github.com/dal-go/dalgo2sql v0.4.22 h1:mdYr7L1cSrUYMQBE1DFR6VJJiZvpiJ4weWHH5BuJ34k=
 github.com/dal-go/dalgo2sql v0.4.22/go.mod h1:MMbmeOJgEFckuSe1Pu1Ju+LGomufaqSHqjffWGLdkKw=
+github.com/dal-go/dalgo2sql v0.4.23 h1:RB/yzGZKlF4yYzfX7IElLjLEw9wG2Ek8x5CmkD5LNrU=
+github.com/dal-go/dalgo2sql v0.4.23/go.mod h1:euhg68sRKHMpD125tuUdkYkTPPwWZxqR6/UG9eVWO1k=
 github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/filetug v0.0.21 h1:KrfFSJb4LxlaD+AIxYRn4VrdEWHSpaPqF01E2PvVAEM=
@@ -226,6 +228,8 @@ github.com/sneat-co/sneat-go-core v0.54.13 h1:+cw7zzKvuhET8j+f/hNjlzAmUPDdn6/vaJ
 github.com/sneat-co/sneat-go-core v0.54.13/go.mod h1:wuN98CZIVoFxx9k7dvTHsaeSjpQqnJegUiIOwH1uHYY=
 github.com/sneat-co/sneat-go-core v0.54.14 h1:Lhy7LMZIXY1dWXACf0f8Evh06Nz87JeO92ozhFZkQXU=
 github.com/sneat-co/sneat-go-core v0.54.14/go.mod h1:8dQ9+tZnmiyrjJSYaxYToqhDzfJYHqkbvk42/70o23s=
+github.com/sneat-co/sneat-go-core v0.54.15 h1:8h2n48lVm2Nvd3wNYFWiN8co0aVNlQfUCRGk2pSJgDk=
+github.com/sneat-co/sneat-go-core v0.54.15/go.mod h1:A3h4sngwsv/mETWMTqOtgi1OFPdJkFm3daWpazA6LYM=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.5.3 h1:jmXUvGomnU1o3W/V5h2VEradbpJDwGrzugQQvL0POH4=
 github.com/stretchr/objx v0.5.3/go.mod h1:rDQraq+vQZU7Fde9LOZLr8Tax6zZvy4kuNKF+QYS+U0=
@@ -249,6 +253,8 @@ github.com/strongo/strongo-tui v0.0.1 h1:8o+2dvj3GuHaPQvmVq9LaiKWWRFq4wVcFf6fjye
 github.com/strongo/strongo-tui v0.0.1/go.mod h1:V6bqDiE9ZnjzP6COkoMwGjDBNTI+MEPRa1iD4XZ/H+k=
 github.com/strongo/strongoapp v0.31.14 h1:DzeoJyk2W7nuK/e5wrk+XBbPu3jPbzzgtmAgjmtt6Mk=
 github.com/strongo/strongoapp v0.31.14/go.mod h1:PgZrJHdUVOnkSSaQoGfWlK+nMkxKEPoMLxS4i2lGKJk=
+github.com/strongo/strongoapp v0.31.15 h1:FxjlnGaeE8xqzETYlu6I3twt/txihvEV8A+V2m/ypWA=
+github.com/strongo/strongoapp v0.31.15/go.mod h1:Z7QT1zzeUH9PdI/jaz6X+ReuzNLTL43dOehF9E/IkSg=
 github.com/strongo/validation v0.0.7 h1:gs6YkwPsYtVsepQaQOB+ZF+T0Gu5+nk4ZMND8F85e+U=
 github.com/strongo/validation v0.0.7/go.mod h1:YUwoPEItLJd/Bc9X1OCUm03ofhvm3kwZvuihU7/jz58=
 github.com/urfave/cli/v3 v3.6.2 h1:lQuqiPrZ1cIz8hz+HcrG0TNZFxU70dPZ3Yl+pSrH9A8=

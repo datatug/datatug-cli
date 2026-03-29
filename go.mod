@@ -11,9 +11,9 @@ go 1.26.0
 require (
 	cloud.google.com/go/firestore v1.21.0
 	github.com/alecthomas/chroma/v2 v2.23.1
-	github.com/dal-go/dalgo2sql v0.4.28
+	github.com/dal-go/dalgo2sql v0.4.29
 	github.com/datatug/filetug v0.0.21
-	github.com/datatug/sql2csv v0.0.0-20200927071952-a7fb986d1ec2
+	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.8
 	github.com/go-git/go-git/v5 v5.17.0
@@ -26,9 +26,9 @@ require (
 	github.com/posthog/posthog-go v1.11.2
 	github.com/rivo/tview v0.42.0
 	github.com/stretchr/testify v1.11.1
-	github.com/strongo/logus v0.4.0
+	github.com/strongo/logus v0.4.1
 	github.com/strongo/strongo-tui v0.0.1
-	github.com/strongo/validation v0.0.7
+	github.com/strongo/validation v0.0.8
 	github.com/urfave/cli/v3 v3.8.0
 	github.com/xo/dburl v0.24.2
 	github.com/zalando/go-keyring v0.2.8
@@ -63,9 +63,9 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
-	github.com/crediterra/money v0.3.0 // indirect
+	github.com/crediterra/money v0.3.1 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
-	github.com/dal-go/dalgo v0.41.9
+	github.com/dal-go/dalgo v0.41.10
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
@@ -99,12 +99,12 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/sneat-co/sneat-go-core v0.54.21
-	github.com/strongo/analytics v0.2.3 // indirect
+	github.com/sneat-co/sneat-go-core v0.54.22
+	github.com/strongo/analytics v0.2.4 // indirect
 	github.com/strongo/decimal v0.1.1 // indirect
 	github.com/strongo/random v0.0.1
-	github.com/strongo/slice v0.3.3
-	github.com/strongo/strongoapp v0.31.19 // indirect
+	github.com/strongo/slice v0.3.4
+	github.com/strongo/strongoapp v0.31.20 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.65.0 // indirect

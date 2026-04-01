@@ -11,16 +11,16 @@ go 1.26.0
 require (
 	cloud.google.com/go/firestore v1.21.0
 	github.com/alecthomas/chroma/v2 v2.23.1
-	github.com/dal-go/dalgo2sql v0.4.29
+	github.com/dal-go/dalgo2sql v0.4.30
 	github.com/datatug/filetug v0.0.21
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.8
-	github.com/go-git/go-git/v5 v5.17.0
+	github.com/go-git/go-git/v5 v5.17.2
 	github.com/google/go-github/v84 v84.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
-	github.com/mattn/go-sqlite3 v1.14.37
+	github.com/mattn/go-sqlite3 v1.14.38
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.11.2
@@ -34,7 +34,7 @@ require (
 	github.com/zalando/go-keyring v0.2.8
 	go.uber.org/mock v0.6.0
 	golang.org/x/oauth2 v0.36.0
-	google.golang.org/api v0.273.0
+	google.golang.org/api v0.273.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -99,12 +99,12 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/sneat-co/sneat-go-core v0.54.22
+	github.com/sneat-co/sneat-go-core v0.54.23
 	github.com/strongo/analytics v0.2.4 // indirect
 	github.com/strongo/decimal v0.1.1 // indirect
 	github.com/strongo/random v0.0.1
 	github.com/strongo/slice v0.3.4
-	github.com/strongo/strongoapp v0.31.20 // indirect
+	github.com/strongo/strongoapp v0.31.21 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.65.0 // indirect

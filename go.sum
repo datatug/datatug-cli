@@ -86,6 +86,8 @@ github.com/dal-go/dalgo2sql v0.4.28 h1:+mv618nNnSiPd3acuTgbeeUI+/RkT7iRD32DcNtpn
 github.com/dal-go/dalgo2sql v0.4.28/go.mod h1:kNS3mR/kueLJLHHtXLd36B7AeXU/t04ppMa+1C56hBI=
 github.com/dal-go/dalgo2sql v0.4.29 h1:qobbh/ekN+2MMy9czsYNlu913d59KU1MOpTP91/Z4Rc=
 github.com/dal-go/dalgo2sql v0.4.29/go.mod h1:kNS3mR/kueLJLHHtXLd36B7AeXU/t04ppMa+1C56hBI=
+github.com/dal-go/dalgo2sql v0.4.30 h1:KXl9FWLsrwbDEPg5eqwxUlh0TzaeKMr7GNZzHbaP8LU=
+github.com/dal-go/dalgo2sql v0.4.30/go.mod h1:ZCGj2C0GlGVmGawgSsplRuAJ6MP6Scepm2F7er3SdZs=
 github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/filetug v0.0.21 h1:KrfFSJb4LxlaD+AIxYRn4VrdEWHSpaPqF01E2PvVAEM=
@@ -131,6 +133,8 @@ github.com/go-git/go-git-fixtures/v4 v4.3.2-0.20231010084843-55a94097c399 h1:eMj
 github.com/go-git/go-git-fixtures/v4 v4.3.2-0.20231010084843-55a94097c399/go.mod h1:1OCfN199q1Jm3HZlxleg+Dw/mwps2Wbk9frAWm+4FII=
 github.com/go-git/go-git/v5 v5.17.0 h1:AbyI4xf+7DsjINHMu35quAh4wJygKBKBuXVjV/pxesM=
 github.com/go-git/go-git/v5 v5.17.0/go.mod h1:f82C4YiLx+Lhi8eHxltLeGC5uBTXSFa6PC5WW9o4SjI=
+github.com/go-git/go-git/v5 v5.17.2 h1:B+nkdlxdYrvyFK4GPXVU8w1U+YkbsgciIR7f2sZJ104=
+github.com/go-git/go-git/v5 v5.17.2/go.mod h1:pW/VmeqkanRFqR6AljLcs7EA7FbZaN5MQqO7oZADXpo=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=
 github.com/go-logr/logr v1.4.3/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
@@ -218,6 +222,8 @@ github.com/mattn/go-sqlite3 v1.14.34 h1:3NtcvcUnFBPsuRcno8pUtupspG/GM+9nZ88zgJcp
 github.com/mattn/go-sqlite3 v1.14.34/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
 github.com/mattn/go-sqlite3 v1.14.37 h1:3DOZp4cXis1cUIpCfXLtmlGolNLp2VEqhiB/PARNBIg=
 github.com/mattn/go-sqlite3 v1.14.37/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
+github.com/mattn/go-sqlite3 v1.14.38 h1:tDUzL85kMvOrvpCt8P64SbGgVFtJB11GPi2AdmITgb4=
+github.com/mattn/go-sqlite3 v1.14.38/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
 github.com/microsoft/go-mssqldb v1.6.0 h1:mM3gYdVwEPFrlg/Dvr2DNVEgYFG7L42l+dGc67NNNpc=
 github.com/microsoft/go-mssqldb v1.6.0/go.mod h1:00mDtPbeQCRGC1HwOOR5K/gr30P1NcEG0vx6Kbv2aJU=
 github.com/mitchellh/go-homedir v1.1.0 h1:lukF9ziXFxDFPkA1vsr5zpc1XuPDn/wFntq5mG+4E0Y=
@@ -274,6 +280,8 @@ github.com/sneat-co/sneat-go-core v0.54.21 h1:OvBLzncxRVMMdbZc4KROOtE9yBma8lFOTq
 github.com/sneat-co/sneat-go-core v0.54.21/go.mod h1:snKomxQqIYqYde8iuXdqodbJ0F6aW7ng1pIAgMIlZjg=
 github.com/sneat-co/sneat-go-core v0.54.22 h1:dZT0usv74mVcRtqCIP2ULpNnrW8NmFNRe4EL/fvRNjs=
 github.com/sneat-co/sneat-go-core v0.54.22/go.mod h1:xf+D41sWTz6Bi14M+O2BWbdAj/bj/H3uPayLdKe7/n4=
+github.com/sneat-co/sneat-go-core v0.54.23 h1:Qce46/n+v/iq4JihQS/HpSmZFC3P01L0R6Wzhxp4TBY=
+github.com/sneat-co/sneat-go-core v0.54.23/go.mod h1:GLmVtg15GwPLzUL4AcKi8r3frFkDqHCq3+egEhc2y4s=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.5.3 h1:jmXUvGomnU1o3W/V5h2VEradbpJDwGrzugQQvL0POH4=
 github.com/stretchr/objx v0.5.3/go.mod h1:rDQraq+vQZU7Fde9LOZLr8Tax6zZvy4kuNKF+QYS+U0=
@@ -313,6 +321,8 @@ github.com/strongo/strongoapp v0.31.19 h1:ey7CUrjwg2ldtcnJoHQaXmSaCSDv12FyFA5y0I
 github.com/strongo/strongoapp v0.31.19/go.mod h1:nkUB/Tl9ah49MyMuZsdb+hruXxlZ29UKbUM6GLbGh9E=
 github.com/strongo/strongoapp v0.31.20 h1:xRgQAeniKpk19lnXOnC4cUEcDSVraxNTk56E7N0b3PE=
 github.com/strongo/strongoapp v0.31.20/go.mod h1:nkUB/Tl9ah49MyMuZsdb+hruXxlZ29UKbUM6GLbGh9E=
+github.com/strongo/strongoapp v0.31.21 h1:sbI50bfc0snNp5heqkAKwN0ZkFIAOGCXyL0KtDg+3uE=
+github.com/strongo/strongoapp v0.31.21/go.mod h1:jVYGKnSDPfgIAMOmovSC/mbX9NYILMapfKXGg2GvMNU=
 github.com/strongo/validation v0.0.7 h1:gs6YkwPsYtVsepQaQOB+ZF+T0Gu5+nk4ZMND8F85e+U=
 github.com/strongo/validation v0.0.7/go.mod h1:YUwoPEItLJd/Bc9X1OCUm03ofhvm3kwZvuihU7/jz58=
 github.com/strongo/validation v0.0.8 h1:LL3FODf1MTOROKa8fHJuwYxiKHcvd1W2Vs0OXc1H46U=
@@ -447,6 +457,8 @@ google.golang.org/api v0.272.0 h1:eLUQZGnAS3OHn31URRf9sAmRk3w2JjMx37d2k8AjJmA=
 google.golang.org/api v0.272.0/go.mod h1:wKjowi5LNJc5qarNvDCvNQBn3rVK8nSy6jg2SwRwzIA=
 google.golang.org/api v0.273.0 h1:r/Bcv36Xa/te1ugaN1kdJ5LoA5Wj/cL+a4gj6FiPBjQ=
 google.golang.org/api v0.273.0/go.mod h1:JbAt7mF+XVmWu6xNP8/+CTiGH30ofmCmk9nM8d8fHew=
+google.golang.org/api v0.273.1 h1:L7G/TmpAMz0nKx/ciAVssVmWQiOF6+pOuXeKrWVsquY=
+google.golang.org/api v0.273.1/go.mod h1:JbAt7mF+XVmWu6xNP8/+CTiGH30ofmCmk9nM8d8fHew=
 google.golang.org/genproto v0.0.0-20260217215200-42d3e9bedb6d h1:vsOm753cOAMkt76efriTCDKjpCbK18XGHMJHo0JUKhc=
 google.golang.org/genproto v0.0.0-20260217215200-42d3e9bedb6d/go.mod h1:0oz9d7g9QLSdv9/lgbIjowW1JoxMbxmBVNe8i6tORJI=
 google.golang.org/genproto v0.0.0-20260316180232-0b37fe3546d5 h1:JNfk58HZ8lfmXbYK2vx/UvsqIL59TzByCxPIX4TDmsE=

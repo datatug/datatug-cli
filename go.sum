@@ -88,6 +88,8 @@ github.com/dal-go/dalgo2sql v0.4.29 h1:qobbh/ekN+2MMy9czsYNlu913d59KU1MOpTP91/Z4
 github.com/dal-go/dalgo2sql v0.4.29/go.mod h1:kNS3mR/kueLJLHHtXLd36B7AeXU/t04ppMa+1C56hBI=
 github.com/dal-go/dalgo2sql v0.4.30 h1:KXl9FWLsrwbDEPg5eqwxUlh0TzaeKMr7GNZzHbaP8LU=
 github.com/dal-go/dalgo2sql v0.4.30/go.mod h1:ZCGj2C0GlGVmGawgSsplRuAJ6MP6Scepm2F7er3SdZs=
+github.com/dal-go/dalgo2sql v0.4.31 h1:xYGEgEeOiffz8sB77iGqAg2fYqJ2v3Tf0xOQ/EGYiIY=
+github.com/dal-go/dalgo2sql v0.4.31/go.mod h1:ZCGj2C0GlGVmGawgSsplRuAJ6MP6Scepm2F7er3SdZs=
 github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/filetug v0.0.21 h1:KrfFSJb4LxlaD+AIxYRn4VrdEWHSpaPqF01E2PvVAEM=

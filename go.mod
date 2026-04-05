@@ -11,7 +11,7 @@ go 1.26.0
 require (
 	cloud.google.com/go/firestore v1.21.0
 	github.com/alecthomas/chroma/v2 v2.23.1
-	github.com/dal-go/dalgo2sql v0.4.30
+	github.com/dal-go/dalgo2sql v0.4.31
 	github.com/datatug/filetug v0.0.21
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3

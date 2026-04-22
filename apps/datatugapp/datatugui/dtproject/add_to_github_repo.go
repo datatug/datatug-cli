@@ -21,7 +21,7 @@ import (
 	"github.com/datatug/filetug/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/go-git/go-git/v5"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 	"github.com/rivo/tview"
 	"golang.org/x/oauth2"
 )
@@ -300,11 +300,11 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 			var sb strings.Builder
 			for i, step := range steps {
 				if i < currentStep {
-					fmt.Fprintf(&sb, "- %s - [green]done[-]\n", step)
+					_, _ = fmt.Fprintf(&sb, "- %s - [green]done[-]\n", step)
 				} else if i == currentStep {
-					fmt.Fprintf(&sb, "- %s - [yellow]%s[-]\n", step, status)
+					_, _ = fmt.Fprintf(&sb, "- %s - [yellow]%s[-]\n", step, status)
 				} else {
-					fmt.Fprintf(&sb, "- %s\n", step)
+					_, _ = fmt.Fprintf(&sb, "- %s\n", step)
 				}
 			}
 			progressView.SetText(sb.String())

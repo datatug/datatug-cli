@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/dtprojcreator"
-	"github.com/google/go-github/v84/github"
+	"github.com/google/go-github/v85/github"
 )
 
 var _ dtprojcreator.Storage = (*GhStorage)(nil)

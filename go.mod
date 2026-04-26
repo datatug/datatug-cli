@@ -11,7 +11,7 @@ go 1.26.0
 require (
 	cloud.google.com/go/firestore v1.22.0
 	github.com/alecthomas/chroma/v2 v2.23.1
-	github.com/dal-go/dalgo2sql v0.4.38
+	github.com/dal-go/dalgo2sql v0.4.39
 	github.com/datatug/filetug v0.0.21
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3
@@ -98,12 +98,12 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/sneat-co/sneat-go-core v0.54.26
+	github.com/sneat-co/sneat-go-core v0.54.27
 	github.com/strongo/analytics v0.2.5 // indirect
 	github.com/strongo/decimal v0.1.1 // indirect
 	github.com/strongo/random v0.0.1
 	github.com/strongo/slice v0.3.4
-	github.com/strongo/strongoapp v0.31.25 // indirect
+	github.com/strongo/strongoapp v0.31.26 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0 // indirect

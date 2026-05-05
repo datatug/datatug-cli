@@ -11,7 +11,7 @@ go 1.26.0
 require (
 	cloud.google.com/go/firestore v1.22.0
 	github.com/alecthomas/chroma/v2 v2.24.1
-	github.com/dal-go/dalgo2sql v0.4.40
+	github.com/dal-go/dalgo2sql v0.4.42
 	github.com/datatug/filetug v0.0.21
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3
@@ -34,7 +34,7 @@ require (
 	github.com/zalando/go-keyring v0.2.8
 	go.uber.org/mock v0.6.0
 	golang.org/x/oauth2 v0.36.0
-	google.golang.org/api v0.277.0
+	google.golang.org/api v0.278.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

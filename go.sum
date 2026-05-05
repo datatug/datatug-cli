@@ -68,6 +68,8 @@ github.com/dal-go/dalgo2sql v0.4.39 h1:O1tm3Pqnos6fD0L9FDU4Tmi+NaXjW08WvzGteDrfg
 github.com/dal-go/dalgo2sql v0.4.39/go.mod h1:aFrofvTGA7I7vBQpGgx+RrveDG5f4aV86xR7+5a+h/4=
 github.com/dal-go/dalgo2sql v0.4.40 h1:9BxzcMK/XZNOMi0cYfOLsD0WRHxERwMJSIHpVwXBjZM=
 github.com/dal-go/dalgo2sql v0.4.40/go.mod h1:aFrofvTGA7I7vBQpGgx+RrveDG5f4aV86xR7+5a+h/4=
+github.com/dal-go/dalgo2sql v0.4.42 h1:mi52+Nv1Vzymgk4ZT2z2CUHUAMsTLG6HoEPJ9pWuc9E=
+github.com/dal-go/dalgo2sql v0.4.42/go.mod h1:Mnj+6MjMkyoG3fYZJapGu12wVcRMf4Dtm9s4AxWq+Vs=
 github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/filetug v0.0.21 h1:KrfFSJb4LxlaD+AIxYRn4VrdEWHSpaPqF01E2PvVAEM=
@@ -360,6 +362,8 @@ google.golang.org/api v0.276.0 h1:nVArUtfLEihtW+b0DdcqRGK1xoEm2+ltAihyztq7MKY=
 google.golang.org/api v0.276.0/go.mod h1:Fnag/EWUPIcJXuIkP1pjoTgS5vdxlk3eeemL7Do6bvw=
 google.golang.org/api v0.277.0 h1:HJfyJUiNeBBUMai7ez8u14wkp/gH/I4wpGbbO9o+cSk=
 google.golang.org/api v0.277.0/go.mod h1:B9TqLBwJqVjp1mtt7WeoQwWRwvu/400y5lETOql+giQ=
+google.golang.org/api v0.278.0 h1:W7jiRvRi53VYFfZ/HoZjQBtJk7gOFbHD8ot1RzVZU6E=
+google.golang.org/api v0.278.0/go.mod h1:B9TqLBwJqVjp1mtt7WeoQwWRwvu/400y5lETOql+giQ=
 google.golang.org/genproto v0.0.0-20260420184626-e10c466a9529 h1:QoMBg0moLIlB/eucPzc+ID5SgPZWuirtjAn3l8nW2Dg=
 google.golang.org/genproto v0.0.0-20260420184626-e10c466a9529/go.mod h1:EjLmDZ8liSLBrCTK5vP+bGIxRQHE3ovGvOI0CzGk1PI=
 google.golang.org/genproto/googleapis/api v0.0.0-20260420184626-e10c466a9529 h1:zUWMZsvo/IJcD1t6MNCPO/azZTwz0TvwCBqr5aifoVY=

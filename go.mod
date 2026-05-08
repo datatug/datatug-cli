@@ -18,6 +18,7 @@ require (
 	github.com/gdamore/tcell/v2 v2.13.9
 	github.com/go-git/go-git/v5 v5.19.0
 	github.com/google/go-github/v85 v85.0.0
+	github.com/google/go-github/v86 v86.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
 	github.com/mattn/go-sqlite3 v1.14.44

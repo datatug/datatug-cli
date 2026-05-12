@@ -56,6 +56,8 @@ github.com/dal-go/dalgo v0.41.15 h1:quY9KMe7PSs59Zt+Zx8AUR0NDVB8CeQMm4wRXzlZfJs=
 github.com/dal-go/dalgo v0.41.15/go.mod h1:mGR/cl9X6O2QCmu1FzrM8gVgFkkhdR33Ur3msnJJJXU=
 github.com/dal-go/dalgo2sql v0.4.42 h1:mi52+Nv1Vzymgk4ZT2z2CUHUAMsTLG6HoEPJ9pWuc9E=
 github.com/dal-go/dalgo2sql v0.4.42/go.mod h1:Mnj+6MjMkyoG3fYZJapGu12wVcRMf4Dtm9s4AxWq+Vs=
+github.com/dal-go/dalgo2sql v0.4.43 h1:pGDtOc4qBQzNHKEsmg3w8ZUP7rLX9mXG8jY3wxl8RSQ=
+github.com/dal-go/dalgo2sql v0.4.43/go.mod h1:9/RrBz5MLub+tH0u2lrtTmQh/+Bb/tF9DT6LB2YtI2U=
 github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/filetug v0.0.21 h1:KrfFSJb4LxlaD+AIxYRn4VrdEWHSpaPqF01E2PvVAEM=
@@ -198,6 +200,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/posthog/posthog-go v1.12.4 h1:fAqTAGgLQFZADRg3AJvSSoP0hwEIs940OE8AmL8/H8c=
 github.com/posthog/posthog-go v1.12.4/go.mod h1:xsVOW9YImilUcazwPNEq4PJDqEZf2KeCS758zXjwkPg=
+github.com/posthog/posthog-go v1.12.5 h1:l/x3mpqisXJ0sTOyyRutsTQAgiWYuJT1uhN4cQraJ8o=
+github.com/posthog/posthog-go v1.12.5/go.mod h1:xsVOW9YImilUcazwPNEq4PJDqEZf2KeCS758zXjwkPg=
 github.com/qri-io/jsonpointer v0.1.1 h1:prVZBZLL6TW5vsSB9fFHFAMBLI4b0ri5vribQlTJiBA=
 github.com/qri-io/jsonpointer v0.1.1/go.mod h1:DnJPaYgiKu56EuDp8TU5wFLdZIcAnb/uH9v37ZaMV64=
 github.com/qri-io/jsonschema v0.2.1 h1:NNFoKms+kut6ABPf6xiKNM5214jzxAhDBrPHCJ97Wg0=
@@ -216,6 +220,8 @@ github.com/skeema/knownhosts v1.3.2 h1:EDL9mgf4NzwMXCTfaxSD/o/a5fxDw/xL9nkU28Jjd
 github.com/skeema/knownhosts v1.3.2/go.mod h1:bEg3iQAuw+jyiw+484wwFJoKSLwcfd7fqRy+N0QTiow=
 github.com/sneat-co/sneat-go-core v0.54.29 h1:cOt72wC5DJSJdqhjOn8yjpxNMbDZRI8indFDb1YsndE=
 github.com/sneat-co/sneat-go-core v0.54.29/go.mod h1:/w7h0Dhv4zrou9spRW1YlqFPEPXTF9kEgwosLqhgMBk=
+github.com/sneat-co/sneat-go-core v0.54.30 h1:dKisGObXUB4sgCmlWEZsE+dHxthVVX+cEf1pDI3pKkI=
+github.com/sneat-co/sneat-go-core v0.54.30/go.mod h1:H1YgY3fRWwTbZc8z9Vyc21HRC0A47Mt9/7ZA1Sd73os=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.5.3 h1:jmXUvGomnU1o3W/V5h2VEradbpJDwGrzugQQvL0POH4=
 github.com/stretchr/objx v0.5.3/go.mod h1:rDQraq+vQZU7Fde9LOZLr8Tax6zZvy4kuNKF+QYS+U0=
@@ -239,6 +245,8 @@ github.com/strongo/strongo-tui v0.0.1 h1:8o+2dvj3GuHaPQvmVq9LaiKWWRFq4wVcFf6fjye
 github.com/strongo/strongo-tui v0.0.1/go.mod h1:V6bqDiE9ZnjzP6COkoMwGjDBNTI+MEPRa1iD4XZ/H+k=
 github.com/strongo/strongoapp v0.31.27 h1:b3vwCVEPxsN8sbDnTHcj3Fq1D8apfn7Fhh5T9h132mA=
 github.com/strongo/strongoapp v0.31.27/go.mod h1:ctYTJrdmojWZOwdEGCpPwsWjsPOfG5Db4epCmb4b53A=
+github.com/strongo/strongoapp v0.31.28 h1:2toA1wPSI2qTcmG2qX1mwPH1xGEHPtzIGGO1SKyTW8s=
+github.com/strongo/strongoapp v0.31.28/go.mod h1:zauzVQk+SLb7KQLbVfKNhrFVohNEKH+7bzxt08bb1kE=
 github.com/strongo/validation v0.0.8 h1:LL3FODf1MTOROKa8fHJuwYxiKHcvd1W2Vs0OXc1H46U=
 github.com/strongo/validation v0.0.8/go.mod h1:YUwoPEItLJd/Bc9X1OCUm03ofhvm3kwZvuihU7/jz58=
 github.com/urfave/cli/v3 v3.8.0 h1:XqKPrm0q4P0q5JpoclYoCAv0/MIvH/jZ2umzuf8pNTI=

@@ -93,6 +93,12 @@ The viewer MUST connect read-only by default, mirroring [scan REQ: connection-st
 
 The connection opened by `datatug db` MUST be read-only. Verifiable by attempting an `UPDATE` from inside the viewer (where supported by the viewer's UI) and expecting it to fail.
 
+## Subcommands
+
+| Subcommand | Status | Description |
+|---|---|---|
+| [`db copy`](copy/README.md) | Approved | `datatug db copy --from <url> --to <url>` — cross-engine database copy primitive. |
+
 ## Outstanding Questions
 
 - Should the viewer launched here be the same component as the TUI's DB viewer, or a separate "ad-hoc" mode with different UX?

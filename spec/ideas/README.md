@@ -6,9 +6,9 @@ The Idea format follows [SpecScore](https://specscore.md/idea-specification).
 
 ## Index
 
-| Idea | Status | Summary |
-|---|---|---|
-| [cross-engine-db-copy](cross-engine-db-copy.md) | Approved | A `datatug db copy --from <url> --to <url>` primitive plus `project export`/`import` sugar, moving data across DALgo backends (SQLite, PostgreSQL, inGitDB) with auto-target-schema. |
+| Idea | Status | Date | Owner | Promotes To |
+|------|--------|------|-------|-------------|
+| [cross-engine-db-copy](cross-engine-db-copy.md) | Approved | 2026-05-12 | alex | — |
 
 ## Outstanding Questions
 

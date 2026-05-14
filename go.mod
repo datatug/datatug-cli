@@ -5,8 +5,11 @@ go 1.26.0
 //replace github.com/datatug/datatug-core => ../datatug-core
 
 //replace github.com/dal-go/dalgo => ../../dal-go/dalgo
-//
-//replace github.com/dal-go/dalgo2sql => ../../dal-go/dalgo2sql
+
+// Local checkout has commit 581a278 (embed dal.ConcurrencyAvailable) which
+// is required by dalgo v0.42.0+ but is not yet present in a tagged release
+// of dalgo2sql. Remove this directive once dalgo2sql cuts a new tag.
+replace github.com/dal-go/dalgo2sql => ../../dal-go/dalgo2sql
 
 require (
 	cloud.google.com/go/firestore v1.22.0
@@ -44,6 +47,7 @@ require (
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/georgysavva/scany/v2 v2.1.4 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
+	github.com/gofrs/flock v0.13.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
@@ -64,7 +68,7 @@ require (
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/crediterra/money v0.3.1 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
-	github.com/dal-go/dalgo v0.41.15
+	github.com/dal-go/dalgo v0.42.0
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect

@@ -14,6 +14,9 @@ func dbCommand() *cli.Command {
 		Name:        "db",
 		Usage:       "Opens database viewer",
 		Description: "",
+		Commands: []*cli.Command{
+			dbCopyCommand(),
+		},
 		Action: func(ctx context.Context, command *cli.Command) error {
 			u, err := dburl.Parse(command.Args().First())
 			if err != nil {

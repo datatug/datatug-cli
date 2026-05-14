@@ -8,7 +8,7 @@
 
 ## Summary
 
-Extends [`datatug db copy`](../README.md) with four orthogonal subsetting axes — table include/exclude, structured row predicates, per-table row limits, and column subsetting — all exposed both as CLI flags and as a YAML config-file schema. Row predicates compile to DALgo's `dal.WhereField` / `GroupCondition` and push down to the source backend's query engine; pull-down filtering is out of scope for MVP because every supported source backend (SQLite, inGitDB) can push. The CLI surface uses a colon-delimited mini-syntax (`--where <table>:<field>:<op>:<value>`) with a fixed ten-operator vocabulary; complex OR-groups are config-file-only. This Feature is what makes [`db snapshot`'s](../../../../../ideas/db-snapshot-command.md) config-file forwarder useful — without subsetting, snapshots can only capture whole databases.
+Extends [`datatug db copy`](../README.md) with three orthogonal subsetting axes — table include/exclude, structured row predicates, and per-table row limits — all exposed both as CLI flags and as a YAML config-file schema. Row predicates compile to DALgo's `dal.WhereField` / `GroupCondition` and push down to the source backend's query engine; pull-down filtering is out of scope for MVP because every supported source backend (SQLite, inGitDB) can push. The CLI surface uses a colon-delimited mini-syntax (`--where <table>:<field>:<op>:<value>`) with a fixed ten-operator vocabulary; complex OR-groups are config-file-only. **Column subsetting is deferred** to a follow-up Feature once an upstream DALgo `QueryBuilder.SelectFields(...)` extension lands — see [Synopsis](#synopsis) for context. This Feature is what makes [`db snapshot`'s](../../../../../ideas/db-snapshot-command.md) config-file forwarder useful for the three covered axes — without it, snapshots can only capture whole databases.
 
 ## Synopsis
 
@@ -17,11 +17,11 @@ datatug db copy --from <url> --to <url>
                 [--include <t1,t2,…>]        | [--exclude <t1,t2,…>]
                 [--where <table>:<field>:<op>:<value>]…
                 [--limit <table>:<N>]…
-                [--columns <table>:<c1,c2,…>] | [--exclude-columns <table>:<c1,c2,…>]
-                [--exclude-columns-global <c1,c2,…>]
                 [--filter-config <path-to-yaml>]
                 [<existing copy flags: --overwrite, --parallel-streams, --progress>]
 ```
+
+**MVP scope: column subsetting deferred.** `--columns`, `--exclude-columns`, and `--exclude-columns-global` are NOT in MVP. A plan-time audit of `dal-go/dalgo` found that `QueryBuilder` exposes no explicit field-projection method; the existing surface (`SelectIntoRecordset`, `SelectIntoRecord`, `SelectKeysOnly`) returns whole records. REQ:push-down-only forbids a pull-down "read all, drop in copy engine" workaround, so column subsetting requires upstream DALgo work — a `QueryBuilder.SelectFields(...dal.FieldName)` (or equivalent) extension landing in `dal-go/dalgo`, plus driver coverage in `dalgo2sqlite` and `dalgo2ingitdb`. That extension is filed as a sibling Idea (`dalgo-query-projection`, to be drafted) and will produce a follow-up DataTug Feature `cli/db/copy/filtering/columns/` once the upstream work lands. See [Out of Scope](#out-of-scope).
 
 ## Problem
 
@@ -96,45 +96,19 @@ The `--limit` flag MUST accept a colon-delimited 2-tuple `<table>:<N>` where `N`
 
 `--limit <table>:<N>` MUST compile to DALgo's structured `Limit(N)` clause on the per-table read query. The implementation MUST NOT achieve limiting by reading more rows than requested and discarding the remainder (REQ:push-down-only).
 
-### Column subsetting
+### Column subsetting (deferred)
 
-#### REQ: columns-include-flag
-
-The `--columns` flag MUST accept a colon-delimited form `<table>:<c1,c2,…>` and MUST be repeatable. When present for a table, only the listed columns AND the table's primary-key columns (REQ:columns-pk-implicit) are SELECTed from the source.
-
-#### REQ: columns-exclude-flag
-
-The `--exclude-columns` flag MUST accept the same `<table>:<c1,c2,…>` form. When present, the listed columns are excluded from the SELECT; all other columns (plus PK) are kept.
-
-#### REQ: columns-mutex-per-table
-
-For any single table, `--columns` and `--exclude-columns` MUST NOT both be specified. Conflict MUST exit `2` naming the conflicting table.
-
-#### REQ: columns-pk-implicit
-
-A table's primary-key column(s) are ALWAYS included in the SELECT, regardless of `--columns` whitelist contents or `--exclude-columns` blacklist contents. If a user explicitly lists a PK column in `--exclude-columns` for that table OR omits it from a `--columns` whitelist that names other columns, the implementation MUST exit `2` with stderr naming the table and the PK column, explaining that PKs cannot be subsetted (target writes need them as record keys).
-
-#### REQ: columns-global-exclude
-
-The `--exclude-columns-global` flag MUST accept a comma-separated column-name list. For each source table being copied, any column whose name matches an entry in this list is excluded from the SELECT. Tables that do not have any of the named columns are NOT an error — the global exclude silently no-ops per-table. PK columns named in `--exclude-columns-global` MUST be silently excluded from the global rule (PK protection per REQ:columns-pk-implicit overrides).
-
-#### REQ: columns-global-interaction-with-per-table
-
-`--exclude-columns-global` and per-table `--columns` / `--exclude-columns` compose by intersection: a column is SELECTed for a table if and only if (a) it survives the per-table rule (whitelist contains it, OR blacklist does not contain it, OR no per-table rule applies) AND (b) it is not in the global exclude list (unless it is a PK). The order of evaluation is per-table first, then global exclude trims.
-
-#### REQ: columns-unknown-field
-
-If `--columns` or `--exclude-columns` names a column not present on the introspected source table, the command MUST exit `2` BEFORE any write, with stderr naming the table and unknown column. `--exclude-columns-global` is exempt — unknown columns in the global list are silently ignored per REQ:columns-global-exclude.
+Column subsetting (`--columns`, `--exclude-columns`, `--exclude-columns-global`) is **not in MVP** — see [Synopsis](#synopsis) and [Out of Scope](#out-of-scope) for the reason (no `QueryBuilder` projection API in DALgo today; REQ:push-down-only forbids a pull-down workaround). A future Feature `cli/db/copy/filtering/columns/` will land once the upstream `dalgo-query-projection` Idea ships.
 
 ### Push-down semantics
 
 #### REQ: push-down-only
 
-All filtering (table include/exclude, row WHERE, row LIMIT, column projection) MUST be applied at the source query level — compiled into the `dal.StructuredQuery` (or its `dal.NewTextQuery` fallback for `dalgo2sql`) that the source `dal.Adapter` executes. The implementation MUST NOT read full rows from the source and discard rows or columns in the copy engine. This rule is what makes "1000 latest customers from a 100k-row table" cheap; violating it would re-introduce the inefficiency the Idea explicitly rejected.
+All filtering (table include/exclude, row WHERE, row LIMIT) MUST be applied at the source query level — compiled into the `dal.StructuredQuery` (or its `dal.NewTextQuery` fallback for `dalgo2sql`) that the source `dal.Adapter` executes. The implementation MUST NOT read full rows from the source and discard rows in the copy engine. This rule is what makes "1000 latest customers from a 100k-row table" cheap; violating it would re-introduce the inefficiency the Idea explicitly rejected.
 
 #### REQ: backend-coverage
 
-For MVP, the implementation MUST support push-down for all four filter axes on both source backends in the parent Feature's E2E pair: `sqlite` (via `dalgo2sqlite`) and `ingitdb` (via `dalgo2ingitdb`). If a future backend's driver lacks coverage for an axis, the command MUST exit `1` BEFORE any write, with stderr naming the source backend and the unsupported axis. (Pull-down fallback is explicitly deferred per the Out of Scope section.)
+For MVP, the implementation MUST support push-down for all three filter axes on both source backends in the parent Feature's E2E pair: `sqlite` (via `dalgo2sqlite`) and `ingitdb` (via `dalgo2ingitdb`). If a future backend's driver lacks coverage for an axis, the command MUST exit `1` BEFORE any write, with stderr naming the source backend and the unsupported axis. (Pull-down fallback is explicitly deferred per the Out of Scope section.)
 
 ### Config-file forwarding
 
@@ -162,13 +136,9 @@ where:
         - {field: …, op: …, value: …}
 limit:
   <table>: <positive-int>
-columns:
-  global_exclude: [<column>, …]                 # mirrors --exclude-columns-global
-  per_table:
-    <table>:
-      include: [<column>, …]                    # mutex with `exclude`
-      exclude: [<column>, …]                    # mutex with `include`
 ```
+
+A `columns:` key is **reserved** for the deferred column-subsetting follow-up Feature. In MVP, a `columns:` key in the config file MUST be rejected with exit `2` and a message naming the deferral.
 
 Any unrecognized top-level key MUST exit `2`. Inside `where:<table>:`, each list entry MUST be either an object with `{field, op, value}` keys OR an object with a single `or:` key whose value is a list of `{field, op, value}` entries (max one level of OR nesting in MVP).
 
@@ -180,7 +150,7 @@ OR-groups in `where:<table>:` MUST compile to `dal.GroupCondition{operator: Or, 
 
 #### REQ: copy-acs-no-filter-baseline
 
-The existing `db copy` ACs (`sqlite-to-ingitdb-chinook-roundtrip` and siblings) MUST remain valid as "no filtering flags" baseline behavior. When this Feature lands, the parent `cli/db/copy` Feature MUST be amended to note that those ACs assume no `--include` / `--exclude` / `--where` / `--limit` / `--columns` / `--exclude-columns` / `--exclude-columns-global` / `--filter-config` flag is present.
+The existing `db copy` ACs (`sqlite-to-ingitdb-chinook-roundtrip` and siblings) MUST remain valid as "no filtering flags" baseline behavior. When this Feature lands, the parent `cli/db/copy` Feature MUST be amended to note that those ACs assume no `--include` / `--exclude` / `--where` / `--limit` / `--filter-config` flag is present.
 
 ### Error handling and exit codes
 
@@ -190,7 +160,7 @@ The existing `db copy` ACs (`sqlite-to-ingitdb-chinook-roundtrip` and siblings) 
 |---|---|
 | `0` | All copy work completed; filters applied as specified |
 | `1` | Push-down unsupported on a source backend for an axis used (REQ:backend-coverage), or generic runtime error |
-| `2` | Invalid filter flag (mutex violation, unknown operator, unknown table, unknown field, unknown column, type-coercion failure, PK in exclusion, malformed config, mixed config+flag) |
+| `2` | Invalid filter flag (mutex violation, unknown operator, unknown table, unknown field, type-coercion failure, malformed config, mixed config+flag, reserved `columns:` key in config) |
 
 Exit codes `4` (connection failure) carry over unchanged from the parent Feature.
 
@@ -200,13 +170,13 @@ Exit codes `4` (connection failure) carry over unchanged from the parent Feature
 
 | Component | Responsibility | Lives in |
 |---|---|---|
-| `pkg/dbcopy/filter` (proposed) | CLI flag parsing for `--include`/`--exclude`/`--where`/`--limit`/`--columns`/`--exclude-columns`/`--exclude-columns-global`; YAML config parsing for `--filter-config`; compilation to `dal.Query` per source table | this repo (new package) |
+| `pkg/dbcopy/filter` (proposed) | CLI flag parsing for `--include`/`--exclude`/`--where`/`--limit`; YAML config parsing for `--filter-config`; compilation to `dal.Query` per source table | this repo (new package) |
 | `pkg/dbcopy/filter/operator.go` (proposed) | Fixed operator vocabulary (REQ:operator-vocabulary); token → `dal.Operator` map; rejection of unknown tokens | this repo |
 | `pkg/dbcopy/filter/coercion.go` (proposed) | Value-to-type coercion (REQ:where-type-coercion); uses introspected `dbschema.Type` | this repo |
 | `pkg/dbcopy/engine.go` (existing) | Calls into the filter package to build per-table `dal.Query`; passes the resulting query to source `dal.Adapter.ExecuteQueryToRecordsReader` | this repo (modified) |
-| `dal.QueryBuilder.Where` / `WhereField` / `Limit` / field-projection | DALgo structured-query construction primitives | `dal-go/dalgo/dal` (existing) |
-| `dalgo2sqlite` query compiler | StructuredQuery → SQLite text for cases where StructuredQuery isn't executed natively | `dal-go/dalgo2sqlite` (existing; plan-time audit for completeness) |
-| `dalgo2ingitdb` query executor | Native StructuredQuery execution against the file tree | `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` (existing; plan-time audit for Where + Limit + projection coverage) |
+| `dal.QueryBuilder.Where` / `WhereField` / `Limit` | DALgo structured-query construction primitives — confirmed at plan time | `dal-go/dalgo/dal` (existing) |
+| `dalgo2sqlite` query compiler | StructuredQuery → SQLite text for cases where StructuredQuery isn't executed natively | `dal-go/dalgo2sqlite` (existing; plan-time audit for Where + Limit completeness) |
+| `dalgo2ingitdb` query executor | Native StructuredQuery execution against the file tree | `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` (existing; plan-time audit for Where + Limit coverage) |
 
 ### Data flow
 
@@ -215,8 +185,8 @@ flowchart TD
     cli["CLI flags +<br/>--filter-config"]
     schema[("source DB schema<br/>(via dbschema introspection)")]
     parsed["filter directives<br/>(table-keyed)"]
-    validate["validate against source schema<br/>(REQ:where-type-coercion,<br/>REQ:where-unknown-field,<br/>REQ:columns-unknown-field,<br/>REQ:table-not-found,<br/>REQ:columns-pk-implicit)"]
-    compile["compile to dal.Query per table<br/>(Where + Limit + field projection)"]
+    validate["validate against source schema<br/>(REQ:where-type-coercion,<br/>REQ:where-unknown-field,<br/>REQ:table-not-found)"]
+    compile["compile to dal.Query per table<br/>(Where + Limit)"]
     worker["per-table copy worker<br/>(existing engine — REQ:push-down-only)"]
     exit2(["exit 2<br/>(invalid filter)"])
 
@@ -231,9 +201,9 @@ flowchart TD
 ### Dependencies
 
 - **`cli/db/copy`** (parent Feature, Implemented) — extends its CLI surface and its copy engine. This Feature does NOT change `db copy`'s URL-parsing, schema-introspection, target-DDL, or overwrite/concurrency rules; those continue to apply unchanged.
-- **DALgo `dal.QueryBuilder` / `WhereField` / `Limit` / field projection** — `dal-go/dalgo` — **Plan-time audit required.** `WhereField` and `GroupCondition` exist (verified at Idea time). `Limit` and explicit field projection coverage across `dalgo2sqlite`, `dalgo2sql`, `dalgo2ingitdb` is the plan-time bar.
-- **`dalgo2sqlite` StructuredQuery → SQLite SQL compiler** — `dal-go/dalgo2sqlite` — **Plan-time audit required.** Verify Where + Limit + projection compile to correct SQLite SQL for the Chinook fixture.
-- **`dalgo2ingitdb` query execution** — `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` — **Plan-time audit required.** Verify Where + Limit + projection execute correctly against an inGitDB tree.
+- **DALgo `dal.QueryBuilder` / `WhereField` / `Limit`** — `dal-go/dalgo` — **Audited at plan time:** `WhereField` (line 87 of `dal/q_builder.go`), `GroupCondition` (verified at Idea time), and `Limit` (line 72) all exist on the public `QueryBuilder` API. **Field projection (`SelectFields(...)` or equivalent) does NOT exist** — the only `Select*` methods are `SelectIntoRecord`, `SelectIntoRecordset`, `SelectKeysOnly`, none of which subsets columns. This is why column subsetting is deferred (see [Synopsis](#synopsis), [Out of Scope](#out-of-scope)).
+- **`dalgo2sqlite` StructuredQuery → SQLite SQL compiler** — `dal-go/dalgo2sqlite` — **Plan-time audit required.** Verify Where + Limit compile to correct SQLite SQL for the Chinook fixture.
+- **`dalgo2ingitdb` query execution** — `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` — **Plan-time audit required.** Verify Where + Limit execute correctly against an inGitDB tree.
 
 ## Testing Strategy
 
@@ -246,13 +216,11 @@ E2E tests against the canonical Chinook fixture, exactly mirroring the parent Fe
 | `--where` (single condition) | `db copy --where Customer:Country:=:USA` produces a target Customer collection with exactly source's `WHERE Country = 'USA'` row count |
 | `--where` (AND, multiple flags) | `db copy --where Customer:Country:=:USA --where Customer:SupportRepId:=:3` AND-composes |
 | `--limit` | `db copy --limit Invoice:50` produces a target Invoice collection with exactly 50 rows |
-| `--columns` (whitelist) | `db copy --columns Customer:CustomerId,FirstName,LastName` produces target Customer rows containing only those columns plus PK |
-| `--exclude-columns` (blacklist) | `db copy --exclude-columns Customer:Email,Phone` produces target Customer rows missing those columns; PK preserved |
-| `--exclude-columns-global` | `db copy --exclude-columns-global LastEditedTime` drops `LastEditedTime` from any source table that has it; tables without it are unaffected |
-| Combined axes (REQ:config-cli-equivalence equivalence) | One invocation combines all four axes and a `--filter-config` invocation with the YAML equivalent — outputs MUST be byte-identical |
+| Combined axes (REQ:config-cli-equivalence equivalence) | One invocation combines all three axes and a `--filter-config` invocation with the YAML equivalent — outputs MUST be byte-identical |
 | OR-groups via config | A `--filter-config` with `or:` group in `where:Customer:` produces target rows matching `(condition1 OR condition2)`, AND-composed with peer conditions |
+| Reserved `columns:` key rejected | A `--filter-config` whose YAML contains a top-level `columns:` key exits `2` with stderr naming the deferral |
 
-Unit tests cover: operator vocabulary (REQ:operator-vocabulary), type coercion (REQ:where-type-coercion), CLI mini-syntax parser including `\:` escape (REQ:where-cli-syntax), YAML schema parser including OR-group nesting limits (REQ:config-file-schema), mutex enforcement (REQ:include-exclude-mutex, REQ:columns-mutex-per-table), PK protection (REQ:columns-pk-implicit), unknown-field/column/table error paths (REQ:table-not-found, REQ:where-unknown-field, REQ:columns-unknown-field).
+Unit tests cover: operator vocabulary (REQ:operator-vocabulary), type coercion (REQ:where-type-coercion), CLI mini-syntax parser including `\:` escape (REQ:where-cli-syntax), YAML schema parser including OR-group nesting limits and the reserved-`columns:` rejection (REQ:config-file-schema), mutex enforcement (REQ:include-exclude-mutex), unknown-field/table error paths (REQ:table-not-found, REQ:where-unknown-field).
 
 ## Rehearse Integration
 
@@ -266,7 +234,8 @@ Inherited from the source Idea, reinforced at Feature-spec time:
 - **OR-groups on the CLI `--where` flag** — config-file-only. REQ:where-and-semantics formalizes the CLI restriction.
 - **Raw SQL passthrough** (`--raw-where`) — chosen against in favor of structured predicates for portability. Future Idea if real users hit the operator-vocabulary limit.
 - **Pull-down filtering** (read all, filter in copy engine) — every MVP backend pushes; REQ:backend-coverage exits `1` on unsupported axes, no fallback.
-- **Anonymization / data masking / column transformation** — column subsetting drops columns; it does NOT redact or transform values. Distinct concern.
+- **Column subsetting** (`--columns`, `--exclude-columns`, `--exclude-columns-global`) — **DEFERRED.** `dal-go/dalgo`'s `QueryBuilder` exposes no explicit field-projection method today; REQ:push-down-only forbids reading-all-columns-and-dropping-in-engine. Requires an upstream sibling Idea (`dalgo-query-projection`, to be filed in `dal-go/dalgo/spec/ideas/`) that adds `QueryBuilder.SelectFields(...dal.FieldName)` (or equivalent) plus driver coverage in `dalgo2sqlite` and `dalgo2ingitdb`. A follow-up DataTug Feature `cli/db/copy/filtering/columns/` will land once that upstream work tags a release. MVP `--filter-config` rejects any YAML containing a top-level `columns:` key (REQ:config-file-schema).
+- **Anonymization / data masking / column transformation** — separate concern; even when column subsetting lands, it will drop columns rather than redact or transform values.
 - **Subqueries, joins, computed columns in WHERE** — the structured surface doesn't support them.
 - **Wildcards or regex in table names** (`--include 'log_*'`) — explicit list only.
 - **Operator extensions beyond the fixed ten** — `like`, `between`, `regex`, et al. deferred.
@@ -280,13 +249,13 @@ From the source Idea:
 
 | Idea assumption | Status at Feature time |
 |---|---|
-| Must-be-true: DALgo's `dal.StructuredQuery` surface — `WhereField`, `GroupCondition`, `Limit`, and explicit field projection — compiles correctly across MVP backends | Carried; plan-time audit work, NOT a REQ contract (REQ:backend-coverage codifies the runtime check) |
+| Must-be-true: DALgo's `dal.StructuredQuery` surface — `WhereField`, `GroupCondition`, `Limit`, and explicit field projection — compiles correctly across MVP backends | **Partially resolved at plan time:** `WhereField`, `GroupCondition`, and `Limit` exist and compile across MVP backends (verified in `dal-go/dalgo/dal/q_builder.go`). **Explicit field projection does NOT exist** — column subsetting is therefore deferred to a follow-up Feature gated on the `dalgo-query-projection` sibling Idea. REQ:backend-coverage codifies the runtime check for the remaining axes (Where, Limit). |
 | Must-be-true: The fixed operator vocabulary covers ≥95% of real-world fixture-subsetting needs | Resolved; ten operators frozen in REQ:operator-vocabulary |
 | Must-be-true: The CLI mini-syntax `<table>:<field>:<op>:<value>` parses unambiguously | Resolved; REQ:where-cli-syntax pins the colon-delimiter + `\:` escape |
 | Must-be-true: Config-file YAML schema is a 1:1 mirror of CLI flags plus OR-groups | Resolved; REQ:config-file-schema + REQ:config-cli-equivalence pin both rules |
 | Should-be-true: Push-down filtering is fast enough that "1000 latest customers from a 100k-row Customer table" completes in under 2 seconds | Carried; plan-time benchmark, NOT a REQ contract |
-| Should-be-true: Column projection in `dalgo2sql` (Postgres) preserves type fidelity | Carried; plan-time audit on Postgres-deferred timing |
-| Should-be-true: Global column exclusion silently no-ops on tables lacking the column | Resolved; REQ:columns-global-exclude pins silent behavior; unknown columns in `--exclude-columns-global` are also silent |
+| Should-be-true: Column projection in `dalgo2sql` (Postgres) preserves type fidelity | Deferred along with column subsetting; will carry into the follow-up `cli/db/copy/filtering/columns/` Feature. |
+| Should-be-true: Global column exclusion silently no-ops on tables lacking the column | Deferred along with column subsetting; will carry into the follow-up Feature. |
 | Might-be-true: Users will hit the operator-vocabulary ceiling | Open (Out of Scope until evidence) |
 | Might-be-true: Referential-integrity-aware subsetting will be the dominant follow-up request | Open (Out of Scope until evidence) |
 | Might-be-true: Users will want filter expressions stored as reusable named profiles | Resolved: a config-file path IS the profile; no separate `--profile` flag needed |
@@ -381,61 +350,21 @@ From the source Idea:
 **When** the user runs `datatug db copy --from … --include Invoice --limit Invoice:50 --limit Invoice:100`
 **Then** the command exits `2`; stderr names the duplicated table `Invoice` and the conflicting values `50` / `100`.
 
-### AC: columns-whitelist-narrows-projection
-
-**Requirements:** filtering#req:columns-include-flag, filtering#req:columns-pk-implicit
-
-**Given** a SQLite Chinook source where `Customer` has 13 columns including PK `CustomerId`
-**When** the user runs `datatug db copy --from … --include Customer --columns Customer:FirstName,LastName`
-**Then** the command exits `0`; target `Customer/` records contain exactly `CustomerId` (implicit PK), `FirstName`, `LastName` — three fields, no others.
-
-### AC: columns-blacklist-drops-listed
-
-**Requirements:** filtering#req:columns-exclude-flag
-
-**Given** a SQLite Chinook source where `Customer` has 13 columns
-**When** the user runs `datatug db copy --from … --include Customer --exclude-columns Customer:Phone,Email`
-**Then** the command exits `0`; target `Customer/` records contain 11 fields (13 minus 2); `Phone` and `Email` are absent; PK is present.
-
-### AC: columns-pk-explicit-exclusion-rejected
-
-**Requirements:** filtering#req:columns-pk-implicit
-
-**Given** a SQLite Chinook source where `Customer.CustomerId` is the primary key
-**When** the user runs `datatug db copy --from … --include Customer --exclude-columns Customer:CustomerId`
-**Then** the command exits `2`; stderr names the table `Customer`, the PK column `CustomerId`, and explains that PKs cannot be excluded.
-
-### AC: columns-global-trims-per-table-whitelist
-
-**Requirements:** filtering#req:columns-global-interaction-with-per-table
-
-**Given** a SQLite Chinook source where `Customer` has columns including `CustomerId` (PK), `FirstName`, `Email`, and `LastEditedTime`
-**When** the user runs `datatug db copy --from … --include Customer --columns Customer:FirstName,Email --exclude-columns-global Email,LastEditedTime`
-**Then** the command exits `0`; target `Customer/` records contain exactly `CustomerId` (PK, implicit) AND `FirstName`; `Email` is excluded because the global rule trims it AFTER the per-table whitelist selects it; `LastEditedTime` is excluded by global (it would have been excluded anyway by the per-table whitelist, but the global rule applies).
-
-### AC: columns-global-exclude-applies-where-present
-
-**Requirements:** filtering#req:columns-global-exclude
-
-**Given** a synthetic SQLite source where tables `T1` and `T2` both have a `CreatedAt` column but `T3` does not
-**When** the user runs `datatug db copy --from … --exclude-columns-global CreatedAt`
-**Then** the command exits `0`; target `T1/` and `T2/` records lack the `CreatedAt` field; target `T3/` is structurally unchanged (no error).
-
-### AC: columns-unknown-rejected
-
-**Requirements:** filtering#req:columns-unknown-field
-
-**Given** a SQLite Chinook source where `Customer` has no column `NickName`
-**When** the user runs `datatug db copy --from … --include Customer --columns Customer:NickName`
-**Then** the command exits `2`; stderr names the unknown column.
-
 ### AC: config-cli-equivalence-byte-identical
 
 **Requirements:** filtering#req:filter-config-flag, filtering#req:config-cli-equivalence
 
-**Given** a SQLite Chinook source, a `filter.yaml` containing `include: [Customer]`, `where: {Customer: [{field: Country, op: '=', value: USA}]}`, `limit: {Customer: 5}`, `columns: {per_table: {Customer: {include: [FirstName, LastName]}}}` AND an equivalent flag form
+**Given** a SQLite Chinook source, a `filter.yaml` containing `include: [Customer]`, `where: {Customer: [{field: Country, op: '=', value: USA}]}`, `limit: {Customer: 5}` AND an equivalent flag form
 **When** the user runs both forms against the same source, writing to two separate target directories
 **Then** both invocations exit `0`; the two target directories are byte-identical (same files, same record contents, same row order modulo the parent Feature's per-table ordering rules).
+
+### AC: config-columns-key-reserved-rejected
+
+**Requirements:** filtering#req:config-file-schema
+
+**Given** a `with-columns.yaml` containing a top-level `columns:` key (the reserved schema slot for the deferred column-subsetting follow-up)
+**When** the user runs `datatug db copy --from … --filter-config ./with-columns.yaml`
+**Then** the command exits `2`; stderr names the `columns:` key and explains that column subsetting is deferred to a future Feature (`cli/db/copy/filtering/columns/`).
 
 ### AC: config-and-flags-mixed-rejected
 
@@ -479,12 +408,11 @@ From the source Idea:
 
 ## Outstanding Questions
 
-- **Column ordering in target records.** When `--columns` whitelists a subset, do the target records preserve the listed order or the source's introspected order? Direction: source's introspected order (PK first, then whitelist order). Confirm at plan time.
 - **Levenshtein suggestion threshold for `where-unknown-field`.** REQ:where-unknown-field says distance ≤ 2 — confirm this is the right ceiling, and whether to suggest ONLY the closest or ALL within threshold. Plan time.
 - **`is_null` / `is_not_null` value-slot behavior.** REQ:operator-vocabulary says the value slot is "empty / ignored". Should `--where Customer:Country:is_null:foo` be silently accepted (value ignored) or rejected (exit 2 for extraneous value)? Direction: reject. Confirm at plan time.
 - **YAML `value` type coercion.** When YAML scalars decode as native types (`5` → int, `true` → bool, `2025-01-01` → date), should the config-path skip the CLI's string-then-coerce pipeline OR funnel through it for behavior parity? Direction: funnel through coercion for parity. Confirm at plan time.
 - **Verbose echo of compiled query under `--progress`.** When `--progress` is enabled, should stderr include the compiled `dal.Query` (or its SQL-text equivalent) for each table? Useful for debugging filters; would be a new progress-line type. Plan time.
-- **Test fixture for `columns-global-exclude-applies-where-present` AC.** Chinook doesn't naturally have a `CreatedAt`/`UpdatedAt` pattern. The AC describes a "synthetic SQLite source". Plan time: build the fixture or rewrite the AC against an existing Chinook column that appears in some but not all tables.
+- **`dalgo-query-projection` sibling Idea filing.** The deferred column-subsetting work needs a formal Idea in `dal-go/dalgo/spec/ideas/dalgo-query-projection.md` proposing `QueryBuilder.SelectFields(...dal.FieldName)`. Not blocking this Feature's MVP, but blocks the follow-up `cli/db/copy/filtering/columns/` Feature.
 
 ---
 *This document follows the https://specscore.md/feature-specification*

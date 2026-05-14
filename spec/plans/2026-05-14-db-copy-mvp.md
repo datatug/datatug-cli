@@ -20,11 +20,10 @@ A plan-time audit of the two drivers revealed:
 - **`dalgo2ingitdb` had no row CRUD** — `Insert`, `RunReadwriteTransaction`, `ExecuteQuery*` were stubbed with `dal.ErrNotSupported`. **Resolved upstream** via `ingitdb-cli` commit `3444b2f feat(dalgo2ingitdb): implement record CRUD with file locking`. Currently consumed via local `replace` directive until a release tag includes it.
 - **`dalgo2sqlite.DescribeCollection` rejects `DATETIME` and `NUMERIC(p,s)`** — still open; breaks 4 of 11 Chinook tables. Upstream issue staged at [`docs/upstream-issues/dalgo2sqlite-describe-datetime-numeric.md`](../../docs/upstream-issues/dalgo2sqlite-describe-datetime-numeric.md).
 
-**Initial slice — SQLite → inGitDB (schema + rows).** Tasks 3, 9 are now complete for the forward direction: schema replicates via `dbschema` / `ddl`, rows stream via `ExecuteQueryToRecordsReader` → `InsertMulti`. Live binary verified: Chinook fixture (11 tables) yields 729 rows across the 6 describe-able single-PK tables, 4 tables describe-skipped, 1 (`PlaylistTrack`) row-skipped due to composite PK.
+**Initial slice — SQLite → inGitDB (schema + rows).** Tasks 3, 9 are now complete for the forward direction: schema replicates via `dbschema` / `ddl`, rows stream via `ExecuteQueryToRecordsReader` → `InsertMulti`. Composite-PK tables now copy too — each row's target record ID is the `fmt.Sprintf("%v", v)` of every PK column joined by `__`, in `DescribeCollection`-reported order. Live binary verified: Chinook fixture (11 tables) yields 9444 rows total across the 7 describe-able tables (729 from single-PK tables + 8715 from `PlaylistTrack`'s composite PK); 4 tables remain describe-skipped pending the upstream `dalgo2sqlite` `DATETIME`/`NUMERIC` fix.
 
 **Still open in this Feature scope:**
 
-- Composite-PK row copy (e.g. `PlaylistTrack`). Needs a key-encoding decision for the inGitDB record filename.
 - Reverse direction inGitDB → SQLite. Blocked: `dalgo2sql`'s inserter uses struct reflection and rejects `map[string]any` Record data. Fix is either upstream in `dalgo2sql` or a `reflect.StructOf` translation layer in this engine.
 - Task 4 (empty-target check), Task 5 (overwrite=reload schema-match + truncate), Task 6 (parallel-streams cap), Task 8 (partial-failure semantics).
 

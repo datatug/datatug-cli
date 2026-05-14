@@ -62,8 +62,9 @@ type SourceSummary struct {
 //
 // Tables the source can't describe (e.g. dalgo2sqlite rejecting DATETIME /
 // NUMERIC) are appended to Skipped and processing continues. Tables with
-// no PK or a composite PK get schema replicated but row copy is skipped
-// with the reason recorded in RowSkips.
+// no PK get schema replicated but row copy is skipped with the reason
+// recorded in RowSkips. Composite-PK tables are now copied (key encoded
+// as `__`-joined PK values; see encodeRecordID in engine_rows.go).
 //
 // Errors:
 //   - ErrSourceHasNoTables — source introspects cleanly but has zero
@@ -133,8 +134,7 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 			case err == nil:
 				summary.RowsCopied += rowsCopied
 				summary.RowsByTable[def.Name] = rowsCopied
-			case errors.Is(err, ErrNoPrimaryKey),
-				errors.Is(err, ErrCompositePKUnsupported):
+			case errors.Is(err, ErrNoPrimaryKey):
 				// Schema replicated; row copy not possible for this table.
 				summary.RowSkips[def.Name] = err.Error()
 				fmt.Fprintf(stderr, "row copy skipped for %q: %v\n", def.Name, err)

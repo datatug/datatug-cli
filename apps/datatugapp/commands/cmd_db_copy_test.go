@@ -105,8 +105,8 @@ func TestDBCopy_RemoteInGitDB_Exit2(t *testing.T) {
 
 // End-to-end happy path against the checked-in Chinook fixture going to
 // an empty inGitDB target. Succeeds with exit 0, the row-copy summary on
-// stderr, schemas+rows for the 6 single-PK describe-able tables landing
-// on the target (PlaylistTrack has a composite PK and is row-skipped;
+// stderr, schemas+rows for the 7 describe-able tables (including
+// PlaylistTrack with its composite PK, copied via `__`-joined keys);
 // 4 tables are describe-skipped because dalgo2sqlite can't describe
 // DATETIME / NUMERIC; tracked upstream).
 func TestDBCopy_Chinook_SQLiteToInGitDB_HappyPath(t *testing.T) {
@@ -121,5 +121,8 @@ func TestDBCopy_Chinook_SQLiteToInGitDB_HappyPath(t *testing.T) {
 	)
 	assert.NoError(t, runErr)
 	assert.Contains(t, stderr.String(), "db copy: replicated schema for 7/11 collections")
-	assert.Contains(t, stderr.String(), "copied 729 rows")
+	// 729 single-PK rows + 8715 PlaylistTrack composite-PK rows = 9444.
+	assert.Contains(t, stderr.String(), "copied 9444 rows")
+	assert.NotContains(t, stderr.String(), "row copy skipped for \"PlaylistTrack\"",
+		"PlaylistTrack must no longer appear in the skip list")
 }

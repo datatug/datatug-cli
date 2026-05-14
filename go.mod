@@ -6,29 +6,21 @@ go 1.26.0
 
 //replace github.com/dal-go/dalgo => ../../dal-go/dalgo
 
-// Local checkout has commit 581a278 (embed dal.ConcurrencyAvailable) which
-// is required by dalgo v0.42.0+ but is not yet present in a tagged release
-// of dalgo2sql. Remove this directive once dalgo2sql cuts a new tag.
-replace github.com/dal-go/dalgo2sql => ../../dal-go/dalgo2sql
+// dal-go/dalgo2sql v0.5.0 and dal-go/dalgo2sqlite v0.0.1 now ship the
+// upstream changes db copy depends on (map[string]any Record.Data accept;
+// DATETIME / NUMERIC(p,s) recognition), so no replace is needed for them.
 
-// Local checkout has commit 3444b2f (record CRUD with file locking) and
-// commit 3fdd326 (auto-register collections in root-collections.yaml).
-// Required by `datatug db copy` row streaming and target-side schema
-// transactions, but not yet in a tagged release of ingitdb-cli. Remove
-// this directive once ingitdb-cli cuts a new tag.
+// Local checkout has commits past v1.8.3 (record-CRUD + auto-register-in-
+// root-collections + Decimal/Bytes type mapping) that aren't yet in any
+// tagged release of ingitdb-cli. Remove this directive once ingitdb-cli
+// cuts a new tag.
 replace github.com/ingitdb/ingitdb-cli => ../../ingitdb/ingitdb-cli
-
-// Local checkout has commit 55e47aa (recognize DATETIME and NUMERIC(p,s)
-// declared types) which unblocks the 4 of 11 Chinook tables that were
-// previously describe-skipped. Not yet in a tagged release of dalgo2sqlite.
-// Remove this directive once dalgo2sqlite cuts a new tag.
-replace github.com/dal-go/dalgo2sqlite => ../../dal-go/dalgo2sqlite
 
 require (
 	cloud.google.com/go/firestore v1.22.0
 	github.com/alecthomas/chroma/v2 v2.24.1
-	github.com/dal-go/dalgo2sql v0.4.43
-	github.com/dal-go/dalgo2sqlite v0.0.0-20260513182736-6886f34af097
+	github.com/dal-go/dalgo2sql v0.5.0
+	github.com/dal-go/dalgo2sqlite v0.0.1
 	github.com/datatug/filetug v0.0.21
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3

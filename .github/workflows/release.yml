@@ -16,6 +16,14 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          # goreleaser inspects the git state (tags + commit history) to
+          # determine the version and changelog. The default shallow clone
+          # has no tags, so goreleaser errors out with
+          #   "git doesn't contain any tags - either add a tag or use
+          #   --snapshot"
+          # fetch-depth: 0 pulls full history + tags.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v6
         with:

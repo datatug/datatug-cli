@@ -11,6 +11,12 @@ go 1.26.0
 // of dalgo2sql. Remove this directive once dalgo2sql cuts a new tag.
 replace github.com/dal-go/dalgo2sql => ../../dal-go/dalgo2sql
 
+// Local checkout has commit 3444b2f (record CRUD with file locking) which
+// implements Insert / Get / RunReadwriteTransaction / ExecuteQueryToRecordsReader
+// — required by `datatug db copy` row streaming but not yet in a tagged
+// release of ingitdb-cli. Remove this directive once ingitdb-cli cuts a new tag.
+replace github.com/ingitdb/ingitdb-cli => ../../ingitdb/ingitdb-cli
+
 require (
 	cloud.google.com/go/firestore v1.22.0
 	github.com/alecthomas/chroma/v2 v2.24.1
@@ -24,7 +30,7 @@ require (
 	github.com/google/go-github/v86 v86.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
-	github.com/ingitdb/ingitdb-cli v1.8.2
+	github.com/ingitdb/ingitdb-cli v1.8.3
 	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c

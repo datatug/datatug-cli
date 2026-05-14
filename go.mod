@@ -6,15 +6,13 @@ go 1.26.0
 
 //replace github.com/dal-go/dalgo => ../../dal-go/dalgo
 
-// dal-go/dalgo2sql v0.5.0 and dal-go/dalgo2sqlite v0.0.1 now ship the
-// upstream changes db copy depends on (map[string]any Record.Data accept;
-// DATETIME / NUMERIC(p,s) recognition), so no replace is needed for them.
-
-// Local checkout has commits past v1.8.3 (record-CRUD + auto-register-in-
-// root-collections + Decimal/Bytes type mapping) that aren't yet in any
-// tagged release of ingitdb-cli. Remove this directive once ingitdb-cli
-// cuts a new tag.
-replace github.com/ingitdb/ingitdb-cli => ../../ingitdb/ingitdb-cli
+// All three sibling deps now ship the upstream changes db-copy depends on
+// at tagged versions:
+//   - dal-go/dalgo2sql v0.5.0       (map[string]any Record.Data accept)
+//   - dal-go/dalgo2sqlite v0.0.1    (DATETIME / NUMERIC(p,s) recognition)
+//   - ingitdb/ingitdb-cli v1.9.0    (record CRUD + auto-register +
+//                                    Decimal/Bytes type mapping)
+// No replace directives needed.
 
 require (
 	cloud.google.com/go/firestore v1.22.0
@@ -29,7 +27,7 @@ require (
 	github.com/google/go-github/v86 v86.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
-	github.com/ingitdb/ingitdb-cli v1.8.3
+	github.com/ingitdb/ingitdb-cli v1.9.0
 	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c

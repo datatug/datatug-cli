@@ -145,6 +145,8 @@ github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUq
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
 github.com/ingitdb/ingitdb-cli v1.9.0 h1:SVg6AD5IuoDA2jhwnVzfHxPl+wDHl6Ig4ZUva22cwFQ=
 github.com/ingitdb/ingitdb-cli v1.9.0/go.mod h1:XEEdDV3VpDsiINBv1uiPu50fqf/eNPJKShTNENEQjPM=
+github.com/ingitdb/ingitdb-cli v1.10.0 h1:9A0dYOxDyIXB8qRQ+ERQlRqRfticFO1PpjFhtFj4Jjo=
+github.com/ingitdb/ingitdb-cli v1.10.0/go.mod h1:XEEdDV3VpDsiINBv1uiPu50fqf/eNPJKShTNENEQjPM=
 github.com/ingr-io/ingr-go v0.0.2 h1:2AfFllqzCe2dCNtxIUo306oYzaZr//YzrVOHd0C73nI=
 github.com/ingr-io/ingr-go v0.0.2/go.mod h1:gb/dGW0qXziCq9iAIgk0yITyWY013w2bhdYiXO0RLuY=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=

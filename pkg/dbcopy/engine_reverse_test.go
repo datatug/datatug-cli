@@ -84,34 +84,9 @@ func TestCopy_RoundTrip_ChinookViaInGitDB(t *testing.T) {
 
 	var reverseStderr bytes.Buffer
 	reverseSummary, err := Copy(ctx, srcIngit, tgtSQLite, CopyOpts{Stderr: &reverseStderr})
-	if err != nil {
-		// Discovery mode: capture the error verbatim and skip with a TODO.
-		// The point of this test is to verify the reverse direction is
-		// wired; a failure here is a known-limitation finding worth
-		// documenting, not a regression in forward direction.
-		//
-		// KNOWN LIMITATION (observed 2026-05-14, dalgo2ingitdb schema_reader):
-		//   create target collection "Album": dalgo2sqlite: CreateCollection
-		//   exec "CREATE TABLE Album (AlbumId INTEGER NOT NULL, Title TEXT NOT
-		//   NULL, ArtistId INTEGER NOT NULL, PRIMARY KEY ($key))":
-		//   parameters prohibited in index expressions
-		//
-		// Root cause: dalgo2ingitdb's DescribeCollection returns a synthetic
-		// PK column literally named "$key" instead of the real PK column
-		// names that were used to write the records. When the engine feeds
-		// that CollectionDef to dalgo2sqlite.CreateCollection, the resulting
-		// DDL contains `PRIMARY KEY ($key)` which SQLite rejects because
-		// `$key` is parsed as a bind parameter.
-		//
-		// TODO(dalgo2ingitdb): DescribeCollection should report the real
-		// PK column names (e.g. ["AlbumId"], or ["PlaylistId","TrackId"] for
-		// composite keys) so that round-tripping the schema through a SQL
-		// backend produces a well-formed CREATE TABLE statement. Once that
-		// lands, this test should flip from t.Skip to asserting Phase 2
-		// success.
-		t.Skipf("reverse direction blocked by upstream limitation in dalgo2ingitdb DescribeCollection (PK reported as $key instead of real columns).\nphase 2 error: %v\nstderr:\n%s",
-			err, reverseStderr.String())
-	}
+	require.NoError(t, err,
+		"phase 2 reverse copy should now succeed end-to-end (ingitdb-cli v1.10.0 preserves real PK column names; engine builds incomplete keys for SQL targets so dalgo2sql iterates the data map). stderr:\n%s",
+		reverseStderr.String())
 
 	t.Logf("phase 2 reverse: created=%d rows=%d byTable=%v skips=%v",
 		reverseSummary.Created, reverseSummary.RowsCopied,
@@ -120,19 +95,13 @@ func TestCopy_RoundTrip_ChinookViaInGitDB(t *testing.T) {
 		t.Logf("phase 2 reverse stderr:\n%s", reverseStderr.String())
 	}
 
-	// We expect all 11 collections to come back over.
+	// All 11 collections come back; row count matches forward exactly.
 	assert.Equal(t, 11, reverseSummary.Created,
 		"phase 2 should recreate all 11 Chinook tables on SQLite")
-	assert.Greater(t, reverseSummary.RowsCopied, int64(0),
-		"phase 2 should copy at least some rows")
-
-	// Row-count parity check (informational). inGitDB's ListCollections
-	// walks the filesystem so collection iteration order may differ from
-	// SQLite's, but per-table row counts should match what phase 1 wrote.
-	if reverseSummary.RowsCopied != forwardSummary.RowsCopied {
-		t.Logf("NOTE: round-trip row-count divergence: forward=%d reverse=%d",
-			forwardSummary.RowsCopied, reverseSummary.RowsCopied)
-	}
+	assert.Equal(t, forwardSummary.RowsCopied, reverseSummary.RowsCopied,
+		"round-trip row count must match forward exactly")
+	assert.Empty(t, reverseSummary.RowSkips,
+		"no per-table row skips expected in reverse direction")
 
 	// ── Phase 3: identity check on Album.AlbumId=1 ───────────────────
 	// "For Those About To Rock We Salute You" is row 1 of the Chinook

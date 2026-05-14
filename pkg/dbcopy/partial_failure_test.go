@@ -437,18 +437,28 @@ type faultySourceDB struct {
 func (f faultySourceDB) ExecuteQueryToRecordsReader(
 	ctx context.Context, query dal.Query,
 ) (dal.RecordsReader, error) {
-	// Best-effort: the engine constructs `SELECT * FROM "<name>"` text
-	// queries (see copyRows). Snoop the table name from the SQL.
-	sql := ""
-	if tq, ok := query.(dal.TextQuery); ok {
-		sql = tq.Text()
-	}
-	if sql != "" && f.failTable != "" {
-		needle := `FROM "` + f.failTable + `"`
-		if containsSubstring(sql, needle) {
-			return nil, fmt.Errorf("injected source read failure for %q",
-				f.failTable)
+	// The engine builds either a TextQuery or a StructuredQuery via the
+	// dalgo QueryBuilder. Detect both shapes and extract the collection
+	// name so we can inject a failure for the configured table.
+	collection := ""
+	if sq, ok := query.(dal.StructuredQuery); ok {
+		if from := sq.From(); from != nil {
+			switch b := from.Base().(type) {
+			case dal.CollectionRef:
+				collection = b.Name()
+			case *dal.CollectionRef:
+				collection = b.Name()
+			}
 		}
+	} else if tq, ok := query.(dal.TextQuery); ok {
+		// Best-effort string match for legacy text queries.
+		if containsSubstring(tq.Text(), `FROM "`+f.failTable+`"`) {
+			collection = f.failTable
+		}
+	}
+	if collection != "" && collection == f.failTable {
+		return nil, fmt.Errorf("injected source read failure for %q",
+			f.failTable)
 	}
 	return f.Database.ExecuteQueryToRecordsReader(ctx, query)
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
@@ -239,4 +240,76 @@ func TestCopy_NilFiltersTreatedAsNoFilter(t *testing.T) {
 				"with Filters=%s, expected ErrSourceHasNoTables (no behavior change), got %v", name, err)
 		})
 	}
+}
+
+// AC:include-flag-narrows-to-listed-tables — REQ:include-flag.
+func TestCopy_IncludeNarrowsToListedTables(t *testing.T) {
+	t.Parallel()
+
+	chinook, err := filepath.Abs("testdata/chinook.db")
+	assert.NoError(t, err)
+	src, err := dalgo2sqlite.NewDatabase(chinook)
+	assert.NoError(t, err)
+
+	tgtDir := t.TempDir()
+	tgt, err := dalgo2ingitdb.NewDatabase(tgtDir, validator.NewCollectionsReader())
+	assert.NoError(t, err)
+
+	opts := CopyOpts{
+		Filters: &filter.Directives{IncludeTables: []string{"Customer", "Invoice"}},
+	}
+	summary, err := Copy(context.Background(), src, tgt, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, summary.Tables, "include narrows to 2 tables")
+
+	got := append([]string(nil), summary.CreatedNames...)
+	sort.Strings(got)
+	assert.Equal(t, []string{"Customer", "Invoice"}, got)
+}
+
+// AC:exclude-flag-skips-listed-tables — REQ:exclude-flag.
+func TestCopy_ExcludeSkipsListedTables(t *testing.T) {
+	t.Parallel()
+
+	chinook, err := filepath.Abs("testdata/chinook.db")
+	assert.NoError(t, err)
+	src, err := dalgo2sqlite.NewDatabase(chinook)
+	assert.NoError(t, err)
+
+	tgtDir := t.TempDir()
+	tgt, err := dalgo2ingitdb.NewDatabase(tgtDir, validator.NewCollectionsReader())
+	assert.NoError(t, err)
+
+	opts := CopyOpts{
+		Filters: &filter.Directives{ExcludeTables: []string{"Genre", "MediaType"}},
+	}
+	summary, err := Copy(context.Background(), src, tgt, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, 9, summary.Tables, "exclude drops 2 of 11 Chinook tables")
+
+	for _, name := range summary.CreatedNames {
+		assert.NotEqual(t, "Genre", name)
+		assert.NotEqual(t, "MediaType", name)
+	}
+}
+
+// AC:unknown-table-in-include-rejected — REQ:table-not-found.
+func TestCopy_UnknownTableInIncludeRejected(t *testing.T) {
+	t.Parallel()
+
+	chinook, err := filepath.Abs("testdata/chinook.db")
+	assert.NoError(t, err)
+	src, err := dalgo2sqlite.NewDatabase(chinook)
+	assert.NoError(t, err)
+
+	tgtDir := t.TempDir()
+	tgt, err := dalgo2ingitdb.NewDatabase(tgtDir, validator.NewCollectionsReader())
+	assert.NoError(t, err)
+
+	opts := CopyOpts{
+		Filters: &filter.Directives{IncludeTables: []string{"Customer", "Users"}},
+	}
+	_, err = Copy(context.Background(), src, tgt, opts)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Users", "error must name unknown table")
 }

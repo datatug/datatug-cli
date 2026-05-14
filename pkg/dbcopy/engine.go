@@ -116,6 +116,20 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 		return summary, ErrSourceHasNoTables
 	}
 
+	// Apply table include/exclude filter (REQ:include-flag, REQ:exclude-flag,
+	// REQ:table-not-found). On unknown-table error we return immediately;
+	// the caller maps this to exit 2 in cmd_db_copy.go (Task 9). On a
+	// successful empty result (every table filtered out), treat as "nothing
+	// to do" — distinct from ErrSourceHasNoTables.
+	refs, err = filter.ApplyTableFilter(refs, opts.Filters)
+	if err != nil {
+		return summary, err
+	}
+	summary.Tables = len(refs)
+	if len(refs) == 0 {
+		return summary, nil
+	}
+
 	// 2. If --overwrite is omitted, pre-flight verify the target is "empty
 	//    for this copy" (REQ:empty-target-check). Any source-named target
 	//    table with >=1 row aborts BEFORE we touch the target.

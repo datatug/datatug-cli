@@ -7,7 +7,7 @@ verifiable tasks with clear acceptance criteria and dependency ordering.
 
 | Plan | Feature | Status |
 |------|---------|--------|
-| [2026-05-14-db-copy-mvp](2026-05-14-db-copy-mvp.md) | [`cli/db/copy`](../features/cli/db/copy/README.md) | Planned |
+| [2026-05-14-db-copy-mvp](2026-05-14-db-copy-mvp.md) | [`cli/db/copy`](../features/cli/db/copy/README.md) | Done |
 
 ## Outstanding Questions
 

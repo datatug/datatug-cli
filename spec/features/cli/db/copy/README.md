@@ -2,7 +2,7 @@
 
 > [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fdb%2Fcopy) — graph, discussions, approvals
 
-**Status:** Approved
+**Status:** Implemented
 **Source Idea:** [`cross-engine-db-copy`](../../../../ideas/cross-engine-db-copy.md)
 **Parent Feature:** [`cli/db`](../README.md)
 

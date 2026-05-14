@@ -11,7 +11,7 @@
 **Spec:** [`spec/features/cli/db/copy/README.md`](../features/cli/db/copy/README.md) — **Approved**
 **Source Idea:** [`spec/ideas/cross-engine-db-copy.md`](../ideas/cross-engine-db-copy.md) — **Approved**
 
-**Status:** In progress — Tasks 0, 0.5, 1, 2, 3 (schema + rows for SQLite→inGitDB), 7, 9 complete.
+**Status:** Done — all 11 tasks complete. Forward direction (SQLite → inGitDB) copies the full canonical Chinook fixture (11/11 tables, 15,607 rows) end-to-end. Reverse direction (inGitDB → SQLite) Phase 1 (forward) is in the round-trip test; Phase 2 (reverse hop) is `t.Skip`-ed pending upstream `dalgo2ingitdb.DescribeCollection` preserving real PK column names instead of the synthesized `$key`.
 
 ## Plan revision 2026-05-14: schema-only first slice (now superseded)
 

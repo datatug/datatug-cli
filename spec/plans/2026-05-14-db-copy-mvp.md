@@ -18,13 +18,15 @@
 A plan-time audit of the two drivers revealed:
 
 - **`dalgo2ingitdb` had no row CRUD** — `Insert`, `RunReadwriteTransaction`, `ExecuteQuery*` were stubbed with `dal.ErrNotSupported`. **Resolved upstream** via `ingitdb-cli` commit `3444b2f feat(dalgo2ingitdb): implement record CRUD with file locking`. Currently consumed via local `replace` directive until a release tag includes it.
-- **`dalgo2sqlite.DescribeCollection` rejects `DATETIME` and `NUMERIC(p,s)`** — still open; breaks 4 of 11 Chinook tables. Upstream issue staged at [`docs/upstream-issues/dalgo2sqlite-describe-datetime-numeric.md`](../../docs/upstream-issues/dalgo2sqlite-describe-datetime-numeric.md).
+- **`dalgo2sqlite.DescribeCollection` rejects `DATETIME` and `NUMERIC(p,s)`** — **Resolved upstream** via `dalgo2sqlite` commit `55e47aa fix(dalgo2sqlite): recognize DATETIME and NUMERIC(p,s) declared types`. Consumed via local `replace`.
+- **`dalgo2ingitdb` rejects `dbschema.Decimal` and `dbschema.Bytes` at CreateCollection** (surfaced once Decimal started flowing through). **Resolved upstream** via `ingitdb-cli` commit `a49e43e feat(dalgo2ingitdb): map Decimal→Float and Bytes→String (lossy carriers)`.
+- **`dalgo2sql` only accepts struct-shaped `Record.Data()`** — blocked the inGitDB → SQLite reverse direction. **Resolved upstream** via `dalgo2sql` commit `5411807 feat(dalgo2sql): accept map[string]any Record.Data for Insert/Set/Update`.
 
-**Initial slice — SQLite → inGitDB (schema + rows).** Tasks 3, 9 are now complete for the forward direction: schema replicates via `dbschema` / `ddl`, rows stream via `ExecuteQueryToRecordsReader` → `InsertMulti`. Composite-PK tables now copy too — each row's target record ID is the `fmt.Sprintf("%v", v)` of every PK column joined by `__`, in `DescribeCollection`-reported order. Live binary verified: Chinook fixture (11 tables) yields 9444 rows total across the 7 describe-able tables (729 from single-PK tables + 8715 from `PlaylistTrack`'s composite PK); 4 tables remain describe-skipped pending the upstream `dalgo2sqlite` `DATETIME`/`NUMERIC` fix.
+**Full Chinook (SQLite → inGitDB).** Tasks 3, 9 are complete for the forward direction with full coverage: schema replicates via `dbschema` / `ddl`, rows stream via `ExecuteQueryToRecordsReader` → `InsertMulti`. Composite-PK tables copy via `__`-joined record IDs. Live binary verified: Chinook fixture (11/11 tables, 0 skipped) yields **15,607 rows** copied end-to-end into a fresh inGitDB project.
 
 **Still open in this Feature scope:**
 
-- Reverse direction inGitDB → SQLite. Blocked: `dalgo2sql`'s inserter uses struct reflection and rejects `map[string]any` Record data. Fix is either upstream in `dalgo2sql` or a `reflect.StructOf` translation layer in this engine.
+- End-to-end E2E test for the inGitDB → SQLite reverse direction (the underlying building blocks are in place upstream).
 - Task 4 (empty-target check), Task 5 (overwrite=reload schema-match + truncate), Task 6 (parallel-streams cap), Task 8 (partial-failure semantics).
 
 ---

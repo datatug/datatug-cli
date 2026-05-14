@@ -11,11 +11,18 @@ go 1.26.0
 // of dalgo2sql. Remove this directive once dalgo2sql cuts a new tag.
 replace github.com/dal-go/dalgo2sql => ../../dal-go/dalgo2sql
 
-// Local checkout has commit 3444b2f (record CRUD with file locking) which
-// implements Insert / Get / RunReadwriteTransaction / ExecuteQueryToRecordsReader
-// — required by `datatug db copy` row streaming but not yet in a tagged
-// release of ingitdb-cli. Remove this directive once ingitdb-cli cuts a new tag.
+// Local checkout has commit 3444b2f (record CRUD with file locking) and
+// commit 3fdd326 (auto-register collections in root-collections.yaml).
+// Required by `datatug db copy` row streaming and target-side schema
+// transactions, but not yet in a tagged release of ingitdb-cli. Remove
+// this directive once ingitdb-cli cuts a new tag.
 replace github.com/ingitdb/ingitdb-cli => ../../ingitdb/ingitdb-cli
+
+// Local checkout has commit 55e47aa (recognize DATETIME and NUMERIC(p,s)
+// declared types) which unblocks the 4 of 11 Chinook tables that were
+// previously describe-skipped. Not yet in a tagged release of dalgo2sqlite.
+// Remove this directive once dalgo2sqlite cuts a new tag.
+replace github.com/dal-go/dalgo2sqlite => ../../dal-go/dalgo2sqlite
 
 require (
 	cloud.google.com/go/firestore v1.22.0

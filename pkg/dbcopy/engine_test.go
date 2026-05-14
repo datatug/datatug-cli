@@ -40,12 +40,10 @@ func TestCopy_SourceHasNoTables(t *testing.T) {
 }
 
 // TestCopy_ChinookSQLiteToInGitDB exercises the happy path: Chinook source
-// → empty inGitDB target. The 7 describe-able tables get replicated to
-// the target; the 4 tables that dalgo2sqlite can't describe (DATETIME /
-// NUMERIC) are skipped with a stderr note.
-//
-// This is the schema-only first slice: row data is NOT copied (tracked
-// upstream at docs/upstream-issues/ingitdb-cli-dalgo2ingitdb-row-crud.md).
+// → empty inGitDB target. All 11 Chinook tables are now describe-able
+// (after dalgo2sqlite DATETIME/NUMERIC support) and row-copy-able
+// (composite-PK encoding handles PlaylistTrack). Total rows copied:
+// 15607 (sum of all Chinook row counts).
 func TestCopy_ChinookSQLiteToInGitDB(t *testing.T) {
 	t.Parallel()
 
@@ -63,28 +61,20 @@ func TestCopy_ChinookSQLiteToInGitDB(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equal(t, 11, summary.Tables, "Chinook has 11 tables")
-	assert.GreaterOrEqual(t, summary.Created, 7,
-		"expected at least the 7 describe-able tables to land on target")
-	assert.LessOrEqual(t, summary.Created, 11)
+	assert.Equal(t, 11, summary.Created, "all 11 Chinook tables are now describe-able and replicable")
+	assert.Empty(t, summary.Skipped, "DATETIME/NUMERIC types are now recognized by dalgo2sqlite")
 
-	// The 4 known-rejected tables (Employee, Invoice, InvoiceLine, Track)
-	// should appear in Skipped. We assert a non-empty Skipped + Created+Skipped
-	// == Tables, which is the schema-replication invariant.
-	assert.NotEmpty(t, summary.Skipped, "expected DATETIME/NUMERIC tables to be skipped")
+	// Schema invariant: every source table either landed or was skipped.
 	assert.Equal(t, summary.Tables, summary.Created+len(summary.Skipped))
 
-	// Row streaming should have moved real data for at least one table.
-	// PlaylistTrack has a composite PK and is now copied (the `__`-joined
-	// key encoding lands every row), so we expect >0 rows AND no row-skip
-	// entries for PlaylistTrack.
-	assert.Greater(t, summary.RowsCopied, int64(0),
-		"expected row streaming to copy >0 rows from Chinook")
-	assert.NotContains(t, summary.RowSkips, "PlaylistTrack",
-		"PlaylistTrack (composite PK) should no longer be row-skipped")
+	// Row streaming should have moved real data for every table — including
+	// PlaylistTrack (composite PK via `__`-joined key encoding).
+	assert.Equal(t, int64(15607), summary.RowsCopied,
+		"full Chinook is 15607 rows: 347+275+59+8+25+412+2240+5+18+8715+3503")
+	assert.Empty(t, summary.RowSkips, "no row-copy skips expected on Chinook")
 	assert.Contains(t, summary.RowsByTable, "PlaylistTrack",
 		"PlaylistTrack should appear in per-table row counts")
 	t.Logf("rows copied: %d (by table: %v)", summary.RowsCopied, summary.RowsByTable)
-	t.Logf("row skips: %v", summary.RowSkips)
 
 	// Verify the target ACTUALLY has the created collections.
 	refs, err := dbschema.ListCollections(context.Background(), tgt, nil)

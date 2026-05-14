@@ -120,9 +120,11 @@ func TestDBCopy_Chinook_SQLiteToInGitDB_HappyPath(t *testing.T) {
 		"--to", "ingitdb://"+tgtDir,
 	)
 	assert.NoError(t, runErr)
-	assert.Contains(t, stderr.String(), "db copy: replicated schema for 7/11 collections")
-	// 729 single-PK rows + 8715 PlaylistTrack composite-PK rows = 9444.
-	assert.Contains(t, stderr.String(), "copied 9444 rows")
-	assert.NotContains(t, stderr.String(), "row copy skipped for \"PlaylistTrack\"",
-		"PlaylistTrack must no longer appear in the skip list")
+	assert.Contains(t, stderr.String(), "db copy: replicated schema for 11/11 collections (0 skipped)")
+	// Full Chinook: 347+275+59+8+25+412+2240+5+18+8715+3503 = 15607.
+	assert.Contains(t, stderr.String(), "copied 15607 rows")
+	assert.NotContains(t, stderr.String(), "row copy skipped",
+		"no row skips expected after composite-PK support landed")
+	assert.NotContains(t, stderr.String(), "skipping",
+		"no describe-skips expected after dalgo2sqlite DATETIME/NUMERIC support landed")
 }

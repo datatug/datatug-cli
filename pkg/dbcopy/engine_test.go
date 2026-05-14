@@ -11,6 +11,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/dalgo2sqlite"
+	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
 	"github.com/ingitdb/ingitdb-cli/pkg/dalgo2ingitdb"
 	"github.com/ingitdb/ingitdb-cli/pkg/ingitdb/validator"
 	"github.com/stretchr/testify/assert"
@@ -202,4 +203,40 @@ func TestEncodeRecordID(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "TrackId")
 	})
+}
+
+// TestCopy_NilFiltersTreatedAsNoFilter is a regression for the new
+// CopyOpts.Filters field added in Task 2 of the filtering plan: passing
+// nil or a zero-value *filter.Directives MUST behave identically to
+// omitting Filters entirely. Until Task 3 wires Filters into the engine,
+// this test just verifies CopyOpts construction with Filters set does
+// not panic and Copy() returns the same well-known result it would
+// without Filters.
+func TestCopy_NilFiltersTreatedAsNoFilter(t *testing.T) {
+	t.Parallel()
+
+	// Empty SQLite source — Copy() will return ErrSourceHasNoTables,
+	// which is the expected baseline behavior regardless of Filters.
+	srcPath := filepath.Join(t.TempDir(), "empty.db")
+	src, err := dalgo2sqlite.NewDatabase(srcPath)
+	assert.NoError(t, err)
+
+	tgtDir := t.TempDir()
+	tgt, err := dalgo2ingitdb.NewDatabase(tgtDir, validator.NewCollectionsReader())
+	assert.NoError(t, err)
+
+	// Test both nil and zero-value *filter.Directives — both must be
+	// treated as "no filtering" and produce identical behavior to the
+	// no-Filters baseline.
+	for _, name := range []string{"nil", "zero-value"} {
+		t.Run(name, func(t *testing.T) {
+			opts := CopyOpts{}
+			if name == "zero-value" {
+				opts.Filters = &filter.Directives{}
+			}
+			_, err := Copy(context.Background(), src, tgt, opts)
+			assert.True(t, errors.Is(err, ErrSourceHasNoTables),
+				"with Filters=%s, expected ErrSourceHasNoTables (no behavior change), got %v", name, err)
+		})
+	}
 }

@@ -19,6 +19,8 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/dalgo/ddl"
+
+	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
 )
 
 // CopyOpts controls a Copy call.
@@ -47,6 +49,13 @@ type CopyOpts struct {
 	// either source or target advertises SupportsConcurrentConnections()==false
 	// (REQ:concurrency-cap).
 	ParallelStreams int
+
+	// Filters carries resolved filtering directives (table include/exclude,
+	// row WHERE predicates, row limits). nil or empty means "no filtering
+	// — copy whole DB per parent Feature ACs". Subsequent tasks consume
+	// this at two seams (pre-worker table filter; engine_rows query builder).
+	// Spec: spec/features/cli/db/copy/filtering/README.md
+	Filters *filter.Directives
 }
 
 // SourceSummary is what Copy reports back to the caller.

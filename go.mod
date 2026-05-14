@@ -44,6 +44,7 @@ require (
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.18.0 // indirect
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
+	github.com/dal-go/dalgo2sqlite v0.0.0-20260513182736-6886f34af097 // indirect
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/georgysavva/scany/v2 v2.1.4 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect

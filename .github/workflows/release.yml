@@ -1,13 +1,18 @@
 name: Release
 
 on:
-  # Manual-only trigger: kick off from the Actions tab or via
-  #   gh workflow run release.yml --ref <tag-or-branch>
-  # goreleaser uses the checked-out git state (commit + nearest tag) to
-  # determine the version. Push-on-tag is intentionally disabled so the
-  # auto-bumping in Go CI doesn't trigger a binary release on every push
-  # to main; we cut releases on a human cadence instead.
+  # Manual-only trigger. Dispatch from the Actions tab or via:
+  #   gh workflow run release.yml --field tag=v0.1.0
+  # The workflow YAML itself comes from main (so improvements land
+  # without needing to re-cut a tag), but the checkout step picks up
+  # the SPECIFIC tag passed via `inputs.tag` — that's what goreleaser
+  # releases. Decouples "workflow source" from "release target".
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git tag to release (e.g. v0.1.0). Must exist on origin.'
+        required: true
+        type: string
 
 jobs:
   release:
@@ -17,12 +22,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          # Check out the SPECIFIC tag the dispatcher asked to release,
+          # not the ref the workflow was triggered from. goreleaser
+          # checks `HEAD must equal <tag>'s commit` and would otherwise
+          # fail with "git tag <X> was not made against commit <Y>".
+          ref: ${{ inputs.tag }}
           # goreleaser inspects the git state (tags + commit history) to
-          # determine the version and changelog. The default shallow clone
-          # has no tags, so goreleaser errors out with
-          #   "git doesn't contain any tags - either add a tag or use
-          #   --snapshot"
-          # fetch-depth: 0 pulls full history + tags.
+          # determine the version and changelog. The default shallow
+          # clone has no tags, so without this it errors out with
+          #   "git doesn't contain any tags"
           fetch-depth: 0
 
       - uses: actions/setup-go@v6

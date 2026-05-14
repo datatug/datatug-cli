@@ -104,10 +104,11 @@ func TestDBCopy_RemoteInGitDB_Exit2(t *testing.T) {
 }
 
 // End-to-end happy path against the checked-in Chinook fixture going to
-// an empty inGitDB target. Schema-only first slice — succeeds with exit 0,
-// the schema-only note on stderr, and 7/11 collections created on the
-// target (4 are skipped because dalgo2sqlite can't describe DATETIME /
-// NUMERIC; tracked upstream).
+// an empty inGitDB target. Succeeds with exit 0, the row-copy summary on
+// stderr, schemas+rows for the 6 single-PK describe-able tables landing
+// on the target (PlaylistTrack has a composite PK and is row-skipped;
+// 4 tables are describe-skipped because dalgo2sqlite can't describe
+// DATETIME / NUMERIC; tracked upstream).
 func TestDBCopy_Chinook_SQLiteToInGitDB_HappyPath(t *testing.T) {
 	t.Parallel()
 	chinook, err := filepath.Abs("../../../pkg/dbcopy/testdata/chinook.db")
@@ -119,5 +120,6 @@ func TestDBCopy_Chinook_SQLiteToInGitDB_HappyPath(t *testing.T) {
 		"--to", "ingitdb://"+tgtDir,
 	)
 	assert.NoError(t, runErr)
-	assert.Contains(t, stderr.String(), "schema replicated; row data not yet copied")
+	assert.Contains(t, stderr.String(), "db copy: replicated schema for 7/11 collections")
+	assert.Contains(t, stderr.String(), "copied 729 rows")
 }

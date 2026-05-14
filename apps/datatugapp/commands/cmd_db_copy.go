@@ -92,6 +92,11 @@ func dbCopyAction(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Bool("progress") {
 		opts.Progress = dbcopy.NewProgressWriter(cmd.Root().ErrWriter, true)
 	}
+	// inGitDB targets need root-collections.yaml registration after each
+	// CreateCollection; thread the project path through.
+	if tgtRef.Scheme == "ingitdb" {
+		opts.TargetInGitDBPath = tgtRef.Path
+	}
 
 	summary, err := dbcopy.Copy(ctx, src, tgt, opts)
 	if errors.Is(err, dbcopy.ErrSourceHasNoTables) {
@@ -105,8 +110,8 @@ func dbCopyAction(ctx context.Context, cmd *cli.Command) error {
 
 	if summary.Tables > 0 {
 		fmt.Fprintf(cmd.Root().ErrWriter,
-			"db copy: replicated schema for %d/%d collections (%d skipped)\n",
-			summary.Created, summary.Tables, len(summary.Skipped),
+			"db copy: replicated schema for %d/%d collections (%d skipped), copied %d rows\n",
+			summary.Created, summary.Tables, len(summary.Skipped), summary.RowsCopied,
 		)
 	}
 	return nil

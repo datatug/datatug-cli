@@ -1,11 +1,9 @@
-// engine.go — schema-only first slice of `datatug db copy`.
+// engine.go — copy engine for `datatug db copy`.
 //
 // Implements REQ:source-schema-via-dbschema, REQ:target-schema-via-ddl,
 // REQ:source-introspection-failure, REQ:recreate-drops-first.
-//
-// Row streaming (REQ:bounded-memory-streaming, REQ:row-insert-via-dalgo) is
-// deferred until dalgo2ingitdb lands row CRUD; see
-// docs/upstream-issues/ingitdb-cli-dalgo2ingitdb-row-crud.md.
+// Row streaming (REQ:bounded-memory-streaming, REQ:row-insert-via-dalgo)
+// lives in engine_rows.go.
 
 package dbcopy
 
@@ -28,33 +26,55 @@ type CopyOpts struct {
 	// CRUD lands).
 	Overwrite string
 
-	// Stderr receives the schema-only follow-up note and any concurrency
-	// warning. Defaults to discard if nil.
+	// Stderr receives per-table skip / row-error notes and the final
+	// summary note. Defaults to discard if nil.
 	Stderr io.Writer
 
 	// Progress, if non-nil, receives per-table progress lines.
 	Progress *ProgressWriter
+
+	// SchemaOnly, if true, skips row streaming entirely and only replicates
+	// the target schema. Useful for E2E-test scaffolding and for backends
+	// where row streaming isn't supported in this direction.
+	SchemaOnly bool
+
+	// TargetInGitDBPath, when non-empty, is the filesystem path to the
+	// inGitDB project root. Used to update .ingitdb/root-collections.yaml
+	// after CreateCollection — see ingitdb_register.go for the rationale.
+	// The CLI populates this from the parsed BackendRef when --to is an
+	// ingitdb:// URL.
+	TargetInGitDBPath string
 }
 
 // SourceSummary is what Copy reports back to the caller.
 type SourceSummary struct {
 	Tables        int
 	Created       int
-	Skipped       []string // tables skipped (e.g. dalgo2sqlite DATETIME/NUMERIC rejection)
-	RowStreaming  bool     // true once dalgo2ingitdb lands row CRUD; today: false
-	TargetBackend string   // adapter name of target, for error messages
+	CreatedNames  []string // names of collections created on the target, in source-iteration order
+	Skipped       []string // tables skipped at DescribeCollection time
+	RowsCopied    int64    // total rows inserted into the target across all tables
+	RowsByTable   map[string]int64
+	RowSkips      map[string]string // table → reason (e.g. composite PK, no PK)
+	TargetBackend string            // adapter name of target, for error messages
 }
 
-// Copy replicates the source database into the target.
+// Copy replicates the source database into the target — schema first,
+// then row data per table.
 //
-// First-slice scope: schema only — collections, primary keys, indexes.
-// Row data is NOT copied; see package doc and the upstream issue tracked
-// at docs/upstream-issues/ingitdb-cli-dalgo2ingitdb-row-crud.md.
+// Schema replication uses DALgo dbschema/ddl. Row streaming uses
+// ExecuteQueryToRecordsReader on the source and RunReadwriteTransaction →
+// InsertMulti on the target (see engine_rows.go).
+//
+// If opts.SchemaOnly is true, only schema is replicated.
+//
+// Tables the source can't describe (e.g. dalgo2sqlite rejecting DATETIME /
+// NUMERIC) are appended to Skipped and processing continues. Tables with
+// no PK or a composite PK get schema replicated but row copy is skipped
+// with the reason recorded in RowSkips.
 //
 // Errors:
 //   - ErrSourceHasNoTables — source introspects cleanly but has zero
-//     collections; the caller should exit 0 with a stderr note (per
-//     REQ:source-introspection-failure).
+//     collections.
 //   - any other error — wrapped with the failing operation and table name.
 func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSummary, error) {
 	stderr := opts.Stderr
@@ -62,7 +82,11 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 		stderr = io.Discard
 	}
 
-	summary := SourceSummary{TargetBackend: adapterName(target)}
+	summary := SourceSummary{
+		TargetBackend: adapterName(target),
+		RowsByTable:   map[string]int64{},
+		RowSkips:      map[string]string{},
+	}
 
 	// 1. Introspect source.
 	refs, err := dbschema.ListCollections(ctx, source, nil)
@@ -84,7 +108,7 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 		}
 	}
 
-	// 3. For each source table: describe, then create on target.
+	// 3. For each source table: describe → create on target → stream rows.
 	for _, ref := range refs {
 		def, err := dbschema.DescribeCollection(ctx, source, &ref)
 		if err != nil {
@@ -106,16 +130,39 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 			return summary, fmt.Errorf("create target collection %q: %w", def.Name, err)
 		}
 		summary.Created++
+		summary.CreatedNames = append(summary.CreatedNames, def.Name)
+
+		// For inGitDB targets, register every created collection in
+		// .ingitdb/root-collections.yaml so the next loadDefinition picks
+		// them up. See ingitdb_register.go for the rationale.
+		if opts.TargetInGitDBPath != "" {
+			if err := registerInGitDBCollections(opts.TargetInGitDBPath, summary.CreatedNames); err != nil {
+				return summary, fmt.Errorf("register inGitDB collection %q: %w", def.Name, err)
+			}
+		}
+
+		// Row streaming — unless explicitly disabled.
+		var rowsCopied int64
+		if !opts.SchemaOnly {
+			rowsCopied, err = copyRows(ctx, source, target, def)
+			switch {
+			case err == nil:
+				summary.RowsCopied += rowsCopied
+				summary.RowsByTable[def.Name] = rowsCopied
+			case errors.Is(err, ErrNoPrimaryKey),
+				errors.Is(err, ErrCompositePKUnsupported):
+				// Schema replicated; row copy not possible for this table.
+				summary.RowSkips[def.Name] = err.Error()
+				fmt.Fprintf(stderr, "row copy skipped for %q: %v\n", def.Name, err)
+			default:
+				return summary, fmt.Errorf("row copy %q: %w", def.Name, err)
+			}
+		}
 
 		if opts.Progress != nil {
-			opts.Progress.FinishTable(def.Name, 0, 0)
+			opts.Progress.FinishTable(def.Name, rowsCopied, 0)
 		}
 	}
-
-	// 4. Emit the schema-only follow-up note. Row streaming hasn't shipped
-	//    yet; the user deserves to know.
-	fmt.Fprintln(stderr,
-		"note: schema replicated; row data not yet copied — dalgo2ingitdb row CRUD pending (see docs/upstream-issues/ingitdb-cli-dalgo2ingitdb-row-crud.md)")
 
 	return summary, nil
 }

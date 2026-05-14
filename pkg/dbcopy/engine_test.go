@@ -58,24 +58,30 @@ func TestCopy_ChinookSQLiteToInGitDB(t *testing.T) {
 	assert.NoError(t, err)
 
 	var stderr bytes.Buffer
-	summary, err := Copy(context.Background(), src, tgt, CopyOpts{Stderr: &stderr})
+	summary, err := Copy(context.Background(), src, tgt, CopyOpts{
+		Stderr:            &stderr,
+		TargetInGitDBPath: tgtDir,
+	})
 	assert.NoError(t, err)
 
 	assert.Equal(t, 11, summary.Tables, "Chinook has 11 tables")
 	assert.GreaterOrEqual(t, summary.Created, 7,
 		"expected at least the 7 describe-able tables to land on target")
 	assert.LessOrEqual(t, summary.Created, 11)
-	assert.False(t, summary.RowStreaming, "first slice is schema-only")
 
 	// The 4 known-rejected tables (Employee, Invoice, InvoiceLine, Track)
 	// should appear in Skipped. We assert a non-empty Skipped + Created+Skipped
-	// == Tables, which is the schema-only invariant.
+	// == Tables, which is the schema-replication invariant.
 	assert.NotEmpty(t, summary.Skipped, "expected DATETIME/NUMERIC tables to be skipped")
 	assert.Equal(t, summary.Tables, summary.Created+len(summary.Skipped))
 
-	// stderr must carry the schema-only follow-up note.
-	assert.Contains(t, stderr.String(), "schema replicated; row data not yet copied")
-	assert.Contains(t, stderr.String(), "ingitdb-cli-dalgo2ingitdb-row-crud")
+	// Row streaming should have moved real data for at least one table.
+	// Chinook tables have single-column PKs except PlaylistTrack (composite),
+	// so we expect >0 rows in at least the single-PK tables we describe-able.
+	assert.Greater(t, summary.RowsCopied, int64(0),
+		"expected row streaming to copy >0 rows from Chinook")
+	t.Logf("rows copied: %d (by table: %v)", summary.RowsCopied, summary.RowsByTable)
+	t.Logf("row skips: %v", summary.RowSkips)
 
 	// Verify the target ACTUALLY has the created collections.
 	refs, err := dbschema.ListCollections(context.Background(), tgt, nil)

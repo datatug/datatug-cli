@@ -813,14 +813,14 @@ func TestCoerceValue(t *testing.T) {
 		want    any
 		wantErr bool
 	}{
-		{"int valid", "42", dbschema.Integer, int64(42), false},
-		{"int invalid", "abc", dbschema.Integer, nil, true},
+		{"int valid", "42", dbschema.Int, int64(42), false},
+		{"int invalid", "abc", dbschema.Int, nil, true},
 		{"float valid", "3.14", dbschema.Float, 3.14, false},
 		{"float invalid", "pi", dbschema.Float, nil, true},
-		{"bool true", "true", dbschema.Boolean, true, false},
-		{"bool True", "True", dbschema.Boolean, true, false},
-		{"bool false", "false", dbschema.Boolean, false, false},
-		{"bool invalid", "yes", dbschema.Boolean, nil, true},
+		{"bool true", "true", dbschema.Bool, true, false},
+		{"bool True", "True", dbschema.Bool, true, false},
+		{"bool false", "false", dbschema.Bool, false, false},
+		{"bool invalid", "yes", dbschema.Bool, nil, true},
 		{"date valid", "2025-01-15", dbschema.Time, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC), false},
 		{"date invalid", "01/15/2025", dbschema.Time, nil, true},
 		{"string passthrough", "anything", dbschema.String, "anything", false},
@@ -878,7 +878,7 @@ import (
 // Unknown column types are passed through as strings.
 func CoerceValue(raw string, colType dbschema.Type) (any, error) {
 	switch colType {
-	case dbschema.Integer:
+	case dbschema.Int:
 		v, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("value %q is not a valid integer", raw)
@@ -892,7 +892,7 @@ func CoerceValue(raw string, colType dbschema.Type) (any, error) {
 		}
 		return v, nil
 
-	case dbschema.Boolean:
+	case dbschema.Bool:
 		v, err := strconv.ParseBool(strings.ToLower(raw))
 		if err != nil {
 			return nil, fmt.Errorf("value %q is not a valid boolean (expected true/false/1/0)", raw)
@@ -1247,8 +1247,8 @@ import (
 func TestValidateWhere_UnknownFieldWithSuggestion(t *testing.T) {
 	def := &dbschema.CollectionDef{
 		Name: "Customer",
-		Columns: []dbschema.ColumnDef{
-			{Name: "CustomerId", Type: dbschema.Integer},
+		Columns: []dbschema.FieldDef{
+			{Name: "CustomerId", Type: dbschema.Int},
 			{Name: "FirstName", Type: dbschema.String},
 			{Name: "LastName", Type: dbschema.String},
 		},
@@ -1269,7 +1269,7 @@ func TestValidateWhere_UnknownFieldWithSuggestion(t *testing.T) {
 func TestValidateWhere_TypeMismatch(t *testing.T) {
 	def := &dbschema.CollectionDef{
 		Name: "Invoice",
-		Columns: []dbschema.ColumnDef{
+		Columns: []dbschema.FieldDef{
 			{Name: "Total", Type: dbschema.Decimal},
 		},
 	}
@@ -1334,13 +1334,15 @@ func ValidateWhereAgainstSchema(table string, p Predicate, def *dbschema.Collect
 	return nil
 }
 
-func findColumn(def *dbschema.CollectionDef, name string) *dbschema.ColumnDef {
+func findColumn(def *dbschema.CollectionDef, name string) *dbschema.FieldDef {
 	if def == nil {
 		return nil
 	}
-	for i := range def.Columns {
-		if def.Columns[i].Name == name {
-			return &def.Columns[i]
+	for i := range def.Fields {
+		// dbschema.FieldDef.Name is a dal.FieldName (defined string type) —
+		// explicit conversion required to compare with a plain string.
+		if string(def.Fields[i].Name) == name {
+			return &def.Fields[i]
 		}
 	}
 	return nil
@@ -1354,11 +1356,12 @@ func closestColumnName(def *dbschema.CollectionDef, want string) string {
 	}
 	best := ""
 	bestDist := 3 // threshold (≤ 2)
-	for _, c := range def.Columns {
-		d := levenshtein(c.Name, want)
+	for _, c := range def.Fields {
+		name := string(c.Name)
+		d := levenshtein(name, want)
 		if d < bestDist {
 			bestDist = d
-			best = c.Name
+			best = name
 		}
 	}
 	return best
@@ -1425,7 +1428,7 @@ import (
 func TestCompileWhereForTable_SingleCondition(t *testing.T) {
 	def := &dbschema.CollectionDef{
 		Name: "Customer",
-		Columns: []dbschema.ColumnDef{
+		Columns: []dbschema.FieldDef{
 			{Name: "Country", Type: dbschema.String},
 		},
 	}
@@ -1452,9 +1455,9 @@ func TestCompileWhereForTable_SingleCondition(t *testing.T) {
 func TestCompileWhereForTable_AndComposition(t *testing.T) {
 	def := &dbschema.CollectionDef{
 		Name: "Customer",
-		Columns: []dbschema.ColumnDef{
+		Columns: []dbschema.FieldDef{
 			{Name: "Country", Type: dbschema.String},
-			{Name: "SupportRepId", Type: dbschema.Integer},
+			{Name: "SupportRepId", Type: dbschema.Int},
 		},
 	}
 	group := &PredicateGroup{

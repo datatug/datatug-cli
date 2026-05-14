@@ -9,6 +9,8 @@ The Idea format follows [SpecScore](https://specscore.md/idea-specification).
 | Idea | Status | Date | Owner | Promotes To |
 |------|--------|------|-------|-------------|
 | [cross-engine-db-copy](cross-engine-db-copy.md) | Approved | 2026-05-12 | alex | — |
+| [db-copy-filtering](db-copy-filtering.md) | Approved | 2026-05-14 | alex | — |
+| [db-snapshot-command](db-snapshot-command.md) | Approved | 2026-05-14 | alex | — |
 
 ## Outstanding Questions
 

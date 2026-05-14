@@ -15,6 +15,7 @@ require (
 	cloud.google.com/go/firestore v1.22.0
 	github.com/alecthomas/chroma/v2 v2.24.1
 	github.com/dal-go/dalgo2sql v0.4.43
+	github.com/dal-go/dalgo2sqlite v0.0.0-20260513182736-6886f34af097
 	github.com/datatug/filetug v0.0.21
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3
@@ -23,6 +24,7 @@ require (
 	github.com/google/go-github/v86 v86.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
+	github.com/ingitdb/ingitdb-cli v1.8.2
 	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
@@ -44,14 +46,15 @@ require (
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.18.0 // indirect
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
-	github.com/dal-go/dalgo2sqlite v0.0.0-20260513182736-6886f34af097 // indirect
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/georgysavva/scany/v2 v2.1.4 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/gofrs/flock v0.13.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
+	github.com/ingr-io/ingr-go v0.0.2 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
+	github.com/pelletier/go-toml/v2 v2.3.1 // indirect
 )
 
 require (

@@ -86,8 +86,9 @@ func dbCopyAction(ctx context.Context, cmd *cli.Command) error {
 
 	// Run the copy.
 	opts := dbcopy.CopyOpts{
-		Overwrite: overwrite,
-		Stderr:    cmd.Root().ErrWriter,
+		Overwrite:       overwrite,
+		Stderr:          cmd.Root().ErrWriter,
+		ParallelStreams: cmd.Int("parallel-streams"),
 	}
 	if cmd.Bool("progress") {
 		opts.Progress = dbcopy.NewProgressWriter(cmd.Root().ErrWriter, true)

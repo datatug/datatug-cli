@@ -1,7 +1,8 @@
 // engine.go — copy engine for `datatug db copy`.
 //
 // Implements REQ:source-schema-via-dbschema, REQ:target-schema-via-ddl,
-// REQ:source-introspection-failure, REQ:recreate-drops-first.
+// REQ:source-introspection-failure, REQ:recreate-drops-first,
+// REQ:parallel-streams-flag, REQ:concurrency-cap.
 // Row streaming (REQ:bounded-memory-streaming, REQ:row-insert-via-dalgo)
 // lives in engine_rows.go.
 
@@ -12,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
+	"sync"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
@@ -37,6 +40,13 @@ type CopyOpts struct {
 	// the target schema. Useful for E2E-test scaffolding and for backends
 	// where row streaming isn't supported in this direction.
 	SchemaOnly bool
+
+	// ParallelStreams is the requested max number of source tables copied
+	// concurrently. 0 means "use the default": runtime.NumCPU()-1 (with a
+	// floor of 1). Negative values are normalized to 1. Capped to 1 when
+	// either source or target advertises SupportsConcurrentConnections()==false
+	// (REQ:concurrency-cap).
+	ParallelStreams int
 }
 
 // SourceSummary is what Copy reports back to the caller.
@@ -65,6 +75,11 @@ type SourceSummary struct {
 // no PK get schema replicated but row copy is skipped with the reason
 // recorded in RowSkips. Composite-PK tables are now copied (key encoded
 // as `__`-joined PK values; see encodeRecordID in engine_rows.go).
+//
+// Concurrency: opts.ParallelStreams governs how many tables are copied in
+// parallel. The effective value is capped to 1 if either source or target
+// advertises SupportsConcurrentConnections()==false. When the cap reduces
+// an explicitly-requested value >1, one warning line is emitted on stderr.
 //
 // Errors:
 //   - ErrSourceHasNoTables — source introspects cleanly but has zero
@@ -115,53 +130,160 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 		}
 	}
 
-	// 3. For each source table: describe → create on target → stream rows.
+	// 3. Resolve effective parallelism (REQ:parallel-streams-flag, REQ:concurrency-cap).
+	effective := resolveParallelism(opts.ParallelStreams, source, target, stderr)
+
+	// 4. Per-table worker pool. Each worker: describe → create → copy rows.
+	jobs := make(chan dal.CollectionRef, len(refs))
 	for _, ref := range refs {
-		def, err := dbschema.DescribeCollection(ctx, source, &ref)
-		if err != nil {
-			// dalgo2sqlite rejects DATETIME / NUMERIC today (see upstream
-			// issue). Log the skip on stderr so the user knows, and continue
-			// — the rest of the schema can still be replicated.
-			fmt.Fprintf(stderr,
-				"skipping %q: source DescribeCollection failed: %v\n",
-				ref.Name(), err)
-			summary.Skipped = append(summary.Skipped, ref.Name())
-			continue
-		}
+		jobs <- ref
+	}
+	close(jobs)
 
-		if opts.Progress != nil {
-			opts.Progress.StartTable(def.Name, -1)
-		}
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-		if err := ddl.CreateCollection(ctx, target, *def); err != nil {
-			return summary, fmt.Errorf("create target collection %q: %w", def.Name, err)
-		}
-		summary.Created++
-		summary.CreatedNames = append(summary.CreatedNames, def.Name)
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex // guards summary mutations
+		errOnce sync.Once
+		firstErr error
+	)
 
-		// Row streaming — unless explicitly disabled.
-		var rowsCopied int64
-		if !opts.SchemaOnly {
-			rowsCopied, err = copyRows(ctx, source, target, def)
-			switch {
-			case err == nil:
-				summary.RowsCopied += rowsCopied
-				summary.RowsByTable[def.Name] = rowsCopied
-			case errors.Is(err, ErrNoPrimaryKey):
-				// Schema replicated; row copy not possible for this table.
-				summary.RowSkips[def.Name] = err.Error()
-				fmt.Fprintf(stderr, "row copy skipped for %q: %v\n", def.Name, err)
-			default:
-				return summary, fmt.Errorf("row copy %q: %w", def.Name, err)
+	recordErr := func(err error) {
+		errOnce.Do(func() {
+			firstErr = err
+			cancel()
+		})
+	}
+
+	for i := 0; i < effective; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ref := range jobs {
+				if workerCtx.Err() != nil {
+					return
+				}
+				if err := copyOneTable(workerCtx, source, target, ref, opts, stderr, &summary, &mu); err != nil {
+					recordErr(err)
+					return
+				}
 			}
-		}
+		}()
+	}
 
-		if opts.Progress != nil {
-			opts.Progress.FinishTable(def.Name, rowsCopied, 0)
+	wg.Wait()
+	if firstErr != nil {
+		return summary, firstErr
+	}
+	return summary, nil
+}
+
+// copyOneTable handles describe → create → row-copy for a single source
+// collection. Mutations to the shared summary happen under mu.
+func copyOneTable(
+	ctx context.Context,
+	source, target dal.DB,
+	ref dal.CollectionRef,
+	opts CopyOpts,
+	stderr io.Writer,
+	summary *SourceSummary,
+	mu *sync.Mutex,
+) error {
+	def, err := dbschema.DescribeCollection(ctx, source, &ref)
+	if err != nil {
+		// dalgo2sqlite rejects DATETIME / NUMERIC today (see upstream
+		// issue). Log the skip on stderr so the user knows, and continue
+		// — the rest of the schema can still be replicated.
+		mu.Lock()
+		fmt.Fprintf(stderr,
+			"skipping %q: source DescribeCollection failed: %v\n",
+			ref.Name(), err)
+		summary.Skipped = append(summary.Skipped, ref.Name())
+		mu.Unlock()
+		return nil
+	}
+
+	if opts.Progress != nil {
+		opts.Progress.StartTable(def.Name, -1)
+	}
+
+	if err := ddl.CreateCollection(ctx, target, *def); err != nil {
+		return fmt.Errorf("create target collection %q: %w", def.Name, err)
+	}
+	mu.Lock()
+	summary.Created++
+	summary.CreatedNames = append(summary.CreatedNames, def.Name)
+	mu.Unlock()
+
+	// Row streaming — unless explicitly disabled.
+	var rowsCopied int64
+	if !opts.SchemaOnly {
+		rowsCopied, err = copyRows(ctx, source, target, def)
+		switch {
+		case err == nil:
+			mu.Lock()
+			summary.RowsCopied += rowsCopied
+			summary.RowsByTable[def.Name] = rowsCopied
+			mu.Unlock()
+		case errors.Is(err, ErrNoPrimaryKey):
+			// Schema replicated; row copy not possible for this table.
+			mu.Lock()
+			summary.RowSkips[def.Name] = err.Error()
+			fmt.Fprintf(stderr, "row copy skipped for %q: %v\n", def.Name, err)
+			mu.Unlock()
+		default:
+			return fmt.Errorf("row copy %q: %w", def.Name, err)
 		}
 	}
 
-	return summary, nil
+	if opts.Progress != nil {
+		opts.Progress.FinishTable(def.Name, rowsCopied, 0)
+	}
+	return nil
+}
+
+// resolveParallelism computes the effective worker count from the
+// requested ParallelStreams value, the default fallback, and the
+// ConcurrencyAware capability of source/target. When the cap reduces an
+// explicitly-requested value >1, one warning line is emitted on stderr
+// per REQ:concurrency-cap.
+func resolveParallelism(requested int, source, target dal.DB, stderr io.Writer) int {
+	defaulted := requested == 0
+	if requested == 0 {
+		requested = runtime.NumCPU() - 1
+		if requested < 1 {
+			requested = 1
+		}
+	}
+	if requested < 1 {
+		requested = 1
+	}
+
+	srcConc := source.SupportsConcurrentConnections()
+	tgtConc := target.SupportsConcurrentConnections()
+	if srcConc && tgtConc {
+		return requested
+	}
+
+	// Capped to 1. Warn only if the user explicitly asked for more.
+	if !defaulted && requested > 1 {
+		var constraining string
+		switch {
+		case !srcConc && !tgtConc:
+			constraining = fmt.Sprintf("%s (source) and %s (target)",
+				adapterName(source), adapterName(target))
+		case !srcConc:
+			constraining = fmt.Sprintf("%s (source)", adapterName(source))
+		case !tgtConc:
+			constraining = fmt.Sprintf("%s (target)", adapterName(target))
+		}
+		fmt.Fprintf(stderr,
+			"warning: %s requires serial writes; ignoring --parallel-streams=%d, using 1\n",
+			constraining, requested)
+	}
+	return 1
 }
 
 // ErrSourceHasNoTables signals that the source introspected cleanly but

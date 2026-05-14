@@ -130,6 +130,20 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 		}
 	}
 
+	// 3b. If --overwrite=reload, validate every source-named target table's
+	//     schema is a superset of the source's (REQ:reload-schema-match).
+	//     ALL tables are validated BEFORE any TRUNCATE; the first mismatch
+	//     aborts with NO target write — satisfies AC:reload-rejects-schema-mismatch.
+	if opts.Overwrite == "reload" {
+		sourceBackend := backendOf(source)
+		targetBackend := backendOf(target)
+		for _, ref := range refs {
+			if err := validateReloadSchema(ctx, source, target, &ref, sourceBackend, targetBackend); err != nil {
+				return summary, err
+			}
+		}
+	}
+
 	// 3. Resolve effective parallelism (REQ:parallel-streams-flag, REQ:concurrency-cap).
 	effective := resolveParallelism(opts.ParallelStreams, source, target, stderr)
 
@@ -209,13 +223,24 @@ func copyOneTable(
 		opts.Progress.StartTable(def.Name, -1)
 	}
 
-	if err := ddl.CreateCollection(ctx, target, *def); err != nil {
-		return fmt.Errorf("create target collection %q: %w", def.Name, err)
+	// For --overwrite=reload, the target table already exists with a
+	// validated superset schema (see validateReloadSchema in the Copy
+	// pre-flight). We must NOT recreate it — that would drop the extra
+	// target-only columns the AC requires us to preserve. Instead, we
+	// truncate the target rows and then stream source rows in.
+	if opts.Overwrite == "reload" {
+		if err := truncateTargetCollection(ctx, target, def.Name); err != nil {
+			return fmt.Errorf("truncate target %q: %w", def.Name, err)
+		}
+	} else {
+		if err := ddl.CreateCollection(ctx, target, *def); err != nil {
+			return fmt.Errorf("create target collection %q: %w", def.Name, err)
+		}
+		mu.Lock()
+		summary.Created++
+		summary.CreatedNames = append(summary.CreatedNames, def.Name)
+		mu.Unlock()
 	}
-	mu.Lock()
-	summary.Created++
-	summary.CreatedNames = append(summary.CreatedNames, def.Name)
-	mu.Unlock()
 
 	// Row streaming — unless explicitly disabled.
 	var rowsCopied int64
@@ -290,6 +315,21 @@ func resolveParallelism(requested int, source, target dal.DB, stderr io.Writer) 
 // has zero collections. Callers should exit 0 with a stderr note per
 // REQ:source-introspection-failure.
 var ErrSourceHasNoTables = errors.New("source has no tables; nothing to copy")
+
+// backendOf maps a DALgo adapter Name() to the dbcopy backend constant
+// accepted by MapType (BackendSQLite, BackendInGitDB). Falls back to
+// the raw adapter name when no mapping is known; MapType will then
+// reject the value with a clear error.
+func backendOf(db dal.DB) string {
+	switch adapterName(db) {
+	case "dalgo2sqlite":
+		return BackendSQLite
+	case "dalgo2ingitdb":
+		return BackendInGitDB
+	default:
+		return adapterName(db)
+	}
+}
 
 // adapterName returns the adapter Name() if available, else "unknown".
 func adapterName(db dal.DB) string {

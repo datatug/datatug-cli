@@ -19,6 +19,12 @@
 
 The verb is a pure primitive: either side can be any DALgo-supported URL. A `--parallel-streams` flag governs per-table parallelism with a safety cap derived from the DALgo `ConcurrencyAware` capability. A non-empty target requires an explicit `--overwrite=recreate` (drop tables and recreate from source schema) or `--overwrite=reload` (truncate tables and reload data, preserving schema).
 
+## Contents
+
+| Child | Description |
+|---|---|
+| [filtering](filtering/README.md) | Extends `datatug db copy` with four orthogonal subsetting axes — table include/exclude, structured row predicates (push-down via DALgo `WhereField`), per-table row limits, and column subsetting (per-table whitelist/blacklist + global column exclusion) — exposed as CLI flags and mirrored 1:1 in a YAML config schema for `db snapshot`'s forwarder. Promotes the `db-copy-filtering` Idea. |
+
 ## Synopsis
 
 ```

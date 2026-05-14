@@ -37,13 +37,6 @@ type CopyOpts struct {
 	// the target schema. Useful for E2E-test scaffolding and for backends
 	// where row streaming isn't supported in this direction.
 	SchemaOnly bool
-
-	// TargetInGitDBPath, when non-empty, is the filesystem path to the
-	// inGitDB project root. Used to update .ingitdb/root-collections.yaml
-	// after CreateCollection — see ingitdb_register.go for the rationale.
-	// The CLI populates this from the parsed BackendRef when --to is an
-	// ingitdb:// URL.
-	TargetInGitDBPath string
 }
 
 // SourceSummary is what Copy reports back to the caller.
@@ -131,15 +124,6 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 		}
 		summary.Created++
 		summary.CreatedNames = append(summary.CreatedNames, def.Name)
-
-		// For inGitDB targets, register every created collection in
-		// .ingitdb/root-collections.yaml so the next loadDefinition picks
-		// them up. See ingitdb_register.go for the rationale.
-		if opts.TargetInGitDBPath != "" {
-			if err := registerInGitDBCollections(opts.TargetInGitDBPath, summary.CreatedNames); err != nil {
-				return summary, fmt.Errorf("register inGitDB collection %q: %w", def.Name, err)
-			}
-		}
 
 		// Row streaming — unless explicitly disabled.
 		var rowsCopied int64

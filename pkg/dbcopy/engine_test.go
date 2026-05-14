@@ -58,10 +58,7 @@ func TestCopy_ChinookSQLiteToInGitDB(t *testing.T) {
 	assert.NoError(t, err)
 
 	var stderr bytes.Buffer
-	summary, err := Copy(context.Background(), src, tgt, CopyOpts{
-		Stderr:            &stderr,
-		TargetInGitDBPath: tgtDir,
-	})
+	summary, err := Copy(context.Background(), src, tgt, CopyOpts{Stderr: &stderr})
 	assert.NoError(t, err)
 
 	assert.Equal(t, 11, summary.Tables, "Chinook has 11 tables")

@@ -92,11 +92,6 @@ func dbCopyAction(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Bool("progress") {
 		opts.Progress = dbcopy.NewProgressWriter(cmd.Root().ErrWriter, true)
 	}
-	// inGitDB targets need root-collections.yaml registration after each
-	// CreateCollection; thread the project path through.
-	if tgtRef.Scheme == "ingitdb" {
-		opts.TargetInGitDBPath = tgtRef.Path
-	}
 
 	summary, err := dbcopy.Copy(ctx, src, tgt, opts)
 	if errors.Is(err, dbcopy.ErrSourceHasNoTables) {

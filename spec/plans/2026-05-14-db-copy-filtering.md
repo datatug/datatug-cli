@@ -2,9 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Extend `datatug db copy` with four orthogonal subsetting axes — table include/exclude, structured row predicates, per-table row limits, and column subsetting (per-table whitelist/blacklist + global column exclude) — exposed both as CLI flags AND as a YAML config-file schema. Push-down via DALgo's `dal.QueryBuilder` (`Where` + `Limit` + projection). Satisfies the contract in [`spec/features/cli/db/copy/filtering/README.md`](../features/cli/db/copy/filtering/README.md).
+**Goal:** Extend `datatug db copy` with three orthogonal subsetting axes — table include/exclude, structured row predicates, and per-table row limits — exposed both as CLI flags AND as a YAML config-file schema. Push-down via DALgo's `dal.QueryBuilder` (`Where` + `Limit`). Satisfies the contract in [`spec/features/cli/db/copy/filtering/README.md`](../features/cli/db/copy/filtering/README.md).
 
-**Architecture:** New internal package `pkg/dbcopy/filter/` holds parsing (CLI mini-syntax + YAML), validation against introspected source schema, and compilation to `dal.QueryBuilder` calls. The existing `pkg/dbcopy/engine.go` gains a `Filters` field on `CopyOpts` and consults it at two seams: (a) before kicking off workers, the `refs` returned by `dbschema.ListCollections` are filtered by `--include`/`--exclude`; (b) inside `engine_rows.copyRows`, the existing `dal.NewQueryBuilder(dal.From(colRef)).SelectIntoRecordset()` becomes a filter-aware builder that adds `WhereField`, `Limit`, and field projection per the resolved directives. `apps/datatugapp/commands/cmd_db_copy.go` adds eight new CLI flags. No engine-specific SQL is emitted — everything compiles to DALgo structured queries.
+**Scope note — column subsetting deferred.** The Feature originally specified four axes; column subsetting (the fourth) is deferred to a follow-up Feature (`cli/db/copy/filtering/columns/`) because DALgo's `QueryBuilder` exposes no explicit field-projection method today and the Feature's REQ:push-down-only forbids a pull-down workaround. The YAML config schema **reserves** the top-level `columns:` key and this plan instructs the parser to reject it with a clear deferral message. See [Feature spec](../features/cli/db/copy/filtering/README.md#out-of-scope) for the upstream `dalgo-query-projection` Idea dependency.
+
+**Architecture:** New internal package `pkg/dbcopy/filter/` holds parsing (CLI mini-syntax + YAML), validation against introspected source schema, and compilation to `dal.QueryBuilder` calls. The existing `pkg/dbcopy/engine.go` gains a `Filters` field on `CopyOpts` and consults it at two seams: (a) before kicking off workers, the `refs` returned by `dbschema.ListCollections` are filtered by `--include`/`--exclude`; (b) inside `engine_rows.copyRows`, the existing `dal.NewQueryBuilder(dal.From(colRef)).SelectIntoRecordset()` becomes a filter-aware builder that adds `WhereField` and `Limit` per the resolved directives. `apps/datatugapp/commands/cmd_db_copy.go` adds five new CLI flags. No engine-specific SQL is emitted — everything compiles to DALgo structured queries.
 
 **Tech Stack:** Go 1.26, `github.com/dal-go/dalgo/dal` (`QueryBuilder`, `WhereField`, `Limit`, `GroupCondition`, `Operator`), `github.com/dal-go/dalgo/dbschema` (`DescribeCollection` for column-type introspection), `gopkg.in/yaml.v3` for config-file parsing, `github.com/urfave/cli/v3` (existing CLI style), `github.com/stretchr/testify` for assertions.
 
@@ -21,28 +23,30 @@
 
 ```
 pkg/dbcopy/filter/
-├── filter.go              # Directives struct (all four axes), package doc
+├── filter.go              # Directives struct (three axes — MVP), package doc
 ├── filter_test.go         # Directives sanity tests
 ├── operator.go            # Operator vocabulary: token → dal.Operator map
 ├── operator_test.go
 ├── coercion.go            # Value → typed value coercion against dbschema.Type
 ├── coercion_test.go
-├── cli.go                 # CLI mini-syntax parsers (--where, --limit, --columns, etc.)
+├── cli.go                 # CLI mini-syntax parsers (--where, --limit)
 ├── cli_test.go
-├── config.go              # YAML config file parsing
+├── config.go              # YAML config file parsing (rejects reserved `columns:` key)
 ├── config_test.go
-├── validate.go            # Schema-aware validation (unknown table/field/column, PK protection, suggestions)
+├── validate.go            # Schema-aware validation (unknown table/field, Levenshtein suggestions)
 ├── validate_test.go
 ├── compile.go             # Compile Directives → per-table dal.QueryBuilder steps
 └── compile_test.go
 ```
 
+**Note on `Directives` shape.** Although column subsetting is deferred, the `Directives` struct (Task 1) carries `PerTableColumns` and `GlobalExcludeColumns` fields as no-op carriers — populated by neither the CLI nor the YAML parser in MVP, and unused by the engine. This keeps the type stable for the follow-up Feature to extend without breaking changes; tests assert these fields stay nil in MVP. If you prefer a tighter MVP, remove them and re-add in the follow-up — a minor design choice the implementer can make.
+
 **Modified files:**
 
 ```
 pkg/dbcopy/engine.go           # CopyOpts.Filters field; pre-worker table filter
-pkg/dbcopy/engine_rows.go      # Filter-aware query builder
-apps/datatugapp/commands/cmd_db_copy.go  # Eight new CLI flags + wiring
+pkg/dbcopy/engine_rows.go      # Filter-aware query builder (Where + Limit)
+apps/datatugapp/commands/cmd_db_copy.go  # Five new CLI flags + wiring
 spec/features/cli/db/copy/README.md      # One-paragraph "baseline ACs assume no filter" note
 ```
 
@@ -1661,446 +1665,15 @@ REQ:where-type-coercion, REQ:push-down-only."
 
 ---
 
-## Task 9: Column subsetting (`--columns`, `--exclude-columns`, PK protection)
 
-**Files:**
-- Modify: `pkg/dbcopy/filter/cli.go` (`ParseColumnsFlag`)
-- Modify: `pkg/dbcopy/filter/cli_test.go`
-- Modify: `pkg/dbcopy/filter/validate.go` (`ValidateColumnRule`)
-- Modify: `pkg/dbcopy/filter/validate_test.go`
-- Modify: `pkg/dbcopy/filter/compile.go` (`ResolveColumnsForTable`)
-- Modify: `pkg/dbcopy/filter/compile_test.go`
-- Modify: `pkg/dbcopy/engine_rows.go` (field projection on QueryBuilder)
-
-- [ ] **Step 9.1: Write `ParseColumnsFlag` test**
-
-Add to `pkg/dbcopy/filter/cli_test.go`:
-
-```go
-func TestParseColumnsFlag(t *testing.T) {
-	cases := []struct {
-		in        string
-		wantTable string
-		wantCols  []string
-		wantErr   bool
-	}{
-		{"Customer:Id,Name,Email", "Customer", []string{"Id", "Name", "Email"}, false},
-		{"Customer:Id", "Customer", []string{"Id"}, false},
-		{"Customer:  Id , Name  ", "Customer", []string{"Id", "Name"}, false},
-		{"Customer:", "", nil, true},
-		{":Id,Name", "", nil, true},
-		{"NoColons", "", nil, true},
-		{"", "", nil, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			table, cols, err := ParseColumnsFlag(tc.in)
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("ParseColumnsFlag(%q) err=%v wantErr=%v", tc.in, err, tc.wantErr)
-			}
-			if err != nil {
-				return
-			}
-			if table != tc.wantTable {
-				t.Errorf("table = %q, want %q", table, tc.wantTable)
-			}
-			if !reflect.DeepEqual(cols, tc.wantCols) {
-				t.Errorf("cols = %v, want %v", cols, tc.wantCols)
-			}
-		})
-	}
-}
-```
-
-- [ ] **Step 9.2: Run test, expect fail; implement `ParseColumnsFlag`**
-
-Add to `pkg/dbcopy/filter/cli.go`:
-
-```go
-// ParseColumnsFlag parses one --columns or --exclude-columns
-// <table>:<c1,c2,…> token. Returns the table name and the column
-// list (non-empty). Whitespace around column names is trimmed.
-// REQ:columns-include-flag, REQ:columns-exclude-flag.
-func ParseColumnsFlag(s string) (table string, cols []string, err error) {
-	idx := strings.Index(s, ":")
-	if idx < 0 {
-		return "", nil, fmt.Errorf("--columns: expected <table>:<c1,c2,…>, got %q", s)
-	}
-	table = strings.TrimSpace(s[:idx])
-	if table == "" {
-		return "", nil, fmt.Errorf("--columns: table must be non-empty in %q", s)
-	}
-	cols = ParseTableList(s[idx+1:])
-	if len(cols) == 0 {
-		return "", nil, fmt.Errorf("--columns: column list must be non-empty in %q", s)
-	}
-	return table, cols, nil
-}
-```
-
-Run test: PASS.
-
-- [ ] **Step 9.3: Write `ValidateColumnRule` test (PK protection)**
-
-Add to `pkg/dbcopy/filter/validate_test.go`:
-
-```go
-func TestValidateColumnRule_PKExclusionRejected(t *testing.T) {
-	def := &dbschema.CollectionDef{
-		Name:       "Customer",
-		PrimaryKey: []dbschema.FieldName{"CustomerId"},
-		Columns: []dbschema.ColumnDef{
-			{Name: "CustomerId", Type: dbschema.Integer},
-			{Name: "Email", Type: dbschema.String},
-		},
-	}
-	rule := &ColumnRule{Exclude: []string{"CustomerId"}}
-	err := ValidateColumnRule("Customer", rule, def)
-	if err == nil || !strings.Contains(err.Error(), "CustomerId") {
-		t.Fatalf("expected PK-exclusion error naming CustomerId, got %v", err)
-	}
-}
-
-func TestValidateColumnRule_PKMissingFromWhitelistRejected(t *testing.T) {
-	def := &dbschema.CollectionDef{
-		Name:       "Customer",
-		PrimaryKey: []dbschema.FieldName{"CustomerId"},
-		Columns: []dbschema.ColumnDef{
-			{Name: "CustomerId", Type: dbschema.Integer},
-			{Name: "Email", Type: dbschema.String},
-		},
-	}
-	rule := &ColumnRule{Include: []string{"Email"}} // PK absent
-	err := ValidateColumnRule("Customer", rule, def)
-	if err == nil || !strings.Contains(err.Error(), "CustomerId") {
-		t.Fatalf("expected PK-missing-from-whitelist error, got %v", err)
-	}
-}
-
-func TestValidateColumnRule_UnknownColumnRejected(t *testing.T) {
-	def := &dbschema.CollectionDef{
-		Name:       "Customer",
-		PrimaryKey: []dbschema.FieldName{"CustomerId"},
-		Columns: []dbschema.ColumnDef{
-			{Name: "CustomerId", Type: dbschema.Integer},
-		},
-	}
-	rule := &ColumnRule{Include: []string{"CustomerId", "Bogus"}}
-	err := ValidateColumnRule("Customer", rule, def)
-	if err == nil || !strings.Contains(err.Error(), "Bogus") {
-		t.Fatalf("expected unknown-column error naming Bogus, got %v", err)
-	}
-}
-```
-
-- [ ] **Step 9.4: Implement `ValidateColumnRule`**
-
-Add to `pkg/dbcopy/filter/validate.go`:
-
-```go
-// ValidateColumnRule checks the per-table column rule against the
-// introspected schema. REQ:columns-pk-implicit, REQ:columns-unknown-field.
-func ValidateColumnRule(table string, rule *ColumnRule, def *dbschema.CollectionDef) error {
-	if rule == nil {
-		return nil
-	}
-	colSet := make(map[string]struct{}, len(def.Columns))
-	for _, c := range def.Columns {
-		colSet[c.Name] = struct{}{}
-	}
-	pkSet := make(map[string]struct{}, len(def.PrimaryKey))
-	for _, p := range def.PrimaryKey {
-		pkSet[string(p)] = struct{}{}
-	}
-
-	check := func(names []string, flag string) error {
-		for _, n := range names {
-			if _, ok := colSet[n]; !ok {
-				return fmt.Errorf("%s %s: unknown column %q", flag, table, n)
-			}
-		}
-		return nil
-	}
-	if err := check(rule.Include, "--columns"); err != nil {
-		return err
-	}
-	if err := check(rule.Exclude, "--exclude-columns"); err != nil {
-		return err
-	}
-
-	// PK protection: rule.Exclude MUST NOT contain any PK column.
-	for _, e := range rule.Exclude {
-		if _, isPK := pkSet[e]; isPK {
-			return fmt.Errorf(
-				"--exclude-columns %s: cannot exclude primary-key column %q (PKs are required for target writes)",
-				table, e,
-			)
-		}
-	}
-	// PK protection: if Include is non-empty, every PK column MUST be in it.
-	if len(rule.Include) > 0 {
-		includedSet := make(map[string]struct{}, len(rule.Include))
-		for _, n := range rule.Include {
-			includedSet[n] = struct{}{}
-		}
-		for pk := range pkSet {
-			if _, ok := includedSet[pk]; !ok {
-				return fmt.Errorf(
-					"--columns %s: primary-key column %q must be in the whitelist (PKs are required for target writes)",
-					table, pk,
-				)
-			}
-		}
-	}
-	return nil
-}
-```
-
-- [ ] **Step 9.5: Run validation tests**
-
-Run: `go test ./pkg/dbcopy/filter/ -run TestValidateColumnRule -v`
-Expected: PASS (3 subtests).
-
-- [ ] **Step 9.6: Write `ResolveColumnsForTable` test**
-
-Add to `pkg/dbcopy/filter/compile_test.go`:
-
-```go
-func TestResolveColumnsForTable(t *testing.T) {
-	def := &dbschema.CollectionDef{
-		Name:       "Customer",
-		PrimaryKey: []dbschema.FieldName{"CustomerId"},
-		Columns: []dbschema.ColumnDef{
-			{Name: "CustomerId"},
-			{Name: "FirstName"},
-			{Name: "LastName"},
-			{Name: "Email"},
-			{Name: "CreatedAt"},
-		},
-	}
-	cases := []struct {
-		name           string
-		rule           *ColumnRule
-		globalExclude  []string
-		wantCols       []string // expected projected fields
-	}{
-		{"no rule", nil, nil, nil}, // nil → no projection (select all)
-		{"per-table whitelist", &ColumnRule{Include: []string{"CustomerId", "FirstName"}}, nil, []string{"CustomerId", "FirstName"}},
-		{"per-table blacklist", &ColumnRule{Exclude: []string{"Email", "CreatedAt"}}, nil, []string{"CustomerId", "FirstName", "LastName"}},
-		{"global only", nil, []string{"CreatedAt"}, []string{"CustomerId", "FirstName", "LastName", "Email"}},
-		{"global + per-table whitelist (intersection)", &ColumnRule{Include: []string{"CustomerId", "FirstName", "Email"}}, []string{"Email"}, []string{"CustomerId", "FirstName"}},
-		{"global tries to drop PK (no-op)", nil, []string{"CustomerId"}, []string{"CustomerId", "FirstName", "LastName", "Email", "CreatedAt"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := ResolveColumnsForTable(def, tc.rule, tc.globalExclude)
-			if !reflect.DeepEqual(got, tc.wantCols) {
-				t.Fatalf("got %v, want %v", got, tc.wantCols)
-			}
-		})
-	}
-}
-```
-
-- [ ] **Step 9.7: Implement `ResolveColumnsForTable`**
-
-Add to `pkg/dbcopy/filter/compile.go`:
-
-```go
-// ResolveColumnsForTable resolves the effective SELECT projection for
-// a table given the per-table rule, the global exclude list, and the
-// table's introspected schema. Returns nil to mean "no projection —
-// select all columns" (matches the existing no-filter engine path).
-//
-// Order: per-table rule applied first; then global exclude trims;
-// then PK columns are added back if global exclude removed them.
-// REQ:columns-global-interaction-with-per-table, REQ:columns-pk-implicit,
-// REQ:columns-global-exclude.
-func ResolveColumnsForTable(def *dbschema.CollectionDef, rule *ColumnRule, globalExclude []string) []string {
-	if def == nil {
-		return nil
-	}
-	if rule == nil && len(globalExclude) == 0 {
-		return nil
-	}
-
-	pkSet := make(map[string]struct{}, len(def.PrimaryKey))
-	for _, p := range def.PrimaryKey {
-		pkSet[string(p)] = struct{}{}
-	}
-	globalSet := make(map[string]struct{}, len(globalExclude))
-	for _, n := range globalExclude {
-		globalSet[n] = struct{}{}
-	}
-
-	// Step 1: build the post-per-table-rule set in source-introspection order.
-	allow := make([]string, 0, len(def.Columns))
-	if rule != nil && len(rule.Include) > 0 {
-		// Whitelist: only listed columns survive (PK protection upstream).
-		want := make(map[string]struct{}, len(rule.Include))
-		for _, n := range rule.Include {
-			want[n] = struct{}{}
-		}
-		for _, c := range def.Columns {
-			if _, ok := want[c.Name]; ok {
-				allow = append(allow, c.Name)
-			}
-		}
-	} else if rule != nil && len(rule.Exclude) > 0 {
-		// Blacklist: every column except listed ones.
-		drop := make(map[string]struct{}, len(rule.Exclude))
-		for _, n := range rule.Exclude {
-			drop[n] = struct{}{}
-		}
-		for _, c := range def.Columns {
-			if _, ok := drop[c.Name]; !ok {
-				allow = append(allow, c.Name)
-			}
-		}
-	} else {
-		// No per-table rule: start with every column.
-		for _, c := range def.Columns {
-			allow = append(allow, c.Name)
-		}
-	}
-
-	// Step 2: trim by global exclude, EXCEPT PK columns
-	// (REQ:columns-pk-implicit overrides REQ:columns-global-exclude).
-	out := make([]string, 0, len(allow))
-	for _, n := range allow {
-		if _, isPK := pkSet[n]; isPK {
-			out = append(out, n)
-			continue
-		}
-		if _, isGlobalExcluded := globalSet[n]; isGlobalExcluded {
-			continue
-		}
-		out = append(out, n)
-	}
-	return out
-}
-```
-
-- [ ] **Step 9.8: Run compile tests**
-
-Run: `go test ./pkg/dbcopy/filter/ -run TestResolveColumnsForTable -v`
-Expected: PASS (6 subtests).
-
-- [ ] **Step 9.9: Wire projection into `engine_rows.copyRows`**
-
-In `pkg/dbcopy/engine_rows.go`, before `query := builder.SelectIntoRecordset()`, add:
-
-```go
-	if opts.Filters != nil {
-		var rule *filter.ColumnRule
-		if opts.Filters.PerTableColumns != nil {
-			rule = opts.Filters.PerTableColumns[def.Name]
-		}
-		if err := filter.ValidateColumnRule(def.Name, rule, def); err != nil {
-			return 0, fmt.Errorf("validate column rule for %q: %w", def.Name, err)
-		}
-		if cols := filter.ResolveColumnsForTable(def, rule, opts.Filters.GlobalExcludeColumns); cols != nil {
-			fields := make([]dal.FieldName, len(cols))
-			for i, c := range cols {
-				fields[i] = dal.FieldName(c)
-			}
-			builder = builder.SelectFields(fields...)
-		}
-	}
-```
-
-Note: confirm DALgo's projection API is `SelectFields(fields...)` — at plan-time audit (per Idea's Must-be-true). If the API differs (e.g. `Select(...)` or builder pattern), substitute accordingly. If field projection isn't yet available on QueryBuilder, this is the upstream-PR boundary called out in the Feature's Dependencies section.
-
-- [ ] **Step 9.10: Write E2E column tests**
-
-Add to `pkg/dbcopy/engine_test.go`:
-
-```go
-func TestCopy_ColumnsWhitelistNarrowsProjection(t *testing.T) {
-	// AC:columns-whitelist-narrows-projection
-	ctx := context.Background()
-	src := newChinookSQLiteSource(t)
-	tgt := newEmptyInGitDBTarget(t)
-
-	opts := CopyOpts{
-		Filters: &filter.Directives{
-			IncludeTables: []string{"Customer"},
-			PerTableColumns: map[string]*filter.ColumnRule{
-				"Customer": {Include: []string{"CustomerId", "FirstName", "LastName"}},
-			},
-		},
-	}
-	if _, err := Copy(ctx, src, tgt, opts); err != nil {
-		t.Fatalf("Copy: %v", err)
-	}
-	// Verify target Customer records have exactly 3 fields.
-	assertCollectionFields(t, tgt, "Customer", []string{"CustomerId", "FirstName", "LastName"})
-}
-
-func TestCopy_ColumnsPKExclusionRejected(t *testing.T) {
-	// AC:columns-pk-explicit-exclusion-rejected
-	ctx := context.Background()
-	src := newChinookSQLiteSource(t)
-	tgt := newEmptyInGitDBTarget(t)
-
-	opts := CopyOpts{
-		Filters: &filter.Directives{
-			IncludeTables: []string{"Customer"},
-			PerTableColumns: map[string]*filter.ColumnRule{
-				"Customer": {Exclude: []string{"CustomerId"}},
-			},
-		},
-	}
-	_, err := Copy(ctx, src, tgt, opts)
-	if err == nil || !strings.Contains(err.Error(), "CustomerId") {
-		t.Fatalf("expected PK-protection error, got %v", err)
-	}
-}
-```
-
-Note: `assertCollectionFields` is a new test helper that opens the target's first record and asserts `record.Data` (the map[string]any) has exactly the expected keys. Add to `engine_test.go`:
-
-```go
-func assertCollectionFields(t *testing.T, tgt dal.DB, collection string, wantFields []string) {
-	t.Helper()
-	// Implementation: iterate the inGitDB tree for one record, parse YAML,
-	// assert keys. Concrete code at plan time when target test helpers are
-	// available.
-}
-```
-
-- [ ] **Step 9.11: Run all tests**
-
-Run: `go test ./pkg/dbcopy/... -v`
-Expected: PASS.
-
-- [ ] **Step 9.12: Commit**
-
-```bash
-git add pkg/dbcopy/filter/cli.go pkg/dbcopy/filter/cli_test.go pkg/dbcopy/filter/validate.go pkg/dbcopy/filter/validate_test.go pkg/dbcopy/filter/compile.go pkg/dbcopy/filter/compile_test.go pkg/dbcopy/engine_rows.go pkg/dbcopy/engine_test.go
-git commit -m "feat(filter): column subsetting with PK protection and global intersection
-
-ParseColumnsFlag parses --columns / --exclude-columns; ValidateColumnRule
-rejects unknown columns AND PK exclusion (both blacklist-PK and PK
-missing from whitelist); ResolveColumnsForTable composes per-table
-rule with --exclude-columns-global by intersection (per-table first,
-then global trim, PK protection overrides global). engine_rows.copyRows
-applies the resolved projection via QueryBuilder.SelectFields.
-
-REQ:columns-include-flag, REQ:columns-exclude-flag,
-REQ:columns-mutex-per-table, REQ:columns-pk-implicit,
-REQ:columns-global-exclude, REQ:columns-global-interaction-with-per-table,
-REQ:columns-unknown-field."
-```
-
----
-
-## Task 10: CLI flag wiring in `cmd_db_copy.go`
+## Task 9: CLI flag wiring in `cmd_db_copy.go`
 
 **Files:**
 - Modify: `apps/datatugapp/commands/cmd_db_copy.go`
 
-- [ ] **Step 10.1: Add the eight new flags**
+**Note:** Column-subsetting flags (`--columns`, `--exclude-columns`, `--exclude-columns-global`) are NOT included — column subsetting is deferred per the Feature spec amendment. The follow-up Feature `cli/db/copy/filtering/columns/` will add them once the upstream `dalgo-query-projection` Idea ships.
+
+- [ ] **Step 9.1: Add the five new flags**
 
 In `apps/datatugapp/commands/cmd_db_copy.go`, inside `dbCopyCommand()`'s `Flags` slice, add after the existing `progress` flag:
 
@@ -2121,25 +1694,13 @@ In `apps/datatugapp/commands/cmd_db_copy.go`, inside `dbCopyCommand()`'s `Flags`
 			Name:  "limit",
 			Usage: "Per-table row limit: <table>:<N> (positive integer). Repeatable; one per table.",
 		},
-		&cli.StringSliceFlag{
-			Name:  "columns",
-			Usage: "Per-table column whitelist: <table>:<c1,c2,…>. Repeatable. Mutually exclusive with --exclude-columns on the same table.",
-		},
-		&cli.StringSliceFlag{
-			Name:  "exclude-columns",
-			Usage: "Per-table column blacklist: <table>:<c1,c2,…>. Repeatable. Mutually exclusive with --columns on the same table.",
-		},
-		&cli.StringFlag{
-			Name:  "exclude-columns-global",
-			Usage: "Comma-separated column names dropped from every copied table that has them (silent no-op for tables without). PKs are protected.",
-		},
 		&cli.StringFlag{
 			Name:  "filter-config",
 			Usage: "Path to a YAML filter config file. Mutually exclusive with any other filter flag.",
 		},
 ```
 
-- [ ] **Step 10.2: Build the Directives from flags inside `dbCopyAction`**
+- [ ] **Step 9.2: Build the Directives from flags inside `dbCopyAction`**
 
 In the same file, before the `opts := dbcopy.CopyOpts{...}` line, add:
 
@@ -2157,17 +1718,13 @@ Add the helper function at the bottom of the file:
 // CLI flags. Returns an error (mapped to exit 2 by the caller) on:
 //   - --filter-config mixed with any other filter flag
 //   - --include + --exclude both supplied
-//   - any per-table mutex violation
 //   - any parse error
 func buildDirectivesFromFlags(cmd *cli.Command) (*filter.Directives, error) {
 	configPath := cmd.String("filter-config")
 	otherFilterFlagsPresent := cmd.String("include") != "" ||
 		cmd.String("exclude") != "" ||
 		len(cmd.StringSlice("where")) > 0 ||
-		len(cmd.StringSlice("limit")) > 0 ||
-		len(cmd.StringSlice("columns")) > 0 ||
-		len(cmd.StringSlice("exclude-columns")) > 0 ||
-		cmd.String("exclude-columns-global") != ""
+		len(cmd.StringSlice("limit")) > 0
 
 	if configPath != "" && otherFilterFlagsPresent {
 		return nil, fmt.Errorf("--filter-config and individual filter flags are mutually exclusive; supply at most one")
@@ -2218,38 +1775,6 @@ func buildDirectivesFromFlags(cmd *cli.Command) (*filter.Directives, error) {
 		d.LimitsByTable[table] = n
 	}
 
-	addColumns := func(raws []string, fieldName string) error {
-		for _, raw := range raws {
-			table, cols, err := filter.ParseColumnsFlag(raw)
-			if err != nil {
-				return err
-			}
-			if d.PerTableColumns == nil {
-				d.PerTableColumns = map[string]*filter.ColumnRule{}
-			}
-			rule := d.PerTableColumns[table]
-			if rule == nil {
-				rule = &filter.ColumnRule{}
-				d.PerTableColumns[table] = rule
-			}
-			switch fieldName {
-			case "columns":
-				rule.Include = append(rule.Include, cols...)
-			case "exclude-columns":
-				rule.Exclude = append(rule.Exclude, cols...)
-			}
-		}
-		return nil
-	}
-	if err := addColumns(cmd.StringSlice("columns"), "columns"); err != nil {
-		return nil, err
-	}
-	if err := addColumns(cmd.StringSlice("exclude-columns"), "exclude-columns"); err != nil {
-		return nil, err
-	}
-
-	d.GlobalExcludeColumns = filter.ParseTableList(cmd.String("exclude-columns-global"))
-
 	if err := d.PreValidate(); err != nil {
 		return nil, err
 	}
@@ -2270,7 +1795,7 @@ Then assign `directives` into `opts`:
 	}
 ```
 
-- [ ] **Step 10.3: Build and run a smoke E2E**
+- [ ] **Step 9.3: Build and run a smoke E2E**
 
 Run:
 ```bash
@@ -2279,22 +1804,23 @@ go build ./...
 ```
 Expected: exit 0, `/tmp/snap-test/Customer/` and `/tmp/snap-test/Invoice/` directories exist, no other Chinook tables present.
 
-- [ ] **Step 10.4: Commit**
+- [ ] **Step 9.4: Commit**
 
 ```bash
 git add apps/datatugapp/commands/cmd_db_copy.go
-git commit -m "feat(cli): wire eight filter flags into db copy
+git commit -m "feat(cli): wire five filter flags into db copy
 
 Adds --include, --exclude, --where (slice), --limit (slice),
---columns (slice), --exclude-columns (slice), --exclude-columns-global,
 --filter-config. buildDirectivesFromFlags constructs filter.Directives,
 enforcing flag-vs-config mutex (REQ:config-cli-equivalence) and
-include-exclude mutex (REQ:include-exclude-mutex)."
+include-exclude mutex (REQ:include-exclude-mutex).
+
+Column-subsetting flags deferred per the Feature spec amendment."
 ```
 
 ---
 
-## Task 11: YAML config-file parser + OR-groups
+## Task 10: YAML config-file parser + OR-groups
 
 **Files:**
 - Create: `pkg/dbcopy/filter/config.go`
@@ -2302,8 +1828,11 @@ include-exclude mutex (REQ:include-exclude-mutex)."
 - Create: `pkg/dbcopy/filter/testdata/full.yaml`
 - Create: `pkg/dbcopy/filter/testdata/or-group.yaml`
 - Create: `pkg/dbcopy/filter/testdata/bad-key.yaml`
+- Create: `pkg/dbcopy/filter/testdata/reserved-columns.yaml`
 
-- [ ] **Step 11.1: Create test fixtures**
+**Note:** The YAML schema does NOT include a `columns:` section in MVP. A top-level `columns:` key is **reserved** for the deferred column-subsetting follow-up Feature and MUST be rejected with a clear error.
+
+- [ ] **Step 10.1: Create test fixtures**
 
 Create `pkg/dbcopy/filter/testdata/full.yaml`:
 
@@ -2314,10 +1843,6 @@ where:
     - {field: Country, op: '=', value: USA}
 limit:
   Customer: 5
-columns:
-  per_table:
-    Customer:
-      include: [FirstName, LastName]
 ```
 
 Create `pkg/dbcopy/filter/testdata/or-group.yaml`:
@@ -2337,7 +1862,17 @@ Create `pkg/dbcopy/filter/testdata/bad-key.yaml`:
 subset: [Customer]   # unrecognized top-level key
 ```
 
-- [ ] **Step 11.2: Write the parser test**
+Create `pkg/dbcopy/filter/testdata/reserved-columns.yaml`:
+
+```yaml
+include: [Customer]
+columns:                # reserved for the deferred column-subsetting Feature
+  per_table:
+    Customer:
+      include: [FirstName, LastName]
+```
+
+- [ ] **Step 10.2: Write the parser test**
 
 Create `pkg/dbcopy/filter/config_test.go`:
 
@@ -2367,8 +1902,18 @@ func TestParseConfigFile_Full(t *testing.T) {
 	if grp.Conditions[0].Field != "Country" || grp.Conditions[0].Value != "USA" {
 		t.Errorf("Where condition = %+v", grp.Conditions[0])
 	}
-	if rule := d.PerTableColumns["Customer"]; rule == nil || len(rule.Include) != 2 {
-		t.Errorf("PerTableColumns[Customer] = %+v", rule)
+}
+
+func TestParseConfigFile_ReservedColumnsKey(t *testing.T) {
+	_, err := ParseConfigFile("testdata/reserved-columns.yaml")
+	if err == nil {
+		t.Fatal("expected error for reserved `columns:` key")
+	}
+	if !strings.Contains(err.Error(), "columns") {
+		t.Errorf("error %q must name the reserved `columns` key", err)
+	}
+	if !strings.Contains(err.Error(), "deferred") && !strings.Contains(err.Error(), "future") {
+		t.Errorf("error %q should mention the deferral", err)
 	}
 }
 
@@ -2395,7 +1940,7 @@ func TestParseConfigFile_BadKey(t *testing.T) {
 }
 ```
 
-- [ ] **Step 11.3: Implement `ParseConfigFile`**
+- [ ] **Step 10.3: Implement `ParseConfigFile`**
 
 Create `pkg/dbcopy/filter/config.go`:
 
@@ -2405,57 +1950,59 @@ package filter
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 // configFile mirrors the YAML schema documented in
 // spec/features/cli/db/copy/filtering/README.md#req:config-file-schema.
-// All fields are optional.
+// All fields are optional. A top-level `columns:` key is RESERVED for
+// the deferred column-subsetting follow-up Feature and is rejected at
+// parse time — see ParseConfigFile.
 type configFile struct {
 	Include []string                     `yaml:"include"`
 	Exclude []string                     `yaml:"exclude"`
 	Where   map[string][]configWhereEntry `yaml:"where"`
 	Limit   map[string]int               `yaml:"limit"`
-	Columns *configColumns               `yaml:"columns"`
 }
 
 type configWhereEntry struct {
 	// Exactly one of (Field/Op/Value) OR Or is populated. The YAML decoder
-	// disambiguates by checking which keys are present (see UnmarshalYAML).
+	// disambiguates by which keys are present.
 	Field string `yaml:"field,omitempty"`
 	Op    string `yaml:"op,omitempty"`
 	Value string `yaml:"value,omitempty"`
 	Or    []configWhereEntry `yaml:"or,omitempty"`
 }
 
-type configColumns struct {
-	GlobalExclude []string                       `yaml:"global_exclude"`
-	PerTable      map[string]*configColumnRule   `yaml:"per_table"`
-}
-
-type configColumnRule struct {
-	Include []string `yaml:"include"`
-	Exclude []string `yaml:"exclude"`
-}
-
 // ParseConfigFile reads and decodes the YAML at path into a Directives.
-// Rejects unrecognized top-level keys (REQ:config-file-schema).
+// Rejects unrecognized top-level keys (REQ:config-file-schema). The
+// `columns:` key is recognized but reserved for the deferred
+// column-subsetting follow-up Feature; presence of `columns:` MUST
+// produce an error naming the deferral.
 func ParseConfigFile(path string) (*Directives, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
 
-	// Decode into a generic map first to detect unknown top-level keys.
+	// Decode into a generic map first to detect unknown top-level keys
+	// AND the reserved `columns:` key.
 	var generic map[string]any
 	if err := yaml.Unmarshal(data, &generic); err != nil {
 		return nil, fmt.Errorf("parse config file: %w", err)
 	}
-	known := map[string]bool{"include": true, "exclude": true, "where": true, "limit": true, "columns": true}
+	if _, hasColumns := generic["columns"]; hasColumns {
+		return nil, fmt.Errorf(
+			"top-level `columns:` key is reserved for a deferred follow-up Feature " +
+				"(`cli/db/copy/filtering/columns/`); column subsetting is not in MVP",
+		)
+	}
+	known := map[string]bool{"include": true, "exclude": true, "where": true, "limit": true}
 	for k := range generic {
 		if !known[k] {
-			return nil, fmt.Errorf("unrecognized top-level key %q (allowed: include, exclude, where, limit, columns)", k)
+			return nil, fmt.Errorf("unrecognized top-level key %q (allowed: include, exclude, where, limit)", k)
 		}
 	}
 
@@ -2467,26 +2014,9 @@ func ParseConfigFile(path string) (*Directives, error) {
 	}
 
 	d := &Directives{
-		IncludeTables:        cf.Include,
-		ExcludeTables:        cf.Exclude,
-		LimitsByTable:        cf.Limit,
-		GlobalExcludeColumns: nil,
-	}
-
-	if cf.Columns != nil {
-		d.GlobalExcludeColumns = cf.Columns.GlobalExclude
-		if cf.Columns.PerTable != nil {
-			d.PerTableColumns = map[string]*ColumnRule{}
-			for table, rule := range cf.Columns.PerTable {
-				if rule == nil {
-					continue
-				}
-				d.PerTableColumns[table] = &ColumnRule{
-					Include: rule.Include,
-					Exclude: rule.Exclude,
-				}
-			}
-		}
+		IncludeTables: cf.Include,
+		ExcludeTables: cf.Exclude,
+		LimitsByTable: cf.Limit,
 	}
 
 	if len(cf.Where) > 0 {
@@ -2520,14 +2050,14 @@ func ParseConfigFile(path string) (*Directives, error) {
 }
 ```
 
-Add `"strings"` and `"gopkg.in/yaml.v3"` to the imports if not present. Note: the existing `go.mod` likely already has yaml.v3 — confirm with `go mod tidy` after edits.
+Note: `gopkg.in/yaml.v3` is already in `go.mod` (used by other parts of the CLI). `go mod tidy` after edits is a no-op for this dependency.
 
-- [ ] **Step 11.4: Run config tests**
+- [ ] **Step 10.4: Run config tests**
 
 Run: `go test ./pkg/dbcopy/filter/ -run TestParseConfigFile -v`
-Expected: PASS (3 subtests).
+Expected: PASS (4 subtests: Full, OrGroup, BadKey, ReservedColumnsKey).
 
-- [ ] **Step 11.5: Write OR-group E2E test**
+- [ ] **Step 10.5: Write OR-group E2E test**
 
 Add to `pkg/dbcopy/engine_test.go`:
 
@@ -2554,12 +2084,12 @@ func TestCopy_ConfigOrGroup(t *testing.T) {
 }
 ```
 
-- [ ] **Step 11.6: Run all tests**
+- [ ] **Step 10.6: Run all tests**
 
 Run: `go test ./pkg/dbcopy/... -v`
 Expected: PASS.
 
-- [ ] **Step 11.7: Commit**
+- [ ] **Step 10.7: Commit**
 
 ```bash
 git add pkg/dbcopy/filter/config.go pkg/dbcopy/filter/config_test.go pkg/dbcopy/filter/testdata/ pkg/dbcopy/engine_test.go
@@ -2567,22 +2097,24 @@ git commit -m "feat(filter): YAML config-file parser with OR-group support
 
 Implements REQ:filter-config-flag, REQ:config-file-schema, and
 REQ:config-or-groups. ParseConfigFile decodes the YAML mirror of
-the CLI flags, rejects unknown top-level keys, and compiles where:
-entries with 'or:' subkeys into Subgroup PredicateGroups for
-GroupCondition emission at compile time.
+the CLI flags (include/exclude/where/limit), rejects unknown
+top-level keys, rejects the reserved \`columns:\` key (deferred
+to follow-up Feature), and compiles where: entries with 'or:'
+subkeys into Subgroup PredicateGroups for GroupCondition emission
+at compile time.
 
 E2E: Chinook USA-OR-Canada returns 16 customers."
 ```
 
 ---
 
-## Task 12: Backend-coverage runtime check (REQ:backend-coverage)
+## Task 11: Backend-coverage runtime check (REQ:backend-coverage)
 
 **Files:**
 - Modify: `pkg/dbcopy/engine_rows.go`
 - Modify: `pkg/dbcopy/engine_test.go`
 
-- [ ] **Step 12.1: Write the failing test using a stub adapter**
+- [ ] **Step 11.1: Write the failing test using a stub adapter**
 
 Add to `pkg/dbcopy/engine_test.go`:
 
@@ -2633,7 +2165,7 @@ func TestCopy_BackendWithoutWherePushdownExits1(t *testing.T) {
 }
 ```
 
-- [ ] **Step 12.2: Implement the backend-coverage wrap**
+- [ ] **Step 11.2: Implement the backend-coverage wrap**
 
 In `pkg/dbcopy/engine_rows.go`, after `reader, err := src.ExecuteQueryToRecordsReader(ctx, query)`:
 
@@ -2655,12 +2187,12 @@ In `pkg/dbcopy/engine_rows.go`, after `reader, err := src.ExecuteQueryToRecordsR
 
 Note: `adapterName(src)` already exists in `engine.go` — confirm it's accessible from `engine_rows.go` (same package, so yes).
 
-- [ ] **Step 12.3: Run the test**
+- [ ] **Step 11.3: Run the test**
 
 Run: `go test ./pkg/dbcopy/ -run TestCopy_BackendWithoutWherePushdownExits1 -v`
 Expected: PASS.
 
-- [ ] **Step 12.4: Map the error to exit 1 in `cmd_db_copy.go`**
+- [ ] **Step 11.4: Map the error to exit 1 in `cmd_db_copy.go`**
 
 In `apps/datatugapp/commands/cmd_db_copy.go`, after the `dbcopy.Copy` call, look at the existing error handling. Add a case that catches the "lacks push-down support" sentinel and maps to exit 1:
 
@@ -2677,7 +2209,7 @@ In `apps/datatugapp/commands/cmd_db_copy.go`, after the `dbcopy.Copy` call, look
 
 (Match against existing error-handling style — don't restructure unrelated branches.)
 
-- [ ] **Step 12.5: Commit**
+- [ ] **Step 11.5: Commit**
 
 ```bash
 git add pkg/dbcopy/engine_rows.go pkg/dbcopy/engine_test.go apps/datatugapp/commands/cmd_db_copy.go
@@ -2694,12 +2226,12 @@ REQ:backend-coverage."
 
 ---
 
-## Task 13: Parent `db copy` README amendment
+## Task 12: Parent `db copy` README amendment
 
 **Files:**
 - Modify: `spec/features/cli/db/copy/README.md`
 
-- [ ] **Step 13.1: Add the baseline-ACs note**
+- [ ] **Step 12.1: Add the baseline-ACs note**
 
 In `spec/features/cli/db/copy/README.md`, locate the `## Acceptance Criteria` section heading. Immediately after the heading, before the first `### AC:` block, insert:
 
@@ -2707,12 +2239,12 @@ In `spec/features/cli/db/copy/README.md`, locate the `## Acceptance Criteria` se
 **Note:** All ACs in this section assume NO filtering flags are present (no `--include`, `--exclude`, `--where`, `--limit`, `--columns`, `--exclude-columns`, `--exclude-columns-global`, or `--filter-config`). Subsetting behavior is specified by the [`filtering` sub-feature](filtering/README.md) (REQ:copy-acs-no-filter-baseline there).
 ```
 
-- [ ] **Step 13.2: Run lint**
+- [ ] **Step 12.2: Run lint**
 
 Run: `specscore spec lint`
 Expected: 0 violations.
 
-- [ ] **Step 13.3: Commit**
+- [ ] **Step 12.3: Commit**
 
 ```bash
 git add spec/features/cli/db/copy/README.md
@@ -2730,7 +2262,7 @@ Before handing off:
 
 **Spec coverage check** — every REQ in the Feature has at least one task:
 
-| REQ | Task |
+| REQ (post-amendment) | Task |
 |---|---|
 | include-flag | 3 |
 | exclude-flag | 3 |
@@ -2743,30 +2275,22 @@ Before handing off:
 | where-unknown-field | 8 |
 | limit-flag | 7 |
 | limit-compiles-to-dalgo-limit | 7 |
-| columns-include-flag | 9 |
-| columns-exclude-flag | 9 |
-| columns-mutex-per-table | 3 (PreValidate), 9 |
-| columns-pk-implicit | 9 |
-| columns-global-exclude | 9 |
-| columns-global-interaction-with-per-table | 9 |
-| columns-unknown-field | 9 |
-| push-down-only | 7, 8, 9 |
-| backend-coverage | 12 |
-| filter-config-flag | 10, 11 |
-| config-cli-equivalence | 10 |
-| config-file-schema | 11 |
-| config-or-groups | 11 |
-| copy-acs-no-filter-baseline | 13 |
-| exit-codes | 10, 12 |
+| push-down-only | 7, 8 |
+| backend-coverage | 11 |
+| filter-config-flag | 9, 10 |
+| config-cli-equivalence | 9 |
+| config-file-schema (incl. reserved `columns:` rejection) | 10 |
+| config-or-groups | 10 |
+| copy-acs-no-filter-baseline | 12 |
+| exit-codes | 9, 11 |
 
-All 26 REQs (23 in Feature + 3 derivable) are covered. No gaps.
+All 19 MVP REQs are covered. **Deferred (not in plan):** the seven `columns-*` REQs from the Feature's deferred "Column subsetting" section — these move to the follow-up `cli/db/copy/filtering/columns/` Feature once the upstream `dalgo-query-projection` Idea ships.
 
 **Type-consistency check:**
-- `Directives` struct fields: `IncludeTables`, `ExcludeTables`, `Where`, `LimitsByTable`, `PerTableColumns`, `GlobalExcludeColumns` — used consistently in Tasks 3, 7, 8, 9, 11.
+- `Directives` struct fields: `IncludeTables`, `ExcludeTables`, `Where`, `LimitsByTable` — used consistently in Tasks 3, 7, 8, 10. (`PerTableColumns` and `GlobalExcludeColumns` are carried as no-op fields per the File Structure note; not populated in MVP.)
 - `Predicate`: `Field`, `Operator OperatorToken`, `Value` — Tasks 1, 6, 8.
-- `ColumnRule`: `Include`, `Exclude` — Tasks 1, 9, 11.
-- `PredicateGroup`: `Operator GroupOperator`, `Conditions []Predicate`, `Subgroups []*PredicateGroup` — Tasks 1, 8, 11.
-- `ResolveColumnsForTable`, `CompileWhereForTable`, `ValidateColumnRule`, `ValidateWhereAgainstSchema` — defined in Tasks 8, 9; called from `engine_rows.go` in same tasks. Consistent.
+- `PredicateGroup`: `Operator GroupOperator`, `Conditions []Predicate`, `Subgroups []*PredicateGroup` — Tasks 1, 8, 10.
+- `CompileWhereForTable`, `ValidateWhereAgainstSchema` — defined in Task 8; called from `engine_rows.go` in same task. Consistent.
 
 **Placeholder check:** no TBD/TODO/FIXME in any task body. Each step has concrete code or commands.
 

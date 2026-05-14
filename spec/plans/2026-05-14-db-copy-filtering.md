@@ -8,7 +8,7 @@
 
 **Architecture:** New internal package `pkg/dbcopy/filter/` holds parsing (CLI mini-syntax + YAML), validation against introspected source schema, and compilation to `dal.QueryBuilder` calls. The existing `pkg/dbcopy/engine.go` gains a `Filters` field on `CopyOpts` and consults it at two seams: (a) before kicking off workers, the `refs` returned by `dbschema.ListCollections` are filtered by `--include`/`--exclude`; (b) inside `engine_rows.copyRows`, the existing `dal.NewQueryBuilder(dal.From(colRef)).SelectIntoRecordset()` becomes a filter-aware builder that adds `WhereField` and `Limit` per the resolved directives. `apps/datatugapp/commands/cmd_db_copy.go` adds five new CLI flags. No engine-specific SQL is emitted — everything compiles to DALgo structured queries.
 
-**Tech Stack:** Go 1.26, `github.com/dal-go/dalgo/dal` (`QueryBuilder`, `WhereField`, `Limit`, `GroupCondition`, `Operator`), `github.com/dal-go/dalgo/dbschema` (`DescribeCollection` for column-type introspection), `gopkg.in/yaml.v3` for config-file parsing, `github.com/urfave/cli/v3` (existing CLI style), `github.com/stretchr/testify` for assertions.
+**Tech Stack:** Go 1.26, `github.com/dal-go/dalgo/dal` (`QueryBuilder`, `WhereField`, `Limit`, `Operator`), `github.com/dal-go/dalgo/dbschema` (`DescribeCollection` for column-type introspection), `gopkg.in/yaml.v3` for config-file parsing, `github.com/urfave/cli/v3` (existing CLI style), `github.com/stretchr/testify` for assertions.
 
 **Spec:** [`spec/features/cli/db/copy/filtering/README.md`](../features/cli/db/copy/filtering/README.md) — **Approved**
 **Source Idea:** [`spec/ideas/db-copy-filtering.md`](../ideas/db-copy-filtering.md) — **Approved**
@@ -623,6 +623,7 @@ Create `pkg/dbcopy/filter/operator_test.go`:
 package filter
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
@@ -634,20 +635,26 @@ func TestParseOperator(t *testing.T) {
 		want    dal.Operator
 		wantErr bool
 	}{
+		// Six DALgo-supported operators (MVP vocabulary).
 		{"=", dal.Equal, false},
-		{"!=", dal.NotEqual, false},
-		{"<", dal.LessThan, false},
-		{"<=", dal.LessThanOrEqual, false},
-		{">", dal.GreaterThan, false},
-		{">=", dal.GreaterThanOrEqual, false},
+		{"<", dal.LessThen, false},
+		{"<=", dal.LessOrEqual, false},
+		{">", dal.GreaterThen, false},
+		{">=", dal.GreaterOrEqual, false},
 		{"in", dal.In, false},
-		{"not_in", dal.NotIn, false},
-		{"is_null", dal.IsNull, false},
-		{"is_not_null", dal.IsNotNull, false},
-		{"like", 0, true},
-		{"between", 0, true},
-		{"==", 0, true},
-		{"", 0, true},
+
+		// Deferred operators — must be rejected with a vocabulary error
+		// pointing at the dalgo-extended-operators follow-up.
+		{"!=", "", true},
+		{"not_in", "", true},
+		{"is_null", "", true},
+		{"is_not_null", "", true},
+
+		// Plainly unknown.
+		{"like", "", true},
+		{"between", "", true},
+		{"==", "", true},
+		{"", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.token, func(t *testing.T) {
@@ -668,7 +675,7 @@ func TestParseOperator_UnknownLists_All_Supported(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	msg := err.Error()
-	for _, op := range []string{"=", "!=", "<", "<=", ">", ">=", "in", "not_in", "is_null", "is_not_null"} {
+	for _, op := range []string{"=", "<", "<=", ">", ">=", "in"} {
 		if !strings.Contains(msg, op) {
 			t.Errorf("error %q must list supported operator %q", msg, op)
 		}
@@ -695,48 +702,42 @@ import (
 	"github.com/dal-go/dalgo/dal"
 )
 
-// OperatorToken is the string form of an operator as seen on the CLI
-// or in YAML. Used in Predicate.Operator. Compiled to dal.Operator
-// via ParseOperator at validate/compile time.
-type OperatorToken string
-
-// The fixed MVP operator vocabulary. Any token outside this set is
-// rejected at parse time (REQ:operator-vocabulary).
+// The fixed MVP operator vocabulary. Six tokens covering the operators
+// that DALgo today exposes via dal.Operator constants. Four originally
+// planned operators (!=, not_in, is_null, is_not_null) are deferred —
+// dal-go/dalgo does not currently provide NotEqual, NotIn, IsNull, or
+// IsNotNull. See REQ:operator-vocabulary and the sibling
+// `dalgo-extended-operators` Idea (to be filed in dal-go/dalgo).
+//
+// Note: DALgo's constants spell "Then" instead of "Than"
+// (dal.LessThen, dal.GreaterThen). Preserved as-is — fixing the typo
+// is part of the upstream follow-up work.
 const (
-	OpEqual              OperatorToken = "="
-	OpNotEqual           OperatorToken = "!="
-	OpLessThan           OperatorToken = "<"
-	OpLessThanOrEqual    OperatorToken = "<="
-	OpGreaterThan        OperatorToken = ">"
-	OpGreaterThanOrEqual OperatorToken = ">="
-	OpIn                 OperatorToken = "in"
-	OpNotIn              OperatorToken = "not_in"
-	OpIsNull             OperatorToken = "is_null"
-	OpIsNotNull          OperatorToken = "is_not_null"
+	OpEqual          OperatorToken = "="
+	OpLessThan       OperatorToken = "<"
+	OpLessOrEqual    OperatorToken = "<="
+	OpGreaterThan    OperatorToken = ">"
+	OpGreaterOrEqual OperatorToken = ">="
+	OpIn             OperatorToken = "in"
 )
 
 // supportedOperators is the canonical fixed vocabulary order used in
 // error messages.
 var supportedOperators = []OperatorToken{
-	OpEqual, OpNotEqual,
-	OpLessThan, OpLessThanOrEqual,
-	OpGreaterThan, OpGreaterThanOrEqual,
-	OpIn, OpNotIn,
-	OpIsNull, OpIsNotNull,
+	OpEqual,
+	OpLessThan, OpLessOrEqual,
+	OpGreaterThan, OpGreaterOrEqual,
+	OpIn,
 }
 
 // operatorToDal maps every supported OperatorToken to its dal.Operator.
 var operatorToDal = map[OperatorToken]dal.Operator{
-	OpEqual:              dal.Equal,
-	OpNotEqual:           dal.NotEqual,
-	OpLessThan:           dal.LessThan,
-	OpLessThanOrEqual:    dal.LessThanOrEqual,
-	OpGreaterThan:        dal.GreaterThan,
-	OpGreaterThanOrEqual: dal.GreaterThanOrEqual,
-	OpIn:                 dal.In,
-	OpNotIn:              dal.NotIn,
-	OpIsNull:             dal.IsNull,
-	OpIsNotNull:          dal.IsNotNull,
+	OpEqual:          dal.Equal,
+	OpLessThan:       dal.LessThen,    // upstream typo — see vocabulary doc comment
+	OpLessOrEqual:    dal.LessOrEqual,
+	OpGreaterThan:    dal.GreaterThen, // upstream typo
+	OpGreaterOrEqual: dal.GreaterOrEqual,
+	OpIn:             dal.In,
 }
 
 // ParseOperator returns the dal.Operator for token, or an error listing
@@ -749,35 +750,37 @@ func ParseOperator(token string) (dal.Operator, error) {
 		for i, t := range supportedOperators {
 			names[i] = string(t)
 		}
-		return 0, fmt.Errorf(
+		return "", fmt.Errorf(
 			"unsupported operator %q; supported operators: %s",
 			token, strings.Join(names, ", "),
 		)
 	}
 	return op, nil
 }
-
-// TakesValue reports whether the operator's value slot is meaningful.
-// is_null and is_not_null ignore the value (REQ:operator-vocabulary).
-func (t OperatorToken) TakesValue() bool {
-	return t != OpIsNull && t != OpIsNotNull
-}
 ```
+
+**Note:** `OperatorToken` is already declared in `filter.go` (Task 1). Do NOT re-declare it here — that would be a duplicate-declaration compile error. Just define the constants and helpers in `operator.go` against the existing type.
+
+The `TakesValue()` method that earlier plan revisions described is intentionally omitted: every MVP operator takes a value, so the method would always return `true`. When `is_null`/`is_not_null` land via the upstream follow-up, that Feature can re-add `TakesValue()` and the call-sites it gates.
 
 - [ ] **Step 4.4: Run test to verify it passes**
 
 Run: `go test ./pkg/dbcopy/filter/ -run TestParseOperator -v`
-Expected: PASS (14 subtests + the "lists all supported" test).
+Expected: PASS — 14 subtests (6 accepted + 4 deferred-rejected + 4 unknown-rejected) plus the "lists all supported" test.
 
 - [ ] **Step 4.5: Commit**
 
 ```bash
 git add pkg/dbcopy/filter/operator.go pkg/dbcopy/filter/operator_test.go
-git commit -m "feat(filter): fixed ten-operator vocabulary
+git commit -m "feat(filter): fixed six-operator vocabulary
 
-Implements REQ:operator-vocabulary. ParseOperator accepts only the
-ten tokens (=, !=, <, <=, >, >=, in, not_in, is_null, is_not_null)
-and rejects everything else with a message listing the supported set."
+Implements REQ:operator-vocabulary. ParseOperator accepts the six
+tokens (=, <, <=, >, >=, in) that DALgo today supports via
+dal.Operator constants. Four operators (!=, not_in, is_null,
+is_not_null) are deferred — dal-go/dalgo does not expose NotEqual,
+NotIn, IsNull, or IsNotNull. The sibling dalgo-extended-operators
+Idea will add them upstream; a follow-up Feature re-introduces them
+once tagged. Notes the upstream typo (LessThen/GreaterThen) inline."
 ```
 
 ---
@@ -956,13 +959,14 @@ func TestParseWhereFlag(t *testing.T) {
 		wantErr   bool
 	}{
 		{"Customer:Country:=:USA", "Customer", "Country", OpEqual, "USA", false},
-		{"Invoice:Total:>=:100.50", "Invoice", "Total", OpGreaterThanOrEqual, "100.50", false},
+		{"Invoice:Total:>=:100.50", "Invoice", "Total", OpGreaterOrEqual, "100.50", false},
 		{"User:tags:in:admin,staff", "User", "tags", OpIn, "admin,staff", false},
-		{"User:deleted_at:is_null:", "User", "deleted_at", OpIsNull, "", false},
 		{"Log:msg:=:hello\\:world", "Log", "msg", OpEqual, "hello:world", false}, // \: escape
 		{"only-three:parts:=", "", "", "", "", true},
 		{"", "", "", "", "", true},
 		{"a:b:badop:c", "", "", "", "", true},
+		// Deferred operator rejected at parse time (REQ:operator-vocabulary).
+		{"User:deleted_at:is_null:", "", "", "", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
@@ -1280,18 +1284,9 @@ func TestValidateWhere_TypeMismatch(t *testing.T) {
 		}
 	}
 }
-
-func TestValidateWhere_IsNullSkipsCoercion(t *testing.T) {
-	def := &dbschema.CollectionDef{
-		Name: "Customer",
-		Columns: []dbschema.ColumnDef{{Name: "Email", Type: dbschema.String}},
-	}
-	pred := Predicate{Field: "Email", Operator: OpIsNull, Value: ""}
-	if err := ValidateWhereAgainstSchema("Customer", pred, def); err != nil {
-		t.Fatalf("is_null must skip coercion: %v", err)
-	}
-}
 ```
+
+(Note: an earlier plan revision included `TestValidateWhere_IsNullSkipsCoercion`. Removed because `is_null` is deferred from MVP — see REQ:operator-vocabulary's deferral note. Every MVP operator takes a value, so the value-coercion branch is unconditional.)
 
 - [ ] **Step 8.2: Run test to verify it fails**
 
@@ -1315,7 +1310,8 @@ import (
 // to the field's type. On unknown field, returns an error suggesting the
 // Levenshtein-closest source field (REQ:where-unknown-field).
 //
-// is_null / is_not_null operators skip value coercion entirely.
+// Every MVP operator takes a value (REQ:operator-vocabulary defers the
+// null-test operators), so coercion is unconditional.
 func ValidateWhereAgainstSchema(table string, p Predicate, def *dbschema.CollectionDef) error {
 	col := findColumn(def, p.Field)
 	if col == nil {
@@ -1327,10 +1323,6 @@ func ValidateWhereAgainstSchema(table string, p Predicate, def *dbschema.Collect
 			)
 		}
 		return fmt.Errorf("--where %s: unknown field %q", table, p.Field)
-	}
-
-	if !p.Operator.TakesValue() {
-		return nil
 	}
 
 	if _, err := CoerceValue(p.Value, col.Type); err != nil {
@@ -1502,14 +1494,18 @@ import (
 
 // CompileWhereForTable validates each predicate in group against def
 // and returns the dal.Condition slice ready to pass to QueryBuilder.Where.
-// Sub-groups (config-file OR-groups) are compiled to GroupCondition wrappers.
 //
-// REQ:where-and-semantics, REQ:config-or-groups, REQ:push-down-only.
+// MVP only compiles flat AND-composed predicates; OR-groups (group.Subgroups)
+// are deferred per REQ:config-file-schema's reserved-`or:`-key rule, gated on
+// the upstream `dalgo-group-condition-ctor` Idea. The Subgroups field stays
+// on PredicateGroup as a no-op carrier for the follow-up Feature.
+//
+// REQ:where-and-semantics, REQ:push-down-only.
 func CompileWhereForTable(table string, group *PredicateGroup, def *dbschema.CollectionDef) ([]dal.Condition, error) {
-	if group == nil || (len(group.Conditions) == 0 && len(group.Subgroups) == 0) {
+	if group == nil || len(group.Conditions) == 0 {
 		return nil, nil
 	}
-	conds := make([]dal.Condition, 0, len(group.Conditions)+len(group.Subgroups))
+	conds := make([]dal.Condition, 0, len(group.Conditions))
 
 	for _, p := range group.Conditions {
 		if err := ValidateWhereAgainstSchema(table, p, def); err != nil {
@@ -1520,27 +1516,13 @@ func CompileWhereForTable(table string, group *PredicateGroup, def *dbschema.Col
 			return nil, fmt.Errorf("compile --where %s.%s: %w", table, p.Field, err)
 		}
 		col := findColumn(def, p.Field)
-		var value any = nil
-		if p.Operator.TakesValue() {
-			v, err := CoerceValue(p.Value, col.Type)
-			if err != nil {
-				return nil, fmt.Errorf("compile --where %s.%s: %w", table, p.Field, err)
-			}
-			value = v
+		// Every MVP operator takes a value (REQ:operator-vocabulary defers
+		// the null-test operators); coerce unconditionally.
+		value, err := CoerceValue(p.Value, col.Type)
+		if err != nil {
+			return nil, fmt.Errorf("compile --where %s.%s: %w", table, p.Field, err)
 		}
 		conds = append(conds, dal.WhereField(p.Field, op, value))
-	}
-
-	for _, sub := range group.Subgroups {
-		subConds, err := CompileWhereForTable(table, sub, def)
-		if err != nil {
-			return nil, err
-		}
-		op := dal.And
-		if sub.Operator == Or {
-			op = dal.Or
-		}
-		conds = append(conds, dal.GroupCondition{Operator: op, Conditions: subConds})
 	}
 
 	return conds, nil
@@ -1653,11 +1635,15 @@ git add pkg/dbcopy/filter/validate.go pkg/dbcopy/filter/validate_test.go pkg/dbc
 git commit -m "feat(filter): --where compilation, AND composition, Levenshtein suggestions
 
 ValidateWhereAgainstSchema rejects unknown fields with Levenshtein
-suggestion ≤2; rejects values that fail type coercion. Compile
-recursively walks PredicateGroup → dal.Condition list, supporting
-AND across conditions and OR via Subgroup.Operator=Or.
-engine_rows.copyRows applies the compiled Where to the QueryBuilder
-before SelectIntoRecordset.
+suggestion ≤2; rejects values that fail type coercion. Compile walks
+PredicateGroup.Conditions into a flat dal.Condition list (AND-composed
+at QueryBuilder.Where call time). engine_rows.copyRows applies the
+compiled Where to the QueryBuilder before SelectIntoRecordset.
+
+OR-groups are deferred (PredicateGroup.Subgroups is a no-op carrier
+field) per Feature spec amendment — see Task 10's reserved-or:-key
+rejection. The follow-up Feature gated on dalgo-group-condition-ctor
+will re-introduce OR.
 
 REQ:where-and-semantics, REQ:where-unknown-field,
 REQ:where-type-coercion, REQ:push-down-only."
@@ -1820,17 +1806,19 @@ Column-subsetting flags deferred per the Feature spec amendment."
 
 ---
 
-## Task 10: YAML config-file parser + OR-groups
+## Task 10: YAML config-file parser
 
 **Files:**
 - Create: `pkg/dbcopy/filter/config.go`
 - Create: `pkg/dbcopy/filter/config_test.go`
 - Create: `pkg/dbcopy/filter/testdata/full.yaml`
-- Create: `pkg/dbcopy/filter/testdata/or-group.yaml`
 - Create: `pkg/dbcopy/filter/testdata/bad-key.yaml`
 - Create: `pkg/dbcopy/filter/testdata/reserved-columns.yaml`
+- Create: `pkg/dbcopy/filter/testdata/reserved-or.yaml`
 
-**Note:** The YAML schema does NOT include a `columns:` section in MVP. A top-level `columns:` key is **reserved** for the deferred column-subsetting follow-up Feature and MUST be rejected with a clear error.
+**Note:** The YAML schema does NOT include a `columns:` section or `or:` subkeys in MVP. Both are **reserved** for deferred follow-up Features and MUST be rejected:
+- Top-level `columns:` → reserved for the deferred column-subsetting follow-up.
+- Nested `or:` under `where:<table>:` → reserved for the deferred OR-group follow-up, gated on the upstream `dalgo-group-condition-ctor` Idea (DALgo's `GroupCondition` has unexported fields and no public constructor).
 
 - [ ] **Step 10.1: Create test fixtures**
 
@@ -1843,17 +1831,6 @@ where:
     - {field: Country, op: '=', value: USA}
 limit:
   Customer: 5
-```
-
-Create `pkg/dbcopy/filter/testdata/or-group.yaml`:
-
-```yaml
-include: [Customer]
-where:
-  Customer:
-    - or:
-        - {field: Country, op: '=', value: USA}
-        - {field: Country, op: '=', value: Canada}
 ```
 
 Create `pkg/dbcopy/filter/testdata/bad-key.yaml`:
@@ -1870,6 +1847,17 @@ columns:                # reserved for the deferred column-subsetting Feature
   per_table:
     Customer:
       include: [FirstName, LastName]
+```
+
+Create `pkg/dbcopy/filter/testdata/reserved-or.yaml`:
+
+```yaml
+include: [Customer]
+where:
+  Customer:
+    - or:               # reserved for the deferred OR-group Feature
+        - {field: Country, op: '=', value: USA}
+        - {field: Country, op: '=', value: Canada}
 ```
 
 - [ ] **Step 10.2: Write the parser test**
@@ -1917,18 +1905,16 @@ func TestParseConfigFile_ReservedColumnsKey(t *testing.T) {
 	}
 }
 
-func TestParseConfigFile_OrGroup(t *testing.T) {
-	d, err := ParseConfigFile("testdata/or-group.yaml")
-	if err != nil {
-		t.Fatalf("ParseConfigFile: %v", err)
+func TestParseConfigFile_ReservedOrKey(t *testing.T) {
+	_, err := ParseConfigFile("testdata/reserved-or.yaml")
+	if err == nil {
+		t.Fatal("expected error for reserved `or:` subkey")
 	}
-	grp := d.Where["Customer"]
-	if grp == nil || len(grp.Subgroups) != 1 {
-		t.Fatalf("expected one OR-subgroup, got %+v", grp)
+	if !strings.Contains(err.Error(), "or") {
+		t.Errorf("error %q must name the reserved `or` key", err)
 	}
-	sub := grp.Subgroups[0]
-	if sub.Operator != Or || len(sub.Conditions) != 2 {
-		t.Errorf("subgroup = %+v, want Or with 2 conditions", sub)
+	if !strings.Contains(err.Error(), "deferred") && !strings.Contains(err.Error(), "future") {
+		t.Errorf("error %q should mention the deferral", err)
 	}
 }
 
@@ -1957,9 +1943,9 @@ import (
 
 // configFile mirrors the YAML schema documented in
 // spec/features/cli/db/copy/filtering/README.md#req:config-file-schema.
-// All fields are optional. A top-level `columns:` key is RESERVED for
-// the deferred column-subsetting follow-up Feature and is rejected at
-// parse time — see ParseConfigFile.
+// All fields are optional. Two reserved keys (`columns:` and nested
+// `or:`) are NOT modeled here — they're rejected via the generic-map
+// scan in ParseConfigFile before this struct decodes.
 type configFile struct {
 	Include []string                     `yaml:"include"`
 	Exclude []string                     `yaml:"exclude"`
@@ -1968,19 +1954,16 @@ type configFile struct {
 }
 
 type configWhereEntry struct {
-	// Exactly one of (Field/Op/Value) OR Or is populated. The YAML decoder
-	// disambiguates by which keys are present.
 	Field string `yaml:"field,omitempty"`
 	Op    string `yaml:"op,omitempty"`
 	Value string `yaml:"value,omitempty"`
-	Or    []configWhereEntry `yaml:"or,omitempty"`
 }
 
 // ParseConfigFile reads and decodes the YAML at path into a Directives.
 // Rejects unrecognized top-level keys (REQ:config-file-schema). The
-// `columns:` key is recognized but reserved for the deferred
-// column-subsetting follow-up Feature; presence of `columns:` MUST
-// produce an error naming the deferral.
+// `columns:` (top-level) and nested `or:` (inside where:<table>:) keys
+// are recognized but reserved for deferred follow-up Features and MUST
+// produce errors naming the deferral.
 func ParseConfigFile(path string) (*Directives, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -1988,7 +1971,7 @@ func ParseConfigFile(path string) (*Directives, error) {
 	}
 
 	// Decode into a generic map first to detect unknown top-level keys
-	// AND the reserved `columns:` key.
+	// AND the two reserved keys (`columns:`, nested `or:`).
 	var generic map[string]any
 	if err := yaml.Unmarshal(data, &generic); err != nil {
 		return nil, fmt.Errorf("parse config file: %w", err)
@@ -2003,6 +1986,29 @@ func ParseConfigFile(path string) (*Directives, error) {
 	for k := range generic {
 		if !known[k] {
 			return nil, fmt.Errorf("unrecognized top-level key %q (allowed: include, exclude, where, limit)", k)
+		}
+	}
+
+	// Walk where: entries and reject any reserved `or:` subkey.
+	if whereRaw, ok := generic["where"].(map[string]any); ok {
+		for table, entries := range whereRaw {
+			list, ok := entries.([]any)
+			if !ok {
+				continue
+			}
+			for _, entry := range list {
+				m, ok := entry.(map[string]any)
+				if !ok {
+					continue
+				}
+				if _, hasOr := m["or"]; hasOr {
+					return nil, fmt.Errorf(
+						"nested `or:` key under `where:%s:` is reserved for a deferred follow-up Feature "+
+							"(OR-groups in row predicates); MVP supports only AND-composed conditions per table",
+						table,
+					)
+				}
+			}
 		}
 	}
 
@@ -2024,23 +2030,11 @@ func ParseConfigFile(path string) (*Directives, error) {
 		for table, entries := range cf.Where {
 			grp := &PredicateGroup{Operator: And}
 			for _, e := range entries {
-				if len(e.Or) > 0 {
-					sub := &PredicateGroup{Operator: Or}
-					for _, oe := range e.Or {
-						sub.Conditions = append(sub.Conditions, Predicate{
-							Field:    oe.Field,
-							Operator: OperatorToken(oe.Op),
-							Value:    oe.Value,
-						})
-					}
-					grp.Subgroups = append(grp.Subgroups, sub)
-				} else {
-					grp.Conditions = append(grp.Conditions, Predicate{
-						Field:    e.Field,
-						Operator: OperatorToken(e.Op),
-						Value:    e.Value,
-					})
-				}
+				grp.Conditions = append(grp.Conditions, Predicate{
+					Field:    e.Field,
+					Operator: OperatorToken(e.Op),
+					Value:    e.Value,
+				})
 			}
 			d.Where[table] = grp
 		}
@@ -2055,55 +2049,27 @@ Note: `gopkg.in/yaml.v3` is already in `go.mod` (used by other parts of the CLI)
 - [ ] **Step 10.4: Run config tests**
 
 Run: `go test ./pkg/dbcopy/filter/ -run TestParseConfigFile -v`
-Expected: PASS (4 subtests: Full, OrGroup, BadKey, ReservedColumnsKey).
+Expected: PASS (4 subtests: Full, ReservedColumnsKey, ReservedOrKey, BadKey).
 
-- [ ] **Step 10.5: Write OR-group E2E test**
-
-Add to `pkg/dbcopy/engine_test.go`:
-
-```go
-func TestCopy_ConfigOrGroup(t *testing.T) {
-	// AC:config-or-group-composes — USA OR Canada → 16 customers in Chinook.
-	ctx := context.Background()
-	src := newChinookSQLiteSource(t)
-	tgt := newEmptyInGitDBTarget(t)
-
-	d, err := filter.ParseConfigFile("../filter/testdata/or-group.yaml")
-	if err != nil {
-		t.Fatalf("ParseConfigFile: %v", err)
-	}
-
-	opts := CopyOpts{Filters: d}
-	summary, err := Copy(ctx, src, tgt, opts)
-	if err != nil {
-		t.Fatalf("Copy: %v", err)
-	}
-	if got := summary.RowsByTable["Customer"]; got != 16 {
-		t.Fatalf("Customer rows = %d, want 16 (USA + Canada)", got)
-	}
-}
-```
-
-- [ ] **Step 10.6: Run all tests**
+- [ ] **Step 10.5: Run all tests**
 
 Run: `go test ./pkg/dbcopy/... -v`
 Expected: PASS.
 
-- [ ] **Step 10.7: Commit**
+- [ ] **Step 10.6: Commit**
 
 ```bash
 git add pkg/dbcopy/filter/config.go pkg/dbcopy/filter/config_test.go pkg/dbcopy/filter/testdata/ pkg/dbcopy/engine_test.go
-git commit -m "feat(filter): YAML config-file parser with OR-group support
+git commit -m "feat(filter): YAML config-file parser (AND-only predicates)
 
-Implements REQ:filter-config-flag, REQ:config-file-schema, and
-REQ:config-or-groups. ParseConfigFile decodes the YAML mirror of
-the CLI flags (include/exclude/where/limit), rejects unknown
-top-level keys, rejects the reserved \`columns:\` key (deferred
-to follow-up Feature), and compiles where: entries with 'or:'
-subkeys into Subgroup PredicateGroups for GroupCondition emission
-at compile time.
-
-E2E: Chinook USA-OR-Canada returns 16 customers."
+Implements REQ:filter-config-flag and REQ:config-file-schema.
+ParseConfigFile decodes the YAML mirror of the CLI flags
+(include/exclude/where/limit), rejects unknown top-level keys,
+rejects the reserved \`columns:\` key (deferred column-subsetting
+Feature), and rejects nested \`or:\` subkeys under where:<table>:
+(deferred OR-group Feature, gated on upstream
+dalgo-group-condition-ctor Idea). MVP supports only AND-composed
+predicates per table — matches the CLI surface."
 ```
 
 ---
@@ -2280,16 +2246,19 @@ Before handing off:
 | filter-config-flag | 9, 10 |
 | config-cli-equivalence | 9 |
 | config-file-schema (incl. reserved `columns:` rejection) | 10 |
-| config-or-groups | 10 |
 | copy-acs-no-filter-baseline | 12 |
 | exit-codes | 9, 11 |
 
-All 19 MVP REQs are covered. **Deferred (not in plan):** the seven `columns-*` REQs from the Feature's deferred "Column subsetting" section — these move to the follow-up `cli/db/copy/filtering/columns/` Feature once the upstream `dalgo-query-projection` Idea ships.
+All 18 MVP REQs are covered. **Deferred (not in plan):**
+
+- The seven `columns-*` REQs from the Feature's deferred "Column subsetting" section — move to follow-up `cli/db/copy/filtering/columns/` Feature once the upstream `dalgo-query-projection` Idea ships.
+- The four deferred operators (`!=`, `not_in`, `is_null`, `is_not_null`) — part of REQ:operator-vocabulary, deferred to follow-up Feature once the upstream `dalgo-extended-operators` Idea ships.
+- `REQ:config-or-groups` — DELETED from the Feature spec. OR-groups in row predicates are deferred to a follow-up Feature once the upstream `dalgo-group-condition-ctor` Idea ships. Reserved-`or:`-key rejection is covered by REQ:config-file-schema in Task 10.
 
 **Type-consistency check:**
 - `Directives` struct fields: `IncludeTables`, `ExcludeTables`, `Where`, `LimitsByTable` — used consistently in Tasks 3, 7, 8, 10. (`PerTableColumns` and `GlobalExcludeColumns` are carried as no-op fields per the File Structure note; not populated in MVP.)
 - `Predicate`: `Field`, `Operator OperatorToken`, `Value` — Tasks 1, 6, 8.
-- `PredicateGroup`: `Operator GroupOperator`, `Conditions []Predicate`, `Subgroups []*PredicateGroup` — Tasks 1, 8, 10.
+- `PredicateGroup`: `Operator GroupOperator`, `Conditions []Predicate`, `Subgroups []*PredicateGroup` — Tasks 1, 8, 10. (`Subgroups` is a no-op carrier in MVP; populated by the deferred OR-group follow-up Feature.)
 - `CompileWhereForTable`, `ValidateWhereAgainstSchema` — defined in Task 8; called from `engine_rows.go` in same task. Consistent.
 
 **Placeholder check:** no TBD/TODO/FIXME in any task body. Each step has concrete code or commands.

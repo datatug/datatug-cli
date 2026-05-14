@@ -8,7 +8,7 @@
 
 ## Summary
 
-Extends [`datatug db copy`](../README.md) with three orthogonal subsetting axes — table include/exclude, structured row predicates, and per-table row limits — all exposed both as CLI flags and as a YAML config-file schema. Row predicates compile to DALgo's `dal.WhereField` / `GroupCondition` and push down to the source backend's query engine; pull-down filtering is out of scope for MVP because every supported source backend (SQLite, inGitDB) can push. The CLI surface uses a colon-delimited mini-syntax (`--where <table>:<field>:<op>:<value>`) with a fixed ten-operator vocabulary; complex OR-groups are config-file-only. **Column subsetting is deferred** to a follow-up Feature once an upstream DALgo `QueryBuilder.SelectFields(...)` extension lands — see [Synopsis](#synopsis) for context. This Feature is what makes [`db snapshot`'s](../../../../../ideas/db-snapshot-command.md) config-file forwarder useful for the three covered axes — without it, snapshots can only capture whole databases.
+Extends [`datatug db copy`](../README.md) with three orthogonal subsetting axes — table include/exclude, structured row predicates (AND-only in MVP), and per-table row limits — all exposed both as CLI flags and as a YAML config-file schema. Row predicates compile to DALgo's `dal.WhereField` and push down to the source backend's query engine; pull-down filtering is out of scope for MVP because every supported source backend (SQLite, inGitDB) can push. The CLI surface uses a colon-delimited mini-syntax (`--where <table>:<field>:<op>:<value>`). **Column subsetting and OR-groups are both deferred** to follow-up Features (see [Out of Scope](#out-of-scope)) — the former because DALgo lacks a `QueryBuilder.SelectFields(...)` projection method, the latter because DALgo's `GroupCondition` struct has unexported fields and no public constructor. This Feature is what makes [`db snapshot`'s](../../../../../ideas/db-snapshot-command.md) config-file forwarder useful for the three covered axes — without it, snapshots can only capture whole databases.
 
 ## Synopsis
 
@@ -57,7 +57,7 @@ The `--where` flag MUST accept a colon-delimited 4-tuple `<table>:<field>:<op>:<
 
 #### REQ: where-and-semantics
 
-When multiple `--where` flags target the same `<table>`, the predicates AND together. There is no way to express OR-groups on the CLI; users needing OR composition MUST switch to `--filter-config <path>` (REQ:config-file-schema).
+When multiple `--where` flags target the same `<table>`, the predicates AND together. OR composition is deferred from MVP (see [Out of Scope](#out-of-scope)) — both the CLI and the YAML config schema accept only AND-composed predicates.
 
 #### REQ: operator-vocabulary
 
@@ -65,22 +65,20 @@ The fixed MVP operator vocabulary MUST be exactly:
 
 | Token | Semantic | DALgo `dal.Operator` mapping |
 |---|---|---|
-| `=` | equals | `Equal` |
-| `!=` | not equals | `NotEqual` |
-| `<` | less than | `LessThan` |
-| `<=` | less than or equal | `LessThanOrEqual` |
-| `>` | greater than | `GreaterThan` |
-| `>=` | greater than or equal | `GreaterThanOrEqual` |
-| `in` | value-in-comma-list | `In` (value is comma-split inside the 4-tuple's `<value>` slot) |
-| `not_in` | value-not-in-comma-list | `NotIn` |
-| `is_null` | field IS NULL | `IsNull` (value slot is empty / ignored) |
-| `is_not_null` | field IS NOT NULL | `IsNotNull` |
+| `=` | equals | `dal.Equal` |
+| `<` | less than | `dal.LessThen` (note: DALgo's constant uses "Then" not "Than" — typo in upstream, preserved) |
+| `<=` | less than or equal | `dal.LessOrEqual` |
+| `>` | greater than | `dal.GreaterThen` (same DALgo typo) |
+| `>=` | greater than or equal | `dal.GreaterOrEqual` |
+| `in` | value-in-comma-list | `dal.In` (value is comma-split inside the 4-tuple's `<value>` slot) |
 
 Any other operator token in `--where` MUST exit `2` with stderr listing the supported set.
 
+**Deferred operators.** `!=`, `not_in`, `is_null`, and `is_not_null` are NOT in MVP — a plan-time audit found that `dal-go/dalgo` does not expose `NotEqual`, `NotIn`, `IsNull`, or `IsNotNull` constants (only the six above plus `And`/`Or` for grouping). They require an upstream DALgo PR (sibling Idea to be filed: `dalgo-extended-operators`) before they can land. See [Out of Scope](#out-of-scope).
+
 #### REQ: where-type-coercion
 
-Values are decoded by attempting type coercion against the column's introspected `dbschema.Type` in this order: integer, float, boolean (`true`/`false` case-insensitive), date (ISO-8601 `YYYY-MM-DD`), datetime (ISO-8601), string fallback. If coercion fails for the column's expected type, the command MUST exit `2` with stderr naming the table, field, attempted value, and expected type. `is_null` / `is_not_null` skip coercion entirely.
+Values are decoded by attempting type coercion against the column's introspected `dbschema.Type` in this order: integer, float, boolean (`true`/`false` case-insensitive), date (ISO-8601 `YYYY-MM-DD`), datetime (ISO-8601), string fallback. If coercion fails for the column's expected type, the command MUST exit `2` with stderr naming the table, field, attempted value, and expected type. (Every operator in the MVP vocabulary takes a value; null-test operators are deferred per REQ:operator-vocabulary.)
 
 #### REQ: where-unknown-field
 
@@ -118,7 +116,7 @@ The `--filter-config <path>` flag MUST accept a path to a YAML file containing f
 
 #### REQ: config-cli-equivalence
 
-A config file's effect MUST be identical to the equivalent flags-only invocation, with one exception: the YAML form additionally supports OR-groups in the `where:` section per REQ:config-or-groups. For every config key with a flag equivalent, the resolved (post-parse, pre-compile) `dal.Query` MUST be byte-identical to the flag-form. Mixing `--filter-config` with flag overrides of the same axis MUST exit `2` (no flag-vs-config merging in MVP).
+A config file's effect MUST be identical to the equivalent flags-only invocation. For every config key with a flag equivalent, the resolved (post-parse, pre-compile) `dal.Query` MUST be byte-identical to the flag-form. Mixing `--filter-config` with flag overrides of the same axis MUST exit `2` (no flag-vs-config merging in MVP). OR-groups are deferred (see [Out of Scope](#out-of-scope)) — both CLI and config-file surfaces accept only AND-composed predicates in MVP.
 
 #### REQ: config-file-schema
 
@@ -131,20 +129,16 @@ exclude: [<table>, …]                    # mutex with `include`
 where:
   <table>:
     - {field: <name>, op: <op>, value: <v>}    # AND across list entries
-    - or:                                       # OR-group (config-only)
-        - {field: …, op: …, value: …}
-        - {field: …, op: …, value: …}
 limit:
   <table>: <positive-int>
 ```
 
-A `columns:` key is **reserved** for the deferred column-subsetting follow-up Feature. In MVP, a `columns:` key in the config file MUST be rejected with exit `2` and a message naming the deferral.
+Two YAML keys are **reserved** for deferred follow-up Features and MUST be rejected with exit `2`:
 
-Any unrecognized top-level key MUST exit `2`. Inside `where:<table>:`, each list entry MUST be either an object with `{field, op, value}` keys OR an object with a single `or:` key whose value is a list of `{field, op, value}` entries (max one level of OR nesting in MVP).
+- A top-level `columns:` key — reserved for the deferred column-subsetting follow-up Feature (`cli/db/copy/filtering/columns/`).
+- An `or:` key nested inside a `where:<table>:` list entry — reserved for the deferred OR-group follow-up Feature, gated on the upstream `dalgo-group-condition-ctor` Idea (to be filed) that adds a public constructor for `dal.GroupCondition` (DALgo's current API exposes `GroupCondition` with unexported fields and no factory).
 
-#### REQ: config-or-groups
-
-OR-groups in `where:<table>:` MUST compile to `dal.GroupCondition{operator: Or, conditions: [...]}` wrapping the inner `WhereField` conditions, joined to peer (non-OR) entries on the same table via the outer AND (`GroupCondition{operator: And, conditions: [whereField, whereField, orGroup, …]}`).
+Any other unrecognized top-level key MUST also exit `2`. Inside `where:<table>:`, each list entry MUST be an object with exactly the keys `{field, op, value}` — any other key (including `or:`) is rejected with the deferral message.
 
 ### Interaction with existing `db copy` ACs
 
@@ -217,10 +211,10 @@ E2E tests against the canonical Chinook fixture, exactly mirroring the parent Fe
 | `--where` (AND, multiple flags) | `db copy --where Customer:Country:=:USA --where Customer:SupportRepId:=:3` AND-composes |
 | `--limit` | `db copy --limit Invoice:50` produces a target Invoice collection with exactly 50 rows |
 | Combined axes (REQ:config-cli-equivalence equivalence) | One invocation combines all three axes and a `--filter-config` invocation with the YAML equivalent — outputs MUST be byte-identical |
-| OR-groups via config | A `--filter-config` with `or:` group in `where:Customer:` produces target rows matching `(condition1 OR condition2)`, AND-composed with peer conditions |
 | Reserved `columns:` key rejected | A `--filter-config` whose YAML contains a top-level `columns:` key exits `2` with stderr naming the deferral |
+| Reserved nested `or:` key rejected | A `--filter-config` whose YAML contains an `or:` subkey inside `where:<table>:` exits `2` with stderr naming the OR-group deferral |
 
-Unit tests cover: operator vocabulary (REQ:operator-vocabulary), type coercion (REQ:where-type-coercion), CLI mini-syntax parser including `\:` escape (REQ:where-cli-syntax), YAML schema parser including OR-group nesting limits and the reserved-`columns:` rejection (REQ:config-file-schema), mutex enforcement (REQ:include-exclude-mutex), unknown-field/table error paths (REQ:table-not-found, REQ:where-unknown-field).
+Unit tests cover: operator vocabulary (REQ:operator-vocabulary), type coercion (REQ:where-type-coercion), CLI mini-syntax parser including `\:` escape (REQ:where-cli-syntax), YAML schema parser including the reserved-`columns:` and reserved-`or:` rejections (REQ:config-file-schema), mutex enforcement (REQ:include-exclude-mutex), unknown-field/table error paths (REQ:table-not-found, REQ:where-unknown-field).
 
 ## Rehearse Integration
 
@@ -231,14 +225,15 @@ All ACs below are testable via `go test ./...` plus shell-driven E2E runs invoki
 Inherited from the source Idea, reinforced at Feature-spec time:
 
 - **Referential-integrity-aware subsetting** — auto-including parent rows referenced by selected children. User-responsible; this is a "capture subset" tool, not a "consistent subset" tool. Filtered children may dangle.
-- **OR-groups on the CLI `--where` flag** — config-file-only. REQ:where-and-semantics formalizes the CLI restriction.
+- **OR-groups in row predicates** (both CLI and YAML config) — **DEFERRED.** DALgo's `dal.GroupCondition` struct has unexported fields and no public constructor (or `Or(...)` factory), so external packages cannot compile `(a OR b)` predicates today. Requires an upstream sibling Idea `dalgo-group-condition-ctor` (to be filed in `dal-go/dalgo/spec/ideas/`) that adds either `dal.NewGroupCondition(op, conds...) Condition` or `func Or(conds...) Condition`. A follow-up DataTug Feature will re-introduce OR-groups once the upstream work tags a release. MVP CLI and YAML both accept only AND-composed predicates; the YAML schema reserves the `or:` subkey and rejects it with a clear deferral message (REQ:config-file-schema).
 - **Raw SQL passthrough** (`--raw-where`) — chosen against in favor of structured predicates for portability. Future Idea if real users hit the operator-vocabulary limit.
 - **Pull-down filtering** (read all, filter in copy engine) — every MVP backend pushes; REQ:backend-coverage exits `1` on unsupported axes, no fallback.
 - **Column subsetting** (`--columns`, `--exclude-columns`, `--exclude-columns-global`) — **DEFERRED.** `dal-go/dalgo`'s `QueryBuilder` exposes no explicit field-projection method today; REQ:push-down-only forbids reading-all-columns-and-dropping-in-engine. Requires an upstream sibling Idea (`dalgo-query-projection`, to be filed in `dal-go/dalgo/spec/ideas/`) that adds `QueryBuilder.SelectFields(...dal.FieldName)` (or equivalent) plus driver coverage in `dalgo2sqlite` and `dalgo2ingitdb`. A follow-up DataTug Feature `cli/db/copy/filtering/columns/` will land once that upstream work tags a release. MVP `--filter-config` rejects any YAML containing a top-level `columns:` key (REQ:config-file-schema).
 - **Anonymization / data masking / column transformation** — separate concern; even when column subsetting lands, it will drop columns rather than redact or transform values.
 - **Subqueries, joins, computed columns in WHERE** — the structured surface doesn't support them.
 - **Wildcards or regex in table names** (`--include 'log_*'`) — explicit list only.
-- **Operator extensions beyond the fixed ten** — `like`, `between`, `regex`, et al. deferred.
+- **Extended operators** (`!=`, `not_in`, `is_null`, `is_not_null`) — **DEFERRED.** A plan-time audit found that `dal-go/dalgo` does not expose `NotEqual`, `NotIn`, `IsNull`, or `IsNotNull` constants — only the six covered by REQ:operator-vocabulary plus `And`/`Or` for grouping. Requires an upstream sibling Idea `dalgo-extended-operators` (to be filed in `dal-go/dalgo/spec/ideas/`) that adds the four missing constants. A follow-up DataTug Feature will re-introduce them once the upstream work tags a release. The painful loss in MVP is `is_null`/`is_not_null` (no way to filter on soft-delete sentinels without a NULL test); users who need this can WHERE-equal against a known non-null sentinel value if their schema permits.
+- **Operator extensions beyond DALgo's current set + the four-deferred batch** — `like`, `between`, `regex`, et al. Stay deferred; revisit only after the four-deferred batch lands and real-user demand surfaces.
 - **Postgres source/target** — deferred to match the parent Feature's current MVP scope (parent `db copy` defers Postgres until a Postgres DALgo driver lands `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware`).
 - **Flag overrides over config (`--filter-config base.yaml --where extra:…`)** — REQ:config-cli-equivalence rejects mixing in MVP. Layered configs may revisit.
 - **Mutating filter behavior at the target** — filters only narrow what is *read* from source; target writes use the standard parent-Feature path. No target-side filtering (e.g. INSERT-then-DELETE) is added.
@@ -250,9 +245,9 @@ From the source Idea:
 | Idea assumption | Status at Feature time |
 |---|---|
 | Must-be-true: DALgo's `dal.StructuredQuery` surface — `WhereField`, `GroupCondition`, `Limit`, and explicit field projection — compiles correctly across MVP backends | **Partially resolved at plan time:** `WhereField`, `GroupCondition`, and `Limit` exist and compile across MVP backends (verified in `dal-go/dalgo/dal/q_builder.go`). **Explicit field projection does NOT exist** — column subsetting is therefore deferred to a follow-up Feature gated on the `dalgo-query-projection` sibling Idea. REQ:backend-coverage codifies the runtime check for the remaining axes (Where, Limit). |
-| Must-be-true: The fixed operator vocabulary covers ≥95% of real-world fixture-subsetting needs | Resolved; ten operators frozen in REQ:operator-vocabulary |
+| Must-be-true: The fixed operator vocabulary covers ≥95% of real-world fixture-subsetting needs | **Partially resolved at plan time:** the six DALgo-supported operators (`=, <, <=, >, >=, in`) are frozen in REQ:operator-vocabulary. The four originally-planned operators (`!=, not_in, is_null, is_not_null`) are deferred — DALgo lacks the constants — and tracked under a sibling Idea `dalgo-extended-operators` (to be filed) plus a follow-up DataTug Feature once landed. |
 | Must-be-true: The CLI mini-syntax `<table>:<field>:<op>:<value>` parses unambiguously | Resolved; REQ:where-cli-syntax pins the colon-delimiter + `\:` escape |
-| Must-be-true: Config-file YAML schema is a 1:1 mirror of CLI flags plus OR-groups | Resolved; REQ:config-file-schema + REQ:config-cli-equivalence pin both rules |
+| Must-be-true: Config-file YAML schema is a 1:1 mirror of CLI flags plus OR-groups | **Partially resolved at plan time:** the 1:1 mirror for AND-composed predicates is pinned in REQ:config-file-schema + REQ:config-cli-equivalence. OR-groups are deferred — DALgo's `GroupCondition` has unexported fields and no public constructor, so external packages cannot compile OR predicates. Tracked under a sibling Idea `dalgo-group-condition-ctor` (to be filed) plus a follow-up DataTug Feature once landed. |
 | Should-be-true: Push-down filtering is fast enough that "1000 latest customers from a 100k-row Customer table" completes in under 2 seconds | Carried; plan-time benchmark, NOT a REQ contract |
 | Should-be-true: Column projection in `dalgo2sql` (Postgres) preserves type fidelity | Deferred along with column subsetting; will carry into the follow-up `cli/db/copy/filtering/columns/` Feature. |
 | Should-be-true: Global column exclusion silently no-ops on tables lacking the column | Deferred along with column subsetting; will carry into the follow-up Feature. |
@@ -316,7 +311,7 @@ From the source Idea:
 
 **Given** any source
 **When** the user runs `datatug db copy --from … --include Customer --where Customer:Country:like:USA`
-**Then** the command exits `2`; stderr names `like` as the unsupported operator AND lists the ten valid operators.
+**Then** the command exits `2`; stderr names `like` as the unsupported operator AND lists the six valid operators.
 
 ### AC: where-type-coercion-failure-rejected
 
@@ -374,13 +369,13 @@ From the source Idea:
 **When** the user runs `datatug db copy --from … --filter-config ./filter.yaml --where Customer:Country:=:USA`
 **Then** the command exits `2`; stderr names both `--filter-config` and `--where` and explains that flag and config cannot mix in MVP.
 
-### AC: config-or-group-composes
+### AC: config-or-key-rejected
 
-**Requirements:** filtering#req:config-or-groups
+**Requirements:** filtering#req:config-file-schema
 
-**Given** a SQLite Chinook source where 16 customers satisfy `Country = 'USA' OR Country = 'Canada'`
-**When** the user runs `datatug db copy --from … --filter-config ./or.yaml` where `or.yaml` has `where: {Customer: [{or: [{field: Country, op: '=', value: USA}, {field: Country, op: '=', value: Canada}]}]}`
-**Then** the command exits `0`; the target `Customer/` collection contains exactly those 16 records.
+**Given** an `or.yaml` whose `where:Customer:` entries include an `or:` subkey (the reserved schema slot for the deferred OR-group follow-up Feature)
+**When** the user runs `datatug db copy --from … --filter-config ./or.yaml`
+**Then** the command exits `2`; stderr names the `or:` key under `where:Customer:` and explains that OR-groups are deferred to a future Feature pending the upstream `dalgo-group-condition-ctor` Idea.
 
 ### AC: malformed-config-rejected
 
@@ -409,7 +404,7 @@ From the source Idea:
 ## Outstanding Questions
 
 - **Levenshtein suggestion threshold for `where-unknown-field`.** REQ:where-unknown-field says distance ≤ 2 — confirm this is the right ceiling, and whether to suggest ONLY the closest or ALL within threshold. Plan time.
-- **`is_null` / `is_not_null` value-slot behavior.** REQ:operator-vocabulary says the value slot is "empty / ignored". Should `--where Customer:Country:is_null:foo` be silently accepted (value ignored) or rejected (exit 2 for extraneous value)? Direction: reject. Confirm at plan time.
+- **`dalgo-extended-operators` sibling Idea filing.** The deferred `!=`, `not_in`, `is_null`, `is_not_null` operators need a formal Idea in `dal-go/dalgo/spec/ideas/dalgo-extended-operators.md` proposing `NotEqual`, `NotIn`, `IsNull`, `IsNotNull` constants (and ideally renaming `GreaterThen`/`LessThen` to `GreaterThan`/`LessThan` with backward-compat aliases). Not blocking this Feature's MVP, but blocks the follow-up Feature that re-introduces those operators.
 - **YAML `value` type coercion.** When YAML scalars decode as native types (`5` → int, `true` → bool, `2025-01-01` → date), should the config-path skip the CLI's string-then-coerce pipeline OR funnel through it for behavior parity? Direction: funnel through coercion for parity. Confirm at plan time.
 - **Verbose echo of compiled query under `--progress`.** When `--progress` is enabled, should stderr include the compiled `dal.Query` (or its SQL-text equivalent) for each table? Useful for debugging filters; would be a new progress-line type. Plan time.
 - **`dalgo-query-projection` sibling Idea filing.** The deferred column-subsetting work needs a formal Idea in `dal-go/dalgo/spec/ideas/dalgo-query-projection.md` proposing `QueryBuilder.SelectFields(...dal.FieldName)`. Not blocking this Feature's MVP, but blocks the follow-up `cli/db/copy/filtering/columns/` Feature.

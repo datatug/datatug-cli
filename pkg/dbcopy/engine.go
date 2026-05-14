@@ -92,7 +92,20 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 		return summary, ErrSourceHasNoTables
 	}
 
-	// 2. If --overwrite=recreate, drop target tables that match source names
+	// 2. If --overwrite is omitted, pre-flight verify the target is "empty
+	//    for this copy" (REQ:empty-target-check). Any source-named target
+	//    table with >=1 row aborts BEFORE we touch the target.
+	if opts.Overwrite == "" {
+		sourceNames := make([]string, len(refs))
+		for i, r := range refs {
+			sourceNames[i] = r.Name()
+		}
+		if err := checkEmptyTarget(ctx, target, sourceNames); err != nil {
+			return summary, err
+		}
+	}
+
+	// 3. If --overwrite=recreate, drop target tables that match source names
 	//    BEFORE we introspect each one (REQ:recreate-drops-first).
 	if opts.Overwrite == "recreate" {
 		for _, ref := range refs {

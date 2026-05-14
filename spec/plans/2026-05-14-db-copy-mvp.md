@@ -11,7 +11,18 @@
 **Spec:** [`spec/features/cli/db/copy/README.md`](../features/cli/db/copy/README.md) — **Approved**
 **Source Idea:** [`spec/ideas/cross-engine-db-copy.md`](../ideas/cross-engine-db-copy.md) — **Approved**
 
-**Status:** Planned
+**Status:** In progress — Tasks 0, 0.5, 1, 2, 7 complete.
+
+## Plan revision 2026-05-14: schema-only first slice
+
+A plan-time audit of the two drivers revealed:
+
+- **`dalgo2ingitdb` has no row CRUD** — `Insert`, `RunReadwriteTransaction`, `ExecuteQuery*` are stubbed with `dal.ErrNotSupported` (per `pkg/dalgo2ingitdb/database.go` lines 82-118). Upstream issue staged at [`docs/upstream-issues/ingitdb-cli-dalgo2ingitdb-row-crud.md`](../../docs/upstream-issues/ingitdb-cli-dalgo2ingitdb-row-crud.md).
+- **`dalgo2sqlite.DescribeCollection` rejects `DATETIME` and `NUMERIC(p,s)`** — breaks 4 of 11 Chinook tables. Upstream issue staged at [`docs/upstream-issues/dalgo2sqlite-describe-datetime-numeric.md`](../../docs/upstream-issues/dalgo2sqlite-describe-datetime-numeric.md).
+
+**First slice — schema-only.** Tasks 3, 4, 5, 9, 10 below are scoped to schema replication only: read source via `dbschema.SchemaReader`, write target via `ddl.SchemaModifier`. Row streaming (Tasks 6, 8) and row-aware overwrite branches (parts of Task 5) are deferred until the two upstream issues land. The CLI contract is unchanged; against an inGitDB target the command emits a stderr note that row data wasn't copied and points at the upstream issue.
+
+The Feature spec carries this caveat in its Summary (see updated `spec/features/cli/db/copy/README.md`).
 
 ---
 

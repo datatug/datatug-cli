@@ -1,9 +1,13 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Manual-only trigger: kick off from the Actions tab or via
+  #   gh workflow run release.yml --ref <tag-or-branch>
+  # goreleaser uses the checked-out git state (commit + nearest tag) to
+  # determine the version. Push-on-tag is intentionally disabled so the
+  # auto-bumping in Go CI doesn't trigger a binary release on every push
+  # to main; we cut releases on a human cadence instead.
+  workflow_dispatch:
 
 jobs:
   release:

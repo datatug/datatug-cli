@@ -2,16 +2,17 @@ name: Release
 
 on:
   # Manual-only trigger. Dispatch from the Actions tab or via:
-  #   gh workflow run release.yml --field tag=v0.1.0
-  # The workflow YAML itself comes from main (so improvements land
-  # without needing to re-cut a tag), but the checkout step picks up
-  # the SPECIFIC tag passed via `inputs.tag` — that's what goreleaser
-  # releases. Decouples "workflow source" from "release target".
+  #   gh workflow run release.yml                    # latest v* tag
+  #   gh workflow run release.yml --field tag=v0.1.0 # specific tag
+  # The workflow YAML always comes from main (so improvements land
+  # without needing to re-cut a tag); the checkout step picks up
+  # the resolved tag — that's what goreleaser releases. Decouples
+  # "workflow source" from "release target".
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Git tag to release (e.g. v0.1.0). Must exist on origin.'
-        required: true
+        description: 'Git tag to release (e.g. v0.1.0). Leave empty to pick the highest semver v* tag.'
+        required: false
         type: string
 
 jobs:
@@ -20,13 +21,35 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Resolve release tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            tag="${{ inputs.tag }}"
+            echo "Using explicit tag from inputs: $tag"
+          else
+            # Pick the highest semver-sorted v* tag from the repo's tag
+            # list. `sort -V` does natural/version sort; `tail -1` picks
+            # the highest. Paginated to handle repos with >100 tags.
+            tag=$(gh api --paginate "repos/${{ github.repository }}/tags" \
+                  --jq '.[].name' | grep -E '^v[0-9]+\.' | sort -V | tail -1)
+            if [ -z "$tag" ]; then
+              echo "::error::No v* tag found in repository — pass --field tag=<tag> explicitly"
+              exit 1
+            fi
+            echo "Resolved latest tag: $tag"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v6
         with:
-          # Check out the SPECIFIC tag the dispatcher asked to release,
-          # not the ref the workflow was triggered from. goreleaser
-          # checks `HEAD must equal <tag>'s commit` and would otherwise
-          # fail with "git tag <X> was not made against commit <Y>".
-          ref: ${{ inputs.tag }}
+          # Check out the resolved tag specifically, not the ref the
+          # workflow was triggered from. goreleaser checks
+          # `HEAD must equal <tag>'s commit` and would otherwise fail
+          # with "git tag <X> was not made against commit <Y>".
+          ref: ${{ steps.resolve.outputs.tag }}
           # goreleaser inspects the git state (tags + commit history) to
           # determine the version and changelog. The default shallow
           # clone has no tags, so without this it errors out with

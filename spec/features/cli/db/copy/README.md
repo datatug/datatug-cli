@@ -8,7 +8,7 @@
 
 ## Summary
 
-`datatug db copy --from <url> --to <url>` is a streaming, cross-engine database-copy primitive. It reads the source schema and table data via the DALgo abstraction and writes them to the target via the same abstraction — auto-creating the target schema on the way. MVP is end-to-end-tested against three backends: SQLite, PostgreSQL, and inGitDB (via `dalgo2ingitdb`). The `ingitdb://` URL scheme dispatches to the inGitDB driver against a local-filesystem path.
+`datatug db copy --from <url> --to <url>` is a streaming, cross-engine database-copy primitive. It reads the source schema and table data via the DALgo abstraction and writes them to the target via the same abstraction — auto-creating the target schema on the way. MVP is end-to-end-tested in **both directions** between SQLite (via `dalgo2sqlite`) and inGitDB (via `dalgo2ingitdb`) — i.e. SQLite → inGitDB AND inGitDB → SQLite. PostgreSQL is recognized as a URL scheme but deferred from the MVP E2E bar until a PostgreSQL DALgo driver lands `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware`. The `ingitdb://` URL scheme dispatches to the inGitDB driver against a local-filesystem path.
 
 The verb is a pure primitive: either side can be any DALgo-supported URL. A `--parallel-streams` flag governs per-table parallelism with a safety cap derived from the DALgo `ConcurrencyAware` capability. A non-empty target requires an explicit `--overwrite=recreate` (drop tables and recreate from source schema) or `--overwrite=reload` (truncate tables and reload data, preserving schema).
 
@@ -47,11 +47,11 @@ The command MUST accept the following optional flags:
 
 The MVP URL parser MUST accept these schemes:
 
-| Scheme | Form | DALgo driver |
-|---|---|---|
-| `sqlite` | `sqlite:///absolute/path.db` or `sqlite://./relative/path.db` | `dalgo2sql` (SQLite) |
-| `postgres` | `postgres://user:pw@host:port/dbname?sslmode=...` | `dalgo2sql` (PostgreSQL) |
-| `ingitdb` | `ingitdb://./path-to-project` (local-filesystem path) | `dalgo2ingitdb` (lives in `ingitdb/ingitdb-cli`) |
+| Scheme | Form | DALgo driver | MVP status |
+|---|---|---|---|
+| `sqlite` | `sqlite:///absolute/path.db` or `sqlite://./relative/path.db` | `dalgo2sqlite` (lives in `dal-go/dalgo2sqlite`) | E2E-tested |
+| `ingitdb` | `ingitdb://./path-to-project` (local-filesystem path) | `dalgo2ingitdb` (lives in `ingitdb/ingitdb-cli`) | E2E-tested |
+| `postgres` | `postgres://user:pw@host:port/dbname?sslmode=...` | TBD (no driver currently exposes `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware`) | **Deferred** — scheme recognized; opening MUST exit `1` with a "PostgreSQL backend not yet wired" message until a driver is registered. |
 
 #### REQ: ingitdb-url-local-only
 
@@ -83,7 +83,7 @@ For indexes, the command MUST apply each non-primary index via `ddl.CreateIndex`
 
 #### REQ: type-mapping-coverage
 
-The MVP type-mapping table MUST cover every column type appearing in the canonical Chinook fixture across all six directed pairs of the three MVP backends (SQLite ↔ PostgreSQL ↔ inGitDB). Types outside that closed set MUST fail at schema-creation time (exit `1`) with a per-column error naming the unsupported source type and the target backend. The exact mapping table is plan-time content; this REQ pins the coverage bar.
+The MVP type-mapping table MUST cover every column type appearing in the canonical Chinook fixture across both directed pairs of the MVP backends (SQLite ↔ inGitDB). Types outside that closed set MUST fail at schema-creation time (exit `1`) with a per-column error naming the unsupported source type and the target backend. The exact mapping table is plan-time content; this REQ pins the coverage bar. (PostgreSQL pairs are out of MVP scope; when the Postgres driver lands, the type-mapping table extends to the four additional directed pairs.)
 
 #### REQ: recreate-drops-first
 
@@ -176,8 +176,9 @@ If a copy fails midway (mid-stream insert error, target connection drop, source 
 | Type mapper | Cross-engine column-type translation table for the MVP triplet (SQLite ↔ PostgreSQL ↔ inGitDB) | this repo (`pkg/dbcopy/typemap.go` proposed) |
 | Copy engine | Per-table worker pool that drives `Reader` → `InsertMulti`; honors `--parallel-streams` cap | this repo (`pkg/dbcopy/engine.go` proposed) |
 | `dal.Adapter` (source/target) | DALgo `dbschema` introspection + DDL application + row read/write | `dal-go/dalgo` (shipped via dbschema + ddl + concurrency-capability Features) |
-| `dalgo2ingitdb` | inGitDB DALgo driver (read + write + dbschema + DDL coverage) | `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` |
-| `dalgo2sql` | SQL DALgo driver covering SQLite + PostgreSQL (read + write + dbschema + DDL coverage) | `dal-go/dalgo2sql` (existing) |
+| `dalgo2ingitdb` | inGitDB DALgo driver (read + write + dbschema + DDL coverage; advertises `ConcurrencyAvailable`) | `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` |
+| `dalgo2sqlite` | SQLite DALgo driver (read + write + dbschema + DDL coverage; advertises `NoConcurrency`) | `dal-go/dalgo2sqlite` |
+| PostgreSQL driver | TBD — deferred until a driver implements `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware`. `dalgo2sql` covers data-plane today but not the schema/concurrency capabilities. | `dal-go/dalgo2sql` (data-plane only today) |
 
 ### Data flow
 
@@ -206,27 +207,28 @@ If a copy fails midway (mid-stream insert error, target connection drop, source 
 
 ### Dependencies
 
-- **DALgo `dbschema`** — `dal-go/dalgo/dbschema` — shipped in the dbschema Feature batch (commits `b9e3d35..…` on `dal-go/dalgo:main`).
-- **DALgo `ddl`** — `dal-go/dalgo/ddl` — shipped in the ddl Feature batch.
-- **DALgo `ConcurrencyAware`** — `dal-go/dalgo` — shipped in the concurrency-capability Feature.
-- **`dalgo2ingitdb`** — `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` — pre-existing; coverage of dbschema + ddl + ConcurrencyAware must be verified at plan time.
-- **`dalgo2sql`** — `dal-go/dalgo2sql` — pre-existing; coverage of dbschema + ddl + ConcurrencyAware must be verified at plan time.
+- **DALgo `dbschema`** — `dal-go/dalgo/dbschema` — **Implemented**.
+- **DALgo `ddl`** — `dal-go/dalgo/ddl` — **Implemented**.
+- **DALgo `ConcurrencyAware`** — `dal-go/dalgo` — **Implemented**.
+- **`dalgo2ingitdb`** — `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` — **Ready** (implements `dbschema.SchemaReader`, `ddl.SchemaModifier`, embeds `dal.ConcurrencyAvailable`).
+- **`dalgo2sqlite`** — `dal-go/dalgo2sqlite` — **Ready** (implements `dbschema.SchemaReader`, `ddl.SchemaModifier`, embeds `dal.NoConcurrency`).
+- **PostgreSQL driver** — none of `dalgo2sql` / a hypothetical `dalgo2postgres` currently exposes the three capability interfaces. The `postgres://` scheme is recognized but disabled until a driver lands; see the MVP-status column in REQ:supported-schemes.
 - **URL parser** — `github.com/xo/dburl` is the existing parser used by `datatug db <url>` (the viewer Feature). The `ingitdb://` scheme MUST be registered with `dburl` (either via `dburl.Register` if available or via a small wrapper in `pkg/dbcopy/url.go`).
 
 ## Testing Strategy
 
-E2E tests against the canonical Chinook fixture for the three MVP backends. The matrix:
+E2E tests against the canonical Chinook fixture. PostgreSQL pairs are deferred until a Postgres DALgo driver implements the three capability interfaces.
 
 | Source → Target | E2E test target |
 |---|---|
 | SQLite → inGitDB | yes (MVP minimum) |
-| SQLite → PostgreSQL | yes (MVP minimum) |
 | inGitDB → SQLite | yes (MVP minimum) |
-| inGitDB → PostgreSQL | yes (MVP minimum) |
-| PostgreSQL → SQLite | yes (MVP minimum) |
-| PostgreSQL → inGitDB | yes (MVP minimum) |
+| SQLite → PostgreSQL | deferred (no driver) |
+| inGitDB → PostgreSQL | deferred (no driver) |
+| PostgreSQL → SQLite | deferred (no driver) |
+| PostgreSQL → inGitDB | deferred (no driver) |
 
-Per the source Idea: "If the primitive ships and only one direction (e.g. SQLite→inGitDB) is wired for E2E, that is still a shippable MVP — the contract is set, additional backends fill in." The six-direction matrix is the bar for "complete"; one direction is the bar for "shippable".
+Per the source Idea: "If the primitive ships and only one direction (e.g. SQLite→inGitDB) is wired for E2E, that is still a shippable MVP — the contract is set, additional backends fill in." The two SQLite↔inGitDB directions are the MVP bar; the four PostgreSQL pairs fill in when the Postgres driver lands.
 
 Unit tests cover: URL scheme dispatch (REQ:supported-schemes), the type-mapping table (REQ:type-mapping-coverage), the concurrency-cap rule (REQ:concurrency-cap), the empty-target detection (REQ:empty-target-check), the reload schema-match validator (REQ:reload-schema-match).
 

@@ -97,7 +97,7 @@ func dbCopyAction(ctx context.Context, cmd *cli.Command) error {
 	summary, err := dbcopy.Copy(ctx, src, tgt, opts)
 	if errors.Is(err, dbcopy.ErrSourceHasNoTables) {
 		// REQ:source-introspection-failure: exit 0 with stderr note.
-		fmt.Fprintln(cmd.Root().ErrWriter, "source has no tables; nothing to copy")
+		_, _ = fmt.Fprintln(cmd.Root().ErrWriter, "source has no tables; nothing to copy")
 		return nil
 	}
 	if err != nil {
@@ -105,7 +105,7 @@ func dbCopyAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if summary.Tables > 0 {
-		fmt.Fprintf(cmd.Root().ErrWriter,
+		_, _ = fmt.Fprintf(cmd.Root().ErrWriter,
 			"db copy: replicated schema for %d/%d collections (%d skipped), copied %d rows\n",
 			summary.Created, summary.Tables, len(summary.Skipped), summary.RowsCopied,
 		)

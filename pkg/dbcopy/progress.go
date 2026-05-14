@@ -36,10 +36,10 @@ func (p *ProgressWriter) StartTable(table string, estRows int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if estRows < 0 {
-		fmt.Fprintf(p.w, "copying %s (est. ? rows)…\n", table)
+		_, _ = fmt.Fprintf(p.w, "copying %s (est. ? rows)…\n", table)
 		return
 	}
-	fmt.Fprintf(p.w, "copying %s (est. %d rows)…\n", table, estRows)
+	_, _ = fmt.Fprintf(p.w, "copying %s (est. %d rows)…\n", table, estRows)
 }
 
 // FinishTable announces that a copy of `table` has completed: `rows`
@@ -50,5 +50,5 @@ func (p *ProgressWriter) FinishTable(table string, rows int64, d time.Duration) 
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	fmt.Fprintf(p.w, "copied %s: %d rows in %s\n", table, rows, d.Round(time.Millisecond).String())
+	_, _ = fmt.Fprintf(p.w, "copied %s: %d rows in %s\n", table, rows, d.Round(time.Millisecond).String())
 }

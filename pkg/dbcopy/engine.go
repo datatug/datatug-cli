@@ -211,7 +211,7 @@ func copyOneTable(
 		// issue). Log the skip on stderr so the user knows, and continue
 		// — the rest of the schema can still be replicated.
 		mu.Lock()
-		fmt.Fprintf(stderr,
+		_, _ = fmt.Fprintf(stderr,
 			"skipping %q: source DescribeCollection failed: %v\n",
 			ref.Name(), err)
 		summary.Skipped = append(summary.Skipped, ref.Name())
@@ -256,7 +256,7 @@ func copyOneTable(
 			// Schema replicated; row copy not possible for this table.
 			mu.Lock()
 			summary.RowSkips[def.Name] = err.Error()
-			fmt.Fprintf(stderr, "row copy skipped for %q: %v\n", def.Name, err)
+			_, _ = fmt.Fprintf(stderr, "row copy skipped for %q: %v\n", def.Name, err)
 			mu.Unlock()
 		default:
 			return fmt.Errorf("row copy %q: %w", def.Name, err)
@@ -304,7 +304,7 @@ func resolveParallelism(requested int, source, target dal.DB, stderr io.Writer) 
 		case !tgtConc:
 			constraining = fmt.Sprintf("%s (target)", adapterName(target))
 		}
-		fmt.Fprintf(stderr,
+		_, _ = fmt.Fprintf(stderr,
 			"warning: %s requires serial writes; ignoring --parallel-streams=%d, using 1\n",
 			constraining, requested)
 	}

@@ -4,12 +4,13 @@ go 1.26.0
 
 //replace github.com/datatug/datatug-core => ../datatug-core
 
-// Local replace until dal-go/dalgo cuts a release that ships the
-// SQL-standard `LIMIT N` emission (replacing the T-SQL `SELECT TOP N`).
-// Task 7 of the filtering plan depends on this. The dialect-aware
-// follow-up is tracked under the `dalgo-dialect-aware-sql-emission`
-// sibling Idea (to be filed).
-replace github.com/dal-go/dalgo => ../../../../../dal-go/dalgo
+// Local replace until dal-go/dalgo2sql cuts a release that ships the
+// emitSQL shim translating dalgo's `SELECT TOP N` to ANSI/SQLite
+// `LIMIT N` (sqlite_emit.go in dalgo2sql). Task 7 of the filtering
+// plan depends on this. The proper dialect-aware emission is tracked
+// under the `dalgo-dialect-aware-sql-emission` sibling Idea in
+// `dal-go/dalgo/spec/ideas/` — this shim disappears once that lands.
+replace github.com/dal-go/dalgo2sql => ../../../../../dal-go/dalgo2sql
 
 // All three sibling deps now ship the upstream changes db-copy depends on
 // at tagged versions:

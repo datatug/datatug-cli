@@ -323,6 +323,80 @@ func TestCopy_LimitNarrowsRowCount(t *testing.T) {
 	assert.Equal(t, int64(50), summary.RowsByTable["Invoice"], "Invoice rows = 50 (Chinook 412 capped)")
 }
 
+// AC:where-single-condition — Chinook has 13 Customers with Country='USA'.
+func TestCopy_WhereSingleCondition(t *testing.T) {
+	t.Parallel()
+
+	chinook, err := filepath.Abs("testdata/chinook.db")
+	assert.NoError(t, err)
+	src, err := dalgo2sqlite.NewDatabase(chinook)
+	assert.NoError(t, err)
+
+	tgtDir := t.TempDir()
+	tgt, err := dalgo2ingitdb.NewDatabase(tgtDir, validator.NewCollectionsReader())
+	assert.NoError(t, err)
+
+	opts := CopyOpts{
+		Filters: &filter.Directives{
+			IncludeTables: []string{"Customer"},
+			Where: map[string]*filter.PredicateGroup{
+				"Customer": {
+					Operator: filter.And,
+					Conditions: []filter.Predicate{
+						{Field: "Country", Operator: filter.OpEqual, Value: "USA"},
+					},
+				},
+			},
+		},
+	}
+	summary, err := Copy(context.Background(), src, tgt, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(13), summary.RowsByTable["Customer"], "Customer rows = 13 (Country='USA')")
+}
+
+// AC:where-and-composition — Country='USA' AND SupportRepId=3 → 4 rows.
+//
+// Blocked on an upstream dalgo SQL-emission bug: dal.GroupCondition.String()
+// joins multi-condition WHERE clauses with `strings.Join(conds, "AND")`
+// (no surrounding spaces), so the emitted SQL is `... = "USA"ANDSupportRepId
+// = 3` which SQLite rejects with a syntax error. The fix is a one-line
+// edit in dal-go/dalgo (`" "+string(v.operator)+" "`), but per Task 8's
+// scope discipline that change is out of scope and must be handled in a
+// separate dalgo-side commit, analogous to how Task 7 handled the
+// SELECT-TOP-vs-LIMIT emission bug (commit 1adac80). Un-skip once the
+// dalgo replace carries the spacing fix.
+func TestCopy_WhereAndComposition(t *testing.T) {
+	t.Skip("blocked on upstream dalgo GroupCondition.String() spacing bug; see comment above")
+	t.Parallel()
+
+	chinook, err := filepath.Abs("testdata/chinook.db")
+	assert.NoError(t, err)
+	src, err := dalgo2sqlite.NewDatabase(chinook)
+	assert.NoError(t, err)
+
+	tgtDir := t.TempDir()
+	tgt, err := dalgo2ingitdb.NewDatabase(tgtDir, validator.NewCollectionsReader())
+	assert.NoError(t, err)
+
+	opts := CopyOpts{
+		Filters: &filter.Directives{
+			IncludeTables: []string{"Customer"},
+			Where: map[string]*filter.PredicateGroup{
+				"Customer": {
+					Operator: filter.And,
+					Conditions: []filter.Predicate{
+						{Field: "Country", Operator: filter.OpEqual, Value: "USA"},
+						{Field: "SupportRepId", Operator: filter.OpEqual, Value: "3"},
+					},
+				},
+			},
+		},
+	}
+	summary, err := Copy(context.Background(), src, tgt, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(4), summary.RowsByTable["Customer"], "Customer rows = 4 (USA + Rep=3)")
+}
+
 // AC:unknown-table-in-include-rejected — REQ:table-not-found.
 func TestCopy_UnknownTableInIncludeRejected(t *testing.T) {
 	t.Parallel()

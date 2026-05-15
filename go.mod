@@ -4,26 +4,22 @@ go 1.26.0
 
 //replace github.com/datatug/datatug-core => ../datatug-core
 
-// Local replace until dal-go/dalgo2sql cuts a release that ships the
-// emitSQL shim translating dalgo's `SELECT TOP N` to ANSI/SQLite
-// `LIMIT N` (sqlite_emit.go in dalgo2sql). Task 7 of the filtering
-// plan depends on this. The proper dialect-aware emission is tracked
-// under the `dalgo-dialect-aware-sql-emission` sibling Idea in
-// `dal-go/dalgo/spec/ideas/` — this shim disappears once that lands.
-replace github.com/dal-go/dalgo2sql => ../../../../../dal-go/dalgo2sql
-
-// All three sibling deps now ship the upstream changes db-copy depends on
+// All sibling deps now ship the upstream changes db-copy depends on
 // at tagged versions:
-//   - dal-go/dalgo2sql v0.5.0       (map[string]any Record.Data accept)
+//   - dal-go/dalgo2sql v0.6.2       (ANSI/SQLite LIMIT N emission via
+//                                    sqlite_emit.go — stopgap until
+//                                    dialect-aware emission lands per
+//                                    dal-go/dalgo/spec/ideas/
+//                                    dalgo-dialect-aware-sql-emission)
 //   - dal-go/dalgo2sqlite v0.0.1    (DATETIME / NUMERIC(p,s) recognition)
 //   - ingitdb/ingitdb-cli v1.9.0    (record CRUD + auto-register +
 //                                    Decimal/Bytes type mapping)
-// Only the dalgo replace above is active during the LIMIT-N transition.
+// No replace directives needed.
 
 require (
 	cloud.google.com/go/firestore v1.22.0
 	github.com/alecthomas/chroma/v2 v2.24.1
-	github.com/dal-go/dalgo2sql v0.5.0
+	github.com/dal-go/dalgo2sql v0.6.2
 	github.com/dal-go/dalgo2sqlite v0.0.1
 	github.com/datatug/filetug v0.0.21
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d

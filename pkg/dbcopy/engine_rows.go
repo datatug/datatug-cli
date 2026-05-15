@@ -23,6 +23,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
+	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
 )
 
 // defaultRowBatchSize is the buffer size used by copyRows. Picked empirically
@@ -80,6 +81,16 @@ func copyRows(
 	colRef := dal.NewRootCollectionRef(def.Name, "")
 	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(colRef))
 	if opts.Filters != nil {
+		// REQ:where-and-semantics — apply predicates for this table.
+		if group, ok := opts.Filters.Where[def.Name]; ok && group != nil {
+			conds, err := filter.CompileWhereForTable(def.Name, group, def)
+			if err != nil {
+				return 0, fmt.Errorf("compile where for %q: %w", def.Name, err)
+			}
+			if len(conds) > 0 {
+				builder = builder.Where(conds...)
+			}
+		}
 		if n, ok := opts.Filters.LimitsByTable[def.Name]; ok && n > 0 {
 			builder = builder.Limit(n)
 		}

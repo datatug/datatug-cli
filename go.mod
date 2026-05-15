@@ -4,7 +4,12 @@ go 1.26.0
 
 //replace github.com/datatug/datatug-core => ../datatug-core
 
-//replace github.com/dal-go/dalgo => ../../dal-go/dalgo
+// Local replace until dal-go/dalgo cuts a release that ships the
+// SQL-standard `LIMIT N` emission (replacing the T-SQL `SELECT TOP N`).
+// Task 7 of the filtering plan depends on this. The dialect-aware
+// follow-up is tracked under the `dalgo-dialect-aware-sql-emission`
+// sibling Idea (to be filed).
+replace github.com/dal-go/dalgo => ../../../../../dal-go/dalgo
 
 // All three sibling deps now ship the upstream changes db-copy depends on
 // at tagged versions:
@@ -12,7 +17,7 @@ go 1.26.0
 //   - dal-go/dalgo2sqlite v0.0.1    (DATETIME / NUMERIC(p,s) recognition)
 //   - ingitdb/ingitdb-cli v1.9.0    (record CRUD + auto-register +
 //                                    Decimal/Bytes type mapping)
-// No replace directives needed.
+// Only the dalgo replace above is active during the LIMIT-N transition.
 
 require (
 	cloud.google.com/go/firestore v1.22.0

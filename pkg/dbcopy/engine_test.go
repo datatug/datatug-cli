@@ -296,22 +296,12 @@ func TestCopy_ExcludeSkipsListedTables(t *testing.T) {
 // AC:limit-applies-per-table — Chinook Invoice has 412 rows; --limit
 // Invoice:50 should produce a target collection of exactly 50.
 //
-// BLOCKED on upstream dalgo bug: structuredQuery.String() emits
-// `SELECT TOP N ...` (T-SQL syntax) regardless of dialect.
-// dalgo2sql hands that text verbatim to SQLite, which rejects it
-// with `near "50": syntax error`. The engine wiring is correct
-// (builder.Limit(N) is called) but cannot be exercised end-to-end
-// against the SQLite Chinook fixture until dalgo (or dalgo2sql)
-// emits dialect-appropriate LIMIT syntax. inGitDB-source path
-// works because dalgo2ingitdb consumes StructuredQuery.Limit()
-// directly (see ingitdb-cli/.../dalgo2ingitdb/query.go:60).
-// Track: REQ:limit-compiles-to-dalgo-limit — needs upstream fix.
+// Depends on a local-replace of dal-go/dalgo that emits SQL-standard
+// `LIMIT N` instead of T-SQL `SELECT TOP N` (see go.mod). The
+// dialect-aware follow-up lives under the `dalgo-dialect-aware-sql-emission`
+// sibling Idea. Track: REQ:limit-compiles-to-dalgo-limit.
 func TestCopy_LimitNarrowsRowCount(t *testing.T) {
 	t.Parallel()
-	t.Skip("BLOCKED: dalgo structuredQuery.String() emits T-SQL `TOP N` " +
-		"instead of SQLite-compatible `LIMIT N`; dalgo2sql passes the " +
-		"text verbatim to SQLite. Engine wiring (builder.Limit) is correct. " +
-		"Re-enable once upstream dalgo or dalgo2sql emits dialect-aware LIMIT.")
 
 	chinook, err := filepath.Abs("testdata/chinook.db")
 	assert.NoError(t, err)

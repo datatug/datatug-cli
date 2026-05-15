@@ -1247,7 +1247,7 @@ import (
 func TestValidateWhere_UnknownFieldWithSuggestion(t *testing.T) {
 	def := &dbschema.CollectionDef{
 		Name: "Customer",
-		Columns: []dbschema.FieldDef{
+		Fields: []dbschema.FieldDef{
 			{Name: "CustomerId", Type: dbschema.Int},
 			{Name: "FirstName", Type: dbschema.String},
 			{Name: "LastName", Type: dbschema.String},
@@ -1269,7 +1269,7 @@ func TestValidateWhere_UnknownFieldWithSuggestion(t *testing.T) {
 func TestValidateWhere_TypeMismatch(t *testing.T) {
 	def := &dbschema.CollectionDef{
 		Name: "Invoice",
-		Columns: []dbschema.FieldDef{
+		Fields: []dbschema.FieldDef{
 			{Name: "Total", Type: dbschema.Decimal},
 		},
 	}
@@ -1428,7 +1428,7 @@ import (
 func TestCompileWhereForTable_SingleCondition(t *testing.T) {
 	def := &dbschema.CollectionDef{
 		Name: "Customer",
-		Columns: []dbschema.FieldDef{
+		Fields: []dbschema.FieldDef{
 			{Name: "Country", Type: dbschema.String},
 		},
 	}
@@ -1455,7 +1455,7 @@ func TestCompileWhereForTable_SingleCondition(t *testing.T) {
 func TestCompileWhereForTable_AndComposition(t *testing.T) {
 	def := &dbschema.CollectionDef{
 		Name: "Customer",
-		Columns: []dbschema.FieldDef{
+		Fields: []dbschema.FieldDef{
 			{Name: "Country", Type: dbschema.String},
 			{Name: "SupportRepId", Type: dbschema.Int},
 		},

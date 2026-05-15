@@ -59,6 +59,7 @@ func copyRows(
 	src dal.DB,
 	tgt dal.DB,
 	def *dbschema.CollectionDef,
+	opts CopyOpts,
 ) (int64, error) {
 	if def == nil {
 		return 0, errors.New("copyRows: nil CollectionDef")
@@ -77,7 +78,13 @@ func copyRows(
 	// projects every column (no WHERE / LIMIT) into a map[string]any
 	// record via the default record factory in each driver.
 	colRef := dal.NewRootCollectionRef(def.Name, "")
-	query := dal.NewQueryBuilder(dal.From(colRef)).SelectIntoRecordset()
+	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(colRef))
+	if opts.Filters != nil {
+		if n, ok := opts.Filters.LimitsByTable[def.Name]; ok && n > 0 {
+			builder = builder.Limit(n)
+		}
+	}
+	query := builder.SelectIntoRecordset()
 	reader, err := src.ExecuteQueryToRecordsReader(ctx, query)
 	if err != nil {
 		return 0, fmt.Errorf("source ExecuteQueryToRecordsReader on %q: %w", def.Name, err)

@@ -1,0 +1,6 @@
+include: [Customer]
+where:
+  Customer:
+    - or:               # reserved for the deferred OR-group Feature
+        - {field: Country, op: '=', value: USA}
+        - {field: Country, op: '=', value: Canada}

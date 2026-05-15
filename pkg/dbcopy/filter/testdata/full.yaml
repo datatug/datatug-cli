@@ -1,0 +1,6 @@
+include: [Customer]
+where:
+  Customer:
+    - {field: Country, op: '=', value: USA}
+limit:
+  Customer: 5

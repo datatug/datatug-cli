@@ -297,10 +297,11 @@ func TestCopy_ExcludeSkipsListedTables(t *testing.T) {
 // AC:limit-applies-per-table — Chinook Invoice has 412 rows; --limit
 // Invoice:50 should produce a target collection of exactly 50.
 //
-// Depends on a local-replace of dal-go/dalgo that emits SQL-standard
-// `LIMIT N` instead of T-SQL `SELECT TOP N` (see go.mod). The
-// dialect-aware follow-up lives under the `dalgo-dialect-aware-sql-emission`
-// sibling Idea. Track: REQ:limit-compiles-to-dalgo-limit.
+// Depends on a local-replace of dal-go/dalgo2sql that adds an
+// `emitSQL` shim translating dalgo's `SELECT TOP N` into ANSI/SQLite
+// `LIMIT N` (see go.mod). The proper dialect-aware emission lives
+// under the `dalgo-dialect-aware-sql-emission` sibling Idea — once
+// that lands, the shim disappears. Track: REQ:limit-compiles-to-dalgo-limit.
 func TestCopy_LimitNarrowsRowCount(t *testing.T) {
 	t.Parallel()
 

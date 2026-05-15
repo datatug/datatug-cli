@@ -281,6 +281,8 @@ From the source Idea:
 
 ## Acceptance Criteria
 
+**Note:** All ACs in this section assume NO filtering flags are present (no `--include`, `--exclude`, `--where`, `--limit`, or `--filter-config`). Subsetting behavior is specified by the [`filtering` sub-feature](filtering/README.md) (REQ:copy-acs-no-filter-baseline there). Column-subsetting flags (`--columns`, `--exclude-columns`, `--exclude-columns-global`) are deferred from MVP — see the filtering sub-feature's Out of Scope.
+
 ### AC: missing-from-rejected
 
 **Requirements:** copy#req:required-flags

@@ -98,6 +98,16 @@ func copyRows(
 	query := builder.SelectIntoRecordset()
 	reader, err := src.ExecuteQueryToRecordsReader(ctx, query)
 	if err != nil {
+		// REQ:backend-coverage — if the source driver returns an error
+		// indicating it doesn't support a filter axis we asked for, wrap
+		// it with a sentinel message so cmd_db_copy maps to exit 1.
+		if opts.Filters != nil && !opts.Filters.IsEmpty() &&
+			strings.Contains(err.Error(), "not supported") {
+			return 0, fmt.Errorf(
+				"source backend %s lacks push-down support for filter (where/limit/projection): %w",
+				adapterName(src), err,
+			)
+		}
 		return 0, fmt.Errorf("source ExecuteQueryToRecordsReader on %q: %w", def.Name, err)
 	}
 	defer func() { _ = reader.Close() }()

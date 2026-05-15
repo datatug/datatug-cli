@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -416,4 +417,59 @@ func TestCopy_UnknownTableInIncludeRejected(t *testing.T) {
 	_, err = Copy(context.Background(), src, tgt, opts)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "Users", "error must name unknown table")
+}
+
+// errFilterNotSupportedAdapter wraps a real source adapter and rejects
+// any structured query containing a WHERE clause, mimicking a future
+// backend that doesn't push down WHERE.
+//
+// Embeds the concrete *dalgo2sqlite.Database (not the dal.DB interface)
+// so the engine's dbschema.SchemaReader type assertion resolves against
+// the inherited method set.
+type errFilterNotSupportedAdapter struct {
+	*dalgo2sqlite.Database
+}
+
+func (e *errFilterNotSupportedAdapter) ExecuteQueryToRecordsReader(
+	ctx context.Context, q dal.Query,
+) (dal.RecordsReader, error) {
+	if sq, ok := q.(dal.StructuredQuery); ok && sq.Where() != nil {
+		return nil, fmt.Errorf("stub backend: filter axis 'where' not supported by this driver")
+	}
+	return e.Database.ExecuteQueryToRecordsReader(ctx, q)
+}
+
+// AC:backend-without-pushdown-exits-1 — REQ:backend-coverage.
+func TestCopy_BackendWithoutWherePushdownExits1(t *testing.T) {
+	t.Parallel()
+
+	chinook, err := filepath.Abs("testdata/chinook.db")
+	assert.NoError(t, err)
+	realSrc, err := dalgo2sqlite.NewDatabase(chinook)
+	assert.NoError(t, err)
+	src := &errFilterNotSupportedAdapter{Database: realSrc}
+
+	tgtDir := t.TempDir()
+	tgt, err := dalgo2ingitdb.NewDatabase(tgtDir, validator.NewCollectionsReader())
+	assert.NoError(t, err)
+
+	opts := CopyOpts{
+		Filters: &filter.Directives{
+			IncludeTables: []string{"Customer"},
+			Where: map[string]*filter.PredicateGroup{
+				"Customer": {
+					Operator: filter.And,
+					Conditions: []filter.Predicate{
+						{Field: "Country", Operator: filter.OpEqual, Value: "USA"},
+					},
+				},
+			},
+		},
+	}
+	_, err = Copy(context.Background(), src, tgt, opts)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not supported",
+		"error must mention the underlying 'not supported' reason")
+	assert.Contains(t, err.Error(), "push-down",
+		"error must mention push-down support gap to map to exit 1")
 }

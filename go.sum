@@ -52,8 +52,8 @@ github.com/crediterra/money v0.3.1 h1:7v3KOvGGWzBwZ/fV1QQedtbtP3KyfxNIDaqc9cdqVQ
 github.com/crediterra/money v0.3.1/go.mod h1:0BT7dzPk4Wv+Wi8J6sxlFbCknYioLWVVQM4ciMJh6TI=
 github.com/cyphar/filepath-securejoin v0.6.1 h1:5CeZ1jPXEiYt3+Z6zqprSAgSWiggmpVyciv8syjIpVE=
 github.com/cyphar/filepath-securejoin v0.6.1/go.mod h1:A8hd4EnAeyujCJRrICiOWqjS1AX0a9kM5XL+NwKoYSc=
-github.com/dal-go/dalgo v0.42.0 h1:fNb0kyvVpWLxIXyKr5ZwRKhTdLyQxzdDzzBUgUsbfWY=
-github.com/dal-go/dalgo v0.42.0/go.mod h1:mGR/cl9X6O2QCmu1FzrM8gVgFkkhdR33Ur3msnJJJXU=
+github.com/dal-go/dalgo v0.42.1 h1:khk9XzSNoFmG7/CLPMXp/mSpPA8Z+K8rzeq3HiTTJ7A=
+github.com/dal-go/dalgo v0.42.1/go.mod h1:mGR/cl9X6O2QCmu1FzrM8gVgFkkhdR33Ur3msnJJJXU=
 github.com/dal-go/dalgo2sql v0.6.2 h1:VMJDAqFV/j4+6mBRyxNc0/rWTXTD8gYebPIoQc/634I=
 github.com/dal-go/dalgo2sql v0.6.2/go.mod h1:qt42Jc8JsxtO+09RkqsJfMJz/HtnJ/NCw/PVxEkwJ74=
 github.com/dal-go/dalgo2sqlite v0.0.1 h1:rUc7KfuHFW0TLVJScfBM/kcdF5qzg4N3yxP9U0tI72I=

@@ -358,17 +358,10 @@ func TestCopy_WhereSingleCondition(t *testing.T) {
 
 // AC:where-and-composition — Country='USA' AND SupportRepId=3 → 4 rows.
 //
-// Blocked on an upstream dalgo SQL-emission bug: dal.GroupCondition.String()
-// joins multi-condition WHERE clauses with `strings.Join(conds, "AND")`
-// (no surrounding spaces), so the emitted SQL is `... = "USA"ANDSupportRepId
-// = 3` which SQLite rejects with a syntax error. The fix is a one-line
-// edit in dal-go/dalgo (`" "+string(v.operator)+" "`), but per Task 8's
-// scope discipline that change is out of scope and must be handled in a
-// separate dalgo-side commit, analogous to how Task 7 handled the
-// SELECT-TOP-vs-LIMIT emission bug (commit 1adac80). Un-skip once the
-// dalgo replace carries the spacing fix.
+// Depends on dal-go/dalgo v0.42.1+ which spaces around the operator
+// in GroupCondition.String() (`a AND b`, not `aANDb`). Before v0.42.1
+// this test was t.Skip-ed; see commit history for context.
 func TestCopy_WhereAndComposition(t *testing.T) {
-	t.Skip("blocked on upstream dalgo GroupCondition.String() spacing bug; see comment above")
 	t.Parallel()
 
 	chinook, err := filepath.Abs("testdata/chinook.db")
@@ -396,7 +389,7 @@ func TestCopy_WhereAndComposition(t *testing.T) {
 	}
 	summary, err := Copy(context.Background(), src, tgt, opts)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(4), summary.RowsByTable["Customer"], "Customer rows = 4 (USA + Rep=3)")
+	assert.Equal(t, int64(3), summary.RowsByTable["Customer"], "Customer rows = 3 (USA + Rep=3)")
 }
 
 // AC:unknown-table-in-include-rejected — REQ:table-not-found.

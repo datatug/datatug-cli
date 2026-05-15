@@ -4,6 +4,7 @@ package filter
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -54,6 +55,28 @@ func ParseWhereFlag(s string) (table string, pred Predicate, err error) {
 		return "", Predicate{}, fmt.Errorf("--where %q: %w", s, err)
 	}
 	return table, Predicate{Field: field, Operator: opToken, Value: value}, nil
+}
+
+// ParseLimitFlag parses one --limit <table>:<N> token. N must be a
+// positive integer. REQ:limit-flag.
+func ParseLimitFlag(s string) (table string, n int, err error) {
+	idx := strings.Index(s, ":")
+	if idx < 0 {
+		return "", 0, fmt.Errorf("--limit: expected <table>:<N>, got %q", s)
+	}
+	table = strings.TrimSpace(s[:idx])
+	nStr := strings.TrimSpace(s[idx+1:])
+	if table == "" {
+		return "", 0, fmt.Errorf("--limit: table must be non-empty in %q", s)
+	}
+	n, err = strconv.Atoi(nStr)
+	if err != nil {
+		return "", 0, fmt.Errorf("--limit %q: N must be an integer, got %q", s, nStr)
+	}
+	if n <= 0 {
+		return "", 0, fmt.Errorf("--limit %q: N must be positive, got %d", s, n)
+	}
+	return table, n, nil
 }
 
 // splitUnescaped splits s by sep, treating a preceding escape byte as

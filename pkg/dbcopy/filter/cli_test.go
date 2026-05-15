@@ -83,3 +83,36 @@ func TestParseWhereFlag(t *testing.T) {
 		})
 	}
 }
+
+func TestParseLimitFlag(t *testing.T) {
+	cases := []struct {
+		in        string
+		wantTable string
+		wantN     int
+		wantErr   bool
+	}{
+		{"Customer:1000", "Customer", 1000, false},
+		{"  Customer : 1000 ", "Customer", 1000, false},
+		{"Customer:0", "", 0, true},
+		{"Customer:-5", "", 0, true},
+		{"Customer:abc", "", 0, true},
+		{"Customer", "", 0, true},
+		{":1000", "", 0, true},
+		{"", "", 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			table, n, err := ParseLimitFlag(tc.in)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ParseLimitFlag(%q) err=%v wantErr=%v", tc.in, err, tc.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if table != tc.wantTable || n != tc.wantN {
+				t.Fatalf("ParseLimitFlag(%q) = (%q, %d), want (%q, %d)",
+					tc.in, table, n, tc.wantTable, tc.wantN)
+			}
+		})
+	}
+}

@@ -268,7 +268,7 @@ func copyOneTable(
 	// Row streaming — unless explicitly disabled.
 	var rowsCopied int64
 	if !opts.SchemaOnly {
-		rowsCopied, err = copyRows(ctx, source, target, def)
+		rowsCopied, err = copyRows(ctx, source, target, def, opts)
 		switch {
 		case err == nil:
 			mu.Lock()

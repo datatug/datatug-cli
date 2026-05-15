@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
@@ -129,11 +128,13 @@ func dbCopyAction(ctx context.Context, cmd *cli.Command) error {
 		return nil
 	}
 	if err != nil {
-		// REQ:backend-coverage — runtime capability gap (exit 1), distinct
-		// from parse-time rejection (exit 2).
-		if strings.Contains(err.Error(), "lacks push-down support") {
-			return cli.Exit(err.Error(), 1)
-		}
+		// REQ:backend-coverage — runtime capability gap (exit 1) is
+		// covered by this branch: engine_rows.go wraps "not supported"
+		// driver errors with the "lacks push-down support" sentinel
+		// string before returning, so the descriptive message reaches
+		// stderr. Exit 1 is shared with other runtime failures (per
+		// REQ:exit-codes); parse-time rejection (exit 2) is handled
+		// earlier in dbCopyAction.
 		return cli.Exit(err.Error(), 1)
 	}
 

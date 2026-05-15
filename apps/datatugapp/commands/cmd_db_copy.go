@@ -160,7 +160,14 @@ func buildDirectivesFromFlags(cmd *cli.Command) (*filter.Directives, error) {
 	}
 
 	if configPath != "" {
-		return nil, fmt.Errorf("--filter-config is not yet wired; gated on Task 10 (YAML config parser)")
+		d, err := filter.ParseConfigFile(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("--filter-config %q: %w", configPath, err)
+		}
+		if err := d.PreValidate(); err != nil {
+			return nil, err
+		}
+		return d, nil
 	}
 
 	d := &filter.Directives{}

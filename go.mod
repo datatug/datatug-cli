@@ -19,7 +19,7 @@ go 1.26.0
 require (
 	cloud.google.com/go/firestore v1.22.0
 	github.com/alecthomas/chroma/v2 v2.24.1
-	github.com/dal-go/dalgo2sql v0.6.2
+	github.com/dal-go/dalgo2sql v0.6.3
 	github.com/dal-go/dalgo2sqlite v0.0.1
 	github.com/datatug/filetug v0.0.21
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
@@ -29,7 +29,7 @@ require (
 	github.com/google/go-github/v86 v86.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
-	github.com/ingitdb/ingitdb-cli v1.10.0
+	github.com/ingitdb/ingitdb-cli v1.11.2
 	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
@@ -39,12 +39,12 @@ require (
 	github.com/strongo/logus v0.4.1
 	github.com/strongo/strongo-tui v0.0.1
 	github.com/strongo/validation v0.0.8
-	github.com/urfave/cli/v3 v3.8.0
+	github.com/urfave/cli/v3 v3.9.0
 	github.com/xo/dburl v0.24.2
 	github.com/zalando/go-keyring v0.2.8
 	go.uber.org/mock v0.6.0
 	golang.org/x/oauth2 v0.36.0
-	google.golang.org/api v0.278.0
+	google.golang.org/api v0.279.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -77,7 +77,7 @@ require (
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/crediterra/money v0.3.1 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
-	github.com/dal-go/dalgo v0.42.1
+	github.com/dal-go/dalgo v0.43.1
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
@@ -111,7 +111,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/sneat-co/sneat-go-core v0.54.30
+	github.com/sneat-co/sneat-go-core v0.54.31
 	github.com/strongo/analytics v0.2.5 // indirect
 	github.com/strongo/decimal v0.1.1 // indirect
 	github.com/strongo/random v0.0.1

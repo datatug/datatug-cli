@@ -26,17 +26,33 @@ Help wanted to [get test coverage to 100%](https://github.com/datatug/datatug-cl
 
 ## Installation
 
-### From source codes
+### macOS / Linux — curl
 
 ```bash
-go install github.com/datatug/datatug-cli@latest -o datatug
+curl -fsSL https://datatug.io/install/get-cli | sh
 ```
 
-### macOS ([Homebrew](https://github.com/datatug/homebrew-tap))
+Environment overrides: `DATATUG_VERSION` (default: latest release), `DATATUG_INSTALL_DIR` (default: `/usr/local/bin` or `~/.local/bin`).
+
+### Windows — PowerShell
+
+```powershell
+powershell -c "irm https://datatug.io/install/get-cli.ps1 | iex"
+```
+
+Environment overrides: `DATATUG_VERSION`, `DATATUG_INSTALL_DIR` (default: `%LOCALAPPDATA%\Programs\datatug\bin`).
+
+### macOS — Homebrew ([tap](https://github.com/datatug/homebrew-tap))
 
 ```bash
 brew tap datatug/tap
 brew install datatug
+```
+
+### Any platform — Go
+
+```bash
+go install github.com/datatug/datatug-cli@latest
 ```
 
 ## What you can do with DataTug

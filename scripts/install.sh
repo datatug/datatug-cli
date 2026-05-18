@@ -12,6 +12,14 @@ set -eu
 
 REPO="datatug/datatug-cli"
 BIN_NAME="datatug"
+# Multi-component releases: when releases are published to a different repo
+# (e.g. synchestra-io/synchestra-releases) and/or tags are prefixed
+# (e.g. "cli-v0.x.y" alongside "servers-v0.x.y"), set these.
+RELEASES_REPO=""
+RELEASE_TAG_PREFIX=""
+
+# Derive defaults
+: "${RELEASES_REPO:=$REPO}"
 
 log()  { printf '%s\n' "$*"; }
 err()  { printf 'error: %s\n' "$*" >&2; }
@@ -41,22 +49,36 @@ fi
 # --- Resolve version -------------------------------------------------------
 VERSION="${DATATUG_VERSION:-latest}"
 if [ "$VERSION" = "latest" ]; then
-  VERSION="$(
-    curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-      | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
-      | head -n1
-  )"
+  if [ -n "$RELEASE_TAG_PREFIX" ]; then
+    # Multi-component releases repo: /releases/latest doesn't know which
+    # prefix we care about — list recent releases and pick the newest with
+    # our prefix.
+    VERSION="$(
+      curl -fsSL "https://api.github.com/repos/${RELEASES_REPO}/releases?per_page=50" \
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
+        | grep "^${RELEASE_TAG_PREFIX}" \
+        | head -n1
+    )"
+  else
+    VERSION="$(
+      curl -fsSL "https://api.github.com/repos/${RELEASES_REPO}/releases/latest" \
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
+        | head -n1
+    )"
+  fi
   [ -n "$VERSION" ] || die "failed to resolve latest release tag from GitHub"
 fi
 
 # goreleaser archives are named with the version without the leading "v"
-VER_NO_V="${VERSION#v}"
+# (and without the optional release-tag prefix).
+VER_NO_V="${VERSION#${RELEASE_TAG_PREFIX}}"
+VER_NO_V="${VER_NO_V#v}"
 
 EXT="tar.gz"
 [ "$OS" = "windows" ] && EXT="zip"
 
 ARCHIVE="${BIN_NAME}_${VER_NO_V}_${OS}_${ARCH}.${EXT}"
-BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+BASE_URL="https://github.com/${RELEASES_REPO}/releases/download/${VERSION}"
 ARCHIVE_URL="${BASE_URL}/${ARCHIVE}"
 CHECKSUMS_URL="${BASE_URL}/${BIN_NAME}_${VER_NO_V}_checksums.txt"
 

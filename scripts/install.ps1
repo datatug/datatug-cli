@@ -18,6 +18,14 @@ try {
 $Repo    = 'datatug/datatug-cli'
 $Project = 'datatug'
 $BinName = "$Project.exe"
+# Multi-component releases: when releases are published to a different repo
+# (e.g. synchestra-io/synchestra-releases) and/or tags are prefixed
+# (e.g. "cli-v0.x.y" alongside "servers-v0.x.y"), set these.
+$ReleasesRepo     = ''
+$ReleaseTagPrefix = ''
+
+# Derive defaults
+if (-not $ReleasesRepo) { $ReleasesRepo = $Repo }
 
 function Write-Info($msg) { Write-Host $msg }
 function Die($msg) { Write-Error $msg; exit 1 }
@@ -36,18 +44,30 @@ if ($arch -eq 'arm64') {
 $version = if ($env:DATATUG_VERSION) { $env:DATATUG_VERSION } else { 'latest' }
 if ($version -eq 'latest') {
     try {
-        $rel = Invoke-RestMethod -UseBasicParsing `
-            -Uri "https://api.github.com/repos/$Repo/releases/latest"
-        $version = $rel.tag_name
+        if ($ReleaseTagPrefix) {
+            # Multi-component releases repo: filter releases by our prefix.
+            $releases = Invoke-RestMethod -UseBasicParsing `
+                -Uri "https://api.github.com/repos/$ReleasesRepo/releases?per_page=50"
+            $match = $releases | Where-Object { $_.tag_name -like "$ReleaseTagPrefix*" } | Select-Object -First 1
+            if ($match) { $version = $match.tag_name }
+        } else {
+            $rel = Invoke-RestMethod -UseBasicParsing `
+                -Uri "https://api.github.com/repos/$ReleasesRepo/releases/latest"
+            $version = $rel.tag_name
+        }
     } catch {
         Die "failed to resolve latest release tag from GitHub: $_"
     }
     if (-not $version) { Die 'failed to resolve latest release tag from GitHub' }
 }
-$verNoV = $version.TrimStart('v')
+$verNoV = $version
+if ($ReleaseTagPrefix -and $verNoV.StartsWith($ReleaseTagPrefix)) {
+    $verNoV = $verNoV.Substring($ReleaseTagPrefix.Length)
+}
+$verNoV = $verNoV.TrimStart('v')
 
 $archive       = "${Project}_${verNoV}_windows_${arch}.zip"
-$baseUrl       = "https://github.com/$Repo/releases/download/$version"
+$baseUrl       = "https://github.com/$ReleasesRepo/releases/download/$version"
 $archiveUrl    = "$baseUrl/$archive"
 $checksumsUrl  = "$baseUrl/${Project}_${verNoV}_checksums.txt"
 

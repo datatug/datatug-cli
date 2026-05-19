@@ -150,7 +150,7 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 					if err != nil {
 						return
 					}
-					_, _, err := client.Repositories.Get(context.Background(), githubOwner, repoName)
+					_, _, err = client.Repositories.Get(context.Background(), githubOwner, repoName)
 					newRepoExists := err == nil
 					if newRepoExists != repoExists {
 						repoExists = newRepoExists

@@ -148,6 +148,7 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 				if token != nil {
 					client, err := github.NewClient(github.WithHTTPClient(oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token))))
 					if err != nil {
+						fmt.Printf("failed to initialize GitHub client: %v\n", err)
 						return
 					}
 					_, _, err = client.Repositories.Get(context.Background(), githubOwner, repoName)
@@ -229,6 +230,7 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 					go func() {
 						client, err := github.NewClient(github.WithHTTPClient(oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token))))
 						if err != nil {
+							fmt.Printf("failed to initialize GitHub client: %v\n", err)
 							return
 						}
 						user, _, err := client.Users.Get(context.Background(), "")

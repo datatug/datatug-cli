@@ -60,7 +60,13 @@ func ShowAddToGitHubRepo(tui *sneatnav.TUI) {
 	useToken := func(token *oauth2.Token) {
 		ts := oauth2.StaticTokenSource(token)
 		tc := oauth2.NewClient(ctx, ts)
-		client := github.NewClient(tc)
+		client, err := github.NewClient(github.WithHTTPClient(tc))
+		if err != nil {
+			tui.App.QueueUpdateDraw(func() {
+				sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to initialize GitHub client: %w", err))
+			})
+			return
+		}
 
 		// List repositories
 		repos, _, err := client.Repositories.ListByAuthenticatedUser(ctx, nil)

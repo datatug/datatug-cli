@@ -146,7 +146,10 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 			go func() {
 				token, _ := ghauth.GetToken()
 				if token != nil {
-					client := github.NewClient(oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token)))
+					client, err := github.NewClient(github.WithHTTPClient(oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token))))
+					if err != nil {
+						return
+					}
 					_, _, err := client.Repositories.Get(context.Background(), githubOwner, repoName)
 					newRepoExists := err == nil
 					if newRepoExists != repoExists {
@@ -224,7 +227,10 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 				if githubOwner == "" {
 					// Fetch owner title
 					go func() {
-						client := github.NewClient(oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token)))
+						client, err := github.NewClient(github.WithHTTPClient(oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token))))
+						if err != nil {
+							return
+						}
 						user, _, err := client.Users.Get(context.Background(), "")
 						if err == nil {
 							githubOwner = user.GetLogin()
@@ -325,7 +331,13 @@ func authenticateGitHub(tui *sneatnav.TUI, onSuccess func(owner string)) {
 				}
 				_ = ghauth.SaveToken(token)
 
-				client := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(token)))
+				client, err := github.NewClient(github.WithHTTPClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(token))))
+				if err != nil {
+					tui.App.QueueUpdateDraw(func() {
+						sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to initialize GitHub client: %w", err))
+					})
+					return
+				}
 				user, _, _ := client.Users.Get(ctx, "")
 
 				tui.App.QueueUpdateDraw(func() {
@@ -406,7 +418,10 @@ func createGitHubProject(tui *sneatnav.TUI, title string, visibility datatug.Pro
 
 	ts := oauth2.StaticTokenSource(token)
 	tc := oauth2.NewClient(ctx, ts)
-	client := github.NewClient(tc)
+	client, err := github.NewClient(github.WithHTTPClient(tc))
+	if err != nil {
+		return projectRef, fmt.Errorf("failed to initialize GitHub client: %w", err)
+	}
 
 	var projectID string
 	projectsStore := dtgithub.NewRepoProjectsStore(client, "")

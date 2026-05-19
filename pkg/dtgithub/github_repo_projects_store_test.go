@@ -12,7 +12,8 @@ import (
 func TestNewRepoProjectsStore(t *testing.T) {
 	ctx := context.Background()
 	httpClient, _, _ := http.NewClient(ctx)
-	ghClient := github.NewClient(httpClient)
+	ghClient, err := github.NewClient(github.WithHTTPClient(httpClient))
+	assert.NoError(t, err)
 	store := NewRepoProjectsStore(ghClient, "test_branch")
 	assert.NotNil(t, store)
 	assert.Equal(t, "test_branch", store.branch)

@@ -1,6 +1,7 @@
 package dtgithub
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/google/go-github/v87/github"
@@ -8,7 +9,7 @@ import (
 )
 
 func TestNewRepoProjectsStore(t *testing.T) {
-	ghClient, err := github.NewClient()
+	ghClient, err := github.NewClient(github.WithHTTPClient(&http.Client{}))
 	assert.NoError(t, err)
 	store := NewRepoProjectsStore(ghClient, "test_branch")
 	assert.NotNil(t, store)

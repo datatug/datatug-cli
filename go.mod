@@ -27,7 +27,7 @@ require (
 	github.com/gdamore/tcell/v2 v2.13.9
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/google/go-github/v86 v86.0.0
-	github.com/google/go-github/v87 v87.0.0
+	github.com/google/go-github/v88 v88.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
 	github.com/ingitdb/ingitdb-cli v1.11.4

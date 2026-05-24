@@ -20,7 +20,7 @@ require (
 	cloud.google.com/go/firestore v1.22.0
 	github.com/alecthomas/chroma/v2 v2.24.1
 	github.com/dal-go/dalgo2sql v0.6.5
-	github.com/dal-go/dalgo2sqlite v0.0.1
+	github.com/dal-go/dalgo2sqlite v0.0.2
 	github.com/datatug/filetug v0.0.21
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3

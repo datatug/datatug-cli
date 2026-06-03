@@ -119,6 +119,13 @@ func TestSaveProject_PersistsDbModels(t *testing.T) {
 								Columns: datatug.ColumnModels{
 									{ColumnInfo: datatug.ColumnInfo{DbColumnProps: datatug.DbColumnProps{Name: "id", DbType: "INTEGER"}}},
 								},
+								PrimaryKey: &datatug.UniqueKey{Name: "PK_widgets", Columns: []string{"id"}},
+								ForeignKeys: datatug.ForeignKeys{
+									{Name: "FK_widgets_0", Columns: []string{"id"}, RefTable: datatug.NewCollectionKey(datatug.CollectionTypeTable, "gadgets", "main", "", nil)},
+								},
+								Indexes: []*datatug.Index{
+									{Name: "idx_widgets_id", Type: "BTREE", Columns: []*datatug.IndexColumn{{Name: "id"}}},
+								},
 							},
 						},
 					},
@@ -145,6 +152,16 @@ func TestSaveProject_PersistsDbModels(t *testing.T) {
 		assert.Equal(t, "widgets", table.Name)
 		if assert.Len(t, table.Columns, 1) {
 			assert.Equal(t, "id", table.Columns[0].Name)
+		}
+		// Primary key, foreign keys and indexes must round-trip too.
+		if assert.NotNil(t, table.PrimaryKey) {
+			assert.Equal(t, []string{"id"}, table.PrimaryKey.Columns)
+		}
+		if assert.Len(t, table.ForeignKeys, 1) {
+			assert.Equal(t, "gadgets", table.ForeignKeys[0].RefTable.Name)
+		}
+		if assert.Len(t, table.Indexes, 1) {
+			assert.Equal(t, "idx_widgets_id", table.Indexes[0].Name)
 		}
 	}
 }

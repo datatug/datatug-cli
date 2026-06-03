@@ -35,7 +35,7 @@ func TestScanDbCatalog_SQLite3(t *testing.T) {
 	var widgets *datatug.CollectionInfo
 	for _, sch := range catalog.Schemas {
 		for _, tbl := range sch.Tables {
-			if tbl.Name() == "widgets" {
+			if tbl.Name == "widgets" {
 				widgets = tbl
 			}
 		}

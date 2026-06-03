@@ -30,37 +30,37 @@ func TestIsKnownCollectionType(t *testing.T) {
 
 func TestNewTableKey(t *testing.T) {
 	key := NewTableKey("table1", "schema1", "catalog1", nil)
-	assert.Equal(t, CollectionTypeTable, key.Type())
-	assert.Equal(t, "table1", key.Name())
-	assert.Equal(t, "schema1", key.Schema())
-	assert.Equal(t, "catalog1", key.Catalog())
+	assert.Equal(t, CollectionTypeTable, key.Type)
+	assert.Equal(t, "table1", key.Name)
+	assert.Equal(t, "schema1", key.Schema)
+	assert.Equal(t, "catalog1", key.Catalog)
 }
 
 func TestNewViewKey(t *testing.T) {
 	key := NewViewKey("view1", "schema1", "catalog1", nil)
-	assert.Equal(t, CollectionTypeView, key.Type())
-	assert.Equal(t, "view1", key.Name())
-	assert.Equal(t, "schema1", key.Schema())
-	assert.Equal(t, "catalog1", key.Catalog())
+	assert.Equal(t, CollectionTypeView, key.Type)
+	assert.Equal(t, "view1", key.Name)
+	assert.Equal(t, "schema1", key.Schema)
+	assert.Equal(t, "catalog1", key.Catalog)
 }
 
 func TestNewCollectionKey(t *testing.T) {
 	t.Run("table", func(t *testing.T) {
 		key := NewCollectionKey(CollectionTypeTable, "table1", "schema1", "catalog1", nil)
-		assert.Equal(t, CollectionTypeTable, key.Type())
-		assert.Equal(t, "table1", key.Name())
-		assert.Equal(t, "schema1", key.Schema())
-		assert.Equal(t, "catalog1", key.Catalog())
+		assert.Equal(t, CollectionTypeTable, key.Type)
+		assert.Equal(t, "table1", key.Name)
+		assert.Equal(t, "schema1", key.Schema)
+		assert.Equal(t, "catalog1", key.Catalog)
 	})
 	t.Run("view", func(t *testing.T) {
 		key := NewCollectionKey(CollectionTypeView, "view1", "schema1", "catalog1", nil)
-		assert.Equal(t, CollectionTypeView, key.Type())
-		assert.Equal(t, "view1", key.Name())
+		assert.Equal(t, CollectionTypeView, key.Type)
+		assert.Equal(t, "view1", key.Name)
 	})
 	t.Run("any", func(t *testing.T) {
 		key := NewCollectionKey(CollectionTypeAny, "any1", "schema1", "catalog1", nil)
-		assert.Equal(t, CollectionType(CollectionTypeAny), key.Type())
-		assert.Equal(t, "any1", key.Name())
+		assert.Equal(t, CollectionType(CollectionTypeAny), key.Type)
+		assert.Equal(t, "any1", key.Name)
 	})
 	t.Run("invalid_panic", func(t *testing.T) {
 		assert.Panics(t, func() {

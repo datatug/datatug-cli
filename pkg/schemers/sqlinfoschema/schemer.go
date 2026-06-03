@@ -32,19 +32,19 @@ func (s InformationSchema) GetDatabase(name string) (database *datatug.DbCatalog
 		return database, fmt.Errorf("failed to retrieve tables metadata: %w", err)
 	}
 	for _, t := range tables {
-		schema := database.Schemas.GetByID(t.Schema())
+		schema := database.Schemas.GetByID(t.Schema)
 		if schema == nil {
 			schema = new(datatug.DbSchema)
-			schema.ID = t.Schema()
+			schema.ID = t.Schema
 			database.Schemas = append(database.Schemas, schema)
 		}
-		switch t.Name() {
+		switch t.Name {
 		case "BASE TABLE":
 			schema.Tables = append(schema.Tables, t)
 		case "VIEW":
 			schema.Views = append(schema.Views, t)
 		default:
-			err = fmt.Errorf("object [%s] has unknown DB type: %v", t.Name(), t.DbType)
+			err = fmt.Errorf("object [%s] has unknown DB type: %v", t.Name, t.DbType)
 			return
 		}
 	}
@@ -195,11 +195,11 @@ ORDER BY tc.TABLE_SCHEMA, tc.TABLE_NAME, tc.CONSTRAINT_TYPE, kcu.CONSTRAINT_NAME
 						}
 						var refByTable *datatug.ReferencedBy
 						for _, refByTable = range refTable.ReferencedBy {
-							if refByTable.Catalog() == catalog && refByTable.Schema() == constraint.SchemaName && refByTable.Name() == constraint.TableName {
+							if refByTable.Catalog == catalog && refByTable.Schema == constraint.SchemaName && refByTable.Name == constraint.TableName {
 								break
 							}
 						}
-						if refByTable == nil || refByTable.Catalog() != catalog || refByTable.Schema() != constraint.SchemaName || refByTable.Name() != constraint.TableName {
+						if refByTable == nil || refByTable.Catalog != catalog || refByTable.Schema != constraint.SchemaName || refByTable.Name != constraint.TableName {
 							refByTable = &datatug.ReferencedBy{
 								DBCollectionKey: table.DBCollectionKey,
 								ForeignKeys:     make([]*datatug.RefByForeignKey, 0, 1),

@@ -42,20 +42,20 @@ USE %s
 SELECT
 	*
 FROM %s.%s
-%s JOIN %s.%s ON`, catalog, table.Schema(), table.Name(), "%v", fk.RefTable.Schema(), fk.RefTable.Name()))
+%s JOIN %s.%s ON`, catalog, table.Schema, table.Name, "%v", fk.RefTable.Schema, fk.RefTable.Name))
 
-			fkRefTable := dbServer.Catalogs.GetTable(catalog, fk.RefTable.Schema(), fk.RefTable.Name())
+			fkRefTable := dbServer.Catalogs.GetTable(catalog, fk.RefTable.Schema, fk.RefTable.Name)
 			if fkRefTable == nil {
-				return nil, fmt.Errorf("table %s.%s is referencing via %s to unknown table %s.%s", table.Schema(), table.Name(), fk.Name, fk.RefTable.Schema(), fk.RefTable.Name())
+				return nil, fmt.Errorf("table %s.%s is referencing via %s to unknown table %s.%s", table.Schema, table.Name, fk.Name, fk.RefTable.Schema, fk.RefTable.Name)
 			}
 			for i, fkCol := range fk.Columns {
 				if i > 0 {
 					joinSQL += " AND"
 				}
-				if fkRefTable.Name() != table.Name() {
-					joinSQL += fmt.Sprintf(" %s.%s = %s.%s", fkRefTable.Name(), fkRefTable.PrimaryKey.Columns[i], table.Name(), fkCol)
+				if fkRefTable.Name != table.Name {
+					joinSQL += fmt.Sprintf(" %s.%s = %s.%s", fkRefTable.Name, fkRefTable.PrimaryKey.Columns[i], table.Name, fkCol)
 				} else {
-					joinSQL += fmt.Sprintf(" %s.%s.%s = %s.%s.%s", fkRefTable.Schema(), fkRefTable.Name(), fkRefTable.PrimaryKey.Columns[i], table.Schema(), table.Name(), fkCol)
+					joinSQL += fmt.Sprintf(" %s.%s.%s = %s.%s.%s", fkRefTable.Schema, fkRefTable.Name, fkRefTable.PrimaryKey.Columns[i], table.Schema, table.Name, fkCol)
 				}
 			}
 
@@ -71,8 +71,8 @@ FROM %s.%s
 			fks[i] = fmt.Sprintf("- `%s` (%s) ⇒ [%s](../../../%s).[%s](../../../%s/tables/%s)",
 				fk.Name,
 				fmt.Sprintf("**%v**", strings.Join(fk.Columns, "**, **")),
-				fk.RefTable.Schema(), fk.RefTable.Schema(), fk.RefTable.Name(),
-				fk.RefTable.Schema(), fk.RefTable.Name(),
+				fk.RefTable.Schema, fk.RefTable.Schema, fk.RefTable.Name,
+				fk.RefTable.Schema, fk.RefTable.Name,
 			) + "\n  <br>&nbsp;&nbsp;DDL *to* JOIN: " + strings.Join(joins, " | ")
 		}
 		//<br>&nbsp;&nbsp;&nbsp;&nbsp;DDL to JOIN: [LEFT](left) | [INNER](inner) | [RIGHT](right)
@@ -194,11 +194,11 @@ FROM %s.%s
 
 	var openInDatatugApp string
 	if repoID != "" && projectID != "" {
-		schema := table.Schema()
+		schema := table.Schema
 		if !reUnquoted.MatchString(schema) {
 			schema = fmt.Sprintf("[%s]", schema)
 		}
-		name := table.Name()
+		name := table.Name
 		if !reUnquoted.MatchString(name) {
 			name = fmt.Sprintf("[%s]", name)
 		}
@@ -246,19 +246,19 @@ func (*refByWalker) getTableID(schema, name string) string {
 
 func (walker *refByWalker) walkReferencedBy(table *datatug.CollectionInfo, level int) error {
 	level++
-	tableID := walker.getTableID(table.Schema(), table.Name())
+	tableID := walker.getTableID(table.Schema, table.Name)
 	walker.processed[tableID] = table
 	for i, refBy := range table.ReferencedBy {
-		refByID := walker.getTableID(refBy.Schema(), refBy.Name())
+		refByID := walker.getTableID(refBy.Schema, refBy.Name)
 		isSelf := refByID == tableID
 		if _, ok := walker.processed[refByID]; ok && !isSelf {
 			continue
 		}
 		walker.process(table, refBy, level, i)
-		referringTable := walker.dbServer.Catalogs.GetTable(walker.catalog, refBy.Schema(), refBy.Name())
+		referringTable := walker.dbServer.Catalogs.GetTable(walker.catalog, refBy.Schema, refBy.Name)
 		if referringTable == nil {
 			return fmt.Errorf("catalog %v has table [%s.%s] that is referenced by unknown table [%s.%s]",
-				walker.catalog, table.Schema(), table.Name(), refBy.Schema(), refBy.Name())
+				walker.catalog, table.Schema, table.Name, refBy.Schema, refBy.Name)
 		}
 		if !isSelf && len(referringTable.ReferencedBy) > 0 {
 			_ = walker.walkReferencedBy(referringTable, level)
@@ -273,7 +273,7 @@ USE %s
 SELECT
 	*
 FROM %s.%s
-%s JOIN %s.%s ON`, catalog, parent.Schema(), parent.Name(), "%v", refBy.Schema(), refBy.Name()))
+%s JOIN %s.%s ON`, catalog, parent.Schema, parent.Name, "%v", refBy.Schema, refBy.Name))
 
 	const singleIndent = "  "
 	indent := strings.Repeat(singleIndent, (level-1)*len(singleIndent))
@@ -287,7 +287,7 @@ FROM %s.%s
 		//indent += singleIndent
 	}
 
-	s = append(s, indent+fmt.Sprintf("- [%s](../../../%s).[%s](../../../%s/tables/%s)", refBy.Schema(), refBy.Schema(), refBy.Name(), refBy.Schema(), refBy.Name()))
+	s = append(s, indent+fmt.Sprintf("- [%s](../../../%s).[%s](../../../%s/tables/%s)", refBy.Schema, refBy.Schema, refBy.Name, refBy.Schema, refBy.Name))
 	fkIndent := indent + singleIndent
 	const itemTextPadding = "  "
 	for _, fk := range refBy.ForeignKeys {
@@ -296,10 +296,10 @@ FROM %s.%s
 			if i > 0 {
 				joinSQL += " AND"
 			}
-			if refBy.Name() != parent.Name() {
-				joinSQL += fmt.Sprintf(" %s.%s = %s.%s", refBy.Name(), fkCol, parent.Name(), parent.PrimaryKey.Columns[i])
+			if refBy.Name != parent.Name {
+				joinSQL += fmt.Sprintf(" %s.%s = %s.%s", refBy.Name, fkCol, parent.Name, parent.PrimaryKey.Columns[i])
 			} else {
-				joinSQL += fmt.Sprintf(" %s.%s.%s = %v.%v.%v", refBy.Schema(), refBy.Name(), fkCol, parent.Schema(), parent.Name(), parent.PrimaryKey.Columns[i])
+				joinSQL += fmt.Sprintf(" %s.%s.%s = %v.%v.%v", refBy.Schema, refBy.Name, fkCol, parent.Schema, parent.Name, parent.PrimaryKey.Columns[i])
 			}
 		}
 

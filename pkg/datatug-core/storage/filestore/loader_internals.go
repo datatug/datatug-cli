@@ -301,7 +301,6 @@ func loadTable(dirPath, schema, tableName string) (table *datatug.CollectionInfo
 	//log.Printf("loadTable: prefix=%v", prefix)
 
 	table = &datatug.CollectionInfo{}
-	table.DBCollectionKey = datatug.NewCollectionKey(datatug.CollectionTypeTable, tableName, schema, "", nil)
 	loadTableFile := func(suffix string, required bool) (err error) {
 		filePath := path.Join(tableDirPath, prefix+suffix)
 		//log.Printf("loadTableFile: path=%v, required=%v", filePath, required)
@@ -332,6 +331,9 @@ func loadTable(dirPath, schema, tableName string) (table *datatug.CollectionInfo
 	//	err = fmt.Errorf("failed to load table files: %w", err)
 	//	return
 	//}
+	// In the directory-tree format the table identity comes from the file path,
+	// so apply it after loading (the file body's name, if any, must not override it).
+	table.DBCollectionKey = datatug.NewCollectionKey(datatug.CollectionTypeTable, tableName, schema, "", nil)
 	return
 }
 

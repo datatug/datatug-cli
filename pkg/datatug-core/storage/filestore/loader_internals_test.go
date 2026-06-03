@@ -138,14 +138,14 @@ func TestLoaderInternals(t *testing.T) {
 		loadedTable, err := loadTable(tablesDir, "dbo", tableName)
 		assert.NoError(t, err)
 		assert.NotNil(t, loadedTable)
-		assert.Equal(t, tableName, loadedTable.Name())
+		assert.Equal(t, tableName, loadedTable.Name)
 	})
 
 	t.Run("loadTableModel", func(t *testing.T) {
 		tm, err := loadTableModel("test")
 		assert.NoError(t, err)
 		assert.NotNil(t, tm)
-		assert.Equal(t, "test", tm.Name())
+		assert.Equal(t, "test", tm.Name)
 	})
 
 	t.Run("loadDbCatalogs", func(t *testing.T) {
@@ -212,6 +212,6 @@ func TestLoaderInternals(t *testing.T) {
 		tables, err := loadTables(schemasDir, schemaID, folder)
 		assert.NoError(t, err)
 		assert.Len(t, tables, 1)
-		assert.Equal(t, tableID, tables[0].Name())
+		assert.Equal(t, tableID, tables[0].Name)
 	})
 }

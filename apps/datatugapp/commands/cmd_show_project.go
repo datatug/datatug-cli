@@ -77,19 +77,19 @@ func (v *showProjectCommand) Execute(_ []string) error {
 						}
 					}
 					printTable := func(singular string, t *datatug.CollectionInfo) {
-						_, _ = fmt.Fprintf(w, "\t\t\t\t📄 %v: %s.%s\n", singular, t.Schema(), t.Name())
+						_, _ = fmt.Fprintf(w, "\t\t\t\t📄 %v: %s.%s\n", singular, t.Schema, t.Name)
 						if t.PrimaryKey != nil {
 							_, _ = fmt.Fprintf(w, "\t\t\t\t\t🔑 Primary key: %s (%s)\n", t.PrimaryKey.Name, strings.Join(t.PrimaryKey.Columns, ", "))
 						}
 						if len(t.ForeignKeys) > 0 {
 							_, _ = fmt.Fprintf(w, "\t\t\t\t\t🔗 Foreign keys (%d):", len(t.ForeignKeys))
 							for _, fk := range t.ForeignKeys {
-								_, _ = fmt.Fprintf(w, "\t\t\t\t\t\t (%v) %s.%s @ %v\n", strings.Join(fk.Columns, ", "), fk.RefTable.Schema(), fk.RefTable.Name(), fk.Name)
+								_, _ = fmt.Fprintf(w, "\t\t\t\t\t\t (%v) %s.%s @ %v\n", strings.Join(fk.Columns, ", "), fk.RefTable.Schema, fk.RefTable.Name, fk.Name)
 							}
 						}
 						for _, refBy := range t.ReferencedBy {
 							for _, fk := range refBy.ForeignKeys {
-								_, _ = fmt.Fprintf(w, "\t\t\t\t\t📎 Referenced by: %s.%s (%s) @ %v\n", refBy.Schema(), refBy.Name(), strings.Join(fk.Columns, ", "), fk.Name)
+								_, _ = fmt.Fprintf(w, "\t\t\t\t\t📎 Referenced by: %s.%s (%s) @ %v\n", refBy.Schema, refBy.Name, strings.Join(fk.Columns, ", "), fk.Name)
 							}
 						}
 						printCols(t)

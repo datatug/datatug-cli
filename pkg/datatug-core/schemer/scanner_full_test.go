@@ -555,7 +555,7 @@ func TestScanCatalog_Errors(t *testing.T) {
 
 	getByName := func(tables datatug.Tables, name string) *datatug.CollectionInfo {
 		for _, t := range tables {
-			if t.Name() == name {
+			if t.Name == name {
 				return t
 			}
 		}
@@ -811,8 +811,8 @@ func TestScanCatalog_Errors(t *testing.T) {
 		}
 		tables := datatug.Tables(catalog.Schemas.GetByID(schemaID).Tables)
 		t1 := getByName(tables, "t1")
-		if t1.ForeignKeys[0].RefTable.Name() != "t2" {
-			t.Errorf("expected ref table t2, got %v", t1.ForeignKeys[0].RefTable.Name())
+		if t1.ForeignKeys[0].RefTable.Name != "t2" {
+			t.Errorf("expected ref table t2, got %v", t1.ForeignKeys[0].RefTable.Name)
 		}
 		if len(t1.ForeignKeys[0].Columns) != 2 {
 			t.Errorf("expected 2 columns in FK, got %v", len(t1.ForeignKeys[0].Columns))

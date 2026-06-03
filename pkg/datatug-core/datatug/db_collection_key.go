@@ -26,12 +26,17 @@ func IsKnownCollectionType(v CollectionType) bool {
 	}
 }
 
-// DBCollectionKey defines a key that identifies a table or a view
-type DBCollectionKey struct { // TODO: Should we rename back to the `CollectionKey`?
-	schema  string
-	catalog string
-	t       CollectionType
-	Ref     dal.CollectionRef
+// DBCollectionKey defines a key that identifies a table or a view.
+//
+// The identity fields are exported (with json tags) so a collection/table
+// round-trips through JSON. Ref is in-memory only (json:"-") and is populated
+// by NewCollectionKey.
+type DBCollectionKey struct {
+	Name    string            `json:"name"`
+	Schema  string            `json:"schema,omitempty"`
+	Catalog string            `json:"catalog,omitempty"`
+	Type    CollectionType    `json:"type,omitempty"`
+	Ref     dal.CollectionRef `json:"-"`
 }
 
 func NewCollectionKey(t CollectionType, name, schema, catalog string, parent *dal.Key) DBCollectionKey {
@@ -39,9 +44,10 @@ func NewCollectionKey(t CollectionType, name, schema, catalog string, parent *da
 		panic(fmt.Sprintf("unknown collection type: %s", t))
 	}
 	return DBCollectionKey{
-		t:       t,
-		schema:  schema,
-		catalog: catalog,
+		Type:    t,
+		Schema:  schema,
+		Catalog: catalog,
+		Name:    name,
 		Ref:     dal.NewCollectionRef(name, "", parent),
 	}
 }
@@ -54,24 +60,8 @@ func NewViewKey(name, schema, catalog string, parent *dal.Key) DBCollectionKey {
 	return NewCollectionKey(CollectionTypeView, name, schema, catalog, parent)
 }
 
-func (v DBCollectionKey) Name() string {
-	return v.Ref.Name()
-}
-
-func (v DBCollectionKey) Type() CollectionType {
-	return v.t
-}
-
-func (v DBCollectionKey) Schema() string {
-	return v.schema
-}
-
-func (v DBCollectionKey) Catalog() string {
-	return v.catalog
-}
-
 func (v DBCollectionKey) String() string {
-	return fmt.Sprintf("DBCollectionKey{catalog=%s,ref:%s}", v.catalog, v.Ref.String())
+	return fmt.Sprintf("DBCollectionKey{catalog=%s,schema=%s,name=%s}", v.Catalog, v.Schema, v.Name)
 }
 
 // Validate returns error if not valid

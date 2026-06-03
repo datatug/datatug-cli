@@ -8,17 +8,39 @@ import (
 	"strconv"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dbconnection"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/urfave/cli/v3"
 )
 
-func scanCommandAction(_ context.Context, _ *cli.Command) error {
+var (
+	scanProjectFlag  = cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "Registered project id/name to scan into"}
+	scanDirFlag      = cli.StringFlag{Name: "directory", Aliases: []string{"d"}, Usage: "Path to the project directory (alternative to --project)"}
+	scanDriverFlag   = cli.StringFlag{Name: "driver", Aliases: []string{"D"}, Usage: "DB driver, e.g. sqlserver"}
+	scanServerFlag   = cli.StringFlag{Name: "server", Aliases: []string{"s"}, Usage: "Network server / host name"}
+	scanPortFlag     = cli.IntFlag{Name: "port", Usage: "Server network port (default if omitted)"}
+	scanUserFlag     = cli.StringFlag{Name: "user", Aliases: []string{"U"}, Usage: "DB login user"}
+	scanPasswordFlag = cli.StringFlag{Name: "password", Aliases: []string{"P"}, Usage: "DB login password"}
+	scanDbFlag       = cli.StringFlag{Name: "db", Usage: "ID of database to scan", Required: true}
+	scanDbModelFlag  = cli.StringFlag{Name: "dbmodel", Usage: "ID of DB model (required for newly scanned databases)"}
+	scanEnvFlag      = cli.StringFlag{Name: "env", Usage: "Environment the DB belongs to. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.", Required: true}
+)
+
+func scanCommandAction(_ context.Context, c *cli.Command) error {
 	v := &scanDbCommand{}
-	var err error
-	if err = v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	v.ProjectName = c.String(scanProjectFlag.Name)
+	v.ProjectDir = c.String(scanDirFlag.Name)
+	v.Driver = c.String(scanDriverFlag.Name)
+	v.Host = c.String(scanServerFlag.Name)
+	v.Port = c.Int(scanPortFlag.Name)
+	v.User = c.String(scanUserFlag.Name)
+	v.Password = c.String(scanPasswordFlag.Name)
+	v.Database = c.String(scanDbFlag.Name)
+	v.DbModel = c.String(scanDbModelFlag.Name)
+	v.Environment = c.String(scanEnvFlag.Name)
+
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
 	}
 	log.Println("Initiating project...")
@@ -26,73 +48,24 @@ func scanCommandAction(_ context.Context, _ *cli.Command) error {
 		return fmt.Errorf("ProjectDir=[%v] not found: %w", v.ProjectDir, err)
 	}
 
-	if v.Host == "" {
-		panic("not implemented yet")
-		//store := v.store.GetProjectStore(v.projectID)
-		//envDb, err := v.store.GetProjectStore(v.projectID).Environments().Environment(v.Environment).Servers().Server(v.Host).Catalogs().Catalog(v.Database).LoadEnvironmentCatalog()
-		//if err != nil {
-		//	return err
-		//}
-		//if v.Driver == "" {
-		//	if envDb.Server.Driver == "" {
-		//		return fmt.Errorf("env DB has no driver specified: %v @ %v", v.Database, v.Host)
-		//	}
-		//	v.Driver = envDb.Server.Driver
-		//} else if envDb.Server.Driver != v.Driver {
-		//	return fmt.Errorf("requested driver %v is different from one used by DB [%v]: %v", v.Driver, v.Database, envDb.Server.Driver)
-		//}
-		//v.Host = envDb.Server.Host
-		//if v.DbModel == "" {
-		//	v.DbModel = envDb.DbModel
-		//}
-	}
-
-	options := []string{"mode=" + dbconnection.ModeReadOnly}
-	if v.Port != 0 {
-		options = append(options, "port="+strconv.Itoa(v.Port))
-	}
-
-	var connParams dbconnection.Params
-
-	switch v.Driver {
-	case "sqlite3":
-		panic("not implemented yet")
-		//ctx := context.Background()
-		//serverRef := datatug.ServerRef{Driver: v.Driver, Host: "localhost"}
-		//store := v.store.GetProjectStore(v.projectID)
-		//dbCatalog, err := .DbServers().DbServer(serverRef).Catalogs().DbCatalog(v.Database).LoadDbCatalogSummary(ctx)
-		//if err != nil {
-		//	return fmt.Errorf("failed to load DB catalog: %w", err)
-		//}
-		//if dbCatalog == nil {
-		//	return fmt.Errorf("db catalog not found for server=%+v, catalog=%v", serverRef, v.Database)
-		//}
-		//fullPath, err := homedir.Expand(dbCatalog.Path)
-		//if err != nil {
-		//	return fmt.Errorf("failed to expand path for SQLite3 connection string: %w", err)
-		//}
-		//connParams = dbconnection.NewSQLite3ConnectionParams(fullPath, v.Database, dbconnection.ModeReadOnly)
-	default:
-		if connParams, err = dbconnection.NewConnectionString(v.Driver, v.Host, v.User, v.Password, v.Database, options...); err != nil {
-			return fmt.Errorf("invalid connection string: %v", err)
-		}
+	connParams, err := v.connectionParams()
+	if err != nil {
+		return err
 	}
 
 	if v.DbModel == "" {
 		v.DbModel = v.Database
 	}
 
-	var datatugProject *datatug.Project
 	projectStore := v.store.GetProjectStore(v.projectID)
-	datatugProject, err = api.UpdateDbSchema(context.Background(), projectStore, v.projectID, v.Environment, v.Driver, v.DbModel, connParams)
+	datatugProject, err := api.UpdateDbSchema(context.Background(), projectStore, v.projectID, v.Environment, v.Driver, v.DbModel, connParams)
 	if err != nil {
 		return err
 	}
 
 	log.Println("Saving project", datatugProject.ID, "...")
 	storage.Current, _ = filestore.NewSingleProjectStore(v.ProjectDir, v.projectID)
-	var dal storage.Store
-	dal, err = storage.NewDatatugStore("")
+	dal, err := storage.NewDatatugStore("")
 	if err != nil {
 		return err
 	}
@@ -103,12 +76,41 @@ func scanCommandAction(_ context.Context, _ *cli.Command) error {
 	return nil
 }
 
+// connectionParams builds DB connection parameters from the scan flags.
+// Code paths that are not yet implemented return an error instead of panicking.
+func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
+	if v.Host == "" {
+		// Deriving the server/host from the project's environment config is not implemented yet.
+		return nil, fmt.Errorf("deriving the DB server from environment config is not implemented yet — pass -s/--server")
+	}
+
+	options := []string{"mode=" + dbconnection.ModeReadOnly}
+	if v.Port != 0 {
+		options = append(options, "port="+strconv.Itoa(v.Port))
+	}
+
+	switch v.Driver {
+	case "sqlite3":
+		return nil, fmt.Errorf("scanning sqlite3 databases is not implemented yet")
+	default:
+		connParams, err := dbconnection.NewConnectionString(v.Driver, v.Host, v.User, v.Password, v.Database, options...)
+		if err != nil {
+			return nil, fmt.Errorf("invalid connection string: %w", err)
+		}
+		return connParams, nil
+	}
+}
+
 func scanCommandArgs() *cli.Command {
 	return &cli.Command{
 		Name:        "scan",
 		Usage:       "Adds or updates DB metadata",
 		Description: "Adds or updates DB metadata from a specific server in a specific environment",
-		Action:      scanCommandAction,
+		Flags: []cli.Flag{
+			&scanProjectFlag, &scanDirFlag, &scanDriverFlag, &scanServerFlag, &scanPortFlag,
+			&scanUserFlag, &scanPasswordFlag, &scanDbFlag, &scanDbModelFlag, &scanEnvFlag,
+		},
+		Action: scanCommandAction,
 	}
 }
 

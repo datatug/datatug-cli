@@ -280,7 +280,7 @@ func (c demoCommand) addDemoProjectToDatatugConfig(datatugUserDir, demoProjectPa
 	if demoProjConfig != nil {
 		demoProjConfig.Origin = demoProjectPath
 		settings.Projects = append(settings.Projects, demoProjConfig)
-		if err = saveConfig(settings); err != nil {
+		if err = dtconfig.SaveSettings(settings); err != nil {
 			return fmt.Errorf("failed to save settings: %w", err)
 		}
 	}

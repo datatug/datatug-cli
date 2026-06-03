@@ -9,7 +9,6 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dbconnection"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/urfave/cli/v3"
 )
@@ -25,6 +24,7 @@ var (
 	scanDbFlag       = cli.StringFlag{Name: "db", Usage: "ID of database to scan", Required: true}
 	scanDbModelFlag  = cli.StringFlag{Name: "dbmodel", Usage: "ID of DB model (required for newly scanned databases)"}
 	scanEnvFlag      = cli.StringFlag{Name: "env", Usage: "Environment the DB belongs to. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.", Required: true}
+	scanPathFlag     = cli.StringFlag{Name: "path", Usage: "Path to the SQLite database file (required for -D sqlite3)"}
 )
 
 func scanCommandAction(_ context.Context, c *cli.Command) error {
@@ -39,6 +39,7 @@ func scanCommandAction(_ context.Context, c *cli.Command) error {
 	v.Database = c.String(scanDbFlag.Name)
 	v.DbModel = c.String(scanDbModelFlag.Name)
 	v.Environment = c.String(scanEnvFlag.Name)
+	v.Path = c.String(scanPathFlag.Name)
 
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
@@ -64,21 +65,23 @@ func scanCommandAction(_ context.Context, c *cli.Command) error {
 	}
 
 	log.Println("Saving project", datatugProject.ID, "...")
-	storage.Current, _ = filestore.NewSingleProjectStore(v.ProjectDir, v.projectID)
-	dal, err := storage.NewDatatugStore("")
-	if err != nil {
-		return err
-	}
-	if err = dal.GetProjectStore(datatugProject.ID).SaveProject(context.Background(), datatugProject); err != nil {
-		return fmt.Errorf("failed to save datatug project [%v]: %w", v.projectID, err)
+	saveStore, _ := filestore.NewSingleProjectStore(v.ProjectDir, datatugProject.ID)
+	if err = saveStore.GetProjectStore(datatugProject.ID).SaveProject(context.Background(), datatugProject); err != nil {
+		return fmt.Errorf("failed to save datatug project [%v]: %w", datatugProject.ID, err)
 	}
 
 	return nil
 }
 
 // connectionParams builds DB connection parameters from the scan flags.
-// Code paths that are not yet implemented return an error instead of panicking.
 func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
+	if v.Driver == dbconnection.DriverSQLite3 {
+		if v.Path == "" {
+			return nil, fmt.Errorf("scanning a sqlite3 database requires --path to the database file")
+		}
+		return dbconnection.NewSQLite3ConnectionParams(v.Path, v.Database, dbconnection.ModeReadOnly), nil
+	}
+
 	if v.Host == "" {
 		// Deriving the server/host from the project's environment config is not implemented yet.
 		return nil, fmt.Errorf("deriving the DB server from environment config is not implemented yet — pass -s/--server")
@@ -89,16 +92,11 @@ func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
 		options = append(options, "port="+strconv.Itoa(v.Port))
 	}
 
-	switch v.Driver {
-	case "sqlite3":
-		return nil, fmt.Errorf("scanning sqlite3 databases is not implemented yet")
-	default:
-		connParams, err := dbconnection.NewConnectionString(v.Driver, v.Host, v.User, v.Password, v.Database, options...)
-		if err != nil {
-			return nil, fmt.Errorf("invalid connection string: %w", err)
-		}
-		return connParams, nil
+	connParams, err := dbconnection.NewConnectionString(v.Driver, v.Host, v.User, v.Password, v.Database, options...)
+	if err != nil {
+		return nil, fmt.Errorf("invalid connection string: %w", err)
 	}
+	return connParams, nil
 }
 
 func scanCommandArgs() *cli.Command {
@@ -108,7 +106,7 @@ func scanCommandArgs() *cli.Command {
 		Description: "Adds or updates DB metadata from a specific server in a specific environment",
 		Flags: []cli.Flag{
 			&scanProjectFlag, &scanDirFlag, &scanDriverFlag, &scanServerFlag, &scanPortFlag,
-			&scanUserFlag, &scanPasswordFlag, &scanDbFlag, &scanDbModelFlag, &scanEnvFlag,
+			&scanUserFlag, &scanPasswordFlag, &scanDbFlag, &scanDbModelFlag, &scanEnvFlag, &scanPathFlag,
 		},
 		Action: scanCommandAction,
 	}
@@ -125,4 +123,5 @@ type scanDbCommand struct {
 	Database    string `long:"db" required:"true" description:"ID of database to be scanned."`
 	DbModel     string `long:"dbmodel" required:"false" description:"ID of DB model, is required for newly scanned databases."`
 	Environment string `long:"env" required:"true" description:"Specify environment the DB belongs to. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD."`
+	Path        string `long:"path" description:"Path to the SQLite database file (required for sqlite3)."`
 }

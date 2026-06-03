@@ -13,6 +13,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/parallel"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 	"github.com/datatug/datatug-cli/pkg/schemers/mssqlschema"
+	"github.com/datatug/datatug-cli/pkg/schemers/sqliteschema"
 	"github.com/strongo/random"
 	"github.com/strongo/slice"
 	"github.com/strongo/validation"
@@ -61,10 +62,12 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 		}
 		return nil
 	}
-	dbServer := datatug.ServerRef{
-		Driver: driver,
-		Host:   dbConnParams.Server(),
-		Port:   dbConnParams.Port(),
+	// SQLite is file-based: the project model forbids host/port for sqlite3
+	// (the file path is carried on the catalog instead).
+	dbServer := datatug.ServerRef{Driver: driver}
+	if driver != dbconnection.DriverSQLite3 {
+		dbServer.Host = dbConnParams.Server()
+		dbServer.Port = dbConnParams.Port()
 	}
 	scanDbWorker := func() error {
 		var scanErr error
@@ -207,11 +210,9 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 }
 
 func newProjectWithDatabase(environment string, dbServer datatug.ServerRef, dbCatalog *datatug.DbCatalog) (project *datatug.Project, err error) {
-	//var currentUser *user.User
-	//if currentUser, err = user.Current(); err != nil {
-	//	err = fmt.Errorf("failed to get current OS user")
-	//	return
-	//}
+	if dbCatalog.Driver == "" {
+		dbCatalog.Driver = dbServer.Driver
+	}
 	project = &datatug.Project{
 		ProjectItem: datatug.ProjectItem{
 			ProjItemBrief: datatug.ProjItemBrief{ID: random.ID(9)},
@@ -240,6 +241,7 @@ func newProjectWithDatabase(environment string, dbServer datatug.ServerRef, dbCa
 		},
 		DbDrivers: datatug.ProjDbDrivers{
 			{
+				ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: dbServer.Driver}},
 				Servers: datatug.ProjDbServers{
 					{
 						ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: dbServer.GetID()}},
@@ -272,11 +274,10 @@ func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Param
 	switch server.Driver {
 	case "sqlserver":
 		scanner = schemer.NewScanner(mssqlschema.NewSchemaProvider())
-	// TODO: Disabled until figured out how to exclude it from Google Appengine Build
-	//case "sqlite3":
-	//	scanner = schemer.NewScanner(sqlite.NewSchemaProvider())
+	case dbconnection.DriverSQLite3:
+		scanner = schemer.NewScanner(sqliteschema.NewSchemaProvider(func() (*sql.DB, error) { return db, nil }))
 	default:
-		return nil, fmt.Errorf("unsupported DB driver: %v", err)
+		return nil, fmt.Errorf("unsupported DB driver: %v", server.Driver)
 	}
 
 	dbCatalog, err = scanner.ScanCatalog(context.Background(), connectionParams.Catalog())

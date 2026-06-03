@@ -25,9 +25,6 @@ var _ schemer.SchemaProvider = (*schemaProvider)(nil)
 
 type schemaProvider struct {
 	columnsProvider
-	constraintsProvider
-	indexColumnsProvider
-	indexesProvider
 	getSqliteDB func() (*sql.DB, error)
 }
 

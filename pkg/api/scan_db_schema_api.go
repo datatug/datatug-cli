@@ -333,6 +333,11 @@ func updateSchemaModel(envID string, schema *datatug.Schema, dbSchema *datatug.D
 			if tableModel == nil {
 				tableModel = &datatug.TableModel{
 					DBCollectionKey: table.DBCollectionKey,
+					PrimaryKey:      table.PrimaryKey,
+					ForeignKeys:     table.ForeignKeys,
+					ReferencedBy:    table.ReferencedBy,
+					Indexes:         table.Indexes,
+					AlternateKeys:   table.AlternateKeys,
 					ByEnv:           make(datatug.StateByEnv),
 				}
 				tableModel.ByEnv[envID] = &datatug.EnvState{

@@ -195,10 +195,15 @@ func (v TableModels) GetByName(name string) *TableModel {
 // TableModel hold models for table or view
 type TableModel struct {
 	DBCollectionKey
-	DbType  string `json:"dbType,omitempty"` // e.g. "BASE TABLE", "VIEW", etc.
-	Columns ColumnModels
-	Checks  Checks     `json:"checks,omitempty"` // References to checks by type/id
-	ByEnv   StateByEnv `json:"byEnv,omitempty"`
+	DbType        string `json:"dbType,omitempty"` // e.g. "BASE TABLE", "VIEW", etc.
+	Columns       ColumnModels
+	PrimaryKey    *UniqueKey    `json:"primaryKey,omitempty"`
+	ForeignKeys   ForeignKeys   `json:"foreignKeys,omitempty"`
+	ReferencedBy  ReferencedBys `json:"referencedBy,omitempty"`
+	Indexes       []*Index      `json:"indexes,omitempty"`
+	AlternateKeys []UniqueKey   `json:"alternateKeys,omitempty"`
+	Checks        Checks        `json:"checks,omitempty"` // References to checks by type/id
+	ByEnv         StateByEnv    `json:"byEnv,omitempty"`
 }
 
 func (v *TableModel) String() string {

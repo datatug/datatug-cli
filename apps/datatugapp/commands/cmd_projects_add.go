@@ -9,15 +9,21 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/urfave/cli/v3"
-	"gopkg.in/yaml.v3"
+)
+
+var (
+	addProjectNameFlag = cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "Project id/name to register", Required: true}
+	addProjectDirFlag  = cli.StringFlag{Name: "directory", Aliases: []string{"d"}, Usage: "Path to the project directory", Required: true}
 )
 
 type addProjectCommand struct {
 	projectBaseCommand
 }
 
-func addProjectCommandAction(_ context.Context, _ *cli.Command) error {
+func addProjectCommandAction(_ context.Context, c *cli.Command) error {
 	v := &addProjectCommand{}
+	v.ProjectName = c.String(addProjectNameFlag.Name)
+	v.ProjectDir = c.String(addProjectDirFlag.Name)
 	return v.Execute(nil)
 }
 
@@ -26,7 +32,10 @@ func projectsAddCommandArgs() *cli.Command {
 		Name:        "add",
 		Usage:       "Adds a project to the local settings",
 		Description: "Adds a project by name and directory to the settings file",
-		Action:      addProjectCommandAction,
+		Flags: []cli.Flag{
+			&addProjectNameFlag, &addProjectDirFlag,
+		},
+		Action: addProjectCommandAction,
 	}
 }
 
@@ -39,8 +48,8 @@ func (v *addProjectCommand) Execute(_ []string) error {
 	}
 	projectID := strings.ToLower(v.ProjectName)
 	project := settings.GetProjectConfig(projectID)
-	if project != nil { // GetProjectStore with requested name already added to settings
-		if project.Path == v.ProjectDir { // Attempt to add the same project with same path
+	if project != nil { // project with requested id already in settings
+		if project.Path == v.ProjectDir { // same project, same path
 			return nil // No problem, just do nothing.
 		}
 		return fmt.Errorf("project with id=%s already added to settings with path: %s", projectID, project.Path)
@@ -49,33 +58,9 @@ func (v *addProjectCommand) Execute(_ []string) error {
 
 	settings.Projects = append(settings.Projects, &projectConfig)
 
-	if err = saveConfig(settings); err != nil {
+	if err = dtconfig.SaveSettings(settings); err != nil {
 		return fmt.Errorf("failed to save settings: %w", err)
 	}
 
-	return nil
-}
-
-func saveConfig(config dtconfig.Settings) error {
-	configFilePath := "~/.datatug.yaml"
-	f, err := os.Create(configFilePath)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := f.Close(); err != nil {
-			fmt.Printf("failed to close config file opened for writing: %v", err)
-		}
-	}()
-	if config.Server != nil && config.Server.IsEmpty() {
-		config.Server = nil
-	}
-	if config.Client != nil && config.Client.IsEmpty() {
-		config.Client = nil
-	}
-	encoder := yaml.NewEncoder(f)
-	if err = encoder.Encode(config); err != nil {
-		return err
-	}
 	return nil
 }

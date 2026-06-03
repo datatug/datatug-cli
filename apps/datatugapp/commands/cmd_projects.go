@@ -67,7 +67,11 @@ type projectsCommand struct {
 func getProjPathsByID(config dtconfig.Settings) (pathsByID map[string]string) {
 	pathsByID = make(map[string]string, len(config.Projects))
 	for _, p := range config.Projects {
-		pathsByID[p.ID] = p.Origin
+		if p.Path != "" {
+			pathsByID[p.ID] = p.Path // locally-added projects store a local Path
+		} else {
+			pathsByID[p.ID] = p.Origin
+		}
 	}
 	return
 }

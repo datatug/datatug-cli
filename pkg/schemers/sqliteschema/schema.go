@@ -42,5 +42,7 @@ func (s schemaProvider) GetCollections(_ context.Context, parent *dal.Key) (sche
 }
 
 func (schemaProvider) IsBulkProvider() bool {
-	return true
+	// SQLite has no INFORMATION_SCHEMA; metadata is read per-table via PRAGMA,
+	// so use the scanner's per-table (non-bulk) path.
+	return false
 }

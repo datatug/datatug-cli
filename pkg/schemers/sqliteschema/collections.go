@@ -26,13 +26,13 @@ func getCollections(db *sql.DB, filter collectionsFilter) (reader schemer.Collec
 		}
 	case datatug.CollectionTypeTable:
 		r.collectionType = datatug.CollectionTypeTable
-		r.rows, err = db.Query(`SELECT name, sql FROM sqlite_schema WHERE type  'table' ORDER BY name`)
+		r.rows, err = db.Query(`SELECT name, sql FROM sqlite_schema WHERE type = 'table' ORDER BY name`)
 		if err != nil {
 			return nil, fmt.Errorf("failed to retrieve list of SQLite tables : %w", err)
 		}
 	case datatug.CollectionTypeView:
 		r.collectionType = datatug.CollectionTypeView
-		r.rows, err = db.Query(`SELECT name, sql FROM sqlite_schema WHERE type  'view' ORDER BY name`)
+		r.rows, err = db.Query(`SELECT name, sql FROM sqlite_schema WHERE type = 'view' ORDER BY name`)
 		if err != nil {
 			return nil, fmt.Errorf("failed to retrieve list of SQLite views : %w", err)
 		}
@@ -73,18 +73,25 @@ func (s *collectionsReader) NextCollection() (c *datatug.CollectionInfo, err err
 		return c, fmt.Errorf("failed to scan db row into CollectionInfo struct: %w", err)
 	}
 	var collectionType datatug.CollectionType
+	var canonicalDbType string
 	switch strings.ToLower(dbType) {
 	case "table":
 		collectionType = datatug.CollectionTypeTable
+		canonicalDbType = "BASE TABLE" // the schemer scanner switches on "BASE TABLE"/"VIEW"
 	case "view":
 		collectionType = datatug.CollectionTypeView
+		canonicalDbType = "VIEW"
 	default:
 		err = fmt.Errorf("unsupported DB type: %s", dbType)
 		return
 	}
 	c = &datatug.CollectionInfo{
-		DBCollectionKey: datatug.NewCollectionKey(collectionType, name, "", "", nil),
-		DDL:             sqlText,
+		// "main" is SQLite's default schema (database) name.
+		DBCollectionKey: datatug.NewCollectionKey(collectionType, name, "main", "", nil),
+		TableProps: datatug.TableProps{
+			DbType: canonicalDbType,
+		},
+		DDL: sqlText,
 	}
 	return
 }

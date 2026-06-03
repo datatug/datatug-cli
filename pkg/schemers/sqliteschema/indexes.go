@@ -2,36 +2,23 @@ package sqliteschema
 
 import (
 	"context"
+	"io"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
-	"github.com/datatug/datatug-cli/pkg/schemers/sqlinfoschema"
 )
 
 var _ schemer.IndexesProvider = (*indexesProvider)(nil)
 
-type indexesProvider struct {
-	sqlinfoschema.IndexesProvider
+// indexesProvider does not yet extract SQLite indexes.
+//
+// TODO: implement native SQLite index extraction via PRAGMA index_list(table).
+// Until then it returns no indexes so a scan completes with tables and columns.
+type indexesProvider struct{}
+
+func (indexesProvider) GetIndexes(_ context.Context, _, _, _ string) (schemer.IndexesReader, error) {
+	return emptyIndexesReader{}, nil
 }
 
-func (v indexesProvider) GetIndexes(ctx context.Context, catalog, schema, table string) (schemer.IndexesReader, error) {
-	v.SQL = indexesSQL
-	return v.IndexesProvider.GetIndexes(ctx, catalog, schema, table)
-}
+type emptyIndexesReader struct{}
 
-//goland:noinspection SqlNoDataSourceInspection
-const indexesSQL = `
-SELECT 
-    SCHEMA_NAME(o.schema_id) AS schema_name,
-	o.name AS object_name,
-    CASE WHEN o.type = 'U' THEN 'Table' WHEN o.type = 'V' THEN 'View' ELSE o.type END AS object_type,
-    i.name,
-	i.type,
-	i.type_desc,
-	is_unique,
-	is_primary_key,
-	is_unique_constraint
-FROM sys.indexes AS i
-INNER JOIN sys.objects o ON o.object_id = i.object_id
-WHERE o.is_ms_shipped <> 1 AND i.type > 0
-ORDER BY SCHEMA_NAME(o.schema_id) + '.' + o.name, i.name
-`
+func (emptyIndexesReader) NextIndex() (*schemer.Index, error) { return nil, io.EOF }

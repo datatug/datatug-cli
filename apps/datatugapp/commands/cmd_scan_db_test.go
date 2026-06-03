@@ -20,17 +20,26 @@ func cmdHasFlag(cmd *cli.Command, name string) bool {
 
 func TestScanCommand_RegistersFlags(t *testing.T) {
 	cmd := scanCommandArgs()
-	for _, name := range []string{"project", "directory", "driver", "server", "port", "user", "password", "db", "dbmodel", "env"} {
+	for _, name := range []string{"project", "directory", "driver", "server", "port", "user", "password", "db", "dbmodel", "env", "path"} {
 		assert.Truef(t, cmdHasFlag(cmd, name), "scan command must register --%s flag", name)
 	}
 }
 
-func TestScanConnectionParams_Sqlite3ReturnsErrorNotPanic(t *testing.T) {
-	v := &scanDbCommand{Driver: "sqlite3", Host: "localhost", Database: "demo"}
+func TestScanConnectionParams_Sqlite3WithoutPathReturnsError(t *testing.T) {
+	v := &scanDbCommand{Driver: "sqlite3", Database: "demo"} // no --path
 	params, err := v.connectionParams()
 	require.Error(t, err)
 	assert.Nil(t, params)
-	assert.Contains(t, err.Error(), "not implemented")
+	assert.Contains(t, err.Error(), "--path")
+}
+
+func TestScanConnectionParams_Sqlite3WithPathSucceeds(t *testing.T) {
+	v := &scanDbCommand{Driver: "sqlite3", Database: "chinook", Path: "/tmp/chinook.db"}
+	params, err := v.connectionParams()
+	require.NoError(t, err)
+	require.NotNil(t, params)
+	assert.Equal(t, "sqlite3", params.Driver())
+	assert.Equal(t, "chinook", params.Catalog())
 }
 
 func TestScanConnectionParams_NoHostReturnsErrorNotPanic(t *testing.T) {

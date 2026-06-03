@@ -55,6 +55,9 @@ func TestServerReference_Validate(t *testing.T) {
 	t.Run("sqlite_with_port", func(t *testing.T) {
 		assert.Error(t, ServerRef{Driver: "sqlite3", Port: 123}.Validate())
 	})
+	t.Run("sqlite_valid", func(t *testing.T) {
+		assert.NoError(t, ServerRef{Driver: "sqlite3"}.Validate())
+	})
 	t.Run("unknown_driver", func(t *testing.T) {
 		assert.Error(t, ServerRef{Driver: "unknown", Host: "localhost"}.Validate())
 	})

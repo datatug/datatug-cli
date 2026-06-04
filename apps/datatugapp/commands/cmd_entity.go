@@ -32,9 +32,149 @@ func entityCommand() *cli.Command {
 		Usage: "Author and read DataTug entities",
 		Commands: []*cli.Command{
 			entityAddCommandArgs(),
+			entityListCommandArgs(),
+			entityShowCommandArgs(),
 			entityFieldCommand(),
 		},
 	}
+}
+
+func entityListCommandArgs() *cli.Command {
+	return &cli.Command{
+		Name:        "list",
+		Usage:       "List the entities in a project",
+		Description: "Lists the project's entities, one per line. Read-only: never writes.",
+		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag},
+		Action:      entityListCommandAction,
+	}
+}
+
+func entityListCommandAction(ctx context.Context, c *cli.Command) error {
+	v := &projectBaseCommand{}
+	v.ProjectDir = c.String(entityDirFlag.Name)
+	v.ProjectName = c.String(entityProjectFlag.Name)
+
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+		return err
+	}
+
+	projectStore := v.store.GetProjectStore(v.projectID)
+
+	entities, err := projectStore.LoadEntities(ctx)
+	if err != nil {
+		return err
+	}
+
+	w := c.Root().Writer
+	if w == nil {
+		w = os.Stdout
+	}
+
+	if len(entities) == 0 {
+		_, _ = fmt.Fprintln(w, "no entities")
+		return nil
+	}
+
+	for _, e := range entities {
+		if e.Title != "" {
+			_, _ = fmt.Fprintf(w, "%s — %s\n", e.ID, e.Title)
+		} else {
+			_, _ = fmt.Fprintln(w, e.ID)
+		}
+	}
+	return nil
+}
+
+func entityShowCommandArgs() *cli.Command {
+	return &cli.Command{
+		Name:        "show",
+		Usage:       "Show an entity's fields and read-only generated mapping copy",
+		Description: "Renders an entity's fields and, when present, the read-only generated copy of its table/column links. Read-only: never writes.",
+		ArgsUsage:   "<Entity>",
+		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag},
+		Action:      entityShowCommandAction,
+	}
+}
+
+func entityShowCommandAction(ctx context.Context, c *cli.Command) error {
+	name := c.Args().First()
+	if name == "" {
+		return cli.Exit("entity name is required: datatug entity show <Entity>", 2)
+	}
+
+	v := &projectBaseCommand{}
+	v.ProjectDir = c.String(entityDirFlag.Name)
+	v.ProjectName = c.String(entityProjectFlag.Name)
+
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+		return err
+	}
+
+	projectStore := v.store.GetProjectStore(v.projectID)
+
+	entity, err := projectStore.LoadEntity(ctx, name)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return cli.Exit(fmt.Sprintf("entity %q not found", name), 1)
+		}
+		return err
+	}
+
+	rendered, err := renderEntityShow(entity)
+	if err != nil {
+		return err
+	}
+
+	w := c.Root().Writer
+	if w == nil {
+		w = os.Stdout
+	}
+	_, _ = fmt.Fprint(w, rendered)
+	return nil
+}
+
+// renderEntityShow renders a loaded entity as YAML for the read-only show view,
+// labelling the generated table/column mapping copy when present. It routes
+// through the model's JSON tags (which flatten the embedded ProjItemBrief, so
+// the id/title surface correctly) and then re-renders as YAML.
+func renderEntityShow(entity *datatug.Entity) (string, error) {
+	jsonData, err := json.Marshal(entity)
+	if err != nil {
+		return "", err
+	}
+	var doc map[string]any
+	if err = json.Unmarshal(jsonData, &doc); err != nil {
+		return "", err
+	}
+
+	// The mapping copy (tables) is a read-only generated artifact: render it in a
+	// clearly-labelled, separate section so a reader never mistakes it for
+	// authored content.
+	tables, hasTables := doc["tables"]
+	delete(doc, "tables")
+
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err = enc.Encode(doc); err != nil {
+		return "", err
+	}
+	if err = enc.Close(); err != nil {
+		return "", err
+	}
+
+	if hasTables {
+		buf.WriteString("# generated mapping copy (read-only)\n")
+		tablesEnc := yaml.NewEncoder(&buf)
+		tablesEnc.SetIndent(2)
+		if err = tablesEnc.Encode(map[string]any{"tables": tables}); err != nil {
+			return "", err
+		}
+		if err = tablesEnc.Close(); err != nil {
+			return "", err
+		}
+	}
+	return buf.String(), nil
 }
 
 func entityFieldCommand() *cli.Command {

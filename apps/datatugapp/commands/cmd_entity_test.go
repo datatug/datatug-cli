@@ -465,6 +465,72 @@ func TestEntityAdd_ExtendsFieldType_Accepted(t *testing.T) {
 	assert.Equal(t, "extends:currency", fields["amount"], "extends:<ref> type must be accepted")
 }
 
+// AC: entity-list-lists — given a project with entities User and Order, entity
+// list shows both.
+func TestEntityList_Lists(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := runEntityStdin(t, "id: User\nfields:\n  - id: id\n    type: string\n", "entity", "add", "-d", dir)
+	require.NoError(t, err)
+	_, _, err = runEntityStdin(t, "id: Order\nfields:\n  - id: id\n    type: string\n", "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	stdout, _, err := runEntity(t, "entity", "list", "-d", dir)
+	assert.NoError(t, err)
+
+	out := stdout.String()
+	assert.Contains(t, out, "User")
+	assert.Contains(t, out, "Order")
+}
+
+// AC: entity-show-renders — entity show renders the entity's fields and the
+// read-only generated mapping copy, and does not mutate the on-disk file.
+func TestEntityShow_Renders(t *testing.T) {
+	dir := t.TempDir()
+	// Create User with a field AND a populated tables (generated mapping copy).
+	def := "id: User\n" +
+		"fields:\n" +
+		"  - id: email\n" +
+		"    type: string\n" +
+		"tables:\n" +
+		"  - name: users\n" +
+		"    schema: public\n"
+	_, _, err := runEntityStdin(t, def, "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	entityPath := filepath.Join(dir, "entities", "User", "User.entity.json")
+	before, err := os.ReadFile(entityPath)
+	require.NoError(t, err)
+
+	stdout, _, err := runEntity(t, "entity", "show", "User", "-d", dir)
+	assert.NoError(t, err)
+
+	out := stdout.String()
+	assert.Contains(t, out, "email", "field name must appear")
+	assert.Contains(t, out, "users", "mapping copy table name must appear")
+
+	// Non-mutation: the on-disk entity file must be byte-identical after show.
+	after, err := os.ReadFile(entityPath)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "entity show must not mutate the on-disk file")
+}
+
+// entity show for a missing entity fails non-zero with a not-found error.
+func TestEntityShow_NotFound(t *testing.T) {
+	dir := t.TempDir()
+
+	_, _, err := runEntity(t, "entity", "show", "Ghost", "-d", dir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+// entity show with no entity argument fails non-zero.
+func TestEntityShow_MissingArg(t *testing.T) {
+	dir := t.TempDir()
+
+	_, _, err := runEntity(t, "entity", "show", "-d", dir)
+	assert.Error(t, err)
+}
+
 // An invalid --format value is rejected with a non-zero error.
 func TestEntityAdd_InvalidFormat_Errors(t *testing.T) {
 	dir := t.TempDir()

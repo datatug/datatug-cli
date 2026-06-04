@@ -7,7 +7,7 @@ Features of the `datatug` CLI.
 | Feature | Status | Kind | Description |
 |---------|--------|------|-------------|
 | [cli](cli/README.md) | Implementing | Command | `datatug` CLI — parent feature for command-level specifications |
-| [mutation-git-integration](mutation-git-integration/README.md) | Approved | — | TODO: Add description. |
+| [mutation-git-integration](mutation-git-integration/README.md) | Implementing | — | TODO: Add description. |
 
 ## Open Questions
 

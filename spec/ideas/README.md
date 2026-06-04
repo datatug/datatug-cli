@@ -13,6 +13,7 @@ The Idea format follows [SpecScore](https://specscore.md/idea-specification).
 | [db-snapshot-command](db-snapshot-command.md) | Approved | 2026-05-14 | alex | — |
 | [mutation-git-integration](mutation-git-integration.md) | Specified | 2026-06-04 | alex | mutation-git-integration |
 | [semantic-metadata-cli](semantic-metadata-cli.md) | Specified | 2026-06-04 | alex | cli/entity |
+| [shared-module-system](shared-module-system.md) | Approved | 2026-06-04 | alex | — |
 
 ## Open Questions
 

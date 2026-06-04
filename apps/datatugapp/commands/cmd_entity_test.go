@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -529,6 +530,84 @@ func TestEntityShow_MissingArg(t *testing.T) {
 
 	_, _, err := runEntity(t, "entity", "show", "-d", dir)
 	assert.Error(t, err)
+}
+
+// gitHead returns the current HEAD commit hash of the git repo at dir, or ""
+// if there is no commit yet.
+func gitHead(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "HEAD")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// AC: git-flag-rejects-unknown — a mutating command run with --git=bogus exits
+// non-zero, naming the invalid value and the supported set.
+func TestEntityAdd_GitFlag_RejectsUnknown(t *testing.T) {
+	dir := t.TempDir()
+	stdin := "id: User\nfields:\n  - id: id\n    type: string\n"
+
+	_, _, err := runEntityStdin(t, stdin, "entity", "add", "-d", dir, "--git", "bogus")
+	require.Error(t, err)
+	msg := err.Error()
+	assert.Contains(t, msg, "bogus")
+	assert.Contains(t, msg, "none")
+	assert.Contains(t, msg, "stage")
+	assert.Contains(t, msg, "commit")
+
+	_, statErr := os.Stat(filepath.Join(dir, "entities"))
+	assert.True(t, os.IsNotExist(statErr), "nothing must be written on invalid --git value")
+}
+
+// AC: git-commit-not-supported — a mutating command run with --git=commit exits
+// non-zero reporting commit is not yet supported, and writes nothing / creates
+// no commit.
+func TestEntityAdd_GitFlag_CommitNotSupported(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, exec.Command("git", "init", dir).Run())
+	headBefore := gitHead(t, dir)
+
+	stdin := "id: User\nfields:\n  - id: id\n    type: string\n"
+	_, _, err := runEntityStdin(t, stdin, "entity", "add", "-d", dir, "--git", "commit")
+	require.Error(t, err)
+	msg := err.Error()
+	assert.Contains(t, msg, "commit")
+	assert.Contains(t, msg, "not yet supported")
+
+	// No entity written (resolver runs before the write).
+	_, statErr := os.Stat(filepath.Join(dir, "entities"))
+	assert.True(t, os.IsNotExist(statErr), "nothing must be written on --git=commit")
+
+	// No new commit created.
+	assert.Equal(t, headBefore, gitHead(t, dir), "no commit must be created")
+}
+
+// AC: git-flag-default-none — with no --git flag, written files appear as
+// untracked (not staged) and no commit is created.
+func TestEntityAdd_GitFlag_DefaultNone(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, exec.Command("git", "init", dir).Run())
+	headBefore := gitHead(t, dir)
+
+	stdin := "id: User\nfields:\n  - id: id\n    type: string\n"
+	_, _, err := runEntityStdin(t, stdin, "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	entityRel := filepath.Join("entities", "User", "User.entity.json")
+	assert.FileExists(t, filepath.Join(dir, entityRel))
+
+	// The file must be untracked (??), not staged (A ).
+	out, err := exec.Command("git", "-C", dir, "status", "--porcelain", entityRel).CombinedOutput()
+	require.NoError(t, err)
+	status := string(out)
+	assert.Contains(t, status, "??", "written file must be untracked")
+	assert.NotContains(t, status, "A  ", "written file must not be staged")
+
+	// No new commit created.
+	assert.Equal(t, headBefore, gitHead(t, dir), "no commit must be created")
 }
 
 // An invalid --format value is rejected with a non-zero error.

@@ -403,7 +403,7 @@ func entityAddCommandArgs() *cli.Command {
 		Name:        "add",
 		Usage:       "Create a new entity from a definition file",
 		Description: "Creates a new entity from a YAML/JSON definition file. Create-only: fails if the entity already exists.",
-		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &entityFileFlag, &entityFormatFlag, &entityContinueOnErrorFlag},
+		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &entityFileFlag, &entityFormatFlag, &entityContinueOnErrorFlag, &gitFlag},
 		Action:      entityAddCommandAction,
 	}
 }
@@ -556,6 +556,12 @@ func entityAddCommandAction(ctx context.Context, c *cli.Command) error {
 	v.ProjectName = c.String(entityProjectFlag.Name)
 
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+		return err
+	}
+
+	// Resolve the version-control mode before reading input or writing anything,
+	// so an invalid or unsupported --git value fails loud before any write.
+	if _, err := resolveGitMode(c.String(gitFlag.Name)); err != nil {
 		return err
 	}
 

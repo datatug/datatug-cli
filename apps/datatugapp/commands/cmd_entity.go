@@ -31,8 +31,71 @@ func entityCommand() *cli.Command {
 		Usage: "Author and read DataTug entities",
 		Commands: []*cli.Command{
 			entityAddCommandArgs(),
+			entityFieldCommand(),
 		},
 	}
+}
+
+func entityFieldCommand() *cli.Command {
+	return &cli.Command{
+		Name:  "field",
+		Usage: "Author entity fields",
+		Commands: []*cli.Command{
+			entityFieldAddCommandArgs(),
+		},
+	}
+}
+
+func entityFieldAddCommandArgs() *cli.Command {
+	return &cli.Command{
+		Name:        "add",
+		Usage:       "Add one or more new fields to an existing entity",
+		Description: "Adds one or more new fields to an existing entity from a YAML/JSON definition. Additive-only: fails if any named field already exists and never overwrites existing field content.",
+		ArgsUsage:   "<Entity>",
+		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &entityFileFlag, &entityFormatFlag, &entityContinueOnErrorFlag},
+		Action:      entityFieldAddCommandAction,
+	}
+}
+
+// readDefinitionInput resolves the definition input shared by entity add and
+// entity field add: it validates an explicit --format, reads from the -f file
+// or stdin (-f '-' or absent), and rejects empty (whitespace-only) input. It
+// returns the raw bytes and a human-readable source description.
+func readDefinitionInput(c *cli.Command) (data []byte, source string, err error) {
+	// Validate an explicit --format value up front (before reading/writing).
+	format := c.String(entityFormatFlag.Name)
+	switch format {
+	case "", "yaml", "json":
+		// ok
+	default:
+		return nil, "", cli.Exit(fmt.Sprintf("unsupported --format %q (expected 'yaml' or 'json')", format), 2)
+	}
+
+	// Resolve the input source: a file path, or stdin when -f is '-' or absent.
+	filePath := c.String(entityFileFlag.Name)
+	fromStdin := filePath == "" || filePath == "-"
+
+	if fromStdin {
+		source = "stdin"
+		reader := c.Root().Reader
+		if reader == nil {
+			reader = os.Stdin
+		}
+		if data, err = io.ReadAll(reader); err != nil {
+			return nil, source, fmt.Errorf("failed to read entity definition from stdin: %w", err)
+		}
+	} else {
+		source = fmt.Sprintf("file [%s]", filePath)
+		if data, err = os.ReadFile(filePath); err != nil {
+			return nil, source, fmt.Errorf("failed to read entity definition file [%s]: %w", filePath, err)
+		}
+	}
+
+	// Empty input (zero or whitespace-only bytes) is an error; write nothing.
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return nil, source, cli.Exit(fmt.Sprintf("empty input from %s", source), 2)
+	}
+	return data, source, nil
 }
 
 func entityAddCommandArgs() *cli.Command {
@@ -71,6 +134,33 @@ func parseEntityDocs(data []byte) ([]*datatug.Entity, error) {
 		return nil, err
 	}
 	return []*datatug.Entity{entity}, nil
+}
+
+// parseFieldDocs parses one or more field definitions from YAML or JSON bytes.
+// A top-level array yields a batch of N fields; a top-level object yields a
+// degenerate batch of one. It routes through JSON so the model's json struct
+// tags populate EntityField correctly.
+func parseFieldDocs(data []byte) ([]*datatug.EntityField, error) {
+	var doc any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	jsonData, err := json.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+	if _, isList := doc.([]any); isList {
+		var fields []*datatug.EntityField
+		if err = json.Unmarshal(jsonData, &fields); err != nil {
+			return nil, err
+		}
+		return fields, nil
+	}
+	field := &datatug.EntityField{}
+	if err = json.Unmarshal(jsonData, field); err != nil {
+		return nil, err
+	}
+	return []*datatug.EntityField{field}, nil
 }
 
 // fileWrite describes one file to write atomically: its final path and content.
@@ -138,41 +228,9 @@ func entityAddCommandAction(ctx context.Context, c *cli.Command) error {
 		return err
 	}
 
-	// Validate an explicit --format value up front (before reading/writing).
-	format := c.String(entityFormatFlag.Name)
-	switch format {
-	case "", "yaml", "json":
-		// ok
-	default:
-		return cli.Exit(fmt.Sprintf("unsupported --format %q (expected 'yaml' or 'json')", format), 2)
-	}
-
-	// Resolve the input source: a file path, or stdin when -f is '-' or absent.
-	filePath := c.String(entityFileFlag.Name)
-	fromStdin := filePath == "" || filePath == "-"
-
-	var data []byte
-	var source string
-	var err error
-	if fromStdin {
-		source = "stdin"
-		reader := c.Root().Reader
-		if reader == nil {
-			reader = os.Stdin
-		}
-		if data, err = io.ReadAll(reader); err != nil {
-			return fmt.Errorf("failed to read entity definition from stdin: %w", err)
-		}
-	} else {
-		source = fmt.Sprintf("file [%s]", filePath)
-		if data, err = os.ReadFile(filePath); err != nil {
-			return fmt.Errorf("failed to read entity definition file [%s]: %w", filePath, err)
-		}
-	}
-
-	// Empty input (zero or whitespace-only bytes) is an error; write nothing.
-	if len(strings.TrimSpace(string(data))) == 0 {
-		return cli.Exit(fmt.Sprintf("empty input from %s", source), 2)
+	data, source, err := readDefinitionInput(c)
+	if err != nil {
+		return err
 	}
 
 	entities, err := parseEntityDocs(data)
@@ -305,6 +363,105 @@ func addEntitiesContinueOnError(
 	}
 	if len(failures) > 0 {
 		return fmt.Errorf("entity add completed with failures: %s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+func entityFieldAddCommandAction(ctx context.Context, c *cli.Command) error {
+	name := c.Args().First()
+	if name == "" {
+		return cli.Exit("entity name is required: datatug entity field add <Entity>", 2)
+	}
+
+	v := &projectBaseCommand{}
+	v.ProjectDir = c.String(entityDirFlag.Name)
+	v.ProjectName = c.String(entityProjectFlag.Name)
+
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+		return err
+	}
+
+	data, source, err := readDefinitionInput(c)
+	if err != nil {
+		return err
+	}
+
+	fields, err := parseFieldDocs(data)
+	if err != nil {
+		return fmt.Errorf("failed to parse field definition from %s: %w", source, err)
+	}
+	if len(fields) == 0 {
+		return cli.Exit(fmt.Sprintf("no fields found in input from %s", source), 2)
+	}
+
+	projectStore := v.store.GetProjectStore(v.projectID)
+
+	// field add operates only on existing entities: load it, requiring presence.
+	entity, err := projectStore.LoadEntity(ctx, name)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return cli.Exit(fmt.Sprintf("entity %q not found", name), 1)
+		}
+		return err
+	}
+
+	existing := make(map[string]bool, len(entity.Fields))
+	for _, f := range entity.Fields {
+		existing[f.ID] = true
+	}
+
+	w := c.Root().Writer
+	if w == nil {
+		w = os.Stdout
+	}
+
+	entityPath := filepath.Join(v.ProjectDir, "entities", name, name+".entity.json")
+	continueOnError := c.Bool(entityContinueOnErrorFlag.Name)
+
+	var toAdd []*datatug.EntityField
+	var failures []string
+	for _, f := range fields {
+		switch {
+		case f.ID == "":
+			failures = append(failures, "<missing id>")
+			if continueOnError {
+				_, _ = fmt.Fprintln(w, "failed field: <missing id>")
+			}
+		case existing[f.ID]:
+			failures = append(failures, fmt.Sprintf("%s (already exists)", f.ID))
+			if continueOnError {
+				_, _ = fmt.Fprintf(w, "failed field: %s (already exists)\n", f.ID)
+			}
+		default:
+			existing[f.ID] = true
+			toAdd = append(toAdd, f)
+		}
+	}
+
+	// Atomic (default) mode: any collision means write nothing and exit non-zero.
+	if !continueOnError && len(failures) > 0 {
+		for _, fl := range failures {
+			_, _ = fmt.Fprintf(w, "failed field: %s\n", fl)
+		}
+		return fmt.Errorf("entity field add failed (nothing written): %s", strings.Join(failures, "; "))
+	}
+
+	if len(toAdd) > 0 {
+		entity.Fields = append(entity.Fields, toAdd...)
+		content, err := marshalEntityFile(entity)
+		if err != nil {
+			return err
+		}
+		if err = atomicWriteFiles([]fileWrite{{path: entityPath, content: content}}); err != nil {
+			return err
+		}
+		for _, f := range toAdd {
+			_, _ = fmt.Fprintf(w, "added field: %s\n", f.ID)
+		}
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("entity field add completed with failures: %s", strings.Join(failures, "; "))
 	}
 	return nil
 }

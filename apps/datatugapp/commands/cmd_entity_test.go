@@ -238,6 +238,84 @@ func TestEntityAdd_BatchMatchesStoreFormat(t *testing.T) {
 	assert.Equal(t, string(storeData), string(batchData), "batch write must match store on-disk format")
 }
 
+// loadEntityFields is a test helper: it reads the on-disk entity file and
+// returns a map of field id -> type for assertions.
+func loadEntityFields(t *testing.T, dir, name string) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, "entities", name, name+".entity.json"))
+	require.NoError(t, err)
+	var ent struct {
+		Fields []struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		} `json:"fields"`
+	}
+	require.NoError(t, json.Unmarshal(data, &ent))
+	out := map[string]string{}
+	for _, f := range ent.Fields {
+		out[f.ID] = f.Type
+	}
+	return out
+}
+
+// AC: field-add-additive — adding a new field to an existing entity adds it and
+// leaves the pre-existing field unchanged.
+func TestEntityFieldAdd_Additive(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := runEntityStdin(t, "id: User\nfields:\n  - id: id\n    type: integer\n", "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	_, _, err = runEntityStdin(t, "id: primaryCurrency\ntype: string\n", "entity", "field", "add", "User", "-d", dir)
+	assert.NoError(t, err)
+
+	fields := loadEntityFields(t, dir, "User")
+	assert.Equal(t, "string", fields["primaryCurrency"], "primaryCurrency must be added")
+	assert.Equal(t, "integer", fields["id"], "id must be unchanged")
+}
+
+// AC: field-add-rejects-existing — adding a field named like an existing one
+// fails non-zero and leaves the entity unchanged.
+func TestEntityFieldAdd_RejectsExisting(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := runEntityStdin(t, "id: User\nfields:\n  - id: id\n    type: integer\n", "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	entityPath := filepath.Join(dir, "entities", "User", "User.entity.json")
+	before, err := os.ReadFile(entityPath)
+	require.NoError(t, err)
+
+	_, _, err = runEntityStdin(t, "id: id\ntype: integer\n", "entity", "field", "add", "User", "-d", dir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "id")
+
+	after, err := os.ReadFile(entityPath)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "entity must be left unchanged")
+}
+
+// AC: no-implicit-override — adding a field id with a different type never
+// overwrites the existing field; it fails non-zero and the type is preserved.
+func TestEntityFieldAdd_NoImplicitOverride(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := runEntityStdin(t, "id: User\nfields:\n  - id: id\n    type: integer\n", "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	_, _, err = runEntityStdin(t, "id: id\ntype: string\n", "entity", "field", "add", "User", "-d", dir)
+	assert.Error(t, err)
+
+	fields := loadEntityFields(t, dir, "User")
+	assert.Equal(t, "integer", fields["id"], "id type must remain integer (never overwritten)")
+}
+
+// field add on a non-existent entity fails non-zero with a not-found error.
+func TestEntityFieldAdd_EntityNotFound(t *testing.T) {
+	dir := t.TempDir()
+
+	_, _, err := runEntityStdin(t, "id: primaryCurrency\ntype: string\n", "entity", "field", "add", "Ghost", "-d", dir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
 // An invalid --format value is rejected with a non-zero error.
 func TestEntityAdd_InvalidFormat_Errors(t *testing.T) {
 	dir := t.TempDir()

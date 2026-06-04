@@ -25,6 +25,7 @@ Implement `datatug entity add` for a single entity read from `-f <file>`: parse 
 
 ### Task 2: `entity add` input — stdin + format resolution + empty-input
 
+**Status:** done
 **Verifies:** cli/entity#ac:add-reads-stdin, cli/entity#ac:add-empty-errors
 
 Extend `entity add` input handling to read from stdin (`-f -`, or no `-f`), resolve the format as `--format` › file extension › content sniff, and treat empty input as an error that writes nothing.

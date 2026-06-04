@@ -70,7 +70,7 @@ A two-week spike landing `datatug db snapshot --project X --db Y --env Z` end-to
   - **`projectBaseCommand` reuse** (apps/datatugapp/commands/project_base_command.go). Existing code; verify it exposes the URL-for-triple resolver in a form callable from `dbCopyAction`'s peer command. Plan-time audit only.
   - **`db copy`'s `--from` URL parser** (`pkg/dbcopy.Parse`). Existing; snapshot calls it with the resolved URL once project lookup completes.
 
-## Outstanding Questions
+## Open Questions
 
 - **Timestamp format.** ISO-8601 (`2026-05-14T13-22-05Z`, replacing `:` with `-` for cross-platform filename safety) vs compact (`20260514T132205Z`). The Recommended Direction picks ISO-8601-with-dashes; confirm at Feature-spec time.
 - **Default `--to` path in raw `--from <url>` mode.** Direction picks `./snapshots/<timestamp>/` (CWD-relative). Alternatives: derive from source URL (`./snapshots/<source-db-name>/<timestamp>/`), or refuse to default outside project context. Confirm at Feature-spec time.

@@ -69,7 +69,7 @@ A focused spike landing `datatug db copy --from <url> --to <url>` with three E2E
   - **inGitDB default file format** — sibling Idea at `ingitdb/ingitdb-cli/spec/ideas/default-record-format.md` (proposes INGR as the default). Informational only — `db copy` writes via `dalgo2ingitdb` and inherits whatever format the project is configured for.
   - **URL scheme support** — register `ingitdb://` (likely via an extension to `xo/dburl` or a local resolver layer).
 
-## Outstanding Questions
+## Open Questions
 
 - **Backend concurrency-capability surface in DALgo.** Tracked as a sibling DALgo Idea: [`dal-go/dalgo/spec/ideas/concurrency-capability.md`](https://github.com/dal-go/dalgo/blob/main/spec/ideas/concurrency-capability.md) (proposes a single optional `dal.ConcurrencyAware` interface). Shape is open in that Idea; this Idea consumes whatever it produces.
 - **`dalgo2ingitdb` parallel-write safety.** SQLite is known unsafe-for-concurrent-writers; PostgreSQL is fine; `dalgo2ingitdb` writing many table files in parallel to a single working tree is unproven. Stress-test before claiming `dalgo2ingitdb` is concurrent-safe; until then it advertises `concurrent=false`.

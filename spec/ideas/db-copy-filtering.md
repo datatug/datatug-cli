@@ -72,7 +72,7 @@ A three-week spike landing all four subsetting axes against Chinook on both supp
   - **`dalgo2sql` structured-query-to-SQL compiler** — must compile `Limit` and field projection to Postgres/SQLite text. Plan-time verification; upstream PR if gaps exist.
   - **`dalgo2ingitdb`** — already executes StructuredQuery natively; coverage of `Where` + `Limit` + projection needs plan-time spot-check.
 
-## Outstanding Questions
+## Open Questions
 
 - **CLI mini-syntax for `--where`.** Direction picks `<table>:<field>:<op>:<value>` (colon-delimited). Alternatives: `<table>.<field><op><value>` (no separator, harder to parse for multi-char ops like `!=`, `is_null`), JSON-per-flag (`--where '{"table":"users","field":"id","op":">","value":1}'` — verbose but bulletproof). Confirm at Feature-spec time.
 - **Value escaping in `--where`.** Strings with `:` or shell-special characters need a documented escaping rule. URL-encoding? Backslash? Single-quote-enclosed? Pin at Feature-spec time.

@@ -1,6 +1,6 @@
 # Plan: Git Integration for Mutating Commands (mutation-git-integration)
 
-**Status:** Implementing
+**Status:** Completed
 **Source Feature:** mutation-git-integration
 **Date:** 2026-06-04
 **Owner:** alex
@@ -25,6 +25,7 @@ Add one reusable `urfave/cli/v3` `--git=<none|stage|commit>` flag (default `none
 
 ### Task 2: go-git stage helper — changed-files-only, fail-loud off-repo, partial apply
 
+**Status:** done
 **Verifies:** mutation-git-integration#ac:git-stage-scoped, mutation-git-integration#ac:git-stage-non-repo-failloud, mutation-git-integration#ac:git-partial-stages-written-only
 
 Implement a go-git helper that, given the command's exact changed-file list, stages only those paths on the current branch (never `git add -A`), leaving unrelated staged/unstaged changes untouched. When `--git=stage` (or `commit`) is requested against a non-git directory, fail loud (non-zero, "not a git repository") before any project files are written. Wire `--git=stage` into the entity mutators, ensuring a `--continue-on-error` partial batch stages exactly the files actually written.

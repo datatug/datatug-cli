@@ -561,8 +561,15 @@ func entityAddCommandAction(ctx context.Context, c *cli.Command) error {
 
 	// Resolve the version-control mode before reading input or writing anything,
 	// so an invalid or unsupported --git value fails loud before any write.
-	if _, err := resolveGitMode(c.String(gitFlag.Name)); err != nil {
+	mode, err := resolveGitMode(c.String(gitFlag.Name))
+	if err != nil {
 		return err
+	}
+	// Fail loud before any write if staging is requested off-repo.
+	if mode == gitModeStage {
+		if _, err := openRepo(v.ProjectDir); err != nil {
+			return err
+		}
 	}
 
 	data, source, err := readDefinitionInput(c)
@@ -600,10 +607,19 @@ func entityAddCommandAction(ctx context.Context, c *cli.Command) error {
 
 	continueOnError := c.Bool(entityContinueOnErrorFlag.Name)
 
+	var written []string
 	if continueOnError {
-		return addEntitiesContinueOnError(w, entities, entityExists, entityFilePath)
+		written, err = addEntitiesContinueOnError(w, entities, entityExists, entityFilePath)
+	} else {
+		written, err = addEntitiesAtomic(w, entities, entityExists, entityFilePath)
 	}
-	return addEntitiesAtomic(w, entities, entityExists, entityFilePath)
+	// Stage exactly the files actually written, even on partial failure.
+	if mode == gitModeStage {
+		if stageErr := stageFiles(v.ProjectDir, written); stageErr != nil {
+			return stageErr
+		}
+	}
+	return err
 }
 
 // addEntitiesAtomic implements the default all-or-nothing commit: preflight all
@@ -615,7 +631,7 @@ func addEntitiesAtomic(
 	entities []*datatug.Entity,
 	entityExists func(id string) bool,
 	entityFilePath func(id string) string,
-) error {
+) ([]string, error) {
 	var failed bool
 	var writes []fileWrite
 	type report struct {
@@ -660,16 +676,20 @@ func addEntitiesAtomic(
 				failures = append(failures, strings.TrimPrefix(r.line, "failed: "))
 			}
 		}
-		return fmt.Errorf("entity add failed (atomic mode, nothing written): %s", strings.Join(failures, "; "))
+		return nil, fmt.Errorf("entity add failed (atomic mode, nothing written): %s", strings.Join(failures, "; "))
 	}
 
 	if err := atomicWriteFiles(writes); err != nil {
-		return err
+		return nil, err
+	}
+	written := make([]string, len(writes))
+	for i, fw := range writes {
+		written[i] = fw.path
 	}
 	for _, r := range reports {
 		_, _ = fmt.Fprintln(w, r.line)
 	}
-	return nil
+	return written, nil
 }
 
 // addEntitiesContinueOnError implements partial apply: each item is processed
@@ -680,8 +700,9 @@ func addEntitiesContinueOnError(
 	entities []*datatug.Entity,
 	entityExists func(id string) bool,
 	entityFilePath func(id string) string,
-) error {
+) ([]string, error) {
 	var failures []string
+	var written []string
 	for _, entity := range entities {
 		switch {
 		case entity.ID == "":
@@ -696,22 +717,24 @@ func addEntitiesContinueOnError(
 				_, _ = fmt.Fprintf(w, "failed: %s (%v)\n", entity.ID, err)
 				continue
 			}
+			path := entityFilePath(entity.ID)
 			content, err := marshalEntityFile(entity)
 			if err == nil {
-				err = atomicWriteFiles([]fileWrite{{path: entityFilePath(entity.ID), content: content}})
+				err = atomicWriteFiles([]fileWrite{{path: path, content: content}})
 			}
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s (%v)", entity.ID, err))
 				_, _ = fmt.Fprintf(w, "failed: %s (%v)\n", entity.ID, err)
 				continue
 			}
+			written = append(written, path)
 			_, _ = fmt.Fprintf(w, "created: %s\n", entity.ID)
 		}
 	}
 	if len(failures) > 0 {
-		return fmt.Errorf("entity add completed with failures: %s", strings.Join(failures, "; "))
+		return written, fmt.Errorf("entity add completed with failures: %s", strings.Join(failures, "; "))
 	}
-	return nil
+	return written, nil
 }
 
 func entityFieldAddCommandAction(ctx context.Context, c *cli.Command) error {

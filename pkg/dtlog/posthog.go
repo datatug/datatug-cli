@@ -62,7 +62,6 @@ func Close() {
 }
 
 func getPostHogClient() posthog.Client {
-	_, _ = fmt.Println("Initializing PostHog client...")
 	config := readPostHogConfig()
 	var isConfigNeedToBeSaved bool
 	config.ApiKey = os.Getenv("DATATUG_POSTHOG_API_KEY")

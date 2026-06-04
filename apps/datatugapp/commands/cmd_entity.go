@@ -42,8 +42,96 @@ func entityFieldCommand() *cli.Command {
 		Usage: "Author entity fields",
 		Commands: []*cli.Command{
 			entityFieldAddCommandArgs(),
+			entityFieldSetCommandArgs(),
 		},
 	}
+}
+
+var (
+	entityFieldTypeFlag  = cli.StringFlag{Name: "type", Usage: "Field type"}
+	entityFieldTitleFlag = cli.StringFlag{Name: "title", Usage: "Field title"}
+	entityFieldKeyFlag   = cli.BoolFlag{Name: "key", Usage: "Whether the field is a key field"}
+)
+
+func entityFieldSetCommandArgs() *cli.Command {
+	return &cli.Command{
+		Name:        "set",
+		Usage:       "Update attributes of an existing field on an entity",
+		Description: "Updates an existing field's type, title, and/or key flag. Fails if the field does not exist; only attributes whose flags are passed are changed.",
+		ArgsUsage:   "<Entity> <field>",
+		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &entityFieldTypeFlag, &entityFieldTitleFlag, &entityFieldKeyFlag},
+		Action:      entityFieldSetCommandAction,
+	}
+}
+
+func entityFieldSetCommandAction(ctx context.Context, c *cli.Command) error {
+	name := c.Args().Get(0)
+	fieldName := c.Args().Get(1)
+	if name == "" || fieldName == "" {
+		return cli.Exit("entity and field names are required: datatug entity field set <Entity> <field>", 2)
+	}
+
+	setType := c.IsSet(entityFieldTypeFlag.Name)
+	setTitle := c.IsSet(entityFieldTitleFlag.Name)
+	setKey := c.IsSet(entityFieldKeyFlag.Name)
+	if !setType && !setTitle && !setKey {
+		return cli.Exit("nothing to update: pass at least one of --type, --title, --key", 2)
+	}
+
+	v := &projectBaseCommand{}
+	v.ProjectDir = c.String(entityDirFlag.Name)
+	v.ProjectName = c.String(entityProjectFlag.Name)
+
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+		return err
+	}
+
+	projectStore := v.store.GetProjectStore(v.projectID)
+
+	entity, err := projectStore.LoadEntity(ctx, name)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return cli.Exit(fmt.Sprintf("entity %q not found", name), 1)
+		}
+		return err
+	}
+
+	var field *datatug.EntityField
+	for _, f := range entity.Fields {
+		if f.ID == fieldName {
+			field = f
+			break
+		}
+	}
+	if field == nil {
+		return cli.Exit(fmt.Sprintf("field %q not found in entity %q", fieldName, name), 1)
+	}
+
+	if setType {
+		field.Type = c.String(entityFieldTypeFlag.Name)
+	}
+	if setTitle {
+		field.Title = c.String(entityFieldTitleFlag.Name)
+	}
+	if setKey {
+		field.IsKeyField = c.Bool(entityFieldKeyFlag.Name)
+	}
+
+	content, err := marshalEntityFile(entity)
+	if err != nil {
+		return err
+	}
+	entityPath := filepath.Join(v.ProjectDir, "entities", name, name+".entity.json")
+	if err = atomicWriteFiles([]fileWrite{{path: entityPath, content: content}}); err != nil {
+		return err
+	}
+
+	w := c.Root().Writer
+	if w == nil {
+		w = os.Stdout
+	}
+	_, _ = fmt.Fprintf(w, "updated field: %s\n", fieldName)
+	return nil
 }
 
 func entityFieldAddCommandArgs() *cli.Command {

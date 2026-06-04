@@ -46,6 +46,7 @@ Implement `datatug entity field add <Entity>` as additive-only: add one or more 
 
 ### Task 5: `entity field set` — surgical update incl `--key`
 
+**Status:** done
 **Verifies:** cli/entity#ac:field-set-updates, cli/entity#ac:field-set-key-flag, cli/entity#ac:field-set-missing-errors
 
 Implement `datatug entity field set <Entity> <field>` to update an existing field's type, title, and key flag (`--key`), failing non-zero if the field does not exist.

@@ -1,6 +1,6 @@
 # Plan: Git Integration for Mutating Commands (mutation-git-integration)
 
-**Status:** Approved
+**Status:** Implementing
 **Source Feature:** mutation-git-integration
 **Date:** 2026-06-04
 **Owner:** alex
@@ -18,6 +18,7 @@ Split along the natural seam between **flag/value handling** (which needs no git
 
 ### Task 1: Shared `--git` flag + value semantics (none / commit / unknown)
 
+**Status:** done
 **Verifies:** mutation-git-integration#ac:git-flag-rejects-unknown, mutation-git-integration#ac:git-commit-not-supported, mutation-git-integration#ac:git-flag-default-none
 
 Add one reusable `urfave/cli/v3` `--git=<none|stage|commit>` flag (default `none`) plus a mode-resolution helper that rejects an unknown value non-zero (naming the value and supported set) and rejects `commit` non-zero as "not yet supported". Wire the flag into the `entity` mutating commands so that `--git=none` (or absent) performs no version-control action — files are written and nothing is staged or committed.

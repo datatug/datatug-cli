@@ -60,6 +60,7 @@ Implement `datatug entity field rm <Entity> <field>` to remove a named field, fa
 
 ### Task 7: Field-type validation
 
+**Status:** done
 **Verifies:** cli/entity#ac:field-type-invalid
 
 Add validation that rejects any field whose type is neither a datatug-core known type nor an `extends:<ref>` reference, surfacing a clear error and writing nothing. The known-type set (including any `currency` type) is owned by datatug-core; this task only enforces the rejection at the CLI boundary.

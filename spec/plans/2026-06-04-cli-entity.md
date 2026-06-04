@@ -32,6 +32,7 @@ Extend `entity add` input handling to read from stdin (`-f -`, or no `-f`), reso
 
 ### Task 3: `entity add` batch + atomic engine + `--continue-on-error`
 
+**Status:** done
 **Verifies:** cli/entity#ac:add-batch-atomic-rollback, cli/entity#ac:add-continue-on-error
 
 Add multi-entity batch support with the default atomic commit (preflight → stage-to-temp → batch-rename), per-item result reporting, and non-zero exit on any failure; add the `--continue-on-error` flag for partial apply (write the items that pass, report the rest).

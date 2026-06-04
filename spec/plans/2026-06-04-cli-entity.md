@@ -1,6 +1,6 @@
 # Plan: Entity Authoring CLI (cli/entity)
 
-**Status:** Approved
+**Status:** Implementing
 **Source Feature:** cli/entity
 **Date:** 2026-06-04
 **Owner:** alex
@@ -18,6 +18,7 @@ Build the single-entity `add` path first (create-only guard + canonical JSON sto
 
 ### Task 1: `entity add` — create-only from file + JSON storage
 
+**Status:** done
 **Verifies:** cli/entity#ac:add-creates-new, cli/entity#ac:add-rejects-existing, cli/entity#ac:storage-json
 
 Implement `datatug entity add` for a single entity read from `-f <file>`: parse the definition, enforce the create-only guard (fail non-zero if the entity already exists, never overwrite), and persist it as canonical JSON at `entities/<Name>/<Name>.entity.json`.

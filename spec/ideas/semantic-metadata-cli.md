@@ -1,9 +1,9 @@
 # Idea: Semantic Metadata Authoring CLI Verbs
 
-**Status:** Approved
+**Status:** Specified
 **Date:** 2026-06-04
 **Owner:** alex
-**Promotes To:** —
+**Promotes To:** cli/entity
 **Supersedes:** —
 **Related Ideas:** —
 

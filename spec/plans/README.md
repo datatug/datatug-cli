@@ -8,8 +8,9 @@ verifiable tasks with clear acceptance criteria and dependency ordering.
 | Plan | Feature | Status |
 |------|---------|--------|
 | [2026-05-14-db-copy-mvp](2026-05-14-db-copy-mvp.md) | [`cli/db/copy`](../features/cli/db/copy/README.md) | Done |
+| [2026-06-04-cli-entity](2026-06-04-cli-entity.md) | [`cli/entity`](../features/cli/entity/README.md) | Approved |
 
-## Outstanding Questions
+## Open Questions
 
 None at this time.
 

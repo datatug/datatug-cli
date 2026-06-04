@@ -208,6 +208,7 @@ Every AC above is CLI-observable (exit code, stdout, and on-disk files), so all 
 ## Sidekick Seeds Generated
 
 - [module-system-with-a-modules-registry-and-module-qualified](../../../ideas/seeds/module-system-with-a-modules-registry-and-module-qualified.md) — captured 2026-06-04 by specstudio:implement
+- [semantic-field-types-currency-as-constrained-string-via-extends](../../../ideas/seeds/semantic-field-types-currency-as-constrained-string-via-extends.md) — captured 2026-06-04 by specstudio:implement
 
 ---
 *This document follows the https://specscore.md/feature-specification*

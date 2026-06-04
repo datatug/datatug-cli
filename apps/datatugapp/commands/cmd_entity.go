@@ -195,7 +195,7 @@ func entityFieldRmCommandArgs() *cli.Command {
 		Usage:       "Remove a named field from an entity",
 		Description: "Removes a named field from an existing entity. Fails non-zero if the field is absent and writes nothing.",
 		ArgsUsage:   "<Entity> <field>",
-		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag},
+		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &gitFlag},
 		Action:      entityFieldRmCommandAction,
 	}
 }
@@ -212,6 +212,15 @@ func entityFieldRmCommandAction(ctx context.Context, c *cli.Command) error {
 	v.ProjectName = c.String(entityProjectFlag.Name)
 
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+		return err
+	}
+
+	// Resolve the version-control mode and fail loud before any write.
+	mode, err := resolveGitMode(c.String(gitFlag.Name))
+	if err != nil {
+		return err
+	}
+	if err = gitPreflight(v.ProjectDir, mode); err != nil {
 		return err
 	}
 
@@ -246,6 +255,9 @@ func entityFieldRmCommandAction(ctx context.Context, c *cli.Command) error {
 	if err = atomicWriteFiles([]fileWrite{{path: entityPath, content: content}}); err != nil {
 		return err
 	}
+	if err = applyGit(v.ProjectDir, mode, []string{entityPath}); err != nil {
+		return err
+	}
 
 	w := c.Root().Writer
 	if w == nil {
@@ -267,7 +279,7 @@ func entityFieldSetCommandArgs() *cli.Command {
 		Usage:       "Update attributes of an existing field on an entity",
 		Description: "Updates an existing field's type, title, and/or key flag. Fails if the field does not exist; only attributes whose flags are passed are changed.",
 		ArgsUsage:   "<Entity> <field>",
-		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &entityFieldTypeFlag, &entityFieldTitleFlag, &entityFieldKeyFlag},
+		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &entityFieldTypeFlag, &entityFieldTitleFlag, &entityFieldKeyFlag, &gitFlag},
 		Action:      entityFieldSetCommandAction,
 	}
 }
@@ -291,6 +303,15 @@ func entityFieldSetCommandAction(ctx context.Context, c *cli.Command) error {
 	v.ProjectName = c.String(entityProjectFlag.Name)
 
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+		return err
+	}
+
+	// Resolve the version-control mode and fail loud before any write.
+	mode, err := resolveGitMode(c.String(gitFlag.Name))
+	if err != nil {
+		return err
+	}
+	if err = gitPreflight(v.ProjectDir, mode); err != nil {
 		return err
 	}
 
@@ -337,6 +358,9 @@ func entityFieldSetCommandAction(ctx context.Context, c *cli.Command) error {
 	if err = atomicWriteFiles([]fileWrite{{path: entityPath, content: content}}); err != nil {
 		return err
 	}
+	if err = applyGit(v.ProjectDir, mode, []string{entityPath}); err != nil {
+		return err
+	}
 
 	w := c.Root().Writer
 	if w == nil {
@@ -352,7 +376,7 @@ func entityFieldAddCommandArgs() *cli.Command {
 		Usage:       "Add one or more new fields to an existing entity",
 		Description: "Adds one or more new fields to an existing entity from a YAML/JSON definition. Additive-only: fails if any named field already exists and never overwrites existing field content.",
 		ArgsUsage:   "<Entity>",
-		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &entityFileFlag, &entityFormatFlag, &entityContinueOnErrorFlag},
+		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &entityFileFlag, &entityFormatFlag, &entityContinueOnErrorFlag, &gitFlag},
 		Action:      entityFieldAddCommandAction,
 	}
 }
@@ -566,10 +590,8 @@ func entityAddCommandAction(ctx context.Context, c *cli.Command) error {
 		return err
 	}
 	// Fail loud before any write if staging is requested off-repo.
-	if mode == gitModeStage {
-		if _, err := openRepo(v.ProjectDir); err != nil {
-			return err
-		}
+	if err := gitPreflight(v.ProjectDir, mode); err != nil {
+		return err
 	}
 
 	data, source, err := readDefinitionInput(c)
@@ -614,10 +636,8 @@ func entityAddCommandAction(ctx context.Context, c *cli.Command) error {
 		written, err = addEntitiesAtomic(w, entities, entityExists, entityFilePath)
 	}
 	// Stage exactly the files actually written, even on partial failure.
-	if mode == gitModeStage {
-		if stageErr := stageFiles(v.ProjectDir, written); stageErr != nil {
-			return stageErr
-		}
+	if stageErr := applyGit(v.ProjectDir, mode, written); stageErr != nil {
+		return stageErr
 	}
 	return err
 }
@@ -751,6 +771,15 @@ func entityFieldAddCommandAction(ctx context.Context, c *cli.Command) error {
 		return err
 	}
 
+	// Resolve the version-control mode and fail loud before any write.
+	mode, err := resolveGitMode(c.String(gitFlag.Name))
+	if err != nil {
+		return err
+	}
+	if err = gitPreflight(v.ProjectDir, mode); err != nil {
+		return err
+	}
+
 	data, source, err := readDefinitionInput(c)
 	if err != nil {
 		return err
@@ -830,6 +859,9 @@ func entityFieldAddCommandAction(ctx context.Context, c *cli.Command) error {
 			return err
 		}
 		if err = atomicWriteFiles([]fileWrite{{path: entityPath, content: content}}); err != nil {
+			return err
+		}
+		if err = applyGit(v.ProjectDir, mode, []string{entityPath}); err != nil {
 			return err
 		}
 		for _, f := range toAdd {

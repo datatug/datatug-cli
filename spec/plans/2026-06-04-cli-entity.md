@@ -74,6 +74,8 @@ Implement the non-mutating read-back verbs: `datatug entity list` (list the proj
 
 ### Task 9: `--git` flag integration (none/stage)
 
+**Status:** blocked
+**Blocked-On:** the cross-repo `mutation-git-integration` capability (the shared `--git=<none|stage|commit>` flag + go-git helper) has not landed in this repo — no shared flag/helper exists. Per the Plan's Open Questions, Task 9 is blocked on that dependency rather than reimplemented with a throwaway local git helper.
 **Verifies:** cli/entity#ac:git-default-none, cli/entity#ac:git-stage-scoped
 
 Wire the shared `--git=<none|stage|commit>` flag (from the `mutation-git-integration` capability) into all mutating `entity` subcommands, acting only on the files the command changed. Verify default `none` (no VCS side effect) and `--git=stage` (stage exactly the written files, leaving unrelated changes alone). `--git=commit` is parser-accepted but not scheduled here, per the Feature.

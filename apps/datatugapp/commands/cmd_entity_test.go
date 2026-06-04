@@ -585,8 +585,8 @@ func TestEntityAdd_GitFlag_CommitNotSupported(t *testing.T) {
 	assert.Equal(t, headBefore, gitHead(t, dir), "no commit must be created")
 }
 
-// AC: git-flag-default-none — with no --git flag, written files appear as
-// untracked (not staged) and no commit is created.
+// AC: git-flag-default-none; cli/entity#ac:git-default-none — with no --git
+// flag, written files appear as untracked (not staged) and no commit is created.
 func TestEntityAdd_GitFlag_DefaultNone(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, exec.Command("git", "init", dir).Run())
@@ -632,9 +632,9 @@ func gitPorcelain(t *testing.T, dir, path string) string {
 	return string(out)
 }
 
-// AC: git-stage-scoped — with --git=stage, exactly the files the command wrote
-// are staged; an unrelated unstaged change to an existing tracked file remains
-// unstaged.
+// AC: git-stage-scoped; cli/entity#ac:git-stage-scoped — with --git=stage,
+// exactly the files the command wrote are staged; an unrelated unstaged change
+// to an existing tracked file remains unstaged.
 func TestEntityAdd_GitStage_ScopedToWrittenFiles(t *testing.T) {
 	dir := t.TempDir()
 	gitInitRepo(t, dir)
@@ -706,6 +706,36 @@ func TestEntityAdd_GitStage_PartialStagesWrittenOnly(t *testing.T) {
 	orderStatus := gitPorcelain(t, dir, orderRel)
 	assert.NotContains(t, orderStatus, "A  ", "failed item must not be staged")
 	assert.Contains(t, orderStatus, "??", "pre-existing Order file must remain untracked")
+}
+
+// REQ: git-flag — every mutating entity subcommand accepts --git. field add
+// with --git=stage stages exactly the rewritten entity file, and field set /
+// field rm both reject an invalid --git value (proving they expose the flag).
+func TestEntityFieldVerbs_GitWiring(t *testing.T) {
+	dir := t.TempDir()
+	gitInitRepo(t, dir)
+
+	// Create the entity to operate on (no --git, so it stays untracked).
+	stdin := "id: User\nfields:\n  - id: id\n    type: string\n"
+	_, _, err := runEntityStdin(t, stdin, "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	entityRel := filepath.Join("entities", "User", "User.entity.json")
+
+	// field add --git=stage must stage the rewritten entity file.
+	_, _, err = runEntityStdin(t, "id: email\ntype: string\n", "entity", "field", "add", "User", "-d", dir, "--git", "stage")
+	require.NoError(t, err)
+	assert.Contains(t, gitPorcelain(t, dir, entityRel), "A  ", "field add must stage the rewritten entity file")
+
+	// field set must accept --git (a bogus value is rejected non-zero).
+	_, _, err = runEntity(t, "entity", "field", "set", "User", "email", "--title", "Email", "-d", dir, "--git", "bogus")
+	require.Error(t, err, "field set must expose --git and reject an invalid value")
+	assert.Contains(t, err.Error(), "bogus")
+
+	// field rm must accept --git (a bogus value is rejected non-zero).
+	_, _, err = runEntity(t, "entity", "field", "rm", "User", "email", "-d", dir, "--git", "bogus")
+	require.Error(t, err, "field rm must expose --git and reject an invalid value")
+	assert.Contains(t, err.Error(), "bogus")
 }
 
 // An invalid --format value is rejected with a non-zero error.

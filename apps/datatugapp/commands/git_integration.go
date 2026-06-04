@@ -45,6 +45,30 @@ func resolveGitMode(value string) (gitMode, error) {
 	}
 }
 
+// gitPreflight performs the fail-loud check that must run before any write.
+// When mode is stage it verifies the project is inside a git repository (via
+// openRepo), returning openRepo's "not a git repository" error otherwise. It is
+// a no-op for none. (commit and unknown values are already rejected by
+// resolveGitMode.)
+func gitPreflight(projectDir string, mode gitMode) error {
+	if mode == gitModeStage {
+		if _, err := openRepo(projectDir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyGit performs the post-write version-control action for the given mode.
+// When mode is stage it stages exactly writtenPaths into the index; it is a
+// no-op for none.
+func applyGit(projectDir string, mode gitMode, writtenPaths []string) error {
+	if mode == gitModeStage {
+		return stageFiles(projectDir, writtenPaths)
+	}
+	return nil
+}
+
 // openRepo opens the git repository that contains projectDir, walking up
 // parent directories (DetectDotGit). A directory that is not inside a git
 // repository yields a clear "not a git repository" error suitable for a

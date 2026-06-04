@@ -39,6 +39,7 @@ Add multi-entity batch support with the default atomic commit (preflight → sta
 
 ### Task 4: `entity field add` — additive, batch
 
+**Status:** done
 **Verifies:** cli/entity#ac:field-add-additive, cli/entity#ac:field-add-rejects-existing, cli/entity#ac:no-implicit-override
 
 Implement `datatug entity field add <Entity>` as additive-only: add one or more new fields, fail non-zero if any named field already exists, and never overwrite existing field content (the no-implicit-override guarantee).

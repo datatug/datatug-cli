@@ -144,6 +144,100 @@ func TestEntityAdd_EmptyStdin_Errors(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "nothing must be written on empty input")
 }
 
+// AC: add-batch-atomic-rollback — a batch with one new entity (User) and one
+// existing entity (Order) in the default atomic mode writes nothing, reports
+// the Order conflict, and exits non-zero.
+func TestEntityAdd_BatchAtomicRollback(t *testing.T) {
+	dir := t.TempDir()
+
+	// Pre-create Order so the batch hits a create-only conflict.
+	orderDef := "id: Order\nfields:\n  - id: id\n    type: string\n"
+	_, _, err := runEntityStdin(t, orderDef, "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	orderPath := filepath.Join(dir, "entities", "Order", "Order.entity.json")
+	orderBefore, err := os.ReadFile(orderPath)
+	require.NoError(t, err)
+
+	batch := "- id: User\n  fields:\n    - id: id\n      type: string\n- id: Order\n  fields:\n    - id: id\n      type: string\n"
+	stdout, _, runErr := runEntityStdin(t, batch, "entity", "add", "-d", dir)
+	assert.Error(t, runErr)
+
+	// Atomic rollback: User must NOT be written.
+	userPath := filepath.Join(dir, "entities", "User", "User.entity.json")
+	_, statErr := os.Stat(userPath)
+	assert.True(t, os.IsNotExist(statErr), "User must not be written in atomic rollback")
+
+	// Order must be left unchanged.
+	orderAfter, err := os.ReadFile(orderPath)
+	require.NoError(t, err)
+	assert.Equal(t, orderBefore, orderAfter, "existing Order must be left unchanged")
+
+	// The per-item report must flag Order as the conflict.
+	report := stdout.String() + runErr.Error()
+	assert.Contains(t, report, "Order")
+	assert.Contains(t, report, "exists")
+}
+
+// AC: add-continue-on-error — same batch with --continue-on-error creates User,
+// reports Order failed, and exits non-zero.
+func TestEntityAdd_BatchContinueOnError(t *testing.T) {
+	dir := t.TempDir()
+
+	orderDef := "id: Order\nfields:\n  - id: id\n    type: string\n"
+	_, _, err := runEntityStdin(t, orderDef, "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	batch := "- id: User\n  fields:\n    - id: id\n      type: string\n- id: Order\n  fields:\n    - id: id\n      type: string\n"
+	stdout, _, err := runEntityStdin(t, batch, "entity", "add", "-d", dir, "--continue-on-error")
+	assert.Error(t, err)
+
+	// User IS created in partial-apply mode.
+	userPath := filepath.Join(dir, "entities", "User", "User.entity.json")
+	assert.FileExists(t, userPath)
+
+	// Report mentions Order failed.
+	report := stdout.String() + err.Error()
+	assert.Contains(t, report, "Order")
+	assert.Contains(t, report, "exists")
+}
+
+// An all-new batch creates every entity, reports each, and exits zero.
+func TestEntityAdd_BatchAllNew(t *testing.T) {
+	dir := t.TempDir()
+
+	batch := "- id: User\n  fields:\n    - id: id\n      type: string\n- id: Order\n  fields:\n    - id: id\n      type: string\n"
+	stdout, _, err := runEntityStdin(t, batch, "entity", "add", "-d", dir)
+	assert.NoError(t, err)
+
+	assert.FileExists(t, filepath.Join(dir, "entities", "User", "User.entity.json"))
+	assert.FileExists(t, filepath.Join(dir, "entities", "Order", "Order.entity.json"))
+
+	out := stdout.String()
+	assert.Contains(t, out, "User")
+	assert.Contains(t, out, "Order")
+}
+
+// The atomic batch path must produce byte-identical on-disk JSON to the
+// single-entity store path (SaveEntity), so curated files stay consistent.
+func TestEntityAdd_BatchMatchesStoreFormat(t *testing.T) {
+	dirBatch := t.TempDir()
+	dirStore := t.TempDir()
+
+	// single via store path (one object, not a list)
+	_, _, err := runEntityStdin(t, "id: User\nfields:\n  - id: id\n    type: string\n", "entity", "add", "-d", dirStore)
+	require.NoError(t, err)
+	// single via batch list of one
+	_, _, err = runEntityStdin(t, "- id: User\n  fields:\n    - id: id\n      type: string\n", "entity", "add", "-d", dirBatch)
+	require.NoError(t, err)
+
+	storeData, err := os.ReadFile(filepath.Join(dirStore, "entities", "User", "User.entity.json"))
+	require.NoError(t, err)
+	batchData, err := os.ReadFile(filepath.Join(dirBatch, "entities", "User", "User.entity.json"))
+	require.NoError(t, err)
+	assert.Equal(t, string(storeData), string(batchData), "batch write must match store on-disk format")
+}
+
 // An invalid --format value is rejected with a non-zero error.
 func TestEntityAdd_InvalidFormat_Errors(t *testing.T) {
 	dir := t.TempDir()

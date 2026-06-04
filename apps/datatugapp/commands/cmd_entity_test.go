@@ -307,6 +307,68 @@ func TestEntityFieldAdd_NoImplicitOverride(t *testing.T) {
 	assert.Equal(t, "integer", fields["id"], "id type must remain integer (never overwritten)")
 }
 
+// AC: field-set-updates — setting a new type on an existing field updates the
+// type and exits zero.
+func TestEntityFieldSet_UpdatesType(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := runEntityStdin(t, "id: User\nfields:\n  - id: primaryCurrency\n    type: string\n", "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	_, _, err = runEntity(t, "entity", "field", "set", "User", "primaryCurrency", "--type", "currency", "-d", dir)
+	assert.NoError(t, err)
+
+	fields := loadEntityFields(t, dir, "User")
+	assert.Equal(t, "currency", fields["primaryCurrency"], "primaryCurrency type must become currency")
+}
+
+// AC: field-set-key-flag — --key promotes a non-key field to a key field and
+// exits zero.
+func TestEntityFieldSet_KeyFlag(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := runEntityStdin(t, "id: User\nfields:\n  - id: email\n    type: string\n", "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	_, _, err = runEntity(t, "entity", "field", "set", "User", "email", "--key", "-d", dir)
+	assert.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, "entities", "User", "User.entity.json"))
+	require.NoError(t, err)
+	var ent struct {
+		Fields []struct {
+			ID         string `json:"id"`
+			IsKeyField bool   `json:"isKeyField"`
+		} `json:"fields"`
+	}
+	require.NoError(t, json.Unmarshal(data, &ent))
+	var keyed bool
+	for _, f := range ent.Fields {
+		if f.ID == "email" {
+			keyed = f.IsKeyField
+		}
+	}
+	assert.True(t, keyed, "email must become a key field")
+}
+
+// AC: field-set-missing-errors — setting attributes on a non-existent field
+// fails non-zero and leaves the entity unchanged.
+func TestEntityFieldSet_MissingErrors(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := runEntityStdin(t, "id: User\nfields:\n  - id: id\n    type: string\n", "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	entityPath := filepath.Join(dir, "entities", "User", "User.entity.json")
+	before, err := os.ReadFile(entityPath)
+	require.NoError(t, err)
+
+	_, _, err = runEntity(t, "entity", "field", "set", "User", "xyz", "--title", "X", "-d", dir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "xyz")
+
+	after, err := os.ReadFile(entityPath)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "entity must be left unchanged")
+}
+
 // field add on a non-existent entity fails non-zero with a not-found error.
 func TestEntityFieldAdd_EntityNotFound(t *testing.T) {
 	dir := t.TempDir()

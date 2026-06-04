@@ -23,6 +23,8 @@ const (
 	TypeFloat = "float"
 	// TypeMoney   = "money"
 	TypeMoney = "money"
+	// TypeCurrency = "currency"
+	TypeCurrency = "currency"
 
 	// TypeDate     = "date"
 	TypeDate = "date"
@@ -56,6 +58,7 @@ var KnownTypes = []string{
 	TypeDecimal,
 	TypeFloat,
 	TypeMoney,
+	TypeCurrency,
 
 	TypeDate,
 	TypeDateTime,

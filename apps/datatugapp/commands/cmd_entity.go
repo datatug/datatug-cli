@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
@@ -175,7 +176,11 @@ func entityFieldSetCommandAction(ctx context.Context, c *cli.Command) error {
 	}
 
 	if setType {
-		field.Type = c.String(entityFieldTypeFlag.Name)
+		newType := c.String(entityFieldTypeFlag.Name)
+		if err = validateFieldType(newType); err != nil {
+			return cli.Exit(fmt.Sprintf("field %q: %v", fieldName, err), 1)
+		}
+		field.Type = newType
 	}
 	if setTitle {
 		field.Title = c.String(entityFieldTitleFlag.Name)
@@ -318,6 +323,37 @@ func parseFieldDocs(data []byte) ([]*datatug.EntityField, error) {
 	return []*datatug.EntityField{field}, nil
 }
 
+// validateFieldType rejects a non-empty field type that is neither a
+// datatug-core known type nor an extends:<ref> reference. An empty type is
+// permissive on purpose: untyped fields exist on disk in real projects (e.g.
+// the demo Person entity) and no AC requires rejecting them.
+func validateFieldType(t string) error {
+	if t == "" {
+		return nil
+	}
+	if ref, ok := strings.CutPrefix(t, "extends:"); ok {
+		if strings.TrimSpace(ref) == "" {
+			return fmt.Errorf("unknown field type %q (expected a known type or extends:<ref>)", t)
+		}
+		return nil
+	}
+	if slices.Contains(datatug.KnownTypes, t) {
+		return nil
+	}
+	return fmt.Errorf("unknown field type %q (expected a known type or extends:<ref>)", t)
+}
+
+// validateEntityFieldTypes validates every field type of an entity, returning
+// the first failure with field context.
+func validateEntityFieldTypes(entity *datatug.Entity) error {
+	for _, f := range entity.Fields {
+		if err := validateFieldType(f.Type); err != nil {
+			return fmt.Errorf("field %q: %w", f.ID, err)
+		}
+	}
+	return nil
+}
+
 // fileWrite describes one file to write atomically: its final path and content.
 type fileWrite struct {
 	path    string
@@ -451,6 +487,11 @@ func addEntitiesAtomic(
 			failed = true
 			reports[i] = report{line: fmt.Sprintf("failed: %s (already exists)", entity.ID)}
 		default:
+			if err := validateEntityFieldTypes(entity); err != nil {
+				failed = true
+				reports[i] = report{line: fmt.Sprintf("failed: %s (%v)", entity.ID, err)}
+				continue
+			}
 			content, err := marshalEntityFile(entity)
 			if err != nil {
 				failed = true
@@ -504,6 +545,11 @@ func addEntitiesContinueOnError(
 			failures = append(failures, fmt.Sprintf("%s (already exists)", entity.ID))
 			_, _ = fmt.Fprintf(w, "failed: %s (already exists)\n", entity.ID)
 		default:
+			if err := validateEntityFieldTypes(entity); err != nil {
+				failures = append(failures, fmt.Sprintf("%s (%v)", entity.ID, err))
+				_, _ = fmt.Fprintf(w, "failed: %s (%v)\n", entity.ID, err)
+				continue
+			}
 			content, err := marshalEntityFile(entity)
 			if err == nil {
 				err = atomicWriteFiles([]fileWrite{{path: entityFilePath(entity.ID), content: content}})
@@ -588,6 +634,13 @@ func entityFieldAddCommandAction(ctx context.Context, c *cli.Command) error {
 				_, _ = fmt.Fprintf(w, "failed field: %s (already exists)\n", f.ID)
 			}
 		default:
+			if typeErr := validateFieldType(f.Type); typeErr != nil {
+				failures = append(failures, fmt.Sprintf("%s (%v)", f.ID, typeErr))
+				if continueOnError {
+					_, _ = fmt.Fprintf(w, "failed field: %s (%v)\n", f.ID, typeErr)
+				}
+				continue
+			}
 			existing[f.ID] = true
 			toAdd = append(toAdd, f)
 		}

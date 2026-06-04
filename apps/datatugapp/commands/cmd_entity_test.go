@@ -399,6 +399,72 @@ func TestEntityFieldAdd_EntityNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
+// AC: field-type-invalid — adding an entity whose field has an unknown type
+// fails non-zero reporting the bad type and writes nothing.
+func TestEntityAdd_InvalidFieldType_Errors(t *testing.T) {
+	dir := t.TempDir()
+	stdin := "id: User\nfields:\n  - id: id\n    type: not-a-type\n"
+
+	_, _, err := runEntityStdin(t, stdin, "entity", "add", "-d", dir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not-a-type")
+
+	_, statErr := os.Stat(filepath.Join(dir, "entities", "User"))
+	assert.True(t, os.IsNotExist(statErr), "nothing must be written on invalid field type")
+}
+
+// field add with an unknown field type fails non-zero and leaves the entity
+// unchanged.
+func TestEntityFieldAdd_InvalidFieldType_Errors(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := runEntityStdin(t, "id: User\nfields:\n  - id: id\n    type: integer\n", "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	entityPath := filepath.Join(dir, "entities", "User", "User.entity.json")
+	before, err := os.ReadFile(entityPath)
+	require.NoError(t, err)
+
+	_, _, err = runEntityStdin(t, "id: bad\ntype: not-a-type\n", "entity", "field", "add", "User", "-d", dir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not-a-type")
+
+	after, err := os.ReadFile(entityPath)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "entity must be left unchanged")
+}
+
+// field set with an unknown --type fails non-zero and leaves the field
+// unchanged.
+func TestEntityFieldSet_InvalidFieldType_Errors(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := runEntityStdin(t, "id: User\nfields:\n  - id: id\n    type: integer\n", "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	entityPath := filepath.Join(dir, "entities", "User", "User.entity.json")
+	before, err := os.ReadFile(entityPath)
+	require.NoError(t, err)
+
+	_, _, err = runEntity(t, "entity", "field", "set", "User", "id", "--type", "not-a-type", "-d", dir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not-a-type")
+
+	after, err := os.ReadFile(entityPath)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "field must be left unchanged")
+}
+
+// An extends:<ref> field type is accepted by entity add.
+func TestEntityAdd_ExtendsFieldType_Accepted(t *testing.T) {
+	dir := t.TempDir()
+	stdin := "id: User\nfields:\n  - id: amount\n    type: extends:currency\n"
+
+	_, _, err := runEntityStdin(t, stdin, "entity", "add", "-d", dir)
+	assert.NoError(t, err)
+
+	fields := loadEntityFields(t, dir, "User")
+	assert.Equal(t, "extends:currency", fields["amount"], "extends:<ref> type must be accepted")
+}
+
 // An invalid --format value is rejected with a non-zero error.
 func TestEntityAdd_InvalidFormat_Errors(t *testing.T) {
 	dir := t.TempDir()

@@ -1,6 +1,6 @@
 # Idea: Semantic Metadata Authoring CLI Verbs
 
-**Status:** Implementing
+**Status:** Implemented
 **Date:** 2026-06-04
 **Owner:** alex
 **Promotes To:** cli/entity

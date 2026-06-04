@@ -34,7 +34,7 @@ func TestFsEntitiesStore(t *testing.T) {
 		}
 		err := store.SaveEntity(ctx, entity)
 		assert.NoError(t, err)
-		assert.FileExists(t, filepath.Join(entitiesDir, "entity1.entity.json"))
+		assert.FileExists(t, filepath.Join(entitiesDir, "entity1", "entity1.entity.json"))
 	})
 
 	t.Run("loadEntity", func(t *testing.T) {

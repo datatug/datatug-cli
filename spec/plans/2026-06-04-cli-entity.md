@@ -67,6 +67,7 @@ Add validation that rejects any field whose type is neither a datatug-core known
 
 ### Task 8: Read-back — `entity list` + `entity show`
 
+**Status:** done
 **Verifies:** cli/entity#ac:entity-list-lists, cli/entity#ac:entity-show-renders
 
 Implement the non-mutating read-back verbs: `datatug entity list` (list the project's entities) and `datatug entity show <Entity>` (render the entity's fields plus, when present, the read-only generated copy of its table/column links).

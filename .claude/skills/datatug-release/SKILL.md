@@ -29,9 +29,10 @@ so there is **no in-repo version file to edit**.
   every step below succeeded (or the commit was already released).
 - **Idempotent per commit:** if `HEAD` is already tagged with a `vX.Y.Z` tag,
   the release for this commit already happened — succeed without re-tagging or
-  re-dispatching. This is what makes the multi-Feature case safe: shipping a
-  second Feature at the same commit just flips its status, it does not cut a
-  second release.
+  re-dispatching. And when HEAD has advanced past the release with only
+  bookkeeping commits, the confirm-only path (see Input) still succeeds without
+  cutting a redundant release. Together these make the multi-Feature case safe:
+  shipping a follow-on Feature just confirms, it does not cut a second release.
 
 ## Input (`args`)
 
@@ -41,6 +42,18 @@ so there is **no in-repo version file to edit**.
 - `minor` → minor bump
 - `major` → major bump
 - an explicit `vX.Y.Z` → use exactly that version (overrides bump logic)
+- `confirm` → confirm-only: never cut a release; verify the latest release already
+  covers HEAD and report success (see Confirm-only below)
+
+**Confirm-only (auto and explicit).** For a bump-level `args` (`patch`/`minor`/`major`
+or empty), if the latest release tag is an ancestor of HEAD and HEAD adds **no
+releasable changes** over it — everything since the tag is bookkeeping under
+`spec/`, `.specscore/`, or `.claude/` — the delegate treats the release as already
+covering HEAD's code and returns `RELEASE_OK <latest-tag>` **without cutting a new
+release**. This is the multi-Feature case: shipping Feature A cuts the release;
+shipping Feature B, after only spec/status commits advanced HEAD past the tag, just
+confirms. Passing `args: confirm` forces this path and **fails loud** if releasable
+changes exist, so it can never falsely mark a Feature shipped.
 
 ## Procedure
 
@@ -78,25 +91,52 @@ fi
 ### 3. Resolve the target version from `args`
 
 ```bash
-BUMP="$1"   # the value of ship.delegate.args
-case "$BUMP" in
-  v[0-9]*)                       # explicit version
-    echo "$BUMP" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "RELEASE_FAILED bad explicit version '$BUMP'"; exit 1; }
-    NEW="$BUMP" ;;
-  *)                             # bump level (local tag list already synced with remote in step 1)
-    latest=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
-    latest=${latest:-v0.0.0}
-    IFS=. read -r MA MI PA <<EOF
-${latest#v}
+BUMP="${1:-patch}"   # the value of ship.delegate.args (default patch)
+
+# Explicit version always cuts a new release at HEAD.
+if echo "$BUMP" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+  NEW="$BUMP"
+else
+  # Bump level or the literal "confirm". Resolve the latest release tag
+  # (local list already synced with remote in step 1).
+  latest=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+
+  # --- Confirm-only path -------------------------------------------------
+  # If a release exists, is an ancestor of HEAD, and HEAD adds NO releasable
+  # changes over it (everything since the tag is bookkeeping under spec/,
+  # .specscore/, .claude/), the code at HEAD is already published in `latest`.
+  # Succeed without cutting a redundant release. Side-effect-free: no push,
+  # tag, or dispatch — main is synced later by ship's status-transition commit.
+  if [ -n "$latest" ] && git merge-base --is-ancestor "$latest" HEAD 2>/dev/null; then
+    releasable=$(git diff --name-only "$latest"..HEAD | grep -vE '^(spec/|\.specscore/|\.claude/)' || true)
+    if [ -z "$releasable" ]; then
+      echo "RELEASE_OK $latest (confirm-only: HEAD adds no releasable changes over $latest)"
+      exit 0
+    fi
+    if [ "$BUMP" = "confirm" ]; then
+      echo "RELEASE_FAILED confirm requested but releasable changes exist since $latest:"
+      echo "$releasable"
+      exit 1
+    fi
+  elif [ "$BUMP" = "confirm" ]; then
+    echo "RELEASE_FAILED confirm requested but no release tag is an ancestor of HEAD"
+    exit 1
+  fi
+
+  # --- Cut path ----------------------------------------------------------
+  base=${latest:-v0.0.0}
+  IFS=. read -r MA MI PA <<EOF
+${base#v}
 EOF
-    case "${BUMP:-patch}" in
-      major) MA=$((MA+1)); MI=0; PA=0 ;;
-      minor) MI=$((MI+1)); PA=0 ;;
-      patch) PA=$((PA+1)) ;;
-      *) echo "RELEASE_FAILED unknown bump '$BUMP'"; exit 1 ;;
-    esac
-    NEW="v$MA.$MI.$PA" ;;
-esac
+  case "$BUMP" in
+    major) MA=$((MA+1)); MI=0; PA=0 ;;
+    minor) MI=$((MI+1)); PA=0 ;;
+    patch) PA=$((PA+1)) ;;
+    *) echo "RELEASE_FAILED unknown bump '$BUMP' (use major|minor|patch, confirm, or vX.Y.Z)"; exit 1 ;;
+  esac
+  NEW="v$MA.$MI.$PA"
+fi
+
 # Guard: target tag must not already exist anywhere
 git rev-parse -q --verify "refs/tags/$NEW" >/dev/null && { echo "RELEASE_FAILED tag $NEW already exists but not on HEAD"; exit 1; }
 git ls-remote --exit-code --tags origin "$NEW" >/dev/null 2>&1 && { echo "RELEASE_FAILED tag $NEW already exists on origin"; exit 1; }

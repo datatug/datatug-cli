@@ -369,6 +369,27 @@ func TestEntityFieldSet_MissingErrors(t *testing.T) {
 	assert.Equal(t, before, after, "entity must be left unchanged")
 }
 
+// AC: field-rm-removes — removing a named field deletes it and leaves the other
+// field present; running the same rm again exits non-zero because it is absent.
+func TestEntityFieldRm_Removes(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := runEntityStdin(t, "id: User\nfields:\n  - id: id\n    type: integer\n  - id: tmp\n    type: string\n", "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	_, _, err = runEntity(t, "entity", "field", "rm", "User", "tmp", "-d", dir)
+	assert.NoError(t, err)
+
+	fields := loadEntityFields(t, dir, "User")
+	_, hasTmp := fields["tmp"]
+	assert.False(t, hasTmp, "tmp must be removed")
+	assert.Equal(t, "integer", fields["id"], "id must be unchanged")
+
+	// Running the same rm again must fail non-zero because tmp is now absent.
+	_, _, err = runEntity(t, "entity", "field", "rm", "User", "tmp", "-d", dir)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "tmp")
+}
+
 // field add on a non-existent entity fails non-zero with a not-found error.
 func TestEntityFieldAdd_EntityNotFound(t *testing.T) {
 	dir := t.TempDir()

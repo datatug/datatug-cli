@@ -43,8 +43,75 @@ func entityFieldCommand() *cli.Command {
 		Commands: []*cli.Command{
 			entityFieldAddCommandArgs(),
 			entityFieldSetCommandArgs(),
+			entityFieldRmCommandArgs(),
 		},
 	}
+}
+
+func entityFieldRmCommandArgs() *cli.Command {
+	return &cli.Command{
+		Name:        "rm",
+		Usage:       "Remove a named field from an entity",
+		Description: "Removes a named field from an existing entity. Fails non-zero if the field is absent and writes nothing.",
+		ArgsUsage:   "<Entity> <field>",
+		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag},
+		Action:      entityFieldRmCommandAction,
+	}
+}
+
+func entityFieldRmCommandAction(ctx context.Context, c *cli.Command) error {
+	name := c.Args().Get(0)
+	fieldName := c.Args().Get(1)
+	if name == "" || fieldName == "" {
+		return cli.Exit("entity and field names are required: datatug entity field rm <Entity> <field>", 2)
+	}
+
+	v := &projectBaseCommand{}
+	v.ProjectDir = c.String(entityDirFlag.Name)
+	v.ProjectName = c.String(entityProjectFlag.Name)
+
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+		return err
+	}
+
+	projectStore := v.store.GetProjectStore(v.projectID)
+
+	entity, err := projectStore.LoadEntity(ctx, name)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return cli.Exit(fmt.Sprintf("entity %q not found", name), 1)
+		}
+		return err
+	}
+
+	idx := -1
+	for i, f := range entity.Fields {
+		if f.ID == fieldName {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return cli.Exit(fmt.Sprintf("field %q not found in entity %q", fieldName, name), 1)
+	}
+
+	entity.Fields = append(entity.Fields[:idx], entity.Fields[idx+1:]...)
+
+	content, err := marshalEntityFile(entity)
+	if err != nil {
+		return err
+	}
+	entityPath := filepath.Join(v.ProjectDir, "entities", name, name+".entity.json")
+	if err = atomicWriteFiles([]fileWrite{{path: entityPath, content: content}}); err != nil {
+		return err
+	}
+
+	w := c.Root().Writer
+	if w == nil {
+		w = os.Stdout
+	}
+	_, _ = fmt.Fprintf(w, "removed field: %s\n", fieldName)
+	return nil
 }
 
 var (

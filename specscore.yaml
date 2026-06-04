@@ -12,3 +12,7 @@ gates:
         name: spec-reviewer
         prompt: .specscore/reviewers/specify-reviewer.md
       - type: human
+  # specstudio:implement guards gates.implementation.pre_commit (per-commit human checkpoint).
+  implementation.pre_commit:
+    reviewers:
+      - type: human

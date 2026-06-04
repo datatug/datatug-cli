@@ -205,5 +205,9 @@ Every AC above is CLI-observable (exit code, stdout, and on-disk files), so all 
 - Whether `--format` also governs read-back echo format (default YAML).
 - The concrete set of known field types — including whether `currency` is a new known type or an `extends:` reference — is resolved in the datatug-core dependency, not here.
 
+## Sidekick Seeds Generated
+
+- [module-system-with-a-modules-registry-and-module-qualified](../../../ideas/seeds/module-system-with-a-modules-registry-and-module-qualified.md) — captured 2026-06-04 by specstudio:implement
+
 ---
 *This document follows the https://specscore.md/feature-specification*

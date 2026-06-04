@@ -610,6 +610,104 @@ func TestEntityAdd_GitFlag_DefaultNone(t *testing.T) {
 	assert.Equal(t, headBefore, gitHead(t, dir), "no commit must be created")
 }
 
+// gitInitRepo initialises a git repo at dir with a usable identity so commits
+// (and any operations that read config) work in tests.
+func gitInitRepo(t *testing.T, dir string) {
+	t.Helper()
+	require.NoError(t, exec.Command("git", "init", dir).Run())
+	require.NoError(t, exec.Command("git", "-C", dir, "config", "user.email", "test@example.com").Run())
+	require.NoError(t, exec.Command("git", "-C", dir, "config", "user.name", "Test").Run())
+}
+
+// gitPorcelain returns `git status --porcelain` output for the given path
+// (relative to dir), or for the whole repo when path is empty.
+func gitPorcelain(t *testing.T, dir, path string) string {
+	t.Helper()
+	args := []string{"-C", dir, "status", "--porcelain"}
+	if path != "" {
+		args = append(args, path)
+	}
+	out, err := exec.Command("git", args...).CombinedOutput()
+	require.NoError(t, err)
+	return string(out)
+}
+
+// AC: git-stage-scoped — with --git=stage, exactly the files the command wrote
+// are staged; an unrelated unstaged change to an existing tracked file remains
+// unstaged.
+func TestEntityAdd_GitStage_ScopedToWrittenFiles(t *testing.T) {
+	dir := t.TempDir()
+	gitInitRepo(t, dir)
+
+	// Baseline tracked file, committed.
+	otherPath := filepath.Join(dir, "other.txt")
+	require.NoError(t, os.WriteFile(otherPath, []byte("v1\n"), 0644))
+	require.NoError(t, exec.Command("git", "-C", dir, "add", "other.txt").Run())
+	require.NoError(t, exec.Command("git", "-C", dir, "commit", "-m", "baseline").Run())
+
+	// Unrelated unstaged change to the existing tracked file.
+	require.NoError(t, os.WriteFile(otherPath, []byte("v2\n"), 0644))
+
+	stdin := "id: User\nfields:\n  - id: id\n    type: string\n"
+	_, _, err := runEntityStdin(t, stdin, "entity", "add", "-d", dir, "--git", "stage")
+	require.NoError(t, err)
+
+	entityRel := filepath.Join("entities", "User", "User.entity.json")
+	assert.FileExists(t, filepath.Join(dir, entityRel))
+
+	// The entity file must be staged (added).
+	entityStatus := gitPorcelain(t, dir, entityRel)
+	assert.Contains(t, entityStatus, "A  ", "written entity file must be staged")
+
+	// The unrelated change must remain unstaged ( M = worktree-modified, not staged).
+	otherStatus := gitPorcelain(t, dir, "other.txt")
+	assert.Contains(t, otherStatus, " M ", "unrelated change must remain unstaged")
+	assert.NotContains(t, otherStatus, "M  ", "unrelated change must not be staged")
+}
+
+// AC: git-stage-non-repo-failloud — with --git=stage against a non-git
+// directory, the command exits non-zero with a "not a git repository" error and
+// writes no project files (preflight fails before any write).
+func TestEntityAdd_GitStage_NonRepoFailLoud(t *testing.T) {
+	dir := t.TempDir()
+
+	stdin := "id: User\nfields:\n  - id: id\n    type: string\n"
+	_, _, err := runEntityStdin(t, stdin, "entity", "add", "-d", dir, "--git", "stage")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a git repository")
+
+	_, statErr := os.Stat(filepath.Join(dir, "entities"))
+	assert.True(t, os.IsNotExist(statErr), "nothing must be written when off-repo and --git=stage")
+}
+
+// AC: git-partial-stages-written-only — with --continue-on-error --git=stage on
+// a batch where one item fails and one succeeds, only the succeeding item's file
+// is staged; the failed item contributes nothing to the index.
+func TestEntityAdd_GitStage_PartialStagesWrittenOnly(t *testing.T) {
+	dir := t.TempDir()
+	gitInitRepo(t, dir)
+
+	// Pre-create Order so the batch item for it fails.
+	_, _, err := runEntityStdin(t, "id: Order\nfields:\n  - id: id\n    type: string\n", "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	batch := "- id: User\n  fields:\n    - id: id\n      type: string\n- id: Order\n  fields:\n    - id: id\n      type: string\n"
+	_, _, err = runEntityStdin(t, batch, "entity", "add", "-d", dir, "--continue-on-error", "--git", "stage")
+	require.Error(t, err, "Order already exists so the batch must report a failure")
+
+	// User succeeded and must be staged.
+	userRel := filepath.Join("entities", "User", "User.entity.json")
+	assert.FileExists(t, filepath.Join(dir, userRel))
+	assert.Contains(t, gitPorcelain(t, dir, userRel), "A  ", "successful item's file must be staged")
+
+	// Order existed before the batch and was not (re)written; it must contribute
+	// nothing new to the index — it remains untracked (we never committed it).
+	orderRel := filepath.Join("entities", "Order", "Order.entity.json")
+	orderStatus := gitPorcelain(t, dir, orderRel)
+	assert.NotContains(t, orderStatus, "A  ", "failed item must not be staged")
+	assert.Contains(t, orderStatus, "??", "pre-existing Order file must remain untracked")
+}
+
 // An invalid --format value is rejected with a non-zero error.
 func TestEntityAdd_InvalidFormat_Errors(t *testing.T) {
 	dir := t.TempDir()

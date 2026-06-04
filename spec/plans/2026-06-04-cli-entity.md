@@ -53,6 +53,7 @@ Implement `datatug entity field set <Entity> <field>` to update an existing fiel
 
 ### Task 6: `entity field rm`
 
+**Status:** done
 **Verifies:** cli/entity#ac:field-rm-removes
 
 Implement `datatug entity field rm <Entity> <field>` to remove a named field, failing non-zero if the field is absent.

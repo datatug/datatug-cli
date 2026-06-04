@@ -2,8 +2,11 @@ name: Go CI
 
 on:
   push:
-    branches-ignore:
-      - renovate/**
+    # Only run on pushes to the default branch (e.g. merges). PRs are covered
+    # by the pull_request trigger below; scoping push to main avoids running
+    # the same checks twice (push + pull_request) on every PR-branch push.
+    branches:
+      - main
     paths:
       - 'go.*'
       - '**/*.go'

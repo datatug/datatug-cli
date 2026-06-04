@@ -30,3 +30,9 @@ go.work
 
 # Downloadable files
 demo-dbs/
+
+# .claude/ is excluded by the global gitignore (~/.gitignore_global).
+# Re-include committed project skills; keep worktrees/ingitdb/ local-only.
+!.claude/
+.claude/*
+!.claude/skills/

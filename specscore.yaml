@@ -16,3 +16,16 @@ gates:
   implementation.pre_commit:
     reviewers:
       - type: human
+  # specstudio:ship guards gates.ship.pre_dispatch — the go/no-go before the deploy
+  # delegate is dispatched. Ship carries no built-in reviewer; if this is absent
+  # the reviewer-gates loader refuses and ship halts.
+  ship.pre_dispatch:
+    reviewers:
+      - type: human
+
+# Deploy delegate dispatched by specstudio:ship on the delegate's explicit success.
+# Only delegate.skill and delegate.args are recognized (the ship: schema MUST NOT grow).
+ship:
+  delegate:
+    skill: datatug-release
+    args: minor   # bump level (major|minor|patch) or an explicit vX.Y.Z

@@ -7,7 +7,7 @@ Features of the `datatug` CLI.
 | Feature | Status | Kind | Description |
 |---------|--------|------|-------------|
 | [cli](cli/README.md) | Implementing | Command | `datatug` CLI — parent feature for command-level specifications |
-| [mutation-git-integration](mutation-git-integration/README.md) | Implementing | — | Shared `--git=<none\|stage\|commit>` flag + go-git helper that mutating commands opt into to stage/commit exactly the files they changed. |
+| [mutation-git-integration](mutation-git-integration/README.md) | Implementing | Capability | Shared `--git=<none\|stage\|commit>` flag + go-git helper that mutating commands opt into to stage/commit exactly the files they changed. |
 
 ## Open Questions
 

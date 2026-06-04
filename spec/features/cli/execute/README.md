@@ -1,6 +1,6 @@
 # Feature: Execute
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fexecute) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/execute?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/execute?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/execute?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/execute?op=request-change) |
 
 **Status:** Implementing
 
@@ -142,7 +142,7 @@ Supplying both `--query` and `--consoleCommand-text` exits `2` with a stderr mes
 
 Running with `--password secret123` does NOT produce any line containing `secret123` on stdout or stderr.
 
-## Outstanding Questions
+## Open Questions
 
 - The current command name is `updateUrlConfig` (the Go function is `updateUrlConfigCommandArgs`, the Usage string is "Executes query or a consoleCommand"). The implementation is clearly an executor, not a config-updater. Rename to `execute` is REQUIRED; this spec defines the target. When does the rename land — and is the old name kept as an alias?
 - The flag `--consoleCommand-text` ships with the literal string `consoleCommand` (a leftover from a global rename of `command` → `consoleCommand` that hit places it shouldn't). It MUST be renamed `--command-text` / `-t`.

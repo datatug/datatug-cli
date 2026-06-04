@@ -1,6 +1,6 @@
 # Feature: Projects Add
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fprojects%2Fadd) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/projects/add?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/projects/add?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/projects/add?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/projects/add?op=request-change) |
 
 **Status:** Implementing
 
@@ -112,7 +112,7 @@ With `demo` already pointing at `./demo`, running `datatug projects add --projec
 
 Run from any working directory, the command MUST write to `$HOME/.datatug.yaml`, NOT to `./~/.datatug.yaml`.
 
-## Outstanding Questions
+## Open Questions
 
 - The current code uses `os.Create("~/.datatug.yaml")` — the literal `~` is not expanded by `os.Create`. Should the fix land alongside this spec, or as a separate task?
 - Should `projects add` accept a `--title` flag to set the human-readable title at registration time? Today the title is empty until manually edited.

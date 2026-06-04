@@ -1,6 +1,6 @@
 # Feature: Dataset Data
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fdataset%2Fdata) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset/data?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset/data?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset/data?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset/data?op=request-change) |
 
 **Status:** Implementing
 
@@ -115,7 +115,7 @@ YAML and JSON output MUST be encoded as a list of objects, where each object map
 
 `--format grid` opens an interactive table the user can close to return to the shell.
 
-## Outstanding Questions
+## Open Questions
 
 - The indent parsing logic in the current implementation is buggy (compares `strconv.Atoi` error wrong, mixes `v.Indent` as both digit and spaces). Should the spec define a stricter `--indent` grammar (e.g., `"0"`, `"2"`, `"4"`, `"TAB"`) and let the implementation be rewritten cleanly?
 - `--dataset` is inherited from the parent base struct but is not consumed by `data`. Should it be removed from this command's flag set, or used to disambiguate when `--file` is relative?

@@ -1,6 +1,6 @@
 # Feature: Config
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fconfig) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/config?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/config?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/config?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/config?op=request-change) |
 
 **Status:** Implementing
 
@@ -85,7 +85,7 @@ With no `~/.datatug.yaml` present, `datatug config` exits `3` and writes a stder
 
 Running `datatug config` MUST NOT create `~/.datatug.yaml` if it does not exist, and MUST NOT modify its mtime if it does. Verifiable by stat before/after.
 
-## Outstanding Questions
+## Open Questions
 
 - Should this command expand into `datatug config <get|set|list|unset>` subcommands, mirroring `git config` / `gh config`? Today there is no way to set values from the CLI.
 - Should output format be selectable via `--format yaml|json` per the parent [REQ: yaml-default-for-structured](../README.md#req-yaml-default-for-structured)?

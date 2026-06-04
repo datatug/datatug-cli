@@ -1,6 +1,6 @@
 # Feature: Init
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Finit) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/init?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/init?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/init?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/init?op=request-change) |
 
 **Status:** Implementing
 
@@ -102,7 +102,7 @@ Running `datatug init my-proj ./my-proj-dir` twice in a row exits non-zero on th
 
 The created project file contains a `Created.At` timestamp within a small delta (e.g., ±10s) of when the command was run.
 
-## Outstanding Questions
+## Open Questions
 
 - Should `init` automatically call [`projects add`](../projects/add/README.md) so the new project is immediately addressable by ID from `~/.datatug.yaml`? Today the user must run two commands.
 - Should there be a `--force` flag to overwrite an existing `datatug/` directory? Current behavior is strict refusal, which is safer but blocks legitimate re-init.

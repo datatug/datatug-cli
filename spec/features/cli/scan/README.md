@@ -1,6 +1,6 @@
 # Feature: Scan
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fscan) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/scan?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/scan?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/scan?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/scan?op=request-change) |
 
 **Status:** Implementing
 
@@ -126,7 +126,7 @@ Running `datatug scan ... --password secret123` with logging enabled does NOT pr
 
 `datatug scan ... --db sample` (no `--dbmodel`) writes metadata under `dbModel: sample`.
 
-## Outstanding Questions
+## Open Questions
 
 - SQLite scanning is currently `panic("not implemented yet")`. Should this spec mandate SQLite support or formally defer it to a follow-up feature?
 - Should there be a `--dry-run` flag that connects, reads schema, but does not write the project? Useful for CI checks before committing.

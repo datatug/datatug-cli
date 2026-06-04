@@ -1,6 +1,6 @@
 # Feature: Dataset Def
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fdataset%2Fdef) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset/def?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset/def?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset/def?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset/def?op=request-change) |
 
 **Status:** Implementing
 
@@ -86,7 +86,7 @@ The dataset definition MUST be loaded via `store.LoadRecordsetDefinition(ctx, id
 
 `datatug dataset-def --dir ./demo --dataset does-not-exist` exits `3`.
 
-## Outstanding Questions
+## Open Questions
 
 - Command name MUST eventually be `datatug dataset def`. When does that rename land?
 - Should there be a `--format json` mode in addition to YAML? Easy to add — just swap the encoder.

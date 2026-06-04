@@ -1,6 +1,6 @@
 # Feature: UI
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fui) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/ui?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/ui?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/ui?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/ui?op=request-change) |
 
 **Status:** Implementing
 
@@ -107,7 +107,7 @@ The TUI registers viewers (database, FileTug, GCloud, AWS, Azure), settings, and
 
 If `dtstate` cannot be read (missing file, corrupt YAML), the TUI still launches and shows the projects screen, with a non-fatal error logged.
 
-## Outstanding Questions
+## Open Questions
 
 - The `--file` flag is currently SQLite-only; the error path for non-SQLite files calls `panic` rather than returning an error. Should the implementation be updated to return a clean `InvalidArgs` exit per [cli REQ: no-log-fatal](../README.md#req-no-log-fatal)?
 - The parent-level `--tui` flag exists but has no documented effect on non-`ui` subcommands. Should it be removed or pinned to a specific meaning?

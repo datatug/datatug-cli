@@ -1,6 +1,6 @@
 # Feature: Render
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Frender) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/render?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/render?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/render?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/render?op=request-change) |
 
 **Status:** Implementing
 
@@ -89,7 +89,7 @@ Two back-to-back `datatug render` invocations against the same project produce b
 
 `datatug render` against any project MUST NOT open any network socket. Verifiable by running under `strace`/`dtruss` with no network syscalls expected.
 
-## Outstanding Questions
+## Open Questions
 
 - Should `render` also be capable of running against a repo-root layout (multiple projects), parallel to [validate REQ: repo-root-multi-project](../validate/README.md#req-repo-root-multi-project)?
 - Should there be a `--check` flag that exits non-zero if a render would change any file, suitable as a CI guard against forgetting to commit re-rendered READMEs?

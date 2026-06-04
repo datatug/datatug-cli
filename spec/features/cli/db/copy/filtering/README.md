@@ -1,6 +1,6 @@
 # Feature: `datatug db copy` filtering and subsetting
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fdb%2Fcopy%2Ffiltering) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db/copy/filtering?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db/copy/filtering?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db/copy/filtering?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db/copy/filtering?op=request-change) |
 
 **Status:** Approved
 **Source Idea:** [`db-copy-filtering`](../../../../../ideas/db-copy-filtering.md)
@@ -401,7 +401,7 @@ From the source Idea:
 **When** the user runs `datatug db copy --from sqlite:///./chinook.db --to ingitdb://./out` with NO filter flag and NO config
 **Then** the command behaves identically to the parent Feature's existing AC (every Chinook table copied, all rows, all columns) — no regression introduced by this Feature's CLI surface.
 
-## Outstanding Questions
+## Open Questions
 
 - **Levenshtein suggestion threshold for `where-unknown-field`.** REQ:where-unknown-field says distance ≤ 2 — confirm this is the right ceiling, and whether to suggest ONLY the closest or ALL within threshold. Plan time.
 - **`dalgo-extended-operators` sibling Idea filing.** The deferred `!=`, `not_in`, `is_null`, `is_not_null` operators need a formal Idea in `dal-go/dalgo/spec/ideas/dalgo-extended-operators.md` proposing `NotEqual`, `NotIn`, `IsNull`, `IsNotNull` constants (and ideally renaming `GreaterThen`/`LessThen` to `GreaterThan`/`LessThan` with backward-compat aliases). Not blocking this Feature's MVP, but blocks the follow-up Feature that re-introduces those operators.

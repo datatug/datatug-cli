@@ -1,6 +1,6 @@
 # Feature: Queries
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fqueries) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/queries?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/queries?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/queries?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/queries?op=request-change) |
 
 **Status:** Planned
 
@@ -86,7 +86,7 @@ Against a project with N queries, `datatug queries` exits `0` and prints exactly
 
 `datatug queries` does NOT panic. (Not yet met.)
 
-## Outstanding Questions
+## Open Questions
 
 - Should this be renamed `datatug query list` per [parent REQ: singular-resource-names](../README.md#req-singular-resource-names) and [REQ: verb-subcommands](../README.md#req-verb-subcommands)?
 - Which sub-commands belong in the same release as the rename? Candidates: `new`, `rm`, `rename`, `run`.

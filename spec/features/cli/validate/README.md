@@ -1,6 +1,6 @@
 # Feature: Validate
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fvalidate) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/validate?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/validate?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/validate?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/validate?op=request-change) |
 
 **Status:** Implementing
 
@@ -99,7 +99,7 @@ A project with a known structural error exits non-zero, and the error is describ
 
 In a repo-root layout with three projects where the second is invalid, `datatug validate` validates the first, fails on the second, and does NOT attempt to validate the third.
 
-## Outstanding Questions
+## Open Questions
 
 - The command is named `validate` in CLI but is constructed by a Go function called `testCommandArgs` and its description still says "Runs validation scripts" / "The `test` consoleCommand executes validation scripts." Should the Go-level naming be cleaned up?
 - Should there be a `--all` flag that continues past the first failure and reports every problem, vs. the current fail-fast behavior?

@@ -1,6 +1,6 @@
 # Feature: Projects
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fprojects) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/projects?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/projects?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/projects?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/projects?op=request-change) |
 
 **Status:** Implementing
 
@@ -107,7 +107,7 @@ With three projects registered (`a`, `b`, `c`), `datatug projects` prints exactl
 
 `datatug projects --fields foo` exits `2` with stderr message naming `foo`.
 
-## Outstanding Questions
+## Open Questions
 
 - The command name violates [REQ: singular-resource-names](../README.md#req-singular-resource-names) (`projects` vs `project list`). When does the rename land — and should this spec define an alias for the old name?
 - Default output is CSV-like text; should it switch to YAML/JSON via [REQ: yaml-default-for-structured](../README.md#req-yaml-default-for-structured)?

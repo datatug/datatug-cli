@@ -1,6 +1,6 @@
 # Feature: Serve
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fserve) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/serve?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/serve?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/serve?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/serve?op=request-change) |
 
 **Status:** Implementing
 
@@ -150,7 +150,7 @@ Sending SIGINT to a running `datatug serve` causes the process to exit `0` withi
 
 `datatug serve --dir ./not-a-project` exits `3` with a stderr message naming the missing/invalid project.
 
-## Outstanding Questions
+## Open Questions
 
 - Graceful shutdown is currently a TODO in the implementation. Should that land alongside this spec or in a follow-up?
 - Should the agent emit a structured "ready" line (e.g., a single JSON object) on stdout when it has bound the port, so test harnesses can wait deterministically?

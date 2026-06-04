@@ -1,6 +1,6 @@
 # Feature: Demo
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fdemo) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/demo?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/demo?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/demo?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/demo?op=request-change) |
 
 **Status:** Implementing
 
@@ -131,7 +131,7 @@ Running `datatug demo --reset-project` after an initial install removes and re-c
 
 If `chinook-local.sqlite` is truncated to zero bytes, the next `datatug demo` run detects the verification failure and re-downloads.
 
-## Outstanding Questions
+## Open Questions
 
 - Should the demo respect a `DATATUG_HOME` env var instead of hardcoding `~/datatug/`?
 - The Chinook download URL is hardcoded against `github.com/datatug/chinook-database`. Should there be a fallback mirror?

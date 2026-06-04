@@ -54,9 +54,15 @@ test "$(git rev-parse --abbrev-ref HEAD)" = "main"            # must be on main
 test -z "$(git status --porcelain)"                           # clean working tree
 gh auth status >/dev/null 2>&1                                 # gh authenticated
 git remote get-url origin | grep -q 'datatug/datatug-cli'     # correct repo
+git fetch --tags --quiet origin                               # sync remote tags (see note)
 ```
 
 If any check fails, print `RELEASE_FAILED <which precondition>` and stop.
+
+**Tag sync (load-bearing):** the fetch above brings *remote* tags into the local
+tag list. Without it, bump computation (step 3) reads a stale local view and can
+pick a version that already exists on the remote — a collision the pre-push
+guard would then reject. Always sync before resolving the version.
 
 ### 2. Idempotency — already released this commit?
 
@@ -77,7 +83,7 @@ case "$BUMP" in
   v[0-9]*)                       # explicit version
     echo "$BUMP" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "RELEASE_FAILED bad explicit version '$BUMP'"; exit 1; }
     NEW="$BUMP" ;;
-  *)                             # bump level
+  *)                             # bump level (local tag list already synced with remote in step 1)
     latest=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
     latest=${latest:-v0.0.0}
     IFS=. read -r MA MI PA <<EOF

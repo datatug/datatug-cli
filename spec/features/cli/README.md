@@ -1,6 +1,6 @@
 # Feature: CLI
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli?op=request-change) |
 
 **Status:** Implementing
 
@@ -51,6 +51,7 @@ External command groups live in their own packages and are referenced here but n
 | `gcloud` | [`apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudcmds`](../../../apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudcmds) | Google Cloud integration subcommands |
 
 These groups MUST observe the shared conventions defined below even though their per-command contracts live elsewhere.
+| [entity](entity/README.md) | datatug entity verbs to author and read entities and their fields: create-only add, surgical field edits, batch-first/atomic writes, and read-back. |
 
 ## Behavior
 
@@ -181,7 +182,7 @@ The user-level config file MUST be valid YAML. Comments are preserved on read wh
 
 A panic inside any command exits the process with code `10`, leaves the terminal in a usable state (no leftover TUI screen), and writes the panic message plus a stack trace to stderr.
 
-## Outstanding Questions
+## Open Questions
 
 - Several existing command names violate the [REQ: singular-resource-names](#req-singular-resource-names) / [REQ: verb-subcommands](#req-verb-subcommands) conventions: `projects` (should be `project list`), `datasets` (should be `dataset list`), `queries` (should be `query list`), `updateUrlConfig` (should be `execute` or `query run`), `dataset-def` and `dataset-data` (should be `dataset def` / `dataset data` subcommands of [`dataset`](dataset/README.md)). Should this spec define a deprecation path with aliases, or wait for a 1.0 break?
 - The implementation currently mixes `log.Fatal`, returned errors, and `panic` for failure paths. Should this spec mandate the migration to returned errors in scope, or split that into a separate refactor feature?

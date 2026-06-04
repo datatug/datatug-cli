@@ -1,6 +1,6 @@
 # Feature: Version
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fversion) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/version?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/version?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/version?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/version?op=request-change) |
 
 **Status:** Planned
 
@@ -114,7 +114,7 @@ None. Neither the subcommand nor the flag accepts arguments.
 
 A `datatug` binary built without `-ldflags` exits `0` and prints `dev` for the flag surface and `datatug dev (none) unknown` for the subcommand surface.
 
-## Outstanding Questions
+## Open Questions
 
 - Which Go package owns the injected `version`/`commit`/`date` vars? Candidates: `apps/global`, `apps/datatugapp`, or a new `apps/datatugapp/buildinfo`.
 - Should the build pipeline (`.github/workflows/...`) be updated in the same change that lands the version command, so release builds actually inject the values?

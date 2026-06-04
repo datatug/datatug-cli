@@ -1,6 +1,6 @@
 # Feature: Show
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fshow) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/show?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/show?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/show?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/show?op=request-change) |
 
 **Status:** Implementing
 
@@ -96,7 +96,7 @@ This pins the current implementation as the contract.
 
 Two back-to-back `datatug show` invocations against the same project produce byte-identical stdout.
 
-## Outstanding Questions
+## Open Questions
 
 - Should `show` gain a `--format yaml|json` mode for machine consumption, satisfying [parent REQ: yaml-default-for-structured](../README.md#req-yaml-default-for-structured)?
 - The current output is dense and uses emoji. Should there be a `--no-emoji` flag for terminals or pipelines that mishandle them?

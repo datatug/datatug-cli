@@ -1,6 +1,6 @@
 # Feature: Console
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fconsole) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/console?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/console?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/console?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/console?op=request-change) |
 
 **Status:** Planned
 
@@ -88,7 +88,7 @@ None.
 
 Running `datatug projects` outside the console produces the same stdout as typing `projects` inside the console. (Not yet met.)
 
-## Outstanding Questions
+## Open Questions
 
 - Should the console use `liner`, `readline`, `prompt-toolkit`-style, or a custom line editor? The current implementation only toggles `GO_FLAGS_COMPLETION`, which is no longer relevant under urfave/cli v3.
 - Is the console scoped to a single project context, or does it support multi-project switching mid-session?

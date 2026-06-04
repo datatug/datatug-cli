@@ -1,6 +1,6 @@
 # Feature: DB
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fdb) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db?op=request-change) |
 
 **Status:** Planned
 
@@ -99,7 +99,7 @@ The connection opened by `datatug db` MUST be read-only. Verifiable by attemptin
 |---|---|---|
 | [`db copy`](copy/README.md) | Approved | `datatug db copy --from <url> --to <url>` — cross-engine database copy primitive. |
 
-## Outstanding Questions
+## Open Questions
 
 - Should the viewer launched here be the same component as the TUI's DB viewer, or a separate "ad-hoc" mode with different UX?
 - Should `datatug db` accept a positional dataset (e.g., `datatug db sqlite3://./demo.sqlite employees`) and open directly into a single table?

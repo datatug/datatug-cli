@@ -1,6 +1,6 @@
 # Feature: Dataset
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fdataset) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset?op=request-change) |
 
 **Status:** Implementing
 
@@ -92,7 +92,7 @@ Subcommands that operate on a specific dataset MUST accept `--dataset <id>` to i
 
 `datatug dataset` (no further args) prints help and exits `0`. (Not yet met — see Outstanding Questions.)
 
-## Outstanding Questions
+## Open Questions
 
 - The current code registers `dataset-def` and `dataset-data` as top-level commands (`datatug dataset-def`, `datatug dataset-data`) instead of subcommands of `dataset`. Should this spec require collapsing them to `datatug dataset def` / `datatug dataset data`? Doing so is a breaking change.
 - The bare `datatug dataset` action currently calls `initProjectCommand` and then returns nil with a `TODO`. Should this be replaced with a help dump now, or left for the migration mentioned above?

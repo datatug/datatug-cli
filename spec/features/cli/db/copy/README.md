@@ -1,6 +1,6 @@
 # Feature: `datatug db copy`
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fdb%2Fcopy) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db/copy?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db/copy?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db/copy?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db/copy?op=request-change) |
 
 **Status:** Implemented
 **Source Idea:** [`cross-engine-db-copy`](../../../../ideas/cross-engine-db-copy.md)
@@ -451,7 +451,7 @@ From the source Idea:
 **When** the user runs `datatug db copy --from ... --to ...`
 **Then** the command exits `1`; on the target after exit, `a` is fully copied (every source row present); `b` exists (table created) and has between 0 and len(`b`)-1 rows (the partial state at the moment of failure); `c` does NOT exist on the target (its worker never started).
 
-## Outstanding Questions
+## Open Questions
 
 - **Type-mapping table contents.** The Idea references "a small, deterministic table without per-table user overrides" for the MVP triplet. The table's exact contents (which SQLite affinity maps to which PostgreSQL type, how `BLOB` round-trips through inGitDB, etc.) is plan-time work — REQ:type-mapping-coverage pins only the coverage bar (every Chinook column type, all six directed pairs). Resolve at plan time.
 - **`dalgo2sql` and `dalgo2ingitdb` capability verification.** Both drivers need to be confirmed to implement the DALgo `dbschema.Adapter`, `ddl.Applier`, and `ConcurrencyAware` interfaces shipped in the prior Feature batches. Plan-time audit; if either driver is missing a method, that's a scoped follow-up against the corresponding driver, not a blocker for this Feature's interface design.

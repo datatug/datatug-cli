@@ -8,7 +8,7 @@ Features of the `datatug` CLI.
 |---------|--------|------|-------------|
 | [cli](cli/README.md) | Implementing | Command | `datatug` CLI — parent feature for command-level specifications |
 
-## Outstanding Questions
+## Open Questions
 
 None at this time.
 

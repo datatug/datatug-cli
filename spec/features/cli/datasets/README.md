@@ -1,6 +1,6 @@
 # Feature: Datasets
 
-> [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures%2Fcli%2Fdatasets) — graph, discussions, approvals
+> [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/datasets?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/datasets?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/datasets?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/datasets?op=request-change) |
 
 **Status:** Implementing
 
@@ -73,7 +73,7 @@ Against the demo project with N datasets, `datatug datasets --dir ./demo` exits 
 
 A project with no datasets produces zero stdout lines and exits `0`.
 
-## Outstanding Questions
+## Open Questions
 
 - Should this command be renamed to `dataset list` per [parent REQ: singular-resource-names](../README.md#req-singular-resource-names) and [REQ: verb-subcommands](../README.md#req-verb-subcommands)?
 - Should there be a `--format yaml|json` mode that emits structured output (id + name + column count, for example)? Today it is plain IDs only.

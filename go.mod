@@ -25,6 +25,7 @@ require (
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.8
+	github.com/gdamore/tcell/v3 v3.4.0
 	github.com/go-git/go-git/v5 v5.19.1
 	github.com/google/go-github/v86 v86.0.0
 	github.com/google/uuid v1.6.0

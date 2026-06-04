@@ -1,9 +1,9 @@
 # Idea: Git Integration for Mutating Commands
 
-**Status:** Approved
+**Status:** Specifying
 **Date:** 2026-06-04
 **Owner:** alex
-**Promotes To:** —
+**Promotes To:** mutation-git-integration
 **Supersedes:** —
 **Related Ideas:** —
 

@@ -1,7 +1,7 @@
 # Feature: Serve-Brokered AI Query Builder
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/serve-brokered-query-builder?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/serve-brokered-query-builder?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/serve-brokered-query-builder?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/serve-brokered-query-builder?op=request-change) |
-**Status:** Approved
+**Status:** Under Review
 **Date:** 2026-06-05
 **Owner:** alexander.trakhimenok
 **Source Ideas:** —
@@ -11,7 +11,7 @@
 
 ## Summary
 
-The **CLI (daemon) Implementation** of the Serve-Brokered AI Query Builder Capability (`specscore:feature/serve-brokered-query-builder@github.com/datatug/datatug`). It extends the existing `datatug serve` daemon ([cli/serve](../cli/serve/README.md)) with two additions on the **same** process, host, port, and lifecycle: an **MCP endpoint** (streamable HTTP) that a terminal AI-agent drives, and a **query-builder session broker** that holds one canonical dalgo AST per named-query *tab* and synchronizes it with the hosted Web UI over HTTP + WebSocket. This Feature specifies only the daemon-side surface and its deltas; all platform-agnostic behavior is inherited from the Capability it `**Implements:**`.
+The **CLI (daemon) Implementation** of the Serve-Brokered AI Query Builder Capability (`specscore:feature/serve-brokered-query-builder@github.com/datatug/datatug`). It extends the existing `datatug serve` daemon ([cli/serve](../cli/serve/README.md)) with two additions on the **same** process, host, port, and lifecycle: an **MCP endpoint** (streamable HTTP) that a terminal AI-agent drives, and a **query-builder session broker** that holds one current query per named-query *tab* and synchronizes it with the hosted Web UI over HTTP + WebSocket. Each tab is in one of two modes: **DTQL mode** (default) holds a canonical dalgo AST whose textual form is a 1:1 DTQL-YAML serialization, rendered to the connection's native query language on run; **native mode** holds the connection's own native query text plus parameters verbatim and executes it as-is. The AST spans relational and nested/document shapes; a tab may convert DTQL→native one-way. This Feature specifies only the daemon-side surface and its deltas; all platform-agnostic behavior is inherited from the Capability it `**Implements:**`.
 
 ## Problem
 
@@ -19,7 +19,7 @@ The Capability defines *what* a serve-brokered query builder must do on every su
 
 ## Behavior
 
-This Implementation inherits every Capability requirement (`tab-current-version`, `canonical-ast`, `tab-connection-binding`, `mcp-agent-face`, `apply-change-payload`, `terminal-quiet-by-default`, `web-deterministic-edits`, `web-history-and-revert`, `results-presentation`, `two-way-sync`, `candidate-options`, `deep-link-onboarding`, `local-loopback-access`, `read-only-queries`, `parity-matrix`). The requirements below specify the daemon-side realization and its deltas. The terminal-presentation requirements (`terminal-quiet-by-default`) and the Web UI's own rendering (`web-history-and-revert` client state) are realized by the agent skill and the `datatug-apps` features respectively; this daemon provides the server-side endpoints they consume.
+This Implementation inherits every Capability requirement (`tab-current-version`, `query-mode`, `canonical-ast`, `dtql-yaml-form`, `native-mode-representation`, `mode-transition`, `tab-connection-binding`, `mcp-agent-face`, `apply-change-payload`, `terminal-quiet-by-default`, `web-deterministic-edits`, `web-native-edits`, `query-parameters`, `web-history-and-revert`, `results-presentation`, `two-way-sync`, `candidate-options`, `deep-link-onboarding`, `local-loopback-access`, `read-only-queries`, `parity-matrix`). The requirements below specify the daemon-side realization and its deltas. The terminal-presentation requirements (`terminal-quiet-by-default`) and the Web UI's own rendering (`web-history-and-revert` client state) are realized by the agent skill and the `datatug-apps` features respectively; this daemon provides the server-side endpoints they consume.
 
 ### Daemon surface (extends `cli/serve`)
 
@@ -29,27 +29,43 @@ This Implementation inherits every Capability requirement (`tab-current-version`
 
 #### REQ: mcp-builder-tools
 
-The MCP endpoint MUST provide, at minimum, the tools `create_tab`, `apply_change`, `inspect`, and `run`, each addressing a tab by an explicit tab id (except `create_tab`, which returns one).
+The MCP endpoint MUST provide, at minimum, the tools `create_tab` (taking the tab's mode — `dtql` (default) or `native` — and its connection), `apply_change`, `inspect`, `convert_to_native`, and `run`, each addressing a tab by an explicit tab id (except `create_tab`, which returns one).
 
 ### Query-session state
 
 #### REQ: tab-current-ast
 
-The daemon MUST hold each tab's current query as one canonical dalgo AST, in memory, keyed by tab id, with no prior-version history retained and no persistence across restarts. The AST MUST be rendered to executable SQL only on run, in the dialect of the tab's bound connection. (Realizes the Capability's `tab-current-version` + `canonical-ast`.)
+For a `dtql`-mode tab the daemon MUST hold the current query as one canonical dalgo AST, in memory, keyed by tab id, with no prior-version history retained and no persistence across restarts. The AST MUST be rendered to the bound connection's native query language only on run (the SQL dialect for a SQL connection, the native query form for a document store). The "dalgo form" returned by `inspect` is the AST's 1:1 DTQL-YAML serialization. (Realizes the Capability's `tab-current-version` + `canonical-ast` + `dtql-yaml-form`.)
+
+#### REQ: tab-native-text
+
+For a `native`-mode tab the daemon MUST hold the connection's native query text plus its parameter set verbatim, in memory, keyed by tab id, and MUST NOT maintain a dalgo AST, parse, or rewrite the text — `run` executes it as-is against the bound connection. (Realizes the Capability's `native-mode-representation`.)
+
+#### REQ: convert-to-native
+
+`convert_to_native` MUST take a `dtql`-mode tab id, render its current AST to native text in the tab's dialect, set the tab to `native` mode holding that text, and discard the AST. The daemon MUST offer no inverse (`native`→`dtql`) operation. (Realizes the Capability's `mode-transition`.)
 
 #### REQ: tab-connection-bind
 
-`create_tab` MUST bind the new tab to exactly one project connection chosen at creation; that connection fixes the tab's dialect for the life of the tab and MUST NOT change thereafter.
+`create_tab` MUST bind the new tab to exactly one project connection chosen at creation; that connection fixes the tab's native query language (SQL dialect or document-store form) for the life of the tab and MUST NOT change thereafter.
 
 #### REQ: apply-change-full-query
 
-`apply_change` MUST accept a tab id, the prose description, the structured delta, and the full resulting query, and MUST set the tab's current AST to the supplied full query verbatim — the daemon MUST NOT re-derive the query from the prose. The prose and delta MUST be forwarded to subscribed Web UI clients (for their history) but MUST NOT be retained by the daemon.
+`apply_change` MUST accept a tab id, the prose description, and the full resulting query, and MUST set the tab's current query to the supplied full query verbatim — the daemon MUST NOT re-derive it from the prose. In `dtql` mode the full query is the dalgo AST and the call SHOULD also carry the structured delta; in `native` mode it is the native text plus parameters and the delta is omitted. An `apply_change` MUST match the tab's mode. The prose and delta MUST be forwarded to subscribed Web UI clients (for their history) but MUST NOT be retained by the daemon.
+
+#### REQ: tab-parameters
+
+The daemon MUST hold a tab's named parameters and bind their values at run time, in both modes — as AST nodes in `dtql` mode, alongside the native text in `native` mode. Parameter values arriving from the Web UI MUST be applied to the tab's current query. (Realizes the Capability's `query-parameters`.)
 
 ### Web-facing API
 
 #### REQ: http-structured-edits
 
-The daemon MUST expose HTTP endpoints that accept structured deterministic edits (such as add/remove/select column, add filter, set ordering) for a given tab id and apply them to that tab's current AST, never accepting prose on these endpoints.
+For a `dtql`-mode tab the daemon MUST expose HTTP endpoints that accept structured deterministic edits (such as add/remove/select field-or-column, add filter, set ordering, select nested/sub-collection) and apply them to that tab's current AST, never accepting prose on these endpoints.
+
+#### REQ: http-native-text-edit
+
+For a `native`-mode tab the daemon MUST expose an HTTP endpoint that accepts replacement native query text (and parameter values) for a given tab id and adopts it verbatim as the tab's current query, without parsing or interpreting it.
 
 #### REQ: ws-two-way-sync
 
@@ -83,7 +99,7 @@ The daemon MUST bind to loopback, MUST require the valid session token on builde
 
 #### REQ: read-only-enforced
 
-The daemon MUST reject any mutating or DDL query (insert/update/delete/DDL) arriving from either face and MUST leave the target tab's current AST unchanged.
+For `dtql`-mode tabs the daemon MUST reject any request whose evident intent mutates data or schema and MUST leave the tab's current AST unchanged (the AST cannot express mutation). For `native`-mode tabs, where the text is opaque, the daemon MUST execute every query through a read-only session/transaction on the connection so the engine itself rejects any mutating or DDL statement (insert/update/delete/DDL) — without parsing the native text. In neither case is a mutation allowed to take effect.
 
 #### REQ: reuse-existing-execution
 
@@ -111,13 +127,31 @@ The daemon MUST execute queries through the CLI's existing query-execution and r
 
 **Given** a running daemon
 **When** an MCP client lists tools
-**Then** `create_tab`, `apply_change`, `inspect`, and `run` are present, and each (except `create_tab`) requires a tab id.
+**Then** `create_tab` (accepting a mode and a connection), `apply_change`, `inspect`, `convert_to_native`, and `run` are present, and each (except `create_tab`) requires a tab id.
 
 ### AC: current-ast-no-history (verifies REQ:tab-current-ast)
 
-**Given** a tab whose query has been changed several times
+**Given** a `dtql`-mode tab whose query has been changed several times
 **When** the tab is inspected and then the daemon is restarted
-**Then** before restart only the latest AST is returned with no prior-version history, and after restart the tab no longer exists.
+**Then** before restart only the latest AST is returned (its dalgo form is DTQL-YAML) with no prior-version history, and after restart the tab no longer exists.
+
+### AC: native-tab-text-verbatim (verifies REQ:tab-native-text)
+
+**Given** a `native`-mode tab created with native query text and parameters
+**When** the tab is inspected and run
+**Then** the daemon returns and executes the native text unchanged and maintains no dalgo AST for it.
+
+### AC: convert-discards-ast (verifies REQ:convert-to-native)
+
+**Given** a `dtql`-mode tab
+**When** `convert_to_native` is called
+**Then** the AST is rendered to native text in the tab's dialect, the tab becomes `native` holding that text, the AST is discarded, and no inverse conversion tool exists.
+
+### AC: parameters-bound-at-run (verifies REQ:tab-parameters)
+
+**Given** a tab declaring a named parameter, in either mode
+**When** the Web UI sets the parameter value and the tab is run
+**Then** the value is bound at execution against the current query.
 
 ### AC: tab-bound-to-one-connection (verifies REQ:tab-connection-bind)
 
@@ -127,15 +161,21 @@ The daemon MUST execute queries through the CLI's existing query-execution and r
 
 ### AC: apply-change-adopts-full-query (verifies REQ:apply-change-full-query)
 
-**Given** a tab with a current query
-**When** `apply_change` is called with a tab id, prose, a structured delta, and a full resulting query
-**Then** the tab's current AST becomes the supplied full query verbatim, the prose/delta are forwarded to subscribed Web clients, and the daemon retains no history.
+**Given** a `dtql`-mode tab with a current query
+**When** `apply_change` is called with a tab id, prose, a structured delta, and a full resulting query (the AST)
+**Then** the tab's current AST becomes the supplied full query verbatim, the prose/delta are forwarded to subscribed Web clients, and the daemon retains no history; and for a `native`-mode tab the same holds with the full native text (no delta).
 
 ### AC: web-structured-edit-applied (verifies REQ:http-structured-edits)
 
-**Given** a tab with a current AST
+**Given** a `dtql`-mode tab with a current AST
 **When** the Web UI posts a structured "add filter" edit for that tab id
 **Then** the daemon applies it to the tab's current AST, and the endpoint rejects a prose payload.
+
+### AC: web-native-text-adopted (verifies REQ:http-native-text-edit)
+
+**Given** a `native`-mode tab
+**When** the Web UI posts replacement native query text (and parameter values) for that tab id
+**Then** the daemon adopts the text verbatim as the tab's current query without parsing it.
 
 ### AC: edit-syncs-both-ways (verifies REQ:ws-two-way-sync)
 
@@ -175,9 +215,15 @@ The daemon MUST execute queries through the CLI's existing query-execution and r
 
 ### AC: mutation-refused (verifies REQ:read-only-enforced)
 
-**Given** a tab with a current AST
+**Given** a `dtql`-mode tab with a current AST
 **When** a request asks to delete or otherwise mutate data/schema
 **Then** the daemon refuses it and the tab's current AST is unchanged.
+
+### AC: native-mutation-blocked-at-engine (verifies REQ:read-only-enforced)
+
+**Given** a `native`-mode tab whose text contains a mutating statement (e.g. `DELETE`/`DROP`)
+**When** it is run
+**Then** the daemon executes it through a read-only session/transaction and the engine rejects the mutation, so no data or schema change occurs and the daemon does not parse the native text.
 
 ### AC: execution-reuses-existing-path (verifies REQ:reuse-existing-execution)
 
@@ -195,15 +241,18 @@ Every AC has a concrete daemon surface (MCP tools, HTTP/WS endpoints, in-memory 
 - The agent's natural-language interpretation and terminal presentation (`terminal-quiet-by-default`) — owned by the `query-builder` skill in `datatug-ai-skills`; the daemon exposes structured tools only.
 - Which refinement operations the agent guarantees vs reports unsupported — an agent/skill concern; the daemon stores and runs whatever valid read-only AST it is given.
 - Query history and session persistence in the daemon — current versions only, in-memory, lost on restart.
+- `native`→`dtql` conversion and a bespoke DTQL parser — the daemon renders DTQL-YAML (the AST's serialization) with a standard YAML serializer; native text is never parsed into the AST, and adopting an existing text language (PRQL/Malloy) is deferred.
 - Remote/multi-user serve and link-sharing via reverse proxy — local single-session (loopback + token) this cycle; a post-MVP follow-on.
-- Concurrency control for simultaneous agent + Web edits — last-write-wins on the tab's current AST.
-- Mutating/DDL execution — refused (REQ:read-only-enforced).
+- Concurrency control for simultaneous agent + Web edits — last-write-wins on the tab's current query.
+- Mutating/DDL execution — refused in `dtql` mode and blocked at the engine via a read-only session in `native` mode (REQ:read-only-enforced).
 
 ## Open Questions
 
 - Is the builder always-on in `datatug serve`, or gated behind a flag (e.g. `--query-builder`) until it stabilizes?
 - Transport specifics: SSE vs WebSocket for the Web live feed (the Capability leans WebSocket), and the exact MCP streamable-HTTP path on the daemon.
 - Where the per-tab session token and one-time code live in the existing `cli/serve` auth model, and their lifetimes.
+- Which native renderers and read-only-session mechanisms exist per driver (SQL read-only transaction vs document-store equivalents), and whether `convert_to_native` and nested/document AST rendering ship fully or Partial in the first cycle.
+- Whether the DTQL-YAML schema is owned here or in `datatug-go-models` (shared with the AST definition).
 
 ---
 *This document follows the https://specscore.md/feature-specification*

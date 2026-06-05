@@ -463,7 +463,7 @@ func panelList(p sneatnav.Panel) *tview.List {
 	}
 	// Step 2: unwrap the interface to get the concrete WithBoxType struct.
 	concrete := pwbField.Elem()
-	if concrete.Kind() == reflect.Ptr {
+	if concrete.Kind() == reflect.Pointer {
 		concrete = concrete.Elem()
 	}
 	if concrete.Kind() != reflect.Struct {

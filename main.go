@@ -23,6 +23,7 @@ import (
 )
 
 var osExit = os.Exit
+var logFatal = log.Fatal
 
 func main() {
 
@@ -65,7 +66,7 @@ func main() {
 		args = args[:1]
 	}
 	if err := cmd.Run(context.Background(), args); err != nil {
-		log.Fatal(err)
+		logFatal(err)
 	}
 	//var p = getParser()
 	//if _, err := p.Parse(); err != nil {

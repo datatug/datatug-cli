@@ -123,6 +123,176 @@ the sqlmock `*sql.DB`:
 p := columnsProvider{ColumnsProvider: sqlinfoschema.ColumnsProvider{DB: db}}
 ```
 
+### Headless TUI pattern for tview/tcell packages (`apps/datatugapp/...`, `pkg/sneatview/sneatnav`)
+
+All TUI packages use `tcell.NewSimulationScreen` backed by `tview.NewApplication`. The canonical
+helper — repeated across `dtapiservice`, `dtsettings`, `awsui`, `azureui`, `clouds_ui`,
+`dtviewers`, `gcloudui`, etc. — is:
+
+```go
+func newSafeTUI(t *testing.T) *sneatnav.TUI {
+    screen := tcell.NewSimulationScreen("UTF-8")
+    if err := screen.Init(); err != nil { t.Fatalf(...) }
+    app := tview.NewApplication().SetScreen(screen)
+    root := sneatv.NewBreadcrumb("test", func() error { return nil })
+    tui := sneatnav.NewTUI(app, root)
+    t.Cleanup(func() { app.Stop() }) // app.Stop() calls screen.Fini internally; do NOT call screen.Fini again
+    return tui
+}
+```
+
+`pkg/sneatview/sneatnav/testing.go` exports `InvokeInputCapture(p, key, ch, mod)` for
+driving widget key-handlers without importing tview/tcell directly from external test packages.
+
+### `registerViewer` seam for cloud viewer packages (`awsui`, `azureui`, `gcloudui`)
+
+Each viewer package exposes a `var registerViewer = dtviewers.RegisterViewer` seam. In tests,
+override it to capture the registered `Viewer` struct, then invoke its `Action` closure to cover
+the registration body without side-effects:
+
+```go
+orig := registerViewer
+t.Cleanup(func() { registerViewer = orig })
+var captured dtviewers.Viewer
+registerViewer = func(v dtviewers.Viewer) { captured = v }
+RegisterAsViewer()
+// now drive: captured.Action(tui, sneatnav.FocusToMenu)
+```
+
+### `sync.Once` guard for `RegisterModule` in test binaries
+
+Packages that call `RegisterModule()` (or any function that panics on duplicate registration)
+must wrap the first call in a `var registerOnce sync.Once` and use `registerOnce.Do(...)` in
+every test that needs it. This is required in `dtapiservice`, `dtsettings`, and `dtviewers`.
+
+### `newTextViewFunc` / `newXxxFunc` seams for widget capture
+
+Production code that constructs widgets via a package-level `var newTextViewFunc = tview.NewTextView`
+seam lets tests intercept construction and grab the concrete widget:
+
+```go
+orig := newTextViewFunc
+t.Cleanup(func() { newTextViewFunc = orig })
+var captured *tview.TextView
+newTextViewFunc = func() *tview.TextView {
+    tv := tview.NewTextView()
+    captured = tv
+    return tv
+}
+```
+Use `captured` to call `GetInputCapture()` and drive every branch of the installed handler.
+
+### `panelList` reflect trick for `*tview.List` inside sneatv panels (`dtviewers`)
+
+`sneatv.WithDefaultBorders` wraps a `*tview.List` inside a `PrimitiveWithBox` interface field.
+To extract the list for direct manipulation (e.g. `SetCurrentItem`, `GetItemSelectedFunc`):
+
+```go
+func panelList(p sneatnav.Panel) *tview.List {
+    panelElem := reflect.ValueOf(p).Elem()
+    pwbField := panelElem.FieldByName("PrimitiveWithBox")
+    // ... unwrap interface → struct → Primitive field → *tview.List
+}
+```
+See `pkg/dtviewers/dtviewers_test.go` for the full implementation.
+
+### `gcloudcmds` CLI seam pattern
+
+`gcloudcmds` exports two seam vars (`getGCloudProjects`, `openGCloudProjectsScreen`). Build a
+root `*cli.Command` wrapping `GoogleCloudCommand()`, override both seams, then call
+`root.Run(context.Background(), argv)` to drive the full subcommand dispatch in-process.
+
+### `keyring.MockInit()` for OAuth token storage tests (`pkg/auth/gauth`, `pkg/auth/ghauth`)
+
+`github.com/zalando/go-keyring` has `keyring.MockInit()` and `keyring.MockInitWithError(err)`.
+Call once per test (not per package) to redirect keyring operations to an in-memory store.
+Use `MockInitWithError` to verify that saveRefreshToken errors are only logged, not returned.
+
+### `fakeTicker` / `tickerIface` for polling loops (`pkg/auth/ghauth`)
+
+`ghauth.PollForToken` uses a `var newTicker func(d) tickerIface` seam. Implement:
+
+```go
+type fakeTicker struct{ ch chan time.Time }
+func newFakeTicker(ticks int) *fakeTicker {
+    ft := &fakeTicker{ch: make(chan time.Time, ticks)}
+    for i := 0; i < ticks; i++ { ft.ch <- time.Now() }
+    return ft
+}
+func (f *fakeTicker) C() <-chan time.Time { return f.ch }
+func (f *fakeTicker) Stop()               {}
+func (f *fakeTicker) Reset(_ time.Duration) {}
+```
+
+Pre-fill the channel for success paths; use an unbuffered channel + cancelled context for the
+timeout/cancel path.
+
+### `fakeTypedDriver` for `ColumnTypeDatabaseTypeName` (`pkg/sqlexecute`)
+
+`database/sql` does not expose `ColumnType.DatabaseTypeName` through sqlmock. Register a custom
+`database/sql/driver` that implements `driver.RowsColumnTypeDatabaseTypeName`:
+
+```go
+type fakeTypedRows struct { rows []fakeRow; pos int }
+func (r *fakeTypedRows) ColumnTypeDatabaseTypeName(index int) string { return r.rows[index].colDbType }
+// ... Columns(), Close(), Next() boilerplate
+```
+Register named drivers once in `TestMain` via `sql.Register("fakename", &fakeTypedDriver{...})`.
+This is the only way to test the `UNIQUEIDENTIFIER` → UUID conversion paths and the
+sqlserver byte-swap branch in `executor.go`.
+
+### `withFakeHandle` seam for `pkg/server/endpoints` handlers
+
+`endpoints` uses a `var handle` function pointer and `var getContextFromRequest`. Override both
+in tests to invoke the worker directly without a real HTTP pipeline:
+
+```go
+getContextFromRequest = func(r *http.Request) (context.Context, error) { return r.Context(), nil }
+handle = func(w, r, dto, opts, status, getCtx, worker) {
+    ctx, _ := getCtx(r)
+    resp, err := worker(ctx)
+    if err != nil { handleError(err, w, r); return }
+    w.WriteHeader(status)
+}
+```
+
+### `posthog` mock client and global-state backup pattern (`pkg/dtlog`)
+
+`dtlog` stores global state in `mu`-protected vars (`ph`, `initialized`, `queue`,
+`posthogDistinctID`). Tests that mutate these must backup-and-restore under `mu.Lock()`.
+Implement `mockPosthogClient` satisfying `posthog.Client` with an `enqueued []posthog.Message`
+slice to verify what gets queued during `postInitFlush`.
+
+### Firestore iteration seams (`pkg/schemers/firestoreschema`)
+
+`firestoreschema` injects four seam vars for Firestore client operations:
+`firestoreDoc`, `firestoreCollections`, `iterCollectionNext`, `closeFirestoreClient`.
+Override all four in `withSeams(t, refs, customDocSeam)` helper and restore with the returned
+cleanup function. This avoids any live Firestore connection.
+
+### `github.Client` backed by `httptest.Server` (`pkg/dtgithub`)
+
+```go
+func setupGHClient(t *testing.T) (*github.Client, *http.ServeMux) {
+    mux := http.NewServeMux()
+    server := httptest.NewServer(mux)
+    t.Cleanup(server.Close)
+    client := github.NewClient(nil)
+    u, _ := url.Parse(server.URL + "/")
+    client.BaseURL = u
+    client.UploadURL = u
+    return client, mux
+}
+```
+Register route handlers on `mux` for the exact GitHub API paths under test.
+
+### `stateSeams` backup/restore struct (`pkg/dtstate`)
+
+`dtstate` has multiple package-level function vars (`getState`, `saveState`, `filePathFn`,
+`osOpen`, `goAsync`, `appStop`). Create a `stateSeams` struct with a `backupSeams()` constructor
+and a `restore()` method to save/restore all of them atomically per test. Also use `tempStateDir`
+helper that sets `filePathFn` to a `t.TempDir()` path for isolation.
+
 ## Notes
 
 - A nil-check guard is missing before the `defer rows.Close()` in `sqlinfoschema.getTables`;
@@ -131,3 +301,6 @@ p := columnsProvider{ColumnsProvider: sqlinfoschema.ColumnsProvider{DB: db}}
 - `pkg/schemers/sqliteschema` tests are in `package sqliteschema` (white-box), giving full
   access to unexported types (`collectionsReader`, `columnsReader`, `foreignKeysReader`, etc.).
   All new schemer tests should follow the same white-box pattern.
+- `app.Stop()` in tview calls `screen.Fini()` internally. Never call `screen.Fini()` separately
+  in cleanup or the test will panic with a double-Fini. The `newSafeTUI` pattern above is the
+  correct approach across all TUI packages.

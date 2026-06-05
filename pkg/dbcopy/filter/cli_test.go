@@ -84,6 +84,35 @@ func TestParseWhereFlag(t *testing.T) {
 	}
 }
 
+func TestParseTableList_AllEmpty(t *testing.T) {
+	// All segments trim to empty — should return nil (line 27-29 of cli.go).
+	got := ParseTableList(",  , ,")
+	if got != nil {
+		t.Fatalf("ParseTableList(\",  , ,\") = %v, want nil", got)
+	}
+}
+
+func TestParseWhereFlag_EmptyTableOrField(t *testing.T) {
+	cases := []struct {
+		in string
+	}{
+		{":field:=:v"}, // blank table
+		{"t:::v"},      // blank field (op also blank but table check fires first)
+		{"t::=:v"},     // blank field
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			_, _, err := ParseWhereFlag(tc.in)
+			if err == nil {
+				t.Fatalf("ParseWhereFlag(%q): expected error for blank table/field, got nil", tc.in)
+			}
+			if !strings.Contains(err.Error(), "non-empty") {
+				t.Fatalf("ParseWhereFlag(%q): error %q should mention non-empty", tc.in, err)
+			}
+		})
+	}
+}
+
 func TestParseLimitFlag(t *testing.T) {
 	cases := []struct {
 		in        string

@@ -19,6 +19,9 @@ func RegisterModule() {
 		})
 }
 
+// newTextViewFunc is a seam that lets tests capture the textView built by GoApiServiceMonitor.
+var newTextViewFunc = func() *tview.TextView { return tview.NewTextView() }
+
 func GoApiServiceMonitor(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	breadcrumbs := tui.Header.Breadcrumbs()
 	breadcrumbs.Clear()
@@ -27,7 +30,7 @@ func GoApiServiceMonitor(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	}))
 
 	menu := datatugui.NewDataTugMainMenu(tui, datatugui.RootScreenWebUI)
-	textView := tview.NewTextView()
+	textView := newTextViewFunc()
 	sneatv.DefaultBorderWithPadding(textView.Box)
 	textView.SetTitle("Web UI & Local API Service Monitor")
 	textView.SetText("Open web UI: https://datatug.app/pwa/#api=localhost:8080")

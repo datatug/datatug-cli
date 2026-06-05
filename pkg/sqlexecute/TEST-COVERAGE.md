@@ -5,22 +5,21 @@
 | Run | Coverage | Uncovered statements |
 |-----|----------|---------------------|
 | Pre-run (baseline) | 0.7% | ~120 |
-| Post-run | 94.9% | 7 |
+| Previous agent run | 94.9% | 7 |
+| Post-run | 95.7% | 6 |
 
 ## Seams added
 
-None. No production code was modified.
+None. No production code was modified. The `db.Close()` error branch (executor.go:159-161) was
+covered by registering a fake SQL driver (`dbclosetest`) whose `Conn.Close()` returns an error,
+then routing `executeCommand` through that driver via `getDbByID`. No seam in production code
+was required because the driver name is already injectable via the `getDbByID` callback.
 
 ## Documented gaps
 
-All 7 remaining uncovered statements are structurally unreachable under the seam rule (would require refactoring production logic to inject failure points).
+All 6 remaining uncovered statements are structurally unreachable under the seam rule (would require refactoring production logic to inject failure points).
 
 ### error-path
-
-**`executeCommand` — `db.Close()` error in defer (executor.go:159-161)**
-- `whyType`: error-path
-- `reason`: `sql.DB.Close()` delegates to the underlying driver's `Conn.Close()`. All drivers in use (sqlite3, the fake typed driver) return `nil`. The `database/sql` layer never surfaces a non-nil error here in practice.
-- `refactorRequired`: Replace `sql.Open` with an injectable factory (`var sqlOpen = sql.Open`) so tests can inject a `*sql.DB` wrapper whose `Close()` returns an error.
 
 **`executeQuery` — `rows.Close()` error in defer (executor.go:208-210)**
 - `whyType`: error-path

@@ -38,6 +38,8 @@ func getDbServerSummary(w http.ResponseWriter, r *http.Request) {
 	returnJSON(w, r, http.StatusOK, err, summary)
 }
 
+var deleteDbServerFunc = api.DeleteDbServer
+
 // deleteDbServer removes a DB server from project
 func deleteDbServer(w http.ResponseWriter, r *http.Request) {
 	log.Println(r.Method, r.RequestURI)
@@ -53,7 +55,7 @@ func deleteDbServer(w http.ResponseWriter, r *http.Request) {
 		handleError(err, w, r)
 	}
 	ref := newProjectRef(q)
-	if err = api.DeleteDbServer(ctx, ref, dbServer); err != nil {
+	if err = deleteDbServerFunc(ctx, ref, dbServer); err != nil {
 		handleError(err, w, r)
 		return
 	}

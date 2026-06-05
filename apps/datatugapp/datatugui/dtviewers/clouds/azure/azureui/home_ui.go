@@ -8,8 +8,11 @@ import (
 
 const viewerID dtviewers.ViewerID = "azure"
 
+// registerViewer is a seam so tests can intercept viewer registration.
+var registerViewer = dtviewers.RegisterViewer
+
 func RegisterAsViewer() {
-	dtviewers.RegisterViewer(dtviewers.Viewer{
+	registerViewer(dtviewers.Viewer{
 		ID:          viewerID,
 		Name:        "Microsoft Azure",
 		Description: "(not implemented yet)",

@@ -45,14 +45,14 @@ func goFirestoreCollections(gcProjCtx *CGProjectContext) error {
 
 		collections, err := gcProjCtx.Schema().GetCollections(ctx, nil)
 		if err != nil {
-			gcProjCtx.TUI.App.QueueUpdateDraw(func() {
+			scheduleUpdate(gcProjCtx.TUI.App, func() {
 				list.Clear()
 				addAuthErrorItems(gcProjCtx, list, err)
 			})
 			return
 		}
 
-		gcProjCtx.TUI.App.QueueUpdateDraw(func() {
+		scheduleUpdate(gcProjCtx.TUI.App, func() {
 			list.Clear()
 			if len(collections) == 0 {
 				list.AddItem("No collections", "The Firestore database has no root collections", 0, nil)
@@ -70,6 +70,27 @@ func goFirestoreCollections(gcProjCtx *CGProjectContext) error {
 
 	gcProjCtx.TUI.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToContent))
 	return nil
+}
+
+// newFirestoreClientFunc is a seam so tests can replace newFirestoreClient.
+var newFirestoreClientFunc = func(ctx context.Context, projectID string) (*firestore.Client, error) {
+	return newFirestoreClient(ctx, projectID)
+}
+
+// scheduleUpdate is a seam wrapping app.QueueUpdateDraw so tests can execute
+// the callback synchronously instead of queuing it on a non-running event loop.
+var scheduleUpdate = func(app *tview.Application, f func()) {
+	app.QueueUpdateDraw(f)
+}
+
+// startInteractiveLoginFunc is a seam for gauth.StartInteractiveLogin.
+var startInteractiveLoginFunc = func(ctx context.Context, scopes []string) (*oauth2.Token, error) {
+	return gauth.StartInteractiveLogin(ctx, scopes)
+}
+
+// deleteRefreshTokenFunc is a seam for gauth.DeleteRefreshToken.
+var deleteRefreshTokenFunc = func() error {
+	return gauth.DeleteRefreshToken()
 }
 
 // newFirestoreClient attempts to build a Firestore client using an OAuth2 TokenSource
@@ -117,19 +138,19 @@ func addAuthErrorItems(gcProjCtx *CGProjectContext, list *tview.List, err error)
 		// Action: Re-login with Firestore scopes
 		list.AddItem("Re-login (add Firestore scope)", "Open browser to re-consent and save new token", 'l', func() {
 			go func() {
-				_, _ = gauth.StartInteractiveLogin(context.Background(), []string{
+				_, _ = startInteractiveLoginFunc(context.Background(), []string{
 					"https://www.googleapis.com/auth/cloud-platform",
 					"https://www.googleapis.com/auth/datastore",
 				})
 				// After login attempt, retry screen
-				gcProjCtx.TUI.App.QueueUpdateDraw(func() {
+				scheduleUpdate(gcProjCtx.TUI.App, func() {
 					_ = goFirestoreCollections(gcProjCtx)
 				})
 			}()
 		})
 		// Action: Forget saved login
 		list.AddItem("Forget saved login", "Delete saved refresh token to force re-consent", 'f', func() {
-			_ = gauth.DeleteRefreshToken()
+			_ = deleteRefreshTokenFunc()
 			_ = goFirestoreCollections(gcProjCtx)
 		})
 	} else {

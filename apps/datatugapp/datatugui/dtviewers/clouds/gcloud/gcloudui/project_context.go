@@ -12,6 +12,11 @@ import (
 	"google.golang.org/api/cloudresourcemanager/v3"
 )
 
+// getGCloudProjects is a seam so tests can replace gauth.GetGCloudProjects.
+var getGCloudProjects = func(ctx context.Context) ([]*cloudresourcemanager.Project, error) {
+	return gauth.GetGCloudProjects(ctx)
+}
+
 type GCloudContext struct {
 	*clouds.CloudContext
 	loadingProjects sync.Mutex
@@ -23,7 +28,7 @@ func (v *GCloudContext) GetProjects() (projects []*cloudresourcemanager.Project,
 		v.loadingProjects.Lock()
 		defer v.loadingProjects.Unlock()
 		if v.projects == nil {
-			v.projects, err = gauth.GetGCloudProjects(context.Background())
+			v.projects, err = getGCloudProjects(context.Background())
 		}
 	}
 	return v.projects, err
@@ -42,7 +47,7 @@ func NewProjectContext(ctx *GCloudContext, project *cloudresourcemanager.Project
 		GCloudContext: ctx,
 		Project:       project,
 		schema: firestoreschema.NewProvider(func(ctx context.Context) (client *firestore.Client, err error) {
-			return newFirestoreClient(ctx, project.ProjectId)
+			return newFirestoreClientFunc(ctx, project.ProjectId)
 		}),
 	}
 }

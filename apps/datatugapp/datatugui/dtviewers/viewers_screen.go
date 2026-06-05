@@ -10,6 +10,10 @@ import (
 	"github.com/rivo/tview"
 )
 
+// seams for testing
+var screenOpened = func(id, name string) { dtlog.ScreenOpened(id, name) }
+var saveCurrentScreenPath = func(path string) { dtstate.SaveCurrentScreePath(path) }
+
 func GoViewersScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	breadcrumbs := tui.Header.Breadcrumbs()
 	breadcrumbs.Clear()
@@ -19,8 +23,8 @@ func GoViewersScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	content := GetViewersListPanel(tui, " Viewers ", focusTo, ViewersListOptions{WithDescription: true})
 
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
-	dtlog.ScreenOpened("viewers", "Viewers")
-	dtstate.SaveCurrentScreePath("viewers")
+	screenOpened("viewers", "Viewers")
+	saveCurrentScreenPath("viewers")
 	return nil
 }
 

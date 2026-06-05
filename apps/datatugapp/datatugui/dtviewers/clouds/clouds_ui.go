@@ -8,11 +8,14 @@ import (
 	"github.com/rivo/tview"
 )
 
+// newTextViewFunc is a seam so tests can capture the created TextView.
+var newTextViewFunc = tview.NewTextView
+
 // GoCloudPlaceholderHome shows a placeholder screen for a cloud that is not implemented yet
 func GoCloudPlaceholderHome(cContext *CloudContext, viewerID dtviewers.ViewerID, title, message string, focusTo sneatnav.FocusTo) error {
 	menu := dtviewers.NewCloudsMenu(cContext.TUI, viewerID)
 
-	textView := tview.NewTextView()
+	textView := newTextViewFunc()
 	sneatv.DefaultBorderWithPadding(textView.Box)
 	textView.SetTitle(title)
 	textView.SetText(message)

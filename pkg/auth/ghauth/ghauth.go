@@ -18,9 +18,32 @@ const (
 	keyringUser    = "github-oauth-token"
 )
 
+// tickerIface abstracts time.Ticker for testing.
+type tickerIface interface {
+	C() <-chan time.Time
+	Stop()
+	Reset(d time.Duration)
+}
+
+// realTicker wraps *time.Ticker to implement tickerIface.
+type realTicker struct{ t *time.Ticker }
+
+func (r *realTicker) C() <-chan time.Time   { return r.t.C }
+func (r *realTicker) Stop()                 { r.t.Stop() }
+func (r *realTicker) Reset(d time.Duration) { r.t.Reset(d) }
+
+// seams for testing
+var (
+	httpClient     = &http.Client{}
+	deviceCodeURL  = "https://github.com/login/device/code"
+	accessTokenURL = "https://github.com/login/oauth/access_token"
+	newTicker      = func(d time.Duration) tickerIface { return &realTicker{time.NewTicker(d)} }
+	jsonMarshal    = json.Marshal
+)
+
 // SaveToken stores the GitHub OAuth token in the system keyring.
 func SaveToken(token *oauth2.Token) error {
-	data, err := json.Marshal(token)
+	data, err := jsonMarshal(token)
 	if err != nil {
 		return fmt.Errorf("failed to marshal token: %w", err)
 	}
@@ -73,8 +96,7 @@ func postJSON(ctx context.Context, url string, data interface{}, target interfac
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}
@@ -104,7 +126,7 @@ func RequestDeviceCode(ctx context.Context, clientID string) (*DeviceCodeRespons
 		"scope":     "repo",
 	}
 	var res DeviceCodeResponse
-	if err := postJSON(ctx, "https://github.com/login/device/code", data, &res); err != nil {
+	if err := postJSON(ctx, deviceCodeURL, data, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -115,7 +137,7 @@ func PollForToken(ctx context.Context, clientID, clientSecret, deviceCode string
 	if interval == 0 {
 		interval = 5
 	}
-	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	ticker := newTicker(time.Duration(interval) * time.Second)
 	defer ticker.Stop()
 
 	attempt := 0
@@ -123,7 +145,7 @@ func PollForToken(ctx context.Context, clientID, clientSecret, deviceCode string
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-ticker.C:
+		case <-ticker.C():
 			attempt++
 			if onAttempt != nil {
 				onAttempt(attempt)
@@ -166,7 +188,7 @@ func requestToken(ctx context.Context, clientID, clientSecret, deviceCode string
 		ErrorDescription string `json:"error_description"`
 	}
 
-	if err := postJSON(ctx, "https://github.com/login/oauth/access_token", data, &res); err != nil {
+	if err := postJSON(ctx, accessTokenURL, data, &res); err != nil {
 		return nil, err
 	}
 

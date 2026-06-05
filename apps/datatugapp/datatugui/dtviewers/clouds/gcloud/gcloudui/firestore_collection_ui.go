@@ -72,9 +72,9 @@ func goFirestoreCollection(gcProjCtx *CGProjectContext, collection *schemers.Col
 		if gcProjCtx.Project != nil {
 			projectID = gcProjCtx.Project.ProjectId
 		}
-		client, err := newFirestoreClient(ctx, projectID)
+		client, err := newFirestoreClientFunc(ctx, projectID)
 		if err != nil {
-			gcProjCtx.TUI.App.QueueUpdateDraw(func() {
+			scheduleUpdate(gcProjCtx.TUI.App, func() {
 				// Clear and show error
 				b.Table.Clear()
 				b.Table.SetCell(0, 0, tview.NewTableCell("Error").SetSelectable(false))
@@ -98,7 +98,7 @@ func goFirestoreCollection(gcProjCtx *CGProjectContext, collection *schemers.Col
 				if errors.Is(err, iterator.Done) {
 					break
 				}
-				gcProjCtx.TUI.App.QueueUpdateDraw(func() {
+				scheduleUpdate(gcProjCtx.TUI.App, func() {
 					b.Table.Clear()
 					b.Table.SetCell(0, 0, tview.NewTableCell("Error").SetSelectable(false))
 					b.Table.SetCell(1, 0, tview.NewTableCell(err.Error()).SetSelectable(false))
@@ -120,7 +120,7 @@ func goFirestoreCollection(gcProjCtx *CGProjectContext, collection *schemers.Col
 
 		slices.Sort(columns)
 
-		gcProjCtx.TUI.App.QueueUpdateDraw(func() {
+		scheduleUpdate(gcProjCtx.TUI.App, func() {
 			const maxWidth = 15
 			b.Table.Clear()
 			// Recreate header

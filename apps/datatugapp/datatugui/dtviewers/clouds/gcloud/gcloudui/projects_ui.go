@@ -146,7 +146,7 @@ func showGCloudProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error
 
 	go func() {
 		projects, err := cContext.GetProjects()
-		cContext.TUI.App.QueueUpdateDraw(func() {
+		scheduleUpdate(cContext.TUI.App, func() {
 			// Clear rows except header
 			table.Clear()
 			// Re-add header after Clear

@@ -10,6 +10,10 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// seams — overridable in tests
+var getGCloudProjects = gauth.GetGCloudProjects
+var openGCloudProjectsScreen = gcloudui.OpenGCloudProjectsScreen
+
 func projectsCommand() *cli.Command {
 	formatFlag := &cli.StringFlag{
 		Name:    "format",
@@ -20,7 +24,7 @@ func projectsCommand() *cli.Command {
 	return &cli.Command{
 		Name: "projects",
 		Action: func(ctx context.Context, command *cli.Command) error {
-			projects, err := gauth.GetGCloudProjects(ctx)
+			projects, err := getGCloudProjects(ctx)
 			if err != nil {
 				return err
 			}
@@ -38,7 +42,7 @@ func projectsCommand() *cli.Command {
 					fmt.Println(project.ProjectId)
 				}
 			case "":
-				return gcloudui.OpenGCloudProjectsScreen(projects)
+				return openGCloudProjectsScreen(projects)
 			default:
 				return fmt.Errorf("invalid flag: --format=%s", format)
 			}

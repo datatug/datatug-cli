@@ -8,8 +8,11 @@ import (
 
 const viewerID dtviewers.ViewerID = "aws"
 
+// registerViewer is a seam so tests can intercept viewer registration.
+var registerViewer = dtviewers.RegisterViewer
+
 func RegisterAsViewer() {
-	dtviewers.RegisterViewer(dtviewers.Viewer{
+	registerViewer(dtviewers.Viewer{
 		ID:          viewerID,
 		Name:        "Amazon Web Services",
 		Description: "(not implemented yet)",

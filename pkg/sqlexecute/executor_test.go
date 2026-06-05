@@ -130,6 +130,38 @@ func (r *closeErrRows) Next(dest []driver.Value) error {
 	return nil
 }
 
+// dbCloseErrDriver is a fake driver whose Conn.Close() returns an error.
+// This covers the db.Close() error branch in executeCommand's deferred close.
+type dbCloseErrDriver struct{}
+type dbCloseErrConn struct{}
+type dbCloseErrStmt struct{}
+type dbCloseErrRows struct{ pos int }
+
+func (d *dbCloseErrDriver) Open(_ string) (driver.Conn, error) { return &dbCloseErrConn{}, nil }
+func (c *dbCloseErrConn) Prepare(_ string) (driver.Stmt, error) {
+	return &dbCloseErrStmt{}, nil
+}
+func (c *dbCloseErrConn) Close() error              { return errors.New("db conn close error") }
+func (c *dbCloseErrConn) Begin() (driver.Tx, error) { return &fakeDriverTx{}, nil }
+func (s *dbCloseErrStmt) Close() error              { return nil }
+func (s *dbCloseErrStmt) NumInput() int             { return -1 }
+func (s *dbCloseErrStmt) Exec(_ []driver.Value) (driver.Result, error) {
+	return nil, errors.New("exec not supported")
+}
+func (s *dbCloseErrStmt) Query(_ []driver.Value) (driver.Rows, error) {
+	return &dbCloseErrRows{}, nil
+}
+func (r *dbCloseErrRows) Columns() []string { return []string{"n"} }
+func (r *dbCloseErrRows) Close() error      { return nil }
+func (r *dbCloseErrRows) Next(dest []driver.Value) error {
+	if r.pos >= 1 {
+		return io.EOF
+	}
+	r.pos++
+	dest[0] = int64(42)
+	return nil
+}
+
 // validUUIDbytes is a valid 16-byte UUID value.
 var validUUIDbytes = []byte{
 	0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x11, 0xd1,
@@ -155,6 +187,8 @@ func init() {
 	sql.Register("fakebaduid", &fakeTypedDriver{rows: []fakeRow{
 		{colName: "uid", colDbType: "UNIQUEIDENTIFIER", value: []byte{0x01, 0x02, 0x03}},
 	}})
+	// dbclosetest: Conn.Close() returns an error, covering the db.Close() defer error branch
+	sql.Register("dbclosetest", &dbCloseErrDriver{})
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -747,6 +781,33 @@ func TestExecuteQuery_RowsCloseError(t *testing.T) {
 	recordset, err := e.executeQuery(db, "fakecloseerr", "SELECT n", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(recordset.Rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(recordset.Rows))
+	}
+}
+
+// TestExecuteCommand_DBCloseError covers the db.Close() error branch in the deferred
+// close of executeCommand (executor.go:159-161). The "dbclosetest" driver's Conn.Close()
+// returns an error; after a successful query the connection is established, so db.Close()
+// propagates the driver error into the log (but does not return it to the caller).
+func TestExecuteCommand_DBCloseError(t *testing.T) {
+	e := NewExecutor(
+		func(envID, dbID string) (*datatug.EnvDb, error) {
+			return &datatug.EnvDb{
+				Server: datatug.ServerRef{Driver: "dbclosetest", Host: "localhost"},
+			}, nil
+		},
+		nil,
+	)
+	// The query succeeds; db.Close() logs an error but does not return it.
+	recordset, err := e.executeCommand(RequestCommand{
+		Env:  "dev",
+		DB:   "mydb",
+		Text: "SELECT n",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error (db.Close error is logged, not returned): %v", err)
 	}
 	if len(recordset.Rows) != 1 {
 		t.Fatalf("expected 1 row, got %d", len(recordset.Rows))

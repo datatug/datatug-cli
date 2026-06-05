@@ -11,6 +11,22 @@ import (
 	"google.golang.org/api/iterator"
 )
 
+// seams – replaced by tests to avoid requiring a live Firestore backend
+var (
+	firestoreDoc = func(client *firestore.Client, path string) firestoreCollectionsProvider {
+		return client.Doc(path)
+	}
+	firestoreCollections = func(ctx context.Context, p firestoreCollectionsProvider) *firestore.CollectionIterator {
+		return p.Collections(ctx)
+	}
+	iterCollectionNext = func(iter *firestore.CollectionIterator) (*firestore.CollectionRef, error) {
+		return iter.Next()
+	}
+	closeFirestoreClient = func(c *firestore.Client) error {
+		return c.Close()
+	}
+)
+
 type GetClient func(ctx context.Context) (client *firestore.Client, err error)
 
 func NewProvider(getConnection GetClient) schemers.Provider {
@@ -36,16 +52,16 @@ func (p simpleProvider) GetCollection(ctx context.Context, collectionRef *dal.Co
 	var fsCollectionsProvider firestoreCollectionsProvider
 
 	if strings.Contains(collectionRef.Path(), "/") {
-		fsCollectionsProvider = client.Doc(collectionRef.Parent().String())
+		fsCollectionsProvider = firestoreDoc(client, collectionRef.Parent().String())
 	} else {
 		fsCollectionsProvider = client
 	}
 
-	iter := fsCollectionsProvider.Collections(ctx)
+	iter := firestoreCollections(ctx, fsCollectionsProvider)
 
 	for {
 		var ref *firestore.CollectionRef
-		if ref, err = iter.Next(); err != nil {
+		if ref, err = iterCollectionNext(iter); err != nil {
 			if errors.Is(err, iterator.Done) {
 				err = nil
 				break
@@ -67,7 +83,7 @@ func (p simpleProvider) GetCollections(ctx context.Context, parentKey *dal.Key) 
 		return
 	}
 	defer func() {
-		_ = client.Close()
+		_ = closeFirestoreClient(client)
 	}()
 
 	var fsCollectionsProvider firestoreCollectionsProvider
@@ -75,13 +91,13 @@ func (p simpleProvider) GetCollections(ctx context.Context, parentKey *dal.Key) 
 	if parentKey == nil {
 		fsCollectionsProvider = client
 	} else {
-		fsCollectionsProvider = client.Doc(parentKey.String())
+		fsCollectionsProvider = firestoreDoc(client, parentKey.String())
 	}
 
-	iter := fsCollectionsProvider.Collections(ctx)
+	iter := firestoreCollections(ctx, fsCollectionsProvider)
 	for {
 		var ref *firestore.CollectionRef
-		if ref, err = iter.Next(); err != nil {
+		if ref, err = iterCollectionNext(iter); err != nil {
 			if errors.Is(err, iterator.Done) {
 				err = nil
 				break

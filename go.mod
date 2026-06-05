@@ -18,6 +18,7 @@ go 1.26.0
 
 require (
 	cloud.google.com/go/firestore v1.22.0
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alecthomas/chroma/v2 v2.24.1
 	github.com/dal-go/dalgo2sql v0.6.5
 	github.com/dal-go/dalgo2sqlite v0.0.2

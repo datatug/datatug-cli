@@ -17,7 +17,7 @@ import (
 	"github.com/datatug/filetug/pkg/fsutils"
 	"github.com/datatug/filetug/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
-	"github.com/google/go-github/v86/github"
+	"github.com/google/go-github/v88/github"
 	"github.com/pkg/browser"
 	"github.com/rivo/tview"
 	"golang.org/x/oauth2"
@@ -146,8 +146,11 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 			go func() {
 				token, _ := ghauth.GetToken()
 				if token != nil {
-					client := github.NewClient(oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token)))
-					_, _, err := client.Repositories.Get(context.Background(), githubOwner, repoName)
+					client, err := githubClient(context.Background(), token)
+					if err != nil {
+						return
+					}
+					_, _, err = client.Repositories.Get(context.Background(), githubOwner, repoName)
 					newRepoExists := err == nil
 					if newRepoExists != repoExists {
 						repoExists = newRepoExists
@@ -224,7 +227,10 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 				if githubOwner == "" {
 					// Fetch owner title
 					go func() {
-						client := github.NewClient(oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token)))
+						client, err := githubClient(context.Background(), token)
+						if err != nil {
+							return
+						}
 						user, _, err := client.Users.Get(context.Background(), "")
 						if err == nil {
 							githubOwner = user.GetLogin()
@@ -325,7 +331,13 @@ func authenticateGitHub(tui *sneatnav.TUI, onSuccess func(owner string)) {
 				}
 				_ = ghauth.SaveToken(token)
 
-				client := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(token)))
+				client, err := githubClient(ctx, token)
+				if err != nil {
+					tui.App.QueueUpdateDraw(func() {
+						sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to create GitHub client: %w", err))
+					})
+					return
+				}
 				user, _, _ := client.Users.Get(ctx, "")
 
 				tui.App.QueueUpdateDraw(func() {
@@ -406,7 +418,10 @@ func createGitHubProject(tui *sneatnav.TUI, title string, visibility datatug.Pro
 
 	ts := oauth2.StaticTokenSource(token)
 	tc := oauth2.NewClient(ctx, ts)
-	client := github.NewClient(tc)
+	client, err := github.NewClient(github.WithHTTPClient(tc))
+	if err != nil {
+		return projectRef, fmt.Errorf("failed to create GitHub client: %w", err)
+	}
 
 	var projectID string
 	projectsStore := dtgithub.NewRepoProjectsStore(client, "")

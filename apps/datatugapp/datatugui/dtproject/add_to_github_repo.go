@@ -21,7 +21,7 @@ import (
 	"github.com/datatug/filetug/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/go-git/go-git/v5"
-	"github.com/google/go-github/v86/github"
+	"github.com/google/go-github/v88/github"
 	"github.com/rivo/tview"
 	"golang.org/x/oauth2"
 )
@@ -60,7 +60,11 @@ func ShowAddToGitHubRepo(tui *sneatnav.TUI) {
 	useToken := func(token *oauth2.Token) {
 		ts := oauth2.StaticTokenSource(token)
 		tc := oauth2.NewClient(ctx, ts)
-		client := github.NewClient(tc)
+		client, err := github.NewClient(github.WithHTTPClient(tc))
+		if err != nil {
+			sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to create GitHub client: %w", err))
+			return
+		}
 
 		// List repositories
 		repos, _, err := client.Repositories.ListByAuthenticatedUser(ctx, nil)

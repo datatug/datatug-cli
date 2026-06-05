@@ -36,3 +36,4 @@ demo-dbs/
 !.claude/
 .claude/*
 !.claude/skills/
+/*.cov

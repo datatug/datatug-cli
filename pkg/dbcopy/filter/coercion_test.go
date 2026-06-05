@@ -27,6 +27,11 @@ func TestCoerceValue(t *testing.T) {
 		{"date invalid", "01/15/2025", dbschema.Time, nil, true},
 		{"string passthrough", "anything", dbschema.String, "anything", false},
 		{"decimal coerces as float", "9.99", dbschema.Decimal, 9.99, false},
+		// RFC3339 datetime fallback (line 58-59 of coercion.go).
+		{"datetime RFC3339", "2024-01-02T15:04:05Z", dbschema.Time, time.Date(2024, 1, 2, 15, 4, 5, 0, time.UTC), false},
+		// Unknown column type passthrough via default branch (line 66-67).
+		{"bytes passthrough", "rawdata", dbschema.Bytes, "rawdata", false},
+		{"null passthrough", "x", dbschema.Null, "x", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -31,10 +31,14 @@ type DatatugState struct {
 
 var saveState = SaveState
 var getState = GetDatatugState
+var filePathFn = getFilePath
+var osOpen = os.Open
+var goAsync = func(fn func()) { go fn() }
+var appStop = func() { global.App.Stop() }
 
 func GetDatatugState() (state *DatatugState, err error) {
 	state = new(DatatugState)
-	filePath := getFilePath()
+	filePath := filePathFn()
 	var fileInfo fs.FileInfo
 	if fileInfo, err = os.Stat(filePath); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -46,7 +50,7 @@ func GetDatatugState() (state *DatatugState, err error) {
 		return
 	}
 	var f *os.File
-	f, err = os.Open(filePath)
+	f, err = osOpen(filePath)
 	if err != nil {
 		return
 	}
@@ -64,12 +68,12 @@ func GetDatatugState() (state *DatatugState, err error) {
 }
 
 func BumpRecentProject(projectID string) {
-	go func() {
+	goAsync(func() {
 		if err := bumpRecentProject(projectID); err != nil {
 			ctx := context.Background()
 			logus.Errorf(ctx, "failed to bump recent project '%s': %v", projectID, err)
 		}
-	}()
+	})
 }
 
 // bumpRecentProject reads DatatugState using `getState` and:
@@ -117,7 +121,7 @@ func SaveCurrentScreePathSync(currentScreenPath string) {
 	state, err := getState()
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			global.App.Stop()
+			appStop()
 			time.Sleep(time.Millisecond)
 			panic(fmt.Sprintf("failed to get datatug state: %v", err))
 		}
@@ -138,11 +142,11 @@ func SaveCurrentScreePath(currentScreenPath string) {
 
 func SaveState(state *DatatugState) (err error) {
 	if hadRecentProjects && len(state.RecentProjects) == 0 {
-		global.App.Stop()
+		appStop()
 		time.Sleep(time.Millisecond)
 		panic("no recent projects found")
 	}
-	filePath := getFilePath()
+	filePath := filePathFn()
 	var f *os.File
 	if f, err = os.Create(filePath); err != nil {
 		return

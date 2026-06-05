@@ -24,22 +24,45 @@ func RegisterModule() {
 		})
 }
 
+// getLexerFn is the seam used in tests to substitute a custom chroma.Lexer.
+var getLexerFn = func(s string) chroma.Lexer {
+	return lexers.Get(s)
+}
+
+// getSettingsFn is the seam used in tests to simulate dtconfig.GetSettings errors.
+var getSettingsFn func() (dtconfig.Settings, error) = dtconfig.GetSettings
+
+// marshalFn is the seam used in tests to simulate yaml.Marshal errors.
+var marshalFn = func(v interface{}) ([]byte, error) { return yaml.Marshal(v) }
+
+// onTextViewReady is a test seam; nil in production.
+// When non-nil, GoSettingsScreen calls it with the textView after SetInputCapture is registered.
+var onTextViewReady func(tv *tview.TextView)
+
+// onBreadcrumbPushed is a test seam; nil in production.
+// When non-nil, GoSettingsScreen calls it with the breadcrumb action after Push.
+var onBreadcrumbPushed func(action func() error)
+
 func GoSettingsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	breadcrumbs := tui.Header.Breadcrumbs()
 	breadcrumbs.Clear()
-	breadcrumbs.Push(sneatv.NewBreadcrumb("Settings", func() error {
+	bcAction := func() error {
 		return GoSettingsScreen(tui, sneatnav.FocusToContent)
-	}))
+	}
+	breadcrumbs.Push(sneatv.NewBreadcrumb("Settings", bcAction))
+	if onBreadcrumbPushed != nil {
+		onBreadcrumbPushed(bcAction)
+	}
 
 	textView := tview.NewTextView()
 	var settingsStr string
-	setting, err := dtconfig.GetSettings()
+	setting, err := getSettingsFn()
 	if err != nil {
 		settingsStr = err.Error()
 	}
 
 	if settingsStr == "" {
-		data, err := yaml.Marshal(setting)
+		data, err := marshalFn(setting)
 		if err != nil {
 			settingsStr = err.Error()
 		} else {
@@ -49,9 +72,7 @@ func GoSettingsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 
 	const fileName = " Config File: ~/.datatug.yaml"
 
-	settingsStr, err = chroma2tcell.ColorizeYAMLForTview(settingsStr, func(s string) chroma.Lexer {
-		return lexers.Get(s)
-	})
+	settingsStr, err = chroma2tcell.ColorizeYAMLForTview(settingsStr, getLexerFn)
 	if err != nil {
 		return err
 	}
@@ -83,6 +104,9 @@ func GoSettingsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 			return event
 		}
 	})
+	if onTextViewReady != nil {
+		onTextViewReady(textView)
+	}
 
 	menu := datatugui.NewDataTugMainMenu(tui, datatugui.RootScreenSettings)
 	tui.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToMenu))

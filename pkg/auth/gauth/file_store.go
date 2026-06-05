@@ -9,6 +9,15 @@ import (
 	"path/filepath"
 )
 
+// userConfigDir is a seam for testing DefaultFilepath when os.UserConfigDir fails.
+var userConfigDir = os.UserConfigDir
+
+// osWriteFile is a seam for testing Save when the write itself fails.
+var osWriteFile = os.WriteFile
+
+// jsonMarshalIndent is a seam for testing Save when marshalling fails.
+var jsonMarshalIndent = json.MarshalIndent
+
 // FileStore persists service accounts to a JSON file.
 // It is safe to use even if the file does not exist yet: Load returns an empty slice.
 
@@ -30,7 +39,7 @@ func (s FileStore) Validate() error {
 // On macOS: ~/Library/Application Support/firestore-viewer/service_accounts.json
 // On Windows: %AppData%/firestore-viewer/service_accounts.json
 func DefaultFilepath() (string, error) {
-	confDir, err := os.UserConfigDir()
+	confDir, err := userConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("get user config dir: %w", err)
 	}
@@ -77,9 +86,9 @@ func (s FileStore) Save(list []ServiceAccountDbo) error {
 	if err := s.ensureDir(); err != nil {
 		return fmt.Errorf("ensure dir: %w", err)
 	}
-	b, err := json.MarshalIndent(list, "", "  ")
+	b, err := jsonMarshalIndent(list, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal service accounts: %w", err)
 	}
-	return os.WriteFile(s.Filepath, b, 0o644)
+	return osWriteFile(s.Filepath, b, 0o644)
 }

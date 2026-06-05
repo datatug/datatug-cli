@@ -19,6 +19,9 @@ const (
 	keyringUser    = "google-oauth-refresh-token"
 )
 
+// getTokenFromWebFn is a seam for testing StartInteractiveLogin without a browser.
+var getTokenFromWebFn = getTokenFromWeb
+
 // getGoogleCloudClient handles the OAuth2 flow for desktop apps and caches the token locally.
 func getGoogleCloudClient(ctx context.Context) (client *http.Client, err error) {
 
@@ -107,7 +110,7 @@ func StartInteractiveLogin(ctx context.Context, scopes []string) (*oauth2.Token,
 		Endpoint:     google.Endpoint,
 		RedirectURL:  "http://localhost:8080/oauth2callback",
 	}
-	tok, err := getTokenFromWeb(ctx, cfg)
+	tok, err := getTokenFromWebFn(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("interactive login failed: %w", err)
 	}

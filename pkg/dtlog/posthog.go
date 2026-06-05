@@ -29,6 +29,36 @@ var (
 	initialized bool
 )
 
+type yamlEncoder interface {
+	Encode(v interface{}) error
+}
+
+// seams for testing
+var (
+	getPostHogApiKeyFromServerFunc = getPostHogApiKeyFromServer
+	posthogNewWithConfig           = func(apiKey string, config posthog.Config) (posthog.Client, error) {
+		return posthog.NewWithConfig(apiKey, config)
+	}
+	osCreate      = os.Create
+	httpDoRequest = func(req *http.Request) (*http.Response, error) {
+		return http.DefaultClient.Do(req)
+	}
+	posthogAPIKeyURL = "https://raw.githubusercontent.com/datatug/datatug-cli/refs/heads/main/envs/prod/posthog-api-key.txt"
+	newYamlEncoder   = func(w io.Writer) yamlEncoder { return yaml.NewEncoder(w) }
+)
+
+// postInitFlush is extracted so tests can invoke it after pre-seeding the queue.
+var postInitFlush = func(client posthog.Client) {
+	mu.Lock()
+	defer mu.Unlock()
+	ph = client
+	initialized = true
+	for _, msg := range queue {
+		enqueue(msg)
+	}
+	queue = nil
+}
+
 type posthogConfig struct {
 	ApiKey          string    `yaml:"api_key"`
 	ApiKeyTimestamp time.Time `yaml:"api_key_timestamp"`
@@ -41,14 +71,7 @@ func init() {
 	sessionStarted = time.Now()
 	go func() {
 		client := getPostHogClient()
-		mu.Lock()
-		defer mu.Unlock()
-		ph = client
-		initialized = true
-		for _, msg := range queue {
-			enqueue(msg)
-		}
-		queue = nil
+		postInitFlush(client)
 	}()
 }
 
@@ -66,7 +89,7 @@ func getPostHogClient() posthog.Client {
 	var isConfigNeedToBeSaved bool
 	config.ApiKey = os.Getenv("DATATUG_POSTHOG_API_KEY")
 	if config.ApiKey == "" && !config.LockApiKey && time.Now().After(config.ApiKeyTimestamp.Add(24*time.Hour)) {
-		apiKey, err := getPostHogApiKeyFromServer()
+		apiKey, err := getPostHogApiKeyFromServerFunc()
 		if err != nil {
 			ctx := context.Background()
 			logus.Warningf(ctx, "Failed to get PostHog API key from server: %v", err)
@@ -90,7 +113,7 @@ func getPostHogClient() posthog.Client {
 		}
 	}
 	posthogDistinctID = config.DistinctID
-	client, err := posthog.NewWithConfig(config.ApiKey, posthog.Config{Endpoint: "https://eu.i.posthog.com"})
+	client, err := posthogNewWithConfig(config.ApiKey, posthog.Config{Endpoint: "https://eu.i.posthog.com"})
 	if err != nil {
 		ctx := context.Background()
 		logus.Errorf(ctx, "Failed to initialize PostHog client: %v", err)
@@ -100,14 +123,14 @@ func getPostHogClient() posthog.Client {
 }
 
 func writePostHogConfigToFile(ctx context.Context, config posthogConfig) error {
-	file, err := os.Create(getPosthogConfigFilePath())
+	file, err := osCreate(getPosthogConfigFilePath())
 	if err != nil {
 		logus.Errorf(ctx, "Failed to create PostHog config file: %v", err)
 	} else {
 		defer func() {
 			_ = file.Close()
 		}()
-		encoder := yaml.NewEncoder(file)
+		encoder := newYamlEncoder(file)
 		if err = encoder.Encode(config); err != nil {
 			ctx := context.Background()
 			logus.Errorf(ctx, "Failed to encode PostHog config file: %v", err)
@@ -117,24 +140,24 @@ func writePostHogConfigToFile(ctx context.Context, config posthogConfig) error {
 }
 
 func getPostHogApiKeyFromServer() (string, error) {
-	const url = "https://raw.githubusercontent.com/datatug/datatug-cli/refs/heads/main/envs/prod/posthog-api-key.txt"
 	timeout := 5 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", posthogAPIKeyURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch posthog api key from server: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpDoRequest(req)
 	if err != nil {
 		ctx = context.Background()
 		if errors.Is(err, context.DeadlineExceeded) {
 			logus.Warningf(ctx, "Request to GitHub server for PostHog API Key timed out %v", timeout)
 		} else {
-			logus.Errorf(ctx, "failed to fetch posthog api key from %s: %v", url, err)
+			logus.Errorf(ctx, "failed to fetch posthog api key from %s: %v", posthogAPIKeyURL, err)
 		}
+		return "", err
 	}
 	defer func() {
 		_ = resp.Body.Close()

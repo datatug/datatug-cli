@@ -1,18 +1,15 @@
 package dtgithub
 
 import (
-	"context"
 	"testing"
 
-	"github.com/google/go-github/v86/github"
+	"github.com/google/go-github/v88/github"
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/api/transport/http"
 )
 
 func TestNewRepoProjectsStore(t *testing.T) {
-	ctx := context.Background()
-	httpClient, _, _ := http.NewClient(ctx)
-	ghClient := github.NewClient(httpClient)
+	ghClient, err := github.NewClient()
+	assert.NoError(t, err)
 	store := NewRepoProjectsStore(ghClient, "test_branch")
 	assert.NotNil(t, store)
 	assert.Equal(t, "test_branch", store.branch)

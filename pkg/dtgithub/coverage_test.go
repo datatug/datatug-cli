@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -17,7 +16,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/dtprojcreator"
-	"github.com/google/go-github/v86/github"
+	"github.com/google/go-github/v88/github"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,12 +29,17 @@ func setupGHClient(t *testing.T) (*github.Client, *http.ServeMux) {
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
-	client := github.NewClient(nil)
-	u, err := url.Parse(server.URL + "/")
+	serverURL := server.URL + "/"
+	client, err := github.NewClient(github.WithURLs(&serverURL, &serverURL))
 	require.NoError(t, err)
-	client.BaseURL = u
-	client.UploadURL = u
 	return client, mux
+}
+
+func newTestGHClient(t *testing.T) *github.Client {
+	t.Helper()
+	client, err := github.NewClient()
+	require.NoError(t, err)
+	return client
 }
 
 func noopReport(_, _ string) {}
@@ -86,7 +90,7 @@ func repoJSON(name string) map[string]any {
 // ---------- NewRepoProjectsStore ----------
 
 func TestNewRepoProjectsStore_EmptyBranch(t *testing.T) {
-	client := github.NewClient(nil)
+	client := newTestGHClient(t)
 	store := NewRepoProjectsStore(client, "")
 	assert.Equal(t, "main", store.branch)
 	assert.Equal(t, client, store.client)
@@ -95,7 +99,7 @@ func TestNewRepoProjectsStore_EmptyBranch(t *testing.T) {
 // ---------- NewStorage ----------
 
 func TestNewStorage(t *testing.T) {
-	client := github.NewClient(nil)
+	client := newTestGHClient(t)
 	s := NewStorage(client, "owner", "repo", "main")
 	assert.Equal(t, client, s.client)
 	assert.Equal(t, "owner", s.repoOwner)
@@ -107,14 +111,14 @@ func TestNewStorage(t *testing.T) {
 // ---------- FileExists / OpenFile (panic stubs) ----------
 
 func TestFileExists_Panics(t *testing.T) {
-	s := NewStorage(github.NewClient(nil), "o", "r", "main")
+	s := NewStorage(newTestGHClient(t), "o", "r", "main")
 	assert.Panics(t, func() {
 		_, _ = s.FileExists(context.Background(), "somepath")
 	})
 }
 
 func TestOpenFile_Panics(t *testing.T) {
-	s := NewStorage(github.NewClient(nil), "o", "r", "main")
+	s := NewStorage(newTestGHClient(t), "o", "r", "main")
 	assert.Panics(t, func() {
 		_, _ = s.OpenFile(context.Background(), "somepath")
 	})
@@ -180,7 +184,7 @@ func (e *errorReader) Read(_ []byte) (int, error) { return 0, e.err }
 // ---------- Commit ----------
 
 func TestCommit_EmptyEntries(t *testing.T) {
-	s := NewStorage(github.NewClient(nil), "o", "r", "main")
+	s := NewStorage(newTestGHClient(t), "o", "r", "main")
 	err := s.Commit(context.Background(), "empty commit")
 	require.NoError(t, err)
 }
@@ -344,7 +348,7 @@ func TestCommit_UpdateRefError(t *testing.T) {
 // ---------- newProjectCreator ----------
 
 func TestNewProjectCreator(t *testing.T) {
-	client := github.NewClient(nil)
+	client := newTestGHClient(t)
 	report := datatug.StatusReporter(noopReport)
 	creator := newProjectCreator(client, report)
 	assert.Equal(t, client, creator.client)
@@ -430,7 +434,7 @@ func TestCloneRepo_DirAlreadyExists(t *testing.T) {
 	defer func() { _ = removeDirForTest("projectPath") }()
 
 	c := &projectCreator{
-		client:    github.NewClient(nil),
+		client:    newTestGHClient(t),
 		report:    noopReport,
 		repoOwner: "owner",
 		repoName:  "repo",
@@ -445,7 +449,7 @@ func TestCloneRepo_DirDoesNotExist(t *testing.T) {
 	_ = removeDirForTest("projectPath")
 
 	c := &projectCreator{
-		client:    github.NewClient(nil),
+		client:    newTestGHClient(t),
 		report:    noopReport,
 		repoOwner: "owner",
 		repoName:  "repo",

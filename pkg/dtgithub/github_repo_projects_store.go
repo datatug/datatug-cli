@@ -29,6 +29,10 @@ func NewRepoProjectsStore(client *github.Client, branch string) *GithubRepoProje
 
 var _ datatug.ProjectsStore = (*GithubRepoProjectsStore)(nil)
 
+// seams for testing
+var createProjectFiles = dtprojcreator.CreateProjectFiles
+var addProjectToSettings = dtconfig.AddProjectToSettings
+
 type GithubRepoProjectsStore struct {
 	client *github.Client
 	branch string
@@ -114,7 +118,7 @@ func (c *projectCreator) CreateProject(
 	}
 
 	var project *datatug.Project
-	err = dtprojcreator.CreateProjectFiles(ctx, project, pathToProjectFromRepoRoot, storage, c.report)
+	err = createProjectFiles(ctx, project, pathToProjectFromRepoRoot, storage, c.report)
 	if err != nil {
 		err = fmt.Errorf("failed to create project files: %w", err)
 		return
@@ -255,7 +259,7 @@ func (c *projectCreator) addProjectToDataTugConfig(pathToProjectFromRepoRoot, pr
 		Path:  projectDir,
 		Title: projectTitle,
 	}
-	if err = dtconfig.AddProjectToSettings(projectRef); err != nil {
+	if err = addProjectToSettings(projectRef); err != nil {
 		err = fmt.Errorf("failed to add repoName to DataTug app config: %w", err)
 		return
 	}

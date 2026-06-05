@@ -10,8 +10,11 @@ func RegisterViewer(viewer Viewer) {
 	viewers = append(viewers, viewer)
 }
 
+// seam for testing
+var registerMainMenuItem = datatugui.RegisterMainMenuItem
+
 func RegisterModule() {
-	datatugui.RegisterMainMenuItem(datatugui.RootScreenViewers,
+	registerMainMenuItem(datatugui.RootScreenViewers,
 		datatugui.MainMenuItem{
 			Text:     "Viewers",
 			Shortcut: 'v',

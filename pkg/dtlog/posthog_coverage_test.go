@@ -144,9 +144,7 @@ func TestGetPostHogClient_EmptyDistinctID(t *testing.T) {
 	}
 	defer func() { posthogNewWithConfig = oldNew }()
 
-	oldEnv := os.Getenv("DATATUG_POSTHOG_API_KEY")
-	os.Setenv("DATATUG_POSTHOG_API_KEY", "test-key")
-	defer os.Setenv("DATATUG_POSTHOG_API_KEY", oldEnv)
+	t.Setenv("DATATUG_POSTHOG_API_KEY", "test-key")
 
 	client := getPostHogClient()
 	assert.NotNil(t, client)
@@ -165,9 +163,7 @@ func TestGetPostHogClient_NewClientError(t *testing.T) {
 	}
 	defer func() { posthogNewWithConfig = oldNew }()
 
-	oldEnv := os.Getenv("DATATUG_POSTHOG_API_KEY")
-	os.Setenv("DATATUG_POSTHOG_API_KEY", "test-key")
-	defer os.Setenv("DATATUG_POSTHOG_API_KEY", oldEnv)
+	t.Setenv("DATATUG_POSTHOG_API_KEY", "test-key")
 
 	client := getPostHogClient()
 	assert.Nil(t, client)
@@ -192,9 +188,7 @@ func TestGetPostHogClient_ApiKeyServerError(t *testing.T) {
 	}
 	defer func() { posthogNewWithConfig = oldNew }()
 
-	oldEnv := os.Getenv("DATATUG_POSTHOG_API_KEY")
-	os.Unsetenv("DATATUG_POSTHOG_API_KEY")
-	defer os.Setenv("DATATUG_POSTHOG_API_KEY", oldEnv)
+	t.Setenv("DATATUG_POSTHOG_API_KEY", "")
 
 	client := getPostHogClient()
 	// falls back to hardcoded key, still returns a client
@@ -220,9 +214,7 @@ func TestGetPostHogClient_ApiKeyServerSuccess(t *testing.T) {
 	}
 	defer func() { posthogNewWithConfig = oldNew }()
 
-	oldEnv := os.Getenv("DATATUG_POSTHOG_API_KEY")
-	os.Unsetenv("DATATUG_POSTHOG_API_KEY")
-	defer os.Setenv("DATATUG_POSTHOG_API_KEY", oldEnv)
+	t.Setenv("DATATUG_POSTHOG_API_KEY", "")
 
 	client := getPostHogClient()
 	assert.NotNil(t, client)

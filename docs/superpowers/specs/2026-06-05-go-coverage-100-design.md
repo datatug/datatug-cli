@@ -100,6 +100,8 @@ phases 3–5.
   target.
 - Parse `cover.out` mechanically into the skeleton:
   `package → file → function → uncovered line ranges`.
+- **Record the pre-run baseline metrics**: per-package and total coverage % and
+  number of uncovered lines. These are carried through to every report.
 - Drop packages already at 100%.
 - **Rationale:** the structural breakdown is mechanical, so it consumes no agent
   tokens; agents only add the semantic layer.
@@ -159,7 +161,8 @@ phases 3–5.
 ### Phase 6 — Overview (main session)
 - Read all created/updated `TEST-COVERAGE.md` + verification results.
 - Write `TEST-COVERAGE-OVERVIEW.md` at the module root:
-  - Global before/after coverage %.
+  - Per-package and total pre-run vs post-run coverage % and uncovered-line counts
+    (pre-run from Phase 1, post-run from Phase 5).
   - Per-package status (100% / documented-gap / quarantined-with-reason).
   - Quarantine list.
   - **Taxonomy roll-up:** count of each remaining why-type + the refactoring each
@@ -178,14 +181,24 @@ phases 3–5.
 
 ## 7. Report formats
 
+**Coverage metrics — required in every report.** Every coverage report includes,
+for its scope, both **pre-run** and **post-run**: coverage **percentage** and
+**number of uncovered lines**. Per-package reports show that package's metrics; the
+root overview shows **per-package and total**. Metrics come from the Phase-1 baseline
+(pre-run) and Phase-5 verification (post-run).
+
 ### Per-package `TEST-COVERAGE.md` (written by test-engineers)
+- A **Coverage metrics** header: this package's pre-run and post-run coverage % and
+  uncovered-line count.
 - **Grouped by why-type.** For each: the uncovered functions/branches, why they
   can't be tested as-is, and the kind of refactoring required.
 - A **Seams added** section listing every seam introduced (audit trail for
   production changes).
 
 ### Root `TEST-COVERAGE-OVERVIEW.md` (written by main session)
-- Global before/after %, per-package status, quarantine list, taxonomy roll-up.
+- **Coverage metrics table:** per-package and total pre-run vs post-run coverage %
+  and uncovered-line counts.
+- Per-package status, quarantine list, taxonomy roll-up.
 
 ## 8. Risks & Mitigations
 

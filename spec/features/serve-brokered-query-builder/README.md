@@ -1,7 +1,7 @@
 # Feature: Serve-Brokered AI Query Builder
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/serve-brokered-query-builder?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/serve-brokered-query-builder?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/serve-brokered-query-builder?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/serve-brokered-query-builder?op=request-change) |
-**Status:** Under Review
+**Status:** Approved
 **Date:** 2026-06-05
 **Owner:** alexander.trakhimenok
 **Source Ideas:** —
@@ -99,7 +99,7 @@ The daemon MUST bind to loopback, MUST require the valid session token on builde
 
 #### REQ: read-only-enforced
 
-For `dtql`-mode tabs the daemon MUST reject any request whose evident intent mutates data or schema and MUST leave the tab's current AST unchanged (the AST cannot express mutation). For `native`-mode tabs, where the text is opaque, the daemon MUST execute every query through a read-only session/transaction on the connection so the engine itself rejects any mutating or DDL statement (insert/update/delete/DDL) — without parsing the native text. In neither case is a mutation allowed to take effect.
+For `dtql`-mode tabs the AST is read-only **by construction** (it cannot express mutation), so the daemon additionally MUST reject any request whose evident intent mutates data or schema and MUST leave the tab's current AST unchanged. For `native`-mode tabs, where the text is opaque, the daemon MUST execute every query through a read-only session/transaction on the connection so the engine itself rejects any mutating or DDL statement (insert/update/delete/DDL) — without parsing the native text. In neither case is a mutation allowed to take effect.
 
 #### REQ: reuse-existing-execution
 

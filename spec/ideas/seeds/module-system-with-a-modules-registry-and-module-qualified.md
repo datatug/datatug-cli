@@ -1,12 +1,7 @@
 ---
 type: sidekick-seed
-slug: module-system-with-a-modules-registry-and-module-qualified
-captured_at: 2026-06-04T12:51:12Z
 captured_by: specstudio:implement
-captured_during: spec/features/cli/entity
-trigger: explicit
 status: queued
-synchestra_task: null
 ---
 # Module system with a modules registry and module-qualified entity references
 

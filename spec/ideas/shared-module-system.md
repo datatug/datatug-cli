@@ -1,3 +1,8 @@
+---
+format: https://specscore.md/idea-specification
+status: Approved
+---
+
 # Idea: Shared, Standalone Module System (registry + namespaces + qualified references)
 
 **Status:** Approved

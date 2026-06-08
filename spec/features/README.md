@@ -1,3 +1,7 @@
+---
+format: https://specscore.md/features-index-specification
+---
+
 # datatug-cli Features
 
 > [View in SpecStudio](https://specstudio.synchestra.io/project/features?id=datatug-cli@datatug@github.com&path=spec%2Ffeatures) — graph, discussions, approvals

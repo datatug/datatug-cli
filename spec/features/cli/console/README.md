@@ -1,8 +1,14 @@
+---
+format: https://specscore.md/feature-specification
+status: Planned
+---
+
 # Feature: Console
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/console?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/console?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/console?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/console?op=request-change) |
 
 **Status:** Planned
+**Source Ideas:** —
 
 ## Summary
 

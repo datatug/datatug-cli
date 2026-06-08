@@ -1,8 +1,14 @@
+---
+format: https://specscore.md/feature-specification
+status: Implementing
+---
+
 # Feature: Projects Add
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/projects/add?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/projects/add?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/projects/add?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/projects/add?op=request-change) |
 
 **Status:** Implementing
+**Source Ideas:** —
 
 ## Summary
 

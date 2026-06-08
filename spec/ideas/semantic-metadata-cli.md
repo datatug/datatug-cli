@@ -1,3 +1,8 @@
+---
+format: https://specscore.md/idea-specification
+status: Implemented
+---
+
 # Idea: Semantic Metadata Authoring CLI Verbs
 
 **Status:** Implemented

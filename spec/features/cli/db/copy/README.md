@@ -1,8 +1,14 @@
+---
+format: https://specscore.md/feature-specification
+status: Implemented
+---
+
 # Feature: `datatug db copy`
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db/copy?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db/copy?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db/copy?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/db/copy?op=request-change) |
 
 **Status:** Implemented
+**Source Ideas:** —
 **Source Idea:** [`cross-engine-db-copy`](../../../../ideas/cross-engine-db-copy.md)
 **Parent Feature:** [`cli/db`](../README.md)
 

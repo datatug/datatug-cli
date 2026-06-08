@@ -1,3 +1,8 @@
+---
+format: https://specscore.md/feature-specification
+status: Approved
+---
+
 # Feature: Serve-Brokered AI Query Builder
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/serve-brokered-query-builder?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/serve-brokered-query-builder?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/serve-brokered-query-builder?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/serve-brokered-query-builder?op=request-change) |

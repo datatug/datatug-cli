@@ -1,3 +1,8 @@
+---
+format: https://specscore.md/idea-specification
+status: Implemented
+---
+
 # Idea: Git Integration for Mutating Commands
 
 **Status:** Implemented

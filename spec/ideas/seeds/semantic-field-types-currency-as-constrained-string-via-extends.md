@@ -1,12 +1,7 @@
 ---
 type: sidekick-seed
-slug: semantic-field-types-currency-as-constrained-string-via-extends
-captured_at: 2026-06-04T12:51:12Z
 captured_by: specstudio:implement
-captured_during: spec/features/cli/entity
-trigger: explicit
 status: queued
-synchestra_task: null
 ---
 # Semantic field types: currency as a constrained string (ISO len-3 enum) via extends / entity-field references
 

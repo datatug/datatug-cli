@@ -1,8 +1,14 @@
+---
+format: https://specscore.md/feature-specification
+status: Implementing
+---
+
 # Feature: Dataset Data
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset/data?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset/data?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset/data?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/dataset/data?op=request-change) |
 
 **Status:** Implementing
+**Source Ideas:** —
 
 ## Summary
 

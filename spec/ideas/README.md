@@ -1,3 +1,7 @@
+---
+format: https://specscore.md/ideas-index-specification
+---
+
 # Ideas
 
 Pre-spec one-pagers refined through structured divergent and convergent thinking. Each Idea here is a candidate that may promote to one or more Features in `spec/features/`.

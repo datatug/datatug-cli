@@ -1,3 +1,8 @@
+---
+format: https://specscore.md/idea-specification
+status: Approved
+---
+
 # Idea: db copy filtering and subsetting
 
 **Status:** Approved

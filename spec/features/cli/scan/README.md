@@ -1,8 +1,14 @@
+---
+format: https://specscore.md/feature-specification
+status: Implementing
+---
+
 # Feature: Scan
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/scan?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/scan?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/scan?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/scan?op=request-change) |
 
 **Status:** Implementing
+**Source Ideas:** —
 
 ## Summary
 

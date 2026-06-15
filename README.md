@@ -20,6 +20,19 @@
 
 ![datatug-cli-employees-2.png](docs/screenshots/datatug-cli-employees-2.png)
 
+<!-- dev-approach:v1 -->
+## Our approach to development
+
+We build with our own tooling:
+
+- **[SpecScore](https://specscore.md)** — specify requirements as `SpecScore.md` artifacts
+- **[SpecStudio](https://specscore.studio)** — author & manage specs across their lifecycle
+- **[inGitDB](https://ingitdb.com)** — store structured data in Git where applicable
+- **[DALgo](https://dalgo.io)** — data access layer for Go
+- **[cover100.dev](https://cover100.dev)** — drive toward 100% test coverage
+- **[DataTug](https://datatug.io)** — query & explore data
+<!-- /dev-approach -->
+
 ## ♺ Continuous Integration — [![Build and Test](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml/badge.svg)](https://github.com/datatug/datatug-cli/actions/workflows/golangci.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/datatug/datatug-cli?cache=1)](https://goreportcard.com/report/github.com/datatug/datatug-cli) [![GoDoc](https://godoc.org/github.com/datatug/datatug-cli?status.svg)](https://godoc.org/github.com/datatug/datatug-cli) [![Coverage Status](https://coveralls.io/repos/github/datatug/datatug-cli/badge.svg?branch=main&cache-1)](https://coveralls.io/github/datatug/datatug-cli?branch=main)
 
 Help wanted to [get test coverage to 100%](https://github.com/datatug/datatug-cli/issues/64).

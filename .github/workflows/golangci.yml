@@ -32,6 +32,8 @@ jobs:
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     with:
+      # Uses the C-based github.com/mattn/go-sqlite3 driver, which requires cgo.
+      cgo_enabled: true
       disable-version-bumping: false
       code_coverage: true
       min_test_coverage_percent: 60.9

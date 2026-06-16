@@ -104,8 +104,8 @@ func TestOpen_SQLite_OpensChinookFixture(t *testing.T) {
 // TestOpen_InGitDB_OpensEmptyProject exercises the ingitdb Open path against
 // a freshly-created empty project directory. The dalgo2ingitdb constructor
 // only validates the path; opening doesn't require a populated project.
-// Asserts the driver advertises SupportsConcurrentConnections()==true
-// (dalgo2ingitdb embeds dal.ConcurrencyAvailable).
+// Asserts the driver reports SupportsConcurrentConnections()==false
+// (dalgo2ingitdb is single-writer; the git working tree is not concurrent-safe).
 func TestOpen_InGitDB_OpensEmptyProject(t *testing.T) {
 	t.Parallel()
 	projDir := t.TempDir()
@@ -120,8 +120,8 @@ func TestOpen_InGitDB_OpensEmptyProject(t *testing.T) {
 	assert.NotNil(t, db)
 	if db != nil {
 		assert.NotNil(t, db.Adapter())
-		// dalgo2ingitdb embeds dal.ConcurrencyAvailable.
-		assert.True(t, db.SupportsConcurrentConnections(),
-			"dalgo2ingitdb must advertise ConcurrencyAvailable")
+		// dalgo2ingitdb is single-writer (git working tree); reports false.
+		assert.False(t, db.SupportsConcurrentConnections(),
+			"dalgo2ingitdb is single-writer and must not advertise ConcurrencyAvailable")
 	}
 }

@@ -22,8 +22,8 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2sqlite"
-	"github.com/ingitdb/ingitdb-cli/pkg/dalgo2ingitdb"
-	"github.com/ingitdb/ingitdb-cli/pkg/ingitdb/validator"
+	"github.com/ingitdb/dalgo2ingitdb"
+	"github.com/ingitdb/ingitdb-go/ingitdb/validator"
 	"github.com/xo/dburl"
 )
 

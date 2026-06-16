@@ -30,7 +30,8 @@ require (
 	github.com/google/go-github/v88 v88.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
-	github.com/ingitdb/ingitdb-cli v1.31.4
+	github.com/ingitdb/dalgo2ingitdb v0.0.1
+	github.com/ingitdb/ingitdb-go/ingitdb v0.0.1
 	github.com/mattn/go-sqlite3 v1.14.45
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
@@ -50,9 +51,9 @@ require (
 )
 
 require (
-	github.com/RoaringBitmap/roaring/v2 v2.18.0 // indirect
+	github.com/RoaringBitmap/roaring/v2 v2.18.2 // indirect
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
-	github.com/dlclark/regexp2 v1.12.0 // indirect
+	github.com/dlclark/regexp2/v2 v2.1.1 // indirect
 	github.com/georgysavva/scany/v2 v2.1.4 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/gofrs/flock v0.13.0 // indirect
@@ -61,6 +62,7 @@ require (
 	github.com/ingr-io/ingr-go v0.0.2 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.3.1 // indirect
+	go.starlark.net v0.0.0-20260613233743-8ba36ccb83fb // indirect
 )
 
 require (
@@ -94,7 +96,7 @@ require (
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.15 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.16 // indirect
 	github.com/googleapis/gax-go/v2 v2.22.0 // indirect
 	//github.com/jackc/pgx/v5 v5.7.6 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
@@ -117,7 +119,7 @@ require (
 	github.com/strongo/decimal v0.1.1 // indirect
 	github.com/strongo/random v0.0.1
 	github.com/strongo/slice v0.3.5
-	github.com/strongo/strongoapp v0.31.30 // indirect
+	github.com/strongo/strongoapp v0.31.35 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0 // indirect
@@ -126,15 +128,15 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
-	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/term v0.43.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto v0.0.0-20260420184626-e10c466a9529 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260420184626-e10c466a9529 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260511170946-3700d4141b60 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect

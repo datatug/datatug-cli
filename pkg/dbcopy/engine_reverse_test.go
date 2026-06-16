@@ -23,8 +23,8 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo2sqlite"
-	"github.com/ingitdb/ingitdb-cli/pkg/dalgo2ingitdb"
-	"github.com/ingitdb/ingitdb-cli/pkg/ingitdb/validator"
+	"github.com/ingitdb/dalgo2ingitdb"
+	"github.com/ingitdb/ingitdb-go/ingitdb/validator"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

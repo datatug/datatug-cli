@@ -1,6 +1,6 @@
 # Plan: Git Integration for Mutating Commands (mutation-git-integration)
 
-**Status:** Completed
+**Status:** Implemented
 **Source Feature:** mutation-git-integration
 **Date:** 2026-06-04
 **Owner:** alex

@@ -1,6 +1,6 @@
 # Plan: Entity Authoring CLI (cli/entity)
 
-**Status:** Completed
+**Status:** Implemented
 **Source Feature:** cli/entity
 **Date:** 2026-06-04
 **Owner:** alex

@@ -3,47 +3,30 @@ package commands
 import (
 	"context"
 	"fmt"
-	"strings"
+	"os"
 
+	"github.com/datatug/cliformat"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/urfave/cli/v3"
 )
 
-func projectsCommandAction(_ context.Context, _ *cli.Command) error {
-	v := &projectsCommand{}
+type projectEntry struct {
+	ID     string `json:"id"     yaml:"id"`
+	Title  string `json:"title"  yaml:"title,omitempty"`
+	Origin string `json:"origin" yaml:"origin,omitempty"`
+}
+
+func projectsCommandAction(_ context.Context, cmd *cli.Command) error {
+	format := cmd.String("format")
 	settings, err := dtconfig.GetSettings()
 	if err != nil {
 		return fmt.Errorf("failed to get settings: %w", err)
 	}
-	if len(v.List) == 0 {
-		if len(v.All) == 1 {
-			v.List = []string{"id", "path", "title"}
-		} else {
-			v.List = []string{"id"}
-		}
+	entries := make([]projectEntry, 0, len(settings.Projects))
+	for _, p := range settings.Projects {
+		entries = append(entries, projectEntry{ID: p.ID, Title: p.Title, Origin: p.Origin})
 	}
-	fields := make([]string, 0, len(v.List))
-	for _, field := range v.List {
-		fields = append(fields, strings.Split(field, ",")...)
-	}
-
-	for _, project := range settings.Projects {
-		line := make([]string, 0, len(v.List))
-		for _, field := range fields {
-			switch field {
-			case "id":
-				line = append(line, project.ID)
-			case "origin":
-				line = append(line, project.Origin)
-			case "title":
-				line = append(line, project.Title)
-			default:
-				return fmt.Errorf("unsupported field: %v", field)
-			}
-		}
-		fmt.Println(strings.Join(line, ","))
-	}
-	return nil
+	return cliformat.WriteList(os.Stdout, format, entries, func(e projectEntry) string { return e.ID })
 }
 
 func projectsCommandArgs() *cli.Command {
@@ -52,16 +35,13 @@ func projectsCommandArgs() *cli.Command {
 		Usage:       "List & manage DataTug projects",
 		Description: "",
 		Action:      projectsCommandAction,
+		Flags: []cli.Flag{
+			&cli.StringFlag{Name: "format", Aliases: []string{"o"}, Value: "name", Usage: "output format: name, yaml, json"},
+		},
 		Commands: []*cli.Command{
 			projectsAddCommandArgs(),
 		},
 	}
-}
-
-type projectsCommand struct {
-	//Format []string `short:"f" long:"format" description:"Output format, default CSV"`
-	All  []bool   `short:"a" long:"all" description:"Output all fields"`
-	List []string `short:"f" long:"fields" description:"Comma separate list of fields to output, default is 'id'. Possible values: id, path, title"`
 }
 
 func getProjPathsByID(config dtconfig.Settings) (pathsByID map[string]string) {

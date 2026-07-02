@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"gopkg.in/yaml.v3"
@@ -17,6 +18,7 @@ type Settings struct {
 
 	Client *ClientConfig `yaml:"client,omitempty" json:"client,omitempty"`
 	Server *ServerConfig `yaml:"server,omitempty" json:"server,omitempty"`
+	WebUI  *WebUIConfig  `yaml:"webui,omitempty" json:"webui,omitempty"`
 
 	Credentials map[string][]AuthCredential `yaml:"credentials,omitempty" json:"credentials,omitempty"`
 }
@@ -46,6 +48,23 @@ type ClientConfig struct {
 
 type ServerConfig struct {
 	UrlConfig `yaml:",inline"`
+}
+
+// DefaultWebUIOrigin is the DataTug web UI the CLI hands off to unless overridden in settings.
+const DefaultWebUIOrigin = "https://datatug.app"
+
+// WebUIConfig configures the web UI the CLI opens screens in (e.g. via Ctrl+W).
+type WebUIConfig struct {
+	// Origin is the base URL of the web UI, e.g. "https://datatug.app" or "http://localhost:4200".
+	Origin string `yaml:"origin,omitempty" json:"origin,omitempty"`
+}
+
+// WebUIOrigin returns the configured web UI origin, falling back to DefaultWebUIOrigin.
+func (v Settings) WebUIOrigin() string {
+	if v.WebUI != nil && v.WebUI.Origin != "" {
+		return strings.TrimSuffix(v.WebUI.Origin, "/")
+	}
+	return DefaultWebUIOrigin
 }
 
 type StoreType string

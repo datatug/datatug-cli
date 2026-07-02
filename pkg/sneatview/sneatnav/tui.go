@@ -35,8 +35,29 @@ func (tui *TUI) inputCapture(event *tcell.EventKey) *tcell.EventKey {
 		tui.App.Stop()
 		return nil
 	default:
+		if handler, ok := tui.globalKeyHandlers[key]; ok {
+			// Text-editing widgets keep their own Ctrl-key bindings (e.g. Ctrl+W = delete word).
+			if _, editing := tui.App.GetFocus().(*tview.InputField); !editing {
+				handler()
+				return nil
+			}
+		}
 		return event
 	}
+}
+
+// RegisterGlobalKeyHandler binds an app-wide key to an action. The binding is
+// ignored while an input field has focus so text-editing keys are not hijacked.
+func (tui *TUI) RegisterGlobalKeyHandler(key tcell.Key, handler func()) {
+	if tui.globalKeyHandlers == nil {
+		tui.globalKeyHandlers = make(map[tcell.Key]func(), 1)
+	}
+	tui.globalKeyHandlers[key] = handler
+}
+
+// ActionsMenu exposes the bottom actions bar so apps can add their own global actions.
+func (tui *TUI) ActionsMenu() *ActionsMenu {
+	return &tui.actionsMenu
 }
 
 const (
@@ -53,6 +74,8 @@ type TUI struct {
 	stack       []Screen
 	actionsMenu ActionsMenu
 	pages       *tview.Pages
+
+	globalKeyHandlers map[tcell.Key]func()
 	//
 	setPanelsCounter int
 }

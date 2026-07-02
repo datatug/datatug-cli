@@ -45,9 +45,9 @@ func TestCurrentScreenWebUIURL(t *testing.T) {
 			return dtconfig.Settings{WebUI: &dtconfig.WebUIConfig{Origin: "http://localhost:4200"}}, nil
 		}
 		webUIGetState = func() (*dtstate.DatatugState, error) {
-			return &dtstate.DatatugState{CurrentScreenPath: "settings"}, nil
+			return &dtstate.DatatugState{CurrentScreenPath: "projects"}, nil
 		}
-		if got, want := CurrentScreenWebUIURL(), "http://localhost:4200/settings"; got != want {
+		if got, want := CurrentScreenWebUIURL(), "http://localhost:4200/my"; got != want {
 			t.Errorf("CurrentScreenWebUIURL() = %q, want %q", got, want)
 		}
 	})
@@ -81,7 +81,7 @@ func TestOpenCurrentScreenInWebUI(t *testing.T) {
 			return nil
 		}
 		OpenCurrentScreenInWebUI(newTestTUI(t))
-		if want := dtconfig.DefaultWebUIOrigin + "/projects"; opened != want {
+		if want := dtconfig.DefaultWebUIOrigin + "/my"; opened != want {
 			t.Errorf("opened %q, want %q", opened, want)
 		}
 	})

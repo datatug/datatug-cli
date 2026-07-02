@@ -1,6 +1,7 @@
 package datatugapp
 
 import (
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtproject"
 	"github.com/datatug/datatug-cli/apps/global"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
@@ -15,6 +16,7 @@ func NewDatatugTUI() (tui *sneatnav.TUI) {
 	tui = sneatnav.NewTUI(global.App, sneatv.NewBreadcrumb(" ⛴ DataTug", func() error {
 		return goProjectScreen(tui, sneatnav.FocusToMenu)
 	}))
+	datatugui.RegisterWebUIHandoff(tui)
 	return
 }
 

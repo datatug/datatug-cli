@@ -25,12 +25,10 @@ func newTestTUI(t *testing.T) *sneatnav.TUI {
 func TestWebUIURLForScreen(t *testing.T) {
 	const origin = "https://datatug.app"
 	for screenPath, want := range map[string]string{
-		"projects":    origin + "/projects",
-		"viewers":     origin + "/viewers",
-		"settings":    origin + "/settings",
-		"api_monitor": origin + "/api-monitor",
-		"":            origin,
-		"unknown":     origin,
+		"projects": origin + "/my",
+		"viewers":  origin, // no web equivalent yet — root, not a guessed URL
+		"":         origin,
+		"unknown":  origin,
 	} {
 		if got := WebUIURLForScreen(origin, screenPath); got != want {
 			t.Errorf("WebUIURLForScreen(%q, %q) = %q, want %q", origin, screenPath, got, want)

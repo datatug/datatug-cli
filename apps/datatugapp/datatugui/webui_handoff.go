@@ -20,13 +20,11 @@ var (
 // screenPathToWebPath maps a TUI screen path (as persisted by
 // dtstate.SaveCurrentScreePath) to the corresponding web UI route — the
 // screen registry of the CLI↔web parity contract
-// (backstage/docs/roadmaps/datatug-cli-webui-parity.md). Screens not listed
-// here hand off to the web UI root rather than to a guessed URL.
+// (backstage/docs/roadmaps/datatug-cli-webui-parity.md). Only routes that
+// exist in datatug-apps belong here; screens without a web equivalent yet
+// hand off to the web UI root rather than to a guessed URL.
 var screenPathToWebPath = map[string]string{
-	"projects":    "/projects",
-	"viewers":     "/viewers",
-	"settings":    "/settings",
-	"api_monitor": "/api-monitor",
+	"projects": "/my", // signed-in home listing the user's data; closest match until a projects route exists
 }
 
 // WebUIURLForScreen resolves the web UI URL for a TUI screen path.

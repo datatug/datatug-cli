@@ -20,8 +20,8 @@ require (
 	cloud.google.com/go/firestore v1.22.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/dal-go/dalgo2sql v0.7.7
-	github.com/dal-go/dalgo2sqlite v0.0.15
+	github.com/dal-go/dalgo2sql v0.7.8
+	github.com/dal-go/dalgo2sqlite v0.0.16
 	github.com/datatug/cliformat v0.0.1
 	github.com/datatug/filetug v0.0.21
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
@@ -31,12 +31,12 @@ require (
 	github.com/google/go-github/v88 v88.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
-	github.com/ingitdb/dalgo2ingitdb v0.0.1
+	github.com/ingitdb/dalgo2ingitdb v0.1.0
 	github.com/ingitdb/ingitdb-go/ingitdb v0.0.1
 	github.com/mattn/go-sqlite3 v1.14.47
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/posthog/posthog-go v1.17.2
+	github.com/posthog/posthog-go v1.17.5
 	github.com/rivo/tview v0.42.0
 	github.com/stretchr/testify v1.11.1
 	github.com/strongo/logus v0.4.1
@@ -52,7 +52,7 @@ require (
 )
 
 require (
-	github.com/RoaringBitmap/roaring/v2 v2.18.2 // indirect
+	github.com/RoaringBitmap/roaring/v2 v2.19.0 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/bits-and-blooms/bitset v1.24.4 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
@@ -86,7 +86,7 @@ require (
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/crediterra/money v0.3.1 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
-	github.com/dal-go/dalgo v0.62.8
+	github.com/dal-go/dalgo v0.62.9
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
@@ -120,12 +120,12 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/sneat-co/sneat-go-core v0.58.3
+	github.com/sneat-co/sneat-go-core v0.58.6
 	github.com/strongo/analytics v0.2.5 // indirect
 	github.com/strongo/decimal v0.1.1 // indirect
 	github.com/strongo/random v0.0.1
 	github.com/strongo/slice v0.3.5
-	github.com/strongo/strongoapp v0.31.40 // indirect
+	github.com/strongo/strongoapp v0.31.41 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0 // indirect

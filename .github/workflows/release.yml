@@ -1,80 +1,45 @@
 name: Release
 
+# Continuous delivery: every merge to `main` runs the shared strongo/cicd
+# release workflow, which bumps the version from conventional commits and
+# releases it in one run (GoReleaser against this repo's .goreleaser.yaml).
+# Pushing an explicit `vX.Y.Z` tag also works and releases that exact version.
+# A docs/chore-only merge cuts no tag and publishes nothing.
+#
+# datatug-cli is pre-1.0: allow_major_version_bump stays false, so a stray
+# `feat!:` is capped to a minor bump instead of jumping to v1.0.0. Cut v1.0.0
+# deliberately by pushing that tag.
+#
+# The release binaries are CGO_ENABLED=0 (see .goreleaser.yaml builds), so they
+# cross-compile cleanly on the shared ubuntu runner even though CI tests use cgo
+# for the sqlite driver.
+
 on:
-  # Manual-only trigger. Dispatch from the Actions tab or via:
-  #   gh workflow run release.yml                    # latest v* tag
-  #   gh workflow run release.yml --field tag=v0.1.0 # specific tag
-  # The workflow YAML always comes from main (so improvements land
-  # without needing to re-cut a tag); the checkout step picks up
-  # the resolved tag — that's what goreleaser releases. Decouples
-  # "workflow source" from "release target".
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Git tag to release (e.g. v0.1.0). Leave empty to pick the highest semver v* tag.'
-        required: false
-        type: string
+
+# One release at a time; a second push queues instead of racing the first.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    uses: strongo/cicd/.github/workflows/release.yml@v1
     permissions:
       contents: write
-    steps:
-      - name: Resolve release tag
-        id: resolve
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if [ -n "${{ inputs.tag }}" ]; then
-            tag="${{ inputs.tag }}"
-            echo "Using explicit tag from inputs: $tag"
-          else
-            # Pick the highest semver-sorted v* tag from the repo's tag
-            # list. `sort -V` does natural/version sort; `tail -1` picks
-            # the highest. Paginated to handle repos with >100 tags.
-            tag=$(gh api --paginate "repos/${{ github.repository }}/tags" \
-                  --jq '.[].name' | grep -E '^v[0-9]+\.' | sort -V | tail -1)
-            if [ -z "$tag" ]; then
-              echo "::error::No v* tag found in repository — pass --field tag=<tag> explicitly"
-              exit 1
-            fi
-            echo "Resolved latest tag: $tag"
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@v7
-        with:
-          # Check out the resolved tag specifically, not the ref the
-          # workflow was triggered from. goreleaser checks
-          # `HEAD must equal <tag>'s commit` and would otherwise fail
-          # with "git tag <X> was not made against commit <Y>".
-          ref: ${{ steps.resolve.outputs.tag }}
-          # goreleaser inspects the git state (tags + commit history) to
-          # determine the version and changelog. The default shallow
-          # clone has no tags, so without this it errors out with
-          #   "git doesn't contain any tags"
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version: stable
-
-      - name: Debug Homebrew token
-        env:
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-        run: |
-          if [ -z "${HOMEBREW_TAP_GITHUB_TOKEN:-}" ]; then
-            echo "❌ HOMEBREW_TAP_GITHUB_TOKEN is NOT set"
-            exit 1
-          else
-            echo "✅ HOMEBREW_TAP_GITHUB_TOKEN is set"
-          fi
-
-      - uses: goreleaser/goreleaser-action@v7
-        with:
-          version: v2
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+    with:
+      # Pre-1.0: cap an accidental major (feat!:) to a minor bump.
+      allow_major_version_bump: false
+    secrets:
+      # Cross-repo PAT for the Homebrew tap (datatug/homebrew-tap), forwarded to
+      # GoReleaser as $GORELEASER_GITHUB_TOKEN and referenced by the cask's
+      # repository.token. Reuses the repo's existing HOMEBREW_TAP_GITHUB_TOKEN.
+      GORELEASER_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

@@ -52,7 +52,11 @@ release:
     owner: datatug
     name: datatug-cli
 
-brews:
+# Homebrew cask (ecosystem standard; `brews:` is deprecated — see strongo/cicd
+# README "Packaging conventions"). GoReleaser auto-installs the `datatug` binary
+# from the archive, so the old `bin.install` and `--version` smoke test are no
+# longer needed (casks have no install/test hook).
+homebrew_casks:
   - name: datatug
     ids:
       - tarball
@@ -63,10 +67,6 @@ brews:
     repository:
       owner: datatug
       name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-
-    install: |
-      bin.install "datatug"
-
-    test: |
-      system "#{bin}/datatug", "--version"
+      # Forwarded by the shared strongo/cicd release.yml (mapped from the repo's
+      # HOMEBREW_TAP_GITHUB_TOKEN secret).
+      token: "{{ .Env.GORELEASER_GITHUB_TOKEN }}"

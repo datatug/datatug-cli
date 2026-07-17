@@ -28,12 +28,15 @@ jobs:
   strongo_workflow:
     permissions:
       contents: write
-    uses: strongo/cicd/.github/workflows/workflow.yml@main
+    uses: strongo/cicd/.github/workflows/workflow.yml@v1
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     with:
       # Uses the C-based github.com/mattn/go-sqlite3 driver, which requires cgo.
       cgo_enabled: true
-      disable-version-bumping: false
+      # Version bump + release now happen in release.yml (continuous delivery on
+      # push to main). This workflow only builds/lints/tests — disable its bump
+      # so it does not create a competing tag.
+      disable-version-bumping: true
       code_coverage: true
       min_test_coverage_percent: 60.9

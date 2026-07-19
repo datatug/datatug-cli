@@ -21,7 +21,7 @@ require (
 	github.com/dal-go/dalgo2sql v0.9.6
 	github.com/dal-go/dalgo2sqlite v0.0.24
 	github.com/datatug/cliformat v0.0.1
-	github.com/datatug/filetug v0.0.21
+	github.com/datatug/filetug v0.1.1
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.10
@@ -91,7 +91,7 @@ require (
 	github.com/cloudflare/circl v1.6.4 // indirect
 	github.com/crediterra/money v0.3.1 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
-	github.com/dal-go/dalgo v0.62.15
+	github.com/dal-go/dalgo v0.63.0
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
@@ -125,7 +125,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/sneat-co/sneat-go-core v0.60.0
+	github.com/sneat-co/sneat-go-core v0.60.1
 	github.com/strongo/analytics v0.2.5 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
 	github.com/strongo/random v0.0.1

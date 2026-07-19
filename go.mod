@@ -14,7 +14,8 @@ go 1.26.4
 //   - dal-go/dalgo2sqlite v0.0.1    (DATETIME / NUMERIC(p,s) recognition)
 //   - ingitdb/ingitdb-cli v1.9.0    (record CRUD + auto-register +
 //                                    Decimal/Bytes type mapping)
-// No replace directives needed.
+// filetug v0.1.0 moved its module path from github.com/datatug/filetug.
+replace github.com/datatug/filetug => github.com/filetug/filetug v0.1.0
 
 require (
 	cloud.google.com/go/firestore v1.24.0

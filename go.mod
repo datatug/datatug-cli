@@ -14,9 +14,6 @@ go 1.26.4
 //   - dal-go/dalgo2sqlite v0.0.1    (DATETIME / NUMERIC(p,s) recognition)
 //   - ingitdb/ingitdb-cli v1.9.0    (record CRUD + auto-register +
 //                                    Decimal/Bytes type mapping)
-// filetug v0.1.0 moved its module path from github.com/datatug/filetug.
-replace github.com/datatug/filetug => github.com/filetug/filetug v0.1.0
-
 require (
 	cloud.google.com/go/firestore v1.24.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
@@ -24,7 +21,7 @@ require (
 	github.com/dal-go/dalgo2sql v0.9.6
 	github.com/dal-go/dalgo2sqlite v0.0.24
 	github.com/datatug/cliformat v0.0.1
-	github.com/datatug/filetug v0.1.0
+	github.com/datatug/filetug v0.0.21
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/gdamore/tcell/v2 v2.13.10
@@ -53,7 +50,7 @@ require (
 )
 
 require (
-	github.com/RoaringBitmap/roaring/v2 v2.19.0 // indirect
+	github.com/RoaringBitmap/roaring/v2 v2.21.0 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/bits-and-blooms/bitset v1.24.6 // indirect
 	github.com/dlclark/regexp2/v2 v2.5.0 // indirect
@@ -76,7 +73,7 @@ require (
 	modernc.org/libc v1.74.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.53.0 // indirect
+	modernc.org/sqlite v1.54.0 // indirect
 )
 
 require (
@@ -133,7 +130,7 @@ require (
 	github.com/strongo/decimal v0.1.2 // indirect
 	github.com/strongo/random v0.0.1
 	github.com/strongo/slice v0.3.5
-	github.com/strongo/strongoapp v0.31.43 // indirect
+	github.com/strongo/strongoapp v0.31.44 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.69.0 // indirect

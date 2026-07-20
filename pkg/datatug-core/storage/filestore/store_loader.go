@@ -9,7 +9,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/parallel"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
-	"github.com/datatug/filetug/pkg/fsutils"
+	"github.com/filetug/filetug/pkg/fsutils"
 	"github.com/strongo/validation"
 )
 

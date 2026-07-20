@@ -1,7 +1,7 @@
 package sneatnav
 
 import (
-	"github.com/datatug/filetug/pkg/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatv"
 	"github.com/rivo/tview"
 )
 

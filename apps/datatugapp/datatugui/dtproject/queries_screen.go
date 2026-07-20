@@ -2,7 +2,7 @@ package dtproject
 
 import (
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/datatug/filetug/pkg/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatv"
 	"github.com/rivo/tview"
 )
 

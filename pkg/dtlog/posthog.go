@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/datatug/filetug/pkg/fsutils"
+	"github.com/filetug/filetug/pkg/fsutils"
 	"github.com/google/uuid"
 	"github.com/posthog/posthog-go"
 	"github.com/strongo/logus"

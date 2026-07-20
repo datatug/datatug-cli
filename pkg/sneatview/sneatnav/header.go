@@ -1,7 +1,7 @@
 package sneatnav
 
 import (
-	"github.com/datatug/filetug/pkg/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -30,7 +30,7 @@ func (h *Header) SetFocus(to HeaderFocusedTo, from tview.Primitive) {
 	h.focus.from = from
 	switch to {
 	case ToBreadcrumbs:
-		h.breadcrumbs.TakeFocus()
+		h.breadcrumbs.TakeFocus(h)
 		h.tui.SetFocus(h.breadcrumbs)
 	case ToRightMenu:
 		h.tui.SetFocus(h.rightMenu)

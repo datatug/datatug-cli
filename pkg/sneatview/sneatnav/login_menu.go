@@ -1,6 +1,6 @@
 package sneatnav
 
-import "github.com/datatug/filetug/pkg/sneatv"
+import "github.com/datatug/datatug-cli/pkg/sneatv"
 
 type LoginMenu struct {
 	*sneatv.ButtonWithShortcut

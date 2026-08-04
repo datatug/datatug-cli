@@ -9,10 +9,11 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds"
 	"github.com/datatug/datatug-cli/pkg/schemers"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"golang.org/x/oauth2"
@@ -73,7 +74,7 @@ func (f *fakeSchemaProvider) GetCollection(_ context.Context, _ *dal.CollectionR
 	return nil, f.err
 }
 
-func (f *fakeSchemaProvider) GetCollections(_ context.Context, _ *dal.Key) ([]*schemers.Collection, error) {
+func (f *fakeSchemaProvider) GetCollections(_ context.Context, _ *record.Key) ([]*schemers.Collection, error) {
 	return f.collections, f.err
 }
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
-	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 	"github.com/datatug/datatug-cli/pkg/schemers/sqlinfoschema"
 )
@@ -393,7 +393,7 @@ func TestGetCollections_WithParentKey_NoParent(t *testing.T) {
 		AddRow("Users", "table")
 	mock.ExpectQuery(".*").WillReturnRows(rows)
 
-	parentKey := dal.NewKeyWithID("schemas", "dbo")
+	parentKey := record.NewKeyWithID("schemas", "dbo")
 	v := collectionsProvider{db: db}
 	reader, err := v.GetCollections(context.Background(), parentKey)
 	if err != nil {
@@ -418,8 +418,8 @@ func TestGetCollections_WithParentKey_WithParent(t *testing.T) {
 		AddRow("Users", "table")
 	mock.ExpectQuery(".*").WillReturnRows(rows)
 
-	catalogKey := dal.NewKeyWithID("catalogs", "mydb")
-	schemaKey := dal.NewKeyWithParentAndID(catalogKey, "schemas", "dbo")
+	catalogKey := record.NewKeyWithID("catalogs", "mydb")
+	schemaKey := record.NewKeyWithParentAndID(catalogKey, "schemas", "dbo")
 	v := collectionsProvider{db: db}
 	reader, err := v.GetCollections(context.Background(), schemaKey)
 	if err != nil {
@@ -508,7 +508,7 @@ func TestNextCollection_SchemaSet(t *testing.T) {
 		AddRow("Users", "table")
 	mock.ExpectQuery(".*").WillReturnRows(rows)
 
-	parentKey := dal.NewKeyWithID("schemas", "dbo")
+	parentKey := record.NewKeyWithID("schemas", "dbo")
 	v := collectionsProvider{db: db}
 	reader, err := v.GetCollections(context.Background(), parentKey)
 	if err != nil {

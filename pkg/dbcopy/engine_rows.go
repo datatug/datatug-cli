@@ -23,6 +23,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
+	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
 )
 
@@ -114,7 +115,7 @@ func copyRows(
 
 	var (
 		rowsCopied int64
-		batch      = make([]dal.Record, 0, defaultRowBatchSize)
+		batch      = make([]record.Record, 0, defaultRowBatchSize)
 	)
 
 	flush := func() error {
@@ -156,7 +157,7 @@ func copyRows(
 		if err != nil {
 			return rowsCopied, err
 		}
-		rec := dal.NewRecordWithData(key, data)
+		rec := record.NewRecordWithData(key, data)
 		batch = append(batch, rec)
 
 		if len(batch) >= defaultRowBatchSize {
@@ -172,7 +173,7 @@ func copyRows(
 	return rowsCopied, nil
 }
 
-// buildTargetKey constructs a dal.Key appropriate for the target adapter.
+// buildTargetKey constructs a record.Key appropriate for the target adapter.
 //
 //   - inGitDB target: needs key.ID for the record filename. Encode the
 //     row's PK column values via encodeRecordID (single value or
@@ -183,17 +184,17 @@ func copyRows(
 //     leave key.ID nil and let the driver iterate every column in the
 //     record's Data map — the PK column values flow through as regular
 //     columns and SQLite enforces the PK constraint at the DB level.
-func buildTargetKey(target dal.DB, collection string, pkFields []string, data map[string]any) (*dal.Key, error) {
+func buildTargetKey(target dal.DB, collection string, pkFields []string, data map[string]any) (*record.Key, error) {
 	if adapterName(target) == "dalgo2ingitdb" {
 		id, err := encodeRecordID(collection, pkFields, data)
 		if err != nil {
 			return nil, err
 		}
-		return dal.NewKeyWithID(collection, id), nil
+		return record.NewKeyWithID(collection, id), nil
 	}
 	// For all other adapters (SQL flavors today), leave the ID unset and
 	// rely on the data map.
-	return dal.NewIncompleteKey(collection, reflect.String, nil), nil
+	return record.NewIncompleteKey(collection, reflect.String, nil), nil
 }
 
 // ErrNoPrimaryKey is returned when a source collection has no PK declared.

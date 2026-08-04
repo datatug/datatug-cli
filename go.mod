@@ -26,7 +26,7 @@ require (
 	github.com/filetug/filetug v0.1.1
 	github.com/gdamore/tcell/v2 v2.13.10
 	github.com/go-git/go-git/v5 v5.19.2
-	github.com/google/go-github/v89 v89.0.0
+	github.com/google/go-github/v90 v90.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
 	github.com/ingitdb/dalgo2ingitdb v0.2.4
@@ -49,7 +49,10 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/dal-go/record v0.1.2
+require (
+	github.com/dal-go/record v0.1.2
+	github.com/google/go-github/v89 v89.0.0
+)
 
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.24.0 // indirect

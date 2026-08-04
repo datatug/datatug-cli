@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 )
@@ -19,7 +19,7 @@ type collectionsProvider struct {
 
 func (v collectionsProvider) GetCollections(
 	_ context.Context,
-	parentKey *dal.Key,
+	parentKey *record.Key,
 ) (
 	reader schemer.CollectionsReader,
 	err error,

@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 )
 
@@ -28,7 +28,7 @@ type schemaProvider struct {
 	getSqliteDB func() (*sql.DB, error)
 }
 
-func (s schemaProvider) GetCollections(_ context.Context, parent *dal.Key) (schemer.CollectionsReader, error) {
+func (s schemaProvider) GetCollections(_ context.Context, parent *record.Key) (schemer.CollectionsReader, error) {
 	_ = parent
 	db, err := s.getSqliteDB()
 	if err != nil {

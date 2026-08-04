@@ -23,6 +23,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
+	"github.com/dal-go/record"
 )
 
 // ReloadSchemaMismatchError signals that the target's schema for a
@@ -35,11 +36,11 @@ import (
 // SourceValue and TargetValue describe what differed (e.g. type names
 // or PK column lists) in human-readable form, for the stderr diff.
 type ReloadSchemaMismatchError struct {
-	Table        string
-	Column       string
-	SourceValue  string
-	TargetValue  string
-	Reason       string // short reason: "missing column", "type mismatch", "primary key mismatch"
+	Table       string
+	Column      string
+	SourceValue string
+	TargetValue string
+	Reason      string // short reason: "missing column", "type mismatch", "primary key mismatch"
 }
 
 func (e *ReloadSchemaMismatchError) Error() string {
@@ -270,7 +271,7 @@ func truncateTargetCollection(ctx context.Context, target dal.DB, name string) e
 // collectKeysToTruncate reads every record of `name` from target and
 // returns its Key, rebuilt from the row data using the target's own
 // PK declaration. The cursor is closed before returning.
-func collectKeysToTruncate(ctx context.Context, target dal.DB, name string) ([]*dal.Key, error) {
+func collectKeysToTruncate(ctx context.Context, target dal.DB, name string) ([]*record.Key, error) {
 	// Describe the target collection so we know which row columns form
 	// its PK. inGitDB synthesizes "$key"; SQLite returns the natural PK.
 	ref := dal.NewCollectionRef(name, "", nil)
@@ -295,7 +296,7 @@ func collectKeysToTruncate(ctx context.Context, target dal.DB, name string) ([]*
 	}
 	defer func() { _ = reader.Close() }()
 
-	var keys []*dal.Key
+	var keys []*record.Key
 	for {
 		rec, err := reader.Next()
 		if err != nil {
@@ -312,14 +313,14 @@ func collectKeysToTruncate(ctx context.Context, target dal.DB, name string) ([]*
 	}
 }
 
-// targetRecordKey reconstructs a dal.Key for a target row. inGitDB's
+// targetRecordKey reconstructs a record.Key for a target row. inGitDB's
 // reader produces records with usable .Key() values (its PK is the
 // synthesized "$key", not a row column), so we use rec.Key() in that
 // case. SQLite's reader yields placeholder keys, so we rebuild from
 // the row data using the target's declared PK fields — matching
 // copyRows' encoding so the deleted keys have the same shape as the
 // keys subsequently inserted.
-func targetRecordKey(collection string, pkFields []string, rec dal.Record) (*dal.Key, error) {
+func targetRecordKey(collection string, pkFields []string, rec record.Record) (*record.Key, error) {
 	// Synthetic "$key" PK (inGitDB) — the reader already produced the
 	// correct key on the record.
 	if len(pkFields) == 1 && pkFields[0] == string("$key") {
@@ -341,5 +342,5 @@ func targetRecordKey(collection string, pkFields []string, rec dal.Record) (*dal
 	if err != nil {
 		return nil, err
 	}
-	return dal.NewKeyWithID(collection, id), nil
+	return record.NewKeyWithID(collection, id), nil
 }

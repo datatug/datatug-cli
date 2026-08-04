@@ -35,6 +35,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2sqlite"
+	"github.com/dal-go/record"
 	"github.com/ingitdb/dalgo2ingitdb"
 	"github.com/ingitdb/ingitdb-go/ingitdb/validator"
 	"github.com/stretchr/testify/assert"
@@ -59,10 +60,14 @@ var errInjectedInsertFailure = errors.New("injected InsertMulti failure")
 // state contains only the rows from the prior successful flushes.
 //
 // All other methods (CreateCollection, ListCollections, etc.) are
-// promoted from the embedded *dalgo2ingitdb.Database verbatim. The
-// engine's type assertions for ddl.SchemaModifier and
-// dbschema.SchemaReader succeed against *faultyTarget because the
-// driver's methods are inherited at compile time.
+// promoted from the embedded *dalgo2ingitdb.Database verbatim, so the
+// engine's ddl.SchemaModifier and dbschema.SchemaReader lookups still
+// resolve — dal.As finds them on the backend behind the sealed DB.
+//
+// Note that faultyTarget is a dal.Backend, not a dal.DB: since dalgo
+// v0.64 only dal.NewDB can mint a DB, so call sites hand the engine
+// dal.NewDB(tgt) and the interception sits under the framework write
+// pipeline, exactly where the driver's own transaction used to be.
 type faultyTarget struct {
 	*dalgo2ingitdb.Database
 
@@ -88,16 +93,19 @@ func (f *faultyTarget) RunReadwriteTransaction(
 }
 
 // newIngitDBForTest opens a fresh ingitdb target and returns the
-// concrete *dalgo2ingitdb.Database for embedding into a wrapper. The
-// public NewDatabase returns dal.DB; we type-assert here once so each
-// test reads cleanly.
+// concrete *dalgo2ingitdb.Database for embedding into a wrapper.
+//
+// Since dalgo v0.64 the public NewDatabase returns a sealed dal.DB that
+// decorates the adapter with the framework write pipeline, so the concrete
+// driver has to be recovered with dal.BackendOf rather than type-asserted
+// off the DB directly.
 func newIngitDBForTest(t *testing.T, dir string) *dalgo2ingitdb.Database {
 	t.Helper()
 	db, err := dalgo2ingitdb.NewDatabase(dir, validator.NewCollectionsReader())
 	require.NoError(t, err)
-	concrete, ok := db.(*dalgo2ingitdb.Database)
+	concrete, ok := dal.BackendOf(db).(*dalgo2ingitdb.Database)
 	require.True(t, ok,
-		"dalgo2ingitdb.NewDatabase must return *Database for the wrapper to embed; got %T", db)
+		"dalgo2ingitdb must back its dal.DB with *Database for the wrapper to embed; got %T", dal.BackendOf(db))
 	return concrete
 }
 
@@ -115,7 +123,7 @@ type wrappedTx struct {
 // collection by construction in the engine's row-streaming flush).
 func (w *wrappedTx) InsertMulti(
 	ctx context.Context,
-	records []dal.Record,
+	records []record.Record,
 	opts ...dal.InsertOption,
 ) error {
 	if len(records) == 0 {
@@ -258,7 +266,7 @@ func TestCopy_PartialFailure_LeavesCompletedTablesIntact(t *testing.T) {
 		faultAfter: 2, // succeed on calls 1 and 2; fail on call 3
 	}
 
-	summary, copyErr := Copy(context.Background(), src, tgt, CopyOpts{
+	summary, copyErr := Copy(context.Background(), src, dal.NewDB(tgt), CopyOpts{
 		ParallelStreams: 1, // serial -> alphabetical iteration -> a, b, c
 	})
 
@@ -319,7 +327,7 @@ func TestCopy_PartialFailure_FirstBatchFails(t *testing.T) {
 		faultAfter: 0, // fail on the very first call
 	}
 
-	_, copyErr := Copy(context.Background(), src, tgt, CopyOpts{
+	_, copyErr := Copy(context.Background(), src, dal.NewDB(tgt), CopyOpts{
 		ParallelStreams: 1,
 	})
 	assert.Error(t, copyErr)
@@ -386,7 +394,7 @@ func TestCopy_PartialFailure_ParallelMode(t *testing.T) {
 		faultAfter: 1, // fail on the 2nd batch
 	}
 
-	_, copyErr := Copy(context.Background(), src, tgt, CopyOpts{
+	_, copyErr := Copy(context.Background(), src, dal.NewDB(tgt), CopyOpts{
 		ParallelStreams: 3,
 	})
 
@@ -503,7 +511,7 @@ func TestCopy_PartialFailure_SourceReadError(t *testing.T) {
 	tgt, err := dalgo2ingitdb.NewDatabase(tgtDir, validator.NewCollectionsReader())
 	require.NoError(t, err)
 
-	_, copyErr := Copy(context.Background(), src, tgt, CopyOpts{
+	_, copyErr := Copy(context.Background(), src, dal.NewDB(tgt), CopyOpts{
 		ParallelStreams: 1,
 	})
 	assert.Error(t, copyErr, "source-read failure must propagate")

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 )
@@ -48,7 +49,7 @@ func TestNewSchemaProvider_NilPanics(t *testing.T) {
 
 func TestGetCollections_Success(t *testing.T) {
 	s, _ := newProviderWithTestDB(t)
-	r, err := s.GetCollections(context.Background(), (*dal.Key)(nil))
+	r, err := s.GetCollections(context.Background(), (*record.Key)(nil))
 	if err != nil {
 		t.Fatalf("GetCollections: %v", err)
 	}
@@ -545,7 +546,7 @@ func TestNextCollection_ViewType(t *testing.T) {
 
 func TestGetCollections_ErrDB(t *testing.T) {
 	s := newProviderWithErrDB(t)
-	_, err := s.GetCollections(context.Background(), (*dal.Key)(nil))
+	_, err := s.GetCollections(context.Background(), (*record.Key)(nil))
 	if err == nil {
 		t.Error("expected error when getSqliteDB returns error")
 	}

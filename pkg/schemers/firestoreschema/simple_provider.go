@@ -7,6 +7,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/schemers"
 	"google.golang.org/api/iterator"
 )
@@ -77,7 +78,7 @@ func (p simpleProvider) GetCollection(ctx context.Context, collectionRef *dal.Co
 	return
 }
 
-func (p simpleProvider) GetCollections(ctx context.Context, parentKey *dal.Key) (collections []*schemers.Collection, err error) {
+func (p simpleProvider) GetCollections(ctx context.Context, parentKey *record.Key) (collections []*schemers.Collection, err error) {
 	var client *firestore.Client
 	if client, err = p.getClient(ctx); err != nil {
 		return

@@ -7,6 +7,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/schemers"
 	"google.golang.org/api/iterator"
 )
@@ -172,7 +173,7 @@ func TestGetCollection_iterError(t *testing.T) {
 // TestGetCollection_nestedCollection covers the "contains /" branch (lines 38-39),
 // exercising the firestoreDoc seam.
 func TestGetCollection_nestedCollection_found(t *testing.T) {
-	parentKey := dal.NewKeyWithID("projects", "proj1")
+	parentKey := record.NewKeyWithID("projects", "proj1")
 	collRef := dal.NewCollectionRef("tasks", "", parentKey)
 
 	docSeamCalled := false
@@ -250,7 +251,7 @@ func TestGetCollections_noParent_withResults(t *testing.T) {
 
 // TestGetCollections_withParent covers parentKey!=nil branch (lines 77-78).
 func TestGetCollections_withParent(t *testing.T) {
-	parentKey := dal.NewKeyWithID("projects", "proj1")
+	parentKey := record.NewKeyWithID("projects", "proj1")
 
 	docSeamCalled := false
 	docSeam := func(_ *firestore.Client, _ string) firestoreCollectionsProvider {

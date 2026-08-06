@@ -14,7 +14,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/dtprojcreator"
 	"github.com/filetug/filetug/pkg/fsutils"
-	"github.com/google/go-github/v89/github"
+	"github.com/google/go-github/v90/github"
 )
 
 func NewRepoProjectsStore(client *github.Client, branch string) *GithubRepoProjectsStore {

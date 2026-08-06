@@ -17,7 +17,7 @@ import (
 	"github.com/filetug/filetug/pkg/fsutils"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
-	"github.com/google/go-github/v89/github"
+	"github.com/google/go-github/v90/github"
 	"github.com/pkg/browser"
 	"github.com/rivo/tview"
 	"golang.org/x/oauth2"

@@ -49,10 +49,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require (
-	github.com/dal-go/record v0.1.2
-	github.com/google/go-github/v90 v90.0.0
-)
+require github.com/dal-go/record v0.1.2
 
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.24.0 // indirect

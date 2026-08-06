@@ -51,7 +51,7 @@ require (
 
 require (
 	github.com/dal-go/record v0.1.2
-	github.com/google/go-github/v89 v89.0.0
+	github.com/google/go-github/v90 v90.0.0
 )
 
 require (

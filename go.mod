@@ -15,11 +15,11 @@ go 1.26.4
 //   - ingitdb/ingitdb-cli v1.9.0    (record CRUD + auto-register +
 //                                    Decimal/Bytes type mapping)
 require (
-	cloud.google.com/go/firestore v1.24.0
+	cloud.google.com/go/firestore v1.25.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/dal-go/dalgo2sql v0.10.2
-	github.com/dal-go/dalgo2sqlite v0.1.2
+	github.com/dal-go/dalgo2sql v0.10.5
+	github.com/dal-go/dalgo2sqlite v0.1.4
 	github.com/datatug/cliformat v0.0.1
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3
@@ -34,7 +34,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.49
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/posthog/posthog-go v1.22.0
+	github.com/posthog/posthog-go v1.23.0
 	github.com/rivo/tview v0.42.0
 	github.com/stretchr/testify v1.11.1
 	github.com/strongo/logus v0.4.1
@@ -114,7 +114,7 @@ require (
 	github.com/cloudflare/circl v1.6.4 // indirect
 	github.com/crediterra/money v0.3.5 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
-	github.com/dal-go/dalgo v0.64.4
+	github.com/dal-go/dalgo v0.64.6
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
@@ -148,7 +148,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/sneat-co/sneat-go-core v0.62.0
+	github.com/sneat-co/sneat-go-core v0.63.0
 	github.com/strongo/analytics v0.2.5 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
 	github.com/strongo/random v0.0.1

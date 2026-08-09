@@ -8,6 +8,8 @@ cloud.google.com/go/compute/metadata v0.9.0 h1:pDUj4QMoPejqq20dK0Pg2N4yG9zIkYGdB
 cloud.google.com/go/compute/metadata v0.9.0/go.mod h1:E0bWwX5wTnLPedCKqk3pJmVgCBSM6qQI1yTBdEb3C10=
 cloud.google.com/go/firestore v1.24.0 h1:x0Z3hrgjYgo2wI9whuBRQcNc2hYwzZDQy/7pkUXbXcs=
 cloud.google.com/go/firestore v1.24.0/go.mod h1:5aojyjN4olKUnBZDCRWwM+NsdrrCX3t1qfyERZGOonM=
+cloud.google.com/go/firestore v1.25.0 h1:yY3rQKyQXNhnhETdseNayF6W1p4x0bdg9ZYS4hKJfOw=
+cloud.google.com/go/firestore v1.25.0/go.mod h1:0PU6hj+r/QlhB6BLsRX+Kt/SYefTXrpYrBeHbYaSis8=
 cloud.google.com/go/longrunning v1.2.0 h1:WjYH3YHBGCxGJP9M4dWGHBfXr/cFIjMkNgWcJj7/iMM=
 cloud.google.com/go/longrunning v1.2.0/go.mod h1:5KMQALFGOCtFoi2xSOA1u3H7WKlhmckgiyFw7+LGQp0=
 dario.cat/mergo v1.0.2 h1:85+piFYR1tMbRrLcDwR18y4UKJ3aH1Tbzi24VRW1TK8=
@@ -83,10 +85,16 @@ github.com/cyphar/filepath-securejoin v0.7.0 h1:s0Y3ITPy6sQn5xt54DuYvTF8hu134ooY
 github.com/cyphar/filepath-securejoin v0.7.0/go.mod h1:ymLGms/u3BYaviIiuKFnUx8EkQEZeK6cInNoAPJA3o4=
 github.com/dal-go/dalgo v0.64.4 h1:cecs5qLe/mPxM66+fg93+8Z57IB5oQiVDRAtC6PKPz0=
 github.com/dal-go/dalgo v0.64.4/go.mod h1:q3jCRh1hNvH6SA6YESJDcKAnoGN3/6fec9Gebn4IVEk=
+github.com/dal-go/dalgo v0.64.6 h1:GyNPqop7kous/5otQhVbenpIgLxeEUSuc2eY4iVFMR4=
+github.com/dal-go/dalgo v0.64.6/go.mod h1:BrRPUGCBp+0mOR9+3nSxCVtkxwxmfYzCnlUPAHAAdtY=
 github.com/dal-go/dalgo2sql v0.10.2 h1:HHTMwsDXnfOU2FdWTLDhqKLyAPYG02QSkR4iD49XmC4=
 github.com/dal-go/dalgo2sql v0.10.2/go.mod h1:zpSeookq7VDNDjH69LIN3DdqZ43Ssiyrqn5sWBML6o8=
+github.com/dal-go/dalgo2sql v0.10.5 h1:+jpV3Nk0vuXqPitCZTxHsC/hrBlx3Ge8PA2A4y2bxc0=
+github.com/dal-go/dalgo2sql v0.10.5/go.mod h1:9QACa+PePHy1ODkxrO5/+JjXK+A6ZmdrbeZk1/90JCI=
 github.com/dal-go/dalgo2sqlite v0.1.2 h1:vd1mIySfWx9x+bmeQKYYIH04u3Zt+kf/r81kAeoGi9E=
 github.com/dal-go/dalgo2sqlite v0.1.2/go.mod h1:7Z4ipYh+RzOv0qXjr4eVtF8InI2F3IyqF0UR42WnAD8=
+github.com/dal-go/dalgo2sqlite v0.1.4 h1:ZsBeDbQekAcvoDA+k8hAI5tdfFbEAHO4aXu3p6CPu/E=
+github.com/dal-go/dalgo2sqlite v0.1.4/go.mod h1:RAPnbshrnSxsoEoEQMLghldn49+BLaLU9+V1Ez8Ii+k=
 github.com/dal-go/record v0.1.2 h1:cDy296wwG3r2T+vy0yVJBouJ936oISiqiNB7G3ef5Og=
 github.com/dal-go/record v0.1.2/go.mod h1:quwsVJTT0f6y3Mhx+yHpTobY7luX1M6kyO6fdJ/AFYE=
 github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMFLdQ=
@@ -265,6 +273,8 @@ github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRI
 github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/posthog/posthog-go v1.22.0 h1:VNy+sMJ9MMnENr9dMSxfQt/5bB4UhwRdZfasOAghMMg=
 github.com/posthog/posthog-go v1.22.0/go.mod h1://M430hNH3e8CDv4i8SJesb26816Mpa6GIZaiP4pNQU=
+github.com/posthog/posthog-go v1.23.0 h1:Uj/mHGBRY+VutTMAtK79Lbha5lHCyYEuZypLtfWjQbI=
+github.com/posthog/posthog-go v1.23.0/go.mod h1://M430hNH3e8CDv4i8SJesb26816Mpa6GIZaiP4pNQU=
 github.com/qri-io/jsonpointer v0.1.1 h1:prVZBZLL6TW5vsSB9fFHFAMBLI4b0ri5vribQlTJiBA=
 github.com/qri-io/jsonpointer v0.1.1/go.mod h1:DnJPaYgiKu56EuDp8TU5wFLdZIcAnb/uH9v37ZaMV64=
 github.com/qri-io/jsonschema v0.2.1 h1:NNFoKms+kut6ABPf6xiKNM5214jzxAhDBrPHCJ97Wg0=
@@ -288,6 +298,8 @@ github.com/skeema/knownhosts v1.3.2 h1:EDL9mgf4NzwMXCTfaxSD/o/a5fxDw/xL9nkU28Jjd
 github.com/skeema/knownhosts v1.3.2/go.mod h1:bEg3iQAuw+jyiw+484wwFJoKSLwcfd7fqRy+N0QTiow=
 github.com/sneat-co/sneat-go-core v0.62.0 h1:UG3dJOT21eH177+Y4SDlcEiQJTmTE9eP/fu0CRqc9wg=
 github.com/sneat-co/sneat-go-core v0.62.0/go.mod h1:3+J9yzMhqYEmfovt35ycan18BqwqPod5PtciLGAKuNw=
+github.com/sneat-co/sneat-go-core v0.63.0 h1:UrCigPRQmr1imn3IRfK6F61IyuL13hDypumO54PfoXQ=
+github.com/sneat-co/sneat-go-core v0.63.0/go.mod h1:Ym7UFBqFGk/1wG95DDldYN5aQ6i3n6/uHOklkxBg0Fk=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
 github.com/spf13/cobra v1.10.2/go.mod h1:7C1pvHqHw5A4vrJfjNwvOdzYu0Gml16OCs2GRiTUUS4=
 github.com/spf13/pflag v1.0.9/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An2Bg=

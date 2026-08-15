@@ -93,6 +93,8 @@ github.com/dal-go/dalgo2sql v0.10.2 h1:HHTMwsDXnfOU2FdWTLDhqKLyAPYG02QSkR4iD49Xm
 github.com/dal-go/dalgo2sql v0.10.2/go.mod h1:zpSeookq7VDNDjH69LIN3DdqZ43Ssiyrqn5sWBML6o8=
 github.com/dal-go/dalgo2sql v0.10.5 h1:+jpV3Nk0vuXqPitCZTxHsC/hrBlx3Ge8PA2A4y2bxc0=
 github.com/dal-go/dalgo2sql v0.10.5/go.mod h1:9QACa+PePHy1ODkxrO5/+JjXK+A6ZmdrbeZk1/90JCI=
+github.com/dal-go/dalgo2sql v0.10.6 h1:r3crvfTcVQfiJj66KvH2/gaKG/jocUbb95rStqbcPJk=
+github.com/dal-go/dalgo2sql v0.10.6/go.mod h1:3S1GVJ35dPAnIZly/BbKWXXQwhQkYOyKlBlRAuMV9Dk=
 github.com/dal-go/dalgo2sqlite v0.1.2 h1:vd1mIySfWx9x+bmeQKYYIH04u3Zt+kf/r81kAeoGi9E=
 github.com/dal-go/dalgo2sqlite v0.1.2/go.mod h1:7Z4ipYh+RzOv0qXjr4eVtF8InI2F3IyqF0UR42WnAD8=
 github.com/dal-go/dalgo2sqlite v0.1.4 h1:ZsBeDbQekAcvoDA+k8hAI5tdfFbEAHO4aXu3p6CPu/E=
@@ -279,6 +281,8 @@ github.com/posthog/posthog-go v1.22.0 h1:VNy+sMJ9MMnENr9dMSxfQt/5bB4UhwRdZfasOAg
 github.com/posthog/posthog-go v1.22.0/go.mod h1://M430hNH3e8CDv4i8SJesb26816Mpa6GIZaiP4pNQU=
 github.com/posthog/posthog-go v1.23.0 h1:Uj/mHGBRY+VutTMAtK79Lbha5lHCyYEuZypLtfWjQbI=
 github.com/posthog/posthog-go v1.23.0/go.mod h1://M430hNH3e8CDv4i8SJesb26816Mpa6GIZaiP4pNQU=
+github.com/posthog/posthog-go v1.23.1 h1:Xw8QnH1WdCjHoqEbej7FI3CfM1g0jBJb8aBqIpBvQeM=
+github.com/posthog/posthog-go v1.23.1/go.mod h1:seY9mmw3mYGT9i2Wr5Dn3JXWPiAkZ6aolwH/5l8eVQE=
 github.com/qri-io/jsonpointer v0.1.1 h1:prVZBZLL6TW5vsSB9fFHFAMBLI4b0ri5vribQlTJiBA=
 github.com/qri-io/jsonpointer v0.1.1/go.mod h1:DnJPaYgiKu56EuDp8TU5wFLdZIcAnb/uH9v37ZaMV64=
 github.com/qri-io/jsonschema v0.2.1 h1:NNFoKms+kut6ABPf6xiKNM5214jzxAhDBrPHCJ97Wg0=

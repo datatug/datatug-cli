@@ -10,8 +10,8 @@ import (
 	"github.com/dal-go/dalgo/recordset"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -174,7 +174,7 @@ func newRecordsetUI(tui *sneatnav.TUI, collectionCtx dtviewers.CollectionContext
 		}
 		q := dal.From(collectionCtx.CollectionRef).NewQuery().SelectIntoRecordset(recordset.WithName(collectionCtx.CollectionRef.Name()))
 
-		rs, err = loadDataIntoTable(ctx, tui, db, q, table, func(rs2 recordset.Recordset) {
+		rs, _ = loadDataIntoTable(ctx, tui, db, q, table, func(rs2 recordset.Recordset) {
 			rs = rs2
 			row, col := table.GetSelection()
 			onSelectionChanged(row, col)
@@ -225,5 +225,5 @@ func loadDataIntoTable(
 			done(tableContent.recordset)
 		}
 	})
-	return tableContent.recordset, nil
+	return tableContent.recordset, err
 }

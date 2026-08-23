@@ -18,8 +18,8 @@ require (
 	cloud.google.com/go/firestore v1.25.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/dal-go/dalgo2sql v0.10.7
-	github.com/dal-go/dalgo2sqlite v0.1.5
+	github.com/dal-go/dalgo2sql v0.11.0
+	github.com/dal-go/dalgo2sqlite v0.1.6
 	github.com/datatug/cliformat v0.0.1
 	github.com/datatug/sql2csv v0.0.0-20260327145511-68fc0416403d
 	github.com/denisenkom/go-mssqldb v0.12.3
@@ -49,7 +49,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/dal-go/record v0.1.2
+require github.com/dal-go/record v0.1.3
 
 require (
 	github.com/RoaringBitmap/roaring/v2 v2.25.0 // indirect
@@ -115,7 +115,7 @@ require (
 	github.com/cloudflare/circl v1.6.4 // indirect
 	github.com/crediterra/money v0.3.5 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
-	github.com/dal-go/dalgo v0.64.8
+	github.com/dal-go/dalgo v0.66.1
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
@@ -149,7 +149,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/sneat-co/sneat-go-core v0.64.0
+	github.com/sneat-co/sneat-go-core v0.66.1
 	github.com/strongo/analytics v0.2.5 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
 	github.com/strongo/random v0.0.1

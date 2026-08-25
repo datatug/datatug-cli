@@ -1,6 +1,6 @@
 module github.com/datatug/datatug-cli
 
-go 1.26.4
+go 1.27.0
 
 //replace github.com/datatug/datatug-core => ../datatug-core
 

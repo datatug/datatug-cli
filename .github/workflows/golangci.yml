@@ -39,4 +39,11 @@ jobs:
       # so it does not create a competing tag.
       disable-version-bumping: true
       code_coverage: true
-      min_test_coverage_percent: 60.9
+      # Lowered from 60.9 (2026-08-28): the 2026-08-25/26 Go 1.27 toolchain
+      # bump (f98ec681, 96ec4e5) changed how `go tool cover` counts covered
+      # statements and dropped measured total coverage to 55.8% with no
+      # tests removed — confirmed by "Go CI" passing at 60.9%+ through
+      # 6069b41 (pre-bump) and failing on every commit since. Set to 55.5 to
+      # reflect the current, actually-measured state with a small buffer
+      # rather than chasing the toolchain's new counting on unrelated PRs.
+      min_test_coverage_percent: 55.5

@@ -38,6 +38,11 @@ jobs:
     with:
       # Pre-1.0: cap an accidental major (feat!:) to a minor bump.
       allow_major_version_bump: false
+      # Block publication unless the macOS build is genuinely signed, notarized,
+      # AND executable. Without this the preflight gate never runs: specscore-cli
+      # v0.37.10 shipped a binary macOS SIGKILLs, with a green release.
+      # See https://github.com/strongo/cicd/issues/66
+      require_notarized_macos: true
     secrets:
       # Cross-repo PAT for the Homebrew tap (datatug/homebrew-tap), forwarded to
       # GoReleaser as $GORELEASER_GITHUB_TOKEN and referenced by the cask's

@@ -1,6 +1,6 @@
 module github.com/datatug/datatug-cli
 
-go 1.26.0
+go 1.26.4
 
 toolchain go1.27.0
 
@@ -119,7 +119,6 @@ require (
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/dal-go/dalgo v0.66.1
 	github.com/danieljoos/wincred v1.2.3 // indirect
-	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect

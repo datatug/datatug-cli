@@ -28,7 +28,12 @@ jobs:
   strongo_workflow:
     permissions:
       contents: write
-    uses: strongo/cicd/.github/workflows/workflow.yml@v1
+    # Pinned to an exact tag, not the moving @v1, which is being retired.
+    # workflow.yml is currently byte-identical at both refs, so this is a
+    # no-op in behaviour — but @v1 silently served a 14-versions-stale
+    # release.yml, which is how a macOS signing gate came to no-op. Pin
+    # exactly so a moving tag can never change this job underneath us.
+    uses: strongo/cicd/.github/workflows/workflow.yml@v1.14.14
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     with:

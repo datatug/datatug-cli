@@ -323,8 +323,8 @@ github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWD
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/strongo/analytics v0.2.8 h1:h0snZrFba1DDI7H/RcePbq3V8MeuOrZFC8kj5ZJkp/I=
 github.com/strongo/analytics v0.2.8/go.mod h1:/pf7goR1CZtkvZHrJH5sXpJJl6IAefWCx82eSGUZ2V0=
-github.com/strongo/buildinfo v0.1.0 h1:ehcqoRc7Dnj62RtjE70A3xeVzrsHjqAg/8x6CfN27H0=
-github.com/strongo/buildinfo v0.1.0/go.mod h1:CXAaGYhJ/qIZqwai12oAUuvFDQlONkgtmjPAv0IWKx4=
+github.com/strongo/buildinfo v0.2.0 h1:4lVoCUfUbwJN8EbqFNQ1oYdBnjKrKRx6FlLVrTPSleI=
+github.com/strongo/buildinfo v0.2.0/go.mod h1:JpxZ3Jku81LJC1RNIqCNYwguDzLk90eemxUXx4JnSlA=
 github.com/strongo/decimal v0.1.2 h1:/LHdX9zJTUPpEM2cuQhnwCWNWLCUwG0BJMyOetpryY8=
 github.com/strongo/decimal v0.1.2/go.mod h1:uKFgetJbR2uT026stdbK54ELXTH9h0vZOPPOp7DAODk=
 github.com/strongo/dsstore v0.0.8 h1:BYsbfOVWKEvr24vHdnM6PNyHuFW968rr4tc5EK7BeQw=

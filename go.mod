@@ -45,7 +45,7 @@ require (
 	github.com/sneat-co/sneat-go-core v0.67.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	github.com/strongo/buildinfo v0.1.0
+	github.com/strongo/buildinfo v0.2.0
 	github.com/strongo/logus v0.4.3
 	github.com/strongo/random v0.0.1
 	github.com/strongo/slice v0.3.9

@@ -18,7 +18,7 @@ import (
 	"github.com/posthog/posthog-go"
 	"github.com/spf13/cobra"
 	"github.com/strongo/buildinfo"
-	"github.com/strongo/buildinfo/cobracmd"
+	"github.com/strongo/buildinfo/fangcmd"
 	"github.com/strongo/logus"
 
 	//_ "github.com/jackc/pgx/v5"
@@ -90,6 +90,6 @@ func main() {
 var getCommand = func() (*cobra.Command, []fang.Option) {
 	root := commands.DatatugCommand()
 	info := buildinfo.Get("datatug")
-	fangOpts := cobracmd.Wire(root, info)
+	fangOpts := fangcmd.Wire(root, info)
 	return root, fangOpts
 }

@@ -6,11 +6,19 @@ import (
 	"github.com/datatug/datatug-cli/apps"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudcmds"
 	"github.com/datatug/datatug-cli/pkg/auth"
+	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/urfave/cli/v3"
 )
 
 func DatatugCommand() *cli.Command {
+	// Override the default "<name> version <version>" shape so
+	// `datatug --version` / `-v` print the bare semver only
+	// (REQ: flag-output, REQ: short-flag).
+	cli.VersionPrinter = printBareVersion
+
 	return &cli.Command{
+		Name:           "datatug",
+		Version:        dtlog.Version(),
 		Action:         datatugCommandAction,
 		DefaultCommand: "ui", // run UI when no subcommand is provided
 		Flags:          []cli.Flag{apps.TUIFlag},
@@ -36,6 +44,7 @@ func DatatugCommand() *cli.Command {
 			consoleCommandArgs(),
 			dbCommand(),
 			entityCommand(),
+			versionCommandArgs(),
 		},
 	}
 }

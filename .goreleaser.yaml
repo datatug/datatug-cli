@@ -15,7 +15,9 @@ builds:
     goarch: [ amd64, arm64 ]
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
+      - -X github.com/datatug/datatug-cli/pkg/dtlog.version={{.Version}}
+      - -X github.com/datatug/datatug-cli/pkg/dtlog.commit={{.FullCommit}}
+      - -X github.com/datatug/datatug-cli/pkg/dtlog.date={{.Date}}
 
   - id: datatug-windows
     main: .
@@ -25,7 +27,9 @@ builds:
     goarch: [ amd64 ]
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
+      - -X github.com/datatug/datatug-cli/pkg/dtlog.version={{.Version}}
+      - -X github.com/datatug/datatug-cli/pkg/dtlog.commit={{.FullCommit}}
+      - -X github.com/datatug/datatug-cli/pkg/dtlog.date={{.Date}}
 
 archives:
   - id: tarball
@@ -75,8 +79,10 @@ release:
 
 # Homebrew cask (ecosystem standard; `brews:` is deprecated — see strongo/cicd
 # README "Packaging conventions"). GoReleaser auto-installs the `datatug` binary
-# from the archive, so the old `bin.install` and `--version` smoke test are no
-# longer needed (casks have no install/test hook).
+# from the archive; casks have no install/test hook, but the release pipeline's
+# macOS signing preflight gate runs its own `datatug --version` smoke test
+# against the signed binary (spec/features/cli/version) before it ever reaches
+# the tap.
 homebrew_casks:
   - name: datatug
     ids:

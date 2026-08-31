@@ -35,7 +35,7 @@ jobs:
     # Pinned to an exact tag, not the moving @v1: that tag defines the
     # require_notarized_macos input but does NOT contain the
     # macos_signing_preflight job, so the gate silently no-ops there.
-    uses: strongo/cicd/.github/workflows/release.yml@v1.14.14
+    uses: strongo/cicd/.github/workflows/release.yml@v1.14.17
     permissions:
       contents: write
     with:

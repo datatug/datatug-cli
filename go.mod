@@ -39,7 +39,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.50
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	github.com/posthog/posthog-go v1.24.3
+	github.com/posthog/posthog-go v1.24.4
 	github.com/qri-io/jsonschema v0.2.1
 	github.com/rivo/tview v0.42.0
 	github.com/sneat-co/sneat-go-core v0.67.3

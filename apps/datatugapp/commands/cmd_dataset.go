@@ -1,12 +1,10 @@
 package commands
 
 import (
-	"context"
-
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
-func datasetCommandAction(_ context.Context, _ *cli.Command) error {
+func datasetCommandAction(_ *cobra.Command, _ []string) error {
 	v := &datasetCommand{}
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
@@ -15,13 +13,12 @@ func datasetCommandAction(_ context.Context, _ *cli.Command) error {
 	return nil
 }
 
-func datasetCommands() *cli.Command {
-	return &cli.Command{
-		Name:        "dataset",
-		Usage:       "Recordset commands: def, data",
-		Description: "Recordset commands: def, data",
-		Aliases:     []string{"ds"},
-		Action:      datasetCommandAction,
+func datasetCommands() *cobra.Command {
+	return &cobra.Command{
+		Use:     "dataset",
+		Short:   "Recordset commands: def, data",
+		Aliases: []string{"ds"},
+		RunE:    datasetCommandAction,
 	}
 }
 

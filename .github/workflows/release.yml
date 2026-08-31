@@ -39,6 +39,12 @@ jobs:
     permissions:
       contents: write
     with:
+      # Must be >= go.mod's `go` directive. Adopting github.com/strongo/buildinfo
+      # raised it to 1.27.0. The shared release job runs its `go mod tidy`
+      # before-hook under this setup-go version with GOTOOLCHAIN=local, so
+      # leaving it unset (default '1.26') fails with
+      # "go.mod requires go >= 1.27.0" before the build starts.
+      go_version: '1.27.0'
       # Pre-1.0: cap an accidental major (feat!:) to a minor bump.
       allow_major_version_bump: false
       # Block publication unless the macOS build is genuinely signed, notarized,

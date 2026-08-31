@@ -1,21 +1,15 @@
 package commands
 
 import (
-	"slices"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v3"
 )
 
-func cmdHasFlag(cmd *cli.Command, name string) bool {
-	for _, f := range cmd.Flags {
-		if slices.Contains(f.Names(), name) {
-			return true
-		}
-	}
-	return false
+func cmdHasFlag(cmd *cobra.Command, name string) bool {
+	return cmd.Flags().Lookup(name) != nil
 }
 
 func TestScanCommand_RegistersFlags(t *testing.T) {

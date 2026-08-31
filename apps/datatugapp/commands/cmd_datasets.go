@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
-func datasetsCommandAction(_ context.Context, _ *cli.Command) error {
+func datasetsCommandAction(_ *cobra.Command, _ []string) error {
 	v := &datasetsCommand{}
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
@@ -24,11 +24,11 @@ func datasetsCommandAction(_ context.Context, _ *cli.Command) error {
 	return nil
 }
 
-func datasetsCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:   "datasets",
-		Usage:  "List and manage datasets for current DataTug project",
-		Action: datasetsCommandAction,
+func datasetsCommandArgs() *cobra.Command {
+	return &cobra.Command{
+		Use:   "datasets",
+		Short: "List and manage datasets for current DataTug project",
+		RunE:  datasetsCommandAction,
 	}
 }
 

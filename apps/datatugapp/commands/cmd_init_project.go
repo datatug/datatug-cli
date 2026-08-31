@@ -11,30 +11,28 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
+	"github.com/spf13/cobra"
 	"github.com/strongo/logus"
-	"github.com/urfave/cli/v3"
 )
 
-var projectIdArg = &cli.StringArg{Name: "project"}
-var projectPathArg = &cli.StringArg{Name: "projectPath"}
-
-func initCommand() *cli.Command {
-	return &cli.Command{
-		Name:        "init",
-		Usage:       "Creates a new datatug project",
-		Description: "Creates a new datatug project in specified directory using a connection to some database",
-		Action:      initCommandAction,
-		Arguments: []cli.Argument{
-			projectIdArg,
-			projectPathArg,
-		},
+func initCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "init [project] [projectPath]",
+		Short: "Creates a new datatug project",
+		Long:  "Creates a new datatug project in specified directory using a connection to some database",
+		RunE:  initCommandAction,
 	}
 }
 
-func initCommandAction(ctx context.Context, c *cli.Command) (err error) {
+// initCommandAction reads two optional positional arguments: project (ID)
+// and projectPath — matching github.com/urfave/cli/v3's StringArg semantics,
+// where a missing positional argument resolves to "" rather than an error.
+func initCommandAction(cmd *cobra.Command, args []string) (err error) {
+	ctx := cmd.Context()
 	logus.Infof(ctx, "Initiating project...")
 
-	projectDir := c.Arguments[1].Get().(string)
+	projectID := argAt(args, 0)
+	projectDir := argAt(args, 1)
 	if err = os.MkdirAll(projectDir, 0777); err != nil {
 		return err
 	}
@@ -74,8 +72,6 @@ func initCommandAction(ctx context.Context, c *cli.Command) (err error) {
 	//if database, err = informationSchema.GetDatabase(v.Database); err != nil {
 	//	return fmt.Errorf("failed to get database metadata: %w", err)
 	//}
-
-	projectID := projectIdArg.Get().(string)
 
 	storage.Current, projectID = filestore.NewSingleProjectStore(projectDir, projectID)
 	datatugProject := datatug.Project{

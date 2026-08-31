@@ -9,28 +9,22 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
-var dirFlag = cli.StringFlag{
-	Name:    "dir",
-	Aliases: []string{"d"},
-}
-
-func testCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "validate",
-		Usage:       "Runs validation scripts",
-		Description: "The `test` consoleCommand executes validation scripts.",
-		Flags: []cli.Flag{
-			&dirFlag,
-		},
-		Action: validateAction,
+func testCommandArgs() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "validate",
+		Short: "Runs validation scripts",
+		Long:  "The `test` consoleCommand executes validation scripts.",
+		RunE:  validateAction,
 	}
+	cmd.Flags().StringP("dir", "d", "", "")
+	return cmd
 }
 
-func validateAction(_ context.Context, c *cli.Command) (err error) {
-	dirPath := c.String(dirFlag.Name)
+func validateAction(cmd *cobra.Command, _ []string) (err error) {
+	dirPath, _ := cmd.Flags().GetString("dir")
 	log.Println("Project path:", dirPath)
 
 	var repoRootFile *datatug.RepoRootFile

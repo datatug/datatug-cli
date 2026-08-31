@@ -21,15 +21,15 @@ func TestGoogleAuthCommand(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("GoogleAuthCommand returned nil")
 	}
-	if cmd.Name != "google" {
-		t.Fatalf("unexpected Name: %q", cmd.Name)
+	if cmd.Name() != "google" {
+		t.Fatalf("unexpected Name: %q", cmd.Name())
 	}
-	if cmd.Description == "" {
-		t.Fatal("expected non-empty Description")
+	if cmd.Short == "" {
+		t.Fatal("expected non-empty Short")
 	}
-	// Invoke the Action closure to cover the nil-return branch.
-	if err := cmd.Action(context.Background(), cmd); err != nil {
-		t.Fatalf("Action returned error: %v", err)
+	// Invoke the RunE closure to cover the nil-return branch.
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("RunE returned error: %v", err)
 	}
 }
 

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
 // gitMode is the resolved version-control behaviour for a mutating command.
@@ -20,12 +20,14 @@ const (
 	gitModeStage
 )
 
-// gitFlag is the shared --git flag reused across mutating commands. Its value
-// selects the version-control behaviour: none (default), stage, or commit.
-var gitFlag = cli.StringFlag{
-	Name:  "git",
-	Usage: "Version-control action for written files: none, stage, or commit",
-	Value: "none",
+// gitFlagName is the shared --git flag name reused across mutating commands.
+// Its value selects the version-control behaviour: none (default), stage, or
+// commit.
+const gitFlagName = "git"
+
+// registerGitFlag registers the shared --git flag on cmd, defaulting to "none".
+func registerGitFlag(cmd *cobra.Command) {
+	cmd.Flags().String(gitFlagName, "none", "Version-control action for written files: none, stage, or commit")
 }
 
 // resolveGitMode maps a --git flag value to a gitMode. An empty value defaults
@@ -39,9 +41,9 @@ func resolveGitMode(value string) (gitMode, error) {
 	case "stage":
 		return gitModeStage, nil
 	case "commit":
-		return gitModeNone, cli.Exit("--git=commit is not yet supported", 2)
+		return gitModeNone, Exit("--git=commit is not yet supported", 2)
 	default:
-		return gitModeNone, cli.Exit(fmt.Sprintf("invalid --git value %q (supported values: none, stage, commit)", value), 2)
+		return gitModeNone, Exit(fmt.Sprintf("invalid --git value %q (supported values: none, stage, commit)", value), 2)
 	}
 }
 
@@ -76,7 +78,7 @@ func applyGit(projectDir string, mode gitMode, writtenPaths []string) error {
 func openRepo(projectDir string) (*git.Repository, error) {
 	repo, err := git.PlainOpenWithOptions(projectDir, &git.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
-		return nil, cli.Exit(fmt.Sprintf("%s is not a git repository: %v", projectDir, err), 2)
+		return nil, Exit(fmt.Sprintf("%s is not a git repository: %v", projectDir, err), 2)
 	}
 	return repo, nil
 }

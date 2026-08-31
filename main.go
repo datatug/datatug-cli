@@ -3,27 +3,29 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
-	"log"
 	"os"
 	"runtime/debug"
 	"strings"
 	"time"
 
+	"charm.land/fang/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
 	"github.com/datatug/datatug-cli/apps/global"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/posthog/posthog-go"
+	"github.com/spf13/cobra"
+	"github.com/strongo/buildinfo"
+	"github.com/strongo/buildinfo/cobracmd"
 	"github.com/strongo/logus"
 
 	//_ "github.com/jackc/pgx/v5"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/urfave/cli/v3"
 )
 
 var osExit = os.Exit
-var logFatal = log.Fatal
 
 func main() {
 
@@ -58,32 +60,36 @@ func main() {
 		}
 	}()
 
-	cmd := getCommand()
-	args := os.Args
-	// When running under `go test`, os.Args contains testing flags that urfave/cli doesn't recognize.
-	// Detect test binary by suffix and strip args to avoid parsing test flags.
-	if len(args) > 0 && strings.HasSuffix(args[0], ".test") {
-		args = args[:1]
+	root, fangOpts := getCommand()
+
+	args := os.Args[1:]
+	// When running under `go test`, os.Args contains testing flags that cobra
+	// doesn't recognize. Detect test binary by suffix and drop them so the CLI
+	// parses as a bare invocation instead.
+	if len(os.Args) > 0 && strings.HasSuffix(os.Args[0], ".test") {
+		args = nil
 	}
-	if err := cmd.Run(context.Background(), args); err != nil {
-		logFatal(err)
+	root.SetArgs(args)
+
+	if err := fang.Execute(context.Background(), root, fangOpts...); err != nil {
+		// fang.Execute has already printed err (styled, or bare on a
+		// non-terminal stderr — see charm.land/fang/v2's DefaultErrorHandler).
+		// Resolve only the process exit code here: an ExitCoder (this
+		// package's replacement for github.com/urfave/cli/v3's cli.Exit)
+		// carries a specific code; anything else exits 1, matching every
+		// non-ExitCoder error's outcome before the cobra migration.
+		var ec commands.ExitCoder
+		if errors.As(err, &ec) {
+			osExit(ec.ExitCode())
+			return
+		}
+		osExit(1)
 	}
-	//var p = getParser()
-	//if _, err := p.Parse(); err != nil {
-	//	var flagsErr *flags.Error
-	//	switch {
-	//	case errors.As(err, &flagsErr):
-	//		if errors.Is(flagsErr.CollectionType, flags.ErrHelp) {
-	//			os.Exit(0)
-	//		}
-	//		os.Exit(1)
-	//	default:
-	//		_, _ = fmt.Fprintf(os.Stderr, "failed to execute command: %s", err)
-	//		os.Exit(1)
-	//	}
-	//}
 }
 
-var getCommand = func() *cli.Command {
-	return commands.DatatugCommand()
+var getCommand = func() (*cobra.Command, []fang.Option) {
+	root := commands.DatatugCommand()
+	info := buildinfo.Get("datatug")
+	fangOpts := cobracmd.Wire(root, info)
+	return root, fangOpts
 }

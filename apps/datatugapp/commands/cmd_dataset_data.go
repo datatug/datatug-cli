@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,7 +22,7 @@ type datasetDataCommand struct {
 	Indent string `long:"indent" description:"Pass a digit to specify number of spaces (default=1). Special value: 'TAB'."`
 }
 
-func datasetDataCommandAction(_ context.Context, _ *cli.Command) error {
+func datasetDataCommandAction(_ *cobra.Command, _ []string) error {
 	v := &datasetDataCommand{}
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
@@ -80,12 +80,12 @@ func datasetDataCommandAction(_ context.Context, _ *cli.Command) error {
 	return writeRows(recordset, encoder)
 }
 
-func datasetDataCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "dataset-data",
-		Usage:       "Outputs dataset data in YAML/JSON or GRID",
-		Description: "Displays dataset data. Use --format yaml|json|grid and --indent for formatting.",
-		Action:      datasetDataCommandAction,
+func datasetDataCommandArgs() *cobra.Command {
+	return &cobra.Command{
+		Use:   "dataset-data",
+		Short: "Outputs dataset data in YAML/JSON or GRID",
+		Long:  "Displays dataset data. Use --format yaml|json|grid and --indent for formatting.",
+		RunE:  datasetDataCommandAction,
 	}
 }
 

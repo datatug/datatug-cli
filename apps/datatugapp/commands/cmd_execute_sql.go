@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -15,31 +14,31 @@ import (
 	"github.com/datatug/sql2csv"
 	"github.com/google/uuid"
 	"github.com/gosuri/uitable"
+	"github.com/spf13/cobra"
 	"github.com/strongo/validation"
-	"github.com/urfave/cli/v3"
 )
 
-func updateUrlConfigCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "updateUrlConfig",
-		Usage:       "Executes query or a consoleCommand",
-		Description: "The `updateUrlConfig` consoleCommand executes consoleCommand or query. Like an SQL query or an SQL stored procedure.",
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "driver", Aliases: []string{"D"}, Usage: "SQL driver"},
-			&cli.StringFlag{Name: "host", Aliases: []string{"h"}, Usage: "Database host", Value: "localhost"},
-			&cli.StringFlag{Name: "mode", Usage: "rw - ReadWrite, ro - ReadOnly (default for SQLite)"},
-			&cli.StringFlag{Name: "port", Usage: "Database port"},
-			&cli.StringFlag{Name: "user", Aliases: []string{"U"}, Usage: "Database user"},
-			&cli.StringFlag{Name: "password", Aliases: []string{"P"}, Usage: "Database password"},
-			&cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "DataTug project ID"},
-			&cli.StringFlag{Name: "schema", Aliases: []string{"s"}, Usage: "Database schema"},
-			&cli.StringFlag{Name: "query", Aliases: []string{"q"}, Usage: "SQL query"},
-			&cli.StringFlag{Name: "consoleCommand-text", Aliases: []string{"t"}, Usage: "SQL command text"},
-			&cli.StringFlag{Name: "output-path", Aliases: []string{"o"}, Usage: "Output path"},
-			&cli.StringFlag{Name: "output-format", Aliases: []string{"f"}, Usage: "Output format (csv)", Value: "csv"},
-		},
-		Action: updateUrlConfigCommandAction,
+func updateUrlConfigCommandArgs() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "updateUrlConfig",
+		Short: "Executes query or a consoleCommand",
+		Long:  "The `updateUrlConfig` consoleCommand executes consoleCommand or query. Like an SQL query or an SQL stored procedure.",
+		RunE:  updateUrlConfigCommandAction,
 	}
+	flags := cmd.Flags()
+	flags.StringP("driver", "D", "", "SQL driver")
+	flags.StringP("host", "h", "localhost", "Database host")
+	flags.String("mode", "", "rw - ReadWrite, ro - ReadOnly (default for SQLite)")
+	flags.String("port", "", "Database port")
+	flags.StringP("user", "U", "", "Database user")
+	flags.StringP("password", "P", "", "Database password")
+	flags.StringP("project", "p", "", "DataTug project ID")
+	flags.StringP("schema", "s", "", "Database schema")
+	flags.StringP("query", "q", "", "SQL query")
+	flags.StringP("consoleCommand-text", "t", "", "SQL command text")
+	flags.StringP("output-path", "o", "", "Output path")
+	flags.StringP("output-format", "f", "csv", "Output format (csv)")
+	return cmd
 }
 
 // executeSQLCommand defines parameters for updateUrlConfig SQL consoleCommand
@@ -225,20 +224,32 @@ func (handler writerHandler) Process(columnTypes []*sql.ColumnType, rows *sql.Ro
 	return err
 }
 
-func updateUrlConfigCommandAction(_ context.Context, cmd *cli.Command) error {
+func updateUrlConfigCommandAction(cmd *cobra.Command, _ []string) error {
+	driver, _ := cmd.Flags().GetString("driver")
+	host, _ := cmd.Flags().GetString("host")
+	mode, _ := cmd.Flags().GetString("mode")
+	port, _ := cmd.Flags().GetString("port")
+	user, _ := cmd.Flags().GetString("user")
+	password, _ := cmd.Flags().GetString("password")
+	project, _ := cmd.Flags().GetString("project")
+	schema, _ := cmd.Flags().GetString("schema")
+	query, _ := cmd.Flags().GetString("query")
+	commandText, _ := cmd.Flags().GetString("consoleCommand-text")
+	outputPath, _ := cmd.Flags().GetString("output-path")
+	outputFormat, _ := cmd.Flags().GetString("output-format")
 	v := &executeSQLCommand{
-		Driver:       cmd.String("driver"),
-		Host:         cmd.String("host"),
-		Mode:         cmd.String("mode"),
-		Port:         cmd.String("port"),
-		User:         cmd.String("user"),
-		Password:     cmd.String("password"),
-		Project:      cmd.String("project"),
-		Schema:       cmd.String("schema"),
-		Query:        cmd.String("query"),
-		CommandText:  cmd.String("consoleCommand-text"),
-		OutputPath:   cmd.String("output-path"),
-		OutputFormat: cmd.String("output-format"),
+		Driver:       driver,
+		Host:         host,
+		Mode:         mode,
+		Port:         port,
+		User:         user,
+		Password:     password,
+		Project:      project,
+		Schema:       schema,
+		Query:        query,
+		CommandText:  commandText,
+		OutputPath:   outputPath,
+		OutputFormat: outputFormat,
 	}
 	if err := v.Validate(); err != nil {
 		return err

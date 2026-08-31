@@ -2,17 +2,18 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"os"
 	"strings"
 	"testing"
 
+	"charm.land/fang/v2"
+	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
 	"github.com/datatug/datatug-cli/apps/global"
 	"github.com/rivo/tview"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
-	"github.com/urfave/cli/v3"
 )
 
 // defaultGetCommand holds the original getCommand closure so tests that mutate
@@ -22,13 +23,17 @@ var defaultGetCommand = getCommand
 
 func TestMainFunc(t *testing.T) {
 	t.Run("getCommand_no_error", func(t *testing.T) {
-		getCommand = func() *cli.Command {
-			return &cli.Command{Action: func(ctx context.Context, c *cli.Command) error { return nil }}
+		getCommand = func() (*cobra.Command, []fang.Option) {
+			return &cobra.Command{
+				SilenceUsage:  true,
+				SilenceErrors: true,
+				RunE:          func(_ *cobra.Command, _ []string) error { return nil },
+			}, nil
 		}
 		main()
 	})
 	t.Run("getCommand_nil", func(t *testing.T) {
-		getCommand = func() *cli.Command { return nil }
+		getCommand = func() (*cobra.Command, []fang.Option) { return nil, nil }
 		osExitBackup := osExit
 		osStdErrBackup := os.Stderr
 		r, w, err := os.Pipe()
@@ -69,7 +74,7 @@ func TestMainFunc(t *testing.T) {
 		}()
 
 		global.App = tview.NewApplication()
-		getCommand = func() *cli.Command { return nil }
+		getCommand = func() (*cobra.Command, []fang.Option) { return nil, nil }
 		var exitCode int
 		osExit = func(i int) { exitCode = i }
 
@@ -77,35 +82,63 @@ func TestMainFunc(t *testing.T) {
 
 		assert.Equal(t, 1, exitCode)
 	})
-	// Cover the logFatal(err) branch: getCommand returns a command whose Run returns
-	// an error. logFatal is stubbed so the test binary doesn't call os.Exit.
+	// Cover the plain-error branch: getCommand returns a command whose RunE
+	// returns a non-ExitCoder error. main must exit 1 (matching every
+	// non-ExitCoder error's outcome before the cobra migration, when such an
+	// error reached logFatal).
 	t.Run("cmd_run_error", func(t *testing.T) {
 		getCommandBackup := getCommand
-		logFatalBackup := logFatal
-		defer func() {
-			getCommand = getCommandBackup
-			logFatal = logFatalBackup
-		}()
+		defer func() { getCommand = getCommandBackup }()
 
 		wantErr := errors.New("test run error")
-		getCommand = func() *cli.Command {
-			return &cli.Command{
-				Action: func(ctx context.Context, c *cli.Command) error {
-					return wantErr
-				},
-			}
+		getCommand = func() (*cobra.Command, []fang.Option) {
+			return &cobra.Command{
+				SilenceUsage:  true,
+				SilenceErrors: true,
+				RunE:          func(_ *cobra.Command, _ []string) error { return wantErr },
+			}, nil
 		}
-		var gotArg interface{}
-		logFatal = func(v ...interface{}) { gotArg = v[0] }
+		osExitBackup := osExit
+		defer func() { osExit = osExitBackup }()
+		var exitCode int
+		var exitCalled bool
+		osExit = func(i int) { exitCode = i; exitCalled = true }
 
 		main()
 
-		assert.Equal(t, wantErr, gotArg)
+		assert.True(t, exitCalled)
+		assert.Equal(t, 1, exitCode)
+	})
+	// Cover the ExitCoder branch: getCommand returns a command whose RunE
+	// returns commands.Exit(msg, code). main must exit with that exact code —
+	// the cobra-migration replacement for github.com/urfave/cli/v3's cli.Exit.
+	t.Run("cmd_run_exit_coder", func(t *testing.T) {
+		getCommandBackup := getCommand
+		defer func() { getCommand = getCommandBackup }()
+
+		getCommand = func() (*cobra.Command, []fang.Option) {
+			return &cobra.Command{
+				SilenceUsage:  true,
+				SilenceErrors: true,
+				RunE:          func(_ *cobra.Command, _ []string) error { return commands.Exit("boom", 7) },
+			}, nil
+		}
+		osExitBackup := osExit
+		defer func() { osExit = osExitBackup }()
+		var exitCode int
+		var exitCalled bool
+		osExit = func(i int) { exitCode = i; exitCalled = true }
+
+		main()
+
+		assert.True(t, exitCalled)
+		assert.Equal(t, 7, exitCode)
 	})
 	// Cover the real getCommand var body by calling the original closure captured
 	// before any test reassigns the package-level var.
 	t.Run("default_getCommand_returns_non_nil", func(t *testing.T) {
-		cmd := defaultGetCommand()
+		cmd, opts := defaultGetCommand()
 		assert.NotNil(t, cmd)
+		assert.NotEmpty(t, opts)
 	})
 }

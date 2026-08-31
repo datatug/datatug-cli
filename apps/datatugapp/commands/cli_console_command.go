@@ -1,19 +1,18 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"os"
 
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
-func consoleCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "console",
-		Usage:       "Starts interactive console",
-		Description: "Starts interactive console with autocomplete",
-		Action: func(ctx context.Context, c *cli.Command) error {
+func consoleCommandArgs() *cobra.Command {
+	return &cobra.Command{
+		Use:   "console",
+		Short: "Starts interactive console",
+		Long:  "Starts interactive console with autocomplete",
+		RunE: func(_ *cobra.Command, _ []string) error {
 			v := &consoleCommand{}
 			return v.Execute(nil)
 		},

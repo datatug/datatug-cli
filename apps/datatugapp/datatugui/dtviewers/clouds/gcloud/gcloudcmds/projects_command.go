@@ -7,28 +7,24 @@ import (
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds/gcloud/gcloudui"
 	"github.com/datatug/datatug-cli/pkg/auth/gauth"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
 // seams — overridable in tests
 var getGCloudProjects = gauth.GetGCloudProjects
 var openGCloudProjectsScreen = gcloudui.OpenGCloudProjectsScreen
 
-func projectsCommand() *cli.Command {
-	formatFlag := &cli.StringFlag{
-		Name:    "format",
-		Aliases: []string{"f"},
-		Usage:   "Output format: < id | json | csv >",
-		Value:   "id",
-	}
-	return &cli.Command{
-		Name: "projects",
-		Action: func(ctx context.Context, command *cli.Command) error {
+func projectsCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "projects",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := context.Background()
 			projects, err := getGCloudProjects(ctx)
 			if err != nil {
 				return err
 			}
-			switch format := strings.ToLower(command.String("format")); format {
+			formatValue, _ := cmd.Flags().GetString("format")
+			switch format := strings.ToLower(formatValue); format {
 			case "json":
 				for _, project := range projects {
 					fmt.Printf(`{"id": "%s", "name": "%s", "status"="%s"}`+"\n", project.ProjectId, project.DisplayName, project.State)
@@ -48,8 +44,7 @@ func projectsCommand() *cli.Command {
 			}
 			return nil
 		},
-		Flags: []cli.Flag{
-			formatFlag,
-		},
 	}
+	cmd.Flags().StringP("format", "f", "id", "Output format: < id | json | csv >")
+	return cmd
 }

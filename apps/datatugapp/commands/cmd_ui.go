@@ -17,30 +17,29 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dtio"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/spf13/cobra"
 	"github.com/strongo/logus"
-	"github.com/urfave/cli/v3"
 )
 
-var file = &cli.StringFlag{
-	Name:    "file",
-	Aliases: []string{"f"},
-	Usage:   "Specify a DB file to open",
-}
-
-func uiCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "ui",
-		Usage:       "Starts Command Line UI",
-		Description: "",
-		Flags: []cli.Flag{
-			file,
-		},
-		Action: func(ctx context.Context, c *cli.Command) error {
-			v := &uiCommand{}
-			// Read the parsed value of the flag from the command
-			return v.Execute(c.String("file"))
+func uiCommandArgs() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "ui",
+		Short: "Starts Command Line UI",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			filePath, _ := cmd.Flags().GetString("file")
+			return runUI(filePath)
 		},
 	}
+	cmd.Flags().StringP("file", "f", "", "Specify a DB file to open")
+	return cmd
+}
+
+// runUI launches the terminal UI, optionally opening filePath. It is shared
+// by the `ui` subcommand and the root command's default-to-ui fallback (a
+// bare `datatug` invocation).
+func runUI(filePath string) error {
+	v := &uiCommand{}
+	return v.Execute(filePath)
 }
 
 type uiCommand struct {

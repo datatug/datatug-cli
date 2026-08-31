@@ -8,10 +8,10 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
-func renderCommandAction(_ context.Context, _ *cli.Command) error {
+func renderCommandAction(_ *cobra.Command, _ []string) error {
 	v := &renderCommand{}
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
@@ -42,12 +42,12 @@ func renderCommandAction(_ context.Context, _ *cli.Command) error {
 	return err
 }
 
-func renderCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "render",
-		Usage:       "Renders readme.md files",
-		Description: "Updates readme.md files - this is useful for updating them without scan",
-		Action:      renderCommandAction,
+func renderCommandArgs() *cobra.Command {
+	return &cobra.Command{
+		Use:   "render",
+		Short: "Renders readme.md files",
+		Long:  "Updates readme.md files - this is useful for updating them without scan",
+		RunE:  renderCommandAction,
 	}
 }
 

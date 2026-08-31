@@ -10,36 +10,23 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dbconnection"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
-var (
-	scanProjectFlag  = cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "Registered project id/name to scan into"}
-	scanDirFlag      = cli.StringFlag{Name: "directory", Aliases: []string{"d"}, Usage: "Path to the project directory (alternative to --project)"}
-	scanDriverFlag   = cli.StringFlag{Name: "driver", Aliases: []string{"D"}, Usage: "DB driver, e.g. sqlserver"}
-	scanServerFlag   = cli.StringFlag{Name: "server", Aliases: []string{"s"}, Usage: "Network server / host name"}
-	scanPortFlag     = cli.IntFlag{Name: "port", Usage: "Server network port (default if omitted)"}
-	scanUserFlag     = cli.StringFlag{Name: "user", Aliases: []string{"U"}, Usage: "DB login user"}
-	scanPasswordFlag = cli.StringFlag{Name: "password", Aliases: []string{"P"}, Usage: "DB login password"}
-	scanDbFlag       = cli.StringFlag{Name: "db", Usage: "ID of database to scan", Required: true}
-	scanDbModelFlag  = cli.StringFlag{Name: "dbmodel", Usage: "ID of DB model (required for newly scanned databases)"}
-	scanEnvFlag      = cli.StringFlag{Name: "env", Usage: "Environment the DB belongs to. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.", Required: true}
-	scanPathFlag     = cli.StringFlag{Name: "path", Usage: "Path to the SQLite database file (required for -D sqlite3)"}
-)
-
-func scanCommandAction(_ context.Context, c *cli.Command) error {
+func scanCommandAction(cmd *cobra.Command, _ []string) error {
+	flags := cmd.Flags()
 	v := &scanDbCommand{}
-	v.ProjectName = c.String(scanProjectFlag.Name)
-	v.ProjectDir = c.String(scanDirFlag.Name)
-	v.Driver = c.String(scanDriverFlag.Name)
-	v.Host = c.String(scanServerFlag.Name)
-	v.Port = c.Int(scanPortFlag.Name)
-	v.User = c.String(scanUserFlag.Name)
-	v.Password = c.String(scanPasswordFlag.Name)
-	v.Database = c.String(scanDbFlag.Name)
-	v.DbModel = c.String(scanDbModelFlag.Name)
-	v.Environment = c.String(scanEnvFlag.Name)
-	v.Path = c.String(scanPathFlag.Name)
+	v.ProjectName, _ = flags.GetString("project")
+	v.ProjectDir, _ = flags.GetString("directory")
+	v.Driver, _ = flags.GetString("driver")
+	v.Host, _ = flags.GetString("server")
+	v.Port, _ = flags.GetInt("port")
+	v.User, _ = flags.GetString("user")
+	v.Password, _ = flags.GetString("password")
+	v.Database, _ = flags.GetString("db")
+	v.DbModel, _ = flags.GetString("dbmodel")
+	v.Environment, _ = flags.GetString("env")
+	v.Path, _ = flags.GetString("path")
 
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
@@ -99,29 +86,40 @@ func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
 	return connParams, nil
 }
 
-func scanCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "scan",
-		Usage:       "Adds or updates DB metadata",
-		Description: "Adds or updates DB metadata from a specific server in a specific environment",
-		Flags: []cli.Flag{
-			&scanProjectFlag, &scanDirFlag, &scanDriverFlag, &scanServerFlag, &scanPortFlag,
-			&scanUserFlag, &scanPasswordFlag, &scanDbFlag, &scanDbModelFlag, &scanEnvFlag, &scanPathFlag,
-		},
-		Action: scanCommandAction,
+func scanCommandArgs() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "scan",
+		Short: "Adds or updates DB metadata",
+		Long:  "Adds or updates DB metadata from a specific server in a specific environment",
+		RunE:  scanCommandAction,
 	}
+	flags := cmd.Flags()
+	flags.StringP("project", "p", "", "Registered project id/name to scan into")
+	flags.StringP("directory", "d", "", "Path to the project directory (alternative to --project)")
+	flags.StringP("driver", "D", "", "DB driver, e.g. sqlserver")
+	flags.StringP("server", "s", "", "Network server / host name")
+	flags.Int("port", 0, "Server network port (default if omitted)")
+	flags.StringP("user", "U", "", "DB login user")
+	flags.StringP("password", "P", "", "DB login password")
+	flags.String("db", "", "ID of database to scan")
+	flags.String("dbmodel", "", "ID of DB model (required for newly scanned databases)")
+	flags.String("env", "", "Environment the DB belongs to. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.")
+	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3)")
+	_ = cmd.MarkFlagRequired("db")
+	_ = cmd.MarkFlagRequired("env")
+	return cmd
 }
 
 // scanDbCommand defines parameters for scan consoleCommand
 type scanDbCommand struct {
 	projectBaseCommand
-	Driver      string `short:"D" long:"driver" description:"Supported values: sqlserver."`
-	Host        string `short:"s" long:"server" description:"Network server name."`
-	Port        int    `long:"port" description:"ServerReference network port, if not specified default is used."`
-	User        string `short:"U" long:"user" description:"User name to login to DB."`
-	Password    string `short:"P" long:"password" description:"Password to login to DB."`
-	Database    string `long:"db" required:"true" description:"ID of database to be scanned."`
-	DbModel     string `long:"dbmodel" required:"false" description:"ID of DB model, is required for newly scanned databases."`
-	Environment string `long:"env" required:"true" description:"Specify environment the DB belongs to. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD."`
-	Path        string `long:"path" description:"Path to the SQLite database file (required for sqlite3)."`
+	Driver      string
+	Host        string
+	Port        int
+	User        string
+	Password    string
+	Database    string
+	DbModel     string
+	Environment string
+	Path        string
 }

@@ -9,15 +9,15 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
 	"github.com/gosuri/uitable"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
-func showCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "show",
-		Usage:       "Displays project data",
-		Description: "Outputs project data in human readable format",
-		Action: func(ctx context.Context, c *cli.Command) error {
+func showCommandArgs() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show",
+		Short: "Displays project data",
+		Long:  "Outputs project data in human readable format",
+		RunE: func(_ *cobra.Command, _ []string) error {
 			v := &showProjectCommand{}
 			return v.Execute(nil)
 		},

@@ -19,7 +19,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/go-git/go-git/v5"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
 const (
@@ -35,17 +35,16 @@ const (
 	demoProjectDir             = "demo-project"
 )
 
-func demoCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "demo",
-		Usage:       "Installs & runs demo",
-		Description: "Adds demo DB & creates or update demo DataTug project",
-		Flags: []cli.Flag{
-			&cli.BoolFlag{Name: "reset-db", Usage: "Re-downloads demo DB file from internet"},
-			&cli.BoolFlag{Name: "reset-project", Usage: "Recreates demo project"},
-		},
-		Action: demoCommandAction,
+func demoCommandArgs() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "demo",
+		Short: "Installs & runs demo",
+		Long:  "Adds demo DB & creates or update demo DataTug project",
+		RunE:  demoCommandAction,
 	}
+	cmd.Flags().Bool("reset-db", false, "Re-downloads demo DB file from internet")
+	cmd.Flags().Bool("reset-project", false, "Recreates demo project")
+	return cmd
 }
 
 type demoCommand struct {
@@ -421,10 +420,12 @@ func (c demoCommand) updateDemoProjectEnvironments(project *datatug.Project, cat
 	return nil
 }
 
-func demoCommandAction(_ context.Context, cmd *cli.Command) error {
+func demoCommandAction(cmd *cobra.Command, _ []string) error {
+	resetDB, _ := cmd.Flags().GetBool("reset-db")
+	resetProject, _ := cmd.Flags().GetBool("reset-project")
 	c := demoCommand{
-		ResetDB:      cmd.Bool("reset-db"),
-		ResetProject: cmd.Bool("reset-project"),
+		ResetDB:      resetDB,
+		ResetProject: resetProject,
 	}
 	return c.Execute()
 }

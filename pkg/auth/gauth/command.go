@@ -1,16 +1,14 @@
 package gauth
 
 import (
-	"context"
-
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
-func GoogleAuthCommand() *cli.Command {
-	return &cli.Command{
-		Name:        "google",
-		Description: "Manages authentication with Google",
-		Action: func(ctx context.Context, command *cli.Command) error {
+func GoogleAuthCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "google",
+		Short: "Manages authentication with Google",
+		RunE: func(_ *cobra.Command, _ []string) error {
 			return nil
 		},
 	}

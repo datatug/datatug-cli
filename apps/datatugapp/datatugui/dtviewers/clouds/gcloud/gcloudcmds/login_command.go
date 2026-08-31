@@ -1,15 +1,13 @@
 package gcloudcmds
 
 import (
-	"context"
-
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
-func loginCommand() *cli.Command {
-	return &cli.Command{
-		Name: "login",
-		Action: func(ctx context.Context, command *cli.Command) error {
+func loginCommand() *cobra.Command {
+	return &cobra.Command{
+		Use: "login",
+		RunE: func(_ *cobra.Command, _ []string) error {
 			return nil
 		},
 	}

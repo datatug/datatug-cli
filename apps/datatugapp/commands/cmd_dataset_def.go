@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
@@ -12,7 +12,7 @@ type datasetDefCommand struct {
 	datasetBaseCommand
 }
 
-func datasetDefCommandAction(_ context.Context, _ *cli.Command) error {
+func datasetDefCommandAction(_ *cobra.Command, _ []string) error {
 	v := &datasetDefCommand{}
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
@@ -29,11 +29,11 @@ func datasetDefCommandAction(_ context.Context, _ *cli.Command) error {
 	return encoder.Encode(dataset)
 }
 
-func datasetDefCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "dataset-def",
-		Usage:       "Outputs dataset definition in YAML",
-		Description: "Displays dataset (recordset) definition in YAML",
-		Action:      datasetDefCommandAction,
+func datasetDefCommandArgs() *cobra.Command {
+	return &cobra.Command{
+		Use:   "dataset-def",
+		Short: "Outputs dataset definition in YAML",
+		Long:  "Displays dataset (recordset) definition in YAML",
+		RunE:  datasetDefCommandAction,
 	}
 }

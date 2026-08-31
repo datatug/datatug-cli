@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,46 +12,65 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
-var (
-	entityDirFlag     = cli.StringFlag{Name: "directory", Aliases: []string{"d"}, Usage: "Path to the project directory (alternative to --project)"}
-	entityProjectFlag = cli.StringFlag{Name: "project", Aliases: []string{"p"}, Usage: "Registered project id/name"}
-	entityFileFlag    = cli.StringFlag{Name: "file", Aliases: []string{"f"}, Usage: "Path to the entity definition file (YAML or JSON); use '-' or omit to read from stdin"}
-	entityFormatFlag  = cli.StringFlag{Name: "format", Usage: "Input format: yaml or json (defaults to file extension or content sniff)"}
+const (
+	entityDirFlagName     = "directory"
+	entityProjectFlagName = "project"
+	entityFileFlagName    = "file"
+	entityFormatFlagName  = "format"
 
-	entityContinueOnErrorFlag = cli.BoolFlag{Name: "continue-on-error", Usage: "Apply items that pass and report the rest, instead of the default atomic all-or-nothing commit"}
+	entityContinueOnErrorFlagName = "continue-on-error"
 )
 
-func entityCommand() *cli.Command {
-	return &cli.Command{
-		Name:  "entity",
-		Usage: "Author and read DataTug entities",
-		Commands: []*cli.Command{
-			entityAddCommandArgs(),
-			entityListCommandArgs(),
-			entityShowCommandArgs(),
-			entityFieldCommand(),
-		},
-	}
+// registerEntityProjectFlags registers the --directory/-d and --project/-p
+// flags shared by every entity subcommand.
+func registerEntityProjectFlags(cmd *cobra.Command) {
+	cmd.Flags().StringP(entityDirFlagName, "d", "", "Path to the project directory (alternative to --project)")
+	cmd.Flags().StringP(entityProjectFlagName, "p", "", "Registered project id/name")
 }
 
-func entityListCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "list",
-		Usage:       "List the entities in a project",
-		Description: "Lists the project's entities, one per line. Read-only: never writes.",
-		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag},
-		Action:      entityListCommandAction,
-	}
+// registerEntityDefinitionFlags registers the --file/-f, --format and
+// --continue-on-error flags shared by the authoring subcommands that read an
+// entity/field definition from a file or stdin.
+func registerEntityDefinitionFlags(cmd *cobra.Command) {
+	cmd.Flags().StringP(entityFileFlagName, "f", "", "Path to the entity definition file (YAML or JSON); use '-' or omit to read from stdin")
+	cmd.Flags().String(entityFormatFlagName, "", "Input format: yaml or json (defaults to file extension or content sniff)")
+	cmd.Flags().Bool(entityContinueOnErrorFlagName, false, "Apply items that pass and report the rest, instead of the default atomic all-or-nothing commit")
 }
 
-func entityListCommandAction(ctx context.Context, c *cli.Command) error {
+func entityCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "entity",
+		Short: "Author and read DataTug entities",
+	}
+	cmd.AddCommand(
+		entityAddCommandArgs(),
+		entityListCommandArgs(),
+		entityShowCommandArgs(),
+		entityFieldCommand(),
+	)
+	return cmd
+}
+
+func entityListCommandArgs() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List the entities in a project",
+		Long:  "Lists the project's entities, one per line. Read-only: never writes.",
+		RunE:  entityListCommandAction,
+	}
+	registerEntityProjectFlags(cmd)
+	return cmd
+}
+
+func entityListCommandAction(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	v := &projectBaseCommand{}
-	v.ProjectDir = c.String(entityDirFlag.Name)
-	v.ProjectName = c.String(entityProjectFlag.Name)
+	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
+	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
 
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
@@ -65,10 +83,7 @@ func entityListCommandAction(ctx context.Context, c *cli.Command) error {
 		return err
 	}
 
-	w := c.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+	w := cmd.OutOrStdout()
 
 	if len(entities) == 0 {
 		_, _ = fmt.Fprintln(w, "no entities")
@@ -85,26 +100,27 @@ func entityListCommandAction(ctx context.Context, c *cli.Command) error {
 	return nil
 }
 
-func entityShowCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "show",
-		Usage:       "Show an entity's fields and read-only generated mapping copy",
-		Description: "Renders an entity's fields and, when present, the read-only generated copy of its table/column links. Read-only: never writes.",
-		ArgsUsage:   "<Entity>",
-		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag},
-		Action:      entityShowCommandAction,
+func entityShowCommandArgs() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "show <Entity>",
+		Short: "Show an entity's fields and read-only generated mapping copy",
+		Long:  "Renders an entity's fields and, when present, the read-only generated copy of its table/column links. Read-only: never writes.",
+		RunE:  entityShowCommandAction,
 	}
+	registerEntityProjectFlags(cmd)
+	return cmd
 }
 
-func entityShowCommandAction(ctx context.Context, c *cli.Command) error {
-	name := c.Args().First()
+func entityShowCommandAction(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	name := argAt(args, 0)
 	if name == "" {
-		return cli.Exit("entity name is required: datatug entity show <Entity>", 2)
+		return Exit("entity name is required: datatug entity show <Entity>", 2)
 	}
 
 	v := &projectBaseCommand{}
-	v.ProjectDir = c.String(entityDirFlag.Name)
-	v.ProjectName = c.String(entityProjectFlag.Name)
+	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
+	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
 
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
@@ -115,7 +131,7 @@ func entityShowCommandAction(ctx context.Context, c *cli.Command) error {
 	entity, err := projectStore.LoadEntity(ctx, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return cli.Exit(fmt.Sprintf("entity %q not found", name), 1)
+			return Exit(fmt.Sprintf("entity %q not found", name), 1)
 		}
 		return err
 	}
@@ -125,12 +141,18 @@ func entityShowCommandAction(ctx context.Context, c *cli.Command) error {
 		return err
 	}
 
-	w := c.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+	w := cmd.OutOrStdout()
 	_, _ = fmt.Fprint(w, rendered)
 	return nil
+}
+
+// argAt returns args[i], or "" when i is out of range — matching
+// github.com/urfave/cli/v3's Args.Get(n) semantics (blank string, never a panic).
+func argAt(args []string, i int) string {
+	if i < len(args) {
+		return args[i]
+	}
+	return ""
 }
 
 // renderEntityShow renders a loaded entity as YAML for the read-only show view,
@@ -177,46 +199,50 @@ func renderEntityShow(entity *datatug.Entity) (string, error) {
 	return buf.String(), nil
 }
 
-func entityFieldCommand() *cli.Command {
-	return &cli.Command{
-		Name:  "field",
-		Usage: "Author entity fields",
-		Commands: []*cli.Command{
-			entityFieldAddCommandArgs(),
-			entityFieldSetCommandArgs(),
-			entityFieldRmCommandArgs(),
-		},
+func entityFieldCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "field",
+		Short: "Author entity fields",
 	}
+	cmd.AddCommand(
+		entityFieldAddCommandArgs(),
+		entityFieldSetCommandArgs(),
+		entityFieldRmCommandArgs(),
+	)
+	return cmd
 }
 
-func entityFieldRmCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "rm",
-		Usage:       "Remove a named field from an entity",
-		Description: "Removes a named field from an existing entity. Fails non-zero if the field is absent and writes nothing.",
-		ArgsUsage:   "<Entity> <field>",
-		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &gitFlag},
-		Action:      entityFieldRmCommandAction,
+func entityFieldRmCommandArgs() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rm <Entity> <field>",
+		Short: "Remove a named field from an entity",
+		Long:  "Removes a named field from an existing entity. Fails non-zero if the field is absent and writes nothing.",
+		RunE:  entityFieldRmCommandAction,
 	}
+	registerEntityProjectFlags(cmd)
+	registerGitFlag(cmd)
+	return cmd
 }
 
-func entityFieldRmCommandAction(ctx context.Context, c *cli.Command) error {
-	name := c.Args().Get(0)
-	fieldName := c.Args().Get(1)
+func entityFieldRmCommandAction(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	name := argAt(args, 0)
+	fieldName := argAt(args, 1)
 	if name == "" || fieldName == "" {
-		return cli.Exit("entity and field names are required: datatug entity field rm <Entity> <field>", 2)
+		return Exit("entity and field names are required: datatug entity field rm <Entity> <field>", 2)
 	}
 
 	v := &projectBaseCommand{}
-	v.ProjectDir = c.String(entityDirFlag.Name)
-	v.ProjectName = c.String(entityProjectFlag.Name)
+	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
+	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
 
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
 	}
 
 	// Resolve the version-control mode and fail loud before any write.
-	mode, err := resolveGitMode(c.String(gitFlag.Name))
+	gitValue, _ := cmd.Flags().GetString(gitFlagName)
+	mode, err := resolveGitMode(gitValue)
 	if err != nil {
 		return err
 	}
@@ -229,7 +255,7 @@ func entityFieldRmCommandAction(ctx context.Context, c *cli.Command) error {
 	entity, err := projectStore.LoadEntity(ctx, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return cli.Exit(fmt.Sprintf("entity %q not found", name), 1)
+			return Exit(fmt.Sprintf("entity %q not found", name), 1)
 		}
 		return err
 	}
@@ -242,7 +268,7 @@ func entityFieldRmCommandAction(ctx context.Context, c *cli.Command) error {
 		}
 	}
 	if idx < 0 {
-		return cli.Exit(fmt.Sprintf("field %q not found in entity %q", fieldName, name), 1)
+		return Exit(fmt.Sprintf("field %q not found in entity %q", fieldName, name), 1)
 	}
 
 	entity.Fields = append(entity.Fields[:idx], entity.Fields[idx+1:]...)
@@ -259,55 +285,58 @@ func entityFieldRmCommandAction(ctx context.Context, c *cli.Command) error {
 		return err
 	}
 
-	w := c.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+	w := cmd.OutOrStdout()
 	_, _ = fmt.Fprintf(w, "removed field: %s\n", fieldName)
 	return nil
 }
 
-var (
-	entityFieldTypeFlag  = cli.StringFlag{Name: "type", Usage: "Field type"}
-	entityFieldTitleFlag = cli.StringFlag{Name: "title", Usage: "Field title"}
-	entityFieldKeyFlag   = cli.BoolFlag{Name: "key", Usage: "Whether the field is a key field"}
+const (
+	entityFieldTypeFlagName  = "type"
+	entityFieldTitleFlagName = "title"
+	entityFieldKeyFlagName   = "key"
 )
 
-func entityFieldSetCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "set",
-		Usage:       "Update attributes of an existing field on an entity",
-		Description: "Updates an existing field's type, title, and/or key flag. Fails if the field does not exist; only attributes whose flags are passed are changed.",
-		ArgsUsage:   "<Entity> <field>",
-		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &entityFieldTypeFlag, &entityFieldTitleFlag, &entityFieldKeyFlag, &gitFlag},
-		Action:      entityFieldSetCommandAction,
+func entityFieldSetCommandArgs() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "set <Entity> <field>",
+		Short: "Update attributes of an existing field on an entity",
+		Long:  "Updates an existing field's type, title, and/or key flag. Fails if the field does not exist; only attributes whose flags are passed are changed.",
+		RunE:  entityFieldSetCommandAction,
 	}
+	registerEntityProjectFlags(cmd)
+	cmd.Flags().String(entityFieldTypeFlagName, "", "Field type")
+	cmd.Flags().String(entityFieldTitleFlagName, "", "Field title")
+	cmd.Flags().Bool(entityFieldKeyFlagName, false, "Whether the field is a key field")
+	registerGitFlag(cmd)
+	return cmd
 }
 
-func entityFieldSetCommandAction(ctx context.Context, c *cli.Command) error {
-	name := c.Args().Get(0)
-	fieldName := c.Args().Get(1)
+func entityFieldSetCommandAction(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	name := argAt(args, 0)
+	fieldName := argAt(args, 1)
 	if name == "" || fieldName == "" {
-		return cli.Exit("entity and field names are required: datatug entity field set <Entity> <field>", 2)
+		return Exit("entity and field names are required: datatug entity field set <Entity> <field>", 2)
 	}
 
-	setType := c.IsSet(entityFieldTypeFlag.Name)
-	setTitle := c.IsSet(entityFieldTitleFlag.Name)
-	setKey := c.IsSet(entityFieldKeyFlag.Name)
+	setType := cmd.Flags().Changed(entityFieldTypeFlagName)
+	setTitle := cmd.Flags().Changed(entityFieldTitleFlagName)
+	setKey := cmd.Flags().Changed(entityFieldKeyFlagName)
 	if !setType && !setTitle && !setKey {
-		return cli.Exit("nothing to update: pass at least one of --type, --title, --key", 2)
+		return Exit("nothing to update: pass at least one of --type, --title, --key", 2)
 	}
 
 	v := &projectBaseCommand{}
-	v.ProjectDir = c.String(entityDirFlag.Name)
-	v.ProjectName = c.String(entityProjectFlag.Name)
+	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
+	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
 
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
 	}
 
 	// Resolve the version-control mode and fail loud before any write.
-	mode, err := resolveGitMode(c.String(gitFlag.Name))
+	gitValue, _ := cmd.Flags().GetString(gitFlagName)
+	mode, err := resolveGitMode(gitValue)
 	if err != nil {
 		return err
 	}
@@ -320,7 +349,7 @@ func entityFieldSetCommandAction(ctx context.Context, c *cli.Command) error {
 	entity, err := projectStore.LoadEntity(ctx, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return cli.Exit(fmt.Sprintf("entity %q not found", name), 1)
+			return Exit(fmt.Sprintf("entity %q not found", name), 1)
 		}
 		return err
 	}
@@ -333,21 +362,21 @@ func entityFieldSetCommandAction(ctx context.Context, c *cli.Command) error {
 		}
 	}
 	if field == nil {
-		return cli.Exit(fmt.Sprintf("field %q not found in entity %q", fieldName, name), 1)
+		return Exit(fmt.Sprintf("field %q not found in entity %q", fieldName, name), 1)
 	}
 
 	if setType {
-		newType := c.String(entityFieldTypeFlag.Name)
+		newType, _ := cmd.Flags().GetString(entityFieldTypeFlagName)
 		if err = validateFieldType(newType); err != nil {
-			return cli.Exit(fmt.Sprintf("field %q: %v", fieldName, err), 1)
+			return Exit(fmt.Sprintf("field %q: %v", fieldName, err), 1)
 		}
 		field.Type = newType
 	}
 	if setTitle {
-		field.Title = c.String(entityFieldTitleFlag.Name)
+		field.Title, _ = cmd.Flags().GetString(entityFieldTitleFlagName)
 	}
 	if setKey {
-		field.IsKeyField = c.Bool(entityFieldKeyFlag.Name)
+		field.IsKeyField, _ = cmd.Flags().GetBool(entityFieldKeyFlagName)
 	}
 
 	content, err := marshalEntityFile(entity)
@@ -362,49 +391,45 @@ func entityFieldSetCommandAction(ctx context.Context, c *cli.Command) error {
 		return err
 	}
 
-	w := c.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+	w := cmd.OutOrStdout()
 	_, _ = fmt.Fprintf(w, "updated field: %s\n", fieldName)
 	return nil
 }
 
-func entityFieldAddCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "add",
-		Usage:       "Add one or more new fields to an existing entity",
-		Description: "Adds one or more new fields to an existing entity from a YAML/JSON definition. Additive-only: fails if any named field already exists and never overwrites existing field content.",
-		ArgsUsage:   "<Entity>",
-		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &entityFileFlag, &entityFormatFlag, &entityContinueOnErrorFlag, &gitFlag},
-		Action:      entityFieldAddCommandAction,
+func entityFieldAddCommandArgs() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add <Entity>",
+		Short: "Add one or more new fields to an existing entity",
+		Long:  "Adds one or more new fields to an existing entity from a YAML/JSON definition. Additive-only: fails if any named field already exists and never overwrites existing field content.",
+		RunE:  entityFieldAddCommandAction,
 	}
+	registerEntityProjectFlags(cmd)
+	registerEntityDefinitionFlags(cmd)
+	registerGitFlag(cmd)
+	return cmd
 }
 
 // readDefinitionInput resolves the definition input shared by entity add and
 // entity field add: it validates an explicit --format, reads from the -f file
 // or stdin (-f '-' or absent), and rejects empty (whitespace-only) input. It
 // returns the raw bytes and a human-readable source description.
-func readDefinitionInput(c *cli.Command) (data []byte, source string, err error) {
+func readDefinitionInput(cmd *cobra.Command) (data []byte, source string, err error) {
 	// Validate an explicit --format value up front (before reading/writing).
-	format := c.String(entityFormatFlag.Name)
+	format, _ := cmd.Flags().GetString(entityFormatFlagName)
 	switch format {
 	case "", "yaml", "json":
 		// ok
 	default:
-		return nil, "", cli.Exit(fmt.Sprintf("unsupported --format %q (expected 'yaml' or 'json')", format), 2)
+		return nil, "", Exit(fmt.Sprintf("unsupported --format %q (expected 'yaml' or 'json')", format), 2)
 	}
 
 	// Resolve the input source: a file path, or stdin when -f is '-' or absent.
-	filePath := c.String(entityFileFlag.Name)
+	filePath, _ := cmd.Flags().GetString(entityFileFlagName)
 	fromStdin := filePath == "" || filePath == "-"
 
 	if fromStdin {
 		source = "stdin"
-		reader := c.Root().Reader
-		if reader == nil {
-			reader = os.Stdin
-		}
+		reader := cmd.InOrStdin()
 		if data, err = io.ReadAll(reader); err != nil {
 			return nil, source, fmt.Errorf("failed to read entity definition from stdin: %w", err)
 		}
@@ -417,19 +442,22 @@ func readDefinitionInput(c *cli.Command) (data []byte, source string, err error)
 
 	// Empty input (zero or whitespace-only bytes) is an error; write nothing.
 	if len(strings.TrimSpace(string(data))) == 0 {
-		return nil, source, cli.Exit(fmt.Sprintf("empty input from %s", source), 2)
+		return nil, source, Exit(fmt.Sprintf("empty input from %s", source), 2)
 	}
 	return data, source, nil
 }
 
-func entityAddCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "add",
-		Usage:       "Create a new entity from a definition file",
-		Description: "Creates a new entity from a YAML/JSON definition file. Create-only: fails if the entity already exists.",
-		Flags:       []cli.Flag{&entityDirFlag, &entityProjectFlag, &entityFileFlag, &entityFormatFlag, &entityContinueOnErrorFlag, &gitFlag},
-		Action:      entityAddCommandAction,
+func entityAddCommandArgs() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add",
+		Short: "Create a new entity from a definition file",
+		Long:  "Creates a new entity from a YAML/JSON definition file. Create-only: fails if the entity already exists.",
+		RunE:  entityAddCommandAction,
 	}
+	registerEntityProjectFlags(cmd)
+	registerEntityDefinitionFlags(cmd)
+	registerGitFlag(cmd)
+	return cmd
 }
 
 // parseEntityDocs parses one or more entity definitions from YAML or JSON bytes.
@@ -574,10 +602,11 @@ func marshalEntityFile(entity *datatug.Entity) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func entityAddCommandAction(ctx context.Context, c *cli.Command) error {
+func entityAddCommandAction(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	v := &projectBaseCommand{}
-	v.ProjectDir = c.String(entityDirFlag.Name)
-	v.ProjectName = c.String(entityProjectFlag.Name)
+	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
+	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
 
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
@@ -585,7 +614,8 @@ func entityAddCommandAction(ctx context.Context, c *cli.Command) error {
 
 	// Resolve the version-control mode before reading input or writing anything,
 	// so an invalid or unsupported --git value fails loud before any write.
-	mode, err := resolveGitMode(c.String(gitFlag.Name))
+	gitValue, _ := cmd.Flags().GetString(gitFlagName)
+	mode, err := resolveGitMode(gitValue)
 	if err != nil {
 		return err
 	}
@@ -594,7 +624,7 @@ func entityAddCommandAction(ctx context.Context, c *cli.Command) error {
 		return err
 	}
 
-	data, source, err := readDefinitionInput(c)
+	data, source, err := readDefinitionInput(cmd)
 	if err != nil {
 		return err
 	}
@@ -604,7 +634,7 @@ func entityAddCommandAction(ctx context.Context, c *cli.Command) error {
 		return fmt.Errorf("failed to parse entity definition from %s: %w", source, err)
 	}
 	if len(entities) == 0 {
-		return cli.Exit(fmt.Sprintf("no entities found in input from %s", source), 2)
+		return Exit(fmt.Sprintf("no entities found in input from %s", source), 2)
 	}
 
 	projectStore := v.store.GetProjectStore(v.projectID)
@@ -622,12 +652,9 @@ func entityAddCommandAction(ctx context.Context, c *cli.Command) error {
 		return filepath.Join(v.ProjectDir, "entities", id, id+".entity.json")
 	}
 
-	w := c.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+	w := cmd.OutOrStdout()
 
-	continueOnError := c.Bool(entityContinueOnErrorFlag.Name)
+	continueOnError, _ := cmd.Flags().GetBool(entityContinueOnErrorFlagName)
 
 	var written []string
 	if continueOnError {
@@ -757,22 +784,24 @@ func addEntitiesContinueOnError(
 	return written, nil
 }
 
-func entityFieldAddCommandAction(ctx context.Context, c *cli.Command) error {
-	name := c.Args().First()
+func entityFieldAddCommandAction(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	name := argAt(args, 0)
 	if name == "" {
-		return cli.Exit("entity name is required: datatug entity field add <Entity>", 2)
+		return Exit("entity name is required: datatug entity field add <Entity>", 2)
 	}
 
 	v := &projectBaseCommand{}
-	v.ProjectDir = c.String(entityDirFlag.Name)
-	v.ProjectName = c.String(entityProjectFlag.Name)
+	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
+	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
 
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
 	}
 
 	// Resolve the version-control mode and fail loud before any write.
-	mode, err := resolveGitMode(c.String(gitFlag.Name))
+	gitValue, _ := cmd.Flags().GetString(gitFlagName)
+	mode, err := resolveGitMode(gitValue)
 	if err != nil {
 		return err
 	}
@@ -780,7 +809,7 @@ func entityFieldAddCommandAction(ctx context.Context, c *cli.Command) error {
 		return err
 	}
 
-	data, source, err := readDefinitionInput(c)
+	data, source, err := readDefinitionInput(cmd)
 	if err != nil {
 		return err
 	}
@@ -790,7 +819,7 @@ func entityFieldAddCommandAction(ctx context.Context, c *cli.Command) error {
 		return fmt.Errorf("failed to parse field definition from %s: %w", source, err)
 	}
 	if len(fields) == 0 {
-		return cli.Exit(fmt.Sprintf("no fields found in input from %s", source), 2)
+		return Exit(fmt.Sprintf("no fields found in input from %s", source), 2)
 	}
 
 	projectStore := v.store.GetProjectStore(v.projectID)
@@ -799,7 +828,7 @@ func entityFieldAddCommandAction(ctx context.Context, c *cli.Command) error {
 	entity, err := projectStore.LoadEntity(ctx, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return cli.Exit(fmt.Sprintf("entity %q not found", name), 1)
+			return Exit(fmt.Sprintf("entity %q not found", name), 1)
 		}
 		return err
 	}
@@ -809,13 +838,10 @@ func entityFieldAddCommandAction(ctx context.Context, c *cli.Command) error {
 		existing[f.ID] = true
 	}
 
-	w := c.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+	w := cmd.OutOrStdout()
 
 	entityPath := filepath.Join(v.ProjectDir, "entities", name, name+".entity.json")
-	continueOnError := c.Bool(entityContinueOnErrorFlag.Name)
+	continueOnError, _ := cmd.Flags().GetBool(entityContinueOnErrorFlagName)
 
 	var toAdd []*datatug.EntityField
 	var failures []string

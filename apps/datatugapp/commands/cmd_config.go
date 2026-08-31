@@ -1,15 +1,14 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"os"
 
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
-func configCommandAction(_ context.Context, _ *cli.Command) error {
+func configCommandAction(_ *cobra.Command, _ []string) error {
 	settings, err := dtconfig.GetSettings()
 	if err != nil {
 		return fmt.Errorf("failed to get config: %w", err)
@@ -20,11 +19,10 @@ func configCommandAction(_ context.Context, _ *cli.Command) error {
 	return nil
 }
 
-func configCommand() *cli.Command {
-	return &cli.Command{
-		Name:        "config",
-		Usage:       "Prints config",
-		Description: "",
-		Action:      configCommandAction,
+func configCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "config",
+		Short: "Prints config",
+		RunE:  configCommandAction,
 	}
 }

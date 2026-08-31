@@ -6,28 +6,28 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
-	"github.com/urfave/cli/v3"
 )
 
 // runCopy invokes the copy command with the given argv slice (no "datatug"
 // prefix; pass starting from "db"). Captures stderr and stdout. Returns
-// the cli.Command's exit-coder error (or nil) for the caller to inspect.
+// the returned error (or nil) for the caller to inspect — an ExitCoder when
+// the command used Exit(), a plain error otherwise.
 func runCopy(t *testing.T, argv ...string) (stdout, stderr *bytes.Buffer, err error) {
 	t.Helper()
 	stdout = &bytes.Buffer{}
 	stderr = &bytes.Buffer{}
-	root := &cli.Command{
-		Name:      "datatug",
-		Commands:  []*cli.Command{dbCommand()},
-		Writer:    stdout,
-		ErrWriter: stderr,
-		// urfave/cli's default ExitErrHandler calls os.Exit on ExitCoder
-		// errors, which would terminate the test process. Override to a
-		// no-op so the test can observe the returned error directly.
-		ExitErrHandler: func(_ context.Context, _ *cli.Command, _ error) {},
+	root := &cobra.Command{
+		Use:           "datatug",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
-	err = root.Run(context.Background(), append([]string{"datatug"}, argv...))
+	root.AddCommand(dbCommand())
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.SetArgs(argv)
+	err = root.ExecuteContext(context.Background())
 	return
 }
 
@@ -36,7 +36,7 @@ func TestDBCopy_MissingFrom_Exit2(t *testing.T) {
 	t.Parallel()
 	_, _, err := runCopy(t, "db", "copy", "--to", "sqlite:///tmp/out.db")
 	assert.Error(t, err)
-	if ec, ok := err.(cli.ExitCoder); ok {
+	if ec, ok := err.(ExitCoder); ok {
 		assert.Equal(t, 2, ec.ExitCode())
 	}
 	assert.Contains(t, err.Error(), "from")
@@ -47,7 +47,7 @@ func TestDBCopy_MissingTo_Exit2(t *testing.T) {
 	t.Parallel()
 	_, _, err := runCopy(t, "db", "copy", "--from", "sqlite:///tmp/in.db")
 	assert.Error(t, err)
-	if ec, ok := err.(cli.ExitCoder); ok {
+	if ec, ok := err.(ExitCoder); ok {
 		assert.Equal(t, 2, ec.ExitCode())
 	}
 	assert.Contains(t, err.Error(), "to")
@@ -62,7 +62,7 @@ func TestDBCopy_OverwriteBogus_Exit2(t *testing.T) {
 		"--overwrite", "merge",
 	)
 	assert.Error(t, err)
-	if ec, ok := err.(cli.ExitCoder); ok {
+	if ec, ok := err.(ExitCoder); ok {
 		assert.Equal(t, 2, ec.ExitCode())
 	}
 	msg := err.Error()
@@ -80,7 +80,7 @@ func TestDBCopy_UnknownScheme_Exit2(t *testing.T) {
 		"--to", "sqlite:///tmp/out.db",
 	)
 	assert.Error(t, err)
-	if ec, ok := err.(cli.ExitCoder); ok {
+	if ec, ok := err.(ExitCoder); ok {
 		assert.Equal(t, 2, ec.ExitCode())
 	}
 	msg := err.Error()
@@ -97,7 +97,7 @@ func TestDBCopy_RemoteInGitDB_Exit2(t *testing.T) {
 		"--to", "ingitdb://github.com/owner/repo",
 	)
 	assert.Error(t, err)
-	if ec, ok := err.(cli.ExitCoder); ok {
+	if ec, ok := err.(ExitCoder); ok {
 		assert.Equal(t, 2, ec.ExitCode())
 	}
 	assert.Contains(t, err.Error(), "local paths only")

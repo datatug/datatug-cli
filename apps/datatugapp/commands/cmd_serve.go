@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,13 +9,13 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/datatug/datatug-cli/pkg/server"
 	"github.com/pkg/browser"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
 )
 
 // ServeCommand executes serve consoleCommand
 //var ServeCommand *flags.Command
 
-func serveCommandAction(_ context.Context, _ *cli.Command) error {
+func serveCommandAction(_ *cobra.Command, _ []string) error {
 	v := &serveCommand{}
 	var config dtconfig.Settings
 	config, err := dtconfig.GetSettings()
@@ -72,20 +71,24 @@ func serveCommandAction(_ context.Context, _ *cli.Command) error {
 	return httpServer.ServeHTTP(pathsByID, v.Host, v.Port)
 }
 
-func serveCommandArgs() *cli.Command {
-	return &cli.Command{
-		Name:        "serve",
-		Usage:       "Serves HTTP server to provide API for UI",
-		Description: "Serves HTTP server to provide API for UI. Default port is 8989",
-		Action:      serveCommandAction,
+func serveCommandArgs() *cobra.Command {
+	return &cobra.Command{
+		Use:   "serve",
+		Short: "Serves HTTP server to provide API for UI",
+		Long:  "Serves HTTP server to provide API for UI. Default port is 8989",
+		RunE:  serveCommandAction,
 	}
 }
 
-// serveCommand defines parameters for serve consoleCommand
+// serveCommand defines parameters for serve consoleCommand. No flags are
+// registered on the `serve` cobra.Command (matching the pre-migration
+// urfave/cli/v3 wiring, which likewise never attached these fields to any
+// cli.Flag), so every field below always holds its zero value at runtime;
+// serveCommandAction falls back to config-file/default values instead.
 type serveCommand struct {
 	projectBaseCommand
-	Host      string `short:"h" long:"host" default:"localhost"`
-	Port      int    `short:"o" long:"port" default:"8989"`
-	Local     bool   `long:"local" description:"opens UI on default localhost:4200"`
-	ClientURL string `long:"client-url" description:"Default is https://datatug.app/pwa/agent/localhost:8989"`
+	Host      string
+	Port      int
+	Local     bool
+	ClientURL string
 }

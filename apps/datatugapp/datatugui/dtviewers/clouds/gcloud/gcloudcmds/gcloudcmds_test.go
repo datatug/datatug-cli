@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v3"
 	"google.golang.org/api/cloudresourcemanager/v3"
 )
 
@@ -31,13 +31,15 @@ func runProjects(t *testing.T, fakeProjects []*cloudresourcemanager.Project, fak
 		return nil
 	}
 
-	root := &cli.Command{
-		Name:           "datatug",
-		Commands:       []*cli.Command{GoogleCloudCommand()},
-		ExitErrHandler: func(_ context.Context, _ *cli.Command, _ error) {},
+	root := &cobra.Command{
+		Use:           "datatug",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
-	argv := append([]string{"datatug", "gcloud", "projects"}, extraArgs...)
-	return root.Run(context.Background(), argv)
+	root.AddCommand(GoogleCloudCommand())
+	argv := append([]string{"gcloud", "projects"}, extraArgs...)
+	root.SetArgs(argv)
+	return root.ExecuteContext(context.Background())
 }
 
 // sampleProjects returns a small slice of fake projects for table-driven tests.
@@ -52,13 +54,13 @@ func sampleProjects() []*cloudresourcemanager.Project {
 
 func TestGoogleCloudCommand_Name(t *testing.T) {
 	cmd := GoogleCloudCommand()
-	assert.Equal(t, "gcloud", cmd.Name)
+	assert.Equal(t, "gcloud", cmd.Name())
 }
 
 func TestGoogleCloudCommand_HasLoginAndProjects(t *testing.T) {
 	cmd := GoogleCloudCommand()
-	require.Len(t, cmd.Commands, 2)
-	names := []string{cmd.Commands[0].Name, cmd.Commands[1].Name}
+	require.Len(t, cmd.Commands(), 2)
+	names := []string{cmd.Commands()[0].Name(), cmd.Commands()[1].Name()}
 	assert.Contains(t, names, "login")
 	assert.Contains(t, names, "projects")
 }
@@ -67,13 +69,13 @@ func TestGoogleCloudCommand_HasLoginAndProjects(t *testing.T) {
 
 func TestLoginCommand_Name(t *testing.T) {
 	cmd := loginCommand()
-	assert.Equal(t, "login", cmd.Name)
+	assert.Equal(t, "login", cmd.Name())
 }
 
 func TestLoginCommand_ActionReturnsNil(t *testing.T) {
 	cmd := loginCommand()
-	require.NotNil(t, cmd.Action)
-	err := cmd.Action(context.Background(), cmd)
+	require.NotNil(t, cmd.RunE)
+	err := cmd.RunE(cmd, nil)
 	assert.NoError(t, err)
 }
 
@@ -81,18 +83,12 @@ func TestLoginCommand_ActionReturnsNil(t *testing.T) {
 
 func TestProjectsCommand_Name(t *testing.T) {
 	cmd := projectsCommand()
-	assert.Equal(t, "projects", cmd.Name)
+	assert.Equal(t, "projects", cmd.Name())
 }
 
 func TestProjectsCommand_HasFormatFlag(t *testing.T) {
 	cmd := projectsCommand()
-	var found bool
-	for _, f := range cmd.Flags {
-		if f.Names()[0] == "format" {
-			found = true
-		}
-	}
-	assert.True(t, found, "expected --format flag")
+	assert.NotNil(t, cmd.Flags().Lookup("format"), "expected --format flag")
 }
 
 func TestProjectsCommand_GetProjectsError(t *testing.T) {
@@ -134,12 +130,14 @@ func TestProjectsCommand_FormatEmpty_OpensScreen(t *testing.T) {
 		return nil
 	}
 
-	root := &cli.Command{
-		Name:           "datatug",
-		Commands:       []*cli.Command{GoogleCloudCommand()},
-		ExitErrHandler: func(_ context.Context, _ *cli.Command, _ error) {},
+	root := &cobra.Command{
+		Use:           "datatug",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
-	err := root.Run(context.Background(), []string{"datatug", "gcloud", "projects", "--format", ""})
+	root.AddCommand(GoogleCloudCommand())
+	root.SetArgs([]string{"gcloud", "projects", "--format", ""})
+	err := root.ExecuteContext(context.Background())
 	assert.NoError(t, err)
 	assert.True(t, called, "openGCloudProjectsScreen should have been called")
 }

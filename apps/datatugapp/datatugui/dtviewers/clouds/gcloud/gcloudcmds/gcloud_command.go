@@ -1,13 +1,11 @@
 package gcloudcmds
 
-import "github.com/urfave/cli/v3"
+import "github.com/spf13/cobra"
 
-func GoogleCloudCommand() *cli.Command {
-	return &cli.Command{
-		Name: "gcloud",
-		Commands: []*cli.Command{
-			loginCommand(),
-			projectsCommand(),
-		},
+func GoogleCloudCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "gcloud",
 	}
+	cmd.AddCommand(loginCommand(), projectsCommand())
+	return cmd
 }

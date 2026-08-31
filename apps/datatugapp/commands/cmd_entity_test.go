@@ -10,35 +10,36 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v3"
 )
 
 // runEntity invokes the entity command with the given argv slice (no "datatug"
 // prefix; pass starting from "entity"). Captures stdout/stderr and returns the
-// cli.Command's error (or nil) for the caller to inspect. A no-op
-// ExitErrHandler lets the test observe the returned error / exit code directly.
+// returned error (or nil) for the caller to inspect.
 func runEntity(t *testing.T, argv ...string) (stdout, stderr *bytes.Buffer, err error) {
 	t.Helper()
 	return runEntityStdin(t, "", argv...)
 }
 
 // runEntityStdin is like runEntity but injects the given string as the
-// command's stdin via root.Reader, letting tests exercise stdin input.
+// command's stdin, letting tests exercise stdin input.
 func runEntityStdin(t *testing.T, stdin string, argv ...string) (stdout, stderr *bytes.Buffer, err error) {
 	t.Helper()
 	stdout = &bytes.Buffer{}
 	stderr = &bytes.Buffer{}
-	root := &cli.Command{
-		Name:           "datatug",
-		Commands:       []*cli.Command{entityCommand()},
-		Reader:         strings.NewReader(stdin),
-		Writer:         stdout,
-		ErrWriter:      stderr,
-		ExitErrHandler: func(_ context.Context, _ *cli.Command, _ error) {},
+	root := &cobra.Command{
+		Use:           "datatug",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
-	err = root.Run(context.Background(), append([]string{"datatug"}, argv...))
+	root.AddCommand(entityCommand())
+	root.SetIn(strings.NewReader(stdin))
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.SetArgs(argv)
+	err = root.ExecuteContext(context.Background())
 	return
 }
 

@@ -95,12 +95,8 @@ github.com/cyphar/filepath-securejoin v0.7.0 h1:s0Y3ITPy6sQn5xt54DuYvTF8hu134ooY
 github.com/cyphar/filepath-securejoin v0.7.0/go.mod h1:ymLGms/u3BYaviIiuKFnUx8EkQEZeK6cInNoAPJA3o4=
 github.com/dal-go/dalgo v0.74.2 h1:i80DdaEG617Ki93hTrT6WSpmP/Pb3Siosxkkrtymi78=
 github.com/dal-go/dalgo v0.74.2/go.mod h1:ffWy4OC32BDoseIh+9KF/W9VUGk3FfkAtIvUzUf1zAY=
-github.com/dal-go/dalgo2sql v0.11.3 h1:oDqbdX/i3y2mAB+wJ6ubeyx4+bl403b8/bJrwrRJQKY=
-github.com/dal-go/dalgo2sql v0.11.3/go.mod h1:qWegyW115zJaYBZ/Zj9R1fNoo5lJxTS98KJx/IzSWsY=
 github.com/dal-go/dalgo2sql v0.11.4 h1:7UrhL8Blr5qRJ4Hcdzyf0VxI3uEhQAywdADJrZrStX0=
 github.com/dal-go/dalgo2sql v0.11.4/go.mod h1:OZKb7blQM1OXpEsshU5XWN/bD2jSmwVyvGEiCSJBulU=
-github.com/dal-go/dalgo2sqlite v0.1.7 h1:fY9MdMXGlIPYeM0rrq+3AscLDpmj1bHJMQNUMRELvP0=
-github.com/dal-go/dalgo2sqlite v0.1.7/go.mod h1:/BsGQhghmzE3/z8euMaYHLzyoEw6Ox++4Os2Y4Tl0g8=
 github.com/dal-go/dalgo2sqlite v0.1.8 h1:i7lb9MEQ5/ZVbF7nGUPQUp6C4m58HxGLVlGi6MGamjE=
 github.com/dal-go/dalgo2sqlite v0.1.8/go.mod h1:+n9hXVRd5GEaaqiYpmeTrKlRuzut2gdjpjgD435F5xI=
 github.com/dal-go/record v0.1.3 h1:K85k/kSX08lTefMiMmPpC12nmCY2TVJk7+ZyC5PD9XU=
@@ -133,8 +129,6 @@ github.com/fatih/color v1.19.0 h1:Zp3PiM21/9Ld6FzSKyL5c/BULoe/ONr9KlbYVOfG8+w=
 github.com/fatih/color v1.19.0/go.mod h1:zNk67I0ZUT1bEGsSGyCZYZNrHuTkJJB+r6Q9VuMi0LE=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
-github.com/filetug/filetug v0.2.4 h1:ZLRxOCLQB49YMycF0Cg7Cp0i8kQUiF2OoYAJg3h7oJ8=
-github.com/filetug/filetug v0.2.4/go.mod h1:uwEkPQfXQ88/a73jNJq2vmqz3H97Jysd3joWUukttS8=
 github.com/filetug/filetug v0.3.0 h1:ZZZKhMBd3EJgHEC7yl27k3LNQiHMdgz/XOkutRPgFqs=
 github.com/filetug/filetug v0.3.0/go.mod h1:vlZXqTPA2zpZ7OqxWisDj9gS+LUcG0KJaUc5r3d0V+U=
 github.com/gdamore/encoding v1.0.1 h1:YzKZckdBL6jVt2Gc+5p82qhrGiqMdG/eNs6Wy0u3Uhw=
@@ -202,8 +196,6 @@ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/ingitdb/dalgo2ingitdb v0.3.5 h1:aL+VWhbY3tct7FldgaIApe2gL2RiQXizbk4PYAZrGjo=
 github.com/ingitdb/dalgo2ingitdb v0.3.5/go.mod h1:LLiFCCJiYbathvdL3aLVEIUgzJRpW374yK/g1725zyw=
-github.com/ingitdb/ingitdb-go/ingitdb v0.5.4 h1:faa18iO+qcF1FO8ZdzgpQa+6j9VxIarNNMSGXc08MMo=
-github.com/ingitdb/ingitdb-go/ingitdb v0.5.4/go.mod h1:p0dD9yIhTKG86CedtvJCoasv4Nf4AKei9KQUy45agdI=
 github.com/ingitdb/ingitdb-go/ingitdb v0.6.0 h1:TzPGAMH2KM6ThgoZBV6dqnT02MVN5fd5et9aB5iI4SY=
 github.com/ingitdb/ingitdb-go/ingitdb v0.6.0/go.mod h1:p0dD9yIhTKG86CedtvJCoasv4Nf4AKei9KQUy45agdI=
 github.com/ingr-io/ingr-go v0.0.2 h1:2AfFllqzCe2dCNtxIUo306oYzaZr//YzrVOHd0C73nI=
@@ -313,8 +305,6 @@ github.com/sergi/go-diff v1.4.0/go.mod h1:A0bzQcvG0E7Rwjx0REVgAGH58e96+X0MeOfepq
 github.com/sirupsen/logrus v1.7.0/go.mod h1:yWOB1SBYBC5VeMP7gHvWumXLIWorT60ONWic61uBYv0=
 github.com/skeema/knownhosts v1.3.2 h1:EDL9mgf4NzwMXCTfaxSD/o/a5fxDw/xL9nkU28JjdBg=
 github.com/skeema/knownhosts v1.3.2/go.mod h1:bEg3iQAuw+jyiw+484wwFJoKSLwcfd7fqRy+N0QTiow=
-github.com/sneat-co/sneat-go-core v0.67.2 h1:ezkvbHkpfmfzBqg4OD6kouLQtyND/QK6YobUkHa9MI4=
-github.com/sneat-co/sneat-go-core v0.67.2/go.mod h1:bIt8bPBj6aVn1kCgP4VvaV9hFHmx8NzExjywlSrYOMA=
 github.com/sneat-co/sneat-go-core v0.67.3 h1:ymgK4CwkPRYu3YbsVN/o8z35JQUy18w/qsCql33SLCo=
 github.com/sneat-co/sneat-go-core v0.67.3/go.mod h1:bIt8bPBj6aVn1kCgP4VvaV9hFHmx8NzExjywlSrYOMA=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
@@ -333,8 +323,6 @@ github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWD
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/strongo/analytics v0.2.8 h1:h0snZrFba1DDI7H/RcePbq3V8MeuOrZFC8kj5ZJkp/I=
 github.com/strongo/analytics v0.2.8/go.mod h1:/pf7goR1CZtkvZHrJH5sXpJJl6IAefWCx82eSGUZ2V0=
-github.com/strongo/buildinfo v0.2.0 h1:4lVoCUfUbwJN8EbqFNQ1oYdBnjKrKRx6FlLVrTPSleI=
-github.com/strongo/buildinfo v0.2.0/go.mod h1:JpxZ3Jku81LJC1RNIqCNYwguDzLk90eemxUXx4JnSlA=
 github.com/strongo/buildinfo v0.2.1 h1:z6H2UJYT8hAgzCUnNIjOCEAWmNnvj3KZdYXIw5dZngs=
 github.com/strongo/buildinfo v0.2.1/go.mod h1:JpxZ3Jku81LJC1RNIqCNYwguDzLk90eemxUXx4JnSlA=
 github.com/strongo/decimal v0.1.2 h1:/LHdX9zJTUPpEM2cuQhnwCWNWLCUwG0BJMyOetpryY8=
@@ -459,8 +447,6 @@ golang.org/x/tools v0.48.0/go.mod h1:08xX0orndb/F7jJxGDicx061tyd5pcMto75YMAXr6lk
 golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
 gonum.org/v1/gonum v0.17.0 h1:VbpOemQlsSMrYmn7T2OUvQ4dqxQXU+ouZFQsZOx50z4=
 gonum.org/v1/gonum v0.17.0/go.mod h1:El3tOrEuMpv2UdMrbNlKEh9vd86bmQ6vqIcDwxEOc1E=
-google.golang.org/api v0.295.0 h1:SSqFeEVjnK5SKo6t7D0E0M7EfX8SP7K0+OJd2Ly5FzU=
-google.golang.org/api v0.295.0/go.mod h1:02qB8+Ox1ZFzcaKFMguy1nQLJmSIyvV6Ff4txJEXtl4=
 google.golang.org/api v0.296.0 h1:Nn5EHeKdGx70MFClaV/II0gsWUm6xhEjb0xYLylVvaA=
 google.golang.org/api v0.296.0/go.mod h1:02qB8+Ox1ZFzcaKFMguy1nQLJmSIyvV6Ff4txJEXtl4=
 google.golang.org/genproto v0.0.0-20260803160001-6ac0973c030d h1:33JLrUF0lFT31667SAtJzZAjLewV0ew5Mizks4caz0A=

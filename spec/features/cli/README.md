@@ -47,7 +47,9 @@ Pinning the contract surface lets the implementation evolve without breaking use
 | [db/](db/README.md) | Open a database viewer by URL |
 | [queries/](queries/README.md) | Queries management (placeholder; not implemented) |
 | [execute/](execute/README.md) | Execute an SQL query/command (currently exposed under the name `updateUrlConfig`) |
+| [query/](query/README.md) | `query run` — run an ad-hoc DTQL query through the user's access policies (`~/.datatug/policies/`): rows to stdout, applied limitations to stderr |
 | [version/](version/README.md) | CLI version reporting |
+| [entity](entity/README.md) | Author and read entities and their fields (`add`, `field add/set/rm`, `list`, `show`) |
 
 External command groups live in their own packages and are referenced here but not specified in this tree:
 
@@ -94,9 +96,10 @@ Every `datatug` command MUST observe the following exit-code contract:
 | `2` | Invalid arguments (missing required flag, bad flag value, malformed input) |
 | `3` | Resource not found (project, dataset, file, database) |
 | `4` | Connection or I/O failure against an external system (database, HTTP, filesystem) |
+| `5` | Access denied by an access policy (DALgo `access.ErrAccessDenied`) |
 | `10` | Unexpected / catch-all panic |
 
-Exit codes `5–9` and `11–19` are reserved for future standard codes and MUST NOT be used by individual commands.
+Exit codes `6–9` and `11–19` are reserved for future standard codes and MUST NOT be used by individual commands.
 
 #### REQ: standard-exit-codes
 
@@ -138,7 +141,7 @@ YAML and JSON output keys are part of each command's contract. Renaming or remov
 |---|---|---|
 | `--project` | `-p` | DataTug project ID (resolved against the user-level registry at `~/.datatug.yaml`). |
 | `--dir` | `-d` | Path to a DataTug project directory. Mutually exclusive with `--project`. |
-| `--format` | `-f` | Output format. Allowed values vary by command (subset of `yaml`, `json`, `text`, `csv`, `grid`). |
+| `--format` | `-f` | Output format. Allowed values vary by command (subset of `yaml`, `json`, `jsonl`, `text`, `csv`, `grid`). On commands that read an input document (`entity add`, `query run`) `-f` is `--file` and `--format` has no short alias. |
 | `--tui` |  | Force TUI mode where supported (parent command flag). |
 | `-h`, `--help` |  | Print help and exit `0`. Provided by urfave/cli; commands MUST NOT override it. |
 

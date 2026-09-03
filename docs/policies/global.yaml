@@ -1,0 +1,43 @@
+# Global DataTug access policy — the example `datatug query run` verifies.
+#
+# Install it as ~/.datatug/policies/global.yaml (or point --policies-dir at a
+# directory holding it). Every document in that directory is applied together:
+# a row or field must be allowed by all of them.
+#
+# The policy below models a CRM: anyone may list products; a user may list and
+# read only the customers assigned to them (`ownerID == $currentUser`, where
+# `$currentUser` comes from `datatug query run --as <user>`), and never sees the
+# `passwordHash` field because the rules allow-list the visible fields.
+apiVersion: dalgo.io/access/v1
+kind: AccessPolicy
+metadata:
+  name: global
+default: deny
+scopes:
+  - path: /customers
+    rules:
+      - id: list-own
+        effect: allow
+        operations: [query]
+        where:
+          op: "=="
+          left: { field: ownerID }
+          right: { param: currentUser }
+        fields: [id, name, email, ownerID]
+  # Point reads are exercised by applications, not by `query run`, which only
+  # issues queries; the rule is here so the document is complete for both.
+  - path: /customers/*
+    rules:
+      - id: read-own
+        effect: allow
+        operations: [read]
+        where:
+          op: "=="
+          left: { field: ownerID }
+          right: { param: currentUser }
+        fields: [id, name, email, ownerID]
+  - path: /products
+    rules:
+      - id: list-all
+        effect: allow
+        operations: [query]

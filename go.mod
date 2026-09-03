@@ -20,7 +20,7 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
-	github.com/dal-go/dalgo v0.74.2
+	github.com/dal-go/dalgo v0.79.1
 	github.com/dal-go/dalgo2sql v0.11.4
 	github.com/dal-go/dalgo2sqlite v0.1.8
 	github.com/dal-go/record v0.1.3

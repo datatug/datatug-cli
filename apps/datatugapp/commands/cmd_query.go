@@ -163,14 +163,11 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return Exit(fmt.Sprintf("open %s: %v", o.db, err), exitCodeDatabase)
 	}
-	if closer, ok := db.(io.Closer); ok {
-		defer func() { _ = closer.Close() }()
-	}
 	stderr := cmd.ErrOrStderr()
 	if len(loaded) == 0 {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
-	result, err := accesspolicies.Run(ctx, db, query, accesspolicies.Options{Principal: principal, Variables: variables, Policies: loaded})
+	result, err := accesspolicies.Run(ctx, db, query, accesspolicies.Options{Principal: principal, Variables: variables, Policies: loaded, Unrestricted: o.noPolicies})
 	if !o.quiet {
 		for _, line := range result.Lines {
 			_, _ = fmt.Fprintln(stderr, line.String())
@@ -197,7 +194,7 @@ func queryFailure(err error) error {
 	switch {
 	case errors.Is(err, access.ErrAccessDenied):
 		return Exit(err.Error(), exitCodeAccessDenied)
-	case errors.Is(err, accesspolicies.ErrUnresolvedParam):
+	case errors.Is(err, accesspolicies.ErrInvalidQuery), errors.Is(err, accesspolicies.ErrNoPolicies):
 		return Exit(err.Error(), exitCodeUsage)
 	default:
 		return Exit(err.Error(), exitCodeDatabase)

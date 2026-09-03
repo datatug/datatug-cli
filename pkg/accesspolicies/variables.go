@@ -3,6 +3,7 @@ package accesspolicies
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/dal-go/dalgo/dal"
 	"gopkg.in/yaml.v3"
@@ -43,6 +44,9 @@ func parseValue(raw string) any {
 	var value any
 	if err := yaml.Unmarshal([]byte(raw), &value); err != nil || value == nil {
 		return raw
+	}
+	if _, isTime := value.(time.Time); isTime {
+		return raw // dates stay the literal text so they compare with stored strings
 	}
 	return value
 }

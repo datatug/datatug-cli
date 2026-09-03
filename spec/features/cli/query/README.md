@@ -40,7 +40,7 @@ datatug query run --db <url> (-f <dtql-file>|--from <collection>) \
 
 #### REQ: query-input
 
-`query run` MUST accept the query either as a DTQL document (`-f <path>`, YAML or JSON; `-f -` reads stdin) or as `--from <collection>`, which selects every row and every field of one root collection. Exactly one of the two MUST be given; otherwise the command MUST exit 2 with a usage error. Parameters in the query document (`param:` nodes in `where`) MUST be substituted from `--var` before execution; an unresolved query parameter MUST exit 2 naming `$name`. Parameters elsewhere than `where` are not supported and MUST exit 2.
+`query run` MUST accept the query either as a DTQL document (`-f <path>`, YAML or JSON; `-f -` reads stdin) or as `--from <collection>`, which selects every row and every field of one root collection. Exactly one of the two MUST be given; otherwise the command MUST exit 2 with a usage error. Parameters in the query document (`param:` nodes on the right-hand side of a `where` comparison) MUST be substituted from `--var` before execution; an unresolved query parameter MUST exit 2 naming `$name`. A parameter anywhere else (columns, the left-hand side, `orderBy`, `groupBy`, `having`) is not supported and MUST exit 2 naming it.
 
 #### REQ: db-url
 
@@ -58,17 +58,17 @@ Each file MUST be a DALgo access document — an `AccessPolicy` or a principal-b
 
 #### REQ: principal-and-variables
 
-`--as <user-id>` MUST set the principal ID (always a string) and the `$currentUser` variable; `--role` and `--group` (repeatable, valid without `--as`) MUST set the principal's roles and groups, so role bindings apply to an anonymous principal. `--var name=value` (repeatable) MUST define further variables for `$name`. A name MUST satisfy DALgo's parameter grammar (`dal.ValidParamName`); the names `currentUser`, `principal.*` and `path.*` are reserved and MUST exit 2, pointing at `--as`, `--role` and `--group`; `now` MAY be overridden to test time-bound rules. A value MUST be parsed as a YAML scalar or flow sequence, so `--var age=18` compares numerically, `--var open=true` as a boolean and `--var ids=[1,2]` feeds an `In` condition; quote to force a string (`--var id="'007'"`); a mapping value MUST exit 2.
+`--as <user-id>` MUST set the principal ID (always a string) and the `$currentUser` variable; `--role` and `--group` (repeatable, valid without `--as`) MUST set the principal's roles and groups, so role bindings apply to an anonymous principal. `--var name=value` (repeatable) MUST define further variables for `$name`. A name MUST satisfy DALgo's parameter grammar (`dal.ValidParamName`); the names `currentUser`, `principal.*` and `path.*` are reserved and MUST exit 2, pointing at `--as`, `--role` and `--group`; `now` MAY be overridden to test time-bound rules. A value MUST be parsed as a YAML scalar or flow sequence, so `--var age=18` compares numerically, `--var open=true` as a boolean and `--var ids=[1,2]` feeds an `In` condition; a date stays the literal text; quote to force a string (`--var id="'007'"`); a mapping value MUST exit 2.
 
 ### Execution and output
 
 #### REQ: secured-execution
 
-The query MUST run through `access.SecureReadSession` over the opened database, so row conditions are pushed into the query and field allow-lists are projected or redacted by DALgo before any row reaches the command. A query whose `where`, `orderBy`, `groupBy` or `having` references a field that some deciding rule's `fields` list of some loaded policy refuses MUST be denied naming the field, so a caller cannot probe a hidden field through row counts. With `--no-policies` the query MUST run unrestricted and `access: running without access policies` MUST be written to stderr even under `--quiet`.
+The query MUST run through `access.SecureReadSession` over the opened database, so row conditions are pushed into the query and field allow-lists are projected or redacted by DALgo before any row reaches the command. A query whose columns, `where`, `orderBy`, `groupBy` or `having` reference a field that some deciding rule's `fields` list of some loaded policy refuses MUST be denied naming the field, so a caller cannot read a hidden field under another name or probe it through row counts; a query using any construct the check cannot classify MUST be denied too (fail closed). Because DALgo redacts by output name, column aliases (`as:`) MUST be refused with exit 2 whenever a loaded policy carries a field list. With `--no-policies` the query MUST run unrestricted and `access: running without access policies` MUST be written to stderr even under `--quiet`.
 
 #### REQ: stdout-rows
 
-Result rows MUST be written to stdout only, in the `--format` given: `grid` (default; aligned columns), `json` (one array of objects), `jsonl` (one object per line), `yaml` (a sequence of mappings) or `csv` (header row then rows). The record key MUST be emitted first as `$key`; it identifies the record and is not subject to field allow-lists. Then the record's fields: the requested columns that survive enforcement (a requested column absent from every returned row MUST NOT appear), in request order; when the query names no columns, the union of the returned fields in sorted order. A record whose data contains a field literally named `$key` MUST exit 1. Nothing else MUST be written to stdout. Row streams default to `grid` rather than the umbrella's YAML because they are looked at more often than parsed; `yaml` remains available.
+Result rows MUST be written to stdout only, in the `--format` given: `grid` (default; aligned columns), `json` (one array of objects), `jsonl` (one object per line), `yaml` (a sequence of mappings) or `csv` (header row then rows). The record key MUST be emitted first as `$key`; it identifies the record and is not subject to field allow-lists. Then the record's fields: when the query names columns, those columns in request order, de-duplicated, minus any column that enforcement removed from every returned row (nothing is added in its place; an adapter may still return an unknown column as empty); when the query names no columns, the union of the returned fields in sorted order. Numbers MUST render plainly (`1000000`, never `1e+06`). A record whose data contains a field literally named `$key` MUST exit 1. Nothing else MUST be written to stdout. Row streams default to `grid` rather than the umbrella's YAML because they are looked at more often than parsed; `yaml` remains available.
 
 #### REQ: stderr-report
 
@@ -192,6 +192,24 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 **When** the user runs it as alice
 **Then** stdout is empty, stderr names `passwordHash`, and the exit code is 5.
 
+### AC: hidden-field-select-denied (verifies REQ:secured-execution)
+
+**Given** the same policy and a DTQL document selecting `name` and `passwordHash`
+**When** the user runs it as alice
+**Then** stdout is empty, stderr names `passwordHash`, and the exit code is 5.
+
+### AC: alias-refused-under-field-lists (verifies REQ:secured-execution)
+
+**Given** the same policy and a DTQL document selecting `passwordHash` as `public_hash`
+**When** the user runs it as alice
+**Then** stdout is empty, stderr names `public_hash`, and the exit code is 2.
+
+### AC: param-outside-where-exit-2 (verifies REQ:query-input)
+
+**Given** a DTQL document whose `orderBy` is `{ param: col }`
+**When** the user runs it with `--var col=name`
+**Then** the command exits 2 naming `$col`.
+
 ### AC: no-policies-warns (verifies REQ:secured-execution)
 
 **Given** `--no-policies --quiet`
@@ -228,11 +246,17 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 **When** the user runs the query with `--format csv`, `jsonl`, `yaml` and `grid`
 **Then** csv has the header `$key,email,id,name,ownerID` followed by two rows, jsonl has two JSON objects on two lines, yaml is a sequence of two mappings, and grid has a header line and two aligned rows.
 
-### AC: header-from-enforced-rows (verifies REQ:stdout-rows)
+### AC: header-follows-request-order (verifies REQ:stdout-rows)
 
-**Given** the global policy and a DTQL document selecting `name` and `passwordHash` from `customers`
+**Given** the global policy and a DTQL document selecting `name` then `email` from `customers`
 **When** the user runs it as alice with `--format csv`
-**Then** the header is `$key,name`; no `passwordHash` column appears.
+**Then** the header is `$key,name,email` (request order, not the sorted union) and no `passwordHash` column appears.
+
+### AC: numbers-plain (verifies REQ:stdout-rows)
+
+**Given** a product priced `1000000`
+**When** the user runs `--from products` in each of `csv`, `grid`, `yaml` and `json`
+**Then** every output contains `1000000` and none contains `1e+06`.
 
 ### AC: db-unopenable-exit-4 (verifies REQ:exit-codes)
 
@@ -245,7 +269,7 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 - `pkg/accesspolicies` is the reusable core, so the TUI and `serve` can adopt it without the cobra layer:
   - `ResolveDir` (`--policies-dir` > `DATATUG_POLICIES_DIR` > `~/.datatug/policies`), `Load` (discovery, `--policy` files, the `--no-policies` rules and the zero-policies refusal), `LoadFile` (`access.DecodePolicy`, source = path).
   - `ParseVariables` (name grammar, reserved names, YAML scalar or sequence values).
-  - `Run(ctx, session, query, Options) (Result, error)`: principal and variables on the context, query-parameter substitution (`condeval.Substitute` + `dal.WithWhere`), the hidden-field reference check against every field list DALgo's decisions expose (`Decision.Writes`), `access.SecureReadSession`, and `Result{Reader, Lines}`.
+  - `Run(ctx, session, query, Options) (Result, error)`: principal and variables on the context, query-parameter placement and substitution (`condeval.Substitute` + `dal.WithWhere`), the alias refusal and the hidden-field reference check over columns and clauses against every field list DALgo's decisions expose (`Decision.Writes`, mirroring DALgo's pattern matcher), `access.SecureReadSession`, and `Result{Reader, Lines}`; running with no policies requires `Options.Unrestricted`.
   - `Line{Policy, Source, Resource, Rule, Allowed, Condition, Bindings, FieldLists, Via, Explanation}` with `String()` rendering the pinned report format; `Explain` produces the lines from one `Decide` per policy.
 - `apps/datatugapp/commands/cmd_query.go`: the `query` group (help only) and `run`: flags, DTQL/`--from` query construction, `pkg/dbcopy` URL backend, exit-code mapping, and row formatting (`query_output.go`: rows normalised to JSON-shaped maps; `grid`, `json`, `jsonl`, `yaml`, `csv`).
 - `~/.datatug/` sits beside the umbrella's proposed `~/.datatug.yaml`; `DATATUG_POLICIES_DIR` follows its `DATATUG_*` naming.
@@ -254,7 +278,8 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 ## Error Handling and Failure Modes
 
 - Undecodable query or policy document, unsupported document kind, bad `--var`, unresolved query parameter, missing explicit policies directory, zero policies without `--no-policies`, `--no-policies` with `--policy`: exit 2, naming the file, variable or directory.
-- Denied by policy, including a missing variable or a hidden-field reference: exit 5; stdout stays empty because the denial is raised before any row is written.
+- Denied by policy, including a missing variable, a hidden-field reference or a query the check cannot classify: exit 5; stdout stays empty because the denial is raised before any row is written.
+- Column alias under a field-restricted policy, or a parameter outside a where right-hand side: exit 2.
 - Database cannot be opened, or the adapter refuses the rewritten query (unsupported operator): exit 4 with the adapter's error.
 - A data field named `$key`, or a write to stdout failing: exit 1.
 
@@ -272,7 +297,7 @@ Deferred — no `specscore rehearse` scenarios yet; the command tests below are 
 
 - Writing data through policies (the command is read-only).
 - Project-scoped policies (`<project>/policies/`) and policy management verbs (`datatug policy list|check`).
-- Pagination and cursors; the query runs once and streams all rows.
+- Pagination and cursors; the query runs once and the rows are buffered before output.
 - Joins: DTQL documents do not express them, so the report covers the base collection only.
 
 ## Open Questions

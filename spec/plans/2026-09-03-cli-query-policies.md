@@ -32,7 +32,7 @@ The reusable core lives in `pkg/accesspolicies` (discovery, decoding, variable p
 ### Task 2: Principal, variables, secured run and report
 
 **Id:** task-2
-**Verifies:** cli/query#ac:var-invalid-exit-2, cli/query#ac:var-typed, cli/query#ac:hidden-field-filter-denied, cli/query#ac:report-names-limitations, cli/query#ac:report-no-limitations
+**Verifies:** cli/query#ac:var-invalid-exit-2, cli/query#ac:var-typed, cli/query#ac:hidden-field-filter-denied, cli/query#ac:hidden-field-select-denied, cli/query#ac:alias-refused-under-field-lists, cli/query#ac:param-outside-where-exit-2, cli/query#ac:report-names-limitations, cli/query#ac:report-no-limitations
 **Depends-On:** 1
 **Status:** complete
 
@@ -41,7 +41,7 @@ The reusable core lives in `pkg/accesspolicies` (discovery, decoding, variable p
 ### Task 3: Query command
 
 **Id:** task-3
-**Verifies:** cli/query#ac:query-from-collection, cli/query#ac:query-file-stdin, cli/query#ac:input-mutually-exclusive, cli/query#ac:query-param-substituted, cli/query#ac:db-url-required, cli/query#ac:db-scheme-unsupported, cli/query#ac:rows-filtered-by-principal, cli/query#ac:fields-hidden, cli/query#ac:no-policies-warns, cli/query#ac:quiet-suppresses-report, cli/query#ac:denied-exit-5, cli/query#ac:formats, cli/query#ac:header-from-enforced-rows, cli/query#ac:db-unopenable-exit-4
+**Verifies:** cli/query#ac:query-from-collection, cli/query#ac:query-file-stdin, cli/query#ac:input-mutually-exclusive, cli/query#ac:query-param-substituted, cli/query#ac:db-url-required, cli/query#ac:db-scheme-unsupported, cli/query#ac:rows-filtered-by-principal, cli/query#ac:fields-hidden, cli/query#ac:no-policies-warns, cli/query#ac:quiet-suppresses-report, cli/query#ac:denied-exit-5, cli/query#ac:formats, cli/query#ac:header-follows-request-order, cli/query#ac:numbers-plain, cli/query#ac:db-unopenable-exit-4
 **Depends-On:** 2
 **Status:** complete
 

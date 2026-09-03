@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
@@ -175,7 +174,7 @@ func TestParseVariables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"minPrice": 10, "open": true, "name": "alice", "empty": "", "list": []any{"eu", "uk"}, "text": "[unclosed", "id": "007", "now": time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)}
+	want := map[string]any{"minPrice": 10, "open": true, "name": "alice", "empty": "", "list": []any{"eu", "uk"}, "text": "[unclosed", "id": "007", "now": "2026-01-01"}
 	if !reflect.DeepEqual(variables, want) {
 		t.Errorf("variables = %#v, want %#v", variables, want)
 	}
@@ -244,24 +243,44 @@ func (opaqueQuery) String() string { return "SELECT 1" }
 func TestHiddenReferences(t *testing.T) {
 	lines := []Line{{FieldLists: [][]string{{"id", "name", "address.*", "public_*", "*_at"}}}, {}}
 	allowed := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("customers", ""))).
-		Where(dal.WhereField("name", dal.Equal, dal.Constant{Value: "x"}), dal.NewGroupCondition(dal.Or, dal.WhereField("address.city", dal.Equal, dal.Constant{Value: "y"}), dal.WhereField("public_bio", dal.Equal, dal.Constant{Value: "z"}))).
-		OrderBy(dal.Ascending(dal.Field("created_at"))).
-		SelectColumns()
-	if hidden := hiddenReferences(allowed, lines); len(hidden) != 0 {
-		t.Errorf("allowed references reported hidden: %v", hidden)
+		Where(dal.WhereField("name", dal.Equal, dal.Constant{Value: "x"}), dal.NewGroupCondition(dal.Or, dal.WhereField("address.city", dal.Equal, dal.Constant{Value: "y"}), dal.WhereField("public_bio", dal.In, dal.Array{Value: []string{"z"}})), dal.WhereField("id", dal.Equal, dal.NewParam("id"))).
+		OrderBy(dal.Ascending(dal.Field("created_at")), dal.Descending(dal.DocumentID())).
+		SelectColumns(dal.Column{Expression: dal.Field("name")}, dal.Column{Expression: dal.Field("id"), Alias: "id"})
+	if hidden, err := hiddenReferences(allowed, lines); err != nil || len(hidden) != 0 {
+		t.Errorf("allowed references reported hidden: %v, %v", hidden, err)
 	}
 	probing := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("customers", ""))).
 		Where(dal.WhereField("passwordHash", dal.Equal, dal.Constant{Value: "h1"})).
 		OrderBy(dal.Descending(dal.Field("email"))).
 		GroupBy(dal.Field("ownerID")).
-		SelectColumns()
-	if hidden := hiddenReferences(probing, lines); strings.Join(hidden, ",") != "email,ownerID,passwordHash" {
-		t.Errorf("hidden = %v", hidden)
+		SelectColumns(dal.Column{Expression: dal.Field("phone"), Alias: "public_phone"})
+	if hidden, err := hiddenReferences(probing, lines); err != nil || strings.Join(hidden, ",") != "email,ownerID,passwordHash,phone" {
+		t.Errorf("hidden = %v, %v", hidden, err)
 	}
-	if hiddenReferences(probing, nil) != nil {
-		t.Error("no field lists means nothing is hidden")
+	if aliases := aliasedColumns(probing); strings.Join(aliases, ",") != "public_phone" {
+		t.Errorf("aliases = %v", aliases)
+	}
+	if hidden, err := hiddenReferences(probing, nil); err != nil || hidden != nil {
+		t.Errorf("no field lists means nothing is hidden: %v, %v", hidden, err)
+	}
+	// Unknown node kinds fail closed.
+	odd := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("customers", ""))).Where(fakeCondition{}).SelectColumns()
+	if _, err := hiddenReferences(odd, lines); err == nil || !strings.Contains(err.Error(), "unsupported condition") {
+		t.Errorf("unknown condition = %v", err)
+	}
+	oddExpr := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("customers", ""))).SelectColumns(dal.Column{Expression: fakeExpression{}})
+	if _, err := hiddenReferences(oddExpr, lines); err == nil || !strings.Contains(err.Error(), "unsupported expression") {
+		t.Errorf("unknown expression = %v", err)
 	}
 }
+
+type fakeCondition struct{}
+
+func (fakeCondition) String() string { return "fake" }
+
+type fakeExpression struct{}
+
+func (fakeExpression) String() string { return "fake()" }
 
 type stubSession struct {
 	dal.ReadSession
@@ -276,22 +295,30 @@ func (s *stubSession) ExecuteQueryToRecordsReader(_ context.Context, query dal.Q
 func TestRunSubstitutesParamsAndDenies(t *testing.T) {
 	stub := &stubSession{}
 	priced := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("products", ""))).Where(dal.WhereField("price", dal.GreaterOrEqual, dal.NewParam("minPrice"))).SelectColumns()
-	result, err := Run(context.Background(), stub, priced, Options{Variables: map[string]any{"minPrice": 10}})
+	unrestricted := Options{Unrestricted: true}
+	result, err := Run(context.Background(), stub, priced, Options{Variables: map[string]any{"minPrice": 10}, Unrestricted: true})
 	if err != nil || result.Lines != nil || !strings.Contains(stub.query.String(), "price >= 10") {
 		t.Errorf("substituted run = %v, %v, %s", result, err, stub.query)
 	}
-	if _, err := Run(context.Background(), stub, priced, Options{}); !errors.Is(err, ErrUnresolvedParam) || !strings.Contains(err.Error(), "minPrice") {
+	if _, err := Run(context.Background(), stub, priced, unrestricted); !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "minPrice") {
 		t.Errorf("unresolved = %v", err)
 	}
-	having := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("products", ""))).GroupBy(dal.Field("kind")).Having(dal.WhereField("n", dal.Equal, dal.NewParam("n"))).SelectColumns()
-	if _, err := Run(context.Background(), stub, having, Options{Variables: map[string]any{"n": 1}}); !errors.Is(err, ErrUnresolvedParam) || !strings.Contains(err.Error(), "having") {
-		t.Errorf("having param = %v", err)
+	if _, err := Run(context.Background(), stub, priced, Options{}); !errors.Is(err, ErrNoPolicies) {
+		t.Errorf("no policies without Unrestricted = %v", err)
+	}
+	misplaced := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("products", ""))).
+		Where(dal.NewComparison(dal.NewParam("left"), dal.Equal, dal.Field("kind"))).
+		GroupBy(dal.NewParam("grp")).Having(dal.WhereField("n", dal.Equal, dal.NewParam("n"))).
+		OrderBy(dal.Ascending(dal.NewParam("ord"))).
+		SelectColumns(dal.Column{Expression: dal.NewParam("col")})
+	if _, err := Run(context.Background(), stub, misplaced, Options{Variables: map[string]any{"n": 1, "left": 1, "grp": 1, "ord": 1, "col": 1}, Unrestricted: true}); !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "$col, $grp, $left, $n, $ord") {
+		t.Errorf("misplaced params = %v", err)
 	}
 	plain := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("products", ""))).SelectColumns()
-	if result, err := Run(context.Background(), stub, plain, Options{}); err != nil || result.Query.String() != plain.String() {
+	if result, err := Run(context.Background(), stub, plain, unrestricted); err != nil || result.Query.String() != plain.String() {
 		t.Errorf("plain run = %v, %v", result, err)
 	}
-	if result, err := Run(context.Background(), stub, opaqueQuery{}, Options{}); err != nil || result.Query == nil {
+	if result, err := Run(context.Background(), stub, opaqueQuery{}, unrestricted); err != nil || result.Query == nil {
 		t.Errorf("opaque run = %v, %v", result, err)
 	}
 	// With policies: the hidden-field probe is denied before the session sees it.
@@ -309,5 +336,25 @@ func TestRunSubstitutesParamsAndDenies(t *testing.T) {
 	}
 	if result.Lines[0].Bindings[0] != "currentUser=alice" {
 		t.Errorf("principal must bind currentUser: %v", result.Lines[0])
+	}
+	// Selecting a hidden field, or aliasing any column, is refused too.
+	selecting := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("customers", ""))).SelectColumns(dal.Column{Expression: dal.Field("passwordHash")})
+	if _, err := Run(context.Background(), stub, selecting, Options{Principal: &access.Principal{ID: "alice"}, Policies: loaded}); !errors.Is(err, access.ErrAccessDenied) || !strings.Contains(err.Error(), "passwordHash") || stub.query != nil {
+		t.Errorf("select hidden = %v", err)
+	}
+	aliased := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("customers", ""))).SelectColumns(dal.Column{Expression: dal.Field("name"), Alias: "n"})
+	if _, err := Run(context.Background(), stub, aliased, Options{Principal: &access.Principal{ID: "alice"}, Policies: loaded}); !errors.Is(err, ErrInvalidQuery) || !strings.Contains(err.Error(), "n") || stub.query != nil {
+		t.Errorf("alias = %v", err)
+	}
+	unverifiable := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("customers", ""))).Where(fakeCondition{}).SelectColumns()
+	if _, err := Run(context.Background(), stub, unverifiable, Options{Principal: &access.Principal{ID: "alice"}, Policies: loaded}); !errors.Is(err, access.ErrAccessDenied) || stub.query != nil {
+		t.Errorf("unverifiable = %v", err)
+	}
+	// Without field lists the walker is not consulted, so odd nodes reach the session.
+	open := writePolicy(t, t.TempDir(), "open.yaml", "open")
+	openLoaded, _ := LoadFile(open)
+	products := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("products", ""))).Where(fakeCondition{}).SelectColumns()
+	if _, err := Run(context.Background(), stub, products, Options{Policies: []Loaded{openLoaded}}); err != nil || stub.query == nil {
+		t.Errorf("unrestricted collection = %v", err)
 	}
 }

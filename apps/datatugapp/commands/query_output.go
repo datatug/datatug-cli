@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -28,9 +30,10 @@ type queryRow struct {
 // collectRows drains a records reader, normalising every record's data to a
 // map so struct, map and pointer targets render the same way.
 func collectRows(reader dal.RecordsReader) ([]queryRow, error) {
-	if closer, ok := reader.(io.Closer); ok {
-		defer func() { _ = closer.Close() }()
+	if reader == nil {
+		return nil, nil
 	}
+	defer func() { _ = reader.Close() }()
 	var rows []queryRow
 	for {
 		rec, err := reader.Next()
@@ -56,9 +59,10 @@ func collectRows(reader dal.RecordsReader) ([]queryRow, error) {
 // like the key column.
 var errReservedKeyField = errors.New("a record has a data field named " + keyColumn + ", which is reserved for the record key")
 
-// rowColumns returns the output columns after enforcement: the requested
-// columns that appear in at least one returned row, in request order; when
-// none were requested (or none survived), the sorted union of returned fields.
+// rowColumns returns the output columns after enforcement: when the query
+// names columns, those that appear in at least one returned row, in request
+// order (possibly none, leaving $key alone); otherwise the sorted union of the
+// returned fields.
 func rowColumns(query dal.Query, rows []queryRow) ([]string, error) {
 	present := map[string]bool{}
 	for _, row := range rows {
@@ -69,20 +73,20 @@ func rowColumns(query dal.Query, rows []queryRow) ([]string, error) {
 			present[name] = true
 		}
 	}
-	if structured, ok := query.(dal.StructuredQuery); ok {
+	if structured, ok := query.(dal.StructuredQuery); ok && len(structured.Columns()) > 0 {
 		var names []string
+		seen := map[string]bool{}
 		for _, column := range structured.Columns() {
 			name := column.Alias
 			if field, isField := column.Expression.(dal.FieldRef); isField && name == "" {
 				name = field.Name()
 			}
-			if name != "" && present[name] {
+			if name != "" && present[name] && !seen[name] {
+				seen[name] = true
 				names = append(names, name)
 			}
 		}
-		if len(names) > 0 {
-			return names, nil
-		}
+		return names, nil
 	}
 	names := make([]string, 0, len(present))
 	for name := range present {
@@ -161,7 +165,7 @@ func writeYAMLRows(w io.Writer, columns []string, rows []queryRow) error {
 		mapping := &yaml.Node{Kind: yaml.MappingNode}
 		add := func(name string, value any) error {
 			var valueNode yaml.Node
-			if err := valueNode.Encode(value); err != nil {
+			if err := valueNode.Encode(plainNumbers(value)); err != nil {
 				return err
 			}
 			mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: name}, &valueNode)
@@ -253,10 +257,38 @@ func cellText(value any) string {
 		return ""
 	case string:
 		return v
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
 	case map[string]any, []any:
 		encoded, _ := json.Marshal(v)
 		return string(encoded)
 	default:
 		return fmt.Sprint(v)
+	}
+}
+
+// plainNumbers turns the float64 values JSON normalisation produced back into
+// integers where they are integral, recursively, so YAML never shows 1e+06.
+func plainNumbers(value any) any {
+	switch v := value.(type) {
+	case float64:
+		if v == math.Trunc(v) && math.Abs(v) < 1<<53 {
+			return int64(v)
+		}
+		return v
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = plainNumbers(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = plainNumbers(item)
+		}
+		return out
+	default:
+		return value
 	}
 }

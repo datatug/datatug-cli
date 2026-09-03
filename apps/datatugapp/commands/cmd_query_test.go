@@ -95,7 +95,7 @@ func setupQueryDB(t *testing.T) string {
 		record.NewRecordWithData(record.NewKeyWithID("customers", "c3"), map[string]any{"id": "c3", "name": "Cid", "email": "cid@example.com", "passwordHash": "h3", "ownerID": "bob"}),
 		record.NewRecordWithData(record.NewKeyWithID("products", "p1"), map[string]any{"name": "pen", "price": 5}),
 		record.NewRecordWithData(record.NewKeyWithID("products", "p2"), map[string]any{"name": "book", "price": 10}),
-		record.NewRecordWithData(record.NewKeyWithID("products", "p3"), map[string]any{"name": "lamp", "price": 20}),
+		record.NewRecordWithData(record.NewKeyWithID("products", "p3"), map[string]any{"name": "lamp", "price": 1000000}),
 	}
 	if err := db.RunReadwriteTransaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		return tx.InsertMulti(ctx, records)
@@ -304,11 +304,28 @@ func TestQuery_GlobalPolicyFiltersRowsAndFields(t *testing.T) {
 	if code != 5 || stdout != "" || !strings.Contains(stderr, "passwordHash") {
 		t.Errorf("hidden field probe: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
-	// The header follows enforcement: a requested hidden column never appears.
+	// Selecting the hidden field is denied; aliasing any column is refused.
 	selecting := "from:\n  name: customers\ncolumns:\n  - field: name\n  - field: passwordHash\n"
 	stdout, stderr, code = runQuery(t, selecting, "--db", url, "-f", "-", "--policies-dir", dir, "--as", "alice", "--format", "csv")
-	if code != 0 || !strings.HasPrefix(stdout, "$key,name\n") || strings.Contains(stdout, "passwordHash") {
-		t.Errorf("enforced header: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	if code != 5 || stdout != "" || !strings.Contains(stderr, "passwordHash") {
+		t.Errorf("select hidden: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	aliased := "from:\n  name: customers\ncolumns:\n  - field: passwordHash\n    as: public_hash\n"
+	stdout, stderr, code = runQuery(t, aliased, "--db", url, "-f", "-", "--policies-dir", dir, "--as", "alice", "--format", "csv")
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "public_hash") {
+		t.Errorf("alias under field list: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	// Requested columns keep their request order (the union would be sorted).
+	ordered := "from:\n  name: customers\ncolumns:\n  - field: name\n  - field: email\n"
+	stdout, stderr, code = runQuery(t, ordered, "--db", url, "-f", "-", "--policies-dir", dir, "--as", "alice", "--format", "csv")
+	if code != 0 || !strings.HasPrefix(stdout, "$key,name,email\n") || strings.Contains(stdout, "passwordHash") {
+		t.Errorf("request-order header: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	// A parameter outside a where right-hand side is a usage error.
+	byParam := "from:\n  name: customers\norderBy:\n  - param: col\n"
+	stdout, stderr, code = runQuery(t, byParam, "--db", url, "-f", "-", "--policies-dir", dir, "--as", "alice", "--var", "col=name")
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "$col") {
+		t.Errorf("misplaced param: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 	// The policies directory can come from the environment.
 	t.Setenv("DATATUG_POLICIES_DIR", dir)
@@ -396,6 +413,13 @@ func TestQuery_Formats(t *testing.T) {
 	if len(lines) != 3 || lines[0] != "$key,email,id,name,ownerID" {
 		t.Errorf("csv = %q", stdout)
 	}
+	// Integers render plainly, never in exponent form.
+	for _, format := range []string{"csv", "grid", "yaml", "json"} {
+		stdout, _, code := runQuery(t, "", "--db", url, "--from", "products", "--policies-dir", dir, "--quiet", "--format", format)
+		if code != 0 || !strings.Contains(stdout, "1000000") || strings.Contains(stdout, "e+06") {
+			t.Errorf("%s numbers = %q", format, stdout)
+		}
+	}
 	stdout, _, _ = runQuery(t, "", append(base, "jsonl")...)
 	lines = strings.Split(strings.TrimSpace(stdout), "\n")
 	if len(lines) != 2 {
@@ -420,20 +444,27 @@ func TestQuery_Formats(t *testing.T) {
 }
 
 func TestQueryOutputHelpers(t *testing.T) {
-	rows := []queryRow{{key: "k1", data: map[string]any{"b": 1, "a": "x", "n": nil, "m": map[string]any{"z": 1}, "l": []any{1, 2}, "f": 1.5, "t": true}}}
+	rows := []queryRow{{key: "k1", data: map[string]any{"b": float64(1), "a": "x", "n": nil, "m": map[string]any{"z": float64(1000000)}, "l": []any{float64(1), 2.5}, "f": 1.5, "t": true}}}
 	columns, err := rowColumns(dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("c", ""))).SelectColumns(), rows)
 	if err != nil || strings.Join(columns, ",") != "a,b,f,l,m,n,t" {
 		t.Errorf("columns = %v, %v", columns, err)
 	}
-	aliased := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("c", ""))).SelectColumns(dal.Column{Expression: dal.Field("x"), Alias: "b"}, dal.Column{Expression: dal.Field("a")}, dal.Column{Expression: dal.Field("gone")})
+	aliased := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("c", ""))).SelectColumns(dal.Column{Expression: dal.Field("x"), Alias: "b"}, dal.Column{Expression: dal.Field("a")}, dal.Column{Expression: dal.Field("gone")}, dal.Column{Expression: dal.Field("a")})
 	if columns, err := rowColumns(aliased, rows); err != nil || strings.Join(columns, ",") != "b,a" {
 		t.Errorf("aliased columns = %v, %v", columns, err)
+	}
+	onlyGone := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("c", ""))).SelectColumns(dal.Column{Expression: dal.Field("gone")})
+	if columns, err := rowColumns(onlyGone, rows); err != nil || len(columns) != 0 {
+		t.Errorf("no survivors must not widen: %v, %v", columns, err)
+	}
+	if rows, err := collectRows(nil); err != nil || rows != nil {
+		t.Errorf("nil reader = %v, %v", rows, err)
 	}
 	if _, err := rowColumns(aliased, []queryRow{{key: "k", data: map[string]any{"$key": 1}}}); !errors.Is(err, errReservedKeyField) {
 		t.Errorf("reserved key field = %v", err)
 	}
 	var out bytes.Buffer
-	if err := writeQueryRows(&out, "csv", []string{"a", "b", "m", "l", "n", "f", "t"}, rows); err != nil || !strings.Contains(out.String(), `k1,x,1,"{""z"":1}","[1,2]",,1.5,true`) {
+	if err := writeQueryRows(&out, "csv", []string{"a", "b", "m", "l", "n", "f", "t"}, rows); err != nil || !strings.Contains(out.String(), `k1,x,1,"{""z"":1000000}","[1,2.5]",,1.5,true`) {
 		t.Errorf("csv = %q, %v", out.String(), err)
 	}
 	out.Reset()
@@ -445,7 +476,7 @@ func TestQueryOutputHelpers(t *testing.T) {
 		t.Errorf("empty yaml = %q, %v", out.String(), err)
 	}
 	out.Reset()
-	if err := writeQueryRows(&out, "yaml", []string{"a", "b"}, rows); err != nil || !strings.HasPrefix(out.String(), "- $key: k1\n  a: x\n  b: 1\n") {
+	if err := writeQueryRows(&out, "yaml", []string{"a", "b", "m", "l"}, rows); err != nil || !strings.HasPrefix(out.String(), "- $key: k1\n  a: x\n  b: 1\n  m:\n    z: 1000000\n  l:\n    - 1\n    - 2.5\n") {
 		t.Errorf("yaml = %q, %v", out.String(), err)
 	}
 	out.Reset()

@@ -30,7 +30,7 @@ require (
 	github.com/filetug/filetug v0.3.0
 	github.com/gdamore/tcell/v2 v2.13.10
 	github.com/go-git/go-git/v5 v5.19.2
-	github.com/google/go-github/v90 v90.0.0
+	github.com/google/go-github/v91 v91.0.0
 	github.com/google/go-github/v91 v91.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4

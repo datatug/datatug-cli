@@ -16,12 +16,12 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
+	"github.com/datatug/datatug-cli/pkg/sneatv"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/filetug/filetug/pkg/fsutils"
-	"github.com/datatug/datatug-cli/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
 	"github.com/go-git/go-git/v5"
-	"github.com/google/go-github/v90/github"
+	"github.com/google/go-github/v91/github"
 	"github.com/rivo/tview"
 	"golang.org/x/oauth2"
 )
@@ -350,9 +350,9 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 				// Create initial README.md to initialize the repository
 				updateProgress(0, "initializing repository...")
 				_, _, err = client.Repositories.CreateFile(ctx, repoOwner, repoName, "README.md", &github.RepositoryContentFileOptions{
-					Message: github.Ptr("feat: initial commit"),
+					Message: new("feat: initial commit"),
 					Content: []byte("# " + repoName + "\n\nDataTug project repository."),
-					Branch:  github.Ptr(branch),
+					Branch:  new(branch),
 				})
 				if err != nil {
 					tui.App.QueueUpdateDraw(func() {
@@ -377,10 +377,10 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 			// Check if files already exist to avoid overwriting or redundant commits
 			if existing, _, _, _ := client.Repositories.GetContents(ctx, repoOwner, repoName, path, &github.RepositoryContentGetOptions{Ref: branch}); existing == nil {
 				entries = append(entries, &github.TreeEntry{
-					Path:    github.Ptr(path),
-					Type:    github.Ptr("blob"),
-					Mode:    github.Ptr("100644"),
-					Content: github.Ptr(content),
+					Path:    new(path),
+					Type:    new("blob"),
+					Mode:    new("100644"),
+					Content: new(content),
 				})
 			}
 		}
@@ -407,7 +407,7 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 			}
 
 			commit, _, err := client.Git.CreateCommit(ctx, repoOwner, repoName, github.Commit{
-				Message: github.Ptr("chore: adds datatug project"),
+				Message: new("chore: adds datatug project"),
 				Tree:    tree,
 				Parents: []*github.Commit{parent},
 			}, &github.CreateCommitOptions{})
@@ -422,7 +422,7 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 			ref.Object.SHA = commit.SHA
 			_, _, err = client.Git.UpdateRef(ctx, repoOwner, repoName, ref.GetRef(), github.UpdateRef{
 				SHA:   commit.GetSHA(),
-				Force: github.Ptr(false),
+				Force: new(false),
 			})
 			if err != nil {
 				tui.App.QueueUpdateDraw(func() {
@@ -454,10 +454,10 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 			if !dataTugSectionTitleRegex.Match([]byte(content)) {
 				newContent := content + getDataTugSectionForReadmeMD()
 				_, _, err = client.Repositories.UpdateFile(ctx, repoOwner, repoName, rootReadme.GetPath(), &github.RepositoryContentFileOptions{
-					Message: github.Ptr("chore: adds ##DataTug section to /README.md"),
+					Message: new("chore: adds ##DataTug section to /README.md"),
 					Content: []byte(newContent),
 					SHA:     rootReadme.SHA,
-					Branch:  github.Ptr(branch),
+					Branch:  new(branch),
 				})
 				if err != nil {
 					tui.App.QueueUpdateDraw(func() {
@@ -469,9 +469,9 @@ func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repo
 		} else {
 			newContent := "# " + repoName + getDataTugSectionForReadmeMD()
 			_, _, err = client.Repositories.CreateFile(ctx, repoOwner, repoName, "README.md", &github.RepositoryContentFileOptions{
-				Message: github.Ptr("feat: creates /README.md with ##DataTug section"),
+				Message: new("feat: creates /README.md with ##DataTug section"),
 				Content: []byte(newContent),
-				Branch:  github.Ptr(branch),
+				Branch:  new(branch),
 			})
 			if err != nil {
 				tui.App.QueueUpdateDraw(func() {

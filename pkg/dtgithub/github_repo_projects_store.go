@@ -14,7 +14,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/dtprojcreator"
 	"github.com/filetug/filetug/pkg/fsutils"
-	"github.com/google/go-github/v90/github"
+	"github.com/google/go-github/v91/github"
 )
 
 func NewRepoProjectsStore(client *github.Client, branch string) *GithubRepoProjectsStore {
@@ -100,9 +100,9 @@ func (c *projectCreator) CreateProject(
 		if errors.As(err, &gErr) && gErr.Response != nil && (gErr.Response.StatusCode == 404 || gErr.Response.StatusCode == 409) {
 			// Create initial README.md to initialize the repository
 			_, _, err = c.client.Repositories.CreateFile(ctx, c.repoOwner, c.repoName, "README.md", &github.RepositoryContentFileOptions{
-				Message: github.Ptr("feat: initial commit"),
+				Message: new("feat: initial commit"),
 				Content: []byte("# " + c.repoName),
-				Branch:  github.Ptr(c.branch),
+				Branch:  new(c.branch),
 			})
 			if err != nil {
 				err = fmt.Errorf("failed to initialize repository: %w", err)
@@ -141,8 +141,8 @@ func (c *projectCreator) createRepo(ctx context.Context, visibility datatug.Proj
 	if err != nil {
 		// Create repository
 		c.repo = &github.Repository{
-			Name:    github.Ptr(c.repoName),
-			Private: github.Ptr(visibility == datatug.PrivateProject),
+			Name:    new(c.repoName),
+			Private: new(visibility == datatug.PrivateProject),
 		}
 
 		c.repo, _, err = c.client.Repositories.Create(ctx, "", c.repo)
@@ -171,10 +171,10 @@ func (c *projectCreator) addDatatugSectionToRootReadmeFile(ctx context.Context, 
 		if !dataTugSectionTitleRegex.Match([]byte(content)) {
 			newContent := content + getDataTugSectionForReadmeMD()
 			_, _, err = c.client.Repositories.UpdateFile(ctx, c.repoOwner, c.repoName, rootReadme.GetPath(), &github.RepositoryContentFileOptions{
-				Message: github.Ptr("chore: adds ##DataTug section to /README.md"),
+				Message: new("chore: adds ##DataTug section to /README.md"),
 				Content: []byte(newContent),
 				SHA:     rootReadme.SHA,
-				Branch:  github.Ptr(c.branch),
+				Branch:  new(c.branch),
 			})
 			if err != nil {
 				return fmt.Errorf("failed to update /README.md: %w", err)
@@ -183,9 +183,9 @@ func (c *projectCreator) addDatatugSectionToRootReadmeFile(ctx context.Context, 
 	} else {
 		newContent := "# " + c.repoName + getDataTugSectionForReadmeMD()
 		_, _, err = c.client.Repositories.CreateFile(ctx, c.repoOwner, c.repoName, "README.md", &github.RepositoryContentFileOptions{
-			Message: github.Ptr("feat: creates /README.md with ##DataTug section"),
+			Message: new("feat: creates /README.md with ##DataTug section"),
 			Content: []byte(newContent),
-			Branch:  github.Ptr(c.branch),
+			Branch:  new(c.branch),
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create root README.md: %w", err)
@@ -207,7 +207,7 @@ func (c *projectCreator) addDatatugSectionToRootReadmeFile(ctx context.Context, 
 //
 //	var commit *github.Commit
 //	commit, _, err = c.client.Git.CreateCommit(ctx, c.repoOwner, c.repoName, github.Commit{
-//		Message: github.Ptr("chore: adds datatug project"),
+//		Message: new("chore: adds datatug project"),
 //		Tree:    tree,
 //		Parents: []*github.Commit{parent},
 //	}, &github.CreateCommitOptions{})
@@ -220,7 +220,7 @@ func (c *projectCreator) addDatatugSectionToRootReadmeFile(ctx context.Context, 
 //	ref.Object.SHA = commit.SHA
 //	_, _, err = c.client.Git.UpdateRef(ctx, c.repoOwner, c.repoName, ref.GetRef(), github.UpdateRef{
 //		SHA:   commit.GetSHA(),
-//		Force: github.Ptr(false),
+//		Force: new(false),
 //	})
 //	return
 //}

@@ -31,7 +31,7 @@ func TestOpen_ResolvesFromSnapshot_NetworkDisabled(t *testing.T) {
 	down.Close() // unreachable from here on — this IS "network disabled".
 
 	root := writeSyntheticProjectWithURL(t, downURL+"/countries/currency/q?country={name}")
-	db, err := Open(context.Background(), root)
+	db, err := Open(context.Background(), root, AllowInsecureLoopback())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestOpen_ResolvesLive(t *testing.T) {
 	defer up.Close()
 
 	root := writeSyntheticProjectWithURL(t, up.URL+"/countries/currency/q?country={name}")
-	db, err := Open(context.Background(), root)
+	db, err := Open(context.Background(), root, AllowInsecureLoopback())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

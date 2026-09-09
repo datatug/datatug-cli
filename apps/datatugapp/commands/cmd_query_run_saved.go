@@ -277,6 +277,18 @@ func resolveSQLOrDTQLSourceURL(ctx context.Context, projStore datatug.ProjectSto
 // parameters bind as literal WHERE-equality values (dal.WhereField),
 // matching pkg/httpsource's own tests, not through the "variables" resolution
 // DTQL's "param:" nodes use.
+// runStructuredHTTPQuery calls executor.RunStructured; a package var so
+// this package's own tests can substitute
+// secureread.Executor.RunStructuredInsecureForTest (dal-go/dalgo2http
+// v0.2.0's TEST-ONLY Collection.InsecureAllowLoopback) when a saved HTTP
+// query's .query.http file has been rewritten to a loopback address for a
+// deterministic live-failure test — see cmd_query_run_saved_test.go's
+// breakHTTPQueryNetwork. Production code always runs with this default,
+// which calls the real, https-only-enforcing RunStructured.
+var runStructuredHTTPQuery = func(ctx context.Context, executor *secureread.Executor, sourceURL string, query dal.Query, variables map[string]any) (secureread.Result, error) {
+	return executor.RunStructured(ctx, sourceURL, query, variables)
+}
+
 func runHTTPSavedQuery(ctx context.Context, executor *secureread.Executor, projectDir string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
 	sourceURL := "http://" + projectDir
 	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(queryDef.ID, "")))
@@ -294,7 +306,7 @@ func runHTTPSavedQuery(ctx context.Context, executor *secureread.Executor, proje
 	if len(missing) > 0 {
 		return secureread.Result{}, fmt.Errorf("query %q: missing --var for required parameter(s): %s", queryDef.ID, strings.Join(missing, ", "))
 	}
-	return executor.RunStructured(ctx, sourceURL, builder.SelectColumns(), nil)
+	return runStructuredHTTPQuery(ctx, executor, sourceURL, builder.SelectColumns(), nil)
 }
 
 // sqlQueryArgs builds one dal.QueryArg{Name: p.ID, Value: variables[p.ID]}

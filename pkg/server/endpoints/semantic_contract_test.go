@@ -433,7 +433,7 @@ func TestSemanticApplicable_CustomerInvoicesApplicable_InvoiceLinesNotYet(t *tes
 
 	var invoices *apicontract.Candidate
 	for i := range resp.Applicable {
-		if resp.Applicable[i].QueryID == "customer-invoices" {
+		if resp.Applicable[i].QueryID == "customers/customer-invoices" {
 			invoices = &resp.Applicable[i]
 		}
 	}
@@ -455,7 +455,7 @@ func TestSemanticApplicable_CustomerInvoicesApplicable_InvoiceLinesNotYet(t *tes
 
 	var lines *apicontract.Candidate
 	for i := range resp.NotYet {
-		if resp.NotYet[i].QueryID == "invoice-lines" {
+		if resp.NotYet[i].QueryID == "invoices/invoice-lines" {
 			lines = &resp.NotYet[i]
 		}
 	}
@@ -486,7 +486,7 @@ func TestSemanticApplicable_NonSemanticRequiredParam_AlwaysMissing(t *testing.T)
 	}
 	var export *apicontract.Candidate
 	for i := range resp.NotYet {
-		if resp.NotYet[i].QueryID == "customer-export" {
+		if resp.NotYet[i].QueryID == "customers/customer-export" {
 			export = &resp.NotYet[i]
 		}
 	}
@@ -513,7 +513,7 @@ func TestSemanticApplicable_AmbiguousFacts(t *testing.T) {
 	}
 	var invoices *apicontract.Candidate
 	for i := range resp.NotYet {
-		if resp.NotYet[i].QueryID == "customer-invoices" {
+		if resp.NotYet[i].QueryID == "customers/customer-invoices" {
 			invoices = &resp.NotYet[i]
 		}
 	}

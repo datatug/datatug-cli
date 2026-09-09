@@ -56,7 +56,7 @@ func computeSemanticApplicable(ctx context.Context, req apicontract.ApplicableRe
 	if err != nil {
 		return apicontract.ApplicableResponse{}, newInvalidRequest("project", err.Error())
 	}
-	queries, err := loadModuleQueries(projectDir)
+	queries, canonicalIDs, err := loadModuleQueries(projectDir)
 	if err != nil {
 		return apicontract.ApplicableResponse{}, err
 	}
@@ -111,10 +111,10 @@ func computeSemanticApplicable(ctx context.Context, req apicontract.ApplicableRe
 
 	var candidates []apicontract.Candidate
 	for _, aq := range applicableQ {
-		candidates = append(candidates, buildApplicableCandidate(ctx, projStore, projectDir, req.Environment, aq, ambiguous, enabledByField, latestFactByField))
+		candidates = append(candidates, buildApplicableCandidate(ctx, projStore, projectDir, req.Environment, aq, ambiguous, enabledByField, latestFactByField, canonicalIDs))
 	}
 	for _, nq := range notYetQ {
-		candidates = append(candidates, buildNotYetCandidate(ctx, projStore, projectDir, req.Environment, nq, ambiguous, enabledByField))
+		candidates = append(candidates, buildNotYetCandidate(ctx, projStore, projectDir, req.Environment, nq, ambiguous, enabledByField, canonicalIDs))
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].QueryID < candidates[j].QueryID })
 
@@ -169,7 +169,7 @@ func mapFactOrigin(o string) string {
 // can auto-bind them) and target resolution (api.EligibleTargets) —
 // either of which can still demote it out of the "runnable" state despite
 // every semantic parameter being bound.
-func buildApplicableCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, aq semantic.ApplicableQuery, ambiguous map[string]bool, enabledByField map[string][]apicontract.Fact, latestFactByField map[string]apicontract.Fact) apicontract.Candidate {
+func buildApplicableCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, aq semantic.ApplicableQuery, ambiguous map[string]bool, enabledByField map[string][]apicontract.Fact, latestFactByField map[string]apicontract.Fact, canonicalIDs map[*datatug.QueryDef]string) apicontract.Candidate {
 	var bindings []apicontract.Binding
 	var chain []apicontract.ChainStep
 	for i, b := range aq.Bindings {
@@ -187,7 +187,7 @@ func buildApplicableCandidate(ctx context.Context, projStore datatug.ProjectStor
 	}
 	missing, extraChain, ambig := missingNonSemanticParameters(aq.Query)
 	chain = append(chain, extraChain...)
-	return finishCandidate(ctx, projStore, projectDir, environment, aq.Query, bindings, chain, missing, ambig)
+	return finishCandidate(ctx, projStore, projectDir, environment, aq.Query, bindings, chain, missing, ambig, canonicalIDs)
 }
 
 // buildNotYetCandidate builds one Candidate for a query
@@ -196,7 +196,7 @@ func buildApplicableCandidate(ctx context.Context, projStore datatug.ProjectStor
 // (api-contract.md: "missing: string[] // parameter IDs") and attaching an
 // Ambiguous entry instead of a plain "missing" explanation when that
 // entity.field's block was due to conflicting facts, not an absent one.
-func buildNotYetCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, nq semantic.NotYetApplicable, ambiguous map[string]bool, enabledByField map[string][]apicontract.Fact) apicontract.Candidate {
+func buildNotYetCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, nq semantic.NotYetApplicable, ambiguous map[string]bool, enabledByField map[string][]apicontract.Fact, canonicalIDs map[*datatug.QueryDef]string) apicontract.Candidate {
 	var missing []string
 	var chain []apicontract.ChainStep
 	var ambig []apicontract.Ambiguous
@@ -223,7 +223,7 @@ func buildNotYetCandidate(ctx context.Context, projStore datatug.ProjectStore, p
 	missing = append(missing, extraMissing...)
 	chain = append(chain, extraChain...)
 	ambig = append(ambig, extraAmbig...)
-	return finishCandidate(ctx, projStore, projectDir, environment, nq.Query, nil, chain, missing, ambig)
+	return finishCandidate(ctx, projStore, projectDir, environment, nq.Query, nil, chain, missing, ambig, canonicalIDs)
 }
 
 // missingNonSemanticParameters lists every required parameter with no
@@ -250,7 +250,7 @@ func missingNonSemanticParameters(q *datatug.QueryDef) (missing []string, chain 
 // unavailable (nothing to run against, regardless of bindings) beats
 // needs-input (a binding is missing/ambiguous) beats needs-target (bindings
 // are fine but more than one authorized source exists) beats runnable.
-func finishCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, q *datatug.QueryDef, bindings []apicontract.Binding, chain []apicontract.ChainStep, missing []string, ambiguous []apicontract.Ambiguous) apicontract.Candidate {
+func finishCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, q *datatug.QueryDef, bindings []apicontract.Binding, chain []apicontract.ChainStep, missing []string, ambiguous []apicontract.Ambiguous, canonicalIDs map[*datatug.QueryDef]string) apicontract.Candidate {
 	eligible, err := api.EligibleTargets(ctx, projStore, projectDir, environment, q)
 	if err != nil {
 		eligible = nil
@@ -287,8 +287,18 @@ func finishCandidate(ctx context.Context, projStore datatug.ProjectStore, projec
 	if targets == nil {
 		targets = []apicontract.CandidateTarget{}
 	}
+	// S97: the canonical, folder-qualified id (never the bare q.ID) — a
+	// client that opens what applicable hands it (get_query, run_query)
+	// must be able to load it directly; every query in the demo project
+	// lives in a subfolder, so q.ID alone would 404/500 downstream. Falls
+	// back to q.ID only defensively (canonicalIDs is always populated by
+	// loadModuleQueries for every query it returns).
+	queryID := canonicalIDs[q]
+	if queryID == "" {
+		queryID = q.ID
+	}
 	return apicontract.Candidate{
-		QueryID: q.ID, Targets: targets, SelectedSource: selectedSource,
+		QueryID: queryID, Targets: targets, SelectedSource: selectedSource,
 		Bindings: bindings, Chain: chain, Missing: missing, Ambiguous: ambiguous, State: state,
 	}
 }

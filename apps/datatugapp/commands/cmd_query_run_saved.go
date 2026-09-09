@@ -34,15 +34,25 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		return Exit(err.Error(), exitCodeUsage)
 	}
 
+	// o.query may be bare or folder-qualified (S97's one saved-query id
+	// convention, matching `queries/applicable`/`get_query`/`exec/run_query`
+	// server-side): resolved to the canonical, folder-qualified form before
+	// LoadQuery ever sees it, so a bare id that matches more than one query
+	// across folders is a clear usage error naming every candidate, not the
+	// store's own raw "no such file or directory".
+	canonicalID, err := api.ResolveQueryID(projectDir, o.query)
+	if err != nil {
+		return Exit(err.Error(), exitCodeUsage)
+	}
 	// Queries are loaded through the store's own query loader
 	// (datatug-core v0.23.0+: fsQueriesStore.LoadQuery hydrates QueryDef.Text
 	// from its "<id>.query.<type>" sidecar directly, the same load path
 	// filestore.LoadProject's Queries tree now uses) - not by hand-reading
 	// the sidecar file ourselves, and not through LoadProject's whole-project
 	// walk, which would load every query in the project just to run one.
-	queryDef, err := projStore.LoadQuery(ctx, o.query)
+	queryDef, err := projStore.LoadQuery(ctx, canonicalID)
 	if err != nil {
-		return Exit(fmt.Sprintf("load query %q: %v", o.query, err), exitCodeDatabase)
+		return Exit(fmt.Sprintf("load query %q: %v", canonicalID, err), exitCodeDatabase)
 	}
 
 	variables, err := accesspolicies.ParseVariables(o.vars)

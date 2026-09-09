@@ -459,3 +459,105 @@ func TestExecRunQuery_MissingDeclaredRequiredParameter_StillMissingParameter(t *
 		t.Errorf("field = %q, want %q", env.Error.Field, "CustomerId")
 	}
 }
+
+// --- S97: one saved-query id convention across applicable/get_query/run_query ---
+
+// writeQueryIDConventionTestProject builds a minimal project — no DB
+// catalog, no policies (S97's query-id resolution fails, when it fails,
+// before either is ever touched) — with two queries sharing the same bare
+// id ("q") in different folders, for the unknown/ambiguous-id test cases.
+func writeQueryIDConventionTestProject(t *testing.T) (projectDir, projectID string) {
+	t.Helper()
+	dir := t.TempDir()
+	projectID = "query-id-convention-test-" + strings.NewReplacer("/", "-", " ", "-").Replace(t.Name())
+	filestore.SetProjectPath(projectID, dir)
+	writePolicies(t, dir)
+	writeMinimalQuery := func(folder string) {
+		queriesDir := filepath.Join(dir, "queries", folder)
+		mustMkdirAll(t, queriesDir)
+		mustWriteFile(t, filepath.Join(queriesDir, "q.query.json"), `{"id":"q","type":"DTQL"}`)
+	}
+	writeMinimalQuery("x")
+	writeMinimalQuery("y")
+	return dir, projectID
+}
+
+// TestExecRunQuery_SavedQuery_BareIDResolvesToTheSameQueryAsFolderQualified
+// covers S97's "bare id unique -> resolves" case for exec/run_query: the
+// bare form ("customer-invoices") must run the exact same query as the
+// canonical folder-qualified form (TestExecRunQuery_SavedFixture_
+// DecodesAndExecutes' own "customers/customer-invoices"), and the
+// response's Provenance.QueryID must report the canonical form regardless
+// of which form the request used.
+func TestExecRunQuery_SavedQuery_BareIDResolvesToTheSameQueryAsFolderQualified(t *testing.T) {
+	projectDir, projectID := writeRunQueryTestProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+
+	req := apicontract.ExecutionRequest{
+		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
+		QueryID:        "customer-invoices", // bare — S97
+		Parameters:     map[string]apicontract.TypedValue{"CustomerId": apicontract.NewIntegerValue("5")},
+		BindingOrigins: []apicontract.BindingOriginEntry{{ParameterID: "CustomerId", Origin: apicontract.BindingOriginSelection}},
+		Mode:           apicontract.ProvenanceModeLive,
+	}
+	result, err := computeRunQuery(context.Background(), req)
+	if err != nil {
+		t.Fatalf("computeRunQuery(bare queryId): %v", err)
+	}
+	if len(result.Recordset.Rows) != 1 {
+		t.Fatalf("len(Rows) = %d, want 1 (Customer 5)", len(result.Recordset.Rows))
+	}
+	if result.Provenance.QueryID != "customers/customer-invoices" {
+		t.Errorf("Provenance.QueryID = %q, want the canonical folder-qualified form %q", result.Provenance.QueryID, "customers/customer-invoices")
+	}
+}
+
+// TestExecRunQuery_UnknownQueryID_NotFound covers S97's "unknown -> 404"
+// case: a queryId matching no query at all is NOT_FOUND, never a raw
+// filesystem error or an unclassified 500.
+func TestExecRunQuery_UnknownQueryID_NotFound(t *testing.T) {
+	projectDir, projectID := writeQueryIDConventionTestProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+
+	req := apicontract.ExecutionRequest{
+		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
+		QueryID:        "no-such-query",
+		Parameters:     map[string]apicontract.TypedValue{},
+		BindingOrigins: []apicontract.BindingOriginEntry{},
+		Mode:           apicontract.ProvenanceModeLive,
+	}
+	status, env := postRunQuery(t, req)
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (code=%q message=%q)", status, env.Error.Code, env.Error.Message)
+	}
+	if env.Error.Code != string(apicontract.ErrCodeNotFound) {
+		t.Errorf("code = %q, want %q", env.Error.Code, apicontract.ErrCodeNotFound)
+	}
+}
+
+// TestExecRunQuery_AmbiguousBareQueryID_InvalidRequest covers S97's
+// "ambiguous -> INVALID_REQUEST" case: a bare queryId matching more than
+// one query across folders is a clear 400 naming the ambiguity, never a
+// silent pick of one or a 500.
+func TestExecRunQuery_AmbiguousBareQueryID_InvalidRequest(t *testing.T) {
+	projectDir, projectID := writeQueryIDConventionTestProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+
+	req := apicontract.ExecutionRequest{
+		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
+		QueryID:        "q", // bare, matches both x/q and y/q
+		Parameters:     map[string]apicontract.TypedValue{},
+		BindingOrigins: []apicontract.BindingOriginEntry{},
+		Mode:           apicontract.ProvenanceModeLive,
+	}
+	status, env := postRunQuery(t, req)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (code=%q message=%q)", status, env.Error.Code, env.Error.Message)
+	}
+	if env.Error.Code != string(apicontract.ErrCodeInvalidRequest) {
+		t.Errorf("code = %q, want %q", env.Error.Code, apicontract.ErrCodeInvalidRequest)
+	}
+	if env.Error.Field != "queryId" {
+		t.Errorf("field = %q, want %q", env.Error.Field, "queryId")
+	}
+}

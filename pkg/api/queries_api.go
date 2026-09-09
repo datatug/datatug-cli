@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
@@ -55,18 +56,30 @@ func DeleteQuery(ctx context.Context, ref dto.ProjectItemRef) error {
 	return store.DeleteQuery(ctx, ref.ID)
 }
 
-// GetQuery returns query definition
+// GetQuery returns query definition. ref.ID may be bare or folder-qualified
+// (S97's one saved-query id convention): resolved via ResolveQueryID before
+// the store ever sees it, so an unknown id is ErrQueryNotFound and an
+// ambiguous bare id is ErrAmbiguousQueryID — never the store's own raw
+// filesystem error text.
 func GetQuery(ctx context.Context, ref dto.ProjectItemRef) (query *datatug.QueryDefWithFolderPath, err error) {
 	if err = ref.Validate(); err != nil {
 		return query, err
+	}
+	projectDir, ok := ProjectDir(ref.ProjectID)
+	if !ok {
+		return nil, fmt.Errorf("%w: unknown project %q", ErrQueryNotFound, ref.ProjectID)
+	}
+	canonicalID, err := ResolveQueryID(projectDir, ref.ID)
+	if err != nil {
+		return nil, err
 	}
 	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	queryDef, err := store.LoadQuery(ctx, ref.ID)
+	queryDef, err := store.LoadQuery(ctx, canonicalID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %q", ErrQueryNotFound, canonicalID)
 	}
 	return &datatug.QueryDefWithFolderPath{
 		QueryDef: *queryDef,

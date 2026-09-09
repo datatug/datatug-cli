@@ -48,26 +48,47 @@ func loadModuleEntities(dir string) ([]*datatug.Entity, error) {
 // the module's datatug.QueryDef type. Applicable only needs ID/Type/
 // Parameters, all present in the .query.json file itself — the sibling
 // .query.<ext> body (SQL/DTQL/HTTP text) is never read here.
-func loadModuleQueries(dir string) ([]*datatug.QueryDef, error) {
+//
+// canonicalIDs maps each returned *datatug.QueryDef pointer to its
+// canonical, folder-qualified id (its path relative to queries/, "/"-joined
+// — the same convention api.ResolveQueryID/QueryIDIndex use, and the id
+// fsQueriesStore.LoadQuery actually needs for a query in a subfolder). It is
+// keyed by pointer, not by QueryDef.ID (always bare — datatug.QueryDef.ID
+// is never folder-qualified, per fsQueriesStore.LoadQuery's own SetID
+// convention), because two queries in different folders may share the same
+// bare id (S97's own "ambiguous" case for input resolution), which a
+// bare-id-keyed map could not distinguish between.
+func loadModuleQueries(dir string) ([]*datatug.QueryDef, map[*datatug.QueryDef]string, error) {
 	queriesDir := filepath.Join(dir, storage.QueriesFolder)
 	suffix := "." + storage.QueryFileSuffix + ".json"
 	var queries []*datatug.QueryDef
+	canonicalIDs := map[*datatug.QueryDef]string{}
 	err := walkJSONFiles(queriesDir, suffix, func(path string, data []byte) error {
 		var query datatug.QueryDef
 		if err := json.Unmarshal(data, &query); err != nil {
 			return fmt.Errorf("parse %s: %w", path, err)
 		}
+		bareID := strings.TrimSuffix(filepath.Base(path), suffix)
 		if query.ID == "" {
-			query.ID = strings.TrimSuffix(filepath.Base(path), suffix)
+			query.ID = bareID
+		}
+		rel, relErr := filepath.Rel(queriesDir, filepath.Dir(path))
+		if relErr != nil {
+			return relErr
+		}
+		canonicalID := bareID
+		if rel != "." {
+			canonicalID = filepath.ToSlash(filepath.Join(rel, bareID))
 		}
 		queries = append(queries, &query)
+		canonicalIDs[&query] = canonicalID
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("load queries from %s: %w", queriesDir, err)
+		return nil, nil, fmt.Errorf("load queries from %s: %w", queriesDir, err)
 	}
-	sort.Slice(queries, func(i, j int) bool { return queries[i].ID < queries[j].ID })
-	return queries, nil
+	sort.Slice(queries, func(i, j int) bool { return canonicalIDs[queries[i]] < canonicalIDs[queries[j]] })
+	return queries, canonicalIDs, nil
 }
 
 // walkJSONFiles calls onFile(path, data) for every regular file under dir

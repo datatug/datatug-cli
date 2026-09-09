@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/strongo/validation"
 )
@@ -45,6 +46,37 @@ func TestHandleError(t *testing.T) {
 		}
 		if !strings.Contains(w.Body.String(), "SOURCE_UNAVAILABLE") {
 			t.Errorf("expected SOURCE_UNAVAILABLE code in body, got %q", w.Body.String())
+		}
+	})
+
+	t.Run("unknown query id yields 404 (S97)", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		err := fmt.Errorf("wrap: %w", api.ErrQueryNotFound)
+		if !handleError(err, w, r) {
+			t.Error("expected true for non-nil error")
+		}
+		if w.Code != http.StatusNotFound {
+			t.Errorf("expected 404, got %d", w.Code)
+		}
+	})
+
+	t.Run("ambiguous query id yields 400 INVALID_REQUEST naming the query parameter (S97)", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		err := fmt.Errorf("wrap: %w", api.ErrAmbiguousQueryID)
+		if !handleError(err, w, r) {
+			t.Error("expected true for non-nil error")
+		}
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", w.Code)
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, "INVALID_REQUEST") {
+			t.Errorf("expected INVALID_REQUEST code in body, got %q", body)
+		}
+		if !strings.Contains(body, `"field":"query"`) {
+			t.Errorf("expected field=query in body, got %q", body)
 		}
 	})
 

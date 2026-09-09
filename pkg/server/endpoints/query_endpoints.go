@@ -25,12 +25,15 @@ var getQuery = api.GetQuery
 //	returnJSON(w, r, http.StatusOK, err, v)
 //}
 
-// getQueryHandler returns query definition
+// getQueryHandler returns query definition. The web client
+// (project-item-service.ts's getProjItem, instantiated for queries with
+// itemPath="query") sends the query id as `?query=`, not `?id=` — widen the
+// item-id lookup to accept both.
 func getQueryHandler(w http.ResponseWriter, r *http.Request) {
 	var ref dto.ProjectItemRef
 	getProjectItem(w, r, &ref, func(ctx context.Context) (responseDTO apicore.ResponseDTO, err error) {
 		return getQuery(ctx, ref)
-	})
+	}, urlParamID, "query")
 }
 
 // createQuery handles create query endpoint

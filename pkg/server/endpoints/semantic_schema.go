@@ -78,6 +78,9 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 	}
 	db, err := ref.Open(ctx)
 	if err != nil {
+		if errors.Is(err, dbcopy.ErrSourceFileMissing) {
+			return resolvedSource{}, newSourceUnavailable(err.Error())
+		}
 		return resolvedSource{}, fmt.Errorf("open %s: %w", sourceURL, err)
 	}
 	reader, ok := dal.As[dbschema.SchemaReader](db)

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/validation"
 )
@@ -48,6 +49,14 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	case errors.Is(err, secureread.ErrOpaqueSQLNotGranted):
 		response.Code = "UNSUPPORTED_PROTECTED_EXECUTION"
 		w.WriteHeader(http.StatusForbidden)
+	// A legacy route (exec/select, exec/execute_commands) hit the same
+	// missing-source-file condition api-contract.md's SOURCE_UNAVAILABLE
+	// covers (see pkg/dbcopy.CheckSourceFile) — surfaced with that code
+	// rather than the driver's own raw "unable to open database file" text
+	// reaching a bare 500.
+	case errors.Is(err, dbcopy.ErrSourceFileMissing):
+		response.Code = "SOURCE_UNAVAILABLE"
+		w.WriteHeader(http.StatusServiceUnavailable)
 	case validation.IsBadRequestError(err):
 		w.WriteHeader(http.StatusBadRequest)
 	default:

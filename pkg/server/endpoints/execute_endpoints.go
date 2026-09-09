@@ -61,8 +61,8 @@ func executeSelectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	cols := query.Get("cols")
 	request := api.SelectRequest{
-		Project:     query.Get("proj"),
-		Environment: query.Get("env"),
+		Project:     paramAlias(query, "proj", urlParamProjectID),
+		Environment: paramAlias(query, "env", "environment"),
 		Database:    query.Get("db"),
 		From:        query.Get("from"),
 		SQL:         query.Get("sql"),

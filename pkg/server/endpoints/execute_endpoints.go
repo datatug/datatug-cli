@@ -9,32 +9,25 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/sqlexecute"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 
-// executeCommandsHandler handler for execute command endpoint
+// executeCommandsHandler handler for execute command endpoint. The web
+// client (datatug-apps' agent.service.ts, AgentService.execute) sends the
+// project id as the `?project=` query parameter and never in the JSON body
+// (it deletes projectId from the body before POSTing) — Project is filled
+// in from the query string first, exactly like createProject's StoreID, so
+// a body that happens not to carry "project" at all still resolves it. See
+// api.ExecuteCommandsRequest's doc comment for why this replaced the
+// pkg/sqlexecute.Request shape.
 func executeCommandsHandler(w http.ResponseWriter, r *http.Request) {
 
-	var executeRequest sqlexecute.Request
+	var executeRequest api.ExecuteCommandsRequest
 
-	executeRequest.Project = r.URL.Query().Get("project")
+	executeRequest.Project = r.URL.Query().Get(urlParamProjectID)
 
 	switch r.Method {
-	//case "GET":
-	//	q := r.URL.ExecuteSingle()
-	//	executeRequest.ID = q.Get("id")
-	//	executeRequest.GetProjectStore = q.Get("p")
-	//	env := q.Get("env")
-	//	db := q.Get("db")
-	//	executeRequest.Commands = append(executeRequest.Commands,
-	//		execute.RequestCommand{
-	//			Env:  env,
-	//			DB:   db,
-	//			Text: q.Get("q1"),
-	//		},
-	//	)
 	case "POST":
 		decoder := json.NewDecoder(r.Body)
 		if err := decoder.Decode(&executeRequest); err != nil {

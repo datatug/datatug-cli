@@ -32,6 +32,16 @@ var nativeSQLLimitation = Limitation{
 // condition or field allow-list is applied to the returned rows regardless
 // of what accesspolicies.Explain reports for the collection-scoped rules.
 //
+// Before any of that, this process's own operator-level grant is checked
+// first (Task 12, api-contract.md REQ:opaque-sql-limitation: "the support
+// demo has no such grant"): unless the session is Unrestricted or was
+// explicitly started with AllowOpaqueSQL (`datatug serve
+// --allow-opaque-sql`), RunNativeSQL refuses with ErrOpaqueSQLNotGranted
+// before doing anything else — this is what makes every native-SQL caller
+// (exec/run_query and the legacy exec/select/exec/execute_commands routes,
+// which all share one Executor/Session) obey the same boundary, rather than
+// each endpoint needing its own check.
+//
 // args are the query's own bind values (dal.QueryArg{Name, Value}) — a named
 // arg (Name != "") binds an "@name"/":name"/"$name" placeholder in sqlText;
 // a positional arg (Name == "") binds an ordinary "?" placeholder, in order.
@@ -55,6 +65,9 @@ var nativeSQLLimitation = Limitation{
 // dal.DB.RunReadonlyTransaction branch alongside this PRAGMA one, per the
 // brief's "PRAGMA query_only for SQLite; read-only tx elsewhere" design.
 func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, args ...dal.QueryArg) (Result, error) {
+	if !e.session.Unrestricted && !e.session.AllowOpaqueSQL {
+		return Result{}, ErrOpaqueSQLNotGranted
+	}
 	ref, err := dbcopy.Parse(sourceURL)
 	if err != nil {
 		return Result{}, err

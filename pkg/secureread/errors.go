@@ -26,3 +26,13 @@ var ErrNoPrincipal = errors.New("secureread: no principal named; pass --as, --ro
 // with no native SQL-text execution surface in this repository yet. See
 // RunNativeSQL's doc comment for the exact schemes this covers today.
 var ErrNativeSQLUnsupported = errors.New("secureread: native SQL is not supported for this source")
+
+// ErrOpaqueSQLNotGranted is returned by RunNativeSQL before any dispatch
+// when the session is neither Unrestricted nor carries an explicit
+// AllowOpaqueSQL grant (REQ:opaque-sql-limitation: "The protected profile
+// MUST refuse opaque native SQL before execution with
+// UNSUPPORTED_PROTECTED_EXECUTION"). Every caller of RunNativeSQL —
+// exec/run_query and the legacy exec/select / exec/execute_commands
+// routes alike, since they share one Executor/Session — is refused the
+// same way.
+var ErrOpaqueSQLNotGranted = errors.New("secureread: native SQL execution requires an explicit opaque-query grant (--allow-opaque-sql) or an unrestricted session")

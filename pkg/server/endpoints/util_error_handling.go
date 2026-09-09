@@ -36,6 +36,18 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	case errors.Is(err, secureread.ErrAccessDenied):
 		response.Code = "ACCESS_DENIED"
 		w.WriteHeader(http.StatusForbidden)
+	// A legacy route (exec/select, exec/execute_commands) hit the same
+	// centralized opaque-SQL grant gate exec/run_query uses
+	// (secureread.Executor.RunNativeSQL / session.AllowOpaqueSQL) —
+	// api-contract.md "Security and errors": "All legacy routes obey the
+	// same rule." This keeps the legacy {error,code} envelope shape (not
+	// this task's rewritten {error:{code,message,field,requestId}}
+	// contract envelope — see contract_errors.go for the routes that DO
+	// use it) but reports the appendix's own error code for this refusal
+	// rather than reusing ACCESS_DENIED.
+	case errors.Is(err, secureread.ErrOpaqueSQLNotGranted):
+		response.Code = "UNSUPPORTED_PROTECTED_EXECUTION"
+		w.WriteHeader(http.StatusForbidden)
 	case validation.IsBadRequestError(err):
 		w.WriteHeader(http.StatusBadRequest)
 	default:

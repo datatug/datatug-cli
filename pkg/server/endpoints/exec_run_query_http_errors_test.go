@@ -98,7 +98,7 @@ func TestExecRunQuery_HTTPSource_ResponseTooLarge_MapsTo413(t *testing.T) {
 	useInsecureLoopbackHTTPQuery(t) // srv is a loopback httptest.Server (plain HTTP)
 	const overCap = 2*1024*1024 + 1
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(make([]byte, overCap))
+		_, _ = w.Write(make([]byte, overCap))
 	}))
 	defer srv.Close()
 

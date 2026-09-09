@@ -3,23 +3,23 @@ package endpoints
 import (
 	"time"
 
-	"github.com/datatug/datatug-cli/pkg/apicontract_local"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
 // toContractRecordset shapes a secureread.Result's Columns/Rows into the
 // appendix's Recordset (api-contract.md "Shared JSON types": "rows have
 // exactly one value per returned column"). Column types are inferred from
-// the first non-null observed value in that column (see
-// apicontract_local.FromGoValue's own doc for why: no richer per-column
-// type registry exists yet in this codebase to consult instead) and default
-// to "string" for an all-null/empty column.
-func toContractRecordset(result secureread.Result) (apicontract_local.Recordset, error) {
+// the first non-null observed value in that column (see fromGoValue's own
+// doc for why: no richer per-column type registry exists yet in this
+// codebase to consult instead) and default to "string" for an
+// all-null/empty column.
+func toContractRecordset(result secureread.Result) (apicontract.Recordset, error) {
 	columnTypes := make([]string, len(result.Columns))
 	for i, name := range result.Columns {
 		for _, row := range result.Rows {
 			if v, ok := row.Data[name]; ok && v != nil {
-				tv, err := apicontract_local.FromGoValue(v, "")
+				tv, err := fromGoValue(v, "")
 				if err == nil {
 					columnTypes[i] = string(tv.Type)
 					break
@@ -27,26 +27,26 @@ func toContractRecordset(result secureread.Result) (apicontract_local.Recordset,
 			}
 		}
 		if columnTypes[i] == "" {
-			columnTypes[i] = string(apicontract_local.TypeString)
+			columnTypes[i] = string(apicontract.ValueTypeString)
 		}
 	}
-	columns := make([]apicontract_local.Column, len(result.Columns))
+	columns := make([]apicontract.Column, len(result.Columns))
 	for i, name := range result.Columns {
-		columns[i] = apicontract_local.Column{Name: name, Type: columnTypes[i]}
+		columns[i] = apicontract.Column{Name: name, Type: columnTypes[i]}
 	}
-	rows := make([][]apicontract_local.TypedValue, len(result.Rows))
+	rows := make([][]apicontract.TypedValue, len(result.Rows))
 	for r, row := range result.Rows {
-		values := make([]apicontract_local.TypedValue, len(result.Columns))
+		values := make([]apicontract.TypedValue, len(result.Columns))
 		for c, name := range result.Columns {
-			tv, err := apicontract_local.FromGoValue(row.Data[name], columnTypes[c])
+			tv, err := fromGoValue(row.Data[name], columnTypes[c])
 			if err != nil {
-				return apicontract_local.Recordset{}, err
+				return apicontract.Recordset{}, err
 			}
 			values[c] = tv
 		}
 		rows[r] = values
 	}
-	return apicontract_local.Recordset{Columns: columns, Rows: rows}, nil
+	return apicontract.Recordset{Columns: columns, Rows: rows}, nil
 }
 
 // toContractLimitations folds secureread's internally-split Limitation
@@ -66,7 +66,7 @@ func toContractRecordset(result secureread.Result) (apicontract_local.Recordset,
 // need secureread's own internal Limitation shape to carry that
 // association, which it does not yet — flagged as a Task 13 ("converge
 // protected execution") follow-up, not fixed here.
-func toContractLimitations(in []secureread.Limitation) []apicontract_local.Limitation {
+func toContractLimitations(in []secureread.Limitation) []apicontract.Limitation {
 	var policyNames []string
 	rowsFiltered := false
 	var hiddenColumns []string
@@ -83,7 +83,7 @@ func toContractLimitations(in []secureread.Limitation) []apicontract_local.Limit
 		}
 	}
 	if len(policyNames) == 0 && !rowsFiltered && len(hiddenColumns) == 0 {
-		return []apicontract_local.Limitation{}
+		return []apicontract.Limitation{}
 	}
 	policy := "policy"
 	if len(policyNames) > 0 {
@@ -92,7 +92,7 @@ func toContractLimitations(in []secureread.Limitation) []apicontract_local.Limit
 	if hiddenColumns == nil {
 		hiddenColumns = []string{}
 	}
-	return []apicontract_local.Limitation{{Policy: policy, RowsFiltered: rowsFiltered, HiddenColumns: hiddenColumns}}
+	return []apicontract.Limitation{{Policy: policy, RowsFiltered: rowsFiltered, HiddenColumns: hiddenColumns}}
 }
 
 func containsStr(list []string, s string) bool {

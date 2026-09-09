@@ -12,11 +12,34 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/apicontract_local"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/semantic"
 )
+
+// relatedRequest is POST semantic/related's body (api-contract.md "Endpoint
+// table": Scope + {fact:Fact,limit?}). Core's pkg/apicontract (the schema
+// authority, v0.26.0) defines RelatedResponse/RelatedItem but not a request
+// envelope for this endpoint — Scope and Fact are core's own shared schema
+// types, reused here unchanged; only the enclosing envelope has no
+// pkg/apicontract type of its own. See applicableRequest's doc comment
+// (semantic_applicable.go) for the same gap, named once for the lead there.
+type relatedRequest struct {
+	apicontract.Scope
+	Fact  apicontract.Fact `json:"fact"`
+	Limit int              `json:"limit,omitempty"`
+}
+
+// relatedRowsRequest is POST semantic/related/rows's body. Same gap as
+// relatedRequest: no pkg/apicontract request envelope, composed here from
+// core's own Scope/TypedValue.
+type relatedRowsRequest struct {
+	apicontract.Scope
+	LookupID string                 `json:"lookupId"`
+	Value    apicontract.TypedValue `json:"value"`
+	Limit    int                    `json:"limit,omitempty"`
+}
 
 // semanticRelatedHandler is POST /datatug/semantic/related, rewritten
 // (Task 12) to the appendix's exact envelope: Scope + {fact:Fact,limit?} in
@@ -26,48 +49,48 @@ import (
 func semanticRelatedHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeContractError(w, r, apicontract_local.NewInvalidRequest("", "failed to read request body: "+err.Error()))
+		writeContractError(w, r, newInvalidRequest("", "failed to read request body: "+err.Error()))
 		return
 	}
-	var req apicontract_local.RelatedRequest
+	var req relatedRequest
 	if err := decodeContractBody(body, &req); err != nil {
-		writeContractError(w, r, apicontract_local.NewInvalidRequest("", err.Error()))
+		writeContractError(w, r, newInvalidRequest("", err.Error()))
 		return
 	}
 	resp, err := computeSemanticRelated(r.Context(), req)
 	writeContractResponse(w, r, err, resp)
 }
 
-func computeSemanticRelated(ctx context.Context, req apicontract_local.RelatedRequest) (apicontract_local.RelatedResponse, error) {
+func computeSemanticRelated(ctx context.Context, req relatedRequest) (apicontract.RelatedResponse, error) {
 	if err := validateScope(req.Scope); err != nil {
-		return apicontract_local.RelatedResponse{}, err
+		return apicontract.RelatedResponse{}, err
 	}
 	if err := validateFact(req.Fact); err != nil {
-		return apicontract_local.RelatedResponse{}, err
+		return apicontract.RelatedResponse{}, err
 	}
 	if req.Fact.Physical == nil {
-		return apicontract_local.RelatedResponse{}, apicontract_local.NewInvalidRequest("fact.physical", "is required to compute related lookups")
+		return apicontract.RelatedResponse{}, newInvalidRequest("fact.physical", "is required to compute related lookups")
 	}
 	projectDir, ok := api.ProjectDir(req.Project)
 	if !ok {
-		return apicontract_local.RelatedResponse{}, apicontract_local.NewNotFound("unknown project")
+		return apicontract.RelatedResponse{}, newNotFound("unknown project")
 	}
 	projStore, err := api.ProjectStoreFor(req.Project)
 	if err != nil {
-		return apicontract_local.RelatedResponse{}, apicontract_local.NewInvalidRequest("project", err.Error())
+		return apicontract.RelatedResponse{}, newInvalidRequest("project", err.Error())
 	}
 	entities, err := loadModuleEntities(projectDir)
 	if err != nil {
-		return apicontract_local.RelatedResponse{}, err
+		return apicontract.RelatedResponse{}, err
 	}
 	physical := *req.Fact.Physical
 	resolved, err := resolveSource(ctx, projStore, projectDir, req.Environment, physical.Source, physical.Collection)
 	if err != nil {
-		return apicontract_local.RelatedResponse{}, err
+		return apicontract.RelatedResponse{}, err
 	}
 	value, err := factValueString(req.Fact.Value)
 	if err != nil {
-		return apicontract_local.RelatedResponse{}, err
+		return apicontract.RelatedResponse{}, err
 	}
 	provenance := semantic.Inferred
 	if req.Fact.Mapping == "declared" {
@@ -91,11 +114,11 @@ func computeSemanticRelated(ctx context.Context, req apicontract_local.RelatedRe
 
 	executor, ok := api.SecureExecutor()
 	if !ok {
-		return apicontract_local.RelatedResponse{}, apicontract_local.NewError("INTERNAL", "server has no policy-enforced session configured", "")
+		return apicontract.RelatedResponse{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
-	resp := apicontract_local.RelatedResponse{Related: make([]apicontract_local.RelatedEntry, 0, len(lookups)), Truncated: truncated}
+	resp := apicontract.RelatedResponse{Related: make([]apicontract.RelatedItem, 0, len(lookups)), Truncated: truncated}
 	for _, lookup := range lookups {
-		entry := apicontract_local.RelatedEntry{
+		entry := apicontract.RelatedItem{
 			Label: lookup.Collection, Source: lookup.Source, Collection: lookup.Collection,
 			LookupID: encodeLookupID(lookup.Source, lookup.Collection, lookup.Column),
 		}
@@ -121,20 +144,20 @@ func computeSemanticRelated(ctx context.Context, req apicontract_local.RelatedRe
 // validateFact checks the subset of Fact fields every semantic endpoint
 // that accepts one needs populated: id/entity/field/value are always
 // required; origin must be one of the closed set.
-func validateFact(f apicontract_local.Fact) error {
+func validateFact(f apicontract.Fact) error {
 	if f.Entity == "" {
-		return apicontract_local.NewMissingParameter("fact.entity")
+		return newMissingParameter("fact.entity")
 	}
 	if f.Field == "" {
-		return apicontract_local.NewMissingParameter("fact.field")
+		return newMissingParameter("fact.field")
 	}
-	if f.Value.IsZero() {
-		return apicontract_local.NewMissingParameter("fact.value")
+	if f.Value.Type == "" {
+		return newMissingParameter("fact.value")
 	}
 	switch f.Origin {
-	case apicontract_local.OriginSelection, apicontract_local.OriginContext, apicontract_local.OriginManual:
+	case apicontract.FactOriginSelection, apicontract.FactOriginContext, apicontract.FactOriginManual:
 	default:
-		return apicontract_local.NewInvalidRequest("fact.origin", fmt.Sprintf("unknown origin %q", f.Origin))
+		return newInvalidRequest("fact.origin", fmt.Sprintf("unknown origin %q", f.Origin))
 	}
 	return nil
 }
@@ -146,10 +169,10 @@ func validateFact(f apicontract_local.Fact) error {
 // requires at the transport boundary is preserved up to here, then
 // collapsed to the query-parameter string form countRelated/dal.WhereField
 // need).
-func factValueString(v apicontract_local.TypedValue) (string, error) {
-	native, err := v.Native()
+func factValueString(v apicontract.TypedValue) (string, error) {
+	native, err := nativeValue(v)
 	if err != nil {
-		return "", apicontract_local.NewTypeMismatch("fact.value", err.Error())
+		return "", newTypeMismatch("fact.value", err.Error())
 	}
 	return fmt.Sprint(native), nil
 }
@@ -161,7 +184,7 @@ func factValueString(v apicontract_local.TypedValue) (string, error) {
 // when any policy Limitation applied, the count query itself failed, or the
 // budget was exceeded — every one of these means "count unavailable", never
 // a number that would misrepresent what an unrestricted caller would see.
-func countRelated(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, environment string, lookup semantic.Lookup, value string) (*int, error) {
+func countRelated(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, environment string, lookup semantic.Lookup, value string) (*int64, error) {
 	lookupSource, err := resolveSource(ctx, projStore, projectDir, environment, lookup.Source, lookup.Collection)
 	if err != nil {
 		return nil, err
@@ -178,7 +201,7 @@ func countRelated(ctx context.Context, executor *secureread.Executor, projStore 
 	if len(result.Limitations) > 0 {
 		return nil, nil
 	}
-	n := len(result.Rows)
+	n := int64(len(result.Rows))
 	return &n, nil
 }
 
@@ -189,47 +212,47 @@ func countRelated(ctx context.Context, executor *secureread.Executor, projStore 
 func semanticRelatedRowsHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeContractError(w, r, apicontract_local.NewInvalidRequest("", "failed to read request body: "+err.Error()))
+		writeContractError(w, r, newInvalidRequest("", "failed to read request body: "+err.Error()))
 		return
 	}
-	var req apicontract_local.RelatedRowsRequest
+	var req relatedRowsRequest
 	if err := decodeContractBody(body, &req); err != nil {
-		writeContractError(w, r, apicontract_local.NewInvalidRequest("", err.Error()))
+		writeContractError(w, r, newInvalidRequest("", err.Error()))
 		return
 	}
 	resp, err := computeSemanticRelatedRows(r.Context(), req)
 	writeContractResponse(w, r, err, resp)
 }
 
-func computeSemanticRelatedRows(ctx context.Context, req apicontract_local.RelatedRowsRequest) (apicontract_local.Result, error) {
+func computeSemanticRelatedRows(ctx context.Context, req relatedRowsRequest) (apicontract.Result, error) {
 	if err := validateScope(req.Scope); err != nil {
-		return apicontract_local.Result{}, err
+		return apicontract.Result{}, err
 	}
 	if req.LookupID == "" {
-		return apicontract_local.Result{}, apicontract_local.NewMissingParameter("lookupId")
+		return apicontract.Result{}, newMissingParameter("lookupId")
 	}
-	if req.Value.IsZero() {
-		return apicontract_local.Result{}, apicontract_local.NewMissingParameter("value")
+	if req.Value.Type == "" {
+		return apicontract.Result{}, newMissingParameter("value")
 	}
 	source, collection, column, err := decodeLookupID(req.LookupID)
 	if err != nil {
-		return apicontract_local.Result{}, apicontract_local.NewInvalidRequest("lookupId", err.Error())
+		return apicontract.Result{}, newInvalidRequest("lookupId", err.Error())
 	}
 	projectDir, ok := api.ProjectDir(req.Project)
 	if !ok {
-		return apicontract_local.Result{}, apicontract_local.NewNotFound("unknown project")
+		return apicontract.Result{}, newNotFound("unknown project")
 	}
 	projStore, err := api.ProjectStoreFor(req.Project)
 	if err != nil {
-		return apicontract_local.Result{}, apicontract_local.NewInvalidRequest("project", err.Error())
+		return apicontract.Result{}, newInvalidRequest("project", err.Error())
 	}
 	resolved, err := resolveSource(ctx, projStore, projectDir, req.Environment, source, collection)
 	if err != nil {
-		return apicontract_local.Result{}, err
+		return apicontract.Result{}, err
 	}
 	value, err := factValueString(req.Value)
 	if err != nil {
-		return apicontract_local.Result{}, err
+		return apicontract.Result{}, err
 	}
 	limit := boundLimit(req.Limit)
 	builder := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(collection, ""))).
@@ -239,17 +262,17 @@ func computeSemanticRelatedRows(ctx context.Context, req apicontract_local.Relat
 
 	executor, ok := api.SecureExecutor()
 	if !ok {
-		return apicontract_local.Result{}, apicontract_local.NewError("INTERNAL", "server has no policy-enforced session configured", "")
+		return apicontract.Result{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
 	result, err := executor.RunStructured(ctx, resolved.URL, query, nil)
 	if err != nil {
 		if err == context.DeadlineExceeded {
-			return apicontract_local.Result{}, apicontract_local.NewTimeout("related rows lookup timed out")
+			return apicontract.Result{}, newTimeout("related rows lookup timed out")
 		}
 		if isAccessDenied(err) {
-			return apicontract_local.Result{}, contractErrAccessDenied(err.Error())
+			return apicontract.Result{}, contractErrAccessDenied(err.Error())
 		}
-		return apicontract_local.Result{}, apicontract_local.NewInvalidRequest("", err.Error())
+		return apicontract.Result{}, newInvalidRequest("", err.Error())
 	}
 	truncated := len(result.Rows) > limit
 	if truncated {
@@ -257,14 +280,14 @@ func computeSemanticRelatedRows(ctx context.Context, req apicontract_local.Relat
 	}
 	recordset, err := toContractRecordset(result)
 	if err != nil {
-		return apicontract_local.Result{}, apicontract_local.NewError("INTERNAL", err.Error(), "")
+		return apicontract.Result{}, newContractError(codeInternal, err.Error(), "")
 	}
-	return apicontract_local.Result{
+	return apicontract.Result{
 		Recordset:   recordset,
 		Limitations: toContractLimitations(result.Limitations),
-		Provenance: apicontract_local.Provenance{
-			Source: source, Collection: collection, Mode: apicontract_local.ModeLive,
-			ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), ExecutionProfile: apicontract_local.ProfileProtected,
+		Provenance: apicontract.Provenance{
+			Source: source, Collection: collection, Mode: apicontract.ProvenanceModeLive,
+			ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), ExecutionProfile: apicontract.ExecutionProfileProtected,
 		},
 		Truncated: truncated,
 	}, nil

@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/apicontract_local"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
 // Bounds api-contract.md "Bounded lookups and HTTP" fixes: default/maximum
@@ -27,18 +27,18 @@ const (
 // project this process actually serves — callers do that themselves via
 // api.ProjectDir, since the right error there is NOT_FOUND, not
 // INVALID_REQUEST.
-func validateScope(s apicontract_local.Scope) error {
+func validateScope(s apicontract.Scope) error {
 	if s.Project == "" {
-		return apicontract_local.NewMissingParameter("project")
+		return newMissingParameter("project")
 	}
 	if s.Environment == "" {
-		return apicontract_local.NewMissingParameter("environment")
+		return newMissingParameter("environment")
 	}
 	if s.SecurityContextID == "" {
-		return apicontract_local.NewMissingParameter("securityContextId")
+		return newMissingParameter("securityContextId")
 	}
 	if !api.ValidateSecurityContext(s.SecurityContextID) {
-		return apicontract_local.NewStaleContext("securityContextId does not match the agent's current session; call agent-info again")
+		return newStaleContext("securityContextId does not match the agent's current session; call agent-info again")
 	}
 	return nil
 }

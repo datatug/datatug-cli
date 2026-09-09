@@ -11,7 +11,6 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/apicontract_local"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/semantic"
@@ -46,7 +45,7 @@ type resolvedSource struct {
 func resolveSource(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment, source, collection string) (resolvedSource, error) {
 	resolved, err := api.ResolveSource(ctx, projStore, projectDir, environment, source)
 	if err != nil {
-		return resolvedSource{}, apicontract_local.NewSourceUnavailable(err.Error())
+		return resolvedSource{}, newSourceUnavailable(err.Error())
 	}
 	switch resolved.Kind {
 	case api.SourceKindSQL:
@@ -54,13 +53,13 @@ func resolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 	case api.SourceKindInGitDB:
 		recordsetPath := recordsetDefinitionPath(projectDir, resolved.ID)
 		if !fileExists(recordsetPath) {
-			return resolvedSource{}, apicontract_local.NewSourceUnavailable(fmt.Sprintf("source %q has no recordset definition at %s", source, recordsetPath))
+			return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has no recordset definition at %s", source, recordsetPath))
 		}
 		return resolveRecordsetSource(resolved.URL, recordsetPath, collection)
 	case api.SourceKindHTTP:
 		return resolveHTTPSource(projectDir, resolved.ID, collection)
 	default:
-		return resolvedSource{}, apicontract_local.NewSourceUnavailable(fmt.Sprintf("source %q has an unsupported kind %q", source, resolved.Kind))
+		return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has an unsupported kind %q", source, resolved.Kind))
 	}
 }
 
@@ -222,7 +221,7 @@ func resolveHTTPSource(projectDir, queryID, collection string) (resolvedSource, 
 		}
 		return resolvedSource{Columns: columns}, nil
 	}
-	return resolvedSource{}, apicontract_local.NewSourceUnavailable(fmt.Sprintf("HTTP query %q not found", queryID))
+	return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("HTTP query %q not found", queryID))
 }
 
 // httpDeclaredColumns returns queryID's declared recordset column ->

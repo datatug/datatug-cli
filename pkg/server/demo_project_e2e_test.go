@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/apicontract_local"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
 // demoProjectDefaultDir is the real datatug-demo-projects/demo-project-1
@@ -125,7 +125,7 @@ func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("GET agent-info: status %d, body %s", status, raw)
 	}
-	var info apicontract_local.AgentInfoResponse
+	var info apicontract.AgentInfo
 	if err := json.Unmarshal(raw, &info); err != nil {
 		t.Fatalf("decode agent-info: %v (body %s)", err, raw)
 	}
@@ -133,22 +133,22 @@ func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 		t.Fatalf("agent-info principal.id = %q, want admin", info.Principal.ID)
 	}
 
-	runForCustomer := func(customerID int64) apicontract_local.Result {
+	runForCustomer := func(customerID int64) apicontract.Result {
 		t.Helper()
-		request := apicontract_local.ExecutionRequest{
+		request := apicontract.ExecutionRequest{
 			Project: demoProjectID, Environment: demoProjectEnv, SecurityContextID: info.SecurityContextID,
 			Source: demoProjectSource, QueryID: "customers/customer-invoices",
-			Parameters: map[string]apicontract_local.TypedValue{"CustomerId": apicontract_local.NewIntegerValue(customerID)},
-			BindingOrigins: []apicontract_local.BindingOriginInput{
-				{ParameterID: "CustomerId", Origin: apicontract_local.BindingOriginManual},
+			Parameters: map[string]apicontract.TypedValue{"CustomerId": apicontract.NewIntegerValue(strconv.FormatInt(customerID, 10))},
+			BindingOrigins: []apicontract.BindingOriginEntry{
+				{ParameterID: "CustomerId", Origin: apicontract.BindingOriginManual},
 			},
-			Mode: apicontract_local.ModeLive,
+			Mode: apicontract.ProvenanceModeLive,
 		}
 		status, raw := postJSON(t, baseURL, "/datatug/exec/run_query", request)
 		if status != http.StatusOK {
 			t.Fatalf("run_query(CustomerId=%d): status %d, body %s", customerID, status, raw)
 		}
-		var result apicontract_local.Result
+		var result apicontract.Result
 		if err := json.Unmarshal(raw, &result); err != nil {
 			t.Fatalf("decode run_query(CustomerId=%d) response: %v (body %s)", customerID, err, raw)
 		}
@@ -178,14 +178,14 @@ func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 	// "number" (a float64 driver value), not "integer": dalgo2sqlite's
 	// structured-query row scan does not preserve SQLite's declared INTEGER
 	// column affinity distinctly from REAL through condeval.ToMap — see
-	// apicontract_local.FromGoValue's own doc comment on inferring a
+	// fromGoValue (pkg/server/endpoints)'s own doc comment on inferring a
 	// TypedValue's type from the observed Go runtime value. That is a
 	// faithful, contract-conformant TypedValue (a number IS a valid
 	// representation of an integer value); typedValueKey below compares by
 	// whichever field the type actually populated, so this test's
 	// assertion is not coupled to that driver-shape detail.
 
-	invoiceIDs := func(result apicontract_local.Result) map[string]bool {
+	invoiceIDs := func(result apicontract.Result) map[string]bool {
 		out := map[string]bool{}
 		for _, row := range result.Recordset.Rows {
 			out[typedValueKey(row[invoiceIDColumn])] = true
@@ -204,13 +204,13 @@ func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 	// be the SAME typed value that was actually applied, and its origin
 	// evidence must be honestly reported as client-reported (this test drove
 	// the binding by hand, standing in for the browser's own auto-binding).
-	if len(resultOne.BindingsApplied) != 1 || resultOne.BindingsApplied[0].ParameterID != "CustomerId" || resultOne.BindingsApplied[0].Value.Text != "1" {
+	if len(resultOne.BindingsApplied) != 1 || resultOne.BindingsApplied[0].ParameterID != "CustomerId" || resultOne.BindingsApplied[0].Value.Str != "1" {
 		t.Fatalf("customer 1 BindingsApplied = %+v, want [{CustomerId, integer 1}]", resultOne.BindingsApplied)
 	}
-	if resultOne.BindingsApplied[0].OriginEvidence != apicontract_local.EvidenceClientReported {
+	if resultOne.BindingsApplied[0].OriginEvidence != apicontract.BindingOriginEvidenceClientReported {
 		t.Fatalf("customer 1 BindingsApplied[0].OriginEvidence = %q, want client-reported", resultOne.BindingsApplied[0].OriginEvidence)
 	}
-	if resultTwo.BindingsApplied[0].Value.Text != "2" {
+	if resultTwo.BindingsApplied[0].Value.Str != "2" {
 		t.Fatalf("customer 2 BindingsApplied = %+v, want CustomerId=2", resultTwo.BindingsApplied)
 	}
 
@@ -221,7 +221,7 @@ func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 	if resultOne.Provenance.Source != demoProjectSource {
 		t.Fatalf("Provenance.Source = %q, want %q", resultOne.Provenance.Source, demoProjectSource)
 	}
-	if resultOne.Provenance.ExecutionProfile != apicontract_local.ProfileProtected {
+	if resultOne.Provenance.ExecutionProfile != apicontract.ExecutionProfileProtected {
 		t.Fatalf("Provenance.ExecutionProfile = %q, want protected (DTQL through the policy path)", resultOne.Provenance.ExecutionProfile)
 	}
 }
@@ -231,14 +231,14 @@ func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 // rendering of Number for TypeNumber, "true"/"false" for TypeBoolean) — see
 // this test's own note above on why a real driver-scanned integer column
 // can legitimately arrive as TypeNumber rather than TypeInteger.
-func typedValueKey(v apicontract_local.TypedValue) string {
+func typedValueKey(v apicontract.TypedValue) string {
 	switch v.Type {
-	case apicontract_local.TypeNumber:
-		return strconv.FormatFloat(v.Number, 'f', -1, 64)
-	case apicontract_local.TypeBoolean:
+	case apicontract.ValueTypeNumber:
+		return strconv.FormatFloat(v.Num, 'f', -1, 64)
+	case apicontract.ValueTypeBoolean:
 		return strconv.FormatBool(v.Bool)
 	default:
-		return v.Text
+		return v.Str
 	}
 }
 
@@ -276,7 +276,7 @@ func TestDemoProject_RunQuery_SQL_RealParameterEffect_WithGrant(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("GET agent-info: status %d, body %s", status, raw)
 	}
-	var info apicontract_local.AgentInfoResponse
+	var info apicontract.AgentInfo
 	if err := json.Unmarshal(raw, &info); err != nil {
 		t.Fatalf("decode agent-info: %v (body %s)", err, raw)
 	}
@@ -284,22 +284,22 @@ func TestDemoProject_RunQuery_SQL_RealParameterEffect_WithGrant(t *testing.T) {
 		t.Fatalf("agent-info capabilities.opaqueReadOnly = false, want true (--allow-opaque-sql set)")
 	}
 
-	runForCustomer := func(customerID int64) apicontract_local.Result {
+	runForCustomer := func(customerID int64) apicontract.Result {
 		t.Helper()
-		request := apicontract_local.ExecutionRequest{
+		request := apicontract.ExecutionRequest{
 			Project: demoProjectID, Environment: demoProjectEnv, SecurityContextID: info.SecurityContextID,
 			Source: demoProjectSource, QueryID: "customers/customer-purchases-by-genre",
-			Parameters: map[string]apicontract_local.TypedValue{"CustomerId": apicontract_local.NewIntegerValue(customerID)},
-			BindingOrigins: []apicontract_local.BindingOriginInput{
-				{ParameterID: "CustomerId", Origin: apicontract_local.BindingOriginManual},
+			Parameters: map[string]apicontract.TypedValue{"CustomerId": apicontract.NewIntegerValue(strconv.FormatInt(customerID, 10))},
+			BindingOrigins: []apicontract.BindingOriginEntry{
+				{ParameterID: "CustomerId", Origin: apicontract.BindingOriginManual},
 			},
-			Mode: apicontract_local.ModeLive,
+			Mode: apicontract.ProvenanceModeLive,
 		}
 		status, raw := postJSON(t, baseURL, "/datatug/exec/run_query", request)
 		if status != http.StatusOK {
 			t.Fatalf("run_query(CustomerId=%d): status %d, body %s", customerID, status, raw)
 		}
-		var result apicontract_local.Result
+		var result apicontract.Result
 		if err := json.Unmarshal(raw, &result); err != nil {
 			t.Fatalf("decode run_query(CustomerId=%d) response: %v (body %s)", customerID, err, raw)
 		}
@@ -309,11 +309,11 @@ func TestDemoProject_RunQuery_SQL_RealParameterEffect_WithGrant(t *testing.T) {
 	resultOne := runForCustomer(1)
 	resultTwo := runForCustomer(2)
 
-	if resultOne.Provenance.ExecutionProfile != apicontract_local.ProfileOpaquePrivileged {
+	if resultOne.Provenance.ExecutionProfile != apicontract.ExecutionProfileOpaquePrivileged {
 		t.Fatalf("Provenance.ExecutionProfile = %q, want opaque-privileged", resultOne.Provenance.ExecutionProfile)
 	}
 
-	rockRow := func(result apicontract_local.Result) []apicontract_local.TypedValue {
+	rockRow := func(result apicontract.Result) []apicontract.TypedValue {
 		nameCol, tracksCol := -1, -1
 		for i, c := range result.Recordset.Columns {
 			switch c.Name {

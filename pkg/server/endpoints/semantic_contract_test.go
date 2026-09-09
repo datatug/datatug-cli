@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/apicontract_local"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
@@ -25,7 +25,7 @@ import (
 // principal or role are rejected" — that was exactly what it did). Returns
 // a base Scope with the freshly-minted securityContextId already filled
 // in.
-func configureSemanticSession(t *testing.T, projectDir, projectID, as string, roles []string) apicontract_local.Scope {
+func configureSemanticSession(t *testing.T, projectDir, projectID, as string, roles []string) apicontract.Scope {
 	t.Helper()
 	session, err := secureread.NewSession(secureread.SessionOptions{
 		As: as, Roles: roles, PoliciesDir: projectDir + "/policies",
@@ -43,14 +43,32 @@ func configureSemanticSession(t *testing.T, projectDir, projectID, as string, ro
 	storage.NewDatatugStore = func(string) (storage.Store, error) {
 		return filestore.NewStore("files", pathsByID)
 	}
-	return apicontract_local.Scope{Project: projectID, Environment: semanticTestEnv, SecurityContextID: api.SecurityContextID()}
+	return apicontract.Scope{Project: projectID, Environment: semanticTestEnv, SecurityContextID: api.SecurityContextID()}
 }
 
-func declaredFact(id, entity, field string, value apicontract_local.TypedValue, source, collection, column string) apicontract_local.Fact {
-	return apicontract_local.Fact{
-		ID: id, Entity: entity, Field: field, Value: value, Origin: apicontract_local.OriginSelection,
-		Physical: &apicontract_local.PhysicalRef{Source: source, Collection: collection, Column: column},
+func declaredFact(id, entity, field string, value apicontract.TypedValue, source, collection, column string) apicontract.Fact {
+	return apicontract.Fact{
+		ID: id, Entity: entity, Field: field, Value: value, Origin: apicontract.FactOriginSelection,
+		Physical: &apicontract.PhysicalRef{Source: source, Collection: collection, Column: column},
 		Mapping:  "declared", Enabled: true,
+	}
+}
+
+// assertValid fails the test unless v satisfies datatug-core's own
+// Validate() — the schema authority's rule engine, generated from the same
+// appendix that produced pkg/apicontract/fixtures' frozen examples. This is
+// this stream's fixture-conformance check for the endpoints
+// (exec/run_query, semantic/columns, semantic/related(/rows),
+// queries/applicable) whose real responses carry live query data and so
+// cannot be byte-compared against a frozen fixture the way the static error
+// envelopes are (contract_error_test.go) — every response this package
+// builds must still be a valid instance of the type core's own fixtures
+// demonstrate, checked with core's own code, not a hand-rolled duplicate of
+// it.
+func assertValid(t *testing.T, v interface{ Validate() error }) {
+	t.Helper()
+	if err := v.Validate(); err != nil {
+		t.Errorf("response does not satisfy datatug-core/pkg/apicontract's own Validate(): %v", err)
 	}
 }
 
@@ -60,11 +78,12 @@ func TestSemanticColumns_ChinookCustomer_Declared(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 
-	resp, err := computeSemanticColumns(context.Background(), scope, apicontract_local.SourceRef{Source: semanticTestSource, Collection: "Customer"})
+	resp, err := computeSemanticColumns(context.Background(), scope, apicontract.SourceRef{Source: semanticTestSource, Collection: "Customer"})
 	if err != nil {
 		t.Fatalf("computeSemanticColumns: %v", err)
 	}
-	byColumn := map[string]apicontract_local.ColumnEntry{}
+	assertValid(t, resp)
+	byColumn := map[string]apicontract.SemanticColumnMapping{}
 	for _, c := range resp.Columns {
 		byColumn[c.Column] = c
 	}
@@ -72,7 +91,7 @@ func TestSemanticColumns_ChinookCustomer_Declared(t *testing.T) {
 	if !ok {
 		t.Fatalf("CustomerId not resolved; got %+v", resp.Columns)
 	}
-	if custID.Entity != "Customer" || custID.Field != "ID" || custID.Provenance != apicontract_local.ColumnDeclared {
+	if custID.Entity != "Customer" || custID.Field != "ID" || custID.Provenance != apicontract.SemanticProvenanceDeclared {
 		t.Fatalf("CustomerId resolution = %+v, want Entity=Customer Field=ID Provenance=declared", custID)
 	}
 	if _, ok := byColumn["FirstName"]; ok {
@@ -83,15 +102,16 @@ func TestSemanticColumns_ChinookCustomer_Declared(t *testing.T) {
 func TestSemanticColumns_SupportNotesRecordset_Declared(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	resp, err := computeSemanticColumns(context.Background(), scope, apicontract_local.SourceRef{Source: "support-notes", Collection: "support-notes"})
+	resp, err := computeSemanticColumns(context.Background(), scope, apicontract.SourceRef{Source: "support-notes", Collection: "support-notes"})
 	if err != nil {
 		t.Fatalf("computeSemanticColumns: %v", err)
 	}
+	assertValid(t, resp)
 	var found bool
 	for _, c := range resp.Columns {
 		if c.Column == "CustomerId" {
 			found = true
-			if c.Provenance != apicontract_local.ColumnDeclared {
+			if c.Provenance != apicontract.SemanticProvenanceDeclared {
 				t.Fatalf("CustomerId provenance = %q, want declared", c.Provenance)
 			}
 		}
@@ -104,16 +124,17 @@ func TestSemanticColumns_SupportNotesRecordset_Declared(t *testing.T) {
 func TestSemanticColumns_HTTPSource_Declared(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	resp, err := computeSemanticColumns(context.Background(), scope, apicontract_local.SourceRef{Source: "country-facts", Collection: "country-facts"})
+	resp, err := computeSemanticColumns(context.Background(), scope, apicontract.SourceRef{Source: "country-facts", Collection: "country-facts"})
 	if err != nil {
 		t.Fatalf("computeSemanticColumns: %v", err)
 	}
-	byColumn := map[string]apicontract_local.ColumnEntry{}
+	assertValid(t, resp)
+	byColumn := map[string]apicontract.SemanticColumnMapping{}
 	for _, c := range resp.Columns {
 		byColumn[c.Column] = c
 	}
 	currency, ok := byColumn["currency"]
-	if !ok || currency.Entity != "Country" || currency.Field != "Currency" || currency.Provenance != apicontract_local.ColumnDeclared {
+	if !ok || currency.Entity != "Country" || currency.Field != "Currency" || currency.Provenance != apicontract.SemanticProvenanceDeclared {
 		t.Fatalf("currency resolution = %+v (ok=%v), want declared Country.Currency", currency, ok)
 	}
 	if _, ok := byColumn["population"]; ok {
@@ -124,25 +145,25 @@ func TestSemanticColumns_HTTPSource_Declared(t *testing.T) {
 func TestSemanticColumns_UnknownSource_SourceUnavailable(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	_, err := computeSemanticColumns(context.Background(), scope, apicontract_local.SourceRef{Source: "no-such-source", Collection: "Customer"})
-	assertContractError(t, err, apicontract_local.CodeSourceUnavailable)
+	_, err := computeSemanticColumns(context.Background(), scope, apicontract.SourceRef{Source: "no-such-source", Collection: "Customer"})
+	assertContractError(t, err, apicontract.ErrCodeSourceUnavailable)
 }
 
 func TestSemanticColumns_MissingParams(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	_, err := computeSemanticColumns(context.Background(), scope, apicontract_local.SourceRef{Collection: "Customer"})
-	assertContractError(t, err, apicontract_local.CodeMissingParameter)
-	_, err = computeSemanticColumns(context.Background(), scope, apicontract_local.SourceRef{Source: semanticTestSource})
-	assertContractError(t, err, apicontract_local.CodeMissingParameter)
+	_, err := computeSemanticColumns(context.Background(), scope, apicontract.SourceRef{Collection: "Customer"})
+	assertContractError(t, err, apicontract.ErrCodeMissingParameter)
+	_, err = computeSemanticColumns(context.Background(), scope, apicontract.SourceRef{Source: semanticTestSource})
+	assertContractError(t, err, apicontract.ErrCodeMissingParameter)
 }
 
 func TestSemanticColumns_StaleContext(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	scope.SecurityContextID = "not-the-real-one"
-	_, err := computeSemanticColumns(context.Background(), scope, apicontract_local.SourceRef{Source: semanticTestSource, Collection: "Customer"})
-	assertContractError(t, err, apicontract_local.CodeStaleContext)
+	_, err := computeSemanticColumns(context.Background(), scope, apicontract.SourceRef{Source: semanticTestSource, Collection: "Customer"})
+	assertContractError(t, err, apicontract.ErrCodeStaleContext)
 }
 
 // --- semantic/related, semantic/related/rows ---
@@ -155,12 +176,13 @@ func TestSemanticRelated_CustomerFiveInvoicesAndSupportNotes(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 
-	fact := declaredFact("f1", "Customer", "ID", apicontract_local.NewIntegerValue(5), semanticTestSource, "Customer", "CustomerId")
-	resp, err := computeSemanticRelated(context.Background(), apicontract_local.RelatedRequest{Scope: scope, Fact: fact})
+	fact := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
+	resp, err := computeSemanticRelated(context.Background(), relatedRequest{Scope: scope, Fact: fact})
 	if err != nil {
 		t.Fatalf("computeSemanticRelated: %v", err)
 	}
-	byCollection := map[string]apicontract_local.RelatedEntry{}
+	assertValid(t, resp)
+	byCollection := map[string]apicontract.RelatedItem{}
 	for _, e := range resp.Related {
 		byCollection[e.Source+"/"+e.Collection] = e
 	}
@@ -190,8 +212,8 @@ func TestSemanticRelated_RestrictedPrincipal_NoTrueCount(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "bob", []string{"support"})
 
-	fact := declaredFact("f1", "Customer", "ID", apicontract_local.NewIntegerValue(5), semanticTestSource, "Customer", "CustomerId")
-	resp, err := computeSemanticRelated(context.Background(), apicontract_local.RelatedRequest{Scope: scope, Fact: fact})
+	fact := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
+	resp, err := computeSemanticRelated(context.Background(), relatedRequest{Scope: scope, Fact: fact})
 	if err != nil {
 		t.Fatalf("computeSemanticRelated: %v", err)
 	}
@@ -209,9 +231,9 @@ func TestSemanticRelated_RestrictedPrincipal_NoTrueCount(t *testing.T) {
 func TestSemanticRelated_DisabledFact_Refused(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	fact := declaredFact("f1", "Customer", "ID", apicontract_local.NewIntegerValue(5), semanticTestSource, "Customer", "CustomerId")
+	fact := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
 	fact.Enabled = false
-	_, err := computeSemanticRelated(context.Background(), apicontract_local.RelatedRequest{Scope: scope, Fact: fact})
+	_, err := computeSemanticRelated(context.Background(), relatedRequest{Scope: scope, Fact: fact})
 	// Disabled facts carry no special error of their own here — the field
 	// is still structurally valid; this just documents that Enabled is not
 	// independently validated by computeSemanticRelated (a disabled fact
@@ -228,8 +250,8 @@ func TestSemanticRelated_DisabledFact_Refused(t *testing.T) {
 func TestSemanticRelated_MissingRequiredFields(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	_, err := computeSemanticRelated(context.Background(), apicontract_local.RelatedRequest{Scope: scope})
-	assertContractError(t, err, apicontract_local.CodeMissingParameter)
+	_, err := computeSemanticRelated(context.Background(), relatedRequest{Scope: scope})
+	assertContractError(t, err, apicontract.ErrCodeMissingParameter)
 }
 
 func TestSemanticRelatedRows_CustomerFiveInvoices(t *testing.T) {
@@ -237,16 +259,17 @@ func TestSemanticRelatedRows_CustomerFiveInvoices(t *testing.T) {
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	lookupID := encodeLookupID(semanticTestSource, "Invoice", "CustomerId")
 
-	resp, err := computeSemanticRelatedRows(context.Background(), apicontract_local.RelatedRowsRequest{
-		Scope: scope, LookupID: lookupID, Value: apicontract_local.NewIntegerValue(5),
+	resp, err := computeSemanticRelatedRows(context.Background(), relatedRowsRequest{
+		Scope: scope, LookupID: lookupID, Value: apicontract.NewIntegerValue("5"),
 	})
 	if err != nil {
 		t.Fatalf("computeSemanticRelatedRows: %v", err)
 	}
+	assertValid(t, resp)
 	if len(resp.Recordset.Rows) != 7 {
 		t.Fatalf("len(Rows) = %d, want 7", len(resp.Recordset.Rows))
 	}
-	if resp.Provenance.ExecutionProfile != apicontract_local.ProfileProtected {
+	if resp.Provenance.ExecutionProfile != apicontract.ExecutionProfileProtected {
 		t.Fatalf("ExecutionProfile = %q, want protected", resp.Provenance.ExecutionProfile)
 	}
 }
@@ -260,12 +283,12 @@ func TestSemanticRelatedRows_RestrictedPrincipal_ZeroOrDenied(t *testing.T) {
 	scope := configureSemanticSession(t, projectDir, projectID, "bob", []string{"support"})
 	lookupID := encodeLookupID(semanticTestSource, "Invoice", "CustomerId")
 
-	resp, err := computeSemanticRelatedRows(context.Background(), apicontract_local.RelatedRowsRequest{
-		Scope: scope, LookupID: lookupID, Value: apicontract_local.NewIntegerValue(5),
+	resp, err := computeSemanticRelatedRows(context.Background(), relatedRowsRequest{
+		Scope: scope, LookupID: lookupID, Value: apicontract.NewIntegerValue("5"),
 	})
 	if err != nil {
-		var ce *apicontract_local.Error
-		if !isContractErrorCode(err, apicontract_local.CodeAccessDenied, &ce) {
+		var ce *contractError
+		if !isContractErrorCode(err, apicontract.ErrCodeAccessDenied, &ce) {
 			t.Fatalf("computeSemanticRelatedRows: %v (want either 0 rows or ACCESS_DENIED)", err)
 		}
 		return
@@ -278,10 +301,10 @@ func TestSemanticRelatedRows_RestrictedPrincipal_ZeroOrDenied(t *testing.T) {
 func TestSemanticRelatedRows_InvalidLookupID(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	_, err := computeSemanticRelatedRows(context.Background(), apicontract_local.RelatedRowsRequest{
-		Scope: scope, LookupID: "not-valid-base64!!", Value: apicontract_local.NewIntegerValue(5),
+	_, err := computeSemanticRelatedRows(context.Background(), relatedRowsRequest{
+		Scope: scope, LookupID: "not-valid-base64!!", Value: apicontract.NewIntegerValue("5"),
 	})
-	assertContractError(t, err, apicontract_local.CodeInvalidRequest)
+	assertContractError(t, err, apicontract.ErrCodeInvalidRequest)
 }
 
 func TestEncodeDecodeLookupID_RoundTrip(t *testing.T) {
@@ -306,14 +329,15 @@ func TestEncodeDecodeLookupID_RoundTrip(t *testing.T) {
 func TestSemanticApplicable_CustomerInvoicesApplicable_InvoiceLinesNotYet(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	fact := declaredFact("f1", "Customer", "ID", apicontract_local.NewIntegerValue(5), semanticTestSource, "Customer", "CustomerId")
+	fact := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
 
-	resp, err := computeSemanticApplicable(context.Background(), apicontract_local.ApplicableRequest{Scope: scope, Values: []apicontract_local.Fact{fact}})
+	resp, err := computeSemanticApplicable(context.Background(), applicableRequest{Scope: scope, Values: []apicontract.Fact{fact}})
 	if err != nil {
 		t.Fatalf("computeSemanticApplicable: %v", err)
 	}
+	assertValid(t, resp)
 
-	var invoices *apicontract_local.Candidate
+	var invoices *apicontract.Candidate
 	for i := range resp.Applicable {
 		if resp.Applicable[i].QueryID == "customer-invoices" {
 			invoices = &resp.Applicable[i]
@@ -328,14 +352,14 @@ func TestSemanticApplicable_CustomerInvoicesApplicable_InvoiceLinesNotYet(t *tes
 	if len(invoices.Chain) == 0 || invoices.Chain[0].Explanation == "" {
 		t.Fatalf("customer-invoices chain is empty, want resolution chain text")
 	}
-	if invoices.State != apicontract_local.StateRunnable {
+	if invoices.State != apicontract.CandidateStateRunnable {
 		t.Fatalf("customer-invoices state = %q, want runnable", invoices.State)
 	}
 	if invoices.SelectedSource != semanticTestSource {
 		t.Fatalf("customer-invoices selectedSource = %q, want %q", invoices.SelectedSource, semanticTestSource)
 	}
 
-	var lines *apicontract_local.Candidate
+	var lines *apicontract.Candidate
 	for i := range resp.NotYet {
 		if resp.NotYet[i].QueryID == "invoice-lines" {
 			lines = &resp.NotYet[i]
@@ -347,7 +371,7 @@ func TestSemanticApplicable_CustomerInvoicesApplicable_InvoiceLinesNotYet(t *tes
 	if len(lines.Missing) != 1 || lines.Missing[0] != "InvoiceId" {
 		t.Fatalf("invoice-lines missing = %+v, want [InvoiceId] (the parameter ID)", lines.Missing)
 	}
-	if lines.State != apicontract_local.StateNeedsInput {
+	if lines.State != apicontract.CandidateStateNeedsInput {
 		t.Fatalf("invoice-lines state = %q, want needs-input", lines.State)
 	}
 }
@@ -360,13 +384,13 @@ func TestSemanticApplicable_CustomerInvoicesApplicable_InvoiceLinesNotYet(t *tes
 func TestSemanticApplicable_NonSemanticRequiredParam_AlwaysMissing(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	fact := declaredFact("f1", "Customer", "ID", apicontract_local.NewIntegerValue(5), semanticTestSource, "Customer", "CustomerId")
+	fact := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
 
-	resp, err := computeSemanticApplicable(context.Background(), apicontract_local.ApplicableRequest{Scope: scope, Values: []apicontract_local.Fact{fact}})
+	resp, err := computeSemanticApplicable(context.Background(), applicableRequest{Scope: scope, Values: []apicontract.Fact{fact}})
 	if err != nil {
 		t.Fatalf("computeSemanticApplicable: %v", err)
 	}
-	var export *apicontract_local.Candidate
+	var export *apicontract.Candidate
 	for i := range resp.NotYet {
 		if resp.NotYet[i].QueryID == "customer-export" {
 			export = &resp.NotYet[i]
@@ -386,14 +410,14 @@ func TestSemanticApplicable_NonSemanticRequiredParam_AlwaysMissing(t *testing.T)
 func TestSemanticApplicable_AmbiguousFacts(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	f1 := declaredFact("f1", "Customer", "ID", apicontract_local.NewIntegerValue(5), semanticTestSource, "Customer", "CustomerId")
-	f2 := declaredFact("f2", "Customer", "ID", apicontract_local.NewIntegerValue(6), semanticTestSource, "Customer", "CustomerId")
+	f1 := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
+	f2 := declaredFact("f2", "Customer", "ID", apicontract.NewIntegerValue("6"), semanticTestSource, "Customer", "CustomerId")
 
-	resp, err := computeSemanticApplicable(context.Background(), apicontract_local.ApplicableRequest{Scope: scope, Values: []apicontract_local.Fact{f1, f2}})
+	resp, err := computeSemanticApplicable(context.Background(), applicableRequest{Scope: scope, Values: []apicontract.Fact{f1, f2}})
 	if err != nil {
 		t.Fatalf("computeSemanticApplicable: %v", err)
 	}
-	var invoices *apicontract_local.Candidate
+	var invoices *apicontract.Candidate
 	for i := range resp.NotYet {
 		if resp.NotYet[i].QueryID == "customer-invoices" {
 			invoices = &resp.NotYet[i]
@@ -413,7 +437,7 @@ func TestSemanticApplicable_AmbiguousFacts(t *testing.T) {
 func TestSemanticApplicable_NoValues_EverythingNotYet(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	resp, err := computeSemanticApplicable(context.Background(), apicontract_local.ApplicableRequest{Scope: scope})
+	resp, err := computeSemanticApplicable(context.Background(), applicableRequest{Scope: scope})
 	if err != nil {
 		t.Fatalf("computeSemanticApplicable: %v", err)
 	}
@@ -434,8 +458,8 @@ func TestSemanticApplicable_UnknownProject_NotFound(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	scope.Project = "no-such-project-xyz"
-	_, err := computeSemanticApplicable(context.Background(), apicontract_local.ApplicableRequest{Scope: scope})
-	assertContractError(t, err, apicontract_local.CodeNotFound)
+	_, err := computeSemanticApplicable(context.Background(), applicableRequest{Scope: scope})
+	assertContractError(t, err, apicontract.ErrCodeNotFound)
 }
 
 // --- HTTP-level handler smoke tests ---
@@ -453,7 +477,7 @@ func TestSemanticColumnsHandler_HTTP(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	var resp apicontract_local.ColumnsResponse
+	var resp apicontract.SemanticColumnsResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v; body=%s", err, rec.Body.String())
 	}
@@ -469,11 +493,11 @@ func TestSemanticColumnsHandler_HTTP_MissingParameterEnvelope(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
 	}
-	var env apicontract_local.ErrorEnvelope
+	var env apicontract.ErrorEnvelope
 	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
 		t.Fatalf("unmarshal error response: %v", err)
 	}
-	if env.Error.Code != apicontract_local.CodeMissingParameter || env.Error.Field == "" || env.Error.RequestID == "" {
+	if env.Error.Code != string(apicontract.ErrCodeMissingParameter) || env.Error.Field == "" || env.Error.RequestID == "" {
 		t.Fatalf("error response = %+v, want MISSING_PARAMETER with a field and requestId", env.Error)
 	}
 }
@@ -498,18 +522,18 @@ func TestSemanticApplicableHandler_HTTP_UnknownFieldRejected(t *testing.T) {
 	}
 }
 
-// assertContractError fails the test unless err is an *apicontract_local.Error
-// with the given code.
-func assertContractError(t *testing.T, err error, code apicontract_local.ErrorCode) {
+// assertContractError fails the test unless err is a *contractError with the
+// given code.
+func assertContractError(t *testing.T, err error, code apicontract.ErrorCode) {
 	t.Helper()
-	var ce *apicontract_local.Error
+	var ce *contractError
 	if !isContractErrorCode(err, code, &ce) {
-		t.Fatalf("err = %v, want *apicontract_local.Error{Code: %s}", err, code)
+		t.Fatalf("err = %v, want *contractError{Code: %s}", err, code)
 	}
 }
 
-func isContractErrorCode(err error, code apicontract_local.ErrorCode, out **apicontract_local.Error) bool {
-	ce, ok := err.(*apicontract_local.Error)
+func isContractErrorCode(err error, code apicontract.ErrorCode, out **contractError) bool {
+	ce, ok := err.(*contractError)
 	if !ok || ce.Code != code {
 		return false
 	}

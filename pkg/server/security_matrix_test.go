@@ -593,8 +593,14 @@ func TestExecuteSelect_NativeSQL_RefusedWithoutGrant(t *testing.T) {
 
 // TestExecuteSelect_NativeSQL_LabelledWithGrant is the legacy route's
 // "with an explicit grant" counterpart: native SQL executes and still
-// carries the nativeSql limitation label exec/select's own (pre-existing,
-// unchanged-shape) QueryResultResponse uses.
+// carries a policy-attributed limitation entry and opaque-privileged
+// provenance, exec/select's QueryResultResponse now sharing exec/run_query's
+// exact apicontract.Limitation/Provenance shapes (S101 Fix 2) — a bare
+// "nativeSql"-kind/Note pair no longer exists in that shape (folded into
+// the same combined Limitation{policy,...} entry a policy-restricted
+// structured read gets; see secureread.ToContractLimitations), so this
+// asserts the policy attribution and the ExecutionProfile distinction
+// instead.
 func TestExecuteSelect_NativeSQL_LabelledWithGrant(t *testing.T) {
 	pathsByID, projectID := newSecurityMatrixProject(t)
 	session := securityMatrixSession(t, "agent1", "support")
@@ -617,20 +623,155 @@ func TestExecuteSelect_NativeSQL_LabelledWithGrant(t *testing.T) {
 	if len(response.Rows) != 2 {
 		t.Fatalf("rows = %d, want 2 (native SQL is not row-restricted); body %s", len(response.Rows), raw)
 	}
-	native := findLimitation(response.Limitations, "nativeSql")
-	if native == nil {
-		t.Fatalf("Limitations = %+v, want a nativeSql entry", response.Limitations)
+	if len(response.Limitations) == 0 || response.Limitations[0].Policy == "" {
+		t.Fatalf("Limitations = %+v, want a policy-attributed entry", response.Limitations)
 	}
-	if native.Note == "" {
-		t.Errorf("nativeSql limitation has no Note")
+	if response.Provenance.ExecutionProfile != apicontract.ExecutionProfileOpaquePrivileged {
+		t.Errorf("Provenance.ExecutionProfile = %q, want %q", response.Provenance.ExecutionProfile, apicontract.ExecutionProfileOpaquePrivileged)
 	}
 }
 
-func findLimitation(limitations []api.LimitationDTO, kind string) *api.LimitationDTO {
-	for i := range limitations {
-		if limitations[i].Kind == kind {
-			return &limitations[i]
+// TestExecuteSelect_SchemaQualifiedFrom is S101's J4 fix, end to end: the
+// real web UI's table page sends `from=<sqliteSchema>.<Table>` (SQLite's own
+// default-schema-qualified name for whatever it introspected), while
+// policies/customers.yaml (and this fixture's securityMatrixPolicy) declare
+// `path: /Customer` with no schema at all — before Fix 1 that mismatch
+// denied every browse of a real table regardless of row content. It also
+// covers Fix 2 (exec/select's response now carries the same
+// apicontract.Limitation/Provenance shape exec/run_query does) and the
+// brief's explicit table: main.Customer matches; bare Customer still
+// matches; archive.Customer (a genuinely different, non-default schema)
+// does not match unless the policy says so, and its denial still names the
+// requested form.
+func TestExecuteSelect_SchemaQualifiedFrom(t *testing.T) {
+	pathsByID, projectID := newSecurityMatrixProject(t)
+
+	t.Run("main.Customer (sqlite3 default schema) matches the bare /Customer policy path", func(t *testing.T) {
+		session := securityMatrixSession(t, "agent1", "support")
+		baseURL := startServeHTTPWithSession(t, pathsByID, session)
+
+		requestURL := fmt.Sprintf("%s/datatug/exec/select?proj=%s&env=%s&db=%s&from=%s",
+			baseURL, projectID, securityMatrixEnv, securityMatrixSource, url.QueryEscape("main.Customer"))
+		status, raw := getURL(t, requestURL)
+		if status != http.StatusOK {
+			t.Fatalf("exec/select(from=main.Customer): status %d, want 200; body %s", status, raw)
 		}
-	}
-	return nil
+		var response api.QueryResultResponse
+		if err := json.Unmarshal(raw, &response); err != nil {
+			t.Fatalf("decode response: %v (body %s)", err, raw)
+		}
+		if len(response.Rows) != 1 {
+			t.Fatalf("rows = %d, want 1 (Cathy, Canada); body %s", len(response.Rows), raw)
+		}
+		if _, hasEmail := response.Rows[0]["Email"]; hasEmail {
+			t.Errorf("row still carries the hidden Email field: %+v", response.Rows[0])
+		}
+		if bytes.Contains(raw, []byte("cathy@example.com")) {
+			t.Errorf("response body leaks the hidden Email value: %s", raw)
+		}
+		if len(response.Limitations) == 0 {
+			t.Fatalf("Limitations = %+v, want a policy-attributed entry", response.Limitations)
+		}
+		if !response.Limitations[0].RowsFiltered {
+			t.Errorf("Limitations[0].RowsFiltered = false, want true (Brazil filtered out)")
+		}
+		if hidden := response.Limitations[0].HiddenColumns; len(hidden) != 1 || hidden[0] != "Email" {
+			t.Errorf("Limitations[0].HiddenColumns = %v, want [Email]", hidden)
+		}
+		if response.Provenance.ExecutionProfile != apicontract.ExecutionProfileProtected {
+			t.Errorf("Provenance.ExecutionProfile = %q, want %q", response.Provenance.ExecutionProfile, apicontract.ExecutionProfileProtected)
+		}
+	})
+
+	t.Run("bare Customer still matches (unchanged)", func(t *testing.T) {
+		session := securityMatrixSession(t, "agent1", "support")
+		baseURL := startServeHTTPWithSession(t, pathsByID, session)
+
+		requestURL := fmt.Sprintf("%s/datatug/exec/select?proj=%s&env=%s&db=%s&from=Customer",
+			baseURL, projectID, securityMatrixEnv, securityMatrixSource)
+		status, raw := getURL(t, requestURL)
+		if status != http.StatusOK {
+			t.Fatalf("exec/select(from=Customer): status %d, want 200; body %s", status, raw)
+		}
+		var response api.QueryResultResponse
+		if err := json.Unmarshal(raw, &response); err != nil {
+			t.Fatalf("decode response: %v (body %s)", err, raw)
+		}
+		if len(response.Rows) != 1 {
+			t.Fatalf("rows = %d, want 1 (Cathy, Canada); body %s", len(response.Rows), raw)
+		}
+	})
+
+	t.Run("archive.Customer (a genuinely different, non-default schema) is denied, naming the requested form", func(t *testing.T) {
+		session := securityMatrixSession(t, "agent1", "support")
+		baseURL := startServeHTTPWithSession(t, pathsByID, session)
+
+		requestURL := fmt.Sprintf("%s/datatug/exec/select?proj=%s&env=%s&db=%s&from=%s",
+			baseURL, projectID, securityMatrixEnv, securityMatrixSource, url.QueryEscape("archive.Customer"))
+		status, raw := getURL(t, requestURL)
+		if status != http.StatusForbidden {
+			t.Fatalf("exec/select(from=archive.Customer): status %d, want 403; body %s", status, raw)
+		}
+		var errResponse struct {
+			Error string `json:"error"`
+			Code  string `json:"code"`
+		}
+		if err := json.Unmarshal(raw, &errResponse); err != nil {
+			t.Fatalf("decode error response: %v (body %s)", err, raw)
+		}
+		if errResponse.Code != "ACCESS_DENIED" {
+			t.Errorf("error code = %q, want ACCESS_DENIED", errResponse.Code)
+		}
+		if !strings.Contains(errResponse.Error, "archive.Customer") {
+			t.Errorf("error = %q, want it to still name the originally requested archive.Customer", errResponse.Error)
+		}
+	})
+
+	t.Run("admin querying main.Customer gets every row and no limitations", func(t *testing.T) {
+		session := securityMatrixSession(t, "boss", "admin")
+		baseURL := startServeHTTPWithSession(t, pathsByID, session)
+
+		requestURL := fmt.Sprintf("%s/datatug/exec/select?proj=%s&env=%s&db=%s&from=%s",
+			baseURL, projectID, securityMatrixEnv, securityMatrixSource, url.QueryEscape("main.Customer"))
+		status, raw := getURL(t, requestURL)
+		if status != http.StatusOK {
+			t.Fatalf("exec/select(from=main.Customer, admin): status %d, want 200; body %s", status, raw)
+		}
+		var response api.QueryResultResponse
+		if err := json.Unmarshal(raw, &response); err != nil {
+			t.Fatalf("decode response: %v (body %s)", err, raw)
+		}
+		if len(response.Rows) != 2 {
+			t.Fatalf("rows = %d, want 2 (admin sees both Brazil and Canada); body %s", len(response.Rows), raw)
+		}
+		if len(response.Limitations) != 0 {
+			t.Errorf("Limitations = %+v, want none for admin", response.Limitations)
+		}
+	})
+
+	t.Run("explicitly selecting the hidden Email column is refused even schema-qualified", func(t *testing.T) {
+		session := securityMatrixSession(t, "agent1", "support")
+		baseURL := startServeHTTPWithSession(t, pathsByID, session)
+
+		requestURL := fmt.Sprintf("%s/datatug/exec/select?proj=%s&env=%s&db=%s&from=%s&cols=%s",
+			baseURL, projectID, securityMatrixEnv, securityMatrixSource,
+			url.QueryEscape("main.Customer"), url.QueryEscape("CustomerId,Email"))
+		status, raw := getURL(t, requestURL)
+		if status != http.StatusForbidden {
+			t.Fatalf("exec/select(from=main.Customer, cols=CustomerId,Email): status %d, want 403; body %s", status, raw)
+		}
+		var errResponse struct {
+			Error string `json:"error"`
+			Code  string `json:"code"`
+		}
+		if err := json.Unmarshal(raw, &errResponse); err != nil {
+			t.Fatalf("decode error response: %v (body %s)", err, raw)
+		}
+		if errResponse.Code != "ACCESS_DENIED" {
+			t.Errorf("error code = %q, want ACCESS_DENIED", errResponse.Code)
+		}
+		if bytes.Contains(raw, []byte("cathy@example.com")) {
+			t.Errorf("refusal body leaks the hidden Email value: %s", raw)
+		}
+	})
 }

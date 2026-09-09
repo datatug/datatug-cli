@@ -8,6 +8,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
@@ -77,24 +78,53 @@ func ExecuteSelect(ctx context.Context, storeID string, request SelectRequest) (
 	}
 	projStore := store.GetProjectStore(request.Project)
 	projDir, _ := projectDir(request.Project)
-	sourceURL, err := resolveSourceURL(ctx, projStore, request.Environment, request.Database, projDir)
+	sourceURL, driver, err := resolveSourceURL(ctx, projStore, request.Environment, request.Database, projDir)
 	if err != nil {
 		return QueryResultResponse{}, err
 	}
 
 	var result secureread.Result
+	// executionProfile/collection mirror exec/run_query's own
+	// Provenance.ExecutionProfile distinction (S101, Fix 2): native SQL
+	// text is opaque-privileged (no row/column policy applied to it — see
+	// pkg/secureread/native_sql.go's REQ:opaque-sql-limitation); a "from"
+	// selection is a policy-enforced structured read. Collection is empty
+	// for SQL text, which names no single collection.
+	executionProfile := apicontract.ExecutionProfileProtected
+	collection := request.From
 	if request.SQL != "" {
+		executionProfile = apicontract.ExecutionProfileOpaquePrivileged
+		collection = ""
 		result, err = executor.RunNativeSQL(ctx, sourceURL, request.SQL)
 	} else {
 		var query dal.Query
-		if query, err = buildSelectQuery(request); err == nil {
+		if query, err = buildSelectQuery(request, driver); err == nil {
 			result, err = executor.RunStructured(ctx, sourceURL, query, nil)
+			err = policyDenialNamingOriginalResource(err, request.From, driver)
 		}
 	}
 	if err != nil {
 		return QueryResultResponse{}, err
 	}
-	return resultToResponse(result), nil
+	return resultToResponse(result, executionProfile, request.Database, collection), nil
+}
+
+// policyDenialNamingOriginalResource re-names an access-denied error's
+// resource back to the client's originally-requested physical name when
+// buildSelectQuery narrowed it for policy matching (S101: "a denial still
+// logs the original request form") — every other error, and every
+// non-denial outcome, passes through completely unchanged. Wraps with %w
+// so errors.Is(err, secureread.ErrAccessDenied) still matches through it
+// (util_error_handling.go's existing ACCESS_DENIED/403 classification is
+// unaffected).
+func policyDenialNamingOriginalResource(err error, originalFrom, driver string) error {
+	if err == nil || !errors.Is(err, secureread.ErrAccessDenied) {
+		return err
+	}
+	if PolicyCollectionName(originalFrom, driver) == originalFrom {
+		return err // nothing was narrowed; the error already names originalFrom
+	}
+	return fmt.Errorf("%w (requested as %q)", err, originalFrom)
 }
 
 // buildSelectQuery turns a "from"-shaped SelectRequest into a
@@ -103,8 +133,22 @@ func ExecuteSelect(ctx context.Context, storeID string, request SelectRequest) (
 // Where carries ";"-separated "field:value" equality conditions, AND-ed
 // together — the same format the pre-secureread /exec/select handler
 // accepted (SelectRequest.Validate requires the ":" separator).
-func buildSelectQuery(request SelectRequest) (dal.Query, error) {
-	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(request.From, "")))
+//
+// The query's FROM collection uses PolicyCollectionName(request.From,
+// driver), not request.From verbatim (S101): dal-go/dalgo's own
+// access.SecureReadSession derives its policy-matching Resource path
+// directly from this same collection name — there is no separate
+// "policy-only" name in DALgo's model — so a policy authored against the
+// semantic layer's bare collection convention ("/Customer") would
+// otherwise never match a browser's schema-qualified physical request
+// ("main.Customer"), denying every read regardless of row content. Safe
+// for execution too: stripping only ever happens when the qualifier IS the
+// driver's own default schema, in which case the qualified and bare forms
+// name the identical physical table (SQLite's implicit "main", Postgres's
+// default "public" search_path entry).
+func buildSelectQuery(request SelectRequest, driver string) (dal.Query, error) {
+	collectionName := PolicyCollectionName(request.From, driver)
+	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(collectionName, "")))
 	if request.Where != "" {
 		for _, condition := range strings.Split(request.Where, ";") {
 			parts := strings.SplitN(condition, ":", 2)

@@ -14,16 +14,19 @@ import (
 // resolveSourceURL turns a project's environment + database (an EnvDbServer
 // catalog ID) into the pkg/dbcopy source URL secureread.Executor opens
 // (REQ:server-acl-all-reads: "open sources through pkg/dbcopy/url.go" —
-// sqlite:// via dalgo2sqlite, ingitdb://). It walks the environment's
-// configured DB servers looking for one whose catalog matches database,
-// mirroring how a human would pick a database within an environment.
-// projDir is the project's own on-disk directory, needed to resolve a
-// catalog path that is relative rather than "~"/"$HOME"-prefixed or already
-// absolute — see ResolveCatalogPath.
-func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, environment, database, projDir string) (string, error) {
+// sqlite:// via dalgo2sqlite, ingitdb://), and the resolved catalog's own
+// driver name (S101: so a caller building a structured query's collection
+// reference can derive that driver's default schema — see
+// PolicyCollectionName — from real catalog metadata instead of assuming
+// one). It walks the environment's configured DB servers looking for one
+// whose catalog matches database, mirroring how a human would pick a
+// database within an environment. projDir is the project's own on-disk
+// directory, needed to resolve a catalog path that is relative rather than
+// "~"/"$HOME"-prefixed or already absolute — see ResolveCatalogPath.
+func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, environment, database, projDir string) (sourceURL, driver string, err error) {
 	env, err := projStore.LoadEnvironment(ctx, environment)
 	if err != nil {
-		return "", fmt.Errorf("load environment %q: %w", environment, err)
+		return "", "", fmt.Errorf("load environment %q: %w", environment, err)
 	}
 	var lastErr error
 	for _, server := range env.DbServers {
@@ -35,12 +38,13 @@ func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, envir
 			lastErr = catalogErr
 			continue
 		}
-		return sourceURLFromCatalog(catalog, projDir)
+		sourceURL, err = sourceURLFromCatalog(catalog, projDir)
+		return sourceURL, catalog.Driver, err
 	}
 	if lastErr != nil {
-		return "", fmt.Errorf("database %q not found in environment %q (tried %d server(s), last error: %w)", database, environment, len(env.DbServers), lastErr)
+		return "", "", fmt.Errorf("database %q not found in environment %q (tried %d server(s), last error: %w)", database, environment, len(env.DbServers), lastErr)
 	}
-	return "", fmt.Errorf("environment %q has no DB servers configured; cannot resolve database %q", environment, database)
+	return "", "", fmt.Errorf("environment %q has no DB servers configured; cannot resolve database %q", environment, database)
 }
 
 // sourceURLFromCatalog maps a resolved DbCatalog to the pkg/dbcopy URL

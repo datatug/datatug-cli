@@ -125,11 +125,17 @@ const (
 	QueryTypeSQL           QueryType = "SQL"
 	QueryTypeHTTP          QueryType = "HTTP"
 	QueryTypeStructuredSQL QueryType = "StructuredSQL"
+	// QueryTypeDTQL is a query stored as DTQL-YAML (dal-go/dalgo/dtql),
+	// sidecar file "<id>.query.dtql" beside "<id>.query.json" — the same
+	// <id>.<QueryFileSuffix>.<lowercase(Type)> convention saveQuery already
+	// uses for QueryTypeSQL's "<id>.query.sql" (REQ:dtql-query-type, hub
+	// Feature core-investigation-loop).
+	QueryTypeDTQL QueryType = "DTQL"
 )
 
 func IsKnownQueryType(queryType QueryType) bool {
 	switch queryType {
-	case QueryTypeSQL, QueryTypeHTTP, QueryTypeStructuredSQL:
+	case QueryTypeSQL, QueryTypeHTTP, QueryTypeStructuredSQL, QueryTypeDTQL:
 		return true
 	default:
 		return false
@@ -177,7 +183,7 @@ func (v QueryDef) Validate() error {
 				return validation.NewErrBadRecordFieldValue(fmt.Sprintf("targets[%v]", i), "for HTTP queries catalog should be empty, got: %v"+target.Catalog)
 			}
 		}
-	case "SQL", "GraphQL":
+	case "SQL", "GraphQL", "DTQL":
 		//if strings.TrimSpace(v.Text) == "" {
 		//	return validation.NewErrRequestIsMissingRequiredField("text")
 		//}

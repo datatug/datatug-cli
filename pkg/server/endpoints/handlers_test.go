@@ -852,6 +852,14 @@ func TestExecuteCommandsHandler(t *testing.T) {
 	})
 }
 
+// TestExecuteSelectHandler covers the handler's own request-shape parsing
+// (limit, cols, the "proj" default) now that it routes to the
+// policy-enforced api.ExecuteSelect (REQ:server-acl-all-reads) instead of
+// the always-panicking legacy sqlexecute path. The old "p:name:type=value"
+// query-parameter parsing this test used to cover was removed with that
+// path: RunStructured/RunNativeSQL have no equivalent typed-parameter
+// substitution, so those sub-tests (integer/boolean/unknown param type) no
+// longer apply and were deleted rather than left asserting dead behaviour.
 func TestExecuteSelectHandler(t *testing.T) {
 	savedJSON := returnJSON
 	defer func() { returnJSON = savedJSON }()
@@ -873,53 +881,6 @@ func TestExecuteSelectHandler(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := makeRequest(http.MethodGet, "/exec/select?proj=p1&env=dev&db=mydb&from=tbl", "")
 		executeSelectHandler(w, r)
-	})
-
-	t.Run("integer param valid", func(t *testing.T) {
-		defer func() { recover() }() //nolint:errcheck
-		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodGet, "/exec/select?proj=p1&p:mykey:integer=42", "")
-		executeSelectHandler(w, r)
-	})
-
-	t.Run("integer param null", func(t *testing.T) {
-		defer func() { recover() }() //nolint:errcheck
-		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodGet, "/exec/select?proj=p1&p:mykey:integer=null", "")
-		executeSelectHandler(w, r)
-	})
-
-	t.Run("integer param invalid", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodGet, "/exec/select?proj=p1&p:mykey:integer=notanumber", "")
-		executeSelectHandler(w, r)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("expected 400, got %d", w.Code)
-		}
-	})
-
-	t.Run("boolean param true", func(t *testing.T) {
-		defer func() { recover() }() //nolint:errcheck
-		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodGet, "/exec/select?proj=p1&p:mykey:boolean=true", "")
-		executeSelectHandler(w, r)
-	})
-
-	t.Run("boolean param false", func(t *testing.T) {
-		defer func() { recover() }() //nolint:errcheck
-		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodGet, "/exec/select?proj=p1&p:mykey:boolean=false", "")
-		executeSelectHandler(w, r)
-	})
-
-	t.Run("unknown param type returns error", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodGet, "/exec/select?proj=p1&p:mykey:unknowntype=val", "")
-		executeSelectHandler(w, r)
-		// NewErrBadRecordFieldValue doesn't satisfy IsBadRequestError, so yields 500
-		if w.Code == http.StatusOK {
-			t.Errorf("expected error status, got 200")
-		}
 	})
 
 	t.Run("cols splitting", func(t *testing.T) {

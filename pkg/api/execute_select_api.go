@@ -2,15 +2,17 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/sqlexecute"
+	"github.com/dal-go/dalgo/dal"
+	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/validation"
 )
 
-// SelectRequest holds request data
+// SelectRequest holds request data for GET /datatug/exec/select.
 type SelectRequest struct {
 	Project     string
 	Environment string
@@ -20,7 +22,6 @@ type SelectRequest struct {
 	Where       string
 	Limit       int
 	Columns     []string
-	Parameters  []datatug.Parameter
 }
 
 // Validate returns error if not valid
@@ -57,52 +58,67 @@ func (v SelectRequest) Validate() error {
 	return nil
 }
 
-// ExecuteSelect executes select command
-func ExecuteSelect(ctx context.Context, storeID string, selectRequest SelectRequest) (response sqlexecute.Response, err error) {
-	if err = selectRequest.Validate(); err != nil {
-		return
+// ExecuteSelect executes a select through the policy-enforced
+// secureread.Executor (REQ:server-acl-all-reads): a "from" selection runs
+// through RunStructured, raw "sql" text through RunNativeSQL. Every read the
+// web UI can trigger through `datatug serve` MUST come through this one
+// path — see routes.go's executeRoutes / execute_endpoints.go.
+func ExecuteSelect(ctx context.Context, storeID string, request SelectRequest) (QueryResultResponse, error) {
+	if err := request.Validate(); err != nil {
+		return QueryResultResponse{}, err
 	}
-	command := sqlexecute.RequestCommand{
-		Env: selectRequest.Environment,
-		DB:  selectRequest.Database,
+	executor, ok := SecureExecutor()
+	if !ok {
+		return QueryResultResponse{}, errors.New("exec/select: server has no policy-enforced session configured")
 	}
-	if selectRequest.SQL == "" {
-		if selectRequest.Limit >= 0 {
-			command.Text += fmt.Sprintf("select top %v ", selectRequest.Limit)
-		} else {
-			command.Text += "select "
-		}
-		if len(selectRequest.Columns) > 0 {
-			command.Text += strings.Join(selectRequest.Columns, ", ")
-		} else {
-			command.Text += "*"
-		}
-		command.Text += " from " + selectRequest.From
-		if selectRequest.Where != "" {
-			conditions := strings.Split(selectRequest.Where, ";")
-			for i, condition := range conditions {
-				if i == 0 {
-					command.Text += " where "
-				} else {
-					command.Text += " and "
-				}
-				where := strings.Split(condition, ":")
-				command.Text += fmt.Sprintf("%v = '%v'", where[0], where[1])
-			}
-		}
-	} else {
-		command.Text = selectRequest.SQL
-	}
-	command.Parameters = selectRequest.Parameters[:]
-	request := sqlexecute.Request{
-		Project: selectRequest.Project,
-		Commands: []sqlexecute.RequestCommand{
-			command,
-		},
-	}
-	response, err = ExecuteCommands(ctx, storeID, request)
+	store, err := storage.NewDatatugStore(storeID)
 	if err != nil {
-		err = fmt.Errorf("failed to execute select command: %w\n%v", err, command.Text)
+		return QueryResultResponse{}, err
 	}
-	return
+	projStore := store.GetProjectStore(request.Project)
+	sourceURL, err := resolveSourceURL(ctx, projStore, request.Environment, request.Database)
+	if err != nil {
+		return QueryResultResponse{}, err
+	}
+
+	var result secureread.Result
+	if request.SQL != "" {
+		result, err = executor.RunNativeSQL(ctx, sourceURL, request.SQL)
+	} else {
+		var query dal.Query
+		if query, err = buildSelectQuery(request); err == nil {
+			result, err = executor.RunStructured(ctx, sourceURL, query, nil)
+		}
+	}
+	if err != nil {
+		return QueryResultResponse{}, err
+	}
+	return resultToResponse(result), nil
+}
+
+// buildSelectQuery turns a "from"-shaped SelectRequest into a
+// dal.StructuredQuery, the same builder pattern
+// apps/datatugapp/commands/cmd_query.go's buildQuery uses for `--from`.
+// Where carries ";"-separated "field:value" equality conditions, AND-ed
+// together — the same format the pre-secureread /exec/select handler
+// accepted (SelectRequest.Validate requires the ":" separator).
+func buildSelectQuery(request SelectRequest) (dal.Query, error) {
+	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(request.From, "")))
+	if request.Where != "" {
+		for _, condition := range strings.Split(request.Where, ";") {
+			parts := strings.SplitN(condition, ":", 2)
+			if len(parts) != 2 || parts[0] == "" {
+				return nil, validation.NewErrBadRequestFieldValue("where", fmt.Sprintf("each condition must be field:value, got %q", condition))
+			}
+			builder = builder.WhereField(parts[0], dal.Equal, parts[1])
+		}
+	}
+	if request.Limit >= 0 {
+		builder = builder.Limit(request.Limit)
+	}
+	columns := make([]dal.Column, 0, len(request.Columns))
+	for _, name := range request.Columns {
+		columns = append(columns, dal.Column{Expression: dal.Field(name)})
+	}
+	return builder.SelectColumns(columns...), nil
 }

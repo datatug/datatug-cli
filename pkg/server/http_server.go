@@ -11,6 +11,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/datatug/datatug-cli/pkg/server/endpoints"
 	"github.com/julienschmidt/httprouter"
+	"github.com/sneat-co/sneat-go-core/apicore"
 )
 
 var agentHost string
@@ -24,19 +25,26 @@ func NewHttpServer() HttpServer {
 	return HttpServer{}
 }
 
-func (s HttpServer) Shutdown(ctx context.Context) error {
+func (s *HttpServer) Shutdown(ctx context.Context) error {
 	return s.s.Shutdown(ctx)
 }
 
-// ServeHTTP starts HTTP server
-func (s HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int) error {
-	storage.NewDatatugStore = func(id string) (v storage.Store, err error) {
+// newDatatugStoreFactory builds the storage.NewDatatugStore implementation
+// ServeHTTP wires up: a filestore-backed store over pathsByID, mirroring the
+// working path project_base_command.go already uses for CLI commands.
+func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storage.Store, error) {
+	return func(id string) (v storage.Store, err error) {
 		if v, err = filestore.NewStore("files", pathsByID); err != nil {
 			err = fmt.Errorf("failed to create filestore for storage id=%v: %w", id, err)
 			return
 		}
-		panic("implement me")
+		return
 	}
+}
+
+// ServeHTTP starts HTTP server
+func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int) error {
+	storage.NewDatatugStore = newDatatugStoreFactory(pathsByID)
 
 	if host == "" {
 		agentHost = "localhost"
@@ -63,7 +71,7 @@ func (s HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int
 	}
 	endpoints.RegisterDatatugHandlers("", router, endpoints.RegisterAllHandlers, logWrapper, func(r *http.Request) (context.Context, error) {
 		return r.Context(), nil
-	}, nil)
+	}, apicore.Execute)
 
 	s.s = &http.Server{
 		Addr:           fmt.Sprintf("%v:%v", agentHost, agentPort),

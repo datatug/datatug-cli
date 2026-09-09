@@ -52,21 +52,25 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 	if err := validateScope(apicontract.Scope{Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}); err != nil {
 		return apicontract.Result{}, err
 	}
-	if req.QueryID == "" && req.DTQL == "" {
-		return apicontract.Result{}, newInvalidRequest("queryId", "exactly one of queryId or dtql is required")
-	}
-	if req.QueryID != "" && req.DTQL != "" {
-		return apicontract.Result{}, newInvalidRequest("dtql", "dtql cannot be supplied together with queryId")
-	}
-	switch req.Mode {
-	case "", apicontract.ProvenanceModeLive:
-		req.Mode = apicontract.ProvenanceModeLive
-	case apicontract.ProvenanceModeSnapshot:
-	default:
-		return apicontract.Result{}, newTypeMismatch("mode", fmt.Sprintf("must be %q or %q", apicontract.ProvenanceModeLive, apicontract.ProvenanceModeSnapshot))
-	}
-	if err := validateBindingOrigins(req); err != nil {
-		return apicontract.Result{}, err
+	// req.Validate() is core's own structural check (datatug-core v0.27.0,
+	// pkg/apicontract — the schema authority): queryId/dtql exclusivity
+	// ("exactly one of queryId or dtql is required"), dtql-requires-source,
+	// every Parameters value's own TypedValue shape, bindingOrigins naming
+	// exactly the submitted parameters (no more, no fewer) with a
+	// recognized origin, mode's closed set {live,snapshot} with
+	// snapshot-requires-snapshotId, and — "an explicit limit: 0 is
+	// INVALID_REQUEST" per the lead session's semantics ruling for this
+	// stream — Limit, when the caller sent one, in (0,500]. This supersedes
+	// the hand-written queryId/dtql-exclusivity, mode-enum, and
+	// validateBindingOrigins checks that used to live here (S91's gap:
+	// exec/run_query was the one endpoint PR #215 left decoding through
+	// DecodeStrict/decodeContractBody without ever calling Validate(), unlike
+	// its semantic/related and semantic/related/rows siblings — see
+	// semantic_related.go). validateScope above still runs first for the one
+	// thing core's Validate() cannot check: STALE_CONTEXT
+	// (api.ValidateSecurityContext), a live-session check.
+	if err := req.Validate(); err != nil {
+		return apicontract.Result{}, requestValidationError(err)
 	}
 
 	projDir, ok := api.ProjectDir(req.Project)
@@ -205,12 +209,13 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 // DTQL requires an explicit req.Source; a saved query obeys target
 // resolution (one eligible target auto-selected and reported; several need
 // an explicit, authorized req.Source or TARGET_REQUIRED; zero is
-// SOURCE_UNAVAILABLE).
+// SOURCE_UNAVAILABLE). req.Source == "" alongside req.DTQL != "" can no
+// longer reach this function — computeRunQuery's req.Validate() call already
+// rejects that shape ("source: is required for ad-hoc dtql") before
+// resolveExecutionSource is ever called, superseding the hand-written
+// newMissingParameter("source") check that used to guard it here.
 func resolveExecutionSource(ctx context.Context, projStore datatug.ProjectStore, projDir string, req apicontract.ExecutionRequest, queryDef *datatug.QueryDef) (api.ResolvedSource, error) {
 	if req.DTQL != "" {
-		if req.Source == "" {
-			return api.ResolvedSource{}, newMissingParameter("source")
-		}
 		resolved, err := api.ResolveSource(ctx, projStore, projDir, req.Environment, req.Source)
 		if err != nil {
 			return api.ResolvedSource{}, newSourceUnavailable(err.Error())
@@ -248,33 +253,6 @@ func candidateTargets(sources []api.ResolvedSource) []apicontract.CandidateTarge
 		out[i] = apicontract.CandidateTarget{Source: s.ID, Label: s.Label}
 	}
 	return out
-}
-
-// validateBindingOrigins checks api-contract.md's "bindingOrigins supplies
-// display provenance, is checked for exactly the submitted keys": every
-// Parameters key has exactly one BindingOrigins entry, and vice versa.
-func validateBindingOrigins(req apicontract.ExecutionRequest) error {
-	origins := make(map[string]bool, len(req.BindingOrigins))
-	for _, o := range req.BindingOrigins {
-		if origins[o.ParameterID] {
-			return newInvalidRequest("bindingOrigins", fmt.Sprintf("duplicate bindingOrigins entry for parameter %q", o.ParameterID))
-		}
-		origins[o.ParameterID] = true
-		switch o.Origin {
-		case apicontract.BindingOriginSelection, apicontract.BindingOriginContext, apicontract.BindingOriginManual, apicontract.BindingOriginDefault:
-		default:
-			return newInvalidRequest("bindingOrigins", fmt.Sprintf("parameter %q has unknown origin %q", o.ParameterID, o.Origin))
-		}
-	}
-	for paramID := range req.Parameters {
-		if !origins[paramID] {
-			return newInvalidRequest("bindingOrigins", fmt.Sprintf("parameter %q has no matching bindingOrigins entry", paramID))
-		}
-	}
-	if len(origins) != len(req.Parameters) {
-		return newInvalidRequest("bindingOrigins", "bindingOrigins must name exactly the submitted parameters, no more")
-	}
-	return nil
 }
 
 // typedParametersToVariables converts req.Parameters (TypedValue) into the

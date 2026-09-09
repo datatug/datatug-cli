@@ -104,27 +104,76 @@ func TestExecRunQuery_AdhocFixture_DecodesAndExecutes(t *testing.T) {
 	// catalog is semanticTestSource ("chinook"). Only the source id is
 	// substituted for execution.
 	req.Source = semanticTestSource
-	// The fixture's own dtql text ("select:\n  from: Customer\n") is a DTQL
-	// syntax dal-go/dalgo's own dtql.Deserialize (pkg/secureread/executor.go's
-	// RunDTQL) rejects outright ("field select not found in type
-	// dtql.document") against the dalgo version this repo currently pins — a
-	// real wire-compatibility gap this stream's report surfaces, not
-	// something exec/run_query's own req.Validate() adoption caused or can
-	// fix (ExecutionRequest.Validate() has no opinion on DTQL body syntax,
-	// only that DTQL is present). Substituted with the same "from:/where:"-
-	// less shape TestExecRunQuery_SavedFixture_DecodesAndExecutes's own DTQL
-	// executes successfully with, so this test can still prove a live
-	// execution round trip; the fixture's OWN dtql bytes are still decoded
-	// and Validate()-checked above, unmodified, via decodeRequestFixture.
-	req.DTQL = "from:\n  name: Customer\n"
+	// The fixture's own dtql text used to be "select:\n  from: Customer\n" —
+	// YAML-shaped prose dal-go/dalgo's own dtql.Deserialize
+	// (pkg/secureread/executor.go's RunDTQL) rejected outright ("field select
+	// not found in type dtql.document"), a real wire-compatibility gap this
+	// stream's report surfaced against datatug-core v0.27.0. datatug-core
+	// v0.27.3 (datatug-core#316) replaced it with a real DTQL document — a
+	// Customer selection (CustomerId/FirstName/LastName/Email) filtered by a
+	// Customer.ID-named param bound "from selection", parameters/bindingOrigins
+	// populated to match — so it now parses and executes unmodified: no
+	// substitution is needed here any more, and the fixture's own dtql,
+	// parameters and bindingOrigins all flow into computeRunQuery untouched.
 
 	result, err := computeRunQuery(context.Background(), req)
 	if err != nil {
 		t.Fatalf("computeRunQuery(fixture request): %v", err)
 	}
 	assertValid(t, result)
-	if len(result.Recordset.Rows) == 0 {
-		t.Fatalf("expected at least one Customer row, got 0")
+	if len(result.Recordset.Rows) != 1 {
+		t.Fatalf("len(Rows) = %d, want 1 (the fixture's where clause filters to Customer.ID=5)", len(result.Recordset.Rows))
+	}
+
+	colIndex := func(name string) int {
+		t.Helper()
+		for i, col := range result.Recordset.Columns {
+			if col.Name == name {
+				return i
+			}
+		}
+		t.Fatalf("column %q not found in recordset columns %v", name, result.Recordset.Columns)
+		return -1
+	}
+	row := result.Recordset.Rows[0]
+	// The Chinook SQLite driver reports CustomerId as a numeric column
+	// (fromGoValue's float64 branch, typed_value_convert.go), unlike the
+	// fixture's own declared parameter type ("integer") — the recordset
+	// column carries the driver's own observed type, not the request
+	// parameter's declared one, so this checks .Num rather than .Str.
+	if got := row[colIndex("CustomerId")].Num; got != 5 {
+		t.Errorf("CustomerId = %v, want %v", got, 5)
+	}
+	if got := row[colIndex("FirstName")].Str; got != "František" {
+		t.Errorf("FirstName = %q, want %q", got, "František")
+	}
+	if got := row[colIndex("LastName")].Str; got != "Wichterlová" {
+		t.Errorf("LastName = %q, want %q", got, "Wichterlová")
+	}
+	if got := row[colIndex("Email")].Str; got != "frantisekw@jetbrains.com" {
+		t.Errorf("Email = %q, want %q", got, "frantisekw@jetbrains.com")
+	}
+
+	// bindingsApplied must echo the fixture's own "from selection" origin
+	// (bindingOrigins: [{parameterId: "Customer.ID", origin: "selection",
+	// factId: "f1"}]) for the one parameter it actually applied — ad-hoc DTQL
+	// has no queryDef to narrow against, so every supplied parameter is
+	// reported (bindingsApplied's own doc comment, exec_run_query.go).
+	if len(result.BindingsApplied) != 1 {
+		t.Fatalf("len(BindingsApplied) = %d, want 1: %+v", len(result.BindingsApplied), result.BindingsApplied)
+	}
+	binding := result.BindingsApplied[0]
+	if binding.ParameterID != "Customer.ID" {
+		t.Errorf("BindingsApplied[0].ParameterID = %q, want %q", binding.ParameterID, "Customer.ID")
+	}
+	if binding.Origin != apicontract.BindingOriginSelection {
+		t.Errorf("BindingsApplied[0].Origin = %q, want %q (the fixture's own bindingOrigins entry)", binding.Origin, apicontract.BindingOriginSelection)
+	}
+	if binding.OriginEvidence != apicontract.BindingOriginEvidenceClientReported {
+		t.Errorf("BindingsApplied[0].OriginEvidence = %q, want %q", binding.OriginEvidence, apicontract.BindingOriginEvidenceClientReported)
+	}
+	if binding.FactID != "f1" {
+		t.Errorf("BindingsApplied[0].FactID = %q, want %q (the fixture's own bindingOrigins factId)", binding.FactID, "f1")
 	}
 }
 

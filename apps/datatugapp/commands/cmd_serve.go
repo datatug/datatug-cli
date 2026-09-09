@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/server"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
@@ -26,12 +29,11 @@ const (
 // ServeCommand executes serve consoleCommand
 //var ServeCommand *flags.Command
 
-// serveFlags holds the values parsed off the `serve` cobra.Command's flags.
-// --as/--role/--group are reserved: parsed and logged here, but not yet
-// enforced. Task 6 (plan: 2026-09-09-phase-1-core-investigation-loop.md)
-// wires them into access policies.
 const serveOpenBrowserFlag = "open-browser"
 
+// serveFlags holds the values parsed off the `serve` cobra.Command's flags.
+// --as/--role/--group fix the principal every policy-enforced read in this
+// process runs as (REQ:principal-selection) — see resolveServeSession.
 type serveFlags struct {
 	openBrowser bool
 	host        string
@@ -94,13 +96,66 @@ func resolveServeAddr(host string, port int, config dtconfig.Settings) (string, 
 	return host, port
 }
 
+// resolveServeSession builds the fixed secureread.Session `datatug serve`
+// runs its whole process life under (REQ:principal-selection,
+// REQ:server-acl-all-reads). Policies come from "<project>/policies/" when
+// projectDir is set and that folder exists, else the usual accesspolicies
+// default (--policies-dir/$DATATUG_POLICIES_DIR/~/.datatug/policies — same
+// resolution `datatug query run` uses).
+//
+// Per the hub Feature's resolved Open Question ("Should the serving
+// principal default to admin when --as is omitted, or should serve refuse
+// to start without a principal when a policy set exists? Recommendation:
+// default admin only when no policy set exists; otherwise require --as."):
+// a policy set with no --as/--role/--group refuses to start; no policy set
+// at all runs Unrestricted, defaulting the reported principal to "admin"
+// unless the caller named one explicitly.
+func resolveServeSession(projectDir string, flags serveFlags) (secureread.Session, error) {
+	policiesDir := ""
+	if projectDir != "" {
+		candidate := filepath.Join(projectDir, "policies")
+		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
+			policiesDir = candidate
+		}
+	}
+	hasPrincipal := flags.as != "" || len(flags.roles) > 0 || len(flags.groups) > 0
+
+	_, err := accesspolicies.Load(accesspolicies.LoadOptions{Dir: policiesDir})
+	switch {
+	case err == nil:
+		if !hasPrincipal {
+			return secureread.Session{}, errors.New("serve: a policy set was found but no principal was named; pass --as, --role or --group (or remove the policies to run unrestricted)")
+		}
+		return secureread.NewSession(secureread.SessionOptions{
+			As: flags.as, Roles: flags.roles, Groups: flags.groups, PoliciesDir: policiesDir,
+		})
+	case errors.Is(err, accesspolicies.ErrNoPolicies):
+		as := flags.as
+		if !hasPrincipal {
+			as = "admin"
+		}
+		return secureread.NewSession(secureread.SessionOptions{
+			As: as, Roles: flags.roles, Groups: flags.groups, NoPolicies: true,
+		})
+	default:
+		return secureread.Session{}, fmt.Errorf("serve: load access policies: %w", err)
+	}
+}
+
 func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	flags, err := readServeFlags(cmd)
 	if err != nil {
 		return err
 	}
-	if flags.as != "" || len(flags.roles) > 0 || len(flags.groups) > 0 {
-		log.Printf("serve: --as=%q --role=%v --group=%v parsed but not yet enforced (plan task 6 wires access policies)", flags.as, flags.roles, flags.groups)
+
+	session, err := resolveServeSession(flags.projectDir, flags)
+	if err != nil {
+		return Exit(err.Error(), exitCodeUsage)
+	}
+	if session.Unrestricted {
+		log.Printf("serve: running without access policy enforcement (principal=%v)", flags.as)
+	} else {
+		log.Printf("serve: %d access policy document(s) loaded; serving as principal %+v", len(session.Policies), session.Principal)
 	}
 
 	config, err := dtconfig.GetSettings()
@@ -148,7 +203,7 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	}
 	httpServer := server.NewHttpServer()
 	// TODO: implement graceful shutdown
-	return httpServer.ServeHTTP(pathsByID, host, port)
+	return httpServer.ServeHTTP(pathsByID, host, port, session)
 }
 
 func serveCommandArgs() *cobra.Command {
@@ -163,8 +218,8 @@ func serveCommandArgs() *cobra.Command {
 	flags.Int(servePortFlag, 0, "Port to bind the agent HTTP server to (default: 8989, or the server.port setting)")
 	flags.String(serveProjectFlag, "", "Path to a single DataTug project directory to serve")
 	flags.Bool(serveOpenBrowserFlag, false, "Open the web UI in a browser (off by default; the URL is always printed)")
-	flags.String(serveAsFlag, "", "Principal user ID to serve as (reserved: parsed but not yet enforced)")
-	flags.StringArray(serveRoleFlag, nil, "Principal role, repeatable (reserved: parsed but not yet enforced)")
-	flags.StringArray(serveGroupFlag, nil, "Principal group, repeatable (reserved: parsed but not yet enforced)")
+	flags.String(serveAsFlag, "", "Principal user ID to serve as; required when the project has a policies/ set (or $HOME/"+accesspolicies.DefaultDir+")")
+	flags.StringArray(serveRoleFlag, nil, "Principal role, repeatable")
+	flags.StringArray(serveGroupFlag, nil, "Principal group, repeatable")
 	return cmd
 }

@@ -12,7 +12,22 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/datatug/datatug-cli/pkg/secureread"
 )
+
+// unrestrictedTestSession is a valid, --no-policies-equivalent
+// secureread.Session for tests that only exercise unrelated server plumbing
+// (ping, agent-info, projects_summary) and are not themselves about access
+// policy enforcement.
+func unrestrictedTestSession(t *testing.T) secureread.Session {
+	t.Helper()
+	session, err := secureread.NewSession(secureread.SessionOptions{NoPolicies: true})
+	if err != nil {
+		t.Fatalf("NewSession(NoPolicies): %v", err)
+	}
+	return session
+}
 
 // TestNewDatatugStoreFactory replaces the old recover()-around-the-panic
 // coverage: storage.NewDatatugStore used to be wired to a closure that always
@@ -100,12 +115,19 @@ func waitForServer(t *testing.T, url string) {
 // cleanup (graceful shutdown) via t.Cleanup.
 func startServeHTTP(t *testing.T, pathsByID map[string]string) string {
 	t.Helper()
+	return startServeHTTPWithSession(t, pathsByID, unrestrictedTestSession(t))
+}
+
+// startServeHTTPWithSession is startServeHTTP with an explicit
+// secureread.Session, for tests that exercise policy enforcement.
+func startServeHTTPWithSession(t *testing.T, pathsByID map[string]string, session secureread.Session) string {
+	t.Helper()
 	port := freeTCPPort(t)
 
 	httpServer := NewHttpServer()
 	serveErrCh := make(chan error, 1)
 	go func() {
-		serveErrCh <- httpServer.ServeHTTP(pathsByID, "127.0.0.1", port)
+		serveErrCh <- httpServer.ServeHTTP(pathsByID, "127.0.0.1", port, session)
 	}()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

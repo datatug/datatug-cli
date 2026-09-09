@@ -103,5 +103,6 @@ func executeRoutes(path string, router router, wrap wrapper, writeOnly bool) {
 	if !writeOnly {
 		route(router, wrap, http.MethodPost, path+"/exec/execute_commands", executeCommandsHandler)
 		route(router, wrap, http.MethodGet, path+"/exec/select", executeSelectHandler)
+		route(router, wrap, http.MethodPost, path+"/exec/run_query", runQueryHandler)
 	}
 }

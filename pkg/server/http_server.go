@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/server/endpoints"
 	"github.com/julienschmidt/httprouter"
 	"github.com/sneat-co/sneat-go-core/apicore"
@@ -42,9 +44,14 @@ func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storag
 	}
 }
 
-// ServeHTTP starts HTTP server
-func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int) error {
+// ServeHTTP starts HTTP server. session is the fixed secureread.Session this
+// process's whole life runs under (REQ:principal-selection) — every read the
+// web UI can trigger through the endpoints registered below goes through it
+// (REQ:server-acl-all-reads); see apps/datatugapp/commands/cmd_serve.go for
+// how it is built from --as/--role/--group and the project's policy set.
+func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int, session secureread.Session) error {
 	storage.NewDatatugStore = newDatatugStoreFactory(pathsByID)
+	api.ConfigureSecureSession(session, pathsByID)
 
 	if host == "" {
 		agentHost = "localhost"

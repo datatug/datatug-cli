@@ -236,7 +236,7 @@ func verifySQLiteFile(path string) error {
 		return fmt.Errorf("failed to count Customer rows: %w", err)
 	}
 	if count <= 0 {
-		return errors.New("Customer table is empty")
+		return errors.New("table Customer is empty")
 	}
 	return nil
 }

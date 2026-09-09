@@ -108,6 +108,13 @@ func newSourceUnavailable(message string) *contractError {
 	return newContractError(apicontract.ErrCodeSourceUnavailable, message, "source")
 }
 
+// newResponseTooLarge builds a 413 RESPONSE_TOO_LARGE error — dal-go/
+// dalgo2http v0.2.0's ErrResponseTooLarge (a live HTTP source's response
+// exceeded the adapter's 2 MiB cap) maps here; see exec_run_query.go.
+func newResponseTooLarge(message string) *contractError {
+	return newContractError(apicontract.ErrCodeResponseTooLarge, message, "")
+}
+
 // newTimeout builds a 504 TIMEOUT error.
 func newTimeout(message string) *contractError {
 	return newContractError(apicontract.ErrCodeTimeout, message, "")

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -8,8 +9,27 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
+
+// useInsecureLoopbackBackend swaps the package-level openBackend var (see
+// cmd_query.go) for the duration of t so `query run --db http://...` opens
+// an HTTP(S) source via dbcopy.BackendRef.OpenForTest instead of Open —
+// dal-go/dalgo2http v0.2.0 requires https:// and blocks dialing loopback
+// for every descriptor loaded from a project file, and these tests point a
+// QueryDef's .query.http file at a loopback httptest.Server (or a
+// deliberately-unreachable loopback address). The swap is restored via
+// t.Cleanup so production behavior (the default openBackend, https-only)
+// is unaffected for every other test in this package.
+func useInsecureLoopbackBackend(t *testing.T) {
+	t.Helper()
+	orig := openBackend
+	openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
+		return backend.OpenForTest(ctx)
+	}
+	t.Cleanup(func() { openBackend = orig })
+}
 
 // TestQueryRunCommand_DBFlagHelpListsAllSchemes proves the --db flag's help
 // text cannot silently drift from dbcopy's actual dispatcher: it is
@@ -78,6 +98,7 @@ func writeProvenanceTestFile(t *testing.T, path, content string) {
 // stderr and, under --format json, a $provenance field naming the same
 // source on every row.
 func TestQuery_HTTPSource_Live_ProvenanceReported(t *testing.T) {
+	useInsecureLoopbackBackend(t) // up.URL is a loopback httptest.Server (plain HTTP)
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("name"); got != "Gadget" {
 			t.Fatalf("upstream request name = %q, want Gadget", got)
@@ -113,6 +134,7 @@ func TestQuery_HTTPSource_Live_ProvenanceReported(t *testing.T) {
 // $provenance field says "snapshot" too — the network-disabled pattern
 // pkg/httpsource's own tests use (see TestOpen_ResolvesFromSnapshot_NetworkDisabled).
 func TestQuery_HTTPSource_Snapshot_ProvenanceReported(t *testing.T) {
+	useInsecureLoopbackBackend(t) // downURL is a loopback address (plain HTTP)
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("network must be disabled for this test; got a request: %s", r.URL)
 	}))

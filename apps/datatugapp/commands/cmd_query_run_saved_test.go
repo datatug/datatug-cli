@@ -1,15 +1,36 @@
 package commands
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/dal-go/dalgo/dal"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/mitchellh/go-homedir"
 	_ "modernc.org/sqlite"
 )
+
+// useInsecureLoopbackHTTPSavedQuery swaps the package-level
+// runStructuredHTTPQuery var (see cmd_query_run_saved.go) for the duration
+// of t so a saved HTTP query opens its source via
+// secureread.Executor.RunStructuredInsecureForTest instead of
+// RunStructured — dal-go/dalgo2http v0.2.0 requires https:// and blocks
+// dialing loopback for every descriptor loaded from a project file, and
+// breakHTTPQueryNetwork rewrites country-facts.query.http to a loopback
+// address. Restored via t.Cleanup so production behavior (the default
+// runStructuredHTTPQuery, https-only) is unaffected for every other test.
+func useInsecureLoopbackHTTPSavedQuery(t *testing.T) {
+	t.Helper()
+	orig := runStructuredHTTPQuery
+	runStructuredHTTPQuery = func(ctx context.Context, executor *secureread.Executor, sourceURL string, query dal.Query, variables map[string]any) (secureread.Result, error) {
+		return executor.RunStructuredInsecureForTest(ctx, sourceURL, query, variables)
+	}
+	t.Cleanup(func() { runStructuredHTTPQuery = orig })
+}
 
 // demoProject1Dir is the real, committed demo-project-1 checkout this
 // package's other tests already read from (e.g. cmd_validate_test.go's
@@ -231,6 +252,7 @@ func TestQueryRunSaved_SQL(t *testing.T) {
 // the same "source: snapshot ..." stderr line and $provenance JSON field
 // PR #204's ad-hoc `--db http://...` path does.
 func TestQueryRunSaved_HTTP(t *testing.T) {
+	useInsecureLoopbackHTTPSavedQuery(t) // breakHTTPQueryNetwork points the query at a loopback address
 	projectDir := setupSavedQueryProject(t)
 
 	stdout, stderr, code := runQuery(t, "",

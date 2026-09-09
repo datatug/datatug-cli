@@ -177,6 +177,29 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 		if errors.Is(err, dbcopy.ErrSourceFileMissing) {
 			return apicontract.Result{}, newSourceUnavailable(err.Error())
 		}
+		// dal-go/dalgo2http v0.2.0's Phase 1 HTTP bounds (adopted alongside
+		// this stream): a live response over the adapter's 2 MiB cap fails
+		// explicitly with ErrResponseTooLarge rather than a misleading JSON
+		// decode error — RESPONSE_TOO_LARGE is the exact appendix code for
+		// that shape.
+		if errors.Is(err, dalgo2http.ErrResponseTooLarge) {
+			return apicontract.Result{}, newResponseTooLarge(fmt.Sprintf("query %q: the HTTP source's response exceeded the size limit", req.QueryID))
+		}
+		// ErrAddressBlocked (the guarded dialer refused a private/loopback/
+		// link-local/metadata/multicast/unspecified address, including a DNS
+		// rebind), ErrRedirectNotAllowed (the endpoint tried to redirect —
+		// always refused), and ErrInvalidConfig (a descriptor's urlTemplate
+		// is not https://, or another config-time validation failure — a
+		// "scheme error" in the stream brief's words) are all a source/config
+		// problem this request's caller cannot fix, exactly like
+		// ErrSourceFileMissing above — mapped the same way, to
+		// SOURCE_UNAVAILABLE, with a fixed message naming only the query:
+		// never err.Error() itself, which can carry a resolved IP, dial
+		// address, or other adapter-internal detail that must not reach a
+		// caller.
+		if errors.Is(err, dalgo2http.ErrAddressBlocked) || errors.Is(err, dalgo2http.ErrRedirectNotAllowed) || errors.Is(err, dalgo2http.ErrInvalidConfig) {
+			return apicontract.Result{}, newSourceUnavailable(fmt.Sprintf("query %q: its HTTP source is unreachable or misconfigured", req.QueryID))
+		}
 		return apicontract.Result{}, newInvalidRequest("", err.Error())
 	}
 	if collection == "" {
@@ -424,5 +447,21 @@ func runHTTPQuery(ctx context.Context, executor *secureread.Executor, sourceURL 
 	if len(missing) > 0 {
 		return secureread.Result{}, fmt.Errorf("query %q: missing required parameter(s): %s", queryDef.ID, strings.Join(missing, ", "))
 	}
-	return executor.RunStructured(ctx, sourceURL, builder.SelectColumns(), nil)
+	return runStructuredHTTPQuery(ctx, executor, sourceURL, builder.SelectColumns(), nil)
+}
+
+// runStructuredHTTPQuery calls executor.RunStructured; a package var so
+// this package's own tests can substitute
+// secureread.Executor.RunStructuredInsecureForTest (dal-go/dalgo2http
+// v0.2.0's TEST-ONLY Collection.InsecureAllowLoopback) to exercise the
+// ErrResponseTooLarge/ErrRedirectNotAllowed classifier branches above
+// (computeRunQuery's err-handling block) against a real loopback
+// httptest.Server, without any project descriptor file ever requesting
+// that itself. Production code always runs with this default, which calls
+// the real, https-only-enforcing RunStructured. (ErrAddressBlocked and the
+// https-only "scheme error" branch need no such server — a blocked or
+// non-https address is rejected before any network activity, so those are
+// tested through this same default, unswapped.)
+var runStructuredHTTPQuery = func(ctx context.Context, executor *secureread.Executor, sourceURL string, query dal.Query, variables map[string]any) (secureread.Result, error) {
+	return executor.RunStructured(ctx, sourceURL, query, variables)
 }

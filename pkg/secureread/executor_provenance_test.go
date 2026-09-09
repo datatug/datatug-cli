@@ -70,7 +70,15 @@ func TestRunStructured_HTTPSource_ReportsSnapshotProvenance(t *testing.T) {
 	}
 	executor := NewExecutor(session)
 
-	result, err := executor.RunStructured(context.Background(), sourceURL, countriesQuery(), nil)
+	// The fixture's URL template is a loopback address nothing listens on
+	// (see newHTTPFixture above) — dalgo2http v0.2.0 requires https:// and
+	// blocks dialing loopback for every descriptor loaded from a project
+	// file, so this exercises RunStructuredInsecureForTest (Go-code-only
+	// Collection.InsecureAllowLoopback, never settable by the .query.http
+	// file itself) instead of RunStructured, preserving this test's exact
+	// intent: a live failure yields a labelled snapshot with retained
+	// provenance, proven through the real end-to-end wiring.
+	result, err := executor.RunStructuredInsecureForTest(context.Background(), sourceURL, countriesQuery(), nil)
 	if err != nil {
 		t.Fatalf("RunStructured: %v", err)
 	}

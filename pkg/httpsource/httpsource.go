@@ -16,19 +16,52 @@ package httpsource
 import (
 	"context"
 	"fmt"
-	"net/http"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2http"
 	"github.com/dal-go/record"
 )
 
+// Option configures Open. The zero value of every Option's underlying
+// config is production-safe; only AllowInsecureLoopback (see its doc
+// comment) changes behavior, and only when a caller passes it explicitly.
+type Option func(*openOptions)
+
+type openOptions struct {
+	insecureAllowLoopback bool
+}
+
+// AllowInsecureLoopback is a TEST-ONLY Open Option: every
+// dalgo2http.Collection Open builds from projectDir gets
+// Collection.InsecureAllowLoopback set (dal-go/dalgo2http v0.2.0's escape
+// hatch — URLTemplate may then use http://, and the guarded dialer may
+// dial a loopback address, but ONLY when the host is literally loopback;
+// every other blocked address class stays blocked). It exists so this
+// package's own tests, and other packages' tests that drive the same
+// sourceURL -> pkg/dbcopy -> httpsource.Open pipeline in-process (see
+// pkg/dbcopy's BackendRef.OpenForTest and pkg/secureread's
+// Executor.RunStructuredInsecureForTest), can exercise a live-then-snapshot
+// HTTP source against a loopback httptest.Server or an
+// intentionally-unreachable loopback address (e.g. 127.0.0.1:1) — WITHOUT
+// any project descriptor file ever being able to request this itself: the
+// field is set here, in Go code, from an explicit caller opt-in, never from
+// anything LoadHTTPQueries/LoadURLTemplate read off disk. NEVER pass this
+// outside test code.
+func AllowInsecureLoopback() Option {
+	return func(o *openOptions) { o.insecureAllowLoopback = true }
+}
+
 // Open builds a dal.DB from every HTTP QueryDef declared under
 // <projectDir>/queries/**. It fails with an error naming projectDir when no
 // HTTP QueryDef is found there: an http(s):// db-copy source with nothing
 // to serve is a configuration mistake (the wrong project path, most often),
 // not a validly-empty database.
-func Open(_ context.Context, projectDir string) (dal.DB, error) {
+func Open(_ context.Context, projectDir string, opts ...Option) (dal.DB, error) {
+	var o openOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	loaded, err := LoadHTTPQueries(projectDir)
 	if err != nil {
 		return nil, err
@@ -50,15 +83,29 @@ func Open(_ context.Context, projectDir string) (dal.DB, error) {
 		if err != nil {
 			return nil, err
 		}
+		if o.insecureAllowLoopback {
+			coll.InsecureAllowLoopback = true
+		}
 		collections = append(collections, coll)
 		ids = append(ids, coll.Name)
 	}
 
 	db, err := dalgo2http.NewDB(dalgo2http.Config{
 		Collections: collections,
-		Client:      http.DefaultClient,
-		Snapshots:   newFixtureFS(fdir, ids),
-		Mode:        dalgo2http.ModeLiveThenSnapshot,
+		// Client is deliberately left nil: dalgo2http.NewDB then installs its
+		// own default client (see dalgo2http's newDefaultClient) — the
+		// guarded dialer that refuses private/loopback/link-local/metadata/
+		// multicast/unspecified addresses (including a DNS rebind) and the
+		// CheckRedirect that refuses every redirect. Setting Client to
+		// http.DefaultClient here (as this line used to) silently discarded
+		// BOTH of those Phase 1 HTTP bounds — the standard library's default
+		// client dials anywhere and follows redirects — which is exactly the
+		// gap TestExecRunQuery_HTTPSource_RedirectNotAllowed_MapsToSourceUnavailable
+		// and TestExecRunQuery_HTTPSource_AddressBlocked_MapsToSourceUnavailable
+		// (pkg/server/endpoints/exec_run_query_http_errors_test.go) caught
+		// while adopting dalgo2http v0.2.0.
+		Snapshots: newFixtureFS(fdir, ids),
+		Mode:      dalgo2http.ModeLiveThenSnapshot,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("httpsource: %w", err)

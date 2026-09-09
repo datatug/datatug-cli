@@ -34,7 +34,24 @@ func (s *HttpServer) Shutdown(ctx context.Context) error {
 // newDatatugStoreFactory builds the storage.NewDatatugStore implementation
 // ServeHTTP wires up: a filestore-backed store over pathsByID, mirroring the
 // working path project_base_command.go already uses for CLI commands.
+//
+// It also registers each project's directory with filestore.SetProjectPath
+// (an existing helper that, before this change, nothing in this codebase
+// ever called outside its own test — filestore.GetProjectPath always
+// returned "" for a served project). The semantic endpoints
+// (pkg/server/endpoints/semantic_*.go) need a project's real directory to
+// read its queries/entities/recordsets/data trees directly — the same
+// files-on-disk access pattern dbcopy/httpsource already use elsewhere —
+// and storage.GetStore's own context-based store lookup does not work for a
+// plain HTTP request under ServeHTTP (verified: it always fails with "no
+// store configured", since nothing populates storage.StoreFromContext for a
+// served request; see the semantic endpoints' PR body for how this was
+// found). Wiring the already-exported SetProjectPath here is the minimal
+// fix, not a new mechanism.
 func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storage.Store, error) {
+	for id, path := range pathsByID {
+		filestore.SetProjectPath(id, path)
+	}
 	return func(id string) (v storage.Store, err error) {
 		if v, err = filestore.NewStore("files", pathsByID); err != nil {
 			err = fmt.Errorf("failed to create filestore for storage id=%v: %w", id, err)

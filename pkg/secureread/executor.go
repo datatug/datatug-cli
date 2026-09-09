@@ -35,7 +35,34 @@ func NewExecutor(session Session) *Executor {
 // (including $currentUser, bound automatically from the session's
 // principal); pass nil when the query has none.
 func (e *Executor) RunStructured(ctx context.Context, sourceURL string, query dal.Query, variables map[string]any) (Result, error) {
-	db, closeSource, err := openSource(ctx, sourceURL)
+	return e.runStructured(ctx, sourceURL, query, variables, false)
+}
+
+// RunStructuredInsecureForTest is RunStructured, except the underlying
+// HTTP(S) source is opened via dbcopy.BackendRef.OpenForTest instead of
+// Open: every dalgo2http.Collection it builds gets
+// Collection.InsecureAllowLoopback set (dal-go/dalgo2http v0.2.0's
+// TEST-ONLY escape hatch — see httpsource.AllowInsecureLoopback's doc
+// comment). This lets a test point a QueryDef's .query.http file at a
+// loopback httptest.Server, or a deliberately-unreachable loopback address
+// (e.g. 127.0.0.1:1, for a fast deterministic live-failure), while still
+// exercising RunStructured's exact real wiring — accesspolicies.Run, the
+// dalgo2http.Recorder context, Result.Provenance — end to end, instead of
+// weakening the test by bypassing RunStructured altogether.
+//
+// NEVER call this from production code. It exists for this package's own
+// tests (executor_provenance_test.go) and for other packages' tests that
+// drive the same sourceURL -> pkg/dbcopy -> pkg/httpsource pipeline
+// in-process (e.g. apps/datatugapp/commands). A production descriptor file
+// can never request this itself: dalgo2http excludes
+// InsecureAllowLoopback from its YAML/JSON schema, and this method is only
+// reachable by Go code that calls it explicitly.
+func (e *Executor) RunStructuredInsecureForTest(ctx context.Context, sourceURL string, query dal.Query, variables map[string]any) (Result, error) {
+	return e.runStructured(ctx, sourceURL, query, variables, true)
+}
+
+func (e *Executor) runStructured(ctx context.Context, sourceURL string, query dal.Query, variables map[string]any, insecureAllowLoopback bool) (Result, error) {
+	db, closeSource, err := openSource(ctx, sourceURL, insecureAllowLoopback)
 	if err != nil {
 		return Result{}, err
 	}
@@ -99,12 +126,22 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 // ingitdb:// through dalgo2ingitdb); an unknown scheme fails with
 // dbcopy.Parse's own descriptive error. The returned close func is always
 // safe to call, even when the backend has no Close method.
-func openSource(ctx context.Context, sourceURL string) (dal.DB, func(), error) {
+//
+// insecureAllowLoopback, when true, opens an http(s):// source via
+// dbcopy.BackendRef.OpenForTest instead of Open (see
+// Executor.RunStructuredInsecureForTest's doc comment) — every other
+// scheme is unaffected either way.
+func openSource(ctx context.Context, sourceURL string, insecureAllowLoopback bool) (dal.DB, func(), error) {
 	ref, err := dbcopy.Parse(sourceURL)
 	if err != nil {
 		return nil, nil, err
 	}
-	db, err := ref.Open(ctx)
+	var db dal.DB
+	if insecureAllowLoopback {
+		db, err = ref.OpenForTest(ctx)
+	} else {
+		db, err = ref.Open(ctx)
+	}
 	if err != nil {
 		return nil, nil, err
 	}

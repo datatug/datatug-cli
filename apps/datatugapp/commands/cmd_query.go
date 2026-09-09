@@ -165,6 +165,18 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 	return o, nil
 }
 
+// openBackend opens backend into a dal.DB for the direct (--db) `query run`
+// path; a package var so this package's own tests can substitute
+// dbcopy.BackendRef.OpenForTest (dal-go/dalgo2http v0.2.0's TEST-ONLY
+// Collection.InsecureAllowLoopback) for an HTTP(S) source backed by a
+// loopback httptest.Server, without any project descriptor file ever being
+// able to request that itself — see cmd_query_http_provenance_test.go.
+// Production code always runs with this default, which calls the real,
+// https-only-enforcing BackendRef.Open.
+var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
+	return backend.Open(ctx)
+}
+
 func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	o, err := readQueryOptions(cmd)
 	if err != nil {
@@ -200,7 +212,7 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	db, err := backend.Open(ctx)
+	db, err := openBackend(ctx, backend)
 	if err != nil {
 		return Exit(fmt.Sprintf("open %s: %v", o.db, err), exitCodeDatabase)
 	}

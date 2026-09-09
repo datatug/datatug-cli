@@ -137,7 +137,11 @@ func TestOpen_HTTP_OpensDemoLikeProject(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "http", ref.Scheme)
 
-	db, err := ref.Open(context.Background())
+	// srv is an httptest.Server: plain HTTP on loopback. OpenForTest sets
+	// dalgo2http v0.2.0's TEST-ONLY Collection.InsecureAllowLoopback (see
+	// its doc comment) so this exercises the dbcopy -> httpsource wiring
+	// without a real https:// endpoint.
+	db, err := ref.OpenForTest(context.Background())
 	assert.NoError(t, err)
 	assert.NotNil(t, db)
 	if db == nil {

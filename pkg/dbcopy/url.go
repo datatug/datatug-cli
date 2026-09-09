@@ -230,6 +230,30 @@ func extractScheme(rawURL string) string {
 // synchronous and do not honor cancellation. That's acceptable for the MVP
 // CLI verb.
 func (r BackendRef) Open(ctx context.Context) (dal.DB, error) {
+	return r.open(ctx, false)
+}
+
+// OpenForTest is Open, except that for an "http"/"https" BackendRef every
+// dalgo2http.Collection it builds gets Collection.InsecureAllowLoopback set
+// (dal-go/dalgo2http v0.2.0's TEST-ONLY escape hatch — see
+// httpsource.AllowInsecureLoopback's doc comment). Every other scheme
+// behaves identically to Open.
+//
+// It exists so a test that drives the full sourceURL -> Parse -> Open
+// pipeline in-process (e.g. apps/datatugapp/commands's
+// cmd_query_http_provenance_test.go, pkg/secureread's
+// executor_provenance_test.go via Executor.RunStructuredInsecureForTest)
+// can point an HTTP QueryDef's .query.http file at a loopback
+// httptest.Server or an intentionally-unreachable loopback address (e.g.
+// 127.0.0.1:1, for a fast deterministic live-failure), without any project
+// descriptor file ever requesting that itself — the field is set here, in
+// Go code, only when a caller explicitly calls THIS method instead of
+// Open. NEVER call this from production code.
+func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
+	return r.open(ctx, true)
+}
+
+func (r BackendRef) open(ctx context.Context, insecureAllowLoopback bool) (dal.DB, error) {
 	switch r.Scheme {
 	case "sqlite":
 		if err := CheckSourceFile(r.Path); err != nil {
@@ -255,7 +279,11 @@ func (r BackendRef) Open(ctx context.Context) (dal.DB, error) {
 		return nil, ErrPostgresNotWired
 
 	case "http", "https":
-		db, err := httpsource.Open(ctx, r.Path)
+		var opts []httpsource.Option
+		if insecureAllowLoopback {
+			opts = append(opts, httpsource.AllowInsecureLoopback())
+		}
+		db, err := httpsource.Open(ctx, r.Path, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("open %s source %q: %w", r.Scheme, r.Path, err)
 		}

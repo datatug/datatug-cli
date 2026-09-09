@@ -647,8 +647,22 @@ func gitInitRepo(t *testing.T, dir string) {
 
 // gitPorcelain returns `git status --porcelain` output for the given path
 // (relative to dir), or for the whole repo when path is empty.
+//
+// It refreshes the index's cached stat info first (`git update-index
+// --refresh`), guarding against "racy git": a file this test modifies in the
+// same second the index was last written can carry an mtime indistinguishable
+// from "unchanged" at whole-second stat resolution, so `git status` can
+// report a stale "" (clean) instead of the real " M " until something forces
+// a content-level recheck. --refresh does exactly that — it re-stats every
+// entry and, for one whose cached stat looks racy, compares content instead
+// of trusting the cache — without staging or otherwise changing anything, so
+// it cannot weaken what the caller's porcelain assertions check. Its exit
+// code is deliberately ignored: it is non-zero whenever any entry still
+// needs updating (i.e. exactly the "genuinely modified" case these tests
+// assert on), not a failure of the refresh itself.
 func gitPorcelain(t *testing.T, dir, path string) string {
 	t.Helper()
+	_ = exec.Command("git", "-C", dir, "update-index", "-q", "--refresh").Run()
 	args := []string{"-C", dir, "status", "--porcelain"}
 	if path != "" {
 		args = append(args, path)

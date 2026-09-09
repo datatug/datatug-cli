@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
@@ -166,7 +167,7 @@ func ExecuteCommands(ctx context.Context, storeID string, request ExecuteCommand
 		if len(command.NamedParams) > 0 {
 			return ExecuteCommandsResponse{}, validation.NewErrBadRequestFieldValue("namedParams", "not supported for execute_commands; use GET /exec/select for a parameterized single query")
 		}
-		sourceURL, err := resolveSourceURL(ctx, projStore, command.Env, command.DB, projDir)
+		sourceURL, _, err := resolveSourceURL(ctx, projStore, command.Env, command.DB, projDir)
 		if err != nil {
 			return ExecuteCommandsResponse{}, fmt.Errorf("command %d: %w", i, err)
 		}
@@ -182,7 +183,7 @@ func ExecuteCommands(ctx context.Context, storeID string, request ExecuteCommand
 			CommandID:           commandID,
 			ElapsedMilliseconds: time.Since(commandStart).Milliseconds(),
 			Items: []CommandResponseItem{
-				{Type: "recordset", Value: resultToResponse(result)},
+				{Type: "recordset", Value: resultToResponse(result, apicontract.ExecutionProfileOpaquePrivileged, command.DB, "")},
 			},
 		}
 	}

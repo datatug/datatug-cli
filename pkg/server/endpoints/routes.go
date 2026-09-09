@@ -129,6 +129,20 @@ func recordsetsRoutes(path string, router router, wrap wrapper, writeOnly bool, 
 // secureread.openReadOnlySQLite), so neither needs requireWriteCapability.
 // exec/run_query is this stream's rewritten normative-transport endpoint
 // (exec_run_query.go).
+//
+// exec/select's response (api.QueryResultResponse) is "keep-as-is" only in
+// that it stays {columns, rows} for existing consumers; S101 (Fix 2)
+// additively extended it with the same `limitations`/`provenance` fields
+// exec/run_query's apicontract.Result carries — `provenance.executionProfile`
+// is "protected" for a `from=` structured read and "opaque-privileged" for a
+// `sql=` native-SQL one, populated from the same secureread.Result a
+// structured/native execution already produces (see resultToResponse in
+// pkg/api/query_result.go). S101 (Fix 1) also made `from`'s policy matching
+// schema-aware: a schema-qualified physical name (e.g. sqlite3's
+// "main.Customer") is matched against a policy `path` the same way a bare
+// name is, by stripping the resolved source's own default schema at
+// query-construction time (see pkg/api.PolicyCollectionName) — a non-default
+// schema is never stripped and keeps its own distinct policy identity.
 func executeRoutes(path string, router router, wrap wrapper, writeOnly bool) {
 	if !writeOnly {
 		route(router, wrap, http.MethodPost, path+"/exec/execute_commands", executeCommandsHandler)

@@ -49,70 +49,13 @@ func toContractRecordset(result secureread.Result) (apicontract.Recordset, error
 	return apicontract.Recordset{Columns: columns, Rows: rows}, nil
 }
 
-// toContractLimitations folds secureread's internally-split Limitation
-// entries (a standalone "rowsFiltered" marker, a standalone
-// "hiddenColumns" marker, one "policy"/"nativeSql" entry per applied
-// policy — see pkg/secureread/result.go) into the appendix's single-shape
-// Limitation{policy, rowsFiltered, hiddenColumns} list.
-//
-// Phase 1's demo scenarios apply exactly one named policy per request
-// (customers-support, security-matrix, etc.), so folding every applied
-// policy name into ONE combined entry alongside the overall rowsFiltered/
-// hiddenColumns flags is accurate for them. A project with more than one
-// DISTINCT policy applying different row/column restrictions to the SAME
-// request would see them combined into that one entry too (its
-// rowsFiltered/hiddenColumns already reflect the union). Attributing
-// rowsFiltered/hiddenColumns to the SPECIFIC policy that caused each would
-// need secureread's own internal Limitation shape to carry that
-// association, which it does not yet — flagged as a Task 13 ("converge
-// protected execution") follow-up, not fixed here.
+// toContractLimitations folds a secureread.Result's own Limitations into
+// the appendix's single-shape Limitation{policy, rowsFiltered,
+// hiddenColumns} list — now secureread.ToContractLimitations (S101: moved
+// there so pkg/api's exec/select gets the identical folding logic without
+// pkg/api needing to import this package).
 func toContractLimitations(in []secureread.Limitation) []apicontract.Limitation {
-	var policyNames []string
-	rowsFiltered := false
-	var hiddenColumns []string
-	for _, l := range in {
-		switch l.Kind {
-		case secureread.LimitationPolicy, secureread.LimitationNativeSQL:
-			if l.Policy != "" && !containsStr(policyNames, l.Policy) {
-				policyNames = append(policyNames, l.Policy)
-			}
-		case secureread.LimitationRowsFiltered:
-			rowsFiltered = true
-		case secureread.LimitationHiddenColumns:
-			hiddenColumns = append(hiddenColumns, l.Columns...)
-		}
-	}
-	if len(policyNames) == 0 && !rowsFiltered && len(hiddenColumns) == 0 {
-		return []apicontract.Limitation{}
-	}
-	policy := "policy"
-	if len(policyNames) > 0 {
-		policy = joinStrings(policyNames, ",")
-	}
-	if hiddenColumns == nil {
-		hiddenColumns = []string{}
-	}
-	return []apicontract.Limitation{{Policy: policy, RowsFiltered: rowsFiltered, HiddenColumns: hiddenColumns}}
-}
-
-func containsStr(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
-func joinStrings(list []string, sep string) string {
-	out := ""
-	for i, s := range list {
-		if i > 0 {
-			out += sep
-		}
-		out += s
-	}
-	return out
+	return secureread.ToContractLimitations(in)
 }
 
 // nowRFC3339UTC is Provenance.ObservedAt's exact wire format (api-contract.md

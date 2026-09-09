@@ -5,79 +5,62 @@ import (
 
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
 // QueryResultResponse is the JSON shape every policy-enforced read endpoint
 // returns: the columns and rows the principal is allowed to see, plus the
-// limitations that were applied producing them (REQ:limitation-visible —
-// "every result MUST carry the policy limitations applied ... rather than
-// have applied silently"). It is the direct serialization of
-// secureread.Result; see LimitationDTO for the per-entry shape.
+// SAME limitations/provenance shapes exec/run_query's apicontract.Result
+// returns (S101 — datatug-core v0.27.3 pkg/apicontract's own Limitation and
+// Provenance types, reused directly rather than a separately-shaped DTO).
+// Additive: {columns, rows} are unchanged; a caller that reads only those
+// two fields is unaffected. Limitations is empty (never null, never
+// omitted) for an unrestricted/admin read — "nothing applies" is a real,
+// observable state (AC hidden-column-refused's sibling: "an empty
+// limitation list does not authorize opaque execution" applies here in
+// reverse — an empty list here truly means nothing was restricted).
 type QueryResultResponse struct {
-	Columns     []string         `json:"columns"`
-	Rows        []map[string]any `json:"rows"`
-	Limitations []LimitationDTO  `json:"limitations,omitempty"`
-	// Provenance reports whether the rows came from a live HTTP-source
-	// fetch or a recorded fixtures/http/ snapshot (S58 finding 2) — set
-	// only when secureread.Result.Provenance was observed (today, only an
-	// httpsource-backed query); absent for sqlite/ingitdb results, the same
-	// nil-means-"not observed" convention as PR #204's ad-hoc `datatug
-	// query run --db http://...` $provenance field.
-	Provenance *ProvenanceDTO `json:"provenance,omitempty"`
-}
-
-// ProvenanceDTO mirrors dalgo2http.Provenance for JSON, matching
-// apps/datatugapp/commands/query_output.go's queryProvenance field naming
-// (source/collection/fetchedAt) so a client sees the same shape regardless
-// of which surface (CLI --format json, or this HTTP response) it reads.
-type ProvenanceDTO struct {
-	Source     string `json:"source"`
-	Collection string `json:"collection"`
-	FetchedAt  string `json:"fetchedAt"`
-}
-
-func newProvenanceDTO(prov dalgo2http.Provenance) *ProvenanceDTO {
-	return &ProvenanceDTO{
-		Source:     string(prov.Source),
-		Collection: prov.Collection,
-		FetchedAt:  prov.FetchedAt.UTC().Format(time.RFC3339),
-	}
-}
-
-// LimitationDTO mirrors secureread.Limitation for JSON. Kind is one of
-// "policy", "rowsFiltered", "hiddenColumns" or "nativeSql"
-// (secureread.LimitationKind); which of Policy/Note/Columns/Count is set
-// depends on Kind exactly as documented on secureread.Limitation.
-type LimitationDTO struct {
-	Kind    string   `json:"kind"`
-	Policy  string   `json:"policy,omitempty"`
-	Note    string   `json:"note,omitempty"`
-	Columns []string `json:"columns,omitempty"`
-	Count   *int     `json:"count,omitempty"`
+	Columns     []string                 `json:"columns"`
+	Rows        []map[string]any         `json:"rows"`
+	Limitations []apicontract.Limitation `json:"limitations"`
+	Provenance  apicontract.Provenance   `json:"provenance"`
 }
 
 // resultToResponse converts a secureread.Result into the wire response.
 // Rows never carry a hidden field's value at this point — the redaction
 // already happened inside secureread.Executor.Run*, and a denial never
 // reaches here at all (Run* returns an error instead of a Result).
-func resultToResponse(result secureread.Result) QueryResultResponse {
+//
+// executionProfile is apicontract.ExecutionProfileProtected for a
+// policy-enforced structured read (RunStructured) or
+// ExecutionProfileOpaquePrivileged for native SQL text (RunNativeSQL) —
+// the same distinction exec/run_query's own Result.Provenance.
+// ExecutionProfile reports, "never the session's allowed capabilities...
+// a privileged principal running protected [reads] still receives
+// protected provenance" (api-contract.md). source/collection name what was
+// actually queried (the catalog id and the AS-REQUESTED, not
+// policy-narrowed, physical name — see PolicyCollectionName) for
+// observability; collection is empty for a native-SQL request, which has
+// no single collection.
+func resultToResponse(result secureread.Result, executionProfile, source, collection string) QueryResultResponse {
 	rows := make([]map[string]any, len(result.Rows))
 	for i, row := range result.Rows {
 		rows[i] = row.Data
 	}
-	limitations := make([]LimitationDTO, len(result.Limitations))
-	for i, l := range result.Limitations {
-		limitations[i] = LimitationDTO{
-			Kind:    string(l.Kind),
-			Policy:  l.Policy,
-			Note:    l.Note,
-			Columns: l.Columns,
-			Count:   l.Count,
-		}
+	mode := apicontract.ProvenanceModeLive
+	if result.Provenance != nil && result.Provenance.Source == dalgo2http.SourceSnapshot {
+		mode = apicontract.ProvenanceModeSnapshot
 	}
-	var provenance *ProvenanceDTO
-	if result.Provenance != nil {
-		provenance = newProvenanceDTO(*result.Provenance)
+	return QueryResultResponse{
+		Columns:     result.Columns,
+		Rows:        rows,
+		Limitations: secureread.ToContractLimitations(result.Limitations),
+		Provenance: apicontract.Provenance{
+			Source:           source,
+			Collection:       collection,
+			Mode:             mode,
+			ObservedAt:       time.Now().UTC().Format(time.RFC3339Nano),
+			ExecutionProfile: executionProfile,
+		},
 	}
-	return QueryResultResponse{Columns: result.Columns, Rows: rows, Limitations: limitations, Provenance: provenance}
 }

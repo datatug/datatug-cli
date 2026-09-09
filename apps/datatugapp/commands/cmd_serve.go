@@ -127,20 +127,11 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 
 	host, port := resolveServeAddr(flags.host, flags.port, config)
 
-	// The web UI addresses a local agent as a store id of the form host:port
-	// under /store/<id> (datatug-apps routes); the old /pwa/repo/... route no
-	// longer exists and crashed the hosted app with NG04002.
-	var agent string
-	if port == 0 || port == 80 {
-		agent = host
-	} else {
-		agent = fmt.Sprintf("%v:%v", host, port)
-	}
-	url := "https://datatug.app/store/" + agent
+	agentURL, url := serveAgentURLs(host, port)
 
 	// Founder ruling 2026-09-09: serve never opens a browser by default; it
 	// prints the link and opens a browser only with --open-browser.
-	fmt.Printf("DataTug web UI for this agent: %s\n", url)
+	fmt.Printf("DataTug agent API: %s/datatug\nDataTug web UI for this agent: %s\n", agentURL, url)
 	if flags.openBrowser {
 		if err := browser.OpenURL(url); err != nil {
 			_, _ = fmt.Printf("failed to open browser with URL=%v: %v\n", url, err)
@@ -149,6 +140,24 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	httpServer := server.NewHttpServer()
 	// TODO: implement graceful shutdown
 	return httpServer.ServeHTTP(pathsByID, host, port)
+}
+
+// serveAgentURLs returns the plain-HTTP base URL the agent listens on and the
+// hosted web UI link that points at it.
+//
+// Founder direction 2026-09-09: "when we open datatug app we should pass the
+// host+path to the server we've started (either localhost or whatever it has
+// been configured to use)". The web UI addresses an agent as a store id under
+// /store/<id> (datatug-apps routes). A bare host:port id is resolved by the
+// UI as a protocol-relative //host:port, which from https://datatug.app becomes
+// https://host:port and cannot reach this plain-HTTP server; the
+// `http-<host>:<port>` form carries the scheme explicitly, so the id always
+// includes the scheme, the resolved host and the resolved port.
+func serveAgentURLs(host string, port int) (agentURL, webUIURL string) {
+	hostPort := fmt.Sprintf("%s:%d", host, port)
+	agentURL = "http://" + hostPort
+	webUIURL = "https://datatug.app/store/http-" + hostPort
+	return agentURL, webUIURL
 }
 
 func serveCommandArgs() *cobra.Command {

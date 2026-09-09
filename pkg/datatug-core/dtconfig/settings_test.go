@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -130,6 +132,27 @@ func TestGetConfigFilePath(t *testing.T) {
 		}()
 		GetConfigFilePath()
 	})
+}
+
+func TestGetSettingsFromFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "settings.yaml")
+	if err := os.WriteFile(file, []byte("server: {host: 127.0.0.1, port: 9876}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := GetSettingsFromFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.Server == nil || settings.Server.Host != "127.0.0.1" || settings.Server.Port != 9876 {
+		t.Fatalf("unexpected explicit settings: %+v", settings)
+	}
+	if _, err = GetSettingsFromFile(dir); err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("directory should be rejected as settings: %v", err)
+	}
+	if _, err = GetSettingsFromFile(filepath.Join(dir, "missing")); !os.IsNotExist(err) {
+		t.Fatalf("missing settings error = %v", err)
+	}
 }
 
 func TestOsOpen(t *testing.T) {

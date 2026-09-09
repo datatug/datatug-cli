@@ -93,7 +93,29 @@ var osCreate = func(name string) (interface{ io.WriteCloser }, error) {
 var getSettings = GetSettings
 
 func GetSettings() (settings Settings, err error) {
-	configFilePath := GetConfigFilePath()
+	return readSettings(GetConfigFilePath(), false)
+}
+
+// GetSettingsFromFile reads an explicitly selected regular settings file.
+// It is used by isolated daemon launches without changing the user's home or
+// default DataTug settings location.
+func GetSettingsFromFile(configFilePath string) (settings Settings, err error) {
+	if configFilePath == "" {
+		return settings, fmt.Errorf("settings file path is required")
+	}
+	return readSettings(configFilePath, true)
+}
+
+func readSettings(configFilePath string, requireRegular bool) (settings Settings, err error) {
+	if requireRegular {
+		info, statErr := os.Stat(configFilePath)
+		if statErr != nil {
+			return settings, statErr
+		}
+		if !info.Mode().IsRegular() {
+			return settings, fmt.Errorf("settings path is not a regular file")
+		}
+	}
 	var f io.ReadCloser
 	if f, err = osOpen(configFilePath); err != nil {
 		return

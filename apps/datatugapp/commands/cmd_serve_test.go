@@ -54,6 +54,7 @@ func TestReadServeFlags(t *testing.T) {
 		"--host=0.0.0.0",
 		"--port=9000",
 		"--project=/tmp/demo-project",
+		"--config=/tmp/datatug-e2e.yaml",
 		"--as=admin",
 		"--role=support",
 		"--role=readonly",
@@ -72,6 +73,7 @@ func TestReadServeFlags(t *testing.T) {
 		host:       "0.0.0.0",
 		port:       9000,
 		projectDir: "/tmp/demo-project",
+		configFile: "/tmp/datatug-e2e.yaml",
 		as:         "admin",
 		roles:      []string{"support", "readonly"},
 		groups:     []string{"team-a"},
@@ -91,7 +93,7 @@ func TestReadServeFlagsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readServeFlags: %v", err)
 	}
-	if flags.host != "" || flags.port != 0 || flags.projectDir != "" {
+	if flags.host != "" || flags.port != 0 || flags.projectDir != "" || flags.configFile != "" {
 		t.Fatalf("expected zero-value flags, got %+v", flags)
 	}
 }

@@ -19,6 +19,7 @@ const (
 	serveHostFlag    = "host"
 	servePortFlag    = "port"
 	serveProjectFlag = "project"
+	serveConfigFlag  = "config"
 	serveAsFlag      = "as"
 	serveRoleFlag    = "role"
 	serveGroupFlag   = "group"
@@ -35,6 +36,7 @@ type serveFlags struct {
 	host       string
 	port       int
 	projectDir string
+	configFile string
 	as         string
 	roles      []string
 	groups     []string
@@ -51,6 +53,9 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.projectDir, err = flags.GetString(serveProjectFlag); err != nil {
+		return f, err
+	}
+	if f.configFile, err = flags.GetString(serveConfigFlag); err != nil {
 		return f, err
 	}
 	if f.as, err = flags.GetString(serveAsFlag); err != nil {
@@ -98,7 +103,12 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		log.Printf("serve: --as=%q --role=%v --group=%v parsed but not yet enforced (plan task 6 wires access policies)", flags.as, flags.roles, flags.groups)
 	}
 
-	config, err := dtconfig.GetSettings()
+	var config dtconfig.Settings
+	if flags.configFile != "" {
+		config, err = dtconfig.GetSettingsFromFile(flags.configFile)
+	} else {
+		config, err = dtconfig.GetSettings()
+	}
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("failed to get DataTug settings: %w", err)
@@ -180,6 +190,7 @@ func serveCommandArgs() *cobra.Command {
 	flags.String(serveHostFlag, "", "Host to bind the agent HTTP server to (default: localhost, or the server.host setting)")
 	flags.Int(servePortFlag, 0, "Port to bind the agent HTTP server to (default: 8989, or the server.port setting)")
 	flags.String(serveProjectFlag, "", "Path to a single DataTug project directory to serve")
+	flags.String(serveConfigFlag, "", "Path to a DataTug settings file for this server")
 	flags.String(serveAsFlag, "", "Principal user ID to serve as (reserved: parsed but not yet enforced)")
 	flags.StringArray(serveRoleFlag, nil, "Principal role, repeatable (reserved: parsed but not yet enforced)")
 	flags.StringArray(serveGroupFlag, nil, "Principal group, repeatable (reserved: parsed but not yet enforced)")

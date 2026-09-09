@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
@@ -230,18 +229,20 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (st
 }
 
 // runSQLSavedQuery resolves the SQL query's environment+database, binds its
-// named "@param" placeholders (see bindSQLNamedParams) and runs it through
-// Executor.RunNativeSQL.
+// declared parameters (see sqlQueryArgs) as real dal.QueryArg values, and
+// runs it through Executor.RunNativeSQL, which passes them straight to the
+// database/sql driver — an "@ParamName" placeholder in sqlText binds by
+// name (dal-go/dalgo2sql v0.11.7+, see RunNativeSQL's doc comment).
 func runSQLSavedQuery(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
 	sourceURL, err := resolveSQLOrDTQLSourceURL(ctx, projStore, projectDir, envFlag, queryDef)
 	if err != nil {
 		return secureread.Result{}, err
 	}
-	text, err := bindSQLNamedParams(queryDef.Text, variables)
+	args, err := sqlQueryArgs(queryDef, variables)
 	if err != nil {
 		return secureread.Result{}, fmt.Errorf("query %q: %w", queryDef.ID, err)
 	}
-	return executor.RunNativeSQL(ctx, sourceURL, text)
+	return executor.RunNativeSQL(ctx, sourceURL, queryDef.Text, args...)
 }
 
 // runDTQLSavedQuery resolves the DTQL query's environment+database and runs
@@ -296,55 +297,30 @@ func runHTTPSavedQuery(ctx context.Context, executor *secureread.Executor, proje
 	return executor.RunStructured(ctx, sourceURL, builder.SelectColumns(), nil)
 }
 
-// sqlNamedParamPattern matches a "@ParamName" placeholder in saved SQL query
-// text, e.g. demo-project-1's queries/invoices/invoice-lines.query.sql:
-// "WHERE il.InvoiceId = @InvoiceId".
-var sqlNamedParamPattern = regexp.MustCompile(`@([A-Za-z_][A-Za-z0-9_]*)`)
-
-// bindSQLNamedParams substitutes every "@ParamName" placeholder in sqlText
-// with variables[ParamName], SQL-quoted as a literal.
-//
-// secureread.Executor.RunNativeSQL takes no variables/args parameter -
-// dal.NewTextQuery does accept them (dal.QueryArg{Name, Value}), but
-// dal-go/dalgo2sql's reader_base.go passes each raw QueryArg struct straight
-// through to database/sql as a driver arg (`a[i] = arg`, not `arg.Value` or
-// sql.Named(arg.Name, arg.Value)) - database/sql's default parameter
-// converter rejects any type it doesn't recognize (struct included), so
-// that path errors before a query ever runs. That is a dal-go/dalgo2sql bug,
-// several repos upstream of this one; flagged in the PR body, not fixed
-// here. Substituting into the literal SQL text ourselves, entirely within
-// this file, sidesteps it without depending on unverified third-party
-// binding behavior. sqlText only ever comes from a saved query file this
-// CLI's own user already controls (git-tracked project content), and each
-// substituted value is quoted as a SQL literal (strings single-quoted with
-// ” escaping; everything else via fmt.Sprint) rather than concatenated
-// unescaped.
-func bindSQLNamedParams(sqlText string, variables map[string]any) (string, error) {
+// sqlQueryArgs builds one dal.QueryArg{Name: p.ID, Value: variables[p.ID]}
+// per declared parameter, in declaration order, for a real driver-level bind
+// (see RunNativeSQL's doc comment) - the QueryDef's own declared parameters
+// are the single source of truth for which "@name" placeholders sqlText is
+// allowed to reference, exactly as before this switched from string
+// substitution to real binding. A required parameter with no matching --var
+// fails the same way bindSQLNamedParams's predecessor did.
+func sqlQueryArgs(queryDef *datatug.QueryDef, variables map[string]any) ([]dal.QueryArg, error) {
 	var missing []string
-	bound := sqlNamedParamPattern.ReplaceAllStringFunc(sqlText, func(match string) string {
-		name := match[1:]
-		value, ok := variables[name]
+	args := make([]dal.QueryArg, 0, len(queryDef.Parameters))
+	for _, p := range queryDef.Parameters {
+		value, ok := variables[p.ID]
 		if !ok {
-			missing = append(missing, name)
-			return match
+			if p.IsRequired {
+				missing = append(missing, p.ID)
+			}
+			continue
 		}
-		return sqlLiteral(value)
-	})
+		args = append(args, dal.QueryArg{Name: p.ID, Value: value})
+	}
 	if len(missing) > 0 {
-		return "", fmt.Errorf("missing --var for SQL parameter(s): %s", strings.Join(missing, ", "))
+		return nil, fmt.Errorf("missing --var for SQL parameter(s): %s", strings.Join(missing, ", "))
 	}
-	return bound, nil
-}
-
-func sqlLiteral(value any) string {
-	switch v := value.(type) {
-	case nil:
-		return "NULL"
-	case string:
-		return "'" + strings.ReplaceAll(v, "'", "''") + "'"
-	default:
-		return fmt.Sprint(v)
-	}
+	return args, nil
 }
 
 // secureRowsToQueryRows adapts secureread.Result's rows to query_output.go's

@@ -94,12 +94,32 @@ func freeTCPPort(t *testing.T) int {
 	return port
 }
 
+// testHTTPClient is used for every HTTP request this package's ServeHTTP
+// tests make against a server startServeHTTPWithSession started, instead of
+// http.DefaultClient/http.Get/http.Post. http.DefaultClient's Transport
+// keeps a completed connection open for keep-alive reuse; the server's
+// graceful net/http.Server.Shutdown (called from every such test's
+// t.Cleanup) can only finish once every connection it tracks has become
+// idle from BOTH sides. TestServeHTTP_ProjectSummary_ReturnsSummary failed
+// once in CI with "Shutdown: context deadline exceeded" and passed
+// immediately on rerun - the signature of a race in that idle-connection
+// bookkeeping, not a real, reproducible hang (Go's own httptest package
+// works around the identical class of race by tracking and force-closing
+// every client connection itself on Close, rather than trusting Shutdown's
+// idle-connection handling alone - see httptest.Server.Close). Disabling
+// keep-alives here means every response closes its connection as soon as
+// it is read, so Shutdown never has anything to wait on from the client
+// side at all.
+var testHTTPClient = &http.Client{
+	Transport: &http.Transport{DisableKeepAlives: true},
+}
+
 func waitForServer(t *testing.T, url string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(url)
+		resp, err := testHTTPClient.Get(url)
 		if err == nil {
 			_ = resp.Body.Close()
 			return
@@ -153,7 +173,7 @@ func assertPingAndAgentInfo(t *testing.T, baseURL string) {
 	t.Helper()
 
 	t.Run("ping", func(t *testing.T) {
-		resp, err := http.Get(baseURL + "/datatug/ping")
+		resp, err := testHTTPClient.Get(baseURL + "/datatug/ping")
 		if err != nil {
 			t.Fatalf("GET /datatug/ping: %v", err)
 		}
@@ -171,7 +191,7 @@ func assertPingAndAgentInfo(t *testing.T, baseURL string) {
 	})
 
 	t.Run("agent-info", func(t *testing.T) {
-		resp, err := http.Get(baseURL + "/datatug/agent-info")
+		resp, err := testHTTPClient.Get(baseURL + "/datatug/agent-info")
 		if err != nil {
 			t.Fatalf("GET /datatug/agent-info: %v", err)
 		}
@@ -205,7 +225,7 @@ func TestServeHTTP_PingAndAgentInfo(t *testing.T) {
 	assertPingAndAgentInfo(t, baseURL)
 
 	t.Run("projects_summary uses the real store wiring", func(t *testing.T) {
-		resp, err := http.Get(baseURL + "/datatug/projects/projects_summary?storage=files")
+		resp, err := testHTTPClient.Get(baseURL + "/datatug/projects/projects_summary?storage=files")
 		if err != nil {
 			t.Fatalf("GET /datatug/projects/projects_summary: %v", err)
 		}

@@ -17,7 +17,7 @@ func getWithOrigin(t *testing.T, requestURL, origin string) *http.Response {
 		t.Fatalf("NewRequest: %v", err)
 	}
 	req.Header.Set("Origin", origin)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := testHTTPClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s (Origin: %s): %v", requestURL, origin, err)
 	}
@@ -89,3 +89,41 @@ func TestServeHTTP_CORS_DatatugApp(t *testing.T) {
 // POST/PUT/DELETE with a JSON body is preflighted, and that OPTIONS request
 // must pass this check too before the browser ever sends the real request
 // this file's tests cover.
+
+// TestServeHTTP_CORS_127001_StillRefused pins down, with a real request
+// rather than only a doc comment, the exact gap TestServeHTTP_CORS_DatatugApp
+// and http_server.go's AddKnownHosts comment both already describe: a dev
+// server or UI addressing this agent via plain http://127.0.0.1:<port>
+// still gets refused, even though the OPTIONS-preflight side of the same
+// origin (endpoints.IsSupportedOrigin, see the comment above) already
+// accepts it — so a browser's preflight can succeed while its real request
+// still 403s. S61 item 3 was briefed on the premise that the AddKnownHosts
+// comment falsely claims 127.0.0.1 is allowed; it does not — re-read here
+// character for character, it already says the opposite ("is NOT fixed by
+// this call"), confirmed against PR #205's original, unmodified commit
+// (7859c5b). Nothing needed correcting; this test instead turns the
+// comment's claim into an executable, regression-proof one. Fixing the gap
+// for real needs either an upstream sneat-go-core change
+// (security.IsLocalhostHost treating 127.0.0.1/::1 as loopback synonyms of
+// "localhost") or a local override of the swappable apicore.VerifyRequest
+// var (not just origin-checking: VerifyRequest also does auth-token
+// verification and is not itself swappable at a narrower grain — there is
+// no exported hook between it and security.VerifyOrigin) — out of
+// proportion for this stream, exactly as the existing comments already
+// concluded.
+func TestServeHTTP_CORS_127001_StillRefused(t *testing.T) {
+	const projectID = "cors-127001-project"
+	pathsByID := authHookProjectFixture(t, projectID)
+	session, err := secureread.NewSession(secureread.SessionOptions{As: "agent1", NoPolicies: true})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	baseURL := startServeHTTPWithSession(t, pathsByID, session)
+	summaryURL := baseURL + "/datatug/projects/project_summary?id=" + projectID
+
+	resp := getWithOrigin(t, summaryURL, "http://127.0.0.1:4200")
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (http://127.0.0.1:<port> is still refused today — see this test's doc comment)", resp.StatusCode)
+	}
+}

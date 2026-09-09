@@ -46,7 +46,7 @@ func TestServeHTTP_ProjectSummary_ReturnsSummary(t *testing.T) {
 	}
 	baseURL := startServeHTTPWithSession(t, pathsByID, session)
 
-	resp, err := http.Get(baseURL + "/datatug/projects/project_summary?id=" + projectID)
+	resp, err := testHTTPClient.Get(baseURL + "/datatug/projects/project_summary?id=" + projectID)
 	if err != nil {
 		t.Fatalf("GET project_summary: %v", err)
 	}
@@ -105,7 +105,7 @@ func postCreateProject(t *testing.T, baseURL string) (*http.Response, error) {
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	return http.Post(baseURL+"/datatug/projects/create_project?store=files", "application/json", bytes.NewReader(body))
+	return testHTTPClient.Post(baseURL+"/datatug/projects/create_project?store=files", "application/json", bytes.NewReader(body))
 }
 
 // TestServeHTTP_CreateProject_AuthGate is brief S36's item 1 regression test

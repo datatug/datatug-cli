@@ -7,8 +7,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3" // registers the "sqlite3" database/sql driver (CGO)
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dbconnection"
+	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +35,7 @@ func TestScanDbCatalog_SQLite3(t *testing.T) {
 	var widgets *datatug.CollectionInfo
 	for _, sch := range catalog.Schemas {
 		for _, tbl := range sch.Tables {
-			if tbl.Name == "widgets" {
+			if tbl.Name() == "widgets" {
 				widgets = tbl
 			}
 		}
@@ -76,7 +76,7 @@ func TestScanDbCatalog_SQLite3_IndexesFKsConstraints(t *testing.T) {
 	tables := map[string]*datatug.CollectionInfo{}
 	for _, sch := range catalog.Schemas {
 		for _, tbl := range sch.Tables {
-			tables[tbl.Name] = tbl
+			tables[tbl.Name()] = tbl
 		}
 	}
 	require.Contains(t, tables, "album")
@@ -87,7 +87,7 @@ func TestScanDbCatalog_SQLite3_IndexesFKsConstraints(t *testing.T) {
 	require.Len(t, album.ForeignKeys, 1, "album must have one foreign key")
 	fk := album.ForeignKeys[0]
 	assert.Equal(t, []string{"artist_id"}, fk.Columns)
-	assert.Equal(t, "artist", fk.RefTable.Name)
+	assert.Equal(t, "artist", fk.RefTable.Name())
 
 	// Index: idx_album_title (plus the implicit unique index on artist)
 	var idxNames []string

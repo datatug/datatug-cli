@@ -10,9 +10,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/dtprojcreator"
+	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
+	"github.com/datatug/datatug-core/pkg/storage/dtprojcreator"
 	"github.com/filetug/filetug/pkg/fsutils"
 	"github.com/google/go-github/v91/github"
 )

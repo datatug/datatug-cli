@@ -2,8 +2,8 @@ package gcloudui
 
 import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/gdamore/tcell/v2"
 )
 

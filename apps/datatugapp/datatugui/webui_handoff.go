@@ -2,20 +2,56 @@ package datatugui
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/gdamore/tcell/v2"
 	"github.com/pkg/browser"
+	"gopkg.in/yaml.v3"
 )
 
 // Seams for testing.
 var (
-	webUIGetSettings = dtconfig.GetSettings
-	webUIGetState    = dtstate.GetDatatugState
-	openURL          = browser.OpenURL
+	webUIReadConfigFile = func() ([]byte, error) { return os.ReadFile(dtconfig.GetConfigFilePath()) }
+	webUIGetState       = dtstate.GetDatatugState
+	openURL             = browser.OpenURL
 )
+
+// DefaultWebUIOrigin is the DataTug web UI the CLI hands off to unless
+// overridden in settings.
+const DefaultWebUIOrigin = "https://datatug.app"
+
+// webUIConfigFile is the local, CLI-only `webui:` section of
+// ~/.datatug.yaml. datatug-core's dtconfig.Settings doesn't model this - it
+// is a CLI runtime preference (where to open a browser), not part of the
+// shared project/query model - so it is decoded independently here rather
+// than added to (forking) the shared Settings type.
+type webUIConfigFile struct {
+	WebUI *struct {
+		Origin string `yaml:"origin,omitempty"`
+	} `yaml:"webui,omitempty"`
+}
+
+// webUIOrigin resolves the configured web UI origin, falling back to
+// DefaultWebUIOrigin when there is no config file, no `webui:` section, or
+// it fails to parse.
+func webUIOrigin() string {
+	data, err := webUIReadConfigFile()
+	if err != nil {
+		return DefaultWebUIOrigin
+	}
+	var cfg webUIConfigFile
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return DefaultWebUIOrigin
+	}
+	if cfg.WebUI != nil && cfg.WebUI.Origin != "" {
+		return strings.TrimSuffix(cfg.WebUI.Origin, "/")
+	}
+	return DefaultWebUIOrigin
+}
 
 // screenPathToWebPath maps a TUI screen path (as persisted by
 // dtstate.SaveCurrentScreePath) to the corresponding web UI route — the
@@ -38,8 +74,7 @@ func WebUIURLForScreen(origin, screenPath string) string {
 // CurrentScreenWebUIURL resolves the web UI URL for the current TUI screen,
 // using the origin from settings (default https://datatug.app).
 func CurrentScreenWebUIURL() string {
-	settings, _ := webUIGetSettings() // no settings file is fine — use defaults
-	origin := settings.WebUIOrigin()
+	origin := webUIOrigin() // no settings file is fine — use defaults
 	var screenPath string
 	if state, err := webUIGetState(); err == nil && state != nil {
 		screenPath = state.CurrentScreenPath

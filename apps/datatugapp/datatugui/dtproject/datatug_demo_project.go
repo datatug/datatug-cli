@@ -5,11 +5,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/filetug/filetug/pkg/fsutils"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
+	"github.com/filetug/filetug/pkg/fsutils"
 	"github.com/go-git/go-git/v5"
 	"github.com/rivo/tview"
 )
@@ -34,10 +34,10 @@ const demoProjectDir = datatugDemoProjectsDir + "/" + demoProject1DirName
 
 func newDemoProject1Ref() *dtconfig.ProjectRef {
 	return &dtconfig.ProjectRef{
-		ID:     demoProject1LocalID,
-		Path:   demoProjectDir,
-		Origin: demoProjectOrigin,
-		Title:  demoProject1Title,
+		ID:    demoProject1LocalID,
+		Path:  demoProjectDir,
+		Url:   demoProjectOrigin,
+		Title: demoProject1Title,
 	}
 }
 
@@ -51,9 +51,9 @@ func openDatatugDemoProject(tui *sneatnav.TUI, projectRef dtconfig.ProjectRef) {
 	}
 	openDemoProject := func() {
 		projRef := dtconfig.ProjectRef{
-			ID:     demoProject1LocalID,
-			Origin: demoProjectOrigin,
-			Path:   projectDir,
+			ID:   demoProject1LocalID,
+			Url:  demoProjectOrigin,
+			Path: projectDir,
 		}
 		loader := filestore.NewProjectStore(projRef.ID, projRef.Path)
 		projectCtx := NewProjectContext(tui, loader, projRef)

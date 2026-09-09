@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +12,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/dtentity"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -111,6 +113,36 @@ func entityShowCommandArgs() *cobra.Command {
 	return cmd
 }
 
+// loadEntityWithTables loads an entity via projectStore.LoadEntity (which
+// datatug-core v0.20.0 correctly finds regardless of the on-disk entities
+// layout), then repairs its Tables field. datatug.ProjectStore.LoadEntity
+// does a generic JSON unmarshal, which still cannot populate Tables -
+// datatug.TableKeys/DBCollectionKey has no exported fields or
+// UnmarshalJSON, see dtentity's doc comment - so a plain load always comes
+// back with Tables empty. Left unrepaired, any load-modify-save round trip
+// (entity field add/set/rm) would silently drop the entity's mapping copy
+// on save. This CLI always writes entities at the nested
+// <dir>/<id>/<id>.entity.json path (see entityFilePath in
+// entityAddCommandAction), so re-reading that same file and taking its
+// Tables via dtentity.UnmarshalEntity recovers it; a read failure here just
+// means no Tables to recover, not a load failure.
+func loadEntityWithTables(ctx context.Context, projectStore datatug.ProjectStore, projectDir, id string) (*datatug.Entity, error) {
+	entity, err := projectStore.LoadEntity(ctx, id)
+	if err != nil {
+		return entity, err
+	}
+	data, readErr := os.ReadFile(filepath.Join(projectDir, "entities", id, id+".entity.json"))
+	if readErr != nil {
+		return entity, nil
+	}
+	reparsed, parseErr := dtentity.UnmarshalEntity(data)
+	if parseErr != nil {
+		return entity, nil
+	}
+	entity.Tables = reparsed.Tables
+	return entity, nil
+}
+
 func entityShowCommandAction(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	name := argAt(args, 0)
@@ -128,7 +160,7 @@ func entityShowCommandAction(cmd *cobra.Command, args []string) error {
 
 	projectStore := v.store.GetProjectStore(v.projectID)
 
-	entity, err := projectStore.LoadEntity(ctx, name)
+	entity, err := loadEntityWithTables(ctx, projectStore, v.ProjectDir, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Exit(fmt.Sprintf("entity %q not found", name), 1)
@@ -171,8 +203,15 @@ func renderEntityShow(entity *datatug.Entity) (string, error) {
 
 	// The mapping copy (tables) is a read-only generated artifact: render it in a
 	// clearly-labelled, separate section so a reader never mistakes it for
-	// authored content.
-	tables, hasTables := doc["tables"]
+	// authored content. Rendered from entity.Tables directly via
+	// dtentity.TableKeyDoc rather than doc["tables"], which generic
+	// marshalling of datatug.TableKeys cannot populate (see that type's doc
+	// comment for why).
+	var tables []dtentity.TableKeyDoc
+	for _, k := range entity.Tables {
+		tables = append(tables, dtentity.TableKeyDoc{Name: k.Name(), Schema: k.Schema(), Catalog: k.Catalog()})
+	}
+	hasTables := len(tables) > 0
 	delete(doc, "tables")
 
 	var buf bytes.Buffer
@@ -252,7 +291,7 @@ func entityFieldRmCommandAction(cmd *cobra.Command, args []string) error {
 
 	projectStore := v.store.GetProjectStore(v.projectID)
 
-	entity, err := projectStore.LoadEntity(ctx, name)
+	entity, err := loadEntityWithTables(ctx, projectStore, v.ProjectDir, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Exit(fmt.Sprintf("entity %q not found", name), 1)
@@ -346,7 +385,7 @@ func entityFieldSetCommandAction(cmd *cobra.Command, args []string) error {
 
 	projectStore := v.store.GetProjectStore(v.projectID)
 
-	entity, err := projectStore.LoadEntity(ctx, name)
+	entity, err := loadEntityWithTables(ctx, projectStore, v.ProjectDir, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Exit(fmt.Sprintf("entity %q not found", name), 1)
@@ -475,14 +514,20 @@ func parseEntityDocs(data []byte) ([]*datatug.Entity, error) {
 		return nil, err
 	}
 	if _, isList := doc.([]any); isList {
-		var entities []*datatug.Entity
-		if err = json.Unmarshal(jsonData, &entities); err != nil {
+		var rawEntities []json.RawMessage
+		if err = json.Unmarshal(jsonData, &rawEntities); err != nil {
 			return nil, err
+		}
+		entities := make([]*datatug.Entity, len(rawEntities))
+		for i, raw := range rawEntities {
+			if entities[i], err = dtentity.UnmarshalEntity(raw); err != nil {
+				return nil, err
+			}
 		}
 		return entities, nil
 	}
-	entity := &datatug.Entity{}
-	if err = json.Unmarshal(jsonData, entity); err != nil {
+	entity, err := dtentity.UnmarshalEntity(jsonData)
+	if err != nil {
 		return nil, err
 	}
 	return []*datatug.Entity{entity}, nil
@@ -593,13 +638,7 @@ func marshalEntityFile(entity *datatug.Entity) ([]byte, error) {
 	if len(entity.Fields) == 0 && entity.Fields != nil {
 		entity.Fields = nil
 	}
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetIndent("", "\t")
-	if err := encoder.Encode(entity); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return dtentity.MarshalEntity(entity)
 }
 
 func entityAddCommandAction(cmd *cobra.Command, _ []string) error {
@@ -825,7 +864,7 @@ func entityFieldAddCommandAction(cmd *cobra.Command, args []string) error {
 	projectStore := v.store.GetProjectStore(v.projectID)
 
 	// field add operates only on existing entities: load it, requiring presence.
-	entity, err := projectStore.LoadEntity(ctx, name)
+	entity, err := loadEntityWithTables(ctx, projectStore, v.ProjectDir, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Exit(fmt.Sprintf("entity %q not found", name), 1)

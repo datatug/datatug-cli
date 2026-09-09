@@ -7,8 +7,8 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/dal-go/record"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 	"github.com/datatug/datatug-cli/pkg/schemers/sqlinfoschema"
+	"github.com/datatug/datatug-core/pkg/schemer"
 )
 
 // ---- columnsProvider ----

@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/datatug/cliformat"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,7 @@ func projectsCommandAction(cmd *cobra.Command, _ []string) error {
 	}
 	entries := make([]projectEntry, 0, len(settings.Projects))
 	for _, p := range settings.Projects {
-		entries = append(entries, projectEntry{ID: p.ID, Title: p.Title, Origin: p.Origin})
+		entries = append(entries, projectEntry{ID: p.ID, Title: p.Title, Origin: p.Url})
 	}
 	return cliformat.WriteList(os.Stdout, format, entries, func(e projectEntry) string { return e.ID })
 }
@@ -45,7 +45,7 @@ func getProjPathsByID(config dtconfig.Settings) (pathsByID map[string]string) {
 		if p.Path != "" {
 			pathsByID[p.ID] = p.Path // locally-added projects store a local Path
 		} else {
-			pathsByID[p.ID] = p.Origin
+			pathsByID[p.ID] = p.Url
 		}
 	}
 	return

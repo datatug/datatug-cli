@@ -5,7 +5,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2http"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
 // countryFactsDef and currencyRateDef mirror the real

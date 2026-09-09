@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
+	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/schemer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -600,8 +600,8 @@ func TestGetTables_Success_BaseTableAndView(t *testing.T) {
 	tables, err := is.getTables("testdb")
 	require.NoError(t, err)
 	assert.Len(t, tables, 2)
-	assert.Equal(t, datatug.CollectionTypeTable, tables[0].Type)
-	assert.Equal(t, datatug.CollectionTypeView, tables[1].Type)
+	assert.Equal(t, datatug.CollectionTypeTable, tables[0].Type())
+	assert.Equal(t, datatug.CollectionTypeView, tables[1].Type())
 }
 
 func TestGetTables_UnknownType(t *testing.T) {

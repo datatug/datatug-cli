@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/strongo/strongo-tui/pkg/colors"
@@ -46,12 +46,12 @@ func (b *TablesBox) refreshTable() {
 	i := 0
 	lowerFilter := strings.ToLower(b.filter)
 	for _, collection := range b.collections {
-		if collection.Type == b.collectionType {
-			if b.filter != "" && !strings.Contains(strings.ToLower(collection.Name), lowerFilter) {
+		if collection.Type() == b.collectionType {
+			if b.filter != "" && !strings.Contains(strings.ToLower(collection.Name()), lowerFilter) {
 				continue
 			}
 			i++
-			name := tview.NewTableCell(collection.Name).SetExpansion(1)
+			name := tview.NewTableCell(collection.Name()).SetExpansion(1)
 			name.SetReference(collection)
 			b.SetCell(i, 0, name)
 		}

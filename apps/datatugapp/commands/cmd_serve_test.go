@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 )
 
 // TestResolveServeAddr covers the bug fixed in cmd_serve.go: serveCommandAction

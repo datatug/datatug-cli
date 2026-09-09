@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dbconnection"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/parallel"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 	"github.com/datatug/datatug-cli/pkg/schemers/mssqlschema"
 	"github.com/datatug/datatug-cli/pkg/schemers/sqliteschema"
+	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/dbconnection"
+	"github.com/datatug/datatug-core/pkg/parallel"
+	"github.com/datatug/datatug-core/pkg/schemer"
 	"github.com/strongo/random"
 	"github.com/strongo/slice"
 	"github.com/strongo/validation"
@@ -331,13 +331,19 @@ func updateSchemaModel(envID string, schema *datatug.Schema, dbSchema *datatug.D
 		for _, table := range tables {
 			tableModel := schema.Tables.GetByKey(table.DBCollectionKey)
 			if tableModel == nil {
+				// datatug-core v0.17.0's datatug.TableModel (the persisted,
+				// git-tracked schema type) no longer carries PrimaryKey/
+				// ForeignKeys/ReferencedBy/Indexes/AlternateKeys - only the
+				// live-scanned datatug.CollectionInfo (table, above) does.
+				// The vendored copy this replaced kept those fields on
+				// TableModel and copied them here; that data is dropped on
+				// persist until datatug-core's TableModel carries it again
+				// (or a project-level decision accepts CollectionInfo/
+				// DbCatalog, re-derived by re-scanning, as the source of
+				// truth for it instead of the git-tracked DbModel). Flagged
+				// in the PR - not a scope call for this migration.
 				tableModel = &datatug.TableModel{
 					DBCollectionKey: table.DBCollectionKey,
-					PrimaryKey:      table.PrimaryKey,
-					ForeignKeys:     table.ForeignKeys,
-					ReferencedBy:    table.ReferencedBy,
-					Indexes:         table.Indexes,
-					AlternateKeys:   table.AlternateKeys,
 					ByEnv:           make(datatug.StateByEnv),
 				}
 				tableModel.ByEnv[envID] = &datatug.EnvState{

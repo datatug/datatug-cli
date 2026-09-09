@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/server/endpoints"
+	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/julienschmidt/httprouter"
 	"github.com/sneat-co/sneat-go-core/apicore"
 )

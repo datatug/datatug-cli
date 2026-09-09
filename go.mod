@@ -26,6 +26,7 @@ require (
 	github.com/dal-go/dalgo2sqlite v0.1.8
 	github.com/dal-go/record v0.1.3
 	github.com/datatug/cliformat v0.0.3
+	github.com/datatug/datatug-core v0.21.0
 	github.com/datatug/sql2csv v0.0.0-20260826045256-b0d582f72f50
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/filetug/filetug v0.3.0
@@ -41,7 +42,6 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.24.3
-	github.com/qri-io/jsonschema v0.2.1
 	github.com/rivo/tview v0.42.0
 	github.com/sneat-co/sneat-go-core v0.67.3
 	github.com/spf13/cobra v1.10.2
@@ -49,12 +49,11 @@ require (
 	github.com/strongo/buildinfo v0.2.1
 	github.com/strongo/logus v0.4.3
 	github.com/strongo/random v0.0.2
-	github.com/strongo/slice v0.3.9
+	github.com/strongo/slice v0.3.10
 	github.com/strongo/strongo-tui v0.1.0
 	github.com/strongo/validation v0.0.13
 	github.com/xo/dburl v0.24.2
 	github.com/zalando/go-keyring v0.2.8
-	go.uber.org/mock v0.6.0
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.296.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -144,6 +143,7 @@ require (
 	github.com/pjbgf/sha1cd v0.6.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/qri-io/jsonpointer v0.1.1 // indirect
+	github.com/qri-io/jsonschema v0.2.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
@@ -164,6 +164,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.45.0 // indirect
 	go.opentelemetry.io/otel/trace v1.45.0 // indirect
 	go.starlark.net v0.0.0-20260708150628-5395d018f003 // indirect
+	go.uber.org/mock v0.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/image v0.44.0 // indirect

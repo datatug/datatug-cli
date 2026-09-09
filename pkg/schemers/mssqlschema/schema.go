@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
+	"github.com/datatug/datatug-core/pkg/schemer"
 )
 
 // NewSchemaProvider creates a new SchemaProvider for MS SQL Server

@@ -275,6 +275,31 @@ func TestEntityFieldAdd_Additive(t *testing.T) {
 	assert.Equal(t, "integer", fields["id"], "id must be unchanged")
 }
 
+// A load-modify-save round trip (field add) must not silently drop the
+// entity's Tables ("generated mapping copy"): datatug.ProjectStore.LoadEntity
+// does a generic JSON unmarshal that cannot populate Tables (see
+// loadEntityWithTables's doc comment), so re-saving an entity loaded that way
+// without repairing Tables first would wipe it.
+func TestEntityFieldAdd_PreservesTables(t *testing.T) {
+	dir := t.TempDir()
+	def := "id: User\n" +
+		"fields:\n" +
+		"  - id: id\n" +
+		"    type: integer\n" +
+		"tables:\n" +
+		"  - name: users\n" +
+		"    schema: public\n"
+	_, _, err := runEntityStdin(t, def, "entity", "add", "-d", dir)
+	require.NoError(t, err)
+
+	_, _, err = runEntityStdin(t, "id: email\ntype: string\n", "entity", "field", "add", "User", "-d", dir)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, "entities", "User", "User.entity.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "users", "Tables must survive a field add round trip")
+}
+
 // AC: field-add-rejects-existing — adding a field named like an existing one
 // fails non-zero and leaves the entity unchanged.
 func TestEntityFieldAdd_RejectsExisting(t *testing.T) {

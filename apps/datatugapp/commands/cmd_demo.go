@@ -12,12 +12,12 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dto"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/parallel"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
+	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
+	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-core/pkg/parallel"
+	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/go-git/go-git/v5"
 	"github.com/spf13/cobra"
 )
@@ -272,12 +272,12 @@ func (c demoCommand) addDemoProjectToDatatugConfig(datatugUserDir, demoProjectPa
 		}
 	}
 	demoProjConfig := settings.GetProjectConfig(demoProjectAlias)
-	if demoProjConfig != nil && demoProjConfig.Origin != demoProjectPath {
+	if demoProjConfig != nil && demoProjConfig.Url != demoProjectPath {
 		return fmt.Errorf("demo project expected to be located at %v but is pointing to unexpected path: %v",
-			demoProjectPath, demoProjConfig.Origin)
+			demoProjectPath, demoProjConfig.Url)
 	}
 	if demoProjConfig != nil {
-		demoProjConfig.Origin = demoProjectPath
+		demoProjConfig.Url = demoProjectPath
 		settings.Projects = append(settings.Projects, demoProjConfig)
 		if err = dtconfig.SaveSettings(settings); err != nil {
 			return fmt.Errorf("failed to save settings: %w", err)

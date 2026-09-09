@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
+	"github.com/datatug/datatug-core/pkg/schemer"
 )
 
 func (s schemaProvider) GetReferrers(ctx context.Context, schema, table string) (referrers []schemer.ForeignKey, err error) {

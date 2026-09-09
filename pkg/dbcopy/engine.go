@@ -181,9 +181,9 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 	defer cancel()
 
 	var (
-		wg      sync.WaitGroup
-		mu      sync.Mutex // guards summary mutations
-		errOnce sync.Once
+		wg       sync.WaitGroup
+		mu       sync.Mutex // guards summary mutations
+		errOnce  sync.Once
 		firstErr error
 	)
 

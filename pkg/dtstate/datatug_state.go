@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/apps/global"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/dtroot"
 	"github.com/strongo/logus"
 )
 
@@ -167,5 +167,5 @@ func SaveState(state *DatatugState) (err error) {
 }
 
 func getFilePath() string {
-	return filepath.Join(datatug.DirPath(), cliStateFileName)
+	return filepath.Join(dtroot.Path(), cliStateFileName)
 }

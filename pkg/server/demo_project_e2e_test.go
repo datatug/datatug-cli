@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/apicontract_local"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
@@ -238,5 +239,115 @@ func typedValueKey(v apicontract_local.TypedValue) string {
 		return strconv.FormatBool(v.Bool)
 	default:
 		return v.Text
+	}
+}
+
+// TestDemoProject_RunQuery_SQL_RealParameterEffect_WithGrant is the
+// native-SQL counterpart of TestDemoProject_RunQuery_RealParameterEffect:
+// the real customer-purchases-by-genre SQL query (queries/customers/
+// customer-purchases-by-genre.query.sql, "WHERE i.CustomerId = @CustomerId")
+// runs through the SAME rewritten exec/run_query, with an explicit
+// --allow-opaque-sql grant (REQ:opaque-sql-limitation), and its
+// @CustomerId placeholder binds as a real driver argument
+// (dal.QueryArg{Name:"CustomerId"} -> dalgo2sql's sql.Named — see
+// native_sql.go and exec_run_query.go's sqlQueryArgs) rather than the
+// textual @ParamName substitution
+// apps/datatugapp/commands/cmd_query_run_saved.go used to do (removed
+// upstream once dal-go/dalgo2sql v0.11.7 fixed real TextQuery arg
+// binding). Two different customers' top genre ("Rock" for both) has a
+// different TracksPurchased/TotalSpent (verified with the sqlite3 CLI:
+// customer 1 -> 14 tracks/13.86; customer 2 -> 17 tracks/16.83) — a
+// textual-substitution bug that mishandled the placeholder, or one that
+// silently ignored it and ran the same aggregate for both, would not
+// reproduce these exact, distinct numbers.
+func TestDemoProject_RunQuery_SQL_RealParameterEffect_WithGrant(t *testing.T) {
+	srcDir := resolveDemoProjectDir(t)
+	projectDir := copyDemoProjectToTempDir(t, srcDir)
+
+	session, err := secureread.NewSession(secureread.SessionOptions{
+		As: "admin", Roles: []string{"admin"}, PoliciesDir: filepath.Join(projectDir, "policies"),
+	})
+	if err != nil {
+		t.Fatalf("secureread.NewSession: %v", err)
+	}
+	baseURL := startServeHTTPWithSessionAndCapabilities(t, map[string]string{demoProjectID: projectDir}, session, api.Capabilities{AllowOpaqueSQL: true})
+
+	status, raw := getURL(t, baseURL+"/datatug/agent-info")
+	if status != http.StatusOK {
+		t.Fatalf("GET agent-info: status %d, body %s", status, raw)
+	}
+	var info apicontract_local.AgentInfoResponse
+	if err := json.Unmarshal(raw, &info); err != nil {
+		t.Fatalf("decode agent-info: %v (body %s)", err, raw)
+	}
+	if !info.Capabilities.OpaqueReadOnly {
+		t.Fatalf("agent-info capabilities.opaqueReadOnly = false, want true (--allow-opaque-sql set)")
+	}
+
+	runForCustomer := func(customerID int64) apicontract_local.Result {
+		t.Helper()
+		request := apicontract_local.ExecutionRequest{
+			Project: demoProjectID, Environment: demoProjectEnv, SecurityContextID: info.SecurityContextID,
+			Source: demoProjectSource, QueryID: "customers/customer-purchases-by-genre",
+			Parameters: map[string]apicontract_local.TypedValue{"CustomerId": apicontract_local.NewIntegerValue(customerID)},
+			BindingOrigins: []apicontract_local.BindingOriginInput{
+				{ParameterID: "CustomerId", Origin: apicontract_local.BindingOriginManual},
+			},
+			Mode: apicontract_local.ModeLive,
+		}
+		status, raw := postJSON(t, baseURL, "/datatug/exec/run_query", request)
+		if status != http.StatusOK {
+			t.Fatalf("run_query(CustomerId=%d): status %d, body %s", customerID, status, raw)
+		}
+		var result apicontract_local.Result
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatalf("decode run_query(CustomerId=%d) response: %v (body %s)", customerID, err, raw)
+		}
+		return result
+	}
+
+	resultOne := runForCustomer(1)
+	resultTwo := runForCustomer(2)
+
+	if resultOne.Provenance.ExecutionProfile != apicontract_local.ProfileOpaquePrivileged {
+		t.Fatalf("Provenance.ExecutionProfile = %q, want opaque-privileged", resultOne.Provenance.ExecutionProfile)
+	}
+
+	rockRow := func(result apicontract_local.Result) []apicontract_local.TypedValue {
+		nameCol, tracksCol := -1, -1
+		for i, c := range result.Recordset.Columns {
+			switch c.Name {
+			case "GenreName":
+				nameCol = i
+			case "TracksPurchased":
+				tracksCol = i
+			}
+		}
+		if nameCol < 0 || tracksCol < 0 {
+			t.Fatalf("customer-purchases-by-genre recordset missing GenreName/TracksPurchased; got %+v", result.Recordset.Columns)
+		}
+		for _, row := range result.Recordset.Rows {
+			if typedValueKey(row[nameCol]) == "Rock" {
+				return row
+			}
+		}
+		t.Fatalf("no Rock row in result; got %+v", result.Recordset.Rows)
+		return nil
+	}
+	rowOne, rowTwo := rockRow(resultOne), rockRow(resultTwo)
+	tracksCol := -1
+	for i, c := range resultOne.Recordset.Columns {
+		if c.Name == "TracksPurchased" {
+			tracksCol = i
+		}
+	}
+	if typedValueKey(rowOne[tracksCol]) == typedValueKey(rowTwo[tracksCol]) {
+		t.Fatalf("Rock TracksPurchased is the SAME for CustomerId 1 and 2 (%s) — the @CustomerId placeholder did not actually bind", typedValueKey(rowOne[tracksCol]))
+	}
+	if typedValueKey(rowOne[tracksCol]) != "14" {
+		t.Errorf("customer 1 Rock TracksPurchased = %s, want 14", typedValueKey(rowOne[tracksCol]))
+	}
+	if typedValueKey(rowTwo[tracksCol]) != "17" {
+		t.Errorf("customer 2 Rock TracksPurchased = %s, want 17", typedValueKey(rowTwo[tracksCol]))
 	}
 }

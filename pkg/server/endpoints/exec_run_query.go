@@ -131,15 +131,11 @@ func computeRunQuery(ctx context.Context, req apicontract_local.ExecutionRequest
 		// "All legacy routes obey the same rule"). A missing grant surfaces
 		// below as secureread.ErrOpaqueSQLNotGranted, mapped to
 		// UNSUPPORTED_PROTECTED_EXECUTION.
-		if requiresSQLParameterBinding(queryDef, variables) {
-			return apicontract_local.Result{}, apicontract_local.NewInvalidRequest("queryId",
-				fmt.Sprintf("query %q declares parameters; native-SQL driver-bound parameter binding is not implemented yet (see plan task 13) — run it with no parameters, or use a DTQL query", req.QueryID))
-		}
 		var text string
 		text, err = api.LoadQueryDocument(req.Project, req.QueryID, queryDef.Type)
 		if err == nil {
 			profile = apicontract_local.ProfileOpaquePrivileged
-			result, err = executor.RunNativeSQL(runCtx, resolved.URL, text)
+			result, err = executor.RunNativeSQL(runCtx, resolved.URL, text, sqlQueryArgs(queryDef, variables)...)
 		}
 	case queryDef.Type == datatug.QueryTypeHTTP:
 		profile = apicontract_local.ProfileProtected
@@ -338,22 +334,23 @@ func declaredValueType(t string) (apicontract_local.ValueType, bool) {
 	}
 }
 
-// requiresSQLParameterBinding reports whether running queryDef's native SQL
-// text would need parameter substitution this codebase cannot yet do
-// safely (see runQueryHandler's doc comment and PR body): true when the
-// query declares any parameters and the caller supplied at least one value
-// for them (an unparameterized SQL query, or one whose declared parameters
-// the caller left entirely unsupplied and none required, runs as-is).
-func requiresSQLParameterBinding(queryDef *datatug.QueryDef, variables map[string]any) bool {
-	if len(queryDef.Parameters) == 0 {
-		return false
-	}
+// sqlQueryArgs builds the []dal.QueryArg RunNativeSQL binds as real driver
+// arguments (dal-go/dalgo2sql v0.11.7+, sql.Named — see native_sql.go's own
+// doc comment), one named arg per queryDef.Parameters entry the caller
+// supplied a value for. datatug-demo-projects/demo-project-1's own SQL
+// queries already write "@ParamName" placeholders (e.g.
+// "WHERE i.CustomerId = @CustomerId") — the exact named-placeholder form
+// dalgo2sql converts a named QueryArg into — so no new query-authoring
+// convention is introduced here, only real binding for the one that
+// already existed textually.
+func sqlQueryArgs(queryDef *datatug.QueryDef, variables map[string]any) []dal.QueryArg {
+	var args []dal.QueryArg
 	for _, p := range queryDef.Parameters {
-		if _, ok := variables[p.ID]; ok {
-			return true
+		if value, ok := variables[p.ID]; ok {
+			args = append(args, dal.QueryArg{Name: p.ID, Value: value})
 		}
 	}
-	return false
+	return args
 }
 
 // bindingsApplied builds the appendix's execution-confirmed

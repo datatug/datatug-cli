@@ -1,6 +1,11 @@
 package api
 
-import "github.com/datatug/datatug-cli/pkg/secureread"
+import (
+	"time"
+
+	"github.com/dal-go/dalgo2http"
+	"github.com/datatug/datatug-cli/pkg/secureread"
+)
 
 // QueryResultResponse is the JSON shape every policy-enforced read endpoint
 // returns: the columns and rows the principal is allowed to see, plus the
@@ -12,6 +17,31 @@ type QueryResultResponse struct {
 	Columns     []string         `json:"columns"`
 	Rows        []map[string]any `json:"rows"`
 	Limitations []LimitationDTO  `json:"limitations,omitempty"`
+	// Provenance reports whether the rows came from a live HTTP-source
+	// fetch or a recorded fixtures/http/ snapshot (S58 finding 2) — set
+	// only when secureread.Result.Provenance was observed (today, only an
+	// httpsource-backed query); absent for sqlite/ingitdb results, the same
+	// nil-means-"not observed" convention as PR #204's ad-hoc `datatug
+	// query run --db http://...` $provenance field.
+	Provenance *ProvenanceDTO `json:"provenance,omitempty"`
+}
+
+// ProvenanceDTO mirrors dalgo2http.Provenance for JSON, matching
+// apps/datatugapp/commands/query_output.go's queryProvenance field naming
+// (source/collection/fetchedAt) so a client sees the same shape regardless
+// of which surface (CLI --format json, or this HTTP response) it reads.
+type ProvenanceDTO struct {
+	Source     string `json:"source"`
+	Collection string `json:"collection"`
+	FetchedAt  string `json:"fetchedAt"`
+}
+
+func newProvenanceDTO(prov dalgo2http.Provenance) *ProvenanceDTO {
+	return &ProvenanceDTO{
+		Source:     string(prov.Source),
+		Collection: prov.Collection,
+		FetchedAt:  prov.FetchedAt.UTC().Format(time.RFC3339),
+	}
 }
 
 // LimitationDTO mirrors secureread.Limitation for JSON. Kind is one of
@@ -45,5 +75,9 @@ func resultToResponse(result secureread.Result) QueryResultResponse {
 			Count:   l.Count,
 		}
 	}
-	return QueryResultResponse{Columns: result.Columns, Rows: rows, Limitations: limitations}
+	var provenance *ProvenanceDTO
+	if result.Provenance != nil {
+		provenance = newProvenanceDTO(*result.Provenance)
+	}
+	return QueryResultResponse{Columns: result.Columns, Rows: rows, Limitations: limitations, Provenance: provenance}
 }

@@ -1,6 +1,9 @@
 package secureread
 
-import "github.com/datatug/datatug-cli/pkg/accesspolicies"
+import (
+	"github.com/dal-go/dalgo2http"
+	"github.com/datatug/datatug-cli/pkg/accesspolicies"
+)
 
 // LimitationKind names the shape of one applied limitation, per
 // REQ:limitation-visible ("policy name, rows filtered yes/no, hidden
@@ -61,6 +64,16 @@ type Result struct {
 	Columns     []string
 	Rows        []Row
 	Limitations []Limitation
+	// Provenance is set only when the source observed one while producing
+	// this Result — today, only a pkg/httpsource-backed source (opened via
+	// pkg/dbcopy's http(s):// scheme) ever calls the dalgo2http.Observer
+	// RunStructured wires into the query's context; every other backend
+	// (sqlite, ingitdb) leaves it nil. nil means "not observed", never
+	// "this was live" — mirrors pkg/httpsource.Result's own doc comment on
+	// this exact ambiguity, and matches the ad-hoc `datatug query run --db
+	// http://...` path's own ($provenance / "source: ..." line, PR #204)
+	// treatment of the same nil-vs-live distinction.
+	Provenance *dalgo2http.Provenance
 }
 
 // limitationsFromLines turns accesspolicies.Explain's per-policy Lines into

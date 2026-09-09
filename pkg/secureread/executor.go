@@ -7,6 +7,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
@@ -39,7 +40,21 @@ func (e *Executor) RunStructured(ctx context.Context, sourceURL string, query da
 		return Result{}, err
 	}
 	defer closeSource()
-	return e.runThroughPolicies(ctx, db, query, variables)
+	// rec observes the dalgo2http.Provenance (live vs snapshot) of an
+	// HTTP-source query, exactly as the ad-hoc `datatug query run --db
+	// http://...` path does (apps/datatugapp/commands/cmd_query.go, PR
+	// #204); every other backend never calls the observer, so rec.Last
+	// simply reports "not observed" for them, and Result.Provenance stays
+	// nil.
+	rec := dalgo2http.NewRecorder()
+	result, err := e.runThroughPolicies(rec.WithContext(ctx), db, query, variables)
+	if err != nil {
+		return Result{}, err
+	}
+	if prov, ok := rec.Last(); ok {
+		result.Provenance = &prov
+	}
+	return result, nil
 }
 
 // RunDTQL deserializes a DTQL-YAML document (dal-go/dalgo/dtql.Deserialize)

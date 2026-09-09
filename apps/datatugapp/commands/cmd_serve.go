@@ -121,19 +121,16 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 
 	host, port := resolveServeAddr(flags.host, flags.port, config)
 
-	// The pre-migration `--local`/`--client-url` flags were never wired to
-	// cobra (same dead-flag issue as --host/--port before this fix), so this
-	// always resolved to the datatug.app URL; preserved as-is, out of scope
-	// for this fix.
-	clientURL := fmt.Sprintf("https://datatug.app/pwa/repo/%s:%d", host, port)
+	// The web UI addresses a local agent as a store id of the form host:port
+	// under /store/<id> (datatug-apps routes); the old /pwa/repo/... route no
+	// longer exists and crashed the hosted app with NG04002.
 	var agent string
 	if port == 0 || port == 80 {
 		agent = host
 	} else {
 		agent = fmt.Sprintf("%v:%v", host, port)
 	}
-
-	url := clientURL + "/agent/" + agent
+	url := "https://datatug.app/store/" + agent
 
 	if err := browser.OpenURL(url); err != nil {
 		_, _ = fmt.Printf("failed to open browser with URl=%v: %v", url, err)

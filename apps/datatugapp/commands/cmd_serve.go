@@ -30,13 +30,16 @@ const (
 // --as/--role/--group are reserved: parsed and logged here, but not yet
 // enforced. Task 6 (plan: 2026-09-09-phase-1-core-investigation-loop.md)
 // wires them into access policies.
+const serveOpenBrowserFlag = "open-browser"
+
 type serveFlags struct {
-	host       string
-	port       int
-	projectDir string
-	as         string
-	roles      []string
-	groups     []string
+	openBrowser bool
+	host        string
+	port        int
+	projectDir  string
+	as          string
+	roles       []string
+	groups      []string
 }
 
 func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
@@ -47,6 +50,9 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.port, err = flags.GetInt(servePortFlag); err != nil {
+		return f, err
+	}
+	if f.openBrowser, err = flags.GetBool(serveOpenBrowserFlag); err != nil {
 		return f, err
 	}
 	if f.projectDir, err = flags.GetString(serveProjectFlag); err != nil {
@@ -121,22 +127,24 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 
 	host, port := resolveServeAddr(flags.host, flags.port, config)
 
-	// The pre-migration `--local`/`--client-url` flags were never wired to
-	// cobra (same dead-flag issue as --host/--port before this fix), so this
-	// always resolved to the datatug.app URL; preserved as-is, out of scope
-	// for this fix.
-	clientURL := fmt.Sprintf("https://datatug.app/pwa/repo/%s:%d", host, port)
+	// The web UI addresses a local agent as a store id of the form host:port
+	// under /store/<id> (datatug-apps routes); the old /pwa/repo/... route no
+	// longer exists and crashed the hosted app with NG04002.
 	var agent string
 	if port == 0 || port == 80 {
 		agent = host
 	} else {
 		agent = fmt.Sprintf("%v:%v", host, port)
 	}
+	url := "https://datatug.app/store/" + agent
 
-	url := clientURL + "/agent/" + agent
-
-	if err := browser.OpenURL(url); err != nil {
-		_, _ = fmt.Printf("failed to open browser with URl=%v: %v", url, err)
+	// Founder ruling 2026-09-09: serve never opens a browser by default; it
+	// prints the link and opens a browser only with --open-browser.
+	fmt.Printf("DataTug web UI for this agent: %s\n", url)
+	if flags.openBrowser {
+		if err := browser.OpenURL(url); err != nil {
+			_, _ = fmt.Printf("failed to open browser with URL=%v: %v\n", url, err)
+		}
 	}
 	httpServer := server.NewHttpServer()
 	// TODO: implement graceful shutdown
@@ -154,6 +162,7 @@ func serveCommandArgs() *cobra.Command {
 	flags.String(serveHostFlag, "", "Host to bind the agent HTTP server to (default: localhost, or the server.host setting)")
 	flags.Int(servePortFlag, 0, "Port to bind the agent HTTP server to (default: 8989, or the server.port setting)")
 	flags.String(serveProjectFlag, "", "Path to a single DataTug project directory to serve")
+	flags.Bool(serveOpenBrowserFlag, false, "Open the web UI in a browser (off by default; the URL is always printed)")
 	flags.String(serveAsFlag, "", "Principal user ID to serve as (reserved: parsed but not yet enforced)")
 	flags.StringArray(serveRoleFlag, nil, "Principal role, repeatable (reserved: parsed but not yet enforced)")
 	flags.StringArray(serveGroupFlag, nil, "Principal group, repeatable (reserved: parsed but not yet enforced)")

@@ -18,33 +18,13 @@ import (
 	"github.com/datatug/datatug-core/pkg/semantic"
 )
 
-// relatedRequest is POST semantic/related's body (api-contract.md "Endpoint
-// table": Scope + {fact:Fact,limit?}). Core's pkg/apicontract (the schema
-// authority, v0.26.0) defines RelatedResponse/RelatedItem but not a request
-// envelope for this endpoint — Scope and Fact are core's own shared schema
-// types, reused here unchanged; only the enclosing envelope has no
-// pkg/apicontract type of its own. See applicableRequest's doc comment
-// (semantic_applicable.go) for the same gap, named once for the lead there.
-type relatedRequest struct {
-	apicontract.Scope
-	Fact  apicontract.Fact `json:"fact"`
-	Limit int              `json:"limit,omitempty"`
-}
-
-// relatedRowsRequest is POST semantic/related/rows's body. Same gap as
-// relatedRequest: no pkg/apicontract request envelope, composed here from
-// core's own Scope/TypedValue.
-type relatedRowsRequest struct {
-	apicontract.Scope
-	LookupID string                 `json:"lookupId"`
-	Value    apicontract.TypedValue `json:"value"`
-	Limit    int                    `json:"limit,omitempty"`
-}
-
-// semanticRelatedHandler is POST /datatug/semantic/related, rewritten
-// (Task 12) to the appendix's exact envelope: Scope + {fact:Fact,limit?} in
-// the JSON body (POST, so a semantic value is never copied into a URL —
-// api-contract.md "Endpoint table"), response
+// semanticRelatedHandler is POST /datatug/semantic/related, decoding the
+// appendix's exact envelope — Scope + {fact:Fact,limit?} in the JSON body
+// (POST, so a semantic value is never copied into a URL — api-contract.md
+// "Endpoint table") — as core's own apicontract.RelatedRequest (the schema
+// authority for this body since PR datatug-core#313 / v0.27.0 of
+// datatug-core; previously composed locally here, a gap S78's report named
+// for the lead and #313 closed). Response:
 // {related:[{lookupId,label,source,collection,count}],truncated}.
 func semanticRelatedHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
@@ -52,8 +32,8 @@ func semanticRelatedHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, newInvalidRequest("", "failed to read request body: "+err.Error()))
 		return
 	}
-	var req relatedRequest
-	if err := decodeContractBody(body, &req); err != nil {
+	var req apicontract.RelatedRequest
+	if err := apicontract.DecodeStrict(body, &req); err != nil {
 		writeContractError(w, r, newInvalidRequest("", err.Error()))
 		return
 	}
@@ -61,13 +41,27 @@ func semanticRelatedHandler(w http.ResponseWriter, r *http.Request) {
 	writeContractResponse(w, r, err, resp)
 }
 
-func computeSemanticRelated(ctx context.Context, req relatedRequest) (apicontract.RelatedResponse, error) {
-	if err := validateScope(req.Scope); err != nil {
+func computeSemanticRelated(ctx context.Context, req apicontract.RelatedRequest) (apicontract.RelatedResponse, error) {
+	scope := apicontract.Scope{Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}
+	if err := validateScope(scope); err != nil {
 		return apicontract.RelatedResponse{}, err
 	}
-	if err := validateFact(req.Fact); err != nil {
-		return apicontract.RelatedResponse{}, err
+	// req.Validate() is core's own structural check: required Scope fields,
+	// Fact validity (id/entity/field/value/origin/mapping — everything
+	// validateFact used to hand-check here, now superseded), and — "an
+	// explicit limit: 0 is INVALID_REQUEST" per the lead session's semantics
+	// ruling for this stream — Limit, when the caller sent one, in (0,50].
+	// validateScope above still runs first for the one thing core's
+	// Validate() cannot check: STALE_CONTEXT (api.ValidateSecurityContext), a
+	// live-session check.
+	if err := req.Validate(); err != nil {
+		return apicontract.RelatedResponse{}, requestValidationError(err)
 	}
+	// fact.physical is required by THIS endpoint specifically ("compute
+	// related lookups" needs a physical column to pivot from), not by Fact's
+	// own general schema (core's Fact.Validate() only validates Physical
+	// when present, since some Fact-carrying endpoints — queries/applicable —
+	// accept facts with no physical mapping at all).
 	if req.Fact.Physical == nil {
 		return apicontract.RelatedResponse{}, newInvalidRequest("fact.physical", "is required to compute related lookups")
 	}
@@ -106,7 +100,20 @@ func computeSemanticRelated(ctx context.Context, req relatedRequest) (apicontrac
 	}
 	lookups := semantic.RelatedLookups(entities, schemaByCollection, selected)
 
-	limit := boundRelatedLimit(req.Limit)
+	// req.Limit is *int (core's own optional-limit shape): nil means the
+	// caller sent no "limit" at all, so boundRelatedLimit's own "0 means
+	// unset, default to the cap" rule applies unchanged; an explicit
+	// "limit": 0 is no longer reachable here at all — req.Validate() above
+	// already rejected it as INVALID_REQUEST, distinct from an absent limit
+	// for the first time (previously both unmarshaled to the same `int`
+	// zero value and were indistinguishable — this stream's limit-0
+	// semantics change; see requestValidationError and exec_run_query.go's
+	// identical requestedLimit idiom for ExecutionRequest.Limit).
+	requestedLimit := 0
+	if req.Limit != nil {
+		requestedLimit = *req.Limit
+	}
+	limit := boundRelatedLimit(requestedLimit)
 	truncated := len(lookups) > limit
 	if truncated {
 		lookups = lookups[:limit]
@@ -139,27 +146,6 @@ func computeSemanticRelated(ctx context.Context, req relatedRequest) (apicontrac
 		return resp.Related[i].Collection < resp.Related[j].Collection
 	})
 	return resp, nil
-}
-
-// validateFact checks the subset of Fact fields every semantic endpoint
-// that accepts one needs populated: id/entity/field/value are always
-// required; origin must be one of the closed set.
-func validateFact(f apicontract.Fact) error {
-	if f.Entity == "" {
-		return newMissingParameter("fact.entity")
-	}
-	if f.Field == "" {
-		return newMissingParameter("fact.field")
-	}
-	if f.Value.Type == "" {
-		return newMissingParameter("fact.value")
-	}
-	switch f.Origin {
-	case apicontract.FactOriginSelection, apicontract.FactOriginContext, apicontract.FactOriginManual:
-	default:
-		return newInvalidRequest("fact.origin", fmt.Sprintf("unknown origin %q", f.Origin))
-	}
-	return nil
 }
 
 // factValueString renders a TypedValue as the plain string
@@ -206,17 +192,20 @@ func countRelated(ctx context.Context, executor *secureread.Executor, projStore 
 }
 
 // semanticRelatedRowsHandler is POST /datatug/semantic/related/rows,
-// rewritten (Task 12) to the appendix's exact envelope: Scope +
+// decoding the appendix's exact envelope — Scope +
 // {lookupId,value:TypedValue,limit?}, response Result (the same shape
-// exec/run_query returns).
+// exec/run_query returns) — as core's own apicontract.RelatedRowsRequest
+// (the schema authority for this body since PR datatug-core#313 / v0.27.0 of
+// datatug-core; previously composed locally here, a gap S78's report named
+// for the lead and #313 closed).
 func semanticRelatedRowsHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeContractError(w, r, newInvalidRequest("", "failed to read request body: "+err.Error()))
 		return
 	}
-	var req relatedRowsRequest
-	if err := decodeContractBody(body, &req); err != nil {
+	var req apicontract.RelatedRowsRequest
+	if err := apicontract.DecodeStrict(body, &req); err != nil {
 		writeContractError(w, r, newInvalidRequest("", err.Error()))
 		return
 	}
@@ -224,15 +213,21 @@ func semanticRelatedRowsHandler(w http.ResponseWriter, r *http.Request) {
 	writeContractResponse(w, r, err, resp)
 }
 
-func computeSemanticRelatedRows(ctx context.Context, req relatedRowsRequest) (apicontract.Result, error) {
-	if err := validateScope(req.Scope); err != nil {
+func computeSemanticRelatedRows(ctx context.Context, req apicontract.RelatedRowsRequest) (apicontract.Result, error) {
+	scope := apicontract.Scope{Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}
+	if err := validateScope(scope); err != nil {
 		return apicontract.Result{}, err
 	}
-	if req.LookupID == "" {
-		return apicontract.Result{}, newMissingParameter("lookupId")
-	}
-	if req.Value.Type == "" {
-		return apicontract.Result{}, newMissingParameter("value")
+	// req.Validate() is core's own structural check: required Scope fields
+	// and lookupId, Value validity, and — "an explicit limit: 0 is
+	// INVALID_REQUEST" per the lead session's semantics ruling for this
+	// stream — Limit, when the caller sent one, in (0,500]. This supersedes
+	// the two hand-written req.LookupID=="" / req.Value.Type=="" checks that
+	// used to live here. validateScope above still runs first for the one
+	// thing core's Validate() cannot check: STALE_CONTEXT
+	// (api.ValidateSecurityContext), a live-session check.
+	if err := req.Validate(); err != nil {
+		return apicontract.Result{}, requestValidationError(err)
 	}
 	source, collection, column, err := decodeLookupID(req.LookupID)
 	if err != nil {
@@ -254,7 +249,18 @@ func computeSemanticRelatedRows(ctx context.Context, req relatedRowsRequest) (ap
 	if err != nil {
 		return apicontract.Result{}, err
 	}
-	limit := boundLimit(req.Limit)
+	// req.Limit is *int (core's own optional-limit shape): nil means the
+	// caller sent no "limit" at all, so boundLimit's own "0 means unset,
+	// default to 100" rule applies unchanged; an explicit "limit": 0 is no
+	// longer reachable here — req.Validate() above already rejected it as
+	// INVALID_REQUEST (this stream's limit-0 semantics change; see
+	// requestValidationError and exec_run_query.go's identical
+	// requestedLimit idiom for ExecutionRequest.Limit).
+	requestedLimit := 0
+	if req.Limit != nil {
+		requestedLimit = *req.Limit
+	}
+	limit := boundLimit(requestedLimit)
 	builder := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(collection, ""))).
 		Where(dal.WhereField(column, dal.Equal, value)).
 		Limit(limit + 1) // +1 so a full page can be distinguished from an exact-limit result, for Truncated.

@@ -13,33 +13,21 @@ import (
 	"github.com/datatug/datatug-core/pkg/semantic"
 )
 
-// applicableRequest is POST queries/applicable's request body
-// (api-contract.md "Endpoint table": Scope + {values:Fact[]}). Core's
-// pkg/apicontract (the schema authority, v0.26.0) defines ApplicableResponse
-// but not a request envelope for this endpoint — only Scope and Fact
-// themselves are shared schema types, both reused here unchanged; the
-// enclosing envelope is real appendix-defined shape with no
-// pkg/apicontract type of its own. S78's report to the lead names this as a
-// datatug-core gap (the appendix should probably grow an
-// apicontract.ApplicableRequest alongside ExecutionRequest), not something
-// to fork the underlying Scope/Fact types over.
-type applicableRequest struct {
-	apicontract.Scope
-	Values []apicontract.Fact `json:"values"`
-}
-
-// semanticApplicableHandler is POST /datatug/queries/applicable, rewritten
-// (Task 12) to the appendix's exact envelope: Scope + {values:Fact[]},
-// response {applicable:Candidate[],notYet:Candidate[]} — replacing the
-// previous ApplicableRequest/ApplicableEntry/NotYetEntry shape.
+// semanticApplicableHandler is POST /datatug/queries/applicable, decoding
+// the appendix's exact envelope — Scope + {values:Fact[]}, response
+// {applicable:Candidate[],notYet:Candidate[]} — as core's own
+// apicontract.ApplicableRequest (the schema authority for this body since PR
+// datatug-core#313 / v0.27.0 of datatug-core; previously composed locally
+// here from Scope+Fact, a gap S78's report named for the lead and #313
+// closed).
 func semanticApplicableHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeContractError(w, r, newInvalidRequest("", "failed to read request body: "+err.Error()))
 		return
 	}
-	var req applicableRequest
-	if err := decodeContractBody(body, &req); err != nil {
+	var req apicontract.ApplicableRequest
+	if err := apicontract.DecodeStrict(body, &req); err != nil {
 		writeContractError(w, r, newInvalidRequest("", err.Error()))
 		return
 	}
@@ -47,9 +35,18 @@ func semanticApplicableHandler(w http.ResponseWriter, r *http.Request) {
 	writeContractResponse(w, r, err, resp)
 }
 
-func computeSemanticApplicable(ctx context.Context, req applicableRequest) (apicontract.ApplicableResponse, error) {
-	if err := validateScope(req.Scope); err != nil {
+func computeSemanticApplicable(ctx context.Context, req apicontract.ApplicableRequest) (apicontract.ApplicableResponse, error) {
+	scope := apicontract.Scope{Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}
+	if err := validateScope(scope); err != nil {
 		return apicontract.ApplicableResponse{}, err
+	}
+	// req.Validate() is core's own structural check (required Scope fields,
+	// every Values[i] Fact validity) — called before any handler logic below
+	// touches storage. validateScope above still runs first: it alone knows
+	// about STALE_CONTEXT (api.ValidateSecurityContext), a live-session check
+	// core's Validate() has no way to perform.
+	if err := req.Validate(); err != nil {
+		return apicontract.ApplicableResponse{}, requestValidationError(err)
 	}
 	projectDir, ok := api.ProjectDir(req.Project)
 	if !ok {

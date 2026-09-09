@@ -54,6 +54,35 @@ func declaredFact(id, entity, field string, value apicontract.TypedValue, source
 	}
 }
 
+// newApplicableRequest/newRelatedRequest/newRelatedRowsRequest build core's
+// own apicontract.ApplicableRequest/RelatedRequest/RelatedRowsRequest (the
+// schema authority for these bodies since PR datatug-core#313 / v0.27.0 of
+// datatug-core) from a test's Scope, flattening Project/Environment/
+// SecurityContextID into the envelope's own top-level fields exactly as the
+// real handlers' decoded requests do — a thin helper so call sites below
+// stay as close as possible to their pre-#313 `applicableRequest{Scope:
+// scope, ...}` shape.
+func newApplicableRequest(scope apicontract.Scope, values []apicontract.Fact) apicontract.ApplicableRequest {
+	return apicontract.ApplicableRequest{
+		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
+		Values: values,
+	}
+}
+
+func newRelatedRequest(scope apicontract.Scope, fact apicontract.Fact, limit *int) apicontract.RelatedRequest {
+	return apicontract.RelatedRequest{
+		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
+		Fact: fact, Limit: limit,
+	}
+}
+
+func newRelatedRowsRequest(scope apicontract.Scope, lookupID string, value apicontract.TypedValue, limit *int) apicontract.RelatedRowsRequest {
+	return apicontract.RelatedRowsRequest{
+		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
+		LookupID: lookupID, Value: value, Limit: limit,
+	}
+}
+
 // assertValid fails the test unless v satisfies datatug-core's own
 // Validate() — the schema authority's rule engine, generated from the same
 // appendix that produced pkg/apicontract/fixtures' frozen examples. This is
@@ -177,7 +206,7 @@ func TestSemanticRelated_CustomerFiveInvoicesAndSupportNotes(t *testing.T) {
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 
 	fact := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
-	resp, err := computeSemanticRelated(context.Background(), relatedRequest{Scope: scope, Fact: fact})
+	resp, err := computeSemanticRelated(context.Background(), newRelatedRequest(scope, fact, nil))
 	if err != nil {
 		t.Fatalf("computeSemanticRelated: %v", err)
 	}
@@ -213,7 +242,7 @@ func TestSemanticRelated_RestrictedPrincipal_NoTrueCount(t *testing.T) {
 	scope := configureSemanticSession(t, projectDir, projectID, "bob", []string{"support"})
 
 	fact := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
-	resp, err := computeSemanticRelated(context.Background(), relatedRequest{Scope: scope, Fact: fact})
+	resp, err := computeSemanticRelated(context.Background(), newRelatedRequest(scope, fact, nil))
 	if err != nil {
 		t.Fatalf("computeSemanticRelated: %v", err)
 	}
@@ -233,7 +262,7 @@ func TestSemanticRelated_DisabledFact_Refused(t *testing.T) {
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	fact := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
 	fact.Enabled = false
-	_, err := computeSemanticRelated(context.Background(), relatedRequest{Scope: scope, Fact: fact})
+	_, err := computeSemanticRelated(context.Background(), newRelatedRequest(scope, fact, nil))
 	// Disabled facts carry no special error of their own here — the field
 	// is still structurally valid; this just documents that Enabled is not
 	// independently validated by computeSemanticRelated (a disabled fact
@@ -250,8 +279,29 @@ func TestSemanticRelated_DisabledFact_Refused(t *testing.T) {
 func TestSemanticRelated_MissingRequiredFields(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	_, err := computeSemanticRelated(context.Background(), relatedRequest{Scope: scope})
+	_, err := computeSemanticRelated(context.Background(), newRelatedRequest(scope, apicontract.Fact{}, nil))
 	assertContractError(t, err, apicontract.ErrCodeMissingParameter)
+}
+
+// TestSemanticRelated_ExplicitLimitZero_InvalidRequest covers this stream's
+// (S83) limit-0 semantics change: adopting apicontract.RelatedRequest gives
+// Limit a *int shape, so an explicit `"limit": 0` on the wire is now
+// distinguishable from an absent limit for the first time — core's own
+// Validate() (PR datatug-core#313 / v0.27.0 of datatug-core) enforces Limit
+// in (0,50] when present, rejecting an explicit zero as INVALID_REQUEST (the
+// lead session's semantics ruling for this stream: "the schema authority
+// wins"). Before #313, the CLI-local relatedRequest.Limit was a plain int,
+// so an explicit 0 and an absent limit unmarshaled identically and were both
+// silently treated as "use the default" — TestSemanticRelated_
+// CustomerFiveInvoicesAndSupportNotes above (Limit nil, i.e. genuinely
+// absent) still exercises that unchanged "absent -> default" half.
+func TestSemanticRelated_ExplicitLimitZero_InvalidRequest(t *testing.T) {
+	projectDir, projectID := writeSemanticTestProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	fact := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
+	zero := 0
+	_, err := computeSemanticRelated(context.Background(), newRelatedRequest(scope, fact, &zero))
+	assertContractError(t, err, apicontract.ErrCodeInvalidRequest)
 }
 
 func TestSemanticRelatedRows_CustomerFiveInvoices(t *testing.T) {
@@ -259,9 +309,7 @@ func TestSemanticRelatedRows_CustomerFiveInvoices(t *testing.T) {
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	lookupID := encodeLookupID(semanticTestSource, "Invoice", "CustomerId")
 
-	resp, err := computeSemanticRelatedRows(context.Background(), relatedRowsRequest{
-		Scope: scope, LookupID: lookupID, Value: apicontract.NewIntegerValue("5"),
-	})
+	resp, err := computeSemanticRelatedRows(context.Background(), newRelatedRowsRequest(scope, lookupID, apicontract.NewIntegerValue("5"), nil))
 	if err != nil {
 		t.Fatalf("computeSemanticRelatedRows: %v", err)
 	}
@@ -283,9 +331,7 @@ func TestSemanticRelatedRows_RestrictedPrincipal_ZeroOrDenied(t *testing.T) {
 	scope := configureSemanticSession(t, projectDir, projectID, "bob", []string{"support"})
 	lookupID := encodeLookupID(semanticTestSource, "Invoice", "CustomerId")
 
-	resp, err := computeSemanticRelatedRows(context.Background(), relatedRowsRequest{
-		Scope: scope, LookupID: lookupID, Value: apicontract.NewIntegerValue("5"),
-	})
+	resp, err := computeSemanticRelatedRows(context.Background(), newRelatedRowsRequest(scope, lookupID, apicontract.NewIntegerValue("5"), nil))
 	if err != nil {
 		var ce *contractError
 		if !isContractErrorCode(err, apicontract.ErrCodeAccessDenied, &ce) {
@@ -301,9 +347,26 @@ func TestSemanticRelatedRows_RestrictedPrincipal_ZeroOrDenied(t *testing.T) {
 func TestSemanticRelatedRows_InvalidLookupID(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	_, err := computeSemanticRelatedRows(context.Background(), relatedRowsRequest{
-		Scope: scope, LookupID: "not-valid-base64!!", Value: apicontract.NewIntegerValue("5"),
-	})
+	_, err := computeSemanticRelatedRows(context.Background(), newRelatedRowsRequest(scope, "not-valid-base64!!", apicontract.NewIntegerValue("5"), nil))
+	assertContractError(t, err, apicontract.ErrCodeInvalidRequest)
+}
+
+// TestSemanticRelatedRows_ExplicitLimitZero_InvalidRequest is
+// TestSemanticRelated_ExplicitLimitZero_InvalidRequest's /semantic/
+// related/rows counterpart (this stream's, S83, limit-0 semantics change):
+// apicontract.RelatedRowsRequest.Limit is likewise *int, so an explicit
+// `"limit": 0` is now distinguishable from an absent one and core's
+// Validate() rejects it as INVALID_REQUEST (Limit in (0,500] when present) —
+// where the pre-#313 CLI-local relatedRowsRequest.Limit (a plain int) could
+// not tell the two apart. TestSemanticRelatedRows_CustomerFiveInvoices above
+// (Limit nil, i.e. genuinely absent) still exercises the unchanged
+// "absent -> default" half.
+func TestSemanticRelatedRows_ExplicitLimitZero_InvalidRequest(t *testing.T) {
+	projectDir, projectID := writeSemanticTestProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	lookupID := encodeLookupID(semanticTestSource, "Invoice", "CustomerId")
+	zero := 0
+	_, err := computeSemanticRelatedRows(context.Background(), newRelatedRowsRequest(scope, lookupID, apicontract.NewIntegerValue("5"), &zero))
 	assertContractError(t, err, apicontract.ErrCodeInvalidRequest)
 }
 
@@ -331,7 +394,7 @@ func TestSemanticApplicable_CustomerInvoicesApplicable_InvoiceLinesNotYet(t *tes
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	fact := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
 
-	resp, err := computeSemanticApplicable(context.Background(), applicableRequest{Scope: scope, Values: []apicontract.Fact{fact}})
+	resp, err := computeSemanticApplicable(context.Background(), newApplicableRequest(scope, []apicontract.Fact{fact}))
 	if err != nil {
 		t.Fatalf("computeSemanticApplicable: %v", err)
 	}
@@ -386,7 +449,7 @@ func TestSemanticApplicable_NonSemanticRequiredParam_AlwaysMissing(t *testing.T)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	fact := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
 
-	resp, err := computeSemanticApplicable(context.Background(), applicableRequest{Scope: scope, Values: []apicontract.Fact{fact}})
+	resp, err := computeSemanticApplicable(context.Background(), newApplicableRequest(scope, []apicontract.Fact{fact}))
 	if err != nil {
 		t.Fatalf("computeSemanticApplicable: %v", err)
 	}
@@ -413,7 +476,7 @@ func TestSemanticApplicable_AmbiguousFacts(t *testing.T) {
 	f1 := declaredFact("f1", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
 	f2 := declaredFact("f2", "Customer", "ID", apicontract.NewIntegerValue("6"), semanticTestSource, "Customer", "CustomerId")
 
-	resp, err := computeSemanticApplicable(context.Background(), applicableRequest{Scope: scope, Values: []apicontract.Fact{f1, f2}})
+	resp, err := computeSemanticApplicable(context.Background(), newApplicableRequest(scope, []apicontract.Fact{f1, f2}))
 	if err != nil {
 		t.Fatalf("computeSemanticApplicable: %v", err)
 	}
@@ -437,7 +500,7 @@ func TestSemanticApplicable_AmbiguousFacts(t *testing.T) {
 func TestSemanticApplicable_NoValues_EverythingNotYet(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
-	resp, err := computeSemanticApplicable(context.Background(), applicableRequest{Scope: scope})
+	resp, err := computeSemanticApplicable(context.Background(), newApplicableRequest(scope, nil))
 	if err != nil {
 		t.Fatalf("computeSemanticApplicable: %v", err)
 	}
@@ -458,7 +521,7 @@ func TestSemanticApplicable_UnknownProject_NotFound(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	scope.Project = "no-such-project-xyz"
-	_, err := computeSemanticApplicable(context.Background(), applicableRequest{Scope: scope})
+	_, err := computeSemanticApplicable(context.Background(), newApplicableRequest(scope, nil))
 	assertContractError(t, err, apicontract.ErrCodeNotFound)
 }
 

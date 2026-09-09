@@ -4,7 +4,15 @@ project_name: datatug
 
 before:
   hooks:
-    - go mod tidy
+    # VERIFY tidiness; never impose it. The mutating `go mod tidy` that used to
+    # live here is exactly what let v0.13.2 ship a lie: PR #188 left go.mod
+    # requiring go-github/v91 while every source file still imported v90, so
+    # this hook silently re-added v90 in the ephemeral release runner and
+    # GoReleaser happily built and published binaries against v90 — a fully
+    # green Release on a commit whose `go build ./...` was red in Go CI.
+    # `-diff` writes nothing and exits non-zero on drift, so a release now
+    # stops instead of healing the tree out from under the tag.
+    - go mod tidy -diff
 
 builds:
   - id: datatug-unix

@@ -52,3 +52,32 @@ jobs:
       # reflect the current, actually-measured state with a small buffer
       # rather than chasing the toolchain's new counting on unrelated PRs.
       min_test_coverage_percent: 55.5
+  # Fail fast on go.mod/go.sum drift — the gap that shipped v0.13.2.
+  #
+  # Renovate raised two PRs for the same go-github v90->v91 bump a minute
+  # apart. #187 merged first and ADDED the v91 require beside v90; CI passed,
+  # because v90 was still there and every import still resolved. #188 was cut
+  # from the pre-#187 base, so it REPLACED the v90 line, leaving go.mod with a
+  # duplicated v91 require, no v90, and five source files still importing v90.
+  #
+  # `strongo_workflow` above builds and tests, so it correctly went red on #188
+  # and on the merge commit. Nothing enforced that: `main` has no branch
+  # protection, so #188 merged red, and Release runs as an independent workflow
+  # that never consults Go CI. This job makes the *earlier* signal — an
+  # untidy go.mod — red on the PR that introduces it, which would have failed
+  # #187 on its unused v91 require, before the pair could interleave.
+  #
+  # `-diff` only reports; it never rewrites go.mod, so it cannot mask drift the
+  # way a mutating `go mod tidy` does.
+  go-mod-tidy:
+    name: go.mod is tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          # Must be >= go.mod's `go` directive, same constraint as release.yml.
+          go-version: '1.27.0'
+          cache: true
+      - name: go mod tidy -diff
+        run: go mod tidy -diff

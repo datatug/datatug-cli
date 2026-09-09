@@ -30,13 +30,16 @@ const (
 // --as/--role/--group are reserved: parsed and logged here, but not yet
 // enforced. Task 6 (plan: 2026-09-09-phase-1-core-investigation-loop.md)
 // wires them into access policies.
+const serveOpenBrowserFlag = "open-browser"
+
 type serveFlags struct {
-	host       string
-	port       int
-	projectDir string
-	as         string
-	roles      []string
-	groups     []string
+	openBrowser bool
+	host        string
+	port        int
+	projectDir  string
+	as          string
+	roles       []string
+	groups      []string
 }
 
 func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
@@ -47,6 +50,9 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.port, err = flags.GetInt(servePortFlag); err != nil {
+		return f, err
+	}
+	if f.openBrowser, err = flags.GetBool(serveOpenBrowserFlag); err != nil {
 		return f, err
 	}
 	if f.projectDir, err = flags.GetString(serveProjectFlag); err != nil {
@@ -132,8 +138,13 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	}
 	url := "https://datatug.app/store/" + agent
 
-	if err := browser.OpenURL(url); err != nil {
-		_, _ = fmt.Printf("failed to open browser with URl=%v: %v", url, err)
+	// Founder ruling 2026-09-09: serve never opens a browser by default; it
+	// prints the link and opens a browser only with --open-browser.
+	fmt.Printf("DataTug web UI for this agent: %s\n", url)
+	if flags.openBrowser {
+		if err := browser.OpenURL(url); err != nil {
+			_, _ = fmt.Printf("failed to open browser with URL=%v: %v\n", url, err)
+		}
 	}
 	httpServer := server.NewHttpServer()
 	// TODO: implement graceful shutdown
@@ -151,6 +162,7 @@ func serveCommandArgs() *cobra.Command {
 	flags.String(serveHostFlag, "", "Host to bind the agent HTTP server to (default: localhost, or the server.host setting)")
 	flags.Int(servePortFlag, 0, "Port to bind the agent HTTP server to (default: 8989, or the server.port setting)")
 	flags.String(serveProjectFlag, "", "Path to a single DataTug project directory to serve")
+	flags.Bool(serveOpenBrowserFlag, false, "Open the web UI in a browser (off by default; the URL is always printed)")
 	flags.String(serveAsFlag, "", "Principal user ID to serve as (reserved: parsed but not yet enforced)")
 	flags.StringArray(serveRoleFlag, nil, "Principal role, repeatable (reserved: parsed but not yet enforced)")
 	flags.StringArray(serveGroupFlag, nil, "Principal group, repeatable (reserved: parsed but not yet enforced)")

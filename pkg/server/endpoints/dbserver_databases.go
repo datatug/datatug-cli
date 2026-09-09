@@ -29,9 +29,11 @@ func getServerDatabases(w http.ResponseWriter, r *http.Request) {
 		handleError(err, w, r)
 		return
 	}
-	databases, err := api.GetServerDatabases(request)
+	databases, err := getServerDatabasesFunc(request)
 	returnJSON(w, r, http.StatusOK, err, databases)
 }
+
+var getServerDatabasesFunc = api.GetServerDatabases
 
 func newDbServerFromQueryParams(query url.Values) (dbServer datatug.ServerRef, err error) {
 	dbServer.Driver = query.Get("driver")

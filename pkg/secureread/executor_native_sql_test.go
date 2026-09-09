@@ -3,10 +3,12 @@ package secureread
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
 
 // TestRunNativeSQL_Labelled covers AC native-sql-labelled: a SQL-text query
@@ -170,5 +172,26 @@ func TestRunNativeSQL_Unrestricted_NoLabelNeeded(t *testing.T) {
 	}
 	if findLimitation(result.Limitations, LimitationNativeSQL) != nil {
 		t.Error("LimitationNativeSQL present on an Unrestricted run")
+	}
+}
+
+// TestRunNativeSQL_MissingSourceFile_TypedError covers S80 Fix 2 for
+// RunNativeSQL's own read-only connection (openReadOnlySQLite), which opens
+// its dedicated *sql.DB directly rather than through dbcopy.BackendRef.Open
+// — it needs the identical dbcopy.ErrSourceFileMissing check so a missing
+// sqlite file surfaces the same typed error exec/select and
+// exec/execute_commands (both native-SQL callers through this same
+// Executor) can map to SOURCE_UNAVAILABLE, instead of the raw
+// "unable to open database file" driver text.
+func TestRunNativeSQL_MissingSourceFile_TypedError(t *testing.T) {
+	sourceURL := "sqlite://" + filepath.Join(t.TempDir(), "missing.db")
+	session, err := NewSession(SessionOptions{NoPolicies: true})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	executor := NewExecutor(session)
+	_, err = executor.RunNativeSQL(context.Background(), sourceURL, "SELECT 1")
+	if !errors.Is(err, dbcopy.ErrSourceFileMissing) {
+		t.Fatalf("RunNativeSQL(missing sqlite source) = %v, want dbcopy.ErrSourceFileMissing", err)
 	}
 }

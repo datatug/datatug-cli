@@ -3,10 +3,12 @@ package secureread
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
 
 func customersQuery(columns ...dal.Column) dal.Query {
@@ -261,5 +263,33 @@ func TestRunStructured_UnknownScheme_TypedError(t *testing.T) {
 	_, err := executor.RunStructured(context.Background(), "mongodb://host/db", productsQuery(), nil)
 	if err == nil || !strings.Contains(err.Error(), "mongodb") || !strings.Contains(err.Error(), "sqlite") {
 		t.Fatalf("RunStructured(unknown scheme) = %v, want an error naming the scheme and the supported list", err)
+	}
+}
+
+// TestRunStructured_MissingSourceFile_TypedError covers S80 Fix 2's "test
+// per source kind": a source URL whose file-backed path does not exist
+// (`datatug serve --project` against the demo project before `datatug demo`
+// has fetched its fixtures, per S77's finding) must fail with
+// dbcopy.ErrSourceFileMissing — checkable via errors.Is, so
+// pkg/server/endpoints can map it to SOURCE_UNAVAILABLE instead of letting
+// the raw driver text reach an HTTP 500 — for both backends this Executor
+// opens through pkg/dbcopy.
+func TestRunStructured_MissingSourceFile_TypedError(t *testing.T) {
+	tests := []struct {
+		name      string
+		sourceURL func(t *testing.T) string
+	}{
+		{"sqlite", func(t *testing.T) string { return "sqlite://" + filepath.Join(t.TempDir(), "missing.db") }},
+		{"ingitdb", func(t *testing.T) string { return "ingitdb://" + filepath.Join(t.TempDir(), "missing-project") }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			session := aliceSession(t, permissivePolicy)
+			executor := NewExecutor(session)
+			_, err := executor.RunStructured(context.Background(), tc.sourceURL(t), productsQuery(), nil)
+			if !errors.Is(err, dbcopy.ErrSourceFileMissing) {
+				t.Fatalf("RunStructured(missing %s source) = %v, want dbcopy.ErrSourceFileMissing", tc.name, err)
+			}
+		})
 	}
 }

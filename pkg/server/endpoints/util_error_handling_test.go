@@ -2,11 +2,13 @@ package endpoints
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/strongo/validation"
 )
 
@@ -28,6 +30,21 @@ func TestHandleError(t *testing.T) {
 		}
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected 400, got %d", w.Code)
+		}
+	})
+
+	t.Run("missing source file yields 503 SOURCE_UNAVAILABLE (S80 Fix 2)", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		err := fmt.Errorf("wrap: %w", dbcopy.ErrSourceFileMissing)
+		if !handleError(err, w, r) {
+			t.Error("expected true for non-nil error")
+		}
+		if w.Code != http.StatusServiceUnavailable {
+			t.Errorf("expected 503, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "SOURCE_UNAVAILABLE") {
+			t.Errorf("expected SOURCE_UNAVAILABLE code in body, got %q", w.Body.String())
 		}
 	})
 

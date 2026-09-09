@@ -77,9 +77,11 @@ func executeSelectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	storeID := query.Get(urlParamStoreID)
-	response, err := api.ExecuteSelect(ctx, storeID, request)
+	response, err := executeSelectFunc(ctx, storeID, request)
 	returnJSON(w, r, http.StatusOK, err, response)
 }
+
+var executeSelectFunc = api.ExecuteSelect
 
 // runQueryHandler (POST exec/run_query) is defined in exec_run_query.go,
 // rewritten to the appendix's ExecutionRequest/Result envelope (Task 12).

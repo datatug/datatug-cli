@@ -21,6 +21,8 @@ import (
 func getEnvironmentSummary(w http.ResponseWriter, r *http.Request) {
 	var ref dto.ProjectItemRef
 	getProjectItem(w, r, &ref, func(ctx context.Context) (responseDTO apicore.ResponseDTO, err error) {
-		return api.GetEnvironmentSummary(ctx, ref)
+		return getEnvironmentSummaryFunc(ctx, ref)
 	}, urlParamID, "environment", "env")
 }
+
+var getEnvironmentSummaryFunc = api.GetEnvironmentSummary

@@ -53,13 +53,21 @@ func newProjectRef(q url.Values) (ref dto.ProjectRef) {
 
 // fillProjectItemRef fills ref's project fields (see fillProjectRef) and its
 // item ID from the first of idParamNames present in q, defaulting to
-// urlParamID ("id") when no idParamNames are given.
+// urlParamID ("id") when no idParamNames are given — an empty string among
+// idParamNames (the pre-existing "" convention callers used before this
+// became variadic) is skipped rather than treated as a literal query key.
 func fillProjectItemRef(ref *dto.ProjectItemRef, q url.Values, idParamNames ...string) {
 	fillProjectRef(&ref.ProjectRef, q)
-	if len(idParamNames) == 0 {
-		idParamNames = []string{urlParamID}
+	var names []string
+	for _, n := range idParamNames {
+		if n != "" {
+			names = append(names, n)
+		}
 	}
-	ref.ID = paramAlias(q, idParamNames...)
+	if len(names) == 0 {
+		names = []string{urlParamID}
+	}
+	ref.ID = paramAlias(q, names...)
 }
 
 func newProjectItemRef(q url.Values, idParamNames ...string) (ref dto.ProjectItemRef) {

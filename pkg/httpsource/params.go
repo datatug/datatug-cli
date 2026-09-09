@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo2http"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
 var placeholderRe = regexp.MustCompile(`\{([a-zA-Z0-9_]+)\}`)

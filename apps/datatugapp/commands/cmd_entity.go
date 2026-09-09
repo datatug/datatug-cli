@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -112,6 +113,36 @@ func entityShowCommandArgs() *cobra.Command {
 	return cmd
 }
 
+// loadEntityWithTables loads an entity via projectStore.LoadEntity (which
+// datatug-core v0.20.0 correctly finds regardless of the on-disk entities
+// layout), then repairs its Tables field. datatug.ProjectStore.LoadEntity
+// does a generic JSON unmarshal, which still cannot populate Tables -
+// datatug.TableKeys/DBCollectionKey has no exported fields or
+// UnmarshalJSON, see dtentity's doc comment - so a plain load always comes
+// back with Tables empty. Left unrepaired, any load-modify-save round trip
+// (entity field add/set/rm) would silently drop the entity's mapping copy
+// on save. This CLI always writes entities at the nested
+// <dir>/<id>/<id>.entity.json path (see entityFilePath in
+// entityAddCommandAction), so re-reading that same file and taking its
+// Tables via dtentity.UnmarshalEntity recovers it; a read failure here just
+// means no Tables to recover, not a load failure.
+func loadEntityWithTables(ctx context.Context, projectStore datatug.ProjectStore, projectDir, id string) (*datatug.Entity, error) {
+	entity, err := projectStore.LoadEntity(ctx, id)
+	if err != nil {
+		return entity, err
+	}
+	data, readErr := os.ReadFile(filepath.Join(projectDir, "entities", id, id+".entity.json"))
+	if readErr != nil {
+		return entity, nil
+	}
+	reparsed, parseErr := dtentity.UnmarshalEntity(data)
+	if parseErr != nil {
+		return entity, nil
+	}
+	entity.Tables = reparsed.Tables
+	return entity, nil
+}
+
 func entityShowCommandAction(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	name := argAt(args, 0)
@@ -129,7 +160,7 @@ func entityShowCommandAction(cmd *cobra.Command, args []string) error {
 
 	projectStore := v.store.GetProjectStore(v.projectID)
 
-	entity, err := projectStore.LoadEntity(ctx, name)
+	entity, err := loadEntityWithTables(ctx, projectStore, v.ProjectDir, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Exit(fmt.Sprintf("entity %q not found", name), 1)
@@ -260,7 +291,7 @@ func entityFieldRmCommandAction(cmd *cobra.Command, args []string) error {
 
 	projectStore := v.store.GetProjectStore(v.projectID)
 
-	entity, err := projectStore.LoadEntity(ctx, name)
+	entity, err := loadEntityWithTables(ctx, projectStore, v.ProjectDir, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Exit(fmt.Sprintf("entity %q not found", name), 1)
@@ -354,7 +385,7 @@ func entityFieldSetCommandAction(cmd *cobra.Command, args []string) error {
 
 	projectStore := v.store.GetProjectStore(v.projectID)
 
-	entity, err := projectStore.LoadEntity(ctx, name)
+	entity, err := loadEntityWithTables(ctx, projectStore, v.ProjectDir, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Exit(fmt.Sprintf("entity %q not found", name), 1)
@@ -651,18 +682,6 @@ func entityAddCommandAction(cmd *cobra.Command, _ []string) error {
 	// disk, regardless of whether it is readable. A corrupt/unreadable existing
 	// file MUST still block creation (never overwrite); only a genuine
 	// not-found error means the entity is absent.
-	//
-	// KNOWN GAP (tracked, not papered over here - see PR): datatug-core
-	// v0.17.0's filestore entities store reads/writes a flat
-	// <dir>/<id>.entity.json layout (storage/filestore/store_entities.go
-	// calling newFileProjectItemsStore), but this command - and the real,
-	// committed demo project - uses the nested <dir>/<id>/<id>.entity.json
-	// layout entityFilePath computes below. So LoadEntity here (and
-	// LoadEntity/LoadEntities generally, e.g. `entity list`/`show`) cannot
-	// see entities in the real, committed layout, including ones this
-	// command itself just wrote. A fix (S27) is in progress in datatug-core;
-	// once it ships, bump this module's `require` to that tag - no code
-	// change needed here.
 	entityExists := func(id string) bool {
 		_, loadErr := projectStore.LoadEntity(ctx, id)
 		return loadErr == nil || !errors.Is(loadErr, os.ErrNotExist)
@@ -845,7 +864,7 @@ func entityFieldAddCommandAction(cmd *cobra.Command, args []string) error {
 	projectStore := v.store.GetProjectStore(v.projectID)
 
 	// field add operates only on existing entities: load it, requiring presence.
-	entity, err := projectStore.LoadEntity(ctx, name)
+	entity, err := loadEntityWithTables(ctx, projectStore, v.ProjectDir, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Exit(fmt.Sprintf("entity %q not found", name), 1)

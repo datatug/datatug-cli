@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
+	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/storage"
 )
 
 // LoadedQuery is one HTTP-type QueryDef found by LoadHTTPQueries, together

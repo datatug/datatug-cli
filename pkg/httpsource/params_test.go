@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo2http"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
 func TestClassifyParams(t *testing.T) {

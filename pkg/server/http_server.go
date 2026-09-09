@@ -34,14 +34,6 @@ func (s *HttpServer) Shutdown(ctx context.Context) error {
 // newDatatugStoreFactory builds the storage.NewDatatugStore implementation
 // ServeHTTP wires up: a filestore-backed store over pathsByID, mirroring the
 // working path project_base_command.go already uses for CLI commands.
-//
-// KNOWN GAP (tracked, not papered over here - see PR): datatug-core
-// v0.17.0's filestore entities store reads/writes a flat
-// <dir>/<id>.entity.json layout, not the nested <dir>/<id>/<id>.entity.json
-// layout real projects (e.g. the demo project) use, so /datatug/entities/*
-// requests against a real project will not see its entities. A fix (S27) is
-// in progress in datatug-core; once it ships, bump this module's `require`
-// to that tag - no code change needed here.
 func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storage.Store, error) {
 	return func(id string) (v storage.Store, err error) {
 		if v, err = filestore.NewStore("files", pathsByID); err != nil {

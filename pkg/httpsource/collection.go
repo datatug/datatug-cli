@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo2http"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
 // defaultTimeout bounds one live request per collection when nothing else

@@ -10,16 +10,41 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/dal-go/dalgo/condeval"
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo2http"
 	"gopkg.in/yaml.v3"
 )
 
 const keyColumn = "$key"
+const provenanceColumn = "$provenance"
 
 var queryFormats = []string{"grid", "json", "jsonl", "yaml", "csv"}
+
+// queryProvenance is the row-level $provenance field written into json/jsonl
+// output when a query's rows came from a dalgo2http-backed source that
+// reported a dalgo2http.Provenance (today, only pkg/httpsource) — the
+// machine-readable sibling of the "source: ..." line queryRunCommandAction
+// prints to stderr. Every row of one query result shares the same value:
+// they all came from the same one collection read.
+type queryProvenance struct {
+	Source     string `json:"source"`
+	Collection string `json:"collection"`
+	FetchedAt  string `json:"fetchedAt"`
+}
+
+// newQueryProvenance builds the $provenance field from the
+// dalgo2http.Provenance a query execution observed.
+func newQueryProvenance(prov dalgo2http.Provenance) *queryProvenance {
+	return &queryProvenance{
+		Source:     string(prov.Source),
+		Collection: prov.Collection,
+		FetchedAt:  prov.FetchedAt.UTC().Format(time.RFC3339),
+	}
+}
 
 // queryRow is one result record: its key and its JSON-shaped data.
 type queryRow struct {
@@ -96,12 +121,16 @@ func rowColumns(query dal.Query, rows []queryRow) ([]string, error) {
 	return names, nil
 }
 
-func writeQueryRows(w io.Writer, format string, columns []string, rows []queryRow) error {
+// provenance is nil for every source that never reports a
+// dalgo2http.Provenance (sqlite, ingitdb, postgres); non-nil only adds the
+// $provenance field to json/jsonl output, so those other formats' and
+// backends' output stays byte-for-byte unchanged.
+func writeQueryRows(w io.Writer, format string, columns []string, rows []queryRow, provenance *queryProvenance) error {
 	switch format {
 	case "json":
-		return writeJSONRows(w, columns, rows, true)
+		return writeJSONRows(w, columns, rows, true, provenance)
 	case "jsonl":
-		return writeJSONRows(w, columns, rows, false)
+		return writeJSONRows(w, columns, rows, false, provenance)
 	case "yaml":
 		return writeYAMLRows(w, columns, rows)
 	case "csv":
@@ -113,7 +142,7 @@ func writeQueryRows(w io.Writer, format string, columns []string, rows []queryRo
 	}
 }
 
-func writeJSONRows(w io.Writer, columns []string, rows []queryRow, asArray bool) error {
+func writeJSONRows(w io.Writer, columns []string, rows []queryRow, asArray bool, provenance *queryProvenance) error {
 	if asArray {
 		if _, err := io.WriteString(w, "[\n"); err != nil {
 			return err
@@ -130,6 +159,10 @@ func writeJSONRows(w io.Writer, columns []string, rows []queryRow, asArray bool)
 			}
 			b.WriteString(",")
 			writeJSONField(&b, column, value)
+		}
+		if provenance != nil {
+			b.WriteString(",")
+			writeJSONField(&b, provenanceColumn, provenance)
 		}
 		b.WriteString("}")
 		if asArray && i < len(rows)-1 {

@@ -464,26 +464,35 @@ func TestQueryOutputHelpers(t *testing.T) {
 		t.Errorf("reserved key field = %v", err)
 	}
 	var out bytes.Buffer
-	if err := writeQueryRows(&out, "csv", []string{"a", "b", "m", "l", "n", "f", "t"}, rows); err != nil || !strings.Contains(out.String(), `k1,x,1,"{""z"":1000000}","[1,2.5]",,1.5,true`) {
+	if err := writeQueryRows(&out, "csv", []string{"a", "b", "m", "l", "n", "f", "t"}, rows, nil); err != nil || !strings.Contains(out.String(), `k1,x,1,"{""z"":1000000}","[1,2.5]",,1.5,true`) {
 		t.Errorf("csv = %q, %v", out.String(), err)
 	}
 	out.Reset()
-	if err := writeQueryRows(&out, "grid", []string{"a"}, nil); err != nil || out.String() != "$key  a\n" {
+	if err := writeQueryRows(&out, "grid", []string{"a"}, nil, nil); err != nil || out.String() != "$key  a\n" {
 		t.Errorf("empty grid = %q, %v", out.String(), err)
 	}
 	out.Reset()
-	if err := writeQueryRows(&out, "yaml", nil, nil); err != nil || out.String() != "[]\n" {
+	if err := writeQueryRows(&out, "yaml", nil, nil, nil); err != nil || out.String() != "[]\n" {
 		t.Errorf("empty yaml = %q, %v", out.String(), err)
 	}
 	out.Reset()
-	if err := writeQueryRows(&out, "yaml", []string{"a", "b", "m", "l"}, rows); err != nil || !strings.HasPrefix(out.String(), "- $key: k1\n  a: x\n  b: 1\n  m:\n    z: 1000000\n  l:\n    - 1\n    - 2.5\n") {
+	if err := writeQueryRows(&out, "yaml", []string{"a", "b", "m", "l"}, rows, nil); err != nil || !strings.HasPrefix(out.String(), "- $key: k1\n  a: x\n  b: 1\n  m:\n    z: 1000000\n  l:\n    - 1\n    - 2.5\n") {
 		t.Errorf("yaml = %q, %v", out.String(), err)
 	}
 	out.Reset()
-	if err := writeQueryRows(&out, "json", nil, nil); err != nil || out.String() != "[\n]\n" {
+	if err := writeQueryRows(&out, "json", nil, nil, nil); err != nil || out.String() != "[\n]\n" {
 		t.Errorf("empty json = %q, %v", out.String(), err)
 	}
-	if err := writeQueryRows(&out, "xml", nil, nil); err == nil {
+	if err := writeQueryRows(&out, "xml", nil, nil, nil); err == nil {
 		t.Error("unsupported format must fail")
+	}
+	out.Reset()
+	prov := &queryProvenance{Source: "live", Collection: "widgets", FetchedAt: "2026-09-09T14:40:00Z"}
+	if err := writeQueryRows(&out, "json", []string{"a"}, rows, prov); err != nil || !strings.Contains(out.String(), `"$provenance":{"source":"live","collection":"widgets","fetchedAt":"2026-09-09T14:40:00Z"}`) {
+		t.Errorf("json with provenance = %q, %v", out.String(), err)
+	}
+	out.Reset()
+	if err := writeQueryRows(&out, "csv", []string{"a"}, rows, prov); err != nil || strings.Contains(out.String(), "provenance") {
+		t.Errorf("csv must not gain a provenance column: %q, %v", out.String(), err)
 	}
 }

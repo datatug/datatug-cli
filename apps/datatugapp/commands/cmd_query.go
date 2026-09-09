@@ -7,10 +7,12 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dtql"
+	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/spf13/cobra"
@@ -35,6 +37,19 @@ const (
 	exitCodeDatabase     = 4
 	exitCodeAccessDenied = 5
 )
+
+// dbSchemesHelp lists every URL scheme dbcopy.Parse accepts, generated from
+// dbcopy.SupportedSchemes() so the --db flag's help text cannot silently
+// drift from what it actually dispatches to (as it did when http/https were
+// wired in without this text being updated).
+func dbSchemesHelp() string {
+	schemes := dbcopy.SupportedSchemes()
+	labeled := make([]string, len(schemes))
+	for i, scheme := range schemes {
+		labeled[i] = scheme + "://"
+	}
+	return strings.Join(labeled, ", ")
+}
 
 // queryCommand is the `query` resource group; the bare group shows help.
 func queryCommand() *cobra.Command {
@@ -64,7 +79,7 @@ Examples:
 		RunE:         queryRunCommandAction,
 	}
 	flags := cmd.Flags()
-	flags.String(queryDBFlag, "", "Database URL (sqlite://, ingitdb://, postgres://)")
+	flags.String(queryDBFlag, "", "Database URL ("+dbSchemesHelp()+")")
 	flags.StringP(queryFileFlag, "f", "", "DTQL query document (YAML or JSON); '-' reads stdin")
 	flags.String(queryFromFlag, "", "Select every row and field of this root collection (alternative to -f)")
 	flags.String(queryFormatFlag, "grid", "Output format: "+strings.Join(queryFormats, ", "))
@@ -167,11 +182,20 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	if len(loaded) == 0 {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
-	result, err := accesspolicies.Run(ctx, db, query, accesspolicies.Options{Principal: principal, Variables: variables, Policies: loaded, Unrestricted: o.noPolicies})
+	// rec observes the dalgo2http.Provenance (live vs snapshot) of an
+	// HTTP-source query, exactly as pkg/httpsource.ExecuteQuery does
+	// internally; every other backend never calls the observer, so rec.Last
+	// simply reports "not observed" for them.
+	rec := dalgo2http.NewRecorder()
+	result, err := accesspolicies.Run(rec.WithContext(ctx), db, query, accesspolicies.Options{Principal: principal, Variables: variables, Policies: loaded, Unrestricted: o.noPolicies})
 	if !o.quiet {
 		for _, line := range result.Lines {
 			_, _ = fmt.Fprintln(stderr, line.String())
 		}
+	}
+	prov, provOK := rec.Last()
+	if provOK {
+		_, _ = fmt.Fprintln(stderr, provenanceLine(prov))
 	}
 	if err != nil {
 		return queryFailure(err)
@@ -184,10 +208,28 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return Exit(err.Error(), 1)
 	}
-	if err := writeQueryRows(cmd.OutOrStdout(), o.format, columns, rows); err != nil {
+	var provenance *queryProvenance
+	if provOK {
+		provenance = newQueryProvenance(prov)
+	}
+	if err := writeQueryRows(cmd.OutOrStdout(), o.format, columns, rows, provenance); err != nil {
 		return Exit(err.Error(), 1)
 	}
 	return nil
+}
+
+// provenanceLine renders the stderr note printed after an HTTP-source query
+// so a demo or interactive run always shows whether the rows just printed
+// came from the live endpoint or a recorded fixtures/http/ snapshot (see
+// pkg/httpsource's Mode: ModeLiveThenSnapshot fallback) — built only from
+// what dalgo2http.Provenance actually reports (Collection, Source,
+// FetchedAt), never a fabricated endpoint URL it doesn't carry.
+func provenanceLine(prov dalgo2http.Provenance) string {
+	fetchedAt := prov.FetchedAt.UTC()
+	if prov.Source == dalgo2http.SourceSnapshot {
+		return fmt.Sprintf("source: snapshot fixtures/http/%s.json (captured %s)", prov.Collection, fetchedAt.Format("2006-01-02"))
+	}
+	return fmt.Sprintf("source: live %s (%s)", prov.Collection, fetchedAt.Format(time.RFC3339))
 }
 
 func queryFailure(err error) error {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"strings"
 
@@ -120,12 +121,23 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	}
 
 	host, port := resolveServeAddr(flags.host, flags.port, config)
+	ovdbTargets, err := config.ResolveOpenVaultDBTargets()
+	if err != nil {
+		return err
+	}
+	var agentSessionToken string
+	if len(ovdbTargets) != 0 {
+		agentSessionToken, err = server.NewAgentSessionToken()
+		if err != nil {
+			return err
+		}
+	}
 
 	// The pre-migration `--local`/`--client-url` flags were never wired to
 	// cobra (same dead-flag issue as --host/--port before this fix), so this
 	// always resolved to the datatug.app URL; preserved as-is, out of scope
 	// for this fix.
-	clientURL := fmt.Sprintf("https://datatug.app/pwa/repo/%s:%d", host, port)
+	clientURL := fmt.Sprintf("%s/pwa/repo/%s:%d", config.WebUIOrigin(), host, port)
 	var agent string
 	if port == 0 || port == 80 {
 		agent = host
@@ -133,12 +145,26 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		agent = fmt.Sprintf("%v:%v", host, port)
 	}
 
-	url := clientURL + "/agent/" + agent
+	launchURL := clientURL + "/agent/" + agent
+	if agentSessionToken != "" {
+		// A fragment is available to the launched web app but is not sent to
+		// the hosted web server, proxy logs, or the OpenVaultDB upstream.
+		launchURL += "#agentToken=" + url.QueryEscape(agentSessionToken)
+	}
 
-	if err := browser.OpenURL(url); err != nil {
-		_, _ = fmt.Printf("failed to open browser with URl=%v: %v", url, err)
+	if err := browser.OpenURL(launchURL); err != nil {
+		if agentSessionToken != "" {
+			_, _ = fmt.Println("failed to open browser for the protected DataTug session")
+		} else {
+			_, _ = fmt.Printf("failed to open browser with URL: %v", err)
+		}
 	}
 	httpServer := server.NewHttpServer()
+	if len(ovdbTargets) != 0 {
+		httpServer = server.NewHttpServerWithOpenVaultDB(server.OpenVaultDBProxyOptions{
+			Origin: config.WebUIOrigin(), SessionToken: agentSessionToken, Targets: ovdbTargets,
+		})
+	}
 	// TODO: implement graceful shutdown
 	return httpServer.ServeHTTP(pathsByID, host, port)
 }

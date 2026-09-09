@@ -16,9 +16,10 @@ type Settings struct {
 	// Intentionally do not use map
 	Projects []*ProjectRef `yaml:"projects,omitempty" json:"projects,omitempty"`
 
-	Client *ClientConfig `yaml:"client,omitempty" json:"client,omitempty"`
-	Server *ServerConfig `yaml:"server,omitempty" json:"server,omitempty"`
-	WebUI  *WebUIConfig  `yaml:"webui,omitempty" json:"webui,omitempty"`
+	Client      *ClientConfig      `yaml:"client,omitempty" json:"client,omitempty"`
+	Server      *ServerConfig      `yaml:"server,omitempty" json:"server,omitempty"`
+	WebUI       *WebUIConfig       `yaml:"webui,omitempty" json:"webui,omitempty"`
+	OpenVaultDB *OpenVaultDBConfig `yaml:"openvaultdb,omitempty" json:"-"`
 
 	Credentials map[string][]AuthCredential `yaml:"credentials,omitempty" json:"credentials,omitempty"`
 }

@@ -18,11 +18,16 @@ var agentHost string
 var agentPort int
 
 type HttpServer struct {
-	s *http.Server
+	s     *http.Server
+	proxy OpenVaultDBProxyOptions
 }
 
 func NewHttpServer() HttpServer {
 	return HttpServer{}
+}
+
+func NewHttpServerWithOpenVaultDB(proxy OpenVaultDBProxyOptions) HttpServer {
+	return HttpServer{proxy: proxy}
 }
 
 func (s *HttpServer) Shutdown(ctx context.Context) error {
@@ -72,6 +77,9 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	endpoints.RegisterDatatugHandlers("", router, endpoints.RegisterAllHandlers, logWrapper, func(r *http.Request) (context.Context, error) {
 		return r.Context(), nil
 	}, apicore.Execute)
+	if err := registerOpenVaultDBProxy(router, s.proxy); err != nil {
+		return err
+	}
 
 	s.s = &http.Server{
 		Addr:           fmt.Sprintf("%v:%v", agentHost, agentPort),

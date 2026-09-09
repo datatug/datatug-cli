@@ -1,5 +1,28 @@
 name: Go CI
 
+# ⚠ THE NAMES IN THIS FILE ARE LOAD-BEARING.
+#
+# Branch protection on main requires these three checks by exact string:
+#
+#   strongo_workflow / Build & test
+#   strongo_workflow / Lint
+#   go.mod is tidy
+#
+# A check's context is "<job id> / <job name>" for a reusable-workflow job, and
+# the job's `name:` for a normal one. So renaming the `strongo_workflow` job
+# key below, or the `go-mod-tidy` job's `name:`, or a job inside strongo/cicd's
+# shared workflow.yml, retires a required context WITHOUT retiring the
+# requirement. GitHub then waits forever for a check that will never post
+# again, and every pull request becomes permanently unmergeable — the failure
+# is silent, and it looks like CI hanging rather than a config error.
+#
+# If you rename any of them, update the protection in the same change:
+#   gh api repos/datatug/datatug-cli/branches/main/protection \
+#     --jq '.required_status_checks.contexts'
+#
+# The `paths:` filters were removed for the same reason; see the note on the
+# triggers below.
+
 # NO `paths:` filters, deliberately. This workflow's checks are REQUIRED by
 # branch protection on main, and GitHub leaves a required check that never
 # runs pending forever rather than passing it — so a paths-filtered required

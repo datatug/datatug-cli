@@ -135,6 +135,7 @@ func TestDeleteBoard(t *testing.T) {
 // ---- common: deleteProjItem ----
 
 func TestDeleteProjItem(t *testing.T) {
+	configureServedProjects(t, map[string]string{"p1": "/tmp/p1"})
 	var deletedRef dto.ProjectItemRef
 	delFunc := func(ctx context.Context, ref dto.ProjectItemRef) error {
 		deletedRef = ref
@@ -143,7 +144,7 @@ func TestDeleteProjItem(t *testing.T) {
 	handler := deleteProjItem(delFunc)
 	withFakeHandle(t, func() {
 		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodDelete, "/?storage=s1&project=p1&id=item99", "")
+		r := makeRequest(http.MethodDelete, "/?project=p1&id=item99", "")
 		handler(w, r)
 	})
 	if deletedRef.ID != "item99" {
@@ -166,16 +167,17 @@ func TestDeleteProjItemError(t *testing.T) {
 // ---- common: createProjectItem ----
 
 func TestCreateProjectItem(t *testing.T) {
+	configureServedProjects(t, map[string]string{"p1": "/tmp/p1"})
 	cap := &handleCapture{}
 	withFakeHandleCapture(t, cap, func() {
 		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodPost, "/?storage=s1&project=p1", `{}`)
+		r := makeRequest(http.MethodPost, "/?project=p1", `{}`)
 		var ref dto.ProjectRef
 		createProjectItem(w, r, &ref, nil, func(ctx context.Context) (apicore.ResponseDTO, error) {
 			return nil, nil
 		})
-		if ref.StoreID != "s1" {
-			t.Errorf("expected StoreID=s1, got %q", ref.StoreID)
+		if ref.StoreID != api.LocalStoreID {
+			t.Errorf("expected StoreID=%s, got %q", api.LocalStoreID, ref.StoreID)
 		}
 		if !cap.workerCalled {
 			t.Error("expected worker to be called")
@@ -189,18 +191,19 @@ func TestCreateProjectItem(t *testing.T) {
 // ---- common: saveProjectItem ----
 
 func TestSaveProjectItem(t *testing.T) {
+	configureServedProjects(t, map[string]string{"myproj": "/tmp/myproj"})
 	cap := &handleCapture{}
 	withFakeHandleCapture(t, cap, func() {
 		w := httptest.NewRecorder()
 		// saveProjectItem calls fillProjectItemRef with idParamName="" which reads q.Get("") — always "".
 		// So ID will be empty; we just assert the ref is filled and handle is called.
-		r := makeRequest(http.MethodPut, "/?storage=mystore&project=myproj", `{}`)
+		r := makeRequest(http.MethodPut, "/?project=myproj", `{}`)
 		var ref dto.ProjectItemRef
 		saveProjectItem(w, r, &ref, nil, func(ctx context.Context) (apicore.ResponseDTO, error) {
 			return nil, nil
 		})
-		if ref.StoreID != "mystore" {
-			t.Errorf("expected StoreID=mystore, got %q", ref.StoreID)
+		if ref.StoreID != api.LocalStoreID {
+			t.Errorf("expected StoreID=%s, got %q", api.LocalStoreID, ref.StoreID)
 		}
 		if !cap.workerCalled {
 			t.Error("expected worker to be called")
@@ -211,12 +214,13 @@ func TestSaveProjectItem(t *testing.T) {
 // ---- common: getProjectItem ----
 
 func TestGetProjectItem(t *testing.T) {
+	configureServedProjects(t, map[string]string{"p1": "/tmp/p1"})
 	cap := &handleCapture{}
 	withFakeHandleCapture(t, cap, func() {
 		w := httptest.NewRecorder()
 		// getProjectItem calls fillProjectItemRef with idParamName="" which reads q.Get("") — always "".
 		// We assert handle is called with the right verify options.
-		r := makeRequest(http.MethodGet, "/?storage=s1&project=p1", "")
+		r := makeRequest(http.MethodGet, "/?project=p1", "")
 		var ref dto.ProjectItemRef
 		getProjectItem(w, r, &ref, func(ctx context.Context) (apicore.ResponseDTO, error) {
 			return nil, nil

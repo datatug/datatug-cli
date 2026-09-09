@@ -2,11 +2,53 @@ package endpoints
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/apicontract/fixtures"
 )
+
+// TestWriteContractResponse_CORSOriginOnSuccessAndError covers S87 Fix 2:
+// writeContractResponse's success branch used to skip
+// Access-Control-Allow-Origin entirely (only writeContractError, its error
+// branch, set it) — every "new-contract" route (agent-info, semantic/columns,
+// exec/run_query) that succeeded carried no CORS header at all, which a real
+// browser blocks outright as an opaque CORS failure before the response ever
+// reaches the app (S85's finding, reproduced via the journey Playwright
+// suite's real browser — S77's own curl-based reproduction never exercises
+// CORS at all, which is why this went unnoticed until then).
+func TestWriteContractResponse_CORSOriginOnSuccessAndError(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Origin", "http://localhost:4200")
+		writeContractResponse(w, r, nil, map[string]string{"ok": "true"})
+		if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:4200" {
+			t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "http://localhost:4200")
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Origin", "http://localhost:4200")
+		writeContractResponse(w, r, newNotFound("unknown project"), nil)
+		if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:4200" {
+			t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "http://localhost:4200")
+		}
+	})
+
+	t.Run("no origin header omits it on both branches", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		writeContractResponse(w, r, nil, map[string]string{"ok": "true"})
+		if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
+			t.Errorf("Access-Control-Allow-Origin = %q, want empty", got)
+		}
+	})
+}
 
 // decodeErrorFixture reads name from datatug-core's own frozen fixture set
 // (pkg/apicontract/fixtures, v0.26.0 — the schema authority S78 adopted)

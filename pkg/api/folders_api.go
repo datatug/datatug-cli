@@ -5,7 +5,6 @@ import (
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
-	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 
@@ -14,7 +13,7 @@ func CreateFolder(ctx context.Context, request dto.CreateFolder) (folder *datatu
 	if err = request.ProjectRef.Validate(); err != nil {
 		return nil, err
 	}
-	store, err := storage.GetProjectStore(ctx, request.StoreID, request.ProjectID)
+	store, err := projectStoreForID(request.StoreID, request.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +29,7 @@ func DeleteFolder(ctx context.Context, ref dto.ProjectItemRef) error {
 	if ref.ProjectID == "" {
 		return validation.NewErrRequestIsMissingRequiredField("projectID")
 	}
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return err
 	}

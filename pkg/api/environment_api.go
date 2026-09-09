@@ -5,7 +5,6 @@ import (
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
-	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 
@@ -17,7 +16,7 @@ func GetEnvironmentSummary(ctx context.Context, ref dto.ProjectItemRef) (*datatu
 	if ref.ID == "" {
 		return nil, validation.NewErrRequestIsMissingRequiredField("envID")
 	}
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}

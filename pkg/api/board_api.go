@@ -6,13 +6,12 @@ import (
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
-	"github.com/datatug/datatug-core/pkg/storage"
 )
 
 // CreateBoard creates board
 func CreateBoard(ctx context.Context, ref dto.ProjectRef, board datatug.Board) (*datatug.Board, error) {
 	log.Printf("api.CreateBoard(ref=%+v)", ref)
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -21,7 +20,7 @@ func CreateBoard(ctx context.Context, ref dto.ProjectRef, board datatug.Board) (
 
 // GetBoard returns board by ID
 func GetBoard(ctx context.Context, ref dto.ProjectItemRef) (*datatug.Board, error) {
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +29,7 @@ func GetBoard(ctx context.Context, ref dto.ProjectItemRef) (*datatug.Board, erro
 
 // DeleteBoard deletes board
 func DeleteBoard(ctx context.Context, ref dto.ProjectItemRef) error {
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -39,7 +38,7 @@ func DeleteBoard(ctx context.Context, ref dto.ProjectItemRef) error {
 
 // SaveBoard saves board
 func SaveBoard(ctx context.Context, ref dto.ProjectRef, board datatug.Board) (*datatug.Board, error) {
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/validation"
@@ -57,6 +58,16 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	case errors.Is(err, dbcopy.ErrSourceFileMissing):
 		response.Code = "SOURCE_UNAVAILABLE"
 		w.WriteHeader(http.StatusServiceUnavailable)
+	// api.ResolveStoreID (S87): an explicit ?storage= naming a store this
+	// session did not configure for the request's project, or (today
+	// unreachable — see ErrAmbiguousStore's own doc comment) a project
+	// served by more than one configured store with no explicit ?storage=
+	// to disambiguate. Both name the "storage" parameter, matching the
+	// brief's "INVALID_REQUEST naming the parameter".
+	case errors.Is(err, api.ErrUnknownStoreID), errors.Is(err, api.ErrAmbiguousStore):
+		response.Code = "INVALID_REQUEST"
+		response.Field = urlParamStoreID
+		w.WriteHeader(http.StatusBadRequest)
 	case validation.IsBadRequestError(err):
 		w.WriteHeader(http.StatusBadRequest)
 	default:

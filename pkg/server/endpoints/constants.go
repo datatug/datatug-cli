@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-core/pkg/dto"
 )
 
@@ -34,20 +35,36 @@ func paramAlias(q url.Values, names ...string) string {
 	return ""
 }
 
-// fillProjectRef reads a request's store/project identifiers, accepting
-// both the contract's "project" name and "proj" — the name several
-// datatug-apps client call sites send (db-server.service.ts,
-// environment.service.ts) — via paramAlias.
-func fillProjectRef(ref *dto.ProjectRef, q url.Values) {
-	ref.StoreID = q.Get(urlParamStoreID)
-	if ref.StoreID == "" {
-		ref.StoreID = "firestore"
-	}
+// fillProjectRef reads a request's project id (accepting both the
+// contract's "project" name and the client's "proj" — see paramAlias) and
+// resolves its store id via api.ResolveStoreID: an explicit ?storage= is
+// honored only when it names a store this session actually configured for
+// that project; otherwise it defaults to the one store `datatug serve`
+// configured for it. It never falls back to a hardcoded "firestore" literal
+// the way it used to — no `datatug serve --project` session ever configures
+// a Firestore store, so that default made every "keep-as-is" GET route
+// (environment-summary first among them) fail downstream with "no store
+// configured for id=firestore" (S85's finding; S87 fixes it here).
+//
+// When the request carries no project id at all, store resolution is
+// skipped (ref.StoreID stays "") so the caller's own missing-project-id
+// validation reports that, rather than a confusing "unknown store" error
+// about an empty project id.
+func fillProjectRef(ref *dto.ProjectRef, q url.Values) error {
 	ref.ProjectID = paramAlias(q, urlParamProjectID, "proj")
+	if ref.ProjectID == "" {
+		return nil
+	}
+	storeID, err := api.ResolveStoreID(q.Get(urlParamStoreID), ref.ProjectID)
+	if err != nil {
+		return err
+	}
+	ref.StoreID = storeID
+	return nil
 }
 
-func newProjectRef(q url.Values) (ref dto.ProjectRef) {
-	fillProjectRef(&ref, q)
+func newProjectRef(q url.Values) (ref dto.ProjectRef, err error) {
+	err = fillProjectRef(&ref, q)
 	return
 }
 
@@ -56,8 +73,10 @@ func newProjectRef(q url.Values) (ref dto.ProjectRef) {
 // urlParamID ("id") when no idParamNames are given — an empty string among
 // idParamNames (the pre-existing "" convention callers used before this
 // became variadic) is skipped rather than treated as a literal query key.
-func fillProjectItemRef(ref *dto.ProjectItemRef, q url.Values, idParamNames ...string) {
-	fillProjectRef(&ref.ProjectRef, q)
+func fillProjectItemRef(ref *dto.ProjectItemRef, q url.Values, idParamNames ...string) error {
+	if err := fillProjectRef(&ref.ProjectRef, q); err != nil {
+		return err
+	}
 	var names []string
 	for _, n := range idParamNames {
 		if n != "" {
@@ -68,10 +87,11 @@ func fillProjectItemRef(ref *dto.ProjectItemRef, q url.Values, idParamNames ...s
 		names = []string{urlParamID}
 	}
 	ref.ID = paramAlias(q, names...)
+	return nil
 }
 
-func newProjectItemRef(q url.Values, idParamNames ...string) (ref dto.ProjectItemRef) {
-	fillProjectItemRef(&ref, q, idParamNames...)
+func newProjectItemRef(q url.Values, idParamNames ...string) (ref dto.ProjectItemRef, err error) {
+	err = fillProjectItemRef(&ref, q, idParamNames...)
 	return
 }
 
@@ -83,12 +103,18 @@ func newProjectItemRef(q url.Values, idParamNames ...string) (ref dto.ProjectIte
 // query string. Every other project-scoped endpoint's client call sends
 // `project=<projectId>` instead (see fillProjectRef/newProjectRef), so this
 // helper is deliberately scoped to just these two routes rather than folded
-// into fillProjectRef, which stays "project"-only for everything else.
-func projectRefByID(q url.Values) (ref dto.ProjectRef) {
-	ref.StoreID = q.Get(urlParamStoreID)
-	if ref.StoreID == "" {
-		ref.StoreID = "firestore"
-	}
+// into fillProjectRef, which stays "project"-only for everything else. Store
+// resolution is the same api.ResolveStoreID treatment fillProjectRef gets —
+// see its doc comment.
+func projectRefByID(q url.Values) (ref dto.ProjectRef, err error) {
 	ref.ProjectID = q.Get(urlParamID)
-	return
+	if ref.ProjectID == "" {
+		return ref, nil
+	}
+	storeID, err := api.ResolveStoreID(q.Get(urlParamStoreID), ref.ProjectID)
+	if err != nil {
+		return ref, err
+	}
+	ref.StoreID = storeID
+	return ref, nil
 }

@@ -7,7 +7,6 @@ import (
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
-	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 
@@ -26,7 +25,7 @@ func GetEntity(ctx context.Context, ref dto.ProjectItemRef) (entity *datatug.Ent
 	if err = validateEntityInput(ref.ProjectID, ref.ID); err != nil {
 		return
 	}
-	store, err := storage.GetStore(ctx, ref.StoreID)
+	store, err := storeFor(ref.StoreID)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +39,7 @@ func GetAllEntities(ctx context.Context, ref dto.ProjectRef) (entity datatug.Ent
 	if err = validateProjectInput(ref.ProjectID); err != nil {
 		return
 	}
-	store, err := storage.GetStore(ctx, ref.StoreID)
+	store, err := storeFor(ref.StoreID)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +53,7 @@ func DeleteEntity(ctx context.Context, ref dto.ProjectItemRef) error {
 	if err := validateEntityInput(ref.ProjectID, ref.ID); err != nil {
 		return err
 	}
-	store, err := storage.GetStore(ctx, ref.StoreID)
+	store, err := storeFor(ref.StoreID)
 	if err != nil {
 		return err
 	}
@@ -78,7 +77,7 @@ func SaveEntity(ctx context.Context, ref dto.ProjectRef, entity *datatug.Entity)
 		return fmt.Errorf("entity is not valid: %w", err)
 	}
 	log.Printf("Saving entity: %+v", entity)
-	store, err := storage.GetStore(ctx, ref.StoreID)
+	store, err := storeFor(ref.StoreID)
 	if err != nil {
 		return err
 	}

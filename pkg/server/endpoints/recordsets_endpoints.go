@@ -41,7 +41,11 @@ func getRecordsetDataParams(r *http.Request) (params api.RecordsetDataRequestPar
 // getRecordsetsSummary returns list of dataset definitions
 func getRecordsetsSummary(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	ref := newProjectRef(query)
+	ref, err := newProjectRef(query)
+	if err != nil {
+		handleError(err, w, r)
+		return
+	}
 	ctx, err := getContextFromRequest(r)
 	if err != nil {
 		handleError(err, w, r)

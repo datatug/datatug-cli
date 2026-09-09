@@ -5,13 +5,12 @@ import (
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
-	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 
 // AddDbServer adds db server to project
 func AddDbServer(ctx context.Context, ref dto.ProjectRef, projDbServer datatug.ProjDbServer) error {
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -22,7 +21,7 @@ func AddDbServer(ctx context.Context, ref dto.ProjectRef, projDbServer datatug.P
 //
 //goland:noinspection GoUnusedExportedFunction
 func UpdateDbServer(ctx context.Context, ref dto.ProjectRef, projDbServer datatug.ProjDbServer) error {
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -31,7 +30,7 @@ func UpdateDbServer(ctx context.Context, ref dto.ProjectRef, projDbServer datatu
 
 // DeleteDbServer adds db server to project
 func DeleteDbServer(ctx context.Context, ref dto.ProjectRef, dbServer datatug.ServerRef) (err error) {
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -44,7 +43,7 @@ func GetDbServerSummary(ctx context.Context, ref dto.ProjectRef, dbServer datatu
 		err = validation.NewBadRequestError(err)
 		return nil, err
 	}
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}

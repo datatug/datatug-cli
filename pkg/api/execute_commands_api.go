@@ -157,6 +157,7 @@ func ExecuteCommands(ctx context.Context, storeID string, request ExecuteCommand
 		return ExecuteCommandsResponse{}, err
 	}
 	projStore := dtStore.GetProjectStore(request.Project)
+	projDir, _ := projectDir(request.Project)
 
 	start := time.Now()
 	response := ExecuteCommandsResponse{Commands: make([]CommandExecutionResult, len(request.Commands))}
@@ -165,7 +166,7 @@ func ExecuteCommands(ctx context.Context, storeID string, request ExecuteCommand
 		if len(command.NamedParams) > 0 {
 			return ExecuteCommandsResponse{}, validation.NewErrBadRequestFieldValue("namedParams", "not supported for execute_commands; use GET /exec/select for a parameterized single query")
 		}
-		sourceURL, err := resolveSourceURL(ctx, projStore, command.Env, command.DB)
+		sourceURL, err := resolveSourceURL(ctx, projStore, command.Env, command.DB, projDir)
 		if err != nil {
 			return ExecuteCommandsResponse{}, fmt.Errorf("command %d: %w", i, err)
 		}

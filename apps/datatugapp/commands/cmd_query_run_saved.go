@@ -10,9 +10,9 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 )
 
@@ -65,9 +65,9 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	case datatug.QueryTypeHTTP:
 		result, err = runHTTPSavedQuery(ctx, executor, projectDir, queryDef, variables)
 	case datatug.QueryTypeSQL:
-		result, err = runSQLSavedQuery(ctx, executor, projStore, o.env, queryDef, variables)
+		result, err = runSQLSavedQuery(ctx, executor, projStore, projectDir, o.env, queryDef, variables)
 	case datatug.QueryTypeDTQL:
-		result, err = runDTQLSavedQuery(ctx, executor, projStore, o.env, queryDef, variables)
+		result, err = runDTQLSavedQuery(ctx, executor, projStore, projectDir, o.env, queryDef, variables)
 	default:
 		err = fmt.Errorf("query %q has type %q, which is not yet runnable through the policy-enforced path", o.query, queryDef.Type)
 	}
@@ -78,16 +78,19 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	if !o.quiet {
 		writeSavedQueryLimitations(stderr, result.Limitations)
 	}
-	// provenance (live vs. fixtures/http/ snapshot, PR #204) is nil here:
-	// secureread.Result carries no Provenance field - accesspolicies.Run
-	// executes through the generic dal.DB/dal.Query interface, which does
-	// not surface pkg/httpsource's dalgo2http.Provenance the way calling
-	// pkg/httpsource.ExecuteQuery directly would. Every non-HTTP backend
-	// already renders with provenance nil (byte-for-byte unchanged per
-	// PR #204); a policy-enforced saved HTTP query renders the same way -
-	// a real, documented gap versus the ad-hoc --db http:// path, not a bug,
-	// flagged in this PR's body as a follow-up.
-	if err := writeQueryRows(cmd.OutOrStdout(), o.format, result.Columns, secureRowsToQueryRows(result.Rows), nil); err != nil {
+	// provenance (live vs. fixtures/http/ snapshot, PR #204's "source: ..."
+	// line and $provenance field): secureread.Result.Provenance is set only
+	// for an HTTP-source query (S58 threaded pkg/httpsource's
+	// dalgo2http.Provenance through RunStructured into Result - see
+	// pkg/secureread/executor.go); every other backend leaves it nil, and
+	// writeQueryRows/provenanceLine already treat nil as "nothing to report",
+	// the same convention the ad-hoc --db http://... path uses.
+	var provenance *queryProvenance
+	if result.Provenance != nil {
+		_, _ = fmt.Fprintln(stderr, provenanceLine(*result.Provenance))
+		provenance = newQueryProvenance(*result.Provenance)
+	}
+	if err := writeQueryRows(cmd.OutOrStdout(), o.format, result.Columns, secureRowsToQueryRows(result.Rows), provenance); err != nil {
 		return Exit(err.Error(), 1)
 	}
 	return nil
@@ -170,15 +173,15 @@ func resolveQueryDatabase(ctx context.Context, projStore datatug.ProjectStore, e
 
 // resolveQuerySourceURL turns environment+database into the pkg/dbcopy
 // source URL secureread.Executor opens - the same shape
-// pkg/api/source_resolver.go's resolveSourceURL builds for the server (not
-// reused directly: it is unexported in pkg/api, which this stream must not
-// edit), with one deliberate difference: catalog.Path is expanded through
-// go-homedir before being embedded in the URL. pkg/api's version does not
-// expand it, which would build an unopenable "sqlite://~/datatug/dbs/..."
-// URL for demo-project-1's real catalog data (environments/*/catalogs/*/*.db.json,
-// fixed to carry "~/datatug/..." paths by the S45 dead-layout cleanup) -
-// flagged in this stream's PR body as a gap in pkg/api, not fixed there.
-func resolveQuerySourceURL(ctx context.Context, projStore datatug.ProjectStore, envID, database string) (string, error) {
+// pkg/api/source_resolver.go's resolveSourceURL builds for the server.
+// Catalog path expansion (S58 finding 1: a catalog's Path may be
+// "~"/"$HOME"-prefixed, project-relative, or already absolute - demo-
+// project-1's real catalog data uses "~/datatug/dbs/chinook-local.sqlite",
+// per the S45 dead-layout cleanup) goes through api.ResolveCatalogPath, the
+// one shared helper this stream's own PR added so pkg/api's
+// sourceURLFromCatalog and this function agree, instead of each carrying
+// its own copy.
+func resolveQuerySourceURL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envID, database string) (string, error) {
 	env, err := projStore.LoadEnvironment(ctx, envID)
 	if err != nil {
 		return "", fmt.Errorf("load environment %q: %w", envID, err)
@@ -193,7 +196,7 @@ func resolveQuerySourceURL(ctx context.Context, projStore datatug.ProjectStore, 
 			lastErr = catErr
 			continue
 		}
-		return querySourceURLFromCatalog(catalog)
+		return querySourceURLFromCatalog(catalog, projectDir)
 	}
 	if lastErr != nil {
 		return "", fmt.Errorf("database %q not found in environment %q: %w", database, envID, lastErr)
@@ -201,26 +204,26 @@ func resolveQuerySourceURL(ctx context.Context, projStore datatug.ProjectStore, 
 	return "", fmt.Errorf("environment %q has no DB servers configured; cannot resolve database %q", envID, database)
 }
 
-func querySourceURLFromCatalog(catalog datatug.DbCatalog) (string, error) {
+func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (string, error) {
 	switch catalog.Driver {
 	case "sqlite3", "sqlite":
 		if catalog.Path == "" {
 			return "", fmt.Errorf("catalog %q has no path configured for its sqlite driver", catalog.ID)
 		}
-		expanded, err := homedir.Expand(catalog.Path)
+		path, err := api.ResolveCatalogPath(projectDir, catalog.Path)
 		if err != nil {
-			return "", fmt.Errorf("expand catalog %q path %q: %w", catalog.ID, catalog.Path, err)
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
-		return "sqlite://" + expanded, nil
+		return "sqlite://" + path, nil
 	case "ingitdb":
 		if catalog.Path == "" {
 			return "", fmt.Errorf("catalog %q has no path configured for its ingitdb driver", catalog.ID)
 		}
-		expanded, err := homedir.Expand(catalog.Path)
+		path, err := api.ResolveCatalogPath(projectDir, catalog.Path)
 		if err != nil {
-			return "", fmt.Errorf("expand catalog %q path %q: %w", catalog.ID, catalog.Path, err)
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
-		return "ingitdb://" + expanded, nil
+		return "ingitdb://" + path, nil
 	default:
 		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3 or ingitdb)", catalog.Driver)
 	}
@@ -229,8 +232,8 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog) (string, error) {
 // runSQLSavedQuery resolves the SQL query's environment+database, binds its
 // named "@param" placeholders (see bindSQLNamedParams) and runs it through
 // Executor.RunNativeSQL.
-func runSQLSavedQuery(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, envFlag string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
-	sourceURL, err := resolveSQLOrDTQLSourceURL(ctx, projStore, envFlag, queryDef)
+func runSQLSavedQuery(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
+	sourceURL, err := resolveSQLOrDTQLSourceURL(ctx, projStore, projectDir, envFlag, queryDef)
 	if err != nil {
 		return secureread.Result{}, err
 	}
@@ -244,15 +247,15 @@ func runSQLSavedQuery(ctx context.Context, executor *secureread.Executor, projSt
 // runDTQLSavedQuery resolves the DTQL query's environment+database and runs
 // it through Executor.RunDTQL, which resolves its "param:" nodes (and
 // $currentUser) from variables the same way accesspolicies.Run always has.
-func runDTQLSavedQuery(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, envFlag string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
-	sourceURL, err := resolveSQLOrDTQLSourceURL(ctx, projStore, envFlag, queryDef)
+func runDTQLSavedQuery(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
+	sourceURL, err := resolveSQLOrDTQLSourceURL(ctx, projStore, projectDir, envFlag, queryDef)
 	if err != nil {
 		return secureread.Result{}, err
 	}
 	return executor.RunDTQL(ctx, sourceURL, []byte(queryDef.Text), variables)
 }
 
-func resolveSQLOrDTQLSourceURL(ctx context.Context, projStore datatug.ProjectStore, envFlag string, queryDef *datatug.QueryDef) (string, error) {
+func resolveSQLOrDTQLSourceURL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (string, error) {
 	envID, err := resolveQueryEnvironment(ctx, projStore, envFlag)
 	if err != nil {
 		return "", err
@@ -261,7 +264,7 @@ func resolveSQLOrDTQLSourceURL(ctx context.Context, projStore datatug.ProjectSto
 	if err != nil {
 		return "", err
 	}
-	return resolveQuerySourceURL(ctx, projStore, envID, database)
+	return resolveQuerySourceURL(ctx, projStore, projectDir, envID, database)
 }
 
 // runHTTPSavedQuery runs an HTTP-type query through pkg/httpsource, which

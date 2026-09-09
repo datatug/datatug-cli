@@ -227,7 +227,9 @@ func TestQueryRunSaved_SQL(t *testing.T) {
 // TestQueryRunSaved_HTTP runs the demo's country-facts HTTP query with its
 // live endpoint deliberately unreachable (breakHTTPQueryNetwork), proving
 // the result comes from the committed fixtures/http/country-facts.json
-// snapshot — no network involved.
+// snapshot — no network involved — and (S58 finding 2) that this reports
+// the same "source: snapshot ..." stderr line and $provenance JSON field
+// PR #204's ad-hoc `--db http://...` path does.
 func TestQueryRunSaved_HTTP(t *testing.T) {
 	projectDir := setupSavedQueryProject(t)
 
@@ -244,6 +246,20 @@ func TestQueryRunSaved_HTTP(t *testing.T) {
 	}
 	if rows[0]["currency"] != "CAD" {
 		t.Errorf("currency = %v, want CAD (fixtures/http/country-facts.json's recorded value): %+v", rows[0]["currency"], rows[0])
+	}
+
+	if !strings.Contains(stderr, "source: snapshot fixtures/http/country-facts.json") {
+		t.Errorf("stderr missing the snapshot provenance line: %q", stderr)
+	}
+	provenance, ok := rows[0]["$provenance"].(map[string]any)
+	if !ok {
+		t.Fatalf("row missing $provenance field: %+v", rows[0])
+	}
+	if provenance["source"] != "snapshot" {
+		t.Errorf("$provenance.source = %v, want snapshot: %+v", provenance["source"], provenance)
+	}
+	if provenance["collection"] != "country-facts" {
+		t.Errorf("$provenance.collection = %v, want country-facts: %+v", provenance["collection"], provenance)
 	}
 }
 

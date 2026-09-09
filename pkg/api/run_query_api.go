@@ -75,7 +75,8 @@ func RunQuery(ctx context.Context, request RunQueryRequest) (RunQueryResponse, e
 		return RunQueryResponse{}, err
 	}
 	projStore := store.GetProjectStore(request.ProjectID)
-	sourceURL, err := resolveSourceURL(ctx, projStore, request.Environment, request.Database)
+	projDir, _ := projectDir(request.ProjectID)
+	sourceURL, err := resolveSourceURL(ctx, projStore, request.Environment, request.Database, projDir)
 	if err != nil {
 		return RunQueryResponse{}, err
 	}
@@ -93,9 +94,27 @@ func RunQuery(ctx context.Context, request RunQueryRequest) (RunQueryResponse, e
 }
 
 // runSavedQuery loads request.QueryID from the project store and dispatches
-// on its declared Type: SQL text through RunNativeSQL, DTQL through RunDTQL.
-// Both read the query's document/text sidecar file directly (loadQueryDocument)
-// since LoadQuery does not hydrate QueryDef.Text from it yet.
+// on its declared Type: SQL text through RunNativeSQL, DTQL through
+// RunDTQL. QueryTypeHTTP falls to the default case below and is refused,
+// not dispatched — sourceURL here is always built from
+// request.Environment/request.Database (RunQuery resolves it unconditionally
+// before calling this function), which is the wrong shape for an HTTP
+// source (a project-wide "http://<projectDir>" URL, unrelated to any
+// environment/database — see
+// apps/datatugapp/commands/cmd_query_run_saved.go's runHTTPSavedQuery for
+// the CLI's own working equivalent). Wiring HTTP dispatch in here needs
+// RunQuery's env/database validation to become conditional on query type
+// first; S58 threaded secureread.Result.Provenance and
+// QueryResultResponse.Provenance through this file so that dispatch, once
+// added, reports live/snapshot correctly with no further response-shape
+// change — but did not add the dispatch itself (out of that stream's
+// scope; flagged in its PR body).
+//
+// Both SQL and DTQL still read the query's document/text sidecar file
+// directly (loadQueryDocument) rather than queryDef.Text, even though
+// datatug-core v0.23.0's LoadQuery now hydrates it (see
+// apps/datatugapp/commands/cmd_query_run_saved.go, which already switched)
+// — also out of S58's scope; flagged as a follow-up, not fixed here.
 func runSavedQuery(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, request RunQueryRequest, sourceURL string) (secureread.Result, error) {
 	queryDef, err := projStore.LoadQuery(ctx, request.QueryID)
 	if err != nil {

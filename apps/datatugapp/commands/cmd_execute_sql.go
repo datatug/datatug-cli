@@ -27,7 +27,9 @@ func updateUrlConfigCommandArgs() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	flags.StringP("driver", "D", "", "SQL driver")
-	flags.StringP("host", "h", "localhost", "Database host")
+	// No shorthand: "-h" collides with cobra's own --help flag, which it
+	// auto-registers on first Execute and panics if the shorthand is taken.
+	flags.String("host", "localhost", "Database host")
 	flags.String("mode", "", "rw - ReadWrite, ro - ReadOnly (default for SQLite)")
 	flags.String("port", "", "Database port")
 	flags.StringP("user", "U", "", "Database user")

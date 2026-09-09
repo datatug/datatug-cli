@@ -2,9 +2,10 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
-	"os"
 	"path/filepath"
 
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -30,11 +31,15 @@ func validateAction(cmd *cobra.Command, _ []string) (err error) {
 	var repoRootFile *datatug.RepoRootFile
 
 	repoRootFile, err = filestore.LoadRootDatatugFile(dirPath)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to load root repo file: %w", err)
-	}
-
-	if os.IsNotExist(err) {
+	if err != nil {
+		// filestore.LoadRootDatatugFile wraps the underlying os error with
+		// fmt.Errorf("...: %w", ...); os.IsNotExist predates errors.Is and
+		// does not see through that wrapping, so it never recognizes a
+		// missing root .datatug.yaml here - use errors.Is against
+		// fs.ErrNotExist instead, which does unwrap.
+		if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("failed to load root repo file: %w", err)
+		}
 		return validateProject(dirPath)
 	}
 

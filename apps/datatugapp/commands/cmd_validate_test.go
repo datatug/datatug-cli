@@ -73,6 +73,52 @@ func TestQueryDefTarget_Validate_AcceptsCredentialFreeDTQLQuery(t *testing.T) {
 	}
 }
 
+// TestValidateAction_FallsBackToSingleProjectMode is the repro/regression
+// test for the audit's "`datatug validate --dir <single-project-dir>` errors
+// instead of falling back to single-project mode when there is no root
+// .datatug.yaml" finding. validateAction's `os.IsNotExist(err)` check never
+// fires: filestore.LoadRootDatatugFile wraps the underlying not-exist error
+// with fmt.Errorf("...: %w", ...), and os.IsNotExist predates errors.Is - it
+// only recognizes a handful of concrete os error types, not an arbitrary
+// %w-wrapped one, so the wrapped not-exist error is always treated as a real
+// failure instead of the "no root file, fall back to single-project mode"
+// signal it's meant to be.
+func TestValidateAction_FallsBackToSingleProjectMode(t *testing.T) {
+	dir := t.TempDir()
+	initCmd := initCommand()
+	initCmd.SetArgs([]string{"proj1", dir})
+	if err := initCmd.Execute(); err != nil {
+		t.Fatalf("init fixture project: %v", err)
+	}
+
+	cmd := testCommandArgs()
+	cmd.SetArgs([]string{"--dir", dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("validate --dir %s (no root .datatug.yaml): %v", dir, err)
+	}
+}
+
+// TestValidateAction_RootFileMissing_vs_RealError distinguishes "no root
+// file, fall back" from "root file present but unreadable for a real reason"
+// directly against validateAction's actual predicate, independent of the
+// filesystem: a bare os.ErrNotExist must fall back (via validateProject,
+// which then fails because the single-project dir isn't a valid project
+// either - proving the fallback path was actually taken, not swallowed) and
+// a non-not-exist error must still be surfaced as-is.
+func TestValidateAction_RootFileMissing_vs_RealError(t *testing.T) {
+	dir := t.TempDir() // empty: not a valid single project either
+
+	cmd := testCommandArgs()
+	cmd.SetArgs([]string{"--dir", dir})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected an error - dir has no root file AND is not a valid single project")
+	}
+	if strings.Contains(err.Error(), "failed to load root repo file") {
+		t.Errorf("error still reports the root-file load failure instead of falling back to single-project mode: %v", err)
+	}
+}
+
 // TestValidateProject_RealDemoProject exercises the exact path `datatug
 // validate` uses (validateProject: initProjectCommand -> LoadProject ->
 // Validate) against the real, committed demo project, proving the

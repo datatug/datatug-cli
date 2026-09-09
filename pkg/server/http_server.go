@@ -87,6 +87,7 @@ func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storag
 func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int, session secureread.Session, caps api.Capabilities) error {
 	storage.NewDatatugStore = newDatatugStoreFactory(pathsByID)
 	api.ConfigureSecureSession(session, pathsByID, caps)
+	api.WarnMissingSourceFiles(context.Background(), pathsByID)
 
 	// apicore.Execute (wired in below) panics if this hook is left nil
 	// (sneat-go-core/apicore.VerifyRequest) — datatug serve has no

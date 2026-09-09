@@ -12,6 +12,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -153,6 +154,9 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 		}
 		if errors.Is(err, secureread.ErrAccessDenied) {
 			return apicontract.Result{}, contractErrAccessDenied(err.Error())
+		}
+		if errors.Is(err, dbcopy.ErrSourceFileMissing) {
+			return apicontract.Result{}, newSourceUnavailable(err.Error())
 		}
 		return apicontract.Result{}, newInvalidRequest("", err.Error())
 	}

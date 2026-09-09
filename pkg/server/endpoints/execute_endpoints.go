@@ -61,8 +61,8 @@ func executeSelectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	cols := query.Get("cols")
 	request := api.SelectRequest{
-		Project:     query.Get("proj"),
-		Environment: query.Get("env"),
+		Project:     paramAlias(query, "proj", urlParamProjectID),
+		Environment: paramAlias(query, "env", "environment"),
 		Database:    query.Get("db"),
 		From:        query.Get("from"),
 		SQL:         query.Get("sql"),
@@ -77,9 +77,11 @@ func executeSelectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	storeID := query.Get(urlParamStoreID)
-	response, err := api.ExecuteSelect(ctx, storeID, request)
+	response, err := executeSelectFunc(ctx, storeID, request)
 	returnJSON(w, r, http.StatusOK, err, response)
 }
+
+var executeSelectFunc = api.ExecuteSelect
 
 // runQueryHandler (POST exec/run_query) is defined in exec_run_query.go,
 // rewritten to the appendix's ExecutionRequest/Result envelope (Task 12).

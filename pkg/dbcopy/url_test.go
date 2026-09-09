@@ -225,3 +225,64 @@ func TestOpen_InGitDB_OpensEmptyProject(t *testing.T) {
 			"dalgo2ingitdb is single-writer and must not advertise ConcurrencyAvailable")
 	}
 }
+
+// TestCheckSourceFile covers S80 Fix 2: a missing file-backed source used to
+// surface only through the driver's own opaque "unable to open database
+// file" text (sqlite) reaching an HTTP 500, or an equivalent ingitdb path
+// failure — CheckSourceFile gives every caller (Open, and
+// pkg/secureread's own read-only connection) one typed, errors.Is-checkable
+// signal naming the path and the `datatug demo` recovery.
+func TestCheckSourceFile(t *testing.T) {
+	t.Parallel()
+
+	t.Run("existing file is nil", func(t *testing.T) {
+		t.Parallel()
+		absPath, err := filepath.Abs("testdata/chinook.db")
+		assert.NoError(t, err)
+		assert.NoError(t, CheckSourceFile(absPath))
+	})
+
+	t.Run("existing directory is nil", func(t *testing.T) {
+		t.Parallel()
+		assert.NoError(t, CheckSourceFile(t.TempDir()))
+	})
+
+	t.Run("missing path wraps ErrSourceFileMissing naming the path and recovery", func(t *testing.T) {
+		t.Parallel()
+		missing := filepath.Join(t.TempDir(), "does-not-exist.sqlite")
+		err := CheckSourceFile(missing)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, ErrSourceFileMissing), "expected ErrSourceFileMissing, got %v", err)
+		assert.Contains(t, err.Error(), missing)
+		assert.Contains(t, err.Error(), "datatug demo")
+	})
+}
+
+// TestOpen_SQLite_MissingFile_WrapsErrSourceFileMissing proves Open's sqlite
+// branch reports ErrSourceFileMissing (not the raw driver error) before the
+// modernc.org/sqlite driver ever runs, for a path that simply does not
+// exist — this is the exact chinook-local.sqlite-not-fetched-yet scenario
+// S77 found (`datatug serve --project` with no prior `datatug demo` run).
+func TestOpen_SQLite_MissingFile_WrapsErrSourceFileMissing(t *testing.T) {
+	t.Parallel()
+	missing := filepath.Join(t.TempDir(), "chinook-local.sqlite")
+	ref, err := Parse("sqlite://" + missing)
+	assert.NoError(t, err)
+
+	db, openErr := ref.Open(context.Background())
+	assert.Nil(t, db)
+	assert.True(t, errors.Is(openErr, ErrSourceFileMissing), "expected ErrSourceFileMissing, got %v", openErr)
+}
+
+// TestOpen_InGitDB_MissingPath_WrapsErrSourceFileMissing is the equivalent
+// inGitDB case the brief names alongside the sqlite one.
+func TestOpen_InGitDB_MissingPath_WrapsErrSourceFileMissing(t *testing.T) {
+	t.Parallel()
+	missing := filepath.Join(t.TempDir(), "does-not-exist-project")
+	ref, err := Parse("ingitdb://" + missing)
+	assert.NoError(t, err)
+
+	db, openErr := ref.Open(context.Background())
+	assert.Nil(t, db)
+	assert.True(t, errors.Is(openErr, ErrSourceFileMissing), "expected ErrSourceFileMissing, got %v", openErr)
+}

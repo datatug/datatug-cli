@@ -17,7 +17,7 @@ import (
 func semanticColumnsHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	scope := apicontract.Scope{
-		Project: q.Get(urlParamProjectID), Environment: q.Get("environment"), SecurityContextID: q.Get("securityContextId"),
+		Project: paramAlias(q, urlParamProjectID, "proj"), Environment: paramAlias(q, "environment", "env"), SecurityContextID: q.Get("securityContextId"),
 	}
 	ref := apicontract.SourceRef{Source: q.Get("source"), Collection: q.Get("collection")}
 	resp, err := computeSemanticColumns(r.Context(), scope, ref)

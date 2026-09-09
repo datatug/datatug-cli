@@ -193,7 +193,7 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 
 	host, port := resolveServeAddr(flags.host, flags.port, config)
 
-	agentURL, url := serveAgentURLs(host, port)
+	agentURL, url := serveAgentURLs(bannerAddr(host, flags.host), port)
 
 	// Founder ruling 2026-09-09: serve never opens a browser by default; it
 	// prints the link and opens a browser only with --open-browser.
@@ -226,6 +226,28 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 // https://host:port and cannot reach this plain-HTTP server; the
 // `http-<host>:<port>` form carries the scheme explicitly, so the id always
 // includes the scheme, the resolved host and the resolved port.
+// bannerAddr returns the host serveAgentURLs' banner should print for
+// resolvedHost (resolveServeAddr's output, what net.Listen actually binds).
+// S77 found the banner printing the literal string "localhost" while the
+// process actually binds 127.0.0.1 (Go resolves the "localhost" hostname to
+// that concrete loopback address before binding, but the pre-bind banner
+// never saw the resolved value) — a real CORS-relevant mismatch, not merely
+// cosmetic. When the caller never passed --host (explicitHost == ""), the
+// default "localhost" is translated to the concrete address net.Listen
+// binds it to; any other resolvedHost (an explicit --host, or one resolved
+// from ~/.datatug.yaml's server: section) passes through unchanged. When
+// --host WAS given explicitly, exactly what the caller typed is printed,
+// never silently replaced.
+func bannerAddr(resolvedHost, explicitHost string) string {
+	if explicitHost != "" {
+		return resolvedHost
+	}
+	if resolvedHost == "localhost" {
+		return "127.0.0.1"
+	}
+	return resolvedHost
+}
+
 func serveAgentURLs(host string, port int) (agentURL, webUIURL string) {
 	hostPort := fmt.Sprintf("%s:%d", host, port)
 	agentURL = "http://" + hostPort

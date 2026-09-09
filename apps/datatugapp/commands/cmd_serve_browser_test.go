@@ -35,3 +35,46 @@ func TestServeAgentURLsCarrySchemeHostAndPort(t *testing.T) {
 		t.Errorf("port 80 must stay explicit in the store id, got %q", webUIURL)
 	}
 }
+
+// TestBannerAddr covers the bug S77 found: the serve banner printed the
+// literal string "localhost" while the process actually bound 127.0.0.1.
+func TestBannerAddr(t *testing.T) {
+	tests := []struct {
+		name         string
+		resolvedHost string
+		explicitHost string
+		want         string
+	}{
+		{
+			name:         "default localhost prints the real bind address",
+			resolvedHost: "localhost",
+			explicitHost: "",
+			want:         "127.0.0.1",
+		},
+		{
+			name:         "explicit --host localhost is printed exactly as given",
+			resolvedHost: "localhost",
+			explicitHost: "localhost",
+			want:         "localhost",
+		},
+		{
+			name:         "explicit --host wildcard passes through unchanged",
+			resolvedHost: "0.0.0.0",
+			explicitHost: "0.0.0.0",
+			want:         "0.0.0.0",
+		},
+		{
+			name:         "a config-resolved non-localhost host passes through unchanged",
+			resolvedHost: "example.com",
+			explicitHost: "",
+			want:         "example.com",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bannerAddr(tt.resolvedHost, tt.explicitHost); got != tt.want {
+				t.Errorf("bannerAddr(%q, %q) = %q, want %q", tt.resolvedHost, tt.explicitHost, got, tt.want)
+			}
+		})
+	}
+}

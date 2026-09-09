@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
@@ -52,6 +53,29 @@ func SupportedSchemes() []string {
 // until a PostgreSQL DALgo driver implements the three capability interfaces
 // (dbschema.SchemaReader, ddl.SchemaModifier, dal.ConcurrencyAware).
 var ErrPostgresNotWired = errors.New("PostgreSQL backend not yet wired")
+
+// ErrSourceFileMissing is wrapped by CheckSourceFile (and, through it, by
+// Open's sqlite/ingitdb branches) when a file-backed source does not exist
+// on disk — e.g. `datatug serve --project` against a demo project before
+// `datatug demo` has fetched ~/datatug/dbs/chinook-local.sqlite. Checked
+// with errors.Is so a caller (pkg/secureread, pkg/server/endpoints) can map
+// it to api-contract.md's SOURCE_UNAVAILABLE (503) instead of letting the
+// driver's own opaque "unable to open database file" text reach an HTTP 500.
+var ErrSourceFileMissing = errors.New("source file does not exist")
+
+// CheckSourceFile reports ErrSourceFileMissing (wrapping path and a
+// `datatug demo` recovery hint) when path does not exist on disk, and nil
+// when it does or when the stat fails for any other reason (permissions,
+// etc. — left for the underlying driver to report on its own terms). It is
+// exported so callers that open a file-backed source through a path other
+// than BackendRef.Open (pkg/secureread's read-only native-SQL connection)
+// can perform the identical check.
+func CheckSourceFile(path string) error {
+	if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
+		return fmt.Errorf("%w: %s (run `datatug demo` to fetch the demo project's data fixtures)", ErrSourceFileMissing, path)
+	}
+	return nil
+}
 
 // BackendRef is a parsed --from/--to URL.
 type BackendRef struct {
@@ -208,6 +232,9 @@ func extractScheme(rawURL string) string {
 func (r BackendRef) Open(ctx context.Context) (dal.DB, error) {
 	switch r.Scheme {
 	case "sqlite":
+		if err := CheckSourceFile(r.Path); err != nil {
+			return nil, err
+		}
 		db, err := dalgo2sqlite.NewDatabase(r.Path)
 		if err != nil {
 			return nil, fmt.Errorf("open sqlite %q: %w", r.Path, err)
@@ -215,6 +242,9 @@ func (r BackendRef) Open(ctx context.Context) (dal.DB, error) {
 		return db, nil
 
 	case "ingitdb":
+		if err := CheckSourceFile(r.Path); err != nil {
+			return nil, err
+		}
 		db, err := dalgo2ingitdb.NewDatabase(r.Path, validator.NewCollectionsReader())
 		if err != nil {
 			return nil, fmt.Errorf("open ingitdb %q: %w", r.Path, err)

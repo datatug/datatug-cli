@@ -34,9 +34,11 @@ func getDbServerSummary(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		handleError(err, w, r)
 	}
-	summary, err := api.GetDbServerSummary(ctx, ref, dbServer)
+	summary, err := getDbServerSummaryFunc(ctx, ref, dbServer)
 	returnJSON(w, r, http.StatusOK, err, summary)
 }
+
+var getDbServerSummaryFunc = api.GetDbServerSummary
 
 var deleteDbServerFunc = api.DeleteDbServer
 

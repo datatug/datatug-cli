@@ -29,7 +29,11 @@ func getDbServerSummary(w http.ResponseWriter, r *http.Request) {
 		Driver: q.Get("driver"),
 		Host:   q.Get("host"),
 	}
-	ref := newProjectRef(q)
+	ref, err := newProjectRef(q)
+	if err != nil {
+		handleError(err, w, r)
+		return
+	}
 	ctx, err := getContextFromRequest(r)
 	if err != nil {
 		handleError(err, w, r)
@@ -56,7 +60,11 @@ func deleteDbServer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		handleError(err, w, r)
 	}
-	ref := newProjectRef(q)
+	ref, err := newProjectRef(q)
+	if err != nil {
+		handleError(err, w, r)
+		return
+	}
 	if err = deleteDbServerFunc(ctx, ref, dbServer); err != nil {
 		handleError(err, w, r)
 		return

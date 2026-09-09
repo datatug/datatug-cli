@@ -7,7 +7,6 @@ import (
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
-	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 
@@ -16,7 +15,7 @@ func GetRecordsetsSummary(ctx context.Context, ref dto.ProjectRef) (*dto.ProjRec
 	if ref.ProjectID == "" {
 		return nil, validation.NewErrRequestIsMissingRequiredField("project")
 	}
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +77,7 @@ func getRecordsetFolder(folder *dto.ProjRecordsetSummary, paths []string) *dto.P
 
 // GetDatasetDefinition returns definition of a dataset by ID
 func GetDatasetDefinition(ctx context.Context, ref dto.ProjectItemRef) (dataset *datatug.RecordsetDefinition, err error) {
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}

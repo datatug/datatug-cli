@@ -11,7 +11,11 @@ import (
 
 func deleteProjItem(del func(ctx context.Context, ref dto.ProjectItemRef) error) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ref := newProjectItemRef(r.URL.Query())
+		ref, err := newProjectItemRef(r.URL.Query())
+		if err != nil {
+			handleError(err, w, r)
+			return
+		}
 		worker := func(ctx context.Context) (responseDTO apicore.ResponseDTO, err error) {
 			return nil, del(ctx, ref)
 		}
@@ -27,7 +31,10 @@ func createProjectItem(
 	f func(ctx context.Context) (responseDTO apicore.ResponseDTO, err error),
 ) {
 	log.Printf("createProjectItem(ref=%+v, request: %T)", ref, requestDTO)
-	fillProjectRef(ref, r.URL.Query())
+	if err := fillProjectRef(ref, r.URL.Query()); err != nil {
+		handleError(err, w, r)
+		return
+	}
 	handle(w, r, requestDTO, VerifyRequest{
 		AuthRequired:     true,
 		MinContentLength: 0,
@@ -41,7 +48,10 @@ func saveProjectItem(
 	requestDTO apicore.RequestDTO,
 	f func(ctx context.Context) (responseDTO apicore.ResponseDTO, err error),
 ) {
-	fillProjectItemRef(ref, r.URL.Query())
+	if err := fillProjectItemRef(ref, r.URL.Query()); err != nil {
+		handleError(err, w, r)
+		return
+	}
 	handle(w, r, requestDTO, VerifyRequest{
 		AuthRequired:     true,
 		MinContentLength: 0,
@@ -60,7 +70,10 @@ func getProjectItem(
 	f func(ctx context.Context) (responseDTO apicore.ResponseDTO, err error),
 	idParamNames ...string,
 ) {
-	fillProjectItemRef(ref, r.URL.Query(), idParamNames...)
+	if err := fillProjectItemRef(ref, r.URL.Query(), idParamNames...); err != nil {
+		handleError(err, w, r)
+		return
+	}
 	handle(w, r, nil, VerifyRequest{
 		AuthRequired: true,
 	}, http.StatusCreated, getContextFromRequest, f)

@@ -41,7 +41,11 @@ func (ProjectAgentEndpoints) deleteProject(w http.ResponseWriter, _ *http.Reques
 // (project.service.ts's getProjectSummaryRequest) sends the project id as
 // `?id=`, not `?project=` — see projectRefByID.
 func getProjectSummary(w http.ResponseWriter, r *http.Request) {
-	ref := projectRefByID(r.URL.Query())
+	ref, err := projectRefByID(r.URL.Query())
+	if err != nil {
+		handleError(err, w, r)
+		return
+	}
 	worker := func(ctx context.Context) (response apicore.ResponseDTO, err error) {
 		return api.GetProjectSummary(ctx, ref)
 	}

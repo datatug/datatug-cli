@@ -32,6 +32,7 @@ func TestCreateQueryVar(t *testing.T) {
 // TestDeleteDbServerSuccess covers the returnJSON success line in deleteDbServer
 // by stubbing the deleteDbServerFunc seam to return nil.
 func TestDeleteDbServerSuccess(t *testing.T) {
+	configureServedProjects(t, map[string]string{"p1": "/tmp/p1"})
 	savedCtx := getContextFromRequest
 	savedJSON := returnJSON
 	savedDel := deleteDbServerFunc
@@ -50,7 +51,7 @@ func TestDeleteDbServerSuccess(t *testing.T) {
 		return nil
 	}
 	w := httptest.NewRecorder()
-	r := makeRequest(http.MethodDelete, "/?project=p1&storage=s1", "")
+	r := makeRequest(http.MethodDelete, "/?project=p1", "")
 	deleteDbServer(w, r)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)

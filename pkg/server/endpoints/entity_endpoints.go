@@ -24,7 +24,11 @@ func getEntities(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		handleError(err, w, r)
 	}
-	ref := newProjectRef(r.URL.Query())
+	ref, err := newProjectRef(r.URL.Query())
+	if err != nil {
+		handleError(err, w, r)
+		return
+	}
 	v, err := api.GetAllEntities(ctx, ref)
 	returnJSON(w, r, http.StatusOK, err, v)
 }

@@ -9,6 +9,25 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
+// writeCORSOrigin echoes the request's Origin as Access-Control-Allow-Origin.
+// writeContractResponse's success branch used to skip this entirely — only
+// writeContractError set it — so every "new-contract" route (agent-info,
+// semantic/columns, exec/run_query) that succeeded carried no CORS header at
+// all. curl (S77's own manual reproduction tool) never exercises CORS, so
+// this went unnoticed until a real browser blocked it outright as an opaque
+// CORS failure, distinct in shape from every other request's ordinary
+// HttpErrorResponse (agent-info always succeeds — nil error, never routed
+// through writeContractError — so it was the one route this gap reliably
+// hit; S85's finding, reproduced through the journey Playwright suite's real
+// browser). legacy-envelope routes never had this asymmetry: returnJSON and
+// handleError both already set this header on every response, success or
+// error alike (util_json.go, util_error_handling.go).
+func writeCORSOrigin(w http.ResponseWriter, r *http.Request) {
+	if origin := r.Header.Get("Origin"); origin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+	}
+}
+
 // writeContractResponse writes content (any of this task's rewritten
 // envelopes) as the response body, or err as the appendix's exact error
 // envelope with err's mapped HTTP status, when err is non-nil. Every
@@ -17,6 +36,7 @@ import (
 // writeSemanticJSON (both of which predate the appendix's
 // {error:{code,message,field,requestId,targets?}} shape).
 func writeContractResponse(w http.ResponseWriter, r *http.Request, err error, content any) {
+	writeCORSOrigin(w, r)
 	if err != nil {
 		writeContractError(w, r, err)
 		return
@@ -38,10 +58,7 @@ func writeContractResponse(w http.ResponseWriter, r *http.Request, err error, co
 // contract-conformant caller: every path this stream added to the request
 // lifecycle returns a typed *contractError instead).
 func writeContractError(w http.ResponseWriter, r *http.Request, err error) {
-	origin := r.Header.Get("Origin")
-	if origin != "" {
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-	}
+	writeCORSOrigin(w, r)
 	w.Header().Set("Content-Type", "application/json")
 
 	var ce *contractError

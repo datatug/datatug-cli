@@ -14,7 +14,11 @@ func getProjectFull(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		handleError(err, w, r)
 	}
-	ref := projectRefByID(r.URL.Query())
+	ref, err := projectRefByID(r.URL.Query())
+	if err != nil {
+		handleError(err, w, r)
+		return
+	}
 	project, err := api.GetProjectFull(ctx, ref)
 	returnJSON(w, r, http.StatusOK, err, project)
 }

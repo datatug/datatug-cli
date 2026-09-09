@@ -5,7 +5,6 @@ import (
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
-	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 
@@ -25,7 +24,7 @@ func CreateQuery(ctx context.Context, request dto.CreateQuery) (*datatug.QueryDe
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
-	store, err := storage.GetProjectStore(ctx, request.StoreID, request.ProjectID)
+	store, err := projectStoreForID(request.StoreID, request.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +36,7 @@ func UpdateQuery(ctx context.Context, request dto.UpdateQuery) (*datatug.QueryDe
 	if err := request.Validate(); err != nil {
 		return nil, validation.NewBadRequestError(err)
 	}
-	store, err := storage.GetProjectStore(ctx, request.StoreID, request.ProjectID)
+	store, err := projectStoreForID(request.StoreID, request.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +48,7 @@ func DeleteQuery(ctx context.Context, ref dto.ProjectItemRef) error {
 	if err := ref.Validate(); err != nil {
 		return err
 	}
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -61,7 +60,7 @@ func GetQuery(ctx context.Context, ref dto.ProjectItemRef) (query *datatug.Query
 	if err = ref.Validate(); err != nil {
 		return query, err
 	}
-	store, err := storage.GetProjectStore(ctx, ref.StoreID, ref.ProjectID)
+	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}

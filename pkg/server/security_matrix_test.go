@@ -224,7 +224,7 @@ func postJSON(t *testing.T, baseURL, path string, body any) (status int, raw []b
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	resp, err := http.Post(baseURL+path, "application/json", bytes.NewReader(encoded))
+	resp, err := testHTTPClient.Post(baseURL+path, "application/json", bytes.NewReader(encoded))
 	if err != nil {
 		t.Fatalf("POST %s: %v", path, err)
 	}
@@ -238,7 +238,7 @@ func postJSON(t *testing.T, baseURL, path string, body any) (status int, raw []b
 
 func getURL(t *testing.T, requestURL string) (status int, raw []byte) {
 	t.Helper()
-	resp, err := http.Get(requestURL)
+	resp, err := testHTTPClient.Get(requestURL)
 	if err != nil {
 		t.Fatalf("GET %s: %v", requestURL, err)
 	}

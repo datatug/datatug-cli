@@ -32,6 +32,15 @@ var nativeSQLLimitation = Limitation{
 // condition or field allow-list is applied to the returned rows regardless
 // of what accesspolicies.Explain reports for the collection-scoped rules.
 //
+// args are the query's own bind values (dal.QueryArg{Name, Value}) — a named
+// arg (Name != "") binds an "@name"/":name"/"$name" placeholder in sqlText;
+// a positional arg (Name == "") binds an ordinary "?" placeholder, in order.
+// They reach the database/sql driver exactly as given: dal-go/dalgo2sql
+// v0.11.7+ converts a named dal.QueryArg to sql.Named(Name, Value) and a
+// positional one to its bare Value (see dal-go/dalgo2sql#177 — a real bind,
+// not string substitution into sqlText, so a value can never be mistaken
+// for SQL syntax).
+//
 // The SQLite session is pinned read-only at the engine level with
 // PRAGMA query_only on a dedicated, single-connection database handle, so
 // even a multi-statement injection inside sqlText cannot write — this is
@@ -45,7 +54,7 @@ var nativeSQLLimitation = Limitation{
 // A future SQL-capable adapter for another scheme should add a read-only
 // dal.DB.RunReadonlyTransaction branch alongside this PRAGMA one, per the
 // brief's "PRAGMA query_only for SQLite; read-only tx elsewhere" design.
-func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string) (Result, error) {
+func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, args ...dal.QueryArg) (Result, error) {
 	ref, err := dbcopy.Parse(sourceURL)
 	if err != nil {
 		return Result{}, err
@@ -59,7 +68,7 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string) 
 	}
 	defer closeDB()
 
-	query := dal.NewTextQuery(sqlText, nil)
+	query := dal.NewTextQuery(sqlText, nil, args...)
 	result, err := e.runThroughPolicies(ctx, db, query, nil)
 	if err != nil {
 		return Result{}, err

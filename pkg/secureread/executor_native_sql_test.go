@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/dal-go/dalgo/dal"
 )
 
 // TestRunNativeSQL_Labelled covers AC native-sql-labelled: a SQL-text query
@@ -86,6 +88,32 @@ func TestRunNativeSQL_UnsupportedScheme_TypedError(t *testing.T) {
 	_, err := executor.RunNativeSQL(context.Background(), sourceURL, "SELECT 1")
 	if !errors.Is(err, ErrNativeSQLUnsupported) {
 		t.Fatalf("RunNativeSQL(ingitdb) = %v, want ErrNativeSQLUnsupported", err)
+	}
+}
+
+// TestRunNativeSQL_NamedArgBindsThroughDriver proves a named
+// dal.QueryArg{Name, Value} reaches the SQLite driver as a real bind value
+// (dal-go/dalgo2sql v0.11.7+, sql.Named) rather than failing or being
+// substituted into the SQL text by hand: an "@name" placeholder in sqlText
+// binds to exactly the row that value names, no more, no less.
+func TestRunNativeSQL_NamedArgBindsThroughDriver(t *testing.T) {
+	sourceURL := newSQLiteFixture(t)
+	session := aliceSession(t, opaqueSQLAllowedPolicy)
+	executor := NewExecutor(session)
+	result, err := executor.RunNativeSQL(context.Background(), sourceURL,
+		"SELECT name, price FROM products WHERE name = @name",
+		dal.QueryArg{Name: "name", Value: "book"})
+	if err != nil {
+		t.Fatalf("RunNativeSQL: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1: %+v", len(result.Rows), result.Rows)
+	}
+	if got := result.Rows[0].Data["name"]; got != "book" {
+		t.Errorf("name = %v, want book", got)
+	}
+	if got := result.Rows[0].Data["price"]; got != float64(10) {
+		t.Errorf("price = %v (%T), want 10", got, got)
 	}
 }
 

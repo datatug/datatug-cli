@@ -37,9 +37,11 @@ func (ProjectAgentEndpoints) deleteProject(w http.ResponseWriter, _ *http.Reques
 	_, _ = w.Write([]byte("Deletion of a DataTug project is not implemented at agent yet."))
 }
 
-// getProjectSummary a handler to return project summary
+// getProjectSummary a handler to return project summary. The web client
+// (project.service.ts's getProjectSummaryRequest) sends the project id as
+// `?id=`, not `?project=` — see projectRefByID.
 func getProjectSummary(w http.ResponseWriter, r *http.Request) {
-	ref := newProjectRef(r.URL.Query())
+	ref := projectRefByID(r.URL.Query())
 	worker := func(ctx context.Context) (response apicore.ResponseDTO, err error) {
 		return api.GetProjectSummary(ctx, ref)
 	}

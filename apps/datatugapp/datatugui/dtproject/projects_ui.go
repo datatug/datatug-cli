@@ -8,14 +8,15 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
+	"github.com/datatug/datatug-cli/pkg/dtroot"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/filetug/filetug/pkg/fsutils"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
+	"github.com/filetug/filetug/pkg/fsutils"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/strongo/logus"
@@ -178,15 +179,15 @@ func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
 		}
 	}
 
-	var defaultGithubProjPathPrefix = fmt.Sprintf("~/%s/github.com/", datatug.Dir)
+	var defaultGithubProjPathPrefix = fmt.Sprintf("~/%s/github.com/", dtroot.Dir)
 
 	// Add existing projects under Local projects
 	for _, p := range panel.projects {
-		if strings.HasPrefix(p.Origin, "github.com/") ||
+		if strings.HasPrefix(p.Url, "github.com/") ||
 			strings.HasPrefix(p.Path, defaultGithubProjPathPrefix) {
 			var origin string
-			if strings.HasPrefix(p.Origin, "github.com/") {
-				origin = strings.TrimPrefix(p.Origin, "github.com/")
+			if strings.HasPrefix(p.Url, "github.com/") {
+				origin = strings.TrimPrefix(p.Url, "github.com/")
 			} else {
 				origin = strings.TrimPrefix(p.Path, defaultGithubProjPathPrefix)
 			}

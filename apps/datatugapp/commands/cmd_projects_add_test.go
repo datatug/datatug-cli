@@ -3,7 +3,7 @@ package commands
 import (
 	"testing"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,14 +14,14 @@ func TestProjectsAddCommand_RegistersFlags(t *testing.T) {
 	}
 }
 
-func TestGetProjPathsByID_PrefersLocalPathThenOrigin(t *testing.T) {
+func TestGetProjPathsByID_PrefersLocalPathThenUrl(t *testing.T) {
 	cfg := dtconfig.Settings{
 		Projects: []*dtconfig.ProjectRef{
 			{ID: "local", Path: "/tmp/local"},
-			{ID: "remote", Origin: "github.com/acme/remote"},
+			{ID: "remote", Url: "github.com/acme/remote"},
 		},
 	}
 	paths := getProjPathsByID(cfg)
 	assert.Equal(t, "/tmp/local", paths["local"], "a locally-added project must resolve by its Path")
-	assert.Equal(t, "github.com/acme/remote", paths["remote"], "a project with only Origin must still resolve")
+	assert.Equal(t, "github.com/acme/remote", paths["remote"], "a project with only Url must still resolve")
 }

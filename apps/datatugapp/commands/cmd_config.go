@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/spf13/cobra"
 )
 

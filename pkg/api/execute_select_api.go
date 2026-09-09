@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 

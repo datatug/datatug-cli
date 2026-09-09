@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
+	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
 type projectDirCommand struct {
@@ -55,7 +55,7 @@ func (v *projectBaseCommand) initProjectCommand(o projectCommandOptions) error {
 		if project.Path != "" {
 			v.ProjectDir = project.Path // locally-added projects store a local Path
 		} else {
-			v.ProjectDir = project.Origin
+			v.ProjectDir = project.Url
 		}
 	}
 

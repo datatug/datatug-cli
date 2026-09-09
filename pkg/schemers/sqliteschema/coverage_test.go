@@ -8,8 +8,8 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/record"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
+	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/schemer"
 )
 
 // helpers
@@ -62,7 +62,7 @@ func TestGetCollections_Success(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NextCollection: %v", err)
 		}
-		names = append(names, c.Name)
+		names = append(names, c.Name())
 	}
 	if len(names) == 0 {
 		t.Error("expected at least one collection")
@@ -533,7 +533,7 @@ func TestNextCollection_ViewType(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NextCollection: %v", err)
 		}
-		if c.Type == datatug.CollectionTypeView {
+		if c.Type() == datatug.CollectionTypeView {
 			sawView = true
 		}
 	}

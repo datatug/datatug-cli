@@ -8,9 +8,9 @@ import (
 	"path"
 	"time"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
+	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/spf13/cobra"
 	"github.com/strongo/logus"
 )
@@ -113,7 +113,7 @@ func initCommandAction(cmd *cobra.Command, args []string) (err error) {
 		return err
 	}
 	store := dal.GetProjectStore(projectID)
-	if err = store.SaveProject(context.Background(), &datatugProject); err != nil {
+	if err = saveProjectWithDbModels(context.Background(), store, &datatugProject); err != nil {
 		return err
 	}
 	return err

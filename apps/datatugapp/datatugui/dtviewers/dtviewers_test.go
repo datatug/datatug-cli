@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/gdamore/tcell/v2"
 	_ "github.com/mattn/go-sqlite3" // registers "sqlite3" driver for GetDB tests
 	"github.com/rivo/tview"

@@ -7,8 +7,8 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2sql"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
 	"github.com/datatug/datatug-cli/pkg/schemers/sqliteschema"
+	"github.com/datatug/datatug-core/pkg/schemer"
 	"github.com/filetug/filetug/pkg/fsutils"
 )
 

@@ -4,10 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -36,13 +35,48 @@ func TestWebUIURLForScreen(t *testing.T) {
 	}
 }
 
+func TestWebUIOrigin(t *testing.T) {
+	restoreConfig := webUIReadConfigFile
+	t.Cleanup(func() { webUIReadConfigFile = restoreConfig })
+
+	cases := map[string]struct {
+		read func() ([]byte, error)
+		want string
+	}{
+		"no_config_file": {
+			read: func() ([]byte, error) { return nil, errors.New("not found") },
+			want: DefaultWebUIOrigin,
+		},
+		"no_webui_section": {
+			read: func() ([]byte, error) { return []byte("projects: []\n"), nil },
+			want: DefaultWebUIOrigin,
+		},
+		"malformed_yaml": {
+			read: func() ([]byte, error) { return []byte("webui: [invalid"), nil },
+			want: DefaultWebUIOrigin,
+		},
+		"custom_origin_trims_trailing_slash": {
+			read: func() ([]byte, error) { return []byte("webui:\n  origin: http://localhost:4200/\n"), nil },
+			want: "http://localhost:4200",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			webUIReadConfigFile = tc.read
+			if got := webUIOrigin(); got != tc.want {
+				t.Errorf("webUIOrigin() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCurrentScreenWebUIURL(t *testing.T) {
-	restoreSettings, restoreState := webUIGetSettings, webUIGetState
-	t.Cleanup(func() { webUIGetSettings, webUIGetState = restoreSettings, restoreState })
+	restoreConfig, restoreState := webUIReadConfigFile, webUIGetState
+	t.Cleanup(func() { webUIReadConfigFile, webUIGetState = restoreConfig, restoreState })
 
 	t.Run("custom_origin_and_screen", func(t *testing.T) {
-		webUIGetSettings = func() (dtconfig.Settings, error) {
-			return dtconfig.Settings{WebUI: &dtconfig.WebUIConfig{Origin: "http://localhost:4200"}}, nil
+		webUIReadConfigFile = func() ([]byte, error) {
+			return []byte("webui:\n  origin: http://localhost:4200\n"), nil
 		}
 		webUIGetState = func() (*dtstate.DatatugState, error) {
 			return &dtstate.DatatugState{CurrentScreenPath: "projects"}, nil
@@ -53,23 +87,23 @@ func TestCurrentScreenWebUIURL(t *testing.T) {
 	})
 
 	t.Run("defaults_when_settings_and_state_unavailable", func(t *testing.T) {
-		webUIGetSettings = func() (dtconfig.Settings, error) {
-			return dtconfig.Settings{}, errors.New("no settings file")
+		webUIReadConfigFile = func() ([]byte, error) {
+			return nil, errors.New("no settings file")
 		}
 		webUIGetState = func() (*dtstate.DatatugState, error) {
 			return nil, errors.New("no state file")
 		}
-		if got := CurrentScreenWebUIURL(); got != dtconfig.DefaultWebUIOrigin {
-			t.Errorf("CurrentScreenWebUIURL() = %q, want %q", got, dtconfig.DefaultWebUIOrigin)
+		if got := CurrentScreenWebUIURL(); got != DefaultWebUIOrigin {
+			t.Errorf("CurrentScreenWebUIURL() = %q, want %q", got, DefaultWebUIOrigin)
 		}
 	})
 }
 
 func TestOpenCurrentScreenInWebUI(t *testing.T) {
-	restoreSettings, restoreState, restoreOpen := webUIGetSettings, webUIGetState, openURL
-	t.Cleanup(func() { webUIGetSettings, webUIGetState, openURL = restoreSettings, restoreState, restoreOpen })
+	restoreConfig, restoreState, restoreOpen := webUIReadConfigFile, webUIGetState, openURL
+	t.Cleanup(func() { webUIReadConfigFile, webUIGetState, openURL = restoreConfig, restoreState, restoreOpen })
 
-	webUIGetSettings = func() (dtconfig.Settings, error) { return dtconfig.Settings{}, nil }
+	webUIReadConfigFile = func() ([]byte, error) { return nil, errors.New("no settings file") }
 	webUIGetState = func() (*dtstate.DatatugState, error) {
 		return &dtstate.DatatugState{CurrentScreenPath: "projects"}, nil
 	}
@@ -81,7 +115,7 @@ func TestOpenCurrentScreenInWebUI(t *testing.T) {
 			return nil
 		}
 		OpenCurrentScreenInWebUI(newTestTUI(t))
-		if want := dtconfig.DefaultWebUIOrigin + "/my"; opened != want {
+		if want := DefaultWebUIOrigin + "/my"; opened != want {
 			t.Errorf("opened %q, want %q", opened, want)
 		}
 	})

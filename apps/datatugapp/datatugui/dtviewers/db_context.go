@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/schemer"
+	"github.com/datatug/datatug-core/pkg/schemer"
 )
 
 type DbContext interface {

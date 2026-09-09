@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
+	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/rivo/tview"
 )
 
@@ -71,7 +71,7 @@ func GetProjectTitle(p *dtconfig.ProjectRef) (projectTitle string) {
 		projectTitle = p.ID
 	}
 	if projectTitle == "" {
-		projectTitle = p.Origin
+		projectTitle = p.Url
 	}
 	return projectTitle
 }

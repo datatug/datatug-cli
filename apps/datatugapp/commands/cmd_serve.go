@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/server"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )

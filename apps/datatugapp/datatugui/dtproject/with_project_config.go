@@ -1,7 +1,7 @@
 package dtproject
 
 import (
-	"github.com/datatug/datatug-cli/pkg/datatug-core/dtconfig"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 )
 
 type WithProjectConfig interface {

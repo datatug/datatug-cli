@@ -6,8 +6,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
+	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +34,7 @@ func renderCommandAction(_ *cobra.Command, _ []string) error {
 	}
 
 	log.Println("Saving project", datatugProject.ID, "...")
-	if err = projectStore.SaveProject(context.Background(), datatugProject); err != nil {
+	if err = saveProjectWithDbModels(context.Background(), projectStore, datatugProject); err != nil {
 		err = fmt.Errorf("failed to save datatug project: %w", err)
 		return err
 	}

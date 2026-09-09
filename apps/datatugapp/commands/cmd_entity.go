@@ -11,7 +11,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
+	"github.com/datatug/datatug-cli/pkg/dtentity"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -171,8 +172,15 @@ func renderEntityShow(entity *datatug.Entity) (string, error) {
 
 	// The mapping copy (tables) is a read-only generated artifact: render it in a
 	// clearly-labelled, separate section so a reader never mistakes it for
-	// authored content.
-	tables, hasTables := doc["tables"]
+	// authored content. Rendered from entity.Tables directly via
+	// dtentity.TableKeyDoc rather than doc["tables"], which generic
+	// marshalling of datatug.TableKeys cannot populate (see that type's doc
+	// comment for why).
+	var tables []dtentity.TableKeyDoc
+	for _, k := range entity.Tables {
+		tables = append(tables, dtentity.TableKeyDoc{Name: k.Name(), Schema: k.Schema(), Catalog: k.Catalog()})
+	}
+	hasTables := len(tables) > 0
 	delete(doc, "tables")
 
 	var buf bytes.Buffer
@@ -475,14 +483,20 @@ func parseEntityDocs(data []byte) ([]*datatug.Entity, error) {
 		return nil, err
 	}
 	if _, isList := doc.([]any); isList {
-		var entities []*datatug.Entity
-		if err = json.Unmarshal(jsonData, &entities); err != nil {
+		var rawEntities []json.RawMessage
+		if err = json.Unmarshal(jsonData, &rawEntities); err != nil {
 			return nil, err
+		}
+		entities := make([]*datatug.Entity, len(rawEntities))
+		for i, raw := range rawEntities {
+			if entities[i], err = dtentity.UnmarshalEntity(raw); err != nil {
+				return nil, err
+			}
 		}
 		return entities, nil
 	}
-	entity := &datatug.Entity{}
-	if err = json.Unmarshal(jsonData, entity); err != nil {
+	entity, err := dtentity.UnmarshalEntity(jsonData)
+	if err != nil {
 		return nil, err
 	}
 	return []*datatug.Entity{entity}, nil
@@ -593,13 +607,7 @@ func marshalEntityFile(entity *datatug.Entity) ([]byte, error) {
 	if len(entity.Fields) == 0 && entity.Fields != nil {
 		entity.Fields = nil
 	}
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetIndent("", "\t")
-	if err := encoder.Encode(entity); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
+	return dtentity.MarshalEntity(entity)
 }
 
 func entityAddCommandAction(cmd *cobra.Command, _ []string) error {
@@ -643,6 +651,18 @@ func entityAddCommandAction(cmd *cobra.Command, _ []string) error {
 	// disk, regardless of whether it is readable. A corrupt/unreadable existing
 	// file MUST still block creation (never overwrite); only a genuine
 	// not-found error means the entity is absent.
+	//
+	// KNOWN GAP (tracked, not papered over here - see PR): datatug-core
+	// v0.17.0's filestore entities store reads/writes a flat
+	// <dir>/<id>.entity.json layout (storage/filestore/store_entities.go
+	// calling newFileProjectItemsStore), but this command - and the real,
+	// committed demo project - uses the nested <dir>/<id>/<id>.entity.json
+	// layout entityFilePath computes below. So LoadEntity here (and
+	// LoadEntity/LoadEntities generally, e.g. `entity list`/`show`) cannot
+	// see entities in the real, committed layout, including ones this
+	// command itself just wrote. A fix (S27) is in progress in datatug-core;
+	// once it ships, bump this module's `require` to that tag - no code
+	// change needed here.
 	entityExists := func(id string) bool {
 		_, loadErr := projectStore.LoadEntity(ctx, id)
 		return loadErr == nil || !errors.Is(loadErr, os.ErrNotExist)

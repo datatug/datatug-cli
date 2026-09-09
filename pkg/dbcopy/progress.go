@@ -16,9 +16,9 @@ import (
 // Format is pinned by REQ:progress-reporting in
 // spec/features/cli/db/copy/README.md.
 type ProgressWriter struct {
-	w   io.Writer
-	mu  sync.Mutex
-	on  bool
+	w  io.Writer
+	mu sync.Mutex
+	on bool
 }
 
 // NewProgressWriter returns a ProgressWriter writing to w when enabled is

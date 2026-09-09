@@ -25,7 +25,22 @@ func registerRoutes(path string, router router, wrapper wrapper, writeOnly bool)
 	entitiesRoutes(path, router, wrapper, writeOnly)
 	recordsetsRoutes(path, router, wrapper, writeOnly)
 	executeRoutes(path, router, wrapper, writeOnly)
+	semanticRoutes(path, router, wrapper, writeOnly)
 
+}
+
+// semanticRoutes registers the core-investigation-loop semantic endpoints
+// (plan tasks 5 and 7): column resolution, related lookups and their row
+// execution, and applicable-queries matching. All four are reads; none is
+// registered in RegisterWriteOnlyHandlers mode.
+func semanticRoutes(path string, router router, wrap wrapper, writeOnly bool) {
+	if writeOnly {
+		return
+	}
+	route(router, wrap, http.MethodGet, path+"/semantic/columns", semanticColumnsHandler)
+	route(router, wrap, http.MethodGet, path+"/semantic/related", semanticRelatedHandler)
+	route(router, wrap, http.MethodGet, path+"/semantic/related/rows", semanticRelatedRowsHandler)
+	route(router, wrap, http.MethodPost, path+"/queries/applicable", semanticApplicableHandler)
 }
 
 func foldersRoutes(path string, router router, wrap wrapper) {

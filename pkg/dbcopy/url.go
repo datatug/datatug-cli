@@ -36,6 +36,18 @@ import (
 // and to construct the error message for REQ:unknown-scheme-rejected.
 var supportedSchemes = []string{"sqlite", "ingitdb", "postgres", "http", "https"}
 
+// SupportedSchemes returns the exact schemes Parse/Open dispatch, in
+// dispatch order. It is the single source of truth other packages should
+// build user-facing scheme lists from (e.g. a `--db` flag's help text) so
+// that text cannot drift from what Open actually accepts the way it did
+// when http/https were wired in here without every caller's help text being
+// updated to match.
+func SupportedSchemes() []string {
+	out := make([]string, len(supportedSchemes))
+	copy(out, supportedSchemes)
+	return out
+}
+
 // ErrPostgresNotWired is returned by BackendRef.Open for postgres:// URLs
 // until a PostgreSQL DALgo driver implements the three capability interfaces
 // (dbschema.SchemaReader, ddl.SchemaModifier, dal.ConcurrencyAware).

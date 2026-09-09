@@ -73,7 +73,9 @@ func initCommandAction(cmd *cobra.Command, args []string) (err error) {
 	//	return fmt.Errorf("failed to get database metadata: %w", err)
 	//}
 
-	storage.Current, projectID = filestore.NewSingleProjectStore(projectDir, projectID)
+	fsStore, singleProjectID := filestore.NewSingleProjectStore(projectDir, projectID)
+	storage.Current = fsStore
+	projectID = singleProjectID
 	datatugProject := datatug.Project{
 		ProjectItem: datatug.ProjectItem{
 			ProjItemBrief: datatug.ProjItemBrief{ID: projectID},
@@ -108,13 +110,9 @@ func initCommandAction(cmd *cobra.Command, args []string) (err error) {
 		}
 	}
 
-	var dal storage.Store
-	if dal, err = storage.NewDatatugStore(""); err != nil {
+	projectStore := fsStore.GetProjectStore(projectID)
+	if err = projectStore.SaveProject(context.Background(), &datatugProject); err != nil {
 		return err
 	}
-	store := dal.GetProjectStore(projectID)
-	if err = store.SaveProject(context.Background(), &datatugProject); err != nil {
-		return err
-	}
-	return err
+	return nil
 }

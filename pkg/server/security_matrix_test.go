@@ -142,7 +142,8 @@ func securityMatrixSession(t *testing.T, as, role string) secureread.Session {
 // (added by main's PR #199) is the first code in this repo to exercise
 // ServerRef.Validate() for sqlite3 through the real datatug-core module. Fix
 // belongs in datatug/datatug-core's pkg/datatug/server.go; once it ships and
-// this module's `require` is bumped past it, remove this skip.
+// this module's `require` is bumped past it, remove this skip. Tracked as
+// datatug/datatug-core#307.
 func skipServerRefValidateSqlite3Bug(t *testing.T) {
 	t.Helper()
 	t.Skip("blocked on datatug-core ServerRef.Validate() sqlite3 bug (missing `return nil`, always fails) - see skipServerRefValidateSqlite3Bug doc comment")

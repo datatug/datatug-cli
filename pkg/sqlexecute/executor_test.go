@@ -361,7 +361,8 @@ func TestRequestCommand_Validate(t *testing.T) {
 // something introduced by this rebase. Same root cause as
 // pkg/server/security_matrix_test.go's skipServerRefValidateSqlite3Bug. Fix
 // belongs in datatug/datatug-core's pkg/datatug/server.go; once it ships and
-// this module's `require` is bumped past it, remove this skip.
+// this module's `require` is bumped past it, remove this skip. Tracked as
+// datatug/datatug-core#307.
 func skipServerRefValidateSqlite3Bug(t *testing.T) {
 	t.Helper()
 	t.Skip("blocked on datatug-core ServerRef.Validate() sqlite3 bug (missing `return nil`, always fails) - see skipServerRefValidateSqlite3Bug doc comment")

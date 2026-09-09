@@ -81,24 +81,8 @@ func executeSelectHandler(w http.ResponseWriter, r *http.Request) {
 	returnJSON(w, r, http.StatusOK, err, response)
 }
 
-// runQueryHandler executes a saved or ad-hoc query through the
-// policy-enforced secureread.Executor (REQ:server-acl-all-reads,
-// REQ:dtql-query-type) — see api.RunQuery.
-func runQueryHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		handleError(validation.NewBadRequestError(errors.New("only POST requests are supported for this endpoint")), w, r)
-		return
-	}
-	var request api.RunQueryRequest
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&request); err != nil {
-		err = fmt.Errorf("%w: failed to decode request body", validation.NewBadRequestError(err))
-		handleError(err, w, r)
-		return
-	}
-	if request.StoreID == "" {
-		request.StoreID = r.URL.Query().Get(urlParamStoreID)
-	}
-	response, err := api.RunQuery(r.Context(), request)
-	returnJSON(w, r, http.StatusOK, err, response)
-}
+// runQueryHandler (POST exec/run_query) is defined in exec_run_query.go,
+// rewritten to the appendix's ExecutionRequest/Result envelope (Task 12).
+// pkg/api.RunQuery/RunQueryRequest/RunQueryResponse (the previous ad-hoc
+// shape this route used) are superseded; see exec_run_query.go's doc
+// comment and the PR body's inventory.

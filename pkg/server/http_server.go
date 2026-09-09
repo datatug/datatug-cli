@@ -81,9 +81,12 @@ func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storag
 // web UI can trigger through the endpoints registered below goes through it
 // (REQ:server-acl-all-reads); see apps/datatugapp/commands/cmd_serve.go for
 // how it is built from --as/--role/--group and the project's policy set.
-func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int, session secureread.Session) error {
+// caps gates this process's write/opaque-SQL capabilities closed by default
+// (api.Capabilities's own doc comment) — see cmd_serve.go's --allow-writes/
+// --allow-opaque-sql flags.
+func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int, session secureread.Session, caps api.Capabilities) error {
 	storage.NewDatatugStore = newDatatugStoreFactory(pathsByID)
-	api.ConfigureSecureSession(session, pathsByID)
+	api.ConfigureSecureSession(session, pathsByID, caps)
 
 	// apicore.Execute (wired in below) panics if this hook is left nil
 	// (sneat-go-core/apicore.VerifyRequest) — datatug serve has no
@@ -144,9 +147,9 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 			handler(w, r)
 		}
 	}
-	endpoints.RegisterDatatugHandlers("", router, endpoints.RegisterAllHandlers, logWrapper, func(r *http.Request) (context.Context, error) {
+	endpoints.RegisterDatatugHandlersWithCapabilities("", router, endpoints.RegisterAllHandlers, logWrapper, func(r *http.Request) (context.Context, error) {
 		return r.Context(), nil
-	}, apicore.Execute)
+	}, apicore.Execute, endpoints.Capabilities{AllowWrites: caps.AllowWrites})
 
 	s.s = &http.Server{
 		Addr:           fmt.Sprintf("%v:%v", agentHost, agentPort),

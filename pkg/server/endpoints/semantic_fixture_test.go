@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
@@ -19,6 +21,15 @@ import (
 // of inventing a new one.
 const chinookFixturePath = "../../dbcopy/testdata/chinook.db"
 
+// semanticTestEnv/semanticTestSource are this fixture's environment id and
+// stable source id (its catalog's DbModel — see pkg/api/resolver.go's
+// ResolvedSource doc comment for why DbModel, not the catalog's own
+// project-item id, is the appendix's SourceRef.source).
+const (
+	semanticTestEnv    = "local"
+	semanticTestSource = "chinook"
+)
+
 // writeSemanticTestProject builds a self-contained, hermetic project
 // directory (registered under a per-test-unique project ID via
 // filestore.SetProjectPath, mirroring what `datatug serve --project` does
@@ -26,19 +37,22 @@ const chinookFixturePath = "../../dbcopy/testdata/chinook.db"
 // datatug-demo-projects/demo-project-1 shape this feature targets:
 //
 //   - entities/Customer: DECLARED Mappings to both chinook.Customer.CustomerId
-//     and support-notes.support-notes.CustomerId (the real demo project does
-//     not declare these yet — see the PR body for that verified gap; this
-//     fixture proves the endpoints' OWN behaviour is correct once a project
-//     does declare them, independent of that gap).
-//   - dbs/chinook.sqlite: a copy of chinookFixturePath, real Customer/Invoice
-//     FK data.
+//     and support-notes.support-notes.CustomerId (matching the real demo
+//     project's current content).
+//   - An environment ("local") + DB catalog (DbModel "chinook") pointing at
+//     a copy of chinookFixturePath — resolved through pkg/api's unified
+//     resolver (Task 12), not the pre-Task-12 "<projectDir>/dbs/*.sqlite"
+//     guess.
 //   - recordsets/support-notes.recordset.json + data/ingitdb/support-notes:
 //     a real, openable inGitDB collection, mirroring
 //     demo-project-1/data/ingitdb/support-notes exactly (same file format),
 //     with customer 5 owning 2 notes.
-//   - queries/customer-invoices, queries/invoice-lines: Meta-tagged
-//     parameters for Applicable (customer-invoices bindable from Customer.ID;
-//     invoice-lines needs Invoice.ID, which is never on hand -> "not yet").
+//   - queries/customer-invoices (Meta-tagged CustomerId, bindable),
+//     queries/invoice-lines (Meta-tagged InvoiceId, never on hand -> "not
+//     yet"), queries/customer-export (a NON-semantic required parameter,
+//     for missingNonSemanticParameters coverage).
+//   - queries/reference/country-facts: an HTTP QueryDef with declared,
+//     Meta-tagged recordset columns, for semantic/columns' HTTP branch.
 //   - policies/*.yaml: "admin" (full access) and "support" (Customer rows
 //     only, no Invoice grant at all) roles, for the restricted-principal
 //     scenario.
@@ -49,10 +63,12 @@ func writeSemanticTestProject(t *testing.T) (projectDir, projectID string) {
 	filestore.SetProjectPath(projectID, dir)
 
 	writeCustomerEntity(t, dir)
-	writeChinookDB(t, dir)
+	dbPath := copyChinookDB(t, dir)
+	registerChinookEnvironment(t, dir, projectID, dbPath)
 	writeSupportNotesRecordset(t, dir)
 	writeSupportNotesIngitdb(t, dir)
 	writeApplicableQueries(t, dir)
+	writeHTTPCountryQuery(t, dir)
 	writePolicies(t, dir)
 
 	return dir, projectID
@@ -85,22 +101,53 @@ func writeCustomerEntity(t *testing.T, dir string) {
 	}`)
 }
 
-func writeChinookDB(t *testing.T, dir string) {
+// copyChinookDB copies chinookFixturePath into dir (outside any project
+// convention path — its real location is dictated by the environment/
+// catalog record registerChinookEnvironment writes, per Task 12's unified
+// resolver) and returns the copy's path.
+func copyChinookDB(t *testing.T, dir string) string {
 	t.Helper()
-	dbsDir := filepath.Join(dir, "dbs")
-	mustMkdirAll(t, dbsDir)
 	src, err := os.Open(chinookFixturePath)
 	if err != nil {
 		t.Fatalf("open %s: %v", chinookFixturePath, err)
 	}
 	defer func() { _ = src.Close() }()
-	dst, err := os.Create(filepath.Join(dbsDir, "chinook.sqlite"))
+	dbPath := filepath.Join(dir, "chinook.sqlite")
+	dst, err := os.Create(dbPath)
 	if err != nil {
 		t.Fatalf("create chinook.sqlite: %v", err)
 	}
 	defer func() { _ = dst.Close() }()
 	if _, err := io.Copy(dst, src); err != nil {
 		t.Fatalf("copy chinook.sqlite: %v", err)
+	}
+	return dbPath
+}
+
+// registerChinookEnvironment writes a real environment + DB catalog record
+// (DbModel "chinook", matching writeCustomerEntity's own Mappings source
+// id) so pkg/api's unified resolver (resolver.go) can find it — the SAME
+// registry exec/run_query's ExecutionRequest.source and this file's
+// semantic/columns/related tests both resolve "chinook" through.
+func registerChinookEnvironment(t *testing.T, dir, projectID, dbPath string) {
+	t.Helper()
+	projStore := filestore.NewProjectStore(projectID, dir)
+	ctx := context.Background()
+
+	env := &datatug.Environment{
+		DbServers: datatug.EnvDbServers{
+			{ServerRef: datatug.ServerRef{Driver: "sqlite3"}},
+		},
+	}
+	env.ID = semanticTestEnv
+	if err := projStore.SaveEnvironment(ctx, env); err != nil {
+		t.Fatalf("SaveEnvironment: %v", err)
+	}
+	serverID := (&datatug.EnvDbServer{ServerRef: datatug.ServerRef{Driver: "sqlite3"}}).GetID()
+	catalog := &datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{Driver: "sqlite3", Path: dbPath, DbModel: semanticTestSource}}
+	catalog.ID = "chinook-local"
+	if err := projStore.SaveEnvDbCatalog(ctx, semanticTestEnv, serverID, catalog.ID, catalog); err != nil {
+		t.Fatalf("SaveEnvDbCatalog: %v", err)
 	}
 }
 
@@ -171,16 +218,32 @@ func fmtSupportNote(customerID int) string {
 		strconv.Itoa(customerID) + "\nNote: Test support note.\n"
 }
 
+// writeApplicableQueries writes three saved queries: customer-invoices
+// (Meta-tagged CustomerId, bindable from Customer.ID), invoice-lines
+// (Meta-tagged InvoiceId, never on hand in these tests -> "not yet"), and
+// customer-export (a NON-semantic required parameter "format" alongside a
+// semantic one, covering missingNonSemanticParameters — a query fully
+// semantically bindable can still be "not yet" because of a plain required
+// parameter the appendix's missing[] must also report).
 func writeApplicableQueries(t *testing.T, dir string) {
 	t.Helper()
-	queriesDir := filepath.Join(dir, "queries", "customers")
-	mustMkdirAll(t, queriesDir)
-	mustWriteFile(t, filepath.Join(queriesDir, "customer-invoices.query.json"), `{
+	customersDir := filepath.Join(dir, "queries", "customers")
+	mustMkdirAll(t, customersDir)
+	mustWriteFile(t, filepath.Join(customersDir, "customer-invoices.query.json"), `{
 		"id": "customer-invoices",
 		"title": "Customer invoices",
 		"type": "SQL",
 		"parameters": [
-			{"id": "customerId", "type": "integer", "isRequired": true, "meta": {"entity": "Customer", "field": "ID"}}
+			{"id": "CustomerId", "type": "integer", "isRequired": true, "meta": {"entity": "Customer", "field": "ID"}}
+		]
+	}`)
+	mustWriteFile(t, filepath.Join(customersDir, "customer-export.query.json"), `{
+		"id": "customer-export",
+		"title": "Customer export",
+		"type": "SQL",
+		"parameters": [
+			{"id": "CustomerId", "type": "integer", "isRequired": true, "meta": {"entity": "Customer", "field": "ID"}},
+			{"id": "format", "type": "string", "isRequired": true}
 		]
 	}`)
 	invoicesDir := filepath.Join(dir, "queries", "invoices")
@@ -190,7 +253,37 @@ func writeApplicableQueries(t *testing.T, dir string) {
 		"title": "Invoice lines",
 		"type": "SQL",
 		"parameters": [
-			{"id": "invoiceId", "type": "integer", "isRequired": true, "meta": {"entity": "Invoice", "field": "ID"}}
+			{"id": "InvoiceId", "type": "integer", "isRequired": true, "meta": {"entity": "Invoice", "field": "ID"}}
+		]
+	}`)
+}
+
+// writeHTTPCountryQuery writes an HTTP-type QueryDef with declared,
+// Meta-tagged recordset columns (datatug-demo-projects/demo-project-1's
+// own country-facts.query.json shape) — semantic/columns' HTTP branch
+// (resolveHTTPSource/httpDeclaredColumns) reads these directly rather than
+// through pkg/semantic.Resolve. No .query.http URL-template sidecar is
+// written: these tests never dispatch this query, only resolve its
+// declared columns.
+func writeHTTPCountryQuery(t *testing.T, dir string) {
+	t.Helper()
+	refDir := filepath.Join(dir, "queries", "reference")
+	mustMkdirAll(t, refDir)
+	mustWriteFile(t, filepath.Join(refDir, "country-facts.query.json"), `{
+		"id": "country-facts",
+		"title": "Country facts",
+		"type": "HTTP",
+		"parameters": [
+			{"id": "name", "type": "string", "isRequired": true, "meta": {"entity": "Country", "field": "Name"}}
+		],
+		"recordsets": [
+			{
+				"columns": [
+					{"name": "name", "type": "string", "meta": {"entity": "Country", "field": "Name"}},
+					{"name": "currency", "type": "string", "meta": {"entity": "Country", "field": "Currency"}},
+					{"name": "population", "type": "integer"}
+				]
+			}
 		]
 	}`)
 }

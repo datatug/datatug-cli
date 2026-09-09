@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/server"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
@@ -18,12 +19,14 @@ import (
 )
 
 const (
-	serveHostFlag    = "host"
-	servePortFlag    = "port"
-	serveProjectFlag = "project"
-	serveAsFlag      = "as"
-	serveRoleFlag    = "role"
-	serveGroupFlag   = "group"
+	serveHostFlag           = "host"
+	servePortFlag           = "port"
+	serveProjectFlag        = "project"
+	serveAsFlag             = "as"
+	serveRoleFlag           = "role"
+	serveGroupFlag          = "group"
+	serveAllowWritesFlag    = "allow-writes"
+	serveAllowOpaqueSQLFlag = "allow-opaque-sql"
 )
 
 // ServeCommand executes serve consoleCommand
@@ -35,13 +38,15 @@ const serveOpenBrowserFlag = "open-browser"
 // --as/--role/--group fix the principal every policy-enforced read in this
 // process runs as (REQ:principal-selection) — see resolveServeSession.
 type serveFlags struct {
-	openBrowser bool
-	host        string
-	port        int
-	projectDir  string
-	as          string
-	roles       []string
-	groups      []string
+	openBrowser    bool
+	host           string
+	port           int
+	projectDir     string
+	as             string
+	roles          []string
+	groups         []string
+	allowWrites    bool
+	allowOpaqueSQL bool
 }
 
 func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
@@ -67,6 +72,12 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.groups, err = flags.GetStringArray(serveGroupFlag); err != nil {
+		return f, err
+	}
+	if f.allowWrites, err = flags.GetBool(serveAllowWritesFlag); err != nil {
+		return f, err
+	}
+	if f.allowOpaqueSQL, err = flags.GetBool(serveAllowOpaqueSQLFlag); err != nil {
 		return f, err
 	}
 	return f, nil
@@ -193,8 +204,15 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	httpServer := server.NewHttpServer()
+	caps := api.Capabilities{AllowWrites: flags.allowWrites, AllowOpaqueSQL: flags.allowOpaqueSQL}
+	if caps.AllowWrites {
+		log.Printf("serve: --allow-writes set; project-mutation routes are enabled")
+	}
+	if caps.AllowOpaqueSQL {
+		log.Printf("serve: --allow-opaque-sql set; native SQL executes with opaque-privileged provenance (no row/column enforcement)")
+	}
 	// TODO: implement graceful shutdown
-	return httpServer.ServeHTTP(pathsByID, host, port, session)
+	return httpServer.ServeHTTP(pathsByID, host, port, session, caps)
 }
 
 // serveAgentURLs returns the plain-HTTP base URL the agent listens on and the
@@ -230,5 +248,7 @@ func serveCommandArgs() *cobra.Command {
 	flags.String(serveAsFlag, "", "Principal user ID to serve as; required when the project has a policies/ set (or $HOME/"+accesspolicies.DefaultDir+")")
 	flags.StringArray(serveRoleFlag, nil, "Principal role, repeatable")
 	flags.StringArray(serveGroupFlag, nil, "Principal group, repeatable")
+	flags.Bool(serveAllowWritesFlag, false, "Enable project-mutation routes (create/save/delete project, query, board, entity, recordset rows); refused by default (api-contract.md: writes need an explicit capability)")
+	flags.Bool(serveAllowOpaqueSQLFlag, false, "Allow native SQL execution with opaque-privileged provenance (no row/column enforcement); refused by default (REQ:opaque-sql-limitation)")
 	return cmd
 }

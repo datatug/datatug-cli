@@ -10,8 +10,17 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
+
+// writeCapabilityForAuthGateTests is AllowWrites:true: this file's test is
+// specifically about the AUTH hook (api.AuthTokenFromHTTPRequest /
+// apicore.VerifyRequest), not Task 12's separate write-capability gate
+// (requireWriteCapability) — using the plain startServeHTTPWithSession
+// default (every write off) would refuse createProject before the auth
+// hook it exists to test ever runs, at the wrong layer.
+var writeCapabilityForAuthGateTests = api.Capabilities{AllowWrites: true}
 
 // authHookProjectFixture writes a minimal, valid datatug-project.json (the
 // "created"/"access" fields ProjectFile.Validate() requires — see
@@ -44,7 +53,7 @@ func TestServeHTTP_ProjectSummary_ReturnsSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	baseURL := startServeHTTPWithSession(t, pathsByID, session)
+	baseURL := startServeHTTPWithSessionAndCapabilities(t, pathsByID, session, writeCapabilityForAuthGateTests)
 
 	resp, err := testHTTPClient.Get(baseURL + "/datatug/projects/project_summary?id=" + projectID)
 	if err != nil {
@@ -120,7 +129,7 @@ func TestServeHTTP_CreateProject_AuthGate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewSession: %v", err)
 		}
-		baseURL := startServeHTTPWithSession(t, pathsByID, session)
+		baseURL := startServeHTTPWithSessionAndCapabilities(t, pathsByID, session, writeCapabilityForAuthGateTests)
 
 		resp, err := postCreateProject(t, baseURL)
 		if err != nil {
@@ -168,7 +177,7 @@ func TestServeHTTP_CreateProject_AuthGate(t *testing.T) {
 		// still refuses this state on its own rather than assuming that
 		// upstream guard always ran (see auth_hook.go's doc comment).
 		anonymousWithPolicies := secureread.Session{Policies: policies, Principal: nil, Unrestricted: false}
-		baseURL := startServeHTTPWithSession(t, pathsByID, anonymousWithPolicies)
+		baseURL := startServeHTTPWithSessionAndCapabilities(t, pathsByID, anonymousWithPolicies, writeCapabilityForAuthGateTests)
 
 		resp, err := postCreateProject(t, baseURL)
 		if err != nil {

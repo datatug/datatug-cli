@@ -17,7 +17,7 @@ func TestRegisterRoutesNilPanic(t *testing.T) {
 			t.Error("expected panic for nil router")
 		}
 	}()
-	registerRoutes("", nil, nil, false)
+	registerRoutes("", nil, nil, false, Capabilities{})
 }
 
 // TestCreateQueryVar covers the createQuery package-level var.

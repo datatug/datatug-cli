@@ -10,26 +10,13 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
+	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/apicontract_local"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/semantic"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
-
-// sqliteFilePath is this package's own convention for finding a SQL source's
-// physical file: <projectDir>/dbs/<source>.sqlite. It exists because, as
-// verified while building these endpoints, this codebase currently has no
-// working "source name -> connection" registry for SQL sources — a
-// project's DbModels/Environments carry only catalog ID strings, never a
-// path or connection string (see cmd_demo.go's legacy, unrelated download
-// flow, and pkg/api/scan_db_schema_api.go's scanDbCatalog, which both expect
-// that path to be supplied out of band, not read from a project file). This
-// convention is intentionally the simplest thing that could work, and
-// applies ONLY within these new endpoints; see the PR body for the demo
-// project's current gap (it has no physical dbs/chinook.sqlite yet).
-func sqliteFilePath(projectDir, source string) string {
-	return filepath.Join(projectDir, storage.DbsFolder, source+".sqlite")
-}
 
 // recordsetDefinitionPath is the project's declared shape for a
 // non-SQL (inGitDB-backed) collection: recordsets/<source>.recordset.json,
@@ -48,24 +35,33 @@ type resolvedSource struct {
 	Schema  semantic.TableSchema
 }
 
-// resolveSource resolves (source, collection) to a resolvedSource: SQL when
-// sqliteFilePath(projectDir, source) exists (schema read live through
-// dal-go/dalgo/dbschema.SchemaReader — dalgo2sqlite implements it, pure Go,
-// no cgo, unlike the legacy pkg/schemers/sqliteschema this repo's own
-// pkg/api/scan_db_schema_api.go uses), otherwise inGitDB, assuming source
-// names a recordsets/<source>.recordset.json definition whose declared
-// Columns/PrimaryKey/ForeignKeys supply the schema directly (inGitDB itself
-// has no schema-introspection capability to fall back to).
-func resolveSource(ctx context.Context, projectDir, source, collection string) (resolvedSource, error) {
-	if sqlPath := sqliteFilePath(projectDir, source); fileExists(sqlPath) {
-		return resolveSQLSource(ctx, sqlPath, collection)
+// resolveSource resolves (environment, source, collection) to a
+// resolvedSource through pkg/api's unified resolver (resolver.go) — the
+// SAME registry exec/run_query and every other execution path now uses
+// (REQ:exact-transport-and-source-contract: "Semantic discovery and
+// execution use the same authorized project source registry"). It replaces
+// this file's previous own "<projectDir>/dbs/<source>.sqlite" guess (never
+// matched by any real project — see the PR body's inventory) and its
+// separate environment-blind inGitDB-only fallback.
+func resolveSource(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment, source, collection string) (resolvedSource, error) {
+	resolved, err := api.ResolveSource(ctx, projStore, projectDir, environment, source)
+	if err != nil {
+		return resolvedSource{}, apicontract_local.NewSourceUnavailable(err.Error())
 	}
-	if recordsetPath := recordsetDefinitionPath(projectDir, source); fileExists(recordsetPath) {
-		return resolveRecordsetSource(projectDir, recordsetPath, source, collection)
+	switch resolved.Kind {
+	case api.SourceKindSQL:
+		return resolveSQLSourceURL(ctx, resolved.URL, collection)
+	case api.SourceKindInGitDB:
+		recordsetPath := recordsetDefinitionPath(projectDir, resolved.ID)
+		if !fileExists(recordsetPath) {
+			return resolvedSource{}, apicontract_local.NewSourceUnavailable(fmt.Sprintf("source %q has no recordset definition at %s", source, recordsetPath))
+		}
+		return resolveRecordsetSource(resolved.URL, recordsetPath, collection)
+	case api.SourceKindHTTP:
+		return resolveHTTPSource(projectDir, resolved.ID, collection)
+	default:
+		return resolvedSource{}, apicontract_local.NewSourceUnavailable(fmt.Sprintf("source %q has an unsupported kind %q", source, resolved.Kind))
 	}
-	return resolvedSource{}, newFieldError("source", fmt.Sprintf(
-		"unknown source %q: no %s and no %s", source, sqliteFilePath(projectDir, source), recordsetDefinitionPath(projectDir, source),
-	))
 }
 
 func fileExists(path string) bool {
@@ -73,8 +69,10 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-func resolveSQLSource(ctx context.Context, sqlPath, collection string) (resolvedSource, error) {
-	sourceURL := "sqlite://" + sqlPath
+// resolveSQLSourceURL is resolveSQLSource's own logic, taking an
+// already-resolved sqlite:// URL (api.ResolvedSource.URL) instead of
+// building one from a bare filesystem path itself.
+func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (resolvedSource, error) {
 	ref, err := dbcopy.Parse(sourceURL)
 	if err != nil {
 		return resolvedSource{}, err
@@ -140,7 +138,15 @@ func resolveSQLSource(ctx context.Context, sqlPath, collection string) (resolved
 	}, nil
 }
 
-func resolveRecordsetSource(projectDir, recordsetPath, source, collection string) (resolvedSource, error) {
+// resolveRecordsetSource reads recordsetPath's declared schema for an
+// inGitDB-backed collection. sourceURL is api.ResolvedSource.URL (the
+// project's shared ingitdb:// store) — resolveRecordsetSource no longer
+// builds it itself. collection is currently unused (a recordset definition
+// declares exactly one collection, itself); kept as a parameter for
+// symmetry with resolveSQLSourceURL and so a future multi-collection
+// recordset definition needs no signature change here.
+func resolveRecordsetSource(sourceURL, recordsetPath, collection string) (resolvedSource, error) {
+	_ = collection
 	data, err := os.ReadFile(recordsetPath)
 	if err != nil {
 		return resolvedSource{}, fmt.Errorf("read %s: %w", recordsetPath, err)
@@ -176,11 +182,67 @@ func resolveRecordsetSource(projectDir, recordsetPath, source, collection string
 	// support-notes's connection to Customer is the sameField (mapping-based)
 	// kind, resolved from EntityField.Mappings, not from this schema at all.
 	return resolvedSource{
-		URL:     semanticIngitdbPath(projectDir),
+		URL:     sourceURL,
 		Columns: columns,
 		Schema: semantic.TableSchema{
 			PrimaryKey:  primaryKey,
 			ForeignKeys: foreignKeys,
 		},
 	}, nil
+}
+
+// resolveHTTPSource shapes an HTTP QueryDef's own declared recordset
+// columns (Recordsets[0].Columns[].Meta) into a resolvedSource: HTTP
+// QueryDefs carry no EntityField.Mappings/NamePatterns wiring of their own
+// (task 4's demo entities map Country.Name to chinook/support-notes
+// columns only; a query's response columns are typed and Meta-tagged
+// directly on the QueryDef instead — see datatug-demo-projects/demo-
+// project-1's queries/reference/country-facts.query.json), so this is a
+// different, simpler resolution path than resolveSQLSourceURL/
+// resolveRecordsetSource's declared-Mappings-or-NamePatterns pipeline: a
+// Meta-tagged response column is reported "declared" directly (Task 12's
+// own engineering decision — the appendix names no HTTP-specific column-
+// resolution rule).
+func resolveHTTPSource(projectDir, queryID, collection string) (resolvedSource, error) {
+	_ = collection
+	queries, err := loadModuleQueries(projectDir)
+	if err != nil {
+		return resolvedSource{}, err
+	}
+	for _, q := range queries {
+		if q == nil || q.ID != queryID {
+			continue
+		}
+		if len(q.Recordsets) == 0 {
+			return resolvedSource{}, nil
+		}
+		var columns []semantic.Column
+		for _, c := range q.Recordsets[0].Columns {
+			columns = append(columns, semantic.Column{Name: c.Name, Type: c.Type})
+		}
+		return resolvedSource{Columns: columns}, nil
+	}
+	return resolvedSource{}, apicontract_local.NewSourceUnavailable(fmt.Sprintf("HTTP query %q not found", queryID))
+}
+
+// httpDeclaredColumns returns queryID's declared recordset column ->
+// {entity,field} map, for computeSemanticColumns' HTTP branch (which skips
+// pkg/semantic.Resolve entirely — see resolveHTTPSource's doc comment).
+func httpDeclaredColumns(projectDir, queryID string) (map[string]datatug.EntityFieldRef, error) {
+	queries, err := loadModuleQueries(projectDir)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]datatug.EntityFieldRef{}
+	for _, q := range queries {
+		if q == nil || q.ID != queryID || len(q.Recordsets) == 0 {
+			continue
+		}
+		for _, c := range q.Recordsets[0].Columns {
+			if c.Meta != nil {
+				out[c.Name] = *c.Meta
+			}
+		}
+	}
+	return out, nil
 }

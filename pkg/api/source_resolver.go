@@ -83,6 +83,13 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 // fsQueriesStore.LoadQuery does not hydrate QueryDef.Text back from that
 // file (the read-back half of REQ:dtql-query-type's sidecar rule lands with
 // datatug-core PR #302 / the S1b module swap — see this stream's PR body).
+// LoadQueryDocument exports loadQueryDocument for pkg/server/endpoints'
+// exec/run_query rewrite (Task 12), which needs the same sidecar-text read
+// this package's own RunQuery/ExecuteSelect already used.
+func LoadQueryDocument(projectID, queryID string, queryType datatug.QueryType) (string, error) {
+	return loadQueryDocument(projectID, queryID, queryType)
+}
+
 func loadQueryDocument(projectID, queryID string, queryType datatug.QueryType) (string, error) {
 	dir, ok := projectDir(projectID)
 	if !ok || dir == "" {

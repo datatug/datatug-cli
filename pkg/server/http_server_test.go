@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -139,15 +140,25 @@ func startServeHTTP(t *testing.T, pathsByID map[string]string) string {
 }
 
 // startServeHTTPWithSession is startServeHTTP with an explicit
-// secureread.Session, for tests that exercise policy enforcement.
+// secureread.Session and every write/opaque-SQL capability off, for tests
+// that exercise policy enforcement but not the write-capability gate itself
+// (see write_capability_test.go for that).
 func startServeHTTPWithSession(t *testing.T, pathsByID map[string]string, session secureread.Session) string {
+	t.Helper()
+	return startServeHTTPWithSessionAndCapabilities(t, pathsByID, session, api.Capabilities{})
+}
+
+// startServeHTTPWithSessionAndCapabilities is startServeHTTPWithSession with
+// an explicit api.Capabilities, for tests that exercise --allow-writes/
+// --allow-opaque-sql themselves.
+func startServeHTTPWithSessionAndCapabilities(t *testing.T, pathsByID map[string]string, session secureread.Session, caps api.Capabilities) string {
 	t.Helper()
 	port := freeTCPPort(t)
 
 	httpServer := NewHttpServer()
 	serveErrCh := make(chan error, 1)
 	go func() {
-		serveErrCh <- httpServer.ServeHTTP(pathsByID, "127.0.0.1", port, session)
+		serveErrCh <- httpServer.ServeHTTP(pathsByID, "127.0.0.1", port, session, caps)
 	}()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

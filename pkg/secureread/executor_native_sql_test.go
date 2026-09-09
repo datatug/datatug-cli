@@ -15,6 +15,7 @@ import (
 func TestRunNativeSQL_Labelled(t *testing.T) {
 	sourceURL := newSQLiteFixture(t)
 	session := aliceSession(t, opaqueSQLAllowedPolicy)
+	session.AllowOpaqueSQL = true // Task 12's operator-level grant, on top of the policy's own opaqueQuery scope — see ErrOpaqueSQLNotGranted's doc comment.
 	executor := NewExecutor(session)
 	result, err := executor.RunNativeSQL(context.Background(), sourceURL, "SELECT name, price FROM products ORDER BY name")
 	if err != nil {
@@ -42,6 +43,7 @@ func TestRunNativeSQL_Labelled(t *testing.T) {
 func TestRunNativeSQL_Unauthorized_Refused(t *testing.T) {
 	sourceURL := newSQLiteFixture(t)
 	session := aliceSession(t, ownerScopedPolicy) // no opaqueQuery scope
+	session.AllowOpaqueSQL = true                 // isolate the POLICY-level refusal this test is about from Task 12's separate operator-level gate (ErrOpaqueSQLNotGranted), which would otherwise refuse first for an unrelated reason.
 	executor := NewExecutor(session)
 	_, err := executor.RunNativeSQL(context.Background(), sourceURL, "SELECT * FROM products")
 	if !errors.Is(err, ErrAccessDenied) {
@@ -55,12 +57,16 @@ func TestRunNativeSQL_Unauthorized_Refused(t *testing.T) {
 func TestRunNativeSQL_ReadOnlyEnforced(t *testing.T) {
 	sourceURL := newSQLiteFixture(t)
 	session := aliceSession(t, opaqueSQLAllowedPolicy)
+	session.AllowOpaqueSQL = true // reach the PRAGMA query_only enforcement this test is about, past Task 12's operator-level gate.
 	executor := NewExecutor(session)
 	ctx := context.Background()
 
 	_, err := executor.RunNativeSQL(ctx, sourceURL, "DELETE FROM products")
 	if err == nil {
 		t.Fatal("DELETE through RunNativeSQL succeeded, want a read-only failure")
+	}
+	if errors.Is(err, ErrOpaqueSQLNotGranted) {
+		t.Fatalf("DELETE was refused by the opaque-grant gate, not the read-only enforcement this test is about: %v", err)
 	}
 
 	// The table must be untouched: a plain structured read (its own,
@@ -84,6 +90,7 @@ func TestRunNativeSQL_ReadOnlyEnforced(t *testing.T) {
 func TestRunNativeSQL_UnsupportedScheme_TypedError(t *testing.T) {
 	sourceURL := newInGitDBFixture(t)
 	session := aliceSession(t, opaqueSQLAllowedPolicy)
+	session.AllowOpaqueSQL = true // reach the unsupported-scheme check past Task 12's operator-level gate.
 	executor := NewExecutor(session)
 	_, err := executor.RunNativeSQL(context.Background(), sourceURL, "SELECT 1")
 	if !errors.Is(err, ErrNativeSQLUnsupported) {
@@ -99,6 +106,7 @@ func TestRunNativeSQL_UnsupportedScheme_TypedError(t *testing.T) {
 func TestRunNativeSQL_NamedArgBindsThroughDriver(t *testing.T) {
 	sourceURL := newSQLiteFixture(t)
 	session := aliceSession(t, opaqueSQLAllowedPolicy)
+	session.AllowOpaqueSQL = true // Task 12's operator-level grant, on top of the policy's own opaqueQuery scope — see ErrOpaqueSQLNotGranted's doc comment.
 	executor := NewExecutor(session)
 	result, err := executor.RunNativeSQL(context.Background(), sourceURL,
 		"SELECT name, price FROM products WHERE name = @name",
@@ -114,6 +122,31 @@ func TestRunNativeSQL_NamedArgBindsThroughDriver(t *testing.T) {
 	}
 	if got := result.Rows[0].Data["price"]; got != float64(10) {
 		t.Errorf("price = %v (%T), want 10", got, got)
+	}
+}
+
+// TestRunNativeSQL_OpaqueSQLNotGranted_RefusedByOperatorFlag covers Task
+// 12's own addition (api-contract.md REQ:opaque-sql-limitation, "the
+// support demo has no such grant"): even a principal whose POLICY grants an
+// opaqueQuery scope is refused with ErrOpaqueSQLNotGranted — never
+// ErrAccessDenied, so exec/run_query/exec/select can map it to the
+// appendix's UNSUPPORTED_PROTECTED_EXECUTION rather than ACCESS_DENIED —
+// when this serve process itself was not started with an explicit
+// operator-level grant (session.AllowOpaqueSQL, `datatug serve
+// --allow-opaque-sql`). This is a Session-level capability layered ON TOP
+// of the pre-existing per-principal access.OpaqueQueryScope policy check
+// (TestRunNativeSQL_Unauthorized_Refused covers that one alone), not a
+// replacement for it: both must allow it before native SQL runs.
+func TestRunNativeSQL_OpaqueSQLNotGranted_RefusedByOperatorFlag(t *testing.T) {
+	sourceURL := newSQLiteFixture(t)
+	session := aliceSession(t, opaqueSQLAllowedPolicy) // policy grants opaqueQuery; session.AllowOpaqueSQL left false.
+	executor := NewExecutor(session)
+	_, err := executor.RunNativeSQL(context.Background(), sourceURL, "SELECT * FROM products")
+	if !errors.Is(err, ErrOpaqueSQLNotGranted) {
+		t.Fatalf("RunNativeSQL without the operator-level grant = %v, want ErrOpaqueSQLNotGranted", err)
+	}
+	if errors.Is(err, ErrAccessDenied) {
+		t.Errorf("ErrOpaqueSQLNotGranted must be distinct from ErrAccessDenied (different appendix error codes: UNSUPPORTED_PROTECTED_EXECUTION vs ACCESS_DENIED)")
 	}
 }
 

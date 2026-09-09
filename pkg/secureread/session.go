@@ -20,6 +20,17 @@ type Session struct {
 	// Unrestricted must be set explicitly (--no-policies) to run with no
 	// policy enforcement at all.
 	Unrestricted bool
+	// AllowOpaqueSQL is the "separate explicit opaque-query grant"
+	// REQ:opaque-sql-limitation describes: without it (and without
+	// Unrestricted), RunNativeSQL refuses before dispatch with
+	// ErrOpaqueSQLNotGranted, for every caller — the appendix's exec/
+	// run_query AND every legacy execution route (exec/select,
+	// exec/execute_commands) share this one Executor/Session, so gating it
+	// here (rather than per-endpoint) is what makes "all legacy routes obey
+	// the same boundary" (api-contract.md "Security and errors") actually
+	// true instead of aspirational. Set from `datatug serve
+	// --allow-opaque-sql` via pkg/api.Capabilities/ConfigureSecureSession.
+	AllowOpaqueSQL bool
 }
 
 // SessionOptions mirrors the serve-style flags `datatug query run` already

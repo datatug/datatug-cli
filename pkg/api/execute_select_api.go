@@ -76,7 +76,8 @@ func ExecuteSelect(ctx context.Context, storeID string, request SelectRequest) (
 		return QueryResultResponse{}, err
 	}
 	projStore := store.GetProjectStore(request.Project)
-	sourceURL, err := resolveSourceURL(ctx, projStore, request.Environment, request.Database)
+	projDir, _ := projectDir(request.Project)
+	sourceURL, err := resolveSourceURL(ctx, projStore, request.Environment, request.Database, projDir)
 	if err != nil {
 		return QueryResultResponse{}, err
 	}

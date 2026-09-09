@@ -17,7 +17,10 @@ import (
 // sqlite:// via dalgo2sqlite, ingitdb://). It walks the environment's
 // configured DB servers looking for one whose catalog matches database,
 // mirroring how a human would pick a database within an environment.
-func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, environment, database string) (string, error) {
+// projDir is the project's own on-disk directory, needed to resolve a
+// catalog path that is relative rather than "~"/"$HOME"-prefixed or already
+// absolute — see ResolveCatalogPath.
+func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, environment, database, projDir string) (string, error) {
 	env, err := projStore.LoadEnvironment(ctx, environment)
 	if err != nil {
 		return "", fmt.Errorf("load environment %q: %w", environment, err)
@@ -32,7 +35,7 @@ func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, envir
 			lastErr = catalogErr
 			continue
 		}
-		return sourceURLFromCatalog(catalog)
+		return sourceURLFromCatalog(catalog, projDir)
 	}
 	if lastErr != nil {
 		return "", fmt.Errorf("database %q not found in environment %q (tried %d server(s), last error: %w)", database, environment, len(env.DbServers), lastErr)
@@ -44,18 +47,30 @@ func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, envir
 // scheme its driver corresponds to. Only the two schemes secureread.Executor
 // (via pkg/dbcopy) actually opens are supported here; anything else fails
 // with a descriptive error rather than silently building an unusable URL.
-func sourceURLFromCatalog(catalog datatug.DbCatalog) (string, error) {
+// catalog.Path is expanded through ResolveCatalogPath first (S58: this used
+// to build "sqlite://" + catalog.Path with no expansion at all, unopenable
+// against demo-project-1's real catalog data, which declares paths like
+// "~/datatug/dbs/chinook-local.sqlite").
+func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, error) {
 	switch catalog.Driver {
 	case "sqlite3", "sqlite":
 		if catalog.Path == "" {
 			return "", fmt.Errorf("catalog %q has no path configured for its sqlite driver", catalog.ID)
 		}
-		return "sqlite://" + catalog.Path, nil
+		path, err := ResolveCatalogPath(projDir, catalog.Path)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		return "sqlite://" + path, nil
 	case "ingitdb":
 		if catalog.Path == "" {
 			return "", fmt.Errorf("catalog %q has no path configured for its ingitdb driver", catalog.ID)
 		}
-		return "ingitdb://" + catalog.Path, nil
+		path, err := ResolveCatalogPath(projDir, catalog.Path)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		return "ingitdb://" + path, nil
 	default:
 		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3 or ingitdb)", catalog.Driver)
 	}

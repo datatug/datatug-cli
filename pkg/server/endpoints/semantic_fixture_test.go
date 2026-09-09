@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
 // chinookFixturePath is dbcopy's own checked-in Chinook SQLite fixture

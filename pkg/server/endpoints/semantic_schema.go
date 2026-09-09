@@ -10,11 +10,10 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/datatug"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
-	moduledatatug "github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/semantic"
+	"github.com/datatug/datatug-core/pkg/storage"
 )
 
 // sqliteFilePath is this package's own convention for finding a SQL source's
@@ -97,15 +96,15 @@ func resolveSQLSource(ctx context.Context, sqlPath, collection string) (resolved
 	for i, f := range def.Fields {
 		columns[i] = semantic.Column{Name: string(f.Name), Type: f.Type.String()}
 	}
-	var primaryKey *moduledatatug.UniqueKey
+	var primaryKey *datatug.UniqueKey
 	if len(def.PrimaryKey) > 0 {
 		cols := make([]string, len(def.PrimaryKey))
 		for i, c := range def.PrimaryKey {
 			cols[i] = string(c)
 		}
-		primaryKey = &moduledatatug.UniqueKey{Name: "primary", Columns: cols}
+		primaryKey = &datatug.UniqueKey{Name: "primary", Columns: cols}
 	}
-	var referencedBy moduledatatug.ReferencedBys
+	var referencedBy datatug.ReferencedBys
 	referrers, err := reader.ListReferrers(ctx, &collRef)
 	if err != nil && !errors.Is(err, dal.ErrNotSupported) {
 		return resolvedSource{}, fmt.Errorf("list referrers for %s.%s: %w", sourceURL, collection, err)
@@ -115,9 +114,9 @@ func resolveSQLSource(ctx context.Context, sqlPath, collection string) (resolved
 		for i, f := range ref.Fields {
 			cols[i] = string(f)
 		}
-		referencedBy = append(referencedBy, &moduledatatug.ReferencedBy{
-			DBCollectionKey: moduledatatug.NewTableKey(ref.Collection.Name(), "", "", nil),
-			ForeignKeys: []*moduledatatug.RefByForeignKey{{
+		referencedBy = append(referencedBy, &datatug.ReferencedBy{
+			DBCollectionKey: datatug.NewTableKey(ref.Collection.Name(), "", "", nil),
+			ForeignKeys: []*datatug.RefByForeignKey{{
 				Name:    "referrer:" + ref.Collection.Name(),
 				Columns: cols,
 			}},
@@ -154,18 +153,18 @@ func resolveRecordsetSource(projectDir, recordsetPath, source, collection string
 	for i, c := range def.Columns {
 		columns[i] = semantic.Column{Name: c.Name, Type: c.Type}
 	}
-	var primaryKey *moduledatatug.UniqueKey
+	var primaryKey *datatug.UniqueKey
 	if def.PrimaryKey != nil {
-		primaryKey = &moduledatatug.UniqueKey{
+		primaryKey = &datatug.UniqueKey{
 			Name: def.PrimaryKey.Name, Columns: def.PrimaryKey.Columns, IsClustered: def.PrimaryKey.IsClustered,
 		}
 	}
-	foreignKeys := make(moduledatatug.ForeignKeys, len(def.ForeignKeys))
+	foreignKeys := make(datatug.ForeignKeys, len(def.ForeignKeys))
 	for i, fk := range def.ForeignKeys {
-		foreignKeys[i] = &moduledatatug.ForeignKey{
+		foreignKeys[i] = &datatug.ForeignKey{
 			Name:        fk.Name,
 			Columns:     fk.Columns,
-			RefTable:    moduledatatug.NewTableKey(fk.RefTable.Name, fk.RefTable.Schema, fk.RefTable.Catalog, nil),
+			RefTable:    datatug.NewTableKey(fk.RefTable.Name(), fk.RefTable.Schema(), fk.RefTable.Catalog(), nil),
 			MatchOption: fk.MatchOption,
 			UpdateRule:  fk.UpdateRule,
 			DeleteRule:  fk.DeleteRule,

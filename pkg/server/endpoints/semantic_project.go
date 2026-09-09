@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage"
-	"github.com/datatug/datatug-cli/pkg/datatug-core/storage/filestore"
-	moduledatatug "github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
 // semanticProjectDir resolves the "project" query-param value to the
@@ -21,26 +21,24 @@ import (
 //
 // The three semantic/applicable-queries endpoints read a project's
 // entities/queries/recordsets/data trees directly off disk rather than
-// through datatug.ProjectStore, for two reasons:
+// through datatug.ProjectStore:
 //
-//  1. pkg/semantic (github.com/datatug/datatug-core/pkg/semantic, imported
-//     from the module per this stream's brief since datatug-cli's own S1b
-//     module-dependency swap had not landed when this was written — see the
-//     PR body) operates on that MODULE's own datatug.Entity/QueryDef types.
-//     The vendored pkg/datatug-core/datatug.Entity used everywhere else in
-//     this repo is missing EntityField.Mappings entirely (confirmed by
-//     diffing the two trees while building this): unmarshaling a project's
-//     entity JSON through the vendored type silently drops any "mappings"
-//     key, which would make every resolution "inferred" or absent, never
-//     "declared", regardless of what the project file actually says. Reading
-//     the same JSON bytes into the module's own Entity type (which does
-//     have Mappings) avoids that silently-wrong translation.
-//  2. datatug.ProjectStore's LoadQueries(ctx, folderPath) does not recurse
+//   - When this was first written, datatug-cli still vendored its own copy
+//     of pkg/datatug-core/datatug, whose Entity type was missing
+//     EntityField.Mappings entirely (confirmed by diffing the two trees at
+//     the time), and only pkg/semantic's module import carried the real
+//     one. datatug-cli's S1b module-dependency swap (PR #197) has since
+//     replaced every vendored import with the module's own — the type
+//     datatug.ProjectStore.LoadEntities returns now has Mappings too — so
+//     this specific reason no longer applies; loadModuleEntities is kept as
+//     the direct-read path anyway, for symmetry with loadModuleQueries
+//     below and because it is already proven and tested.
+//   - datatug.ProjectStore's LoadQueries(ctx, folderPath) does not recurse
 //     into subfolders (verified against project_items_store.go's loadDir,
 //     which reads exactly one directory level) and QueriesFolder.Folders is
-//     never populated by it either — so it cannot return "every query in the
-//     project" the way Applicable needs in one call. Direct traversal is
-//     both simpler and correct for this specific need.
+//     never populated by it either — so it cannot return "every query in
+//     the project" the way Applicable needs in one call, regardless of
+//     vendored-vs-module. This reason still applies today.
 func semanticProjectDir(projectID string) (string, error) {
 	if projectID == "" {
 		return "", newFieldError("project", "is required")
@@ -53,14 +51,14 @@ func semanticProjectDir(projectID string) (string, error) {
 }
 
 // loadModuleEntities reads every entities/**/*.entity.json file under dir
-// into the module's datatug.Entity type (see semanticProjectDir's doc for
-// why not the vendored one).
-func loadModuleEntities(dir string) ([]*moduledatatug.Entity, error) {
+// into datatug.Entity directly, bypassing datatug.ProjectStore (see
+// semanticProjectDir's doc for why).
+func loadModuleEntities(dir string) ([]*datatug.Entity, error) {
 	entitiesDir := filepath.Join(dir, storage.EntitiesFolder)
 	suffix := "." + storage.EntityFileSuffix + ".json"
-	var entities []*moduledatatug.Entity
+	var entities []*datatug.Entity
 	err := walkJSONFiles(entitiesDir, suffix, func(path string, data []byte) error {
-		var entity moduledatatug.Entity
+		var entity datatug.Entity
 		if err := json.Unmarshal(data, &entity); err != nil {
 			return fmt.Errorf("parse %s: %w", path, err)
 		}
@@ -81,12 +79,12 @@ func loadModuleEntities(dir string) ([]*moduledatatug.Entity, error) {
 // the module's datatug.QueryDef type. Applicable only needs ID/Type/
 // Parameters, all present in the .query.json file itself — the sibling
 // .query.<ext> body (SQL/DTQL/HTTP text) is never read here.
-func loadModuleQueries(dir string) ([]*moduledatatug.QueryDef, error) {
+func loadModuleQueries(dir string) ([]*datatug.QueryDef, error) {
 	queriesDir := filepath.Join(dir, storage.QueriesFolder)
 	suffix := "." + storage.QueryFileSuffix + ".json"
-	var queries []*moduledatatug.QueryDef
+	var queries []*datatug.QueryDef
 	err := walkJSONFiles(queriesDir, suffix, func(path string, data []byte) error {
-		var query moduledatatug.QueryDef
+		var query datatug.QueryDef
 		if err := json.Unmarshal(data, &query); err != nil {
 			return fmt.Errorf("parse %s: %w", path, err)
 		}

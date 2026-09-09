@@ -113,7 +113,7 @@ func initCommandAction(cmd *cobra.Command, args []string) (err error) {
 		return err
 	}
 	store := dal.GetProjectStore(projectID)
-	if err = saveProjectWithDbModels(context.Background(), store, &datatugProject); err != nil {
+	if err = store.SaveProject(context.Background(), &datatugProject); err != nil {
 		return err
 	}
 	return err

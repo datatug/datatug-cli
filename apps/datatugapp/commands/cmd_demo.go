@@ -337,7 +337,7 @@ func (c demoCommand) updateDemoProject(ctx context.Context, demoProjectPath stri
 		return err
 	}
 	store := dal.GetProjectStore(project.ID)
-	if err = saveProjectWithDbModels(ctx, store, project); err != nil {
+	if err = store.SaveProject(ctx, project); err != nil {
 		return fmt.Errorf("faield to save project: %w", err)
 	}
 	return nil

@@ -10,7 +10,6 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/sqlexecute"
-	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )

@@ -34,7 +34,7 @@ func renderCommandAction(_ *cobra.Command, _ []string) error {
 	}
 
 	log.Println("Saving project", datatugProject.ID, "...")
-	if err = saveProjectWithDbModels(context.Background(), projectStore, datatugProject); err != nil {
+	if err = projectStore.SaveProject(context.Background(), datatugProject); err != nil {
 		err = fmt.Errorf("failed to save datatug project: %w", err)
 		return err
 	}

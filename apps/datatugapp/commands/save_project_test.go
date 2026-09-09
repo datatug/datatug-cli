@@ -12,10 +12,15 @@ import (
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
-// TestSaveProjectWithDbModels_PersistsDbModels proves saveProjectWithDbModels
-// works around datatug-core v0.17.0's filestore.SaveProject, which does not
-// persist project.DbModels (see the comment on saveProjectWithDbModels).
-func TestSaveProjectWithDbModels_PersistsDbModels(t *testing.T) {
+// TestSaveProject_PersistsDbModels proves datatug-core v0.21.0's plain
+// filestore.SaveProject now persists project.DbModels itself (PR #306) -
+// this repo used to need a local saveProjectWithDbModels workaround for
+// v0.17.0..v0.20.0, where SaveProject's DB-models save block was a stub;
+// that workaround is gone as of the v0.21.0 bump, and every former call site
+// now calls store.SaveProject directly. A brand-new DB model defaults to the
+// nested <dbModelsDir>/<id>/<id>.dbmodel.json layout (v0.21.0's dual-layout
+// support, same rule entities already had from v0.20.0).
+func TestSaveProject_PersistsDbModels(t *testing.T) {
 	dir := t.TempDir()
 	store, projID := filestore.NewSingleProjectStore(dir, "proj1")
 	projectStore := store.GetProjectStore(projID)
@@ -28,11 +33,11 @@ func TestSaveProjectWithDbModels_PersistsDbModels(t *testing.T) {
 		},
 	}
 
-	if err := saveProjectWithDbModels(context.Background(), projectStore, project); err != nil {
-		t.Fatalf("saveProjectWithDbModels: %v", err)
+	if err := projectStore.SaveProject(context.Background(), project); err != nil {
+		t.Fatalf("SaveProject: %v", err)
 	}
 
-	dbModelFile := filepath.Join(dir, "dbmodels", "dbmodel1.dbmodel.json")
+	dbModelFile := filepath.Join(dir, "dbmodels", "dbmodel1", "dbmodel1.dbmodel.json")
 	data, err := os.ReadFile(dbModelFile)
 	if err != nil {
 		t.Fatalf("expected %s to exist: %v", dbModelFile, err)
@@ -46,9 +51,9 @@ func TestSaveProjectWithDbModels_PersistsDbModels(t *testing.T) {
 	}
 }
 
-// TestSaveProjectWithDbModels_NoDbModels proves the wrapper is a no-op extra
-// step (beyond the plain SaveProject) when there are no DB models to save.
-func TestSaveProjectWithDbModels_NoDbModels(t *testing.T) {
+// TestSaveProject_NoDbModels proves SaveProject is a no-op for DB models
+// (no dbmodels dir created) when there are none to save.
+func TestSaveProject_NoDbModels(t *testing.T) {
 	dir := t.TempDir()
 	store, projID := filestore.NewSingleProjectStore(dir, "proj2")
 	projectStore := store.GetProjectStore(projID)
@@ -58,8 +63,8 @@ func TestSaveProjectWithDbModels_NoDbModels(t *testing.T) {
 		Created:     &datatug.ProjectCreated{At: time.Now()},
 	}
 
-	if err := saveProjectWithDbModels(context.Background(), projectStore, project); err != nil {
-		t.Fatalf("saveProjectWithDbModels: %v", err)
+	if err := projectStore.SaveProject(context.Background(), project); err != nil {
+		t.Fatalf("SaveProject: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "dbmodels")); !os.IsNotExist(err) {
 		t.Errorf("expected no dbmodels dir to be created, stat error = %v", err)

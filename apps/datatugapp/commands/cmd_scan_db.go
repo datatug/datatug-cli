@@ -53,7 +53,7 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 
 	log.Println("Saving project", datatugProject.ID, "...")
 	saveStore, _ := filestore.NewSingleProjectStore(v.ProjectDir, datatugProject.ID)
-	if err = saveProjectWithDbModels(context.Background(), saveStore.GetProjectStore(datatugProject.ID), datatugProject); err != nil {
+	if err = saveStore.GetProjectStore(datatugProject.ID).SaveProject(context.Background(), datatugProject); err != nil {
 		return fmt.Errorf("failed to save datatug project [%v]: %w", datatugProject.ID, err)
 	}
 

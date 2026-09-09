@@ -48,9 +48,23 @@ func (s *HttpServer) Shutdown(ctx context.Context) error {
 // served request; see the semantic endpoints' PR body for how this was
 // found). Wiring the already-exported SetProjectPath here is the minimal
 // fix, not a new mechanism.
+//
+// The registration is first-registration-wins per process (skipped, not
+// re-applied, when a project ID is already registered under a different
+// path): SetProjectPath itself panics on that collision by design, and a
+// live `datatug serve` process only ever calls ServeHTTP once, so this only
+// matters for this package's own tests, several of which legitimately call
+// ServeHTTP more than once in the same test binary with the same project ID
+// reused across a fresh t.TempDir() each time (see
+// security_matrix_test.go's newSecurityMatrixProject) — a real re-pointing
+// of one project ID to a different directory within a single process would
+// still be a bug worth surfacing, just not one this factory should crash
+// the whole server over.
 func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storage.Store, error) {
 	for id, path := range pathsByID {
-		filestore.SetProjectPath(id, path)
+		if existing := filestore.GetProjectPath(id); existing == "" || existing == path {
+			filestore.SetProjectPath(id, path)
+		}
 	}
 	return func(id string) (v storage.Store, err error) {
 		if v, err = filestore.NewStore("files", pathsByID); err != nil {

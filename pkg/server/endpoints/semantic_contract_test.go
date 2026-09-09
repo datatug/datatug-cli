@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -176,6 +179,34 @@ func TestSemanticColumns_UnknownSource_SourceUnavailable(t *testing.T) {
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	_, err := computeSemanticColumns(context.Background(), scope, apicontract.SourceRef{Source: "no-such-source", Collection: "Customer"})
 	assertContractError(t, err, apicontract.ErrCodeSourceUnavailable)
+}
+
+// TestSemanticColumns_MissingSourceFile_SourceUnavailable covers S80 Fix 2:
+// a source that resolves to a real, registered catalog whose underlying
+// file has gone missing (`datatug serve --project` against the demo project
+// before `datatug demo` has fetched ~/datatug/dbs/chinook-local.sqlite,
+// per S77's finding) must map to SOURCE_UNAVAILABLE (503), never the raw
+// sqlite driver text reaching a bare INTERNAL (500).
+func TestSemanticColumns_MissingSourceFile_SourceUnavailable(t *testing.T) {
+	projectDir, projectID := writeSemanticTestProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	if err := os.Remove(filepath.Join(projectDir, "chinook.sqlite")); err != nil {
+		t.Fatalf("remove chinook.sqlite fixture: %v", err)
+	}
+	_, err := computeSemanticColumns(context.Background(), scope, apicontract.SourceRef{Source: semanticTestSource, Collection: "Customer"})
+	var ce *contractError
+	if !isContractErrorCode(err, apicontract.ErrCodeSourceUnavailable, &ce) {
+		t.Fatalf("err = %v, want *contractError{Code: %s}", err, apicontract.ErrCodeSourceUnavailable)
+	}
+	if !strings.Contains(ce.Message, "chinook.sqlite") {
+		t.Errorf("message = %q, want it to name the missing path (chinook.sqlite)", ce.Message)
+	}
+	if !strings.Contains(ce.Message, "datatug demo") {
+		t.Errorf("message = %q, want the `datatug demo` recovery hint", ce.Message)
+	}
+	if strings.Contains(strings.ToLower(ce.Message), "unable to open database file") {
+		t.Errorf("message = %q, leaked the raw sqlite driver text instead of a contract message", ce.Message)
+	}
 }
 
 func TestSemanticColumns_MissingParams(t *testing.T) {

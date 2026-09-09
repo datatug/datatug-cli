@@ -75,6 +75,14 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if ref.Scheme != "sqlite" {
 		return Result{}, fmt.Errorf("%w: scheme %q", ErrNativeSQLUnsupported, ref.Scheme)
 	}
+	// openReadOnlySQLite opens its own dedicated connection rather than going
+	// through BackendRef.Open (see its doc comment), so it needs its own
+	// existence check to surface dbcopy.ErrSourceFileMissing the same way
+	// Open's sqlite branch does — see pkg/server/endpoints/exec_run_query.go
+	// and util_error_handling.go for where that maps to SOURCE_UNAVAILABLE.
+	if err := dbcopy.CheckSourceFile(ref.Path); err != nil {
+		return Result{}, err
+	}
 	db, closeDB, err := openReadOnlySQLite(ctx, ref.Path)
 	if err != nil {
 		return Result{}, err

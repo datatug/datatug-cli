@@ -14,22 +14,26 @@ import (
 	"github.com/strongo/validation"
 )
 
-// getServerDatabases returns databases hosted at server
+// getServerDatabases returns databases hosted at server. The web client
+// (db-server.service.ts's getServerDatabases) sends "proj"; paramAlias also
+// accepts the contract's "project"/"environment" names.
 func getServerDatabases(w http.ResponseWriter, r *http.Request) {
 	log.Println(r.Method, r.RequestURI)
 	q := r.URL.Query()
 	request := dto.GetServerDatabasesRequest{
-		Project:     q.Get("proj"),
-		Environment: q.Get("env"),
+		Project:     paramAlias(q, "proj", urlParamProjectID),
+		Environment: paramAlias(q, "env", "environment"),
 	}
 	var err error
 	if request.ServerRef, err = newDbServerFromQueryParams(q); err != nil {
 		handleError(err, w, r)
 		return
 	}
-	databases, err := api.GetServerDatabases(request)
+	databases, err := getServerDatabasesFunc(request)
 	returnJSON(w, r, http.StatusOK, err, databases)
 }
+
+var getServerDatabasesFunc = api.GetServerDatabases
 
 func newDbServerFromQueryParams(query url.Values) (dbServer datatug.ServerRef, err error) {
 	dbServer.Driver = query.Get("driver")

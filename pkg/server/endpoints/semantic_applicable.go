@@ -8,10 +8,25 @@ import (
 	"sort"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/apicontract_local"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/semantic"
 )
+
+// applicableRequest is POST queries/applicable's request body
+// (api-contract.md "Endpoint table": Scope + {values:Fact[]}). Core's
+// pkg/apicontract (the schema authority, v0.26.0) defines ApplicableResponse
+// but not a request envelope for this endpoint — only Scope and Fact
+// themselves are shared schema types, both reused here unchanged; the
+// enclosing envelope is real appendix-defined shape with no
+// pkg/apicontract type of its own. S78's report to the lead names this as a
+// datatug-core gap (the appendix should probably grow an
+// apicontract.ApplicableRequest alongside ExecutionRequest), not something
+// to fork the underlying Scope/Fact types over.
+type applicableRequest struct {
+	apicontract.Scope
+	Values []apicontract.Fact `json:"values"`
+}
 
 // semanticApplicableHandler is POST /datatug/queries/applicable, rewritten
 // (Task 12) to the appendix's exact envelope: Scope + {values:Fact[]},
@@ -20,33 +35,33 @@ import (
 func semanticApplicableHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeContractError(w, r, apicontract_local.NewInvalidRequest("", "failed to read request body: "+err.Error()))
+		writeContractError(w, r, newInvalidRequest("", "failed to read request body: "+err.Error()))
 		return
 	}
-	var req apicontract_local.ApplicableRequest
+	var req applicableRequest
 	if err := decodeContractBody(body, &req); err != nil {
-		writeContractError(w, r, apicontract_local.NewInvalidRequest("", err.Error()))
+		writeContractError(w, r, newInvalidRequest("", err.Error()))
 		return
 	}
 	resp, err := computeSemanticApplicable(r.Context(), req)
 	writeContractResponse(w, r, err, resp)
 }
 
-func computeSemanticApplicable(ctx context.Context, req apicontract_local.ApplicableRequest) (apicontract_local.ApplicableResponse, error) {
+func computeSemanticApplicable(ctx context.Context, req applicableRequest) (apicontract.ApplicableResponse, error) {
 	if err := validateScope(req.Scope); err != nil {
-		return apicontract_local.ApplicableResponse{}, err
+		return apicontract.ApplicableResponse{}, err
 	}
 	projectDir, ok := api.ProjectDir(req.Project)
 	if !ok {
-		return apicontract_local.ApplicableResponse{}, apicontract_local.NewNotFound("unknown project")
+		return apicontract.ApplicableResponse{}, newNotFound("unknown project")
 	}
 	projStore, err := api.ProjectStoreFor(req.Project)
 	if err != nil {
-		return apicontract_local.ApplicableResponse{}, apicontract_local.NewInvalidRequest("project", err.Error())
+		return apicontract.ApplicableResponse{}, newInvalidRequest("project", err.Error())
 	}
 	queries, err := loadModuleQueries(projectDir)
 	if err != nil {
-		return apicontract_local.ApplicableResponse{}, err
+		return apicontract.ApplicableResponse{}, err
 	}
 
 	// Disabled facts are ignored (api-contract.md "Binding and context
@@ -62,7 +77,7 @@ func computeSemanticApplicable(ctx context.Context, req apicontract_local.Applic
 	// (AC:typed-context-isolation); every distinct value at ANY origin
 	// currently conflicts, which is conservative (never silently picks a
 	// value the browser would not have) rather than wrong.
-	enabledByField := map[string][]apicontract_local.Fact{}
+	enabledByField := map[string][]apicontract.Fact{}
 	for _, f := range req.Values {
 		if !f.Enabled {
 			continue
@@ -72,14 +87,14 @@ func computeSemanticApplicable(ctx context.Context, req apicontract_local.Applic
 	}
 	ambiguous := map[string]bool{}
 	var available []semantic.SemanticValue
-	latestFactByField := map[string]apicontract_local.Fact{}
+	latestFactByField := map[string]apicontract.Fact{}
 	for key, facts := range enabledByField {
 		if distinctFactValues(facts) > 1 {
 			ambiguous[key] = true
 			continue
 		}
 		f := facts[len(facts)-1]
-		native, nativeErr := f.Value.Native()
+		native, nativeErr := nativeValue(f.Value)
 		if nativeErr != nil {
 			continue // an unconvertible TypedValue simply cannot bind anything; treated as absent, not a request-level error.
 		}
@@ -97,7 +112,7 @@ func computeSemanticApplicable(ctx context.Context, req apicontract_local.Applic
 
 	applicableQ, notYetQ := semantic.Applicable(queries, available)
 
-	var candidates []apicontract_local.Candidate
+	var candidates []apicontract.Candidate
 	for _, aq := range applicableQ {
 		candidates = append(candidates, buildApplicableCandidate(ctx, projStore, projectDir, req.Environment, aq, ambiguous, enabledByField, latestFactByField))
 	}
@@ -106,9 +121,9 @@ func computeSemanticApplicable(ctx context.Context, req apicontract_local.Applic
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].QueryID < candidates[j].QueryID })
 
-	resp := apicontract_local.ApplicableResponse{Applicable: []apicontract_local.Candidate{}, NotYet: []apicontract_local.Candidate{}}
+	resp := apicontract.ApplicableResponse{Applicable: []apicontract.Candidate{}, NotYet: []apicontract.Candidate{}}
 	for _, c := range candidates {
-		if c.State == apicontract_local.StateRunnable {
+		if c.State == apicontract.CandidateStateRunnable {
 			resp.Applicable = append(resp.Applicable, c)
 		} else {
 			resp.NotYet = append(resp.NotYet, c)
@@ -119,15 +134,15 @@ func computeSemanticApplicable(ctx context.Context, req apicontract_local.Applic
 
 func fieldKey(entity, field string) string { return entity + "\x00" + field }
 
-// distinctFactValues counts how many DISTINCT TypedValue.Equal values facts
+// distinctFactValues counts how many DISTINCT typedValueEqual values facts
 // carries (api-contract.md: "More than one distinct typed value ... is
 // ambiguous").
-func distinctFactValues(facts []apicontract_local.Fact) int {
-	var distinct []apicontract_local.TypedValue
+func distinctFactValues(facts []apicontract.Fact) int {
+	var distinct []apicontract.TypedValue
 	for _, f := range facts {
 		found := false
 		for _, d := range distinct {
-			if d.Equal(f.Value) {
+			if typedValueEqual(d, f.Value) {
 				found = true
 				break
 			}
@@ -139,14 +154,14 @@ func distinctFactValues(facts []apicontract_local.Fact) int {
 	return len(distinct)
 }
 
-func mapFactOrigin(o apicontract_local.FactOrigin) apicontract_local.BindingOrigin {
+func mapFactOrigin(o string) string {
 	switch o {
-	case apicontract_local.OriginSelection:
-		return apicontract_local.BindingOriginSelection
-	case apicontract_local.OriginContext:
-		return apicontract_local.BindingOriginContext
+	case apicontract.FactOriginSelection:
+		return apicontract.BindingOriginSelection
+	case apicontract.FactOriginContext:
+		return apicontract.BindingOriginContext
 	default:
-		return apicontract_local.BindingOriginManual
+		return apicontract.BindingOriginManual
 	}
 }
 
@@ -157,21 +172,21 @@ func mapFactOrigin(o apicontract_local.FactOrigin) apicontract_local.BindingOrig
 // can auto-bind them) and target resolution (api.EligibleTargets) —
 // either of which can still demote it out of the "runnable" state despite
 // every semantic parameter being bound.
-func buildApplicableCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, aq semantic.ApplicableQuery, ambiguous map[string]bool, enabledByField map[string][]apicontract_local.Fact, latestFactByField map[string]apicontract_local.Fact) apicontract_local.Candidate {
-	var bindings []apicontract_local.Binding
-	var chain []apicontract_local.CandidateChainEntry
+func buildApplicableCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, aq semantic.ApplicableQuery, ambiguous map[string]bool, enabledByField map[string][]apicontract.Fact, latestFactByField map[string]apicontract.Fact) apicontract.Candidate {
+	var bindings []apicontract.Binding
+	var chain []apicontract.ChainStep
 	for i, b := range aq.Bindings {
 		key := fieldKey(b.From.Entity, b.From.Field)
 		fact := latestFactByField[key]
-		bindings = append(bindings, apicontract_local.Binding{
+		bindings = append(bindings, apicontract.Binding{
 			ParameterID: b.Parameter, Value: fact.Value, Origin: mapFactOrigin(fact.Origin),
-			OriginEvidence: apicontract_local.EvidenceClientReported, FactID: fact.ID,
+			OriginEvidence: apicontract.BindingOriginEvidenceClientReported, FactID: fact.ID,
 		})
 		explanation := b.Parameter
 		if i < len(aq.Chain) {
 			explanation = aq.Chain[i]
 		}
-		chain = append(chain, apicontract_local.CandidateChainEntry{ParameterID: b.Parameter, FactID: fact.ID, Explanation: explanation})
+		chain = append(chain, apicontract.ChainStep{ParameterID: b.Parameter, FactID: fact.ID, Explanation: explanation})
 	}
 	missing, extraChain, ambig := missingNonSemanticParameters(aq.Query)
 	chain = append(chain, extraChain...)
@@ -184,10 +199,10 @@ func buildApplicableCandidate(ctx context.Context, projStore datatug.ProjectStor
 // (api-contract.md: "missing: string[] // parameter IDs") and attaching an
 // Ambiguous entry instead of a plain "missing" explanation when that
 // entity.field's block was due to conflicting facts, not an absent one.
-func buildNotYetCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, nq semantic.NotYetApplicable, ambiguous map[string]bool, enabledByField map[string][]apicontract_local.Fact) apicontract_local.Candidate {
+func buildNotYetCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, nq semantic.NotYetApplicable, ambiguous map[string]bool, enabledByField map[string][]apicontract.Fact) apicontract.Candidate {
 	var missing []string
-	var chain []apicontract_local.CandidateChainEntry
-	var ambig []apicontract_local.CandidateAmbiguous
+	var chain []apicontract.ChainStep
+	var ambig []apicontract.Ambiguous
 	for _, ef := range nq.Missing {
 		for _, p := range nq.Query.Parameters {
 			if p.Meta == nil || p.Meta.Entity+"."+p.Meta.Field != ef {
@@ -200,10 +215,10 @@ func buildNotYetCandidate(ctx context.Context, projStore datatug.ProjectStore, p
 				for _, f := range enabledByField[key] {
 					factIDs = append(factIDs, f.ID)
 				}
-				ambig = append(ambig, apicontract_local.CandidateAmbiguous{ParameterID: p.ID, FactIDs: factIDs})
-				chain = append(chain, apicontract_local.CandidateChainEntry{ParameterID: p.ID, Explanation: fmt.Sprintf("%d conflicting values available for %s; select one to resolve", len(factIDs), ef)})
+				ambig = append(ambig, apicontract.Ambiguous{ParameterID: p.ID, FactIDs: factIDs})
+				chain = append(chain, apicontract.ChainStep{ParameterID: p.ID, Explanation: fmt.Sprintf("%d conflicting values available for %s; select one to resolve", len(factIDs), ef)})
 			} else {
-				chain = append(chain, apicontract_local.CandidateChainEntry{ParameterID: p.ID, Explanation: fmt.Sprintf("%s is not available from the current selection or context", ef)})
+				chain = append(chain, apicontract.ChainStep{ParameterID: p.ID, Explanation: fmt.Sprintf("%s is not available from the current selection or context", ef)})
 			}
 		}
 	}
@@ -220,13 +235,13 @@ func buildNotYetCandidate(ctx context.Context, projStore datatug.ProjectStore, p
 // applicability"), but the appendix's own missing[] explicitly includes
 // "non-semantic required parameters" too — nothing in this Feature auto-
 // binds them, so they are always missing regardless of available facts.
-func missingNonSemanticParameters(q *datatug.QueryDef) (missing []string, chain []apicontract_local.CandidateChainEntry, ambiguous []apicontract_local.CandidateAmbiguous) {
+func missingNonSemanticParameters(q *datatug.QueryDef) (missing []string, chain []apicontract.ChainStep, ambiguous []apicontract.Ambiguous) {
 	for _, p := range q.Parameters {
 		if p.Meta != nil || !p.IsRequired {
 			continue
 		}
 		missing = append(missing, p.ID)
-		chain = append(chain, apicontract_local.CandidateChainEntry{ParameterID: p.ID, Explanation: "required parameter has no semantic tag; supply it explicitly"})
+		chain = append(chain, apicontract.ChainStep{ParameterID: p.ID, Explanation: "required parameter has no semantic tag; supply it explicitly"})
 	}
 	return missing, chain, ambiguous
 }
@@ -238,44 +253,44 @@ func missingNonSemanticParameters(q *datatug.QueryDef) (missing []string, chain 
 // unavailable (nothing to run against, regardless of bindings) beats
 // needs-input (a binding is missing/ambiguous) beats needs-target (bindings
 // are fine but more than one authorized source exists) beats runnable.
-func finishCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, q *datatug.QueryDef, bindings []apicontract_local.Binding, chain []apicontract_local.CandidateChainEntry, missing []string, ambiguous []apicontract_local.CandidateAmbiguous) apicontract_local.Candidate {
+func finishCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, q *datatug.QueryDef, bindings []apicontract.Binding, chain []apicontract.ChainStep, missing []string, ambiguous []apicontract.Ambiguous) apicontract.Candidate {
 	eligible, err := api.EligibleTargets(ctx, projStore, projectDir, environment, q)
 	if err != nil {
 		eligible = nil
 	}
 	sort.Strings(missing)
 
-	var state apicontract_local.CandidateState
+	var state string
 	var selectedSource string
 	targets := candidateTargets(eligible)
 	switch {
 	case len(eligible) == 0:
-		state = apicontract_local.StateSourceUnavailable
+		state = apicontract.CandidateStateSourceUnavailable
 	case len(missing) > 0 || len(ambiguous) > 0:
-		state = apicontract_local.StateNeedsInput
+		state = apicontract.CandidateStateNeedsInput
 	case len(eligible) == 1:
-		state = apicontract_local.StateRunnable
+		state = apicontract.CandidateStateRunnable
 		selectedSource = eligible[0].ID
 	default:
-		state = apicontract_local.StateNeedsTarget
+		state = apicontract.CandidateStateNeedsTarget
 	}
 
 	if bindings == nil {
-		bindings = []apicontract_local.Binding{}
+		bindings = []apicontract.Binding{}
 	}
 	if chain == nil {
-		chain = []apicontract_local.CandidateChainEntry{}
+		chain = []apicontract.ChainStep{}
 	}
 	if missing == nil {
 		missing = []string{}
 	}
 	if ambiguous == nil {
-		ambiguous = []apicontract_local.CandidateAmbiguous{}
+		ambiguous = []apicontract.Ambiguous{}
 	}
 	if targets == nil {
-		targets = []apicontract_local.CandidateTarget{}
+		targets = []apicontract.CandidateTarget{}
 	}
-	return apicontract_local.Candidate{
+	return apicontract.Candidate{
 		QueryID: q.ID, Targets: targets, SelectedSource: selectedSource,
 		Bindings: bindings, Chain: chain, Missing: missing, Ambiguous: ambiguous, State: state,
 	}

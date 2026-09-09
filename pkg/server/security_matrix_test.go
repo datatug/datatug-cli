@@ -11,12 +11,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/apicontract_local"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 
@@ -35,7 +36,7 @@ import (
 // Task 12 (S64) rewrote exec/run_query to the appendix's ExecutionRequest ->
 // Result envelope: every request/response shape below changed from the
 // previous api.RunQueryRequest/RunQueryResponse ad-hoc pair to
-// apicontract_local's contract types, and every call now first fetches
+// datatug-core/pkg/apicontract's contract types, and every call now first fetches
 // agent-info for a current securityContextId (api-contract.md "Scope and
 // identity": "An ID is a staleness check ... agent-info obtains the initial
 // ID").
@@ -275,13 +276,13 @@ func getURL(t *testing.T, requestURL string) (status int, raw []byte) {
 // fetchAgentInfo calls GET agent-info and decodes its exact contract
 // envelope — every scoped request below needs its securityContextId first
 // (api-contract.md: "agent-info obtains the initial ID").
-func fetchAgentInfo(t *testing.T, baseURL string) apicontract_local.AgentInfoResponse {
+func fetchAgentInfo(t *testing.T, baseURL string) apicontract.AgentInfo {
 	t.Helper()
 	status, raw := getURL(t, baseURL+"/datatug/agent-info")
 	if status != http.StatusOK {
 		t.Fatalf("GET agent-info: status %d, body %s", status, raw)
 	}
-	var info apicontract_local.AgentInfoResponse
+	var info apicontract.AgentInfo
 	if err := json.Unmarshal(raw, &info); err != nil {
 		t.Fatalf("decode agent-info: %v (body %s)", err, raw)
 	}
@@ -291,8 +292,8 @@ func fetchAgentInfo(t *testing.T, baseURL string) apicontract_local.AgentInfoRes
 // intParam builds one manual-origin integer ExecutionRequest parameter/
 // bindingOrigins pair for CustomerId — every test below drives run_query by
 // hand, standing in for the browser's own auto-binding (task 15's scope).
-func intParam(id string, value int64) (apicontract_local.TypedValue, apicontract_local.BindingOriginInput) {
-	return apicontract_local.NewIntegerValue(value), apicontract_local.BindingOriginInput{ParameterID: id, Origin: apicontract_local.BindingOriginManual}
+func intParam(id string, value int64) (apicontract.TypedValue, apicontract.BindingOriginEntry) {
+	return apicontract.NewIntegerValue(strconv.FormatInt(value, 10)), apicontract.BindingOriginEntry{ParameterID: id, Origin: apicontract.BindingOriginManual}
 }
 
 // TestRunQuery_RestrictedRowsAndColumns is AC restricted-rows-and-columns-server:
@@ -320,18 +321,18 @@ func TestRunQuery_RestrictedRowsAndColumns(t *testing.T) {
 
 	t.Run("Brazilian customer: zero rows, rowsFiltered", func(t *testing.T) {
 		value, origin := intParam("CustomerId", 1)
-		request := apicontract_local.ExecutionRequest{
+		request := apicontract.ExecutionRequest{
 			Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 			Source: securityMatrixSource, QueryID: "customer-by-id",
-			Parameters:     map[string]apicontract_local.TypedValue{"CustomerId": value},
-			BindingOrigins: []apicontract_local.BindingOriginInput{origin},
-			Mode:           apicontract_local.ModeLive,
+			Parameters:     map[string]apicontract.TypedValue{"CustomerId": value},
+			BindingOrigins: []apicontract.BindingOriginEntry{origin},
+			Mode:           apicontract.ProvenanceModeLive,
 		}
 		status, raw := postJSON(t, baseURL, "/datatug/exec/run_query", request)
 		if status != http.StatusOK {
 			t.Fatalf("run_query: status %d, body %s", status, raw)
 		}
-		var response apicontract_local.Result
+		var response apicontract.Result
 		if err := json.Unmarshal(raw, &response); err != nil {
 			t.Fatalf("decode response: %v (body %s)", err, raw)
 		}
@@ -341,25 +342,25 @@ func TestRunQuery_RestrictedRowsAndColumns(t *testing.T) {
 		if len(response.Limitations) == 0 || !response.Limitations[0].RowsFiltered {
 			t.Errorf("Limitations = %+v, want a rowsFiltered entry", response.Limitations)
 		}
-		if response.Provenance.ExecutionProfile != apicontract_local.ProfileProtected {
+		if response.Provenance.ExecutionProfile != apicontract.ExecutionProfileProtected {
 			t.Errorf("Provenance.ExecutionProfile = %q, want protected", response.Provenance.ExecutionProfile)
 		}
 	})
 
 	t.Run("Canadian customer: rows without Email, hiddenColumns", func(t *testing.T) {
 		value, origin := intParam("CustomerId", 2)
-		request := apicontract_local.ExecutionRequest{
+		request := apicontract.ExecutionRequest{
 			Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 			Source: securityMatrixSource, QueryID: "customer-by-id",
-			Parameters:     map[string]apicontract_local.TypedValue{"CustomerId": value},
-			BindingOrigins: []apicontract_local.BindingOriginInput{origin},
-			Mode:           apicontract_local.ModeLive,
+			Parameters:     map[string]apicontract.TypedValue{"CustomerId": value},
+			BindingOrigins: []apicontract.BindingOriginEntry{origin},
+			Mode:           apicontract.ProvenanceModeLive,
 		}
 		status, raw := postJSON(t, baseURL, "/datatug/exec/run_query", request)
 		if status != http.StatusOK {
 			t.Fatalf("run_query: status %d, body %s", status, raw)
 		}
-		var response apicontract_local.Result
+		var response apicontract.Result
 		if err := json.Unmarshal(raw, &response); err != nil {
 			t.Fatalf("decode response: %v (body %s)", err, raw)
 		}
@@ -378,7 +379,7 @@ func TestRunQuery_RestrictedRowsAndColumns(t *testing.T) {
 		if idx := colIndex("Email"); idx >= 0 {
 			t.Errorf("row still carries an Email column: %+v", response.Recordset.Columns)
 		}
-		if idx := colIndex("FirstName"); idx < 0 || row[idx].Text != "Cathy" {
+		if idx := colIndex("FirstName"); idx < 0 || row[idx].Str != "Cathy" {
 			t.Errorf("row FirstName = %+v, want Cathy", row)
 		}
 		if len(response.Limitations) == 0 {
@@ -405,18 +406,18 @@ func TestRunQuery_DTQL_RunsForAdmin(t *testing.T) {
 	info := fetchAgentInfo(t, baseURL)
 
 	value, origin := intParam("CustomerId", 1)
-	request := apicontract_local.ExecutionRequest{
+	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 		Source: securityMatrixSource, QueryID: "customer-by-id",
-		Parameters:     map[string]apicontract_local.TypedValue{"CustomerId": value},
-		BindingOrigins: []apicontract_local.BindingOriginInput{origin},
-		Mode:           apicontract_local.ModeLive,
+		Parameters:     map[string]apicontract.TypedValue{"CustomerId": value},
+		BindingOrigins: []apicontract.BindingOriginEntry{origin},
+		Mode:           apicontract.ProvenanceModeLive,
 	}
 	status, raw := postJSON(t, baseURL, "/datatug/exec/run_query", request)
 	if status != http.StatusOK {
 		t.Fatalf("run_query: status %d, body %s", status, raw)
 	}
-	var response apicontract_local.Result
+	var response apicontract.Result
 	if err := json.Unmarshal(raw, &response); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
 	}
@@ -425,17 +426,17 @@ func TestRunQuery_DTQL_RunsForAdmin(t *testing.T) {
 	}
 	emailFound := false
 	for i, c := range response.Recordset.Columns {
-		if c.Name == "Email" && response.Recordset.Rows[0][i].Text == "ana@example.com" {
+		if c.Name == "Email" && response.Recordset.Rows[0][i].Str == "ana@example.com" {
 			emailFound = true
 		}
 	}
 	if !emailFound {
 		t.Errorf("admin row missing Email: columns=%+v row=%+v", response.Recordset.Columns, response.Recordset.Rows[0])
 	}
-	if len(response.BindingsApplied) != 1 || response.BindingsApplied[0].ParameterID != "CustomerId" || response.BindingsApplied[0].Value.Text != "1" {
+	if len(response.BindingsApplied) != 1 || response.BindingsApplied[0].ParameterID != "CustomerId" || response.BindingsApplied[0].Value.Str != "1" {
 		t.Errorf("BindingsApplied = %+v, want [{CustomerId, integer 1}]", response.BindingsApplied)
 	}
-	if response.BindingsApplied[0].OriginEvidence != apicontract_local.EvidenceClientReported {
+	if response.BindingsApplied[0].OriginEvidence != apicontract.BindingOriginEvidenceClientReported {
 		t.Errorf("BindingsApplied[0].OriginEvidence = %q, want client-reported", response.BindingsApplied[0].OriginEvidence)
 	}
 }
@@ -451,22 +452,22 @@ func TestRunQuery_HiddenColumnExplicit_Refused(t *testing.T) {
 	info := fetchAgentInfo(t, baseURL)
 
 	value, origin := intParam("CustomerId", 2)
-	request := apicontract_local.ExecutionRequest{
+	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 		Source: securityMatrixSource, DTQL: customerEmailExplicitDTQL,
-		Parameters:     map[string]apicontract_local.TypedValue{"CustomerId": value},
-		BindingOrigins: []apicontract_local.BindingOriginInput{origin},
-		Mode:           apicontract_local.ModeLive,
+		Parameters:     map[string]apicontract.TypedValue{"CustomerId": value},
+		BindingOrigins: []apicontract.BindingOriginEntry{origin},
+		Mode:           apicontract.ProvenanceModeLive,
 	}
 	status, raw := postJSON(t, baseURL, "/datatug/exec/run_query", request)
 	if status != http.StatusForbidden {
 		t.Fatalf("run_query(explicit Email select) status = %d, want 403; body %s", status, raw)
 	}
-	var errResponse apicontract_local.ErrorEnvelope
+	var errResponse apicontract.ErrorEnvelope
 	if err := json.Unmarshal(raw, &errResponse); err != nil {
 		t.Fatalf("decode error response: %v (body %s)", err, raw)
 	}
-	if errResponse.Error.Code != apicontract_local.CodeAccessDenied {
+	if errResponse.Error.Code != string(apicontract.ErrCodeAccessDenied) {
 		t.Errorf("error code = %q, want ACCESS_DENIED", errResponse.Error.Code)
 	}
 	if errResponse.Error.RequestID == "" {
@@ -498,22 +499,22 @@ func TestRunQuery_NativeSQL_RefusedWithoutGrant(t *testing.T) {
 		t.Fatalf("agent-info capabilities.opaqueReadOnly = true, want false (no grant configured)")
 	}
 
-	request := apicontract_local.ExecutionRequest{
+	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 		Source: securityMatrixSource, QueryID: "customers-sql",
-		Parameters:     map[string]apicontract_local.TypedValue{},
-		BindingOrigins: []apicontract_local.BindingOriginInput{},
-		Mode:           apicontract_local.ModeLive,
+		Parameters:     map[string]apicontract.TypedValue{},
+		BindingOrigins: []apicontract.BindingOriginEntry{},
+		Mode:           apicontract.ProvenanceModeLive,
 	}
 	status, raw := postJSON(t, baseURL, "/datatug/exec/run_query", request)
 	if status != http.StatusForbidden {
 		t.Fatalf("run_query(SQL, no grant) status = %d, want 403; body %s", status, raw)
 	}
-	var errResponse apicontract_local.ErrorEnvelope
+	var errResponse apicontract.ErrorEnvelope
 	if err := json.Unmarshal(raw, &errResponse); err != nil {
 		t.Fatalf("decode error response: %v (body %s)", err, raw)
 	}
-	if errResponse.Error.Code != apicontract_local.CodeUnsupportedProtectedExec {
+	if errResponse.Error.Code != string(apicontract.ErrCodeUnsupportedProtectedExecution) {
 		t.Errorf("error code = %q, want UNSUPPORTED_PROTECTED_EXECUTION", errResponse.Error.Code)
 	}
 }
@@ -537,25 +538,25 @@ func TestRunQuery_NativeSQL_OpaquePrivilegedWithGrant(t *testing.T) {
 		t.Fatalf("agent-info capabilities.opaqueReadOnly = false, want true (--allow-opaque-sql set)")
 	}
 
-	request := apicontract_local.ExecutionRequest{
+	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 		Source: securityMatrixSource, QueryID: "customers-sql",
-		Parameters:     map[string]apicontract_local.TypedValue{},
-		BindingOrigins: []apicontract_local.BindingOriginInput{},
-		Mode:           apicontract_local.ModeLive,
+		Parameters:     map[string]apicontract.TypedValue{},
+		BindingOrigins: []apicontract.BindingOriginEntry{},
+		Mode:           apicontract.ProvenanceModeLive,
 	}
 	status, raw := postJSON(t, baseURL, "/datatug/exec/run_query", request)
 	if status != http.StatusOK {
 		t.Fatalf("run_query(SQL, with grant): status %d, body %s", status, raw)
 	}
-	var response apicontract_local.Result
+	var response apicontract.Result
 	if err := json.Unmarshal(raw, &response); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
 	}
 	if len(response.Recordset.Rows) != 2 {
 		t.Fatalf("rows = %d, want 2 (native SQL is not row-restricted); body %s", len(response.Recordset.Rows), raw)
 	}
-	if response.Provenance.ExecutionProfile != apicontract_local.ProfileOpaquePrivileged {
+	if response.Provenance.ExecutionProfile != apicontract.ExecutionProfileOpaquePrivileged {
 		t.Errorf("Provenance.ExecutionProfile = %q, want opaque-privileged", response.Provenance.ExecutionProfile)
 	}
 }

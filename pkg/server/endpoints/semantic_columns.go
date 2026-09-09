@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/apicontract_local"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/semantic"
 )
 
@@ -16,36 +16,36 @@ import (
 // provenance}]} with unmapped columns omitted entirely.
 func semanticColumnsHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	scope := apicontract_local.Scope{
+	scope := apicontract.Scope{
 		Project: q.Get(urlParamProjectID), Environment: q.Get("environment"), SecurityContextID: q.Get("securityContextId"),
 	}
-	ref := apicontract_local.SourceRef{Source: q.Get("source"), Collection: q.Get("collection")}
+	ref := apicontract.SourceRef{Source: q.Get("source"), Collection: q.Get("collection")}
 	resp, err := computeSemanticColumns(r.Context(), scope, ref)
 	writeContractResponse(w, r, err, resp)
 }
 
-func computeSemanticColumns(ctx context.Context, scope apicontract_local.Scope, ref apicontract_local.SourceRef) (apicontract_local.ColumnsResponse, error) {
+func computeSemanticColumns(ctx context.Context, scope apicontract.Scope, ref apicontract.SourceRef) (apicontract.SemanticColumnsResponse, error) {
 	if err := validateScope(scope); err != nil {
-		return apicontract_local.ColumnsResponse{}, err
+		return apicontract.SemanticColumnsResponse{}, err
 	}
 	if ref.Source == "" {
-		return apicontract_local.ColumnsResponse{}, apicontract_local.NewMissingParameter("source")
+		return apicontract.SemanticColumnsResponse{}, newMissingParameter("source")
 	}
 	if ref.Collection == "" {
-		return apicontract_local.ColumnsResponse{}, apicontract_local.NewMissingParameter("collection")
+		return apicontract.SemanticColumnsResponse{}, newMissingParameter("collection")
 	}
 	projectDir, ok := api.ProjectDir(scope.Project)
 	if !ok {
-		return apicontract_local.ColumnsResponse{}, apicontract_local.NewNotFound("unknown project")
+		return apicontract.SemanticColumnsResponse{}, newNotFound("unknown project")
 	}
 	projStore, err := api.ProjectStoreFor(scope.Project)
 	if err != nil {
-		return apicontract_local.ColumnsResponse{}, apicontract_local.NewInvalidRequest("project", err.Error())
+		return apicontract.SemanticColumnsResponse{}, newInvalidRequest("project", err.Error())
 	}
 
 	resolvedRegistry, regErr := api.ResolveSource(ctx, projStore, projectDir, scope.Environment, ref.Source)
 	if regErr != nil {
-		return apicontract_local.ColumnsResponse{}, apicontract_local.NewSourceUnavailable(regErr.Error())
+		return apicontract.SemanticColumnsResponse{}, newSourceUnavailable(regErr.Error())
 	}
 
 	// HTTP sources declare their own typed, Meta-tagged recordset columns
@@ -54,12 +54,12 @@ func computeSemanticColumns(ctx context.Context, scope apicontract_local.Scope, 
 	if resolvedRegistry.Kind == api.SourceKindHTTP {
 		declared, declErr := httpDeclaredColumns(projectDir, resolvedRegistry.ID)
 		if declErr != nil {
-			return apicontract_local.ColumnsResponse{}, declErr
+			return apicontract.SemanticColumnsResponse{}, declErr
 		}
-		resp := apicontract_local.ColumnsResponse{Columns: []apicontract_local.ColumnEntry{}}
+		resp := apicontract.SemanticColumnsResponse{Columns: []apicontract.SemanticColumnMapping{}}
 		for name, meta := range declared {
-			resp.Columns = append(resp.Columns, apicontract_local.ColumnEntry{
-				Column: name, Entity: meta.Entity, Field: meta.Field, Provenance: apicontract_local.ColumnDeclared,
+			resp.Columns = append(resp.Columns, apicontract.SemanticColumnMapping{
+				Column: name, Entity: meta.Entity, Field: meta.Field, Provenance: apicontract.SemanticProvenanceDeclared,
 			})
 		}
 		return resp, nil
@@ -67,23 +67,23 @@ func computeSemanticColumns(ctx context.Context, scope apicontract_local.Scope, 
 
 	entities, err := loadModuleEntities(projectDir)
 	if err != nil {
-		return apicontract_local.ColumnsResponse{}, err
+		return apicontract.SemanticColumnsResponse{}, err
 	}
 	resolved, err := resolveSource(ctx, projStore, projectDir, scope.Environment, ref.Source, ref.Collection)
 	if err != nil {
-		return apicontract_local.ColumnsResponse{}, err
+		return apicontract.SemanticColumnsResponse{}, err
 	}
 	resolutions := semantic.Resolve(entities, ref.Source, ref.Collection, resolved.Columns)
-	resp := apicontract_local.ColumnsResponse{Columns: []apicontract_local.ColumnEntry{}}
+	resp := apicontract.SemanticColumnsResponse{Columns: []apicontract.SemanticColumnMapping{}}
 	for _, res := range resolutions {
 		if res.Err != nil {
 			continue // unresolved (name-pattern evaluation failure): omitted, same as any other unmapped column.
 		}
-		provenance := apicontract_local.ColumnInferred
+		provenance := apicontract.SemanticProvenanceInferred
 		if res.Provenance == semantic.Declared {
-			provenance = apicontract_local.ColumnDeclared
+			provenance = apicontract.SemanticProvenanceDeclared
 		}
-		resp.Columns = append(resp.Columns, apicontract_local.ColumnEntry{
+		resp.Columns = append(resp.Columns, apicontract.SemanticColumnMapping{
 			Column: res.Column, Entity: res.Entity, Field: res.Field, Provenance: provenance,
 		})
 	}

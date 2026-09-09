@@ -5,7 +5,7 @@ import (
 	"sort"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/apicontract_local"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
 // dataTugAgentVersion is this agent's reported version
@@ -21,19 +21,19 @@ func AgentInfo(w http.ResponseWriter, r *http.Request) {
 	roles, groups := api.SecurePrincipalRolesGroups()
 	projectIDs := api.SecureConfiguredProjectIDs()
 	sort.Strings(projectIDs)
-	projects := make([]apicontract_local.AgentInfoProject, len(projectIDs))
+	projects := make([]apicontract.AgentProjectRef, len(projectIDs))
 	for i, id := range projectIDs {
-		projects[i] = apicontract_local.AgentInfoProject{ID: id}
+		projects[i] = apicontract.AgentProjectRef{ID: id}
 	}
 	caps := api.GetCapabilities()
-	resp := apicontract_local.AgentInfoResponse{
+	resp := apicontract.AgentInfo{
 		Version: dataTugAgentVersion,
-		Principal: apicontract_local.AgentInfoPrincipal{
+		Principal: apicontract.AgentPrincipal{
 			ID: api.SecurePrincipalID(), Roles: roles, Groups: groups,
 		},
 		SecurityContextID: api.SecurityContextID(),
 		Projects:          projects,
-		Capabilities: apicontract_local.AgentInfoCapabilities{
+		Capabilities: apicontract.AgentCapabilities{
 			// ProtectedQueries: this process can always run policy-enforced
 			// DTQL/structured execution (REQ:server-acl-all-reads) — true
 			// even for an Unrestricted (--no-policies) session, which still

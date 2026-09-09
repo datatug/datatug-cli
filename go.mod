@@ -26,7 +26,7 @@ require (
 	github.com/dal-go/dalgo2sqlite v0.1.8
 	github.com/dal-go/record v0.1.3
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.23.0
+	github.com/datatug/datatug-core v0.26.0
 	github.com/datatug/sql2csv v0.0.0-20260826045256-b0d582f72f50
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/filetug/filetug v0.3.0

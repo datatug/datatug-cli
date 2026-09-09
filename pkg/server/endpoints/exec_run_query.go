@@ -12,8 +12,8 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-cli/pkg/apicontract_local"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
@@ -29,17 +29,17 @@ import (
 // DisallowUnknownFields rather than a silently wrong response).
 func runQueryHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeContractError(w, r, apicontract_local.NewInvalidRequest("", "only POST is supported for exec/run_query"))
+		writeContractError(w, r, newInvalidRequest("", "only POST is supported for exec/run_query"))
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeContractError(w, r, apicontract_local.NewInvalidRequest("", "failed to read request body: "+err.Error()))
+		writeContractError(w, r, newInvalidRequest("", "failed to read request body: "+err.Error()))
 		return
 	}
-	var req apicontract_local.ExecutionRequest
+	var req apicontract.ExecutionRequest
 	if err := decodeContractBody(body, &req); err != nil {
-		writeContractError(w, r, apicontract_local.NewInvalidRequest("", err.Error()))
+		writeContractError(w, r, newInvalidRequest("", err.Error()))
 		return
 	}
 	result, err := computeRunQuery(r.Context(), req)
@@ -47,79 +47,79 @@ func runQueryHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // computeRunQuery is runQueryHandler's testable core.
-func computeRunQuery(ctx context.Context, req apicontract_local.ExecutionRequest) (apicontract_local.Result, error) {
-	if err := validateScope(apicontract_local.Scope{Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}); err != nil {
-		return apicontract_local.Result{}, err
+func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (apicontract.Result, error) {
+	if err := validateScope(apicontract.Scope{Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}); err != nil {
+		return apicontract.Result{}, err
 	}
 	if req.QueryID == "" && req.DTQL == "" {
-		return apicontract_local.Result{}, apicontract_local.NewInvalidRequest("queryId", "exactly one of queryId or dtql is required")
+		return apicontract.Result{}, newInvalidRequest("queryId", "exactly one of queryId or dtql is required")
 	}
 	if req.QueryID != "" && req.DTQL != "" {
-		return apicontract_local.Result{}, apicontract_local.NewInvalidRequest("dtql", "dtql cannot be supplied together with queryId")
+		return apicontract.Result{}, newInvalidRequest("dtql", "dtql cannot be supplied together with queryId")
 	}
 	switch req.Mode {
-	case "", apicontract_local.ModeLive:
-		req.Mode = apicontract_local.ModeLive
-	case apicontract_local.ModeSnapshot:
+	case "", apicontract.ProvenanceModeLive:
+		req.Mode = apicontract.ProvenanceModeLive
+	case apicontract.ProvenanceModeSnapshot:
 	default:
-		return apicontract_local.Result{}, apicontract_local.NewTypeMismatch("mode", fmt.Sprintf("must be %q or %q", apicontract_local.ModeLive, apicontract_local.ModeSnapshot))
+		return apicontract.Result{}, newTypeMismatch("mode", fmt.Sprintf("must be %q or %q", apicontract.ProvenanceModeLive, apicontract.ProvenanceModeSnapshot))
 	}
 	if err := validateBindingOrigins(req); err != nil {
-		return apicontract_local.Result{}, err
+		return apicontract.Result{}, err
 	}
 
 	projDir, ok := api.ProjectDir(req.Project)
 	if !ok {
-		return apicontract_local.Result{}, apicontract_local.NewNotFound(fmt.Sprintf("unknown project %q", req.Project))
+		return apicontract.Result{}, newNotFound(fmt.Sprintf("unknown project %q", req.Project))
 	}
 	projStore, err := api.ProjectStoreFor(req.Project)
 	if err != nil {
-		return apicontract_local.Result{}, apicontract_local.NewInvalidRequest("project", err.Error())
+		return apicontract.Result{}, newInvalidRequest("project", err.Error())
 	}
 	executor, ok := api.SecureExecutor()
 	if !ok {
-		return apicontract_local.Result{}, apicontract_local.NewError("INTERNAL", "server has no policy-enforced session configured", "")
+		return apicontract.Result{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
 
 	var queryDef *datatug.QueryDef
 	if req.QueryID != "" {
 		queryDef, err = projStore.LoadQuery(ctx, req.QueryID)
 		if err != nil {
-			return apicontract_local.Result{}, apicontract_local.NewNotFound(fmt.Sprintf("query %q not found", req.QueryID))
+			return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", req.QueryID))
 		}
 	}
 
 	resolved, targetErr := resolveExecutionSource(ctx, projStore, projDir, req, queryDef)
 	if targetErr != nil {
-		return apicontract_local.Result{}, targetErr
+		return apicontract.Result{}, targetErr
 	}
 
 	variables, missing, mismatched := typedParametersToVariables(req.Parameters, queryDef)
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return apicontract_local.Result{}, apicontract_local.NewMissingParameter(missing[0])
+		return apicontract.Result{}, newMissingParameter(missing[0])
 	}
 	if len(mismatched) > 0 {
 		sort.Strings(mismatched)
-		return apicontract_local.Result{}, apicontract_local.NewTypeMismatch(mismatched[0], fmt.Sprintf("parameter %q does not match its declared type", mismatched[0]))
+		return apicontract.Result{}, newTypeMismatch(mismatched[0], fmt.Sprintf("parameter %q does not match its declared type", mismatched[0]))
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, defaultExecTimeout)
 	defer cancel()
 
 	var result secureread.Result
-	var profile apicontract_local.ExecutionProfile
+	var profile string
 	var collection string
 
 	switch {
 	case req.DTQL != "":
-		profile = apicontract_local.ProfileProtected
+		profile = apicontract.ExecutionProfileProtected
 		result, err = executor.RunDTQL(runCtx, resolved.URL, []byte(req.DTQL), variables)
 	case queryDef.Type == datatug.QueryTypeDTQL:
 		var doc string
 		doc, err = api.LoadQueryDocument(req.Project, req.QueryID, queryDef.Type)
 		if err == nil {
-			profile = apicontract_local.ProfileProtected
+			profile = apicontract.ExecutionProfileProtected
 			result, err = executor.RunDTQL(runCtx, resolved.URL, []byte(doc), variables)
 		}
 	case queryDef.Type == datatug.QueryTypeSQL:
@@ -134,27 +134,27 @@ func computeRunQuery(ctx context.Context, req apicontract_local.ExecutionRequest
 		var text string
 		text, err = api.LoadQueryDocument(req.Project, req.QueryID, queryDef.Type)
 		if err == nil {
-			profile = apicontract_local.ProfileOpaquePrivileged
+			profile = apicontract.ExecutionProfileOpaquePrivileged
 			result, err = executor.RunNativeSQL(runCtx, resolved.URL, text, sqlQueryArgs(queryDef, variables)...)
 		}
 	case queryDef.Type == datatug.QueryTypeHTTP:
-		profile = apicontract_local.ProfileProtected
+		profile = apicontract.ExecutionProfileProtected
 		collection = queryDef.ID
 		result, err = runHTTPQuery(runCtx, executor, resolved.URL, queryDef, variables)
 	default:
-		return apicontract_local.Result{}, apicontract_local.NewInvalidRequest("queryId", fmt.Sprintf("query %q has type %q, which exec/run_query does not support yet", req.QueryID, queryDef.Type))
+		return apicontract.Result{}, newInvalidRequest("queryId", fmt.Sprintf("query %q has type %q, which exec/run_query does not support yet", req.QueryID, queryDef.Type))
 	}
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return apicontract_local.Result{}, apicontract_local.NewTimeout(fmt.Sprintf("execution exceeded the %s timeout", defaultExecTimeout))
+			return apicontract.Result{}, newTimeout(fmt.Sprintf("execution exceeded the %s timeout", defaultExecTimeout))
 		}
 		if errors.Is(err, secureread.ErrOpaqueSQLNotGranted) {
-			return apicontract_local.Result{}, apicontract_local.NewUnsupportedProtectedExecution(err.Error())
+			return apicontract.Result{}, newUnsupportedProtectedExecution(err.Error())
 		}
 		if errors.Is(err, secureread.ErrAccessDenied) {
-			return apicontract_local.Result{}, contractErrAccessDenied(err.Error())
+			return apicontract.Result{}, contractErrAccessDenied(err.Error())
 		}
-		return apicontract_local.Result{}, apicontract_local.NewInvalidRequest("", err.Error())
+		return apicontract.Result{}, newInvalidRequest("", err.Error())
 	}
 	if collection == "" {
 		collection = req.Source
@@ -163,7 +163,11 @@ func computeRunQuery(ctx context.Context, req apicontract_local.ExecutionRequest
 		}
 	}
 
-	limit := boundLimit(req.Limit)
+	requestedLimit := 0
+	if req.Limit != nil {
+		requestedLimit = *req.Limit
+	}
+	limit := boundLimit(requestedLimit)
 	truncated := false
 	if len(result.Rows) > limit {
 		result.Rows = result.Rows[:limit]
@@ -172,19 +176,19 @@ func computeRunQuery(ctx context.Context, req apicontract_local.ExecutionRequest
 
 	recordset, err := toContractRecordset(result)
 	if err != nil {
-		return apicontract_local.Result{}, apicontract_local.NewError("INTERNAL", err.Error(), "")
+		return apicontract.Result{}, newContractError(codeInternal, err.Error(), "")
 	}
 
-	mode := apicontract_local.ModeLive
+	mode := apicontract.ProvenanceModeLive
 	if result.Provenance != nil && result.Provenance.Source == dalgo2http.SourceSnapshot {
-		mode = apicontract_local.ModeSnapshot
+		mode = apicontract.ProvenanceModeSnapshot
 	}
 
-	return apicontract_local.Result{
+	return apicontract.Result{
 		Recordset:       recordset,
 		Limitations:     toContractLimitations(result.Limitations),
 		BindingsApplied: bindingsApplied(req, queryDef),
-		Provenance: apicontract_local.Provenance{
+		Provenance: apicontract.Provenance{
 			Source: resolved.ID, Collection: collection, QueryID: req.QueryID,
 			Mode: mode, SnapshotID: req.SnapshotID, ObservedAt: nowRFC3339UTC(), ExecutionProfile: profile,
 		},
@@ -198,21 +202,21 @@ func computeRunQuery(ctx context.Context, req apicontract_local.ExecutionRequest
 // resolution (one eligible target auto-selected and reported; several need
 // an explicit, authorized req.Source or TARGET_REQUIRED; zero is
 // SOURCE_UNAVAILABLE).
-func resolveExecutionSource(ctx context.Context, projStore datatug.ProjectStore, projDir string, req apicontract_local.ExecutionRequest, queryDef *datatug.QueryDef) (api.ResolvedSource, error) {
+func resolveExecutionSource(ctx context.Context, projStore datatug.ProjectStore, projDir string, req apicontract.ExecutionRequest, queryDef *datatug.QueryDef) (api.ResolvedSource, error) {
 	if req.DTQL != "" {
 		if req.Source == "" {
-			return api.ResolvedSource{}, apicontract_local.NewMissingParameter("source")
+			return api.ResolvedSource{}, newMissingParameter("source")
 		}
 		resolved, err := api.ResolveSource(ctx, projStore, projDir, req.Environment, req.Source)
 		if err != nil {
-			return api.ResolvedSource{}, apicontract_local.NewSourceUnavailable(err.Error())
+			return api.ResolvedSource{}, newSourceUnavailable(err.Error())
 		}
 		return resolved, nil
 	}
 
 	eligible, err := api.EligibleTargets(ctx, projStore, projDir, req.Environment, queryDef)
 	if err != nil {
-		return api.ResolvedSource{}, apicontract_local.NewSourceUnavailable(err.Error())
+		return api.ResolvedSource{}, newSourceUnavailable(err.Error())
 	}
 	if req.Source != "" {
 		for _, s := range eligible {
@@ -220,24 +224,24 @@ func resolveExecutionSource(ctx context.Context, projStore datatug.ProjectStore,
 				return s, nil
 			}
 		}
-		return api.ResolvedSource{}, apicontract_local.NewTargetRequired(
-			fmt.Sprintf("source %q is not an authorized target for query %q", req.Source, req.QueryID), candidateTargets(eligible))
+		return api.ResolvedSource{}, newTargetRequired(
+			fmt.Sprintf("source %q is not an authorized target for query %q", req.Source, req.QueryID), targetOptions(candidateTargets(eligible)))
 	}
 	switch len(eligible) {
 	case 0:
-		return api.ResolvedSource{}, apicontract_local.NewSourceUnavailable(fmt.Sprintf("query %q has no eligible source in environment %q", req.QueryID, req.Environment))
+		return api.ResolvedSource{}, newSourceUnavailable(fmt.Sprintf("query %q has no eligible source in environment %q", req.QueryID, req.Environment))
 	case 1:
 		return eligible[0], nil
 	default:
-		return api.ResolvedSource{}, apicontract_local.NewTargetRequired(
-			fmt.Sprintf("query %q has more than one eligible target; select one explicitly", req.QueryID), candidateTargets(eligible))
+		return api.ResolvedSource{}, newTargetRequired(
+			fmt.Sprintf("query %q has more than one eligible target; select one explicitly", req.QueryID), targetOptions(candidateTargets(eligible)))
 	}
 }
 
-func candidateTargets(sources []api.ResolvedSource) []apicontract_local.CandidateTarget {
-	out := make([]apicontract_local.CandidateTarget, len(sources))
+func candidateTargets(sources []api.ResolvedSource) []apicontract.CandidateTarget {
+	out := make([]apicontract.CandidateTarget, len(sources))
 	for i, s := range sources {
-		out[i] = apicontract_local.CandidateTarget{Source: s.ID, Label: s.Label}
+		out[i] = apicontract.CandidateTarget{Source: s.ID, Label: s.Label}
 	}
 	return out
 }
@@ -245,26 +249,26 @@ func candidateTargets(sources []api.ResolvedSource) []apicontract_local.Candidat
 // validateBindingOrigins checks api-contract.md's "bindingOrigins supplies
 // display provenance, is checked for exactly the submitted keys": every
 // Parameters key has exactly one BindingOrigins entry, and vice versa.
-func validateBindingOrigins(req apicontract_local.ExecutionRequest) error {
+func validateBindingOrigins(req apicontract.ExecutionRequest) error {
 	origins := make(map[string]bool, len(req.BindingOrigins))
 	for _, o := range req.BindingOrigins {
 		if origins[o.ParameterID] {
-			return apicontract_local.NewInvalidRequest("bindingOrigins", fmt.Sprintf("duplicate bindingOrigins entry for parameter %q", o.ParameterID))
+			return newInvalidRequest("bindingOrigins", fmt.Sprintf("duplicate bindingOrigins entry for parameter %q", o.ParameterID))
 		}
 		origins[o.ParameterID] = true
 		switch o.Origin {
-		case apicontract_local.BindingOriginSelection, apicontract_local.BindingOriginContext, apicontract_local.BindingOriginManual, apicontract_local.BindingOriginDefault:
+		case apicontract.BindingOriginSelection, apicontract.BindingOriginContext, apicontract.BindingOriginManual, apicontract.BindingOriginDefault:
 		default:
-			return apicontract_local.NewInvalidRequest("bindingOrigins", fmt.Sprintf("parameter %q has unknown origin %q", o.ParameterID, o.Origin))
+			return newInvalidRequest("bindingOrigins", fmt.Sprintf("parameter %q has unknown origin %q", o.ParameterID, o.Origin))
 		}
 	}
 	for paramID := range req.Parameters {
 		if !origins[paramID] {
-			return apicontract_local.NewInvalidRequest("bindingOrigins", fmt.Sprintf("parameter %q has no matching bindingOrigins entry", paramID))
+			return newInvalidRequest("bindingOrigins", fmt.Sprintf("parameter %q has no matching bindingOrigins entry", paramID))
 		}
 	}
 	if len(origins) != len(req.Parameters) {
-		return apicontract_local.NewInvalidRequest("bindingOrigins", "bindingOrigins must name exactly the submitted parameters, no more")
+		return newInvalidRequest("bindingOrigins", "bindingOrigins must name exactly the submitted parameters, no more")
 	}
 	return nil
 }
@@ -276,10 +280,10 @@ func validateBindingOrigins(req apicontract_local.ExecutionRequest) error {
 // type matches. missing lists required declared parameters with no
 // supplied value; mismatched lists parameters whose TypedValue.Type
 // disagrees with the query's own declared ParameterDef.Type.
-func typedParametersToVariables(params map[string]apicontract_local.TypedValue, queryDef *datatug.QueryDef) (variables map[string]any, missing, mismatched []string) {
+func typedParametersToVariables(params map[string]apicontract.TypedValue, queryDef *datatug.QueryDef) (variables map[string]any, missing, mismatched []string) {
 	variables = make(map[string]any, len(params))
 	for name, tv := range params {
-		native, err := tv.Native()
+		native, err := nativeValue(tv)
 		if err != nil {
 			mismatched = append(mismatched, name)
 			continue
@@ -306,29 +310,29 @@ func typedParametersToVariables(params map[string]apicontract_local.TypedValue, 
 
 // declaredValueType maps a ParameterDef.Type string ("integer", "string",
 // "number", "boolean", "date", "datetime", "decimal") onto the matching
-// apicontract_local.ValueType, when this codebase declares one it
-// recognizes. An unrecognized type string (ok == false) is not checked —
-// api-contract.md: "Type names for parameters/columns map explicitly to
-// existing core definitions; unsupported types fail validation rather than
-// being converted silently" — but that mapping/validation lives in
-// datatug-core's own type registry, not duplicated here; this resolver only
-// checks the types it already understands.
-func declaredValueType(t string) (apicontract_local.ValueType, bool) {
+// apicontract.ValueType, when this codebase declares one it recognizes. An
+// unrecognized type string (ok == false) is not checked — api-contract.md:
+// "Type names for parameters/columns map explicitly to existing core
+// definitions; unsupported types fail validation rather than being
+// converted silently" — but that mapping/validation lives in datatug-core's
+// own type registry, not duplicated here; this resolver only checks the
+// types it already understands.
+func declaredValueType(t string) (apicontract.ValueType, bool) {
 	switch t {
 	case "integer":
-		return apicontract_local.TypeInteger, true
+		return apicontract.ValueTypeInteger, true
 	case "string":
-		return apicontract_local.TypeString, true
+		return apicontract.ValueTypeString, true
 	case "number":
-		return apicontract_local.TypeNumber, true
+		return apicontract.ValueTypeNumber, true
 	case "boolean", "bit":
-		return apicontract_local.TypeBoolean, true
+		return apicontract.ValueTypeBoolean, true
 	case "date":
-		return apicontract_local.TypeDate, true
+		return apicontract.ValueTypeDate, true
 	case "datetime":
-		return apicontract_local.TypeDateTime, true
+		return apicontract.ValueTypeDatetime, true
 	case "decimal":
-		return apicontract_local.TypeDecimal, true
+		return apicontract.ValueTypeDecimal, true
 	default:
 		return "", false
 	}
@@ -363,8 +367,8 @@ func sqlQueryArgs(queryDef *datatug.QueryDef, variables map[string]any) []dal.Qu
 // every supplied parameter is reported (no query definition exists to
 // narrow against — see this file's Task-13-deferred note on deeper AST-level
 // confirmation).
-func bindingsApplied(req apicontract_local.ExecutionRequest, queryDef *datatug.QueryDef) []apicontract_local.Binding {
-	origins := make(map[string]apicontract_local.BindingOriginInput, len(req.BindingOrigins))
+func bindingsApplied(req apicontract.ExecutionRequest, queryDef *datatug.QueryDef) []apicontract.Binding {
+	origins := make(map[string]apicontract.BindingOriginEntry, len(req.BindingOrigins))
 	for _, o := range req.BindingOrigins {
 		origins[o.ParameterID] = o
 	}
@@ -385,12 +389,12 @@ func bindingsApplied(req apicontract_local.ExecutionRequest, queryDef *datatug.Q
 		}
 	}
 	sort.Strings(ids)
-	bindings := make([]apicontract_local.Binding, 0, len(ids))
+	bindings := make([]apicontract.Binding, 0, len(ids))
 	for _, id := range ids {
 		origin := origins[id]
-		bindings = append(bindings, apicontract_local.Binding{
+		bindings = append(bindings, apicontract.Binding{
 			ParameterID: id, Value: req.Parameters[id], Origin: origin.Origin,
-			OriginEvidence: apicontract_local.EvidenceClientReported, FactID: origin.FactID,
+			OriginEvidence: apicontract.BindingOriginEvidenceClientReported, FactID: origin.FactID,
 		})
 	}
 	return bindings

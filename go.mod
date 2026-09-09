@@ -20,7 +20,8 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
-	github.com/dal-go/dalgo v0.79.1
+	github.com/dal-go/dalgo v0.79.5
+	github.com/dal-go/dalgo2http v0.1.0
 	github.com/dal-go/dalgo2sql v0.11.4
 	github.com/dal-go/dalgo2sqlite v0.1.8
 	github.com/dal-go/record v0.1.3
@@ -47,10 +48,10 @@ require (
 	github.com/stretchr/testify v1.12.1
 	github.com/strongo/buildinfo v0.2.1
 	github.com/strongo/logus v0.4.3
-	github.com/strongo/random v0.0.1
+	github.com/strongo/random v0.0.2
 	github.com/strongo/slice v0.3.9
 	github.com/strongo/strongo-tui v0.1.0
-	github.com/strongo/validation v0.0.12
+	github.com/strongo/validation v0.0.13
 	github.com/xo/dburl v0.24.2
 	github.com/zalando/go-keyring v0.2.8
 	go.uber.org/mock v0.6.0
@@ -70,7 +71,7 @@ require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
-	github.com/RoaringBitmap/roaring/v2 v2.26.0 // indirect
+	github.com/RoaringBitmap/roaring/v2 v2.27.0 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect

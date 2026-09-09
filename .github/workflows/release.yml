@@ -35,10 +35,25 @@ jobs:
     # Pinned to an exact tag, not the moving @v1: that tag defines the
     # require_notarized_macos input but does NOT contain the
     # macos_signing_preflight job, so the gate silently no-ops there.
-    uses: strongo/cicd/.github/workflows/release.yml@v1.14.17
+    uses: strongo/cicd/.github/workflows/release.yml@v1.18.0
     permissions:
       contents: write
+      # Lets the require_workflow_success guard below read Go CI's result for
+      # this commit. A reusable workflow cannot grant itself more than its
+      # caller allows, so this has to be here rather than in the shared
+      # workflow. Without it the guard fails closed and says so.
+      actions: read
     with:
+      # Refuse to tag or publish when Go CI did not pass for this exact
+      # commit. This workflow and Go CI are siblings started by the same
+      # push, with no cross-workflow `needs:` between them, so before this
+      # input a red suite could not stop a release — and did not: v0.13.2
+      # shipped six binaries from a commit whose `go build ./...` was red,
+      # built against go-github v90 while go.mod declared v91, because
+      # GoReleaser's `go mod tidy` before-hook re-added v90 in the runner.
+      # Names the workflow's `name:`, not its filename; a name matching no
+      # workflow fails rather than quietly disabling the gate.
+      require_workflow_success: 'Go CI'
       # Must be >= go.mod's `go` directive. Adopting github.com/strongo/buildinfo
       # raised it to 1.27.0. The shared release job runs its `go mod tidy`
       # before-hook under this setup-go version with GOTOOLCHAIN=local, so

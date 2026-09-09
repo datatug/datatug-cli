@@ -1,27 +1,31 @@
 name: Go CI
 
+# NO `paths:` filters, deliberately. This workflow's checks are REQUIRED by
+# branch protection on main, and GitHub leaves a required check that never
+# runs pending forever rather than passing it — so a paths-filtered required
+# check makes any pull request outside the filter permanently unmergeable
+# (a README-only change could never land).
+#
+# The filters also weakened the release gate. release.yml sets
+# `require_workflow_success: 'Go CI'`, which asks whether this workflow
+# succeeded for the exact commit. A commit the filters excluded produces no
+# run, so the guard has nothing to check and, correctly but unhelpfully,
+# waits out its grace and continues ungated. Running always means the gate
+# always has a real verdict and never burns that wait.
+#
+# The cost is one ~1 minute run on pushes and pull requests that touch no Go
+# code. That is the price of the checks being trustworthy.
 on:
   push:
-    # Only run on pushes to the default branch (e.g. merges). PRs are covered
-    # by the pull_request trigger below; scoping push to main avoids running
-    # the same checks twice (push + pull_request) on every PR-branch push.
+    # Still scoped to the default branch: pull-request branches are covered by
+    # the pull_request trigger below, so this avoids running twice per push.
     branches:
       - main
-    paths:
-      - 'go.*'
-      - '**/*.go'
-      - 'src/**'
-      - '.github/workflows/golangci.yml'
   #    tags:
   #      - 'v[0-9]+\.[0-9]+\.[0-9]+' # Push events to matching v*, i.e. v20.15.10
   pull_request:
     branches:
       - '**'
-    paths:
-      - 'go.*'
-      - '**/*.go'
-      - 'src/**'
-      - '.github/workflows/*.yml'
 
 jobs:
 

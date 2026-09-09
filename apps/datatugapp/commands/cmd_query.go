@@ -31,6 +31,9 @@ const (
 	queryPoliciesDirFlag = "policies-dir"
 	queryNoPoliciesFlag  = "no-policies"
 	queryQuietFlag       = "quiet"
+	queryProjectFlag     = "project"
+	queryQueryFlag       = "query"
+	queryEnvFlag         = "env"
 
 	// Standard exit codes from the CLI umbrella feature.
 	exitCodeUsage        = 2
@@ -74,7 +77,9 @@ applied (row conditions, field allow-lists, the deciding rule) go to stderr.
 Examples:
   datatug query run --db ingitdb://./crm --from customers --as alice
   datatug query run --db sqlite:///tmp/crm.db -f report.dtql.yaml --as alice --role support --format csv
-  datatug query run --db ingitdb://./crm --from products --var minPrice=10 --format json`,
+  datatug query run --db ingitdb://./crm --from products --var minPrice=10 --format json
+  datatug query run --project ./demo-project-1 --query customers/customer-invoices --as alice --var CustomerId=5
+  datatug query run --project demo-project-1 --query reference/country-facts --env local --var name=Brazil`,
 		SilenceUsage: true,
 		RunE:         queryRunCommandAction,
 	}
@@ -82,6 +87,9 @@ Examples:
 	flags.String(queryDBFlag, "", "Database URL ("+dbSchemesHelp()+")")
 	flags.StringP(queryFileFlag, "f", "", "DTQL query document (YAML or JSON); '-' reads stdin")
 	flags.String(queryFromFlag, "", "Select every row and field of this root collection (alternative to -f)")
+	flags.String(queryProjectFlag, "", "Project directory or registered project ID (alternative to --db; runs a saved --query by ID)")
+	flags.String(queryQueryFlag, "", "Saved query ID to run, e.g. customers/customer-invoices (requires --project)")
+	flags.String(queryEnvFlag, "", "Environment ID the saved query runs against (default: the project's only environment)")
 	flags.String(queryFormatFlag, "grid", "Output format: "+strings.Join(queryFormats, ", "))
 	flags.String(queryAsFlag, "", "Principal user ID; also sets $currentUser")
 	flags.StringArray(queryRoleFlag, nil, "Principal role (repeatable)")
@@ -107,6 +115,9 @@ type queryOptions struct {
 	policiesDir string
 	noPolicies  bool
 	quiet       bool
+	project     string
+	query       string
+	env         string
 }
 
 func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
@@ -124,12 +135,24 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 	o.policiesDir, _ = flags.GetString(queryPoliciesDirFlag)
 	o.noPolicies, _ = flags.GetBool(queryNoPoliciesFlag)
 	o.quiet, _ = flags.GetBool(queryQuietFlag)
+	o.project, _ = flags.GetString(queryProjectFlag)
+	o.query, _ = flags.GetString(queryQueryFlag)
+	o.env, _ = flags.GetString(queryEnvFlag)
+
+	savedQueryMode := o.project != "" || o.query != ""
+	adHocMode := o.db != "" || o.file != "" || o.from != ""
 	switch {
-	case strings.TrimSpace(o.db) == "":
-		return o, Exit("--db is required", exitCodeUsage)
-	case o.file == "" && o.from == "":
+	case savedQueryMode && adHocMode:
+		return o, Exit("--project/--query and --db/-f/--from are mutually exclusive", exitCodeUsage)
+	case savedQueryMode && (o.project == "" || o.query == ""):
+		return o, Exit("--project and --query must be given together", exitCodeUsage)
+	case savedQueryMode && (len(o.policies) > 0 || o.policiesDir != "" || o.noPolicies):
+		return o, Exit("--policy/--policies-dir/--no-policies are not supported with --project/--query; policies come from the project's own policies/ directory, exactly like `serve`", exitCodeUsage)
+	case !savedQueryMode && strings.TrimSpace(o.db) == "":
+		return o, Exit("one of --project+--query or --db is required", exitCodeUsage)
+	case !savedQueryMode && o.file == "" && o.from == "":
 		return o, Exit("one of -f/--file or --from is required", exitCodeUsage)
-	case o.file != "" && o.from != "":
+	case !savedQueryMode && o.file != "" && o.from != "":
 		return o, Exit("-f/--file and --from are mutually exclusive", exitCodeUsage)
 	}
 	valid := false
@@ -146,6 +169,9 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	o, err := readQueryOptions(cmd)
 	if err != nil {
 		return err
+	}
+	if o.project != "" && o.query != "" {
+		return runSavedQueryCommand(cmd, o)
 	}
 	query, err := buildQuery(o, cmd.InOrStdin())
 	if err != nil {

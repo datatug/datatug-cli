@@ -207,7 +207,7 @@ func resolveRecordsetSource(sourceURL, recordsetPath, collection string) (resolv
 // resolution rule).
 func resolveHTTPSource(projectDir, queryID, collection string) (resolvedSource, error) {
 	_ = collection
-	queries, err := loadModuleQueries(projectDir)
+	queries, _, err := loadModuleQueries(projectDir)
 	if err != nil {
 		return resolvedSource{}, err
 	}
@@ -231,7 +231,7 @@ func resolveHTTPSource(projectDir, queryID, collection string) (resolvedSource, 
 // {entity,field} map, for computeSemanticColumns' HTTP branch (which skips
 // pkg/semantic.Resolve entirely — see resolveHTTPSource's doc comment).
 func httpDeclaredColumns(projectDir, queryID string) (map[string]datatug.EntityFieldRef, error) {
-	queries, err := loadModuleQueries(projectDir)
+	queries, _, err := loadModuleQueries(projectDir)
 	if err != nil {
 		return nil, err
 	}

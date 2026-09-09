@@ -88,6 +88,21 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 
 	var queryDef *datatug.QueryDef
 	if req.QueryID != "" {
+		// S97: req.QueryID may be bare or folder-qualified — resolve to the
+		// canonical, folder-qualified form (ResolveQueryID's own doc
+		// comment) before LoadQuery/LoadQueryDocument ever see it, and
+		// mutate req.QueryID in place so every downstream use (both
+		// LoadQueryDocument calls below, Provenance.QueryID, and every
+		// error message naming req.QueryID) reports the same canonical id
+		// consistently.
+		canonicalID, resolveErr := api.ResolveQueryID(projDir, req.QueryID)
+		if resolveErr != nil {
+			if errors.Is(resolveErr, api.ErrAmbiguousQueryID) {
+				return apicontract.Result{}, newInvalidRequest("queryId", resolveErr.Error())
+			}
+			return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", req.QueryID))
+		}
+		req.QueryID = canonicalID
 		queryDef, err = projStore.LoadQuery(ctx, req.QueryID)
 		if err != nil {
 			return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", req.QueryID))

@@ -77,7 +77,7 @@ func TestApplicableRequestFixture_DecodesAndValidatesThroughRealHandler(t *testi
 	// hand-built equivalent — so customer-invoices must come back Applicable
 	// through the real handler too.
 	for _, c := range resp.Applicable {
-		if c.QueryID == "customer-invoices" {
+		if c.QueryID == "customers/customer-invoices" {
 			return
 		}
 	}

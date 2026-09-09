@@ -361,3 +361,73 @@ func TestQueryRunSaved_UnknownProject(t *testing.T) {
 		t.Errorf("stderr must name the unresolved --project value: %q", stderr)
 	}
 }
+
+// --- S97: one saved-query id convention, applied to `datatug query run --query` too ---
+
+// TestQueryRunSaved_BareQueryID_ResolvesTheSameAsFolderQualified covers
+// S97's "bare id unique -> resolves" case for the CLI path: --query
+// "customer-invoices" (bare) must run the identical query
+// TestQueryRunSaved_DTQL's own "customers/customer-invoices" runs, not fail
+// with the store's raw "no such file or directory".
+func TestQueryRunSaved_BareQueryID_ResolvesTheSameAsFolderQualified(t *testing.T) {
+	projectDir := setupSavedQueryProject(t)
+
+	stdout, stderr, code := runQuery(t, "",
+		"--project", projectDir, "--query", "customer-invoices",
+		"--env", "local", "--as", "boss", "--role", "admin",
+		"--var", "CustomerId=5", "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	rows := decodeObjects(t, stdout)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2 (customer 5's two invoices); stdout=%s", len(rows), stdout)
+	}
+}
+
+// TestQueryRunSaved_UnknownQueryID_ClearUsageError covers S97's "unknown ->
+// clear error, never a raw filesystem error" case for the CLI path.
+func TestQueryRunSaved_UnknownQueryID_ClearUsageError(t *testing.T) {
+	projectDir := setupSavedQueryProject(t)
+
+	_, stderr, code := runQuery(t, "",
+		"--project", projectDir, "--query", "no-such-query",
+		"--env", "local", "--as", "boss", "--role", "admin", "--format", "json")
+	if code != exitCodeUsage {
+		t.Fatalf("exit = %d, want %d (usage: unknown query); stderr=%q", code, exitCodeUsage, stderr)
+	}
+	if strings.Contains(stderr, "no such file") || strings.Contains(stderr, "open ") {
+		t.Errorf("stderr leaked raw filesystem text: %q", stderr)
+	}
+}
+
+// TestQueryRunSaved_AmbiguousQueryID_ClearUsageError covers S97's
+// "ambiguous -> clear error naming the ambiguity" case for the CLI path:
+// demo-project-1 has no naturally-colliding bare ids, so this constructs a
+// minimal temp project with two queries sharing the bare id "q" in
+// different folders.
+func TestQueryRunSaved_AmbiguousQueryID_ClearUsageError(t *testing.T) {
+	tempDatatugHome(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "datatug-project.json"), []byte(`{"id":"ambiguous-query-test","title":"Ambiguous query test"}`), 0o644); err != nil {
+		t.Fatalf("write datatug-project.json: %v", err)
+	}
+	for _, folder := range []string{"x", "y"} {
+		queriesDir := filepath.Join(dir, "queries", folder)
+		if err := os.MkdirAll(queriesDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", queriesDir, err)
+		}
+		if err := os.WriteFile(filepath.Join(queriesDir, "q.query.json"), []byte(`{"id":"q","type":"DTQL"}`), 0o644); err != nil {
+			t.Fatalf("write query file: %v", err)
+		}
+	}
+
+	_, stderr, code := runQuery(t, "",
+		"--project", dir, "--query", "q", "--as", "boss", "--role", "admin")
+	if code != exitCodeUsage {
+		t.Fatalf("exit = %d, want %d (usage: ambiguous query id); stderr=%q", code, exitCodeUsage, stderr)
+	}
+	if !strings.Contains(stderr, "x/q") || !strings.Contains(stderr, "y/q") {
+		t.Errorf("stderr must name both candidates x/q and y/q: %q", stderr)
+	}
+}

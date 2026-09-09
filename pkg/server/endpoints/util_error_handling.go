@@ -68,6 +68,16 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 		response.Code = "INVALID_REQUEST"
 		response.Field = urlParamStoreID
 		w.WriteHeader(http.StatusBadRequest)
+	// api.ResolveQueryID (S97): get_query's legacy envelope maps an unknown
+	// saved-query id to a clean 404 (never the store's own raw filesystem
+	// error text) and an ambiguous bare id to 400 INVALID_REQUEST naming the
+	// "query" parameter and every candidate.
+	case errors.Is(err, api.ErrQueryNotFound):
+		w.WriteHeader(http.StatusNotFound)
+	case errors.Is(err, api.ErrAmbiguousQueryID):
+		response.Code = "INVALID_REQUEST"
+		response.Field = "query"
+		w.WriteHeader(http.StatusBadRequest)
 	case validation.IsBadRequestError(err):
 		w.WriteHeader(http.StatusBadRequest)
 	default:

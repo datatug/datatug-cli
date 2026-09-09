@@ -59,10 +59,10 @@ func (s *GhStorage) WriteFile(ctx context.Context, path string, reader io.Reader
 		}
 		s.mutex.Lock()
 		s.entries = append(s.entries, &github.TreeEntry{
-			Path:    github.Ptr(path),
-			Type:    github.Ptr("blob"),
-			Mode:    github.Ptr("100644"),
-			Content: github.Ptr(string(content)),
+			Path:    new(path),
+			Type:    new("blob"),
+			Mode:    new("100644"),
+			Content: new(string(content)),
 		})
 		s.mutex.Unlock()
 	}
@@ -91,7 +91,7 @@ func (s *GhStorage) Commit(ctx context.Context, message string) error {
 	}
 
 	commit, _, err := s.client.Git.CreateCommit(ctx, s.repoOwner, s.repoName, github.Commit{
-		Message: github.Ptr(message),
+		Message: new(message),
 		Tree:    tree,
 		Parents: []*github.Commit{{SHA: s.ref.Object.SHA}},
 	}, &github.CreateCommitOptions{})
@@ -101,7 +101,7 @@ func (s *GhStorage) Commit(ctx context.Context, message string) error {
 
 	ref, _, err := s.client.Git.UpdateRef(ctx, s.repoOwner, s.repoName, s.ref.GetRef(), github.UpdateRef{
 		SHA:   commit.GetSHA(),
-		Force: github.Ptr(false),
+		Force: new(false),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update ref: %w", err)

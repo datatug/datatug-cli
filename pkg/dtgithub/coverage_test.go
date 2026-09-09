@@ -207,13 +207,13 @@ func TestCommit_WithPresetRef(t *testing.T) {
 
 	s := NewStorage(client, "o", "r", "main")
 	s.ref = &github.Reference{
-		Ref: github.Ptr("refs/heads/main"),
+		Ref: new("refs/heads/main"),
 		Object: &github.GitObject{
-			SHA: github.Ptr(sha),
+			SHA: new(sha),
 		},
 	}
 	s.entries = []*github.TreeEntry{
-		{Path: github.Ptr("f.txt"), Type: github.Ptr("blob"), Mode: github.Ptr("100644"), Content: github.Ptr("x")},
+		{Path: new("f.txt"), Type: new("blob"), Mode: new("100644"), Content: new("x")},
 	}
 
 	err := s.Commit(context.Background(), "test commit")
@@ -241,7 +241,7 @@ func TestCommit_NilRef_GetRef(t *testing.T) {
 
 	s := NewStorage(client, "o", "r", "main")
 	s.entries = []*github.TreeEntry{
-		{Path: github.Ptr("f.txt"), Type: github.Ptr("blob"), Mode: github.Ptr("100644"), Content: github.Ptr("x")},
+		{Path: new("f.txt"), Type: new("blob"), Mode: new("100644"), Content: new("x")},
 	}
 
 	err := s.Commit(context.Background(), "test commit")
@@ -257,7 +257,7 @@ func TestCommit_GetRefError(t *testing.T) {
 
 	s := NewStorage(client, "o", "r", "main")
 	s.entries = []*github.TreeEntry{
-		{Path: github.Ptr("f.txt"), Type: github.Ptr("blob"), Mode: github.Ptr("100644"), Content: github.Ptr("x")},
+		{Path: new("f.txt"), Type: new("blob"), Mode: new("100644"), Content: new("x")},
 	}
 
 	err := s.Commit(context.Background(), "test commit")
@@ -275,11 +275,11 @@ func TestCommit_CreateTreeError(t *testing.T) {
 
 	s := NewStorage(client, "o", "r", "main")
 	s.ref = &github.Reference{
-		Ref:    github.Ptr("refs/heads/main"),
-		Object: &github.GitObject{SHA: github.Ptr(sha)},
+		Ref:    new("refs/heads/main"),
+		Object: &github.GitObject{SHA: new(sha)},
 	}
 	s.entries = []*github.TreeEntry{
-		{Path: github.Ptr("f.txt"), Type: github.Ptr("blob"), Mode: github.Ptr("100644"), Content: github.Ptr("x")},
+		{Path: new("f.txt"), Type: new("blob"), Mode: new("100644"), Content: new("x")},
 	}
 
 	err := s.Commit(context.Background(), "test commit")
@@ -302,11 +302,11 @@ func TestCommit_CreateCommitError(t *testing.T) {
 
 	s := NewStorage(client, "o", "r", "main")
 	s.ref = &github.Reference{
-		Ref:    github.Ptr("refs/heads/main"),
-		Object: &github.GitObject{SHA: github.Ptr(sha)},
+		Ref:    new("refs/heads/main"),
+		Object: &github.GitObject{SHA: new(sha)},
 	}
 	s.entries = []*github.TreeEntry{
-		{Path: github.Ptr("f.txt"), Type: github.Ptr("blob"), Mode: github.Ptr("100644"), Content: github.Ptr("x")},
+		{Path: new("f.txt"), Type: new("blob"), Mode: new("100644"), Content: new("x")},
 	}
 
 	err := s.Commit(context.Background(), "test commit")
@@ -333,11 +333,11 @@ func TestCommit_UpdateRefError(t *testing.T) {
 
 	s := NewStorage(client, "o", "r", "main")
 	s.ref = &github.Reference{
-		Ref:    github.Ptr("refs/heads/main"),
-		Object: &github.GitObject{SHA: github.Ptr(sha)},
+		Ref:    new("refs/heads/main"),
+		Object: &github.GitObject{SHA: new(sha)},
 	}
 	s.entries = []*github.TreeEntry{
-		{Path: github.Ptr("f.txt"), Type: github.Ptr("blob"), Mode: github.Ptr("100644"), Content: github.Ptr("x")},
+		{Path: new("f.txt"), Type: new("blob"), Mode: new("100644"), Content: new("x")},
 	}
 
 	err := s.Commit(context.Background(), "test commit")

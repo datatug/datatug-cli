@@ -15,6 +15,7 @@ import (
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/httpsource"
 	"github.com/spf13/cobra"
 )
 
@@ -212,6 +213,19 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// This ad-hoc `datatug query run --db http://...` path predates
+	// pkg/httpsource.Open's fail-closed ModeLive default (see Open's own doc
+	// comment) and is documented, tested, offline-friendly terminal UX
+	// outside api-contract.md's scope (that appendix only binds `datatug
+	// serve`'s exec/run_query, which always names an explicit mode from its
+	// ExecutionRequest) — provenanceLine's own doc comment already explains
+	// this command shows the caller whether an answer was live or a
+	// recorded fixtures/http/ snapshot, so a silent live-then-snapshot
+	// fallback is a feature here, not the contract's forbidden "silent
+	// fallback ... claim". Opting in explicitly (rather than relying on a
+	// package default) keeps that behavior unchanged and visible at this
+	// exact call site. A no-op for every non-HTTP backend.
+	ctx = httpsource.ContextWithDispatch(ctx, dalgo2http.ModeLiveThenSnapshot, false, 0)
 	db, err := openBackend(ctx, backend)
 	if err != nil {
 		return Exit(fmt.Sprintf("open %s: %v", o.db, err), exitCodeDatabase)

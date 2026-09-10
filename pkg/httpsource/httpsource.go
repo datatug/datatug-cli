@@ -56,11 +56,12 @@ func AllowInsecureLoopback() Option {
 // HTTP QueryDef is found there: an http(s):// db-copy source with nothing
 // to serve is a configuration mistake (the wrong project path, most often),
 // not a validly-empty database.
-func Open(_ context.Context, projectDir string, opts ...Option) (dal.DB, error) {
+func Open(ctx context.Context, projectDir string, opts ...Option) (dal.DB, error) {
 	var o openOptions
 	for _, opt := range opts {
 		opt(&o)
 	}
+	dispatch := dispatchFromContext(ctx)
 
 	loaded, err := LoadHTTPQueries(projectDir)
 	if err != nil {
@@ -86,15 +87,41 @@ func Open(_ context.Context, projectDir string, opts ...Option) (dal.DB, error) 
 		if o.insecureAllowLoopback {
 			coll.InsecureAllowLoopback = true
 		}
+		if dispatch.timeout > 0 {
+			coll.Timeout = dispatch.timeout
+		}
 		collections = append(collections, coll)
 		ids = append(ids, coll.Name)
 	}
 
-	db, err := dalgo2http.NewDB(dalgo2http.Config{
+	// mode: ContextWithDispatch lets a caller pick per REQUEST. The package
+	// default, when nothing overrides it, is dalgo2http.ModeLive — strict,
+	// no fallback. This line used to hardcode ModeLiveThenSnapshot
+	// unconditionally, a silent live-then-snapshot fallback api-contract.md's
+	// Bounded-lookups-and-HTTP paragraph forbids ("No silent fallback or
+	// production-acceptance claim based on a fixture is allowed"): a caller
+	// could not tell "this answer is live" from "this answer is a stale
+	// fixture the live endpoint happened to fail for" without inspecting
+	// Provenance itself, and `datatug serve`'s exec/run_query — the one
+	// caller api-contract.md actually binds — must always dispatch the exact
+	// mode its ExecutionRequest.mode named, never an implicit blend. Two
+	// callers that predate this fix (the CLI's own ad-hoc `datatug query
+	// run --db http://...` and `datatug query run-saved`, both documented,
+	// tested, offline-friendly terminal UX outside api-contract.md's scope)
+	// opt back into the old fallback explicitly via ContextWithDispatch, so
+	// their behavior is unchanged, but it is now a visible per-call-site
+	// choice instead of this package's silent default.
+	mode := dispatch.mode
+	if mode == "" {
+		mode = dalgo2http.ModeLive
+	}
+
+	cfg := dalgo2http.Config{
 		Collections: collections,
-		// Client is deliberately left nil: dalgo2http.NewDB then installs its
-		// own default client (see dalgo2http's newDefaultClient) — the
-		// guarded dialer that refuses private/loopback/link-local/metadata/
+		// Client is deliberately left nil (unless --http-offline set it via
+		// dispatch.offline below): dalgo2http.NewDB then installs its own
+		// default client (see dalgo2http's newDefaultClient) — the guarded
+		// dialer that refuses private/loopback/link-local/metadata/
 		// multicast/unspecified addresses (including a DNS rebind) and the
 		// CheckRedirect that refuses every redirect. Setting Client to
 		// http.DefaultClient here (as this line used to) silently discarded
@@ -105,8 +132,12 @@ func Open(_ context.Context, projectDir string, opts ...Option) (dal.DB, error) 
 		// (pkg/server/endpoints/exec_run_query_http_errors_test.go) caught
 		// while adopting dalgo2http v0.2.0.
 		Snapshots: newFixtureFS(fdir, ids),
-		Mode:      dalgo2http.ModeLiveThenSnapshot,
-	})
+		Mode:      mode,
+	}
+	if dispatch.offline {
+		cfg.Client = offlineClient
+	}
+	db, err := dalgo2http.NewDB(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("httpsource: %w", err)
 	}

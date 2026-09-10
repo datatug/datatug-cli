@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/httpsource"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -124,7 +126,33 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 		return apicontract.Result{}, newTypeMismatch(mismatched[0], fmt.Sprintf("parameter %q does not match its declared type", mismatched[0]))
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, defaultExecTimeout)
+	// mode:snapshot only ever means something for an HTTP-typed saved query
+	// (api-contract.md "Live failure returns SOURCE_UNAVAILABLE ... a second
+	// request with mode:snapshot and a configured snapshotId" — the snapshot
+	// concept this stream (Task 14) implements exists only for dalgo2http-
+	// backed sources). req.Validate() already enforces mode is one of
+	// live/snapshot and snapshot carries a snapshotId; this is the one
+	// additional check core cannot perform itself (it has no queryDef to
+	// consult).
+	if req.Mode == apicontract.ProvenanceModeSnapshot && (queryDef == nil || queryDef.Type != datatug.QueryTypeHTTP) {
+		return apicontract.Result{}, newInvalidRequest("mode", "mode:snapshot is only supported for HTTP-type saved queries")
+	}
+	// Resolved BEFORE the dispatch switch (rather than inside its HTTP case)
+	// so a bad snapshotId returns immediately as its own typed
+	// *contractError (NOT_FOUND) instead of flowing into the generic
+	// post-switch err-handling block below, which classifies dalgo2http/
+	// secureread sentinel errors and would otherwise wrap an
+	// already-correctly-typed error in a misleading INVALID_REQUEST.
+	var httpMode dalgo2http.Mode
+	if queryDef != nil && queryDef.Type == datatug.QueryTypeHTTP {
+		var modeErr *contractError
+		httpMode, modeErr = resolveHTTPExecutionMode(projDir, queryDef, req)
+		if modeErr != nil {
+			return apicontract.Result{}, modeErr
+		}
+	}
+
+	runCtx, cancel := context.WithTimeout(ctx, execTimeoutFor())
 	defer cancel()
 
 	var result secureread.Result
@@ -160,7 +188,8 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 	case queryDef.Type == datatug.QueryTypeHTTP:
 		profile = apicontract.ExecutionProfileProtected
 		collection = queryDef.ID
-		result, err = runHTTPQuery(runCtx, executor, resolved.URL, queryDef, variables)
+		dispatchCtx := httpsource.ContextWithDispatch(runCtx, httpMode, api.GetCapabilities().HTTPOffline, execTimeoutFor())
+		result, err = runHTTPQuery(dispatchCtx, executor, resolved.URL, queryDef, variables)
 	default:
 		return apicontract.Result{}, newInvalidRequest("queryId", fmt.Sprintf("query %q has type %q, which exec/run_query does not support yet", req.QueryID, queryDef.Type))
 	}
@@ -198,7 +227,55 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 		// address, or other adapter-internal detail that must not reach a
 		// caller.
 		if errors.Is(err, dalgo2http.ErrAddressBlocked) || errors.Is(err, dalgo2http.ErrRedirectNotAllowed) || errors.Is(err, dalgo2http.ErrInvalidConfig) {
-			return apicontract.Result{}, newSourceUnavailable(fmt.Sprintf("query %q: its HTTP source is unreachable or misconfigured", req.QueryID))
+			return apicontract.Result{}, sourceUnavailableWithSnapshots(projDir, queryDef, fmt.Sprintf("query %q: its HTTP source is unreachable or misconfigured", req.QueryID))
+		}
+		// ErrUpstream (DNS failure, connection refused/reset, a timeout, or
+		// a 5xx/429 live response) and ErrUpstreamClient (a plain 4xx live
+		// response — the widget/endpoint itself rejected the request) are
+		// both "live failure of any kind", the Phase 1 HTTP bounds' own
+		// phrase: "Live failure returns SOURCE_UNAVAILABLE" draws no
+		// distinction between a network-level failure and an unhelpful
+		// response, and dalgo2http's own doLiveFetch text-formats (%v, not
+		// %w) the underlying error when wrapping ErrUpstream, so a timeout
+		// specifically is NOT observable via errors.Is(err,
+		// context.DeadlineExceeded) here — this branch is what actually
+		// catches an HTTP fetch that ran past its deadline (item 4), by
+		// design: TIMEOUT/504 is reserved for the overall exec/run_query
+		// budget on non-HTTP paths, per this same contract paragraph naming
+		// SOURCE_UNAVAILABLE for every live HTTP failure shape including
+		// "connect, timeout, non-2xx". --http-offline's errHTTPOffline
+		// (pkg/httpsource/dispatch.go) is wrapped exactly the same way, so
+		// an offline demo's live attempt reaches here too, indistinguishable
+		// from a real network failure — which is the point: no distinct
+		// "offline" code would let a caller special-case it.
+		if errors.Is(err, dalgo2http.ErrUpstream) || errors.Is(err, dalgo2http.ErrUpstreamClient) {
+			return apicontract.Result{}, sourceUnavailableWithSnapshots(projDir, queryDef, fmt.Sprintf("query %q: its HTTP source is unreachable or misconfigured", req.QueryID))
+		}
+		// ErrSnapshotMiss: defense in depth only. resolveHTTPExecutionMode
+		// already validates req.SnapshotID against
+		// httpsource.SnapshotIdentity before dispatch ever reaches
+		// dalgo2http, so this dalgo2http-level miss should be unreachable in
+		// production; if it ever fires anyway (e.g. a fixture file removed
+		// between that check and this fetch), it means the same thing the
+		// pre-dispatch check reports: NOT_FOUND, never a raw adapter error.
+		if errors.Is(err, dalgo2http.ErrSnapshotMiss) {
+			return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q: the requested snapshot was not found", req.QueryID))
+		}
+		// Provider-capability check before dispatch (Phase 1 HTTP bounds:
+		// "if a requested protected predicate/projection cannot be enforced
+		// safely, reject it rather than fetching an unrestricted result and
+		// claiming enforcement"). collection != "" scopes this to the HTTP
+		// dispatch path only (set exclusively in the switch's HTTP case
+		// above): reached when a row/column access policy ANDs a condition
+		// or projection into the query that this HTTP collection cannot push
+		// into its URL template — dalgo2http's own query.go (planQuery /
+		// collectEqualities / columnFieldNames) fails closed with
+		// dal.ErrNotSupported BEFORE any fetch is attempted, so this is
+		// enforcement working as designed, not a bug to work around. The
+		// fixed message never echoes err.Error(), which could name the
+		// hidden field or condition.
+		if collection != "" && errors.Is(err, dal.ErrNotSupported) {
+			return apicontract.Result{}, newAccessDenied(fmt.Sprintf("query %q: a policy-protected condition or projection cannot be safely enforced on its HTTP source", req.QueryID))
 		}
 		return apicontract.Result{}, newInvalidRequest("", err.Error())
 	}
@@ -226,8 +303,25 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 	}
 
 	mode := apicontract.ProvenanceModeLive
-	if result.Provenance != nil && result.Provenance.Source == dalgo2http.SourceSnapshot {
-		mode = apicontract.ProvenanceModeSnapshot
+	// observedAt defaults to execution time (nowRFC3339UTC) — the best
+	// available answer for a source that never reports its own dalgo2http.
+	// Provenance (sqlite, ingitdb, native SQL). An HTTP-typed query DOES
+	// report one (result.Provenance, wired by secureread.Executor via the
+	// dalgo2http.Recorder — see executor.go), and its FetchedAt is the
+	// ACTUAL observation time: "now" for a live fetch, but the fixture's own
+	// recorded capture time for a snapshot — api-contract.md "Snapshot
+	// responses retain recorded time and identity". Defaulting to
+	// nowRFC3339UTC() unconditionally here (as this line used to) silently
+	// reported a snapshot as observed "just now", which is exactly the
+	// "production-acceptance claim based on a fixture" the contract forbids
+	// — caught by this stream's own journey e2e (J2b) asserting the exact
+	// 2026-09-09 recorded date and finding today's date instead.
+	observedAt := nowRFC3339UTC()
+	if result.Provenance != nil {
+		if result.Provenance.Source == dalgo2http.SourceSnapshot {
+			mode = apicontract.ProvenanceModeSnapshot
+		}
+		observedAt = result.Provenance.FetchedAt.UTC().Format(time.RFC3339)
 	}
 
 	return apicontract.Result{
@@ -236,7 +330,7 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 		BindingsApplied: bindingsApplied(req, queryDef),
 		Provenance: apicontract.Provenance{
 			Source: resolved.ID, Collection: collection, QueryID: req.QueryID,
-			Mode: mode, SnapshotID: req.SnapshotID, ObservedAt: nowRFC3339UTC(), ExecutionProfile: profile,
+			Mode: mode, SnapshotID: req.SnapshotID, ObservedAt: observedAt, ExecutionProfile: profile,
 		},
 		Truncated: truncated,
 	}, nil
@@ -420,17 +514,86 @@ func bindingsApplied(req apicontract.ExecutionRequest, queryDef *datatug.QueryDe
 	return bindings
 }
 
+// resolveHTTPExecutionMode turns req.Mode/req.SnapshotID into the
+// dalgo2http.Mode runHTTPQuery dispatches with, for one HTTP-typed
+// queryDef (api-contract.md "Live failure returns SOURCE_UNAVAILABLE ...
+// the user must explicitly choose [a recorded snapshot], producing a second
+// request with mode:snapshot and a configured snapshotId"). req.Validate()
+// (datatug-core) already enforces mode is one of live/snapshot and
+// snapshot requires a non-empty SnapshotID; this adds the one check core
+// cannot perform itself: whether that snapshotId actually identifies the
+// project's recorded fixture for this query (httpsource.SnapshotIdentity —
+// the lead assumption's "<queryID>@<recordedAt>" identity, documented in
+// the contract amendment), so a caller can never coerce a fabricated
+// identity into ModeSnapshot dispatch. Returns NOT_FOUND (never leaking the
+// project path or the caller's fabricated id) when there is no recorded
+// fixture at all, or the supplied id does not match the one that exists.
+func resolveHTTPExecutionMode(projDir string, queryDef *datatug.QueryDef, req apicontract.ExecutionRequest) (dalgo2http.Mode, *contractError) {
+	if req.Mode != apicontract.ProvenanceModeSnapshot {
+		return dalgo2http.ModeLive, nil
+	}
+	validID, _, ok := httpsource.SnapshotIdentity(projDir, queryDef.ID)
+	if !ok || validID != req.SnapshotID {
+		return "", newNotFound(fmt.Sprintf("query %q: the requested snapshot was not found", queryDef.ID))
+	}
+	return dalgo2http.ModeSnapshot, nil
+}
+
+// availableSnapshotsDetails / snapshotOption are this lane's LEAD ASSUMPTION
+// 2026-09-10 (pending founder confirmation; see the contract amendment in
+// spec/features/core-investigation-loop/api-contract.md) for snapshot
+// discovery: when a live HTTP dispatch fails and this project has a
+// recorded fixture for the query, the SOURCE_UNAVAILABLE response's sibling
+// "details" key (contractError.Details' own doc comment explains why it is
+// a sibling key rather than nested inside "error") carries exactly this
+// shape and no other field, so the browser can render "Use recorded
+// snapshot from <date>" and send a SECOND request naming SnapshotID
+// verbatim — never automatically, never as a silent fallback on this same
+// response.
+type availableSnapshotsDetails struct {
+	AvailableSnapshots []snapshotOption `json:"availableSnapshots"`
+}
+
+type snapshotOption struct {
+	SnapshotID string `json:"snapshotId"`
+	RecordedAt string `json:"recordedAt"`
+}
+
+// sourceUnavailableWithSnapshots builds a 503 SOURCE_UNAVAILABLE
+// *contractError for a live dispatch failure, attaching
+// availableSnapshotsDetails when queryDef is HTTP-typed and this project has
+// a recorded fixture for it. Every non-HTTP SOURCE_UNAVAILABLE path
+// (dbcopy.ErrSourceFileMissing, a resolver failure) keeps calling
+// newSourceUnavailable directly and carries no details — this helper is
+// reached only from the HTTP-specific branches of computeRunQuery's error
+// classifier.
+func sourceUnavailableWithSnapshots(projDir string, queryDef *datatug.QueryDef, message string) *contractError {
+	ce := newSourceUnavailable(message)
+	if queryDef == nil || queryDef.Type != datatug.QueryTypeHTTP {
+		return ce
+	}
+	id, recordedAt, ok := httpsource.SnapshotIdentity(projDir, queryDef.ID)
+	if !ok {
+		return ce
+	}
+	ce.Details = availableSnapshotsDetails{AvailableSnapshots: []snapshotOption{{SnapshotID: id, RecordedAt: recordedAt.UTC().Format(time.RFC3339)}}}
+	return ce
+}
+
 // runHTTPQuery is exec_run_query's HTTP-typed saved-query dispatch: one
 // dal.WhereField equality per supplied declared parameter, run through the
 // same policy-enforced Executor.RunStructured every other source uses —
 // mirroring apps/datatugapp/commands/cmd_query_run_saved.go's
 // runHTTPSavedQuery (the CLI's own working equivalent) rather than
-// reinventing it. Full bounded/SSRF-hardened HTTP execution (address/
-// redirect/size/time budgets beyond dalgo2http's own defaults, explicit
-// snapshot dispatch) is plan task 14's scope ("Complete bounded HTTP
-// browser execution"); this is the minimum needed so exec/run_query does
-// not simply fail every HTTP-typed queryId, per AC:real-transport-and-
-// parameter-effect's "HTTP targets resolve without a fake database".
+// reinventing it. Plan task 14 ("Complete bounded HTTP browser execution")
+// adds the request-driven live/snapshot dispatch (resolveHTTPExecutionMode,
+// wired into ctx by the switch case above via
+// httpsource.ContextWithDispatch), the SOURCE_UNAVAILABLE/NOT_FOUND/
+// ACCESS_DENIED classification this file's err-handling block now performs,
+// and --http-offline; this function itself is unchanged from the minimum
+// that made exec/run_query not simply fail every HTTP-typed queryId, per
+// AC:real-transport-and-parameter-effect's "HTTP targets resolve without a
+// fake database".
 func runHTTPQuery(ctx context.Context, executor *secureread.Executor, sourceURL string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
 	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(queryDef.ID, "")))
 	var missing []string

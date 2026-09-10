@@ -35,6 +35,19 @@ type contractError struct {
 	Field     string
 	RequestID string
 	Targets   []apicontract.TargetOption
+	// Details, when non-nil, is serialized as a sibling top-level "details"
+	// key next to "error" in the wire response — see errorResponseEnvelope
+	// and availableSnapshotsDetails (exec_run_query.go). datatug-core
+	// v0.27.3's apicontract.ErrorBody has no generic details field, and its
+	// own Validate() restricts Targets to ErrCodeTargetRequired, so neither
+	// can carry this; a sibling key is the one extension this package can
+	// add without a datatug-core release (a go.mod bump this stream's brief
+	// explicitly rules out) while leaving apicontract.ErrorBody's wire shape
+	// byte-for-byte unchanged for every existing "error.*" consumer. LEAD
+	// ASSUMPTION 2026-09-10, pending founder confirmation — see the
+	// contract amendment in
+	// spec/features/core-investigation-loop/api-contract.md.
+	Details any
 }
 
 func (e *contractError) Error() string {

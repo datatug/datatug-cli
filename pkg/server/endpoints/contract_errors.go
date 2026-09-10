@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
 // writeCORSOrigin echoes the request's Origin as Access-Control-Allow-Origin.
@@ -75,9 +76,29 @@ func writeContractError(w http.ResponseWriter, r *http.Request, err error) {
 		status = http.StatusInternalServerError
 	}
 	w.WriteHeader(status)
-	if encErr := json.NewEncoder(w).Encode(ce.envelope()); encErr != nil {
+	if encErr := json.NewEncoder(w).Encode(wireErrorEnvelope(ce)); encErr != nil {
 		log.Printf("contract endpoint: failed to encode error envelope: %v", encErr)
 	}
+}
+
+// errorResponseEnvelope is the actual wire shape writeContractError sends:
+// apicontract.ErrorEnvelope's own "error" key, untouched, plus an optional
+// sibling "details" key — see contractError.Details' doc comment for why
+// this lives here rather than as a field on apicontract.ErrorBody itself.
+// omitempty on Details means a *contractError with no Details produces
+// exactly the byte-for-byte {"error":{...}} shape every existing consumer
+// already decodes; nothing changes for them.
+type errorResponseEnvelope struct {
+	Error   apicontract.ErrorBody `json:"error"`
+	Details any                   `json:"details,omitempty"`
+}
+
+// wireErrorEnvelope builds ce's actual wire response: ce.envelope().Error
+// unchanged (so contract_error_test.go's fixture-shape comparison, which
+// calls envelope() directly, keeps testing exactly datatug-core's schema),
+// with ce.Details attached as the sibling key.
+func wireErrorEnvelope(ce *contractError) errorResponseEnvelope {
+	return errorResponseEnvelope{Error: ce.envelope().Error, Details: ce.Details}
 }
 
 // contractErrAccessDenied builds an ACCESS_DENIED *contractError. message

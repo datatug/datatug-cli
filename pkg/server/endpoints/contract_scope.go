@@ -43,6 +43,23 @@ func validateScope(s apicontract.Scope) error {
 	return nil
 }
 
+// execTimeoutFor returns the per-request execution timeout computeRunQuery
+// bounds exec/run_query with: `datatug serve --exec-timeout`'s configured
+// value (api.Capabilities.ExecTimeout) when set, clamped to
+// (0, maxExecTimeout] — "a configured upper bound of 30 seconds" — else
+// defaultExecTimeout. A zero/negative configured value (the flag's own
+// unset default) is treated as "not configured", not as "a zero timeout".
+func execTimeoutFor() time.Duration {
+	d := api.GetCapabilities().ExecTimeout
+	if d <= 0 {
+		return defaultExecTimeout
+	}
+	if d > maxExecTimeout {
+		return maxExecTimeout
+	}
+	return d
+}
+
 // boundLimit clamps a caller-supplied limit to
 // [1, maxResultLimit], defaulting to defaultResultLimit when requested is
 // 0 (unset) or negative.

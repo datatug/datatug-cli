@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -27,6 +28,8 @@ const (
 	serveGroupFlag          = "group"
 	serveAllowWritesFlag    = "allow-writes"
 	serveAllowOpaqueSQLFlag = "allow-opaque-sql"
+	serveHTTPOfflineFlag    = "http-offline"
+	serveExecTimeoutFlag    = "exec-timeout"
 )
 
 // ServeCommand executes serve consoleCommand
@@ -47,6 +50,8 @@ type serveFlags struct {
 	groups         []string
 	allowWrites    bool
 	allowOpaqueSQL bool
+	httpOffline    bool
+	execTimeout    time.Duration
 }
 
 func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
@@ -78,6 +83,12 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.allowOpaqueSQL, err = flags.GetBool(serveAllowOpaqueSQLFlag); err != nil {
+		return f, err
+	}
+	if f.httpOffline, err = flags.GetBool(serveHTTPOfflineFlag); err != nil {
+		return f, err
+	}
+	if f.execTimeout, err = flags.GetDuration(serveExecTimeoutFlag); err != nil {
 		return f, err
 	}
 	return f, nil
@@ -204,12 +215,23 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	httpServer := server.NewHttpServer()
-	caps := api.Capabilities{AllowWrites: flags.allowWrites, AllowOpaqueSQL: flags.allowOpaqueSQL}
+	caps := api.Capabilities{
+		AllowWrites:    flags.allowWrites,
+		AllowOpaqueSQL: flags.allowOpaqueSQL,
+		HTTPOffline:    flags.httpOffline,
+		ExecTimeout:    flags.execTimeout,
+	}
 	if caps.AllowWrites {
 		log.Printf("serve: --allow-writes set; project-mutation routes are enabled")
 	}
 	if caps.AllowOpaqueSQL {
 		log.Printf("serve: --allow-opaque-sql set; native SQL executes with opaque-privileged provenance (no row/column enforcement)")
+	}
+	if caps.HTTPOffline {
+		log.Printf("serve: --http-offline set; every HTTP-typed saved query's live fetch fails as SOURCE_UNAVAILABLE without touching the network")
+	}
+	if caps.ExecTimeout > 0 {
+		log.Printf("serve: --exec-timeout=%s (api-contract.md's 30s ceiling still applies; values above it are clamped down)", caps.ExecTimeout)
 	}
 	// TODO: implement graceful shutdown
 	return httpServer.ServeHTTP(pathsByID, host, port, session, caps)
@@ -272,5 +294,7 @@ func serveCommandArgs() *cobra.Command {
 	flags.StringArray(serveGroupFlag, nil, "Principal group, repeatable")
 	flags.Bool(serveAllowWritesFlag, false, "Enable project-mutation routes (create/save/delete project, query, board, entity, recordset rows); refused by default (api-contract.md: writes need an explicit capability)")
 	flags.Bool(serveAllowOpaqueSQLFlag, false, "Allow native SQL execution with opaque-privileged provenance (no row/column enforcement); refused by default (REQ:opaque-sql-limitation)")
+	flags.Bool(serveHTTPOfflineFlag, false, "Make every HTTP-typed saved query's live fetch fail as SOURCE_UNAVAILABLE without touching the network, so an explicit mode:snapshot request is the only way to get rows (offline demos); off by default")
+	flags.Duration(serveExecTimeoutFlag, 0, "Per-request execution timeout for exec/run_query (default 10s, api-contract.md's configured upper bound is 30s; values above it are clamped down)")
 	return cmd
 }

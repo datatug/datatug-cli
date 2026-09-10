@@ -8,6 +8,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2http"
+	"github.com/datatug/datatug-cli/pkg/httpsource"
 )
 
 // newHTTPFixture builds a minimal datatug project directory with one HTTP
@@ -76,9 +77,14 @@ func TestRunStructured_HTTPSource_ReportsSnapshotProvenance(t *testing.T) {
 	// file, so this exercises RunStructuredInsecureForTest (Go-code-only
 	// Collection.InsecureAllowLoopback, never settable by the .query.http
 	// file itself) instead of RunStructured, preserving this test's exact
-	// intent: a live failure yields a labelled snapshot with retained
-	// provenance, proven through the real end-to-end wiring.
-	result, err := executor.RunStructuredInsecureForTest(context.Background(), sourceURL, countriesQuery(), nil)
+	// intent: an explicit ModeSnapshot dispatch yields the labelled snapshot
+	// with retained provenance, proven through the real end-to-end wiring.
+	// pkg/httpsource.Open's own default is the fail-closed ModeLive (see its
+	// doc comment) — httpsource.ContextWithDispatch is this test's explicit
+	// opt-in, the same mechanism exec/run_query's mode:snapshot dispatch
+	// uses, so this no longer relies on a live failure silently falling back.
+	ctx := httpsource.ContextWithDispatch(context.Background(), dalgo2http.ModeSnapshot, false, 0)
+	result, err := executor.RunStructuredInsecureForTest(ctx, sourceURL, countriesQuery(), nil)
 	if err != nil {
 		t.Fatalf("RunStructured: %v", err)
 	}

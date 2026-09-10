@@ -6,18 +6,44 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"testing"
 
 	"github.com/pkg/browser"
 	"golang.org/x/oauth2"
 )
 
+// openBrowser is a seam so tests can prove no browser is ever opened.
+var openBrowser = browser.OpenURL
+
+// ErrInteractiveLoginUnavailable is returned instead of opening a browser when the
+// process is a `go test` binary or DATATUG_NO_BROWSER is set: an interactive Google
+// consent page must never pop up on a developer's machine as a side effect of running
+// the test suite or a non-interactive job.
+var ErrInteractiveLoginUnavailable = errors.New("gauth: interactive Google login is unavailable in this process (go test or DATATUG_NO_BROWSER set); run `datatug auth google` interactively")
+
+// interactiveLoginAllowed reports whether opening a browser for OAuth consent is
+// acceptable in this process.
+func interactiveLoginAllowed() bool {
+	if testing.Testing() {
+		return false
+	}
+	if v := os.Getenv("DATATUG_NO_BROWSER"); v != "" && v != "0" && v != "false" {
+		return false
+	}
+	return true
+}
+
 // getTokenFromWeb runs a browser auth flow.
 func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (token *oauth2.Token, err error) {
+	if !interactiveLoginAllowed() {
+		return nil, ErrInteractiveLoginUnavailable
+	}
 	// Step 1: Get auth URL
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
 
 	// Step 2: Open browser
-	if err = browser.OpenURL(authURL); err != nil {
+	if err = openBrowser(authURL); err != nil {
 		return
 	}
 

@@ -65,8 +65,8 @@ func getGoogleCloudClient(ctx context.Context) (client *http.Client, err error) 
 
 	if token == nil {
 		//tok, err := tokenFromFile(tokFile)
-		if token, err = getTokenFromWeb(ctx, config); err != nil {
-			err = fmt.Errorf("failed to get token: %v", err)
+		if token, err = getTokenFromWebFn(ctx, config); err != nil {
+			err = fmt.Errorf("failed to get token: %w", err)
 			return
 		}
 		if token.RefreshToken != "" {

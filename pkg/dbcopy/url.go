@@ -226,11 +226,18 @@ func extractScheme(rawURL string) string {
 //     QueryDef under the project directory (r.Path) into a
 //     dalgo2http collection.
 //
+// Open never applies the provider-side read hardening OpenProtected does
+// (see its doc comment): every caller here — `datatug db copy`, and schema
+// introspection in pkg/server/endpoints — is a trusted, operator-level
+// caller with no pkg/accesspolicies wrapper above it, so a formula/computed
+// column is returned exactly as the provider evaluates it, matching every
+// dalgo2sql/dalgo2ingitdb release before Task 13 (S110).
+//
 // The context is reserved for future use; today's driver constructors are
 // synchronous and do not honor cancellation. That's acceptable for the MVP
 // CLI verb.
 func (r BackendRef) Open(ctx context.Context) (dal.DB, error) {
-	return r.open(ctx, false)
+	return r.open(ctx, false, false)
 }
 
 // OpenForTest is Open, except that for an "http"/"https" BackendRef every
@@ -250,10 +257,60 @@ func (r BackendRef) Open(ctx context.Context) (dal.DB, error) {
 // Go code, only when a caller explicitly calls THIS method instead of
 // Open. NEVER call this from production code.
 func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
-	return r.open(ctx, true)
+	return r.open(ctx, true, false)
 }
 
-func (r BackendRef) open(ctx context.Context, insecureAllowLoopback bool) (dal.DB, error) {
+// OpenProtected is Open, except an "ingitdb" BackendRef is opened with
+// dalgo2ingitdb v0.4.0's dalgo2ingitdb.WithStoredOnlyReads() database
+// option. Every other scheme behaves identically to Open.
+//
+// pkg/secureread.openSource is the only caller: it always wraps the
+// returned dal.DB with pkg/accesspolicies (the session's local YAML
+// policies) before any row reaches a caller. dalgo2ingitdb's own formula
+// evaluator has no way to know which of a computed column's dependencies
+// pkg/accesspolicies would have redacted — the adapter computes the value
+// from the FULL underlying record and hands back the (correct) result,
+// which can leak a hidden field's value through an allowed computed column
+// (see dal-go/dalgo2ingitdb#8 / this repo's README "Owner access
+// policies" section). WithStoredOnlyReads keeps dalgo2ingitdb from
+// evaluating or returning any formula column at all under an outer policy
+// wrapper, so pkg/accesspolicies' field allow-list is the only thing that
+// can ever put a value on the wire — it stays the single enforcement
+// point. This adapter never writes an .ingitdb/access/manifest.yaml file
+// of its own, so dalgo2ingitdb's persisted owner-policy layer (also new in
+// v0.4.0) never activates for a datatug-cli-opened project; policies do
+// NOT layer under pkg/accesspolicies here — pkg/accesspolicies remains the
+// sole enforcement layer for every source this CLI opens.
+//
+// The sqlite scheme intentionally does NOT opt into dalgo2sql v0.12.0's
+// DbOptions.StructuredQueryDialect: "sqlite" (bounded, parameter-bound
+// structured-query compilation) here. compileStructuredSQL unconditionally
+// rejects any structured query whose FROM source carries a non-empty
+// alias ("structured SQL query source aliases are not supported") — and
+// this project's own demo query (queries/customers/customer-invoices.query.dtql,
+// `from: {name: Invoice, alias: i}`) uses exactly that shape, so enabling
+// it here would turn a real saved query into a hard error. The legacy
+// emitSQL path this CLI keeps using already renders every dal.Constant
+// value through dal-go/dalgo's quoteString (doubling embedded single
+// quotes), so the common SQL-injection vector the new dialect targets is
+// already mitigated for the query shapes pkg/secureread executes; the
+// stronger binding dalgo2sql v0.12.0 offers is left for a follow-up once
+// alias support (or an alias-stripping shim) exists upstream.
+func (r BackendRef) OpenProtected(ctx context.Context) (dal.DB, error) {
+	return r.open(ctx, false, true)
+}
+
+// OpenProtectedForTest combines OpenProtected's provider-side read
+// hardening with OpenForTest's http(s) loopback escape hatch. It exists for
+// pkg/secureread's Executor.RunStructuredInsecureForTest, which must drive
+// the exact same openSource -> BackendRef -> pkg/accesspolicies pipeline
+// RunStructured uses in production, just against a loopback test server.
+// NEVER call this from production code.
+func (r BackendRef) OpenProtectedForTest(ctx context.Context) (dal.DB, error) {
+	return r.open(ctx, true, true)
+}
+
+func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected bool) (dal.DB, error) {
 	switch r.Scheme {
 	case "sqlite":
 		if err := CheckSourceFile(r.Path); err != nil {
@@ -269,7 +326,14 @@ func (r BackendRef) open(ctx context.Context, insecureAllowLoopback bool) (dal.D
 		if err := CheckSourceFile(r.Path); err != nil {
 			return nil, err
 		}
-		db, err := dalgo2ingitdb.NewDatabase(r.Path, validator.NewCollectionsReader())
+		var opts []dalgo2ingitdb.DatabaseOption
+		if protected {
+			// See OpenProtected's doc comment: pkg/secureread is the only
+			// caller that sets protected=true, and it always layers
+			// pkg/accesspolicies above the returned dal.DB.
+			opts = append(opts, dalgo2ingitdb.WithStoredOnlyReads())
+		}
+		db, err := dalgo2ingitdb.NewDatabase(r.Path, validator.NewCollectionsReader(), opts...)
 		if err != nil {
 			return nil, fmt.Errorf("open ingitdb %q: %w", r.Path, err)
 		}

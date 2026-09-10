@@ -56,7 +56,7 @@ func foldersRoutes(path string, router router, wrap wrapper, caps Capabilities) 
 
 func queriesRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
 	if !writeOnly {
-		//route(router, wrap, http.MethodGet, path+"/queries/all_queries", endpoints.GetQueries)
+		route(router, wrap, http.MethodGet, path+"/queries/all_queries", getQueriesHandler)
 		route(router, wrap, http.MethodGet, path+"/queries/get_query", getQueryHandler)
 	}
 	route(router, wrap, http.MethodPost, path+"/queries/create_query", requireWriteCapability(caps, createQuery))
@@ -87,6 +87,9 @@ func projectsRoutes(path string, router router, wrap wrapper, writeOnly bool, ca
 func environmentsRoutes(path string, router router, wrap wrapper, writeOnly bool) {
 	if !writeOnly {
 		route(router, wrap, http.MethodGet, path+"/environment-summary", getEnvironmentSummary)
+		// catalog-tables: Task 17 item A.2 (S121) — see
+		// getCatalogTablesHandler/api.CatalogTables's own doc comments.
+		route(router, wrap, http.MethodGet, path+"/catalog-tables", getCatalogTablesHandler)
 	}
 }
 

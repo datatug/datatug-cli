@@ -303,8 +303,25 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 	}
 
 	mode := apicontract.ProvenanceModeLive
-	if result.Provenance != nil && result.Provenance.Source == dalgo2http.SourceSnapshot {
-		mode = apicontract.ProvenanceModeSnapshot
+	// observedAt defaults to execution time (nowRFC3339UTC) — the best
+	// available answer for a source that never reports its own dalgo2http.
+	// Provenance (sqlite, ingitdb, native SQL). An HTTP-typed query DOES
+	// report one (result.Provenance, wired by secureread.Executor via the
+	// dalgo2http.Recorder — see executor.go), and its FetchedAt is the
+	// ACTUAL observation time: "now" for a live fetch, but the fixture's own
+	// recorded capture time for a snapshot — api-contract.md "Snapshot
+	// responses retain recorded time and identity". Defaulting to
+	// nowRFC3339UTC() unconditionally here (as this line used to) silently
+	// reported a snapshot as observed "just now", which is exactly the
+	// "production-acceptance claim based on a fixture" the contract forbids
+	// — caught by this stream's own journey e2e (J2b) asserting the exact
+	// 2026-09-09 recorded date and finding today's date instead.
+	observedAt := nowRFC3339UTC()
+	if result.Provenance != nil {
+		if result.Provenance.Source == dalgo2http.SourceSnapshot {
+			mode = apicontract.ProvenanceModeSnapshot
+		}
+		observedAt = result.Provenance.FetchedAt.UTC().Format(time.RFC3339)
 	}
 
 	return apicontract.Result{
@@ -313,7 +330,7 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 		BindingsApplied: bindingsApplied(req, queryDef),
 		Provenance: apicontract.Provenance{
 			Source: resolved.ID, Collection: collection, QueryID: req.QueryID,
-			Mode: mode, SnapshotID: req.SnapshotID, ObservedAt: nowRFC3339UTC(), ExecutionProfile: profile,
+			Mode: mode, SnapshotID: req.SnapshotID, ObservedAt: observedAt, ExecutionProfile: profile,
 		},
 		Truncated: truncated,
 	}, nil

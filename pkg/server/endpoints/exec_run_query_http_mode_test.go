@@ -75,6 +75,27 @@ type httpErrorEnvelopeWithDetails struct {
 	} `json:"details"`
 }
 
+// postRunQuerySuccess is postRunQuery for the 200 path: decodes the body as
+// apicontract.Result, failing the test if the status isn't 200.
+func postRunQuerySuccess(t *testing.T, req apicontract.ExecutionRequest) apicontract.Result {
+	t.Helper()
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/datatug/exec/run_query", strings.NewReader(string(body)))
+	runQueryHandler(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", w.Code, w.Body.String())
+	}
+	var result apicontract.Result
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal result: %v (body: %s)", err, w.Body.String())
+	}
+	return result
+}
+
 func postRunQueryRaw(t *testing.T, req apicontract.ExecutionRequest) (status int, env httpErrorEnvelopeWithDetails, rawBody []byte) {
 	t.Helper()
 	body, err := json.Marshal(req)
@@ -170,11 +191,22 @@ func TestExecRunQuery_HTTPSource_ModeSnapshot_ValidSnapshotID_Success(t *testing
 	req := httpRunQueryRequest(scope)
 	req.Mode = apicontract.ProvenanceModeSnapshot
 	req.SnapshotID = wantID
-	status, env := postRunQuery(t, req)
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (code=%q message=%q)", status, env.Error.Code, env.Error.Message)
+	result := postRunQuerySuccess(t, req)
+	if result.Provenance.Mode != apicontract.ProvenanceModeSnapshot {
+		t.Errorf("provenance.mode = %q, want %q", result.Provenance.Mode, apicontract.ProvenanceModeSnapshot)
 	}
-	_ = wantRecordedAt
+	if result.Provenance.SnapshotID != wantID {
+		t.Errorf("provenance.snapshotId = %q, want %q", result.Provenance.SnapshotID, wantID)
+	}
+	// The regression this test guards: observedAt MUST be the fixture's own
+	// recorded capture time, never "now" — a snapshot response that reports
+	// its own execution time as "observed" is exactly the "production-
+	// acceptance claim based on a fixture" api-contract.md forbids (found by
+	// this stream's own journey e2e, J2b, asserting the exact recorded date).
+	wantObservedAt := wantRecordedAt.UTC().Format(time.RFC3339)
+	if result.Provenance.ObservedAt != wantObservedAt {
+		t.Errorf("provenance.observedAt = %q, want the fixture's own recorded time %q (not now)", result.Provenance.ObservedAt, wantObservedAt)
+	}
 }
 
 // TestExecRunQuery_HTTPSource_ModeSnapshot_NonHTTPQuery_InvalidRequest

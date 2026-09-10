@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo2sql"
 	"github.com/dal-go/record"
 	"github.com/stretchr/testify/assert"
 )
@@ -381,13 +383,12 @@ func TestOpenProtected_InGitDB_SuppressesFormulaColumns(t *testing.T) {
 	assert.Nil(t, data["full_name"], "OpenProtected must suppress the computed column, not evaluate it")
 }
 
-// TestOpenProtected_SQLite_MatchesOpen proves datatug-cli's decision not to
-// opt the sqlite scheme into dalgo2sql v0.12.0's
-// DbOptions.StructuredQueryDialect: "sqlite" (see OpenProtected's doc
-// comment — it would reject this project's own aliased
-// customer-invoices.query.dtql): a protected sqlite:// open still returns
-// the exact same rows/columns as a plain Open, for the same structured
-// query.
+// TestOpenProtected_SQLite_MatchesOpen proves that opting protected sqlite
+// reads into dalgo2sql's StructuredQueryDialect: "sqlite" (see
+// OpenProtected's doc comment) changes how the SQL is compiled, not what it
+// returns: a protected sqlite:// open still returns the exact same
+// rows/columns as a plain Open (which keeps using the legacy, undialected
+// emitSQL rendering), for the same structured query.
 func TestOpenProtected_SQLite_MatchesOpen(t *testing.T) {
 	t.Parallel()
 	absPath, err := filepath.Abs("testdata/chinook.db")
@@ -416,4 +417,91 @@ func TestOpenProtected_SQLite_MatchesOpen(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equal(t, openRec.Data(), protectedRec.Data())
+}
+
+// aliasDialectMaliciousBillingCountry is a classic SQL-injection payload
+// shaped for a naive string-interpolation vulnerability: a closing quote
+// followed by a statement-terminating `;` and a `--` line comment. Against
+// the legacy emitSQL path (still used by plain Open, and by OpenProtected
+// before dalgo2sql StructuredQueryDialect: "sqlite" was opted in) this
+// exact value renders through dal-go/dalgo's quoteString, which doubles
+// embedded single quotes — a real mitigation, but the two tests below prove
+// the dialect this stream opts protected reads into does something
+// stronger: it never touches the SQL text at all, binding the value as a
+// driver arg instead.
+const aliasDialectMaliciousBillingCountry = `x'; DROP TABLE Invoice; --`
+
+// TestOpenProtected_SQLite_StructuredDialect_StringParamBoundNotInterpolated
+// is S114 Stage 2's second required test, its behavioral half: a string
+// parameter containing a `'` and a `--`/`;` sequence, filtered against a
+// real chinook.db over the actual OpenProtected -> dalgo2sqlite ->
+// dalgo2sql pipeline, returns the honest empty result and no error — not a
+// SQL syntax error (which a naively-terminated statement would produce),
+// and not every row (which an always-true `OR 1=1`-shaped injection would
+// produce). A same-connection follow-up query for a BillingCountry value
+// that really exists (chinook.db has 91 USA invoices) proves the Invoice
+// table is still intact, i.e. the payload's `; DROP TABLE Invoice; --`
+// never executed as SQL on this connection.
+func TestOpenProtected_SQLite_StructuredDialect_StringParamBoundNotInterpolated(t *testing.T) {
+	t.Parallel()
+	absPath, err := filepath.Abs("testdata/chinook.db")
+	assert.NoError(t, err)
+
+	ref, err := Parse("sqlite://" + absPath)
+	assert.NoError(t, err)
+	db, err := ref.OpenProtected(context.Background())
+	assert.NoError(t, err)
+
+	maliciousQuery := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("Invoice", "i"))).
+		WhereField("BillingCountry", dal.Equal, aliasDialectMaliciousBillingCountry).
+		SelectColumns(dal.Column{Expression: dal.Field("InvoiceId")})
+	maliciousReader, err := db.ExecuteQueryToRecordsReader(context.Background(), maliciousQuery)
+	assert.NoError(t, err)
+	defer func() { _ = maliciousReader.Close() }()
+	_, err = maliciousReader.Next()
+	assert.ErrorIs(t, err, dal.ErrNoMoreRecords,
+		"a BillingCountry no row has must match nothing — not error, and not silently match every row")
+
+	usaQuery := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("Invoice", "i"))).
+		WhereField("BillingCountry", dal.Equal, "USA").
+		SelectColumns(dal.Column{Expression: dal.Field("InvoiceId")})
+	usaReader, err := db.ExecuteQueryToRecordsReader(context.Background(), usaQuery)
+	assert.NoError(t, err)
+	defer func() { _ = usaReader.Close() }()
+	_, err = usaReader.Next()
+	assert.NoError(t, err, "Invoice must still contain USA rows on this same connection — the payload must not have executed as SQL")
+}
+
+// TestStructuredDialect_StringParamEmitsPlaceholderNotLiteral is S114 Stage
+// 2's second required test, its SQL-text half: it proves, directly on the
+// emitted SQL and bound args (via sqlmock, the same technique
+// dal-go/dalgo2sql's own structured_sql_test.go uses), that the malicious
+// BillingCountry value becomes a `?` placeholder plus a bound arg — never a
+// quoted literal in the query text. sqlmock.WithArgs enforces this two
+// ways at once: ExpectQuery's regex only matches SQL containing a literal
+// `?`, so text with the malicious value inlined would not match at all; and
+// WithArgs(aliasDialectMaliciousBillingCountry) fails the expectation
+// unless that exact value arrives as a driver argument.
+func TestStructuredDialect_StringParamEmitsPlaceholderNotLiteral(t *testing.T) {
+	mockDB, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer func() { _ = mockDB.Close() }()
+
+	sqlDB := dalgo2sql.NewDatabase(mockDB, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"})
+
+	q := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("Invoice", "i"))).
+		WhereField("BillingCountry", dal.Equal, aliasDialectMaliciousBillingCountry).
+		SelectColumns(dal.Column{Expression: dal.Field("InvoiceId")})
+
+	mock.ExpectQuery("SELECT `InvoiceId` FROM `Invoice` AS `i` WHERE `BillingCountry` = \\?").
+		WithArgs(aliasDialectMaliciousBillingCountry).
+		WillReturnRows(sqlmock.NewRows([]string{"InvoiceId"}))
+
+	reader, err := sqlDB.ExecuteQueryToRecordsReader(context.Background(), q)
+	assert.NoError(t, err)
+	defer func() { _ = reader.Close() }()
+	_, err = reader.Next()
+	assert.ErrorIs(t, err, dal.ErrNoMoreRecords)
+
+	assert.NoError(t, mock.ExpectationsWereMet())
 }

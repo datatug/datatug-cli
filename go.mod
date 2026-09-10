@@ -22,7 +22,7 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/dal-go/dalgo v0.80.0
 	github.com/dal-go/dalgo2http v0.2.0
-	github.com/dal-go/dalgo2sql v0.12.0
+	github.com/dal-go/dalgo2sql v0.13.0
 	github.com/dal-go/dalgo2sqlite v0.1.11
 	github.com/dal-go/record v0.1.3
 	github.com/datatug/cliformat v0.0.3

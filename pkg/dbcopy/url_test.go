@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/record"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -289,4 +290,130 @@ func TestOpen_InGitDB_MissingPath_WrapsErrSourceFileMissing(t *testing.T) {
 	db, openErr := ref.Open(context.Background())
 	assert.Nil(t, db)
 	assert.True(t, errors.Is(openErr, ErrSourceFileMissing), "expected ErrSourceFileMissing, got %v", openErr)
+}
+
+// writeInGitDBFormulaProject builds a minimal on-disk inGitDB project with
+// one "people" collection whose "full_name" column is a formula
+// (first_name + " " + last_name) over two stored columns, mirroring
+// dal-go/dalgo2ingitdb's own formula_read_test.go setupFormulaDB fixture.
+// dbschema.FieldDef (the type ddl.SchemaModifier.CreateCollection takes)
+// has no Formula concept, so a formula column can only be declared by
+// writing the raw .collection/definition.yaml dalgo2ingitdb reads directly.
+func writeInGitDBFormulaProject(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	defDir := filepath.Join(root, "people", ".collection")
+	assert.NoError(t, os.MkdirAll(defDir, 0o755))
+	def := `id: people
+record_file:
+  name: "{key}.yaml"
+  format: yaml
+  type: map[string]any
+columns:
+  first_name:
+    type: string
+  last_name:
+    type: string
+  full_name:
+    type: string
+    formula: 'first_name + " " + last_name'
+`
+	assert.NoError(t, os.WriteFile(filepath.Join(defDir, "definition.yaml"), []byte(def), 0o644))
+	ingitDir := filepath.Join(root, ".ingitdb")
+	assert.NoError(t, os.MkdirAll(ingitDir, 0o755))
+	assert.NoError(t, os.WriteFile(filepath.Join(ingitDir, "root-collections.yaml"), []byte("people: people\n"), 0o644))
+	recordsDir := filepath.Join(root, "people", "$records")
+	assert.NoError(t, os.MkdirAll(recordsDir, 0o755))
+	assert.NoError(t, os.WriteFile(filepath.Join(recordsDir, "ada.yaml"), []byte("first_name: Ada\nlast_name: Lovelace\n"), 0o644))
+	return root
+}
+
+// TestOpen_InGitDB_EvaluatesFormulaColumns pins the legacy behaviour
+// OpenProtected must NOT change for Open's own callers (`datatug db copy`
+// and schema introspection — both trusted, operator-level, with no
+// pkg/accesspolicies wrapper above them): Open still evaluates and returns
+// a formula column's computed value, exactly like it did before dalgo2ingitdb
+// v0.4.0 introduced WithStoredOnlyReads.
+func TestOpen_InGitDB_EvaluatesFormulaColumns(t *testing.T) {
+	t.Parallel()
+	root := writeInGitDBFormulaProject(t)
+	ref, err := Parse("ingitdb://" + root)
+	assert.NoError(t, err)
+
+	db, err := ref.Open(context.Background())
+	assert.NoError(t, err)
+	if !assert.NotNil(t, db) {
+		return
+	}
+	rec := record.NewRecordWithData(record.NewKeyWithID("people", "ada"), map[string]any{})
+	assert.NoError(t, db.Get(context.Background(), rec))
+	data := rec.Data().(map[string]any)
+	assert.Equal(t, "Ada", data["first_name"])
+	assert.Equal(t, "Ada Lovelace", data["full_name"], "Open (unprotected) must keep evaluating formula columns")
+}
+
+// TestOpenProtected_InGitDB_SuppressesFormulaColumns proves OpenProtected
+// wires dalgo2ingitdb v0.4.0's WithStoredOnlyReads() database option in:
+// stored columns come back with the SAME values Open returns (a protected
+// read yields the same rows/columns as before for every stored field), but
+// the formula column comes back suppressed instead of evaluated — the
+// protection pkg/secureread.openSource needs because it always layers
+// pkg/accesspolicies (the local YAML policy) on top of whatever this
+// package returns (see OpenProtected's doc comment). Without this, a
+// policy that allows the "full_name" field name would leak the value of
+// whichever stored field(s) it hides, evaluated through the formula.
+func TestOpenProtected_InGitDB_SuppressesFormulaColumns(t *testing.T) {
+	t.Parallel()
+	root := writeInGitDBFormulaProject(t)
+	ref, err := Parse("ingitdb://" + root)
+	assert.NoError(t, err)
+
+	db, err := ref.OpenProtected(context.Background())
+	assert.NoError(t, err)
+	if !assert.NotNil(t, db) {
+		return
+	}
+	rec := record.NewRecordWithData(record.NewKeyWithID("people", "ada"), map[string]any{})
+	assert.NoError(t, db.Get(context.Background(), rec))
+	data := rec.Data().(map[string]any)
+	assert.Equal(t, "Ada", data["first_name"], "stored column must be unchanged from Open")
+	assert.Equal(t, "Lovelace", data["last_name"], "stored column must be unchanged from Open")
+	assert.Nil(t, data["full_name"], "OpenProtected must suppress the computed column, not evaluate it")
+}
+
+// TestOpenProtected_SQLite_MatchesOpen proves datatug-cli's decision not to
+// opt the sqlite scheme into dalgo2sql v0.12.0's
+// DbOptions.StructuredQueryDialect: "sqlite" (see OpenProtected's doc
+// comment — it would reject this project's own aliased
+// customer-invoices.query.dtql): a protected sqlite:// open still returns
+// the exact same rows/columns as a plain Open, for the same structured
+// query.
+func TestOpenProtected_SQLite_MatchesOpen(t *testing.T) {
+	t.Parallel()
+	absPath, err := filepath.Abs("testdata/chinook.db")
+	assert.NoError(t, err)
+
+	q := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("Customer", ""))).
+		Where(dal.WhereField("CustomerId", dal.Equal, 1)).
+		SelectIntoRecord(nil)
+
+	openRef, err := Parse("sqlite://" + absPath)
+	assert.NoError(t, err)
+	openDB, err := openRef.Open(context.Background())
+	assert.NoError(t, err)
+	openReader, err := openDB.ExecuteQueryToRecordsReader(context.Background(), q)
+	assert.NoError(t, err)
+	openRec, err := openReader.Next()
+	assert.NoError(t, err)
+
+	protectedRef, err := Parse("sqlite://" + absPath)
+	assert.NoError(t, err)
+	protectedDB, err := protectedRef.OpenProtected(context.Background())
+	assert.NoError(t, err)
+	protectedReader, err := protectedDB.ExecuteQueryToRecordsReader(context.Background(), q)
+	assert.NoError(t, err)
+	protectedRec, err := protectedReader.Next()
+	assert.NoError(t, err)
+
+	assert.Equal(t, openRec.Data(), protectedRec.Data())
 }

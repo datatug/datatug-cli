@@ -22,7 +22,7 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/dal-go/dalgo v0.80.0
 	github.com/dal-go/dalgo2http v0.2.0
-	github.com/dal-go/dalgo2sql v0.11.7
+	github.com/dal-go/dalgo2sql v0.12.0
 	github.com/dal-go/dalgo2sqlite v0.1.11
 	github.com/dal-go/record v0.1.3
 	github.com/datatug/cliformat v0.0.3
@@ -35,7 +35,7 @@ require (
 	github.com/google/go-github/v91 v91.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
-	github.com/ingitdb/dalgo2ingitdb v0.3.5
+	github.com/ingitdb/dalgo2ingitdb v0.4.0
 	github.com/ingitdb/ingitdb-go/ingitdb v0.6.0
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/go-sqlite3 v1.14.50

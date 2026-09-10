@@ -19,10 +19,15 @@ func TestOpen_NoHTTPQueries(t *testing.T) {
 }
 
 // TestOpen_ResolvesFromSnapshot_NetworkDisabled proves
-// AC:http-source-in-demo's "with the network disabled" clause: a live
-// endpoint that is unreachable at all (the httptest server is closed before
-// Open ever runs) still answers, from the recorded fixture, and the
-// Provenance ExecuteQuery reports says so.
+// AC:http-source-in-demo's "with the network disabled" clause: with an
+// explicit ModeSnapshot dispatch (Open's own default is the fail-closed
+// ModeLive — see Open's doc comment — so this test asks for ModeSnapshot the
+// same way exec/run_query's mode:snapshot dispatch does, via
+// ContextWithDispatch, rather than relying on a live failure to fall back)
+// the recorded fixture answers even though the live endpoint is completely
+// unreachable (the httptest server is closed before Open ever runs, and its
+// handler would fail the test outright if ever hit), and the Provenance
+// ExecuteQuery reports says so.
 func TestOpen_ResolvesFromSnapshot_NetworkDisabled(t *testing.T) {
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("network must be disabled for this test; got a request: %s", r.URL)
@@ -31,7 +36,8 @@ func TestOpen_ResolvesFromSnapshot_NetworkDisabled(t *testing.T) {
 	down.Close() // unreachable from here on — this IS "network disabled".
 
 	root := writeSyntheticProjectWithURL(t, downURL+"/countries/currency/q?country={name}")
-	db, err := Open(context.Background(), root, AllowInsecureLoopback())
+	ctx := ContextWithDispatch(context.Background(), dalgo2http.ModeSnapshot, false, 0)
+	db, err := Open(ctx, root, AllowInsecureLoopback())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

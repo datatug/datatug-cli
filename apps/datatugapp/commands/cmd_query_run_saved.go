@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/httpsource"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
@@ -316,6 +318,13 @@ func runHTTPSavedQuery(ctx context.Context, executor *secureread.Executor, proje
 	if len(missing) > 0 {
 		return secureread.Result{}, fmt.Errorf("query %q: missing --var for required parameter(s): %s", queryDef.ID, strings.Join(missing, ", "))
 	}
+	// Same explicit opt-in as cmd_query.go's ad-hoc --db path: this command
+	// predates pkg/httpsource.Open's fail-closed ModeLive default and is
+	// documented, tested, offline-friendly terminal UX outside
+	// api-contract.md's scope (only `datatug serve`'s exec/run_query is
+	// bound by that appendix's mode:live|snapshot semantics). See Open's own
+	// doc comment.
+	ctx = httpsource.ContextWithDispatch(ctx, dalgo2http.ModeLiveThenSnapshot, false, 0)
 	return runStructuredHTTPQuery(ctx, executor, sourceURL, builder.SelectColumns(), nil)
 }
 

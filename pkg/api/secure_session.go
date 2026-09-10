@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -39,6 +40,21 @@ var (
 type Capabilities struct {
 	AllowWrites    bool
 	AllowOpaqueSQL bool
+	// HTTPOffline is `datatug serve --http-offline` (Phase 1 Task 14, item
+	// 7): when true, every HTTP-typed saved query's LIVE fetch fails as
+	// SOURCE_UNAVAILABLE without ever touching the network (see
+	// pkg/httpsource.ContextWithDispatch's offline argument), so a demo can
+	// prove "network disabled -> honest failure -> explicit snapshot"
+	// deterministically. It is a real operator-facing switch (offline demos),
+	// not a test hook. False (the default) leaves live dispatch unaffected.
+	HTTPOffline bool
+	// ExecTimeout overrides pkg/server/endpoints' default 10-second
+	// exec/run_query budget (api-contract.md "Bounded lookups and HTTP":
+	// "Server execution has a 10-second default timeout, with a configured
+	// upper bound of 30 seconds"). Zero means "use the default"; any value
+	// above the 30-second ceiling is clamped down to it — see
+	// pkg/server/endpoints/contract_scope.go's execTimeoutFor.
+	ExecTimeout time.Duration
 }
 
 // ConfigureSecureSession wires the fixed secureread.Session `datatug serve`

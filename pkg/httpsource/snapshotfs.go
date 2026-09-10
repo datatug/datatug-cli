@@ -19,6 +19,28 @@ import (
 // recorded on 2026-09-09 as "fetched just now").
 var fixtureRecordedAt = time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC)
 
+// SnapshotIdentity reports the stable identity pkg/server/endpoints'
+// exec/run_query uses for the one recorded snapshot this demo project ships
+// per HTTP query — see fixtureFS's own doc comment for why there is exactly
+// one, independent of the parameter value actually requested. The identity
+// is "<queryID>@<recordedAt RFC3339>" (lead assumption 2026-09-10, pending
+// founder confirmation — see the contract amendment in
+// spec/features/core-investigation-loop/api-contract.md): stable across
+// process restarts (recordedAt never changes without a new fixture file
+// replacing the old one), and the exact string a client must echo back as
+// ExecutionRequest.SnapshotID to select this snapshot explicitly
+// (api-contract.md "mode:snapshot and a configured snapshotId"). ok is
+// false when projectDir has no recorded fixture for queryID
+// (fixtures/http/<queryID>.json does not exist), in which case id and
+// recordedAt are the zero value and must not be used.
+func SnapshotIdentity(projectDir, queryID string) (id string, recordedAt time.Time, ok bool) {
+	path := filepath.Join(fixturesDir(projectDir), queryID+".json")
+	if _, err := os.Stat(path); err != nil {
+		return "", time.Time{}, false
+	}
+	return queryID + "@" + fixtureRecordedAt.Format(time.RFC3339), fixtureRecordedAt, true
+}
+
 // fixtureFS bridges a datatug project's fixtures/http/ directory — one
 // flatly-named raw-response-body file per query (e.g. "country-facts.json"),
 // independent of any particular parameter value — to the shape

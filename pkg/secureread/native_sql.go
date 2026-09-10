@@ -123,13 +123,12 @@ func openReadOnlySQLite(ctx context.Context, path string) (dal.DB, func(), error
 		return nil, nil, fmt.Errorf("secureread: enable read-only session on %q: %w", path, execErr)
 	}
 	// DbOptions{} deliberately leaves StructuredQueryDialect unset:
-	// dalgo2sql v0.12.0's "sqlite" dialect only changes how a
-	// dal.StructuredQuery compiles (getReaderBaseWithDialect), and
-	// RunNativeSQL — this connection's only caller — always executes a
-	// dal.TextQuery (see RunNativeSQL above), so the option would be a
-	// no-op here even if set. See dbcopy.BackendRef.OpenProtected's doc
-	// comment for why datatug-cli does not opt structured reads into that
-	// dialect anywhere yet.
+	// dalgo2sql's "sqlite" dialect (opted in elsewhere for protected
+	// structured reads — see dbcopy.BackendRef.OpenProtected's doc comment)
+	// only changes how a dal.StructuredQuery compiles
+	// (getReaderBaseWithDialect), and RunNativeSQL — this connection's only
+	// caller — always executes a dal.TextQuery (see RunNativeSQL above), so
+	// the option would be a no-op here even if set.
 	db := dalgo2sql.NewDatabase(sqlDB, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{})
 	return db, func() { _ = sqlDB.Close() }, nil
 }

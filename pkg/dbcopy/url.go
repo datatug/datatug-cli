@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo2sql"
 	"github.com/dal-go/dalgo2sqlite"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
 	"github.com/ingitdb/dalgo2ingitdb"
@@ -282,20 +283,22 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 // NOT layer under pkg/accesspolicies here — pkg/accesspolicies remains the
 // sole enforcement layer for every source this CLI opens.
 //
-// The sqlite scheme intentionally does NOT opt into dalgo2sql v0.12.0's
+// The sqlite scheme opts protected reads into dalgo2sql's
 // DbOptions.StructuredQueryDialect: "sqlite" (bounded, parameter-bound
-// structured-query compilation) here. compileStructuredSQL unconditionally
-// rejects any structured query whose FROM source carries a non-empty
-// alias ("structured SQL query source aliases are not supported") — and
-// this project's own demo query (queries/customers/customer-invoices.query.dtql,
-// `from: {name: Invoice, alias: i}`) uses exactly that shape, so enabling
-// it here would turn a real saved query into a hard error. The legacy
-// emitSQL path this CLI keeps using already renders every dal.Constant
-// value through dal-go/dalgo's quoteString (doubling embedded single
-// quotes), so the common SQL-injection vector the new dialect targets is
-// already mitigated for the query shapes pkg/secureread executes; the
-// stronger binding dalgo2sql v0.12.0 offers is left for a follow-up once
-// alias support (or an alias-stripping shim) exists upstream.
+// structured-query compilation): dal-go/dalgo2sql#179 added FROM-source
+// alias support to compileStructuredSQL, which used to unconditionally
+// reject any structured query whose FROM source carried an alias — this
+// project's own demo query (queries/customers/customer-invoices.query.dtql,
+// `from: {name: Invoice, alias: i}`) uses exactly that shape, and used to
+// turn into a hard error the moment this dialect was enabled. With #179
+// fixed, every DTQL query datatug ships or tests (see dalgo2sql's own
+// dtql_datatug_inventory_test.go) compiles cleanly, so protected reads now
+// get the dialect's real guarantees: every dal.Constant value becomes a
+// genuine `?` placeholder + bound arg (not a quoted-string literal), and
+// an unsupported shape (a join, GROUP BY, HAVING, a cursor) fails closed
+// instead of silently falling back to legacy string rendering. The plain
+// Open path (db copy / introspection) is unaffected — it never sets
+// StructuredQueryDialect, so it keeps using the legacy emitSQL rendering.
 func (r BackendRef) OpenProtected(ctx context.Context) (dal.DB, error) {
 	return r.open(ctx, false, true)
 }
@@ -316,7 +319,17 @@ func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected b
 		if err := CheckSourceFile(r.Path); err != nil {
 			return nil, err
 		}
-		db, err := dalgo2sqlite.NewDatabase(r.Path)
+		var opts dalgo2sql.DbOptions
+		if protected {
+			// See OpenProtected's doc comment: pkg/secureread is the only
+			// caller that sets protected=true, and it always layers
+			// pkg/accesspolicies above the returned dal.DB — the dialect's
+			// bound-value, validated-source compilation is additional
+			// hardening under that same enforcement point, not a
+			// replacement for it.
+			opts.StructuredQueryDialect = "sqlite"
+		}
+		db, err := dalgo2sqlite.NewDatabaseWithOptions(r.Path, dal.NewSchema(nil, nil), opts)
 		if err != nil {
 			return nil, fmt.Errorf("open sqlite %q: %w", r.Path, err)
 		}

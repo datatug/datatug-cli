@@ -127,8 +127,16 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 // dbcopy.Parse's own descriptive error. The returned close func is always
 // safe to call, even when the backend has no Close method.
 //
+// Every Executor call — RunStructured, RunDTQL, RunNativeSQL — runs the
+// result through accesspolicies.Run before a caller ever sees a row (see
+// runThroughPolicies), so openSource always opens through
+// dbcopy.BackendRef.OpenProtected/OpenProtectedForTest, never plain
+// Open/OpenForTest: this is the "protected read" OpenProtected's doc
+// comment describes, and it is what wires dalgo2ingitdb v0.4.0's
+// WithStoredOnlyReads() option in for every source this package opens.
+//
 // insecureAllowLoopback, when true, opens an http(s):// source via
-// dbcopy.BackendRef.OpenForTest instead of Open (see
+// dbcopy.BackendRef.OpenProtectedForTest instead of OpenProtected (see
 // Executor.RunStructuredInsecureForTest's doc comment) — every other
 // scheme is unaffected either way.
 func openSource(ctx context.Context, sourceURL string, insecureAllowLoopback bool) (dal.DB, func(), error) {
@@ -138,9 +146,9 @@ func openSource(ctx context.Context, sourceURL string, insecureAllowLoopback boo
 	}
 	var db dal.DB
 	if insecureAllowLoopback {
-		db, err = ref.OpenForTest(ctx)
+		db, err = ref.OpenProtectedForTest(ctx)
 	} else {
-		db, err = ref.Open(ctx)
+		db, err = ref.OpenProtected(ctx)
 	}
 	if err != nil {
 		return nil, nil, err

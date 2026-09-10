@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
@@ -82,6 +83,35 @@ func GetQuery(ctx context.Context, ref dto.ProjectItemRef) (query *datatug.Query
 		return nil, fmt.Errorf("%w: %q", ErrQueryNotFound, canonicalID)
 	}
 	return &datatug.QueryDefWithFolderPath{
-		QueryDef: *queryDef,
+		FolderPath: folderPathFromCanonicalID(canonicalID),
+		QueryDef:   *queryDef,
 	}, nil
+}
+
+// folderPathFromCanonicalID derives QueryDefWithFolderPath.FolderPath — a
+// field its own Validate() requires non-empty — from a canonical,
+// folder-qualified query id (ResolveQueryID's return value): everything
+// before the last "/", or datatug.RootSharedFolderName ("~") for a query
+// directly under queries/ with no subfolder.
+//
+// Found while restoring GET /queries/all_queries (S121, Task 17): this field
+// was never populated (always its zero value, ""), so every live GET
+// /datatug/queries/get_query response failed apicore's own automatic
+// response validation with "response is not valid: bad value for field
+// [folderPath]: missing required field" — a 500 for every query, a
+// pre-existing regression this codebase's own get_query unit tests never
+// caught because they stub getQueryHandler's `getQuery` var directly
+// (pkg/server/endpoints/param_aliases_test.go) rather than exercising the
+// real api.GetQuery -> apicore.Execute response-validation path over HTTP,
+// and CI's journey e2e job builds datatug-cli from a pinned older tag
+// (DATATUG_CLI_REF, apps/datatug-app/e2e/README.md) that predates it. The
+// wire value itself is inert today — datatug-apps' IQueryDef has no
+// folderPath field at all (project-item-service.ts's ProjItem is typed
+// loosely enough that the client silently ignores it) — only its presence
+// (non-empty) matters for the response to pass validation.
+func folderPathFromCanonicalID(canonicalID string) string {
+	if i := strings.LastIndex(canonicalID, "/"); i >= 0 {
+		return canonicalID[:i]
+	}
+	return datatug.RootSharedFolderName
 }

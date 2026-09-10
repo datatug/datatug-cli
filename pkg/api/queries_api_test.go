@@ -43,6 +43,7 @@ func TestGetQuery_S97_IDConvention(t *testing.T) {
 	writeQueryFile(t, dir, "customers/customer-invoices.query.json", "customer-invoices")
 	writeQueryFile(t, dir, "x/q.query.json", "q")
 	writeQueryFile(t, dir, "y/q.query.json", "q")
+	writeQueryFile(t, dir, "root-query.query.json", "root-query")
 	registerQueryTestProject(t, projectID, dir)
 
 	refFor := func(id string) dto.ProjectItemRef {
@@ -99,6 +100,41 @@ func TestGetQuery_S97_IDConvention(t *testing.T) {
 		}
 		if got.ID != "q" {
 			t.Errorf("got.ID = %q, want %q", got.ID, "q")
+		}
+	})
+
+	// Regression (found live while restoring GET /queries/all_queries, S121):
+	// GetQuery's returned *datatug.QueryDefWithFolderPath never had its own
+	// required FolderPath field populated, so every real GET
+	// /datatug/queries/get_query request 500'd at apicore.Execute's automatic
+	// response validation ("bad value for field [folderPath]: missing
+	// required field") — invisible to every test above because none of them
+	// call .Validate() on the result the way the real HTTP response path
+	// does. This asserts both the value AND that the full response validates,
+	// for a folder-qualified query and a query with no folder alike.
+	t.Run("FolderPath is populated and the response validates", func(t *testing.T) {
+		got, err := GetQuery(context.Background(), refFor("customers/customer-invoices"))
+		if err != nil {
+			t.Fatalf("GetQuery: %v", err)
+		}
+		if got.FolderPath != "customers" {
+			t.Errorf("FolderPath = %q, want %q", got.FolderPath, "customers")
+		}
+		if err := got.Validate(); err != nil {
+			t.Errorf("response fails its own Validate(): %v", err)
+		}
+	})
+
+	t.Run("FolderPath for a query with no subfolder is the root marker", func(t *testing.T) {
+		got, err := GetQuery(context.Background(), refFor("root-query"))
+		if err != nil {
+			t.Fatalf("GetQuery: %v", err)
+		}
+		if got.FolderPath != "~" {
+			t.Errorf("FolderPath = %q, want %q", got.FolderPath, "~")
+		}
+		if err := got.Validate(); err != nil {
+			t.Errorf("response fails its own Validate(): %v", err)
 		}
 	})
 }

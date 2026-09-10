@@ -74,6 +74,12 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	// "query" parameter and every candidate.
 	case errors.Is(err, api.ErrQueryNotFound):
 		w.WriteHeader(http.StatusNotFound)
+	// api.GetCatalogTables (S121, Task 17 item A.2): an unknown project or a
+	// catalog with no <id>.db.json under the requested environment — same
+	// clean-404 treatment as ErrQueryNotFound above, never a raw
+	// filesystem error.
+	case errors.Is(err, api.ErrCatalogNotFound):
+		w.WriteHeader(http.StatusNotFound)
 	case errors.Is(err, api.ErrAmbiguousQueryID):
 		response.Code = "INVALID_REQUEST"
 		response.Field = "query"

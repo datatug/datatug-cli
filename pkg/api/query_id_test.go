@@ -11,13 +11,18 @@ import (
 // writeQueryFile writes a minimal .query.json file at
 // <projectDir>/queries/<relPath> with the given declared id — enough for
 // ResolveQueryID's directory walk (it never reads query bodies/parameters).
+// Includes a title (datatug.QueryDef.Validate() requires one — ProjItemBrief
+// isTitleRequired=true) so a *datatug.QueryDefWithFolderPath built from this
+// file can pass its own .Validate(), the way GetQuery's real HTTP response
+// path (apicore.Execute) always does — see queries_api_test.go's
+// "FolderPath is populated and the response validates" case.
 func writeQueryFile(t *testing.T, projectDir, relPath, id string) {
 	t.Helper()
 	full := filepath.Join(projectDir, "queries", relPath)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(full), err)
 	}
-	content := `{"id":"` + id + `","type":"SQL"}`
+	content := `{"id":"` + id + `","title":"` + id + `","type":"SQL"}`
 	if err := os.WriteFile(full, []byte(content), 0o600); err != nil {
 		t.Fatalf("write %s: %v", full, err)
 	}

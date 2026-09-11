@@ -338,7 +338,7 @@ func catalogMatchesTarget(s ResolvedSource, target datatug.QueryDefTarget) bool 
 
 func driverMatches(targetDriver string, kind SourceKind) bool {
 	switch strings.ToLower(targetDriver) {
-	case "sqlite", "sqlite3":
+	case "sqlite", "sqlite3", "openvaultdb":
 		return kind == SourceKindSQL
 	case "ingitdb":
 		return kind == SourceKindInGitDB

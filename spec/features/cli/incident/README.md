@@ -136,7 +136,7 @@ Status and outcome values are not CLI-invented; they are exactly the hub Feature
 
 ### AC: access-request-approve-list (verifies REQ:access-verbs)
 
-**Given** `INC-1` references the demo project, `support` may not read `Invoice`, and `admin` holds the project's incident-approver role (the project admin holds it by default; founder, 2026-09-11)
+**Given** `INC-1` references the demo project, `support` may not read `Invoice`, and `admin` holds the project's incident-approver role (founder, 2026-09-11, verbatim: *"By default project admin has this role but can move it to someone else"*)
 **When** `datatug incident access request INC-1 --source chinook --collection Invoice --reason "stuck invoices" --json` runs as `support` and prints `requestId`, then `datatug incident access approve INC-1 <requestId> --json` runs as `admin`, then `datatug incident access list INC-1 --json` runs
 **Then** the list shows one active grant with scope `chinook/Invoice`, requester `support`, approver `admin` and an expiry; `datatug incident show INC-1 --json` reports the `access.requested` and `access.approved` events with those actors; and the same `approve` run as `support`, and an `approve` with an unknown request id, both exit `1` with stdout empty and stderr indistinguishable from each other.
 

@@ -307,3 +307,20 @@ func TestParseQueriesRoot(t *testing.T) {
 		})
 	}
 }
+
+// TestGetPersonalQueries_UnknownProjectIsNotFound: a project id serve never
+// opened is api.ErrQueryNotFound for root=personal exactly as for
+// getAllQueries' shared tree — even when ~/.datatug/projects/<id>/queries/
+// (here, the $DATATUG_PERSONAL_DIR override) already holds files for it.
+func TestGetPersonalQueries_UnknownProjectIsNotFound(t *testing.T) {
+	setPersonalQueriesBaseDir(t)
+	projectDir, projectID := writeSemanticTestProject(t)
+	configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	const ghost = "ghost-project"
+	writePersonalQuery(t, ghost, "orphan", "Orphan query for a project serve never opened")
+
+	folder, err := getPersonalQueries(context.Background(), dto.ProjectRef{StoreID: "files", ProjectID: ghost})
+	if !errors.Is(err, api.ErrQueryNotFound) {
+		t.Fatalf("getPersonalQueries(%q) error = %v (folder %+v), want api.ErrQueryNotFound", ghost, err, folder)
+	}
+}

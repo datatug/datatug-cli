@@ -175,6 +175,12 @@ func getPersonalQueries(_ context.Context, ref dto.ProjectRef) (*datatug.Queries
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
+	// Same unknown-project rule as getAllQueries: a project serve never
+	// opened is 404 for root=personal too (not an empty folder read from
+	// whatever ~/.datatug/projects/<id>/ happens to hold), whoever asks.
+	if _, ok := api.ProjectDir(ref.ProjectID); !ok {
+		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, ref.ProjectID)
+	}
 	principalID := api.SecurePrincipalID()
 	rootID := datatug.RootUserFolderPrefix + principalID
 	if principalID == "" {

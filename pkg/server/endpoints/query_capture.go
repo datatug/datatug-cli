@@ -12,6 +12,7 @@ import (
 
 	"github.com/dal-go/dalgo/access"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/querywrite"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
@@ -87,6 +88,10 @@ type captureProvenance struct {
 // legacy project-item writes accept.
 const maxCaptureBodyBytes = 1 << 20
 
+// captureWriteTimeout bounds the store write (querywrite.Timeout); a
+// variable only so a test can shorten it.
+var captureWriteTimeout = querywrite.Timeout
+
 // captureQueryHandler is POST queries/capture. The route is registered
 // behind requireWriteCapability; computeCaptureQuery then authorizes the
 // serving principal itself.
@@ -160,8 +165,10 @@ func rejectTrailingJSON(body []byte) error {
 //     (api.AuthorizeProjectQueryWrite; 403 ACCESS_DENIED).
 //  6. The source resolves in the environment as a target a saved query
 //     can bind to (400).
-//  7. One atomic, conditional write through the revisioned store; its
-//     typed refusals map to 400 or 409 REVISION_CONFLICT.
+//  7. One atomic, conditional write through the revisioned store, bounded
+//     by captureWriteTimeout; its typed refusals map to 400 or 409
+//     REVISION_CONFLICT, and a store still locked by another writer when
+//     the bound runs out maps to 504 TIMEOUT with nothing written.
 func computeCaptureQuery(ctx context.Context, req captureQueryRequest) (captureQueryResponse, int, error) {
 	if err := validateScope(apicontract.Scope{Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}); err != nil {
 		return captureQueryResponse{}, 0, err
@@ -199,7 +206,9 @@ func computeCaptureQuery(ctx context.Context, req captureQueryRequest) (captureQ
 		return captureQueryResponse{}, 0, captureInternal(err)
 	}
 	record := capturedRecord{Query: req.Query, Author: api.SecurePrincipalID(), Environment: req.Environment, Collection: collection}
-	stored, err := store.PutQuery(ctx, record, condition)
+	writeCtx, cancel := context.WithTimeout(ctx, captureWriteTimeout)
+	defer cancel()
+	stored, err := store.PutQuery(writeCtx, record, condition)
 	if err != nil {
 		return captureQueryResponse{}, 0, captureStoreFailure(err, condition)
 	}
@@ -256,7 +265,7 @@ func captureStoreFailure(err error, condition captureWriteCondition) error {
 			return newInvalidRequest(fieldOr(refused.Field, "query"), refused.Reason)
 		}
 	case errors.Is(err, context.DeadlineExceeded):
-		return newTimeout("saving the query timed out; reload it before retrying")
+		return newTimeout("the query store stayed busy with another write, so nothing was saved; reload the query before retrying")
 	default:
 		return captureInternal(err)
 	}

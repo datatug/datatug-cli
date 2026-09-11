@@ -278,21 +278,63 @@ func getQueryHandler(w http.ResponseWriter, r *http.Request) {
 var createQuery = func(w http.ResponseWriter, r *http.Request) {
 	var ref dto.ProjectRef
 	var request dto.CreateQuery
+	tw := &timeoutStatusWriter{ResponseWriter: w}
 	saveFunc := func(ctx context.Context) (apicore.ResponseDTO, error) {
-		return api.CreateQuery(ctx, request)
+		query, err := api.CreateQuery(ctx, request)
+		return query, tw.observe(err)
 	}
-	createProjectItem(w, r, &ref, &request, saveFunc)
+	createProjectItem(tw, r, &ref, &request, saveFunc)
 }
 
 // updateQuery handles update query endpoint
 func updateQuery(w http.ResponseWriter, r *http.Request) {
 	var ref dto.ProjectItemRef
 	var request dto.UpdateQuery
+	tw := &timeoutStatusWriter{ResponseWriter: w}
 	saveFunc := func(ctx context.Context) (apicore.ResponseDTO, error) {
-		return api.UpdateQuery(ctx, request)
+		query, err := api.UpdateQuery(ctx, request)
+		return query, tw.observe(err)
 	}
-	saveProjectItem(w, r, &ref, &request, saveFunc)
+	saveProjectItem(tw, r, &ref, &request, saveFunc)
 }
 
 // deleteQuery handles delete query endpoint
-var deleteQuery = deleteProjItem(api.DeleteQuery)
+var deleteQuery = timeoutAwareDelete(api.DeleteQuery)
+
+// timeoutAwareDelete is deleteProjItem(del) answering a timed-out delete
+// with 504 (timeoutStatusWriter).
+func timeoutAwareDelete(del func(ctx context.Context, ref dto.ProjectItemRef) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tw := &timeoutStatusWriter{ResponseWriter: w}
+		deleteProjItem(func(ctx context.Context, ref dto.ProjectItemRef) error {
+			return tw.observe(del(ctx, ref))
+		})(tw, r)
+	}
+}
+
+// timeoutStatusWriter lets the legacy query write routes answer a write
+// that timed out waiting for the query store (api's bounded write,
+// querywrite.Timeout) with 504 Gateway Timeout. Those routes report errors
+// through apicore, whose error mapping knows only 400, 401 and 500, so a
+// timeout would otherwise be an indistinct 500; the body keeps the legacy
+// error envelope and the timeout's fixed message.
+type timeoutStatusWriter struct {
+	http.ResponseWriter
+	timedOut bool
+}
+
+// observe records whether err is a timeout and returns it unchanged.
+func (w *timeoutStatusWriter) observe(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		w.timedOut = true
+	}
+	return err
+}
+
+// WriteHeader turns the 500 apicore writes for an observed timeout into 504.
+func (w *timeoutStatusWriter) WriteHeader(status int) {
+	if w.timedOut && status == http.StatusInternalServerError {
+		status = http.StatusGatewayTimeout
+	}
+	w.ResponseWriter.WriteHeader(status)
+}

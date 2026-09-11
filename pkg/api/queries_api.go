@@ -86,18 +86,31 @@ func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *data
 	if err != nil {
 		return nil, err
 	}
-	if err := store.SaveQuery(ctx, query); err != nil {
+	writeCtx, cancel := context.WithTimeout(ctx, legacyWriteTimeout)
+	defer cancel()
+	if err := store.SaveQuery(writeCtx, query); err != nil {
 		return nil, legacyStoreFailure(err)
 	}
 	return query, nil
 }
 
+// legacyWriteTimeout bounds a legacy query write's wait on the store
+// (querywrite.Timeout); a variable only so a test can shorten it.
+var legacyWriteTimeout = querywrite.Timeout
+
 // legacyStoreFailure maps a failed legacy store write: a refused location
 // becomes a 400 carrying a fixed message that names the offending segment
-// only (storeLocationRefusal); anything else passes through.
+// only (storeLocationRefusal); a store still locked by another writer when
+// legacyWriteTimeout runs out becomes a fixed message wrapping
+// context.DeadlineExceeded, which the endpoints answer with 504 - the store
+// gives up before its commit point, so nothing was written; anything else
+// passes through.
 func legacyStoreFailure(err error) error {
 	if message, ok := storeLocationRefusal(err); ok {
 		return validation.NewBadRequestError(errors.New(message))
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("the query store stayed busy with another write, so nothing was saved; retry: %w", context.DeadlineExceeded)
 	}
 	return err
 }
@@ -124,7 +137,9 @@ func DeleteQuery(ctx context.Context, ref dto.ProjectItemRef) error {
 	if err != nil {
 		return err
 	}
-	if err := store.DeleteQuery(ctx, ref.ID); err != nil {
+	writeCtx, cancel := context.WithTimeout(ctx, legacyWriteTimeout)
+	defer cancel()
+	if err := store.DeleteQuery(writeCtx, ref.ID); err != nil {
 		return legacyStoreFailure(err)
 	}
 	return nil

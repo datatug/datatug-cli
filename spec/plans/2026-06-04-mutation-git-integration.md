@@ -1,3 +1,8 @@
+---
+format: https://specscore.md/plan-specification
+status: Implemented
+---
+
 # Plan: Git Integration for Mutating Commands (mutation-git-integration)
 
 **Status:** Implemented
@@ -18,14 +23,14 @@ Split along the natural seam between **flag/value handling** (which needs no git
 
 ### Task 1: Shared `--git` flag + value semantics (none / commit / unknown)
 
-**Status:** done
+**Status:** complete
 **Verifies:** mutation-git-integration#ac:git-flag-rejects-unknown, mutation-git-integration#ac:git-commit-not-supported, mutation-git-integration#ac:git-flag-default-none
 
 Add one reusable `urfave/cli/v3` `--git=<none|stage|commit>` flag (default `none`) plus a mode-resolution helper that rejects an unknown value non-zero (naming the value and supported set) and rejects `commit` non-zero as "not yet supported". Wire the flag into the `entity` mutating commands so that `--git=none` (or absent) performs no version-control action — files are written and nothing is staged or committed.
 
 ### Task 2: go-git stage helper — changed-files-only, fail-loud off-repo, partial apply
 
-**Status:** done
+**Status:** complete
 **Verifies:** mutation-git-integration#ac:git-stage-scoped, mutation-git-integration#ac:git-stage-non-repo-failloud, mutation-git-integration#ac:git-partial-stages-written-only
 
 Implement a go-git helper that, given the command's exact changed-file list, stages only those paths on the current branch (never `git add -A`), leaving unrelated staged/unstaged changes untouched. When `--git=stage` (or `commit`) is requested against a non-git directory, fail loud (non-zero, "not a git repository") before any project files are written. Wire `--git=stage` into the entity mutators, ensuring a `--continue-on-error` partial batch stages exactly the files actually written.

@@ -2,6 +2,18 @@
 
 project:
   title: DataTug CLI
+  host: github.com
+  org: datatug
+  repo: datatug-cli
+
+# Related SpecScore projects (repo-config REQ:projects-list). The hub repo
+# (github.com/datatug/datatug) owns the ai-query-builder, incidents and
+# serve-brokered-query-builder Capabilities that this repo's Implementations
+# cite cross-repo. The path is relative to this file and reaches the sibling
+# hub clone from the canonical clone only, not from a linked worktree; it also
+# conflicts with REQ:projects-list. Tracked in specscore/specscore-cli#201.
+projects:
+  - ../datatug
 
 # Reviewer gates (event-keyed per the reviewer-gates contract / loader).
 # specstudio:specify guards gates.feature.approved.

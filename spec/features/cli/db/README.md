@@ -20,6 +20,12 @@ status: Planned
 datatug db <url>
 ```
 
+## Contents
+
+| Directory | Description |
+|---|---|
+| [copy/](copy/README.md) | `datatug db copy --from <url> --to <url>` — cross-engine database copy primitive. |
+
 ## Problem
 
 Users often want to look at a database that has nothing to do with a DataTug project — a one-off SQLite file, a connection string for production, a colleague's URL. Requiring them to `init` a project first is overkill. `datatug db` is the lightweight escape hatch: parse a database URL, open a viewer, no project required.

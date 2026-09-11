@@ -11,7 +11,7 @@ status: Approved
 **Owner:** alexander.trakhimenok
 **Source Ideas:** —
 **Supersedes:** —
-**Implements:** specscore:feature/serve-brokered-query-builder@github.com/datatug/datatug
+**Implements:** specscore://github.com/datatug/datatug/feature/serve-brokered-query-builder
 **Grade:** A
 
 ## Summary

@@ -45,9 +45,10 @@ func UpdateQuery(ctx context.Context, request dto.UpdateQuery) (*datatug.QueryDe
 // as "../x" addressed a file outside the project's queries/ tree, and an
 // unvalidated query (a target carrying a password) reached git-tracked
 // files. Now, before the store is touched: the folder path and id must be
-// safe path segments (400 otherwise), the serving principal must be
-// authorized for a project write through AuthorizeProjectQueryWrite (the
-// gate queries/capture uses; 403 otherwise), and the query must pass
+// safe path segments, and a folder must be one this build's store really
+// writes to (requireFolderSupport; 400 otherwise), the serving principal
+// must be authorized for a project write through AuthorizeProjectQueryWrite
+// (the gate queries/capture uses; 403 otherwise), and the query must pass
 // QueryDef.Validate (400 otherwise). The write itself keeps its legacy
 // create-or-replace semantics (DALgo Set): a revision-checked write is
 // queries/capture's job.
@@ -65,6 +66,9 @@ func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *data
 	if query.FolderPath == datatug.RootSharedFolderName {
 		query.FolderPath = ""
 	}
+	if err := requireFolderSupport(queryID); err != nil {
+		return nil, validation.NewBadRequestError(err)
+	}
 	if err := AuthorizeProjectQueryWrite(ctx, projectID, queryID, access.Set); err != nil {
 		return nil, err
 	}
@@ -79,7 +83,8 @@ func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *data
 }
 
 // DeleteQuery is the legacy queries/delete_query write. ref.ID is the
-// query's folder-qualified id; every segment must be safe (400 otherwise)
+// query's folder-qualified id; every segment must be safe and a folder must
+// be one this build's store resolves (requireFolderSupport; 400 otherwise),
 // and the serving principal must be authorized to delete it (403
 // otherwise) before the store is touched.
 func DeleteQuery(ctx context.Context, ref dto.ProjectItemRef) error {
@@ -87,6 +92,9 @@ func DeleteQuery(ctx context.Context, ref dto.ProjectItemRef) error {
 		return err
 	}
 	if err := validateQueryPath("id", ref.ID); err != nil {
+		return validation.NewBadRequestError(err)
+	}
+	if err := requireFolderSupport(ref.ID); err != nil {
 		return validation.NewBadRequestError(err)
 	}
 	if err := AuthorizeProjectQueryWrite(ctx, ref.ProjectID, ref.ID, access.Delete); err != nil {
@@ -102,6 +110,24 @@ func DeleteQuery(ctx context.Context, ref dto.ProjectItemRef) error {
 // errUnsafeQueryLocation marks a folder path or query id that does not name
 // a location inside the project's queries/ tree.
 var errUnsafeQueryLocation = errors.New("unsafe query location")
+
+// errFolderNotWritable marks a folder-qualified legacy write that this
+// build's store would not put where the request asks
+// (legacyStoreResolvesFolders).
+var errFolderNotWritable = errors.New("this agent's query store writes and deletes root queries only")
+
+// requireFolderSupport refuses a folder-qualified queryID when this build's
+// store would not write or delete exactly that location, so the resource
+// AuthorizeProjectQueryWrite evaluates is always the file the store
+// touches. Refusing is the fail-closed choice: authorizing the root
+// location instead would silently put the query somewhere the caller did
+// not ask for.
+func requireFolderSupport(queryID string) error {
+	if legacyStoreResolvesFolders || !strings.Contains(queryID, "/") {
+		return nil
+	}
+	return fmt.Errorf("%w: %q names a folder, and it is refused rather than written to or deleted from another location", errFolderNotWritable, queryID)
+}
 
 // legacyQueryID validates a legacy query's folder path and bare id and
 // returns its folder-qualified id. A folder path of "" or

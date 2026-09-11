@@ -71,7 +71,7 @@ const unstableCanonicalID = "�"
 // drop the invisible code points, map each rune to its case class, and
 // decompose again so the result is comparable rune for rune.
 func canonicalRound(s string) string {
-	folder := folderPool.Get().(cases.Caser)
+	folder := folderPool.Get().(*cases.Caser)
 	folded := folder.String(norm.NFD.String(s))
 	folderPool.Put(folder)
 	var b strings.Builder
@@ -88,7 +88,10 @@ func canonicalRound(s string) string {
 // folderPool holds full-case-folding casers. A cases.Caser is stateful and
 // must not be shared between goroutines, and building one per call shows up
 // in the exhaustive tests, so they are pooled.
-var folderPool = sync.Pool{New: func() any { return cases.Fold() }}
+var folderPool = sync.Pool{New: func() any {
+	folder := cases.Fold()
+	return &folder
+}}
 
 // isInvisibleRune reports whether r is a default-ignorable code point: the
 // format characters (Cf: the soft hyphen, the zero-width space and joiners,

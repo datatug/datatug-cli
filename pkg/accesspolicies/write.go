@@ -22,10 +22,12 @@ const (
 )
 
 // ProjectQueryResource returns the policy resource for the saved query
-// queryID of project projectID.
+// queryID of project projectID. The query id is kept in its canonical
+// caseless form (CanonicalQueryID), so every spelling a file system
+// resolves to the same query file names the same resource.
 func ProjectQueryResource(projectID, queryID string) access.Resource {
 	project := record.NewKeyWithID(ProjectsCollection, projectID)
-	return access.RecordResourceForKey(record.NewKeyWithParentAndID(project, ProjectQueriesCollection, queryID))
+	return access.RecordResourceForKey(record.NewKeyWithParentAndID(project, ProjectQueriesCollection, CanonicalQueryID(queryID)))
 }
 
 // WriteOptions is the identity and policy set a project write is decided
@@ -97,20 +99,36 @@ func AuthorizeWrite(ctx context.Context, o WriteOptions, operation access.Operat
 	}
 	request := access.Request{Operation: operation, Resources: []access.Resource{resource}}
 	for _, item := range o.Policies {
-		decision := item.Policy.Decide(ctx, request)
+		name := policyName(item)
+		if item.writes == nil {
+			return &WriteDeniedError{Policy: name, Operation: operation, Resource: resource.String(),
+				Reason: "the policy was not loaded from its document (accesspolicies.LoadFile or DecodeLoaded), so it cannot decide a project write"}
+		}
+		if item.writes.refusal != "" {
+			return &WriteDeniedError{Policy: name, Operation: operation, Resource: resource.String(), Reason: item.writes.refusal}
+		}
+		decision := item.writes.policy.Decide(ctx, request)
 		if !decision.Allowed {
 			reason := decision.Explanation
 			if reason == "" {
 				reason = "no rule allows it"
 			}
-			return &WriteDeniedError{Policy: item.Policy.Name(), Operation: operation, Resource: resource.String(), Reason: reason}
+			return &WriteDeniedError{Policy: name, Operation: operation, Resource: resource.String(), Reason: reason}
 		}
 		if constrainedWrite(decision) {
-			return &WriteDeniedError{Policy: item.Policy.Name(), Operation: operation, Resource: resource.String(),
+			return &WriteDeniedError{Policy: name, Operation: operation, Resource: resource.String(),
 				Reason: "the grant holds only under a row condition, check or field list, which a project file write cannot enforce"}
 		}
 	}
 	return nil
+}
+
+// policyName is item's policy name, or "" when it has no policy.
+func policyName(item Loaded) string {
+	if item.Policy == nil {
+		return ""
+	}
+	return item.Policy.Name()
 }
 
 // constrainedWrite reports whether an allow decision still carries a

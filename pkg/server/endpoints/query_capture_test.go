@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -72,7 +73,18 @@ func (f *fakeCaptureStore) PutQuery(_ context.Context, record capturedRecord, co
 // store.
 func captureTestSetup(t *testing.T, as string, roles []string, allowWrites bool) (apicontract.Scope, *fakeCaptureStore) {
 	t.Helper()
+	return captureTestSetupWithPolicies(t, as, roles, allowWrites, nil)
+}
+
+// captureTestSetupWithPolicies is captureTestSetup with extra policy
+// documents, keyed by file name, loaded next to the project's own: every
+// loaded policy must allow a write.
+func captureTestSetupWithPolicies(t *testing.T, as string, roles []string, allowWrites bool, extra map[string]string) (apicontract.Scope, *fakeCaptureStore) {
+	t.Helper()
 	projectDir, projectID := writeSemanticTestProject(t)
+	for name, doc := range extra {
+		mustWriteFile(t, filepath.Join(projectDir, "policies", name), doc)
+	}
 	session, err := secureread.NewSession(secureread.SessionOptions{As: as, Roles: roles, PoliciesDir: projectDir + "/policies"})
 	if err != nil {
 		t.Fatalf("secureread.NewSession: %v", err)

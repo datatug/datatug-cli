@@ -4,6 +4,7 @@
 package accesspolicies
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -46,6 +47,12 @@ func ResolveDir(flagValue string) (dir string, explicit bool, err error) {
 type Loaded struct {
 	Policy access.Policy
 	Source string
+
+	// writes is the same document as AuthorizeWrite evaluates it (see
+	// prepareProjectWrites). It is nil for a Loaded not built by LoadFile or
+	// DecodeLoaded, and AuthorizeWrite refuses every project write under
+	// such a policy.
+	writes *projectWrites
 }
 
 // LoadOptions says where policies come from.
@@ -121,16 +128,29 @@ func LoadFile(path string) (Loaded, error) {
 	if codec == nil {
 		return Loaded{}, fmt.Errorf("policy %s: unsupported extension, want .yaml, .yml or .json", path)
 	}
-	file, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return Loaded{}, fmt.Errorf("policy %s: %w", path, err)
 	}
-	defer func() { _ = file.Close() }()
-	policy, err := access.DecodePolicy(file, codec, access.WithSource(path))
+	loaded, err := DecodeLoaded(data, codec, path)
 	if err != nil {
 		return Loaded{}, fmt.Errorf("policy %s: %w", path, err)
 	}
-	return Loaded{Policy: policy, Source: path}, nil
+	return loaded, nil
+}
+
+// DecodeLoaded decodes one access document held in data, as LoadFile does
+// for a file; source is where it came from and is never shown to a client.
+// Besides the policy every read runs through, it prepares the document's
+// project-write view (prepareProjectWrites): a document that cannot be
+// prepared still loads, and AuthorizeWrite refuses project writes under it.
+func DecodeLoaded(data []byte, codec access.Codec, source string) (Loaded, error) {
+	policy, err := access.DecodePolicy(bytes.NewReader(data), codec, access.WithSource(source))
+	if err != nil {
+		return Loaded{}, err
+	}
+	writes := prepareProjectWrites(data)
+	return Loaded{Policy: policy, Source: source, writes: &writes}, nil
 }
 
 // Policies returns the decoded policies in load order.

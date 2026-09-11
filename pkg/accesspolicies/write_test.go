@@ -85,11 +85,11 @@ const serverPolicyDir = "/srv/secret-policies/"
 func decodeLoaded(t *testing.T, name, doc string) Loaded {
 	t.Helper()
 	source := serverPolicyDir + name
-	policy, err := access.DecodePolicy(strings.NewReader(doc), access.YAMLCodec{}, access.WithSource(source))
+	loaded, err := DecodeLoaded([]byte(doc), access.YAMLCodec{}, source)
 	if err != nil {
 		t.Fatalf("decode %s: %v", name, err)
 	}
-	return Loaded{Policy: policy, Source: source}
+	return loaded
 }
 
 func principalWithRoles(id string, roles ...string) *access.Principal {

@@ -38,6 +38,10 @@ datatug incident evidence <id> attach (--execution <recId> | --annotation <id> |
 datatug incident link <id> (--recurrence-of <id> | --related <id>) [--store <storeId>]
 datatug incident resolve <id> --outcome resolved|false-alarm|accepted|handed-off|unresolved [--store <storeId>]
 datatug incident merge <duplicate-id> --into <id> [--project <id>] [--store <storeId>] [--json]
+datatug incident access request <id> --source <sourceId> [--collection <name>]... --reason <text> [--until <RFC3339>] [--project <id>] [--store <storeId>] [--json]
+datatug incident access approve|decline <id> <requestId> [--reason <text>] [--store <storeId>] [--json]
+datatug incident access revoke <id> <grantId> [--reason <text>] [--store <storeId>] [--json]
+datatug incident access list <id> [--store <storeId>] [--format grid|json|yaml] [--json]
 datatug incident watch [<id>] [--json] [--since <cursor>] [--project <id>] [--store <storeId>]
 ```
 
@@ -57,6 +61,7 @@ datatug incident watch [<id>] [--json] [--since <cursor>] [--project <id>] [--st
 | `link` | Record a recurrence or a related-incident relationship. |
 | `resolve` | Close the incident with one of the five outcomes (hub REQ:lifecycle-and-outcomes; vision §23). |
 | `merge` | Append the duplicate's events into the surviving incident and close the duplicate with `mergedInto`; hub REQ:lifecycle-and-outcomes. |
+| `access` | Request, approve, decline, revoke and list incident-scoped temporary read grants; see REQ:access-verbs. |
 | `watch` | Stream the incident's (or the store's) event log; see REQ:event-cursor-watch. |
 
 ## Behavior
@@ -65,13 +70,19 @@ datatug incident watch [<id>] [--json] [--since <cursor>] [--project <id>] [--st
 
 #### REQ: singular-namespace-and-verbs
 
-Every incident capability MUST be exposed under one singular resource namespace, `datatug incident` (never `incidents`), matching `cli#req:singular-resource-names`. Each capability MUST be an explicit verb subcommand — `list`, `search`, `show`, `similar`, `create`, `update`, `context`, `hypothesis`, `evidence`, `link`, `resolve`, `merge`, `watch` — per `cli#req:verb-subcommands`. A bare `datatug incident` with no verb MUST print help and exit `0`; it MUST NOT perform an implicit default action (e.g. it MUST NOT default to `list`).
+Every incident capability MUST be exposed under one singular resource namespace, `datatug incident` (never `incidents`), matching `cli#req:singular-resource-names`. Each capability MUST be an explicit verb subcommand — `list`, `search`, `show`, `similar`, `create`, `update`, `context`, `hypothesis`, `evidence`, `link`, `resolve`, `merge`, `access`, `watch` — per `cli#req:verb-subcommands`. A bare `datatug incident` with no verb MUST print help and exit `0`; it MUST NOT perform an implicit default action (e.g. it MUST NOT default to `list`).
 
 ### Output
 
 #### REQ: json-and-grid-output
 
 Every read verb (`list`, `search`, `show`, `similar`) MUST support `--format json|yaml|grid`. The default MUST be `grid` when stdout is a terminal and `json` otherwise, so an unredirected human run is readable and a piped/scripted run is machine-parseable without an explicit flag. **(lead assumption)** This inverts the umbrella's `cli#req:yaml-default-for-structured` default for this namespace specifically, because AI agents and scripts — this Feature's primary non-human consumers per vision §50 — expect JSON, not YAML, and a TTY check already gives humans a readable default. A `--json` boolean MUST be accepted as shorthand for `--format json`; passing `--json` together with `--format` set to anything other than `json` MUST exit `2`. Every `--format json` (or `--json`) output MUST reuse the server's own JSON field names and `TypedValue` shape for facts (`{type, value}`, per the transport appendix), never a CLI-renamed or CLI-flattened shape, so a script that already speaks the `/datatug/incidents/*` wire format can parse CLI output unchanged.
+
+### Access requests
+
+#### REQ: access-verbs
+
+`datatug incident access` MUST expose the hub's incident-scoped read grants (hub `incidents` REQ:access-requests-in-incident; `server-enforced-access` REQ:incident-scoped-grants; founder, 2026-09-11: request and approval in the simplest form are MVP) as five verbs and nothing more. `request <id> --source <sourceId> [--collection <name>]... --reason <text> [--until <RFC3339>]` MUST append `access.requested` for the calling principal and print the request id; `approve <id> <requestId>` and `decline <id> <requestId>` MUST append `access.approved` or `access.declined` and MUST exit `1` with `ACCESS_DENIED` echoed when the caller is not an approver for the referenced project (the server decides; the CLI never infers approver status); `revoke <id> <grantId>` MUST append `access.revoked`; `list <id>` MUST print pending requests and active grants with scope, requester, approver, expiry and grant id from the projection, never from a CLI-side cache. `request` MUST reject a malformed or past `--until` with exit `2`. Every verb proxies the server (`POST /datatug/incidents/{id}/access/*`, `GET …/access`); no verb evaluates policy locally. A read that succeeds under a grant is an ordinary `query run` or check run: the grant id appears in that execution record, not in any CLI flag.
 
 ### Event stream
 
@@ -122,6 +133,12 @@ Status and outcome values are not CLI-invented; they are exactly the hub Feature
 **Given** a project with no incidents yet
 **When** `datatug incident create --project demo --title "Checkout errors spike" --description "5xx rate above baseline" --json` runs, its stdout JSON `id` field is captured (e.g. `INC-1`), and then `datatug incident show INC-1 --project demo --json` runs using that short id
 **Then** `show`'s JSON `title` and `description` match what `create` was given, `status` is `open`, and running `show` again with the full id echoed in `create`'s own output returns the identical projection.
+
+### AC: access-request-approve-list (verifies REQ:access-verbs)
+
+**Given** `INC-1` references the demo project, `support` may not read `Invoice`, and `admin` is an approver for that project
+**When** `datatug incident access request INC-1 --source chinook --collection Invoice --reason "stuck invoices" --json` runs as `support` and prints `requestId`, then `datatug incident access approve INC-1 <requestId> --json` runs as `admin`, then `datatug incident access list INC-1 --json` runs
+**Then** the list shows one active grant with scope `chinook/Invoice`, requester `support`, approver `admin` and an expiry; `datatug incident show INC-1 --json` reports the `access.requested` and `access.approved` events with those actors; and the same `approve` run as `support` exits `1` with `ACCESS_DENIED` echoed and stdout empty.
 
 ### AC: status-follows-hub-sequence (verifies REQ:status-and-outcome-vocabulary)
 

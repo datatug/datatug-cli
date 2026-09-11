@@ -1,6 +1,7 @@
 package querywrite
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -64,6 +65,13 @@ func QueryCredentialReason(q *datatug.QueryDef) (field, reason string, found boo
 // itself; any other value in the JSON form it is persisted in, as a whole
 // (which finds a secret JSON member such as {"password": "x"}) and string
 // by string, every map key included, recursively.
+//
+// The JSON form is produced with HTML escaping off, as datatug-core's own
+// default-value screen produces it. json.Marshal would escape "<", ">" and
+// "&", so the placeholder {"password": "<value>"} reached the screen as
+// "<value>", which is not the placeholder the screen allows, and
+// the CLI refused a default core accepts. The failure was closed, but the
+// two screens must agree.
 func defaultValueCredentialReason(v any) (reason string, found bool) {
 	switch v := v.(type) {
 	case nil:
@@ -71,15 +79,18 @@ func defaultValueCredentialReason(v any) (reason string, found bool) {
 	case string:
 		return CredentialReason(v)
 	}
-	data, err := json.Marshal(v)
-	if err != nil {
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(v); err != nil {
 		return "", false // not persistable either; the write reports that
 	}
+	data := bytes.TrimRight(encoded.Bytes(), "\n")
 	if reason, found := CredentialReason(string(data)); found {
 		return reason, true
 	}
 	var decoded any
-	_ = json.Unmarshal(data, &decoded) // cannot fail on json.Marshal's own output
+	_ = json.Unmarshal(data, &decoded) // cannot fail on the encoder's own output
 	return jsonStringsCredentialReason(decoded)
 }
 

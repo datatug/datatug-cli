@@ -142,6 +142,15 @@ var legacyWriteTimeout = querywrite.Timeout
 // passes through, and its text - which can hold an absolute server path
 // and OS error text - never reaches a client: the endpoints answer it with
 // a generic 500 and log it (legacyQueryWriteResponse).
+//
+// A stored query file that does not parse is one of those: a write that
+// replaces it reads it first (writeRevisionedLegacyQuery, to keep its
+// capture provenance), and the store reports the parse failure as an
+// ordinary error, with no typed error to tell it apart from an I/O
+// failure. So it is a 500 with the generic message, and the agent log
+// carries which file and why under the same request ID. Turning it into a
+// typed 4xx ("the stored query is corrupt; replace it") needs a typed
+// error from datatug-core's filestore, which is a change in that repo.
 func legacyStoreFailure(err error) error {
 	if message, ok := storeLocationRefusal(err); ok {
 		return validation.NewBadRequestError(errors.New(message))

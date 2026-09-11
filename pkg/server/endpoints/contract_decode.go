@@ -20,6 +20,15 @@ import (
 // reconciled by precedence." Two spellings of one struct field that differ
 // only in case ("project" and "Project") are duplicates too: encoding/json
 // matches them to the same field and would keep the last.
+//
+// The limit of that rule: a struct with two DISTINCT fields whose JSON
+// names differ only by case (`json:"id"` beside `json:"ID"`) would have a
+// body naming both rejected as a duplicate, although encoding/json decodes
+// it unambiguously - the fold cannot tell one field spelled twice from two
+// fields spelled alike. No type decoded here has such a pair (this
+// package's request types and datatug-core's apicontract were both
+// scanned), and a new one must not: give two fields JSON names that differ
+// by more than case.
 func decodeContractBody(body []byte, v any) error {
 	if err := checkNoDuplicateKeys(body, reflect.TypeOf(v)); err != nil {
 		return err

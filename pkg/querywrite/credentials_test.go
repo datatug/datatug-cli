@@ -106,3 +106,37 @@ func TestQueryCredentialReason(t *testing.T) {
 		}
 	}
 }
+
+// TestDefaultValueCredentialReason_ScreensTheFormCoreScreens: a parameter
+// default that is not a string is screened in the JSON form it is
+// persisted in, and that form is built with HTML escaping off, as
+// datatug-core's own default-value screen builds it. json.Marshal would
+// have written {"password": "<value>"} as "<value>", which is not
+// the placeholder the screen allows, so the CLI refused a default core
+// accepts. The failure was closed, but the two screens must agree.
+func TestDefaultValueCredentialReason_ScreensTheFormCoreScreens(t *testing.T) {
+	allowed := []any{
+		map[string]any{"password": "<value>"},
+		map[string]any{"token": "<enter your token>"},
+		map[string]any{"api_key": "${API_KEY}"},
+		map[string]any{"note": "a & b"},
+		map[string]any{"password": ""},
+		[]any{"<placeholder>"},
+	}
+	for _, value := range allowed {
+		if reason, found := defaultValueCredentialReason(value); found {
+			t.Errorf("defaultValueCredentialReason(%v) = %q: a placeholder is not a secret", value, reason)
+		}
+	}
+	refused := []any{
+		map[string]any{"password": "hunter2"},
+		map[string]any{"dsn": "postgres://u:secret@h/db"},
+		[]any{map[string]any{"password": "hunter2"}},
+		map[string]any{"nested": map[string]any{"apiKey": "sk-live-123456"}},
+	}
+	for _, value := range refused {
+		if _, found := defaultValueCredentialReason(value); !found {
+			t.Errorf("defaultValueCredentialReason(%v) found no secret", value)
+		}
+	}
+}

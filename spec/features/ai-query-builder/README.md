@@ -12,7 +12,7 @@ status: Approved
 **Owner:** alexander.trakhimenok
 **Source Ideas:** —
 **Supersedes:** —
-**Implements:** specscore:feature/ai-query-builder@github.com/datatug/datatug
+**Implements:** specscore://github.com/datatug/datatug/feature/ai-query-builder
 **Grade:** A
 
 ## Summary

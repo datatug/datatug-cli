@@ -2,6 +2,20 @@
 
 project:
   title: DataTug CLI
+  host: github.com
+  org: datatug
+  repo: datatug-cli
+
+# Related SpecScore projects (repo-config REQ:projects-list). The hub repo
+# (github.com/datatug/datatug) owns the ai-query-builder, cli/incident, and
+# serve-brokered-query-builder Capabilities that this repo's Implementations
+# cite cross-repo. Path is relative to THIS file's directory and resolves
+# from the canonical clone (/Users/alex/projects/datatug/datatug-cli ->
+# ../datatug -> /Users/alex/projects/datatug/datatug). It does not resolve
+# from a worktree nested under .worktrees/<name> (two extra path levels);
+# that is a property of the nested-worktree layout, not of this entry.
+projects:
+  - ../datatug
 
 # Reviewer gates (event-keyed per the reviewer-gates contract / loader).
 # specstudio:specify guards gates.feature.approved.

@@ -493,7 +493,7 @@ func TestStructuredDialect_StringParamEmitsPlaceholderNotLiteral(t *testing.T) {
 		WhereField("BillingCountry", dal.Equal, aliasDialectMaliciousBillingCountry).
 		SelectColumns(dal.Column{Expression: dal.Field("InvoiceId")})
 
-	mock.ExpectQuery("SELECT `InvoiceId` FROM `Invoice` AS `i` WHERE `BillingCountry` = \\?").
+	mock.ExpectQuery("SELECT `InvoiceId` FROM `Invoice` AS `i` WHERE \\(\\+`BillingCountry` COLLATE BINARY\\) = \\?").
 		WithArgs(aliasDialectMaliciousBillingCountry).
 		WillReturnRows(sqlmock.NewRows([]string{"InvoiceId"}))
 

@@ -48,7 +48,7 @@ func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, envir
 }
 
 // sourceURLFromCatalog maps a resolved DbCatalog to the pkg/dbcopy URL
-// scheme its driver corresponds to. Only the two schemes secureread.Executor
+// scheme its driver corresponds to. Only the schemes secureread.Executor
 // (via pkg/dbcopy) actually opens are supported here; anything else fails
 // with a descriptive error rather than silently building an unusable URL.
 // catalog.Path is expanded through ResolveCatalogPath first (S58: this used
@@ -57,6 +57,15 @@ func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, envir
 // "~/datatug/dbs/chinook-local.sqlite").
 func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, error) {
 	switch catalog.Driver {
+	case "openvaultdb":
+		if catalog.Path == "" {
+			return "", fmt.Errorf("OpenVaultDB connection descriptor path is required")
+		}
+		path, err := ResolveCatalogPath(projDir, catalog.Path)
+		if err != nil {
+			return "", err
+		}
+		return "openvaultdb://" + path, nil
 	case "sqlite3", "sqlite":
 		if catalog.Path == "" {
 			return "", fmt.Errorf("catalog %q has no path configured for its sqlite driver", catalog.ID)
@@ -76,7 +85,7 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		}
 		return "ingitdb://" + path, nil
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3 or ingitdb)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb or openvaultdb)", catalog.Driver)
 	}
 }
 

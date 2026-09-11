@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/access"
+	"github.com/datatug/datatug-cli/pkg/querywrite"
 )
 
 // projectWrites is a loaded policy as AuthorizeWrite evaluates it.
@@ -44,8 +45,13 @@ type writeRule struct {
 
 // pathSegment is one segment of a policy path pattern, decoded.
 type pathSegment struct {
+	// value is the segment as the write view compares it: a query id in
+	// its canonical form (CanonicalQueryID), everything else as written.
 	value string
-	isID  bool
+	// raw is the segment as the policy author wrote it, decoded but not
+	// canonicalized, for a message that quotes their own spelling.
+	raw  string
+	isID bool
 }
 
 // prepareProjectWrites builds the project-write view of the access document
@@ -180,7 +186,7 @@ func (w *rewriter) rewritePath(scope *access.DocumentScope, parent []pathSegment
 		if part == "" || err != nil {
 			return nil, false, false
 		}
-		segment := pathSegment{value: decoded, isID: i%2 == 1}
+		segment := pathSegment{value: decoded, raw: decoded, isID: i%2 == 1}
 		if segment.isID && isQueryIDPosition(segments) && !isIDWildcard(decoded) {
 			canonical := CanonicalQueryID(decoded)
 			if isIDWildcard(canonical) {
@@ -206,11 +212,41 @@ func (w *rewriter) rewritePath(scope *access.DocumentScope, parent []pathSegment
 // query can ever match, rather than let it silently not apply.
 func (w *rewriter) checkRules() {
 	for _, rule := range w.rules {
+		name, path := fmt.Sprintf("rule %q", rule.name), displayPath(rule.path, rule.trailingAll)
 		if isBelowQueryID(rule.path, rule.trailingAll) {
-			w.refuse(folderScopeRefusal(fmt.Sprintf("rule %q", rule.name), displayPath(rule.path, rule.trailingAll)))
+			w.refuse(folderScopeRefusal(name, path))
 			return
 		}
+		if len(rule.path) == 4 && isQueryIDPosition(rule.path[:3]) && rule.path[3].isID && !isIDWildcard(rule.path[3].value) {
+			if reason, ok := queryIDReason(rule.path[3].raw); !ok {
+				w.refuse(unusableQueryIDRefusal(name, path, reason))
+				return
+			}
+		}
 	}
+}
+
+// queryIDReason reports why id cannot be the folder-qualified id of a saved
+// query: every "/"-separated segment of it must pass the one segment
+// validator every query write path applies (querywrite.SegmentReason). A
+// rule naming an id no write could ever use is a rule that silently never
+// applies - a mistyped glob (".../queries/Rev*"), a trailing dot or an
+// invisible character Windows or HFS+ would read as another name - so the
+// policy refuses project query writes instead.
+func queryIDReason(id string) (reason string, ok bool) {
+	for _, segment := range strings.Split(id, "/") {
+		if reason, ok := querywrite.SegmentReason(segment); !ok {
+			return fmt.Sprintf("its segment %q %s", segment, reason), false
+		}
+	}
+	return "", true
+}
+
+// unusableQueryIDRefusal is prepareProjectWrites' refusal of a rule that
+// names a query id no query write could use.
+func unusableQueryIDRefusal(rule, path, reason string) string {
+	return fmt.Sprintf("%s (path %q) names a query id no query write can use, so it can never apply: %s; "+
+		"project query writes are refused while this policy is loaded", rule, path, reason)
 }
 
 // qualifiedRuleName is the name DALgo compiles a rule under: its id, or

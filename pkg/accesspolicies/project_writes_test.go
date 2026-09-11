@@ -285,6 +285,51 @@ func TestPrepareProjectWrites_RefusesWhatItCannotReproduce(t *testing.T) {
 	}
 }
 
+// A rule naming a query id no query write could ever use - a mistyped glob,
+// a trailing dot, an invisible character, a Windows 8.3 short name - can
+// never apply. Rather than let it silently not apply, the policy refuses
+// every project query write and names the rule.
+func TestPrepareProjectWrites_RefusesAQueryIDNoWriteCanUse(t *testing.T) {
+	refused := map[string]string{
+		"/datatug_projects/*/queries/Rev*":             "must not contain any of",
+		"/datatug_projects/demo/queries/reports.":      `must not end with "." or a space`,
+		"/datatug_projects/*/queries/rev%E2%80%8Cenue": "invisible",
+		"/datatug_projects/*/queries/LONGFO~1":         "short name",
+		"/datatug_projects/*/queries/reports%2F":       "must not be empty",
+		"/datatug_projects/*/queries/CON":              "device name",
+		"/datatug_projects/*/queries/%7E":              "queries root",
+	}
+	for pattern, want := range refused {
+		t.Run(pattern, func(t *testing.T) {
+			loaded := decodeLoaded(t, "deny.yaml", denyQueryDoc(pattern))
+			err := AuthorizeWrite(context.Background(), WriteOptions{Principal: principalWithRoles("alice"), Policies: []Loaded{loaded}},
+				access.Set, ProjectQueryResource("demo", "anything"))
+			var denied *WriteDeniedError
+			if !errors.As(err, &denied) {
+				t.Fatalf("expected every project query write to be refused, got %v", err)
+			}
+			for _, part := range []string{`rule "protect-query"`, "no query write can use", want} {
+				if !strings.Contains(denied.Reason, part) {
+					t.Errorf("Reason = %q, want it to mention %q", denied.Reason, part)
+				}
+			}
+		})
+	}
+	// A canonicalizable id, a wildcard and a capture are not refused.
+	for _, pattern := range []string{
+		"/datatug_projects/*/queries/Revenue",
+		"/datatug_projects/*/queries/Reports%2FRevenue",
+		"/datatug_projects/*/queries/caf%C3%A9",
+		"/datatug_projects/*/queries/*",
+		"/datatug_projects/{project}/queries/{query}",
+	} {
+		loaded := decodeLoaded(t, "deny.yaml", denyQueryDoc(pattern))
+		if loaded.writes.refusal != "" {
+			t.Errorf("%s: project writes are refused: %s", pattern, loaded.writes.refusal)
+		}
+	}
+}
+
 // flattenPolicy returns the rules DALgo itself compiles for policy: DALgo
 // encodes its own rule tree back into a document, and this flattens that
 // document the way DALgo joins nested scopes. It shares no code with the

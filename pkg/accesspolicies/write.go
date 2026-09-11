@@ -78,6 +78,25 @@ func (e *WriteDeniedError) Unwrap() error { return access.ErrAccessDenied }
 //   - A grant that holds only under a row condition, a check or a field
 //     allow-list is denied too: a project file has no rows or fields to
 //     evaluate it against, so such a grant cannot be enforced here.
+//
+// How a policy names a query. A saved query is the record
+// /datatug_projects/{projectID}/queries/{queryID} (ProjectQueryResource):
+//
+//   - queryID is the query's folder-qualified id kept as ONE path segment.
+//     A policy names the query "revenue" in folder "reports" as
+//     /datatug_projects/demo/queries/reports%2Frevenue, the "/" inside the
+//     id percent-encoded, and every query in every folder as
+//     /datatug_projects/demo/queries/* (or .../queries/**).
+//   - Query ids match by CanonicalQueryID on both sides, the resource and
+//     every query id in the loaded policies' paths: case- and
+//     Unicode-normalization-insensitively, so "Revenue", "REVENUE" and
+//     "revenue" are one query to every rule, as they are one file on APFS.
+//   - Folder-scoped rules are not supported. A rule path below the
+//     query-id segment (.../queries/reports/**, .../queries/reports/x) can
+//     never match a query, so rather than let such a rule silently not
+//     apply, every project query write is refused while a policy holding
+//     one is loaded, and the refusal names the rule. Reads are unaffected:
+//     they run through the policy as loaded.
 func AuthorizeWrite(ctx context.Context, o WriteOptions, operation access.Operations, resource access.Resource) error {
 	switch operation {
 	case access.Insert, access.Set, access.Update, access.Delete:

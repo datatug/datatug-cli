@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/access"
+	"github.com/datatug/datatug-cli/pkg/querywrite"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/strongo/validation"
@@ -156,22 +157,19 @@ func validateQueryPath(field, p string) error {
 	return nil
 }
 
-// validateQueryPathSegment rejects a segment that could leave its parent
-// directory or be read differently by another OS: empty (so no absolute
-// path and no "a//b"), "." or "..", or holding a separator or NUL.
+// validateQueryPathSegment rejects a segment querywrite.SegmentReason
+// refuses - the one segment validator every query write path shares, with
+// datatug-core's storage rules: nothing that could leave its parent
+// directory (empty, so no absolute path and no "a//b"; "." or ".."; a
+// separator or NUL), be read differently by another OS or tool (control and
+// bidi characters, Windows-illegal characters and device names, a trailing
+// "." or space) or collide with the store's own entries (a leading ".",
+// ".dt-query-txn"), nothing over 200 bytes, and never "~".
 func validateQueryPathSegment(field, segment string) error {
-	var reason string
-	switch {
-	case segment == "":
-		reason = "must not be empty or have an empty segment"
-	case segment == "." || segment == "..":
-		reason = `must not be "." or ".."`
-	case strings.ContainsAny(segment, "/\\\x00"):
-		reason = "must not contain a path separator or NUL"
-	default:
-		return nil
+	if reason, ok := querywrite.SegmentReason(segment); !ok {
+		return fmt.Errorf("%w: %s segment %q %s", errUnsafeQueryLocation, field, segment, reason)
 	}
-	return fmt.Errorf("%w: %s segment %q %s", errUnsafeQueryLocation, field, segment, reason)
+	return nil
 }
 
 // GetQuery returns query definition. ref.ID may be bare or folder-qualified

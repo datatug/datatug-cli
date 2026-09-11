@@ -12,6 +12,7 @@ import (
 	"github.com/dal-go/dalgo/dtql"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/querywrite"
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
@@ -47,12 +48,12 @@ var captureOrigins = map[string]bool{"selection": true, "context": true, "manual
 // read or written and returns the collection its DTQL reads. Every failure
 // is 400 INVALID_REQUEST naming the "query.<field>" it concerns.
 func validateCapturedQuery(q capturedQuery) (collection string, err error) {
-	if err := validateCaptureName("query.id", q.ID); err != nil {
+	if err := validateCaptureLocation("query.id", q.ID); err != nil {
 		return "", err
 	}
 	if q.FolderPath != "" {
 		for _, segment := range strings.Split(q.FolderPath, "/") {
-			if err := validateCaptureName("query.folderPath", segment); err != nil {
+			if err := validateCaptureLocation("query.folderPath", segment); err != nil {
 				return "", err
 			}
 		}
@@ -74,6 +75,19 @@ func validateCapturedQuery(q capturedQuery) (collection string, err error) {
 		return "", err
 	}
 	return validateCaptureDTQL(q.DTQL, q.Parameters)
+}
+
+// validateCaptureLocation checks one folder segment or the query id: first
+// the segment rules every query write path shares
+// (querywrite.SegmentReason), then capture's stricter allow-list
+// (validateCaptureName).
+func validateCaptureLocation(field, value string) error {
+	if value != "" {
+		if reason, ok := querywrite.SegmentReason(value); !ok {
+			return newInvalidRequest(field, fmt.Sprintf("segment %q %s", value, reason))
+		}
+	}
+	return validateCaptureName(field, value)
 }
 
 // validateCaptureName checks one path-segment-shaped name against

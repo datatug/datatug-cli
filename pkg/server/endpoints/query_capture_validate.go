@@ -128,7 +128,7 @@ func captureTextReason(value string, required bool, maxRunes int, multiline bool
 			return "must not contain control characters"
 		}
 	}
-	if reason, found := captureCredentialReason(value); found {
+	if reason, found := querywrite.CredentialReason(value); found {
 		return reason
 	}
 	return ""
@@ -201,7 +201,7 @@ func validateCaptureDTQL(text string, params []capturedParameter) (string, error
 	if len(text) > maxCaptureDTQLBytes {
 		return "", newInvalidRequest(field, fmt.Sprintf("is longer than %d bytes", maxCaptureDTQLBytes))
 	}
-	if reason, found := captureCredentialReason(text); found {
+	if reason, found := querywrite.CredentialReason(text); found {
 		return "", newInvalidRequest(field, reason)
 	}
 	query, err := dtql.Deserialize([]byte(text))

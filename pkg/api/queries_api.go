@@ -50,7 +50,10 @@ func UpdateQuery(ctx context.Context, request dto.UpdateQuery) (*datatug.QueryDe
 // writes to (requireFolderSupport; 400 otherwise), the serving principal
 // must be authorized for a project write through AuthorizeProjectQueryWrite
 // (the gate queries/capture uses; 403 otherwise), and the query must pass
-// QueryDef.Validate (400 otherwise). The write itself keeps its legacy
+// QueryDef.Validate and the credential screen every query write path
+// shares, over its title, purpose, text, parameter titles and defaults and
+// target fields (querywrite.QueryCredentialReason; 400 otherwise). The
+// write itself keeps its legacy
 // create-or-replace semantics (DALgo Set): a revision-checked write is
 // queries/capture's job.
 func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *datatug.QueryDefWithFolderPath) (*datatug.QueryDefWithFolderPath, error) {
@@ -75,6 +78,9 @@ func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *data
 	}
 	if err := query.QueryDef.Validate(); err != nil {
 		return nil, validation.NewBadRequestError(err)
+	}
+	if field, reason, found := querywrite.QueryCredentialReason(&query.QueryDef); found {
+		return nil, validation.NewBadRequestError(validation.NewErrBadRecordFieldValue(field, reason))
 	}
 	store, err := projectStoreForID(storeID, projectID)
 	if err != nil {

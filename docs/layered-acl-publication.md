@@ -62,7 +62,7 @@ landing; task 24 stays in progress until the whole wave and final E2E land.
 - CGO-enabled `go test ./pkg/dbcopy ./pkg/server/endpoints`: pass, including existing SQL injection/binding cases.
 - Existing HTTP `exec/run_query` tests resolve an OpenVaultDB catalog and preserve an owner denial in `details.authorization`.
 - `golangci-lint run`: zero issues.
-- Full CGO-enabled `go test ./...`: all packages pass except commands' existing `TestQueryRunSaved_SQL` and `TestQueryRunSaved_PolicyRefusal`. Both lack the operator-level opaque SQL capability required by current main. Baseline comparison is recorded in the PR; do not weaken that gate to make fixtures pass.
+- Full CGO-enabled `go test ./...`: all packages pass except commands' existing `TestQueryRunSaved_SQL` and `TestQueryRunSaved_PolicyRefusal`. The SQL case lacks the required operator-level opaque SQL capability; the refusal case expects a denial where the current demo fixture grants support access to Canadian invoices. Baseline comparison is recorded in the PR; do not weaken that gate to make fixtures pass.
 - Dependency integration preserves native numeric lookup values. The reviewed SQLite compiler intentionally avoids affinity coercion and uses binary comparison; the consumer's SQL placeholder mock is updated accordingly while retaining its bound-argument assertion.
 
 The original task-21 branch is retained as `recovery/acl-task21-original` before replacing its publication branch. The replacement worktree is `.worktrees/acl24-datatug-publication`; canonical clones stay clean.

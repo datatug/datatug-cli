@@ -29,19 +29,19 @@ datatug incident search <text> [--entity <Entity>.<Field>=<value>]... [--project
 datatug incident show <id> [--at <RFC3339>] [--project <id>] [--store <storeId>] [--format ...] [--json]
 datatug incident similar <id> [--project <id>] [--store <storeId>] [--format ...] [--json]
 datatug incident create --title <text> [--description <text>] [--from-investigation <id>] [--project <id>] [--store <storeId>]
-datatug incident update <id> (--status <status> | --note <text>) [--project <id>]
-datatug incident context <id> add|promote|reject --entity <Entity> --field <field> --value <value> \
+datatug incident update <id> (--status <status> | --note <text>) [--project <id>] [--store <storeId>]
+datatug incident context <id> add|promote|reject --entity <Entity> --field <field> --value <value> [--store <storeId>] \
     [--role affected|healthy_control|suspected|excluded|recovered] [--layer <layer>] [--project <id>]
-datatug incident hypothesis <id> add --text <text>
-datatug incident hypothesis <id> set-state <hypothesisId> --state <state>
-datatug incident evidence <id> attach (--execution <recId> | --annotation <id> | --check-run <recId>)
-datatug incident link <id> (--recurrence-of <id> | --related <id>)
-datatug incident resolve <id> --outcome resolved|false-alarm|accepted|handed-off|unresolved
+datatug incident hypothesis <id> add --text <text> [--store <storeId>]
+datatug incident hypothesis <id> set-state <hypothesisId> --state <state> [--store <storeId>]
+datatug incident evidence <id> attach (--execution <recId> | --annotation <id> | --check-run <recId>) [--store <storeId>]
+datatug incident link <id> (--recurrence-of <id> | --related <id>) [--store <storeId>]
+datatug incident resolve <id> --outcome resolved|false-alarm|accepted|handed-off|unresolved [--store <storeId>]
 datatug incident merge <duplicate-id> --into <id> [--project <id>] [--store <storeId>] [--json]
 datatug incident watch [<id>] [--json] [--since <cursor>] [--project <id>] [--store <storeId>]
 ```
 
-`--project` follows the umbrella's `--project`/`--dir` resolution (`cli#req:project-or-dir-resolution`); every verb above accepts it. `--store <storeId>` selects the incident store when more than one is configured (default: the store configured for the current project; hub REQ:incident-store); `create`, `list`, `show`, `watch`, `search`, `similar` and `merge` accept it. The incident store is routed by configuration, never by `--project`: `--project` instead scopes which DataTug project's evidence is read, and one incident MAY reference several projects (hub REQ:incident-store, REQ:multi-project-incidents).
+`--project` follows the umbrella's `--project`/`--dir` resolution (`cli#req:project-or-dir-resolution`); every verb above accepts it. `--store <storeId>` selects the incident store when more than one is configured (default: the store configured for the current project; hub REQ:incident-store); every verb accepts it — `create`, `list`, `search`, `watch` to choose the store, and every verb that takes an `<id>` (`show`, `similar`, `update`, `context`, `hypothesis`, `evidence`, `link`, `resolve`, `merge`) to resolve a short id within that store. The incident store is routed by configuration, never by `--project`: `--project` instead scopes which DataTug project's evidence is read, and one incident MAY reference several projects (hub REQ:incident-store, REQ:multi-project-incidents).
 
 | Verb | Purpose |
 |---|---|
@@ -55,7 +55,7 @@ datatug incident watch [<id>] [--json] [--since <cursor>] [--project <id>] [--st
 | `hypothesis` | Add a hypothesis or change an existing one's `--state`. |
 | `evidence` | Attach an execution record, an annotation or a check run as evidence for a hypothesis. |
 | `link` | Record a recurrence or a related-incident relationship. |
-| `resolve` | Close the incident with one of the five outcomes (product-family.md D3/§23). |
+| `resolve` | Close the incident with one of the five outcomes (hub REQ:lifecycle-and-outcomes; vision §23). |
 | `merge` | Append the duplicate's events into the surviving incident and close the duplicate with `mergedInto`; hub REQ:lifecycle-and-outcomes. |
 | `watch` | Stream the incident's (or the store's) event log; see REQ:event-cursor-watch. |
 
@@ -107,7 +107,7 @@ Every verb that takes an `<id>` argument MUST accept both the store-scoped short
 
 #### REQ: status-and-outcome-vocabulary
 
-Status and outcome values are not CLI-invented; they are exactly the hub Feature's vocabulary (hub REQ:lifecycle-and-outcomes). `datatug incident update <id> --status <status>` MUST accept exactly the seven hub statuses — `open`, `investigating`, `mitigating`, `recovering`, `resolved`, `watching`, `closed` — and an unrecognized value MUST exit `2` naming the allowed statuses. `datatug incident resolve <id> --outcome <outcome>` MUST accept exactly the five hub outcomes — `resolved`, `false-alarm`, `accepted`, `handed-off`, `unresolved`. `duplicate` is not a hub outcome: `--outcome duplicate` MUST exit `2` with a message pointing at `datatug incident merge <duplicate-id> --into <id>` instead. `merge` MUST append the duplicate's events into the surviving incident and close the duplicate with `mergedInto` set and no outcome (hub REQ:lifecycle-and-outcomes); merging an incident that is already merged a second time MUST exit `1` with error code `ALREADY_MERGED` (REQ:exit-codes).
+Status and outcome values are not CLI-invented; they are exactly the hub Feature's vocabulary (hub REQ:lifecycle-and-outcomes). `datatug incident update <id> --status <status>` MUST accept exactly the seven hub statuses — `open`, `investigating`, `mitigating`, `recovering`, `resolved`, `watching`, `closed` — and an unrecognized value MUST exit `2` naming the allowed statuses. `datatug incident resolve <id> --outcome <outcome>` MUST accept exactly the five hub outcomes — `resolved`, `false-alarm`, `accepted`, `handed-off`, `unresolved`. `duplicate` is not a hub outcome: `--outcome duplicate` MUST exit `2` with a message pointing at `datatug incident merge <duplicate-id> --into <id>` instead. `merge` MUST append the duplicate's events into the surviving incident and close the duplicate with `mergedInto` set and no outcome (hub REQ:lifecycle-and-outcomes); merging an incident that is already merged a second time MUST exit `1` with the transport appendix's `INVALID_REQUEST` echoed (REQ:exit-codes; hub REQ:lifecycle-and-outcomes).
 
 ### Back-links
 
@@ -133,7 +133,7 @@ Status and outcome values are not CLI-invented; they are exactly the hub Feature
 
 **Given** `INC-2` is a duplicate of `INC-1` with two recorded events
 **When** `datatug incident merge INC-2 --into INC-1 --json` runs
-**Then** `INC-1`'s event stream contains `INC-2`'s two events tagged `incident.merged`, `datatug incident show INC-2 --json` reports `status` `closed` and `mergedInto` equal to `INC-1`'s `IncidentRef` (`{storeId, incidentId}`), and running the identical `merge` a second time exits `1` with error code `ALREADY_MERGED`.
+**Then** `INC-1`'s event stream contains `INC-2`'s two events tagged `incident.merged`, `datatug incident show INC-2 --json` reports `status` `closed` and `mergedInto` equal to `INC-1`'s `IncidentRef` (`{storeId, incidentId}`), and running the identical `merge` a second time exits `1` with error code `INVALID_REQUEST` (the hub defines no merge-specific code).
 
 ### AC: list-by-asset-back-link (verifies REQ:list-filters-by-back-link)
 
@@ -151,7 +151,7 @@ Status and outcome values are not CLI-invented; they are exactly the hub Feature
 
 **Given** the canonical demo incident fixture, whose event log rejects hypothesis `H17` at `2026-09-11T10:43:51Z`
 **When** `datatug incident show INC-1 --at 2026-09-11T10:43:40Z --json` runs, and separately `datatug incident show INC-1 --json` runs with no `--at`
-**Then** the `--at` run's projection shows `H17` still in state `open` (before the rejection event), while the no-`--at` run shows `H17` in state `rejected`.
+**Then** the `--at` run's projection shows `H17` still in state `investigating` (before the rejection event), while the no-`--at` run shows `H17` in state `rejected`.
 
 ### AC: json-output-matches-api-envelope (verifies REQ:json-and-grid-output)
 

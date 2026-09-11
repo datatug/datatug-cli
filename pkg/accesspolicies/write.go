@@ -16,6 +16,12 @@ import (
 // collection names, so a grant on a data collection (path: /Customer) never
 // grants a project write, while a catch-all grant (path: /**) - the
 // demo-project-1 admin rule set - covers them.
+//
+// The separation rests on that prefix alone: policy paths share one
+// namespace, so a data source with a collection literally named
+// "datatug_projects" would put its rows under the same paths as project
+// files, and a grant written for either would apply to both. Never give a
+// data collection that name.
 const (
 	ProjectsCollection       = "datatug_projects"
 	ProjectQueriesCollection = "queries"

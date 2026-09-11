@@ -50,6 +50,7 @@ Pinning the contract surface lets the implementation evolve without breaking use
 | [query/](query/README.md) | `query run` — run an ad-hoc DTQL query through the user's access policies (`~/.datatug/policies/`): rows to stdout, applied limitations to stderr |
 | [version/](version/README.md) | CLI version reporting |
 | [entity](entity/README.md) | Author and read entities and their fields (`add`, `field add/set/rm`, `list`, `show`) |
+| [incident](incident/README.md) | List, search, inspect, create/update and resolve incidents; attach context, hypotheses and evidence; link recurrence; `watch` streams the event stream for humans, scripts and AI agents |
 
 External command groups live in their own packages and are referenced here but not specified in this tree:
 

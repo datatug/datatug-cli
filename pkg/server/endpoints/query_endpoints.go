@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/sneat-co/sneat-go-core/apicore"
@@ -141,39 +141,28 @@ func getAllQueries(_ context.Context, ref dto.ProjectRef) (*datatug.QueriesFolde
 	return buildQueriesFolderTree(queries, canonicalIDs, datatug.RootSharedFolderName), nil
 }
 
-// personalRootDirName is the on-disk directory a principal's personal
-// project root lives under, as a SIBLING of the project's shared
-// storage.QueriesFolder ("queries/") — literally "user:<principalID>",
-// e.g. "<project>/user:alice/queries/...". This is this task's (S169) own
-// additive convention: datatug-core's RootSharedFolderName ("~") and
-// RootUserFolderPrefix ("user:") are wire-level QueriesFolder/Folder-field
-// root-id conventions only (proj_item.go's ValidateFolderPath) — verified,
-// datatug-core ships no on-disk layout or loader for either of them (no
-// RootUserFolderPrefix reference anywhere in its pkg/storage; the shared
-// root's own "~" is likewise never a physical directory name, see
-// buildQueriesFolderTree below).
-//
-// A personal root deliberately sits OUTSIDE the project's queries/ tree
-// (rather than as a queries/user:<id>/ subdirectory of it) so
-// loadModuleQueries' shared-tree walk (a plain recursive
-// filepath.WalkDir over queries/) can never pick up a personal query as a
-// side effect of where it happens to live on disk — the two roots stay
-// fully isolated by construction, not by a filter loadModuleQueries would
-// otherwise need to apply on every call. Rooting personal queries at
-// "<project>/user:<id>/" (its own "queries/" subdirectory, like any
-// project) also means getPersonalQueries reuses loadModuleQueries
-// completely unchanged, exactly as getAllQueries does.
-func personalRootDirName(principalID string) string {
-	return datatug.RootUserFolderPrefix + principalID
-}
-
 // getPersonalQueries loads the serving principal's own personal root
-// (personalRootDirName) rather than getAllQueries' shared tree — GET
-// /datatug/queries/all_queries?root=personal (S169). Never creates that
-// directory for a read: a principal with no personal queries yet gets an
-// empty folder, exactly like loadModuleQueries already does for any other
-// missing directory (walkJSONFiles treats ENOENT as "no files", not an
-// error).
+// rather than getAllQueries' shared tree — GET
+// /datatug/queries/all_queries?root=personal (S169, on-disk layout revised
+// by S172). Never creates that directory for a read: a principal with no
+// personal queries yet gets an empty folder, exactly like loadModuleQueries
+// already does for any other missing directory (walkJSONFiles treats
+// ENOENT as "no files", not an error).
+//
+// On-disk location (S172, superseding S169's original
+// "<project>/user:<principalID>/queries/" sibling-directory layout):
+// personalqueries.ResolveProjectDir(ref.ProjectID) —
+// $DATATUG_PERSONAL_DIR/<projectID> if that env var is set, else
+// ~/.datatug/projects/<projectID> — entirely OUTSIDE the shared project
+// directory api.ProjectDir resolves, and so never in the project's own git
+// repo. Founder ruling 2026-09-11 (verbatim): "where personal queries live
+// on disk for datatug serve. - I'm Ok with your suggestion for now." — see
+// personalqueries.ResolveProjectDir's own doc comment for the full
+// rationale (no colon in a directory name — illegal on Windows — and the
+// "for now"/provisional caveat). The wire root id stays
+// datatug.RootUserFolderPrefix+principalID unchanged, the same
+// datatug-core convention getAllQueries' RootSharedFolderName sits beside;
+// only the on-disk directory moved.
 //
 // An anonymous principal (no `--as` at `datatug serve` startup —
 // api.SecurePrincipalID() == "") owns no personal root at all: rather than
@@ -191,11 +180,16 @@ func getPersonalQueries(_ context.Context, ref dto.ProjectRef) (*datatug.Queries
 	if principalID == "" {
 		return &datatug.QueriesFolder{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: rootID}}}, nil
 	}
-	projectDir, ok := api.ProjectDir(ref.ProjectID)
-	if !ok {
-		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, ref.ProjectID)
+	// personalqueries.ErrInvalidProjectID (an unsafe path segment) is
+	// handled by util_error_handling.go exactly like ErrInvalidQueriesRoot
+	// below — 400 INVALID_REQUEST, field "project". In practice
+	// ref.ProjectID always comes from a loaded datatug-project.json or a
+	// served project's config key (never raw user input), so this is a
+	// defensive backstop, not an expected everyday response.
+	personalProjectDir, err := personalqueries.ResolveProjectDir(ref.ProjectID)
+	if err != nil {
+		return nil, err
 	}
-	personalProjectDir := filepath.Join(projectDir, personalRootDirName(principalID))
 	queries, canonicalIDs, err := loadModuleQueries(personalProjectDir)
 	if err != nil {
 		return nil, err

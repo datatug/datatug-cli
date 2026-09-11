@@ -10,6 +10,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/validation"
 )
@@ -89,6 +90,17 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	case errors.Is(err, ErrInvalidQueriesRoot):
 		response.Code = "INVALID_REQUEST"
 		response.Field = urlParamRoot
+		w.WriteHeader(http.StatusBadRequest)
+	// getPersonalQueries -> personalqueries.ResolveProjectDir (S172): a
+	// ref.ProjectID that is not a single safe directory-name path segment
+	// (empty, a path separator, or a "."/".." traversal segment) — same
+	// {code,field} shape as ErrInvalidQueriesRoot above, naming "project"
+	// per this task's own brief. Reachable only defensively; ProjectID
+	// always comes from a loaded project file or served-project config key
+	// in practice, never raw request input.
+	case errors.Is(err, personalqueries.ErrInvalidProjectID):
+		response.Code = "INVALID_REQUEST"
+		response.Field = "project"
 		w.WriteHeader(http.StatusBadRequest)
 	case validation.IsBadRequestError(err):
 		w.WriteHeader(http.StatusBadRequest)

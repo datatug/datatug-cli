@@ -11,22 +11,56 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/dto"
 )
 
-// writePersonalQuery writes one .query.json file under this task's (S169)
-// on-disk personal-root convention — "<dir>/user:<principalID>/queries/",
-// i.e. personalRootDirName(principalID) as a SIBLING of dir's own shared
-// queries/ tree, with its own queries/ subdirectory — mirroring
-// writeApplicableQueries' own fixture-writing style (semantic_fixture_test.go)
-// but rooted at that sibling project directory, exactly as getPersonalQueries
-// (via loadModuleQueries) reads it.
-func writePersonalQuery(t *testing.T, dir, principalID, id, title string) {
+// setPersonalQueriesBaseDir points personalqueries.ResolveProjectDir's
+// $DATATUG_PERSONAL_DIR override at a fresh, hermetic t.TempDir() for the
+// life of one test (S172). Every test below that reaches getPersonalQueries
+// must call this first — otherwise it would fall through to the real
+// ~/.datatug/projects on the machine running the suite.
+func setPersonalQueriesBaseDir(t *testing.T) string {
 	t.Helper()
-	personalDir := filepath.Join(dir, personalRootDirName(principalID), "queries")
+	base := t.TempDir()
+	t.Setenv(personalqueries.DirEnv, base)
+	return base
+}
+
+// writePersonalQuery writes one .query.json file under this task's (S172)
+// on-disk personal-queries convention — personalqueries.ResolveProjectDir's
+// own resolved "<base>/<projectID>/queries/" — mirroring
+// writeApplicableQueries' own fixture-writing style (semantic_fixture_test.go),
+// exactly as getPersonalQueries (via loadModuleQueries) reads it. Callers
+// must have already pointed $DATATUG_PERSONAL_DIR at a test directory via
+// setPersonalQueriesBaseDir.
+func writePersonalQuery(t *testing.T, projectID, id, title string) {
+	t.Helper()
+	dir, err := personalqueries.ResolveProjectDir(projectID)
+	if err != nil {
+		t.Fatalf("personalqueries.ResolveProjectDir(%q): %v", projectID, err)
+	}
+	personalDir := filepath.Join(dir, "queries")
 	mustMkdirAll(t, personalDir)
 	mustWriteFile(t, filepath.Join(personalDir, id+".query.json"), `{
+		"id": "`+id+`",
+		"title": "`+title+`",
+		"type": "SQL"
+	}`)
+}
+
+// writeLegacyPersonalQuery writes a query file at S169's ORIGINAL on-disk
+// location — "<projectDir>/user:<principalID>/queries/<id>.query.json", a
+// SIBLING of the shared project's own queries/ tree — the layout S172
+// replaced with personalqueries.ResolveProjectDir's home-rooted directory.
+// Used only by TestGetPersonalQueries_OldSiblingDirLayoutIsNoLongerRead, to
+// prove that old location is dead, not merely undocumented.
+func writeLegacyPersonalQuery(t *testing.T, projectDir, principalID, id, title string) {
+	t.Helper()
+	legacyDir := filepath.Join(projectDir, "user:"+principalID, "queries")
+	mustMkdirAll(t, legacyDir)
+	mustWriteFile(t, filepath.Join(legacyDir, id+".query.json"), `{
 		"id": "`+id+`",
 		"title": "`+title+`",
 		"type": "SQL"
@@ -48,14 +82,18 @@ func configureAnonymousSession(t *testing.T, projectDir, projectID string) {
 	api.ConfigureSecureSession(session, map[string]string{projectID: projectDir}, api.Capabilities{})
 }
 
-// TestGetPersonalQueries_PrincipalSeesOwnPersonalQueries covers S169's
-// core case: a principal with queries under their own user:<id> root sees
-// exactly those, folder-qualified the same way getAllQueries' shared tree
-// already is — and the shared tree never gains the personal query either
-// (the two roots are fully isolated, different directories entirely).
+// TestGetPersonalQueries_PrincipalSeesOwnPersonalQueries covers S169/S172's
+// core case: a principal with queries under their own home-rooted personal
+// directory (personalqueries.ResolveProjectDir) sees exactly those,
+// folder-qualified the same way getAllQueries' shared tree already is —
+// and the shared tree never gains the personal query either (the two
+// roots are fully isolated, different directories entirely: this doubles
+// as this task's required root=shared-never-leaks-personal-files
+// coverage).
 func TestGetPersonalQueries_PrincipalSeesOwnPersonalQueries(t *testing.T) {
+	setPersonalQueriesBaseDir(t)
 	projectDir, projectID := writeSemanticTestProject(t)
-	writePersonalQuery(t, projectDir, "alice", "my-scratchpad", "My scratchpad query")
+	writePersonalQuery(t, projectID, "my-scratchpad", "My scratchpad query")
 	configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 
 	folder, err := getPersonalQueries(context.Background(), dto.ProjectRef{StoreID: "files", ProjectID: projectID})
@@ -86,6 +124,27 @@ func TestGetPersonalQueries_PrincipalSeesOwnPersonalQueries(t *testing.T) {
 	}
 }
 
+// TestGetPersonalQueries_OldSiblingDirLayoutIsNoLongerRead is S172's
+// regression test: a file written at S169's original on-disk location (a
+// "user:<id>/queries/" sibling of the project's own shared queries/ tree,
+// INSIDE the project directory) must NOT be returned by getPersonalQueries
+// any more — only personalqueries.ResolveProjectDir's home-rooted
+// directory is read.
+func TestGetPersonalQueries_OldSiblingDirLayoutIsNoLongerRead(t *testing.T) {
+	setPersonalQueriesBaseDir(t)
+	projectDir, projectID := writeSemanticTestProject(t)
+	writeLegacyPersonalQuery(t, projectDir, "alice", "old-location-query", "Should not be found")
+	configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+
+	folder, err := getPersonalQueries(context.Background(), dto.ProjectRef{StoreID: "files", ProjectID: projectID})
+	if err != nil {
+		t.Fatalf("getPersonalQueries: %v", err)
+	}
+	if len(folder.Items) != 0 || len(folder.Folders) != 0 {
+		t.Errorf("personal folder = %+v, want empty (the old sibling-directory location must not be read any more)", folder)
+	}
+}
+
 // TestGetPersonalQueries_AnonymousPrincipalGetsEmptyFolder covers this
 // task's own documented fallback: "an unauthenticated/anonymous principal
 // gets an empty personal root, never an error" — even when SOME principal
@@ -93,8 +152,9 @@ func TestGetPersonalQueries_PrincipalSeesOwnPersonalQueries(t *testing.T) {
 // anonymous caller truly gets nothing back rather than an accident of an
 // otherwise-empty fixture.
 func TestGetPersonalQueries_AnonymousPrincipalGetsEmptyFolder(t *testing.T) {
+	setPersonalQueriesBaseDir(t)
 	projectDir, projectID := writeSemanticTestProject(t)
-	writePersonalQuery(t, projectDir, "alice", "my-scratchpad", "My scratchpad query")
+	writePersonalQuery(t, projectID, "my-scratchpad", "My scratchpad query")
 	configureAnonymousSession(t, projectDir, projectID)
 
 	if got := api.SecurePrincipalID(); got != "" {
@@ -143,8 +203,9 @@ func TestGetQueriesHandler_HTTP_RootShared(t *testing.T) {
 // personal queries, and asserts the shared demo queries are absent from
 // that response.
 func TestGetQueriesHandler_HTTP_RootPersonal(t *testing.T) {
+	setPersonalQueriesBaseDir(t)
 	projectDir, projectID := writeSemanticTestProject(t)
-	writePersonalQuery(t, projectDir, "alice", "my-scratchpad", "My scratchpad query")
+	writePersonalQuery(t, projectID, "my-scratchpad", "My scratchpad query")
 	configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 
 	req := httptest.NewRequest(http.MethodGet, "/datatug/queries/all_queries?project="+projectID+"&root=personal", nil)
@@ -172,8 +233,9 @@ func TestGetQueriesHandler_HTTP_RootPersonal(t *testing.T) {
 // TestGetQueriesHandler_HTTP_RootPersonal's anonymous-principal
 // counterpart, over the real HTTP handler.
 func TestGetQueriesHandler_HTTP_RootPersonal_Anonymous(t *testing.T) {
+	setPersonalQueriesBaseDir(t)
 	projectDir, projectID := writeSemanticTestProject(t)
-	writePersonalQuery(t, projectDir, "alice", "my-scratchpad", "My scratchpad query")
+	writePersonalQuery(t, projectID, "my-scratchpad", "My scratchpad query")
 	configureAnonymousSession(t, projectDir, projectID)
 
 	req := httptest.NewRequest(http.MethodGet, "/datatug/queries/all_queries?project="+projectID+"&root=personal", nil)

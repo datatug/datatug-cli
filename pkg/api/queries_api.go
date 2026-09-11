@@ -116,21 +116,24 @@ func legacyStoreFailure(err error) error {
 }
 
 // DeleteQuery is the legacy queries/delete_query write. ref.ID is the
-// query's folder-qualified id; every segment must be safe and a folder must
-// be one this build's store resolves (requireFolderSupport; 400 otherwise),
-// and the serving principal must be authorized to delete it (403
-// otherwise) before the store is touched.
+// query's folder-qualified id; a leading "~/" names the queries root, as
+// the folderPath "~" does for create_query and update_query, so "~/x" and
+// "x" delete the same root query. Every segment must be safe and a folder
+// must be one this build's store resolves (requireFolderSupport; 400
+// otherwise), and the serving principal must be authorized to delete it
+// (403 otherwise) before the store is touched.
 func DeleteQuery(ctx context.Context, ref dto.ProjectItemRef) error {
 	if err := ref.Validate(); err != nil {
 		return err
 	}
-	if err := validateQueryPath("id", ref.ID); err != nil {
+	queryID := strings.TrimPrefix(ref.ID, datatug.RootSharedFolderName+"/")
+	if err := validateQueryPath("id", queryID); err != nil {
 		return validation.NewBadRequestError(err)
 	}
-	if err := requireFolderSupport(ref.ID); err != nil {
+	if err := requireFolderSupport(queryID); err != nil {
 		return validation.NewBadRequestError(err)
 	}
-	if err := AuthorizeProjectQueryWrite(ctx, ref.ProjectID, ref.ID, access.Delete); err != nil {
+	if err := AuthorizeProjectQueryWrite(ctx, ref.ProjectID, queryID, access.Delete); err != nil {
 		return err
 	}
 	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
@@ -139,7 +142,7 @@ func DeleteQuery(ctx context.Context, ref dto.ProjectItemRef) error {
 	}
 	writeCtx, cancel := context.WithTimeout(ctx, legacyWriteTimeout)
 	defer cancel()
-	if err := store.DeleteQuery(writeCtx, ref.ID); err != nil {
+	if err := store.DeleteQuery(writeCtx, queryID); err != nil {
 		return legacyStoreFailure(err)
 	}
 	return nil

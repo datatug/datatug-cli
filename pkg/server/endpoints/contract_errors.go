@@ -48,6 +48,18 @@ func writeContractResponse(w http.ResponseWriter, r *http.Request, err error, co
 	}
 }
 
+// writeContractResponseStatus writes a success envelope with an explicit
+// status - for a success other than 200 OK, such as queries/capture's
+// 201 Created.
+func writeContractResponseStatus(w http.ResponseWriter, r *http.Request, status int, content any) {
+	writeCORSOrigin(w, r)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if encErr := json.NewEncoder(w).Encode(content); encErr != nil {
+		log.Printf("contract endpoint: failed to encode response: %v", encErr)
+	}
+}
+
 // writeContractError maps err to the appendix's error envelope. A
 // *contractError is written as-is; secureread.ErrAccessDenied becomes
 // ACCESS_DENIED; everything else becomes INTERNAL — actually INVALID_REQUEST

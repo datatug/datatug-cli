@@ -150,6 +150,9 @@ func TestContractError_EveryErrorCodeHasAFixtureOrADocumentedGap(t *testing.T) {
 		apicontract.ErrCodeStaleContext:                  true,
 		apicontract.ErrCodeSourceUnavailable:             true,
 		apicontract.ErrCodeTimeout:                       true,
+		// queries/capture's REVISION_CONFLICT; its fixture arrives with the
+		// datatug-core release that adds the code.
+		codeRevisionConflict: true,
 	}
 	// documentedGaps: fixture-demonstrated codes this package's contract
 	// handlers never construct today, each with why. These are the

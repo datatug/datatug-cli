@@ -22,7 +22,7 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/dal-go/dalgo v0.80.0
 	github.com/dal-go/dalgo2http v0.2.0
-	github.com/dal-go/dalgo2sql v0.13.2-0.20260911180835-12f461ad4443
+	github.com/dal-go/dalgo2sql v0.14.0
 	github.com/dal-go/dalgo2sqlite v0.1.11
 	github.com/dal-go/record v0.1.3
 	github.com/datatug/cliformat v0.0.3
@@ -35,12 +35,12 @@ require (
 	github.com/google/go-github/v91 v91.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
-	github.com/ingitdb/dalgo2ingitdb v0.4.1-0.20260911171803-394d3ce00f4b
+	github.com/ingitdb/dalgo2ingitdb v0.5.0
 	github.com/ingitdb/ingitdb-go/ingitdb v0.6.0
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/go-sqlite3 v1.14.50
 	github.com/mitchellh/go-homedir v1.1.0
-	github.com/openvaultdb/openvaultdb-go v0.4.1-0.20260911172336-49776c28085f
+	github.com/openvaultdb/openvaultdb-go v0.5.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.24.3
 	github.com/rivo/tview v0.42.0

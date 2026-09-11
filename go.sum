@@ -105,8 +105,8 @@ github.com/dal-go/dalgo2mysql v0.2.0 h1:JKjZWNbHqJebTNh+OKrNwa+nhzAV/jptsrC1d3xk
 github.com/dal-go/dalgo2mysql v0.2.0/go.mod h1:3CMbIvu4cocKLpAbY4SDfsahC1rxFSFWjbnATxbKg0s=
 github.com/dal-go/dalgo2postgres v0.2.0 h1:nfYZKOd0pDbW4AnhetqohOFWZyT3EGoEqfjBTcEs4NY=
 github.com/dal-go/dalgo2postgres v0.2.0/go.mod h1:cu0NzUzUErojrJJlMBwUSUfeuXYa7Y16wiBWVbcz40A=
-github.com/dal-go/dalgo2sql v0.13.2-0.20260911180835-12f461ad4443 h1:U/kjPCXiVlKpI8QLwkKE8KJI1eO1aKr7kBJNfpf0n7o=
-github.com/dal-go/dalgo2sql v0.13.2-0.20260911180835-12f461ad4443/go.mod h1:fDCBRNyJcvuLytULdB2z4fWEcEK1acKRoocSN8jPASg=
+github.com/dal-go/dalgo2sql v0.14.0 h1:MTeBA3tEq74Nt6NIJs6CvJBkZYFxWPHbf3OtrVhIHCk=
+github.com/dal-go/dalgo2sql v0.14.0/go.mod h1:fDCBRNyJcvuLytULdB2z4fWEcEK1acKRoocSN8jPASg=
 github.com/dal-go/dalgo2sqlite v0.1.11 h1:RZLAb3bYIVxY9AhoGf0xMB4ewK0kjsB0C2ENFbE6fpU=
 github.com/dal-go/dalgo2sqlite v0.1.11/go.mod h1:tdHMQt1xbJWgcuTJkaaegdkPTh/jQXtLF6zLppYb0O0=
 github.com/dal-go/record v0.1.3 h1:K85k/kSX08lTefMiMmPpC12nmCY2TVJk7+ZyC5PD9XU=
@@ -210,8 +210,8 @@ github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUq
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/ingitdb/dalgo2ingitdb v0.4.1-0.20260911171803-394d3ce00f4b h1:kdWZsH6QHTAnyONu0qMB4eTCfPJe/dVPaieqkeHOMck=
-github.com/ingitdb/dalgo2ingitdb v0.4.1-0.20260911171803-394d3ce00f4b/go.mod h1:FI/QbOLIGOzKyqryo1Pf5A7rhTJ0lcTnK7h6Hl1YhZ8=
+github.com/ingitdb/dalgo2ingitdb v0.5.0 h1:4fh+9bC6pLdcH7TEseLSDQUlk0hBfJK5oEfXsAAvmos=
+github.com/ingitdb/dalgo2ingitdb v0.5.0/go.mod h1:FI/QbOLIGOzKyqryo1Pf5A7rhTJ0lcTnK7h6Hl1YhZ8=
 github.com/ingitdb/dalgo2ingitdb4github v0.2.3 h1:9cOBFdWWtUREBkbnL5hvO7fT0gYzl08hLHy3jesiIJI=
 github.com/ingitdb/dalgo2ingitdb4github v0.2.3/go.mod h1:4AJrmWiyCBI+9pwLQq1PE8EFlgNfHboXXL4C/UJ5Tlg=
 github.com/ingitdb/ingitdb-go/ingitdb v0.6.0 h1:TzPGAMH2KM6ThgoZBV6dqnT02MVN5fd5et9aB5iI4SY=
@@ -286,8 +286,8 @@ github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOF
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/onsi/gomega v1.34.1 h1:EUMJIKUjM8sKjYbtxQI9A4z2o+rruxnzNvpknOXie6k=
 github.com/onsi/gomega v1.34.1/go.mod h1:kU1QgUvBDLXBJq618Xvm2LUX6rSAfRaFRTcdOeDLwwY=
-github.com/openvaultdb/openvaultdb-go v0.4.1-0.20260911172336-49776c28085f h1:9ef3QtRCTXup2cmiMDdmydGaV6Dx3WT/3UA6KcY0as8=
-github.com/openvaultdb/openvaultdb-go v0.4.1-0.20260911172336-49776c28085f/go.mod h1:eTf8PCNFV+AAEDPH6fBYWvk3QUvXEhW+gU31lpned0A=
+github.com/openvaultdb/openvaultdb-go v0.5.0 h1:2Rqaqqm/14JCKRW1z4AjZBpPzE2WMj4LxzoIKN+mWy8=
+github.com/openvaultdb/openvaultdb-go v0.5.0/go.mod h1:+a4CGVFWCbS+IUxjZPIzM6RaW1Hs25lTcGnAR1Erppw=
 github.com/pelletier/go-toml/v2 v2.4.3 h1:GTRvJQutkOSftxIFD5xw9aepkYNuPWmVJpffdDPYVpY=
 github.com/pelletier/go-toml/v2 v2.4.3/go.mod h1:2gIqNv+qfxSVS7cM2xJQKtLSTLUE9V8t9Stt+h56mCY=
 github.com/pjbgf/sha1cd v0.6.0 h1:3WJ8Wz8gvDz29quX1OcEmkAlUg9diU4GxJHqs0/XiwU=

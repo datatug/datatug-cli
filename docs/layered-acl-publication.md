@@ -66,3 +66,22 @@ landing; task 24 stays in progress until the whole wave and final E2E land.
 - Dependency integration preserves native numeric lookup values. The reviewed SQLite compiler intentionally avoids affinity coercion and uses binary comparison; the consumer's SQL placeholder mock is updated accordingly while retaining its bound-argument assertion.
 
 The original task-21 branch is retained as `recovery/acl-task21-original` before replacing its publication branch. The replacement worktree is `.worktrees/acl24-datatug-publication`; canonical clones stay clean.
+
+## Independent review and provider convergence
+
+The independent reviewer approved the corrected source changes. Report:
+https://github.com/dal-go/dalgo2sql/pull/181#issuecomment-5638776986
+
+The confirmed provider/consumer envelope mismatch is corrected: real owner
+errors carry `error.authorization`, while successful UPDATE responses keep
+`authorization` at top level. The real SQLite/InGitDB test now requires typed
+owner blockers/layers; the endpoint fixture uses the real nested shape.
+
+SQL `v0.14.0` and InGitDB adapter `v0.5.0` contain the exact reviewed code after
+WB landing. Their full trees match the inspected source commits, and the module
+graph comparison changes only the respective version labels. No local replaces
+are introduced. The HTTP adapter remains at its published main pseudo-version
+because that commit has no observed release tag. DataTug landing stays with the
+lead; current browser write/Explain convergence remains unfinished.
+
+OpenVaultDB #18 landed at `caeac4d9f21bb0512c0fcacb749df5b181d3a79b` and released `v0.5.0`; its post-target CI passed. This CLI now consumes that release. Comparing the prior pinned owner revision with the release shows no Go source changes; the final resolved module graph changes only the SQL, InGitDB and OpenVaultDB version labels.

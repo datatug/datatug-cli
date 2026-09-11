@@ -154,9 +154,9 @@ Status and outcome values are not CLI-invented; they are exactly the hub Feature
 
 ### AC: list-by-asset-back-link (verifies REQ:list-filters-by-back-link)
 
-**Given** the check `stuck-invoices` was run under `INC-1` and never under `INC-3`
-**When** `datatug incident list --check stuck-invoices --json` runs
-**Then** the output contains `INC-1` and does not contain `INC-3`.
+**Given** the check `stuck-invoices` and the query `customers/customer-invoices` were each run under `INC-1` and never under `INC-3`, and a board `<boardId>` is referenced by an `INC-1` event and by no `INC-3` event
+**When** `datatug incident list --check stuck-invoices --json`, `datatug incident list --query customers/customer-invoices --json` and `datatug incident list --board <boardId> --json` each run
+**Then** each output contains `INC-1` and does not contain `INC-3`.
 
 ### AC: watch-resumes-from-cursor (verifies REQ:event-cursor-watch)
 
@@ -175,6 +175,12 @@ Status and outcome values are not CLI-invented; they are exactly the hub Feature
 **Given** an incident whose Investigation Context carries a typed fact (e.g. `Order.id` equal to a numeric value)
 **When** `datatug incident show INC-1 --json` runs with stdout piped to a file (non-TTY)
 **Then** the fact appears in the JSON as `{type: "integer", value: "..."}` matching the transport appendix's `TypedValue` shape exactly, with no CLI-only field renaming, and running the same command with a TTY attached instead defaults to aligned `grid` output without `--format` being given.
+
+### AC: similar-output-matches-ranked-signals (verifies REQ:json-and-grid-output)
+
+**Given** the fixture incidents from the hub's `AC:search-finds-similar-by-entities` (INC-1 resolved, INC-2 open, overlapping signals)
+**When** `datatug incident similar INC-2 --json` runs
+**Then** the ranked incident list and matched-signal fields equal the `GET /datatug/incidents/{id}/similar` envelope byte for byte, with the top-ranked entry the same incident the API ranks first — the CLI pins only the verb and this output shape; the ranking algorithm itself is the hub Feature's `REQ:search-and-similarity`, not retested here.
 
 ### AC: denied-incident-exit-1-no-disclosure (verifies REQ:exit-codes)
 

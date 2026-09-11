@@ -84,6 +84,12 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 		response.Code = "INVALID_REQUEST"
 		response.Field = "query"
 		w.WriteHeader(http.StatusBadRequest)
+	// getQueriesHandler's ?root= (S169, GET all_queries?root=personal): an
+	// unrecognized value — never "shared"/"personal" nor silently defaulted.
+	case errors.Is(err, ErrInvalidQueriesRoot):
+		response.Code = "INVALID_REQUEST"
+		response.Field = urlParamRoot
+		w.WriteHeader(http.StatusBadRequest)
 	case validation.IsBadRequestError(err):
 		w.WriteHeader(http.StatusBadRequest)
 	default:

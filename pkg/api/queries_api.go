@@ -86,7 +86,20 @@ func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *data
 	if err != nil {
 		return nil, err
 	}
-	return query, store.SaveQuery(ctx, query)
+	if err := store.SaveQuery(ctx, query); err != nil {
+		return nil, legacyStoreFailure(err)
+	}
+	return query, nil
+}
+
+// legacyStoreFailure maps a failed legacy store write: a refused location
+// becomes a 400 carrying a fixed message that names the offending segment
+// only (storeLocationRefusal); anything else passes through.
+func legacyStoreFailure(err error) error {
+	if message, ok := storeLocationRefusal(err); ok {
+		return validation.NewBadRequestError(errors.New(message))
+	}
+	return err
 }
 
 // DeleteQuery is the legacy queries/delete_query write. ref.ID is the
@@ -111,7 +124,10 @@ func DeleteQuery(ctx context.Context, ref dto.ProjectItemRef) error {
 	if err != nil {
 		return err
 	}
-	return store.DeleteQuery(ctx, ref.ID)
+	if err := store.DeleteQuery(ctx, ref.ID); err != nil {
+		return legacyStoreFailure(err)
+	}
+	return nil
 }
 
 // errUnsafeQueryLocation marks a folder path or query id that does not name

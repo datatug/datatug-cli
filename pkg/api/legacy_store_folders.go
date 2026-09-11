@@ -2,7 +2,12 @@
 
 package api
 
-import "github.com/datatug/datatug-core/pkg/datatug"
+import (
+	"errors"
+
+	"github.com/datatug/datatug-cli/pkg/querywrite"
+	"github.com/datatug/datatug-core/pkg/datatug"
+)
 
 // This build compiles only against a datatug-core whose filestore resolves
 // a query's folder (the Phase 2 task 2 storage: SaveQuery honours
@@ -16,3 +21,16 @@ var _ datatug.RevisionedQueriesStore
 // query routes write through puts a query in the folder its request names.
 // See legacy_store_default.go.
 const legacyStoreResolvesFolders = true
+
+// storeLocationRefusal reports the store's refusal of a query location
+// (datatug.InvalidQueryLocationError: a symlinked, non-directory or
+// unreadable folder found on disk) as the fixed message a 400 may carry,
+// naming the offending segment only - never the store's reason text,
+// which can hold an absolute server path and OS error text.
+func storeLocationRefusal(err error) (message string, ok bool) {
+	var location *datatug.InvalidQueryLocationError
+	if !errors.As(err, &location) {
+		return "", false
+	}
+	return querywrite.LocationMessage(location.FolderPath, location.ID, location.Reason), true
+}

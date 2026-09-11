@@ -15,3 +15,9 @@ package api
 // location whose file the authorized resource names exactly, and refuse a
 // folder with 400 rather than write somewhere the caller did not ask for.
 const legacyStoreResolvesFolders = false
+
+// storeLocationRefusal never finds one in this build: the pinned store has
+// no typed location error, so its failures stay failures (500).
+func storeLocationRefusal(error) (message string, ok bool) {
+	return "", false
+}

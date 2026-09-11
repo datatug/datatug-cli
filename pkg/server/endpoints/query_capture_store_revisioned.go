@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/datatug/datatug-cli/pkg/querywrite"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/strongo/validation"
 )
@@ -131,7 +132,9 @@ func translateRevisionedStoreError(err error) error {
 		if location.FolderPath == "" && location.ID != "" {
 			field = "query.id"
 		}
-		return &captureStoreError{Kind: captureErrLocation, Field: field, Reason: location.Reason}
+		// The store's reason can carry an absolute server path and OS error
+		// text; a client gets a fixed message naming the segment only.
+		return &captureStoreError{Kind: captureErrLocation, Field: field, Reason: querywrite.LocationMessage(location.FolderPath, location.ID, location.Reason)}
 	case errors.As(err, &incomplete):
 		return &captureStoreError{Kind: captureErrIncomplete, Field: "query.id", Reason: incomplete.Reason}
 	case errors.As(err, &conflict):

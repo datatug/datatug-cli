@@ -246,6 +246,10 @@ func captureQueryID(folderPath, id string) string {
 	return folderPath + "/" + id
 }
 
+// revisionConflictMessage is a failed ifMatch's message, word for word
+// datatug-core's frozen fixture error_revision_conflict.json.
+const revisionConflictMessage = "the query changed since that revision was read; reload it and retry"
+
 // captureStoreFailure maps a failed store write onto the error envelope.
 func captureStoreFailure(err error, condition captureWriteCondition) error {
 	var refused *captureStoreError
@@ -256,7 +260,7 @@ func captureStoreFailure(err error, condition captureWriteCondition) error {
 			if condition.IfNoneMatch {
 				return newRevisionConflict("query.id", "a query already exists at this location; choose another id, or load it and update it with ifMatch")
 			}
-			return newRevisionConflict("ifMatch", "the query changed since that revision was read, or no longer exists; reload it and retry")
+			return newRevisionConflict("ifMatch", revisionConflictMessage)
 		case captureErrIncomplete:
 			return newInvalidRequest("query.id", "the stored query at this location is an incomplete pair; replace it with ifMatch set to its current revision")
 		case captureErrLocation:

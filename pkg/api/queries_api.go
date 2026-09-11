@@ -91,6 +91,12 @@ func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *data
 	if err := store.SaveQuery(writeCtx, query); err != nil {
 		return nil, legacyStoreFailure(err)
 	}
+	// Answer with the root's API id again, as GetQuery does: apicore
+	// validates the response, and QueryDefWithFolderPath.Validate refuses
+	// an empty folderPath, which answered a saved root query with a 500.
+	if query.FolderPath == "" {
+		query.FolderPath = datatug.RootSharedFolderName
+	}
 	return query, nil
 }
 

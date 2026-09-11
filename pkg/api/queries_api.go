@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/dal-go/dalgo/access"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/strongo/validation"
@@ -21,33 +23,73 @@ import (
 //	return project.Queries().LoadQueries(ctx, folder)
 //}
 
-// CreateQuery creates a new query
+// CreateQuery is the legacy queries/create_query write. See saveLegacyQuery.
 func CreateQuery(ctx context.Context, request dto.CreateQuery) (*datatug.QueryDefWithFolderPath, error) {
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
-	store, err := projectStoreForID(request.StoreID, request.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	return &request.Query, store.SaveQuery(ctx, &request.Query)
+	return saveLegacyQuery(ctx, request.StoreID, request.ProjectID, &request.Query)
 }
 
-// UpdateQuery updates existing query
+// UpdateQuery is the legacy queries/update_query write. See saveLegacyQuery.
 func UpdateQuery(ctx context.Context, request dto.UpdateQuery) (*datatug.QueryDefWithFolderPath, error) {
 	if err := request.Validate(); err != nil {
 		return nil, validation.NewBadRequestError(err)
 	}
-	store, err := projectStoreForID(request.StoreID, request.ProjectID)
+	return saveLegacyQuery(ctx, request.StoreID, request.ProjectID, &request.Query)
+}
+
+// saveLegacyQuery is the write both legacy routes share. They used to be
+// gated only by the process-wide --allow-writes flag, so any serving
+// principal - a read-only one included - could write any query, an id such
+// as "../x" addressed a file outside the project's queries/ tree, and an
+// unvalidated query (a target carrying a password) reached git-tracked
+// files. Now, before the store is touched: the folder path and id must be
+// safe path segments (400 otherwise), the serving principal must be
+// authorized for a project write through AuthorizeProjectQueryWrite (the
+// gate queries/capture uses; 403 otherwise), and the query must pass
+// QueryDef.Validate (400 otherwise). The write itself keeps its legacy
+// create-or-replace semantics (DALgo Set): a revision-checked write is
+// queries/capture's job.
+func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *datatug.QueryDefWithFolderPath) (*datatug.QueryDefWithFolderPath, error) {
+	queryID, err := legacyQueryID(query.FolderPath, query.ID)
+	if err != nil {
+		return nil, validation.NewBadRequestError(err)
+	}
+	// "~" (datatug.RootSharedFolderName) is this API's own id for the
+	// queries root - GetQuery returns it as a root query's folderPath, so a
+	// client that round-trips get_query into update_query sends it back.
+	// The store's root is "": a store that honours FolderPath (the
+	// revisioned filestore) would otherwise write a duplicate query into a
+	// literal "queries/~/" directory.
+	if query.FolderPath == datatug.RootSharedFolderName {
+		query.FolderPath = ""
+	}
+	if err := AuthorizeProjectQueryWrite(ctx, projectID, queryID, access.Set); err != nil {
+		return nil, err
+	}
+	if err := query.QueryDef.Validate(); err != nil {
+		return nil, validation.NewBadRequestError(err)
+	}
+	store, err := projectStoreForID(storeID, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return &request.Query, store.SaveQuery(ctx, &request.Query)
+	return query, store.SaveQuery(ctx, query)
 }
 
-// DeleteQuery deletes query
+// DeleteQuery is the legacy queries/delete_query write. ref.ID is the
+// query's folder-qualified id; every segment must be safe (400 otherwise)
+// and the serving principal must be authorized to delete it (403
+// otherwise) before the store is touched.
 func DeleteQuery(ctx context.Context, ref dto.ProjectItemRef) error {
 	if err := ref.Validate(); err != nil {
+		return err
+	}
+	if err := validateQueryPath("id", ref.ID); err != nil {
+		return validation.NewBadRequestError(err)
+	}
+	if err := AuthorizeProjectQueryWrite(ctx, ref.ProjectID, ref.ID, access.Delete); err != nil {
 		return err
 	}
 	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
@@ -55,6 +97,55 @@ func DeleteQuery(ctx context.Context, ref dto.ProjectItemRef) error {
 		return err
 	}
 	return store.DeleteQuery(ctx, ref.ID)
+}
+
+// errUnsafeQueryLocation marks a folder path or query id that does not name
+// a location inside the project's queries/ tree.
+var errUnsafeQueryLocation = errors.New("unsafe query location")
+
+// legacyQueryID validates a legacy query's folder path and bare id and
+// returns its folder-qualified id. A folder path of "" or
+// datatug.RootSharedFolderName ("~", the root id GetQuery responses carry)
+// is the queries root.
+func legacyQueryID(folderPath, id string) (string, error) {
+	if err := validateQueryPathSegment("id", id); err != nil {
+		return "", err
+	}
+	if folderPath == "" || folderPath == datatug.RootSharedFolderName {
+		return id, nil
+	}
+	if err := validateQueryPath("folderPath", folderPath); err != nil {
+		return "", err
+	}
+	return folderPath + "/" + id, nil
+}
+
+// validateQueryPath checks every "/"-separated segment of p.
+func validateQueryPath(field, p string) error {
+	for _, segment := range strings.Split(p, "/") {
+		if err := validateQueryPathSegment(field, segment); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateQueryPathSegment rejects a segment that could leave its parent
+// directory or be read differently by another OS: empty (so no absolute
+// path and no "a//b"), "." or "..", or holding a separator or NUL.
+func validateQueryPathSegment(field, segment string) error {
+	var reason string
+	switch {
+	case segment == "":
+		reason = "must not be empty or have an empty segment"
+	case segment == "." || segment == "..":
+		reason = `must not be "." or ".."`
+	case strings.ContainsAny(segment, "/\\\x00"):
+		reason = "must not contain a path separator or NUL"
+	default:
+		return nil
+	}
+	return fmt.Errorf("%w: %s segment %q %s", errUnsafeQueryLocation, field, segment, reason)
 }
 
 // GetQuery returns query definition. ref.ID may be bare or folder-qualified

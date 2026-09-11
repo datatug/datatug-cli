@@ -72,7 +72,19 @@ func (e *WriteDeniedError) Unwrap() error { return access.ErrAccessDenied }
 
 // AuthorizeWrite decides whether o's principal may perform operation (one
 // of Insert, Set, Update or Delete) on resource, returning nil when it may
-// and a *WriteDeniedError when it may not. Deny by default:
+// and a *WriteDeniedError when it may not.
+//
+// It is for project files only - saved queries, named by
+// ProjectQueryResource - and must never decide a data write. It refuses any
+// grant that holds only under a row condition, check or field list, and it
+// evaluates each policy's project-write view, whose query ids are
+// canonicalized; a data write must go through DALgo's residual-enforcing
+// write session, which checks those conditions against the rows written.
+// Nor may grants from any other source, such as incident-scoped read
+// grants, be appended to o.Policies: every policy listed must allow a
+// write, and none of them is written to widen one.
+//
+// Deny by default:
 //
 //   - An Unrestricted session is the explicit --no-policies local-owner
 //     profile and is allowed.

@@ -104,7 +104,9 @@ var legacyWriteTimeout = querywrite.Timeout
 // legacyWriteTimeout runs out becomes a fixed message wrapping
 // context.DeadlineExceeded, which the endpoints answer with 504 - the store
 // gives up before its commit point, so nothing was written; anything else
-// passes through.
+// passes through, and its text - which can hold an absolute server path
+// and OS error text - never reaches a client: the endpoints answer it with
+// a generic 500 and log it (legacyQueryWriteResponse).
 func legacyStoreFailure(err error) error {
 	if message, ok := storeLocationRefusal(err); ok {
 		return validation.NewBadRequestError(errors.New(message))

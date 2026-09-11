@@ -3,6 +3,7 @@ package endpoints
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -160,4 +161,45 @@ func TestLegacyQueryWriteResponse_RewritesOnly500(t *testing.T) {
 			t.Errorf("observed %T: got %d %q, want the 400 and its body kept", observed, rec.Code, rec.Body.String())
 		}
 	}
+}
+
+// A store failure's text can hold an absolute server path and OS error
+// text, and apicore wrote it verbatim as the 500 body. Every legacy query
+// write 500 now carries a fixed message; the detail goes to the agent log.
+func TestLegacyQueryWrites_500BodiesAreGeneric(t *testing.T) {
+	const storeErr = "remove /Users/operator/projects/secret-project/queries/q1.query.json: operation not permitted"
+	t.Run("a store error through apicore", func(t *testing.T) {
+		withApicoreErrorHandle(t)
+		handler := legacyQueryDelete(func(context.Context, dto.ProjectItemRef) error { return errors.New(storeErr) })
+		w := httptest.NewRecorder()
+		handler(w, httptest.NewRequest(http.MethodDelete, "/datatug/queries/delete_query?id=q1", nil))
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("status %d, want 500; body %s", w.Code, w.Body.String())
+		}
+		got := decodeLegacyErrorBody(t, w)
+		if got.Code != "INTERNAL" || got.Message != "the query could not be deleted; the agent log has the details under this request ID" {
+			t.Errorf("error %+v, want INTERNAL with the fixed message", got)
+		}
+		assertBodyOmits(t, w, "/Users", "secret-project", "q1.query.json", "operation not permitted")
+	})
+	t.Run("a 500 the route never observed", func(t *testing.T) {
+		// apicore answers 500 on its own when a successful response fails
+		// its validation; the route saw no error, and the body is still
+		// apicore's text.
+		rec := httptest.NewRecorder()
+		w := newLegacyQueryWriteResponse(rec, "queries/update_query", "save", "saved")
+		_ = w.observe(nil)
+		w.WriteHeader(http.StatusInternalServerError)
+		if _, err := w.Write([]byte(`{"error":{"message":"response is not valid: ` + storeErr + `"}}`)); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status %d, want 500", rec.Code)
+		}
+		got := decodeLegacyErrorBody(t, rec)
+		if got.Code != "INTERNAL" || got.Message != "the query could not be saved; the agent log has the details under this request ID" {
+			t.Errorf("error %+v, want INTERNAL with the fixed message", got)
+		}
+		assertBodyOmits(t, rec, "/Users", "response is not valid")
+	})
 }

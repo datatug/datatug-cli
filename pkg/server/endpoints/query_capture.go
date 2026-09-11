@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"github.com/dal-go/dalgo/access"
+	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/querywrite"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -193,7 +194,7 @@ func computeCaptureQuery(ctx context.Context, req captureQueryRequest) (captureQ
 	}
 	if err := api.AuthorizeProjectQueryWrite(ctx, req.Project, queryID, operation); err != nil {
 		if errors.Is(err, secureread.ErrAccessDenied) {
-			return captureQueryResponse{}, 0, newAccessDenied("the serving principal may not save project queries: " + err.Error())
+			return captureQueryResponse{}, 0, captureAccessDenied(err)
 		}
 		return captureQueryResponse{}, 0, captureInternal(err)
 	}
@@ -251,6 +252,16 @@ func captureQueryID(folderPath, id string) string {
 const revisionConflictMessage = "the query changed since that revision was read; reload it and retry"
 
 // captureStoreFailure maps a failed store write onto the error envelope.
+//
+// The store's own typed refusals become a 400 or a 409; a wait that ran out
+// becomes a 504 with nothing written. Everything else is a 500 with a fixed
+// message (captureInternal), including a stored query file that does not
+// parse: the store reports that as an ordinary error, and nothing tells it
+// apart from an I/O failure, so the client is told only that the query
+// could not be saved and the agent log carries which file and why. A typed
+// 4xx for it ("the stored query is corrupt; replace it with ifMatch") needs
+// a typed error from datatug-core's filestore, which is a change in that
+// repo.
 func captureStoreFailure(err error, condition captureWriteCondition) error {
 	var refused *captureStoreError
 	switch {
@@ -280,6 +291,34 @@ func fieldOr(field, fallback string) string {
 		return fallback
 	}
 	return field
+}
+
+// captureAccessDeniedMessage is the fixed 403 message of a refused
+// capture, with the agent's own reason appended when there is one a client
+// may have (see captureAccessDenied).
+const captureAccessDeniedMessage = "the serving principal may not save project queries"
+
+// captureAccessDenied answers a refused capture with a 403 whose message
+// names nothing the request did not: not the policy that refused it, not
+// the rule or the role, and not the resource path it protects - a client
+// that may not write a query may not learn which policy says so, nor that
+// the query it named exists. The denial's own text, which carries all of
+// that, goes to the agent log under the request ID the client is given.
+//
+// The exception is a denial no policy decided (WriteDeniedError.Policy is
+// empty): this agent has no serve session, was started without
+// --allow-writes, or has no policy loaded at all. Those reasons are the
+// agent's own mode, which agent-info publishes anyway, and they name
+// nothing else - no query, policy, rule or role - so the client is told
+// which one it is, and can stop asking.
+func captureAccessDenied(err error) *contractError {
+	var denied *accesspolicies.WriteDeniedError
+	if errors.As(err, &denied) && denied.Policy == "" {
+		return newAccessDenied(captureAccessDeniedMessage + ": " + denied.Reason)
+	}
+	ce := newAccessDenied(captureAccessDeniedMessage)
+	log.Printf("queries/capture: request %s: answered 403 ACCESS_DENIED: %v", ce.RequestID, err)
+	return ce
 }
 
 // captureInternal answers an unexpected failure with a 500 whose message

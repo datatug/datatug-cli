@@ -417,26 +417,37 @@ func TestCaptureQuery_OnlyPOST(t *testing.T) {
 }
 
 func TestCaptureQuery_DeniedPrincipalsWriteNothing(t *testing.T) {
+	// A denial a policy decided carries the fixed message and nothing else:
+	// which policy, rule and role decided it, and the resource path it
+	// protects, go to the agent log (captureAccessDenied). A denial the
+	// agent's own mode decided - no --allow-writes - still says so: that
+	// names nothing but the agent's configuration, which agent-info
+	// publishes anyway.
 	tests := []struct {
 		name        string
 		as          string
 		roles       []string
 		allowWrites bool
-		mention     string
+		message     string
 	}{
-		{name: "a read-only principal", as: "sam", roles: []string{"support"}, allowWrites: true, mention: `policy "semantic-test"`},
-		{name: "a principal no grant binds", as: "mallory", allowWrites: true, mention: `policy "semantic-test"`},
-		{name: "admin on an agent started without --allow-writes", as: "admin", roles: []string{"admin"}, mention: "--allow-writes"},
+		{name: "a read-only principal", as: "sam", roles: []string{"support"}, allowWrites: true,
+			message: captureAccessDeniedMessage},
+		{name: "a principal no grant binds", as: "mallory", allowWrites: true,
+			message: captureAccessDeniedMessage},
+		{name: "admin on an agent started without --allow-writes", as: "admin", roles: []string{"admin"},
+			message: captureAccessDeniedMessage + ": this agent was started without --allow-writes; project writes are refused"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			scope, fake := captureTestSetup(t, tt.as, tt.roles, tt.allowWrites)
 			env := assertCaptureError(t, postCapture(t, validCaptureRequest(scope)), fake, http.StatusForbidden, apicontract.ErrCodeAccessDenied, "")
-			if !strings.Contains(env.Error.Message, tt.mention) {
-				t.Errorf("message %q does not mention %q", env.Error.Message, tt.mention)
+			if env.Error.Message != tt.message {
+				t.Errorf("message %q, want %q", env.Error.Message, tt.message)
 			}
-			if strings.Contains(env.Error.Message, "/policies") {
-				t.Errorf("message %q reveals the policies directory", env.Error.Message)
+			for _, leak := range []string{"/policies", "semantic-test", "datatug_projects", tt.as} {
+				if strings.Contains(env.Error.Message, leak) {
+					t.Errorf("message %q reveals %q", env.Error.Message, leak)
+				}
 			}
 		})
 	}

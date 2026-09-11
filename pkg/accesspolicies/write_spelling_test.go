@@ -170,8 +170,11 @@ func TestAuthorizeWrite_RefusesAPolicyWithoutItsDocument(t *testing.T) {
 	}
 }
 
-// A scope tree that cannot be rewritten in place fails closed.
-func TestAuthorizeWrite_RefusesWhatItCannotCanonicalize(t *testing.T) {
+// A scope tree written with anchors and aliases is canonicalized like any
+// other: the rewrite works on the document DALgo decoded, where an alias is
+// already the value it names. A document that cannot be decoded at all
+// fails closed.
+func TestAuthorizeWrite_CanonicalizesAliasedScopes(t *testing.T) {
 	const aliased = `apiVersion: dalgo.io/access/v1
 kind: AccessPolicy
 metadata:
@@ -195,13 +198,20 @@ scopes:
         operations: [readwrite]
 `
 	policies := []Loaded{decodeLoaded(t, "aliased.yaml", aliased)}
-	err := AuthorizeWrite(context.Background(), WriteOptions{Policies: policies}, access.Insert, ProjectQueryResource("p", "other"))
-	var denied *WriteDeniedError
-	if !errors.As(err, &denied) || !strings.Contains(denied.Reason, "alias") {
-		t.Fatalf("expected a refusal naming the alias, got %v", err)
+	for _, id := range []string{"Revenue", "revenue", "REVENUE"} {
+		for _, operation := range []access.Operations{access.Insert, access.Delete} {
+			err := AuthorizeWrite(context.Background(), WriteOptions{Policies: policies}, operation, ProjectQueryResource("p", id))
+			var denied *WriteDeniedError
+			if !errors.As(err, &denied) || !strings.Contains(denied.Reason, "protect") {
+				t.Errorf("%s %q under the aliased deny: expected the deny rule to refuse it, got %v", operation, id, err)
+			}
+		}
+	}
+	if err := AuthorizeWrite(context.Background(), WriteOptions{Policies: policies}, access.Insert, ProjectQueryResource("p", "other")); err != nil {
+		t.Errorf("an unrelated query must stay writable, got %v", err)
 	}
 	for _, data := range []string{"{", "- [unbalanced"} {
-		if w := prepareProjectWrites([]byte(data)); w.refusal == "" {
+		if w := prepareProjectWrites([]byte(data), access.YAMLCodec{}); w.refusal == "" {
 			t.Errorf("prepareProjectWrites(%q) must refuse", data)
 		}
 	}

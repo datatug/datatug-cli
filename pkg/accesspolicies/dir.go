@@ -149,7 +149,7 @@ func DecodeLoaded(data []byte, codec access.Codec, source string) (Loaded, error
 	if err != nil {
 		return Loaded{}, err
 	}
-	writes := prepareProjectWrites(data)
+	writes := prepareProjectWrites(data, codec)
 	return Loaded{Policy: policy, Source: source, writes: &writes}, nil
 }
 

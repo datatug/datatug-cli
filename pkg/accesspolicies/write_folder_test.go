@@ -121,7 +121,10 @@ func TestDisplayPathAndRuleNames(t *testing.T) {
 	if got := displayPath(nil, true); got != "/**" {
 		t.Errorf("displayPath(root) = %q", got)
 	}
-	if got := scopeRuleName(nil, nil, "admin"); got != "a scope" {
-		t.Errorf("scopeRuleName with no rule = %q", got)
+	if got := qualifiedRuleName("admin", " protect "); got != "admin/protect" {
+		t.Errorf("qualifiedRuleName in a rule set = %q", got)
+	}
+	if got := qualifiedRuleName("", "protect"); got != "protect" {
+		t.Errorf("qualifiedRuleName at the top level = %q", got)
 	}
 }

@@ -29,7 +29,7 @@ func CreateQuery(ctx context.Context, request dto.CreateQuery) (*datatug.QueryDe
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
-	return saveLegacyQuery(ctx, request.StoreID, request.ProjectID, &request.Query)
+	return saveLegacyQuery(ctx, request.StoreID, request.ProjectID, &request.Query, legacyCreate)
 }
 
 // UpdateQuery is the legacy queries/update_query write. See saveLegacyQuery.
@@ -37,8 +37,24 @@ func UpdateQuery(ctx context.Context, request dto.UpdateQuery) (*datatug.QueryDe
 	if err := request.Validate(); err != nil {
 		return nil, validation.NewBadRequestError(err)
 	}
-	return saveLegacyQuery(ctx, request.StoreID, request.ProjectID, &request.Query)
+	return saveLegacyQuery(ctx, request.StoreID, request.ProjectID, &request.Query, legacyUpdate)
 }
+
+// legacyWriteMode is the legacy route a query write came through.
+type legacyWriteMode int
+
+const (
+	// legacyCreate is queries/create_query.
+	legacyCreate legacyWriteMode = iota + 1
+	// legacyUpdate is queries/update_query.
+	legacyUpdate
+)
+
+// ErrLegacyQueryWriteConflict is a legacy query write that lost every
+// attempt to another write committing to the same query between its read
+// of the stored query and its own conditional write, so nothing was
+// written. The endpoints answer it with 409.
+var ErrLegacyQueryWriteConflict = errors.New("the query kept changing while it was being saved, so nothing was saved")
 
 // saveLegacyQuery is the write both legacy routes share. They used to be
 // gated only by the process-wide --allow-writes flag, so any serving
@@ -56,7 +72,17 @@ func UpdateQuery(ctx context.Context, request dto.UpdateQuery) (*datatug.QueryDe
 // write itself keeps its legacy
 // create-or-replace semantics (DALgo Set): a revision-checked write is
 // queries/capture's job.
-func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *datatug.QueryDefWithFolderPath) (*datatug.QueryDefWithFolderPath, error) {
+//
+// A query's capture provenance (QueryDef.Capture, in a build whose
+// datatug-core has it) is the server's record of a queries/capture save,
+// never a client's claim: create_query refuses a request that carries one
+// (refuseClientCapture; 400 naming query.capture), update_query accepts
+// one only when it equals the stored query's own, and neither route can
+// set, change or clear it - the stored capture is kept on every legacy
+// write (writeLegacyQuery). The default build's datatug-core has no
+// capture field at all, so a request's "capture" block never decodes and
+// is never stored.
+func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *datatug.QueryDefWithFolderPath, mode legacyWriteMode) (*datatug.QueryDefWithFolderPath, error) {
 	queryID, err := legacyQueryID(query.FolderPath, query.ID)
 	if err != nil {
 		return nil, validation.NewBadRequestError(err)
@@ -76,6 +102,9 @@ func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *data
 	if err := AuthorizeProjectQueryWrite(ctx, projectID, queryID, access.Set); err != nil {
 		return nil, err
 	}
+	if err := refuseClientCapture(mode, query); err != nil {
+		return nil, err
+	}
 	if err := query.QueryDef.Validate(); err != nil {
 		return nil, validation.NewBadRequestError(err)
 	}
@@ -88,7 +117,7 @@ func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *data
 	}
 	writeCtx, cancel := context.WithTimeout(ctx, legacyWriteTimeout)
 	defer cancel()
-	if err := store.SaveQuery(writeCtx, query); err != nil {
+	if err := writeLegacyQuery(writeCtx, store, queryID, query); err != nil {
 		return nil, legacyStoreFailure(err)
 	}
 	// Answer with the root's API id again, as GetQuery does: apicore

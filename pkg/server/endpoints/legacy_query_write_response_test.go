@@ -203,3 +203,20 @@ func TestLegacyQueryWrites_500BodiesAreGeneric(t *testing.T) {
 		assertBodyOmits(t, rec, "/Users", "response is not valid")
 	})
 }
+
+// A legacy write that kept losing to other writes of the same query
+// answers 409, not apicore's 500.
+func TestLegacyQueryWrites_ConflictAnswers409(t *testing.T) {
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPut, "/datatug/queries/update_query?id=q1", nil)
+	w := newLegacyQueryWriteResponse(rec, "queries/update_query", "save", "saved")
+	err := w.observe(fmt.Errorf("saving q1: %w", api.ErrLegacyQueryWriteConflict))
+	apicore.ReturnJSON(r.Context(), w, r, http.StatusCreated, err, nil)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status %d, want 409; body %s", rec.Code, rec.Body.String())
+	}
+	got := decodeLegacyErrorBody(t, rec)
+	if got.Code != "REVISION_CONFLICT" || got.Message != "the query kept changing while it was being saved, so nothing was saved; reload it and retry" {
+		t.Errorf("error %+v, want REVISION_CONFLICT with the fixed message", got)
+	}
+}

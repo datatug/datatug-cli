@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -30,6 +31,9 @@ import (
 //   - a write that timed out waiting for the query store
 //     (context.DeadlineExceeded) is 504 TIMEOUT. The store gives up before
 //     its commit point, so nothing was written;
+//   - a write that kept losing to other writes of the same query
+//     (api.ErrLegacyQueryWriteConflict) is 409 REVISION_CONFLICT; nothing
+//     was written;
 //   - anything else - a store failure whose text can hold an absolute
 //     server path and OS error text, a response that failed apicore's own
 //     validation - stays a 500, with code INTERNAL and a generic message.
@@ -107,6 +111,9 @@ func (w *legacyQueryWriteResponse) classify() (status int, code, message string)
 	case errors.Is(w.err, context.DeadlineExceeded):
 		return http.StatusGatewayTimeout, "TIMEOUT",
 			"the query store stayed busy with another write, so nothing was " + w.done + "; retry"
+	case errors.Is(w.err, api.ErrLegacyQueryWriteConflict):
+		return http.StatusConflict, string(codeRevisionConflict),
+			"the query kept changing while it was being " + w.done + ", so nothing was " + w.done + "; reload it and retry"
 	default:
 		return http.StatusInternalServerError, "INTERNAL",
 			"the query could not be " + w.done + "; the agent log has the details under this request ID"

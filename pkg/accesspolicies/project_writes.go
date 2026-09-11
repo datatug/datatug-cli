@@ -213,8 +213,12 @@ func (w *rewriter) rewritePath(scope *access.DocumentScope, parent []pathSegment
 func (w *rewriter) checkRules() {
 	for _, rule := range w.rules {
 		name, path := fmt.Sprintf("rule %q", rule.name), displayPath(rule.path, rule.trailingAll)
+		if position := brokenAlternation(rule.path); position >= 0 {
+			w.refuse(nestedScopeRefusal(name, path, rule.path[position].value, position))
+			return
+		}
 		if isBelowQueryID(rule.path, rule.trailingAll) {
-			w.refuse(folderScopeRefusal(name, path))
+			w.refuse(folderScopeRefusal(name, path, trailingAllOnly(rule.path, rule.trailingAll), rule.path[3].value))
 			return
 		}
 		if len(rule.path) == 4 && isQueryIDPosition(rule.path[:3]) && rule.path[3].isID && !isIDWildcard(rule.path[3].value) {
@@ -273,13 +277,68 @@ func isBelowQueryID(segments []pathSegment, trailingAll bool) bool {
 	return len(segments) > 4 || trailingAll && !isIDWildcard(segments[3].value)
 }
 
+// trailingAllOnly reports whether a rule isBelowQueryID flagged is at the
+// query id itself and flagged only for its trailing "/**".
+func trailingAllOnly(segments []pathSegment, trailingAll bool) bool {
+	return trailingAll && len(segments) == 4
+}
+
 // folderScopeRefusal is prepareProjectWrites' refusal of a rule scoped
-// below a query id.
-func folderScopeRefusal(rule, path string) string {
-	return fmt.Sprintf("%s (path %q) is scoped below a single query id, where no query can match it: "+
+// below a query id. A rule deeper than the id can match no query at all; a
+// rule at the id written with a trailing "/**" matches exactly one query -
+// the one whose whole id is that segment - and never the queries in a
+// folder of that name, which is what its author meant by "/**".
+func folderScopeRefusal(rule, path string, trailingAll bool, id string) string {
+	what := "is scoped below a single query id, where no query can match it"
+	if trailingAll {
+		what = fmt.Sprintf("ends in \"/**\" below the query id %q, which DALgo trims: it matches only the query whose whole id is %q, "+
+			"never the queries in a folder of that name", id, id)
+	}
+	return fmt.Sprintf("%s (path %q) %s: "+
 		"folder-scoped query rules are not supported, so project query writes are refused while this policy is loaded; "+
 		"a folder-qualified query id is one path segment, written /%s/<project>/%s/<folder>%%2F<id>",
-		rule, path, ProjectsCollection, ProjectQueriesCollection)
+		rule, path, what, ProjectsCollection, ProjectQueriesCollection)
+}
+
+// brokenAlternation reports the position at or before the query id where a
+// rule under the project files' collection stops alternating collection,
+// id, collection, id - the shape every record path has - or -1 when it does
+// not.
+//
+// DALgo parses each scope's own path from its own first segment, so nesting
+// decides which segments are ids: a parent
+// /datatug_projects/{project}/queries with a child /Revenue makes "Revenue"
+// a collection name, and the rule can never match a query, whatever it
+// spells. The same joined path written in one scope matches. Rather than
+// let such a rule silently not apply, the policy refuses every project
+// query write.
+func brokenAlternation(segments []pathSegment) int {
+	if len(segments) == 0 || segments[0].isID || segments[0].value != ProjectsCollection {
+		return -1
+	}
+	for position, segment := range segments {
+		if position > 3 {
+			return -1 // deeper than a query id: isBelowQueryID reports it
+		}
+		if segment.isID != (position%2 == 1) {
+			return position
+		}
+	}
+	return -1
+}
+
+// nestedScopeRefusal is prepareProjectWrites' refusal of a rule whose
+// nested scopes join to a path no query resource can have.
+func nestedScopeRefusal(rule, path, segment string, position int) string {
+	kind := "a collection name"
+	if position%2 == 0 {
+		kind = "a record id"
+	}
+	return fmt.Sprintf("%s (path %q) joins nested scopes whose segments do not alternate collection, id: "+
+		"DALgo reads each scope's path from its own first segment, so %q is %s at position %d, and no query can match the rule; "+
+		"project query writes are refused while this policy is loaded - write the path in one scope, "+
+		"or split it so each scope's own path starts with a collection name",
+		rule, path, segment, kind, position)
 }
 
 // displayPath renders absolute segments as a policy path.

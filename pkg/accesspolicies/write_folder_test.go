@@ -3,6 +3,7 @@ package accesspolicies
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -90,6 +91,112 @@ bindings:
 				}
 			}
 		})
+	}
+}
+
+// A rule whose nested scopes join to a path no query resource can have -
+// DALgo reads each scope's path from its own first segment, so a child
+// scope of .../queries names a collection, not a query id - can never match
+// a query. It fails closed like any other rule that cannot apply, naming
+// the rule and the segment that lands wrong.
+func TestAuthorizeWrite_NestedScopesThatCannotMatchFailClosed(t *testing.T) {
+	const header = `apiVersion: dalgo.io/access/v1
+kind: AccessPolicy
+metadata:
+  name: nested-parity
+default: deny
+scopes:
+  - path: /**
+    rules:
+      - id: all
+        effect: allow
+        operations: [readwrite]
+`
+	refused := map[string]struct{ doc, segment string }{
+		"a child of the queries collection": {`  - path: /datatug_projects/demo/queries
+    scopes:
+      - path: /Revenue
+        rules:
+          - id: protect-revenue
+            effect: deny
+            operations: [write]
+`, "Revenue"},
+		"three levels": {`  - path: /datatug_projects
+    scopes:
+      - path: /demo/queries
+        scopes:
+          - path: /Revenue
+            rules:
+              - id: protect-revenue
+                effect: deny
+                operations: [write]
+`, "demo"},
+		"a child of the project id": {`  - path: /datatug_projects/demo
+    scopes:
+      - path: /queries
+        scopes:
+          - path: /Revenue
+            rules:
+              - id: protect-revenue
+                effect: deny
+                operations: [write]
+`, "Revenue"},
+	}
+	for name, tt := range refused {
+		t.Run(name, func(t *testing.T) {
+			loaded := decodeLoaded(t, "nested.yaml", header+tt.doc)
+			for _, id := range []string{"Revenue", "revenue", "other"} {
+				err := AuthorizeWrite(context.Background(), WriteOptions{Principal: principalWithRoles("a"), Policies: []Loaded{loaded}},
+					access.Insert, ProjectQueryResource("demo", id))
+				var denied *WriteDeniedError
+				if !errors.As(err, &denied) {
+					t.Fatalf("write %q: expected every query write to be refused, got %v", id, err)
+				}
+				for _, want := range []string{`rule "protect-revenue"`, "do not alternate collection, id", strconv.Quote(tt.segment)} {
+					if !strings.Contains(denied.Reason, want) {
+						t.Errorf("write %q: Reason = %q, want it to mention %s", id, denied.Reason, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+// The refusal of a folder deny says what DALgo really does with the
+// trailing "/**": it trims it, so the rule matches the one query whose
+// whole id is that segment, never the queries in a folder of that name.
+func TestAuthorizeWrite_FolderDenyRefusalIsAccurate(t *testing.T) {
+	doc := `apiVersion: dalgo.io/access/v1
+kind: AccessPolicy
+metadata:
+  name: folder-deny
+default: deny
+scopes:
+  - path: /datatug_projects/demo/queries/reports/**
+    rules:
+      - id: protect-reports-folder
+        effect: deny
+        operations: [write]
+`
+	loaded := decodeLoaded(t, "folder.yaml", doc)
+	err := AuthorizeWrite(context.Background(), WriteOptions{Principal: principalWithRoles("a"), Policies: []Loaded{loaded}},
+		access.Insert, ProjectQueryResource("demo", "reports/revenue"))
+	var denied *WriteDeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("expected the write to be refused, got %v", err)
+	}
+	for _, want := range []string{
+		`rule "protect-reports-folder"`,
+		`ends in "/**" below the query id "REPORTS"`,
+		"it matches only the query whose whole id is",
+		"never the queries in a folder of that name",
+	} {
+		if !strings.Contains(denied.Reason, want) {
+			t.Errorf("Reason = %q, want it to mention %q", denied.Reason, want)
+		}
+	}
+	if strings.Contains(denied.Reason, "no query can match it") {
+		t.Errorf("Reason = %q still claims no query can match a trimmed /** rule", denied.Reason)
 	}
 }
 

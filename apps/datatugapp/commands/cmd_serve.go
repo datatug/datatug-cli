@@ -11,6 +11,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/server"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
@@ -281,8 +282,14 @@ func serveCommandArgs() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Serves HTTP server to provide API for UI",
-		Long:  "Serves HTTP server to provide API for UI. Default port is 8989",
-		RunE:  serveCommandAction,
+		Long: "Serves HTTP server to provide API for UI. Default port is 8989.\n\n" +
+			"Personal queries: GET /datatug/queries/all_queries?root=personal lists the serving\n" +
+			"principal's own queries, stored OUTSIDE the shared project directory (so nothing\n" +
+			"personal is ever committed into the project's repo) under $" + personalqueries.DirEnv + "/<project-id>\n" +
+			"if that environment variable is set, else ~/" + personalqueries.DefaultBaseDir + "/<project-id>. This\n" +
+			"directory is never created by a read; a principal with no personal queries yet just\n" +
+			"gets an empty list. Provisional layout (2026-09-11 founder ruling) — may change.",
+		RunE: serveCommandAction,
 	}
 	flags := cmd.Flags()
 	flags.String(serveHostFlag, "", "Host to bind the agent HTTP server to (default: localhost, or the server.host setting)")

@@ -7,13 +7,11 @@ project:
   repo: datatug-cli
 
 # Related SpecScore projects (repo-config REQ:projects-list). The hub repo
-# (github.com/datatug/datatug) owns the ai-query-builder, cli/incident, and
+# (github.com/datatug/datatug) owns the ai-query-builder, incidents and
 # serve-brokered-query-builder Capabilities that this repo's Implementations
-# cite cross-repo. Path is relative to THIS file's directory and resolves
-# from the canonical clone (/Users/alex/projects/datatug/datatug-cli ->
-# ../datatug -> /Users/alex/projects/datatug/datatug). It does not resolve
-# from a worktree nested under .worktrees/<name> (two extra path levels);
-# that is a property of the nested-worktree layout, not of this entry.
+# cite cross-repo. The path is relative to this file and reaches the sibling
+# hub clone from the canonical clone only, not from a linked worktree; it also
+# conflicts with REQ:projects-list. Tracked in specscore/specscore-cli#201.
 projects:
   - ../datatug
 

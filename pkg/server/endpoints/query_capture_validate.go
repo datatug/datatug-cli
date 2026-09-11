@@ -110,7 +110,7 @@ func captureTextReason(value string, required bool, maxRunes int, multiline bool
 		return fmt.Sprintf("is longer than %d characters", maxRunes)
 	}
 	for _, r := range value {
-		if unicode.IsControl(r) && !(multiline && (r == '\n' || r == '\r' || r == '\t')) {
+		if unicode.IsControl(r) && (!multiline || (r != '\n' && r != '\r' && r != '\t')) {
 			return "must not contain control characters"
 		}
 	}

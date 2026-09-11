@@ -139,3 +139,28 @@ func TestClientBoundsDeadlineAndSanitizesTransportError(t *testing.T) {
 		t.Fatalf("unsafe transport error: %v", err)
 	}
 }
+
+func TestAuthorizationErrorEnvelope(t *testing.T) {
+	denial := strings.ReplaceAll(allowResult, `"allow"`, `"deny"`)
+	denial = strings.ReplaceAll(denial, `"allowed":true`, `"allowed":false`)
+	denial = strings.ReplaceAll(denial, `"blockers":[]`, `"blockers":[{"operationId":"u1","code":"ACCESS_DENIED","scope":"operation","layerId":"owner"}]`)
+	for _, tc := range []struct {
+		name, body string
+		valid      bool
+	}{
+		{"owner error", `{"error":{"code":"access_denied","authorization":` + denial + `}}`, true},
+		{"ambiguous error", `{"authorization":` + denial + `,"error":{"authorization":` + denial + `}}`, false},
+		{"allowed error", `{"error":{"authorization":` + allowResult + `}}`, false},
+		{"missing authorization", `{"error":{"code":"access_denied"}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, _, err := ValidateAuthorizationEnvelope([]byte(tc.body))
+			if (err == nil) != tc.valid {
+				t.Fatalf("validation=%v", err)
+			}
+			if tc.valid && (result.Allowed || len(result.Blockers) != 1 || result.Blockers[0].LayerID != "owner") {
+				t.Fatal("owner denial lost")
+			}
+		})
+	}
+}

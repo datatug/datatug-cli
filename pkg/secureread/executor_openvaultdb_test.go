@@ -130,6 +130,10 @@ bindings: {roles: {reader: [read]}}
 			if _, err = executor.RunDTQL(context.Background(), sourceURL, []byte(strings.Replace(query, "field: name", "field: tenant", 1)), nil); !errors.Is(err, access.ErrAccessDenied) {
 				t.Fatalf("lower column denial=%v", err)
 			}
+			var denial *openvaultdb.AuthorizationError
+			if !errors.As(err, &denial) || len(denial.Decision.Blockers) == 0 || len(denial.Decision.Layers) == 0 {
+				t.Fatalf("real owner denial lost structured blockers: %v", err)
+			}
 			wrong := aliceSession(t, permissivePolicy)
 			wrong.Principal.ID = "bob"
 			if _, err = NewExecutor(wrong).RunDTQL(context.Background(), sourceURL, []byte(query), nil); !errors.Is(err, access.ErrAccessDenied) {

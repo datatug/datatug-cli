@@ -139,12 +139,16 @@ func (c Client) do(ctx context.Context, target Target, method, path, contentType
 		}
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		var envelope map[string]json.RawMessage
-		if DecodeJSONObjectStrict(data, &envelope) == nil {
-			if nested := envelope["authorization"]; len(nested) != 0 {
-				if _, err := authorization.DecodeResultCompatible(nested); err != nil {
-					return Response{}, errors.New("OpenVaultDB returned an invalid authorization error")
-				}
+		var envelope struct {
+			Authorization json.RawMessage `json:"authorization"`
+			Error         struct {
+				Authorization json.RawMessage `json:"authorization"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(data, &envelope) == nil && (len(envelope.Authorization) != 0 || len(envelope.Error.Authorization) != 0) {
+			result, _, err := ValidateAuthorizationEnvelope(data)
+			if err != nil || result.Allowed {
+				return Response{}, errors.New("OpenVaultDB returned an invalid authorization error")
 			}
 		}
 	}
@@ -157,12 +161,26 @@ func ValidateAuthorizationEnvelope(data []byte) (authorization.Result, string, e
 		return authorization.Result{}, "", errors.New("invalid OpenVaultDB authorization response")
 	}
 	authData := envelope["authorization"]
+	isError := len(envelope["error"]) != 0
+	if isError {
+		if len(authData) != 0 {
+			return authorization.Result{}, "", errors.New("ambiguous OpenVaultDB authorization response")
+		}
+		var detail map[string]json.RawMessage
+		if err := json.Unmarshal(envelope["error"], &detail); err != nil {
+			return authorization.Result{}, "", errors.New("invalid OpenVaultDB error response")
+		}
+		authData = detail["authorization"]
+	}
 	if len(authData) == 0 {
 		return authorization.Result{}, "", errors.New("OpenVaultDB response omitted authorization result")
 	}
 	result, err := authorization.DecodeResultCompatible(authData)
 	if err != nil {
 		return authorization.Result{}, "", fmt.Errorf("invalid OpenVaultDB authorization result: %w", err)
+	}
+	if isError && result.Allowed {
+		return authorization.Result{}, "", errors.New("OpenVaultDB error contained an allowed decision")
 	}
 	var revision string
 	if raw := envelope["dataRevision"]; len(raw) != 0 && json.Unmarshal(raw, &revision) != nil {

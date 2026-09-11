@@ -154,7 +154,7 @@ Status and outcome values are not CLI-invented; they are exactly the hub Feature
 
 ### AC: list-by-asset-back-link (verifies REQ:list-filters-by-back-link)
 
-**Given** the check `stuck-invoices` and the query `customers/customer-invoices` were each run under `INC-1` and never under `INC-3`, and a board is referenced by an `INC-1` event and by no `INC-3` event
+**Given** the check `stuck-invoices` and the query `customers/customer-invoices` were each run under `INC-1` and never under `INC-3`, and a board `<boardId>` is referenced by an `INC-1` event and by no `INC-3` event
 **When** `datatug incident list --check stuck-invoices --json`, `datatug incident list --query customers/customer-invoices --json` and `datatug incident list --board <boardId> --json` each run
 **Then** each output contains `INC-1` and does not contain `INC-3`.
 

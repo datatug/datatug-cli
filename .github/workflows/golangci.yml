@@ -55,15 +55,13 @@ jobs:
   strongo_workflow:
     permissions:
       contents: write
-    # Pinned to an exact tag, not the moving @v1, which is being retired.
-    # workflow.yml is currently byte-identical at both refs, so this is a
-    # no-op in behaviour — but @v1 silently served a 14-versions-stale
-    # release.yml, which is how a macOS signing gate came to no-op. Pin
-    # exactly so a moving tag can never change this job underneath us.
-    uses: strongo/cicd/.github/workflows/workflow.yml@v1.14.17
+    # Pin the shared workflow exactly so it cannot change underneath this job.
+    # v1.20.0 adds the opt-in conventional PR-title gate enabled below.
+    uses: strongo/cicd/.github/workflows/workflow.yml@v1.20.0
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     with:
+      require_conventional_pr_title: true
       # Uses the C-based github.com/mattn/go-sqlite3 driver, which requires cgo.
       cgo_enabled: true
       # Version bump + release now happen in release.yml (continuous delivery on

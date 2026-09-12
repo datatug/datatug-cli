@@ -82,7 +82,7 @@ func computeSemanticRelated(ctx context.Context, req apicontract.RelatedRequest)
 	if err != nil {
 		return apicontract.RelatedResponse{}, err
 	}
-	value, err := factValueString(req.Fact.Value)
+	value, err := nativeValue(req.Fact.Value)
 	if err != nil {
 		return apicontract.RelatedResponse{}, err
 	}
@@ -148,21 +148,6 @@ func computeSemanticRelated(ctx context.Context, req apicontract.RelatedRequest)
 	return resp, nil
 }
 
-// factValueString renders a TypedValue as the plain string
-// semantic.SemanticValue/RelatedLookups' equality-filter machinery expects
-// (that package is untyped — see pkg/semantic.SemanticValue.Value
-// interface{} — so the exact TypedValue type distinction the appendix
-// requires at the transport boundary is preserved up to here, then
-// collapsed to the query-parameter string form countRelated/dal.WhereField
-// need).
-func factValueString(v apicontract.TypedValue) (string, error) {
-	native, err := nativeValue(v)
-	if err != nil {
-		return "", newTypeMismatch("fact.value", err.Error())
-	}
-	return fmt.Sprint(native), nil
-}
-
 // countRelated runs lookup's filter through the access-policy path (bounded
 // by the appendix's 2-second count budget: api-contract.md "Bounded lookups
 // and HTTP" — "return null if an exact authorized count cannot be obtained
@@ -170,7 +155,7 @@ func factValueString(v apicontract.TypedValue) (string, error) {
 // when any policy Limitation applied, the count query itself failed, or the
 // budget was exceeded — every one of these means "count unavailable", never
 // a number that would misrepresent what an unrestricted caller would see.
-func countRelated(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, environment string, lookup semantic.Lookup, value string) (*int64, error) {
+func countRelated(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, environment string, lookup semantic.Lookup, value any) (*int64, error) {
 	lookupSource, err := resolveSource(ctx, projStore, projectDir, environment, lookup.Source, lookup.Collection)
 	if err != nil {
 		return nil, err
@@ -245,7 +230,7 @@ func computeSemanticRelatedRows(ctx context.Context, req apicontract.RelatedRows
 	if err != nil {
 		return apicontract.Result{}, err
 	}
-	value, err := factValueString(req.Value)
+	value, err := nativeValue(req.Value)
 	if err != nil {
 		return apicontract.Result{}, err
 	}

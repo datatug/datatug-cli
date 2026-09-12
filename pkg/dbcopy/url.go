@@ -29,6 +29,7 @@ import (
 	"github.com/dal-go/dalgo2sql"
 	"github.com/dal-go/dalgo2sqlite"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
+	"github.com/datatug/datatug-cli/pkg/openvaultdb"
 	"github.com/ingitdb/dalgo2ingitdb"
 	"github.com/ingitdb/ingitdb-go/ingitdb/validator"
 	"github.com/xo/dburl"
@@ -36,7 +37,7 @@ import (
 
 // supportedSchemes is the MVP-supported scheme list, used both for dispatch
 // and to construct the error message for REQ:unknown-scheme-rejected.
-var supportedSchemes = []string{"sqlite", "ingitdb", "postgres", "http", "https"}
+var supportedSchemes = []string{"sqlite", "ingitdb", "postgres", "http", "https", "openvaultdb"}
 
 // SupportedSchemes returns the exact schemes Parse/Open dispatch, in
 // dispatch order. It is the single source of truth other packages should
@@ -102,6 +103,13 @@ type BackendRef struct {
 // The unknown-scheme error message names BOTH the unsupported scheme AND
 // the supported list, as required by REQ:unknown-scheme-rejected.
 func Parse(rawURL string) (BackendRef, error) {
+	if strings.HasPrefix(rawURL, "openvaultdb://") {
+		path := strings.TrimPrefix(rawURL, "openvaultdb://")
+		if path == "" {
+			return BackendRef{}, fmt.Errorf("OpenVaultDB connection descriptor path is required")
+		}
+		return BackendRef{Scheme: "openvaultdb", Path: path, Raw: rawURL}, nil
+	}
 	// Intercept ingitdb:// before delegating to dburl — dburl doesn't know
 	// the scheme and would reject it.
 	if strings.HasPrefix(rawURL, "ingitdb://") {
@@ -315,6 +323,8 @@ func (r BackendRef) OpenProtectedForTest(ctx context.Context) (dal.DB, error) {
 
 func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected bool) (dal.DB, error) {
 	switch r.Scheme {
+	case "openvaultdb":
+		return openvaultdb.OpenSource(r.Path)
 	case "sqlite":
 		if err := CheckSourceFile(r.Path); err != nil {
 			return nil, err

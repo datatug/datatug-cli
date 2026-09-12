@@ -3,6 +3,8 @@ name: Release
 # Continuous delivery: every merge to `main` runs the shared strongo/cicd
 # release workflow, which bumps the version from conventional commits and
 # releases it in one run (GoReleaser against this repo's .goreleaser.yaml).
+# Task publication PRs therefore use a conventional release type when their
+# merged code still needs its first immutable tag.
 # Pushing an explicit `vX.Y.Z` tag also works and releases that exact version.
 # A docs/chore-only merge cuts no tag and publishes nothing.
 #

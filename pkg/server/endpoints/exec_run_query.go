@@ -15,6 +15,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
+	"github.com/datatug/datatug-cli/pkg/openvaultdb"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -201,7 +202,12 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 			return apicontract.Result{}, newUnsupportedProtectedExecution(err.Error())
 		}
 		if errors.Is(err, secureread.ErrAccessDenied) {
-			return apicontract.Result{}, contractErrAccessDenied(err.Error())
+			ce := contractErrAccessDenied(err.Error())
+			var remote *openvaultdb.AuthorizationError
+			if errors.As(err, &remote) {
+				ce.Details = map[string]any{"authorization": remote.Decision}
+			}
+			return apicontract.Result{}, ce
 		}
 		if errors.Is(err, dbcopy.ErrSourceFileMissing) {
 			return apicontract.Result{}, newSourceUnavailable(err.Error())

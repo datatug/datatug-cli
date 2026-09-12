@@ -35,7 +35,7 @@ require (
 	github.com/google/go-github/v91 v91.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
-	github.com/ingitdb/dalgo2ingitdb v0.5.0
+	github.com/ingitdb/dalgo2ingitdb v0.6.0
 	github.com/ingitdb/ingitdb-go/ingitdb v0.6.0
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/go-sqlite3 v1.14.50

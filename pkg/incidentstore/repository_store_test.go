@@ -18,6 +18,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRepositoryStorePreparesPrivateMetadataDirectories(t *testing.T) {
+	store := newTestStore(t)
+	info, err := os.Stat(filepath.Join(store.root, "incidents", ".store"))
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+	require.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+}
+
 func TestRepositoryStoreAppendReplayAndProjection(t *testing.T) {
 	store := newTestStore(t)
 	mutation := createdMutation(t, "create-1", "INC-1")

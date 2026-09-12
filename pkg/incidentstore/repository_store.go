@@ -4,7 +4,6 @@ package incidentstore
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,13 +13,15 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/incidents"
+	"github.com/ingitdb/dalgo2ingitdb"
+	"github.com/ingitdb/ingitdb-go/ingitdb/validator"
 )
 
 const (
-	lockRetryDelay = 20 * time.Millisecond
 	defaultTimeout = 10 * time.Second
 	maxEventsBytes = 64 << 20
 )
@@ -33,13 +34,22 @@ var ErrIncidentNotFound = errors.New("incident not found")
 type RepositoryStore struct {
 	location incidents.StoreLocation
 	root     string
-	fsRoot   *os.Root
+	files    *dalgo2ingitdb.RootedFiles
+	ops      rootedFileOps
 	now      func() time.Time
 	// afterMergeStep is a test-only crash seam invoked after each durable
 	// event append and before projections and the final receipt are published.
 	afterMergeStep     func(int) error
 	afterAppendPrepare func() error
 	afterAppendCommit  func() error
+}
+
+type rootedFileOps interface {
+	AppendJSONL(relativePath string, value any) error
+	ReadJSONLWithLimit(relativePath string, maxBytes int64) ([]json.RawMessage, error)
+	WriteJSONAtomicWithMode(relativePath string, value any, mode os.FileMode) error
+	ReadJSON(relativePath string, target any) error
+	ReadDir(relativePath string) ([]os.DirEntry, error)
 }
 
 var _ incidents.Store = (*RepositoryStore)(nil)
@@ -60,15 +70,31 @@ func NewRepositoryStore(location incidents.StoreLocation, root string) (*Reposit
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return nil, fmt.Errorf("incident store root must be a real directory")
 	}
-	fsRoot, err := os.OpenRoot(abs)
+	scope := dalgo2ingitdb.RootedFilesScope{Prefix: "incidents"}
+	db, err := dalgo2ingitdb.NewDatabase(
+		abs,
+		validator.NewCollectionsReader(),
+		dalgo2ingitdb.WithRootedFilesScopes(scope),
+	)
 	if err != nil {
-		return nil, fmt.Errorf("open incident store root: %w", err)
+		return nil, fmt.Errorf("open incident DALgo store: %w", err)
 	}
-	return &RepositoryStore{location: location, root: abs, fsRoot: fsRoot, now: time.Now}, nil
+	files, err := dalgo2ingitdb.RootedFilesFor(context.Background(), db, scope)
+	if err != nil {
+		return nil, fmt.Errorf("open incident file capability: %w", err)
+	}
+	// Receipt and intent directories are descendants of this private root.
+	// RootedFiles intentionally creates nested parents with ordinary directory
+	// permissions, while the 0700 ancestor keeps the whole metadata tree private.
+	if err := files.EnsureDir(".store", 0o700); err != nil {
+		_ = files.Close()
+		return nil, fmt.Errorf("prepare private incident metadata: %w", err)
+	}
+	return &RepositoryStore{location: location, root: abs, files: files, ops: files, now: time.Now}, nil
 }
 
 // Close releases the root directory handle held by the store.
-func (s *RepositoryStore) Close() error { return s.fsRoot.Close() }
+func (s *RepositoryStore) Close() error { return s.files.Close() }
 
 func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutation) (result incidents.AppendResult, err error) {
 	if err = mutation.Validate(); err != nil {
@@ -77,17 +103,17 @@ func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutatio
 	if mutation.Incident.StoreID != s.location.StoreID {
 		return result, fmt.Errorf("incident store %q cannot write %q", s.location.StoreID, mutation.Incident.StoreID)
 	}
-	err = s.withLock(ctx, func() error {
-		intentPath, intentPathErr := s.mergeIntentPath(mutation.MutationID)
+	err = s.withLock(ctx, func(store *RepositoryStore) error {
+		intentPath, intentPathErr := store.mergeIntentPath(mutation.MutationID)
 		if intentPathErr != nil {
 			return intentPathErr
 		}
-		if _, found, readErr := s.readMergeIntent(intentPath); readErr != nil {
+		if _, found, readErr := store.readMergeIntent(intentPath); readErr != nil {
 			return readErr
 		} else if found {
 			return incidents.ErrMutationConflict
 		}
-		if pending, pendingErr := s.hasPendingMerge(mutation.MutationID); pendingErr != nil {
+		if pending, pendingErr := store.hasPendingMerge(mutation.MutationID); pendingErr != nil {
 			return pendingErr
 		} else if pending {
 			return incidents.ErrSequenceConflict
@@ -98,22 +124,22 @@ func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutatio
 		}
 		hash := sha256.Sum256(request)
 		hashText := hex.EncodeToString(hash[:])
-		receiptPath, pathErr := s.receiptPath(mutation.MutationID)
+		receiptPath, pathErr := store.receiptPath(mutation.MutationID)
 		if pathErr != nil {
 			return pathErr
 		}
-		if receipt, found, readErr := s.readReceipt(receiptPath); readErr != nil {
+		if receipt, found, readErr := store.readReceipt(receiptPath); readErr != nil {
 			return readErr
 		} else if found {
 			if receipt.RequestHash != hashText {
 				return incidents.ErrMutationConflict
 			}
-			result, err = s.finishAppend(mutation.Incident, receipt)
+			result, err = store.finishAppend(mutation.Incident, receipt)
 			result.Replayed = err == nil
 			return err
 		}
 
-		events, readErr := s.loadEvents(mutation.Incident)
+		events, readErr := store.loadEvents(mutation.Incident)
 		if readErr != nil {
 			return readErr
 		}
@@ -140,15 +166,15 @@ func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutatio
 			Event:       event,
 			Projection:  projection,
 		}
-		if err := s.writeJSONAtomic(receiptPath, receipt, 0o600); err != nil {
+		if err := store.writeJSONAtomic(receiptPath, receipt, 0o600); err != nil {
 			return fmt.Errorf("prepare mutation receipt: %w", err)
 		}
-		if s.afterAppendPrepare != nil {
-			if prepareErr := s.afterAppendPrepare(); prepareErr != nil {
+		if store.afterAppendPrepare != nil {
+			if prepareErr := store.afterAppendPrepare(); prepareErr != nil {
 				return prepareErr
 			}
 		}
-		result, err = s.finishAppend(mutation.Incident, receipt)
+		result, err = store.finishAppend(mutation.Incident, receipt)
 		return err
 	})
 	return result, err
@@ -158,8 +184,8 @@ func (s *RepositoryStore) Events(ctx context.Context, ref incidents.IncidentRef,
 	if err = s.validateRef(ref); err != nil {
 		return nil, err
 	}
-	err = s.withLock(ctx, func() error {
-		all, readErr := s.loadEvents(ref)
+	err = s.withLock(ctx, func(store *RepositoryStore) error {
+		all, readErr := store.loadEvents(ref)
 		if readErr != nil {
 			return readErr
 		}
@@ -180,8 +206,8 @@ func (s *RepositoryStore) Projection(ctx context.Context, ref incidents.Incident
 	if err = s.validateRef(ref); err != nil {
 		return projection, err
 	}
-	err = s.withLock(ctx, func() error {
-		events, readErr := s.loadEvents(ref)
+	err = s.withLock(ctx, func(store *RepositoryStore) error {
+		events, readErr := store.loadEvents(ref)
 		if readErr != nil {
 			return readErr
 		}
@@ -194,7 +220,7 @@ func (s *RepositoryStore) Projection(ctx context.Context, ref incidents.Incident
 		}
 		if at == nil {
 			layout, _ := incidents.LayoutFor(ref)
-			return s.writeJSONAtomic(s.join(layout.Projection), projection, 0o644)
+			return store.writeJSONAtomic(store.join(layout.Projection), projection, 0o644)
 		}
 		return nil
 	})
@@ -208,23 +234,23 @@ func (s *RepositoryStore) Merge(ctx context.Context, mutation incidents.MergeMut
 	if mutation.Source.StoreID != s.location.StoreID {
 		return result, fmt.Errorf("incident store %q cannot merge %q", s.location.StoreID, mutation.Source.StoreID)
 	}
-	err = s.withLock(ctx, func() error {
+	err = s.withLock(ctx, func(store *RepositoryStore) error {
 		request, marshalErr := json.Marshal(mutation)
 		if marshalErr != nil {
 			return marshalErr
 		}
 		hashText := requestHash(request)
-		receiptPath, pathErr := s.receiptPath(mutation.MutationID)
+		receiptPath, pathErr := store.receiptPath(mutation.MutationID)
 		if pathErr != nil {
 			return pathErr
 		}
-		if receipt, found, readErr := s.readMergeReceipt(receiptPath); readErr != nil {
+		if receipt, found, readErr := store.readMergeReceipt(receiptPath); readErr != nil {
 			return readErr
 		} else if found {
 			if receipt.RequestHash != hashText {
 				return incidents.ErrMutationConflict
 			}
-			if publishErr := s.publishMergeProjections(receipt.Result); publishErr != nil {
+			if publishErr := store.publishMergeProjections(receipt.Result); publishErr != nil {
 				return publishErr
 			}
 			result = receipt.Result
@@ -232,11 +258,11 @@ func (s *RepositoryStore) Merge(ctx context.Context, mutation incidents.MergeMut
 			return nil
 		}
 
-		intentPath, pathErr := s.mergeIntentPath(mutation.MutationID)
+		intentPath, pathErr := store.mergeIntentPath(mutation.MutationID)
 		if pathErr != nil {
 			return pathErr
 		}
-		intent, found, readErr := s.readMergeIntent(intentPath)
+		intent, found, readErr := store.readMergeIntent(intentPath)
 		if readErr != nil {
 			return readErr
 		}
@@ -244,23 +270,23 @@ func (s *RepositoryStore) Merge(ctx context.Context, mutation incidents.MergeMut
 			if intent.RequestHash != hashText {
 				return incidents.ErrMutationConflict
 			}
-			result, err = s.finishMerge(intentPath, receiptPath, intent)
+			result, err = store.finishMerge(intentPath, receiptPath, intent)
 			if err == nil {
 				result.Replayed = true
 			}
 			return err
 		}
-		if pending, pendingErr := s.hasPendingMerge(mutation.MutationID); pendingErr != nil {
+		if pending, pendingErr := store.hasPendingMerge(mutation.MutationID); pendingErr != nil {
 			return pendingErr
 		} else if pending {
 			return incidents.ErrSequenceConflict
 		}
 
-		sourceEvents, sourceErr := s.loadEvents(mutation.Source)
+		sourceEvents, sourceErr := store.loadEvents(mutation.Source)
 		if sourceErr != nil {
 			return sourceErr
 		}
-		intoEvents, intoErr := s.loadEvents(mutation.Into)
+		intoEvents, intoErr := store.loadEvents(mutation.Into)
 		if intoErr != nil {
 			return intoErr
 		}
@@ -279,7 +305,7 @@ func (s *RepositoryStore) Merge(ctx context.Context, mutation incidents.MergeMut
 			return fmt.Errorf("incident merge requires two active incidents")
 		}
 
-		mergeAt := s.now().UTC()
+		mergeAt := store.now().UTC()
 		imported := make([]incidents.Event, 0, len(sourceEvents))
 		for i, sourceEvent := range sourceEvents {
 			importedEvent := sourceEvent
@@ -315,10 +341,10 @@ func (s *RepositoryStore) Merge(ctx context.Context, mutation incidents.MergeMut
 			Kind: receiptKindMerge, RequestHash: hashText, Mutation: mutation,
 			ImportedEvents: imported, SourceMergedEvent: sourceMerged,
 		}
-		if writeErr := s.writeJSONAtomic(intentPath, intent, 0o600); writeErr != nil {
+		if writeErr := store.writeJSONAtomic(intentPath, intent, 0o600); writeErr != nil {
 			return fmt.Errorf("prepare merge intent: %w", writeErr)
 		}
-		result, err = s.finishMerge(intentPath, receiptPath, intent)
+		result, err = store.finishMerge(intentPath, receiptPath, intent)
 		return err
 	})
 	return result, err
@@ -558,93 +584,30 @@ func (s *RepositoryStore) ensureEvent(ref incidents.IncidentRef, wanted incident
 
 func (s *RepositoryStore) appendEvent(ref incidents.IncidentRef, event incidents.Event) error {
 	layout, _ := incidents.LayoutFor(ref)
-	fileName := s.join(layout.Events)
-	relative, err := s.relative(fileName)
+	relative, err := s.capabilityPath(s.join(layout.Events))
 	if err != nil {
 		return err
 	}
-	parent := filepath.Dir(relative)
-	if err := s.fsRoot.MkdirAll(parent, 0o755); err != nil {
-		return err
-	}
-	_, statErr := s.fsRoot.Stat(relative)
-	created := os.IsNotExist(statErr)
-	if statErr != nil && !created {
-		return statErr
-	}
-	b, err := json.Marshal(event)
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n')
-	f, err := s.fsRoot.OpenFile(relative, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	if _, err = f.Write(b); err == nil {
-		err = f.Sync()
-	}
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if created {
-		return s.syncDir(parent)
-	}
-	return nil
+	return s.ops.AppendJSONL(relative, event)
 }
 
 func (s *RepositoryStore) loadEvents(ref incidents.IncidentRef) ([]incidents.Event, error) {
 	layout, _ := incidents.LayoutFor(ref)
-	fileName := s.join(layout.Events)
-	relative, err := s.relative(fileName)
+	relative, err := s.capabilityPath(s.join(layout.Events))
 	if err != nil {
 		return nil, err
 	}
-	b, err := s.fsRoot.ReadFile(relative)
-	if os.IsNotExist(err) {
+	records, err := s.ops.ReadJSONLWithLimit(relative, maxEventsBytes)
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > maxEventsBytes {
-		return nil, fmt.Errorf("incident event stream exceeds %d bytes", maxEventsBytes)
-	}
-	if len(b) > 0 && b[len(b)-1] != '\n' {
-		last := bytes.LastIndexByte(b, '\n')
-		completeLength := int64(last + 1)
-		f, openErr := s.fsRoot.OpenFile(relative, os.O_WRONLY, 0)
-		if openErr != nil {
-			return nil, fmt.Errorf("open incomplete event tail: %w", openErr)
-		}
-		truncateErr := f.Truncate(completeLength)
-		if truncateErr == nil {
-			truncateErr = f.Sync()
-		}
-		closeErr := f.Close()
-		if truncateErr != nil {
-			return nil, fmt.Errorf("discard incomplete event tail: %w", truncateErr)
-		}
-		if closeErr != nil {
-			return nil, fmt.Errorf("close repaired event stream: %w", closeErr)
-		}
-		if err := s.syncDir(filepath.Dir(relative)); err != nil {
-			return nil, fmt.Errorf("discard incomplete event tail: %w", err)
-		}
-		b = b[:completeLength]
-	}
-	lines := bytes.Split(b, []byte{'\n'})
-	events := make([]incidents.Event, 0, len(lines))
-	for _, line := range lines {
-		if len(line) == 0 {
-			continue
-		}
+	events := make([]incidents.Event, 0, len(records))
+	for _, record := range records {
 		var event incidents.Event
-		if err := decodeStrict(line, &event); err != nil {
+		if err := decodeStrict(record, &event); err != nil {
 			return nil, fmt.Errorf("decode incident event: %w", err)
 		}
 		if event.Seq != uint64(len(events)+1) {
@@ -658,7 +621,7 @@ func (s *RepositoryStore) loadEvents(ref incidents.IncidentRef) ([]incidents.Eve
 	return events, nil
 }
 
-func (s *RepositoryStore) withLock(ctx context.Context, fn func() error) error {
+func (s *RepositoryStore) withLock(ctx context.Context, fn func(*RepositoryStore) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -667,33 +630,20 @@ func (s *RepositoryStore) withLock(ctx context.Context, fn func() error) error {
 		ctx, cancel = context.WithTimeout(ctx, defaultTimeout)
 		defer cancel()
 	}
-	storeDir := filepath.Join("incidents", ".store")
-	if err := s.fsRoot.MkdirAll(storeDir, 0o700); err != nil {
-		return err
-	}
-	if err := s.fsRoot.Chmod(storeDir, 0o700); err != nil {
-		return err
-	}
-	lockPath := filepath.Join(storeDir, "lock")
-	lockFile, err := s.fsRoot.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = lockFile.Close() }()
-	if err := lockFileContext(ctx, lockFile); err != nil {
-		return fmt.Errorf("acquire incident store lock: %w", err)
-	}
-	defer func() { _ = unlockFile(lockFile) }()
-	if err := s.recoverPendingMutations(); err != nil {
-		return fmt.Errorf("recover pending incident mutation: %w", err)
-	}
-	return fn()
+	return s.files.WithExclusiveLock(ctx, ".store/lock", func(locked dalgo2ingitdb.LockedFiles) error {
+		lockedStore := *s
+		lockedStore.ops = locked
+		if err := lockedStore.recoverPendingMutations(); err != nil {
+			return fmt.Errorf("recover pending incident mutation: %w", err)
+		}
+		return fn(&lockedStore)
+	})
 }
 
 func (s *RepositoryStore) recoverPendingMutations() error {
 	receiptsDir := filepath.Join("incidents", ".store", "mutations")
 	entries, err := s.readDir(receiptsDir)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	for _, entry := range entries {
@@ -721,7 +671,7 @@ func (s *RepositoryStore) recoverPendingMutations() error {
 
 	intentsDir := filepath.Join("incidents", ".store", "merge-intents")
 	entries, err = s.readDir(intentsDir)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	for _, entry := range entries {
@@ -774,7 +724,7 @@ func (s *RepositoryStore) mergeIntentPath(mutationID string) (string, error) {
 func (s *RepositoryStore) hasPendingMerge(exceptMutationID string) (bool, error) {
 	dir := filepath.Join("incidents", ".store", "merge-intents")
 	entries, err := s.readDir(dir)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
@@ -809,37 +759,52 @@ func (s *RepositoryStore) relative(target string) (string, error) {
 	return relative, nil
 }
 
+func (s *RepositoryStore) capabilityPath(target string) (string, error) {
+	if !filepath.IsAbs(target) {
+		target = s.join(filepath.ToSlash(target))
+	}
+	relative, err := s.relative(target)
+	if err != nil {
+		return "", err
+	}
+	prefix := "incidents" + string(filepath.Separator)
+	if !strings.HasPrefix(relative, prefix) || len(relative) == len(prefix) {
+		return "", fmt.Errorf("incident store path escapes incidents scope")
+	}
+	return filepath.ToSlash(strings.TrimPrefix(relative, prefix)), nil
+}
+
 func (s *RepositoryStore) writeJSONAtomic(fileName string, value any, mode os.FileMode) error {
-	relative, err := s.relative(fileName)
+	relative, err := s.capabilityPath(fileName)
 	if err != nil {
 		return err
 	}
-	return s.writeJSONAtomicRelative(relative, value, mode)
+	return s.ops.WriteJSONAtomicWithMode(relative, value, mode)
 }
 
 func (s *RepositoryStore) readFile(fileName string) ([]byte, error) {
-	relative, err := s.relative(fileName)
+	relative, err := s.capabilityPath(fileName)
 	if err != nil {
 		return nil, err
 	}
-	return s.fsRoot.ReadFile(relative)
+	var raw json.RawMessage
+	if err := s.ops.ReadJSON(relative, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 func (s *RepositoryStore) readDir(relative string) ([]os.DirEntry, error) {
-	dir, err := s.fsRoot.Open(relative)
+	relative, err := s.capabilityPath(relative)
 	if err != nil {
 		return nil, err
 	}
-	entries, readErr := dir.ReadDir(-1)
-	if closeErr := dir.Close(); readErr == nil {
-		readErr = closeErr
-	}
-	return entries, readErr
+	return s.ops.ReadDir(relative)
 }
 
 func (s *RepositoryStore) readReceipt(fileName string) (appendReceipt, bool, error) {
 	b, err := s.readFile(fileName)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return appendReceipt{}, false, nil
 	}
 	if err != nil {
@@ -883,7 +848,7 @@ func (s *RepositoryStore) readReceiptKind(fileName string) (string, error) {
 
 func (s *RepositoryStore) readMergeReceipt(fileName string) (mergeReceipt, bool, error) {
 	b, err := s.readFile(fileName)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return mergeReceipt{}, false, nil
 	}
 	if err != nil {
@@ -910,7 +875,7 @@ func (s *RepositoryStore) readMergeReceipt(fileName string) (mergeReceipt, bool,
 
 func (s *RepositoryStore) readMergeIntent(fileName string) (mergeIntent, bool, error) {
 	b, err := s.readFile(fileName)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return mergeIntent{}, false, nil
 	}
 	if err != nil {
@@ -954,65 +919,8 @@ func mustMarshal(value any) json.RawMessage {
 	return b
 }
 
-func (s *RepositoryStore) writeJSONAtomicRelative(fileName string, value any, mode os.FileMode) error {
-	b, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n')
-	parent := filepath.Dir(fileName)
-	dirMode := os.FileMode(0o755)
-	if filepath.Base(parent) == "mutations" || filepath.Base(parent) == "merge-intents" || filepath.Base(parent) == ".store" {
-		dirMode = 0o700
-	}
-	if err := s.fsRoot.MkdirAll(parent, dirMode); err != nil {
-		return err
-	}
-	if dirMode == 0o700 {
-		if err := s.fsRoot.Chmod(parent, dirMode); err != nil {
-			return err
-		}
-	}
-	random := make([]byte, 16)
-	if _, err := rand.Read(random); err != nil {
-		return err
-	}
-	tmpName := filepath.Join(parent, ".incident-"+hex.EncodeToString(random))
-	tmp, err := s.fsRoot.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_RDWR, mode)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = s.fsRoot.Remove(tmpName) }()
-	_, err = tmp.Write(b)
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return err
-	}
-	if err := s.fsRoot.Rename(tmpName, fileName); err != nil {
-		return err
-	}
-	return s.syncDir(parent)
-}
-
 func eventsEqual(left, right incidents.Event) bool {
 	a, _ := json.Marshal(left)
 	b, _ := json.Marshal(right)
 	return bytes.Equal(a, b)
-}
-
-func (s *RepositoryStore) syncDir(dir string) error {
-	f, err := s.fsRoot.Open(dir)
-	if err != nil {
-		return err
-	}
-	err = f.Sync()
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-	return err
 }

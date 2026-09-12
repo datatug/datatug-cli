@@ -212,6 +212,8 @@ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/ingitdb/dalgo2ingitdb v0.5.0 h1:4fh+9bC6pLdcH7TEseLSDQUlk0hBfJK5oEfXsAAvmos=
 github.com/ingitdb/dalgo2ingitdb v0.5.0/go.mod h1:FI/QbOLIGOzKyqryo1Pf5A7rhTJ0lcTnK7h6Hl1YhZ8=
+github.com/ingitdb/dalgo2ingitdb v0.6.0 h1:gLSnoCzmXdDrIm1djN7Kgx+Pcp3DuwNj9MWBmLCLXS0=
+github.com/ingitdb/dalgo2ingitdb v0.6.0/go.mod h1:l39kP1q/rbYxKroM9vAVvXDlD6BLYd+LJL+tv7nQoIY=
 github.com/ingitdb/dalgo2ingitdb4github v0.2.3 h1:9cOBFdWWtUREBkbnL5hvO7fT0gYzl08hLHy3jesiIJI=
 github.com/ingitdb/dalgo2ingitdb4github v0.2.3/go.mod h1:4AJrmWiyCBI+9pwLQq1PE8EFlgNfHboXXL4C/UJ5Tlg=
 github.com/ingitdb/ingitdb-go/ingitdb v0.6.0 h1:TzPGAMH2KM6ThgoZBV6dqnT02MVN5fd5et9aB5iI4SY=

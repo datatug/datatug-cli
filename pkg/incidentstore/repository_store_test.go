@@ -125,11 +125,11 @@ func TestRepositoryStoreRecoversInterruptedMerge(t *testing.T) {
 	_, err = store.Merge(context.Background(), mutation)
 	require.ErrorIs(t, err, crash)
 
-	blockedAppend := noteMutation(t, "other-write", into.Incident)
-	_, err = store.Append(context.Background(), blockedAppend)
-	require.ErrorIs(t, err, incidents.ErrSequenceConflict)
-
 	store.afterMergeStep = nil
+	recoveredProjection, err := store.Projection(context.Background(), into.Incident, nil)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), recoveredProjection.LastSeq)
+
 	recovered, err := store.Merge(context.Background(), mutation)
 	require.NoError(t, err)
 	require.True(t, recovered.Replayed)
@@ -140,6 +140,34 @@ func TestRepositoryStoreRecoversInterruptedMerge(t *testing.T) {
 	sourceEvents, err := store.Events(context.Background(), source.Incident, 0)
 	require.NoError(t, err)
 	require.Len(t, sourceEvents, 3)
+}
+
+func TestRepositoryStoreRecoversPreparedAppendBeforeNextMutation(t *testing.T) {
+	store := newTestStore(t)
+	first := createdMutation(t, "create-1", "INC-1")
+	crash := errors.New("simulated crash after append prepare")
+	store.afterAppendPrepare = func() error { return crash }
+
+	_, err := store.Append(context.Background(), first)
+	require.ErrorIs(t, err, crash)
+
+	store.afterAppendPrepare = nil
+	second := noteMutation(t, "note-1", first.Incident)
+	result, err := store.Append(context.Background(), second)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), result.Event.Seq)
+
+	replayed, err := store.Append(context.Background(), first)
+	require.NoError(t, err)
+	require.True(t, replayed.Replayed)
+	require.Equal(t, uint64(1), replayed.Event.Seq)
+
+	events, err := store.Events(context.Background(), first.Incident, 0)
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	for i, event := range events {
+		require.Equal(t, uint64(i+1), event.Seq)
+	}
 }
 
 func TestRepositoryStoreRejectsMutationIDReuseAcrossKinds(t *testing.T) {
@@ -283,7 +311,7 @@ func TestRepositoryStoreRecoversPreparedReceiptAndIncompleteTail(t *testing.T) {
 	var receipt appendReceipt
 	require.NoError(t, json.Unmarshal(b, &receipt))
 	receipt.Committed = false
-	require.NoError(t, writeJSONAtomic(receiptPath, receipt, 0o600))
+	require.NoError(t, store.writeJSONAtomic(receiptPath, receipt, 0o600))
 
 	replayed, err := store.Append(context.Background(), mutation)
 	require.NoError(t, err)
@@ -343,9 +371,18 @@ func TestRepositoryStoreRejectsSymlinkedStoragePaths(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(store.root, "incidents"), 0o755))
 	require.NoError(t, os.Symlink(outside, filepath.Join(store.root, "incidents", "INC-1")))
 	_, err = store.Append(context.Background(), createdMutation(t, "create-1", "INC-1"))
-	require.ErrorContains(t, err, "contains symlink")
+	require.Error(t, err)
 	_, err = os.Stat(filepath.Join(outside, "events.jsonl"))
 	require.True(t, os.IsNotExist(err))
+
+	lockStore := newTestStore(t)
+	storeDir := filepath.Join(lockStore.root, "incidents", ".store")
+	require.NoError(t, os.MkdirAll(storeDir, 0o700))
+	outsideLock := filepath.Join(t.TempDir(), "lock")
+	require.NoError(t, os.WriteFile(outsideLock, nil, 0o600))
+	require.NoError(t, os.Symlink(outsideLock, filepath.Join(storeDir, "lock")))
+	_, err = lockStore.Append(context.Background(), createdMutation(t, "create-2", "INC-2"))
+	require.Error(t, err)
 }
 
 func newTestStore(t *testing.T) *RepositoryStore {
@@ -354,6 +391,7 @@ func newTestStore(t *testing.T) *RepositoryStore {
 		StoreID: "ops", Kind: incidents.StoreLocationDedicatedRepository,
 	}, t.TempDir())
 	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
 	store.now = func() time.Time { return time.Date(2026, 9, 12, 10, 0, 0, 0, time.UTC) }
 	return store
 }

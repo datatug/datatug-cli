@@ -19,24 +19,33 @@ func TestOpenLocationRoutesAllRepositoryKinds(t *testing.T) {
 	}
 	cases := []struct {
 		name     string
+		incident string
 		location incidents.StoreLocation
 		root     string
 	}{
-		{name: "project", location: incidents.StoreLocation{StoreID: "project", Kind: incidents.StoreLocationProjectRepository, Project: &project}, root: roots.Projects[project]},
-		{name: "dedicated", location: incidents.StoreLocation{StoreID: "dedicated", Kind: incidents.StoreLocationDedicatedRepository}, root: roots.Dedicated["dedicated"]},
-		{name: "application", location: incidents.StoreLocation{StoreID: "application", Kind: incidents.StoreLocationApplicationRepository}, root: roots.Application},
+		{name: "project", incident: "INC-PROJECT", location: incidents.StoreLocation{StoreID: "project", Kind: incidents.StoreLocationProjectRepository, Project: &project}, root: roots.Projects[project]},
+		{name: "dedicated", incident: "INC-DEDICATED", location: incidents.StoreLocation{StoreID: "dedicated", Kind: incidents.StoreLocationDedicatedRepository}, root: roots.Dedicated["dedicated"]},
+		{name: "application", incident: "INC-APPLICATION", location: incidents.StoreLocation{StoreID: "application", Kind: incidents.StoreLocationApplicationRepository}, root: roots.Application},
 	}
+	allRoots := []string{roots.Application, roots.Dedicated["dedicated"], roots.Projects[project]}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			store, err := OpenLocation(testCase.location, roots)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, store.Close()) })
-			mutation := createdMutation(t, "create-1", "INC-1")
+			mutation := createdMutation(t, "create-1", testCase.incident)
 			mutation.Incident.StoreID = testCase.location.StoreID
 			_, err = store.Append(context.Background(), mutation)
 			require.NoError(t, err)
-			_, err = os.Stat(filepath.Join(testCase.root, "incidents", "INC-1", "events.jsonl"))
+			_, err = os.Stat(filepath.Join(testCase.root, "incidents", testCase.incident, "events.jsonl"))
 			require.NoError(t, err)
+			for _, otherRoot := range allRoots {
+				if otherRoot == testCase.root {
+					continue
+				}
+				_, err = os.Stat(filepath.Join(otherRoot, "incidents", testCase.incident, "events.jsonl"))
+				require.True(t, os.IsNotExist(err), "store %s must not fall back to root %s", testCase.name, otherRoot)
+			}
 		})
 	}
 }

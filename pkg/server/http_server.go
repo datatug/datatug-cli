@@ -153,7 +153,7 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	// OPTIONS-preflight half of this same gap (endpoints.IsSupportedOrigin,
 	// datatug-cli's own separate check) IS fixed either way, since that
 	// function is entirely local.
-	security.AddKnownHosts("datatug.app")
+	security.AddKnownHosts("datatug.app", "app.incidentius.com")
 
 	router := httprouter.New()
 	router.GlobalOPTIONS = http.HandlerFunc(globalOptionsHandler)

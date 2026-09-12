@@ -14,7 +14,7 @@ func IsSupportedOrigin(origin string) bool {
 		return true
 	}
 	switch origin {
-	case "https://datatug.app":
+	case "https://datatug.app", "https://app.incidentius.com":
 		return true
 	default:
 		return strings.HasPrefix(origin, "https://") && strings.HasSuffix(origin, ".datatug.app")

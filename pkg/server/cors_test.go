@@ -72,6 +72,17 @@ func TestServeHTTP_CORS_DatatugApp(t *testing.T) {
 		}
 	})
 
+	t.Run("https://app.incidentius.com is allowed", func(t *testing.T) {
+		resp := getWithOrigin(t, summaryURL, "https://app.incidentius.com")
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "https://app.incidentius.com" {
+			t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "https://app.incidentius.com")
+		}
+	})
+
 	t.Run("an unrelated origin is still refused", func(t *testing.T) {
 		resp := getWithOrigin(t, summaryURL, "https://evil.example.com")
 		defer func() { _ = resp.Body.Close() }()

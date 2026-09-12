@@ -1,0 +1,193 @@
+package accesspolicies
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/dal-go/dalgo/access"
+	"github.com/dal-go/record"
+)
+
+// ProjectsCollection and ProjectQueriesCollection name DataTug project files
+// as DALgo policy resources: a saved query is the record
+// /datatug_projects/{projectID}/queries/{queryID}, where queryID is the
+// query's canonical, folder-qualified ID kept as one path segment. The
+// "datatug_" prefix keeps project files apart from every data source's own
+// collection names, so a grant on a data collection (path: /Customer) never
+// grants a project write, while a catch-all grant (path: /**) - the
+// demo-project-1 admin rule set - covers them.
+//
+// The separation rests on that prefix alone: policy paths share one
+// namespace, so a data source with a collection literally named
+// "datatug_projects" would put its rows under the same paths as project
+// files, and a grant written for either would apply to both. Never give a
+// data collection that name.
+const (
+	ProjectsCollection       = "datatug_projects"
+	ProjectQueriesCollection = "queries"
+)
+
+// ProjectQueryResource returns the policy resource for the saved query
+// queryID of project projectID. The query id is kept in its canonical
+// caseless form (CanonicalQueryID), so every spelling a file system
+// resolves to the same query file names the same resource.
+func ProjectQueryResource(projectID, queryID string) access.Resource {
+	project := record.NewKeyWithID(ProjectsCollection, projectID)
+	return access.RecordResourceForKey(record.NewKeyWithParentAndID(project, ProjectQueriesCollection, CanonicalQueryID(queryID)))
+}
+
+// WriteOptions is the identity and policy set a project write is decided
+// under - a `datatug serve` session's fixed principal and loaded policies.
+type WriteOptions struct {
+	// Principal is the caller; nil means no principal, which no grant binds.
+	Principal *access.Principal
+	// Policies are the loaded documents; every one must allow the write.
+	Policies []Loaded
+	// Unrestricted is the explicit --no-policies local-owner profile.
+	Unrestricted bool
+}
+
+// WriteDeniedError reports a refused project write. It names the deciding
+// policy, the operation, the resource and a reason, and never the policy
+// file's location on the serving machine. It unwraps to
+// access.ErrAccessDenied.
+type WriteDeniedError struct {
+	// Policy is the name of the policy that refused the write; empty when
+	// the write was refused by default, with no policy deciding.
+	Policy    string
+	Operation access.Operations
+	Resource  string
+	Reason    string
+}
+
+func (e *WriteDeniedError) Error() string {
+	if e.Policy == "" {
+		return fmt.Sprintf("%v: %s on %s: %s", access.ErrAccessDenied, e.Operation, e.Resource, e.Reason)
+	}
+	return fmt.Sprintf("%v: policy %q does not allow %s on %s: %s", access.ErrAccessDenied, e.Policy, e.Operation, e.Resource, e.Reason)
+}
+
+// Unwrap makes errors.Is(err, access.ErrAccessDenied) true.
+func (e *WriteDeniedError) Unwrap() error { return access.ErrAccessDenied }
+
+// AuthorizeWrite decides whether o's principal may perform operation (one
+// of Insert, Set, Update or Delete) on resource, returning nil when it may
+// and a *WriteDeniedError when it may not.
+//
+// It is for project files only - saved queries, named by
+// ProjectQueryResource - and must never decide a data write. It refuses any
+// grant that holds only under a row condition, check or field list, and it
+// evaluates each policy's project-write view, whose query ids are
+// canonicalized; a data write must go through DALgo's residual-enforcing
+// write session, which checks those conditions against the rows written.
+// Nor may grants from any other source, such as incident-scoped read
+// grants, be appended to o.Policies: every policy listed must allow a
+// write, and none of them is written to widen one.
+//
+// Deny by default:
+//
+//   - An Unrestricted session is the explicit --no-policies local-owner
+//     profile and is allowed.
+//   - Otherwise at least one policy must be loaded and every loaded policy
+//     must allow the write, for the principal on the context - the same
+//     intersection a secured session applies to reads. A principal no
+//     grant binds, a read-only grant and a missing principal are all
+//     denied.
+//   - A grant that holds only under a row condition, a check or a field
+//     allow-list is denied too: a project file has no rows or fields to
+//     evaluate it against, so such a grant cannot be enforced here.
+//
+// How a policy names a query. A saved query is the record
+// /datatug_projects/{projectID}/queries/{queryID} (ProjectQueryResource):
+//
+//   - queryID is the query's folder-qualified id kept as ONE path segment.
+//     A policy names the query "revenue" in folder "reports" as
+//     /datatug_projects/demo/queries/reports%2Frevenue, the "/" inside the
+//     id percent-encoded, and every query in every folder as
+//     /datatug_projects/demo/queries/* (or .../queries/**).
+//   - Query ids match by CanonicalQueryID on both sides, the resource and
+//     every query id in the loaded policies' paths: case- and
+//     Unicode-normalization-insensitively, so "Revenue", "REVENUE" and
+//     "revenue" are one query to every rule, as they are one file on APFS.
+//   - Folder-scoped rules are not supported. A rule path below the
+//     query-id segment (.../queries/reports/**, .../queries/reports/x) can
+//     never match a query, so rather than let such a rule silently not
+//     apply, every project query write is refused while a policy holding
+//     one is loaded, and the refusal names the rule. Reads are unaffected:
+//     they run through the policy as loaded.
+func AuthorizeWrite(ctx context.Context, o WriteOptions, operation access.Operations, resource access.Resource) error {
+	switch operation {
+	case access.Insert, access.Set, access.Update, access.Delete:
+	default:
+		return fmt.Errorf("accesspolicies: %s is not a single project-write operation", operation)
+	}
+	if o.Unrestricted {
+		return nil
+	}
+	if len(o.Policies) == 0 {
+		return &WriteDeniedError{Operation: operation, Resource: resource.String(),
+			Reason: "no access policy is loaded, and project writes are denied by default"}
+	}
+	if o.Principal != nil {
+		ctx = access.WithPrincipal(ctx, *o.Principal)
+		if o.Principal.ID != nil {
+			ctx = access.WithCurrentUser(ctx, o.Principal.ID)
+		}
+	}
+	request := access.Request{Operation: operation, Resources: []access.Resource{resource}}
+	for _, item := range o.Policies {
+		name := policyName(item)
+		if item.writes == nil {
+			return &WriteDeniedError{Policy: name, Operation: operation, Resource: resource.String(),
+				Reason: "the policy was not loaded from its document (accesspolicies.LoadFile or DecodeLoaded), so it cannot decide a project write"}
+		}
+		if item.writes.refusal != "" {
+			return &WriteDeniedError{Policy: name, Operation: operation, Resource: resource.String(), Reason: item.writes.refusal}
+		}
+		decision := item.writes.policy.Decide(ctx, request)
+		if !decision.Allowed {
+			reason := decision.Explanation
+			if reason == "" {
+				reason = "no rule allows it"
+			}
+			return &WriteDeniedError{Policy: name, Operation: operation, Resource: resource.String(), Reason: reason}
+		}
+		if constrainedWrite(decision) {
+			return &WriteDeniedError{Policy: name, Operation: operation, Resource: resource.String(),
+				Reason: "the grant holds only under a row condition, check or field list, which a project file write cannot enforce"}
+		}
+	}
+	return nil
+}
+
+// policyName is item's policy name, or "" when it has no policy.
+func policyName(item Loaded) string {
+	if item.Policy == nil {
+		return ""
+	}
+	return item.Policy.Name()
+}
+
+// constrainedWrite reports whether an allow decision still carries a
+// constraint the caller would have to enforce: a row residual, or a write
+// residual with conditional alternatives or a terminal rule restricted by a
+// where, a check or a field allow-list.
+func constrainedWrite(decision access.Decision) bool {
+	for _, residual := range decision.Residuals {
+		if residual != nil {
+			return true
+		}
+	}
+	for _, write := range decision.Writes {
+		if write == nil {
+			continue
+		}
+		if len(write.Alternatives) > 0 || write.Terminal == nil {
+			return true
+		}
+		if t := write.Terminal; t.Where != nil || t.Check != nil || len(t.Fields) > 0 {
+			return true
+		}
+	}
+	return false
+}

@@ -214,7 +214,27 @@ func httpStatusFor(code apicontract.ErrorCode) int {
 	if status := code.HTTPStatus(); status != 0 {
 		return status
 	}
+	if code == codeRevisionConflict {
+		return http.StatusConflict
+	}
 	return http.StatusInternalServerError
+}
+
+// codeRevisionConflict is REVISION_CONFLICT (409): a project write whose
+// optimistic-concurrency condition failed - queries/capture's create found
+// a query already stored at the location, or its update named a revision
+// that is no longer current - so nothing was written. It is not
+// STALE_CONTEXT, which a client recovers from by calling agent-info again.
+// It mirrors datatug-core apicontract.ErrCodeRevisionConflict, added with
+// the capture contract but not yet in a tagged release, and is a lead
+// assumption pending an api-contract.md amendment of the closed code set.
+// Once go.mod moves to a release that has it, use the core constant and
+// drop the explicit case in httpStatusFor.
+const codeRevisionConflict apicontract.ErrorCode = "REVISION_CONFLICT"
+
+// newRevisionConflict builds a 409 REVISION_CONFLICT error naming field.
+func newRevisionConflict(field, message string) *contractError {
+	return newContractError(codeRevisionConflict, message, field)
 }
 
 // envelope converts e into the wire apicontract.ErrorEnvelope, stamping a

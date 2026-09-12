@@ -19,9 +19,10 @@ When DataTug agent is started with a `serve` command it listens on HTTP port (*b
 | DELETE | /entities/delete_entity | |
 |  **Queries** |
 | GET | /queries/all_queries | |
-| POST | /queries/create_query | |
-| PUT | /queries/save_query | |
-| DELETE | /queries/delete_query | |
+| POST | /queries/create_query | Legacy create-or-replace; needs `--allow-writes` and a project-write grant for the serving principal |
+| PUT | /queries/update_query | Legacy create-or-replace; same authorization as create_query |
+| DELETE | /queries/delete_query | Needs `--allow-writes` and a project-write grant |
+| POST | /queries/capture | Save as project query: an atomic, revision-checked create (`ifNoneMatch`) or update (`ifMatch`) of a DTQL query pair; same authorization |
 |  **Recordsets** |
 | GET | /data/recordsets | |
 | GET | /data/recordset_definition | |

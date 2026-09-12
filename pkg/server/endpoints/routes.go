@@ -62,6 +62,10 @@ func queriesRoutes(path string, router router, wrap wrapper, writeOnly bool, cap
 	route(router, wrap, http.MethodPost, path+"/queries/create_query", requireWriteCapability(caps, createQuery))
 	route(router, wrap, http.MethodPut, path+"/queries/update_query", requireWriteCapability(caps, updateQuery))
 	route(router, wrap, http.MethodDelete, path+"/queries/delete_query", requireWriteCapability(caps, deleteQuery))
+	// queries/capture: "Save as project query" (Phase 2 task 2). Behind the
+	// process write capability here, then authorized for the serving
+	// principal inside the handler (api.AuthorizeProjectQueryWrite).
+	route(router, wrap, http.MethodPost, path+"/queries/capture", requireWriteCapability(caps, captureQueryHandler))
 }
 
 func boardsRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {

@@ -20,6 +20,24 @@ import (
 var agentHost string
 var agentPort int
 
+// requestReadTimeout and responseWriteTimeout are http.Server's own
+// deadlines for one request.
+//
+// The write deadline's clock starts when the request's headers have been
+// read and covers everything after it: reading the body (up to
+// requestReadTimeout), the handler's own work, and writing the response. A
+// query write bounds its wait on the query store by querywrite.Timeout and
+// can commit at the very end of that wait, so the write deadline has to
+// outlast the whole sequence - a body read that took its full allowance
+// followed by a store write that took its own. Otherwise a query write
+// could commit while its response never reached the client, which is the
+// one outcome the route's 504 contract must never produce: a timeout there
+// means nothing was written. timeouts_test.go pins the relationship.
+const (
+	requestReadTimeout   = 10 * time.Second
+	responseWriteTimeout = 30 * time.Second
+)
+
 type HttpServer struct {
 	s *http.Server
 }
@@ -154,8 +172,8 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 
 	s.s = &http.Server{
 		Addr:           fmt.Sprintf("%v:%v", agentHost, agentPort),
-		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   10 * time.Second,
+		ReadTimeout:    requestReadTimeout,
+		WriteTimeout:   responseWriteTimeout,
 		MaxHeaderBytes: 1 << 16,
 		Handler:        router,
 	}

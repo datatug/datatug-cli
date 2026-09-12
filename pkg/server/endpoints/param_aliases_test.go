@@ -21,6 +21,10 @@ import (
 // agent.service.ts, project-item-service.ts) — with the pre-existing
 // default kept working too, so no existing caller regresses.
 func TestKeepAsIsRoutesAcceptContractAndClientParamNames(t *testing.T) {
+	// Every subtest resolves project "p1" (fillProjectRef's
+	// api.ResolveStoreID); serve it here rather than rely on a session an
+	// earlier test left configured.
+	configureServedProjects(t, map[string]string{"p1": "/tmp/p1"})
 	t.Run("GET /environment-summary", func(t *testing.T) {
 		var got dto.ProjectItemRef
 		saved := getEnvironmentSummaryFunc

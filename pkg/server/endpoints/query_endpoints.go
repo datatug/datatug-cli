@@ -278,21 +278,36 @@ func getQueryHandler(w http.ResponseWriter, r *http.Request) {
 var createQuery = func(w http.ResponseWriter, r *http.Request) {
 	var ref dto.ProjectRef
 	var request dto.CreateQuery
+	lw := newLegacyQueryWriteResponse(w, "queries/create_query", "save", "saved")
 	saveFunc := func(ctx context.Context) (apicore.ResponseDTO, error) {
-		return api.CreateQuery(ctx, request)
+		query, err := api.CreateQuery(ctx, request)
+		return query, lw.observe(err)
 	}
-	createProjectItem(w, r, &ref, &request, saveFunc)
+	createProjectItem(lw, r, &ref, &request, saveFunc)
 }
 
 // updateQuery handles update query endpoint
 func updateQuery(w http.ResponseWriter, r *http.Request) {
 	var ref dto.ProjectItemRef
 	var request dto.UpdateQuery
+	lw := newLegacyQueryWriteResponse(w, "queries/update_query", "save", "saved")
 	saveFunc := func(ctx context.Context) (apicore.ResponseDTO, error) {
-		return api.UpdateQuery(ctx, request)
+		query, err := api.UpdateQuery(ctx, request)
+		return query, lw.observe(err)
 	}
-	saveProjectItem(w, r, &ref, &request, saveFunc)
+	saveProjectItem(lw, r, &ref, &request, saveFunc)
 }
 
 // deleteQuery handles delete query endpoint
-var deleteQuery = deleteProjItem(api.DeleteQuery)
+var deleteQuery = legacyQueryDelete(api.DeleteQuery)
+
+// legacyQueryDelete is deleteProjItem(del) answering through
+// legacyQueryWriteResponse.
+func legacyQueryDelete(del func(ctx context.Context, ref dto.ProjectItemRef) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		lw := newLegacyQueryWriteResponse(w, "queries/delete_query", "delete", "deleted")
+		deleteProjItem(func(ctx context.Context, ref dto.ProjectItemRef) error {
+			return lw.observe(del(ctx, ref))
+		})(lw, r)
+	}
+}

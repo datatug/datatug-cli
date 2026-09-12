@@ -48,6 +48,26 @@ func writeContractResponse(w http.ResponseWriter, r *http.Request, err error, co
 	}
 }
 
+// writeContractResponseStatus writes a success envelope with an explicit
+// status - for a success other than 200 OK, such as queries/capture's
+// 201 Created.
+func writeContractResponseStatus(w http.ResponseWriter, r *http.Request, status int, content any) {
+	writeCORSOrigin(w, r)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if encErr := json.NewEncoder(w).Encode(content); encErr != nil {
+		log.Printf("contract endpoint: failed to encode response: %v", encErr)
+	}
+}
+
+// unclassifiedErrorMessage is the body of every 500 writeContractError
+// answers on its own. An unclassified error's own text is written by
+// whatever failed - a store, a driver, the OS - and can hold an absolute
+// server path, a connection string or a stored value, none of which may
+// reach a client. The text goes to the agent log under the same request ID
+// the client is given, so an operator can still tie the two together.
+const unclassifiedErrorMessage = "the request could not be completed; the agent log has the details under this request ID"
+
 // writeContractError maps err to the appendix's error envelope. A
 // *contractError is written as-is; secureread.ErrAccessDenied becomes
 // ACCESS_DENIED; everything else becomes INTERNAL — actually INVALID_REQUEST
@@ -57,7 +77,8 @@ func writeContractResponse(w http.ResponseWriter, r *http.Request, err error, co
 // at all (still shaped as {error:{...}} for a consistent envelope, with code
 // "INTERNAL" — outside the appendix's closed set, but never returned for a
 // contract-conformant caller: every path this stream added to the request
-// lifecycle returns a typed *contractError instead).
+// lifecycle returns a typed *contractError instead), carrying
+// unclassifiedErrorMessage rather than the error's own text.
 func writeContractError(w http.ResponseWriter, r *http.Request, err error) {
 	writeCORSOrigin(w, r)
 	w.Header().Set("Content-Type", "application/json")
@@ -69,7 +90,8 @@ func writeContractError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, secureread.ErrAccessDenied):
 		ce = contractErrAccessDenied(err.Error())
 	default:
-		ce = &contractError{Code: codeInternal, Message: err.Error(), RequestID: newRequestID()}
+		ce = &contractError{Code: codeInternal, Message: unclassifiedErrorMessage, RequestID: newRequestID()}
+		log.Printf("%s: request %s: answered 500 INTERNAL: %v", r.URL.Path, ce.RequestID, err)
 	}
 	status := httpStatusFor(ce.Code)
 	if ce.Code == codeInternal {

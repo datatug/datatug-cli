@@ -115,8 +115,8 @@ github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMF
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/cliformat v0.0.3 h1:d9p5vo7r8BH6qSKyTHQ9Al2sT6QHsQTK9KRlihaJdIU=
 github.com/datatug/cliformat v0.0.3/go.mod h1:DwX9tWHiyH+vZtbVEVOyHOEOw1Km9AzhgHoqI0PowAc=
-github.com/datatug/datatug-core v0.28.1 h1:iBuQ0RPxzgy6CiANZFr+K0vC5QlKXhD43jCUccr16yQ=
-github.com/datatug/datatug-core v0.28.1/go.mod h1:ODLMXUQ1jtOf7QjtNGWrws3JB/EAIk/PUTrcfydvHEs=
+github.com/datatug/datatug-core v0.29.0 h1:vbMAOLqYt3+QdNMsRwoRO5vFDwDG7mE0AWRdhAg+a6I=
+github.com/datatug/datatug-core v0.29.0/go.mod h1:ODLMXUQ1jtOf7QjtNGWrws3JB/EAIk/PUTrcfydvHEs=
 github.com/datatug/sql2csv v0.0.0-20260826045256-b0d582f72f50 h1:c6sYh6FI5mQFnc2wVCx84oKjfd7pVYGijtgSesgwKnI=
 github.com/datatug/sql2csv v0.0.0-20260826045256-b0d582f72f50/go.mod h1:AFcHWXF0BoVP8Z3BEvBDWBpFcBRMs7HdAhbt2M0XGzI=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
@@ -210,8 +210,8 @@ github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUq
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/ingitdb/dalgo2ingitdb v0.5.0 h1:4fh+9bC6pLdcH7TEseLSDQUlk0hBfJK5oEfXsAAvmos=
-github.com/ingitdb/dalgo2ingitdb v0.5.0/go.mod h1:FI/QbOLIGOzKyqryo1Pf5A7rhTJ0lcTnK7h6Hl1YhZ8=
+github.com/ingitdb/dalgo2ingitdb v0.6.0 h1:gLSnoCzmXdDrIm1djN7Kgx+Pcp3DuwNj9MWBmLCLXS0=
+github.com/ingitdb/dalgo2ingitdb v0.6.0/go.mod h1:l39kP1q/rbYxKroM9vAVvXDlD6BLYd+LJL+tv7nQoIY=
 github.com/ingitdb/dalgo2ingitdb4github v0.2.3 h1:9cOBFdWWtUREBkbnL5hvO7fT0gYzl08hLHy3jesiIJI=
 github.com/ingitdb/dalgo2ingitdb4github v0.2.3/go.mod h1:4AJrmWiyCBI+9pwLQq1PE8EFlgNfHboXXL4C/UJ5Tlg=
 github.com/ingitdb/ingitdb-go/ingitdb v0.6.0 h1:TzPGAMH2KM6ThgoZBV6dqnT02MVN5fd5et9aB5iI4SY=

@@ -26,7 +26,7 @@ require (
 	github.com/dal-go/dalgo2sqlite v0.1.11
 	github.com/dal-go/record v0.1.3
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.28.1
+	github.com/datatug/datatug-core v0.29.0
 	github.com/datatug/sql2csv v0.0.0-20260826045256-b0d582f72f50
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/filetug/filetug v0.3.0
@@ -35,7 +35,7 @@ require (
 	github.com/google/go-github/v91 v91.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
-	github.com/ingitdb/dalgo2ingitdb v0.5.0
+	github.com/ingitdb/dalgo2ingitdb v0.6.0
 	github.com/ingitdb/ingitdb-go/ingitdb v0.6.0
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/go-sqlite3 v1.14.50

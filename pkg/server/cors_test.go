@@ -24,6 +24,22 @@ func getWithOrigin(t *testing.T, requestURL, origin string) *http.Response {
 	return resp
 }
 
+func optionsWithOrigin(t *testing.T, requestURL, origin, method string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodOptions, requestURL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Access-Control-Request-Method", method)
+	req.Header.Set("Access-Control-Request-Headers", "authorization,content-type")
+	resp, err := testHTTPClient.Do(req)
+	if err != nil {
+		t.Fatalf("OPTIONS %s (Origin: %s): %v", requestURL, origin, err)
+	}
+	return resp
+}
+
 // TestServeHTTP_CORS_DatatugApp is the regression test for half of lane
 // C5's finding (datatug-apps PR #59, verified with curl): the agent's
 // origin check (sneat-go-core/security.VerifyOrigin, invoked by every
@@ -72,11 +88,48 @@ func TestServeHTTP_CORS_DatatugApp(t *testing.T) {
 		}
 	})
 
+	t.Run("https://app.incidentius.com is allowed", func(t *testing.T) {
+		resp := getWithOrigin(t, summaryURL, "https://app.incidentius.com")
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "https://app.incidentius.com" {
+			t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "https://app.incidentius.com")
+		}
+	})
+
 	t.Run("an unrelated origin is still refused", func(t *testing.T) {
 		resp := getWithOrigin(t, summaryURL, "https://evil.example.com")
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusForbidden {
 			t.Fatalf("status = %d, want 403 (the origin check must still refuse strangers)", resp.StatusCode)
+		}
+	})
+}
+
+func TestServeHTTP_CORS_IncidentiusPreflight(t *testing.T) {
+	baseURL := startServeHTTPWithSession(t, nil, unrestrictedTestSession(t))
+
+	t.Run("exact production origin is allowed", func(t *testing.T) {
+		resp := optionsWithOrigin(t, baseURL+"/datatug/queries/create_query", "https://app.incidentius.com", http.MethodPost)
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("status = %d, want 204", resp.StatusCode)
+		}
+		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "https://app.incidentius.com" {
+			t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "https://app.incidentius.com")
+		}
+		if got := resp.Header.Get("Access-Control-Allow-Methods"); got != http.MethodPost {
+			t.Errorf("Access-Control-Allow-Methods = %q, want %q", got, http.MethodPost)
+		}
+	})
+
+	t.Run("near miss is refused", func(t *testing.T) {
+		resp := optionsWithOrigin(t, baseURL+"/datatug/queries/create_query", "https://app.incidentius.com:443", http.MethodPost)
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", resp.StatusCode)
 		}
 	})
 }

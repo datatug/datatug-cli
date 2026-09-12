@@ -52,8 +52,10 @@ proves protected writes. This distinction remains a task-24 acceptance item.
 Provider review PRs: dal-go/dalgo#159, dal-go/dalgo2sql#181,
 ingitdb/dalgo2ingitdb#9, openvaultdb/openvaultdb-go#18. Dependencies are immutable
 reachable review commits, without local replaces. Converge to observed release
-tags after the lead approves and the providers land. The lead owns DataTug
-landing; task 24 stays in progress until the whole wave and final E2E land.
+tags after the lead approves and the providers land. DataTug CLI #237 and Apps
+#138 landed through WB after the independent review. Task 24 stays in progress
+until the remaining browser write/Explain convergence and final whole-chain
+acceptance land.
 
 
 ## Verification, 2026-09-11
@@ -81,7 +83,13 @@ SQL `v0.14.0` and InGitDB adapter `v0.5.0` contain the exact reviewed code after
 WB landing. Their full trees match the inspected source commits, and the module
 graph comparison changes only the respective version labels. No local replaces
 are introduced. The HTTP adapter remains at its published main pseudo-version
-because that commit has no observed release tag. DataTug landing stays with the
-lead; current browser write/Explain convergence remains unfinished.
+because that commit has no observed release tag. DataTug CLI #237 landed at
+`dc33880a5badf674885a16bd2409c13446f31d07`; current browser write/Explain
+convergence remains unfinished.
 
 OpenVaultDB #18 landed at `caeac4d9f21bb0512c0fcacb749df5b181d3a79b` and released `v0.5.0`; its post-target CI passed. This CLI now consumes that release. Comparing the prior pinned owner revision with the release shows no Go source changes; the final resolved module graph changes only the SQL, InGitDB and OpenVaultDB version labels.
+
+The first CLI landing completed all required and release checks, but its squash
+subject did not match a conventional release type. The release workflow therefore
+correctly retained `v0.24.4`. This follow-up records the final publication state
+under a `fix:` change so the ACL-enabled CLI receives its own immutable patch tag.

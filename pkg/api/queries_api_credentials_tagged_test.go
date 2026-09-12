@@ -1,5 +1,3 @@
-//go:build datatug_query_capture
-
 package api
 
 import (

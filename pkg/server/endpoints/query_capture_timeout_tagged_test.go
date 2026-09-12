@@ -1,4 +1,4 @@
-//go:build datatug_query_capture && (darwin || linux)
+//go:build darwin || linux
 
 package endpoints
 

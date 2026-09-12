@@ -30,9 +30,8 @@ import (
 // CaptureQueryRequest, CapturedQuery, CapturedParameter, EntityFieldRef,
 // CaptureBindingOrigin, CaptureQueryResponse and CaptureProvenance field
 // for field (frozen fixtures capture_query_*.json). They are declared here
-// because no tagged datatug-core has them yet; the build-tagged
-// query_capture_fixtures_test.go pins them to core's fixtures. Replace them
-// with the apicontract types once go.mod moves to a release that has them.
+// to keep the endpoint's translation explicit; query_capture_fixtures_test.go
+// pins them to the released core fixtures.
 
 type captureQueryRequest struct {
 	Project           string        `json:"project"`

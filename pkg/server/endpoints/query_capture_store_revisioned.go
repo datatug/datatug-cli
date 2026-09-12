@@ -1,5 +1,3 @@
-//go:build datatug_query_capture
-
 package endpoints
 
 import (
@@ -11,11 +9,8 @@ import (
 	"github.com/strongo/validation"
 )
 
-// This file compiles only with -tags datatug_query_capture, against a
-// datatug-core that has RevisionedQueriesStore (Phase 2 task 2 storage) and
-// QueryDef.Purpose/Capture (the capture contract). Once go.mod moves to a
-// release with both, drop the build tag here and delete
-// query_capture_store_unavailable.go.
+// datatug-core v0.28.1 supplies RevisionedQueriesStore and the
+// QueryDef.Purpose/Capture contract, so this is the default production adapter.
 
 // adaptRevisionedStore wires datatug-core's revisioned store in: the
 // project store queries/capture writes through must implement

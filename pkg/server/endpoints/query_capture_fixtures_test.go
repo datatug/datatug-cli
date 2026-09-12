@@ -1,5 +1,3 @@
-//go:build datatug_query_capture
-
 package endpoints
 
 import (
@@ -14,8 +12,7 @@ import (
 )
 
 // These tests pin this package's capture wire types and error envelopes to
-// datatug-core's frozen capture fixtures (build tag datatug_query_capture:
-// they need a datatug-core with the capture contract).
+// datatug-core's frozen capture fixtures released in v0.28.1.
 
 func readCoreFixture(t *testing.T, name string) []byte {
 	t.Helper()

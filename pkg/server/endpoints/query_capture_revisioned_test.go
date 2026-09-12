@@ -1,5 +1,3 @@
-//go:build datatug_query_capture
-
 package endpoints
 
 import (
@@ -28,7 +26,7 @@ import (
 )
 
 // These tests run the capture endpoint against datatug-core's real
-// revisioned filestore (build tag datatug_query_capture).
+// revisioned filestore released in datatug-core v0.28.1.
 
 // realCaptureSetup serves a fresh semantic test project, committed to its
 // own Git repository, as principal as/roles with --allow-writes, through

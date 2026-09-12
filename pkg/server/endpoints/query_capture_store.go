@@ -12,15 +12,8 @@ import (
 // queries/capture needs: one conditional, atomic write of a query's
 // "<id>.query.json" / "<id>.query.dtql" pair.
 //
-// It is declared here, in this package's own terms, because no tagged
-// datatug-core release has the revisioned store yet. Its methods name types
-// (datatug.QueryWriteCondition, StoredQuery, QueryRevision) that the
-// datatug-core release go.mod pins does not have, so not even a runtime
-// type assertion against the real interface can be written until that
-// release exists. query_capture_store_revisioned.go (build tag
-// datatug_query_capture) adapts the real store to this interface;
-// query_capture_store_unavailable.go is the default build, which fails
-// closed.
+// It is declared here in this package's own terms to keep the endpoint
+// coupled to only the released revisioned-store behavior it needs.
 type queryCaptureStore interface {
 	// PutQuery persists record under condition, with
 	// RevisionedQueriesStore.PutQuery's semantics: it returns only once the

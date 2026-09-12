@@ -9,17 +9,9 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
-// embeddedCredentialReason is datatug-core's credential screen,
-// datatug.EmbeddedCredentialReason, which no datatug-core release that
-// go.mod can pin exports yet; credentials_core_copy.go is a verbatim copy.
-// When go.mod moves to a release that has it, the switch-over is this one
-// line:
-//
-//	var embeddedCredentialReason = datatug.EmbeddedCredentialReason
-//
-// followed by deleting credentials_core_copy.go. Everything in this package
-// screens through embeddedCredentialReason only, so nothing else changes.
-var embeddedCredentialReason = coreEmbeddedCredentialReason
+// embeddedCredentialReason is the released datatug-core credential screen.
+// Keeping the local name makes every CLI write path share that single policy.
+var embeddedCredentialReason = datatug.EmbeddedCredentialReason
 
 // CredentialReason reports why value appears to embed a secret - a URL or
 // DSN password, a secret key/value pair or JSON member, an HTTP credential

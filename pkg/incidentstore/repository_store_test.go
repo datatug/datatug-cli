@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -383,6 +385,39 @@ func TestRepositoryStoreRejectsSymlinkedStoragePaths(t *testing.T) {
 	require.NoError(t, os.Symlink(outsideLock, filepath.Join(storeDir, "lock")))
 	_, err = lockStore.Append(context.Background(), createdMutation(t, "create-2", "INC-2"))
 	require.Error(t, err)
+}
+
+func TestRepositoryStoreSymlinkSwapCannotEscapeRoot(t *testing.T) {
+	store := newTestStore(t)
+	created := createdMutation(t, "create-1", "INC-1")
+	_, err := store.Append(context.Background(), created)
+	require.NoError(t, err)
+
+	incidentDir := filepath.Join(store.root, "incidents", "INC-1")
+	heldDir := filepath.Join(store.root, "incidents", "INC-1-held")
+	outside := t.TempDir()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 250; i++ {
+			if renameErr := os.Rename(incidentDir, heldDir); renameErr != nil {
+				runtime.Gosched()
+				continue
+			}
+			if symlinkErr := os.Symlink(outside, incidentDir); symlinkErr == nil {
+				runtime.Gosched()
+				_ = os.Remove(incidentDir)
+			}
+			_ = os.Rename(heldDir, incidentDir)
+		}
+	}()
+	for i := 0; i < 250; i++ {
+		_, _ = store.Append(context.Background(), noteMutation(t, "race-note-"+strconv.Itoa(i), created.Incident))
+	}
+	<-done
+
+	_, err = os.Stat(filepath.Join(outside, "events.jsonl"))
+	require.True(t, os.IsNotExist(err), "a path swap must never redirect incident events outside the opened root")
 }
 
 func newTestStore(t *testing.T) *RepositoryStore {

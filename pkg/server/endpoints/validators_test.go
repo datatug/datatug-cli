@@ -15,4 +15,8 @@ func TestIsSupportedOrigin(t *testing.T) {
 	assert.True(t, IsSupportedOrigin("https://127.0.0.1:8971"))
 	assert.False(t, IsSupportedOrigin("https://www.example.com"))
 	assert.False(t, IsSupportedOrigin("http://www.example.com"))
+	assert.False(t, IsSupportedOrigin("http://app.incidentius.com"))
+	assert.False(t, IsSupportedOrigin("https://app.incidentius.com:443"))
+	assert.False(t, IsSupportedOrigin("https://test.app.incidentius.com"))
+	assert.False(t, IsSupportedOrigin("https://app.incidentius.com/path"))
 }

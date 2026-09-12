@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/datatug/datatug-core/pkg/incidents"
 	"github.com/stretchr/testify/require"
@@ -49,7 +50,9 @@ func TestRepositoryStoreRejectsInvalidRequests(t *testing.T) {
 
 func TestRepositoryStoreRejectsInvalidRootsAndPaths(t *testing.T) {
 	location := incidents.StoreLocation{StoreID: "ops", Kind: incidents.StoreLocationDedicatedRepository}
-	_, err := NewRepositoryStore(incidents.StoreLocation{}, t.TempDir())
+	_, err := OpenLocation(incidents.StoreLocation{}, RepositoryRoots{})
+	require.Error(t, err)
+	_, err = NewRepositoryStore(incidents.StoreLocation{}, t.TempDir())
 	require.Error(t, err)
 	_, err = NewRepositoryStore(location, filepath.Join(t.TempDir(), "missing"))
 	require.Error(t, err)
@@ -77,6 +80,34 @@ func TestRepositoryStoreRejectsInvalidRootsAndPaths(t *testing.T) {
 
 	_, err = OpenLocation(location, RepositoryRoots{})
 	require.ErrorContains(t, err, "repository root is not configured")
+
+	blockedMetadataRoot := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(blockedMetadataRoot, "incidents"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(blockedMetadataRoot, "incidents", ".store"), nil, 0o600))
+	_, err = NewRepositoryStore(location, blockedMetadataRoot)
+	require.ErrorContains(t, err, "prepare private incident metadata")
+
+	missingManifestRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(missingManifestRoot, ".ingitdb", "access"), 0o700))
+	_, err = NewRepositoryStore(location, missingManifestRoot)
+	require.ErrorContains(t, err, "open incident DALgo store")
+
+	securedRoot := t.TempDir()
+	accessDir := filepath.Join(securedRoot, ".ingitdb", "access")
+	require.NoError(t, os.MkdirAll(accessDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(accessDir, "manifest.yaml"), []byte("enabled: true\ndatabase: incidents-test\npolicies: [deny.yaml]\n"), 0o600))
+	policy := "apiVersion: dtql.org/access/v1\nkind: AccessPolicy\nmetadata: {name: deny-all}\ntarget: {database: incidents-test}\ncomposition: dalgo-hierarchical-v1\ndefault: deny\nscopes: []\n"
+	require.NoError(t, os.WriteFile(filepath.Join(accessDir, "deny.yaml"), []byte(policy), 0o600))
+	_, err = NewRepositoryStore(location, securedRoot)
+	require.ErrorContains(t, err, "open incident file capability")
+}
+
+func TestRepositoryStoreReportsAbsolutePathFailure(t *testing.T) {
+	location := incidents.StoreLocation{StoreID: "ops", Kind: incidents.StoreLocationDedicatedRepository}
+	testErr := errors.New("absolute path failed")
+	_, err := newRepositoryStore(location, ".", func(string) (string, error) { return "", testErr })
+	require.ErrorContains(t, err, "incident store root")
+	require.ErrorIs(t, err, testErr)
 }
 
 func TestRepositoryStoreRejectsCorruptMetadata(t *testing.T) {
@@ -220,6 +251,16 @@ func TestHasPendingMergeStates(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, pending)
 	})
+
+	t.Run("irrelevant entries", func(t *testing.T) {
+		store := newTestStore(t)
+		dir := filepath.Join(store.root, "incidents", ".store", "merge-intents")
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "directory.json"), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "note.txt"), nil, 0o600))
+		pending, err := store.hasPendingMerge("")
+		require.NoError(t, err)
+		require.False(t, pending)
+	})
 }
 
 func TestFinishAppendFailureStages(t *testing.T) {
@@ -316,9 +357,16 @@ func TestValidateMergeIntentFailures(t *testing.T) {
 		{name: "invalid source event", mutate: func(intent *mergeIntent) { intent.SourceMergedEvent.ID = "" }},
 		{name: "wrong source incident", mutate: func(intent *mergeIntent) {
 			intent.SourceMergedEvent.Incident = intent.Mutation.Into
+			intent.SourceMergedEvent.Refs[0].Incident = &intent.Mutation.Source
+			intent.SourceMergedEvent.Payload = mustJSON(t, incidents.MergedPayload{
+				Into: intent.Mutation.Source, MergeID: intent.Mutation.MutationID,
+			})
 		}},
-		{name: "malformed source payload", mutate: func(intent *mergeIntent) {
-			intent.SourceMergedEvent.Payload = json.RawMessage("{")
+		{name: "strict source payload", mutate: func(intent *mergeIntent) {
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(intent.SourceMergedEvent.Payload, &payload))
+			payload["unexpected"] = true
+			intent.SourceMergedEvent.Payload = mustJSON(t, payload)
 		}},
 		{name: "mismatched source payload", mutate: func(intent *mergeIntent) {
 			intent.SourceMergedEvent.Payload = mustJSON(t, incidents.MergedPayload{
@@ -472,6 +520,58 @@ func TestFinishMergeFailureStages(t *testing.T) {
 	}
 }
 
+func TestFinishAppendFoldFailure(t *testing.T) {
+	store := newTestStore(t)
+	receipt := appendReceiptFixture(t)
+	note := receipt.Event
+	note.ID = "note-first"
+	note.Type = incidents.EventNoteAdded
+	note.Payload = mustJSON(t, incidents.NoteAddedPayload{Body: "invalid first event"})
+	require.NoError(t, store.appendEvent(note.Incident, note))
+	receipt.Event.Seq = 2
+	_, err := store.finishAppend(receipt.Event.Incident, receipt)
+	require.ErrorContains(t, err, "first event must be incident.created")
+}
+
+func TestFinishMergeResumesAfterSourceEventAppend(t *testing.T) {
+	store, intent := seededMergeStore(t)
+	require.NoError(t, store.appendEvent(intent.Mutation.Source, intent.SourceMergedEvent))
+	intentPath := store.join(filepath.Join("incidents", ".store", "merge-intents", "merge-fixture.json"))
+	receiptPath := store.join(filepath.Join("incidents", ".store", "mutations", "merge-fixture.json"))
+	result, err := store.finishMerge(intentPath, receiptPath, intent)
+	require.NoError(t, err)
+	require.Equal(t, incidents.StatusClosed, result.Source.Status)
+}
+
+func TestFinishMergeFoldFailures(t *testing.T) {
+	tests := []struct {
+		name   string
+		failAt int
+	}{
+		{name: "source", failAt: 4},
+		{name: "target", failAt: 5},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store, intent := seededMergeStore(t)
+			ref := intent.Mutation.Source
+			if tc.name == "target" {
+				ref = intent.Mutation.Into
+			}
+			note := appendReceiptFixture(t).Event
+			note.ID = "note-first"
+			note.Incident = ref
+			note.Type = incidents.EventNoteAdded
+			note.Payload = mustJSON(t, incidents.NoteAddedPayload{Body: "invalid first event"})
+			store.ops = &recordsAtRootedFileOps{
+				rootedFileOps: store.files, replaceAt: tc.failAt, records: []json.RawMessage{mustJSON(t, note)},
+			}
+			_, err := store.finishMerge("intent", "receipt", intent)
+			require.ErrorContains(t, err, "first event must be incident.created")
+		})
+	}
+}
+
 func TestRepositoryStoreMergeErrorStates(t *testing.T) {
 	ctx := context.Background()
 
@@ -578,6 +678,33 @@ func TestRepositoryStoreMergeErrorStates(t *testing.T) {
 		_, err = store.Merge(ctx, incidents.MergeMutation{MutationID: "second-merge", Source: source.Incident, Into: other.Incident})
 		require.ErrorContains(t, err, "requires two active incidents")
 	})
+
+	t.Run("import visibility precedes target", func(t *testing.T) {
+		store := newTestStore(t)
+		source := createdMutation(t, "visibility-source", "INC-SOURCE")
+		into := createdMutation(t, "visibility-target", "INC-TARGET")
+		_, err := store.Append(ctx, source)
+		require.NoError(t, err)
+		_, err = store.Append(ctx, into)
+		require.NoError(t, err)
+		store.now = func() time.Time { return source.Event.At.Add(-time.Minute) }
+		_, err = store.Merge(ctx, incidents.MergeMutation{MutationID: "visibility-merge", Source: source.Incident, Into: into.Incident})
+		require.ErrorContains(t, err, "visibleAt precedes prior event")
+	})
+
+	t.Run("source merge visibility precedes source", func(t *testing.T) {
+		store := newTestStore(t)
+		source := createdMutation(t, "source-visibility-source", "INC-SOURCE")
+		into := createdMutation(t, "source-visibility-target", "INC-TARGET")
+		into.Event.At = source.Event.At.Add(-2 * time.Minute)
+		_, err := store.Append(ctx, source)
+		require.NoError(t, err)
+		_, err = store.Append(ctx, into)
+		require.NoError(t, err)
+		store.now = func() time.Time { return source.Event.At.Add(-time.Minute) }
+		_, err = store.Merge(ctx, incidents.MergeMutation{MutationID: "source-visibility-merge", Source: source.Incident, Into: into.Incident})
+		require.ErrorContains(t, err, "visibleAt precedes prior event")
+	})
 }
 
 func TestRepositoryStorePublicReadAndFoldErrors(t *testing.T) {
@@ -604,11 +731,183 @@ func TestRepositoryStorePublicReadAndFoldErrors(t *testing.T) {
 	require.ErrorContains(t, err, "first event must be incident.created")
 }
 
+func TestRepositoryStorePublicAppendStorageFailures(t *testing.T) {
+	testErr := errors.New("injected append storage failure")
+	tests := []struct {
+		name      string
+		operation string
+		failAt    int
+	}{
+		{name: "read merge intent", operation: "read", failAt: 1},
+		{name: "read pending merges", operation: "read-dir", failAt: 1},
+		{name: "read receipt", operation: "read", failAt: 2},
+		{name: "load events", operation: "read-jsonl", failAt: 1},
+		{name: "prepare receipt", operation: "write", failAt: 1},
+		{name: "finish append reload", operation: "read-jsonl", failAt: 2},
+		{name: "append event", operation: "append", failAt: 1},
+		{name: "commit receipt", operation: "write", failAt: 2},
+		{name: "write projection", operation: "write", failAt: 3},
+		{name: "publish receipt", operation: "write", failAt: 4},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newTestStore(t)
+			store.afterRecovery = func(locked *RepositoryStore) {
+				locked.ops = &failRootedFileOps{
+					rootedFileOps: locked.ops, operation: tc.operation, failAt: tc.failAt, err: testErr,
+				}
+			}
+			_, err := store.Append(context.Background(), createdMutation(t, "public-append-failure", "INC-FAIL"))
+			require.ErrorIs(t, err, testErr)
+		})
+	}
+}
+
+func TestRepositoryStorePublicMergeStorageFailures(t *testing.T) {
+	testErr := errors.New("injected merge storage failure")
+	tests := []struct {
+		name      string
+		operation string
+		failAt    int
+	}{
+		{name: "read receipt", operation: "read", failAt: 1},
+		{name: "read intent", operation: "read", failAt: 2},
+		{name: "read pending merges", operation: "read-dir", failAt: 1},
+		{name: "load source", operation: "read-jsonl", failAt: 1},
+		{name: "load target", operation: "read-jsonl", failAt: 2},
+		{name: "prepare intent", operation: "write", failAt: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newTestStore(t)
+			source := createdMutation(t, "create-source", "INC-SOURCE")
+			into := createdMutation(t, "create-target", "INC-TARGET")
+			_, err := store.Append(context.Background(), source)
+			require.NoError(t, err)
+			_, err = store.Append(context.Background(), into)
+			require.NoError(t, err)
+			store.afterRecovery = func(locked *RepositoryStore) {
+				locked.ops = &failRootedFileOps{
+					rootedFileOps: locked.ops, operation: tc.operation, failAt: tc.failAt, err: testErr,
+				}
+			}
+			_, err = store.Merge(context.Background(), incidents.MergeMutation{
+				MutationID: "public-merge-failure", Source: source.Incident, Into: into.Incident,
+			})
+			require.ErrorIs(t, err, testErr)
+		})
+	}
+}
+
+func TestRepositoryStorePublicPendingAndReplayStates(t *testing.T) {
+	t.Run("append sees pending merge created after recovery", func(t *testing.T) {
+		store := newTestStore(t)
+		pending := mergeIntentFixture(t)
+		pending.Mutation.MutationID = "other-pending-merge"
+		pending.RequestHash = requestHash([]byte("other pending merge"))
+		store.afterRecovery = func(locked *RepositoryStore) {
+			path, err := locked.mergeIntentPath(pending.Mutation.MutationID)
+			require.NoError(t, err)
+			require.NoError(t, locked.writeJSONAtomic(path, pending, 0o600))
+		}
+		_, err := store.Append(context.Background(), createdMutation(t, "append-with-pending", "INC-PENDING"))
+		require.ErrorIs(t, err, incidents.ErrSequenceConflict)
+	})
+
+	t.Run("merge resumes intent created after recovery", func(t *testing.T) {
+		store, intent := seededMergeStore(t)
+		store.afterRecovery = func(locked *RepositoryStore) {
+			path, err := locked.mergeIntentPath(intent.Mutation.MutationID)
+			require.NoError(t, err)
+			request, err := json.Marshal(intent.Mutation)
+			require.NoError(t, err)
+			intent.RequestHash = requestHash(request)
+			require.NoError(t, locked.writeJSONAtomic(path, intent, 0o600))
+		}
+		result, err := store.Merge(context.Background(), intent.Mutation)
+		require.NoError(t, err)
+		require.True(t, result.Replayed)
+	})
+
+	t.Run("merge sees unrelated pending intent", func(t *testing.T) {
+		store := newTestStore(t)
+		source := createdMutation(t, "pending-source", "INC-SOURCE")
+		into := createdMutation(t, "pending-target", "INC-TARGET")
+		_, err := store.Append(context.Background(), source)
+		require.NoError(t, err)
+		_, err = store.Append(context.Background(), into)
+		require.NoError(t, err)
+		pending := mergeIntentFixture(t)
+		pending.Mutation.MutationID = "other-pending-merge"
+		pending.RequestHash = requestHash([]byte("other pending merge"))
+		store.afterRecovery = func(locked *RepositoryStore) {
+			path, err := locked.mergeIntentPath(pending.Mutation.MutationID)
+			require.NoError(t, err)
+			require.NoError(t, locked.writeJSONAtomic(path, pending, 0o600))
+		}
+		_, err = store.Merge(context.Background(), incidents.MergeMutation{
+			MutationID: "blocked-by-pending", Source: source.Incident, Into: into.Incident,
+		})
+		require.ErrorIs(t, err, incidents.ErrSequenceConflict)
+	})
+
+	t.Run("merge replay republishes projections", func(t *testing.T) {
+		store := newTestStore(t)
+		source := createdMutation(t, "replay-source", "INC-SOURCE")
+		into := createdMutation(t, "replay-target", "INC-TARGET")
+		_, err := store.Append(context.Background(), source)
+		require.NoError(t, err)
+		_, err = store.Append(context.Background(), into)
+		require.NoError(t, err)
+		mutation := incidents.MergeMutation{MutationID: "replay-merge", Source: source.Incident, Into: into.Incident}
+		_, err = store.Merge(context.Background(), mutation)
+		require.NoError(t, err)
+		testErr := errors.New("projection publish failed")
+		store.afterRecovery = func(locked *RepositoryStore) {
+			locked.ops = &failRootedFileOps{rootedFileOps: locked.ops, operation: "write", failAt: 1, err: testErr}
+		}
+		_, err = store.Merge(context.Background(), mutation)
+		require.ErrorIs(t, err, testErr)
+	})
+}
+
+func TestRepositoryStoreProjectionReadFailureAfterRecovery(t *testing.T) {
+	store := newTestStore(t)
+	ref := incidents.IncidentRef{StoreID: "ops", IncidentID: "INC-PROJECTION-FAIL"}
+	testErr := errors.New("projection read failed")
+	store.afterRecovery = func(locked *RepositoryStore) {
+		locked.ops = &failRootedFileOps{rootedFileOps: locked.ops, operation: "read-jsonl", failAt: 1, err: testErr}
+	}
+	_, err := store.Projection(context.Background(), ref, nil)
+	require.ErrorIs(t, err, testErr)
+}
+
+func TestReceiptReadersWrapMalformedJSON(t *testing.T) {
+	store := newTestStore(t)
+	store.ops = rawReadRootedFileOps{rootedFileOps: store.files, raw: json.RawMessage("{")}
+	path := store.join(filepath.Join("incidents", ".store", "mutations", "malformed.json"))
+	_, _, err := store.readReceipt(path)
+	require.ErrorContains(t, err, "decode mutation receipt")
+	_, err = store.readReceiptKind(path)
+	require.ErrorContains(t, err, "decode mutation receipt kind")
+	_, _, err = store.readMergeReceipt(path)
+	require.ErrorContains(t, err, "decode merge receipt")
+	_, _, err = store.readMergeIntent(path)
+	require.ErrorContains(t, err, "decode merge intent")
+}
+
 func TestRecoverPendingMutationsErrorStates(t *testing.T) {
 	t.Run("receipt directory read", func(t *testing.T) {
 		store := newTestStore(t)
 		store.ops = errorRootedFileOps{err: errors.New("receipt directory failed")}
 		require.ErrorContains(t, store.recoverPendingMutations(), "receipt directory failed")
+	})
+
+	t.Run("intent directory read", func(t *testing.T) {
+		store := newTestStore(t)
+		testErr := errors.New("intent directory failed")
+		store.ops = &failRootedFileOps{rootedFileOps: store.files, operation: "read-dir", failAt: 2, err: testErr}
+		require.ErrorIs(t, store.recoverPendingMutations(), testErr)
 	})
 
 	t.Run("irrelevant entries", func(t *testing.T) {
@@ -655,6 +954,17 @@ func TestRecoverPendingMutationsErrorStates(t *testing.T) {
 		events, err := store.loadEvents(receipt.Event.Incident)
 		require.NoError(t, err)
 		require.Len(t, events, 1)
+	})
+
+	t.Run("unpublished append finish failure", func(t *testing.T) {
+		store := newTestStore(t)
+		receipt := appendReceiptFixture(t)
+		path, err := store.receiptPath(receipt.Event.ID)
+		require.NoError(t, err)
+		writeStoreJSON(t, path, receipt)
+		testErr := errors.New("recover append failed")
+		store.ops = &failRootedFileOps{rootedFileOps: store.files, operation: "append", failAt: 1, err: testErr}
+		require.ErrorIs(t, store.recoverPendingMutations(), testErr)
 	})
 
 	t.Run("committed merge intent is skipped", func(t *testing.T) {
@@ -737,6 +1047,35 @@ type recordsRootedFileOps struct {
 	records []json.RawMessage
 }
 
+type recordsAtRootedFileOps struct {
+	rootedFileOps
+	replaceAt int
+	calls     int
+	records   []json.RawMessage
+}
+
+func (o *recordsAtRootedFileOps) ReadJSONLWithLimit(path string, limit int64) ([]json.RawMessage, error) {
+	o.calls++
+	if o.calls == o.replaceAt {
+		return o.records, nil
+	}
+	return o.rootedFileOps.ReadJSONLWithLimit(path, limit)
+}
+
+type rawReadRootedFileOps struct {
+	rootedFileOps
+	raw json.RawMessage
+}
+
+func (o rawReadRootedFileOps) ReadJSON(_ string, target any) error {
+	raw, ok := target.(*json.RawMessage)
+	if !ok {
+		return errors.New("target is not raw JSON")
+	}
+	*raw = append((*raw)[:0], o.raw...)
+	return nil
+}
+
 func (o recordsRootedFileOps) ReadJSONLWithLimit(string, int64) ([]json.RawMessage, error) {
 	return o.records, nil
 }
@@ -768,6 +1107,20 @@ func (o *failRootedFileOps) WriteJSONAtomicWithMode(path string, value any, mode
 		return o.err
 	}
 	return o.rootedFileOps.WriteJSONAtomicWithMode(path, value, mode)
+}
+
+func (o *failRootedFileOps) ReadJSON(path string, target any) error {
+	if o.shouldFail("read") {
+		return o.err
+	}
+	return o.rootedFileOps.ReadJSON(path, target)
+}
+
+func (o *failRootedFileOps) ReadDir(path string) ([]os.DirEntry, error) {
+	if o.shouldFail("read-dir") {
+		return nil, o.err
+	}
+	return o.rootedFileOps.ReadDir(path)
 }
 
 type errorRootedFileOps struct{ err error }

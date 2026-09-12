@@ -31,8 +31,6 @@ func OpenLocation(location incidents.StoreLocation, roots RepositoryRoots) (*Rep
 		root = roots.Dedicated[location.StoreID]
 	case incidents.StoreLocationApplicationRepository:
 		root = roots.Application
-	default:
-		return nil, fmt.Errorf("unsupported incident store location %q", location.Kind)
 	}
 	if strings.TrimSpace(root) == "" {
 		return nil, fmt.Errorf("repository root is not configured for incident store %q (%s)", location.StoreID, location.Kind)

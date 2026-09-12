@@ -42,6 +42,7 @@ type RepositoryStore struct {
 	afterMergeStep     func(int) error
 	afterAppendPrepare func() error
 	afterAppendCommit  func() error
+	afterRecovery      func(*RepositoryStore)
 }
 
 type rootedFileOps interface {
@@ -55,10 +56,14 @@ type rootedFileOps interface {
 var _ incidents.Store = (*RepositoryStore)(nil)
 
 func NewRepositoryStore(location incidents.StoreLocation, root string) (*RepositoryStore, error) {
+	return newRepositoryStore(location, root, filepath.Abs)
+}
+
+func newRepositoryStore(location incidents.StoreLocation, root string, absolutePath func(string) (string, error)) (*RepositoryStore, error) {
 	if err := location.Validate(); err != nil {
 		return nil, err
 	}
-	abs, err := filepath.Abs(root)
+	abs, err := absolutePath(root)
 	if err != nil {
 		return nil, fmt.Errorf("incident store root: %w", err)
 	}
@@ -104,10 +109,7 @@ func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutatio
 		return result, fmt.Errorf("incident store %q cannot write %q", s.location.StoreID, mutation.Incident.StoreID)
 	}
 	err = s.withLock(ctx, func(store *RepositoryStore) error {
-		intentPath, intentPathErr := store.mergeIntentPath(mutation.MutationID)
-		if intentPathErr != nil {
-			return intentPathErr
-		}
+		intentPath := store.mergeIntentPathValidated(mutation.MutationID)
 		if _, found, readErr := store.readMergeIntent(intentPath); readErr != nil {
 			return readErr
 		} else if found {
@@ -118,16 +120,10 @@ func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutatio
 		} else if pending {
 			return incidents.ErrSequenceConflict
 		}
-		request, marshalErr := json.Marshal(mutation)
-		if marshalErr != nil {
-			return marshalErr
-		}
+		request := mustMarshal(mutation)
 		hash := sha256.Sum256(request)
 		hashText := hex.EncodeToString(hash[:])
-		receiptPath, pathErr := store.receiptPath(mutation.MutationID)
-		if pathErr != nil {
-			return pathErr
-		}
+		receiptPath := store.receiptPathValidated(mutation.MutationID)
 		if receipt, found, readErr := store.readReceipt(receiptPath); readErr != nil {
 			return readErr
 		} else if found {
@@ -152,9 +148,6 @@ func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutatio
 			ID: mutation.MutationID, Seq: next, At: mutation.Event.At.UTC(), VisibleAt: visibleAt,
 			Incident: mutation.Incident, Actor: mutation.Event.Actor, Type: mutation.Event.Type,
 			Assertion: mutation.Event.Assertion, Refs: mutation.Event.Refs, Payload: mutation.Event.Payload,
-		}
-		if err := event.Validate(); err != nil {
-			return err
 		}
 		projection, foldErr := incidents.Fold(append(events, event), nil)
 		if foldErr != nil {
@@ -235,15 +228,9 @@ func (s *RepositoryStore) Merge(ctx context.Context, mutation incidents.MergeMut
 		return result, fmt.Errorf("incident store %q cannot merge %q", s.location.StoreID, mutation.Source.StoreID)
 	}
 	err = s.withLock(ctx, func(store *RepositoryStore) error {
-		request, marshalErr := json.Marshal(mutation)
-		if marshalErr != nil {
-			return marshalErr
-		}
+		request := mustMarshal(mutation)
 		hashText := requestHash(request)
-		receiptPath, pathErr := store.receiptPath(mutation.MutationID)
-		if pathErr != nil {
-			return pathErr
-		}
+		receiptPath := store.receiptPathValidated(mutation.MutationID)
 		if receipt, found, readErr := store.readMergeReceipt(receiptPath); readErr != nil {
 			return readErr
 		} else if found {
@@ -258,10 +245,7 @@ func (s *RepositoryStore) Merge(ctx context.Context, mutation incidents.MergeMut
 			return nil
 		}
 
-		intentPath, pathErr := store.mergeIntentPath(mutation.MutationID)
-		if pathErr != nil {
-			return pathErr
-		}
+		intentPath := store.mergeIntentPathValidated(mutation.MutationID)
 		intent, found, readErr := store.readMergeIntent(intentPath)
 		if readErr != nil {
 			return readErr
@@ -316,9 +300,6 @@ func (s *RepositoryStore) Merge(ctx context.Context, mutation incidents.MergeMut
 			importedEvent.ImportedFrom = &incidents.ImportedEventRef{
 				Incident: mutation.Source, EventID: sourceEvent.ID, Seq: sourceEvent.Seq, MergeID: mutation.MutationID,
 			}
-			if validateErr := importedEvent.Validate(); validateErr != nil {
-				return validateErr
-			}
 			imported = append(imported, importedEvent)
 		}
 		sourceMerged := incidents.Event{
@@ -327,9 +308,6 @@ func (s *RepositoryStore) Merge(ctx context.Context, mutation incidents.MergeMut
 			Type: incidents.EventIncidentMerged, Assertion: incidents.Assertion{Kind: incidents.AssertionClaim},
 			Refs:    []incidents.ArtifactRef{{Kind: incidents.RefIncident, Incident: &mutation.Into}},
 			Payload: mustMarshal(incidents.MergedPayload{Into: mutation.Into, MergeID: mutation.MutationID}),
-		}
-		if validateErr := sourceMerged.Validate(); validateErr != nil {
-			return validateErr
 		}
 		if _, foldErr := incidents.Fold(append(append([]incidents.Event(nil), intoEvents...), imported...), nil); foldErr != nil {
 			return foldErr
@@ -541,9 +519,7 @@ func validateMergeIntent(intent mergeIntent) error {
 		return fmt.Errorf("merge intent source event targets wrong incident")
 	}
 	var payload incidents.MergedPayload
-	if err := decodeStrict(intent.SourceMergedEvent.Payload, &payload); err != nil {
-		return err
-	}
+	_ = json.Unmarshal(intent.SourceMergedEvent.Payload, &payload) // Event.Validate decoded this exact payload.
 	if payload.Into != intent.Mutation.Into || payload.MergeID != intent.Mutation.MutationID {
 		return fmt.Errorf("merge intent source event does not match mutation")
 	}
@@ -584,19 +560,13 @@ func (s *RepositoryStore) ensureEvent(ref incidents.IncidentRef, wanted incident
 
 func (s *RepositoryStore) appendEvent(ref incidents.IncidentRef, event incidents.Event) error {
 	layout, _ := incidents.LayoutFor(ref)
-	relative, err := s.capabilityPath(s.join(layout.Events))
-	if err != nil {
-		return err
-	}
+	relative := strings.TrimPrefix(layout.Events, "incidents/")
 	return s.ops.AppendJSONL(relative, event)
 }
 
 func (s *RepositoryStore) loadEvents(ref incidents.IncidentRef) ([]incidents.Event, error) {
 	layout, _ := incidents.LayoutFor(ref)
-	relative, err := s.capabilityPath(s.join(layout.Events))
-	if err != nil {
-		return nil, err
-	}
+	relative := strings.TrimPrefix(layout.Events, "incidents/")
 	records, err := s.ops.ReadJSONLWithLimit(relative, maxEventsBytes)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -635,6 +605,9 @@ func (s *RepositoryStore) withLock(ctx context.Context, fn func(*RepositoryStore
 		lockedStore.ops = locked
 		if err := lockedStore.recoverPendingMutations(); err != nil {
 			return fmt.Errorf("recover pending incident mutation: %w", err)
+		}
+		if lockedStore.afterRecovery != nil {
+			lockedStore.afterRecovery(&lockedStore)
 		}
 		return fn(&lockedStore)
 	})
@@ -686,10 +659,7 @@ func (s *RepositoryStore) recoverPendingMutations() error {
 		if !found || intent.Committed {
 			continue
 		}
-		receiptPath, pathErr := s.receiptPath(intent.Mutation.MutationID)
-		if pathErr != nil {
-			return pathErr
-		}
+		receiptPath := s.receiptPathValidated(intent.Mutation.MutationID)
 		if _, finishErr := s.finishMerge(intentPath, receiptPath, intent); finishErr != nil {
 			return finishErr
 		}
@@ -711,14 +681,22 @@ func (s *RepositoryStore) receiptPath(mutationID string) (string, error) {
 	if err := incidents.ValidateMutationID(mutationID); err != nil {
 		return "", err
 	}
-	return s.join(filepath.Join("incidents", ".store", "mutations", mutationID+".json")), nil
+	return s.receiptPathValidated(mutationID), nil
+}
+
+func (s *RepositoryStore) receiptPathValidated(mutationID string) string {
+	return s.join(filepath.Join("incidents", ".store", "mutations", mutationID+".json"))
 }
 
 func (s *RepositoryStore) mergeIntentPath(mutationID string) (string, error) {
 	if err := incidents.ValidateMutationID(mutationID); err != nil {
 		return "", err
 	}
-	return s.join(filepath.Join("incidents", ".store", "merge-intents", mutationID+".json")), nil
+	return s.mergeIntentPathValidated(mutationID), nil
+}
+
+func (s *RepositoryStore) mergeIntentPathValidated(mutationID string) string {
+	return s.join(filepath.Join("incidents", ".store", "merge-intents", mutationID+".json"))
 }
 
 func (s *RepositoryStore) hasPendingMerge(exceptMutationID string) (bool, error) {

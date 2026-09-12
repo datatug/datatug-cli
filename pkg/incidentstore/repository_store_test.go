@@ -172,6 +172,39 @@ func TestRepositoryStoreRecoversPreparedAppendBeforeNextMutation(t *testing.T) {
 	}
 }
 
+func TestRepositoryStoreReadPublishesCommittedAppendProjectionAfterCrash(t *testing.T) {
+	store := newTestStore(t)
+	mutation := createdMutation(t, "create-1", "INC-1")
+	crash := errors.New("simulated crash after append commit")
+	store.afterAppendCommit = func() error { return crash }
+
+	_, err := store.Append(context.Background(), mutation)
+	require.ErrorIs(t, err, crash)
+	layout, err := incidents.LayoutFor(mutation.Incident)
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(store.root, filepath.FromSlash(layout.Projection)))
+	require.True(t, os.IsNotExist(err))
+
+	store.afterAppendCommit = nil
+	events, err := store.Events(context.Background(), mutation.Incident, 0)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+
+	projectionBytes, err := os.ReadFile(filepath.Join(store.root, filepath.FromSlash(layout.Projection)))
+	require.NoError(t, err)
+	var projection incidents.Incident
+	require.NoError(t, json.Unmarshal(projectionBytes, &projection))
+	require.Equal(t, uint64(1), projection.LastSeq)
+
+	receiptPath, err := store.receiptPath(mutation.MutationID)
+	require.NoError(t, err)
+	receipt, found, err := store.readReceipt(receiptPath)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.True(t, receipt.Committed)
+	require.True(t, receipt.Published)
+}
+
 func TestRepositoryStoreRejectsMutationIDReuseAcrossKinds(t *testing.T) {
 	store := newTestStore(t)
 	source := createdMutation(t, "create-source", "INC-2")

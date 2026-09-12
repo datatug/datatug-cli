@@ -39,6 +39,7 @@ type RepositoryStore struct {
 	// event append and before projections and the final receipt are published.
 	afterMergeStep     func(int) error
 	afterAppendPrepare func() error
+	afterAppendCommit  func() error
 }
 
 var _ incidents.Store = (*RepositoryStore)(nil)
@@ -334,6 +335,7 @@ type appendReceipt struct {
 	Event       incidents.Event    `json:"event"`
 	Projection  incidents.Incident `json:"projection"`
 	Committed   bool               `json:"committed"`
+	Published   bool               `json:"published,omitempty"`
 }
 
 type mergeIntent struct {
@@ -386,14 +388,27 @@ func (s *RepositoryStore) finishAppend(ref incidents.IncidentRef, receipt append
 	result := incidents.AppendResult{Event: committedEvent, Projection: projection}
 	receipt.Event = committedEvent
 	receipt.Projection = projection
-	receipt.Committed = true
 	receiptPath, _ := s.receiptPath(receipt.Event.ID)
-	if err := s.writeJSONAtomic(receiptPath, receipt, 0o600); err != nil {
-		return incidents.AppendResult{}, fmt.Errorf("commit mutation receipt: %w", err)
+	if !receipt.Committed {
+		receipt.Committed = true
+		if err := s.writeJSONAtomic(receiptPath, receipt, 0o600); err != nil {
+			return incidents.AppendResult{}, fmt.Errorf("commit mutation receipt: %w", err)
+		}
+		if s.afterAppendCommit != nil {
+			if commitErr := s.afterAppendCommit(); commitErr != nil {
+				return incidents.AppendResult{}, commitErr
+			}
+		}
 	}
 	layout, _ := incidents.LayoutFor(ref)
 	if err := s.writeJSONAtomic(s.join(layout.Projection), projection, 0o644); err != nil {
 		return incidents.AppendResult{}, fmt.Errorf("write incident projection: %w", err)
+	}
+	if !receipt.Published {
+		receipt.Published = true
+		if err := s.writeJSONAtomic(receiptPath, receipt, 0o600); err != nil {
+			return incidents.AppendResult{}, fmt.Errorf("publish mutation receipt: %w", err)
+		}
 	}
 	return result, nil
 }
@@ -697,7 +712,7 @@ func (s *RepositoryStore) recoverPendingMutations() error {
 		if readErr != nil {
 			return readErr
 		}
-		if found && !receipt.Committed {
+		if found && !receipt.Published {
 			if _, finishErr := s.finishAppend(receipt.Event.Incident, receipt); finishErr != nil {
 				return finishErr
 			}

@@ -109,6 +109,31 @@ func TestRepositoryStoreRecoversMissingIndexWithoutDuplicatingExecutionIDAcrossM
 	require.Equal(t, original, loaded)
 }
 
+func TestRepositoryStoreIdentityRecoveryUsesRootedExecutionAuthority(t *testing.T) {
+	root := t.TempDir()
+	location := incidents.StoreLocation{StoreID: "ops", Kind: incidents.StoreLocationDedicatedRepository}
+	store, err := NewRepositoryStore(location, root)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	original := validExecutionRecord("ops", "payments", "exec-rooted")
+	require.NoError(t, store.PutExecution(context.Background(), original))
+	require.NoError(t, os.Remove(filepath.Join(root, "executions", ".store", "index.json")))
+
+	detachedExecutions := filepath.Join(root, "executions-detached")
+	require.NoError(t, os.Rename(filepath.Join(root, "executions"), detachedExecutions))
+	require.NoError(t, os.Mkdir(filepath.Join(root, "executions"), 0o755))
+	replacement := original
+	replacement.ExecutedAt = "2026-10-13T10:11:12Z"
+	replacement.Provenance.ObservedAt = replacement.ExecutedAt
+
+	require.ErrorIs(t, store.PutExecution(context.Background(), replacement), ErrExecutionExists)
+	_, statErr := os.Stat(filepath.Join(detachedExecutions, "2026", "10", original.Ref.ExecutionID+".json"))
+	require.True(t, os.IsNotExist(statErr), "duplicate execution receipt was created: %v", statErr)
+	loaded, err := store.Execution(context.Background(), original.Ref)
+	require.NoError(t, err)
+	require.Equal(t, original, loaded)
+}
+
 func TestRepositoryStoreExecutionReadsCanBeBounded(t *testing.T) {
 	root := t.TempDir()
 	location := incidents.StoreLocation{StoreID: "ops", Kind: incidents.StoreLocationDedicatedRepository}

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"time"
@@ -77,12 +76,7 @@ func (s *RepositoryStore) PutExecution(ctx context.Context, record apicontract.E
 }
 
 func (s *RepositoryStore) executionPathsForID(executionID string) ([]string, error) {
-	root, err := os.OpenRoot(filepath.Join(s.root, "executions"))
-	if err != nil {
-		return nil, fmt.Errorf("open execution receipt root: %w", err)
-	}
-	defer func() { _ = root.Close() }()
-	years, err := fs.ReadDir(root.FS(), ".")
+	years, err := fs.ReadDir(s.executionRoot.FS(), ".")
 	if err != nil {
 		return nil, fmt.Errorf("list execution receipt years: %w", err)
 	}
@@ -91,7 +85,7 @@ func (s *RepositoryStore) executionPathsForID(executionID string) ([]string, err
 		if !year.IsDir() || !executionDateSegment(year.Name(), 4, 0, 9999) {
 			continue
 		}
-		months, readErr := fs.ReadDir(root.FS(), year.Name())
+		months, readErr := fs.ReadDir(s.executionRoot.FS(), year.Name())
 		if readErr != nil {
 			return nil, fmt.Errorf("list execution receipt months: %w", readErr)
 		}
@@ -99,11 +93,17 @@ func (s *RepositoryStore) executionPathsForID(executionID string) ([]string, err
 			if !month.IsDir() || !executionDateSegment(month.Name(), 2, 1, 12) {
 				continue
 			}
-			path := year.Name() + "/" + month.Name() + "/" + executionID + ".json"
-			if _, statErr := root.Lstat(path); statErr == nil {
-				paths = append(paths, path)
-			} else if !errors.Is(statErr, os.ErrNotExist) {
-				return nil, fmt.Errorf("inspect execution receipt identity: %w", statErr)
+			monthPath := year.Name() + "/" + month.Name()
+			receipts, listErr := fs.ReadDir(s.executionRoot.FS(), monthPath)
+			if listErr != nil {
+				return nil, fmt.Errorf("list execution receipts: %w", listErr)
+			}
+			filename := executionID + ".json"
+			for _, receipt := range receipts {
+				if receipt.Name() == filename {
+					paths = append(paths, monthPath+"/"+filename)
+					break
+				}
 			}
 		}
 	}

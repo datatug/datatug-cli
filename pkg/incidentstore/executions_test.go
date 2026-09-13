@@ -69,6 +69,26 @@ func TestRepositoryStoreRejectsInterruptedExecutionIndexPublish(t *testing.T) {
 	require.True(t, os.IsNotExist(statErr), "receipt was published despite incomplete index state: %v", statErr)
 }
 
+func TestRepositoryStoreRetainsReservationWhenReceiptWriteOutcomeIsUncertain(t *testing.T) {
+	root := t.TempDir()
+	location := incidents.StoreLocation{StoreID: "ops", Kind: incidents.StoreLocationDedicatedRepository}
+	store, err := NewRepositoryStore(location, root)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	record := validExecutionRecord("ops", "payments", "exec-uncertain")
+	path := executionPath(time.Date(2026, 9, 13, 0, 0, 0, 0, time.UTC), record.Ref.ExecutionID)
+	testErr := errors.New("directory sync failed after receipt rename")
+	store.executionOps = &publishThenFailExecutionOps{rootedFileOps: store.executionOps, path: path, err: testErr}
+
+	require.ErrorIs(t, store.PutExecution(context.Background(), record), testErr)
+	replacement := record
+	replacement.ExecutedAt = "2026-10-13T10:11:12Z"
+	replacement.Provenance.ObservedAt = replacement.ExecutedAt
+	require.ErrorIs(t, store.PutExecution(context.Background(), replacement), ErrExecutionExists)
+	_, statErr := os.Stat(filepath.Join(root, "executions", "2026", "10", record.Ref.ExecutionID+".json"))
+	require.True(t, os.IsNotExist(statErr), "retry created a second immutable receipt: %v", statErr)
+}
+
 func TestRepositoryStoreNeverOverwritesUnindexedExecutionReceipt(t *testing.T) {
 	root := t.TempDir()
 	location := incidents.StoreLocation{StoreID: "ops", Kind: incidents.StoreLocationDedicatedRepository}
@@ -245,4 +265,22 @@ func TestApplicationRepositoryExecutionListsStayStoreQualified(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, secondRecords, 1)
 	require.Equal(t, "app-b", secondRecords[0].Ref.StoreID)
+}
+
+type publishThenFailExecutionOps struct {
+	rootedFileOps
+	path   string
+	err    error
+	failed bool
+}
+
+func (o *publishThenFailExecutionOps) WriteJSONAtomicWithMode(path string, value any, mode os.FileMode) error {
+	if err := o.rootedFileOps.WriteJSONAtomicWithMode(path, value, mode); err != nil {
+		return err
+	}
+	if path == o.path && !o.failed {
+		o.failed = true
+		return o.err
+	}
+	return nil
 }

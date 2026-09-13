@@ -55,9 +55,11 @@ func (s *RepositoryStore) PutExecution(ctx context.Context, record apicontract.E
 			return fmt.Errorf("prepare execution index: %w", err)
 		}
 		if err := store.executionOps.WriteJSONAtomicWithMode(path, record, 0o644); err != nil {
-			delete(index.Paths, record.Ref.ExecutionID)
-			_ = store.executionOps.WriteJSONAtomicWithMode(".store/index.json", index, 0o600)
-			return fmt.Errorf("write execution receipt: %w", err)
+			// Atomic publication may report a directory-sync failure after rename
+			// made the receipt visible. Keep the authoritative reservation: a
+			// later retry either observes the immutable receipt or fails closed as
+			// reserved-but-missing until an explicit repair path is provided.
+			return fmt.Errorf("write execution receipt with reservation retained: %w", err)
 		}
 		return nil
 	})

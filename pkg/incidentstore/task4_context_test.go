@@ -2,6 +2,7 @@ package incidentstore
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -55,6 +56,7 @@ func TestRepositoryStorePersistsAndReplaysTask4ContextTransitions(t *testing.T) 
 
 	rejectPromoted := contextMutation(t, "reject-promoted", created.Incident, incidents.EventContextFactRejected, incidents.ContextFactRejectedPayload{Layer: overlay.Layer})
 	_, err = store.Append(ctx, rejectPromoted)
+	require.ErrorIs(t, err, ErrInvalidIncidentTransition)
 	require.ErrorContains(t, err, "promoted overlay")
 	afterRejectedAttempt, err := store.Events(ctx, created.Incident, 0)
 	require.NoError(t, err)
@@ -86,10 +88,25 @@ func TestRepositoryStoreRejectionRetainsOverlayWithoutCanonicalizing(t *testing.
 		Fact: incidents.ContextFactRef{Scope: scope, ID: overlay.ID, Layer: overlay.Layer}, Role: investigation.FactRoleAffected,
 	})
 	_, err = store.Append(ctx, promoteRejected)
+	require.ErrorIs(t, err, ErrInvalidIncidentTransition)
 	require.ErrorContains(t, err, "rejected overlay")
 	events, err := store.Events(ctx, created.Incident, 0)
 	require.NoError(t, err)
 	require.Len(t, events, 3, "a transition from a rejected overlay must fail closed")
+
+	corrupt := incidents.Event{
+		ID: "corrupt-promotion", Seq: 4, At: time.Date(2026, 9, 13, 12, 1, 0, 0, time.UTC),
+		VisibleAt: time.Date(2026, 9, 13, 12, 1, 0, 0, time.UTC), Incident: created.Incident,
+		Actor: incidents.Actor{Kind: incidents.ActorHuman, ID: "alex", Via: incidents.ActorViaCLI},
+		Type:  incidents.EventContextFactPromoted, Assertion: incidents.Assertion{Kind: incidents.AssertionClaim},
+		Payload: mustJSON(t, incidents.ContextFactPromotedPayload{
+			Fact: incidents.ContextFactRef{Scope: scope, ID: overlay.ID, Layer: overlay.Layer}, Role: investigation.FactRoleAffected,
+		}),
+	}
+	require.NoError(t, store.appendEvent(created.Incident, corrupt))
+	_, err = store.Append(ctx, noteMutation(t, "after-corruption", created.Incident))
+	require.ErrorContains(t, err, "validate stored incident stream")
+	require.False(t, errors.Is(err, ErrInvalidIncidentTransition), "stored corruption must remain an internal provider failure")
 }
 
 func contextMutation(t *testing.T, mutationID string, ref incidents.IncidentRef, eventType incidents.EventType, payload any) incidents.Mutation {

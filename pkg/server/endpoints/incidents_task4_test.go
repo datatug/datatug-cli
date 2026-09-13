@@ -141,8 +141,14 @@ func TestIncidentHTTPTask4RejectionRetainsOverlayAndContradictionsFailClosed(t *
 
 	failed := appendIncidentContextEventRaw(t, router, scopes["alpha"], created.Incident.Ref, "promote-rejected", incidents.EventContextFactPromoted, mustTask4Payload(t, incidents.ContextFactPromotedPayload{
 		Fact: incidents.ContextFactRef{Scope: scope, ID: overlay.ID, Layer: overlay.Layer}, Role: investigation.FactRoleAffected,
-	}), http.StatusInternalServerError)
-	require.NotContains(t, failed.Body.String(), overlay.ID, "an unclassified fold failure must not disclose stored state")
+	}), http.StatusBadRequest)
+	var envelope apicontract.ErrorEnvelope
+	require.NoError(t, json.Unmarshal(failed.Body.Bytes(), &envelope))
+	require.Equal(t, string(apicontract.ErrCodeInvalidRequest), envelope.Error.Code)
+	require.Equal(t, "event", envelope.Error.Field)
+	require.Equal(t, "event contradicts current incident state", envelope.Error.Message)
+	require.NotContains(t, failed.Body.String(), overlay.ID)
+	require.NotContains(t, failed.Body.String(), overlay.Layer)
 
 	query := incidentScopeValues(scopes["alpha"])
 	query.Set("follow", "false")

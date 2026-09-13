@@ -29,6 +29,12 @@ const (
 
 var ErrIncidentNotFound = errors.New("incident not found")
 
+// ErrInvalidIncidentTransition identifies a structurally valid append whose
+// event contradicts the current incident projection. Append distinguishes it
+// from a corrupt stored stream by folding the persisted baseline first, so an
+// HTTP adapter can map only caller-caused state conflicts to INVALID_REQUEST.
+var ErrInvalidIncidentTransition = errors.New("invalid incident transition")
+
 var (
 	ErrExecutionNotFound = errors.New("execution not found")
 	ErrExecutionExists   = errors.New("execution already exists")
@@ -233,6 +239,11 @@ func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutatio
 		if readErr != nil {
 			return readErr
 		}
+		if len(events) > 0 {
+			if _, baselineErr := incidents.Fold(events, nil); baselineErr != nil {
+				return fmt.Errorf("validate stored incident stream: %w", baselineErr)
+			}
+		}
 		if mutation.ExpectedSeq != nil && *mutation.ExpectedSeq != uint64(len(events)) {
 			return incidents.ErrSequenceConflict
 		}
@@ -245,7 +256,7 @@ func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutatio
 		}
 		projection, foldErr := incidents.Fold(append(events, event), nil)
 		if foldErr != nil {
-			return foldErr
+			return fmt.Errorf("%w: %v", ErrInvalidIncidentTransition, foldErr)
 		}
 		receipt := appendReceipt{
 			Kind:        receiptKindAppend,

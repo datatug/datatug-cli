@@ -75,23 +75,31 @@ func incidentViewPolicy(ctx context.Context, stored incidents.Incident, events [
 		}
 	}
 	allFacts := append([]investigation.Fact(nil), stored.CanonicalContext.Facts...)
-	malformedCreatedEvent := false
+	malformedFactEvent := false
 	for _, event := range events {
-		if event.Type != incidents.EventIncidentCreated {
-			continue
+		switch event.Type {
+		case incidents.EventIncidentCreated:
+			var payload incidents.CreatedPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				// Stored events should already be validated by the provider. If an
+				// adapter violates that contract, keep the malformed event and every
+				// incident-wide-sensitive note fail-closed.
+				policy.WithheldEvents[event.ID] = true
+				malformedFactEvent = true
+				continue
+			}
+			allFacts = append(allFacts, payload.CanonicalContext.Facts...)
+		case incidents.EventContextFactAdded:
+			var payload incidents.ContextFactAddedPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				policy.WithheldEvents[event.ID] = true
+				malformedFactEvent = true
+				continue
+			}
+			allFacts = append(allFacts, payload.Fact)
 		}
-		var payload incidents.CreatedPayload
-		if err := json.Unmarshal(event.Payload, &payload); err != nil {
-			// Stored events should already be validated by the provider. If an
-			// adapter violates that contract, keep the malformed event and every
-			// incident-wide-sensitive note fail-closed.
-			policy.WithheldEvents[event.ID] = true
-			malformedCreatedEvent = true
-			continue
-		}
-		allFacts = append(allFacts, payload.CanonicalContext.Facts...)
 	}
-	allFactsVisible := !malformedCreatedEvent
+	allFactsVisible := !malformedFactEvent
 	for _, fact := range allFacts {
 		visibility := incidentFactVisibility(ctx, fact, session, paths)
 		if fact.Scope != nil {

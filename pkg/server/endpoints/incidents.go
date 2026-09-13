@@ -628,6 +628,8 @@ func incidentStoreError(err error) error {
 	switch {
 	case errors.Is(err, incidentstore.ErrInvalidEventCursor):
 		return newInvalidRequest("since", "invalid event cursor")
+	case errors.Is(err, incidentstore.ErrInvalidIncidentTransition):
+		return newInvalidRequest("event", "event contradicts current incident state")
 	case errors.Is(err, incidentstore.ErrIncidentNotFound):
 		return newNotFound("incident not found")
 	case errors.Is(err, incidents.ErrMutationConflict), errors.Is(err, incidents.ErrSequenceConflict):

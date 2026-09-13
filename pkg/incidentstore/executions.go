@@ -185,10 +185,10 @@ func initializeExecutionIndex(files, executions *dalgo2ingitdb.RootedFiles) erro
 	return files.WithExclusiveLock(ctx, ".store/execution-index-init.lock", func(locked dalgo2ingitdb.LockedFiles) error {
 		var layout executionLayout
 		layoutErr := locked.ReadJSON(".store/execution-layout.json", &layout)
-		index, indexErr := loadExecutionIndex(executions)
+		_, indexErr := loadExecutionIndex(executions)
 		if errors.Is(layoutErr, os.ErrNotExist) {
 			if errors.Is(indexErr, os.ErrNotExist) {
-				index = executionIndex{Paths: make(map[string]string)}
+				index := executionIndex{Paths: make(map[string]string)}
 				if err := executions.WriteJSONAtomicWithMode(".store/index.json", index, 0o600); err != nil {
 					return fmt.Errorf("initialize execution index: %w", err)
 				}

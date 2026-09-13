@@ -37,14 +37,13 @@ var (
 // dedicated, and application repositories use this same implementation and
 // layout; routing decides only which root is supplied.
 type RepositoryStore struct {
-	location      incidents.StoreLocation
-	root          string
-	files         *dalgo2ingitdb.RootedFiles
-	ops           rootedFileOps
-	executions    *dalgo2ingitdb.RootedFiles
-	executionRoot *os.Root
-	executionOps  rootedFileOps
-	now           func() time.Time
+	location     incidents.StoreLocation
+	root         string
+	files        *dalgo2ingitdb.RootedFiles
+	ops          rootedFileOps
+	executions   *dalgo2ingitdb.RootedFiles
+	executionOps rootedFileOps
+	now          func() time.Time
 	// afterMergeStep is a test-only crash seam invoked after each durable
 	// event append and before projections and the final receipt are published.
 	afterMergeStep     func(int) error
@@ -68,6 +67,10 @@ func NewRepositoryStore(location incidents.StoreLocation, root string) (*Reposit
 }
 
 func newRepositoryStore(location incidents.StoreLocation, root string, absolutePath func(string) (string, error)) (*RepositoryStore, error) {
+	return newRepositoryStoreWithAcquisitionHook(location, root, absolutePath, nil)
+}
+
+func newRepositoryStoreWithAcquisitionHook(location incidents.StoreLocation, root string, absolutePath func(string) (string, error), afterExecutionCapability func() error) (*RepositoryStore, error) {
 	if err := location.Validate(); err != nil {
 		return nil, err
 	}
@@ -102,53 +105,43 @@ func newRepositoryStore(location incidents.StoreLocation, root string, absoluteP
 		_ = files.Close()
 		return nil, fmt.Errorf("open execution file capability: %w", err)
 	}
-	executionPath := filepath.Join(abs, executionScope.Prefix)
-	verifiedExecutionRoot, err := os.Lstat(executionPath)
-	if err != nil {
-		_ = files.Close()
-		_ = executions.Close()
-		return nil, fmt.Errorf("inspect execution file capability root: %w", err)
-	}
-	executionRoot, err := os.OpenRoot(executionPath)
-	if err != nil {
-		_ = files.Close()
-		_ = executions.Close()
-		return nil, fmt.Errorf("open execution file capability root: %w", err)
-	}
-	openedExecutionRoot, err := executionRoot.Stat(".")
-	if err != nil || !os.SameFile(verifiedExecutionRoot, openedExecutionRoot) {
-		_ = executionRoot.Close()
-		_ = files.Close()
-		_ = executions.Close()
-		if err != nil {
-			return nil, fmt.Errorf("verify execution file capability root: %w", err)
+	if afterExecutionCapability != nil {
+		if err := afterExecutionCapability(); err != nil {
+			_ = files.Close()
+			_ = executions.Close()
+			return nil, fmt.Errorf("after execution file capability acquisition: %w", err)
 		}
-		return nil, errors.New("execution file capability root changed during acquisition")
 	}
+	// Receipt enumeration and mutation deliberately share this one DALgo
+	// capability. Reopening abs/executions here would split authority if that
+	// pathname were renamed between acquisitions.
+	//
 	// Receipt and intent directories are descendants of this private root.
 	// RootedFiles intentionally creates nested parents with ordinary directory
 	// permissions, while the 0700 ancestor keeps the whole metadata tree private.
 	if err := files.EnsureDir(".store", 0o700); err != nil {
-		_ = executionRoot.Close()
 		_ = files.Close()
 		_ = executions.Close()
 		return nil, fmt.Errorf("prepare private incident metadata: %w", err)
 	}
 	if err := executions.EnsureDir(".store", 0o700); err != nil {
-		_ = executionRoot.Close()
 		_ = files.Close()
 		_ = executions.Close()
 		return nil, fmt.Errorf("prepare private execution metadata: %w", err)
 	}
-	return &RepositoryStore{location: location, root: abs, files: files, ops: files, executions: executions, executionRoot: executionRoot, executionOps: executions, now: time.Now}, nil
+	if err := initializeExecutionIndex(files, executions); err != nil {
+		_ = files.Close()
+		_ = executions.Close()
+		return nil, err
+	}
+	return &RepositoryStore{location: location, root: abs, files: files, ops: files, executions: executions, executionOps: executions, now: time.Now}, nil
 }
 
 // Close releases the root directory handle held by the store.
 func (s *RepositoryStore) Close() error {
-	executionRootErr := s.executionRoot.Close()
 	executionErr := s.executions.Close()
 	incidentErr := s.files.Close()
-	return errors.Join(executionRootErr, executionErr, incidentErr)
+	return errors.Join(executionErr, incidentErr)
 }
 
 func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutation) (result incidents.AppendResult, err error) {

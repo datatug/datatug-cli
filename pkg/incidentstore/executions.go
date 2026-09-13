@@ -5,14 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/ingitdb/dalgo2ingitdb"
 )
+
+const executionLayoutVersion = 1
+
+var ErrExecutionIndexUnavailable = errors.New("execution index unavailable")
 
 // PutExecution appends one immutable execution receipt to the routed evidence
 // repository. The receipt is never overwritten, including by an idempotent
@@ -35,26 +40,9 @@ func (s *RepositoryStore) PutExecution(ctx context.Context, record apicontract.E
 			var existing apicontract.ExecutionRecord
 			if readErr := store.executionOps.ReadJSON(indexedPath, &existing); readErr == nil {
 				return ErrExecutionExists
-			} else if !errors.Is(readErr, os.ErrNotExist) {
-				return fmt.Errorf("read indexed execution receipt: %w", readErr)
+			} else {
+				return fmt.Errorf("%w: read indexed execution receipt: %v", ErrExecutionIndexUnavailable, readErr)
 			}
-			// Recover an interrupted append whose private index was published but
-			// whose immutable receipt never became visible.
-			delete(index.Paths, record.Ref.ExecutionID)
-		}
-		existingPaths, scanErr := store.executionPathsForID(record.Ref.ExecutionID)
-		if scanErr != nil {
-			return scanErr
-		}
-		if len(existingPaths) > 0 {
-			if len(existingPaths) > 1 {
-				return fmt.Errorf("execution id %q has multiple immutable receipts", record.Ref.ExecutionID)
-			}
-			index.Paths[record.Ref.ExecutionID] = existingPaths[0]
-			if err := store.executionOps.WriteJSONAtomicWithMode(".store/index.json", index, 0o600); err != nil {
-				return fmt.Errorf("recover execution index: %w", err)
-			}
-			return ErrExecutionExists
 		}
 		var occupied json.RawMessage
 		if readErr := store.executionOps.ReadJSON(path, &occupied); readErr == nil {
@@ -73,42 +61,6 @@ func (s *RepositoryStore) PutExecution(ctx context.Context, record apicontract.E
 		}
 		return nil
 	})
-}
-
-func (s *RepositoryStore) executionPathsForID(executionID string) ([]string, error) {
-	years, err := fs.ReadDir(s.executionRoot.FS(), ".")
-	if err != nil {
-		return nil, fmt.Errorf("list execution receipt years: %w", err)
-	}
-	var paths []string
-	for _, year := range years {
-		if !year.IsDir() || !executionDateSegment(year.Name(), 4, 0, 9999) {
-			continue
-		}
-		months, readErr := fs.ReadDir(s.executionRoot.FS(), year.Name())
-		if readErr != nil {
-			return nil, fmt.Errorf("list execution receipt months: %w", readErr)
-		}
-		for _, month := range months {
-			if !month.IsDir() || !executionDateSegment(month.Name(), 2, 1, 12) {
-				continue
-			}
-			monthPath := year.Name() + "/" + month.Name()
-			receipts, listErr := fs.ReadDir(s.executionRoot.FS(), monthPath)
-			if listErr != nil {
-				return nil, fmt.Errorf("list execution receipts: %w", listErr)
-			}
-			filename := executionID + ".json"
-			for _, receipt := range receipts {
-				if receipt.Name() == filename {
-					paths = append(paths, monthPath+"/"+filename)
-					break
-				}
-			}
-		}
-	}
-	sort.Strings(paths)
-	return paths, nil
 }
 
 func executionDateSegment(value string, width, minimum, maximum int) bool {
@@ -223,15 +175,88 @@ type executionIndex struct {
 	Paths map[string]string `json:"paths"`
 }
 
-func (s *RepositoryStore) readExecutionIndex() (executionIndex, error) {
-	index := executionIndex{Paths: make(map[string]string)}
-	if err := s.executionOps.ReadJSON(".store/index.json", &index); errors.Is(err, os.ErrNotExist) {
-		return index, nil
-	} else if err != nil {
-		return index, fmt.Errorf("read execution index: %w", err)
-	}
+type executionLayout struct {
+	Version int `json:"version"`
+}
+
+func initializeExecutionIndex(files, executions *dalgo2ingitdb.RootedFiles) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer cancel()
+	return files.WithExclusiveLock(ctx, ".store/execution-index-init.lock", func(locked dalgo2ingitdb.LockedFiles) error {
+		var layout executionLayout
+		layoutErr := locked.ReadJSON(".store/execution-layout.json", &layout)
+		index, indexErr := loadExecutionIndex(executions)
+		if errors.Is(layoutErr, os.ErrNotExist) {
+			if errors.Is(indexErr, os.ErrNotExist) {
+				index = executionIndex{Paths: make(map[string]string)}
+				if err := executions.WriteJSONAtomicWithMode(".store/index.json", index, 0o600); err != nil {
+					return fmt.Errorf("initialize execution index: %w", err)
+				}
+			} else if indexErr != nil {
+				return fmt.Errorf("%w: %v", ErrExecutionIndexUnavailable, indexErr)
+			}
+			layout = executionLayout{Version: executionLayoutVersion}
+			if err := locked.WriteJSONAtomicWithMode(".store/execution-layout.json", layout, 0o600); err != nil {
+				return fmt.Errorf("initialize execution layout: %w", err)
+			}
+			return nil
+		}
+		if layoutErr != nil {
+			return fmt.Errorf("%w: read layout: %v", ErrExecutionIndexUnavailable, layoutErr)
+		}
+		if layout.Version != executionLayoutVersion {
+			return fmt.Errorf("%w: unsupported layout version %d", ErrExecutionIndexUnavailable, layout.Version)
+		}
+		if indexErr != nil {
+			return fmt.Errorf("%w: %v", ErrExecutionIndexUnavailable, indexErr)
+		}
+		return nil
+	})
+}
+
+func validateExecutionIndex(index executionIndex) error {
 	if index.Paths == nil {
-		index.Paths = make(map[string]string)
+		return fmt.Errorf("%w: paths are required", ErrExecutionIndexUnavailable)
+	}
+	seenPaths := make(map[string]struct{}, len(index.Paths))
+	for executionID, path := range index.Paths {
+		if err := (apicontract.ExecutionRef{StoreID: "index", ProjectID: "index", ExecutionID: executionID}).Validate(); err != nil {
+			return fmt.Errorf("%w: invalid execution id %q", ErrExecutionIndexUnavailable, executionID)
+		}
+		parts := strings.Split(path, "/")
+		if len(parts) != 3 || !executionDateSegment(parts[0], 4, 0, 9999) || !executionDateSegment(parts[1], 2, 1, 12) || parts[2] != executionID+".json" {
+			return fmt.Errorf("%w: invalid path for execution %q", ErrExecutionIndexUnavailable, executionID)
+		}
+		if _, exists := seenPaths[path]; exists {
+			return fmt.Errorf("%w: duplicate receipt path %q", ErrExecutionIndexUnavailable, path)
+		}
+		seenPaths[path] = struct{}{}
+	}
+	return nil
+}
+
+func (s *RepositoryStore) readExecutionIndex() (executionIndex, error) {
+	var layout executionLayout
+	if err := s.ops.ReadJSON(".store/execution-layout.json", &layout); err != nil {
+		return executionIndex{}, fmt.Errorf("%w: read layout: %v", ErrExecutionIndexUnavailable, err)
+	}
+	if layout.Version != executionLayoutVersion {
+		return executionIndex{}, fmt.Errorf("%w: unsupported layout version %d", ErrExecutionIndexUnavailable, layout.Version)
+	}
+	index, err := loadExecutionIndex(s.executionOps)
+	if err != nil {
+		return executionIndex{}, fmt.Errorf("%w: %v", ErrExecutionIndexUnavailable, err)
+	}
+	return index, nil
+}
+
+func loadExecutionIndex(ops rootedFileOps) (executionIndex, error) {
+	index := executionIndex{}
+	if err := ops.ReadJSON(".store/index.json", &index); err != nil {
+		return executionIndex{}, fmt.Errorf("read execution index: %w", err)
+	}
+	if err := validateExecutionIndex(index); err != nil {
+		return executionIndex{}, err
 	}
 	return index, nil
 }

@@ -124,3 +124,46 @@ func TestNewManagerRejectsPrivateDirSymlinkedIntoEvidenceRepository(t *testing.T
 	_, statErr := os.Stat(filepath.Join(repositoryRoot, ".server-private"))
 	require.True(t, os.IsNotExist(statErr), "unsafe directory was created: %v", statErr)
 }
+
+func TestStoreRejectsStoreDirectorySymlinkedIntoEvidenceRepository(t *testing.T) {
+	repositoryRoot := t.TempDir()
+	privateRoot := t.TempDir()
+	require.NoError(t, os.Symlink(repositoryRoot, filepath.Join(privateRoot, "p")))
+	project := incidents.ProjectRef{StoreID: "p", ProjectID: "p"}
+	location := incidents.StoreLocation{StoreID: "p", Kind: incidents.StoreLocationProjectRepository, Project: &project}
+	manager, err := NewManager(
+		incidentstore.RepositoryRoots{Projects: map[incidents.ProjectRef]string{project: repositoryRoot}},
+		map[string]incidents.StoreLocation{"p": location},
+		Options{PrivateDir: privateRoot},
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+
+	_, err = manager.ProjectStore("p")
+	require.ErrorIs(t, err, ErrUnsafePrivateDir)
+	_, statErr := os.Stat(filepath.Join(repositoryRoot, "snapshots.sqlite"))
+	require.True(t, os.IsNotExist(statErr), "unsafe database was created: %v", statErr)
+}
+
+func TestStoreRejectsSnapshotDatabaseSymlink(t *testing.T) {
+	repositoryRoot := t.TempDir()
+	privateRoot := t.TempDir()
+	storeDir := filepath.Join(privateRoot, "p")
+	require.NoError(t, os.Mkdir(storeDir, 0o700))
+	target := filepath.Join(repositoryRoot, "snapshots.sqlite")
+	require.NoError(t, os.Symlink(target, filepath.Join(storeDir, "snapshots.sqlite")))
+	project := incidents.ProjectRef{StoreID: "p", ProjectID: "p"}
+	location := incidents.StoreLocation{StoreID: "p", Kind: incidents.StoreLocationProjectRepository, Project: &project}
+	manager, err := NewManager(
+		incidentstore.RepositoryRoots{Projects: map[incidents.ProjectRef]string{project: repositoryRoot}},
+		map[string]incidents.StoreLocation{"p": location},
+		Options{PrivateDir: privateRoot},
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, manager.Close()) })
+
+	_, err = manager.ProjectStore("p")
+	require.ErrorIs(t, err, ErrUnsafePrivateDir)
+	_, statErr := os.Stat(target)
+	require.True(t, os.IsNotExist(statErr), "unsafe database target was created: %v", statErr)
+}

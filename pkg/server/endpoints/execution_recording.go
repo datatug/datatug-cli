@@ -354,7 +354,10 @@ func finiteDecimal(value *big.Rat) (string, bool) {
 		return "", false
 	}
 	scale := max(twos, fives)
-	decimal := strings.TrimRight(strings.TrimRight(value.FloatString(scale), "0"), ".")
+	decimal := value.FloatString(scale)
+	if scale > 0 {
+		decimal = strings.TrimRight(strings.TrimRight(decimal, "0"), ".")
+	}
 	if decimal == "-0" || decimal == "" {
 		decimal = "0"
 	}

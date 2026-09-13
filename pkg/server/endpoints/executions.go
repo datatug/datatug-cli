@@ -331,6 +331,13 @@ func authorizeExecutionRecord(r *http.Request, record apicontract.ExecutionRecor
 	if !ok {
 		return fmt.Errorf("server has no policy-enforced session configured")
 	}
+	// Parameter and applied-binding values have no retained field identity that
+	// can be re-authorized independently. They are safe to return only to the
+	// exact principal/policy scope that observed them; otherwise fail closed
+	// even when every result column remains visible under the current policy.
+	if (len(record.Parameters) > 0 || len(record.BindingsApplied) > 0) && record.PolicyFingerprint != api.SecurePolicyFingerprint() {
+		return secureread.ErrSnapshotPolicyUnexpressible
+	}
 	columns := make([]apicontract.Column, len(record.AuthorizedFields))
 	probeRow := make([]apicontract.TypedValue, len(record.AuthorizedFields))
 	for i, field := range record.AuthorizedFields {

@@ -183,6 +183,12 @@ func pathWithin(root, path string) bool {
 }
 
 func pathInsideGitRepository(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if err == nil && !info.IsDir() {
+		path = filepath.Dir(path)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
 	for current := path; ; current = filepath.Dir(current) {
 		gitMarker := filepath.Join(current, ".git")
 		if _, err := os.Lstat(gitMarker); err == nil {
@@ -266,7 +272,7 @@ func (m *Manager) Store(location incidents.StoreLocation) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	store, err := openStore(location, repository, m.options)
+	store, err := openStore(location, repository, m.options, m.roots)
 	if err != nil {
 		_ = repository.Close()
 		return nil, err
@@ -296,15 +302,24 @@ type Store struct {
 	now        func() time.Time
 }
 
-func openStore(location incidents.StoreLocation, repository *incidentstore.RepositoryStore, options Options) (*Store, error) {
+func openStore(location incidents.StoreLocation, repository *incidentstore.RepositoryStore, options Options, roots incidentstore.RepositoryRoots) (*Store, error) {
 	dir := filepath.Join(options.PrivateDir, location.StoreID)
+	if err := validatePrivateStoreDir(dir, roots); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create private evidence directory: %w", err)
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("secure private evidence directory: %w", err)
 	}
+	if err := validatePrivateStoreDir(dir, roots); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(dir, "snapshots.sqlite")
+	if err := ensurePrivateDatabaseFile(path, roots); err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open snapshot sidecar: %w", err)
@@ -329,6 +344,55 @@ func openStore(location incidents.StoreLocation, repository *incidentstore.Repos
 		return nil, fmt.Errorf("secure snapshot sidecar: %w", err)
 	}
 	return &Store{location: location, repository: repository, db: db, byteCap: options.ByteCap, retention: options.Retention, now: options.Now}, nil
+}
+
+func validatePrivateStoreDir(dir string, roots incidentstore.RepositoryRoots) error {
+	info, err := os.Lstat(dir)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return ErrUnsafePrivateDir
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect private evidence store directory: %w", err)
+	}
+	if err := validatePrivateDir(dir, roots); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensurePrivateDatabaseFile(path string, roots incidentstore.RepositoryRoots) error {
+	info, err := os.Lstat(path)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return ErrUnsafePrivateDir
+		}
+		return validatePrivateDir(path, roots)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect private snapshot database: %w", err)
+	}
+	if err := validatePrivateDir(path, roots); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return ensurePrivateDatabaseFile(path, roots)
+	}
+	if err != nil {
+		return fmt.Errorf("create private snapshot database: %w", err)
+	}
+	if closeErr := file.Close(); closeErr != nil {
+		return fmt.Errorf("close private snapshot database: %w", closeErr)
+	}
+	info, err = os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("verify private snapshot database: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return ErrUnsafePrivateDir
+	}
+	return validatePrivateDir(path, roots)
 }
 
 func (s *Store) Close() error {

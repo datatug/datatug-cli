@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -452,6 +453,33 @@ scopes:
 	}
 }
 
+func TestExecutionMetadataAuthorizationFailsClosedForChangedBindingScope(t *testing.T) {
+	session, err := secureread.NewSession(secureread.SessionOptions{As: "alice", NoPolicies: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api.ConfigureSecureSession(session, map[string]string{"p": t.TempDir()}, api.Capabilities{})
+	value := apicontract.ScalarValue(apicontract.NewStringValue("sensitive-binding"))
+	record := apicontract.ExecutionRecord{
+		Provenance:        apicontract.Provenance{Collection: "orders"},
+		AuthorizedFields:  []apicontract.FieldAccessRef{{Column: "id"}},
+		PolicyFingerprint: strings.Repeat("a", 64),
+		Parameters:        map[string]apicontract.TypedValueOrSet{"customer": value},
+		BindingsApplied: []apicontract.Binding{{
+			ParameterID: "customer", Value: value, Origin: apicontract.BindingOriginManual,
+			OriginEvidence: apicontract.BindingOriginEvidenceClientReported,
+		}},
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	if err := authorizeExecutionRecord(request, record); !isCurrentPolicyDenial(err) {
+		t.Fatalf("changed-scope metadata authorization = %v, want fail-closed denial", err)
+	}
+	record.PolicyFingerprint = api.SecurePolicyFingerprint()
+	if err := authorizeExecutionRecord(request, record); err != nil {
+		t.Fatalf("same-scope metadata authorization = %v", err)
+	}
+}
+
 func TestAggregateMeasurementDoesNotRoundExactDecimals(t *testing.T) {
 	projection := apicontract.MeasurementProjection{ID: "sum", Column: "amount", Aggregate: apicontract.MeasurementAggregateSum}
 	measurement := aggregateMeasurement(projection, 0, [][]apicontract.TypedValue{
@@ -470,6 +498,19 @@ func TestAggregateMeasurementDoesNotRoundExactDecimals(t *testing.T) {
 	})
 	if measurement.Completeness != apicontract.MeasurementUnavailable || measurement.Value != nil {
 		t.Fatalf("non-terminating average = %+v, want unavailable rather than rounded", measurement)
+	}
+}
+
+func TestFiniteDecimalPreservesIntegerZeroes(t *testing.T) {
+	for _, value := range []string{"0", "10", "100", "-200"} {
+		exact, ok := new(big.Rat).SetString(value)
+		if !ok {
+			t.Fatalf("parse %q", value)
+		}
+		got, finite := finiteDecimal(exact)
+		if !finite || got != value {
+			t.Fatalf("finiteDecimal(%s) = %q, %v", value, got, finite)
+		}
 	}
 }
 

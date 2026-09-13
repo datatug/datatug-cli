@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
@@ -40,6 +43,20 @@ func (s *RepositoryStore) PutExecution(ctx context.Context, record apicontract.E
 			// whose immutable receipt never became visible.
 			delete(index.Paths, record.Ref.ExecutionID)
 		}
+		existingPaths, scanErr := store.executionPathsForID(record.Ref.ExecutionID)
+		if scanErr != nil {
+			return scanErr
+		}
+		if len(existingPaths) > 0 {
+			if len(existingPaths) > 1 {
+				return fmt.Errorf("execution id %q has multiple immutable receipts", record.Ref.ExecutionID)
+			}
+			index.Paths[record.Ref.ExecutionID] = existingPaths[0]
+			if err := store.executionOps.WriteJSONAtomicWithMode(".store/index.json", index, 0o600); err != nil {
+				return fmt.Errorf("recover execution index: %w", err)
+			}
+			return ErrExecutionExists
+		}
 		var occupied json.RawMessage
 		if readErr := store.executionOps.ReadJSON(path, &occupied); readErr == nil {
 			return ErrExecutionExists
@@ -57,6 +74,49 @@ func (s *RepositoryStore) PutExecution(ctx context.Context, record apicontract.E
 		}
 		return nil
 	})
+}
+
+func (s *RepositoryStore) executionPathsForID(executionID string) ([]string, error) {
+	root, err := os.OpenRoot(filepath.Join(s.root, "executions"))
+	if err != nil {
+		return nil, fmt.Errorf("open execution receipt root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	years, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return nil, fmt.Errorf("list execution receipt years: %w", err)
+	}
+	var paths []string
+	for _, year := range years {
+		if !year.IsDir() || !executionDateSegment(year.Name(), 4, 0, 9999) {
+			continue
+		}
+		months, readErr := fs.ReadDir(root.FS(), year.Name())
+		if readErr != nil {
+			return nil, fmt.Errorf("list execution receipt months: %w", readErr)
+		}
+		for _, month := range months {
+			if !month.IsDir() || !executionDateSegment(month.Name(), 2, 1, 12) {
+				continue
+			}
+			path := year.Name() + "/" + month.Name() + "/" + executionID + ".json"
+			if _, statErr := root.Lstat(path); statErr == nil {
+				paths = append(paths, path)
+			} else if !errors.Is(statErr, os.ErrNotExist) {
+				return nil, fmt.Errorf("inspect execution receipt identity: %w", statErr)
+			}
+		}
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func executionDateSegment(value string, width, minimum, maximum int) bool {
+	if len(value) != width {
+		return false
+	}
+	number, err := strconv.Atoi(value)
+	return err == nil && number >= minimum && number <= maximum
 }
 
 // Execution loads an immutable receipt by its store-qualified ID.

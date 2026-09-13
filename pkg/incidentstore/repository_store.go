@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/incidents"
@@ -40,6 +41,7 @@ type RepositoryStore struct {
 	location     incidents.StoreLocation
 	root         string
 	files        *dalgo2ingitdb.RootedFiles
+	incidentRoot *os.Root
 	ops          rootedFileOps
 	executions   *dalgo2ingitdb.RootedFiles
 	executionOps rootedFileOps
@@ -50,6 +52,29 @@ type RepositoryStore struct {
 	afterAppendPrepare func() error
 	afterAppendCommit  func() error
 	afterRecovery      func(*RepositoryStore)
+	notifier           *storeNotifier
+}
+
+type storeNotifier struct {
+	mu sync.Mutex
+	ch chan struct{}
+}
+
+func newStoreNotifier() *storeNotifier {
+	return &storeNotifier{ch: make(chan struct{})}
+}
+
+func (n *storeNotifier) current() <-chan struct{} {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.ch
+}
+
+func (n *storeNotifier) signal() {
+	n.mu.Lock()
+	close(n.ch)
+	n.ch = make(chan struct{})
+	n.mu.Unlock()
 }
 
 type rootedFileOps interface {
@@ -60,7 +85,7 @@ type rootedFileOps interface {
 	ReadDir(relativePath string) ([]os.DirEntry, error)
 }
 
-var _ incidents.Store = (*RepositoryStore)(nil)
+var _ incidents.APIStore = (*RepositoryStore)(nil)
 
 func NewRepositoryStore(location incidents.StoreLocation, root string) (*RepositoryStore, error) {
 	return newRepositoryStore(location, root, filepath.Abs)
@@ -100,14 +125,33 @@ func newRepositoryStoreWithAcquisitionHook(location incidents.StoreLocation, roo
 	if err != nil {
 		return nil, fmt.Errorf("open incident file capability: %w", err)
 	}
+	incidentPath := filepath.Join(abs, "incidents")
+	incidentInfo, err := os.Lstat(incidentPath)
+	if err != nil || incidentInfo.Mode()&os.ModeSymlink != 0 || !incidentInfo.IsDir() {
+		_ = files.Close()
+		return nil, fmt.Errorf("open incident directory index: incidents must be a real directory")
+	}
+	incidentRoot, err := os.OpenRoot(incidentPath)
+	if err != nil {
+		_ = files.Close()
+		return nil, fmt.Errorf("open incident directory index: %w", err)
+	}
+	openedIncidentInfo, err := incidentRoot.Stat(".")
+	if err != nil || !os.SameFile(incidentInfo, openedIncidentInfo) {
+		_ = files.Close()
+		_ = incidentRoot.Close()
+		return nil, fmt.Errorf("open incident directory index: incidents changed during acquisition")
+	}
 	executions, err := dalgo2ingitdb.RootedFilesFor(context.Background(), db, executionScope)
 	if err != nil {
 		_ = files.Close()
+		_ = incidentRoot.Close()
 		return nil, fmt.Errorf("open execution file capability: %w", err)
 	}
 	if afterExecutionCapability != nil {
 		if err := afterExecutionCapability(); err != nil {
 			_ = files.Close()
+			_ = incidentRoot.Close()
 			_ = executions.Close()
 			return nil, fmt.Errorf("after execution file capability acquisition: %w", err)
 		}
@@ -121,32 +165,39 @@ func newRepositoryStoreWithAcquisitionHook(location incidents.StoreLocation, roo
 	// permissions, while the 0700 ancestor keeps the whole metadata tree private.
 	if err := files.EnsureDir(".store", 0o700); err != nil {
 		_ = files.Close()
+		_ = incidentRoot.Close()
 		_ = executions.Close()
 		return nil, fmt.Errorf("prepare private incident metadata: %w", err)
 	}
 	if err := executions.EnsureDir(".store", 0o700); err != nil {
 		_ = files.Close()
+		_ = incidentRoot.Close()
 		_ = executions.Close()
 		return nil, fmt.Errorf("prepare private execution metadata: %w", err)
 	}
 	if err := initializeExecutionIndex(files, executions); err != nil {
 		_ = files.Close()
+		_ = incidentRoot.Close()
 		_ = executions.Close()
 		return nil, err
 	}
-	return &RepositoryStore{location: location, root: abs, files: files, ops: files, executions: executions, executionOps: executions, now: time.Now}, nil
+	return &RepositoryStore{location: location, root: abs, files: files, incidentRoot: incidentRoot, ops: files, executions: executions, executionOps: executions, now: time.Now, notifier: newStoreNotifier()}, nil
 }
 
 // Close releases the root directory handle held by the store.
 func (s *RepositoryStore) Close() error {
 	executionErr := s.executions.Close()
 	incidentErr := s.files.Close()
-	return errors.Join(executionErr, incidentErr)
+	indexErr := s.incidentRoot.Close()
+	return errors.Join(executionErr, incidentErr, indexErr)
 }
 
 func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutation) (result incidents.AppendResult, err error) {
 	if err = mutation.Validate(); err != nil {
 		return result, err
+	}
+	if strings.HasPrefix(mutation.Incident.IncidentID, "INC-") && !canonicalIncidentID(mutation.Incident.IncidentID) {
+		return result, fmt.Errorf("incident ID %q is not a canonical INC-n identifier", mutation.Incident.IncidentID)
 	}
 	if mutation.Incident.StoreID != s.location.StoreID {
 		return result, fmt.Errorf("incident store %q cannot write %q", s.location.StoreID, mutation.Incident.StoreID)
@@ -186,7 +237,7 @@ func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutatio
 			return incidents.ErrSequenceConflict
 		}
 		next := uint64(len(events) + 1)
-		visibleAt := mutation.Event.At.UTC()
+		visibleAt := store.now().UTC()
 		event := incidents.Event{
 			ID: mutation.MutationID, Seq: next, At: mutation.Event.At.UTC(), VisibleAt: visibleAt,
 			Incident: mutation.Incident, Actor: mutation.Event.Actor, Type: mutation.Event.Type,
@@ -373,6 +424,7 @@ func (s *RepositoryStore) Merge(ctx context.Context, mutation incidents.MergeMut
 
 const (
 	receiptKindAppend = "append"
+	receiptKindCreate = "create"
 	receiptKindMerge  = "merge"
 )
 
@@ -451,11 +503,15 @@ func (s *RepositoryStore) finishAppend(ref incidents.IncidentRef, receipt append
 	if err := s.writeJSONAtomic(s.join(layout.Projection), projection, 0o644); err != nil {
 		return incidents.AppendResult{}, fmt.Errorf("write incident projection: %w", err)
 	}
+	if err := s.registerIncident(ref); err != nil {
+		return incidents.AppendResult{}, fmt.Errorf("register incident: %w", err)
+	}
 	if !receipt.Published {
 		receipt.Published = true
 		if err := s.writeJSONAtomic(receiptPath, receipt, 0o600); err != nil {
 			return incidents.AppendResult{}, fmt.Errorf("publish mutation receipt: %w", err)
 		}
+		s.notifier.signal()
 	}
 	return result, nil
 }
@@ -534,10 +590,17 @@ func (s *RepositoryStore) finishMerge(intentPath, receiptPath string, intent mer
 	if err := s.publishMergeProjections(result); err != nil {
 		return incidents.MergeResult{}, err
 	}
+	if err := s.registerIncident(intent.Mutation.Source); err != nil {
+		return incidents.MergeResult{}, fmt.Errorf("register merge source: %w", err)
+	}
+	if err := s.registerIncident(intent.Mutation.Into); err != nil {
+		return incidents.MergeResult{}, fmt.Errorf("register merge target: %w", err)
+	}
 	intent.Committed = true
 	if err := s.writeJSONAtomic(intentPath, intent, 0o600); err != nil {
 		return incidents.MergeResult{}, fmt.Errorf("commit merge intent: %w", err)
 	}
+	s.notifier.signal()
 	return result, nil
 }
 
@@ -671,10 +734,10 @@ func (s *RepositoryStore) recoverPendingMutations() error {
 		if kindErr != nil {
 			return kindErr
 		}
-		if kind != receiptKindAppend {
+		if kind != receiptKindAppend && kind != receiptKindCreate {
 			continue
 		}
-		receipt, found, readErr := s.readReceipt(fileName)
+		receipt, found, readErr := s.readAppendLikeReceipt(fileName, kind)
 		if readErr != nil {
 			return readErr
 		}
@@ -824,6 +887,14 @@ func (s *RepositoryStore) readDir(relative string) ([]os.DirEntry, error) {
 }
 
 func (s *RepositoryStore) readReceipt(fileName string) (appendReceipt, bool, error) {
+	return s.readAppendLikeReceipt(fileName, receiptKindAppend)
+}
+
+func (s *RepositoryStore) readCreateReceipt(fileName string) (appendReceipt, bool, error) {
+	return s.readAppendLikeReceipt(fileName, receiptKindCreate)
+}
+
+func (s *RepositoryStore) readAppendLikeReceipt(fileName, expectedKind string) (appendReceipt, bool, error) {
 	b, err := s.readFile(fileName)
 	if errors.Is(err, os.ErrNotExist) {
 		return appendReceipt{}, false, nil
@@ -837,14 +908,14 @@ func (s *RepositoryStore) readReceipt(fileName string) (appendReceipt, bool, err
 	if err := json.Unmarshal(b, &header); err != nil {
 		return appendReceipt{}, false, fmt.Errorf("decode mutation receipt: %w", err)
 	}
-	if header.Kind != receiptKindAppend {
+	if header.Kind != expectedKind {
 		return appendReceipt{}, false, incidents.ErrMutationConflict
 	}
 	var receipt appendReceipt
 	if err := decodeStrict(b, &receipt); err != nil {
 		return appendReceipt{}, false, fmt.Errorf("decode mutation receipt: %w", err)
 	}
-	if receipt.Kind != receiptKindAppend || len(receipt.RequestHash) != sha256.Size*2 || receipt.Event.ID == "" {
+	if receipt.Kind != expectedKind || len(receipt.RequestHash) != sha256.Size*2 || receipt.Event.ID == "" {
 		return appendReceipt{}, false, incidents.ErrMutationConflict
 	}
 	return receipt, true, nil
@@ -861,7 +932,7 @@ func (s *RepositoryStore) readReceiptKind(fileName string) (string, error) {
 	if err := json.Unmarshal(b, &envelope); err != nil {
 		return "", fmt.Errorf("decode mutation receipt kind: %w", err)
 	}
-	if envelope.Kind != receiptKindAppend && envelope.Kind != receiptKindMerge {
+	if envelope.Kind != receiptKindAppend && envelope.Kind != receiptKindCreate && envelope.Kind != receiptKindMerge {
 		return "", fmt.Errorf("invalid mutation receipt kind %q", envelope.Kind)
 	}
 	return envelope.Kind, nil

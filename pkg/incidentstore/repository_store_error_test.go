@@ -308,7 +308,7 @@ func TestFinishAppendFailureStages(t *testing.T) {
 
 	t.Run("publish receipt", func(t *testing.T) {
 		store := newTestStore(t)
-		store.ops = &failRootedFileOps{rootedFileOps: store.files, operation: "write", failAt: 2, err: testErr}
+		store.ops = &failRootedFileOps{rootedFileOps: store.files, operation: "write", failAt: 3, err: testErr}
 		receipt := appendReceiptFixture(t)
 		receipt.Committed = true
 		_, err := store.finishAppend(receipt.Event.Incident, receipt)
@@ -327,7 +327,7 @@ func TestFinishAppendFailureStages(t *testing.T) {
 
 func appendReceiptFixture(t *testing.T) appendReceipt {
 	t.Helper()
-	mutation := createdMutation(t, "append-fixture", "INC-FIXTURE")
+	mutation := createdMutation(t, "append-fixture", "INC-903")
 	event := incidents.Event{
 		ID:        mutation.MutationID,
 		Seq:       1,
@@ -501,7 +501,7 @@ func TestFinishMergeFailureStages(t *testing.T) {
 		{name: "reload target", operation: "read-jsonl", failAt: 5},
 		{name: "commit receipt", operation: "write", failAt: 1, wantContains: "commit merge receipt"},
 		{name: "publish projection", operation: "write", failAt: 2, wantContains: "write merged incident projection"},
-		{name: "commit intent", operation: "write", failAt: 4, wantContains: "commit merge intent"},
+		{name: "commit intent", operation: "write", failAt: 5, wantContains: "commit merge intent"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -664,9 +664,9 @@ func TestRepositoryStoreMergeErrorStates(t *testing.T) {
 
 	t.Run("already merged incident", func(t *testing.T) {
 		store := newTestStore(t)
-		source := createdMutation(t, "source", "INC-SOURCE")
-		into := createdMutation(t, "into", "INC-INTO")
-		other := createdMutation(t, "other", "INC-OTHER")
+		source := createdMutation(t, "source", "INC-909")
+		into := createdMutation(t, "into", "INC-905")
+		other := createdMutation(t, "other", "INC-906")
 		_, err := store.Append(ctx, source)
 		require.NoError(t, err)
 		_, err = store.Append(ctx, into)
@@ -681,8 +681,8 @@ func TestRepositoryStoreMergeErrorStates(t *testing.T) {
 
 	t.Run("import visibility precedes target", func(t *testing.T) {
 		store := newTestStore(t)
-		source := createdMutation(t, "visibility-source", "INC-SOURCE")
-		into := createdMutation(t, "visibility-target", "INC-TARGET")
+		source := createdMutation(t, "visibility-source", "INC-909")
+		into := createdMutation(t, "visibility-target", "INC-910")
 		_, err := store.Append(ctx, source)
 		require.NoError(t, err)
 		_, err = store.Append(ctx, into)
@@ -694,8 +694,8 @@ func TestRepositoryStoreMergeErrorStates(t *testing.T) {
 
 	t.Run("source merge visibility precedes source", func(t *testing.T) {
 		store := newTestStore(t)
-		source := createdMutation(t, "source-visibility-source", "INC-SOURCE")
-		into := createdMutation(t, "source-visibility-target", "INC-TARGET")
+		source := createdMutation(t, "source-visibility-source", "INC-909")
+		into := createdMutation(t, "source-visibility-target", "INC-910")
 		into.Event.At = source.Event.At.Add(-2 * time.Minute)
 		_, err := store.Append(ctx, source)
 		require.NoError(t, err)
@@ -709,7 +709,7 @@ func TestRepositoryStoreMergeErrorStates(t *testing.T) {
 
 func TestRepositoryStorePublicReadAndFoldErrors(t *testing.T) {
 	store := newTestStore(t)
-	ref := incidents.IncidentRef{StoreID: "ops", IncidentID: "INC-CORRUPT"}
+	ref := incidents.IncidentRef{StoreID: "ops", IncidentID: "INC-901"}
 	layout, err := incidents.LayoutFor(ref)
 	require.NoError(t, err)
 	eventsPath := store.join(layout.Events)
@@ -717,7 +717,7 @@ func TestRepositoryStorePublicReadAndFoldErrors(t *testing.T) {
 	_, err = store.Events(context.Background(), ref, 0)
 	require.Error(t, err)
 
-	ref.IncidentID = "INC-FOLD"
+	ref.IncidentID = "INC-904"
 	note := appendReceiptFixture(t).Event
 	note.ID = "note-first"
 	note.Seq = 1
@@ -757,7 +757,7 @@ func TestRepositoryStorePublicAppendStorageFailures(t *testing.T) {
 					rootedFileOps: locked.ops, operation: tc.operation, failAt: tc.failAt, err: testErr,
 				}
 			}
-			_, err := store.Append(context.Background(), createdMutation(t, "public-append-failure", "INC-FAIL"))
+			_, err := store.Append(context.Background(), createdMutation(t, "public-append-failure", "INC-902"))
 			require.ErrorIs(t, err, testErr)
 		})
 	}
@@ -780,8 +780,8 @@ func TestRepositoryStorePublicMergeStorageFailures(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newTestStore(t)
-			source := createdMutation(t, "create-source", "INC-SOURCE")
-			into := createdMutation(t, "create-target", "INC-TARGET")
+			source := createdMutation(t, "create-source", "INC-909")
+			into := createdMutation(t, "create-target", "INC-910")
 			_, err := store.Append(context.Background(), source)
 			require.NoError(t, err)
 			_, err = store.Append(context.Background(), into)
@@ -810,7 +810,7 @@ func TestRepositoryStorePublicPendingAndReplayStates(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, locked.writeJSONAtomic(path, pending, 0o600))
 		}
-		_, err := store.Append(context.Background(), createdMutation(t, "append-with-pending", "INC-PENDING"))
+		_, err := store.Append(context.Background(), createdMutation(t, "append-with-pending", "INC-907"))
 		require.ErrorIs(t, err, incidents.ErrSequenceConflict)
 	})
 
@@ -831,8 +831,8 @@ func TestRepositoryStorePublicPendingAndReplayStates(t *testing.T) {
 
 	t.Run("merge sees unrelated pending intent", func(t *testing.T) {
 		store := newTestStore(t)
-		source := createdMutation(t, "pending-source", "INC-SOURCE")
-		into := createdMutation(t, "pending-target", "INC-TARGET")
+		source := createdMutation(t, "pending-source", "INC-909")
+		into := createdMutation(t, "pending-target", "INC-910")
 		_, err := store.Append(context.Background(), source)
 		require.NoError(t, err)
 		_, err = store.Append(context.Background(), into)
@@ -853,8 +853,8 @@ func TestRepositoryStorePublicPendingAndReplayStates(t *testing.T) {
 
 	t.Run("merge replay republishes projections", func(t *testing.T) {
 		store := newTestStore(t)
-		source := createdMutation(t, "replay-source", "INC-SOURCE")
-		into := createdMutation(t, "replay-target", "INC-TARGET")
+		source := createdMutation(t, "replay-source", "INC-909")
+		into := createdMutation(t, "replay-target", "INC-910")
 		_, err := store.Append(context.Background(), source)
 		require.NoError(t, err)
 		_, err = store.Append(context.Background(), into)
@@ -873,7 +873,7 @@ func TestRepositoryStorePublicPendingAndReplayStates(t *testing.T) {
 
 func TestRepositoryStoreProjectionReadFailureAfterRecovery(t *testing.T) {
 	store := newTestStore(t)
-	ref := incidents.IncidentRef{StoreID: "ops", IncidentID: "INC-PROJECTION-FAIL"}
+	ref := incidents.IncidentRef{StoreID: "ops", IncidentID: "INC-908"}
 	testErr := errors.New("projection read failed")
 	store.afterRecovery = func(locked *RepositoryStore) {
 		locked.ops = &failRootedFileOps{rootedFileOps: locked.ops, operation: "read-jsonl", failAt: 1, err: testErr}
@@ -1009,8 +1009,8 @@ func seededMergeStore(t *testing.T) (*RepositoryStore, mergeIntent) {
 func mergeIntentFixture(t *testing.T) mergeIntent {
 	t.Helper()
 	source := appendReceiptFixture(t).Event
-	source.Incident.IncidentID = "INC-SOURCE"
-	into := incidents.IncidentRef{StoreID: source.Incident.StoreID, IncidentID: "INC-INTO"}
+	source.Incident.IncidentID = "INC-909"
+	into := incidents.IncidentRef{StoreID: source.Incident.StoreID, IncidentID: "INC-905"}
 	mutation := incidents.MergeMutation{MutationID: "merge-fixture", Source: source.Incident, Into: into}
 	mergeAt := source.At.Add(1)
 	imported := source

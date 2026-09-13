@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-core/pkg/apicontract"
@@ -62,10 +63,14 @@ func computeSemanticApplicable(ctx context.Context, req apicontract.ApplicableRe
 	}
 
 	// Disabled facts are ignored (api-contract.md "Binding and context
-	// behavior"). More than one DISTINCT value within the same entity.field
-	// is ambiguous and is excluded from `available` entirely, so
+	// behavior"). This adapter implements equality binding only: an enabled
+	// predicate with any other condition is retained separately so candidates
+	// can report why the relevant parameter remains unbound, but is never
+	// offered to semantic.Applicable as an equality value. More than one
+	// DISTINCT equality value within the same entity.field is ambiguous and is
+	// excluded from `available` entirely, so
 	// semantic.Applicable naturally reports every query needing it as
-	// missing that field too — buildApplicableCandidate then attaches the
+	// missing that field too — buildNotYetCandidate then attaches the
 	// Ambiguous detail (as opposed to a plain "nothing supplied") when it
 	// re-derives the same key. This is Task 12's OWN simplified ambiguity
 	// rule: it does not yet implement the appendix's full origin-tier
@@ -75,11 +80,16 @@ func computeSemanticApplicable(ctx context.Context, req apicontract.ApplicableRe
 	// currently conflicts, which is conservative (never silently picks a
 	// value the browser would not have) rather than wrong.
 	enabledByField := map[string][]apicontract.Fact{}
+	unsupportedByField := map[string][]apicontract.Fact{}
 	for _, f := range req.Values {
 		if !f.Enabled {
 			continue
 		}
 		key := fieldKey(f.Entity, f.Field)
+		if f.Condition != "" && f.Condition != apicontract.FactConditionEqual {
+			unsupportedByField[key] = append(unsupportedByField[key], f)
+			continue
+		}
 		enabledByField[key] = append(enabledByField[key], f)
 	}
 	ambiguous := map[string]bool{}
@@ -114,7 +124,7 @@ func computeSemanticApplicable(ctx context.Context, req apicontract.ApplicableRe
 		candidates = append(candidates, buildApplicableCandidate(ctx, projStore, projectDir, req.Environment, aq, ambiguous, enabledByField, latestFactByField, canonicalIDs))
 	}
 	for _, nq := range notYetQ {
-		candidates = append(candidates, buildNotYetCandidate(ctx, projStore, projectDir, req.Environment, nq, ambiguous, enabledByField, canonicalIDs))
+		candidates = append(candidates, buildNotYetCandidate(ctx, projStore, projectDir, req.Environment, nq, ambiguous, enabledByField, unsupportedByField, canonicalIDs))
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].QueryID < candidates[j].QueryID })
 
@@ -196,7 +206,7 @@ func buildApplicableCandidate(ctx context.Context, projStore datatug.ProjectStor
 // (api-contract.md: "missing: string[] // parameter IDs") and attaching an
 // Ambiguous entry instead of a plain "missing" explanation when that
 // entity.field's block was due to conflicting facts, not an absent one.
-func buildNotYetCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, nq semantic.NotYetApplicable, ambiguous map[string]bool, enabledByField map[string][]apicontract.Fact, canonicalIDs map[*datatug.QueryDef]string) apicontract.Candidate {
+func buildNotYetCandidate(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string, nq semantic.NotYetApplicable, ambiguous map[string]bool, enabledByField, unsupportedByField map[string][]apicontract.Fact, canonicalIDs map[*datatug.QueryDef]string) apicontract.Candidate {
 	var missing []string
 	var chain []apicontract.ChainStep
 	var ambig []apicontract.Ambiguous
@@ -214,6 +224,12 @@ func buildNotYetCandidate(ctx context.Context, projStore datatug.ProjectStore, p
 				}
 				ambig = append(ambig, apicontract.Ambiguous{ParameterID: p.ID, FactIDs: factIDs})
 				chain = append(chain, apicontract.ChainStep{ParameterID: p.ID, Explanation: fmt.Sprintf("%d conflicting values available for %s; select one to resolve", len(factIDs), ef)})
+			} else if unsupported := unsupportedByField[key]; len(unsupported) > 0 {
+				skipped := make([]string, len(unsupported))
+				for i, fact := range unsupported {
+					skipped[i] = fmt.Sprintf("%q (%q)", fact.ID, fact.Condition)
+				}
+				chain = append(chain, apicontract.ChainStep{ParameterID: p.ID, Explanation: fmt.Sprintf("facts %s skipped for unsupported conditions; %s remains unbound", strings.Join(skipped, ", "), ef)})
 			} else {
 				chain = append(chain, apicontract.ChainStep{ParameterID: p.ID, Explanation: fmt.Sprintf("%s is not available from the current selection or context", ef)})
 			}

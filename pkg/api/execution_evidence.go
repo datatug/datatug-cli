@@ -58,6 +58,18 @@ func ExecutionEvidenceStoreByID(projectID, storeID string) (*executionstore.Stor
 	return manager.StoreByID(projectID, storeID)
 }
 
+// IncidentStoreByID resolves the incident API provider through the same
+// manager and RepositoryStore already used by immutable execution evidence.
+func IncidentStoreByID(projectID, storeID string) (incidents.APIStore, error) {
+	evidenceMu.RLock()
+	manager := evidenceManager
+	evidenceMu.RUnlock()
+	if manager == nil {
+		return nil, fmt.Errorf("incident store is not configured")
+	}
+	return manager.IncidentStoreByID(projectID, storeID)
+}
+
 // CloseExecutionEvidence releases all routed repository and SQLite handles.
 func CloseExecutionEvidence() error {
 	evidenceMu.Lock()

@@ -137,6 +137,11 @@ func fieldAllowed(patterns []string, path string) bool {
 	return false
 }
 
+// FieldAllowed exposes the exact field-pattern decision used by secured DALgo
+// reads so transport adapters can redact persisted fact values without
+// reimplementing policy matching.
+func FieldAllowed(patterns []string, path string) bool { return fieldAllowed(patterns, path) }
+
 func segmentMatches(pattern, segment string) bool {
 	switch {
 	case pattern == "*":

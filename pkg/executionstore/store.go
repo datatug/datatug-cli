@@ -258,6 +258,17 @@ func (m *Manager) StoreByID(projectID, storeID string) (*Store, error) {
 	return m.Store(location)
 }
 
+// IncidentStoreByID exposes the canonical incident provider already owned by
+// this routed evidence store. Incident and execution evidence therefore share
+// one RepositoryStore, lock, and recovery boundary.
+func (m *Manager) IncidentStoreByID(projectID, storeID string) (incidents.APIStore, error) {
+	store, err := m.StoreByID(projectID, storeID)
+	if err != nil {
+		return nil, err
+	}
+	return store.repository, nil
+}
+
 // Store opens one configured project, dedicated, or application repository.
 func (m *Manager) Store(location incidents.StoreLocation) (*Store, error) {
 	if err := location.Validate(); err != nil {

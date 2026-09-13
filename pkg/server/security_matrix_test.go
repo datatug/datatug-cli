@@ -324,7 +324,7 @@ func TestRunQuery_RestrictedRowsAndColumns(t *testing.T) {
 		request := apicontract.ExecutionRequest{
 			Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 			Source: securityMatrixSource, QueryID: "customer-by-id",
-			Parameters:     map[string]apicontract.TypedValue{"CustomerId": value},
+			Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 			BindingOrigins: []apicontract.BindingOriginEntry{origin},
 			Mode:           apicontract.ProvenanceModeLive,
 		}
@@ -352,7 +352,7 @@ func TestRunQuery_RestrictedRowsAndColumns(t *testing.T) {
 		request := apicontract.ExecutionRequest{
 			Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 			Source: securityMatrixSource, QueryID: "customer-by-id",
-			Parameters:     map[string]apicontract.TypedValue{"CustomerId": value},
+			Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 			BindingOrigins: []apicontract.BindingOriginEntry{origin},
 			Mode:           apicontract.ProvenanceModeLive,
 		}
@@ -409,7 +409,7 @@ func TestRunQuery_DTQL_RunsForAdmin(t *testing.T) {
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 		Source: securityMatrixSource, QueryID: "customer-by-id",
-		Parameters:     map[string]apicontract.TypedValue{"CustomerId": value},
+		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 		BindingOrigins: []apicontract.BindingOriginEntry{origin},
 		Mode:           apicontract.ProvenanceModeLive,
 	}
@@ -433,7 +433,7 @@ func TestRunQuery_DTQL_RunsForAdmin(t *testing.T) {
 	if !emailFound {
 		t.Errorf("admin row missing Email: columns=%+v row=%+v", response.Recordset.Columns, response.Recordset.Rows[0])
 	}
-	if len(response.BindingsApplied) != 1 || response.BindingsApplied[0].ParameterID != "CustomerId" || response.BindingsApplied[0].Value.Str != "1" {
+	if len(response.BindingsApplied) != 1 || response.BindingsApplied[0].ParameterID != "CustomerId" || response.BindingsApplied[0].Value.Scalar == nil || response.BindingsApplied[0].Value.Scalar.Str != "1" {
 		t.Errorf("BindingsApplied = %+v, want [{CustomerId, integer 1}]", response.BindingsApplied)
 	}
 	if response.BindingsApplied[0].OriginEvidence != apicontract.BindingOriginEvidenceClientReported {
@@ -455,7 +455,7 @@ func TestRunQuery_HiddenColumnExplicit_Refused(t *testing.T) {
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 		Source: securityMatrixSource, DTQL: customerEmailExplicitDTQL,
-		Parameters:     map[string]apicontract.TypedValue{"CustomerId": value},
+		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 		BindingOrigins: []apicontract.BindingOriginEntry{origin},
 		Mode:           apicontract.ProvenanceModeLive,
 	}
@@ -502,7 +502,7 @@ func TestRunQuery_NativeSQL_RefusedWithoutGrant(t *testing.T) {
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 		Source: securityMatrixSource, QueryID: "customers-sql",
-		Parameters:     map[string]apicontract.TypedValue{},
+		Parameters:     map[string]apicontract.TypedValueOrSet{},
 		BindingOrigins: []apicontract.BindingOriginEntry{},
 		Mode:           apicontract.ProvenanceModeLive,
 	}
@@ -541,7 +541,7 @@ func TestRunQuery_NativeSQL_OpaquePrivilegedWithGrant(t *testing.T) {
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 		Source: securityMatrixSource, QueryID: "customers-sql",
-		Parameters:     map[string]apicontract.TypedValue{},
+		Parameters:     map[string]apicontract.TypedValueOrSet{},
 		BindingOrigins: []apicontract.BindingOriginEntry{},
 		Mode:           apicontract.ProvenanceModeLive,
 	}

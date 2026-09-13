@@ -117,6 +117,8 @@ github.com/datatug/cliformat v0.0.3 h1:d9p5vo7r8BH6qSKyTHQ9Al2sT6QHsQTK9KRlihaJd
 github.com/datatug/cliformat v0.0.3/go.mod h1:DwX9tWHiyH+vZtbVEVOyHOEOw1Km9AzhgHoqI0PowAc=
 github.com/datatug/datatug-core v0.29.0 h1:vbMAOLqYt3+QdNMsRwoRO5vFDwDG7mE0AWRdhAg+a6I=
 github.com/datatug/datatug-core v0.29.0/go.mod h1:ODLMXUQ1jtOf7QjtNGWrws3JB/EAIk/PUTrcfydvHEs=
+github.com/datatug/datatug-core v0.30.0 h1:PWsMt+U98VyLQpWeePqPqPd+kdQZO6LwHBYNzNTz1jM=
+github.com/datatug/datatug-core v0.30.0/go.mod h1:ODLMXUQ1jtOf7QjtNGWrws3JB/EAIk/PUTrcfydvHEs=
 github.com/datatug/sql2csv v0.0.0-20260826045256-b0d582f72f50 h1:c6sYh6FI5mQFnc2wVCx84oKjfd7pVYGijtgSesgwKnI=
 github.com/datatug/sql2csv v0.0.0-20260826045256-b0d582f72f50/go.mod h1:AFcHWXF0BoVP8Z3BEvBDWBpFcBRMs7HdAhbt2M0XGzI=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

@@ -29,6 +29,14 @@ import (
 // a base Scope with the freshly-minted securityContextId already filled
 // in.
 func configureSemanticSession(t *testing.T, projectDir, projectID, as string, roles []string) apicontract.Scope {
+	return configureSemanticSessionWithCapabilities(t, projectDir, projectID, as, roles, api.Capabilities{
+		SnapshotPolicies: map[string]api.SnapshotProjectPolicy{
+			projectID: {Sources: map[string]api.SnapshotSourcePolicy{semanticTestSource: {Allow: true}}},
+		},
+	})
+}
+
+func configureSemanticSessionWithCapabilities(t *testing.T, projectDir, projectID, as string, roles []string, caps api.Capabilities) apicontract.Scope {
 	t.Helper()
 	session, err := secureread.NewSession(secureread.SessionOptions{
 		As: as, Roles: roles, PoliciesDir: projectDir + "/policies",
@@ -37,7 +45,7 @@ func configureSemanticSession(t *testing.T, projectDir, projectID, as string, ro
 		t.Fatalf("secureread.NewSession: %v", err)
 	}
 	pathsByID := map[string]string{projectID: projectDir}
-	api.ConfigureSecureSession(session, pathsByID, api.Capabilities{})
+	api.ConfigureSecureSession(session, pathsByID, caps)
 	// api.ProjectStoreFor (used by the resolver — pkg/api/resolver.go) goes
 	// through storage.NewDatatugStore, the package-level var pkg/server's
 	// ServeHTTP wires at startup (newDatatugStoreFactory); this package's

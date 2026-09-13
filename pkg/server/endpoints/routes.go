@@ -26,7 +26,18 @@ func registerRoutes(path string, router router, wrapper wrapper, writeOnly bool,
 	recordsetsRoutes(path, router, wrapper, writeOnly, caps)
 	executeRoutes(path, router, wrapper, writeOnly)
 	semanticRoutes(path, router, wrapper, writeOnly)
+	executionRoutes(path, router, wrapper, writeOnly)
 
+}
+
+func executionRoutes(path string, router router, wrap wrapper, writeOnly bool) {
+	if writeOnly {
+		return
+	}
+	route(router, wrap, http.MethodGet, path+"/executions", executionsListHandler)
+	route(router, wrap, http.MethodGet, path+"/executions/:id", executionShowHandler)
+	route(router, wrap, http.MethodGet, path+"/executions/:id/snapshot", executionSnapshotHandler)
+	route(router, wrap, http.MethodPost, path+"/executions/series", executionSeriesHandler)
 }
 
 // semanticRoutes registers the core-investigation-loop semantic endpoints

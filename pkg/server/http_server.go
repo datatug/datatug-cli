@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/server/endpoints"
 	"github.com/datatug/datatug-core/pkg/storage"
@@ -47,7 +49,10 @@ func NewHttpServer() HttpServer {
 }
 
 func (s *HttpServer) Shutdown(ctx context.Context) error {
-	return s.s.Shutdown(ctx)
+	if s.s == nil {
+		return api.CloseExecutionEvidence()
+	}
+	return errors.Join(s.s.Shutdown(ctx), api.CloseExecutionEvidence())
 }
 
 // newDatatugStoreFactory builds the storage.NewDatatugStore implementation
@@ -104,6 +109,14 @@ func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storag
 // --allow-opaque-sql flags.
 func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int, session secureread.Session, caps api.Capabilities) error {
 	storage.NewDatatugStore = newDatatugStoreFactory(pathsByID)
+	if err := api.ConfigureExecutionEvidence(pathsByID, caps.IncidentStores, executionstore.Options{
+		PrivateDir: caps.EvidencePrivateDir,
+		ByteCap:    caps.EvidenceByteCap,
+		Retention:  caps.EvidenceRetention,
+	}); err != nil {
+		return fmt.Errorf("configure execution evidence: %w", err)
+	}
+	defer func() { _ = api.CloseExecutionEvidence() }()
 	api.ConfigureSecureSession(session, pathsByID, caps)
 	api.WarnMissingSourceFiles(context.Background(), pathsByID)
 

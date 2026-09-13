@@ -138,7 +138,7 @@ func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 		request := apicontract.ExecutionRequest{
 			Project: demoProjectID, Environment: demoProjectEnv, SecurityContextID: info.SecurityContextID,
 			Source: demoProjectSource, QueryID: "customers/customer-invoices",
-			Parameters: map[string]apicontract.TypedValue{"CustomerId": apicontract.NewIntegerValue(strconv.FormatInt(customerID, 10))},
+			Parameters: map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(apicontract.NewIntegerValue(strconv.FormatInt(customerID, 10)))},
 			BindingOrigins: []apicontract.BindingOriginEntry{
 				{ParameterID: "CustomerId", Origin: apicontract.BindingOriginManual},
 			},
@@ -204,13 +204,13 @@ func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 	// be the SAME typed value that was actually applied, and its origin
 	// evidence must be honestly reported as client-reported (this test drove
 	// the binding by hand, standing in for the browser's own auto-binding).
-	if len(resultOne.BindingsApplied) != 1 || resultOne.BindingsApplied[0].ParameterID != "CustomerId" || resultOne.BindingsApplied[0].Value.Str != "1" {
+	if len(resultOne.BindingsApplied) != 1 || resultOne.BindingsApplied[0].ParameterID != "CustomerId" || resultOne.BindingsApplied[0].Value.Scalar == nil || resultOne.BindingsApplied[0].Value.Scalar.Str != "1" {
 		t.Fatalf("customer 1 BindingsApplied = %+v, want [{CustomerId, integer 1}]", resultOne.BindingsApplied)
 	}
 	if resultOne.BindingsApplied[0].OriginEvidence != apicontract.BindingOriginEvidenceClientReported {
 		t.Fatalf("customer 1 BindingsApplied[0].OriginEvidence = %q, want client-reported", resultOne.BindingsApplied[0].OriginEvidence)
 	}
-	if resultTwo.BindingsApplied[0].Value.Str != "2" {
+	if resultTwo.BindingsApplied[0].Value.Scalar == nil || resultTwo.BindingsApplied[0].Value.Scalar.Str != "2" {
 		t.Fatalf("customer 2 BindingsApplied = %+v, want CustomerId=2", resultTwo.BindingsApplied)
 	}
 
@@ -289,7 +289,7 @@ func TestDemoProject_RunQuery_SQL_RealParameterEffect_WithGrant(t *testing.T) {
 		request := apicontract.ExecutionRequest{
 			Project: demoProjectID, Environment: demoProjectEnv, SecurityContextID: info.SecurityContextID,
 			Source: demoProjectSource, QueryID: "customers/customer-purchases-by-genre",
-			Parameters: map[string]apicontract.TypedValue{"CustomerId": apicontract.NewIntegerValue(strconv.FormatInt(customerID, 10))},
+			Parameters: map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(apicontract.NewIntegerValue(strconv.FormatInt(customerID, 10)))},
 			BindingOrigins: []apicontract.BindingOriginEntry{
 				{ParameterID: "CustomerId", Origin: apicontract.BindingOriginManual},
 			},

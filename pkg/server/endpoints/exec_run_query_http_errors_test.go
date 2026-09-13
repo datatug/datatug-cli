@@ -64,10 +64,10 @@ func httpRunQueryRequest(scope apicontract.Scope) apicontract.ExecutionRequest {
 	return apicontract.ExecutionRequest{
 		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
 		QueryID: "reference/widget",
-		Parameters: map[string]apicontract.TypedValue{
-			"key": apicontract.NewStringValue("gadget"),
+		Parameters: map[string]apicontract.TypedValueOrSet{
+			"key": apicontract.ScalarValue(apicontract.NewStringValue("gadget")),
 		},
-		BindingOrigins: []apicontract.BindingOriginEntry{{ParameterID: "key", Origin: apicontract.BindingOriginSelection}},
+		BindingOrigins: []apicontract.BindingOriginEntry{{ParameterID: "key", Origin: apicontract.BindingOriginSelection, FactID: "fact-key"}},
 		Mode:           apicontract.ProvenanceModeLive,
 	}
 }

@@ -37,6 +37,9 @@ func validateScope(s apicontract.Scope) error {
 	if s.SecurityContextID == "" {
 		return newMissingParameter("securityContextId")
 	}
+	if err := s.Validate(); err != nil {
+		return requestValidationError(err)
+	}
 	if !api.ValidateSecurityContext(s.SecurityContextID) {
 		return newStaleContext("securityContextId does not match the agent's current session; call agent-info again")
 	}

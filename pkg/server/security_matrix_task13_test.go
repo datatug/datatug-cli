@@ -79,7 +79,7 @@ func TestRunQuery_UnsupportedShape_ColumnAlias_InvalidRequest(t *testing.T) {
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 		Source: securityMatrixSource, DTQL: customerAliasedColumnDTQL,
-		Parameters:     map[string]apicontract.TypedValue{"CustomerId": value},
+		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 		BindingOrigins: []apicontract.BindingOriginEntry{origin},
 		Mode:           apicontract.ProvenanceModeLive,
 	}
@@ -118,7 +118,7 @@ func TestRunQuery_ForbiddenSource_AccessDenied(t *testing.T) {
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 		Source: securityMatrixSource, DTQL: customerInvoiceDTQL,
-		Parameters:     map[string]apicontract.TypedValue{"CustomerId": value},
+		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 		BindingOrigins: []apicontract.BindingOriginEntry{origin},
 		Mode:           apicontract.ProvenanceModeLive,
 	}
@@ -152,7 +152,7 @@ func TestRunQuery_ForgedSecurityContextID_StaleContext(t *testing.T) {
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: "forged-does-not-exist",
 		Source: securityMatrixSource, DTQL: customerByIDDTQL,
-		Parameters:     map[string]apicontract.TypedValue{"CustomerId": value},
+		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 		BindingOrigins: []apicontract.BindingOriginEntry{origin},
 		Mode:           apicontract.ProvenanceModeLive,
 	}
@@ -227,7 +227,7 @@ func TestRunQuery_PrincipalFieldsInQueryStringAndHeader_Ignored(t *testing.T) {
 	request := apicontract.ExecutionRequest{
 		Project: projectID, Environment: securityMatrixEnv, SecurityContextID: info.SecurityContextID,
 		Source: securityMatrixSource, DTQL: customerByIDDTQL,
-		Parameters:     map[string]apicontract.TypedValue{"CustomerId": value},
+		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
 		BindingOrigins: []apicontract.BindingOriginEntry{origin},
 		Mode:           apicontract.ProvenanceModeLive,
 	}

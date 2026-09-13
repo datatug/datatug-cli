@@ -176,7 +176,7 @@ func buildApplicableCandidate(ctx context.Context, projStore datatug.ProjectStor
 		key := fieldKey(b.From.Entity, b.From.Field)
 		fact := latestFactByField[key]
 		bindings = append(bindings, apicontract.Binding{
-			ParameterID: b.Parameter, Value: fact.Value, Origin: mapFactOrigin(fact.Origin),
+			ParameterID: b.Parameter, Value: apicontract.ScalarValue(fact.Value), Origin: mapFactOrigin(fact.Origin),
 			OriginEvidence: apicontract.BindingOriginEvidenceClientReported, FactID: fact.ID,
 		})
 		explanation := b.Parameter

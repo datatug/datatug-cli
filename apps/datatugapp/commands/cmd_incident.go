@@ -79,10 +79,13 @@ func incidentListCommand() *cobra.Command {
 			if err != nil {
 				return incidentCommandError(err)
 			}
-			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) {
+			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) error {
 				for _, incident := range response.Incidents {
-					_, _ = fmt.Fprintf(w, "%s/%s  %-13s  %s\n", incident.Ref.StoreID, incident.Ref.IncidentID, incident.Status, incident.Title)
+					if _, err := fmt.Fprintf(w, "%s/%s  %-13s  %s\n", incident.Ref.StoreID, incident.Ref.IncidentID, incident.Status, incident.Title); err != nil {
+						return err
+					}
 				}
+				return nil
 			})
 		},
 	}
@@ -116,8 +119,9 @@ func incidentCreateCommand() *cobra.Command {
 			if err != nil {
 				return incidentCommandError(err)
 			}
-			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) {
-				_, _ = fmt.Fprintf(w, "%s/%s  %s\n", response.Incident.Ref.StoreID, response.Incident.Ref.IncidentID, response.Incident.Title)
+			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) error {
+				_, err := fmt.Fprintf(w, "%s/%s  %s\n", response.Incident.Ref.StoreID, response.Incident.Ref.IncidentID, response.Incident.Title)
+				return err
 			})
 		},
 	}
@@ -148,7 +152,7 @@ func incidentShowCommand() *cobra.Command {
 			if err != nil {
 				return incidentCommandError(err)
 			}
-			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) { writeIncidentGrid(w, response.Incident) })
+			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) error { return writeIncidentGrid(w, response.Incident) })
 		},
 	}
 	command.Flags().String("at", "", "Historical projection time (RFC3339)")
@@ -186,7 +190,7 @@ func incidentAppendCommand() *cobra.Command {
 			if err != nil {
 				return incidentCommandError(err)
 			}
-			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) { writeIncidentEventLine(w, response.Event) })
+			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) error { return writeIncidentEventLine(w, response.Event) })
 		},
 	}
 	command.Flags().String("type", "", "Event type")
@@ -225,10 +229,13 @@ func incidentSearchCommand() *cobra.Command {
 			if err != nil {
 				return incidentCommandError(err)
 			}
-			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) {
+			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) error {
 				for _, match := range response.Matches {
-					_, _ = fmt.Fprintf(w, "%s/%s  %s  %s\n", match.Incident.Ref.StoreID, match.Incident.Ref.IncidentID, matchedSignalText(match.MatchedSignals), match.Incident.Title)
+					if _, err := fmt.Fprintf(w, "%s/%s  %s  %s\n", match.Incident.Ref.StoreID, match.Incident.Ref.IncidentID, matchedSignalText(match.MatchedSignals), match.Incident.Title); err != nil {
+						return err
+					}
 				}
+				return nil
 			})
 		},
 	}
@@ -249,10 +256,13 @@ func incidentSimilarCommand() *cobra.Command {
 			if err != nil {
 				return incidentCommandError(err)
 			}
-			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) {
+			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) error {
 				for _, match := range response.Matches {
-					_, _ = fmt.Fprintf(w, "%s/%s  score=%d  %s  %s\n", match.Incident.Ref.StoreID, match.Incident.Ref.IncidentID, match.Score, matchedSignalText(match.MatchedSignals), match.Incident.Title)
+					if _, err := fmt.Fprintf(w, "%s/%s  score=%d  %s  %s\n", match.Incident.Ref.StoreID, match.Incident.Ref.IncidentID, match.Score, matchedSignalText(match.MatchedSignals), match.Incident.Title); err != nil {
+						return err
+					}
 				}
+				return nil
 			})
 		},
 	}
@@ -280,8 +290,9 @@ func incidentMergeCommand() *cobra.Command {
 			if err != nil {
 				return incidentCommandError(err)
 			}
-			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) {
-				_, _ = fmt.Fprintf(w, "%s/%s merged into %s/%s\n", response.Source.Ref.StoreID, response.Source.Ref.IncidentID, response.Into.Ref.StoreID, response.Into.Ref.IncidentID)
+			return writeIncidentOutput(cmd, raw, response, func(w io.Writer) error {
+				_, err := fmt.Fprintf(w, "%s/%s merged into %s/%s\n", response.Source.Ref.StoreID, response.Source.Ref.IncidentID, response.Into.Ref.StoreID, response.Into.Ref.IncidentID)
+				return err
 			})
 		},
 	}
@@ -458,7 +469,9 @@ func (c incidentCLI) stream(ctx context.Context, path string, stdout, stderr io.
 				return err
 			}
 		} else {
-			writeIncidentEventLine(stdout, item.Event)
+			if err := writeIncidentEventLine(stdout, item.Event); err != nil {
+				return err
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil && !errors.Is(ctx.Err(), context.Canceled) {
@@ -540,7 +553,7 @@ func incidentOutputFormat(cmd *cobra.Command) (string, error) {
 	}
 }
 
-func writeIncidentOutput(cmd *cobra.Command, raw []byte, value any, grid func(io.Writer)) error {
+func writeIncidentOutput(cmd *cobra.Command, raw []byte, value any, grid func(io.Writer) error) error {
 	format, err := incidentOutputFormat(cmd)
 	if err != nil {
 		return err
@@ -560,23 +573,31 @@ func writeIncidentOutput(cmd *cobra.Command, raw []byte, value any, grid func(io
 			}
 		}
 	case "grid":
-		grid(cmd.OutOrStdout())
+		err = grid(cmd.OutOrStdout())
 	}
 	return err
 }
 
-func writeIncidentGrid(w io.Writer, incident incidents.IncidentView) {
-	_, _ = fmt.Fprintf(w, "%s/%s  %s\n%s\n", incident.Ref.StoreID, incident.Ref.IncidentID, incident.Status, incident.Title)
+func writeIncidentGrid(w io.Writer, incident incidents.IncidentView) error {
+	if _, err := fmt.Fprintf(w, "%s/%s  %s\n%s\n", incident.Ref.StoreID, incident.Ref.IncidentID, incident.Status, incident.Title); err != nil {
+		return err
+	}
 	if incident.Description != "" {
-		_, _ = fmt.Fprintln(w, incident.Description)
+		if _, err := fmt.Fprintln(w, incident.Description); err != nil {
+			return err
+		}
 	}
 	for _, fact := range incident.CanonicalContext.Facts {
-		_, _ = fmt.Fprintf(w, "%s.%s=%v\n", fact.Entity, fact.Field, fact.Value)
+		if _, err := fmt.Fprintf(w, "%s.%s=%v\n", fact.Entity, fact.Field, fact.Value); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func writeIncidentEventLine(w io.Writer, event incidents.Event) {
-	_, _ = fmt.Fprintf(w, "%s  %s  %s\n", event.At.Format("15:04:05"), strings.ToUpper(string(event.Type)), incidentEventDetail(event))
+func writeIncidentEventLine(w io.Writer, event incidents.Event) error {
+	_, err := fmt.Fprintf(w, "%s  %s  %s\n", event.At.Format("15:04:05"), strings.ToUpper(string(event.Type)), incidentEventDetail(event))
+	return err
 }
 
 func incidentEventDetail(event incidents.Event) string {

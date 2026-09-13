@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -100,6 +101,46 @@ func TestIncidentWatchHumanOutputIsOneLinePerEvent(t *testing.T) {
 	require.NoError(t, command.ExecuteContext(context.Background()))
 	require.Equal(t, "10:43:02  NOTE.ADDED  database recovered\n", stdout.String())
 	require.Equal(t, "cursor-human\n", stderr.String())
+}
+
+func TestIncidentWatchHumanOutputFailureDoesNotAdvanceCursor(t *testing.T) {
+	item := incidents.StreamItem{Cursor: "must-not-print", Event: incidents.Event{
+		ID: "note-write-failure", Seq: 2, At: time.Date(2026, 9, 13, 10, 43, 2, 0, time.UTC), VisibleAt: time.Date(2026, 9, 13, 10, 43, 2, 0, time.UTC),
+		Incident: incidents.IncidentRef{StoreID: "ops", IncidentID: "INC-1"}, Actor: incidents.Actor{Kind: incidents.ActorHuman, ID: "alice", Via: incidents.ActorViaAPI},
+		Type: incidents.EventNoteAdded, Assertion: incidents.Assertion{Kind: incidents.AssertionClaim}, Payload: json.RawMessage(`{"body":"cannot print"}`),
+	}}
+	server := incidentStreamTestServer(t, item)
+	writeErr := errors.New("stdout is full")
+	var stderr bytes.Buffer
+	command := incidentCommand()
+	command.SetOut(failingIncidentWriter{err: writeErr})
+	command.SetErr(&stderr)
+	command.SetArgs([]string{"--agent", server.URL, "--project", "demo", "--environment", "prod", "--store", "ops", "watch", "INC-1"})
+	err := command.ExecuteContext(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), writeErr.Error())
+	var exit ExitCoder
+	require.ErrorAs(t, err, &exit)
+	require.Equal(t, 1, exit.ExitCode())
+	require.NotContains(t, stderr.String(), string(item.Cursor))
+}
+
+type failingIncidentWriter struct{ err error }
+
+func (w failingIncidentWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestIncidentShowGridOutputFailureIsReturned(t *testing.T) {
+	server := realIncidentCommandServer(t)
+	runIncidentCommand(t, server.URL, "create", "--title", "Output failure", "--mutation", "output-failure-create")
+	writeErr := errors.New("stdout is full")
+	var stderr bytes.Buffer
+	command := incidentCommand()
+	command.SetOut(failingIncidentWriter{err: writeErr})
+	command.SetErr(&stderr)
+	command.SetArgs([]string{"--agent", server.URL, "--project", "demo", "--environment", "prod", "--store", "demo", "--format", "grid", "show", "INC-1"})
+	err := command.ExecuteContext(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), writeErr.Error())
 }
 
 func TestIncidentEventsInvalidCursorExitsNonzero(t *testing.T) {

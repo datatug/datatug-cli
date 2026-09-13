@@ -114,12 +114,18 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 	}
 	columns := columnsFor(apResult.Query, rows)
 	limitations := limitationsFromLines(apResult.Lines)
-	if structured, ok := apResult.Query.(dal.StructuredQuery); ok && len(structured.Columns()) == 0 {
-		if hidden := hiddenColumnsFor(ctx, db, structured, apResult.Lines); len(hidden) > 0 {
-			limitations = append(limitations, Limitation{Kind: LimitationHiddenColumns, Columns: hidden})
+	collection := ""
+	if structured, ok := apResult.Query.(dal.StructuredQuery); ok {
+		if len(structured.Columns()) == 0 {
+			if hidden := hiddenColumnsFor(ctx, db, structured, apResult.Lines); len(hidden) > 0 {
+				limitations = append(limitations, Limitation{Kind: LimitationHiddenColumns, Columns: hidden})
+			}
+		}
+		if ref, ok := baseCollectionRef(structured); ok {
+			collection = ref.Name()
 		}
 	}
-	return Result{Columns: columns, Rows: rows, Limitations: limitations}, nil
+	return Result{Columns: columns, Rows: rows, Limitations: limitations, Collection: collection}, nil
 }
 
 // openSource opens sourceURL via pkg/dbcopy (sqlite:// through dalgo2sqlite,

@@ -3,6 +3,7 @@ package secureread
 import (
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
 // LimitationKind names the shape of one applied limitation, per
@@ -64,6 +65,10 @@ type Result struct {
 	Columns     []string
 	Rows        []Row
 	Limitations []Limitation
+	// Collection is the base collection a structured query actually read.
+	// Callers use the executor-derived value for evidence provenance and
+	// current-policy replay; it is empty only for opaque native queries.
+	Collection string
 	// Provenance is set only when the source observed one while producing
 	// this Result — today, only a pkg/httpsource-backed source (opened via
 	// pkg/dbcopy's http(s):// scheme) ever calls the dalgo2http.Observer
@@ -74,6 +79,10 @@ type Result struct {
 	// http://...` path's own ($provenance / "source: ..." line, PR #204)
 	// treatment of the same nil-vs-live distinction.
 	Provenance *dalgo2http.Provenance
+	// SnapshotRecordset is populated only by RunSnapshot. It restores the
+	// original contract value types after SQLite has applied current policy;
+	// callers must not infer evidence types from database driver values.
+	SnapshotRecordset *apicontract.Recordset
 }
 
 // limitationsFromLines turns accesspolicies.Explain's per-policy Lines into

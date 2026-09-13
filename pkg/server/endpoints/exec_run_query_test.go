@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
@@ -204,6 +207,91 @@ func TestExecRunQuery_SavedFixture_DecodesAndExecutes(t *testing.T) {
 	}
 }
 
+func TestExecRunQueryRejectsUnresolvedSourceStoreID(t *testing.T) {
+	var req apicontract.ExecutionRequest
+	decodeRequestFixture(t, "execution_request_adhoc.json", &req)
+	projectDir, projectID := writeRunQueryTestProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	req.Project, req.Environment, req.SecurityContextID = scope.Project, scope.Environment, scope.SecurityContextID
+	req.Source = semanticTestSource
+	req.StoreID = "client-invented-store"
+	_, err := computeRunQuery(context.Background(), req)
+	var contractErr *contractError
+	if !errors.As(err, &contractErr) || contractErr.Code != apicontract.ErrCodeInvalidRequest || contractErr.Field != "storeId" {
+		t.Fatalf("computeRunQuery = %v, want storeId INVALID_REQUEST", err)
+	}
+}
+
+func TestExecRunQueryRejectsClientClaimedDefaultThatDoesNotMatchQuery(t *testing.T) {
+	projectDir, projectID := writeRunQueryTestProject(t)
+	mustWriteFile(t, filepath.Join(projectDir, "queries", "customers", "customer-invoices.query.json"), `{
+		"id": "customer-invoices",
+		"title": "Customer invoices",
+		"type": "DTQL",
+		"parameters": [
+			{"id": "CustomerId", "type": "integer", "defaultValue": 5, "isRequired": true}
+		]
+	}`)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	value := apicontract.NewIntegerValue("7")
+	req := apicontract.ExecutionRequest{
+		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
+		QueryID:        "customers/customer-invoices",
+		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
+		BindingOrigins: []apicontract.BindingOriginEntry{{ParameterID: "CustomerId", Origin: apicontract.BindingOriginDefault}},
+		Mode:           apicontract.ProvenanceModeLive,
+	}
+	_, err := computeRunQuery(context.Background(), req)
+	var contractErr *contractError
+	if !errors.As(err, &contractErr) || contractErr.Code != apicontract.ErrCodeInvalidRequest || contractErr.Field != "bindingOrigins" {
+		t.Fatalf("computeRunQuery = %v, want bindingOrigins INVALID_REQUEST", err)
+	}
+}
+
+func TestRecordedSavedQueryUsesPreDispatchRevisionAndDocument(t *testing.T) {
+	var req apicontract.ExecutionRequest
+	decodeRequestFixture(t, "execution_request_saved.json", &req)
+	projectDir, projectID := writeRunQueryTestProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	configureExecutionEvidence(t, projectID, projectDir)
+	req.Project, req.Environment, req.SecurityContextID = scope.Project, scope.Environment, scope.SecurityContextID
+	req.QueryID, req.Record = "customers/customer-invoices", true
+
+	result, err := computeRunQuery(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := api.ExecutionEvidenceStoreByID(projectID, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := store.Execution(context.Background(), *result.Execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.QueryRevision == "" {
+		t.Fatal("recorded saved query has no pre-dispatch revision")
+	}
+
+	projectStore, err := api.ProjectStoreFor(projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := projectStore.(datatug.RevisionedQueriesStore).LoadQueryRevision(context.Background(), req.QueryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := stored.Query.Text
+	mustWriteFile(t, filepath.Join(projectDir, "queries", "customers", "customer-invoices.query.dtql"), "from:\n  name: Invoice\n")
+	document, err := executionQueryDocument(projectID, req.QueryID, &stored.Query.QueryDef, string(stored.Revision))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if document != original {
+		t.Fatalf("revisioned execution document changed after load: %q, want %q", document, original)
+	}
+}
+
 // TestExecRunQuery_SnapshotFixture_DecodesAndValidates proves core's
 // mode:snapshot ExecutionRequest shape (mode + snapshotId together) decodes
 // and satisfies Validate() through the real production path (decodeRequestFixture
@@ -267,7 +355,7 @@ func TestExecRunQuery_InvalidRequestBodies_StatusAndCode(t *testing.T) {
 		return apicontract.ExecutionRequest{
 			Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
 			Source: semanticTestSource, DTQL: runQueryTestCustomerByIDDTQL,
-			Parameters: map[string]apicontract.TypedValue{}, BindingOrigins: []apicontract.BindingOriginEntry{},
+			Parameters: map[string]apicontract.TypedValueOrSet{}, BindingOrigins: []apicontract.BindingOriginEntry{},
 			Mode: apicontract.ProvenanceModeLive,
 		}
 	}
@@ -357,7 +445,7 @@ func TestExecRunQuery_InvalidRequestBodies_StatusAndCode(t *testing.T) {
 			name: "bindingOrigins names an unrecognized origin",
 			build: func() apicontract.ExecutionRequest {
 				req := base()
-				req.Parameters = map[string]apicontract.TypedValue{"CustomerId": apicontract.NewIntegerValue("5")}
+				req.Parameters = map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(apicontract.NewIntegerValue("5"))}
 				req.BindingOrigins = []apicontract.BindingOriginEntry{{ParameterID: "CustomerId", Origin: "bogus"}}
 				return req
 			},
@@ -367,7 +455,7 @@ func TestExecRunQuery_InvalidRequestBodies_StatusAndCode(t *testing.T) {
 			name: "bindingOrigins missing an entry for a supplied parameter",
 			build: func() apicontract.ExecutionRequest {
 				req := base()
-				req.Parameters = map[string]apicontract.TypedValue{"CustomerId": apicontract.NewIntegerValue("5")}
+				req.Parameters = map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(apicontract.NewIntegerValue("5"))}
 				return req
 			},
 			wantStatus: http.StatusBadRequest, wantCode: apicontract.ErrCodeInvalidRequest, wantField: "bindingOrigins",
@@ -416,10 +504,10 @@ func TestExecRunQuery_DeclaredParameterTypeMismatch_StillTypeMismatch(t *testing
 	req := apicontract.ExecutionRequest{
 		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
 		QueryID: "customers/customer-invoices",
-		Parameters: map[string]apicontract.TypedValue{
-			"CustomerId": apicontract.NewStringValue("5"), // declared "integer" on the saved query
+		Parameters: map[string]apicontract.TypedValueOrSet{
+			"CustomerId": apicontract.ScalarValue(apicontract.NewStringValue("5")), // declared "integer" on the saved query
 		},
-		BindingOrigins: []apicontract.BindingOriginEntry{{ParameterID: "CustomerId", Origin: apicontract.BindingOriginSelection}},
+		BindingOrigins: []apicontract.BindingOriginEntry{{ParameterID: "CustomerId", Origin: apicontract.BindingOriginSelection, FactID: "fact-customer"}},
 		Mode:           apicontract.ProvenanceModeLive,
 	}
 	status, env := postRunQuery(t, req)
@@ -444,7 +532,7 @@ func TestExecRunQuery_MissingDeclaredRequiredParameter_StillMissingParameter(t *
 	req := apicontract.ExecutionRequest{
 		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
 		QueryID:        "customers/customer-invoices",
-		Parameters:     map[string]apicontract.TypedValue{},
+		Parameters:     map[string]apicontract.TypedValueOrSet{},
 		BindingOrigins: []apicontract.BindingOriginEntry{},
 		Mode:           apicontract.ProvenanceModeLive,
 	}
@@ -496,8 +584,8 @@ func TestExecRunQuery_SavedQuery_BareIDResolvesToTheSameQueryAsFolderQualified(t
 	req := apicontract.ExecutionRequest{
 		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
 		QueryID:        "customer-invoices", // bare — S97
-		Parameters:     map[string]apicontract.TypedValue{"CustomerId": apicontract.NewIntegerValue("5")},
-		BindingOrigins: []apicontract.BindingOriginEntry{{ParameterID: "CustomerId", Origin: apicontract.BindingOriginSelection}},
+		Parameters:     map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(apicontract.NewIntegerValue("5"))},
+		BindingOrigins: []apicontract.BindingOriginEntry{{ParameterID: "CustomerId", Origin: apicontract.BindingOriginSelection, FactID: "fact-customer"}},
 		Mode:           apicontract.ProvenanceModeLive,
 	}
 	result, err := computeRunQuery(context.Background(), req)
@@ -522,7 +610,7 @@ func TestExecRunQuery_UnknownQueryID_NotFound(t *testing.T) {
 	req := apicontract.ExecutionRequest{
 		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
 		QueryID:        "no-such-query",
-		Parameters:     map[string]apicontract.TypedValue{},
+		Parameters:     map[string]apicontract.TypedValueOrSet{},
 		BindingOrigins: []apicontract.BindingOriginEntry{},
 		Mode:           apicontract.ProvenanceModeLive,
 	}
@@ -546,7 +634,7 @@ func TestExecRunQuery_AmbiguousBareQueryID_InvalidRequest(t *testing.T) {
 	req := apicontract.ExecutionRequest{
 		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
 		QueryID:        "q", // bare, matches both x/q and y/q
-		Parameters:     map[string]apicontract.TypedValue{},
+		Parameters:     map[string]apicontract.TypedValueOrSet{},
 		BindingOrigins: []apicontract.BindingOriginEntry{},
 		Mode:           apicontract.ProvenanceModeLive,
 	}

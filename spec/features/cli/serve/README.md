@@ -93,6 +93,36 @@ Failure to launch the browser MUST log a warning to stdout and MUST NOT abort se
 
 On signal receipt, the HTTP server MUST perform a graceful shutdown: stop accepting new connections, allow in-flight requests up to a short bounded timeout, then exit `0`. The current implementation has a TODO for graceful shutdown — remediation is tracked under Outstanding Questions.
 
+### Execution evidence storage
+
+#### REQ: execution-receipts-follow-incident-routing
+
+Immutable execution receipts MUST use the same configured incident-store route as their incident: the project repository by default, or an explicitly configured dedicated or application repository. Receipts are written through that repository's DALgo-backed lock and atomic-write path under `executions/YYYY/MM/<executionId>.json`; the server MUST NOT introduce a second source-store abstraction.
+
+`server.incidentStores` in `~/.datatug.yaml` supplies shared incident/evidence routes. Each entry has `storeId`, `kind` (`project-repository`, `dedicated-repository`, or `application-repository`), `repository`, and the `project` qualifier required by a project route. Omitting the section preserves the project-repository default.
+
+#### REQ: snapshot-bytes-are-private-sqlite-state
+
+Snapshot typed-row bytes and their mutable availability state MUST live outside every routed Git repository in a server-private modernc SQLite sidecar. The directory is selected by `--evidence-dir`, then `server.evidenceDir`, then `DATATUG_EVIDENCE_DIR`, then `~/.datatug/evidence`. Each routed store owns `<directory>/<storeId>/snapshots.sqlite`; directories are mode `0700` and the database is mode `0600`.
+
+The snapshot cap is selected by `--snapshot-byte-cap`, then `server.snapshotByteCap`, with a 2 MiB default. Retention is selected by `--snapshot-retention`, then `server.snapshotRetention`, with a 30-day default. A canonical snapshot larger than the cap is refused without a partial snapshot. Expiry deletes the bytes and advances separate lifecycle state while leaving the immutable receipt and `snapshotRef` unchanged. The SQLite database and its journal files MUST never be added to the routed Git repository.
+
+Snapshot retention is denied unless `server.snapshotPolicies.<project>.sources.<source>.allow`
+is explicitly `true`. `maskedColumns` on that source policy names exact returned column
+names that are removed in the trusted execution path before snapshot bytes are encoded or
+stored. A missing project, missing source, or `allow: false` still permits the immutable
+execution receipt but leaves its `snapshotRef` absent. Example:
+
+```yaml
+server:
+  snapshotPolicies:
+    payments:
+      sources:
+        billing:
+          allow: true
+          maskedColumns: [cardNumber, secret]
+```
+
 ### URL agent suffix
 
 #### REQ: agent-suffix-format
@@ -109,6 +139,9 @@ The URL the agent navigates the browser to MUST embed the agent's listening addr
 | `--client-url` |  | string | `""` | Override the Web UI URL the browser opens. |
 | `--project` | `-p` | string | `""` | Serve only the project with this registry ID. |
 | `--dir` | `-d` | string | `""` | Serve only the project rooted at this path. |
+| `--evidence-dir` |  | string | `$DATATUG_EVIDENCE_DIR` or `~/.datatug/evidence` | Private SQLite snapshot directory. |
+| `--snapshot-byte-cap` |  | int | `2097152` | Maximum canonical bytes retained for one snapshot. |
+| `--snapshot-retention` |  | duration | `720h` | Retention before snapshot bytes expire. |
 
 ## Exit codes
 
@@ -131,6 +164,12 @@ The URL the agent navigates the browser to MUST embed the agent's listening addr
 | [ui](../ui/README.md) | Independent. TUI does not consume the HTTP API. |
 
 ## Acceptance Criteria
+
+### AC: execution-evidence-stays-out-of-git
+
+**Requirements:** serve#req:execution-receipts-follow-incident-routing, serve#req:snapshot-bytes-are-private-sqlite-state
+
+A recorded project execution writes its immutable receipt below the routed repository's `executions/YYYY/MM/` tree while its snapshot bytes appear only in the configured private SQLite sidecar. Dedicated and application routes write the receipt to their configured repository. Expiring a snapshot removes its bytes without changing the receipt.
 
 ### AC: defaults-bind-localhost-8989
 

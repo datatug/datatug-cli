@@ -219,10 +219,10 @@ func TestExecRunQuery_HTTPSource_ModeSnapshot_NonHTTPQuery_InvalidRequest(t *tes
 	req := apicontract.ExecutionRequest{
 		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
 		QueryID: "customers/customer-invoices",
-		Parameters: map[string]apicontract.TypedValue{
-			"CustomerId": apicontract.NewIntegerValue("1"),
+		Parameters: map[string]apicontract.TypedValueOrSet{
+			"CustomerId": apicontract.ScalarValue(apicontract.NewIntegerValue("1")),
 		},
-		BindingOrigins: []apicontract.BindingOriginEntry{{ParameterID: "CustomerId", Origin: apicontract.BindingOriginSelection}},
+		BindingOrigins: []apicontract.BindingOriginEntry{{ParameterID: "CustomerId", Origin: apicontract.BindingOriginSelection, FactID: "fact-customer"}},
 		Mode:           apicontract.ProvenanceModeSnapshot,
 		SnapshotID:     "customer-invoices@2026-09-09T00:00:00Z",
 	}

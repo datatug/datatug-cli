@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/datatug/datatug-cli/pkg/accesspolicies"
+	"github.com/datatug/datatug-cli/pkg/incidentstore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
@@ -22,6 +24,7 @@ var (
 	projectDirs       map[string]string
 	securityContextID string
 	capabilities      Capabilities
+	policyFingerprint string
 )
 
 // Capabilities are the operator-controlled flags `datatug serve` fixes for
@@ -55,6 +58,13 @@ type Capabilities struct {
 	// above the 30-second ceiling is clamped down to it — see
 	// pkg/server/endpoints/contract_scope.go's execTimeoutFor.
 	ExecTimeout time.Duration
+	// IncidentStores are trusted shared incident/evidence repository routes.
+	// EvidencePrivateDir holds server-private snapshot sidecars.
+	IncidentStores     []incidentstore.ConfiguredStore
+	EvidencePrivateDir string
+	EvidenceByteCap    int
+	EvidenceRetention  time.Duration
+	SnapshotPolicies   map[string]SnapshotProjectPolicy
 }
 
 // ConfigureSecureSession wires the fixed secureread.Session `datatug serve`
@@ -93,7 +103,16 @@ func ConfigureSecureSession(session secureread.Session, pathsByID map[string]str
 	secureExecutor = secureread.NewExecutor(session)
 	projectDirs = pathsByID
 	capabilities = caps
+	policyFingerprint = accesspolicies.Fingerprint(session.Policies, session.Unrestricted, session.Principal)
 	securityContextID = newSecurityContextID()
+}
+
+// SecurePolicyFingerprint identifies the exact policy session that decided
+// the currently served reads without exposing policy text or filesystem paths.
+func SecurePolicyFingerprint() string {
+	secureMu.RLock()
+	defer secureMu.RUnlock()
+	return policyFingerprint
 }
 
 // newSecurityContextID mints a fresh opaque securityContextId: 16 random

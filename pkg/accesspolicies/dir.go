@@ -5,11 +5,15 @@ package accesspolicies
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/dal-go/dalgo/access"
@@ -47,6 +51,7 @@ func ResolveDir(flagValue string) (dir string, explicit bool, err error) {
 type Loaded struct {
 	Policy access.Policy
 	Source string
+	digest [sha256.Size]byte
 
 	// writes is the same document as AuthorizeWrite evaluates it (see
 	// prepareProjectWrites). It is nil for a Loaded not built by LoadFile or
@@ -150,7 +155,38 @@ func DecodeLoaded(data []byte, codec access.Codec, source string) (Loaded, error
 		return Loaded{}, err
 	}
 	writes := prepareProjectWrites(data, codec)
-	return Loaded{Policy: policy, Source: source, writes: &writes}, nil
+	return Loaded{Policy: policy, Source: source, digest: sha256.Sum256(data), writes: &writes}, nil
+}
+
+// Fingerprint returns a deterministic server-attested identity for the exact
+// policy documents in their evaluation order. An unrestricted session has a
+// stable, distinct fingerprint as well.
+func Fingerprint(loaded []Loaded, unrestricted bool, principal *access.Principal) string {
+	h := sha256.New()
+	if unrestricted {
+		_, _ = h.Write([]byte("datatug:unrestricted:v1"))
+	} else {
+		_, _ = h.Write([]byte("datatug:policies:v1"))
+		for _, item := range loaded {
+			_, _ = h.Write(item.digest[:])
+		}
+	}
+	identity := struct {
+		ID     string   `json:"id"`
+		Roles  []string `json:"roles"`
+		Groups []string `json:"groups"`
+	}{Roles: []string{}, Groups: []string{}}
+	if principal != nil {
+		identity.ID = fmt.Sprint(principal.ID)
+		identity.Roles = append(identity.Roles, principal.Roles...)
+		identity.Groups = append(identity.Groups, principal.Groups...)
+		sort.Strings(identity.Roles)
+		sort.Strings(identity.Groups)
+	}
+	encoded, _ := json.Marshal(identity)
+	_, _ = h.Write([]byte("datatug:principal-scope:v1"))
+	_, _ = h.Write(encoded)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Policies returns the decoded policies in load order.

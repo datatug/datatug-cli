@@ -52,7 +52,7 @@ func runQueryHandler(w http.ResponseWriter, r *http.Request) {
 
 // computeRunQuery is runQueryHandler's testable core.
 func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (apicontract.Result, error) {
-	if err := validateScope(apicontract.Scope{Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}); err != nil {
+	if err := validateScope(apicontract.Scope{StoreID: req.StoreID, Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}); err != nil {
 		return apicontract.Result{}, err
 	}
 	// req.Validate() is core's own structural check (datatug-core v0.27.0,
@@ -88,8 +88,14 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 	if !ok {
 		return apicontract.Result{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
+	resolvedStoreID, storeErr := api.ResolveStoreID(req.StoreID, req.Project)
+	if storeErr != nil {
+		return apicontract.Result{}, newInvalidRequest("storeId", "does not identify the configured project store")
+	}
+	req.StoreID = resolvedStoreID
 
 	var queryDef *datatug.QueryDef
+	queryRevision := ""
 	if req.QueryID != "" {
 		// S97: req.QueryID may be bare or folder-qualified — resolve to the
 		// canonical, folder-qualified form (ResolveQueryID's own doc
@@ -106,9 +112,23 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 			return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", req.QueryID))
 		}
 		req.QueryID = canonicalID
-		queryDef, err = projStore.LoadQuery(ctx, req.QueryID)
-		if err != nil {
-			return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", req.QueryID))
+		if req.Record {
+			revisioned, revisionedOK := projStore.(datatug.RevisionedQueriesStore)
+			if !revisionedOK {
+				return apicontract.Result{}, newContractError(codeInternal, "project store cannot attest query revisions", "")
+			}
+			stored, loadErr := revisioned.LoadQueryRevision(ctx, req.QueryID)
+			if loadErr != nil {
+				return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", req.QueryID))
+			}
+			loaded := stored.Query.QueryDef
+			queryDef = &loaded
+			queryRevision = string(stored.Revision)
+		} else {
+			queryDef, err = projStore.LoadQuery(ctx, req.QueryID)
+			if err != nil {
+				return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", req.QueryID))
+			}
 		}
 	}
 
@@ -125,6 +145,9 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 	if len(mismatched) > 0 {
 		sort.Strings(mismatched)
 		return apicontract.Result{}, newTypeMismatch(mismatched[0], fmt.Sprintf("parameter %q does not match its declared type", mismatched[0]))
+	}
+	if err := validateDefaultBindingOrigins(req, queryDef); err != nil {
+		return apicontract.Result{}, err
 	}
 
 	// mode:snapshot only ever means something for an HTTP-typed saved query
@@ -153,6 +176,7 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 		}
 	}
 
+	executionStarted := time.Now().UTC()
 	runCtx, cancel := context.WithTimeout(ctx, execTimeoutFor())
 	defer cancel()
 
@@ -166,7 +190,7 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 		result, err = executor.RunDTQL(runCtx, resolved.URL, []byte(req.DTQL), variables)
 	case queryDef.Type == datatug.QueryTypeDTQL:
 		var doc string
-		doc, err = api.LoadQueryDocument(req.Project, req.QueryID, queryDef.Type)
+		doc, err = executionQueryDocument(req.Project, req.QueryID, queryDef, queryRevision)
 		if err == nil {
 			profile = apicontract.ExecutionProfileProtected
 			result, err = executor.RunDTQL(runCtx, resolved.URL, []byte(doc), variables)
@@ -181,7 +205,7 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 		// below as secureread.ErrOpaqueSQLNotGranted, mapped to
 		// UNSUPPORTED_PROTECTED_EXECUTION.
 		var text string
-		text, err = api.LoadQueryDocument(req.Project, req.QueryID, queryDef.Type)
+		text, err = executionQueryDocument(req.Project, req.QueryID, queryDef, queryRevision)
 		if err == nil {
 			profile = apicontract.ExecutionProfileOpaquePrivileged
 			result, err = executor.RunNativeSQL(runCtx, resolved.URL, text, sqlQueryArgs(queryDef, variables)...)
@@ -286,10 +310,16 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 		return apicontract.Result{}, newInvalidRequest("", err.Error())
 	}
 	if collection == "" {
+		collection = result.Collection
+	}
+	if collection == "" && queryDef != nil && queryDef.Capture != nil {
+		collection = queryDef.Capture.Collection
+	}
+	if collection == "" {
+		collection = resolved.Collection
+	}
+	if collection == "" {
 		collection = req.Source
-		if req.Source == "" {
-			collection = resolved.Collection
-		}
 	}
 
 	requestedLimit := 0
@@ -330,7 +360,7 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 		observedAt = result.Provenance.FetchedAt.UTC().Format(time.RFC3339)
 	}
 
-	return apicontract.Result{
+	response := apicontract.Result{
 		Recordset:       recordset,
 		Limitations:     toContractLimitations(result.Limitations),
 		BindingsApplied: bindingsApplied(req, queryDef),
@@ -339,7 +369,52 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 			Mode: mode, SnapshotID: req.SnapshotID, ObservedAt: observedAt, ExecutionProfile: profile,
 		},
 		Truncated: truncated,
-	}, nil
+	}
+	if req.Record {
+		ref, recordErr := recordQueryExecution(ctx, req, queryDef, queryRevision, response, executionStarted)
+		if recordErr != nil {
+			return apicontract.Result{}, recordErr
+		}
+		response.Execution = &ref
+	}
+	if err := response.Validate(); err != nil {
+		return apicontract.Result{}, fmt.Errorf("validate query execution response: %w", err)
+	}
+	return response, nil
+}
+
+func executionQueryDocument(projectID, queryID string, queryDef *datatug.QueryDef, queryRevision string) (string, error) {
+	if queryRevision != "" {
+		return queryDef.Text, nil
+	}
+	return api.LoadQueryDocument(projectID, queryID, queryDef.Type)
+}
+
+func validateDefaultBindingOrigins(req apicontract.ExecutionRequest, queryDef *datatug.QueryDef) error {
+	declared := make(map[string]datatug.ParameterDef)
+	if queryDef != nil {
+		for _, parameter := range queryDef.Parameters {
+			declared[parameter.ID] = parameter
+		}
+	}
+	for _, origin := range req.BindingOrigins {
+		if origin.Origin != apicontract.BindingOriginDefault {
+			continue
+		}
+		parameter, ok := declared[origin.ParameterID]
+		if !ok || parameter.DefaultValue == nil {
+			return newInvalidRequest("bindingOrigins", "default origin does not resolve to a declared query default")
+		}
+		actual := req.Parameters[origin.ParameterID]
+		if actual.Scalar == nil {
+			return newInvalidRequest("bindingOrigins", "default origin must resolve to one declared scalar default")
+		}
+		expected, err := fromGoValue(parameter.DefaultValue, parameter.Type)
+		if err != nil || !typedValueEqual(expected, *actual.Scalar) {
+			return newInvalidRequest("bindingOrigins", "default origin does not match the declared query default")
+		}
+	}
+	return nil
 }
 
 // resolveExecutionSource applies api-contract.md's target-resolution rule
@@ -400,10 +475,10 @@ func candidateTargets(sources []api.ResolvedSource) []apicontract.CandidateTarge
 // type matches. missing lists required declared parameters with no
 // supplied value; mismatched lists parameters whose TypedValue.Type
 // disagrees with the query's own declared ParameterDef.Type.
-func typedParametersToVariables(params map[string]apicontract.TypedValue, queryDef *datatug.QueryDef) (variables map[string]any, missing, mismatched []string) {
+func typedParametersToVariables(params map[string]apicontract.TypedValueOrSet, queryDef *datatug.QueryDef) (variables map[string]any, missing, mismatched []string) {
 	variables = make(map[string]any, len(params))
 	for name, tv := range params {
-		native, err := nativeValue(tv)
+		native, err := nativeParameterValue(tv)
 		if err != nil {
 			mismatched = append(mismatched, name)
 			continue
@@ -421,11 +496,32 @@ func typedParametersToVariables(params map[string]apicontract.TypedValue, queryD
 			}
 			continue
 		}
-		if expected, ok := declaredValueType(p.Type); ok && tv.Type != expected {
-			mismatched = append(mismatched, p.ID)
+		if expected, ok := declaredValueType(p.Type); ok {
+			setTypeMatches := tv.Set == nil || len(tv.Set.Values) > 0 && tv.Set.Values[0].Type == expected
+			if tv.Scalar != nil && tv.Scalar.Type != expected || !setTypeMatches {
+				mismatched = append(mismatched, p.ID)
+			}
 		}
 	}
 	return variables, missing, mismatched
+}
+
+func nativeParameterValue(value apicontract.TypedValueOrSet) (any, error) {
+	if value.Scalar != nil {
+		return nativeValue(*value.Scalar)
+	}
+	if value.Set == nil {
+		return nil, errors.New("parameter has neither scalar nor set value")
+	}
+	values := make([]any, len(value.Set.Values))
+	for i, item := range value.Set.Values {
+		converted, err := nativeValue(item)
+		if err != nil {
+			return nil, err
+		}
+		values[i] = converted
+	}
+	return values, nil
 }
 
 // declaredValueType maps a ParameterDef.Type string ("integer", "string",
@@ -512,9 +608,14 @@ func bindingsApplied(req apicontract.ExecutionRequest, queryDef *datatug.QueryDe
 	bindings := make([]apicontract.Binding, 0, len(ids))
 	for _, id := range ids {
 		origin := origins[id]
+		originEvidence := apicontract.BindingOriginEvidenceClientReported
+		if origin.Origin == apicontract.BindingOriginDefault {
+			originEvidence = apicontract.BindingOriginEvidenceServerDefault
+		}
 		bindings = append(bindings, apicontract.Binding{
 			ParameterID: id, Value: req.Parameters[id], Origin: origin.Origin,
-			OriginEvidence: apicontract.BindingOriginEvidenceClientReported, FactID: origin.FactID,
+			OriginEvidence: originEvidence, FactID: origin.FactID,
+			ValueFactIDs: origin.ValueFactIDs,
 		})
 	}
 	return bindings

@@ -199,7 +199,7 @@ func semanticRelatedRowsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func computeSemanticRelatedRows(ctx context.Context, req apicontract.RelatedRowsRequest) (apicontract.Result, error) {
-	scope := apicontract.Scope{Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}
+	scope := apicontract.Scope{StoreID: req.StoreID, Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}
 	if err := validateScope(scope); err != nil {
 		return apicontract.Result{}, err
 	}
@@ -214,6 +214,11 @@ func computeSemanticRelatedRows(ctx context.Context, req apicontract.RelatedRows
 	if err := req.Validate(); err != nil {
 		return apicontract.Result{}, requestValidationError(err)
 	}
+	resolvedStoreID, storeErr := api.ResolveStoreID(req.StoreID, req.Project)
+	if storeErr != nil {
+		return apicontract.Result{}, newInvalidRequest("storeId", "does not identify the configured project store")
+	}
+	req.StoreID = resolvedStoreID
 	source, collection, column, err := decodeLookupID(req.LookupID)
 	if err != nil {
 		return apicontract.Result{}, newInvalidRequest("lookupId", err.Error())
@@ -255,6 +260,7 @@ func computeSemanticRelatedRows(ctx context.Context, req apicontract.RelatedRows
 	if !ok {
 		return apicontract.Result{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
+	executionStarted := time.Now().UTC()
 	result, err := executor.RunStructured(ctx, resolved.URL, query, nil)
 	if err != nil {
 		if err == context.DeadlineExceeded {
@@ -273,7 +279,7 @@ func computeSemanticRelatedRows(ctx context.Context, req apicontract.RelatedRows
 	if err != nil {
 		return apicontract.Result{}, newContractError(codeInternal, err.Error(), "")
 	}
-	return apicontract.Result{
+	response := apicontract.Result{
 		Recordset:   recordset,
 		Limitations: toContractLimitations(result.Limitations),
 		Provenance: apicontract.Provenance{
@@ -281,7 +287,18 @@ func computeSemanticRelatedRows(ctx context.Context, req apicontract.RelatedRows
 			ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), ExecutionProfile: apicontract.ExecutionProfileProtected,
 		},
 		Truncated: truncated,
-	}, nil
+	}
+	if req.Record {
+		ref, recordErr := recordRelatedRowsExecution(ctx, req, response, executionStarted)
+		if recordErr != nil {
+			return apicontract.Result{}, recordErr
+		}
+		response.Execution = &ref
+	}
+	if err := response.Validate(); err != nil {
+		return apicontract.Result{}, fmt.Errorf("validate related rows response: %w", err)
+	}
+	return response, nil
 }
 
 func isAccessDenied(err error) bool {

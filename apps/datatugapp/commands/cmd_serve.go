@@ -11,6 +11,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/server"
@@ -21,16 +22,19 @@ import (
 )
 
 const (
-	serveHostFlag           = "host"
-	servePortFlag           = "port"
-	serveProjectFlag        = "project"
-	serveAsFlag             = "as"
-	serveRoleFlag           = "role"
-	serveGroupFlag          = "group"
-	serveAllowWritesFlag    = "allow-writes"
-	serveAllowOpaqueSQLFlag = "allow-opaque-sql"
-	serveHTTPOfflineFlag    = "http-offline"
-	serveExecTimeoutFlag    = "exec-timeout"
+	serveHostFlag              = "host"
+	servePortFlag              = "port"
+	serveProjectFlag           = "project"
+	serveAsFlag                = "as"
+	serveRoleFlag              = "role"
+	serveGroupFlag             = "group"
+	serveAllowWritesFlag       = "allow-writes"
+	serveAllowOpaqueSQLFlag    = "allow-opaque-sql"
+	serveHTTPOfflineFlag       = "http-offline"
+	serveExecTimeoutFlag       = "exec-timeout"
+	serveEvidenceDirFlag       = "evidence-dir"
+	serveSnapshotByteCapFlag   = "snapshot-byte-cap"
+	serveSnapshotRetentionFlag = "snapshot-retention"
 )
 
 // ServeCommand executes serve consoleCommand
@@ -42,17 +46,20 @@ const serveOpenBrowserFlag = "open-browser"
 // --as/--role/--group fix the principal every policy-enforced read in this
 // process runs as (REQ:principal-selection) — see resolveServeSession.
 type serveFlags struct {
-	openBrowser    bool
-	host           string
-	port           int
-	projectDir     string
-	as             string
-	roles          []string
-	groups         []string
-	allowWrites    bool
-	allowOpaqueSQL bool
-	httpOffline    bool
-	execTimeout    time.Duration
+	openBrowser       bool
+	host              string
+	port              int
+	projectDir        string
+	as                string
+	roles             []string
+	groups            []string
+	allowWrites       bool
+	allowOpaqueSQL    bool
+	httpOffline       bool
+	execTimeout       time.Duration
+	evidenceDir       string
+	snapshotByteCap   int
+	snapshotRetention time.Duration
 }
 
 func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
@@ -90,6 +97,15 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.execTimeout, err = flags.GetDuration(serveExecTimeoutFlag); err != nil {
+		return f, err
+	}
+	if f.evidenceDir, err = flags.GetString(serveEvidenceDirFlag); err != nil {
+		return f, err
+	}
+	if f.snapshotByteCap, err = flags.GetInt(serveSnapshotByteCapFlag); err != nil {
+		return f, err
+	}
+	if f.snapshotRetention, err = flags.GetDuration(serveSnapshotRetentionFlag); err != nil {
 		return f, err
 	}
 	return f, nil
@@ -188,6 +204,10 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		}
 		config = dtconfig.Settings{}
 	}
+	runtimeSettings, err := loadServeRuntimeSettings()
+	if err != nil {
+		return fmt.Errorf("failed to read incident store settings: %w", err)
+	}
 
 	pathsByID := make(map[string]string)
 	if flags.projectDir != "" {
@@ -217,10 +237,15 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	}
 	httpServer := server.NewHttpServer()
 	caps := api.Capabilities{
-		AllowWrites:    flags.allowWrites,
-		AllowOpaqueSQL: flags.allowOpaqueSQL,
-		HTTPOffline:    flags.httpOffline,
-		ExecTimeout:    flags.execTimeout,
+		AllowWrites:        flags.allowWrites,
+		AllowOpaqueSQL:     flags.allowOpaqueSQL,
+		HTTPOffline:        flags.httpOffline,
+		ExecTimeout:        flags.execTimeout,
+		IncidentStores:     runtimeSettings.Server.IncidentStores,
+		EvidencePrivateDir: firstNonEmpty(flags.evidenceDir, runtimeSettings.Server.EvidenceDir),
+		EvidenceByteCap:    firstNonZero(flags.snapshotByteCap, runtimeSettings.Server.SnapshotByteCap),
+		EvidenceRetention:  firstNonZeroDuration(flags.snapshotRetention, runtimeSettings.Server.SnapshotRetention),
+		SnapshotPolicies:   runtimeSettings.Server.SnapshotPolicies,
 	}
 	if caps.AllowWrites {
 		log.Printf("serve: --allow-writes set; project-mutation routes are enabled")
@@ -233,6 +258,9 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	}
 	if caps.ExecTimeout > 0 {
 		log.Printf("serve: --exec-timeout=%s (api-contract.md's 30s ceiling still applies; values above it are clamped down)", caps.ExecTimeout)
+	}
+	if caps.EvidencePrivateDir != "" {
+		log.Printf("serve: execution snapshot sidecars use %s (default is ~/%s; override with --%s or $%s)", caps.EvidencePrivateDir, executionstore.DefaultDir, serveEvidenceDirFlag, executionstore.DirEnv)
 	}
 	// TODO: implement graceful shutdown
 	return httpServer.ServeHTTP(pathsByID, host, port, session, caps)
@@ -303,5 +331,8 @@ func serveCommandArgs() *cobra.Command {
 	flags.Bool(serveAllowOpaqueSQLFlag, false, "Allow native SQL execution with opaque-privileged provenance (no row/column enforcement); refused by default (REQ:opaque-sql-limitation)")
 	flags.Bool(serveHTTPOfflineFlag, false, "Make every HTTP-typed saved query's live fetch fail as SOURCE_UNAVAILABLE without touching the network, so an explicit mode:snapshot request is the only way to get rows (offline demos); off by default")
 	flags.Duration(serveExecTimeoutFlag, 0, "Per-request execution timeout for exec/run_query (default 10s, api-contract.md's configured upper bound is 30s; values above it are clamped down)")
+	flags.String(serveEvidenceDirFlag, "", "Server-private execution snapshot directory (default $"+executionstore.DirEnv+" or ~/"+executionstore.DefaultDir+")")
+	flags.Int(serveSnapshotByteCapFlag, 0, "Maximum canonical bytes retained per execution snapshot (default 2 MiB)")
+	flags.Duration(serveSnapshotRetentionFlag, 0, "Execution snapshot retention before bytes are expired (default 30 days)")
 	return cmd
 }

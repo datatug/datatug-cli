@@ -281,7 +281,7 @@ func TestRepositoryStoreWatchProjectCursorExcludesForeignIncidents(t *testing.T)
 	forged := state
 	forged.Positions[beta.Projection.Ref.IncidentID] = 1
 	_, err = store.WatchProject(context.Background(), incidents.WatchQuery{Since: encodeCursorState(forged)}, alphaMutation.PrimaryProject)
-	require.ErrorContains(t, err, "event cursor does not match project")
+	require.ErrorIs(t, err, ErrInvalidEventCursor)
 }
 
 func TestRepositoryStoreSnapshotWatchHasDeterministicIncidentBoundary(t *testing.T) {
@@ -356,7 +356,7 @@ func TestRepositoryStoreWatchValidationAndClose(t *testing.T) {
 	_, err := store.List(context.Background(), incidents.CandidateListQuery{ProjectID: "partial"})
 	require.Error(t, err)
 	_, err = store.Watch(context.Background(), incidents.WatchQuery{Since: "bad cursor"})
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrInvalidEventCursor)
 	stream, err := store.Watch(context.Background(), incidents.WatchQuery{})
 	require.NoError(t, err)
 	require.NoError(t, stream.Close())

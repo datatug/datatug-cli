@@ -108,3 +108,23 @@ func TestIncidentPolicyIncludesImportedCreatedEventSensitivity(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, visible)
 }
+
+func TestIncidentPolicyAllowsOnlyCanonicalSourceClosingMergeReference(t *testing.T) {
+	source := incidents.IncidentRef{StoreID: "ops", IncidentID: "INC-1"}
+	into := incidents.IncidentRef{StoreID: "ops", IncidentID: "INC-2"}
+	arbitrary := incidents.IncidentRef{StoreID: "ops", IncidentID: "INC-3"}
+	crossStore := incidents.IncidentRef{StoreID: "foreign", IncidentID: "INC-2"}
+	stored := incidents.Incident{Ref: source, MergedInto: &into}
+	mergeRef := func(id string, target incidents.IncidentRef) incidents.Event {
+		return incidents.Event{ID: id, Incident: source, Type: incidents.EventIncidentMerged, Refs: []incidents.ArtifactRef{{Kind: incidents.RefIncident, Incident: &target}}}
+	}
+	events := []incidents.Event{
+		mergeRef("canonical", into),
+		mergeRef("arbitrary", arbitrary),
+		mergeRef("cross-store", crossStore),
+	}
+	policy := incidentViewPolicy(context.Background(), stored, events, secureread.Session{Unrestricted: true}, nil)
+	require.False(t, policy.WithheldEvents["canonical"])
+	require.True(t, policy.WithheldEvents["arbitrary"])
+	require.True(t, policy.WithheldEvents["cross-store"])
+}

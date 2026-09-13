@@ -266,13 +266,19 @@ func incidentAppendHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, err)
 		return
 	}
-	mutation := incidents.Mutation{MutationID: req.MutationID, Incident: req.Incident, ExpectedSeq: req.ExpectedSeq, Event: incidents.EventDraft{
+	mutation := incidents.Mutation{MutationID: req.MutationID, Incident: req.Incident, Event: incidents.EventDraft{
 		At: req.Event.At, Actor: actor, Type: req.Event.Type, Assertion: req.Event.Assertion, Refs: req.Event.Refs, Payload: req.Event.Payload,
 	}}
-	if err = authorizeIncidentEvent(r.Context(), store, mutation); err != nil {
-		writeContractError(w, r, err)
+	authorizedSeq, authorizationErr := authorizeIncidentEvent(r.Context(), store, mutation)
+	if authorizationErr != nil {
+		writeContractError(w, r, authorizationErr)
 		return
 	}
+	if req.ExpectedSeq != nil && *req.ExpectedSeq != authorizedSeq {
+		writeContractError(w, r, incidentStoreError(incidents.ErrSequenceConflict))
+		return
+	}
+	mutation.ExpectedSeq = &authorizedSeq
 	result, err := store.Append(r.Context(), mutation)
 	if err != nil {
 		writeContractError(w, r, incidentStoreError(err))
@@ -297,28 +303,35 @@ func incidentAppendHandler(w http.ResponseWriter, r *http.Request) {
 	writeContractResponse(w, r, incidentStoreError(err), response)
 }
 
-func authorizeIncidentEvent(ctx context.Context, store incidents.APIStore, mutation incidents.Mutation) error {
+func authorizeIncidentEvent(ctx context.Context, store incidents.APIStore, mutation incidents.Mutation) (uint64, error) {
 	stored, err := store.Projection(ctx, mutation.Incident, nil)
 	if err != nil {
-		return incidentStoreError(err)
+		return 0, incidentStoreError(err)
 	}
 	events, err := store.Events(ctx, mutation.Incident, 0)
 	if err != nil {
-		return incidentStoreError(err)
+		return 0, incidentStoreError(err)
 	}
-	draft := incidents.Event{ID: mutation.MutationID, Seq: stored.LastSeq + 1, At: mutation.Event.At, VisibleAt: mutation.Event.At, Incident: mutation.Incident, Actor: mutation.Event.Actor, Type: mutation.Event.Type, Assertion: mutation.Event.Assertion, Refs: mutation.Event.Refs, Payload: mutation.Event.Payload}
+	authorizedSeq := stored.LastSeq
+	for _, event := range events {
+		if event.ID == mutation.MutationID {
+			authorizedSeq = event.Seq - 1
+			break
+		}
+	}
+	draft := incidents.Event{ID: mutation.MutationID, Seq: authorizedSeq + 1, At: mutation.Event.At, VisibleAt: mutation.Event.At, Incident: mutation.Incident, Actor: mutation.Event.Actor, Type: mutation.Event.Type, Assertion: mutation.Event.Assertion, Refs: mutation.Event.Refs, Payload: mutation.Event.Payload}
 	_, policy, err := api.IncidentView(ctx, stored, append(events, draft))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	_, visible, err := incidents.ApplyEventView(draft, policy)
 	if err != nil {
-		return newInvalidRequest("event", err.Error())
+		return 0, newInvalidRequest("event", err.Error())
 	}
 	if !visible {
-		return newAccessDenied("current access policy does not permit this incident event")
+		return 0, newAccessDenied("current access policy does not permit this incident event")
 	}
-	return nil
+	return authorizedSeq, nil
 }
 
 func incidentMergeHandler(w http.ResponseWriter, r *http.Request) {
@@ -516,47 +529,87 @@ func incidentEventsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = stream.Close() }()
+	first, firstErr := nextVisibleIncidentStreamItem(r.Context(), store, stream, resolved)
+	if firstErr != nil {
+		if incidentStreamDone(r.Context(), firstErr) {
+			writeCORSOrigin(w, r)
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			return
+		}
+		writeContractError(w, r, incidentStoreError(firstErr))
+		return
+	}
+	firstLine, err := json.Marshal(first)
+	if err != nil {
+		writeContractError(w, r, err)
+		return
+	}
 	writeCORSOrigin(w, r)
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	flusher, _ := w.(http.Flusher)
-	encoder := json.NewEncoder(w)
+	if _, err := w.Write(append(firstLine, '\n')); err != nil {
+		return
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
 	for {
-		item, nextErr := stream.Next(r.Context())
+		item, nextErr := nextVisibleIncidentStreamItem(r.Context(), store, stream, resolved)
 		if nextErr != nil {
-			if errors.Is(nextErr, context.Canceled) || errors.Is(nextErr, context.DeadlineExceeded) || errors.Is(nextErr, io.EOF) {
+			if incidentStreamDone(r.Context(), nextErr) {
 				return
 			}
-			return
+			panic(http.ErrAbortHandler)
 		}
-		stored, projectionErr := store.Projection(r.Context(), item.Event.Incident, nil)
-		if projectionErr != nil {
-			return
+		line, encodeErr := json.Marshal(item)
+		if encodeErr != nil {
+			panic(http.ErrAbortHandler)
 		}
-		if !incidentHasProject(stored, resolved) {
-			continue
-		}
-		events, eventsErr := store.Events(r.Context(), item.Event.Incident, 0)
-		if eventsErr != nil {
-			return
-		}
-		_, policy, policyErr := api.IncidentView(r.Context(), stored, events)
-		if policyErr != nil {
-			return
-		}
-		visibleItem, visible, viewErr := incidents.ApplyStreamItemView(item, policy)
-		if viewErr != nil {
-			return
-		}
-		if !visible {
-			continue
-		}
-		if encodeErr := encoder.Encode(visibleItem); encodeErr != nil {
+		if _, writeErr := w.Write(append(line, '\n')); writeErr != nil {
 			return
 		}
 		if flusher != nil {
 			flusher.Flush()
 		}
 	}
+}
+
+func nextVisibleIncidentStreamItem(ctx context.Context, store incidents.APIStore, stream incidents.EventStream, resolved incidents.ProjectRef) (incidents.StreamItem, error) {
+	for {
+		item, err := stream.Next(ctx)
+		if err != nil {
+			return incidents.StreamItem{}, err
+		}
+		stored, err := store.Projection(ctx, item.Event.Incident, nil)
+		if err != nil {
+			return incidents.StreamItem{}, err
+		}
+		if !incidentHasProject(stored, resolved) {
+			continue
+		}
+		events, err := store.Events(ctx, item.Event.Incident, 0)
+		if err != nil {
+			return incidents.StreamItem{}, err
+		}
+		_, policy, err := api.IncidentView(ctx, stored, events)
+		if err != nil {
+			return incidents.StreamItem{}, err
+		}
+		visibleItem, visible, err := incidents.ApplyStreamItemView(item, policy)
+		if err != nil {
+			return incidents.StreamItem{}, err
+		}
+		if visible {
+			return visibleItem, nil
+		}
+	}
+}
+
+func incidentStreamDone(ctx context.Context, err error) bool {
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	return ctx.Err() != nil && errors.Is(err, ctx.Err())
 }
 
 func incidentHasProject(incident incidents.Incident, project incidents.ProjectRef) bool {
@@ -573,6 +626,8 @@ func incidentStoreError(err error) error {
 		return nil
 	}
 	switch {
+	case errors.Is(err, incidentstore.ErrInvalidEventCursor):
+		return newInvalidRequest("since", "invalid event cursor")
 	case errors.Is(err, incidentstore.ErrIncidentNotFound):
 		return newNotFound("incident not found")
 	case errors.Is(err, incidents.ErrMutationConflict), errors.Is(err, incidents.ErrSequenceConflict):

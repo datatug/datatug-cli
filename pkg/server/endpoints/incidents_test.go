@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -63,10 +64,20 @@ func TestIncidentHTTPCreateReplayShowAppendListAndEvents(t *testing.T) {
 			Payload: noteBody,
 		},
 	}
+	mismatched := appendRequest
+	mismatched.MutationID = "append-wrong-seq"
+	wrongSeq := uint64(0)
+	mismatched.ExpectedSeq = &wrongSeq
+	performIncidentJSON(t, router, http.MethodPost, "/datatug/incidents/INC-1/events", mismatched, http.StatusConflict)
 	appended := performIncidentJSON(t, router, http.MethodPost, "/datatug/incidents/INC-1/events", appendRequest, http.StatusOK)
 	var appendResponse apicontract.IncidentAppendResponse
 	require.NoError(t, apicontract.DecodeStrict(appended.Body.Bytes(), &appendResponse))
 	require.Equal(t, uint64(2), appendResponse.Event.Seq)
+	replayedAppend := performIncidentJSON(t, router, http.MethodPost, "/datatug/incidents/INC-1/events", appendRequest, http.StatusOK)
+	var replayedAppendResponse apicontract.IncidentAppendResponse
+	require.NoError(t, apicontract.DecodeStrict(replayedAppend.Body.Bytes(), &replayedAppendResponse))
+	require.True(t, replayedAppendResponse.Replayed)
+	require.Equal(t, appendResponse.Event, replayedAppendResponse.Event)
 
 	listQuery := incidentScopeValues(scopes["alpha"])
 	listQuery.Set("check", "check-orders")
@@ -159,6 +170,132 @@ func TestIncidentHTTPFiniteEventsWaitForDeterministicSnapshot(t *testing.T) {
 	}
 	require.Equal(t, 1, delayed.incidentCalls)
 	require.Equal(t, 1, delayed.projectCalls)
+}
+
+func TestIncidentHTTPRejectsInvalidEventCursorsWithoutLeakingState(t *testing.T) {
+	router, scopes := configureIncidentHTTP(t, "alpha", "beta")
+	for _, fixture := range []apicontract.IncidentCreateRequest{
+		incidentCreateFixture(scopes["alpha"], "cursor-alpha-one", "Alpha one"),
+		incidentCreateFixture(scopes["alpha"], "cursor-alpha-two", "Alpha two"),
+		incidentCreateFixture(scopes["beta"], "cursor-beta", "Beta"),
+	} {
+		performIncidentJSON(t, router, http.MethodPost, "/datatug/incidents", fixture, http.StatusCreated)
+	}
+	alphaQuery := incidentScopeValues(scopes["alpha"])
+	alphaQuery.Set("follow", "false")
+	alphaSingle := firstIncidentStreamItem(t, performIncidentRequest(t, router, http.MethodGet, "/datatug/incidents/INC-1/events?"+alphaQuery.Encode(), nil, http.StatusOK))
+	alphaProject := firstIncidentStreamItem(t, performIncidentRequest(t, router, http.MethodGet, "/datatug/incidents/events?"+alphaQuery.Encode(), nil, http.StatusOK))
+
+	wrongStore := mutateIncidentCursor(t, alphaSingle.Cursor, func(state map[string]any) { state["store"] = "foreign" })
+	foreignPosition := mutateIncidentCursor(t, alphaProject.Cursor, func(state map[string]any) {
+		state["positions"].(map[string]any)["INC-3"] = float64(1)
+	})
+	tests := []struct {
+		name   string
+		target string
+	}{
+		{name: "malformed", target: "/datatug/incidents/INC-1/events?" + withIncidentCursor(alphaQuery, "%%%")},
+		{name: "wrong incident", target: "/datatug/incidents/INC-2/events?" + withIncidentCursor(alphaQuery, string(alphaSingle.Cursor))},
+		{name: "wrong store", target: "/datatug/incidents/INC-1/events?" + withIncidentCursor(alphaQuery, string(wrongStore))},
+		{name: "wrong project", target: "/datatug/incidents/events?" + withIncidentCursor(incidentScopeValues(scopes["beta"]), string(alphaProject.Cursor))},
+		{name: "foreign position", target: "/datatug/incidents/events?" + withIncidentCursor(alphaQuery, string(foreignPosition))},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := performIncidentRequest(t, router, http.MethodGet, test.target, nil, http.StatusBadRequest)
+			var envelope apicontract.ErrorEnvelope
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope))
+			require.Equal(t, string(apicontract.ErrCodeInvalidRequest), envelope.Error.Code)
+			require.Equal(t, "since", envelope.Error.Field)
+			require.Equal(t, "invalid event cursor", envelope.Error.Message)
+			require.NotContains(t, response.Body.String(), "INC-3")
+			require.NotContains(t, response.Body.String(), "foreign")
+		})
+	}
+}
+
+func TestIncidentHTTPStreamProviderFailuresAreNeverCleanEOF(t *testing.T) {
+	router, scopes := configureIncidentHTTP(t, "alpha")
+	performIncidentJSON(t, router, http.MethodPost, "/datatug/incidents", incidentCreateFixture(scopes["alpha"], "stream-create", "Stream"), http.StatusCreated)
+	baseStore, err := api.IncidentStoreByID("alpha", "ops")
+	require.NoError(t, err)
+	snapshots := baseStore.(incidentstore.SnapshotWatcher)
+	seed, err := snapshots.WatchProjectSnapshot(context.Background(), incidents.WatchQuery{}, incidents.ProjectRef{StoreID: api.LocalStoreID, ProjectID: "alpha", Environment: "prod"})
+	require.NoError(t, err)
+	seedItem, err := seed.Next(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, seed.Close())
+
+	broken := errors.New("provider exploded with private state")
+	wrapper := &scriptedSnapshotStore{APIStore: baseStore, nextErr: broken}
+	previousResolver := incidentStoreByID
+	incidentStoreByID = func(_, _ string) (incidents.APIStore, error) { return wrapper, nil }
+	t.Cleanup(func() { incidentStoreByID = previousResolver })
+	server := httptest.NewServer(router)
+	t.Cleanup(server.Close)
+	query := incidentScopeValues(scopes["alpha"])
+	query.Set("follow", "false")
+
+	response, err := http.Get(server.URL + "/datatug/incidents/events?" + query.Encode()) //nolint:noctx
+	require.NoError(t, err)
+	preBody, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, http.StatusInternalServerError, response.StatusCode)
+	require.NotContains(t, string(preBody), broken.Error())
+	var envelope apicontract.ErrorEnvelope
+	require.NoError(t, json.Unmarshal(preBody, &envelope))
+	require.Equal(t, "INTERNAL", envelope.Error.Code)
+
+	wrapper.items = []incidents.StreamItem{seedItem}
+	response, err = http.Get(server.URL + "/datatug/incidents/events?" + query.Encode()) //nolint:noctx
+	require.NoError(t, err)
+	postBody, readErr := io.ReadAll(response.Body)
+	require.Error(t, readErr)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.Contains(t, string(postBody), "stream-create")
+}
+
+func TestIncidentHTTPAppendAuthorizationIsRevisionBound(t *testing.T) {
+	router, scopes := configureIncidentHTTP(t, "alpha")
+	baseStore, err := api.IncidentStoreByID("alpha", "ops")
+	require.NoError(t, err)
+	actor := incidents.Actor{Kind: incidents.ActorHuman, ID: "alice", Via: incidents.ActorViaAPI}
+	primary := incidents.ProjectRef{StoreID: api.LocalStoreID, ProjectID: "alpha", Environment: "prod"}
+	hidden := incidents.ProjectRef{StoreID: api.LocalStoreID, ProjectID: "hidden", Environment: "prod"}
+	at := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	source, err := baseStore.Create(context.Background(), incidents.CreateMutation{
+		MutationID: "interleave-source", StoreID: "ops", UID: "interleave-source", Title: "Hidden source", At: at, Reporter: actor,
+		PrimaryProject: primary, Projects: []incidents.ProjectRef{hidden}, CanonicalContext: incidents.CanonicalContext{Facts: []investigation.Fact{{
+			ID: "secret", Entity: "Customer", Field: "ID", Value: investigation.NewIntegerValue("99"), Origin: investigation.FactOriginManual, Enabled: true, Scope: &hidden,
+		}}},
+	})
+	require.NoError(t, err)
+	target, err := baseStore.Create(context.Background(), incidents.CreateMutation{
+		MutationID: "interleave-target", StoreID: "ops", UID: "interleave-target", Title: "Visible target", At: at, Reporter: actor,
+		PrimaryProject: primary, CanonicalContext: incidents.CanonicalContext{Facts: []investigation.Fact{}},
+	})
+	require.NoError(t, err)
+	wrapped := &interleavingAppendStore{APIStore: baseStore, beforeAppend: func() {
+		_, mergeErr := baseStore.Merge(context.Background(), incidents.MergeMutation{MutationID: "interleave-merge", Source: source.Projection.Ref, Into: target.Projection.Ref})
+		require.NoError(t, mergeErr)
+	}}
+	previousResolver := incidentStoreByID
+	incidentStoreByID = func(_, _ string) (incidents.APIStore, error) { return wrapped, nil }
+	t.Cleanup(func() { incidentStoreByID = previousResolver })
+
+	note, err := json.Marshal(incidents.NoteAddedPayload{Body: "must not commit"})
+	require.NoError(t, err)
+	request := apicontract.IncidentAppendRequest{IncidentScope: scopes["alpha"], MutationID: "interleaved-note", Incident: target.Projection.Ref,
+		Event: apicontract.IncidentEventInput{At: at.Add(time.Minute), Type: incidents.EventNoteAdded, Assertion: incidents.Assertion{Kind: incidents.AssertionClaim}, Payload: note}}
+	performIncidentJSON(t, router, http.MethodPost, "/datatug/incidents/"+target.Projection.Ref.IncidentID+"/events", request, http.StatusConflict)
+	events, err := baseStore.Events(context.Background(), target.Projection.Ref, 0)
+	require.NoError(t, err)
+	for _, event := range events {
+		require.NotEqual(t, request.MutationID, event.ID)
+	}
+	performIncidentJSON(t, router, http.MethodPost, "/datatug/incidents/"+target.Projection.Ref.IncidentID+"/events", request, http.StatusForbidden)
 }
 
 func TestIncidentHTTPSeparatesRequestValidationFromProviderFailures(t *testing.T) {
@@ -263,6 +400,16 @@ func TestIncidentHTTPMergeWithholdsImportedSourceSensitivity(t *testing.T) {
 		Refs: []incidents.ArtifactRef{{Kind: incidents.RefCheck, Artifact: &incidents.ProjectArtifactRef{StoreID: api.LocalStoreID, ProjectID: "alpha", Environment: "prod", ID: "source-secret-check"}}}, Payload: notePayload,
 	}})
 	require.NoError(t, err)
+	preMergeQuery := incidentScopeValues(scopes["alpha"])
+	preMergeQuery.Set("follow", "false")
+	preMerge := performIncidentRequest(t, router, http.MethodGet, "/datatug/incidents/events?"+preMergeQuery.Encode(), nil, http.StatusOK)
+	preMergeDecoder := json.NewDecoder(preMerge.Body)
+	var preMergeItem incidents.StreamItem
+	var preMergeCursor incidents.EventCursor
+	for preMergeDecoder.Decode(&preMergeItem) == nil {
+		preMergeCursor = preMergeItem.Cursor
+	}
+	require.NotEmpty(t, preMergeCursor)
 
 	mergeRequest := apicontract.IncidentMergeRequest{IncidentScope: scopes["alpha"], MutationID: "merge-source", Source: source.Projection.Ref, Into: target.Projection.Ref}
 	performIncidentJSON(t, router, http.MethodPost, "/datatug/incidents/"+source.Projection.Ref.IncidentID+"/merge", mergeRequest, http.StatusOK)
@@ -283,9 +430,41 @@ func TestIncidentHTTPMergeWithholdsImportedSourceSensitivity(t *testing.T) {
 	}
 	require.Equal(t, []string{"target-created", "merge-source-import-1"}, eventIDs)
 
+	sourceEvents := performIncidentRequest(t, router, http.MethodGet, "/datatug/incidents/"+source.Projection.Ref.IncidentID+"/events?"+query.Encode(), nil, http.StatusOK)
+	var sourceMerge incidents.StreamItem
+	sourceDecoder := json.NewDecoder(sourceEvents.Body)
+	for sourceDecoder.Decode(&item) == nil {
+		if item.Event.ID == "merge-source-source" {
+			sourceMerge = item
+		}
+	}
+	require.Equal(t, incidents.EventIncidentMerged, sourceMerge.Event.Type)
+	require.Equal(t, target.Projection.Ref, *sourceMerge.Event.Refs[0].Incident)
+
 	whole := performIncidentRequest(t, router, http.MethodGet, "/datatug/incidents/events?"+query.Encode(), nil, http.StatusOK)
 	require.NotContains(t, whole.Body.String(), "source customer secret")
 	require.NotContains(t, whole.Body.String(), "source-secret-check")
+	require.Contains(t, whole.Body.String(), "merge-source-source")
+
+	liveQuery := incidentScopeValues(scopes["alpha"])
+	liveQuery.Set("since", string(preMergeCursor))
+	server := httptest.NewServer(router)
+	t.Cleanup(server.Close)
+	liveContext, cancelLive := context.WithCancel(context.Background())
+	t.Cleanup(cancelLive)
+	request, err := http.NewRequestWithContext(liveContext, http.MethodGet, server.URL+"/datatug/incidents/events?"+liveQuery.Encode(), nil)
+	require.NoError(t, err)
+	liveResponse, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, liveResponse.Body.Close()) })
+	liveDecoder := json.NewDecoder(liveResponse.Body)
+	foundMerge := false
+	for i := 0; i < 4 && !foundMerge; i++ {
+		require.NoError(t, liveDecoder.Decode(&item))
+		foundMerge = item.Event.ID == "merge-source-source"
+	}
+	require.True(t, foundMerge)
+	cancelLive()
 }
 
 type incidentHTTPScopes map[string]apicontract.IncidentScope
@@ -296,6 +475,50 @@ type delayedSnapshotStore struct {
 	delay         time.Duration
 	incidentCalls int
 	projectCalls  int
+}
+
+type scriptedSnapshotStore struct {
+	incidents.APIStore
+	items   []incidents.StreamItem
+	nextErr error
+}
+
+func (s *scriptedSnapshotStore) WatchSnapshot(context.Context, incidents.WatchQuery) (incidents.EventStream, error) {
+	return &scriptedEventStream{items: append([]incidents.StreamItem(nil), s.items...), nextErr: s.nextErr}, nil
+}
+
+func (s *scriptedSnapshotStore) WatchProjectSnapshot(context.Context, incidents.WatchQuery, incidents.ProjectRef) (incidents.EventStream, error) {
+	return &scriptedEventStream{items: append([]incidents.StreamItem(nil), s.items...), nextErr: s.nextErr}, nil
+}
+
+type scriptedEventStream struct {
+	items   []incidents.StreamItem
+	nextErr error
+}
+
+func (s *scriptedEventStream) Next(context.Context) (incidents.StreamItem, error) {
+	if len(s.items) == 0 {
+		return incidents.StreamItem{}, s.nextErr
+	}
+	item := s.items[0]
+	s.items = s.items[1:]
+	return item, nil
+}
+
+func (*scriptedEventStream) Close() error { return nil }
+
+type interleavingAppendStore struct {
+	incidents.APIStore
+	beforeAppend  func()
+	didInterleave bool
+}
+
+func (s *interleavingAppendStore) Append(ctx context.Context, mutation incidents.Mutation) (incidents.AppendResult, error) {
+	if !s.didInterleave {
+		s.didInterleave = true
+		s.beforeAppend()
+	}
+	return s.APIStore.Append(ctx, mutation)
 }
 
 func (s *delayedSnapshotStore) WatchSnapshot(ctx context.Context, query incidents.WatchQuery) (incidents.EventStream, error) {
@@ -334,6 +557,32 @@ func (s delayedEventStream) Next(ctx context.Context) (incidents.StreamItem, err
 
 func incidentScopeValues(scope apicontract.IncidentScope) url.Values {
 	return url.Values{"storeId": {scope.StoreID}, "project": {scope.Project}, "environment": {scope.Environment}, "securityContextId": {scope.SecurityContextID}}
+}
+
+func firstIncidentStreamItem(t *testing.T, response *httptest.ResponseRecorder) incidents.StreamItem {
+	t.Helper()
+	var item incidents.StreamItem
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&item))
+	return item
+}
+
+func withIncidentCursor(values url.Values, cursor string) string {
+	copy := values.Clone()
+	copy.Set("since", cursor)
+	copy.Set("follow", "false")
+	return copy.Encode()
+}
+
+func mutateIncidentCursor(t *testing.T, cursor incidents.EventCursor, mutate func(map[string]any)) incidents.EventCursor {
+	t.Helper()
+	raw, err := base64.RawURLEncoding.DecodeString(string(cursor))
+	require.NoError(t, err)
+	var state map[string]any
+	require.NoError(t, json.Unmarshal(raw, &state))
+	mutate(state)
+	raw, err = json.Marshal(state)
+	require.NoError(t, err)
+	return incidents.EventCursor(base64.RawURLEncoding.EncodeToString(raw))
 }
 
 func configureIncidentHTTP(t *testing.T, projectIDs ...string) (*httprouter.Router, incidentHTTPScopes) {

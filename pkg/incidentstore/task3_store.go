@@ -20,6 +20,11 @@ import (
 
 const eventCursorVersion = 1
 
+// ErrInvalidEventCursor identifies all malformed or scope-mismatched cursors.
+// Callers may map it to a non-disclosing request error without parsing storage
+// error text or exposing the cursor's decoded state.
+var ErrInvalidEventCursor = errors.New("invalid event cursor")
+
 type eventCursorState struct {
 	Version    int                   `json:"v"`
 	StoreID    string                `json:"store"`
@@ -366,7 +371,7 @@ func candidateMatches(incident incidents.Incident, query incidents.CandidateList
 }
 
 func (s *RepositoryStore) Watch(ctx context.Context, query incidents.WatchQuery) (incidents.EventStream, error) {
-	if err := query.Validate(); err != nil {
+	if err := validateWatchQuery(query); err != nil {
 		return nil, err
 	}
 	if query.Incident != nil {
@@ -382,7 +387,7 @@ func (s *RepositoryStore) Watch(ctx context.Context, query incidents.WatchQuery)
 }
 
 func (s *RepositoryStore) WatchSnapshot(ctx context.Context, query incidents.WatchQuery) (incidents.EventStream, error) {
-	if err := query.Validate(); err != nil {
+	if err := validateWatchQuery(query); err != nil {
 		return nil, err
 	}
 	if query.Incident != nil {
@@ -398,7 +403,7 @@ func (s *RepositoryStore) WatchSnapshot(ctx context.Context, query incidents.Wat
 }
 
 func (s *RepositoryStore) WatchProject(ctx context.Context, query incidents.WatchQuery, project incidents.ProjectRef) (incidents.EventStream, error) {
-	if err := query.Validate(); err != nil {
+	if err := validateWatchQuery(query); err != nil {
 		return nil, err
 	}
 	if query.Incident != nil {
@@ -422,7 +427,7 @@ func (s *RepositoryStore) WatchProject(ctx context.Context, query incidents.Watc
 		}
 		for incidentID := range state.Positions {
 			if !allowed[incidentID] {
-				return fmt.Errorf("event cursor does not match project")
+				return ErrInvalidEventCursor
 			}
 		}
 		return nil
@@ -434,7 +439,7 @@ func (s *RepositoryStore) WatchProject(ctx context.Context, query incidents.Watc
 }
 
 func (s *RepositoryStore) WatchProjectSnapshot(ctx context.Context, query incidents.WatchQuery, project incidents.ProjectRef) (incidents.EventStream, error) {
-	if err := query.Validate(); err != nil {
+	if err := validateWatchQuery(query); err != nil {
 		return nil, err
 	}
 	if query.Incident != nil {
@@ -448,6 +453,13 @@ func (s *RepositoryStore) WatchProjectSnapshot(ctx context.Context, query incide
 		return nil, err
 	}
 	return s.newSnapshotStream(ctx, query, &project, state)
+}
+
+func validateWatchQuery(query incidents.WatchQuery) error {
+	if query.Since != "" && query.Since.Validate() != nil {
+		return ErrInvalidEventCursor
+	}
+	return query.Validate()
 }
 
 func (s *RepositoryStore) newSnapshotStream(ctx context.Context, query incidents.WatchQuery, project *incidents.ProjectRef, state eventCursorState) (incidents.EventStream, error) {
@@ -471,7 +483,7 @@ func (s *RepositoryStore) newSnapshotStream(ctx context.Context, query incidents
 		if project != nil {
 			for incidentID := range state.Positions {
 				if !allowed[incidentID] {
-					return fmt.Errorf("event cursor does not match project")
+					return ErrInvalidEventCursor
 				}
 			}
 		}
@@ -497,24 +509,24 @@ func (s *RepositoryStore) decodeCursor(query incidents.WatchQuery, project *inci
 	}
 	b, err := base64.RawURLEncoding.DecodeString(string(query.Since))
 	if err != nil || decodeStrict(b, &state) != nil || state.Version != eventCursorVersion || state.StoreID != s.location.StoreID {
-		return eventCursorState{}, fmt.Errorf("invalid event cursor")
+		return eventCursorState{}, ErrInvalidEventCursor
 	}
 	wantedIncident := ""
 	if query.Incident != nil {
 		wantedIncident = query.Incident.IncidentID
 	}
 	if state.IncidentID != wantedIncident || state.Positions == nil {
-		return eventCursorState{}, fmt.Errorf("event cursor does not match watch query")
+		return eventCursorState{}, ErrInvalidEventCursor
 	}
 	if project == nil && state.Project != nil || project != nil && (state.Project == nil || *state.Project != *project) {
-		return eventCursorState{}, fmt.Errorf("event cursor does not match project")
+		return eventCursorState{}, ErrInvalidEventCursor
 	}
 	for incidentID := range state.Positions {
 		if err := (incidents.IncidentRef{StoreID: s.location.StoreID, IncidentID: incidentID}).Validate(); err != nil {
-			return eventCursorState{}, fmt.Errorf("invalid event cursor")
+			return eventCursorState{}, ErrInvalidEventCursor
 		}
 		if wantedIncident != "" && incidentID != wantedIncident {
-			return eventCursorState{}, fmt.Errorf("event cursor does not match watch query")
+			return eventCursorState{}, ErrInvalidEventCursor
 		}
 	}
 	return state, nil

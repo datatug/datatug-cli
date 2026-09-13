@@ -104,7 +104,7 @@ func incidentViewPolicy(ctx context.Context, stored incidents.Incident, events [
 	for _, event := range events {
 		refsVisible := true
 		for _, ref := range event.Refs {
-			if !incidentRefVisible(ref, allFactsVisible, paths) {
+			if !incidentRefVisible(ref, event, stored, allFactsVisible, paths) {
 				refsVisible = false
 				break
 			}
@@ -166,7 +166,7 @@ func incidentProjectScopeServed(scope investigation.ProjectScope, paths map[stri
 	return ok
 }
 
-func incidentRefVisible(ref incidents.ArtifactRef, allFactsVisible bool, paths map[string]string) bool {
+func incidentRefVisible(ref incidents.ArtifactRef, event incidents.Event, stored incidents.Incident, allFactsVisible bool, paths map[string]string) bool {
 	switch {
 	case ref.Kind == incidents.RefFact:
 		return allFactsVisible && ref.Artifact != nil && incidentProjectScopeServed(investigation.ProjectScope{StoreID: ref.Artifact.StoreID, ProjectID: ref.Artifact.ProjectID, Environment: ref.Artifact.Environment}, paths)
@@ -181,10 +181,14 @@ func incidentRefVisible(ref incidents.ArtifactRef, allFactsVisible bool, paths m
 		_, left := paths[ref.Comparison.Left.ProjectID]
 		_, right := paths[ref.Comparison.Right.ProjectID]
 		return left && right
-	case ref.Incident != nil:
-		// IncidentRef has no project scope, so this adapter cannot prove the
-		// referenced incident is visible inside a shared store. Fail closed.
-		return false
+	case ref.Kind == incidents.RefIncident && ref.Incident != nil:
+		// IncidentRef has no project scope. The one link whose authorization is
+		// already established without another lookup is the canonical source-
+		// closing merge event: its same-store destination must equal the folded
+		// source projection's MergedInto. All arbitrary incident links remain
+		// fail-closed until a resolver-aware typed-links contract exists.
+		return event.Type == incidents.EventIncidentMerged && event.Incident == stored.Ref &&
+			stored.MergedInto != nil && *ref.Incident == *stored.MergedInto && ref.Incident.StoreID == stored.Ref.StoreID
 	default:
 		return ref.ID != ""
 	}

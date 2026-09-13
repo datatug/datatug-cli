@@ -31,8 +31,10 @@ const (
 )
 
 type incidentCLI struct {
-	client executionClient
-	scope  apicontract.IncidentScope
+	client        executionClient
+	scope         apicontract.IncidentScope
+	storeExplicit bool
+	storeSelected bool
 }
 
 func incidentCommand() *cobra.Command {
@@ -341,7 +343,8 @@ func newIncidentCLI(cmd *cobra.Command) (incidentCLI, error) {
 	if scope.StoreID == "" {
 		scope.StoreID = scope.Project
 	}
-	return incidentCLI{client: client, scope: apicontract.IncidentScope{
+	storeFlag := cmd.Flag(executionStoreFlag)
+	return incidentCLI{client: client, storeExplicit: storeFlag != nil && storeFlag.Changed, scope: apicontract.IncidentScope{
 		StoreID: scope.StoreID, Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
 	}}, nil
 }
@@ -355,18 +358,23 @@ func newIncidentCLIRef(cmd *cobra.Command, value string) (incidentCLI, incidents
 	return cli, ref, err
 }
 
-func (c incidentCLI) resolveRef(value string) (incidents.IncidentRef, error) {
+func (c *incidentCLI) resolveRef(value string) (incidents.IncidentRef, error) {
 	storeID, incidentID := c.scope.StoreID, value
 	if before, after, found := strings.Cut(value, "/"); found {
 		storeID, incidentID = before, after
-		if storeID != c.scope.StoreID {
+		if c.storeExplicit && storeID != c.scope.StoreID {
 			return incidents.IncidentRef{}, Exit("qualified incident store does not match --store", exitCodeUsage)
 		}
+		if c.storeSelected && storeID != c.scope.StoreID {
+			return incidents.IncidentRef{}, Exit("incident references must use the same store", exitCodeUsage)
+		}
+		c.scope.StoreID = storeID
 	}
 	ref := incidents.IncidentRef{StoreID: storeID, IncidentID: incidentID}
 	if err := ref.Validate(); err != nil {
 		return incidents.IncidentRef{}, Exit("invalid incident id", exitCodeUsage)
 	}
+	c.storeSelected = true
 	return ref, nil
 }
 

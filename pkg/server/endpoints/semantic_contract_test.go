@@ -536,6 +536,64 @@ func TestSemanticApplicable_AmbiguousFacts(t *testing.T) {
 	}
 }
 
+func TestSemanticApplicable_UnsupportedPredicateSkipsOnlyItsBinding(t *testing.T) {
+	projectDir, projectID := writeSemanticTestProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	customerRange := declaredFact("customer-range", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
+	customerRange.Condition = apicontract.FactConditionGreaterThan
+	invoiceEquality := declaredFact("invoice-equality", "Invoice", "ID", apicontract.NewIntegerValue("17"), semanticTestSource, "Invoice", "InvoiceId")
+	invoiceEquality.Condition = apicontract.FactConditionEqual
+	disabledCountry := declaredFact("disabled-country-predicate", "Country", "Name", apicontract.NewStringValue("IE"), semanticTestSource, "Country", "Name")
+	disabledCountry.Condition = apicontract.FactConditionNotEqual
+	disabledCountry.Enabled = false
+	body, err := json.Marshal(newApplicableRequest(scope, []apicontract.Fact{customerRange, invoiceEquality, disabledCountry}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/datatug/queries/applicable", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	semanticApplicableHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 when unsupported predicates can be skipped independently; body = %s", rec.Code, rec.Body.String())
+	}
+	var resp apicontract.ApplicableResponse
+	if err := apicontract.DecodeStrict(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	assertValid(t, resp)
+
+	var invoiceLines *apicontract.Candidate
+	for i := range resp.Applicable {
+		if resp.Applicable[i].QueryID == "invoices/invoice-lines" {
+			invoiceLines = &resp.Applicable[i]
+		}
+	}
+	if invoiceLines == nil {
+		t.Fatalf("invoice-lines should remain applicable from its equality fact; applicable=%+v notYet=%+v", resp.Applicable, resp.NotYet)
+	}
+	var customerInvoices *apicontract.Candidate
+	for i := range resp.NotYet {
+		if resp.NotYet[i].QueryID == "customers/customer-invoices" {
+			customerInvoices = &resp.NotYet[i]
+		}
+	}
+	if customerInvoices == nil {
+		t.Fatalf("customer-invoices should remain unbound; applicable=%+v notYet=%+v", resp.Applicable, resp.NotYet)
+	}
+	if len(customerInvoices.Missing) != 1 || customerInvoices.Missing[0] != "CustomerId" {
+		t.Fatalf("customer-invoices missing = %+v, want [CustomerId]", customerInvoices.Missing)
+	}
+	foundSkipped := false
+	for _, step := range customerInvoices.Chain {
+		if step.ParameterID == "CustomerId" && step.FactID == "" && strings.Contains(step.Explanation, "customer-range") && strings.Contains(step.Explanation, "unsupported condition") {
+			foundSkipped = true
+		}
+	}
+	if !foundSkipped {
+		t.Fatalf("customer-invoices chain = %+v, want skipped unsupported-condition explanation for customer-range", customerInvoices.Chain)
+	}
+}
+
 func TestSemanticApplicable_NoValues_EverythingNotYet(t *testing.T) {
 	projectDir, projectID := writeSemanticTestProject(t)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
@@ -621,6 +679,30 @@ func TestSemanticApplicableHandler_HTTP_UnknownFieldRejected(t *testing.T) {
 	semanticApplicableHandler(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 for an unknown field (e.g. a client-supplied role); body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSemanticRelatedHandler_HTTP_RejectsUnsupportedPredicateBeforeEqualityLookup(t *testing.T) {
+	projectDir, projectID := writeSemanticTestProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	fact := declaredFact("customer-range", "Customer", "ID", apicontract.NewIntegerValue("5"), semanticTestSource, "Customer", "CustomerId")
+	fact.Condition = apicontract.FactConditionGreaterThan
+	body, err := json.Marshal(newRelatedRequest(scope, fact, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/datatug/semantic/related", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	semanticRelatedHandler(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for unsupported related predicate; body = %s", rec.Code, rec.Body.String())
+	}
+	var envelope apicontract.ErrorEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(envelope.Error.Message, "not supported for related discovery") {
+		t.Fatalf("error = %+v, want explicit related-discovery condition rejection", envelope.Error)
 	}
 }
 

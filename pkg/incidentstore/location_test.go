@@ -23,9 +23,9 @@ func TestOpenLocationRoutesAllRepositoryKinds(t *testing.T) {
 		location incidents.StoreLocation
 		root     string
 	}{
-		{name: "project", incident: "INC-PROJECT", location: incidents.StoreLocation{StoreID: "project", Kind: incidents.StoreLocationProjectRepository, Project: &project}, root: roots.Projects[project]},
-		{name: "dedicated", incident: "INC-DEDICATED", location: incidents.StoreLocation{StoreID: "dedicated", Kind: incidents.StoreLocationDedicatedRepository}, root: roots.Dedicated["dedicated"]},
-		{name: "application", incident: "INC-APPLICATION", location: incidents.StoreLocation{StoreID: "application", Kind: incidents.StoreLocationApplicationRepository}, root: roots.Application},
+		{name: "project", incident: "INC-101", location: incidents.StoreLocation{StoreID: "project", Kind: incidents.StoreLocationProjectRepository, Project: &project}, root: roots.Projects[project]},
+		{name: "dedicated", incident: "INC-102", location: incidents.StoreLocation{StoreID: "dedicated", Kind: incidents.StoreLocationDedicatedRepository}, root: roots.Dedicated["dedicated"]},
+		{name: "application", incident: "INC-103", location: incidents.StoreLocation{StoreID: "application", Kind: incidents.StoreLocationApplicationRepository}, root: roots.Application},
 	}
 	allRoots := []string{roots.Application, roots.Dedicated["dedicated"], roots.Projects[project]}
 	for _, testCase := range cases {

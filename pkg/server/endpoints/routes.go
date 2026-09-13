@@ -27,7 +27,24 @@ func registerRoutes(path string, router router, wrapper wrapper, writeOnly bool,
 	executeRoutes(path, router, wrapper, writeOnly)
 	semanticRoutes(path, router, wrapper, writeOnly)
 	executionRoutes(path, router, wrapper, writeOnly)
+	incidentRoutes(path, router, wrapper, writeOnly, caps)
 
+}
+
+func incidentRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
+	if !writeOnly {
+		route(router, wrap, http.MethodGet, path+"/incidents", incidentListHandler)
+		// httprouter cannot mix literal and parameter children at the same path
+		// segment. Keep the public /search and /events collection paths by
+		// dispatching their reserved values before treating :id as an incident.
+		route(router, wrap, http.MethodGet, path+"/incidents/:id", incidentReadDispatch)
+		route(router, wrap, http.MethodPost, path+"/incidents/:id", incidentSearchDispatch)
+		route(router, wrap, http.MethodGet, path+"/incidents/:id/events", incidentEventsHandler)
+		route(router, wrap, http.MethodGet, path+"/incidents/:id/similar", incidentSimilarHandler)
+	}
+	route(router, wrap, http.MethodPost, path+"/incidents", requireWriteCapability(caps, incidentCreateHandler))
+	route(router, wrap, http.MethodPost, path+"/incidents/:id/events", requireWriteCapability(caps, incidentAppendHandler))
+	route(router, wrap, http.MethodPost, path+"/incidents/:id/merge", requireWriteCapability(caps, incidentMergeHandler))
 }
 
 func executionRoutes(path string, router router, wrap wrapper, writeOnly bool) {

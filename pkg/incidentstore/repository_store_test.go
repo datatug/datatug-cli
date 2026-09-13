@@ -34,8 +34,16 @@ func TestRepositoryStoreAppendReplayAndProjection(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, first.Replayed)
 	require.Equal(t, uint64(1), first.Event.Seq)
-	require.Equal(t, mutation.Event.At, first.Event.VisibleAt)
+	require.NotEqual(t, mutation.Event.At, first.Event.VisibleAt)
+	require.Equal(t, store.now().UTC(), first.Event.VisibleAt)
 	require.Equal(t, "Invoices stuck", first.Projection.Title)
+	beforePublication := mutation.Event.At.Add(30 * time.Second)
+	_, err = store.Projection(context.Background(), mutation.Incident, &beforePublication)
+	require.Error(t, err, "a backdated caller timestamp must not make an event visible before server publication")
+	atPublication := first.Event.VisibleAt
+	historical, err := store.Projection(context.Background(), mutation.Incident, &atPublication)
+	require.NoError(t, err)
+	require.Equal(t, first.Projection, historical)
 
 	replayed, err := store.Append(context.Background(), mutation)
 	require.NoError(t, err)

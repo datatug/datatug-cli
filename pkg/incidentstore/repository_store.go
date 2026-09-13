@@ -249,6 +249,9 @@ func (s *RepositoryStore) Append(ctx context.Context, mutation incidents.Mutatio
 		}
 		next := uint64(len(events) + 1)
 		visibleAt := store.now().UTC()
+		if len(events) > 0 && visibleAt.Before(events[len(events)-1].VisibleAt) {
+			visibleAt = events[len(events)-1].VisibleAt
+		}
 		event := incidents.Event{
 			ID: mutation.MutationID, Seq: next, At: mutation.Event.At.UTC(), VisibleAt: visibleAt,
 			Incident: mutation.Incident, Actor: mutation.Event.Actor, Type: mutation.Event.Type,

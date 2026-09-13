@@ -63,6 +63,29 @@ func TestRepositoryStorePersistsAndReplaysTask4ContextTransitions(t *testing.T) 
 	require.Len(t, afterRejectedAttempt, 3, "a contradictory transition must not be persisted")
 }
 
+func TestRepositoryStoreClampsAppendVisibilityAfterClockRollback(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	publicationTime := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return publicationTime }
+	created := createdMutation(t, "create-clock-rollback", "INC-3")
+	createdResult, err := store.Append(ctx, created)
+	require.NoError(t, err)
+	require.Equal(t, publicationTime, createdResult.Event.VisibleAt)
+
+	store.now = func() time.Time { return publicationTime.Add(-time.Hour) }
+	scope := investigation.ProjectScope{StoreID: "local", ProjectID: "billing", Environment: "prod"}
+	overlay := investigation.Fact{
+		ID: "customer-13", Entity: "Customer", Field: "ID", Value: investigation.NewIntegerValue("13"),
+		Origin: investigation.FactOriginContext, Enabled: true, Role: investigation.FactRoleSuspected,
+		Layer: "hypothesis:H13", Scope: &scope,
+	}
+	result, err := store.Append(ctx, contextMutation(t, "add-after-clock-rollback", created.Incident, incidents.EventContextFactAdded, incidents.ContextFactAddedPayload{Fact: overlay}))
+	require.NoError(t, err)
+	require.Equal(t, publicationTime, result.Event.VisibleAt)
+	require.Equal(t, overlay, result.Projection.CanonicalContext.Facts[0])
+}
+
 func TestRepositoryStoreRejectionRetainsOverlayWithoutCanonicalizing(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

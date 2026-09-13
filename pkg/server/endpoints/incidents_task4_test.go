@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -117,6 +118,29 @@ func TestIncidentHTTPTask4ContextPromotionPersistsProjectsAndRedacts(t *testing.
 	require.NoError(t, json.Unmarshal(streamedPromotion.Payload, &promotionView))
 	require.Equal(t, overlay.Layer, promotionView.Fact.Layer)
 	require.Equal(t, investigation.FactRoleAffected, promotionView.Role)
+}
+
+func TestIncidentHTTPTask4AppendSurvivesClockRollback(t *testing.T) {
+	router, scopes := configureIncidentHTTP(t, "alpha")
+	scope := investigation.ProjectScope{StoreID: api.LocalStoreID, ProjectID: "alpha", Environment: "prod"}
+	store, err := api.IncidentStoreByID(scope.ProjectID, "ops")
+	require.NoError(t, err)
+	baselineVisibleAt := time.Now().UTC().Add(time.Hour)
+	created, err := store.Create(context.Background(), incidents.CreateMutation{
+		MutationID: "create-clock-rollback", StoreID: "ops", UID: "clock-rollback", Title: "Clock rollback", At: baselineVisibleAt,
+		Reporter: incidents.Actor{Kind: incidents.ActorHuman, ID: "alice", Via: incidents.ActorViaAPI}, PrimaryProject: scope,
+	})
+	require.NoError(t, err)
+	require.Equal(t, baselineVisibleAt, created.Event.VisibleAt)
+
+	overlay := investigation.Fact{
+		ID: "customer-clock", Entity: "Customer", Field: "ID", Value: investigation.NewIntegerValue("14"),
+		Origin: investigation.FactOriginContext, Enabled: true, Role: investigation.FactRoleSuspected,
+		Layer: "hypothesis:clock", Scope: &scope,
+	}
+	result := appendIncidentContextEvent(t, router, scopes["alpha"], created.Projection.Ref, "add-after-clock-rollback", incidents.EventContextFactAdded, incidents.ContextFactAddedPayload{Fact: overlay}, http.StatusOK)
+	require.Equal(t, baselineVisibleAt, result.Event.VisibleAt)
+	require.Equal(t, investigation.FactRoleSuspected, findTask4FactView(t, result.Projection.CanonicalContext.Facts, overlay.ID, overlay.Layer).Role)
 }
 
 func TestIncidentHTTPTask4RejectionRetainsOverlayAndContradictionsFailClosed(t *testing.T) {

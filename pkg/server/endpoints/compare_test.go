@@ -10,9 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/comparecache"
 	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/incidents"
+	"github.com/datatug/datatug-core/pkg/recordsetcompare"
 	"github.com/stretchr/testify/require"
 )
 
@@ -293,6 +296,51 @@ func TestReadableCompareSnapshotAccepts847RowsAndRejectsInputCapOverflow(t *test
 	var contractErr *contractError
 	require.ErrorAs(t, err, &contractErr)
 	require.Equal(t, apicontract.ErrCodeSourceUnavailable, contractErr.Code)
+}
+
+func TestComputeComparePublishesMatchingRowsToCache(t *testing.T) {
+	require.NoError(t, api.ConfigureCompareCache(comparecache.Options{PrivateDir: t.TempDir()}))
+	t.Cleanup(func() { require.NoError(t, api.CloseCompareCache()) })
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	columns := []apicontract.Column{
+		{Name: "id", Type: string(apicontract.ValueTypeString)},
+		{Name: "status", Type: string(apicontract.ValueTypeString)},
+	}
+	leftSet := apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{
+		{apicontract.NewStringValue("1"), apicontract.NewStringValue("same")},
+		{apicontract.NewStringValue("2"), apicontract.NewStringValue("old")},
+	}}
+	rightSet := apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{
+		{apicontract.NewStringValue("1"), apicontract.NewStringValue("same")},
+		{apicontract.NewStringValue("3"), apicontract.NewStringValue("new")},
+	}}
+	receipt := func(id string, rows int) apicontract.CompareSideReceipt {
+		return apicontract.CompareSideReceipt{
+			Execution:  apicontract.ExecutionRef{StoreID: "ops", ProjectID: "project", ExecutionID: id},
+			ExecutedAt: now, RowCount: rows,
+		}
+	}
+	result, err := computeCompareWith(context.Background(), apicontract.CompareRequest{
+		SecurityContextID: "ctx", QueryID: "orders", Key: []string{"id"},
+		Left:  apicontract.CompareSideSpec{Kind: apicontract.CompareSideScope, StoreID: "ops", Project: "project", Environment: "before"},
+		Right: apicontract.CompareSideSpec{Kind: apicontract.CompareSideScope, StoreID: "ops", Project: "project", Environment: "after"},
+	}, compareDependencies{
+		executeSide: func(_ context.Context, _ apicontract.CompareRequest, side apicontract.CompareSideSpec) (compareSideData, error) {
+			if side.Environment == "before" {
+				return compareSideData{recordset: leftSet, receipt: receipt("left-run", 2)}, nil
+			}
+			return compareSideData{recordset: rightSet, receipt: receipt("right-run", 2)}, nil
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Summary.Unchanged)
+	page, err := api.PageCompareCache(context.Background(), comparecache.PageRequest{
+		ComparisonID: api.ComparisonCacheID(result.Left.Execution, result.Right.Execution),
+		State:        recordsetcompare.RecordMatched,
+	})
+	require.NoError(t, err)
+	require.Len(t, page.Rows, 1)
+	require.Equal(t, "1", page.Rows[0].Key[0].Str)
 }
 
 func validIncidentCompareRequest() apicontract.CompareRequest {

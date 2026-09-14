@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -183,6 +184,12 @@ func computeExecutionSnapshot(r *http.Request) (apicontract.SnapshotReadResponse
 		}
 		return snapshot, nil
 	}
+	// The snapshot payload alone cannot upgrade a legacy execution whose
+	// completeness was never recorded. Expose false/unknown as truncated so
+	// clients fail closed rather than treating the retained rows as complete.
+	if record.ResultComplete == nil || !*record.ResultComplete {
+		snapshot.Truncated = true
+	}
 	// Available snapshots are authorized with their real recorded rows. A
 	// metadata-only preflight would incorrectly deny a valid current policy
 	// that projects away columns which RunSnapshot must instead remove.
@@ -327,6 +334,10 @@ func executionReadError(err error) error {
 }
 
 func authorizeExecutionRecord(r *http.Request, record apicontract.ExecutionRecord) error {
+	return authorizeExecutionRecordContext(r.Context(), record)
+}
+
+func authorizeExecutionRecordContext(ctx context.Context, record apicontract.ExecutionRecord) error {
 	executor, ok := api.SecureExecutor()
 	if !ok {
 		return fmt.Errorf("server has no policy-enforced session configured")
@@ -344,7 +355,7 @@ func authorizeExecutionRecord(r *http.Request, record apicontract.ExecutionRecor
 		columns[i] = apicontract.Column{Name: field.Column, Type: string(apicontract.ValueTypeString)}
 		probeRow[i] = apicontract.NewStringValue("datatug-policy-probe")
 	}
-	result, err := executor.RunSnapshot(r.Context(), record.Provenance.Collection, apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{probeRow}})
+	result, err := executor.RunSnapshot(ctx, record.Provenance.Collection, apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{probeRow}})
 	if err != nil {
 		return fmt.Errorf("%w: metadata policy probe: %v", secureread.ErrSnapshotPolicyUnexpressible, err)
 	}

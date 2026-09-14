@@ -232,8 +232,8 @@ func TestWritePostHogConfigToFile_CreateError(t *testing.T) {
 	_, restore := withTempConfig(t, "")
 	defer restore()
 
-	err := writePostHogConfigToFile(nil, posthogConfig{ApiKey: "k", DistinctID: "d"}) //nolint:staticcheck
-	assert.NoError(t, err)                                                            // function always returns nil
+	err := writePostHogConfigToFile(context.TODO(), posthogConfig{ApiKey: "k", DistinctID: "d"})
+	assert.NoError(t, err) // function always returns nil
 }
 
 // --- readPostHogConfig: file not found ---

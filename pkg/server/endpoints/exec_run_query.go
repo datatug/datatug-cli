@@ -51,7 +51,18 @@ func runQueryHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // computeRunQuery is runQueryHandler's testable core.
+type runQueryOptions struct {
+	// rowLimit lets an internal caller use its own safety bound without
+	// changing the public ExecutionRequest limit contract. Zero keeps the
+	// public exec/run_query bound.
+	rowLimit int
+}
+
 func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (apicontract.Result, error) {
+	return computeRunQueryWithOptions(ctx, req, runQueryOptions{})
+}
+
+func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRequest, options runQueryOptions) (apicontract.Result, error) {
 	if err := validateScope(apicontract.Scope{StoreID: req.StoreID, Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}); err != nil {
 		return apicontract.Result{}, err
 	}
@@ -327,10 +338,12 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 		requestedLimit = *req.Limit
 	}
 	limit := boundLimit(requestedLimit)
-	truncated := false
-	if len(result.Rows) > limit {
+	if options.rowLimit > 0 {
+		limit = options.rowLimit
+	}
+	truncated := len(result.Rows) > limit
+	if truncated {
 		result.Rows = result.Rows[:limit]
-		truncated = true
 	}
 
 	recordset, err := toContractRecordset(result)

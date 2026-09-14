@@ -24,7 +24,7 @@ func registerRoutes(path string, router router, wrapper wrapper, writeOnly bool,
 	dbServerRoutes(path, router, wrapper, writeOnly, caps)
 	entitiesRoutes(path, router, wrapper, writeOnly, caps)
 	recordsetsRoutes(path, router, wrapper, writeOnly, caps)
-	executeRoutes(path, router, wrapper, writeOnly)
+	executeRoutes(path, router, wrapper, writeOnly, caps)
 	semanticRoutes(path, router, wrapper, writeOnly)
 	executionRoutes(path, router, wrapper, writeOnly)
 	incidentRoutes(path, router, wrapper, writeOnly, caps)
@@ -178,10 +178,11 @@ func recordsetsRoutes(path string, router router, wrap wrapper, writeOnly bool, 
 // name is, by stripping the resolved source's own default schema at
 // query-construction time (see pkg/api.PolicyCollectionName) — a non-default
 // schema is never stripped and keeps its own distinct policy identity.
-func executeRoutes(path string, router router, wrap wrapper, writeOnly bool) {
+func executeRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
 	if !writeOnly {
 		route(router, wrap, http.MethodPost, path+"/exec/execute_commands", executeCommandsHandler)
 		route(router, wrap, http.MethodGet, path+"/exec/select", executeSelectHandler)
 		route(router, wrap, http.MethodPost, path+"/exec/run_query", runQueryHandler)
+		route(router, wrap, http.MethodPost, path+"/compare", compareHandler(caps))
 	}
 }

@@ -51,6 +51,7 @@ func DatatugCommand() *cobra.Command {
 		dbCommand(),
 		entityCommand(),
 		executionCommand(),
+		compareCommand(),
 		incidentCommand(),
 	)
 	return root

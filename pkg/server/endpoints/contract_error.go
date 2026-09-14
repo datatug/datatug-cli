@@ -121,6 +121,13 @@ func newSourceUnavailable(message string) *contractError {
 	return newContractError(apicontract.ErrCodeSourceUnavailable, message, "source")
 }
 
+// newSnapshotExpired reports that historical row bytes required for a
+// comparison are no longer readable. It never falls back to a fingerprint or
+// an empty recordset.
+func newSnapshotExpired(message string) *contractError {
+	return newContractError(apicontract.ErrCodeSnapshotExpired, message, "execution")
+}
+
 // newResponseTooLarge builds a 413 RESPONSE_TOO_LARGE error — dal-go/
 // dalgo2http v0.2.0's ErrResponseTooLarge (a live HTTP source's response
 // exceeded the adapter's 2 MiB cap) maps here; see exec_run_query.go.

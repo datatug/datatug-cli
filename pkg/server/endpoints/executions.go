@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -327,6 +328,10 @@ func executionReadError(err error) error {
 }
 
 func authorizeExecutionRecord(r *http.Request, record apicontract.ExecutionRecord) error {
+	return authorizeExecutionRecordContext(r.Context(), record)
+}
+
+func authorizeExecutionRecordContext(ctx context.Context, record apicontract.ExecutionRecord) error {
 	executor, ok := api.SecureExecutor()
 	if !ok {
 		return fmt.Errorf("server has no policy-enforced session configured")
@@ -344,7 +349,7 @@ func authorizeExecutionRecord(r *http.Request, record apicontract.ExecutionRecor
 		columns[i] = apicontract.Column{Name: field.Column, Type: string(apicontract.ValueTypeString)}
 		probeRow[i] = apicontract.NewStringValue("datatug-policy-probe")
 	}
-	result, err := executor.RunSnapshot(r.Context(), record.Provenance.Collection, apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{probeRow}})
+	result, err := executor.RunSnapshot(ctx, record.Provenance.Collection, apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{probeRow}})
 	if err != nil {
 		return fmt.Errorf("%w: metadata policy probe: %v", secureread.ErrSnapshotPolicyUnexpressible, err)
 	}

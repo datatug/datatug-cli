@@ -51,7 +51,7 @@ func TestWriteContractResponse_CORSOriginOnSuccessAndError(t *testing.T) {
 }
 
 // decodeErrorFixture reads name from datatug-core's own frozen fixture set
-// (pkg/apicontract/fixtures, v0.26.0 — the schema authority S78 adopted)
+// (pkg/apicontract/fixtures, v0.34.0 — the schema authority this package uses)
 // and decodes it as an apicontract.ErrorEnvelope, failing the test on any
 // error — a missing/renamed fixture is itself a finding this stream's
 // report would need to surface, not a silently-skipped case.
@@ -95,6 +95,7 @@ func TestContractError_MatchesCoreFixtureShape(t *testing.T) {
 		{"error_not_found.json", newNotFound("unknown project")},
 		{"error_stale_context.json", newStaleContext("call agent-info again")},
 		{"error_source_unavailable.json", newSourceUnavailable("no eligible source")},
+		{"error_snapshot_expired.json", newSnapshotExpired("the retained row snapshot expired")},
 		{"error_timeout.json", newTimeout("execution exceeded the timeout")},
 		{"error_target_required.json", newTargetRequired("choose a source for this query", []apicontract.TargetOption{
 			{Source: "chinook-local", Label: "Local Chinook"},
@@ -149,6 +150,7 @@ func TestContractError_EveryErrorCodeHasAFixtureOrADocumentedGap(t *testing.T) {
 		apicontract.ErrCodeNotFound:                      true,
 		apicontract.ErrCodeStaleContext:                  true,
 		apicontract.ErrCodeSourceUnavailable:             true,
+		apicontract.ErrCodeSnapshotExpired:               true,
 		apicontract.ErrCodeTimeout:                       true,
 		// queries/capture's REVISION_CONFLICT; its fixture arrives with the
 		// datatug-core release that adds the code.

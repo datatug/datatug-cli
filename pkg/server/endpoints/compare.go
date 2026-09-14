@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/comparecache"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/incidents"
@@ -140,12 +141,27 @@ func computeCompareWith(ctx context.Context, req apicontract.CompareRequest, dep
 	if req.Limit != nil {
 		limit = *req.Limit
 	}
-	result, err := recordsetcompare.Compare(left.recordset, right.recordset, left.receipt, right.receipt, recordsetcompare.Options{
+	options := recordsetcompare.Options{
 		Key: append([]string(nil), req.Key...), DistributionColumn: req.DistributionColumn, Limit: limit,
+	}
+	session, cacheErr := api.BeginCompareCache(ctx, comparecache.BeginRequest{
+		QueryID: req.QueryID, Left: left.receipt.Execution, Right: right.receipt.Execution,
 	})
+	if cacheErr != nil {
+		api.LogCompareCacheSkip("begin", cacheErr)
+	} else if session != nil {
+		options.Observer = session.Observer()
+		defer session.Abort()
+	}
+	result, err := recordsetcompare.Compare(left.recordset, right.recordset, left.receipt, right.receipt, options)
 	if err != nil {
 		leftReceipt, rightReceipt := left.receipt, right.receipt
 		return apicontract.CompareResult{}, &compareComputationError{cause: newInvalidRequest("compare", err.Error()), left: &leftReceipt, right: &rightReceipt}
+	}
+	if session != nil {
+		if commitErr := session.Commit(result); commitErr != nil {
+			api.LogCompareCacheSkip("commit", commitErr)
+		}
 	}
 	if req.Incident != nil {
 		comparison := incidents.ComparisonRef{Left: incidents.ExecutionRef(result.Left.Execution), Right: incidents.ExecutionRef(result.Right.Execution)}

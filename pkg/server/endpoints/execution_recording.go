@@ -104,6 +104,7 @@ func persistExecution(ctx context.Context, input executionInput, result apicontr
 		hash := sha256.Sum256([]byte(input.DTQL))
 		dtqlHash = hex.EncodeToString(hash[:])
 	}
+	resultComplete := !result.Truncated
 	record := apicontract.ExecutionRecord{
 		Ref:     ref,
 		Scope:   apicontract.ExecutionRecordScope{StoreID: input.SourceStoreID, Project: input.Project, Environment: input.Environment},
@@ -114,7 +115,7 @@ func persistExecution(ctx context.Context, input executionInput, result apicontr
 		DurationMS: max(time.Since(started).Milliseconds(), 0), Limitations: normalizeLimitations(result.Limitations),
 		Provenance:       result.Provenance,
 		AuthorizedFields: authorizedFields(input.SourceStoreID, input.Project, input.Environment, result, input.SemanticFields),
-		RowCount:         len(result.Recordset.Rows), ResultFingerprint: fingerprint,
+		RowCount:         len(result.Recordset.Rows), ResultFingerprint: fingerprint, ResultComplete: &resultComplete,
 		Incident: input.Incident, Measurements: normalizeMeasurements(input.Measurements),
 	}
 	if input.Snapshot {

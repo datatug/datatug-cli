@@ -162,6 +162,49 @@ func TestRecordedRunQueryListShowAndSnapshotJourney(t *testing.T) {
 	}
 }
 
+func TestRecordedRunQueryPersistsArbitraryLimitAsIncomplete(t *testing.T) {
+	projectDir, projectID := writeRunQueryTestProject(t)
+	queryDir := filepath.Join(projectDir, "queries", "customers")
+	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.json"), `{"id":"customer-invoices","type":"DTQL"}`)
+	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.dtql"), "from:\n  name: Invoice\n")
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	configureExecutionEvidence(t, projectID, projectDir)
+	limit := 100
+	req := apicontract.ExecutionRequest{
+		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
+		QueryID: "customers/customer-invoices", Parameters: map[string]apicontract.TypedValueOrSet{}, BindingOrigins: []apicontract.BindingOriginEntry{},
+		Mode: apicontract.ProvenanceModeLive, Limit: &limit, Record: true, Snapshot: true,
+	}
+
+	result, err := computeRunQuery(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Truncated || len(result.Recordset.Rows) != limit || result.Execution == nil {
+		t.Fatalf("limited result = rows:%d truncated:%v execution:%v", len(result.Recordset.Rows), result.Truncated, result.Execution)
+	}
+	store, err := api.ExecutionEvidenceStoreByID(projectID, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := store.Execution(context.Background(), *result.Execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.ResultComplete == nil || *record.ResultComplete {
+		t.Fatalf("resultComplete = %v, want explicit false", record.ResultComplete)
+	}
+	request := apicontract.CompareRequest{
+		SecurityContextID: scope.SecurityContextID, QueryID: req.QueryID, Key: []string{"InvoiceId"},
+	}
+	side := apicontract.CompareSideSpec{Kind: apicontract.CompareSideRecord, Execution: result.Execution}
+	_, err = loadCompareRecordSide(context.Background(), request, side)
+	var contractErr *contractError
+	if !errors.As(err, &contractErr) || contractErr.Code != apicontract.ErrCodeSourceUnavailable {
+		t.Fatalf("record replay error = %v, want SOURCE_UNAVAILABLE", err)
+	}
+}
+
 func TestExpiredSnapshotStillRechecksCurrentCollectionAccess(t *testing.T) {
 	var req apicontract.ExecutionRequest
 	decodeRequestFixture(t, "execution_request_adhoc.json", &req)

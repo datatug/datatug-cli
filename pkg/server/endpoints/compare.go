@@ -26,6 +26,7 @@ type compareSideData struct {
 
 type compareDependencies struct {
 	executeSide func(context.Context, apicontract.CompareRequest, apicontract.CompareSideSpec) (compareSideData, error)
+	resolveKey  func(context.Context, apicontract.CompareRequest) ([]string, error)
 	preflight   func(context.Context, apicontract.CompareRequest) (*incidents.ComparisonRef, error)
 	appendRun   func(context.Context, apicontract.CompareRequest, incidents.ComparisonRef) error
 }
@@ -70,6 +71,7 @@ func compareHandler(caps Capabilities) http.HandlerFunc {
 		}
 		result, err := computeCompareWith(r.Context(), req, compareDependencies{
 			executeSide: executeCompareSide,
+			resolveKey:  resolveCompareKey,
 			preflight:   preflightCompareIncident,
 			appendRun:   appendCompareRun,
 		})
@@ -85,11 +87,18 @@ func computeCompareWith(ctx context.Context, req apicontract.CompareRequest, dep
 	if err := req.Validate(); err != nil {
 		return apicontract.CompareResult{}, requestValidationError(err)
 	}
-	// compare.run persists the deterministic key contract. Reject an incident
-	// compare before preflight or either side executes when that event could not
-	// be validly appended.
-	if req.Incident != nil && len(req.Key) == 0 {
-		return apicontract.CompareResult{}, newInvalidRequest("key", "key is required when persisting an incident comparison")
+	if len(req.Key) == 0 {
+		if req.Left.Kind == apicontract.CompareSideRecord || req.Right.Kind == apicontract.CompareSideRecord {
+			return apicontract.CompareResult{}, newInvalidRequest("key", "an explicit key is required when comparing an execution record")
+		}
+		if deps.resolveKey == nil {
+			return apicontract.CompareResult{}, newInvalidRequest("key", "the live query has no resolvable mapped key")
+		}
+		key, err := deps.resolveKey(ctx, req)
+		if err != nil {
+			return apicontract.CompareResult{}, err
+		}
+		req.Key = key
 	}
 	if deps.executeSide == nil {
 		return apicontract.CompareResult{}, newContractError(codeInternal, "compare side executor is not configured", "")

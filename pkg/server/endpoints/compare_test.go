@@ -267,6 +267,34 @@ func TestReadableCompareSnapshotMapsEveryUnavailableStateToSnapshotExpired(t *te
 	}
 }
 
+func TestReadableCompareSnapshotAccepts847RowsAndRejectsInputCapOverflow(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	recordset := apicontract.Recordset{
+		Columns: []apicontract.Column{{Name: "id", Type: string(apicontract.ValueTypeInteger)}},
+		Rows:    make([][]apicontract.TypedValue, 847),
+	}
+	for index := range recordset.Rows {
+		recordset.Rows[index] = []apicontract.TypedValue{apicontract.NewIntegerValue(fmt.Sprint(index + 1))}
+	}
+	response := apicontract.SnapshotReadResponse{
+		SnapshotState: apicontract.SnapshotState{Availability: apicontract.SnapshotAvailable, ChangedAt: now},
+		Recordset:     &recordset,
+	}
+
+	retained, err := readableCompareSnapshot(response, nil)
+	require.NoError(t, err)
+	require.Len(t, retained.Rows, 847)
+
+	response.Recordset.Rows = make([][]apicontract.TypedValue, compareInputMaximumRows+1)
+	for index := range response.Recordset.Rows {
+		response.Recordset.Rows[index] = []apicontract.TypedValue{apicontract.NewIntegerValue(fmt.Sprint(index + 1))}
+	}
+	_, err = readableCompareSnapshot(response, nil)
+	var contractErr *contractError
+	require.ErrorAs(t, err, &contractErr)
+	require.Equal(t, apicontract.ErrCodeSourceUnavailable, contractErr.Code)
+}
+
 func validIncidentCompareRequest() apicontract.CompareRequest {
 	incident := incidents.IncidentRef{StoreID: "ops", IncidentID: "INC-1"}
 	return apicontract.CompareRequest{

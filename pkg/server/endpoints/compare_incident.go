@@ -87,13 +87,14 @@ func compareIncidentState(ctx context.Context, req apicontract.CompareRequest) (
 	if req.Incident == nil {
 		return nil, incidents.Incident{}, nil, newInvalidRequest("incident", "incident is required")
 	}
-	projectID := compareProjectID(req.Left)
-	if projectID == "" {
-		projectID = compareProjectID(req.Right)
-	}
-	if projectID == "" {
+	leftProject, rightProject := compareProjectID(req.Left), compareProjectID(req.Right)
+	if leftProject == "" || rightProject == "" {
 		return nil, incidents.Incident{}, nil, newInvalidRequest("incident", "cannot resolve incident project")
 	}
+	if leftProject != rightProject {
+		return nil, incidents.Incident{}, nil, newInvalidRequest("incident", "incident comparison sides must belong to one project")
+	}
+	projectID := leftProject
 	store, err := api.IncidentStoreByID(projectID, req.Incident.StoreID)
 	if err != nil {
 		return nil, incidents.Incident{}, nil, newNotFound("incident store not found")

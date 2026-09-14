@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 	"github.com/datatug/datatug-core/pkg/incidents"
 	"github.com/spf13/cobra"
 )
+
+const compareAgentRequestTimeout = 75 * time.Second
 
 const (
 	compareAgentFlag        = "agent"
@@ -68,17 +71,17 @@ func runCompareCommand(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	leftText, _ := cmd.Flags().GetString(compareLeftFlag)
+	rightText, _ := cmd.Flags().GetString(compareRightFlag)
 	project, _ := cmd.Flags().GetString(compareProjectFlag)
-	if project == "" {
+	if project == "" && (compareSideNeedsProject(leftText) || compareSideNeedsProject(rightText)) {
 		if len(info.Projects) != 1 {
-			return Exit("--project is required when the agent does not serve exactly one project", exitCodeUsage)
+			return Exit("--project is required for env or facts sides when the agent does not serve exactly one project", exitCodeUsage)
 		}
 		project = info.Projects[0].ID
 	}
 	storeID, _ := cmd.Flags().GetString(compareStoreFlag)
 	defaultEnvironment, _ := cmd.Flags().GetString(compareEnvironmentFlag)
-	leftText, _ := cmd.Flags().GetString(compareLeftFlag)
-	rightText, _ := cmd.Flags().GetString(compareRightFlag)
 	left, err := parseCompareSide(leftText, project, storeID, defaultEnvironment)
 	if err != nil {
 		return Exit("--left: "+err.Error(), exitCodeUsage)
@@ -106,6 +109,10 @@ func runCompareCommand(cmd *cobra.Command, _ []string) error {
 			return Exit("--incident: "+parseErr.Error(), exitCodeUsage)
 		}
 		request.Incident = &incident
+		leftProject, rightProject := compareSideProject(left), compareSideProject(right)
+		if leftProject == "" || rightProject == "" || leftProject != rightProject {
+			return Exit("--incident requires both sides to belong to one unambiguous project", exitCodeUsage)
+		}
 	}
 	if err := request.Validate(); err != nil {
 		return Exit(err.Error(), exitCodeUsage)
@@ -139,6 +146,30 @@ func runCompareCommand(cmd *cobra.Command, _ []string) error {
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s -> %s: +%d -%d ~%d, %d unchanged\n",
 		result.Left.Execution.ExecutionID, result.Right.Execution.ExecutionID,
 		result.Summary.Added, result.Summary.Removed, result.Summary.Changed, result.Summary.Unchanged)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "key: %s\n", strings.Join(result.Key, ", "))
+	writeCompareRows(cmd.OutOrStdout(), "added", result.Columns, result.Key, result.Added)
+	writeCompareRows(cmd.OutOrStdout(), "removed", result.Columns, result.Key, result.Removed)
+	for _, row := range result.Changed {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "changed [%s]:", formatCompareKey(result.Key, row.Key))
+		for _, change := range row.Columns {
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), " %s %s -> %s", change.Column, formatCompareValue(change.Left), formatCompareValue(change.Right))
+		}
+		_, _ = fmt.Fprintln(cmd.OutOrStdout())
+	}
+	if result.Distribution != nil {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "distribution %s:\n", result.Distribution.Column)
+		for _, value := range result.Distribution.Values {
+			ratio := "null"
+			if value.Ratio != nil {
+				ratio = strconv.FormatFloat(*value.Ratio, 'g', -1, 64)
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  %s: left %d (%.2f%%), right %d (%.2f%%), ratio %s\n",
+				formatCompareValue(value.Value), value.Left.Count, value.Left.Pct, value.Right.Count, value.Right.Pct, ratio)
+		}
+		if result.Distribution.Truncated {
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "  distribution values are truncated")
+		}
+	}
 	if result.PolicyLimited {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "comparison is limited by the current access policy")
 	}
@@ -146,6 +177,59 @@ func runCompareCommand(cmd *cobra.Command, _ []string) error {
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "diff rows are truncated; summary counts remain complete")
 	}
 	return nil
+}
+
+func compareSideNeedsProject(value string) bool {
+	kind, _, ok := strings.Cut(value, "=")
+	return ok && (kind == "env" || kind == "facts")
+}
+
+func compareSideProject(side apicontract.CompareSideSpec) string {
+	if side.Execution != nil {
+		return side.Execution.ProjectID
+	}
+	return side.Project
+}
+
+func writeCompareRows(w io.Writer, label string, columns []apicontract.Column, keyNames []string, rows []apicontract.CompareRow) {
+	for _, row := range rows {
+		_, _ = fmt.Fprintf(w, "%s [%s]:", label, formatCompareKey(keyNames, row.Key))
+		for i, value := range row.Row {
+			if i < len(columns) {
+				_, _ = fmt.Fprintf(w, " %s=%s", columns[i].Name, formatCompareValue(value))
+			}
+		}
+		_, _ = fmt.Fprintln(w)
+	}
+}
+
+func formatCompareKey(names []string, values []apicontract.TypedValue) string {
+	parts := make([]string, 0, len(values))
+	for i, value := range values {
+		name := fmt.Sprintf("key%d", i+1)
+		if i < len(names) {
+			name = names[i]
+		}
+		parts = append(parts, name+"="+formatCompareValue(value))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatCompareValue(value apicontract.TypedValue) string {
+	switch value.Type {
+	case apicontract.ValueTypeString, apicontract.ValueTypeDate, apicontract.ValueTypeDatetime:
+		return strconv.Quote(value.Str)
+	case apicontract.ValueTypeInteger, apicontract.ValueTypeDecimal:
+		return value.Str
+	case apicontract.ValueTypeNumber:
+		return strconv.FormatFloat(value.Num, 'g', -1, 64)
+	case apicontract.ValueTypeBoolean:
+		return strconv.FormatBool(value.Bool)
+	case apicontract.ValueTypeNull:
+		return "null"
+	default:
+		return "<invalid>"
+	}
 }
 
 func parseCompareSide(value, project, storeID, defaultEnvironment string) (apicontract.CompareSideSpec, error) {
@@ -196,7 +280,11 @@ func newAgentHTTPClient(cmd *cobra.Command, flagName string) (agentHTTPClient, a
 		host, port := resolveServeAddr("", 0, settings)
 		agent = fmt.Sprintf("http://%s:%d", host, port)
 	}
-	client := agentHTTPClient{baseURL: strings.TrimRight(agent, "/"), client: &http.Client{Timeout: 30 * time.Second}}
+	// Compare may execute two sides sequentially, each using the server's
+	// valid 30-second execution budget, followed by snapshot persistence and
+	// an optional incident append. Preserve caller cancellation while allowing
+	// that complete server-side budget to finish.
+	client := agentHTTPClient{baseURL: strings.TrimRight(agent, "/"), client: &http.Client{Timeout: compareAgentRequestTimeout}}
 	raw, status, err := client.get(cmd.Context(), "/datatug/agent-info")
 	if err != nil {
 		return agentHTTPClient{}, apicontract.AgentInfo{}, err

@@ -1,7 +1,11 @@
 package endpoints
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,8 +15,11 @@ import (
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/incidents"
 	"github.com/datatug/datatug-core/pkg/investigation"
+	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/stretchr/testify/require"
 )
 
@@ -60,9 +67,23 @@ func TestCompareFactsUsesOneNativeSQLiteSetExecutionPerSide(t *testing.T) {
 		MutationID: "create-compare-facts", StoreID: "ops", UID: "compare-facts", Title: "Compare cohorts", At: time.Now().UTC(),
 		Reporter:       incidents.Actor{Kind: incidents.ActorHuman, ID: "alice", Via: incidents.ActorViaAPI},
 		PrimaryProject: projectScope,
+		Projects: []incidents.ProjectRef{
+			{StoreID: api.LocalStoreID, ProjectID: "foreign-project", Environment: scope.Environment},
+			{StoreID: api.LocalStoreID, ProjectID: projectID, Environment: "foreign-environment"},
+		},
 		CanonicalContext: incidents.CanonicalContext{Facts: []investigation.Fact{
 			fact("affected-5", "5", investigation.FactRoleAffected),
 			fact("control-6", "6", investigation.FactRoleHealthyControl),
+			func() investigation.Fact {
+				foreign := fact("affected-foreign-project", "7", investigation.FactRoleAffected)
+				foreign.Scope = &investigation.ProjectScope{StoreID: api.LocalStoreID, ProjectID: "foreign-project", Environment: scope.Environment}
+				return foreign
+			}(),
+			func() investigation.Fact {
+				foreign := fact("affected-foreign-environment", "8", investigation.FactRoleAffected)
+				foreign.Scope = &investigation.ProjectScope{StoreID: api.LocalStoreID, ProjectID: projectID, Environment: "foreign-environment"}
+				return foreign
+			}(),
 		}},
 	})
 	require.NoError(t, err)
@@ -230,6 +251,125 @@ scopes:
 	}
 }
 
+func TestCompareHandlerInfersMappedKeyForLiveEnvironmentSides(t *testing.T) {
+	projectDir, projectID := writeRunQueryTestProject(t)
+	queryDir := filepath.Join(projectDir, "queries", "customers")
+	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.json"), `{
+        "id":"customer-invoices","title":"Customers","type":"DTQL",
+        "recordsets":[{
+          "id":"customers","title":"Customers","type":"recordset",
+          "primaryKey":{"name":"PK_Customer","columns":["CustomerId"]},
+          "columns":[
+            {"name":"CustomerId","type":"number","meta":{"entity":"Customer","field":"ID"}},
+            {"name":"FirstName","type":"string","meta":{"entity":"Customer","field":"FirstName"}}
+          ]
+        }]
+    }`)
+	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.dtql"), "from:\n  name: Customer\n")
+	scope := configureSemanticSessionWithCapabilities(t, projectDir, projectID, "alice", []string{"admin"}, api.Capabilities{
+		SnapshotPolicies: map[string]api.SnapshotProjectPolicy{
+			projectID: {Sources: map[string]api.SnapshotSourcePolicy{semanticTestSource: {Allow: true, MaskedColumns: []string{"Email"}}}},
+		},
+	})
+	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
+	require.NoError(t, api.ConfigureExecutionEvidence(map[string]string{projectID: projectDir}, nil, executionstore.Options{PrivateDir: t.TempDir()}))
+	t.Cleanup(func() { require.NoError(t, api.CloseExecutionEvidence()) })
+	request := apicontract.CompareRequest{
+		SecurityContextID: scope.SecurityContextID, QueryID: "customers/customer-invoices",
+		Left:  apicontract.CompareSideSpec{Kind: apicontract.CompareSideScope, StoreID: api.LocalStoreID, Project: projectID, Environment: scope.Environment},
+		Right: apicontract.CompareSideSpec{Kind: apicontract.CompareSideScope, StoreID: api.LocalStoreID, Project: projectID, Environment: scope.Environment},
+	}
+	body, err := json.Marshal(request)
+	require.NoError(t, err)
+	httpRequest := httptest.NewRequest(http.MethodPost, "/datatug/compare", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+
+	compareHandler(Capabilities{})(response, httpRequest)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var result apicontract.CompareResult
+	require.NoError(t, apicontract.DecodeStrict(response.Body.Bytes(), &result))
+	require.Equal(t, []string{"CustomerId"}, result.Key)
+	require.Equal(t, 59, result.Summary.Unchanged)
+	require.NotEqual(t, result.Left.Execution, result.Right.Execution)
+	require.True(t, result.Left.Reproducible)
+	require.Contains(t, result.Left.Limitations, apicontract.Limitation{Policy: "snapshot-retention", HiddenColumns: []string{"Email"}})
+	for _, column := range result.Columns {
+		require.NotEqual(t, "Email", column.Name)
+	}
+}
+
+func TestCompareFactsUsesOneNativeInGitDBSetExecutionPerSide(t *testing.T) {
+	projectDir := t.TempDir()
+	projectID := "compare-facts-ingitdb"
+	filestore.SetProjectPath(projectID, projectDir)
+	writeSupportNotesIngitdb(t, projectDir)
+	store := filestore.NewProjectStore(projectID, projectDir)
+	environment := &datatug.Environment{}
+	environment.ID = "prod"
+	require.NoError(t, store.SaveEnvironment(context.Background(), environment))
+	catalog := &datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{Driver: "ingitdb", Path: filepath.Join(projectDir, "data", "ingitdb"), DbModel: "support-notes"}}
+	catalog.ID = "support-notes-prod"
+	require.NoError(t, store.SaveEnvDbCatalog(context.Background(), "prod", "ingitdb:0", catalog.ID, catalog))
+	queryDir := filepath.Join(projectDir, "queries")
+	mustMkdirAll(t, queryDir)
+	mustWriteFile(t, filepath.Join(queryDir, "notes.query.json"), `{
+      "id":"notes","title":"Notes by customer","type":"DTQL",
+      "parameters":[{"id":"CustomerId","type":"integer","isRequired":true,"isMultiValue":true,"meta":{"entity":"Customer","field":"CustomerId"}}]
+    }`)
+	mustWriteFile(t, filepath.Join(queryDir, "notes.query.dtql"), `from:
+  name: support-notes
+where:
+  op: In
+  left: {field: CustomerId}
+  right: {param: CustomerId}
+`)
+	session, err := secureread.NewSession(secureread.SessionOptions{As: "alice", NoPolicies: true})
+	require.NoError(t, err)
+	pathsByID := map[string]string{projectID: projectDir}
+	api.ConfigureSecureSession(session, pathsByID, api.Capabilities{SnapshotPolicies: map[string]api.SnapshotProjectPolicy{
+		projectID: {Sources: map[string]api.SnapshotSourcePolicy{"support-notes": {Allow: true}}},
+	}})
+	storage.NewDatatugStore = func(string) (storage.Store, error) { return filestore.NewStore("files", pathsByID) }
+	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
+	repository := t.TempDir()
+	require.NoError(t, api.ConfigureExecutionEvidence(map[string]string{projectID: projectDir}, []incidentstore.ConfiguredStore{{
+		StoreID: "ops", Kind: incidents.StoreLocationDedicatedRepository, Repository: repository,
+	}}, executionstore.Options{PrivateDir: t.TempDir()}))
+	t.Cleanup(func() { require.NoError(t, api.CloseExecutionEvidence()) })
+	scope := investigation.ProjectScope{StoreID: api.LocalStoreID, ProjectID: projectID, Environment: "prod"}
+	fact := func(id, value, role string) investigation.Fact {
+		return investigation.Fact{ID: id, Entity: "Customer", Field: "CustomerId", Value: investigation.NewIntegerValue(value), Origin: investigation.FactOriginManual,
+			Enabled: true, Role: role, Layer: investigation.FactLayerCanonical, Scope: &scope}
+	}
+	incidentStore, err := api.IncidentStoreByID(projectID, "ops")
+	require.NoError(t, err)
+	created, err := incidentStore.Create(context.Background(), incidents.CreateMutation{
+		MutationID: "create-ingitdb-compare", StoreID: "ops", UID: "ingitdb-compare", Title: "Compare inGitDB cohorts", At: time.Now().UTC(),
+		Reporter: incidents.Actor{Kind: incidents.ActorHuman, ID: "alice", Via: incidents.ActorViaAPI}, PrimaryProject: scope,
+		CanonicalContext: incidents.CanonicalContext{Facts: []investigation.Fact{
+			fact("affected-1", "1", investigation.FactRoleAffected), fact("control-2", "2", investigation.FactRoleHealthyControl),
+		}},
+	})
+	require.NoError(t, err)
+	request := apicontract.CompareRequest{
+		SecurityContextID: api.SecurityContextID(), QueryID: "notes", Incident: &created.Projection.Ref, MutationID: "compare-ingitdb", Key: []string{"CustomerId"},
+		Left:  apicontract.CompareSideSpec{Kind: apicontract.CompareSideFacts, StoreID: api.LocalStoreID, Project: projectID, Environment: "prod", CohortRole: apicontract.CompareCohortAffected},
+		Right: apicontract.CompareSideSpec{Kind: apicontract.CompareSideFacts, StoreID: api.LocalStoreID, Project: projectID, Environment: "prod", CohortRole: apicontract.CompareCohortControl},
+	}
+	result, err := computeCompareWith(context.Background(), request, compareDependencies{executeSide: executeCompareSide, resolveKey: resolveCompareKey, preflight: preflightCompareIncident, appendRun: appendCompareRun})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Summary.Added)
+	require.Equal(t, 1, result.Summary.Removed)
+	require.Equal(t, 1, result.Left.RowCount)
+	require.Equal(t, 1, result.Right.RowCount)
+	leftEvidence, err := api.ExecutionEvidenceStoreByID(projectID, "ops")
+	require.NoError(t, err)
+	leftRecord, err := leftEvidence.Execution(context.Background(), result.Left.Execution)
+	require.NoError(t, err)
+	require.Equal(t, [][]string{{"affected-1"}}, leftRecord.BindingsApplied[0].ValueFactIDs)
+}
+
 func TestProveNativeFactsBindingFailsClosedForNonDTQLBeforeExecution(t *testing.T) {
 	projectDir, projectID := writeRunQueryTestProject(t)
 	queryPath := filepath.Join(projectDir, "queries", "customers", "customer-invoices.query.json")
@@ -266,6 +406,36 @@ where:
     - op: "=="
       left: {field: Country}
       right: {value: Brazil}
+`)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
+
+	_, err := proveNativeFactsBinding(context.Background(), "customers/customer-invoices", apicontract.CompareSideSpec{
+		Kind: apicontract.CompareSideFacts, StoreID: api.LocalStoreID, Project: projectID,
+		Environment: scope.Environment, CohortRole: apicontract.CompareCohortAffected,
+	}, "Customer", "CustomerId")
+	var contractErr *contractError
+	require.ErrorAs(t, err, &contractErr)
+	require.Equal(t, apicontract.ErrCodeSourceUnavailable, contractErr.Code)
+}
+
+func TestProveNativeFactsBindingRejectsAmbiguousInverseBinding(t *testing.T) {
+	projectDir, projectID := writeRunQueryTestProject(t)
+	queryDir := filepath.Join(projectDir, "queries", "customers")
+	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.json"), `{
+        "id":"customer-invoices","type":"DTQL",
+        "parameters":[{"id":"CustomerId","type":"integer","isRequired":true,"isMultiValue":true,"meta":{"entity":"Customer","field":"CustomerId"}}]
+    }`)
+	mustWriteFile(t, filepath.Join(queryDir, "customer-invoices.query.dtql"), `from:
+  name: Customer
+where:
+  and:
+    - op: In
+      left: {field: CustomerId}
+      right: {param: CustomerId}
+    - op: In
+      left: {param: CustomerId}
+      right: {field: CustomerId}
 `)
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })

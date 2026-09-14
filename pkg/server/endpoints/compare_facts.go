@@ -15,8 +15,8 @@ import (
 )
 
 // executeCompareFactsSide binds one current-policy-visible incident cohort to
-// one saved DTQL query parameter. It deliberately accepts only the structured
-// SQLite path whose parsed query proves an exact `field In $parameter` node.
+// one saved DTQL query parameter. It accepts only structured SQLite and
+// inGitDB paths whose parsed query proves an exact `field In $parameter` node.
 // HTTP templates and opaque SQL cannot provide that proof, so they fail before
 // computeRunQuery reaches a data source rather than looping or filtering rows.
 func executeCompareFactsSide(ctx context.Context, request apicontract.CompareRequest, side apicontract.CompareSideSpec) (compareSideData, error) {
@@ -119,8 +119,10 @@ func proveNativeFactsBinding(ctx context.Context, queryID string, side apicontra
 	if err != nil {
 		return "", err
 	}
-	if resolved.Kind != api.SourceKindSQL || !strings.HasPrefix(resolved.URL, "sqlite://") {
-		return "", newSourceUnavailable("facts comparison requires a structured SQLite source with native set binding")
+	nativeStructured := resolved.Kind == api.SourceKindSQL && strings.HasPrefix(resolved.URL, "sqlite://") ||
+		resolved.Kind == api.SourceKindInGitDB && strings.HasPrefix(resolved.URL, "ingitdb://")
+	if !nativeStructured {
+		return "", newSourceUnavailable("facts comparison requires a structured SQLite or inGitDB source with native set binding")
 	}
 	document, err := executionQueryDocument(side.Project, canonicalID, queryDef, "")
 	if err != nil {
@@ -162,6 +164,9 @@ func countNativeInBindings(condition dal.Condition, field, parameter string) (in
 		if value.Operator == dal.In && leftOK && left.Source() == "" && left.Name() == field && rightOK && right.Name == parameter {
 			return 1, true
 		}
+		if comparisonMentionsCohortBinding(value, field, parameter) {
+			return 0, false
+		}
 		return 0, true
 	case *dal.Comparison:
 		if value != nil {
@@ -186,4 +191,20 @@ func countNativeInBindings(condition dal.Condition, field, parameter string) (in
 		}
 	}
 	return 0, false
+}
+
+func comparisonMentionsCohortBinding(comparison dal.Comparison, field, parameter string) bool {
+	for _, expression := range []dal.Expression{comparison.Left, comparison.Right} {
+		switch value := expression.(type) {
+		case dal.FieldRef:
+			if value.Source() == "" && value.Name() == field {
+				return true
+			}
+		case dal.Param:
+			if value.Name == parameter {
+				return true
+			}
+		}
+	}
+	return false
 }

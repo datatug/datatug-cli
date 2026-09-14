@@ -12,6 +12,11 @@ import (
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
+// compareInputMaximumRows is deliberately independent from the 500-row
+// CompareResult diff-output cap and the facts cohort cap. It bounds the two
+// materialized inputs while admitting the normative 847-row replay case.
+const compareInputMaximumRows = 10_000
+
 func executeCompareSide(ctx context.Context, req apicontract.CompareRequest, side apicontract.CompareSideSpec) (compareSideData, error) {
 	switch side.Kind {
 	case apicontract.CompareSideScope:
@@ -43,18 +48,17 @@ func executeCompareLiveSide(
 	parameters map[string]apicontract.TypedValueOrSet,
 	origins []apicontract.BindingOriginEntry,
 ) (compareSideData, error) {
-	maxRows := apicontract.CompareMaximumLimit
 	execRequest := apicontract.ExecutionRequest{
 		StoreID: side.StoreID, Project: side.Project, Environment: side.Environment,
 		SecurityContextID: request.SecurityContextID, QueryID: request.QueryID,
 		Parameters: parameters, BindingOrigins: origins,
-		Mode: apicontract.ProvenanceModeLive, Limit: &maxRows,
+		Mode:     apicontract.ProvenanceModeLive,
 		Incident: request.Incident, Record: true, Snapshot: true,
 	}
 	if err := execRequest.Normalize(); err != nil {
 		return compareSideData{}, requestValidationError(err)
 	}
-	result, err := computeRunQuery(ctx, execRequest)
+	result, err := computeRunQueryWithOptions(ctx, execRequest, runQueryOptions{rowLimit: compareInputMaximumRows})
 	if err != nil {
 		return compareSideData{}, err
 	}
@@ -70,19 +74,46 @@ func executeCompareLiveSide(
 		return compareSideData{}, newContractError(codeInternal, "read persisted compare receipt", "")
 	}
 	reproducible := false
+	comparedRecordset := result.Recordset
+	limitations := normalizeLimitations(result.Limitations)
 	if record.SnapshotRef != "" {
 		if snapshot, snapshotErr := store.Snapshot(ctx, record.Ref, record.SnapshotRef); snapshotErr == nil {
-			reproducible = snapshot.SnapshotState.Availability == apicontract.SnapshotAvailable && snapshot.Recordset != nil
+			if snapshot.SnapshotState.Availability == apicontract.SnapshotAvailable && snapshot.Recordset != nil {
+				comparedRecordset = *snapshot.Recordset
+				reproducible = true
+				limitations = append(limitations, snapshotRetentionLimitations(result.Recordset, comparedRecordset)...)
+			}
 		}
 	}
+	if !reproducible {
+		limitations = append(limitations, apicontract.Limitation{Policy: "snapshot-retention-unavailable", HiddenColumns: []string{}})
+	}
 	receipt := apicontract.CompareSideReceipt{
-		Execution: record.Ref, ExecutedAt: record.ExecutedAt, RowCount: len(result.Recordset.Rows),
-		Limitations: normalizeLimitations(result.Limitations), Reproducible: reproducible,
+		Execution: record.Ref, ExecutedAt: record.ExecutedAt, RowCount: len(comparedRecordset.Rows),
+		Limitations: normalizeLimitations(limitations), Reproducible: reproducible,
 	}
 	if err := receipt.Validate(); err != nil {
 		return compareSideData{}, newContractError(codeInternal, "validate persisted compare receipt", "")
 	}
-	return compareSideData{recordset: result.Recordset, receipt: receipt, truncated: result.Truncated}, nil
+	return compareSideData{recordset: comparedRecordset, receipt: receipt, truncated: result.Truncated}, nil
+}
+
+func snapshotRetentionLimitations(executed, retained apicontract.Recordset) []apicontract.Limitation {
+	retainedColumns := make(map[string]struct{}, len(retained.Columns))
+	for _, column := range retained.Columns {
+		retainedColumns[column.Name] = struct{}{}
+	}
+	hidden := make([]string, 0, len(executed.Columns)-len(retained.Columns))
+	for _, column := range executed.Columns {
+		if _, ok := retainedColumns[column.Name]; !ok {
+			hidden = append(hidden, column.Name)
+		}
+	}
+	if len(hidden) == 0 {
+		return nil
+	}
+	sort.Strings(hidden)
+	return []apicontract.Limitation{{Policy: "snapshot-retention", HiddenColumns: hidden}}
 }
 
 func loadCompareRecordSide(ctx context.Context, request apicontract.CompareRequest, side apicontract.CompareSideSpec) (compareSideData, error) {
@@ -104,9 +135,6 @@ func loadCompareRecordSide(ctx context.Context, request apicontract.CompareReque
 	if record.QueryID == "" || record.QueryID != request.QueryID {
 		return compareSideData{}, newInvalidRequest("queryId", "record side was not produced by the requested query")
 	}
-	if record.RowCount >= apicontract.CompareMaximumLimit {
-		return compareSideData{}, newSourceUnavailable("the historical execution cannot prove that its retained rows are complete")
-	}
 	if record.SnapshotRef == "" {
 		return compareSideData{}, newSnapshotExpired("the execution has no retained row snapshot")
 	}
@@ -114,6 +142,9 @@ func loadCompareRecordSide(ctx context.Context, request apicontract.CompareReque
 	retained, err := readableCompareSnapshot(snapshot, err)
 	if err != nil {
 		return compareSideData{}, err
+	}
+	if record.ResultComplete == nil || !*record.ResultComplete {
+		return compareSideData{}, newSourceUnavailable("the historical execution cannot prove that its retained rows are complete")
 	}
 	executor, ok := api.SecureExecutor()
 	if !ok {
@@ -151,6 +182,12 @@ func readableCompareSnapshot(snapshot apicontract.SnapshotReadResponse, err erro
 	}
 	if snapshot.SnapshotState.Availability != apicontract.SnapshotAvailable || snapshot.Recordset == nil {
 		return apicontract.Recordset{}, newSnapshotExpired("the execution row snapshot is no longer retained")
+	}
+	if len(snapshot.Recordset.Rows) > compareInputMaximumRows {
+		return apicontract.Recordset{}, newSourceUnavailable("the retained execution exceeds the comparison input safety bound")
+	}
+	if snapshot.Truncated {
+		return apicontract.Recordset{}, newSourceUnavailable("the retained execution snapshot is incomplete")
 	}
 	return *snapshot.Recordset, nil
 }

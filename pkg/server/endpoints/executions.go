@@ -184,6 +184,12 @@ func computeExecutionSnapshot(r *http.Request) (apicontract.SnapshotReadResponse
 		}
 		return snapshot, nil
 	}
+	// The snapshot payload alone cannot upgrade a legacy execution whose
+	// completeness was never recorded. Expose false/unknown as truncated so
+	// clients fail closed rather than treating the retained rows as complete.
+	if record.ResultComplete == nil || !*record.ResultComplete {
+		snapshot.Truncated = true
+	}
 	// Available snapshots are authorized with their real recorded rows. A
 	// metadata-only preflight would incorrectly deny a valid current policy
 	// that projects away columns which RunSnapshot must instead remove.

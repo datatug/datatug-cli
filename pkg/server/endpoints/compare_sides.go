@@ -161,6 +161,7 @@ func loadCompareRecordSide(ctx context.Context, request apicontract.CompareReque
 		return compareSideData{}, newContractError(codeInternal, "shape filtered comparison snapshot", "")
 	}
 	limitations := append([]apicontract.Limitation(nil), record.Limitations...)
+	limitations = append(limitations, recordedSnapshotRetentionLimitations(record, retained)...)
 	limitations = append(limitations, toContractLimitations(filtered.Limitations)...)
 	limitations = normalizeLimitations(limitations)
 	receipt := apicontract.CompareSideReceipt{
@@ -171,6 +172,21 @@ func loadCompareRecordSide(ctx context.Context, request apicontract.CompareReque
 		return compareSideData{}, fmt.Errorf("validate record compare receipt: %w", err)
 	}
 	return compareSideData{recordset: *filtered.SnapshotRecordset, receipt: receipt}, nil
+}
+
+func recordedSnapshotRetentionLimitations(record apicontract.ExecutionRecord, retained apicontract.Recordset) []apicontract.Limitation {
+	retainedColumns := make(map[string]struct{}, len(retained.Columns))
+	for _, column := range retained.Columns {
+		retainedColumns[column.Name] = struct{}{}
+	}
+	for _, authorized := range record.AuthorizedFields {
+		if _, ok := retainedColumns[authorized.Column]; !ok {
+			// The later reader may not be allowed to know the omitted field's
+			// name. Report the retention restriction without disclosing it.
+			return []apicontract.Limitation{{Policy: "snapshot-retention", HiddenColumns: []string{}}}
+		}
+	}
+	return nil
 }
 
 func readableCompareSnapshot(snapshot apicontract.SnapshotReadResponse, err error) (apicontract.Recordset, error) {

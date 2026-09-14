@@ -297,6 +297,13 @@ func TestCompareHandlerInfersMappedKeyForLiveEnvironmentSides(t *testing.T) {
 	for _, column := range result.Columns {
 		require.NotEqual(t, "Email", column.Name)
 	}
+	recordRequest := apicontract.CompareRequest{
+		SecurityContextID: scope.SecurityContextID, QueryID: request.QueryID, Key: result.Key,
+	}
+	recordSide := apicontract.CompareSideSpec{Kind: apicontract.CompareSideRecord, Execution: &result.Left.Execution}
+	replayed, err := loadCompareRecordSide(context.Background(), recordRequest, recordSide)
+	require.NoError(t, err)
+	require.Contains(t, replayed.receipt.Limitations, apicontract.Limitation{Policy: "snapshot-retention", HiddenColumns: []string{}})
 }
 
 func TestCompareFactsUsesOneNativeInGitDBSetExecutionPerSide(t *testing.T) {

@@ -1,0 +1,84 @@
+package commands
+
+// specscore: feature/cli/install
+
+import (
+	"errors"
+
+	"github.com/spf13/cobra"
+
+	"github.com/strongo/cli-helpers/cliinstall/cobracmd"
+	"github.com/strongo/cli-helpers/selfupdate"
+)
+
+// installErrors implements cobracmd.ErrorMapper for datatug's own,
+// intentionally simple exit-code contract
+// (cli-install#req:host-owned-exit-codes), mirroring selfUpdateErrors: every
+// failure — a *cobracmd.UsageError (an invalid --format, or --all combined
+// with names), an unknown target name (selfupdate.KindUnknownTarget), a
+// missing per-user bin directory or an already-occupied destination
+// (selfupdate.KindNoInstallDir, selfupdate.KindDestinationExists), or any
+// failure kind shared with self-update — exits 1 via the same
+// commands.Exit/ExitCoder mechanism every other datatug command uses.
+//
+// Every new kind cli-install added is mapped in its own switch case, per
+// that REQ ("MUST map the three new kinds explicitly... MUST NOT let them
+// fall into a self-update default branch"), even though datatug's own exit
+// code for all of them is the same 1 the self-update default branch already
+// used: KindUnknownTarget's underlying error already names the unknown
+// target and lists valid catalog ids
+// (cli-install#req:unknown-target-refused), which is the "usage message"
+// datatug reports for it.
+type installErrors struct{}
+
+// Failure maps every install failure onto datatug's generic error exit
+// code, 1.
+//
+// A nil err is defended against even though cobracmd.ErrorMapper's own doc
+// comment says Failure "maps a non-nil command error": cliinstall/cobracmd
+// v0.19.0's runInstall calls mapFailure(opts, plan.Failure()) and
+// mapFailure(opts, result.Failure()) unconditionally, and
+// cliinstall.BatchResult.Failure() returns nil for a fully successful batch
+// (including a successful --dry-run with nothing to fail), so a host
+// mapper that assumes non-nil per that doc — as selfUpdateErrors does,
+// safely, because selfupdate/cobracmd never calls mapFailure with a
+// possibly-nil error — panics here on the ordinary success path. Feedback
+// for cli-helpers: mapFailure itself should short-circuit nil before
+// calling opts.Errors.Failure, matching what its own doc comment already
+// promises callers.
+func (installErrors) Failure(err error) error {
+	if err == nil {
+		return nil
+	}
+	var usage *cobracmd.UsageError
+	if errors.As(err, &usage) {
+		return Exit(err.Error(), 1)
+	}
+	switch selfupdate.KindOf(err) {
+	case selfupdate.KindUnknownTarget:
+		// The underlying error already lists valid ids — see the type doc
+		// comment above — so no extra usage text is added here.
+		return Exit(err.Error(), 1)
+	case selfupdate.KindNoInstallDir, selfupdate.KindDestinationExists:
+		return Exit(err.Error(), 1)
+	default:
+		return Exit(err.Error(), 1)
+	}
+}
+
+// InstallCommand returns the "install" command, built from
+// github.com/strongo/cli-helpers/cliinstall/cobracmd against datatug's own
+// catalog id (cli-install#req:host-identity-from-catalog). `install` lists
+// the fleet CLIs relevant to datatug (`ingitdb`, `ovdb`, `specscore`) with
+// their live status, and `install <name>...` installs them the same way
+// datatug itself was installed. cobracmd.New panics if "datatug" is absent
+// from the compiled catalog — a programming error this package's own tests
+// catch (TestInstallCommand_Shape proves the real entry resolves), never a
+// runtime state a user sees.
+func InstallCommand() *cobra.Command {
+	return cobracmd.New(cobracmd.CommandOptions{
+		Short:  "List and install fleet CLIs relevant to datatug",
+		Errors: installErrors{},
+		HostID: "datatug",
+	})
+}

@@ -118,12 +118,13 @@ func main() {
 var getCommand = func() (*cobra.Command, []fang.Option) {
 	root := commands.DatatugCommand()
 	info := buildinfo.Get("datatug")
-	// self-update is wired here, where main.go builds the root, against
-	// datatug's own compiled-in cliinstall catalog entry
+	// self-update and install are wired here, where main.go builds the
+	// root, against datatug's own compiled-in cliinstall catalog entry
 	// (cli-install#req:host-identity-from-catalog); commands.DatatugCommand
 	// itself stays version-agnostic so its existing zero-argument tests are
 	// unaffected.
 	root.AddCommand(commands.SelfUpdateCommand(info.Version))
+	root.AddCommand(commands.InstallCommand())
 	fangOpts := fangcmd.Wire(root, info)
 	return root, fangOpts
 }

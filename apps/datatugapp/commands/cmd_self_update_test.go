@@ -21,8 +21,10 @@ func TestSelfUpdateCommand_Shape(t *testing.T) {
 	if cmd.Name() != "self-update" {
 		t.Errorf("Name() = %q, want %q", cmd.Name(), "self-update")
 	}
-	if !cmd.HasAlias("update") {
-		t.Error(`self-update must alias "update"`)
+	// The "update" alias was planned but never released
+	// (cli-install#req:update-alias-policy) and MUST NOT ship.
+	if cmd.HasAlias("update") {
+		t.Error(`self-update must not alias "update" (cli-install#req:update-alias-policy)`)
 	}
 	for _, name := range []string{"check", "yes", "version", "allow-downgrade", "dry-run"} {
 		if cmd.Flags().Lookup(name) == nil {

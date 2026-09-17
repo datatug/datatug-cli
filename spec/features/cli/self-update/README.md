@@ -11,7 +11,7 @@ status: Implementing
 
 ## Summary
 
-`datatug self-update` (alias `update`) is built entirely on the fleet-wide
+`datatug self-update` is built entirely on the fleet-wide
 [Self-Update Library](https://github.com/strongo/cli-helpers/blob/main/spec/features/self-update/README.md)
 (`github.com/strongo/cli-helpers/selfupdate`, Stable), configured from
 datatug's own compiled-in catalog entry in
@@ -48,11 +48,13 @@ to know it (in particular, any other catalog CLI's `install datatug`).
 
 #### REQ: command-name
 
-The CLI MUST expose the command as `datatug self-update`, aliased `update`,
-built from `github.com/strongo/cli-helpers/selfupdate/cobracmd`. datatug has
-no other command named `update`, so the alias is unambiguous (unlike
-`ingitdb`, whose `update` is the SQL UPDATE verb and therefore carries no
-alias). The command inherits the library's flag surface — `--check`,
+The CLI MUST expose the command as `datatug self-update`, built from
+`github.com/strongo/cli-helpers/selfupdate/cobracmd`. It has no `update`
+alias: an alias was planned before this Feature shipped but was dropped
+before release
+([cli-install#req:update-alias-policy](https://github.com/strongo/cli-helpers/blob/main/spec/features/cli-install/README.md#req-update-alias-policy):
+"datatug's planned `update` alias, never released, MUST NOT ship"). The
+command inherits the library's flag surface — `--check`,
 `--yes`/`-y`, `--version`, `--allow-downgrade`, `--dry-run` — none of which
 is re-specified here. `--format` is not registered: datatug's self-update
 does not (yet) offer machine-readable output.
@@ -146,13 +148,14 @@ The shared behavior lives upstream, not in this repository:
 
 ## Acceptance Criteria
 
-### AC: canonical-name-and-alias
+### AC: canonical-name-no-alias
 
 **Requirements:** cli/self-update#req:command-name
 
 **Given** an installed `datatug` binary
-**When** the user runs `datatug self-update --check` and, separately, `datatug update --check`
-**Then** both resolve to the same command and produce the same result.
+**When** the user runs `datatug self-update --check`
+**Then** it runs the self-update check, and `datatug update` is not a
+recognized command (no `update` alias ships).
 
 ### AC: catalog-identity-matches-releases
 
@@ -185,13 +188,9 @@ than re-proving.
   `cobracmd.CommandOptions`), matching the fleet's other machine-readable
   surfaces, or does datatug have no near-term scripted-self-update use
   case that would justify it?
-- Should datatug also gain the shared `install` command
-  (cli-install#req:fleet-cutover) so it can list and install other fleet
-  CLIs relevant to it (`ingitdb`, `ovdb`, `specscore`), and be listed by
-  them in turn? Tracked as a separate, later change; this Feature's
-  `apps/datatugapp/commands/cmd_self_update.go` doc comment already notes
-  where the three install-only failure kinds will need mapping when it
-  lands.
+- Resolved: datatug gained the shared `install` command
+  (cli-install#req:fleet-cutover) — see [install](../install/README.md),
+  which maps the three install-only failure kinds explicitly.
 
 ---
 *This document follows the https://specscore.md/feature-specification*

@@ -48,7 +48,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
 	github.com/strongo/buildinfo v0.3.0
-	github.com/strongo/cli-helpers v0.16.0
+	github.com/strongo/cli-helpers v0.19.0
 	github.com/strongo/logus v0.4.3
 	github.com/strongo/random v0.0.2
 	github.com/strongo/slice v0.3.10

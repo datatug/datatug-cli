@@ -33,10 +33,8 @@ var catalogByID = cliinstall.ByID
 //
 // cliinstall's three install-only failure kinds (KindUnknownTarget,
 // KindNoInstallDir, KindDestinationExists) can never reach Failure through
-// self-update — datatug declares no `install` command yet, that is a
-// separate, later change — so they would fall through the same generic
-// branch as every self-update failure kind; they get their own explicit
-// mapping when `install` is added.
+// self-update: they are only produced by the `install` command, which maps
+// them explicitly in its own installErrors (cmd_install.go).
 type selfUpdateErrors struct{}
 
 // Failure maps every self-update failure onto datatug's generic error exit
@@ -54,8 +52,8 @@ func (selfUpdateErrors) UpdateAvailable(_ selfupdate.CheckResult) error {
 	return nil
 }
 
-// SelfUpdateCommand returns the "self-update" command (aliased "update"),
-// built from github.com/strongo/cli-helpers/selfupdate/cobracmd against
+// SelfUpdateCommand returns the "self-update" command, built from
+// github.com/strongo/cli-helpers/selfupdate/cobracmd against
 // datatug's own compiled-in catalog entry
 // (cli-install#req:host-identity-from-catalog): the same identity —
 // repository, the GoReleaser-default asset/checksums naming datatug's own
@@ -73,9 +71,11 @@ func SelfUpdateCommand(ver string) *cobra.Command {
 		panic(fmt.Sprintf("cliinstall: no catalog entry for %q", "datatug"))
 	}
 
+	// No "update" alias: it was never released
+	// (cli-install#req:update-alias-policy — "datatug's planned `update`
+	// alias, never released, MUST NOT ship").
 	return cobracmd.New(entry.Config(ver), cobracmd.CommandOptions{
-		Aliases: []string{"update"},
-		Short:   "Update the installed datatug binary in place",
-		Errors:  selfUpdateErrors{},
+		Short:  "Update the installed datatug binary in place",
+		Errors: selfUpdateErrors{},
 	})
 }

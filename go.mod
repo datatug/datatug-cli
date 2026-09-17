@@ -20,13 +20,13 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
-	github.com/dal-go/dalgo v0.80.0
+	github.com/dal-go/dalgo v0.80.5
 	github.com/dal-go/dalgo2http v0.2.0
 	github.com/dal-go/dalgo2sql v0.14.0
 	github.com/dal-go/dalgo2sqlite v0.1.11
 	github.com/dal-go/record v0.1.3
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.36.0
+	github.com/datatug/datatug-core v0.36.1
 	github.com/datatug/sql2csv v0.0.0-20260826045256-b0d582f72f50
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/filetug/filetug v0.3.0
@@ -35,12 +35,12 @@ require (
 	github.com/google/go-github/v91 v91.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
-	github.com/ingitdb/dalgo2ingitdb v0.6.0
-	github.com/ingitdb/ingitdb-go/ingitdb v0.6.0
+	github.com/ingitdb/dalgo2ingitdb v0.6.1
+	github.com/ingitdb/ingitdb-go/ingitdb v0.6.1
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/go-sqlite3 v1.14.50
 	github.com/mitchellh/go-homedir v1.1.0
-	github.com/openvaultdb/openvaultdb-go v0.5.0
+	github.com/openvaultdb/openvaultdb-go v0.6.2
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/posthog/posthog-go v1.24.3
 	github.com/rivo/tview v0.42.0
@@ -73,7 +73,7 @@ require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
-	github.com/RoaringBitmap/roaring/v2 v2.27.0 // indirect
+	github.com/RoaringBitmap/roaring/v2 v2.28.0 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
@@ -184,7 +184,7 @@ require (
 	golang.org/x/image v0.44.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto v0.0.0-20260803160001-6ac0973c030d // indirect

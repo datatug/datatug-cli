@@ -48,7 +48,11 @@ func TestQueryRoundTripsThroughStaticSchema(t *testing.T) {
 	projectKey := record.NewKeyWithParentAndID(extKey, "projects", "p1")
 	queryKey := record.NewKeyWithParentAndID(projectKey, "queries", "q1")
 
-	wantData := map[string]any{"id": "q1"}
+	// A QueryDef-shaped record: id/title/type are the columns the queries
+	// definition marks required (datatug.QueryDef embeds ProjectItem, whose
+	// ValidateWithOptions(true) requires id and title; QueryDef.Validate's
+	// own switch requires type).
+	wantData := map[string]any{"id": "q1", "title": "Query 1", "type": "SQL"}
 	err = db.RunReadwriteTransaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
 		return tx.Set(ctx, record.NewRecordWithData(queryKey, wantData))
 	})
@@ -84,8 +88,10 @@ func TestQueryRoundTripsThroughStaticSchema(t *testing.T) {
 	if !ok {
 		t.Fatalf("read back data is %T, want map[string]any", got.Data())
 	}
-	if gotData["id"] != wantData["id"] {
-		t.Errorf("read back id = %v, want %v", gotData["id"], wantData["id"])
+	for _, field := range []string{"id", "title", "type"} {
+		if gotData[field] != wantData[field] {
+			t.Errorf("read back %s = %v, want %v", field, gotData[field], wantData[field])
+		}
 	}
 
 	// No project record was ever written for the "ext/datatug" scoping

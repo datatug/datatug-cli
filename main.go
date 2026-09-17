@@ -125,6 +125,7 @@ var getCommand = func() (*cobra.Command, []fang.Option) {
 	// unaffected.
 	root.AddCommand(commands.SelfUpdateCommand(info.Version))
 	root.AddCommand(commands.InstallCommand())
+	root.AddCommand(commands.UpgradeCommand(info.Version))
 	fangOpts := fangcmd.Wire(root, info)
 	return root, fangOpts
 }

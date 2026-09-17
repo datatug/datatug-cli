@@ -347,8 +347,8 @@ github.com/strongo/analytics v0.2.8 h1:h0snZrFba1DDI7H/RcePbq3V8MeuOrZFC8kj5ZJkp
 github.com/strongo/analytics v0.2.8/go.mod h1:/pf7goR1CZtkvZHrJH5sXpJJl6IAefWCx82eSGUZ2V0=
 github.com/strongo/buildinfo v0.3.0 h1:nPbCrSA+7I3bct6mwZ24U6SHfV7TaRafoYzDucwl1Qg=
 github.com/strongo/buildinfo v0.3.0/go.mod h1:JpxZ3Jku81LJC1RNIqCNYwguDzLk90eemxUXx4JnSlA=
-github.com/strongo/cli-helpers v0.19.0 h1:fHjblS8DKB8Kyy9HHwJQQjUDZx1x4bbcPAamZ8r999o=
-github.com/strongo/cli-helpers v0.19.0/go.mod h1:2eUFIkQELgeWLeYz9g3hKer+Kcf+3vnAzHMOPDE7ItA=
+github.com/strongo/cli-helpers v0.21.0 h1:x95ouM0JFEaQxu66xU3QAT8Mtn+mvRcDyPXUC6ZYN4E=
+github.com/strongo/cli-helpers v0.21.0/go.mod h1:2eUFIkQELgeWLeYz9g3hKer+Kcf+3vnAzHMOPDE7ItA=
 github.com/strongo/decimal v0.1.2 h1:/LHdX9zJTUPpEM2cuQhnwCWNWLCUwG0BJMyOetpryY8=
 github.com/strongo/decimal v0.1.2/go.mod h1:uKFgetJbR2uT026stdbK54ELXTH9h0vZOPPOp7DAODk=
 github.com/strongo/dsstore v0.0.8 h1:BYsbfOVWKEvr24vHdnM6PNyHuFW968rr4tc5EK7BeQw=

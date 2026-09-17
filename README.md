@@ -77,17 +77,22 @@ datatug self-update --check  # report whether a newer release exists, without ap
 
 Homebrew installs run `brew update && brew upgrade --yes --cask -- datatug`; manual installs (curl, PowerShell, `go install`) download and checksum-verify the latest release and swap the binary in place. See [spec/features/cli/self-update](spec/features/cli/self-update/README.md).
 
-### Installing related CLIs
+### Installing and upgrading related CLIs
 
 ```bash
 datatug install                # list ingitdb, ovdb and specscore, with install status
 datatug install ovdb           # show details and install it the same way datatug itself was installed
 datatug install ovdb --dry-run # report the planned action without downloading or writing anything
+datatug upgrade                # report current/latest/verdict for every installed fleet CLI plus datatug itself
+datatug upgrade --all          # upgrade every installed fleet CLI plus datatug itself, after one confirmation
 ```
 
 `ingitdb` validates and edits the inGitDB databases DataTug reads; `ovdb`
 runs a user-owned OpenVaultDB server DataTug can query as a catalog;
-`specscore` lints DataTug's own specifications. See
+`specscore` lints DataTug's own specifications. `datatug upgrade` is the
+fleet-wide counterpart to `self-update`: `datatug self-update` is exactly
+`datatug upgrade datatug`, built from the same catalog configuration, so
+the two never disagree. See
 [spec/features/cli/install](spec/features/cli/install/README.md).
 
 ## What you can do with DataTug

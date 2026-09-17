@@ -34,22 +34,13 @@ type installErrors struct{}
 // Failure maps every install failure onto datatug's generic error exit
 // code, 1.
 //
-// A nil err is defended against even though cobracmd.ErrorMapper's own doc
-// comment says Failure "maps a non-nil command error": cliinstall/cobracmd
-// v0.19.0's runInstall calls mapFailure(opts, plan.Failure()) and
-// mapFailure(opts, result.Failure()) unconditionally, and
-// cliinstall.BatchResult.Failure() returns nil for a fully successful batch
-// (including a successful --dry-run with nothing to fail), so a host
-// mapper that assumes non-nil per that doc — as selfUpdateErrors does,
-// safely, because selfupdate/cobracmd never calls mapFailure with a
-// possibly-nil error — panics here on the ordinary success path. Feedback
-// for cli-helpers: mapFailure itself should short-circuit nil before
-// calling opts.Errors.Failure, matching what its own doc comment already
-// promises callers.
+// cliinstall/cobracmd v0.21.0's own mapFailure short-circuits a nil error
+// before ever calling opts.Errors.Failure (see that package's doc comment
+// on mapFailure and its TestMapFailure_NeverCallsMapperWithNil), so this
+// method can now rely on cobracmd.ErrorMapper's documented "maps a
+// non-nil command error" contract like selfUpdateErrors already does; the
+// v0.19.0-era nil-guard workaround this method used to carry is gone.
 func (installErrors) Failure(err error) error {
-	if err == nil {
-		return nil
-	}
 	var usage *cobracmd.UsageError
 	if errors.As(err, &usage) {
 		return Exit(err.Error(), 1)

@@ -81,22 +81,6 @@ func TestInstallErrors_UnknownTarget_MessageListsValidIDs(t *testing.T) {
 	}
 }
 
-// TestInstallErrors_Failure_NilReturnsNil proves the defensive nil guard:
-// cliinstall/cobracmd v0.19.0's runInstall calls mapFailure(opts,
-// plan.Failure()) and mapFailure(opts, result.Failure()) unconditionally,
-// and BatchResult.Failure() returns nil for a fully successful batch
-// (including a successful --dry-run), so opts.Errors.Failure(nil) is a
-// real, reachable call on the ordinary success path — see the doc comment
-// on installErrors.Failure for how this was found (a manual `datatug
-// install ovdb --dry-run` smoke run panicked before this guard was added).
-func TestInstallErrors_Failure_NilReturnsNil(t *testing.T) {
-	t.Parallel()
-
-	if got := (installErrors{}).Failure(nil); got != nil {
-		t.Errorf("Failure(nil) = %v, want nil", got)
-	}
-}
-
 // --- end-to-end exit-code contract, fully offline ---
 //
 // `install nosuchcli` never reaches a status probe, a release lookup, or

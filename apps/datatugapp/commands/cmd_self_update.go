@@ -52,17 +52,19 @@ func (selfUpdateErrors) UpdateAvailable(_ selfupdate.CheckResult) error {
 	return nil
 }
 
-// SelfUpdateCommand returns the "self-update" command, built from
-// github.com/strongo/cli-helpers/selfupdate/cobracmd against
-// datatug's own compiled-in catalog entry
-// (cli-install#req:host-identity-from-catalog): the same identity —
-// repository, the GoReleaser-default asset/checksums naming datatug's own
-// .goreleaser.yaml already matches, and the HomebrewCask("datatug")
-// executable upgrade steps — that any other fleet CLI's `install datatug`
-// resolves against. ver is the running build's own version
-// (GoReleaser-pinned at link time, "dev" otherwise), matching what
-// `datatug version --json` reports for the same build.
-func SelfUpdateCommand(ver string) *cobra.Command {
+// datatugSelfUpdateConfig builds the selfupdate.Config both SelfUpdateCommand
+// and UpgradeCommand (cmd_upgrade.go) use — datatug's own compiled-in
+// catalog entry (cli-install#req:host-identity-from-catalog): the same
+// identity — repository, the GoReleaser-default asset/checksums naming
+// datatug's own .goreleaser.yaml already matches, and the
+// HomebrewCask("datatug") executable upgrade steps — that any other fleet
+// CLI's `install datatug` resolves against. ver is the running build's own
+// version (GoReleaser-pinned at link time, "dev" otherwise), matching what
+// `datatug version --json` reports for the same build. Sharing this one
+// helper is what makes `datatug self-update` and `datatug upgrade datatug`
+// reach the exact same library call by construction
+// (cli-install#req:self-update-equals-upgrade-self), not by convention.
+func datatugSelfUpdateConfig(ver string) selfupdate.Config {
 	entry, ok := catalogByID("datatug")
 	if !ok {
 		// A host id absent from the catalog is a programming error caught by
@@ -70,11 +72,17 @@ func SelfUpdateCommand(ver string) *cobra.Command {
 		// (cli-install#req:host-identity-from-catalog).
 		panic(fmt.Sprintf("cliinstall: no catalog entry for %q", "datatug"))
 	}
+	return entry.Config(ver)
+}
 
+// SelfUpdateCommand returns the "self-update" command, built from
+// github.com/strongo/cli-helpers/selfupdate/cobracmd against
+// datatugSelfUpdateConfig's identity.
+func SelfUpdateCommand(ver string) *cobra.Command {
 	// No "update" alias: it was never released
 	// (cli-install#req:update-alias-policy — "datatug's planned `update`
 	// alias, never released, MUST NOT ship").
-	return cobracmd.New(entry.Config(ver), cobracmd.CommandOptions{
+	return cobracmd.New(datatugSelfUpdateConfig(ver), cobracmd.CommandOptions{
 		Short:  "Update the installed datatug binary in place",
 		Errors: selfUpdateErrors{},
 	})

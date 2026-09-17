@@ -113,8 +113,12 @@ Source files implementing this feature (annotated with
 - [`apps/datatugapp/commands/cmd_install.go`](../../../../apps/datatugapp/commands/cmd_install.go) —
   the `installErrors` exit-code mapper and the `cobracmd.New` wiring against
   `HostID: "datatug"`.
-- [`main.go`](../../../../main.go) — registers the command where the root is
-  built (`getCommand`), alongside `self-update`.
+- [`apps/datatugapp/commands/cmd_upgrade.go`](../../../../apps/datatugapp/commands/cmd_upgrade.go) —
+  the `upgradeErrors` mapper (embeds `installErrors`, adds
+  `UpgradesAvailable`) and the `cobracmd.NewUpgrade` wiring against the same
+  `HostConfig` `self-update` builds.
+- [`main.go`](../../../../main.go) — registers both commands where the root
+  is built (`getCommand`), alongside `self-update`.
 
 The shared behavior lives upstream, not in this repository:
 `github.com/strongo/cli-helpers` `cliinstall/`, `cliinstall/cliui/`,
@@ -122,9 +126,38 @@ The shared behavior lives upstream, not in this repository:
 `cliinstall/catalog_datatug.go` (datatug's own catalog entry, shared with
 `self-update`).
 
-`upgrade` (cli-install's fleet-wide update verb, `cliinstall/cobracmd`'s
-future `upgrade` command) is a separate, later change — not wired by this
-Feature.
+### Upgrading
+
+#### REQ: upgrade-command
+
+The CLI MUST also expose `datatug upgrade [name...] [--all] [--check]
+[--yes] [--dry-run] [--format text|json]`, built from
+`cliinstall/cobracmd.NewUpgrade` against the same `HostID: "datatug"` and
+the exact same `HostConfig` `datatug self-update` builds
+(`datatugSelfUpdateConfig`, [`cmd_self_update.go`](../../../../apps/datatugapp/commands/cmd_self_update.go));
+datatug's self-update has no after-update hook, so `upgrade` passes none
+either. `datatug self-update` MUST therefore be `datatug upgrade datatug`
+by construction, not by convention
+([cli-install#req:self-update-equals-upgrade-self](https://github.com/strongo/cli-helpers/blob/main/spec/features/cli-install/README.md#req-self-update-equals-upgrade-self)).
+`upgrade --all` means every *installed* catalog id plus datatug itself, not
+the relevance matrix `install` lists — a target that is merely relevant but
+not installed has nothing to upgrade. `upgrade` gets no `update` alias
+([cli-install#req:update-alias-policy](https://github.com/strongo/cli-helpers/blob/main/spec/features/cli-install/README.md#req-update-alias-policy)).
+
+`datatug upgrade` MUST use the same `upgradeErrors` exit-code mapper as
+`install` (it embeds `installErrors` unchanged, so every failure kind maps
+identically) with one addition: `UpgradesAvailable` returns `nil`,
+mirroring `self-update`'s own `UpdateAvailable`
+([self-update#req:exit-codes](../self-update/README.md#req-exit-codes)) —
+datatug reserves no distinct exit code for "an upgrade is available" for
+either command, so `datatug self-update --check` and
+`datatug upgrade --check`/`datatug upgrade datatug --check` exit `0` for
+the same verdicts.
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Success, including a report showing an available upgrade |
+| `1` | Every operational failure, including an unknown upgrade target and a release-lookup failure |
 
 ## Interaction with Other Features
 
@@ -162,10 +195,24 @@ write —
 [cli-install#ac:hosts-keep-their-exit-codes-and-cutover-completes](https://github.com/strongo/cli-helpers/blob/main/spec/features/cli-install/README.md#ac-hosts-keep-their-exit-codes-and-cutover-completes)'s
 `install nosuchcli` case, applied to datatug's own exit code.
 
+### AC: upgrade-exit-code-contract
+
+**Requirements:** cli/install#req:upgrade-command
+
+**Given** an installed `datatug` binary
+**When** the user runs `datatug upgrade nosuchcli`
+**Then** the command exits `1` before any release lookup, the same way
+`datatug install nosuchcli` does; and when the user runs
+`datatug self-update --check` and `datatug upgrade datatug --check` against
+the same release, both exit `0` for the same verdict — up to date, an
+update available, or undetermined — because both reach the exact same
+`selfupdate.Config.Check` call.
+
 The remaining behavior — status probing and its bounded, concurrent,
 offline probe; the destination policy and denylist; Homebrew cask
 execution; checksum verification and no-replace placement; the batch
-confirmation gate and `--dry-run`; and machine-readable JSON output — is
+confirmation gate and `--dry-run`; upgrade's own target selection, release
+lookups and per-target policy; and machine-readable JSON output — is
 specified and tested once in the
 [CLI Install Command Library](https://github.com/strongo/cli-helpers/blob/main/spec/features/cli-install/README.md)'s
 own Acceptance Criteria, which this command inherits by construction rather
@@ -173,9 +220,6 @@ than re-proving.
 
 ## Open Questions
 
-- Should `datatug install` gain the fleet-wide `upgrade` command
-  (cli-install's `upgrade` amendment) in the same way `self-update` will
-  become `upgrade <self>`? Tracked as a separate, later change.
 - Should datatug's own exit-code contract eventually reserve a dedicated
   invalid-arguments code for `KindUnknownTarget` and an invalid-state code
   for `KindNoInstallDir`/`KindDestinationExists`, matching the parent

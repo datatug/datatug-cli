@@ -48,8 +48,9 @@ func TestQueryRoundTripsThroughStaticSchema(t *testing.T) {
 	projectKey := record.NewKeyWithParentAndID(extKey, "projects", "p1")
 	queryKey := record.NewKeyWithParentAndID(projectKey, "queries", "q1")
 
+	wantData := map[string]any{"id": "q1"}
 	err = db.RunReadwriteTransaction(ctx, func(ctx context.Context, tx dal.ReadwriteTransaction) error {
-		return tx.Set(ctx, record.NewRecordWithData(queryKey, map[string]any{"id": "q1"}))
+		return tx.Set(ctx, record.NewRecordWithData(queryKey, wantData))
 	})
 	if err != nil {
 		t.Fatalf("write query q1: %v", err)
@@ -61,12 +62,58 @@ func TestQueryRoundTripsThroughStaticSchema(t *testing.T) {
 		t.Fatalf("expected query record at %s: %v", wantPath, statErr)
 	}
 
+	// The canonical layout is a directory per record ("records_dir: '.'"),
+	// never the flat file a {key}-templated name would produce without it,
+	// and never nested under an inGitDB "$records" directory.
+	flatPath := filepath.Join(dir, filepath.FromSlash(
+		"ext/datatug/projects/p1/queries/q1.query.json"))
+	if _, statErr := os.Stat(flatPath); statErr == nil {
+		t.Errorf("did not expect a flat record file at %s", flatPath)
+	}
+	if recordsDirs := findDirsNamed(t, dir, "$records"); len(recordsDirs) > 0 {
+		t.Errorf("did not expect any $records directory, found: %v", recordsDirs)
+	}
+
+	// Read the record back through the driver (not just the filesystem) and
+	// confirm the data written is the data read back.
+	got := record.NewRecordWithData(queryKey, map[string]any{})
+	if err = db.Get(ctx, got); err != nil {
+		t.Fatalf("read back query q1: %v", err)
+	}
+	gotData, ok := got.Data().(map[string]any)
+	if !ok {
+		t.Fatalf("read back data is %T, want map[string]any", got.Data())
+	}
+	if gotData["id"] != wantData["id"] {
+		t.Errorf("read back id = %v, want %v", gotData["id"], wantData["id"])
+	}
+
 	// No project record was ever written for the "ext/datatug" scoping
 	// parent (REQ:extension-namespace: it need not exist as a record file).
 	extRecordPath := filepath.Join(dir, filepath.FromSlash("ext/datatug/datatug.ext.json"))
 	if _, statErr := os.Stat(extRecordPath); statErr == nil {
 		t.Errorf("did not expect a record file for the ext/datatug scoping parent at %s", extRecordPath)
 	}
+}
+
+// findDirsNamed walks root and returns every directory path whose base name
+// equals name.
+func findDirsNamed(t *testing.T, root, name string) []string {
+	t.Helper()
+	var found []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() && d.Name() == name {
+			found = append(found, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	return found
 }
 
 // TestSecondProjectDoesNotCollide proves the schema serves two projects in

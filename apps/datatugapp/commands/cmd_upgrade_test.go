@@ -133,8 +133,8 @@ func TestUpgradeCommand_NoSuchTarget_ExitCodeContract(t *testing.T) {
 	if !errors.As(err, &ec) {
 		t.Fatalf("Execute() error = %v (%T), want an ExitCoder", err, err)
 	}
-	if ec.ExitCode() != 1 {
-		t.Errorf("Execute() exit code = %d, want 1", ec.ExitCode())
+	if ec.ExitCode() != 2 {
+		t.Errorf("Execute() exit code = %d, want 2 (invalid arguments)", ec.ExitCode())
 	}
 	if !strings.Contains(err.Error(), "nosuchcli") {
 		t.Errorf("error %q does not name the unknown target", err.Error())
@@ -154,8 +154,8 @@ func TestUpgradeCommand_InvalidFormat_IsUsageError(t *testing.T) {
 		t.Fatal("expected a non-nil error for --format yaml")
 	}
 	var ec ExitCoder
-	if !errors.As(err, &ec) || ec.ExitCode() != 1 {
-		t.Errorf("Execute() exit code = %v, want 1", err)
+	if !errors.As(err, &ec) || ec.ExitCode() != 2 {
+		t.Errorf("Execute() exit code = %v, want 2 (invalid arguments)", err)
 	}
 	if !strings.Contains(err.Error(), "--format") {
 		t.Errorf("error %q does not mention --format", err.Error())

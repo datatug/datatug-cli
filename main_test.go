@@ -194,10 +194,12 @@ func TestMain_VersionJSON_NoTelemetryEnqueued(t *testing.T) {
 func TestMain_OtherCommand_StillEnqueuesTelemetry(t *testing.T) {
 	getCommandBackup := getCommand
 	dtlogEnqueueBackup := dtlogEnqueue
+	dtlogStartBackup := dtlogStart
 	osArgsBackup := os.Args
 	defer func() {
 		getCommand = getCommandBackup
 		dtlogEnqueue = dtlogEnqueueBackup
+		dtlogStart = dtlogStartBackup
 		os.Args = osArgsBackup
 	}()
 
@@ -213,11 +215,77 @@ func TestMain_OtherCommand_StillEnqueuesTelemetry(t *testing.T) {
 
 	var enqueued []posthog.Message
 	dtlogEnqueue = func(msg posthog.Message) { enqueued = append(enqueued, msg) }
+	dtlogStart = func() {}
 
 	os.Args = []string{"datatug"}
 	main()
 
 	assert.Len(t, enqueued, 2, "a non-version-json invocation must enqueue both the started and exited events")
+}
+
+// TestMain_VersionJSON_NeverStartsTelemetry proves
+// cli-install#req:version-json-side-effect-free/json-output-side-effect-free
+// at the main.go level: `datatug version --json` must never call
+// dtlog.Start — the call that would fetch a PostHog API key over the
+// network and could write ~/datatug/.posthog.yaml (see dtlog.Start's own
+// doc comment and pkg/dtlog's TestStart_NotCalled_NoKeyFetchOrFileWrite for
+// the proof, one layer down, that without Start those side effects truly
+// never happen).
+func TestMain_VersionJSON_NeverStartsTelemetry(t *testing.T) {
+	getCommandBackup := getCommand
+	dtlogStartBackup := dtlogStart
+	osArgsBackup := os.Args
+	defer func() {
+		getCommand = getCommandBackup
+		dtlogStart = dtlogStartBackup
+		os.Args = osArgsBackup
+	}()
+
+	getCommand = func() (*cobra.Command, []fang.Option) { return versionJSONStubRoot(), nil }
+
+	started := false
+	dtlogStart = func() { started = true }
+
+	os.Args = []string{"datatug", "version", "--json"}
+	main()
+
+	assert.False(t, started, "version --json must never call dtlog.Start")
+}
+
+// TestMain_OtherCommand_StartsTelemetry is the control case for the test
+// above: an ordinary invocation must call dtlog.Start, proving the
+// version --json exemption is narrow, not a regression that silenced
+// telemetry startup generally.
+func TestMain_OtherCommand_StartsTelemetry(t *testing.T) {
+	getCommandBackup := getCommand
+	dtlogEnqueueBackup := dtlogEnqueue
+	dtlogStartBackup := dtlogStart
+	osArgsBackup := os.Args
+	defer func() {
+		getCommand = getCommandBackup
+		dtlogEnqueue = dtlogEnqueueBackup
+		dtlogStart = dtlogStartBackup
+		os.Args = osArgsBackup
+	}()
+
+	getCommand = func() (*cobra.Command, []fang.Option) {
+		root := &cobra.Command{
+			Use:           "datatug",
+			SilenceUsage:  true,
+			SilenceErrors: true,
+			RunE:          func(_ *cobra.Command, _ []string) error { return nil },
+		}
+		return root, nil
+	}
+
+	dtlogEnqueue = func(_ posthog.Message) {}
+	started := false
+	dtlogStart = func() { started = true }
+
+	os.Args = []string{"datatug"}
+	main()
+
+	assert.True(t, started, "a non-version-json invocation must call dtlog.Start")
 }
 
 // TestIsVersionJSONInvocation covers isVersionJSONInvocation directly,

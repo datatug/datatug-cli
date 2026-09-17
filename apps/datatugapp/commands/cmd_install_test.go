@@ -35,21 +35,24 @@ func TestInstallCommand_Shape(t *testing.T) {
 
 // Failure must map every kind of install failure — usage errors, all three
 // cli-install-only kinds explicitly, every self-update-shared kind, and any
-// plain error — onto exit code 1
-// (cli-install#req:host-owned-exit-codes).
-func TestInstallErrors_Failure_MapsToExitOne(t *testing.T) {
+// plain error — onto datatug's parent CLI spec exit-code contract via
+// failureExitCode (cmd_exit_codes.go), the SAME function selfUpdateErrors
+// uses (cli-install#req:host-owned-exit-codes).
+func TestInstallErrors_Failure_MapsToParentSpecExitCodes(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		name string
 		err  error
+		want int
 	}{
-		{"usage error", &cobracmd.UsageError{Err: errors.New("invalid --format")}},
-		{"unknown target", &selfupdate.Failure{Kind: selfupdate.KindUnknownTarget, Err: errors.New("nosuchcli: not a known install target; valid ids: ingitdb, ovdb, specscore")}},
-		{"no install dir", &selfupdate.Failure{Kind: selfupdate.KindNoInstallDir, Err: errors.New("no per-user bin directory on PATH")}},
-		{"destination exists", &selfupdate.Failure{Kind: selfupdate.KindDestinationExists, Path: "/home/alex/.local/bin/ovdb", Err: errors.New("destination already exists")}},
-		{"self-update-shared kind", &selfupdate.Failure{Kind: selfupdate.KindChecksum, Err: errors.New("checksum mismatch")}},
-		{"plain error", errors.New("plain error")},
+		{"usage error", &cobracmd.UsageError{Err: errors.New("invalid --format")}, 2},
+		{"unknown target", &selfupdate.Failure{Kind: selfupdate.KindUnknownTarget, Err: errors.New("nosuchcli: not a known install target; valid ids: ingitdb, ovdb, specscore")}, 2},
+		{"no install dir", &selfupdate.Failure{Kind: selfupdate.KindNoInstallDir, Err: errors.New("no per-user bin directory on PATH")}, 4},
+		{"destination exists", &selfupdate.Failure{Kind: selfupdate.KindDestinationExists, Path: "/home/alex/.local/bin/ovdb", Err: errors.New("destination already exists")}, 4},
+		{"self-update-shared kind (checksum)", &selfupdate.Failure{Kind: selfupdate.KindChecksum, Err: errors.New("checksum mismatch")}, 1},
+		{"self-update-shared kind (release lookup)", &selfupdate.Failure{Kind: selfupdate.KindReleaseLookup, Err: errors.New("lookup failed")}, 4},
+		{"plain error", errors.New("plain error"), 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -59,8 +62,8 @@ func TestInstallErrors_Failure_MapsToExitOne(t *testing.T) {
 			if !errors.As(got, &ec) {
 				t.Fatalf("Failure(%v) = %v (%T), want an ExitCoder", c.err, got, got)
 			}
-			if ec.ExitCode() != 1 {
-				t.Errorf("Failure(%v) exit code = %d, want 1", c.err, ec.ExitCode())
+			if ec.ExitCode() != c.want {
+				t.Errorf("Failure(%v) exit code = %d, want %d", c.err, ec.ExitCode(), c.want)
 			}
 		})
 	}
@@ -107,8 +110,8 @@ func TestInstallCommand_NoSuchTarget_ExitCodeContract(t *testing.T) {
 	if !errors.As(err, &ec) {
 		t.Fatalf("Execute() error = %v (%T), want an ExitCoder", err, err)
 	}
-	if ec.ExitCode() != 1 {
-		t.Errorf("Execute() exit code = %d, want 1", ec.ExitCode())
+	if ec.ExitCode() != 2 {
+		t.Errorf("Execute() exit code = %d, want 2 (invalid arguments)", ec.ExitCode())
 	}
 	if !strings.Contains(err.Error(), "nosuchcli") {
 		t.Errorf("error %q does not name the unknown target", err.Error())
@@ -135,8 +138,8 @@ func TestInstallCommand_InvalidFormat_IsUsageError(t *testing.T) {
 		t.Fatal("expected a non-nil error for --format yaml")
 	}
 	var ec ExitCoder
-	if !errors.As(err, &ec) || ec.ExitCode() != 1 {
-		t.Errorf("Execute() exit code = %v, want 1", err)
+	if !errors.As(err, &ec) || ec.ExitCode() != 2 {
+		t.Errorf("Execute() exit code = %v, want 2 (invalid arguments)", err)
 	}
 	if !strings.Contains(err.Error(), "--format") {
 		t.Errorf("error %q does not mention --format", err.Error())

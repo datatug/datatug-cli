@@ -55,9 +55,11 @@ before release
 ([cli-install#req:update-alias-policy](https://github.com/strongo/cli-helpers/blob/main/spec/features/cli-install/README.md#req-update-alias-policy):
 "datatug's planned `update` alias, never released, MUST NOT ship"). The
 command inherits the library's flag surface — `--check`,
-`--yes`/`-y`, `--version`, `--allow-downgrade`, `--dry-run` — none of which
-is re-specified here. `--format` is not registered: datatug's self-update
-does not (yet) offer machine-readable output.
+`--yes`/`-y`, `--version`, `--allow-downgrade`, `--dry-run`, `--format
+text|json` — none of which is re-specified here. `--format json` matches
+`upgrade`'s own always-registered `--format`
+([cli-install#req:self-update-equals-upgrade-self](https://github.com/strongo/cli-helpers/blob/main/spec/features/cli-install/README.md#req-self-update-equals-upgrade-self)
+pairs the two commands' flag surfaces).
 
 ### Catalog configuration
 
@@ -97,30 +99,40 @@ cask token for a user.
 
 #### REQ: exit-codes
 
-`datatug self-update` MUST use exit code `1` for every operational failure
-— ambiguous detection, release-lookup, download, checksum, permission,
-non-interactive refusal without `--yes`, a managed-command (`brew`)
-failure, or an invalid usage — via the same `commands.Exit`/`ExitCoder`
-mechanism every other datatug command uses to signal a specific process
-exit code. `--check` MUST exit `0` whether the binary is up to date, an
-update is available, or the running version is undetermined: datatug
-reserves no distinct exit code for "update available" — the printed
-`--check` verdict line is the only signal, and `UpdateAvailable` returns
-`nil` rather than a failure.
+`datatug self-update` MUST map every failure onto the parent
+[CLI](../README.md) spec's shared exit-code contract
+(`spec/features/cli/README.md`'s "Shared exit-code contract"), not a
+generic catch-all, via the same `commands.Exit`/`ExitCoder` mechanism every
+other datatug command uses to signal a specific process exit code, through
+one shared `failureExitCode` function
+(`apps/datatugapp/commands/cmd_exit_codes.go`) also used by
+[install](../install/README.md) and upgrade
+(cli-install#req:host-owned-exit-codes: hosts "keep their self-update
+mapping for the shared kinds"). `--check` MUST exit `0` whether the binary
+is up to date, an update is available, or the running version is
+undetermined: datatug reserves no distinct exit code for "update
+available" — the printed `--check` verdict line is the only signal, and
+`UpdateAvailable` returns `nil` rather than a failure.
 
 | Exit code | Meaning |
 |---|---|
 | `0` | Success: self-replace completed, the Homebrew cask command ran successfully, or already up to date; also `--check` reporting any verdict, including an available update |
-| `1` | Every operational failure: ambiguous detection, network/download failure, missing OS/arch asset, checksum mismatch, permission denied, non-interactive without `--yes`, unknown `--version` tag, a refused downgrade, or a failed `brew` command |
+| `1` | Generic catch-all: ambiguous detection, checksum mismatch, a failed `brew` command, or any other kind not named below |
+| `2` | Invalid arguments: an invalid usage (`--format`), a refused downgrade without `--allow-downgrade`, or a non-interactive refusal without `--yes` — all fixed by passing a different flag |
+| `3` | Not found: an unknown `--version` tag, or no release asset for this platform |
+| `4` | Connection/I/O failure: a release-lookup or download failure |
 
 This is datatug's own choice among the exit-code contracts the library
-supports (cli-install#req:host-owned-exit-codes) — there being no
-pre-existing self-update command, there was no prior contract to preserve.
+supports (cli-install#req:host-owned-exit-codes), aligned with the parent
+[CLI](../README.md) spec's own standard codes rather than a simpler,
+narrower contract — there being no pre-existing self-update command, there
+was no prior narrower contract to preserve.
 
 cliinstall's three install-only failure kinds (`KindUnknownTarget`,
 `KindNoInstallDir`, `KindDestinationExists`) cannot reach this command:
-datatug declares no `install` command yet. They will get their own explicit
-mapping when `install` is added.
+they are only produced by [install](../install/README.md)/upgrade, which
+map them through the same shared `failureExitCode` (`2` and `4`
+respectively).
 
 ## Implementation
 
@@ -130,6 +142,9 @@ Source files implementing this feature (annotated with
 - [`apps/datatugapp/commands/cmd_self_update.go`](../../../../apps/datatugapp/commands/cmd_self_update.go) —
   the catalog lookup, the `selfUpdateErrors` exit-code mapper, and the
   `cobracmd.New` wiring.
+- [`apps/datatugapp/commands/cmd_exit_codes.go`](../../../../apps/datatugapp/commands/cmd_exit_codes.go) —
+  `failureExitCode`, the one shared mapping self-update, install and
+  upgrade all route through.
 - [`main.go`](../../../../main.go) — registers the command where the root
   is built (`getCommand`), against the running build's own version
   (`buildinfo.Get("datatug").Version`).
@@ -144,7 +159,7 @@ The shared behavior lives upstream, not in this repository:
 | Feature | Interaction |
 |---|---|
 | [version](../version/README.md) | `self-update`'s running version is datatug's own build identity (`buildinfo.Get("datatug").Version`), the same value `version --json` reports. |
-| [CLI](../README.md) (parent) | `self-update` is exempt from the parent's `REQ: telemetry-events` only for `version --json`, per that spec's amendment; `self-update` itself still emits the ordinary CLI started/exited events. |
+| [CLI](../README.md) (parent) | Only `version --json` is exempt from the parent's `REQ: telemetry-events`, per that spec's amendment; `self-update` itself is not exempt and emits the ordinary CLI started/exited events. |
 
 ## Acceptance Criteria
 
@@ -171,7 +186,7 @@ recognized command (no `update` alias ships).
 
 **Given** three scenarios — up to date, update available, and a release-lookup error
 **When** the user runs `datatug self-update --check` in each
-**Then** the exit codes are `0`, `0`, and `1` respectively: only the release-lookup failure is a non-nil error, mapped to exit `1`.
+**Then** the exit codes are `0`, `0`, and `4` respectively: only the release-lookup failure is a non-nil error, mapped to exit `4` (connection/I/O failure) via `failureExitCode`.
 
 The remaining behavior — install-method detection and its safe-ambiguous
 default, the confirmation gate and non-interactive refusal, checksum
@@ -184,10 +199,9 @@ than re-proving.
 
 ## Open Questions
 
-- Should `datatug self-update` gain `--format json` (`JSONFormat: true` on
-  `cobracmd.CommandOptions`), matching the fleet's other machine-readable
-  surfaces, or does datatug have no near-term scripted-self-update use
-  case that would justify it?
+- Resolved: `datatug self-update` gained `--format json`
+  (`JSONFormat: true`), matching `upgrade`'s own always-registered
+  `--format` (cli-install#req:self-update-equals-upgrade-self).
 - Resolved: datatug gained the shared `install` command
   (cli-install#req:fleet-cutover) — see [install](../install/README.md),
   which maps the three install-only failure kinds explicitly.

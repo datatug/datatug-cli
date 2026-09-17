@@ -33,6 +33,17 @@ var osExit = os.Exit
 // (cli-install#req:version-json-side-effect-free in strongo/cli-helpers).
 var dtlogEnqueue = dtlog.Enqueue
 
+// dtlogStart is a seam over dtlog.Start so tests can prove, without a real
+// PostHog client, network request or file write, exactly which invocations
+// start telemetry at all — in particular that `version --json` never does
+// (cli-install#req:version-json-side-effect-free,
+// json-output-side-effect-free): dtlog used to do this unconditionally from
+// a package init(), which meant every invocation, including a bare
+// `version --json` probe, silently fetched a PostHog API key over the
+// network and could write ~/datatug/.posthog.yaml. See dtlog.Start's own
+// doc comment.
+var dtlogStart = dtlog.Start
+
 func main() {
 
 	// skipTelemetry is set below, before fang.Execute runs, but declared
@@ -96,6 +107,7 @@ func main() {
 	skipTelemetry = isVersionJSONInvocation(root, args)
 
 	if !skipTelemetry {
+		dtlogStart()
 		dtlogEnqueue(posthog.Capture{Event: "DataTug CLI started"})
 	}
 

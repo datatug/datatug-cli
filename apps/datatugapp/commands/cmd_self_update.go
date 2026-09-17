@@ -18,15 +18,17 @@ import (
 // exercisable. Tests that replace it must not run in parallel.
 var catalogByID = cliinstall.ByID
 
-// selfUpdateErrors implements cobracmd.ErrorMapper for datatug's own,
-// intentionally simple exit-code contract
-// (cli-install#req:host-owned-exit-codes): datatug had no self-update
-// command before this one, so there is no pre-existing contract to
-// preserve. Every operational failure — ambiguous detection, release
-// lookup, download, checksum, permission, non-interactive refusal, a
-// managed-command failure, or an invalid usage — exits 1. `--check`
-// reporting an available (or undetermined) update is NOT treated as a
-// failure and exits 0: UpdateAvailable returns nil, the branch
+// selfUpdateErrors implements cobracmd.ErrorMapper for datatug's own exit
+// codes, which follow the parent CLI spec's shared contract
+// (spec/features/cli/README.md's "Shared exit-code contract"), not a
+// generic catch-all (cli-install#req:host-owned-exit-codes): datatug had no
+// self-update command before this one, so there is no pre-existing
+// simpler contract to preserve, and the parent spec already defines
+// standard codes for invalid arguments (2), not found (3) and I/O/
+// connection failures (4) that self-update's own failure kinds map onto
+// cleanly — see failureExitCode (cmd_exit_codes.go) for the full table.
+// `--check` reporting an available (or undetermined) update is NOT treated
+// as a failure and exits 0: UpdateAvailable returns nil, the branch
 // cobracmd.ErrorMapper documents for a consumer that reserves no distinct
 // exit code for "update available" — the human-readable verdict line was
 // already printed before this mapper runs.
@@ -34,14 +36,16 @@ var catalogByID = cliinstall.ByID
 // cliinstall's three install-only failure kinds (KindUnknownTarget,
 // KindNoInstallDir, KindDestinationExists) can never reach Failure through
 // self-update: they are only produced by the `install` command, which maps
-// them explicitly in its own installErrors (cmd_install.go).
+// them through the same failureExitCode in its own installErrors
+// (cmd_install.go).
 type selfUpdateErrors struct{}
 
-// Failure maps every self-update failure onto datatug's generic error exit
-// code, 1, via the same commands.Exit/ExitCoder mechanism every other
-// datatug command uses to signal a specific process exit code to main.go.
+// Failure maps every self-update failure onto datatug's parent-spec exit
+// code via failureExitCode (cmd_exit_codes.go), through the same
+// commands.Exit/ExitCoder mechanism every other datatug command uses to
+// signal a specific process exit code to main.go.
 func (selfUpdateErrors) Failure(err error) error {
-	return Exit(err.Error(), 1)
+	return Exit(err.Error(), failureExitCode(err))
 }
 
 // UpdateAvailable reports success (exit 0) even though a newer release
@@ -83,7 +87,8 @@ func SelfUpdateCommand(ver string) *cobra.Command {
 	// (cli-install#req:update-alias-policy — "datatug's planned `update`
 	// alias, never released, MUST NOT ship").
 	return cobracmd.New(datatugSelfUpdateConfig(ver), cobracmd.CommandOptions{
-		Short:  "Update the installed datatug binary in place",
-		Errors: selfUpdateErrors{},
+		Short:      "Update the installed datatug binary in place",
+		JSONFormat: true,
+		Errors:     selfUpdateErrors{},
 	})
 }

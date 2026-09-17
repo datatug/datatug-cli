@@ -13,9 +13,10 @@ import (
 // cli-install#req:upgrade-check requires
 // (cliinstall/cobracmd.UpgradeErrorMapper), reusing installErrors.Failure
 // unchanged so `upgrade`'s failure mapping is identical to `install`'s —
-// every kind, including the three cli-install-only kinds, maps to exit 1 —
-// and therefore identical to `self-update`'s shared kinds too
-// (selfUpdateErrors maps every one of them the same way).
+// both route every kind, including the three cli-install-only kinds,
+// through the same failureExitCode (cmd_exit_codes.go) — and therefore
+// identical to `self-update`'s shared kinds too (selfUpdateErrors routes
+// through the same function).
 type upgradeErrors struct{ installErrors }
 
 // UpgradesAvailable reports success (exit 0), mirroring selfUpdateErrors.

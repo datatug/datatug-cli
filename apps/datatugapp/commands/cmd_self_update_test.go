@@ -26,7 +26,7 @@ func TestSelfUpdateCommand_Shape(t *testing.T) {
 	if cmd.HasAlias("update") {
 		t.Error(`self-update must not alias "update" (cli-install#req:update-alias-policy)`)
 	}
-	for _, name := range []string{"check", "yes", "version", "allow-downgrade", "dry-run"} {
+	for _, name := range []string{"check", "yes", "version", "allow-downgrade", "dry-run", "format"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("missing --%s flag", name)
 		}
@@ -34,10 +34,11 @@ func TestSelfUpdateCommand_Shape(t *testing.T) {
 	if f := cmd.Flags().Lookup("yes"); f.Shorthand != "y" {
 		t.Errorf("--yes shorthand = %q, want y", f.Shorthand)
 	}
-	// JSONFormat is left false: datatug's self-update flag surface does not
-	// (yet) offer --format.
-	if cmd.Flags().Lookup("format") != nil {
-		t.Error("unexpected --format flag; JSONFormat was not requested")
+	// JSONFormat: true, matching upgrade's own always-registered --format
+	// (cli-install#req:self-update-equals-upgrade-self pairs the two
+	// commands' flag surfaces).
+	if f := cmd.Flags().Lookup("format"); f.DefValue != "text" {
+		t.Errorf("--format default = %q, want text", f.DefValue)
 	}
 }
 
@@ -91,32 +92,43 @@ func TestDatatugCatalogEntry_HomebrewCaskIsExecutable(t *testing.T) {
 
 // --- selfUpdateErrors: datatug's own exit-code contract ---
 
-// Failure must map every kind of self-update failure onto exit code 1
-// through the same commands.Exit/ExitCoder mechanism every other datatug
-// command uses.
-func TestSelfUpdateErrors_Failure_MapsToExitOne(t *testing.T) {
+// Failure must map every kind of self-update failure onto datatug's parent
+// CLI spec exit-code contract (spec/features/cli/README.md's "Shared
+// exit-code contract"), via failureExitCode (cmd_exit_codes.go), through
+// the same commands.Exit/ExitCoder mechanism every other datatug command
+// uses.
+func TestSelfUpdateErrors_Failure_MapsToParentSpecExitCodes(t *testing.T) {
 	t.Parallel()
 
-	cases := []error{
-		&selfupdate.Failure{Kind: selfupdate.KindAmbiguous, Err: errors.New("ambiguous")},
-		&selfupdate.Failure{Kind: selfupdate.KindReleaseLookup, Err: errors.New("lookup failed")},
-		&selfupdate.Failure{Kind: selfupdate.KindChecksum, Err: errors.New("checksum mismatch")},
-		&selfupdate.Failure{Kind: selfupdate.KindPermission, Path: "/usr/local/bin/datatug", Err: errors.New("permission denied")},
-		&selfupdate.Failure{Kind: selfupdate.KindNonInteractive, Err: errors.New("no tty")},
-		&selfupdate.Failure{Kind: selfupdate.KindManagedCommand, Err: errors.New("brew failed")},
-		&cobracmd.UsageError{Err: errors.New("invalid --format")},
-		errors.New("plain error"),
+	cases := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"usage error", &cobracmd.UsageError{Err: errors.New("invalid --format")}, 2},
+		{"downgrade", &selfupdate.Failure{Kind: selfupdate.KindDowngrade, Err: errors.New("older than running")}, 2},
+		{"non-interactive", &selfupdate.Failure{Kind: selfupdate.KindNonInteractive, Err: errors.New("no tty")}, 2},
+		{"unknown tag", &selfupdate.Failure{Kind: selfupdate.KindUnknownTag, Err: errors.New("no such tag")}, 3},
+		{"unsupported platform", &selfupdate.Failure{Kind: selfupdate.KindUnsupportedPlatform, Err: errors.New("no asset")}, 3},
+		{"release lookup", &selfupdate.Failure{Kind: selfupdate.KindReleaseLookup, Err: errors.New("lookup failed")}, 4},
+		{"download", &selfupdate.Failure{Kind: selfupdate.KindDownload, Err: errors.New("404")}, 4},
+		{"permission", &selfupdate.Failure{Kind: selfupdate.KindPermission, Path: "/usr/local/bin/datatug", Err: errors.New("permission denied")}, 4},
+		{"ambiguous", &selfupdate.Failure{Kind: selfupdate.KindAmbiguous, Err: errors.New("ambiguous")}, 1},
+		{"checksum", &selfupdate.Failure{Kind: selfupdate.KindChecksum, Err: errors.New("checksum mismatch")}, 1},
+		{"managed command", &selfupdate.Failure{Kind: selfupdate.KindManagedCommand, Err: errors.New("brew failed")}, 1},
+		{"plain error", errors.New("plain error"), 1},
 	}
-	for _, err := range cases {
-		got := (selfUpdateErrors{}).Failure(err)
-		var ec ExitCoder
-		if !errors.As(got, &ec) {
-			t.Errorf("Failure(%v) = %v (%T), want an ExitCoder", err, got, got)
-			continue
-		}
-		if ec.ExitCode() != 1 {
-			t.Errorf("Failure(%v) exit code = %d, want 1", err, ec.ExitCode())
-		}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := (selfUpdateErrors{}).Failure(c.err)
+			var ec ExitCoder
+			if !errors.As(got, &ec) {
+				t.Fatalf("Failure(%v) = %v (%T), want an ExitCoder", c.err, got, got)
+			}
+			if ec.ExitCode() != c.want {
+				t.Errorf("Failure(%v) exit code = %d, want %d", c.err, ec.ExitCode(), c.want)
+			}
+		})
 	}
 }
 
@@ -215,8 +227,8 @@ func TestSelfUpdate_CheckExitCodeContract_EndToEnd(t *testing.T) {
 			t.Fatal("expected a non-nil error for a release-lookup failure")
 		}
 		var ec ExitCoder
-		if !errors.As(err, &ec) || ec.ExitCode() != 1 {
-			t.Fatalf("Execute() error = %v, want an ExitCoder with code 1", err)
+		if !errors.As(err, &ec) || ec.ExitCode() != 4 {
+			t.Fatalf("Execute() error = %v, want an ExitCoder with code 4 (KindReleaseLookup is a connection/I/O failure)", err)
 		}
 	})
 }

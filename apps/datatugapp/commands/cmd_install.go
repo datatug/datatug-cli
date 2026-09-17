@@ -3,36 +3,33 @@ package commands
 // specscore: feature/cli/install
 
 import (
-	"errors"
-
 	"github.com/spf13/cobra"
 
 	"github.com/strongo/cli-helpers/cliinstall/cobracmd"
-	"github.com/strongo/cli-helpers/selfupdate"
 )
 
-// installErrors implements cobracmd.ErrorMapper for datatug's own,
-// intentionally simple exit-code contract
-// (cli-install#req:host-owned-exit-codes), mirroring selfUpdateErrors: every
-// failure — a *cobracmd.UsageError (an invalid --format, or --all combined
-// with names), an unknown target name (selfupdate.KindUnknownTarget), a
-// missing per-user bin directory or an already-occupied destination
-// (selfupdate.KindNoInstallDir, selfupdate.KindDestinationExists), or any
-// failure kind shared with self-update — exits 1 via the same
-// commands.Exit/ExitCoder mechanism every other datatug command uses.
+// installErrors implements cobracmd.ErrorMapper for datatug's own exit
+// codes, mirroring selfUpdateErrors: both route every failure through the
+// same failureExitCode (cmd_exit_codes.go), which follows the parent CLI
+// spec's shared exit-code contract
+// (spec/features/cli/README.md's "Shared exit-code contract") —
+// (cli-install#req:host-owned-exit-codes). A *cobracmd.UsageError (an
+// invalid --format, or --all combined with names) and
+// selfupdate.KindUnknownTarget both map to code 2 (invalid arguments);
+// selfupdate.KindNoInstallDir and KindDestinationExists both map to code 4
+// (connection/I/O failure); every kind shared with self-update maps
+// identically to how self-update maps it.
 //
-// Every new kind cli-install added is mapped in its own switch case, per
-// that REQ ("MUST map the three new kinds explicitly... MUST NOT let them
-// fall into a self-update default branch"), even though datatug's own exit
-// code for all of them is the same 1 the self-update default branch already
-// used: KindUnknownTarget's underlying error already names the unknown
-// target and lists valid catalog ids
-// (cli-install#req:unknown-target-refused), which is the "usage message"
-// datatug reports for it.
+// Every new kind cli-install added is mapped in failureExitCode's own
+// switch case, per that REQ ("MUST map the three new kinds explicitly...
+// MUST NOT let them fall into a self-update default branch"):
+// KindUnknownTarget's underlying error already names the unknown target and
+// lists valid catalog ids (cli-install#req:unknown-target-refused), which
+// is the "usage message" datatug reports for it.
 type installErrors struct{}
 
-// Failure maps every install failure onto datatug's generic error exit
-// code, 1.
+// Failure maps every install failure onto datatug's parent-spec exit code
+// via failureExitCode (cmd_exit_codes.go).
 //
 // cliinstall/cobracmd v0.21.0's own mapFailure short-circuits a nil error
 // before ever calling opts.Errors.Failure (see that package's doc comment
@@ -41,20 +38,7 @@ type installErrors struct{}
 // non-nil command error" contract like selfUpdateErrors already does; the
 // v0.19.0-era nil-guard workaround this method used to carry is gone.
 func (installErrors) Failure(err error) error {
-	var usage *cobracmd.UsageError
-	if errors.As(err, &usage) {
-		return Exit(err.Error(), 1)
-	}
-	switch selfupdate.KindOf(err) {
-	case selfupdate.KindUnknownTarget:
-		// The underlying error already lists valid ids — see the type doc
-		// comment above — so no extra usage text is added here.
-		return Exit(err.Error(), 1)
-	case selfupdate.KindNoInstallDir, selfupdate.KindDestinationExists:
-		return Exit(err.Error(), 1)
-	default:
-		return Exit(err.Error(), 1)
-	}
+	return Exit(err.Error(), failureExitCode(err))
 }
 
 // InstallCommand returns the "install" command, built from

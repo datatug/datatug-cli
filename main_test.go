@@ -11,6 +11,7 @@ import (
 	"charm.land/fang/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
 	"github.com/datatug/datatug-cli/apps/global"
+	"github.com/posthog/posthog-go"
 	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -141,4 +142,107 @@ func TestMainFunc(t *testing.T) {
 		assert.NotNil(t, cmd)
 		assert.NotEmpty(t, opts)
 	})
+}
+
+// versionJSONStubRoot builds a minimal root command exposing a "version"
+// subcommand with a bool "--json" flag, standing in for the real root
+// fangcmd.Wire builds (buildinfo/cobracmd.VersionCommand), so these tests
+// don't depend on the full command tree or a real buildinfo.Info.
+func versionJSONStubRoot() *cobra.Command {
+	root := &cobra.Command{Use: "datatug", SilenceUsage: true, SilenceErrors: true}
+	versionCmd := &cobra.Command{
+		Use:  "version",
+		Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error { return nil },
+	}
+	versionCmd.Flags().Bool("json", false, "")
+	root.AddCommand(versionCmd)
+	return root
+}
+
+// TestMain_VersionJSON_NoTelemetryEnqueued proves
+// cli-install#req:version-json-side-effect-free holds at the main.go
+// level: `datatug version --json` must enqueue neither the "CLI started"
+// nor the "CLI exited" PostHog event, while every other invocation still
+// enqueues both, exactly as main.go did before this task added the
+// version --json exemption.
+func TestMain_VersionJSON_NoTelemetryEnqueued(t *testing.T) {
+	getCommandBackup := getCommand
+	dtlogEnqueueBackup := dtlogEnqueue
+	osArgsBackup := os.Args
+	defer func() {
+		getCommand = getCommandBackup
+		dtlogEnqueue = dtlogEnqueueBackup
+		os.Args = osArgsBackup
+	}()
+
+	getCommand = func() (*cobra.Command, []fang.Option) { return versionJSONStubRoot(), nil }
+
+	var enqueued []posthog.Message
+	dtlogEnqueue = func(msg posthog.Message) { enqueued = append(enqueued, msg) }
+
+	os.Args = []string{"datatug", "version", "--json"}
+	main()
+
+	assert.Empty(t, enqueued, "version --json must not enqueue any telemetry event")
+}
+
+// TestMain_OtherCommand_StillEnqueuesTelemetry is the control case for the
+// test above: an ordinary invocation must still enqueue both the "started"
+// and "exited" events, proving the version --json check above is a
+// narrow exemption, not a regression that silenced telemetry generally.
+func TestMain_OtherCommand_StillEnqueuesTelemetry(t *testing.T) {
+	getCommandBackup := getCommand
+	dtlogEnqueueBackup := dtlogEnqueue
+	osArgsBackup := os.Args
+	defer func() {
+		getCommand = getCommandBackup
+		dtlogEnqueue = dtlogEnqueueBackup
+		os.Args = osArgsBackup
+	}()
+
+	getCommand = func() (*cobra.Command, []fang.Option) {
+		root := &cobra.Command{
+			Use:           "datatug",
+			SilenceUsage:  true,
+			SilenceErrors: true,
+			RunE:          func(_ *cobra.Command, _ []string) error { return nil },
+		}
+		return root, nil
+	}
+
+	var enqueued []posthog.Message
+	dtlogEnqueue = func(msg posthog.Message) { enqueued = append(enqueued, msg) }
+
+	os.Args = []string{"datatug"}
+	main()
+
+	assert.Len(t, enqueued, 2, "a non-version-json invocation must enqueue both the started and exited events")
+}
+
+// TestIsVersionJSONInvocation covers isVersionJSONInvocation directly,
+// including the plain "version" (no --json), "--json=false", and
+// unmatched-command branches TestMain_VersionJSON_NoTelemetryEnqueued
+// doesn't reach.
+func TestIsVersionJSONInvocation(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"version --json", []string{"version", "--json"}, true},
+		{"version --json=true", []string{"version", "--json=true"}, true},
+		{"version --json=false", []string{"version", "--json=false"}, false},
+		{"version, no flag", []string{"version"}, false},
+		{"not version", []string{"init"}, false},
+		{"no args", nil, false},
+		{"version, unparseable flag", []string{"version", "--not-a-real-flag"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := versionJSONStubRoot()
+			root.AddCommand(&cobra.Command{Use: "init", RunE: func(_ *cobra.Command, _ []string) error { return nil }})
+			assert.Equal(t, c.want, isVersionJSONInvocation(root, c.args))
+		})
+	}
 }

@@ -68,6 +68,15 @@ brew install datatug
 go install github.com/datatug/datatug-cli@latest
 ```
 
+### Updating
+
+```bash
+datatug self-update          # or: datatug update
+datatug self-update --check  # report whether a newer release exists, without applying it
+```
+
+Homebrew installs run `brew update && brew upgrade --yes --cask -- datatug`; manual installs (curl, PowerShell, `go install`) download and checksum-verify the latest release and swap the binary in place. See [spec/features/cli/self-update](spec/features/cli/self-update/README.md).
+
 ## What you can do with DataTug
 
 - Explore data everywhere — SQL databases, cloud data sources, logs, and APIs (HTTP / REST)

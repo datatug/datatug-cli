@@ -27,10 +27,22 @@ import (
 
 var osExit = os.Exit
 
+// dtlogEnqueue is a seam over dtlog.Enqueue so tests can prove, without a
+// real PostHog client, exactly which invocations do and do not enqueue a
+// telemetry event — in particular that `version --json` enqueues none
+// (cli-install#req:version-json-side-effect-free in strongo/cli-helpers).
+var dtlogEnqueue = dtlog.Enqueue
+
 func main() {
 
-	// Enqueue an event
-	dtlog.Enqueue(posthog.Capture{Event: "DataTug CLI started"})
+	// skipTelemetry is set below, before fang.Execute runs, but declared
+	// here (and read by the deferred closure below) so the defer/recover
+	// registration keeps its original position — first, before anything
+	// that can panic (getCommand returning a nil root, in particular; see
+	// the "getCommand_nil" test). A panic before skipTelemetry is assigned
+	// leaves it false, which only means the unreached "started" event was
+	// never sent either — never a false skip.
+	var skipTelemetry bool
 
 	defer func() {
 		r := recover()
@@ -43,7 +55,7 @@ func main() {
 			logus.Errorf(ctx, "panic: %s", rText)
 			timestamp := time.Now()
 			distinctID := dtlog.DistinctID()
-			dtlog.Enqueue(posthog.NewDefaultException(
+			dtlogEnqueue(posthog.NewDefaultException(
 				timestamp,
 				distinctID,
 				"panic",
@@ -52,7 +64,9 @@ func main() {
 			_, _ = fmt.Fprintln(os.Stderr, "panic:", r)
 			debug.PrintStack()
 		}
-		dtlog.Enqueue(posthog.Capture{Event: "DataTug CLI exited"})
+		if !skipTelemetry {
+			dtlogEnqueue(posthog.Capture{Event: "DataTug CLI exited"})
+		}
 		dtlog.Close()
 		//time.Sleep(10 * time.Millisecond) // Allow some time for event to be sent
 		if r != nil {
@@ -70,6 +84,20 @@ func main() {
 		args = nil
 	}
 	root.SetArgs(args)
+
+	// `version --json` MUST NOT emit telemetry — including the start/exit
+	// events every other invocation gets — so probing an installed datatug
+	// build is safe to repeat
+	// (cli-install#req:version-json-side-effect-free in
+	// strongo/cli-helpers). Resolved through cobra's own command/flag
+	// resolution (root.Find + the matched command's own flag set) rather
+	// than hand-parsed argv matching, so this check can never disagree with
+	// what fang.Execute actually runs below.
+	skipTelemetry = isVersionJSONInvocation(root, args)
+
+	if !skipTelemetry {
+		dtlogEnqueue(posthog.Capture{Event: "DataTug CLI started"})
+	}
 
 	if err := fang.Execute(context.Background(), root, fangOpts...); err != nil {
 		// fang.Execute has already printed err (styled, or bare on a
@@ -90,6 +118,35 @@ func main() {
 var getCommand = func() (*cobra.Command, []fang.Option) {
 	root := commands.DatatugCommand()
 	info := buildinfo.Get("datatug")
+	// self-update is wired here, where main.go builds the root, against
+	// datatug's own compiled-in cliinstall catalog entry
+	// (cli-install#req:host-identity-from-catalog); commands.DatatugCommand
+	// itself stays version-agnostic so its existing zero-argument tests are
+	// unaffected.
+	root.AddCommand(commands.SelfUpdateCommand(info.Version))
 	fangOpts := fangcmd.Wire(root, info)
 	return root, fangOpts
+}
+
+// isVersionJSONInvocation reports whether args would dispatch root to the
+// buildinfo "version" subcommand (added by fangcmd.Wire, via
+// buildinfo/cobracmd.VersionCommand) with --json set. It uses cobra's own
+// command/flag resolution (root.Find, then the matched command's own flag
+// set) instead of scanning argv by hand, so it can never disagree with
+// what fang.Execute resolves and runs a few lines below — both walk the
+// exact same command tree with the exact same args.
+//
+// Calling cmd.ParseFlags here is safe to repeat: cobra's own Execute below
+// parses the same args into the same flags again, and pflag.FlagSet.Parse
+// is idempotent for identical input.
+func isVersionJSONInvocation(root *cobra.Command, args []string) bool {
+	cmd, flagArgs, err := root.Find(args)
+	if err != nil || cmd == nil || cmd.Name() != "version" {
+		return false
+	}
+	if err := cmd.ParseFlags(flagArgs); err != nil {
+		return false
+	}
+	asJSON, _ := cmd.Flags().GetBool("json")
+	return asJSON
 }

@@ -1,7 +1,7 @@
 charm.land/fang/v2 v2.0.1 h1:zQCM8JQJ1JnQX/66B5jlCYBUxL2as5JXQZ2KJ6EL0mY=
 charm.land/fang/v2 v2.0.1/go.mod h1:S1GmkpcvK+OB5w9caywUnJcsMew45Ot8FXqoz8ALrII=
-charm.land/lipgloss/v2 v2.0.1 h1:6Xzrn49+Py1Um5q/wZG1gWgER2+7dUyZ9XMEufqPSys=
-charm.land/lipgloss/v2 v2.0.1/go.mod h1:KjPle2Qd3YmvP1KL5OMHiHysGcNwq6u83MUjYkFvEkM=
+charm.land/lipgloss/v2 v2.0.5 h1:kbNxgeeUOYv5J0YdpxFjfvf3dFvqH8Aci4zB6xqFtrY=
+charm.land/lipgloss/v2 v2.0.5/go.mod h1:9oqhxt4yxIMe6q5A4kHr44DremZk7J9UNh74GlWa5nc=
 cloud.google.com/go v0.123.0 h1:2NAUJwPR47q+E35uaJeYoNhuNEM9kM8SjgRgdeOJUSE=
 cloud.google.com/go v0.123.0/go.mod h1:xBoMV08QcqUGuPW65Qfm1o9Y4zKZBpGS+7bImXLTAZU=
 cloud.google.com/go/auth v0.23.2 h1:pxSCpfiji41hpzpPdMCftEUCezpgpqmmDdYiAjCKXxo=
@@ -345,8 +345,10 @@ github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWD
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/strongo/analytics v0.2.8 h1:h0snZrFba1DDI7H/RcePbq3V8MeuOrZFC8kj5ZJkp/I=
 github.com/strongo/analytics v0.2.8/go.mod h1:/pf7goR1CZtkvZHrJH5sXpJJl6IAefWCx82eSGUZ2V0=
-github.com/strongo/buildinfo v0.2.1 h1:z6H2UJYT8hAgzCUnNIjOCEAWmNnvj3KZdYXIw5dZngs=
-github.com/strongo/buildinfo v0.2.1/go.mod h1:JpxZ3Jku81LJC1RNIqCNYwguDzLk90eemxUXx4JnSlA=
+github.com/strongo/buildinfo v0.3.0 h1:nPbCrSA+7I3bct6mwZ24U6SHfV7TaRafoYzDucwl1Qg=
+github.com/strongo/buildinfo v0.3.0/go.mod h1:JpxZ3Jku81LJC1RNIqCNYwguDzLk90eemxUXx4JnSlA=
+github.com/strongo/cli-helpers v0.16.0 h1:KU8pU8KvSDp1fNH+oFoQDF95zl+xna7eMcC9F9wN6fE=
+github.com/strongo/cli-helpers v0.16.0/go.mod h1:2eUFIkQELgeWLeYz9g3hKer+Kcf+3vnAzHMOPDE7ItA=
 github.com/strongo/decimal v0.1.2 h1:/LHdX9zJTUPpEM2cuQhnwCWNWLCUwG0BJMyOetpryY8=
 github.com/strongo/decimal v0.1.2/go.mod h1:uKFgetJbR2uT026stdbK54ELXTH9h0vZOPPOp7DAODk=
 github.com/strongo/dsstore v0.0.8 h1:BYsbfOVWKEvr24vHdnM6PNyHuFW968rr4tc5EK7BeQw=

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/posthog/posthog-go"
 	"github.com/stretchr/testify/assert"
@@ -31,6 +32,125 @@ func withTempConfig(t *testing.T, content string) (path string, restore func()) 
 	old := getPosthogConfigFilePath
 	getPosthogConfigFilePath = func() string { return p }
 	return p, func() { getPosthogConfigFilePath = old }
+}
+
+// --- Start: side effects require an explicit call ---
+
+// TestStart_NotCalled_NoKeyFetchOrFileWrite proves
+// cli-install#req:version-json-side-effect-free at the dtlog package level:
+// without a Start() call, this package makes no network request and writes
+// no file — getPostHogApiKeyFromServerFunc and osCreate are never invoked.
+// This is the seam `datatug version --json` relies on: main.go never calls
+// Start for that invocation (see main_test.go's
+// TestMain_VersionJSON_NoTelemetryEnqueued and its dtlogStart counterpart).
+func TestStart_NotCalled_NoKeyFetchOrFileWrite(t *testing.T) {
+	oldFetch := getPostHogApiKeyFromServerFunc
+	oldCreate := osCreate
+	var fetchCalled, createCalled bool
+	getPostHogApiKeyFromServerFunc = func() (string, error) {
+		fetchCalled = true
+		return "", nil
+	}
+	osCreate = func(name string) (*os.File, error) {
+		createCalled = true
+		return nil, errors.New("must not be called")
+	}
+	defer func() {
+		getPostHogApiKeyFromServerFunc = oldFetch
+		osCreate = oldCreate
+	}()
+
+	// Deliberately NOT calling Start(). A few enqueue/close calls exercise
+	// the package the way a `version --json` run would, without ever
+	// starting telemetry.
+	Enqueue(posthog.Capture{Event: "must not reach the network or disk"})
+	Close()
+
+	assert.False(t, fetchCalled, "getPostHogApiKeyFromServerFunc must not be called without Start()")
+	assert.False(t, createCalled, "osCreate must not be called without Start()")
+}
+
+// TestStart_FreshCall_SetsStartedAndSession proves Start()'s own "not
+// already started" path: it flips started to true and generates a new
+// session id SYNCHRONOUSLY (before the async goroutine that resolves the
+// PostHog client even runs) — this is the branch
+// TestStart_Called_IsIdempotent's pre-started setup never reaches. The
+// injected seams keep the async goroutine off the network and disk
+// (REQ: no-network-in-tests); the test waits for it to finish (via
+// `initialized`) before restoring shared state, so it never races the
+// deferred cleanup.
+func TestStart_FreshCall_SetsStartedAndSession(t *testing.T) {
+	_, restoreConfig := withTempConfig(t, "api_key: test-key\ndistinct_id: test-id\n")
+	oldFetch := getPostHogApiKeyFromServerFunc
+	oldNew := posthogNewWithConfig
+	getPostHogApiKeyFromServerFunc = func() (string, error) { return "", nil }
+	posthogNewWithConfig = func(apiKey string, config posthog.Config) (posthog.Client, error) {
+		return &mockPosthogClient{}, nil
+	}
+
+	mu.Lock()
+	oldStarted := started
+	oldSessionID := sessionID
+	started = false
+	sessionID = "before-start"
+	mu.Unlock()
+
+	Start()
+
+	mu.Lock()
+	gotStarted := started
+	gotSessionID := sessionID
+	mu.Unlock()
+	assert.True(t, gotStarted, "Start() must set started = true")
+	assert.NotEqual(t, "before-start", gotSessionID, "Start() must generate a new session id synchronously")
+
+	// Let the async goroutine (getPostHogClient + postInitFlush) finish
+	// before restoring shared state, so it can never race the restore.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		done := initialized
+		mu.Unlock()
+		if done || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	mu.Lock()
+	started = oldStarted
+	sessionID = oldSessionID
+	ph = nil
+	initialized = false
+	queue = nil
+	mu.Unlock()
+	getPostHogApiKeyFromServerFunc = oldFetch
+	posthogNewWithConfig = oldNew
+	restoreConfig()
+}
+
+// TestStart_Called_IsIdempotent proves a second Start() call is a no-op
+// (does not re-run session bookkeeping or spawn a second goroutine), so a
+// caller that calls it more than once by mistake never double-initializes.
+func TestStart_Called_IsIdempotent(t *testing.T) {
+	mu.Lock()
+	oldStarted := started
+	oldSessionID := sessionID
+	started = true // pretend Start already ran
+	sessionID = "already-started-session"
+	mu.Unlock()
+	defer func() {
+		mu.Lock()
+		started = oldStarted
+		sessionID = oldSessionID
+		mu.Unlock()
+	}()
+
+	Start()
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, "already-started-session", sessionID, "a second Start() call must not reset session bookkeeping")
 }
 
 // --- DistinctID ---

@@ -47,7 +47,8 @@ require (
 	github.com/sneat-co/sneat-go-core v0.67.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	github.com/strongo/buildinfo v0.2.1
+	github.com/strongo/buildinfo v0.3.0
+	github.com/strongo/cli-helpers v0.21.0
 	github.com/strongo/logus v0.4.3
 	github.com/strongo/random v0.0.2
 	github.com/strongo/slice v0.3.10
@@ -63,7 +64,7 @@ require (
 )
 
 require (
-	charm.land/lipgloss/v2 v2.0.1 // indirect
+	charm.land/lipgloss/v2 v2.0.5 // indirect
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.23.2 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect

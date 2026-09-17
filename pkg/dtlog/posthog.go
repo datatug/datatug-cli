@@ -27,6 +27,7 @@ var (
 	mu          sync.Mutex
 	queue       []posthog.Message
 	initialized bool
+	started     bool
 )
 
 type yamlEncoder interface {
@@ -66,7 +67,30 @@ type posthogConfig struct {
 	DistinctID      string    `yaml:"distinct_id"`
 }
 
-func init() {
+// Start begins PostHog client initialization: session bookkeeping plus an
+// asynchronous goroutine that resolves the API key (reading the local
+// config file, and — when the cached key is stale — fetching a fresh one
+// from raw.githubusercontent.com over the network) and, when a distinct id
+// or refreshed key needs saving, writes ~/datatug/.posthog.yaml.
+//
+// It MUST be called at most once, and only by a caller that actually wants
+// telemetry for this invocation — this package used to do all of that from
+// a package init() unconditionally, which meant every invocation, including
+// `datatug version --json`, silently made a network request and could write
+// a file merely by importing this package. Before Start runs, Enqueue and
+// Close are no-ops (cli-install#req:version-json-side-effect-free,
+// json-output-side-effect-free): main.go calls Start only when telemetry is
+// not skipped for this invocation, after resolving isVersionJSONInvocation,
+// so `version --json` never reaches getPostHogClient at all.
+func Start() {
+	mu.Lock()
+	if started {
+		mu.Unlock()
+		return
+	}
+	started = true
+	mu.Unlock()
+
 	sessionID = uuid.NewString()
 	sessionStarted = time.Now()
 	go func() {
@@ -78,6 +102,9 @@ func init() {
 func Close() {
 	mu.Lock()
 	defer mu.Unlock()
+	if !started {
+		return
+	}
 	if ph != nil {
 		_ = ph.Close()
 		ph = nil
@@ -221,8 +248,18 @@ func withSession(p posthog.Properties) posthog.Properties {
 		Set("$session_duration", time.Since(sessionStarted).Milliseconds())
 }
 
+// Enqueue queues msg for delivery once the PostHog client has finished
+// initializing (see postInitFlush), or delivers it immediately once it has.
+// Before Start has been called, Enqueue is a no-op: there is no client to
+// deliver to, and queuing forever without a Start call would leak memory
+// for an invocation that deliberately never starts telemetry (`version
+// --json`; see Start's own doc comment).
 func Enqueue(msg posthog.Message) {
 	mu.Lock()
+	if !started {
+		mu.Unlock()
+		return
+	}
 	if !initialized {
 		queue = append(queue, msg)
 		mu.Unlock()

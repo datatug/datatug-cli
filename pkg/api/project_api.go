@@ -54,7 +54,16 @@ func GetProjectSummary(ctx context.Context, ref dto.ProjectRef) (projSummary *da
 	return &datatug.ProjectSummary{ProjectFile: projectFile}, err
 }
 
-// CreateProject create a new DataTug project using requested store
+// CreateProject create a new DataTug project using requested store.
+//
+// The request is forwarded to the store unchanged, id included: since
+// datatug-core v0.39.0 dto.CreateProjectRequest carries a caller-supplied
+// ID that addresses the project for the rest of its life, and no layer
+// between the caller and the store may derive, fold or replace it. The id's
+// rules live in dto.CreateProjectRequest.Validate (1-64 characters,
+// lower-case ASCII letters, digits, "-" and "_", starting and ending with a
+// letter or a digit); this function only surfaces that error, and never
+// re-implements it.
 func CreateProject(ctx context.Context, request dto.CreateProjectRequest) (*datatug.ProjectSummary, error) {
 	if err := request.Validate(); err != nil {
 		return nil, err

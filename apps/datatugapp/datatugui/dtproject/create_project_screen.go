@@ -2,6 +2,7 @@ package dtproject
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
+	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/filetug/filetug/pkg/fsutils"
@@ -20,6 +22,7 @@ import (
 	"github.com/google/go-github/v91/github"
 	"github.com/pkg/browser"
 	"github.com/rivo/tview"
+	"github.com/strongo/validation"
 	"golang.org/x/oauth2"
 )
 
@@ -29,6 +32,144 @@ const (
 	createAtLocal  createTarget = "Local"
 	createAtGitHub createTarget = "GitHub"
 )
+
+// validateNewProject reports whether the create form holds a project
+// datatug-core would accept, and is the only validation this screen does.
+//
+// A project id is supplied by the caller and never derived from the title —
+// it addresses the project for the rest of its life, as a directory name
+// under a file-backed store and as a key segment elsewhere — so the rules
+// it must satisfy (1-64 characters, lower-case ASCII letters, digits, "-"
+// and "_", starting and ending with a letter or a digit, upper case refused
+// rather than folded) live in dto.ValidateProjectID, which datatug-core
+// v0.40.0 exports for exactly this: a caller that has to choose an id,
+// without a whole dto.CreateProjectRequest to wrap it in. This function
+// forwards to it and surfaces its error verbatim, including "id is
+// required" for an empty one; it re-implements none of the rules, so the
+// screen cannot drift from the store that will enforce them.
+//
+// The title is the one thing checked locally. The screen has no store to
+// name in a CreateProjectRequest — it writes the project's files itself
+// (createLocalProject) or hands the job to dtgithub, and never calls
+// storage.NewDatatugStore — and "a title is required" is the whole of the
+// rule, so there is nothing here to drift from either. It is checked first
+// so a pristine form asks for the title before the id: filling the title in
+// then suggests the id by itself.
+func validateNewProject(projectID, title string) error {
+	if strings.TrimSpace(title) == "" {
+		return validation.NewErrRequestIsMissingRequiredField("title")
+	}
+	return dto.ValidateProjectID(projectID)
+}
+
+// suggestProjectID derives a project-id suggestion from a project title,
+// for the create form to prefill the id field with. It is a convenience,
+// not a rule: the id actually used is whatever the id field holds when the
+// user presses Create, and validateNewProject alone decides whether that is
+// acceptable.
+//
+// Every run of characters that cannot appear in an id becomes a single "-",
+// ASCII letters are lower-cased, and separators are trimmed from both ends,
+// so "My First Project" suggests "my-first-project". The candidate is then
+// put through dto.ValidateProjectID — core's own rules, the same ones the
+// form applies to what the user types: if it comes back refused — a
+// non-Latin title yields no ASCII letters or digits at all, a very long one
+// overruns the id length limit — the suggestion is dropped and "" returned.
+// The screen then leaves the id empty for the user to type instead of
+// blocking on the title, and this function never has to know why core
+// refused it, nor carry a copy of the length cap to pre-empt it.
+func suggestProjectID(title string) string {
+	var suggestion strings.Builder
+	separatorPending := false
+	for _, r := range strings.ToLower(title) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			// Only between two kept characters, never leading: that trims
+			// the start, and never emitting a trailing one trims the end.
+			if separatorPending && suggestion.Len() > 0 {
+				suggestion.WriteByte('-')
+			}
+			separatorPending = false
+			suggestion.WriteRune(r)
+			continue
+		}
+		separatorPending = true
+	}
+	candidate := suggestion.String()
+	if dto.ValidateProjectID(candidate) != nil {
+		return ""
+	}
+	return candidate
+}
+
+// newProjectID is the create screen's project id and the single piece of
+// state behind the Title/ID coupling: whether the user has taken the id
+// over from the title.
+//
+// The id starts out following the title, a keystroke at a time. The first
+// non-empty text the user types into the id field is a choice, and from
+// then on the title never overwrites it. Clearing the field is not a
+// choice but the absence of one — someone who wipes the id wants the
+// default back — so it hands the id to the title again and the next title
+// keystroke suggests afresh.
+//
+// It lives out here, away from goCreateProjectScreen's closures, so the
+// rule can be tested without standing up a terminal.
+type newProjectID struct {
+	value string
+	// userOwns is true while the id belongs to the user rather than to the
+	// title. Only a non-empty edit sets it.
+	userOwns bool
+}
+
+// titleChanged re-derives the id from title unless the user owns it, and
+// reports whether the id actually changed — the screen rewrites the widget
+// only then, so a title keystroke that suggests the same id does not move
+// the user's cursor for nothing.
+func (v *newProjectID) titleChanged(title string) (changed bool) {
+	if v.userOwns {
+		return false
+	}
+	suggested := suggestProjectID(title)
+	if suggested == v.value {
+		return false
+	}
+	v.value = suggested
+	return true
+}
+
+// edited records what the user typed into the id field. Only
+// idFieldChanged calls it, and only for a keystroke, so every call here is
+// by definition the user speaking.
+func (v *newProjectID) edited(text string) {
+	v.value = text
+	v.userOwns = text != ""
+}
+
+// idFieldChanged applies one call of the ID field's tview changed handler
+// to id, and reports whether the screen must write the field back
+// afterwards. It is the whole of that decision, extracted from the screen
+// so both halves of it can be tested rather than merely written down.
+//
+// screenIsWriting is true while the screen itself is inside SetText on that
+// field. tview's changed handler cannot tell its own write from a
+// keystroke, and a write recorded as an edit would latch the id to the user
+// on the first character the screen's own suggestion put there — after
+// which the title would silently stop suggesting.
+//
+// titleNow is the title as it stands. It is what a decision to re-suggest
+// would need, and it is deliberately not used: the answer is always "do not
+// write the field back". Clearing the id hands it to the title (see
+// newProjectID), and the title suggests again on its next keystroke — but
+// refilling the field here, at the moment it goes empty, would make the id
+// impossible to clear and retype, since the last backspace would
+// immediately restore the text the user was deleting.
+func idFieldChanged(id *newProjectID, screenIsWriting bool, text, titleNow string) (writeFieldBack bool) {
+	if screenIsWriting {
+		return false
+	}
+	id.edited(text)
+	return false
+}
 
 // goCreateProjectScreen shows a modal to create a new project
 func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
@@ -57,6 +198,10 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 	var githubOwner string
 	var visibility = "Public"
 	location = "~/datatug"
+
+	// projectID is what the user will create the project as, together with
+	// the one piece of state that decides who owns it. See its type.
+	var projectID newProjectID
 
 	flex := tview.NewFlex().SetDirection(tview.FlexRow)
 
@@ -100,6 +245,52 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 	//sneatv.DefaultBorderWithoutPadding(flex.Box)
 	//flex.AddItem(tview.NewTextView(), 1, 0, false)
 	flex.SetTitle("New Project")
+
+	// validationView carries the form's inline error: an empty or malformed
+	// id (or a missing title) has to say so here and stop the create, never
+	// reach a store that would refuse it out of sight or, worse, accept it.
+	validationView := tview.NewTextView().SetDynamicColors(true).SetWordWrap(true)
+
+	// idField is rebuilt by every refreshForm, so the closures below reach
+	// it through this variable rather than capturing one instance.
+	var idField *tview.InputField
+
+	// settingProjectID is true only while the screen itself writes into
+	// idField. tview's changed handler cannot tell a programmatic SetText
+	// from a keystroke, and without this guard the screen's own suggestion
+	// would look like a user edit and latch the id on its first character.
+	var settingProjectID bool
+
+	showValidationError := func(err error) {
+		validationView.SetText("[red]" + tview.Escape(err.Error()) + "[-]")
+	}
+
+	// refreshValidation re-checks the form as it is typed. A form nobody has
+	// touched yet stays quiet — "id is required" before the first keystroke
+	// is noise, not help — but anything typed is judged immediately, and
+	// pressing Create re-checks unconditionally.
+	refreshValidation := func() {
+		if title == "" && projectID.value == "" {
+			validationView.SetText("")
+			return
+		}
+		if err := validateNewProject(projectID.value, title); err != nil {
+			showValidationError(err)
+			return
+		}
+		validationView.SetText("")
+	}
+
+	// showProjectID writes the id the title just suggested into the widget
+	// without that write counting as a user edit.
+	showProjectID := func() {
+		if idField == nil {
+			return
+		}
+		settingProjectID = true
+		idField.SetText(projectID.value)
+		settingProjectID = false
+	}
 
 	var refreshForm func()
 
@@ -180,9 +371,13 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 		form.Clear(true)
 		form.AddInputField("Title", title, 50, nil, func(text string) {
 			title = text
+			if projectID.titleChanged(title) {
+				showProjectID()
+			}
 			if createAt != "Local" {
 				updateGithubPath()
 			}
+			refreshValidation()
 		}).SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 			switch event.Key() {
 			case tcell.KeyUp:
@@ -204,6 +399,24 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 				return event
 			}
 		})
+
+		// The id field follows Title, so that the suggestion appears right
+		// under the words it was derived from and is edited in place.
+		idField = tview.NewInputField().
+			SetLabel("ID").
+			SetText(projectID.value).
+			SetFieldWidth(50).
+			SetChangedFunc(func(text string) {
+				// Thin on purpose: idFieldChanged owns what a change to
+				// this field means, so the two rules it carries are pinned
+				// by tests instead of living in a closure no test can
+				// reach.
+				if idFieldChanged(&projectID, settingProjectID, text, title) {
+					showProjectID()
+				}
+				refreshValidation()
+			})
+		form.AddFormItem(idField)
 
 		if createAt == "Local" {
 			form.AddInputField("Location", location, 0, nil, func(text string) {
@@ -247,8 +460,11 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 
 		form.SetButtonBackgroundColor(tcell.ColorCornflowerBlue)
 		form.AddButton("Create", func() {
-			if strings.TrimSpace(title) == "" {
-				sneatnav.ShowErrorModal(tui, fmt.Errorf("project title is required"))
+			// Checked here as well as on every keystroke: a form the user
+			// never touched is quiet, and pressing Create on it must still
+			// say what is missing rather than create a project with no id.
+			if err := validateNewProject(projectID.value, title); err != nil {
+				showValidationError(err)
 				return
 			}
 			repoName := title
@@ -263,7 +479,7 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 				projectVisibility = datatug.PublicProject
 			default:
 			}
-			handleCreateProject(tui, createAt, title, location, repoName, projectVisibility)
+			handleCreateProject(tui, createAt, projectID.value, title, location, repoName, projectVisibility)
 		})
 		form.AddButton("Cancel", func() {
 			_ = GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)
@@ -273,6 +489,9 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 	refreshForm()
 
 	flex.AddItem(form, 0, 1, true)
+	// Three rows so a full validation message (core's "invalid character"
+	// error spells out the whole charset) is readable without truncation.
+	flex.AddItem(validationView, 3, 0, false)
 
 	contentPanel := sneatnav.NewPanel(tui, sneatv.WithBordersWithoutPadding(flex, flex.Box))
 	tui.SetPanels(nil, contentPanel)
@@ -349,14 +568,14 @@ func authenticateGitHub(tui *sneatnav.TUI, onSuccess func(owner string)) {
 	}()
 }
 
-func handleCreateProject(tui *sneatnav.TUI, createAt createTarget, title, location, repoName string, visibility datatug.ProjectVisibility) {
+func handleCreateProject(tui *sneatnav.TUI, createAt createTarget, projectID, title, location, repoName string, visibility datatug.ProjectVisibility) {
 	var projectRef dtconfig.ProjectRef
 	var err error
 	switch createAt {
 	case createAtLocal:
-		projectRef, err = createLocalProject(tui, title, location)
+		projectRef, err = createLocalProject(tui, projectID, title, location)
 	case createAtGitHub:
-		projectRef, err = createGitHubProject(tui, repoName, visibility)
+		projectRef, err = createGitHubProject(tui, projectID, repoName, visibility)
 	}
 	if err != nil {
 		sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to create project: %w", err))
@@ -366,9 +585,16 @@ func handleCreateProject(tui *sneatnav.TUI, createAt createTarget, title, locati
 	openProject(tui, projectRef)
 }
 
-func createLocalProject(tui *sneatnav.TUI, name, location string) (projectRef dtconfig.ProjectRef, err error) {
+// createLocalProject writes a new project under location.
+//
+// The directory is named after projectID, not the title: the id is the
+// caller-supplied, charset-restricted name a project is addressed by
+// (datatug-core v0.39.0), while a title is free text that may contain path
+// separators, "..", whitespace or characters a file system cannot store.
+// The title is recorded inside the project file, where it belongs.
+func createLocalProject(tui *sneatnav.TUI, projectID, title, location string) (projectRef dtconfig.ProjectRef, err error) {
 	fullPath := fsutils.ExpandHome(location)
-	projectPath := filepath.Join(fullPath, name)
+	projectPath := filepath.Join(fullPath, projectID)
 
 	if err = os.MkdirAll(projectPath, 0755); err != nil {
 		sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to create project directory: %w", err))
@@ -381,21 +607,34 @@ func createLocalProject(tui *sneatnav.TUI, name, location string) (projectRef dt
 		return
 	}
 
-	// Create datatug-project.json
-	configContent := fmt.Sprintf(`{
-  "id": "%s",
-  "title": "%s"
-}`, name, name)
+	// Create datatug-project.json. Marshalled rather than formatted into a
+	// template: a title is free text now that the id carries the naming
+	// rules, so a quote or a backslash in it would otherwise write a file
+	// that is not JSON at all.
+	var configContent []byte
+	if configContent, err = json.MarshalIndent(struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}{ID: projectID, Title: title}, "", "  "); err != nil {
+		sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to build project config: %w", err))
+		return
+	}
 	configFilePath := filepath.Join(datatugDir, storage.ProjectSummaryFileName)
-	if err = os.WriteFile(configFilePath, []byte(configContent), 0644); err != nil {
+	if err = os.WriteFile(configFilePath, configContent, 0644); err != nil {
 		sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to create project config: %w", err))
 		return
 	}
 
-	// Add to app settings
-	if err = dtconfig.AddProjectToSettings(dtconfig.ProjectRef{
-		Path: projectPath,
-	}); err != nil {
+	// Add to app settings. The id is recorded here too:
+	// dtconfig.AddProjectToSettings rejects a project whose ID matches one
+	// already listed, so leaving it empty made the second locally created
+	// project collide with the first ("project already exists, id: ").
+	projectRef = dtconfig.ProjectRef{
+		ID:    projectID,
+		Path:  projectPath,
+		Title: title,
+	}
+	if err = dtconfig.AddProjectToSettings(projectRef); err != nil {
 		sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to update app settings: %w", err))
 		return
 	}
@@ -408,7 +647,17 @@ func openProject(tui *sneatnav.TUI, projectRef dtconfig.ProjectRef) {
 	GoDatatugProjectScreen(projectCtx)
 }
 
-func createGitHubProject(tui *sneatnav.TUI, title string, visibility datatug.ProjectVisibility) (projectRef dtconfig.ProjectRef, err error) {
+// createGitHubProject creates the project in a GitHub repository.
+//
+// projectID is the id the user chose on the create screen, passed through
+// rather than invented here: the id belongs to the person creating the
+// project, on this target exactly as on the local one.
+//
+// Note that dtgithub wants something else under the same name —
+// GithubRepoProjectsStore.CreateNewProject splits its projectID into
+// "owner/repo/dir" — so a plain project id does not satisfy it, and that
+// mismatch is issue #260, left open here deliberately.
+func createGitHubProject(tui *sneatnav.TUI, projectID, title string, visibility datatug.ProjectVisibility) (projectRef dtconfig.ProjectRef, err error) {
 	ctx := context.Background()
 	token, err := ghauth.GetToken()
 	if err != nil || token == nil {
@@ -423,7 +672,6 @@ func createGitHubProject(tui *sneatnav.TUI, title string, visibility datatug.Pro
 		return projectRef, fmt.Errorf("failed to create GitHub client: %w", err)
 	}
 
-	var projectID string
 	projectsStore := dtgithub.NewRepoProjectsStore(client, "")
 
 	_, err = projectsStore.CreateNewProject(ctx, projectID, title, visibility, func(step string, status string) {

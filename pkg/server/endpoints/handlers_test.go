@@ -308,11 +308,27 @@ func TestCreateProject(t *testing.T) {
 	cap := &handleCapture{}
 	withFakeHandleCapture(t, cap, func() {
 		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodPost, "/?store=s1", `{"title":"test"}`)
+		r := makeRequest(http.MethodPost, "/?store=s1", `{"id":"test","title":"test"}`)
 		endpoints := ProjectAgentEndpoints{}
 		endpoints.createProject(w, r)
 		if !cap.workerCalled {
 			t.Error("expected worker to be called")
+		}
+		// The content-length floor has to admit the shortest body that can
+		// carry both mandatory fields. Sized for `{"title":""}` before
+		// datatug-core v0.39.0 made `id` caller-supplied, it would now be
+		// describing a request shape that no longer exists — and a floor
+		// raised past this body would reject a perfectly valid create with
+		// a length error instead of ever reaching Validate.
+		const shortestValidBody = `{"id":"a","title":"t"}`
+		minLength := cap.verifyOptions.MinimumContentLength()
+		if minLength > int64(len(shortestValidBody)) {
+			t.Errorf("MinimumContentLength() = %d, want at most %d (the length of %s)",
+				minLength, len(shortestValidBody), shortestValidBody)
+		}
+		if minLength <= int64(len(`{"title":""}`)) {
+			t.Errorf("MinimumContentLength() = %d, want more than %d: a body that short cannot name both `id` and `title`",
+				minLength, len(`{"title":""}`))
 		}
 	})
 }

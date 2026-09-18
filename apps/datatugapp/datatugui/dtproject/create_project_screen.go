@@ -22,6 +22,7 @@ import (
 	"github.com/google/go-github/v91/github"
 	"github.com/pkg/browser"
 	"github.com/rivo/tview"
+	"github.com/strongo/validation"
 	"golang.org/x/oauth2"
 )
 
@@ -32,38 +33,33 @@ const (
 	createAtGitHub createTarget = "GitHub"
 )
 
-// newProjectStoreID is the store id the create screen quotes when it asks
-// datatug-core whether the form is valid.
-//
-// dto.CreateProjectRequest.Validate checks the store alongside the id and
-// the title, and this screen has no store to name: it writes the project's
-// files itself (createLocalProject) or hands the job to dtgithub, and never
-// calls storage.NewDatatugStore. "files" is the id `datatug serve`
-// registers the local file store under (pkg/server/http_server.go), so it
-// is the closest true answer for the Local target and a placeholder for the
-// GitHub one. Nothing resolves a store from it here — it exists only so the
-// id and title rules can be enforced by their owner instead of being
-// copied into this package.
-const newProjectStoreID = "files"
-
 // validateNewProject reports whether the create form holds a project
 // datatug-core would accept, and is the only validation this screen does.
 //
-// Since datatug-core v0.39.0 a project id is supplied by the caller and
-// never derived from the title — it addresses the project for the rest of
-// its life, as a directory name under a file-backed store and as a key
-// segment elsewhere — so the rules it must satisfy (1-64 characters,
-// lower-case ASCII letters, digits, "-" and "_", starting and ending with a
-// letter or a digit, upper case refused rather than folded) live in
-// dto.CreateProjectRequest.Validate. This function forwards to it and
-// surfaces its error verbatim; it deliberately re-implements none of it, so
-// the screen cannot drift from the store that will enforce it.
+// A project id is supplied by the caller and never derived from the title —
+// it addresses the project for the rest of its life, as a directory name
+// under a file-backed store and as a key segment elsewhere — so the rules
+// it must satisfy (1-64 characters, lower-case ASCII letters, digits, "-"
+// and "_", starting and ending with a letter or a digit, upper case refused
+// rather than folded) live in dto.ValidateProjectID, which datatug-core
+// v0.40.0 exports for exactly this: a caller that has to choose an id,
+// without a whole dto.CreateProjectRequest to wrap it in. This function
+// forwards to it and surfaces its error verbatim, including "id is
+// required" for an empty one; it re-implements none of the rules, so the
+// screen cannot drift from the store that will enforce them.
+//
+// The title is the one thing checked locally. The screen has no store to
+// name in a CreateProjectRequest — it writes the project's files itself
+// (createLocalProject) or hands the job to dtgithub, and never calls
+// storage.NewDatatugStore — and "a title is required" is the whole of the
+// rule, so there is nothing here to drift from either. It is checked first
+// so a pristine form asks for the title before the id: filling the title in
+// then suggests the id by itself.
 func validateNewProject(projectID, title string) error {
-	return dto.CreateProjectRequest{
-		StoreID: newProjectStoreID,
-		ID:      projectID,
-		Title:   title,
-	}.Validate()
+	if strings.TrimSpace(title) == "" {
+		return validation.NewErrRequestIsMissingRequiredField("title")
+	}
+	return dto.ValidateProjectID(projectID)
 }
 
 // suggestProjectID derives a project-id suggestion from a project title,
@@ -75,12 +71,13 @@ func validateNewProject(projectID, title string) error {
 // Every run of characters that cannot appear in an id becomes a single "-",
 // ASCII letters are lower-cased, and separators are trimmed from both ends,
 // so "My First Project" suggests "my-first-project". The candidate is then
-// put through validateNewProject, the same check the form applies to what
-// the user types: if it comes back refused — a non-Latin title yields no
-// ASCII letters or digits at all, a very long one overruns the id length
-// limit — the suggestion is dropped and "" returned. The screen then leaves
-// the id empty for the user to type instead of blocking on the title, and
-// this function never has to know why core refused it.
+// put through dto.ValidateProjectID — core's own rules, the same ones the
+// form applies to what the user types: if it comes back refused — a
+// non-Latin title yields no ASCII letters or digits at all, a very long one
+// overruns the id length limit — the suggestion is dropped and "" returned.
+// The screen then leaves the id empty for the user to type instead of
+// blocking on the title, and this function never has to know why core
+// refused it, nor carry a copy of the length cap to pre-empt it.
 func suggestProjectID(title string) string {
 	var suggestion strings.Builder
 	separatorPending := false
@@ -98,7 +95,7 @@ func suggestProjectID(title string) string {
 		separatorPending = true
 	}
 	candidate := suggestion.String()
-	if candidate == "" || validateNewProject(candidate, title) != nil {
+	if dto.ValidateProjectID(candidate) != nil {
 		return ""
 	}
 	return candidate

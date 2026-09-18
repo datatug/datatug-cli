@@ -198,6 +198,8 @@ func TestValidateNewProject(t *testing.T) {
 		{name: "underscores and digits are allowed inside", projectID: "a_1-b", title: "T"},
 		{name: "a missing id is refused", projectID: "", title: "My First Project", wantErr: true},
 		{name: "a missing title is refused", projectID: "my-first-project", title: "", wantErr: true},
+		{name: "a whitespace-only title is refused", projectID: "my-first-project", title: "   ", wantErr: true},
+		{name: "a title is not held to the id's charset", projectID: "my-first-project", title: "Проект: 2026/Q1 «план»"},
 		{name: "upper case is refused, not folded", projectID: "My-Project", title: "T", wantErr: true},
 		{name: "spaces are refused", projectID: "my project", title: "T", wantErr: true},
 		{name: "a path separator is refused", projectID: "a/b", title: "T", wantErr: true},
@@ -215,4 +217,17 @@ func TestValidateNewProject(t *testing.T) {
 			}
 		})
 	}
+
+	// The title is checked before the id, so a form with neither asks for
+	// the title first — and filling it in then suggests the id by itself,
+	// which is the shortest route out of an empty form.
+	t.Run("an empty form asks for the title before the id", func(t *testing.T) {
+		err := validateNewProject("", "")
+		if err == nil {
+			t.Fatal("validateNewProject(\"\", \"\") = nil, want an error")
+		}
+		if !strings.Contains(err.Error(), "title") {
+			t.Errorf("validateNewProject(\"\", \"\") = %v, want it to name the title first", err)
+		}
+	})
 }

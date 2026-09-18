@@ -184,6 +184,79 @@ func TestNewProjectIDFollowsTitleUntilEdited(t *testing.T) {
 	})
 }
 
+// TestIDFieldChanged pins the two rules that used to live only inside the
+// create screen's changed handler, where no test could reach them. Each
+// subtest names the mutation it exists to catch.
+func TestIDFieldChanged(t *testing.T) {
+	const title = "My First Project"
+
+	t.Run("the screen's own write is not a user edit", func(t *testing.T) {
+		// Mutation this catches: dropping the screenIsWriting guard, so
+		// SetText is recorded as a keystroke.
+		var id newProjectID
+		if !id.titleChanged(title) {
+			t.Fatal("setup: the title did not suggest an id")
+		}
+		// The screen writes that suggestion into the widget; tview calls
+		// the changed handler back with it.
+		if writeBack := idFieldChanged(&id, true, id.value, title); writeBack {
+			t.Error("the screen's own write asked to be written back, which would recurse")
+		}
+		if id.userOwns {
+			t.Fatal("the screen's own SetText counted as a user edit: the title would stop suggesting after the first character the screen itself wrote")
+		}
+		// Proof of the consequence, not just the flag: the title still owns
+		// the id and goes on suggesting.
+		if !id.titleChanged("My Second Project") {
+			t.Fatal("the title stopped suggesting after the screen wrote its own suggestion")
+		}
+		if id.value != "my-second-project" {
+			t.Errorf("id = %q, want %q", id.value, "my-second-project")
+		}
+	})
+
+	t.Run("clearing the id field does not refill it on the spot", func(t *testing.T) {
+		// Mutation this catches: re-suggesting from the title the moment
+		// the field goes empty, which makes the id impossible to clear and
+		// retype — the last backspace would restore what was being deleted.
+		var id newProjectID
+		id.titleChanged(title)
+		idFieldChanged(&id, false, "mine", title)
+		if !id.userOwns {
+			t.Fatal("setup: a typed id did not become the user's")
+		}
+		writeBack := idFieldChanged(&id, false, "", title)
+		if writeBack {
+			t.Error("clearing the id asked the screen to write the field back: the suggestion must wait for the next title keystroke")
+		}
+		if id.value != "" {
+			t.Errorf("id = %q, want %q: cleared, not refilled", id.value, "")
+		}
+		// It is handed back to the title, which suggests again on its next
+		// keystroke — that, and not an immediate refill, is how the default
+		// returns.
+		if id.userOwns {
+			t.Error("an emptied id field still counted as the user's choice")
+		}
+		if !id.titleChanged("Second Attempt") || id.value != "second-attempt" {
+			t.Errorf("id = %q, want the title to resume suggesting %q", id.value, "second-attempt")
+		}
+	})
+
+	t.Run("a keystroke is recorded verbatim", func(t *testing.T) {
+		var id newProjectID
+		if writeBack := idFieldChanged(&id, false, "typed-by-hand", title); writeBack {
+			t.Error("a keystroke asked the screen to write the field back, which would fight the user's cursor")
+		}
+		if id.value != "typed-by-hand" {
+			t.Errorf("id = %q, want %q", id.value, "typed-by-hand")
+		}
+		if !id.userOwns {
+			t.Error("a typed id did not become the user's")
+		}
+	})
+}
+
 // TestValidateNewProject checks that the screen really is asking
 // datatug-core, rather than answering for it: every case here is a rule the
 // screen does not implement.

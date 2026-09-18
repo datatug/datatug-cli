@@ -137,12 +137,38 @@ func (v *newProjectID) titleChanged(title string) (changed bool) {
 	return true
 }
 
-// edited records what the user typed into the id field. The screen calls
-// it for keystrokes only, never for its own writes, so every call here is
+// edited records what the user typed into the id field. Only
+// idFieldChanged calls it, and only for a keystroke, so every call here is
 // by definition the user speaking.
 func (v *newProjectID) edited(text string) {
 	v.value = text
 	v.userOwns = text != ""
+}
+
+// idFieldChanged applies one call of the ID field's tview changed handler
+// to id, and reports whether the screen must write the field back
+// afterwards. It is the whole of that decision, extracted from the screen
+// so both halves of it can be tested rather than merely written down.
+//
+// screenIsWriting is true while the screen itself is inside SetText on that
+// field. tview's changed handler cannot tell its own write from a
+// keystroke, and a write recorded as an edit would latch the id to the user
+// on the first character the screen's own suggestion put there — after
+// which the title would silently stop suggesting.
+//
+// titleNow is the title as it stands. It is what a decision to re-suggest
+// would need, and it is deliberately not used: the answer is always "do not
+// write the field back". Clearing the id hands it to the title (see
+// newProjectID), and the title suggests again on its next keystroke — but
+// refilling the field here, at the moment it goes empty, would make the id
+// impossible to clear and retype, since the last backspace would
+// immediately restore the text the user was deleting.
+func idFieldChanged(id *newProjectID, screenIsWriting bool, text, titleNow string) (writeFieldBack bool) {
+	if screenIsWriting {
+		return false
+	}
+	id.edited(text)
+	return false
 }
 
 // goCreateProjectScreen shows a modal to create a new project
@@ -381,13 +407,13 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 			SetText(projectID.value).
 			SetFieldWidth(50).
 			SetChangedFunc(func(text string) {
-				// The screen's own writes return early rather than being
-				// recorded as an edit, so newProjectID never has to tell
-				// the two apart.
-				if settingProjectID {
-					return
+				// Thin on purpose: idFieldChanged owns what a change to
+				// this field means, so the two rules it carries are pinned
+				// by tests instead of living in a closure no test can
+				// reach.
+				if idFieldChanged(&projectID, settingProjectID, text, title) {
+					showProjectID()
 				}
-				projectID.edited(text)
 				refreshValidation()
 			})
 		form.AddFormItem(idField)
@@ -549,7 +575,7 @@ func handleCreateProject(tui *sneatnav.TUI, createAt createTarget, projectID, ti
 	case createAtLocal:
 		projectRef, err = createLocalProject(tui, projectID, title, location)
 	case createAtGitHub:
-		projectRef, err = createGitHubProject(tui, repoName, visibility)
+		projectRef, err = createGitHubProject(tui, projectID, repoName, visibility)
 	}
 	if err != nil {
 		sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to create project: %w", err))
@@ -621,7 +647,17 @@ func openProject(tui *sneatnav.TUI, projectRef dtconfig.ProjectRef) {
 	GoDatatugProjectScreen(projectCtx)
 }
 
-func createGitHubProject(tui *sneatnav.TUI, title string, visibility datatug.ProjectVisibility) (projectRef dtconfig.ProjectRef, err error) {
+// createGitHubProject creates the project in a GitHub repository.
+//
+// projectID is the id the user chose on the create screen, passed through
+// rather than invented here: the id belongs to the person creating the
+// project, on this target exactly as on the local one.
+//
+// Note that dtgithub wants something else under the same name —
+// GithubRepoProjectsStore.CreateNewProject splits its projectID into
+// "owner/repo/dir" — so a plain project id does not satisfy it, and that
+// mismatch is issue #260, left open here deliberately.
+func createGitHubProject(tui *sneatnav.TUI, projectID, title string, visibility datatug.ProjectVisibility) (projectRef dtconfig.ProjectRef, err error) {
 	ctx := context.Background()
 	token, err := ghauth.GetToken()
 	if err != nil || token == nil {
@@ -636,7 +672,6 @@ func createGitHubProject(tui *sneatnav.TUI, title string, visibility datatug.Pro
 		return projectRef, fmt.Errorf("failed to create GitHub client: %w", err)
 	}
 
-	var projectID string
 	projectsStore := dtgithub.NewRepoProjectsStore(client, "")
 
 	_, err = projectsStore.CreateNewProject(ctx, projectID, title, visibility, func(step string, status string) {

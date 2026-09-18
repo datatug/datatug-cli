@@ -150,17 +150,32 @@ func TestServeHTTP_CreateProject_AuthGate(t *testing.T) {
 			// through the Firestore-backed path instead). net/http
 			// recovers that panic per-connection and closes it without
 			// writing a response, which surfaces here as a transport error
-			// rather than a clean status code. That is precisely the
-			// signal this subtest needs: the auth gate let the request
-			// through instead of refusing it with 401. If datatug-core
-			// ever implements FsStore.CreateProject, this branch simply
-			// stops firing and the status-code assertion below covers it.
+			// rather than a clean status code.
+			//
+			// That is the strongest signal this subtest can get, and it is
+			// positive on two counts, not one: the request got past the
+			// auth gate, AND past dto.CreateProjectRequest.Validate inside
+			// api.CreateProject — a body Validate refuses returns an error
+			// cleanly and never panics, so it could not reach here. If
+			// datatug-core ever implements FsStore.CreateProject, this
+			// branch stops firing and the status-code assertions below
+			// carry both checks instead.
 			t.Logf("createProject reached the (separately unimplemented) FsStore.CreateProject past the auth gate: %v", err)
 			return
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == http.StatusUnauthorized {
 			t.Fatalf("createProject refused the serve principal with 401")
+		}
+		// Not only "not a 401": a 400 would mean the request never got as
+		// far as the store, because Validate refused the body — which is
+		// how this subtest could pass while testing nothing. It did exactly
+		// that until datatug-core v0.39.0's mandatory `id` was added to
+		// postCreateProject's body: the request was refused one layer past
+		// the gate, and the assertion above still held.
+		if resp.StatusCode == http.StatusBadRequest {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("createProject refused the request body with 400 (%s): the body must be valid enough to reach the store, or this subtest proves nothing about the auth gate", body)
 		}
 	})
 

@@ -184,5 +184,6 @@ func executeRoutes(path string, router router, wrap wrapper, writeOnly bool, cap
 		route(router, wrap, http.MethodGet, path+"/exec/select", executeSelectHandler)
 		route(router, wrap, http.MethodPost, path+"/exec/run_query", runQueryHandler)
 		route(router, wrap, http.MethodPost, path+"/compare", compareHandler(caps))
+		route(router, wrap, http.MethodGet, path+"/compare/rows", compareRowsHandler)
 	}
 }

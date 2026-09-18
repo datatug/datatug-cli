@@ -104,6 +104,50 @@ func suggestProjectID(title string) string {
 	return candidate
 }
 
+// newProjectID is the create screen's project id and the single piece of
+// state behind the Title/ID coupling: whether the user has taken the id
+// over from the title.
+//
+// The id starts out following the title, a keystroke at a time. The first
+// non-empty text the user types into the id field is a choice, and from
+// then on the title never overwrites it. Clearing the field is not a
+// choice but the absence of one — someone who wipes the id wants the
+// default back — so it hands the id to the title again and the next title
+// keystroke suggests afresh.
+//
+// It lives out here, away from goCreateProjectScreen's closures, so the
+// rule can be tested without standing up a terminal.
+type newProjectID struct {
+	value string
+	// userOwns is true while the id belongs to the user rather than to the
+	// title. Only a non-empty edit sets it.
+	userOwns bool
+}
+
+// titleChanged re-derives the id from title unless the user owns it, and
+// reports whether the id actually changed — the screen rewrites the widget
+// only then, so a title keystroke that suggests the same id does not move
+// the user's cursor for nothing.
+func (v *newProjectID) titleChanged(title string) (changed bool) {
+	if v.userOwns {
+		return false
+	}
+	suggested := suggestProjectID(title)
+	if suggested == v.value {
+		return false
+	}
+	v.value = suggested
+	return true
+}
+
+// edited records what the user typed into the id field. The screen calls
+// it for keystrokes only, never for its own writes, so every call here is
+// by definition the user speaking.
+func (v *newProjectID) edited(text string) {
+	v.value = text
+	v.userOwns = text != ""
+}
+
 // goCreateProjectScreen shows a modal to create a new project
 func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 	/*
@@ -132,13 +176,9 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 	var visibility = "Public"
 	location = "~/datatug"
 
-	// projectID is what the user will create the project as. It starts out
-	// as a suggestion derived from the title and keeps following the title
-	// until the user edits the field themselves — from that moment
-	// projectIDEdited stays true and the id is theirs, never overwritten by
-	// a later keystroke in Title.
-	var projectID string
-	var projectIDEdited bool
+	// projectID is what the user will create the project as, together with
+	// the one piece of state that decides who owns it. See its type.
+	var projectID newProjectID
 
 	flex := tview.NewFlex().SetDirection(tview.FlexRow)
 
@@ -194,8 +234,8 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 
 	// settingProjectID is true only while the screen itself writes into
 	// idField. tview's changed handler cannot tell a programmatic SetText
-	// from a keystroke, and without this guard the very first suggestion
-	// would look like a user edit and freeze the id at one character.
+	// from a keystroke, and without this guard the screen's own suggestion
+	// would look like a user edit and latch the id on its first character.
 	var settingProjectID bool
 
 	showValidationError := func(err error) {
@@ -207,26 +247,26 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 	// is noise, not help — but anything typed is judged immediately, and
 	// pressing Create re-checks unconditionally.
 	refreshValidation := func() {
-		if title == "" && projectID == "" {
+		if title == "" && projectID.value == "" {
 			validationView.SetText("")
 			return
 		}
-		if err := validateNewProject(projectID, title); err != nil {
+		if err := validateNewProject(projectID.value, title); err != nil {
 			showValidationError(err)
 			return
 		}
 		validationView.SetText("")
 	}
 
-	// setSuggestedProjectID installs a title-derived suggestion without
-	// letting it count as a user edit.
-	setSuggestedProjectID := func(suggested string) {
-		projectID = suggested
-		if idField != nil {
-			settingProjectID = true
-			idField.SetText(suggested)
-			settingProjectID = false
+	// showProjectID writes the id the title just suggested into the widget
+	// without that write counting as a user edit.
+	showProjectID := func() {
+		if idField == nil {
+			return
 		}
+		settingProjectID = true
+		idField.SetText(projectID.value)
+		settingProjectID = false
 	}
 
 	var refreshForm func()
@@ -308,8 +348,8 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 		form.Clear(true)
 		form.AddInputField("Title", title, 50, nil, func(text string) {
 			title = text
-			if !projectIDEdited {
-				setSuggestedProjectID(suggestProjectID(title))
+			if projectID.titleChanged(title) {
+				showProjectID()
 			}
 			if createAt != "Local" {
 				updateGithubPath()
@@ -338,17 +378,19 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 		})
 
 		// The id field follows Title, so that the suggestion appears right
-		// under the words it was derived from and is edited in place. The
-		// user owns it from their first keystroke in it onwards.
+		// under the words it was derived from and is edited in place.
 		idField = tview.NewInputField().
 			SetLabel("ID").
-			SetText(projectID).
+			SetText(projectID.value).
 			SetFieldWidth(50).
 			SetChangedFunc(func(text string) {
-				if !settingProjectID {
-					projectIDEdited = true
+				// The screen's own writes return early rather than being
+				// recorded as an edit, so newProjectID never has to tell
+				// the two apart.
+				if settingProjectID {
+					return
 				}
-				projectID = text
+				projectID.edited(text)
 				refreshValidation()
 			})
 		form.AddFormItem(idField)
@@ -398,7 +440,7 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 			// Checked here as well as on every keystroke: a form the user
 			// never touched is quiet, and pressing Create on it must still
 			// say what is missing rather than create a project with no id.
-			if err := validateNewProject(projectID, title); err != nil {
+			if err := validateNewProject(projectID.value, title); err != nil {
 				showValidationError(err)
 				return
 			}
@@ -414,7 +456,7 @@ func goCreateProjectScreen(tui *sneatnav.TUI, createAt createTarget) {
 				projectVisibility = datatug.PublicProject
 			default:
 			}
-			handleCreateProject(tui, createAt, projectID, title, location, repoName, projectVisibility)
+			handleCreateProject(tui, createAt, projectID.value, title, location, repoName, projectVisibility)
 		})
 		form.AddButton("Cancel", func() {
 			_ = GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)

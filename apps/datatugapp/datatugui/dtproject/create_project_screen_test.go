@@ -74,6 +74,116 @@ func TestSuggestProjectIDIsAlwaysAcceptable(t *testing.T) {
 	}
 }
 
+// TestNewProjectIDFollowsTitleUntilEdited walks the create form's
+// Title/ID coupling keystroke by keystroke, which is the whole of the
+// founder's ruling on who owns the id.
+func TestNewProjectIDFollowsTitleUntilEdited(t *testing.T) {
+	t.Run("the suggestion tracks the title while nobody has claimed it", func(t *testing.T) {
+		var id newProjectID
+		for _, step := range []struct {
+			title string
+			want  string
+		}{
+			{title: "M", want: "m"},
+			{title: "My", want: "my"},
+			{title: "My ", want: "my"},
+			{title: "My F", want: "my-f"},
+			{title: "My First Project", want: "my-first-project"},
+		} {
+			id.titleChanged(step.title)
+			if id.value != step.want {
+				t.Errorf("after title %q: id = %q, want %q", step.title, id.value, step.want)
+			}
+			if id.userOwns {
+				t.Errorf("after title %q: the title still owns the id, nothing was typed into it", step.title)
+			}
+		}
+	})
+
+	t.Run("titleChanged reports whether the widget needs rewriting", func(t *testing.T) {
+		var id newProjectID
+		if !id.titleChanged("My Project") {
+			t.Error("the first suggestion is a change, want true")
+		}
+		// A trailing space suggests the same id: rewriting the widget here
+		// would move the user's cursor for nothing.
+		if id.titleChanged("My Project ") {
+			t.Error("an unchanged suggestion reported a change, want false")
+		}
+	})
+
+	t.Run("a non-empty edit takes the id from the title for good", func(t *testing.T) {
+		var id newProjectID
+		id.titleChanged("My First Project")
+		id.edited("mine")
+		if !id.userOwns {
+			t.Error("a typed id is the user's, want userOwns")
+		}
+		if id.titleChanged("A Completely Different Title") {
+			t.Error("the title overwrote an id the user had typed")
+		}
+		if id.value != "mine" {
+			t.Errorf("id = %q, want it left alone as %q", id.value, "mine")
+		}
+	})
+
+	t.Run("clearing the field hands the id back to the title", func(t *testing.T) {
+		var id newProjectID
+		id.titleChanged("My First Project")
+		id.edited("mine")
+		// Wiping the field is the absence of a choice, not a choice.
+		id.edited("")
+		if id.userOwns {
+			t.Error("an emptied id field still counted as the user's choice")
+		}
+		if id.value != "" {
+			t.Errorf("id = %q, want %q until the title suggests again", id.value, "")
+		}
+		if !id.titleChanged("Second Attempt") {
+			t.Fatal("the title did not resume suggesting after the id was cleared")
+		}
+		if id.value != "second-attempt" {
+			t.Errorf("id = %q, want the title's suggestion %q back", id.value, "second-attempt")
+		}
+	})
+
+	t.Run("the latch re-engages on the next non-empty edit", func(t *testing.T) {
+		var id newProjectID
+		id.titleChanged("First")
+		id.edited("mine")
+		id.edited("")
+		id.edited("m")
+		if !id.userOwns {
+			t.Error("typing after a wipe did not take the id back, want userOwns")
+		}
+		if id.titleChanged("Another Title") {
+			t.Error("the title overwrote the id the user typed after the wipe")
+		}
+		if id.value != "m" {
+			t.Errorf("id = %q, want %q", id.value, "m")
+		}
+	})
+
+	t.Run("a title that suggests nothing leaves the field for the user", func(t *testing.T) {
+		var id newProjectID
+		id.titleChanged("Проект")
+		if id.value != "" {
+			t.Errorf("id = %q, want %q: a non-Latin title must not block the form", id.value, "")
+		}
+		if id.userOwns {
+			t.Error("an empty suggestion counted as a user edit")
+		}
+		// The user types their own, and it sticks.
+		id.edited("my-project")
+		if id.titleChanged("Проект 2") {
+			t.Error("the title overwrote an id the user typed for an untranslatable title")
+		}
+		if id.value != "my-project" {
+			t.Errorf("id = %q, want %q", id.value, "my-project")
+		}
+	})
+}
+
 // TestValidateNewProject checks that the screen really is asking
 // datatug-core, rather than answering for it: every case here is a rule the
 // screen does not implement.

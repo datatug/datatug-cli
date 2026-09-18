@@ -101,16 +101,23 @@ bindings:
     admin: [admin]
 `
 
-// postCreateProject POSTs a minimally-valid create_project request body
-// (title is the only field CreateProjectRequest.Validate requires besides
-// the "store" query param) and returns whatever the transport gives back:
-// either a normal *http.Response, or a transport-level error when the
-// handler panics before writing anything (see the doc comment on
+// postCreateProject POSTs a minimally-valid create_project request body and
+// returns whatever the transport gives back: either a normal
+// *http.Response, or a transport-level error when the handler panics before
+// writing anything (see the doc comment on
 // TestServeHTTP_CreateProject_AuthGate's "accepted" subtest for why that
 // happens, and why it is still a clean, positive signal here).
+//
+// "id" and "title" are the fields CreateProjectRequest.Validate requires in
+// the body, besides the "store" query param — datatug-core v0.39.0 made the
+// id mandatory and caller-supplied. It has to be a valid one (lower-case
+// ASCII letters, digits, "-" and "_", starting and ending with a letter or
+// a digit): an invalid id is refused by Validate inside api.CreateProject,
+// which is past the auth gate these subtests are about, so it would make
+// the "accepted" subtest pass for the wrong reason.
 func postCreateProject(t *testing.T, baseURL string) (*http.Response, error) {
 	t.Helper()
-	body, err := json.Marshal(map[string]string{"title": "New Project"})
+	body, err := json.Marshal(map[string]string{"id": "new-project", "title": "New Project"})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}

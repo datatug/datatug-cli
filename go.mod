@@ -166,6 +166,7 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/strongo/analytics v0.2.8 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
+	github.com/strongo/deviceauth v0.0.2 // indirect
 	github.com/strongo/dsstore v0.0.8 // indirect
 	github.com/strongo/strongoapp v0.31.55 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect

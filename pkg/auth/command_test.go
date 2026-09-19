@@ -12,10 +12,15 @@ func TestCommand(t *testing.T) {
 	if cmd.Name() != "auth" {
 		t.Errorf("expected Name %q, got %q", "auth", cmd.Name())
 	}
-	if len(cmd.Commands()) != 1 {
-		t.Fatalf("expected 1 subcommand, got %d", len(cmd.Commands()))
+	want := map[string]bool{"login": false, "status": false, "logout": false, "google": false}
+	for _, child := range cmd.Commands() {
+		if _, ok := want[child.Name()]; ok {
+			want[child.Name()] = true
+		}
 	}
-	if cmd.Commands()[0].Name() != "google" {
-		t.Errorf("expected subcommand Name %q, got %q", "google", cmd.Commands()[0].Name())
+	for name, found := range want {
+		if !found {
+			t.Errorf("missing %q subcommand", name)
+		}
 	}
 }

@@ -49,6 +49,7 @@ require (
 	github.com/stretchr/testify v1.12.1
 	github.com/strongo/buildinfo v0.3.0
 	github.com/strongo/cli-helpers v0.21.0
+	github.com/strongo/deviceauth v0.1.0
 	github.com/strongo/logus v0.4.3
 	github.com/strongo/random v0.0.2
 	github.com/strongo/slice v0.3.10
@@ -166,7 +167,6 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/strongo/analytics v0.2.8 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
-	github.com/strongo/deviceauth v0.0.2 // indirect
 	github.com/strongo/dsstore v0.0.8 // indirect
 	github.com/strongo/strongoapp v0.31.55 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect

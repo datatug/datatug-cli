@@ -351,8 +351,8 @@ github.com/strongo/cli-helpers v0.21.0 h1:x95ouM0JFEaQxu66xU3QAT8Mtn+mvRcDyPXUC6
 github.com/strongo/cli-helpers v0.21.0/go.mod h1:2eUFIkQELgeWLeYz9g3hKer+Kcf+3vnAzHMOPDE7ItA=
 github.com/strongo/decimal v0.1.2 h1:/LHdX9zJTUPpEM2cuQhnwCWNWLCUwG0BJMyOetpryY8=
 github.com/strongo/decimal v0.1.2/go.mod h1:uKFgetJbR2uT026stdbK54ELXTH9h0vZOPPOp7DAODk=
-github.com/strongo/deviceauth v0.0.2 h1:Bi5SggVVj5HeqggbbOdGTgs8Ka3O4b092lRFbqjMxxM=
-github.com/strongo/deviceauth v0.0.2/go.mod h1:bPTivN2eqTgfphYuyB+WKvlBmRNfbyrpMOEGz5T172o=
+github.com/strongo/deviceauth v0.1.0 h1:wl+VrsRkDGQqYrqnm0IiCmPGldnBLdzzA1nfNwgDdis=
+github.com/strongo/deviceauth v0.1.0/go.mod h1:bPTivN2eqTgfphYuyB+WKvlBmRNfbyrpMOEGz5T172o=
 github.com/strongo/dsstore v0.0.8 h1:BYsbfOVWKEvr24vHdnM6PNyHuFW968rr4tc5EK7BeQw=
 github.com/strongo/dsstore v0.0.8/go.mod h1:TlVsyTZ8kF3zD8cPsdRD9vNhLhz5A+oN+LbMWf0JLKc=
 github.com/strongo/logus v0.4.3 h1:hAT2VNAj41SXta7A2bRPmk/RgWXAO930faHga5Fc58w=

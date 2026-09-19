@@ -117,6 +117,14 @@ func TestLogin_RejectsWrongAudienceAndStorageFailure(t *testing.T) {
 	}
 }
 
+func TestPrintWarningsDoesNotExposeProviderDetail(t *testing.T) {
+	var output bytes.Buffer
+	printWarnings(&output, []error{errors.New("provider response included firebase-refresh")})
+	if !strings.Contains(output.String(), "previous device login") || strings.Contains(output.String(), "firebase-refresh") {
+		t.Fatalf("warning output=%q", output.String())
+	}
+}
+
 func testDependencies(server *httptest.Server, store *memoryStore) dependencies {
 	return dependencies{
 		httpClient: server.Client(), openBrowser: func(string) error { return nil },

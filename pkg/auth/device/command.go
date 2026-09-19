@@ -121,6 +121,7 @@ func loginCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.C
 			if err != nil {
 				return err
 			}
+			printWarnings(cmd.ErrOrStderr(), auth.Warnings)
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged in to %s as %s.\nToken storage: %s\n", client.Issuer(), auth.Identity.Subject, description)
 			return nil
 		},
@@ -166,6 +167,14 @@ func logoutCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged out of %s.\n", client.Issuer())
 		return nil
 	}}
+}
+
+func printWarnings(output io.Writer, warnings []error) {
+	for range warnings {
+		// Warning causes can carry provider response detail. Keep stderr useful
+		// without echoing a credential, token, or response body.
+		_, _ = fmt.Fprintln(output, "Warning: the previous device login could not be revoked; it may remain active until it expires.")
+	}
 }
 
 func exchangeCustomToken(ctx context.Context, token string) (session, error) {

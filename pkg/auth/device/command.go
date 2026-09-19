@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -42,10 +41,9 @@ type session struct {
 type dependencies struct {
 	httpClient  *http.Client
 	openBrowser func(string) error
-	login       func(context.Context, deviceauth.LoginOptions) (deviceauth.LoginResult, error)
 	exchange    func(context.Context, string) (session, error)
-	identity    func(context.Context, *http.Client, *url.URL, string) (identity, error)
-	newStore    func(*url.URL, bool) (deviceauth.Store, string, error)
+	refresh     RefreshSession
+	newClient   func(string, bool) (*deviceauth.Client, deviceauth.Store, string, error)
 }
 
 // Command returns the DataTug auth.sneat.co commands. It is separate from
@@ -59,10 +57,9 @@ func defaultDependencies() dependencies {
 	return dependencies{
 		httpClient:  &http.Client{Timeout: 15 * time.Second},
 		openBrowser: deviceauth.OpenBrowser,
-		login:       deviceauth.Login,
 		exchange:    exchangeCustomToken,
-		identity:    fetchIdentity,
-		newStore:    newStore,
+		refresh:     refreshFirebaseSession,
+		newClient:   newClient,
 	}
 }
 
@@ -101,46 +98,30 @@ func loginCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.C
 	return &cobra.Command{
 		Use: "login", Short: "Sign in through your browser", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			issuer, err := issuerURL(*rawIssuer)
-			if err != nil {
-				return err
-			}
-			store, description, err := deps.newStore(issuer, *insecure)
+			client, store, description, err := deps.newClient(*rawIssuer, *insecure)
 			if err != nil {
 				return fmt.Errorf("configure credential storage: %w", err)
 			}
 			if *insecure {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warning: --insecure-storage writes the Firebase session unencrypted to %s.\n", description)
 			}
-			result, err := deps.login(context.WithValue(cmd.Context(), oauth2.HTTPClient, deps.httpClient), deviceauth.LoginOptions{
-				OAuthConfig: oauth2.Config{ClientID: clientID, Scopes: scopes, Endpoint: oauth2.Endpoint{DeviceAuthURL: issuer.String() + "/oauth/device/code", TokenURL: issuer.String() + "/oauth/token", AuthStyle: oauth2.AuthStyleInParams}},
-				DeviceInfo:  deviceInfo(), OpenBrowser: deps.openBrowser, Output: cmd.OutOrStdout(), ErrorOutput: cmd.ErrOrStderr(),
-			})
+			auth, err := client.DeviceLoginAndStore(context.WithValue(cmd.Context(), oauth2.HTTPClient, deps.httpClient), deviceauth.DeviceLoginOptions{
+				DeviceInfo: deviceInfo(), OpenBrowser: deps.openBrowser, Output: cmd.OutOrStdout(), ErrorOutput: cmd.ErrOrStderr(),
+				TokenTransformer: func(ctx context.Context, token *oauth2.Token) (*oauth2.Token, error) {
+					if !strings.EqualFold(token.TokenType, customTokenType) {
+						return nil, errors.New("authorization server returned an unexpected token type")
+					}
+					sess, err := deps.exchange(ctx, token.AccessToken)
+					if err != nil {
+						return nil, fmt.Errorf("exchange device login for Firebase session: %w", err)
+					}
+					return &oauth2.Token{AccessToken: sess.IDToken, TokenType: "Bearer", RefreshToken: sess.RefreshToken, Expiry: sess.ExpiresAt}, nil
+				},
+			}, store)
 			if err != nil {
 				return err
 			}
-			if !strings.EqualFold(result.Token.TokenType, customTokenType) {
-				return errors.New("device login: authorization server returned an unexpected token type")
-			}
-			sess, err := deps.exchange(cmd.Context(), result.Token.AccessToken)
-			if err != nil {
-				return fmt.Errorf("exchange device login for Firebase session: %w", err)
-			}
-			identity, err := deps.identity(cmd.Context(), deps.httpClient, issuer, sess.IDToken)
-			if err != nil {
-				return err
-			}
-			if identity.Subject == "" || identity.Audience != clientID {
-				return errors.New("device login: identity is not authorized for datatug-cli")
-			}
-			if sess.UID != "" && sess.UID != identity.Subject {
-				return errors.New("device login: Firebase identity does not match authorization identity")
-			}
-			sess.UID = identity.Subject
-			if err := store.Save(deviceauth.Credential{AccessToken: sess.IDToken, RefreshToken: sess.RefreshToken, Expiry: sess.ExpiresAt, AccountID: sess.UID, AccountName: sess.Email, Scopes: strings.Fields(identity.Scope)}); err != nil {
-				return fmt.Errorf("save Firebase session: %w", err)
-			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged in to %s as %s.\nToken storage: %s\n", issuer.Host, sess.UID, description)
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged in to %s as %s.\nToken storage: %s\n", client.Issuer(), auth.Identity.Subject, description)
 			return nil
 		},
 	}
@@ -148,74 +129,43 @@ func loginCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.C
 
 func statusCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.Command {
 	return &cobra.Command{Use: "status", Short: "Show the current DataTug login", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		issuer, err := issuerURL(*rawIssuer)
-		if err != nil {
-			return err
-		}
-		store, description, err := deps.newStore(issuer, *insecure)
+		client, store, description, err := deps.newClient(*rawIssuer, *insecure)
 		if err != nil {
 			return fmt.Errorf("configure credential storage: %w", err)
 		}
-		credential, err := store.Load()
+		token, err := newTokenSource(cmd.Context(), client, store, deps.refresh).Token()
 		if errors.Is(err, deviceauth.ErrCredentialNotFound) {
-			return fmt.Errorf("not logged in to %s; run 'datatug auth device login'", issuer.Host)
+			return fmt.Errorf("not logged in to %s; run 'datatug auth login'", client.Issuer())
 		}
 		if err != nil {
 			return fmt.Errorf("load Firebase session: %w", err)
 		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n  Logged in as: %s\n  Scopes: %s\n  Expires: %s\n  Token storage: %s\n", issuer.Host, credential.AccountID, strings.Join(credential.Scopes, " "), credential.Expiry.UTC().Format(time.RFC3339), description)
+		identity, err := client.UserInfo(context.WithValue(cmd.Context(), oauth2.HTTPClient, deps.httpClient), token)
+		if err != nil {
+			return fmt.Errorf("validate Firebase session: %w", err)
+		}
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s\n  Logged in as: %s\n  Scopes: %s\n  Expires: %s\n  Token storage: %s\n", client.Issuer(), identity.Subject, strings.Join(identity.Scopes, " "), token.Expiry.UTC().Format(time.RFC3339), description)
 		return nil
 	}}
 }
 
 func logoutCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.Command {
 	return &cobra.Command{Use: "logout", Short: "Remove the stored DataTug login", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		issuer, err := issuerURL(*rawIssuer)
-		if err != nil {
-			return err
-		}
-		store, _, err := deps.newStore(issuer, *insecure)
+		client, store, _, err := deps.newClient(*rawIssuer, *insecure)
 		if err != nil {
 			return fmt.Errorf("configure credential storage: %w", err)
 		}
-		if _, err := store.Load(); errors.Is(err, deviceauth.ErrCredentialNotFound) {
-			return fmt.Errorf("not logged in to %s", issuer.Host)
+		if _, err := client.ScopedStore(store).Load(); errors.Is(err, deviceauth.ErrCredentialNotFound) {
+			return fmt.Errorf("not logged in to %s", client.Issuer())
 		} else if err != nil {
 			return fmt.Errorf("load Firebase session: %w", err)
 		}
-		if err := store.Delete(); err != nil {
-			return fmt.Errorf("remove Firebase session: %w", err)
+		if err := client.Logout(cmd.Context(), store); err != nil {
+			return fmt.Errorf("logout DataTug session: %w", err)
 		}
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged out of %s.\n", issuer.Host)
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged out of %s.\n", client.Issuer())
 		return nil
 	}}
-}
-
-type identity struct {
-	Subject  string `json:"sub"`
-	Audience string `json:"aud"`
-	Scope    string `json:"scope"`
-}
-
-func fetchIdentity(ctx context.Context, client *http.Client, issuer *url.URL, token string) (identity, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, issuer.String()+"/oauth/userinfo", nil)
-	if err != nil {
-		return identity{}, err
-	}
-	request.Header.Set("Authorization", "Bearer "+token)
-	response, err := client.Do(request)
-	if err != nil {
-		return identity{}, fmt.Errorf("validate device identity: %w", err)
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode != http.StatusOK {
-		return identity{}, fmt.Errorf("validate device identity: auth server returned HTTP %d", response.StatusCode)
-	}
-	var result identity
-	if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&result); err != nil {
-		return identity{}, fmt.Errorf("decode device identity: %w", err)
-	}
-	return result, nil
 }
 
 func exchangeCustomToken(ctx context.Context, token string) (session, error) {
@@ -251,38 +201,68 @@ func exchangeCustomToken(ctx context.Context, token string) (session, error) {
 	return session{IDToken: out.IDToken, RefreshToken: out.RefreshToken, UID: out.LocalID, Email: out.Email, ExpiresAt: time.Now().Add(seconds)}, nil
 }
 
-func newStore(issuer *url.URL, insecure bool) (deviceauth.Store, string, error) {
+func refreshFirebaseSession(ctx context.Context, refreshToken string) (session, error) {
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}}
+	endpoint := "https://securetoken.googleapis.com/v1/token?key=" + url.QueryEscape(firebaseAPIKey)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return session{}, err
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return session{}, err
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return session{}, fmt.Errorf("Firebase session refresh returned HTTP %d", response.StatusCode)
+	}
+	var out struct {
+		IDToken      string `json:"id_token"`
+		RefreshToken string `json:"refresh_token"`
+		UserID       string `json:"user_id"`
+		ExpiresIn    string `json:"expires_in"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&out); err != nil {
+		return session{}, err
+	}
+	seconds, err := time.ParseDuration(out.ExpiresIn + "s")
+	if err != nil {
+		return session{}, fmt.Errorf("decode Firebase refreshed session expiry: %w", err)
+	}
+	return session{IDToken: out.IDToken, RefreshToken: out.RefreshToken, UID: out.UserID, ExpiresAt: time.Now().Add(seconds)}, nil
+}
+
+func newClient(rawIssuer string, insecure bool) (*deviceauth.Client, deviceauth.Store, string, error) {
+	client, err := deviceauth.NewClient(deviceauth.ClientConfig{
+		Issuer:         rawIssuer,
+		ClientID:       clientID,
+		Scopes:         scopes,
+		RequiredScopes: scopes,
+		KeyringService: "datatug-cli",
+		KeyringAccount: "firebase-session",
+	})
+	if err != nil {
+		return nil, nil, "", err
+	}
 	if !insecure {
-		store, err := deviceauth.NewKeyringStore("datatug-cli", issuer.String()+"|"+clientID)
-		return store, "operating system keyring", err
+		store, err := client.NewKeyringStore()
+		return client, store, "operating system keyring", err
 	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
-	path := filepath.Join(dir, "datatug", "auth", base64.RawURLEncoding.EncodeToString([]byte(issuer.Host))+".json")
+	issuerHost, err := url.Parse(client.Issuer())
+	if err != nil {
+		return nil, nil, "", err
+	}
+	path := filepath.Join(dir, "datatug", "auth", base64.RawURLEncoding.EncodeToString([]byte(issuerHost.Host))+".json")
 	store, err := deviceauth.NewFileStore(path)
-	return store, path, err
+	return client, store, path, err
 }
 
 func deviceInfo() deviceauth.DeviceInfo {
 	hostname, _ := os.Hostname()
 	return deviceauth.DeviceInfo{Name: strings.TrimSpace(hostname), OS: runtime.GOOS, Arch: runtime.GOARCH}
-}
-
-func issuerURL(raw string) (*url.URL, error) {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
-		return nil, errors.New("--auth-host must be an absolute authorization server URL")
-	}
-	host := strings.ToLower(parsed.Hostname())
-	loopback := host == "localhost"
-	if address, parseErr := netip.ParseAddr(host); parseErr == nil {
-		loopback = address.IsLoopback()
-	}
-	if parsed.Scheme != "https" && (parsed.Scheme != "http" || !loopback) {
-		return nil, errors.New("--auth-host must use HTTPS (HTTP is allowed only for loopback development)")
-	}
-	parsed.Scheme, parsed.Host, parsed.Path = strings.ToLower(parsed.Scheme), strings.ToLower(parsed.Host), ""
-	return parsed, nil
 }

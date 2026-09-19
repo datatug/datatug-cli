@@ -191,7 +191,7 @@ func exchangeCustomToken(ctx context.Context, token string) (session, error) {
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return session{}, fmt.Errorf("Firebase custom-token exchange returned HTTP %d", response.StatusCode)
+		return session{}, fmt.Errorf("firebase custom-token exchange returned HTTP %d", response.StatusCode)
 	}
 	var out struct {
 		IDToken      string `json:"idToken"`
@@ -224,7 +224,7 @@ func refreshFirebaseSession(ctx context.Context, refreshToken string) (session, 
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return session{}, fmt.Errorf("Firebase session refresh returned HTTP %d", response.StatusCode)
+		return session{}, fmt.Errorf("firebase session refresh returned HTTP %d", response.StatusCode)
 	}
 	var out struct {
 		IDToken      string `json:"id_token"`

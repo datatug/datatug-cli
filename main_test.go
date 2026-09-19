@@ -141,6 +141,16 @@ func TestMainFunc(t *testing.T) {
 		cmd, opts := defaultGetCommand()
 		assert.NotNil(t, cmd)
 		assert.NotEmpty(t, opts)
+		for _, name := range []string{
+			"auth", "compare", "config", "console", "dataset", "dataset-data",
+			"datasets", "db", "demo", "entity", "execution", "gcloud", "init",
+			"install", "projects", "queries", "query", "render", "scan", "self-update",
+			"serve", "show", "ui", "updateUrlConfig", "upgrade", "validate", "version",
+		} {
+			found, _, err := cmd.Find([]string{name})
+			assert.NoError(t, err, "command %q must be exposed by datatug --help", name)
+			assert.Equal(t, name, found.Name(), "command %q must be exposed by datatug --help", name)
+		}
 	})
 }
 

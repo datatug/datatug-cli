@@ -125,6 +125,68 @@ func TestPrintWarningsDoesNotExposeProviderDetail(t *testing.T) {
 	}
 }
 
+func TestLogout_RefreshesExpiredSessionBeforeRevoke(t *testing.T) {
+	var revokeToken string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/oauth/device/code":
+			_, _ = io.WriteString(w, `{"device_code":"device","user_code":"ABCD-EFGH","verification_uri":"https://verify.example/device","expires_in":300,"interval":1}`)
+		case "/oauth/token":
+			_, _ = io.WriteString(w, `{"access_token":"custom-token","token_type":"urn:ietf:params:oauth:token-type:firebase-custom-token","expires_in":300}`)
+		case "/oauth/userinfo":
+			_, _ = io.WriteString(w, `{"sub":"user-1","aud":"datatug-cli","scope":"openid profile datatug:projects:read datatug:projects:write"}`)
+		case "/oauth/revoke":
+			revokeToken = r.FormValue("token")
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	store := &memoryStore{}
+	deps := testDependencies(server, store)
+	deps.refresh = func(context.Context, string) (session, error) {
+		return session{IDToken: "logout-refreshed", RefreshToken: "rotated-refresh", UID: "user-1", ExpiresAt: time.Now().Add(time.Hour)}, nil
+	}
+	cmd := newCommand(deps)
+	cmd.SetArgs([]string{"login", "--auth-host", server.URL})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	store.credential.Expiry = time.Now().Add(-time.Minute)
+	cmd.SetArgs([]string{"logout", "--auth-host", server.URL})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if revokeToken != "logout-refreshed" {
+		t.Fatalf("revoke token = %q, want refreshed Firebase ID token", revokeToken)
+	}
+	if _, err := store.Load(); !errors.Is(err, deviceauth.ErrCredentialNotFound) {
+		t.Fatalf("credential retained after successful logout: %v", err)
+	}
+}
+
+func TestLogout_RefreshFailureRetainsSession(t *testing.T) {
+	server := authServer(t, clientID)
+	defer server.Close()
+	store := &memoryStore{}
+	deps := testDependencies(server, store)
+	cmd := newCommand(deps)
+	cmd.SetArgs([]string{"login", "--auth-host", server.URL})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	store.credential.Expiry = time.Now().Add(-time.Minute)
+	deps.refresh = func(context.Context, string) (session, error) { return session{}, errors.New("refresh failed") }
+	cmd = newCommand(deps)
+	cmd.SetArgs([]string{"logout", "--auth-host", server.URL})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "refresh failed") {
+		t.Fatalf("logout error=%v", err)
+	}
+	if _, err := store.Load(); err != nil {
+		t.Fatalf("refresh failure deleted local credential: %v", err)
+	}
+}
+
 func testDependencies(server *httptest.Server, store *memoryStore) dependencies {
 	return dependencies{
 		httpClient: server.Client(), openBrowser: func(string) error { return nil },

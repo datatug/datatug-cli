@@ -156,10 +156,10 @@ func logoutCommand(rawIssuer *string, insecure *bool, deps dependencies) *cobra.
 		if err != nil {
 			return fmt.Errorf("configure credential storage: %w", err)
 		}
-		if _, err := client.ScopedStore(store).Load(); errors.Is(err, deviceauth.ErrCredentialNotFound) {
+		if _, err := newTokenSource(cmd.Context(), client, store, deps.refresh).Token(); errors.Is(err, deviceauth.ErrCredentialNotFound) {
 			return fmt.Errorf("not logged in to %s", client.Issuer())
 		} else if err != nil {
-			return fmt.Errorf("load Firebase session: %w", err)
+			return fmt.Errorf("refresh Firebase session before logout: %w", err)
 		}
 		if err := client.Logout(cmd.Context(), store); err != nil {
 			return fmt.Errorf("logout DataTug session: %w", err)

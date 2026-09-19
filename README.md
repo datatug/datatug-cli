@@ -42,31 +42,28 @@ Help wanted to [get test coverage to 100%](https://github.com/datatug/datatug-cl
 ### macOS / Linux — curl
 
 ```bash
-curl -fsSL https://datatug.io/install/get-cli | sh
+(p=$(mktemp) && trap 'rm -f "$p"' EXIT && curl -fsSL https://datatug.io/install/get-cli -o "$p" && sh "$p")
 ```
 
-Environment overrides: `DATATUG_VERSION` (default: latest release), `DATATUG_INSTALL_DIR` (default: `/usr/local/bin` or `~/.local/bin`).
+Environment overrides: `DATATUG_VERSION` (default: latest release), `DATATUG_INSTALL_DIR` (default: `~/.local/bin`).
 
 ### Windows — PowerShell
 
 ```powershell
-powershell -c "irm https://datatug.io/install/get-cli.ps1 | iex"
+$p=Join-Path $env:TEMP ("datatug-"+[guid]::NewGuid()+".ps1"); try { irm https://datatug.io/install/get-cli.ps1 -OutFile $p -EA Stop; & $p } finally { Remove-Item $p -EA SilentlyContinue }
 ```
 
-Environment overrides: `DATATUG_VERSION`, `DATATUG_INSTALL_DIR` (default: `%LOCALAPPDATA%\Programs\datatug\bin`).
+Environment overrides: `DATATUG_VERSION`, `DATATUG_INSTALL_DIR` (default: `%LOCALAPPDATA%\DataTug\bin`). Current Windows releases support amd64.
 
-### macOS — Homebrew ([tap](https://github.com/datatug/homebrew-tap))
+### macOS / Linux — Homebrew ([tap](https://github.com/datatug/homebrew-tap))
 
 ```bash
-brew tap datatug/tap
-brew install datatug
+brew install --cask datatug/tap/datatug
 ```
 
-### Any platform — Go
-
-```bash
-go install github.com/datatug/datatug-cli@latest
-```
+The direct installers and Homebrew package do not require Go. See the full
+[installation guide](https://datatug.io/install/) or the official
+[AI-agent instructions](https://datatug.io/agent-instructions/install/).
 
 ### Updating
 
@@ -75,7 +72,7 @@ datatug self-update
 datatug self-update --check  # report whether a newer release exists, without applying it
 ```
 
-Homebrew installs run `brew update && brew upgrade --yes --cask -- datatug`; manual installs (curl, PowerShell, `go install`) download and checksum-verify the latest release and swap the binary in place. See [spec/features/cli/self-update](spec/features/cli/self-update/README.md).
+Homebrew installs run `brew update && brew upgrade --yes --cask -- datatug`; direct installs from curl or PowerShell download and checksum-verify the latest release and swap the binary in place. See [spec/features/cli/self-update](spec/features/cli/self-update/README.md).
 
 ### Installing and upgrading related CLIs
 
@@ -126,14 +123,6 @@ No, we won't.
 The project is **free and open source** codes available at https://github.com/datatug/datatug. You are welcome to
 check - we do not look into your data.
 
-You can easily get executable of the agent from source codes using next command:
-
-```
-go install github.com/datatug/datatug
-```
-
-Note: _[Go language](https://golang.org/) should be [pre-installed](https://golang.org/dl/)_
-
 ## Where are metadata stored?
 
 When DataTug agent scans or compare your database it stores meta information in a datatug project as set of simple to
@@ -161,15 +150,11 @@ If the current directory is a DataTug project folder you don't need to specify p
 > datatug show
 ```
 
-## How to get DataTug agent CLI?
+## How to get the DataTug CLI?
 
-Get from source codes by running:
+Use one of the supported methods in [Installation](#installation). None requires Go.
 
-```
-> go install github.com/datatug/datatug
-```
-
-If it passes you are good to go:
+Then verify the installed CLI:
 
 ```
 > datatug --help

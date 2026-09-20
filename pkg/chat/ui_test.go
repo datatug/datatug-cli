@@ -18,7 +18,7 @@ func TestUIRendersStructuredResultAsBubblesTable(t *testing.T) {
 	}}}})
 	u.rebuildHistory(true)
 	view := u.View().Content
-	for _, want := range []string{"Found one.", "CustomerId", "City", "Prague", "Ctrl+G grid"} {
+	for _, want := range []string{"Found one.", "CustomerId", "City", "Prague", "Shift+↑↓ to navigate"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
@@ -74,7 +74,7 @@ func TestGridKeepsFocusAndCursorAcrossHorizontalNavigation(t *testing.T) {
 	}
 }
 
-func TestUpFromEmptyInputFocusesLatestGrid(t *testing.T) {
+func TestShiftUpFromEmptyInputFocusesLatestGrid(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
 	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
 		Columns: []string{"InvoiceId"},
@@ -85,11 +85,15 @@ func TestUpFromEmptyInputFocusesLatestGrid(t *testing.T) {
 	}}}})
 
 	if u.gridFocused {
-		t.Fatal("grid unexpectedly focused before pressing up")
+		t.Fatal("grid unexpectedly focused before pressing shift+up")
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if u.gridFocused {
+		t.Fatal("plain up unexpectedly focused the grid")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
 	if !u.gridFocused {
-		t.Fatal("up from empty input did not focus the latest grid")
+		t.Fatal("shift+up from empty input did not focus the latest grid")
 	}
 	if u.activeGrid < 0 || !u.entries[u.activeGrid].grid.table.Focused() {
 		t.Fatal("latest grid table is not focused")
@@ -98,6 +102,89 @@ func TestUpFromEmptyInputFocusesLatestGrid(t *testing.T) {
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if got := u.entries[u.activeGrid].grid.table.Cursor(); got != 1 {
 		t.Fatalf("cursor after down = %d, want 1", got)
+	}
+}
+
+func TestShiftArrowsNavigateBetweenGridsAndInput(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
+		Columns: []string{"First"},
+		Rows:    []secureread.Row{{Data: map[string]any{"First": "older"}}},
+	}}}})
+	olderGrid := len(u.entries) - 1
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
+		Columns: []string{"Second"},
+		Rows:    []secureread.Row{{Data: map[string]any{"Second": "newer"}}},
+	}}}})
+	newerGrid := len(u.entries) - 1
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	if !u.gridFocused || u.activeGrid != newerGrid {
+		t.Fatalf("first shift+up focused grid %d, want newest grid %d", u.activeGrid, newerGrid)
+	}
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	if !u.gridFocused || u.activeGrid != olderGrid {
+		t.Fatalf("second shift+up focused grid %d, want older grid %d", u.activeGrid, olderGrid)
+	}
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModShift})
+	if !u.gridFocused || u.activeGrid != newerGrid {
+		t.Fatalf("shift+down focused grid %d, want newer grid %d", u.activeGrid, newerGrid)
+	}
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModShift})
+	if u.gridFocused || !u.input.Focused() {
+		t.Fatal("shift+down from newest grid did not return focus to input")
+	}
+}
+
+func TestShiftNavigationScrollsFocusedGridIntoView(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width = 40
+	u.history.SetWidth(40)
+	u.history.SetHeight(5)
+	for _, value := range []string{"oldest", "middle", "newest"} {
+		u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
+			Columns: []string{"Value"},
+			Rows: []secureread.Row{
+				{Data: map[string]any{"Value": value + " 1"}},
+				{Data: map[string]any{"Value": value + " 2"}},
+				{Data: map[string]any{"Value": value + " 3"}},
+			},
+		}}}})
+	}
+	u.rebuildHistory(true)
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	bottomOffset := u.history.YOffset()
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	if got := u.history.YOffset(); got >= bottomOffset {
+		t.Fatalf("viewport offset after focusing previous grid = %d, want less than bottom offset %d", got, bottomOffset)
+	}
+}
+
+func TestShiftUpPreservesNonEmptyInput(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
+		Columns: []string{"InvoiceId"},
+		Rows:    []secureread.Row{{Data: map[string]any{"InvoiceId": 412}}},
+	}}}})
+	u.input.SetValue("draft question")
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	if u.gridFocused {
+		t.Fatal("shift+up with non-empty input unexpectedly focused a grid")
+	}
+	if got := u.input.Value(); got != "draft question" {
+		t.Fatalf("input value = %q, want draft preserved", got)
+	}
+}
+
+func TestUIShowsShiftArrowNavigationHint(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	if view := u.View().Content; !strings.Contains(view, "Shift+↑↓ to navigate") {
+		t.Fatalf("status line missing Shift+Arrow navigation hint:\n%s", view)
 	}
 }
 

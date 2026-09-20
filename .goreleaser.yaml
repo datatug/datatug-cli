@@ -48,12 +48,17 @@ archives:
     files:
       - README.md
       - LICENSE*
+      - THIRD_PARTY_NOTICES.md
 
   - id: zip
     formats: [ zip ]
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     ids: [ datatug-windows ]
+    files:
+      - README.md
+      - LICENSE*
+      - THIRD_PARTY_NOTICES.md
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"

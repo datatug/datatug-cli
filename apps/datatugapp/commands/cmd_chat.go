@@ -20,6 +20,7 @@ type chatOptions struct {
 	env      string
 	database string
 	model    string
+	baseURL  string
 	thinking string
 	as       string
 	roles    []string
@@ -41,6 +42,7 @@ func chatCommand() *cobra.Command {
 	flags.StringVar(&options.env, "env", "local", "Project environment ID")
 	flags.StringVar(&options.database, "database", "", "Database catalog ID (auto-selected when the environment has one)")
 	flags.StringVar(&options.model, "model", defaultChatModel, "Model name (for example gpt-5.6-luna, claude-haiku, or ollama/qwen3:4b)")
+	flags.StringVar(&options.baseURL, "base-url", "", "OpenAI-compatible model API base URL")
 	flags.StringVar(&options.thinking, "thinking", "low", "Model reasoning effort: low, medium, or high (provider support varies)")
 	flags.StringVar(&options.as, "as", "", "Principal ID used for access policies")
 	flags.StringSliceVar(&options.roles, "role", nil, "Principal role (repeatable)")
@@ -87,7 +89,7 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 		return Exit("chat: "+strings.TrimPrefix(err.Error(), "serve: "), exitCodeUsage)
 	}
 	executor := secureread.NewExecutor(session)
-	llm, err := pimodels.New(ctx, options.model, pimodels.WithThinkingLevel(options.thinking))
+	llm, err := pimodels.New(ctx, options.model, chatModelOptions(options)...)
 	if err != nil {
 		return Exit(fmt.Sprintf("configure chat model %q: %v", options.model, err), exitCodeUsage)
 	}
@@ -96,4 +98,12 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 		return Exit(err.Error(), exitCodeUsage)
 	}
 	return chat.NewUI(ctx, conversation, options.model).Run()
+}
+
+func chatModelOptions(options chatOptions) []pimodels.Option {
+	modelOptions := []pimodels.Option{pimodels.WithThinkingLevel(options.thinking)}
+	if options.baseURL != "" {
+		modelOptions = append(modelOptions, pimodels.WithBaseURL(options.baseURL))
+	}
+	return modelOptions
 }

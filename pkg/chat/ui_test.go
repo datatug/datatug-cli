@@ -74,6 +74,40 @@ func TestGridKeepsFocusAndCursorAcrossHorizontalNavigation(t *testing.T) {
 	}
 }
 
+func TestUpFromEmptyInputFocusesLatestGrid(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
+		Columns: []string{"InvoiceId"},
+		Rows: []secureread.Row{
+			{Data: map[string]any{"InvoiceId": 412}},
+			{Data: map[string]any{"InvoiceId": 411}},
+		},
+	}}}})
+
+	if u.gridFocused {
+		t.Fatal("grid unexpectedly focused before pressing up")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if !u.gridFocused {
+		t.Fatal("up from empty input did not focus the latest grid")
+	}
+	if u.activeGrid < 0 || !u.entries[u.activeGrid].grid.table.Focused() {
+		t.Fatal("latest grid table is not focused")
+	}
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if got := u.entries[u.activeGrid].grid.table.Cursor(); got != 1 {
+		t.Fatalf("cursor after down = %d, want 1", got)
+	}
+}
+
+func TestUIViewLeavesMouseAvailableForTerminalSelection(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	if got := u.View().MouseMode; got != tea.MouseModeNone {
+		t.Fatalf("mouse mode = %v, want MouseModeNone so the terminal can select text", got)
+	}
+}
+
 func TestVisibleColumnsWindowsWideResults(t *testing.T) {
 	grid := GridModel{Columns: []GridColumn{{Name: "First"}, {Name: "Second"}, {Name: "Third"}}, Rows: [][]string{{"aaaaaaaa", "bbbbbbbb", "cccccccc"}}}
 	columns, indexes := visibleColumns(grid, 1, 14)

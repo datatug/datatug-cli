@@ -1,6 +1,10 @@
 package commands
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/dimetron/pi-go/pimodels"
+)
 
 func TestChatCommandDefaults(t *testing.T) {
 	cmd := chatCommand()
@@ -11,6 +15,7 @@ func TestChatCommandDefaults(t *testing.T) {
 		"project":  ".",
 		"env":      "local",
 		"model":    "gpt-5.6-luna",
+		"base-url": "",
 		"thinking": "low",
 	} {
 		flag := cmd.Flags().Lookup(name)
@@ -20,6 +25,18 @@ func TestChatCommandDefaults(t *testing.T) {
 		if flag.DefValue != want {
 			t.Errorf("--%s default = %q, want %q", name, flag.DefValue, want)
 		}
+	}
+}
+
+func TestChatModelOptionsRouteExactModelToCustomEndpoint(t *testing.T) {
+	info, err := pimodels.Resolve("deepseek-flash", chatModelOptions(chatOptions{
+		baseURL: "https://api.deepseek.com",
+	})...)
+	if err != nil {
+		t.Fatalf("Resolve(deepseek-flash): %v", err)
+	}
+	if info.Provider != "openai" || info.Model != "deepseek-flash" || !info.Custom {
+		t.Fatalf("resolved info = %+v, want custom OpenAI-compatible deepseek-flash", info)
 	}
 }
 

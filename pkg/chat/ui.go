@@ -209,16 +209,29 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			u.focusInput()
 			return u, nil
+		case "shift+up":
+			if u.gridFocused {
+				u.focusAdjacentGrid(-1)
+				u.rebuildHistory(false)
+				return u, nil
+			}
+			if !u.busy && strings.TrimSpace(u.input.Value()) == "" {
+				if u.focusLatestGrid() {
+					u.rebuildHistory(true)
+				}
+				return u, nil
+			}
+		case "shift+down":
+			if u.gridFocused {
+				u.focusAdjacentGrid(1)
+				u.rebuildHistory(false)
+				return u, nil
+			}
 		}
 		if u.gridFocused {
 			if cmd, handled := u.updateGrid(msg); handled {
 				u.rebuildHistory(false)
 				return u, cmd
-			}
-		} else if msg.String() == "up" && !u.busy && strings.TrimSpace(u.input.Value()) == "" {
-			if u.focusLatestGrid() {
-				u.rebuildHistory(true)
-				return u, nil
 			}
 		} else if msg.String() == "enter" && !u.busy {
 			prompt := strings.TrimSpace(u.input.Value())
@@ -287,15 +300,38 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 
 func (u *UI) focusLatestGrid() bool {
 	for i := len(u.entries) - 1; i >= 0; i-- {
-		if u.entries[i].grid != nil && len(u.entries[i].grid.model.Rows) > 0 {
-			u.activeGrid = i
-			u.gridFocused = true
-			u.input.Blur()
-			u.entries[i].grid.table.Focus()
+		if u.focusGrid(i) {
 			return true
 		}
 	}
 	return false
+}
+
+func (u *UI) focusAdjacentGrid(direction int) bool {
+	for i := u.activeGrid + direction; i >= 0 && i < len(u.entries); i += direction {
+		if u.focusGrid(i) {
+			return true
+		}
+	}
+	if direction > 0 {
+		u.focusInput()
+		return true
+	}
+	return false
+}
+
+func (u *UI) focusGrid(index int) bool {
+	if index < 0 || index >= len(u.entries) || u.entries[index].grid == nil || len(u.entries[index].grid.model.Rows) == 0 {
+		return false
+	}
+	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
+		u.entries[u.activeGrid].grid.table.Blur()
+	}
+	u.activeGrid = index
+	u.gridFocused = true
+	u.input.Blur()
+	u.entries[index].grid.table.Focus()
+	return true
 }
 
 func (u *UI) focusInput() {
@@ -352,7 +388,8 @@ func formatLimitations(limitations []secureread.Limitation) string {
 
 func (u *UI) rebuildHistory(scrollToBottom bool) {
 	blocks := make([]string, 0, len(u.entries))
-	for _, entry := range u.entries {
+	activeBlock := -1
+	for entryIndex, entry := range u.entries {
 		if entry.grid != nil {
 			if entry.grid.width != u.width {
 				entry.grid.width = u.width
@@ -364,6 +401,9 @@ func (u *UI) rebuildHistory(scrollToBottom bool) {
 			if len(entry.grid.model.Rows) == 0 {
 				blocks = append(blocks, mutedStyle.Render("No rows returned."))
 			} else {
+				if u.gridFocused && entryIndex == u.activeGrid {
+					activeBlock = len(blocks)
+				}
 				blocks = append(blocks, gridTitleStyle.Render(fmt.Sprintf("%d rows", len(entry.grid.model.Rows)))+"\n"+entry.grid.table.View())
 			}
 			continue
@@ -378,10 +418,38 @@ func (u *UI) rebuildHistory(scrollToBottom bool) {
 	if scrollToBottom {
 		u.history.GotoBottom()
 	}
+	if activeBlock >= 0 {
+		u.ensureBlockVisible(blocks, activeBlock)
+	}
+}
+
+func (u *UI) ensureBlockVisible(blocks []string, blockIndex int) {
+	width := max(1, u.history.Width())
+	start := 0
+	for i := 0; i < blockIndex; i++ {
+		start += renderedLineCount(blocks[i], width) + 1
+	}
+	blockHeight := renderedLineCount(blocks[blockIndex], width)
+	top := u.history.YOffset()
+	height := max(1, u.history.Height())
+	if start < top || blockHeight >= height {
+		u.history.SetYOffset(start)
+	} else if start+blockHeight > top+height {
+		u.history.SetYOffset(start + blockHeight - height)
+	}
+}
+
+func renderedLineCount(content string, width int) int {
+	lines := 0
+	for _, line := range strings.Split(content, "\n") {
+		lineWidth := lipgloss.Width(line)
+		lines += max(1, (lineWidth+width-1)/width)
+	}
+	return lines
 }
 
 func (u *UI) View() tea.View {
-	help := "↑/Ctrl+G grid • arrows navigate • ←/→ columns • Enter sort • Esc input • Ctrl+C quit"
+	help := "Shift+↑↓ to navigate • arrows move • ←/→ columns • Enter sort • Esc input • Ctrl+C quit"
 	if u.busy {
 		help = "Thinking… • Ctrl+C quit"
 	}

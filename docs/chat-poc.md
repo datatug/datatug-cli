@@ -50,6 +50,31 @@ datatug chat \
   --base-url https://api.deepseek.com
 ```
 
+For repeatable provider setup, define a named AI profile in
+`~/.datatug.yaml`. The profile stores provider defaults and only the name of
+the environment variable containing the credential:
+
+```yaml
+ai:
+  profiles:
+    deepseek:
+      model: deepseek-flash
+      baseUrl: https://api.deepseek.com
+      apiKeyEnv: DEEPSEEK_API_KEY
+      thinking: low
+```
+
+Then select the profile with:
+
+```sh
+DEEPSEEK_API_KEY="$(pi auth print-api-key --provider deepseek)" \
+datatug chat --ai deepseek
+```
+
+The `--model`, `--base-url`, and `--thinking` flags remain available as
+explicit per-run overrides. If `--ai` is omitted, the existing default model
+and credential behavior are unchanged.
+
 Use `--database` when an environment has more than one catalog. Projects with
 access policies must also pass an appropriate `--as`, `--role`, or `--group`,
 exactly like other policy-secured DataTug reads.

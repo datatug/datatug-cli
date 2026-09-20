@@ -19,9 +19,11 @@ type chatOptions struct {
 	project  string
 	env      string
 	database string
+	ai       string
 	model    string
 	baseURL  string
 	thinking string
+	apiKey   string
 	as       string
 	roles    []string
 	groups   []string
@@ -41,6 +43,7 @@ func chatCommand() *cobra.Command {
 	flags.StringVarP(&options.project, "project", "p", ".", "DataTug project directory or registered project ID")
 	flags.StringVar(&options.env, "env", "local", "Project environment ID")
 	flags.StringVar(&options.database, "database", "", "Database catalog ID (auto-selected when the environment has one)")
+	flags.StringVar(&options.ai, "ai", "", "Configured AI profile name")
 	flags.StringVar(&options.model, "model", defaultChatModel, "Model name (for example gpt-5.6-luna, claude-haiku, or ollama/qwen3:4b)")
 	flags.StringVar(&options.baseURL, "base-url", "", "OpenAI-compatible model API base URL")
 	flags.StringVar(&options.thinking, "thinking", "low", "Model reasoning effort: low, medium, or high (provider support varies)")
@@ -54,6 +57,11 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if options.ai != "" {
+		if err := resolveChatAIProfile(&options, cmd); err != nil {
+			return Exit(err.Error(), exitCodeUsage)
+		}
 	}
 	projectDir, projectStore, err := resolveQueryProject(options.project)
 	if err != nil {
@@ -102,6 +110,9 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 
 func chatModelOptions(options chatOptions) []pimodels.Option {
 	modelOptions := []pimodels.Option{pimodels.WithThinkingLevel(options.thinking)}
+	if options.apiKey != "" {
+		modelOptions = append(modelOptions, pimodels.WithAPIKey(options.apiKey))
+	}
 	if options.baseURL != "" {
 		modelOptions = append(modelOptions, pimodels.WithBaseURL(options.baseURL))
 	}

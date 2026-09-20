@@ -43,8 +43,9 @@ func resolveChatAIProfile(options *chatOptions, cmd *cobra.Command) error {
 	}
 
 	keyEnv := strings.TrimSpace(profile.APIKeyEnv)
+	options.apiKey = ""
 	if keyEnv == "" {
-		return fmt.Errorf("AI profile %q has no API key environment variable", options.ai)
+		return nil
 	}
 	key, ok := os.LookupEnv(keyEnv)
 	if !ok || strings.TrimSpace(key) == "" {

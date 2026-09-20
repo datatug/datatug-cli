@@ -88,6 +88,23 @@ func TestResolveChatAIProfileExplicitOverrides(t *testing.T) {
 	}
 }
 
+func TestResolveChatAIProfileAllowsProviderManagedCredentials(t *testing.T) {
+	restore := getChatSettings
+	t.Cleanup(func() { getChatSettings = restore })
+	getChatSettings = func() (dtconfig.Settings, error) {
+		return dtconfig.Settings{AI: &dtconfig.AIConfig{Profiles: map[string]dtconfig.AIProfile{
+			"ollama": {Model: "ollama/qwen3:4b"},
+		}}}, nil
+	}
+	options := chatOptions{ai: "ollama", model: defaultChatModel, thinking: "low", apiKey: "stale-value"}
+	if err := resolveChatAIProfile(&options, chatCommand()); err != nil {
+		t.Fatalf("resolveChatAIProfile: %v", err)
+	}
+	if options.model != "ollama/qwen3:4b" || options.apiKey != "" {
+		t.Fatalf("options = %+v, want provider-managed credential behavior", options)
+	}
+}
+
 func TestResolveChatAIProfileErrors(t *testing.T) {
 	tests := []struct {
 		name        string

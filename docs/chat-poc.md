@@ -51,8 +51,8 @@ datatug chat \
 ```
 
 For repeatable provider setup, define a named AI profile in
-`~/.datatug.yaml`. The profile stores provider defaults and only the name of
-the environment variable containing the credential:
+`~/.datatug.yaml`. The profile stores provider defaults and, when needed, the
+name of the environment variable containing the credential:
 
 ```yaml
 ai:
@@ -74,6 +74,10 @@ datatug chat --ai deepseek
 The `--model`, `--base-url`, and `--thinking` flags remain available as
 explicit per-run overrides. If `--ai` is omitted, the existing default model
 and credential behavior are unchanged.
+
+`apiKeyEnv` is optional. When it is omitted, pi-go/provider environment,
+OAuth, or keyless authentication behavior is used instead; when it is set,
+the named environment variable must contain a non-empty key.
 
 Use `--database` when an environment has more than one catalog. Projects with
 access policies must also pass an appropriate `--as`, `--role`, or `--group`,

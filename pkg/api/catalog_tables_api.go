@@ -63,6 +63,115 @@ type CatalogTables struct {
 	Views  []CatalogTable `json:"views"`
 }
 
+// CatalogColumn is the compact, model-facing description of one stored
+// database column. It intentionally excludes environment scan bookkeeping:
+// chat needs enough context to construct a query, not the complete dbmodel.
+type CatalogColumn struct {
+	Name   string `json:"name"`
+	DbType string `json:"dbType,omitempty"`
+}
+
+// CatalogRelation describes one stored table or view and its columns.
+type CatalogRelation struct {
+	Schema  string          `json:"schema"`
+	Name    string          `json:"name"`
+	DbType  string          `json:"dbType"`
+	Columns []CatalogColumn `json:"columns"`
+}
+
+// CatalogSchema is the compact stored schema supplied to consumers such as
+// DataTug Chat. DataTug's scanned dbmodel remains the source of truth; this
+// function never introspects the live database independently.
+type CatalogSchema struct {
+	Relations []CatalogRelation `json:"relations"`
+}
+
+type catalogColumnsFile struct {
+	Columns []CatalogColumn `json:"columns"`
+}
+
+// GetCatalogSchema resolves a configured catalog to its scanned dbmodel and
+// loads table/view columns in deterministic order.
+func GetCatalogSchema(projectDir, environmentID, catalogID string) (*CatalogSchema, error) {
+	dbModelID, err := catalogDbModel(projectDir, environmentID, catalogID)
+	if err != nil {
+		return nil, err
+	}
+	dbModelDir := filepath.Join(projectDir, storage.DbModelsFolder, dbModelID)
+	var relations []CatalogRelation
+	for _, kind := range []struct {
+		dir    string
+		dbType string
+	}{{"tables", "BASE TABLE"}, {"views", "VIEW"}} {
+		items, err := loadCatalogRelations(dbModelDir, kind.dir, kind.dbType)
+		if err != nil {
+			return nil, err
+		}
+		relations = append(relations, items...)
+	}
+	sort.Slice(relations, func(i, j int) bool {
+		if relations[i].Schema != relations[j].Schema {
+			return relations[i].Schema < relations[j].Schema
+		}
+		return relations[i].Name < relations[j].Name
+	})
+	if relations == nil {
+		relations = []CatalogRelation{}
+	}
+	return &CatalogSchema{Relations: relations}, nil
+}
+
+func loadCatalogRelations(dbModelDir, kind, dbType string) ([]CatalogRelation, error) {
+	var out []CatalogRelation
+	schemaDirs, err := os.ReadDir(dbModelDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return out, nil
+		}
+		return nil, fmt.Errorf("list schemas under %s: %w", dbModelDir, err)
+	}
+	for _, schemaDir := range schemaDirs {
+		if !schemaDir.IsDir() {
+			continue
+		}
+		schema := schemaDir.Name()
+		kindDir := filepath.Join(dbModelDir, schema, kind)
+		tableDirs, err := os.ReadDir(kindDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("list %s under %s: %w", kind, kindDir, err)
+		}
+		for _, tableDir := range tableDirs {
+			if !tableDir.IsDir() {
+				continue
+			}
+			name := tableDir.Name()
+			matches, err := filepath.Glob(filepath.Join(kindDir, name, "*.columns.json"))
+			if err != nil {
+				return nil, fmt.Errorf("find columns for %s.%s: %w", schema, name, err)
+			}
+			if len(matches) != 1 {
+				return nil, fmt.Errorf("relation %s.%s has %d columns files; want 1", schema, name, len(matches))
+			}
+			data, err := os.ReadFile(matches[0])
+			if err != nil {
+				return nil, fmt.Errorf("read columns for %s.%s: %w", schema, name, err)
+			}
+			var file catalogColumnsFile
+			if err := json.Unmarshal(data, &file); err != nil {
+				return nil, fmt.Errorf("parse columns for %s.%s: %w", schema, name, err)
+			}
+			if file.Columns == nil {
+				file.Columns = []CatalogColumn{}
+			}
+			out = append(out, CatalogRelation{Schema: schema, Name: name, DbType: dbType, Columns: file.Columns})
+		}
+	}
+	return out, nil
+}
+
 // catalogDbModelFile is the minimal shape this reads out of
 // environments/<env>/catalogs/<catalog>/<catalog>.db.json — a
 // datatug.DbCatalogBase-shaped file every demo/real project already writes

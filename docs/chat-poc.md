@@ -39,6 +39,17 @@ stays configurable through pi-go's provider resolver, for example:
 datatug chat --model ollama/qwen3:4b
 ```
 
+OpenAI-compatible providers can be selected with an explicit base URL. For
+example, to use the exact `deepseek-flash` model with a DeepSeek credential
+already stored by the pi harness:
+
+```sh
+OPENAI_API_KEY="$(pi auth print-api-key --provider deepseek)" \
+datatug chat \
+  --model deepseek-flash \
+  --base-url https://api.deepseek.com
+```
+
 Use `--database` when an environment has more than one catalog. Projects with
 access policies must also pass an appropriate `--as`, `--role`, or `--group`,
 exactly like other policy-secured DataTug reads.
@@ -46,11 +57,13 @@ exactly like other policy-secured DataTug reads.
 ## Terminal interaction
 
 - Type a question and press Enter.
-- Press Ctrl+G to focus the latest result grid; Escape returns to input.
+- From an empty input, press Up or Ctrl+G to focus the latest result grid;
+  Escape returns to input.
 - Up/Down and Page Up/Page Down navigate rows.
 - Left/Right choose columns and horizontally window results wider than the terminal.
 - Enter sorts by the selected column; press it again to reverse the order.
-- The history viewport remains scrollable with the mouse or viewport keys.
+- Bubble Tea mouse capture stays disabled so the terminal can select and copy
+  text normally.
 
 ## Deliberate boundaries
 

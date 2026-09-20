@@ -215,6 +215,11 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				u.rebuildHistory(false)
 				return u, cmd
 			}
+		} else if msg.String() == "up" && !u.busy && strings.TrimSpace(u.input.Value()) == "" {
+			if u.focusLatestGrid() {
+				u.rebuildHistory(true)
+				return u, nil
+			}
 		} else if msg.String() == "enter" && !u.busy {
 			prompt := strings.TrimSpace(u.input.Value())
 			if prompt != "" {
@@ -376,7 +381,7 @@ func (u *UI) rebuildHistory(scrollToBottom bool) {
 }
 
 func (u *UI) View() tea.View {
-	help := "Ctrl+G grid • arrows navigate • ←/→ columns • Enter sort • Esc input • Ctrl+C quit"
+	help := "↑/Ctrl+G grid • arrows navigate • ←/→ columns • Enter sort • Esc input • Ctrl+C quit"
 	if u.busy {
 		help = "Thinking… • Ctrl+C quit"
 	}
@@ -384,7 +389,6 @@ func (u *UI) View() tea.View {
 	content := lipgloss.JoinVertical(lipgloss.Left, u.history.View(), status, u.input.View())
 	view := tea.NewView(content)
 	view.AltScreen = true
-	view.MouseMode = tea.MouseModeCellMotion
 	return view
 }
 

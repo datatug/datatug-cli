@@ -27,7 +27,7 @@ func openTestStore(t *testing.T, path string, scope ChatScope) *SessionStore {
 }
 
 func testScope() ChatScope {
-	return ChatScope{ProjectID: "demo-project", Environment: "local", Database: "chinook", AccessFingerprint: "admin-policy-v1", Sources: map[string]string{"chinook": "sqlite:///chinook.db"}}
+	return ChatScope{ProjectID: "demo-project", Environment: "local", Database: "chinook", AccessFingerprint: "admin-policy-v1", Sources: map[string]string{"chinook": "sqlite:///chinook.db", "private": "sqlite:///private.db?token=secret"}}
 }
 
 func testStorePath(t *testing.T) string {
@@ -391,7 +391,7 @@ func bookmarkableSelection(t *testing.T, store *SessionStore) (ChatSession, Cont
 	}
 	when := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
 	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///private.db?token=secret", Turn{Queries: []QueryResult{{
-		Title: "Invoices", DTQL: "from: {name: Invoice}",
+		Title: "Invoices", DTQL: "from: {name: Invoice}", SourceID: "private",
 		Result: secureread.Result{Columns: []string{"ID", "When", "Total"}, Rows: []secureread.Row{
 			{Key: "a", Data: map[string]any{"ID": int64(1), "When": when, "Total": 1.25}},
 			{Key: "b", Data: map[string]any{"ID": int64(2), "When": when.AddDate(0, 0, 1), "Total": 2.5}},

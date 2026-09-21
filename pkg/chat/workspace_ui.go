@@ -10,7 +10,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
-var workspaceTabs = []string{"Project", "Selected", "Docked"}
+var workspaceTabs = []string{"Project", "Selected", "Docked", "Bookmarks"}
 
 func workspaceTabIndex(name string) int {
 	for i, tab := range workspaceTabs {
@@ -49,7 +49,49 @@ func (u *UI) refreshWorkspace() error {
 	u.snapshot = snapshot
 	u.workspaceTab = workspaceTabIndex(snapshot.Workspace.ActiveTab)
 	u.rebuildDockGrids()
+	return u.refreshBookmarks()
+}
+
+func (u *UI) refreshBookmarks() error {
+	if u.sessions == nil {
+		return nil
+	}
+	items, err := u.sessions.FindBookmarks(u.ctx, u.bookmarkSearch, u.bookmarkTags)
+	if err != nil {
+		return err
+	}
+	selectedID := ""
+	if u.bookmarkIndex >= 0 && u.bookmarkIndex < len(u.bookmarkItems) {
+		selectedID = u.bookmarkItems[u.bookmarkIndex].ID
+	}
+	u.bookmarkItems = items
+	u.bookmarkIndex = min(u.bookmarkIndex, max(0, len(items)-1))
+	for index, item := range items {
+		if item.ID == selectedID {
+			u.bookmarkIndex = index
+			break
+		}
+	}
+	if u.bookmarkGridID != u.selectedBookmarkID() {
+		u.bookmarkGrid = nil
+		u.bookmarkGridID = ""
+		u.bookmarkGridFocused = false
+	}
 	return nil
+}
+
+func (u *UI) selectedBookmarkID() string {
+	if u.bookmarkIndex < 0 || u.bookmarkIndex >= len(u.bookmarkItems) {
+		return ""
+	}
+	return u.bookmarkItems[u.bookmarkIndex].ID
+}
+
+func (u *UI) selectedBookmarkReference() ContextReference {
+	if u.bookmarkIndex < 0 || u.bookmarkIndex >= len(u.bookmarkItems) {
+		return ContextReference{}
+	}
+	return bookmarkReference(u.bookmarkItems[u.bookmarkIndex])
 }
 
 func (u *UI) performWorkspaceAction(action WorkspaceAction) {
@@ -145,6 +187,46 @@ func (u *UI) projectPickerView(width, height int) string {
 }
 
 func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
+	if u.bookmarkMode != "" {
+		u.updateBookmarkInput(msg)
+		return
+	}
+	if u.bookmarkGridFocused && u.workspaceTab == 3 {
+		grid := u.ensureBookmarkGrid()
+		if grid == nil {
+			u.bookmarkGridFocused = false
+			return
+		}
+		switch msg.String() {
+		case "tab":
+			u.bookmarkGridFocused = false
+			grid.setFocused(false)
+		case "up", "k":
+			if len(grid.model.Rows) > 0 {
+				grid.rowIndex = max(0, grid.rowIndex-1)
+				grid.table.SetCursor(grid.rowIndex)
+			}
+		case "down", "j":
+			if len(grid.model.Rows) > 0 {
+				grid.rowIndex = min(len(grid.model.Rows)-1, grid.rowIndex+1)
+				grid.table.SetCursor(grid.rowIndex)
+			}
+		case "left", "h":
+			grid.selectedColumn = max(0, grid.selectedColumn-1)
+			grid.rebuild()
+		case "right", "l":
+			grid.selectedColumn = min(len(grid.model.Columns)-1, grid.selectedColumn+1)
+			grid.rebuild()
+		case "a":
+			u.toggleAttachment(u.selectedBookmarkReference())
+		case "d":
+			u.performWorkspaceAction(WorkspaceAction{Kind: "dock", Reference: u.selectedBookmarkReference()})
+		case "s":
+			grid.model.Sort(grid.selectedColumn)
+			grid.rebuild()
+		}
+		return
+	}
 	if u.dockGridFocused && u.workspaceTab == 2 {
 		if u.dockIndex >= 0 && u.dockIndex < len(u.snapshot.Workspace.Docks) {
 			dock := u.snapshot.Workspace.Docks[u.dockIndex]
@@ -207,6 +289,9 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 			u.projectDetails = false
 		case 2:
 			u.dockIndex = max(0, u.dockIndex-1)
+		case 3:
+			u.bookmarkIndex = max(0, u.bookmarkIndex-1)
+			u.bookmarkGrid = nil
 		}
 	case "down", "j":
 		switch u.workspaceTab {
@@ -215,6 +300,9 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 			u.projectDetails = false
 		case 2:
 			u.dockIndex = min(len(u.snapshot.Workspace.Docks)-1, u.dockIndex+1)
+		case 3:
+			u.bookmarkIndex = min(len(u.bookmarkItems)-1, u.bookmarkIndex+1)
+			u.bookmarkGrid = nil
 		}
 	case "enter":
 		if u.workspaceTab == 0 {
@@ -229,6 +317,11 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 			}
 		} else if u.workspaceTab == 2 && len(u.snapshot.Workspace.Docks) > 0 {
 			u.dockGridFocused = true
+		} else if u.workspaceTab == 3 && len(u.bookmarkItems) > 0 {
+			u.bookmarkGridFocused = true
+			if grid := u.ensureBookmarkGrid(); grid != nil {
+				grid.setFocused(true)
+			}
 		}
 	case "space", "a":
 		switch u.workspaceTab {
@@ -244,21 +337,123 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 			if u.dockIndex >= 0 && u.dockIndex < len(u.snapshot.Workspace.Docks) {
 				u.toggleAttachment(u.snapshot.Workspace.Docks[u.dockIndex].Reference)
 			}
+		case 3:
+			if ref := u.selectedBookmarkReference(); ref.ObjectID != "" {
+				u.toggleAttachment(ref)
+			}
+		}
+	case "b":
+		if u.workspaceTab == 1 {
+			if selection, ok := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]; ok {
+				u.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_create", Reference: ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}})
+			}
+		} else if u.workspaceTab == 2 && u.dockIndex >= 0 && u.dockIndex < len(u.snapshot.Workspace.Docks) {
+			ref := u.snapshot.Workspace.Docks[u.dockIndex].Reference
+			if ref.Kind != "bookmark" {
+				u.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_create", Reference: ref})
+			}
 		}
 	case "d":
 		if u.workspaceTab == 1 {
 			if selection, ok := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]; ok {
 				u.performWorkspaceAction(WorkspaceAction{Kind: "dock", Reference: ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}})
 			}
+		} else if u.workspaceTab == 3 {
+			if ref := u.selectedBookmarkReference(); ref.ObjectID != "" {
+				u.performWorkspaceAction(WorkspaceAction{Kind: "dock", Reference: ref})
+			}
 		}
 	case "x":
-		if u.workspaceTab == 2 && u.dockIndex >= 0 && u.dockIndex < len(u.snapshot.Workspace.Docks) {
+		if u.workspaceTab == 3 && u.selectedBookmarkID() != "" {
+			u.startBookmarkInput("delete", "Type delete to confirm")
+		} else if u.workspaceTab == 2 && u.dockIndex >= 0 && u.dockIndex < len(u.snapshot.Workspace.Docks) {
 			u.performWorkspaceAction(WorkspaceAction{Kind: "undock", DockID: u.snapshot.Workspace.Docks[u.dockIndex].ID})
 		} else if len(u.snapshot.Workspace.Attachments) > 0 {
 			last := u.snapshot.Workspace.Attachments[len(u.snapshot.Workspace.Attachments)-1]
 			u.performWorkspaceAction(WorkspaceAction{Kind: "detach", Reference: last})
 		}
+	case "r":
+		if u.workspaceTab == 3 && u.selectedBookmarkID() != "" {
+			u.startBookmarkInput("rename", "Bookmark title")
+		}
+	case "t":
+		if u.workspaceTab == 3 && u.selectedBookmarkID() != "" {
+			u.startBookmarkInput("tag_add", "Add tag")
+		}
+	case "T":
+		if u.workspaceTab == 3 && u.selectedBookmarkID() != "" {
+			u.startBookmarkInput("tag_remove", "Remove tag")
+		}
+	case "/":
+		if u.workspaceTab == 3 {
+			u.startBookmarkInput("search", "Search bookmarks")
+		}
+	case "f":
+		if u.workspaceTab == 3 {
+			u.startBookmarkInput("tags", "Filter tags (comma separated)")
+		}
 	}
+}
+
+func (u *UI) startBookmarkInput(mode, placeholder string) {
+	u.bookmarkMode = mode
+	u.bookmarkEditor.Placeholder = placeholder
+	u.bookmarkEditor.SetValue("")
+	u.bookmarkEditor.Focus()
+}
+
+func (u *UI) updateBookmarkInput(msg tea.KeyPressMsg) {
+	if msg.String() != "enter" {
+		u.bookmarkEditor, _ = u.bookmarkEditor.Update(msg)
+		return
+	}
+	value := strings.TrimSpace(u.bookmarkEditor.Value())
+	mode := u.bookmarkMode
+	u.bookmarkMode = ""
+	u.bookmarkEditor.Blur()
+	bookmarkID := u.selectedBookmarkID()
+	switch mode {
+	case "rename":
+		u.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_rename", BookmarkID: bookmarkID, Title: value})
+	case "tag_add":
+		u.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_add_tag", BookmarkID: bookmarkID, Tag: value})
+	case "tag_remove":
+		u.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_remove_tag", BookmarkID: bookmarkID, Tag: value})
+	case "delete":
+		if value == "delete" {
+			u.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_delete", BookmarkID: bookmarkID})
+		}
+	case "search":
+		u.bookmarkSearch = value
+		if err := u.refreshBookmarks(); err != nil {
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: conciseError(err)})
+		}
+	case "tags":
+		u.bookmarkTags = nil
+		for _, tag := range strings.Split(value, ",") {
+			if tag = strings.TrimSpace(tag); tag != "" {
+				u.bookmarkTags = append(u.bookmarkTags, tag)
+			}
+		}
+		if err := u.refreshBookmarks(); err != nil {
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: conciseError(err)})
+		}
+	}
+}
+
+func (u *UI) ensureBookmarkGrid() *gridState {
+	if u.bookmarkIndex < 0 || u.bookmarkIndex >= len(u.bookmarkItems) {
+		return nil
+	}
+	bookmark := u.bookmarkItems[u.bookmarkIndex]
+	if u.bookmarkGrid != nil && u.bookmarkGridID == bookmark.ID {
+		return u.bookmarkGrid
+	}
+	result, _ := bookmarkResult(bookmark)
+	u.bookmarkGrid = newGridState(NewGridModel(result), bookmark.Title, u.workspacePaneWidth())
+	u.bookmarkGridID = bookmark.ID
+	u.bookmarkGrid.setFocused(u.bookmarkGridFocused)
+	return u.bookmarkGrid
 }
 
 func (u *UI) toggleAttachment(ref ContextReference) {
@@ -392,6 +587,7 @@ func (u *UI) setWorkspaceTab(index int) {
 		_ = u.applyWorkspaceAction(WorkspaceAction{Kind: "set_tab", Title: workspaceTabs[u.workspaceTab]})
 	}
 	u.dockGridFocused = false
+	u.bookmarkGridFocused = false
 }
 
 func (u *UI) workspaceView(width, height int) string {
@@ -404,11 +600,16 @@ func (u *UI) workspaceView(width, height int) string {
 		return u.sessionPickerView(width, height)
 	}
 	tabs := make([]string, len(workspaceTabs))
-	for i, tab := range workspaceTabs {
+	labels := workspaceTabs
+	if width < 45 {
+		labels = []string{"Proj", "Sel", "Dock", "Marks"}
+	}
+	for i := range workspaceTabs {
+		label := labels[i]
 		if i == u.workspaceTab {
-			tabs[i] = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51")).Render("[" + tab + "]")
+			tabs[i] = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51")).Render("[" + label + "]")
 		} else {
-			tabs[i] = "[" + tab + "]"
+			tabs[i] = "[" + label + "]"
 		}
 	}
 	header := strings.Join(tabs, " ")
@@ -420,6 +621,8 @@ func (u *UI) workspaceView(width, height int) string {
 		body = u.selectedDetails(width)
 	case "Docked":
 		body = u.dockedView(width)
+	case "Bookmarks":
+		body = u.bookmarksView(width, height-1)
 	}
 	lines := append([]string{padAnsiLine(header, width)}, strings.Split(body, "\n")...)
 	for len(lines) < height {
@@ -430,6 +633,80 @@ func (u *UI) workspaceView(width, height int) string {
 	}
 	for i, line := range lines {
 		lines[i] = padAnsiLine(line, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (u *UI) bookmarksView(width, height int) string {
+	u.bookmarkEditor.SetWidth(max(8, min(36, width-2)))
+	filter := ""
+	if u.bookmarkSearch != "" {
+		filter = " · search: " + sanitizeTerminalText(u.bookmarkSearch)
+	}
+	if len(u.bookmarkTags) > 0 {
+		filter += " · tags: " + sanitizeTerminalText(strings.Join(u.bookmarkTags, ", "))
+	}
+	lines := []string{fmt.Sprintf("Bookmarks (%d)%s", len(u.bookmarkItems), filter)}
+	if u.bookmarkMode != "" {
+		lines = append(lines, u.bookmarkEditor.View())
+	}
+	if len(u.bookmarkItems) == 0 {
+		if len(u.bookmarkTags) > 0 {
+			lines = append(lines, "No bookmarks match these tags.")
+		} else if u.bookmarkSearch != "" {
+			lines = append(lines, "No bookmarks match this search.")
+		} else {
+			lines = append(lines, "No bookmarks yet. Focus a grid or Selection and press b.")
+		}
+		return strings.Join(lines, "\n")
+	}
+	listHeight := max(1, min(6, height/3))
+	start := max(0, u.bookmarkIndex-listHeight+1)
+	end := min(len(u.bookmarkItems), start+listHeight)
+	for i := start; i < end; i++ {
+		bookmark := u.bookmarkItems[i]
+		result, _ := bookmarkResult(bookmark)
+		marker := "  "
+		if i == u.bookmarkIndex {
+			marker = "▸ "
+		}
+		attached, docked := false, false
+		ref := bookmarkReference(bookmark)
+		for _, item := range u.snapshot.Workspace.Attachments {
+			attached = attached || sameReference(item, ref)
+		}
+		for _, item := range u.snapshot.Workspace.Docks {
+			docked = docked || sameReference(item.Reference, ref)
+		}
+		flags := ""
+		if attached {
+			flags += " · attached"
+		}
+		if docked {
+			flags += " · docked"
+		}
+		label := fmt.Sprintf("%s%s · %d rows · %s%s", marker, sanitizeTerminalText(bookmark.Title), len(result.Rows), bookmark.TargetKind, flags)
+		if i == u.bookmarkIndex && u.workspaceFocused && !u.bookmarkGridFocused {
+			label = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Render(ansi.Truncate(label, width, "…"))
+		}
+		lines = append(lines, label)
+	}
+	bookmark := u.bookmarkItems[u.bookmarkIndex]
+	lines = append(lines, "Tags: "+sanitizeTerminalText(strings.Join(bookmark.Tags, ", ")))
+	when := "unknown"
+	if !bookmark.Snapshot.RecordSet.CreatedAt.IsZero() {
+		when = bookmark.Snapshot.RecordSet.CreatedAt.UTC().Format("2006-01-02 15:04 UTC")
+	}
+	lines = append(lines, "Source: "+sanitizeTerminalText(bookmark.SourceID)+" · snapshot: "+when)
+	if doc := strings.Join(strings.Fields(sanitizeTerminalText(bookmark.Snapshot.RecordSet.DTQL)), " "); doc != "" {
+		lines = append(lines, "DTQL: "+ansi.Truncate(doc, max(1, width-7), "…"))
+	}
+	lines = append(lines, "", "Enter grid · a attach · d dock · r rename · t add tag · T remove · / search · f tags · x delete")
+	if grid := u.ensureBookmarkGrid(); grid != nil {
+		grid.width = width
+		grid.rebuild()
+		grid.setFocused(u.bookmarkGridFocused)
+		lines = append(lines, grid.view())
 	}
 	return strings.Join(lines, "\n")
 }
@@ -665,6 +942,13 @@ type referenceGridData struct {
 
 func gridDataForReference(session ChatSession, ref ContextReference) (referenceGridData, bool) {
 	switch ref.Kind {
+	case "bookmark":
+		bookmark, ok := session.Bookmarks[ref.ObjectID]
+		if !ok {
+			return referenceGridData{}, false
+		}
+		result, sourceRows := bookmarkResult(bookmark)
+		return referenceGridData{Result: result, SourceRows: sourceRows}, true
 	case "recordset":
 		record, ok := session.RecordSets[ref.ObjectID]
 		if !ok {
@@ -706,14 +990,15 @@ func gridDataForReference(session ChatSession, ref ContextReference) (referenceG
 		if len(columns) == 0 {
 			columns = record.Result.Columns
 		}
-		result := secureread.Result{Columns: append([]string{}, columns...), Rows: make([]secureread.Row, 0, len(rows))}
-		sourceRows := make([]int, 0, len(rows))
-		for _, index := range rows {
-			if index >= 0 && index < len(record.Result.Rows) {
-				result.Rows = append(result.Rows, record.Result.Rows[index])
-				sourceRows = append(sourceRows, index)
-			}
+		var selection *Selection
+		if ref.Kind == "selection" {
+			selected := session.Workspace.Selections[ref.ObjectID]
+			selection = &selected
 		}
+		projectedView := view
+		projectedView.RowIndices = rows
+		projectedView.Columns = columns
+		result, sourceRows := projectSnapshot(record, &projectedView, selection)
 		return referenceGridData{Result: result, SourceRows: sourceRows, RecordSetID: record.ID, ViewID: view.ID}, true
 	}
 	return referenceGridData{}, false

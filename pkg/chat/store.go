@@ -486,6 +486,9 @@ func validateLoadedWorkspace(item ChatSession) error {
 				}
 			}
 		}
+		if err := validateSelectionRangeProjection(record.Result.Columns, selection.Rows, selection.Columns, selection.Ranges); err != nil {
+			return fmt.Errorf("workspace selection %q: %w", selection.ID, err)
+		}
 	}
 	if item.Workspace.CurrentSelectionID != "" {
 		if _, ok := item.Workspace.Selections[item.Workspace.CurrentSelectionID]; !ok {

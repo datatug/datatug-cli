@@ -17,6 +17,7 @@ import (
 type Bookmark struct {
 	ID         string
 	ProjectID  string
+	SourceID   string
 	TargetKind string
 	Title      string
 	Tags       []string
@@ -28,12 +29,14 @@ type Bookmark struct {
 // BookmarkSnapshot contains copied identifiers only. They must never be
 // resolved via the originating session.
 type BookmarkSnapshot struct {
+	SourceID  string
 	RecordSet RecordSet
 	View      *RecordSetView
 	Selection *Selection
 }
 
 type storedBookmarkSnapshot struct {
+	SourceID  string                  `json:"sourceId,omitempty"`
 	RecordSet storedBookmarkRecordSet `json:"recordSet"`
 	View      *RecordSetView          `json:"view,omitempty"`
 	Selection *Selection              `json:"selection,omitempty"`
@@ -71,12 +74,16 @@ func (s *SessionStore) CreateBookmark(ctx context.Context, sessionID string, ref
 	if err != nil {
 		return Bookmark{}, err
 	}
+	snapshot.SourceID, err = s.bookmarkSourceID(snapshot)
+	if err != nil {
+		return Bookmark{}, err
+	}
 	payload, err := encodeBookmarkSnapshot(snapshot)
 	if err != nil {
 		return Bookmark{}, fmt.Errorf("encode bookmark snapshot: %w", err)
 	}
 	now := time.Now().UTC()
-	bookmark := Bookmark{ID: uuid.NewString(), ProjectID: s.info.ProjectID, TargetKind: kind, Title: normalizeBookmarkTitle(title, ref.Title, fallback), CreatedAt: now, UpdatedAt: now, Snapshot: snapshot}
+	bookmark := Bookmark{ID: uuid.NewString(), ProjectID: s.info.ProjectID, SourceID: snapshot.SourceID, TargetKind: kind, Title: normalizeBookmarkTitle(title, fallback, ref.Title), CreatedAt: now, UpdatedAt: now, Snapshot: snapshot}
 	tagsJSON, _ := json.Marshal(bookmark.Tags)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, bookmark.ID, bookmark.ProjectID, s.scope, bookmark.Title, string(tagsJSON), bookmark.TargetKind, stamp(now), stamp(now), payload); err != nil {
 		return Bookmark{}, fmt.Errorf("store bookmark: %w", err)
@@ -96,6 +103,10 @@ func (s *SessionStore) ListBookmarks(ctx context.Context) ([]Bookmark, error) {
 	var bookmarks []Bookmark
 	for rows.Next() {
 		bookmark, err := scanBookmark(rows)
+		if err != nil {
+			return nil, err
+		}
+		bookmark.SourceID, err = s.bookmarkSourceID(bookmark.Snapshot)
 		if err != nil {
 			return nil, err
 		}
@@ -256,7 +267,25 @@ func (s *SessionStore) bookmark(ctx context.Context, q bookmarkSQL, id string) (
 	if errors.Is(err, sql.ErrNoRows) {
 		return Bookmark{}, fmt.Errorf("bookmark %q not found in this project and access scope", id)
 	}
+	if err != nil {
+		return Bookmark{}, err
+	}
+	bookmark.SourceID, err = s.bookmarkSourceID(bookmark.Snapshot)
 	return bookmark, err
+}
+
+func (s *SessionStore) bookmarkSourceID(snapshot BookmarkSnapshot) (string, error) {
+	id := snapshot.SourceID
+	if id == "" {
+		id = snapshot.RecordSet.Database
+	}
+	if id == "" || id != snapshot.RecordSet.Database {
+		return "", errors.New("bookmark source does not match this project scope")
+	}
+	if _, ok := s.info.Sources[id]; !ok {
+		return "", errors.New("bookmark source does not match this project scope")
+	}
+	return id, nil
 }
 
 type bookmarkScanner interface{ Scan(...any) error }
@@ -401,7 +430,7 @@ func encodeBookmarkSnapshot(snapshot BookmarkSnapshot) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	stored := storedBookmarkSnapshot{RecordSet: storedBookmarkRecordSet{ID: snapshot.RecordSet.ID, QueryID: snapshot.RecordSet.QueryID, OriginMessageID: snapshot.RecordSet.OriginMessageID, Title: snapshot.RecordSet.Title, DTQL: snapshot.RecordSet.DTQL, Source: snapshot.RecordSet.Source, Environment: snapshot.RecordSet.Environment, Database: snapshot.RecordSet.Database, Parameters: snapshot.RecordSet.Parameters, CreatedAt: snapshot.RecordSet.CreatedAt, Result: result}, View: snapshot.View, Selection: snapshot.Selection}
+	stored := storedBookmarkSnapshot{SourceID: snapshot.SourceID, RecordSet: storedBookmarkRecordSet{ID: snapshot.RecordSet.ID, QueryID: snapshot.RecordSet.QueryID, OriginMessageID: snapshot.RecordSet.OriginMessageID, Title: snapshot.RecordSet.Title, DTQL: snapshot.RecordSet.DTQL, Source: snapshot.RecordSet.Source, Environment: snapshot.RecordSet.Environment, Database: snapshot.RecordSet.Database, Parameters: snapshot.RecordSet.Parameters, CreatedAt: snapshot.RecordSet.CreatedAt, Result: result}, View: snapshot.View, Selection: snapshot.Selection}
 	return json.Marshal(stored)
 }
 
@@ -417,7 +446,7 @@ func decodeBookmarkSnapshot(targetKind string, payload []byte) (BookmarkSnapshot
 	if err != nil {
 		return BookmarkSnapshot{}, err
 	}
-	snapshot := BookmarkSnapshot{RecordSet: RecordSet{ID: stored.RecordSet.ID, QueryID: stored.RecordSet.QueryID, OriginMessageID: stored.RecordSet.OriginMessageID, Title: stored.RecordSet.Title, DTQL: stored.RecordSet.DTQL, Source: stored.RecordSet.Source, Environment: stored.RecordSet.Environment, Database: stored.RecordSet.Database, Parameters: stored.RecordSet.Parameters, CreatedAt: stored.RecordSet.CreatedAt, Result: result}, View: stored.View, Selection: stored.Selection}
+	snapshot := BookmarkSnapshot{SourceID: stored.SourceID, RecordSet: RecordSet{ID: stored.RecordSet.ID, QueryID: stored.RecordSet.QueryID, OriginMessageID: stored.RecordSet.OriginMessageID, Title: stored.RecordSet.Title, DTQL: stored.RecordSet.DTQL, Source: stored.RecordSet.Source, Environment: stored.RecordSet.Environment, Database: stored.RecordSet.Database, Parameters: stored.RecordSet.Parameters, CreatedAt: stored.RecordSet.CreatedAt, Result: result}, View: stored.View, Selection: stored.Selection}
 	if err := validateBookmarkSnapshot(targetKind, snapshot); err != nil {
 		return BookmarkSnapshot{}, err
 	}
@@ -494,15 +523,25 @@ func (s *SessionStore) validateBookmarkReferences(ctx context.Context, q bookmar
 		refs = append(refs, dock.Reference)
 	}
 	for _, ref := range refs {
-		if !strings.EqualFold(ref.Kind, "bookmark") || seen[ref.ObjectID] {
+		if !strings.EqualFold(ref.Kind, "bookmark") {
 			continue
 		}
 		if ref.ObjectID == "" {
 			return errors.New("bookmark context identity is empty")
 		}
+		if ref.ProjectID != "" && ref.ProjectID != s.info.ProjectID {
+			return errors.New("bookmark context belongs to a different project")
+		}
+		if seen[ref.ObjectID] {
+			continue
+		}
 		seen[ref.ObjectID] = true
-		if _, err := s.bookmark(ctx, q, ref.ObjectID); err != nil {
+		bookmark, err := s.bookmark(ctx, q, ref.ObjectID)
+		if err != nil {
 			return errors.New("bookmark context is unavailable")
+		}
+		if ref.SourceID != "" && ref.SourceID != bookmark.SourceID {
+			return errors.New("bookmark context belongs to a different data source")
 		}
 	}
 	return nil

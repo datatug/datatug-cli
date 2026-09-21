@@ -94,6 +94,10 @@ type WorkspaceAction struct {
 	Rows        []int            `json:"rows,omitempty"`
 	Ranges      []CellRange      `json:"ranges,omitempty"`
 	DockID      string           `json:"dockId,omitempty"`
+	BookmarkID  string           `json:"bookmarkId,omitempty"`
+	Tag         string           `json:"tag,omitempty"`
+	Search      string           `json:"search,omitempty"`
+	Tags        []string         `json:"tags,omitempty"`
 }
 
 func (w WorkspaceState) apply(session ChatSession, catalog ProjectCatalog, a WorkspaceAction) (WorkspaceState, ContextReference, error) {
@@ -144,7 +148,7 @@ func (w WorkspaceState) apply(session ChatSession, catalog ProjectCatalog, a Wor
 		w.CurrentSelectionID = ""
 		return w, ContextReference{}, nil
 	case "set_tab":
-		if a.Title != "Project" && a.Title != "Selected" && a.Title != "Docked" {
+		if a.Title != "Project" && a.Title != "Selected" && a.Title != "Docked" && a.Title != "Bookmarks" {
 			return w, ContextReference{}, fmt.Errorf("unknown workspace tab %q", a.Title)
 		}
 		w.ActiveTab = a.Title
@@ -177,8 +181,8 @@ func (w WorkspaceState) apply(session ChatSession, catalog ProjectCatalog, a Wor
 		if err := validateContextReference(session, catalog, w, a.Reference); err != nil {
 			return w, ContextReference{}, err
 		}
-		if a.Reference.Kind != "recordset" && a.Reference.Kind != "view" && a.Reference.Kind != "selection" {
-			return w, ContextReference{}, fmt.Errorf("only a RecordSet, view, or selection can be docked")
+		if a.Reference.Kind != "recordset" && a.Reference.Kind != "view" && a.Reference.Kind != "selection" && a.Reference.Kind != "bookmark" {
+			return w, ContextReference{}, fmt.Errorf("only a RecordSet, view, selection, or bookmark can be docked")
 		}
 		for _, dock := range w.Docks {
 			if sameReference(dock.Reference, a.Reference) {
@@ -352,6 +356,9 @@ func (w WorkspaceState) selectRows(session ChatSession, a WorkspaceAction) (Work
 			}
 		}
 	}
+	if err := validateSelectionRangeProjection(record.Result.Columns, rows, columns, a.Ranges); err != nil {
+		return w, ContextReference{}, err
+	}
 	title := normalizeGridTitle(a.Title)
 	if a.Title == "" {
 		title = record.Title
@@ -369,6 +376,50 @@ func (w WorkspaceState) selectRows(session ChatSession, a WorkspaceAction) (Work
 	w.ActiveTab = "Selected"
 	ref := ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}
 	return w, ref, nil
+}
+
+// Range coordinates and the display row/column axes must describe the same
+// selection. Otherwise a model-supplied Rows/Columns override could silently
+// drop cells from the immutable range when the snapshot is projected.
+func validateSelectionRangeProjection(recordColumns []string, rows []int, columns []string, ranges []CellRange) error {
+	if len(ranges) == 0 {
+		return nil
+	}
+	rangeRows := map[int]bool{}
+	rangeColumns := map[string]bool{}
+	for _, span := range ranges {
+		for row := span.FirstRow; row <= span.LastRow; row++ {
+			rangeRows[row] = true
+		}
+		for column := span.FirstCol; column <= span.LastCol; column++ {
+			if column < 0 || column >= len(recordColumns) {
+				return fmt.Errorf("cell range is outside this RecordSet")
+			}
+			rangeColumns[recordColumns[column]] = true
+		}
+	}
+	selectedRows := map[int]bool{}
+	for _, row := range rows {
+		selectedRows[row] = true
+	}
+	selectedColumns := map[string]bool{}
+	for _, column := range columns {
+		selectedColumns[column] = true
+	}
+	if len(selectedRows) != len(rangeRows) || len(selectedColumns) != len(rangeColumns) || len(selectedRows) != len(rows) || len(selectedColumns) != len(columns) {
+		return fmt.Errorf("cell ranges must match the selected rows and columns")
+	}
+	for row := range rangeRows {
+		if !selectedRows[row] {
+			return fmt.Errorf("cell ranges must match the selected rows and columns")
+		}
+	}
+	for column := range rangeColumns {
+		if !selectedColumns[column] {
+			return fmt.Errorf("cell ranges must match the selected rows and columns")
+		}
+	}
+	return nil
 }
 
 func sortRecordRows(record RecordSet, rows []int, column string, descending bool) {
@@ -397,33 +448,44 @@ func containsColumn(columns []string, name string) bool {
 	return false
 }
 
-// selectionParameters resolves only attached selection values, locally at the
-// query boundary. The model sees parameter names and schemas, never rows.
+// selectionParameters resolves attached/docked values locally at the query
+// boundary. The model sees parameter names and schemas, never rows.
 func selectionParameters(session ChatSession) map[string]any {
 	params := map[string]any{}
 	for contextIndex, ref := range contextReferences(session) {
-		if ref.Kind != "selection" {
+		var record RecordSet
+		var view *RecordSetView
+		var selection *Selection
+		switch ref.Kind {
+		case "selection":
+			selected, ok := session.Workspace.Selections[ref.ObjectID]
+			if !ok {
+				continue
+			}
+			visible, ok := session.Workspace.Views[selected.ViewID]
+			if !ok {
+				continue
+			}
+			record, ok = session.RecordSets[visible.RecordSetID]
+			if !ok {
+				continue
+			}
+			view, selection = &visible, &selected
+		case "bookmark":
+			bookmark, ok := session.Bookmarks[ref.ObjectID]
+			if !ok {
+				continue
+			}
+			record, view, selection = bookmark.Snapshot.RecordSet, bookmark.Snapshot.View, bookmark.Snapshot.Selection
+		default:
 			continue
 		}
-		selection, ok := session.Workspace.Selections[ref.ObjectID]
-		if !ok {
-			continue
-		}
-		view, ok := session.Workspace.Views[selection.ViewID]
-		if !ok {
-			continue
-		}
-		record, ok := session.RecordSets[view.RecordSetID]
-		if !ok {
-			continue
-		}
-		for columnIndex, column := range selection.Columns {
-			values := make([]any, 0, len(selection.Rows))
-			for _, rowIndex := range selection.Rows {
-				if rowIndex >= 0 && rowIndex < len(record.Result.Rows) {
-					if value := record.Result.Rows[rowIndex].Data[column]; value != nil {
-						values = append(values, value)
-					}
+		projected, _ := projectSnapshot(record, view, selection)
+		for columnIndex, column := range projected.Columns {
+			values := make([]any, 0, len(projected.Rows))
+			for _, row := range projected.Rows {
+				if value, present := row.Data[column]; present && value != nil {
+					values = append(values, value)
 				}
 			}
 			params[fmt.Sprintf("selection_%d_c%d", contextIndex+1, columnIndex+1)] = values
@@ -453,6 +515,9 @@ func contextReferences(session ChatSession) []ContextReference {
 }
 
 func sameReference(a, b ContextReference) bool {
+	if a.Kind == "bookmark" && b.Kind == "bookmark" {
+		return a.ProjectID == b.ProjectID && a.ObjectID == b.ObjectID
+	}
 	return a.Kind == b.Kind && a.ProjectID == b.ProjectID && a.SourceID == b.SourceID && a.ObjectID == b.ObjectID
 }
 
@@ -472,6 +537,17 @@ func validateContextReference(session ChatSession, catalog ProjectCatalog, w Wor
 	case "selection":
 		if _, ok := w.Selections[ref.ObjectID]; !ok {
 			return fmt.Errorf("the selected selection is no longer available")
+		}
+	case "bookmark":
+		bookmark, ok := session.Bookmarks[ref.ObjectID]
+		if !ok || bookmark.ProjectID != catalog.ID {
+			return fmt.Errorf("the selected bookmark is no longer available")
+		}
+		if ref.ProjectID != "" && ref.ProjectID != bookmark.ProjectID {
+			return fmt.Errorf("bookmark belongs to a different project")
+		}
+		if ref.SourceID != "" && ref.SourceID != bookmark.SourceID {
+			return fmt.Errorf("bookmark belongs to a different data source")
 		}
 	case "project", "source", "table", "project_view", "query":
 		for _, object := range catalog.Objects {

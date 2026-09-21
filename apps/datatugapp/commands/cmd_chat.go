@@ -129,6 +129,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		return "", Exit(fmt.Sprintf("resolve chat storage: %v", err), exitCodeUsage)
 	}
 	store, err := chat.OpenSessionStore(storePath, chat.ChatScope{
+		ProjectID:   projectCatalog.ID,
 		Environment: options.env, Database: database,
 		AccessFingerprint: accesspolicies.Fingerprint(session.Policies, session.Unrestricted, session.Principal),
 		Sources:           sourceURLs,

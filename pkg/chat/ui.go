@@ -391,42 +391,51 @@ type turnMessage struct {
 // UI is the Bubble Tea chat model: a scrollable history viewport, inline
 // bubble-table components, and a fixed bottom input.
 type UI struct {
-	ctx                context.Context
-	conversation       Conversation
-	sessions           *SessionChat
-	sessionID          string
-	sessionTitle       string
-	snapshot           ChatSession
-	catalog            ProjectCatalog
-	modelName          string
-	history            viewport.Model
-	input              textinput.Model
-	entries            []historyEntry
-	activeGrid         int
-	gridFocused        bool
-	workspaceFocused   bool
-	workspaceTab       int
-	explorerIndex      int
-	explorerOffset     int
-	explorerCollapsed  map[string]bool
-	projectDetails     bool
-	dockIndex          int
-	dockGridFocused    bool
-	dockGrids          map[string]*gridState
-	rangeAnchor        int
-	rangeColumn        int
-	sessionPicker      bool
-	sessionPickerIndex int
-	pickerSessions     []ChatSession
-	projectPicker      bool
-	projectPickerIndex int
-	projectChoices     []ProjectChoice
-	selectedProject    string
-	chatPanePercent    int
-	mouseCapture       bool
-	busy               bool
-	width              int
-	height             int
+	ctx                 context.Context
+	conversation        Conversation
+	sessions            *SessionChat
+	sessionID           string
+	sessionTitle        string
+	snapshot            ChatSession
+	catalog             ProjectCatalog
+	modelName           string
+	history             viewport.Model
+	input               textinput.Model
+	entries             []historyEntry
+	activeGrid          int
+	gridFocused         bool
+	workspaceFocused    bool
+	workspaceTab        int
+	explorerIndex       int
+	explorerOffset      int
+	explorerCollapsed   map[string]bool
+	projectDetails      bool
+	dockIndex           int
+	dockGridFocused     bool
+	dockGrids           map[string]*gridState
+	bookmarkItems       []Bookmark
+	bookmarkIndex       int
+	bookmarkGrid        *gridState
+	bookmarkGridID      string
+	bookmarkGridFocused bool
+	bookmarkMode        string
+	bookmarkEditor      textinput.Model
+	bookmarkSearch      string
+	bookmarkTags        []string
+	rangeAnchor         int
+	rangeColumn         int
+	sessionPicker       bool
+	sessionPickerIndex  int
+	pickerSessions      []ChatSession
+	projectPicker       bool
+	projectPickerIndex  int
+	projectChoices      []ProjectChoice
+	selectedProject     string
+	chatPanePercent     int
+	mouseCapture        bool
+	busy                bool
+	width               int
+	height              int
 }
 
 // ProjectChoice identifies a configured DataTug project, not a database.
@@ -464,6 +473,9 @@ func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI
 	input.SetStyles(inputStyles)
 	input.SetWidth(contentWidth(80) - 2)
 	input.Focus()
+	bookmarkEditor := textinput.New()
+	bookmarkEditor.Prompt = "> "
+	bookmarkEditor.SetWidth(36)
 	history := viewport.New(viewport.WithWidth(contentWidth(80)), viewport.WithHeight(20))
 	history.SoftWrap = true
 	return &UI{
@@ -472,6 +484,7 @@ func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI
 		modelName:         modelName,
 		history:           history,
 		input:             input,
+		bookmarkEditor:    bookmarkEditor,
 		activeGrid:        -1,
 		rangeAnchor:       -1,
 		dockGrids:         map[string]*gridState{},
@@ -602,6 +615,18 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			u.mouseCapture = !u.mouseCapture
 			return u, nil
 		case "esc":
+			if u.bookmarkMode != "" {
+				u.bookmarkMode = ""
+				u.bookmarkEditor.Blur()
+				return u, nil
+			}
+			if u.bookmarkGridFocused {
+				u.bookmarkGridFocused = false
+				if u.bookmarkGrid != nil {
+					u.bookmarkGrid.setFocused(false)
+				}
+				return u, nil
+			}
 			u.sessionPicker = false
 			u.projectPicker = false
 			u.focusInput()
@@ -698,6 +723,10 @@ func (u *UI) loadSession(session ChatSession) {
 	u.gridFocused = false
 	u.workspaceFocused = false
 	u.dockGridFocused = false
+	u.bookmarkGridFocused = false
+	u.bookmarkGrid = nil
+	u.bookmarkGridID = ""
+	u.bookmarkMode = ""
 	u.rangeAnchor = -1
 	u.workspaceTab = workspaceTabIndex(session.Workspace.ActiveTab)
 	u.dockGrids = map[string]*gridState{}
@@ -715,6 +744,7 @@ func (u *UI) loadSession(session ChatSession) {
 	}
 	u.history.SetHeight(u.historyHeight())
 	u.rebuildDockGrids()
+	_ = u.refreshBookmarks()
 	u.rebuildHistory(true)
 }
 
@@ -838,6 +868,15 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			}
 		}
 		u.performWorkspaceAction(WorkspaceAction{Kind: "dock", Reference: ref})
+		return nil, true
+	case "b":
+		ref := ContextReference{Kind: "recordset", ObjectID: u.entries[u.activeGrid].recordSetID, Title: g.title}
+		if selection, ok := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]; ok {
+			if view := u.snapshot.Workspace.Views[selection.ViewID]; view.RecordSetID == ref.ObjectID {
+				ref = ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}
+			}
+		}
+		u.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_create", Reference: ref})
 		return nil, true
 	case "s":
 		g.model.Sort(g.selectedColumn)
@@ -1124,13 +1163,22 @@ func (u *UI) statusLines() []string {
 		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.sessionTitle), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
 	}
 	if u.gridFocused {
-		segments = []string{"Shift+↑↓ to navigate", "↑↓ rows", "←→ columns", "Space row", "c cell", "r range", "a attach", "d dock", "s sort", "Enter details", "Esc input"}
+		segments = []string{"Shift+↑↓ to navigate", "↑↓ rows", "←→ columns", "Space row", "c cell", "r range", "a attach", "d dock", "b bookmark", "s sort", "Enter details", "Esc input"}
 		if u.sessions != nil {
 			segments = append([]string{"session: " + sanitizeTerminalText(u.sessionTitle)}, segments...)
 		}
 	}
 	if u.workspaceFocused {
-		segments = []string{"F6/Esc input", "←→ tabs", "↑↓ navigate", "Ctrl+←→ resize", "Space attach", "Enter open", "d dock", "x detach/undock", mouseHint}
+		segments = []string{"F6/Esc input", "←→ tabs", "↑↓ navigate", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", mouseHint}
+		if u.workspaceTab == 3 {
+			segments = []string{"F6/Esc input", "←→ tabs", "↑↓ browse", "Enter open grid", "a attach", "d dock", "r rename", "t/T tags", "/ search", "f filter", "x delete", mouseHint}
+			if u.bookmarkGridFocused {
+				segments = []string{"Tab list", "↑↓ rows", "←→ columns", "s sort", "a attach", "d dock", "Esc list"}
+			}
+			if u.bookmarkMode != "" {
+				segments = []string{"Bookmark " + u.bookmarkMode, "Enter apply", "Esc cancel"}
+			}
+		}
 	}
 	if u.busy {
 		segments = []string{"model: " + sanitizeTerminalText(u.modelName), "Thinking…", "Ctrl+C quit"}

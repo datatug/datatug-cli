@@ -2,6 +2,8 @@
 
 The [original Phase 1 request](chat-phase1-original-prompt.md) is preserved
 verbatim for historical context.
+The [original Phase 4 request](chat-phase4-original-prompt.md) is also preserved
+verbatim; this link does not imply Phase 4 has been implemented.
 
 Phase 2 now adds durable, session-scoped chat state and RecordSet snapshots.
 See [the Phase 2 design](chat-phase2-design.md) for storage and lifecycle

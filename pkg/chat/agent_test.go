@@ -73,6 +73,153 @@ func TestRunDTQLReturnsPersistedRecordSetReference(t *testing.T) {
 	}
 }
 
+func TestRunDTQLRefusesModelAuthoredJoin(t *testing.T) {
+	executor := &fakeExecutor{}
+	conversation := &ADKConversation{}
+	doc := `from:
+  name: Invoice
+  alias: i
+  joins:
+    - from: {name: Customer, alias: c}
+      on: [{left: {field: CustomerId, source: i}, op: '==', right: {field: CustomerId, source: c}}]
+limit: 5
+`
+	response, err := conversation.runDTQL(context.Background(), executor, "sqlite:///chinook.db", runDTQLArgs{DTQL: doc})
+	if err != nil || response.OK || !strings.Contains(response.Error, "foreign-key candidate") || executor.calls != 0 {
+		t.Fatalf("model-authored JOIN was not refused before execution: %+v, %v, calls=%d", response, err, executor.calls)
+	}
+}
+
+func TestAgentJoinToolUsesSameApplicationOperation(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	llm := &scriptedLLM{}
+	queryExecutor := &fakeExecutor{}
+	conversation, err := NewADKConversation(llm, queryExecutor, "sqlite:///fixture.db", "- Invoice: InvoiceId, CustomerId")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := NewSessionChat(ctx, store, conversation, "sqlite:///fixture.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.AppendUser(ctx, chat.activeID, "Show invoices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := store.AppendQuery(ctx, chat.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
+		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
+		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": "private-row-value"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joinExecutor := &joinExecutorStub{}
+	chat.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: joinExecutor})
+	candidates, err := chat.JoinCandidates(ctx, base.RecordSetID)
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("candidates = %#v, %v", candidates, err)
+	}
+	llm.responses = []*model.LLMResponse{
+		{Content: genai.NewContentFromFunctionCall("apply_join_candidate", map[string]any{"recordSetId": base.RecordSetID, "candidateId": string(candidates[0].ID)}, genai.RoleModel)},
+		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"title": "Placeholder", "dtql": "from: {name: Invoice}\nlimit: 1"}, genai.RoleModel)},
+		{Content: genai.NewContentFromText("Joined.", genai.RoleModel)},
+	}
+	turn, err := chat.Ask(ctx, "Join customers")
+	if err != nil || len(turn.Actions) != 1 || turn.Actions[0].Err != nil {
+		t.Fatalf("agent JOIN turn = %+v, %v", turn, err)
+	}
+	if len(turn.Queries) != 0 || queryExecutor.calls != 0 {
+		t.Fatalf("model's follow-up query should not execute or create a second grid: queries=%+v calls=%d", turn.Queries, queryExecutor.calls)
+	}
+	agentResultID := turn.Actions[0].Reference.ObjectID
+	if agentResultID == "" {
+		t.Fatal("agent did not return a persisted RecordSet ID")
+	}
+	uiResult, err := chat.ApplyJoinCandidate(ctx, base.RecordSetID, candidates[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := chat.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentResult := snapshot.RecordSets[agentResultID]
+	if agentResult.DTQL != uiResult.DTQL || agentResult.Lineage == nil || uiResult.Lineage == nil {
+		t.Fatalf("agent/UI JOIN paths diverged: %#v / %#v", agentResult, uiResult)
+	}
+	if len(llm.requests) == 0 || len(llm.requests[0].Contents) == 0 {
+		t.Fatal("no model request captured")
+	}
+	prompt := llm.requests[0].Contents[0].Parts[0].Text
+	if !strings.Contains(prompt, string(candidates[0].ID)) || strings.Contains(prompt, "private-row-value") {
+		t.Fatalf("candidate context missing or row value leaked: %q", prompt)
+	}
+}
+
+func TestAgentJoinTargetAmbiguityCannotBeGuessed(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	llm := &scriptedLLM{}
+	conversation, err := NewADKConversation(llm, &fakeExecutor{}, "sqlite:///fixture.db", "- Order: BillingAddressId, ShippingAddressId")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := NewSessionChat(ctx, store, conversation, "sqlite:///fixture.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.AppendUser(ctx, chat.activeID, "Show orders")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := store.AppendQuery(ctx, chat.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
+		Title: "Orders", DTQL: "from: {name: Order}\ncolumns: [{field: OrderId}]\nlimit: 5\n",
+		Result: secureread.Result{Columns: []string{"OrderId"}, Rows: []secureread.Row{{Data: map[string]any{"OrderId": 1}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := ForeignKeySnapshot{Source: "sqlite:///fixture.db", Columns: map[string][]string{
+		"main.order":   {"OrderId", "BillingAddressId", "ShippingAddressId"},
+		"main.address": {"AddressId", "City"},
+	}, Keys: []ForeignKey{
+		{ConstraintID: "billing", Schema: "main", FromRelation: "Order", FromFields: []string{"BillingAddressId"}, ToSchema: "main", ToRelation: "Address", ToFields: []string{"AddressId"}},
+		{ConstraintID: "shipping", Schema: "main", FromRelation: "Order", FromFields: []string{"ShippingAddressId"}, ToSchema: "main", ToRelation: "Address", ToFields: []string{"AddressId"}},
+	}}
+	joinExecutor := &fakeExecutor{result: secureread.Result{Columns: []string{"OrderId"}}}
+	chat.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: snapshot, Executor: joinExecutor})
+	candidates, err := chat.JoinCandidates(ctx, base.RecordSetID)
+	if err != nil || len(candidates) != 2 {
+		t.Fatalf("candidates = %#v, %v", candidates, err)
+	}
+	var shipping JoinCandidateID
+	for _, candidate := range candidates {
+		if candidate.ConstraintID == "shipping" {
+			shipping = candidate.ID
+		}
+	}
+	if shipping == "" {
+		t.Fatal("shipping edge missing")
+	}
+	call := func() *model.LLMResponse {
+		return &model.LLMResponse{Content: genai.NewContentFromFunctionCall("apply_join_candidate", map[string]any{"recordSetId": base.RecordSetID, "candidateId": string(shipping)}, genai.RoleModel)}
+	}
+	llm.responses = []*model.LLMResponse{call(), {Content: genai.NewContentFromText("Done.", genai.RoleModel)}}
+	turn, err := chat.Ask(ctx, "Join address")
+	if err != nil || len(turn.Actions) != 1 || turn.Actions[0].Err == nil || joinExecutor.calls != 0 {
+		t.Fatalf("ambiguous target was guessed: turn=%+v err=%v calls=%d", turn, err, joinExecutor.calls)
+	}
+	llm.responses = []*model.LLMResponse{call(), {Content: genai.NewContentFromText("Done.", genai.RoleModel)}}
+	llm.calls = 0
+	turn, err = chat.Ask(ctx, "Join shipping address")
+	if err != nil || len(turn.Actions) != 1 || turn.Actions[0].Err != nil || joinExecutor.calls != 1 {
+		t.Fatalf("explicit shipping edge was refused: turn=%+v err=%v calls=%d", turn, err, joinExecutor.calls)
+	}
+}
+
 func TestQueryToolDoesNotReturnLocallyBoundValuesInErrors(t *testing.T) {
 	const secret = "Paris-private-selected-value"
 	conversation := &ADKConversation{}

@@ -54,6 +54,7 @@ type storedBookmarkRecordSet struct {
 	Parameters      map[string]any  `json:"parameters"`
 	CreatedAt       time.Time       `json:"createdAt"`
 	Result          json.RawMessage `json:"result"`
+	Lineage         *JoinLineage    `json:"lineage,omitempty"`
 }
 
 type bookmarkSQL interface {
@@ -430,7 +431,7 @@ func encodeBookmarkSnapshot(snapshot BookmarkSnapshot) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	stored := storedBookmarkSnapshot{SourceID: snapshot.SourceID, RecordSet: storedBookmarkRecordSet{ID: snapshot.RecordSet.ID, QueryID: snapshot.RecordSet.QueryID, OriginMessageID: snapshot.RecordSet.OriginMessageID, Title: snapshot.RecordSet.Title, DTQL: snapshot.RecordSet.DTQL, Source: snapshot.RecordSet.Source, Environment: snapshot.RecordSet.Environment, Database: snapshot.RecordSet.Database, Parameters: snapshot.RecordSet.Parameters, CreatedAt: snapshot.RecordSet.CreatedAt, Result: result}, View: snapshot.View, Selection: snapshot.Selection}
+	stored := storedBookmarkSnapshot{SourceID: snapshot.SourceID, RecordSet: storedBookmarkRecordSet{ID: snapshot.RecordSet.ID, QueryID: snapshot.RecordSet.QueryID, OriginMessageID: snapshot.RecordSet.OriginMessageID, Title: snapshot.RecordSet.Title, DTQL: snapshot.RecordSet.DTQL, Source: snapshot.RecordSet.Source, Environment: snapshot.RecordSet.Environment, Database: snapshot.RecordSet.Database, Parameters: snapshot.RecordSet.Parameters, CreatedAt: snapshot.RecordSet.CreatedAt, Result: result, Lineage: snapshot.RecordSet.Lineage}, View: snapshot.View, Selection: snapshot.Selection}
 	return json.Marshal(stored)
 }
 
@@ -446,7 +447,7 @@ func decodeBookmarkSnapshot(targetKind string, payload []byte) (BookmarkSnapshot
 	if err != nil {
 		return BookmarkSnapshot{}, err
 	}
-	snapshot := BookmarkSnapshot{SourceID: stored.SourceID, RecordSet: RecordSet{ID: stored.RecordSet.ID, QueryID: stored.RecordSet.QueryID, OriginMessageID: stored.RecordSet.OriginMessageID, Title: stored.RecordSet.Title, DTQL: stored.RecordSet.DTQL, Source: stored.RecordSet.Source, Environment: stored.RecordSet.Environment, Database: stored.RecordSet.Database, Parameters: stored.RecordSet.Parameters, CreatedAt: stored.RecordSet.CreatedAt, Result: result}, View: stored.View, Selection: stored.Selection}
+	snapshot := BookmarkSnapshot{SourceID: stored.SourceID, RecordSet: RecordSet{ID: stored.RecordSet.ID, QueryID: stored.RecordSet.QueryID, OriginMessageID: stored.RecordSet.OriginMessageID, Title: stored.RecordSet.Title, DTQL: stored.RecordSet.DTQL, Source: stored.RecordSet.Source, Environment: stored.RecordSet.Environment, Database: stored.RecordSet.Database, Parameters: stored.RecordSet.Parameters, CreatedAt: stored.RecordSet.CreatedAt, Result: result, Lineage: stored.RecordSet.Lineage}, View: stored.View, Selection: stored.Selection}
 	if err := validateBookmarkSnapshot(targetKind, snapshot); err != nil {
 		return BookmarkSnapshot{}, err
 	}

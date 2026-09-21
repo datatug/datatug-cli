@@ -24,9 +24,9 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dal-go/dalgo v0.83.2
+	github.com/dal-go/dalgo v0.85.0
 	github.com/dal-go/dalgo2http v0.2.0
-	github.com/dal-go/dalgo2sql v0.17.1-0.20260921072327-6a759f5296be
+	github.com/dal-go/dalgo2sql v0.18.0
 	github.com/dal-go/dalgo2sqlite v0.1.11
 	github.com/dal-go/record v0.1.3
 	github.com/datatug/cliformat v0.0.3

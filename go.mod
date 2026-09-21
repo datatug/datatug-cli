@@ -23,16 +23,18 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
+	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.83.2
 	github.com/dal-go/dalgo2http v0.2.0
 	github.com/dal-go/dalgo2sql v0.17.1-0.20260921072327-6a759f5296be
 	github.com/dal-go/dalgo2sqlite v0.1.11
 	github.com/dal-go/record v0.1.3
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.40.0
+	github.com/datatug/datatug-core v0.41.0
 	github.com/datatug/sql2csv v0.0.0-20260826045256-b0d582f72f50
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/dimetron/pi-go v0.1.4
+	github.com/evertras/bubble-table v0.23.0
 	github.com/filetug/filetug v0.3.0
 	github.com/gdamore/tcell/v2 v2.13.10
 	github.com/go-git/go-git/v5 v5.19.2
@@ -40,7 +42,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gosuri/uitable v0.0.4
 	github.com/ingitdb/dalgo2ingitdb v0.6.1
-	github.com/ingitdb/ingitdb-go/ingitdb v0.6.1
+	github.com/ingitdb/ingitdb-go/ingitdb v0.7.3
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/go-sqlite3 v1.14.50
 	github.com/mitchellh/go-homedir v1.1.0
@@ -94,7 +96,6 @@ require (
 	github.com/charmbracelet/glamour v1.0.0 // indirect
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be // indirect
-	github.com/charmbracelet/x/ansi v0.11.8 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250603201427-c31516f43444 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20260813141921-f091cedeaf78 // indirect

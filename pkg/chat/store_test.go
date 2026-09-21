@@ -3,10 +3,12 @@ package chat
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +27,7 @@ func openTestStore(t *testing.T, path string, scope ChatScope) *SessionStore {
 }
 
 func testScope() ChatScope {
-	return ChatScope{Environment: "local", Database: "chinook", AccessFingerprint: "admin-policy-v1", Sources: map[string]string{"chinook": "sqlite:///chinook.db"}}
+	return ChatScope{ProjectID: "demo-project", Environment: "local", Database: "chinook", AccessFingerprint: "admin-policy-v1", Sources: map[string]string{"chinook": "sqlite:///chinook.db"}}
 }
 
 func testStorePath(t *testing.T) string {
@@ -373,5 +375,196 @@ func TestCorruptSnapshotPayloadIsReported(t *testing.T) {
 	}
 	if _, err := store.Load(ctx, session.ID); err == nil || !strings.Contains(err.Error(), "corrupt RecordSet") {
 		t.Fatalf("corrupt snapshot load error = %v", err)
+	}
+}
+
+func bookmarkableSelection(t *testing.T, store *SessionStore) (ChatSession, ContextReference) {
+	t.Helper()
+	ctx := context.Background()
+	session, err := store.Create(ctx, "Invoices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.AppendUser(ctx, session.ID, "show invoices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	when := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
+	turn, err := store.AppendTurn(ctx, session.ID, user.ID, "sqlite:///private.db?token=secret", Turn{Queries: []QueryResult{{
+		Title: "Invoices", DTQL: "from: {name: Invoice}",
+		Result: secureread.Result{Columns: []string{"ID", "When", "Total"}, Rows: []secureread.Row{
+			{Key: "a", Data: map[string]any{"ID": int64(1), "When": when, "Total": 1.25}},
+			{Key: "b", Data: map[string]any{"ID": int64(2), "When": when.AddDate(0, 0, 1), "Total": 2.5}},
+			{Key: "c", Data: map[string]any{"ID": int64(3), "When": when.AddDate(0, 0, 2), "Total": 3.75}},
+		}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := RecordSetView{ID: "view-1", RecordSetID: turn.Queries[0].RecordSetID, Title: "Invoice subset", RowIndices: []int{2, 0}, Columns: []string{"ID", "When", "Total"}, CreatedAt: when}
+	selection := Selection{ID: "selection-1", ViewID: view.ID, Title: "Chosen invoices", Rows: []int{2, 0}, Columns: []string{"ID", "When", "Total"}, Ranges: []CellRange{{FirstRow: 0, LastRow: 0, FirstCol: 0, LastCol: 1}, {FirstRow: 2, LastRow: 2, FirstCol: 1, LastCol: 2}}, CreatedAt: when}
+	if err := store.SaveWorkspace(ctx, session.ID, WorkspaceState{Views: map[string]RecordSetView{view.ID: view}, Selections: map[string]Selection{selection.ID: selection}}); err != nil {
+		t.Fatal(err)
+	}
+	return session, ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}
+}
+
+func TestBookmarkMigrationFromV2IsAtomicAndIdempotent(t *testing.T) {
+	ctx := context.Background()
+	path := testStorePath(t)
+	store := openTestStore(t, path, testScope())
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE bookmarks; PRAGMA user_version = 2`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrated := openTestStore(t, path, testScope())
+	var version int
+	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 3 {
+		t.Fatalf("schema version = %d, %v", version, err)
+	}
+	if _, err := migrated.db.ExecContext(ctx, `INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('bad', ?, ?, 'bad', '[]', 'recordset', ?, ?, '{}')`, testScope().ProjectID, migrated.scope, stamp(time.Now().UTC()), stamp(time.Now().UTC())); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrated.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A second v3 open does not rerun or corrupt the completed migration.
+	reopened := openTestStore(t, path, testScope())
+	if _, err := reopened.ListBookmarks(ctx); err == nil || !strings.Contains(err.Error(), "corrupt bookmark") {
+		t.Fatalf("invalid v3 snapshot was not rejected after restart: %v", err)
+	}
+}
+
+func TestBookmarkSelectionSurvivesOriginDeletionAndRestart(t *testing.T) {
+	ctx := context.Background()
+	path := testStorePath(t)
+	store := openTestStore(t, path, testScope())
+	session, ref := bookmarkableSelection(t, store)
+	bookmark, err := store.CreateBookmark(ctx, session.ID, ref, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddBookmarkTag(ctx, bookmark.ID, " Incident "); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddBookmarkTag(ctx, bookmark.ID, "incident"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Clear(ctx, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if bookmarks, err := store.ListBookmarks(ctx); err != nil || len(bookmarks) != 1 {
+		t.Fatalf("bookmarks after origin clear = %+v, %v", bookmarks, err)
+	}
+	if err := store.Delete(ctx, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestStore(t, path, testScope())
+	bookmarks, err := reopened.ListBookmarks(ctx)
+	if err != nil || len(bookmarks) != 1 || len(bookmarks[0].Tags) != 1 || bookmarks[0].Tags[0] != "Incident" {
+		t.Fatalf("bookmarks after origin deletion/restart = %+v, %v", bookmarks, err)
+	}
+	result, sourceRows := bookmarkResult(bookmarks[0])
+	if got, want := sourceRows, []int{2, 0}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("source rows = %v, want %v", got, want)
+	}
+	if got := result.Rows[0].Data["Total"]; got != 3.75 {
+		t.Fatalf("typed selected value = %#v", got)
+	}
+	if _, ok := result.Rows[0].Data["ID"]; ok {
+		t.Fatalf("range hole leaked ID into selected row: %+v", result.Rows[0].Data)
+	}
+	if got := result.Rows[1].Data["When"]; got != time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC) {
+		t.Fatalf("typed date = %#v", got)
+	}
+	if _, ok := result.Rows[1].Data["Total"]; ok {
+		t.Fatalf("range hole leaked Total into selected row: %+v", result.Rows[1].Data)
+	}
+}
+
+func TestBookmarkTagsAndProjectScopeIsolation(t *testing.T) {
+	ctx := context.Background()
+	path := testStorePath(t)
+	store := openTestStore(t, path, testScope())
+	session, ref := bookmarkableSelection(t, store)
+	first, err := store.CreateBookmark(ctx, session.ID, ref, "Prague invoices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.CreateBookmark(ctx, session.ID, ref, "Payment invoices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct {
+		id   string
+		tags []string
+	}{{first.ID, []string{"Incident", "2026-09-21"}}, {second.ID, []string{"incident", "payments"}}} {
+		for _, tag := range item.tags {
+			if _, err := store.AddBookmarkTag(ctx, item.id, tag); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	found, err := store.FindBookmarks(ctx, "prague", []string{"incident", "2026-09-21", "INCIDENT"})
+	if err != nil || len(found) != 1 || found[0].ID != first.ID {
+		t.Fatalf("AND tag search = %+v, %v", found, err)
+	}
+	if _, err := store.RemoveBookmarkTag(ctx, first.ID, "INCIDENT"); err != nil {
+		t.Fatal(err)
+	}
+	if found, err := store.FindBookmarks(ctx, "", []string{"incident"}); err != nil || len(found) != 1 || found[0].ID != second.ID {
+		t.Fatalf("removed tag search = %+v, %v", found, err)
+	}
+	otherProject := testScope()
+	otherProject.ProjectID = "another-project"
+	if found, err := openTestStore(t, path, otherProject).ListBookmarks(ctx); err != nil || len(found) != 0 {
+		t.Fatalf("cross-project bookmarks = %+v, %v", found, err)
+	}
+	otherScope := testScope()
+	otherScope.AccessFingerprint = "other-policy"
+	if found, err := openTestStore(t, path, otherScope).ListBookmarks(ctx); err != nil || len(found) != 0 {
+		t.Fatalf("cross-scope bookmarks = %+v, %v", found, err)
+	}
+}
+
+func TestBookmarkDeleteBlocksPersistedReferencesAndSaveValidatesThem(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	origin, ref := bookmarkableSelection(t, store)
+	bookmark, err := store.CreateBookmark(ctx, origin.ID, ref, "Chosen invoices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer, err := store.Create(ctx, "Consumer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bookmarkRef := ContextReference{Kind: "bookmark", ObjectID: bookmark.ID, Title: bookmark.Title}
+	if err := store.SaveWorkspace(ctx, consumer.ID, WorkspaceState{Attachments: []ContextReference{bookmarkRef}, Docks: []Dock{{ID: "dock-1", Reference: bookmarkRef}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteBookmark(ctx, bookmark.ID); err == nil || !strings.Contains(err.Error(), "still referenced") {
+		t.Fatalf("delete referenced bookmark = %v", err)
+	}
+	if err := store.SaveWorkspace(ctx, consumer.ID, WorkspaceState{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteBookmark(ctx, bookmark.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveWorkspace(ctx, consumer.ID, WorkspaceState{Attachments: []ContextReference{{Kind: "bookmark", ObjectID: bookmark.ID}}}); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("saving deleted bookmark reference = %v", err)
 	}
 }

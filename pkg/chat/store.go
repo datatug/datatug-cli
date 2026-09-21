@@ -23,6 +23,10 @@ import (
 // ChatScope prevents a cached, policy-redacted result from being reopened
 // under another database or principal/policy configuration.
 type ChatScope struct {
+	// ProjectID partitions retained project artefacts. It deliberately does not
+	// participate in the existing session scope hash: Phase 2 sessions retain
+	// their exact historic scope identity during the Phase 4 migration.
+	ProjectID         string
 	Environment       string
 	Database          string
 	AccessFingerprint string
@@ -37,6 +41,7 @@ type ChatSession struct {
 	Messages   []ChatMessage
 	Queries    []ExecutedQuery
 	RecordSets map[string]RecordSet
+	Bookmarks  map[string]Bookmark
 	Workspace  WorkspaceState
 }
 
@@ -109,8 +114,8 @@ func canonicalProjectPath(projectDir string) (string, error) {
 }
 
 func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
-	if scope.Environment == "" || scope.Database == "" || scope.AccessFingerprint == "" || scope.Sources[scope.Database] == "" {
-		return nil, errors.New("chat session scope requires environment, database, access fingerprint, and selected source")
+	if scope.ProjectID == "" || scope.Environment == "" || scope.Database == "" || scope.AccessFingerprint == "" || scope.Sources[scope.Database] == "" {
+		return nil, errors.New("chat session scope requires project ID, environment, database, access fingerprint, and selected source")
 	}
 	if path == "" {
 		return nil, errors.New("chat session store path is empty")
@@ -158,7 +163,14 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	encoded, _ := json.Marshal(scope)
+	// Keep the persisted scope identity byte-for-byte compatible with Phase 3.
+	// ProjectID is an additional bookmark boundary, not a session-scope change.
+	encoded, _ := json.Marshal(struct {
+		Environment       string
+		Database          string
+		AccessFingerprint string
+		Sources           map[string]string
+	}{scope.Environment, scope.Database, scope.AccessFingerprint, scope.Sources})
 	sum := sha256.Sum256(encoded)
 	newScope := hex.EncodeToString(sum[:])
 	legacy, _ := json.Marshal(struct {
@@ -240,7 +252,7 @@ func initChatSchema(db *sql.DB) error {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read chat schema version: %w", err)
 	}
-	if version != 0 && version != 1 && version != 2 {
+	if version != 0 && version != 1 && version != 2 && version != 3 {
 		return fmt.Errorf("unsupported chat database schema version %d", version)
 	}
 	if version >= 1 {
@@ -254,10 +266,16 @@ func initChatSchema(db *sql.DB) error {
 		if err := db.QueryRow("PRAGMA quick_check").Scan(&integrity); err != nil || integrity != "ok" {
 			return fmt.Errorf("chat database integrity check failed: %s: %v", integrity, err)
 		}
-		if version == 2 {
+		if version >= 2 {
 			var name string
 			if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_workspace'`).Scan(&name); err != nil {
 				return fmt.Errorf("chat database is missing workspace metadata: %w", err)
+			}
+		}
+		if version == 3 {
+			var name string
+			if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'bookmarks'`).Scan(&name); err != nil {
+				return fmt.Errorf("chat database is missing bookmark metadata: %w", err)
 			}
 			return nil
 		}
@@ -275,7 +293,11 @@ func initChatSchema(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, dtql TEXT NOT NULL, source TEXT NOT NULL, parameters_json TEXT NOT NULL, executed_at TEXT NOT NULL, error TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS recordsets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, query_id TEXT NOT NULL REFERENCES queries(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, dtql TEXT NOT NULL, source TEXT NOT NULL, environment TEXT NOT NULL, database_id TEXT NOT NULL, parameters_json TEXT NOT NULL, created_at TEXT NOT NULL, result_json BLOB NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS session_workspace (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, state_json TEXT NOT NULL)`,
-		`PRAGMA user_version = 2`,
+		// A bookmark snapshot has no foreign key to the transient session rows.
+		// It owns its encoded result, view, and selection after creation.
+		`CREATE TABLE IF NOT EXISTS bookmarks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, scope TEXT NOT NULL, title TEXT NOT NULL, tags_json TEXT NOT NULL, target_kind TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, snapshot_json BLOB NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS bookmarks_scope_project_recent ON bookmarks(scope, project_id, updated_at DESC, id DESC)`,
+		`PRAGMA user_version = 3`,
 	} {
 		if _, err := tx.Exec(statement); err != nil {
 			return fmt.Errorf("initialize chat schema: %w", err)
@@ -356,6 +378,7 @@ func (s *SessionStore) Load(ctx context.Context, id string) (ChatSession, error)
 		return item, fmt.Errorf("corrupt chat session timestamp: %w", err)
 	}
 	item.RecordSets = make(map[string]RecordSet)
+	item.Bookmarks = make(map[string]Bookmark)
 	if err := s.loadMessages(ctx, &item); err != nil {
 		return ChatSession{}, err
 	}
@@ -365,7 +388,13 @@ func (s *SessionStore) Load(ctx context.Context, id string) (ChatSession, error)
 	if err := s.loadRecordSets(ctx, &item); err != nil {
 		return ChatSession{}, err
 	}
+	if err := s.loadBookmarks(ctx, &item); err != nil {
+		return ChatSession{}, err
+	}
 	if err := s.loadWorkspace(ctx, &item); err != nil {
+		return ChatSession{}, err
+	}
+	if err := s.validateBookmarkReferences(ctx, s.db, item.Workspace); err != nil {
 		return ChatSession{}, err
 	}
 	for _, message := range item.Messages {
@@ -479,6 +508,9 @@ func (s *SessionStore) SaveWorkspace(ctx context.Context, sessionID string, stat
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := sessionExists(ctx, tx, sessionID, s.scope); err != nil {
+		return err
+	}
+	if err := s.validateBookmarkReferences(ctx, tx, state); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO session_workspace (session_id, state_json) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET state_json = excluded.state_json`, sessionID, string(payload)); err != nil {

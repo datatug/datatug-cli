@@ -354,11 +354,12 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 			}
 		}
 	case "d":
-		if u.workspaceTab == 1 {
+		switch u.workspaceTab {
+		case 1:
 			if selection, ok := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]; ok {
 				u.performWorkspaceAction(WorkspaceAction{Kind: "dock", Reference: ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}})
 			}
-		} else if u.workspaceTab == 3 {
+		case 3:
 			if ref := u.selectedBookmarkReference(); ref.ObjectID != "" {
 				u.performWorkspaceAction(WorkspaceAction{Kind: "dock", Reference: ref})
 			}

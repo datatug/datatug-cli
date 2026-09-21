@@ -372,7 +372,8 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 				}
 			}
 		}
-		if ref.Kind == "selection" {
+		switch ref.Kind {
+		case "selection":
 			if selection, ok := session.Workspace.Selections[ref.ObjectID]; ok {
 				view := session.Workspace.Views[selection.ViewID]
 				line += fmt.Sprintf("; RecordSet=%s; selected rows=%d; columns=%s", view.RecordSetID, len(selection.Rows), strings.Join(selection.Columns, ", "))
@@ -380,7 +381,7 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 					line += fmt.Sprintf("; DTQL In parameter for %s: selection_%d_c%d", column, index+1, columnIndex+1)
 				}
 			}
-		} else if ref.Kind == "bookmark" {
+		case "bookmark":
 			if bookmark, ok := session.Bookmarks[ref.ObjectID]; ok {
 				result, _ := bookmarkResult(bookmark)
 				line += fmt.Sprintf("; target=%s; rows=%d; columns=%s", bookmark.TargetKind, len(result.Rows), boundedContextText(sanitizeTerminalText(strings.Join(result.Columns, ", ")), 600))

@@ -161,6 +161,9 @@ func countLineCandidate(column secureread.ColumnStatistics) (ChartCandidate, boo
 		return ChartCandidate{}, false
 	}
 	points, bucket := bucketDateCounts(column.DateBuckets)
+	if len(points) < 2 {
+		return ChartCandidate{}, false
+	}
 	return ChartCandidate{Score: 90, Reason: "ordered date/time dimension", Spec: ChartSpec{
 		Kind: ChartLine, Title: "Rows over " + column.Name, Dimension: column.Name, Measure: "Rows", Aggregation: "count", Ordering: "date asc",
 		SourceColumns: []string{column.Name}, Bucket: bucket, Points: points,
@@ -181,7 +184,7 @@ func sumLineCandidate(stats secureread.RecordSetStatistics, sums secureread.Date
 		}
 	}
 	points, bucket := bucketDateSums(sums.Buckets)
-	if !finiteChartPoints(points) {
+	if len(points) < 2 || !finiteChartPoints(points) {
 		return ChartCandidate{}, false
 	}
 	return ChartCandidate{Score: 100, Reason: "ordered date and numeric measure", Spec: ChartSpec{
@@ -252,6 +255,10 @@ func chartDateBucketLabel(bucket, mode string) string {
 		}
 	case "day":
 		return dateBucketDay(bucket)
+	case "datetime":
+		if len(bucket) == len("2006-01-02") {
+			return bucket + "T00:00:00Z"
+		}
 	}
 	return bucket
 }

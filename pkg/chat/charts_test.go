@@ -120,6 +120,49 @@ func TestInferChartCandidatesKeepsSameDayDatetimeCountAndSumLines(t *testing.T) 
 	}
 }
 
+func TestInferChartCandidatesRendersMixedDateAndDatetimeSameDayLines(t *testing.T) {
+	stats := secureread.RecordSetStatistics{RowCount: 2, Columns: []secureread.ColumnStatistics{{
+		Name: "Timestamp", NonNullCount: 2, Cardinality: 2, Types: secureread.TypeObservations{Date: 1, Datetime: 1},
+		DateBuckets: []secureread.DateBucket{{Bucket: "2026-09-21", Count: 1}, {Bucket: "2026-09-21T10:00:00Z", Count: 1}},
+	}}, DateNumericSums: []secureread.DateNumericSum{{
+		DateColumn: "Timestamp", NumericColumn: "Total", Buckets: []secureread.DateNumericBucket{{Bucket: "2026-09-21", Sum: 2}, {Bucket: "2026-09-21T10:00:00Z", Sum: 3}},
+	}}}
+	var countLine, sumLine bool
+	for _, candidate := range InferChartCandidates(stats) {
+		if candidate.Spec.Kind != ChartLine || candidate.Spec.Dimension != "Timestamp" || candidate.Spec.Bucket != "datetime" {
+			continue
+		}
+		if got, want := candidate.Spec.Points, []ChartPoint{{Label: "2026-09-21T00:00:00Z", Value: 1}, {Label: "2026-09-21T10:00:00Z", Value: 1}}; candidate.Spec.Aggregation == "count" && !reflect.DeepEqual(got, want) {
+			t.Fatalf("mixed date/datetime count points = %+v, want %+v", got, want)
+		}
+		if got, want := candidate.Spec.Points, []ChartPoint{{Label: "2026-09-21T00:00:00Z", Value: 2}, {Label: "2026-09-21T10:00:00Z", Value: 3}}; candidate.Spec.Aggregation == "sum" && !reflect.DeepEqual(got, want) {
+			t.Fatalf("mixed date/datetime sum points = %+v, want %+v", got, want)
+		}
+		if rendered := renderChart(candidate.Spec, 48, 12); strings.Contains(rendered, "could not") {
+			t.Fatalf("mixed date/datetime line failed to render: %q", rendered)
+		}
+		countLine = countLine || candidate.Spec.Aggregation == "count"
+		sumLine = sumLine || candidate.Spec.Aggregation == "sum"
+	}
+	if !countLine || !sumLine {
+		t.Fatalf("mixed date/datetime candidates = %+v", InferChartCandidates(stats))
+	}
+}
+
+func TestInferChartCandidatesRejectsCollapsedMixedDateAndDatetimeMidnightLines(t *testing.T) {
+	stats := secureread.RecordSetStatistics{RowCount: 2, Columns: []secureread.ColumnStatistics{{
+		Name: "Timestamp", NonNullCount: 2, Cardinality: 2, Types: secureread.TypeObservations{Date: 1, Datetime: 1},
+		DateBuckets: []secureread.DateBucket{{Bucket: "2026-09-21", Count: 1}, {Bucket: "2026-09-21T00:00:00Z", Count: 1}},
+	}}, DateNumericSums: []secureread.DateNumericSum{{
+		DateColumn: "Timestamp", NumericColumn: "Total", Buckets: []secureread.DateNumericBucket{{Bucket: "2026-09-21", Sum: 2}, {Bucket: "2026-09-21T00:00:00Z", Sum: 3}},
+	}}}
+	for _, candidate := range InferChartCandidates(stats) {
+		if candidate.Spec.Kind == ChartLine && candidate.Spec.Dimension == "Timestamp" {
+			t.Fatalf("collapsed mixed date/datetime generated a one-point line: %+v", candidate)
+		}
+	}
+}
+
 func TestDatetimeChartBucketsKeepSameDayPrecisionAndCrossDayDateAggregation(t *testing.T) {
 	sameDay := make([]secureread.DateBucket, 61)
 	for i := range sameDay {

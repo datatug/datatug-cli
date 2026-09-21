@@ -201,17 +201,19 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 	case "right", "l":
 		u.setWorkspaceTab(u.workspaceTab + 1)
 	case "up", "k":
-		if u.workspaceTab == 0 {
+		switch u.workspaceTab {
+		case 0:
 			u.explorerIndex = max(0, u.explorerIndex-1)
 			u.projectDetails = false
-		} else if u.workspaceTab == 2 {
+		case 2:
 			u.dockIndex = max(0, u.dockIndex-1)
 		}
 	case "down", "j":
-		if u.workspaceTab == 0 {
+		switch u.workspaceTab {
+		case 0:
 			u.explorerIndex = min(len(nodes)-1, u.explorerIndex+1)
 			u.projectDetails = false
-		} else if u.workspaceTab == 2 {
+		case 2:
 			u.dockIndex = min(len(u.snapshot.Workspace.Docks)-1, u.dockIndex+1)
 		}
 	case "enter":

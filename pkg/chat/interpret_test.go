@@ -17,12 +17,15 @@ import (
 func TestInterpretUsesCLIADKToolWithoutExecutingRows(t *testing.T) {
 	doc := "from: {schema: main, name: Invoice}\nlimit: 20\n"
 	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc}, genai.RoleModel)},
+		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc}, genai.RoleModel), UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount: 120, CandidatesTokenCount: 30, TotalTokenCount: 150,
+		}},
 		{Content: genai.NewContentFromText("Here are the rows", genai.RoleModel)},
 	}}
-	dtql, err := interpretWithModel(context.Background(), InterpretRequest{Question: "Last 20 invoices", Schema: "main.Invoice: InvoiceId"}, llm)
-	if err != nil || dtql != strings.TrimSpace(doc) {
-		t.Fatalf("interpretWithModel() = %q, %v", dtql, err)
+	result, err := interpretWithModelDetailed(context.Background(), InterpretRequest{Question: "Last 20 invoices", Schema: "main.Invoice: InvoiceId"}, llm)
+	if err != nil || result.DTQL != strings.TrimSpace(doc) || result.Usage == nil ||
+		result.Usage.InputTokens != 120 || result.Usage.OutputTokens != 30 || result.Usage.TotalTokens != 150 {
+		t.Fatalf("interpretWithModelDetailed() = %+v, %v", result, err)
 	}
 	if len(llm.requests) == 0 || !strings.Contains(llm.requests[0].Config.SystemInstruction.Parts[0].Text, "The browser will execute") {
 		t.Fatal("browser schema constraints were not sent to CLI ADK agent")
@@ -121,6 +124,7 @@ func TestInterpretDeepSeekCompatibleToolCall(t *testing.T) {
 		arguments, _ := json.Marshal(map[string]string{"dtql": doc})
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": "chatcmpl-test", "object": "chat.completion", "created": 1, "model": "deepseek-flash",
+			"usage": map[string]any{"prompt_tokens": 121, "completion_tokens": 24, "total_tokens": 145},
 			"choices": []any{map[string]any{"index": 0, "finish_reason": "tool_calls", "message": map[string]any{
 				"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{
 					"id": "call_1", "type": "function", "function": map[string]any{"name": "run_dtql", "arguments": string(arguments)},
@@ -129,11 +133,12 @@ func TestInterpretDeepSeekCompatibleToolCall(t *testing.T) {
 		})
 	}))
 	defer server.Close()
-	dtql, err := Interpret(context.Background(), InterpretRequest{
+	result, err := InterpretDetailed(context.Background(), InterpretRequest{
 		Question: "Last 20 invoices", Schema: "main.Invoice: InvoiceId",
 		Provider: InterpretProvider{Protocol: "openai-chat", BaseURL: server.URL, Model: "deepseek-flash", APIKey: "secret-test-key"},
 	})
-	if err != nil || dtql != strings.TrimSpace(doc) || calls != 1 {
-		t.Fatalf("Interpret() = %q, %v; provider calls = %d", dtql, err, calls)
+	if err != nil || result.DTQL != strings.TrimSpace(doc) || calls != 1 || result.Usage == nil ||
+		result.Usage.InputTokens != 121 || result.Usage.OutputTokens != 24 || result.Usage.TotalTokens != 145 {
+		t.Fatalf("InterpretDetailed() DTQL=%q usage=%+v, %v; provider calls = %d", result.DTQL, result.Usage, err, calls)
 	}
 }

@@ -44,15 +44,13 @@ func chatInterpretHandler(w http.ResponseWriter, r *http.Request) {
 		writeChatError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	dtql, err := chat.Interpret(r.Context(), req)
+	result, err := chat.InterpretDetailed(r.Context(), req)
 	if err != nil {
 		writeChatError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(struct {
-		DTQL string `json:"dtql"`
-	}{DTQL: dtql})
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func writeChatError(w http.ResponseWriter, status int, message string) {

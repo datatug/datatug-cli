@@ -114,8 +114,20 @@ func (browserDTQLExecutor) RunDTQL(context.Context, string, []byte, map[string]a
 // It returns only a validated DTQL document; model prose and results are not
 // part of the browser contract. Provider errors are deliberately sanitized.
 func Interpret(ctx context.Context, req InterpretRequest) (string, error) {
+	result, err := InterpretDetailed(ctx, req)
+	return result.DTQL, err
+}
+
+// InterpretResult contains the DTQL action and provider-reported token usage.
+type InterpretResult struct {
+	DTQL  string      `json:"dtql"`
+	Usage *TokenUsage `json:"usage,omitempty"`
+}
+
+// InterpretDetailed also returns model usage when the provider reports it.
+func InterpretDetailed(ctx context.Context, req InterpretRequest) (InterpretResult, error) {
 	if err := req.Validate(); err != nil {
-		return "", err
+		return InterpretResult{}, err
 	}
 	provider := "openai"
 	if req.Provider.Protocol == "anthropic-messages" {
@@ -127,24 +139,29 @@ func Interpret(ctx context.Context, req InterpretRequest) (string, error) {
 		pimodels.WithAPIKey(req.Provider.APIKey), pimodels.WithBaseURL(baseURL),
 	)
 	if err != nil {
-		return "", errors.New("could not configure provider model")
+		return InterpretResult{}, errors.New("could not configure provider model")
 	}
-	return interpretWithModel(ctx, req, llm)
+	return interpretWithModelDetailed(ctx, req, llm)
 }
 
 func interpretWithModel(ctx context.Context, req InterpretRequest, llm model.LLM) (string, error) {
+	result, err := interpretWithModelDetailed(ctx, req, llm)
+	return result.DTQL, err
+}
+
+func interpretWithModelDetailed(ctx context.Context, req InterpretRequest, llm model.LLM) (InterpretResult, error) {
 	conversation, err := NewADKConversation(llm, browserDTQLExecutor{}, "browser-indexeddb://active-project", req.Schema, WithBrowserInterpretation())
 	if err != nil {
-		return "", errors.New("could not initialize chat agent")
+		return InterpretResult{}, errors.New("could not initialize chat agent")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	turn, err := conversation.Ask(ctx, req.Question)
 	if err != nil {
-		return "", errors.New("provider request failed")
+		return InterpretResult{}, errors.New("provider request failed")
 	}
 	if len(turn.Queries) != 1 || turn.Queries[0].Err != nil || strings.TrimSpace(turn.Queries[0].DTQL) == "" {
-		return "", errors.New("provider did not return one valid DTQL action")
+		return InterpretResult{}, errors.New("provider did not return one valid DTQL action")
 	}
-	return turn.Queries[0].DTQL, nil
+	return InterpretResult{DTQL: turn.Queries[0].DTQL, Usage: turn.Usage}, nil
 }

@@ -172,9 +172,14 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 // Collection.InsecureAllowLoopback) for an HTTP(S) source backed by a
 // loopback httptest.Server, without any project descriptor file ever being
 // able to request that itself — see cmd_query_http_provenance_test.go.
-// Production code always runs with this default, which calls the real,
-// https-only-enforcing BackendRef.Open.
+// Production code always runs with this default. SQLite uses the validated
+// structured-query dialect so grouped DTQL is rendered as native SQL (and
+// literals remain bound parameters); other sources keep their existing open
+// behavior. Both paths retain the HTTPS-only HTTP-source enforcement.
 var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
+	if backend.Scheme == "sqlite" {
+		return backend.OpenProtected(ctx)
+	}
 	return backend.Open(ctx)
 }
 

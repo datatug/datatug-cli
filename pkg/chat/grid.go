@@ -96,8 +96,14 @@ func NewGridModel(result secureread.Result) GridModel {
 		cells := make([]string, len(result.Columns))
 		raw := make([]any, len(result.Columns))
 		for columnIndex, name := range result.Columns {
-			raw[columnIndex] = row.Data[name]
-			cells[columnIndex] = sanitizeTerminalText(formatGridValue(name, raw[columnIndex]))
+			value, present := row.Data[name]
+			if !present {
+				// Sparse cell-range selections leave unselected cells absent;
+				// distinguish them visually from an explicitly selected SQL NULL.
+				continue
+			}
+			raw[columnIndex] = value
+			cells[columnIndex] = sanitizeTerminalText(formatGridValue(name, value))
 		}
 		model.Rows[rowIndex] = cells
 		model.RawRows[rowIndex] = raw

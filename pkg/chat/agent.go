@@ -78,6 +78,7 @@ type Conversation interface {
 type queryObserverKey struct{}
 type workspaceObserverKey struct{}
 type selectionParametersKey struct{}
+type bookmarkFinderKey struct{}
 
 func withQueryObserver(ctx context.Context, observer func(QueryResult) (QueryResult, error)) context.Context {
 	return context.WithValue(ctx, queryObserverKey{}, observer)
@@ -89,6 +90,10 @@ func withWorkspaceObserver(ctx context.Context, observer func(WorkspaceAction) (
 
 func withSelectionParameters(ctx context.Context, resolver func() map[string]any) context.Context {
 	return context.WithValue(ctx, selectionParametersKey{}, resolver)
+}
+
+func withBookmarkFinder(ctx context.Context, finder func(string, []string) ([]Bookmark, error)) context.Context {
+	return context.WithValue(ctx, bookmarkFinderKey{}, finder)
 }
 
 // ADKConversation uses an ephemeral ADK session for each turn. DataTug's
@@ -173,6 +178,24 @@ type workspaceActionResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
+type bookmarkSearchArgs struct {
+	Search string   `json:"search,omitempty"`
+	Tags   []string `json:"tags,omitempty"`
+}
+
+type bookmarkSearchItem struct {
+	ID         string   `json:"id"`
+	SourceID   string   `json:"sourceId"`
+	TargetKind string   `json:"targetKind"`
+	Rows       int      `json:"rows"`
+	Columns    []string `json:"columns"`
+}
+
+type bookmarkSearchResponse struct {
+	Items []bookmarkSearchItem `json:"items,omitempty"`
+	Error string               `json:"error,omitempty"`
+}
+
 // NewADKConversation builds the constrained chat agent. schemaContext is a
 // compact description derived from DataTug's stored dbmodel.
 func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaContext string, options ...Option) (*ADKConversation, error) {
@@ -204,12 +227,34 @@ func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaC
 	}
 	workspaceTool, err := functiontool.New(functiontool.Config{
 		Name:        "workspace_action",
-		Description: "Apply a deterministic selection, attach/detach, dock/undock, or clear-selection action to existing DataTug session objects. Does not query the database.",
+		Description: "Apply a deterministic selection, attach/detach, dock/undock, bookmark create/rename/tag/delete, or clear-selection action to existing DataTug objects. Does not query the database.",
 	}, func(ctx agent.Context, args WorkspaceAction) (workspaceActionResponse, error) {
 		return c.runWorkspaceAction(ctx, args), nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("chat: create workspace tool: %w", err)
+	}
+	bookmarkTool, err := functiontool.New(functiontool.Config{
+		Name:        "find_bookmarks",
+		Description: "Find project bookmarks by case-insensitive title text and/or tags (all tags required). Returns opaque IDs, safe source IDs and result shape; never row values or bookmark titles/tags.",
+	}, func(ctx agent.Context, args bookmarkSearchArgs) (bookmarkSearchResponse, error) {
+		finder, ok := ctx.Value(bookmarkFinderKey{}).(func(string, []string) ([]Bookmark, error))
+		if !ok {
+			return bookmarkSearchResponse{Error: "Bookmarks are unavailable in this chat."}, nil
+		}
+		items, findErr := finder(args.Search, args.Tags)
+		if findErr != nil {
+			return bookmarkSearchResponse{Error: conciseError(findErr)}, nil
+		}
+		response := bookmarkSearchResponse{Items: make([]bookmarkSearchItem, 0, min(len(items), 20))}
+		for _, item := range items[:min(len(items), 20)] {
+			result, _ := bookmarkResult(item)
+			response.Items = append(response.Items, bookmarkSearchItem{ID: item.ID, SourceID: item.SourceID, TargetKind: item.TargetKind, Rows: len(result.Rows), Columns: result.Columns})
+		}
+		return response, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("chat: create bookmark tool: %w", err)
 	}
 
 	instruction := buildInstruction(schemaContext)
@@ -227,7 +272,7 @@ func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaC
 		InstructionProvider: func(agent.ReadonlyContext) (string, error) {
 			return instruction, nil
 		},
-		Tools: []adktool.Tool{tool, workspaceTool},
+		Tools: []adktool.Tool{tool, workspaceTool, bookmarkTool},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("chat: create ADK agent: %w", err)
@@ -368,6 +413,16 @@ func (c *ADKConversation) runWorkspaceAction(ctx context.Context, action Workspa
 		summary = "Undocked " + ref.Title + "."
 	case "clear_selection":
 		summary = "Selection cleared."
+	case "bookmark_create":
+		summary = "Bookmarked the result."
+	case "bookmark_rename":
+		summary = "Renamed the bookmark."
+	case "bookmark_add_tag":
+		summary = "Tagged the bookmark."
+	case "bookmark_remove_tag":
+		summary = "Removed the bookmark tag."
+	case "bookmark_delete":
+		summary = "Deleted bookmark."
 	}
 	c.captureAction(WorkspaceActionResult{Reference: ref, Summary: summary})
 	return workspaceActionResponse{OK: true, Kind: ref.Kind, ID: ref.ObjectID, Summary: summary}
@@ -595,6 +650,24 @@ corresponding field. DataTug binds the actual values locally. Do not invent
 selected IDs, list row values, or ask DataTug to rerun an old query just to
 render its existing grid.
 
+Bookmarks are durable project-owned snapshots of a RecordSet, View, or exact
+Selection. Call find_bookmarks to list or search them by title or tags; multiple
+tags are AND filters. It returns opaque IDs, safe source IDs, result shape and
+target kind, not bookmark titles, tags, or row values. If more than one item
+matches, ask the user to narrow the search instead of guessing. To bookmark
+the current selection, call workspace_action with kind "bookmark_create" and
+no reference. For a different target, pass its exact recordset/view/selection
+reference. The optional title is bookmark metadata. To rename, add/remove one
+tag, or delete, call workspace_action with kind "bookmark_rename",
+"bookmark_add_tag", "bookmark_remove_tag", or "bookmark_delete" and the exact
+bookmarkId (or omit only in the turn immediately after acting on that bookmark).
+The tag goes
+in the tag field. Never create a bookmark by rerunning a historical query.
+Use a bookmark reference of kind "bookmark" and its exact ID to attach/dock it.
+An attached or docked bookmark exposes local selection_N_cN parameter names
+for its visible columns, as described in session context. Use those parameters
+in DTQL; do not request or invent saved row values.
+
 For requests to select, attach, detach, dock, undock, or clear selection, call
 workspace_action with structured arguments. Use "select" over an existing
 RecordSet (recordSetId) or View (viewId), optionally filtering by column and
@@ -604,6 +677,7 @@ selection is not attached merely by selecting it. For "dock them", dock the
 current selection by calling workspace_action with kind "dock" and no
 reference; DataTug resolves it locally. To dock a different item, pass its
 exact reference with a lowercase kind ("recordset", "view", or "selection").
+Bookmarks can also be attached or docked by exact ID.
 Do not run a new query for a local
 selection or dock action. If the existing RecordSet lacks the field needed to
 select correctly, query a suitable source, then select from the returned

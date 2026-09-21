@@ -17,12 +17,14 @@ type ContextualConversation interface {
 // SessionChat composes durable state with the existing AI -> DTQL pipeline.
 // Its lock prevents a session switch while a turn is being saved/executed.
 type SessionChat struct {
-	mu       sync.Mutex
-	store    *SessionStore
-	agent    ContextualConversation
-	source   string
-	catalog  ProjectCatalog
-	activeID string
+	mu                 sync.Mutex
+	store              *SessionStore
+	agent              ContextualConversation
+	source             string
+	catalog            ProjectCatalog
+	activeID           string
+	lastBookmarkID     string
+	implicitBookmarkID string
 }
 
 func NewSessionChat(ctx context.Context, store *SessionStore, agent ContextualConversation, source string, catalogs ...ProjectCatalog) (*SessionChat, error) {
@@ -52,6 +54,19 @@ func (c *SessionChat) applyWorkspaceAction(ctx context.Context, action Workspace
 	if err != nil {
 		return ContextReference{}, err
 	}
+	if strings.HasPrefix(action.Kind, "bookmark_") {
+		return c.applyBookmarkAction(ctx, session, action)
+	}
+	c.lastBookmarkID = ""
+	c.implicitBookmarkID = ""
+	if strings.EqualFold(action.Reference.Kind, "bookmark") {
+		if err := validateContextReference(session, c.catalog, session.Workspace, action.Reference); err != nil {
+			return ContextReference{}, err
+		}
+		if bookmark, ok := session.Bookmarks[action.Reference.ObjectID]; ok {
+			action.Reference = bookmarkReference(bookmark)
+		}
+	}
 	next, ref, err := session.Workspace.apply(session, c.catalog, action)
 	if err != nil {
 		return ContextReference{}, err
@@ -60,6 +75,81 @@ func (c *SessionChat) applyWorkspaceAction(ctx context.Context, action Workspace
 		return ContextReference{}, err
 	}
 	return ref, nil
+}
+
+// FindBookmarks is the shared read path for the UI and the agent. Storage
+// enforces project and policy visibility before any metadata is returned.
+func (c *SessionChat) FindBookmarks(ctx context.Context, search string, tags []string) ([]Bookmark, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.store.FindBookmarks(ctx, search, tags)
+}
+
+func bookmarkReference(bookmark Bookmark) ContextReference {
+	return ContextReference{Kind: "bookmark", ProjectID: bookmark.ProjectID, SourceID: bookmark.SourceID, ObjectID: bookmark.ID, Title: bookmark.Title}
+}
+
+func (c *SessionChat) applyBookmarkAction(ctx context.Context, session ChatSession, action WorkspaceAction) (ContextReference, error) {
+	bookmarkID := action.BookmarkID
+	if bookmarkID == "" && action.Reference.Kind == "bookmark" {
+		bookmarkID = action.Reference.ObjectID
+	}
+	if bookmarkID == "" {
+		bookmarkID = c.implicitBookmarkID
+	}
+	if action.Kind != "bookmark_create" && bookmarkID == "" {
+		return ContextReference{}, fmt.Errorf("choose a bookmark by ID before changing it")
+	}
+	var bookmark Bookmark
+	var err error
+	switch action.Kind {
+	case "bookmark_create":
+		ref := action.Reference
+		if ref.ObjectID == "" && session.Workspace.CurrentSelectionID != "" {
+			if selection, ok := session.Workspace.Selections[session.Workspace.CurrentSelectionID]; ok {
+				ref = ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}
+			}
+		}
+		if ref.ObjectID == "" {
+			for i := len(session.Messages) - 1; i >= 0; i-- {
+				if record, ok := session.RecordSets[session.Messages[i].RecordSetID]; ok {
+					ref = ContextReference{Kind: "recordset", ObjectID: record.ID, Title: record.Title}
+					break
+				}
+			}
+		}
+		if err := validateContextReference(session, c.catalog, session.Workspace, ref); err != nil {
+			return ContextReference{}, err
+		}
+		if ref.Kind != "recordset" && ref.Kind != "view" && ref.Kind != "selection" {
+			return ContextReference{}, fmt.Errorf("only a RecordSet, view, or selection can be bookmarked")
+		}
+		bookmark, err = c.store.CreateBookmark(ctx, session.ID, ref, action.Title)
+	case "bookmark_rename":
+		bookmark, err = c.store.RenameBookmark(ctx, bookmarkID, action.Title)
+	case "bookmark_add_tag":
+		bookmark, err = c.store.AddBookmarkTag(ctx, bookmarkID, action.Tag)
+	case "bookmark_remove_tag":
+		bookmark, err = c.store.RemoveBookmarkTag(ctx, bookmarkID, action.Tag)
+	case "bookmark_delete":
+		if err = c.store.DeleteBookmark(ctx, bookmarkID); err == nil {
+			if c.lastBookmarkID == bookmarkID {
+				c.lastBookmarkID = ""
+			}
+			if c.implicitBookmarkID == bookmarkID {
+				c.implicitBookmarkID = ""
+			}
+		}
+		return ContextReference{Kind: "bookmark", ObjectID: bookmarkID}, err
+	default:
+		return ContextReference{}, fmt.Errorf("unknown bookmark action %q", action.Kind)
+	}
+	if err != nil {
+		return ContextReference{}, err
+	}
+	c.lastBookmarkID = bookmark.ID
+	c.implicitBookmarkID = bookmark.ID
+	return bookmarkReference(bookmark), nil
 }
 
 func (c *SessionChat) Snapshot(ctx context.Context) (ChatSession, error) {
@@ -80,6 +170,7 @@ func (c *SessionChat) Create(ctx context.Context) (ChatSession, error) {
 	session, err := c.store.Create(ctx, "New chat")
 	if err == nil {
 		c.activeID = session.ID
+		c.lastBookmarkID = ""
 	}
 	return session, err
 }
@@ -110,6 +201,7 @@ func (c *SessionChat) Switch(ctx context.Context, prefix string) (ChatSession, e
 	snapshot, err = c.store.Load(ctx, snapshot.ID)
 	if err == nil {
 		c.activeID = snapshot.ID
+		c.lastBookmarkID = ""
 	}
 	return snapshot, err
 }
@@ -132,6 +224,7 @@ func (c *SessionChat) Clear(ctx context.Context) (ChatSession, error) {
 	if err := c.store.Clear(ctx, c.activeID); err != nil {
 		return ChatSession{}, err
 	}
+	c.lastBookmarkID = ""
 	return c.store.Load(ctx, c.activeID)
 }
 
@@ -153,6 +246,7 @@ func (c *SessionChat) Delete(ctx context.Context) (ChatSession, error) {
 	}
 	if err == nil {
 		c.activeID = next.ID
+		c.lastBookmarkID = ""
 	}
 	return next, err
 }
@@ -165,6 +259,10 @@ func (c *SessionChat) Ask(ctx context.Context, prompt string) (Turn, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return Turn{}, fmt.Errorf("chat prompt must not be empty")
 	}
+	// One subsequent agent turn may refer to the just-created bookmark without
+	// an ID. A different intervening turn expires that implicit target.
+	c.implicitBookmarkID, c.lastBookmarkID = c.lastBookmarkID, ""
+	defer func() { c.implicitBookmarkID = "" }()
 	prior, err := c.store.Load(ctx, c.activeID)
 	if err != nil {
 		return Turn{}, err
@@ -195,6 +293,9 @@ func (c *SessionChat) Ask(ctx context.Context, prompt string) (Turn, error) {
 			return nil
 		}
 		return selectionParameters(current)
+	})
+	ctx = withBookmarkFinder(ctx, func(search string, tags []string) ([]Bookmark, error) {
+		return c.store.FindBookmarks(ctx, search, tags)
 	})
 	turn, agentErr := c.agent.AskWithContext(ctx, prompt, contextText)
 	if agentErr != nil {
@@ -252,7 +353,17 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 		if index >= len(session.Workspace.Attachments) {
 			contextKind = "Docked"
 		}
-		line := fmt.Sprintf("%s %s %s (project=%s source=%s id=%s)", contextKind, ref.Kind, sanitizeTerminalText(ref.Title), ref.ProjectID, ref.SourceID, ref.ObjectID)
+		label, sourceID := sanitizeTerminalText(ref.Title), ref.SourceID
+		if ref.Kind == "selection" {
+			label = "saved selection"
+		}
+		if ref.Kind == "bookmark" {
+			label = "saved bookmark"
+			if bookmark, ok := session.Bookmarks[ref.ObjectID]; ok {
+				sourceID = bookmark.SourceID
+			}
+		}
+		line := fmt.Sprintf("%s %s %s (project=%s source=%s id=%s)", contextKind, ref.Kind, label, ref.ProjectID, sourceID, ref.ObjectID)
 		if len(catalogs) > 0 {
 			for _, object := range catalogs[0].Objects {
 				if sameReference(object.Reference, ref) && len(object.Columns) > 0 {
@@ -261,7 +372,8 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 				}
 			}
 		}
-		if ref.Kind == "selection" {
+		switch ref.Kind {
+		case "selection":
 			if selection, ok := session.Workspace.Selections[ref.ObjectID]; ok {
 				view := session.Workspace.Views[selection.ViewID]
 				line += fmt.Sprintf("; RecordSet=%s; selected rows=%d; columns=%s", view.RecordSetID, len(selection.Rows), strings.Join(selection.Columns, ", "))
@@ -269,11 +381,19 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 					line += fmt.Sprintf("; DTQL In parameter for %s: selection_%d_c%d", column, index+1, columnIndex+1)
 				}
 			}
+		case "bookmark":
+			if bookmark, ok := session.Bookmarks[ref.ObjectID]; ok {
+				result, _ := bookmarkResult(bookmark)
+				line += fmt.Sprintf("; target=%s; rows=%d; columns=%s", bookmark.TargetKind, len(result.Rows), boundedContextText(sanitizeTerminalText(strings.Join(result.Columns, ", ")), 600))
+				for columnIndex, column := range result.Columns {
+					line += fmt.Sprintf("; DTQL In parameter for %s: selection_%d_c%d", column, index+1, columnIndex+1)
+				}
+			}
 		}
 		lines = append(lines, line)
 	}
 	if current, ok := session.Workspace.Selections[session.Workspace.CurrentSelectionID]; ok {
-		lines = append(lines, fmt.Sprintf("Current selection %s (id=%s; rows=%d; not query context unless attached or docked)", sanitizeTerminalText(current.Title), current.ID, len(current.Rows)))
+		lines = append(lines, fmt.Sprintf("Current selection (id=%s; rows=%d; not query context unless attached or docked)", current.ID, len(current.Rows)))
 	}
 	start := max(0, len(session.Messages)-16)
 	for _, message := range session.Messages[start:] {

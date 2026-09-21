@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"charm.land/fang/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
 	"github.com/datatug/datatug-cli/apps/global"
 	"github.com/posthog/posthog-go"
@@ -21,6 +22,16 @@ import (
 // the package-level var can restore it and the default-body test can call it
 // before any reassignment.
 var defaultGetCommand = getCommand
+
+func TestPreserveErrorTextCase(t *testing.T) {
+	var output bytes.Buffer
+	styles := fang.Styles{
+		ErrorText: lipgloss.NewStyle().Transform(func(string) string { return "Ai profile was recased" }),
+	}
+	preserveErrorTextCase(&output, styles, errors.New(`AI profile "deepseek" is invalid`))
+	assert.Contains(t, output.String(), `AI profile "deepseek" is invalid`)
+	assert.NotContains(t, output.String(), "Ai profile")
+}
 
 func TestMainFunc(t *testing.T) {
 	t.Run("getCommand_no_error", func(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -139,7 +140,16 @@ var getCommand = func() (*cobra.Command, []fang.Option) {
 	root.AddCommand(commands.InstallCommand())
 	root.AddCommand(commands.UpgradeCommand(info.Version))
 	fangOpts := fangcmd.Wire(root, info)
+	// Fang title-cases the first word of styled errors by default, which turns
+	// acronyms such as "AI" into "Ai". Keep the rest of Fang's error rendering
+	// and usage hints while preserving the command's intentional casing.
+	fangOpts = append(fangOpts, fang.WithErrorHandler(preserveErrorTextCase))
 	return root, fangOpts
+}
+
+func preserveErrorTextCase(w io.Writer, styles fang.Styles, err error) {
+	styles.ErrorText = styles.ErrorText.UnsetTransform()
+	fang.DefaultErrorHandler(w, styles, err)
 }
 
 // isVersionJSONInvocation reports whether args would dispatch root to the

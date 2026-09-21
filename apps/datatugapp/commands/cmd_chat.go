@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -105,7 +106,27 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
-	return chat.NewUI(ctx, conversation, options.model).Run()
+	storePath, err := chat.DefaultChatStorePath(projectDir)
+	if err != nil {
+		return Exit(fmt.Sprintf("resolve chat storage: %v", err), exitCodeUsage)
+	}
+	store, err := chat.OpenSessionStore(storePath, chat.ChatScope{
+		Environment: options.env, Database: database,
+		AccessFingerprint: accesspolicies.Fingerprint(session.Policies, session.Unrestricted, session.Principal),
+	})
+	if err != nil {
+		return Exit(fmt.Sprintf("open chat sessions: %v", err), exitCodeUsage)
+	}
+	defer func() { _ = store.Close() }()
+	sessions, err := chat.NewSessionChat(ctx, store, conversation, sourceURL)
+	if err != nil {
+		return Exit(fmt.Sprintf("restore chat session: %v", err), exitCodeUsage)
+	}
+	ui, err := chat.NewSessionUI(ctx, sessions, options.model)
+	if err != nil {
+		return Exit(fmt.Sprintf("render chat session: %v", err), exitCodeUsage)
+	}
+	return ui.Run()
 }
 
 func chatModelOptions(options chatOptions) []pimodels.Option {

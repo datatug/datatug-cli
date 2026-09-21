@@ -131,10 +131,37 @@ func TestADKConversation_AppliesThinkingLevelToADKRequests(t *testing.T) {
 	}
 }
 
+func TestADKConversationRebuildsEachTurnFromExplicitContext(t *testing.T) {
+	llm := &scriptedLLM{responses: []*model.LLMResponse{
+		{Content: genai.NewContentFromText("First answer", genai.RoleModel)},
+		{Content: genai.NewContentFromText("Second answer", genai.RoleModel)},
+	}}
+	conversation, err := NewADKConversation(llm, &fakeExecutor{}, "sqlite:///fixture.db", "- Customer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conversation.AskWithContext(context.Background(), "first", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conversation.AskWithContext(context.Background(), "second", "RecordSet rs-1: CustomerId 5"); err != nil {
+		t.Fatal(err)
+	}
+	if len(llm.requests) != 2 {
+		t.Fatalf("model requests = %d", len(llm.requests))
+	}
+	if len(llm.requests[1].Contents) != 1 {
+		t.Fatalf("second request inherited opaque ADK history: %+v", llm.requests[1].Contents)
+	}
+	secondPrompt := llm.requests[1].Contents[0].Parts[0].Text
+	if !strings.Contains(secondPrompt, "RecordSet rs-1") || !strings.Contains(secondPrompt, "Current user request:\nsecond") {
+		t.Fatalf("rebuilt prompt = %q", secondPrompt)
+	}
+}
+
 func TestADKConversation_ModelToolResponseRunsDTQL(t *testing.T) {
 	doc := "from:\n  name: Customer\nlimit: 2\n"
 	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc}, genai.RoleModel)},
+		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"title": "Customers", "dtql": doc}, genai.RoleModel)},
 		{Content: genai.NewContentFromText("Here are the customers.", genai.RoleModel)},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{
@@ -157,6 +184,9 @@ func TestADKConversation_ModelToolResponseRunsDTQL(t *testing.T) {
 	}
 	if len(turn.Queries) != 1 || len(turn.Queries[0].Result.Rows) != 1 {
 		t.Fatalf("Queries = %+v", turn.Queries)
+	}
+	if turn.Queries[0].Title != "Customers" {
+		t.Fatalf("query title = %q, want Customers", turn.Queries[0].Title)
 	}
 }
 

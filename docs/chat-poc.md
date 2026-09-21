@@ -1,16 +1,30 @@
 # DataTug Chat PoC
 
+The [original Phase 1 request](chat-phase1-original-prompt.md) is preserved
+verbatim for historical context.
+
+Phase 2 now adds durable, session-scoped chat state and RecordSet snapshots.
+See [the Phase 2 design](chat-phase2-design.md) for storage and lifecycle
+details. The original AI → DTQL → secure execution → grid path below is
+unchanged.
+
 This phase proves one vertical slice:
 
 ```text
 user -> ADK agent -> run_dtql tool -> secureread.Executor -> DALgo backend
-     -> secureread.Result -> Bubbles table
+     -> secureread.Result -> Bubble Table grid
 ```
 
 The model never executes SQL and never renders rows. Its only data tool accepts
 a DTQL YAML document. DataTug validates that document with `dtql.Deserialize`,
 applies the normal access-policy path, executes it through the configured DALgo
 adapter, and gives the Bubble Tea UI a structured `secureread.Result`.
+
+The terminal grid uses the MIT-licensed `github.com/evertras/bubble-table`
+dependency for table layout, pagination, and horizontal overflow. DataTug
+keeps a small adapter around that component so chat/query domain types remain
+independent of the table library; DataTug continues to own the result-card
+title, footer, scrollbar, focus navigation, and terminal styling.
 
 ## Run
 
@@ -44,7 +58,10 @@ example, to use the exact `deepseek-flash` model with a DeepSeek credential
 already stored by the pi harness:
 
 ```sh
-OPENAI_API_KEY="$(pi auth print-api-key --provider deepseek)" \
+set -a
+. ~/.pi-go/.env
+set +a
+
 datatug chat \
   --model deepseek-flash \
   --base-url https://api.deepseek.com
@@ -60,14 +77,17 @@ ai:
     deepseek:
       model: deepseek-flash
       baseUrl: https://api.deepseek.com
-      apiKeyEnv: DEEPSEEK_API_KEY
+      apiKeyEnv: OPENAI_API_KEY
       thinking: low
 ```
 
 Then select the profile with:
 
 ```sh
-DEEPSEEK_API_KEY="$(pi auth print-api-key --provider deepseek)" \
+set -a
+. ~/.pi-go/.env
+set +a
+
 datatug chat --ai deepseek
 ```
 
@@ -90,16 +110,32 @@ exactly like other policy-secured DataTug reads.
   Escape returns to input.
 - Up/Down and Page Up/Page Down navigate rows.
 - Left/Right choose columns and horizontally window results wider than the terminal.
-- Enter sorts by the selected column; press it again to reverse the order.
-- Bubble Tea mouse capture stays disabled so the terminal can select and copy
-  text normally.
+- Press `s` to sort by the selected column; press it again to reverse the order.
+- Enter is reserved for future row details/drill-down.
+- The mouse wheel or a touchpad scrolls chat history. Press `F2` to temporarily
+  disable mouse capture for normal terminal text selection, then `F2` again to
+  restore wheel scrolling. A terminal's mouse-capture override modifier also works.
+- `/sessions` lists sessions; `/new` creates one; `/switch <ID-prefix>` reopens
+  one; `/rename <title>` renames the current session. `/clear confirm` removes
+  its history and cached results, and `/delete confirm` removes the session.
+  Run `/help` to see these commands in the terminal.
+
+Sessions and result snapshots live in a private SQLite file under
+`~/.datatug/chat/`, keyed by the canonical project path. DataTug reopens the
+latest session for the selected environment, database, principal, and policy
+fingerprint. A different role or changed policy set cannot reopen the old
+scope's cached rows. Grids restore from saved snapshots without rerunning
+queries. A first request gives a new session a short title; `/rename` can
+change it at any time.
 
 ## Deliberate boundaries
 
 - Schema context comes from the selected catalog's stored, scanned dbmodel. It
   does not independently introspect the live database for every prompt.
-- The PoC keeps the existing `secureread.Result` as its RecordSet boundary; it
-  does not add persistence, lineage, selections, bookmarks, or a workspace.
+- The PoC's `secureread.Result` remains the execution boundary. Phase 2 saves
+  immutable copies in session-owned RecordSets with IDs, DTQL, source identity,
+  and originating turn. Selections, bookmarks, and a workspace remain out of
+  scope.
 - Current DTQL supports one root relation and deliberately rejects joins. A
   request such as "tracks by AC/DC" therefore receives an honest unsupported
   response instead of an SQL fallback. Invoice and Customer scenarios need no

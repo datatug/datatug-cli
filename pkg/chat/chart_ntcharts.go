@@ -38,10 +38,14 @@ func renderChart(spec ChartSpec, width, height int) string {
 			label := ansi.Truncate(sanitizeTerminalText(point.Label), 14, "…")
 			chart.Push(barchart.BarData{Label: fmt.Sprintf("%s %.0f", label, point.Value), Values: []barchart.BarValue{{Name: spec.Measure, Value: point.Value, Style: lipgloss.NewStyle().Foreground(lipgloss.Color("45"))}}})
 		}
+		// Horizontal bar labels determine the chart origin. NTCharts calculates
+		// that origin on Resize, after the data labels are known.
+		chart.Resize(width, height)
 		chart.Draw()
 		rendered = chart.View()
 	case ChartLine:
-		chart := timeserieslinechart.New(width, height)
+		points := make([]timeserieslinechart.TimePoint, 0, len(spec.Points))
+		var first, last time.Time
 		for _, point := range spec.Points {
 			var stamp time.Time
 			var err error
@@ -53,7 +57,20 @@ func renderChart(spec ChartSpec, width, height int) string {
 			if err != nil {
 				return "Chart dates could not be displayed."
 			}
-			chart.Push(timeserieslinechart.TimePoint{Time: stamp, Value: point.Value})
+			if first.IsZero() || stamp.Before(first) {
+				first = stamp
+			}
+			if last.IsZero() || stamp.After(last) {
+				last = stamp
+			}
+			points = append(points, timeserieslinechart.TimePoint{Time: stamp, Value: point.Value})
+		}
+		// NTCharts defaults to a range based on the current clock. Historical
+		// RecordSets would otherwise be compressed against today's date.
+		padding := max(time.Hour, last.Sub(first)/20)
+		chart := timeserieslinechart.New(width, height, timeserieslinechart.WithTimeRange(first.Add(-padding), last.Add(padding)))
+		for _, point := range points {
+			chart.Push(point)
 		}
 		chart.DrawBraille()
 		rendered = chart.View()

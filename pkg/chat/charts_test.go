@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -139,6 +140,31 @@ func TestNTChartsAdapterRendersSupportedSpecs(t *testing.T) {
 	}
 	if got := renderChart(ChartSpec{Kind: ChartPie, Points: []ChartPoint{{Label: "A", Value: 1}}}, 48, 12); !strings.Contains(got, "not available") {
 		t.Errorf("unsupported kind fallback = %q", got)
+	}
+}
+
+func TestNTChartsAdapterKeepsHistoricalLineRangeAndBarLabels(t *testing.T) {
+	historical := renderChart(ChartSpec{
+		Kind:   ChartLine,
+		Bucket: "day",
+		Points: []ChartPoint{{Label: "2013-01-01", Value: 5}, {Label: "2013-02-01", Value: 9}},
+	}, 64, 12)
+	if !strings.Contains(historical, "'13") {
+		t.Fatalf("historical line omitted its data year:\n%s", historical)
+	}
+	if currentYear := time.Now().UTC().Format("'06"); strings.Contains(historical, currentYear) {
+		t.Fatalf("historical line used current-year axis %q:\n%s", currentYear, historical)
+	}
+
+	bar := ansi.Strip(renderChart(ChartSpec{
+		Kind:    ChartBar,
+		Measure: "Rows",
+		Points:  []ChartPoint{{Label: "Brazil", Value: 5}, {Label: "USA", Value: 3}},
+	}, 32, 8))
+	for _, label := range []string{"Brazil", "USA"} {
+		if !strings.Contains(bar, label) {
+			t.Errorf("horizontal bar omitted %q:\n%s", label, bar)
+		}
 	}
 }
 

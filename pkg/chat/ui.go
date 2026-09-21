@@ -34,9 +34,10 @@ var (
 )
 
 type historyEntry struct {
-	role string
-	text string
-	grid *gridState
+	role        string
+	text        string
+	grid        *gridState
+	recordSetID string
 }
 
 type gridState struct {
@@ -390,22 +391,57 @@ type turnMessage struct {
 // UI is the Bubble Tea chat model: a scrollable history viewport, inline
 // bubble-table components, and a fixed bottom input.
 type UI struct {
-	ctx          context.Context
-	conversation Conversation
-	sessions     *SessionChat
-	sessionID    string
-	sessionTitle string
-	modelName    string
-	history      viewport.Model
-	input        textinput.Model
-	entries      []historyEntry
-	activeGrid   int
-	gridFocused  bool
-	mouseCapture bool
-	busy         bool
-	width        int
-	height       int
+	ctx                context.Context
+	conversation       Conversation
+	sessions           *SessionChat
+	sessionID          string
+	sessionTitle       string
+	snapshot           ChatSession
+	catalog            ProjectCatalog
+	modelName          string
+	history            viewport.Model
+	input              textinput.Model
+	entries            []historyEntry
+	activeGrid         int
+	gridFocused        bool
+	workspaceFocused   bool
+	workspaceTab       int
+	explorerIndex      int
+	explorerOffset     int
+	explorerCollapsed  map[string]bool
+	projectDetails     bool
+	dockIndex          int
+	dockGridFocused    bool
+	dockGrids          map[string]*gridState
+	rangeAnchor        int
+	rangeColumn        int
+	sessionPicker      bool
+	sessionPickerIndex int
+	pickerSessions     []ChatSession
+	projectPicker      bool
+	projectPickerIndex int
+	projectChoices     []ProjectChoice
+	selectedProject    string
+	chatPanePercent    int
+	mouseCapture       bool
+	busy               bool
+	width              int
+	height             int
 }
+
+// ProjectChoice identifies a configured DataTug project, not a database.
+type ProjectChoice struct {
+	Key    string
+	Title  string
+	Detail string
+}
+
+func (u *UI) SetProjectChoices(choices []ProjectChoice) {
+	u.projectChoices = append([]ProjectChoice(nil), choices...)
+	u.projectPickerIndex = 0
+}
+
+func (u *UI) SelectedProject() string { return u.selectedProject }
 
 // NewUI creates the terminal chat model without starting a real terminal.
 func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI {
@@ -431,15 +467,19 @@ func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI
 	history := viewport.New(viewport.WithWidth(contentWidth(80)), viewport.WithHeight(20))
 	history.SoftWrap = true
 	return &UI{
-		ctx:          ctx,
-		conversation: conversation,
-		modelName:    modelName,
-		history:      history,
-		input:        input,
-		activeGrid:   -1,
-		mouseCapture: true,
-		width:        80,
-		height:       24,
+		ctx:               ctx,
+		conversation:      conversation,
+		modelName:         modelName,
+		history:           history,
+		input:             input,
+		activeGrid:        -1,
+		rangeAnchor:       -1,
+		dockGrids:         map[string]*gridState{},
+		explorerCollapsed: map[string]bool{},
+		chatPanePercent:   56,
+		mouseCapture:      true,
+		width:             80,
+		height:            24,
 	}
 }
 
@@ -448,6 +488,7 @@ func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI
 func NewSessionUI(ctx context.Context, sessions *SessionChat, modelName string) (*UI, error) {
 	u := NewUI(ctx, sessions, modelName)
 	u.sessions = sessions
+	u.catalog = sessions.catalog
 	snapshot, err := sessions.Snapshot(u.ctx)
 	if err != nil {
 		return nil, err
@@ -472,11 +513,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tea.WindowSizeMsg:
 		u.width, u.height = msg.Width, msg.Height
-		innerWidth := contentWidth(msg.Width)
-		u.input.SetWidth(max(1, innerWidth-2))
-		u.history.SetWidth(innerWidth)
-		u.history.SetHeight(u.historyHeight())
-		u.rebuildHistory(false)
+		u.resizeChatPane()
 	case turnMessage:
 		u.busy = false
 		u.history.SetHeight(u.historyHeight())
@@ -504,7 +541,13 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		u.rebuildHistory(true)
 		return u, nil
 	case tea.MouseClickMsg:
-		if u.mouseCapture && msg.Button == tea.MouseLeft && msg.Y == u.historyHeight() &&
+		if u.mouseCapture && msg.Button == tea.MouseLeft && msg.Y == u.historyHeight()+2 {
+			if ref, ok := u.attachmentCloseAt(msg.X - responsiveGutter(u.width)); ok {
+				u.performWorkspaceAction(WorkspaceAction{Kind: "detach", Reference: ref})
+				return u, nil
+			}
+		}
+		if u.mouseCapture && msg.Button == tea.MouseLeft && msg.Y == u.historyHeight()+1 &&
 			msg.X >= responsiveGutter(u.width) && msg.X < u.width-responsiveGutter(u.width) && !u.history.AtBottom() {
 			u.focusInput()
 			u.rebuildHistory(false)
@@ -515,6 +558,41 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return u, tea.Quit
+		case "ctrl+left", "ctrl+right":
+			if u.splitEnabled() {
+				delta := -5
+				if msg.String() == "ctrl+right" {
+					delta = 5
+				}
+				u.chatPanePercent = max(40, min(75, u.chatPanePercent+delta))
+				u.resizeChatPane()
+			}
+			return u, nil
+		case "f3":
+			if len(u.projectChoices) > 0 {
+				u.projectPicker = !u.projectPicker
+				u.sessionPicker = false
+				if u.projectPicker {
+					u.focusWorkspace()
+				}
+			}
+			return u, nil
+		case "f4":
+			u.sessionPicker = !u.sessionPicker
+			u.projectPicker = false
+			if u.sessionPicker {
+				u.focusWorkspace()
+				u.loadPickerSessions()
+			}
+			return u, nil
+		case "f6":
+			if u.workspaceFocused {
+				u.focusInput()
+			} else {
+				u.focusWorkspace()
+			}
+			u.rebuildHistory(false)
+			return u, nil
 		case "ctrl+g":
 			if u.focusLatestGrid() {
 				u.rebuildHistory(true)
@@ -524,6 +602,8 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			u.mouseCapture = !u.mouseCapture
 			return u, nil
 		case "esc":
+			u.sessionPicker = false
+			u.projectPicker = false
 			u.focusInput()
 			u.rebuildHistory(false)
 			return u, nil
@@ -545,6 +625,17 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				u.rebuildHistory(false)
 				return u, nil
 			}
+		}
+		if u.sessionPicker {
+			u.updateSessionPicker(msg)
+			return u, nil
+		}
+		if u.projectPicker {
+			return u, u.updateProjectPicker(msg)
+		}
+		if u.workspaceFocused {
+			u.updateWorkspaceKey(msg)
+			return u, nil
 		}
 		if u.gridFocused {
 			if cmd, handled := u.updateGrid(msg); handled {
@@ -570,6 +661,10 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return u, u.ask(prompt)
 			}
 			return u, nil
+		} else if msg.String() == "ctrl+d" && len(u.snapshot.Workspace.Attachments) > 0 {
+			last := u.snapshot.Workspace.Attachments[len(u.snapshot.Workspace.Attachments)-1]
+			u.performWorkspaceAction(WorkspaceAction{Kind: "detach", Reference: last})
+			return u, nil
 		}
 	}
 
@@ -583,16 +678,34 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return u, tea.Batch(commands...)
 }
 
+func (u *UI) resizeChatPane() {
+	innerWidth := u.chatPaneWidth()
+	u.input.SetWidth(max(1, innerWidth-2))
+	u.history.SetWidth(innerWidth)
+	u.history.SetHeight(u.historyHeight())
+	u.rebuildHistory(false)
+	for _, grid := range u.dockGrids {
+		grid.width = u.workspacePaneWidth()
+		grid.rebuild()
+	}
+}
+
 func (u *UI) loadSession(session ChatSession) {
 	u.sessionID, u.sessionTitle = session.ID, session.Title
+	u.snapshot = session
 	u.entries = nil
 	u.activeGrid = -1
 	u.gridFocused = false
+	u.workspaceFocused = false
+	u.dockGridFocused = false
+	u.rangeAnchor = -1
+	u.workspaceTab = workspaceTabIndex(session.Workspace.ActiveTab)
+	u.dockGrids = map[string]*gridState{}
 	u.input.Focus()
 	for _, message := range session.Messages {
 		if message.Kind == "grid" {
 			record := session.RecordSets[message.RecordSetID]
-			u.entries = append(u.entries, historyEntry{grid: newGridState(NewGridModel(record.Result), record.Title, contentWidth(u.width))})
+			u.entries = append(u.entries, historyEntry{grid: newGridState(NewGridModel(record.Result), record.Title, u.chatPaneWidth()), recordSetID: record.ID})
 			if note := formatLimitations(record.Result.Limitations); note != "" {
 				u.entries = append(u.entries, historyEntry{role: "Access", text: note})
 			}
@@ -601,6 +714,7 @@ func (u *UI) loadSession(session ChatSession) {
 		u.entries = append(u.entries, historyEntry{role: message.Role, text: message.Text})
 	}
 	u.history.SetHeight(u.historyHeight())
+	u.rebuildDockGrids()
 	u.rebuildHistory(true)
 }
 
@@ -700,12 +814,37 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	case "enter":
-		// Reserved for row details/drill-down. Keep it consumed while the
-		// grid is focused so it cannot accidentally submit the chat input.
+		u.selectFromGrid("row")
+		u.setWorkspaceTab(1)
+		return nil, true
+	case "space":
+		u.selectFromGrid("row")
+		return nil, true
+	case "c":
+		u.selectFromGrid("cell")
+		return nil, true
+	case "r":
+		u.selectFromGrid("range")
+		return nil, true
+	case "a":
+		ref := ContextReference{Kind: "recordset", ObjectID: u.entries[u.activeGrid].recordSetID, Title: g.title}
+		u.toggleAttachment(ref)
+		return nil, true
+	case "d":
+		ref := ContextReference{Kind: "recordset", ObjectID: u.entries[u.activeGrid].recordSetID, Title: g.title}
+		if selection, ok := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]; ok {
+			if view := u.snapshot.Workspace.Views[selection.ViewID]; view.RecordSetID == ref.ObjectID {
+				ref = ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}
+			}
+		}
+		u.performWorkspaceAction(WorkspaceAction{Kind: "dock", Reference: ref})
 		return nil, true
 	case "s":
 		g.model.Sort(g.selectedColumn)
 		g.rebuild()
+		if recordSetID := u.entries[u.activeGrid].recordSetID; recordSetID != "" {
+			u.syncRecordSetSort(recordSetID, g.model)
+		}
 		g.table.Focus()
 		return nil, true
 	case "tab":
@@ -747,7 +886,9 @@ func (u *UI) focusGrid(index int) bool {
 		u.entries[u.activeGrid].grid.setFocused(false)
 	}
 	u.activeGrid = index
+	u.rangeAnchor = -1
 	u.gridFocused = true
+	u.workspaceFocused = false
 	u.input.Blur()
 	u.entries[index].grid.setFocused(true)
 	return true
@@ -758,7 +899,18 @@ func (u *UI) focusInput() {
 		u.entries[u.activeGrid].grid.setFocused(false)
 	}
 	u.gridFocused = false
+	u.workspaceFocused = false
+	u.dockGridFocused = false
 	u.input.Focus()
+}
+
+func (u *UI) focusWorkspace() {
+	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
+		u.entries[u.activeGrid].grid.setFocused(false)
+	}
+	u.gridFocused = false
+	u.workspaceFocused = true
+	u.input.Blur()
 }
 
 func (u *UI) ask(prompt string) tea.Cmd {
@@ -774,11 +926,11 @@ func (u *UI) appendTurn(turn Turn) {
 	}
 	for _, query := range turn.Queries {
 		if query.Err != nil {
-			u.entries = append(u.entries, historyEntry{role: "DataTug", text: friendlyQueryError(query.Err)})
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: publicQueryError(query.Err, query.Parameters)})
 			continue
 		}
 		grid := NewGridModel(query.Result)
-		u.entries = append(u.entries, historyEntry{grid: newGridState(grid, query.Title, contentWidth(u.width))})
+		u.entries = append(u.entries, historyEntry{grid: newGridState(grid, query.Title, u.chatPaneWidth()), recordSetID: query.RecordSetID})
 		if limitationText := formatLimitations(query.Result.Limitations); limitationText != "" {
 			u.entries = append(u.entries, historyEntry{role: "Access", text: limitationText})
 		}
@@ -806,7 +958,7 @@ func formatLimitations(limitations []secureread.Limitation) string {
 }
 
 func (u *UI) rebuildHistory(scrollToBottom bool) {
-	innerWidth := contentWidth(u.width)
+	innerWidth := u.chatPaneWidth()
 	u.history.SetWidth(innerWidth)
 	u.input.SetWidth(max(1, innerWidth-2))
 	blocks := make([]string, 0, len(u.entries))
@@ -884,16 +1036,27 @@ func renderedLineCount(content string, width int) int {
 }
 
 func (u *UI) View() tea.View {
-	innerWidth := contentWidth(u.width)
+	innerWidth := u.chatPaneWidth()
 	u.history.SetHeight(u.historyHeight())
 	spacer := strings.Repeat(" ", innerWidth)
 	if !u.history.AtBottom() {
 		spacer = scrollDownCue(innerWidth)
 	}
 	input := inputSurfaceStyle.Width(innerWidth).Render(u.input.View())
+	attachments := u.attachmentLine(innerWidth)
 	statusText := strings.Join(u.statusLines(), "\n")
-	status := statusSurfaceStyle.Width(innerWidth).Render(statusStyle.Render(statusText))
-	content := lipgloss.JoinVertical(lipgloss.Left, u.history.View(), spacer, input, status)
+	status := statusSurfaceStyle.Width(contentWidth(u.width)).Render(statusStyle.Render(statusText))
+	chat := lipgloss.JoinVertical(lipgloss.Left, u.history.View(), spacer, attachments, input)
+	bodyHeight := max(1, u.height-1-len(u.statusLines()))
+	body := chat
+	if u.splitEnabled() {
+		workspace := u.workspaceView(u.workspacePaneWidth(), bodyHeight)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, chat, strings.Repeat("│\n", max(0, bodyHeight-1))+"│", workspace)
+	} else if u.workspaceFocused {
+		body = u.workspaceView(contentWidth(u.width), bodyHeight)
+	}
+	top := u.topBar(contentWidth(u.width))
+	content := lipgloss.JoinVertical(lipgloss.Left, top, body, status)
 	content = withRootGutter(content, u.width)
 	view := tea.NewView(content)
 	view.AltScreen = true
@@ -903,6 +1066,45 @@ func (u *UI) View() tea.View {
 		view.MouseMode = tea.MouseModeNone
 	}
 	return view
+}
+
+func (u *UI) topBar(width int) string {
+	project := u.catalog.Title
+	if project == "" {
+		project = "Project"
+	}
+	session := u.sessionTitle
+	if session == "" {
+		session = "New chat"
+	}
+	label := fmt.Sprintf("DataTug │ Project: %s [F3] │ Session: %s [F4] │ View: %s [F6] │ Help: /help", sanitizeTerminalText(project), sanitizeTerminalText(session), workspaceTabs[u.workspaceTab])
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Width(width).Render(ansi.Truncate(label, width, "…"))
+}
+
+func (u *UI) attachmentLine(width int) string {
+	if len(u.snapshot.Workspace.Attachments) == 0 {
+		return padAnsiLine(" ", width)
+	}
+	labels := make([]string, 0, len(u.snapshot.Workspace.Attachments))
+	for _, ref := range u.snapshot.Workspace.Attachments {
+		labels = append(labels, "["+sanitizeTerminalText(ref.Title)+" ×]")
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("111")).Background(lipgloss.Color("235")).Width(width).Render(ansi.Truncate(strings.Join(labels, " "), width, "…"))
+}
+
+func (u *UI) attachmentCloseAt(x int) (ContextReference, bool) {
+	if x < 0 || x >= u.chatPaneWidth() {
+		return ContextReference{}, false
+	}
+	position := 0
+	for _, ref := range u.snapshot.Workspace.Attachments {
+		titleWidth := ansi.StringWidth(sanitizeTerminalText(ref.Title))
+		if x == position+titleWidth+2 { // the × in "[title ×]"
+			return ref, true
+		}
+		position += titleWidth + 5 // bracket, space, ×, bracket, gap
+	}
+	return ContextReference{}, false
 }
 
 func scrollDownCue(width int) string {
@@ -917,15 +1119,18 @@ func (u *UI) statusLines() []string {
 	if !u.mouseCapture {
 		mouseHint = "F2 wheel"
 	}
-	segments := []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "Enter send", "Ctrl+G grid", mouseHint, "Ctrl+C quit"}
+	segments := []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "Enter send", "F6 workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", mouseHint, "Ctrl+C quit"}
 	if u.sessions != nil {
-		segments = append([]string{"session: " + sanitizeTerminalText(u.sessionTitle), "/sessions"}, segments...)
+		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.sessionTitle), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
 	}
 	if u.gridFocused {
-		segments = []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "↑↓ rows", "←→ columns", "s sort", "Enter reserved", "Esc/Tab input", mouseHint, "Ctrl+C quit"}
+		segments = []string{"Shift+↑↓ to navigate", "↑↓ rows", "←→ columns", "Space row", "c cell", "r range", "a attach", "d dock", "s sort", "Enter details", "Esc input"}
 		if u.sessions != nil {
 			segments = append([]string{"session: " + sanitizeTerminalText(u.sessionTitle)}, segments...)
 		}
+	}
+	if u.workspaceFocused {
+		segments = []string{"F6/Esc input", "←→ tabs", "↑↓ navigate", "Ctrl+←→ resize", "Space attach", "Enter open", "d dock", "x detach/undock", mouseHint}
 	}
 	if u.busy {
 		segments = []string{"model: " + sanitizeTerminalText(u.modelName), "Thinking…", "Ctrl+C quit"}
@@ -961,7 +1166,7 @@ func wrapStatusSegments(segments []string, maxWidth int) []string {
 }
 
 func (u *UI) historyHeight() int {
-	return max(1, u.height-2-len(u.statusLines()))
+	return max(1, u.height-4-len(u.statusLines()))
 }
 
 func withRootGutter(content string, width int) string {

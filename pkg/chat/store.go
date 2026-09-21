@@ -26,6 +26,7 @@ type ChatScope struct {
 	Environment       string
 	Database          string
 	AccessFingerprint string
+	Sources           map[string]string
 }
 
 type ChatSession struct {
@@ -36,6 +37,7 @@ type ChatSession struct {
 	Messages   []ChatMessage
 	Queries    []ExecutedQuery
 	RecordSets map[string]RecordSet
+	Workspace  WorkspaceState
 }
 
 type ChatMessage struct {
@@ -107,8 +109,8 @@ func canonicalProjectPath(projectDir string) (string, error) {
 }
 
 func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
-	if scope.Environment == "" || scope.Database == "" || scope.AccessFingerprint == "" {
-		return nil, errors.New("chat session scope requires environment, database, and access fingerprint")
+	if scope.Environment == "" || scope.Database == "" || scope.AccessFingerprint == "" || scope.Sources[scope.Database] == "" {
+		return nil, errors.New("chat session scope requires environment, database, access fingerprint, and selected source")
 	}
 	if path == "" {
 		return nil, errors.New("chat session store path is empty")
@@ -158,7 +160,79 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 	}
 	encoded, _ := json.Marshal(scope)
 	sum := sha256.Sum256(encoded)
-	return &SessionStore{db: db, scope: hex.EncodeToString(sum[:]), info: scope, path: path}, nil
+	newScope := hex.EncodeToString(sum[:])
+	legacy, _ := json.Marshal(struct {
+		Environment       string
+		Database          string
+		AccessFingerprint string
+	}{scope.Environment, scope.Database, scope.AccessFingerprint})
+	legacySum := sha256.Sum256(legacy)
+	if err := migrateLegacyChatScopes(db, hex.EncodeToString(legacySum[:]), newScope, scope.Sources[scope.Database]); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return &SessionStore{db: db, scope: newScope, info: scope, path: path}, nil
+}
+
+// Phase 2 scope hashes omitted source identity. Reopen those sessions only if
+// every saved execution used the currently selected source URL. Old sessions
+// with no queries are safe to migrate. Mismatched snapshots remain untouched
+// and inaccessible rather than being relabeled as data from a new source.
+func migrateLegacyChatScopes(db *sql.DB, oldScope, newScope, selectedURL string) error {
+	if oldScope == newScope {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	sessions, err := tx.Query(`SELECT id FROM sessions WHERE scope = ?`, oldScope)
+	if err != nil {
+		return fmt.Errorf("read legacy chat sessions: %w", err)
+	}
+	var ids []string
+	for sessions.Next() {
+		var id string
+		if err := sessions.Scan(&id); err != nil {
+			_ = sessions.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := sessions.Err(); err != nil {
+		_ = sessions.Close()
+		return err
+	}
+	_ = sessions.Close()
+	for _, id := range ids {
+		rows, err := tx.Query(`SELECT source FROM queries WHERE session_id = ? UNION SELECT source FROM recordsets WHERE session_id = ?`, id, id)
+		if err != nil {
+			return fmt.Errorf("read legacy chat sources: %w", err)
+		}
+		compatible := true
+		for rows.Next() {
+			var source string
+			if err := rows.Scan(&source); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			if source != selectedURL {
+				compatible = false
+			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		_ = rows.Close()
+		if compatible {
+			if _, err := tx.Exec(`UPDATE sessions SET scope = ? WHERE id = ?`, newScope, id); err != nil {
+				return fmt.Errorf("migrate legacy chat session: %w", err)
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 func initChatSchema(db *sql.DB) error {
@@ -166,10 +240,10 @@ func initChatSchema(db *sql.DB) error {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read chat schema version: %w", err)
 	}
-	if version != 0 && version != 1 {
+	if version != 0 && version != 1 && version != 2 {
 		return fmt.Errorf("unsupported chat database schema version %d", version)
 	}
-	if version == 1 {
+	if version >= 1 {
 		for _, table := range []string{"sessions", "messages", "queries", "recordsets"} {
 			var name string
 			if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
@@ -180,7 +254,13 @@ func initChatSchema(db *sql.DB) error {
 		if err := db.QueryRow("PRAGMA quick_check").Scan(&integrity); err != nil || integrity != "ok" {
 			return fmt.Errorf("chat database integrity check failed: %s: %v", integrity, err)
 		}
-		return nil
+		if version == 2 {
+			var name string
+			if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_workspace'`).Scan(&name); err != nil {
+				return fmt.Errorf("chat database is missing workspace metadata: %w", err)
+			}
+			return nil
+		}
 	}
 	tx, err := db.Begin()
 	if err != nil {
@@ -194,7 +274,8 @@ func initChatSchema(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS messages_session_order ON messages(session_id)`,
 		`CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, dtql TEXT NOT NULL, source TEXT NOT NULL, parameters_json TEXT NOT NULL, executed_at TEXT NOT NULL, error TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS recordsets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, query_id TEXT NOT NULL REFERENCES queries(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, dtql TEXT NOT NULL, source TEXT NOT NULL, environment TEXT NOT NULL, database_id TEXT NOT NULL, parameters_json TEXT NOT NULL, created_at TEXT NOT NULL, result_json BLOB NOT NULL)`,
-		`PRAGMA user_version = 1`,
+		`CREATE TABLE IF NOT EXISTS session_workspace (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, state_json TEXT NOT NULL)`,
+		`PRAGMA user_version = 2`,
 	} {
 		if _, err := tx.Exec(statement); err != nil {
 			return fmt.Errorf("initialize chat schema: %w", err)
@@ -284,6 +365,9 @@ func (s *SessionStore) Load(ctx context.Context, id string) (ChatSession, error)
 	if err := s.loadRecordSets(ctx, &item); err != nil {
 		return ChatSession{}, err
 	}
+	if err := s.loadWorkspace(ctx, &item); err != nil {
+		return ChatSession{}, err
+	}
 	for _, message := range item.Messages {
 		if message.Kind == "grid" {
 			if _, ok := item.RecordSets[message.RecordSetID]; !ok {
@@ -292,6 +376,118 @@ func (s *SessionStore) Load(ctx context.Context, id string) (ChatSession, error)
 		}
 	}
 	return item, nil
+}
+
+func (s *SessionStore) loadWorkspace(ctx context.Context, item *ChatSession) error {
+	var payload string
+	err := s.db.QueryRowContext(ctx, `SELECT state_json FROM session_workspace WHERE session_id = ?`, item.ID).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		item.Workspace = WorkspaceState{Views: map[string]RecordSetView{}, Selections: map[string]Selection{}, ActiveTab: "Project"}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal([]byte(payload), &item.Workspace); err != nil {
+		return fmt.Errorf("corrupt workspace for chat session %q: %w", item.ID, err)
+	}
+	if item.Workspace.Views == nil {
+		item.Workspace.Views = map[string]RecordSetView{}
+	}
+	if item.Workspace.Selections == nil {
+		item.Workspace.Selections = map[string]Selection{}
+	}
+	return validateLoadedWorkspace(*item)
+}
+
+func validateLoadedWorkspace(item ChatSession) error {
+	for id, view := range item.Workspace.Views {
+		if view.ID != id {
+			return fmt.Errorf("workspace view %q has inconsistent identity", id)
+		}
+		record, ok := item.RecordSets[view.RecordSetID]
+		if !ok {
+			return fmt.Errorf("workspace view %q references a missing RecordSet", view.ID)
+		}
+		for _, column := range append(append([]string{}, view.Columns...), view.OrderBy) {
+			if column != "" && !containsColumn(record.Result.Columns, column) {
+				return fmt.Errorf("workspace view %q has invalid column %q", view.ID, column)
+			}
+		}
+		for _, row := range view.RowIndices {
+			if row < 0 || row >= len(record.Result.Rows) {
+				return fmt.Errorf("workspace view %q has invalid row index %d", view.ID, row)
+			}
+		}
+	}
+	for id, selection := range item.Workspace.Selections {
+		if selection.ID != id {
+			return fmt.Errorf("workspace selection %q has inconsistent identity", id)
+		}
+		view, ok := item.Workspace.Views[selection.ViewID]
+		if !ok {
+			return fmt.Errorf("workspace selection %q references a missing view", selection.ID)
+		}
+		record := item.RecordSets[view.RecordSetID]
+		allowedRows := make(map[int]bool, len(view.RowIndices))
+		for _, row := range view.RowIndices {
+			allowedRows[row] = true
+		}
+		viewColumns := view.Columns
+		if len(viewColumns) == 0 {
+			viewColumns = record.Result.Columns
+		}
+		for _, row := range selection.Rows {
+			if !allowedRows[row] {
+				return fmt.Errorf("workspace selection %q has a row outside its view", selection.ID)
+			}
+		}
+		for _, column := range selection.Columns {
+			if !containsColumn(viewColumns, column) {
+				return fmt.Errorf("workspace selection %q has a column outside its view", selection.ID)
+			}
+		}
+		for _, span := range selection.Ranges {
+			if span.FirstRow < 0 || span.LastRow < span.FirstRow || span.LastRow >= len(record.Result.Rows) || span.FirstCol < 0 || span.LastCol < span.FirstCol || span.LastCol >= len(record.Result.Columns) {
+				return fmt.Errorf("workspace selection %q has an invalid cell range", selection.ID)
+			}
+			for row := span.FirstRow; row <= span.LastRow; row++ {
+				if !allowedRows[row] {
+					return fmt.Errorf("workspace selection %q has a cell range outside its view", selection.ID)
+				}
+			}
+		}
+	}
+	if item.Workspace.CurrentSelectionID != "" {
+		if _, ok := item.Workspace.Selections[item.Workspace.CurrentSelectionID]; !ok {
+			return fmt.Errorf("workspace current selection is missing")
+		}
+	}
+	return nil
+}
+
+// SaveWorkspace replaces only session-scoped presentation/context state; it
+// never modifies an immutable RecordSet or reruns a query.
+func (s *SessionStore) SaveWorkspace(ctx context.Context, sessionID string, state WorkspaceState) error {
+	payload, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("encode workspace: %w", err)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := sessionExists(ctx, tx, sessionID, s.scope); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO session_workspace (session_id, state_json) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET state_json = excluded.state_json`, sessionID, string(payload)); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, stamp(time.Now().UTC()), sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SessionStore) loadMessages(ctx context.Context, item *ChatSession) error {
@@ -383,7 +579,7 @@ func (s *SessionStore) Clear(ctx context.Context, id string) error {
 	if err := sessionExists(ctx, tx, id, s.scope); err != nil {
 		return err
 	}
-	for _, table := range []string{"recordsets", "queries", "messages"} {
+	for _, table := range []string{"session_workspace", "recordsets", "queries", "messages"} {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE session_id = ?", id); err != nil {
 			return err
 		}
@@ -492,11 +688,19 @@ func (s *SessionStore) checkOrigin(ctx context.Context, tx *sql.Tx, sessionID, o
 
 func (s *SessionStore) appendQueryTx(ctx context.Context, tx *sql.Tx, sessionID, originID, source string, query *QueryResult, now time.Time) error {
 	query.QueryID = uuid.NewString()
+	parameters := query.Parameters
+	if parameters == nil {
+		parameters = map[string]any{}
+	}
+	paramsJSON, err := json.Marshal(parameters)
+	if err != nil {
+		return fmt.Errorf("encode query parameters: %w", err)
+	}
 	errText := ""
 	if query.Err != nil {
-		errText = friendlyQueryError(query.Err)
+		errText = publicQueryError(query.Err, query.Parameters)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO queries (id, session_id, origin_message_id, title, dtql, source, parameters_json, executed_at, error) VALUES (?, ?, ?, ?, ?, ?, '{}', ?, ?)`, query.QueryID, sessionID, originID, query.Title, query.DTQL, source, stamp(now), errText); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO queries (id, session_id, origin_message_id, title, dtql, source, parameters_json, executed_at, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, query.QueryID, sessionID, originID, query.Title, query.DTQL, source, string(paramsJSON), stamp(now), errText); err != nil {
 		return err
 	}
 	message := ChatMessage{ID: uuid.NewString(), Role: "DataTug", QueryID: query.QueryID, CreatedAt: now}
@@ -504,11 +708,15 @@ func (s *SessionStore) appendQueryTx(ctx context.Context, tx *sql.Tx, sessionID,
 		message.Kind, message.Text = "error", errText
 	} else {
 		query.RecordSetID = uuid.NewString()
+		databaseID := s.info.Database
+		if query.SourceID != "" {
+			databaseID = query.SourceID
+		}
 		payload, err := encodeResult(query.Result)
 		if err != nil {
 			return fmt.Errorf("encode query result: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)`, query.RecordSetID, sessionID, query.QueryID, originID, query.Title, query.DTQL, source, s.info.Environment, s.info.Database, stamp(now), payload); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO recordsets (id, session_id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, query.RecordSetID, sessionID, query.QueryID, originID, query.Title, query.DTQL, source, s.info.Environment, databaseID, string(paramsJSON), stamp(now), payload); err != nil {
 			return err
 		}
 		message.Kind, message.RecordSetID = "grid", query.RecordSetID

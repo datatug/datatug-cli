@@ -2,6 +2,8 @@ package chat
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"iter"
 	"strings"
 	"testing"
@@ -11,6 +13,15 @@ import (
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 )
+
+func TestFriendlyAgentErrorDoesNotExposeProviderPayload(t *testing.T) {
+	if got := friendlyAgentError(fmt.Errorf("chat: agent turn: %w", context.DeadlineExceeded)); got != "The AI request timed out. Please try again." {
+		t.Fatalf("timeout message = %q", got)
+	}
+	if got := friendlyAgentError(errors.New("provider response contains private payload")); strings.Contains(got, "private payload") {
+		t.Fatalf("provider payload leaked to UI: %q", got)
+	}
+}
 
 type contextualStub struct {
 	contexts []string
@@ -71,10 +82,13 @@ func TestSessionChatRebuildsContextAfterRestartAndSwitch(t *testing.T) {
 		t.Fatal(err)
 	}
 	prior := continuing.contexts[0]
-	for _, want := range []string{"Show last 2 orders", "RecordSet", "CustomerId distinct values: 58, 44", "from: {name: Invoice}"} {
+	for _, want := range []string{"Show last 2 orders", "RecordSet", "columns: InvoiceId, CustomerId", "from: {name: Invoice}"} {
 		if !strings.Contains(prior, want) {
 			t.Errorf("restored context missing %q: %s", want, prior)
 		}
+	}
+	if strings.Contains(prior, "CustomerId distinct values") {
+		t.Fatalf("raw row identifiers leaked into model context: %s", prior)
 	}
 	snapshot, err := chat.Snapshot(ctx)
 	if err != nil || len(snapshot.Messages) != 4 || len(snapshot.RecordSets) != 1 {
@@ -93,17 +107,6 @@ func TestSessionChatRebuildsContextAfterRestartAndSwitch(t *testing.T) {
 	remaining, err := chat.Snapshot(ctx)
 	if err != nil || remaining.ID != second.ID {
 		t.Fatalf("remaining = %+v, %v", remaining, err)
-	}
-}
-
-func TestContextBoundsIdentifierValues(t *testing.T) {
-	record := RecordSet{ID: "rs", Result: secureread.Result{Columns: []string{"CustomerId"}}}
-	for i := 0; i < 120; i++ {
-		record.Result.Rows = append(record.Result.Rows, secureread.Row{Data: map[string]any{"CustomerId": i}})
-	}
-	contextText := recordIdentifierContext(record)
-	if !strings.Contains(contextText, "truncated; not a complete set") || strings.Contains(contextText, ", 119") {
-		t.Fatalf("unbounded identifier context: %s", contextText)
 	}
 }
 

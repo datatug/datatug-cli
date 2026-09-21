@@ -318,13 +318,13 @@ func TestUIComposerSpacerShowsScrollDownCueAndClickJumpsToLatest(t *testing.T) {
 	if !u.history.AtBottom() {
 		t.Fatal("test history did not start at the bottom")
 	}
-	cueRow := u.historyHeight()
+	cueRow := u.historyHeight() + 1 // application top bar
 	lines := strings.Split(ansi.Strip(u.View().Content), "\n")
 	if strings.TrimSpace(lines[cueRow]) != "" {
 		t.Fatalf("composer spacer should be blank at the bottom: %q", lines[cueRow])
 	}
-	if !strings.Contains(lines[cueRow+1], "Ask about your data") {
-		t.Fatalf("composer does not follow spacer: %q", lines[cueRow+1])
+	if !strings.Contains(lines[cueRow+2], "Ask about your data") {
+		t.Fatalf("composer does not follow attachment row: %q", lines[cueRow+2])
 	}
 
 	_, _ = u.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
@@ -360,7 +360,7 @@ func TestClickingScrollDownCueClearsGridFocus(t *testing.T) {
 		t.Fatal("expected grid focus")
 	}
 	u.history.GotoTop()
-	_, _ = u.Update(tea.MouseClickMsg{X: u.width / 2, Y: u.historyHeight(), Button: tea.MouseLeft})
+	_, _ = u.Update(tea.MouseClickMsg{X: u.width / 2, Y: u.historyHeight() + 1, Button: tea.MouseLeft})
 	if !u.history.AtBottom() || u.gridFocused || !u.input.Focused() {
 		t.Fatal("scroll-down cue did not return to latest history and composer focus")
 	}
@@ -665,7 +665,7 @@ func TestUIStatusHintsFollowFocus(t *testing.T) {
 	}
 	u.rebuildHistory(false)
 	gridView := ansi.Strip(u.View().Content)
-	if !strings.Contains(gridView, "Shift+↑↓ to navigate") || !strings.Contains(gridView, "Enter reserved") || !strings.Contains(gridView, "s sort") {
+	if !strings.Contains(gridView, "Shift+↑↓ to navigate") || !strings.Contains(gridView, "Enter details") || !strings.Contains(gridView, "s sort") {
 		t.Fatalf("grid status is not contextual: %s", gridView)
 	}
 }

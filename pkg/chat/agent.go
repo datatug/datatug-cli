@@ -52,7 +52,9 @@ type QueryResult struct {
 	Parameters  map[string]any
 	Source      string
 	SourceID    string
-	Err         error
+	// Lineage is DataTug-owned execution provenance, never model supplied.
+	Lineage *JoinLineage
+	Err     error
 }
 
 type WorkspaceActionResult struct {
@@ -79,6 +81,7 @@ type queryObserverKey struct{}
 type workspaceObserverKey struct{}
 type selectionParametersKey struct{}
 type bookmarkFinderKey struct{}
+type joinObserverKey struct{}
 
 func withQueryObserver(ctx context.Context, observer func(QueryResult) (QueryResult, error)) context.Context {
 	return context.WithValue(ctx, queryObserverKey{}, observer)
@@ -96,6 +99,10 @@ func withBookmarkFinder(ctx context.Context, finder func(string, []string) ([]Bo
 	return context.WithValue(ctx, bookmarkFinderKey{}, finder)
 }
 
+func withJoinObserver(ctx context.Context, observer func(string, JoinCandidateID) (RecordSet, error)) context.Context {
+	return context.WithValue(ctx, joinObserverKey{}, observer)
+}
+
 // ADKConversation uses an ephemeral ADK session for each turn. DataTug's
 // durable ChatSession, not ADK memory, owns conversation history.
 type ADKConversation struct {
@@ -110,6 +117,7 @@ type ADKConversation struct {
 	modelCalls  int
 	toolCalls   int
 	actionCalls int
+	joinApplied bool
 }
 
 type conversationConfig struct {
@@ -196,6 +204,18 @@ type bookmarkSearchResponse struct {
 	Error string               `json:"error,omitempty"`
 }
 
+type applyJoinCandidateArgs struct {
+	RecordSetID string          `json:"recordSetId" jsonschema:"Exact RecordSet ID from available FK candidates"`
+	CandidateID JoinCandidateID `json:"candidateId" jsonschema:"Exact FK candidate ID from the same RecordSet"`
+}
+
+type applyJoinCandidateResponse struct {
+	OK          bool   `json:"ok"`
+	RecordSetID string `json:"recordSetId,omitempty"`
+	Rows        int    `json:"rows,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
 // NewADKConversation builds the constrained chat agent. schemaContext is a
 // compact description derived from DataTug's stored dbmodel.
 func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaContext string, options ...Option) (*ADKConversation, error) {
@@ -256,6 +276,15 @@ func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaC
 	if err != nil {
 		return nil, fmt.Errorf("chat: create bookmark tool: %w", err)
 	}
+	joinTool, err := functiontool.New(functiontool.Config{
+		Name:        "apply_join_candidate",
+		Description: "Apply an exact DataTug foreign-key candidate to an existing RecordSet. DataTug derives ON, validates DTQL, executes the query, and saves a new RecordSet. Never supply SQL or ON fields.",
+	}, func(ctx agent.Context, args applyJoinCandidateArgs) (applyJoinCandidateResponse, error) {
+		return c.runJoinCandidate(ctx, args), nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("chat: create JOIN tool: %w", err)
+	}
 
 	instruction := buildInstruction(schemaContext)
 	root, err := llmagent.New(llmagent.Config{
@@ -272,7 +301,7 @@ func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaC
 		InstructionProvider: func(agent.ReadonlyContext) (string, error) {
 			return instruction, nil
 		},
-		Tools: []adktool.Tool{tool, workspaceTool, bookmarkTool},
+		Tools: []adktool.Tool{tool, workspaceTool, bookmarkTool, joinTool},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("chat: create ADK agent: %w", err)
@@ -294,6 +323,12 @@ func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaC
 
 func (c *ADKConversation) runDTQL(ctx context.Context, executor DTQLExecutor, sourceURL string, args runDTQLArgs) (runDTQLResponse, error) {
 	title := normalizeGridTitle(args.Title)
+	c.mu.Lock()
+	joined := c.joinApplied
+	c.mu.Unlock()
+	if joined {
+		return runDTQLResponse{Title: title, Error: "A JOIN already produced the result for this turn; do not run another query."}, nil
+	}
 	if args.SourceID != "" {
 		resolved := c.sources[args.SourceID]
 		if resolved == "" {
@@ -318,6 +353,11 @@ func (c *ADKConversation) runDTQL(ctx context.Context, executor DTQLExecutor, so
 		c.capture(ctx, QueryResult{Title: title, DTQL: doc, Err: wrapped})
 		return runDTQLResponse{Title: title, Error: "I couldn't construct a valid query: " + conciseError(wrapped)}, nil
 	}
+	if len(query.From().Joins()) > 0 {
+		err := errors.New("model-authored JOIN DTQL is not allowed; select an available foreign-key candidate")
+		c.capture(ctx, QueryResult{Title: title, DTQL: doc, Err: err})
+		return runDTQLResponse{Title: title, Error: err.Error()}, nil
+	}
 	if query.Limit() < 1 || query.Limit() > maxRows {
 		err := fmt.Errorf("DTQL limit must be between 1 and %d", maxRows)
 		c.capture(ctx, QueryResult{Title: title, DTQL: doc, Err: err})
@@ -333,6 +373,53 @@ func (c *ADKConversation) runDTQL(ctx context.Context, executor DTQLExecutor, so
 		return runDTQLResponse{Title: title, Error: publicQueryError(captured.Err, captured.Parameters)}, nil
 	}
 	return runDTQLResponse{Title: title, OK: true, RecordSetID: captured.RecordSetID, Columns: result.Columns, Rows: len(result.Rows)}, nil
+}
+
+func (c *ADKConversation) runJoinCandidate(ctx context.Context, args applyJoinCandidateArgs) applyJoinCandidateResponse {
+	c.mu.Lock()
+	c.actionCalls++
+	allowed := c.actionCalls <= 3
+	c.mu.Unlock()
+	if !allowed {
+		return applyJoinCandidateResponse{Error: "Too many JOIN actions in one turn."}
+	}
+	if args.RecordSetID == "" || args.CandidateID == "" {
+		return applyJoinCandidateResponse{Error: "Choose an exact RecordSet and foreign-key candidate before joining."}
+	}
+	observer, ok := ctx.Value(joinObserverKey{}).(func(string, JoinCandidateID) (RecordSet, error))
+	if !ok {
+		return applyJoinCandidateResponse{Error: "JOIN exploration is unavailable in this chat."}
+	}
+	record, err := observer(args.RecordSetID, args.CandidateID)
+	if err != nil {
+		message := publicJoinError(err)
+		c.captureAction(WorkspaceActionResult{Error: message, Err: err})
+		return applyJoinCandidateResponse{Error: message}
+	}
+	c.mu.Lock()
+	c.joinApplied = true
+	c.mu.Unlock()
+	c.captureAction(WorkspaceActionResult{Reference: ContextReference{Kind: "recordset", ObjectID: record.ID}, Summary: "Joined using the selected foreign key."})
+	return applyJoinCandidateResponse{OK: true, RecordSetID: record.ID, Rows: len(record.Result.Rows)}
+}
+
+func publicJoinError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "ambiguous join target"):
+		return "Cannot add JOIN: " + conciseError(err)
+	case strings.Contains(message, "stale"), strings.Contains(message, "unavailable"), strings.Contains(message, "metadata"):
+		return "That foreign-key relationship is no longer available. Refresh the grid and choose again."
+	case strings.Contains(message, "policy"), strings.Contains(message, "readable"):
+		return "This JOIN is not available under the current access policy."
+	case strings.Contains(message, "aggregate"), strings.Contains(message, "projection"), strings.Contains(message, "wildcard"):
+		return "This result cannot be joined safely without changing its selected columns."
+	default:
+		return "I couldn't apply that JOIN. Check the selected relationship and try again."
+	}
 }
 
 // Only bind Selection values named in this validated DTQL document. This
@@ -456,6 +543,7 @@ func (c *ADKConversation) resetTurn() {
 	c.modelCalls = 0
 	c.toolCalls = 0
 	c.actionCalls = 0
+	c.joinApplied = false
 }
 
 func (c *ADKConversation) capture(ctx context.Context, result QueryResult) QueryResult {
@@ -602,10 +690,18 @@ what you queried after a successful tool call.
 If attached context names another project source, supply its sourceId to
 run_dtql. Never invent a source ID or URL.
 
-DTQL supports exactly one source relation (joins are not supported), selected
+For a new data query, run_dtql accepts a single source relation, selected
 columns, where expressions, groupBy, aggregate columns, having, orderBy, limit,
-and offset. You can aggregate invoices by CustomerId to answer customer-order
-totals, but do not invent customer names when a join would be required.
+and offset. Do not write a JOIN into run_dtql: DataTug rejects model-authored
+JOINs. To follow a foreign-key relationship on an existing RecordSet, call
+apply_join_candidate with the exact recordSetId and candidateId from the
+available FK candidate context. DataTug derives the ON fields and runs the
+JOIN. Candidate IDs are specific to one RecordSet and may become stale after
+schema changes. If more than one relationship could satisfy the user's target
+(for example billing and shipping addresses), ask which relationship they
+mean instead of guessing. Never invent a candidate ID, ON clause or row value.
+After a successful apply_join_candidate call, the joined RecordSet is the
+answer. Do not call run_dtql again in that turn or create a placeholder query.
 Every query must include
 a limit from 1 to 1000; use 100 when the user gives no count. Use exact relation
 and column names from the schema. A typical shape is:
@@ -683,8 +779,8 @@ selection or dock action. If the existing RecordSet lacks the field needed to
 select correctly, query a suitable source, then select from the returned
 recordSetId. Never infer unseen row values from a grid summary.
 
-If the request requires a join or cannot be represented in DTQL, explain that
-briefly and do not invent data or fall back to SQL. If the tool reports invalid
+If a requested JOIN has no FK candidate or cannot be represented safely,
+explain that briefly and do not invent data or fall back to SQL. If the tool reports invalid
 DTQL, correct it once when possible. Do not expose internal payloads.
 
 Configured schema:

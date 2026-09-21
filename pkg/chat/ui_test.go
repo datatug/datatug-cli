@@ -30,6 +30,72 @@ func TestUIRendersStructuredResultAsBubbleTable(t *testing.T) {
 	}
 }
 
+func TestUIInlineFKJoinNavigationAndApply(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.AppendUser(ctx, sessions.activeID, "Show invoices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
+		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
+		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: &joinExecutorStub{}})
+	u, err := NewSessionUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.width, u.height = 100, 40
+	u.resizeChatPane()
+	if !strings.Contains(u.View().Content, "You can JOIN") || !strings.Contains(u.View().Content, "Customer") {
+		t.Fatalf("inline FK area missing:\n%s", u.View().Content)
+	}
+	if !u.focusLatestGrid() {
+		t.Fatal("grid could not be focused")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Text: "g"})
+	if !u.joinFocused || u.entries[u.activeGrid].grid.focused {
+		t.Fatal("JOIN area did not receive focus")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !strings.Contains(u.View().Content, "Invoice.CustomerId") {
+		t.Fatal("exact FK details not displayed")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if u.joinFocused || !u.entries[u.activeGrid].grid.focused {
+		t.Fatal("Esc did not return to grid")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Text: "g"})
+	_, command := u.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	if command == nil {
+		t.Fatal("Space did not invoke JOIN application")
+	}
+	message := command()
+	if _, ok := message.(joinMessage); !ok {
+		t.Fatalf("JOIN command returned %T", message)
+	}
+	_, _ = u.Update(message)
+	snapshot, err := sessions.Snapshot(ctx)
+	if err != nil || len(snapshot.RecordSets) != 2 {
+		t.Fatalf("JOIN result was not persisted: %d RecordSets, %v", len(snapshot.RecordSets), err)
+	}
+	if snapshot.RecordSets[base.RecordSetID].Lineage != nil {
+		t.Fatal("base RecordSet was mutated")
+	}
+	if !strings.Contains(u.View().Content, "Invoices + Customer") {
+		t.Fatal("joined grid not rendered")
+	}
+}
+
 func TestUIShowsAppliedLimitationsIncludingEmptyResults(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
 	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{

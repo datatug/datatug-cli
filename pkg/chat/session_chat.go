@@ -25,6 +25,85 @@ type SessionChat struct {
 	activeID           string
 	lastBookmarkID     string
 	implicitBookmarkID string
+	joinApplication    JoinApplication
+}
+
+// ConfigureJoinApplication installs the DataTug-owned join boundary. It is a
+// separate setup step because existing chat construction deliberately knows
+// nothing about database adapters; callers may leave it unset when a source
+// has no FK capability.
+func (c *SessionChat) ConfigureJoinApplication(application JoinApplication) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.joinApplication = application
+}
+
+// JoinCandidates resolves candidates for a persisted immutable RecordSet.
+// The returned IDs are opaque and must be supplied unchanged to ApplyJoinCandidate.
+func (c *SessionChat) JoinCandidates(ctx context.Context, recordSetID string) ([]JoinCandidate, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.joinApplication == nil {
+		return []JoinCandidate{}, nil
+	}
+	session, err := c.store.Load(ctx, c.activeID)
+	if err != nil {
+		return nil, err
+	}
+	record, ok := session.RecordSets[recordSetID]
+	if !ok {
+		return nil, fmt.Errorf("RecordSet %q is not in the active session", recordSetID)
+	}
+	return c.joinApplication.Candidates(ctx, record)
+}
+
+// ApplyJoinCandidate is the shared UI/agent operation. It records an action
+// message and persists the execution as the ordinary immutable query/grid
+// sequence, so restarts never re-execute historic joins.
+func (c *SessionChat) ApplyJoinCandidate(ctx context.Context, recordSetID string, candidateID JoinCandidateID) (RecordSet, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.applyJoinCandidate(ctx, recordSetID, candidateID, "")
+}
+
+func (c *SessionChat) applyJoinCandidate(ctx context.Context, recordSetID string, candidateID JoinCandidateID, originMessageID string) (RecordSet, error) {
+	if c.joinApplication == nil {
+		return RecordSet{}, fmt.Errorf("JOIN exploration is unavailable for this source")
+	}
+	session, err := c.store.Load(ctx, c.activeID)
+	if err != nil {
+		return RecordSet{}, err
+	}
+	record, ok := session.RecordSets[recordSetID]
+	if !ok {
+		return RecordSet{}, fmt.Errorf("RecordSet %q is not in the active session", recordSetID)
+	}
+	query, err := c.joinApplication.Apply(ctx, record, candidateID)
+	if err != nil {
+		return RecordSet{}, err
+	}
+	if query.Err != nil {
+		return RecordSet{}, query.Err
+	}
+	if query.Source == "" {
+		query.Source = c.source
+	}
+	if originMessageID == "" {
+		action, appendErr := c.store.AppendUser(ctx, c.activeID, "JOIN "+query.Title)
+		if appendErr != nil {
+			return RecordSet{}, appendErr
+		}
+		originMessageID = action.ID
+	}
+	stored, err := c.store.AppendQuery(ctx, c.activeID, originMessageID, query.Source, query)
+	if err != nil {
+		return RecordSet{}, err
+	}
+	snapshot, err := c.store.Load(ctx, c.activeID)
+	if err != nil {
+		return RecordSet{}, err
+	}
+	return snapshot.RecordSets[stored.RecordSetID], nil
 }
 
 func NewSessionChat(ctx context.Context, store *SessionStore, agent ContextualConversation, source string, catalogs ...ProjectCatalog) (*SessionChat, error) {
@@ -268,6 +347,12 @@ func (c *SessionChat) Ask(ctx context.Context, prompt string) (Turn, error) {
 		return Turn{}, err
 	}
 	contextText := buildSessionContext(prior, c.catalog)
+	if c.joinApplication != nil {
+		joinContext := c.joinCandidateContext(ctx, prior)
+		if joinContext != "" {
+			contextText = joinContext + "\n" + boundedContextText(contextText, maxContextChars-len(joinContext)-1)
+		}
+	}
 	user, err := c.store.AppendUser(ctx, c.activeID, prompt)
 	if err != nil {
 		return Turn{}, err
@@ -297,6 +382,12 @@ func (c *SessionChat) Ask(ctx context.Context, prompt string) (Turn, error) {
 	ctx = withBookmarkFinder(ctx, func(search string, tags []string) ([]Bookmark, error) {
 		return c.store.FindBookmarks(ctx, search, tags)
 	})
+	ctx = withJoinObserver(ctx, func(recordSetID string, candidateID JoinCandidateID) (RecordSet, error) {
+		if err := c.validateAgentJoinChoice(ctx, prior, recordSetID, candidateID, prompt); err != nil {
+			return RecordSet{}, err
+		}
+		return c.applyJoinCandidate(ctx, recordSetID, candidateID, user.ID)
+	})
 	turn, agentErr := c.agent.AskWithContext(ctx, prompt, contextText)
 	if agentErr != nil {
 		turn = Turn{Text: friendlyAgentError(agentErr)}
@@ -313,6 +404,152 @@ func (c *SessionChat) Ask(ctx context.Context, prompt string) (Turn, error) {
 		}
 	}
 	return c.store.AppendTurn(ctx, c.activeID, user.ID, c.source, turn)
+}
+
+// An exact candidate ID does not by itself prove the user chose between
+// multiple same-target edges: the model could have picked one arbitrarily.
+// Require a source alias/field token unique to the chosen edge in the user's
+// actual request. This is generic identifier matching, not table-name intent
+// handling; unresolved intent returns a clarification before any query runs.
+func (c *SessionChat) validateAgentJoinChoice(ctx context.Context, session ChatSession, recordSetID string, candidateID JoinCandidateID, prompt string) error {
+	if c.joinApplication == nil {
+		return fmt.Errorf("JOIN exploration is unavailable")
+	}
+	record, ok := session.RecordSets[recordSetID]
+	if !ok {
+		return fmt.Errorf("RecordSet is unavailable")
+	}
+	candidates, err := c.joinApplication.Candidates(ctx, record)
+	if err != nil {
+		return err
+	}
+	var chosen JoinCandidate
+	for _, candidate := range candidates {
+		if candidate.ID == candidateID {
+			chosen = candidate
+			break
+		}
+	}
+	if chosen.ID == "" {
+		return fmt.Errorf("selected foreign-key edge is stale or unavailable")
+	}
+	var alternatives []JoinCandidate
+	for _, candidate := range candidates {
+		if strings.EqualFold(candidate.Target.Relation, chosen.Target.Relation) {
+			alternatives = append(alternatives, candidate)
+		}
+	}
+	if len(alternatives) < 2 || strings.Contains(prompt, string(candidateID)) {
+		return nil
+	}
+	otherTokens := map[string]bool{}
+	for _, candidate := range alternatives {
+		if candidate.ID == chosen.ID {
+			continue
+		}
+		for token := range joinChoiceTokens(candidate) {
+			otherTokens[token] = true
+		}
+	}
+	promptWords := map[string]bool{}
+	for _, word := range identifierWords(prompt) {
+		promptWords[word] = true
+	}
+	for token := range joinChoiceTokens(chosen) {
+		if !otherTokens[token] && promptWords[token] {
+			return nil
+		}
+	}
+	options := make([]string, 0, len(alternatives))
+	for _, candidate := range alternatives {
+		fields := make([]string, len(candidate.Fields))
+		for i, pair := range candidate.Fields {
+			fields[i] = sanitizeTerminalText(pair.SourceField)
+		}
+		options = append(options, strings.Join(fields, "+"))
+	}
+	return fmt.Errorf("ambiguous JOIN target %s: choose %s", sanitizeTerminalText(chosen.Target.Relation), strings.Join(options, " or "))
+}
+
+func joinChoiceTokens(candidate JoinCandidate) map[string]bool {
+	tokens := map[string]bool{}
+	for _, word := range identifierWords(candidate.Source.Alias) {
+		tokens[word] = true
+	}
+	for _, pair := range candidate.Fields {
+		for _, word := range identifierWords(pair.SourceField) {
+			tokens[word] = true
+		}
+	}
+	return tokens
+}
+
+func identifierWords(value string) []string {
+	var words []string
+	var current []rune
+	flush := func() {
+		if len(current) > 0 {
+			words = append(words, strings.ToLower(string(current)))
+			current = nil
+		}
+	}
+	var previous rune
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			flush()
+			previous = 0
+			continue
+		}
+		if r >= 'A' && r <= 'Z' && previous >= 'a' && previous <= 'z' {
+			flush()
+		}
+		current = append(current, r)
+		previous = r
+	}
+	flush()
+	return words
+}
+
+// joinCandidateContext carries only schema relationship identities and field
+// names, never RecordSet row/cell values, into the next model turn.
+func (c *SessionChat) joinCandidateContext(ctx context.Context, session ChatSession) string {
+	if c.joinApplication == nil {
+		return ""
+	}
+	const maxRecords, maxCandidates = 3, 20
+	seen := map[string]bool{}
+	lines := []string{"Available foreign-key JOIN candidates (use exact recordSetId and candidateId with apply_join_candidate; do not invent ON fields):"}
+	for i, records := len(session.Messages)-1, 0; i >= 0 && records < maxRecords; i-- {
+		id := session.Messages[i].RecordSetID
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		record, ok := session.RecordSets[id]
+		if !ok {
+			continue
+		}
+		records++
+		candidates, err := c.joinApplication.Candidates(ctx, record)
+		if err != nil {
+			continue
+		}
+		for _, candidate := range candidates[:min(len(candidates), maxCandidates)] {
+			sourceName := candidate.Source.Alias
+			if sourceName == "" {
+				sourceName = candidate.Source.Relation
+			}
+			pairs := make([]string, len(candidate.Fields))
+			for fieldIndex, pair := range candidate.Fields {
+				pairs[fieldIndex] = pair.SourceField + "=" + pair.TargetField
+			}
+			lines = append(lines, fmt.Sprintf("recordSetId=%s candidateId=%s source=%s(%s) target=%s direction=%s cardinality=%s fields=%s", record.ID, candidate.ID, sourceName, candidate.Source.Relation, candidate.Target.Relation, candidate.Direction, candidate.Cardinality, strings.Join(pairs, ",")))
+		}
+	}
+	if len(lines) == 1 {
+		return ""
+	}
+	return boundedContextText(strings.Join(lines, "\n"), 4000)
 }
 
 func friendlyAgentError(err error) string {

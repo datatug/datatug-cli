@@ -2,7 +2,9 @@ package commands
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
@@ -141,6 +144,40 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	sessions, err := chat.NewSessionChat(ctx, store, conversation, sourceURL, projectCatalog)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("restore chat session: %v", err), exitCodeUsage)
+	}
+	// FK evidence is source-scoped. Non-SQLite sources remain usable for Chat,
+	// but expose no inferred JOINs in this first discovery implementation.
+	joinSource, err := dbcopy.Parse(sourceURL)
+	if err != nil {
+		return "", Exit(fmt.Sprintf("resolve chat source: %v", err), exitCodeUsage)
+	}
+	if joinSource.Scheme == "sqlite" {
+		if err := dbcopy.CheckSourceFile(joinSource.Path); err != nil {
+			return "", Exit(fmt.Sprintf("load JOIN metadata: %v", err), exitCodeUsage)
+		}
+		readOnlyURL := (&url.URL{Scheme: "file", Path: joinSource.Path, RawQuery: "mode=ro"}).String()
+		metadataDB, openErr := sql.Open("sqlite", readOnlyURL)
+		if openErr != nil {
+			return "", Exit(fmt.Sprintf("open JOIN metadata: %v", openErr), exitCodeUsage)
+		}
+		defer func() { _ = metadataDB.Close() }()
+		refresh := func(ctx context.Context) (chat.ForeignKeySnapshot, error) {
+			return chat.LoadSQLiteForeignKeySnapshot(ctx, sourceURL, metadataDB)
+		}
+		snapshot, scanErr := refresh(ctx)
+		if scanErr != nil {
+			return "", Exit(fmt.Sprintf("load JOIN metadata: %v", scanErr), exitCodeUsage)
+		}
+		sessions.ConfigureJoinApplication(chat.ForeignKeyJoinApplication{
+			Source: sourceURL, Snapshot: snapshot, Refresh: refresh,
+			Executor: executor, Secure: !session.Unrestricted,
+			CanReadTarget: func(ctx context.Context, target chat.RelationInstance) error {
+				if target.Schema != "" && !strings.EqualFold(target.Schema, "main") {
+					return fmt.Errorf("JOIN target schema is not supported by this policy preflight")
+				}
+				return executor.CanReadWholeCollection(ctx, target.Relation)
+			},
+		})
 	}
 	ui, err := chat.NewSessionUI(ctx, sessions, options.model)
 	if err != nil {

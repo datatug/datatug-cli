@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -34,10 +35,42 @@ var (
 )
 
 type historyEntry struct {
-	role        string
-	text        string
-	grid        *gridState
-	recordSetID string
+	role               string
+	text               string
+	grid               *gridState
+	recordSetID        string
+	joinCandidates     []JoinCandidate
+	joinSourceIndex    int
+	joinCandidateIndex int
+	joinDetails        bool
+}
+
+type joinGroup struct {
+	source     RelationInstance
+	candidates []JoinCandidate
+}
+
+func (e *historyEntry) joinGroups() []joinGroup {
+	var groups []joinGroup
+	for _, candidate := range e.joinCandidates {
+		if len(groups) == 0 || groups[len(groups)-1].source.ID != candidate.Source.ID {
+			groups = append(groups, joinGroup{source: candidate.Source})
+		}
+		groups[len(groups)-1].candidates = append(groups[len(groups)-1].candidates, candidate)
+	}
+	return groups
+}
+
+func (e *historyEntry) selectedJoin() (JoinCandidate, bool) {
+	groups := e.joinGroups()
+	if e.joinSourceIndex < 0 || e.joinSourceIndex >= len(groups) {
+		return JoinCandidate{}, false
+	}
+	group := groups[e.joinSourceIndex]
+	if e.joinCandidateIndex < 0 || e.joinCandidateIndex >= len(group.candidates) {
+		return JoinCandidate{}, false
+	}
+	return group.candidates[e.joinCandidateIndex], true
 }
 
 type gridState struct {
@@ -388,6 +421,10 @@ type turnMessage struct {
 	err  error
 }
 
+type joinMessage struct {
+	err error
+}
+
 // UI is the Bubble Tea chat model: a scrollable history viewport, inline
 // bubble-table components, and a fixed bottom input.
 type UI struct {
@@ -404,6 +441,7 @@ type UI struct {
 	entries             []historyEntry
 	activeGrid          int
 	gridFocused         bool
+	joinFocused         bool
 	workspaceFocused    bool
 	workspaceTab        int
 	explorerIndex       int
@@ -553,6 +591,26 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		u.rebuildHistory(true)
 		return u, nil
+	case joinMessage:
+		u.busy = false
+		if msg.err != nil {
+			u.focusInput()
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: publicJoinError(msg.err)})
+			u.rebuildHistory(true)
+			return u, nil
+		}
+		if u.sessions != nil {
+			snapshot, err := u.sessions.Snapshot(u.ctx)
+			if err != nil {
+				u.focusInput()
+				u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Couldn't restore the joined result."})
+			} else {
+				u.loadSession(snapshot)
+				u.focusLatestGrid()
+			}
+		}
+		u.rebuildHistory(true)
+		return u, nil
 	case tea.MouseClickMsg:
 		if u.mouseCapture && msg.Button == tea.MouseLeft && msg.Y == u.historyHeight()+2 {
 			if ref, ok := u.attachmentCloseAt(msg.X - responsiveGutter(u.width)); ok {
@@ -615,6 +673,14 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			u.mouseCapture = !u.mouseCapture
 			return u, nil
 		case "esc":
+			if u.joinFocused {
+				u.joinFocused = false
+				if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
+					u.entries[u.activeGrid].grid.setFocused(true)
+				}
+				u.rebuildHistory(false)
+				return u, nil
+			}
 			if u.bookmarkMode != "" {
 				u.bookmarkMode = ""
 				u.bookmarkEditor.Blur()
@@ -721,6 +787,7 @@ func (u *UI) loadSession(session ChatSession) {
 	u.entries = nil
 	u.activeGrid = -1
 	u.gridFocused = false
+	u.joinFocused = false
 	u.workspaceFocused = false
 	u.dockGridFocused = false
 	u.bookmarkGridFocused = false
@@ -734,7 +801,26 @@ func (u *UI) loadSession(session ChatSession) {
 	for _, message := range session.Messages {
 		if message.Kind == "grid" {
 			record := session.RecordSets[message.RecordSetID]
-			u.entries = append(u.entries, historyEntry{grid: newGridState(NewGridModel(record.Result), record.Title, u.chatPaneWidth()), recordSetID: record.ID})
+			entry := historyEntry{grid: newGridState(NewGridModel(record.Result), record.Title, u.chatPaneWidth()), recordSetID: record.ID}
+			if u.sessions != nil {
+				if candidates, err := u.sessions.JoinCandidates(u.ctx, record.ID); err == nil {
+					entry.joinCandidates = candidates
+					sort.Slice(entry.joinCandidates, func(i, j int) bool {
+						left, right := entry.joinCandidates[i], entry.joinCandidates[j]
+						if left.Source.ID != right.Source.ID {
+							return left.Source.ID < right.Source.ID
+						}
+						if left.Target.Relation != right.Target.Relation {
+							return left.Target.Relation < right.Target.Relation
+						}
+						if left.ConstraintID != right.ConstraintID {
+							return left.ConstraintID < right.ConstraintID
+						}
+						return left.ID < right.ID
+					})
+				}
+			}
+			u.entries = append(u.entries, entry)
 			if note := formatLimitations(record.Result.Limitations); note != "" {
 				u.entries = append(u.entries, historyEntry{role: "Access", text: note})
 			}
@@ -816,7 +902,56 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	g := u.entries[u.activeGrid].grid
+	if u.joinFocused {
+		entry := &u.entries[u.activeGrid]
+		groups := entry.joinGroups()
+		if len(groups) == 0 {
+			u.joinFocused = false
+			g.setFocused(true)
+			return nil, true
+		}
+		switch msg.String() {
+		case "up", "k":
+			if entry.joinSourceIndex > 0 {
+				entry.joinSourceIndex--
+				entry.joinCandidateIndex = 0
+			}
+		case "down", "j":
+			if entry.joinSourceIndex+1 < len(groups) {
+				entry.joinSourceIndex++
+				entry.joinCandidateIndex = 0
+			}
+		case "left", "h":
+			if entry.joinCandidateIndex > 0 {
+				entry.joinCandidateIndex--
+			}
+		case "right", "l":
+			if entry.joinCandidateIndex+1 < len(groups[entry.joinSourceIndex].candidates) {
+				entry.joinCandidateIndex++
+			}
+		case "enter":
+			entry.joinDetails = !entry.joinDetails
+		case "space":
+			candidate, ok := entry.selectedJoin()
+			if !ok || u.sessions == nil {
+				return nil, true
+			}
+			u.busy = true
+			return u.applyJoin(entry.recordSetID, candidate.ID), true
+		case "tab":
+			u.focusInput()
+		default:
+			return nil, true
+		}
+		return nil, true
+	}
 	switch msg.String() {
+	case "g":
+		if len(u.entries[u.activeGrid].joinCandidates) > 0 {
+			u.joinFocused = true
+			g.setFocused(false)
+		}
+		return nil, true
 	case "left", "h":
 		if g.selectedColumn > 0 {
 			g.selectedColumn--
@@ -918,7 +1053,7 @@ func (u *UI) focusAdjacentGrid(direction int) bool {
 }
 
 func (u *UI) focusGrid(index int) bool {
-	if index < 0 || index >= len(u.entries) || u.entries[index].grid == nil || len(u.entries[index].grid.model.Rows) == 0 {
+	if index < 0 || index >= len(u.entries) || u.entries[index].grid == nil || (len(u.entries[index].grid.model.Rows) == 0 && len(u.entries[index].joinCandidates) == 0) {
 		return false
 	}
 	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
@@ -927,6 +1062,7 @@ func (u *UI) focusGrid(index int) bool {
 	u.activeGrid = index
 	u.rangeAnchor = -1
 	u.gridFocused = true
+	u.joinFocused = false
 	u.workspaceFocused = false
 	u.input.Blur()
 	u.entries[index].grid.setFocused(true)
@@ -938,6 +1074,7 @@ func (u *UI) focusInput() {
 		u.entries[u.activeGrid].grid.setFocused(false)
 	}
 	u.gridFocused = false
+	u.joinFocused = false
 	u.workspaceFocused = false
 	u.dockGridFocused = false
 	u.input.Focus()
@@ -948,6 +1085,7 @@ func (u *UI) focusWorkspace() {
 		u.entries[u.activeGrid].grid.setFocused(false)
 	}
 	u.gridFocused = false
+	u.joinFocused = false
 	u.workspaceFocused = true
 	u.input.Blur()
 }
@@ -956,6 +1094,13 @@ func (u *UI) ask(prompt string) tea.Cmd {
 	return func() tea.Msg {
 		turn, err := u.conversation.Ask(u.ctx, prompt)
 		return turnMessage{turn: turn, err: err}
+	}
+}
+
+func (u *UI) applyJoin(recordSetID string, candidateID JoinCandidateID) tea.Cmd {
+	return func() tea.Msg {
+		_, err := u.sessions.ApplyJoinCandidate(u.ctx, recordSetID, candidateID)
+		return joinMessage{err: err}
 	}
 }
 
@@ -1007,14 +1152,18 @@ func (u *UI) rebuildHistory(scrollToBottom bool) {
 			if entry.grid.width != innerWidth {
 				entry.grid.width = innerWidth
 				entry.grid.rebuild()
-				if u.gridFocused && u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid == entry.grid {
+				if u.gridFocused && !u.joinFocused && u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid == entry.grid {
 					entry.grid.setFocused(true)
 				}
 			}
 			if u.gridFocused && entryIndex == u.activeGrid {
 				activeBlock = len(blocks)
 			}
-			blocks = append(blocks, entry.grid.view())
+			block := entry.grid.view()
+			if len(entry.joinCandidates) > 0 {
+				block += "\n" + joinAreaView(&entry, u.joinFocused && u.activeGrid == entryIndex, innerWidth)
+			}
+			blocks = append(blocks, block)
 			continue
 		}
 		label := agentStyle.Render(sanitizeTerminalText(entry.role) + ":")
@@ -1039,6 +1188,67 @@ func (u *UI) rebuildHistory(scrollToBottom bool) {
 	}
 }
 
+func joinAreaView(entry *historyEntry, focused bool, width int) string {
+	groups := entry.joinGroups()
+	if len(groups) == 0 {
+		return ""
+	}
+	lines := []string{statusStyle.Render("  You can JOIN  [g]")}
+	for sourceIndex, group := range groups {
+		source := sanitizeTerminalText(group.source.Relation)
+		if group.source.Alias != "" && !strings.EqualFold(group.source.Alias, group.source.Relation) {
+			source = sanitizeTerminalText(group.source.Alias) + " (" + source + ")"
+		}
+		prefix := "  " + source + ": "
+		counts := map[string]int{}
+		for _, candidate := range group.candidates {
+			counts[strings.ToLower(candidate.Target.Relation)]++
+		}
+		labels := make([]string, len(group.candidates))
+		for index, candidate := range group.candidates {
+			label := sanitizeTerminalText(candidate.Target.Relation)
+			if counts[strings.ToLower(candidate.Target.Relation)] > 1 {
+				fields := make([]string, len(candidate.Fields))
+				for i, pair := range candidate.Fields {
+					fields[i] = sanitizeTerminalText(pair.SourceField)
+				}
+				label += " (" + strings.Join(fields, ", ") + ")"
+			}
+			if candidate.Cardinality == "one-to-many" {
+				label += " →*"
+			} else {
+				label += " →1"
+			}
+			labels[index] = label
+		}
+		plain := prefix + strings.Join(labels, "  ·  ")
+		if focused && sourceIndex == entry.joinSourceIndex {
+			selected := min(entry.joinCandidateIndex, len(labels)-1)
+			selectedLabel := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Render(labels[selected])
+			parts := append([]string(nil), labels...)
+			parts[selected] = selectedLabel
+			highlighted := activeTitleStyle.Render(prefix) + strings.Join(parts, "  ·  ")
+			if lipgloss.Width(highlighted) <= width {
+				lines = append(lines, highlighted)
+			} else {
+				lines = append(lines, ansi.Truncate(activeTitleStyle.Render(prefix)+selectedLabel+statusStyle.Render(fmt.Sprintf("  (%d/%d)", selected+1, len(labels))), width, "…"))
+			}
+		} else {
+			lines = append(lines, statusStyle.Render(ansi.Truncate(plain, width, "…")))
+		}
+	}
+	if focused && entry.joinDetails {
+		if candidate, ok := entry.selectedJoin(); ok {
+			lines = append(lines, statusStyle.Render("  Foreign key • "+candidate.Cardinality))
+			for _, pair := range candidate.Fields {
+				line := "  " + candidate.Source.Relation + "." + pair.SourceField + " → " + candidate.Target.Relation + "." + pair.TargetField
+				lines = append(lines, statusStyle.Render(ansi.Truncate(sanitizeTerminalText(line), width, "…")))
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (u *UI) ensureBlockVisible(blocks []string, blockIndex int) {
 	width := max(1, u.history.Width())
 	start := 0
@@ -1048,6 +1258,12 @@ func (u *UI) ensureBlockVisible(blocks []string, blockIndex int) {
 	blockHeight := renderedLineCount(blocks[blockIndex], width)
 	top := u.history.YOffset()
 	height := max(1, u.history.Height())
+	if u.joinFocused {
+		// The JOIN controls sit below the grid. With a tall grid, anchoring
+		// the block's top would make the focused controls invisible.
+		u.history.SetYOffset(max(0, start+blockHeight-height))
+		return
+	}
 	target := start
 	if blockIndex > 0 {
 		previousHeight := renderedLineCount(blocks[blockIndex-1], width)
@@ -1163,10 +1379,13 @@ func (u *UI) statusLines() []string {
 		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.sessionTitle), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
 	}
 	if u.gridFocused {
-		segments = []string{"Shift+↑↓ to navigate", "↑↓ rows", "←→ columns", "Space row", "c cell", "r range", "a attach", "d dock", "b bookmark", "s sort", "Enter details", "Esc input"}
+		segments = []string{"Shift+↑↓ to navigate", "↑↓ rows", "←→ columns", "g joins", "Space row", "c cell", "r range", "a attach", "d dock", "b bookmark", "s sort", "Enter details", "Esc input"}
 		if u.sessions != nil {
 			segments = append([]string{"session: " + sanitizeTerminalText(u.sessionTitle)}, segments...)
 		}
+	}
+	if u.joinFocused {
+		segments = []string{"JOIN candidates", "↑↓ source", "←→ relationship", "Space add JOIN", "Enter details", "Esc grid", "Tab input"}
 	}
 	if u.workspaceFocused {
 		segments = []string{"F6/Esc input", "←→ tabs", "↑↓ navigate", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", mouseHint}

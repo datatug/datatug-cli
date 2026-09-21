@@ -1010,16 +1010,14 @@ func (u *UI) syncRecordSetSort(recordSetID string, sorted GridModel) {
 		if u.entries[i].recordSetID != recordSetID || u.entries[i].grid == nil {
 			continue
 		}
-		u.entries[i].grid.model = sorted
-		u.entries[i].grid.rebuild()
+		u.entries[i].grid.replaceModel(sorted)
 	}
 	for _, dock := range u.snapshot.Workspace.Docks {
 		if dock.Reference.Kind != "recordset" || dock.Reference.ObjectID != recordSetID {
 			continue
 		}
 		if grid := u.dockGrids[dock.ID]; grid != nil {
-			grid.model = sorted
-			grid.rebuild()
+			grid.replaceModel(sorted)
 		}
 	}
 	u.rebuildHistory(false)

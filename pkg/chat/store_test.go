@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -303,6 +304,24 @@ func TestResultCodecDerivesStatisticsForManualResultsWhileEncodingRows(t *testin
 	}
 	if decoded.Statistics.RowCount != 1 || decoded.Statistics.Columns[0].Types.Date != 1 || len(decoded.Statistics.DateNumericSums) != 1 {
 		t.Fatalf("manual-result statistics = %+v", decoded.Statistics)
+	}
+}
+
+func TestResultCodecMarksOverflowedDateNumericSumsIncomplete(t *testing.T) {
+	result := secureread.Result{Columns: []string{"Timestamp", "Total"}, Rows: []secureread.Row{
+		{Data: map[string]any{"Timestamp": time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC), "Total": math.MaxFloat64}},
+		{Data: map[string]any{"Timestamp": time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC), "Total": math.MaxFloat64}},
+	}}
+	payload, err := encodeResult(result)
+	if err != nil {
+		t.Fatalf("encodeResult: %v", err)
+	}
+	decoded, err := decodeResult(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Statistics.DateNumericSums) != 1 || !decoded.Statistics.DateNumericSums[0].Incomplete {
+		t.Fatalf("overflow statistics = %+v", decoded.Statistics.DateNumericSums)
 	}
 }
 

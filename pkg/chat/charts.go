@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -180,11 +181,23 @@ func sumLineCandidate(stats secureread.RecordSetStatistics, sums secureread.Date
 		}
 	}
 	points, bucket := bucketDateSums(sums.Buckets)
+	if !finiteChartPoints(points) {
+		return ChartCandidate{}, false
+	}
 	return ChartCandidate{Score: 100, Reason: "ordered date and numeric measure", Spec: ChartSpec{
 		Kind: ChartLine, Title: fmt.Sprintf("%s over %s", sums.NumericColumn, sums.DateColumn), Dimension: sums.DateColumn,
 		Measure: sums.NumericColumn, Aggregation: "sum", Ordering: "date asc", SourceColumns: []string{sums.DateColumn, sums.NumericColumn},
 		Bucket: bucket, Points: points,
 	}}, true
+}
+
+func finiteChartPoints(points []ChartPoint) bool {
+	for _, point := range points {
+		if math.IsNaN(point.Value) || math.IsInf(point.Value, 0) {
+			return false
+		}
+	}
+	return true
 }
 
 func dateBucketSize(count int, first, last string) string {
@@ -195,29 +208,63 @@ func dateBucketSize(count int, first, last string) string {
 }
 
 func bucketDateCounts(buckets []secureread.DateBucket) ([]ChartPoint, string) {
-	mode := dateBucketSize(len(buckets), buckets[0].Bucket, buckets[len(buckets)-1].Bucket)
+	mode := chartDateBucketMode(len(buckets), buckets[0].Bucket, buckets[len(buckets)-1].Bucket)
 	values := map[string]float64{}
 	for _, bucket := range buckets {
-		label := bucket.Bucket
-		if mode == "month" && len(label) >= 7 {
-			label = label[:7]
-		}
+		label := chartDateBucketLabel(bucket.Bucket, mode)
 		values[label] += float64(bucket.Count)
 	}
 	return orderedDatePoints(values), mode
 }
 
 func bucketDateSums(buckets []secureread.DateNumericBucket) ([]ChartPoint, string) {
-	mode := dateBucketSize(len(buckets), buckets[0].Bucket, buckets[len(buckets)-1].Bucket)
+	mode := chartDateBucketMode(len(buckets), buckets[0].Bucket, buckets[len(buckets)-1].Bucket)
 	values := map[string]float64{}
 	for _, bucket := range buckets {
-		label := bucket.Bucket
-		if mode == "month" && len(label) >= 7 {
-			label = label[:7]
-		}
+		label := chartDateBucketLabel(bucket.Bucket, mode)
 		values[label] += bucket.Sum
 	}
 	return orderedDatePoints(values), mode
+}
+
+func chartDateBucketMode(count int, first, last string) string {
+	if containsDatetimeBucket(first) || containsDatetimeBucket(last) {
+		firstDay, lastDay := dateBucketDay(first), dateBucketDay(last)
+		if firstDay == lastDay {
+			// A Timestamp line must not collapse distinct same-day observations
+			// merely because there are more than sixty of them.
+			return "datetime"
+		}
+		if len(firstDay) >= 7 && len(lastDay) >= 7 && firstDay[:7] == lastDay[:7] {
+			// Keep same-month multi-day timestamps as a daily line even when a
+			// busy day pushes the raw timestamp count above the date threshold.
+			return "day"
+		}
+	}
+	return dateBucketSize(count, first, last)
+}
+
+func chartDateBucketLabel(bucket, mode string) string {
+	switch mode {
+	case "month":
+		if len(bucket) >= 7 {
+			return bucket[:7]
+		}
+	case "day":
+		return dateBucketDay(bucket)
+	}
+	return bucket
+}
+
+func dateBucketDay(bucket string) string {
+	if len(bucket) >= len("2006-01-02") {
+		return bucket[:len("2006-01-02")]
+	}
+	return bucket
+}
+
+func containsDatetimeBucket(bucket string) bool {
+	return len(bucket) > len("2006-01-02") && strings.Contains(bucket, "T")
 }
 
 func orderedDatePoints(values map[string]float64) []ChartPoint {

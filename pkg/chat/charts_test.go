@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"math"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -92,6 +93,83 @@ func TestIncompleteFrequenciesNeverClaimExactTopTen(t *testing.T) {
 	stats := secureread.RecordSetStatistics{RowCount: 5000, Columns: []secureread.ColumnStatistics{{Name: "Country", NonNullCount: 5000, Cardinality: 4096, CardinalityIncomplete: true, FrequenciesIncomplete: true, Frequencies: []secureread.ValueFrequency{{Label: "USA", Count: 10}}}}}
 	if got := InferChartCandidates(stats); len(got) != 0 {
 		t.Fatalf("incomplete data generated false exact chart: %+v", got)
+	}
+}
+
+func TestInferChartCandidatesKeepsSameDayDatetimeCountAndSumLines(t *testing.T) {
+	stats := secureread.RecordSetStatistics{RowCount: 2, Columns: []secureread.ColumnStatistics{{
+		Name: "Timestamp", NonNullCount: 2, Cardinality: 2, Types: secureread.TypeObservations{Datetime: 2},
+		DateBuckets: []secureread.DateBucket{{Bucket: "2026-09-21T10:00:00Z", Count: 1}, {Bucket: "2026-09-21T11:00:00Z", Count: 1}},
+	}}, DateNumericSums: []secureread.DateNumericSum{{
+		DateColumn: "Timestamp", NumericColumn: "Total", Buckets: []secureread.DateNumericBucket{{Bucket: "2026-09-21T10:00:00Z", Sum: 2}, {Bucket: "2026-09-21T11:00:00Z", Sum: 3}},
+	}}}
+	candidates := InferChartCandidates(stats)
+	var countLine, sumLine bool
+	for _, candidate := range candidates {
+		if candidate.Spec.Kind != ChartLine || candidate.Spec.Dimension != "Timestamp" || candidate.Spec.Bucket != "datetime" || len(candidate.Spec.Points) != 2 {
+			continue
+		}
+		countLine = countLine || candidate.Spec.Aggregation == "count"
+		sumLine = sumLine || candidate.Spec.Aggregation == "sum"
+		if rendered := renderChart(candidate.Spec, 48, 12); strings.Contains(rendered, "could not") {
+			t.Fatalf("datetime line failed to render: %q", rendered)
+		}
+	}
+	if !countLine || !sumLine {
+		t.Fatalf("same-day datetime candidates = %+v", candidates)
+	}
+}
+
+func TestDatetimeChartBucketsKeepSameDayPrecisionAndCrossDayDateAggregation(t *testing.T) {
+	sameDay := make([]secureread.DateBucket, 61)
+	for i := range sameDay {
+		stamp := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC).Add(time.Duration(i) * time.Minute).Format(time.RFC3339)
+		sameDay[i] = secureread.DateBucket{Bucket: stamp, Count: 1}
+	}
+	points, mode := bucketDateCounts(sameDay)
+	if mode != "datetime" || len(points) != 61 || points[0].Label != "2026-09-21T10:00:00Z" {
+		t.Fatalf("same-day datetime buckets = %q %+v", mode, points)
+	}
+	sameMonthCrossDay := make([]secureread.DateBucket, 61)
+	for i := range sameMonthCrossDay {
+		day, minute := 21, i
+		if i >= 31 {
+			day, minute = 22, i-31
+		}
+		stamp := time.Date(2026, 9, day, 10, 0, 0, 0, time.UTC).Add(time.Duration(minute) * time.Minute).Format(time.RFC3339)
+		sameMonthCrossDay[i] = secureread.DateBucket{Bucket: stamp, Count: 1}
+	}
+	points, mode = bucketDateCounts(sameMonthCrossDay)
+	if mode != "day" || !reflect.DeepEqual(points, []ChartPoint{{Label: "2026-09-21", Value: 31}, {Label: "2026-09-22", Value: 30}}) {
+		t.Fatalf("same-month cross-day buckets = %q %+v", mode, points)
+	}
+	crossDay := []secureread.DateBucket{{Bucket: "2026-09-21T10:00:00Z", Count: 1}, {Bucket: "2026-09-22T11:00:00Z", Count: 2}}
+	points, mode = bucketDateCounts(crossDay)
+	if mode != "day" || !reflect.DeepEqual(points, []ChartPoint{{Label: "2026-09-21", Value: 1}, {Label: "2026-09-22", Value: 2}}) {
+		t.Fatalf("cross-day datetime buckets = %q %+v", mode, points)
+	}
+	sumPoints, sumMode := bucketDateSums([]secureread.DateNumericBucket{{Bucket: "2026-09-21T10:00:00Z", Sum: 2}, {Bucket: "2026-09-22T11:00:00Z", Sum: 3}})
+	if sumMode != "day" || !reflect.DeepEqual(sumPoints, []ChartPoint{{Label: "2026-09-21", Value: 2}, {Label: "2026-09-22", Value: 3}}) {
+		t.Fatalf("cross-day datetime sums = %q %+v", sumMode, sumPoints)
+	}
+}
+
+func TestInferChartCandidatesRejectsOverflowedGroupedDateSums(t *testing.T) {
+	buckets := make([]secureread.DateNumericBucket, 61)
+	for i := range buckets {
+		month, day := 9, i+1
+		if i >= 30 {
+			month, day = 10, i-29
+		}
+		buckets[i] = secureread.DateNumericBucket{Bucket: dateLabel(2026, month, day), Sum: math.MaxFloat64}
+	}
+	stats := secureread.RecordSetStatistics{RowCount: 61, DateNumericSums: []secureread.DateNumericSum{{
+		DateColumn: "InvoiceDate", NumericColumn: "Total", Buckets: buckets,
+	}}}
+	for _, candidate := range InferChartCandidates(stats) {
+		if candidate.Spec.Aggregation == "sum" {
+			t.Fatalf("overflowed grouped sum generated a chart: %+v", candidate)
+		}
 	}
 }
 

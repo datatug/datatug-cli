@@ -49,9 +49,12 @@ func renderChart(spec ChartSpec, width, height int) string {
 		for _, point := range spec.Points {
 			var stamp time.Time
 			var err error
-			if spec.Bucket == "month" {
+			switch spec.Bucket {
+			case "month":
 				stamp, err = time.ParseInLocation("2006-01", point.Label, time.UTC)
-			} else {
+			case "datetime":
+				stamp, err = time.Parse(time.RFC3339, point.Label)
+			default:
 				stamp, err = time.ParseInLocation("2006-01-02", point.Label, time.UTC)
 			}
 			if err != nil {

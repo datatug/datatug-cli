@@ -157,27 +157,56 @@ func observedFromValue(value any) observedValue {
 	}
 	switch v := value.(type) {
 	case time.Time:
-		return observedValue{kind: ValueKindDatetime, label: v.UTC().Format(time.RFC3339Nano), date: v.UTC().Format("2006-01-02")}
+		stamp := v.UTC().Format(time.RFC3339Nano)
+		return observedValue{kind: ValueKindDatetime, label: stamp, date: stamp}
 	case string:
 		if date, err := time.Parse("2006-01-02", v); err == nil && date.Format("2006-01-02") == v {
 			return observedValue{kind: ValueKindDate, label: v, date: v}
 		}
 		if datetime, err := time.Parse(time.RFC3339, v); err == nil {
-			return observedValue{kind: ValueKindDatetime, label: v, date: datetime.UTC().Format("2006-01-02")}
+			return observedValue{kind: ValueKindDatetime, label: v, date: datetime.UTC().Format(time.RFC3339Nano)}
 		}
 		return observedValue{kind: ValueKindString, label: v}
 	case bool:
 		return observedValue{kind: ValueKindBoolean, label: strconv.FormatBool(v)}
+	case int:
+		return observedNumber(strconv.FormatInt(int64(v), 10), float64(v))
+	case int8:
+		return observedNumber(strconv.FormatInt(int64(v), 10), float64(v))
+	case int16:
+		return observedNumber(strconv.FormatInt(int64(v), 10), float64(v))
+	case int32:
+		return observedNumber(strconv.FormatInt(int64(v), 10), float64(v))
+	case int64:
+		return observedNumber(strconv.FormatInt(v, 10), float64(v))
+	case uint:
+		return observedNumber(strconv.FormatUint(uint64(v), 10), float64(v))
+	case uint8:
+		return observedNumber(strconv.FormatUint(uint64(v), 10), float64(v))
+	case uint16:
+		return observedNumber(strconv.FormatUint(uint64(v), 10), float64(v))
+	case uint32:
+		return observedNumber(strconv.FormatUint(uint64(v), 10), float64(v))
+	case uint64:
+		return observedNumber(strconv.FormatUint(v, 10), float64(v))
+	case float32:
+		return observedNumber(strconv.FormatFloat(float64(v), 'g', -1, 64), float64(v))
+	case float64:
+		return observedNumber(strconv.FormatFloat(v, 'g', -1, 64), v)
 	case json.Number:
 		if n, err := v.Float64(); err == nil && !math.IsNaN(n) && !math.IsInf(n, 0) {
 			return observedValue{kind: ValueKindNumber, label: v.String(), numeric: n, isNum: true}
 		}
 		return observedValue{kind: ValueKindOther, label: v.String()}
 	}
-	if n, ok := numberValue(value); ok {
-		return observedValue{kind: ValueKindNumber, label: strconv.FormatFloat(n, 'g', -1, 64), numeric: n, isNum: true}
-	}
 	return observedValue{kind: ValueKindOther, label: fmt.Sprint(value)}
+}
+
+func observedNumber(label string, value float64) observedValue {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return observedValue{kind: ValueKindOther, label: label}
+	}
+	return observedValue{kind: ValueKindNumber, label: label, numeric: value, isNum: true}
 }
 
 func observedFromTypedValue(value apicontract.TypedValue) observedValue {
@@ -203,43 +232,10 @@ func observedFromTypedValue(value apicontract.TypedValue) observedValue {
 		if err != nil {
 			return observedValue{kind: ValueKindDatetime, label: value.Str}
 		}
-		return observedValue{kind: ValueKindDatetime, label: value.Str, date: parsed.UTC().Format("2006-01-02")}
+		return observedValue{kind: ValueKindDatetime, label: value.Str, date: parsed.UTC().Format(time.RFC3339Nano)}
 	default:
 		return observedValue{kind: ValueKindOther}
 	}
-}
-
-func numberValue(value any) (float64, bool) {
-	var n float64
-	switch v := value.(type) {
-	case int:
-		n = float64(v)
-	case int8:
-		n = float64(v)
-	case int16:
-		n = float64(v)
-	case int32:
-		n = float64(v)
-	case int64:
-		n = float64(v)
-	case uint:
-		n = float64(v)
-	case uint8:
-		n = float64(v)
-	case uint16:
-		n = float64(v)
-	case uint32:
-		n = float64(v)
-	case uint64:
-		n = float64(v)
-	case float32:
-		n = float64(v)
-	case float64:
-		n = v
-	default:
-		return 0, false
-	}
-	return n, !math.IsNaN(n) && !math.IsInf(n, 0)
 }
 
 type columnAccumulator struct {
@@ -364,8 +360,13 @@ func (a *statisticsAccumulator) addPair(dateColumn, numericColumn, bucket string
 		pair.incomplete = true
 		return
 	}
+	next := entry.Sum + value
+	if math.IsNaN(next) || math.IsInf(next, 0) {
+		pair.incomplete = true
+		return
+	}
 	entry.Bucket = bucket
-	entry.Sum += value
+	entry.Sum = next
 	entry.Count++
 	pair.buckets[bucket] = entry
 }

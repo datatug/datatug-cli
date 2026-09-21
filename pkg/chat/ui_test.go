@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -373,7 +374,7 @@ func TestUIViewEnablesMouseWheelHistoryScrolling(t *testing.T) {
 
 func TestUIComposerSpacerShowsScrollDownCueAndClickJumpsToLatest(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
-	u.width = 80
+	u.width = 70
 	u.height = 12
 	for i := 0; i < 20; i++ {
 		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "history line"})
@@ -731,8 +732,227 @@ func TestUIStatusHintsFollowFocus(t *testing.T) {
 	}
 	u.rebuildHistory(false)
 	gridView := ansi.Strip(u.View().Content)
-	if !strings.Contains(gridView, "Shift+↑↓ to navigate") || !strings.Contains(gridView, "Enter details") || !strings.Contains(gridView, "s sort") {
+	if !strings.Contains(gridView, "1 Table") || !strings.Contains(gridView, "2 Charts") || !strings.Contains(gridView, "3 Current row") || !strings.Contains(gridView, "↑↓ rows") {
 		t.Fatalf("grid status is not contextual: %s", gridView)
+	}
+}
+
+func TestRecordsetViewsRouteFocusAcrossSplitAndNarrowLayouts(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width = 180
+	u.chatPanePercent = 75
+	u.appendTurn(Turn{Queries: []QueryResult{{Title: "Customers", Result: secureread.Result{
+		Columns: []string{"ID", "Country"},
+		Rows:    []secureread.Row{{Data: map[string]any{"ID": 1, "Country": "Ireland"}}},
+	}}}})
+	if !u.focusLatestGrid() {
+		t.Fatal("expected grid focus")
+	}
+	g := u.entries[u.activeGrid].grid
+	g.charts = []ChartCandidate{
+		{Spec: ChartSpec{Kind: ChartBar, Title: "By country", Points: []ChartPoint{{Label: "Ireland", Value: 1}}}},
+		{Spec: ChartSpec{Kind: ChartBar, Title: "By ID", Points: []ChartPoint{{Label: "1", Value: 1}}}},
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Text: "2"})
+	if g.activeView != recordsetCharts || !g.recordsetLayout(u.chatPaneWidth()).split || g.secondaryFocus {
+		t.Fatalf("wide chart state = view:%v layout:%+v secondary:%v", g.activeView, g.recordsetLayout(u.chatPaneWidth()), g.secondaryFocus)
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if !g.secondaryFocus || g.chartIndex != 1 {
+		t.Fatalf("chart focus/index = %v/%d, want true/1", g.secondaryFocus, g.chartIndex)
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Text: "1"})
+	if g.activeView != recordsetTable || g.secondaryFocus {
+		t.Fatalf("table return = view:%v secondary:%v", g.activeView, g.secondaryFocus)
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Text: "3"})
+	if g.activeView != recordsetCurrentRow {
+		t.Fatalf("current-row view = %v", g.activeView)
+	}
+	u.width = 70
+	u.rebuildHistory(false)
+	if g.recordsetLayout(u.chatPaneWidth()).split || !g.secondaryFocus {
+		t.Fatalf("narrow inspector layout/focus = %+v/%v", g.recordsetLayout(u.chatPaneWidth()), g.secondaryFocus)
+	}
+	if view := ansi.Strip(u.View().Content); !strings.Contains(view, "● Current row") || !strings.Contains(view, "Ireland") {
+		t.Fatalf("narrow inspector did not render current row:\n%s", view)
+	}
+}
+
+func TestRecordsetTabReturnsToComposerOutsideWideSplit(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}}}})
+	if !u.focusLatestGrid() {
+		t.Fatal("expected grid focus")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if u.gridFocused || !u.input.Focused() {
+		t.Fatal("Tab in Table did not return to the composer")
+	}
+	if !u.focusLatestGrid() {
+		t.Fatal("expected grid refocus")
+	}
+	u.width = 70
+	_, _ = u.Update(tea.KeyPressMsg{Text: "3"})
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if u.gridFocused || !u.input.Focused() {
+		t.Fatal("Tab in narrow secondary view did not return to the composer")
+	}
+}
+
+func TestEscapeClearsSecondaryPaneHighlight(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width = 70
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
+		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
+	}}}})
+	if !u.focusLatestGrid() {
+		t.Fatal("expected grid focus")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Text: "3"})
+	u.rebuildHistory(false)
+	if view := ansi.Strip(u.View().Content); !strings.Contains(view, "● Current row") {
+		t.Fatalf("focused secondary pane lacks active marker:\n%s", view)
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if u.gridFocused || !u.input.Focused() {
+		t.Fatal("Escape did not return focus to composer")
+	}
+	if view := ansi.Strip(u.View().Content); strings.Contains(view, "● Current row") {
+		t.Fatalf("Escape left secondary pane highlighted:\n%s", view)
+	}
+}
+
+func TestRecordsetHeaderRetainsViewControlsForLongTitles(t *testing.T) {
+	g := newGridState(GridModel{}, strings.Repeat("very long generated title ", 8), 70)
+	header := ansi.Strip(g.recordsetHeader(70))
+	for _, want := range []string{"1 Table", "2 Charts", "3 Current row"} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("long-title header hid %q: %q", want, header)
+		}
+	}
+	if got := ansi.StringWidth(header); got != 70 {
+		t.Fatalf("header width = %d, want 70: %q", got, header)
+	}
+}
+
+func TestRecordsetHeaderRetainsAllControlsAtTwentyTwoCells(t *testing.T) {
+	g := newGridState(GridModel{}, strings.Repeat("generated title ", 8), 22)
+	header := ansi.Strip(g.recordsetHeader(22))
+	for _, want := range []string{"1 Tab", "2 Chart", "3 Row"} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("22-cell header hid %q: %q", want, header)
+		}
+	}
+	if got := ansi.StringWidth(header); got != 22 {
+		t.Fatalf("header width = %d, want 22: %q", got, header)
+	}
+}
+
+func TestCurrentRowInspectorScrollsAndResetsForAnotherSourceRow(t *testing.T) {
+	result := secureread.Result{}
+	for index := 0; index < 18; index++ {
+		name := fmt.Sprintf("Field%02d", index)
+		result.Columns = append(result.Columns, name)
+	}
+	result.Rows = []secureread.Row{
+		{Data: map[string]any{}},
+		{Data: map[string]any{}},
+	}
+	for index, name := range result.Columns {
+		result.Rows[0].Data[name] = fmt.Sprintf("first value %02d with enough words to wrap", index)
+		result.Rows[1].Data[name] = fmt.Sprintf("second value %02d", index)
+	}
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width = 180
+	u.chatPanePercent = 75
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: result}}})
+	if !u.focusLatestGrid() {
+		t.Fatal("expected grid focus")
+	}
+	g := u.entries[u.activeGrid].grid
+	_, _ = u.Update(tea.KeyPressMsg{Text: "3"})
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	u.rebuildHistory(false)
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if g.inspector.YOffset() == 0 {
+		t.Fatal("inspector did not scroll")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	u.rebuildHistory(false)
+	if got := g.inspector.YOffset(); got != 0 {
+		t.Fatalf("inspector offset after row change = %d, want 0", got)
+	}
+}
+
+func TestEmptyRecordsetCanBeFocusedAndShowsSecondaryEmptyStates(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.appendTurn(Turn{Queries: []QueryResult{{Title: "Empty", Result: secureread.Result{Columns: []string{"ID"}}}}})
+	if !u.focusLatestGrid() {
+		t.Fatal("empty grid was not focusable")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Text: "2"})
+	u.rebuildHistory(false)
+	if view := ansi.Strip(u.View().Content); !strings.Contains(view, "No chart candidates") {
+		t.Fatalf("empty charts state missing:\n%s", view)
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Text: "3"})
+	u.rebuildHistory(false)
+	if view := ansi.Strip(u.View().Content); !strings.Contains(view, "No current row") {
+		t.Fatalf("empty current-row state missing:\n%s", view)
+	}
+}
+
+func TestGridSortRetainsSelectedSourceRowForInspector(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.appendTurn(Turn{Queries: []QueryResult{{RecordSetID: "recordset", Result: secureread.Result{
+		Columns: []string{"Name"},
+		Rows: []secureread.Row{
+			{Data: map[string]any{"Name": "Zulu"}},
+			{Data: map[string]any{"Name": "Alpha"}},
+			{Data: map[string]any{"Name": "Zulu"}},
+		},
+	}}}})
+	if !u.focusLatestGrid() {
+		t.Fatal("expected grid focus")
+	}
+	g := u.entries[u.activeGrid].grid
+	if before := g.selectedSourceRow(); before != 0 {
+		t.Fatalf("source row before sort = %d, want 0", before)
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Text: "s"})
+	if got := g.selectedSourceRow(); got != 0 || g.rowIndex != 1 || g.model.SourceRows[2] != 2 {
+		t.Fatalf("sorted selection = source:%d index:%d, want source:0 index:1", got, g.rowIndex)
+	}
+}
+
+func TestSessionHelpDocumentsRecordsetAndExistingGridControls(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.runSessionCommand("/help")
+	if len(u.entries) == 0 {
+		t.Fatal("help did not add a response")
+	}
+	help := u.entries[len(u.entries)-1].text
+	for _, want := range []string{
+		"1 Table", "2 Charts", "3 Current row", "Tab panes", "Shift+↑↓ grids",
+		"g JOINs", "Space row", "c cell", "r range", "a attach", "d dock", "b bookmark", "s sort", "Enter details", "Esc composer",
+		"F2", "F6", "Ctrl+C",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("help missing %q: %s", want, help)
+		}
 	}
 }
 

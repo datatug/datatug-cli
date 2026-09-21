@@ -872,11 +872,12 @@ func (s *SessionStore) AppendTurn(ctx context.Context, sessionID, originID, sour
 func stamp(t time.Time) string { return t.Format(time.RFC3339Nano) }
 
 type storedResult struct {
-	Columns     []string                `json:"columns"`
-	Rows        []storedRow             `json:"rows"`
-	Limitations []secureread.Limitation `json:"limitations,omitempty"`
-	Collection  string                  `json:"collection,omitempty"`
-	Provenance  *dalgo2http.Provenance  `json:"provenance,omitempty"`
+	Columns     []string                        `json:"columns"`
+	Rows        []storedRow                     `json:"rows"`
+	Statistics  *secureread.RecordSetStatistics `json:"statistics,omitempty"`
+	Limitations []secureread.Limitation         `json:"limitations,omitempty"`
+	Collection  string                          `json:"collection,omitempty"`
+	Provenance  *dalgo2http.Provenance          `json:"provenance,omitempty"`
 }
 type storedRow struct {
 	Key  string                 `json:"key,omitempty"`
@@ -888,7 +889,12 @@ type storedValue struct {
 }
 
 func encodeResult(result secureread.Result) ([]byte, error) {
-	stored := storedResult{Columns: result.Columns, Limitations: result.Limitations, Collection: result.Collection, Provenance: result.Provenance, Rows: make([]storedRow, len(result.Rows))}
+	statistics := result.Statistics
+	var statisticsCollector *secureread.StatisticsCollector
+	if statistics.RowCount != len(result.Rows) || (len(statistics.Columns) == 0 && len(result.Columns) > 0) {
+		statisticsCollector = secureread.NewStatisticsCollector()
+	}
+	stored := storedResult{Columns: result.Columns, Statistics: &statistics, Limitations: result.Limitations, Collection: result.Collection, Provenance: result.Provenance, Rows: make([]storedRow, len(result.Rows))}
 	for i, row := range result.Rows {
 		stored.Rows[i] = storedRow{Key: row.Key, Data: make(map[string]storedValue, len(row.Data))}
 		for name, value := range row.Data {
@@ -898,6 +904,13 @@ func encodeResult(result secureread.Result) ([]byte, error) {
 			}
 			stored.Rows[i].Data[name] = encoded
 		}
+		if statisticsCollector != nil {
+			statisticsCollector.AddRow(row)
+		}
+	}
+	if statisticsCollector != nil {
+		statistics = statisticsCollector.Finalize(result.Columns)
+		stored.Statistics = &statistics
 	}
 	return json.Marshal(stored)
 }
@@ -940,6 +953,10 @@ func decodeResult(payload []byte) (secureread.Result, error) {
 		return secureread.Result{}, errors.New("missing rows")
 	}
 	result := secureread.Result{Columns: stored.Columns, Limitations: stored.Limitations, Collection: stored.Collection, Provenance: stored.Provenance, Rows: make([]secureread.Row, len(stored.Rows))}
+	var legacyStatistics *secureread.StatisticsCollector
+	if stored.Statistics == nil {
+		legacyStatistics = secureread.NewStatisticsCollector()
+	}
 	for i, row := range stored.Rows {
 		result.Rows[i] = secureread.Row{Key: row.Key, Data: make(map[string]any, len(row.Data))}
 		for name, value := range row.Data {
@@ -949,6 +966,16 @@ func decodeResult(payload []byte) (secureread.Result, error) {
 			}
 			result.Rows[i].Data[name] = decoded
 		}
+		if legacyStatistics != nil {
+			legacyStatistics.AddRow(result.Rows[i])
+		}
+	}
+	if stored.Statistics != nil {
+		result.Statistics = *stored.Statistics
+	} else {
+		// Legacy RecordSet snapshots update analysis while decoding their
+		// already-required cells, never by rerunning a query or a second scan.
+		result.Statistics = legacyStatistics.Finalize(result.Columns)
 	}
 	return result, nil
 }

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -246,6 +247,81 @@ func TestRecordSetSnapshotRestoresTypedRowsWithoutQueryRerun(t *testing.T) {
 	stillOld, err := reloaded.Load(ctx, session.ID)
 	if err != nil || stillOld.RecordSets[rs.ID].Result.Rows[0].Data["InvoiceId"] != int64(412) {
 		t.Fatalf("old snapshot changed: %v", err)
+	}
+}
+
+func TestResultCodecPersistsStatisticsAndDerivesLegacyStatistics(t *testing.T) {
+	result := secureread.Result{
+		Columns: []string{"day", "total", "status"},
+		Rows: []secureread.Row{
+			{Data: map[string]any{"day": time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC), "total": 2.5, "status": "paid"}},
+			{Data: map[string]any{"day": time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC), "total": 3.5}},
+		},
+	}
+	result.Statistics = secureread.StatisticsForRows(result.Columns, result.Rows)
+	payload, err := encodeResult(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeResult(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decoded.Statistics, result.Statistics) {
+		t.Fatalf("persisted statistics = %+v, want %+v", decoded.Statistics, result.Statistics)
+	}
+
+	var legacy storedResult
+	if err := json.Unmarshal(payload, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	legacy.Statistics = nil
+	legacyPayload, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decodedLegacy, err := decodeResult(legacyPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decodedLegacy.Statistics, result.Statistics) {
+		t.Fatalf("legacy statistics = %+v, want %+v", decodedLegacy.Statistics, result.Statistics)
+	}
+}
+
+func TestResultCodecDerivesStatisticsForManualResultsWhileEncodingRows(t *testing.T) {
+	result := secureread.Result{
+		Columns: []string{"InvoiceDate", "Total"},
+		Rows:    []secureread.Row{{Data: map[string]any{"InvoiceDate": "2013-12-22", "Total": 1.99}}},
+	}
+	payload, err := encodeResult(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeResult(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Statistics.RowCount != 1 || decoded.Statistics.Columns[0].Types.Date != 1 || len(decoded.Statistics.DateNumericSums) != 1 {
+		t.Fatalf("manual-result statistics = %+v", decoded.Statistics)
+	}
+}
+
+func TestResultCodecMarksOverflowedDateNumericSumsIncomplete(t *testing.T) {
+	result := secureread.Result{Columns: []string{"Timestamp", "Total"}, Rows: []secureread.Row{
+		{Data: map[string]any{"Timestamp": time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC), "Total": math.MaxFloat64}},
+		{Data: map[string]any{"Timestamp": time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC), "Total": math.MaxFloat64}},
+	}}
+	payload, err := encodeResult(result)
+	if err != nil {
+		t.Fatalf("encodeResult: %v", err)
+	}
+	decoded, err := decodeResult(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Statistics.DateNumericSums) != 1 || !decoded.Statistics.DateNumericSums[0].Incomplete {
+		t.Fatalf("overflow statistics = %+v", decoded.Statistics.DateNumericSums)
 	}
 }
 

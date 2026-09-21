@@ -60,15 +60,19 @@ func (e *Executor) RunSnapshot(ctx context.Context, collection string, recordset
 	if err != nil {
 		return Result{}, err
 	}
-	typed, err := restoreSnapshotRecordset(recordset, result)
+	typed, statistics, err := restoreSnapshotRecordset(recordset, result)
 	if err != nil {
 		return Result{}, err
 	}
 	result.SnapshotRecordset = &typed
+	// SQLite deliberately normalizes several values while applying policy. The
+	// restored typed rows supply statistics as they are reconstructed, so no
+	// chart-only pass can mistake driver values for source evidence.
+	result.Statistics = statistics
 	return result, nil
 }
 
-func restoreSnapshotRecordset(original apicontract.Recordset, filtered Result) (apicontract.Recordset, error) {
+func restoreSnapshotRecordset(original apicontract.Recordset, filtered Result) (apicontract.Recordset, RecordSetStatistics, error) {
 	allowed := make(map[string]struct{}, len(filtered.Columns))
 	for _, name := range filtered.Columns {
 		allowed[name] = struct{}{}
@@ -83,13 +87,14 @@ func restoreSnapshotRecordset(original apicontract.Recordset, filtered Result) (
 		}
 	}
 	if len(allowed) != 0 {
-		return apicontract.Recordset{}, ErrSnapshotPolicyUnexpressible
+		return apicontract.Recordset{}, RecordSetStatistics{}, ErrSnapshotPolicyUnexpressible
 	}
 	columns := make([]apicontract.Column, len(indices))
 	for i, index := range indices {
 		columns[i] = original.Columns[index]
 	}
 	rows := make([][]apicontract.TypedValue, 0, len(filtered.Rows))
+	statistics := newStatisticsAccumulator()
 	used := make([]bool, len(original.Rows))
 	for _, filteredRow := range filtered.Rows {
 		match := -1
@@ -104,10 +109,10 @@ func restoreSnapshotRecordset(original apicontract.Recordset, filtered Result) (
 			for filteredIndex, index := range indices {
 				actual := filteredRow.Data[columnNames[filteredIndex]]
 				if !snapshotValueMatches(original.Rows[0][index], actual) {
-					return apicontract.Recordset{}, fmt.Errorf("%w: cannot restore %s from %T", ErrSnapshotPolicyUnexpressible, original.Rows[0][index].Type, actual)
+					return apicontract.Recordset{}, RecordSetStatistics{}, fmt.Errorf("%w: cannot restore %s from %T", ErrSnapshotPolicyUnexpressible, original.Rows[0][index].Type, actual)
 				}
 			}
-			return apicontract.Recordset{}, fmt.Errorf("%w: filtered row cannot be matched to original typed evidence", ErrSnapshotPolicyUnexpressible)
+			return apicontract.Recordset{}, RecordSetStatistics{}, fmt.Errorf("%w: filtered row cannot be matched to original typed evidence", ErrSnapshotPolicyUnexpressible)
 		}
 		used[match] = true
 		row := make([]apicontract.TypedValue, len(indices))
@@ -115,12 +120,17 @@ func restoreSnapshotRecordset(original apicontract.Recordset, filtered Result) (
 			row[i] = original.Rows[match][index]
 		}
 		rows = append(rows, row)
+		values := make(map[string]observedValue, len(columnNames))
+		for i, value := range row {
+			values[columnNames[i]] = observedFromTypedValue(value)
+		}
+		statistics.addObservedRow(values)
 	}
 	restored := apicontract.Recordset{Columns: columns, Rows: rows}
 	if err := restored.Validate(); err != nil {
-		return apicontract.Recordset{}, ErrSnapshotPolicyUnexpressible
+		return apicontract.Recordset{}, RecordSetStatistics{}, ErrSnapshotPolicyUnexpressible
 	}
-	return restored, nil
+	return restored, statistics.finalize(columnNames), nil
 }
 
 func snapshotRowMatches(original []apicontract.TypedValue, indices []int, columns []string, filtered map[string]any) bool {

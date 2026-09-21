@@ -270,12 +270,13 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 }
 
 // OpenProtected is Open, except an "ingitdb" BackendRef is opened with
-// dalgo2ingitdb v0.4.0's dalgo2ingitdb.WithStoredOnlyReads() database
-// option. Every other scheme behaves identically to Open.
+// dalgo2ingitdb.WithStoredOnlyReads() and SQLite uses the validated,
+// parameter-bound structured-query dialect. Other schemes behave like Open.
 //
-// pkg/secureread.openSource is the only caller: it always wraps the
-// returned dal.DB with pkg/accesspolicies (the session's local YAML
-// policies) before any row reaches a caller. dalgo2ingitdb's own formula
+// pkg/secureread.openSource uses this for policy-secured sessions; direct
+// `query run` uses it for SQLite structured queries. A policy-secured session
+// wraps the returned dal.DB with pkg/accesspolicies before any row reaches a
+// caller. dalgo2ingitdb's own formula
 // evaluator has no way to know which of a computed column's dependencies
 // pkg/accesspolicies would have redacted — the adapter computes the value
 // from the FULL underlying record and hands back the (correct) result,
@@ -299,12 +300,12 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 // project's own demo query (queries/customers/customer-invoices.query.dtql,
 // `from: {name: Invoice, alias: i}`) uses exactly that shape, and used to
 // turn into a hard error the moment this dialect was enabled. With #179
-// fixed, every DTQL query datatug ships or tests (see dalgo2sql's own
-// dtql_datatug_inventory_test.go) compiles cleanly, so protected reads now
+// fixed, existing non-aggregate DTQL queries (see dalgo2sql's own
+// dtql_datatug_inventory_test.go) compile cleanly, so protected reads now
 // get the dialect's real guarantees: every dal.Constant value becomes a
 // genuine `?` placeholder + bound arg (not a quoted-string literal), and
-// an unsupported shape (a join, GROUP BY, HAVING, a cursor) fails closed
-// instead of silently falling back to legacy string rendering. The plain
+// unsupported shapes (such as joins and cursors) fail closed. GROUP BY and
+// HAVING are compiled by dalgo2sql's aggregation path. The plain
 // Open path (db copy / introspection) is unaffected — it never sets
 // StructuredQueryDialect, so it keeps using the legacy emitSQL rendering.
 func (r BackendRef) OpenProtected(ctx context.Context) (dal.DB, error) {
@@ -331,12 +332,9 @@ func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected b
 		}
 		var opts dalgo2sql.DbOptions
 		if protected {
-			// See OpenProtected's doc comment: pkg/secureread is the only
-			// caller that sets protected=true, and it always layers
-			// pkg/accesspolicies above the returned dal.DB — the dialect's
-			// bound-value, validated-source compilation is additional
-			// hardening under that same enforcement point, not a
-			// replacement for it.
+			// The validated dialect binds values and supports native
+			// aggregation. Caller-side policies, when enabled, remain a
+			// separate enforcement layer.
 			opts.StructuredQueryDialect = "sqlite"
 		}
 		db, err := dalgo2sqlite.NewDatabaseWithOptions(r.Path, dal.NewSchema(nil, nil), opts)
@@ -351,9 +349,8 @@ func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected b
 		}
 		var opts []dalgo2ingitdb.DatabaseOption
 		if protected {
-			// See OpenProtected's doc comment: pkg/secureread is the only
-			// caller that sets protected=true, and it always layers
-			// pkg/accesspolicies above the returned dal.DB.
+			// See OpenProtected's doc comment: the inGitDB protected path
+			// layers pkg/accesspolicies above the returned dal.DB.
 			opts = append(opts, dalgo2ingitdb.WithStoredOnlyReads())
 		}
 		db, err := dalgo2ingitdb.NewDatabase(r.Path, validator.NewCollectionsReader(), opts...)

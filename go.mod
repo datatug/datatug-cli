@@ -23,9 +23,9 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
-	github.com/dal-go/dalgo v0.80.5
+	github.com/dal-go/dalgo v0.83.2
 	github.com/dal-go/dalgo2http v0.2.0
-	github.com/dal-go/dalgo2sql v0.14.0
+	github.com/dal-go/dalgo2sql v0.17.1-0.20260921072327-6a759f5296be
 	github.com/dal-go/dalgo2sqlite v0.1.11
 	github.com/dal-go/record v0.1.3
 	github.com/datatug/cliformat v0.0.3
@@ -67,7 +67,7 @@ require (
 	google.golang.org/api v0.296.0
 	google.golang.org/genai v1.71.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.58.0
+	modernc.org/sqlite v1.59.0
 )
 
 require (
@@ -220,7 +220,7 @@ require (
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	modernc.org/libc v1.75.6 // indirect
+	modernc.org/libc v1.75.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 	rsc.io/omap v1.2.0 // indirect

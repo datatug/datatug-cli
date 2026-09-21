@@ -2,6 +2,7 @@ package secureread
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -53,6 +54,31 @@ func TestStatisticsCapsDistinctValuesExplicitly(t *testing.T) {
 	}
 	if column.Cardinality != MaxStatisticDistinctValues || len(column.Frequencies) != MaxStatisticDistinctValues {
 		t.Fatalf("retained distinct values = %d / %d", column.Cardinality, len(column.Frequencies))
+	}
+}
+
+func TestStatisticsCappedDateNumericPairsAreDeterministic(t *testing.T) {
+	values := make(map[string]any)
+	for dateIndex := range 9 {
+		values[fmt.Sprintf("date%02d", dateIndex)] = "2026-09-21"
+	}
+	for numberIndex := range 8 {
+		values[fmt.Sprintf("number%02d", numberIndex)] = numberIndex
+	}
+	var first []DateNumericSum
+	for attempt := range 12 {
+		stats := StatisticsForRows(nil, []Row{{Data: values}})
+		if !stats.DateNumericSumsIncomplete || len(stats.DateNumericSums) != MaxStatisticDateNumericPairs {
+			t.Fatalf("attempt %d: capped pairs = %+v", attempt, stats.DateNumericSums)
+		}
+		if attempt == 0 {
+			first = stats.DateNumericSums
+		} else if !reflect.DeepEqual(first, stats.DateNumericSums) {
+			t.Fatalf("attempt %d retained different pairs", attempt)
+		}
+	}
+	if first[0].DateColumn != "date00" || first[0].NumericColumn != "number00" || first[len(first)-1].DateColumn != "date07" || first[len(first)-1].NumericColumn != "number07" {
+		t.Fatalf("retained pair order = first %+v, last %+v", first[0], first[len(first)-1])
 	}
 }
 

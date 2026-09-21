@@ -291,9 +291,22 @@ func (a *statisticsAccumulator) addObservedRow(values map[string]observedValue) 
 			numbers[name] = value
 		}
 	}
-	for dateColumn, bucket := range dates {
-		for numericColumn, value := range numbers {
-			a.addPair(dateColumn, numericColumn, bucket, value.numeric)
+	// Retain the same first pairs when the bounded aggregate cap is reached.
+	// Iterating the maps directly would make candidate availability depend on
+	// Go's randomized map order for wide results.
+	dateColumns := make([]string, 0, len(dates))
+	for name := range dates {
+		dateColumns = append(dateColumns, name)
+	}
+	sort.Strings(dateColumns)
+	numericColumns := make([]string, 0, len(numbers))
+	for name := range numbers {
+		numericColumns = append(numericColumns, name)
+	}
+	sort.Strings(numericColumns)
+	for _, dateColumn := range dateColumns {
+		for _, numericColumn := range numericColumns {
+			a.addPair(dateColumn, numericColumn, dates[dateColumn], numbers[numericColumn].numeric)
 		}
 	}
 }

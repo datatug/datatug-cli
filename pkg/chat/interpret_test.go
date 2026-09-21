@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -105,5 +106,34 @@ func TestInterpretProviderHTTPContracts(t *testing.T) {
 				t.Fatal("provider was not called")
 			}
 		})
+	}
+}
+
+func TestInterpretDeepSeekCompatibleToolCall(t *testing.T) {
+	const doc = "from: {schema: main, name: Invoice}\nlimit: 20\n"
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("unexpected provider path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		arguments, _ := json.Marshal(map[string]string{"dtql": doc})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-test", "object": "chat.completion", "created": 1, "model": "deepseek-flash",
+			"choices": []any{map[string]any{"index": 0, "finish_reason": "tool_calls", "message": map[string]any{
+				"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{
+					"id": "call_1", "type": "function", "function": map[string]any{"name": "run_dtql", "arguments": string(arguments)},
+				}},
+			}}},
+		})
+	}))
+	defer server.Close()
+	dtql, err := Interpret(context.Background(), InterpretRequest{
+		Question: "Last 20 invoices", Schema: "main.Invoice: InvoiceId",
+		Provider: InterpretProvider{Protocol: "openai-chat", BaseURL: server.URL, Model: "deepseek-flash", APIKey: "secret-test-key"},
+	})
+	if err != nil || dtql != strings.TrimSpace(doc) || calls != 1 {
+		t.Fatalf("Interpret() = %q, %v; provider calls = %d", dtql, err, calls)
 	}
 }

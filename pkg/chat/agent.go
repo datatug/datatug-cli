@@ -72,8 +72,9 @@ func withQueryObserver(ctx context.Context, observer func(QueryResult) (QueryRes
 // ADKConversation uses an ephemeral ADK session for each turn. DataTug's
 // durable ChatSession, not ADK memory, owns conversation history.
 type ADKConversation struct {
-	runner   *runner.Runner
-	sessions session.Service
+	runner                *runner.Runner
+	sessions              session.Service
+	browserInterpretation bool
 
 	turnMu     sync.Mutex
 	mu         sync.Mutex
@@ -83,11 +84,21 @@ type ADKConversation struct {
 }
 
 type conversationConfig struct {
-	generation *genai.GenerateContentConfig
+	generation            *genai.GenerateContentConfig
+	browserInterpretation bool
 }
 
 // Option configures the constrained ADK conversation.
 type Option func(*conversationConfig) error
+
+// WithBrowserInterpretation keeps the CLI's ADK action/tool lifecycle while
+// asking for the subset the browser DALgo parser can execute locally.
+func WithBrowserInterpretation() Option {
+	return func(config *conversationConfig) error {
+		config.browserInterpretation = true
+		return nil
+	}
+}
 
 // WithThinkingLevel maps the CLI's provider-neutral effort onto ADK's
 // portable thinking budget. pi-go also receives the original level so
@@ -144,7 +155,7 @@ func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaC
 			return nil, err
 		}
 	}
-	c := &ADKConversation{}
+	c := &ADKConversation{browserInterpretation: config.browserInterpretation}
 	tool, err := functiontool.New(functiontool.Config{
 		Name:        "run_dtql",
 		Description: "Validate and execute one DTQL YAML query through DataTug and return structured result metadata.",
@@ -156,6 +167,9 @@ func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaC
 	}
 
 	instruction := buildInstruction(schemaContext)
+	if config.browserInterpretation {
+		instruction = buildBrowserInstruction(schemaContext)
+	}
 	root, err := llmagent.New(llmagent.Config{
 		Name:                  "datatug_chat",
 		Description:           "Translates natural-language data questions into DTQL and invokes DataTug.",
@@ -269,6 +283,17 @@ func (c *ADKConversation) takePending() []QueryResult {
 	return results
 }
 
+func (c *ADKConversation) hasSuccessfulPending() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, query := range c.pending {
+		if query.Err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // Ask runs one chat turn and returns model text separately from
 // every structured query result captured by the tool callback.
 func (c *ADKConversation) Ask(ctx context.Context, prompt string) (Turn, error) {
@@ -312,6 +337,11 @@ func (c *ADKConversation) AskWithContext(ctx context.Context, prompt, priorConte
 			if part != nil && !part.Thought && part.Text != "" {
 				text.WriteString(part.Text)
 			}
+		}
+		// Browser Chat needs the structured action only. Stop after its first
+		// valid tool call instead of paying for the CLI's prose follow-up.
+		if c.browserInterpretation && c.hasSuccessfulPending() {
+			break
 		}
 	}
 	queries := finalQueries(c.takePending())
@@ -395,6 +425,26 @@ just to render its existing grid.
 If the request requires a join or cannot be represented in DTQL, explain that
 briefly and do not invent data or fall back to SQL. If the tool reports invalid
 DTQL, correct it once when possible. Do not expose internal payloads.
+
+Configured schema:
+` + schema
+}
+
+func buildBrowserInstruction(schema string) string {
+	return `You are DataTug Chat. For each data question, call run_dtql once with a complete DTQL YAML document. The browser will execute the query over its own local IndexedDB data. You do not see any rows. Never produce SQL, HTML, Markdown tables, or invented row data.
+
+Use exactly one source from the schema, with from, optional one where comparison, optional orderBy, and required limit between 1 and 1000. Do not use columns, joins, groupBy, having, or offset. Use exact table and field names. A typical action is:
+
+from: {schema: main, name: Customer}
+where:
+  op: ==
+  left: {field: City}
+  right: {value: Prague}
+orderBy:
+  - field: CustomerId
+limit: 50
+
+An In comparison uses right: {values: [a, b]}. If the question cannot be represented by this subset, explain briefly without inventing data. If the tool rejects DTQL, correct it once when possible.
 
 Configured schema:
 ` + schema

@@ -43,7 +43,7 @@ func TestInferChartCandidatesRanksSemanticCategoriesAndOrderedLines(t *testing.T
 			boolean = &first[i]
 		}
 	}
-	if country == nil || invoiceID == nil || boolean == nil || !(country.Score > boolean.Score && boolean.Score > invoiceID.Score) {
+	if country == nil || invoiceID == nil || boolean == nil || country.Score <= boolean.Score || boolean.Score <= invoiceID.Score {
 		t.Fatalf("semantic category did not outrank boolean/ID: country=%+v boolean=%+v ID=%+v", country, boolean, invoiceID)
 	}
 }

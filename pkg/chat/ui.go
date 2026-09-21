@@ -952,7 +952,7 @@ func (u *UI) runSessionCommand(input string) {
 			snapshot, err = u.sessions.Delete(u.ctx)
 		}
 	case "/help":
-		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ grids • g JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • s sort • Enter details • Esc composer"})
+		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm\n\nGlobal: F2 mouse select/wheel • F6 workspace • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ grids • g JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • s sort • Enter details • Esc composer"})
 	default:
 		err = fmt.Errorf("unknown chat command %q; type /help", command)
 	}

@@ -837,6 +837,19 @@ func TestRecordsetHeaderRetainsViewControlsForLongTitles(t *testing.T) {
 	}
 }
 
+func TestRecordsetHeaderRetainsAllControlsAtTwentyTwoCells(t *testing.T) {
+	g := newGridState(GridModel{}, strings.Repeat("generated title ", 8), 22)
+	header := ansi.Strip(g.recordsetHeader(22))
+	for _, want := range []string{"1 Tab", "2 Chart", "3 Row"} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("22-cell header hid %q: %q", want, header)
+		}
+	}
+	if got := ansi.StringWidth(header); got != 22 {
+		t.Fatalf("header width = %d, want 22: %q", got, header)
+	}
+}
+
 func TestCurrentRowInspectorScrollsAndResetsForAnotherSourceRow(t *testing.T) {
 	result := secureread.Result{}
 	for index := 0; index < 18; index++ {
@@ -896,7 +909,11 @@ func TestGridSortRetainsSelectedSourceRowForInspector(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
 	u.appendTurn(Turn{Queries: []QueryResult{{RecordSetID: "recordset", Result: secureread.Result{
 		Columns: []string{"Name"},
-		Rows:    []secureread.Row{{Data: map[string]any{"Name": "Zulu"}}, {Data: map[string]any{"Name": "Alpha"}}},
+		Rows: []secureread.Row{
+			{Data: map[string]any{"Name": "Zulu"}},
+			{Data: map[string]any{"Name": "Alpha"}},
+			{Data: map[string]any{"Name": "Zulu"}},
+		},
 	}}}})
 	if !u.focusLatestGrid() {
 		t.Fatal("expected grid focus")
@@ -906,7 +923,7 @@ func TestGridSortRetainsSelectedSourceRowForInspector(t *testing.T) {
 		t.Fatalf("source row before sort = %d, want 0", before)
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Text: "s"})
-	if got := g.selectedSourceRow(); got != 0 || g.rowIndex != 1 {
+	if got := g.selectedSourceRow(); got != 0 || g.rowIndex != 1 || g.model.SourceRows[2] != 2 {
 		t.Fatalf("sorted selection = source:%d index:%d, want source:0 index:1", got, g.rowIndex)
 	}
 }
@@ -931,6 +948,7 @@ func TestSessionHelpDocumentsRecordsetAndExistingGridControls(t *testing.T) {
 	for _, want := range []string{
 		"1 Table", "2 Charts", "3 Current row", "Tab panes", "Shift+↑↓ grids",
 		"g JOINs", "Space row", "c cell", "r range", "a attach", "d dock", "b bookmark", "s sort", "Enter details", "Esc composer",
+		"F2", "F6", "Ctrl+C",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("help missing %q: %s", want, help)

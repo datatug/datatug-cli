@@ -51,6 +51,23 @@ func (g *gridState) recordsetHeader(width int) string {
 			tabs[selected] = "[" + tabs[selected] + "]"
 		}
 		controls = " | " + strings.Join(tabs, " | ")
+		if ansi.StringWidth(rows+controls) > width {
+			// At the smallest usable panes the grid border already carries the
+			// title. Reserve every cell for the three discoverable view controls.
+			tabs = []string{"1 Tab", "2 Chart", "3 Row"}
+			if selected >= 0 && selected < len(tabs) {
+				tabs[selected] = "[" + tabs[selected] + "]"
+			}
+			controls = strings.Join(tabs, " ")
+			if ansi.StringWidth(controls) <= width {
+				return padAnsiLine(controls, width)
+			}
+			tabs = []string{"1", "2", "3"}
+			if selected >= 0 && selected < len(tabs) {
+				tabs[selected] = "[" + tabs[selected] + "]"
+			}
+			return padAnsiLine(strings.Join(tabs, " "), width)
+		}
 	}
 	titleWidth := max(1, width-ansi.StringWidth(rows+controls))
 	title := ansi.Truncate(sanitizeTerminalText(g.title), titleWidth, "…")

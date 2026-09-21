@@ -22,6 +22,7 @@ import (
 	adktool "google.golang.org/adk/v2/tool"
 	"google.golang.org/adk/v2/tool/functiontool"
 	"google.golang.org/genai"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -48,7 +49,17 @@ type QueryResult struct {
 	QueryID     string
 	RecordSetID string
 	Result      secureread.Result
+	Parameters  map[string]any
+	Source      string
+	SourceID    string
 	Err         error
+}
+
+type WorkspaceActionResult struct {
+	Reference ContextReference
+	Summary   string
+	Error     string
+	Err       error
 }
 
 // Turn is one completed agent turn. Text is model prose; Queries remain
@@ -56,6 +67,7 @@ type QueryResult struct {
 type Turn struct {
 	Text    string
 	Queries []QueryResult
+	Actions []WorkspaceActionResult
 }
 
 // Conversation is the UI-facing chat seam and is trivial to fake in tests.
@@ -64,9 +76,19 @@ type Conversation interface {
 }
 
 type queryObserverKey struct{}
+type workspaceObserverKey struct{}
+type selectionParametersKey struct{}
 
 func withQueryObserver(ctx context.Context, observer func(QueryResult) (QueryResult, error)) context.Context {
 	return context.WithValue(ctx, queryObserverKey{}, observer)
+}
+
+func withWorkspaceObserver(ctx context.Context, observer func(WorkspaceAction) (ContextReference, error)) context.Context {
+	return context.WithValue(ctx, workspaceObserverKey{}, observer)
+}
+
+func withSelectionParameters(ctx context.Context, resolver func() map[string]any) context.Context {
+	return context.WithValue(ctx, selectionParametersKey{}, resolver)
 }
 
 // ADKConversation uses an ephemeral ADK session for each turn. DataTug's
@@ -74,20 +96,36 @@ func withQueryObserver(ctx context.Context, observer func(QueryResult) (QueryRes
 type ADKConversation struct {
 	runner   *runner.Runner
 	sessions session.Service
+	sources  map[string]string
 
-	turnMu     sync.Mutex
-	mu         sync.Mutex
-	pending    []QueryResult
-	modelCalls int
-	toolCalls  int
+	turnMu      sync.Mutex
+	mu          sync.Mutex
+	pending     []QueryResult
+	actions     []WorkspaceActionResult
+	modelCalls  int
+	toolCalls   int
+	actionCalls int
 }
 
 type conversationConfig struct {
 	generation *genai.GenerateContentConfig
+	sources    map[string]string
 }
 
 // Option configures the constrained ADK conversation.
 type Option func(*conversationConfig) error
+
+// WithSources limits model-requested source IDs to the project's resolved
+// source registry. The model cannot supply an arbitrary URL.
+func WithSources(sources map[string]string) Option {
+	return func(config *conversationConfig) error {
+		config.sources = make(map[string]string, len(sources))
+		for id, url := range sources {
+			config.sources[id] = url
+		}
+		return nil
+	}
+}
 
 // WithThinkingLevel maps the CLI's provider-neutral effort onto ADK's
 // portable thinking budget. pi-go also receives the original level so
@@ -113,16 +151,26 @@ func WithThinkingLevel(level string) Option {
 }
 
 type runDTQLArgs struct {
-	Title string `json:"title,omitempty" jsonschema:"A short human-readable title for the result, one line, at most 60 characters"`
-	DTQL  string `json:"dtql" jsonschema:"A complete DTQL YAML document to validate and execute"`
+	Title    string `json:"title,omitempty" jsonschema:"A short human-readable title for the result, one line, at most 60 characters"`
+	DTQL     string `json:"dtql" jsonschema:"A complete DTQL YAML document to validate and execute"`
+	SourceID string `json:"sourceId,omitempty" jsonschema:"Project source/catalog ID; omit for the active database"`
 }
 
 type runDTQLResponse struct {
-	Title   string   `json:"title,omitempty"`
-	OK      bool     `json:"ok"`
-	Columns []string `json:"columns,omitempty"`
-	Rows    int      `json:"rows,omitempty"`
-	Error   string   `json:"error,omitempty"`
+	Title       string   `json:"title,omitempty"`
+	OK          bool     `json:"ok"`
+	RecordSetID string   `json:"recordSetId,omitempty"`
+	Columns     []string `json:"columns,omitempty"`
+	Rows        int      `json:"rows,omitempty"`
+	Error       string   `json:"error,omitempty"`
+}
+
+type workspaceActionResponse struct {
+	OK      bool   `json:"ok"`
+	Kind    string `json:"kind,omitempty"`
+	ID      string `json:"id,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // NewADKConversation builds the constrained chat agent. schemaContext is a
@@ -144,7 +192,7 @@ func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaC
 			return nil, err
 		}
 	}
-	c := &ADKConversation{}
+	c := &ADKConversation{sources: config.sources}
 	tool, err := functiontool.New(functiontool.Config{
 		Name:        "run_dtql",
 		Description: "Validate and execute one DTQL YAML query through DataTug and return structured result metadata.",
@@ -153,6 +201,15 @@ func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaC
 	})
 	if err != nil {
 		return nil, fmt.Errorf("chat: create DTQL tool: %w", err)
+	}
+	workspaceTool, err := functiontool.New(functiontool.Config{
+		Name:        "workspace_action",
+		Description: "Apply a deterministic selection, attach/detach, dock/undock, or clear-selection action to existing DataTug session objects. Does not query the database.",
+	}, func(ctx agent.Context, args WorkspaceAction) (workspaceActionResponse, error) {
+		return c.runWorkspaceAction(ctx, args), nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("chat: create workspace tool: %w", err)
 	}
 
 	instruction := buildInstruction(schemaContext)
@@ -170,7 +227,7 @@ func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaC
 		InstructionProvider: func(agent.ReadonlyContext) (string, error) {
 			return instruction, nil
 		},
-		Tools: []adktool.Tool{tool},
+		Tools: []adktool.Tool{tool, workspaceTool},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("chat: create ADK agent: %w", err)
@@ -192,6 +249,13 @@ func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaC
 
 func (c *ADKConversation) runDTQL(ctx context.Context, executor DTQLExecutor, sourceURL string, args runDTQLArgs) (runDTQLResponse, error) {
 	title := normalizeGridTitle(args.Title)
+	if args.SourceID != "" {
+		resolved := c.sources[args.SourceID]
+		if resolved == "" {
+			return runDTQLResponse{Title: title, Error: "That project data source is unavailable."}, nil
+		}
+		sourceURL = resolved
+	}
 	if !c.allowToolCall() {
 		err := fmt.Errorf("the agent exceeded %d query attempts in one turn", maxToolCallsPerTurn)
 		c.capture(ctx, QueryResult{Title: title, DTQL: strings.TrimSpace(args.DTQL), Err: err})
@@ -214,12 +278,105 @@ func (c *ADKConversation) runDTQL(ctx context.Context, executor DTQLExecutor, so
 		c.capture(ctx, QueryResult{Title: title, DTQL: doc, Err: err})
 		return runDTQLResponse{Title: title, Error: err.Error()}, nil
 	}
-	result, err := executor.RunDTQL(ctx, sourceURL, []byte(doc), nil)
-	captured := c.capture(ctx, QueryResult{Title: title, DTQL: doc, Result: result, Err: err})
-	if captured.Err != nil {
-		return runDTQLResponse{Title: title, Error: friendlyQueryError(captured.Err)}, nil
+	var parameters map[string]any
+	if resolve, ok := ctx.Value(selectionParametersKey{}).(func() map[string]any); ok {
+		parameters = referencedSelectionParameters(doc, resolve())
 	}
-	return runDTQLResponse{Title: title, OK: true, Columns: result.Columns, Rows: len(result.Rows)}, nil
+	result, err := executor.RunDTQL(ctx, sourceURL, []byte(doc), parameters)
+	captured := c.capture(ctx, QueryResult{Title: title, DTQL: doc, Result: result, Parameters: parameters, Source: sourceURL, SourceID: args.SourceID, Err: err})
+	if captured.Err != nil {
+		return runDTQLResponse{Title: title, Error: publicQueryError(captured.Err, captured.Parameters)}, nil
+	}
+	return runDTQLResponse{Title: title, OK: true, RecordSetID: captured.RecordSetID, Columns: result.Columns, Rows: len(result.Rows)}, nil
+}
+
+// Only bind Selection values named in this validated DTQL document. This
+// avoids sending unrelated attached selections through the DALgo boundary or
+// persisting them as lineage for a query that did not use them.
+func referencedSelectionParameters(doc string, available map[string]any) map[string]any {
+	if len(available) == 0 {
+		return nil
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(doc), &root); err != nil {
+		return nil // runDTQL already validated the same document
+	}
+	used := map[string]any{}
+	visited := map[*yaml.Node]bool{}
+	var visit func(*yaml.Node)
+	visit = func(node *yaml.Node) {
+		if node == nil || visited[node] {
+			return
+		}
+		visited[node] = true
+		switch node.Kind {
+		case yaml.DocumentNode, yaml.SequenceNode:
+			for _, child := range node.Content {
+				visit(child)
+			}
+		case yaml.MappingNode:
+			for i := 0; i+1 < len(node.Content); i += 2 {
+				key, value := node.Content[i], node.Content[i+1]
+				parameter := value
+				if parameter.Kind == yaml.AliasNode {
+					parameter = parameter.Alias
+				}
+				if key.Value == "param" && parameter != nil && parameter.Kind == yaml.ScalarNode {
+					if bound, ok := available[parameter.Value]; ok {
+						used[parameter.Value] = bound
+					}
+				}
+				visit(value)
+			}
+		case yaml.AliasNode:
+			visit(node.Alias)
+		}
+	}
+	visit(&root)
+	return used
+}
+
+func (c *ADKConversation) runWorkspaceAction(ctx context.Context, action WorkspaceAction) workspaceActionResponse {
+	c.mu.Lock()
+	c.actionCalls++
+	allowed := c.actionCalls <= 3
+	c.mu.Unlock()
+	if !allowed {
+		return workspaceActionResponse{Error: "Too many workspace actions in one turn."}
+	}
+	observer, ok := ctx.Value(workspaceObserverKey{}).(func(WorkspaceAction) (ContextReference, error))
+	if !ok {
+		return workspaceActionResponse{Error: "Workspace actions are unavailable in this chat."}
+	}
+	ref, err := observer(action)
+	if err != nil {
+		message := conciseError(err)
+		c.captureAction(WorkspaceActionResult{Error: message, Err: err})
+		return workspaceActionResponse{Error: message}
+	}
+	summary := "Workspace updated."
+	switch action.Kind {
+	case "select":
+		summary = "Selected " + ref.Title + "."
+	case "dock":
+		summary = "Docked " + ref.Title + "."
+	case "attach":
+		summary = "Attached " + ref.Title + "."
+	case "detach":
+		summary = "Detached " + ref.Title + "."
+	case "undock":
+		summary = "Undocked " + ref.Title + "."
+	case "clear_selection":
+		summary = "Selection cleared."
+	}
+	c.captureAction(WorkspaceActionResult{Reference: ref, Summary: summary})
+	return workspaceActionResponse{OK: true, Kind: ref.Kind, ID: ref.ObjectID, Summary: summary}
+}
+
+func (c *ADKConversation) captureAction(result WorkspaceActionResult) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.actions = append(c.actions, result)
 }
 
 func (c *ADKConversation) allowModelCall() bool {
@@ -240,8 +397,10 @@ func (c *ADKConversation) resetTurn() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pending = nil
+	c.actions = nil
 	c.modelCalls = 0
 	c.toolCalls = 0
+	c.actionCalls = 0
 }
 
 func (c *ADKConversation) capture(ctx context.Context, result QueryResult) QueryResult {
@@ -267,6 +426,14 @@ func (c *ADKConversation) takePending() []QueryResult {
 	results := append([]QueryResult(nil), c.pending...)
 	c.pending = nil
 	return results
+}
+
+func (c *ADKConversation) takeActions() []WorkspaceActionResult {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	actions := append([]WorkspaceActionResult(nil), c.actions...)
+	c.actions = nil
+	return actions
 }
 
 // Ask runs one chat turn and returns model text separately from
@@ -300,8 +467,9 @@ func (c *ADKConversation) AskWithContext(ctx context.Context, prompt, priorConte
 		agent.RunConfig{StreamingMode: agent.StreamingModeNone}) {
 		if err != nil {
 			queries := finalQueries(c.takePending())
-			if len(queries) > 0 {
-				return Turn{Queries: queries}, nil
+			actions := c.takeActions()
+			if len(queries) > 0 || len(actions) > 0 {
+				return Turn{Queries: queries, Actions: actions}, nil
 			}
 			return Turn{}, fmt.Errorf("chat: agent turn: %w", err)
 		}
@@ -315,15 +483,16 @@ func (c *ADKConversation) AskWithContext(ctx context.Context, prompt, priorConte
 		}
 	}
 	queries := finalQueries(c.takePending())
+	actions := c.takeActions()
 	turnText := strings.TrimSpace(text.String())
-	if len(queries) > 0 {
+	if len(queries) > 0 || len(actions) > 0 {
 		// The grid is the answer for successful data requests. Some small
 		// local models emit their hidden reasoning as ordinary text, so do
 		// not surface model prose beside
 		// a structured result or a DataTug-owned execution error.
 		turnText = ""
 	}
-	return Turn{Text: turnText, Queries: queries}, nil
+	return Turn{Text: turnText, Queries: queries, Actions: actions}, nil
 }
 
 // finalQueries hides failed tool attempts when the agent corrected itself and
@@ -358,6 +527,16 @@ func friendlyQueryError(err error) string {
 	return "Query failed: " + message
 }
 
+// Backend errors may echo bound parameter values. Keep the detailed error in
+// process, but never put it in a tool response, chat message, or future prompt
+// when the parameters came from a local Selection.
+func publicQueryError(err error, parameters map[string]any) string {
+	if len(parameters) > 0 {
+		return "Query failed while using the selected data. Check the selected column and try again."
+	}
+	return friendlyQueryError(err)
+}
+
 func buildInstruction(schema string) string {
 	return `You are DataTug Chat. Answer questions about the configured data.
 
@@ -365,9 +544,14 @@ For a data request, call run_dtql with a short one-line title and a complete DTQ
 write SQL. Never format query rows as Markdown, ASCII, JSON, or prose; DataTug
 renders the structured tool result. You may add one short sentence explaining
 what you queried after a successful tool call.
+If attached context names another project source, supply its sourceId to
+run_dtql. Never invent a source ID or URL.
 
 DTQL supports exactly one source relation (joins are not supported), selected
-columns, where expressions, orderBy, limit, and offset. Every query must include
+columns, where expressions, groupBy, aggregate columns, having, orderBy, limit,
+and offset. You can aggregate invoices by CustomerId to answer customer-order
+totals, but do not invent customer names when a join would be required.
+Every query must include
 a limit from 1 to 1000; use 100 when the user gives no count. Use exact relation
 and column names from the schema. A typical shape is:
 
@@ -386,11 +570,44 @@ orderBy:
     desc: true
 limit: 50
 
+For a single-table aggregate, the aggregate expression replaces "field" in
+the projected column; "as" names its output. For example:
+
+from: {name: Invoice}
+groupBy:
+  - field: CustomerId
+orderBy:
+  - field: TotalAmount
+    desc: true
+limit: 20
+columns:
+  - field: CustomerId
+  - aggregate: {function: COUNT, args: [{star: true}]}
+    as: OrderCount
+  - aggregate: {function: SUM, args: [{field: Total}]}
+    as: TotalAmount
+
 For follow-ups about an earlier RecordSet, use the DataTug-provided context.
-The context may include bounded distinct identifier values. A complete set can
-be used in DTQL with "op: In" and "right: {values: [1, 2]}". A truncated set
-is not complete; never claim it is. Do not ask DataTug to rerun an old query
-just to render its existing grid.
+Attached or docked selections contain only identity, schema, count, and local DTQL
+parameter names, never row values. For a follow-up over those rows, use the
+given parameter with "op: In" and "right: {param: selection_1_c1}" on the
+corresponding field. DataTug binds the actual values locally. Do not invent
+selected IDs, list row values, or ask DataTug to rerun an old query just to
+render its existing grid.
+
+For requests to select, attach, detach, dock, undock, or clear selection, call
+workspace_action with structured arguments. Use "select" over an existing
+RecordSet (recordSetId) or View (viewId), optionally filtering by column and
+equals/contains, ordering by orderBy/descending, and limiting results. The
+tool performs selection locally; do not manually enumerate rows. A new
+selection is not attached merely by selecting it. For "dock them", dock the
+current selection by calling workspace_action with kind "dock" and no
+reference; DataTug resolves it locally. To dock a different item, pass its
+exact reference with a lowercase kind ("recordset", "view", or "selection").
+Do not run a new query for a local
+selection or dock action. If the existing RecordSet lacks the field needed to
+select correctly, query a suitable source, then select from the returned
+recordSetId. Never infer unseen row values from a grid summary.
 
 If the request requires a join or cannot be represented in DTQL, explain that
 briefly and do not invent data or fall back to SQL. If the tool reports invalid

@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -20,10 +21,11 @@ type SessionChat struct {
 	store    *SessionStore
 	agent    ContextualConversation
 	source   string
+	catalog  ProjectCatalog
 	activeID string
 }
 
-func NewSessionChat(ctx context.Context, store *SessionStore, agent ContextualConversation, source string) (*SessionChat, error) {
+func NewSessionChat(ctx context.Context, store *SessionStore, agent ContextualConversation, source string, catalogs ...ProjectCatalog) (*SessionChat, error) {
 	if store == nil || agent == nil {
 		return nil, fmt.Errorf("chat sessions require a store and agent")
 	}
@@ -31,7 +33,33 @@ func NewSessionChat(ctx context.Context, store *SessionStore, agent ContextualCo
 	if err != nil {
 		return nil, err
 	}
-	return &SessionChat{store: store, agent: agent, source: source, activeID: latest.ID}, nil
+	chat := &SessionChat{store: store, agent: agent, source: source, activeID: latest.ID}
+	if len(catalogs) > 0 {
+		chat.catalog = catalogs[0]
+	}
+	return chat, nil
+}
+
+// ApplyWorkspaceAction is shared by terminal events and the agent tool.
+func (c *SessionChat) ApplyWorkspaceAction(ctx context.Context, action WorkspaceAction) (ContextReference, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.applyWorkspaceAction(ctx, action)
+}
+
+func (c *SessionChat) applyWorkspaceAction(ctx context.Context, action WorkspaceAction) (ContextReference, error) {
+	session, err := c.store.Load(ctx, c.activeID)
+	if err != nil {
+		return ContextReference{}, err
+	}
+	next, ref, err := session.Workspace.apply(session, c.catalog, action)
+	if err != nil {
+		return ContextReference{}, err
+	}
+	if err := c.store.SaveWorkspace(ctx, c.activeID, next); err != nil {
+		return ContextReference{}, err
+	}
+	return ref, nil
 }
 
 func (c *SessionChat) Snapshot(ctx context.Context) (ChatSession, error) {
@@ -141,7 +169,7 @@ func (c *SessionChat) Ask(ctx context.Context, prompt string) (Turn, error) {
 	if err != nil {
 		return Turn{}, err
 	}
-	contextText := buildSessionContext(prior)
+	contextText := buildSessionContext(prior, c.catalog)
 	user, err := c.store.AppendUser(ctx, c.activeID, prompt)
 	if err != nil {
 		return Turn{}, err
@@ -152,16 +180,48 @@ func (c *SessionChat) Ask(ctx context.Context, prompt string) (Turn, error) {
 		}
 	}
 	ctx = withQueryObserver(ctx, func(query QueryResult) (QueryResult, error) {
-		return c.store.AppendQuery(ctx, c.activeID, user.ID, c.source, query)
+		source := query.Source
+		if source == "" {
+			source = c.source
+		}
+		return c.store.AppendQuery(ctx, c.activeID, user.ID, source, query)
+	})
+	ctx = withWorkspaceObserver(ctx, func(action WorkspaceAction) (ContextReference, error) {
+		return c.applyWorkspaceAction(ctx, action)
+	})
+	ctx = withSelectionParameters(ctx, func() map[string]any {
+		current, loadErr := c.store.Load(ctx, c.activeID)
+		if loadErr != nil {
+			return nil
+		}
+		return selectionParameters(current)
 	})
 	turn, agentErr := c.agent.AskWithContext(ctx, prompt, contextText)
 	if agentErr != nil {
-		turn = Turn{Text: "I couldn't process that request. " + conciseError(agentErr)}
+		turn = Turn{Text: friendlyAgentError(agentErr)}
 	}
-	if turn.Text == "" && len(turn.Queries) == 0 {
+	if turn.Text == "" && len(turn.Queries) == 0 && len(turn.Actions) == 0 {
 		turn.Text = "I couldn't construct a valid query for that request."
 	}
+	if turn.Text == "" && len(turn.Actions) > 0 {
+		last := turn.Actions[len(turn.Actions)-1]
+		if last.Err == nil {
+			turn.Text = last.Summary
+		} else {
+			turn.Text = last.Error
+		}
+	}
 	return c.store.AppendTurn(ctx, c.activeID, user.ID, c.source, turn)
+}
+
+func friendlyAgentError(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "The AI request timed out. Please try again."
+	}
+	if errors.Is(err, context.Canceled) {
+		return "The request was cancelled."
+	}
+	return "I couldn't process that request. Please try again or check the configured AI profile."
 }
 
 const maxContextChars = 12000
@@ -181,11 +241,40 @@ func boundedContextText(value string, maxBytes int) string {
 	return text.String() + suffix
 }
 
-func buildSessionContext(session ChatSession) string {
-	if len(session.Messages) == 0 {
+func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string {
+	refs := contextReferences(session)
+	if len(session.Messages) == 0 && len(refs) == 0 && session.Workspace.CurrentSelectionID == "" {
 		return ""
 	}
-	lines := make([]string, 0, len(session.Messages))
+	lines := make([]string, 0, len(session.Messages)+len(refs)+1)
+	for index, ref := range refs {
+		contextKind := "Attached"
+		if index >= len(session.Workspace.Attachments) {
+			contextKind = "Docked"
+		}
+		line := fmt.Sprintf("%s %s %s (project=%s source=%s id=%s)", contextKind, ref.Kind, sanitizeTerminalText(ref.Title), ref.ProjectID, ref.SourceID, ref.ObjectID)
+		if len(catalogs) > 0 {
+			for _, object := range catalogs[0].Objects {
+				if sameReference(object.Reference, ref) && len(object.Columns) > 0 {
+					line += "; columns=" + strings.Join(object.Columns, ", ")
+					break
+				}
+			}
+		}
+		if ref.Kind == "selection" {
+			if selection, ok := session.Workspace.Selections[ref.ObjectID]; ok {
+				view := session.Workspace.Views[selection.ViewID]
+				line += fmt.Sprintf("; RecordSet=%s; selected rows=%d; columns=%s", view.RecordSetID, len(selection.Rows), strings.Join(selection.Columns, ", "))
+				for columnIndex, column := range selection.Columns {
+					line += fmt.Sprintf("; DTQL In parameter for %s: selection_%d_c%d", column, index+1, columnIndex+1)
+				}
+			}
+		}
+		lines = append(lines, line)
+	}
+	if current, ok := session.Workspace.Selections[session.Workspace.CurrentSelectionID]; ok {
+		lines = append(lines, fmt.Sprintf("Current selection %s (id=%s; rows=%d; not query context unless attached or docked)", sanitizeTerminalText(current.Title), current.ID, len(current.Rows)))
+	}
 	start := max(0, len(session.Messages)-16)
 	for _, message := range session.Messages[start:] {
 		switch message.Kind {
@@ -197,7 +286,6 @@ func buildSessionContext(session ChatSession) string {
 				continue
 			}
 			line := fmt.Sprintf("RecordSet %s (%s): %d rows; columns: %s; source: %s/%s; DTQL: %s", record.ID, boundedContextText(sanitizeTerminalText(record.Title), 100), len(record.Result.Rows), boundedContextText(sanitizeTerminalText(strings.Join(record.Result.Columns, ", ")), 800), record.Environment, record.Database, boundedContextText(record.DTQL, 4000))
-			line += recordIdentifierContext(record)
 			lines = append(lines, line)
 		}
 	}
@@ -205,54 +293,4 @@ func buildSessionContext(session ChatSession) string {
 		lines = lines[1:]
 	}
 	return boundedContextText(strings.Join(lines, "\n"), maxContextChars)
-}
-
-// Identifier values are a bounded, structured hint for follow-ups such as
-// "customers associated with those orders". Ordinary rows are not copied
-// into model context, and a truncated set is explicitly marked incomplete.
-func recordIdentifierContext(record RecordSet) string {
-	var lines []string
-	const maxIdentifierChars = 4000
-	used := 0
-	for _, column := range record.Result.Columns {
-		if column != "id" && !strings.HasSuffix(column, "Id") && !strings.HasSuffix(column, "ID") && !strings.HasSuffix(column, "_id") {
-			continue
-		}
-		seen := map[string]bool{}
-		var values []string
-		truncated := false
-		for _, row := range record.Result.Rows {
-			value := row.Data[column]
-			if value == nil {
-				continue
-			}
-			formatted := sanitizeTerminalText(FormatValue(value))
-			if seen[formatted] {
-				continue
-			}
-			seen[formatted] = true
-			if len(values) == 100 || len(formatted) > 64 || used+len(formatted)+len(column)+64 > maxIdentifierChars {
-				truncated = true
-				break
-			}
-			values = append(values, formatted)
-			used += len(formatted) + 2
-		}
-		if len(values) == 0 && !truncated {
-			continue
-		}
-		line := column + " distinct values: " + strings.Join(values, ", ")
-		if truncated {
-			line += " (truncated; not a complete set)"
-		}
-		lines = append(lines, line)
-		used += len(column) + len(line)
-		if used >= maxIdentifierChars {
-			break
-		}
-	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return "; " + strings.Join(lines, "; ")
 }

@@ -2,6 +2,9 @@ package chat
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +25,7 @@ func openTestStore(t *testing.T, path string, scope ChatScope) *SessionStore {
 }
 
 func testScope() ChatScope {
-	return ChatScope{Environment: "local", Database: "chinook", AccessFingerprint: "admin-policy-v1"}
+	return ChatScope{Environment: "local", Database: "chinook", AccessFingerprint: "admin-policy-v1", Sources: map[string]string{"chinook": "sqlite:///chinook.db"}}
 }
 
 func testStorePath(t *testing.T) string {
@@ -85,6 +88,95 @@ func TestSessionStoreLifecycleAndIsolation(t *testing.T) {
 	list, err = reloaded.List(ctx)
 	if err != nil || len(list) != 1 || list[0].ID != b.ID {
 		t.Fatalf("list after delete = %+v, %v", list, err)
+	}
+}
+
+func TestSessionStoreSeparatesReconfiguredSources(t *testing.T) {
+	ctx := context.Background()
+	path := testStorePath(t)
+	original := testScope()
+	store := openTestStore(t, path, original)
+	session, err := store.Create(ctx, "Old Chinook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.AppendUser(ctx, session.ID, "show customers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendTurn(ctx, session.ID, user.ID, original.Sources[original.Database], Turn{Queries: []QueryResult{{
+		DTQL:   "from: {name: Customer}\nlimit: 1",
+		Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	changed := testScope()
+	changed.Sources = map[string]string{"chinook": "sqlite:///replacement.db"}
+	replacement := openTestStore(t, path, changed)
+	if list, err := replacement.List(ctx); err != nil || len(list) != 0 {
+		t.Fatalf("repointed source reopened old sessions: %+v, %v", list, err)
+	}
+	if _, err := replacement.Load(ctx, session.ID); err == nil {
+		t.Fatal("repointed source reopened old RecordSet")
+	}
+	registryChanged := testScope()
+	registryChanged.Sources["secondary"] = "sqlite:///new-secondary.db"
+	otherRegistry := openTestStore(t, path, registryChanged)
+	if list, err := otherRegistry.List(ctx); err != nil || len(list) != 0 {
+		t.Fatalf("changed source registry reopened old sessions: %+v, %v", list, err)
+	}
+	restored := openTestStore(t, path, original)
+	if got, err := restored.Load(ctx, session.ID); err != nil || len(got.RecordSets) != 1 {
+		t.Fatalf("original source could not restore its snapshot: %+v, %v", got, err)
+	}
+}
+
+func TestLegacyChatScopeMigratesOnlyMatchingSource(t *testing.T) {
+	ctx := context.Background()
+	path := testStorePath(t)
+	scope := testScope()
+	store := openTestStore(t, path, scope)
+	matching, err := store.Create(ctx, "Matching")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong, err := store.Create(ctx, "Wrong source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct{ id, source string }{{matching.ID, scope.Sources[scope.Database]}, {wrong.ID, "sqlite:///old-database.db"}} {
+		user, err := store.AppendUser(ctx, item.id, "show one")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.AppendTurn(ctx, item.id, user.ID, item.source, Turn{Queries: []QueryResult{{
+			DTQL:   "from: {name: Customer}\nlimit: 1",
+			Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}},
+		}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacyJSON, err := json.Marshal(struct {
+		Environment       string
+		Database          string
+		AccessFingerprint string
+	}{scope.Environment, scope.Database, scope.AccessFingerprint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyHash := sha256.Sum256(legacyJSON)
+	if _, err := store.db.Exec(`UPDATE sessions SET scope = ? WHERE id IN (?, ?)`, hex.EncodeToString(legacyHash[:]), matching.ID, wrong.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestStore(t, path, scope)
+	if _, err := reopened.Load(ctx, matching.ID); err != nil {
+		t.Fatalf("matching Phase 2 session was not migrated: %v", err)
+	}
+	if _, err := reopened.Load(ctx, wrong.ID); err == nil {
+		t.Fatal("legacy session from another source was migrated")
 	}
 }
 

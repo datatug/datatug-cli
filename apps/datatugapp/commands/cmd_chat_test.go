@@ -2,6 +2,8 @@ package commands
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -156,5 +158,19 @@ func TestRootRegistersChatCommand(t *testing.T) {
 	}
 	if cmd == nil || cmd.Name() != "chat" {
 		t.Fatalf("chat command = %#v", cmd)
+	}
+}
+
+func TestSameProjectDirectoryDeduplicatesPathAndSymlink(t *testing.T) {
+	directory := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(directory, alias); err != nil {
+		t.Fatal(err)
+	}
+	if !sameProjectDirectory(directory, alias) {
+		t.Fatal("the same registered project would appear twice")
+	}
+	if sameProjectDirectory(directory, t.TempDir()) {
+		t.Fatal("different projects were merged")
 	}
 }

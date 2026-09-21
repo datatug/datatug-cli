@@ -6,6 +6,7 @@ import (
 	"errors"
 	"iter"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -22,13 +23,101 @@ type fakeExecutor struct {
 	calls  int
 	doc    string
 	source string
+	params map[string]any
 }
 
-func (f *fakeExecutor) RunDTQL(_ context.Context, source string, doc []byte, _ map[string]any) (secureread.Result, error) {
+func (f *fakeExecutor) RunDTQL(_ context.Context, source string, doc []byte, params map[string]any) (secureread.Result, error) {
 	f.calls++
 	f.doc = string(doc)
 	f.source = source
+	f.params = params
 	return f.result, f.err
+}
+
+func TestRunDTQLBindsAttachedSelectionLocally(t *testing.T) {
+	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"InvoiceId"}}}
+	conversation := &ADKConversation{sources: map[string]string{"chinook-local": "sqlite:///chinook.db"}}
+	ctx := withSelectionParameters(context.Background(), func() map[string]any {
+		return map[string]any{"selection_1_c1": []any{int64(5), int64(6)}, "selection_2_c1": []any{"unrelated private value"}}
+	})
+	doc := "from: {name: Invoice}\nwhere:\n  op: In\n  left: {field: CustomerId}\n  right: {param: selection_1_c1}\nlimit: 20"
+	response, err := conversation.runDTQL(ctx, executor, "sqlite:///other.db", runDTQLArgs{SourceID: "chinook-local", DTQL: doc})
+	if err != nil || !response.OK {
+		t.Fatalf("runDTQL = %+v, %v", response, err)
+	}
+	if executor.source != "sqlite:///chinook.db" || !reflect.DeepEqual(executor.params["selection_1_c1"], []any{int64(5), int64(6)}) {
+		t.Fatalf("local binding = source %q params %#v", executor.source, executor.params)
+	}
+	if _, ok := executor.params["selection_2_c1"]; ok {
+		t.Fatal("unreferenced selection was passed to DALgo")
+	}
+	if !reflect.DeepEqual(conversation.takePending()[0].Parameters, executor.params) {
+		t.Fatal("query lineage lost locally bound parameters")
+	}
+	response, err = conversation.runDTQL(context.Background(), executor, "sqlite:///other.db", runDTQLArgs{SourceID: "unregistered", DTQL: doc})
+	if err != nil || response.Error == "" || executor.calls != 1 {
+		t.Fatalf("unknown source was executed: %+v, %v, calls=%d", response, err, executor.calls)
+	}
+}
+
+func TestRunDTQLReturnsPersistedRecordSetReference(t *testing.T) {
+	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}}}
+	conversation := &ADKConversation{}
+	ctx := withQueryObserver(context.Background(), func(query QueryResult) (QueryResult, error) {
+		query.RecordSetID = "saved-recordset"
+		return query, nil
+	})
+	response, err := conversation.runDTQL(ctx, executor, "sqlite:///chinook.db", runDTQLArgs{DTQL: "from: {name: Customer}\nlimit: 5"})
+	if err != nil || !response.OK || response.RecordSetID != "saved-recordset" {
+		t.Fatalf("query tool did not return its saved RecordSet reference: %+v, %v", response, err)
+	}
+}
+
+func TestQueryToolDoesNotReturnLocallyBoundValuesInErrors(t *testing.T) {
+	const secret = "Paris-private-selected-value"
+	conversation := &ADKConversation{}
+	executor := &fakeExecutor{err: errors.New("driver rejected parameter " + secret)}
+	ctx := withSelectionParameters(context.Background(), func() map[string]any {
+		return map[string]any{"selection_1_c1": []any{secret}}
+	})
+	doc := "from: {name: Customer}\nwhere:\n  op: In\n  left: {field: City}\n  right: {param: selection_1_c1}\nlimit: 5"
+	response, err := conversation.runDTQL(ctx, executor, "sqlite:///chinook.db", runDTQLArgs{DTQL: doc})
+	if err != nil || response.OK || strings.Contains(response.Error, secret) {
+		t.Fatalf("private parameter leaked through query tool: %+v, %v", response, err)
+	}
+}
+
+func TestAgentWorkspaceToolUsesSameApplicationAction(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, _ := chat.Snapshot(ctx)
+	recordID := workspaceTestRecord(t, store, session.ID)
+	action := WorkspaceAction{Kind: "select", RecordSetID: recordID, Column: "City", Equals: "Prague", Limit: 1}
+	agent := &ADKConversation{}
+	toolContext := withWorkspaceObserver(ctx, func(a WorkspaceAction) (ContextReference, error) {
+		return chat.ApplyWorkspaceAction(ctx, a)
+	})
+	response := agent.runWorkspaceAction(toolContext, action)
+	if !response.OK || response.Kind != "selection" {
+		t.Fatalf("agent action = %+v", response)
+	}
+	viaUI, err := chat.ApplyWorkspaceAction(ctx, action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := chat.Snapshot(ctx)
+	if err != nil || len(saved.Workspace.Selections) != 2 {
+		t.Fatalf("shared application state = %+v, %v", saved.Workspace, err)
+	}
+	agentSelection := saved.Workspace.Selections[response.ID]
+	uiSelection := saved.Workspace.Selections[viaUI.ObjectID]
+	if !reflect.DeepEqual(agentSelection.Rows, uiSelection.Rows) || !reflect.DeepEqual(agentSelection.Columns, uiSelection.Columns) {
+		t.Fatalf("agent/UI diverged: %+v / %+v", agentSelection, uiSelection)
+	}
 }
 
 type scriptedLLM struct {
@@ -249,7 +338,7 @@ func TestRunDTQLTool_RealValidationExecutionAndEmptyResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`CREATE TABLE Customer (CustomerId INTEGER PRIMARY KEY, City TEXT); INSERT INTO Customer VALUES (1, 'Prague'), (2, 'Dublin')`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE Customer (CustomerId INTEGER PRIMARY KEY, City TEXT); INSERT INTO Customer VALUES (1, 'Prague'), (2, 'Dublin'); CREATE TABLE Invoice (InvoiceId INTEGER PRIMARY KEY, CustomerId INTEGER, Total NUMERIC); INSERT INTO Invoice VALUES (10, 1, 5.00), (11, 1, 7.00), (12, 2, 4.00)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -278,6 +367,35 @@ limit: 50`
 	response, err = conversation.runDTQL(context.Background(), executor, source, runDTQLArgs{DTQL: empty})
 	if err != nil || !response.OK || response.Rows != 0 {
 		t.Fatalf("empty DTQL response = %+v, err = %v", response, err)
+	}
+
+	conversation.resetTurn()
+	withLocalIDs := withSelectionParameters(context.Background(), func() map[string]any {
+		return map[string]any{"selection_1_c1": []any{int64(1), int64(2)}}
+	})
+	bound := "from: {name: Customer}\nwhere:\n  op: In\n  left: {field: CustomerId}\n  right: {param: selection_1_c1}\nlimit: 50"
+	response, err = conversation.runDTQL(withLocalIDs, executor, source, runDTQLArgs{DTQL: bound})
+	if err != nil || !response.OK || response.Rows != 2 {
+		t.Fatalf("locally bound DTQL response = %+v, err = %v", response, err)
+	}
+
+	conversation.resetTurn()
+	aggregated := `from: {name: Invoice}
+groupBy:
+  - field: CustomerId
+orderBy:
+  - field: TotalAmount
+    desc: true
+limit: 20
+columns:
+  - field: CustomerId
+  - aggregate: {function: COUNT, args: [{star: true}]}
+    as: OrderCount
+  - aggregate: {function: SUM, args: [{field: Total}]}
+    as: TotalAmount`
+	response, err = conversation.runDTQL(context.Background(), executor, source, runDTQLArgs{DTQL: aggregated})
+	if err != nil || !response.OK || response.Rows != 2 {
+		t.Fatalf("aggregated DTQL response = %+v, err = %v", response, err)
 	}
 
 	conversation.resetTurn()

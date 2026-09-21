@@ -108,7 +108,7 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 	if err != nil {
 		return Result{}, err
 	}
-	rows, err := collectRows(apResult.Reader)
+	rows, statistics, err := collectRows(apResult.Reader)
 	if err != nil {
 		return Result{}, err
 	}
@@ -125,7 +125,7 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 			collection = ref.Name()
 		}
 	}
-	return Result{Columns: columns, Rows: rows, Limitations: limitations, Collection: collection}, nil
+	return Result{Columns: columns, Rows: rows, Statistics: statistics.finalize(columns), Limitations: limitations, Collection: collection}, nil
 }
 
 // openSource opens sourceURL via pkg/dbcopy (sqlite:// through dalgo2sqlite,

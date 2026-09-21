@@ -65,6 +65,9 @@ func (e *Executor) RunSnapshot(ctx context.Context, collection string, recordset
 		return Result{}, err
 	}
 	result.SnapshotRecordset = &typed
+	// SQLite deliberately normalizes several values while applying policy. The
+	// restored recordset is the only source of truth for type-sensitive stats.
+	result.Statistics = StatisticsFromRecordset(typed)
 	return result, nil
 }
 

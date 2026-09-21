@@ -349,7 +349,14 @@ func (c *ADKConversation) AskWithContext(ctx context.Context, prompt, priorConte
 			}
 			usage.InputTokens += int64(reported.PromptTokenCount)
 			usage.OutputTokens += int64(reported.CandidatesTokenCount)
-			usage.TotalTokens += int64(reported.TotalTokenCount)
+			eventTotal := int64(reported.TotalTokenCount)
+			if eventTotal == 0 {
+				// Some OpenAI-compatible adapters omit totals even when they
+				// report input and output. Normalize each event so early exits
+				// and mixed-provider events still have an accurate sum.
+				eventTotal = int64(reported.PromptTokenCount) + int64(reported.CandidatesTokenCount)
+			}
+			usage.TotalTokens += eventTotal
 		}
 		if event.Content == nil {
 			continue
@@ -366,11 +373,6 @@ func (c *ADKConversation) AskWithContext(ctx context.Context, prompt, priorConte
 		}
 	}
 	queries := finalQueries(c.takePending())
-	if usage != nil && usage.TotalTokens == 0 {
-		// Some OpenAI-compatible adapters report input/output counts but omit
-		// a total. Sum those observed counts rather than showing a false zero.
-		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
-	}
 	turnText := strings.TrimSpace(text.String())
 	if len(queries) > 0 {
 		// The grid is the answer for successful data requests. Some small

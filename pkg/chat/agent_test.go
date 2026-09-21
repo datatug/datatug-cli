@@ -66,7 +66,9 @@ func TestADKConversation_PreservesToolResultWhenFinalModelCallFails(t *testing.T
 	doc := "from: {name: Customer}\nlimit: 1\n"
 	llm := &scriptedLLM{
 		responses: []*model.LLMResponse{
-			{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc}, genai.RoleModel)},
+			{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc}, genai.RoleModel), UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+				PromptTokenCount: 10, CandidatesTokenCount: 5,
+			}},
 			nil,
 		},
 		errs: []error{nil, errors.New("provider unavailable")},
@@ -82,6 +84,32 @@ func TestADKConversation_PreservesToolResultWhenFinalModelCallFails(t *testing.T
 	}
 	if executor.calls != 1 || len(turn.Queries) != 1 || turn.Queries[0].Err != nil {
 		t.Fatalf("turn = %+v, executor calls = %d", turn, executor.calls)
+	}
+	if turn.Usage == nil || turn.Usage.InputTokens != 10 || turn.Usage.OutputTokens != 5 || turn.Usage.TotalTokens != 15 {
+		t.Fatalf("early-return usage = %+v", turn.Usage)
+	}
+}
+
+func TestADKConversation_AggregatesMixedUsageTotals(t *testing.T) {
+	doc := "from: {name: Customer}\nlimit: 1\n"
+	llm := &scriptedLLM{responses: []*model.LLMResponse{
+		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc}, genai.RoleModel), UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount: 10, CandidatesTokenCount: 5, TotalTokenCount: 15,
+		}},
+		{Content: genai.NewContentFromText("Done", genai.RoleModel), UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount: 7, CandidatesTokenCount: 3,
+		}},
+	}}
+	conversation, err := NewADKConversation(llm, &fakeExecutor{}, "sqlite:///fixture.db", "- Customer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := conversation.Ask(context.Background(), "show one customer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Usage == nil || turn.Usage.InputTokens != 17 || turn.Usage.OutputTokens != 8 || turn.Usage.TotalTokens != 25 {
+		t.Fatalf("mixed usage = %+v", turn.Usage)
 	}
 }
 

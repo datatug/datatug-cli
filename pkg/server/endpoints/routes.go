@@ -16,6 +16,7 @@ func registerRoutes(path string, router router, wrapper wrapper, writeOnly bool,
 	path = strings.TrimRight(path, "/") + "/datatug"
 	route(router, wrapper, http.MethodGet, path+"/ping", Ping)
 	route(router, wrapper, http.MethodGet, path+"/agent-info", AgentInfo)
+	route(router, wrapper, http.MethodPost, path+"/chat/interpret", chatInterpretHandler)
 	projectsRoutes(path, router, wrapper, writeOnly, caps)
 	foldersRoutes(path, router, wrapper, caps)
 	queriesRoutes(path, router, wrapper, writeOnly, caps)

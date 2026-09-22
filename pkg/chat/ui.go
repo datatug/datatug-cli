@@ -783,6 +783,18 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				u.rebuildHistory(false)
 				return u, nil
 			}
+		case "shift+right":
+			if u.splitEnabled() && !u.workspaceFocused {
+				u.focusWorkspace()
+				u.rebuildHistory(false)
+				return u, nil
+			}
+		case "shift+left":
+			if u.workspaceFocused {
+				u.focusInput()
+				u.rebuildHistory(false)
+				return u, nil
+			}
 		}
 		if u.sessionPicker {
 			u.updateSessionPicker(msg)
@@ -952,7 +964,7 @@ func (u *UI) runSessionCommand(input string) {
 			snapshot, err = u.sessions.Delete(u.ctx)
 		}
 	case "/help":
-		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm\n\nGlobal: F2 mouse select/wheel • F6 workspace • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ grids • g JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • s sort • Enter details • Esc composer"})
+		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm\n\nGlobal: F2 mouse select/wheel • F6/Shift+→ workspace • Shift+← input • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ grids • g JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • s sort • Enter details • Esc composer"})
 	default:
 		err = fmt.Errorf("unknown chat command %q; type /help", command)
 	}
@@ -1460,12 +1472,12 @@ func (u *UI) statusLines() []string {
 	if !u.mouseCapture {
 		mouseHint = "F2 wheel"
 	}
-	segments := []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "Enter send", "F6 workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", mouseHint, "Ctrl+C quit"}
+	segments := []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "Enter send", "F6/Shift+→ workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", mouseHint, "Ctrl+C quit"}
 	if u.sessions != nil {
 		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.sessionTitle), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
 	}
 	if u.gridFocused {
-		segments = []string{"1 Table", "2 Charts", "3 Current row", "Tab panes (wide)", "Shift+↑↓ grids", "Esc input"}
+		segments = []string{"1 Table", "2 Charts", "3 Current row", "Tab panes (wide)", "Shift+↑↓ grids", "Shift+→ workspace", "Esc input"}
 		if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
 			grid := u.entries[u.activeGrid].grid
 			switch grid.activeView {
@@ -1485,9 +1497,9 @@ func (u *UI) statusLines() []string {
 		segments = []string{"JOIN candidates", "↑↓ source", "←→ relationship", "Space add JOIN", "Enter details", "Esc grid", "Tab input"}
 	}
 	if u.workspaceFocused {
-		segments = []string{"F6/Esc input", "←→ tabs", "↑↓ navigate", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", mouseHint}
+		segments = []string{"F6/Esc/Shift+← input", "←→ tabs", "↑↓ navigate", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", mouseHint}
 		if u.workspaceTab == 3 {
-			segments = []string{"F6/Esc input", "←→ tabs", "↑↓ browse", "Enter open grid", "a attach", "d dock", "r rename", "t/T tags", "/ search", "f filter", "x delete", mouseHint}
+			segments = []string{"F6/Esc/Shift+← input", "←→ tabs", "↑↓ browse", "Enter open grid", "a attach", "d dock", "r rename", "t/T tags", "/ search", "f filter", "x delete", mouseHint}
 			if u.bookmarkGridFocused {
 				segments = []string{"Tab list", "↑↓ rows", "←→ columns", "s sort", "a attach", "d dock", "Esc list"}
 			}

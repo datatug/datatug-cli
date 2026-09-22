@@ -211,6 +211,49 @@ func TestShiftArrowsNavigateBetweenGridsAndInput(t *testing.T) {
 	}
 }
 
+func TestShiftRightFocusesWorkspacePaneAndShiftLeftReturnsToInput(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width = 120
+	u.resizeChatPane()
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	if !u.workspaceFocused || u.input.Focused() {
+		t.Fatal("shift+right did not move focus to the workspace pane")
+	}
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModShift})
+	if u.workspaceFocused || !u.input.Focused() {
+		t.Fatal("shift+left did not return focus to the chat input")
+	}
+}
+
+func TestShiftRightIsIgnoredWhenPanesAreNotSplit(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width = 80
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	if u.workspaceFocused {
+		t.Fatal("shift+right focused the workspace pane without a split layout")
+	}
+}
+
+func TestShiftRightFromGridFocusesWorkspacePane(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width = 120
+	u.resizeChatPane()
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
+		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
+	}}}})
+	if !u.focusLatestGrid() {
+		t.Fatal("expected grid focus")
+	}
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	if !u.workspaceFocused || u.gridFocused {
+		t.Fatal("shift+right from a grid did not move focus to the workspace pane")
+	}
+}
+
 func TestEscapeFocusesComposerAndClearsActiveGridHighlight(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
 	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{

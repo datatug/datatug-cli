@@ -19,6 +19,9 @@ import (
 const maxGridHeight = 12
 
 var (
+	messageSurfaceBackground  = lipgloss.Color("235")
+	selectedMessageBackground = lipgloss.Color("237")
+
 	userStyle           = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("45"))
 	agentStyle          = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 	statusStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
@@ -29,7 +32,7 @@ var (
 	selectedCellStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220"))
 	activeCellStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235"))
 	inactiveCellStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Background(lipgloss.Color("232"))
-	activeMessageStyle  = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("235"))
+	activeMessageStyle  = lipgloss.NewStyle().Padding(0, 1).Background(messageSurfaceBackground)
 	inputSurfaceStyle   = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("236"))
 	statusSurfaceStyle  = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("233"))
 )
@@ -508,6 +511,8 @@ type UI struct {
 	entries             []historyEntry
 	activeGrid          int
 	gridFocused         bool
+	messageFocused      bool
+	selectedMessage     int
 	joinFocused         bool
 	workspaceFocused    bool
 	workspaceTab        int
@@ -564,19 +569,17 @@ func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI
 	}
 	input := textinput.New()
 	input.Placeholder = "Ask about your data..."
-	input.Prompt = "> "
+	input.Prompt = ""
 	inputStyles := input.Styles()
 	composerBackground := lipgloss.Color("236")
-	inputStyles.Focused.Prompt = inputStyles.Focused.Prompt.Background(composerBackground)
 	inputStyles.Focused.Text = inputStyles.Focused.Text.Background(composerBackground)
 	inputStyles.Focused.Placeholder = inputStyles.Focused.Placeholder.Background(composerBackground)
 	inputStyles.Focused.Suggestion = inputStyles.Focused.Suggestion.Background(composerBackground)
-	inputStyles.Blurred.Prompt = inputStyles.Blurred.Prompt.Background(composerBackground)
 	inputStyles.Blurred.Text = inputStyles.Blurred.Text.Background(composerBackground)
 	inputStyles.Blurred.Placeholder = inputStyles.Blurred.Placeholder.Background(composerBackground)
 	inputStyles.Blurred.Suggestion = inputStyles.Blurred.Suggestion.Background(composerBackground)
 	input.SetStyles(inputStyles)
-	input.SetWidth(contentWidth(80) - 2)
+	input.SetWidth(max(1, contentWidth(80)-3))
 	input.Focus()
 	bookmarkEditor := textinput.New()
 	bookmarkEditor.Prompt = "> "
@@ -591,6 +594,7 @@ func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI
 		input:             input,
 		bookmarkEditor:    bookmarkEditor,
 		activeGrid:        -1,
+		selectedMessage:   -1,
 		rangeAnchor:       -1,
 		dockGrids:         map[string]*gridState{},
 		explorerCollapsed: map[string]bool{},
@@ -766,20 +770,20 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			u.rebuildHistory(false)
 			return u, nil
 		case "shift+up":
-			if u.gridFocused {
-				u.focusAdjacentGrid(-1)
+			if u.gridFocused || u.messageFocused {
+				u.focusAdjacentSelectable(-1)
 				u.rebuildHistory(false)
 				return u, nil
 			}
 			if !u.busy && strings.TrimSpace(u.input.Value()) == "" {
-				if u.focusLatestGrid() {
+				if u.focusLatestSelectable() {
 					u.rebuildHistory(true)
 				}
 				return u, nil
 			}
 		case "shift+down":
-			if u.gridFocused {
-				u.focusAdjacentGrid(1)
+			if u.gridFocused || u.messageFocused {
+				u.focusAdjacentSelectable(1)
 				u.rebuildHistory(false)
 				return u, nil
 			}
@@ -812,6 +816,12 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				u.rebuildHistory(false)
 				return u, cmd
 			}
+		} else if u.messageFocused {
+			if msg.String() == "enter" && !u.busy {
+				u.editSelectedMessage()
+				u.rebuildHistory(false)
+				return u, nil
+			}
 		} else if msg.String() == "enter" && !u.busy {
 			prompt := strings.TrimSpace(u.input.Value())
 			if prompt != "" {
@@ -839,7 +849,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	if !u.gridFocused {
+	if !u.gridFocused && !u.messageFocused {
 		u.input, cmd = u.input.Update(message)
 		commands = append(commands, cmd)
 	}
@@ -850,7 +860,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (u *UI) resizeChatPane() {
 	innerWidth := u.chatPaneWidth()
-	u.input.SetWidth(max(1, innerWidth-2))
+	u.input.SetWidth(max(1, innerWidth-3))
 	u.history.SetWidth(innerWidth)
 	u.history.SetHeight(u.historyHeight())
 	u.rebuildHistory(false)
@@ -866,6 +876,8 @@ func (u *UI) loadSession(session ChatSession) {
 	u.entries = nil
 	u.activeGrid = -1
 	u.gridFocused = false
+	u.messageFocused = false
+	u.selectedMessage = -1
 	u.joinFocused = false
 	u.workspaceFocused = false
 	u.dockGridFocused = false
@@ -964,7 +976,7 @@ func (u *UI) runSessionCommand(input string) {
 			snapshot, err = u.sessions.Delete(u.ctx)
 		}
 	case "/help":
-		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm\n\nGlobal: F2 mouse select/wheel • F6/Shift+→ workspace • Shift+← input • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ grids • g JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • s sort • Enter details • Esc composer"})
+		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm\n\nGlobal: F2 mouse select/wheel • F6/Shift+→ workspace • Shift+← input • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ select grids/messages • g JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • s sort • Enter details • Esc composer"})
 	default:
 		err = fmt.Errorf("unknown chat command %q; type /help", command)
 	}
@@ -1144,29 +1156,72 @@ func (u *UI) focusLatestGrid() bool {
 	return false
 }
 
-func (u *UI) focusAdjacentGrid(direction int) bool {
-	for i := u.activeGrid + direction; i >= 0 && i < len(u.entries); i += direction {
-		if u.focusGrid(i) {
+// focusLatestSelectable focuses the bottom-most history stop, which is either
+// a result grid or a user message that can be re-edited.
+func (u *UI) focusLatestSelectable() bool {
+	for i := len(u.entries) - 1; i >= 0; i-- {
+		if u.focusStop(i) {
 			return true
+		}
+	}
+	return false
+}
+
+// focusAdjacentSelectable moves the history focus to the previous (-1) or next
+// (+1) selectable stop. Running past the last stop returns focus to the composer.
+func (u *UI) focusAdjacentSelectable(direction int) {
+	for i := u.selectionIndex() + direction; i >= 0 && i < len(u.entries); i += direction {
+		if u.focusStop(i) {
+			return
 		}
 	}
 	if direction > 0 {
 		u.focusInput()
+	}
+}
+
+func (u *UI) selectionIndex() int {
+	if u.gridFocused {
+		return u.activeGrid
+	}
+	if u.messageFocused {
+		return u.selectedMessage
+	}
+	return len(u.entries)
+}
+
+// focusStop focuses entry index when it is a selectable history stop: a result
+// grid or a user message. Other entries are skipped by the caller.
+func (u *UI) focusStop(index int) bool {
+	if index < 0 || index >= len(u.entries) {
+		return false
+	}
+	if u.entries[index].grid != nil {
+		return u.focusGrid(index)
+	}
+	if u.entries[index].role == "You" {
+		u.focusMessage(index)
 		return true
 	}
 	return false
+}
+
+func (u *UI) clearGridHighlight() {
+	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
+		u.entries[u.activeGrid].grid.setFocused(false)
+	}
 }
 
 func (u *UI) focusGrid(index int) bool {
 	if index < 0 || index >= len(u.entries) || u.entries[index].grid == nil {
 		return false
 	}
-	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
-		u.entries[u.activeGrid].grid.setFocused(false)
-	}
+	u.clearGridHighlight()
 	u.activeGrid = index
 	u.rangeAnchor = -1
 	u.gridFocused = true
+	u.messageFocused = false
+	u.selectedMessage = -1
 	u.joinFocused = false
 	u.workspaceFocused = false
 	u.input.Blur()
@@ -1174,11 +1229,34 @@ func (u *UI) focusGrid(index int) bool {
 	return true
 }
 
-func (u *UI) focusInput() {
-	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
-		u.entries[u.activeGrid].grid.setFocused(false)
-	}
+// focusMessage selects a user message so it can be re-edited with Enter.
+func (u *UI) focusMessage(index int) {
+	u.clearGridHighlight()
 	u.gridFocused = false
+	u.messageFocused = true
+	u.selectedMessage = index
+	u.joinFocused = false
+	u.workspaceFocused = false
+	u.dockGridFocused = false
+	u.input.Blur()
+}
+
+// editSelectedMessage loads the selected user message back into the composer
+// with the cursor at the end, ready to resend or edit.
+func (u *UI) editSelectedMessage() {
+	if u.selectedMessage < 0 || u.selectedMessage >= len(u.entries) {
+		return
+	}
+	u.input.SetValue(u.entries[u.selectedMessage].text)
+	u.focusInput()
+	u.input.CursorEnd()
+}
+
+func (u *UI) focusInput() {
+	u.clearGridHighlight()
+	u.gridFocused = false
+	u.messageFocused = false
+	u.selectedMessage = -1
 	u.joinFocused = false
 	u.workspaceFocused = false
 	u.dockGridFocused = false
@@ -1186,10 +1264,10 @@ func (u *UI) focusInput() {
 }
 
 func (u *UI) focusWorkspace() {
-	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
-		u.entries[u.activeGrid].grid.setFocused(false)
-	}
+	u.clearGridHighlight()
 	u.gridFocused = false
+	u.messageFocused = false
+	u.selectedMessage = -1
 	u.joinFocused = false
 	u.workspaceFocused = true
 	u.input.Blur()
@@ -1249,7 +1327,7 @@ func formatLimitations(limitations []secureread.Limitation) string {
 func (u *UI) rebuildHistory(scrollToBottom bool) {
 	innerWidth := u.chatPaneWidth()
 	u.history.SetWidth(innerWidth)
-	u.input.SetWidth(max(1, innerWidth-2))
+	u.input.SetWidth(max(1, innerWidth-3))
 	blocks := make([]string, 0, len(u.entries))
 	activeBlock := -1
 	for entryIndex, entry := range u.entries {
@@ -1264,18 +1342,26 @@ func (u *UI) rebuildHistory(scrollToBottom bool) {
 			blocks = append(blocks, block)
 			continue
 		}
-		label := agentStyle.Render(sanitizeTerminalText(entry.role) + ":")
 		if entry.role == "You" {
-			label = userStyle.Render(sanitizeTerminalText(entry.role) + ":")
+			selected := u.messageFocused && entryIndex == u.selectedMessage
+			if selected {
+				activeBlock = len(blocks)
+			}
+			blocks = append(blocks, userMessageView(entry.text, innerWidth, selected))
+			continue
 		}
-		message := label + " " + sanitizeTerminalText(entry.text)
+		label := agentStyle.Background(messageSurfaceBackground).Render(sanitizeTerminalText(entry.role) + ": ")
+		message := label + lipgloss.NewStyle().Background(messageSurfaceBackground).Render(sanitizeTerminalText(entry.text))
 		if entry.role == "Access" {
 			message = strings.ReplaceAll(message, "; ", "\n")
-		}
-		if entry.role != "Access" {
+		} else {
 			message = activeMessageStyle.Width(innerWidth).Render(message)
 		}
 		blocks = append(blocks, message)
+	}
+	if len(blocks) > 0 {
+		// Leave a margin above the first block so history is not glued to the top bar.
+		blocks[0] = "\n" + blocks[0]
 	}
 	u.history.SetContent(strings.Join(blocks, "\n\n"))
 	if scrollToBottom {
@@ -1284,6 +1370,33 @@ func (u *UI) rebuildHistory(scrollToBottom bool) {
 	if activeBlock >= 0 {
 		u.ensureBlockVisible(blocks, activeBlock)
 	}
+}
+
+// userMessageView renders a user prompt as an OpenCode-style card: a left
+// accent bar that brightens with selection, an elevated background, vertical
+// padding around the text and the same background behind every segment so the
+// text never resets to the terminal background.
+func userMessageView(text string, width int, selected bool) string {
+	width = max(1, width)
+	background := messageSurfaceBackground
+	barStyle := inactiveBorderStyle
+	if selected {
+		background = selectedMessageBackground
+		barStyle = activeBorderStyle
+	}
+	interior := max(1, width-1)
+	label := userStyle.Background(background).Render("You: ")
+	body := lipgloss.NewStyle().Background(background).Render(sanitizeTerminalText(text))
+	card := lipgloss.NewStyle().
+		Background(background).
+		Padding(1, 1).
+		Width(interior).
+		Render(label + body)
+	lines := strings.Split(card, "\n")
+	for i, line := range lines {
+		lines[i] = barStyle.Render("┃") + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 func joinAreaView(entry *historyEntry, focused bool, width int) string {
@@ -1388,14 +1501,42 @@ func renderedLineCount(content string, width int) int {
 	return lines
 }
 
+// composerView renders the input as an OpenCode-style surface: a left accent
+// bar that tracks focus, an elevated background, a leading blank line and a
+// half-block fade along the bottom edge.
+func (u *UI) composerView(width int) string {
+	width = max(1, width)
+	barStyle := inactiveBorderStyle
+	if u.input.Focused() {
+		barStyle = activeBorderStyle
+	}
+	bar := barStyle.Render("┃")
+	interior := max(1, width-1)
+	surface := inputSurfaceStyle.Width(interior)
+	top := bar + surface.Render("")
+	text := bar + surface.Render(u.input.View())
+	fade := barStyle.Render("╹") + lipgloss.NewStyle().
+		Foreground(lipgloss.Color("236")).
+		Width(interior).
+		MaxWidth(interior).
+		Render(strings.Repeat("▀", interior))
+	return lipgloss.JoinVertical(lipgloss.Left, top, text, fade)
+}
+
 func (u *UI) View() tea.View {
 	innerWidth := u.chatPaneWidth()
+	// Pin to the latest message across a height change so a growing composer or
+	// status line cannot silently push the newest content out of view.
+	atBottom := u.history.AtBottom()
 	u.history.SetHeight(u.historyHeight())
+	if atBottom {
+		u.history.GotoBottom()
+	}
 	spacer := strings.Repeat(" ", innerWidth)
 	if !u.history.AtBottom() {
 		spacer = scrollDownCue(innerWidth)
 	}
-	input := inputSurfaceStyle.Width(innerWidth).Render(u.input.View())
+	input := u.composerView(innerWidth)
 	attachments := u.attachmentLine(innerWidth)
 	statusText := strings.Join(u.statusLines(), "\n")
 	status := statusSurfaceStyle.Width(contentWidth(u.width)).Render(statusStyle.Render(statusText))
@@ -1476,6 +1617,9 @@ func (u *UI) statusLines() []string {
 	if u.sessions != nil {
 		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.sessionTitle), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
 	}
+	if u.messageFocused {
+		segments = []string{"message selected", "Enter edit", "Shift+↑↓ navigate", "Esc input", mouseHint}
+	}
 	if u.gridFocused {
 		segments = []string{"1 Table", "2 Charts", "3 Current row", "Tab panes (wide)", "Shift+↑↓ grids", "Shift+→ workspace", "Esc input"}
 		if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
@@ -1542,7 +1686,7 @@ func wrapStatusSegments(segments []string, maxWidth int) []string {
 }
 
 func (u *UI) historyHeight() int {
-	return max(1, u.height-4-len(u.statusLines()))
+	return max(1, u.height-6-len(u.statusLines()))
 }
 
 func withRootGutter(content string, width int) string {

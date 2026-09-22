@@ -37,7 +37,7 @@ var agentPort int
 // means nothing was written. timeouts_test.go pins the relationship.
 const (
 	requestReadTimeout   = 10 * time.Second
-	responseWriteTimeout = 30 * time.Second
+	responseWriteTimeout = 60 * time.Second
 )
 
 type HttpServer struct {

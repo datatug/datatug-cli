@@ -211,6 +211,49 @@ func TestShiftArrowsNavigateBetweenGridsAndInput(t *testing.T) {
 	}
 }
 
+func TestShiftRightFocusesWorkspacePaneAndShiftLeftReturnsToInput(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width = 120
+	u.resizeChatPane()
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	if !u.workspaceFocused || u.input.Focused() {
+		t.Fatal("shift+right did not move focus to the workspace pane")
+	}
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModShift})
+	if u.workspaceFocused || !u.input.Focused() {
+		t.Fatal("shift+left did not return focus to the chat input")
+	}
+}
+
+func TestShiftRightIsIgnoredWhenPanesAreNotSplit(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width = 80
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	if u.workspaceFocused {
+		t.Fatal("shift+right focused the workspace pane without a split layout")
+	}
+}
+
+func TestShiftRightFromGridFocusesWorkspacePane(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width = 120
+	u.resizeChatPane()
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
+		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
+	}}}})
+	if !u.focusLatestGrid() {
+		t.Fatal("expected grid focus")
+	}
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	if !u.workspaceFocused || u.gridFocused {
+		t.Fatal("shift+right from a grid did not move focus to the workspace pane")
+	}
+}
+
 func TestEscapeFocusesComposerAndClearsActiveGridHighlight(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
 	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
@@ -266,11 +309,72 @@ func TestShiftNavigationKeepsPrecedingMessageVisible(t *testing.T) {
 		}}}})
 	}
 	u.rebuildHistory(true)
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	// The newest stop is a grid, then its user message, then the older grid.
+	for range 3 {
+		_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	}
 	visible := ansi.Strip(u.history.View())
 	if !strings.Contains(visible, "You: older question") || !strings.Contains(visible, "older") {
 		t.Fatalf("focused grid lost its preceding message context:\n%s", visible)
+	}
+}
+
+func TestShiftArrowsSelectUserMessageAndEnterLoadsItIntoComposer(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.entries = append(u.entries, historyEntry{role: "You", text: "older question"})
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
+		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
+	}}}})
+	u.entries = append(u.entries, historyEntry{role: "You", text: "newer question"})
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
+		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 2}}},
+	}}}})
+	newerMessage := len(u.entries) - 2
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	if !u.gridFocused {
+		t.Fatal("shift+up did not focus the newest grid")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift})
+	if !u.messageFocused || u.selectedMessage != newerMessage {
+		t.Fatalf("message focus = %v/%d, want true/%d", u.messageFocused, u.selectedMessage, newerMessage)
+	}
+	if !strings.Contains(ansi.Strip(u.View().Content), "message selected") {
+		t.Fatal("status line does not announce the selected message")
+	}
+
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if u.messageFocused || !u.input.Focused() {
+		t.Fatal("Enter did not return focus to the composer")
+	}
+	if got := u.input.Value(); got != "newer question" {
+		t.Fatalf("composer value = %q, want %q", got, "newer question")
+	}
+	if got := u.input.Position(); got != len("newer question") {
+		t.Fatalf("cursor position = %d, want %d", got, len("newer question"))
+	}
+}
+
+func TestUserMessageCardHasBarPaddingAndSelectionState(t *testing.T) {
+	normal := userMessageView("hello", 40, false)
+	selected := userMessageView("hello", 40, true)
+	lines := strings.Split(normal, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("user message card has %d rows, want 3 (top pad, text, bottom pad)", len(lines))
+	}
+	for _, line := range lines {
+		if got := ansi.StringWidth(line); got != 40 {
+			t.Fatalf("user message line rendered at %d cells, want 40: %q", got, line)
+		}
+		if !strings.HasPrefix(ansi.Strip(line), "┃") {
+			t.Fatalf("user message line lacks the left accent bar: %q", ansi.Strip(line))
+		}
+	}
+	if !strings.Contains(ansi.Strip(normal), "You: hello") {
+		t.Fatalf("user message card missing its label:\n%s", ansi.Strip(normal))
+	}
+	if normal == selected {
+		t.Fatal("selected user message is indistinguishable from an unselected one")
 	}
 }
 
@@ -390,8 +494,8 @@ func TestUIComposerSpacerShowsScrollDownCueAndClickJumpsToLatest(t *testing.T) {
 	if strings.TrimSpace(lines[cueRow]) != "" {
 		t.Fatalf("composer spacer should be blank at the bottom: %q", lines[cueRow])
 	}
-	if !strings.Contains(lines[cueRow+2], "Ask about your data") {
-		t.Fatalf("composer does not follow attachment row: %q", lines[cueRow+2])
+	if !strings.Contains(lines[cueRow+3], "Ask about your data") {
+		t.Fatalf("composer does not follow attachment row: %q", lines[cueRow+3])
 	}
 
 	_, _ = u.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
@@ -705,16 +809,35 @@ func TestUIComposerPromptUsesComposerBackground(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
 	styles := u.input.Styles()
 	for name, style := range map[string]lipgloss.Style{
-		"focused prompt":      styles.Focused.Prompt,
 		"focused placeholder": styles.Focused.Placeholder,
 		"focused text":        styles.Focused.Text,
-		"blurred prompt":      styles.Blurred.Prompt,
 		"blurred placeholder": styles.Blurred.Placeholder,
 		"blurred text":        styles.Blurred.Text,
 	} {
 		if style.GetBackground() == nil {
 			t.Errorf("%s has no composer background", name)
 		}
+	}
+}
+
+func TestComposerAccentBarTracksFocus(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	focused := u.composerView(40)
+	u.input.Blur()
+	if u.input.Focused() {
+		t.Fatal("input did not blur")
+	}
+	blurred := u.composerView(40)
+	for _, line := range strings.Split(focused, "\n") {
+		if got := ansi.StringWidth(line); got != 40 {
+			t.Fatalf("composer line rendered at %d cells, want 40: %q", got, line)
+		}
+	}
+	if !strings.Contains(ansi.Strip(focused), "┃") || !strings.Contains(ansi.Strip(focused), "▀") {
+		t.Fatalf("composer lacks its accent bar or fade edge:\n%s", focused)
+	}
+	if focused == blurred {
+		t.Fatal("composer accent bar did not change with focus")
 	}
 }
 
@@ -946,7 +1069,7 @@ func TestSessionHelpDocumentsRecordsetAndExistingGridControls(t *testing.T) {
 	}
 	help := u.entries[len(u.entries)-1].text
 	for _, want := range []string{
-		"1 Table", "2 Charts", "3 Current row", "Tab panes", "Shift+↑↓ grids",
+		"1 Table", "2 Charts", "3 Current row", "Tab panes", "Shift+↑↓ select",
 		"g JOINs", "Space row", "c cell", "r range", "a attach", "d dock", "b bookmark", "s sort", "Enter details", "Esc composer",
 		"F2", "F6", "Ctrl+C",
 	} {

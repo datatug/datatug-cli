@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -34,9 +35,42 @@ var (
 )
 
 type historyEntry struct {
-	role string
-	text string
-	grid *gridState
+	role               string
+	text               string
+	grid               *gridState
+	recordSetID        string
+	joinCandidates     []JoinCandidate
+	joinSourceIndex    int
+	joinCandidateIndex int
+	joinDetails        bool
+}
+
+type joinGroup struct {
+	source     RelationInstance
+	candidates []JoinCandidate
+}
+
+func (e *historyEntry) joinGroups() []joinGroup {
+	var groups []joinGroup
+	for _, candidate := range e.joinCandidates {
+		if len(groups) == 0 || groups[len(groups)-1].source.ID != candidate.Source.ID {
+			groups = append(groups, joinGroup{source: candidate.Source})
+		}
+		groups[len(groups)-1].candidates = append(groups[len(groups)-1].candidates, candidate)
+	}
+	return groups
+}
+
+func (e *historyEntry) selectedJoin() (JoinCandidate, bool) {
+	groups := e.joinGroups()
+	if e.joinSourceIndex < 0 || e.joinSourceIndex >= len(groups) {
+		return JoinCandidate{}, false
+	}
+	group := groups[e.joinSourceIndex]
+	if e.joinCandidateIndex < 0 || e.joinCandidateIndex >= len(group.candidates) {
+		return JoinCandidate{}, false
+	}
+	return group.candidates[e.joinCandidateIndex], true
 }
 
 type gridState struct {
@@ -46,7 +80,14 @@ type gridState struct {
 	selectedColumn int
 	rowIndex       int
 	width          int
+	naturalWidth   int
 	focused        bool
+	activeView     recordsetView
+	secondaryFocus bool
+	charts         []ChartCandidate
+	chartIndex     int
+	inspector      viewport.Model
+	inspectorRow   int
 }
 
 // gridTable is the small DataTug-owned adapter around bubble-table. Keeping
@@ -74,8 +115,19 @@ func (t *gridTable) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	return cmd, true
 }
 
-func newGridState(model GridModel, title string, width int) *gridState {
-	g := &gridState{model: model, title: normalizeGridTitle(title), width: width}
+func newGridState(model GridModel, title string, width int, statistics ...secureread.RecordSetStatistics) *gridState {
+	g := &gridState{
+		model:        model,
+		title:        normalizeGridTitle(title),
+		width:        width,
+		inspector:    viewport.New(viewport.WithWidth(1), viewport.WithHeight(1)),
+		inspectorRow: -1,
+	}
+	g.inspector.SoftWrap = true
+	g.naturalWidth = naturalGridWidth(model)
+	if len(statistics) > 0 {
+		g.charts = InferChartCandidates(statistics[0])
+	}
 	g.rebuild()
 	return g
 }
@@ -85,9 +137,6 @@ func (g *gridState) rebuild() {
 		g.width = 80
 	}
 	previousOffset := g.table.ColumnOffset()
-	if g.table.model.TotalRows() > 0 {
-		g.rowIndex = g.table.Cursor()
-	}
 	tableWidth := g.tableWidth()
 	columns := make([]bubbletable.Column, len(g.model.Columns))
 	for columnIndex := range g.model.Columns {
@@ -132,7 +181,7 @@ func (g *gridState) rebuild() {
 		WithFooterVisibility(false).
 		WithHeaderVisibility(true).
 		WithKeyMap(keys).
-		Focused(g.focused).
+		Focused(g.focused && !g.secondaryFocus).
 		WithRowStyleFunc(func(input bubbletable.RowStyleFuncInput) lipgloss.Style {
 			if input.Index != g.rowIndex {
 				if g.focused {
@@ -172,7 +221,59 @@ func (g *gridState) setFocused(focused bool) {
 		return
 	}
 	g.focused = focused
-	g.table.model = g.table.model.Focused(focused)
+	g.table.model = g.table.model.Focused(focused && !g.secondaryFocus)
+}
+
+func (g *gridState) setSecondaryFocus(focused bool) {
+	if g.activeView == recordsetTable {
+		focused = false
+	}
+	g.secondaryFocus = focused
+	g.table.model = g.table.model.Focused(g.focused && !focused)
+}
+
+func (g *gridState) setRecordsetView(view recordsetView, paneWidth int) {
+	g.activeView = view
+	if view == recordsetTable {
+		g.setSecondaryFocus(false)
+		return
+	}
+	if !g.recordsetLayout(paneWidth).split {
+		g.setSecondaryFocus(true)
+	}
+}
+
+func (g *gridState) selectedSourceRow() int {
+	if g.rowIndex < 0 || g.rowIndex >= len(g.model.SourceRows) {
+		return -1
+	}
+	return g.model.SourceRows[g.rowIndex]
+}
+
+func (g *gridState) restoreSourceRow(sourceRow int) {
+	if sourceRow >= 0 {
+		for index, source := range g.model.SourceRows {
+			if source == sourceRow {
+				g.rowIndex = index
+				break
+			}
+		}
+	}
+	if len(g.model.Rows) == 0 {
+		g.rowIndex = 0
+		return
+	}
+	g.rowIndex = max(0, min(g.rowIndex, len(g.model.Rows)-1))
+}
+
+// replaceModel retains the RecordSet identity selected by this presentation,
+// rather than retaining a mutable display index after sorting.
+func (g *gridState) replaceModel(model GridModel) {
+	sourceRow := g.selectedSourceRow()
+	g.model = model
+	g.naturalWidth = naturalGridWidth(model)
+	g.restoreSourceRow(sourceRow)
+	g.rebuild()
 }
 
 func gridColumnKey(index int) string { return fmt.Sprintf("column-%d", index) }
@@ -387,25 +488,74 @@ type turnMessage struct {
 	err  error
 }
 
+type joinMessage struct {
+	err error
+}
+
 // UI is the Bubble Tea chat model: a scrollable history viewport, inline
 // bubble-table components, and a fixed bottom input.
 type UI struct {
-	ctx          context.Context
-	conversation Conversation
-	sessions     *SessionChat
-	sessionID    string
-	sessionTitle string
-	modelName    string
-	history      viewport.Model
-	input        textinput.Model
-	entries      []historyEntry
-	activeGrid   int
-	gridFocused  bool
-	mouseCapture bool
-	busy         bool
-	width        int
-	height       int
+	ctx                 context.Context
+	conversation        Conversation
+	sessions            *SessionChat
+	sessionID           string
+	sessionTitle        string
+	snapshot            ChatSession
+	catalog             ProjectCatalog
+	modelName           string
+	history             viewport.Model
+	input               textinput.Model
+	entries             []historyEntry
+	activeGrid          int
+	gridFocused         bool
+	joinFocused         bool
+	workspaceFocused    bool
+	workspaceTab        int
+	explorerIndex       int
+	explorerOffset      int
+	explorerCollapsed   map[string]bool
+	projectDetails      bool
+	dockIndex           int
+	dockGridFocused     bool
+	dockGrids           map[string]*gridState
+	bookmarkItems       []Bookmark
+	bookmarkIndex       int
+	bookmarkGrid        *gridState
+	bookmarkGridID      string
+	bookmarkGridFocused bool
+	bookmarkMode        string
+	bookmarkEditor      textinput.Model
+	bookmarkSearch      string
+	bookmarkTags        []string
+	rangeAnchor         int
+	rangeColumn         int
+	sessionPicker       bool
+	sessionPickerIndex  int
+	pickerSessions      []ChatSession
+	projectPicker       bool
+	projectPickerIndex  int
+	projectChoices      []ProjectChoice
+	selectedProject     string
+	chatPanePercent     int
+	mouseCapture        bool
+	busy                bool
+	width               int
+	height              int
 }
+
+// ProjectChoice identifies a configured DataTug project, not a database.
+type ProjectChoice struct {
+	Key    string
+	Title  string
+	Detail string
+}
+
+func (u *UI) SetProjectChoices(choices []ProjectChoice) {
+	u.projectChoices = append([]ProjectChoice(nil), choices...)
+	u.projectPickerIndex = 0
+}
+
+func (u *UI) SelectedProject() string { return u.selectedProject }
 
 // NewUI creates the terminal chat model without starting a real terminal.
 func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI {
@@ -428,18 +578,26 @@ func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI
 	input.SetStyles(inputStyles)
 	input.SetWidth(contentWidth(80) - 2)
 	input.Focus()
+	bookmarkEditor := textinput.New()
+	bookmarkEditor.Prompt = "> "
+	bookmarkEditor.SetWidth(36)
 	history := viewport.New(viewport.WithWidth(contentWidth(80)), viewport.WithHeight(20))
 	history.SoftWrap = true
 	return &UI{
-		ctx:          ctx,
-		conversation: conversation,
-		modelName:    modelName,
-		history:      history,
-		input:        input,
-		activeGrid:   -1,
-		mouseCapture: true,
-		width:        80,
-		height:       24,
+		ctx:               ctx,
+		conversation:      conversation,
+		modelName:         modelName,
+		history:           history,
+		input:             input,
+		bookmarkEditor:    bookmarkEditor,
+		activeGrid:        -1,
+		rangeAnchor:       -1,
+		dockGrids:         map[string]*gridState{},
+		explorerCollapsed: map[string]bool{},
+		chatPanePercent:   56,
+		mouseCapture:      true,
+		width:             80,
+		height:            24,
 	}
 }
 
@@ -448,6 +606,7 @@ func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI
 func NewSessionUI(ctx context.Context, sessions *SessionChat, modelName string) (*UI, error) {
 	u := NewUI(ctx, sessions, modelName)
 	u.sessions = sessions
+	u.catalog = sessions.catalog
 	snapshot, err := sessions.Snapshot(u.ctx)
 	if err != nil {
 		return nil, err
@@ -472,11 +631,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tea.WindowSizeMsg:
 		u.width, u.height = msg.Width, msg.Height
-		innerWidth := contentWidth(msg.Width)
-		u.input.SetWidth(max(1, innerWidth-2))
-		u.history.SetWidth(innerWidth)
-		u.history.SetHeight(u.historyHeight())
-		u.rebuildHistory(false)
+		u.resizeChatPane()
 	case turnMessage:
 		u.busy = false
 		u.history.SetHeight(u.historyHeight())
@@ -503,8 +658,34 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		u.rebuildHistory(true)
 		return u, nil
+	case joinMessage:
+		u.busy = false
+		if msg.err != nil {
+			u.focusInput()
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: publicJoinError(msg.err)})
+			u.rebuildHistory(true)
+			return u, nil
+		}
+		if u.sessions != nil {
+			snapshot, err := u.sessions.Snapshot(u.ctx)
+			if err != nil {
+				u.focusInput()
+				u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Couldn't restore the joined result."})
+			} else {
+				u.loadSession(snapshot)
+				u.focusLatestGrid()
+			}
+		}
+		u.rebuildHistory(true)
+		return u, nil
 	case tea.MouseClickMsg:
-		if u.mouseCapture && msg.Button == tea.MouseLeft && msg.Y == u.historyHeight() &&
+		if u.mouseCapture && msg.Button == tea.MouseLeft && msg.Y == u.historyHeight()+2 {
+			if ref, ok := u.attachmentCloseAt(msg.X - responsiveGutter(u.width)); ok {
+				u.performWorkspaceAction(WorkspaceAction{Kind: "detach", Reference: ref})
+				return u, nil
+			}
+		}
+		if u.mouseCapture && msg.Button == tea.MouseLeft && msg.Y == u.historyHeight()+1 &&
 			msg.X >= responsiveGutter(u.width) && msg.X < u.width-responsiveGutter(u.width) && !u.history.AtBottom() {
 			u.focusInput()
 			u.rebuildHistory(false)
@@ -515,6 +696,41 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return u, tea.Quit
+		case "ctrl+left", "ctrl+right":
+			if u.splitEnabled() {
+				delta := -5
+				if msg.String() == "ctrl+right" {
+					delta = 5
+				}
+				u.chatPanePercent = max(40, min(75, u.chatPanePercent+delta))
+				u.resizeChatPane()
+			}
+			return u, nil
+		case "f3":
+			if len(u.projectChoices) > 0 {
+				u.projectPicker = !u.projectPicker
+				u.sessionPicker = false
+				if u.projectPicker {
+					u.focusWorkspace()
+				}
+			}
+			return u, nil
+		case "f4":
+			u.sessionPicker = !u.sessionPicker
+			u.projectPicker = false
+			if u.sessionPicker {
+				u.focusWorkspace()
+				u.loadPickerSessions()
+			}
+			return u, nil
+		case "f6":
+			if u.workspaceFocused {
+				u.focusInput()
+			} else {
+				u.focusWorkspace()
+			}
+			u.rebuildHistory(false)
+			return u, nil
 		case "ctrl+g":
 			if u.focusLatestGrid() {
 				u.rebuildHistory(true)
@@ -524,6 +740,28 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			u.mouseCapture = !u.mouseCapture
 			return u, nil
 		case "esc":
+			if u.joinFocused {
+				u.joinFocused = false
+				if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
+					u.entries[u.activeGrid].grid.setFocused(true)
+				}
+				u.rebuildHistory(false)
+				return u, nil
+			}
+			if u.bookmarkMode != "" {
+				u.bookmarkMode = ""
+				u.bookmarkEditor.Blur()
+				return u, nil
+			}
+			if u.bookmarkGridFocused {
+				u.bookmarkGridFocused = false
+				if u.bookmarkGrid != nil {
+					u.bookmarkGrid.setFocused(false)
+				}
+				return u, nil
+			}
+			u.sessionPicker = false
+			u.projectPicker = false
 			u.focusInput()
 			u.rebuildHistory(false)
 			return u, nil
@@ -545,6 +783,17 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				u.rebuildHistory(false)
 				return u, nil
 			}
+		}
+		if u.sessionPicker {
+			u.updateSessionPicker(msg)
+			return u, nil
+		}
+		if u.projectPicker {
+			return u, u.updateProjectPicker(msg)
+		}
+		if u.workspaceFocused {
+			u.updateWorkspaceKey(msg)
+			return u, nil
 		}
 		if u.gridFocused {
 			if cmd, handled := u.updateGrid(msg); handled {
@@ -570,6 +819,10 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return u, u.ask(prompt)
 			}
 			return u, nil
+		} else if msg.String() == "ctrl+d" && len(u.snapshot.Workspace.Attachments) > 0 {
+			last := u.snapshot.Workspace.Attachments[len(u.snapshot.Workspace.Attachments)-1]
+			u.performWorkspaceAction(WorkspaceAction{Kind: "detach", Reference: last})
+			return u, nil
 		}
 	}
 
@@ -583,16 +836,58 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return u, tea.Batch(commands...)
 }
 
+func (u *UI) resizeChatPane() {
+	innerWidth := u.chatPaneWidth()
+	u.input.SetWidth(max(1, innerWidth-2))
+	u.history.SetWidth(innerWidth)
+	u.history.SetHeight(u.historyHeight())
+	u.rebuildHistory(false)
+	for _, grid := range u.dockGrids {
+		grid.width = u.workspacePaneWidth()
+		grid.rebuild()
+	}
+}
+
 func (u *UI) loadSession(session ChatSession) {
 	u.sessionID, u.sessionTitle = session.ID, session.Title
+	u.snapshot = session
 	u.entries = nil
 	u.activeGrid = -1
 	u.gridFocused = false
+	u.joinFocused = false
+	u.workspaceFocused = false
+	u.dockGridFocused = false
+	u.bookmarkGridFocused = false
+	u.bookmarkGrid = nil
+	u.bookmarkGridID = ""
+	u.bookmarkMode = ""
+	u.rangeAnchor = -1
+	u.workspaceTab = workspaceTabIndex(session.Workspace.ActiveTab)
+	u.dockGrids = map[string]*gridState{}
 	u.input.Focus()
 	for _, message := range session.Messages {
 		if message.Kind == "grid" {
 			record := session.RecordSets[message.RecordSetID]
-			u.entries = append(u.entries, historyEntry{grid: newGridState(NewGridModel(record.Result), record.Title, contentWidth(u.width))})
+			entry := historyEntry{grid: newGridState(NewGridModel(record.Result), record.Title, u.chatPaneWidth(), record.Result.Statistics), recordSetID: record.ID}
+			if u.sessions != nil {
+				if candidates, err := u.sessions.JoinCandidates(u.ctx, record.ID); err == nil {
+					entry.joinCandidates = candidates
+					sort.Slice(entry.joinCandidates, func(i, j int) bool {
+						left, right := entry.joinCandidates[i], entry.joinCandidates[j]
+						if left.Source.ID != right.Source.ID {
+							return left.Source.ID < right.Source.ID
+						}
+						if left.Target.Relation != right.Target.Relation {
+							return left.Target.Relation < right.Target.Relation
+						}
+						if left.ConstraintID != right.ConstraintID {
+							return left.ConstraintID < right.ConstraintID
+						}
+						return left.ID < right.ID
+					})
+				}
+			}
+			u.entries = append(u.entries, entry)
 			if note := formatLimitations(record.Result.Limitations); note != "" {
 				u.entries = append(u.entries, historyEntry{role: "Access", text: note})
 			}
@@ -601,6 +896,8 @@ func (u *UI) loadSession(session ChatSession) {
 		u.entries = append(u.entries, historyEntry{role: message.Role, text: message.Text})
 	}
 	u.history.SetHeight(u.historyHeight())
+	u.rebuildDockGrids()
+	_ = u.refreshBookmarks()
 	u.rebuildHistory(true)
 }
 
@@ -655,7 +952,7 @@ func (u *UI) runSessionCommand(input string) {
 			snapshot, err = u.sessions.Delete(u.ctx)
 		}
 	case "/help":
-		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "/new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm"})
+		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm\n\nGlobal: F2 mouse select/wheel • F6 workspace • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ grids • g JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • s sort • Enter details • Esc composer"})
 	default:
 		err = fmt.Errorf("unknown chat command %q; type /help", command)
 	}
@@ -672,7 +969,77 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	g := u.entries[u.activeGrid].grid
+	if u.joinFocused {
+		entry := &u.entries[u.activeGrid]
+		groups := entry.joinGroups()
+		if len(groups) == 0 {
+			u.joinFocused = false
+			g.setFocused(true)
+			return nil, true
+		}
+		switch msg.String() {
+		case "up", "k":
+			if entry.joinSourceIndex > 0 {
+				entry.joinSourceIndex--
+				entry.joinCandidateIndex = 0
+			}
+		case "down", "j":
+			if entry.joinSourceIndex+1 < len(groups) {
+				entry.joinSourceIndex++
+				entry.joinCandidateIndex = 0
+			}
+		case "left", "h":
+			if entry.joinCandidateIndex > 0 {
+				entry.joinCandidateIndex--
+			}
+		case "right", "l":
+			if entry.joinCandidateIndex+1 < len(groups[entry.joinSourceIndex].candidates) {
+				entry.joinCandidateIndex++
+			}
+		case "enter":
+			entry.joinDetails = !entry.joinDetails
+		case "space":
+			candidate, ok := entry.selectedJoin()
+			if !ok || u.sessions == nil {
+				return nil, true
+			}
+			u.busy = true
+			return u.applyJoin(entry.recordSetID, candidate.ID), true
+		case "tab":
+			u.focusInput()
+		default:
+			return nil, true
+		}
+		return nil, true
+	}
 	switch msg.String() {
+	case "1":
+		g.setRecordsetView(recordsetTable, u.chatPaneWidth())
+		return nil, true
+	case "2":
+		g.setRecordsetView(recordsetCharts, u.chatPaneWidth())
+		return nil, true
+	case "3":
+		g.setRecordsetView(recordsetCurrentRow, u.chatPaneWidth())
+		return nil, true
+	case "tab":
+		if g.activeView != recordsetTable && g.recordsetLayout(u.chatPaneWidth()).split {
+			g.setSecondaryFocus(!g.secondaryFocus)
+			return nil, true
+		}
+		u.focusInput()
+		return nil, true
+	}
+	if g.activeView != recordsetTable && (g.secondaryFocus || !g.recordsetLayout(u.chatPaneWidth()).split) {
+		return g.updateSecondary(msg)
+	}
+	switch msg.String() {
+	case "g":
+		if len(u.entries[u.activeGrid].joinCandidates) > 0 {
+			u.joinFocused = true
+			g.setFocused(false)
+		}
+		return nil, true
 	case "left", "h":
 		if g.selectedColumn > 0 {
 			g.selectedColumn--
@@ -691,29 +1058,68 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		if g.rowIndex > 0 {
 			g.rowIndex--
 			g.table.SetCursor(g.rowIndex)
+			g.inspectorRow = -1
 		}
 		return nil, true
 	case "down", "j":
 		if g.rowIndex+1 < len(g.model.Rows) {
 			g.rowIndex++
 			g.table.SetCursor(g.rowIndex)
+			g.inspectorRow = -1
 		}
 		return nil, true
 	case "enter":
-		// Reserved for row details/drill-down. Keep it consumed while the
-		// grid is focused so it cannot accidentally submit the chat input.
+		u.selectFromGrid("row")
+		u.setWorkspaceTab(1)
+		return nil, true
+	case "space":
+		u.selectFromGrid("row")
+		return nil, true
+	case "c":
+		u.selectFromGrid("cell")
+		return nil, true
+	case "r":
+		u.selectFromGrid("range")
+		return nil, true
+	case "a":
+		ref := ContextReference{Kind: "recordset", ObjectID: u.entries[u.activeGrid].recordSetID, Title: g.title}
+		u.toggleAttachment(ref)
+		return nil, true
+	case "d":
+		ref := ContextReference{Kind: "recordset", ObjectID: u.entries[u.activeGrid].recordSetID, Title: g.title}
+		if selection, ok := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]; ok {
+			if view := u.snapshot.Workspace.Views[selection.ViewID]; view.RecordSetID == ref.ObjectID {
+				ref = ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}
+			}
+		}
+		u.performWorkspaceAction(WorkspaceAction{Kind: "dock", Reference: ref})
+		return nil, true
+	case "b":
+		ref := ContextReference{Kind: "recordset", ObjectID: u.entries[u.activeGrid].recordSetID, Title: g.title}
+		if selection, ok := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]; ok {
+			if view := u.snapshot.Workspace.Views[selection.ViewID]; view.RecordSetID == ref.ObjectID {
+				ref = ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}
+			}
+		}
+		u.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_create", Reference: ref})
 		return nil, true
 	case "s":
+		sourceRow := g.selectedSourceRow()
 		g.model.Sort(g.selectedColumn)
+		g.restoreSourceRow(sourceRow)
 		g.rebuild()
+		if recordSetID := u.entries[u.activeGrid].recordSetID; recordSetID != "" {
+			u.syncRecordSetSort(recordSetID, g.model)
+		}
 		g.table.Focus()
-		return nil, true
-	case "tab":
-		u.focusInput()
 		return nil, true
 	}
 	cmd, _ := g.table.Update(msg)
+	previousSourceRow := g.selectedSourceRow()
 	g.rowIndex = g.table.Cursor()
+	if previousSourceRow != g.selectedSourceRow() {
+		g.inspectorRow = -1
+	}
 	return cmd, true
 }
 
@@ -740,14 +1146,17 @@ func (u *UI) focusAdjacentGrid(direction int) bool {
 }
 
 func (u *UI) focusGrid(index int) bool {
-	if index < 0 || index >= len(u.entries) || u.entries[index].grid == nil || len(u.entries[index].grid.model.Rows) == 0 {
+	if index < 0 || index >= len(u.entries) || u.entries[index].grid == nil {
 		return false
 	}
 	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
 		u.entries[u.activeGrid].grid.setFocused(false)
 	}
 	u.activeGrid = index
+	u.rangeAnchor = -1
 	u.gridFocused = true
+	u.joinFocused = false
+	u.workspaceFocused = false
 	u.input.Blur()
 	u.entries[index].grid.setFocused(true)
 	return true
@@ -758,7 +1167,20 @@ func (u *UI) focusInput() {
 		u.entries[u.activeGrid].grid.setFocused(false)
 	}
 	u.gridFocused = false
+	u.joinFocused = false
+	u.workspaceFocused = false
+	u.dockGridFocused = false
 	u.input.Focus()
+}
+
+func (u *UI) focusWorkspace() {
+	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
+		u.entries[u.activeGrid].grid.setFocused(false)
+	}
+	u.gridFocused = false
+	u.joinFocused = false
+	u.workspaceFocused = true
+	u.input.Blur()
 }
 
 func (u *UI) ask(prompt string) tea.Cmd {
@@ -768,17 +1190,24 @@ func (u *UI) ask(prompt string) tea.Cmd {
 	}
 }
 
+func (u *UI) applyJoin(recordSetID string, candidateID JoinCandidateID) tea.Cmd {
+	return func() tea.Msg {
+		_, err := u.sessions.ApplyJoinCandidate(u.ctx, recordSetID, candidateID)
+		return joinMessage{err: err}
+	}
+}
+
 func (u *UI) appendTurn(turn Turn) {
 	if turn.Text != "" {
 		u.entries = append(u.entries, historyEntry{role: "DataTug", text: turn.Text})
 	}
 	for _, query := range turn.Queries {
 		if query.Err != nil {
-			u.entries = append(u.entries, historyEntry{role: "DataTug", text: friendlyQueryError(query.Err)})
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: publicQueryError(query.Err, query.Parameters)})
 			continue
 		}
 		grid := NewGridModel(query.Result)
-		u.entries = append(u.entries, historyEntry{grid: newGridState(grid, query.Title, contentWidth(u.width))})
+		u.entries = append(u.entries, historyEntry{grid: newGridState(grid, query.Title, u.chatPaneWidth(), query.Result.Statistics), recordSetID: query.RecordSetID})
 		if limitationText := formatLimitations(query.Result.Limitations); limitationText != "" {
 			u.entries = append(u.entries, historyEntry{role: "Access", text: limitationText})
 		}
@@ -806,24 +1235,21 @@ func formatLimitations(limitations []secureread.Limitation) string {
 }
 
 func (u *UI) rebuildHistory(scrollToBottom bool) {
-	innerWidth := contentWidth(u.width)
+	innerWidth := u.chatPaneWidth()
 	u.history.SetWidth(innerWidth)
 	u.input.SetWidth(max(1, innerWidth-2))
 	blocks := make([]string, 0, len(u.entries))
 	activeBlock := -1
 	for entryIndex, entry := range u.entries {
 		if entry.grid != nil {
-			if entry.grid.width != innerWidth {
-				entry.grid.width = innerWidth
-				entry.grid.rebuild()
-				if u.gridFocused && u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid == entry.grid {
-					entry.grid.setFocused(true)
-				}
-			}
 			if u.gridFocused && entryIndex == u.activeGrid {
 				activeBlock = len(blocks)
 			}
-			blocks = append(blocks, entry.grid.view())
+			block := entry.grid.recordsetView(innerWidth)
+			if len(entry.joinCandidates) > 0 {
+				block += "\n" + joinAreaView(&entry, u.joinFocused && u.activeGrid == entryIndex, innerWidth)
+			}
+			blocks = append(blocks, block)
 			continue
 		}
 		label := agentStyle.Render(sanitizeTerminalText(entry.role) + ":")
@@ -848,6 +1274,67 @@ func (u *UI) rebuildHistory(scrollToBottom bool) {
 	}
 }
 
+func joinAreaView(entry *historyEntry, focused bool, width int) string {
+	groups := entry.joinGroups()
+	if len(groups) == 0 {
+		return ""
+	}
+	lines := []string{statusStyle.Render("  You can JOIN  [g]")}
+	for sourceIndex, group := range groups {
+		source := sanitizeTerminalText(group.source.Relation)
+		if group.source.Alias != "" && !strings.EqualFold(group.source.Alias, group.source.Relation) {
+			source = sanitizeTerminalText(group.source.Alias) + " (" + source + ")"
+		}
+		prefix := "  " + source + ": "
+		counts := map[string]int{}
+		for _, candidate := range group.candidates {
+			counts[strings.ToLower(candidate.Target.Relation)]++
+		}
+		labels := make([]string, len(group.candidates))
+		for index, candidate := range group.candidates {
+			label := sanitizeTerminalText(candidate.Target.Relation)
+			if counts[strings.ToLower(candidate.Target.Relation)] > 1 {
+				fields := make([]string, len(candidate.Fields))
+				for i, pair := range candidate.Fields {
+					fields[i] = sanitizeTerminalText(pair.SourceField)
+				}
+				label += " (" + strings.Join(fields, ", ") + ")"
+			}
+			if candidate.Cardinality == "one-to-many" {
+				label += " →*"
+			} else {
+				label += " →1"
+			}
+			labels[index] = label
+		}
+		plain := prefix + strings.Join(labels, "  ·  ")
+		if focused && sourceIndex == entry.joinSourceIndex {
+			selected := min(entry.joinCandidateIndex, len(labels)-1)
+			selectedLabel := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Render(labels[selected])
+			parts := append([]string(nil), labels...)
+			parts[selected] = selectedLabel
+			highlighted := activeTitleStyle.Render(prefix) + strings.Join(parts, "  ·  ")
+			if lipgloss.Width(highlighted) <= width {
+				lines = append(lines, highlighted)
+			} else {
+				lines = append(lines, ansi.Truncate(activeTitleStyle.Render(prefix)+selectedLabel+statusStyle.Render(fmt.Sprintf("  (%d/%d)", selected+1, len(labels))), width, "…"))
+			}
+		} else {
+			lines = append(lines, statusStyle.Render(ansi.Truncate(plain, width, "…")))
+		}
+	}
+	if focused && entry.joinDetails {
+		if candidate, ok := entry.selectedJoin(); ok {
+			lines = append(lines, statusStyle.Render("  Foreign key • "+candidate.Cardinality))
+			for _, pair := range candidate.Fields {
+				line := "  " + candidate.Source.Relation + "." + pair.SourceField + " → " + candidate.Target.Relation + "." + pair.TargetField
+				lines = append(lines, statusStyle.Render(ansi.Truncate(sanitizeTerminalText(line), width, "…")))
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (u *UI) ensureBlockVisible(blocks []string, blockIndex int) {
 	width := max(1, u.history.Width())
 	start := 0
@@ -857,6 +1344,12 @@ func (u *UI) ensureBlockVisible(blocks []string, blockIndex int) {
 	blockHeight := renderedLineCount(blocks[blockIndex], width)
 	top := u.history.YOffset()
 	height := max(1, u.history.Height())
+	if u.joinFocused {
+		// The JOIN controls sit below the grid. With a tall grid, anchoring
+		// the block's top would make the focused controls invisible.
+		u.history.SetYOffset(max(0, start+blockHeight-height))
+		return
+	}
 	target := start
 	if blockIndex > 0 {
 		previousHeight := renderedLineCount(blocks[blockIndex-1], width)
@@ -884,16 +1377,27 @@ func renderedLineCount(content string, width int) int {
 }
 
 func (u *UI) View() tea.View {
-	innerWidth := contentWidth(u.width)
+	innerWidth := u.chatPaneWidth()
 	u.history.SetHeight(u.historyHeight())
 	spacer := strings.Repeat(" ", innerWidth)
 	if !u.history.AtBottom() {
 		spacer = scrollDownCue(innerWidth)
 	}
 	input := inputSurfaceStyle.Width(innerWidth).Render(u.input.View())
+	attachments := u.attachmentLine(innerWidth)
 	statusText := strings.Join(u.statusLines(), "\n")
-	status := statusSurfaceStyle.Width(innerWidth).Render(statusStyle.Render(statusText))
-	content := lipgloss.JoinVertical(lipgloss.Left, u.history.View(), spacer, input, status)
+	status := statusSurfaceStyle.Width(contentWidth(u.width)).Render(statusStyle.Render(statusText))
+	chat := lipgloss.JoinVertical(lipgloss.Left, u.history.View(), spacer, attachments, input)
+	bodyHeight := max(1, u.height-1-len(u.statusLines()))
+	body := chat
+	if u.splitEnabled() {
+		workspace := u.workspaceView(u.workspacePaneWidth(), bodyHeight)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, chat, strings.Repeat("│\n", max(0, bodyHeight-1))+"│", workspace)
+	} else if u.workspaceFocused {
+		body = u.workspaceView(contentWidth(u.width), bodyHeight)
+	}
+	top := u.topBar(contentWidth(u.width))
+	content := lipgloss.JoinVertical(lipgloss.Left, top, body, status)
 	content = withRootGutter(content, u.width)
 	view := tea.NewView(content)
 	view.AltScreen = true
@@ -903,6 +1407,45 @@ func (u *UI) View() tea.View {
 		view.MouseMode = tea.MouseModeNone
 	}
 	return view
+}
+
+func (u *UI) topBar(width int) string {
+	project := u.catalog.Title
+	if project == "" {
+		project = "Project"
+	}
+	session := u.sessionTitle
+	if session == "" {
+		session = "New chat"
+	}
+	label := fmt.Sprintf("DataTug │ Project: %s [F3] │ Session: %s [F4] │ View: %s [F6] │ Help: /help", sanitizeTerminalText(project), sanitizeTerminalText(session), workspaceTabs[u.workspaceTab])
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Width(width).Render(ansi.Truncate(label, width, "…"))
+}
+
+func (u *UI) attachmentLine(width int) string {
+	if len(u.snapshot.Workspace.Attachments) == 0 {
+		return padAnsiLine(" ", width)
+	}
+	labels := make([]string, 0, len(u.snapshot.Workspace.Attachments))
+	for _, ref := range u.snapshot.Workspace.Attachments {
+		labels = append(labels, "["+sanitizeTerminalText(ref.Title)+" ×]")
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("111")).Background(lipgloss.Color("235")).Width(width).Render(ansi.Truncate(strings.Join(labels, " "), width, "…"))
+}
+
+func (u *UI) attachmentCloseAt(x int) (ContextReference, bool) {
+	if x < 0 || x >= u.chatPaneWidth() {
+		return ContextReference{}, false
+	}
+	position := 0
+	for _, ref := range u.snapshot.Workspace.Attachments {
+		titleWidth := ansi.StringWidth(sanitizeTerminalText(ref.Title))
+		if x == position+titleWidth+2 { // the × in "[title ×]"
+			return ref, true
+		}
+		position += titleWidth + 5 // bracket, space, ×, bracket, gap
+	}
+	return ContextReference{}, false
 }
 
 func scrollDownCue(width int) string {
@@ -917,14 +1460,40 @@ func (u *UI) statusLines() []string {
 	if !u.mouseCapture {
 		mouseHint = "F2 wheel"
 	}
-	segments := []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "Enter send", "Ctrl+G grid", mouseHint, "Ctrl+C quit"}
+	segments := []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "Enter send", "F6 workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", mouseHint, "Ctrl+C quit"}
 	if u.sessions != nil {
-		segments = append([]string{"session: " + sanitizeTerminalText(u.sessionTitle), "/sessions"}, segments...)
+		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.sessionTitle), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
 	}
 	if u.gridFocused {
-		segments = []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "↑↓ rows", "←→ columns", "s sort", "Enter reserved", "Esc/Tab input", mouseHint, "Ctrl+C quit"}
+		segments = []string{"1 Table", "2 Charts", "3 Current row", "Tab panes (wide)", "Shift+↑↓ grids", "Esc input"}
+		if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
+			grid := u.entries[u.activeGrid].grid
+			switch grid.activeView {
+			case recordsetCharts:
+				segments = append(segments, "↑↓ chart candidates")
+			case recordsetCurrentRow:
+				segments = append(segments, "↑↓ inspector")
+			default:
+				segments = append(segments, "↑↓ rows", "←→ columns", "g joins")
+			}
+		}
 		if u.sessions != nil {
 			segments = append([]string{"session: " + sanitizeTerminalText(u.sessionTitle)}, segments...)
+		}
+	}
+	if u.joinFocused {
+		segments = []string{"JOIN candidates", "↑↓ source", "←→ relationship", "Space add JOIN", "Enter details", "Esc grid", "Tab input"}
+	}
+	if u.workspaceFocused {
+		segments = []string{"F6/Esc input", "←→ tabs", "↑↓ navigate", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", mouseHint}
+		if u.workspaceTab == 3 {
+			segments = []string{"F6/Esc input", "←→ tabs", "↑↓ browse", "Enter open grid", "a attach", "d dock", "r rename", "t/T tags", "/ search", "f filter", "x delete", mouseHint}
+			if u.bookmarkGridFocused {
+				segments = []string{"Tab list", "↑↓ rows", "←→ columns", "s sort", "a attach", "d dock", "Esc list"}
+			}
+			if u.bookmarkMode != "" {
+				segments = []string{"Bookmark " + u.bookmarkMode, "Enter apply", "Esc cancel"}
+			}
 		}
 	}
 	if u.busy {
@@ -961,7 +1530,7 @@ func wrapStatusSegments(segments []string, maxWidth int) []string {
 }
 
 func (u *UI) historyHeight() int {
-	return max(1, u.height-2-len(u.statusLines()))
+	return max(1, u.height-4-len(u.statusLines()))
 }
 
 func withRootGutter(content string, width int) string {

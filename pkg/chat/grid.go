@@ -76,6 +76,9 @@ type GridModel struct {
 	// for future typed interactions without leaking database types into the UI
 	// component adapter.
 	RawRows [][]any
+	// SourceRows maps a displayed (possibly sorted) row back to its immutable
+	// RecordSet row index for durable selections.
+	SourceRows []int
 
 	sortColumn int
 	sortDesc   bool
@@ -84,16 +87,23 @@ type GridModel struct {
 // NewGridModel converts a structured query result into display cells while
 // preserving explicit result-column order.
 func NewGridModel(result secureread.Result) GridModel {
-	model := GridModel{Columns: make([]GridColumn, len(result.Columns)), Rows: make([][]string, len(result.Rows)), RawRows: make([][]any, len(result.Rows)), sortColumn: -1}
+	model := GridModel{Columns: make([]GridColumn, len(result.Columns)), Rows: make([][]string, len(result.Rows)), RawRows: make([][]any, len(result.Rows)), SourceRows: make([]int, len(result.Rows)), sortColumn: -1}
 	for i, name := range result.Columns {
 		model.Columns[i] = GridColumn{Name: sanitizeTerminalText(name), Numeric: columnIsNumeric(result.Rows, name)}
 	}
 	for rowIndex, row := range result.Rows {
+		model.SourceRows[rowIndex] = rowIndex
 		cells := make([]string, len(result.Columns))
 		raw := make([]any, len(result.Columns))
 		for columnIndex, name := range result.Columns {
-			raw[columnIndex] = row.Data[name]
-			cells[columnIndex] = sanitizeTerminalText(formatGridValue(name, raw[columnIndex]))
+			value, present := row.Data[name]
+			if !present {
+				// Sparse cell-range selections leave unselected cells absent;
+				// distinguish them visually from an explicitly selected SQL NULL.
+				continue
+			}
+			raw[columnIndex] = value
+			cells[columnIndex] = sanitizeTerminalText(formatGridValue(name, value))
 		}
 		model.Rows[rowIndex] = cells
 		model.RawRows[rowIndex] = raw
@@ -161,6 +171,12 @@ func (m *GridModel) Sort(column int) {
 	if column < 0 || column >= len(m.Columns) {
 		return
 	}
+	if len(m.SourceRows) != len(m.Rows) {
+		m.SourceRows = make([]int, len(m.Rows))
+		for i := range m.SourceRows {
+			m.SourceRows[i] = i
+		}
+	}
 	if m.sortColumn == column {
 		m.sortDesc = !m.sortDesc
 	} else {
@@ -192,10 +208,12 @@ func (m *GridModel) Sort(column int) {
 	if len(m.RawRows) > 0 {
 		rawRows := make([][]any, len(m.Rows))
 		copy(rawRows, m.RawRows)
+		sourceRows := append([]int(nil), m.SourceRows...)
 		sortedRawRows := make([][]any, len(m.Rows))
 		for i, index := range order {
 			m.Rows[i] = rows[index]
 			sortedRawRows[i] = rawRows[index]
+			m.SourceRows[i] = sourceRows[index]
 		}
 		m.RawRows = sortedRawRows
 		return

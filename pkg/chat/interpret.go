@@ -88,10 +88,21 @@ func validateProviderURL(raw string) error {
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
 		return errors.New("invalid provider base URL")
 	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	ip := net.ParseIP(host)
+	if ip != nil {
+		if !ip.IsLoopback() {
+			return errors.New("provider base URL host is not allowed")
+		}
+	} else if host != "localhost" {
+		switch host {
+		case "api.deepseek.com", "api.anthropic.com", "api.openai.com", "openrouter.ai":
+		default:
+			return errors.New("provider base URL host is not allowed")
+		}
+	}
 	if u.Scheme != "https" {
-		host := u.Hostname()
-		if u.Scheme != "http" || (host != "localhost" && net.ParseIP(host) == nil) ||
-			(host != "localhost" && !net.ParseIP(host).IsLoopback()) {
+		if u.Scheme != "http" || (host != "localhost" && (ip == nil || !ip.IsLoopback())) {
 			return errors.New("provider base URL must use HTTPS (HTTP is allowed for loopback)")
 		}
 	}

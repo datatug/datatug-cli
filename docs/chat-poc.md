@@ -2,11 +2,16 @@
 
 The [original Phase 1 request](chat-phase1-original-prompt.md) is preserved
 verbatim for historical context.
+The [Phase 3 request and its later continuation](chat-phase3-original-prompt.md)
+are preserved for historical context.
+The [original Phase 4 request](chat-phase4-original-prompt.md) is also preserved
+verbatim; this link does not imply Phase 4 has been implemented.
 
-Phase 2 now adds durable, session-scoped chat state and RecordSet snapshots.
+Phase 2 added durable, session-scoped chat state and RecordSet snapshots.
 See [the Phase 2 design](chat-phase2-design.md) for storage and lifecycle
-details. The original AI → DTQL → secure execution → grid path below is
-unchanged.
+details. Phase 3 adds session-scoped workspace state: project objects,
+structured attachments, Views/Selections, and docks. The original AI → DTQL
+→ secure execution → grid path below is unchanged.
 
 This phase proves one vertical slice:
 
@@ -119,13 +124,26 @@ exactly like other policy-secured DataTug reads.
   one; `/rename <title>` renames the current session. `/clear confirm` removes
   its history and cached results, and `/delete confirm` removes the session.
   Run `/help` to see these commands in the terminal.
+- On wide terminals, the right-hand workspace has Project, Selected, and Docked
+  tabs. `F6` focuses it; Left/Right changes tabs, and Escape returns to input.
+  `F3` chooses a configured local DataTug project; switching rebuilds the chat
+  runtime and opens that project's own scoped sessions. In Project, Up/Down
+  navigates the tree, Enter expands/collapses branches or shows leaf details,
+  and Space attaches or detaches an object. In a result grid, Space selects a
+  row, `c` a cell, and `r` starts or finishes a row/cell range. The Selected
+  workspace tab can attach that Selection explicitly; `d` docks the active
+  RecordSet or selection. Attachments appear above the composer and can be
+  removed there. On wide terminals, Ctrl+Left/Right resizes the divider.
+  On narrow terminals, `F6` toggles the workspace in the available width.
 
 Sessions and result snapshots live in a private SQLite file under
 `~/.datatug/chat/`, keyed by the canonical project path. DataTug reopens the
 latest session for the selected environment, database, principal, and policy
-fingerprint. A different role or changed policy set cannot reopen the old
-scope's cached rows. Grids restore from saved snapshots without rerunning
-queries. A first request gives a new session a short title; `/rename` can
+fingerprint and the current source registry. A different role, changed policy
+set, or repointed data source cannot reopen the old scope's cached rows.
+Compatible older sessions migrate when their saved source still matches.
+Grids restore from saved snapshots without rerunning queries. A first request
+gives a new session a short title; `/rename` can
 change it at any time.
 
 ## Deliberate boundaries
@@ -134,12 +152,16 @@ change it at any time.
   does not independently introspect the live database for every prompt.
 - The PoC's `secureread.Result` remains the execution boundary. Phase 2 saves
   immutable copies in session-owned RecordSets with IDs, DTQL, source identity,
-  and originating turn. Selections, bookmarks, and a workspace remain out of
-  scope.
+  and originating turn. Phase 3 keeps Views, Selections, attachments, and docks
+  separate from those immutable results. Bookmarks remain out of scope.
+- The agent receives opaque selection references, column names, counts, and
+  local parameter names, but not selected row/cell values. DataTug resolves
+  selected values locally when it executes a follow-up DTQL query.
 - Current DTQL supports one root relation and deliberately rejects joins. A
   request such as "tracks by AC/DC" therefore receives an honest unsupported
   response instead of an SQL fallback. Invoice and Customer scenarios need no
-  join and run end to end.
+  join and run end to end. Single-table aggregates, such as invoice totals by
+  CustomerId, are supported; joining customer names into that result is not.
 - Every Chat-generated DTQL query must include a row limit from 1 to 1000. The
   agent defaults to 100 when the user gives no count, and DataTug validates the
   bound before executing the query.

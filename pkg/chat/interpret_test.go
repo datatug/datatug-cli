@@ -52,9 +52,14 @@ func TestInterpretSanitizesProviderFailure(t *testing.T) {
 }
 
 func TestInterpretRejectsUnsafeURL(t *testing.T) {
-	for _, base := range []string{"http://api.deepseek.com", "https://api.deepseek.com?key=secret", "https://user:secret@api.deepseek.com", "http://192.168.1.2:8989"} {
+	for _, base := range []string{"http://api.deepseek.com", "https://api.deepseek.com?key=secret", "https://user:secret@api.deepseek.com", "http://192.168.1.2:8989", "https://192.168.1.2:8989", "https://internal.example.com", "https://api.deepseek.com.evil.example"} {
 		if err := validateProviderURL(base); err == nil {
 			t.Errorf("accepted unsafe provider URL %q", base)
+		}
+	}
+	for _, base := range []string{"https://api.deepseek.com", "https://api.anthropic.com", "https://api.openai.com/v1", "https://openrouter.ai/api/v1"} {
+		if err := validateProviderURL(base); err != nil {
+			t.Errorf("rejected supported provider URL %q: %v", base, err)
 		}
 	}
 }

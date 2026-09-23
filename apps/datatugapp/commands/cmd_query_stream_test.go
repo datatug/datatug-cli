@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,7 +25,7 @@ const streamingJoinDTQL = `from:
   name: Invoice
   alias: o
   joins:
-    - from: {database: countries, name: Country, alias: c}
+    - from: {database: countries, name: Country, alias: c, scan: {orderBy: [{field: id}], limit: 10000}}
       on: [{left: {field: country_id, source: o}, op: '==', right: {field: id, source: c}}]
 columns:
   - {field: id, source: o, as: invoiceId}
@@ -159,6 +160,13 @@ func TestStreamingShapeAndColumns(t *testing.T) {
 	if !isBoundedFederatedRowShape(query) {
 		t.Fatal("flat join rejected")
 	}
+	withoutCap, err := dtql.Deserialize([]byte(strings.Replace(streamingJoinDTQL, ", scan: {orderBy: [{field: id}], limit: 10000}", "", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isBoundedFederatedRowShape(withoutCap) {
+		t.Fatal("uncapped dimension accepted")
+	}
 	if got := explicitStreamColumns(query); len(got) != 2 || got[0] != "invoiceId" || got[1] != "countryName" {
 		t.Fatalf("columns: %v", got)
 	}
@@ -168,5 +176,87 @@ func TestStreamingShapeAndColumns(t *testing.T) {
 	}
 	if isBoundedFederatedRowShape(ordered) {
 		t.Fatal("ordered join accepted as bounded stream")
+	}
+}
+
+func TestSavedFederatedMoneyAndStreamingFormats(t *testing.T) {
+	urls := streamFixture(t, 3)
+	ordersPath := strings.TrimPrefix(urls["orders"], "sqlite://")
+	countriesPath := strings.TrimPrefix(urls["countries"], "sqlite://")
+	orders, err := sql.Open("sqlite", ordersPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer orders.Close()
+	if _, err := orders.Exec(`ALTER TABLE Invoice ADD COLUMN amount TEXT`); err != nil {
+		t.Fatal(err)
+	}
+	for id, amount := range []string{"0.10", "0.20", "0.30"} {
+		if _, err := orders.Exec(`UPDATE Invoice SET amount=? WHERE id=?`, amount, id+1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	countries, err := sql.Open("sqlite", countriesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer countries.Close()
+	if _, err := countries.Exec(`ALTER TABLE Country ADD COLUMN population INTEGER`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := countries.Exec(`UPDATE Country SET population=2`); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("datatug-project.json", `{"id":"stream-test","title":"Stream test"}`)
+	write("environments/local/local.env.json", `{"id":"local","dbServers":[{"driver":"sqlite3","catalogs":["orders","countries"]}]}`)
+	write("environments/local/catalogs/orders/orders.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q}`, ordersPath))
+	write("environments/local/catalogs/countries/countries.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q}`, countriesPath))
+	moneyDoc := `from:
+  database: orders
+  name: Invoice
+  alias: o
+  joins:
+    - from: {database: countries, name: Country, alias: c}
+      on: [{left: {field: country_id, source: o}, op: '==', right: {field: id, source: c}}]
+groupBy: [{field: id, source: c}, {field: population, source: c}]
+money: {minorUnitScale: 2, divisionScale: 4, rounding: halfEven}
+columns:
+  - {aggregate: {function: sum, args: [{field: amount, source: o}]}, as: totalSales}
+  - {binary: {op: '/', left: {aggregate: {function: sum, args: [{field: amount, source: o}]}}, right: {field: population, source: c}}, as: salesPerCapita}
+`
+	write("queries/sales/money.query.json", `{"id":"money","type":"DTQL"}`)
+	write("queries/sales/money.query.dtql", moneyDoc)
+	write("queries/sales/rows.query.json", `{"id":"rows","type":"DTQL"}`)
+	write("queries/sales/rows.query.dtql", streamingJoinDTQL)
+	stdout, stderr, code := runQuery(t, "", "--project", dir, "--query", "sales/money", "--env", "local", "--format", "json")
+	if code != 0 {
+		t.Fatalf("money exit=%d stderr=%s", code, stderr)
+	}
+	if !strings.Contains(stdout, `"totalSales":"0.6"`) || !strings.Contains(stdout, `"salesPerCapita":"0.3"`) {
+		t.Fatalf("money: %s", stdout)
+	}
+	for _, format := range []string{"jsonl", "csv"} {
+		stdout, stderr, code = runQuery(t, "", "--project", dir, "--query", "sales/rows", "--env", "local", "--format", format)
+		if code != 0 {
+			t.Fatalf("%s exit=%d stderr=%s", format, code, stderr)
+		}
+		if strings.Count(stdout, "\n") != 3+map[bool]int{true: 1, false: 0}[format == "csv"] {
+			t.Fatalf("%s rows: %q", format, stdout)
+		}
+	}
+	_, stderr, code = runQuery(t, "", "--project", dir, "--query", "sales/money", "--env", "local", "--format", "jsonl")
+	if code == 0 || !strings.Contains(stderr, "streaming jsonl requires one flat equality join") {
+		t.Fatalf("money JSONL should reject materialization: exit=%d stderr=%s", code, stderr)
 	}
 }

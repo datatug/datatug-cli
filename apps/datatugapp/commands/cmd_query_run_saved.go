@@ -352,7 +352,7 @@ func runStreamedSavedDTQL(ctx context.Context, out, progress io.Writer, o queryO
 		return true, err
 	}
 	if !isBoundedFederatedRowShape(parsed) {
-		return true, fmt.Errorf("streaming %s supports one flat equality join without ordering, aggregation, or subqueries; use --format json for this query", o.format)
+		return true, fmt.Errorf("streaming %s requires one flat equality join without ordering, aggregation, or subqueries and an explicit dimension scan with a stable orderBy and limit of 1..10000; add scan: {orderBy: [{field: id}], limit: 10000} to the joined source or use --format json", o.format)
 	}
 	stream, err := executor.StreamFederatedDTQL(ctx, []byte(queryDef.Text), urls, variables)
 	if err != nil {
@@ -379,8 +379,10 @@ func runStreamedSavedDTQL(ctx context.Context, out, progress io.Writer, o queryO
 }
 
 // DALgo's row stream keeps the joined dimension in memory and reads the fact
-// side incrementally for this shape. Refuse its generic fallback here because
-// that evaluator can collect the large fact side before the first output row.
+// side incrementally for this shape. An explicit dimension scan limit caps the
+// hash index at 10000 rows. This never adds or changes a query limit: callers
+// choose that result semantics. Refuse generic fallback, which can collect
+// the large fact side before the first output row.
 func isBoundedFederatedRowShape(query dal.StructuredQuery) bool {
 	if query.From() == nil || dal.HasAggregation(query) || dal.HasSubquery(query) || len(query.OrderBy()) != 0 || len(query.From().Joins()) != 1 {
 		return false
@@ -396,6 +398,9 @@ func isBoundedFederatedRowShape(query dal.StructuredQuery) bool {
 	root, rootOK := query.From().Base().(dal.CollectionRef)
 	dimension, dimensionOK := child.Base().(dal.CollectionRef)
 	if !rootOK || !dimensionOK || root.Database() == "" || dimension.Database() == "" {
+		return false
+	}
+	if dimension.ScanLimit() < 1 || dimension.ScanLimit() > 10000 {
 		return false
 	}
 	rootAlias, dimensionAlias := root.Alias(), dimension.Alias()

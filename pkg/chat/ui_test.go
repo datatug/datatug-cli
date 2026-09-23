@@ -57,13 +57,13 @@ func TestUIInlineFKJoinNavigationAndApply(t *testing.T) {
 	}
 	u.width, u.height = 100, 40
 	u.resizeChatPane()
-	if !strings.Contains(u.View().Content, "You can JOIN") || !strings.Contains(u.View().Content, "Customer") {
+	if !strings.Contains(ansi.Strip(u.View().Content), "You can JOIN") || !strings.Contains(u.View().Content, "Customer") {
 		t.Fatalf("inline FK area missing:\n%s", u.View().Content)
 	}
 	if !u.focusLatestGrid() {
 		t.Fatal("grid could not be focused")
 	}
-	_, _ = u.Update(tea.KeyPressMsg{Text: "g"})
+	_, _ = u.Update(tea.KeyPressMsg{Text: "j"})
 	if !u.joinFocused || u.entries[u.activeGrid].grid.focused {
 		t.Fatal("JOIN area did not receive focus")
 	}
@@ -75,7 +75,7 @@ func TestUIInlineFKJoinNavigationAndApply(t *testing.T) {
 	if u.joinFocused || !u.entries[u.activeGrid].grid.focused {
 		t.Fatal("Esc did not return to grid")
 	}
-	_, _ = u.Update(tea.KeyPressMsg{Text: "g"})
+	_, _ = u.Update(tea.KeyPressMsg{Text: "j"})
 	_, command := u.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 	if command == nil {
 		t.Fatal("Space did not invoke JOIN application")
@@ -567,6 +567,209 @@ func TestGridTitleFooterAndScrollbarAreStructuredPresentation(t *testing.T) {
 	}
 }
 
+func TestResultTitleAppearsOnceInCardBorder(t *testing.T) {
+	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "Customers", 80)
+	view := ansi.Strip(g.recordsetView(80))
+	if strings.Count(strings.Split(view, "\n")[0], "Customers") != 1 || strings.Count(view, "Customers") != 1 {
+		t.Fatalf("title repeated in result card:\n%s", view)
+	}
+	for _, tab := range []string{"1 Table", "2 Charts", "3 Current row"} {
+		if !strings.Contains(strings.Split(view, "\n")[0], tab) {
+			t.Fatalf("top border does not expose %s:\n%s", tab, view)
+		}
+	}
+}
+
+func TestFocusedRecordSetTitleAndFooterAreReadable(t *testing.T) {
+	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "Invoices", 80)
+	g.setFocused(true)
+	lines := strings.Split(g.recordsetView(80), "\n")
+	if !strings.Contains(lines[0], activeTitleStyle.Render("Invoices")) {
+		t.Fatalf("focused title has no active color: %q", lines[0])
+	}
+	footer := lines[len(lines)-1]
+	if !strings.Contains(footer, "38;5;252") || !strings.Contains(footer, "Rows 1–1") {
+		t.Fatalf("footer label is not bright enough: %q", footer)
+	}
+}
+
+func TestGridScrollbarTracksCursorBeforePageScrolls(t *testing.T) {
+	rows := make([]secureread.Row, 20)
+	for i := range rows {
+		rows[i] = secureread.Row{Data: map[string]any{"ID": i}}
+	}
+	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: rows}), "Rows", 60)
+	start, _ := g.table.VisibleIndices()
+	before := g.scrollbarLine(0, 12)
+	g.rowIndex = 5
+	g.table.SetCursor(5)
+	after := g.scrollbarLine(0, 12)
+	still, _ := g.table.VisibleIndices()
+	if start != still || before == after {
+		t.Fatalf("scrollbar did not follow cursor within page: page %d→%d, thumb %q→%q", start, still, before, after)
+	}
+}
+
+func TestWorkspaceReturnsToPreviousGrid(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width = 150
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}}}})
+	if !u.focusLatestGrid() {
+		t.Fatal("grid missing")
+	}
+	gridIndex := u.activeGrid
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModShift})
+	if !u.gridFocused || u.activeGrid != gridIndex || !u.entries[gridIndex].grid.focused {
+		t.Fatal("Shift+Left did not restore previous grid focus")
+	}
+}
+
+func TestWorkspaceInspectorsUseCatalogTypes(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width = 150
+	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", Title: "Customer"}, Columns: []string{"CustomerId", "City"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}}}}
+	u.appendTurn(Turn{Queries: []QueryResult{{
+		Title: "Customers",
+		Result: secureread.Result{
+			Columns: []string{"CustomerId", "City"},
+			Rows:    []secureread.Row{{Data: map[string]any{"CustomerId": 42, "City": "Prague"}}},
+		},
+	}}})
+	if !u.focusLatestGrid() {
+		t.Fatal("grid missing")
+	}
+	u.focusWorkspace()
+	u.workspaceTab = 1
+	for _, tc := range []struct{ key, want string }{{"1", "INTEGER"}, {"2", "main.Customer.CustomerId"}, {"3", "main.Customer.City"}} {
+		_, _ = u.Update(tea.KeyPressMsg{Text: tc.key})
+		if view := ansi.Strip(u.workspaceView(65, 22)); !strings.Contains(view, tc.want) {
+			t.Fatalf("inspector %s lacks %q:\n%s", tc.key, tc.want, view)
+		}
+	}
+}
+
+func TestInspectorDoesNotAttributeDerivedOutputByDisplayName(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", SourceID: "chinook"}, Columns: []string{"CustomerId", "City"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}}}}
+	record := RecordSet{Database: "chinook", DTQL: "from: {name: Customer}\ncolumns:\n  - aggregate: {function: COUNT, args: [{star: true}]}\n    as: CustomerId\nlimit: 10\n"}
+	if got := u.columnMeta(&record, "CustomerId"); got.qualified != "" || got.dbType != "" {
+		t.Fatalf("aggregate was falsely attributed to a physical column: %+v", got)
+	}
+	record.DTQL = "from: {name: Customer}\ncolumns:\n  - field: City\n    as: CustomerId\nlimit: 10\n"
+	if got := u.columnMeta(&record, "CustomerId"); got.qualified != "main.Customer.City" || got.dbType != "TEXT" {
+		t.Fatalf("aliased field provenance = %+v", got)
+	}
+}
+
+func TestAltSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: result}, {Result: result}}})
+	_, command := u.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt})
+	if command == nil || u.tableStyle != tableStyleSoft || u.styleNotice != "Table style: Soft" {
+		t.Fatalf("Alt+S style/notice = %s/%q", u.tableStyle.name(), u.styleNotice)
+	}
+	if status := strings.Join(u.statusLines(), " "); !strings.Contains(status, "Table style: Soft") || strings.Contains(status, "Alt+S style") {
+		t.Fatalf("style notice did not temporarily replace shortcut hint: %q", status)
+	}
+	for _, entry := range u.entries {
+		if entry.grid != nil && entry.grid.tableStyle != tableStyleSoft {
+			t.Fatal("existing result did not adopt the style")
+		}
+	}
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: result}}})
+	if got := u.entries[len(u.entries)-1].grid.tableStyle; got != tableStyleSoft {
+		t.Fatalf("new result style = %s", got.name())
+	}
+	storedStyle, err := sessions.TableStyle(ctx)
+	if err != nil || storedStyle != "Soft" {
+		t.Fatalf("persisted style = %q, %v", storedStyle, err)
+	}
+	newSession, err := sessions.Create(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.loadSession(newSession)
+	if u.tableStyle != tableStyleSoft {
+		t.Fatal("new session lost the shared table style")
+	}
+	reopened, err := NewSessionUI(ctx, sessions, "fake-model")
+	if err != nil || reopened.tableStyle != tableStyleSoft {
+		t.Fatalf("restored style = %v, %v", reopened.tableStyle, err)
+	}
+	_, _ = u.Update(tableStyleNoticeExpired{id: u.styleNoticeID})
+	if u.styleNotice != "" {
+		t.Fatal("style name notice did not clear")
+	}
+	u.appendTurn(Turn{Queries: []QueryResult{{Result: result}}})
+	u.focusLatestGrid()
+	if status := strings.Join(u.statusLines(), " "); !strings.Contains(status, "Alt+S style") || strings.Contains(status, "Table style: Soft") {
+		t.Fatalf("shortcut hint did not return after notice: %q", status)
+	}
+}
+
+func TestGridWithoutScrollingUsesPlainRightBorder(t *testing.T) {
+	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "Rows", 60)
+	view := ansi.Strip(g.view())
+	if strings.ContainsAny(view, "▏▐") {
+		t.Fatalf("non-scrolling grid has a scrollbar placeholder: %q", view)
+	}
+	for _, line := range strings.Split(view, "\n")[1 : len(strings.Split(view, "\n"))-1] {
+		if !strings.HasSuffix(line, "│") {
+			t.Fatalf("grid right edge is not a plain border: %q", line)
+		}
+	}
+}
+
+func TestMacOptionSCyclesTableStyle(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.Update(tea.KeyPressMsg{Code: 'ß', Text: "ß"})
+	if u.tableStyle != tableStyleSoft || u.styleNotice != "Table style: Soft" {
+		t.Fatalf("Option+S style/notice = %s/%q", u.tableStyle.name(), u.styleNotice)
+	}
+}
+
+func TestTableStylePresetsChangeHeaderAndDividerColors(t *testing.T) {
+	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1, "Name": "Alex"}}}}), "Rows", 60)
+	if g.tableStyle != tableStyleLines {
+		t.Fatal("new table did not default to Lines")
+	}
+	for _, tc := range []struct {
+		style tableStyle
+		color string
+	}{
+		{tableStyleLines, "241"},
+		{tableStyleSoft, "235"},
+		{tableStyleMinimal, "232"},
+	} {
+		g.tableStyle = tc.style
+		g.rebuild()
+		view := g.table.View()
+		if !strings.Contains(view, "38;5;"+tc.color+"m┃") {
+			t.Fatalf("%s column divider lacks preset color: %q", tc.style.name(), view)
+		}
+		header := strings.Split(view, "\n")[0]
+		if !strings.Contains(header, "\x1b[1;") {
+			t.Fatalf("%s header is not bold: %q", tc.style.name(), header)
+		}
+		card := strings.Split(g.view(), "\n")
+		if len(card) != 4 || strings.Contains(ansi.Strip(card[2]), "━") {
+			t.Fatalf("%s card still has a header/data border: %q", tc.style.name(), card)
+		}
+	}
+}
+
 func TestGridScrollbarUsesTopMiddleAndShortFinalPages(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
 	rows := make([]secureread.Row, 25)
@@ -582,8 +785,8 @@ func TestGridScrollbarUsesTopMiddleAndShortFinalPages(t *testing.T) {
 		t.Fatalf("top page has no scrollbar thumb:\n%s", view)
 	}
 	topLines := strings.Split(ansi.Strip(g.view()), "\n")
-	if len(topLines) < 3 || !strings.HasSuffix(topLines[1], "▐") || !strings.HasSuffix(topLines[2], "▐") {
-		t.Fatalf("scrollbar does not use both table header lines:\n%s", g.view())
+	if len(topLines) < 3 || !strings.HasSuffix(strings.TrimSpace(topLines[1]), "▐") || !strings.HasSuffix(strings.TrimSpace(topLines[2]), "▐") {
+		t.Fatalf("scrollbar is not on the right card edge:\n%s", g.view())
 	}
 	_, _ = u.updateGrid(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if view := g.view(); !strings.Contains(view, "▐") {
@@ -898,7 +1101,7 @@ func TestRecordsetViewsRouteFocusAcrossSplitAndNarrowLayouts(t *testing.T) {
 	if g.recordsetLayout(u.chatPaneWidth()).split || !g.secondaryFocus {
 		t.Fatalf("narrow inspector layout/focus = %+v/%v", g.recordsetLayout(u.chatPaneWidth()), g.secondaryFocus)
 	}
-	if view := ansi.Strip(u.View().Content); !strings.Contains(view, "● Current row") || !strings.Contains(view, "Ireland") {
+	if view := ansi.Strip(u.View().Content); !strings.Contains(view, "3 Current row") || !strings.Contains(view, "Ireland") {
 		t.Fatalf("narrow inspector did not render current row:\n%s", view)
 	}
 }
@@ -935,14 +1138,14 @@ func TestEscapeClearsSecondaryPaneHighlight(t *testing.T) {
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Text: "3"})
 	u.rebuildHistory(false)
-	if view := ansi.Strip(u.View().Content); !strings.Contains(view, "● Current row") {
+	if view := ansi.Strip(u.View().Content); !strings.Contains(view, "● Query result") {
 		t.Fatalf("focused secondary pane lacks active marker:\n%s", view)
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if u.gridFocused || !u.input.Focused() {
 		t.Fatal("Escape did not return focus to composer")
 	}
-	if view := ansi.Strip(u.View().Content); strings.Contains(view, "● Current row") {
+	if view := ansi.Strip(u.View().Content); strings.Contains(view, "● Query result") {
 		t.Fatalf("Escape left secondary pane highlighted:\n%s", view)
 	}
 }
@@ -963,13 +1166,17 @@ func TestRecordsetHeaderRetainsViewControlsForLongTitles(t *testing.T) {
 func TestRecordsetHeaderRetainsAllControlsAtTwentyTwoCells(t *testing.T) {
 	g := newGridState(GridModel{}, strings.Repeat("generated title ", 8), 22)
 	header := ansi.Strip(g.recordsetHeader(22))
-	for _, want := range []string{"1 Tab", "2 Chart", "3 Row"} {
+	for _, want := range []string{"1", "2", "3"} {
 		if !strings.Contains(header, want) {
 			t.Fatalf("22-cell header hid %q: %q", want, header)
 		}
 	}
 	if got := ansi.StringWidth(header); got != 22 {
 		t.Fatalf("header width = %d, want 22: %q", got, header)
+	}
+	top := strings.Split(ansi.Strip(g.recordsetView(22)), "\n")[0]
+	if !strings.Contains(top, "1 2 3") {
+		t.Fatalf("rendered border clips a tab: %q", top)
 	}
 }
 
@@ -1070,7 +1277,7 @@ func TestSessionHelpDocumentsRecordsetAndExistingGridControls(t *testing.T) {
 	help := u.entries[len(u.entries)-1].text
 	for _, want := range []string{
 		"1 Table", "2 Charts", "3 Current row", "Tab panes", "Shift+↑↓ select",
-		"g JOINs", "Space row", "c cell", "r range", "a attach", "d dock", "b bookmark", "s sort", "Enter details", "Esc composer",
+		"j JOINs", "Space row", "c cell", "r range", "a attach", "d dock", "b bookmark", "s sort", "Enter details", "Esc composer",
 		"F2", "F6", "Ctrl+C",
 	} {
 		if !strings.Contains(help, want) {
@@ -1133,5 +1340,12 @@ func TestGridBorderChangesWithFocus(t *testing.T) {
 	activeShape := strings.ReplaceAll(strings.ReplaceAll(ansi.Strip(active), "●", "○"), "○", "○")
 	if activeShape != ansi.Strip(inactive) || active == inactive {
 		t.Fatalf("grid border did not change with focus:\ninactive %q\nactive %q", inactive, active)
+	}
+	activeLines := strings.Split(g.view(), "\n")
+	if !strings.Contains(activeLines[1], activeBorderStyle.Render("│")) || !strings.HasSuffix(activeLines[1], selectedOutlineStyle.Render("│")) {
+		t.Fatalf("focused grid side colors are wrong: %q", activeLines[1])
+	}
+	if !strings.Contains(activeLines[0], "38;5;250m╭") || !strings.Contains(activeLines[len(activeLines)-1], "38;5;250m╰") || strings.Contains(activeLines[len(activeLines)-1], "38;5;51") {
+		t.Fatalf("focused grid top/bottom border colors differ: %q / %q", activeLines[0], activeLines[len(activeLines)-1])
 	}
 }

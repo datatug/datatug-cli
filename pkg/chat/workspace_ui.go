@@ -278,6 +278,11 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 	}
 	nodes := u.explorerNodes()
 	switch msg.String() {
+	case "1", "2", "3":
+		if u.workspaceTab == 1 {
+			u.inspectorTab = int(msg.String()[0] - '1')
+			u.inspectorOffset = 0
+		}
 	case "left", "h":
 		u.setWorkspaceTab(u.workspaceTab - 1)
 	case "right", "l":
@@ -287,6 +292,8 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 		case 0:
 			u.explorerIndex = max(0, u.explorerIndex-1)
 			u.projectDetails = false
+		case 1:
+			u.inspectorOffset = max(0, u.inspectorOffset-1)
 		case 2:
 			u.dockIndex = max(0, u.dockIndex-1)
 		case 3:
@@ -298,6 +305,8 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 		case 0:
 			u.explorerIndex = min(len(nodes)-1, u.explorerIndex+1)
 			u.projectDetails = false
+		case 1:
+			u.inspectorOffset++
 		case 2:
 			u.dockIndex = min(len(u.snapshot.Workspace.Docks)-1, u.dockIndex+1)
 		case 3:
@@ -452,6 +461,8 @@ func (u *UI) ensureBookmarkGrid() *gridState {
 	}
 	result, _ := bookmarkResult(bookmark)
 	u.bookmarkGrid = newGridState(NewGridModel(result), bookmark.Title, u.workspacePaneWidth())
+	u.bookmarkGrid.tableStyle = u.tableStyle
+	u.bookmarkGrid.rebuild()
 	u.bookmarkGridID = bookmark.ID
 	u.bookmarkGrid.setFocused(u.bookmarkGridFocused)
 	return u.bookmarkGrid
@@ -601,16 +612,16 @@ func (u *UI) workspaceView(width, height int) string {
 		return u.sessionPickerView(width, height)
 	}
 	tabs := make([]string, len(workspaceTabs))
-	labels := workspaceTabs
+	labels := []string{"Project", "Inspect", "Docked", "Bookmarks"}
 	if width < 45 {
 		labels = []string{"Proj", "Sel", "Dock", "Marks"}
 	}
 	for i := range workspaceTabs {
 		label := labels[i]
 		if i == u.workspaceTab {
-			tabs[i] = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51")).Render("[" + label + "]")
+			tabs[i] = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Render("● " + label)
 		} else {
-			tabs[i] = "[" + label + "]"
+			tabs[i] = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Render(label)
 		}
 	}
 	header := strings.Join(tabs, " ")
@@ -619,7 +630,7 @@ func (u *UI) workspaceView(width, height int) string {
 	case "Project":
 		body = u.projectExplorer(width, height-1)
 	case "Selected":
-		body = u.selectedDetails(width)
+		body = u.inspectorWorkspaceView(width, height-1)
 	case "Docked":
 		body = u.dockedView(width)
 	case "Bookmarks":
@@ -922,6 +933,8 @@ func (u *UI) rebuildDockGrids() {
 			model.sortColumn, model.sortDesc = columnIndexOf(data.Result.Columns, view.OrderBy), view.Descending
 		}
 		next[dock.ID] = newGridState(model, dock.Title, u.workspacePaneWidth())
+		next[dock.ID].tableStyle = u.tableStyle
+		next[dock.ID].rebuild()
 	}
 	u.dockGrids = next
 	if u.dockIndex >= len(u.snapshot.Workspace.Docks) {

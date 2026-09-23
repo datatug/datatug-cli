@@ -273,7 +273,7 @@ func initChatSchema(db *sql.DB) error {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read chat schema version: %w", err)
 	}
-	if version != 0 && version != 1 && version != 2 && version != 3 && version != 4 && version != 5 {
+	if version != 0 && version != 1 && version != 2 && version != 3 && version != 4 && version != 5 && version != 6 {
 		return fmt.Errorf("unsupported chat database schema version %d", version)
 	}
 	if version >= 1 {
@@ -298,7 +298,11 @@ func initChatSchema(db *sql.DB) error {
 			if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'bookmarks'`).Scan(&name); err != nil {
 				return fmt.Errorf("chat database is missing bookmark metadata: %w", err)
 			}
-			if version == 5 {
+			if version >= 6 {
+				var name string
+				if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chat_preferences'`).Scan(&name); err != nil {
+					return fmt.Errorf("chat database is missing preference metadata: %w", err)
+				}
 				return nil
 			}
 		}
@@ -316,11 +320,12 @@ func initChatSchema(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, dtql TEXT NOT NULL, source TEXT NOT NULL, parameters_json TEXT NOT NULL, executed_at TEXT NOT NULL, error TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS recordsets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, query_id TEXT NOT NULL REFERENCES queries(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, dtql TEXT NOT NULL, source TEXT NOT NULL, environment TEXT NOT NULL, database_id TEXT NOT NULL, parameters_json TEXT NOT NULL, created_at TEXT NOT NULL, result_json BLOB NOT NULL, parent_recordset_id TEXT NOT NULL DEFAULT '', join_candidate_id TEXT NOT NULL DEFAULT '', join_applied_edges_json TEXT NOT NULL DEFAULT '[]')`,
 		`CREATE TABLE IF NOT EXISTS session_workspace (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, state_json TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS chat_preferences (scope TEXT PRIMARY KEY, table_style TEXT NOT NULL)`,
 		// A bookmark snapshot has no foreign key to the transient session rows.
 		// It owns its encoded result, view, and selection after creation.
 		`CREATE TABLE IF NOT EXISTS bookmarks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, scope TEXT NOT NULL, title TEXT NOT NULL, tags_json TEXT NOT NULL, target_kind TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, snapshot_json BLOB NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS bookmarks_scope_project_recent ON bookmarks(scope, project_id, updated_at DESC, id DESC)`,
-		`PRAGMA user_version = 5`,
+		`PRAGMA user_version = 6`,
 	} {
 		if _, err := tx.Exec(statement); err != nil {
 			return fmt.Errorf("initialize chat schema: %w", err)
@@ -585,6 +590,28 @@ func (s *SessionStore) SaveWorkspace(ctx context.Context, sessionID string, stat
 		return err
 	}
 	return tx.Commit()
+}
+
+// TableStyle is a scope-level presentation preference shared by every chat
+// session for the same project, environment, database and role.
+func (s *SessionStore) TableStyle(ctx context.Context) (string, error) {
+	var name string
+	err := s.db.QueryRowContext(ctx, `SELECT table_style FROM chat_preferences WHERE scope = ?`, s.scope).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return tableStyleLines.name(), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func (s *SessionStore) SetTableStyle(ctx context.Context, name string) error {
+	if name != tableStyleSoft.name() && name != tableStyleMinimal.name() && name != tableStyleLines.name() {
+		return fmt.Errorf("unknown table style %q", name)
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO chat_preferences (scope, table_style) VALUES (?, ?) ON CONFLICT(scope) DO UPDATE SET table_style = excluded.table_style`, s.scope, name)
+	return err
 }
 
 func (s *SessionStore) loadMessages(ctx context.Context, item *ChatSession) error {

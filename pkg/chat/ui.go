@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -22,19 +23,21 @@ var (
 	messageSurfaceBackground  = lipgloss.Color("235")
 	selectedMessageBackground = lipgloss.Color("237")
 
-	userStyle           = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("45"))
-	agentStyle          = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-	statusStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	activeTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51"))
-	inactiveTitleStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	activeBorderStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
-	inactiveBorderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	selectedCellStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220"))
-	activeCellStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235"))
-	inactiveCellStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Background(lipgloss.Color("232"))
-	activeMessageStyle  = lipgloss.NewStyle().Padding(0, 1).Background(messageSurfaceBackground)
-	inputSurfaceStyle   = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("236"))
-	statusSurfaceStyle  = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("233"))
+	userStyle            = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("45"))
+	agentStyle           = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	statusStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	tableStyleBadge      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Background(lipgloss.Color("24"))
+	activeTitleStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51"))
+	inactiveTitleStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	activeBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
+	selectedOutlineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+	inactiveBorderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	selectedCellStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220"))
+	activeCellStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235"))
+	inactiveCellStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Background(lipgloss.Color("232"))
+	activeMessageStyle   = lipgloss.NewStyle().Padding(0, 1).Background(messageSurfaceBackground)
+	inputSurfaceStyle    = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("236"))
+	statusSurfaceStyle   = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("233"))
 )
 
 type historyEntry struct {
@@ -91,6 +94,7 @@ type gridState struct {
 	chartIndex     int
 	inspector      viewport.Model
 	inspectorRow   int
+	tableStyle     tableStyle
 }
 
 // gridTable is the small DataTug-owned adapter around bubble-table. Keeping
@@ -177,10 +181,14 @@ func (g *gridState) rebuild() {
 	pageSize := max(1, min(len(rows), maxGridHeight-2))
 	model := bubbletable.New(columns).
 		WithRows(rows).
+		WithBaseStyle(g.tableStyle.dividerStyle()).
+		WithBorderForeground(g.tableStyle.borderColor()).
+		HeaderStyle(g.tableStyle.headerStyle()).
 		WithMaxTotalWidth(tableWidth).
 		WithPageSize(pageSize).
 		WithPaginationWrapping(false).
 		WithOuterBorder(false).
+		WithRowBorder(false).
 		WithFooterVisibility(false).
 		WithHeaderVisibility(true).
 		WithKeyMap(keys).
@@ -294,7 +302,9 @@ func (g *gridState) columnWidth(columnIndex int) int {
 	return max(1, min(g.tableWidth()-1, min(28, max(6, width))))
 }
 
-func (g *gridState) tableWidth() int { return max(2, g.width-2) }
+func (g *gridState) tableWidth() int {
+	return max(2, g.width-2)
+}
 
 // visibleColumnWindow mirrors bubble-table's no-outer-border width rules:
 // each non-final rendered column consumes its content width plus the right
@@ -429,12 +439,14 @@ func (g *gridState) scrollbarLine(line, trackHeight int) string {
 	pageStart, pageEnd := g.table.VisibleIndices()
 	visibleRows := max(0, pageEnd-pageStart+1)
 	if trackHeight == 0 || visibleRows == 0 || len(g.model.Rows) <= visibleRows {
-		return "│"
+		if g.focused {
+			return selectedOutlineStyle.Render("│")
+		}
+		return inactiveBorderStyle.Render("│")
 	}
 	thumbSize := max(1, trackHeight*visibleRows/len(g.model.Rows))
 	maxStart := max(0, trackHeight-thumbSize)
-	maxPageStart := max(1, len(g.model.Rows)-visibleRows)
-	start := pageStart * maxStart / maxPageStart
+	start := g.rowIndex * maxStart / max(1, len(g.model.Rows)-1)
 	if line >= start && line < start+thumbSize {
 		if g.focused {
 			return lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render("▐")
@@ -442,43 +454,54 @@ func (g *gridState) scrollbarLine(line, trackHeight int) string {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render("▐")
 	}
 	if g.focused {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Render("│")
+		return selectedOutlineStyle.Render("│")
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("237")).Render("│")
 }
 
-func (g *gridState) view() string {
+func (g *gridState) view() string { return g.viewWithTitle(g.title) }
+
+func (g *gridState) viewWithTitle(label string) string {
 	cardWidth := max(1, g.width)
-	innerWidth := max(0, cardWidth-2)
+	innerWidth := g.tableWidth()
 	tableView := g.table.View()
 	rawLines := strings.Split(tableView, "\n")
+	// bubble-table always emits a header/data separator with its outer border
+	// disabled. The header surface already distinguishes the two regions.
+	if len(rawLines) > 1 {
+		rawLines = append(rawLines[:1], rawLines[2:]...)
+	}
 	if tableView == "" {
 		rawLines = []string{""}
 	}
 	lines := make([]string, 0, len(rawLines)+2)
-	title := normalizeGridTitle(g.title)
+	title := label
 	if g.focused {
-		title = activeTitleStyle.Render("● " + title)
+		title = activeTitleStyle.Render("● ") + title
 	} else {
-		title = inactiveTitleStyle.Render("○ " + title)
+		title = inactiveTitleStyle.Render("○ ") + title
 	}
 	topBorder := borderLine("╭", title, "╮", cardWidth)
 	if g.focused {
-		topBorder = activeBorderStyle.Render(topBorder)
+		topBorder = selectedOutlineStyle.Render(topBorder)
 	} else {
 		topBorder = inactiveBorderStyle.Render(topBorder)
 	}
 	lines = append(lines, padAnsiLine(topBorder, cardWidth))
 	for lineIndex, line := range rawLines {
-		// Use the two table-header lines as part of the scrollbar track so the
-		// thumb has more useful resolution without making the card taller.
+		// The scrollbar occupies the right card edge, including the header line.
 		scrollbar := g.scrollbarLine(lineIndex, len(rawLines))
-		lines = append(lines, padAnsiLine("│"+padAnsiLine(line, innerWidth)+scrollbar, cardWidth))
+		border := inactiveBorderStyle
+		if g.focused {
+			border = activeBorderStyle
+		}
+		lines = append(lines, padAnsiLine(border.Render("│")+padAnsiLine(line, innerWidth)+scrollbar, cardWidth))
 	}
 	footer := g.footer()
-	bottomBorder := borderLine("╰", footer, "╯", cardWidth)
+	footerLabel := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("252")).Render(footer)
+	bottomBorder := borderLine("╰", footerLabel, "╯", cardWidth)
 	if g.focused {
-		bottomBorder = activeBorderStyle.Render(bottomBorder)
+		bottomBorder = selectedOutlineStyle.Render(bottomBorder)
 	} else {
 		bottomBorder = inactiveBorderStyle.Render(bottomBorder)
 	}
@@ -494,6 +517,8 @@ type turnMessage struct {
 type joinMessage struct {
 	err error
 }
+
+type tableStyleNoticeExpired struct{ id int }
 
 // UI is the Bubble Tea chat model: a scrollable history viewport, inline
 // bubble-table components, and a fixed bottom input.
@@ -515,7 +540,14 @@ type UI struct {
 	selectedMessage     int
 	joinFocused         bool
 	workspaceFocused    bool
+	workspaceReturnGrid int
+	workspaceReturnMsg  int
 	workspaceTab        int
+	inspectorTab        int
+	inspectorOffset     int
+	tableStyle          tableStyle
+	styleNotice         string
+	styleNoticeID       int
 	explorerIndex       int
 	explorerOffset      int
 	explorerCollapsed   map[string]bool
@@ -587,21 +619,23 @@ func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI
 	history := viewport.New(viewport.WithWidth(contentWidth(80)), viewport.WithHeight(20))
 	history.SoftWrap = true
 	return &UI{
-		ctx:               ctx,
-		conversation:      conversation,
-		modelName:         modelName,
-		history:           history,
-		input:             input,
-		bookmarkEditor:    bookmarkEditor,
-		activeGrid:        -1,
-		selectedMessage:   -1,
-		rangeAnchor:       -1,
-		dockGrids:         map[string]*gridState{},
-		explorerCollapsed: map[string]bool{},
-		chatPanePercent:   56,
-		mouseCapture:      true,
-		width:             80,
-		height:            24,
+		ctx:                 ctx,
+		conversation:        conversation,
+		modelName:           modelName,
+		history:             history,
+		input:               input,
+		bookmarkEditor:      bookmarkEditor,
+		activeGrid:          -1,
+		workspaceReturnGrid: -1,
+		workspaceReturnMsg:  -1,
+		selectedMessage:     -1,
+		rangeAnchor:         -1,
+		dockGrids:           map[string]*gridState{},
+		explorerCollapsed:   map[string]bool{},
+		chatPanePercent:     56,
+		mouseCapture:        true,
+		width:               80,
+		height:              24,
 	}
 }
 
@@ -682,6 +716,11 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		u.rebuildHistory(true)
 		return u, nil
+	case tableStyleNoticeExpired:
+		if msg.id == u.styleNoticeID {
+			u.styleNotice = ""
+		}
+		return u, nil
 	case tea.MouseClickMsg:
 		if u.mouseCapture && msg.Button == tea.MouseLeft && msg.Y == u.historyHeight()+2 {
 			if ref, ok := u.attachmentCloseAt(msg.X - responsiveGutter(u.width)); ok {
@@ -700,6 +739,8 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return u, tea.Quit
+		case "alt+s", "ß": // macOS Option+S emits ß unless the terminal maps Option to Meta.
+			return u, u.cycleTableStyle()
 		case "ctrl+left", "ctrl+right":
 			if u.splitEnabled() {
 				delta := -5
@@ -795,7 +836,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "shift+left":
 			if u.workspaceFocused {
-				u.focusInput()
+				u.returnFromWorkspace()
 				u.rebuildHistory(false)
 				return u, nil
 			}
@@ -870,6 +911,47 @@ func (u *UI) resizeChatPane() {
 	}
 }
 
+func (u *UI) setTableStyle(style tableStyle) {
+	if style >= tableStyleCount {
+		style = tableStyleLines
+	}
+	u.tableStyle = style
+	for i := range u.entries {
+		if grid := u.entries[i].grid; grid != nil {
+			grid.tableStyle = style
+			grid.rebuild()
+		}
+	}
+	for _, grid := range u.dockGrids {
+		grid.tableStyle = style
+		grid.rebuild()
+	}
+	if u.bookmarkGrid != nil {
+		u.bookmarkGrid.tableStyle = style
+		u.bookmarkGrid.rebuild()
+	}
+	u.rebuildHistory(false)
+}
+
+func (u *UI) cycleTableStyle() tea.Cmd {
+	next := (u.tableStyle + 1) % tableStyleCount
+	if u.sessions != nil {
+		if err := u.sessions.SetTableStyle(u.ctx, next.name()); err != nil {
+			u.styleNotice = "Couldn't save table style."
+			u.styleNoticeID++
+			id := u.styleNoticeID
+			return tea.Tick(3*time.Second, func(time.Time) tea.Msg { return tableStyleNoticeExpired{id: id} })
+		}
+	}
+	if u.tableStyle != next {
+		u.setTableStyle(next)
+	}
+	u.styleNotice = "Table style: " + next.name()
+	u.styleNoticeID++
+	id := u.styleNoticeID
+	return tea.Tick(3*time.Second, func(time.Time) tea.Msg { return tableStyleNoticeExpired{id: id} })
+}
+
 func (u *UI) loadSession(session ChatSession) {
 	u.sessionID, u.sessionTitle = session.ID, session.Title
 	u.snapshot = session
@@ -886,6 +968,12 @@ func (u *UI) loadSession(session ChatSession) {
 	u.bookmarkGridID = ""
 	u.bookmarkMode = ""
 	u.rangeAnchor = -1
+	u.workspaceReturnGrid, u.workspaceReturnMsg = -1, -1
+	if u.sessions != nil {
+		if name, err := u.sessions.TableStyle(u.ctx); err == nil {
+			u.setTableStyle(parseTableStyle(name))
+		}
+	}
 	u.workspaceTab = workspaceTabIndex(session.Workspace.ActiveTab)
 	u.dockGrids = map[string]*gridState{}
 	u.input.Focus()
@@ -893,6 +981,8 @@ func (u *UI) loadSession(session ChatSession) {
 		if message.Kind == "grid" {
 			record := session.RecordSets[message.RecordSetID]
 			entry := historyEntry{grid: newGridState(NewGridModel(record.Result), record.Title, u.chatPaneWidth(), record.Result.Statistics), recordSetID: record.ID}
+			entry.grid.tableStyle = u.tableStyle
+			entry.grid.rebuild()
 			if u.sessions != nil {
 				if candidates, err := u.sessions.JoinCandidates(u.ctx, record.ID); err == nil {
 					entry.joinCandidates = candidates
@@ -976,7 +1066,7 @@ func (u *UI) runSessionCommand(input string) {
 			snapshot, err = u.sessions.Delete(u.ctx)
 		}
 	case "/help":
-		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm\n\nGlobal: F2 mouse select/wheel • F6/Shift+→ workspace • Shift+← input • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ select grids/messages • g JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • s sort • Enter details • Esc composer"})
+		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm\n\nGlobal: F2 mouse select/wheel • F6/Shift+→ workspace • Shift+← previous • Alt+S table style • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ select grids/messages • j JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • s sort • Enter details • Esc composer\n\nInspector: 1 Current row • 2 Current column • 3 Current recordset"})
 	default:
 		err = fmt.Errorf("unknown chat command %q; type /help", command)
 	}
@@ -1037,6 +1127,12 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 	switch msg.String() {
+	case "j":
+		if len(u.entries[u.activeGrid].joinCandidates) > 0 {
+			u.joinFocused = true
+			g.setFocused(false)
+		}
+		return nil, true
 	case "1":
 		g.setRecordsetView(recordsetTable, u.chatPaneWidth())
 		return nil, true
@@ -1058,12 +1154,6 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return g.updateSecondary(msg)
 	}
 	switch msg.String() {
-	case "g":
-		if len(u.entries[u.activeGrid].joinCandidates) > 0 {
-			u.joinFocused = true
-			g.setFocused(false)
-		}
-		return nil, true
 	case "left", "h":
 		if g.selectedColumn > 0 {
 			g.selectedColumn--
@@ -1085,7 +1175,7 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			g.inspectorRow = -1
 		}
 		return nil, true
-	case "down", "j":
+	case "down":
 		if g.rowIndex+1 < len(g.model.Rows) {
 			g.rowIndex++
 			g.table.SetCursor(g.rowIndex)
@@ -1264,6 +1354,13 @@ func (u *UI) focusInput() {
 }
 
 func (u *UI) focusWorkspace() {
+	u.workspaceReturnGrid = -1
+	u.workspaceReturnMsg = -1
+	if u.gridFocused {
+		u.workspaceReturnGrid = u.activeGrid
+	} else if u.messageFocused {
+		u.workspaceReturnMsg = u.selectedMessage
+	}
 	u.clearGridHighlight()
 	u.gridFocused = false
 	u.messageFocused = false
@@ -1271,6 +1368,17 @@ func (u *UI) focusWorkspace() {
 	u.joinFocused = false
 	u.workspaceFocused = true
 	u.input.Blur()
+}
+
+func (u *UI) returnFromWorkspace() {
+	if u.workspaceReturnGrid >= 0 && u.focusGrid(u.workspaceReturnGrid) {
+		return
+	}
+	if u.workspaceReturnMsg >= 0 && u.workspaceReturnMsg < len(u.entries) {
+		u.focusMessage(u.workspaceReturnMsg)
+		return
+	}
+	u.focusInput()
 }
 
 func (u *UI) ask(prompt string) tea.Cmd {
@@ -1297,7 +1405,10 @@ func (u *UI) appendTurn(turn Turn) {
 			continue
 		}
 		grid := NewGridModel(query.Result)
-		u.entries = append(u.entries, historyEntry{grid: newGridState(grid, query.Title, u.chatPaneWidth(), query.Result.Statistics), recordSetID: query.RecordSetID})
+		styled := newGridState(grid, query.Title, u.chatPaneWidth(), query.Result.Statistics)
+		styled.tableStyle = u.tableStyle
+		styled.rebuild()
+		u.entries = append(u.entries, historyEntry{grid: styled, recordSetID: query.RecordSetID})
 		if limitationText := formatLimitations(query.Result.Limitations); limitationText != "" {
 			u.entries = append(u.entries, historyEntry{role: "Access", text: limitationText})
 		}
@@ -1404,7 +1515,7 @@ func joinAreaView(entry *historyEntry, focused bool, width int) string {
 	if len(groups) == 0 {
 		return ""
 	}
-	lines := []string{statusStyle.Render("  You can JOIN  [g]")}
+	lines := []string{statusStyle.Render("  You can ") + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Render("J") + statusStyle.Render("OIN  · press j")}
 	for sourceIndex, group := range groups {
 		source := sanitizeTerminalText(group.source.Relation)
 		if group.source.Alias != "" && !strings.EqualFold(group.source.Alias, group.source.Relation) {
@@ -1571,7 +1682,11 @@ func (u *UI) topBar(width int) string {
 	if session == "" {
 		session = "New chat"
 	}
-	label := fmt.Sprintf("DataTug │ Project: %s [F3] │ Session: %s [F4] │ View: %s [F6] │ Help: /help", sanitizeTerminalText(project), sanitizeTerminalText(session), workspaceTabs[u.workspaceTab])
+	viewName := workspaceTabs[u.workspaceTab]
+	if viewName == "Selected" {
+		viewName = "Inspect"
+	}
+	label := fmt.Sprintf("DataTug │ Project: %s [F3] │ Session: %s [F4] │ View: %s [F6] │ Help: /help", sanitizeTerminalText(project), sanitizeTerminalText(session), viewName)
 	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Width(width).Render(ansi.Truncate(label, width, "…"))
 }
 
@@ -1621,7 +1736,7 @@ func (u *UI) statusLines() []string {
 		segments = []string{"message selected", "Enter edit", "Shift+↑↓ navigate", "Esc input", mouseHint}
 	}
 	if u.gridFocused {
-		segments = []string{"1 Table", "2 Charts", "3 Current row", "Tab panes (wide)", "Shift+↑↓ grids", "Shift+→ workspace", "Esc input"}
+		segments = []string{"1 Table", "2 Charts", "3 Current row", "j JOIN", "Tab panes (wide)", "Shift+↑↓ grids", "Shift+→ workspace", "Esc input"}
 		if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
 			grid := u.entries[u.activeGrid].grid
 			switch grid.activeView {
@@ -1630,7 +1745,7 @@ func (u *UI) statusLines() []string {
 			case recordsetCurrentRow:
 				segments = append(segments, "↑↓ inspector")
 			default:
-				segments = append(segments, "↑↓ rows", "←→ columns", "g joins")
+				segments = append(segments, "↑↓ rows", "←→ columns")
 			}
 		}
 		if u.sessions != nil {
@@ -1641,9 +1756,12 @@ func (u *UI) statusLines() []string {
 		segments = []string{"JOIN candidates", "↑↓ source", "←→ relationship", "Space add JOIN", "Enter details", "Esc grid", "Tab input"}
 	}
 	if u.workspaceFocused {
-		segments = []string{"F6/Esc/Shift+← input", "←→ tabs", "↑↓ navigate", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", mouseHint}
+		segments = []string{"Shift+← previous", "F6/Esc input", "←→ tabs", "↑↓ navigate", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", mouseHint}
+		if u.workspaceTab == 1 {
+			segments = []string{"1 row", "2 column", "3 recordset", "Shift+← previous", "←→ workspace tabs", "Space attach", "b bookmark", "d dock", mouseHint}
+		}
 		if u.workspaceTab == 3 {
-			segments = []string{"F6/Esc/Shift+← input", "←→ tabs", "↑↓ browse", "Enter open grid", "a attach", "d dock", "r rename", "t/T tags", "/ search", "f filter", "x delete", mouseHint}
+			segments = []string{"Shift+← previous", "F6/Esc input", "←→ tabs", "↑↓ browse", "Enter open grid", "a attach", "d dock", "r rename", "t/T tags", "/ search", "f filter", "x delete", mouseHint}
 			if u.bookmarkGridFocused {
 				segments = []string{"Tab list", "↑↓ rows", "←→ columns", "s sort", "a attach", "d dock", "Esc list"}
 			}
@@ -1657,6 +1775,11 @@ func (u *UI) statusLines() []string {
 		if u.sessions != nil {
 			segments = append([]string{"session: " + sanitizeTerminalText(u.sessionTitle)}, segments...)
 		}
+	}
+	if u.styleNotice != "" {
+		segments = append([]string{tableStyleBadge.Render(" " + u.styleNotice + " ")}, segments...)
+	} else if u.gridFocused || u.workspaceFocused {
+		segments = append(segments, "Alt+S style")
 	}
 	maxWidth := max(1, contentWidth(u.width)-2)
 	return wrapStatusSegments(segments, maxWidth)

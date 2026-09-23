@@ -21,8 +21,9 @@ type ContextReference struct {
 }
 
 type ProjectObject struct {
-	Reference ContextReference
-	Columns   []string
+	Reference   ContextReference
+	Columns     []string
+	ColumnTypes map[string]string
 }
 
 type ProjectCatalog struct {

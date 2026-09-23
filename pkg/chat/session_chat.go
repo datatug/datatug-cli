@@ -121,6 +121,14 @@ func NewSessionChat(ctx context.Context, store *SessionStore, agent ContextualCo
 	return chat, nil
 }
 
+func (c *SessionChat) TableStyle(ctx context.Context) (string, error) {
+	return c.store.TableStyle(ctx)
+}
+
+func (c *SessionChat) SetTableStyle(ctx context.Context, name string) error {
+	return c.store.SetTableStyle(ctx, name)
+}
+
 // ApplyWorkspaceAction is shared by terminal events and the agent tool.
 func (c *SessionChat) ApplyWorkspaceAction(ctx context.Context, action WorkspaceAction) (ContextReference, error) {
 	c.mu.Lock()

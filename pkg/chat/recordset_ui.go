@@ -26,55 +26,60 @@ func (g *gridState) recordsetView(paneWidth int) string {
 			g.rebuild()
 		}
 	}
-	header := g.recordsetHeader(paneWidth)
+	header := strings.TrimRight(g.recordsetHeader(paneWidth), " ")
 	if g.activeView == recordsetTable {
-		return header + "\n" + g.view()
+		return g.viewWithTitle(header)
 	}
-	secondary := g.secondaryView(layout.secondaryWidth)
 	if !layout.split {
-		return header + "\n" + secondary
+		return g.secondaryView(paneWidth, header)
 	}
-	return header + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, g.view(), strings.Repeat(" ", recordsetPaneGap), secondary)
+	secondary := g.secondaryView(layout.secondaryWidth, "")
+	return lipgloss.JoinHorizontal(lipgloss.Top, g.viewWithTitle(header), strings.Repeat(" ", recordsetPaneGap), secondary)
 }
 
 func (g *gridState) recordsetHeader(width int) string {
-	tabs := []string{"1 Table", "2 Charts", "3 Current row"}
-	selected := int(g.activeView)
-	if selected >= 0 && selected < len(tabs) {
-		tabs[selected] = "[" + tabs[selected] + "]"
+	labels := []string{"1 Table", "2 Charts", "3 Current row"}
+	if width < 62 {
+		labels = []string{"1 Table", "2 Chart", "3 Row"}
 	}
-	controls := " | " + strings.Join(tabs, " | ")
-	rows := ": " + strconv.Itoa(len(g.model.Rows)) + " rows"
-	if ansi.StringWidth(rows+controls)+1 > width {
-		tabs = []string{"1 T", "2 C", "3 Row"}
-		if selected >= 0 && selected < len(tabs) {
-			tabs[selected] = "[" + tabs[selected] + "]"
-		}
-		controls = " | " + strings.Join(tabs, " | ")
-		if ansi.StringWidth(rows+controls) > width {
-			// At the smallest usable panes the grid border already carries the
-			// title. Reserve every cell for the three discoverable view controls.
-			tabs = []string{"1 Tab", "2 Chart", "3 Row"}
-			if selected >= 0 && selected < len(tabs) {
-				tabs[selected] = "[" + tabs[selected] + "]"
-			}
-			controls = strings.Join(tabs, " ")
-			if ansi.StringWidth(controls) <= width {
-				return padAnsiLine(controls, width)
-			}
-			tabs = []string{"1", "2", "3"}
-			if selected >= 0 && selected < len(tabs) {
-				tabs[selected] = "[" + tabs[selected] + "]"
-			}
-			return padAnsiLine(strings.Join(tabs, " "), width)
-		}
+	if width < 42 {
+		labels = []string{"1 Tab", "2 Chart", "3 Row"}
 	}
-	titleWidth := max(1, width-ansi.StringWidth(rows+controls))
+	if width > 24 && width < 36 {
+		labels = []string{"1 T", "2 C", "3 Row"}
+	}
+	if width <= 24 {
+		labels = []string{"1", "2", "3"}
+	}
+	separator := " · "
+	if width < 42 {
+		separator = " "
+	}
+	controls := strings.Join(labels, separator)
+	styledLabels := make([]string, len(labels))
+	for i, label := range labels {
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+		if i == int(g.activeView) {
+			style = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231"))
+		}
+		styledLabels[i] = style.Render(label)
+	}
+	styledControls := strings.Join(styledLabels, separator)
+	available := max(1, width-6)
+	if ansi.StringWidth(controls) >= available {
+		return padAnsiLine(styledControls, width)
+	}
+	titleWidth := max(1, available-ansi.StringWidth(controls)-3)
 	title := ansi.Truncate(sanitizeTerminalText(g.title), titleWidth, "…")
-	return padAnsiLine(title+rows+controls, width)
+	if g.focused {
+		title = activeTitleStyle.Render(title)
+	} else {
+		title = lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(title)
+	}
+	return padAnsiLine(title+" │ "+styledControls, width)
 }
 
-func (g *gridState) secondaryView(width int) string {
+func (g *gridState) secondaryView(width int, heading string) string {
 	width = max(3, width)
 	innerWidth := max(1, width-2)
 	title := "Charts"
@@ -93,6 +98,9 @@ func (g *gridState) secondaryView(width int) string {
 	case recordsetCurrentRow:
 		title = "Current row"
 		content = g.inspectorView(innerWidth, recordsetPaneHeight)
+	}
+	if heading != "" {
+		title = heading
 	}
 	return recordsetCard(title, content, width, recordsetPaneHeight, g.focused && g.secondaryFocus)
 }
@@ -123,8 +131,8 @@ func recordsetCard(title, content string, width, bodyHeight int, focused bool) s
 	top := borderLine("╭", title, "╮", width)
 	bottom := borderLine("╰", "", "╯", width)
 	if focused {
-		top = activeBorderStyle.Render(top)
-		bottom = activeBorderStyle.Render(bottom)
+		top = selectedOutlineStyle.Render(top)
+		bottom = selectedOutlineStyle.Render(bottom)
 	} else {
 		top = inactiveBorderStyle.Render(top)
 		bottom = inactiveBorderStyle.Render(bottom)
@@ -136,7 +144,15 @@ func recordsetCard(title, content string, width, bodyHeight int, focused bool) s
 		if index < len(body) {
 			line = body[index]
 		}
-		lines = append(lines, padAnsiLine("│"+padAnsiLine(line, innerWidth)+"│", width))
+		leftBorder := inactiveBorderStyle
+		if focused {
+			leftBorder = activeBorderStyle
+		}
+		rightBorder := inactiveBorderStyle
+		if focused {
+			rightBorder = selectedOutlineStyle
+		}
+		lines = append(lines, padAnsiLine(leftBorder.Render("│")+padAnsiLine(line, innerWidth)+rightBorder.Render("│"), width))
 	}
 	lines = append(lines, padAnsiLine(bottom, width))
 	return strings.Join(lines, "\n")

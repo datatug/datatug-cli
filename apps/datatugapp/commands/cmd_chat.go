@@ -269,12 +269,14 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 				kind = "project_view"
 			}
 			columns := make([]string, len(relation.Columns))
+			columnTypes := make(map[string]string, len(relation.Columns))
 			for i, column := range relation.Columns {
 				columns[i] = column.Name
+				columnTypes[column.Name] = column.DbType
 			}
 			catalog.Objects = append(catalog.Objects, chat.ProjectObject{Reference: chat.ContextReference{
 				Kind: kind, ProjectID: project.ID, SourceID: id, ObjectID: name, Title: relation.Name,
-			}, Columns: columns})
+			}, Columns: columns, ColumnTypes: columnTypes})
 		}
 	}
 	queryIDs, err := api.QueryIDIndex(projectDir)

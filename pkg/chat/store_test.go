@@ -504,7 +504,7 @@ func TestBookmarkMigrationFromV2IsAtomicAndIdempotent(t *testing.T) {
 	}
 	migrated := openTestStore(t, path, testScope())
 	var version int
-	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 5 {
+	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 6 {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 	if _, err := migrated.db.ExecContext(ctx, `INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('bad', ?, ?, 'bad', '[]', 'recordset', ?, ?, '{}')`, testScope().ProjectID, migrated.scope, stamp(time.Now().UTC()), stamp(time.Now().UTC())); err != nil {
@@ -513,10 +513,55 @@ func TestBookmarkMigrationFromV2IsAtomicAndIdempotent(t *testing.T) {
 	if err := migrated.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// A second v5 open does not rerun or corrupt the completed migration.
+	// A second v6 open does not rerun or corrupt the completed migration.
 	reopened := openTestStore(t, path, testScope())
 	if _, err := reopened.ListBookmarks(ctx); err == nil || !strings.Contains(err.Error(), "corrupt bookmark") {
 		t.Fatalf("invalid v3 snapshot was not rejected after restart: %v", err)
+	}
+}
+
+func TestTableStylePreferenceMigratesFromV5AndSpansSessions(t *testing.T) {
+	ctx := context.Background()
+	path := testStorePath(t)
+	store := openTestStore(t, path, testScope())
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE chat_preferences; PRAGMA user_version = 5`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrated := openTestStore(t, path, testScope())
+	first, err := migrated.Create(ctx, "First")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrated.SetTableStyle(ctx, "Minimal"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := migrated.Create(ctx, "Second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == second.ID {
+		t.Fatal("fixture sessions were not distinct")
+	}
+	if err := migrated.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestStore(t, path, testScope())
+	defer func() { _ = reopened.Close() }()
+	if style, err := reopened.TableStyle(ctx); err != nil || style != "Minimal" {
+		t.Fatalf("shared style after migration/restart = %q, %v", style, err)
+	}
+	if err := reopened.SetTableStyle(ctx, "unknown"); err == nil {
+		t.Fatal("invalid style was stored")
 	}
 }
 
@@ -540,7 +585,7 @@ func TestJoinLineageMigrationFromV4AddsAppliedEdges(t *testing.T) {
 	migrated := openTestStore(t, path, testScope())
 	defer func() { _ = migrated.Close() }()
 	var version int
-	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 5 {
+	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 6 {
 		t.Fatalf("migrated schema version = %d, %v", version, err)
 	}
 	session, err := migrated.Create(ctx, "Join migration")

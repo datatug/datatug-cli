@@ -22,7 +22,12 @@ var lookupIdentifier = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 func applySavedQueryLookups(ctx context.Context, result secureread.Result, federation *datatug.QueryFederation, progress io.Writer, quiet bool) (secureread.Result, error) {
 	base, err := url.Parse(federation.OVDBBaseURL)
-	if err != nil || base == nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || !(base.Scheme == "https" || base.Scheme == "http" && (base.Hostname() == "localhost" || base.Hostname() == "127.0.0.1" || base.Hostname() == "::1")) {
+	if err != nil || base == nil {
+		return result, fmt.Errorf("lookup OVDB base URL must use HTTPS or local HTTP without credentials or query parameters")
+	}
+	localHTTP := base.Scheme == "http" && (base.Hostname() == "localhost" || base.Hostname() == "127.0.0.1" || base.Hostname() == "::1")
+	allowedScheme := base.Scheme == "https" || localHTTP
+	if base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || !allowedScheme {
 		return result, fmt.Errorf("lookup OVDB base URL must use HTTPS or local HTTP without credentials or query parameters")
 	}
 	client := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -62,7 +67,7 @@ func applySavedQueryLookups(ctx context.Context, result secureread.Result, feder
 			if err != nil {
 				return nil, err
 			}
-			defer response.Body.Close()
+			defer func() { _ = response.Body.Close() }()
 			if response.StatusCode != http.StatusOK {
 				return nil, fmt.Errorf("OVDB lookup %s/%s failed (%d)", lookup.Database, lookup.Collection, response.StatusCode)
 			}

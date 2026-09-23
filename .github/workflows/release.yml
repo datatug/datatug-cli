@@ -1,9 +1,7 @@
-name: Publish latest release
+name: Release artifacts
 
-# Publication is a separate, manual action. Merging to main and pushing a tag
-# must not publish packages. Run this workflow from main when the latest code
-# is ready to become a release; the shared workflow chooses the next version
-# from conventional commits and publishes via GoReleaser.
+# Each merge to main still computes a version and publishes the GitHub release
+# artifacts. Package-manager distribution is a separate manual workflow.
 #
 # datatug-cli is pre-1.0: allow_major_version_bump stays false, so a stray
 # `feat!:` is capped to a minor bump instead of jumping to v1.0.0.
@@ -13,9 +11,11 @@ name: Publish latest release
 # for the sqlite driver.
 
 on:
-  workflow_dispatch: {}
+  push:
+    branches:
+      - main
 
-# One release at a time; a second manual run queues instead of racing the first.
+# One release at a time; a second merge queues instead of racing the first.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -25,7 +25,6 @@ permissions:
 
 jobs:
   release:
-    if: github.ref == 'refs/heads/main'
     # Pinned to an exact tag, not the moving @v1: that tag defines the
     # require_notarized_macos input but does NOT contain the
     # macos_signing_preflight job, so the gate silently no-ops there.
@@ -38,6 +37,9 @@ jobs:
       # workflow. Without it the guard fails closed and says so.
       actions: read
     with:
+      # Keep GitHub release artifacts automatic, but never update downstream
+      # package managers as a side effect of merging code.
+      goreleaser_extra_args: '--skip=homebrew,winget'
       # Refuse to tag or publish when Go CI did not pass for this exact
       # commit. Before this input a red suite could not stop a release —
       # and did not: v0.13.2

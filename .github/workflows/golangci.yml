@@ -68,7 +68,7 @@ jobs:
       require_conventional_pr_title: true
       # Uses the C-based github.com/mattn/go-sqlite3 driver, which requires cgo.
       cgo_enabled: true
-      # Publication happens only when release.yml is triggered manually.
+      # The release-artifacts workflow owns version tags and GitHub assets.
       # This workflow only builds/lints/tests and never creates a tag.
       disable-version-bumping: true
       code_coverage: true

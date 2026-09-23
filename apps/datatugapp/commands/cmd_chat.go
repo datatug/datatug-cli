@@ -190,6 +190,12 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if err := ui.SetSavedQueryService(chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session}); err != nil {
 		return "", Exit(fmt.Sprintf("list saved project queries: %v", err), exitCodeUsage)
 	}
+	bridge, err := chat.StartBrowserBridge(sessions)
+	if err != nil {
+		return "", Exit(fmt.Sprintf("start browser chat: %v", err), exitCodeUsage)
+	}
+	defer func() { _ = bridge.Close() }()
+	ui.SetBrowserURL(bridge.URL)
 	if err := saveLastChatOptions(cmd, options); err != nil {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)
 	}

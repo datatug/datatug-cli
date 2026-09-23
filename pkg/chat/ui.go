@@ -536,6 +536,10 @@ type tableStyleNoticeExpired struct{ id int }
 // bubble-table components, and a fixed bottom input.
 type UI struct {
 	ctx                  context.Context
+	browserURL           string
+	webLinkVisible       bool
+	bridgeEvents         <-chan struct{}
+	bridgeStop           func()
 	conversation         Conversation
 	sessions             *SessionChat
 	sessionID            string
@@ -619,6 +623,29 @@ func (u *UI) SetProjectChoices(choices []ProjectChoice) {
 
 func (u *UI) SelectedProject() string { return u.selectedProject }
 
+// SetBrowserURL enables F5 to reveal the active CLI session link.
+func (u *UI) SetBrowserURL(url string) {
+	u.browserURL = url
+	if u.sessions != nil && u.bridgeEvents == nil {
+		u.bridgeEvents, u.bridgeStop = u.sessions.SubscribeChanges()
+	}
+}
+
+type bridgeTickMsg struct{}
+
+func (u *UI) awaitBridgeChange() tea.Cmd {
+	if u.bridgeEvents == nil {
+		return nil
+	}
+	events := u.bridgeEvents
+	return func() tea.Msg {
+		if _, ok := <-events; ok {
+			return bridgeTickMsg{}
+		}
+		return nil
+	}
+}
+
 // NewUI creates the terminal chat model without starting a real terminal.
 func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI {
 	if ctx == nil {
@@ -683,11 +710,19 @@ func (u *UI) Run() error {
 	if u.conversation == nil {
 		return fmt.Errorf("chat UI requires a conversation")
 	}
+	if u.bridgeStop != nil {
+		defer u.bridgeStop()
+	}
 	_, err := tea.NewProgram(u).Run()
 	return err
 }
 
-func (u *UI) Init() tea.Cmd { return textinput.Blink }
+func (u *UI) Init() tea.Cmd {
+	if u.browserURL == "" {
+		return textinput.Blink
+	}
+	return tea.Batch(textinput.Blink, u.awaitBridgeChange())
+}
 
 func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	var commands []tea.Cmd
@@ -748,7 +783,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if u.exportDialog != nil {
 		switch message.(type) {
-		case tea.WindowSizeMsg, exportMessage:
+		case tea.WindowSizeMsg, exportMessage, bridgeTickMsg:
 		default:
 			return u, u.updateExportDialog(message)
 		}
@@ -757,6 +792,13 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case parameterLookupMessage:
 		u.receiveParameterLookup(msg)
 		return u, nil
+	case bridgeTickMsg:
+		if u.sessions != nil && !u.busy {
+			if snapshot, err := u.sessions.Snapshot(u.ctx); err == nil && (snapshot.ID != u.sessionID || !snapshot.UpdatedAt.Equal(u.snapshot.UpdatedAt)) {
+				u.refreshSession(snapshot)
+			}
+		}
+		return u, u.awaitBridgeChange()
 	case relatedPreviewMessage:
 		if u.detail != nil && u.detail.sequence == msg.sequence {
 			u.detail.loading = false
@@ -973,6 +1015,11 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "ctrl+r":
 			return u, u.refreshSelectedCard()
+		case "f5":
+			if u.browserURL != "" {
+				u.webLinkVisible = !u.webLinkVisible
+			}
+			return u, nil
 		case "alt+s", "ß": // macOS Option+S emits ß unless the terminal maps Option to Meta.
 			return u, u.cycleTableStyle()
 		case "ctrl+left", "ctrl+right":
@@ -1320,6 +1367,61 @@ func (u *UI) loadSession(session ChatSession) {
 	u.rebuildDockGrids()
 	_ = u.refreshBookmarks()
 	u.rebuildHistory(true)
+}
+
+// refreshSession keeps the user's reading position when a browser turn arrives.
+// A CLI session switch still resets focus to the new conversation.
+func (u *UI) refreshSession(session ChatSession) {
+	if session.ID != u.sessionID {
+		u.loadSession(session)
+		return
+	}
+	gridID := ""
+	rowIndex, sourceRow, columnIndex := 0, -1, 0
+	sortColumn, sortDesc, secondaryFocus := -1, false, false
+	var gridView recordsetView
+	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
+		gridID = u.entries[u.activeGrid].recordSetID
+		grid := u.entries[u.activeGrid].grid
+		rowIndex, sourceRow, columnIndex, gridView = grid.rowIndex, grid.selectedSourceRow(), grid.selectedColumn, grid.activeView
+		sortColumn, sortDesc, secondaryFocus = grid.model.sortColumn, grid.model.sortDesc, grid.secondaryFocus
+	}
+	gridFocused, joinFocused := u.gridFocused, u.joinFocused
+	messageFocused, selectedMessage := u.messageFocused, u.selectedMessage
+	workspaceFocused, workspaceTab, dockIndex := u.workspaceFocused, u.workspaceTab, u.dockIndex
+	offset := u.history.YOffset()
+	u.loadSession(session)
+	if gridFocused && gridID != "" {
+		for index := range u.entries {
+			if u.entries[index].recordSetID == gridID && u.focusGrid(index) {
+				grid := u.entries[index].grid
+				if sortColumn >= 0 && sortColumn < len(grid.model.Columns) {
+					grid.model.Sort(sortColumn)
+					if sortDesc {
+						grid.model.Sort(sortColumn)
+					}
+					grid.rebuild()
+				}
+				grid.rowIndex = min(rowIndex, max(0, len(grid.model.Rows)-1))
+				grid.restoreSourceRow(sourceRow)
+				grid.selectedColumn = min(columnIndex, max(0, len(grid.model.Columns)-1))
+				grid.setRecordsetView(gridView, u.chatPaneWidth())
+				grid.setSecondaryFocus(secondaryFocus)
+				grid.table.SetCursor(grid.rowIndex)
+				u.joinFocused = joinFocused && len(u.entries[index].joinCandidates) > 0
+				break
+			}
+		}
+	} else if messageFocused && selectedMessage >= 0 && selectedMessage < len(u.entries) {
+		u.focusMessage(selectedMessage)
+	} else if workspaceFocused {
+		u.focusWorkspace()
+		u.workspaceTab, u.dockIndex = workspaceTab, dockIndex
+	}
+	if gridFocused || messageFocused || workspaceFocused {
+		u.rebuildHistory(false)
+		u.history.SetYOffset(offset)
+	}
 }
 
 func (u *UI) runSessionCommand(input string) tea.Cmd {
@@ -2285,7 +2387,17 @@ func (u *UI) statusLines() []string {
 		} else if u.gridFocused || u.workspaceFocused {
 			compact = append(compact, "Alt+S style")
 		}
+		if u.webLinkVisible {
+			compact = append(compact, lipgloss.NewStyle().Hyperlink(u.browserURL).Render("Open web chat"), "F5 hide link")
+		} else if u.browserURL != "" {
+			compact = append(compact, "F5 web link")
+		}
 		return wrapStatusSegments(compact, maxWidth)
+	}
+	if u.webLinkVisible {
+		segments = append(segments, lipgloss.NewStyle().Hyperlink(u.browserURL).Render("Open web chat"), "F5 hide link")
+	} else if u.browserURL != "" {
+		segments = append(segments, "F5 web link")
 	}
 	// Preserve the focus cue and primary actions on wide terminals without
 	// making an extra status row merely for the project/session shortcuts.

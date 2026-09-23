@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"strings"
 
+	"github.com/dal-go/dalgo/condeval"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dtql"
 	"github.com/dal-go/dalgo2http"
@@ -76,6 +79,15 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
 	}
 	executor := secureread.NewExecutor(session)
+	if queryDef.Type == datatug.QueryTypeDTQL && (o.format == "jsonl" || o.format == "csv") {
+		streamed, streamErr := runStreamedSavedDTQL(ctx, cmd.OutOrStdout(), stderr, o, executor, projStore, projectDir, queryDef, variables)
+		if streamed {
+			if streamErr != nil {
+				return savedQueryFailure(streamErr)
+			}
+			return nil
+		}
+	}
 
 	var result secureread.Result
 	switch queryDef.Type {
@@ -273,9 +285,24 @@ func runSQLSavedQuery(ctx context.Context, executor *secureread.Executor, projSt
 // it through Executor.RunDTQL, which resolves its "param:" nodes (and
 // $currentUser) from variables the same way accesspolicies.Run always has.
 func runDTQLSavedQuery(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
-	parsed, err := dtql.Deserialize([]byte(queryDef.Text))
+	urls, err := federatedDTQLURLs(ctx, projStore, projectDir, envFlag, queryDef)
 	if err != nil {
 		return secureread.Result{}, err
+	}
+	if len(urls) > 0 {
+		return executor.RunFederatedDTQL(ctx, []byte(queryDef.Text), urls, variables)
+	}
+	sourceURL, err := resolveSQLOrDTQLSourceURL(ctx, projStore, projectDir, envFlag, queryDef)
+	if err != nil {
+		return secureread.Result{}, err
+	}
+	return executor.RunDTQL(ctx, sourceURL, []byte(queryDef.Text), variables)
+}
+
+func federatedDTQLURLs(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (map[string]string, error) {
+	parsed, err := dtql.Deserialize([]byte(queryDef.Text))
+	if err != nil {
+		return nil, err
 	}
 	databases := map[string]bool{}
 	var visit func(dal.FromSource)
@@ -295,23 +322,162 @@ func runDTQLSavedQuery(ctx context.Context, executor *secureread.Executor, projS
 	if len(databases) > 0 {
 		envID, err := resolveQueryEnvironment(ctx, projStore, envFlag)
 		if err != nil {
-			return secureread.Result{}, err
+			return nil, err
 		}
 		urls := make(map[string]string, len(databases))
 		for database := range databases {
 			url, err := resolveQuerySourceURL(ctx, projStore, projectDir, envID, database)
 			if err != nil {
-				return secureread.Result{}, err
+				return nil, err
 			}
 			urls[database] = url
 		}
-		return executor.RunFederatedDTQL(ctx, []byte(queryDef.Text), urls, variables)
+		return urls, nil
 	}
-	sourceURL, err := resolveSQLOrDTQLSourceURL(ctx, projStore, projectDir, envFlag, queryDef)
+	return nil, nil
+}
+
+// runStreamedSavedDTQL handles named-database federated queries only. The
+// streaming contract keeps at most DALgo's bounded lookup batch in memory.
+func runStreamedSavedDTQL(ctx context.Context, out, progress io.Writer, o queryOptions, executor *secureread.Executor, store datatug.ProjectStore, projectDir string, queryDef *datatug.QueryDef, variables map[string]any) (bool, error) {
+	urls, err := federatedDTQLURLs(ctx, store, projectDir, o.env, queryDef)
 	if err != nil {
-		return secureread.Result{}, err
+		return true, err
 	}
-	return executor.RunDTQL(ctx, sourceURL, []byte(queryDef.Text), variables)
+	if len(urls) == 0 {
+		return false, nil
+	}
+	parsed, err := dtql.Deserialize([]byte(queryDef.Text))
+	if err != nil {
+		return true, err
+	}
+	if !isBoundedFederatedRowShape(parsed) {
+		return true, fmt.Errorf("streaming %s supports one flat equality join without ordering, aggregation, or subqueries; use --format json for this query", o.format)
+	}
+	stream, err := executor.StreamFederatedDTQL(ctx, []byte(queryDef.Text), urls, variables)
+	if err != nil {
+		return true, err
+	}
+	defer stream.Close()
+	columns := explicitStreamColumns(stream.Query)
+	if o.format == "csv" && len(columns) == 0 {
+		return true, fmt.Errorf("streaming CSV requires deterministic explicit DTQL columns; use --format jsonl")
+	}
+	if federation := queryDef.Federation; federation != nil {
+		for _, lookup := range federation.Lookups {
+			columns = appendLookupColumns(columns, lookup)
+		}
+	}
+	reader, err := streamSavedQueryLookups(ctx, stream.Reader, queryDef.Federation, progress, o.quiet)
+	if err != nil {
+		return true, err
+	}
+	if !o.quiet {
+		writeSavedQueryLimitations(progress, stream.Limitations())
+	}
+	return true, writeStreamedRows(ctx, out, o.format, columns, reader)
+}
+
+// DALgo's row stream keeps the joined dimension in memory and reads the fact
+// side incrementally for this shape. Refuse its generic fallback here because
+// that evaluator can collect the large fact side before the first output row.
+func isBoundedFederatedRowShape(query dal.StructuredQuery) bool {
+	if query.From() == nil || dal.HasAggregation(query) || dal.HasSubquery(query) || len(query.OrderBy()) != 0 || len(query.From().Joins()) != 1 {
+		return false
+	}
+	join := query.From().Joins()[0]
+	child := join.From()
+	if child == nil {
+		child = dal.From(join.RecordsetSource)
+	}
+	if child == nil || len(child.Joins()) != 0 || len(join.Algorithms()) != 0 {
+		return false
+	}
+	root, rootOK := query.From().Base().(dal.CollectionRef)
+	dimension, dimensionOK := child.Base().(dal.CollectionRef)
+	if !rootOK || !dimensionOK || root.Database() == "" || dimension.Database() == "" {
+		return false
+	}
+	rootAlias, dimensionAlias := root.Alias(), dimension.Alias()
+	if rootAlias == "" {
+		rootAlias = root.Name()
+	}
+	if dimensionAlias == "" {
+		dimensionAlias = dimension.Name()
+	}
+	for _, condition := range join.On() {
+		comparison, ok := condition.(dal.Comparison)
+		if !ok || comparison.Operator != dal.Equal {
+			continue
+		}
+		left, leftOK := comparison.Left.(dal.FieldRef)
+		right, rightOK := comparison.Right.(dal.FieldRef)
+		if leftOK && rightOK && ((left.Source() == rootAlias && right.Source() == dimensionAlias) || (left.Source() == dimensionAlias && right.Source() == rootAlias)) {
+			return true
+		}
+	}
+	return false
+}
+
+func explicitStreamColumns(query dal.StructuredQuery) []string {
+	if len(query.Columns()) == 0 {
+		return nil
+	}
+	columns := make([]string, 0, len(query.Columns()))
+	for _, column := range query.Columns() {
+		name := column.Alias
+		if field, ok := column.Expression.(dal.FieldRef); ok && name == "" {
+			name = field.Name()
+		}
+		if name == "" {
+			return nil
+		}
+		columns = append(columns, name)
+	}
+	return columns
+}
+
+func writeStreamedRows(ctx context.Context, out io.Writer, format string, columns []string, reader dal.RecordsReader) error {
+	if format == "csv" {
+		if err := writeCSVHeader(out, columns); err != nil {
+			return err
+		}
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rec, err := reader.Next()
+		if errors.Is(err, dal.ErrNoMoreRecords) || (err == nil && rec == nil) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		data, err := condeval.ToMap(rec.Data())
+		if err != nil {
+			return err
+		}
+		if _, found := data[keyColumn]; found {
+			return errReservedKeyField
+		}
+		row := queryRow{key: fmt.Sprint(rec.Key().ID), data: data}
+		if format == "jsonl" {
+			rowColumns := columns
+			if len(rowColumns) == 0 {
+				rowColumns = make([]string, 0, len(data))
+				for name := range data {
+					rowColumns = append(rowColumns, name)
+				}
+				sort.Strings(rowColumns)
+			}
+			if err := writeJSONRows(out, rowColumns, []queryRow{row}, false, nil); err != nil {
+				return err
+			}
+		} else if err := writeCSVDataRow(out, columns, row); err != nil {
+			return err
+		}
+	}
 }
 
 func resolveSQLOrDTQLSourceURL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (string, error) {

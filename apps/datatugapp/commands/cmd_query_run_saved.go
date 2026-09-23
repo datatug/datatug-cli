@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dtql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -30,6 +31,11 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		ctx = context.Background()
 	}
 	stderr := cmd.ErrOrStderr()
+	if !o.quiet {
+		ctx = secureread.WithFederatedProgress(ctx, func(item dal.FederatedProgress) {
+			_, _ = fmt.Fprintf(stderr, "query %s: %d rows %s\n", item.Phase, item.Rows, item.Database)
+		})
+	}
 
 	projectDir, projStore, err := resolveQueryProject(o.project)
 	if err != nil {
@@ -84,6 +90,12 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 	}
 	if err != nil {
 		return savedQueryFailure(err)
+	}
+	if queryDef.Federation != nil && len(queryDef.Federation.Lookups) != 0 {
+		result, err = applySavedQueryLookups(ctx, result, queryDef.Federation, stderr, o.quiet)
+		if err != nil {
+			return savedQueryFailure(err)
+		}
 	}
 
 	if !o.quiet {
@@ -261,6 +273,40 @@ func runSQLSavedQuery(ctx context.Context, executor *secureread.Executor, projSt
 // it through Executor.RunDTQL, which resolves its "param:" nodes (and
 // $currentUser) from variables the same way accesspolicies.Run always has.
 func runDTQLSavedQuery(ctx context.Context, executor *secureread.Executor, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
+	parsed, err := dtql.Deserialize([]byte(queryDef.Text))
+	if err != nil {
+		return secureread.Result{}, err
+	}
+	databases := map[string]bool{}
+	var visit func(dal.FromSource)
+	visit = func(from dal.FromSource) {
+		if ref, ok := from.Base().(dal.CollectionRef); ok && ref.Database() != "" {
+			databases[ref.Database()] = true
+		}
+		for _, joined := range from.Joins() {
+			if child := joined.From(); child != nil {
+				visit(child)
+			} else {
+				visit(dal.From(joined.RecordsetSource))
+			}
+		}
+	}
+	visit(parsed.From())
+	if len(databases) > 0 {
+		envID, err := resolveQueryEnvironment(ctx, projStore, envFlag)
+		if err != nil {
+			return secureread.Result{}, err
+		}
+		urls := make(map[string]string, len(databases))
+		for database := range databases {
+			url, err := resolveQuerySourceURL(ctx, projStore, projectDir, envID, database)
+			if err != nil {
+				return secureread.Result{}, err
+			}
+			urls[database] = url
+		}
+		return executor.RunFederatedDTQL(ctx, []byte(queryDef.Text), urls, variables)
+	}
 	sourceURL, err := resolveSQLOrDTQLSourceURL(ctx, projStore, projectDir, envFlag, queryDef)
 	if err != nil {
 		return secureread.Result{}, err

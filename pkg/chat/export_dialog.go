@@ -194,9 +194,10 @@ func (u *UI) updateExportDialog(msg tea.Msg) tea.Cmd {
 }
 
 func (d *exportDialog) focusInput() {
-	if d.focus == 2 {
+	switch d.focus {
+	case 2:
 		d.dir.Focus()
-	} else if d.focus == 3 {
+	case 3:
 		d.name.Focus()
 	}
 }

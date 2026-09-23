@@ -728,14 +728,14 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	var commands []tea.Cmd
 	if u.queryParameters != nil {
 		switch message.(type) {
-		case tea.WindowSizeMsg, parameterLookupMessage:
+		case tea.WindowSizeMsg, parameterLookupMessage, bridgeTickMsg:
 		default:
 			return u, u.updateQueryParametersDialog(message)
 		}
 	}
 	if u.saveQueryDialog != nil {
 		switch message.(type) {
-		case tea.WindowSizeMsg, savedQuerySaveMessage:
+		case tea.WindowSizeMsg, savedQuerySaveMessage, bridgeTickMsg:
 		default:
 			return u, u.updateSaveQueryDialog(message)
 		}
@@ -764,7 +764,9 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return u, nil
 			}
 		}
-		if _, ok := message.(tea.WindowSizeMsg); !ok {
+		switch message.(type) {
+		case tea.WindowSizeMsg, bridgeTickMsg:
+		default:
 			return u, nil
 		}
 	}
@@ -777,7 +779,9 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				u.connectDialog = false
 			}
 		}
-		if _, ok := message.(tea.WindowSizeMsg); !ok {
+		switch message.(type) {
+		case tea.WindowSizeMsg, bridgeTickMsg:
+		default:
 			return u, nil
 		}
 	}

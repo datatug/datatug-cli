@@ -1342,10 +1342,10 @@ func TestGridBorderChangesWithFocus(t *testing.T) {
 		t.Fatalf("grid border did not change with focus:\ninactive %q\nactive %q", inactive, active)
 	}
 	activeLines := strings.Split(g.view(), "\n")
-	if !strings.Contains(activeLines[1], activeBorderStyle.Render("│")) || strings.HasSuffix(activeLines[1], activeBorderStyle.Render("│")) {
-		t.Fatalf("focused grid right edge is highlighted: %q", activeLines[1])
+	if !strings.Contains(activeLines[1], activeBorderStyle.Render("│")) || !strings.HasSuffix(activeLines[1], selectedOutlineStyle.Render("│")) {
+		t.Fatalf("focused grid side colors are wrong: %q", activeLines[1])
 	}
-	if !strings.Contains(activeLines[len(activeLines)-1], "38;5;244m╰") || strings.Contains(activeLines[len(activeLines)-1], "38;5;51") {
-		t.Fatalf("focused grid bottom border uses active color: %q", activeLines[len(activeLines)-1])
+	if !strings.Contains(activeLines[0], "38;5;250m╭") || !strings.Contains(activeLines[len(activeLines)-1], "38;5;250m╰") || strings.Contains(activeLines[len(activeLines)-1], "38;5;51") {
+		t.Fatalf("focused grid top/bottom border colors differ: %q / %q", activeLines[0], activeLines[len(activeLines)-1])
 	}
 }

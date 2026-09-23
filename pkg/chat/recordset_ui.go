@@ -131,11 +131,12 @@ func recordsetCard(title, content string, width, bodyHeight int, focused bool) s
 	top := borderLine("╭", title, "╮", width)
 	bottom := borderLine("╰", "", "╯", width)
 	if focused {
-		top = activeBorderStyle.Render(strings.TrimSuffix(top, "╮")) + inactiveBorderStyle.Render("╮")
+		top = selectedOutlineStyle.Render(top)
+		bottom = selectedOutlineStyle.Render(bottom)
 	} else {
 		top = inactiveBorderStyle.Render(top)
+		bottom = inactiveBorderStyle.Render(bottom)
 	}
-	bottom = inactiveBorderStyle.Render(bottom)
 	lines := []string{padAnsiLine(top, width)}
 	body := strings.Split(content, "\n")
 	for index := 0; index < bodyHeight; index++ {
@@ -147,7 +148,11 @@ func recordsetCard(title, content string, width, bodyHeight int, focused bool) s
 		if focused {
 			leftBorder = activeBorderStyle
 		}
-		lines = append(lines, padAnsiLine(leftBorder.Render("│")+padAnsiLine(line, innerWidth)+inactiveBorderStyle.Render("│"), width))
+		rightBorder := inactiveBorderStyle
+		if focused {
+			rightBorder = selectedOutlineStyle
+		}
+		lines = append(lines, padAnsiLine(leftBorder.Render("│")+padAnsiLine(line, innerWidth)+rightBorder.Render("│"), width))
 	}
 	lines = append(lines, padAnsiLine(bottom, width))
 	return strings.Join(lines, "\n")

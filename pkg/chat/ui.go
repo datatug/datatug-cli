@@ -23,20 +23,21 @@ var (
 	messageSurfaceBackground  = lipgloss.Color("235")
 	selectedMessageBackground = lipgloss.Color("237")
 
-	userStyle           = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("45"))
-	agentStyle          = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-	statusStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	tableStyleBadge     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Background(lipgloss.Color("24"))
-	activeTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51"))
-	inactiveTitleStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	activeBorderStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
-	inactiveBorderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	selectedCellStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220"))
-	activeCellStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235"))
-	inactiveCellStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Background(lipgloss.Color("232"))
-	activeMessageStyle  = lipgloss.NewStyle().Padding(0, 1).Background(messageSurfaceBackground)
-	inputSurfaceStyle   = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("236"))
-	statusSurfaceStyle  = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("233"))
+	userStyle            = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("45"))
+	agentStyle           = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	statusStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	tableStyleBadge      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Background(lipgloss.Color("24"))
+	activeTitleStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51"))
+	inactiveTitleStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	activeBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
+	selectedOutlineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+	inactiveBorderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	selectedCellStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220"))
+	activeCellStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235"))
+	inactiveCellStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Background(lipgloss.Color("232"))
+	activeMessageStyle   = lipgloss.NewStyle().Padding(0, 1).Background(messageSurfaceBackground)
+	inputSurfaceStyle    = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("236"))
+	statusSurfaceStyle   = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("233"))
 )
 
 type historyEntry struct {
@@ -438,6 +439,9 @@ func (g *gridState) scrollbarLine(line, trackHeight int) string {
 	pageStart, pageEnd := g.table.VisibleIndices()
 	visibleRows := max(0, pageEnd-pageStart+1)
 	if trackHeight == 0 || visibleRows == 0 || len(g.model.Rows) <= visibleRows {
+		if g.focused {
+			return selectedOutlineStyle.Render("│")
+		}
 		return inactiveBorderStyle.Render("│")
 	}
 	thumbSize := max(1, trackHeight*visibleRows/len(g.model.Rows))
@@ -450,7 +454,7 @@ func (g *gridState) scrollbarLine(line, trackHeight int) string {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render("▐")
 	}
 	if g.focused {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Render("│")
+		return selectedOutlineStyle.Render("│")
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("237")).Render("│")
 }
@@ -479,7 +483,7 @@ func (g *gridState) viewWithTitle(label string) string {
 	}
 	topBorder := borderLine("╭", title, "╮", cardWidth)
 	if g.focused {
-		topBorder = activeBorderStyle.Render(strings.TrimSuffix(topBorder, "╮")) + inactiveBorderStyle.Render("╮")
+		topBorder = selectedOutlineStyle.Render(topBorder)
 	} else {
 		topBorder = inactiveBorderStyle.Render(topBorder)
 	}
@@ -496,7 +500,11 @@ func (g *gridState) viewWithTitle(label string) string {
 	footer := g.footer()
 	footerLabel := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("252")).Render(footer)
 	bottomBorder := borderLine("╰", footerLabel, "╯", cardWidth)
-	bottomBorder = inactiveBorderStyle.Render(bottomBorder)
+	if g.focused {
+		bottomBorder = selectedOutlineStyle.Render(bottomBorder)
+	} else {
+		bottomBorder = inactiveBorderStyle.Render(bottomBorder)
+	}
 	lines = append(lines, padAnsiLine(bottomBorder, cardWidth))
 	return strings.Join(lines, "\n")
 }

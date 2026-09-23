@@ -577,6 +577,7 @@ type UI struct {
 	mouseCapture        bool
 	busy                bool
 	exporting           bool
+	exportDialog        *exportDialog
 	detail              *cellDetail
 	detailSequence      int
 	width               int
@@ -669,6 +670,13 @@ func (u *UI) Init() tea.Cmd { return textinput.Blink }
 
 func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	var commands []tea.Cmd
+	if u.exportDialog != nil {
+		switch message.(type) {
+		case tea.WindowSizeMsg, exportMessage:
+		default:
+			return u, u.updateExportDialog(message)
+		}
+	}
 	switch msg := message.(type) {
 	case relatedPreviewMessage:
 		if u.detail != nil && u.detail.sequence == msg.sequence {
@@ -1143,7 +1151,11 @@ func (u *UI) runSessionCommand(input string) tea.Cmd {
 			err = fmt.Errorf("usage: /bucket [clear]")
 		}
 	case "/export":
-		commandToRun, err = u.exportCommand(argument)
+		if argument == "" {
+			u.openExportDialog()
+		} else {
+			commandToRun, err = u.exportCommand(argument)
+		}
 	default:
 		err = fmt.Errorf("unknown chat command %q; type /help", command)
 	}
@@ -1318,9 +1330,7 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		u.performWorkspaceAction(WorkspaceAction{Kind: kind, RecordSetID: id})
 		return nil, true
 	case "e":
-		u.focusInput()
-		u.input.SetValue("/export current xlsx ")
-		u.input.CursorEnd()
+		u.openExportDialog()
 		return nil, true
 	}
 	cmd, _ := g.table.Update(msg)
@@ -1760,6 +1770,9 @@ func (u *UI) View() tea.View {
 	content = withRootGutter(content, u.width)
 	if u.detail != nil {
 		content = u.detailOverlay(content)
+	}
+	if u.exportDialog != nil {
+		content = u.exportOverlay(content)
 	}
 	view := tea.NewView(content)
 	view.AltScreen = true

@@ -497,6 +497,16 @@ func (s *SessionStore) loadWorkspace(ctx context.Context, item *ChatSession) err
 }
 
 func validateLoadedWorkspace(item ChatSession) error {
+	seenBucket := map[string]bool{}
+	for _, id := range item.Workspace.ExportBucket {
+		if _, ok := item.RecordSets[id]; !ok {
+			return fmt.Errorf("export bucket references a missing RecordSet")
+		}
+		if seenBucket[id] {
+			return fmt.Errorf("export bucket contains a duplicate RecordSet")
+		}
+		seenBucket[id] = true
+	}
 	for id, view := range item.Workspace.Views {
 		if view.ID != id {
 			return fmt.Errorf("workspace view %q has inconsistent identity", id)

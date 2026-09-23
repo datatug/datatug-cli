@@ -116,7 +116,22 @@ exactly like other policy-secured DataTug reads.
 - Up/Down and Page Up/Page Down navigate rows.
 - Left/Right choose columns and horizontally window results wider than the terminal.
 - Press `s` to sort by the selected column; press it again to reverse the order.
-- Enter is reserved for future row details/drill-down.
+- Enter opens the selected cell's detail dialog with the complete row, column
+  metadata, and (when an authoritative foreign key is available) up to five
+  related records. The related read uses DTQL and normal DataTug access policy.
+  Up/Down or the mouse wheel scrolls the dialog, `y` copies the cell value,
+  and Escape returns to the grid.
+- `B` adds or removes the focused RecordSet from this session's export bucket;
+  `/bucket` lists it and `/bucket clear` empties it. `e` starts a single-RecordSet
+  export command in the composer.
+- `/export current <format> <path>` saves the focused RecordSet;
+  `/export bucket <format> <path>` saves the bucket. Formats are `csv`, `json`,
+  `yaml`, `ingr`, `dbf`, `sqlite`, and `xlsx`. Bucket XLSX has one sheet per
+  RecordSet; bucket SQLite has one table per RecordSet; other bucket formats
+  produce a ZIP with one file per RecordSet (even for a one-item bucket).
+  JSON and YAML store ordered `columns` and `rows` arrays. Existing paths are
+  never overwritten. DBF's ten-byte field-name and fixed-width value limits
+  mean long column names are shortened and oversized values are rejected.
 - The mouse wheel or a touchpad scrolls chat history. Press `F2` to temporarily
   disable mouse capture for normal terminal text selection, then `F2` again to
   restore wheel scrolling. A terminal's mouse-capture override modifier also works.

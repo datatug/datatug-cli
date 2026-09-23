@@ -18,6 +18,7 @@ The Idea format follows [SpecScore](https://specscore.md/idea-specification).
 | [mutation-git-integration](mutation-git-integration.md) | Implemented | 2026-06-04 | alex | mutation-git-integration |
 | [semantic-metadata-cli](semantic-metadata-cli.md) | Implemented | 2026-06-04 | alex | cli/entity |
 | [shared-module-system](shared-module-system.md) | Approved | 2026-06-04 | alex | — |
+| [terminal-chat-ux-acceptance](terminal-chat-ux-acceptance.md) | Draft | 2026-09-23 | alex | — |
 
 ## Open Questions
 

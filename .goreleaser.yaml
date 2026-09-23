@@ -105,6 +105,6 @@ homebrew_casks:
     repository:
       owner: datatug
       name: homebrew-tap
-      # Forwarded by the shared strongo/cicd release.yml (mapped from the repo's
-      # HOMEBREW_TAP_GITHUB_TOKEN secret).
+      # The automatic release skips Homebrew and has no cross-repo token.
+      # Package publication is handled by publish-packages.yml instead.
       token: "{{ .Env.GORELEASER_GITHUB_TOKEN }}"

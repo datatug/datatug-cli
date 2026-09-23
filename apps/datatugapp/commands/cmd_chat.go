@@ -43,6 +43,9 @@ func chatCommand() *cobra.Command {
 		Short: "Ask questions about project data using DTQL",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := applyLastChatOptions(cmd, &options); err != nil {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: load previous chat options: %v\n", err)
+			}
 			return runChat(cmd, options)
 		},
 	}
@@ -182,6 +185,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	ui, err := chat.NewSessionUI(ctx, sessions, options.model)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("render chat session: %v", err), exitCodeUsage)
+	}
+	if err := saveLastChatOptions(cmd, options); err != nil {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)
 	}
 	ui.SetProjectChoices(chatProjectChoices(options.project, projectDir, projectCatalog))
 	if err := ui.Run(); err != nil {

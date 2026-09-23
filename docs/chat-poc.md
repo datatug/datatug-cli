@@ -96,6 +96,13 @@ set +a
 datatug chat --ai deepseek
 ```
 
+After a successful start, plain `datatug chat` reuses the last project,
+environment, database, AI profile, and access identity. Explicit flags override
+those saved choices. Model/base-URL/thinking overrides are remembered only when
+explicitly selected, so a profile's updated defaults continue to take effect.
+The local settings file is `datatug/chat-last.json` under the OS user config
+directory; API keys are never stored there.
+
 The `--model`, `--base-url`, and `--thinking` flags remain available as
 explicit per-run overrides. If `--ai` is omitted, the existing default model
 and credential behavior are unchanged.

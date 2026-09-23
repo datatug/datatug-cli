@@ -403,6 +403,16 @@ func isBoundedFederatedRowShape(query dal.StructuredQuery) bool {
 	if dimension.ScanLimit() < 1 || dimension.ScanLimit() > 10000 {
 		return false
 	}
+	stableOrder := false
+	for _, order := range dimension.ScanOrders() {
+		if field, ok := order.Expression().(dal.FieldRef); ok && field.Name() == "id" {
+			stableOrder = true
+			break
+		}
+	}
+	if !stableOrder {
+		return false
+	}
 	rootAlias, dimensionAlias := root.Alias(), dimension.Alias()
 	if rootAlias == "" {
 		rootAlias = root.Name()

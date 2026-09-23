@@ -167,6 +167,13 @@ func TestStreamingShapeAndColumns(t *testing.T) {
 	if isBoundedFederatedRowShape(withoutCap) {
 		t.Fatal("uncapped dimension accepted")
 	}
+	withoutStableOrder, err := dtql.Deserialize([]byte(strings.Replace(streamingJoinDTQL, "orderBy: [{field: id}]", "orderBy: [{field: name}]", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isBoundedFederatedRowShape(withoutStableOrder) {
+		t.Fatal("dimension scan without stable id order accepted")
+	}
 	if got := explicitStreamColumns(query); len(got) != 2 || got[0] != "invoiceId" || got[1] != "countryName" {
 		t.Fatalf("columns: %v", got)
 	}

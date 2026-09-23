@@ -129,8 +129,10 @@ exactly like other policy-secured DataTug reads.
   Up/Down or the mouse wheel scrolls the dialog, `y` copies the cell value,
   and Escape returns to the grid.
 - `B` adds or removes the focused RecordSet from this session's export bucket;
-  `/bucket` lists it and `/bucket clear` empties it. `e` starts a single-RecordSet
-  export command in the composer.
+  `/bucket` lists it and `/bucket clear` empties it. Press `e` on a RecordSet (or
+  enter `/export`) to open the export dialog. Choose current RecordSet or bucket,
+  format, directory and file name with Tab/Shift+Tab. The directory browser uses
+  arrows and Enter; Space chooses its current folder. Escape cancels.
 - `/export current <format> <path>` saves the focused RecordSet;
   `/export bucket <format> <path>` saves the bucket. Formats are `csv`, `json`,
   `yaml`, `ingr`, `dbf`, `sqlite`, and `xlsx`. Bucket XLSX has one sheet per

@@ -1128,9 +1128,10 @@ func (u *UI) runSessionCommand(input string) tea.Cmd {
 	case "/help":
 		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm • /bucket [clear] • /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path>\n\nGlobal: F2 mouse select/wheel • F6/Shift+→ workspace • Shift+← previous • Alt+S table style • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ select grids/messages • j JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • B bucket • e export • s sort • Enter details • Esc composer\n\nInspector: 1 Current row • 2 Current column • 3 Current recordset"})
 	case "/bucket":
-		if argument == "clear" {
+		switch argument {
+		case "clear":
 			err = u.applyWorkspaceAction(WorkspaceAction{Kind: "bucket_clear"})
-		} else if argument == "" {
+		case "":
 			lines := []string{fmt.Sprintf("Export bucket · %d RecordSets", len(u.snapshot.Workspace.ExportBucket))}
 			for i, id := range u.snapshot.Workspace.ExportBucket {
 				if record, ok := u.snapshot.RecordSets[id]; ok {
@@ -1138,7 +1139,7 @@ func (u *UI) runSessionCommand(input string) tea.Cmd {
 				}
 			}
 			u.entries = append(u.entries, historyEntry{role: "DataTug", text: strings.Join(lines, "\n")})
-		} else {
+		default:
 			err = fmt.Errorf("usage: /bucket [clear]")
 		}
 	case "/export":

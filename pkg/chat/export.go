@@ -314,7 +314,7 @@ func sqliteColumnType(record RecordSet, column string) string {
 			continue
 		}
 		candidate := "TEXT"
-		switch value.(type) {
+		switch value := value.(type) {
 		case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 			candidate = "INTEGER"
 		case float32, float64:
@@ -323,7 +323,7 @@ func sqliteColumnType(record RecordSet, column string) string {
 			candidate = "BLOB"
 		case json.Number:
 			candidate = "TEXT"
-			if _, err := value.(json.Number).Int64(); err == nil {
+			if _, err := value.Int64(); err == nil {
 				candidate = "INTEGER"
 			}
 		}

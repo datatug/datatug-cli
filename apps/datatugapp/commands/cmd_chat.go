@@ -186,6 +186,12 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if err != nil {
 		return "", Exit(fmt.Sprintf("render chat session: %v", err), exitCodeUsage)
 	}
+	bridge, err := chat.StartBrowserBridge(sessions)
+	if err != nil {
+		return "", Exit(fmt.Sprintf("start browser chat: %v", err), exitCodeUsage)
+	}
+	defer func() { _ = bridge.Close() }()
+	ui.SetBrowserURL(bridge.URL)
 	if err := saveLastChatOptions(cmd, options); err != nil {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)
 	}

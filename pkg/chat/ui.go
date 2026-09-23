@@ -576,6 +576,9 @@ type UI struct {
 	chatPanePercent     int
 	mouseCapture        bool
 	busy                bool
+	exporting           bool
+	detail              *cellDetail
+	detailSequence      int
 	width               int
 	height              int
 }
@@ -667,6 +670,26 @@ func (u *UI) Init() tea.Cmd { return textinput.Blink }
 func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	var commands []tea.Cmd
 	switch msg := message.(type) {
+	case relatedPreviewMessage:
+		if u.detail != nil && u.detail.sequence == msg.sequence {
+			u.detail.loading = false
+			u.detail.related = msg.related
+			u.detail.relatedError = msg.err
+		}
+		return u, nil
+	case exportMessage:
+		u.busy, u.exporting = false, false
+		origin := ""
+		if msg.sessionID != "" && msg.sessionID != u.sessionID {
+			origin = " from session " + sanitizeTerminalText(msg.sessionTitle)
+		}
+		if msg.err != nil {
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Couldn't save export" + origin + ": " + conciseError(msg.err)})
+		} else {
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: fmt.Sprintf("Saved %d RecordSet(s)%s to %s", msg.count, origin, msg.path)})
+		}
+		u.rebuildHistory(true)
+		return u, nil
 	case tea.WindowSizeMsg:
 		u.width, u.height = msg.Width, msg.Height
 		u.resizeChatPane()
@@ -722,6 +745,9 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return u, nil
 	case tea.MouseClickMsg:
+		if u.detail != nil {
+			return u, nil
+		}
 		if u.mouseCapture && msg.Button == tea.MouseLeft && msg.Y == u.historyHeight()+2 {
 			if ref, ok := u.attachmentCloseAt(msg.X - responsiveGutter(u.width)); ok {
 				u.performWorkspaceAction(WorkspaceAction{Kind: "detach", Reference: ref})
@@ -735,7 +761,33 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			u.history.GotoBottom()
 			return u, nil
 		}
+	case tea.MouseWheelMsg:
+		if u.detail != nil {
+			if msg.Button == tea.MouseWheelUp {
+				u.detail.offset = max(0, u.detail.offset-3)
+			}
+			if msg.Button == tea.MouseWheelDown {
+				u.detail.offset += 3
+			}
+			return u, nil
+		}
 	case tea.KeyPressMsg:
+		if u.detail != nil {
+			switch msg.String() {
+			case "ctrl+c":
+				return u, tea.Quit
+			case "esc", "enter":
+				u.detail = nil
+				return u, nil
+			case "up", "k":
+				u.detail.offset = max(0, u.detail.offset-1)
+			case "down", "j":
+				u.detail.offset++
+			case "y":
+				return u, tea.SetClipboard(u.detail.copyValue())
+			}
+			return u, nil
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			return u, tea.Quit
@@ -752,6 +804,9 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return u, nil
 		case "f3":
+			if u.exporting {
+				return u, nil
+			}
 			if len(u.projectChoices) > 0 {
 				u.projectPicker = !u.projectPicker
 				u.sessionPicker = false
@@ -761,6 +816,9 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return u, nil
 		case "f4":
+			if u.exporting {
+				return u, nil
+			}
 			u.sessionPicker = !u.sessionPicker
 			u.projectPicker = false
 			if u.sessionPicker {
@@ -868,9 +926,9 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if prompt != "" {
 				u.input.Reset()
 				if u.sessions != nil && strings.HasPrefix(prompt, "/") {
-					u.runSessionCommand(prompt)
+					cmd := u.runSessionCommand(prompt)
 					u.rebuildHistory(true)
-					return u, nil
+					return u, cmd
 				}
 				u.busy = true
 				u.history.SetHeight(u.historyHeight())
@@ -953,6 +1011,7 @@ func (u *UI) cycleTableStyle() tea.Cmd {
 }
 
 func (u *UI) loadSession(session ChatSession) {
+	u.detail = nil
 	u.sessionID, u.sessionTitle = session.ID, session.Title
 	u.snapshot = session
 	u.entries = nil
@@ -1015,7 +1074,7 @@ func (u *UI) loadSession(session ChatSession) {
 	u.rebuildHistory(true)
 }
 
-func (u *UI) runSessionCommand(input string) {
+func (u *UI) runSessionCommand(input string) tea.Cmd {
 	parts := strings.SplitN(input, " ", 2)
 	command := parts[0]
 	argument := ""
@@ -1024,6 +1083,7 @@ func (u *UI) runSessionCommand(input string) {
 	}
 	var snapshot ChatSession
 	var err error
+	var commandToRun tea.Cmd
 	switch command {
 	case "/new":
 		snapshot, err = u.sessions.Create(u.ctx)
@@ -1066,7 +1126,24 @@ func (u *UI) runSessionCommand(input string) {
 			snapshot, err = u.sessions.Delete(u.ctx)
 		}
 	case "/help":
-		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm\n\nGlobal: F2 mouse select/wheel • F6/Shift+→ workspace • Shift+← previous • Alt+S table style • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ select grids/messages • j JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • s sort • Enter details • Esc composer\n\nInspector: 1 Current row • 2 Current column • 3 Current recordset"})
+		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm • /bucket [clear] • /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path>\n\nGlobal: F2 mouse select/wheel • F6/Shift+→ workspace • Shift+← previous • Alt+S table style • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ select grids/messages • j JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • B bucket • e export • s sort • Enter details • Esc composer\n\nInspector: 1 Current row • 2 Current column • 3 Current recordset"})
+	case "/bucket":
+		switch argument {
+		case "clear":
+			err = u.applyWorkspaceAction(WorkspaceAction{Kind: "bucket_clear"})
+		case "":
+			lines := []string{fmt.Sprintf("Export bucket · %d RecordSets", len(u.snapshot.Workspace.ExportBucket))}
+			for i, id := range u.snapshot.Workspace.ExportBucket {
+				if record, ok := u.snapshot.RecordSets[id]; ok {
+					lines = append(lines, fmt.Sprintf("%d. %s (%d rows)", i+1, record.Title, len(record.Result.Rows)))
+				}
+			}
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: strings.Join(lines, "\n")})
+		default:
+			err = fmt.Errorf("usage: /bucket [clear]")
+		}
+	case "/export":
+		commandToRun, err = u.exportCommand(argument)
 	default:
 		err = fmt.Errorf("unknown chat command %q; type /help", command)
 	}
@@ -1075,6 +1152,7 @@ func (u *UI) runSessionCommand(input string) {
 	} else if snapshot.ID != "" {
 		u.loadSession(snapshot)
 	}
+	return commandToRun
 }
 
 func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
@@ -1183,9 +1261,7 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	case "enter":
-		u.selectFromGrid("row")
-		u.setWorkspaceTab(1)
-		return nil, true
+		return u.openCellDetail(), true
 	case "space":
 		u.selectFromGrid("row")
 		return nil, true
@@ -1226,6 +1302,25 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			u.syncRecordSetSort(recordSetID, g.model)
 		}
 		g.table.Focus()
+		return nil, true
+	case "B":
+		id := u.entries[u.activeGrid].recordSetID
+		if id == "" {
+			return nil, true
+		}
+		kind := "bucket_add"
+		for _, existing := range u.snapshot.Workspace.ExportBucket {
+			if existing == id {
+				kind = "bucket_remove"
+				break
+			}
+		}
+		u.performWorkspaceAction(WorkspaceAction{Kind: kind, RecordSetID: id})
+		return nil, true
+	case "e":
+		u.focusInput()
+		u.input.SetValue("/export current xlsx ")
+		u.input.CursorEnd()
 		return nil, true
 	}
 	cmd, _ := g.table.Update(msg)
@@ -1663,6 +1758,9 @@ func (u *UI) View() tea.View {
 	top := u.topBar(contentWidth(u.width))
 	content := lipgloss.JoinVertical(lipgloss.Left, top, body, status)
 	content = withRootGutter(content, u.width)
+	if u.detail != nil {
+		content = u.detailOverlay(content)
+	}
 	view := tea.NewView(content)
 	view.AltScreen = true
 	if u.mouseCapture {
@@ -1736,7 +1834,7 @@ func (u *UI) statusLines() []string {
 		segments = []string{"message selected", "Enter edit", "Shift+↑↓ navigate", "Esc input", mouseHint}
 	}
 	if u.gridFocused {
-		segments = []string{"1 Table", "2 Charts", "3 Current row", "j JOIN", "Tab panes (wide)", "Shift+↑↓ grids", "Shift+→ workspace", "Esc input"}
+		segments = []string{"1 Table", "2 Charts", "3 Current row", "j JOIN", fmt.Sprintf("B bucket:%d", len(u.snapshot.Workspace.ExportBucket)), "e export", "Enter details", "Tab panes (wide)", "Shift+↑↓ grids", "Shift+→ workspace", "Esc input"}
 		if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
 			grid := u.entries[u.activeGrid].grid
 			switch grid.activeView {
@@ -1771,10 +1869,27 @@ func (u *UI) statusLines() []string {
 		}
 	}
 	if u.busy {
-		segments = []string{"model: " + sanitizeTerminalText(u.modelName), "Thinking…", "Ctrl+C quit"}
+		activity := "Thinking…"
+		if u.exporting {
+			activity = "Exporting…"
+		}
+		segments = []string{"model: " + sanitizeTerminalText(u.modelName), activity, "Ctrl+C quit"}
 		if u.sessions != nil {
 			segments = append([]string{"session: " + sanitizeTerminalText(u.sessionTitle)}, segments...)
 		}
+	}
+	if u.detail != nil {
+		segments = []string{"FOCUS Detail", "↑↓ scroll", "Y copy cell", "Esc close"}
+	} else if u.gridFocused && u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
+		segments = append([]string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.title)}, segments...)
+	} else if u.workspaceFocused {
+		focus := "FOCUS Workspace · " + workspaceTabs[u.workspaceTab]
+		if u.workspaceTab == 1 {
+			focus = "FOCUS Inspector"
+		}
+		segments = append([]string{focus}, segments...)
+	} else {
+		segments = append([]string{"FOCUS Chat"}, segments...)
 	}
 	if u.styleNotice != "" {
 		segments = append([]string{tableStyleBadge.Render(" " + u.styleNotice + " ")}, segments...)
@@ -1782,6 +1897,60 @@ func (u *UI) statusLines() []string {
 		segments = append(segments, "Alt+S style")
 	}
 	maxWidth := max(1, contentWidth(u.width)-2)
+	if maxWidth < 100 {
+		compact := []string{"FOCUS Chat", "model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "Enter send", mouseHint, "Ctrl+C quit"}
+		if u.gridFocused && u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
+			compact = []string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.title), "↑↓ rows", "←→ columns", "Enter details", fmt.Sprintf("B bucket:%d", len(u.snapshot.Workspace.ExportBucket)), "e export", "Esc input"}
+		} else if u.workspaceFocused {
+			compact = []string{"FOCUS Workspace · " + workspaceTabs[u.workspaceTab], "Shift+← back", "↑↓ navigate", "Enter open", "Esc input"}
+		} else if u.messageFocused {
+			compact = []string{"FOCUS Message · message selected", "Enter edit", "Shift+↑↓ navigate", "Esc input"}
+		} else if u.busy {
+			activity := "Thinking…"
+			if u.exporting {
+				activity = "Exporting…"
+			}
+			compact = []string{"FOCUS Chat", activity, "Ctrl+C quit"}
+		}
+		if u.detail != nil {
+			compact = []string{"FOCUS Detail", "↑↓ scroll", "Y copy cell", "Esc close"}
+		}
+		if u.styleNotice != "" {
+			compact = append([]string{tableStyleBadge.Render(" " + u.styleNotice + " ")}, compact...)
+		} else if u.gridFocused || u.workspaceFocused {
+			compact = append(compact, "Alt+S style")
+		}
+		return wrapStatusSegments(compact, maxWidth)
+	}
+	// Preserve the focus cue and primary actions on wide terminals without
+	// making an extra status row merely for the project/session shortcuts.
+	if len(wrapStatusSegments(segments, maxWidth)) > 1 && maxWidth >= 100 {
+		compact := segments[:0]
+		for _, segment := range segments {
+			if segment != "F3 projects" && segment != "F4 sessions" {
+				compact = append(compact, segment)
+			}
+		}
+		segments = compact
+	}
+	if len(wrapStatusSegments(segments, maxWidth)) > 1 && maxWidth >= 100 {
+		compact := segments[:0]
+		for _, segment := range segments {
+			if segment != "Alt+S style" && segment != "Tab panes (wide)" && segment != "Shift+→ workspace" {
+				compact = append(compact, segment)
+			}
+		}
+		segments = compact
+	}
+	if len(wrapStatusSegments(segments, maxWidth)) > 1 && maxWidth >= 100 {
+		compact := segments[:0]
+		for _, segment := range segments {
+			if segment != "1 Table" && segment != "2 Charts" && segment != "3 Current row" {
+				compact = append(compact, segment)
+			}
+		}
+		segments = compact
+	}
 	return wrapStatusSegments(segments, maxWidth)
 }
 

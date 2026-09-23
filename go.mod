@@ -21,6 +21,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	cloud.google.com/go/firestore v1.25.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/LindsayBradford/go-dbf v1.0.0-alpha-5
 	github.com/NimbleMarkets/ntcharts/v2 v2.2.0
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
@@ -44,6 +45,7 @@ require (
 	github.com/gosuri/uitable v0.0.4
 	github.com/ingitdb/dalgo2ingitdb v0.6.1
 	github.com/ingitdb/ingitdb-go/ingitdb v0.7.3
+	github.com/ingr-io/ingr-go v0.0.2
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/go-sqlite3 v1.14.50
 	github.com/mitchellh/go-homedir v1.1.0
@@ -63,6 +65,7 @@ require (
 	github.com/strongo/strongo-tui v0.1.0
 	github.com/strongo/validation v0.0.13
 	github.com/xo/dburl v0.24.2
+	github.com/xuri/excelize/v2 v2.11.0
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/text v0.41.0
@@ -86,6 +89,7 @@ require (
 	github.com/RoaringBitmap/roaring/v2 v2.28.0 // indirect
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.71.0 // indirect
+	github.com/axgle/mahonia v0.0.0-20180208002826-3358181d7394 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -143,7 +147,6 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/ingitdb/dalgo2ingitdb4github v0.2.3 // indirect
-	github.com/ingr-io/ingr-go v0.0.2 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
@@ -181,6 +184,8 @@ require (
 	github.com/qri-io/jsonpointer v0.1.1 // indirect
 	github.com/qri-io/jsonschema v0.2.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/richardlehane/mscfb v1.0.7 // indirect
+	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
@@ -194,9 +199,12 @@ require (
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
+	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/xo/terminfo v1.0.0 // indirect
+	github.com/xuri/efp v0.0.1 // indirect
+	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	github.com/yuin/goldmark v1.8.5 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

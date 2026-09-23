@@ -106,7 +106,7 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		bridge.connectionsMu.Lock()
 		bridge.connections[conn] = struct{}{}
 		bridge.connectionsMu.Unlock()

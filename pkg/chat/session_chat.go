@@ -18,6 +18,8 @@ type ContextualConversation interface {
 // Its lock prevents a session switch while a turn is being saved/executed.
 type SessionChat struct {
 	mu                 sync.Mutex
+	listenersMu        sync.Mutex
+	listeners          map[chan struct{}]struct{}
 	store              *SessionStore
 	agent              ContextualConversation
 	source             string
@@ -26,6 +28,38 @@ type SessionChat struct {
 	lastBookmarkID     string
 	implicitBookmarkID string
 	joinApplication    JoinApplication
+}
+
+// SubscribeChanges reports committed changes without sending session data over
+// the notification channel. Call stop when the UI or socket closes.
+func (c *SessionChat) SubscribeChanges() (<-chan struct{}, func()) {
+	changes := make(chan struct{}, 1)
+	c.listenersMu.Lock()
+	if c.listeners == nil {
+		c.listeners = make(map[chan struct{}]struct{})
+	}
+	c.listeners[changes] = struct{}{}
+	c.listenersMu.Unlock()
+	stop := func() {
+		c.listenersMu.Lock()
+		if _, ok := c.listeners[changes]; ok {
+			delete(c.listeners, changes)
+			close(changes)
+		}
+		c.listenersMu.Unlock()
+	}
+	return changes, stop
+}
+
+func (c *SessionChat) notifyChanged() {
+	c.listenersMu.Lock()
+	defer c.listenersMu.Unlock()
+	for changes := range c.listeners {
+		select {
+		case changes <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // ConfigureJoinApplication installs the DataTug-owned join boundary. It is a
@@ -63,6 +97,7 @@ func (c *SessionChat) JoinCandidates(ctx context.Context, recordSetID string) ([
 func (c *SessionChat) ApplyJoinCandidate(ctx context.Context, recordSetID string, candidateID JoinCandidateID) (RecordSet, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.notifyChanged()
 	return c.applyJoinCandidate(ctx, recordSetID, candidateID, "")
 }
 
@@ -133,6 +168,7 @@ func (c *SessionChat) SetTableStyle(ctx context.Context, name string) error {
 func (c *SessionChat) ApplyWorkspaceAction(ctx context.Context, action WorkspaceAction) (ContextReference, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.notifyChanged()
 	return c.applyWorkspaceAction(ctx, action)
 }
 
@@ -254,6 +290,7 @@ func (c *SessionChat) List(ctx context.Context) ([]ChatSession, error) {
 func (c *SessionChat) Create(ctx context.Context) (ChatSession, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.notifyChanged()
 	session, err := c.store.Create(ctx, "New chat")
 	if err == nil {
 		c.activeID = session.ID
@@ -265,6 +302,7 @@ func (c *SessionChat) Create(ctx context.Context) (ChatSession, error) {
 func (c *SessionChat) Switch(ctx context.Context, prefix string) (ChatSession, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.notifyChanged()
 	list, err := c.store.List(ctx)
 	if err != nil {
 		return ChatSession{}, err
@@ -296,6 +334,7 @@ func (c *SessionChat) Switch(ctx context.Context, prefix string) (ChatSession, e
 func (c *SessionChat) Rename(ctx context.Context, title string) (ChatSession, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.notifyChanged()
 	if strings.TrimSpace(title) == "" {
 		return ChatSession{}, fmt.Errorf("session title must not be empty")
 	}
@@ -308,6 +347,7 @@ func (c *SessionChat) Rename(ctx context.Context, title string) (ChatSession, er
 func (c *SessionChat) Clear(ctx context.Context) (ChatSession, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.notifyChanged()
 	if err := c.store.Clear(ctx, c.activeID); err != nil {
 		return ChatSession{}, err
 	}
@@ -318,6 +358,7 @@ func (c *SessionChat) Clear(ctx context.Context) (ChatSession, error) {
 func (c *SessionChat) Delete(ctx context.Context) (ChatSession, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.notifyChanged()
 	if err := c.store.Delete(ctx, c.activeID); err != nil {
 		return ChatSession{}, err
 	}
@@ -341,8 +382,22 @@ func (c *SessionChat) Delete(ctx context.Context) (ChatSession, error) {
 // Ask persists the user message before invoking the model. The tool callback
 // commits each successful query snapshot immediately; final text follows.
 func (c *SessionChat) Ask(ctx context.Context, prompt string) (Turn, error) {
+	return c.ask(ctx, "", prompt)
+}
+
+// AskActive refuses a browser submission if the terminal switched sessions
+// after the browser read its snapshot.
+func (c *SessionChat) AskActive(ctx context.Context, sessionID, prompt string) (Turn, error) {
+	return c.ask(ctx, sessionID, prompt)
+}
+
+func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string) (Turn, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.notifyChanged()
+	if expectedSessionID != "" && expectedSessionID != c.activeID {
+		return Turn{}, fmt.Errorf("chat session changed; refresh before sending")
+	}
 	if strings.TrimSpace(prompt) == "" {
 		return Turn{}, fmt.Errorf("chat prompt must not be empty")
 	}

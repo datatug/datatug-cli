@@ -1,30 +1,21 @@
-name: Release
+name: Publish latest release
 
-# Continuous delivery: every merge to `main` runs the shared strongo/cicd
-# release workflow, which bumps the version from conventional commits and
-# releases it in one run (GoReleaser against this repo's .goreleaser.yaml).
-# Task publication PRs therefore use a conventional release type when their
-# merged code still needs its first immutable tag.
-# Pushing an explicit `vX.Y.Z` tag also works and releases that exact version.
-# A docs/chore-only merge cuts no tag and publishes nothing.
+# Publication is a separate, manual action. Merging to main and pushing a tag
+# must not publish packages. Run this workflow from main when the latest code
+# is ready to become a release; the shared workflow chooses the next version
+# from conventional commits and publishes via GoReleaser.
 #
 # datatug-cli is pre-1.0: allow_major_version_bump stays false, so a stray
-# `feat!:` is capped to a minor bump instead of jumping to v1.0.0. Cut v1.0.0
-# deliberately by pushing that tag.
+# `feat!:` is capped to a minor bump instead of jumping to v1.0.0.
 #
 # The release binaries are CGO_ENABLED=0 (see .goreleaser.yaml builds), so they
 # cross-compile cleanly on the shared ubuntu runner even though CI tests use cgo
 # for the sqlite driver.
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-  workflow_dispatch:
+  workflow_dispatch: {}
 
-# One release at a time; a second push queues instead of racing the first.
+# One release at a time; a second manual run queues instead of racing the first.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -34,6 +25,7 @@ permissions:
 
 jobs:
   release:
+    if: github.ref == 'refs/heads/main'
     # Pinned to an exact tag, not the moving @v1: that tag defines the
     # require_notarized_macos input but does NOT contain the
     # macos_signing_preflight job, so the gate silently no-ops there.
@@ -47,9 +39,8 @@ jobs:
       actions: read
     with:
       # Refuse to tag or publish when Go CI did not pass for this exact
-      # commit. This workflow and Go CI are siblings started by the same
-      # push, with no cross-workflow `needs:` between them, so before this
-      # input a red suite could not stop a release — and did not: v0.13.2
+      # commit. Before this input a red suite could not stop a release —
+      # and did not: v0.13.2
       # shipped six binaries from a commit whose `go build ./...` was red,
       # built against go-github v90 while go.mod declared v91, because
       # GoReleaser's `go mod tidy` before-hook re-added v90 in the runner.

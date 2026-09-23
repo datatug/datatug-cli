@@ -68,9 +68,8 @@ jobs:
       require_conventional_pr_title: true
       # Uses the C-based github.com/mattn/go-sqlite3 driver, which requires cgo.
       cgo_enabled: true
-      # Version bump + release now happen in release.yml (continuous delivery on
-      # push to main). This workflow only builds/lints/tests — disable its bump
-      # so it does not create a competing tag.
+      # Publication happens only when release.yml is triggered manually.
+      # This workflow only builds/lints/tests and never creates a tag.
       disable-version-bumping: true
       code_coverage: true
       # Lowered from 60.9 (2026-08-28): the 2026-08-25/26 Go 1.27 toolchain

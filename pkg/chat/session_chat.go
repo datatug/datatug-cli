@@ -28,6 +28,16 @@ type SessionChat struct {
 	lastBookmarkID     string
 	implicitBookmarkID string
 	joinApplication    JoinApplication
+	queryExecutor      DTQLExecutor
+}
+
+// ConfigureQueryExecutor enables deterministic refresh of stored DTQL without
+// another model call. The caller supplies the same policy-bound executor used
+// for ordinary agent queries.
+func (c *SessionChat) ConfigureQueryExecutor(executor DTQLExecutor) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.queryExecutor = executor
 }
 
 // SubscribeChanges reports committed changes without sending session data over

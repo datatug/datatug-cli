@@ -136,3 +136,38 @@ func TestBrowserBridgeSharesSessionWithTerminal(t *testing.T) {
 		t.Fatal("terminal turn did not reach browser snapshot")
 	}
 }
+
+func TestBrowserBridgeContinuesWhileDialogsAreOpen(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := NewSessionUI(ctx, sessions, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal.SetBrowserURL("http://example.test")
+	t.Cleanup(func() { terminal.bridgeStop() })
+	tests := []struct {
+		name  string
+		open  func()
+		close func()
+	}{
+		{"query parameters", func() { terminal.queryParameters = &queryParametersDialog{} }, func() { terminal.queryParameters = nil }},
+		{"save query", func() { terminal.saveQueryDialog = &saveQueryDialog{} }, func() { terminal.saveQueryDialog = nil }},
+		{"HTTP setting", func() { terminal.httpSettingDraft = &httpSettingDraft{} }, func() { terminal.httpSettingDraft = nil }},
+		{"connect", func() { terminal.connectDialog = true }, func() { terminal.connectDialog = false }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.open()
+			_, command := terminal.Update(bridgeTickMsg{})
+			test.close()
+			if command == nil {
+				t.Fatal("browser change listener was not rearmed")
+			}
+		})
+	}
+}

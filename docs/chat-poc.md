@@ -117,7 +117,69 @@ exactly like other policy-secured DataTug reads.
 
 ## Terminal interaction
 
-- Type a question and press Enter.
+- Type a question and press Enter. Shift+Enter adds another line without
+  sending; the composer grows up to five lines.
+- Type `/` at the start of the composer to open a filterable command chooser;
+  Up/Down choose and Enter inserts the command for editing or confirmation.
+- `/connect` opens a preview of the current connection. Switching the active
+  database from this dialog is not implemented yet.
+- `/http` or `/http new` opens a request form. `/http post <url>`,
+  `/http put <url>`, `/http patch <url>`, and `/http delete <url>` open it
+  with method and URL prefilled; the form also offers GET, HEAD and OPTIONS.
+  Tab navigates fields, Left/Right changes method, and the header list supports
+  Enter to edit and `d` to delete. Add a header through the name/value fields.
+  The form starts with applicable configured headers; changes apply only to
+  that request. Ctrl+Enter submits, Esc cancels. GET/HEAD reject bodies,
+  request bodies are capped at 1 MiB, and non-GET redirects are not followed.
+  `/http get <url>` still downloads directly. Responses (up to 16 MiB) enter the
+  current session. JSON, CSV and YAML arrays of records open as interactive
+  RecordSet tables. The table's `4 Raw` tab shows the original response and
+  `5 Headers` shows request headers on the left and response headers/timings on
+  the right, stacking them on narrow terminals. Sensitive request and response
+  header values are masked in the persisted card. Markdown opens as
+  rendered text; Enter or `m` toggles its raw source. Credential-bearing
+  response headers are redacted, and URL query strings are not saved. The
+  Headers view includes a capped redirect trace (status, sanitized URL and
+  per-hop timing) when redirects occurred.
+- `/http header` and `/http cookie` list the effective outgoing request
+  defaults. Set one with `/http header Name=value` or `/http cookie name=value`;
+  DataTug prompts whether to keep it across all CLI projects or only this
+  project. Settings stay in a private local database, not project files or AI
+  context. Credential-bearing headers and cookies require an HTTP origin;
+  specify it as `/http header https://host Name=value` when needed. `User-Agent`
+  defaults to `DataTug`.
+- `/query <search>` and `/queries <search>` show the same filterable project
+  query picker above the composer. Each candidate shows its query type. Up/Down
+  navigate and Enter runs the selected saved query via the normal DataTug
+  query path; queries with declared parameters first show a small input form.
+  The FK picker shows the first 100 permitted rows only. If a key is absent,
+  enter it directly in the parameter form; the picker does not search beyond
+  that bound yet.
+  The query name appears as a user message with its result below. Project HTTP
+  queries use the policy-bound saved-query runner; unlike an ad-hoc `/http get`
+  card, they currently persist only its structured result, not the raw HTTP
+  response and headers.
+  On a focused DTQL or HTTP result card, `q` opens the project-query save form:
+  enter a name, add multiple tag chips, then save. Request headers and cookies
+  are never copied into a project query; HTTP URLs with unsaved parameters
+  cannot be captured this way. The request form currently saves GET requests
+  without custom headers only; POST/PUT/PATCH/DELETE can be submitted but not
+  saved as project queries until project HTTP query execution supports them.
+  Project HTTP queries require HTTPS.
+  Parameterized DTQL results cannot be captured by `q` yet because this form
+  cannot save parameter declarations and bindings; create a project query with
+  those declarations instead.
+- On a focused query, HTTP table or HTTP document, Ctrl+R refreshes the result.
+  Query refresh reuses stored DTQL through DataTug's policy-bound executor,
+  without a model call. Refresh creates a new immutable version marked
+  `changed` or `unchanged`; earlier versions remain saved. HTTP requests with
+  unsaved URL query parameters must be entered again to refresh safely.
+  Ctrl+R never repeats a non-GET request; resubmit one explicitly in the form.
+  Saved SQL and HTTP project result grids currently rerun through `/query`;
+  their cards do not offer Ctrl+R.
+- `/settings versions <1-100>` changes how many recent versions of a result
+  are shown in history; the default is two. Older snapshots remain stored and
+  reappear if the setting is raised. `/settings` shows the current value.
 - From an empty input, press Up or Ctrl+G to focus the latest result grid;
   Escape returns to input.
 - Up/Down and Page Up/Page Down navigate rows.

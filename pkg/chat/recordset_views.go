@@ -14,6 +14,8 @@ const (
 	recordsetTable recordsetView = iota
 	recordsetCharts
 	recordsetCurrentRow
+	recordsetRaw
+	recordsetHeaders
 )
 
 const (
@@ -34,7 +36,7 @@ type recordsetLayout struct {
 // scrolling, leaving useful room for the selected secondary view.
 func chooseRecordsetLayout(totalWidth, naturalTableWidth int, view recordsetView) recordsetLayout {
 	totalWidth = max(1, totalWidth)
-	if view == recordsetTable {
+	if view == recordsetTable || view == recordsetRaw || view == recordsetHeaders {
 		return recordsetLayout{tableWidth: totalWidth}
 	}
 	useful := max(minUsefulTableCells, min(maxUsefulTableCells, naturalTableWidth))

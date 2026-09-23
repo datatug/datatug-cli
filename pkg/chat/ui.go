@@ -3,11 +3,14 @@ package chat
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -43,8 +46,14 @@ var (
 type historyEntry struct {
 	role               string
 	text               string
+	markdown           bool
+	showRaw            bool
+	showHeaders        bool
+	httpResponse       *HTTPResponse
+	versionBadge       string
 	grid               *gridState
 	recordSetID        string
+	httpResponseID     string
 	joinCandidates     []JoinCandidate
 	joinSourceIndex    int
 	joinCandidateIndex int
@@ -95,6 +104,9 @@ type gridState struct {
 	inspector      viewport.Model
 	inspectorRow   int
 	tableStyle     tableStyle
+	rawBody        []byte
+	httpResponse   *HTTPResponse
+	versionBadge   string
 }
 
 // gridTable is the small DataTug-owned adapter around bubble-table. Keeping
@@ -523,69 +535,78 @@ type tableStyleNoticeExpired struct{ id int }
 // UI is the Bubble Tea chat model: a scrollable history viewport, inline
 // bubble-table components, and a fixed bottom input.
 type UI struct {
-	ctx                 context.Context
-	browserURL          string
-	webLinkVisible      bool
-	bridgeEvents        <-chan struct{}
-	bridgeStop          func()
-	conversation        Conversation
-	sessions            *SessionChat
-	sessionID           string
-	sessionTitle        string
-	snapshot            ChatSession
-	catalog             ProjectCatalog
-	modelName           string
-	history             viewport.Model
-	input               textinput.Model
-	entries             []historyEntry
-	activeGrid          int
-	gridFocused         bool
-	messageFocused      bool
-	selectedMessage     int
-	joinFocused         bool
-	workspaceFocused    bool
-	workspaceReturnGrid int
-	workspaceReturnMsg  int
-	workspaceTab        int
-	inspectorTab        int
-	inspectorOffset     int
-	tableStyle          tableStyle
-	styleNotice         string
-	styleNoticeID       int
-	explorerIndex       int
-	explorerOffset      int
-	explorerCollapsed   map[string]bool
-	projectDetails      bool
-	dockIndex           int
-	dockGridFocused     bool
-	dockGrids           map[string]*gridState
-	bookmarkItems       []Bookmark
-	bookmarkIndex       int
-	bookmarkGrid        *gridState
-	bookmarkGridID      string
-	bookmarkGridFocused bool
-	bookmarkMode        string
-	bookmarkEditor      textinput.Model
-	bookmarkSearch      string
-	bookmarkTags        []string
-	rangeAnchor         int
-	rangeColumn         int
-	sessionPicker       bool
-	sessionPickerIndex  int
-	pickerSessions      []ChatSession
-	projectPicker       bool
-	projectPickerIndex  int
-	projectChoices      []ProjectChoice
-	selectedProject     string
-	chatPanePercent     int
-	mouseCapture        bool
-	busy                bool
-	exporting           bool
-	exportDialog        *exportDialog
-	detail              *cellDetail
-	detailSequence      int
-	width               int
-	height              int
+	ctx                  context.Context
+	browserURL           string
+	webLinkVisible       bool
+	bridgeEvents         <-chan struct{}
+	bridgeStop           func()
+	conversation         Conversation
+	sessions             *SessionChat
+	sessionID            string
+	sessionTitle         string
+	snapshot             ChatSession
+	catalog              ProjectCatalog
+	modelName            string
+	history              viewport.Model
+	input                textarea.Model
+	entries              []historyEntry
+	activeGrid           int
+	gridFocused          bool
+	messageFocused       bool
+	selectedMessage      int
+	joinFocused          bool
+	workspaceFocused     bool
+	workspaceReturnGrid  int
+	workspaceReturnMsg   int
+	workspaceTab         int
+	inspectorTab         int
+	inspectorOffset      int
+	tableStyle           tableStyle
+	styleNotice          string
+	styleNoticeID        int
+	explorerIndex        int
+	explorerOffset       int
+	explorerCollapsed    map[string]bool
+	projectDetails       bool
+	dockIndex            int
+	dockGridFocused      bool
+	dockGrids            map[string]*gridState
+	bookmarkItems        []Bookmark
+	bookmarkIndex        int
+	bookmarkGrid         *gridState
+	bookmarkGridID       string
+	bookmarkGridFocused  bool
+	bookmarkMode         string
+	bookmarkEditor       textinput.Model
+	bookmarkSearch       string
+	bookmarkTags         []string
+	rangeAnchor          int
+	rangeColumn          int
+	sessionPicker        bool
+	sessionPickerIndex   int
+	pickerSessions       []ChatSession
+	projectPicker        bool
+	projectPickerIndex   int
+	projectChoices       []ProjectChoice
+	selectedProject      string
+	chatPanePercent      int
+	mouseCapture         bool
+	busy                 bool
+	exporting            bool
+	exportDialog         *exportDialog
+	commandMenuIndex     int
+	commandMenuDismissed string
+	savedQueryService    SavedQueryService
+	savedQueries         []SavedQuery
+	saveQueryDialog      *saveQueryDialog
+	queryParameters      *queryParametersDialog
+	connectDialog        bool
+	httpSettingDraft     *httpSettingDraft
+	httpRequestDialog    *httpRequestDialog
+	detail               *cellDetail
+	detailSequence       int
+	width                int
+	height               int
 }
 
 // ProjectChoice identifies a configured DataTug project, not a database.
@@ -630,17 +651,17 @@ func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	input := textinput.New()
+	input := textarea.New()
 	input.Placeholder = "Ask about your data..."
 	input.Prompt = ""
+	input.ShowLineNumbers = false
+	input.SetHeight(1)
 	inputStyles := input.Styles()
 	composerBackground := lipgloss.Color("236")
 	inputStyles.Focused.Text = inputStyles.Focused.Text.Background(composerBackground)
 	inputStyles.Focused.Placeholder = inputStyles.Focused.Placeholder.Background(composerBackground)
-	inputStyles.Focused.Suggestion = inputStyles.Focused.Suggestion.Background(composerBackground)
 	inputStyles.Blurred.Text = inputStyles.Blurred.Text.Background(composerBackground)
 	inputStyles.Blurred.Placeholder = inputStyles.Blurred.Placeholder.Background(composerBackground)
-	inputStyles.Blurred.Suggestion = inputStyles.Blurred.Suggestion.Background(composerBackground)
 	input.SetStyles(inputStyles)
 	input.SetWidth(max(1, contentWidth(80)-3))
 	input.Focus()
@@ -705,6 +726,65 @@ func (u *UI) Init() tea.Cmd {
 
 func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	var commands []tea.Cmd
+	if u.queryParameters != nil {
+		switch message.(type) {
+		case tea.WindowSizeMsg, parameterLookupMessage, bridgeTickMsg:
+		default:
+			return u, u.updateQueryParametersDialog(message)
+		}
+	}
+	if u.saveQueryDialog != nil {
+		switch message.(type) {
+		case tea.WindowSizeMsg, savedQuerySaveMessage, bridgeTickMsg:
+		default:
+			return u, u.updateSaveQueryDialog(message)
+		}
+	}
+	if u.httpSettingDraft != nil {
+		if msg, ok := message.(tea.KeyPressMsg); ok {
+			switch msg.String() {
+			case "ctrl+c":
+				return u, tea.Quit
+			case "esc":
+				u.httpSettingDraft = nil
+				return u, nil
+			case "1", "2":
+				scope := "cli"
+				if msg.String() == "2" {
+					scope = "project"
+				}
+				draft := u.httpSettingDraft
+				u.httpSettingDraft = nil
+				if err := u.sessions.store.SetHTTPRequestSetting(u.ctx, scope, draft.kind, draft.origin, draft.name, draft.value); err != nil {
+					u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Couldn't save HTTP " + draft.kind + ": " + conciseError(err)})
+				} else {
+					u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Saved HTTP " + draft.kind + " " + draft.name + " (" + scope + "; value hidden)."})
+				}
+				u.rebuildHistory(true)
+				return u, nil
+			}
+		}
+		switch message.(type) {
+		case tea.WindowSizeMsg, bridgeTickMsg:
+		default:
+			return u, nil
+		}
+	}
+	if u.connectDialog {
+		if msg, ok := message.(tea.KeyPressMsg); ok {
+			if msg.String() == "ctrl+c" {
+				return u, tea.Quit
+			}
+			if msg.String() == "esc" || msg.String() == "enter" {
+				u.connectDialog = false
+			}
+		}
+		switch message.(type) {
+		case tea.WindowSizeMsg, bridgeTickMsg:
+		default:
+			return u, nil
+		}
+	}
 	if u.exportDialog != nil {
 		switch message.(type) {
 		case tea.WindowSizeMsg, exportMessage, bridgeTickMsg:
@@ -713,6 +793,9 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch msg := message.(type) {
+	case parameterLookupMessage:
+		u.receiveParameterLookup(msg)
+		return u, nil
 	case bridgeTickMsg:
 		if u.sessions != nil && !u.busy {
 			if snapshot, err := u.sessions.Snapshot(u.ctx); err == nil && (snapshot.ID != u.sessionID || !snapshot.UpdatedAt.Equal(u.snapshot.UpdatedAt)) {
@@ -739,6 +822,46 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			u.entries = append(u.entries, historyEntry{role: "DataTug", text: fmt.Sprintf("Saved %d RecordSet(s)%s to %s", msg.count, origin, msg.path)})
 		}
 		u.rebuildHistory(true)
+		return u, nil
+	case httpMessage:
+		u.busy = false
+		if msg.err != nil {
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Couldn't save HTTP response: " + conciseError(msg.err)})
+			u.rebuildHistory(true)
+			return u, nil
+		}
+		if msg.sessionID == u.sessionID {
+			u.loadSession(msg.snapshot)
+		} else {
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: "HTTP response saved to the previous session."})
+			u.rebuildHistory(true)
+		}
+		return u, nil
+	case savedQueryMessage:
+		u.busy = false
+		if msg.err != nil {
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Couldn't save query result: " + conciseError(msg.err)})
+			u.rebuildHistory(true)
+		} else if msg.sessionID == u.sessionID {
+			u.loadSession(msg.snapshot)
+		} else {
+			u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Query result saved to the previous session."})
+			u.rebuildHistory(true)
+		}
+		return u, nil
+	case savedQuerySaveMessage:
+		u.busy = false
+		if msg.err != nil {
+			u.saveQueryDialog = msg.draft
+			u.saveQueryDialog.err = "Could not save. Check the name, tags and project write access."
+			return u, nil
+		}
+		if err := u.reloadSavedQueries(); err != nil {
+			u.saveQueryError("Query saved, but the picker could not be refreshed: " + conciseError(err))
+		} else {
+			u.catalog.Objects = append(u.catalog.Objects, ProjectObject{Reference: ContextReference{Kind: "query", ProjectID: u.catalog.ID, ObjectID: msg.query.ID, Title: msg.query.Title}})
+			u.saveQueryError("Saved project query: " + sanitizeTerminalText(msg.query.Title) + " [" + msg.query.Type + "]")
+		}
 		return u, nil
 	case tea.WindowSizeMsg:
 		u.width, u.height = msg.Width, msg.Height
@@ -822,6 +945,9 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return u, nil
 		}
 	case tea.KeyPressMsg:
+		if u.httpRequestDialog != nil {
+			return u, u.updateHTTPRequestDialog(msg)
+		}
 		if u.detail != nil {
 			switch msg.String() {
 			case "ctrl+c":
@@ -838,9 +964,61 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return u, nil
 		}
+		if u.savedQueryMenuHeight() > 0 {
+			switch msg.String() {
+			case "up":
+				u.commandMenuIndex = max(0, u.commandMenuIndex-1)
+				return u, nil
+			case "down":
+				u.commandMenuIndex = min(max(0, len(u.savedQueryMatches())-1), u.commandMenuIndex+1)
+				return u, nil
+			case "enter":
+				matches := u.savedQueryMatches()
+				if len(matches) > 0 {
+					selected := min(u.commandMenuIndex, len(matches)-1)
+					u.input.Reset()
+					u.resizeComposer()
+					u.commandMenuIndex = 0
+					return u, u.selectSavedQuery(matches[selected])
+				}
+			case "esc":
+				u.commandMenuDismissed = u.input.Value()
+				return u, nil
+			}
+		}
+		if u.commandMenuVisible() {
+			switch msg.String() {
+			case "up":
+				u.commandMenuIndex = max(0, u.commandMenuIndex-1)
+				return u, nil
+			case "down":
+				u.commandMenuIndex = min(len(u.commandMenuMatches())-1, u.commandMenuIndex+1)
+				return u, nil
+			case "tab", "enter":
+				matches := u.commandMenuMatches()
+				if u.commandMenuIndex >= len(matches) {
+					u.commandMenuIndex = 0
+				}
+				u.input.SetValue(matches[u.commandMenuIndex].insertText())
+				u.input.CursorEnd()
+				u.commandMenuDismissed = u.input.Value()
+				return u, nil
+			case "esc":
+				u.commandMenuDismissed = u.input.Value()
+				return u, nil
+			}
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			return u, tea.Quit
+		case "shift+enter":
+			if !u.gridFocused && !u.messageFocused && !u.workspaceFocused && !u.busy {
+				u.input.InsertString("\n")
+				u.resizeComposer()
+				return u, nil
+			}
+		case "ctrl+r":
+			return u, u.refreshSelectedCard()
 		case "f5":
 			if u.browserURL != "" {
 				u.webLinkVisible = !u.webLinkVisible
@@ -971,7 +1149,24 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return u, cmd
 			}
 		} else if u.messageFocused {
-			if msg.String() == "enter" && !u.busy {
+			if u.selectedMessage >= 0 && u.selectedMessage < len(u.entries) && u.entries[u.selectedMessage].httpResponse != nil {
+				entry := &u.entries[u.selectedMessage]
+				switch msg.String() {
+				case "q":
+					u.openSaveQueryDialog()
+					return u, nil
+				case "1":
+					entry.showRaw, entry.showHeaders = false, false
+				case "2", "m", "enter":
+					entry.showRaw, entry.showHeaders = !entry.showRaw, false
+				case "3", "h":
+					entry.showHeaders = true
+				default:
+					return u, nil
+				}
+				u.rebuildHistory(false)
+				return u, nil
+			} else if msg.String() == "enter" && !u.busy {
 				u.editSelectedMessage()
 				u.rebuildHistory(false)
 				return u, nil
@@ -980,6 +1175,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			prompt := strings.TrimSpace(u.input.Value())
 			if prompt != "" {
 				u.input.Reset()
+				u.resizeComposer()
 				if u.sessions != nil && strings.HasPrefix(prompt, "/") {
 					cmd := u.runSessionCommand(prompt)
 					u.rebuildHistory(true)
@@ -1004,7 +1200,13 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	if !u.gridFocused && !u.messageFocused {
+		previousInput := u.input.Value()
 		u.input, cmd = u.input.Update(message)
+		if previousInput != u.input.Value() {
+			u.commandMenuIndex = 0
+			u.commandMenuDismissed = ""
+			u.resizeComposer()
+		}
 		commands = append(commands, cmd)
 	}
 	u.history, cmd = u.history.Update(message)
@@ -1091,10 +1293,36 @@ func (u *UI) loadSession(session ChatSession) {
 	u.workspaceTab = workspaceTabIndex(session.Workspace.ActiveTab)
 	u.dockGrids = map[string]*gridState{}
 	u.input.Focus()
+	versionsToKeep := defaultResultVersionsToKeep
+	if u.sessions != nil && u.sessions.store != nil {
+		if count, err := u.sessions.store.ResultVersionsToKeep(u.ctx); err == nil {
+			versionsToKeep = count
+		}
+	}
+	hiddenRecords, hiddenHTTP := hiddenRefreshVersions(session, versionsToKeep)
 	for _, message := range session.Messages {
 		if message.Kind == "grid" {
 			record := session.RecordSets[message.RecordSetID]
+			if hiddenRecords[message.RecordSetID] || hiddenHTTP[record.HTTPResponseID] {
+				continue
+			}
 			entry := historyEntry{grid: newGridState(NewGridModel(record.Result), record.Title, u.chatPaneWidth(), record.Result.Statistics), recordSetID: record.ID}
+			if previous, ok := session.RecordSets[record.RefreshParentID]; ok {
+				entry.grid.versionBadge = "unchanged"
+				if !reflect.DeepEqual(record.Result.Columns, previous.Result.Columns) || !reflect.DeepEqual(record.Result.Rows, previous.Result.Rows) {
+					entry.grid.versionBadge = "changed"
+				}
+			}
+			if response, ok := session.HTTPResponses[record.HTTPResponseID]; ok {
+				entry.grid.rawBody = response.Body
+				entry.grid.httpResponse = &response
+				if previous, ok := session.HTTPResponses[response.RefreshParentID]; ok {
+					entry.grid.versionBadge = "unchanged"
+					if httpResponseChanged(response, previous) {
+						entry.grid.versionBadge = "changed"
+					}
+				}
+			}
 			entry.grid.tableStyle = u.tableStyle
 			entry.grid.rebuild()
 			if u.sessions != nil {
@@ -1121,7 +1349,23 @@ func (u *UI) loadSession(session ChatSession) {
 			}
 			continue
 		}
-		u.entries = append(u.entries, historyEntry{role: message.Role, text: message.Text})
+		entry := historyEntry{role: message.Role, text: message.Text, markdown: message.Kind == "markdown"}
+		if hiddenHTTP[message.HTTPResponseID] {
+			continue
+		}
+		if response, ok := session.HTTPResponses[message.HTTPResponseID]; ok {
+			entry.text = response.displayText()
+			entry.httpResponseID = response.ID
+			entry.httpResponse = &response
+			if previous, ok := session.HTTPResponses[response.RefreshParentID]; ok {
+				status := "unchanged"
+				if httpResponseChanged(response, previous) {
+					status = "changed"
+				}
+				entry.versionBadge = status
+			}
+		}
+		u.entries = append(u.entries, entry)
 	}
 	u.history.SetHeight(u.historyHeight())
 	u.rebuildDockGrids()
@@ -1236,7 +1480,7 @@ func (u *UI) runSessionCommand(input string) tea.Cmd {
 			snapshot, err = u.sessions.Delete(u.ctx)
 		}
 	case "/help":
-		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm • /bucket [clear] • /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path>\n\nGlobal: F2 mouse select/wheel • F6/Shift+→ workspace • Shift+← previous • Alt+S table style • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • Tab panes when wide • ↑↓ active pane • Shift+↑↓ select grids/messages • j JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • B bucket • e export • s sort • Enter details • Esc composer\n\nInspector: 1 Current row • 2 Current column • 3 Current recordset"})
+		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm • /bucket [clear] • /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path> • /connect (preview) • /http [new|GET|POST|PUT|PATCH|DELETE] [url] • /http header|cookie [name=value] • /query [search] or /queries [search] • /settings versions <1-100>\n\nGlobal: Shift+Enter newline • F2 mouse select/wheel • F6/Shift+→ workspace • Shift+← previous • Alt+S table style • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • 4 Raw/5 Headers (HTTP) • Ctrl+R refresh • Tab panes when wide • ↑↓ active pane • Shift+↑↓ select grids/messages • j JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • B bucket • e export • q save query • s sort • Enter details • Esc composer\n\nInspector: 1 Current row • 2 Current column • 3 Current recordset"})
 	case "/bucket":
 		switch argument {
 		case "clear":
@@ -1257,6 +1501,52 @@ func (u *UI) runSessionCommand(input string) tea.Cmd {
 			u.openExportDialog()
 		} else {
 			commandToRun, err = u.exportCommand(argument)
+		}
+	case "/connect":
+		if argument != "" {
+			err = fmt.Errorf("usage: /connect")
+		} else {
+			u.connectDialog = true
+		}
+	case "/http":
+		commandToRun, err = u.httpCommand(argument)
+	case "/query", "/queries":
+		if err = u.reloadSavedQueries(); err == nil {
+			var matches []SavedQuery
+			search := strings.ToLower(argument)
+			for _, query := range u.savedQueries {
+				if strings.Contains(strings.ToLower(query.Title+" "+query.ID+" "+query.Type+" "+strings.Join(query.Tags, " ")), search) {
+					matches = append(matches, query)
+				}
+			}
+			if len(matches) == 0 {
+				err = fmt.Errorf("no saved project queries match %q", argument)
+			} else if len(matches) == 1 && argument != "" {
+				commandToRun = u.selectSavedQuery(matches[0])
+			} else {
+				u.input.SetValue(command + " " + argument)
+				u.commandMenuDismissed = ""
+			}
+		}
+	case "/settings":
+		if argument == "" {
+			var count int
+			count, err = u.sessions.store.ResultVersionsToKeep(u.ctx)
+			if err == nil {
+				u.entries = append(u.entries, historyEntry{role: "DataTug", text: fmt.Sprintf("Result versions to keep: %d (current and previous versions). Use /settings versions <1-100> to change.", count)})
+			}
+		} else {
+			value, ok := strings.CutPrefix(argument, "versions ")
+			count, parseErr := strconv.Atoi(value)
+			if !ok || parseErr != nil {
+				err = fmt.Errorf("usage: /settings versions <1-100>")
+			} else {
+				err = u.sessions.store.SetResultVersionsToKeep(u.ctx, count)
+				if err == nil {
+					u.loadSession(u.snapshot)
+					u.entries = append(u.entries, historyEntry{role: "DataTug", text: fmt.Sprintf("Result versions to keep: %d", count)})
+				}
+			}
 		}
 	default:
 		err = fmt.Errorf("unknown chat command %q; type /help", command)
@@ -1333,6 +1623,19 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "3":
 		g.setRecordsetView(recordsetCurrentRow, u.chatPaneWidth())
+		return nil, true
+	case "4":
+		if g.rawBody != nil {
+			g.setRecordsetView(recordsetRaw, u.chatPaneWidth())
+		}
+		return nil, true
+	case "5":
+		if g.httpResponse != nil {
+			g.setRecordsetView(recordsetHeaders, u.chatPaneWidth())
+		}
+		return nil, true
+	case "q":
+		u.openSaveQueryDialog()
 		return nil, true
 	case "tab":
 		if g.activeView != recordsetTable && g.recordsetLayout(u.chatPaneWidth()).split {
@@ -1500,6 +1803,10 @@ func (u *UI) focusStop(index int) bool {
 		u.focusMessage(index)
 		return true
 	}
+	if u.entries[index].httpResponse != nil {
+		u.focusMessage(index)
+		return true
+	}
 	return false
 }
 
@@ -1547,6 +1854,7 @@ func (u *UI) editSelectedMessage() {
 	u.input.SetValue(u.entries[u.selectedMessage].text)
 	u.focusInput()
 	u.input.CursorEnd()
+	u.resizeComposer()
 }
 
 func (u *UI) focusInput() {
@@ -1604,7 +1912,7 @@ func (u *UI) applyJoin(recordSetID string, candidateID JoinCandidateID) tea.Cmd 
 
 func (u *UI) appendTurn(turn Turn) {
 	if turn.Text != "" {
-		u.entries = append(u.entries, historyEntry{role: "DataTug", text: turn.Text})
+		u.entries = append(u.entries, historyEntry{role: "DataTug", text: turn.Text, markdown: turn.TextFormat == "markdown"})
 	}
 	for _, query := range turn.Queries {
 		if query.Err != nil {
@@ -1666,6 +1974,14 @@ func (u *UI) rebuildHistory(scrollToBottom bool) {
 				activeBlock = len(blocks)
 			}
 			blocks = append(blocks, userMessageView(entry.text, innerWidth, selected))
+			continue
+		}
+		if entry.httpResponse != nil {
+			selected := u.messageFocused && entryIndex == u.selectedMessage
+			if selected {
+				activeBlock = len(blocks)
+			}
+			blocks = append(blocks, httpDocumentView(entry, innerWidth, selected))
 			continue
 		}
 		label := agentStyle.Background(messageSurfaceBackground).Render(sanitizeTerminalText(entry.role) + ": ")
@@ -1855,10 +2171,18 @@ func (u *UI) View() tea.View {
 		spacer = scrollDownCue(innerWidth)
 	}
 	input := u.composerView(innerWidth)
+	commandMenu := u.savedQueryMenuView(innerWidth)
+	if commandMenu == "" {
+		commandMenu = u.commandMenuView(innerWidth)
+	}
 	attachments := u.attachmentLine(innerWidth)
 	statusText := strings.Join(u.statusLines(), "\n")
 	status := statusSurfaceStyle.Width(contentWidth(u.width)).Render(statusStyle.Render(statusText))
-	chat := lipgloss.JoinVertical(lipgloss.Left, u.history.View(), spacer, attachments, input)
+	chatParts := []string{u.history.View(), spacer, attachments}
+	if commandMenu != "" {
+		chatParts = append(chatParts, commandMenu)
+	}
+	chat := lipgloss.JoinVertical(lipgloss.Left, append(chatParts, input)...)
 	bodyHeight := max(1, u.height-1-len(u.statusLines()))
 	body := chat
 	if u.splitEnabled() {
@@ -1875,6 +2199,21 @@ func (u *UI) View() tea.View {
 	}
 	if u.exportDialog != nil {
 		content = u.exportOverlay(content)
+	}
+	if u.connectDialog {
+		content = u.connectOverlay(content)
+	}
+	if u.httpSettingDraft != nil {
+		content = u.httpScopeOverlay(content)
+	}
+	if u.httpRequestDialog != nil {
+		content = u.httpRequestOverlay(content)
+	}
+	if u.saveQueryDialog != nil {
+		content = u.saveQueryOverlay(content)
+	}
+	if u.queryParameters != nil {
+		content = u.queryParametersOverlay(content)
 	}
 	view := tea.NewView(content)
 	view.AltScreen = true
@@ -1947,9 +2286,20 @@ func (u *UI) statusLines() []string {
 	}
 	if u.messageFocused {
 		segments = []string{"message selected", "Enter edit", "Shift+↑↓ navigate", "Esc input", mouseHint}
+		if u.selectedMessage >= 0 && u.selectedMessage < len(u.entries) && u.entries[u.selectedMessage].httpResponse != nil {
+			segments = []string{"HTTP document", "1 Rendered", "2 Raw", "3 Headers", "Ctrl+R refresh", "q save", "Shift+↑↓ navigate", "Esc input", mouseHint}
+		}
 	}
 	if u.gridFocused {
-		segments = []string{"1 Table", "2 Charts", "3 Current row", "j JOIN", fmt.Sprintf("B bucket:%d", len(u.snapshot.Workspace.ExportBucket)), "e export", "Enter details", "Tab panes (wide)", "Shift+↑↓ grids", "Shift+→ workspace", "Esc input"}
+		segments = []string{"1 Table", "2 Charts", "3 Current row", "j JOIN", "e export", "q save", "Enter details", "Tab panes (wide)", "Shift+↑↓ grids", "Shift+→ workspace", "Esc input"}
+		if u.activeGrid >= 0 && u.activeGrid < len(u.entries) {
+			if record, ok := u.snapshot.RecordSets[u.entries[u.activeGrid].recordSetID]; ok && (record.DTQL != "" || record.HTTPResponseID != "") {
+				segments = append(segments, "Ctrl+R refresh")
+			}
+		}
+		if count := len(u.snapshot.Workspace.ExportBucket); count > 0 {
+			segments = append(segments, fmt.Sprintf("B bucket:%d", count))
+		}
 		if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
 			grid := u.entries[u.activeGrid].grid
 			switch grid.activeView {
@@ -2015,11 +2365,17 @@ func (u *UI) statusLines() []string {
 	if maxWidth < 100 {
 		compact := []string{"FOCUS Chat", "model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "Enter send", mouseHint, "Ctrl+C quit"}
 		if u.gridFocused && u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
-			compact = []string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.title), "↑↓ rows", "←→ columns", "Enter details", fmt.Sprintf("B bucket:%d", len(u.snapshot.Workspace.ExportBucket)), "e export", "Esc input"}
+			compact = []string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.title), "↑↓ rows", "←→ columns", "Enter details", "e export", "q save", "Esc input"}
+			if count := len(u.snapshot.Workspace.ExportBucket); count > 0 {
+				compact = append(compact, fmt.Sprintf("B bucket:%d", count))
+			}
 		} else if u.workspaceFocused {
 			compact = []string{"FOCUS Workspace · " + workspaceTabs[u.workspaceTab], "Shift+← back", "↑↓ navigate", "Enter open", "Esc input"}
 		} else if u.messageFocused {
 			compact = []string{"FOCUS Message · message selected", "Enter edit", "Shift+↑↓ navigate", "Esc input"}
+			if u.selectedMessage >= 0 && u.selectedMessage < len(u.entries) && u.entries[u.selectedMessage].httpResponse != nil {
+				compact = []string{"FOCUS HTTP document", "1 Rendered", "2 Raw", "3 Headers", "Ctrl+R refresh", "q save", "Esc input"}
+			}
 		} else if u.busy {
 			activity := "Thinking…"
 			if u.exporting {
@@ -2103,7 +2459,13 @@ func wrapStatusSegments(segments []string, maxWidth int) []string {
 }
 
 func (u *UI) historyHeight() int {
-	return max(1, u.height-6-len(u.statusLines()))
+	return max(1, u.height-6-len(u.statusLines())-max(u.commandMenuHeight(), u.savedQueryMenuHeight())-max(0, u.input.Height()-1))
+}
+
+func (u *UI) resizeComposer() {
+	lines := strings.Count(u.input.Value(), "\n") + 1
+	u.input.SetHeight(min(5, max(1, lines)))
+	u.history.SetHeight(u.historyHeight())
 }
 
 func withRootGutter(content string, width int) string {

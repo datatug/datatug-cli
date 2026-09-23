@@ -538,7 +538,7 @@ func TestWorkspaceSplitAndKeyboardSelection(t *testing.T) {
 	}
 	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
 	view := u.View().Content
-	for _, want := range []string{"Project: Chinook", "[Project]", "[Selected]", "[Docked]", "Customer"} {
+	for _, want := range []string{"Project: Chinook", "● Project", "Inspect", "Docked", "Customer"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("split view missing %q", want)
 		}
@@ -579,7 +579,7 @@ func TestWorkspaceSplitAndKeyboardSelection(t *testing.T) {
 	if len(u.snapshot.Workspace.Docks) != 1 {
 		t.Fatalf("dock state = %+v", u.snapshot.Workspace.Docks)
 	}
-	if !strings.Contains(u.View().Content, "Selected") || !strings.Contains(u.View().Content, "Docked") {
+	if !strings.Contains(u.View().Content, "Inspect") || !strings.Contains(u.View().Content, "Docked") {
 		t.Fatal("workspace disappeared after selection/dock")
 	}
 }

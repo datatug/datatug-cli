@@ -195,7 +195,7 @@ func (s chatSavedQueries) LookupParameter(ctx context.Context, queryID, paramete
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	snapshot, err := chat.LoadSQLiteForeignKeySnapshot(ctx, source, db)
 	if err != nil {
 		return nil, err

@@ -381,7 +381,7 @@ func (u *UI) parameterLookupOverlay(background string) string {
 	if p.grid != nil && len(p.grid.model.Rows) > 0 {
 		grid = p.grid.view()
 	}
-	help := "Showing/filtering the first 100 permitted rows · ↑↓ choose · Enter fills · Esc back"
+	var help string
 	if p.multi {
 		help = fmt.Sprintf("First 100 permitted rows only; type an unlisted key directly · %d selected · Space toggles · ↑↓ move · Enter confirms · Esc back", len(p.selected))
 	} else {

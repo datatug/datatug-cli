@@ -47,7 +47,7 @@ func TestSavedQueryLookupFirstHundredBoundaryAndManualKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if _, err := db.Exec(`CREATE TABLE Customer (CustomerId INTEGER PRIMARY KEY, Name TEXT)`); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestSavedQueryFKLookupReferencedMetaAndDTQLBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	source := "sqlite://" + path
 	snapshot, err := LoadSQLiteForeignKeySnapshot(context.Background(), source, db)
 	if err != nil {

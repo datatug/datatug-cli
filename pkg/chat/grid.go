@@ -51,6 +51,21 @@ func sanitizeTerminalText(value string) string {
 	}, value)
 }
 
+// sanitizeMultilineText retains layout for downloaded documents while removing
+// terminal control sequences and invisible control characters.
+func sanitizeMultilineText(value string) string {
+	value = ansi.Strip(value)
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || r == '\u200c' || r == '\u200d' {
+			return r
+		}
+		if r <= 0x1f || (r >= 0x7f && r <= 0x9f) || unicode.Is(unicode.Cf, r) {
+			return ' '
+		}
+		return r
+	}, value)
+}
+
 func truncateGridText(value string, width int) string {
 	if width <= 0 {
 		return ""

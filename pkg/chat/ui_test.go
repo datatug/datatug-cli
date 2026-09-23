@@ -350,7 +350,7 @@ func TestShiftArrowsSelectUserMessageAndEnterLoadsItIntoComposer(t *testing.T) {
 	if got := u.input.Value(); got != "newer question" {
 		t.Fatalf("composer value = %q, want %q", got, "newer question")
 	}
-	if got := u.input.Position(); got != len("newer question") {
+	if got := u.input.Column(); got != len("newer question") {
 		t.Fatalf("cursor position = %d, want %d", got, len("newer question"))
 	}
 }
@@ -1020,6 +1020,18 @@ func TestUIComposerPromptUsesComposerBackground(t *testing.T) {
 		if style.GetBackground() == nil {
 			t.Errorf("%s has no composer background", name)
 		}
+	}
+}
+
+func TestShiftEnterAddsComposerLineWithoutSending(t *testing.T) {
+	u := NewUI(context.Background(), nil, "test")
+	u.input.SetValue("first")
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	if got := u.input.Value(); got != "first\n" {
+		t.Fatalf("composer text = %q", got)
+	}
+	if u.input.Height() != 2 || u.busy {
+		t.Fatalf("composer height/busy = %d/%v", u.input.Height(), u.busy)
 	}
 }
 

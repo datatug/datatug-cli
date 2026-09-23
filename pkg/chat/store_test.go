@@ -504,7 +504,7 @@ func TestBookmarkMigrationFromV2IsAtomicAndIdempotent(t *testing.T) {
 	}
 	migrated := openTestStore(t, path, testScope())
 	var version int
-	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 6 {
+	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 9 {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 	if _, err := migrated.db.ExecContext(ctx, `INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('bad', ?, ?, 'bad', '[]', 'recordset', ?, ?, '{}')`, testScope().ProjectID, migrated.scope, stamp(time.Now().UTC()), stamp(time.Now().UTC())); err != nil {
@@ -585,7 +585,7 @@ func TestJoinLineageMigrationFromV4AddsAppliedEdges(t *testing.T) {
 	migrated := openTestStore(t, path, testScope())
 	defer func() { _ = migrated.Close() }()
 	var version int
-	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 6 {
+	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 9 {
 		t.Fatalf("migrated schema version = %d, %v", version, err)
 	}
 	session, err := migrated.Create(ctx, "Join migration")
@@ -604,6 +604,31 @@ func TestJoinLineageMigrationFromV4AddsAppliedEdges(t *testing.T) {
 	restored, err := migrated.Load(ctx, session.ID)
 	if err != nil || restored.RecordSets[query.RecordSetID].Lineage == nil || len(restored.RecordSets[query.RecordSetID].Lineage.AppliedEdges) != 1 {
 		t.Fatalf("migrated JOIN provenance did not round-trip: %+v, %v", restored.RecordSets[query.RecordSetID], err)
+	}
+}
+
+func TestV6PreferencesMigrateWithDefaultResultVersions(t *testing.T) {
+	ctx := context.Background()
+	path := testStorePath(t)
+	store := openTestStore(t, path, testScope())
+	if err := store.SetTableStyle(ctx, "Minimal"); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE chat_preferences DROP COLUMN result_versions_to_keep; PRAGMA user_version = 6`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	migrated := openTestStore(t, path, testScope())
+	if count, err := migrated.ResultVersionsToKeep(ctx); err != nil || count != 2 {
+		t.Fatalf("migrated default = %d, %v", count, err)
+	}
+	if style, err := migrated.TableStyle(ctx); err != nil || style != "Minimal" {
+		t.Fatalf("existing style lost: %q, %v", style, err)
 	}
 }
 
@@ -729,5 +754,36 @@ func TestBookmarkDeleteBlocksPersistedReferencesAndSaveValidatesThem(t *testing.
 	}
 	if err := store.SaveWorkspace(ctx, consumer.ID, WorkspaceState{Attachments: []ContextReference{{Kind: "bookmark", ObjectID: bookmark.ID}}}); err == nil || !strings.Contains(err.Error(), "unavailable") {
 		t.Fatalf("saving deleted bookmark reference = %v", err)
+	}
+}
+
+func TestV8HTTPResponsesMigrateRequestMethod(t *testing.T) {
+	path := testStorePath(t)
+	store := openTestStore(t, path, testScope())
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE http_responses DROP COLUMN method; ALTER TABLE http_responses DROP COLUMN request_headers_json; PRAGMA user_version = 8`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrated := openTestStore(t, path, testScope())
+	defer func() { _ = migrated.Close() }()
+	var version int
+	if err := migrated.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 9 {
+		t.Fatalf("migrated version = %d, %v", version, err)
+	}
+	var found int
+	if err := migrated.db.QueryRow(`SELECT count(*) FROM pragma_table_info('http_responses') WHERE name='method'`).Scan(&found); err != nil || found != 1 {
+		t.Fatalf("HTTP method column = %d, %v", found, err)
+	}
+	if err := migrated.db.QueryRow(`SELECT count(*) FROM pragma_table_info('http_responses') WHERE name='request_headers_json'`).Scan(&found); err != nil || found != 1 {
+		t.Fatalf("HTTP request headers column = %d, %v", found, err)
 	}
 }

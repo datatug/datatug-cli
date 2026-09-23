@@ -44,14 +44,16 @@ type QueryResult struct {
 	// Title is presentation metadata supplied by the same structured tool
 	// action as DTQL. It is never included in, or interpreted as, executable
 	// query text.
-	Title       string
-	DTQL        string
-	QueryID     string
-	RecordSetID string
-	Result      secureread.Result
-	Parameters  map[string]any
-	Source      string
-	SourceID    string
+	Title           string
+	DTQL            string
+	QueryID         string
+	RecordSetID     string
+	HTTPResponseID  string
+	RefreshParentID string
+	Result          secureread.Result
+	Parameters      map[string]any
+	Source          string
+	SourceID        string
 	// Lineage is DataTug-owned execution provenance, never model supplied.
 	Lineage *JoinLineage
 	Err     error
@@ -67,10 +69,12 @@ type WorkspaceActionResult struct {
 // Turn is one completed agent turn. Text is model prose; Queries remain
 // structured and are never reconstructed from Text.
 type Turn struct {
-	Text    string
-	Queries []QueryResult
-	Actions []WorkspaceActionResult
-	Usage   *TokenUsage
+	Text string
+	// TextFormat marks trusted DataTug-rendered text, such as an HTTP Markdown document.
+	TextFormat string
+	Queries    []QueryResult
+	Actions    []WorkspaceActionResult
+	Usage      *TokenUsage
 }
 
 // TokenUsage is the usage reported by the model provider for a turn.

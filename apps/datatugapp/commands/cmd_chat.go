@@ -148,6 +148,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if err != nil {
 		return "", Exit(fmt.Sprintf("restore chat session: %v", err), exitCodeUsage)
 	}
+	sessions.ConfigureQueryExecutor(executor)
 	// FK evidence is source-scoped. Non-SQLite sources remain usable for Chat,
 	// but expose no inferred JOINs in this first discovery implementation.
 	joinSource, err := dbcopy.Parse(sourceURL)
@@ -185,6 +186,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	ui, err := chat.NewSessionUI(ctx, sessions, options.model)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("render chat session: %v", err), exitCodeUsage)
+	}
+	if err := ui.SetSavedQueryService(chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session}); err != nil {
+		return "", Exit(fmt.Sprintf("list saved project queries: %v", err), exitCodeUsage)
 	}
 	if err := saveLastChatOptions(cmd, options); err != nil {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)

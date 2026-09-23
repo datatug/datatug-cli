@@ -27,7 +27,7 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dal-go/dalgo v0.87.1-0.20260923221555-b08046da320c
+	github.com/dal-go/dalgo v0.87.1-0.20260923223654-6290b74dc9a3
 	github.com/dal-go/dalgo2http v0.2.0
 	github.com/dal-go/dalgo2sql v0.20.0
 	github.com/dal-go/dalgo2sqlite v0.1.11

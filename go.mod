@@ -42,6 +42,7 @@ require (
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/google/go-github/v91 v91.0.0
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/gosuri/uitable v0.0.4
 	github.com/ingitdb/dalgo2ingitdb v0.6.1
 	github.com/ingitdb/ingitdb-go/ingitdb v0.7.3
@@ -143,7 +144,6 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.21 // indirect
 	github.com/googleapis/gax-go/v2 v2.24.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
-	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/ingitdb/dalgo2ingitdb4github v0.2.3 // indirect

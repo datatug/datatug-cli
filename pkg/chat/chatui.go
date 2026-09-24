@@ -198,6 +198,19 @@ func (u *ChatUI) nextEntryID(prefix string) string {
 // values instead of buffering the whole turn; for a sessionless UI
 // (Conversation only, no SessionChat), it falls back to a one-shot stream
 // around Conversation.Ask.
+// askCmd deliberately still uses plain StartStream, not the new (landed in
+// aichat-tools@b63980a) StartStreamMarkdown: Turn.TextFormat ("markdown")
+// is never actually set on any turn askCmd/StreamAsk can produce today
+// (only ui.go's own non-streamed appendTurn/store.go persistence read it),
+// so unconditionally routing live turns through glamour would change how
+// EVERY plain-prose response renders (glamour re-flows/re-spaces prose
+// word by word) for zero current benefit — confirmed by
+// TestChatUISubmitAsksAndRendersGrid, whose plain "Found one." assertion
+// broke under StartStreamMarkdown. The real fix needs a way to defer the
+// markdown decision until the turn resolves (e.g. ReplaceBlock swapping in
+// a markdown-rendered entry once Turn.TextFormat is known) — out of scope
+// here; checklist item #37's "streamed markdown" gap remains open,
+// necessarily, not by an oversight.
 func (u *ChatUI) askCmd(prompt string) tea.Cmd {
 	id := u.nextEntryID("turn")
 	return u.shell.StartStream(id, func(ctx context.Context) iter.Seq2[ai.Event, error] {
@@ -307,8 +320,7 @@ func (u *ChatUI) appendGridResult(query QueryResult) {
 	}
 	styled.SetKeyHandler(u.handleGridKey)
 	block := u.blockForGrid(styled.Model, query.RecordSetID)
-	u.shell.AppendBlock(block)
-	_ = id // entry ID plumbing for ReplaceBlock/Ctrl+G lands with SidePanel/GlobalKeys wiring
+	u.shell.AppendBlockWithID(id, block)
 }
 
 // blockForGrid wraps gridModel in a JoinBlock when recordSetID has FK-join
@@ -453,7 +465,7 @@ func (u *ChatUI) loadSession(session ChatSession) {
 			u.lastGridEntryID, u.lastGridRecordSetID = u.nextEntryID("grid"), record.ID
 			u.gridsByRecordSetID[record.ID] = styled
 			styled.SetKeyHandler(u.handleGridKey)
-			u.shell.AppendBlock(u.blockForGrid(styled.Model, record.ID))
+			u.shell.AppendBlockWithID(u.lastGridEntryID, u.blockForGrid(styled.Model, record.ID))
 			if note := formatLimitations(record.Result.Limitations); note != "" {
 				u.shell.AppendAssistant(note)
 			}

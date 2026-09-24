@@ -28,14 +28,9 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case "ctrl+g":
 		// Jump to the most recently appended grid/join block — ui.go's
 		// focusLatestGrid (checklist item #45), via chatshell.Model.FocusEntry
-		// (landed in aichat-tools@b6f214d). Not yet functional: FocusEntry
-		// looks an entry up by the ID passed to a *ID-bearing* append, but
-		// chatshell.Model only exposes plain AppendBlock(block) (no ID
-		// parameter) — appendGridResult's lastGridEntryID is generated but
-		// never actually attached to the transcript entry. Needs either an
-		// AppendBlockWithID(id, block) on chatshell.Model, or another way to
-		// learn an appended entry's ID — flagged to Lane A, not worked around
-		// with a private-field reach-in.
+		// + AppendBlockWithID (both landed in aichat-tools@b63980a; see
+		// appendGridResult/loadSession, which now append under
+		// lastGridEntryID instead of a plain AppendBlock).
 		if u.lastGridEntryID != "" {
 			u.shell.FocusEntry(u.lastGridEntryID)
 		}

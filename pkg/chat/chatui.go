@@ -348,6 +348,9 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 	case savedQueryDoneMsg:
 		u.handleSavedQueryDone(msg)
 		return nil
+	case httpDoneMsg:
+		u.handleHTTPDone(msg)
+		return nil
 	}
 	return nil
 }
@@ -541,7 +544,9 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 		}
 	case "/query", "/queries":
 		cmd, err = u.runQueryCommand(argument)
-	case "/connect", "/http":
+	case "/http":
+		cmd, err = u.runHTTPCommand(argument)
+	case "/connect":
 		u.shell.AppendAssistant(command + " isn't available in the new chat UI yet — coming in a follow-up; use /help for what is.")
 	case "/settings":
 		if argument == "" {

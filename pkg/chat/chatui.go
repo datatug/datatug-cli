@@ -577,7 +577,7 @@ func (u *ChatUI) loadSession(session ChatSession) {
 					versionBadge = "changed"
 				}
 			}
-			u.shell.AppendBlock(&httpDocumentBlock{text: text, markdown: message.Kind == "markdown", response: response, versionBadge: versionBadge})
+			u.shell.AppendBlock(&httpDocumentBlock{ui: u, text: text, markdown: message.Kind == "markdown", response: response, versionBadge: versionBadge})
 		case message.Kind == "markdown":
 			u.shell.AppendAssistantMarkdown(text)
 		default:

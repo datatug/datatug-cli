@@ -470,6 +470,32 @@ func TestHTTPDocumentBlockRawHeaderToggle(t *testing.T) {
 	}
 }
 
+// TestHTTPDocumentBlockSaveAsQueryForNonTableResponse is the M5 regression
+// test (r1 adversarial review of #289): ui.go's messageFocused switch wired
+// "q" straight to openSaveQueryDialog for a focused HTTP-response message,
+// which worked even when the response was NOT parsed into a RecordSet (a
+// non-table response -- markdown, plain text, arbitrary JSON secureread
+// never turned into rows). httpDocumentBlock (the ChatUI transcript.Block a
+// non-table HTTP response renders as) had no "q" case at all before this.
+func TestHTTPDocumentBlockSaveAsQueryForNonTableResponse(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	service := &savedQueryStub{}
+	if err := u.SetSavedQueryService(service); err != nil {
+		t.Fatal(err)
+	}
+	response := &HTTPResponse{Method: "GET", URL: "https://example.com/notes.md", StatusCode: 200, ContentType: "text/markdown", Body: []byte("# Notes")}
+	b := &httpDocumentBlock{ui: u, text: "# Notes", markdown: true, response: response}
+
+	// PushOverlay pushes synchronously and returns a nil tea.Cmd (there is
+	// nothing async to schedule), so the overlay is already live once
+	// Update returns -- no drainCmd needed.
+	b.Update(tea.KeyPressMsg{Text: "q"})
+	view := ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(view, "Save") {
+		t.Fatalf("save-as-query overlay did not open:\n%s", view)
+	}
+}
+
 // Ported from TestHTTPTableHasRawAndHeadersTabs: a structured HTTP result's
 // grid exposes the same Raw/Headers ExtraViews (native tui/grid numeric-key
 // view switching) as any other DTQL grid.

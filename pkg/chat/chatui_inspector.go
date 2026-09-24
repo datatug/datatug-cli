@@ -395,6 +395,30 @@ func (u *ChatUI) openSaveQueryDialog() tea.Cmd {
 	return u.shell.PushOverlay(newSaveQueryOverlay(u, request))
 }
 
+// openSaveQueryDialogForHTTPResponse is openSaveQueryDialog's HTTP branch,
+// factored out for a focused HTTP response that has no RecordSet at all --
+// a non-table response (raw text/JSON that secureread never parsed into
+// rows), rendered as a bare httpDocumentBlock rather than a grid+join
+// block. ui.go's messageFocused case wired "q" directly to
+// openSaveQueryDialog for exactly this (a message-only HTTP response, no
+// grid involved); ChatUI's httpDocumentBlock had no "q" case at all until
+// this (M5, r1 adversarial review of #289) -- see http_document_block.go's
+// Update.
+func (u *ChatUI) openSaveQueryDialogForHTTPResponse(response *HTTPResponse) tea.Cmd {
+	if response == nil || u.shell.Busy() || u.savedQueryService == nil {
+		return nil
+	}
+	if response.RequestHasQuery {
+		u.shell.AppendAssistant("This HTTP request had URL parameters that were not stored, so it cannot be saved as a reusable query.")
+		return nil
+	}
+	if response.Method != "" && response.Method != "GET" {
+		u.shell.AppendAssistant("This request used a non-GET method. Save it from the HTTP request form instead.")
+		return nil
+	}
+	return u.shell.PushOverlay(newSaveQueryOverlay(u, SavedQuerySaveRequest{Type: "HTTP", Text: response.URL, Title: response.URL}))
+}
+
 type saveQueryOverlayState struct {
 	ui      *ChatUI
 	request SavedQuerySaveRequest

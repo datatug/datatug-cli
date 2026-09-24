@@ -12,6 +12,7 @@ import (
 // (markdown or plain text) keeps its Rendered/Raw/Headers toggle once it's
 // a real Block instead of a static AppendAssistant(Markdown) string.
 type httpDocumentBlock struct {
+	ui           *ChatUI
 	text         string
 	markdown     bool
 	response     *HTTPResponse
@@ -68,6 +69,14 @@ func (b *httpDocumentBlock) Update(msg tea.Msg) (transcript.Block, tea.Cmd) {
 		b.showRaw, b.showHeaders = !b.showRaw, false
 	case "3", "h":
 		b.showHeaders = true
+	case "q":
+		// M5 (r1 adversarial review of #289): save-as-query for a
+		// non-table HTTP response -- one with no RecordSet at all, so
+		// ChatUI's grid-focused "q" (openSaveQueryDialog, via
+		// activeRecordSetID) never applies to it.
+		if b.ui != nil {
+			return b, b.ui.openSaveQueryDialogForHTTPResponse(b.response)
+		}
 	}
 	return b, nil
 }

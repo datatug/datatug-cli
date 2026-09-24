@@ -58,6 +58,9 @@ type ChatUI struct {
 	// workspace is the SidePanel — DataTug's workspace pane (checklist #8).
 	workspace *workspacePanel
 
+	savedQueryService SavedQueryService
+	savedQueries      []SavedQuery
+
 	projectChoices  []ProjectChoice
 	selectedProject string
 	browserURL      string
@@ -342,6 +345,9 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 		}
 		u.shell.AppendAssistant(fmt.Sprintf("Exported %d RecordSet(s) to %s", msg.count, msg.path))
 		return nil
+	case savedQueryDoneMsg:
+		u.handleSavedQueryDone(msg)
+		return nil
 	}
 	return nil
 }
@@ -533,7 +539,9 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 		} else {
 			cmd, err = u.exportCommand(argument)
 		}
-	case "/connect", "/http", "/query", "/queries":
+	case "/query", "/queries":
+		cmd, err = u.runQueryCommand(argument)
+	case "/connect", "/http":
 		u.shell.AppendAssistant(command + " isn't available in the new chat UI yet — coming in a follow-up; use /help for what is.")
 	case "/settings":
 		if argument == "" {

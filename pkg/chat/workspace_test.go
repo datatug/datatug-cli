@@ -744,15 +744,16 @@ func TestDockedGridSortAndCellSelectionUseSourceCoordinates(t *testing.T) {
 	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
 	u.workspaceTab, u.workspaceFocused, u.dockGridFocused = 2, true, true
 	dock := u.snapshot.Workspace.Docks[0]
-	grid := u.dockGrids[dock.ID]
-	grid.selectedColumn = 0
+	dockGrid := u.dockGrids[dock.ID]
+	dockGrid.SelectColumn(0)
 	_, _ = u.Update(tea.KeyPressMsg{Code: 's'}) // ascending
 	_, _ = u.Update(tea.KeyPressMsg{Code: 's'}) // descending
-	grid = u.dockGrids[dock.ID]
-	if got := grid.model.SourceRows; !reflect.DeepEqual(got, []int{2, 0}) {
+	dockGrid = u.dockGrids[dock.ID]
+	if got := []int{dockGrid.sourceIndexAt(0), dockGrid.sourceIndexAt(1)}; !reflect.DeepEqual(got, []int{2, 0}) {
 		t.Fatalf("docked sorted source rows = %v", got)
 	}
-	grid.selectedColumn, grid.rowIndex = 1, 0 // City in source row 2
+	dockGrid.SelectColumn(1)
+	dockGrid.SelectRow(0) // City in source row 2
 	_, _ = u.Update(tea.KeyPressMsg{Code: 'c'})
 	saved, err := chat.Snapshot(ctx)
 	if err != nil {

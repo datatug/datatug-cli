@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo2http"
+	"github.com/strongo/aichat/tui/grid"
+
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -709,7 +711,7 @@ func (s *SessionStore) TableStyle(ctx context.Context) (string, error) {
 	var name string
 	err := s.db.QueryRowContext(ctx, `SELECT table_style FROM chat_preferences WHERE scope = ?`, s.scope).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
-		return tableStyleLines.name(), nil
+		return grid.StyleLines.Name, nil
 	}
 	if err != nil {
 		return "", err
@@ -718,7 +720,11 @@ func (s *SessionStore) TableStyle(ctx context.Context) (string, error) {
 }
 
 func (s *SessionStore) SetTableStyle(ctx context.Context, name string) error {
-	if name != tableStyleSoft.name() && name != tableStyleMinimal.name() && name != tableStyleLines.name() {
+	known := false
+	for _, style := range grid.Styles {
+		known = known || style.Name == name
+	}
+	if !known {
 		return fmt.Errorf("unknown table style %q", name)
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO chat_preferences (scope, table_style) VALUES (?, ?) ON CONFLICT(scope) DO UPDATE SET table_style = excluded.table_style`, s.scope, name)
@@ -749,7 +755,7 @@ func (s *SessionStore) SetResultVersionsToKeep(ctx context.Context, count int) e
 	if count < 1 || count > 100 {
 		return fmt.Errorf("result version limit must be between 1 and 100")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO chat_preferences (scope, table_style, result_versions_to_keep) VALUES (?, ?, ?) ON CONFLICT(scope) DO UPDATE SET result_versions_to_keep = excluded.result_versions_to_keep`, s.scope, tableStyleLines.name(), count)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO chat_preferences (scope, table_style, result_versions_to_keep) VALUES (?, ?, ?) ON CONFLICT(scope) DO UPDATE SET result_versions_to_keep = excluded.result_versions_to_keep`, s.scope, grid.StyleLines.Name, count)
 	return err
 }
 

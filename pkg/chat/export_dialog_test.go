@@ -13,7 +13,7 @@ import (
 func TestExportDialogWritesCurrentRecordSet(t *testing.T) {
 	u := NewUI(context.Background(), nil, "test")
 	u.snapshot.RecordSets = map[string]RecordSet{"record-1": exportFixture("Invoices")}
-	u.entries = []historyEntry{{recordSetID: "record-1", grid: &gridState{title: "Invoices"}}}
+	u.entries = []historyEntry{{recordSetID: "record-1", grid: newGridState(GridModel{}, "Invoices", 80)}}
 	u.activeGrid = 0
 	u.openExportDialog()
 	if u.exportDialog == nil || u.exportDialog.name.Value() != "Invoices" {

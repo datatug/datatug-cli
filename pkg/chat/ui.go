@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/strongo/aichat/tui/grid"
+
 	"github.com/datatug/datatug-cli/pkg/secureread"
-	bubbletable "github.com/evertras/bubble-table/table"
 )
 
 const maxGridHeight = 12
@@ -31,13 +31,10 @@ var (
 	statusStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	tableStyleBadge      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Background(lipgloss.Color("24"))
 	activeTitleStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51"))
-	inactiveTitleStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	activeBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
 	selectedOutlineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 	inactiveBorderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	selectedCellStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220"))
-	activeCellStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235"))
-	inactiveCellStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Background(lipgloss.Color("232"))
 	activeMessageStyle   = lipgloss.NewStyle().Padding(0, 1).Background(messageSurfaceBackground)
 	inputSurfaceStyle    = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("236"))
 	statusSurfaceStyle   = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("233"))
@@ -88,293 +85,286 @@ func (e *historyEntry) selectedJoin() (JoinCandidate, bool) {
 	return group.candidates[e.joinCandidateIndex], true
 }
 
+// gridState is a thin wrapper around strongo/aichat's tui/grid.Model: the
+// table itself, per-cell column selection, scrollbar, style presets, sort,
+// filter and the card/footer chrome all live in grid.Model (see
+// tui/grid/grid.go, render.go, style.go, update.go in that module).
+// gridState keeps only what a generic grid cannot know about DataTug: chart
+// candidates, an HTTP response's raw body/headers (rendered as ExtraViews),
+// a version badge, and the RecordSet's raw (unformatted) values, indexed by
+// the RecordSet's own row order (grid.Row.Key round-trips a row's position
+// in that order across a Sort).
 type gridState struct {
-	model          GridModel
-	title          string
-	table          gridTable
-	selectedColumn int
-	rowIndex       int
-	width          int
-	naturalWidth   int
-	focused        bool
-	activeView     recordsetView
-	secondaryFocus bool
-	charts         []ChartCandidate
-	chartIndex     int
-	inspector      viewport.Model
-	inspectorRow   int
-	tableStyle     tableStyle
-	rawBody        []byte
-	httpResponse   *HTTPResponse
-	versionBadge   string
+	*grid.Model
+	raw          [][]any
+	baseTitle    string
+	charts       []ChartCandidate
+	chartIndex   int
+	rawBody      []byte
+	httpResponse *HTTPResponse
+	versionBadge string
 }
 
-// gridTable is the small DataTug-owned adapter around bubble-table. Keeping
-// the third-party model here prevents UI-library types from crossing the
-// structured chat/result boundary and gives tests a stable grid seam.
-type gridTable struct {
-	model bubbletable.Model
+// setVersionBadge prefixes ("unchanged"/"changed") or clears the grid's
+// title with a version badge, without losing the underlying title text.
+func (g *gridState) setVersionBadge(badge string) {
+	g.versionBadge = badge
+	if badge == "" {
+		g.SetTitle(g.baseTitle)
+		return
+	}
+	g.SetTitle(badge + " · " + g.baseTitle)
 }
 
-func (t gridTable) Focused() bool { return t.model.GetFocused() }
-func (t gridTable) Cursor() int   { return t.model.GetHighlightedRowIndex() }
-func (t *gridTable) SetCursor(index int) {
-	t.model = t.model.WithHighlightedRow(index)
-}
-func (t *gridTable) Focus()                    { t.model = t.model.Focused(true) }
-func (t *gridTable) Blur()                     { t.model = t.model.Focused(false) }
-func (t gridTable) View() string               { return t.model.View() }
-func (t gridTable) VisibleIndices() (int, int) { return t.model.VisibleIndices() }
-func (t gridTable) ColumnOffset() int          { return t.model.GetHorizontalScrollColumnOffset() }
-func (t *gridTable) ScrollLeft()               { t.model = t.model.ScrollLeft() }
-func (t *gridTable) ScrollRight()              { t.model = t.model.ScrollRight() }
-func (t *gridTable) Update(msg tea.KeyPressMsg) (tea.Cmd, bool) {
-	var cmd tea.Cmd
-	t.model, cmd = t.model.Update(msg)
-	return cmd, true
-}
+// view renders the grid at its own last-set width/focus, for a caller
+// outside the transcript (a dialog) that doesn't otherwise track those.
+func (g *gridState) view() string { return g.View(g.Width(), g.Focused()) }
+
+// gridViewCharts/gridViewCurrentRow/gridViewRaw/gridViewHeaders are the
+// (fixed, by registration order — see newGridState/attachHTTPResponse) grid
+// view indices for DataTug's own ExtraViews, matching the founder-visible
+// "1 Table · 2 Charts · 3 Current row · 4 Raw · 5 Headers" numbering.
+const (
+	gridViewCharts     grid.View = 1
+	gridViewCurrentRow grid.View = 2
+	gridViewRaw        grid.View = 3
+	gridViewHeaders    grid.View = 4
+)
 
 func newGridState(model GridModel, title string, width int, statistics ...secureread.RecordSetStatistics) *gridState {
-	g := &gridState{
-		model:        model,
-		title:        normalizeGridTitle(title),
-		width:        width,
-		inspector:    viewport.New(viewport.WithWidth(1), viewport.WithHeight(1)),
-		inspectorRow: -1,
-	}
-	g.inspector.SoftWrap = true
-	g.naturalWidth = naturalGridWidth(model)
+	return newProjectedGridState(model, title, width, nil, nil, statistics...)
+}
+
+// newProjectedGridState is newGridState for a dock's projected/filtered
+// view of a RecordSet (see rebuildDockGrids): sourceRows[i], when given,
+// maps model.Rows[i] back to its row index in the FULL RecordSet (used for
+// FK-preview lookups, range selection and cross-grid sort sync) — the same
+// role GridModel.SourceRows played before grid.Row.Key became the carrier.
+// A nil/short sourceRows is the identity mapping (the common, non-projected
+// case). extraOpts lets a caller (rebuildDockGrids, for a view-backed dock)
+// pass grid.WithInitialSort so a grid built from already-externally-sorted
+// rows still knows which column/direction that is.
+func newProjectedGridState(model GridModel, title string, width int, sourceRows []int, extraOpts []grid.Option, statistics ...secureread.RecordSetStatistics) *gridState {
+	g := &gridState{raw: model.RawRows, baseTitle: normalizeGridTitle(title)}
 	if len(statistics) > 0 {
 		g.charts = InferChartCandidates(statistics[0])
 	}
-	g.rebuild()
+	cols := append([]grid.Column(nil), model.Columns...)
+	rows := make([]grid.Row, len(model.Rows))
+	for i := range model.Rows {
+		values := make([]any, len(model.Columns))
+		for c := range model.Columns {
+			if c < len(model.Rows[i]) {
+				values[c] = model.Rows[i][c]
+			} else {
+				values[c] = grid.Absent
+			}
+		}
+		key := i
+		if i < len(sourceRows) {
+			key = sourceRows[i]
+		}
+		rows[i] = grid.Row{Key: strconv.Itoa(key), Values: values}
+	}
+	opts := []grid.Option{
+		grid.WithTitle(g.baseTitle),
+		grid.WithExtraViews(g.chartsExtraView(), grid.CardView("Current row")),
+		grid.WithSplitLayout(chooseGridLayout),
+		grid.WithMaxVisibleRows(maxGridHeight - 2), // table page size; secondary-view height (paneHeight) is a cosmetic 2 lines shorter than the pre-adoption recordsetPaneHeight as a result
+	}
+	opts = append(opts, extraOpts...)
+	g.Model = grid.New(cols, rows, opts...)
+	g.SetWidth(width)
 	return g
 }
 
-func (g *gridState) rebuild() {
-	if g.width < 1 {
-		g.width = 80
-	}
-	previousOffset := g.table.ColumnOffset()
-	tableWidth := g.tableWidth()
-	columns := make([]bubbletable.Column, len(g.model.Columns))
-	for columnIndex := range g.model.Columns {
-		columnWidth := g.columnWidth(columnIndex)
-		style := gridColumnStyle(g.model.Columns[columnIndex], columnIndex == g.selectedColumn)
-		columns[columnIndex] = bubbletable.NewColumn(
-			gridColumnKey(columnIndex), g.model.header(columnIndex), columnWidth,
-		).WithStyle(style)
-	}
-	rows := make([]bubbletable.Row, len(g.model.Rows))
-	for rowIndex, values := range g.model.Rows {
-		row := bubbletable.RowData{}
-		for columnIndex := range g.model.Columns {
-			value := ""
-			if columnIndex < len(values) {
-				value = values[columnIndex]
+// attachHTTPResponse records an HTTP response on an already-built gridState
+// (a query's HTTP body/headers arrive after the grid itself, in
+// updateGrid/httpCommand.go) and (re)registers the Raw/Headers ExtraViews —
+// absent until now — so "4"/"5" become reachable and the header shows them.
+func (g *gridState) attachHTTPResponse(body []byte, response *HTTPResponse) {
+	g.rawBody = body
+	g.httpResponse = response
+	g.SetExtraViews(g.chartsExtraView(), grid.CardView("Current row"), g.rawExtraView(), g.headersExtraView())
+}
+
+// chartsExtraView renders DataTug's chart-candidate browser: the currently
+// selected ChartCandidate's terminal chart, cycled with ↑↓. Ported from
+// recordset_ui.go's secondaryView (recordsetCharts case) and updateSecondary.
+func (g *gridState) chartsExtraView() grid.ExtraView {
+	return grid.ExtraView{
+		Label: "Charts",
+		Render: func(_ *grid.Model, width, height int) string {
+			if len(g.charts) == 0 {
+				return "No chart candidates for this recordset."
 			}
-			style := gridColumnStyle(g.model.Columns[columnIndex], columnIndex == g.selectedColumn)
-			row[gridColumnKey(columnIndex)] = bubbletable.NewStyledCell(value, style)
-		}
-		rows[rowIndex] = bubbletable.NewRow(row)
-	}
-	keys := bubbletable.DefaultKeyMap()
-	// DataTug owns column navigation and Enter is reserved for future details.
-	// Disable bubble-table's conflicting defaults rather than letting a hidden
-	// row-selection action consume either key.
-	keys.RowSelectToggle = key.NewBinding(key.WithHelp("enter", "details"))
-	keys.PageDown = key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "next page"))
-	keys.PageUp = key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "previous page"))
-	keys.Filter = key.NewBinding(key.WithHelp("/", "filter"))
-	keys.FilterBlur = key.NewBinding(key.WithHelp("esc", "unfocus"))
-	keys.FilterClear = key.NewBinding(key.WithHelp("esc", "clear filter"))
-	keys.ScrollLeft = key.NewBinding(key.WithHelp("shift+←", "scroll left"))
-	keys.ScrollRight = key.NewBinding(key.WithHelp("shift+→", "scroll right"))
-	pageSize := max(1, min(len(rows), maxGridHeight-2))
-	model := bubbletable.New(columns).
-		WithRows(rows).
-		WithBaseStyle(g.tableStyle.dividerStyle()).
-		WithBorderForeground(g.tableStyle.borderColor()).
-		HeaderStyle(g.tableStyle.headerStyle()).
-		WithMaxTotalWidth(tableWidth).
-		WithPageSize(pageSize).
-		WithPaginationWrapping(false).
-		WithOuterBorder(false).
-		WithRowBorder(false).
-		WithFooterVisibility(false).
-		WithHeaderVisibility(true).
-		WithKeyMap(keys).
-		Focused(g.focused && !g.secondaryFocus).
-		WithRowStyleFunc(func(input bubbletable.RowStyleFuncInput) lipgloss.Style {
-			if input.Index != g.rowIndex {
-				if g.focused {
-					return activeCellStyle
+			g.chartIndex = max(0, min(g.chartIndex, len(g.charts)-1))
+			candidate := g.charts[g.chartIndex]
+			return "Chart " + strconv.Itoa(g.chartIndex+1) + "/" + strconv.Itoa(len(g.charts)) + ": " + sanitizeTerminalText(candidate.Spec.Title) + "\n" +
+				"↑↓ candidates • " + sanitizeTerminalText(candidate.Reason) + "\n" +
+				renderChart(candidate.Spec, width, max(4, height-2))
+		},
+		Update: func(_ *grid.Model, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+			switch msg.String() {
+			case "up":
+				if g.chartIndex > 0 {
+					g.chartIndex--
 				}
-				return inactiveCellStyle
+				return nil, true
+			case "down":
+				if g.chartIndex+1 < len(g.charts) {
+					g.chartIndex++
+				}
+				return nil, true
 			}
-			if g.focused {
-				return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57"))
-			}
-			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")).Background(lipgloss.Color("239"))
-		})
-	if len(rows) > 0 {
-		g.rowIndex = max(0, min(g.rowIndex, len(rows)-1))
-		model = model.WithHighlightedRow(g.rowIndex)
+			return nil, false
+		},
 	}
-	g.table.model = model
-	for i := 0; i < previousOffset; i++ {
-		g.table.ScrollRight()
-	}
-	g.ensureSelectedColumnVisible()
 }
 
-func gridColumnStyle(column GridColumn, selected bool) lipgloss.Style {
-	alignment := lipgloss.Left
-	if column.Numeric {
-		alignment = lipgloss.Right
+// rawExtraView renders the saved HTTP response's raw body in a scrollable
+// viewport. Ported from recordset_ui.go's secondaryView (recordsetRaw case).
+func (g *gridState) rawExtraView() grid.ExtraView {
+	vp := viewport.New(viewport.WithWidth(1), viewport.WithHeight(1))
+	vp.SoftWrap = true
+	return grid.ExtraView{
+		Label: "Raw",
+		Render: func(_ *grid.Model, width, height int) string {
+			vp.SetWidth(max(1, width))
+			vp.SetHeight(max(1, height))
+			vp.SetContent(sanitizeMultilineText(boundedText(g.rawBody)))
+			return vp.View()
+		},
+		Update: viewportScrollUpdate(&vp),
 	}
-	if selected {
-		return selectedCellStyle.Align(alignment)
-	}
-	return lipgloss.NewStyle().Align(alignment)
 }
 
-func (g *gridState) setFocused(focused bool) {
-	if g.focused == focused {
+// headersExtraView renders the saved HTTP response's request/response
+// headers in a scrollable viewport. Ported from recordset_ui.go's
+// secondaryView (recordsetHeaders case) and headersContent.
+func (g *gridState) headersExtraView() grid.ExtraView {
+	vp := viewport.New(viewport.WithWidth(1), viewport.WithHeight(1))
+	vp.SoftWrap = true
+	return grid.ExtraView{
+		Label: "Headers",
+		Render: func(_ *grid.Model, width, height int) string {
+			vp.SetWidth(max(1, width))
+			vp.SetHeight(max(1, height))
+			content := "No HTTP response metadata."
+			if g.httpResponse != nil {
+				content = g.httpResponse.headersContent(width)
+			}
+			vp.SetContent(content)
+			return vp.View()
+		},
+		Update: viewportScrollUpdate(&vp),
+	}
+}
+
+// viewportScrollUpdate is the up/down/pgup/pgdown/home/end handler shared by
+// rawExtraView and headersExtraView.
+func viewportScrollUpdate(vp *viewport.Model) func(*grid.Model, tea.KeyPressMsg) (tea.Cmd, bool) {
+	return func(_ *grid.Model, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+		switch msg.String() {
+		case "up", "down", "pgup", "pgdown", "home", "end":
+			var cmd tea.Cmd
+			*vp, cmd = vp.Update(msg)
+			return cmd, true
+		}
+		return nil, false
+	}
+}
+
+const (
+	minSecondaryCells   = 40
+	minUsefulTableCells = 32
+	maxUsefulTableCells = 72
+	recordsetPaneGap    = 1
+)
+
+// chooseGridLayout is DataTug's WithSplitLayout policy: the table and the
+// active secondary view share the pane, side by side, only when there's
+// enough room for both to be useful; Raw/Headers (already scrollable, often
+// wide JSON/text) always take the full pane instead. Ported from
+// recordset_views.go's chooseRecordsetLayout.
+func chooseGridLayout(totalWidth, naturalWidth int, view grid.View) grid.SplitLayout {
+	if view == grid.ViewTable || view == gridViewRaw || view == gridViewHeaders {
+		return grid.SplitLayout{}
+	}
+	useful := max(minUsefulTableCells, min(maxUsefulTableCells, naturalWidth))
+	if totalWidth-useful-recordsetPaneGap >= minSecondaryCells {
+		return grid.SplitLayout{Split: true, PrimaryWidth: useful, SecondaryWidth: totalWidth - useful - recordsetPaneGap}
+	}
+	return grid.SplitLayout{}
+}
+
+// sourceRowKey/restoreByKey are gridState's stable-selection helpers,
+// wrapping grid.Row.Key/Model.IndexForKey (a display row's position in the
+// RecordSet's own — never reordered — row order, which is what raw/RawRows
+// and cross-grid sort sync key off).
+func (g *gridState) sourceRowKey() string {
+	if row, ok := g.CurrentRow(); ok {
+		return row.Key
+	}
+	return ""
+}
+
+// selectedSourceRow is sourceRowKey as an int (the RecordSet's own row
+// order), or -1. Kept for parity with the pre-adoption gridState method of
+// the same name/shape.
+func (g *gridState) selectedSourceRow() int { return g.sourceIndexAt(g.CurrentIndex()) }
+
+func (g *gridState) restoreByKey(key string) {
+	if key == "" {
 		return
 	}
-	g.focused = focused
-	g.table.model = g.table.model.Focused(focused && !g.secondaryFocus)
-}
-
-func (g *gridState) setSecondaryFocus(focused bool) {
-	if g.activeView == recordsetTable {
-		focused = false
-	}
-	g.secondaryFocus = focused
-	g.table.model = g.table.model.Focused(g.focused && !focused)
-}
-
-func (g *gridState) setRecordsetView(view recordsetView, paneWidth int) {
-	g.activeView = view
-	if view == recordsetTable {
-		g.setSecondaryFocus(false)
-		return
-	}
-	if !g.recordsetLayout(paneWidth).split {
-		g.setSecondaryFocus(true)
+	if index := g.IndexForKey(key); index >= 0 {
+		g.SelectRow(index)
 	}
 }
 
-func (g *gridState) selectedSourceRow() int {
-	if g.rowIndex < 0 || g.rowIndex >= len(g.model.SourceRows) {
+// rawValue returns the RecordSet's raw (unformatted) value for the
+// currently highlighted row/column, or nil if there is none.
+func (g *gridState) rawValue(displayRowIndex, column int) any {
+	row := g.rawRow(displayRowIndex)
+	if row == nil || column < 0 || column >= len(row) {
+		return nil
+	}
+	return row[column]
+}
+
+// rawRow returns the RecordSet's raw (unformatted) values for the row at a
+// display index (post-sort/filter position), resolved via grid.Row.Key back
+// to raw's fixed RecordSet-row order.
+func (g *gridState) rawRow(displayRowIndex int) []any {
+	index := g.sourceIndexAt(displayRowIndex)
+	if index < 0 || index >= len(g.raw) {
+		return nil
+	}
+	return g.raw[index]
+}
+
+// sourceIndexAt resolves a display row (post-sort/filter position) to its
+// position in the RecordSet's own (never reordered) row order, or -1.
+func (g *gridState) sourceIndexAt(displayRowIndex int) int {
+	rows := g.Rows()
+	if displayRowIndex < 0 || displayRowIndex >= len(rows) {
 		return -1
 	}
-	return g.model.SourceRows[g.rowIndex]
+	index, err := strconv.Atoi(rows[displayRowIndex].Key)
+	if err != nil {
+		return -1
+	}
+	return index
 }
 
-func (g *gridState) restoreSourceRow(sourceRow int) {
-	if sourceRow >= 0 {
-		for index, source := range g.model.SourceRows {
-			if source == sourceRow {
-				g.rowIndex = index
-				break
-			}
-		}
-	}
-	if len(g.model.Rows) == 0 {
-		g.rowIndex = 0
-		return
-	}
-	g.rowIndex = max(0, min(g.rowIndex, len(g.model.Rows)-1))
-}
-
-// replaceModel retains the RecordSet identity selected by this presentation,
-// rather than retaining a mutable display index after sorting.
-func (g *gridState) replaceModel(model GridModel) {
-	sourceRow := g.selectedSourceRow()
-	g.model = model
-	g.naturalWidth = naturalGridWidth(model)
-	g.restoreSourceRow(sourceRow)
-	g.rebuild()
-}
-
-func gridColumnKey(index int) string { return fmt.Sprintf("column-%d", index) }
-
-func (g *gridState) columnWidth(columnIndex int) int {
-	if columnIndex < 0 || columnIndex >= len(g.model.Columns) {
-		return 1
-	}
-	width := lipgloss.Width(g.model.header(columnIndex))
-	for _, row := range g.model.Rows {
-		if columnIndex < len(row) && lipgloss.Width(row[columnIndex]) > width {
-			width = lipgloss.Width(row[columnIndex])
-		}
-	}
-	return max(1, min(g.tableWidth()-1, min(28, max(6, width))))
-}
-
-func (g *gridState) tableWidth() int {
-	return max(2, g.width-2)
-}
-
-// visibleColumnWindow mirrors bubble-table's no-outer-border width rules:
-// each non-final rendered column consumes its content width plus the right
-// divider, while the final source column has no trailing divider. A horizontal
-// overflow view reserves two cells for the marker column.
-func (g *gridState) visibleColumnWindow() (int, int) {
-	if len(g.model.Columns) == 0 {
-		return 0, -1
-	}
-	offset := g.table.ColumnOffset()
-	used := 0
-	if offset > 0 {
-		used = 2 // bubble-table's left overflow marker and divider
-	}
-	last := offset - 1
-	for i := offset; i < len(g.model.Columns); i++ {
-		targetWidth := g.tableWidth() - 2 // reserve the right overflow marker
-		finalColumn := i == len(g.model.Columns)-1
-		if finalColumn {
-			targetWidth = g.tableWidth()
-		}
-		renderedWidth := g.columnWidth(i)
-		if !finalColumn {
-			renderedWidth++ // non-final cell plus right divider
-		}
-		if used+renderedWidth > targetWidth {
-			// At very narrow widths bubble-table may render only an overflow
-			// marker. Report no visible data column instead of inventing one.
-			break
-		}
-		used += renderedWidth
-		last = i
-	}
-	return offset, last
-}
-
-func (g *gridState) ensureSelectedColumnVisible() {
-	if len(g.model.Columns) == 0 {
-		return
-	}
-	for g.table.ColumnOffset() > g.selectedColumn {
-		before := g.table.ColumnOffset()
-		g.table.ScrollLeft()
-		if g.table.ColumnOffset() == before {
-			break
-		}
-	}
-	_, last := g.visibleColumnWindow()
-	for g.selectedColumn > last && g.table.ColumnOffset() < g.selectedColumn {
-		before := g.table.ColumnOffset()
-		g.table.ScrollRight()
-		if g.table.ColumnOffset() == before {
-			break
-		}
-		_, last = g.visibleColumnWindow()
-	}
-}
-
+// responsiveGutter/contentWidth/padAnsiLine are DataTug's general
+// terminal-layout helpers, used well beyond the grid (message cards, the
+// workspace pane, the status bar); tui/grid has its own copies (including
+// borderLine, DataTug-side dead code now that the grid's own card border
+// render fully moved there) for the grid's own card border, since a
+// shared-code seam here would leak DataTug's rendering conventions into the
+// generic package.
 func responsiveGutter(width int) int {
 	if width <= 2 {
 		return 0
@@ -395,130 +385,6 @@ func padAnsiLine(line string, width int) string {
 	}
 	line = ansi.Truncate(line, width, "…")
 	return line + strings.Repeat(" ", max(0, width-lipgloss.Width(line)))
-}
-
-func borderLine(left, text, right string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	if width < 3 {
-		return strings.Repeat("─", max(1, width))
-	}
-	available := width - 2
-	if available < 3 {
-		return left + strings.Repeat("─", available) + right
-	}
-	label := " " + ansi.Truncate(text, available-2, "…") + " "
-	if lipgloss.Width(label) > available {
-		return left + strings.Repeat("─", available) + right
-	}
-	fill := max(0, available-lipgloss.Width(label))
-	return left + label + strings.Repeat("─", fill) + right
-}
-
-func (g *gridState) visibleColumnRange() (int, int) {
-	offset, last := g.visibleColumnWindow()
-	if last < offset {
-		return 0, 0
-	}
-	return offset + 1, last + 1
-}
-
-func (g *gridState) footer() string {
-	if len(g.model.Rows) == 0 {
-		return "No rows returned."
-	}
-	start, end := g.table.VisibleIndices()
-	if end < start {
-		return "No rows returned."
-	}
-	firstColumn, lastColumn := g.visibleColumnRange()
-	footer := fmt.Sprintf("Rows %d–%d of %d returned", start+1, end+1, len(g.model.Rows))
-	if firstColumn > 0 {
-		footer += fmt.Sprintf(" • Cols %d–%d of %d", firstColumn, lastColumn, len(g.model.Columns))
-	}
-	if g.model.sortColumn >= 0 && g.model.sortColumn < len(g.model.Columns) {
-		direction := "↑"
-		if g.model.sortDesc {
-			direction = "↓"
-		}
-		footer += " • sort " + g.model.Columns[g.model.sortColumn].Name + " " + direction
-	}
-	return footer
-}
-
-func (g *gridState) scrollbarLine(line, trackHeight int) string {
-	pageStart, pageEnd := g.table.VisibleIndices()
-	visibleRows := max(0, pageEnd-pageStart+1)
-	if trackHeight == 0 || visibleRows == 0 || len(g.model.Rows) <= visibleRows {
-		if g.focused {
-			return selectedOutlineStyle.Render("│")
-		}
-		return inactiveBorderStyle.Render("│")
-	}
-	thumbSize := max(1, trackHeight*visibleRows/len(g.model.Rows))
-	maxStart := max(0, trackHeight-thumbSize)
-	start := g.rowIndex * maxStart / max(1, len(g.model.Rows)-1)
-	if line >= start && line < start+thumbSize {
-		if g.focused {
-			return lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render("▐")
-		}
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render("▐")
-	}
-	if g.focused {
-		return selectedOutlineStyle.Render("│")
-	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("237")).Render("│")
-}
-
-func (g *gridState) view() string { return g.viewWithTitle(g.title) }
-
-func (g *gridState) viewWithTitle(label string) string {
-	cardWidth := max(1, g.width)
-	innerWidth := g.tableWidth()
-	tableView := g.table.View()
-	rawLines := strings.Split(tableView, "\n")
-	// bubble-table always emits a header/data separator with its outer border
-	// disabled. The header surface already distinguishes the two regions.
-	if len(rawLines) > 1 {
-		rawLines = append(rawLines[:1], rawLines[2:]...)
-	}
-	if tableView == "" {
-		rawLines = []string{""}
-	}
-	lines := make([]string, 0, len(rawLines)+2)
-	title := label
-	if g.focused {
-		title = activeTitleStyle.Render("● ") + title
-	} else {
-		title = inactiveTitleStyle.Render("○ ") + title
-	}
-	topBorder := borderLine("╭", title, "╮", cardWidth)
-	if g.focused {
-		topBorder = selectedOutlineStyle.Render(topBorder)
-	} else {
-		topBorder = inactiveBorderStyle.Render(topBorder)
-	}
-	lines = append(lines, padAnsiLine(topBorder, cardWidth))
-	for lineIndex, line := range rawLines {
-		// The scrollbar occupies the right card edge, including the header line.
-		scrollbar := g.scrollbarLine(lineIndex, len(rawLines))
-		border := inactiveBorderStyle
-		if g.focused {
-			border = activeBorderStyle
-		}
-		lines = append(lines, padAnsiLine(border.Render("│")+padAnsiLine(line, innerWidth)+scrollbar, cardWidth))
-	}
-	footer := g.footer()
-	footerLabel := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("252")).Render(footer)
-	bottomBorder := borderLine("╰", footerLabel, "╯", cardWidth)
-	if g.focused {
-		bottomBorder = selectedOutlineStyle.Render(bottomBorder)
-	} else {
-		bottomBorder = inactiveBorderStyle.Render(bottomBorder)
-	}
-	lines = append(lines, padAnsiLine(bottomBorder, cardWidth))
-	return strings.Join(lines, "\n")
 }
 
 type turnMessage struct {
@@ -561,7 +427,7 @@ type UI struct {
 	workspaceTab         int
 	inspectorTab         int
 	inspectorOffset      int
-	tableStyle           tableStyle
+	tableStyle           grid.Style
 	styleNotice          string
 	styleNoticeID        int
 	explorerIndex        int
@@ -1079,7 +945,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if u.joinFocused {
 				u.joinFocused = false
 				if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
-					u.entries[u.activeGrid].grid.setFocused(true)
+					u.entries[u.activeGrid].grid.SetFocused(true)
 				}
 				u.rebuildHistory(false)
 				return u, nil
@@ -1092,7 +958,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if u.bookmarkGridFocused {
 				u.bookmarkGridFocused = false
 				if u.bookmarkGrid != nil {
-					u.bookmarkGrid.setFocused(false)
+					u.bookmarkGrid.SetFocused(false)
 				}
 				return u, nil
 			}
@@ -1220,48 +1086,59 @@ func (u *UI) resizeChatPane() {
 	u.history.SetWidth(innerWidth)
 	u.history.SetHeight(u.historyHeight())
 	u.rebuildHistory(false)
-	for _, grid := range u.dockGrids {
-		grid.width = u.workspacePaneWidth()
-		grid.rebuild()
+	for _, dockGrid := range u.dockGrids {
+		dockGrid.SetWidth(u.workspacePaneWidth())
 	}
 }
 
-func (u *UI) setTableStyle(style tableStyle) {
-	if style >= tableStyleCount {
-		style = tableStyleLines
+func (u *UI) setTableStyle(style grid.Style) {
+	if style.Name == "" {
+		style = grid.StyleLines
 	}
 	u.tableStyle = style
 	for i := range u.entries {
-		if grid := u.entries[i].grid; grid != nil {
-			grid.tableStyle = style
-			grid.rebuild()
+		if entryGrid := u.entries[i].grid; entryGrid != nil {
+			entryGrid.SetStyle(style)
 		}
 	}
-	for _, grid := range u.dockGrids {
-		grid.tableStyle = style
-		grid.rebuild()
+	for _, dockGrid := range u.dockGrids {
+		dockGrid.SetStyle(style)
 	}
 	if u.bookmarkGrid != nil {
-		u.bookmarkGrid.tableStyle = style
-		u.bookmarkGrid.rebuild()
+		u.bookmarkGrid.SetStyle(style)
 	}
 	u.rebuildHistory(false)
 }
 
+func nextTableStyle(current grid.Style) grid.Style {
+	if current.Name == "" {
+		// u.tableStyle is zero-valued until the first explicit style change
+		// (or a saved-session restore); treat that as "currently Lines" so
+		// cycling starts at Soft instead of looping back to Lines itself.
+		current = grid.StyleLines
+	}
+	for i, style := range grid.Styles {
+		if style.Name == current.Name {
+			return grid.Styles[(i+1)%len(grid.Styles)]
+		}
+	}
+	return grid.Styles[0]
+}
+
 func (u *UI) cycleTableStyle() tea.Cmd {
-	next := (u.tableStyle + 1) % tableStyleCount
+	next := nextTableStyle(u.tableStyle)
 	if u.sessions != nil {
-		if err := u.sessions.SetTableStyle(u.ctx, next.name()); err != nil {
+		if err := u.sessions.SetTableStyle(u.ctx, next.Name); err != nil {
 			u.styleNotice = "Couldn't save table style."
 			u.styleNoticeID++
 			id := u.styleNoticeID
 			return tea.Tick(3*time.Second, func(time.Time) tea.Msg { return tableStyleNoticeExpired{id: id} })
 		}
 	}
-	if u.tableStyle != next {
+	if u.tableStyle.Name != next.Name {
 		u.setTableStyle(next)
 	}
-	u.styleNotice = "Table style: " + next.name()
+	u.styleNotice = "Table style: " + next.Name
 	u.styleNoticeID++
 	id := u.styleNoticeID
 	return tea.Tick(3*time.Second, func(time.Time) tea.Msg { return tableStyleNoticeExpired{id: id} })
@@ -1287,7 +1164,7 @@ func (u *UI) loadSession(session ChatSession) {
 	u.workspaceReturnGrid, u.workspaceReturnMsg = -1, -1
 	if u.sessions != nil {
 		if name, err := u.sessions.TableStyle(u.ctx); err == nil {
-			u.setTableStyle(parseTableStyle(name))
+			u.setTableStyle(grid.ParseStyle(name))
 		}
 	}
 	u.workspaceTab = workspaceTabIndex(session.Workspace.ActiveTab)
@@ -1308,23 +1185,24 @@ func (u *UI) loadSession(session ChatSession) {
 			}
 			entry := historyEntry{grid: newGridState(NewGridModel(record.Result), record.Title, u.chatPaneWidth(), record.Result.Statistics), recordSetID: record.ID}
 			if previous, ok := session.RecordSets[record.RefreshParentID]; ok {
-				entry.grid.versionBadge = "unchanged"
+				badge := "unchanged"
 				if !reflect.DeepEqual(record.Result.Columns, previous.Result.Columns) || !reflect.DeepEqual(record.Result.Rows, previous.Result.Rows) {
-					entry.grid.versionBadge = "changed"
+					badge = "changed"
 				}
+				entry.grid.setVersionBadge(badge)
 			}
 			if response, ok := session.HTTPResponses[record.HTTPResponseID]; ok {
-				entry.grid.rawBody = response.Body
-				entry.grid.httpResponse = &response
+				entry.grid.attachHTTPResponse(response.Body, &response)
 				if previous, ok := session.HTTPResponses[response.RefreshParentID]; ok {
-					entry.grid.versionBadge = "unchanged"
+					badge := "unchanged"
 					if httpResponseChanged(response, previous) {
-						entry.grid.versionBadge = "changed"
+						badge = "changed"
 					}
+					entry.grid.setVersionBadge(badge)
 				}
 			}
-			entry.grid.tableStyle = u.tableStyle
-			entry.grid.rebuild()
+			entry.grid.SetStyle(u.tableStyle)
+			entry.grid.SetKeyHandler(u.handleMainGridKey)
 			if u.sessions != nil {
 				if candidates, err := u.sessions.JoinCandidates(u.ctx, record.ID); err == nil {
 					entry.joinCandidates = candidates
@@ -1381,14 +1259,16 @@ func (u *UI) refreshSession(session ChatSession) {
 		return
 	}
 	gridID := ""
-	rowIndex, sourceRow, columnIndex := 0, -1, 0
+	sourceRow := ""
+	columnIndex := 0
 	sortColumn, sortDesc, secondaryFocus := -1, false, false
-	var gridView recordsetView
+	var gridView grid.View
 	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
 		gridID = u.entries[u.activeGrid].recordSetID
-		grid := u.entries[u.activeGrid].grid
-		rowIndex, sourceRow, columnIndex, gridView = grid.rowIndex, grid.selectedSourceRow(), grid.selectedColumn, grid.activeView
-		sortColumn, sortDesc, secondaryFocus = grid.model.sortColumn, grid.model.sortDesc, grid.secondaryFocus
+		activeGrid := u.entries[u.activeGrid].grid
+		sourceRow, columnIndex, gridView = activeGrid.sourceRowKey(), activeGrid.SelectedColumn(), activeGrid.CurrentView()
+		sortColumn, sortDesc = activeGrid.SortState()
+		secondaryFocus = activeGrid.SecondaryFocus()
 	}
 	gridFocused, joinFocused := u.gridFocused, u.joinFocused
 	messageFocused, selectedMessage := u.messageFocused, u.selectedMessage
@@ -1398,20 +1278,17 @@ func (u *UI) refreshSession(session ChatSession) {
 	if gridFocused && gridID != "" {
 		for index := range u.entries {
 			if u.entries[index].recordSetID == gridID && u.focusGrid(index) {
-				grid := u.entries[index].grid
-				if sortColumn >= 0 && sortColumn < len(grid.model.Columns) {
-					grid.model.Sort(sortColumn)
-					if sortDesc {
-						grid.model.Sort(sortColumn)
+				restoredGrid := u.entries[index].grid
+				if sortColumn >= 0 && sortColumn < len(restoredGrid.Columns()) {
+					restoredGrid.Sort(sortColumn)
+					if c, d := restoredGrid.SortState(); d != sortDesc || c != sortColumn {
+						restoredGrid.Sort(sortColumn)
 					}
-					grid.rebuild()
 				}
-				grid.rowIndex = min(rowIndex, max(0, len(grid.model.Rows)-1))
-				grid.restoreSourceRow(sourceRow)
-				grid.selectedColumn = min(columnIndex, max(0, len(grid.model.Columns)-1))
-				grid.setRecordsetView(gridView, u.chatPaneWidth())
-				grid.setSecondaryFocus(secondaryFocus)
-				grid.table.SetCursor(grid.rowIndex)
+				restoredGrid.restoreByKey(sourceRow)
+				restoredGrid.SelectColumn(columnIndex)
+				restoredGrid.SetView(gridView)
+				restoredGrid.SetSecondaryFocus(secondaryFocus)
 				u.joinFocused = joinFocused && len(u.entries[index].joinCandidates) > 0
 				break
 			}
@@ -1559,6 +1436,12 @@ func (u *UI) runSessionCommand(input string) tea.Cmd {
 	return commandToRun
 }
 
+// updateGrid routes a key press to the focused transcript grid. Join-mode
+// (triggered by "j" — a DataTug concept layered above any one grid, letting
+// the user pick which FK-inferred JOIN to apply to a RecordSet) is handled
+// here, outside the grid entirely; everything else delegates to
+// grid.Model.Update, whose registered handleMainGridKey hook (see
+// newGridState) owns DataTug's own actions (q/enter/space/c/r/a/d/b/s/B/e).
 func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	if u.activeGrid < 0 || u.activeGrid >= len(u.entries) || u.entries[u.activeGrid].grid == nil {
 		u.focusInput()
@@ -1570,7 +1453,7 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		groups := entry.joinGroups()
 		if len(groups) == 0 {
 			u.joinFocused = false
-			g.setFocused(true)
+			g.SetFocused(true)
 			return nil, true
 		}
 		switch msg.String() {
@@ -1608,74 +1491,47 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	}
-	switch msg.String() {
-	case "j":
+	if msg.String() == "j" {
 		if len(u.entries[u.activeGrid].joinCandidates) > 0 {
 			u.joinFocused = true
-			g.setFocused(false)
+			g.SetFocused(false)
 		}
 		return nil, true
-	case "1":
-		g.setRecordsetView(recordsetTable, u.chatPaneWidth())
-		return nil, true
-	case "2":
-		g.setRecordsetView(recordsetCharts, u.chatPaneWidth())
-		return nil, true
-	case "3":
-		g.setRecordsetView(recordsetCurrentRow, u.chatPaneWidth())
-		return nil, true
+	}
+	_, cmd := g.Update(msg)
+	return cmd, true
+}
+
+// handleMainGridKey is the grid.KeyHandler for every transcript-history
+// grid (registered by newGridState): DataTug's own actions, with no
+// generic-grid meaning, that used to be a hardcoded part of updateGrid.
+// It always operates on u.activeGrid/u.entries[u.activeGrid], since it is
+// only ever invoked while that grid's own Update is running.
+func (u *UI) handleMainGridKey(m *grid.Model, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if u.activeGrid < 0 || u.activeGrid >= len(u.entries) {
+		return nil, false
+	}
+	entry := &u.entries[u.activeGrid]
+	g := entry.grid
+	switch msg.String() {
 	case "4":
-		if g.rawBody != nil {
-			g.setRecordsetView(recordsetRaw, u.chatPaneWidth())
+		if g.rawBody == nil {
+			return nil, true // reserved; not switchable until an HTTP response is attached
 		}
-		return nil, true
+		return nil, false
 	case "5":
-		if g.httpResponse != nil {
-			g.setRecordsetView(recordsetHeaders, u.chatPaneWidth())
+		if g.httpResponse == nil {
+			return nil, true
 		}
-		return nil, true
+		return nil, false
 	case "q":
 		u.openSaveQueryDialog()
 		return nil, true
 	case "tab":
-		if g.activeView != recordsetTable && g.recordsetLayout(u.chatPaneWidth()).split {
-			g.setSecondaryFocus(!g.secondaryFocus)
+		if m.ToggleSecondaryFocusIfSplit() {
 			return nil, true
 		}
 		u.focusInput()
-		return nil, true
-	}
-	if g.activeView != recordsetTable && (g.secondaryFocus || !g.recordsetLayout(u.chatPaneWidth()).split) {
-		return g.updateSecondary(msg)
-	}
-	switch msg.String() {
-	case "left", "h":
-		if g.selectedColumn > 0 {
-			g.selectedColumn--
-			g.rebuild()
-			g.table.Focus()
-		}
-		return nil, true
-	case "right", "l":
-		if g.selectedColumn+1 < len(g.model.Columns) {
-			g.selectedColumn++
-			g.rebuild()
-			g.table.Focus()
-		}
-		return nil, true
-	case "up", "k":
-		if g.rowIndex > 0 {
-			g.rowIndex--
-			g.table.SetCursor(g.rowIndex)
-			g.inspectorRow = -1
-		}
-		return nil, true
-	case "down":
-		if g.rowIndex+1 < len(g.model.Rows) {
-			g.rowIndex++
-			g.table.SetCursor(g.rowIndex)
-			g.inspectorRow = -1
-		}
 		return nil, true
 	case "enter":
 		return u.openCellDetail(), true
@@ -1689,11 +1545,11 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		u.selectFromGrid("range")
 		return nil, true
 	case "a":
-		ref := ContextReference{Kind: "recordset", ObjectID: u.entries[u.activeGrid].recordSetID, Title: g.title}
+		ref := ContextReference{Kind: "recordset", ObjectID: entry.recordSetID, Title: g.Title()}
 		u.toggleAttachment(ref)
 		return nil, true
 	case "d":
-		ref := ContextReference{Kind: "recordset", ObjectID: u.entries[u.activeGrid].recordSetID, Title: g.title}
+		ref := ContextReference{Kind: "recordset", ObjectID: entry.recordSetID, Title: g.Title()}
 		if selection, ok := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]; ok {
 			if view := u.snapshot.Workspace.Views[selection.ViewID]; view.RecordSetID == ref.ObjectID {
 				ref = ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}
@@ -1702,7 +1558,7 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		u.performWorkspaceAction(WorkspaceAction{Kind: "dock", Reference: ref})
 		return nil, true
 	case "b":
-		ref := ContextReference{Kind: "recordset", ObjectID: u.entries[u.activeGrid].recordSetID, Title: g.title}
+		ref := ContextReference{Kind: "recordset", ObjectID: entry.recordSetID, Title: g.Title()}
 		if selection, ok := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]; ok {
 			if view := u.snapshot.Workspace.Views[selection.ViewID]; view.RecordSetID == ref.ObjectID {
 				ref = ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}
@@ -1711,17 +1567,16 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		u.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_create", Reference: ref})
 		return nil, true
 	case "s":
-		sourceRow := g.selectedSourceRow()
-		g.model.Sort(g.selectedColumn)
-		g.restoreSourceRow(sourceRow)
-		g.rebuild()
-		if recordSetID := u.entries[u.activeGrid].recordSetID; recordSetID != "" {
-			u.syncRecordSetSort(recordSetID, g.model)
+		sourceRow := g.sourceRowKey()
+		m.Sort(m.SelectedColumn())
+		g.restoreByKey(sourceRow)
+		if recordSetID := entry.recordSetID; recordSetID != "" {
+			column, desc := m.SortState()
+			u.syncRecordSetSort(recordSetID, column, desc)
 		}
-		g.table.Focus()
 		return nil, true
 	case "B":
-		id := u.entries[u.activeGrid].recordSetID
+		id := entry.recordSetID
 		if id == "" {
 			return nil, true
 		}
@@ -1738,13 +1593,7 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		u.openExportDialog()
 		return nil, true
 	}
-	cmd, _ := g.table.Update(msg)
-	previousSourceRow := g.selectedSourceRow()
-	g.rowIndex = g.table.Cursor()
-	if previousSourceRow != g.selectedSourceRow() {
-		g.inspectorRow = -1
-	}
-	return cmd, true
+	return nil, false
 }
 
 func (u *UI) focusLatestGrid() bool {
@@ -1812,7 +1661,7 @@ func (u *UI) focusStop(index int) bool {
 
 func (u *UI) clearGridHighlight() {
 	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
-		u.entries[u.activeGrid].grid.setFocused(false)
+		u.entries[u.activeGrid].grid.SetFocused(false)
 	}
 }
 
@@ -1829,7 +1678,7 @@ func (u *UI) focusGrid(index int) bool {
 	u.joinFocused = false
 	u.workspaceFocused = false
 	u.input.Blur()
-	u.entries[index].grid.setFocused(true)
+	u.entries[index].grid.SetFocused(true)
 	return true
 }
 
@@ -1919,10 +1768,10 @@ func (u *UI) appendTurn(turn Turn) {
 			u.entries = append(u.entries, historyEntry{role: "DataTug", text: publicQueryError(query.Err, query.Parameters)})
 			continue
 		}
-		grid := NewGridModel(query.Result)
-		styled := newGridState(grid, query.Title, u.chatPaneWidth(), query.Result.Statistics)
-		styled.tableStyle = u.tableStyle
-		styled.rebuild()
+		resultModel := NewGridModel(query.Result)
+		styled := newGridState(resultModel, query.Title, u.chatPaneWidth(), query.Result.Statistics)
+		styled.SetStyle(u.tableStyle)
+		styled.SetKeyHandler(u.handleMainGridKey)
 		u.entries = append(u.entries, historyEntry{grid: styled, recordSetID: query.RecordSetID})
 		if limitationText := formatLimitations(query.Result.Limitations); limitationText != "" {
 			u.entries = append(u.entries, historyEntry{role: "Access", text: limitationText})
@@ -1961,7 +1810,7 @@ func (u *UI) rebuildHistory(scrollToBottom bool) {
 			if u.gridFocused && entryIndex == u.activeGrid {
 				activeBlock = len(blocks)
 			}
-			block := entry.grid.recordsetView(innerWidth)
+			block := entry.grid.View(innerWidth, entry.grid.Focused())
 			if len(entry.joinCandidates) > 0 {
 				block += "\n" + joinAreaView(&entry, u.joinFocused && u.activeGrid == entryIndex, innerWidth)
 			}
@@ -2301,11 +2150,11 @@ func (u *UI) statusLines() []string {
 			segments = append(segments, fmt.Sprintf("B bucket:%d", count))
 		}
 		if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
-			grid := u.entries[u.activeGrid].grid
-			switch grid.activeView {
-			case recordsetCharts:
+			activeGrid := u.entries[u.activeGrid].grid
+			switch activeGrid.CurrentView() {
+			case gridViewCharts:
 				segments = append(segments, "↑↓ chart candidates")
-			case recordsetCurrentRow:
+			case gridViewCurrentRow:
 				segments = append(segments, "↑↓ inspector")
 			default:
 				segments = append(segments, "↑↓ rows", "←→ columns")
@@ -2346,7 +2195,7 @@ func (u *UI) statusLines() []string {
 	if u.detail != nil {
 		segments = []string{"FOCUS Detail", "↑↓ scroll", "Y copy cell", "Esc close"}
 	} else if u.gridFocused && u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
-		segments = append([]string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.title)}, segments...)
+		segments = append([]string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.Title())}, segments...)
 	} else if u.workspaceFocused {
 		focus := "FOCUS Workspace · " + workspaceTabs[u.workspaceTab]
 		if u.workspaceTab == 1 {
@@ -2365,7 +2214,7 @@ func (u *UI) statusLines() []string {
 	if maxWidth < 100 {
 		compact := []string{"FOCUS Chat", "model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "Enter send", mouseHint, "Ctrl+C quit"}
 		if u.gridFocused && u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
-			compact = []string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.title), "↑↓ rows", "←→ columns", "Enter details", "e export", "q save", "Esc input"}
+			compact = []string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.Title()), "↑↓ rows", "←→ columns", "Enter details", "e export", "q save", "Esc input"}
 			if count := len(u.snapshot.Workspace.ExportBucket); count > 0 {
 				compact = append(compact, fmt.Sprintf("B bucket:%d", count))
 			}

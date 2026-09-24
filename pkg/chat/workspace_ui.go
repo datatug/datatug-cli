@@ -7,6 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/strongo/aichat/tui/grid"
+
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -192,86 +194,19 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 		return
 	}
 	if u.bookmarkGridFocused && u.workspaceTab == 3 {
-		grid := u.ensureBookmarkGrid()
-		if grid == nil {
+		g := u.ensureBookmarkGrid()
+		if g == nil {
 			u.bookmarkGridFocused = false
 			return
 		}
-		switch msg.String() {
-		case "tab":
-			u.bookmarkGridFocused = false
-			grid.setFocused(false)
-		case "up", "k":
-			if len(grid.model.Rows) > 0 {
-				grid.rowIndex = max(0, grid.rowIndex-1)
-				grid.table.SetCursor(grid.rowIndex)
-			}
-		case "down", "j":
-			if len(grid.model.Rows) > 0 {
-				grid.rowIndex = min(len(grid.model.Rows)-1, grid.rowIndex+1)
-				grid.table.SetCursor(grid.rowIndex)
-			}
-		case "left", "h":
-			grid.selectedColumn = max(0, grid.selectedColumn-1)
-			grid.rebuild()
-		case "right", "l":
-			grid.selectedColumn = min(len(grid.model.Columns)-1, grid.selectedColumn+1)
-			grid.rebuild()
-		case "a":
-			u.toggleAttachment(u.selectedBookmarkReference())
-		case "d":
-			u.performWorkspaceAction(WorkspaceAction{Kind: "dock", Reference: u.selectedBookmarkReference()})
-		case "s":
-			grid.model.Sort(grid.selectedColumn)
-			grid.rebuild()
-		}
+		g.Update(msg) // handleBookmarkGridKey owns tab/a/d/s; navigation is grid.Model's own default
 		return
 	}
 	if u.dockGridFocused && u.workspaceTab == 2 {
 		if u.dockIndex >= 0 && u.dockIndex < len(u.snapshot.Workspace.Docks) {
 			dock := u.snapshot.Workspace.Docks[u.dockIndex]
-			if grid := u.dockGrids[dock.ID]; grid != nil {
-				switch msg.String() {
-				case "tab":
-					u.dockGridFocused = false
-					grid.setFocused(false)
-				case "enter", "space":
-					u.selectFromDockGrid("row")
-				case "c":
-					u.selectFromDockGrid("cell")
-				case "r":
-					u.selectFromDockGrid("range")
-				case "a":
-					u.toggleAttachment(dock.Reference)
-				case "up", "k":
-					grid.rowIndex = max(0, grid.rowIndex-1)
-					grid.table.SetCursor(grid.rowIndex)
-				case "down", "j":
-					grid.rowIndex = min(len(grid.model.Rows)-1, grid.rowIndex+1)
-					grid.table.SetCursor(grid.rowIndex)
-				case "left", "h":
-					grid.selectedColumn = max(0, grid.selectedColumn-1)
-					grid.rebuild()
-				case "right", "l":
-					grid.selectedColumn = min(len(grid.model.Columns)-1, grid.selectedColumn+1)
-					grid.rebuild()
-				case "s":
-					data, ok := gridDataForReference(u.snapshot, dock.Reference)
-					if !ok || grid.selectedColumn < 0 || grid.selectedColumn >= len(grid.model.Columns) {
-						break
-					}
-					if data.ViewID != "" {
-						descending := grid.model.sortColumn == grid.selectedColumn && !grid.model.sortDesc
-						u.performWorkspaceAction(WorkspaceAction{Kind: "sort_view", ViewID: data.ViewID, OrderBy: grid.model.Columns[grid.selectedColumn].Name, Descending: descending})
-						// Rebuild after the action so a failed sort never leaves an empty dock.
-						u.dockGrids = map[string]*gridState{}
-						u.rebuildDockGrids()
-					} else {
-						grid.model.Sort(grid.selectedColumn)
-						grid.rebuild()
-						u.syncRecordSetSort(data.RecordSetID, grid.model)
-					}
-				}
+			if g := u.dockGrids[dock.ID]; g != nil {
+				g.Update(msg) // handleDockGridKey owns tab/enter/space/c/r/a/s; navigation is grid.Model's own default
 			}
 		}
 		return
@@ -328,8 +263,8 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 			u.dockGridFocused = true
 		} else if u.workspaceTab == 3 && len(u.bookmarkItems) > 0 {
 			u.bookmarkGridFocused = true
-			if grid := u.ensureBookmarkGrid(); grid != nil {
-				grid.setFocused(true)
+			if bookmarkGrid := u.ensureBookmarkGrid(); bookmarkGrid != nil {
+				bookmarkGrid.SetFocused(true)
 			}
 		}
 	case "space", "a":
@@ -461,10 +396,10 @@ func (u *UI) ensureBookmarkGrid() *gridState {
 	}
 	result, _ := bookmarkResult(bookmark)
 	u.bookmarkGrid = newGridState(NewGridModel(result), bookmark.Title, u.workspacePaneWidth())
-	u.bookmarkGrid.tableStyle = u.tableStyle
-	u.bookmarkGrid.rebuild()
+	u.bookmarkGrid.SetStyle(u.tableStyle)
+	u.bookmarkGrid.SetKeyHandler(u.handleBookmarkGridKey)
 	u.bookmarkGridID = bookmark.ID
-	u.bookmarkGrid.setFocused(u.bookmarkGridFocused)
+	u.bookmarkGrid.SetFocused(u.bookmarkGridFocused)
 	return u.bookmarkGrid
 }
 
@@ -495,48 +430,53 @@ func (u *UI) selectFromDockGrid(mode string) {
 		return
 	}
 	dock := u.snapshot.Workspace.Docks[u.dockIndex]
-	grid := u.dockGrids[dock.ID]
+	g := u.dockGrids[dock.ID]
 	data, ok := gridDataForReference(u.snapshot, dock.Reference)
-	if !ok || grid == nil {
+	if !ok || g == nil {
 		return
 	}
-	u.selectFromGridState(grid, data.RecordSetID, data.ViewID, mode)
+	u.selectFromGridState(g, data.RecordSetID, data.ViewID, mode)
 	if mode != "range" || u.rangeAnchor < 0 {
 		u.dockGridFocused = false
 	}
 }
 
-func (u *UI) selectFromGridState(grid *gridState, recordSetID, viewID, mode string) {
-	if grid.rowIndex < 0 || grid.rowIndex >= len(grid.model.SourceRows) {
+func (u *UI) selectFromGridState(g *gridState, recordSetID, viewID, mode string) {
+	displayRow := g.CurrentIndex()
+	sourceRow := g.sourceIndexAt(displayRow)
+	if sourceRow < 0 {
 		return
 	}
 	record, ok := u.snapshot.RecordSets[recordSetID]
-	if !ok || grid.selectedColumn < 0 || grid.selectedColumn >= len(grid.model.Columns) {
+	selectedColumn := g.SelectedColumn()
+	if !ok || selectedColumn < 0 || selectedColumn >= len(g.Columns()) {
 		return
 	}
-	rows := []int{grid.model.SourceRows[grid.rowIndex]}
-	columns := make([]string, len(grid.model.Columns))
-	for i, column := range grid.model.Columns {
+	rows := []int{sourceRow}
+	columns := make([]string, len(g.Columns()))
+	for i, column := range g.Columns() {
 		columns[i] = column.Name
 	}
 	var ranges []CellRange
 	if mode == "cell" {
-		columns = []string{grid.model.Columns[grid.selectedColumn].Name}
+		columns = []string{g.Columns()[selectedColumn].Name}
 		columnIndex := columnIndexOf(record.Result.Columns, columns[0])
 		ranges = []CellRange{{FirstRow: rows[0], LastRow: rows[0], FirstCol: columnIndex, LastCol: columnIndex}}
 	}
 	if mode == "range" {
 		if u.rangeAnchor < 0 {
-			u.rangeAnchor = grid.rowIndex
-			u.rangeColumn = grid.selectedColumn
+			u.rangeAnchor = displayRow
+			u.rangeColumn = selectedColumn
 			return
 		}
-		first, last := min(u.rangeAnchor, grid.rowIndex), max(u.rangeAnchor, grid.rowIndex)
+		first, last := min(u.rangeAnchor, displayRow), max(u.rangeAnchor, displayRow)
 		rows = make([]int, 0, last-first+1)
 		for i := first; i <= last; i++ {
-			rows = append(rows, grid.model.SourceRows[i])
+			if source := g.sourceIndexAt(i); source >= 0 {
+				rows = append(rows, source)
+			}
 		}
-		firstCol, lastCol := min(u.rangeColumn, grid.selectedColumn), max(u.rangeColumn, grid.selectedColumn)
+		firstCol, lastCol := min(u.rangeColumn, selectedColumn), max(u.rangeColumn, selectedColumn)
 		columns = columns[firstCol : lastCol+1]
 		// Display order can differ from immutable RecordSet order after sorting.
 		// Keep both row and column ranges in immutable RecordSet coordinates.
@@ -548,7 +488,7 @@ func (u *UI) selectFromGridState(grid *gridState, recordSetID, viewID, mode stri
 		}
 		u.rangeAnchor = -1
 	}
-	title := fmt.Sprintf("%s · %d selected", grid.title, len(rows))
+	title := fmt.Sprintf("%s · %d selected", g.Title(), len(rows))
 	u.performWorkspaceAction(WorkspaceAction{Kind: "select", RecordSetID: recordSetID, ViewID: viewID, Rows: rows, Columns: columns, Ranges: ranges, Title: title})
 }
 
@@ -714,11 +654,10 @@ func (u *UI) bookmarksView(width, height int) string {
 		lines = append(lines, "DTQL: "+ansi.Truncate(doc, max(1, width-7), "…"))
 	}
 	lines = append(lines, "", "Enter grid · a attach · d dock · r rename · t add tag · T remove · / search · f tags · x delete")
-	if grid := u.ensureBookmarkGrid(); grid != nil {
-		grid.width = width
-		grid.rebuild()
-		grid.setFocused(u.bookmarkGridFocused)
-		lines = append(lines, grid.view())
+	if bookmarkGrid := u.ensureBookmarkGrid(); bookmarkGrid != nil {
+		bookmarkGrid.SetWidth(width)
+		bookmarkGrid.SetFocused(u.bookmarkGridFocused)
+		lines = append(lines, bookmarkGrid.view())
 	}
 	return strings.Join(lines, "\n")
 }
@@ -942,11 +881,10 @@ func (u *UI) dockedView(width int) string {
 		return strings.Join(lines, "\n")
 	}
 	dock := u.snapshot.Workspace.Docks[u.dockIndex]
-	if grid := u.dockGrids[dock.ID]; grid != nil {
-		grid.width = width
-		grid.rebuild()
-		grid.setFocused(u.dockGridFocused)
-		lines = append(lines, "", grid.view())
+	if dockGrid := u.dockGrids[dock.ID]; dockGrid != nil {
+		dockGrid.SetWidth(width)
+		dockGrid.SetFocused(u.dockGridFocused)
+		lines = append(lines, "", dockGrid.view())
 	}
 	return strings.Join(lines, "\n")
 }
@@ -966,14 +904,20 @@ func (u *UI) rebuildDockGrids() {
 			continue
 		}
 		model := NewGridModel(data.Result)
-		model.SourceRows = data.SourceRows
+		// data.Result's rows already arrive in the persisted view's sorted
+		// order when data.ViewID != ""; grid.WithInitialSort seeds the
+		// grid's own sort-state bookkeeping (footer arrow, and critically
+		// the toggle direction handleDockGridKey's "s" case computes for
+		// the NEXT press) to match, without re-sorting rows it already got
+		// pre-sorted.
+		var opts []grid.Option
 		if data.ViewID != "" {
 			view := u.snapshot.Workspace.Views[data.ViewID]
-			model.sortColumn, model.sortDesc = columnIndexOf(data.Result.Columns, view.OrderBy), view.Descending
+			opts = append(opts, grid.WithInitialSort(columnIndexOf(data.Result.Columns, view.OrderBy), view.Descending))
 		}
-		next[dock.ID] = newGridState(model, dock.Title, u.workspacePaneWidth())
-		next[dock.ID].tableStyle = u.tableStyle
-		next[dock.ID].rebuild()
+		next[dock.ID] = newProjectedGridState(model, dock.Title, u.workspacePaneWidth(), data.SourceRows, opts)
+		next[dock.ID].SetStyle(u.tableStyle)
+		next[dock.ID].SetKeyHandler(u.handleDockGridKey)
 	}
 	u.dockGrids = next
 	if u.dockIndex >= len(u.snapshot.Workspace.Docks) {
@@ -1057,20 +1001,109 @@ func gridDataForReference(session ChatSession, ref ContextReference) (referenceG
 	return referenceGridData{}, false
 }
 
-func (u *UI) syncRecordSetSort(recordSetID string, sorted GridModel) {
-	for i := range u.entries {
-		if u.entries[i].recordSetID != recordSetID || u.entries[i].grid == nil {
-			continue
+// handleBookmarkGridKey is the grid.KeyHandler for u.bookmarkGrid
+// (registered by ensureBookmarkGrid): DataTug's own workspace actions, with
+// no generic-grid meaning.
+func (u *UI) handleBookmarkGridKey(m *grid.Model, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if u.bookmarkGrid == nil {
+		return nil, false
+	}
+	switch msg.String() {
+	case "tab":
+		u.bookmarkGridFocused = false
+		u.bookmarkGrid.SetFocused(false)
+		return nil, true
+	case "a":
+		u.toggleAttachment(u.selectedBookmarkReference())
+		return nil, true
+	case "d":
+		u.performWorkspaceAction(WorkspaceAction{Kind: "dock", Reference: u.selectedBookmarkReference()})
+		return nil, true
+	case "s":
+		m.Sort(m.SelectedColumn())
+		return nil, true
+	}
+	return nil, false
+}
+
+// handleDockGridKey is the grid.KeyHandler for every dock's gridState
+// (registered by rebuildDockGrids): DataTug's own workspace actions. It
+// always operates on u.dockIndex/u.snapshot.Workspace.Docks[u.dockIndex],
+// since it is only ever invoked while that dock's own grid Update is
+// running.
+func (u *UI) handleDockGridKey(m *grid.Model, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if u.dockIndex < 0 || u.dockIndex >= len(u.snapshot.Workspace.Docks) {
+		return nil, false
+	}
+	dock := u.snapshot.Workspace.Docks[u.dockIndex]
+	if u.dockGrids[dock.ID] == nil {
+		return nil, false
+	}
+	switch msg.String() {
+	case "tab":
+		u.dockGridFocused = false
+		u.dockGrids[dock.ID].SetFocused(false)
+		return nil, true
+	case "enter", "space":
+		u.selectFromDockGrid("row")
+		return nil, true
+	case "c":
+		u.selectFromDockGrid("cell")
+		return nil, true
+	case "r":
+		u.selectFromDockGrid("range")
+		return nil, true
+	case "a":
+		u.toggleAttachment(dock.Reference)
+		return nil, true
+	case "s":
+		data, ok := gridDataForReference(u.snapshot, dock.Reference)
+		if !ok {
+			return nil, true
 		}
-		u.entries[i].grid.replaceModel(sorted)
+		if data.ViewID != "" {
+			column, desc := m.SortState()
+			descending := column == m.SelectedColumn() && !desc
+			u.performWorkspaceAction(WorkspaceAction{Kind: "sort_view", ViewID: data.ViewID, OrderBy: m.Columns()[m.SelectedColumn()].Name, Descending: descending})
+			// Rebuild after the action so a failed sort never leaves an empty dock.
+			u.dockGrids = map[string]*gridState{}
+			u.rebuildDockGrids()
+		} else {
+			m.Sort(m.SelectedColumn())
+			column, desc := m.SortState()
+			u.syncRecordSetSort(data.RecordSetID, column, desc)
+		}
+		return nil, true
+	}
+	return nil, false
+}
+
+// syncRecordSetSort applies the same (column, desc) sort to every other
+// gridState showing the same RecordSet (other transcript entries, dock
+// grids), so sorting one view of a RecordSet sorts all of them. Each grid's
+// own highlighted row survives the resort via its stable Row.Key.
+func (u *UI) syncRecordSetSort(recordSetID string, column int, desc bool) {
+	apply := func(g *gridState) {
+		if g == nil {
+			return
+		}
+		sourceRow := g.sourceRowKey()
+		g.Sort(column)
+		if c, d := g.SortState(); d != desc || c != column {
+			g.Sort(column)
+		}
+		g.restoreByKey(sourceRow)
+	}
+	for i := range u.entries {
+		if u.entries[i].recordSetID == recordSetID {
+			apply(u.entries[i].grid)
+		}
 	}
 	for _, dock := range u.snapshot.Workspace.Docks {
 		if dock.Reference.Kind != "recordset" || dock.Reference.ObjectID != recordSetID {
 			continue
 		}
-		if grid := u.dockGrids[dock.ID]; grid != nil {
-			grid.replaceModel(sorted)
-		}
+		apply(u.dockGrids[dock.ID])
 	}
 	u.rebuildHistory(false)
 }

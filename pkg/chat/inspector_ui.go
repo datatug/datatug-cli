@@ -54,24 +54,29 @@ func (u *UI) activeInspectorGrid() (*gridState, *historyEntry, *RecordSet) {
 
 func (u *UI) currentRowDetails(width int) []string {
 	g, _, record := u.activeInspectorGrid()
-	if g == nil || g.rowIndex < 0 || g.rowIndex >= len(g.model.Rows) {
+	rowIndex := -1
+	if g != nil {
+		rowIndex = g.CurrentIndex()
+	}
+	if g == nil || rowIndex < 0 || rowIndex >= len(g.Rows()) {
 		return []string{u.selectedDetails(width)}
 	}
-	lines := []string{fmt.Sprintf("Row %d of %d · %s", g.rowIndex+1, len(g.model.Rows), sanitizeTerminalText(g.title)), ""}
+	rawRow := g.rawRow(rowIndex)
+	lines := []string{fmt.Sprintf("Row %d of %d · %s", rowIndex+1, len(g.Rows()), sanitizeTerminalText(g.Title())), ""}
 	nameWidth, numberWidth := 0, 0
-	for i, column := range g.model.Columns {
+	for i, column := range g.Columns() {
 		nameWidth = max(nameWidth, ansi.StringWidth(column.Name))
-		if column.Numeric && i < len(g.model.Rows[g.rowIndex]) {
-			numberWidth = max(numberWidth, ansi.StringWidth(g.model.Rows[g.rowIndex][i]))
+		if column.Numeric {
+			numberWidth = max(numberWidth, ansi.StringWidth(g.Cell(rowIndex, i)))
 		}
 	}
 	nameWidth = min(nameWidth, max(8, width/3))
 	numberWidth = min(numberWidth, 20)
-	for i, column := range g.model.Columns {
-		value := "—"
-		if i < len(g.model.Rows[g.rowIndex]) {
-			value = g.model.Rows[g.rowIndex][i]
-			if value == "" && i < len(g.model.RawRows[g.rowIndex]) && g.model.RawRows[g.rowIndex][i] == nil {
+	for i, column := range g.Columns() {
+		value := g.Cell(rowIndex, i)
+		if value == "" {
+			value = "—"
+			if i < len(rawRow) && rawRow[i] == nil {
 				value = "NULL"
 			}
 		}
@@ -206,10 +211,10 @@ func (u *UI) columnMeta(record *RecordSet, name string) inspectorColumnMeta {
 
 func (u *UI) currentColumnDetails(width int) []string {
 	g, entry, record := u.activeInspectorGrid()
-	if g == nil || g.selectedColumn < 0 || g.selectedColumn >= len(g.model.Columns) {
+	if g == nil || g.SelectedColumn() < 0 || g.SelectedColumn() >= len(g.Columns()) {
 		return []string{"Focus a result grid to inspect its current column."}
 	}
-	column := g.model.Columns[g.selectedColumn]
+	column := g.Columns()[g.SelectedColumn()]
 	meta := u.columnMeta(record, column.Name)
 	lines := []string{"Column: " + column.Name}
 	if meta.qualified != "" {
@@ -260,8 +265,8 @@ func (u *UI) currentRecordsetDetails(width int) []string {
 	if g == nil {
 		return []string{"Focus a result grid to inspect its RecordSet."}
 	}
-	lines := []string{g.title, fmt.Sprintf("%d rows · %d columns", len(g.model.Rows), len(g.model.Columns)), ""}
-	for _, column := range g.model.Columns {
+	lines := []string{g.Title(), fmt.Sprintf("%d rows · %d columns", len(g.Rows()), len(g.Columns())), ""}
+	for _, column := range g.Columns() {
 		meta := u.columnMeta(record, column.Name)
 		qualified := meta.qualified
 		if qualified == "" {

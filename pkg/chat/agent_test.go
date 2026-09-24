@@ -518,6 +518,34 @@ func TestAIConversation_ReturnsPlainText(t *testing.T) {
 	}
 }
 
+// TestAIConversation_TextResponseFiltersThinkTags is the aichat-migration
+// equivalent of the pre-migration ADK-era TestADKConversation_TextResponseFiltersThoughts:
+// there genai.Part.Thought gave the ADK path a structured field to filter on;
+// here, a local/open model streamed over ai/openaicompat has no such field --
+// its hidden reasoning arrives inline in ordinary EventTextDelta text,
+// wrapped in a <think>...</think> block (see stripThinkTags in agent.go) --
+// so the turn's assembled text must still come out with the reasoning
+// removed and only the real answer left.
+func TestAIConversation_TextResponseFiltersThinkTags(t *testing.T) {
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{text: "<think>internal reasoning about the join</think>That request needs a join, which this PoC does not support."},
+	}}
+	conversation, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///fixture.db", "- Track")
+	if err != nil {
+		t.Fatalf("NewAIConversation: %v", err)
+	}
+	turn, err := conversation.Ask(context.Background(), "show tracks by artist")
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if turn.Text != "That request needs a join, which this PoC does not support." {
+		t.Fatalf("Text = %q", turn.Text)
+	}
+	if len(turn.Queries) != 0 {
+		t.Fatalf("Queries = %+v", turn.Queries)
+	}
+}
+
 func TestRunDTQLTool_EmptyAndExecutionErrorsStayStructured(t *testing.T) {
 	conversation := &AIConversation{}
 	executor := &fakeExecutor{err: errors.New("column foo does not exist")}

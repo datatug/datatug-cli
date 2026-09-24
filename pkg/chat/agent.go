@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +78,23 @@ type TokenUsage struct {
 	InputTokens  int64 `json:"inputTokens"`
 	OutputTokens int64 `json:"outputTokens"`
 	TotalTokens  int64 `json:"totalTokens"`
+}
+
+// thinkTagPattern matches a <think>...</think> block, including its
+// contents, case-insensitively and across newlines.
+var thinkTagPattern = regexp.MustCompile(`(?is)<think>.*?</think>`)
+
+// stripThinkTags removes inline <think>...</think> blocks some local/open
+// models (served over the OpenAI-compatible protocol with no native
+// reasoning_content separation) emit as part of the ordinary text stream,
+// then trims the surrounding whitespace their removal leaves behind. Unlike
+// ai/anthropic's structured thinking blocks (see ai.Message.ProviderState),
+// this content never had a distinct event type to filter on -- it arrives as
+// plain EventTextDelta text -- so it has to be stripped from the assembled
+// turn text itself, equivalent to what the pre-migration ADK path got for
+// free from genai.Part.Thought.
+func stripThinkTags(text string) string {
+	return strings.TrimSpace(thinkTagPattern.ReplaceAllString(text, ""))
 }
 
 func tokenUsageFrom(u *ai.Usage, provider string) *TokenUsage {
@@ -763,7 +781,7 @@ func (c *AIConversation) AskWithContext(ctx context.Context, prompt, priorContex
 	}
 	queries := finalQueries(c.takePending())
 	actions := c.takeActions()
-	turnText := strings.TrimSpace(text.String())
+	turnText := stripThinkTags(text.String())
 	if len(queries) > 0 || len(actions) > 0 {
 		// The grid is the answer for successful data requests. Some small
 		// local models emit their hidden reasoning as ordinary text, so do
@@ -818,7 +836,7 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 			}
 			queries := finalQueries(c.takePending())
 			actions := c.takeActions()
-			turnText := strings.TrimSpace(text.String())
+			turnText := stripThinkTags(text.String())
 			if len(queries) > 0 || len(actions) > 0 {
 				turnText = ""
 			}

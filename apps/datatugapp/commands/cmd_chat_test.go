@@ -2,8 +2,12 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +16,41 @@ import (
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
+	"github.com/strongo/aichat/ai"
 )
+
+// capturingOpenAICompatServer starts an httptest.Server that mimics an
+// openai-compatible /chat/completions streaming endpoint (openaicompat.
+// Provider.Stream always sends the request as SSE) well enough to complete a
+// one-turn ai.Collect call, and records the requested path and the "model"
+// field of the request body it received. Used to assert -- by actually
+// driving a request through the built ai.LLMProvider rather than inspecting
+// its unexported fields -- that NewLLMProvider/resolveChatAIProfile route the
+// exact model ID and base URL a caller supplied, not just some
+// same-provider-family model.
+func capturingOpenAICompatServer(t *testing.T) (server *httptest.Server, gotPath *string, gotModel *string) {
+	t.Helper()
+	gotPath = new(string)
+	gotModel = new(string)
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*gotPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		var decoded struct {
+			Model string `json:"model"`
+		}
+		_ = json.Unmarshal(body, &decoded)
+		*gotModel = decoded.Model
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server, gotPath, gotModel
+}
 
 func TestBuildChatProjectCatalogKeepsUnscannedSources(t *testing.T) {
 	dir := t.TempDir()
@@ -165,12 +203,24 @@ func TestResolveChatAIProfileDefaults(t *testing.T) {
 	if options.apiKey != "secret-value" {
 		t.Fatalf("api key was not loaded from configured environment variable")
 	}
-	provider, err := chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
+	// The base URL itself is already asserted above (options.baseURL ==
+	// "https://api.deepseek.com", the profile's exact endpoint, not some
+	// family default); route the built provider at a local server instead of
+	// the real endpoint so the test can also assert the exact model ID reaches
+	// the wire, not just that some openai-compatible provider was built.
+	server, _, gotModel := capturingOpenAICompatServer(t)
+	provider, err := chat.NewLLMProvider(options.model, server.URL, options.apiKey)
 	if err != nil {
 		t.Fatalf("NewLLMProvider(profile model): %v", err)
 	}
 	if provider.Name() != "openai-compatible" {
 		t.Fatalf("resolved provider = %q, want OpenAI-compatible deepseek model", provider.Name())
+	}
+	if _, _, _, err := ai.Collect(provider.Stream(context.Background(), ai.ChatRequest{Messages: []ai.Message{{Role: ai.RoleUser, Text: "hi"}}})); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	if *gotModel != "deepseek-flash" {
+		t.Fatalf("request model = %q, want the profile's exact model ID deepseek-flash", *gotModel)
 	}
 }
 
@@ -248,12 +298,26 @@ func TestResolveChatAIProfileErrors(t *testing.T) {
 }
 
 func TestNewLLMProviderRoutesExactModelToCustomEndpoint(t *testing.T) {
-	provider, err := chat.NewLLMProvider("deepseek-flash", "https://api.deepseek.com", "")
+	server, gotPath, gotModel := capturingOpenAICompatServer(t)
+	provider, err := chat.NewLLMProvider("deepseek-flash", server.URL, "")
 	if err != nil {
 		t.Fatalf("NewLLMProvider(deepseek-flash): %v", err)
 	}
 	if provider.Name() != "openai-compatible" {
 		t.Fatalf("resolved provider = %q, want custom OpenAI-compatible deepseek-flash", provider.Name())
+	}
+	if _, _, _, err := ai.Collect(provider.Stream(context.Background(), ai.ChatRequest{Messages: []ai.Message{{Role: ai.RoleUser, Text: "hi"}}})); err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	// deepseek-flash is not a recognized bare model prefix (see M1's
+	// modelPrefixes port in provider.go) -- an explicit --base-url must still
+	// route it, unmodified, to that exact custom endpoint rather than erroring
+	// or silently substituting a different model.
+	if *gotModel != "deepseek-flash" {
+		t.Fatalf("request model = %q, want the exact model ID deepseek-flash", *gotModel)
+	}
+	if *gotPath != "/v1/chat/completions" {
+		t.Fatalf("request path = %q, want /v1/chat/completions (ensureV1 must append /v1 to a bare custom endpoint)", *gotPath)
 	}
 }
 

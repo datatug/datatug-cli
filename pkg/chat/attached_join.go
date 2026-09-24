@@ -109,7 +109,7 @@ func promptMentionsRelation(prompt, relation string) bool {
 		words[word] = true
 	}
 	for _, word := range identifierWords(relation) {
-		if !words[word] && !words[word+"s"] && !(strings.HasSuffix(word, "y") && words[strings.TrimSuffix(word, "y")+"ies"]) {
+		if !(words[word] || words[word+"s"] || (strings.HasSuffix(word, "y") && words[strings.TrimSuffix(word, "y")+"ies"])) {
 			return false
 		}
 	}
@@ -129,7 +129,7 @@ func (e *attachedJoinChoiceError) Error() string { return e.question }
 
 func chooseAttachedJoin(candidates []JoinCandidate, prompt, target string) (JoinCandidate, error) {
 	if len(candidates) == 0 {
-		return JoinCandidate{}, fmt.Errorf("No readable foreign-key relationship to attached table %s was found", sanitizeTerminalText(target))
+		return JoinCandidate{}, fmt.Errorf("no readable foreign-key relationship to attached table %s was found", sanitizeTerminalText(target))
 	}
 	if len(candidates) == 1 {
 		return candidates[0], nil

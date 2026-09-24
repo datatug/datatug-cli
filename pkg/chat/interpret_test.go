@@ -67,13 +67,23 @@ func TestInterpretRespectsSelectedProtocol(t *testing.T) {
 	if got := providerBaseURL(InterpretProvider{Protocol: "openai-chat", BaseURL: "https://api.openai.com/v1"}); got != "https://api.openai.com/v1" {
 		t.Fatalf("OpenAI base URL = %q", got)
 	}
+	// The browser only ever sends "openai-chat"; a Responses-only model
+	// (gpt-5.6-luna and friends) is no longer rejected -- interpretProvider
+	// now routes it to ai/openairesponses automatically instead of making
+	// the browser choose a different model (B2, r1 adversarial review).
 	if err := (InterpretRequest{Question: "a", Schema: "b", Provider: InterpretProvider{
 		Protocol: "openai-chat", BaseURL: "https://api.openai.com/v1", Model: "gpt-5.6-luna", APIKey: "key",
-	}}).Validate(); err == nil || !strings.Contains(err.Error(), "Responses protocol") {
-		t.Fatalf("expected explicit Responses-only model rejection, got %v", err)
+	}}).Validate(); err != nil {
+		t.Fatalf("Responses-only model should be accepted on openai-chat and auto-routed: %v", err)
 	}
-	if !requiresOpenAIResponses("agentgateway/openai/gpt-6-astra") {
-		t.Fatal("prefixed Responses-only model was accepted")
+	if !modelNeedsResponses("agentgateway/openai/gpt-6-astra") {
+		t.Fatal("prefixed Responses-only model was not recognized")
+	}
+	if provider := interpretProvider(InterpretProvider{Protocol: "openai-chat", BaseURL: "https://api.openai.com/v1", Model: "gpt-5.6-luna", APIKey: "key"}); provider.Name() != "openai-responses" {
+		t.Fatalf("interpretProvider(gpt-5.6-luna) = %q, want openai-responses", provider.Name())
+	}
+	if provider := interpretProvider(InterpretProvider{Protocol: "openai-chat", BaseURL: "https://api.openai.com/v1", Model: "gpt-5", APIKey: "key"}); provider.Name() != "openai-compatible" {
+		t.Fatalf("interpretProvider(gpt-5) = %q, want openai-compatible", provider.Name())
 	}
 }
 

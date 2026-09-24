@@ -12,6 +12,7 @@ import (
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/ai/anthropic"
 	"github.com/strongo/aichat/ai/openaicompat"
+	"github.com/strongo/aichat/ai/openairesponses"
 )
 
 // InterpretProvider is supplied by the browser for one agent turn. The key is
@@ -45,31 +46,10 @@ func (r InterpretRequest) Validate() error {
 	if n := len(p.Model); n == 0 || n > 100 || strings.TrimSpace(p.Model) != p.Model {
 		return errors.New("invalid provider model")
 	}
-	if p.Protocol == "openai-chat" && requiresOpenAIResponses(p.Model) {
-		return errors.New("this model requires the OpenAI Responses protocol; choose a Chat Completions model")
-	}
 	if n := len(p.APIKey); n == 0 || n > 4096 || strings.TrimSpace(p.APIKey) != p.APIKey {
 		return errors.New("invalid provider API key")
 	}
 	return validateProviderURL(p.BaseURL)
-}
-
-// pi-go routed these model families to its Responses protocol even with an
-// explicit base URL; ai/openaicompat only speaks Chat Completions, so the
-// same guard keeps the browser from silently violating its selected
-// protocol.
-func requiresOpenAIResponses(modelName string) bool {
-	// Strip provider routing prefixes before choosing the endpoint, including
-	// nested gateway prefixes, and inspect the bare ID.
-	if slash := strings.LastIndexByte(modelName, '/'); slash >= 0 {
-		modelName = modelName[slash+1:]
-	}
-	modelName = strings.ToLower(modelName)
-	return (strings.HasPrefix(modelName, "gpt-5") && strings.Contains(modelName, "codex")) ||
-		strings.HasPrefix(modelName, "gpt-5.6-luna") ||
-		strings.HasPrefix(modelName, "gpt-5.6-sol") ||
-		strings.HasPrefix(modelName, "gpt-5.6-terra") ||
-		strings.HasPrefix(modelName, "gpt-6-astra")
 }
 
 func validateProviderURL(raw string) error {
@@ -142,6 +122,15 @@ func interpretProvider(p InterpretProvider) ai.LLMProvider {
 	baseURL := providerBaseURL(p)
 	if p.Protocol == "anthropic-messages" {
 		return anthropic.New(anthropic.Config{BaseURL: baseURL, APIKey: p.APIKey, Model: p.Model})
+	}
+	// The browser only ever sends "openai-chat"; it names the model, not the
+	// wire protocol, and doesn't know some OpenAI model families (gpt-5*-codex,
+	// gpt-5.6-luna/sol/terra, gpt-6-astra) only support the Responses API, not
+	// Chat Completions. Route those to ai/openairesponses automatically --
+	// ported from pi-go's modelNeedsResponses (see provider.go) -- instead of
+	// rejecting the request and making the browser choose a different model.
+	if modelNeedsResponses(p.Model) {
+		return openairesponses.New(openairesponses.Config{BaseURL: ensureV1(baseURL), APIKey: p.APIKey, Model: p.Model})
 	}
 	return openaicompat.New(openaicompat.Config{BaseURL: ensureV1(baseURL), APIKey: p.APIKey, Model: p.Model})
 }

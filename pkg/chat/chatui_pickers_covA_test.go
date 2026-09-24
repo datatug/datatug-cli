@@ -7,6 +7,7 @@ package chat
 // loop.
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func secureReadResult() secureread.Result {
 }
 
 func TestGlobalKeysF4WithoutSessionsIsANoop(t *testing.T) {
-	u := NewChatUI(nil, nil, "fake-model")
+	u := NewChatUI(context.Background(), nil, "fake-model")
 	cmd, handled := u.globalKeys(tea.KeyPressMsg{Code: tea.KeyF4, Text: "f4"})
 	if cmd != nil || !handled {
 		t.Fatalf("F4 without sessions: cmd=%v handled=%v, want nil/true", cmd, handled)

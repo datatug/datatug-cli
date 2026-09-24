@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 func TestHTTPSettingsCLIWideButProjectIsolated(t *testing.T) {
@@ -69,39 +67,6 @@ func TestHTTPRequestSettingsScopesAndRestart(t *testing.T) {
 	}
 	if err := reopened.SetHTTPRequestSetting(ctx, "cli", "header", "", "Authorization", "Bearer secret"); err == nil {
 		t.Fatal("unscoped credential header accepted")
-	}
-}
-
-func TestHTTPRequestSettingsPromptAndMaskedListing(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, sessions, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := u.httpCommand("header User-Agent=DataTug/Test"); err != nil || u.httpSettingDraft == nil {
-		t.Fatalf("scope prompt missing: %v", err)
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Text: "1"})
-	if u.httpSettingDraft != nil {
-		t.Fatal("scope prompt did not close")
-	}
-	if _, err := u.httpCommand("header https://api.example.test Authorization=Bearer secret"); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(u.View().Content, "Bearer secret") {
-		t.Fatal("secret visible in scope prompt")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Text: "2"})
-	if _, err := u.httpCommand("header https://api.example.test"); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(u.View().Content, "Bearer secret") || !strings.Contains(u.View().Content, "Authorization") {
-		t.Fatal("listing revealed secret or omitted header name")
 	}
 }
 

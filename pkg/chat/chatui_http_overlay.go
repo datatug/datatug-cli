@@ -117,12 +117,29 @@ func (u *ChatUI) sendHTTPRequest(spec httpRequestSpec) (tea.Cmd, error) {
 	return runCmd, nil
 }
 
-// handleHTTPDone is called from OnMsg for an httpDoneMsg.
+// handleHTTPDone is called from OnMsg for an httpDoneMsg. r1b item 5b: when
+// the request was submitted from httpRequestOverlay (pendingHTTPRequest set
+// by submit()), a failure keeps that overlay open with its draft and shows
+// the error there instead of losing the draft and posting a generic
+// transcript message; success closes it via CloseOverlay (identity-based --
+// safe even if another overlay has since been pushed on top). A request
+// sent without a dialog (runHTTPCommand's direct "/http GET url" path)
+// leaves pendingHTTPRequest nil, so it keeps the prior transcript-message
+// behavior unchanged.
 func (u *ChatUI) handleHTTPDone(msg httpDoneMsg) {
 	u.shell.SetBusy(false)
+	overlay := u.pendingHTTPRequest
+	u.pendingHTTPRequest = nil
 	if msg.err != nil {
+		if overlay != nil {
+			overlay.err = conciseError(msg.err)
+			return
+		}
 		u.shell.AppendAssistant(conciseError(msg.err))
 		return
+	}
+	if overlay != nil {
+		u.shell.CloseOverlay(overlay)
 	}
 	if msg.sessionID == u.sessionID {
 		u.loadSession(msg.snapshot)
@@ -440,6 +457,16 @@ func (d *httpRequestOverlay) spec() (httpRequestSpec, error) {
 	return spec, nil
 }
 
+// submit stays open (done=false) once the request is actually in flight:
+// r1b item 5b (async-safe dialogs, via strongo/aichat's CloseOverlay) keeps
+// the form -- method/URL/headers/body draft included -- on screen until
+// handleHTTPDone knows whether it succeeded, instead of closing
+// optimistically and losing the draft/showing a generic transcript error on
+// a failure that had nothing to do with what the user typed (a storage
+// write failing, a stale session). d.ui.pendingHTTPRequest names this
+// overlay so handleHTTPDone can reach it; only a SYNCHRONOUS validation
+// failure (an invalid spec, sendHTTPRequest's own upfront checks) sets
+// d.err and returns immediately, as before.
 func (d *httpRequestOverlay) submit() (chatshell.Overlay, tea.Cmd, bool) {
 	d.loadDefaults()
 	spec, err := d.spec()
@@ -452,7 +479,8 @@ func (d *httpRequestOverlay) submit() (chatshell.Overlay, tea.Cmd, bool) {
 		d.err = err.Error()
 		return d, nil, false
 	}
-	return d, cmd, true
+	d.ui.pendingHTTPRequest = d
+	return d, cmd, false
 }
 
 func (d *httpRequestOverlay) View(width, height int) string {

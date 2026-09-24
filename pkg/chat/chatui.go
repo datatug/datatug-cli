@@ -86,6 +86,17 @@ type ChatUI struct {
 	// applies the async relatedPreviewMessage.
 	pendingDetail *cellDetail
 
+	// pendingHTTPRequest and pendingSaveQuery name the httpRequestOverlay/
+	// saveQueryOverlayState (r1b item 5b) currently awaiting an async
+	// result, so handleHTTPDone/handleSaveQueryDone (running on OnMsg, not
+	// the Overlay's own Update) can close it via chatshell.Model.CloseOverlay
+	// on success or set its .err in place on failure -- keeping the user's
+	// draft instead of closing optimistically and reporting the outcome as
+	// a separate transcript message. nil once the pending call resolves (or
+	// was never a dialog submission, e.g. a plain "/http GET url").
+	pendingHTTPRequest *httpRequestOverlay
+	pendingSaveQuery   *saveQueryOverlayState
+
 	// gridsByRecordSetID indexes every transcript grid currently visible by
 	// its RecordSetID — the registry activeGrid() (chatui_inspector.go)
 	// consults to turn chatshell.Model.FocusedRef() (a gridRecordSetRefType

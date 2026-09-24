@@ -4,17 +4,20 @@ package chat
 // and its non-test-function methods stay in saved_queries_test.go, shared
 // with chatui_query_overlay_test.go).
 //
-// Porting TestSaveQueryFailureKeepsDraftAndHidesErrorDetails surfaced a
-// real, deliberate architecture difference (not a regression specific to
-// saved queries): every chatshell.Overlay Submit/Save in this migration
-// (httpRequestOverlay.submit, saveQueryOverlayState.save) closes
-// optimistically on local-validation success and reports the async
+// Porting TestSaveQueryFailureKeepsDraftAndHidesErrorDetails originally
+// surfaced a real, deliberate architecture difference: every
+// chatshell.Overlay Submit/Save in this migration
+// (httpRequestOverlay.submit, saveQueryOverlayState.save) closed
+// optimistically on local-validation success and reported the async
 // backend outcome as a transcript message, rather than staying open until
-// the backend call resolves the way ui.go's dialogs did. So "the draft
-// survives a save failure" no longer holds; what still holds, and is what
-// this test now asserts, is the half that matters for the checklist
-// ("hides error details"): the backend error text never leaks into the
-// transcript.
+// the backend call resolved the way ui.go's dialogs did -- so "the draft
+// survives a save failure" did not hold. r1b item 5b (unblocked by
+// strongo/aichat's CloseOverlay) closes that gap: save() now stays open
+// (done=false) until handleSaveQueryDone knows the outcome, closing only
+// on success and setting o.err in place -- draft intact -- on failure.
+// TestChatUISaveQueryFailureHidesErrorDetails below asserts both halves
+// again: the draft survives, and the backend error text still never
+// leaks into the dialog or the transcript.
 
 import (
 	"errors"
@@ -48,12 +51,24 @@ func TestChatUISaveQueryFailureHidesErrorDetails(t *testing.T) {
 	overlay := newSaveQueryOverlay(u, SavedQuerySaveRequest{Type: "DTQL", Text: "from: {name: Customer}"})
 	overlay.values[0] = "Customers"
 	_, cmd, done := overlay.save()
-	if !done || cmd == nil {
-		t.Fatal("expected save() to close the overlay and return the background save command")
+	if done || cmd == nil {
+		t.Fatal("expected save() to stay open (async-safe, r1b item 5b) and return the background save command")
+	}
+	if u.pendingSaveQuery != overlay {
+		t.Fatal("expected save() to record itself as the pending save-query overlay")
 	}
 	drainCmd(t, u, cmd)
 	if strings.Contains(u.shell.View().Content, "private-token-123") {
-		t.Fatal("save error exposed backend details")
+		t.Fatal("save error exposed backend details in the transcript")
+	}
+	if overlay.err == "" || strings.Contains(overlay.err, "private-token-123") {
+		t.Fatalf("expected a generic in-dialog error, got %q", overlay.err)
+	}
+	if overlay.values[0] != "Customers" {
+		t.Fatalf("draft title was lost on failure: %q", overlay.values[0])
+	}
+	if u.pendingSaveQuery != nil {
+		t.Fatal("expected handleSaveQueryDone to clear pendingSaveQuery")
 	}
 }
 

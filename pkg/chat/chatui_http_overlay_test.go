@@ -100,14 +100,55 @@ func TestHTTPRequestOverlaySubmitsAndPersists(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet, URL: server.URL})
 	d.focus = 6
+	// r1b item 5b: submit stays open (done=false) once the request is in
+	// flight -- it only closes once handleHTTPDone confirms success (via
+	// CloseOverlay), keeping the draft available on failure.
 	_, cmd, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !done || cmd == nil {
-		t.Fatalf("expected Enter on Submit to close the overlay and return a send command; err=%q", d.err)
+	if done || cmd == nil {
+		t.Fatalf("expected Enter on Submit to stay open and return a send command; err=%q", d.err)
+	}
+	if u.pendingHTTPRequest != d {
+		t.Fatal("expected submit to record itself as the pending HTTP request")
 	}
 	drainCmd(t, u, cmd)
+	if d.err != "" {
+		t.Fatalf("unexpected error on success: %q", d.err)
+	}
+	if u.pendingHTTPRequest != nil {
+		t.Fatal("expected handleHTTPDone to clear pendingHTTPRequest")
+	}
 	view := u.shell.View().Content
 	if !strings.Contains(view, "ok") {
 		t.Fatalf("expected fetched JSON in view:\n%s", view)
+	}
+}
+
+// TestChatUIHandleHTTPDoneKeepsOverlayOpenWithDraftOnFailure is r1b item
+// 5b's async-safe dialog contract: a failure reported through
+// pendingHTTPRequest keeps the dialog open with its draft (method/URL/
+// headers/body untouched) and shows the error inline, instead of losing
+// the draft and posting a generic transcript message the way a request
+// sent without a dialog still does (see the table's other case).
+func TestChatUIHandleHTTPDoneKeepsOverlayOpenWithDraftOnFailure(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet, URL: "https://example.com/data"})
+	u.pendingHTTPRequest = d
+	u.handleHTTPDone(httpDoneMsg{err: context.DeadlineExceeded})
+	if d.err == "" {
+		t.Fatal("expected the dialog to show the failure inline")
+	}
+	if d.url.Value() != "https://example.com/data" {
+		t.Fatalf("draft URL was lost: %q", d.url.Value())
+	}
+	if u.pendingHTTPRequest != nil {
+		t.Fatal("expected pendingHTTPRequest to be cleared after handling")
+	}
+
+	// Without a dialog in flight (runHTTPCommand's direct "/http GET url"
+	// path), a failure keeps its prior transcript-message behavior.
+	u.handleHTTPDone(httpDoneMsg{err: context.DeadlineExceeded})
+	if !strings.Contains(u.shell.View().Content, "deadline exceeded") && !strings.Contains(ansi.Strip(u.shell.View().Content), "context deadline exceeded") {
+		t.Fatalf("expected a transcript error message when no dialog is pending:\n%s", u.shell.View().Content)
 	}
 }
 
@@ -203,8 +244,10 @@ func TestChatUIHTTPPostFormSendsBodyAndEditedHeadersAndPersistsMethod(t *testing
 	d.headers = append(d.headers, httpHeaderField{name: "X-Test", value: "edited"})
 	d.headers = append(d.headers, httpHeaderField{name: "Authorization", value: "Bearer secret"})
 	d.focus = 6
+	// r1b item 5b: submit stays open (done=false) until the async result is
+	// known; see TestHTTPRequestOverlaySubmitsAndPersists.
 	_, sendCmd, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !done || sendCmd == nil {
+	if done || sendCmd == nil {
 		t.Fatalf("submit did not send: err=%q", d.err)
 	}
 	drainCmd(t, u, sendCmd)

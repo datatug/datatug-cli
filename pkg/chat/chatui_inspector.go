@@ -448,6 +448,15 @@ func (o *saveQueryOverlayState) addTag() {
 	o.values[1] = ""
 }
 
+// save stays open (done=false) once the write is actually in flight -- r1b
+// item 5b, the same async-safe pattern as httpRequestOverlay.submit: the
+// name/tags draft and any earlier o.err stay on screen until
+// handleSaveQueryDone knows whether the write succeeded, instead of closing
+// optimistically and silently discarding the draft on failure.
+// o.ui.pendingSaveQuery names this overlay so handleSaveQueryDone can close
+// it (success, via CloseOverlay) or set o.err in place (failure). A
+// synchronous validation failure (no writer, empty title) still sets o.err
+// and returns immediately, as before.
 func (o *saveQueryOverlayState) save() (chatshell.Overlay, tea.Cmd, bool) {
 	writer, ok := o.ui.savedQueryService.(SavedQueryWriter)
 	if !ok {
@@ -462,10 +471,11 @@ func (o *saveQueryOverlayState) save() (chatshell.Overlay, tea.Cmd, bool) {
 	}
 	request := o.request
 	ctx := o.ui.ctx
+	o.ui.pendingSaveQuery = o
 	return o, func() tea.Msg {
 		query, err := writer.Save(ctx, request)
 		return saveQueryDoneMsg{query: query, err: err}
-	}, true
+	}, false
 }
 
 // saveQueryDoneMsg reports a background "save as project query" outcome —
@@ -481,11 +491,25 @@ type saveQueryDoneMsg struct {
 // failure it reports a fixed, generic message — never msg.err's text —
 // matching ui.go's savedQuerySaveMessage case: the backend error could
 // echo back request details (a bad token, a rejected header value), so it
-// must not reach the transcript.
+// must not reach the transcript. r1b item 5b: that generic message now
+// appears IN the still-open dialog (o.err) with the name/tags draft intact,
+// not as a transcript message after the dialog has already closed and lost
+// the draft; success closes the dialog via CloseOverlay (identity-based --
+// safe even if another overlay has since been pushed on top, e.g. the
+// query-parameters lookup) and reports as before.
 func (u *ChatUI) handleSaveQueryDone(msg saveQueryDoneMsg) {
+	overlay := u.pendingSaveQuery
+	u.pendingSaveQuery = nil
 	if msg.err != nil {
+		if overlay != nil {
+			overlay.err = "Could not save. Check the name, tags and project write access."
+			return
+		}
 		u.shell.AppendAssistant("Could not save. Check the name, tags and project write access.")
 		return
+	}
+	if overlay != nil {
+		u.shell.CloseOverlay(overlay)
 	}
 	if err := u.reloadSavedQueries(); err != nil {
 		u.shell.AppendAssistant(conciseError(err))

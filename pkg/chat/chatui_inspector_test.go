@@ -44,3 +44,37 @@ func TestChatUIEnterOpensAndClosesCellDetail(t *testing.T) {
 		t.Fatal("Esc did not close the cell detail overlay")
 	}
 }
+
+// TestChatUIGridSortRetainsSelectedSourceRowForInspector is ported from
+// ui_test.go's TestGridSortRetainsSelectedSourceRowForInspector: pressing
+// "s" on a focused transcript grid sorts by the selected column while
+// keeping the SAME underlying row highlighted (handleGridKey's "s" case,
+// chatui_inspector.go) — grid.Model.Sort alone does not do this (it always
+// leaves the display cursor at position 0), so this is real, DataTug-owned
+// behavior, not native grid mechanics.
+func TestChatUIGridSortRetainsSelectedSourceRowForInspector(t *testing.T) {
+	turn := Turn{Queries: []QueryResult{{RecordSetID: "recordset", Result: secureread.Result{
+		Columns: []string{"Name"},
+		Rows: []secureread.Row{
+			{Data: map[string]any{"Name": "Zulu"}},
+			{Data: map[string]any{"Name": "Alpha"}},
+			{Data: map[string]any{"Name": "Zulu"}},
+		},
+	}}}}
+	u, _ := newTestChatUI(t, nil, turn)
+	drainCmd(t, u, u.Submit("Show names"))
+	if !u.shell.FocusEntry(u.lastGridEntryID) {
+		t.Fatal("expected grid focus")
+	}
+	g := u.gridsByRecordSetID[u.lastGridRecordSetID]
+	if g == nil {
+		t.Fatal("grid not tracked by recordset ID")
+	}
+	if before := g.selectedSourceRow(); before != 0 {
+		t.Fatalf("source row before sort = %d, want 0", before)
+	}
+	u.shell.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if got := g.selectedSourceRow(); got != 0 || g.CurrentIndex() != 1 || g.sourceIndexAt(2) != 2 {
+		t.Fatalf("sorted selection = source:%d index:%d, want source:0 index:1", got, g.CurrentIndex())
+	}
+}

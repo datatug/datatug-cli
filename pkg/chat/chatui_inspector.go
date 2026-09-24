@@ -47,8 +47,89 @@ func (u *ChatUI) handleGridKey(_ *grid.Model, msg tea.KeyPressMsg) (tea.Cmd, boo
 			u.workspace.toggleAttachment(ContextReference{Kind: "recordset", ObjectID: u.activeRecordSetID(), Title: g.baseTitle})
 		}
 		return nil, true
+	case "s":
+		if g, _, ok := u.activeGrid(); ok && g != nil {
+			sourceRow := g.sourceRowKey()
+			g.Sort(g.SelectedColumn())
+			g.restoreByKey(sourceRow)
+			if recordSetID := u.activeRecordSetID(); recordSetID != "" {
+				column, desc := g.SortState()
+				u.syncRecordSetSort(recordSetID, column, desc)
+			}
+		}
+		return nil, true
+	case "d":
+		u.dockOrBookmarkActiveGrid("dock")
+		return nil, true
+	case "b":
+		u.dockOrBookmarkActiveGrid("bookmark_create")
+		return nil, true
+	case "B":
+		if recordSetID := u.activeRecordSetID(); recordSetID != "" {
+			kind := "bucket_add"
+			for _, existing := range u.snapshot.Workspace.ExportBucket {
+				if existing == recordSetID {
+					kind = "bucket_remove"
+					break
+				}
+			}
+			u.workspace.performWorkspaceAction(WorkspaceAction{Kind: kind, RecordSetID: recordSetID})
+		}
+		return nil, true
+	case "e":
+		if recordSetID := u.activeRecordSetID(); recordSetID != "" {
+			u.lastGridRecordSetID = recordSetID
+		}
+		return u.shell.PushOverlay(newExportDialogOverlay(u)), true
 	}
 	return nil, false
+}
+
+// dockOrBookmarkActiveGrid is ui.go's handleMainGridKey "d"/"b" cases,
+// ported: dock or bookmark the active grid's RecordSet, upgrading to its
+// current durable Selection's reference (matching that Selection's own
+// RecordSet) exactly as ui.go did.
+func (u *ChatUI) dockOrBookmarkActiveGrid(kind string) {
+	g, _, ok := u.activeGrid()
+	recordSetID := u.activeRecordSetID()
+	if !ok || g == nil || recordSetID == "" {
+		return
+	}
+	ref := ContextReference{Kind: "recordset", ObjectID: recordSetID, Title: g.baseTitle}
+	if selection, ok := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]; ok {
+		if view := u.snapshot.Workspace.Views[selection.ViewID]; view.RecordSetID == ref.ObjectID {
+			ref = ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}
+		}
+	}
+	u.workspace.performWorkspaceAction(WorkspaceAction{Kind: kind, Reference: ref})
+}
+
+// syncRecordSetSort is ui.go's UI.syncRecordSetSort, ported onto ChatUI's
+// single gridsByRecordSetID entry per RecordSetID and workspacePanel's
+// dockGrids: applying the same sort (by key, preserving the highlighted
+// row) to every other live grid — transcript or docked — showing the same
+// RecordSet.
+func (u *ChatUI) syncRecordSetSort(recordSetID string, column int, desc bool) {
+	apply := func(g *gridState) {
+		if g == nil {
+			return
+		}
+		sourceRow := g.sourceRowKey()
+		g.Sort(column)
+		if c, d := g.SortState(); d != desc || c != column {
+			g.Sort(column)
+		}
+		g.restoreByKey(sourceRow)
+	}
+	if g := u.gridsByRecordSetID[recordSetID]; g != nil {
+		apply(g)
+	}
+	for _, dock := range u.snapshot.Workspace.Docks {
+		if dock.Reference.Kind != "recordset" || dock.Reference.ObjectID != recordSetID {
+			continue
+		}
+		apply(u.workspace.dockGrids[dock.ID])
+	}
 }
 
 // selectFromGrid is ui.go's UI.selectFromGrid, ported onto activeGrid() and

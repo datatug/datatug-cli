@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/ai"
 )
@@ -542,28 +541,9 @@ func TestSelectedCellValueStaysOutOfModelRequest(t *testing.T) {
 // Enter-selects-the-first-choice case is already covered there by
 // TestChatUIF3OpensProjectPickerAndSelects.
 
-// TestSplitDividerResizesWithinUsefulBounds is NOT ported: Ctrl+←/→ split
-// resize is checklist item #46, NATIVE to tui/chatshell (no DataTug product
-// code — chatshell.Model owns chatPanePercent/growPanelChat itself now,
-// unexported, with its own test coverage in strongo/aichat). Kept here,
-// unchanged, against the legacy UI's own chatPaneWidth/chatPanePercent,
-// since that's still real, exercised code as long as ui.go exists.
-func TestSplitDividerResizesWithinUsefulBounds(t *testing.T) {
-	u := NewUI(context.Background(), nil, "fake-model")
-	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
-	initial := u.chatPaneWidth()
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModCtrl})
-	if u.chatPaneWidth() <= initial || u.workspacePaneWidth() < 23 {
-		t.Fatalf("right resize: chat=%d workspace=%d", u.chatPaneWidth(), u.workspacePaneWidth())
-	}
-	for range 20 {
-		_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModCtrl})
-	}
-	if u.chatPanePercent != 40 || u.chatPaneWidth() < 42 {
-		t.Fatalf("left resize exceeded minimum: percent=%d width=%d", u.chatPanePercent, u.chatPaneWidth())
-	}
-}
-
-// TestDockedGridSortAndCellSelectionUseSourceCoordinates and
-// TestDockGridHasNoViewSwitcher were ported onto ChatUI's workspacePanel in
-// chatui_sidepanel_test.go.
+//
+// TestSplitDividerResizesWithinUsefulBounds was removed (not ported): Ctrl+←/→
+// split resize is checklist item #46, NATIVE to tui/chatshell (chatshell.Model
+// owns chatPanePercent/growPanelChat itself now, unexported, with its own test
+// coverage in strongo/aichat). It tested only ui.go's own chatPaneWidth/
+// chatPanePercent, which no longer exist once the legacy UI is deleted.

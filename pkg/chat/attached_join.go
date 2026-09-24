@@ -109,9 +109,13 @@ func promptMentionsRelation(prompt, relation string) bool {
 		words[word] = true
 	}
 	for _, word := range identifierWords(relation) {
-		if !(words[word] || words[word+"s"] || (strings.HasSuffix(word, "y") && words[strings.TrimSuffix(word, "y")+"ies"])) {
-			return false
+		if words[word] || words[word+"s"] {
+			continue
 		}
+		if strings.HasSuffix(word, "y") && words[strings.TrimSuffix(word, "y")+"ies"] {
+			continue
+		}
+		return false
 	}
 	return len(identifierWords(relation)) > 0
 }

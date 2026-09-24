@@ -312,7 +312,7 @@ func (d *httpRequestOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd, bo
 		case 6:
 			return d.submit()
 		case 7:
-			d.err = "Save as project query isn't available in the new chat UI yet."
+			return d.saveAsProjectQuery()
 		}
 		return d, nil, false
 	}
@@ -353,6 +353,36 @@ func (d *httpRequestOverlay) commitHeader() {
 	d.headerName.Reset()
 	d.headerValue.Reset()
 	d.setFocus(2)
+}
+
+// saveAsProjectQuery is ui.go's saveHTTPRequestFromDialog, ported to push
+// ChatUI's saveQueryOverlay (chatui_inspector.go) on top of this overlay
+// instead of switching u.saveQueryDialog. The underlying HTTP form stays on
+// the overlay stack (done=false) so Esc from the save dialog returns to it,
+// matching the query_parameters_dialog.go lookup dialog's own
+// stacked-Overlay idiom.
+func (d *httpRequestOverlay) saveAsProjectQuery() (chatshell.Overlay, tea.Cmd, bool) {
+	d.loadDefaults()
+	spec, err := d.spec()
+	if err != nil {
+		d.err = err.Error()
+		return d, nil, false
+	}
+	if d.ui.savedQueryService == nil {
+		d.err = "Project query saving is unavailable."
+		return d, nil, false
+	}
+	if spec.Method != http.MethodGet || spec.Body != "" {
+		d.err = "Project HTTP queries currently support GET only; submit this request without saving."
+		return d, nil, false
+	}
+	for name, value := range spec.Headers {
+		if name != "User-Agent" || value != "DataTug" {
+			d.err = "Project HTTP queries cannot safely store custom headers yet. Submit this request without saving."
+			return d, nil, false
+		}
+	}
+	return d, d.ui.shell.PushOverlay(newSaveQueryOverlay(d.ui, SavedQuerySaveRequest{Type: "HTTP", Text: spec.URL, Title: spec.URL})), false
 }
 
 func (d *httpRequestOverlay) loadDefaults() {

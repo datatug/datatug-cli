@@ -475,12 +475,28 @@ func (u *ChatUI) loadSession(session ChatSession) {
 			continue
 		}
 		text := message.Text
-		if response, ok := session.HTTPResponses[message.HTTPResponseID]; ok {
-			text = response.displayText()
+		var response *HTTPResponse
+		if r, ok := session.HTTPResponses[message.HTTPResponseID]; ok {
+			text = r.displayText()
+			response = &r
 		}
 		switch {
 		case message.Role == "You":
 			u.shell.AppendBlock(newUserMessageBlock(text))
+		case response != nil:
+			// httpDocumentBlock (checklist item #36/#37) ports ui.go's
+			// httpDocumentView as a real transcript.Block so a saved HTTP
+			// response — markdown or not — keeps its 1/2/3 Rendered/Raw/
+			// Headers toggle, not just AppendAssistantMarkdown's one-shot
+			// render.
+			versionBadge := ""
+			if previous, ok := session.HTTPResponses[response.RefreshParentID]; ok {
+				versionBadge = "unchanged"
+				if httpResponseChanged(*response, previous) {
+					versionBadge = "changed"
+				}
+			}
+			u.shell.AppendBlock(&httpDocumentBlock{text: text, markdown: message.Kind == "markdown", response: response, versionBadge: versionBadge})
 		case message.Kind == "markdown":
 			u.shell.AppendAssistantMarkdown(text)
 		default:

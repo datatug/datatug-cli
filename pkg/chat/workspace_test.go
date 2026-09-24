@@ -22,6 +22,79 @@ func workspaceTestCatalog() ProjectCatalog {
 	}}
 }
 
+func TestProjectExplorerShowsSourceIssueInPlace(t *testing.T) {
+	u := NewUI(context.Background(), nil, "test-model")
+	u.catalog = workspaceTestCatalog()
+	u.catalog.Objects[1].Issue = "Schema unavailable: relation main.Customer has no columns file"
+	nodes := u.explorerNodes()
+	found := false
+	for i, node := range nodes {
+		if node.id == "source:chinook-local" {
+			u.explorerIndex = i
+		}
+		if node.issue && node.id == "source:chinook-local:issue" && node.objectIndex == -1 && strings.Contains(node.label, "main.Customer") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("source-local error node missing: %+v", nodes)
+	}
+	u.projectDetails = true
+	view := u.projectExplorer(100, 20)
+	if !strings.Contains(view, "Status: Schema unavailable") || !strings.Contains(view, "Customer") {
+		t.Fatalf("source details did not show the schema error: %q", view)
+	}
+	u.explorerCollapsed["source:chinook-local"] = true
+	found = false
+	for _, node := range u.explorerNodes() {
+		if node.id == "source:chinook-local" && node.issue && strings.Contains(node.label, "⚠") {
+			found = true
+		}
+		if node.id == "source:chinook-local:issue" {
+			t.Fatal("collapsed source still shows its error child")
+		}
+	}
+	if !found {
+		t.Fatal("collapsed source lost its warning indicator")
+	}
+}
+
+func TestProjectExplorerIssueDetailsRemainVisibleInLongTree(t *testing.T) {
+	u := NewUI(context.Background(), nil, "test-model")
+	u.catalog = workspaceTestCatalog()
+	u.catalog.Objects[1].Issue = "Schema unavailable: relation main.Customer has no columns file"
+	for i := range 30 {
+		object := ProjectObject{Reference: ContextReference{
+			Kind: "source", SourceID: fmt.Sprintf("extra-%02d", i), ObjectID: fmt.Sprintf("extra-%02d", i), Title: "Extra source",
+		}}
+		if i == 20 {
+			object.Issue = "Schema unavailable: deep source failed"
+		}
+		u.catalog.Objects = append(u.catalog.Objects, object)
+	}
+	for i, node := range u.explorerNodes() {
+		if node.id == "source:chinook-local:issue" {
+			u.explorerIndex = i
+			break
+		}
+	}
+	u.projectDetails = true
+	view := u.projectExplorer(80, 8)
+	if !strings.Contains(view, "Status: Schema unavailable") {
+		t.Fatalf("selected issue details hidden below long explorer: %q", view)
+	}
+	for i, node := range u.explorerNodes() {
+		if node.id == "source:extra-20:issue" {
+			u.explorerIndex = i
+			break
+		}
+	}
+	view = u.projectExplorer(80, 8)
+	if !strings.Contains(view, "Status: Schema unavailable: deep source failed") {
+		t.Fatalf("deep selected issue details hidden below viewport: %q", view)
+	}
+}
+
 func workspaceTestRecord(t *testing.T, store *SessionStore, sessionID string) string {
 	t.Helper()
 	ctx := context.Background()

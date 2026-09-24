@@ -24,6 +24,7 @@ type ProjectObject struct {
 	Reference   ContextReference
 	Columns     []string
 	ColumnTypes map[string]string
+	Issue       string // local metadata load error; never included in agent context
 }
 
 type ProjectCatalog struct {

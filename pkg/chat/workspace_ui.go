@@ -729,6 +729,8 @@ type explorerNode struct {
 	depth       int
 	objectIndex int // -1 for a grouping node
 	branch      bool
+	issue       bool
+	issueFor    int // owner of an unattachable issue row
 }
 
 func (u *UI) explorerNodes() []explorerNode {
@@ -765,8 +767,17 @@ func (u *UI) explorerNodes() []explorerNode {
 			return
 		}
 		for _, index := range matches {
-			ref := u.catalog.Objects[index].Reference
-			nodes = append(nodes, explorerNode{id: ref.Kind + ":" + ref.SourceID + ":" + ref.ObjectID, label: ref.Title, depth: depth + 1, objectIndex: index})
+			object := u.catalog.Objects[index]
+			ref := object.Reference
+			label := ref.Title
+			if object.Issue != "" {
+				label += " ⚠"
+			}
+			id := ref.Kind + ":" + ref.SourceID + ":" + ref.ObjectID
+			nodes = append(nodes, explorerNode{id: id, label: label, depth: depth + 1, objectIndex: index, issue: object.Issue != ""})
+			if object.Issue != "" {
+				nodes = append(nodes, explorerNode{id: id + ":issue", label: "⚠ " + object.Issue, depth: depth + 2, objectIndex: -1, issue: true, issueFor: index})
+			}
 		}
 	}
 	for i, object := range u.catalog.Objects {
@@ -775,9 +786,16 @@ func (u *UI) explorerNodes() []explorerNode {
 		}
 		ref := object.Reference
 		id := "source:" + ref.SourceID
-		nodes = append(nodes, explorerNode{id: id, label: ref.Title, depth: 1, objectIndex: i, branch: true})
+		label := ref.Title
+		if object.Issue != "" {
+			label += " ⚠"
+		}
+		nodes = append(nodes, explorerNode{id: id, label: label, depth: 1, objectIndex: i, branch: true, issue: object.Issue != ""})
 		if u.explorerCollapsed[id] {
 			continue
+		}
+		if issue := object.Issue; issue != "" {
+			nodes = append(nodes, explorerNode{id: id + ":issue", label: "⚠ " + issue, depth: 2, objectIndex: -1, issue: true, issueFor: i})
 		}
 		appendGroup(ref.SourceID, "table", "Tables", 2)
 		appendGroup(ref.SourceID, "project_view", "Views", 2)
@@ -794,6 +812,7 @@ func (u *UI) projectExplorer(width, height int) string {
 	}
 	u.explorerIndex = min(u.explorerIndex, len(nodes)-1)
 	lines := make([]string, 0, len(nodes)+5)
+	detailsAt := -1
 	for i, node := range nodes {
 		marker := " "
 		if node.objectIndex >= 0 {
@@ -813,22 +832,42 @@ func (u *UI) projectExplorer(width, height int) string {
 			}
 		}
 		label := fmt.Sprintf("%s%s %s %s", strings.Repeat("  ", node.depth), fold, marker, sanitizeTerminalText(node.label))
+		if node.issue {
+			label = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(ansi.Truncate(label, width, "…"))
+		}
 		if i == u.explorerIndex && u.workspaceFocused {
 			label = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Render(ansi.Truncate(label, width, "…"))
 		}
 		lines = append(lines, label)
+		if !u.projectDetails || i != u.explorerIndex {
+			continue
+		}
+		index := node.objectIndex
+		if index < 0 && node.issue {
+			index = node.issueFor
+		}
+		if index >= 0 && index < len(u.catalog.Objects) {
+			detailsAt = len(lines)
+			object := u.catalog.Objects[index]
+			lines = append(lines, "", "Details: "+object.Reference.Title)
+			if object.Issue != "" {
+				lines = append(lines, strings.Split(ansi.Hardwrap("Status: "+sanitizeTerminalText(object.Issue), max(10, width), false), "\n")...)
+			}
+			lines = append(lines, "Kind: "+object.Reference.Kind)
+			if object.Reference.SourceID != "" {
+				lines = append(lines, "Source: "+object.Reference.SourceID)
+			} else {
+				lines = append(lines, "Scope: project")
+			}
+			if len(object.Columns) > 0 {
+				lines = append(lines, "Columns: "+strings.Join(object.Columns, ", "))
+			}
+		}
 	}
-	if u.projectDetails && u.explorerIndex >= 0 && u.explorerIndex < len(nodes) && nodes[u.explorerIndex].objectIndex >= 0 {
-		object := u.catalog.Objects[nodes[u.explorerIndex].objectIndex]
-		lines = append(lines, "", "Details: "+object.Reference.Title, "Kind: "+object.Reference.Kind)
-		if object.Reference.SourceID != "" {
-			lines = append(lines, "Source: "+object.Reference.SourceID)
-		} else {
-			lines = append(lines, "Scope: project")
-		}
-		if len(object.Columns) > 0 {
-			lines = append(lines, "Columns: "+strings.Join(object.Columns, ", "))
-		}
+	// Details belong to the selected object, not the end of the tree. Keep
+	// the selected row and the beginning of its details visible together.
+	if detailsAt >= 0 {
+		u.explorerOffset = u.explorerIndex
 	}
 	if u.explorerIndex < u.explorerOffset {
 		u.explorerOffset = u.explorerIndex

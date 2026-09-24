@@ -77,6 +77,7 @@ type CatalogRelation struct {
 	Name    string          `json:"name"`
 	DbType  string          `json:"dbType"`
 	Columns []CatalogColumn `json:"columns"`
+	Issue   string          `json:"-"` // partial explorer load only; never publish raw file errors
 }
 
 // CatalogSchema is the compact stored schema supplied to consumers such as
@@ -93,6 +94,17 @@ type catalogColumnsFile struct {
 // GetCatalogSchema resolves a configured catalog to its scanned dbmodel and
 // loads table/view columns in deterministic order.
 func GetCatalogSchema(projectDir, environmentID, catalogID string) (*CatalogSchema, error) {
+	return getCatalogSchema(projectDir, environmentID, catalogID, false)
+}
+
+// GetCatalogSchemaPartial preserves healthy relations when one relation's
+// stored column file is missing or malformed. Source-level failures still
+// return an error; affected relations carry a local-only Issue instead.
+func GetCatalogSchemaPartial(projectDir, environmentID, catalogID string) (*CatalogSchema, error) {
+	return getCatalogSchema(projectDir, environmentID, catalogID, true)
+}
+
+func getCatalogSchema(projectDir, environmentID, catalogID string, partial bool) (*CatalogSchema, error) {
 	dbModelID, err := catalogDbModel(projectDir, environmentID, catalogID)
 	if err != nil {
 		return nil, err
@@ -103,7 +115,7 @@ func GetCatalogSchema(projectDir, environmentID, catalogID string) (*CatalogSche
 		dir    string
 		dbType string
 	}{{"tables", "BASE TABLE"}, {"views", "VIEW"}} {
-		items, err := loadCatalogRelations(dbModelDir, kind.dir, kind.dbType)
+		items, err := loadCatalogRelationsWithMode(dbModelDir, kind.dir, kind.dbType, partial)
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +133,7 @@ func GetCatalogSchema(projectDir, environmentID, catalogID string) (*CatalogSche
 	return &CatalogSchema{Relations: relations}, nil
 }
 
-func loadCatalogRelations(dbModelDir, kind, dbType string) ([]CatalogRelation, error) {
+func loadCatalogRelationsWithMode(dbModelDir, kind, dbType string, partial bool) ([]CatalogRelation, error) {
 	var out []CatalogRelation
 	schemaDirs, err := os.ReadDir(dbModelDir)
 	if err != nil {
@@ -148,28 +160,40 @@ func loadCatalogRelations(dbModelDir, kind, dbType string) ([]CatalogRelation, e
 				continue
 			}
 			name := tableDir.Name()
-			matches, err := filepath.Glob(filepath.Join(kindDir, name, "*.columns.json"))
+			columns, err := readCatalogColumns(kindDir, schema, name)
+			if err != nil && !partial {
+				return nil, err
+			}
+			relation := CatalogRelation{Schema: schema, Name: name, DbType: dbType, Columns: columns}
 			if err != nil {
-				return nil, fmt.Errorf("find columns for %s.%s: %w", schema, name, err)
+				relation.Issue = err.Error()
 			}
-			if len(matches) != 1 {
-				return nil, fmt.Errorf("relation %s.%s has %d columns files; want 1", schema, name, len(matches))
-			}
-			data, err := os.ReadFile(matches[0])
-			if err != nil {
-				return nil, fmt.Errorf("read columns for %s.%s: %w", schema, name, err)
-			}
-			var file catalogColumnsFile
-			if err := json.Unmarshal(data, &file); err != nil {
-				return nil, fmt.Errorf("parse columns for %s.%s: %w", schema, name, err)
-			}
-			if file.Columns == nil {
-				file.Columns = []CatalogColumn{}
-			}
-			out = append(out, CatalogRelation{Schema: schema, Name: name, DbType: dbType, Columns: file.Columns})
+			out = append(out, relation)
 		}
 	}
 	return out, nil
+}
+
+func readCatalogColumns(kindDir, schema, name string) ([]CatalogColumn, error) {
+	matches, err := filepath.Glob(filepath.Join(kindDir, name, "*.columns.json"))
+	if err != nil {
+		return nil, fmt.Errorf("find columns for %s.%s: %w", schema, name, err)
+	}
+	if len(matches) != 1 {
+		return nil, fmt.Errorf("relation %s.%s has %d columns files; want 1", schema, name, len(matches))
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		return nil, fmt.Errorf("read columns for %s.%s: %w", schema, name, err)
+	}
+	var file catalogColumnsFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, fmt.Errorf("parse columns for %s.%s: %w", schema, name, err)
+	}
+	if file.Columns == nil {
+		file.Columns = []CatalogColumn{}
+	}
+	return file.Columns, nil
 }
 
 // catalogDbModelFile is the minimal shape this reads out of

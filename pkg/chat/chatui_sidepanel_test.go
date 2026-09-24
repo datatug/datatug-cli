@@ -257,12 +257,24 @@ func TestChatUIExplorerGroupsObjectsByDeclaredSourceAndCollapses(t *testing.T) {
 			unboundDepth = node.depth
 		}
 	}
-	if sourceDepth != 1 || boundDepth != 3 || unboundDepth != 2 {
+	if sourceDepth != 2 || boundDepth != 2 || unboundDepth != 2 {
 		t.Fatalf("unexpected explorer hierarchy: %+v", nodes)
+	}
+	var databases, queryGroups int
+	for _, node := range nodes {
+		if node.label == "Databases (1)" {
+			databases++
+		}
+		if strings.HasPrefix(node.label, "Queries (") {
+			queryGroups++
+		}
+	}
+	if databases != 1 || queryGroups != 1 {
+		t.Fatalf("want one Databases and one Queries group: %+v", nodes)
 	}
 	u.workspace.explorerCollapsed["source:chinook-local"] = true
 	for _, node := range u.workspace.explorerNodes() {
-		if node.label == "By city" || node.label == "Customer" {
+		if node.label == "Customer" {
 			t.Fatalf("collapsed source still exposes child %q", node.label)
 		}
 	}

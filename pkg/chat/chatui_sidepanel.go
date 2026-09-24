@@ -377,11 +377,20 @@ func (p *workspacePanel) explorerNodes() []explorerNode {
 	if p.explorerCollapsed[rootID] {
 		return nodes
 	}
+	sourceCount := 0
+	for _, object := range catalog.Objects {
+		if object.Reference.Kind == "source" {
+			sourceCount++
+		}
+	}
+	if sourceCount > 0 {
+		nodes = append(nodes, explorerNode{id: "group:databases", label: fmt.Sprintf("Databases (%d)", sourceCount), depth: 1, objectIndex: -1, branch: true})
+	}
 	appendGroup := func(sourceID, kind, label string, depth int) {
 		matches := make([]int, 0)
 		for i, object := range catalog.Objects {
 			ref := object.Reference
-			if ref.Kind == kind && ref.SourceID == sourceID {
+			if ref.Kind == kind && (ref.SourceID == sourceID || sourceID == "*") {
 				matches = append(matches, i)
 			}
 		}
@@ -407,28 +416,29 @@ func (p *workspacePanel) explorerNodes() []explorerNode {
 			}
 		}
 	}
-	for i, object := range catalog.Objects {
-		if object.Reference.Kind != "source" {
-			continue
+	if sourceCount > 0 && !p.explorerCollapsed["group:databases"] {
+		for i, object := range catalog.Objects {
+			if object.Reference.Kind != "source" {
+				continue
+			}
+			ref := object.Reference
+			id := "source:" + ref.SourceID
+			label := ref.Title
+			if object.Issue != "" {
+				label += " ⚠"
+			}
+			nodes = append(nodes, explorerNode{id: id, label: label, depth: 2, objectIndex: i, branch: true, issue: object.Issue != ""})
+			if p.explorerCollapsed[id] {
+				continue
+			}
+			if issue := object.Issue; issue != "" {
+				nodes = append(nodes, explorerNode{id: id + ":issue", label: "⚠ " + issue, depth: 3, objectIndex: -1, issue: true, issueFor: i})
+			}
+			appendGroup(ref.SourceID, "table", "Tables", 3)
+			appendGroup(ref.SourceID, "project_view", "Views", 3)
 		}
-		ref := object.Reference
-		id := "source:" + ref.SourceID
-		label := ref.Title
-		if object.Issue != "" {
-			label += " ⚠"
-		}
-		nodes = append(nodes, explorerNode{id: id, label: label, depth: 1, objectIndex: i, branch: true, issue: object.Issue != ""})
-		if p.explorerCollapsed[id] {
-			continue
-		}
-		if issue := object.Issue; issue != "" {
-			nodes = append(nodes, explorerNode{id: id + ":issue", label: "⚠ " + issue, depth: 2, objectIndex: -1, issue: true, issueFor: i})
-		}
-		appendGroup(ref.SourceID, "table", "Tables", 2)
-		appendGroup(ref.SourceID, "project_view", "Views", 2)
-		appendGroup(ref.SourceID, "query", "Queries", 2)
 	}
-	appendGroup("", "query", "Project queries", 1)
+	appendGroup("*", "query", "Queries", 1)
 	return nodes
 }
 

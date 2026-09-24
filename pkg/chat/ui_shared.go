@@ -23,7 +23,19 @@ var (
 	userStyle                 = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("45"))
 	messageSurfaceBackground  = lipgloss.Color("235")
 	selectedMessageBackground = lipgloss.Color("237")
+	// agentStyle is ui.go's original agentStyle var, kept unchanged:
+	// http_document_block.go's httpDocumentBlock still uses it.
+	agentStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 )
+
+// ProjectChoice identifies a configured DataTug project, not a database. It
+// is ui.go's original type, moved here unchanged: ChatUI's
+// SetProjectChoices/chatui_pickers.go's projectPickerOverlay still use it.
+type ProjectChoice struct {
+	Key    string
+	Title  string
+	Detail string
+}
 
 // responsiveGutter/contentWidth/padAnsiLine are DataTug's general
 // terminal-layout helpers, used well beyond the grid (message cards, the

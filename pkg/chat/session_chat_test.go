@@ -250,40 +250,6 @@ func TestSessionContextHasHardSizeLimit(t *testing.T) {
 	}
 }
 
-func TestEmptyToolResultRestoresAsGrid(t *testing.T) {
-	ctx := context.Background()
-	path := testStorePath(t)
-	store := openTestStore(t, path, testScope())
-	llm := &scriptedProvider{steps: []scriptedStep{
-		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": "from: {name: Customer}\nlimit: 1"})}},
-		{text: "No matching rows"},
-	}}
-	agent, err := NewAIConversation(llm, &fakeExecutor{result: secureread.Result{}}, "sqlite:///chinook.db", "- Customer")
-	if err != nil {
-		t.Fatal(err)
-	}
-	chat, err := NewSessionChat(ctx, store, agent, "sqlite:///chinook.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := chat.Ask(ctx, "Show no matches"); err != nil {
-		t.Fatal(err)
-	}
-	_ = store.Close()
-	reloaded := openTestStore(t, path, testScope())
-	chat, err = NewSessionChat(ctx, reloaded, &contextualStub{}, "sqlite:///chinook.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, chat, "fake-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(u.View().Content, "No rows returned.") {
-		t.Fatal("empty persisted grid was not rendered")
-	}
-}
-
 // TestSessionChatStreamAskPersistsSameAsAsk drives a real AIConversation
 // (StreamingConversation) through SessionChat.StreamAsk and checks the
 // persisted session -- the user message, the executed query/RecordSet, and

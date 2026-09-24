@@ -35,17 +35,31 @@ func columnMetaFor(catalog ProjectCatalog, record *RecordSet, name string) inspe
 		}
 		// relationInstances' own walk always appends at least the root FROM
 		// relation (dtql.Deserialize requires a FROM clause to succeed at
-		// all), and dtql has no multi-relation FROM at all -- a literal
-		// "joins are not supported by DTQL" (dtql/serialize.go) -- so
-		// instances here is always exactly len==1 for any document that
-		// reached this point; the r5 fix round (#289) removed the
-		// zero/multi-instance defensive guards this file used to carry
-		// (both provably unreachable via any real DTQL document, per
-		// founder's 100%-coverage-via-seams-not-dead-code directive) rather
-		// than fake a test scenario dtql.Deserialize can never produce.
+		// all), so instances is never empty for any document that reached
+		// this point -- the r5 fix round (#289) removed that zero-instance
+		// guard as provably unreachable, and it stays removed.
+		//
+		// The r5 round ALSO removed an "unqualified source with more than
+		// one relation" guard on the (wrong) belief that DTQL has no
+		// multi-relation FROM at all. That's false: DiscoverJoinCandidates/
+		// deriveJoinDTQL (join.go) and the #291 attached-join widening
+		// produce real joined DTQL documents with a `joins:` clause, and
+		// relationInstances walks every one of them, so len(instances) > 1
+		// is a real, reachable case for a query.Columns() field or wildcard
+		// left unqualified (empty Source()) -- e.g. an unqualified
+		// "CustomerId" projected from Invoice⋈Customer, where both sides
+		// carry that column name. Without this guard, an unqualified
+		// source matched EVERY relation instead of none, so the catalog
+		// loop below matched both sides' same-named columns and reported a
+		// false "ambiguous source" instead of leaving the column
+		// unattributed (the r6 fix round restored this guard; see
+		// TestColumnMetaForUnqualifiedFieldInJoinedQueryIsUnattributed).
 		instances := relationInstances(query.From())
 		allowed := func(source string) map[string]bool {
 			matches := map[string]bool{}
+			if source == "" && len(instances) != 1 {
+				return matches
+			}
 			for _, instance := range instances {
 				if source == "" || strings.EqualFold(source, instance.Alias) || strings.EqualFold(source, instance.Relation) {
 					matches[relationKey(instance.Schema, instance.Relation)] = true

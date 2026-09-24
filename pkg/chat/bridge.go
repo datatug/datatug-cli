@@ -75,6 +75,23 @@ var netListenTCP = net.Listen
 // silently not take effect.
 var wsWriteJSON = func(conn *websocket.Conn, v any) error { return conn.WriteJSON(v) }
 
+// bridgeSubscribeChanges is a test-only seam over SessionChat.SubscribeChanges
+// (nil-effect in production, where it is exactly sessions.SubscribeChanges):
+// StartBrowserBridge's /v1/chat/events handler defers the real stop() right
+// above its receive loop, so under the real SessionChat that loop's own
+// closed-channel ("!ok") case can only ever fire after the loop has already
+// returned via another case -- there is no way to close that specific
+// subscription's channel from outside this one handler invocation. It stays
+// as defensive code (a future SessionChat change, or another caller sharing
+// the same subscription, could close it earlier) rather than being deleted,
+// per the r6 fix round's correction of the r5 round's mistaken "delete
+// provably-dead code" call on inspector_ui.go's own guard. A test overrides
+// this var to hand the handler a channel it can close directly, standing in
+// for "something closed this subscription early."
+var bridgeSubscribeChanges = func(sessions *SessionChat) (<-chan struct{}, func()) {
+	return sessions.SubscribeChanges()
+}
+
 // bridgeBaseContext is a test-only seam over http.Server.BaseContext
 // (nil-effect in production, where it yields the same context.Background()
 // http.Server would use by default): the /v1/chat/events handler's
@@ -117,6 +134,12 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 	// later one to fail overrides wsWriteJSON with a stateful closure
 	// BEFORE calling StartBrowserBridge, instead of swapping it mid-test.
 	writeJSON := wsWriteJSON
+	// subscribeChanges is captured ONCE here too, for the identical reason
+	// writeJSON is above: the /v1/chat/events handler below runs in a
+	// per-connection background goroutine, so a live re-read of the
+	// package var would race a test's later restore. A test overrides
+	// bridgeSubscribeChanges before calling StartBrowserBridge.
+	subscribeChanges := bridgeSubscribeChanges
 	mux := http.NewServeMux()
 	mux.HandleFunc("/datatug/projects/project_summary", func(w http.ResponseWriter, r *http.Request) {
 		if !bridge.authorize(w, r, token) {
@@ -210,7 +233,7 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 			bridge.connectionsMu.Unlock()
 		}()
 		conn.SetReadLimit(1024)
-		changes, stop := sessions.SubscribeChanges()
+		changes, stop := subscribeChanges(sessions)
 		defer stop()
 		disconnected := make(chan struct{})
 		go func() {
@@ -226,17 +249,21 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 		}
 		for {
 			select {
-			// A plain receive, not "_, ok := <-changes": SubscribeChanges'
-			// own stop() (the only thing that ever closes this channel) is
-			// deferred right above this loop, so it only runs once this
-			// function -- and therefore this loop -- has already returned
-			// via one of the other select cases below. A closed-channel
-			// receive is unreachable through the public API (verified by
-			// reading SubscribeChanges: stop() is the sole closer, and
-			// nothing else in this package holds a reference to close this
-			// channel earlier), so the dead !ok branch is deleted rather
-			// than left as a fabricated test.
-			case <-changes:
+			case _, ok := <-changes:
+				// Defensive: under the real SessionChat.SubscribeChanges,
+				// stop() (the only thing that ever closes this specific
+				// channel) is deferred right above this loop, so !ok can
+				// only fire after the loop has already returned via
+				// another case -- see bridgeSubscribeChanges' doc comment.
+				// Restored (r6 fix round) after the r5 round wrongly
+				// deleted it as provably dead: it's genuinely unreachable
+				// through today's SessionChat, but not through every
+				// possible bridgeSubscribeChanges override or future
+				// SessionChat change, so it stays as a real guard rather
+				// than an assumption baked into the loop's shape.
+				if !ok {
+					return
+				}
 				if err := writeJSON(conn, map[string]string{"type": "changed"}); err != nil {
 					return
 				}

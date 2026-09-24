@@ -294,3 +294,50 @@ func TestBridgeEventsHandlerContextDoneReturns(t *testing.T) {
 		t.Fatal("expected the server to close the connection once its base context was canceled")
 	}
 }
+
+// TestBridgeEventsHandlerChangesChannelClosedEarlyReturns covers the
+// /v1/chat/events handler select loop's own `!ok` branch on the changes
+// channel (bridge.go, restored in the r6 fix round -- see bridgeSubscribeChanges'
+// and the loop's own doc comments for why it's genuinely unreachable
+// through today's real SessionChat.SubscribeChanges, but stays as
+// defensive code rather than being deleted). The bridgeSubscribeChanges
+// seam hands the handler a channel this test can close directly -- standing
+// in for "something closed this specific subscription early" -- something
+// the real SubscribeChanges/stop() pairing can never do from outside this
+// one handler invocation.
+func TestBridgeEventsHandlerChangesChannelClosedEarlyReturns(t *testing.T) {
+	fakeChanges := make(chan struct{})
+	restore := bridgeSubscribeChanges
+	t.Cleanup(func() { bridgeSubscribeChanges = restore })
+	bridgeSubscribeChanges = func(*SessionChat) (<-chan struct{}, func()) {
+		return fakeChanges, func() {}
+	}
+
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bridge.Close() })
+
+	socket := dialBridgeEvents(t, bridge)
+	defer func() { _ = socket.Close() }()
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var notification map[string]string
+	if err := socket.ReadJSON(&notification); err != nil || notification["type"] != "changed" {
+		t.Fatalf("initial socket event: %v %v", notification, err)
+	}
+
+	close(fakeChanges)
+
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := socket.ReadJSON(&notification); err == nil {
+		t.Fatal("expected the server to close the connection once its changes channel closed early")
+	}
+}

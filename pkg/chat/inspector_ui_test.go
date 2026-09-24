@@ -68,13 +68,13 @@ func TestColumnMetaForWildcardExcludedColumnIsUnattributed(t *testing.T) {
 	}
 }
 
-// Note: dtql's own validateWildcardYAML rejects any wildcard.Source that
-// isn't exactly the FROM clause's own name/alias (or empty) before
-// columnMetaFor ever runs, and DTQL has no multi-relation FROM at all (a
-// literal "joins are not supported by DTQL", dtql/serialize.go) -- so the
-// r5 fix round (#289) removed columnMetaFor's zero/multi-instance defensive
-// guards outright (both provably unreachable via any real DTQL document)
-// instead of leaving them uncovered; see inspector_ui.go's comment.
+// Note: relationInstances' own walk always appends at least the root FROM
+// relation, so columnMetaFor's zero-instance guard is provably unreachable
+// via any real DTQL document and the r5 fix round (#289) removed it
+// outright. The r5 round ALSO removed a multi-instance guard on the
+// mistaken belief that DTQL has no multi-relation FROM at all -- wrong:
+// see TestColumnMetaForUnqualifiedFieldInJoinedQueryIsUnattributed below,
+// which the r6 fix round added once the guard was restored.
 
 // TestColumnMetaForNameWithSchemaPrefixUsesShortNameForCatalogLookup covers
 // the nil-record path's own name normalisation: a caller-qualified name
@@ -187,6 +187,34 @@ func TestColumnMetaForFieldSourceResolvesToNoRelationIsUnattributed(t *testing.T
 	meta := columnMetaFor(columnMetaForTestCatalog(), record, "InvoiceId")
 	if !metaIsZero(meta) {
 		t.Fatalf("meta = %+v, want zero value when the field's source resolves to no FROM relation", meta)
+	}
+}
+
+// TestColumnMetaForUnqualifiedFieldInJoinedQueryIsUnattributed covers the
+// allowed() closure's own "unqualified source with more than one relation"
+// guard (inspector_ui.go), restored in the r6 fix round after the r5 round
+// wrongly deleted it as unreachable. It's real: DiscoverJoinCandidates/
+// deriveJoinDTQL (join.go) and the #291 attached-join widening produce real
+// joined DTQL documents -- an "implicit wildcard" query (a joined FROM with
+// NO columns: key at all, which dtql.Deserialize accepts; a hand-authored
+// unqualified field or wildcard under a real joins: clause does NOT --
+// dtql's own join_field validation rejects those categorically, verified
+// empirically) is the reachable path: query.Columns() is empty, so
+// columnMetaFor's own len(query.Columns())==0 branch calls allowed("")
+// with len(instances)==2. Without the guard, allowed("") matched every
+// relation instead of none, so the catalog loop below matched Invoice's
+// AND Customer's same-named CustomerId columns and reported a false
+// "ambiguous source" instead of leaving the column unattributed, which is
+// main's real behavior for a joined query with no explicit column list.
+func TestColumnMetaForUnqualifiedFieldInJoinedQueryIsUnattributed(t *testing.T) {
+	catalog := ProjectCatalog{Objects: []ProjectObject{
+		{Reference: ContextReference{Kind: "table", ObjectID: "main.invoice"}, Columns: []string{"InvoiceId", "CustomerId"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER"}},
+		{Reference: ContextReference{Kind: "table", ObjectID: "main.customer"}, Columns: []string{"CustomerId", "FirstName"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER"}},
+	}}
+	record := &RecordSet{DTQL: "from:\n  name: Invoice\n  alias: i\n  joins:\n    - from: {name: Customer, alias: c}\n      on:\n        - {left: {field: CustomerId, source: i}, op: '==', right: {field: CustomerId, source: c}}\nlimit: 5\n"}
+	meta := columnMetaFor(catalog, record, "CustomerId")
+	if !metaIsZero(meta) {
+		t.Fatalf("meta = %+v, want zero value for an unqualified column under a real joined query (main leaves it unattributed, never falsely ambiguous)", meta)
 	}
 }
 

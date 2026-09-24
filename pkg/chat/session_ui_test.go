@@ -6,10 +6,15 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
-func TestSessionUIRestoresGridAndManagesSessions(t *testing.T) {
+// Ported from the legacy UI's session_ui_test.go: same session-management
+// flows (/new /sessions /rename /switch /clear /delete, restoring a
+// persisted grid on NewSessionChatUI), driven through ChatUI's public
+// Submit/drainCmd round trip and shell.View().Content instead of u.entries.
+func TestChatUISessionRestoresGridAndManagesSessions(t *testing.T) {
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -34,48 +39,56 @@ func TestSessionUIRestoresGridAndManagesSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, err := NewSessionUI(ctx, sessions, "fake-model")
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(u.entries) != 2 || u.entries[1].grid == nil || len(u.entries[1].grid.Rows()) != 1 {
-		t.Fatalf("restored history = %+v", u.entries)
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if len(u.gridsByRecordSetID) != 1 {
+		t.Fatalf("restored grids = %+v", u.gridsByRecordSetID)
 	}
-	if !strings.Contains(u.View().Content, "Prague") {
+	if !strings.Contains(u.shell.View().Content, "Prague") {
 		t.Fatal("persisted grid was not rendered")
 	}
-	u.runSessionCommand("/new")
+
+	drainCmd(t, u, u.Submit("/new"))
 	secondID := u.sessionID
-	if secondID == first.ID || len(u.entries) != 0 {
+	if secondID == first.ID || len(u.gridsByRecordSetID) != 0 {
 		t.Fatal("new session did not open empty")
 	}
-	u.runSessionCommand("/sessions")
-	if len(u.entries) != 1 || !strings.Contains(u.entries[0].text, first.ID[:8]) {
-		t.Fatalf("session list = %+v", u.entries)
+
+	drainCmd(t, u, u.Submit("/sessions"))
+	if !strings.Contains(u.shell.View().Content, first.ID[:8]) {
+		t.Fatalf("session list missing first session in view:\n%s", u.shell.View().Content)
 	}
-	u.runSessionCommand("/rename Other analysis")
-	if u.sessionTitle != "Other analysis" {
-		t.Fatalf("renamed title = %q", u.sessionTitle)
+
+	drainCmd(t, u, u.Submit("/rename Other analysis"))
+	if u.snapshot.Title != "Other analysis" {
+		t.Fatalf("renamed title = %q", u.snapshot.Title)
 	}
-	u.runSessionCommand("/switch " + first.ID[:8])
-	if u.sessionID != first.ID || len(u.entries) != 2 || u.entries[1].grid == nil {
+
+	drainCmd(t, u, u.Submit("/switch "+first.ID[:8]))
+	if u.sessionID != first.ID || len(u.gridsByRecordSetID) != 1 {
 		t.Fatal("switch did not restore first grid")
 	}
-	u.runSessionCommand("/clear")
-	if len(u.entries) != 3 || !strings.Contains(u.entries[2].text, "confirm") {
+
+	drainCmd(t, u, u.Submit("/clear"))
+	if !strings.Contains(u.shell.View().Content, "confirm") {
 		t.Fatal("clear lacked confirmation")
 	}
-	u.runSessionCommand("/clear confirm")
-	if len(u.entries) != 0 {
+
+	drainCmd(t, u, u.Submit("/clear confirm"))
+	if len(u.gridsByRecordSetID) != 0 {
 		t.Fatal("clear retained history")
 	}
-	u.runSessionCommand("/delete confirm")
-	if u.sessionID != secondID || u.sessionTitle != "Other analysis" {
-		t.Fatalf("delete switched to %q %q", u.sessionID, u.sessionTitle)
+
+	drainCmd(t, u, u.Submit("/delete confirm"))
+	if u.sessionID != secondID || u.snapshot.Title != "Other analysis" {
+		t.Fatalf("delete switched to %q %q", u.sessionID, u.snapshot.Title)
 	}
 }
 
-func TestSessionUISubmissionPersistsThenRendersFromSnapshot(t *testing.T) {
+func TestChatUISessionSubmissionPersistsThenRendersFromSnapshot(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	agent := &contextualStub{turns: []Turn{{Queries: []QueryResult{{Title: "Invoices", DTQL: "from: {name: Invoice}\nlimit: 1", Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 412}}}}}}}}}
@@ -83,18 +96,15 @@ func TestSessionUISubmissionPersistsThenRendersFromSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, err := NewSessionUI(ctx, sessions, "fake-model")
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
 	if err != nil {
 		t.Fatal(err)
 	}
-	u.input.SetValue("Show one invoice")
-	_, cmd := u.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cmd == nil || !u.busy {
-		t.Fatal("submission did not start")
-	}
-	_, _ = u.Update(cmd())
-	if u.busy || len(u.entries) != 2 || u.entries[1].grid == nil {
-		t.Fatalf("result not restored from snapshot: %+v", u.entries)
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	drainCmd(t, u, u.Submit("Show one invoice"))
+	if len(u.gridsByRecordSetID) != 1 {
+		t.Fatalf("result not restored from snapshot: %+v", u.gridsByRecordSetID)
 	}
 	snapshot, err := sessions.Snapshot(ctx)
 	if err != nil || len(snapshot.RecordSets) != 1 {

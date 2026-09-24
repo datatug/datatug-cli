@@ -288,11 +288,19 @@ func (u *ChatUI) askOpenFunc(ctx context.Context, id, prompt string) iter.Seq2[a
 	}
 }
 
-// OnStreamDone satisfies chatshell.StreamObserver: once the placeholder
-// streamed entry holds the turn's narrative text (or an error was already
-// rendered by chatshell itself), append the turn's query/action results —
-// grid and FK-join blocks, and any applied-limitation notes — the same
-// shape ui.go's appendTurn produced.
+// OnStreamDone satisfies chatshell.StreamObserver. The placeholder streamed
+// entry may hold raw text chatshell rendered live as it arrived -- a
+// model's hidden <think> reasoning before stripThinkTags ran (see agent.go),
+// or plain prose that the final Turn deliberately drops when a query/grid
+// result is the answer (AskWithContext/StreamAskWithContext: "the grid is
+// the answer" clears turnText once len(turn.Queries) > 0). Left alone, that
+// stream-time text would keep showing beside the grid in the live view even
+// though a session reload never persists it (store.go's AppendTurn only
+// inserts a message row when turn.Text != ""; see M3, r1 adversarial
+// review). ReplaceBlock swaps the placeholder entry for a block that
+// reflects the FINAL, resolved Turn.Text before appendTurnResults appends
+// the query/action results below it, so the live view matches what a
+// reload will show.
 func (u *ChatUI) OnStreamDone(id string, _ error) tea.Cmd {
 	u.pendingTurnsMu.Lock()
 	outcome, ok := u.pendingTurns[id]
@@ -301,9 +309,30 @@ func (u *ChatUI) OnStreamDone(id string, _ error) tea.Cmd {
 	if !ok || outcome.err != nil {
 		return nil
 	}
+	u.shell.ReplaceBlock(id, finalTurnTextBlock{text: outcome.turn.Text})
 	u.appendTurnResults(outcome.turn)
 	return nil
 }
+
+// finalTurnTextBlock is a minimal transcript.Block that renders a turn's
+// FINAL, resolved narrative text (or nothing, when empty -- the "grid is
+// the answer" case) in place of whatever chatshell streamed live for that
+// entry. It exists only for OnStreamDone's ReplaceBlock call: a
+// transcript.Block, once set on an entry, takes rendering priority over
+// that entry's own Text field entirely (see tui/transcript's render switch),
+// which is what actually discards the stale streamed content rather than
+// merely rendering the new text alongside it.
+type finalTurnTextBlock struct{ text string }
+
+func (b finalTurnTextBlock) View(width int, _ bool) string {
+	if b.text == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().Width(max(1, width)).Render(string(transcript.RoleAssistant) + ": " + b.text)
+}
+
+func (b finalTurnTextBlock) Update(tea.Msg) (transcript.Block, tea.Cmd) { return b, nil }
+func (finalTurnTextBlock) Focusable() bool                              { return false }
 
 // OnStreamEvent satisfies chatshell.StreamObserver; ChatUI has nothing to
 // add beyond chatshell's own built-in text-delta rendering.

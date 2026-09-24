@@ -39,7 +39,7 @@ func (u *UI) openExportDialog() {
 	d.dir.SetValue(directory)
 	name := "recordset"
 	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
-		name = u.entries[u.activeGrid].grid.title
+		name = u.entries[u.activeGrid].grid.baseTitle
 	} else if len(u.snapshot.Workspace.ExportBucket) > 0 {
 		d.scope = 1
 		name = "bucket"

@@ -9,6 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/strongo/aichat/tui/grid"
+
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -64,7 +66,7 @@ func TestUIInlineFKJoinNavigationAndApply(t *testing.T) {
 		t.Fatal("grid could not be focused")
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Text: "j"})
-	if !u.joinFocused || u.entries[u.activeGrid].grid.focused {
+	if !u.joinFocused || u.entries[u.activeGrid].grid.Focused() {
 		t.Fatal("JOIN area did not receive focus")
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -72,7 +74,7 @@ func TestUIInlineFKJoinNavigationAndApply(t *testing.T) {
 		t.Fatal("exact FK details not displayed")
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if u.joinFocused || !u.entries[u.activeGrid].grid.focused {
+	if u.joinFocused || !u.entries[u.activeGrid].grid.Focused() {
 		t.Fatal("Esc did not return to grid")
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Text: "j"})
@@ -132,14 +134,14 @@ func TestGridKeepsFocusAndCursorAcrossHorizontalNavigation(t *testing.T) {
 	if _, handled := u.updateGrid(tea.KeyPressMsg{Code: tea.KeyRight}); !handled {
 		t.Fatal("right was not handled")
 	}
-	if !g.table.Focused() {
+	if !g.Focused() {
 		t.Fatal("table lost focus after horizontal rebuild")
 	}
 	if _, handled := u.updateGrid(tea.KeyPressMsg{Code: tea.KeyDown}); !handled {
 		t.Fatal("down was not handled")
 	}
-	if g.table.Cursor() != 1 {
-		t.Fatalf("cursor = %d, want 1", g.table.Cursor())
+	if g.CurrentIndex() != 1 {
+		t.Fatalf("cursor = %d, want 1", g.CurrentIndex())
 	}
 }
 
@@ -164,12 +166,12 @@ func TestShiftUpFromEmptyInputFocusesLatestGrid(t *testing.T) {
 	if !u.gridFocused {
 		t.Fatal("shift+up from empty input did not focus the latest grid")
 	}
-	if u.activeGrid < 0 || !u.entries[u.activeGrid].grid.table.Focused() {
+	if u.activeGrid < 0 || !u.entries[u.activeGrid].grid.Focused() {
 		t.Fatal("latest grid table is not focused")
 	}
 
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if got := u.entries[u.activeGrid].grid.table.Cursor(); got != 1 {
+	if got := u.entries[u.activeGrid].grid.CurrentIndex(); got != 1 {
 		t.Fatalf("cursor after down = %d, want 1", got)
 	}
 }
@@ -206,7 +208,7 @@ func TestShiftArrowsNavigateBetweenGridsAndInput(t *testing.T) {
 	if u.gridFocused || !u.input.Focused() {
 		t.Fatal("shift+down from newest grid did not return focus to input")
 	}
-	if u.entries[newerGrid].grid.focused || strings.Contains(u.entries[newerGrid].grid.view(), "●") {
+	if u.entries[newerGrid].grid.Focused() || strings.Contains(u.entries[newerGrid].grid.view(), "●") {
 		t.Fatal("returning to input left the selected grid highlighted")
 	}
 }
@@ -267,7 +269,7 @@ func TestEscapeFocusesComposerAndClearsActiveGridHighlight(t *testing.T) {
 	if u.gridFocused || !u.input.Focused() {
 		t.Fatal("Escape did not return keyboard focus to the composer")
 	}
-	if g.focused || strings.Contains(g.view(), "●") || !strings.Contains(g.view(), "○") {
+	if g.Focused() || strings.Contains(g.view(), "●") || !strings.Contains(g.view(), "○") {
 		t.Fatalf("Escape left the selected grid highlighted:\n%s", g.view())
 	}
 }
@@ -535,7 +537,7 @@ func TestClickingScrollDownCueClearsGridFocus(t *testing.T) {
 	if !u.history.AtBottom() || u.gridFocused || !u.input.Focused() {
 		t.Fatal("scroll-down cue did not return to latest history and composer focus")
 	}
-	if u.entries[u.activeGrid].grid.focused {
+	if u.entries[u.activeGrid].grid.Focused() {
 		t.Fatal("grid remained highlighted after clicking scroll-down cue")
 	}
 }
@@ -569,7 +571,7 @@ func TestGridTitleFooterAndScrollbarAreStructuredPresentation(t *testing.T) {
 
 func TestResultTitleAppearsOnceInCardBorder(t *testing.T) {
 	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "Customers", 80)
-	view := ansi.Strip(g.recordsetView(80))
+	view := ansi.Strip(g.View(80, g.Focused()))
 	if strings.Count(strings.Split(view, "\n")[0], "Customers") != 1 || strings.Count(view, "Customers") != 1 {
 		t.Fatalf("title repeated in result card:\n%s", view)
 	}
@@ -582,8 +584,8 @@ func TestResultTitleAppearsOnceInCardBorder(t *testing.T) {
 
 func TestFocusedRecordSetTitleAndFooterAreReadable(t *testing.T) {
 	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "Invoices", 80)
-	g.setFocused(true)
-	lines := strings.Split(g.recordsetView(80), "\n")
+	g.SetFocused(true)
+	lines := strings.Split(g.View(80, g.Focused()), "\n")
 	if !strings.Contains(lines[0], activeTitleStyle.Render("Invoices")) {
 		t.Fatalf("focused title has no active color: %q", lines[0])
 	}
@@ -599,14 +601,14 @@ func TestGridScrollbarTracksCursorBeforePageScrolls(t *testing.T) {
 		rows[i] = secureread.Row{Data: map[string]any{"ID": i}}
 	}
 	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: rows}), "Rows", 60)
-	start, _ := g.table.VisibleIndices()
-	before := g.scrollbarLine(0, 12)
-	g.rowIndex = 5
-	g.table.SetCursor(5)
-	after := g.scrollbarLine(0, 12)
-	still, _ := g.table.VisibleIndices()
+	g.SetFocused(true)
+	start, _ := g.VisibleIndices()
+	before := g.View(60, true)
+	g.SelectRow(5)
+	after := g.View(60, true)
+	still, _ := g.VisibleIndices()
 	if start != still || before == after {
-		t.Fatalf("scrollbar did not follow cursor within page: page %d→%d, thumb %q→%q", start, still, before, after)
+		t.Fatalf("scrollbar did not follow cursor within page: page %d→%d, view unchanged=%v", start, still, before == after)
 	}
 }
 
@@ -620,7 +622,7 @@ func TestWorkspaceReturnsToPreviousGrid(t *testing.T) {
 	gridIndex := u.activeGrid
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModShift})
-	if !u.gridFocused || u.activeGrid != gridIndex || !u.entries[gridIndex].grid.focused {
+	if !u.gridFocused || u.activeGrid != gridIndex || !u.entries[gridIndex].grid.Focused() {
 		t.Fatal("Shift+Left did not restore previous grid focus")
 	}
 }
@@ -677,20 +679,20 @@ func TestAltSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
 	result := secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}
 	u.appendTurn(Turn{Queries: []QueryResult{{Result: result}, {Result: result}}})
 	_, command := u.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt})
-	if command == nil || u.tableStyle != tableStyleSoft || u.styleNotice != "Table style: Soft" {
-		t.Fatalf("Alt+S style/notice = %s/%q", u.tableStyle.name(), u.styleNotice)
+	if command == nil || u.tableStyle.Name != grid.StyleSoft.Name || u.styleNotice != "Table style: Soft" {
+		t.Fatalf("Alt+S style/notice = %s/%q", u.tableStyle.Name, u.styleNotice)
 	}
 	if status := strings.Join(u.statusLines(), " "); !strings.Contains(status, "Table style: Soft") || strings.Contains(status, "Alt+S style") {
 		t.Fatalf("style notice did not temporarily replace shortcut hint: %q", status)
 	}
 	for _, entry := range u.entries {
-		if entry.grid != nil && entry.grid.tableStyle != tableStyleSoft {
+		if entry.grid != nil && entry.grid.Style().Name != grid.StyleSoft.Name {
 			t.Fatal("existing result did not adopt the style")
 		}
 	}
 	u.appendTurn(Turn{Queries: []QueryResult{{Result: result}}})
-	if got := u.entries[len(u.entries)-1].grid.tableStyle; got != tableStyleSoft {
-		t.Fatalf("new result style = %s", got.name())
+	if got := u.entries[len(u.entries)-1].grid.Style(); got.Name != grid.StyleSoft.Name {
+		t.Fatalf("new result style = %s", got.Name)
 	}
 	storedStyle, err := sessions.TableStyle(ctx)
 	if err != nil || storedStyle != "Soft" {
@@ -701,11 +703,11 @@ func TestAltSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
 		t.Fatal(err)
 	}
 	u.loadSession(newSession)
-	if u.tableStyle != tableStyleSoft {
+	if u.tableStyle.Name != grid.StyleSoft.Name {
 		t.Fatal("new session lost the shared table style")
 	}
 	reopened, err := NewSessionUI(ctx, sessions, "fake-model")
-	if err != nil || reopened.tableStyle != tableStyleSoft {
+	if err != nil || reopened.tableStyle.Name != grid.StyleSoft.Name {
 		t.Fatalf("restored style = %v, %v", reopened.tableStyle, err)
 	}
 	_, _ = u.Update(tableStyleNoticeExpired{id: u.styleNoticeID})
@@ -735,37 +737,36 @@ func TestGridWithoutScrollingUsesPlainRightBorder(t *testing.T) {
 func TestMacOptionSCyclesTableStyle(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
 	u.Update(tea.KeyPressMsg{Code: 'ß', Text: "ß"})
-	if u.tableStyle != tableStyleSoft || u.styleNotice != "Table style: Soft" {
-		t.Fatalf("Option+S style/notice = %s/%q", u.tableStyle.name(), u.styleNotice)
+	if u.tableStyle.Name != grid.StyleSoft.Name || u.styleNotice != "Table style: Soft" {
+		t.Fatalf("Option+S style/notice = %s/%q", u.tableStyle.Name, u.styleNotice)
 	}
 }
 
 func TestTableStylePresetsChangeHeaderAndDividerColors(t *testing.T) {
 	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1, "Name": "Alex"}}}}), "Rows", 60)
-	if g.tableStyle != tableStyleLines {
+	if g.Style().Name != grid.StyleLines.Name {
 		t.Fatal("new table did not default to Lines")
 	}
 	for _, tc := range []struct {
-		style tableStyle
+		style grid.Style
 		color string
 	}{
-		{tableStyleLines, "241"},
-		{tableStyleSoft, "235"},
-		{tableStyleMinimal, "232"},
+		{grid.StyleLines, "241"},
+		{grid.StyleSoft, "235"},
+		{grid.StyleMinimal, "232"},
 	} {
-		g.tableStyle = tc.style
-		g.rebuild()
-		view := g.table.View()
+		g.SetStyle(tc.style)
+		view := g.TableView()
 		if !strings.Contains(view, "38;5;"+tc.color+"m┃") {
-			t.Fatalf("%s column divider lacks preset color: %q", tc.style.name(), view)
+			t.Fatalf("%s column divider lacks preset color: %q", tc.style.Name, view)
 		}
 		header := strings.Split(view, "\n")[0]
 		if !strings.Contains(header, "\x1b[1;") {
-			t.Fatalf("%s header is not bold: %q", tc.style.name(), header)
+			t.Fatalf("%s header is not bold: %q", tc.style.Name, header)
 		}
 		card := strings.Split(g.view(), "\n")
 		if len(card) != 4 || strings.Contains(ansi.Strip(card[2]), "━") {
-			t.Fatalf("%s card still has a header/data border: %q", tc.style.name(), card)
+			t.Fatalf("%s card still has a header/data border: %q", tc.style.Name, card)
 		}
 	}
 }
@@ -793,7 +794,7 @@ func TestGridScrollbarUsesTopMiddleAndShortFinalPages(t *testing.T) {
 		t.Fatalf("middle page has no scrollbar thumb:\n%s", view)
 	}
 	_, _ = u.updateGrid(tea.KeyPressMsg{Code: tea.KeyPgDown})
-	if start, end := g.table.VisibleIndices(); start != 20 || end != 24 {
+	if start, end := g.VisibleIndices(); start != 20 || end != 24 {
 		t.Fatalf("final page range = %d-%d, want 20-24", start, end)
 	}
 	if view := g.view(); !strings.Contains(view, "▐") || !strings.Contains(view, "Rows 21–25 of 25 returned") {
@@ -801,18 +802,12 @@ func TestGridScrollbarUsesTopMiddleAndShortFinalPages(t *testing.T) {
 	}
 }
 
-func TestGridColumnStylesAlignTextLeftAndNumbersRight(t *testing.T) {
-	textColumn := GridColumn{Name: "Customer"}
-	numberColumn := GridColumn{Name: "Total", Numeric: true}
-	for _, selected := range []bool{false, true} {
-		if got := gridColumnStyle(textColumn, selected).GetAlignHorizontal(); got != lipgloss.Left {
-			t.Fatalf("text alignment selected=%v = %v, want left", selected, got)
-		}
-		if got := gridColumnStyle(numberColumn, selected).GetAlignHorizontal(); got != lipgloss.Right {
-			t.Fatalf("numeric alignment selected=%v = %v, want right", selected, got)
-		}
-	}
-}
+// TestGridColumnStylesAlignTextLeftAndNumbersRight: per-column alignment
+// (gridColumnStyle) moved into strongo/aichat's tui/grid as an unexported
+// policy (grid.Column.Numeric drives right-alignment); its coverage moved
+// with it (TestColumnAlignment in tui/grid's test suite). What remains
+// DataTug's own is that GridColumn.Numeric is set correctly by
+// columnIsNumeric, already covered by TestNewGridModelPreservesStructureAndFormatsValues.
 
 func TestGridEnterIsReservedAndSSorts(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
@@ -828,11 +823,11 @@ func TestGridEnterIsReservedAndSSorts(t *testing.T) {
 	}
 	g := u.entries[u.activeGrid].grid
 	_, _ = u.updateGrid(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if got := g.model.Rows[0][0]; got != "Zulu" {
+	if got := g.Cell(0, 0); got != "Zulu" {
 		t.Fatalf("Enter changed sort order to %q", got)
 	}
 	_, _ = u.updateGrid(tea.KeyPressMsg{Text: "s"})
-	if got := g.model.Rows[0][0]; got != "Alpha" {
+	if got := g.Cell(0, 0); got != "Alpha" {
 		t.Fatalf("s did not sort ascending, got %q", got)
 	}
 }
@@ -848,28 +843,28 @@ func TestGridUsesBubbleTablePaginationAndDoesNotWrapAtBoundaries(t *testing.T) {
 		t.Fatal("expected grid focus")
 	}
 	g := u.entries[u.activeGrid].grid
-	if start, end := g.table.VisibleIndices(); start != 0 || end != 9 {
+	if start, end := g.VisibleIndices(); start != 0 || end != 9 {
 		t.Fatalf("initial visible range = %d-%d, want 0-9", start, end)
 	}
 	_, _ = u.updateGrid(tea.KeyPressMsg{Code: tea.KeyUp})
-	if g.table.Cursor() != 0 {
-		t.Fatalf("cursor wrapped at first row: %d", g.table.Cursor())
+	if g.CurrentIndex() != 0 {
+		t.Fatalf("cursor wrapped at first row: %d", g.CurrentIndex())
 	}
 	for i := 0; i < len(rows)-1; i++ {
 		_, _ = u.updateGrid(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
-	if g.table.Cursor() != len(rows)-1 {
-		t.Fatalf("cursor = %d, want last row", g.table.Cursor())
+	if g.CurrentIndex() != len(rows)-1 {
+		t.Fatalf("cursor = %d, want last row", g.CurrentIndex())
 	}
-	if start, end := g.table.VisibleIndices(); start != 20 || end != 24 {
+	if start, end := g.VisibleIndices(); start != 20 || end != 24 {
 		t.Fatalf("last visible range = %d-%d, want 20-24", start, end)
 	}
-	if footer := g.footer(); !strings.Contains(footer, "Rows 21–25 of 25 returned") {
+	if footer := g.Footer(); !strings.Contains(footer, "Rows 21–25 of 25 returned") {
 		t.Fatalf("last-page footer = %q", footer)
 	}
 	_, _ = u.updateGrid(tea.KeyPressMsg{Code: tea.KeyDown})
-	if g.table.Cursor() != len(rows)-1 {
-		t.Fatalf("cursor wrapped at last row: %d", g.table.Cursor())
+	if g.CurrentIndex() != len(rows)-1 {
+		t.Fatalf("cursor wrapped at last row: %d", g.CurrentIndex())
 	}
 }
 
@@ -889,71 +884,69 @@ func TestGridHorizontalSelectionUsesBubbleTableOverflow(t *testing.T) {
 	g := u.entries[u.activeGrid].grid
 	for i := 0; i < 3; i++ {
 		_, _ = u.updateGrid(tea.KeyPressMsg{Code: tea.KeyRight})
-		first, last := g.visibleColumnRange()
-		if g.selectedColumn+1 < first || g.selectedColumn+1 > last {
-			t.Fatalf("step %d selected column %d outside visible range %d-%d", i+1, g.selectedColumn+1, first, last)
+		first, last := g.VisibleColumnRange()
+		if g.SelectedColumn()+1 < first || g.SelectedColumn()+1 > last {
+			t.Fatalf("step %d selected column %d outside visible range %d-%d", i+1, g.SelectedColumn()+1, first, last)
 		}
 	}
-	if g.selectedColumn != 3 || g.table.ColumnOffset() == 0 {
-		t.Fatalf("selected column/offset = %d/%d, want selected last column and horizontal offset", g.selectedColumn, g.table.ColumnOffset())
+	if g.SelectedColumn() != 3 || g.ColumnOffset() == 0 {
+		t.Fatalf("selected column/offset = %d/%d, want selected last column and horizontal offset", g.SelectedColumn(), g.ColumnOffset())
 	}
-	if g.table.ColumnOffset() != 1 {
-		t.Fatalf("horizontal offset = %d, want exact-fit offset 1", g.table.ColumnOffset())
+	if g.ColumnOffset() != 1 {
+		t.Fatalf("horizontal offset = %d, want exact-fit offset 1", g.ColumnOffset())
 	}
-	if first, last := g.visibleColumnRange(); first != 2 || last != 4 {
+	if first, last := g.VisibleColumnRange(); first != 2 || last != 4 {
 		t.Fatalf("visible columns = %d-%d, want exact rendered range 2-4", first, last)
 	}
-	plainTable := ansi.Strip(g.table.View())
+	plainTable := ansi.Strip(g.TableView())
 	for _, visible := range []string{"Second", "Third", "Fourth", "two", "three", "four"} {
 		if !strings.Contains(plainTable, visible) {
 			t.Fatalf("reported visible value %q is absent from rendered table:\n%s", visible, plainTable)
 		}
 	}
-	if footer := g.footer(); !strings.Contains(footer, "Cols 2–4 of 4") {
+	if footer := g.Footer(); !strings.Contains(footer, "Cols 2–4 of 4") {
 		t.Fatalf("footer does not match rendered columns: %q", footer)
 	}
 	for i := 0; i < 3; i++ {
 		_, _ = u.updateGrid(tea.KeyPressMsg{Code: tea.KeyLeft})
 	}
-	if g.selectedColumn != 0 || g.table.ColumnOffset() != 0 {
-		t.Fatalf("left navigation selected column/offset = %d/%d", g.selectedColumn, g.table.ColumnOffset())
+	if g.SelectedColumn() != 0 || g.ColumnOffset() != 0 {
+		t.Fatalf("left navigation selected column/offset = %d/%d", g.SelectedColumn(), g.ColumnOffset())
 	}
 }
 
 func TestGridNarrowMarkerOnlyViewReportsNoVisibleColumns(t *testing.T) {
-	grid := GridModel{
+	model := GridModel{
 		Columns: []GridColumn{{Name: "First"}, {Name: "Second"}},
 		Rows:    [][]string{{"one", "two"}},
 	}
-	g := newGridState(grid, "Narrow", 2)
-	g.selectedColumn = 1
-	g.ensureSelectedColumnVisible()
-	if first, last := g.visibleColumnRange(); first != 0 || last != 0 {
+	g := newGridState(model, "Narrow", 2)
+	g.SelectColumn(1)
+	if first, last := g.VisibleColumnRange(); first != 0 || last != 0 {
 		t.Fatalf("marker-only visible range = %d-%d, want 0-0", first, last)
 	}
-	if strings.Contains(g.footer(), "Cols ") {
-		t.Fatalf("marker-only footer invented visible columns: %q", g.footer())
+	if strings.Contains(g.Footer(), "Cols ") {
+		t.Fatalf("marker-only footer invented visible columns: %q", g.Footer())
 	}
 }
 
 func TestGridNarrowViewCanRevealSelectedFinalColumn(t *testing.T) {
-	grid := GridModel{
+	model := GridModel{
 		Columns: []GridColumn{{Name: "First"}, {Name: "Second"}},
 		Rows:    [][]string{{"one", "two"}},
 	}
 	// The 8-cell table initially has room only for the right overflow marker:
 	// a non-final six-cell column also needs its divider. At offset 1, however,
 	// the left marker plus the divider-free final column fit exactly.
-	g := newGridState(grid, "Narrow", 10)
-	g.selectedColumn = 1
-	g.ensureSelectedColumnVisible()
-	if g.table.ColumnOffset() != 1 {
-		t.Fatalf("horizontal offset = %d, want final-column offset 1", g.table.ColumnOffset())
+	g := newGridState(model, "Narrow", 10)
+	g.SelectColumn(1)
+	if g.ColumnOffset() != 1 {
+		t.Fatalf("horizontal offset = %d, want final-column offset 1", g.ColumnOffset())
 	}
-	if first, last := g.visibleColumnRange(); first != 2 || last != 2 {
+	if first, last := g.VisibleColumnRange(); first != 2 || last != 2 {
 		t.Fatalf("visible range = %d-%d, want selected final column 2-2", first, last)
 	}
-	plainTable := ansi.Strip(g.table.View())
+	plainTable := ansi.Strip(g.TableView())
 	for _, visible := range []string{"Second", "two"} {
 		if !strings.Contains(plainTable, visible) {
 			t.Fatalf("selected final-column value %q is absent from rendered table:\n%s", visible, plainTable)
@@ -975,15 +968,15 @@ func TestGridResizePreservesFocusRowAndHorizontalWindow(t *testing.T) {
 	_, _ = u.updateGrid(tea.KeyPressMsg{Code: tea.KeyDown})
 	_, _ = u.updateGrid(tea.KeyPressMsg{Code: tea.KeyRight})
 	_, _ = u.updateGrid(tea.KeyPressMsg{Code: tea.KeyRight})
-	row := g.table.Cursor()
+	row := g.CurrentIndex()
 	u.width = 70
 	u.rebuildHistory(false)
-	if !g.table.Focused() || g.table.Cursor() != row {
-		t.Fatalf("focus/cursor after resize = %v/%d, want true/%d", g.table.Focused(), g.table.Cursor(), row)
+	if !g.Focused() || g.CurrentIndex() != row {
+		t.Fatalf("focus/cursor after resize = %v/%d, want true/%d", g.Focused(), g.CurrentIndex(), row)
 	}
-	first, last := g.visibleColumnRange()
-	if g.selectedColumn+1 < first || g.selectedColumn+1 > last {
-		t.Fatalf("selected column %d is outside visible range %d-%d after resize", g.selectedColumn+1, first, last)
+	first, last := g.VisibleColumnRange()
+	if g.SelectedColumn()+1 < first || g.SelectedColumn()+1 > last {
+		t.Fatalf("selected column %d is outside visible range %d-%d after resize", g.SelectedColumn()+1, first, last)
 	}
 }
 
@@ -1095,26 +1088,26 @@ func TestRecordsetViewsRouteFocusAcrossSplitAndNarrowLayouts(t *testing.T) {
 		{Spec: ChartSpec{Kind: ChartBar, Title: "By ID", Points: []ChartPoint{{Label: "1", Value: 1}}}},
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Text: "2"})
-	if g.activeView != recordsetCharts || !g.recordsetLayout(u.chatPaneWidth()).split || g.secondaryFocus {
-		t.Fatalf("wide chart state = view:%v layout:%+v secondary:%v", g.activeView, g.recordsetLayout(u.chatPaneWidth()), g.secondaryFocus)
+	if g.CurrentView() != gridViewCharts || !chooseGridLayout(u.chatPaneWidth(), g.NaturalWidth(), g.CurrentView()).Split || g.SecondaryFocus() {
+		t.Fatalf("wide chart state = view:%v layout:%+v secondary:%v", g.CurrentView(), chooseGridLayout(u.chatPaneWidth(), g.NaturalWidth(), g.CurrentView()), g.SecondaryFocus())
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if !g.secondaryFocus || g.chartIndex != 1 {
-		t.Fatalf("chart focus/index = %v/%d, want true/1", g.secondaryFocus, g.chartIndex)
+	if !g.SecondaryFocus() || g.chartIndex != 1 {
+		t.Fatalf("chart focus/index = %v/%d, want true/1", g.SecondaryFocus(), g.chartIndex)
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Text: "1"})
-	if g.activeView != recordsetTable || g.secondaryFocus {
-		t.Fatalf("table return = view:%v secondary:%v", g.activeView, g.secondaryFocus)
+	if g.CurrentView() != grid.ViewTable || g.SecondaryFocus() {
+		t.Fatalf("table return = view:%v secondary:%v", g.CurrentView(), g.SecondaryFocus())
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Text: "3"})
-	if g.activeView != recordsetCurrentRow {
-		t.Fatalf("current-row view = %v", g.activeView)
+	if g.CurrentView() != gridViewCurrentRow {
+		t.Fatalf("current-row view = %v", g.CurrentView())
 	}
 	u.width = 70
 	u.rebuildHistory(false)
-	if g.recordsetLayout(u.chatPaneWidth()).split || !g.secondaryFocus {
-		t.Fatalf("narrow inspector layout/focus = %+v/%v", g.recordsetLayout(u.chatPaneWidth()), g.secondaryFocus)
+	if chooseGridLayout(u.chatPaneWidth(), g.NaturalWidth(), g.CurrentView()).Split || !g.SecondaryFocus() {
+		t.Fatalf("narrow inspector layout/focus = %+v/%v", chooseGridLayout(u.chatPaneWidth(), g.NaturalWidth(), g.CurrentView()), g.SecondaryFocus())
 	}
 	if view := ansi.Strip(u.View().Content); !strings.Contains(view, "3 Current row") || !strings.Contains(view, "Ireland") {
 		t.Fatalf("narrow inspector did not render current row:\n%s", view)
@@ -1167,7 +1160,7 @@ func TestEscapeClearsSecondaryPaneHighlight(t *testing.T) {
 
 func TestRecordsetHeaderRetainsViewControlsForLongTitles(t *testing.T) {
 	g := newGridState(GridModel{}, strings.Repeat("very long generated title ", 8), 70)
-	header := ansi.Strip(g.recordsetHeader(70))
+	header := ansi.Strip(g.HeaderLine(70))
 	for _, want := range []string{"1 Table", "2 Charts", "3 Current row"} {
 		if !strings.Contains(header, want) {
 			t.Fatalf("long-title header hid %q: %q", want, header)
@@ -1180,7 +1173,7 @@ func TestRecordsetHeaderRetainsViewControlsForLongTitles(t *testing.T) {
 
 func TestRecordsetHeaderRetainsAllControlsAtTwentyTwoCells(t *testing.T) {
 	g := newGridState(GridModel{}, strings.Repeat("generated title ", 8), 22)
-	header := ansi.Strip(g.recordsetHeader(22))
+	header := ansi.Strip(g.HeaderLine(22))
 	for _, want := range []string{"1", "2", "3"} {
 		if !strings.Contains(header, want) {
 			t.Fatalf("22-cell header hid %q: %q", want, header)
@@ -1189,7 +1182,7 @@ func TestRecordsetHeaderRetainsAllControlsAtTwentyTwoCells(t *testing.T) {
 	if got := ansi.StringWidth(header); got != 22 {
 		t.Fatalf("header width = %d, want 22: %q", got, header)
 	}
-	top := strings.Split(ansi.Strip(g.recordsetView(22)), "\n")[0]
+	top := strings.Split(ansi.Strip(g.View(22, g.Focused())), "\n")[0]
 	if !strings.Contains(top, "1 2 3") {
 		t.Fatalf("rendered border clips a tab: %q", top)
 	}
@@ -1217,18 +1210,28 @@ func TestCurrentRowInspectorScrollsAndResetsForAnotherSourceRow(t *testing.T) {
 		t.Fatal("expected grid focus")
 	}
 	g := u.entries[u.activeGrid].grid
+	// CardView (grid.CardView, DataTug's "Current row" view) tracks its own
+	// scroll offset internally, so this checks the rendered content instead
+	// of an exported Y-offset: after scrolling down, Field00 is no longer
+	// on screen; after the highlighted row changes, the next render resets
+	// to the top (Field00 visible again). It reads g.ActiveViewContent
+	// (the card's own body) rather than the full u.View().Content: at this
+	// width the recordset is split table+card side by side, and the table
+	// pane's own header legitimately still shows "Field00" regardless of
+	// the card's scroll position.
 	_, _ = u.Update(tea.KeyPressMsg{Text: "3"})
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	u.rebuildHistory(false)
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if g.inspector.YOffset() == 0 {
+	u.rebuildHistory(false)
+	if strings.Contains(g.ActiveViewContent(60, 10), "Field00") {
 		t.Fatal("inspector did not scroll")
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	u.rebuildHistory(false)
-	if got := g.inspector.YOffset(); got != 0 {
-		t.Fatalf("inspector offset after row change = %d, want 0", got)
+	if !strings.Contains(g.ActiveViewContent(60, 10), "Field00") {
+		t.Fatal("inspector offset after row change did not reset to top")
 	}
 }
 
@@ -1268,8 +1271,8 @@ func TestGridSortRetainsSelectedSourceRowForInspector(t *testing.T) {
 		t.Fatalf("source row before sort = %d, want 0", before)
 	}
 	_, _ = u.Update(tea.KeyPressMsg{Text: "s"})
-	if got := g.selectedSourceRow(); got != 0 || g.rowIndex != 1 || g.model.SourceRows[2] != 2 {
-		t.Fatalf("sorted selection = source:%d index:%d, want source:0 index:1", got, g.rowIndex)
+	if got := g.selectedSourceRow(); got != 0 || g.CurrentIndex() != 1 || g.sourceIndexAt(2) != 2 {
+		t.Fatalf("sorted selection = source:%d index:%d, want source:0 index:1", got, g.CurrentIndex())
 	}
 }
 
@@ -1318,10 +1321,58 @@ func TestUIStatusUsesOneLineWhenItFits(t *testing.T) {
 	}
 }
 
+// TestGridTitleAndSelectedColumnUseDifferentColors is m12: this used to
+// compare datatug's OWN now-dead style copies (selectedCellStyle,
+// unreferenced by any real rendering since column-selection styling moved
+// into the shared tui/grid package) rather than asserting anything about
+// what's actually drawn on screen. It now renders a real grid and checks
+// the title and the selected column's header carry visibly different
+// ANSI styling.
 func TestGridTitleAndSelectedColumnUseDifferentColors(t *testing.T) {
-	if activeTitleStyle.Render("same") == selectedCellStyle.Render("same") {
-		t.Fatal("table title and selected column use the same style")
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.appendTurn(Turn{Queries: []QueryResult{{Title: "Distinct Title", Result: secureread.Result{
+		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
+	}}}})
+	if !u.focusLatestGrid() {
+		t.Fatal("expected grid focus")
 	}
+	view := u.entries[u.activeGrid].grid.view()
+	lines := strings.Split(view, "\n")
+	titleLine, headerLine := lines[0], lines[1]
+	titleStart := strings.Index(titleLine, "Distinct")
+	headerStart := strings.Index(headerLine, "ID")
+	if titleStart < 0 || headerStart < 0 {
+		t.Fatalf("could not locate title/header in rendered grid:\n%s", view)
+	}
+	// Compare the ANSI escape sequence immediately preceding each label —
+	// the styling actually applied to it — rather than the label text
+	// itself, which carries no color information once printed.
+	titleStyle := lastAnsiEscape(titleLine[:titleStart])
+	headerStyle := lastAnsiEscape(headerLine[:headerStart])
+	if titleStyle == "" || headerStyle == "" {
+		t.Fatalf("expected ANSI styling before both labels: title=%q header=%q", titleStyle, headerStyle)
+	}
+	if titleStyle == headerStyle {
+		t.Fatalf("table title and selected column header use the same style: %q", titleStyle)
+	}
+}
+
+// lastAnsiEscape returns the last ANSI CSI escape sequence in s (e.g.
+// "\x1b[1;38;5;255;48;5;237m"), or "" if none.
+func lastAnsiEscape(s string) string {
+	last := ""
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\x1b' {
+			continue
+		}
+		end := strings.IndexByte(s[i:], 'm')
+		if end < 0 {
+			break
+		}
+		last = s[i : i+end+1]
+		i += end
+	}
+	return last
 }
 
 func TestUIWidthSweepKeepsRenderedLinesWithinTerminal(t *testing.T) {
@@ -1357,10 +1408,34 @@ func TestGridBorderChangesWithFocus(t *testing.T) {
 		t.Fatalf("grid border did not change with focus:\ninactive %q\nactive %q", inactive, active)
 	}
 	activeLines := strings.Split(g.view(), "\n")
-	if !strings.Contains(activeLines[1], activeBorderStyle.Render("│")) || !strings.HasSuffix(activeLines[1], selectedOutlineStyle.Render("│")) {
+	// The right-edge scrollbar/border uses the shared grid's own
+	// selectedOutlineStyle (color 250) when focused — datatug no longer
+	// keeps its own copy of that style to compare Render() output against
+	// (m12); check for its ANSI color code directly instead.
+	if !strings.Contains(activeLines[1], activeBorderStyle.Render("│")) || !strings.HasSuffix(ansi.Strip(activeLines[1]), "│") || !strings.Contains(activeLines[1], "38;5;250m") {
 		t.Fatalf("focused grid side colors are wrong: %q", activeLines[1])
 	}
 	if !strings.Contains(activeLines[0], "38;5;250m╭") || !strings.Contains(activeLines[len(activeLines)-1], "38;5;250m╰") || strings.Contains(activeLines[len(activeLines)-1], "38;5;51") {
 		t.Fatalf("focused grid top/bottom border colors differ: %q / %q", activeLines[0], activeLines[len(activeLines)-1])
+	}
+}
+
+// TestCurrentRowShowsAbsentMarkerNotBlankForSparseCells is the regression
+// test for m5: a sparse cell (never present in the underlying row's data —
+// GridModel.Rows leaves its display string at "") must show as "—" in the
+// Current row view, via grid.Absent, not an ambiguous blank line.
+func TestCurrentRowShowsAbsentMarkerNotBlankForSparseCells(t *testing.T) {
+	model := GridModel{
+		Columns: []GridColumn{{Name: "First"}, {Name: "Second"}},
+		Rows:    [][]string{{"one", ""}}, // Second is sparse/absent for this row
+	}
+	g := newGridState(model, "Sparse", 60)
+	g.SetView(gridViewCurrentRow)
+	content := ansi.Strip(g.ActiveViewContent(60, 10))
+	if !strings.Contains(content, "—") {
+		t.Fatalf("current row view missing the absent marker: %q", content)
+	}
+	if strings.Contains(content, "NULL") {
+		t.Fatalf("current row view showed NULL for a sparse (never-present) cell: %q", content)
 	}
 }

@@ -1,15 +1,21 @@
 package chat
 
 import (
-	"strings"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
-	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/strongo/aichat/tui/grid"
 )
 
-func TestChooseRecordsetLayoutBoundary(t *testing.T) {
-	for _, view := range []recordsetView{recordsetCharts, recordsetCurrentRow} {
+// TestChooseGridLayoutBoundary is TestChooseRecordsetLayoutBoundary, ported
+// to chooseGridLayout/grid.SplitLayout: the split-pane policy DataTug
+// registers with the shared grid via grid.WithSplitLayout (chooseRecordsetLayout
+// moved into tui/grid.Model itself; this is DataTug's own policy function).
+// (currentRowContent's own coverage moved with the code to
+// strongo/aichat/tui/grid's test suite — TestRowValuesAbsentVsNull,
+// TestCurrentRowContentNoRows — since DataTug no longer has that function;
+// it renders via grid.CardView.)
+func TestChooseGridLayoutBoundary(t *testing.T) {
+	for _, view := range []grid.View{gridViewCharts, gridViewCurrentRow} {
 		for _, tc := range []struct {
 			width int
 			split bool
@@ -19,39 +25,22 @@ func TestChooseRecordsetLayoutBoundary(t *testing.T) {
 			{93, true},
 			{120, true},
 		} {
-			layout := chooseRecordsetLayout(tc.width, 52, view)
-			if layout.split != tc.split {
-				t.Errorf("view %d width %d split = %v, want %v", view, tc.width, layout.split, tc.split)
+			layout := chooseGridLayout(tc.width, 52, view)
+			if layout.Split != tc.split {
+				t.Errorf("view %d width %d split = %v, want %v", view, tc.width, layout.Split, tc.split)
 			}
-			if layout.split && layout.tableWidth+layout.secondaryWidth+recordsetPaneGap != tc.width {
+			if layout.Split && layout.PrimaryWidth+layout.SecondaryWidth+recordsetPaneGap != tc.width {
 				t.Errorf("width %d: pane widths do not fit: %+v", tc.width, layout)
 			}
 		}
 	}
-	if layout := chooseRecordsetLayout(93, 52, recordsetTable); layout.split || layout.tableWidth != 93 {
-		t.Fatalf("table-only layout = %+v", layout)
+	if layout := chooseGridLayout(93, 52, grid.ViewTable); layout.Split {
+		t.Fatalf("table-only layout = %+v, want no split", layout)
 	}
-}
-
-func TestCurrentRowContentWrapsAndDistinguishesNull(t *testing.T) {
-	model := NewGridModel(secureread.Result{
-		Columns: []string{"ID", "Comment", "Missing"},
-		Rows: []secureread.Row{{Data: map[string]any{
-			"ID": 5, "Comment": "a very long description with several words", "Missing": nil,
-		}}},
-	})
-	content := currentRowContent(model, 0, 12)
-	for _, want := range []string{"ID", "5", "Comment", "Missing", "NULL"} {
-		if !strings.Contains(content, want) {
-			t.Errorf("inspector missing %q: %q", want, content)
-		}
+	if layout := chooseGridLayout(200, 52, gridViewRaw); layout.Split {
+		t.Fatalf("Raw view layout = %+v, want no split (always full width)", layout)
 	}
-	for _, line := range strings.Split(content, "\n") {
-		if ansi.StringWidth(line) > 12 {
-			t.Errorf("inspector line exceeds width 12: %q", line)
-		}
-	}
-	if got := currentRowContent(model, 1, 12); got != "No current row." {
-		t.Errorf("no-row content = %q", got)
+	if layout := chooseGridLayout(200, 52, gridViewHeaders); layout.Split {
+		t.Fatalf("Headers view layout = %+v, want no split (always full width)", layout)
 	}
 }

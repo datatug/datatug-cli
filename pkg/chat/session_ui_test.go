@@ -38,7 +38,7 @@ func TestSessionUIRestoresGridAndManagesSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(u.entries) != 2 || u.entries[1].grid == nil || len(u.entries[1].grid.model.Rows) != 1 {
+	if len(u.entries) != 2 || u.entries[1].grid == nil || len(u.entries[1].grid.Rows()) != 1 {
 		t.Fatalf("restored history = %+v", u.entries)
 	}
 	if !strings.Contains(u.View().Content, "Prague") {

@@ -21,7 +21,7 @@ func TestBrowserBridgeSharesSessionWithTerminal(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	agent := &contextualStub{turns: []Turn{{Text: "Three matching rows.", Queries: []QueryResult{{Title: "Count", DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"Count"}, Rows: []secureread.Row{{Data: map[string]any{"Count": 3}}}}}}}, {Text: "Another browser reply."}, {Text: "Terminal reply."}}}
-	sessions, err := NewSessionChat(ctx, store, agent, "sqlite:///chinook.db")
+	sessions, err := NewSessionChat(ctx, store, agent, "sqlite:///chinook.db", ProjectCatalog{ID: "demo-project-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestBrowserBridgeSharesSessionWithTerminal(t *testing.T) {
 	terminal.SetBrowserURL(bridge.URL)
 	var openedURL string
 	terminal.openBrowser = func(url string) error { openedURL = url; return nil }
-	_, _ = terminal.Update(tea.WindowSizeMsg{Width: 160, Height: 36})
+	_, _ = terminal.Update(tea.WindowSizeMsg{Width: 200, Height: 36})
 	if terminal.webLinkVisible {
 		t.Fatal("web link was visible before F5")
 	}
@@ -64,6 +64,9 @@ func TestBrowserBridgeSharesSessionWithTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.Contains(link.Path, "/project/demo-project-1/chat") {
+		t.Fatalf("project chat link path = %q", link.Path)
+	}
 	fragment, err := url.ParseQuery(link.Fragment)
 	if err != nil {
 		t.Fatal(err)
@@ -85,6 +88,12 @@ func TestBrowserBridgeSharesSessionWithTerminal(t *testing.T) {
 		return resp
 	}
 	token := fragment.Get("t")
+	if resp := request("GET", "/datatug/projects/project_summary?id=demo-project-1", nil, token, "https://datatug.app"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("project summary: %d", resp.StatusCode)
+	}
+	if resp := request("GET", "/datatug/projects/project_summary?id=another-project", nil, token, "https://datatug.app"); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("other project summary: %d", resp.StatusCode)
+	}
 	socket, _, err := (&websocket.Dialer{Subprotocols: []string{"datatug-chat", token}}).Dial("ws://"+fragment.Get("h")+"/v1/chat/events", http.Header{"Origin": []string{"https://datatug.app"}})
 	if err != nil {
 		t.Fatal(err)

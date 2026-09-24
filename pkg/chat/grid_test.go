@@ -99,86 +99,17 @@ func TestGridModelSanitizesDisplayTextButPreservesRawValues(t *testing.T) {
 	}
 }
 
-func TestGridModelSortTogglesAndHandlesEmpty(t *testing.T) {
-	grid := NewGridModel(secureread.Result{
-		Columns: []string{"n"},
-		Rows: []secureread.Row{
-			{Data: map[string]any{"n": 10}},
-			{Data: map[string]any{"n": 2}},
-		},
-	})
-	grid.Sort(0)
-	if grid.Rows[0][0] != "2" || grid.header(0) != "n ▲" {
-		t.Fatalf("ascending rows/header = %+v / %q", grid.Rows, grid.header(0))
-	}
-	if grid.RawRows[0][0] != 2 {
-		t.Fatalf("raw values did not follow sort: %+v", grid.RawRows)
-	}
-	grid.Sort(0)
-	if grid.Rows[0][0] != "10" || grid.header(0) != "n ▼" {
-		t.Fatalf("descending rows/header = %+v / %q", grid.Rows, grid.header(0))
-	}
-
-	empty := NewGridModel(secureread.Result{Columns: []string{"id"}})
-	empty.Sort(0)
-	if len(empty.Rows) != 0 {
-		t.Fatalf("empty rows = %+v", empty.Rows)
-	}
-}
-
-func TestGridModelNumericSortKeepsEqualValuesStable(t *testing.T) {
-	grid := GridModel{
-		Columns:    []GridColumn{{Name: "n", Numeric: true}},
-		Rows:       [][]string{{"2"}, {"2.0"}, {"10"}},
-		sortColumn: -1,
-	}
-	grid.Sort(0)
-	grid.Sort(0)
-	if grid.Rows[0][0] != "10" || grid.Rows[1][0] != "2" || grid.Rows[2][0] != "2.0" {
-		t.Fatalf("descending stable rows = %+v", grid.Rows)
-	}
-}
-
-func TestGridModelSortsLargeIntegersExactly(t *testing.T) {
-	grid := NewGridModel(secureread.Result{
-		Columns: []string{"id"},
-		Rows: []secureread.Row{
-			{Data: map[string]any{"id": int64(9007199254740993)}},
-			{Data: map[string]any{"id": int64(9007199254740992)}},
-		},
-	})
-	grid.Sort(0)
-	if grid.Rows[0][0] != "9007199254740992" {
-		t.Fatalf("ascending rows = %+v", grid.Rows)
-	}
-	grid.Sort(0)
-	if grid.Rows[0][0] != "9007199254740993" {
-		t.Fatalf("descending rows = %+v", grid.Rows)
-	}
-}
-
-func TestGridModelSortHandlesPartialRawRows(t *testing.T) {
-	grid := GridModel{
-		Columns:    []GridColumn{{Name: "n", Numeric: true}},
-		Rows:       [][]string{{"2"}, {"1"}, {"3"}},
-		RawRows:    [][]any{{"raw-2"}},
-		sortColumn: -1,
-	}
-	grid.Sort(0)
-	if got := grid.Rows[0][0]; got != "1" {
-		t.Fatalf("sorted rows = %+v", grid.Rows)
-	}
-	if len(grid.RawRows) != 3 || grid.RawRows[0] != nil || grid.RawRows[1][0] != "raw-2" || grid.RawRows[2] != nil {
-		t.Fatalf("partial raw rows lost display-row alignment: %+v", grid.RawRows)
-	}
-
-	grid = GridModel{
-		Columns:    []GridColumn{{Name: "n", Numeric: true}},
-		Rows:       [][]string{{"2"}, {"1"}},
-		sortColumn: -1,
-	}
-	grid.Sort(0)
-	if got := grid.Rows[0][0]; got != "1" {
-		t.Fatalf("sorted nil-raw rows = %+v", grid.Rows)
-	}
-}
+// GridModel no longer sorts (nor tracks a sort column/header arrow, nor a
+// parallel-sorted RawRows/SourceRows) — it is pure presentation data now;
+// sorting is strongo/aichat's tui/grid.Model's, exercised via
+// newGridState/newProjectedGridState (see ui.go) and gridState wrapping
+// *grid.Model. That algorithm's own coverage (stable sort, numeric-aware via
+// big.Rat, large-integer exactness, toggling asc/desc) lives with it in
+// tui/grid's test suite (TestSortTogglesAscDesc and friends), replacing
+// what were TestGridModelSortTogglesAndHandlesEmpty,
+// TestGridModelNumericSortKeepsEqualValuesStable,
+// TestGridModelSortsLargeIntegersExactly and
+// TestGridModelSortHandlesPartialRawRows here. gridState's own stable-
+// selection-across-sort behaviour (Row.Key/sourceRowKey/restoreByKey) is
+// covered by TestGridSortRetainsSelectedSourceRowForInspector in
+// ui_test.go.

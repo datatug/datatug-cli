@@ -946,15 +946,16 @@ func TestDockedGridSortAndCellSelectionUseSourceCoordinates(t *testing.T) {
 	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
 	u.workspaceTab, u.workspaceFocused, u.dockGridFocused = 2, true, true
 	dock := u.snapshot.Workspace.Docks[0]
-	grid := u.dockGrids[dock.ID]
-	grid.selectedColumn = 0
+	dockGrid := u.dockGrids[dock.ID]
+	dockGrid.SelectColumn(0)
 	_, _ = u.Update(tea.KeyPressMsg{Code: 's'}) // ascending
 	_, _ = u.Update(tea.KeyPressMsg{Code: 's'}) // descending
-	grid = u.dockGrids[dock.ID]
-	if got := grid.model.SourceRows; !reflect.DeepEqual(got, []int{2, 0}) {
+	dockGrid = u.dockGrids[dock.ID]
+	if got := []int{dockGrid.sourceIndexAt(0), dockGrid.sourceIndexAt(1)}; !reflect.DeepEqual(got, []int{2, 0}) {
 		t.Fatalf("docked sorted source rows = %v", got)
 	}
-	grid.selectedColumn, grid.rowIndex = 1, 0 // City in source row 2
+	dockGrid.SelectColumn(1)
+	dockGrid.SelectRow(0) // City in source row 2
 	_, _ = u.Update(tea.KeyPressMsg{Code: 'c'})
 	saved, err := chat.Snapshot(ctx)
 	if err != nil {
@@ -966,5 +967,42 @@ func TestDockedGridSortAndCellSelectionUseSourceCoordinates(t *testing.T) {
 	}
 	if !reflect.DeepEqual(selection.Ranges, []CellRange{{FirstRow: 2, LastRow: 2, FirstCol: 1, LastCol: 1}}) {
 		t.Fatalf("docked cell coordinates = %+v", selection.Ranges)
+	}
+}
+
+// TestDockGridHasNoViewSwitcher is the regression test for m9: a dock grid
+// never had a view switcher in main (no Charts/Current-row views to jump
+// to with "2"/"3") — it already shows a narrow, purpose-built row set.
+func TestDockGridHasNoViewSwitcher(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := chat.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordID := workspaceTestRecord(t, store, session.ID)
+	ref, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "select", RecordSetID: recordID, Rows: []int{0, 2}, Title: "Subset"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "dock", Reference: ref}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionUI(ctx, chat, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+	dock := u.snapshot.Workspace.Docks[0]
+	dockGrid := u.dockGrids[dock.ID]
+	if got := dockGrid.ExtraViews(); len(got) != 0 {
+		t.Fatalf("dock grid ExtraViews() = %+v, want none", got)
+	}
+	if header := ansi.Strip(dockGrid.HeaderLine(60)); strings.Contains(header, "2 Charts") || strings.Contains(header, "3 Current row") {
+		t.Fatalf("dock grid header still advertises a view switcher: %q", header)
 	}
 }

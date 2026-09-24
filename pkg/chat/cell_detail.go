@@ -44,17 +44,26 @@ func (d *cellDetail) copyValue() string { return FormatValue(d.value) }
 
 func (u *UI) openCellDetail() tea.Cmd {
 	g, entry, record := u.activeInspectorGrid()
-	if g == nil || g.rowIndex < 0 || g.rowIndex >= len(g.model.RawRows) || g.selectedColumn < 0 || g.selectedColumn >= len(g.model.Columns) {
+	selectedColumn := 0
+	var row []any
+	if g != nil {
+		selectedColumn = g.SelectedColumn()
+		row = g.rawRow(g.CurrentIndex())
+	}
+	if g == nil || row == nil || selectedColumn < 0 || selectedColumn >= len(g.Columns()) {
 		return nil
 	}
 	u.detailSequence++
-	row := g.model.RawRows[g.rowIndex]
-	columns := make([]string, len(g.model.Columns))
-	for i, column := range g.model.Columns {
+	columns := make([]string, len(g.Columns()))
+	for i, column := range g.Columns() {
 		columns[i] = column.Name
 	}
-	meta := u.columnMeta(record, columns[g.selectedColumn])
-	d := &cellDetail{sequence: u.detailSequence, title: g.title, column: columns[g.selectedColumn], value: row[g.selectedColumn], columns: columns, values: append([]any(nil), row...), qualified: meta.qualified, dbType: meta.dbType}
+	meta := u.columnMeta(record, columns[selectedColumn])
+	var value any
+	if selectedColumn < len(row) {
+		value = row[selectedColumn]
+	}
+	d := &cellDetail{sequence: u.detailSequence, title: g.baseTitle, column: columns[selectedColumn], value: value, columns: columns, values: append([]any(nil), row...), qualified: meta.qualified, dbType: meta.dbType}
 	u.detail = d
 	if record == nil || entry == nil || u.sessions == nil || meta.qualified == "" || meta.qualified == "ambiguous source" {
 		return nil

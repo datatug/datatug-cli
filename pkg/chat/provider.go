@@ -41,16 +41,37 @@ type providerFamily struct {
 // providers pi-go used to serve natively keeps existing users' environment
 // working unchanged.
 var familyDefaults = map[string]providerFamily{
-	"anthropic":    {defaultBaseURL: "https://api.anthropic.com", apiKeyEnvs: []string{"ANTHROPIC_API_KEY"}, baseURLEnv: "ANTHROPIC_BASE_URL"},
-	"openai":       {defaultBaseURL: "https://api.openai.com/v1", apiKeyEnvs: []string{"OPENAI_API_KEY"}, baseURLEnv: "OPENAI_BASE_URL"},
-	"gemini":       {defaultBaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", apiKeyEnvs: []string{"GEMINI_API_KEY"}},
-	"mistral":      {defaultBaseURL: "https://api.mistral.ai/v1", apiKeyEnvs: []string{"MISTRAL_API_KEY"}},
-	"xai":          {defaultBaseURL: "https://api.x.ai/v1", apiKeyEnvs: []string{"XAI_API_KEY"}},
-	"ollama":       {defaultBaseURL: "http://localhost:11434/v1"},
-	"azure":        {apiKeyEnvs: []string{"AZUREOPENAI_API_KEY", "AZURE_OPENAI_API_KEY", "AZURE_API_KEY"}, baseURLEnv: "AZURE_OPENAI_ENDPOINT"}, // no fixed default: the endpoint is per-deployment
-	"openrouter":   {defaultBaseURL: "https://openrouter.ai/api/v1", apiKeyEnvs: []string{"OPENROUTER_API_KEY"}},
-	"opencode":     {defaultBaseURL: "https://opencode.ai/zen/go/v1", apiKeyEnvs: []string{"OPENCODE_API_KEY"}},
-	"agentgateway": {defaultBaseURL: "http://localhost:4000", apiKeyEnvs: []string{"AGENTGATEWAY_API_KEY"}},
+	"anthropic":  {defaultBaseURL: "https://api.anthropic.com", apiKeyEnvs: []string{"ANTHROPIC_API_KEY"}, baseURLEnv: "ANTHROPIC_BASE_URL"},
+	"openai":     {defaultBaseURL: "https://api.openai.com/v1", apiKeyEnvs: []string{"OPENAI_API_KEY"}, baseURLEnv: "OPENAI_BASE_URL"},
+	"gemini":     {defaultBaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", apiKeyEnvs: []string{"GEMINI_API_KEY"}},
+	"mistral":    {defaultBaseURL: "https://api.mistral.ai/v1", apiKeyEnvs: []string{"MISTRAL_API_KEY"}},
+	"xai":        {defaultBaseURL: "https://api.x.ai/v1", apiKeyEnvs: []string{"XAI_API_KEY"}},
+	"ollama":     {defaultBaseURL: "http://localhost:11434/v1", apiKeyEnvs: []string{"OLLAMA_API_KEY"}, baseURLEnv: "OLLAMA_HOST"},
+	"azure":      {apiKeyEnvs: []string{"AZUREOPENAI_API_KEY", "AZURE_OPENAI_API_KEY", "AZURE_API_KEY"}, baseURLEnv: "AZURE_OPENAI_ENDPOINT"}, // no fixed default: the endpoint is per-deployment
+	"openrouter": {defaultBaseURL: "https://openrouter.ai/api/v1", apiKeyEnvs: []string{"OPENROUTER_API_KEY"}},
+	"opencode":   {defaultBaseURL: "https://opencode.ai/zen/go/v1", apiKeyEnvs: []string{"OPENCODE_API_KEY"}},
+	// agentgateway's default already carries /v1 (unlike the other bare-host
+	// defaults this file used to leave to ensureV1) because NewLLMProvider
+	// only runs ensureV1 over an explicit or env-sourced base URL, never a
+	// family default it treats as "already exact" -- matching pi-go's
+	// normalizeOpenAIBaseURL, which appends /v1 unconditionally.
+	"agentgateway": {defaultBaseURL: "http://localhost:4000/v1", apiKeyEnvs: []string{"AGENTGATEWAY_API_KEY"}},
+}
+
+// ollamaCloudBaseURL is api.ollama.com's OpenAI-compatible endpoint --
+// ported from pi-go's ollamaCloudURL, simplified to the one protocol
+// datatug-cli's Ollama support speaks (ai/openaicompat, not pi-go's native
+// Ollama SDK client).
+const ollamaCloudBaseURL = "https://api.ollama.com/v1"
+
+// opencodeMessagesModels are the OpenCode Go catalog models served over the
+// Anthropic Messages protocol rather than an OpenAI-shaped one, ported from
+// pi-go's opencodeGoModelCatalog: every entry there mapped to "messages"
+// (the "chat"/"responses" entries need no special casing -- they are
+// already OpenAI-shaped, same as every other non-anthropic family here).
+var opencodeMessagesModels = map[string]bool{
+	"minimax-m3": true, "minimax-m2.7": true, "minimax-m2.5": true,
+	"qwen3.8-max": true, "qwen3.7-max": true, "qwen3.7-plus": true, "qwen3.6-plus": true,
 }
 
 // familyRoutingPrefixes are explicit "family/model" routing prefixes,
@@ -186,15 +207,70 @@ func resolveProviderFamily(modelName string) (family, bareModel string, ok bool)
 // defaulted to OpenAI's own API, which would send the caller's model name
 // and credential to the wrong host.
 func NewLLMProvider(modelName, baseURL, apiKey string) (ai.LLMProvider, error) {
+	endpoint, err := resolveEndpoint(modelName, baseURL, apiKey)
+	if err != nil {
+		return nil, err
+	}
+	switch endpoint.protocol {
+	case protocolAnthropic:
+		return anthropic.New(anthropic.Config{BaseURL: stripTrailingV1(endpoint.baseURL), APIKey: endpoint.apiKey, Model: endpoint.model}), nil
+	case protocolOpenAIResponses:
+		return openairesponses.New(openairesponses.Config{BaseURL: endpoint.baseURL, APIKey: endpoint.apiKey, Model: endpoint.model}), nil
+	default:
+		return openaicompat.New(openaicompat.Config{BaseURL: endpoint.baseURL, APIKey: endpoint.apiKey, Model: endpoint.model}), nil
+	}
+}
+
+// wireProtocol names the adapter package a resolved endpoint is built
+// through -- resolveEndpoint's whole job is choosing one of these plus the
+// base URL/model/key that adapter needs, entirely without constructing a
+// client, so the routing decision itself (family/base-URL/protocol
+// inference -- M1's table) is a pure, directly testable seam independent of
+// NewLLMProvider's three ai/* adapter constructors.
+type wireProtocol int
+
+const (
+	protocolOpenAICompatible wireProtocol = iota
+	protocolOpenAIResponses
+	protocolAnthropic
+)
+
+// resolvedEndpoint is resolveEndpoint's result: everything NewLLMProvider
+// needs to pick and construct the right ai.LLMProvider adapter.
+type resolvedEndpoint struct {
+	protocol wireProtocol
+	baseURL  string
+	apiKey   string
+	model    string
+}
+
+// resolveEndpoint infers the provider family, base URL, API key and wire
+// protocol for one --model/--base-url/--ai-profile input, ported from
+// pi-go's Resolve/ResolveWithBaseURL/ResolveOllamaEndpoint/
+// normalizeOpenAIBaseURL/opencodeGoModelCatalog routing, simplified to the
+// three protocols aichat ships adapters for (ai/anthropic, ai/openaicompat,
+// ai/openairesponses). baseURL and apiKey, when non-empty, always override
+// the family default (and, for baseURL, any OPENAI_BASE_URL/
+// ANTHROPIC_BASE_URL/AZURE_OPENAI_ENDPOINT/OLLAMA_HOST environment
+// fallback) -- matching the previous pimodels.WithBaseURL/WithAPIKey
+// override behaviour.
+//
+// An unrecognized model name (no "family/" prefix, no ":cloud"/"-cloud" tag,
+// no known bare prefix) is an error UNLESS an explicit baseURL was given, in
+// which case -- like pi-go's ResolveWithBaseURL -- it is treated as an
+// intentional custom OpenAI-compatible endpoint rather than silently
+// defaulted to OpenAI's own API, which would send the caller's model name
+// and credential to the wrong host.
+func resolveEndpoint(modelName, baseURL, apiKey string) (resolvedEndpoint, error) {
 	modelName = strings.TrimSpace(modelName)
 	if modelName == "" {
-		return nil, errors.New("chat: model is required")
+		return resolvedEndpoint{}, errors.New("chat: model is required")
 	}
 	family, bareModel, ok := resolveProviderFamily(modelName)
 	explicit := strings.TrimSpace(baseURL) != ""
 	if !ok {
 		if !explicit {
-			return nil, fmt.Errorf("chat: unknown model %q: cannot determine provider (known prefixes: claude, gpt, gemini, mistral, magistral, grok; family/model routing e.g. ollama/..., openrouter/..., agentgateway/...; use :cloud/-cloud suffix for Ollama cloud; or pass --base-url for a custom OpenAI-compatible endpoint)", modelName)
+			return resolvedEndpoint{}, fmt.Errorf("chat: unknown model %q: cannot determine provider (known prefixes: claude, gpt, gemini, mistral, magistral, grok; family/model routing e.g. ollama/..., openrouter/..., agentgateway/...; use :cloud/-cloud suffix for Ollama cloud; or pass --base-url for a custom OpenAI-compatible endpoint)", modelName)
 		}
 		family, bareModel = "openai", modelName
 	}
@@ -208,7 +284,7 @@ func NewLLMProvider(modelName, baseURL, apiKey string) (ai.LLMProvider, error) {
 		resolvedBaseURL = def.defaultBaseURL
 	}
 	if resolvedBaseURL == "" {
-		return nil, fmt.Errorf("chat: %s model %q requires --base-url (no default endpoint for this provider)", family, modelName)
+		return resolvedEndpoint{}, fmt.Errorf("chat: %s model %q requires --base-url (no default endpoint for this provider)", family, modelName)
 	}
 
 	resolvedKey := apiKey
@@ -221,8 +297,24 @@ func NewLLMProvider(modelName, baseURL, apiKey string) (ai.LLMProvider, error) {
 		}
 	}
 
-	if family == "anthropic" {
-		return anthropic.New(anthropic.Config{BaseURL: stripTrailingV1(resolvedBaseURL), APIKey: resolvedKey, Model: bareModel}), nil
+	// Ollama cloud routing, ported from pi-go's ResolveOllamaEndpoint (rules
+	// 2-4; rule 1, an explicit endpoint, already won above -- resolvedBaseURL
+	// only still equals the local default here when neither --base-url nor
+	// OLLAMA_HOST were set). The explicit "ollama/" routing prefix always
+	// means the local daemon (ForceLocal) even for a -cloud/:cloud-tagged
+	// model; otherwise a cloud-tagged model with a resolved key goes to
+	// api.ollama.com, and with no key stays local -- api.ollama.com would
+	// reject an unauthenticated request outright, so local is the only
+	// server that can possibly answer.
+	if family == "ollama" && resolvedBaseURL == def.defaultBaseURL {
+		forceLocal := strings.HasPrefix(strings.ToLower(modelName), "ollama/")
+		if !forceLocal && isOllamaCloudModel(bareModel) && resolvedKey != "" {
+			resolvedBaseURL = ollamaCloudBaseURL
+		}
+	}
+
+	if family == "anthropic" || (family == "opencode" && opencodeMessagesModels[bareModel]) {
+		return resolvedEndpoint{protocol: protocolAnthropic, baseURL: resolvedBaseURL, apiKey: resolvedKey, model: bareModel}, nil
 	}
 	if explicit || resolvedBaseURL != def.defaultBaseURL {
 		// Only normalize a caller-supplied endpoint (an explicit --base-url,
@@ -231,10 +323,16 @@ func NewLLMProvider(modelName, baseURL, apiKey string) (ai.LLMProvider, error) {
 		// OpenAI-compatible path) deliberately don't end in "/v1".
 		resolvedBaseURL = ensureV1(resolvedBaseURL)
 	}
-	if family == "openai" && modelNeedsResponses(bareModel) {
-		return openairesponses.New(openairesponses.Config{BaseURL: resolvedBaseURL, APIKey: resolvedKey, Model: bareModel}), nil
+	// Every family but anthropic speaks an OpenAI-shaped protocol (package
+	// doc comment), so a Responses-only model can arrive through any of
+	// them, not just a bare "openai"-family name -- e.g.
+	// "agentgateway/openai/gpt-5.6-luna" resolves family="agentgateway",
+	// bareModel="openai/gpt-5.6-luna"; modelNeedsResponses strips that
+	// remaining "openai/" wrapper itself (stripKnownProviderPrefixes).
+	if family != "anthropic" && modelNeedsResponses(bareModel) {
+		return resolvedEndpoint{protocol: protocolOpenAIResponses, baseURL: resolvedBaseURL, apiKey: resolvedKey, model: bareModel}, nil
 	}
-	return openaicompat.New(openaicompat.Config{BaseURL: resolvedBaseURL, APIKey: resolvedKey, Model: bareModel}), nil
+	return resolvedEndpoint{protocol: protocolOpenAICompatible, baseURL: resolvedBaseURL, apiKey: resolvedKey, model: bareModel}, nil
 }
 
 // ensureV1 appends a trailing "/v1" path segment when the given base URL

@@ -197,6 +197,105 @@ func TestNewLLMProviderOpenAIAndAnthropicBaseURLEnvOverride(t *testing.T) {
 // finding: a gateway route with "/v1/" already present mid-path (not just as
 // a trailing segment) must be left alone, not gain a second, meaningless
 // trailing "/v1".
+// TestResolveEndpointM1Routing is the M1-remainder table test: agentgateway's
+// default already carries /v1 (pi-go's normalizeOpenAIBaseURL always
+// appends it, never leaving a bare-host default alone the way this file's
+// other family defaults could); the Responses-only check applies to a
+// Responses-only model routed through a non-openai family wrapper, not just
+// a bare "openai/..." name; Ollama cloud/local routing follows pi-go's
+// ResolveOllamaEndpoint rules 2-4 (an explicit "ollama/" prefix always
+// forces local even for a -cloud-tagged name; a cloud-tagged name only
+// reaches api.ollama.com with a resolved key; no key keeps it local); and
+// OpenCode Go's "messages"-protocol catalog models route through the
+// Anthropic adapter, not OpenAI-compatible, while its "chat"/"responses"
+// models do not.
+func TestResolveEndpointM1Routing(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		model, baseURL    string
+		apiKey            string
+		env               map[string]string
+		wantProtocol      wireProtocol
+		wantBaseURL       string
+		wantModel         string
+		wantErrorContains string
+	}{
+		{
+			name:  "agentgateway default base URL already carries /v1",
+			model: "agentgateway/openai/gpt-4o", apiKey: "key",
+			wantProtocol: protocolOpenAICompatible, wantBaseURL: "http://localhost:4000/v1", wantModel: "openai/gpt-4o",
+		},
+		{
+			name:  "agentgateway-wrapped responses-only model still routes to openai-responses",
+			model: "agentgateway/openai/gpt-5.6-luna", apiKey: "key",
+			wantProtocol: protocolOpenAIResponses, wantBaseURL: "http://localhost:4000/v1", wantModel: "openai/gpt-5.6-luna",
+		},
+		{
+			name:  "opencode-wrapped responses-only model still routes to openai-responses",
+			model: "opencode/gpt-5.6-luna", apiKey: "key",
+			wantProtocol: protocolOpenAIResponses, wantBaseURL: "https://opencode.ai/zen/go/v1", wantModel: "gpt-5.6-luna",
+		},
+		{
+			name:  "bare ollama model with no key and no cloud tag stays local",
+			model: "ollama/qwen3:4b", apiKey: "",
+			wantProtocol: protocolOpenAICompatible, wantBaseURL: "http://localhost:11434/v1", wantModel: "qwen3:4b",
+		},
+		{
+			name:  "cloud-tagged ollama model with a resolved key reaches api.ollama.com",
+			model: "deepseek-v4-flash:0731-cloud", apiKey: "", env: map[string]string{"OLLAMA_API_KEY": "cloud-key"},
+			wantProtocol: protocolOpenAICompatible, wantBaseURL: "https://api.ollama.com/v1", wantModel: "deepseek-v4-flash:0731-cloud",
+		},
+		{
+			name:  "cloud-tagged ollama model with no key stays local (api.ollama.com would 401 anyway)",
+			model: "deepseek-v4-flash:0731-cloud", apiKey: "",
+			wantProtocol: protocolOpenAICompatible, wantBaseURL: "http://localhost:11434/v1", wantModel: "deepseek-v4-flash:0731-cloud",
+		},
+		{
+			name:  "explicit ollama/ prefix forces local even with a cloud tag and a key",
+			model: "ollama/deepseek-v4-flash:0731-cloud", apiKey: "cloud-key",
+			wantProtocol: protocolOpenAICompatible, wantBaseURL: "http://localhost:11434/v1", wantModel: "deepseek-v4-flash:0731-cloud",
+		},
+		{
+			name:  "OLLAMA_HOST overrides the local default before cloud routing is even considered",
+			model: "deepseek-v4-flash:0731-cloud", apiKey: "", env: map[string]string{"OLLAMA_API_KEY": "cloud-key", "OLLAMA_HOST": "http://remote-daemon:11434"},
+			wantProtocol: protocolOpenAICompatible, wantBaseURL: "http://remote-daemon:11434/v1", wantModel: "deepseek-v4-flash:0731-cloud",
+		},
+		{
+			name:  "OpenCode Go messages-protocol model routes through the Anthropic adapter",
+			model: "opencode/minimax-m3", apiKey: "key",
+			// resolveEndpoint itself does not strip the trailing /v1 -- that
+			// is NewLLMProvider's own stripTrailingV1 call over
+			// endpoint.baseURL right before anthropic.New, so the Anthropic
+			// SDK's own v1/messages path lands correctly.
+			wantProtocol: protocolAnthropic, wantBaseURL: "https://opencode.ai/zen/go/v1", wantModel: "minimax-m3",
+		},
+		{
+			name:  "OpenCode Go chat-protocol model stays OpenAI-compatible",
+			model: "opencode/grok-4.5", apiKey: "key",
+			wantProtocol: protocolOpenAICompatible, wantBaseURL: "https://opencode.ai/zen/go/v1", wantModel: "grok-4.5",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			endpoint, err := resolveEndpoint(tc.model, tc.baseURL, tc.apiKey)
+			if tc.wantErrorContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErrorContains) {
+					t.Fatalf("err = %v, want substring %q", err, tc.wantErrorContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveEndpoint: %v", err)
+			}
+			if endpoint.protocol != tc.wantProtocol || endpoint.baseURL != tc.wantBaseURL || endpoint.model != tc.wantModel {
+				t.Fatalf("endpoint = %+v, want protocol=%v baseURL=%q model=%q", endpoint, tc.wantProtocol, tc.wantBaseURL, tc.wantModel)
+			}
+		})
+	}
+}
+
 func TestNewLLMProviderRequiresModelName(t *testing.T) {
 	if _, err := NewLLMProvider("  ", "", "key"); err == nil || !strings.Contains(err.Error(), "model is required") {
 		t.Fatalf("err = %v, want a model-required error", err)

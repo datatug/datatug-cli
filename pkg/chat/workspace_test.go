@@ -23,6 +23,86 @@ func workspaceTestCatalog() ProjectCatalog {
 	}}
 }
 
+func TestAttachedTableContextSurvivesHistoryAndIncludesColumnDefinitions(t *testing.T) {
+	catalog := workspaceTestCatalog()
+	catalog.Objects[2].ColumnTypes = map[string]string{"CustomerId": "INTEGER", "City": "NVARCHAR(40)"}
+	attached := catalog.Objects[2].Reference
+	session := ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{attached}}}
+	for range 20 {
+		session.Messages = append(session.Messages, ChatMessage{Role: "You", Kind: "text", Text: strings.Repeat("Invoice ", 250)})
+	}
+	contextText := buildSessionContext(session, catalog)
+	if !strings.Contains(contextText, "Attached table Customer") || !strings.Contains(contextText, "CustomerId INTEGER") || !strings.Contains(contextText, "City NVARCHAR(40)") {
+		t.Fatalf("attached table definition was lost: %s", contextText)
+	}
+	if len(contextText) > maxContextChars {
+		t.Fatalf("context exceeded limit: %d", len(contextText))
+	}
+}
+
+func TestComposerAttachmentChipsCanBeFocusedClearedAndRestored(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := workspaceTestCatalog().Objects[2].Reference
+	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "attach", Reference: ref}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionUI(ctx, chat, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.input.SetValue("Top 5 rows")
+	if !strings.Contains(u.composerView(80), "Customer") {
+		t.Fatal("attached Customer chip is not inside composer card")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if u.attachmentFocus != 0 {
+		t.Fatalf("Tab did not focus attachment chip: %d", u.attachmentFocus)
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if u.input.Value() != "" || len(u.snapshot.Workspace.Attachments) != 1 {
+		t.Fatalf("first Esc should clear text only: %q, %+v", u.input.Value(), u.snapshot.Workspace.Attachments)
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if len(u.snapshot.Workspace.Attachments) != 0 {
+		t.Fatalf("second Esc should clear attachments: %+v", u.snapshot.Workspace.Attachments)
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEsc, Mod: tea.ModShift})
+	if u.input.Value() != "Top 5 rows" || len(u.snapshot.Workspace.Attachments) != 1 {
+		t.Fatalf("Shift+Esc did not restore draft and attachments: %q, %+v", u.input.Value(), u.snapshot.Workspace.Attachments)
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if len(u.snapshot.Workspace.Attachments) != 0 {
+		t.Fatal("Backspace did not remove focused chip")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEsc, Mod: tea.ModShift})
+	if len(u.snapshot.Workspace.Attachments) != 1 || u.input.Value() != "Top 5 rows" {
+		t.Fatal("Shift+Esc did not restore chip removed with Backspace")
+	}
+	_, _ = u.Update(tea.MouseClickMsg{X: responsiveGutter(u.width) + 2 + len("Customer") + 2, Y: u.historyHeight() + 3, Button: tea.MouseLeft})
+	if len(u.snapshot.Workspace.Attachments) != 0 {
+		t.Fatal("clicking the visible × did not remove the chip")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEsc, Mod: tea.ModShift})
+	if len(u.snapshot.Workspace.Attachments) != 1 {
+		t.Fatal("Shift+Esc did not restore chip removed with mouse")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	if len(u.snapshot.Workspace.Attachments) != 0 {
+		t.Fatal("Ctrl+D did not remove last attachment")
+	}
+	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEsc, Mod: tea.ModShift})
+	if len(u.snapshot.Workspace.Attachments) != 1 {
+		t.Fatal("Shift+Esc did not restore chip removed with Ctrl+D")
+	}
+}
+
 func TestProjectExplorerShowsSourceIssueInPlace(t *testing.T) {
 	u := NewUI(context.Background(), nil, "test-model")
 	u.catalog = workspaceTestCatalog()
@@ -40,8 +120,7 @@ func TestProjectExplorerShowsSourceIssueInPlace(t *testing.T) {
 	if !found {
 		t.Fatalf("source-local error node missing: %+v", nodes)
 	}
-	u.projectDetails = true
-	view := u.projectExplorer(100, 20)
+	view := u.workspaceView(100, 20)
 	if !strings.Contains(view, "Status: Schema unavailable") || !strings.Contains(view, "Customer") {
 		t.Fatalf("source details did not show the schema error: %q", view)
 	}
@@ -79,8 +158,7 @@ func TestProjectExplorerIssueDetailsRemainVisibleInLongTree(t *testing.T) {
 			break
 		}
 	}
-	u.projectDetails = true
-	view := u.projectExplorer(80, 8)
+	view := u.workspaceView(80, 12)
 	if !strings.Contains(view, "Status: Schema unavailable") {
 		t.Fatalf("selected issue details hidden below long explorer: %q", view)
 	}
@@ -90,7 +168,7 @@ func TestProjectExplorerIssueDetailsRemainVisibleInLongTree(t *testing.T) {
 			break
 		}
 	}
-	view = u.projectExplorer(80, 8)
+	view = u.workspaceView(80, 12)
 	if !strings.Contains(view, "Status: Schema unavailable: deep source failed") {
 		t.Fatalf("deep selected issue details hidden below viewport: %q", view)
 	}
@@ -628,7 +706,7 @@ func TestWorkspaceSplitAndKeyboardSelection(t *testing.T) {
 	if len(u.snapshot.Workspace.Attachments) != 1 || u.snapshot.Workspace.Attachments[0].Kind != "table" {
 		t.Fatalf("project attachment = %+v", u.snapshot.Workspace.Attachments)
 	}
-	_, _ = u.Update(tea.MouseClickMsg{X: responsiveGutter(u.width) + len("Customer") + 2, Y: u.historyHeight() + 2, Button: tea.MouseLeft})
+	_, _ = u.Update(tea.MouseClickMsg{X: responsiveGutter(u.width) + 2 + len("Customer") + 2, Y: u.historyHeight() + 3, Button: tea.MouseLeft})
 	if len(u.snapshot.Workspace.Attachments) != 0 {
 		t.Fatalf("clicking attachment close did not detach: %+v", u.snapshot.Workspace.Attachments)
 	}
@@ -677,14 +755,137 @@ func TestExplorerGroupsObjectsByDeclaredSourceAndCollapses(t *testing.T) {
 			unboundDepth = node.depth
 		}
 	}
-	if sourceDepth != 1 || boundDepth != 3 || unboundDepth != 2 {
+	if sourceDepth != 2 || boundDepth != 2 || unboundDepth != 2 {
 		t.Fatalf("unexpected explorer hierarchy: %+v", nodes)
+	}
+	var databases, queryGroups int
+	for _, node := range nodes {
+		if node.label == "Databases (1)" {
+			databases++
+		}
+		if strings.HasPrefix(node.label, "Queries (") {
+			queryGroups++
+		}
+	}
+	if databases != 1 || queryGroups != 1 {
+		t.Fatalf("want one Databases and one Queries group: %+v", nodes)
 	}
 	u.explorerCollapsed["source:chinook-local"] = true
 	for _, node := range u.explorerNodes() {
-		if node.label == "By city" || node.label == "Customer" {
+		if node.label == "Customer" {
 			t.Fatalf("collapsed source still exposes child %q", node.label)
 		}
+	}
+}
+
+func TestComposerShrinksAsWrappedAttachmentsAreRemoved(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.width, u.height = 62, 30
+	u.catalog = workspaceTestCatalog()
+	u.snapshot.Workspace.Attachments = []ContextReference{
+		{Title: "First customer table"},
+		{Title: "Second customer table"},
+		{Title: "Third customer table"},
+	}
+	width := u.chatPaneWidth() - 1
+	if got := len(u.attachmentRows(width)); got != 2 {
+		t.Fatalf("attachment rows = %d, want 2", got)
+	}
+	initialHeight := u.historyHeight()
+	if !strings.Contains(u.composerView(u.chatPaneWidth()), "Third customer table") {
+		t.Fatal("wrapped attachment is not visible")
+	}
+	lastChip := u.attachmentRows(width)[1][0]
+	if ref, ok := u.attachmentCloseAt(lastChip.x, 1); !ok || ref.Title != "Third customer table" {
+		t.Fatalf("second-row close target = %+v, %v", ref, ok)
+	}
+	u.snapshot.Workspace.Attachments = u.snapshot.Workspace.Attachments[:2]
+	if got := len(u.attachmentRows(width)); got != 1 {
+		t.Fatalf("attachment rows after removing third chip = %d, want 1", got)
+	}
+	if got := u.historyHeight(); got != initialHeight+1 {
+		t.Fatalf("history height after removing second-row chip = %d, want %d", got, initialHeight+1)
+	}
+	u.snapshot.Workspace.Attachments = nil
+	if got := len(u.attachmentRows(width)); got != 0 {
+		t.Fatalf("attachment rows after clearing chips = %d, want 0", got)
+	}
+	if got := u.historyHeight(); got != initialHeight+2 {
+		t.Fatalf("history height after clearing chips = %d, want %d", got, initialHeight+2)
+	}
+}
+
+func TestProjectCardUsesProjectTitle(t *testing.T) {
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.catalog = workspaceTestCatalog()
+	view := ansi.Strip(u.projectWorkspaceCards(50, 15))
+	if !strings.Contains(view, "Project: "+u.catalog.Title) || strings.Contains(view, "Project explorer") {
+		t.Fatalf("project card title is incorrect:\n%s", view)
+	}
+}
+
+func TestExplorerSelectionShowsTableAndQueryCards(t *testing.T) {
+	u := NewUI(context.Background(), nil, "test-model")
+	u.catalog = workspaceTestCatalog()
+	u.catalog.Objects[2].ColumnTypes = map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}
+	queryText := "SELECT GenreName\n" + strings.Repeat("-- detail line\n", 12) + "FROM purchases"
+	u.catalog.Objects = append(u.catalog.Objects, ProjectObject{Reference: ContextReference{
+		Kind: "query", SourceID: "chinook-local", ObjectID: "purchases", Title: "Customer purchases by genre",
+	}, QueryType: "SQL", QueryText: queryText})
+	for index, node := range u.explorerNodes() {
+		if node.label == "Customer" {
+			u.explorerIndex = index
+			break
+		}
+	}
+	view := ansi.Strip(u.workspaceView(48, 24))
+	if !strings.Contains(view, "Table: Customer") || !strings.Contains(view, "CustomerId") || !strings.Contains(view, "INTEGER") {
+		t.Fatalf("table selection did not show columns card: %q", view)
+	}
+	for index, node := range u.explorerNodes() {
+		if node.label == "Customer purchases by genre" {
+			u.explorerIndex = index
+			break
+		}
+	}
+	view = ansi.Strip(u.workspaceView(48, 24))
+	if !strings.Contains(view, "Query: Customer purchases by genre") || !strings.Contains(view, "SQL") || !strings.Contains(view, "SELECT GenreName") {
+		t.Fatalf("query selection did not show query text: %q", view)
+	}
+	for range 3 {
+		u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	}
+	view = ansi.Strip(u.workspaceView(48, 24))
+	if !strings.Contains(view, "FROM purchases") {
+		t.Fatalf("query detail cannot scroll to end of text: %q", view)
+	}
+}
+
+func TestExplorerArrowsFoldTreeAndTabSwitchesWorkspace(t *testing.T) {
+	u := NewUI(context.Background(), nil, "test-model")
+	u.catalog = workspaceTestCatalog()
+	u.workspaceFocused = true
+	for index, node := range u.explorerNodes() {
+		if node.id == "source:chinook-local" {
+			u.explorerIndex = index
+			break
+		}
+	}
+	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if !u.explorerCollapsed["source:chinook-local"] || u.workspaceTab != 0 {
+		t.Fatalf("Left should collapse source, not switch tab: collapsed=%v tab=%d", u.explorerCollapsed["source:chinook-local"], u.workspaceTab)
+	}
+	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	if u.explorerCollapsed["source:chinook-local"] || u.workspaceTab != 0 {
+		t.Fatalf("Right should expand source, not switch tab: collapsed=%v tab=%d", u.explorerCollapsed["source:chinook-local"], u.workspaceTab)
+	}
+	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	if u.workspaceTab != 1 {
+		t.Fatalf("Tab should switch workspace tab: %d", u.workspaceTab)
+	}
+	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if u.workspaceTab != 0 {
+		t.Fatalf("Shift+Tab should switch back: %d", u.workspaceTab)
 	}
 }
 

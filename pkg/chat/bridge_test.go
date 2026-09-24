@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/gorilla/websocket"
 )
@@ -33,16 +35,30 @@ func TestBrowserBridgeSharesSessionWithTerminal(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = bridge.Close() })
 	terminal.SetBrowserURL(bridge.URL)
+	var openedURL string
+	terminal.openBrowser = func(url string) error { openedURL = url; return nil }
+	_, _ = terminal.Update(tea.WindowSizeMsg{Width: 200, Height: 36})
 	if terminal.webLinkVisible {
 		t.Fatal("web link was visible before F5")
 	}
-	_, _ = terminal.Update(tea.KeyPressMsg{Code: tea.KeyF5})
-	if !terminal.webLinkVisible || !strings.Contains(terminal.View().Content, "Open web chat") {
-		t.Fatal("F5 did not reveal web link")
+	_, openCmd := terminal.Update(tea.KeyPressMsg{Code: tea.KeyF5})
+	if openCmd == nil {
+		t.Fatal("F5 did not request opening the browser")
 	}
-	_, _ = terminal.Update(tea.KeyPressMsg{Code: tea.KeyF5})
+	_, _ = terminal.Update(openCmd())
+	if openedURL != bridge.URL || terminal.webLinkVisible {
+		t.Fatalf("F5 open result = %q, overlay=%v", openedURL, terminal.webLinkVisible)
+	}
+	terminal.openBrowser = func(string) error { return errors.New("no browser available") }
+	_, openCmd = terminal.Update(tea.KeyPressMsg{Code: tea.KeyF5})
+	_, _ = terminal.Update(openCmd())
+	visible := ansi.Strip(terminal.View().Content)
+	if !terminal.webLinkVisible || !strings.Contains(visible, bridge.URL) {
+		t.Fatalf("failed F5 did not show the URL: visible=%v urlBytes=%d", terminal.webLinkVisible, len(bridge.URL))
+	}
+	_, _ = terminal.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if terminal.webLinkVisible {
-		t.Fatal("second F5 did not hide web link")
+		t.Fatal("Esc did not hide failed-browser dialog")
 	}
 	link, err := url.Parse(bridge.URL)
 	if err != nil {

@@ -496,8 +496,8 @@ func TestUIComposerSpacerShowsScrollDownCueAndClickJumpsToLatest(t *testing.T) {
 	if strings.TrimSpace(lines[cueRow]) != "" {
 		t.Fatalf("composer spacer should be blank at the bottom: %q", lines[cueRow])
 	}
-	if !strings.Contains(lines[cueRow+3], "Ask about your data") {
-		t.Fatalf("composer does not follow attachment row: %q", lines[cueRow+3])
+	if !strings.Contains(lines[cueRow+2], "Ask about your data") {
+		t.Fatalf("composer does not follow the spacer: %q", lines[cueRow+2])
 	}
 
 	_, _ = u.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
@@ -1007,11 +1007,14 @@ func TestUIComposerPromptUsesComposerBackground(t *testing.T) {
 	for name, style := range map[string]lipgloss.Style{
 		"focused placeholder": styles.Focused.Placeholder,
 		"focused text":        styles.Focused.Text,
+		"focused cursor line": styles.Focused.CursorLine,
 		"blurred placeholder": styles.Blurred.Placeholder,
 		"blurred text":        styles.Blurred.Text,
 	} {
 		if style.GetBackground() == nil {
 			t.Errorf("%s has no composer background", name)
+		} else if style.GetBackground() != lipgloss.Color("236") {
+			t.Errorf("%s background = %v, want composer surface", name, style.GetBackground())
 		}
 	}
 }

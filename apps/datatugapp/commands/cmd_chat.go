@@ -437,7 +437,7 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 		}
 		catalog.Objects = append(catalog.Objects, chat.ProjectObject{Reference: chat.ContextReference{
 			Kind: "query", ProjectID: project.ID, SourceID: sourceID, ObjectID: id, Title: title,
-		}})
+		}, QueryType: string(query.Type), QueryText: query.Text})
 	}
 	return catalog, urls, nil
 }

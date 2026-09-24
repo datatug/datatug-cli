@@ -95,6 +95,7 @@ type workspaceObserverKey struct{}
 type selectionParametersKey struct{}
 type bookmarkFinderKey struct{}
 type joinObserverKey struct{}
+type attachedJoinKey struct{}
 
 func withQueryObserver(ctx context.Context, observer func(QueryResult) (QueryResult, error)) context.Context {
 	return context.WithValue(ctx, queryObserverKey{}, observer)
@@ -114,6 +115,10 @@ func withBookmarkFinder(ctx context.Context, finder func(string, []string) ([]Bo
 
 func withJoinObserver(ctx context.Context, observer func(string, JoinCandidateID) (RecordSet, error)) context.Context {
 	return context.WithValue(ctx, joinObserverKey{}, observer)
+}
+
+func withAttachedJoin(ctx context.Context, join func(context.Context, QueryResult) (QueryResult, bool, error)) context.Context {
+	return context.WithValue(ctx, attachedJoinKey{}, join)
 }
 
 // ADKConversation uses an ephemeral ADK session for each turn. DataTug's
@@ -397,6 +402,21 @@ func (c *ADKConversation) runDTQL(ctx context.Context, executor DTQLExecutor, so
 	if resolve, ok := ctx.Value(selectionParametersKey{}).(func() map[string]any); ok {
 		parameters = referencedSelectionParameters(doc, resolve())
 	}
+	if join, ok := ctx.Value(attachedJoinKey{}).(func(context.Context, QueryResult) (QueryResult, bool, error)); ok {
+		base := QueryResult{Title: title, DTQL: doc, Source: sourceURL, SourceID: args.SourceID, Parameters: parameters}
+		joined, applied, joinErr := join(ctx, base)
+		if joinErr != nil {
+			c.capture(ctx, QueryResult{Title: title, DTQL: doc, Parameters: parameters, Err: joinErr})
+			return runDTQLResponse{Title: title, Error: publicQueryError(joinErr, parameters)}, nil
+		}
+		if applied {
+			captured := c.capture(ctx, joined)
+			if captured.Err != nil {
+				return runDTQLResponse{Title: title, Error: publicQueryError(captured.Err, captured.Parameters)}, nil
+			}
+			return runDTQLResponse{Title: captured.Title, OK: true, RecordSetID: captured.RecordSetID, Columns: captured.Result.Columns, Rows: len(captured.Result.Rows)}, nil
+		}
+	}
 	result, err := executor.RunDTQL(ctx, sourceURL, []byte(doc), parameters)
 	captured := c.capture(ctx, QueryResult{Title: title, DTQL: doc, Result: result, Parameters: parameters, Source: sourceURL, SourceID: args.SourceID, Err: err})
 	if captured.Err != nil {
@@ -647,46 +667,53 @@ func (c *ADKConversation) AskWithContext(ctx context.Context, prompt, priorConte
 	}
 	var text strings.Builder
 	var usage *TokenUsage
-	for event, err := range c.runner.Run(ctx, userID, providerSessionID,
-		genai.NewContentFromText(modelPrompt, genai.RoleUser),
-		agent.RunConfig{StreamingMode: agent.StreamingModeNone}) {
-		if err != nil {
-			queries := finalQueries(c.takePending())
-			actions := c.takeActions()
-			if len(queries) > 0 || len(actions) > 0 {
-				return Turn{Queries: queries, Actions: actions, Usage: usage}, nil
+	for attempt := 0; attempt < 2; attempt++ {
+		request := modelPrompt
+		if attempt > 0 {
+			request = "Your previous response was empty. For the current data request, call run_dtql with valid DTQL YAML using the configured schema; otherwise give a brief explanation."
+		}
+		for event, err := range c.runner.Run(ctx, userID, providerSessionID,
+			genai.NewContentFromText(request, genai.RoleUser),
+			agent.RunConfig{StreamingMode: agent.StreamingModeNone}) {
+			if err != nil {
+				queries := finalQueries(c.takePending())
+				actions := c.takeActions()
+				if len(queries) > 0 || len(actions) > 0 {
+					return Turn{Queries: queries, Actions: actions, Usage: usage}, nil
+				}
+				return Turn{}, fmt.Errorf("chat: agent turn: %w", err)
 			}
-			return Turn{}, fmt.Errorf("chat: agent turn: %w", err)
-		}
-		if event == nil {
-			continue
-		}
-		if reported := event.UsageMetadata; reported != nil {
-			if usage == nil {
-				usage = &TokenUsage{}
+			if event == nil {
+				continue
 			}
-			usage.InputTokens += int64(reported.PromptTokenCount)
-			usage.OutputTokens += int64(reported.CandidatesTokenCount)
-			eventTotal := int64(reported.TotalTokenCount)
-			if eventTotal == 0 {
-				// Some OpenAI-compatible adapters omit totals even when they
-				// report input and output. Normalize each event so early exits
-				// and mixed-provider events still have an accurate sum.
-				eventTotal = int64(reported.PromptTokenCount) + int64(reported.CandidatesTokenCount)
+			if reported := event.UsageMetadata; reported != nil {
+				if usage == nil {
+					usage = &TokenUsage{}
+				}
+				usage.InputTokens += int64(reported.PromptTokenCount)
+				usage.OutputTokens += int64(reported.CandidatesTokenCount)
+				eventTotal := int64(reported.TotalTokenCount)
+				if eventTotal == 0 {
+					eventTotal = int64(reported.PromptTokenCount) + int64(reported.CandidatesTokenCount)
+				}
+				usage.TotalTokens += eventTotal
 			}
-			usage.TotalTokens += eventTotal
-		}
-		if event.Content == nil {
-			continue
-		}
-		for _, part := range event.Content.Parts {
-			if part != nil && !part.Thought && part.Text != "" {
-				text.WriteString(part.Text)
+			if event.Content == nil || event.Content.Role == "thinking" {
+				continue
+			}
+			for _, part := range event.Content.Parts {
+				if part != nil && !part.Thought && part.Text != "" {
+					text.WriteString(part.Text)
+				}
+			}
+			if c.browserInterpretation && c.hasSuccessfulPending() {
+				break
 			}
 		}
-		// Browser Chat needs the structured action only. Stop after its first
-		// valid tool call instead of paying for the CLI's prose follow-up.
-		if c.browserInterpretation && c.hasSuccessfulPending() {
+		c.mu.Lock()
+		hasAction := len(c.pending) > 0 || len(c.actions) > 0
+		c.mu.Unlock()
+		if hasAction || strings.TrimSpace(text.String()) != "" {
 			break
 		}
 	}
@@ -754,6 +781,15 @@ renders the structured tool result. You may add one short sentence explaining
 what you queried after a successful tool call.
 If attached context names another project source, supply its sourceId to
 run_dtql. Never invent a source ID or URL.
+Attached tables and their column definitions are the active scope for an
+underspecified new request such as "top 5 rows". Prefer them over an earlier
+RecordSet unless the user explicitly refers to that result or another table.
+If the user asks for another table while one or more tables are attached,
+write the single-table DTQL for the requested root table. DataTug will add
+readable many-to-one foreign-key JOINs to attached tables when the relationship
+is unique; it will ask the user to choose when multiple relationships are
+possible. For a one-to-many request, use the many-side table as the root so
+the requested row count is not multiplied by a JOIN.
 
 For a new data query, run_dtql accepts a single source relation, selected
 columns, where expressions, groupBy, aggregate columns, having, orderBy, limit,

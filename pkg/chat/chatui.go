@@ -974,5 +974,44 @@ func (u *ChatUI) statusBar(width int) string {
 			segments = append([]string{"session: " + sanitizeTerminalText(u.snapshot.Title)}, segments...)
 		}
 	}
-	return padAnsiLine(strings.Join(segments, " · "), width)
+	// M5 (r1 adversarial review of #289): ui.go's wrapStatusSegments wrapped
+	// onto a second (or further) status line instead of silently truncating
+	// on a narrow terminal, which padAnsiLine(strings.Join(...), width)
+	// alone would do (ansi.Truncate cuts the joined line, and everything
+	// past the cut is simply gone). Ported, with the "·" separator
+	// statusBar already used rather than ui.go's "•", and without ui.go's
+	// three width>=100 "drop these segments if still multi-line" passes --
+	// this only wraps for what statusBar already computed above.
+	lines := wrapStatusSegments(segments, width)
+	for i, line := range lines {
+		lines[i] = padAnsiLine(line, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// wrapStatusSegments packs segments onto as few lines as fit within
+// maxWidth, breaking to a new line only when the next segment would not
+// fit — ui.go's wrapStatusSegments, ported verbatim (statusBar's own " · "
+// separator in place of ui.go's " • ").
+func wrapStatusSegments(segments []string, maxWidth int) []string {
+	const separator = " · "
+	lines := make([]string, 0, len(segments))
+	current := ""
+	for _, segment := range segments {
+		segment = ansi.Truncate(segment, maxWidth, "…")
+		candidate := segment
+		if current != "" {
+			candidate = current + separator + segment
+		}
+		if current != "" && ansi.StringWidth(candidate) > maxWidth {
+			lines = append(lines, current)
+			current = segment
+			continue
+		}
+		current = candidate
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	return lines
 }

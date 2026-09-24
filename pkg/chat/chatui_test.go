@@ -413,3 +413,31 @@ func TestChatHelpTextRestoresKeyParity(t *testing.T) {
 		}
 	}
 }
+
+// TestChatUIStatusBarWrapsOnNarrowWidth is the M5 regression test (r1
+// adversarial review of #289): statusBar used to join every segment onto
+// one line and ansi.Truncate the whole thing on a narrow terminal, silently
+// dropping everything past the cut. wrapStatusSegments (ported from ui.go)
+// now wraps onto additional lines instead.
+func TestChatUIStatusBarWrapsOnNarrowWidth(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.shell.Update(tea.WindowSizeMsg{Width: 30, Height: 20})
+	status := u.statusBar(30)
+	lines := strings.Split(status, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("status bar did not wrap onto multiple lines at width 30: %q", status)
+	}
+	for _, line := range lines {
+		if w := ansi.StringWidth(line); w > 30 {
+			t.Errorf("wrapped status line exceeds width 30 (%d): %q", w, line)
+		}
+	}
+	// Wrapping must not drop content: every key hint present in the
+	// unwrapped (wide) rendering must still appear somewhere across the
+	// wrapped lines.
+	for _, want := range []string{"F2 select", "Shift+↑↓ navigate", "Enter send", "F6/Shift+→ workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", "Ctrl+C quit"} {
+		if !strings.Contains(status, want) {
+			t.Errorf("wrapped status bar dropped segment %q:\n%s", want, status)
+		}
+	}
+}

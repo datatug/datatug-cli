@@ -286,11 +286,9 @@ func (u *ChatUI) openSaveQueryDialog() tea.Cmd {
 type saveQueryOverlayState struct {
 	ui      *ChatUI
 	request SavedQuerySaveRequest
-	fields  []string // name, tags
-	values  []string
-	focus   int // name, tags, save
+	values  []string // [name, tag-input]
+	focus   int      // name, tags, save
 	tags    []string
-	tag     string
 	err     string
 }
 

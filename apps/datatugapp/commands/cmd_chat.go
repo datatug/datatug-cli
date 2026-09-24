@@ -15,7 +15,6 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -301,7 +300,7 @@ func projectSchemaContext(catalog chat.ProjectCatalog, urls map[string]string, s
 
 func chatProjectChoices(current, currentDir string, catalog chat.ProjectCatalog) []chat.ProjectChoice {
 	choices := []chat.ProjectChoice{{Key: current, Title: catalog.Title, Detail: currentDir}}
-	settings, err := dtconfig.GetSettings()
+	settings, err := getChatSettings()
 	if err != nil { // A direct project path can run without a project registry.
 		return choices
 	}

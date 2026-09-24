@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/strongo/aichat/ai"
@@ -128,6 +129,202 @@ func TestBuildChatProjectCatalogKeepsUnscannedSources(t *testing.T) {
 	}
 	if !foundIssue || !foundHealthy {
 		t.Fatalf("broken Customer should coexist with healthy Invoice: %+v", degraded.Objects)
+	}
+}
+
+// TestBuildChatProjectCatalogIncludesQueries covers buildChatProjectCatalog's
+// saved-query listing tail: an unambiguous single-Catalog-target query is
+// scoped to that source, a query whose targets disagree on Catalog falls
+// back to project scope (ambiguousSource), and a query with no
+// project-source targets stays project-scoped too.
+func TestBuildChatProjectCatalogIncludesQueries(t *testing.T) {
+	dir := t.TempDir()
+	write := func(path, content string) {
+		t.Helper()
+		fullPath := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("datatug-project.json", `{"id":"chat-test","title":"Chat test"}`)
+	write("environments/local/local.env.json", `{"id":"local","dbServers":[{"driver":"sqlite3","catalogs":["chinook-local","second-db"]}]}`)
+	write("environments/local/catalogs/chinook-local/chinook-local.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q}`, filepath.Join(dir, "chinook.sqlite")))
+	write("environments/local/catalogs/second-db/second-db.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q}`, filepath.Join(dir, "second.sqlite")))
+	write("queries/scoped.query.json", `{"id":"scoped","title":"Scoped query","type":"DTQL","targets":[{"catalog":"chinook-local"}]}`)
+	write("queries/ambiguous.query.json", `{"id":"ambiguous","type":"DTQL","targets":[{"catalog":"chinook-local"},{"catalog":"second-db"}]}`)
+	write("queries/untargeted.query.json", `{"id":"untargeted","type":"DTQL"}`)
+
+	store := filestore.NewProjectStore("chat-test", dir)
+	catalog, urls, err := buildChatProjectCatalog(context.Background(), dir, store, "local")
+	if err != nil {
+		t.Fatalf("buildChatProjectCatalog: %v", err)
+	}
+	// Both chinook-local and second-db must resolve to real, non-empty
+	// urls for the ambiguous query's two-different-Catalog-targets loop to
+	// actually reach its ambiguousSource branch (buildChatProjectCatalog's
+	// urls[target.Catalog] != "" guard skips an unknown/unresolvable source
+	// entirely rather than counting it toward ambiguity).
+	if urls["chinook-local"] == "" || urls["second-db"] == "" {
+		t.Fatalf("fixture sources did not resolve to urls: %v", urls)
+	}
+	queries := map[string]chat.ContextReference{}
+	for _, object := range catalog.Objects {
+		if object.Reference.Kind == "query" {
+			queries[object.Reference.ObjectID] = object.Reference
+		}
+	}
+	if len(queries) != 3 {
+		t.Fatalf("expected 3 saved queries in the catalog, got %+v", queries)
+	}
+	if got := queries["scoped"]; got.SourceID != "chinook-local" || got.Title != "Scoped query" {
+		t.Errorf("scoped query = %+v, want SourceID chinook-local", got)
+	}
+	if got := queries["ambiguous"]; got.SourceID != "" {
+		t.Errorf("ambiguous query = %+v, want empty SourceID (project scope)", got)
+	}
+	if got := queries["untargeted"]; got.SourceID != "" || got.Title != "untargeted" {
+		t.Errorf("untargeted query = %+v, want project scope and ID as title fallback", got)
+	}
+}
+
+// TestSetCatalogSourceIssueAppendsMultipleIssues covers the "already has an
+// issue" branch: a second issue for the same source is joined with "; "
+// instead of overwriting the first.
+func TestSetCatalogSourceIssueAppendsMultipleIssues(t *testing.T) {
+	catalog := chat.ProjectCatalog{Objects: []chat.ProjectObject{
+		{Reference: chat.ContextReference{Kind: "source", SourceID: "chinook-local", ObjectID: "chinook-local"}},
+		{Reference: chat.ContextReference{Kind: "table", SourceID: "chinook-local", ObjectID: "main.Customer"}},
+	}}
+	setCatalogSourceIssue(&catalog, "chinook-local", "first issue")
+	setCatalogSourceIssue(&catalog, "chinook-local", "second issue")
+	if got := catalog.Objects[0].Issue; got != "first issue; second issue" {
+		t.Fatalf("Issue = %q, want both issues joined", got)
+	}
+	// A different SourceID or Kind must never be touched.
+	if catalog.Objects[1].Issue != "" {
+		t.Fatalf("wrong object mutated: %+v", catalog.Objects[1])
+	}
+}
+
+// TestChatProjectChoicesListsOtherRegisteredProjects covers
+// chatProjectChoices: the current project always leads, a registered
+// project sharing the current directory (or the current project's own ID)
+// is skipped, and a project with no Path or no ID is skipped too.
+func TestChatProjectChoicesListsOtherRegisteredProjects(t *testing.T) {
+	dir := t.TempDir()
+	other := t.TempDir()
+	restore := getChatSettings
+	t.Cleanup(func() { getChatSettings = restore })
+	getChatSettings = func() (dtconfig.Settings, error) {
+		return dtconfig.Settings{Projects: []*dtconfig.ProjectRef{
+			{ID: "current", Title: "Current (registered)", Path: dir},
+			nil,
+			{ID: "", Title: "no id", Path: other},
+			{ID: "no-path", Title: "no path"},
+			{ID: "sibling", Title: "Sibling project", Path: other},
+		}}, nil
+	}
+	catalog := chat.ProjectCatalog{ID: "current", Title: "Current"}
+	choices := chatProjectChoices("current", dir, catalog)
+	if len(choices) != 2 {
+		t.Fatalf("choices = %+v, want the current project plus exactly one sibling", choices)
+	}
+	if choices[0].Key != "current" || choices[0].Title != "Current" || choices[0].Detail != dir {
+		t.Fatalf("first choice = %+v, want the current project leading", choices[0])
+	}
+	if choices[1].Key != "sibling" || choices[1].Title != "Sibling project" || choices[1].Detail != other {
+		t.Fatalf("second choice = %+v, want the sibling project", choices[1])
+	}
+}
+
+// TestChatProjectChoicesWithoutRegistrySettingsStillListsCurrent covers
+// chatProjectChoices' "a direct project path can run without a project
+// registry" fallback.
+func TestChatProjectChoicesWithoutRegistrySettingsStillListsCurrent(t *testing.T) {
+	restore := getChatSettings
+	t.Cleanup(func() { getChatSettings = restore })
+	getChatSettings = func() (dtconfig.Settings, error) { return dtconfig.Settings{}, errors.New("no registry") }
+	catalog := chat.ProjectCatalog{ID: "solo", Title: "Solo"}
+	choices := chatProjectChoices("solo", "/tmp/solo", catalog)
+	if len(choices) != 1 || choices[0].Key != "solo" {
+		t.Fatalf("choices = %+v, want just the current project", choices)
+	}
+}
+
+// TestSameProjectDirectoryHandlesMissingPaths covers sameProjectDirectory's
+// two os.Stat-failure early-returns (a nonexistent path on either side).
+func TestSameProjectDirectoryHandlesMissingPaths(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "does-not-exist")
+	if sameProjectDirectory(missing, dir) {
+		t.Fatal("a missing left path should never match")
+	}
+	if sameProjectDirectory(dir, missing) {
+		t.Fatal("a missing right path should never match")
+	}
+	file := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if sameProjectDirectory(file, dir) {
+		t.Fatal("a plain file should never match a directory")
+	}
+}
+
+// TestLoadChatJoinApplicationUnavailableSourceIsANoop covers
+// loadChatJoinApplication's "unavailable://" and non-sqlite early returns:
+// neither is an error (JOIN discovery is simply skipped).
+func TestLoadChatJoinApplicationSkipsUnavailableAndNonSQLiteSources(t *testing.T) {
+	ctx := context.Background()
+	app, closeFn, err := loadChatJoinApplication(ctx, "unavailable://chinook-local", nil, false)
+	if app != nil || closeFn != nil || err != nil {
+		t.Fatalf("unavailable source: app=%v close=%v err=%v, want all nil/zero", app, closeFn != nil, err)
+	}
+	app, closeFn, err = loadChatJoinApplication(ctx, "ingitdb:///some/project", nil, false)
+	if app != nil || closeFn != nil || err != nil {
+		t.Fatalf("non-sqlite source: app=%v close=%v err=%v, want all nil/zero", app, closeFn != nil, err)
+	}
+}
+
+// TestLoadChatJoinApplicationLoadsRealSQLiteSnapshot covers
+// loadChatJoinApplication's success path against the real chinook fixture
+// shared with pkg/chat's own join tests: it returns a usable
+// *chat.ForeignKeyJoinApplication whose CanReadTarget enforces the "main"
+// schema-only preflight before delegating to the executor.
+func TestLoadChatJoinApplicationLoadsRealSQLiteSnapshot(t *testing.T) {
+	ctx := context.Background()
+	path, err := filepath.Abs(filepath.Join("..", "..", "..", "pkg", "dbcopy", "testdata", "chinook.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Skipf("chinook fixture unavailable: %v", statErr)
+	}
+	executor := secureread.NewExecutor(secureread.Session{Unrestricted: true})
+	app, closeFn, err := loadChatJoinApplication(ctx, "sqlite:///"+path, executor, true)
+	if err != nil {
+		t.Fatalf("loadChatJoinApplication: %v", err)
+	}
+	if closeFn == nil {
+		t.Fatal("expected a close function for an opened metadata DB")
+	}
+	defer closeFn()
+	if app == nil || len(app.Snapshot.Keys) == 0 {
+		t.Fatalf("expected a non-empty FK snapshot, got %+v", app)
+	}
+	if err := app.CanReadTarget(ctx, chat.RelationInstance{Schema: "other", Relation: "Customer"}); err == nil {
+		t.Fatal("expected a non-main schema target to be rejected by the preflight")
+	}
+	if err := app.CanReadTarget(ctx, chat.RelationInstance{Schema: "main", Relation: "Customer"}); err != nil {
+		t.Fatalf("CanReadTarget(main.Customer): %v", err)
+	}
+	// Refresh re-derives the same snapshot through the same code path.
+	refreshed, err := app.Refresh(ctx)
+	if err != nil || len(refreshed.Keys) == 0 {
+		t.Fatalf("Refresh: %+v, %v", refreshed, err)
 	}
 }
 

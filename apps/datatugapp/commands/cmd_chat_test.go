@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -474,6 +475,8 @@ func TestResolveChatAIProfileErrors(t *testing.T) {
 		{name: "empty key", settings: dtconfig.Settings{AI: &dtconfig.AIConfig{Profiles: map[string]dtconfig.AIProfile{"deepseek": {Model: "deepseek-flash", APIKeyEnv: "TEST_EMPTY_KEY"}}}}, want: "requires a non-empty TEST_EMPTY_KEY"},
 		{name: "missing model", settings: dtconfig.Settings{AI: &dtconfig.AIConfig{Profiles: map[string]dtconfig.AIProfile{"deepseek": {APIKeyEnv: "TEST_KEY"}}}}, want: "has no model"},
 		{name: "config error", settingsErr: errors.New("read failed"), want: "load DataTug AI profiles: read failed"},
+		{name: "config not found", settingsErr: fs.ErrNotExist, want: `AI profile "missing" is not configured: DataTug config file not found`},
+		{name: "no AI section", settings: dtconfig.Settings{}, want: `unknown AI profile "missing"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -484,7 +487,7 @@ func TestResolveChatAIProfileErrors(t *testing.T) {
 			t.Setenv("TEST_MISSING_KEY", "")
 			t.Setenv("TEST_EMPTY_KEY", "")
 			err := resolveChatAIProfile(&chatOptions{ai: "missing"}, chatCommand())
-			if tt.name != "unknown" && tt.name != "config error" {
+			if tt.name != "unknown" && tt.name != "config error" && tt.name != "config not found" && tt.name != "no AI section" {
 				err = resolveChatAIProfile(&chatOptions{ai: "deepseek", model: defaultChatModel}, chatCommand())
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.want) {

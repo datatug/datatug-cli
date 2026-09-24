@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -172,6 +173,347 @@ func TestChatUIBrowserBridgeSharesSessionWithTerminal(t *testing.T) {
 	}
 	if len(snapshot.Messages) != 7 || snapshot.Messages[6].Text != "Terminal reply." || len(snapshot.RecordSets) != 1 {
 		t.Fatal("terminal turn did not reach browser snapshot")
+	}
+}
+
+// erroringConversation always fails AskWithContext, for exercising the
+// browser bridge's own AskActive-error branch.
+type erroringConversation struct{}
+
+func (erroringConversation) AskWithContext(context.Context, string, string) (Turn, error) {
+	return Turn{}, errors.New("model unavailable")
+}
+
+// TestBrowserBridgeListenerFallsBackWhenDefaultPortIsTaken covers
+// StartBrowserBridge's own fallback branch: when 127.0.0.1:3284 is already
+// bound (a second local chat running), it falls back to an ephemeral port
+// instead of failing.
+func TestBrowserBridgeListenerFallsBackWhenDefaultPortIsTaken(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:3284")
+	if err != nil {
+		t.Skipf("port 3284 unavailable for the test itself: %v", err)
+	}
+	defer func() { _ = occupied.Close() }()
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatalf("StartBrowserBridge with the default port taken: %v", err)
+	}
+	t.Cleanup(func() { _ = bridge.Close() })
+	if strings.Contains(bridge.URL, "127.0.0.1:3284") {
+		t.Fatalf("bridge fell back to a different port but URL still names 3284: %q", bridge.URL)
+	}
+}
+
+// TestBrowserBridgeEndpointErrorBranches covers the HTTP endpoints' own
+// method/origin/body/session-mismatch/agent-error branches, none of which
+// TestChatUIBrowserBridgeSharesSessionWithTerminal's happy-path walk
+// exercises.
+func TestBrowserBridgeEndpointErrorBranches(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	agent := &erroringConversation{}
+	sessions, err := NewSessionChat(ctx, store, agent, "sqlite:///chinook.db", ProjectCatalog{ID: "demo-project-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bridge.Close() })
+	link, err := url.Parse(bridge.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragment, err := url.ParseQuery(link.Fragment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := "http://" + fragment.Get("h")
+	token := fragment.Get("t")
+	request := func(method, path string, body []byte, tok, origin string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(method, address+path, bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		if tok != "" {
+			req.Header.Set("X-DataTug-Chat-Capability", tok)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		return resp
+	}
+
+	if resp := request("GET", "/datatug/projects/project_summary?id=demo-project-2", nil, token, "https://evil.example"); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("disallowed origin on project_summary: %d", resp.StatusCode)
+	}
+	if resp := request("POST", "/datatug/projects/project_summary?id=demo-project-2", nil, token, "https://datatug.app"); resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("wrong method on project_summary: %d", resp.StatusCode)
+	}
+	if resp := request("POST", "/v1/chat/session", nil, token, "https://datatug.app"); resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("wrong method on chat/session: %d", resp.StatusCode)
+	}
+	if resp := request("GET", "/v1/chat/messages", nil, token, "https://datatug.app"); resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("wrong method on chat/messages: %d", resp.StatusCode)
+	}
+	if resp := request("POST", "/v1/chat/messages", []byte("not json"), token, "https://datatug.app"); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("malformed body: %d", resp.StatusCode)
+	}
+	if resp := request("POST", "/v1/chat/messages", []byte(`{"text":"  "}`), token, "https://datatug.app"); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("blank text: %d", resp.StatusCode)
+	}
+	if resp := request("POST", "/v1/chat/messages", []byte(`{"text":"hi","sessionId":"wrong-session"}`), token, "https://datatug.app"); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("mismatched sessionId: %d", resp.StatusCode)
+	}
+	// AskActive's own error branch (500) is not reachable from here: a
+	// failing agent (erroringConversation, used above only to keep this
+	// test independent of a real model) is absorbed by SessionChat.ask's
+	// finalizeTurn into a friendly Turn.Text with a nil error -- the bridge
+	// only sees a Go error from AskActive when SessionChat.prepareTurn or
+	// the store append itself fails, which (with the session-ID check
+	// already passed above) would need the store to fail between two
+	// calls in the same synchronous request; not reproducible without a
+	// store seam this package doesn't have.
+
+	// The WebSocket endpoint: origin/host-disallowed (403) and an invalid
+	// subprotocol token (401) -- both checked before any upgrade attempt.
+	if resp := request("GET", "/v1/chat/events", nil, "", "https://evil.example"); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("disallowed origin on chat/events: %d", resp.StatusCode)
+	}
+	wsReq, err := http.NewRequest("GET", address+"/v1/chat/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wsReq.Header.Set("Origin", "https://datatug.app")
+	wsReq.Header.Set("Sec-WebSocket-Protocol", "datatug-chat, wrong-token")
+	resp, err := http.DefaultClient.Do(wsReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("invalid subprotocol token on chat/events: %d", resp.StatusCode)
+	}
+}
+
+// TestBrowserBridgeChatSessionSnapshotErrorSurfaces covers /v1/chat/session's
+// own sessions.Snapshot error branch, forced by closing the underlying
+// store.
+func TestBrowserBridgeChatSessionSnapshotErrorSurfaces(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bridge.Close() })
+	link, err := url.Parse(bridge.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragment, err := url.ParseQuery(link.Fragment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest("GET", "http://"+fragment.Get("h")+"/v1/chat/session", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", "https://datatug.app")
+	req.Header.Set("X-DataTug-Chat-Capability", fragment.Get("t"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("chat/session with a closed store: %d", resp.StatusCode)
+	}
+}
+
+// TestBrowserBridgeEventsLoopDetectsClientDisconnect covers the /v1/chat/events
+// handler's own ReadMessage-error/disconnected-channel branch: the server
+// must stop its select loop (and drop the connection from bridge.connections)
+// once the client closes its end, rather than blocking forever.
+func TestBrowserBridgeEventsLoopDetectsClientDisconnect(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bridge.Close() })
+	link, err := url.Parse(bridge.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragment, err := url.ParseQuery(link.Fragment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := fragment.Get("t")
+	socket, _, err := (&websocket.Dialer{Subprotocols: []string{"datatug-chat", token}}).Dial("ws://"+fragment.Get("h")+"/v1/chat/events", http.Header{"Origin": []string{"https://datatug.app"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notification map[string]string
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := socket.ReadJSON(&notification); err != nil {
+		t.Fatalf("initial socket event: %v", err)
+	}
+	if err := socket.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		bridge.connectionsMu.Lock()
+		remaining := len(bridge.connections)
+		bridge.connectionsMu.Unlock()
+		if remaining == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("server never noticed the client disconnect")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestBrowserBridgeEventsUpgradeFailureIsHandled covers the /v1/chat/events
+// handler's own websocket-Upgrade-error branch: a request that passes
+// auth/subprotocol but never asks for a protocol upgrade at all.
+func TestBrowserBridgeEventsUpgradeFailureIsHandled(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bridge.Close() })
+	link, err := url.Parse(bridge.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragment, err := url.ParseQuery(link.Fragment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest("GET", "http://"+fragment.Get("h")+"/v1/chat/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", "https://datatug.app")
+	req.Header.Set("Sec-WebSocket-Protocol", "datatug-chat, "+fragment.Get("t"))
+	// No Connection:Upgrade/Sec-WebSocket-Key headers: gorilla/websocket's
+	// Upgrader.Upgrade refuses and writes its own error response, and the
+	// handler simply returns.
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		t.Fatal("expected the upgrade to fail without the required headers")
+	}
+}
+
+// TestBrowserBridgeCloseClosesLiveConnections covers Close's own
+// connections-map loop: closing the bridge while a websocket connection is
+// still open must close that connection too, not just the listener.
+func TestBrowserBridgeCloseClosesLiveConnections(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err := url.Parse(bridge.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragment, err := url.ParseQuery(link.Fragment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := fragment.Get("t")
+	socket, _, err := (&websocket.Dialer{Subprotocols: []string{"datatug-chat", token}}).Dial("ws://"+fragment.Get("h")+"/v1/chat/events", http.Header{"Origin": []string{"https://datatug.app"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = socket.Close() }()
+	var notification map[string]string
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := socket.ReadJSON(&notification); err != nil {
+		t.Fatalf("initial socket event: %v", err)
+	}
+	// Close the bridge (not the client socket) first, so the server-side
+	// connections map still holds this connection when Close's loop runs.
+	if err := bridge.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	// The server should have closed its end: a subsequent read must fail
+	// rather than hang.
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := socket.ReadJSON(&notification); err == nil {
+		t.Fatal("expected the server to have closed the connection")
+	}
+}
+
+// TestBrowserBridgeAllowedRequestHostMismatch covers allowedRequest's own
+// Host-mismatch branch directly: an allowed Origin with a Host header that
+// names neither the listener's address nor its localhost:port form.
+func TestBrowserBridgeAllowedRequestHostMismatch(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bridge.Close() })
+	req, err := http.NewRequest("GET", "http://example.test/v1/chat/session", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", "https://datatug.app")
+	req.Host = "not-the-listener-host:9999"
+	if bridge.allowedRequest(req) {
+		t.Fatal("expected a Host mismatch to be disallowed")
 	}
 }
 

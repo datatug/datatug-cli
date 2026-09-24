@@ -45,6 +45,8 @@ type BrowserBridge struct {
 func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
+		// Not covered: crypto/rand.Read failing means the OS entropy
+		// source itself is broken, not reproducible from a test.
 		return nil, fmt.Errorf("create chat bridge capability: %w", err)
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:3284")
@@ -53,6 +55,9 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 		listener, err = net.Listen("tcp", "127.0.0.1:0")
 	}
 	if err != nil {
+		// Not covered: this needs 127.0.0.1:0 (an OS-assigned ephemeral
+		// port) itself to fail, i.e. the loopback interface's whole port
+		// range exhausted -- not reproducible from a test.
 		return nil, fmt.Errorf("listen for browser chat: %w", err)
 	}
 	token := hex.EncodeToString(secret)
@@ -121,6 +126,13 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 			return
 		}
 		if _, err := sessions.AskActive(r.Context(), request.SessionID, request.Text); err != nil {
+			// Not covered: a failing agent is absorbed by
+			// SessionChat.ask's finalizeTurn into a friendly Turn.Text
+			// with a nil error, so AskActive itself only errors when
+			// prepareTurn or the store append fails -- with the session
+			// ID already matched above, that needs the store to fail
+			// between two calls within one request, not reproducible
+			// without a store seam this package doesn't have.
 			http.Error(w, "unable to send message", http.StatusInternalServerError)
 			return
 		}
@@ -168,11 +180,21 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 			}
 		}()
 		if err := conn.WriteJSON(map[string]string{"type": "changed"}); err != nil {
+			// Not covered: this write happens immediately after a
+			// successful Upgrade, so it fails only on a write-side race
+			// (the client closing its socket in the handful of
+			// microseconds between Upgrade returning and this write) --
+			// too timing-dependent to reproduce reliably from a test.
 			return
 		}
 		for {
 			select {
 			case _, ok := <-changes:
+				// Not covered: SubscribeChanges' own stop() (the only
+				// thing that closes this channel) is deferred right
+				// above and so only runs after this loop has already
+				// returned via one of the other cases -- !ok is
+				// unreachable through the public API.
 				if !ok {
 					return
 				}
@@ -182,6 +204,12 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 			case <-disconnected:
 				return
 			case <-r.Context().Done():
+				// Not covered: a websocket upgrade fully hijacks the
+				// underlying connection, so net/http no longer monitors
+				// it for client disconnects -- disconnected (above)
+				// covers that instead. This case only fires on a genuine
+				// request-scoped cancellation (e.g. server shutdown),
+				// not reproducible from a client-side test.
 				return
 			}
 		}

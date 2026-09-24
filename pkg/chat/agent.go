@@ -363,6 +363,9 @@ func (c *ADKConversation) runDTQL(ctx context.Context, executor DTQLExecutor, so
 		}
 		sourceURL = resolved
 	}
+	if strings.HasPrefix(sourceURL, "unavailable://") {
+		return runDTQLResponse{Title: title, Error: "That project data source is unavailable. Choose a healthy source or inspect Project explorer."}, nil
+	}
 	if !c.allowToolCall() {
 		err := fmt.Errorf("the agent exceeded %d query attempts in one turn", maxToolCallsPerTurn)
 		c.capture(ctx, QueryResult{Title: title, DTQL: strings.TrimSpace(args.DTQL), Err: err})

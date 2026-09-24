@@ -96,20 +96,34 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			return "", Exit(err.Error(), exitCodeUsage)
 		}
 	}
-	sourceURL, err := resolveQuerySourceURL(ctx, projectStore, projectDir, options.env, database)
-	if err != nil {
-		return "", Exit(err.Error(), exitCodeUsage)
-	}
-	storedSchema, err := api.GetCatalogSchema(projectDir, options.env, database)
-	if err != nil {
-		return "", Exit(fmt.Sprintf("load project schema: %v", err), exitCodeUsage)
-	}
-	if len(storedSchema.Relations) == 0 {
-		return "", Exit("the selected database has no scanned schema; run datatug scan first", exitCodeUsage)
-	}
 	projectCatalog, sourceURLs, err := buildChatProjectCatalog(ctx, projectDir, projectStore, options.env)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("load project explorer: %v", err), exitCodeUsage)
+	}
+	sourceURL, sourceErr := resolveQuerySourceURL(ctx, projectStore, projectDir, options.env, database)
+	if sourceErr != nil {
+		sourceURL = "unavailable://" + url.PathEscape(database)
+		sourceURLs[database] = sourceURL // stable degraded session scope; never executed
+		setCatalogSourceIssue(&projectCatalog, database, "Source unavailable: "+sourceErr.Error())
+	}
+	storedSchema, schemaErr := api.GetCatalogSchemaPartial(projectDir, options.env, database)
+	if schemaErr != nil {
+		setCatalogSourceIssue(&projectCatalog, database, "Schema unavailable: "+schemaErr.Error())
+	}
+	schemaContext := ""
+	healthyRelations := 0
+	if storedSchema != nil {
+		var healthy api.CatalogSchema
+		for _, relation := range storedSchema.Relations {
+			if relation.Issue == "" {
+				healthy.Relations = append(healthy.Relations, relation)
+				healthyRelations++
+			}
+		}
+		schemaContext = chat.FormatSchemaContext(&healthy)
+	}
+	if healthyRelations == 0 || sourceErr != nil {
+		schemaContext = projectSchemaContext(projectCatalog, sourceURLs, database)
 	}
 
 	session, err := resolveServeSession(projectDir, serveFlags{
@@ -122,13 +136,18 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		return "", Exit("chat: "+strings.TrimPrefix(err.Error(), "serve: "), exitCodeUsage)
 	}
 	executor := secureread.NewExecutor(session)
-	llm, err := pimodels.New(ctx, options.model, chatModelOptions(options)...)
-	if err != nil {
-		return "", Exit(fmt.Sprintf("configure chat model %q: %v", options.model, err), exitCodeUsage)
-	}
-	conversation, err := chat.NewADKConversation(llm, executor, sourceURL, chat.FormatSchemaContext(storedSchema), chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs))
-	if err != nil {
-		return "", Exit(err.Error(), exitCodeUsage)
+	var conversation chat.ContextualConversation
+	if !hasQueryableProjectTables(projectCatalog, sourceURLs) {
+		conversation = unavailableSchemaConversation{database: database}
+	} else {
+		llm, modelErr := pimodels.New(ctx, options.model, chatModelOptions(options)...)
+		if modelErr != nil {
+			return "", Exit(fmt.Sprintf("configure chat model %q: %v", options.model, modelErr), exitCodeUsage)
+		}
+		conversation, err = chat.NewADKConversation(llm, executor, sourceURL, schemaContext, chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs))
+		if err != nil {
+			return "", Exit(err.Error(), exitCodeUsage)
+		}
 	}
 	storePath, err := chat.DefaultChatStorePath(projectDir)
 	if err != nil {
@@ -144,44 +163,20 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		return "", Exit(fmt.Sprintf("open chat sessions: %v", err), exitCodeUsage)
 	}
 	defer func() { _ = store.Close() }()
+	joinApplication, closeJoin, joinErr := loadChatJoinApplication(ctx, sourceURL, executor, session.Unrestricted)
+	if closeJoin != nil {
+		defer closeJoin()
+	}
+	if joinErr != nil {
+		setCatalogSourceIssue(&projectCatalog, database, "JOIN metadata unavailable: "+joinErr.Error())
+	}
 	sessions, err := chat.NewSessionChat(ctx, store, conversation, sourceURL, projectCatalog)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("restore chat session: %v", err), exitCodeUsage)
 	}
 	sessions.ConfigureQueryExecutor(executor)
-	// FK evidence is source-scoped. Non-SQLite sources remain usable for Chat,
-	// but expose no inferred JOINs in this first discovery implementation.
-	joinSource, err := dbcopy.Parse(sourceURL)
-	if err != nil {
-		return "", Exit(fmt.Sprintf("resolve chat source: %v", err), exitCodeUsage)
-	}
-	if joinSource.Scheme == "sqlite" {
-		if err := dbcopy.CheckSourceFile(joinSource.Path); err != nil {
-			return "", Exit(fmt.Sprintf("load JOIN metadata: %v", err), exitCodeUsage)
-		}
-		readOnlyURL := (&url.URL{Scheme: "file", Path: joinSource.Path, RawQuery: "mode=ro"}).String()
-		metadataDB, openErr := sql.Open("sqlite", readOnlyURL)
-		if openErr != nil {
-			return "", Exit(fmt.Sprintf("open JOIN metadata: %v", openErr), exitCodeUsage)
-		}
-		defer func() { _ = metadataDB.Close() }()
-		refresh := func(ctx context.Context) (chat.ForeignKeySnapshot, error) {
-			return chat.LoadSQLiteForeignKeySnapshot(ctx, sourceURL, metadataDB)
-		}
-		snapshot, scanErr := refresh(ctx)
-		if scanErr != nil {
-			return "", Exit(fmt.Sprintf("load JOIN metadata: %v", scanErr), exitCodeUsage)
-		}
-		sessions.ConfigureJoinApplication(chat.ForeignKeyJoinApplication{
-			Source: sourceURL, Snapshot: snapshot, Refresh: refresh,
-			Executor: executor, Secure: !session.Unrestricted,
-			CanReadTarget: func(ctx context.Context, target chat.RelationInstance) error {
-				if target.Schema != "" && !strings.EqualFold(target.Schema, "main") {
-					return fmt.Errorf("JOIN target schema is not supported by this policy preflight")
-				}
-				return executor.CanReadWholeCollection(ctx, target.Relation)
-			},
-		})
+	if joinApplication != nil {
+		sessions.ConfigureJoinApplication(*joinApplication)
 	}
 	ui, err := chat.NewSessionUI(ctx, sessions, options.model)
 	if err != nil {
@@ -204,6 +199,105 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		return "", err
 	}
 	return ui.SelectedProject(), nil
+}
+
+type unavailableSchemaConversation struct{ database string }
+
+func (c unavailableSchemaConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {
+	return chat.Turn{Text: "I can't query " + c.database + " because its source or schema is unavailable. Open Project explorer for details."}, nil
+}
+
+// JOIN discovery is optional: a failed metadata read should disable JOIN
+// suggestions for this source, not prevent chat or other sources from loading.
+func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *secureread.Executor, unrestricted bool) (*chat.ForeignKeyJoinApplication, func(), error) {
+	if strings.HasPrefix(sourceURL, "unavailable://") {
+		return nil, nil, nil
+	}
+	joinSource, err := dbcopy.Parse(sourceURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	if joinSource.Scheme != "sqlite" {
+		return nil, nil, nil
+	}
+	if err := dbcopy.CheckSourceFile(joinSource.Path); err != nil {
+		return nil, nil, err
+	}
+	readOnlyURL := (&url.URL{Scheme: "file", Path: joinSource.Path, RawQuery: "mode=ro"}).String()
+	metadataDB, err := sql.Open("sqlite", readOnlyURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	closeDB := func() { _ = metadataDB.Close() }
+	refresh := func(ctx context.Context) (chat.ForeignKeySnapshot, error) {
+		return chat.LoadSQLiteForeignKeySnapshot(ctx, sourceURL, metadataDB)
+	}
+	snapshot, err := refresh(ctx)
+	if err != nil {
+		closeDB()
+		return nil, nil, err
+	}
+	application := &chat.ForeignKeyJoinApplication{
+		Source: sourceURL, Snapshot: snapshot, Refresh: refresh,
+		Executor: executor, Secure: !unrestricted,
+		CanReadTarget: func(ctx context.Context, target chat.RelationInstance) error {
+			if target.Schema != "" && !strings.EqualFold(target.Schema, "main") {
+				return fmt.Errorf("JOIN target schema is not supported by this policy preflight")
+			}
+			return executor.CanReadWholeCollection(ctx, target.Relation)
+		},
+	}
+	return application, closeDB, nil
+}
+
+func setCatalogSourceIssue(catalog *chat.ProjectCatalog, sourceID, issue string) {
+	for i := range catalog.Objects {
+		object := &catalog.Objects[i]
+		if object.Reference.Kind == "source" && object.Reference.SourceID == sourceID {
+			if object.Issue != "" {
+				object.Issue += "; "
+			}
+			object.Issue += issue
+			return
+		}
+	}
+}
+
+func hasQueryableProjectTables(catalog chat.ProjectCatalog, urls map[string]string) bool {
+	for _, object := range catalog.Objects {
+		if (object.Reference.Kind == "table" || object.Reference.Kind == "project_view") && object.Issue == "" {
+			if source := urls[object.Reference.SourceID]; source != "" && !strings.HasPrefix(source, "unavailable://") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func projectSchemaContext(catalog chat.ProjectCatalog, urls map[string]string, selectedSource string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Selected source %q has unavailable schema or connection. Do not query it. For another listed source, always set sourceId in run_dtql.\n", selectedSource)
+	for _, object := range catalog.Objects {
+		ref := object.Reference
+		if (ref.Kind != "table" && ref.Kind != "project_view") || object.Issue != "" || ref.SourceID == selectedSource {
+			continue
+		}
+		if source := urls[ref.SourceID]; source == "" || strings.HasPrefix(source, "unavailable://") {
+			continue
+		}
+		fmt.Fprintf(&b, "- sourceId %q, %s: ", ref.SourceID, ref.ObjectID)
+		for i, column := range object.Columns {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%s [%s]", column, object.ColumnTypes[column])
+		}
+		b.WriteByte('\n')
+		if b.Len() > 8000 {
+			break
+		}
+	}
+	return b.String()
 }
 
 func chatProjectChoices(current, currentDir string, catalog chat.ProjectCatalog) []chat.ProjectChoice {
@@ -261,24 +355,31 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 			continue
 		}
 		id := database.ID
-		if urls[id] == "" {
-			continue
-		}
 		label := database.Title
 		if label == "" {
 			label = id
 		}
+		sourceIndex := len(catalog.Objects)
 		catalog.Objects = append(catalog.Objects, chat.ProjectObject{Reference: chat.ContextReference{
 			Kind: "source", ProjectID: project.ID, SourceID: id, ObjectID: id, Title: label,
 		}})
+		if urls[id] == "" {
+			catalog.Objects[sourceIndex].Issue = "Source connection could not be resolved. Check its catalog driver and path."
+		}
 		// An unscanned catalog is still a usable source. Only its table list
 		// depends on a dbModel; do not let it block another catalog's chat.
 		if database.DbModel == "" {
+			setCatalogSourceIssue(&catalog, id, "Schema not scanned (dbModel is not set). Run datatug scan for this source.")
 			continue
 		}
-		schema, schemaErr := api.GetCatalogSchema(projectDir, environment, id)
+		schema, schemaErr := api.GetCatalogSchemaPartial(projectDir, environment, id)
 		if schemaErr != nil {
-			return catalog, nil, schemaErr
+			setCatalogSourceIssue(&catalog, id, "Schema unavailable: "+schemaErr.Error())
+			continue
+		}
+		if len(schema.Relations) == 0 {
+			setCatalogSourceIssue(&catalog, id, "No scanned tables or views. Run datatug scan for this source.")
+			continue
 		}
 		for _, relation := range schema.Relations {
 			name := relation.Name
@@ -297,7 +398,7 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 			}
 			catalog.Objects = append(catalog.Objects, chat.ProjectObject{Reference: chat.ContextReference{
 				Kind: kind, ProjectID: project.ID, SourceID: id, ObjectID: name, Title: relation.Name,
-			}, Columns: columns, ColumnTypes: columnTypes})
+			}, Columns: columns, ColumnTypes: columnTypes, Issue: relation.Issue})
 		}
 	}
 	queryIDs, err := api.QueryIDIndex(projectDir)

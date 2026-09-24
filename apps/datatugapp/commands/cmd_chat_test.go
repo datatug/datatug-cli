@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/dimetron/pi-go/pimodels"
@@ -36,6 +37,7 @@ func TestBuildChatProjectCatalogKeepsUnscannedSources(t *testing.T) {
 	}
 	write("environments/local/catalogs/chinook-local/chinook-local.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q,"dbModel":"chinook"}`, filepath.Join(dir, "chinook.sqlite")))
 	write("dbmodels/chinook/main/tables/Customer/main.Customer.columns.json", `{"columns":[{"name":"CustomerId","dbType":"INTEGER"}]}`)
+	write("dbmodels/chinook/main/tables/Invoice/main.Invoice.columns.json", `{"columns":[{"name":"InvoiceId","dbType":"INTEGER"}]}`)
 
 	store := filestore.NewProjectStore("chat-test", dir)
 	catalog, urls, err := buildChatProjectCatalog(context.Background(), dir, store, "local")
@@ -43,16 +45,26 @@ func TestBuildChatProjectCatalogKeepsUnscannedSources(t *testing.T) {
 		t.Fatalf("buildChatProjectCatalog: %v", err)
 	}
 	kinds := map[string]string{}
+	issues := map[string]string{}
 	for _, object := range catalog.Objects {
 		kinds[object.Reference.SourceID+"/"+object.Reference.ObjectID] = object.Reference.Kind
+		if object.Reference.Kind == "source" {
+			issues[object.Reference.SourceID] = object.Issue
+		}
 	}
 	for _, id := range []string{"countries", "orders"} {
 		if kinds[id+"/"+id] != "source" || urls[id] == "" {
 			t.Errorf("unscanned %s missing as usable source: objects=%v urls=%v", id, kinds, urls)
 		}
+		if !strings.Contains(issues[id], "Schema not scanned") {
+			t.Errorf("unscanned %s has no local explorer issue: %q", id, issues[id])
+		}
 	}
 	if kinds["chinook-local/main.Customer"] != "table" {
 		t.Errorf("scanned Chinook table missing: %v", kinds)
+	}
+	if issues["chinook-local"] != "" {
+		t.Errorf("healthy Chinook source has issue: %q", issues["chinook-local"])
 	}
 	if kinds["countries/main.Customer"] != "" || kinds["orders/main.Customer"] != "" {
 		t.Errorf("unscanned catalogs exposed fabricated tables: %v", kinds)
@@ -61,8 +73,50 @@ func TestBuildChatProjectCatalogKeepsUnscannedSources(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "dbmodels/chinook/main/tables/Customer/main.Customer.columns.json")); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := buildChatProjectCatalog(context.Background(), dir, store, "local"); err == nil {
-		t.Fatal("broken scanned schema must still return an error")
+	degraded, _, err := buildChatProjectCatalog(context.Background(), dir, store, "local")
+	if err != nil {
+		t.Fatalf("one broken schema should not block the explorer: %v", err)
+	}
+	foundIssue, foundHealthy := false, false
+	for _, object := range degraded.Objects {
+		if object.Reference.Kind == "table" && object.Reference.SourceID == "chinook-local" && object.Reference.ObjectID == "main.Customer" {
+			if !strings.Contains(object.Issue, "main.Customer") {
+				t.Fatalf("broken table schema not reported on its table: %q", object.Issue)
+			}
+			foundIssue = true
+		}
+		if object.Reference.Kind == "table" && object.Reference.SourceID == "chinook-local" && object.Reference.ObjectID == "main.Invoice" && object.Issue == "" {
+			foundHealthy = true
+		}
+	}
+	if !foundIssue || !foundHealthy {
+		t.Fatalf("broken Customer should coexist with healthy Invoice: %+v", degraded.Objects)
+	}
+}
+
+func TestUnavailableSchemaConversationExplainsLocalError(t *testing.T) {
+	turn, err := (unavailableSchemaConversation{database: "chinook-local"}).AskWithContext(context.Background(), "Show customers", "")
+	if err != nil || !strings.Contains(turn.Text, "chinook-local") || !strings.Contains(turn.Text, "Project explorer") || len(turn.Queries) != 0 {
+		t.Fatalf("unexpected degraded chat turn: %+v, %v", turn, err)
+	}
+}
+
+func TestProjectSchemaContextKeepsOtherSourcesUsable(t *testing.T) {
+	catalog := chat.ProjectCatalog{Objects: []chat.ProjectObject{
+		{Reference: chat.ContextReference{Kind: "table", SourceID: "broken", ObjectID: "main.Customer"}, Issue: "columns missing"},
+		{Reference: chat.ContextReference{Kind: "table", SourceID: "healthy", ObjectID: "main.Invoice"}, Columns: []string{"InvoiceId"}, ColumnTypes: map[string]string{"InvoiceId": "INTEGER"}},
+	}}
+	urls := map[string]string{"broken": "unavailable://broken", "healthy": "sqlite:///healthy.sqlite"}
+	if !hasQueryableProjectTables(catalog, urls) {
+		t.Fatal("healthy source was not queryable")
+	}
+	contextText := projectSchemaContext(catalog, map[string]string{"healthy": "sqlite:///healthy.db"}, "broken")
+	if !strings.Contains(contextText, `sourceId "healthy"`) || !strings.Contains(contextText, "InvoiceId") || strings.Contains(contextText, "main.Customer") {
+		t.Fatalf("wrong fallback schema context: %s", contextText)
+	}
+	delete(urls, "healthy")
+	if hasQueryableProjectTables(catalog, urls) {
+		t.Fatal("unavailable source was treated as queryable")
 	}
 }
 

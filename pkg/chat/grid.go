@@ -1,17 +1,14 @@
 package chat
 
 import (
-	"encoding/hex"
-	"fmt"
-	"math/big"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/strongo/aichat/tui/grid"
+
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -76,11 +73,10 @@ func truncateGridText(value string, width int) string {
 	return ansi.Truncate(value, width, "…")
 }
 
-// GridColumn is the UI-ready description of a structured result column.
-type GridColumn struct {
-	Name    string
-	Numeric bool
-}
+// GridColumn is the UI-ready description of a structured result column. It is
+// an alias for strongo/aichat's tui/grid.Column: DataTug and Sneat Chat share
+// the same generic grid, so a result column has one definition, not two.
+type GridColumn = grid.Column
 
 // GridModel is the terminal-grid boundary. Values are formatted only here,
 // after query execution has produced a structured secureread.Result.
@@ -181,7 +177,10 @@ func isASCIIAlphaNumeric(value byte) bool {
 	return value >= 'a' && value <= 'z' || value >= '0' && value <= '9'
 }
 
-// Sort toggles ascending/descending ordering for one visible column.
+// Sort toggles ascending/descending ordering for one visible column. The
+// comparison itself (stable sort, numeric-aware via big.Rat) is delegated to
+// strongo/aichat's tui/grid.Model.Sort so DataTug and Sneat Chat order rows
+// identically instead of each carrying its own copy of the algorithm.
 func (m *GridModel) Sort(column int) {
 	if column < 0 || column >= len(m.Columns) {
 		return
@@ -192,32 +191,7 @@ func (m *GridModel) Sort(column int) {
 			m.SourceRows[i] = i
 		}
 	}
-	if m.sortColumn == column {
-		m.sortDesc = !m.sortDesc
-	} else {
-		m.sortColumn = column
-		m.sortDesc = false
-	}
-	order := make([]int, len(m.Rows))
-	for i := range order {
-		order[i] = i
-	}
-	sort.SliceStable(order, func(i, j int) bool {
-		leftIndex, rightIndex := order[i], order[j]
-		left, right := m.Rows[leftIndex][column], m.Rows[rightIndex][column]
-		comparison := strings.Compare(left, right)
-		if m.Columns[column].Numeric {
-			leftNumber, leftOK := new(big.Rat).SetString(left)
-			rightNumber, rightOK := new(big.Rat).SetString(right)
-			if leftOK && rightOK {
-				comparison = leftNumber.Cmp(rightNumber)
-			}
-		}
-		if m.sortDesc {
-			return comparison > 0
-		}
-		return comparison < 0
-	})
+	order := m.sortOrder(column)
 	rows := make([][]string, len(m.Rows))
 	copy(rows, m.Rows)
 	if len(m.RawRows) > 0 {
@@ -236,6 +210,45 @@ func (m *GridModel) Sort(column int) {
 	for i, index := range order {
 		m.Rows[i] = rows[index]
 	}
+}
+
+// sortOrder toggles m.sortColumn/m.sortDesc for column and returns the
+// resulting row permutation (order[i] is the pre-sort row index that should
+// land at display position i). The already-formatted display cells are fed
+// into a scratch strongo/aichat tui/grid.Model, keyed by their original row
+// index, purely to reuse its comparator; nothing else about that scratch
+// model (its embedded bubble-table, its own sortColumn/sortDesc) is used.
+func (m *GridModel) sortOrder(column int) []int {
+	if m.sortColumn == column {
+		m.sortDesc = !m.sortDesc
+	} else {
+		m.sortColumn = column
+		m.sortDesc = false
+	}
+	rows := make([]grid.Row, len(m.Rows))
+	for i, cells := range m.Rows {
+		values := make([]any, len(m.Columns))
+		for c := range m.Columns {
+			if c < len(cells) {
+				values[c] = cells[c]
+			} else {
+				values[c] = grid.Absent
+			}
+		}
+		rows[i] = grid.Row{Key: strconv.Itoa(i), Values: values}
+	}
+	scratch := grid.New(m.Columns, rows)
+	scratch.Sort(column) // first call on a fresh Model always sorts ascending
+	if m.sortDesc {
+		scratch.Sort(column) // second call toggles to descending
+	}
+	sorted := scratch.Rows()
+	order := make([]int, len(sorted))
+	for i, row := range sorted {
+		idx, _ := strconv.Atoi(row.Key)
+		order[i] = idx
+	}
+	return order
 }
 
 func (m GridModel) header(column int) string {
@@ -265,25 +278,7 @@ func columnIsNumeric(rows []secureread.Row, name string) bool {
 	return false
 }
 
-// FormatValue applies basic terminal-safe value formatting.
-func FormatValue(value any) string {
-	switch v := value.(type) {
-	case nil:
-		return "NULL"
-	case string:
-		return v
-	case []byte:
-		if utf8.Valid(v) {
-			return string(v)
-		}
-		return "0x" + hex.EncodeToString(v)
-	case time.Time:
-		return v.Format(time.RFC3339)
-	case float32:
-		return strconv.FormatFloat(float64(v), 'f', -1, 32)
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	default:
-		return fmt.Sprint(v)
-	}
-}
+// FormatValue applies basic terminal-safe value formatting. It is
+// strongo/aichat's tui/grid.FormatValue: DataTug and Sneat Chat format grid
+// values identically rather than each keeping its own copy.
+var FormatValue = grid.FormatValue

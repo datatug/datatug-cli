@@ -61,6 +61,13 @@ func chatCommand() *cobra.Command {
 	return cmd
 }
 
+// runChatProjectFunc is a seam over runChatProject: runChat's project-switch
+// loop (options.project = nextProject) is otherwise only reachable by
+// driving ChatUI's real F3 project-picker overlay end to end through
+// RunTeaProgram, which the coverage lanes' other tests deliberately avoid.
+// Always runChatProject in production.
+var runChatProjectFunc = runChatProject
+
 func runChat(cmd *cobra.Command, options chatOptions) error {
 	if options.ai != "" {
 		if err := resolveChatAIProfile(&options, cmd); err != nil {
@@ -68,7 +75,7 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 		}
 	}
 	for {
-		nextProject, err := runChatProject(cmd, options)
+		nextProject, err := runChatProjectFunc(cmd, options)
 		if err != nil || nextProject == "" || nextProject == options.project {
 			return err
 		}
@@ -323,6 +330,12 @@ func sameProjectDirectory(a, b string) bool {
 	return leftErr == nil && rightErr == nil && left.IsDir() && right.IsDir() && os.SameFile(left, right)
 }
 
+// queryIDIndexFunc is a seam over api.QueryIDIndex: buildChatProjectCatalog's
+// QueryIDIndex error branch (a filesystem walk, not routed through
+// projectStore) has no other fault-injection point available to a test.
+// Always api.QueryIDIndex in production.
+var queryIDIndexFunc = api.QueryIDIndex
+
 func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStore datatug.ProjectStore, environment string) (chat.ProjectCatalog, map[string]string, error) {
 	project, err := projectStore.LoadProject(ctx)
 	if err != nil {
@@ -399,7 +412,7 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 			}, Columns: columns, ColumnTypes: columnTypes, Issue: relation.Issue})
 		}
 	}
-	queryIDs, err := api.QueryIDIndex(projectDir)
+	queryIDs, err := queryIDIndexFunc(projectDir)
 	if err != nil {
 		return catalog, nil, err
 	}

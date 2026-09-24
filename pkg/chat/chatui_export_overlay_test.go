@@ -67,6 +67,65 @@ func TestExportDialogOverlayWritesCurrentRecordSet(t *testing.T) {
 	}
 }
 
+// Ported from the legacy UI's export_dialog_test.go
+// (TestExportDialogValidationAndCancel): an unsafe file name is rejected in
+// place, and Esc still closes the (still-open) dialog.
+func TestExportDialogOverlayValidationAndCancel(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	d := newExportDialogOverlay(u)
+	d.focus = 5
+	d.name.SetValue("../outside")
+	d.dir.SetValue(t.TempDir())
+	next, cmd, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil || done || next.(*exportDialogOverlay).err == "" {
+		t.Fatal("unsafe file name should be rejected in dialog")
+	}
+	_, _, done = next.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if !done {
+		t.Fatal("escape should close dialog")
+	}
+}
+
+// Ported from the legacy UI's export_dialog_test.go
+// (TestExportDialogDirectoryPicker).
+func TestExportDialogOverlayDirectoryPicker(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	d := newExportDialogOverlay(u)
+	d.dir.SetValue(t.TempDir())
+	d.focus = 4
+	next, cmd, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	overlay := next.(*exportDialogOverlay)
+	if cmd == nil || done || overlay.picker == nil {
+		t.Fatal("directory picker did not open")
+	}
+	next, _, done = overlay.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	overlay = next.(*exportDialogOverlay)
+	if done || overlay.picker != nil || overlay.dir.Value() == "" {
+		t.Fatal("current directory was not selected")
+	}
+}
+
+// TestExportDialogOverlayDefaultNameExcludesVersionBadge is the regression
+// test for M2, ported from the legacy UI's export_dialog_test.go: a version
+// badge ("changed · "/"unchanged · ") prefixed onto the grid's visible
+// header title (setVersionBadge/SetTitle) must never leak into an export's
+// default filename — newExportDialogOverlay reads RecordSet.Title, not the
+// grid's badge-decorated Title().
+func TestExportDialogOverlayDefaultNameExcludesVersionBadge(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.lastGridRecordSetID = "record-1"
+	u.snapshot.RecordSets = map[string]RecordSet{"record-1": exportFixture("Invoices")}
+	g := newGridState(GridModel{}, "", "Invoices", 80)
+	g.setVersionBadge("changed")
+	if title := g.Title(); !strings.Contains(title, "changed") {
+		t.Fatalf("setup: grid Title() = %q, want it to contain the badge", title)
+	}
+	d := newExportDialogOverlay(u)
+	if d.name.Value() != "Invoices" {
+		t.Fatalf("export default filename = %q, want %q (no version badge)", d.name.Value(), "Invoices")
+	}
+}
+
 func indexOf(values []string, target string) int {
 	for i, v := range values {
 		if v == target {

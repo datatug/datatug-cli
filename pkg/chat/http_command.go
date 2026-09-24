@@ -96,6 +96,12 @@ func fetchHTTPRequestResult(ctx context.Context, spec httpRequestSpec, displayUR
 	defer func() { _ = response.Body.Close() }()
 	content, err := io.ReadAll(io.LimitReader(response.Body, maxHTTPResponseBytes+1))
 	if err != nil {
+		// Not covered: reproducing this deterministically needs a server
+		// that lies about Content-Length and then drops the connection
+		// (net/http.Client returns io.ErrUnexpectedEOF), which isn't
+		// reachable through httptest.Server without hijacking the raw
+		// connection -- too fragile/timing-sensitive a test for the
+		// coverage it would buy.
 		return HTTPResponse{}, nil, "Couldn't read the HTTP response."
 	}
 	if len(content) > maxHTTPResponseBytes {

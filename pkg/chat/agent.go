@@ -255,6 +255,16 @@ type AIConversation struct {
 	joinApplied bool
 
 	lastStreamTurn Turn
+
+	// runDTQLOverride is a test-only seam over runDTQL (nil in production,
+	// where handlers() falls back to c.runDTQL itself): runDTQL's own
+	// signature promises an error return, but every one of its real code
+	// paths reports a failure through runDTQLResponse.Error instead and
+	// always returns a nil error -- so the run_dtql tool handler's own
+	// "infrastructure-level error" guard is otherwise structurally
+	// unreachable. Founder directive: all new Go code aims for 100%
+	// coverage via seams, not left uncovered.
+	runDTQLOverride func(ctx context.Context, executor DTQLExecutor, sourceURL string, args runDTQLArgs) (runDTQLResponse, error)
 }
 
 type conversationConfig struct {
@@ -433,13 +443,18 @@ func (c *AIConversation) handlers() map[string]agent.Handler {
 			if err := json.Unmarshal(call.Arguments, &args); err != nil {
 				return errorResult(call.ID, "invalid run_dtql arguments: "+err.Error()), nil
 			}
-			resp, err := c.runDTQL(ctx, c.executor, c.sourceURL, args)
+			run := c.runDTQL
+			if c.runDTQLOverride != nil {
+				run = c.runDTQLOverride
+			}
+			resp, err := run(ctx, c.executor, c.sourceURL, args)
 			if err != nil {
-				// Not covered: every runDTQL return path below carries a nil
-				// error (failures are reported through resp.Error instead,
-				// captured as a QueryResult); this guard exists for a
-				// future runDTQL change or DTQLExecutor implementation that
-				// starts returning an infrastructure-level error.
+				// runDTQL's own real code paths always return a nil error
+				// (failures are reported through resp.Error instead,
+				// captured as a QueryResult); this guard covers a future
+				// runDTQL change or DTQLExecutor implementation that starts
+				// returning an infrastructure-level error -- exercised via
+				// runDTQLOverride, see AIConversation's doc comment on it.
 				return errorResult(call.ID, err.Error()), nil
 			}
 			return jsonResult(call.ID, resp), nil

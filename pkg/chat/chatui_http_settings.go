@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
@@ -71,12 +72,13 @@ func (u *ChatUI) httpSettingsCommand(kind, argument string) (tea.Cmd, error) {
 		if scope != "cli" && scope != "project" {
 			return nil, fmt.Errorf("that HTTP %s is not saved", kind)
 		}
-		if err := u.sessions.store.RemoveHTTPRequestSetting(u.ctx, scope, kind, origin, name); err != nil {
-			// Not covered: RemoveHTTPRequestSetting's own DELETE only fails
-			// on a broken settingsDB, but the HTTPRequestSettings load two
-			// lines above (same DB, same connection) already returns first
-			// in that case -- there is no real-world path that fails the
-			// second call but not the first from outside the store.
+		removeSetting := u.sessions.store.RemoveHTTPRequestSetting
+		if u.removeHTTPRequestSettingOverride != nil {
+			removeSetting = func(ctx context.Context, scope, kind, origin, name string) error {
+				return u.removeHTTPRequestSettingOverride(scope, kind, origin, name)
+			}
+		}
+		if err := removeSetting(u.ctx, scope, kind, origin, name); err != nil {
 			return nil, fmt.Errorf("couldn't remove HTTP %s", kind)
 		}
 		u.shell.AppendAssistant("Removed " + kind + " " + sanitizeTerminalText(name) + " (" + scope + ").")

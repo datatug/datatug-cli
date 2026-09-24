@@ -227,10 +227,13 @@ func TestSetCatalogSourceIssueAppendsMultipleIssues(t *testing.T) {
 // TestChatProjectChoicesListsOtherRegisteredProjects covers
 // chatProjectChoices: the current project always leads, a registered
 // project sharing the current directory (or the current project's own ID)
-// is skipped, and a project with no Path or no ID is skipped too.
+// is skipped, a project with no Path or no ID is skipped too, and a
+// registered project with no Title falls back to its ID (cmd_chat.go:
+// 341-343).
 func TestChatProjectChoicesListsOtherRegisteredProjects(t *testing.T) {
 	dir := t.TempDir()
 	other := t.TempDir()
+	untitledDir := t.TempDir()
 	restore := getChatSettings
 	t.Cleanup(func() { getChatSettings = restore })
 	getChatSettings = func() (dtconfig.Settings, error) {
@@ -240,18 +243,22 @@ func TestChatProjectChoicesListsOtherRegisteredProjects(t *testing.T) {
 			{ID: "", Title: "no id", Path: other},
 			{ID: "no-path", Title: "no path"},
 			{ID: "sibling", Title: "Sibling project", Path: other},
+			{ID: "untitled-sibling", Path: untitledDir},
 		}}, nil
 	}
 	catalog := chat.ProjectCatalog{ID: "current", Title: "Current"}
 	choices := chatProjectChoices("current", dir, catalog)
-	if len(choices) != 2 {
-		t.Fatalf("choices = %+v, want the current project plus exactly one sibling", choices)
+	if len(choices) != 3 {
+		t.Fatalf("choices = %+v, want the current project plus exactly two siblings", choices)
 	}
 	if choices[0].Key != "current" || choices[0].Title != "Current" || choices[0].Detail != dir {
 		t.Fatalf("first choice = %+v, want the current project leading", choices[0])
 	}
 	if choices[1].Key != "sibling" || choices[1].Title != "Sibling project" || choices[1].Detail != other {
 		t.Fatalf("second choice = %+v, want the sibling project", choices[1])
+	}
+	if choices[2].Key != "untitled-sibling" || choices[2].Title != "untitled-sibling" || choices[2].Detail != untitledDir {
+		t.Fatalf("third choice = %+v, want the untitled sibling falling back to its ID as the title", choices[2])
 	}
 }
 

@@ -872,6 +872,29 @@ func TestAgentHandlersRejectMalformedToolArguments(t *testing.T) {
 	}
 }
 
+// TestAgentRunDTQLHandlerInfrastructureErrorReported covers the run_dtql
+// handler's own "infrastructure-level error" guard (agent.go): runDTQL's
+// real code paths always return a nil error, so this branch is exercised
+// through the runDTQLOverride test seam instead.
+func TestAgentRunDTQLHandlerInfrastructureErrorReported(t *testing.T) {
+	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	injected := errors.New("infrastructure failure")
+	conversation.runDTQLOverride = func(ctx context.Context, executor DTQLExecutor, sourceURL string, args runDTQLArgs) (runDTQLResponse, error) {
+		return runDTQLResponse{}, injected
+	}
+	handler := conversation.handlers()[toolRunDTQL]
+	result, err := handler(context.Background(), ai.ToolCall{ID: "1", Name: toolRunDTQL, Arguments: mustJSON(runDTQLArgs{DTQL: "from: {name: t}"})})
+	if err != nil {
+		t.Fatalf("handler returned an error instead of an error ToolResult: %v", err)
+	}
+	if !result.IsError || !strings.Contains(result.Content, injected.Error()) {
+		t.Fatalf("result = %+v, want an error ToolResult carrying %q", result, injected.Error())
+	}
+}
+
 // TestAgentFindBookmarksHandlerWithoutFinderInContext and
 // TestAgentFindBookmarksHandlerFinderError cover find_bookmarks' own
 // bookmarkFinderKey guard and the finder-returned-error branch -- distinct

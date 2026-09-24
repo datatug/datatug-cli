@@ -33,15 +33,19 @@ func columnMetaFor(catalog ProjectCatalog, record *RecordSet, name string) inspe
 		if err != nil {
 			return meta
 		}
+		// relationInstances' own walk always appends at least the root FROM
+		// relation (dtql.Deserialize requires a FROM clause to succeed at
+		// all), and dtql has no multi-relation FROM at all -- a literal
+		// "joins are not supported by DTQL" (dtql/serialize.go) -- so
+		// instances here is always exactly len==1 for any document that
+		// reached this point; the r5 fix round (#289) removed the
+		// zero/multi-instance defensive guards this file used to carry
+		// (both provably unreachable via any real DTQL document, per
+		// founder's 100%-coverage-via-seams-not-dead-code directive) rather
+		// than fake a test scenario dtql.Deserialize can never produce.
 		instances := relationInstances(query.From())
-		if len(instances) == 0 {
-			return meta
-		}
 		allowed := func(source string) map[string]bool {
 			matches := map[string]bool{}
-			if source == "" && len(instances) != 1 {
-				return matches
-			}
 			for _, instance := range instances {
 				if source == "" || strings.EqualFold(source, instance.Alias) || strings.EqualFold(source, instance.Relation) {
 					matches[relationKey(instance.Schema, instance.Relation)] = true

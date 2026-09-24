@@ -7,6 +7,8 @@ package chat
 import (
 	"context"
 	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -63,6 +65,30 @@ func TestChatUIRunForwardsBridgeEventsAndStopsBridge(t *testing.T) {
 	}
 	if !stopped {
 		t.Fatal("bridgeStop was never called")
+	}
+}
+
+// quitOnInitModel is the smallest possible tea.Model: it asks to quit
+// immediately from Init, never renders anything meaningful, so a real
+// *tea.Program built around it returns from Run() as fast as a Bubble Tea
+// event loop can process one message.
+type quitOnInitModel struct{}
+
+func (quitOnInitModel) Init() tea.Cmd                       { return tea.Quit }
+func (quitOnInitModel) Update(tea.Msg) (tea.Model, tea.Cmd) { return quitOnInitModel{}, nil }
+func (quitOnInitModel) View() tea.View                      { return tea.NewView("") }
+
+// TestRunTeaProgramCallsRealRun covers the DEFAULT runTeaProgram value
+// itself (p.Run()) -- every other test in this file overrides it via
+// SetRunTeaProgramForTest, which is how ChatUI.Run's own tests avoid ever
+// starting a real Bubble Tea program, but that means the seam's actual
+// production body was otherwise never exercised. Redirecting the program's
+// input/output to an empty reader/io.Discard keeps this hermetic: no real
+// TTY is touched, and quitOnInitModel makes Run() return immediately.
+func TestRunTeaProgramCallsRealRun(t *testing.T) {
+	p := tea.NewProgram(quitOnInitModel{}, tea.WithInput(strings.NewReader("")), tea.WithOutput(io.Discard), tea.WithoutSignals(), tea.WithoutRenderer())
+	if _, err := runTeaProgram(p); err != nil {
+		t.Fatalf("runTeaProgram(real program) = %v, want nil", err)
 	}
 }
 

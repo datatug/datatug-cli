@@ -209,6 +209,32 @@ func TestFetchHTTPRequestResultRejectsOversizedResponse(t *testing.T) {
 	}
 }
 
+// TestFetchHTTPRequestResultReadErrorSurfaces covers fetchHTTPRequestResult's
+// io.ReadAll error branch: a server that hijacks the raw connection, claims
+// a Content-Length far larger than what it actually sends, then closes the
+// connection -- net/http.Client's Response.Body then reports
+// io.ErrUnexpectedEOF on read.
+func TestFetchHTTPRequestResultReadErrorSurfaces(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("ResponseWriter does not support hijacking")
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\nshort body")
+		_ = buf.Flush()
+	}))
+	defer server.Close()
+	_, _, failure := fetchHTTPResult(context.Background(), server.URL, server.URL)
+	if !strings.Contains(failure, "Couldn't read the HTTP response") {
+		t.Fatalf("read-error failure = %q", failure)
+	}
+}
+
 // TestFetchHTTPRequestResultNonGetRedirectStopsAtFirstHop covers
 // CheckRedirect's own non-GET/HEAD branch (http.ErrUseLastResponse): a POST
 // redirected by the server must not be followed.

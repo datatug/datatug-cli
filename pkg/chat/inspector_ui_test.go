@@ -71,13 +71,10 @@ func TestColumnMetaForWildcardExcludedColumnIsUnattributed(t *testing.T) {
 // Note: dtql's own validateWildcardYAML rejects any wildcard.Source that
 // isn't exactly the FROM clause's own name/alias (or empty) before
 // columnMetaFor ever runs, and DTQL has no multi-relation FROM at all (a
-// literal "joins are not supported by DTQL", dtql/serialize.go) -- so
-// allowed()'s "wildcard source resolves to zero or multiple relations"
-// branch is unreachable defensive code via any real DTQL document, not
-// exercised here. The same holds for relationInstances returning zero
-// instances (its walk always appends at least the root FROM relation, and
-// dtql.Deserialize requires a FROM clause to succeed at all) -- both
-// defensive branches stay uncovered by design.
+// literal "joins are not supported by DTQL", dtql/serialize.go) -- so the
+// r5 fix round (#289) removed columnMetaFor's zero/multi-instance defensive
+// guards outright (both provably unreachable via any real DTQL document)
+// instead of leaving them uncovered; see inspector_ui.go's comment.
 
 // TestColumnMetaForNameWithSchemaPrefixUsesShortNameForCatalogLookup covers
 // the nil-record path's own name normalisation: a caller-qualified name
@@ -162,6 +159,34 @@ func TestColumnMetaForRecordDatabaseFiltersCatalogObjects(t *testing.T) {
 	meta := columnMetaFor(catalog, record, "InvoiceId")
 	if meta.qualified != "main.invoice.InvoiceId" || meta.dbType != "TEXT" || len(meta.objects) != 1 {
 		t.Fatalf("meta = %+v, want only the db2-scoped table matched", meta)
+	}
+}
+
+// TestColumnMetaForNonFieldProjectionWithDifferentAliasIsSkipped covers the
+// FieldRef type-assertion's own "not a derived value under this name"
+// continue (inspector_ui.go): a non-FieldRef (a computed binary expression)
+// projection whose alias ISN'T the queried name must simply be skipped, not
+// returned as an unattributed derived value -- distinct from
+// TestColumnMetaForDerivedValueSameNameIsUnattributed's projection.Alias ==
+// name case just above.
+func TestColumnMetaForNonFieldProjectionWithDifferentAliasIsSkipped(t *testing.T) {
+	record := &RecordSet{DTQL: "from: {name: Invoice}\ncolumns:\n  - as: Total\n    binary: {op: '+', left: {field: InvoiceId}, right: {value: 1}}\n  - field: InvoiceId\nlimit: 5\n"}
+	meta := columnMetaFor(columnMetaForTestCatalog(), record, "InvoiceId")
+	if meta.qualified != "main.invoice.InvoiceId" || meta.dbType != "INTEGER" {
+		t.Fatalf("meta = %+v, want the computed column skipped and the real field matched", meta)
+	}
+}
+
+// TestColumnMetaForFieldSourceResolvesToNoRelationIsUnattributed covers the
+// "len(sourceRelations) == 0" guard after the FieldRef loop
+// (inspector_ui.go): a field aliased to the queried name whose own
+// explicit source names no real FROM relation leaves matched true but
+// sourceRelations empty.
+func TestColumnMetaForFieldSourceResolvesToNoRelationIsUnattributed(t *testing.T) {
+	record := &RecordSet{DTQL: "from: {name: Invoice}\ncolumns:\n  - field: CustomerId\n    source: doesnotexist\n    as: InvoiceId\nlimit: 5\n"}
+	meta := columnMetaFor(columnMetaForTestCatalog(), record, "InvoiceId")
+	if !metaIsZero(meta) {
+		t.Fatalf("meta = %+v, want zero value when the field's source resolves to no FROM relation", meta)
 	}
 }
 

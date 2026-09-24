@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -142,6 +143,26 @@ func TestChatUIHTTPSettingsCommandRemoveCookieRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(u.shell.View().Content, "Removed cookie") {
 		t.Fatalf("expected a removal confirmation:\n%s", u.shell.View().Content)
+	}
+}
+
+// TestChatUIHTTPSettingsCommandRemoveDeleteErrorSurfaces covers the
+// "remove" branch's own RemoveHTTPRequestSetting error, distinct from the
+// load error above: the load (a few lines up) succeeds, finding the real
+// saved header, but the delete itself then fails -- forced via
+// removeHTTPRequestSettingOverride since a real store's DELETE cannot be
+// made to fail independently of its own successful load in a test fixture
+// (both use the same settingsDB connection).
+func TestChatUIHTTPSettingsCommandRemoveDeleteErrorSurfaces(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	drainCmd(t, u, u.Submit("/http header https://api.example.test X-Test=value"))
+	u.shell.Update(tea.KeyPressMsg{Text: "1"})
+	u.removeHTTPRequestSettingOverride = func(scope, kind, origin, name string) error {
+		return errors.New("injected settingsDB delete failure")
+	}
+	_, err := u.httpSettingsCommand("header", "https://api.example.test remove X-Test")
+	if err == nil || !strings.Contains(err.Error(), "couldn't remove HTTP header") {
+		t.Fatalf("err = %v, want the couldn't-remove error", err)
 	}
 }
 

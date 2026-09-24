@@ -129,6 +129,15 @@ type ChatUI struct {
 	// to reproduce ui.go's messageFocused hint set (plain vs HTTP-document)
 	// for a card that isn't a grid. Reset by ClearTranscript/loadSession.
 	transcriptEntryKinds map[string]string
+
+	// removeHTTPRequestSettingOverride is a test-only seam over
+	// u.sessions.store.RemoveHTTPRequestSetting (nil in production): that
+	// DELETE only fails on a broken settingsDB, but the
+	// HTTPRequestSettings load httpSettingsCommand does two lines above
+	// (same DB, same connection) already returns first in that case --
+	// there is no real fixture that fails the second call but not the
+	// first from outside the store. See httpSettingsCommand.
+	removeHTTPRequestSettingOverride func(scope, kind, origin, name string) error
 }
 
 const (

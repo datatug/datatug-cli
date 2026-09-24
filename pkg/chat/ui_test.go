@@ -1318,10 +1318,58 @@ func TestUIStatusUsesOneLineWhenItFits(t *testing.T) {
 	}
 }
 
+// TestGridTitleAndSelectedColumnUseDifferentColors is m12: this used to
+// compare datatug's OWN now-dead style copies (selectedCellStyle,
+// unreferenced by any real rendering since column-selection styling moved
+// into the shared tui/grid package) rather than asserting anything about
+// what's actually drawn on screen. It now renders a real grid and checks
+// the title and the selected column's header carry visibly different
+// ANSI styling.
 func TestGridTitleAndSelectedColumnUseDifferentColors(t *testing.T) {
-	if activeTitleStyle.Render("same") == selectedCellStyle.Render("same") {
-		t.Fatal("table title and selected column use the same style")
+	u := NewUI(context.Background(), nil, "fake-model")
+	u.appendTurn(Turn{Queries: []QueryResult{{Title: "Distinct Title", Result: secureread.Result{
+		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
+	}}}})
+	if !u.focusLatestGrid() {
+		t.Fatal("expected grid focus")
 	}
+	view := u.entries[u.activeGrid].grid.view()
+	lines := strings.Split(view, "\n")
+	titleLine, headerLine := lines[0], lines[1]
+	titleStart := strings.Index(titleLine, "Distinct")
+	headerStart := strings.Index(headerLine, "ID")
+	if titleStart < 0 || headerStart < 0 {
+		t.Fatalf("could not locate title/header in rendered grid:\n%s", view)
+	}
+	// Compare the ANSI escape sequence immediately preceding each label —
+	// the styling actually applied to it — rather than the label text
+	// itself, which carries no color information once printed.
+	titleStyle := lastAnsiEscape(titleLine[:titleStart])
+	headerStyle := lastAnsiEscape(headerLine[:headerStart])
+	if titleStyle == "" || headerStyle == "" {
+		t.Fatalf("expected ANSI styling before both labels: title=%q header=%q", titleStyle, headerStyle)
+	}
+	if titleStyle == headerStyle {
+		t.Fatalf("table title and selected column header use the same style: %q", titleStyle)
+	}
+}
+
+// lastAnsiEscape returns the last ANSI CSI escape sequence in s (e.g.
+// "\x1b[1;38;5;255;48;5;237m"), or "" if none.
+func lastAnsiEscape(s string) string {
+	last := ""
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\x1b' {
+			continue
+		}
+		end := strings.IndexByte(s[i:], 'm')
+		if end < 0 {
+			break
+		}
+		last = s[i : i+end+1]
+		i += end
+	}
+	return last
 }
 
 func TestUIWidthSweepKeepsRenderedLinesWithinTerminal(t *testing.T) {
@@ -1357,7 +1405,11 @@ func TestGridBorderChangesWithFocus(t *testing.T) {
 		t.Fatalf("grid border did not change with focus:\ninactive %q\nactive %q", inactive, active)
 	}
 	activeLines := strings.Split(g.view(), "\n")
-	if !strings.Contains(activeLines[1], activeBorderStyle.Render("│")) || !strings.HasSuffix(activeLines[1], selectedOutlineStyle.Render("│")) {
+	// The right-edge scrollbar/border uses the shared grid's own
+	// selectedOutlineStyle (color 250) when focused — datatug no longer
+	// keeps its own copy of that style to compare Render() output against
+	// (m12); check for its ANSI color code directly instead.
+	if !strings.Contains(activeLines[1], activeBorderStyle.Render("│")) || !strings.HasSuffix(ansi.Strip(activeLines[1]), "│") || !strings.Contains(activeLines[1], "38;5;250m") {
 		t.Fatalf("focused grid side colors are wrong: %q", activeLines[1])
 	}
 	if !strings.Contains(activeLines[0], "38;5;250m╭") || !strings.Contains(activeLines[len(activeLines)-1], "38;5;250m╰") || strings.Contains(activeLines[len(activeLines)-1], "38;5;51") {

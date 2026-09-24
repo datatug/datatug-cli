@@ -188,28 +188,29 @@ func (u *UI) projectPickerView(width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
+func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) tea.Cmd {
 	if u.bookmarkMode != "" {
 		u.updateBookmarkInput(msg)
-		return
+		return nil
 	}
 	if u.bookmarkGridFocused && u.workspaceTab == 3 {
 		g := u.ensureBookmarkGrid()
 		if g == nil {
 			u.bookmarkGridFocused = false
-			return
+			return nil
 		}
-		g.Update(msg) // handleBookmarkGridKey owns tab/a/d/s; navigation is grid.Model's own default
-		return
+		_, cmd := g.Update(msg) // handleBookmarkGridKey owns tab/a/d/s; navigation is grid.Model's own default
+		return cmd
 	}
 	if u.dockGridFocused && u.workspaceTab == 2 {
 		if u.dockIndex >= 0 && u.dockIndex < len(u.snapshot.Workspace.Docks) {
 			dock := u.snapshot.Workspace.Docks[u.dockIndex]
 			if g := u.dockGrids[dock.ID]; g != nil {
-				g.Update(msg) // handleDockGridKey owns tab/enter/space/c/r/a/s; navigation is grid.Model's own default
+				_, cmd := g.Update(msg) // handleDockGridKey owns tab/enter/space/c/r/a/s; navigation is grid.Model's own default
+				return cmd
 			}
 		}
-		return
+		return nil
 	}
 	nodes := u.explorerNodes()
 	switch msg.String() {
@@ -338,6 +339,7 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 			u.startBookmarkInput("tags", "Filter tags (comma separated)")
 		}
 	}
+	return nil
 }
 
 func (u *UI) startBookmarkInput(mode, placeholder string) {
@@ -395,7 +397,7 @@ func (u *UI) ensureBookmarkGrid() *gridState {
 		return u.bookmarkGrid
 	}
 	result, _ := bookmarkResult(bookmark)
-	u.bookmarkGrid = newGridState(NewGridModel(result), bookmark.Title, u.workspacePaneWidth())
+	u.bookmarkGrid = newMinimalGridState(NewGridModel(result), bookmark.Title, u.workspacePaneWidth()) // no view switcher (m9)
 	u.bookmarkGrid.SetStyle(u.tableStyle)
 	u.bookmarkGrid.SetKeyHandler(u.handleBookmarkGridKey)
 	u.bookmarkGridID = bookmark.ID
@@ -488,7 +490,7 @@ func (u *UI) selectFromGridState(g *gridState, recordSetID, viewID, mode string)
 		}
 		u.rangeAnchor = -1
 	}
-	title := fmt.Sprintf("%s · %d selected", g.Title(), len(rows))
+	title := fmt.Sprintf("%s · %d selected", g.baseTitle, len(rows))
 	u.performWorkspaceAction(WorkspaceAction{Kind: "select", RecordSetID: recordSetID, ViewID: viewID, Rows: rows, Columns: columns, Ranges: ranges, Title: title})
 }
 
@@ -915,7 +917,9 @@ func (u *UI) rebuildDockGrids() {
 			view := u.snapshot.Workspace.Views[data.ViewID]
 			opts = append(opts, grid.WithInitialSort(columnIndexOf(data.Result.Columns, view.OrderBy), view.Descending))
 		}
-		next[dock.ID] = newProjectedGridState(model, dock.Title, u.workspacePaneWidth(), data.SourceRows, opts)
+		// Dock grids never had a view switcher in main either — hide it
+		// (m9): a dock already shows a narrow, purpose-built row set.
+		next[dock.ID] = newProjectedGridState(model, dock.Title, u.workspacePaneWidth(), data.SourceRows, false, opts)
 		next[dock.ID].SetStyle(u.tableStyle)
 		next[dock.ID].SetKeyHandler(u.handleDockGridKey)
 	}
@@ -1061,10 +1065,14 @@ func (u *UI) handleDockGridKey(m *grid.Model, msg tea.KeyPressMsg) (tea.Cmd, boo
 		if !ok {
 			return nil, true
 		}
+		selectedColumn := m.SelectedColumn()
+		if selectedColumn < 0 || selectedColumn >= len(m.Columns()) {
+			return nil, true
+		}
 		if data.ViewID != "" {
 			column, desc := m.SortState()
-			descending := column == m.SelectedColumn() && !desc
-			u.performWorkspaceAction(WorkspaceAction{Kind: "sort_view", ViewID: data.ViewID, OrderBy: m.Columns()[m.SelectedColumn()].Name, Descending: descending})
+			descending := column == selectedColumn && !desc
+			u.performWorkspaceAction(WorkspaceAction{Kind: "sort_view", ViewID: data.ViewID, OrderBy: m.Columns()[selectedColumn].Name, Descending: descending})
 			// Rebuild after the action so a failed sort never leaves an empty dock.
 			u.dockGrids = map[string]*gridState{}
 			u.rebuildDockGrids()

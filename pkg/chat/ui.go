@@ -26,18 +26,16 @@ var (
 	messageSurfaceBackground  = lipgloss.Color("235")
 	selectedMessageBackground = lipgloss.Color("237")
 
-	userStyle            = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("45"))
-	agentStyle           = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-	statusStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	tableStyleBadge      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Background(lipgloss.Color("24"))
-	activeTitleStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51"))
-	activeBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
-	selectedOutlineStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	inactiveBorderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	selectedCellStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220"))
-	activeMessageStyle   = lipgloss.NewStyle().Padding(0, 1).Background(messageSurfaceBackground)
-	inputSurfaceStyle    = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("236"))
-	statusSurfaceStyle   = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("233"))
+	userStyle           = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("45"))
+	agentStyle          = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	statusStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	tableStyleBadge     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Background(lipgloss.Color("24"))
+	activeTitleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51"))
+	activeBorderStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
+	inactiveBorderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	activeMessageStyle  = lipgloss.NewStyle().Padding(0, 1).Background(messageSurfaceBackground)
+	inputSurfaceStyle   = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("236"))
+	statusSurfaceStyle  = lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color("233"))
 )
 
 type historyEntry struct {
@@ -131,8 +129,18 @@ const (
 	gridViewHeaders    grid.View = 4
 )
 
+// newGridState builds a full-chrome grid (view switcher: Table/Charts/
+// Current row, split layout) — a chat transcript entry's own recordset grid.
 func newGridState(model GridModel, title string, width int, statistics ...secureread.RecordSetStatistics) *gridState {
-	return newProjectedGridState(model, title, width, nil, nil, statistics...)
+	return newProjectedGridState(model, title, width, nil, true, nil, statistics...)
+}
+
+// newMinimalGridState builds a grid with NO view switcher (no Charts/
+// Current-row views, no split layout) — main's bookmark, dock and
+// parameter-lookup grids never had one; they already show a narrow,
+// purpose-built row set where "2"/"3" would have nothing to switch to (m9).
+func newMinimalGridState(model GridModel, title string, width int) *gridState {
+	return newProjectedGridState(model, title, width, nil, false, nil)
 }
 
 // newProjectedGridState is newGridState for a dock's projected/filtered
@@ -141,10 +149,12 @@ func newGridState(model GridModel, title string, width int, statistics ...secure
 // FK-preview lookups, range selection and cross-grid sort sync) — the same
 // role GridModel.SourceRows played before grid.Row.Key became the carrier.
 // A nil/short sourceRows is the identity mapping (the common, non-projected
-// case). extraOpts lets a caller (rebuildDockGrids, for a view-backed dock)
-// pass grid.WithInitialSort so a grid built from already-externally-sorted
-// rows still knows which column/direction that is.
-func newProjectedGridState(model GridModel, title string, width int, sourceRows []int, extraOpts []grid.Option, statistics ...secureread.RecordSetStatistics) *gridState {
+// case). fullChrome registers the Charts/Current-row views and split
+// layout (see newGridState/newMinimalGridState). extraOpts lets a caller
+// (rebuildDockGrids, for a view-backed dock) pass grid.WithInitialSort so a
+// grid built from already-externally-sorted rows still knows which
+// column/direction that is.
+func newProjectedGridState(model GridModel, title string, width int, sourceRows []int, fullChrome bool, extraOpts []grid.Option, statistics ...secureread.RecordSetStatistics) *gridState {
 	g := &gridState{raw: model.RawRows, baseTitle: normalizeGridTitle(title)}
 	if len(statistics) > 0 {
 		g.charts = InferChartCandidates(statistics[0])
@@ -168,9 +178,14 @@ func newProjectedGridState(model GridModel, title string, width int, sourceRows 
 	}
 	opts := []grid.Option{
 		grid.WithTitle(g.baseTitle),
-		grid.WithExtraViews(g.chartsExtraView(), grid.CardView("Current row")),
-		grid.WithSplitLayout(chooseGridLayout),
 		grid.WithMaxVisibleRows(maxGridHeight - 2), // table page size; secondary-view height (paneHeight) is a cosmetic 2 lines shorter than the pre-adoption recordsetPaneHeight as a result
+		grid.WithFilterDisabled(),                  // main deliberately never bound "/" to bubble-table's row filter (M3); restore that rather than adopt a feature main never had
+	}
+	if fullChrome {
+		opts = append(opts,
+			grid.WithExtraViews(g.chartsExtraView(), grid.CardView("Current row")),
+			grid.WithSplitLayout(chooseGridLayout),
+		)
 	}
 	opts = append(opts, extraOpts...)
 	g.Model = grid.New(cols, rows, opts...)
@@ -334,8 +349,8 @@ func (g *gridState) rawValue(displayRowIndex, column int) any {
 }
 
 // rawRow returns the RecordSet's raw (unformatted) values for the row at a
-// display index (post-sort/filter position), resolved via grid.Row.Key back
-// to raw's fixed RecordSet-row order.
+// display index (post-sort position; filter is disabled, M3), resolved via
+// grid.Row.Key back to raw's fixed RecordSet-row order.
 func (g *gridState) rawRow(displayRowIndex int) []any {
 	index := g.sourceIndexAt(displayRowIndex)
 	if index < 0 || index >= len(g.raw) {
@@ -344,8 +359,9 @@ func (g *gridState) rawRow(displayRowIndex int) []any {
 	return g.raw[index]
 }
 
-// sourceIndexAt resolves a display row (post-sort/filter position) to its
-// position in the RecordSet's own (never reordered) row order, or -1.
+// sourceIndexAt resolves a display row (post-sort position; filter is
+// disabled, M3) to its position in the RecordSet's own (never reordered)
+// row order, or -1.
 func (g *gridState) sourceIndexAt(displayRowIndex int) int {
 	rows := g.Rows()
 	if displayRowIndex < 0 || displayRowIndex >= len(rows) {
@@ -942,6 +958,18 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			u.mouseCapture = !u.mouseCapture
 			return u, nil
 		case "esc":
+			// A focused grid whose filter is currently capturing input
+			// (CapturesEsc — normally false with M3's WithFilterDisabled,
+			// but this must hold generally, not just for today's disabled
+			// filter) gets first refusal: Esc there means "blur/clear the
+			// filter", not "leave the grid entirely and focus the
+			// composer" (the unconditional behaviour below).
+			if u.gridFocused && u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil && u.entries[u.activeGrid].grid.CapturesEsc() {
+				if cmd, handled := u.updateGrid(msg); handled {
+					u.rebuildHistory(false)
+					return u, cmd
+				}
+			}
 			if u.joinFocused {
 				u.joinFocused = false
 				if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
@@ -1006,8 +1034,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return u, u.updateProjectPicker(msg)
 		}
 		if u.workspaceFocused {
-			u.updateWorkspaceKey(msg)
-			return u, nil
+			return u, u.updateWorkspaceKey(msg)
 		}
 		if u.gridFocused {
 			if cmd, handled := u.updateGrid(msg); handled {
@@ -1259,14 +1286,15 @@ func (u *UI) refreshSession(session ChatSession) {
 		return
 	}
 	gridID := ""
-	sourceRow := ""
+	rowIndex, sourceRow := 0, ""
 	columnIndex := 0
 	sortColumn, sortDesc, secondaryFocus := -1, false, false
 	var gridView grid.View
 	if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
 		gridID = u.entries[u.activeGrid].recordSetID
 		activeGrid := u.entries[u.activeGrid].grid
-		sourceRow, columnIndex, gridView = activeGrid.sourceRowKey(), activeGrid.SelectedColumn(), activeGrid.CurrentView()
+		rowIndex, sourceRow = activeGrid.CurrentIndex(), activeGrid.sourceRowKey()
+		columnIndex, gridView = activeGrid.SelectedColumn(), activeGrid.CurrentView()
 		sortColumn, sortDesc = activeGrid.SortState()
 		secondaryFocus = activeGrid.SecondaryFocus()
 	}
@@ -1284,6 +1312,17 @@ func (u *UI) refreshSession(session ChatSession) {
 					if c, d := restoredGrid.SortState(); d != sortDesc || c != sortColumn {
 						restoredGrid.Sort(sortColumn)
 					}
+				}
+				// Restore by numeric position first (m10 — the original
+				// row-index fallback, clamped to the refreshed row count),
+				// then improve to the exact source row if it's still
+				// present: restoreByKey is a no-op when the row no longer
+				// exists (e.g. the session's underlying data changed), so
+				// without the numeric fallback the highlight would land
+				// wherever the rebuilt table's default (row 0) put it,
+				// rather than close to where the user actually was.
+				if rows := restoredGrid.Rows(); len(rows) > 0 {
+					restoredGrid.SelectRow(min(rowIndex, len(rows)-1))
 				}
 				restoredGrid.restoreByKey(sourceRow)
 				restoredGrid.SelectColumn(columnIndex)
@@ -1498,6 +1537,16 @@ func (u *UI) updateGrid(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	}
+	// Esc has no meaning to the grid itself (no built-in Update case, and
+	// with the filter disabled — M3 — CapturesEsc() is normally false), so
+	// g.Update would just swallow it as a no-op if this function always
+	// claimed handled=true. The grid should only consume Esc while it's
+	// genuinely capturing it (a focused filter, were one ever re-enabled);
+	// otherwise decline so the caller's global Esc handling (return focus
+	// to the composer) runs instead.
+	if msg.String() == "esc" && !g.CapturesEsc() {
+		return nil, false
+	}
 	_, cmd := g.Update(msg)
 	return cmd, true
 }
@@ -1545,11 +1594,11 @@ func (u *UI) handleMainGridKey(m *grid.Model, msg tea.KeyPressMsg) (tea.Cmd, boo
 		u.selectFromGrid("range")
 		return nil, true
 	case "a":
-		ref := ContextReference{Kind: "recordset", ObjectID: entry.recordSetID, Title: g.Title()}
+		ref := ContextReference{Kind: "recordset", ObjectID: entry.recordSetID, Title: g.baseTitle}
 		u.toggleAttachment(ref)
 		return nil, true
 	case "d":
-		ref := ContextReference{Kind: "recordset", ObjectID: entry.recordSetID, Title: g.Title()}
+		ref := ContextReference{Kind: "recordset", ObjectID: entry.recordSetID, Title: g.baseTitle}
 		if selection, ok := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]; ok {
 			if view := u.snapshot.Workspace.Views[selection.ViewID]; view.RecordSetID == ref.ObjectID {
 				ref = ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}
@@ -1558,7 +1607,7 @@ func (u *UI) handleMainGridKey(m *grid.Model, msg tea.KeyPressMsg) (tea.Cmd, boo
 		u.performWorkspaceAction(WorkspaceAction{Kind: "dock", Reference: ref})
 		return nil, true
 	case "b":
-		ref := ContextReference{Kind: "recordset", ObjectID: entry.recordSetID, Title: g.Title()}
+		ref := ContextReference{Kind: "recordset", ObjectID: entry.recordSetID, Title: g.baseTitle}
 		if selection, ok := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]; ok {
 			if view := u.snapshot.Workspace.Views[selection.ViewID]; view.RecordSetID == ref.ObjectID {
 				ref = ContextReference{Kind: "selection", ObjectID: selection.ID, Title: selection.Title}
@@ -2195,7 +2244,7 @@ func (u *UI) statusLines() []string {
 	if u.detail != nil {
 		segments = []string{"FOCUS Detail", "↑↓ scroll", "Y copy cell", "Esc close"}
 	} else if u.gridFocused && u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
-		segments = append([]string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.Title())}, segments...)
+		segments = append([]string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.baseTitle)}, segments...)
 	} else if u.workspaceFocused {
 		focus := "FOCUS Workspace · " + workspaceTabs[u.workspaceTab]
 		if u.workspaceTab == 1 {
@@ -2214,7 +2263,7 @@ func (u *UI) statusLines() []string {
 	if maxWidth < 100 {
 		compact := []string{"FOCUS Chat", "model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "Enter send", mouseHint, "Ctrl+C quit"}
 		if u.gridFocused && u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
-			compact = []string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.Title()), "↑↓ rows", "←→ columns", "Enter details", "e export", "q save", "Esc input"}
+			compact = []string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.baseTitle), "↑↓ rows", "←→ columns", "Enter details", "e export", "q save", "Esc input"}
 			if count := len(u.snapshot.Workspace.ExportBucket); count > 0 {
 				compact = append(compact, fmt.Sprintf("B bucket:%d", count))
 			}

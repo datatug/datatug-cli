@@ -63,7 +63,7 @@ func (u *UI) openCellDetail() tea.Cmd {
 	if selectedColumn < len(row) {
 		value = row[selectedColumn]
 	}
-	d := &cellDetail{sequence: u.detailSequence, title: g.Title(), column: columns[selectedColumn], value: value, columns: columns, values: append([]any(nil), row...), qualified: meta.qualified, dbType: meta.dbType}
+	d := &cellDetail{sequence: u.detailSequence, title: g.baseTitle, column: columns[selectedColumn], value: value, columns: columns, values: append([]any(nil), row...), qualified: meta.qualified, dbType: meta.dbType}
 	u.detail = d
 	if record == nil || entry == nil || u.sessions == nil || meta.qualified == "" || meta.qualified == "ambiguous source" {
 		return nil

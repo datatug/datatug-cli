@@ -62,7 +62,7 @@ func (u *UI) currentRowDetails(width int) []string {
 		return []string{u.selectedDetails(width)}
 	}
 	rawRow := g.rawRow(rowIndex)
-	lines := []string{fmt.Sprintf("Row %d of %d · %s", rowIndex+1, len(g.Rows()), sanitizeTerminalText(g.Title())), ""}
+	lines := []string{fmt.Sprintf("Row %d of %d · %s", rowIndex+1, len(g.Rows()), sanitizeTerminalText(g.baseTitle)), ""}
 	nameWidth, numberWidth := 0, 0
 	for i, column := range g.Columns() {
 		nameWidth = max(nameWidth, ansi.StringWidth(column.Name))
@@ -265,7 +265,7 @@ func (u *UI) currentRecordsetDetails(width int) []string {
 	if g == nil {
 		return []string{"Focus a result grid to inspect its RecordSet."}
 	}
-	lines := []string{g.Title(), fmt.Sprintf("%d rows · %d columns", len(g.Rows()), len(g.Columns())), ""}
+	lines := []string{g.baseTitle, fmt.Sprintf("%d rows · %d columns", len(g.Rows()), len(g.Columns())), ""}
 	for _, column := range g.Columns() {
 		meta := u.columnMeta(record, column.Name)
 		qualified := meta.qualified

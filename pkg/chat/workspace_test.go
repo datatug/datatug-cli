@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -765,5 +766,42 @@ func TestDockedGridSortAndCellSelectionUseSourceCoordinates(t *testing.T) {
 	}
 	if !reflect.DeepEqual(selection.Ranges, []CellRange{{FirstRow: 2, LastRow: 2, FirstCol: 1, LastCol: 1}}) {
 		t.Fatalf("docked cell coordinates = %+v", selection.Ranges)
+	}
+}
+
+// TestDockGridHasNoViewSwitcher is the regression test for m9: a dock grid
+// never had a view switcher in main (no Charts/Current-row views to jump
+// to with "2"/"3") — it already shows a narrow, purpose-built row set.
+func TestDockGridHasNoViewSwitcher(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := chat.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordID := workspaceTestRecord(t, store, session.ID)
+	ref, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "select", RecordSetID: recordID, Rows: []int{0, 2}, Title: "Subset"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "dock", Reference: ref}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionUI(ctx, chat, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+	dock := u.snapshot.Workspace.Docks[0]
+	dockGrid := u.dockGrids[dock.ID]
+	if got := dockGrid.ExtraViews(); len(got) != 0 {
+		t.Fatalf("dock grid ExtraViews() = %+v, want none", got)
+	}
+	if header := ansi.Strip(dockGrid.HeaderLine(60)); strings.Contains(header, "2 Charts") || strings.Contains(header, "3 Current row") {
+		t.Fatalf("dock grid header still advertises a view switcher: %q", header)
 	}
 }

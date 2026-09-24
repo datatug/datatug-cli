@@ -72,3 +72,25 @@ func TestExportDialogDirectoryPicker(t *testing.T) {
 		t.Fatal("current directory was not selected")
 	}
 }
+
+// TestExportDialogDefaultNameExcludesVersionBadge is the regression test
+// for M2: a version badge ("changed · "/"unchanged · ") prefixed onto the
+// grid's visible header title (setVersionBadge/SetTitle) must never leak
+// into a saved reference's Title, an export's default filename, a cell
+// detail's title, an inspector line, or the status bar — all of those use
+// the grid's baseTitle, not its badge-decorated Title().
+func TestExportDialogDefaultNameExcludesVersionBadge(t *testing.T) {
+	u := NewUI(context.Background(), nil, "test")
+	u.snapshot.RecordSets = map[string]RecordSet{"record-1": exportFixture("Invoices")}
+	g := newGridState(GridModel{}, "Invoices", 80)
+	g.setVersionBadge("changed")
+	u.entries = []historyEntry{{recordSetID: "record-1", grid: g}}
+	u.activeGrid = 0
+	if title := g.Title(); !strings.Contains(title, "changed") {
+		t.Fatalf("setup: grid Title() = %q, want it to contain the badge", title)
+	}
+	u.openExportDialog()
+	if u.exportDialog == nil || u.exportDialog.name.Value() != "Invoices" {
+		t.Fatalf("export default filename = %q, want %q (no version badge)", u.exportDialog.name.Value(), "Invoices")
+	}
+}

@@ -615,7 +615,6 @@ func TestProjectCardUsesProjectTitle(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	u.workspace.explorerIndex = 0 // the project root node, always first.
-	u.workspace.projectDetails = true
 	view := ansi.Strip(u.workspace.projectExplorer(50, 15))
 	if !strings.Contains(view, "Project: "+u.catalog.Title) || strings.Contains(view, "Project explorer") {
 		t.Fatalf("project card title is incorrect:\n%s", view)
@@ -636,7 +635,6 @@ func TestExplorerSelectionShowsTableAndQueryCards(t *testing.T) {
 			break
 		}
 	}
-	u.workspace.projectDetails = true
 	view := ansi.Strip(u.workspace.projectExplorer(48, 24))
 	if !strings.Contains(view, "Table: Customer") || !strings.Contains(view, "CustomerId") || !strings.Contains(view, "INTEGER") {
 		t.Fatalf("table selection did not show columns card: %q", view)
@@ -651,12 +649,56 @@ func TestExplorerSelectionShowsTableAndQueryCards(t *testing.T) {
 	if !strings.Contains(view, "Query: Customer purchases by genre") || !strings.Contains(view, "SQL") || !strings.Contains(view, "SELECT GenreName") {
 		t.Fatalf("query selection did not show query text: %q", view)
 	}
+	// PgDn's step is height/4 (m2), so the panel needs a real rendered
+	// height on record -- View, like main's workspaceView, sets it as a
+	// side effect; projectExplorer alone (called above) does not.
+	u.workspace.View(48, 24, true)
 	for range 3 {
 		u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	}
 	view = ansi.Strip(u.workspace.projectExplorer(48, 24))
 	if !strings.Contains(view, "FROM purchases") {
 		t.Fatalf("query detail cannot scroll to end of text: %q", view)
+	}
+}
+
+// TestExplorerHLFoldAndJumpNotTabSwitch covers M10: h/l are the Project
+// explorer's own fold/unfold keys -- like Left/Right -- not a tab switch.
+// On a branch node h folds it (like Left); on a leaf, h instead jumps the
+// cursor up to its nearest shallower branch ancestor (main's ui.go
+// updateWorkspaceKey "left"/"h" case); l unfolds a branch (like Right) and
+// otherwise does nothing.
+func TestExplorerHLFoldAndJumpNotTabSwitch(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.workspace.focused = true
+	var leafIndex, branchIndex int
+	nodes := u.workspace.explorerNodes()
+	for index, node := range nodes {
+		if node.label == "Customer" {
+			leafIndex = index
+		}
+		// The leaf's nearest shallower branch ancestor is its immediate
+		// "Tables (N)" group node, one level closer than the source branch.
+		if node.id == "group:chinook-local:table" {
+			branchIndex = index
+		}
+	}
+	u.workspace.explorerIndex = leafIndex
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	if u.workspace.tab != 0 {
+		t.Fatalf("h must not switch tabs: tab=%d", u.workspace.tab)
+	}
+	if u.workspace.explorerIndex != branchIndex {
+		t.Fatalf("h on a leaf should jump to its nearest shallower branch ancestor: got index %d, want %d", u.workspace.explorerIndex, branchIndex)
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	if !u.workspace.explorerCollapsed["group:chinook-local:table"] {
+		t.Fatalf("h on a branch should fold it, like Left")
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	if u.workspace.explorerCollapsed["group:chinook-local:table"] || u.workspace.tab != 0 {
+		t.Fatalf("l should unfold the branch, not switch tabs: collapsed=%v tab=%d", u.workspace.explorerCollapsed["group:chinook-local:table"], u.workspace.tab)
 	}
 }
 

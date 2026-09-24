@@ -27,11 +27,12 @@ type workspacePanel struct {
 	explorerIndex     int
 	explorerOffset    int
 	explorerCollapsed map[string]bool
-	projectDetails    bool
-	// explorerDetailOffset is PgUp/PgDown's extra scroll into a long
-	// selected details block (e.g. a saved query's full text) on top of
-	// the usual snap-to-selection offset -- ui.go's detail scroll, reset
-	// whenever the explorer selection itself moves.
+	// explorerDetailOffset is PgUp/PgDown's extra scroll into the details
+	// card body (e.g. a saved query's full text) -- ui.go's
+	// u.projectDetailOffset, reset whenever the explorer selection itself
+	// moves. Whether a details card is shown at all is derived from the
+	// current selection (selectedExplorerObject), not a separate toggle --
+	// matching main's workspaceView/projectWorkspaceCards.
 	explorerDetailOffset int
 
 	// Selected (inspector).
@@ -431,14 +432,48 @@ func (p *workspacePanel) explorerNodes() []explorerNode {
 	return nodes
 }
 
+// projectExplorer renders the Project tab: an explorer card (the node tree)
+// and, whenever the cursor sits on a selectable object, a details card below
+// it -- ported from ui.go's projectWorkspaceCards/panelCard onto
+// workspacePanel. Unlike the pre-port Enter-toggled single list, the details
+// card's presence is derived purely from the current selection: it appears
+// as soon as the cursor lands on a non-project object and stays until the
+// cursor moves off it, with no Enter step.
 func (p *workspacePanel) projectExplorer(width, height int) string {
+	projectTitle := "Project: " + p.ui.catalog.Title
+	selected := p.selectedExplorerObject()
+	if selected == nil {
+		return panelCard(projectTitle, p.explorerNodesView(max(1, width-2), max(1, height-2)), width, height)
+	}
+	title, detail := projectObjectDetails(*selected, width-2)
+	detailHeight := min(max(6, height/2), max(6, len(strings.Split(detail, "\n"))+2))
+	if detailHeight > height-5 {
+		detailHeight = max(3, height-5)
+	}
+	explorerHeight := max(3, height-detailHeight-1)
+	explorer := panelCard(projectTitle, p.explorerNodesView(max(1, width-2), max(1, explorerHeight-2)), width, explorerHeight)
+	detailLines := strings.Split(detail, "\n")
+	visible := max(1, detailHeight-3)
+	p.explorerDetailOffset = min(p.explorerDetailOffset, max(0, len(detailLines)-visible))
+	start := p.explorerDetailOffset
+	end := min(len(detailLines), start+visible)
+	shown := append([]string(nil), detailLines[start:end]...)
+	if len(detailLines) > visible {
+		shown = append(shown, fmt.Sprintf("PgUp/PgDn · lines %d–%d of %d", start+1, end, len(detailLines)))
+	}
+	details := panelCard(title, strings.Join(shown, "\n"), width, detailHeight)
+	return explorer + "\n" + strings.Repeat(" ", width) + "\n" + details
+}
+
+// explorerNodesView renders just the node tree (no details), with its own
+// cursor-follow scroll -- the explorer card's body.
+func (p *workspacePanel) explorerNodesView(width, height int) string {
 	nodes := p.explorerNodes()
 	if len(nodes) == 0 {
 		return "No project objects found."
 	}
 	p.explorerIndex = min(p.explorerIndex, len(nodes)-1)
-	lines := make([]string, 0, len(nodes)+5)
-	detailsAt := -1
+	lines := make([]string, 0, len(nodes))
 	for i, node := range nodes {
 		marker := " "
 		if node.objectIndex >= 0 {
@@ -465,66 +500,6 @@ func (p *workspacePanel) projectExplorer(width, height int) string {
 			label = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Render(ansi.Truncate(label, width, "…"))
 		}
 		lines = append(lines, label)
-		if !p.projectDetails || i != p.explorerIndex {
-			continue
-		}
-		index := node.objectIndex
-		if index < 0 && node.issue {
-			index = node.issueFor
-		}
-		if index >= 0 && index < len(p.ui.catalog.Objects) {
-			detailsAt = len(lines)
-			object := p.ui.catalog.Objects[index]
-			// ui.go's workspaceView Project:/Table:/Query: cards, ported
-			// onto the explorer's own select-for-details flow (Enter) --
-			// the header names what kind of object is selected instead of
-			// the generic "Details:" every kind used to share.
-			header := "Details: " + object.Reference.Title
-			switch object.Reference.Kind {
-			case "project":
-				header = "Project: " + object.Reference.Title
-			case "table":
-				header = "Table: " + object.Reference.Title
-			case "query":
-				header = "Query: " + object.Reference.Title
-			}
-			lines = append(lines, "", header)
-			if object.Issue != "" {
-				lines = append(lines, strings.Split(ansi.Hardwrap("Status: "+sanitizeTerminalText(object.Issue), max(10, width), false), "\n")...)
-			}
-			lines = append(lines, "Kind: "+object.Reference.Kind)
-			if object.Reference.SourceID != "" {
-				lines = append(lines, "Source: "+object.Reference.SourceID)
-			} else {
-				lines = append(lines, "Scope: project")
-			}
-			if len(object.Columns) > 0 {
-				columns := object.Columns
-				if len(object.ColumnTypes) > 0 {
-					typed := make([]string, len(object.Columns))
-					for i, column := range object.Columns {
-						if columnType := object.ColumnTypes[column]; columnType != "" {
-							typed[i] = column + " " + columnType
-						} else {
-							typed[i] = column
-						}
-					}
-					columns = typed
-				}
-				lines = append(lines, "Columns: "+strings.Join(columns, ", "))
-			}
-			if object.Reference.Kind == "query" {
-				if object.QueryType != "" {
-					lines = append(lines, "Type: "+object.QueryType)
-				}
-				if object.QueryText != "" {
-					lines = append(lines, strings.Split(ansi.Hardwrap(sanitizeMultilineText(object.QueryText), max(10, width), false), "\n")...)
-				}
-			}
-		}
-	}
-	if detailsAt >= 0 {
-		p.explorerOffset = p.explorerIndex + p.explorerDetailOffset
 	}
 	if p.explorerIndex < p.explorerOffset {
 		p.explorerOffset = p.explorerIndex
@@ -535,6 +510,100 @@ func (p *workspacePanel) projectExplorer(width, height int) string {
 	p.explorerOffset = max(0, min(p.explorerOffset, max(0, len(lines)-height)))
 	end := min(len(lines), p.explorerOffset+height)
 	return strings.Join(lines[p.explorerOffset:end], "\n")
+}
+
+// selectedExplorerObject reports the ProjectObject the cursor currently sits
+// on, or nil when nothing selectable is under it (no selection, or the
+// project root itself) -- ported from ui.go's UI.selectedExplorerObject. An
+// "issue" pseudo-node (objectIndex -1) resolves through issueFor to the real
+// object it was synthesized for, same as the pre-port single-list logic.
+func (p *workspacePanel) selectedExplorerObject() *ProjectObject {
+	nodes := p.explorerNodes()
+	if p.explorerIndex < 0 || p.explorerIndex >= len(nodes) {
+		return nil
+	}
+	node := nodes[p.explorerIndex]
+	index := node.objectIndex
+	if index < 0 && node.issue {
+		index = node.issueFor
+	}
+	if index < 0 || index >= len(p.ui.catalog.Objects) {
+		return nil
+	}
+	object := &p.ui.catalog.Objects[index]
+	if object.Reference.Kind == "project" {
+		return nil
+	}
+	return object
+}
+
+// projectObjectDetails renders one object's details-card title and body,
+// ported verbatim (kind-named title: Table:/View:/Query:/Database:) from
+// ui.go's projectObjectDetails.
+func projectObjectDetails(object ProjectObject, width int) (string, string) {
+	ref := object.Reference
+	var title string
+	var lines []string
+	switch ref.Kind {
+	case "table", "project_view":
+		kind := "Table"
+		if ref.Kind == "project_view" {
+			kind = "View"
+		}
+		title = kind + ": " + ref.Title
+		if len(object.Columns) == 0 {
+			lines = append(lines, "No column metadata available.")
+		} else {
+			nameWidth := len("Column")
+			for _, column := range object.Columns {
+				nameWidth = max(nameWidth, min(len(column), max(8, width/2)))
+			}
+			lines = append(lines, fmt.Sprintf("%-*s  Type", nameWidth, "Column"))
+			for _, column := range object.Columns {
+				lines = append(lines, fmt.Sprintf("%-*s  %s", nameWidth, sanitizeTerminalText(column), sanitizeTerminalText(object.ColumnTypes[column])))
+			}
+		}
+	case "query":
+		title = "Query: " + ref.Title
+		lines = append(lines, "Type: "+sanitizeTerminalText(object.QueryType))
+		if ref.SourceID != "" {
+			lines = append(lines, "Database: "+sanitizeTerminalText(ref.SourceID))
+		}
+		if object.QueryText == "" {
+			lines = append(lines, "Query text unavailable.")
+		} else {
+			for _, line := range strings.Split(sanitizeMultilineText(object.QueryText), "\n") {
+				lines = append(lines, strings.Split(ansi.Hardwrap(line, max(8, width-2), false), "\n")...)
+			}
+		}
+	case "source":
+		title = "Database: " + ref.Title
+		lines = append(lines, "Tables and views are listed above.")
+	default:
+		title = ref.Title
+	}
+	if object.Issue != "" {
+		lines = append([]string{"Status: " + sanitizeTerminalText(object.Issue)}, lines...)
+	}
+	return title, strings.Join(lines, "\n")
+}
+
+// panelCard renders one titled card -- ported verbatim from ui.go's
+// panelCard -- used by both the explorer and details cards above.
+func panelCard(title, body string, width, height int) string {
+	width, height = max(1, width), max(1, height)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255")).Background(lipgloss.Color("238"))
+	contentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235"))
+	lines := []string{titleStyle.Render(padAnsiLine("  "+ansi.Truncate(sanitizeTerminalText(title), max(1, width-2), "…"), width))}
+	content := strings.Split(body, "\n")
+	for i := 1; i < height; i++ {
+		line := ""
+		if i > 1 && i-2 < len(content) {
+			line = content[i-2]
+		}
+		lines = append(lines, contentStyle.Render(padAnsiLine(" "+ansi.Truncate(line, max(1, width-2), "…"), width)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // --- Selected (inspector) tab -----------------------------------------
@@ -932,11 +1001,11 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 	nodes := p.explorerNodes()
 	switch msg.String() {
 	case "pgdown":
-		if p.tab == 0 && p.projectDetails {
+		if p.tab == 0 && p.selectedExplorerObject() != nil {
 			p.explorerDetailOffset += max(1, p.height/4)
 		}
 	case "pgup":
-		if p.tab == 0 && p.projectDetails {
+		if p.tab == 0 && p.selectedExplorerObject() != nil {
 			p.explorerDetailOffset = max(0, p.explorerDetailOffset-max(1, p.height/4))
 		}
 	case "1", "2", "3":
@@ -944,24 +1013,29 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 			p.inspectorSubTab = int(msg.String()[0] - '1')
 			p.inspectorOffset = 0
 		}
-	case "h":
-		p.setTab(p.tab - 1)
-	case "l":
-		p.setTab(p.tab + 1)
 	case "tab":
 		p.setTab(p.tab + 1)
 	case "shift+tab":
 		p.setTab(p.tab - 1)
-	case "left":
-		// ui.go's Left on the Project explorer: fold the branch node under
-		// the cursor (source/group/project root), not switch tabs -- ported
-		// alongside Tab/Shift+Tab taking over the tab-switch binding.
+	case "h", "left":
+		// ui.go's Left/h on the Project explorer: fold the branch node
+		// under the cursor, or -- on a leaf -- jump the cursor up to its
+		// nearest shallower branch ancestor. h/l are the explorer's own
+		// fold/unfold bindings here, not a tab switch (Tab/Shift+Tab own
+		// that).
 		if p.tab == 0 && p.explorerIndex >= 0 && p.explorerIndex < len(nodes) {
 			if node := nodes[p.explorerIndex]; node.branch {
 				p.explorerCollapsed[node.id] = true
+			} else {
+				for i := p.explorerIndex - 1; i >= 0; i-- {
+					if nodes[i].branch && nodes[i].depth < nodes[p.explorerIndex].depth {
+						p.explorerIndex = i
+						break
+					}
+				}
 			}
 		}
-	case "right":
+	case "l", "right":
 		if p.tab == 0 && p.explorerIndex >= 0 && p.explorerIndex < len(nodes) {
 			if node := nodes[p.explorerIndex]; node.branch {
 				p.explorerCollapsed[node.id] = false
@@ -971,7 +1045,6 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 		switch p.tab {
 		case 0:
 			p.explorerIndex = max(0, p.explorerIndex-1)
-			p.projectDetails = false
 			p.explorerDetailOffset = 0
 		case 1:
 			p.inspectorOffset = max(0, p.inspectorOffset-1)
@@ -985,7 +1058,6 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 		switch p.tab {
 		case 0:
 			p.explorerIndex = min(len(nodes)-1, p.explorerIndex+1)
-			p.projectDetails = false
 			p.explorerDetailOffset = 0
 		case 1:
 			p.inspectorOffset++
@@ -997,13 +1069,12 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	case "enter":
 		if p.tab == 0 {
+			// ui.go's Enter on the Project explorer only toggles a branch
+			// node's fold state -- the details card is derived from the
+			// selection itself (selectedExplorerObject), not an Enter step.
 			if p.explorerIndex >= 0 && p.explorerIndex < len(nodes) {
-				node := nodes[p.explorerIndex]
-				if node.branch {
+				if node := nodes[p.explorerIndex]; node.branch {
 					p.explorerCollapsed[node.id] = !p.explorerCollapsed[node.id]
-					p.projectDetails = false
-				} else {
-					p.projectDetails = !p.projectDetails
 				}
 			}
 		} else if p.tab == 2 && len(p.ui.snapshot.Workspace.Docks) > 0 {

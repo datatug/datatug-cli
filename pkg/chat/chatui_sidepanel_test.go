@@ -28,18 +28,23 @@ func TestWorkspacePanelViewShowsTabsAndProjectExplorer(t *testing.T) {
 	}
 }
 
-func TestWorkspacePanelLeftRightSwitchesTabs(t *testing.T) {
+// TestWorkspacePanelTabAndShiftTabSwitchTabs covers Tab/Shift+Tab, the
+// panel's tab-switch bindings -- h/l are the Project explorer's own
+// fold/unfold keys (like main's ui.go), not a tab switch, so they no longer
+// belong here (see TestExplorerArrowsFoldTreeAndTabSwitchesWorkspace for
+// h/l's real behaviour).
+func TestWorkspacePanelTabAndShiftTabSwitchTabs(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if u.workspace.tab != 0 {
 		t.Fatalf("expected initial tab 0, got %d", u.workspace.tab)
 	}
-	u.workspace.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	u.workspace.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if u.workspace.tab != 1 {
-		t.Fatalf("expected right/l to advance tab to 1, got %d", u.workspace.tab)
+		t.Fatalf("expected tab to advance tab to 1, got %d", u.workspace.tab)
 	}
-	u.workspace.Update(tea.KeyPressMsg{Code: 'h', Text: "h"})
+	u.workspace.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	if u.workspace.tab != 0 {
-		t.Fatalf("expected left/h to return to tab 0, got %d", u.workspace.tab)
+		t.Fatalf("expected shift+tab to return to tab 0, got %d", u.workspace.tab)
 	}
 }
 
@@ -177,7 +182,6 @@ func TestChatUIProjectExplorerShowsSourceIssueInPlace(t *testing.T) {
 	if !found {
 		t.Fatalf("source-local error node missing: %+v", nodes)
 	}
-	u.workspace.projectDetails = true
 	view := u.workspace.projectExplorer(100, 20)
 	if !strings.Contains(view, "Status: Schema unavailable") || !strings.Contains(view, "Customer") {
 		t.Fatalf("source details did not show the schema error: %q", view)
@@ -217,7 +221,6 @@ func TestChatUIProjectExplorerIssueDetailsRemainVisibleInLongTree(t *testing.T) 
 			break
 		}
 	}
-	u.workspace.projectDetails = true
 	view := u.workspace.projectExplorer(80, 8)
 	if !strings.Contains(view, "Status: Schema unavailable") {
 		t.Fatalf("selected issue details hidden below long explorer: %q", view)

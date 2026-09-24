@@ -15,20 +15,51 @@ import (
 
 // handleGridKey is every transcript grid's grid.WithKeyHandler/SetKeyHandler
 // hook (registered in appendGridResult/loadSession): "enter" opens cell
-// detail (checklist #50, ui.go's "enter" case) and "q" opens save-as-query
-// (ui.go's "q" case) — matching ui.go's per-key grid switch exactly, without
-// a GlobalKeys binding, since a product KeyHandler is only reached when the
-// enclosing Block (e.g. JoinBlock) isn't itself intercepting the key (its
-// own "j" join-picker mode consumes "enter" before Grid.Update is ever
-// called — see join_block.go's Update).
+// detail (checklist #50, ui.go's "enter" case), "q" opens save-as-query
+// (ui.go's "q" case), and "space"/"c"/"r"/"a" select rows/a cell/a range or
+// toggle attachment (ui.go's selectFromGrid/toggleAttachment) — matching
+// ui.go's per-key grid switch exactly, without a GlobalKeys binding, since a
+// product KeyHandler is only reached when the enclosing Block (e.g.
+// JoinBlock) isn't itself intercepting the key (its own "j" join-picker
+// mode consumes "enter" before Grid.Update is ever called — see
+// join_block.go's Update). Selection/attachment reuse workspacePanel's own
+// selectFromGridState/toggleAttachment (chatui_sidepanel.go) — the same
+// range-anchor and WorkspaceAction plumbing the dock grid's handleDockGridKey
+// already shares, matching ui.go's single u.rangeAnchor field being shared
+// by the main and dock grids.
 func (u *ChatUI) handleGridKey(_ *grid.Model, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch msg.String() {
 	case "enter":
 		return u.openCellDetail(), true
 	case "q":
 		return u.openSaveQueryDialog(), true
+	case "space":
+		u.selectFromGrid("row")
+		return nil, true
+	case "c":
+		u.selectFromGrid("cell")
+		return nil, true
+	case "r":
+		u.selectFromGrid("range")
+		return nil, true
+	case "a":
+		if g, _, ok := u.activeGrid(); ok && g != nil {
+			u.workspace.toggleAttachment(ContextReference{Kind: "recordset", ObjectID: u.activeRecordSetID(), Title: g.baseTitle})
+		}
+		return nil, true
 	}
 	return nil, false
+}
+
+// selectFromGrid is ui.go's UI.selectFromGrid, ported onto activeGrid() and
+// workspacePanel.selectFromGridState.
+func (u *ChatUI) selectFromGrid(mode string) {
+	g, _, ok := u.activeGrid()
+	recordSetID := u.activeRecordSetID()
+	if !ok || g == nil || recordSetID == "" {
+		return
+	}
+	u.workspace.selectFromGridState(g, recordSetID, "", mode)
 }
 
 // activeGrid recovers the transcript's currently-focused grid, the ChatUI

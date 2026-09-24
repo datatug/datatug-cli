@@ -2,10 +2,13 @@ package chat
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
@@ -152,6 +155,184 @@ func TestChatUIEmptyBookmarkedGridNavigation(t *testing.T) {
 	}
 }
 
+// The tests below are ported from the legacy UI's workspace_test.go. Tests
+// that exercise SessionChat/store logic only (no UI/ChatUI type) are
+// unchanged in workspace_test.go.
+
+// Ported from TestProjectExplorerShowsSourceIssueInPlace.
+func TestChatUIProjectExplorerShowsSourceIssueInPlace(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.catalog.Objects[1].Issue = "Schema unavailable: relation main.Customer has no columns file"
+	nodes := u.workspace.explorerNodes()
+	found := false
+	for i, node := range nodes {
+		if node.id == "source:chinook-local" {
+			u.workspace.explorerIndex = i
+		}
+		if node.issue && node.id == "source:chinook-local:issue" && node.objectIndex == -1 && strings.Contains(node.label, "main.Customer") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("source-local error node missing: %+v", nodes)
+	}
+	u.workspace.projectDetails = true
+	view := u.workspace.projectExplorer(100, 20)
+	if !strings.Contains(view, "Status: Schema unavailable") || !strings.Contains(view, "Customer") {
+		t.Fatalf("source details did not show the schema error: %q", view)
+	}
+	u.workspace.explorerCollapsed["source:chinook-local"] = true
+	found = false
+	for _, node := range u.workspace.explorerNodes() {
+		if node.id == "source:chinook-local" && node.issue && strings.Contains(node.label, "⚠") {
+			found = true
+		}
+		if node.id == "source:chinook-local:issue" {
+			t.Fatal("collapsed source still shows its error child")
+		}
+	}
+	if !found {
+		t.Fatal("collapsed source lost its warning indicator")
+	}
+}
+
+// Ported from TestProjectExplorerIssueDetailsRemainVisibleInLongTree.
+func TestChatUIProjectExplorerIssueDetailsRemainVisibleInLongTree(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.catalog.Objects[1].Issue = "Schema unavailable: relation main.Customer has no columns file"
+	for i := range 30 {
+		object := ProjectObject{Reference: ContextReference{
+			Kind: "source", SourceID: fmt.Sprintf("extra-%02d", i), ObjectID: fmt.Sprintf("extra-%02d", i), Title: "Extra source",
+		}}
+		if i == 20 {
+			object.Issue = "Schema unavailable: deep source failed"
+		}
+		u.catalog.Objects = append(u.catalog.Objects, object)
+	}
+	for i, node := range u.workspace.explorerNodes() {
+		if node.id == "source:chinook-local:issue" {
+			u.workspace.explorerIndex = i
+			break
+		}
+	}
+	u.workspace.projectDetails = true
+	view := u.workspace.projectExplorer(80, 8)
+	if !strings.Contains(view, "Status: Schema unavailable") {
+		t.Fatalf("selected issue details hidden below long explorer: %q", view)
+	}
+	for i, node := range u.workspace.explorerNodes() {
+		if node.id == "source:extra-20:issue" {
+			u.workspace.explorerIndex = i
+			break
+		}
+	}
+	view = u.workspace.projectExplorer(80, 8)
+	if !strings.Contains(view, "Status: Schema unavailable: deep source failed") {
+		t.Fatalf("deep selected issue details hidden below viewport: %q", view)
+	}
+}
+
+// Ported from TestExplorerGroupsObjectsByDeclaredSourceAndCollapses.
+func TestChatUIExplorerGroupsObjectsByDeclaredSourceAndCollapses(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.catalog.Objects = append(u.catalog.Objects,
+		ProjectObject{Reference: ContextReference{Kind: "query", ProjectID: "chinook", SourceID: "chinook-local", ObjectID: "by-city", Title: "By city"}},
+		ProjectObject{Reference: ContextReference{Kind: "query", ProjectID: "chinook", ObjectID: "unbound", Title: "Unbound"}},
+	)
+	nodes := u.workspace.explorerNodes()
+	var sourceDepth, boundDepth, unboundDepth int
+	for _, node := range nodes {
+		switch node.label {
+		case "Chinook local":
+			sourceDepth = node.depth
+		case "By city":
+			boundDepth = node.depth
+		case "Unbound":
+			unboundDepth = node.depth
+		}
+	}
+	if sourceDepth != 1 || boundDepth != 3 || unboundDepth != 2 {
+		t.Fatalf("unexpected explorer hierarchy: %+v", nodes)
+	}
+	u.workspace.explorerCollapsed["source:chinook-local"] = true
+	for _, node := range u.workspace.explorerNodes() {
+		if node.label == "By city" || node.label == "Customer" {
+			t.Fatalf("collapsed source still exposes child %q", node.label)
+		}
+	}
+}
+
+// Ported from TestWorkspaceSplitAndKeyboardSelection. The mouse-click
+// attachment-close affordance (ui.go's attachmentLine/attachmentCloseAt) is
+// not ported — ChatUI's topBar does not render attachment chips at all yet,
+// a real, documented gap. The underlying detach behaviour it exercised is
+// covered here instead via the explorer's own "space" toggle (attach then
+// detach the same table reference), which is a supported, already-wired
+// input path to the identical WorkspaceAction{Kind: "detach"}.
+func TestChatUIWorkspaceSplitAndKeyboardSelection(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, _ := sessions.Snapshot(ctx)
+	workspaceTestRecord(t, store, session.ID)
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+	view := u.shell.View().Content
+	for _, want := range []string{"Project: Chinook", "● Project", "Inspect", "Docked", "Customer"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("split view missing %q", want)
+		}
+	}
+	// F6 focuses the workspace pane (native chatshell toggle).
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
+	for index, node := range u.workspace.explorerNodes() {
+		if node.objectIndex >= 0 && u.catalog.Objects[node.objectIndex].Reference.Kind == "table" {
+			u.workspace.explorerIndex = index
+			break
+		}
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeySpace})
+	if len(u.snapshot.Workspace.Attachments) != 1 || u.snapshot.Workspace.Attachments[0].Kind != "table" {
+		t.Fatalf("project attachment = %+v", u.snapshot.Workspace.Attachments)
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeySpace}) // toggles: attach -> detach
+	if len(u.snapshot.Workspace.Attachments) != 0 {
+		t.Fatalf("second space toggle did not detach: %+v", u.snapshot.Workspace.Attachments)
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeySpace}) // attach again
+	if !u.shell.FocusEntry(u.lastGridEntryID) {
+		t.Fatal("grid missing")
+	}
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	if len(u.snapshot.Workspace.Selections) != 1 || u.snapshot.Workspace.CurrentSelectionID == "" {
+		t.Fatalf("row selection = %+v", u.snapshot.Workspace)
+	}
+	if len(u.snapshot.Workspace.Attachments) != 1 {
+		t.Fatalf("row selection changed attachments: %+v", u.snapshot.Workspace.Attachments)
+	}
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeySpace}) // explicitly attach selected rows (tab 1, Selected)
+	if len(u.snapshot.Workspace.Attachments) != 2 {
+		t.Fatalf("selected rows were not attached: %+v", u.snapshot.Workspace.Attachments)
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if len(u.snapshot.Workspace.Docks) != 1 {
+		t.Fatalf("dock state = %+v", u.snapshot.Workspace.Docks)
+	}
+	if !strings.Contains(u.shell.View().Content, "Inspect") || !strings.Contains(u.shell.View().Content, "Docked") {
+		t.Fatal("workspace disappeared after selection/dock")
+	}
+}
+
 func TestWorkspacePanelF6TogglesPanelVisibility(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
@@ -163,5 +344,94 @@ func TestWorkspacePanelF6TogglesPanelVisibility(t *testing.T) {
 	after := strings.Contains(u.shell.View().Content, "Marks")
 	if after {
 		t.Fatal("expected F6 to hide the workspace pane")
+	}
+}
+
+// Ported from TestDockedGridSortAndCellSelectionUseSourceCoordinates.
+func TestChatUIDockedGridSortAndCellSelectionUseSourceCoordinates(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordID := workspaceTestRecord(t, store, session.ID)
+	ref, err := sessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "select", RecordSetID: recordID, Rows: []int{0, 2}, Title: "Subset"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "dock", Reference: ref}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+	u.workspace.tab, u.workspace.dockGridFocused = 2, true
+	dock := u.snapshot.Workspace.Docks[0]
+	dockGrid := u.workspace.dockGrids[dock.ID]
+	dockGrid.SelectColumn(0)
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 's', Text: "s"}) // ascending
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 's', Text: "s"}) // descending
+	dockGrid = u.workspace.dockGrids[dock.ID]
+	if got := []int{dockGrid.sourceIndexAt(0), dockGrid.sourceIndexAt(1)}; !reflect.DeepEqual(got, []int{2, 0}) {
+		t.Fatalf("docked sorted source rows = %v", got)
+	}
+	dockGrid.SelectColumn(1)
+	dockGrid.SelectRow(0) // City in source row 2
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'c', Text: "c"})
+	saved, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := saved.Workspace.Selections[saved.Workspace.CurrentSelectionID]
+	if !reflect.DeepEqual(selection.Rows, []int{2}) || !reflect.DeepEqual(selection.Columns, []string{"City"}) {
+		t.Fatalf("docked cell selection = %+v", selection)
+	}
+	if !reflect.DeepEqual(selection.Ranges, []CellRange{{FirstRow: 2, LastRow: 2, FirstCol: 1, LastCol: 1}}) {
+		t.Fatalf("docked cell coordinates = %+v", selection.Ranges)
+	}
+}
+
+// TestChatUIDockGridHasNoViewSwitcher is the regression test for m9,
+// ported from workspace_test.go's TestDockGridHasNoViewSwitcher: a dock
+// grid never had a view switcher in main (no Charts/Current-row views to
+// jump to with "2"/"3") — it already shows a narrow, purpose-built row set.
+func TestChatUIDockGridHasNoViewSwitcher(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordID := workspaceTestRecord(t, store, session.ID)
+	ref, err := sessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "select", RecordSetID: recordID, Rows: []int{0, 2}, Title: "Subset"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "dock", Reference: ref}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+	dock := u.snapshot.Workspace.Docks[0]
+	dockGrid := u.workspace.dockGrids[dock.ID]
+	if got := dockGrid.ExtraViews(); len(got) != 0 {
+		t.Fatalf("dock grid ExtraViews() = %+v, want none", got)
+	}
+	if header := ansi.Strip(dockGrid.HeaderLine(60)); strings.Contains(header, "2 Charts") || strings.Contains(header, "3 Current row") {
+		t.Fatalf("dock grid header still advertises a view switcher: %q", header)
 	}
 }

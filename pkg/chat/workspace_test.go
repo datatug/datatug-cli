@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/ai"
 )
@@ -22,78 +21,9 @@ func workspaceTestCatalog() ProjectCatalog {
 	}}
 }
 
-func TestProjectExplorerShowsSourceIssueInPlace(t *testing.T) {
-	u := NewUI(context.Background(), nil, "test-model")
-	u.catalog = workspaceTestCatalog()
-	u.catalog.Objects[1].Issue = "Schema unavailable: relation main.Customer has no columns file"
-	nodes := u.explorerNodes()
-	found := false
-	for i, node := range nodes {
-		if node.id == "source:chinook-local" {
-			u.explorerIndex = i
-		}
-		if node.issue && node.id == "source:chinook-local:issue" && node.objectIndex == -1 && strings.Contains(node.label, "main.Customer") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("source-local error node missing: %+v", nodes)
-	}
-	u.projectDetails = true
-	view := u.projectExplorer(100, 20)
-	if !strings.Contains(view, "Status: Schema unavailable") || !strings.Contains(view, "Customer") {
-		t.Fatalf("source details did not show the schema error: %q", view)
-	}
-	u.explorerCollapsed["source:chinook-local"] = true
-	found = false
-	for _, node := range u.explorerNodes() {
-		if node.id == "source:chinook-local" && node.issue && strings.Contains(node.label, "⚠") {
-			found = true
-		}
-		if node.id == "source:chinook-local:issue" {
-			t.Fatal("collapsed source still shows its error child")
-		}
-	}
-	if !found {
-		t.Fatal("collapsed source lost its warning indicator")
-	}
-}
-
-func TestProjectExplorerIssueDetailsRemainVisibleInLongTree(t *testing.T) {
-	u := NewUI(context.Background(), nil, "test-model")
-	u.catalog = workspaceTestCatalog()
-	u.catalog.Objects[1].Issue = "Schema unavailable: relation main.Customer has no columns file"
-	for i := range 30 {
-		object := ProjectObject{Reference: ContextReference{
-			Kind: "source", SourceID: fmt.Sprintf("extra-%02d", i), ObjectID: fmt.Sprintf("extra-%02d", i), Title: "Extra source",
-		}}
-		if i == 20 {
-			object.Issue = "Schema unavailable: deep source failed"
-		}
-		u.catalog.Objects = append(u.catalog.Objects, object)
-	}
-	for i, node := range u.explorerNodes() {
-		if node.id == "source:chinook-local:issue" {
-			u.explorerIndex = i
-			break
-		}
-	}
-	u.projectDetails = true
-	view := u.projectExplorer(80, 8)
-	if !strings.Contains(view, "Status: Schema unavailable") {
-		t.Fatalf("selected issue details hidden below long explorer: %q", view)
-	}
-	for i, node := range u.explorerNodes() {
-		if node.id == "source:extra-20:issue" {
-			u.explorerIndex = i
-			break
-		}
-	}
-	view = u.projectExplorer(80, 8)
-	if !strings.Contains(view, "Status: Schema unavailable: deep source failed") {
-		t.Fatalf("deep selected issue details hidden below viewport: %q", view)
-	}
-}
+// TestProjectExplorerShowsSourceIssueInPlace and
+// TestProjectExplorerIssueDetailsRemainVisibleInLongTree were ported onto
+// ChatUI's workspacePanel in chatui_sidepanel_test.go.
 
 func workspaceTestRecord(t *testing.T, store *SessionStore, sessionID string) string {
 	t.Helper()
@@ -596,112 +526,28 @@ func TestSelectedCellValueStaysOutOfModelRequest(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSplitAndKeyboardSelection(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, _ := chat.Snapshot(ctx)
-	workspaceTestRecord(t, store, session.ID)
-	u, err := NewSessionUI(ctx, chat, "fake-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
-	view := u.View().Content
-	for _, want := range []string{"Project: Chinook", "● Project", "Inspect", "Docked", "Customer"} {
-		if !strings.Contains(view, want) {
-			t.Errorf("split view missing %q", want)
-		}
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyF6})
-	for index, node := range u.explorerNodes() {
-		if node.objectIndex >= 0 && u.catalog.Objects[node.objectIndex].Reference.Kind == "table" {
-			u.explorerIndex = index
-			break
-		}
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeySpace})
-	if len(u.snapshot.Workspace.Attachments) != 1 || u.snapshot.Workspace.Attachments[0].Kind != "table" {
-		t.Fatalf("project attachment = %+v", u.snapshot.Workspace.Attachments)
-	}
-	_, _ = u.Update(tea.MouseClickMsg{X: responsiveGutter(u.width) + len("Customer") + 2, Y: u.historyHeight() + 2, Button: tea.MouseLeft})
-	if len(u.snapshot.Workspace.Attachments) != 0 {
-		t.Fatalf("clicking attachment close did not detach: %+v", u.snapshot.Workspace.Attachments)
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeySpace}) // attach again
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
-	if !u.focusLatestGrid() {
-		t.Fatal("grid missing")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeySpace})
-	if len(u.snapshot.Workspace.Selections) != 1 || u.snapshot.Workspace.CurrentSelectionID == "" {
-		t.Fatalf("row selection = %+v", u.snapshot.Workspace)
-	}
-	if len(u.snapshot.Workspace.Attachments) != 1 {
-		t.Fatalf("row selection changed attachments: %+v", u.snapshot.Workspace.Attachments)
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyF6})
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeySpace}) // explicitly attach selected rows
-	if len(u.snapshot.Workspace.Attachments) != 2 {
-		t.Fatalf("selected rows were not attached: %+v", u.snapshot.Workspace.Attachments)
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: 'd'})
-	if len(u.snapshot.Workspace.Docks) != 1 {
-		t.Fatalf("dock state = %+v", u.snapshot.Workspace.Docks)
-	}
-	if !strings.Contains(u.View().Content, "Inspect") || !strings.Contains(u.View().Content, "Docked") {
-		t.Fatal("workspace disappeared after selection/dock")
-	}
-}
+// TestWorkspaceSplitAndKeyboardSelection was ported onto ChatUI's
+// workspacePanel in chatui_sidepanel_test.go
+// (TestChatUIWorkspaceSplitAndKeyboardSelection) — its mouse-click
+// attachment-close sub-case is a documented, real gap there (ChatUI's
+// topBar renders no attachment chips yet); the detach behaviour itself is
+// covered via the explorer's keyboard "space" toggle instead.
+//
+// TestExplorerGroupsObjectsByDeclaredSourceAndCollapses was ported onto
+// ChatUI's workspacePanel in chatui_sidepanel_test.go.
+//
+// TestProjectPickerSelectsConfiguredProject's Down-navigation case was
+// ported onto ChatUI's project picker overlay in chatui_pickers_test.go
+// (TestChatUIProjectPickerDownThenEnterSelectsSecondChoice); its
+// Enter-selects-the-first-choice case is already covered there by
+// TestChatUIF3OpensProjectPickerAndSelects.
 
-func TestExplorerGroupsObjectsByDeclaredSourceAndCollapses(t *testing.T) {
-	u := NewUI(context.Background(), nil, "fake-model")
-	u.catalog = workspaceTestCatalog()
-	u.catalog.Objects = append(u.catalog.Objects,
-		ProjectObject{Reference: ContextReference{Kind: "query", ProjectID: "chinook", SourceID: "chinook-local", ObjectID: "by-city", Title: "By city"}},
-		ProjectObject{Reference: ContextReference{Kind: "query", ProjectID: "chinook", ObjectID: "unbound", Title: "Unbound"}},
-	)
-	nodes := u.explorerNodes()
-	var sourceDepth, boundDepth, unboundDepth int
-	for _, node := range nodes {
-		switch node.label {
-		case "Chinook local":
-			sourceDepth = node.depth
-		case "By city":
-			boundDepth = node.depth
-		case "Unbound":
-			unboundDepth = node.depth
-		}
-	}
-	if sourceDepth != 1 || boundDepth != 3 || unboundDepth != 2 {
-		t.Fatalf("unexpected explorer hierarchy: %+v", nodes)
-	}
-	u.explorerCollapsed["source:chinook-local"] = true
-	for _, node := range u.explorerNodes() {
-		if node.label == "By city" || node.label == "Customer" {
-			t.Fatalf("collapsed source still exposes child %q", node.label)
-		}
-	}
-}
-
-func TestProjectPickerSelectsConfiguredProject(t *testing.T) {
-	u := NewUI(context.Background(), nil, "fake-model")
-	u.catalog = workspaceTestCatalog()
-	u.SetProjectChoices([]ProjectChoice{{Key: "/projects/chinook", Title: "Chinook"}, {Key: "sales", Title: "Sales"}})
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyF3})
-	if !u.projectPicker || !strings.Contains(u.View().Content, "Sales") {
-		t.Fatal("project picker did not open")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	_, cmd := u.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if got := u.SelectedProject(); got != "sales" || cmd == nil {
-		t.Fatalf("project switch = %q, quit command = %v", got, cmd)
-	}
-}
-
+// TestSplitDividerResizesWithinUsefulBounds is NOT ported: Ctrl+←/→ split
+// resize is checklist item #46, NATIVE to tui/chatshell (no DataTug product
+// code — chatshell.Model owns chatPanePercent/growPanelChat itself now,
+// unexported, with its own test coverage in strongo/aichat). Kept here,
+// unchanged, against the legacy UI's own chatPaneWidth/chatPanePercent,
+// since that's still real, exercised code as long as ui.go exists.
 func TestSplitDividerResizesWithinUsefulBounds(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
 	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
@@ -718,89 +564,6 @@ func TestSplitDividerResizesWithinUsefulBounds(t *testing.T) {
 	}
 }
 
-func TestDockedGridSortAndCellSelectionUseSourceCoordinates(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := chat.Snapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recordID := workspaceTestRecord(t, store, session.ID)
-	ref, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "select", RecordSetID: recordID, Rows: []int{0, 2}, Title: "Subset"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "dock", Reference: ref}); err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, chat, "fake-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
-	u.workspaceTab, u.workspaceFocused, u.dockGridFocused = 2, true, true
-	dock := u.snapshot.Workspace.Docks[0]
-	dockGrid := u.dockGrids[dock.ID]
-	dockGrid.SelectColumn(0)
-	_, _ = u.Update(tea.KeyPressMsg{Code: 's'}) // ascending
-	_, _ = u.Update(tea.KeyPressMsg{Code: 's'}) // descending
-	dockGrid = u.dockGrids[dock.ID]
-	if got := []int{dockGrid.sourceIndexAt(0), dockGrid.sourceIndexAt(1)}; !reflect.DeepEqual(got, []int{2, 0}) {
-		t.Fatalf("docked sorted source rows = %v", got)
-	}
-	dockGrid.SelectColumn(1)
-	dockGrid.SelectRow(0) // City in source row 2
-	_, _ = u.Update(tea.KeyPressMsg{Code: 'c'})
-	saved, err := chat.Snapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	selection := saved.Workspace.Selections[saved.Workspace.CurrentSelectionID]
-	if !reflect.DeepEqual(selection.Rows, []int{2}) || !reflect.DeepEqual(selection.Columns, []string{"City"}) {
-		t.Fatalf("docked cell selection = %+v", selection)
-	}
-	if !reflect.DeepEqual(selection.Ranges, []CellRange{{FirstRow: 2, LastRow: 2, FirstCol: 1, LastCol: 1}}) {
-		t.Fatalf("docked cell coordinates = %+v", selection.Ranges)
-	}
-}
-
-// TestDockGridHasNoViewSwitcher is the regression test for m9: a dock grid
-// never had a view switcher in main (no Charts/Current-row views to jump
-// to with "2"/"3") — it already shows a narrow, purpose-built row set.
-func TestDockGridHasNoViewSwitcher(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := chat.Snapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recordID := workspaceTestRecord(t, store, session.ID)
-	ref, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "select", RecordSetID: recordID, Rows: []int{0, 2}, Title: "Subset"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "dock", Reference: ref}); err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, chat, "fake-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = u.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
-	dock := u.snapshot.Workspace.Docks[0]
-	dockGrid := u.dockGrids[dock.ID]
-	if got := dockGrid.ExtraViews(); len(got) != 0 {
-		t.Fatalf("dock grid ExtraViews() = %+v, want none", got)
-	}
-	if header := ansi.Strip(dockGrid.HeaderLine(60)); strings.Contains(header, "2 Charts") || strings.Contains(header, "3 Current row") {
-		t.Fatalf("dock grid header still advertises a view switcher: %q", header)
-	}
-}
+// TestDockedGridSortAndCellSelectionUseSourceCoordinates and
+// TestDockGridHasNoViewSwitcher were ported onto ChatUI's workspacePanel in
+// chatui_sidepanel_test.go.

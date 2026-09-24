@@ -123,3 +123,28 @@ func TestChatUICtrlRRefreshesLastRecordSet(t *testing.T) {
 		t.Fatalf("expected the refresh to re-run the saved DTQL once, got %d calls", executor.calls)
 	}
 }
+
+// Ported from workspace_test.go's TestProjectPickerSelectsConfiguredProject:
+// the Down-navigation half TestChatUIF3OpensProjectPickerAndSelects above
+// doesn't already cover (that one selects the first/default choice; this
+// one moves down to the second before selecting).
+func TestChatUIProjectPickerDownThenEnterSelectsSecondChoice(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.SetProjectChoices([]ProjectChoice{{Key: "/projects/chinook", Title: "Chinook"}, {Key: "sales", Title: "Sales"}})
+
+	cmd, consumed := u.globalKeys(tea.KeyPressMsg{Code: tea.KeyF3})
+	if !consumed {
+		t.Fatal("expected F3 to be consumed by globalKeys")
+	}
+	drainCmd(t, u, cmd)
+	view := u.shell.View().Content
+	if !strings.Contains(view, "Sales") {
+		t.Fatalf("project picker did not open:\n%s", view)
+	}
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	_, quitCmd := u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := u.SelectedProject(); got != "sales" || quitCmd == nil {
+		t.Fatalf("project switch = %q, quit command = %v", got, quitCmd)
+	}
+}

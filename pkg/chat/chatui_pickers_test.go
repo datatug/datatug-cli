@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/strongo/aichat/tui/grid"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
@@ -146,5 +147,83 @@ func TestChatUIProjectPickerDownThenEnterSelectsSecondChoice(t *testing.T) {
 	_, quitCmd := u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if got := u.SelectedProject(); got != "sales" || quitCmd == nil {
 		t.Fatalf("project switch = %q, quit command = %v", got, quitCmd)
+	}
+}
+
+// TestChatUIAltSCyclesAllTablesAndRestoresSessionStyle is ported from
+// ui_test.go's TestAltSCyclesAllTablesAndRestoresSessionStyle: same
+// scenario (Alt+S cycles every tracked grid's style, persists it, a new/
+// reopened session picks it up), driven through ChatUI's real production
+// wiring instead of u.entries/u.tableStyle/u.styleNotice/u.statusLines.
+// The self-expiring shortcut-hint swap (tableStyleNoticeExpired) has no
+// ChatUI equivalent — see cycleTableStyle's own comment — so this checks
+// the AppendAssistant confirmation it uses instead.
+func TestChatUIAltSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	result := secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}
+	agent := &contextualStub{turns: []Turn{{Queries: []QueryResult{{Result: result}, {Result: result}}}}}
+	sessions, err := NewSessionChat(ctx, store, agent, "sqlite:///fixture.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	drainCmd(t, u, u.Submit("Show two"))
+	if len(u.gridsByRecordSetID) != 2 {
+		t.Fatalf("expected 2 grids before cycling style, got %d", len(u.gridsByRecordSetID))
+	}
+	cmd, consumed := u.globalKeys(tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt})
+	if !consumed {
+		t.Fatal("expected Alt+S to be consumed by globalKeys")
+	}
+	drainCmd(t, u, cmd)
+	if u.tableStyle.Name != grid.StyleSoft.Name {
+		t.Fatalf("style after Alt+S = %s, want Soft", u.tableStyle.Name)
+	}
+	if !strings.Contains(u.shell.View().Content, "Table style: Soft") {
+		t.Fatalf("expected a style-change confirmation in view:\n%s", u.shell.View().Content)
+	}
+	for _, g := range u.gridsByRecordSetID {
+		if g.Style().Name != grid.StyleSoft.Name {
+			t.Fatal("existing result did not adopt the style")
+		}
+	}
+	storedStyle, err := sessions.TableStyle(ctx)
+	if err != nil || storedStyle != "Soft" {
+		t.Fatalf("persisted style = %q, %v", storedStyle, err)
+	}
+	newSession, err := sessions.Create(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.loadSession(newSession)
+	if u.tableStyle.Name != grid.StyleSoft.Name {
+		t.Fatal("new session lost the shared table style")
+	}
+	reopened, err := NewSessionChatUI(ctx, sessions, "fake-model")
+	if err != nil || reopened.tableStyle.Name != grid.StyleSoft.Name {
+		t.Fatalf("restored style = %v, %v", reopened.tableStyle, err)
+	}
+}
+
+// TestChatUIMacOptionSCyclesTableStyle is ported from
+// ui_test.go's TestMacOptionSCyclesTableStyle.
+func TestChatUIMacOptionSCyclesTableStyle(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	cmd, consumed := u.globalKeys(tea.KeyPressMsg{Code: 'ß', Text: "ß"})
+	if !consumed {
+		t.Fatal("expected ß (Option+S) to be consumed by globalKeys")
+	}
+	drainCmd(t, u, cmd)
+	if u.tableStyle.Name != grid.StyleSoft.Name {
+		t.Fatalf("style after Option+S = %s, want Soft", u.tableStyle.Name)
+	}
+	if !strings.Contains(u.shell.View().Content, "Table style: Soft") {
+		t.Fatalf("expected a style-change confirmation in view:\n%s", u.shell.View().Content)
 	}
 }

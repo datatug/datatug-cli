@@ -194,9 +194,11 @@ var _ chatshell.Overlay = (*httpScopeOverlay)(nil)
 // --- Alt+S table style cycling (checklist #18) ---------------------------
 
 // cycleTableStyle is ui.go's (*UI).cycleTableStyle, ported: instead of a
-// timed styleNotice field, it appends a status line via AppendAssistant
-// (chatshell has no equivalent of ui.go's self-expiring root-gutter notice
-// yet).
+// timed styleNotice field, it appends a transcript status line via
+// AppendAssistant (chatshell.Model.SetStatus has no visible effect once
+// WithStatusBar is set — ChatUI's own statusBar function always wins over
+// chatshell's internal m.status, and has no way to read it back — so a
+// bare SetStatus call here would silently confirm nothing to the user).
 func (u *ChatUI) cycleTableStyle() tea.Cmd {
 	next := nextTableStyle(u.tableStyle)
 	if u.sessions != nil {
@@ -209,7 +211,7 @@ func (u *ChatUI) cycleTableStyle() tea.Cmd {
 		u.tableStyle = next
 		u.applyTableStyleToGrids()
 	}
-	u.shell.SetStatus("Table style: " + next.Name)
+	u.shell.AppendAssistant("Table style: " + next.Name)
 	return nil
 }
 

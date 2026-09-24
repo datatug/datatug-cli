@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/strongo/aichat/tui/grid"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
@@ -418,108 +417,6 @@ func TestWorkspaceReturnsToPreviousGrid(t *testing.T) {
 	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyLeft, Mod: tea.ModShift})
 	if !u.gridFocused || u.activeGrid != gridIndex || !u.entries[gridIndex].grid.Focused() {
 		t.Fatal("Shift+Left did not restore previous grid focus")
-	}
-}
-
-func TestWorkspaceInspectorsUseCatalogTypes(t *testing.T) {
-	u := NewUI(context.Background(), nil, "fake-model")
-	u.width = 150
-	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", Title: "Customer"}, Columns: []string{"CustomerId", "City"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}}}}
-	u.appendTurn(Turn{Queries: []QueryResult{{
-		Title: "Customers",
-		Result: secureread.Result{
-			Columns: []string{"CustomerId", "City"},
-			Rows:    []secureread.Row{{Data: map[string]any{"CustomerId": 42, "City": "Prague"}}},
-		},
-	}}})
-	if !u.focusLatestGrid() {
-		t.Fatal("grid missing")
-	}
-	u.focusWorkspace()
-	u.workspaceTab = 1
-	for _, tc := range []struct{ key, want string }{{"1", "INTEGER"}, {"2", "main.Customer.CustomerId"}, {"3", "main.Customer.City"}} {
-		_, _ = u.Update(tea.KeyPressMsg{Text: tc.key})
-		if view := ansi.Strip(u.workspaceView(65, 22)); !strings.Contains(view, tc.want) {
-			t.Fatalf("inspector %s lacks %q:\n%s", tc.key, tc.want, view)
-		}
-	}
-}
-
-func TestInspectorDoesNotAttributeDerivedOutputByDisplayName(t *testing.T) {
-	u := NewUI(context.Background(), nil, "fake-model")
-	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", SourceID: "chinook"}, Columns: []string{"CustomerId", "City"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}}}}
-	record := RecordSet{Database: "chinook", DTQL: "from: {name: Customer}\ncolumns:\n  - aggregate: {function: COUNT, args: [{star: true}]}\n    as: CustomerId\nlimit: 10\n"}
-	if got := u.columnMeta(&record, "CustomerId"); got.qualified != "" || got.dbType != "" {
-		t.Fatalf("aggregate was falsely attributed to a physical column: %+v", got)
-	}
-	record.DTQL = "from: {name: Customer}\ncolumns:\n  - field: City\n    as: CustomerId\nlimit: 10\n"
-	if got := u.columnMeta(&record, "CustomerId"); got.qualified != "main.Customer.City" || got.dbType != "TEXT" {
-		t.Fatalf("aliased field provenance = %+v", got)
-	}
-}
-
-func TestAltSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	defer func() { _ = store.Close() }()
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, sessions, "fake-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}
-	u.appendTurn(Turn{Queries: []QueryResult{{Result: result}, {Result: result}}})
-	_, command := u.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt})
-	if command == nil || u.tableStyle.Name != grid.StyleSoft.Name || u.styleNotice != "Table style: Soft" {
-		t.Fatalf("Alt+S style/notice = %s/%q", u.tableStyle.Name, u.styleNotice)
-	}
-	if status := strings.Join(u.statusLines(), " "); !strings.Contains(status, "Table style: Soft") || strings.Contains(status, "Alt+S style") {
-		t.Fatalf("style notice did not temporarily replace shortcut hint: %q", status)
-	}
-	for _, entry := range u.entries {
-		if entry.grid != nil && entry.grid.Style().Name != grid.StyleSoft.Name {
-			t.Fatal("existing result did not adopt the style")
-		}
-	}
-	u.appendTurn(Turn{Queries: []QueryResult{{Result: result}}})
-	if got := u.entries[len(u.entries)-1].grid.Style(); got.Name != grid.StyleSoft.Name {
-		t.Fatalf("new result style = %s", got.Name)
-	}
-	storedStyle, err := sessions.TableStyle(ctx)
-	if err != nil || storedStyle != "Soft" {
-		t.Fatalf("persisted style = %q, %v", storedStyle, err)
-	}
-	newSession, err := sessions.Create(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u.loadSession(newSession)
-	if u.tableStyle.Name != grid.StyleSoft.Name {
-		t.Fatal("new session lost the shared table style")
-	}
-	reopened, err := NewSessionUI(ctx, sessions, "fake-model")
-	if err != nil || reopened.tableStyle.Name != grid.StyleSoft.Name {
-		t.Fatalf("restored style = %v, %v", reopened.tableStyle, err)
-	}
-	_, _ = u.Update(tableStyleNoticeExpired{id: u.styleNoticeID})
-	if u.styleNotice != "" {
-		t.Fatal("style name notice did not clear")
-	}
-	u.appendTurn(Turn{Queries: []QueryResult{{Result: result}}})
-	u.focusLatestGrid()
-	if status := strings.Join(u.statusLines(), " "); !strings.Contains(status, "Alt+S style") || strings.Contains(status, "Table style: Soft") {
-		t.Fatalf("shortcut hint did not return after notice: %q", status)
-	}
-}
-
-func TestMacOptionSCyclesTableStyle(t *testing.T) {
-	u := NewUI(context.Background(), nil, "fake-model")
-	u.Update(tea.KeyPressMsg{Code: 'ß', Text: "ß"})
-	if u.tableStyle.Name != grid.StyleSoft.Name || u.styleNotice != "Table style: Soft" {
-		t.Fatalf("Option+S style/notice = %s/%q", u.tableStyle.Name, u.styleNotice)
 	}
 }
 

@@ -435,3 +435,41 @@ func TestChatUIDockGridHasNoViewSwitcher(t *testing.T) {
 		t.Fatalf("dock grid header still advertises a view switcher: %q", header)
 	}
 }
+
+// Ported from TestWorkspaceInspectorsUseCatalogTypes.
+func TestChatUIWorkspaceInspectorsUseCatalogTypes(t *testing.T) {
+	turn := Turn{Queries: []QueryResult{{
+		Title: "Customers",
+		Result: secureread.Result{
+			Columns: []string{"CustomerId", "City"},
+			Rows:    []secureread.Row{{Data: map[string]any{"CustomerId": 42, "City": "Prague"}}},
+		},
+	}}}
+	u, _ := newTestChatUI(t, nil, turn)
+	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", Title: "Customer"}, Columns: []string{"CustomerId", "City"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}}}}
+	drainCmd(t, u, u.Submit("Show customers"))
+	if !u.shell.FocusEntry(u.lastGridEntryID) {
+		t.Fatal("grid missing")
+	}
+	u.workspace.tab = 1
+	for _, tc := range []struct{ key, want string }{{"1", "INTEGER"}, {"2", "main.Customer.CustomerId"}, {"3", "main.Customer.City"}} {
+		u.workspace.updateKey(tea.KeyPressMsg{Text: tc.key})
+		if view := ansi.Strip(u.workspace.View(65, 22, true)); !strings.Contains(view, tc.want) {
+			t.Fatalf("inspector %s lacks %q:\n%s", tc.key, tc.want, view)
+		}
+	}
+}
+
+// Ported from TestInspectorDoesNotAttributeDerivedOutputByDisplayName.
+func TestChatUIInspectorDoesNotAttributeDerivedOutputByDisplayName(t *testing.T) {
+	u := NewChatUI(context.Background(), nil, "fake-model")
+	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", SourceID: "chinook"}, Columns: []string{"CustomerId", "City"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}}}}
+	record := RecordSet{Database: "chinook", DTQL: "from: {name: Customer}\ncolumns:\n  - aggregate: {function: COUNT, args: [{star: true}]}\n    as: CustomerId\nlimit: 10\n"}
+	if got := u.columnMeta(&record, "CustomerId"); got.qualified != "" || got.dbType != "" {
+		t.Fatalf("aggregate was falsely attributed to a physical column: %+v", got)
+	}
+	record.DTQL = "from: {name: Customer}\ncolumns:\n  - field: City\n    as: CustomerId\nlimit: 10\n"
+	if got := u.columnMeta(&record, "CustomerId"); got.qualified != "main.Customer.City" || got.dbType != "TEXT" {
+		t.Fatalf("aliased field provenance = %+v", got)
+	}
+}

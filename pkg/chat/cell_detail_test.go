@@ -7,27 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
-func TestEnterOpensAndClosesCellDetailWithoutChangingSelection(t *testing.T) {
-	u := NewUI(context.Background(), nil, "stub")
-	u.appendTurn(Turn{Queries: []QueryResult{{Title: "Invoices", Result: secureread.Result{Columns: []string{"InvoiceId", "CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 7, "CustomerId": 1}}}}}}})
-	if !u.focusLatestGrid() {
-		t.Fatal("grid unavailable")
-	}
-	if _, handled := u.updateGrid(tea.KeyPressMsg{Code: tea.KeyEnter}); !handled || u.detail == nil {
-		t.Fatal("Enter did not open cell detail")
-	}
-	if !strings.Contains(u.View().Content, "Cell · InvoiceId") || !strings.Contains(u.View().Content, "CustomerId: 1") {
-		t.Fatal("dialog missing row or cell")
-	}
-	if _, cmd := u.Update(tea.KeyPressMsg{Code: tea.KeyEsc}); cmd != nil || u.detail != nil || !u.gridFocused {
-		t.Fatal("Esc did not return to grid")
-	}
-}
+// TestEnterOpensAndClosesCellDetailWithoutChangingSelection was ported onto
+// ChatUI's cellDetailOverlay in chatui_inspector_test.go.
 
 func TestPreviewRelatedUsesDTQLAndStructuredResult(t *testing.T) {
 	executor := &joinExecutorStub{}

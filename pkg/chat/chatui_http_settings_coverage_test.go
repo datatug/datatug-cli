@@ -77,6 +77,74 @@ func TestChatUIHTTPSettingsCommandRemoveValidatesNameAndScope(t *testing.T) {
 	}
 }
 
+// TestChatUIHTTPSettingsCommandExplicitOriginParseError covers the explicit
+// http(s):// origin branch's own httpOrigin() error -- distinct from
+// validateHTTPSetting's later origin check, this one fires before the
+// remainder of the argument (the name=value part) is even looked at.
+func TestChatUIHTTPSettingsCommandExplicitOriginParseError(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	if _, err := u.httpSettingsCommand("header", "https:// X=1"); err == nil {
+		t.Fatal("expected an error for an unparsable explicit origin")
+	}
+}
+
+// TestChatUIHTTPSettingsCommandRemoveInvalidNameCharacters covers the
+// "remove <name>" branch's own validHTTPSettingName rejection (distinct
+// from the plain name=value usage error a bare "remove" with no argument
+// hits, since "remove" alone doesn't even match the "remove " prefix).
+func TestChatUIHTTPSettingsCommandRemoveInvalidNameCharacters(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	_, err := u.httpSettingsCommand("header", "remove @@@")
+	if err == nil || !strings.Contains(err.Error(), "remove <name>") {
+		t.Fatalf("err = %v, want the remove-usage error for an invalid name", err)
+	}
+}
+
+// TestChatUIHTTPSettingsCommandRemoveLoadErrorSurfaces covers the "remove"
+// branch's own HTTPRequestSettings load error, forced by closing the
+// underlying store first -- the same real SQL error path a disk failure
+// would hit.
+func TestChatUIHTTPSettingsCommandRemoveLoadErrorSurfaces(t *testing.T) {
+	u, sessions := newTestChatUI(t, nil, Turn{})
+	if err := sessions.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := u.httpSettingsCommand("header", "remove X-Test")
+	if err == nil || !strings.Contains(err.Error(), "couldn't load HTTP settings") {
+		t.Fatalf("err = %v, want the load-error message", err)
+	}
+}
+
+// TestChatUIHTTPSettingsCommandListLoadErrorSurfaces covers
+// listHTTPSettings' own HTTPRequestSettings load error (the empty-argument
+// "/http header" path), forced the same way.
+func TestChatUIHTTPSettingsCommandListLoadErrorSurfaces(t *testing.T) {
+	u, sessions := newTestChatUI(t, nil, Turn{})
+	if err := sessions.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := u.httpSettingsCommand("header", "")
+	if err == nil || !strings.Contains(err.Error(), "couldn't load HTTP settings") {
+		t.Fatalf("err = %v, want the load-error message", err)
+	}
+}
+
+// TestChatUIHTTPSettingsCommandRemoveCookieRoundTrip covers the "remove"
+// branch's cookie-kind path (scope/origin sourced from CookieScopes, not
+// HeaderScopes/HeaderOrigins) -- the header-kind round trip above doesn't
+// exercise it.
+func TestChatUIHTTPSettingsCommandRemoveCookieRoundTrip(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	drainCmd(t, u, u.Submit("/http cookie https://api.example.test session=abc"))
+	u.shell.Update(tea.KeyPressMsg{Text: "1"})
+	if _, err := u.httpSettingsCommand("cookie", "https://api.example.test remove session"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if !strings.Contains(u.shell.View().Content, "Removed cookie") {
+		t.Fatalf("expected a removal confirmation:\n%s", u.shell.View().Content)
+	}
+}
+
 func TestChatUIHTTPSettingsCommandRemoveHeaderRoundTrip(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/http header https://api.example.test X-Test=value"))
@@ -114,6 +182,17 @@ func TestHTTPScopeOverlayEscCancels(t *testing.T) {
 	_, cmd, done := o.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !done || cmd != nil {
 		t.Fatal("expected Esc to close the scope overlay without saving")
+	}
+}
+
+// TestHTTPScopeOverlayIgnoresUnhandledKeys covers Update's fallback return
+// for a key that isn't "1", "2" or "esc".
+func TestHTTPScopeOverlayIgnoresUnhandledKeys(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	o := &httpScopeOverlay{ui: u, draft: httpSettingDraft{kind: "header", name: "X-Test", value: "v"}}
+	next, cmd, done := o.Update(tea.KeyPressMsg{Text: "x"})
+	if done || cmd != nil || next != o {
+		t.Fatal("expected an unhandled key to be a no-op")
 	}
 }
 
@@ -159,6 +238,23 @@ func TestChatUICycleTableStyleWithoutSessionStillAnnounces(t *testing.T) {
 	u.cycleTableStyle()
 	if !strings.Contains(u.shell.View().Content, "Table style:") {
 		t.Fatalf("expected a table-style confirmation without a session:\n%s", u.shell.View().Content)
+	}
+}
+
+// TestChatUICycleTableStyleStoreErrorAnnouncesFailure covers cycleTableStyle's
+// own SetTableStyle error branch, forced by closing the underlying store.
+func TestChatUICycleTableStyleStoreErrorAnnouncesFailure(t *testing.T) {
+	u, sessions := newTestChatUI(t, nil, Turn{})
+	before := u.tableStyle
+	if err := sessions.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	u.cycleTableStyle()
+	if !strings.Contains(u.shell.View().Content, "Couldn't save table style.") {
+		t.Fatalf("expected a save-failure announcement:\n%s", u.shell.View().Content)
+	}
+	if u.tableStyle.Name != before.Name {
+		t.Fatalf("table style changed despite the save failure: %q -> %q", before.Name, u.tableStyle.Name)
 	}
 }
 

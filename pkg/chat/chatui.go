@@ -13,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/tui/chatshell"
@@ -106,6 +107,7 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		chatshell.WithTopBar(u.topBar),
 		chatshell.WithStatusBar(u.statusBar),
 		chatshell.WithSidePanel(u.workspace),
+		chatshell.WithMarkdownRenderer(renderMarkdown),
 	)
 	return u
 }
@@ -171,17 +173,13 @@ func (u *ChatUI) nextEntryID(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, u.entrySeq)
 }
 
-// askCmd starts a streamed turn. SessionChat.Ask (or Conversation.Ask for a
-// sessionless UI) is the fully-persisted call; until SessionChat grows its
-// own streaming method, the call is adapted into a one-shot stream per the
-// brief ("until it exists, adapt Ask into a one-shot stream") — the whole
-// answer arrives as a single text delta, then EventCompleted. Real
-// incremental token streaming needs SessionChat to expose a
-// StreamingConversation-backed method that still runs the query/workspace/
-// bookmark persistence observers SessionChat.Ask wraps; wiring
-// AIConversation.StreamAskWithContext directly here would silently drop
-// that persistence, so this deliberately does not do that yet — see the
-// Lane C report's "deviations" section.
+// askCmd starts a streamed turn through SessionChat.StreamAsk — the
+// persistence-safe streaming method (Lane B): it shares Ask's exact
+// persistence path (context rebuild, AppendUser, the query/workspace/
+// bookmark/join observers, a final AppendTurn) and forwards live ai.Event
+// values instead of buffering the whole turn; for a sessionless UI
+// (Conversation only, no SessionChat), it falls back to a one-shot stream
+// around Conversation.Ask.
 func (u *ChatUI) askCmd(prompt string) tea.Cmd {
 	id := u.nextEntryID("turn")
 	return u.shell.StartStream(id, func(ctx context.Context) iter.Seq2[ai.Event, error] {
@@ -190,12 +188,29 @@ func (u *ChatUI) askCmd(prompt string) tea.Cmd {
 }
 
 func (u *ChatUI) askOpenFunc(ctx context.Context, id, prompt string) iter.Seq2[ai.Event, error] {
+	if u.sessions != nil {
+		events, resolve := u.sessions.StreamAsk(ctx, prompt)
+		return func(yield func(ai.Event, error) bool) {
+			for event, err := range events {
+				// events terminates itself after a fatal (event, err) pair, so
+				// no separate err!=nil early-return is needed here — falling
+				// through always reaches resolve() below, whether the sequence
+				// ended normally, on a fatal error, or the consumer stopped
+				// ranging early (yield returning false, e.g. a cancellation).
+				if !yield(event, err) {
+					break
+				}
+			}
+			turn, err := resolve()
+			u.pendingTurnsMu.Lock()
+			u.pendingTurns[id] = turnOutcome{turn: turn, err: err}
+			u.pendingTurnsMu.Unlock()
+		}
+	}
 	return func(yield func(ai.Event, error) bool) {
 		var turn Turn
 		var err error
-		if u.sessions != nil {
-			turn, err = u.sessions.Ask(ctx, prompt)
-		} else if u.conversation != nil {
+		if u.conversation != nil {
 			turn, err = u.conversation.Ask(ctx, prompt)
 		} else {
 			err = fmt.Errorf("chat UI has no conversation configured")
@@ -416,13 +431,31 @@ func (u *ChatUI) loadSession(session ChatSession) {
 		if response, ok := session.HTTPResponses[message.HTTPResponseID]; ok {
 			text = response.displayText()
 		}
-		switch message.Role {
-		case "You":
+		switch {
+		case message.Role == "You":
 			u.shell.AppendBlock(newUserMessageBlock(text))
+		case message.Kind == "markdown":
+			u.shell.AppendAssistantMarkdown(text)
 		default:
 			u.shell.AppendAssistant(text)
 		}
 	}
+}
+
+// renderMarkdown satisfies transcript.MarkdownRenderer — the same
+// glamour-backed rendering markdown_ui.go's httpDocumentView used for a
+// markdown HTTP response, now shared by every markdown transcript entry
+// (checklist item #37).
+func renderMarkdown(text string, width int) string {
+	renderer, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(max(20, width-4)))
+	if err != nil {
+		return text
+	}
+	rendered, err := renderer.Render(text)
+	if err != nil {
+		return text
+	}
+	return strings.TrimSpace(rendered)
 }
 
 // refreshBadge reports whether current differs from previous, matching

@@ -186,3 +186,45 @@ func TestChatUITopBarAndStatusBarShowProjectAndSession(t *testing.T) {
 		t.Fatalf("expected model name in status bar:\n%s", view)
 	}
 }
+
+func TestChatUIMarkdownHTTPResponseRendersFormatted(t *testing.T) {
+	u, sessions := newTestChatUI(t, nil, Turn{})
+	ctx := context.Background()
+	user, err := sessions.store.AppendUser(ctx, sessions.activeID, "/http get https://example.com/doc.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := HTTPResponse{Method: "GET", URL: "https://example.com/doc.md", StatusCode: 200, ContentType: "text/markdown", Body: []byte("# Heading\n\nSome *text*.")}
+	if _, err := sessions.store.AppendHTTPResponse(ctx, sessions.activeID, user.ID, response, nil); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := sessions.store.Load(ctx, sessions.activeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.loadSession(snapshot)
+	view := u.shell.View().Content
+	if !strings.Contains(view, "Heading") {
+		t.Fatalf("expected rendered markdown heading in view:\n%s", view)
+	}
+}
+
+func TestChatUIAskUsesStreamAsk(t *testing.T) {
+	// StreamAsk shares SessionChat.Ask's persistence path (query/workspace/
+	// bookmark observers via ctx, AppendUser, a final AppendTurn) — verify a
+	// turn asked through ChatUI.Submit lands in the durable session, not
+	// just the transcript view.
+	turn := Turn{Text: "Found one.", Queries: []QueryResult{{Title: "Customers", RecordSetID: "rs1", Result: secureread.Result{
+		Columns: []string{"CustomerId"},
+		Rows:    []secureread.Row{{Data: map[string]any{"CustomerId": 1}}},
+	}}}}
+	u, sessions := newTestChatUI(t, nil, turn)
+	drainCmd(t, u, u.Submit("Show a customer"))
+	snapshot, err := sessions.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.RecordSets) != 1 {
+		t.Fatalf("expected the streamed turn's query to be persisted, got %d RecordSets", len(snapshot.RecordSets))
+	}
+}

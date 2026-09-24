@@ -118,10 +118,10 @@ func (u *ChatUI) refreshLastRecordSet() tea.Cmd {
 			snapshot, err := u.sessions.RefreshRecordSet(ctx, sessionID, recordSetID)
 			return httpDoneMsg{sessionID: sessionID, snapshot: snapshot, err: err}
 		}
-		if busyCmd != nil {
-			return tea.Batch(busyCmd, runCmd)
-		}
-		return runCmd
+		// busyCmd is never nil -- chatshell.Model.SetBusy(true) always
+		// returns its spinner.Tick tea.Cmd -- so there is no "run
+		// unbatched" case to branch on here.
+		return tea.Batch(busyCmd, runCmd)
 	}
 	previous, ok := u.snapshot.HTTPResponses[responseID]
 	if !ok {
@@ -153,6 +153,9 @@ func (u *ChatUI) refreshLastRecordSet() tea.Cmd {
 		if err != nil {
 			return httpDoneMsg{sessionID: sessionID, err: err}
 		}
+		if testAfterRefreshAppendUser != nil {
+			testAfterRefreshAppendUser()
+		}
 		if failure != "" {
 			_, err = store.AppendTurn(ctx, sessionID, origin.ID, previous.URL, Turn{Text: failure})
 		} else {
@@ -165,11 +168,20 @@ func (u *ChatUI) refreshLastRecordSet() tea.Cmd {
 		snapshot, err := store.Load(ctx, sessionID)
 		return httpDoneMsg{sessionID: sessionID, snapshot: snapshot, err: err}
 	}
-	if busyCmd != nil {
-		return tea.Batch(busyCmd, runCmd)
-	}
-	return runCmd
+	// busyCmd is never nil -- see the identical comment above.
+	return tea.Batch(busyCmd, runCmd)
 }
+
+// testAfterRefreshAppendUser, when non-nil, runs synchronously inside
+// refreshLastRecordSet's HTTP-refresh runCmd right after store.AppendUser
+// succeeds, before AppendTurn/AppendHTTPResponse. store is a concrete
+// *SessionStore backed by a real sqlite db (see chatui.go's identical
+// testAfterApplyWorkspaceAction comment for why no interface seam replaces
+// it here); this hook lets a test fault-inject a failure isolated to that
+// second write -- e.g. by closing the store's db -- deterministically,
+// without racing the synchronous call it sits between. Always nil in
+// production.
+var testAfterRefreshAppendUser func()
 
 // openSessionPicker loads the session list (ui.go's loadPickerSessions) and
 // pushes the F4 overlay.

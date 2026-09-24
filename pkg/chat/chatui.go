@@ -673,12 +673,25 @@ func (u *ChatUI) loadSession(session ChatSession) {
 	}
 }
 
+// markdownTermRenderer is the narrow seam renderMarkdown needs from
+// *glamour.TermRenderer — just the one method it calls. newMarkdownRenderer
+// wraps glamour.NewTermRenderer behind it so tests can fault-inject both the
+// constructor and Render failure branches with a fake, without a real
+// terminal-style renderer (coverage lane A3, datatug-cli#289).
+type markdownTermRenderer interface {
+	Render(string) (string, error)
+}
+
+var newMarkdownRenderer = func(options ...glamour.TermRendererOption) (markdownTermRenderer, error) {
+	return glamour.NewTermRenderer(options...)
+}
+
 // renderMarkdown satisfies transcript.MarkdownRenderer — the same
 // glamour-backed rendering markdown_ui.go's httpDocumentView used for a
 // markdown HTTP response, now shared by every markdown transcript entry
 // (checklist item #37).
 func renderMarkdown(text string, width int) string {
-	renderer, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(max(20, width-4)))
+	renderer, err := newMarkdownRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(max(20, width-4)))
 	if err != nil {
 		return text
 	}
@@ -976,12 +989,25 @@ func (u *ChatUI) exportCommand(argument string) (tea.Cmd, error) {
 	}, nil
 }
 
+// testAfterApplyWorkspaceAction, when non-nil, runs synchronously right
+// after u.sessions.ApplyWorkspaceAction succeeds below, before the
+// following Snapshot call. u.sessions is a concrete *SessionChat (a small
+// interface over just these two methods would still need every other
+// direct *SessionChat/.store use across this package rewritten), so this is
+// the narrow seam that lets a test fault-inject a Snapshot-only failure
+// (e.g. by closing the real store's db) without disturbing the preceding
+// ApplyWorkspaceAction call. Always nil in production.
+var testAfterApplyWorkspaceAction func()
+
 func (u *ChatUI) applyWorkspaceAction(action WorkspaceAction) error {
 	if u.sessions == nil {
 		return fmt.Errorf("workspace actions require a durable chat session")
 	}
 	if _, err := u.sessions.ApplyWorkspaceAction(u.ctx, action); err != nil {
 		return err
+	}
+	if testAfterApplyWorkspaceAction != nil {
+		testAfterApplyWorkspaceAction()
 	}
 	snapshot, err := u.sessions.Snapshot(u.ctx)
 	if err != nil {

@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/glamour"
 	"github.com/strongo/aichat/ai"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -982,16 +983,14 @@ func TestRefreshLastRecordSetFetchFailureAppendsFailureTurn(t *testing.T) {
 
 // --- equalColumnsAndRows / renderMarkdown / applyWorkspaceAction / exportCommand ---
 //
-// chatui_pickers.go's refreshLastRecordSet has two "if busyCmd != nil {
-// return tea.Batch(...) } / return runCmd" branches (the bare "return
-// runCmd" arm). They are unreachable with the current chatshell:
-// (*chatshell.Model).SetBusy(true) unconditionally returns m.spinner.Tick
-// (never nil, see strongo/aichat's chatshell.go), and refreshLastRecordSet
-// itself refuses to run at all while u.shell.Busy() is already true (its own
-// guard clause). Confirmed empirically: a SetBusy(true) call made before
-// refreshLastRecordSet is invoked simply makes it return nil outright (the
-// busy guard), never reaching the busyCmd-nil arm. Left uncovered and
-// reported as a genuine dead branch rather than forced with a fake.
+// chatui_pickers.go's refreshLastRecordSet used to have two "if busyCmd !=
+// nil { return tea.Batch(...) } / return runCmd" branches. They were
+// unreachable dead code: (*chatshell.Model).SetBusy(true) unconditionally
+// returns m.spinner.Tick (never nil, see strongo/aichat's chatshell.go), so
+// the bare "return runCmd" arm could never execute. Lane A3 (coverage,
+// datatug-cli#289) removed both dead conditionals -- refreshLastRecordSet
+// now always returns tea.Batch(busyCmd, runCmd) unconditionally -- instead
+// of leaving them permanently uncovered.
 
 func TestEqualColumnsAndRowsDetectsColumnNameMismatch(t *testing.T) {
 	a := secureread.Result{Columns: []string{"a", "b"}, Rows: []secureread.Row{{Data: map[string]any{"a": 1}}}}
@@ -1086,5 +1085,144 @@ func TestLoadSessionHTTPDocumentVersionBadges(t *testing.T) {
 	}
 	if !strings.Contains(view, "unchanged") {
 		t.Fatalf("expected an unchanged version badge in view:\n%s", view)
+	}
+}
+
+// --- renderMarkdown (newMarkdownRenderer seam) ---------------------------
+
+// TestRenderMarkdownConstructorErrorReturnsPlainText covers renderMarkdown's
+// newMarkdownRenderer error branch: a fault-injected constructor failure
+// falls back to the raw text unrendered.
+func TestRenderMarkdownConstructorErrorReturnsPlainText(t *testing.T) {
+	restore := newMarkdownRenderer
+	t.Cleanup(func() { newMarkdownRenderer = restore })
+	injected := errors.New("injected renderer construction failure")
+	newMarkdownRenderer = func(options ...glamour.TermRendererOption) (markdownTermRenderer, error) {
+		return nil, injected
+	}
+	if got := renderMarkdown("# Heading", 80); got != "# Heading" {
+		t.Fatalf("renderMarkdown = %q, want the raw text unchanged on a constructor error", got)
+	}
+}
+
+// fakeMarkdownRenderer implements markdownTermRenderer, always failing
+// Render -- covers renderMarkdown's second (Render) error branch, which a
+// real glamour.TermRenderer given plain text essentially never fails.
+type fakeMarkdownRenderer struct{ err error }
+
+func (f fakeMarkdownRenderer) Render(string) (string, error) { return "", f.err }
+
+func TestRenderMarkdownRenderErrorReturnsPlainText(t *testing.T) {
+	restore := newMarkdownRenderer
+	t.Cleanup(func() { newMarkdownRenderer = restore })
+	injected := errors.New("injected render failure")
+	newMarkdownRenderer = func(options ...glamour.TermRendererOption) (markdownTermRenderer, error) {
+		return fakeMarkdownRenderer{err: injected}, nil
+	}
+	if got := renderMarkdown("# Heading", 80); got != "# Heading" {
+		t.Fatalf("renderMarkdown = %q, want the raw text unchanged on a Render error", got)
+	}
+}
+
+// --- applyWorkspaceAction (testAfterApplyWorkspaceAction seam) -----------
+
+// TestApplyWorkspaceActionSnapshotErrorIsReported covers
+// applyWorkspaceAction's second error branch: ApplyWorkspaceAction itself
+// succeeds, but the following Snapshot call fails. u.sessions.store is a
+// concrete, sqlite-backed *SessionStore reused for both calls in one
+// synchronous invocation, so the only deterministic way to fault-inject a
+// Snapshot-only failure is the testAfterApplyWorkspaceAction hook
+// (chatui.go): it runs right after ApplyWorkspaceAction succeeds and, here,
+// closes the store's db out from under the subsequent Snapshot call.
+func TestApplyWorkspaceActionSnapshotErrorIsReported(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, sessions, "model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := testAfterApplyWorkspaceAction
+	t.Cleanup(func() { testAfterApplyWorkspaceAction = restore })
+	testAfterApplyWorkspaceAction = func() { _ = store.Close() }
+
+	err = u.applyWorkspaceAction(WorkspaceAction{Kind: "bucket_clear"})
+	if err == nil {
+		t.Fatal("expected the closed store to fail the post-apply Snapshot call")
+	}
+}
+
+// --- refreshLastRecordSet AppendTurn/AppendHTTPResponse failure ----------
+
+// TestRefreshLastRecordSetSaveFailureAfterAppendUser covers
+// refreshLastRecordSet's "save refresh" error branch (chatui_pickers.go):
+// store.AppendUser succeeds, but the following AppendTurn/AppendHTTPResponse
+// call fails. Both write through the same synchronous, sqlite-backed
+// *SessionStore in one call, so testAfterRefreshAppendUser (which runs right
+// after AppendUser succeeds) is the deterministic seam: closing the store's
+// db there fails the very next write without racing it.
+func TestRefreshLastRecordSetSaveFailureAfterAppendUser(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, sessions, "model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"name":"Ada"}]`))
+	}))
+	defer server.Close()
+	drainCmd(t, u, u.Submit("/http get "+server.URL))
+	if u.lastGridEntryID == "" || !u.shell.FocusEntry(u.lastGridEntryID) {
+		t.Fatal("HTTP grid not focusable")
+	}
+
+	restore := testAfterRefreshAppendUser
+	t.Cleanup(func() { testAfterRefreshAppendUser = restore })
+	testAfterRefreshAppendUser = func() { _ = store.Close() }
+
+	cmd := u.refreshLastRecordSet()
+	if cmd == nil {
+		t.Fatal("expected a refresh command for a GET request without query parameters")
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var done httpDoneMsg
+		found := false
+		for _, sub := range batch {
+			if out := sub(); out != nil {
+				if hd, ok := out.(httpDoneMsg); ok {
+					done, found = hd, true
+				}
+			}
+		}
+		if !found {
+			t.Fatal("expected an httpDoneMsg among the batched commands")
+		}
+		if done.err == nil || !strings.Contains(done.err.Error(), "save refresh:") {
+			t.Fatalf("done.err = %v, want a wrapped \"save refresh\" error", done.err)
+		}
+		return
+	}
+	t.Fatalf("expected a tea.BatchMsg, got %T", msg)
+}
+
+// TestNewChatUINilContextDefaultsToBackground covers NewChatUI's "ctx ==
+// nil" branch: callers may pass a nil context.Context (chatui.go's own
+// comment says NewUI historically passed context.Background(), but a nil
+// caller must not panic downstream).
+func TestNewChatUINilContextDefaultsToBackground(t *testing.T) {
+	u := NewChatUI(nil, nil, "model") //nolint:staticcheck // exercising the nil-ctx fallback deliberately
+	if u.ctx == nil {
+		t.Fatal("expected NewChatUI to default a nil ctx to context.Background()")
 	}
 }

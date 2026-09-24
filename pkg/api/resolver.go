@@ -306,18 +306,37 @@ func EligibleTargets(ctx context.Context, projStore datatug.ProjectStore, projec
 	if err != nil {
 		return nil, err
 	}
-	if len(queryDef.Targets) == 0 {
-		return dedupeSourcesByID(all), nil
+	return selectEligibleTargets(all, queryDef.Targets), nil
+}
+
+// selectEligibleTargets narrows catalogSources' entries to the catalogs
+// targets select. A target matches one alias (DbModel or catalog ID), but
+// selects the whole catalog: every alias sharing that catalog's URL is kept
+// so dedupeSourcesByID still reports the DbModel ID, the same one an
+// unpinned query resolves to.
+func selectEligibleTargets(all []ResolvedSource, targets []datatug.QueryDefTarget) []ResolvedSource {
+	if len(targets) == 0 {
+		return dedupeSourcesByID(all)
 	}
 	var eligible []ResolvedSource
-	for _, target := range queryDef.Targets {
+	for _, target := range targets {
 		for _, s := range all {
 			if catalogMatchesTarget(s, target) {
-				eligible = append(eligible, s)
+				eligible = append(eligible, catalogAliases(all, s.URL)...)
 			}
 		}
 	}
-	return dedupeSourcesByID(eligible), nil
+	return dedupeSourcesByID(eligible)
+}
+
+func catalogAliases(all []ResolvedSource, url string) []ResolvedSource {
+	var aliases []ResolvedSource
+	for _, s := range all {
+		if s.URL == url {
+			aliases = append(aliases, s)
+		}
+	}
+	return aliases
 }
 
 // catalogMatchesTarget reports whether s (a catalogSources entry) satisfies

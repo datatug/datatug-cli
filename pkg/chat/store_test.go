@@ -504,7 +504,7 @@ func TestBookmarkMigrationFromV2IsAtomicAndIdempotent(t *testing.T) {
 	}
 	migrated := openTestStore(t, path, testScope())
 	var version int
-	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 9 {
+	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 10 {
 		t.Fatalf("schema version = %d, %v", version, err)
 	}
 	if _, err := migrated.db.ExecContext(ctx, `INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('bad', ?, ?, 'bad', '[]', 'recordset', ?, ?, '{}')`, testScope().ProjectID, migrated.scope, stamp(time.Now().UTC()), stamp(time.Now().UTC())); err != nil {
@@ -585,7 +585,7 @@ func TestJoinLineageMigrationFromV4AddsAppliedEdges(t *testing.T) {
 	migrated := openTestStore(t, path, testScope())
 	defer func() { _ = migrated.Close() }()
 	var version int
-	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 9 {
+	if err := migrated.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != 10 {
 		t.Fatalf("migrated schema version = %d, %v", version, err)
 	}
 	session, err := migrated.Create(ctx, "Join migration")
@@ -776,7 +776,7 @@ func TestV8HTTPResponsesMigrateRequestMethod(t *testing.T) {
 	migrated := openTestStore(t, path, testScope())
 	defer func() { _ = migrated.Close() }()
 	var version int
-	if err := migrated.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 9 {
+	if err := migrated.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 10 {
 		t.Fatalf("migrated version = %d, %v", version, err)
 	}
 	var found int
@@ -785,5 +785,77 @@ func TestV8HTTPResponsesMigrateRequestMethod(t *testing.T) {
 	}
 	if err := migrated.db.QueryRow(`SELECT count(*) FROM pragma_table_info('http_responses') WHERE name='request_headers_json'`).Scan(&found); err != nil || found != 1 {
 		t.Fatalf("HTTP request headers column = %d, %v", found, err)
+	}
+}
+
+// TestV9MessagesMigrateProviderStateColumn verifies the backward-compatible
+// schema bump that lets an assistant ChatMessage carry ai.Message.
+// ProviderState (Claude extended-thinking blocks etc.) across a restart/
+// session switch: an old v9 database (no provider_state column) migrates
+// cleanly to v10, and round-trips a stored ProviderState blob unchanged.
+func TestV9MessagesMigrateProviderStateColumn(t *testing.T) {
+	path := testStorePath(t)
+	store := openTestStore(t, path, testScope())
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE messages DROP COLUMN provider_state; PRAGMA user_version = 9`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated := openTestStore(t, path, testScope())
+	defer func() { _ = migrated.Close() }()
+	var version int
+	if err := migrated.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 10 {
+		t.Fatalf("migrated version = %d, %v", version, err)
+	}
+	var found int
+	if err := migrated.db.QueryRow(`SELECT count(*) FROM pragma_table_info('messages') WHERE name='provider_state'`).Scan(&found); err != nil || found != 1 {
+		t.Fatalf("provider_state column = %d, %v", found, err)
+	}
+
+	ctx := context.Background()
+	session, err := migrated.LatestOrCreate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := migrated.AppendUser(ctx, session.ID, "think about it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.ProviderState != nil {
+		t.Fatalf("user message got a ProviderState: %s", user.ProviderState)
+	}
+	state := json.RawMessage(`{"thinking":[{"signature":"sig-1"}]}`)
+	turn, err := migrated.AppendTurn(ctx, session.ID, user.ID, "sqlite:///fixture.db", Turn{Text: "Answer.", ProviderState: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(turn.ProviderState) != string(state) {
+		t.Fatalf("AppendTurn did not echo ProviderState: %s", turn.ProviderState)
+	}
+	loaded, err := migrated.Load(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var assistant ChatMessage
+	found2 := false
+	for _, message := range loaded.Messages {
+		if message.Role == "DataTug" {
+			assistant, found2 = message, true
+		}
+	}
+	if !found2 {
+		t.Fatal("assistant message not persisted")
+	}
+	if string(assistant.ProviderState) != string(state) {
+		t.Fatalf("loaded ProviderState = %s, want %s", assistant.ProviderState, state)
 	}
 }

@@ -283,3 +283,97 @@ func TestEmptyToolResultRestoresAsGrid(t *testing.T) {
 		t.Fatal("empty persisted grid was not rendered")
 	}
 }
+
+// TestSessionChatStreamAskPersistsSameAsAsk drives a real AIConversation
+// (StreamingConversation) through SessionChat.StreamAsk and checks the
+// persisted session -- the user message, the executed query/RecordSet, and
+// the final Turn returned by the drain func -- matches what SessionChat.Ask
+// would have committed for the same scripted turn.
+func TestSessionChatStreamAskPersistsSameAsAsk(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	doc := "from: {name: Customer}\nlimit: 1\n"
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"title": "Customers", "dtql": doc})}},
+		{text: "Here you go."},
+	}}
+	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}}}
+	agent, err := NewAIConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := NewSessionChat(ctx, store, agent, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq, drain := chat.StreamAsk(ctx, "show one customer")
+	var gotToolResult, gotCompleted bool
+	for event, streamErr := range seq {
+		if streamErr != nil {
+			t.Fatalf("unexpected stream error: %v", streamErr)
+		}
+		switch event.Type {
+		case ai.EventToolResult:
+			gotToolResult = true
+		case ai.EventCompleted:
+			gotCompleted = true
+		}
+	}
+	if !gotToolResult || !gotCompleted {
+		t.Fatalf("stream did not forward tool-result/completed events: toolResult=%v completed=%v", gotToolResult, gotCompleted)
+	}
+	turn, drainErr := drain()
+	if drainErr != nil {
+		t.Fatalf("drain: %v", drainErr)
+	}
+	if executor.calls != 1 || len(turn.Queries) != 1 || turn.Queries[0].Err != nil {
+		t.Fatalf("streamed turn = %+v, executor calls = %d", turn, executor.calls)
+	}
+	snapshot, err := chat.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Messages) != 2 || len(snapshot.RecordSets) != 1 {
+		t.Fatalf("StreamAsk did not persist through the same path as Ask: %+v", snapshot)
+	}
+	if snapshot.Messages[0].Role != "You" || snapshot.Messages[0].Text != "show one customer" {
+		t.Fatalf("user message not persisted: %+v", snapshot.Messages[0])
+	}
+}
+
+// TestSessionChatStreamAskFallsBackForNonStreamingAgent checks that a
+// ContextualConversation which doesn't implement StreamingConversation still
+// works through StreamAsk, replaying its buffered Turn as one synthetic
+// EventTextDelta + EventCompleted pair.
+func TestSessionChatStreamAskFallsBackForNonStreamingAgent(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	stub := &contextualStub{turns: []Turn{{Text: "buffered answer"}}}
+	chat, err := NewSessionChat(ctx, store, stub, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq, drain := chat.StreamAsk(ctx, "hello")
+	var texts []string
+	var sawCompleted bool
+	for event, streamErr := range seq {
+		if streamErr != nil {
+			t.Fatalf("unexpected stream error: %v", streamErr)
+		}
+		if event.Type == ai.EventTextDelta {
+			texts = append(texts, event.Text)
+		}
+		if event.Type == ai.EventCompleted {
+			sawCompleted = true
+		}
+	}
+	if !sawCompleted || len(texts) != 1 || texts[0] != "buffered answer" {
+		t.Fatalf("fallback stream = texts=%v completed=%v", texts, sawCompleted)
+	}
+	turn, drainErr := drain()
+	if drainErr != nil || turn.Text != "buffered answer" {
+		t.Fatalf("drain = %+v, %v", turn, drainErr)
+	}
+}

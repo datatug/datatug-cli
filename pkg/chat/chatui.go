@@ -580,6 +580,7 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 func (u *ChatUI) loadSession(session ChatSession) {
 	u.sessionID = session.ID
 	u.snapshot = session
+	u.syncChips()
 	u.shell.ClearTranscript()
 	u.gridsByRecordSetID = map[string]*gridState{}
 	u.joinBlocksByRecordSetID = map[string]*JoinBlock{}
@@ -979,6 +980,7 @@ func (u *ChatUI) applyWorkspaceAction(action WorkspaceAction) error {
 		return err
 	}
 	u.snapshot = snapshot
+	u.syncChips()
 	return nil
 }
 

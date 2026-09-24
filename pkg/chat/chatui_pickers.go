@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/strongo/aichat/tui/chatshell"
-	"github.com/strongo/aichat/tui/focus"
 )
 
 // globalKeys satisfies chatshell.GlobalKeysFunc, checked before chatshell's
@@ -73,24 +72,16 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		// scroll; off releases the terminal's native selection/copy.
 		u.shell.SetMouseEnabled(!u.shell.MouseEnabled())
 		return nil, true
-	case "ctrl+d":
-		// ui.go's Ctrl+D: detach the most recently attached workspace item
-		// from the composer's attachment chips, only while the composer
-		// (not a focused grid/message/sidebar) holds the key -- gated on
-		// chatshell.Model.Zone()/focus.ZoneInput, now exported. Outside the
-		// composer zone, or with no attachment to detach, this falls
-		// through (return nil, false) to chatshell's own key handling --
-		// e.g. its normal forward-delete inside a focused text field --
-		// instead of swallowing Ctrl+D unconditionally.
-		if u.sessions == nil || u.shell.Zone() != focus.ZoneInput || len(u.snapshot.Workspace.Attachments) == 0 {
-			return nil, false
-		}
-		last := u.snapshot.Workspace.Attachments[len(u.snapshot.Workspace.Attachments)-1]
-		if err := u.applyWorkspaceAction(WorkspaceAction{Kind: "detach", Reference: last}); err != nil {
-			u.shell.AppendAssistant(conciseError(err))
-		}
-		return nil, true
 	}
+	// Ctrl+D (detach the most recently attached item) is no longer handled
+	// here: B5 (composer attachment chips, strongo/aichat v0.2.0) wires
+	// every attachment as a chatshell chip (see chatui_chips.go), and
+	// chatshell's own composer now owns Ctrl+D itself -- "remove the last
+	// chip", gated the same way (composer/input zone, only while a chip
+	// exists) -- with its removal reported back through OnChipsChange,
+	// which detaches the matching workspace attachment. Falling through
+	// here (globalKeys never matching "ctrl+d" at all) reaches chatshell's
+	// own key handling instead of this package pre-empting it.
 	return nil, false
 }
 

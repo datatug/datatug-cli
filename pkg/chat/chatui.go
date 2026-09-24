@@ -207,6 +207,14 @@ func (u *ChatUI) SetBrowserURL(url string) {
 	}
 }
 
+// RunTeaProgram runs a *tea.Program to completion. It is a package-level
+// seam over (*tea.Program).Run — ChatUI.Run's only path to an actual
+// terminal — so both this package's and apps/datatugapp/commands' tests can
+// drive Run (and, transitively, cmd_chat.go's runChatProject) without ever
+// starting a real Bubble Tea program against a TTY. Tests must restore the
+// original value (save it, defer-restore) since it is process-global state.
+var RunTeaProgram = func(p *tea.Program) (tea.Model, error) { return p.Run() }
+
 // Run starts the Bubble Tea program and blocks until it exits. Unlike
 // ui.go's Init-batched awaitBridgeChange/re-arm loop (chatshell.Model.Init
 // is fixed and offers no hook to inject an extra startup command), the
@@ -228,7 +236,7 @@ func (u *ChatUI) Run() error {
 	if u.bridgeStop != nil {
 		defer u.bridgeStop()
 	}
-	_, err := program.Run()
+	_, err := RunTeaProgram(program)
 	return err
 }
 
@@ -853,11 +861,10 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 // review of #289): the ChatUI-era version had dropped the F2/F5/Alt+S/
 // Ctrl+D global keys, the HTTP-response Raw/Headers and Ctrl+R refresh grid
 // keys, and the Inspector and Workspace sections entirely. The Composer
-// section (attachment-chip Tab navigation) is deliberately NOT restored:
-// ChatUI's topBar does not render attachment chips at all yet, a real,
-// documented gap (see chatui_sidepanel_test.go's
-// TestChatUIWorkspaceSplitAndKeyboardSelection comment) — documenting a key
-// binding for UI that doesn't exist would be worse than omitting it.
+// section (attachment-chip Tab navigation) is restored too, now that
+// chatui_chips.go actually renders and drives those chips (Tab/Shift+Tab
+// select, Backspace removes the focused one, Esc/Shift+Esc clear and
+// restore) — see chatui_chips.go and chatui_chips_test.go.
 //
 // The HTTP line intentionally reads "1 Rendered/2 Raw/3 Headers", not
 // ui.go's own "4 Raw/5 Headers" — verified against http_document_block.go's
@@ -880,6 +887,7 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 // gap (not merely a help-text omission), left open.
 const chatHelpText = "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm • /bucket [clear] • /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path> • /connect • /http [new|GET|POST|PUT|PATCH|DELETE] [url] • /query [search] or /queries [search] • /settings versions <1-100>\n\n" +
 	"Global: Shift+Enter newline • F2 mouse select/wheel • F5 open web chat • F6/Shift+→ workspace • Shift+← previous • F3 projects • F4 sessions • Alt+S table style • Ctrl+D detach last attachment • Ctrl+←→ resize panes • Ctrl+G latest grid • Ctrl+C quit\n\n" +
+	"Composer: Tab/Shift+Tab select attachment chips • Backspace remove focused chip • Esc clear text, then attachments • Shift+Esc restore both\n\n" +
 	"Workspace: Tab/Shift+Tab switch tabs • ↑↓ navigate • ←→ collapse/expand tree • selection shows details below\n\n" +
 	"Grid: 1 Table • 2 Charts • 3 Current row • Ctrl+R refresh • Tab panes (wide) • Shift+↑↓ select • j JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • B bucket • s sort • Enter details • e export • q save as query • Esc composer\n\n" +
 	"HTTP response: 1 Rendered • 2 Raw • 3 Headers"
@@ -1013,11 +1021,10 @@ func (u *ChatUI) topBar(width int) string {
 // block kinds); and JoinBlock.JoinFocused() (via
 // joinBlocksByRecordSetID[recordSetID], since chatshell exposes only the
 // focused entry's ref/ID, not the Block instance) for ui.go's u.joinFocused,
-// overriding the grid hint set exactly as it did there. One divergence
-// from ui.go's literal wording: the workspace pane switches tabs with
-// ←→/h/l (chatui_sidepanel.go's updateKey), not Tab/Shift+Tab, so the
-// hint says "←→ tabs" -- porting ui.go's stale "Tab/Shift+Tab switch tabs"
-// text here would describe a key binding that does not do that.
+// overriding the grid hint set exactly as it did there. Since M10
+// (chatui_sidepanel.go's updateKey), the workspace pane switches tabs with
+// Tab/Shift+Tab and folds/unfolds the Project explorer tree with ←→/h/l --
+// matching ui.go's own wording exactly, no divergence.
 func (u *ChatUI) statusBar(width int) string {
 	// ui.go's mouseHint: "F2 select" while mouse reporting is on (naming
 	// what pressing F2 gets you -- the terminal's own click-drag text
@@ -1031,7 +1038,7 @@ func (u *ChatUI) statusBar(width int) string {
 	if u.webLinkVisible {
 		segments = append(segments, lipgloss.NewStyle().Hyperlink(u.browserURL).Render("Open web chat"), "F5 hide link")
 	} else if u.browserURL != "" {
-		segments = append(segments, "F5 web link")
+		segments = append(segments, "F5 open web chat")
 	}
 	if u.sessions != nil {
 		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.snapshot.Title), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
@@ -1077,12 +1084,12 @@ func (u *ChatUI) statusBar(width int) string {
 		// ui.go's u.workspaceFocused, including its tab==1 (Selected/
 		// inspector) and tab==3 (Bookmarks, incl. its own grid-focused/
 		// input-mode sub-states) hint sets.
-		segments = []string{"←→ tabs", "↑↓ navigate", "PgUp/Dn details", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", "Shift+← previous", "F6/Esc input", mouseHint}
+		segments = []string{"Shift+← previous", "F6/Esc input", "Tab ⇥ tabs", "←→ tree", "↑↓ navigate", "PgUp/Dn details", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", mouseHint}
 		switch u.workspace.tab {
 		case 1:
-			segments = []string{"1 row", "2 column", "3 recordset", "↑↓ scroll", "Space attach", "b bookmark", "d dock", "←→ tabs", "Shift+← previous", mouseHint}
+			segments = []string{"1 row", "2 column", "3 recordset", "Shift+← previous", "Tab ⇥ workspace tabs", "Space attach", "b bookmark", "d dock", mouseHint}
 		case 3:
-			segments = []string{"↑↓ browse", "Enter open grid", "a attach", "d dock", "r rename", "t/T tags", "/ search", "f filter", "x delete", "←→ tabs", "Shift+← previous", "F6/Esc input", mouseHint}
+			segments = []string{"Shift+← previous", "F6/Esc input", "Tab ⇥ tabs", "↑↓ browse", "Enter open grid", "a attach", "d dock", "r rename", "t/T tags", "/ search", "f filter", "x delete", mouseHint}
 			if u.workspace.bookmarkGridFocused {
 				segments = []string{"Tab list", "↑↓ rows", "←→ columns", "s sort", "a attach", "d dock", "Esc list"}
 			}

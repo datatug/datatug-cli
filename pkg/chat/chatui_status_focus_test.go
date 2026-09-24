@@ -93,7 +93,7 @@ func TestChatUIStatusBarWorkspaceFocusedHint(t *testing.T) {
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
 
 	status := u.statusBar(160)
-	if !strings.Contains(status, "←→ tabs") || !strings.Contains(status, "b bookmark") {
+	if !strings.Contains(status, "Tab ⇥ tabs") || !strings.Contains(status, "←→ tree") || !strings.Contains(status, "b bookmark") {
 		t.Fatalf("expected default workspace-focused hint set:\n%s", status)
 	}
 

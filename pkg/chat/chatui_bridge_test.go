@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -205,8 +206,24 @@ func TestBrowserBridgeListenerFallsBackWhenDefaultPortIsTaken(t *testing.T) {
 		t.Fatalf("StartBrowserBridge with the default port taken: %v", err)
 	}
 	t.Cleanup(func() { _ = bridge.Close() })
-	if strings.Contains(bridge.URL, "127.0.0.1:3284") {
+	// bridge.URL's fragment carries "h=127.0.0.1:<port>&t=..."; extract
+	// that port and assert it isn't 3284 rather than asserting the literal
+	// substring "127.0.0.1:3284" is absent -- the OS-assigned fallback
+	// port can itself contain "3284" as a substring (e.g. 32845), which
+	// would make the old assertion flaky.
+	idx := strings.Index(bridge.URL, "#h=127.0.0.1:")
+	if idx < 0 {
+		t.Fatalf("bridge URL missing expected h= fragment: %q", bridge.URL)
+	}
+	rest := bridge.URL[idx+len("#h=127.0.0.1:"):]
+	if amp := strings.IndexByte(rest, '&'); amp >= 0 {
+		rest = rest[:amp]
+	}
+	if rest == "3284" {
 		t.Fatalf("bridge fell back to a different port but URL still names 3284: %q", bridge.URL)
+	}
+	if _, err := strconv.Atoi(rest); err != nil {
+		t.Fatalf("bridge URL port %q did not parse as a number: %v", rest, err)
 	}
 }
 

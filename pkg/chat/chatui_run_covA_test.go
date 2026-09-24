@@ -1,8 +1,8 @@
 package chat
 
 // Coverage lane A (datatug-cli#289): drives ChatUI.Run's branches through
-// the RunTeaProgram seam added in chatui.go, so a real terminal is never
-// started.
+// the runTeaProgram seam added in chatui.go (SetRunTeaProgramForTest, m3
+// r5 fix round), so a real terminal is never started.
 
 import (
 	"context"
@@ -20,27 +20,25 @@ func TestChatUIRunRequiresConversation(t *testing.T) {
 }
 
 func TestChatUIRunReturnsProgramError(t *testing.T) {
-	restore := RunTeaProgram
-	t.Cleanup(func() { RunTeaProgram = restore })
 	wantErr := errors.New("boom")
 	var gotProgram *tea.Program
-	RunTeaProgram = func(p *tea.Program) (tea.Model, error) {
+	t.Cleanup(SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) {
 		gotProgram = p
 		return nil, wantErr
-	}
+	}))
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if err := u.Run(); !errors.Is(err, wantErr) {
 		t.Fatalf("Run() = %v, want %v", err, wantErr)
 	}
 	if gotProgram == nil {
-		t.Fatal("RunTeaProgram was never invoked with a program")
+		t.Fatal("runTeaProgram was never invoked with a program")
 	}
 }
 
 // TestChatUIRunForwardsBridgeEventsAndStopsBridge covers Run's bridgeEvents
 // goroutine (it forwards each event by calling program.Send, entering that
 // loop body at least once) and its deferred bridgeStop call.
-// RunTeaProgram is overridden to return immediately. A real *tea.Program's
+// runTeaProgram is overridden to return immediately. A real *tea.Program's
 // Send merely queues into its own internal (unexported, unbuffered) msgs
 // channel; with no real Run loop underneath to drain it, the forwarding
 // goroutine's Send call blocks forever once it has entered — by design,
@@ -50,9 +48,7 @@ func TestChatUIRunReturnsProgramError(t *testing.T) {
 // waits on it) to get real coverage of the forwarding statement without
 // reimplementing tea.Program.
 func TestChatUIRunForwardsBridgeEventsAndStopsBridge(t *testing.T) {
-	restore := RunTeaProgram
-	t.Cleanup(func() { RunTeaProgram = restore })
-	RunTeaProgram = func(p *tea.Program) (tea.Model, error) { return nil, nil }
+	t.Cleanup(SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) { return nil, nil }))
 
 	events := make(chan struct{}, 1)
 	events <- struct{}{}
@@ -71,9 +67,7 @@ func TestChatUIRunForwardsBridgeEventsAndStopsBridge(t *testing.T) {
 }
 
 func TestChatUIRunWithoutBridgeNeverCallsBridgeStop(t *testing.T) {
-	restore := RunTeaProgram
-	t.Cleanup(func() { RunTeaProgram = restore })
-	RunTeaProgram = func(p *tea.Program) (tea.Model, error) { return nil, nil }
+	t.Cleanup(SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) { return nil, nil }))
 
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if u.bridgeEvents != nil || u.bridgeStop != nil {

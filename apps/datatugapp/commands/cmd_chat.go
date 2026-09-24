@@ -64,7 +64,8 @@ func chatCommand() *cobra.Command {
 // runChatProjectFunc is a seam over runChatProject: runChat's project-switch
 // loop (options.project = nextProject) is otherwise only reachable by
 // driving ChatUI's real F3 project-picker overlay end to end through
-// RunTeaProgram, which the coverage lanes' other tests deliberately avoid.
+// chat.SetRunTeaProgramForTest's runTeaProgram seam, which the coverage
+// lanes' other tests deliberately avoid.
 // Always runChatProject in production.
 var runChatProjectFunc = runChatProject
 

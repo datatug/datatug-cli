@@ -33,9 +33,7 @@ func TestChatCommandWarnsOnInvalidLastOptionsThenRuns(t *testing.T) {
 	}
 	lastChatOptionsPath = func() (string, error) { return badPath, nil }
 
-	restoreRun := chat.RunTeaProgram
-	t.Cleanup(func() { chat.RunTeaProgram = restoreRun })
-	chat.RunTeaProgram = func(p *tea.Program) (tea.Model, error) { return nil, nil }
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) { return nil, nil }))
 	restoreSettings := getChatSettings
 	t.Cleanup(func() { getChatSettings = restoreSettings })
 

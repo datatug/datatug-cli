@@ -164,18 +164,23 @@ func TestChatUIComposerAttachmentChipsCanBeFocusedClearedAndRestored(t *testing.
 // v0.2.0's own changelog), exercised here only through ChatUI's real
 // attach/detach path.
 //
-// Unlike aichat's own tui/chatshell/chip_test.go (package chatshell, same
-// package as Model), this test cannot assert historyHeight()'s exact +1/+2
-// growth: that method is unexported, and chatshell.Model exposes no public
-// equivalent -- confirmed empirically (a probe test found the *rendered*
-// tea.View().Content line count constant regardless of chip count, since
-// View() always pads/fills to the fixed window height; only the chip-row
-// area WITHIN that fixed total actually grows/shrinks). The row-count
-// (chipRowsWithMany/chipRowsWithOne) and second-row-specific × hit-test
-// below are what's observable through ChatUI's public surface, and are the
-// real behavior this test protects: chip rows actually shrink as
-// attachments are removed, and a click on a wrapped (non-first) row's ×
-// glyph removes the CORRECT chip, not an arbitrary one.
+// historyHeight() itself is unexported on chatshell.Model (package
+// chatshell, not this one), so it cannot be called directly the way
+// aichat's own tui/chatshell/chip_test.go does. Its growth is still
+// observable indirectly, though: View() always renders the transcript
+// viewport at exactly historyHeight() lines (blank-padded when history is
+// shorter, scrolled when it's taller), immediately followed by the first
+// chip row -- so the RENDERED LINE INDEX the first "×]" chip glyph lands on
+// is topBarHeight()+historyHeight() (no slash-command menu is open here),
+// and shrinking the chip area by N rows must move that index down by
+// exactly N lines. firstChipRowLine below measures that index; the +1/+2
+// growth this asserts mirrors origin/main's own initialHeight/
+// initialHeight+1/initialHeight+2 assertions (m2, r5 fix round on #289).
+// The row-count (chipRowsWithMany/chipRowsWithOne) and second-row-specific
+// × hit-test below remain, and are still the real behavior this test
+// protects: chip rows actually shrink as attachments are removed, and a
+// click on a wrapped (non-first) row's × glyph removes the CORRECT chip,
+// not an arbitrary one.
 func TestChatUIComposerShrinksAsWrappedAttachmentsAreRemoved(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
@@ -208,6 +213,10 @@ func TestChatUIComposerShrinksAsWrappedAttachmentsAreRemoved(t *testing.T) {
 	chipRowsWithMany := countChipRows(u.shell.View().Content)
 	if chipRowsWithMany < 2 {
 		t.Fatalf("expected 8 long-labelled chips at width 60 to wrap onto more than one row, got %d row(s)", chipRowsWithMany)
+	}
+	firstChipLineWithMany, ok := firstChipRowLine(u.shell.View().Content)
+	if !ok {
+		t.Fatal("expected a chip row line to measure historyHeight's boundary against")
 	}
 
 	// A mouse click on a chip's × glyph that lands on the SECOND (wrapped)
@@ -256,6 +265,17 @@ func TestChatUIComposerShrinksAsWrappedAttachmentsAreRemoved(t *testing.T) {
 	if chipRowsWithOne >= chipRowsWithMany {
 		t.Fatalf("composer's chip area did not shrink as chips were removed: many=%d one=%d", chipRowsWithMany, chipRowsWithOne)
 	}
+	// historyHeight grows by exactly the number of chip rows that were
+	// freed up -- origin/main's own +1/+2 assertions, ported via the
+	// externally observable first-chip-row-line proxy described above.
+	firstChipLineWithOne, ok := firstChipRowLine(u.shell.View().Content)
+	if !ok {
+		t.Fatal("expected a chip row line left with 1 attachment")
+	}
+	wantGrowth := chipRowsWithMany - chipRowsWithOne
+	if gotGrowth := firstChipLineWithOne - firstChipLineWithMany; gotGrowth != wantGrowth {
+		t.Fatalf("historyHeight growth (first-chip-row-line delta) = %d, want %d (chip rows shrank from %d to %d)", gotGrowth, wantGrowth, chipRowsWithMany, chipRowsWithOne)
+	}
 }
 
 // lastChipRowCloseCoordinates returns the tea.MouseClickMsg X/Y of the
@@ -299,6 +319,20 @@ func countChipRows(content string) int {
 		}
 	}
 	return rows
+}
+
+// firstChipRowLine returns the 0-based index, within content's rendered
+// lines, of the FIRST line carrying a chip's close glyph ("×]") -- see
+// TestChatUIComposerShrinksAsWrappedAttachmentsAreRemoved's doc comment for
+// why that index is an externally observable proxy for
+// topBarHeight()+historyHeight(). ok is false when no chip row is rendered.
+func firstChipRowLine(content string) (line int, ok bool) {
+	for i, l := range strings.Split(content, "\n") {
+		if strings.Contains(ansi.Strip(l), "×]") {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // TestReferenceFromChipRejectsForeignChips covers referenceFromChip's

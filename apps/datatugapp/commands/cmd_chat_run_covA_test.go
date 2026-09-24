@@ -24,6 +24,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
@@ -65,13 +66,11 @@ func writeChatRunProjectFixture(t *testing.T) (dir string) {
 // (unavailableSchemaConversation), asserting it returns the empty
 // "SelectedProject" (RunTeaProgram never switches projects) with no error.
 func TestRunChatProjectUnavailableSchemaHappyPath(t *testing.T) {
-	restoreRun := chat.RunTeaProgram
-	t.Cleanup(func() { chat.RunTeaProgram = restoreRun })
 	var ranWithConversation bool
-	chat.RunTeaProgram = func(p *tea.Program) (tea.Model, error) {
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) {
 		ranWithConversation = true
 		return nil, nil
-	}
+	}))
 	restoreSettings := getChatSettings
 	t.Cleanup(func() { getChatSettings = restoreSettings })
 
@@ -97,9 +96,7 @@ func TestRunChatProjectUnavailableSchemaHappyPath(t *testing.T) {
 // -- and, because options.ai is empty, resolveChatAIProfile is never
 // called.
 func TestRunChatLoopsUntilNoProjectSwitch(t *testing.T) {
-	restoreRun := chat.RunTeaProgram
-	t.Cleanup(func() { chat.RunTeaProgram = restoreRun })
-	chat.RunTeaProgram = func(p *tea.Program) (tea.Model, error) { return nil, nil }
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) { return nil, nil }))
 	restoreSettings := getChatSettings
 	t.Cleanup(func() { getChatSettings = restoreSettings })
 
@@ -117,10 +114,11 @@ func TestRunChatLoopsUntilNoProjectSwitch(t *testing.T) {
 // runChatProject (so RunTeaProgram is never reached, proving the failure
 // really did short-circuit the loop).
 func TestRunChatResolvesAIProfileBeforeLooping(t *testing.T) {
-	restoreRun := chat.RunTeaProgram
-	t.Cleanup(func() { chat.RunTeaProgram = restoreRun })
 	reached := false
-	chat.RunTeaProgram = func(p *tea.Program) (tea.Model, error) { reached = true; return nil, nil }
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) { reached = true; return nil, nil }))
+	restoreSettings := getChatSettings
+	t.Cleanup(func() { getChatSettings = restoreSettings })
+	getChatSettings = func() (dtconfig.Settings, error) { return dtconfig.Settings{}, nil }
 
 	cmd := chatCommand()
 	options := chatOptions{project: ".", env: "local", model: defaultChatModel, thinking: "low", ai: "missing-profile"}
@@ -151,9 +149,7 @@ func TestRunChatProjectRequiresValidProject(t *testing.T) {
 // confirming runChatProject actually threads it through instead of always
 // silently substituting Background().
 func TestRunChatProjectUsesRequestContext(t *testing.T) {
-	restoreRun := chat.RunTeaProgram
-	t.Cleanup(func() { chat.RunTeaProgram = restoreRun })
-	chat.RunTeaProgram = func(p *tea.Program) (tea.Model, error) { return nil, nil }
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) { return nil, nil }))
 	restoreSettings := getChatSettings
 	t.Cleanup(func() { getChatSettings = restoreSettings })
 
@@ -542,9 +538,7 @@ func TestRunChatProjectScannedQueryableHappyPath(t *testing.T) {
 	}))
 	defer server.Close()
 
-	restoreRun := chat.RunTeaProgram
-	t.Cleanup(func() { chat.RunTeaProgram = restoreRun })
-	chat.RunTeaProgram = func(p *tea.Program) (tea.Model, error) { return nil, nil }
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) { return nil, nil }))
 	restoreSettings := getChatSettings
 	t.Cleanup(func() { getChatSettings = restoreSettings })
 
@@ -566,9 +560,7 @@ func TestRunChatProjectScannedQueryableHappyPath(t *testing.T) {
 // exist) still succeeds -- runChatProject degrades to an
 // "unavailable://"-scoped session instead of failing outright.
 func TestRunChatProjectSourceURLResolutionErrorDegrades(t *testing.T) {
-	restoreRun := chat.RunTeaProgram
-	t.Cleanup(func() { chat.RunTeaProgram = restoreRun })
-	chat.RunTeaProgram = func(p *tea.Program) (tea.Model, error) { return nil, nil }
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) { return nil, nil }))
 	restoreSettings := getChatSettings
 	t.Cleanup(func() { getChatSettings = restoreSettings })
 
@@ -715,9 +707,7 @@ func TestRunChatProjectOpenSessionStoreErrorReported(t *testing.T) {
 // parent cannot be created, so the save fails and a warning goes to stderr
 // without failing runChatProject itself.
 func TestRunChatProjectSaveLastChatOptionsWarns(t *testing.T) {
-	restoreRun := chat.RunTeaProgram
-	t.Cleanup(func() { chat.RunTeaProgram = restoreRun })
-	chat.RunTeaProgram = func(p *tea.Program) (tea.Model, error) { return nil, nil }
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) { return nil, nil }))
 	restoreSettings := getChatSettings
 	t.Cleanup(func() { getChatSettings = restoreSettings })
 	restorePath := lastChatOptionsPath
@@ -744,13 +734,11 @@ func TestRunChatProjectSaveLastChatOptionsWarns(t *testing.T) {
 }
 
 // TestRunChatProjectUIRunErrorReported covers runChatProject's ui.Run()
-// error branch (cmd_chat.go:196-198): RunTeaProgram (the seam ui.Run uses)
+// error branch (cmd_chat.go:196-198): runTeaProgram (the seam ui.Run uses)
 // returns an error.
 func TestRunChatProjectUIRunErrorReported(t *testing.T) {
-	restoreRun := chat.RunTeaProgram
-	t.Cleanup(func() { chat.RunTeaProgram = restoreRun })
 	injected := errors.New("injected RunTeaProgram failure")
-	chat.RunTeaProgram = func(p *tea.Program) (tea.Model, error) { return nil, injected }
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(p *tea.Program) (tea.Model, error) { return nil, injected }))
 	restoreSettings := getChatSettings
 	t.Cleanup(func() { getChatSettings = restoreSettings })
 

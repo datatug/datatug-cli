@@ -123,6 +123,39 @@ func TestChatUIStatusBarWorkspaceFocusedHint(t *testing.T) {
 	}
 }
 
+// TestChatUIStatusBarComposerChipHints is m1 (r5 fix round on #289): ui.go's
+// composer-chip hint set -- shown whenever attachment chips exist and the
+// composer (input zone), not the grid/message/workspace zone, holds focus --
+// on both a wide status line (the full hint set) and a narrow one (ui.go's
+// "FOCUS Chat · Tab chips · Esc clear · Shift+Esc restore · Enter send"
+// compact form, maxWidth < 100).
+func TestChatUIStatusBarComposerChipHints(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+	u.snapshot.Workspace.Attachments = []ContextReference{{Kind: "bookmark", ObjectID: "saved"}}
+
+	wide := u.statusBar(160)
+	for _, want := range []string{"Tab chips", "Backspace remove", "Esc clear text/attachments", "Shift+Esc restore", "Enter send", "F6 workspace"} {
+		if !strings.Contains(wide, want) {
+			t.Fatalf("expected the composer-chip hint set to contain %q:\n%s", want, wide)
+		}
+	}
+
+	narrow := u.statusBar(80)
+	want := "FOCUS Chat · Tab chips · Esc clear · Shift+Esc restore · Enter send"
+	if !strings.Contains(narrow, want) {
+		t.Fatalf("statusBar(80) = %q, want it to contain the compact composer-chip hint set %q", narrow, want)
+	}
+
+	// Once attachments are gone, the default composer hint set returns even
+	// on a narrow terminal.
+	u.snapshot.Workspace.Attachments = nil
+	afterClear := u.statusBar(80)
+	if strings.Contains(afterClear, "Tab chips") {
+		t.Fatalf("expected the composer-chip hint set to disappear once attachments are cleared:\n%s", afterClear)
+	}
+}
+
 // TestChatUIStatusBarJoinFocusedHint is ui.go's u.joinFocused hint set,
 // overriding the plain grid hint set exactly as ui.go's separate
 // (non-else) `if u.joinFocused` block did.

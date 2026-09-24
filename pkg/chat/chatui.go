@@ -207,13 +207,27 @@ func (u *ChatUI) SetBrowserURL(url string) {
 	}
 }
 
-// RunTeaProgram runs a *tea.Program to completion. It is a package-level
+// runTeaProgram runs a *tea.Program to completion. It is a package-level
 // seam over (*tea.Program).Run — ChatUI.Run's only path to an actual
 // terminal — so both this package's and apps/datatugapp/commands' tests can
 // drive Run (and, transitively, cmd_chat.go's runChatProject) without ever
-// starting a real Bubble Tea program against a TTY. Tests must restore the
-// original value (save it, defer-restore) since it is process-global state.
-var RunTeaProgram = func(p *tea.Program) (tea.Model, error) { return p.Run() }
+// starting a real Bubble Tea program against a TTY. It stays unexported
+// (m3, r5 fix round on #289: a mutable exported var let any importer swap
+// out how every ChatUI runs); SetRunTeaProgramForTest is the only way to
+// reach it from outside the package.
+var runTeaProgram = func(p *tea.Program) (tea.Model, error) { return p.Run() }
+
+// SetRunTeaProgramForTest overrides runTeaProgram for the duration of a
+// test, returning a func that restores the previous value — call it via
+// t.Cleanup. It exists purely so pkg/chat's own tests and
+// apps/datatugapp/commands' integration tests (which drive ChatUI.Run only
+// transitively, through runChatProject) can intercept the Bubble Tea
+// program run without ever starting a real one against a TTY.
+func SetRunTeaProgramForTest(f func(p *tea.Program) (tea.Model, error)) (restore func()) {
+	previous := runTeaProgram
+	runTeaProgram = f
+	return func() { runTeaProgram = previous }
+}
 
 // Run starts the Bubble Tea program and blocks until it exits. Unlike
 // ui.go's Init-batched awaitBridgeChange/re-arm loop (chatshell.Model.Init
@@ -236,7 +250,7 @@ func (u *ChatUI) Run() error {
 	if u.bridgeStop != nil {
 		defer u.bridgeStop()
 	}
-	_, err := RunTeaProgram(program)
+	_, err := runTeaProgram(program)
 	return err
 }
 
@@ -1061,6 +1075,15 @@ func (u *ChatUI) statusBar(width int) string {
 		mouseHint = "F2 wheel"
 	}
 	segments := []string{"model: " + sanitizeTerminalText(u.modelName), mouseHint, "Shift+↑↓ navigate", "Enter send", "F6/Shift+→ workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", "Ctrl+C quit"}
+	// m1 (r5 fix round on #289): ui.go's composer-chip hint set -- attachment
+	// chips exist and none of the grid/message/workspace zones hold focus
+	// (i.e. the composer/input zone does), so Tab/Shift+Tab drives the chip
+	// row instead of message navigation. focus.ZoneInput is exactly ui.go's
+	// "!u.gridFocused && !u.messageFocused && !u.workspaceFocused".
+	composerChipHints := u.shell.Zone() == focus.ZoneInput && len(u.snapshot.Workspace.Attachments) > 0
+	if composerChipHints {
+		segments = []string{"Tab chips", "Backspace remove", "Esc clear text/attachments", "Shift+Esc restore", "Enter send", "F6 workspace", mouseHint}
+	}
 	if u.webLinkVisible {
 		segments = append(segments, lipgloss.NewStyle().Hyperlink(u.browserURL).Render("Open web chat"), "F5 hide link")
 	} else if u.browserURL != "" {
@@ -1129,6 +1152,22 @@ func (u *ChatUI) statusBar(width int) string {
 		if u.sessions != nil {
 			segments = append([]string{"session: " + sanitizeTerminalText(u.snapshot.Title)}, segments...)
 		}
+	}
+	// m1 (r5 fix round on #289): ui.go's narrow-terminal (maxWidth < 100)
+	// compact composer-chip hint set, "FOCUS Chat · Tab chips · Esc clear ·
+	// Shift+Esc restore · Enter send" -- ui.go's own compact branch checked
+	// the attachment/zone condition independently of (before) its busy
+	// override, so busy still wins here exactly as it did there (Busy()
+	// already overwrote segments above, but composerChipHints itself stays
+	// true; gate this branch on !Busy() too so a busy composer keeps its
+	// "Thinking…" hint instead).
+	if width < 100 && composerChipHints && !u.shell.Busy() {
+		compact := []string{"FOCUS Chat", "Tab chips", "Esc clear", "Shift+Esc restore", "Enter send"}
+		lines := wrapStatusSegments(compact, width)
+		for i, line := range lines {
+			lines[i] = padAnsiLine(line, width)
+		}
+		return strings.Join(lines, "\n")
 	}
 	// M5 (r1 adversarial review of #289): ui.go's wrapStatusSegments wrapped
 	// onto a second (or further) status line instead of silently truncating

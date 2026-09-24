@@ -173,3 +173,16 @@ func TestChatUIJoinCandidatesWireIntoJoinBlock(t *testing.T) {
 		t.Fatalf("expected a *JoinBlock for a RecordSet with join candidates, got %T", block)
 	}
 }
+
+func TestChatUITopBarAndStatusBarShowProjectAndSession(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = ProjectCatalog{Title: "Demo"}
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	view := u.shell.View().Content
+	if !strings.Contains(view, "Demo") {
+		t.Fatalf("expected project title in top bar:\n%s", view)
+	}
+	if !strings.Contains(view, "model: fake-model") {
+		t.Fatalf("expected model name in status bar:\n%s", view)
+	}
+}

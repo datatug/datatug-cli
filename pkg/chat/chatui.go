@@ -12,6 +12,8 @@ import (
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/tui/chatshell"
 	"github.com/strongo/aichat/tui/grid"
@@ -687,14 +689,36 @@ func (u *ChatUI) applyWorkspaceAction(action WorkspaceAction) error {
 	return nil
 }
 
+// topBar is a simplified port of ui.go's topBar: it drops the workspace
+// pane's current tab name (View: ...) since ChatUI has no cheap way yet to
+// read the SidePanel's own state back out generically (chatshell.SidePanel
+// exposes Title()/View()/Update(), not arbitrary product state) — tracked
+// as a follow-up alongside the richer statusBar below.
 func (u *ChatUI) topBar(width int) string {
-	title := "DataTug"
-	if u.sessionID != "" {
-		title = u.snapshot.Title
-	}
-	return padAnsiLine(title, width)
+	project := nonempty(u.catalog.Title, "Project")
+	session := nonempty(u.snapshot.Title, "New chat")
+	label := fmt.Sprintf("DataTug │ Project: %s [F3] │ Session: %s [F4] │ Workspace: [F6] │ Help: /help", sanitizeTerminalText(project), sanitizeTerminalText(session))
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Width(width).Render(ansi.Truncate(label, width, "…"))
 }
 
+// statusBar is a simplified port of ui.go's statusLines: the focus-specific
+// hint sets (grid/join/workspace/message/detail — each keyed off ui.go's
+// own u.gridFocused/u.joinFocused/u.workspaceFocused/u.messageFocused/
+// u.detail fields) are not reproduced since chatshell's focus.Ring exposes
+// only its Zone (input/transcript/sidebar), not which kind of Block within
+// the transcript zone has focus — a finer hint set is a follow-up once/if
+// that becomes available. Busy state (streaming or a product SetBusy) is
+// still distinguished, matching ui.go's "Thinking…" segment.
 func (u *ChatUI) statusBar(width int) string {
-	return padAnsiLine("model: "+u.modelName, width)
+	segments := []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ navigate", "Enter send", "F6/Shift+→ workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", "Ctrl+C quit"}
+	if u.sessions != nil {
+		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.snapshot.Title), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
+	}
+	if u.shell.Busy() {
+		segments = []string{"model: " + sanitizeTerminalText(u.modelName), "Thinking…", "Ctrl+C quit"}
+		if u.sessions != nil {
+			segments = append([]string{"session: " + sanitizeTerminalText(u.snapshot.Title)}, segments...)
+		}
+	}
+	return padAnsiLine(strings.Join(segments, " · "), width)
 }

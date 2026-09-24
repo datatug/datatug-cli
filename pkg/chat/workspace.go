@@ -24,6 +24,8 @@ type ProjectObject struct {
 	Reference   ContextReference
 	Columns     []string
 	ColumnTypes map[string]string
+	QueryType   string // saved query metadata, shown locally in Project explorer
+	QueryText   string // loaded query document, not included in model context
 	Issue       string // local metadata load error; never included in agent context
 }
 
@@ -197,6 +199,9 @@ func (w WorkspaceState) apply(session ChatSession, catalog ProjectCatalog, a Wor
 			}
 		}
 		return w, ContextReference{}, fmt.Errorf("%s is not attached", a.Reference.Title)
+	case "detach_all":
+		w.Attachments = nil
+		return w, ContextReference{}, nil
 	case "dock":
 		if a.Reference.ObjectID == "" && w.CurrentSelectionID != "" {
 			if selection, ok := w.Selections[w.CurrentSelectionID]; ok {

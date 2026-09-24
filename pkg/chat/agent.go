@@ -97,6 +97,69 @@ func stripThinkTags(text string) string {
 	return strings.TrimSpace(thinkTagPattern.ReplaceAllString(text, ""))
 }
 
+const (
+	thinkTagOpen  = "<think>"
+	thinkTagClose = "</think>"
+)
+
+// thinkTagStreamFilter is stripThinkTags's incremental counterpart: chatUI's
+// live view (askOpenFunc) forwards each ai.EventTextDelta to the transcript
+// as it arrives, before a turn's assembled text ever reaches
+// stripThinkTags, so a <think>...</think> block a chunk-boundary-unaware
+// caller passed straight through would flash on screen while streaming even
+// though the final, persisted Turn.Text never shows it. One filter
+// instance is scoped to a single stream: it holds only the undecided tail
+// of raw text (a partial "<think>"/"</think>" tag that might complete on
+// the next delta) between calls, never a whole in-progress <think> block.
+type thinkTagStreamFilter struct {
+	pending string
+	inThink bool
+}
+
+// Filter returns the visible portion of delta -- text outside any
+// <think>...</think> span -- buffering an incomplete tag at the boundary
+// for the next call instead of emitting it early.
+func (f *thinkTagStreamFilter) Filter(delta string) string {
+	raw := f.pending + delta
+	f.pending = ""
+	var out strings.Builder
+	for {
+		if f.inThink {
+			idx := strings.Index(raw, thinkTagClose)
+			if idx < 0 {
+				f.pending = partialTagSuffix(raw, thinkTagClose)
+				return out.String()
+			}
+			raw = raw[idx+len(thinkTagClose):]
+			f.inThink = false
+			continue
+		}
+		idx := strings.Index(raw, thinkTagOpen)
+		if idx < 0 {
+			keep := partialTagSuffix(raw, thinkTagOpen)
+			out.WriteString(raw[:len(raw)-len(keep)])
+			f.pending = keep
+			return out.String()
+		}
+		out.WriteString(raw[:idx])
+		raw = raw[idx+len(thinkTagOpen):]
+		f.inThink = true
+	}
+}
+
+// partialTagSuffix returns the longest suffix of s that is itself a prefix
+// of tag -- the tail a caller must hold back because the next delta could
+// complete it into a full tag match straddling this chunk boundary.
+func partialTagSuffix(s, tag string) string {
+	max := min(len(s), len(tag)-1)
+	for n := max; n > 0; n-- {
+		if strings.HasSuffix(s, tag[:n]) {
+			return s[len(s)-n:]
+		}
+	}
+	return ""
+}
+
 func tokenUsageFrom(u *ai.Usage, provider string) *TokenUsage {
 	if u == nil {
 		return nil
@@ -138,6 +201,7 @@ type workspaceObserverKey struct{}
 type selectionParametersKey struct{}
 type bookmarkFinderKey struct{}
 type joinObserverKey struct{}
+type attachedJoinKey struct{}
 
 func withQueryObserver(ctx context.Context, observer func(QueryResult) (QueryResult, error)) context.Context {
 	return context.WithValue(ctx, queryObserverKey{}, observer)
@@ -157,6 +221,10 @@ func withBookmarkFinder(ctx context.Context, finder func(string, []string) ([]Bo
 
 func withJoinObserver(ctx context.Context, observer func(string, JoinCandidateID) (RecordSet, error)) context.Context {
 	return context.WithValue(ctx, joinObserverKey{}, observer)
+}
+
+func withAttachedJoin(ctx context.Context, join func(context.Context, QueryResult) (QueryResult, bool, error)) context.Context {
+	return context.WithValue(ctx, attachedJoinKey{}, join)
 }
 
 const (
@@ -472,6 +540,21 @@ func (c *AIConversation) runDTQL(ctx context.Context, executor DTQLExecutor, sou
 	var parameters map[string]any
 	if resolve, ok := ctx.Value(selectionParametersKey{}).(func() map[string]any); ok {
 		parameters = referencedSelectionParameters(doc, resolve())
+	}
+	if join, ok := ctx.Value(attachedJoinKey{}).(func(context.Context, QueryResult) (QueryResult, bool, error)); ok {
+		base := QueryResult{Title: title, DTQL: doc, Source: sourceURL, SourceID: args.SourceID, Parameters: parameters}
+		joined, applied, joinErr := join(ctx, base)
+		if joinErr != nil {
+			c.capture(ctx, QueryResult{Title: title, DTQL: doc, Parameters: parameters, Err: joinErr})
+			return runDTQLResponse{Title: title, Error: publicQueryError(joinErr, parameters)}, nil
+		}
+		if applied {
+			captured := c.capture(ctx, joined)
+			if captured.Err != nil {
+				return runDTQLResponse{Title: title, Error: publicQueryError(captured.Err, captured.Parameters)}, nil
+			}
+			return runDTQLResponse{Title: captured.Title, OK: true, RecordSetID: captured.RecordSetID, Columns: captured.Result.Columns, Rows: len(captured.Result.Rows)}, nil
+		}
 	}
 	result, err := executor.RunDTQL(ctx, sourceURL, []byte(doc), parameters)
 	captured := c.capture(ctx, QueryResult{Title: title, DTQL: doc, Result: result, Parameters: parameters, Source: sourceURL, SourceID: args.SourceID, Err: err})
@@ -906,6 +989,15 @@ renders the structured tool result. You may add one short sentence explaining
 what you queried after a successful tool call.
 If attached context names another project source, supply its sourceId to
 run_dtql. Never invent a source ID or URL.
+Attached tables and their column definitions are the active scope for an
+underspecified new request such as "top 5 rows". Prefer them over an earlier
+RecordSet unless the user explicitly refers to that result or another table.
+If the user asks for another table while one or more tables are attached,
+write the single-table DTQL for the requested root table. DataTug will add
+readable many-to-one foreign-key JOINs to attached tables when the relationship
+is unique; it will ask the user to choose when multiple relationships are
+possible. For a one-to-many request, use the many-side table as the root so
+the requested row count is not multiplied by a JOIN.
 
 For a new data query, run_dtql accepts a single source relation, selected
 columns, where expressions, groupBy, aggregate columns, having, orderBy, limit,

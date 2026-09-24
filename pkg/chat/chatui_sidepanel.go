@@ -28,6 +28,11 @@ type workspacePanel struct {
 	explorerOffset    int
 	explorerCollapsed map[string]bool
 	projectDetails    bool
+	// explorerDetailOffset is PgUp/PgDown's extra scroll into a long
+	// selected details block (e.g. a saved query's full text) on top of
+	// the usual snap-to-selection offset -- ui.go's detail scroll, reset
+	// whenever the explorer selection itself moves.
+	explorerDetailOffset int
 
 	// Selected (inspector).
 	inspectorOffset int
@@ -58,8 +63,9 @@ type workspacePanel struct {
 	focused       bool
 }
 
-// workspaceTabs/workspaceTabIndex are already defined in workspace_ui.go
-// (still used there by the old UI) and reused here as-is.
+// workspaceTabs/workspaceTabIndex live in workspace_shared.go, factored out
+// so both this ChatUI SidePanel and (before its retirement) the legacy UI
+// could share one fixed tab order.
 
 func newWorkspacePanel(ui *ChatUI) *workspacePanel {
 	editor := textinput.New()
@@ -469,7 +475,20 @@ func (p *workspacePanel) projectExplorer(width, height int) string {
 		if index >= 0 && index < len(p.ui.catalog.Objects) {
 			detailsAt = len(lines)
 			object := p.ui.catalog.Objects[index]
-			lines = append(lines, "", "Details: "+object.Reference.Title)
+			// ui.go's workspaceView Project:/Table:/Query: cards, ported
+			// onto the explorer's own select-for-details flow (Enter) --
+			// the header names what kind of object is selected instead of
+			// the generic "Details:" every kind used to share.
+			header := "Details: " + object.Reference.Title
+			switch object.Reference.Kind {
+			case "project":
+				header = "Project: " + object.Reference.Title
+			case "table":
+				header = "Table: " + object.Reference.Title
+			case "query":
+				header = "Query: " + object.Reference.Title
+			}
+			lines = append(lines, "", header)
 			if object.Issue != "" {
 				lines = append(lines, strings.Split(ansi.Hardwrap("Status: "+sanitizeTerminalText(object.Issue), max(10, width), false), "\n")...)
 			}
@@ -480,12 +499,32 @@ func (p *workspacePanel) projectExplorer(width, height int) string {
 				lines = append(lines, "Scope: project")
 			}
 			if len(object.Columns) > 0 {
-				lines = append(lines, "Columns: "+strings.Join(object.Columns, ", "))
+				columns := object.Columns
+				if len(object.ColumnTypes) > 0 {
+					typed := make([]string, len(object.Columns))
+					for i, column := range object.Columns {
+						if columnType := object.ColumnTypes[column]; columnType != "" {
+							typed[i] = column + " " + columnType
+						} else {
+							typed[i] = column
+						}
+					}
+					columns = typed
+				}
+				lines = append(lines, "Columns: "+strings.Join(columns, ", "))
+			}
+			if object.Reference.Kind == "query" {
+				if object.QueryType != "" {
+					lines = append(lines, "Type: "+object.QueryType)
+				}
+				if object.QueryText != "" {
+					lines = append(lines, strings.Split(ansi.Hardwrap(sanitizeMultilineText(object.QueryText), max(10, width), false), "\n")...)
+				}
 			}
 		}
 	}
 	if detailsAt >= 0 {
-		p.explorerOffset = p.explorerIndex
+		p.explorerOffset = p.explorerIndex + p.explorerDetailOffset
 	}
 	if p.explorerIndex < p.explorerOffset {
 		p.explorerOffset = p.explorerIndex
@@ -892,20 +931,48 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	nodes := p.explorerNodes()
 	switch msg.String() {
+	case "pgdown":
+		if p.tab == 0 && p.projectDetails {
+			p.explorerDetailOffset += 3
+		}
+	case "pgup":
+		if p.tab == 0 && p.projectDetails {
+			p.explorerDetailOffset = max(0, p.explorerDetailOffset-3)
+		}
 	case "1", "2", "3":
 		if p.tab == 1 {
 			p.inspectorSubTab = int(msg.String()[0] - '1')
 			p.inspectorOffset = 0
 		}
-	case "left", "h":
+	case "h":
 		p.setTab(p.tab - 1)
-	case "right", "l":
+	case "l":
 		p.setTab(p.tab + 1)
+	case "tab":
+		p.setTab(p.tab + 1)
+	case "shift+tab":
+		p.setTab(p.tab - 1)
+	case "left":
+		// ui.go's Left on the Project explorer: fold the branch node under
+		// the cursor (source/group/project root), not switch tabs -- ported
+		// alongside Tab/Shift+Tab taking over the tab-switch binding.
+		if p.tab == 0 && p.explorerIndex >= 0 && p.explorerIndex < len(nodes) {
+			if node := nodes[p.explorerIndex]; node.branch {
+				p.explorerCollapsed[node.id] = true
+			}
+		}
+	case "right":
+		if p.tab == 0 && p.explorerIndex >= 0 && p.explorerIndex < len(nodes) {
+			if node := nodes[p.explorerIndex]; node.branch {
+				p.explorerCollapsed[node.id] = false
+			}
+		}
 	case "up", "k":
 		switch p.tab {
 		case 0:
 			p.explorerIndex = max(0, p.explorerIndex-1)
 			p.projectDetails = false
+			p.explorerDetailOffset = 0
 		case 1:
 			p.inspectorOffset = max(0, p.inspectorOffset-1)
 		case 2:
@@ -919,6 +986,7 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 		case 0:
 			p.explorerIndex = min(len(nodes)-1, p.explorerIndex+1)
 			p.projectDetails = false
+			p.explorerDetailOffset = 0
 		case 1:
 			p.inspectorOffset++
 		case 2:

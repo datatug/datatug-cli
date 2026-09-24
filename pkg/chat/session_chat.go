@@ -431,6 +431,13 @@ type preparedTurn struct {
 	user        ChatMessage
 	prior       ChatSession
 	contextText string
+	// joinChoice, once non-nil after the agent turn, holds an
+	// attachedJoinChoiceError raised by the withAttachedJoin observer below:
+	// the model's run_dtql referenced attached-context metadata that matched
+	// more than one join edge. It is a clarification, not a failed query or
+	// a model-authored choice, so ask()/streamAsk() replace the turn's text
+	// with its question rather than persisting a query error.
+	joinChoice **attachedJoinChoiceError
 }
 
 // prepareTurn is ask() and streamAsk()'s shared setup: validate the expected
@@ -497,7 +504,28 @@ func (c *SessionChat) prepareTurn(ctx context.Context, expectedSessionID, prompt
 		}
 		return c.applyJoinCandidate(ctx, recordSetID, candidateID, user.ID)
 	})
-	return preparedTurn{ctx: ctx, user: user, prior: prior, contextText: contextText}, cleanup, nil
+	joinChoice := new(*attachedJoinChoiceError)
+	ctx = withAttachedJoin(ctx, func(joinCtx context.Context, query QueryResult) (QueryResult, bool, error) {
+		result, applied, joinErr := c.joinAttachedQuery(joinCtx, prior, prompt, query)
+		var choice *attachedJoinChoiceError
+		if errors.As(joinErr, &choice) {
+			*joinChoice = choice
+		}
+		return result, applied, joinErr
+	})
+	return preparedTurn{ctx: ctx, user: user, prior: prior, contextText: contextText, joinChoice: joinChoice}, cleanup, nil
+}
+
+// resolveJoinChoice replaces an agent turn with an attached-JOIN
+// clarification question when prepareTurn's withAttachedJoin observer
+// recorded one: the model referenced attached-context metadata matching
+// more than one foreign-key edge. Keeping the question in chat history (not
+// a query error) lets the next turn resolve it from the user's own answer.
+func resolveJoinChoice(joinChoice **attachedJoinChoiceError, turn Turn, agentErr error) (Turn, error) {
+	if joinChoice != nil && *joinChoice != nil {
+		return Turn{Text: (*joinChoice).Error()}, nil
+	}
+	return turn, agentErr
 }
 
 func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string) (Turn, error) {
@@ -510,6 +538,7 @@ func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string)
 		return Turn{}, err
 	}
 	turn, agentErr := c.agent.AskWithContext(prepared.ctx, prompt, prepared.contextText)
+	turn, agentErr = resolveJoinChoice(prepared.joinChoice, turn, agentErr)
 	turn = finalizeTurn(turn, agentErr)
 	return c.store.AppendTurn(prepared.ctx, c.activeID, prepared.user.ID, c.source, turn)
 }
@@ -525,7 +554,7 @@ func finalizeTurn(turn Turn, agentErr error) Turn {
 		turn = Turn{Text: friendlyAgentError(agentErr)}
 	}
 	if turn.Text == "" && len(turn.Queries) == 0 && len(turn.Actions) == 0 {
-		turn.Text = "I couldn't construct a valid query for that request."
+		turn.Text = "The AI model returned no query or answer. Try again or choose another model."
 	}
 	if turn.Text == "" && len(turn.Actions) > 0 {
 		last := turn.Actions[len(turn.Actions)-1]
@@ -624,6 +653,7 @@ func (c *SessionChat) streamAsk(ctx context.Context, expectedSessionID, prompt s
 		if streamErr != nil && len(lastTurn.Queries) == 0 && len(lastTurn.Actions) == 0 {
 			persistErr = fmt.Errorf("chat: agent turn: %w", streamErr)
 		}
+		lastTurn, persistErr = resolveJoinChoice(prepared.joinChoice, lastTurn, persistErr)
 		turn := finalizeTurn(lastTurn, persistErr)
 		stored, appendErr := c.store.AppendTurn(prepared.ctx, c.activeID, prepared.user.ID, c.source, turn)
 		final, finalErr = stored, appendErr
@@ -810,6 +840,9 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 		return ""
 	}
 	lines := make([]string, 0, len(session.Messages)+len(refs)+1)
+	if len(refs) > 0 {
+		lines = append(lines, "Attached and docked objects are the active query scope. For an underspecified request, use them before earlier RecordSets; use an earlier RecordSet only when the user refers to it.")
+	}
 	for index, ref := range refs {
 		contextKind := "Attached"
 		if index >= len(session.Workspace.Attachments) {
@@ -829,7 +862,15 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 		if len(catalogs) > 0 {
 			for _, object := range catalogs[0].Objects {
 				if sameReference(object.Reference, ref) && len(object.Columns) > 0 {
-					line += "; columns=" + strings.Join(object.Columns, ", ")
+					definitions := make([]string, 0, len(object.Columns))
+					for _, column := range object.Columns {
+						definition := column
+						if columnType := object.ColumnTypes[column]; columnType != "" {
+							definition += " " + columnType
+						}
+						definitions = append(definitions, definition)
+					}
+					line += "; columns=" + strings.Join(definitions, ", ")
 					break
 				}
 			}
@@ -857,6 +898,7 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 	if current, ok := session.Workspace.Selections[session.Workspace.CurrentSelectionID]; ok {
 		lines = append(lines, fmt.Sprintf("Current selection (id=%s; rows=%d; not query context unless attached or docked)", current.ID, len(current.Rows)))
 	}
+	protected := len(lines)
 	start := max(0, len(session.Messages)-16)
 	for _, message := range session.Messages[start:] {
 		switch message.Kind {
@@ -871,8 +913,8 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 			lines = append(lines, line)
 		}
 	}
-	for len(strings.Join(lines, "\n")) > maxContextChars && len(lines) > 1 {
-		lines = lines[1:]
+	for len(strings.Join(lines, "\n")) > maxContextChars && len(lines) > protected {
+		lines = append(lines[:protected], lines[protected+1:]...)
 	}
 	return boundedContextText(strings.Join(lines, "\n"), maxContextChars)
 }

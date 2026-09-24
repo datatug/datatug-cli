@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/ai"
 )
@@ -23,6 +26,46 @@ func workspaceTestCatalog() ProjectCatalog {
 // TestProjectExplorerShowsSourceIssueInPlace and
 // TestProjectExplorerIssueDetailsRemainVisibleInLongTree were ported onto
 // ChatUI's workspacePanel in chatui_sidepanel_test.go.
+
+// TestAttachedTableContextSurvivesHistoryAndIncludesColumnDefinitions is
+// pure SessionChat/buildSessionContext logic -- no UI involved -- so it
+// ports from datatug-cli#291 unchanged.
+func TestAttachedTableContextSurvivesHistoryAndIncludesColumnDefinitions(t *testing.T) {
+	catalog := workspaceTestCatalog()
+	catalog.Objects[2].ColumnTypes = map[string]string{"CustomerId": "INTEGER", "City": "NVARCHAR(40)"}
+	attached := catalog.Objects[2].Reference
+	session := ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{attached}}}
+	for range 20 {
+		session.Messages = append(session.Messages, ChatMessage{Role: "You", Kind: "text", Text: strings.Repeat("Invoice ", 250)})
+	}
+	contextText := buildSessionContext(session, catalog)
+	if !strings.Contains(contextText, "Attached table Customer") || !strings.Contains(contextText, "CustomerId INTEGER") || !strings.Contains(contextText, "City NVARCHAR(40)") {
+		t.Fatalf("attached table definition was lost: %s", contextText)
+	}
+	if len(contextText) > maxContextChars {
+		t.Fatalf("context exceeded limit: %d", len(contextText))
+	}
+}
+
+// TestComposerAttachmentChipsCanBeFocusedClearedAndRestored (datatug-cli#291)
+// does not port: it drove ui.go's own composer directly (u.input,
+// u.attachmentFocus, u.composerView, mouse-click chip removal, Shift+Esc
+// draft/attachment restore). ChatUI's composer is
+// tui/chatshell.Model's -- a different module (strongo/aichat) -- which
+// today renders no attachment chips at all (see chatui_bridge_test.go's own
+// note on the same gap for the web-link hint) and exposes no Tab-focus,
+// Backspace-remove, or Shift+Esc-restore hooks for them. Porting this
+// behaviour needs new chatshell composer API first: a chip list the host
+// can set, chip focus/backspace/click-to-remove wired into
+// chatshell.Model's own key/mouse handling, and an undo (Shift+Esc) stack
+// chatshell owns since it already owns the composer's draft text.
+//
+// TestProjectExplorerShowsSourceIssueInPlace and
+// TestProjectExplorerIssueDetailsRemainVisibleInLongTree were already
+// ported onto ChatUI's workspacePanel in chatui_sidepanel_test.go
+// (TestChatUIProjectExplorerShowsSourceIssueInPlace/
+// TestChatUIProjectExplorerIssueDetailsRemainVisibleInLongTree above in
+// HEAD's own history) so are not duplicated here.
 
 func workspaceTestRecord(t *testing.T, store *SessionStore, sessionID string) string {
 	t.Helper()
@@ -547,3 +590,100 @@ func TestSelectedCellValueStaysOutOfModelRequest(t *testing.T) {
 // owns chatPanePercent/growPanelChat itself now, unexported, with its own test
 // coverage in strongo/aichat). It tested only ui.go's own chatPaneWidth/
 // chatPanePercent, which no longer exist once the legacy UI is deleted.
+//
+// TestDockedGridSortAndCellSelectionUseSourceCoordinates and
+// TestDockGridHasNoViewSwitcher were ported onto ChatUI's workspacePanel in
+// chatui_sidepanel_test.go (TestChatUIDockedGridSortAndCellSelectionUseSourceCoordinates/
+// TestChatUIDockGridHasNoViewSwitcher).
+//
+// TestComposerShrinksAsWrappedAttachmentsAreRemoved (datatug-cli#291) does
+// not port for the same reason as TestComposerAttachmentChipsCanBeFocusedClearedAndRestored
+// above: it drove ui.go's own u.attachmentRows/u.chatPaneWidth/u.composerView/
+// u.historyHeight/u.attachmentCloseAt directly, and chatshell's composer has
+// no chip layout at all yet to ask the same questions of.
+//
+// TestProjectCardUsesProjectTitle, TestExplorerSelectionShowsTableAndQueryCards,
+// and TestExplorerArrowsFoldTreeAndTabSwitchesWorkspace port below onto
+// workspacePanel: the Project:/Table:/Query: explorer detail cards
+// (chatui_sidepanel.go's projectExplorer, extended here to name the
+// selected object's kind and show query type/text and typed columns) and
+// the Left/Right-folds-not-switches-tabs / Tab-switches-tabs bindings
+// (chatui_sidepanel.go's updateKey) are new ChatUI behaviour this PR adds,
+// not merely re-pointed assertions.
+
+func TestProjectCardUsesProjectTitle(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.workspace.explorerIndex = 0 // the project root node, always first.
+	u.workspace.projectDetails = true
+	view := ansi.Strip(u.workspace.projectExplorer(50, 15))
+	if !strings.Contains(view, "Project: "+u.catalog.Title) || strings.Contains(view, "Project explorer") {
+		t.Fatalf("project card title is incorrect:\n%s", view)
+	}
+}
+
+func TestExplorerSelectionShowsTableAndQueryCards(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.catalog.Objects[2].ColumnTypes = map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}
+	queryText := "SELECT GenreName\n" + strings.Repeat("-- detail line\n", 12) + "FROM purchases"
+	u.catalog.Objects = append(u.catalog.Objects, ProjectObject{Reference: ContextReference{
+		Kind: "query", SourceID: "chinook-local", ObjectID: "purchases", Title: "Customer purchases by genre",
+	}, QueryType: "SQL", QueryText: queryText})
+	for index, node := range u.workspace.explorerNodes() {
+		if node.label == "Customer" {
+			u.workspace.explorerIndex = index
+			break
+		}
+	}
+	u.workspace.projectDetails = true
+	view := ansi.Strip(u.workspace.projectExplorer(48, 24))
+	if !strings.Contains(view, "Table: Customer") || !strings.Contains(view, "CustomerId") || !strings.Contains(view, "INTEGER") {
+		t.Fatalf("table selection did not show columns card: %q", view)
+	}
+	for index, node := range u.workspace.explorerNodes() {
+		if node.label == "Customer purchases by genre" {
+			u.workspace.explorerIndex = index
+			break
+		}
+	}
+	view = ansi.Strip(u.workspace.projectExplorer(48, 24))
+	if !strings.Contains(view, "Query: Customer purchases by genre") || !strings.Contains(view, "SQL") || !strings.Contains(view, "SELECT GenreName") {
+		t.Fatalf("query selection did not show query text: %q", view)
+	}
+	for range 3 {
+		u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	}
+	view = ansi.Strip(u.workspace.projectExplorer(48, 24))
+	if !strings.Contains(view, "FROM purchases") {
+		t.Fatalf("query detail cannot scroll to end of text: %q", view)
+	}
+}
+
+func TestExplorerArrowsFoldTreeAndTabSwitchesWorkspace(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.workspace.focused = true
+	for index, node := range u.workspace.explorerNodes() {
+		if node.id == "source:chinook-local" {
+			u.workspace.explorerIndex = index
+			break
+		}
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if !u.workspace.explorerCollapsed["source:chinook-local"] || u.workspace.tab != 0 {
+		t.Fatalf("Left should collapse source, not switch tab: collapsed=%v tab=%d", u.workspace.explorerCollapsed["source:chinook-local"], u.workspace.tab)
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	if u.workspace.explorerCollapsed["source:chinook-local"] || u.workspace.tab != 0 {
+		t.Fatalf("Right should expand source, not switch tab: collapsed=%v tab=%d", u.workspace.explorerCollapsed["source:chinook-local"], u.workspace.tab)
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	if u.workspace.tab != 1 {
+		t.Fatalf("Tab should switch workspace tab: %d", u.workspace.tab)
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if u.workspace.tab != 0 {
+		t.Fatalf("Shift+Tab should switch back: %d", u.workspace.tab)
+	}
+}

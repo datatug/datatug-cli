@@ -86,7 +86,12 @@ func TestChatUISubmitWithNoQueriesAppendsFallbackText(t *testing.T) {
 	cmd := u.Submit("nonsense")
 	drainCmd(t, u, cmd)
 	view := u.shell.View().Content
-	if !strings.Contains(view, "couldn't construct a valid query") {
+	// finalizeTurn's empty-turn fallback text was generalized in
+	// datatug-cli#291 from "I couldn't construct a valid query for that
+	// request." (which claimed a DTQL parse attempt that never happened
+	// for a stub agent returning a bare empty Turn) to this provider-
+	// neutral message.
+	if !strings.Contains(view, "The AI model returned no query or answer") {
 		t.Errorf("expected fallback text in view:\n%s", view)
 	}
 }

@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/strongo/aichat/tui/chatshell"
+	"github.com/strongo/aichat/tui/focus"
 )
 
 // globalKeys satisfies chatshell.GlobalKeysFunc, checked before chatshell's
@@ -40,10 +41,30 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case "alt+s", "ß": // macOS Option+S emits ß unless the terminal maps Option to Meta (ui.go's own alias).
 		return u.cycleTableStyle(), true
 	case "f5":
-		if u.browserURL != "" {
-			u.webLinkVisible = !u.webLinkVisible
+		// ui.go's F5: try to open the actual browser first (M6's web
+		// handoff), falling back to showing the hyperlink -- e.g. no GUI
+		// browser is reachable over SSH -- only when that open fails.
+		// F5 while the fallback link is already visible hides it, same as
+		// Esc below.
+		if u.webLinkVisible {
+			u.webLinkVisible = false
+			return nil, true
 		}
-		return nil, true
+		if u.browserURL == "" {
+			return nil, true
+		}
+		url, open := u.browserURL, u.openBrowser
+		if open == nil {
+			u.webLinkVisible = true
+			return nil, true
+		}
+		return func() tea.Msg { return browserOpenResultMsg{url: url, err: open(url)} }, true
+	case "esc":
+		if u.webLinkVisible {
+			u.webLinkVisible = false
+			return nil, true
+		}
+		return nil, false
 	case "f2":
 		// ui.go's F2 mouseCapture toggle, ported onto chatshell's
 		// SetMouseEnabled: on (the default -- see NewChatUI's
@@ -54,15 +75,15 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "ctrl+d":
 		// ui.go's Ctrl+D: detach the most recently attached workspace item
-		// from the composer's attachment chips. ui.go only handled this
-		// while the composer (not a focused grid/message) held the key --
-		// chatshell.Model has no exported focus-zone accessor to reproduce
-		// that guard here (see M5's status-hints-follow-focus item, blocked
-		// on the same gap), so it fires regardless of the current focus
-		// zone; Ctrl+D has no other binding chatshell or ChatUI assigns, so
-		// this is a strict capability restoration, not a conflicting one.
-		if u.sessions == nil || len(u.snapshot.Workspace.Attachments) == 0 {
-			return nil, true
+		// from the composer's attachment chips, only while the composer
+		// (not a focused grid/message/sidebar) holds the key -- gated on
+		// chatshell.Model.Zone()/focus.ZoneInput, now exported. Outside the
+		// composer zone, or with no attachment to detach, this falls
+		// through (return nil, false) to chatshell's own key handling --
+		// e.g. its normal forward-delete inside a focused text field --
+		// instead of swallowing Ctrl+D unconditionally.
+		if u.sessions == nil || u.shell.Zone() != focus.ZoneInput || len(u.snapshot.Workspace.Attachments) == 0 {
+			return nil, false
 		}
 		last := u.snapshot.Workspace.Attachments[len(u.snapshot.Workspace.Attachments)-1]
 		if err := u.applyWorkspaceAction(WorkspaceAction{Kind: "detach", Reference: last}); err != nil {

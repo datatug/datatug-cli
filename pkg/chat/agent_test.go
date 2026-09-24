@@ -73,6 +73,20 @@ func TestRunDTQLReturnsPersistedRecordSetReference(t *testing.T) {
 	}
 }
 
+func TestJoinedQueryDoesNotReportSuccessWhenPersistenceFails(t *testing.T) {
+	conversation := &AIConversation{}
+	ctx := withAttachedJoin(context.Background(), func(_ context.Context, base QueryResult) (QueryResult, bool, error) {
+		base.DTQL = "from: {name: Invoice, joins: [{from: {name: Customer}, type: LEFT, on: [{left: {field: CustomerId, source: Invoice}, op: '==', right: {field: CustomerId, source: Customer}}]}]}\nlimit: 5"
+		base.Result = secureread.Result{Columns: []string{"InvoiceId"}}
+		return base, true, nil
+	})
+	ctx = withQueryObserver(ctx, func(QueryResult) (QueryResult, error) { return QueryResult{}, errors.New("storage unavailable") })
+	response, err := conversation.runDTQL(ctx, &fakeExecutor{}, "sqlite:///chinook.db", runDTQLArgs{DTQL: "from: {name: Invoice}\nlimit: 5"})
+	if err != nil || response.OK || response.Error == "" {
+		t.Fatalf("joined result falsely reported as saved: %+v, %v", response, err)
+	}
+}
+
 func TestRunDTQLRefusesModelAuthoredJoin(t *testing.T) {
 	executor := &fakeExecutor{}
 	conversation := &AIConversation{}
@@ -286,6 +300,46 @@ type scriptedProvider struct {
 	steps    []scriptedStep
 	requests []ai.ChatRequest
 	calls    int
+}
+
+// TestAgentQueryAutomaticallyJoinsAttachedCustomerIntoOneRecordSet ports
+// origin/main's ADK-era test (datatug-cli#291) onto the aichat scriptedProvider
+// fake: a model-authored single-table query against an attached table (here
+// Customer, attached over Invoice via a many-to-one FK) is transparently
+// widened into one joined RecordSet instead of executing the base query.
+func TestAgentQueryAutomaticallyJoinsAttachedCustomerIntoOneRecordSet(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	catalog := workspaceTestCatalog()
+	catalog.Objects[2].Reference.SourceID = "chinook"
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"title": "Invoices", "dtql": "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5"})}},
+		{text: "Done."},
+	}}
+	baseExecutor := &fakeExecutor{}
+	conversation, err := NewAIConversation(llm, baseExecutor, "sqlite:///chinook.db", "- Invoice\n- Customer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := NewSessionChat(ctx, store, conversation, "sqlite:///chinook.db", catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "attach", Reference: catalog.Objects[2].Reference}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := joinSnapshot()
+	snapshot.Source = "sqlite:///chinook.db"
+	joinExecutor := &joinExecutorStub{}
+	chat.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: snapshot.Source, Snapshot: snapshot, Executor: joinExecutor})
+	turn, err := chat.Ask(ctx, "Show invoices")
+	if err != nil || len(turn.Queries) != 1 || turn.Queries[0].Err != nil || baseExecutor.calls != 0 {
+		t.Fatalf("attached query did not use one joined result: turn=%+v err=%v base calls=%d", turn, err, baseExecutor.calls)
+	}
+	saved, err := chat.Snapshot(ctx)
+	if err != nil || len(saved.RecordSets) != 1 || !strings.Contains(turn.Queries[0].DTQL, "Customer") || !strings.Contains(joinExecutor.doc, "joins:") {
+		t.Fatalf("joined RecordSet not persisted: records=%d query=%+v doc=%q err=%v", len(saved.RecordSets), turn.Queries[0], joinExecutor.doc, err)
+	}
 }
 
 func (p *scriptedProvider) Name() string { return "scripted" }
@@ -544,6 +598,60 @@ func TestAIConversation_TextResponseFiltersThinkTags(t *testing.T) {
 	if len(turn.Queries) != 0 {
 		t.Fatalf("Queries = %+v", turn.Queries)
 	}
+}
+
+// TestThinkTagStreamFilterHidesReasoningAcrossChunkBoundaries covers
+// thinkTagStreamFilter's whole job: chatui.go's askOpenFunc live-forwards
+// each ai.EventTextDelta before stripThinkTags ever sees the assembled
+// turn, so a <think> block (and its closing tag, and the plain text before
+// and after it) has to come out right even when a real provider splits it
+// arbitrarily across separate deltas -- including splitting the literal
+// "<think>"/"</think>" tag text itself mid-tag, which a naive
+// per-delta regexp/strings.Contains check would miss.
+func TestThinkTagStreamFilterHidesReasoningAcrossChunkBoundaries(t *testing.T) {
+	t.Run("whole block in one delta", func(t *testing.T) {
+		var f thinkTagStreamFilter
+		got := f.Filter("Before <think>secret</think> after")
+		if got != "Before  after" {
+			t.Fatalf("got %q", got)
+		}
+	})
+	t.Run("tag split across deltas", func(t *testing.T) {
+		var f thinkTagStreamFilter
+		var out strings.Builder
+		for _, chunk := range []string{"Before <thi", "nk>sec", "ret</th", "ink> after"} {
+			out.WriteString(f.Filter(chunk))
+		}
+		if got := out.String(); got != "Before  after" {
+			t.Fatalf("got %q", got)
+		}
+	})
+	t.Run("open tag never closes", func(t *testing.T) {
+		var f thinkTagStreamFilter
+		var out strings.Builder
+		out.WriteString(f.Filter("visible <think>still reason"))
+		out.WriteString(f.Filter("ing, never closes"))
+		if got := out.String(); got != "visible " {
+			t.Fatalf("got %q, want reasoning to stay hidden with no closing tag", got)
+		}
+	})
+	t.Run("no think tag passes through untouched", func(t *testing.T) {
+		var f thinkTagStreamFilter
+		var out strings.Builder
+		for _, chunk := range []string{"plain ", "answer ", "text"} {
+			out.WriteString(f.Filter(chunk))
+		}
+		if got := out.String(); got != "plain answer text" {
+			t.Fatalf("got %q", got)
+		}
+	})
+	t.Run("angle bracket that is not a think tag stays visible", func(t *testing.T) {
+		var f thinkTagStreamFilter
+		got := f.Filter("1 < 2 and 3 <th> not a tag")
+		if got != "1 < 2 and 3 <th> not a tag" {
+			t.Fatalf("got %q", got)
+		}
+	})
 }
 
 func TestRunDTQLTool_EmptyAndExecutionErrorsStayStructured(t *testing.T) {

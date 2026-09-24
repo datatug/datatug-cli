@@ -37,9 +37,14 @@ type ProjectChoice struct {
 	Detail string
 }
 
-// responsiveGutter/contentWidth/padAnsiLine are DataTug's general
+// responsiveGutter/contentWidth/padAnsiLine were DataTug's general
 // terminal-layout helpers, used well beyond the grid (message cards, the
-// workspace pane, the status bar); tui/grid has its own copies (including
+// workspace pane, the status bar) by the now-retired legacy UI; ChatUI
+// computes its own widths through chatshell instead (see chatWidth's own
+// comment). contentWidth survives only as grid_state_test.go's reference
+// formula for the width a real ChatUI grid renders at -- responsiveGutter
+// has no caller left outside it. padAnsiLine is still genuinely shared
+// (chatui_sidepanel.go's View). tui/grid has its own copies (including
 // borderLine, DataTug-side dead code now that the grid's own card border
 // render fully moved there) for the grid's own card border, since a
 // shared-code seam here would leak DataTug's rendering conventions into the

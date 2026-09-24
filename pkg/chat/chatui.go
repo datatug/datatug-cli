@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/pkg/browser"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/tui/chatshell"
 	"github.com/strongo/aichat/tui/focus"
@@ -66,8 +67,14 @@ type ChatUI struct {
 	selectedProject string
 	browserURL      string
 	webLinkVisible  bool
-	bridgeEvents    <-chan struct{}
-	bridgeStop      func()
+	// openBrowser is ui.go's browser.OpenURL seam: F5 tries it first and
+	// only falls back to showing the hyperlink (webLinkVisible) when it
+	// fails -- e.g. no GUI browser available over SSH. Overridable in
+	// tests (see chatui_bridge_test.go); nil is treated the same as an
+	// always-failing opener.
+	openBrowser  func(string) error
+	bridgeEvents <-chan struct{}
+	bridgeStop   func()
 
 	// pendingTurns holds the structured Turn a StartStream call produced,
 	// keyed by stream ID, from the moment the streaming goroutine finishes
@@ -150,6 +157,7 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		gridsByRecordSetID:      map[string]*gridState{},
 		joinBlocksByRecordSetID: map[string]*JoinBlock{},
 		transcriptEntryKinds:    map[string]string{},
+		openBrowser:             browser.OpenURL,
 	}
 	u.workspace = newWorkspacePanel(u)
 	u.shell = chatshell.New(u,
@@ -298,7 +306,18 @@ func (u *ChatUI) askOpenFunc(ctx context.Context, id, prompt string) iter.Seq2[a
 	if u.sessions != nil {
 		events, resolve := u.sessions.StreamAsk(ctx, prompt)
 		return func(yield func(ai.Event, error) bool) {
+			// thinkFilter hides a <think>...</think> block live, delta by
+			// delta, instead of only once OnStreamDone's ReplaceBlock swaps
+			// in the final, already-stripThinkTags'd Turn.Text -- see
+			// thinkTagStreamFilter's own doc comment (agent.go).
+			var thinkFilter thinkTagStreamFilter
 			for event, err := range events {
+				if event.Type == ai.EventTextDelta {
+					event.Text = thinkFilter.Filter(event.Text)
+					if event.Text == "" && err == nil {
+						continue
+					}
+				}
 				// events terminates itself after a fatal (event, err) pair, so
 				// no separate err!=nil early-return is needed here — falling
 				// through always reaches resolve() below, whether the sequence
@@ -481,6 +500,14 @@ func (u *ChatUI) chatWidth() int {
 // OnMsg satisfies chatshell.MsgHandler.
 func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case browserOpenResultMsg:
+		// ui.go's browserOpenResult case: only a failed attempt for the
+		// still-current browserURL reveals the hyperlink fallback. A
+		// success leaves webLinkVisible false -- the browser opened.
+		if msg.url == u.browserURL && msg.err != nil {
+			u.webLinkVisible = true
+		}
+		return nil
 	case userMessageEditMsg:
 		u.shell.SetComposerText(msg.text)
 		return nil

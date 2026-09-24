@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -49,21 +50,35 @@ func TestChatUIBrowserBridgeSharesSessionWithTerminal(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = bridge.Close() })
 	terminal.SetBrowserURL(bridge.URL)
+	var openedURL string
+	terminal.openBrowser = func(url string) error { openedURL = url; return nil }
 	if terminal.webLinkVisible {
 		t.Fatal("web link was visible before F5")
 	}
+	// A successful open (M6's web handoff) fires u.openBrowser and leaves
+	// the hyperlink fallback hidden -- the real browser opened.
 	cmd, consumed := terminal.globalKeys(tea.KeyPressMsg{Code: tea.KeyF5})
 	if !consumed {
 		t.Fatal("expected F5 to be consumed by globalKeys")
 	}
 	drainCmd(t, terminal, cmd)
-	if !terminal.webLinkVisible || !strings.Contains(terminal.shell.View().Content, "Open web chat") {
-		t.Fatal("F5 did not reveal web link")
+	if openedURL != bridge.URL || terminal.webLinkVisible {
+		t.Fatalf("F5 open result = %q, overlay=%v", openedURL, terminal.webLinkVisible)
 	}
+	// A failed open falls back to showing the hyperlink.
+	terminal.openBrowser = func(string) error { return errors.New("no browser available") }
 	cmd, _ = terminal.globalKeys(tea.KeyPressMsg{Code: tea.KeyF5})
 	drainCmd(t, terminal, cmd)
+	if !terminal.webLinkVisible || !strings.Contains(terminal.shell.View().Content, "Open web chat") {
+		t.Fatal("failed F5 did not reveal web link")
+	}
+	cmd, consumed = terminal.globalKeys(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if !consumed {
+		t.Fatal("expected Esc to be consumed by globalKeys while the fallback link is visible")
+	}
+	drainCmd(t, terminal, cmd)
 	if terminal.webLinkVisible {
-		t.Fatal("second F5 did not hide web link")
+		t.Fatal("Esc did not hide failed-browser dialog")
 	}
 	link, err := url.Parse(bridge.URL)
 	if err != nil {

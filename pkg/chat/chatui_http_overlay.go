@@ -152,9 +152,10 @@ func (u *ChatUI) handleHTTPDone(msg httpDoneMsg) {
 
 // httpRequestOverlay is ChatUI's chatshell.Overlay port of the retired
 // legacy UI's httpRequestDialog: method/URL/headers/body fields,
-// Ctrl+Enter submits. "Save as project query" is not yet wired to its own
-// Overlay — it reports "not yet available" rather than silently doing
-// nothing (see M5 in the r1 adversarial review; still open).
+// Ctrl+Enter submits. "Save as project query" (saveAsProjectQuery below)
+// pushes ChatUI's own saveQueryOverlay on top of this one -- GET-only,
+// custom-header-free requests, same constraints ui.go's saveHTTPRequestFromDialog
+// enforced -- rather than reporting "not yet available".
 type httpRequestOverlay struct {
 	ui *ChatUI
 

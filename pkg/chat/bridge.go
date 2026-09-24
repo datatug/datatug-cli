@@ -22,6 +22,16 @@ import (
 // ui.go) so it survives ui.go's deletion; both UIs share the same message type.
 type bridgeTickMsg struct{}
 
+// browserOpenResultMsg reports the outcome of ChatUI's F5-triggered
+// u.openBrowser(url) attempt (chatui_pickers.go's globalKeys "f5" case).
+// ChatUI.OnMsg only shows the hyperlink fallback (webLinkVisible) when Err
+// is non-nil and still names the URL that was tried -- a stale result for
+// an already-changed browserURL is ignored.
+type browserOpenResultMsg struct {
+	url string
+	err error
+}
+
 // BrowserBridge exposes the active CLI chat to a browser on a loopback-only port.
 // The capability stays in the web URL fragment and is sent in a request header.
 type BrowserBridge struct {

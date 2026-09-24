@@ -120,6 +120,16 @@ func (a ForeignKeyJoinApplication) Candidates(ctx context.Context, record Record
 }
 
 func (a ForeignKeyJoinApplication) Apply(ctx context.Context, record RecordSet, id JoinCandidateID) (QueryResult, error) {
+	return a.apply(ctx, record, id, dal.JoinInner)
+}
+
+// ApplyAttached preserves rows from a fresh root query when optional attached
+// metadata is joined. Interactive JOIN actions keep their existing semantics.
+func (a ForeignKeyJoinApplication) ApplyAttached(ctx context.Context, record RecordSet, id JoinCandidateID) (QueryResult, error) {
+	return a.apply(ctx, record, id, dal.JoinLeft)
+}
+
+func (a ForeignKeyJoinApplication) apply(ctx context.Context, record RecordSet, id JoinCandidateID, joinType dal.JoinType) (QueryResult, error) {
 	if a.Executor == nil {
 		return QueryResult{}, fmt.Errorf("JOIN exploration has no secure query executor")
 	}
@@ -137,7 +147,7 @@ func (a ForeignKeyJoinApplication) Apply(ctx context.Context, record RecordSet, 
 	if a.Secure && !a.canExpandQuery(ctx, q.From()) {
 		return QueryResult{}, fmt.Errorf("JOIN exploration cannot prove every existing source is fully readable under this policy")
 	}
-	doc, candidate, err := DeriveJoinDTQL([]byte(record.DTQL), snapshot, id, appliedEdges(record)...)
+	doc, candidate, err := deriveJoinDTQL([]byte(record.DTQL), snapshot, id, joinType, appliedEdges(record)...)
 	if err != nil {
 		return QueryResult{}, err
 	}
@@ -362,6 +372,10 @@ func DiscoverJoinCandidates(doc []byte, snapshot ForeignKeySnapshot, applied ...
 // DeriveJoinDTQL derives a real AST join. It refuses a stale candidate rather
 // than accepting caller-provided field names or a replacement relation.
 func DeriveJoinDTQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidateID, applied ...AppliedJoinEdge) ([]byte, JoinCandidate, error) {
+	return deriveJoinDTQL(parent, snapshot, id, dal.JoinInner, applied...)
+}
+
+func deriveJoinDTQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidateID, joinType dal.JoinType, applied ...AppliedJoinEdge) ([]byte, JoinCandidate, error) {
 	candidates, err := DiscoverJoinCandidates(parent, snapshot, applied...)
 	if err != nil {
 		return nil, JoinCandidate{}, err
@@ -416,7 +430,7 @@ func DeriveJoinDTQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidate
 		return nil, JoinCandidate{}, fmt.Errorf("selected relation instance is stale")
 	}
 	candidate.Target.ID = RelationInstanceID(fmt.Sprintf("%s/%d", candidate.Source.ID, len(node.Joins())))
-	node.Join(dal.NewJoinedSource(target, dal.JoinInner, on...))
+	node.Join(dal.NewJoinedSource(target, joinType, on...))
 	derived, err := dtql.Serialize(q)
 	if err != nil {
 		return nil, JoinCandidate{}, fmt.Errorf("derive JOIN DTQL: %w", err)

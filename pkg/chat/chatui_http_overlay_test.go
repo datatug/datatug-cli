@@ -511,6 +511,28 @@ func TestHTTPDocumentBlockRawHeaderToggle(t *testing.T) {
 	if !strings.Contains(view, "Content-Type") {
 		t.Fatalf("headers not shown: %s", view)
 	}
+
+	block, cmd := b.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if block != b || cmd != nil {
+		t.Fatalf("non-key message should be a no-op: block=%v cmd=%v", block, cmd)
+	}
+
+	b.Update(tea.KeyPressMsg{Text: "1"})
+	if b.showRaw || b.showHeaders {
+		t.Fatal("\"1\" did not return to rendered view")
+	}
+}
+
+// TestHTTPDocumentBlockShowsVersionBadgeAheadOfSummary covers View's
+// versionBadge prefix, set when a saved HTTP response was re-fetched and
+// differs from the version last shown (see runHTTPRefresh).
+func TestHTTPDocumentBlockShowsVersionBadgeAheadOfSummary(t *testing.T) {
+	response := &HTTPResponse{Method: "GET", StatusCode: 200, ContentType: "text/plain", Body: []byte("hello")}
+	b := &httpDocumentBlock{text: "hello", response: response, versionBadge: "v2"}
+	view := ansi.Strip(b.View(80, false))
+	if !strings.Contains(view, "v2 · GET") {
+		t.Fatalf("version badge not shown ahead of summary: %q", view)
+	}
 }
 
 // TestHTTPDocumentBlockSaveAsQueryForNonTableResponse is the M5 regression

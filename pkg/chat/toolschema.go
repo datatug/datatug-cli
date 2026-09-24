@@ -22,13 +22,20 @@ import (
 // It supports the plain scalar/slice/nested-struct shapes DataTug's tool
 // argument types use; anything else is a programmer error and panics at
 // tool-construction time (caught by tests, never reached at runtime).
+// marshalToolSchema is json.Marshal by default; structSchema only ever
+// builds maps of strings/bools/nested maps/string slices, which
+// encoding/json cannot fail to marshal, so this seam exists solely to let a
+// test drive argsSchema's otherwise-unreachable marshal-error panic without
+// fabricating a schema shape structSchema could never actually produce.
+var marshalToolSchema = json.Marshal
+
 func argsSchema(v any) json.RawMessage {
 	t := reflect.TypeOf(v)
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	schema := structSchema(t)
-	b, err := json.Marshal(schema)
+	b, err := marshalToolSchema(schema)
 	if err != nil {
 		panic(fmt.Sprintf("chat: marshal tool schema for %s: %v", t, err))
 	}

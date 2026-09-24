@@ -37,6 +37,12 @@ type cellDetail struct {
 
 func (d *cellDetail) copyValue() string { return FormatValue(d.value) }
 
+// serializePreviewQuery is dtql.Serialize by default; PreviewRelated always
+// builds a well-formed, valid dal.StructuredQuery from fixed components, so
+// this seam exists solely to let a test drive its otherwise-unreachable
+// serialize-error branch.
+var serializePreviewQuery = dtql.Serialize
+
 // PreviewRelated resolves only an authoritative outgoing FK and reads up to
 // five matching records through the same DTQL/policy executor as chat queries.
 func (a ForeignKeyJoinApplication) PreviewRelated(ctx context.Context, record RecordSet, selected string, row map[string]any) ([]relatedRecord, error) {
@@ -89,7 +95,7 @@ func (a ForeignKeyJoinApplication) PreviewRelated(ctx context.Context, record Re
 			collection = dal.NewQualifiedRootCollectionRef(fk.ToSchema, fk.ToRelation, "")
 		}
 		query := dal.From(collection).NewQuery().Where(conditions...).Limit(5).SelectColumns()
-		doc, err := dtql.Serialize(query)
+		doc, err := serializePreviewQuery(query)
 		if err != nil {
 			return nil, err
 		}

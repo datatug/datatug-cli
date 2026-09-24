@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
 func TestChatUIF4OpensSessionPickerAndSwitches(t *testing.T) {
@@ -84,5 +86,40 @@ func TestChatUISessionPickerEscCloses(t *testing.T) {
 	_, _, done := overlay.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !done {
 		t.Fatal("expected Esc to close the session picker overlay")
+	}
+}
+
+func TestChatUICtrlRRefreshesLastRecordSet(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin, err := store.AppendUser(ctx, sessions.activeID, "Show invoices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := "from: {name: Invoice}\nlimit: 20"
+	query, err := store.AppendQuery(ctx, sessions.activeID, origin.ID, "sqlite:///chinook.db", QueryResult{Title: "Invoices", DTQL: doc, SourceID: "chinook", Result: secureread.Result{Columns: []string{"InvoiceId"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 412}}}}}
+	sessions.ConfigureQueryExecutor(executor)
+
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.lastGridRecordSetID = query.RecordSetID
+
+	cmd, consumed := u.globalKeys(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	if !consumed {
+		t.Fatal("expected Ctrl+R to be consumed by globalKeys")
+	}
+	drainCmd(t, u, cmd)
+	if executor.calls != 1 {
+		t.Fatalf("expected the refresh to re-run the saved DTQL once, got %d calls", executor.calls)
 	}
 }

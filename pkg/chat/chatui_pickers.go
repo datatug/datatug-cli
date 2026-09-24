@@ -38,8 +38,40 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			u.shell.FocusEntry(u.lastGridEntryID)
 		}
 		return nil, true
+	case "ctrl+r":
+		return u.refreshLastRecordSet(), true
 	}
 	return nil, false
+}
+
+// refreshLastRecordSet is a simplified port of refresh_ui.go's
+// refreshSelectedCard for a query RecordSet (checklist item — refresh
+// flow): re-runs the most recently appended grid's stored DTQL, same as
+// pressing Ctrl+R on a focused grid in ui.go. It targets
+// lastGridRecordSetID (the same "most recent, not necessarily focused,
+// grid" simplification /export current already uses — see the Lane C
+// report) rather than the true focused grid, since ChatUI has no equivalent
+// of ui.go's u.activeGrid/u.gridFocused yet. HTTP-response refresh
+// (ui.go's other refreshSelectedCard branch) is not ported.
+func (u *ChatUI) refreshLastRecordSet() tea.Cmd {
+	if u.sessions == nil || u.shell.Busy() || u.lastGridRecordSetID == "" {
+		return nil
+	}
+	record, ok := u.snapshot.RecordSets[u.lastGridRecordSetID]
+	if !ok || record.DTQL == "" {
+		u.shell.AppendAssistant("Saved SQL and HTTP project results cannot be refreshed here. Run the project query again from /query.")
+		return nil
+	}
+	recordSetID, sessionID, ctx := u.lastGridRecordSetID, u.sessionID, u.ctx
+	busyCmd := u.shell.SetBusy(true)
+	runCmd := func() tea.Msg {
+		snapshot, err := u.sessions.RefreshRecordSet(ctx, sessionID, recordSetID)
+		return httpDoneMsg{sessionID: sessionID, snapshot: snapshot, err: err}
+	}
+	if busyCmd != nil {
+		return tea.Batch(busyCmd, runCmd)
+	}
+	return runCmd
 }
 
 // openSessionPicker loads the session list (ui.go's loadPickerSessions) and

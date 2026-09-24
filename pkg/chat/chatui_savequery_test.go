@@ -94,16 +94,22 @@ func TestChatUISavedQueryAutocompleteAliasesFilterAndExecute(t *testing.T) {
 	if err := u.SetSavedQueryService(service); err != nil {
 		t.Fatal(err)
 	}
-	// Searching by tag alias ("city") lists both tagged queries, labeled
-	// with their type — ui.go's savedQueryMenuView labeling, now
-	// runQueryCommand's listing text (a single match runs directly instead
-	// of listing — ChatUI has no live composer-integrated menu to hold a
-	// pending selection, unlike ui.go's savedQueryMenuView; see
-	// runQueryCommand's own comment).
+	// Searching by tag alias ("city") pushes savedQueryPickerOverlay listing
+	// both tagged queries, labeled with their type — the ChatUI-era
+	// replacement for ui.go's reopened live-filtered slash-command menu
+	// (see runQueryCommand's own comment) for the multiple-match case; a
+	// single match still runs directly instead (below).
 	drainCmd(t, u, u.Submit("/query city"))
 	view := u.shell.View().Content
 	if !strings.Contains(view, "Prague customers") || !strings.Contains(view, "Berlin customers") || strings.Contains(view, "Recent orders") || !strings.Contains(view, "[DTQL]") {
 		t.Fatalf("tag alias did not filter/label saved queries:\n%s", view)
+	}
+	// Enter on the picker's first (default-selected) match runs it, the
+	// same way selecting a single match directly would.
+	_, cmd := u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	drainCmd(t, u, cmd)
+	if service.ranID != "customers/prague" {
+		t.Fatalf("Enter on the saved-query picker did not run the selected query: ranID=%q", service.ranID)
 	}
 	// A search with exactly one match runs it directly — both /query and
 	// /queries route through the same runQueryCommand.

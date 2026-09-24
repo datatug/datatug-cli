@@ -137,12 +137,74 @@ func (u *ChatUI) runQueryCommand(argument string) (tea.Cmd, error) {
 	if len(matches) == 1 && argument != "" {
 		return u.selectSavedQuery(matches[0]), nil
 	}
-	lines := []string{fmt.Sprintf("Saved project queries (%d):", len(matches))}
-	for _, query := range matches {
-		lines = append(lines, fmt.Sprintf("- %s [%s] — /query %s", nonempty(query.Title, query.ID), query.Type, query.ID))
+	// M5 (r1 adversarial review of #289): ui.go showed the interactive menu
+	// first here (u.input.SetValue(command+" "+argument);
+	// u.commandMenuDismissed = "" reopened its own live-filtered slash-menu
+	// widget) rather than a static printed list the user then had to retype
+	// an exact ID into. ChatUI has no equivalent live-filtered "/" menu
+	// state to reopen (chatCommands/commandMenuMatches filters by command
+	// NAME, not by saved-query title/tags), so this pushes a dedicated
+	// savedQueryPickerOverlay instead — arrow keys choose, Enter runs,
+	// matching the picker pattern sessionPickerOverlay/projectPickerOverlay
+	// already use.
+	return u.shell.PushOverlay(&savedQueryPickerOverlay{ui: u, queries: matches}), nil
+}
+
+// savedQueryPickerOverlay is /query's (multiple- or zero-argument-match)
+// chatshell.Overlay — ↑↓/j·k choose, Enter runs (via ChatUI.selectSavedQuery,
+// which itself may push a queryParametersOverlay), Esc/q closes without
+// running anything. The ChatUI-era replacement for ui.go's reopened
+// live-filtered slash-command menu (see runQueryCommand's comment).
+type savedQueryPickerOverlay struct {
+	ui      *ChatUI
+	queries []SavedQuery
+	index   int
+}
+
+func (o *savedQueryPickerOverlay) View(width, height int) string {
+	lines := []string{fmt.Sprintf("Saved project queries (%d)  ↑↓ choose · Enter run · Esc close", len(o.queries))}
+	for i, query := range o.queries {
+		marker := "  "
+		if i == o.index {
+			marker = "▸ "
+		}
+		lines = append(lines, fmt.Sprintf("%s%s [%s] — %s", marker, nonempty(query.Title, query.ID), query.Type, query.ID))
 	}
-	u.shell.AppendAssistant(strings.Join(lines, "\n"))
-	return nil, nil
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for i, line := range lines {
+		lines[i] = padAnsiLine(line, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (o *savedQueryPickerOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd, bool) {
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return o, nil, false
+	}
+	switch key.String() {
+	case "up", "k":
+		if o.index > 0 {
+			o.index--
+		}
+	case "down", "j":
+		if o.index+1 < len(o.queries) {
+			o.index++
+		}
+	case "enter":
+		if o.index >= 0 && o.index < len(o.queries) {
+			return o, o.ui.selectSavedQuery(o.queries[o.index]), true
+		}
+		return o, nil, true
+	case "esc", "q":
+		return o, nil, true
+	}
+	return o, nil, false
 }
 
 // --- queryParametersOverlay (checklist item #48) --------------------------

@@ -342,6 +342,36 @@ func TestAgentQueryAutomaticallyJoinsAttachedCustomerIntoOneRecordSet(t *testing
 	}
 }
 
+// TestAgentRetriesEmptyModelTurnBeforeGivingUpOnQuery ports origin/main's
+// ADK-era test (datatug-cli#291) onto the aichat scriptedProvider fake: an
+// outright empty first model turn (no text, no tool call) gets exactly one
+// retry with the nudge prompt before the loop gives up, and that retry
+// succeeds into a structured run_dtql query.
+func TestAgentRetriesEmptyModelTurnBeforeGivingUpOnQuery(t *testing.T) {
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{},
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{
+			"title": "Latest invoices", "dtql": "from: {name: Invoice}\norderBy: [{field: InvoiceId, desc: true}]\nlimit: 100",
+		})}},
+		{text: "Done."},
+	}}
+	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 412}}}}}
+	conversation, err := NewAIConversation(llm, executor, "sqlite:///chinook.db", "- Invoice (schema: main): InvoiceId [INTEGER]")
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := conversation.Ask(context.Background(), "Show last 100 invoices")
+	if err != nil || len(turn.Queries) != 1 || turn.Queries[0].Err != nil || executor.calls != 1 {
+		t.Fatalf("empty model turn was not retried into a structured query: turn=%+v err=%v calls=%d", turn, err, executor.calls)
+	}
+	if got := len(llm.requests); got != 3 {
+		t.Fatalf("expected 3 model calls (empty, retried run_dtql, final text), got %d", got)
+	}
+	if text := llm.requests[1].Messages[len(llm.requests[1].Messages)-1].Text; text != emptyTurnRetryPrompt {
+		t.Fatalf("retry did not send the nudge prompt as a fresh user turn: %q", text)
+	}
+}
+
 func (p *scriptedProvider) Name() string { return "scripted" }
 
 func (p *scriptedProvider) Stream(_ context.Context, req ai.ChatRequest) iter.Seq2[ai.Event, error] {

@@ -279,6 +279,13 @@ func resolveEndpoint(modelName, baseURL, apiKey string) (resolvedEndpoint, error
 	resolvedBaseURL := strings.TrimSpace(baseURL)
 	if !explicit && def.baseURLEnv != "" {
 		resolvedBaseURL = strings.TrimSpace(os.Getenv(def.baseURLEnv))
+		if family == "ollama" && resolvedBaseURL != "" {
+			// OLLAMA_HOST is conventionally set as a bare "host:port" (e.g.
+			// "127.0.0.1:11434", Ollama's own default), unlike
+			// OPENAI_BASE_URL/ANTHROPIC_BASE_URL which are always full URLs --
+			// ported from pi-go's normalizeBaseURL.
+			resolvedBaseURL = ensureScheme(resolvedBaseURL)
+		}
 	}
 	if resolvedBaseURL == "" {
 		resolvedBaseURL = def.defaultBaseURL
@@ -333,6 +340,17 @@ func resolveEndpoint(modelName, baseURL, apiKey string) (resolvedEndpoint, error
 		return resolvedEndpoint{protocol: protocolOpenAIResponses, baseURL: resolvedBaseURL, apiKey: resolvedKey, model: bareModel}, nil
 	}
 	return resolvedEndpoint{protocol: protocolOpenAICompatible, baseURL: resolvedBaseURL, apiKey: resolvedKey, model: bareModel}, nil
+}
+
+// ensureScheme prefixes a bare "host:port"/"host" value with "http://" when
+// it carries no scheme, so it parses as an absolute URL downstream (ensureV1,
+// the HTTP client). OLLAMA_HOST is the only baseURLEnv this repo reads that
+// is conventionally set without one.
+func ensureScheme(raw string) string {
+	if strings.Contains(raw, "://") {
+		return raw
+	}
+	return "http://" + raw
 }
 
 // ensureV1 appends a trailing "/v1" path segment when the given base URL

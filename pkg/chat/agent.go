@@ -763,6 +763,23 @@ func (c *AIConversation) hasSuccessfulPending() bool {
 	return false
 }
 
+// hasPending reports any captured query result, successful or not -- unlike
+// hasSuccessfulPending, used by the empty-turn retry (StreamAskWithContext),
+// which must not retry a turn that produced a genuine (if failed) attempt.
+func (c *AIConversation) hasPending() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.pending) > 0
+}
+
+// hasActions reports any captured workspace-action result, mirroring
+// hasPending for the empty-turn retry.
+func (c *AIConversation) hasActions() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.actions) > 0
+}
+
 func (c *AIConversation) takeActions() []WorkspaceActionResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -878,7 +895,6 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 		defer cancel()
 
 		loop := c.newLoop()
-		req := c.buildRequest(prompt, priorContext)
 
 		var text strings.Builder
 		var partial, usage *TokenUsage
@@ -894,32 +910,54 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 			}
 			c.setLastStreamTurn(Turn{Text: turnText, Queries: queries, Actions: actions, Usage: usage})
 		}
-		for event, err := range loop.Run(turnCtx, req) {
-			if err != nil {
-				finish()
-				yield(event, err)
-				return
+
+		requestPrompt, requestContext := prompt, priorContext
+		for attempt := 0; attempt < 2; attempt++ {
+			req := c.buildRequest(requestPrompt, requestContext)
+			for event, err := range loop.Run(turnCtx, req) {
+				if err != nil {
+					finish()
+					yield(event, err)
+					return
+				}
+				switch event.Type {
+				case ai.EventTextDelta:
+					text.WriteString(event.Text)
+				case ai.EventUsage:
+					partial = addTokenUsage(partial, event.Usage, c.provider.Name())
+				case ai.EventCompleted:
+					usage = tokenUsageFrom(event.Usage, c.provider.Name())
+				}
+				if !yield(event, nil) {
+					finish()
+					return
+				}
+				if c.browserInterpretation && c.hasSuccessfulPending() {
+					finish()
+					return
+				}
 			}
-			switch event.Type {
-			case ai.EventTextDelta:
-				text.WriteString(event.Text)
-			case ai.EventUsage:
-				partial = addTokenUsage(partial, event.Usage, c.provider.Name())
-			case ai.EventCompleted:
-				usage = tokenUsageFrom(event.Usage, c.provider.Name())
+			// datatug-cli#291's empty-turn retry, ported from the pre-migration
+			// ADKConversation.AskWithContext: some small/local models flakily
+			// return an outright empty completion (no text, no tool call) on
+			// the first try. Give the loop exactly one more fresh user turn,
+			// with a nudge instead of the original prompt, before giving up --
+			// matching main's attempt<2 loop, generalized from run_dtql's own
+			// finalQueries()/hasSuccessfulPending() bookkeeping to "no queries,
+			// no actions, no text" so it also covers a workspace-action turn.
+			if attempt > 0 || c.hasPending() || c.hasActions() || strings.TrimSpace(text.String()) != "" {
+				break
 			}
-			if !yield(event, nil) {
-				finish()
-				return
-			}
-			if c.browserInterpretation && c.hasSuccessfulPending() {
-				finish()
-				return
-			}
+			requestPrompt, requestContext = emptyTurnRetryPrompt, ""
 		}
 		finish()
 	}
 }
+
+// emptyTurnRetryPrompt is the fresh user turn sent once, in place of the
+// original prompt, when the model's first pass yielded nothing at all --
+// see StreamAskWithContext's retry loop.
+const emptyTurnRetryPrompt = "Your previous response was empty. For the current data request, call run_dtql with valid DTQL YAML using the configured schema; otherwise give a brief explanation."
 
 func (c *AIConversation) setLastStreamTurn(t Turn) {
 	c.mu.Lock()

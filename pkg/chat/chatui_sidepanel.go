@@ -933,11 +933,11 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "pgdown":
 		if p.tab == 0 && p.projectDetails {
-			p.explorerDetailOffset += 3
+			p.explorerDetailOffset += max(1, p.height/4)
 		}
 	case "pgup":
 		if p.tab == 0 && p.projectDetails {
-			p.explorerDetailOffset = max(0, p.explorerDetailOffset-3)
+			p.explorerDetailOffset = max(0, p.explorerDetailOffset-max(1, p.height/4))
 		}
 	case "1", "2", "3":
 		if p.tab == 1 {

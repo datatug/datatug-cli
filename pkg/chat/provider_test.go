@@ -261,6 +261,11 @@ func TestResolveEndpointM1Routing(t *testing.T) {
 			wantProtocol: protocolOpenAICompatible, wantBaseURL: "http://remote-daemon:11434/v1", wantModel: "deepseek-v4-flash:0731-cloud",
 		},
 		{
+			name:  "OLLAMA_HOST without a scheme is prefixed with http://, like pi-go normalizeBaseURL",
+			model: "deepseek-v4-flash:0731-cloud", apiKey: "", env: map[string]string{"OLLAMA_API_KEY": "cloud-key", "OLLAMA_HOST": "127.0.0.1:11434"},
+			wantProtocol: protocolOpenAICompatible, wantBaseURL: "http://127.0.0.1:11434/v1", wantModel: "deepseek-v4-flash:0731-cloud",
+		},
+		{
 			name:  "OpenCode Go messages-protocol model routes through the Anthropic adapter",
 			model: "opencode/minimax-m3", apiKey: "key",
 			// resolveEndpoint itself does not strip the trailing /v1 -- that

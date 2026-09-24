@@ -78,7 +78,15 @@ func TestInterpretSanitizesProviderFailure(t *testing.T) {
 }
 
 func TestInterpretRejectsUnsafeURL(t *testing.T) {
-	for _, base := range []string{"http://api.deepseek.com", "https://api.deepseek.com?key=secret", "https://user:secret@api.deepseek.com", "http://192.168.1.2:8989", "https://192.168.1.2:8989", "https://internal.example.com", "https://api.deepseek.com.evil.example"} {
+	for _, base := range []string{
+		"http://api.deepseek.com", "https://api.deepseek.com?key=secret", "https://user:secret@api.deepseek.com",
+		"http://192.168.1.2:8989", "https://192.168.1.2:8989", "https://internal.example.com", "https://api.deepseek.com.evil.example",
+		// An operation path baked into the browser-supplied base URL --
+		// validateProviderURL must reject both the OpenAI-shaped and
+		// Anthropic-shaped operation suffix so ensureV1/the Anthropic SDK's
+		// own trailing path never double up.
+		"https://api.deepseek.com/v1/chat/completions", "https://api.anthropic.com/v1/messages",
+	} {
 		if err := validateProviderURL(base); err == nil {
 			t.Errorf("accepted unsafe provider URL %q", base)
 		}
@@ -87,6 +95,68 @@ func TestInterpretRejectsUnsafeURL(t *testing.T) {
 		if err := validateProviderURL(base); err != nil {
 			t.Errorf("rejected supported provider URL %q: %v", base, err)
 		}
+	}
+}
+
+// TestInterpretRequestValidateRejectsEachField covers InterpretRequest.
+// Validate()'s field-by-field guards directly, one field at a time from an
+// otherwise-valid request.
+func TestInterpretRequestValidateRejectsEachField(t *testing.T) {
+	valid := func() InterpretRequest {
+		return InterpretRequest{
+			Question: "Last 20 invoices",
+			Schema:   "main.Invoice: InvoiceId",
+			Provider: InterpretProvider{Protocol: "openai-chat", BaseURL: "https://api.deepseek.com", Model: "deepseek-chat", APIKey: "key"},
+		}
+	}
+	for name, mutate := range map[string]func(*InterpretRequest){
+		"empty question":          func(r *InterpretRequest) { r.Question = "" },
+		"oversized question":      func(r *InterpretRequest) { r.Question = strings.Repeat("a", 1001) },
+		"empty schema":            func(r *InterpretRequest) { r.Schema = "" },
+		"oversized schema":        func(r *InterpretRequest) { r.Schema = strings.Repeat("a", 12001) },
+		"unsupported protocol":    func(r *InterpretRequest) { r.Provider.Protocol = "grpc" },
+		"empty model":             func(r *InterpretRequest) { r.Provider.Model = "" },
+		"oversized model":         func(r *InterpretRequest) { r.Provider.Model = strings.Repeat("m", 101) },
+		"model with whitespace":   func(r *InterpretRequest) { r.Provider.Model = " deepseek-chat " },
+		"empty API key":           func(r *InterpretRequest) { r.Provider.APIKey = "" },
+		"oversized API key":       func(r *InterpretRequest) { r.Provider.APIKey = strings.Repeat("k", 4097) },
+		"API key with whitespace": func(r *InterpretRequest) { r.Provider.APIKey = " key " },
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := valid()
+			mutate(&req)
+			if err := req.Validate(); err == nil {
+				t.Fatalf("Validate() accepted an invalid request (%s): %+v", name, req)
+			}
+		})
+	}
+	if err := valid().Validate(); err != nil {
+		t.Fatalf("Validate() rejected a valid request: %v", err)
+	}
+}
+
+// TestInterpretDetailedRejectsInvalidRequest covers InterpretDetailed's own
+// Validate() short-circuit, ahead of building a provider or running an
+// agent turn at all.
+func TestInterpretDetailedRejectsInvalidRequest(t *testing.T) {
+	_, err := InterpretDetailed(context.Background(), InterpretRequest{})
+	if err == nil {
+		t.Fatal("InterpretDetailed accepted an empty, invalid request")
+	}
+	if _, err := Interpret(context.Background(), InterpretRequest{}); err == nil {
+		t.Fatal("Interpret accepted an empty, invalid request")
+	}
+}
+
+// TestInterpretWithProviderNilProviderReturnsSanitizedError covers
+// interpretWithProviderDetailed's own NewAIConversation error branch (a nil
+// provider, the one failure interpretProvider's callers can actually
+// trigger downstream -- sourceURL and the executor are both hardcoded
+// non-empty).
+func TestInterpretWithProviderNilProviderReturnsSanitizedError(t *testing.T) {
+	_, err := interpretWithProviderDetailed(context.Background(), InterpretRequest{Question: "Q", Schema: "S"}, nil)
+	if err == nil || err.Error() != "could not initialize chat agent" {
+		t.Fatalf("err = %v, want the sanitized init error", err)
 	}
 }
 

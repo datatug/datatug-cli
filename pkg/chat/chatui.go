@@ -529,7 +529,7 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 		}
 	case "/export":
 		if argument == "" {
-			u.shell.AppendAssistant("interactive /export (no arguments) isn't available in the new chat UI yet; use: /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path>")
+			cmd = u.shell.PushOverlay(newExportDialogOverlay(u))
 		} else {
 			cmd, err = u.exportCommand(argument)
 		}

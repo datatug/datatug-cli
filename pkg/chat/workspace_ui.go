@@ -912,13 +912,14 @@ func (u *UI) rebuildDockGrids() {
 		// the toggle direction handleDockGridKey's "s" case computes for
 		// the NEXT press) to match, without re-sorting rows it already got
 		// pre-sorted.
-		var opts []grid.Option
+		// Dock grids never had a view switcher in main either — hide it
+		// entirely, not just the extra views (m4/m9): a dock already shows
+		// a narrow, purpose-built row set.
+		opts := []grid.Option{grid.WithoutViewSwitcher()}
 		if data.ViewID != "" {
 			view := u.snapshot.Workspace.Views[data.ViewID]
 			opts = append(opts, grid.WithInitialSort(columnIndexOf(data.Result.Columns, view.OrderBy), view.Descending))
 		}
-		// Dock grids never had a view switcher in main either — hide it
-		// (m9): a dock already shows a narrow, purpose-built row set.
 		next[dock.ID] = newProjectedGridState(model, dock.Title, u.workspacePaneWidth(), data.SourceRows, false, opts)
 		next[dock.ID].SetStyle(u.tableStyle)
 		next[dock.ID].SetKeyHandler(u.handleDockGridKey)

@@ -1416,3 +1416,23 @@ func TestGridBorderChangesWithFocus(t *testing.T) {
 		t.Fatalf("focused grid top/bottom border colors differ: %q / %q", activeLines[0], activeLines[len(activeLines)-1])
 	}
 }
+
+// TestCurrentRowShowsAbsentMarkerNotBlankForSparseCells is the regression
+// test for m5: a sparse cell (never present in the underlying row's data —
+// GridModel.Rows leaves its display string at "") must show as "—" in the
+// Current row view, via grid.Absent, not an ambiguous blank line.
+func TestCurrentRowShowsAbsentMarkerNotBlankForSparseCells(t *testing.T) {
+	model := GridModel{
+		Columns: []GridColumn{{Name: "First"}, {Name: "Second"}},
+		Rows:    [][]string{{"one", ""}}, // Second is sparse/absent for this row
+	}
+	g := newGridState(model, "Sparse", 60)
+	g.SetView(gridViewCurrentRow)
+	content := ansi.Strip(g.ActiveViewContent(60, 10))
+	if !strings.Contains(content, "—") {
+		t.Fatalf("current row view missing the absent marker: %q", content)
+	}
+	if strings.Contains(content, "NULL") {
+		t.Fatalf("current row view showed NULL for a sparse (never-present) cell: %q", content)
+	}
+}

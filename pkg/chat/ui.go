@@ -140,7 +140,7 @@ func newGridState(model GridModel, title string, width int, statistics ...secure
 // parameter-lookup grids never had one; they already show a narrow,
 // purpose-built row set where "2"/"3" would have nothing to switch to (m9).
 func newMinimalGridState(model GridModel, title string, width int) *gridState {
-	return newProjectedGridState(model, title, width, nil, false, nil)
+	return newProjectedGridState(model, title, width, nil, false, []grid.Option{grid.WithoutViewSwitcher()})
 }
 
 // newProjectedGridState is newGridState for a dock's projected/filtered
@@ -164,7 +164,14 @@ func newProjectedGridState(model GridModel, title string, width int, sourceRows 
 	for i := range model.Rows {
 		values := make([]any, len(model.Columns))
 		for c := range model.Columns {
-			if c < len(model.Rows[i]) {
+			// NewGridModel leaves a cell's display string at its zero
+			// value ("") for a column that was never present in the
+			// underlying row's data (a sparse cell-range selection) —
+			// distinct from an explicit SQL NULL, which formats to the
+			// literal text "NULL" (see grid.go's NewGridModel comment).
+			// grid.Absent is the sentinel that makes CardView/InspectorView
+			// show "—" for it, instead of an ambiguous blank line (m5).
+			if c < len(model.Rows[i]) && model.Rows[i][c] != "" {
 				values[c] = model.Rows[i][c]
 			} else {
 				values[c] = grid.Absent
@@ -208,7 +215,8 @@ func (g *gridState) attachHTTPResponse(body []byte, response *HTTPResponse) {
 // recordset_ui.go's secondaryView (recordsetCharts case) and updateSecondary.
 func (g *gridState) chartsExtraView() grid.ExtraView {
 	return grid.ExtraView{
-		Label: "Charts",
+		Label:      "Charts",
+		ShortLabel: "C", // main's own short form (m3)
 		Render: func(_ *grid.Model, width, height int) string {
 			if len(g.charts) == 0 {
 				return "No chart candidates for this recordset."

@@ -69,13 +69,6 @@ type Turn struct {
 	Queries    []QueryResult
 	Actions    []WorkspaceActionResult
 	Usage      *TokenUsage
-	// ProviderState is the opaque provider-specific extra content the
-	// adapter attached to this turn's assistant message (ai.Message.
-	// ProviderState / ai.Event.ProviderState -- e.g. ai/anthropic's
-	// extended-thinking blocks with their signature). It must be persisted
-	// unmodified alongside whatever text/action message this turn produces:
-	// some providers 400 a later continuation that drops or edits it.
-	ProviderState json.RawMessage
 }
 
 // TokenUsage is the usage reported by the model provider for a turn.
@@ -86,12 +79,11 @@ type TokenUsage struct {
 	TotalTokens  int64 `json:"totalTokens"`
 }
 
-func tokenUsageFrom(u *ai.Usage) *TokenUsage {
+func tokenUsageFrom(u *ai.Usage, provider string) *TokenUsage {
 	if u == nil {
 		return nil
 	}
-	total := u.InputTokens + u.OutputTokens
-	return &TokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, TotalTokens: total}
+	return &TokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, TotalTokens: u.BillableTokens(provider)}
 }
 
 // toAI converts back to ai.Usage for a synthetic EventCompleted (e.g. when a
@@ -104,8 +96,8 @@ func (u *TokenUsage) toAI() *ai.Usage {
 	return &ai.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
 }
 
-func addTokenUsage(dst *TokenUsage, u *ai.Usage) *TokenUsage {
-	added := tokenUsageFrom(u)
+func addTokenUsage(dst *TokenUsage, u *ai.Usage, provider string) *TokenUsage {
+	added := tokenUsageFrom(u, provider)
 	if added == nil {
 		return dst
 	}
@@ -741,7 +733,6 @@ func (c *AIConversation) AskWithContext(ctx context.Context, prompt, priorContex
 	// folds it into the run-ending total, so treating both as additive would
 	// double count).
 	var partial, usage *TokenUsage
-	var providerState json.RawMessage
 	for event, err := range loop.Run(ctx, req) {
 		if err != nil {
 			queries := finalQueries(c.takePending())
@@ -755,12 +746,9 @@ func (c *AIConversation) AskWithContext(ctx context.Context, prompt, priorContex
 		case ai.EventTextDelta:
 			text.WriteString(event.Text)
 		case ai.EventUsage:
-			partial = addTokenUsage(partial, event.Usage)
+			partial = addTokenUsage(partial, event.Usage, c.provider.Name())
 		case ai.EventCompleted:
-			usage = tokenUsageFrom(event.Usage)
-			if len(event.ProviderState) > 0 {
-				providerState = event.ProviderState
-			}
+			usage = tokenUsageFrom(event.Usage, c.provider.Name())
 		}
 		// Browser Chat needs the structured action only. Stop ranging as
 		// soon as its one tool call succeeds instead of paying for a second
@@ -783,7 +771,7 @@ func (c *AIConversation) AskWithContext(ctx context.Context, prompt, priorContex
 		// a structured result or a DataTug-owned execution error.
 		turnText = ""
 	}
-	return Turn{Text: turnText, Queries: queries, Actions: actions, Usage: usage, ProviderState: providerState}, nil
+	return Turn{Text: turnText, Queries: queries, Actions: actions, Usage: usage}, nil
 }
 
 // StreamAskWithContext runs one turn like AskWithContext but yields
@@ -824,7 +812,6 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 
 		var text strings.Builder
 		var partial, usage *TokenUsage
-		var providerState json.RawMessage
 		finish := func() {
 			if usage == nil {
 				usage = partial
@@ -835,7 +822,7 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 			if len(queries) > 0 || len(actions) > 0 {
 				turnText = ""
 			}
-			c.setLastStreamTurn(Turn{Text: turnText, Queries: queries, Actions: actions, Usage: usage, ProviderState: providerState})
+			c.setLastStreamTurn(Turn{Text: turnText, Queries: queries, Actions: actions, Usage: usage})
 		}
 		for event, err := range loop.Run(turnCtx, req) {
 			if err != nil {
@@ -847,12 +834,9 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 			case ai.EventTextDelta:
 				text.WriteString(event.Text)
 			case ai.EventUsage:
-				partial = addTokenUsage(partial, event.Usage)
+				partial = addTokenUsage(partial, event.Usage, c.provider.Name())
 			case ai.EventCompleted:
-				usage = tokenUsageFrom(event.Usage)
-				if len(event.ProviderState) > 0 {
-					providerState = event.ProviderState
-				}
+				usage = tokenUsageFrom(event.Usage, c.provider.Name())
 			}
 			if !yield(event, nil) {
 				finish()

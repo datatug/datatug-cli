@@ -57,14 +57,6 @@ type ChatMessage struct {
 	RecordSetID    string
 	HTTPResponseID string
 	CreatedAt      time.Time
-	// ProviderState is the opaque ai.Message.ProviderState the model
-	// provider attached to this assistant message (e.g. ai/anthropic's
-	// extended-thinking blocks with their signature). It rides along with
-	// whatever text/action message a turn produced; a turn with no text
-	// message (the grid-only "the result is the answer" case) has nowhere
-	// to persist it today. Empty for user messages and providers that don't
-	// report it.
-	ProviderState json.RawMessage
 }
 
 type ExecutedQuery struct {
@@ -323,7 +315,7 @@ func initChatSchema(db *sql.DB) error {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read chat schema version: %w", err)
 	}
-	if version < 0 || version > 10 {
+	if version < 0 || version > 9 {
 		return fmt.Errorf("unsupported chat database schema version %d", version)
 	}
 	if version >= 1 {
@@ -353,7 +345,7 @@ func initChatSchema(db *sql.DB) error {
 				if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chat_preferences'`).Scan(&name); err != nil {
 					return fmt.Errorf("chat database is missing preference metadata: %w", err)
 				}
-				if version >= 10 {
+				if version >= 9 {
 					return nil
 				}
 			}
@@ -367,7 +359,7 @@ func initChatSchema(db *sql.DB) error {
 	for _, statement := range []string{
 		`CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, scope TEXT NOT NULL, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS sessions_scope_recent ON sessions(scope, updated_at DESC)`,
-		`CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, role TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, query_id TEXT NOT NULL DEFAULT '', recordset_id TEXT NOT NULL DEFAULT '', http_response_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, provider_state TEXT NOT NULL DEFAULT '')`,
+		`CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, role TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, query_id TEXT NOT NULL DEFAULT '', recordset_id TEXT NOT NULL DEFAULT '', http_response_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS messages_session_order ON messages(session_id)`,
 		`CREATE TABLE IF NOT EXISTS queries (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, dtql TEXT NOT NULL, source TEXT NOT NULL, parameters_json TEXT NOT NULL, executed_at TEXT NOT NULL, error TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS recordsets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, query_id TEXT NOT NULL REFERENCES queries(id) ON DELETE CASCADE, origin_message_id TEXT NOT NULL, title TEXT NOT NULL, dtql TEXT NOT NULL, source TEXT NOT NULL, environment TEXT NOT NULL, database_id TEXT NOT NULL, parameters_json TEXT NOT NULL, created_at TEXT NOT NULL, result_json BLOB NOT NULL, parent_recordset_id TEXT NOT NULL DEFAULT '', join_candidate_id TEXT NOT NULL DEFAULT '', join_applied_edges_json TEXT NOT NULL DEFAULT '[]', http_response_id TEXT NOT NULL DEFAULT '', refresh_parent_id TEXT NOT NULL DEFAULT '')`,
@@ -378,7 +370,7 @@ func initChatSchema(db *sql.DB) error {
 		// It owns its encoded result, view, and selection after creation.
 		`CREATE TABLE IF NOT EXISTS bookmarks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, scope TEXT NOT NULL, title TEXT NOT NULL, tags_json TEXT NOT NULL, target_kind TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, snapshot_json BLOB NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS bookmarks_scope_project_recent ON bookmarks(scope, project_id, updated_at DESC, id DESC)`,
-		`PRAGMA user_version = 10`,
+		`PRAGMA user_version = 9`,
 	} {
 		if _, err := tx.Exec(statement); err != nil {
 			return fmt.Errorf("initialize chat schema: %w", err)
@@ -439,11 +431,6 @@ func initChatSchema(db *sql.DB) error {
 	if version >= 6 && version < 7 {
 		if _, err := tx.Exec(`ALTER TABLE chat_preferences ADD COLUMN result_versions_to_keep INTEGER NOT NULL DEFAULT 2`); err != nil {
 			return fmt.Errorf("migrate result version preference: %w", err)
-		}
-	}
-	if version >= 1 && version < 10 {
-		if err := addColumnIfMissing(tx, "messages", "provider_state", "TEXT NOT NULL DEFAULT ''"); err != nil {
-			return fmt.Errorf("migrate message provider state: %w", err)
 		}
 	}
 	return tx.Commit()
@@ -773,22 +760,19 @@ func (s *SessionStore) SetResultVersionsToKeep(ctx context.Context, count int) e
 }
 
 func (s *SessionStore) loadMessages(ctx context.Context, item *ChatSession) error {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, role, kind, text, query_id, recordset_id, http_response_id, created_at, provider_state FROM messages WHERE session_id = ? ORDER BY rowid`, item.ID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, role, kind, text, query_id, recordset_id, http_response_id, created_at FROM messages WHERE session_id = ? ORDER BY rowid`, item.ID)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var message ChatMessage
-		var created, providerState string
-		if err := rows.Scan(&message.ID, &message.Role, &message.Kind, &message.Text, &message.QueryID, &message.RecordSetID, &message.HTTPResponseID, &created, &providerState); err != nil {
+		var created string
+		if err := rows.Scan(&message.ID, &message.Role, &message.Kind, &message.Text, &message.QueryID, &message.RecordSetID, &message.HTTPResponseID, &created); err != nil {
 			return err
 		}
 		if message.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
 			return fmt.Errorf("corrupt chat message timestamp: %w", err)
-		}
-		if providerState != "" {
-			message.ProviderState = json.RawMessage(providerState)
 		}
 		item.Messages = append(item.Messages, message)
 	}
@@ -935,11 +919,7 @@ func (s *SessionStore) AppendUser(ctx context.Context, sessionID, prompt string)
 }
 
 func insertMessage(ctx context.Context, tx *sql.Tx, sessionID string, message ChatMessage) error {
-	providerState := ""
-	if len(message.ProviderState) > 0 {
-		providerState = string(message.ProviderState)
-	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO messages (id, session_id, role, kind, text, query_id, recordset_id, http_response_id, created_at, provider_state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, message.ID, sessionID, message.Role, message.Kind, message.Text, message.QueryID, message.RecordSetID, message.HTTPResponseID, stamp(message.CreatedAt), providerState)
+	_, err := tx.ExecContext(ctx, `INSERT INTO messages (id, session_id, role, kind, text, query_id, recordset_id, http_response_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, message.ID, sessionID, message.Role, message.Kind, message.Text, message.QueryID, message.RecordSetID, message.HTTPResponseID, stamp(message.CreatedAt))
 	return err
 }
 
@@ -1043,7 +1023,7 @@ func (s *SessionStore) AppendTurn(ctx context.Context, sessionID, originID, sour
 		if turn.TextFormat == "markdown" {
 			kind = "markdown"
 		}
-		if err := insertMessage(ctx, tx, sessionID, ChatMessage{ID: uuid.NewString(), Role: "DataTug", Kind: kind, Text: turn.Text, CreatedAt: now, ProviderState: turn.ProviderState}); err != nil {
+		if err := insertMessage(ctx, tx, sessionID, ChatMessage{ID: uuid.NewString(), Role: "DataTug", Kind: kind, Text: turn.Text, CreatedAt: now}); err != nil {
 			return Turn{}, err
 		}
 	}

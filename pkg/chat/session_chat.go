@@ -27,8 +27,8 @@ type ContextualConversation interface {
 type StreamingConversation interface {
 	ContextualConversation
 	StreamAskWithContext(ctx context.Context, prompt, priorContext string) iter.Seq2[ai.Event, error]
-	// LastStreamTurn returns the structured Turn (Queries/Actions/Usage/Text/
-	// ProviderState) captured by the most recently completed
+	// LastStreamTurn returns the structured Turn (Queries/Actions/Usage/Text)
+	// captured by the most recently completed
 	// StreamAskWithContext call, once its sequence has finished draining (or
 	// its range loop returned early). SessionChat.StreamAsk uses this to
 	// persist the same Turn Ask would have committed for an equivalent call.

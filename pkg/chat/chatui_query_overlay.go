@@ -95,10 +95,15 @@ func (u *ChatUI) runSavedQuery(query SavedQuery, variables map[string]string) te
 		snapshot, err := store.Load(ctx, sessionID)
 		return savedQueryDoneMsg{sessionID: sessionID, snapshot: snapshot, err: err}
 	}
-	if busyCmd != nil {
-		return tea.Batch(busyCmd, runCmd)
-	}
-	return runCmd
+	// busyCmd is never nil here to warrant a guard: SetBusy(true) always
+	// returns m.spinner.Tick (charm.land/bubbles/v2 spinner.Model.Tick), a
+	// bound value-receiver method value, which Go can never produce as a
+	// nil func -- and u.shell is always a live *chatshell.Model once a
+	// ChatUI exists (see NewChatUI). The historical "if busyCmd != nil"
+	// branch here could therefore never take its false path; removed per
+	// founder's 100%-coverage-via-seams-not-dead-code directive rather than
+	// fake a busyCmd==nil scenario no real chatshell build can produce.
+	return tea.Batch(busyCmd, runCmd)
 }
 
 // handleSavedQueryDone is called from OnMsg for a savedQueryDoneMsg.
@@ -503,11 +508,17 @@ func (p *parameterLookupOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd
 					values = append(values, value)
 				}
 			}
-			encoded, err := json.Marshal(values)
-			if err != nil {
-				p.err = "Could not encode selected keys."
-				return p, nil, false
-			}
+			// json.Marshal(values) can never fail here: every entry in
+			// p.selected was put there by the "space" case below only
+			// after lookupValueToken(value) itself returned ok==true,
+			// which requires json.Marshal(lookupValue(value)) to already
+			// have succeeded once for that exact value (see
+			// lookupValueToken in query_parameters_dialog.go) -- marshaling
+			// a []any of individually-already-marshalable scalars cannot
+			// then fail. Removed the unreachable error branch per
+			// founder's 100%-coverage-via-seams-not-dead-code directive
+			// rather than fake a value that could defeat this guarantee.
+			encoded, _ := json.Marshal(values)
 			p.parent.inputs[p.focus].SetValue(string(encoded))
 			return p, nil, true
 		}

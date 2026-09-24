@@ -301,9 +301,10 @@ func TestBrowserBridgeEndpointErrorBranches(t *testing.T) {
 	// finalizeTurn into a friendly Turn.Text with a nil error -- the bridge
 	// only sees a Go error from AskActive when SessionChat.prepareTurn or
 	// the store append itself fails, which (with the session-ID check
-	// already passed above) would need the store to fail between two
-	// calls in the same synchronous request; not reproducible without a
-	// store seam this package doesn't have.
+	// already passed above) needs the store to fail between two calls in
+	// the same synchronous request. That is now covered separately, via
+	// SessionChat's storeAppendUserOverride seam, by bridge_test.go's
+	// TestBridgeMessagesHandlerAskActiveStoreErrorSurfaces.
 
 	// The WebSocket endpoint: origin/host-disallowed (403) and an invalid
 	// subprotocol token (401) -- both checked before any upgrade attempt.

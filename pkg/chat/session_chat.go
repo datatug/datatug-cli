@@ -50,6 +50,25 @@ type SessionChat struct {
 	implicitBookmarkID string
 	joinApplication    JoinApplication
 	queryExecutor      DTQLExecutor
+
+	// Test-only per-call overrides (nil in production) over specific
+	// *SessionStore call sites below. Each is checked immediately before
+	// its one targeted c.store.<Method> call, so a test can force that
+	// exact call to fail -- e.g. a second call to the same store method
+	// within one code path, after an earlier call already succeeded on the
+	// same real store -- while every other call (including other calls to
+	// the same method elsewhere in this file) still goes through the real
+	// *SessionStore. Founder directive: all new Go code aims for 100%
+	// coverage via seams, not left uncovered. See each call site's own
+	// comment for exactly which call it replaces.
+	storeAppendUserOverride    func(ctx context.Context, sessionID, prompt string) (ChatMessage, error)
+	storeAppendQueryOverride   func(ctx context.Context, sessionID, originID, source string, query QueryResult) (QueryResult, error)
+	storeLoadOverride          func(ctx context.Context, id string) (ChatSession, error)
+	storeSaveWorkspaceOverride func(ctx context.Context, sessionID string, state WorkspaceState) error
+	storeActivateOverride      func(ctx context.Context, id string) error
+	storeListOverride          func(ctx context.Context) ([]ChatSession, error)
+	storeCreateOverride        func(ctx context.Context, title string) (ChatSession, error)
+	storeRenameOverride        func(ctx context.Context, id, title string) error
 }
 
 // ConfigureQueryExecutor enables deterministic refresh of stored DTQL without
@@ -155,25 +174,30 @@ func (c *SessionChat) applyJoinCandidate(ctx context.Context, recordSetID string
 		query.Source = c.source
 	}
 	if originMessageID == "" {
-		action, appendErr := c.store.AppendUser(ctx, c.activeID, "JOIN "+query.Title)
+		appendUser := c.store.AppendUser
+		if c.storeAppendUserOverride != nil {
+			appendUser = c.storeAppendUserOverride
+		}
+		action, appendErr := appendUser(ctx, c.activeID, "JOIN "+query.Title)
 		if appendErr != nil {
-			// Not covered: the Load just above already succeeded on the same
-			// store/connection, so reproducing this needs the store to break
-			// between the two calls within one synchronous request -- not
-			// reproducible without a store seam this package doesn't have
-			// (see the same note on bridge.go's AskActive branch).
 			return RecordSet{}, appendErr
 		}
 		originMessageID = action.ID
 	}
-	stored, err := c.store.AppendQuery(ctx, c.activeID, originMessageID, query.Source, query)
+	appendQuery := c.store.AppendQuery
+	if c.storeAppendQueryOverride != nil {
+		appendQuery = c.storeAppendQueryOverride
+	}
+	stored, err := appendQuery(ctx, c.activeID, originMessageID, query.Source, query)
 	if err != nil {
-		// Not covered: same reason as the AppendUser error above.
 		return RecordSet{}, err
 	}
-	snapshot, err := c.store.Load(ctx, c.activeID)
+	load := c.store.Load
+	if c.storeLoadOverride != nil {
+		load = c.storeLoadOverride
+	}
+	snapshot, err := load(ctx, c.activeID)
 	if err != nil {
-		// Not covered: same reason as the AppendUser error above.
 		return RecordSet{}, err
 	}
 	return snapshot.RecordSets[stored.RecordSetID], nil
@@ -232,10 +256,11 @@ func (c *SessionChat) applyWorkspaceAction(ctx context.Context, action Workspace
 	if err != nil {
 		return ContextReference{}, err
 	}
-	if err := c.store.SaveWorkspace(ctx, c.activeID, next); err != nil {
-		// Not covered: the Load at the top of this function already
-		// succeeded on the same store; see applyJoinCandidate's identical
-		// note above.
+	saveWorkspace := c.store.SaveWorkspace
+	if c.storeSaveWorkspaceOverride != nil {
+		saveWorkspace = c.storeSaveWorkspaceOverride
+	}
+	if err := saveWorkspace(ctx, c.activeID, next); err != nil {
 		return ContextReference{}, err
 	}
 	return ref, nil
@@ -357,14 +382,19 @@ func (c *SessionChat) Switch(ctx context.Context, prefix string) (ChatSession, e
 	if len(matches) != 1 {
 		return ChatSession{}, fmt.Errorf("session prefix %q matched %d sessions; use an unambiguous ID", prefix, len(matches))
 	}
-	snapshot, err := c.store.Load(ctx, matches[0].ID)
+	load := c.store.Load
+	if c.storeLoadOverride != nil {
+		load = c.storeLoadOverride
+	}
+	snapshot, err := load(ctx, matches[0].ID)
 	if err != nil {
-		// Not covered: the List call above already succeeded on the same
-		// store; see applyJoinCandidate's identical note.
 		return ChatSession{}, err
 	}
-	if err := c.store.Activate(ctx, snapshot.ID); err != nil {
-		// Not covered: same reason -- Load just above already succeeded.
+	activate := c.store.Activate
+	if c.storeActivateOverride != nil {
+		activate = c.storeActivateOverride
+	}
+	if err := activate(ctx, snapshot.ID); err != nil {
 		return ChatSession{}, err
 	}
 	snapshot, err = c.store.Load(ctx, snapshot.ID)
@@ -406,20 +436,23 @@ func (c *SessionChat) Delete(ctx context.Context) (ChatSession, error) {
 	if err := c.store.Delete(ctx, c.activeID); err != nil {
 		return ChatSession{}, err
 	}
-	list, err := c.store.List(ctx)
+	list := c.store.List
+	if c.storeListOverride != nil {
+		list = c.storeListOverride
+	}
+	sessions, err := list(ctx)
 	if err != nil {
-		// Not covered: Delete just above already succeeded on the same
-		// store; see applyJoinCandidate's identical note.
 		return ChatSession{}, err
 	}
 	var next ChatSession
-	if len(list) > 0 {
-		next, err = c.store.Load(ctx, list[0].ID)
+	if len(sessions) > 0 {
+		next, err = c.store.Load(ctx, sessions[0].ID)
 	} else {
-		// Not covered: same reason (list is empty, but List() itself
-		// already succeeded, and Create failing needs the store to break
-		// between the two calls).
-		next, err = c.store.Create(ctx, "New chat")
+		create := c.store.Create
+		if c.storeCreateOverride != nil {
+			create = c.storeCreateOverride
+		}
+		next, err = create(ctx, "New chat")
 	}
 	if err == nil {
 		c.activeID = next.ID
@@ -487,16 +520,20 @@ func (c *SessionChat) prepareTurn(ctx context.Context, expectedSessionID, prompt
 			contextText = joinContext + "\n" + boundedContextText(contextText, maxContextChars-len(joinContext)-1)
 		}
 	}
-	user, err := c.store.AppendUser(ctx, c.activeID, prompt)
+	appendUser := c.store.AppendUser
+	if c.storeAppendUserOverride != nil {
+		appendUser = c.storeAppendUserOverride
+	}
+	user, err := appendUser(ctx, c.activeID, prompt)
 	if err != nil {
-		// Not covered: the Load just above already succeeded on the same
-		// store; see applyJoinCandidate's identical note.
 		return preparedTurn{}, cleanup, err
 	}
 	if len(prior.Messages) == 0 && prior.Title == "New chat" {
-		if err := c.store.Rename(ctx, c.activeID, prompt); err != nil {
-			// Not covered: same reason -- AppendUser just above already
-			// succeeded.
+		rename := c.store.Rename
+		if c.storeRenameOverride != nil {
+			rename = c.storeRenameOverride
+		}
+		if err := rename(ctx, c.activeID, prompt); err != nil {
 			return preparedTurn{}, cleanup, err
 		}
 	}

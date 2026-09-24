@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -42,22 +43,58 @@ type BrowserBridge struct {
 	connections   map[*websocket.Conn]struct{}
 }
 
+// readRandom is a test-only seam over crypto/rand.Read (nil-effect in
+// production, where it is exactly rand.Read): the OS entropy source itself
+// failing is not reproducible from a test, so a test overrides this var
+// instead. Founder directive: all new Go code aims for 100% coverage via
+// seams, not left uncovered.
+var readRandom = rand.Read
+
+// netListenTCP is a test-only seam over net.Listen (nil-effect in
+// production, where it is exactly net.Listen): StartBrowserBridge calls it
+// once for the fixed port and, on failure, once more for an OS-assigned
+// ephemeral port. The second call failing needs the loopback interface's
+// whole port range exhausted, not reproducible from a test without this
+// seam -- a test can override it to fail selectively (e.g. only for the
+// ":0" fallback) while a real net.Listen call occupies the fixed port for
+// the first call to fail naturally.
+var netListenTCP = net.Listen
+
+// wsWriteJSON is a test-only seam over (*websocket.Conn).WriteJSON
+// (nil-effect in production, where it is exactly conn.WriteJSON): the
+// /v1/chat/events handler's write immediately after a successful Upgrade
+// (and its later writes on each SessionChat change) only fail on an
+// unreproducible write-side race in real use, so a test overrides this var
+// to force that error deterministically instead. StartBrowserBridge reads
+// it exactly ONCE, into a local `writeJSON` variable, before starting the
+// handler's background connection goroutines -- a test must therefore set
+// its override BEFORE calling StartBrowserBridge (a stateful closure that
+// counts its own calls if only a later write should fail), never swap this
+// var mid-test: the handler never re-reads the package var afterward, so a
+// later swap would race against nothing production-visible, but would also
+// silently not take effect.
+var wsWriteJSON = func(conn *websocket.Conn, v any) error { return conn.WriteJSON(v) }
+
+// bridgeBaseContext is a test-only seam over http.Server.BaseContext
+// (nil-effect in production, where it yields the same context.Background()
+// http.Server would use by default): the /v1/chat/events handler's
+// `case <-r.Context().Done()` only fires on a genuine parent-context
+// cancellation, which nothing in this package triggers in real use -- a
+// test overrides this var to supply a cancellable base context, then
+// cancels it to force that branch deterministically.
+var bridgeBaseContext = func(net.Listener) context.Context { return context.Background() }
+
 func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
-		// Not covered: crypto/rand.Read failing means the OS entropy
-		// source itself is broken, not reproducible from a test.
+	if _, err := readRandom(secret); err != nil {
 		return nil, fmt.Errorf("create chat bridge capability: %w", err)
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:3284")
+	listener, err := netListenTCP("tcp", "127.0.0.1:3284")
 	if err != nil {
 		// Multiple local chats can coexist; the link carries the actual port.
-		listener, err = net.Listen("tcp", "127.0.0.1:0")
+		listener, err = netListenTCP("tcp", "127.0.0.1:0")
 	}
 	if err != nil {
-		// Not covered: this needs 127.0.0.1:0 (an OS-assigned ephemeral
-		// port) itself to fail, i.e. the loopback interface's whole port
-		// range exhausted -- not reproducible from a test.
 		return nil, fmt.Errorf("listen for browser chat: %w", err)
 	}
 	token := hex.EncodeToString(secret)
@@ -68,6 +105,18 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 		path = fmt.Sprintf("/store/http-127.0.0.1:%d/project/%s/chat", port, url.PathEscape(projectID))
 	}
 	bridge.URL = fmt.Sprintf("https://datatug.app%s#h=127.0.0.1:%d&t=%s", path, port, token)
+	// writeJSON captures wsWriteJSON's value ONCE here, synchronously in the
+	// caller's goroutine, rather than the /v1/chat/events handler below
+	// reading the package var directly on every write: that handler runs
+	// in a long-lived background connection goroutine started by
+	// bridge.server.Serve below, so a live re-read would race against a
+	// test restoring wsWriteJSON in a later t.Cleanup once the handler
+	// goroutine may still be running -- the same reasoning bridgeBaseContext
+	// (captured into http.Server's own field, once, below) already follows.
+	// A test that wants the first write to succeed for real and only a
+	// later one to fail overrides wsWriteJSON with a stateful closure
+	// BEFORE calling StartBrowserBridge, instead of swapping it mid-test.
+	writeJSON := wsWriteJSON
 	mux := http.NewServeMux()
 	mux.HandleFunc("/datatug/projects/project_summary", func(w http.ResponseWriter, r *http.Request) {
 		if !bridge.authorize(w, r, token) {
@@ -126,13 +175,6 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 			return
 		}
 		if _, err := sessions.AskActive(r.Context(), request.SessionID, request.Text); err != nil {
-			// Not covered: a failing agent is absorbed by
-			// SessionChat.ask's finalizeTurn into a friendly Turn.Text
-			// with a nil error, so AskActive itself only errors when
-			// prepareTurn or the store append fails -- with the session
-			// ID already matched above, that needs the store to fail
-			// between two calls within one request, not reproducible
-			// without a store seam this package doesn't have.
 			http.Error(w, "unable to send message", http.StatusInternalServerError)
 			return
 		}
@@ -179,42 +221,33 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 				}
 			}
 		}()
-		if err := conn.WriteJSON(map[string]string{"type": "changed"}); err != nil {
-			// Not covered: this write happens immediately after a
-			// successful Upgrade, so it fails only on a write-side race
-			// (the client closing its socket in the handful of
-			// microseconds between Upgrade returning and this write) --
-			// too timing-dependent to reproduce reliably from a test.
+		if err := writeJSON(conn, map[string]string{"type": "changed"}); err != nil {
 			return
 		}
 		for {
 			select {
-			case _, ok := <-changes:
-				// Not covered: SubscribeChanges' own stop() (the only
-				// thing that closes this channel) is deferred right
-				// above and so only runs after this loop has already
-				// returned via one of the other cases -- !ok is
-				// unreachable through the public API.
-				if !ok {
-					return
-				}
-				if err := conn.WriteJSON(map[string]string{"type": "changed"}); err != nil {
+			// A plain receive, not "_, ok := <-changes": SubscribeChanges'
+			// own stop() (the only thing that ever closes this channel) is
+			// deferred right above this loop, so it only runs once this
+			// function -- and therefore this loop -- has already returned
+			// via one of the other select cases below. A closed-channel
+			// receive is unreachable through the public API (verified by
+			// reading SubscribeChanges: stop() is the sole closer, and
+			// nothing else in this package holds a reference to close this
+			// channel earlier), so the dead !ok branch is deleted rather
+			// than left as a fabricated test.
+			case <-changes:
+				if err := writeJSON(conn, map[string]string{"type": "changed"}); err != nil {
 					return
 				}
 			case <-disconnected:
 				return
 			case <-r.Context().Done():
-				// Not covered: a websocket upgrade fully hijacks the
-				// underlying connection, so net/http no longer monitors
-				// it for client disconnects -- disconnected (above)
-				// covers that instead. This case only fires on a genuine
-				// request-scoped cancellation (e.g. server shutdown),
-				// not reproducible from a client-side test.
 				return
 			}
 		}
 	})
-	bridge.server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	bridge.server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, BaseContext: bridgeBaseContext}
 	go func() { _ = bridge.server.Serve(listener) }()
 	return bridge, nil
 }

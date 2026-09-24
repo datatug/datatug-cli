@@ -74,7 +74,42 @@ func TestColumnMetaForWildcardExcludedColumnIsUnattributed(t *testing.T) {
 // literal "joins are not supported by DTQL", dtql/serialize.go) -- so
 // allowed()'s "wildcard source resolves to zero or multiple relations"
 // branch is unreachable defensive code via any real DTQL document, not
-// exercised here.
+// exercised here. The same holds for relationInstances returning zero
+// instances (its walk always appends at least the root FROM relation, and
+// dtql.Deserialize requires a FROM clause to succeed at all) -- both
+// defensive branches stay uncovered by design.
+
+// TestColumnMetaForNameWithSchemaPrefixUsesShortNameForCatalogLookup covers
+// the nil-record path's own name normalisation: a caller-qualified name
+// (e.g. "t.InvoiceId", as currentRecordsetDetails may pass when echoing a
+// query's own output alias) is matched against the catalog by its short
+// (unqualified) column name.
+func TestColumnMetaForNameWithSchemaPrefixUsesShortNameForCatalogLookup(t *testing.T) {
+	catalog := ProjectCatalog{Objects: []ProjectObject{
+		{Reference: ContextReference{Kind: "table", ObjectID: "main.invoice"}, Columns: []string{"InvoiceId"}, ColumnTypes: map[string]string{"InvoiceId": "INTEGER"}},
+	}}
+	meta := columnMetaFor(catalog, nil, "t.InvoiceId")
+	if meta.qualified != "main.invoice.InvoiceId" || meta.dbType != "INTEGER" {
+		t.Fatalf("meta = %+v, want the short name (after the last '.') matched", meta)
+	}
+}
+
+// TestColumnMetaForNonMatchingRelationCatalogObjectIsSkipped covers the
+// sourceRelations guard in the final catalog loop: a table that isn't the
+// DTQL's own FROM relation (here "main.other", column-named the same as the
+// queried column) must be skipped even though record.Database doesn't rule
+// it out on its own.
+func TestColumnMetaForNonMatchingRelationCatalogObjectIsSkipped(t *testing.T) {
+	catalog := ProjectCatalog{Objects: []ProjectObject{
+		{Reference: ContextReference{Kind: "table", ObjectID: "main.invoice"}, Columns: []string{"InvoiceId"}, ColumnTypes: map[string]string{"InvoiceId": "INTEGER"}},
+		{Reference: ContextReference{Kind: "table", ObjectID: "main.other"}, Columns: []string{"InvoiceId"}, ColumnTypes: map[string]string{"InvoiceId": "TEXT"}},
+	}}
+	record := &RecordSet{DTQL: "from: {name: invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n"}
+	meta := columnMetaFor(catalog, record, "InvoiceId")
+	if meta.qualified != "main.invoice.InvoiceId" || meta.dbType != "INTEGER" || len(meta.objects) != 1 {
+		t.Fatalf("meta = %+v, want only the FROM-relation table matched", meta)
+	}
+}
 
 func TestColumnMetaForWildcardResolvesCatalogColumn(t *testing.T) {
 	record := &RecordSet{DTQL: "from: {name: invoice}\ncolumns:\n  - wildcard: {source: invoice, exclude: [Nonexistent]}\n", Database: "db1"}

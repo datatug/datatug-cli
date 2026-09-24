@@ -824,3 +824,402 @@ func TestFinalQueriesHidesCorrectedFailures(t *testing.T) {
 		t.Fatalf("final failed queries = %+v", got)
 	}
 }
+
+// TestTokenUsageToAIRoundTripsNonNilReceiver covers TokenUsage.toAI's
+// non-nil-receiver branch (the nil-receiver -> nil result branch is already
+// covered by every streaming test whose turn carries no usage).
+func TestTokenUsageToAIRoundTripsNonNilReceiver(t *testing.T) {
+	usage := &TokenUsage{InputTokens: 12, OutputTokens: 34}
+	got := usage.toAI()
+	if got == nil || got.InputTokens != 12 || got.OutputTokens != 34 {
+		t.Fatalf("toAI() = %+v", got)
+	}
+	var nilUsage *TokenUsage
+	if got := nilUsage.toAI(); got != nil {
+		t.Fatalf("nil receiver toAI() = %+v, want nil", got)
+	}
+}
+
+// TestAddTokenUsageIgnoresNilEventUsage covers addTokenUsage's own
+// tokenUsageFrom(nil)==nil short-circuit (a partial ai.EventUsage that
+// carries no Usage payload must not clobber an existing running total).
+func TestAddTokenUsageIgnoresNilEventUsage(t *testing.T) {
+	dst := &TokenUsage{InputTokens: 5}
+	if got := addTokenUsage(dst, nil, "openai"); got != dst {
+		t.Fatalf("addTokenUsage(dst, nil, ...) = %+v, want the original dst unchanged", got)
+	}
+}
+
+// TestAgentHandlersRejectMalformedToolArguments covers every tool handler's
+// own json.Unmarshal error branch directly (a model that emits an
+// arguments payload the schema didn't produce).
+func TestAgentHandlersRejectMalformedToolArguments(t *testing.T) {
+	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handlers := conversation.handlers()
+	for _, name := range []string{toolRunDTQL, toolWorkspaceAction, toolFindBookmarks, toolApplyJoinCandidate} {
+		t.Run(name, func(t *testing.T) {
+			result, err := handlers[name](context.Background(), ai.ToolCall{ID: "1", Name: name, Arguments: []byte("not json")})
+			if err != nil {
+				t.Fatalf("handler returned an error instead of an error ToolResult: %v", err)
+			}
+			if !result.IsError {
+				t.Fatalf("expected an error ToolResult for malformed arguments: %+v", result)
+			}
+		})
+	}
+}
+
+// TestAgentFindBookmarksHandlerWithoutFinderInContext and
+// TestAgentFindBookmarksHandlerFinderError cover find_bookmarks' own
+// bookmarkFinderKey guard and the finder-returned-error branch -- distinct
+// from the malformed-arguments case above.
+func TestAgentFindBookmarksHandlerWithoutFinderInContext(t *testing.T) {
+	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := conversation.handlers()[toolFindBookmarks]
+	result, err := handler(context.Background(), ai.ToolCall{ID: "1", Arguments: mustJSON(bookmarkSearchArgs{Search: "invoices"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || !strings.Contains(result.Content, "Bookmarks are unavailable") {
+		t.Fatalf("result = %+v, want the finder-unavailable message", result)
+	}
+}
+
+func TestAgentFindBookmarksHandlerFinderError(t *testing.T) {
+	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := withBookmarkFinder(context.Background(), func(string, []string) ([]Bookmark, error) {
+		return nil, errors.New("bookmark store unavailable")
+	})
+	handler := conversation.handlers()[toolFindBookmarks]
+	result, err := handler(ctx, ai.ToolCall{ID: "1", Arguments: mustJSON(bookmarkSearchArgs{Search: "invoices"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || !strings.Contains(result.Content, "bookmark store unavailable") {
+		t.Fatalf("result = %+v, want the finder's error surfaced", result)
+	}
+}
+
+// TestJSONResultEncodeErrorReturnsErrorToolResult covers jsonResult's own
+// json.Marshal error branch (an unmarshalable value, unreachable through any
+// of this package's own tool-response structs but defensive against a
+// future one).
+func TestJSONResultEncodeErrorReturnsErrorToolResult(t *testing.T) {
+	result := jsonResult("1", make(chan int))
+	if !result.IsError || !strings.Contains(result.Content, "encode tool result") {
+		t.Fatalf("result = %+v, want an encode error", result)
+	}
+}
+
+// TestRunDTQLSourceUnavailablePrefix covers runDTQL's own "unavailable://"
+// sourceURL guard directly.
+func TestRunDTQLSourceUnavailablePrefix(t *testing.T) {
+	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := conversation.runDTQL(context.Background(), &fakeExecutor{}, "unavailable://broken-source", runDTQLArgs{DTQL: "from: {name: Invoice}\nlimit: 5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.OK || !strings.Contains(resp.Error, "unavailable") {
+		t.Fatalf("resp = %+v, want an unavailable-source error", resp)
+	}
+}
+
+// TestRunDTQLAttachedJoinObserverError covers runDTQL's attachedJoinKey
+// branch's own joinErr path -- TestAgentQueryAutomaticallyJoinsAttachedCustomerIntoOneRecordSet
+// only exercises the "applied" success path.
+func TestRunDTQLAttachedJoinObserverError(t *testing.T) {
+	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(context.Background(), attachedJoinKey{}, func(context.Context, QueryResult) (QueryResult, bool, error) {
+		return QueryResult{}, false, errors.New("join lookup failed")
+	})
+	resp, err := conversation.runDTQL(ctx, &fakeExecutor{}, "sqlite:///x", runDTQLArgs{DTQL: "from: {name: Invoice}\nlimit: 5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.OK || resp.Error == "" {
+		t.Fatalf("resp = %+v, want the join observer's error surfaced", resp)
+	}
+}
+
+// TestRunJoinCandidateGuardBranches covers runJoinCandidate's own guard
+// branches directly: missing RecordSetID/CandidateID, no join observer in
+// context, and the actionCalls>3 rate limit.
+func TestRunJoinCandidateGuardBranches(t *testing.T) {
+	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp := conversation.runJoinCandidate(context.Background(), applyJoinCandidateArgs{}); resp.Error == "" {
+		t.Fatalf("resp = %+v, want an error for a missing RecordSetID/CandidateID", resp)
+	}
+	if resp := conversation.runJoinCandidate(context.Background(), applyJoinCandidateArgs{RecordSetID: "rs1", CandidateID: "c1"}); !strings.Contains(resp.Error, "unavailable") {
+		t.Fatalf("resp = %+v, want the JOIN-exploration-unavailable error", resp)
+	}
+	// A fresh conversation for the rate limit itself: the two guard calls
+	// above already incremented actionCalls (it counts every call, even a
+	// rejected one), which would throw off the exact 3-succeed/4th-limited
+	// count below.
+	limited, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := withJoinObserver(context.Background(), func(string, JoinCandidateID) (RecordSet, error) {
+		return RecordSet{ID: "rs2"}, nil
+	})
+	for i := range 4 {
+		resp := limited.runJoinCandidate(ctx, applyJoinCandidateArgs{RecordSetID: "rs1", CandidateID: "c1"})
+		if i < 3 {
+			if !resp.OK {
+				t.Fatalf("call %d: resp = %+v, want success within the rate limit", i, resp)
+			}
+		} else if !strings.Contains(resp.Error, "Too many") {
+			t.Fatalf("call %d: resp = %+v, want the rate-limit error on the 4th call", i, resp)
+		}
+	}
+}
+
+// TestPublicJoinError covers every publicJoinError message-classification
+// branch directly, plus the nil-error short-circuit.
+func TestPublicJoinError(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want string
+	}{
+		"nil":         {nil, ""},
+		"ambiguous":   {errors.New("ambiguous join target for that column"), "Cannot add JOIN"},
+		"stale":       {errors.New("candidate is stale"), "no longer available"},
+		"unavailable": {errors.New("source is unavailable"), "no longer available"},
+		"metadata":    {errors.New("missing metadata"), "no longer available"},
+		"policy":      {errors.New("blocked by policy"), "access policy"},
+		"readable":    {errors.New("column is not readable"), "access policy"},
+		"aggregate":   {errors.New("an aggregate projection"), "changing its selected columns"},
+		"projection":  {errors.New("bad projection shape"), "changing its selected columns"},
+		"wildcard":    {errors.New("wildcard column set"), "changing its selected columns"},
+		"other":       {errors.New("totally unexpected"), "Check the selected relationship"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := publicJoinError(tc.err)
+			if tc.want == "" {
+				if got != "" {
+					t.Fatalf("publicJoinError(nil) = %q, want empty", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("publicJoinError(%v) = %q, want it to contain %q", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestReferencedSelectionParameters covers referencedSelectionParameters'
+// branches directly: no available selections, invalid DTQL (defensive --
+// runDTQL always validates first), an alias node, and a param reference
+// nested inside a sequence.
+func TestReferencedSelectionParameters(t *testing.T) {
+	if got := referencedSelectionParameters("from: {name: Invoice}\nlimit: 5\n", nil); got != nil {
+		t.Fatalf("no available selections: got %v, want nil", got)
+	}
+	if got := referencedSelectionParameters("not: [valid, yaml", map[string]any{"sel1": 1}); got != nil {
+		t.Fatalf("invalid DTQL: got %v, want nil", got)
+	}
+	doc := "from: {name: Invoice}\nwhere: {op: In, left: {field: CustomerId}, right: {param: sel1}}\nlimit: 5\n"
+	got := referencedSelectionParameters(doc, map[string]any{"sel1": []int{1, 2}, "unused": true})
+	if _, ok := got["sel1"]; !ok || len(got) != 1 {
+		t.Fatalf("got %v, want only the referenced parameter bound", got)
+	}
+	// A YAML alias (&anchor/*alias) still resolves to the same scalar node,
+	// exercising the AliasNode branch of both switch statements.
+	aliasDoc := "x-param-name: &p sel1\nfrom: {name: Invoice}\nwhere: {op: In, left: {field: CustomerId}, right: {param: *p}}\nlimit: 5\n"
+	got = referencedSelectionParameters(aliasDoc, map[string]any{"sel1": []int{1}})
+	if _, ok := got["sel1"]; !ok {
+		t.Fatalf("alias-resolved param not bound: got %v", got)
+	}
+}
+
+// TestRunWorkspaceActionObserverError covers runWorkspaceAction's own
+// observer-returned-error branch.
+func TestRunWorkspaceActionObserverError(t *testing.T) {
+	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := withWorkspaceObserver(context.Background(), func(WorkspaceAction) (ContextReference, error) {
+		return ContextReference{}, errors.New("application rejected the action")
+	})
+	resp := conversation.runWorkspaceAction(ctx, WorkspaceAction{Kind: "select"})
+	if resp.OK || !strings.Contains(resp.Error, "application rejected the action") {
+		t.Fatalf("resp = %+v, want the observer's error surfaced", resp)
+	}
+}
+
+// TestRunWorkspaceActionGuardBranches covers runWorkspaceAction's own guard
+// branches directly: no workspace observer in context, and the
+// actionCalls>3 rate limit (TestAgentWorkspaceToolUsesSameApplicationAction
+// only exercises the happy path).
+func TestRunWorkspaceActionGuardBranches(t *testing.T) {
+	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp := conversation.runWorkspaceAction(context.Background(), WorkspaceAction{Kind: "select"}); !strings.Contains(resp.Error, "unavailable") {
+		t.Fatalf("resp = %+v, want the workspace-actions-unavailable error", resp)
+	}
+	// A fresh conversation for the rate limit: the guard call above already
+	// incremented actionCalls once.
+	limited, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := withWorkspaceObserver(context.Background(), func(WorkspaceAction) (ContextReference, error) {
+		return ContextReference{Kind: "selection", Title: "Row"}, nil
+	})
+	for i := range 4 {
+		resp := limited.runWorkspaceAction(ctx, WorkspaceAction{Kind: "select"})
+		if i < 3 {
+			if !resp.OK {
+				t.Fatalf("call %d: resp = %+v, want success within the rate limit", i, resp)
+			}
+		} else if !strings.Contains(resp.Error, "Too many") {
+			t.Fatalf("call %d: resp = %+v, want the rate-limit error on the 4th call", i, resp)
+		}
+	}
+}
+
+// TestRunWorkspaceActionSummaryPerKind covers runWorkspaceAction's own
+// per-Kind summary switch directly: TestAgentWorkspaceToolUsesSameApplicationAction
+// only exercises "select", and none of the others go through the real
+// application observer in any other test.
+func TestRunWorkspaceActionSummaryPerKind(t *testing.T) {
+	for kind, want := range map[string]string{
+		"select":              "Selected Target.",
+		"dock":                "Docked Target.",
+		"attach":              "Attached Target.",
+		"detach":              "Detached Target.",
+		"undock":              "Undocked Target.",
+		"clear_selection":     "Selection cleared.",
+		"bookmark_create":     "Bookmarked the result.",
+		"bookmark_rename":     "Renamed the bookmark.",
+		"bookmark_add_tag":    "Tagged the bookmark.",
+		"bookmark_remove_tag": "Removed the bookmark tag.",
+		"bookmark_delete":     "Deleted bookmark.",
+		"unknown-kind":        "Workspace updated.",
+	} {
+		t.Run(kind, func(t *testing.T) {
+			conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := withWorkspaceObserver(context.Background(), func(WorkspaceAction) (ContextReference, error) {
+				return ContextReference{Kind: "target", Title: "Target"}, nil
+			})
+			resp := conversation.runWorkspaceAction(ctx, WorkspaceAction{Kind: kind})
+			if !resp.OK || resp.Summary != want {
+				t.Fatalf("runWorkspaceAction(kind=%q) summary = %q, want %q", kind, resp.Summary, want)
+			}
+		})
+	}
+}
+
+// TestAskWithContextRejectsEmptyPrompt and
+// TestStreamAskWithContextRejectsEmptyPrompt cover Ask/StreamAskWithContext's
+// own (separate) empty-prompt guards -- AskWithContext's early return is not
+// reached by driving StreamAskWithContext alone, since Ask/AskWithContext
+// never delegates that specific check to it.
+func TestAskWithContextRejectsEmptyPrompt(t *testing.T) {
+	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conversation.AskWithContext(context.Background(), "   ", ""); err == nil {
+		t.Fatal("expected an error for a blank prompt")
+	}
+}
+
+func TestStreamAskWithContextRejectsEmptyPrompt(t *testing.T) {
+	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotErr error
+	for _, err := range conversation.StreamAskWithContext(context.Background(), "   ", "") {
+		gotErr = err
+	}
+	if gotErr == nil {
+		t.Fatal("expected an error event for a blank prompt")
+	}
+}
+
+// TestStreamAskWithContextStopsWhenConsumerBreaksEarly covers
+// StreamAskWithContext's own "the caller stopped ranging" branch (yield
+// returning false): a consumer that breaks out of the range after the
+// first event must not leave the turn's provider call still pending, and
+// LastStreamTurn must still reflect whatever was captured before the break.
+func TestStreamAskWithContextStopsWhenConsumerBreaksEarly(t *testing.T) {
+	llm := &scriptedProvider{steps: []scriptedStep{{text: "Hello there"}}}
+	conversation, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///x", "schema")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := 0
+	for range conversation.StreamAskWithContext(context.Background(), "Hi", "") {
+		events++
+		break
+	}
+	if events != 1 {
+		t.Fatalf("events consumed before break = %d, want 1", events)
+	}
+	// The turn was cut short before EventCompleted, so LastStreamTurn must
+	// not panic and must reflect the partial state finish() captured.
+	_ = conversation.LastStreamTurn()
+}
+
+// TestInterpretBreaksLoopAfterFirstSuccessfulQuery covers
+// StreamAskWithContext's browserInterpretation-and-hasSuccessfulPending
+// early break: a scripted second step would fail the test (via
+// scriptedProvider's own "script exhausted" error) if the loop didn't stop
+// ranging over loop.Run right after the first successful run_dtql.
+func TestInterpretBreaksLoopAfterFirstSuccessfulQuery(t *testing.T) {
+	doc := "from: {name: Invoice}\nlimit: 5\n"
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": doc})}},
+	}}
+	result, err := interpretWithProviderDetailed(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)
+	if err != nil {
+		t.Fatalf("interpretWithProviderDetailed() error = %v", err)
+	}
+	if result.DTQL != strings.TrimSpace(doc) {
+		t.Fatalf("result.DTQL = %q", result.DTQL)
+	}
+	if llm.calls != 1 {
+		t.Fatalf("model calls = %d, want exactly 1 (the loop should break right after the successful query)", llm.calls)
+	}
+}
+
+// TestFriendlyQueryError covers friendlyQueryError's nil-error and
+// message-truncation branches directly.
+func TestFriendlyQueryError(t *testing.T) {
+	if got := friendlyQueryError(nil); got != "" {
+		t.Fatalf("friendlyQueryError(nil) = %q, want empty", got)
+	}
+	long := strings.Repeat("x", 300)
+	got := friendlyQueryError(errors.New(long))
+	if !strings.HasPrefix(got, "Query failed: ") || !strings.HasSuffix(got, "...") || len(got) != len("Query failed: ")+240 {
+		t.Fatalf("friendlyQueryError(long) = %q (len %d)", got, len(got))
+	}
+}

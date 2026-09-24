@@ -435,6 +435,11 @@ func (c *AIConversation) handlers() map[string]agent.Handler {
 			}
 			resp, err := c.runDTQL(ctx, c.executor, c.sourceURL, args)
 			if err != nil {
+				// Not covered: every runDTQL return path below carries a nil
+				// error (failures are reported through resp.Error instead,
+				// captured as a QueryResult); this guard exists for a
+				// future runDTQL change or DTQLExecutor implementation that
+				// starts returning an infrastructure-level error.
 				return errorResult(call.ID, err.Error()), nil
 			}
 			return jsonResult(call.ID, resp), nil

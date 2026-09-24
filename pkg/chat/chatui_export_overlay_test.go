@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -352,6 +353,110 @@ func TestExportDialogOverlayViewRendersPickerAndError(t *testing.T) {
 	view = d.View(70, 20)
 	if !strings.Contains(view, "Directory: ") || !strings.Contains(view, "Space current") {
 		t.Fatalf("expected the directory picker in the view:\n%s", view)
+	}
+}
+
+// TestExportDialogOverlayPickerEnterOnDirectorySelectsIt covers the picker's
+// positive Enter branch: Path pointing at an existing directory selects it
+// and closes the picker, unlike the file-Path case above.
+func TestExportDialogOverlayPickerEnterOnDirectorySelectsIt(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := newExportDialogOverlay(u)
+	d.dir.SetValue(dir)
+	d.focus = 4
+	next, cmd, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	d = next.(*exportDialogOverlay)
+	if done || cmd == nil || d.picker == nil {
+		t.Fatal("directory picker did not open")
+	}
+	drainCmd(t, u, cmd)
+	d.picker.Path = sub
+	next, _, done = d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	d = next.(*exportDialogOverlay)
+	if done || d.picker != nil || d.dir.Value() != sub {
+		t.Fatalf("Enter on a directory should select it: picker=%v dir=%q, want %q", d.picker, d.dir.Value(), sub)
+	}
+}
+
+// TestExportDialogOverlayUpdateIgnoresNonKeyMsg covers Update's early
+// non-key-message return.
+func TestExportDialogOverlayUpdateIgnoresNonKeyMsg(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	d := newExportDialogOverlay(u)
+	next, cmd, done := d.Update(tea.WindowSizeMsg{})
+	if next != d || cmd != nil || done {
+		t.Fatalf("expected a non-key message to be a no-op: next=%v cmd=%v done=%v", next, cmd, done)
+	}
+}
+
+// TestExportDialogOverlayUnhandledKeyAtLeadingFocusIsNoop covers the final
+// fallback return: an unhandled key while focused on a non-text field
+// (Scope, here) is a no-op rather than falling through to the dir/name
+// text-input Update.
+func TestExportDialogOverlayUnhandledKeyAtLeadingFocusIsNoop(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	d := newExportDialogOverlay(u)
+	d.focus = 0
+	next, cmd, done := d.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if next != d || cmd != nil || done || d.scope != 0 {
+		t.Fatalf("expected an unhandled key at focus 0 to be a no-op: next=%v cmd=%v done=%v scope=%d", next, cmd, done, d.scope)
+	}
+}
+
+// TestExportDialogOverlayBucketScopeSubmit covers the bucket-scope branch of
+// the Export step (scope defaults to the "current" keyword otherwise).
+func TestExportDialogOverlayBucketScopeSubmit(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.snapshot.RecordSets = map[string]RecordSet{"rs1": exportFixture("Invoices")}
+	u.snapshot.Workspace.ExportBucket = []string{"rs1"}
+	d := newExportDialogOverlay(u)
+	d.dir.SetValue(t.TempDir())
+	d.name.SetValue("out")
+	d.format = indexOf(exportFormats, "csv")
+	d.focus = 5
+	_, cmd, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !done || cmd == nil {
+		t.Fatalf("expected the bucket-scope export to submit: done=%v cmd=%v dialog error=%q", done, cmd, d.err)
+	}
+	msg := cmd()
+	if result, ok := msg.(chatExportDoneMsg); !ok || result.err != nil {
+		t.Fatalf("bucket export failed: %+v", msg)
+	}
+}
+
+// TestExportDialogOverlayExportCommandErrorSetsMessage covers the
+// exportCommand-returned-error branch: "current" scope with no focused
+// RecordSet fails synchronously, before any write command runs.
+func TestExportDialogOverlayExportCommandErrorSetsMessage(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	d := newExportDialogOverlay(u)
+	d.dir.SetValue(t.TempDir())
+	d.name.SetValue("out")
+	d.format = indexOf(exportFormats, "csv")
+	d.focus = 5
+	next, cmd, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	d = next.(*exportDialogOverlay)
+	if done || cmd != nil || d.err == "" {
+		t.Fatalf("expected exportCommand's error to surface synchronously in d.err: done=%v cmd=%v err=%q", done, cmd, d.err)
+	}
+}
+
+// TestNewExportDialogOverlayFallsBackToDotWhenGetwdFails covers
+// newExportDialogOverlay's os.Getwd error fallback via the exportDialogGetwd
+// seam.
+func TestNewExportDialogOverlayFallsBackToDotWhenGetwdFails(t *testing.T) {
+	original := exportDialogGetwd
+	exportDialogGetwd = func() (string, error) { return "", errors.New("getwd unavailable") }
+	defer func() { exportDialogGetwd = original }()
+	u, _ := newTestChatUI(t, nil, Turn{})
+	d := newExportDialogOverlay(u)
+	if d.dir.Value() != "." {
+		t.Fatalf("directory = %q, want \".\" when Getwd fails", d.dir.Value())
 	}
 }
 

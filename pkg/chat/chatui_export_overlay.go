@@ -32,9 +32,15 @@ type exportDialogOverlay struct {
 	err    string
 }
 
+// exportDialogGetwd is os.Getwd, as a seam: newExportDialogOverlay's
+// getwd-fails fallback ("." as the starting directory) is exercised in
+// tests by overriding this var, since os.Getwd itself cannot be made to
+// fail portably.
+var exportDialogGetwd = os.Getwd
+
 // newExportDialogOverlay mirrors ui.go's openExportDialog.
 func newExportDialogOverlay(ui *ChatUI) *exportDialogOverlay {
-	directory, err := os.Getwd()
+	directory, err := exportDialogGetwd()
 	if err != nil {
 		directory = "."
 	}

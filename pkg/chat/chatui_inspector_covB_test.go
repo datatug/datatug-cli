@@ -302,6 +302,47 @@ func TestChatUIOpenCellDetailWithoutJoinApplicationSkipsPreview(t *testing.T) {
 	}
 }
 
+// TestChatUIOpenCellDetailQualifiedColumnButNoJoinApplicationSkipsPreview
+// covers openCellDetail's OTHER early return: record/sessions/qualified
+// meta all pass (unlike the plain-Submit case above, whose meta.qualified
+// is always empty), but u.sessions.joinApplication isn't a
+// ForeignKeyJoinApplication at all (the type assertion's "ok" is false).
+func TestChatUIOpenCellDetailQualifiedColumnButNoJoinApplicationSkipsPreview(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.AppendUser(ctx, sessions.activeID, "Show invoices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
+		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: CustomerId}]\nlimit: 5\n",
+		Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// No ConfigureJoinApplication call: sessions.joinApplication stays nil,
+	// so the type assertion to ForeignKeyJoinApplication is false.
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.catalog = ProjectCatalog{Objects: []ProjectObject{
+		{Reference: ContextReference{Kind: "table", SourceID: "chinook", ObjectID: "main.Invoice", Title: "Invoice"}, Columns: []string{"CustomerId"}},
+	}}
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	if !u.shell.FocusEntry(u.lastGridEntryID) {
+		t.Fatal("grid unavailable to focus")
+	}
+	u.openCellDetail()
+	if u.pendingDetail == nil || u.pendingDetail.loading || u.pendingDetail.qualified == "" {
+		t.Fatalf("expected a qualified column but no async preview without a join application: %+v", u.pendingDetail)
+	}
+}
+
 // TestCellDetailOverlayViewShowsLoadingRelatedErrorAndRelatedRecords
 // covers cellDetailOverlay.View's loading/relatedError/related-present
 // branches -- TestChatUIEnterOpensAndClosesCellDetail only exercises the
@@ -309,7 +350,10 @@ func TestChatUIOpenCellDetailWithoutJoinApplicationSkipsPreview(t *testing.T) {
 func TestCellDetailOverlayViewShowsLoadingRelatedErrorAndRelatedRecords(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{
-		{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", Title: "Customer"}, Columns: []string{"CustomerId", "City"}},
+		// A non-matching object first exercises the View's own object-scan
+		// "continue" (ObjectID that doesn't EqualFold the FK target).
+		{Reference: ContextReference{Kind: "table", ObjectID: "main.Unrelated", Title: "Unrelated"}, Columns: []string{"X"}},
+		{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", Title: "Customer"}, Columns: []string{"CustomerId", "City"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER"}},
 	}}
 	loading := &cellDetail{title: "Invoices", column: "CustomerId", columns: []string{"CustomerId"}, values: []any{1}, loading: true}
 	overlayLoading := &cellDetailOverlay{ui: u, detail: loading}
@@ -335,7 +379,7 @@ func TestCellDetailOverlayViewShowsLoadingRelatedErrorAndRelatedRecords(t *testi
 	}
 	overlayRelated := &cellDetailOverlay{ui: u, detail: related}
 	view := overlayRelated.View(90, 30)
-	for _, want := range []string{"FK fk1", "Customer", "Columns:", "Related records (showing 1, max 5):", "Prague"} {
+	for _, want := range []string{"FK fk1", "Customer", "Columns:", "CustomerId INTEGER", "Related records (showing 1, max 5):", "Prague"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("related view missing %q:\n%s", want, view)
 		}
@@ -624,14 +668,13 @@ func TestChatUIHandleSaveQueryDoneBranches(t *testing.T) {
 		t.Fatalf("expected a transcript message without a pending overlay:\n%s", u.shell.View().Content)
 	}
 
-	// Success without SetSavedQueryService (reloadSavedQueries fails since
-	// u.savedQueryService is nil / not a lister) surfaces conciseError.
+	// A success whose OWN reloadSavedQueries call fails (the saved-query
+	// service's List() errors) surfaces that failure via conciseError
+	// instead of the "Saved project query" confirmation.
+	u.savedQueryService = &savedQueryStub{listErr: context.DeadlineExceeded}
 	u.handleSaveQueryDone(saveQueryDoneMsg{query: SavedQuery{ID: "q1", Title: "Saved"}})
-	// Whatever reloadSavedQueries' outcome, this must not panic; check the
-	// transcript reflects SOME outcome (error or success message).
-	view := u.shell.View().Content
-	if view == "" {
-		t.Fatal("expected some transcript content after handleSaveQueryDone")
+	if strings.Contains(u.shell.View().Content, "Saved project query") {
+		t.Fatalf("expected the reload failure to suppress the save confirmation:\n%s", u.shell.View().Content)
 	}
 }
 
@@ -743,6 +786,17 @@ func TestSaveQueryOverlayUpdateFullSurface(t *testing.T) {
 		t.Fatalf("expected ctrl+s to have added the pending tag: %+v", o2.tags)
 	}
 	drainCmd(t, u, cmd)
+
+	// ctrl+s with a DUPLICATE pending tag value leaves addTag's error set,
+	// so it must stay open without calling save() at all.
+	o2.values[1] = "onemoretag" // same tag again, case-sensitive match
+	_, cmd, done = o2.Update(tea.KeyPressMsg{Text: "ctrl+s"})
+	if done || cmd != nil {
+		t.Fatalf("expected ctrl+s with a duplicate tag to stay open without saving: err=%q cmd=%v", o2.err, cmd)
+	}
+	if o2.err == "" {
+		t.Fatal("expected a duplicate-tag error")
+	}
 
 	// Typing at focus 0/1 routes through editLineOnKey.
 	o3 := newSaveQueryOverlay(u, SavedQuerySaveRequest{Title: ""})

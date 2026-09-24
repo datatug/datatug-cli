@@ -674,3 +674,74 @@ func TestHTTPRequestOverlayLoadDefaultsSettingsFailureSetsError(t *testing.T) {
 		t.Fatalf("expected a settings-load error, got %q", d.err)
 	}
 }
+
+// TestSendHTTPRequestNilBusyCmdReturnsBareRunCmd covers sendHTTPRequest's
+// busyCmd == nil branch via the startHTTPRequestBusy seam:
+// chatshell.Model.SetBusy(true) always returns a non-nil spinner.Tick in
+// production, so this path is only reachable by overriding the seam
+// directly, as here.
+func TestSendHTTPRequestNilBusyCmdReturnsBareRunCmd(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	original := startHTTPRequestBusy
+	startHTTPRequestBusy = func(*ChatUI) tea.Cmd { return nil }
+	defer func() { startHTTPRequestBusy = original }()
+
+	cmd, err := u.sendHTTPRequest(httpRequestSpec{Method: http.MethodGet, URL: "https://example.com/data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd == nil {
+		t.Fatal("expected a bare runCmd even with a nil busyCmd")
+	}
+}
+
+// TestSendHTTPRequestFinalizeFailureAfterAppendUserReportsError covers
+// sendHTTPRequest's background runCmd failure branch AFTER AppendUser has
+// already succeeded (AppendTurn/AppendHTTPResponse/Load), via the
+// finalizeHTTPRequest seam -- distinct from
+// TestSendHTTPRequestBackgroundAppendUserFailureReportsError, which fails
+// at AppendUser itself.
+func TestSendHTTPRequestFinalizeFailureAfterAppendUserReportsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	u, sessions := newTestChatUI(t, nil, Turn{})
+	original := finalizeHTTPRequest
+	finalizeHTTPRequest = func(context.Context, *SessionStore, string, string, string, string, HTTPResponse, *QueryResult) (ChatSession, error) {
+		return ChatSession{}, context.DeadlineExceeded
+	}
+	defer func() { finalizeHTTPRequest = original }()
+
+	cmd, err := u.sendHTTPRequest(httpRequestSpec{Method: http.MethodGet, URL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainCmd(t, u, cmd)
+	if u.shell.Busy() {
+		t.Fatal("expected handleHTTPDone to clear busy even on a finalize failure")
+	}
+	if !strings.Contains(u.shell.View().Content, "deadline exceeded") {
+		t.Fatalf("expected the finalize error in the transcript:\n%s", u.shell.View().Content)
+	}
+	_ = sessions
+}
+
+// TestFinalizeHTTPRequestDefaultImplementationPropagatesStoreError covers
+// finalizeHTTPRequest's own real (non-overridden) error branch directly:
+// a closed store makes AppendHTTPResponse fail.
+func TestFinalizeHTTPRequestDefaultImplementationPropagatesStoreError(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := finalizeHTTPRequest(ctx, store, sessions.activeID, "origin1", "https://example.com/data", "", HTTPResponse{Method: "GET", URL: "https://example.com/data"}, nil); err == nil {
+		t.Fatal("expected a closed store to fail AppendHTTPResponse")
+	}
+}

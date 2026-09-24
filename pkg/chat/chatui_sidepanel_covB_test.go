@@ -1419,3 +1419,29 @@ func TestWorkspacePanelUpdateBookmarkInputSearchAndTagsReportErrors(t *testing.T
 		t.Fatalf("expected the tags-mode refresh error in the transcript:\n%s", u.shell.View().Content)
 	}
 }
+
+// TestWorkspacePanelSelectedExplorerObjectOnGroupNodeReturnsNil covers
+// selectedExplorerObject's index-out-of-range guard: a grouping node (e.g.
+// "Databases (N)") carries objectIndex -1 and issue==false, so it never
+// resolves through the issueFor substitution either -- the cursor sitting
+// on it must report no selectable object via the same guard a genuinely
+// out-of-range index would hit.
+func TestWorkspacePanelSelectedExplorerObjectOnGroupNodeReturnsNil(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	nodes := u.workspace.explorerNodes()
+	found := false
+	for i, node := range nodes {
+		if node.id == "group:databases" {
+			u.workspace.explorerIndex = i
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("setup: expected a 'group:databases' node")
+	}
+	if obj := u.workspace.selectedExplorerObject(); obj != nil {
+		t.Fatalf("selectedExplorerObject() on a group node = %+v, want nil", obj)
+	}
+}

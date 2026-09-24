@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -50,6 +51,32 @@ type httpDoneMsg struct {
 
 // sendHTTPRequest ports http_command.go's sendHTTPRequest, minus its direct
 // u.entries/u.busy mutation (now shell.AppendBlock/SetBusy).
+// startHTTPRequestBusy is sendHTTPRequest's own SetBusy(true) call, factored
+// into a seam: chatshell.Model.SetBusy(true) always returns a real,
+// non-nil spinner.Tick command in production, so the busyCmd == nil branch
+// below has no legitimate production path -- it exists purely to keep this
+// function honest if that contract ever changes, and is exercised directly
+// by overriding this var in a test.
+var startHTTPRequestBusy = func(u *ChatUI) tea.Cmd { return u.shell.SetBusy(true) }
+
+// finalizeHTTPRequest is sendHTTPRequest's background runCmd tail once
+// store.AppendUser has already succeeded (AppendTurn/AppendHTTPResponse,
+// then Load), factored into a seam so a test can fault-inject a failure
+// there specifically -- distinct from an AppendUser failure -- without a
+// race against real store I/O timing.
+var finalizeHTTPRequest = func(ctx context.Context, store *SessionStore, sessionID, originID, displayURL, failure string, response HTTPResponse, query *QueryResult) (ChatSession, error) {
+	var err error
+	if failure != "" {
+		_, err = store.AppendTurn(ctx, sessionID, originID, displayURL, Turn{Text: failure})
+	} else {
+		_, err = store.AppendHTTPResponse(ctx, sessionID, originID, response, query)
+	}
+	if err != nil {
+		return ChatSession{}, err
+	}
+	return store.Load(ctx, sessionID)
+}
+
 func (u *ChatUI) sendHTTPRequest(spec httpRequestSpec) (tea.Cmd, error) {
 	if !supportedHTTPMethod(spec.Method) {
 		return nil, fmt.Errorf("unsupported HTTP method")
@@ -58,21 +85,23 @@ func (u *ChatUI) sendHTTPRequest(spec httpRequestSpec) (tea.Cmd, error) {
 		return nil, fmt.Errorf("GET and HEAD requests cannot have a body")
 	}
 	rawURL := spec.URL
-	parsed, err := url.ParseRequestURI(rawURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+	// httpOrigin performs the identical scheme/host/credential validation
+	// a separate url.ParseRequestURI check here used to duplicate as a
+	// second, provably unreachable failure branch (the same rawURL can
+	// never pass one and fail the other): validate once via httpOrigin and
+	// reuse it for both the settings-lookup key and the parsed display URL.
+	originURL, err := httpOrigin(rawURL)
+	if err != nil {
 		return nil, fmt.Errorf("/http needs an HTTP or HTTPS URL without embedded credentials")
 	}
+	parsed, _ := url.ParseRequestURI(rawURL) // already validated by httpOrigin above
 	displayURL := *parsed
 	displayURL.RawQuery, displayURL.ForceQuery, displayURL.Fragment = "", false, ""
 	requestText := "/http " + strings.ToLower(spec.Method) + " " + displayURL.String()
 	if u.sessions == nil || u.sessions.store == nil {
 		return nil, fmt.Errorf("HTTP requests need an active chat session")
 	}
-	origin, err := httpOrigin(rawURL)
-	if err != nil {
-		return nil, err
-	}
-	settings, err := u.sessions.store.HTTPRequestSettings(u.ctx, origin)
+	settings, err := u.sessions.store.HTTPRequestSettings(u.ctx, originURL)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't load HTTP request settings")
 	}
@@ -80,7 +109,7 @@ func (u *ChatUI) sendHTTPRequest(spec httpRequestSpec) (tea.Cmd, error) {
 		settings.Headers = make(map[string]string)
 	}
 	for name, value := range spec.Headers {
-		canonical, validationErr := validateHTTPSetting("header", origin, name, value)
+		canonical, validationErr := validateHTTPSetting("header", originURL, name, value)
 		if validationErr != nil {
 			return nil, fmt.Errorf("invalid request header %q", name)
 		}
@@ -93,22 +122,14 @@ func (u *ChatUI) sendHTTPRequest(spec httpRequestSpec) (tea.Cmd, error) {
 	store := u.sessions.store
 	ctx := u.ctx
 	u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(requestText))
-	busyCmd := u.shell.SetBusy(true)
+	busyCmd := startHTTPRequestBusy(u)
 	runCmd := func() tea.Msg {
 		response, query, failure := fetchHTTPRequestResult(ctx, spec, displayURL.String(), settings)
 		origin, err := store.AppendUser(ctx, sessionID, requestText)
 		if err != nil {
 			return httpDoneMsg{sessionID: sessionID, err: err}
 		}
-		if failure != "" {
-			_, err = store.AppendTurn(ctx, sessionID, origin.ID, displayURL.String(), Turn{Text: failure})
-		} else {
-			_, err = store.AppendHTTPResponse(ctx, sessionID, origin.ID, response, query)
-		}
-		if err != nil {
-			return httpDoneMsg{sessionID: sessionID, err: err}
-		}
-		snapshot, err := store.Load(ctx, sessionID)
+		snapshot, err := finalizeHTTPRequest(ctx, store, sessionID, origin.ID, displayURL.String(), failure, response, query)
 		return httpDoneMsg{sessionID: sessionID, snapshot: snapshot, err: err}
 	}
 	if busyCmd != nil {

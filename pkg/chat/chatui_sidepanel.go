@@ -31,6 +31,7 @@ type workspacePanel struct {
 
 	// Selected (inspector).
 	inspectorOffset int
+	inspectorSubTab int // 0 Current row, 1 Current column, 2 Current recordset
 
 	// Docked.
 	dockIndex       int
@@ -499,6 +500,169 @@ func (p *workspacePanel) projectExplorer(width, height int) string {
 
 // --- Selected (inspector) tab -----------------------------------------
 
+// inspectorSubTab is the Selected tab's own Row/Column/RecordSet cursor —
+// ui.go's u.inspectorTab, ported (0 row, 1 column, 2 recordset — matching
+// inspector_ui.go's inspectorWorkspaceView numbering, whose case default is
+// "row").
+func (p *workspacePanel) inspectorView(width, height int) string {
+	tabs := []string{"1 Current row", "2 Current column", "3 Current recordset"}
+	if width < 55 {
+		tabs = []string{"1 Row", "2 Column", "3 Recordset"}
+	}
+	for i := range tabs {
+		if i == p.inspectorSubTab {
+			tabs[i] = "● " + tabs[i]
+		}
+	}
+	header := ansi.Truncate(strings.Join(tabs, " · "), width, "…")
+	var lines []string
+	switch p.inspectorSubTab {
+	case 1:
+		lines = p.currentColumnDetails(width)
+	case 2:
+		lines = p.currentRecordsetDetails(width)
+	default:
+		lines = p.currentRowDetails(width)
+	}
+	visible := max(1, height-2)
+	p.inspectorOffset = min(p.inspectorOffset, max(0, len(lines)-visible))
+	end := min(len(lines), p.inspectorOffset+visible)
+	return strings.Join(append([]string{header, ""}, lines[p.inspectorOffset:end]...), "\n")
+}
+
+// currentRowDetails is inspector_ui.go's (*UI).currentRowDetails, ported to
+// activeGrid (chatui_inspector.go) instead of u.activeInspectorGrid.
+func (p *workspacePanel) currentRowDetails(width int) []string {
+	g, record, ok := p.ui.activeGrid()
+	rowIndex := -1
+	if ok && g != nil {
+		rowIndex = g.CurrentIndex()
+	}
+	if !ok || g == nil || rowIndex < 0 || rowIndex >= len(g.Rows()) {
+		return []string{p.selectedDetails(width)}
+	}
+	rawRow := g.rawRow(rowIndex)
+	lines := []string{fmt.Sprintf("Row %d of %d · %s", rowIndex+1, len(g.Rows()), sanitizeTerminalText(g.baseTitle)), ""}
+	nameWidth, numberWidth := 0, 0
+	for i, column := range g.Columns() {
+		nameWidth = max(nameWidth, ansi.StringWidth(column.Name))
+		if column.Numeric {
+			numberWidth = max(numberWidth, ansi.StringWidth(g.Cell(rowIndex, i)))
+		}
+	}
+	nameWidth = min(nameWidth, max(8, width/3))
+	numberWidth = min(numberWidth, 20)
+	for i, column := range g.Columns() {
+		value := g.Cell(rowIndex, i)
+		if value == "" {
+			value = "—"
+			if i < len(rawRow) && rawRow[i] == nil {
+				value = "NULL"
+			}
+		}
+		meta := p.ui.columnMeta(record, column.Name)
+		typeLabel := meta.dbType
+		if typeLabel == "" {
+			typeLabel = "?"
+		}
+		if column.Numeric {
+			value = strings.Repeat(" ", max(0, numberWidth-ansi.StringWidth(value))) + value
+		}
+		name := ansi.Truncate(column.Name, nameWidth, "…")
+		name = strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name))) + name
+		line := fmt.Sprintf("  %s  %-10s  %s", name, ansi.Truncate(typeLabel, 10, "…"), value)
+		lines = append(lines, ansi.Truncate(line, width, "…"), "")
+	}
+	if selection := p.ui.snapshot.Workspace.CurrentSelectionID; selection != "" {
+		lines = append(lines, "Selection", p.selectedDetails(width))
+	}
+	return lines
+}
+
+// currentColumnDetails is inspector_ui.go's (*UI).currentColumnDetails,
+// ported to activeGrid. FK-candidate attribution needs the transcript
+// entry's join candidates, which JoinBlock (not gridState) owns — ChatUI
+// looks them up via SessionChat.JoinCandidates instead of ui.go's
+// entry.joinCandidates cache.
+func (p *workspacePanel) currentColumnDetails(width int) []string {
+	g, record, ok := p.ui.activeGrid()
+	if !ok || g == nil || g.SelectedColumn() < 0 || g.SelectedColumn() >= len(g.Columns()) {
+		return []string{"Focus a result grid to inspect its current column."}
+	}
+	column := g.Columns()[g.SelectedColumn()]
+	meta := p.ui.columnMeta(record, column.Name)
+	lines := []string{"Column: " + column.Name}
+	if meta.qualified != "" {
+		lines = append(lines, "Source: "+meta.qualified)
+	} else {
+		lines = append(lines, "Source: unavailable")
+	}
+	if meta.dbType != "" {
+		lines = append(lines, "Type: "+meta.dbType)
+	} else {
+		lines = append(lines, "Type: not available in catalog")
+	}
+	if len(meta.objects) > 1 {
+		lines = append(lines, "", "Possible source tables:")
+		for _, object := range meta.objects {
+			lines = append(lines, "  "+ansi.Truncate(object, max(1, width-2), "…"))
+		}
+	}
+	var related []string
+	var constraints []string
+	if p.ui.sessions != nil && record != nil {
+		if candidates, err := p.ui.sessions.JoinCandidates(p.ui.ctx, record.ID); err == nil {
+			for _, candidate := range candidates {
+				for _, pair := range candidate.Fields {
+					if strings.EqualFold(pair.SourceField, column.Name) {
+						related = append(related, candidate.Target.Relation+" · "+candidate.Cardinality)
+						constraints = append(constraints, candidate.ConstraintID)
+						break
+					}
+				}
+			}
+		}
+	}
+	if len(constraints) == 0 {
+		lines = append(lines, "Constraints: not available in compact catalog")
+	} else {
+		lines = append(lines, "FK constraints: "+strings.Join(constraints, ", "))
+	}
+	lines = append(lines, "", "Related tables:")
+	if len(related) == 0 {
+		lines = append(lines, "  No available JOIN candidate for this column.")
+	} else {
+		for _, relation := range related {
+			lines = append(lines, "  "+ansi.Truncate(relation, max(1, width-2), "…"))
+		}
+	}
+	return lines
+}
+
+// currentRecordsetDetails is inspector_ui.go's
+// (*UI).currentRecordsetDetails, ported to activeGrid.
+func (p *workspacePanel) currentRecordsetDetails(width int) []string {
+	g, record, ok := p.ui.activeGrid()
+	if !ok || g == nil {
+		return []string{"Focus a result grid to inspect its RecordSet."}
+	}
+	lines := []string{g.baseTitle, fmt.Sprintf("%d rows · %d columns", len(g.Rows()), len(g.Columns())), ""}
+	for _, column := range g.Columns() {
+		meta := p.ui.columnMeta(record, column.Name)
+		qualified := meta.qualified
+		if qualified == "" {
+			qualified = column.Name
+		}
+		typeLabel := meta.dbType
+		if typeLabel == "" {
+			typeLabel = "type unavailable"
+		}
+		lines = append(lines, ansi.Truncate("  "+qualified+"  "+typeLabel, width, "…"), "")
+	}
+	lines = append(lines, "Constraints require full schema metadata.")
+	return lines
+}
+
 func (p *workspacePanel) selectedDetails(width int) string {
 	selection, ok := p.ui.snapshot.Workspace.Selections[p.ui.snapshot.Workspace.CurrentSelectionID]
 	if !ok {
@@ -672,7 +836,7 @@ func (p *workspacePanel) View(width, height int, focused bool) string {
 	case "Project":
 		body = p.projectExplorer(width, height-1)
 	case "Selected":
-		body = p.selectedDetails(width)
+		body = p.inspectorView(width, height-1)
 	case "Docked":
 		body = p.dockedView(width)
 	case "Bookmarks":
@@ -728,6 +892,11 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	nodes := p.explorerNodes()
 	switch msg.String() {
+	case "1", "2", "3":
+		if p.tab == 1 {
+			p.inspectorSubTab = int(msg.String()[0] - '1')
+			p.inspectorOffset = 0
+		}
 	case "left", "h":
 		p.setTab(p.tab - 1)
 	case "right", "l":

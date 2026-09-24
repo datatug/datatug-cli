@@ -1,6 +1,8 @@
 package chat
 
 import (
+	"fmt"
+	"net/url"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -46,28 +48,84 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	return nil, false
 }
 
-// refreshLastRecordSet is a simplified port of refresh_ui.go's
-// refreshSelectedCard for a query RecordSet (checklist item — refresh
-// flow): re-runs the most recently appended grid's stored DTQL, same as
-// pressing Ctrl+R on a focused grid in ui.go. It targets
-// lastGridRecordSetID (the same "most recent, not necessarily focused,
-// grid" simplification /export current already uses — see the Lane C
-// report) rather than the true focused grid, since ChatUI has no equivalent
-// of ui.go's u.activeGrid/u.gridFocused yet. HTTP-response refresh
-// (ui.go's other refreshSelectedCard branch) is not ported.
+// refreshLastRecordSet is ui.go's refreshSelectedCard (both branches — DTQL
+// RecordSet refresh and HTTP GET refresh), ported to chatshell: it targets
+// the true focused grid (activeGrid) when one is focused, falling back to
+// lastGridRecordSetID (the most recently appended grid) otherwise, matching
+// Ctrl+R on a focused grid in ui.go including its HTTP-response refresh
+// branch (checklist item — HTTP-response refresh).
 func (u *ChatUI) refreshLastRecordSet() tea.Cmd {
-	if u.sessions == nil || u.shell.Busy() || u.lastGridRecordSetID == "" {
+	if u.sessions == nil || u.sessions.store == nil || u.shell.Busy() {
 		return nil
 	}
-	record, ok := u.snapshot.RecordSets[u.lastGridRecordSetID]
-	if !ok || record.DTQL == "" {
-		u.shell.AppendAssistant("Saved SQL and HTTP project results cannot be refreshed here. Run the project query again from /query.")
+	recordSetID := u.activeRecordSetID()
+	if recordSetID == "" {
+		recordSetID = u.lastGridRecordSetID
+	}
+	if recordSetID == "" {
 		return nil
 	}
-	recordSetID, sessionID, ctx := u.lastGridRecordSetID, u.sessionID, u.ctx
+	record, ok := u.snapshot.RecordSets[recordSetID]
+	if !ok {
+		return nil
+	}
+	responseID := record.HTTPResponseID
+	sessionID, ctx, store := u.sessionID, u.ctx, u.sessions.store
+	if responseID == "" {
+		if record.DTQL == "" {
+			u.shell.AppendAssistant("Saved SQL and HTTP project results cannot be refreshed here. Run the project query again from /query.")
+			return nil
+		}
+		busyCmd := u.shell.SetBusy(true)
+		runCmd := func() tea.Msg {
+			snapshot, err := u.sessions.RefreshRecordSet(ctx, sessionID, recordSetID)
+			return httpDoneMsg{sessionID: sessionID, snapshot: snapshot, err: err}
+		}
+		if busyCmd != nil {
+			return tea.Batch(busyCmd, runCmd)
+		}
+		return runCmd
+	}
+	previous, ok := u.snapshot.HTTPResponses[responseID]
+	if !ok {
+		return nil
+	}
+	if previous.Method != "" && previous.Method != "GET" {
+		u.shell.AppendAssistant("Refresh is available for GET requests only. Open /http to send another request explicitly.")
+		return nil
+	}
+	if previous.RequestHasQuery {
+		u.shell.AppendAssistant("This HTTP request had URL parameters that were deliberately not saved. Run /http get again to refresh it.")
+		return nil
+	}
+	parsed, err := url.ParseRequestURI(previous.URL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil {
+		u.shell.AppendAssistant("The saved HTTP URL cannot be refreshed safely.")
+		return nil
+	}
+	origin, _ := httpOrigin(previous.URL)
+	settings, err := store.HTTPRequestSettings(ctx, origin)
+	if err != nil {
+		u.shell.AppendAssistant("Couldn't load HTTP request settings.")
+		return nil
+	}
 	busyCmd := u.shell.SetBusy(true)
 	runCmd := func() tea.Msg {
-		snapshot, err := u.sessions.RefreshRecordSet(ctx, sessionID, recordSetID)
+		response, query, failure := fetchHTTPResult(ctx, previous.URL, previous.URL, settings)
+		origin, err := store.AppendUser(ctx, sessionID, "Refresh: GET "+previous.URL)
+		if err != nil {
+			return httpDoneMsg{sessionID: sessionID, err: err}
+		}
+		if failure != "" {
+			_, err = store.AppendTurn(ctx, sessionID, origin.ID, previous.URL, Turn{Text: failure})
+		} else {
+			response.RefreshParentID = previous.ID
+			_, err = store.AppendHTTPResponse(ctx, sessionID, origin.ID, response, query)
+		}
+		if err != nil {
+			return httpDoneMsg{sessionID: sessionID, err: fmt.Errorf("save refresh: %w", err)}
+		}
+		snapshot, err := store.Load(ctx, sessionID)
 		return httpDoneMsg{sessionID: sessionID, snapshot: snapshot, err: err}
 	}
 	if busyCmd != nil {

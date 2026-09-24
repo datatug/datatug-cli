@@ -769,18 +769,44 @@ func (u *ChatUI) topBar(width int) string {
 	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Width(width).Render(ansi.Truncate(label, width, "…"))
 }
 
-// statusBar is a simplified port of ui.go's statusLines: the focus-specific
-// hint sets (grid/join/workspace/message/detail — each keyed off ui.go's
-// own u.gridFocused/u.joinFocused/u.workspaceFocused/u.messageFocused/
-// u.detail fields) are not reproduced since chatshell's focus.Ring exposes
-// only its Zone (input/transcript/sidebar), not which kind of Block within
-// the transcript zone has focus — a finer hint set is a follow-up once/if
-// that becomes available. Busy state (streaming or a product SetBusy) is
-// still distinguished, matching ui.go's "Thinking…" segment.
+// statusBar is ui.go's statusLines, ported: the grid-focused hint set
+// (checklist #28) now reflects the true focused grid via activeGrid()
+// (chatshell.Model.FocusedRef, see chatui_inspector.go), matching ui.go's
+// u.gridFocused segment set including its Ctrl+R/bucket-count/view-specific
+// (Charts/Current row) follow-ons. The message/join/workspace-specific
+// hint sets ui.go also had (keyed off u.messageFocused/u.joinFocused/
+// u.workspaceFocused) are not reproduced: chatshell's FocusedRef() is nil
+// for a focused userMessageBlock (it implements no EntityBlock) and for
+// any SidePanel-zone focus (documented on FocusedRef itself), so ChatUI
+// cannot yet distinguish those from "nothing/composer focused" — a
+// narrower remaining gap than the session start of this lane, not a new
+// one introduced here.
 func (u *ChatUI) statusBar(width int) string {
 	segments := []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ navigate", "Enter send", "F6/Shift+→ workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", "Ctrl+C quit"}
 	if u.sessions != nil {
 		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.snapshot.Title), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
+	}
+	if g, _, ok := u.activeGrid(); ok && g != nil {
+		segments = []string{"1 Table", "2 Charts", "3 Current row", "j JOIN", "e export", "q save", "Enter details", "Tab panes (wide)", "Shift+↑↓ grids", "Shift+→ workspace", "Esc input"}
+		if recordSetID := u.activeRecordSetID(); recordSetID != "" {
+			if record, ok := u.snapshot.RecordSets[recordSetID]; ok && (record.DTQL != "" || record.HTTPResponseID != "") {
+				segments = append(segments, "Ctrl+R refresh")
+			}
+		}
+		if count := len(u.snapshot.Workspace.ExportBucket); count > 0 {
+			segments = append(segments, fmt.Sprintf("B bucket:%d", count))
+		}
+		switch g.CurrentView() {
+		case gridViewCharts:
+			segments = append(segments, "↑↓ chart candidates")
+		case gridViewCurrentRow:
+			segments = append(segments, "↑↓ inspector")
+		default:
+			segments = append(segments, "↑↓ rows", "←→ columns")
+		}
+		if u.sessions != nil {
+			segments = append([]string{"session: " + sanitizeTerminalText(u.snapshot.Title)}, segments...)
+		}
 	}
 	if u.shell.Busy() {
 		segments = []string{"model: " + sanitizeTerminalText(u.modelName), "Thinking…", "Ctrl+C quit"}

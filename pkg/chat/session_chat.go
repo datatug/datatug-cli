@@ -422,23 +422,38 @@ func (c *SessionChat) AskActive(ctx context.Context, sessionID, prompt string) (
 	return c.ask(ctx, sessionID, prompt)
 }
 
-func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string) (Turn, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	defer c.notifyChanged()
+// preparedTurn is the state ask() and streamAsk() both need before invoking
+// the agent: the just-persisted user message, the prior session snapshot
+// (for join-choice validation), the built context text, and a ctx already
+// carrying every tool observer (query/workspace/selection/bookmark/join).
+type preparedTurn struct {
+	ctx         context.Context
+	user        ChatMessage
+	prior       ChatSession
+	contextText string
+}
+
+// prepareTurn is ask() and streamAsk()'s shared setup: validate the expected
+// session and prompt, swap the implicit-bookmark target, load the prior
+// session, build the context text (including any JOIN-candidate context),
+// persist the user message, rename a fresh "New chat" session, and wire ctx
+// with every observer the agent's tool Handlers call into. Callers must
+// `defer cleanup()` immediately -- it resets c.implicitBookmarkID once the
+// whole turn (buffered or streamed) has finished, not just this setup step.
+func (c *SessionChat) prepareTurn(ctx context.Context, expectedSessionID, prompt string) (preparedTurn, func(), error) {
+	cleanup := func() { c.implicitBookmarkID = "" }
 	if expectedSessionID != "" && expectedSessionID != c.activeID {
-		return Turn{}, fmt.Errorf("chat session changed; refresh before sending")
+		return preparedTurn{}, cleanup, fmt.Errorf("chat session changed; refresh before sending")
 	}
 	if strings.TrimSpace(prompt) == "" {
-		return Turn{}, fmt.Errorf("chat prompt must not be empty")
+		return preparedTurn{}, cleanup, fmt.Errorf("chat prompt must not be empty")
 	}
 	// One subsequent agent turn may refer to the just-created bookmark without
 	// an ID. A different intervening turn expires that implicit target.
 	c.implicitBookmarkID, c.lastBookmarkID = c.lastBookmarkID, ""
-	defer func() { c.implicitBookmarkID = "" }()
 	prior, err := c.store.Load(ctx, c.activeID)
 	if err != nil {
-		return Turn{}, err
+		return preparedTurn{}, cleanup, err
 	}
 	contextText := buildSessionContext(prior, c.catalog)
 	if c.joinApplication != nil {
@@ -449,11 +464,11 @@ func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string)
 	}
 	user, err := c.store.AppendUser(ctx, c.activeID, prompt)
 	if err != nil {
-		return Turn{}, err
+		return preparedTurn{}, cleanup, err
 	}
 	if len(prior.Messages) == 0 && prior.Title == "New chat" {
 		if err := c.store.Rename(ctx, c.activeID, prompt); err != nil {
-			return Turn{}, err
+			return preparedTurn{}, cleanup, err
 		}
 	}
 	ctx = withQueryObserver(ctx, func(query QueryResult) (QueryResult, error) {
@@ -482,9 +497,21 @@ func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string)
 		}
 		return c.applyJoinCandidate(ctx, recordSetID, candidateID, user.ID)
 	})
-	turn, agentErr := c.agent.AskWithContext(ctx, prompt, contextText)
+	return preparedTurn{ctx: ctx, user: user, prior: prior, contextText: contextText}, cleanup, nil
+}
+
+func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string) (Turn, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	defer c.notifyChanged()
+	prepared, cleanup, err := c.prepareTurn(ctx, expectedSessionID, prompt)
+	defer cleanup()
+	if err != nil {
+		return Turn{}, err
+	}
+	turn, agentErr := c.agent.AskWithContext(prepared.ctx, prompt, prepared.contextText)
 	turn = finalizeTurn(turn, agentErr)
-	return c.store.AppendTurn(ctx, c.activeID, user.ID, c.source, turn)
+	return c.store.AppendTurn(prepared.ctx, c.activeID, prepared.user.ID, c.source, turn)
 }
 
 // finalizeTurn applies the same fallback text rules Ask and StreamAsk both
@@ -569,75 +596,16 @@ func (c *SessionChat) streamAsk(ctx context.Context, expectedSessionID, prompt s
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		defer c.notifyChanged()
-		fail := func(err error) {
+		prepared, cleanup, err := c.prepareTurn(ctx, expectedSessionID, prompt)
+		defer cleanup()
+		if err != nil {
 			finalErr = err
 			aiErr := &ai.Error{Code: ai.ErrCodeInvalid, Message: err.Error()}
 			yield(ai.Event{Type: ai.EventError, Error: aiErr}, aiErr)
-		}
-		if expectedSessionID != "" && expectedSessionID != c.activeID {
-			fail(fmt.Errorf("chat session changed; refresh before sending"))
 			return
 		}
-		if strings.TrimSpace(prompt) == "" {
-			fail(fmt.Errorf("chat prompt must not be empty"))
-			return
-		}
-		// One subsequent agent turn may refer to the just-created bookmark
-		// without an ID. A different intervening turn expires that implicit
-		// target -- same rule as ask().
-		c.implicitBookmarkID, c.lastBookmarkID = c.lastBookmarkID, ""
-		defer func() { c.implicitBookmarkID = "" }()
-		prior, err := c.store.Load(ctx, c.activeID)
-		if err != nil {
-			fail(err)
-			return
-		}
-		contextText := buildSessionContext(prior, c.catalog)
-		if c.joinApplication != nil {
-			joinContext := c.joinCandidateContext(ctx, prior)
-			if joinContext != "" {
-				contextText = joinContext + "\n" + boundedContextText(contextText, maxContextChars-len(joinContext)-1)
-			}
-		}
-		user, err := c.store.AppendUser(ctx, c.activeID, prompt)
-		if err != nil {
-			fail(err)
-			return
-		}
-		if len(prior.Messages) == 0 && prior.Title == "New chat" {
-			if err := c.store.Rename(ctx, c.activeID, prompt); err != nil {
-				fail(err)
-				return
-			}
-		}
-		ctx = withQueryObserver(ctx, func(query QueryResult) (QueryResult, error) {
-			source := query.Source
-			if source == "" {
-				source = c.source
-			}
-			return c.store.AppendQuery(ctx, c.activeID, user.ID, source, query)
-		})
-		ctx = withWorkspaceObserver(ctx, func(action WorkspaceAction) (ContextReference, error) {
-			return c.applyWorkspaceAction(ctx, action)
-		})
-		ctx = withSelectionParameters(ctx, func() map[string]any {
-			current, loadErr := c.store.Load(ctx, c.activeID)
-			if loadErr != nil {
-				return nil
-			}
-			return selectionParameters(current)
-		})
-		ctx = withBookmarkFinder(ctx, func(search string, tags []string) ([]Bookmark, error) {
-			return c.store.FindBookmarks(ctx, search, tags)
-		})
-		ctx = withJoinObserver(ctx, func(recordSetID string, candidateID JoinCandidateID) (RecordSet, error) {
-			if err := c.validateAgentJoinChoice(ctx, prior, recordSetID, candidateID, prompt); err != nil {
-				return RecordSet{}, err
-			}
-			return c.applyJoinCandidate(ctx, recordSetID, candidateID, user.ID)
-		})
 		var streamErr error
-		for event, err := range streaming.StreamAskWithContext(ctx, prompt, contextText) {
+		for event, err := range streaming.StreamAskWithContext(prepared.ctx, prompt, prepared.contextText) {
 			streamErr = err
 			if !yield(event, err) {
 				return
@@ -657,7 +625,7 @@ func (c *SessionChat) streamAsk(ctx context.Context, expectedSessionID, prompt s
 			persistErr = fmt.Errorf("chat: agent turn: %w", streamErr)
 		}
 		turn := finalizeTurn(lastTurn, persistErr)
-		stored, appendErr := c.store.AppendTurn(ctx, c.activeID, user.ID, c.source, turn)
+		stored, appendErr := c.store.AppendTurn(prepared.ctx, c.activeID, prepared.user.ID, c.source, turn)
 		final, finalErr = stored, appendErr
 	}
 	return seq, result

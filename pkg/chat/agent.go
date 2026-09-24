@@ -736,66 +736,29 @@ func (c *AIConversation) Ask(ctx context.Context, prompt string) (Turn, error) {
 
 // AskWithContext reconstructs a fresh provider turn from DataTug-owned
 // context. No prior provider session is needed after a restart or switch.
+//
+// It is StreamAskWithContext drained to completion, discarding the
+// progressive events and keeping only the final Turn: both share one
+// implementation of the agent.Loop/usage-accumulation/finalQueries logic,
+// so there is nothing here to fall out of sync with the streaming path.
 func (c *AIConversation) AskWithContext(ctx context.Context, prompt, priorContext string) (Turn, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return Turn{}, errors.New("chat: prompt must not be empty")
 	}
-	c.turnMu.Lock()
-	defer c.turnMu.Unlock()
-	c.resetTurn()
-	ctx, cancel := context.WithTimeout(ctx, turnTimeout)
-	defer cancel()
-
-	loop := c.newLoop()
-	req := c.buildRequest(prompt, priorContext)
-
-	var text strings.Builder
-	// partial accumulates usage live from ai.EventUsage as steps stream, for
-	// a turn that aborts before agent.Loop ever yields its one final,
-	// authoritative summed EventCompleted (which replaces partial, not adds
-	// to it, once seen -- Loop yields that per-step usage independently AND
-	// folds it into the run-ending total, so treating both as additive would
-	// double count).
-	var partial, usage *TokenUsage
-	for event, err := range loop.Run(ctx, req) {
+	var streamErr error
+	for _, err := range c.StreamAskWithContext(ctx, prompt, priorContext) {
 		if err != nil {
-			queries := finalQueries(c.takePending())
-			actions := c.takeActions()
-			if len(queries) > 0 || len(actions) > 0 {
-				return Turn{Queries: queries, Actions: actions, Usage: partial}, nil
-			}
-			return Turn{}, fmt.Errorf("chat: agent turn: %w", err)
-		}
-		switch event.Type {
-		case ai.EventTextDelta:
-			text.WriteString(event.Text)
-		case ai.EventUsage:
-			partial = addTokenUsage(partial, event.Usage, c.provider.Name())
-		case ai.EventCompleted:
-			usage = tokenUsageFrom(event.Usage, c.provider.Name())
-		}
-		// Browser Chat needs the structured action only. Stop ranging as
-		// soon as its one tool call succeeds instead of paying for a second
-		// provider round trip for the CLI's prose follow-up: breaking here
-		// abandons loop.Run before it starts that next step.
-		if c.browserInterpretation && c.hasSuccessfulPending() {
-			break
+			streamErr = err
 		}
 	}
-	if usage == nil {
-		usage = partial
+	turn := c.LastStreamTurn()
+	if streamErr != nil && len(turn.Queries) == 0 && len(turn.Actions) == 0 {
+		// Mirror the pre-dedup contract exactly: a fatal error only fails
+		// the call when it left nothing usable behind; otherwise the
+		// partial Turn StreamAskWithContext already assembled is the result.
+		return Turn{}, fmt.Errorf("chat: agent turn: %w", streamErr)
 	}
-	queries := finalQueries(c.takePending())
-	actions := c.takeActions()
-	turnText := stripThinkTags(text.String())
-	if len(queries) > 0 || len(actions) > 0 {
-		// The grid is the answer for successful data requests. Some small
-		// local models emit their hidden reasoning as ordinary text, so do
-		// not surface model prose beside
-		// a structured result or a DataTug-owned execution error.
-		turnText = ""
-	}
-	return Turn{Text: turnText, Queries: queries, Actions: actions, Usage: usage}, nil
+	return turn, nil
 }
 
 // StreamAskWithContext runs one turn like AskWithContext but yields

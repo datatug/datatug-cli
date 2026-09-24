@@ -4,14 +4,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"strings"
 	"sync"
+
+	"github.com/strongo/aichat/ai"
 )
 
 // ContextualConversation runs a stateless provider turn with context rebuilt
 // from DataTug-owned state. The provider's session is never authoritative.
 type ContextualConversation interface {
 	AskWithContext(context.Context, string, string) (Turn, error)
+}
+
+// StreamingConversation is implemented by conversations that can stream
+// progressive ai.Event values instead of buffering a whole turn (currently
+// *AIConversation). Callers type-assert for it and fall back to
+// ContextualConversation.AskWithContext when a conversation doesn't
+// implement it (for example the fixed unavailableSchemaConversation, or a
+// test fake). See AIConversation.StreamAskWithContext for the exact event
+// contract and how to recover the structured Turn once the stream drains.
+type StreamingConversation interface {
+	ContextualConversation
+	StreamAskWithContext(ctx context.Context, prompt, priorContext string) iter.Seq2[ai.Event, error]
 }
 
 // SessionChat composes durable state with the existing AI -> DTQL pipeline.

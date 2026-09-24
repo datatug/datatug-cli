@@ -9,8 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/pkg/secureread"
-	"google.golang.org/adk/v2/model"
-	"google.golang.org/genai"
+	"github.com/strongo/aichat/ai"
 )
 
 func TestBookmarkCrossSessionContextRestartAndDeletion(t *testing.T) {
@@ -186,15 +185,15 @@ func TestAgentBookmarkActionsAndDiscoveryUseDataTug(t *testing.T) {
 		t.Fatal(err)
 	}
 	recordID := workspaceTestRecord(t, store, session.ID)
-	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("workspace_action", map[string]any{"kind": "bookmark_create", "reference": map[string]any{"kind": "recordset", "objectId": recordID, "title": "Customers"}, "title": "Saved customers"}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Saved.", genai.RoleModel)},
-		{Content: genai.NewContentFromFunctionCall("workspace_action", map[string]any{"kind": "bookmark_add_tag", "tag": "incident"}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Tagged.", genai.RoleModel)},
-		{Content: genai.NewContentFromFunctionCall("find_bookmarks", map[string]any{"tags": []string{"incident"}}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Found the saved customers bookmark.", genai.RoleModel)},
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolWorkspaceAction, map[string]any{"kind": "bookmark_create", "reference": map[string]any{"kind": "recordset", "objectId": recordID, "title": "Customers"}, "title": "Saved customers"})}},
+		{text: "Saved."},
+		{toolCalls: []ai.ToolCall{toolCall("2", toolWorkspaceAction, map[string]any{"kind": "bookmark_add_tag", "tag": "incident"})}},
+		{text: "Tagged."},
+		{toolCalls: []ai.ToolCall{toolCall("3", toolFindBookmarks, map[string]any{"tags": []string{"incident"}})}},
+		{text: "Found the saved customers bookmark."},
 	}}
-	agent, err := NewADKConversation(llm, &fakeExecutor{result: secureread.Result{}}, "sqlite:///chinook.db", "- Customer: CustomerId, City")
+	agent, err := NewAIConversation(llm, &fakeExecutor{result: secureread.Result{}}, "sqlite:///chinook.db", "- Customer: CustomerId, City")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +219,7 @@ func TestAgentBookmarkActionsAndDiscoveryUseDataTug(t *testing.T) {
 		t.Fatalf("model did not receive structured tool results: %d requests", len(llm.requests))
 	}
 	for _, request := range llm.requests {
-		if strings.Contains(fmt.Sprint(request.Contents), "CustomerId=5") {
+		if strings.Contains(fmt.Sprint(request.Messages), "CustomerId=5") {
 			t.Fatal("raw row values leaked to the model")
 		}
 	}
@@ -295,15 +294,15 @@ func TestBookmarkUsesActualSafeSourceIDAcrossSessions(t *testing.T) {
 	if !strings.Contains(modelContext, "source=private") || strings.Contains(modelContext, "private-cell-value") || strings.Contains(modelContext, "sqlite:///") || strings.Contains(modelContext, "token=secret") {
 		t.Fatalf("source or private metadata leaked: %s", modelContext)
 	}
-	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("find_bookmarks", map[string]any{}, genai.RoleModel)},
-		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolFindBookmarks, map[string]any{})}},
+		{toolCalls: []ai.ToolCall{toolCall("2", toolRunDTQL, map[string]any{
 			"sourceId": "private", "title": "Invoices", "dtql": "from: {name: Invoice}\nwhere:\n  op: In\n  left: {field: CustomerId}\n  right: {param: selection_1_c1}\nlimit: 20",
-		}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Done.", genai.RoleModel)},
+		})}},
+		{text: "Done."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"InvoiceId"}}}
-	agent, err := NewADKConversation(llm, executor, scope.Sources[scope.Database], "- Invoice: InvoiceId, CustomerId", WithSources(scope.Sources))
+	agent, err := NewAIConversation(llm, executor, scope.Sources[scope.Database], "- Invoice: InvoiceId, CustomerId", WithSources(scope.Sources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +317,7 @@ func TestBookmarkUsesActualSafeSourceIDAcrossSessions(t *testing.T) {
 		t.Fatalf("wrong local source/binding: source=%q params=%#v", executor.source, executor.params)
 	}
 	for _, request := range llm.requests {
-		payload := fmt.Sprint(request.Contents)
+		payload := fmt.Sprint(request.Messages)
 		if strings.Contains(payload, "private-cell-value") || strings.Contains(payload, "token=secret") || strings.Contains(payload, "sqlite:///") || strings.Contains(payload, "CustomerId=5") {
 			t.Fatalf("private bookmark data leaked into model request: %s", payload)
 		}

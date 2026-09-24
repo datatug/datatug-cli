@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
-	"google.golang.org/adk/v2/model"
-	"google.golang.org/genai"
+	"github.com/strongo/aichat/ai"
 )
 
 func TestFriendlyAgentErrorDoesNotExposeProviderPayload(t *testing.T) {
@@ -148,16 +147,26 @@ type blockingFinalLLM struct {
 
 func (m *blockingFinalLLM) Name() string { return "blocking-final" }
 
-func (m *blockingFinalLLM) GenerateContent(_ context.Context, _ *model.LLMRequest, _ bool) iter.Seq2[*model.LLMResponse, error] {
-	return func(yield func(*model.LLMResponse, error) bool) {
+func (m *blockingFinalLLM) Stream(_ context.Context, _ ai.ChatRequest) iter.Seq2[ai.Event, error] {
+	return func(yield func(ai.Event, error) bool) {
 		m.calls++
+		if !yield(ai.Event{Type: ai.EventStarted}, nil) {
+			return
+		}
 		if m.calls == 1 {
-			yield(&model.LLMResponse{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"title": "One customer", "dtql": "from: {name: Customer}\nlimit: 1"}, genai.RoleModel)}, nil)
+			call := ai.ToolCall{ID: "1", Name: toolRunDTQL, Arguments: mustJSON(map[string]any{"title": "One customer", "dtql": "from: {name: Customer}\nlimit: 1"})}
+			if !yield(ai.Event{Type: ai.EventToolCall, ToolCall: &call}, nil) {
+				return
+			}
+			yield(ai.Event{Type: ai.EventCompleted, StopReason: ai.StopReasonToolCalls}, nil)
 			return
 		}
 		close(m.entered)
 		<-m.release
-		yield(&model.LLMResponse{Content: genai.NewContentFromText("Done", genai.RoleModel)}, nil)
+		if !yield(ai.Event{Type: ai.EventTextDelta, Text: "Done"}, nil) {
+			return
+		}
+		yield(ai.Event{Type: ai.EventCompleted, StopReason: ai.StopReasonEnd}, nil)
 	}
 }
 
@@ -166,7 +175,7 @@ func TestSuccessfulQueryIsDurableBeforeModelFinishes(t *testing.T) {
 	store := openTestStore(t, testStorePath(t), testScope())
 	llm := &blockingFinalLLM{entered: make(chan struct{}), release: make(chan struct{})}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}}}
-	agent, err := NewADKConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId")
+	agent, err := NewAIConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,12 +215,12 @@ func TestRepeatedSuccessfulDTQLExecutionsHaveDistinctSnapshots(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	doc := "from: {name: Customer}\nlimit: 1"
-	call := func() *model.LLMResponse {
-		return &model.LLMResponse{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc}, genai.RoleModel)}
+	step := func(id string) scriptedStep {
+		return scriptedStep{toolCalls: []ai.ToolCall{toolCall(id, toolRunDTQL, map[string]any{"dtql": doc})}}
 	}
-	llm := &scriptedLLM{responses: []*model.LLMResponse{call(), call(), {Content: genai.NewContentFromText("Done", genai.RoleModel)}}}
+	llm := &scriptedProvider{steps: []scriptedStep{step("1"), step("2"), {text: "Done"}}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 5}}}}}
-	agent, err := NewADKConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId")
+	agent, err := NewAIConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,11 +254,11 @@ func TestEmptyToolResultRestoresAsGrid(t *testing.T) {
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
-	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": "from: {name: Customer}\nlimit: 1"}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("No matching rows", genai.RoleModel)},
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": "from: {name: Customer}\nlimit: 1"})}},
+		{text: "No matching rows"},
 	}}
-	agent, err := NewADKConversation(llm, &fakeExecutor{result: secureread.Result{}}, "sqlite:///chinook.db", "- Customer")
+	agent, err := NewAIConversation(llm, &fakeExecutor{result: secureread.Result{}}, "sqlite:///chinook.db", "- Customer")
 	if err != nil {
 		t.Fatal(err)
 	}

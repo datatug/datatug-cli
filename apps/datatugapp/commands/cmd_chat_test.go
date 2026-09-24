@@ -12,7 +12,6 @@ import (
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
-	"github.com/dimetron/pi-go/pimodels"
 )
 
 func TestBuildChatProjectCatalogKeepsUnscannedSources(t *testing.T) {
@@ -166,12 +165,12 @@ func TestResolveChatAIProfileDefaults(t *testing.T) {
 	if options.apiKey != "secret-value" {
 		t.Fatalf("api key was not loaded from configured environment variable")
 	}
-	info, err := pimodels.Resolve(options.model, chatModelOptions(options)...)
+	provider, err := chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
 	if err != nil {
-		t.Fatalf("Resolve(profile model): %v", err)
+		t.Fatalf("NewLLMProvider(profile model): %v", err)
 	}
-	if info.Provider != "openai" || !info.Custom || info.Model != "deepseek-flash" {
-		t.Fatalf("resolved info = %+v, want custom OpenAI-compatible deepseek model", info)
+	if provider.Name() != "openai-compatible" {
+		t.Fatalf("resolved provider = %q, want OpenAI-compatible deepseek model", provider.Name())
 	}
 }
 
@@ -248,15 +247,13 @@ func TestResolveChatAIProfileErrors(t *testing.T) {
 	}
 }
 
-func TestChatModelOptionsRouteExactModelToCustomEndpoint(t *testing.T) {
-	info, err := pimodels.Resolve("deepseek-flash", chatModelOptions(chatOptions{
-		baseURL: "https://api.deepseek.com",
-	})...)
+func TestNewLLMProviderRoutesExactModelToCustomEndpoint(t *testing.T) {
+	provider, err := chat.NewLLMProvider("deepseek-flash", "https://api.deepseek.com", "")
 	if err != nil {
-		t.Fatalf("Resolve(deepseek-flash): %v", err)
+		t.Fatalf("NewLLMProvider(deepseek-flash): %v", err)
 	}
-	if info.Provider != "openai" || info.Model != "deepseek-flash" || !info.Custom {
-		t.Fatalf("resolved info = %+v, want custom OpenAI-compatible deepseek-flash", info)
+	if provider.Name() != "openai-compatible" {
+		t.Fatalf("resolved provider = %q, want custom OpenAI-compatible deepseek-flash", provider.Name())
 	}
 }
 

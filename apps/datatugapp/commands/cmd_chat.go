@@ -16,7 +16,6 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/dimetron/pi-go/pimodels"
 	"github.com/spf13/cobra"
 )
 
@@ -140,11 +139,11 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if !hasQueryableProjectTables(projectCatalog, sourceURLs) {
 		conversation = unavailableSchemaConversation{database: database}
 	} else {
-		llm, modelErr := pimodels.New(ctx, options.model, chatModelOptions(options)...)
-		if modelErr != nil {
-			return "", Exit(fmt.Sprintf("configure chat model %q: %v", options.model, modelErr), exitCodeUsage)
+		provider, providerErr := chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
+		if providerErr != nil {
+			return "", Exit(fmt.Sprintf("configure chat model %q: %v", options.model, providerErr), exitCodeUsage)
 		}
-		conversation, err = chat.NewADKConversation(llm, executor, sourceURL, schemaContext, chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs))
+		conversation, err = chat.NewAIConversation(provider, executor, sourceURL, schemaContext, chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs))
 		if err != nil {
 			return "", Exit(err.Error(), exitCodeUsage)
 		}
@@ -440,15 +439,4 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 		}})
 	}
 	return catalog, urls, nil
-}
-
-func chatModelOptions(options chatOptions) []pimodels.Option {
-	modelOptions := []pimodels.Option{pimodels.WithThinkingLevel(options.thinking)}
-	if options.apiKey != "" {
-		modelOptions = append(modelOptions, pimodels.WithAPIKey(options.apiKey))
-	}
-	if options.baseURL != "" {
-		modelOptions = append(modelOptions, pimodels.WithBaseURL(options.baseURL))
-	}
-	return modelOptions
 }

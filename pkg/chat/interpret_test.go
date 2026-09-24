@@ -3,32 +3,28 @@ package chat
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"google.golang.org/adk/v2/model"
-	"google.golang.org/genai"
+	"github.com/strongo/aichat/ai"
 )
 
-func TestInterpretUsesCLIADKToolWithoutExecutingRows(t *testing.T) {
+func TestInterpretUsesAgentToolWithoutExecutingRows(t *testing.T) {
 	doc := "from: {schema: main, name: Invoice}\nlimit: 20\n"
-	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc}, genai.RoleModel), UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
-			PromptTokenCount: 120, CandidatesTokenCount: 30, TotalTokenCount: 150,
-		}},
-		{Content: genai.NewContentFromText("Here are the rows", genai.RoleModel)},
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": doc})}, usage: &ai.Usage{InputTokens: 120, OutputTokens: 30}},
+		{text: "Here are the rows"},
 	}}
-	result, err := interpretWithModelDetailed(context.Background(), InterpretRequest{Question: "Last 20 invoices", Schema: "main.Invoice: InvoiceId"}, llm)
+	result, err := interpretWithProviderDetailed(context.Background(), InterpretRequest{Question: "Last 20 invoices", Schema: "main.Invoice: InvoiceId"}, llm)
 	if err != nil || result.DTQL != strings.TrimSpace(doc) || result.Usage == nil ||
 		result.Usage.InputTokens != 120 || result.Usage.OutputTokens != 30 || result.Usage.TotalTokens != 150 {
-		t.Fatalf("interpretWithModelDetailed() = %+v, %v", result, err)
+		t.Fatalf("interpretWithProviderDetailed() = %+v, %v", result, err)
 	}
-	if len(llm.requests) == 0 || !strings.Contains(llm.requests[0].Config.SystemInstruction.Parts[0].Text, "The browser will execute") {
-		t.Fatal("browser schema constraints were not sent to CLI ADK agent")
+	if len(llm.requests) == 0 || !strings.Contains(llm.requests[0].System, "The browser will execute") {
+		t.Fatal("browser schema constraints were not sent to the agent")
 	}
 	if llm.calls != 1 {
 		t.Fatalf("browser interpretation made %d model calls, want one", llm.calls)
@@ -36,16 +32,16 @@ func TestInterpretUsesCLIADKToolWithoutExecutingRows(t *testing.T) {
 }
 
 func TestInterpretRejectsMissingDTQLAction(t *testing.T) {
-	llm := &scriptedLLM{responses: []*model.LLMResponse{{Content: genai.NewContentFromText("SELECT * FROM Invoice", genai.RoleModel)}}}
-	_, err := interpretWithModel(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)
+	llm := &scriptedProvider{steps: []scriptedStep{{text: "SELECT * FROM Invoice"}}}
+	_, err := interpretWithProvider(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)
 	if err == nil || !strings.Contains(err.Error(), "valid DTQL action") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
 func TestInterpretSanitizesProviderFailure(t *testing.T) {
-	llm := &scriptedLLM{responses: []*model.LLMResponse{nil}, errs: []error{errors.New("secret-test-key from provider")}}
-	_, err := interpretWithModel(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)
+	llm := &scriptedProvider{steps: []scriptedStep{{err: &ai.Error{Code: ai.ErrCodeUpstream, Message: "secret-test-key from provider"}}}}
+	_, err := interpretWithProvider(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)
 	if err == nil || strings.Contains(err.Error(), "secret-test-key") || !strings.Contains(err.Error(), "provider request failed") {
 		t.Fatalf("unsafe provider error: %v", err)
 	}
@@ -117,6 +113,16 @@ func TestInterpretProviderHTTPContracts(t *testing.T) {
 	}
 }
 
+// sseWrite writes one Server-Sent-Events "data:" frame, matching the OpenAI
+// Chat Completions streaming wire format ai/openaicompat parses (see
+// strongo/aichat's ai/openaicompat package tests for the same helper).
+func sseWrite(w http.ResponseWriter, data string) {
+	_, _ = io.WriteString(w, "data: "+data+"\n\n")
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 func TestInterpretDeepSeekCompatibleToolCall(t *testing.T) {
 	const doc = "from: {schema: main, name: Invoice}\nlimit: 20\n"
 	calls := 0
@@ -125,17 +131,18 @@ func TestInterpretDeepSeekCompatibleToolCall(t *testing.T) {
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Errorf("unexpected provider path %q", r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "text/event-stream")
 		arguments, _ := json.Marshal(map[string]string{"dtql": doc})
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "chatcmpl-test", "object": "chat.completion", "created": 1, "model": "deepseek-flash",
-			"usage": map[string]any{"prompt_tokens": 121, "completion_tokens": 24, "total_tokens": 145},
-			"choices": []any{map[string]any{"index": 0, "finish_reason": "tool_calls", "message": map[string]any{
-				"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{
-					"id": "call_1", "type": "function", "function": map[string]any{"name": "run_dtql", "arguments": string(arguments)},
-				}},
-			}}},
+		toolCallDelta, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{map[string]any{
+			"index": 0, "id": "call_1", "type": "function", "function": map[string]any{"name": "run_dtql", "arguments": string(arguments)},
+		}}}}}})
+		sseWrite(w, string(toolCallDelta))
+		final, _ := json.Marshal(map[string]any{
+			"choices": []any{map[string]any{"delta": map[string]any{}, "finish_reason": "tool_calls"}},
+			"usage":   map[string]any{"prompt_tokens": 121, "completion_tokens": 24, "total_tokens": 145},
 		})
+		sseWrite(w, string(final))
+		sseWrite(w, "[DONE]")
 	}))
 	defer server.Close()
 	result, err := InterpretDetailed(context.Background(), InterpretRequest{

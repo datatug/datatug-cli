@@ -11,8 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-cli/pkg/secureread"
-	"google.golang.org/adk/v2/model"
-	"google.golang.org/genai"
+	"github.com/strongo/aichat/ai"
 )
 
 func workspaceTestCatalog() ProjectCatalog {
@@ -393,16 +392,16 @@ func TestAgentSelectDockAndFollowUpBindsSelectionLocally(t *testing.T) {
 	}
 	recordID := workspaceTestRecord(t, store, seed.ID)
 	doc := "from: {name: Invoice}\nwhere:\n  op: In\n  left: {field: CustomerId}\n  right: {param: selection_1_c1}\nlimit: 20"
-	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("workspace_action", map[string]any{"kind": "select", "recordSetId": recordID, "column": "City", "equals": "Prague", "limit": 2, "columns": []string{"CustomerId"}}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Selected.", genai.RoleModel)},
-		{Content: genai.NewContentFromFunctionCall("workspace_action", map[string]any{"kind": "dock"}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Docked.", genai.RoleModel)},
-		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc, "title": "Largest selected orders"}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Here are their invoices.", genai.RoleModel)},
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolWorkspaceAction, map[string]any{"kind": "select", "recordSetId": recordID, "column": "City", "equals": "Prague", "limit": 2, "columns": []string{"CustomerId"}})}},
+		{text: "Selected."},
+		{toolCalls: []ai.ToolCall{toolCall("2", toolWorkspaceAction, map[string]any{"kind": "dock"})}},
+		{text: "Docked."},
+		{toolCalls: []ai.ToolCall{toolCall("3", toolRunDTQL, map[string]any{"dtql": doc, "title": "Largest selected orders"})}},
+		{text: "Here are their invoices."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"InvoiceId", "CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 404, "CustomerId": 6}}}}}
-	agent, err := NewADKConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId, City\n- Invoice: InvoiceId, CustomerId")
+	agent, err := NewAIConversation(llm, executor, "sqlite:///chinook.db", "- Customer: CustomerId, City\n- Invoice: InvoiceId, CustomerId")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,12 +516,12 @@ func TestFailedBoundQueryNeverSendsSelectedValueToModelAcrossTurns(t *testing.T)
 	store := openTestStore(t, testStorePath(t), testScope())
 	const secret = "Paris"
 	doc := "from: {name: Customer}\nwhere:\n  op: In\n  left: {field: City}\n  right: {param: selection_1_c1}\nlimit: 5"
-	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"dtql": doc}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("The query could not be completed.", genai.RoleModel)},
-		{Content: genai.NewContentFromText("Ready to try again.", genai.RoleModel)},
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": doc})}},
+		{text: "The query could not be completed."},
+		{text: "Ready to try again."},
 	}}
-	agent, err := NewADKConversation(llm, &fakeExecutor{err: errors.New("driver echoed selected value " + secret)}, "sqlite:///chinook.db", "- Customer: CustomerId, City")
+	agent, err := NewAIConversation(llm, &fakeExecutor{err: errors.New("driver echoed selected value " + secret)}, "sqlite:///chinook.db", "- Customer: CustomerId, City")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +551,7 @@ func TestFailedBoundQueryNeverSendsSelectedValueToModelAcrossTurns(t *testing.T)
 		t.Fatalf("model requests = %d, want 3", len(llm.requests))
 	}
 	for i, request := range llm.requests {
-		if text := fmt.Sprint(request.Contents); strings.Contains(text, secret) {
+		if text := fmt.Sprint(request.Messages); strings.Contains(text, secret) {
 			t.Fatalf("selected value leaked into model request %d: %s", i+1, text)
 		}
 	}
@@ -561,8 +560,8 @@ func TestFailedBoundQueryNeverSendsSelectedValueToModelAcrossTurns(t *testing.T)
 func TestSelectedCellValueStaysOutOfModelRequest(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
-	llm := &scriptedLLM{responses: []*model.LLMResponse{{Content: genai.NewContentFromText("Ready.", genai.RoleModel)}}}
-	agent, err := NewADKConversation(llm, &fakeExecutor{}, "sqlite:///chinook.db", "- Customer: CustomerId, City")
+	llm := &scriptedProvider{steps: []scriptedStep{{text: "Ready."}}}
+	agent, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///chinook.db", "- Customer: CustomerId, City")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,7 +587,7 @@ func TestSelectedCellValueStaysOutOfModelRequest(t *testing.T) {
 	if len(llm.requests) != 1 {
 		t.Fatalf("model requests = %d", len(llm.requests))
 	}
-	prompt := llm.requests[0].Contents[0].Parts[0].Text
+	prompt := llm.requests[0].Messages[0].Text
 	if strings.Contains(prompt, "Paris") {
 		t.Fatalf("selected cell value leaked to model: %s", prompt)
 	}

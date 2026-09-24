@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
-	"github.com/dimetron/pi-go/pimodels"
-	"google.golang.org/adk/v2/model"
+	"github.com/strongo/aichat/ai"
+	"github.com/strongo/aichat/ai/anthropic"
+	"github.com/strongo/aichat/ai/openaicompat"
 )
 
-// InterpretProvider is supplied by the browser for one ADK turn. The key is
-// never retained by the agent or passed to the ADK session.
+// InterpretProvider is supplied by the browser for one agent turn. The key is
+// never retained by the agent or passed to session storage.
 type InterpretProvider struct {
 	Protocol string `json:"protocol"`
 	BaseURL  string `json:"baseUrl"`
@@ -53,11 +54,13 @@ func (r InterpretRequest) Validate() error {
 	return validateProviderURL(p.BaseURL)
 }
 
-// pi-go routes these model families to Responses even with an explicit base
-// URL. Do not silently violate the browser's selected Chat Completions protocol.
+// pi-go routed these model families to its Responses protocol even with an
+// explicit base URL; ai/openaicompat only speaks Chat Completions, so the
+// same guard keeps the browser from silently violating its selected
+// protocol.
 func requiresOpenAIResponses(modelName string) bool {
-	// pi-go strips provider routing prefixes before choosing the endpoint.
-	// Inspect the bare ID as well, including nested gateway prefixes.
+	// Strip provider routing prefixes before choosing the endpoint, including
+	// nested gateway prefixes, and inspect the bare ID.
 	if slash := strings.LastIndexByte(modelName, '/'); slash >= 0 {
 		modelName = modelName[slash+1:]
 	}
@@ -67,20 +70,6 @@ func requiresOpenAIResponses(modelName string) bool {
 		strings.HasPrefix(modelName, "gpt-5.6-sol") ||
 		strings.HasPrefix(modelName, "gpt-5.6-terra") ||
 		strings.HasPrefix(modelName, "gpt-6-astra")
-}
-
-func providerBaseURL(p InterpretProvider) string {
-	if p.Protocol != "anthropic-messages" {
-		return p.BaseURL
-	}
-	// Anthropic's SDK appends v1/messages itself; a familiar /v1 API URL
-	// entered in the form must not become /v1/v1/messages.
-	u, _ := url.Parse(p.BaseURL)
-	if strings.HasSuffix(strings.TrimRight(u.Path, "/"), "/v1") {
-		u.Path = strings.TrimSuffix(strings.TrimRight(u.Path, "/"), "/v1")
-		return u.String()
-	}
-	return p.BaseURL
 }
 
 func validateProviderURL(raw string) error {
@@ -113,15 +102,15 @@ func validateProviderURL(raw string) error {
 }
 
 // browserDTQLExecutor is the single difference from the CLI Chat turn: its
-// ADK tool validates and captures DTQL without reading project data. The
-// browser executes the captured action through DALgo over its own IndexedDB.
+// tool validates and captures DTQL without reading project data. The browser
+// executes the captured action through DALgo over its own IndexedDB.
 type browserDTQLExecutor struct{}
 
 func (browserDTQLExecutor) RunDTQL(context.Context, string, []byte, map[string]any) (secureread.Result, error) {
 	return secureread.Result{}, nil
 }
 
-// Interpret uses the same ADK conversation and run_dtql action as CLI Chat.
+// Interpret uses the same agent conversation and run_dtql action as CLI Chat.
 // It returns only a validated DTQL document; model prose and results are not
 // part of the browser contract. Provider errors are deliberately sanitized.
 func Interpret(ctx context.Context, req InterpretRequest) (string, error) {
@@ -140,28 +129,37 @@ func InterpretDetailed(ctx context.Context, req InterpretRequest) (InterpretResu
 	if err := req.Validate(); err != nil {
 		return InterpretResult{}, err
 	}
-	provider := "openai"
-	if req.Provider.Protocol == "anthropic-messages" {
-		provider = "anthropic"
-	}
-	baseURL := providerBaseURL(req.Provider)
-	llm, err := pimodels.NewFromInfo(ctx,
-		pimodels.Info{Provider: provider, Model: req.Provider.Model, BaseURL: baseURL, Custom: true},
-		pimodels.WithAPIKey(req.Provider.APIKey), pimodels.WithBaseURL(baseURL),
-	)
-	if err != nil {
-		return InterpretResult{}, errors.New("could not configure provider model")
-	}
-	return interpretWithModelDetailed(ctx, req, llm)
+	provider := interpretProvider(req.Provider)
+	return interpretWithProviderDetailed(ctx, req, provider)
 }
 
-func interpretWithModel(ctx context.Context, req InterpretRequest, llm model.LLM) (string, error) {
-	result, err := interpretWithModelDetailed(ctx, req, llm)
+// interpretProvider builds the ai.LLMProvider directly from the browser's
+// explicit protocol, base URL, model and API key -- InterpretProvider names
+// its own protocol rather than going through model-name inference
+// (resolveProviderFamily), since the browser already knows exactly which
+// wire protocol its chosen model speaks.
+func interpretProvider(p InterpretProvider) ai.LLMProvider {
+	baseURL := providerBaseURL(p)
+	if p.Protocol == "anthropic-messages" {
+		return anthropic.New(anthropic.Config{BaseURL: baseURL, APIKey: p.APIKey, Model: p.Model})
+	}
+	return openaicompat.New(openaicompat.Config{BaseURL: ensureV1(baseURL), APIKey: p.APIKey, Model: p.Model})
+}
+
+func providerBaseURL(p InterpretProvider) string {
+	if p.Protocol != "anthropic-messages" {
+		return p.BaseURL
+	}
+	return stripTrailingV1(p.BaseURL)
+}
+
+func interpretWithProvider(ctx context.Context, req InterpretRequest, provider ai.LLMProvider) (string, error) {
+	result, err := interpretWithProviderDetailed(ctx, req, provider)
 	return result.DTQL, err
 }
 
-func interpretWithModelDetailed(ctx context.Context, req InterpretRequest, llm model.LLM) (InterpretResult, error) {
-	conversation, err := NewADKConversation(llm, browserDTQLExecutor{}, "browser-indexeddb://active-project", req.Schema, WithBrowserInterpretation())
+func interpretWithProviderDetailed(ctx context.Context, req InterpretRequest, provider ai.LLMProvider) (InterpretResult, error) {
+	conversation, err := NewAIConversation(provider, browserDTQLExecutor{}, "browser-indexeddb://active-project", req.Schema, WithBrowserInterpretation())
 	if err != nil {
 		return InterpretResult{}, errors.New("could not initialize chat agent")
 	}

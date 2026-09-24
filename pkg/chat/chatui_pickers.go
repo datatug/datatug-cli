@@ -44,6 +44,14 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			u.webLinkVisible = !u.webLinkVisible
 		}
 		return nil, true
+	case "f2":
+		// ui.go's F2 mouseCapture toggle, ported onto chatshell's
+		// SetMouseEnabled: on (the default -- see NewChatUI's
+		// chatshell.WithMouse(chatshell.MouseCellMotion)) reports mouse
+		// clicks/wheel to the program for grid row selection and history
+		// scroll; off releases the terminal's native selection/copy.
+		u.shell.SetMouseEnabled(!u.shell.MouseEnabled())
+		return nil, true
 	}
 	return nil, false
 }

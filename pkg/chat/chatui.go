@@ -124,6 +124,9 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		chatshell.WithStatusBar(u.statusBar),
 		chatshell.WithSidePanel(u.workspace),
 		chatshell.WithMarkdownRenderer(renderMarkdown),
+		// Mouse reporting on by default (ui.go's mouseCapture started true);
+		// F2 (globalKeys, chatui_pickers.go) toggles it via SetMouseEnabled.
+		chatshell.WithMouse(chatshell.MouseCellMotion),
 	)
 	return u
 }
@@ -887,7 +890,15 @@ func (u *ChatUI) topBar(width int) string {
 // narrower remaining gap than the session start of this lane, not a new
 // one introduced here.
 func (u *ChatUI) statusBar(width int) string {
-	segments := []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ navigate", "Enter send", "F6/Shift+→ workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", "Ctrl+C quit"}
+	// ui.go's mouseHint: "F2 select" while mouse reporting is on (naming
+	// what pressing F2 gets you -- the terminal's own click-drag text
+	// selection/copy); "F2 wheel" while it is off, naming what a second F2
+	// press restores.
+	mouseHint := "F2 select"
+	if !u.shell.MouseEnabled() {
+		mouseHint = "F2 wheel"
+	}
+	segments := []string{"model: " + sanitizeTerminalText(u.modelName), mouseHint, "Shift+↑↓ navigate", "Enter send", "F6/Shift+→ workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", "Ctrl+C quit"}
 	if u.webLinkVisible {
 		segments = append(segments, lipgloss.NewStyle().Hyperlink(u.browserURL).Render("Open web chat"), "F5 hide link")
 	} else if u.browserURL != "" {

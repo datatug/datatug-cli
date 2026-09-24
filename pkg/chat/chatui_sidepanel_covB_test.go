@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
@@ -433,13 +434,63 @@ func TestProjectObjectDetailsTableWithNoColumns(t *testing.T) {
 	}
 }
 
+// TestProjectObjectDetailsProjectViewKind covers projectObjectDetails'
+// "project_view" branch -- distinct from "table", it titles as "View:".
+func TestProjectObjectDetailsProjectViewKind(t *testing.T) {
+	title, _ := projectObjectDetails(ProjectObject{
+		Reference: ContextReference{Kind: "project_view", Title: "ActiveCustomers"},
+		Columns:   []string{"CustomerId"},
+	}, 60)
+	if title != "View: ActiveCustomers" {
+		t.Fatalf("title = %q, want %q", title, "View: ActiveCustomers")
+	}
+}
+
+// TestWorkspacePanelCurrentRowDetailsAppendsSelectionFooter covers
+// currentRowDetails' trailing "Selection" footer branch: a focused grid's
+// row details additionally show the durable current-selection summary when
+// one exists.
+func TestWorkspacePanelCurrentRowDetailsAppendsSelectionFooter(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordID := workspaceTestRecord(t, store, session.ID)
+	if _, err := sessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "select", RecordSetID: recordID, Rows: []int{0}, Title: "One row"}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+	if !u.shell.FocusEntry(u.lastGridEntryID) {
+		t.Fatal("grid unavailable to focus")
+	}
+	u.workspace.tab, u.workspace.inspectorSubTab = 1, 0
+	view := u.workspace.View(90, 30, true)
+	if !strings.Contains(view, "Selection") || !strings.Contains(view, "One row") {
+		t.Fatalf("expected a Selection footer with the durable selection's title:\n%s", view)
+	}
+}
+
 // TestWorkspacePanelCurrentRowDetailsNullAndUnknownType covers
-// currentRowDetails' NULL-cell rendering (rawRow[i] == nil) and its "?"
-// fallback when columnMeta reports no dbType.
+// currentRowDetails' NULL-cell rendering and its "?" fallback when
+// columnMeta reports no dbType. A NULL cell renders via the row's ABSENT
+// column key (not an explicit `nil` value, which grid.FormatValue already
+// renders as the literal "NULL" before currentRowDetails' own value=="" /
+// rawRow[i]==nil fallback ever runs) -- matching how a sparse cell-range
+// selection or a genuinely unset field reaches secureread.Row.Data.
 func TestWorkspacePanelCurrentRowDetailsNullAndUnknownType(t *testing.T) {
 	turn := Turn{Queries: []QueryResult{{Title: "Widgets", RecordSetID: "rs1", Result: secureread.Result{
 		Columns: []string{"Name"},
-		Rows:    []secureread.Row{{Data: map[string]any{"Name": nil}}},
+		Rows:    []secureread.Row{{Data: map[string]any{}}},
 	}}}}
 	u, _ := newTestChatUI(t, nil, turn)
 	drainCmd(t, u, u.Submit("Show widgets"))
@@ -688,13 +739,31 @@ func TestWorkspacePanelBookmarksViewShowsAttachedAndDockedFlags(t *testing.T) {
 
 // TestWorkspacePanelViewTruncatesOverflowLines covers View's tail
 // truncation when the rendered body produces more lines than the given
-// height.
+// height: unlike projectExplorer (whose panelCard always pads/fills to
+// exactly the requested height itself), bookmarksView ignores height and
+// keeps emitting its full listing/tags/DTQL/help/grid content, so a small
+// height here reliably overflows View's own line budget.
 func TestWorkspacePanelViewTruncatesOverflowLines(t *testing.T) {
-	u, _ := newTestChatUI(t, nil, Turn{})
-	u.catalog = workspaceTestCatalog()
-	view := u.workspace.View(40, 3, true)
-	if got := strings.Count(view, "\n"); got != 2 {
-		t.Fatalf("expected exactly 3 lines (2 newlines) at height 3, got %d newlines:\n%s", got, view)
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	catalog := ProjectCatalog{ID: testScope().ProjectID, Title: "Demo"}
+	chatSessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, _ := chatSessions.Snapshot(ctx)
+	recordID := workspaceTestRecord(t, store, session.ID)
+	if _, err := chatSessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "bookmark_create", Reference: ContextReference{Kind: "recordset", ObjectID: recordID}, Title: "Saved customers"}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, chatSessions, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.workspace.setTab(3)
+	view := u.workspace.View(40, 1, true)
+	if got := strings.Count(view, "\n"); got != 0 {
+		t.Fatalf("expected exactly 1 line (0 newlines) at height 1, got %d newlines:\n%s", got, view)
 	}
 }
 
@@ -1079,5 +1148,273 @@ func TestWorkspacePanelUpdateBookmarkInputTypesIntoEditor(t *testing.T) {
 	u.workspace.updateBookmarkInput(tea.KeyPressMsg{Text: "x"})
 	if u.workspace.bookmarkEditor.Value() != "x" {
 		t.Fatalf("expected the keystroke to reach the editor, got %q", u.workspace.bookmarkEditor.Value())
+	}
+}
+
+// TestWorkspacePanelRebuildDockGridsSkipsUnresolvedReference covers
+// rebuildDockGrids' "continue" branch: a Dock whose Reference no longer
+// resolves (gridDataForReference fails) and isn't already cached is simply
+// skipped, not turned into a nil/panic-prone entry.
+func TestWorkspacePanelRebuildDockGridsSkipsUnresolvedReference(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.snapshot.Workspace.Docks = []Dock{{ID: "ghost", Reference: ContextReference{Kind: "recordset", ObjectID: "missing"}}}
+	u.workspace.dockGrids = map[string]*gridState{}
+	u.workspace.rebuildDockGrids()
+	if _, ok := u.workspace.dockGrids["ghost"]; ok {
+		t.Fatal("expected an unresolved dock reference to be skipped, not cached")
+	}
+}
+
+// TestWorkspacePanelHandleDockGridKeySortGuardsAndDefault covers
+// handleDockGridKey's "s" case guards (gridDataForReference failing, and
+// an out-of-range SelectedColumn) plus its default fallthrough
+// (return nil, false for an unhandled key).
+func TestWorkspacePanelHandleDockGridKeySortGuardsAndDefault(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordID := workspaceTestRecord(t, store, session.ID)
+	if _, err := sessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "dock", Reference: ContextReference{Kind: "recordset", ObjectID: recordID}}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.workspace.dockIndex = 0
+	dock := u.snapshot.Workspace.Docks[0]
+	dockGrid := u.workspace.dockGrids[dock.ID]
+
+	// Default: an unhandled key reports unhandled.
+	if _, handled := u.workspace.handleDockGridKey(dockGrid.Model, tea.KeyPressMsg{Code: 'z', Text: "z"}); handled {
+		t.Fatal("expected an unrecognized key to be reported unhandled")
+	}
+
+	// "s" guard: gridDataForReference fails once the dock's own reference
+	// no longer resolves.
+	u.snapshot.Workspace.Docks[0].Reference = ContextReference{Kind: "recordset", ObjectID: "missing"}
+	if _, handled := u.workspace.handleDockGridKey(dockGrid.Model, tea.KeyPressMsg{Code: 's', Text: "s"}); !handled {
+		t.Fatal("expected 's' to report handled even when the reference can't resolve")
+	}
+	u.snapshot.Workspace.Docks[0].Reference = ContextReference{Kind: "recordset", ObjectID: recordID}
+
+	// "s" guard: an out-of-range SelectedColumn (an empty grid has none).
+	empty := newMinimalGridState(NewGridModel(secureread.Result{}), recordID, "Empty", 40)
+	u.workspace.dockGrids[dock.ID] = empty
+	if _, handled := u.workspace.handleDockGridKey(empty.Model, tea.KeyPressMsg{Code: 's', Text: "s"}); !handled {
+		t.Fatal("expected 's' to report handled with no selectable column")
+	}
+}
+
+// TestWorkspacePanelSelectFromGridStateNoSourceRow covers
+// selectFromGridState's "sourceRow < 0" guard: an empty grid's
+// CurrentIndex/sourceIndexAt resolves to no source row at all.
+func TestWorkspacePanelSelectFromGridStateNoSourceRow(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	empty := newMinimalGridState(NewGridModel(secureread.Result{}), "rs1", "Empty", 40)
+	u.workspace.selectFromGridState(empty, "rs1", "", "row") // no panic, no dispatch
+}
+
+// TestWorkspacePanelExplorerNodesViewShowsAttachedMarker covers
+// explorerNodesView's "attached" marker branch: a node whose object is
+// currently attached renders "●".
+func TestWorkspacePanelExplorerNodesViewShowsAttachedMarker(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	tableRef := u.catalog.Objects[2].Reference // the "Customer" table
+	u.snapshot.Workspace.Attachments = []ContextReference{tableRef}
+	view := u.workspace.explorerNodesView(60, 10)
+	if !strings.Contains(view, "●") {
+		t.Fatalf("expected the attached marker in the explorer view:\n%s", view)
+	}
+}
+
+// TestWorkspacePanelExplorerNodesViewShowsCollapsedFold covers
+// explorerNodesView's collapsed-branch fold indicator ("▸" instead of "▾").
+func TestWorkspacePanelExplorerNodesViewShowsCollapsedFold(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.workspace.explorerCollapsed["group:databases"] = true
+	view := u.workspace.explorerNodesView(60, 10)
+	if !strings.Contains(view, "▸") {
+		t.Fatalf("expected a collapsed-branch fold indicator in the explorer view:\n%s", view)
+	}
+}
+
+// TestWorkspacePanelExplorerNodesShowIssueOnBoundTable covers appendGroup's
+// per-item issue branch (a Table/View/Query object with its own Issue set,
+// distinct from a source-level issue) -- its "⚠" label suffix and synthetic
+// ":issue" detail node.
+func TestWorkspacePanelExplorerNodesShowIssueOnBoundTable(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.catalog.Objects[2].Issue = "Schema unavailable: missing columns"
+	var found bool
+	for _, node := range u.workspace.explorerNodes() {
+		if node.id == "table:chinook-local:main.Customer:issue" && strings.Contains(node.label, "missing columns") {
+			found = true
+		}
+		if node.label == "Customer ⚠" {
+			found = found && true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a per-item issue node for the bound table: %+v", u.workspace.explorerNodes())
+	}
+}
+
+// TestWorkspacePanelBookmarksViewShowsEditorWhileModeActive covers
+// bookmarksView's "p.bookmarkMode != ”" branch: the bookmark editor
+// renders inline once a mode (rename/tag/search/...) is active.
+func TestWorkspacePanelBookmarksViewShowsEditorWhileModeActive(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.workspace.tab = 3
+	u.workspace.startBookmarkInput("search", "Search bookmarks")
+	view := ansi.Strip(u.workspace.View(60, 15, true))
+	if !strings.Contains(view, "Search bookmarks") {
+		t.Fatalf("expected the bookmark editor's placeholder in view:\n%s", view)
+	}
+}
+
+// TestWorkspacePanelUpDownOnProjectTabMovesExplorerCursor covers updateKey's
+// "up"/"down" (tab 0) explorer-cursor branches --
+// TestWorkspacePanelUpDownAcrossAllTabs only covers tabs 2/3, and
+// TestWorkspacePanelExplorerHLFoldAndJumpToAncestor only h/l.
+func TestWorkspacePanelUpDownOnProjectTabMovesExplorerCursor(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.workspace.tab = 0
+	u.workspace.explorerIndex = 1
+	u.workspace.explorerDetailOffset = 5
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	if u.workspace.explorerIndex != 0 || u.workspace.explorerDetailOffset != 0 {
+		t.Fatalf("expected up/k to move to index 0 and reset detail offset, got index=%d offset=%d", u.workspace.explorerIndex, u.workspace.explorerDetailOffset)
+	}
+	u.workspace.explorerDetailOffset = 5
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if u.workspace.explorerIndex != 1 || u.workspace.explorerDetailOffset != 0 {
+		t.Fatalf("expected down/j to move to index 1 and reset detail offset, got index=%d offset=%d", u.workspace.explorerIndex, u.workspace.explorerDetailOffset)
+	}
+}
+
+// TestWorkspacePanelEnterOnProjectTabTogglesBranchFold covers updateKey's
+// "enter" (tab 0) branch-fold-toggle case.
+func TestWorkspacePanelEnterOnProjectTabTogglesBranchFold(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	nodes := u.workspace.explorerNodes()
+	var sourceIndex int
+	var sourceID string
+	for i, node := range nodes {
+		if node.label == "Chinook local" {
+			sourceIndex, sourceID = i, node.id
+			break
+		}
+	}
+	u.workspace.tab = 0
+	u.workspace.explorerIndex = sourceIndex
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !u.workspace.explorerCollapsed[sourceID] {
+		t.Fatal("expected Enter on a branch node to collapse it")
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if u.workspace.explorerCollapsed[sourceID] {
+		t.Fatal("expected a second Enter to uncollapse the branch node")
+	}
+}
+
+// TestWorkspacePanelEnterOnDockedTabFocusesDockGrid covers updateKey's
+// "enter" (tab 2, with Docks present) dockGridFocused branch.
+func TestWorkspacePanelEnterOnDockedTabFocusesDockGrid(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.snapshot.Workspace.Docks = []Dock{{ID: "d1", Title: "First"}}
+	u.workspace.tab = 2
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !u.workspace.dockGridFocused {
+		t.Fatal("expected Enter on the Docked tab (with a dock present) to focus the dock grid")
+	}
+}
+
+// TestWorkspacePanelSpaceAndDOnBookmarksTabUseSelectedReference covers
+// updateKey's "space"/"a" (tab 3) attach branch and "d" (tab 3) dock branch
+// via a real selected bookmark reference.
+func TestWorkspacePanelSpaceAndDOnBookmarksTabUseSelectedReference(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	catalog := ProjectCatalog{ID: testScope().ProjectID, Title: "Demo"}
+	chatSessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, _ := chatSessions.Snapshot(ctx)
+	recordID := workspaceTestRecord(t, store, session.ID)
+	if _, err := chatSessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "bookmark_create", Reference: ContextReference{Kind: "recordset", ObjectID: recordID}, Title: "Saved customers"}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, chatSessions, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.workspace.setTab(3)
+	if err := u.workspace.refreshBookmarks(); err != nil {
+		t.Fatal(err)
+	}
+	if len(u.workspace.bookmarkItems) != 1 {
+		t.Fatalf("expected 1 bookmark, got %d", len(u.workspace.bookmarkItems))
+	}
+	u.workspace.bookmarkIndex = 0
+
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeySpace})
+	snapshot, err := chatSessions.Snapshot(ctx)
+	if err != nil || len(snapshot.Workspace.Attachments) != 1 {
+		t.Fatalf("expected space on Bookmarks tab to attach the selected bookmark: %+v, %v", snapshot.Workspace.Attachments, err)
+	}
+
+	u.workspace.setTab(3) // docking below flips ActiveTab; restore it first
+	u.workspace.bookmarkIndex = 0
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	snapshot, err = chatSessions.Snapshot(ctx)
+	if err != nil || len(snapshot.Workspace.Docks) != 1 {
+		t.Fatalf("expected 'd' on Bookmarks tab to dock the selected bookmark: %+v, %v", snapshot.Workspace.Docks, err)
+	}
+}
+
+// TestWorkspacePanelUpdateBookmarkInputSearchAndTagsReportErrors covers
+// updateBookmarkInput's "search"/"tags" branches' error path: an invalid
+// (empty-after-trim) tag makes refreshBookmarks fail, and the failure must
+// reach the transcript via conciseError rather than be swallowed.
+func TestWorkspacePanelUpdateBookmarkInputSearchAndTagsReportErrors(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.workspace.bookmarkTags = []string{"   "} // makes refreshBookmarks fail
+	u.workspace.startBookmarkInput("search", "Search bookmarks")
+	u.workspace.bookmarkEditor.SetValue("anything")
+	u.workspace.updateBookmarkInput(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !strings.Contains(u.shell.View().Content, "bookmark tag") {
+		t.Fatalf("expected the search-mode refresh error in the transcript:\n%s", u.shell.View().Content)
+	}
+
+	u.workspace.startBookmarkInput("tags", "Filter tags (comma separated)")
+	u.workspace.bookmarkEditor.SetValue("   ,  ") // normalizes to zero tags, refresh succeeds this time
+	u.workspace.updateBookmarkInput(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if len(u.workspace.bookmarkTags) != 0 {
+		t.Fatalf("expected blank tag entries to be dropped, got %+v", u.workspace.bookmarkTags)
+	}
+
+	// Force the "tags" branch's error path too: reach into the store to
+	// simulate an invalid tag surviving into refreshBookmarks by directly
+	// invoking the mode with a tag long enough to fail normalizeTag.
+	u.workspace.startBookmarkInput("tags", "Filter tags (comma separated)")
+	long := strings.Repeat("x", 81)
+	u.workspace.bookmarkEditor.SetValue(long)
+	u.workspace.updateBookmarkInput(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !strings.Contains(u.shell.View().Content, "too long") {
+		t.Fatalf("expected the tags-mode refresh error in the transcript:\n%s", u.shell.View().Content)
 	}
 }

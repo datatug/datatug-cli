@@ -547,7 +547,11 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 	case "/http":
 		cmd, err = u.runHTTPCommand(argument)
 	case "/connect":
-		u.shell.AppendAssistant(command + " isn't available in the new chat UI yet — coming in a follow-up; use /help for what is.")
+		if argument != "" {
+			err = fmt.Errorf("usage: /connect")
+		} else {
+			cmd = u.shell.PushOverlay(&connectOverlay{ui: u})
+		}
 	case "/settings":
 		if argument == "" {
 			var count int

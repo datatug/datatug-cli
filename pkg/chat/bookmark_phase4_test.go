@@ -128,7 +128,7 @@ func TestBookmarkWorkspaceTabOpensStructuredGrid(t *testing.T) {
 		t.Fatalf("bookmark tab did not render: %+v", u.bookmarkItems)
 	}
 	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !u.bookmarkGridFocused || u.bookmarkGrid == nil || len(u.bookmarkGrid.model.Rows) != 3 {
+	if !u.bookmarkGridFocused || u.bookmarkGrid == nil || len(u.bookmarkGrid.Rows()) != 3 {
 		t.Fatalf("bookmark grid did not open: %+v", u.bookmarkGrid)
 	}
 	u.updateWorkspaceKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
@@ -173,7 +173,7 @@ func TestEmptyBookmarkedGridNavigation(t *testing.T) {
 	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyUp})
-	if u.bookmarkGrid == nil || u.bookmarkGrid.rowIndex < 0 {
+	if u.bookmarkGrid == nil || len(u.bookmarkGrid.Rows()) != 0 {
 		t.Fatalf("empty bookmark grid navigation = %+v", u.bookmarkGrid)
 	}
 }

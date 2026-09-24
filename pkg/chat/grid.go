@@ -1,17 +1,13 @@
 package chat
 
 import (
-	"encoding/hex"
-	"fmt"
-	"math/big"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/strongo/aichat/tui/grid"
+
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -76,38 +72,38 @@ func truncateGridText(value string, width int) string {
 	return ansi.Truncate(value, width, "…")
 }
 
-// GridColumn is the UI-ready description of a structured result column.
-type GridColumn struct {
-	Name    string
-	Numeric bool
-}
+// GridColumn is the UI-ready description of a structured result column. It is
+// an alias for strongo/aichat's tui/grid.Column: DataTug and Sneat Chat share
+// the same generic grid, so a result column has one definition, not two.
+type GridColumn = grid.Column
 
-// GridModel is the terminal-grid boundary. Values are formatted only here,
-// after query execution has produced a structured secureread.Result.
+// GridModel is the secureread → grid adapter: the terminal-grid boundary
+// where structured query results are formatted into display cells. It is
+// pure data — sorting, column selection, the table itself and its chrome all
+// live in the shared strongo/aichat tui/grid.Model that gridState (ui.go)
+// wraps; newGridState converts a GridModel into that Model's
+// Columns/Rows once, and grid.Model owns everything from there (including
+// its own display-order permutation on Sort — RawRows below stays fixed in
+// the RecordSet's own row order, since gridState resolves a display row back
+// to it via grid.Row.Key, not a parallel-sorted slice).
 type GridModel struct {
 	Columns []GridColumn
 	Rows    [][]string
-	// RawRows preserves the structured source values alongside formatted cells
-	// for future typed interactions without leaking database types into the UI
-	// component adapter.
+	// RawRows preserves the structured source values, indexed by the
+	// RecordSet's own (never reordered) row order, alongside formatted cells
+	// for typed interactions (FK lookups, saved-query parameter values, cell
+	// detail) without leaking database types into the table itself.
 	RawRows [][]any
-	// SourceRows maps a displayed (possibly sorted) row back to its immutable
-	// RecordSet row index for durable selections.
-	SourceRows []int
-
-	sortColumn int
-	sortDesc   bool
 }
 
 // NewGridModel converts a structured query result into display cells while
 // preserving explicit result-column order.
 func NewGridModel(result secureread.Result) GridModel {
-	model := GridModel{Columns: make([]GridColumn, len(result.Columns)), Rows: make([][]string, len(result.Rows)), RawRows: make([][]any, len(result.Rows)), SourceRows: make([]int, len(result.Rows)), sortColumn: -1}
+	model := GridModel{Columns: make([]GridColumn, len(result.Columns)), Rows: make([][]string, len(result.Rows)), RawRows: make([][]any, len(result.Rows))}
 	for i, name := range result.Columns {
 		model.Columns[i] = GridColumn{Name: sanitizeTerminalText(name), Numeric: columnIsNumeric(result.Rows, name)}
 	}
 	for rowIndex, row := range result.Rows {
-		model.SourceRows[rowIndex] = rowIndex
 		cells := make([]string, len(result.Columns))
 		raw := make([]any, len(result.Columns))
 		for columnIndex, name := range result.Columns {
@@ -181,74 +177,6 @@ func isASCIIAlphaNumeric(value byte) bool {
 	return value >= 'a' && value <= 'z' || value >= '0' && value <= '9'
 }
 
-// Sort toggles ascending/descending ordering for one visible column.
-func (m *GridModel) Sort(column int) {
-	if column < 0 || column >= len(m.Columns) {
-		return
-	}
-	if len(m.SourceRows) != len(m.Rows) {
-		m.SourceRows = make([]int, len(m.Rows))
-		for i := range m.SourceRows {
-			m.SourceRows[i] = i
-		}
-	}
-	if m.sortColumn == column {
-		m.sortDesc = !m.sortDesc
-	} else {
-		m.sortColumn = column
-		m.sortDesc = false
-	}
-	order := make([]int, len(m.Rows))
-	for i := range order {
-		order[i] = i
-	}
-	sort.SliceStable(order, func(i, j int) bool {
-		leftIndex, rightIndex := order[i], order[j]
-		left, right := m.Rows[leftIndex][column], m.Rows[rightIndex][column]
-		comparison := strings.Compare(left, right)
-		if m.Columns[column].Numeric {
-			leftNumber, leftOK := new(big.Rat).SetString(left)
-			rightNumber, rightOK := new(big.Rat).SetString(right)
-			if leftOK && rightOK {
-				comparison = leftNumber.Cmp(rightNumber)
-			}
-		}
-		if m.sortDesc {
-			return comparison > 0
-		}
-		return comparison < 0
-	})
-	rows := make([][]string, len(m.Rows))
-	copy(rows, m.Rows)
-	if len(m.RawRows) > 0 {
-		rawRows := make([][]any, len(m.Rows))
-		copy(rawRows, m.RawRows)
-		sourceRows := append([]int(nil), m.SourceRows...)
-		sortedRawRows := make([][]any, len(m.Rows))
-		for i, index := range order {
-			m.Rows[i] = rows[index]
-			sortedRawRows[i] = rawRows[index]
-			m.SourceRows[i] = sourceRows[index]
-		}
-		m.RawRows = sortedRawRows
-		return
-	}
-	for i, index := range order {
-		m.Rows[i] = rows[index]
-	}
-}
-
-func (m GridModel) header(column int) string {
-	name := m.Columns[column].Name
-	if m.sortColumn != column {
-		return name
-	}
-	if m.sortDesc {
-		return name + " ▼"
-	}
-	return name + " ▲"
-}
-
 func columnIsNumeric(rows []secureread.Row, name string) bool {
 	for _, row := range rows {
 		value := row.Data[name]
@@ -265,25 +193,7 @@ func columnIsNumeric(rows []secureread.Row, name string) bool {
 	return false
 }
 
-// FormatValue applies basic terminal-safe value formatting.
-func FormatValue(value any) string {
-	switch v := value.(type) {
-	case nil:
-		return "NULL"
-	case string:
-		return v
-	case []byte:
-		if utf8.Valid(v) {
-			return string(v)
-		}
-		return "0x" + hex.EncodeToString(v)
-	case time.Time:
-		return v.Format(time.RFC3339)
-	case float32:
-		return strconv.FormatFloat(float64(v), 'f', -1, 32)
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	default:
-		return fmt.Sprint(v)
-	}
-}
+// FormatValue applies basic terminal-safe value formatting. It is
+// strongo/aichat's tui/grid.FormatValue: DataTug and Sneat Chat format grid
+// values identically rather than each keeping its own copy.
+var FormatValue = grid.FormatValue

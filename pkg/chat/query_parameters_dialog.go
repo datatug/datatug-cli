@@ -171,9 +171,8 @@ func (u *UI) refreshParameterLookupGrid() {
 	if p.multi {
 		title += fmt.Sprintf(" (%d selected)", len(p.selected))
 	}
-	p.grid = newGridState(model, title, max(32, min(u.width-10, 90)))
-	p.grid.focused = true
-	p.grid.rebuild()
+	p.grid = newMinimalGridState(model, title, max(32, min(u.width-10, 90))) // no view switcher (m9)
+	p.grid.SetFocused(true)
 }
 
 func (u *UI) updateParameterLookupDialog(key tea.KeyPressMsg) tea.Cmd {
@@ -185,24 +184,23 @@ func (u *UI) updateParameterLookupDialog(key tea.KeyPressMsg) tea.Cmd {
 		d.lookup = nil
 		return nil
 	case "up", "down":
-		if p.grid != nil && len(p.grid.model.Rows) > 0 {
+		if p.grid != nil && len(p.grid.Rows()) > 0 {
 			delta := 1
 			if key.String() == "up" {
 				delta = -1
 			}
-			p.grid.rowIndex = max(0, min(len(p.grid.model.Rows)-1, p.grid.rowIndex+delta))
-			p.grid.table.SetCursor(p.grid.rowIndex)
+			p.grid.SelectRow(max(0, min(len(p.grid.Rows())-1, p.grid.CurrentIndex()+delta)))
 		}
 		return nil
 	case "space":
-		if !p.multi || p.grid == nil || len(p.grid.model.Rows) == 0 {
+		if !p.multi || p.grid == nil || len(p.grid.Rows()) == 0 {
 			return nil
 		}
 		keyColumn := p.keyColumn()
 		if keyColumn < 0 {
 			return nil
 		}
-		value := p.grid.model.RawRows[p.grid.rowIndex][keyColumn]
+		value := p.grid.rawValue(p.grid.CurrentIndex(), keyColumn)
 		token, ok := lookupValueToken(value)
 		if !ok {
 			d.err = "This key cannot be selected."
@@ -213,10 +211,9 @@ func (u *UI) updateParameterLookupDialog(key tea.KeyPressMsg) tea.Cmd {
 		} else {
 			p.selected[token] = lookupValue(value)
 		}
-		row := p.grid.rowIndex
+		row := p.grid.CurrentIndex()
 		u.refreshParameterLookupGrid()
-		p.grid.rowIndex = row
-		p.grid.table.SetCursor(row)
+		p.grid.SelectRow(row)
 		return nil
 	case "enter":
 		if p.multi {
@@ -243,11 +240,12 @@ func (u *UI) updateParameterLookupDialog(key tea.KeyPressMsg) tea.Cmd {
 			d.lookup = nil
 			return nil
 		}
-		if p.grid != nil && len(p.grid.model.Rows) > 0 {
-			index := p.grid.rowIndex
+		if p.grid != nil && len(p.grid.Rows()) > 0 {
+			index := p.grid.CurrentIndex()
+			row := p.grid.rawRow(index)
 			for column, name := range p.result.Columns {
-				if name == p.key && column < len(p.grid.model.RawRows[index]) {
-					value := p.grid.model.RawRows[index][column]
+				if name == p.key && column < len(row) {
+					value := row[column]
 					if value != nil {
 						encoded, err := json.Marshal(lookupValue(value))
 						if err != nil {
@@ -377,9 +375,9 @@ func (u *UI) parameterLookupOverlay(background string) string {
 	width := max(34, min(u.width-4, 96))
 	inside := max(20, width-6)
 	p.filter.SetWidth(inside - 10)
-	grid := "No matching rows in the first 100."
-	if p.grid != nil && len(p.grid.model.Rows) > 0 {
-		grid = p.grid.view()
+	gridText := "No matching rows in the first 100."
+	if p.grid != nil && len(p.grid.Rows()) > 0 {
+		gridText = p.grid.view()
 	}
 	var help string
 	if p.multi {
@@ -387,7 +385,7 @@ func (u *UI) parameterLookupOverlay(background string) string {
 	} else {
 		help = "First 100 permitted rows only; type an unlisted key directly · ↑↓ choose · Enter fills · Esc back"
 	}
-	content := p.filter.View() + "\n" + help + "\n" + grid
+	content := p.filter.View() + "\n" + help + "\n" + gridText
 	if u.queryParameters.err != "" {
 		content += "\n" + sanitizeTerminalText(u.queryParameters.err)
 	}

@@ -139,13 +139,13 @@ func TestSavedQueryMultiFKPickerPreservesSelectionAcrossFilter(t *testing.T) {
 		t.Fatal("zero selection was accepted")
 	}
 	u.updateQueryParametersDialog(tea.KeyPressMsg{Code: tea.KeySpace})
-	if !strings.Contains(u.queryParameters.lookup.grid.model.Rows[0][0], "☑") {
+	if !strings.Contains(u.queryParameters.lookup.grid.Cell(0, 0), "☑") {
 		t.Fatal("selected marker missing")
 	}
 	for _, r := range "Bob" {
 		u.updateQueryParametersDialog(tea.KeyPressMsg{Text: string(r)})
 	}
-	if len(u.queryParameters.lookup.selected) != 1 || len(u.queryParameters.lookup.grid.model.Rows) != 1 {
+	if len(u.queryParameters.lookup.selected) != 1 || len(u.queryParameters.lookup.grid.Rows()) != 1 {
 		t.Fatal("filter lost selection")
 	}
 	u.updateQueryParametersDialog(tea.KeyPressMsg{Code: tea.KeySpace})
@@ -260,7 +260,7 @@ func TestSavedQueryFKLookupFilterAndSelect(t *testing.T) {
 	for _, r := range "Bob" {
 		u.updateQueryParametersDialog(tea.KeyPressMsg{Text: string(r)})
 	}
-	if len(u.queryParameters.lookup.grid.model.Rows) != 1 {
+	if len(u.queryParameters.lookup.grid.Rows()) != 1 {
 		t.Fatal("filter did not narrow rows")
 	}
 	u.updateQueryParametersDialog(tea.KeyPressMsg{Code: tea.KeyEnter})

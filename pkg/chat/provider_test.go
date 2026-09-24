@@ -197,6 +197,55 @@ func TestNewLLMProviderOpenAIAndAnthropicBaseURLEnvOverride(t *testing.T) {
 // finding: a gateway route with "/v1/" already present mid-path (not just as
 // a trailing segment) must be left alone, not gain a second, meaningless
 // trailing "/v1".
+func TestNewLLMProviderRequiresModelName(t *testing.T) {
+	if _, err := NewLLMProvider("  ", "", "key"); err == nil || !strings.Contains(err.Error(), "model is required") {
+		t.Fatalf("err = %v, want a model-required error", err)
+	}
+}
+
+// TestNewLLMProviderRoutesResponsesOnlyModel covers the family=="openai" &&
+// modelNeedsResponses(bareModel) branch: one of responsesOnlyModelPrefixes
+// (see M1's table) must route to ai/openairesponses instead of
+// ai/openaicompat.
+func TestNewLLMProviderRoutesResponsesOnlyModel(t *testing.T) {
+	provider, err := NewLLMProvider("gpt-5-codex", "", "key")
+	if err != nil {
+		t.Fatalf("NewLLMProvider: %v", err)
+	}
+	if provider.Name() != "openai-responses" {
+		t.Fatalf("provider = %q, want openai-responses", provider.Name())
+	}
+}
+
+func TestEnsureV1AndStripTrailingV1ReturnRawOnParseError(t *testing.T) {
+	// A lone "%zz" is an invalid URL escape (net/url.Parse rejects it), the
+	// only realistic way to hit either helper's err != nil branch.
+	const malformed = "http://example.com/%zz"
+	if got := ensureV1(malformed); got != malformed {
+		t.Fatalf("ensureV1(%q) = %q, want the raw input back", malformed, got)
+	}
+	if got := stripTrailingV1(malformed); got != malformed {
+		t.Fatalf("stripTrailingV1(%q) = %q, want the raw input back", malformed, got)
+	}
+}
+
+// TestNormalizeReasoningLevels covers every normalizeReasoning branch not
+// already exercised indirectly through WithThinkingLevel's own "low"/error
+// cases in agent_test.go.
+func TestNormalizeReasoningLevels(t *testing.T) {
+	for _, tc := range []struct{ level, want string }{
+		{"", ""},
+		{"  ", ""},
+		{"MEDIUM", "medium"},
+		{"High", "high"},
+	} {
+		got, err := normalizeReasoning(tc.level)
+		if err != nil || got != tc.want {
+			t.Errorf("normalizeReasoning(%q) = %q, %v; want %q, nil", tc.level, got, err, tc.want)
+		}
+	}
+}
+
 func TestEnsureV1DoesNotAppendWhenPathAlreadyContainsV1(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"https://api.deepseek.com", "https://api.deepseek.com/v1"},

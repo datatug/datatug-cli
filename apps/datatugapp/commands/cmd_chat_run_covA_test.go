@@ -7,6 +7,7 @@ package commands
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -790,5 +791,111 @@ func TestRunChatLoopSwitchesProjects(t *testing.T) {
 	}
 	if seenProjects[0] != "first-project" || seenProjects[1] != "second-project" {
 		t.Fatalf("seenProjects = %v, want [first-project second-project]", seenProjects)
+	}
+}
+
+// --- runChatProject: NewSessionChat / NewSessionChatUI / SetSavedQueryService / StartBrowserBridge seams ---
+
+// TestRunChatProjectNewSessionChatErrorReported covers runChatProject's
+// chat.NewSessionChat error branch (cmd_chat.go, "restore chat session")
+// via the newSessionChat seam: every real dependency up to this call
+// (store, conversation, sourceURL, projectCatalog) already succeeded in the
+// same synchronous call, so no real fixture can make chat.NewSessionChat
+// itself fail without also failing something earlier.
+func TestRunChatProjectNewSessionChatErrorReported(t *testing.T) {
+	restore := newSessionChat
+	t.Cleanup(func() { newSessionChat = restore })
+	injected := errors.New("injected NewSessionChat failure")
+	newSessionChat = func(ctx context.Context, store *chat.SessionStore, agent chat.ContextualConversation, source string, catalogs ...chat.ProjectCatalog) (*chat.SessionChat, error) {
+		return nil, injected
+	}
+
+	dir := writeChatRunProjectFixture(t)
+	cmd := chatCommand()
+	options := chatOptions{project: dir, env: "local", model: defaultChatModel, thinking: "low"}
+	if _, err := runChatProject(cmd, options); err == nil || !strings.Contains(err.Error(), "injected NewSessionChat failure") {
+		t.Fatalf("runChatProject error = %v, want the injected NewSessionChat error", err)
+	}
+}
+
+// TestRunChatProjectNewSessionChatUIErrorReported covers runChatProject's
+// chat.NewSessionChatUI error branch ("render chat session") via the
+// newSessionChatUI seam.
+func TestRunChatProjectNewSessionChatUIErrorReported(t *testing.T) {
+	restore := newSessionChatUI
+	t.Cleanup(func() { newSessionChatUI = restore })
+	injected := errors.New("injected NewSessionChatUI failure")
+	newSessionChatUI = func(ctx context.Context, sessions *chat.SessionChat, modelName string) (*chat.ChatUI, error) {
+		return nil, injected
+	}
+
+	dir := writeChatRunProjectFixture(t)
+	cmd := chatCommand()
+	options := chatOptions{project: dir, env: "local", model: defaultChatModel, thinking: "low"}
+	if _, err := runChatProject(cmd, options); err == nil || !strings.Contains(err.Error(), "injected NewSessionChatUI failure") {
+		t.Fatalf("runChatProject error = %v, want the injected NewSessionChatUI error", err)
+	}
+}
+
+// TestRunChatProjectSetSavedQueryServiceErrorReported covers runChatProject's
+// ui.SetSavedQueryService error branch ("list saved project queries") via
+// the setSavedQueryService seam.
+func TestRunChatProjectSetSavedQueryServiceErrorReported(t *testing.T) {
+	restore := setSavedQueryService
+	t.Cleanup(func() { setSavedQueryService = restore })
+	injected := errors.New("injected SetSavedQueryService failure")
+	setSavedQueryService = func(ui *chat.ChatUI, service chat.SavedQueryService) error { return injected }
+
+	dir := writeChatRunProjectFixture(t)
+	cmd := chatCommand()
+	options := chatOptions{project: dir, env: "local", model: defaultChatModel, thinking: "low"}
+	if _, err := runChatProject(cmd, options); err == nil || !strings.Contains(err.Error(), "injected SetSavedQueryService failure") {
+		t.Fatalf("runChatProject error = %v, want the injected SetSavedQueryService error", err)
+	}
+}
+
+// TestRunChatProjectStartBrowserBridgeErrorReported covers runChatProject's
+// chat.StartBrowserBridge error branch ("start browser chat") via the
+// startBrowserBridge seam.
+func TestRunChatProjectStartBrowserBridgeErrorReported(t *testing.T) {
+	restore := startBrowserBridge
+	t.Cleanup(func() { startBrowserBridge = restore })
+	injected := errors.New("injected StartBrowserBridge failure")
+	startBrowserBridge = func(sessions *chat.SessionChat) (*chat.BrowserBridge, error) { return nil, injected }
+
+	dir := writeChatRunProjectFixture(t)
+	cmd := chatCommand()
+	options := chatOptions{project: dir, env: "local", model: defaultChatModel, thinking: "low"}
+	if _, err := runChatProject(cmd, options); err == nil || !strings.Contains(err.Error(), "injected StartBrowserBridge failure") {
+		t.Fatalf("runChatProject error = %v, want the injected StartBrowserBridge error", err)
+	}
+}
+
+// --- loadChatJoinApplication: openJoinMetadataDB seam ---------------------
+
+// TestLoadChatJoinApplicationOpenMetadataDBErrorReported covers
+// loadChatJoinApplication's sql.Open error branch via the
+// openJoinMetadataDB seam: modernc.org/sqlite never errors eagerly for a
+// syntactically valid DSN against a real, readable file (CheckSourceFile
+// already passed), so no real fixture reaches this branch.
+func TestLoadChatJoinApplicationOpenMetadataDBErrorReported(t *testing.T) {
+	restore := openJoinMetadataDB
+	t.Cleanup(func() { openJoinMetadataDB = restore })
+	injected := errors.New("injected sql.Open failure")
+	openJoinMetadataDB = func(driverName, dataSourceName string) (*sql.DB, error) { return nil, injected }
+
+	real, err := filepath.Abs(filepath.Join("..", "..", "..", "pkg", "dbcopy", "testdata", "chinook.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(real); statErr != nil {
+		t.Skipf("chinook fixture unavailable: %v", statErr)
+	}
+	_, closeFn, err := loadChatJoinApplication(context.Background(), "sqlite:///"+real, nil, false)
+	if !errors.Is(err, injected) {
+		t.Fatalf("loadChatJoinApplication error = %v, want the injected sql.Open error", err)
+	}
+	if closeFn != nil {
+		t.Fatal("expected no close func on an sql.Open error")
 	}
 }

@@ -84,6 +84,21 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 	}
 }
 
+// The following are narrow seams over runChatProject's real-dependency
+// constructors, each of which can otherwise only fail after every prior
+// step in the same synchronous call has already succeeded -- no real
+// fixture can diverge, say, a just-opened store's chat.NewSessionChat call
+// from the chat.OpenSessionStore call three lines above it. Always the
+// named real function/method in production.
+var (
+	newSessionChat       = chat.NewSessionChat
+	newSessionChatUI     = chat.NewSessionChatUI
+	startBrowserBridge   = chat.StartBrowserBridge
+	setSavedQueryService = func(ui *chat.ChatUI, service chat.SavedQueryService) error {
+		return ui.SetSavedQueryService(service)
+	}
+)
+
 func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	ctx := cmd.Context()
 	if ctx == nil {
@@ -175,7 +190,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if joinErr != nil {
 		setCatalogSourceIssue(&projectCatalog, database, "JOIN metadata unavailable: "+joinErr.Error())
 	}
-	sessions, err := chat.NewSessionChat(ctx, store, conversation, sourceURL, projectCatalog)
+	sessions, err := newSessionChat(ctx, store, conversation, sourceURL, projectCatalog)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("restore chat session: %v", err), exitCodeUsage)
 	}
@@ -183,14 +198,14 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if joinApplication != nil {
 		sessions.ConfigureJoinApplication(*joinApplication)
 	}
-	ui, err := chat.NewSessionChatUI(ctx, sessions, options.model)
+	ui, err := newSessionChatUI(ctx, sessions, options.model)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("render chat session: %v", err), exitCodeUsage)
 	}
-	if err := ui.SetSavedQueryService(chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session}); err != nil {
+	if err := setSavedQueryService(ui, chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session}); err != nil {
 		return "", Exit(fmt.Sprintf("list saved project queries: %v", err), exitCodeUsage)
 	}
-	bridge, err := chat.StartBrowserBridge(sessions)
+	bridge, err := startBrowserBridge(sessions)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("start browser chat: %v", err), exitCodeUsage)
 	}
@@ -214,6 +229,12 @@ func (c unavailableSchemaConversation) AskWithContext(context.Context, string, s
 
 // JOIN discovery is optional: a failed metadata read should disable JOIN
 // suggestions for this source, not prevent chat or other sources from loading.
+// openJoinMetadataDB is a seam over sql.Open: modernc.org/sqlite's driver
+// never errors eagerly for a syntactically valid DSN (the connection itself
+// is lazy), so no real fixture reaches loadChatJoinApplication's sql.Open
+// error branch. Always sql.Open in production.
+var openJoinMetadataDB = sql.Open
+
 func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *secureread.Executor, unrestricted bool) (*chat.ForeignKeyJoinApplication, func(), error) {
 	if strings.HasPrefix(sourceURL, "unavailable://") {
 		return nil, nil, nil
@@ -229,7 +250,7 @@ func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *se
 		return nil, nil, err
 	}
 	readOnlyURL := (&url.URL{Scheme: "file", Path: joinSource.Path, RawQuery: "mode=ro"}).String()
-	metadataDB, err := sql.Open("sqlite", readOnlyURL)
+	metadataDB, err := openJoinMetadataDB("sqlite", readOnlyURL)
 	if err != nil {
 		return nil, nil, err
 	}

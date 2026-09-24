@@ -34,6 +34,13 @@ type gridState struct {
 	rawBody      []byte
 	httpResponse *HTTPResponse
 	versionBadge string
+	// entryID is the transcript block ID this grid is currently appended
+	// under (set by ChatUI.appendGridResult/loadSession). It lets a caller
+	// that only has a RecordSetID — e.g. OnMsg's bridgeTickMsg case,
+	// restoring focus across a session reload — recover the id
+	// chatshell.Model.FocusEntry needs, without chatshell offering a
+	// focus-by-ref lookup.
+	entryID string
 }
 
 // setVersionBadge prefixes ("unchanged"/"changed") or clears the grid's

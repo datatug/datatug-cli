@@ -181,8 +181,6 @@ func (u *UI) SetBrowserURL(url string) {
 	}
 }
 
-type bridgeTickMsg struct{}
-
 func (u *UI) awaitBridgeChange() tea.Cmd {
 	if u.bridgeEvents == nil {
 		return nil

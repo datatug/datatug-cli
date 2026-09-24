@@ -39,6 +39,11 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return u.refreshLastRecordSet(), true
 	case "alt+s", "ß": // macOS Option+S emits ß unless the terminal maps Option to Meta (ui.go's own alias).
 		return u.cycleTableStyle(), true
+	case "f5":
+		if u.browserURL != "" {
+			u.webLinkVisible = !u.webLinkVisible
+		}
+		return nil, true
 	}
 	return nil, false
 }

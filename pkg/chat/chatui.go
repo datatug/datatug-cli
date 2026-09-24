@@ -67,6 +67,7 @@ type ChatUI struct {
 	projectChoices  []ProjectChoice
 	selectedProject string
 	browserURL      string
+	webLinkVisible  bool
 	bridgeEvents    <-chan struct{}
 	bridgeStop      func()
 
@@ -161,15 +162,28 @@ func (u *ChatUI) SetBrowserURL(url string) {
 	}
 }
 
-// Run starts the Bubble Tea program and blocks until it exits.
+// Run starts the Bubble Tea program and blocks until it exits. Unlike
+// ui.go's Init-batched awaitBridgeChange/re-arm loop (chatshell.Model.Init
+// is fixed and offers no hook to inject an extra startup command), the
+// browser-bridge change channel is forwarded straight into the running
+// program from a goroutine — simpler, and Handler has no Init capability
+// to plug into.
 func (u *ChatUI) Run() error {
 	if u.conversation == nil {
 		return fmt.Errorf("chat UI requires a conversation")
 	}
+	program := tea.NewProgram(u.shell)
+	if u.bridgeEvents != nil {
+		go func(events <-chan struct{}) {
+			for range events {
+				program.Send(bridgeTickMsg{})
+			}
+		}(u.bridgeEvents)
+	}
 	if u.bridgeStop != nil {
 		defer u.bridgeStop()
 	}
-	_, err := tea.NewProgram(u.shell).Run()
+	_, err := program.Run()
 	return err
 }
 
@@ -334,6 +348,7 @@ func (u *ChatUI) appendGridResult(query QueryResult) {
 	styled.SetKeyHandler(u.handleGridKey)
 	block := u.blockForGrid(styled.Model, query.RecordSetID)
 	u.lastGridEntryID = u.appendBlockWithID("grid", block)
+	styled.entryID = u.lastGridEntryID
 }
 
 // blockForGrid wraps gridModel in a JoinBlock when recordSetID has FK-join
@@ -425,6 +440,29 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 			u.pendingDetail.relatedError = msg.err
 		}
 		return nil
+	case bridgeTickMsg:
+		// Ported from ui.go's bridgeTickMsg case: the browser bridge (or
+		// anything else) persisted a change to this session out of band —
+		// reload it, same as /switch's u.loadSession(snapshot), unless a
+		// turn is already streaming here (don't yank the transcript out
+		// from under an in-flight local turn). ui.go's refreshSession
+		// restored the focused grid's row/column/sort/scroll state across
+		// a reload; loadSession's fresh gridState instances can't carry
+		// that much, but they can at least keep the same RecordSet
+		// focused (re-picking a fresh entryID for it) instead of silently
+		// dropping focus back to the composer.
+		if u.sessions != nil && !u.shell.Busy() {
+			if snapshot, err := u.sessions.Snapshot(u.ctx); err == nil && (snapshot.ID != u.sessionID || !snapshot.UpdatedAt.Equal(u.snapshot.UpdatedAt)) {
+				focusedRecordSetID := u.activeRecordSetID()
+				u.loadSession(snapshot)
+				if focusedRecordSetID != "" {
+					if g, ok := u.gridsByRecordSetID[focusedRecordSetID]; ok && g.entryID != "" {
+						u.shell.FocusEntry(g.entryID)
+					}
+				}
+			}
+		}
+		return nil
 	}
 	return nil
 }
@@ -479,6 +517,7 @@ func (u *ChatUI) loadSession(session ChatSession) {
 			u.gridsByRecordSetID[record.ID] = styled
 			styled.SetKeyHandler(u.handleGridKey)
 			u.lastGridEntryID = u.appendBlockWithID("grid", u.blockForGrid(styled.Model, record.ID))
+			styled.entryID = u.lastGridEntryID
 			if note := formatLimitations(record.Result.Limitations); note != "" {
 				u.shell.AppendAssistant(note)
 			}
@@ -824,6 +863,11 @@ func (u *ChatUI) topBar(width int) string {
 // one introduced here.
 func (u *ChatUI) statusBar(width int) string {
 	segments := []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ navigate", "Enter send", "F6/Shift+→ workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", "Ctrl+C quit"}
+	if u.webLinkVisible {
+		segments = append(segments, lipgloss.NewStyle().Hyperlink(u.browserURL).Render("Open web chat"), "F5 hide link")
+	} else if u.browserURL != "" {
+		segments = append(segments, "F5 web link")
+	}
 	if u.sessions != nil {
 		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.snapshot.Title), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
 	}

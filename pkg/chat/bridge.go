@@ -16,6 +16,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// bridgeTickMsg notifies a chat UI (UI or ChatUI) that SessionChat.SubscribeChanges
+// reported a change — either the browser bridge persisted a new browser turn, or
+// something else appended to the session out of band. Lives here (rather than
+// ui.go) so it survives ui.go's deletion; both UIs share the same message type.
+type bridgeTickMsg struct{}
+
 // BrowserBridge exposes the active CLI chat to a browser on a loopback-only port.
 // The capability stays in the web URL fragment and is sent in a request header.
 type BrowserBridge struct {

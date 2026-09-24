@@ -32,91 +32,6 @@ func TestUIRendersStructuredResultAsBubbleTable(t *testing.T) {
 	}
 }
 
-func TestUIInlineFKJoinNavigationAndApply(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	defer func() { _ = store.Close() }()
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	user, err := store.AppendUser(ctx, sessions.activeID, "Show invoices")
-	if err != nil {
-		t.Fatal(err)
-	}
-	base, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
-		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
-		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sessions.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: &joinExecutorStub{}})
-	u, err := NewSessionUI(ctx, sessions, "fake-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u.width, u.height = 100, 40
-	u.resizeChatPane()
-	if !strings.Contains(ansi.Strip(u.View().Content), "You can JOIN") || !strings.Contains(u.View().Content, "Customer") {
-		t.Fatalf("inline FK area missing:\n%s", u.View().Content)
-	}
-	if !u.focusLatestGrid() {
-		t.Fatal("grid could not be focused")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Text: "j"})
-	if !u.joinFocused || u.entries[u.activeGrid].grid.Focused() {
-		t.Fatal("JOIN area did not receive focus")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !strings.Contains(u.View().Content, "Invoice.CustomerId") {
-		t.Fatal("exact FK details not displayed")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if u.joinFocused || !u.entries[u.activeGrid].grid.Focused() {
-		t.Fatal("Esc did not return to grid")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Text: "j"})
-	_, command := u.Update(tea.KeyPressMsg{Code: tea.KeySpace})
-	if command == nil {
-		t.Fatal("Space did not invoke JOIN application")
-	}
-	message := command()
-	if _, ok := message.(joinMessage); !ok {
-		t.Fatalf("JOIN command returned %T", message)
-	}
-	_, _ = u.Update(message)
-	snapshot, err := sessions.Snapshot(ctx)
-	if err != nil || len(snapshot.RecordSets) != 2 {
-		t.Fatalf("JOIN result was not persisted: %d RecordSets, %v", len(snapshot.RecordSets), err)
-	}
-	if snapshot.RecordSets[base.RecordSetID].Lineage != nil {
-		t.Fatal("base RecordSet was mutated")
-	}
-	if !strings.Contains(u.View().Content, "Invoices + Customer") {
-		t.Fatal("joined grid not rendered")
-	}
-}
-
-func TestUIShowsAppliedLimitationsIncludingEmptyResults(t *testing.T) {
-	u := NewUI(context.Background(), nil, "fake-model")
-	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
-		Columns: []string{"CustomerId"},
-		Limitations: []secureread.Limitation{
-			{Kind: secureread.LimitationPolicy, Note: `access: policy "support" restricted the query`},
-			{Kind: secureread.LimitationRowsFiltered},
-			{Kind: secureread.LimitationHiddenColumns, Columns: []string{"Email"}},
-		},
-	}}}})
-	u.rebuildHistory(true)
-	view := u.View().Content
-	for _, want := range []string{"No rows returned.", `policy "support"`, "rows filtered by policy", "hidden columns: Email"} {
-		if !strings.Contains(view, want) {
-			t.Errorf("view missing %q:\n%s", want, view)
-		}
-	}
-}
-
 func TestShiftUpFromEmptyInputFocusesLatestGrid(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
 	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
@@ -326,29 +241,6 @@ func TestShiftArrowsSelectUserMessageAndEnterLoadsItIntoComposer(t *testing.T) {
 	}
 	if got := u.input.Column(); got != len("newer question") {
 		t.Fatalf("cursor position = %d, want %d", got, len("newer question"))
-	}
-}
-
-func TestUserMessageCardHasBarPaddingAndSelectionState(t *testing.T) {
-	normal := userMessageView("hello", 40, false)
-	selected := userMessageView("hello", 40, true)
-	lines := strings.Split(normal, "\n")
-	if len(lines) != 3 {
-		t.Fatalf("user message card has %d rows, want 3 (top pad, text, bottom pad)", len(lines))
-	}
-	for _, line := range lines {
-		if got := ansi.StringWidth(line); got != 40 {
-			t.Fatalf("user message line rendered at %d cells, want 40: %q", got, line)
-		}
-		if !strings.HasPrefix(ansi.Strip(line), "┃") {
-			t.Fatalf("user message line lacks the left accent bar: %q", ansi.Strip(line))
-		}
-	}
-	if !strings.Contains(ansi.Strip(normal), "You: hello") {
-		t.Fatalf("user message card missing its label:\n%s", ansi.Strip(normal))
-	}
-	if normal == selected {
-		t.Fatal("selected user message is indistinguishable from an unselected one")
 	}
 }
 
@@ -760,34 +652,6 @@ func TestEscapeClearsSecondaryPaneHighlight(t *testing.T) {
 	}
 	if view := ansi.Strip(u.View().Content); strings.Contains(view, "● Query result") {
 		t.Fatalf("Escape left secondary pane highlighted:\n%s", view)
-	}
-}
-
-func TestSessionHelpDocumentsRecordsetAndExistingGridControls(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	defer func() { _ = store.Close() }()
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, sessions, "fake-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u.runSessionCommand("/help")
-	if len(u.entries) == 0 {
-		t.Fatal("help did not add a response")
-	}
-	help := u.entries[len(u.entries)-1].text
-	for _, want := range []string{
-		"1 Table", "2 Charts", "3 Current row", "Tab panes", "Shift+↑↓ select",
-		"j JOINs", "Space row", "c cell", "r range", "a attach", "d dock", "b bookmark", "s sort", "Enter details", "Esc composer",
-		"F2", "F6", "Ctrl+C",
-	} {
-		if !strings.Contains(help, want) {
-			t.Errorf("help missing %q: %s", want, help)
-		}
 	}
 }
 

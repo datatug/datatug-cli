@@ -695,8 +695,8 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 }
 
 const chatHelpText = "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm • /bucket [clear] • /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path> • /settings versions <1-100>\n\n" +
-	"Global: Shift+Enter newline • F6/Shift+→ workspace • Shift+← previous • Ctrl+C quit\n\n" +
-	"Grid: j JOINs • s sort • Enter details"
+	"Global: Shift+Enter newline • F6/Shift+→ workspace • Shift+← previous • F3 projects • F4 sessions • Ctrl+←→ resize panes • Ctrl+G latest grid • Ctrl+C quit\n\n" +
+	"Grid: 1 Table • 2 Charts • 3 Current row • Tab panes (wide) • Shift+↑↓ select • j JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • B bucket • s sort • Enter details • e export • q save as query • Esc composer"
 
 // chatExportDoneMsg reports the outcome of a background /export write —
 // the ChatUI analogue of export_ui.go's exportMessage.

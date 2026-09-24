@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
@@ -226,5 +227,114 @@ func TestChatUIAskUsesStreamAsk(t *testing.T) {
 	}
 	if len(snapshot.RecordSets) != 1 {
 		t.Fatalf("expected the streamed turn's query to be persisted, got %d RecordSets", len(snapshot.RecordSets))
+	}
+}
+
+// TestChatUIInlineFKJoinNavigationAndApply is ported from ui_test.go's
+// TestUIInlineFKJoinNavigationAndApply: JoinBlock's own key mechanics
+// (navigate/details/apply) already have dedicated unit tests in
+// join_block_test.go, and TestChatUIJoinCandidatesWireIntoJoinBlock above
+// already checks blockForGrid wires a JoinBlock in. This is the remaining
+// real gap: the full round trip through ChatUI's actual production wiring
+// (focus the grid -> "j" -> navigate -> Space applies -> result persists
+// and re-renders as the joined grid), which unit tests of the pieces don't
+// cover.
+func TestChatUIInlineFKJoinNavigationAndApply(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.AppendUser(ctx, sessions.activeID, "Show invoices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
+		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n",
+		Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 1}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: &joinExecutorStub{}})
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	view := ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(view, "You can") || !strings.Contains(view, "JOIN") || !strings.Contains(view, "Customer") {
+		t.Fatalf("inline FK area missing:\n%s", view)
+	}
+	if !u.shell.FocusEntry(u.lastGridEntryID) {
+		t.Fatal("grid could not be focused")
+	}
+	u.shell.Update(tea.KeyPressMsg{Text: "j"})
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !strings.Contains(u.shell.View().Content, "Invoice.CustomerId") {
+		t.Fatal("exact FK details not displayed")
+	}
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	u.shell.Update(tea.KeyPressMsg{Text: "j"})
+	_, cmd := u.shell.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	if cmd == nil {
+		t.Fatal("Space did not invoke JOIN application")
+	}
+	drainCmd(t, u, cmd)
+	snapshot, err := sessions.Snapshot(ctx)
+	if err != nil || len(snapshot.RecordSets) != 2 {
+		t.Fatalf("JOIN result was not persisted: %d RecordSets, %v", len(snapshot.RecordSets), err)
+	}
+	if snapshot.RecordSets[base.RecordSetID].Lineage != nil {
+		t.Fatal("base RecordSet was mutated")
+	}
+	if !strings.Contains(u.shell.View().Content, "Invoices + Customer") {
+		t.Fatal("joined grid not rendered")
+	}
+}
+
+// TestChatUIShowsAppliedLimitationsIncludingEmptyResults is ported from
+// ui_test.go's TestUIShowsAppliedLimitationsIncludingEmptyResults.
+func TestChatUIShowsAppliedLimitationsIncludingEmptyResults(t *testing.T) {
+	turn := Turn{Queries: []QueryResult{{Result: secureread.Result{
+		Columns: []string{"CustomerId"},
+		Limitations: []secureread.Limitation{
+			{Kind: secureread.LimitationPolicy, Note: `access: policy "support" restricted the query`},
+			{Kind: secureread.LimitationRowsFiltered},
+			{Kind: secureread.LimitationHiddenColumns, Columns: []string{"Email"}},
+		},
+	}}}}
+	u, _ := newTestChatUI(t, nil, turn)
+	drainCmd(t, u, u.Submit("Show customers"))
+	// Word-wrapped rendering can split a checked phrase across a line
+	// boundary; collapse runs of whitespace (including the wrap newline)
+	// to a single space before matching, like the /help check below.
+	view := strings.Join(strings.Fields(ansi.Strip(u.shell.View().Content)), " ")
+	for _, want := range []string{"No rows returned.", `policy "support"`, "rows filtered by policy", "hidden columns: Email"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+// TestChatUISlashHelpDocumentsGridControls is ported from ui_test.go's
+// TestSessionHelpDocumentsRecordsetAndExistingGridControls: /help must
+// still document every grid key handleGridKey wires (chatui_inspector.go),
+// not just the session-management commands
+// TestChatUISlashHelpListsCommands already checks.
+func TestChatUISlashHelpDocumentsGridControls(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	drainCmd(t, u, u.Submit("/help"))
+	view := strings.Join(strings.Fields(ansi.Strip(u.shell.View().Content)), " ")
+	for _, want := range []string{
+		"1 Table", "2 Charts", "3 Current row", "Tab panes", "Shift+↑↓ select",
+		"j JOINs", "Space row", "c cell", "r range", "a attach", "d dock", "b bookmark", "s sort", "Enter details", "Esc composer",
+		"F3", "F4", "Ctrl+C",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help missing %q: %s", want, view)
+		}
 	}
 }

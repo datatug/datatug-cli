@@ -140,13 +140,14 @@ func TestWorkspacePanelBookmarkGridKeysTabSortDock(t *testing.T) {
 		t.Fatal("expected the bookmark grid to open")
 	}
 
-	// "s" sorts the bookmark grid.
+	// "s" sorts the bookmark grid; press twice to also exercise the
+	// descending toggle.
 	u.workspace.updateKey(tea.KeyPressMsg{Code: 's', Text: "s"})
-	if _, desc := u.workspace.bookmarkGrid.SortState(); desc {
-		// Either direction is fine; we only need the Sort call to have run
-		// without panicking. Re-press to exercise the descending toggle too.
+	_, ascending := u.workspace.bookmarkGrid.SortState()
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if _, descending := u.workspace.bookmarkGrid.SortState(); descending == ascending {
+		t.Fatalf("expected the second 's' press to toggle sort direction, got ascending=%v descending=%v", ascending, descending)
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 's', Text: "s"})
 
 	// "d" docks the bookmark via the shared WorkspaceAction path. Docking
 	// switches the session's ActiveTab to "Docked" as a side effect, which

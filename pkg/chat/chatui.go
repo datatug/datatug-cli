@@ -55,6 +55,9 @@ type ChatUI struct {
 	lastGridRecordSetID string
 	entrySeq            int
 
+	// workspace is the SidePanel — DataTug's workspace pane (checklist #8).
+	workspace *workspacePanel
+
 	projectChoices  []ProjectChoice
 	selectedProject string
 	browserURL      string
@@ -89,6 +92,7 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		tableStyle:   grid.StyleLines,
 		pendingTurns: map[string]turnOutcome{},
 	}
+	u.workspace = newWorkspacePanel(u)
 	u.shell = chatshell.New(u,
 		chatshell.WithContext(ctx),
 		chatshell.WithTitle("DataTug"),
@@ -96,6 +100,7 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		chatshell.WithGlobalKeys(u.globalKeys),
 		chatshell.WithTopBar(u.topBar),
 		chatshell.WithStatusBar(u.statusBar),
+		chatshell.WithSidePanel(u.workspace),
 	)
 	return u
 }
@@ -359,6 +364,11 @@ func (u *ChatUI) loadSession(session ChatSession) {
 	if u.sessions != nil && u.sessions.store != nil {
 		if count, err := u.sessions.store.ResultVersionsToKeep(u.ctx); err == nil {
 			versionsToKeep = count
+		}
+	}
+	if u.workspace != nil {
+		if err := u.workspace.refresh(); err != nil {
+			u.shell.AppendAssistant(conciseError(err))
 		}
 	}
 	hiddenRecords, hiddenHTTP := hiddenRefreshVersions(session, versionsToKeep)

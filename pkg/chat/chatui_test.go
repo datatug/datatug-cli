@@ -338,3 +338,36 @@ func TestChatUISlashHelpDocumentsGridControls(t *testing.T) {
 		}
 	}
 }
+
+// TestChatUIShowsShiftArrowNavigationHint is ported from ui_test.go's
+// TestUIShowsShiftArrowNavigationHint (adapted to ChatUI's own status-bar
+// wording).
+func TestChatUIShowsShiftArrowNavigationHint(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	if view := u.shell.View().Content; !strings.Contains(view, "Shift+↑↓ navigate") {
+		t.Fatalf("status line missing Shift+Arrow navigation hint:\n%s", view)
+	}
+}
+
+// TestChatUIStatusHintsFollowFocus is ported from ui_test.go's
+// TestUIStatusHintsFollowFocus: the composer-focused status differs from
+// the grid-focused status (statusBar, chatui.go).
+func TestChatUIStatusHintsFollowFocus(t *testing.T) {
+	turn := Turn{Queries: []QueryResult{{Result: secureread.Result{
+		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
+	}}}}
+	u, _ := newTestChatUI(t, nil, turn)
+	u.shell.Update(tea.WindowSizeMsg{Width: 220, Height: 30})
+	inputView := ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(inputView, "Shift+↑↓ navigate") || !strings.Contains(inputView, "Enter send") {
+		t.Fatalf("input status is not contextual: %s", inputView)
+	}
+	drainCmd(t, u, u.Submit("Show one"))
+	if !u.shell.FocusEntry(u.lastGridEntryID) {
+		t.Fatal("expected grid focus")
+	}
+	gridView := ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(gridView, "1 Table") || !strings.Contains(gridView, "2 Charts") || !strings.Contains(gridView, "3 Current row") || !strings.Contains(gridView, "↑↓ rows") {
+		t.Fatalf("grid status is not contextual: %s", gridView)
+	}
+}

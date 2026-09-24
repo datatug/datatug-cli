@@ -301,13 +301,6 @@ func TestShiftUpPreservesNonEmptyInput(t *testing.T) {
 	}
 }
 
-func TestUIShowsShiftArrowNavigationHint(t *testing.T) {
-	u := NewUI(context.Background(), nil, "fake-model")
-	if view := u.View().Content; !strings.Contains(view, "Shift+↑↓ to navigate") {
-		t.Fatalf("status line missing Shift+Arrow navigation hint:\n%s", view)
-	}
-}
-
 func TestUIViewEnablesMouseWheelHistoryScrolling(t *testing.T) {
 	u := NewUI(context.Background(), nil, "fake-model")
 	u.width = 50
@@ -486,25 +479,6 @@ func TestComposerAccentBarTracksFocus(t *testing.T) {
 	}
 	if focused == blurred {
 		t.Fatal("composer accent bar did not change with focus")
-	}
-}
-
-func TestUIStatusHintsFollowFocus(t *testing.T) {
-	u := NewUI(context.Background(), nil, "fake-model")
-	inputView := ansi.Strip(u.View().Content)
-	if !strings.Contains(inputView, "Shift+↑↓ to navigate") || !strings.Contains(inputView, "Enter send") {
-		t.Fatalf("input status is not contextual: %s", inputView)
-	}
-	u.appendTurn(Turn{Queries: []QueryResult{{Result: secureread.Result{
-		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
-	}}}})
-	if !u.focusLatestGrid() {
-		t.Fatal("expected grid focus")
-	}
-	u.rebuildHistory(false)
-	gridView := ansi.Strip(u.View().Content)
-	if !strings.Contains(gridView, "1 Table") || !strings.Contains(gridView, "2 Charts") || !strings.Contains(gridView, "3 Current row") || !strings.Contains(gridView, "↑↓ rows") {
-		t.Fatalf("grid status is not contextual: %s", gridView)
 	}
 }
 

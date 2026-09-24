@@ -773,3 +773,157 @@ func TestEditLineOnKeyBranches(t *testing.T) {
 		t.Fatalf("no-text key = %q, want unchanged %q", got, "ab")
 	}
 }
+
+// TestChatUISelectFromGridNoActiveGridIsANoOp covers selectFromGrid's own
+// guard directly (no active grid).
+func TestChatUISelectFromGridNoActiveGridIsANoOp(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.selectFromGrid("row") // no panic, no-op
+}
+
+// TestChatUIActiveGridUntrackedRefIsANoOp covers activeGrid's "g == nil"
+// branch: a focused ref whose RecordSetID isn't (or is no longer) tracked
+// in gridsByRecordSetID.
+func TestChatUIActiveGridUntrackedRefIsANoOp(t *testing.T) {
+	u := focusedGridTestUI(t)
+	delete(u.gridsByRecordSetID, u.lastGridRecordSetID)
+	if g, record, ok := u.activeGrid(); ok || g != nil || record != nil {
+		t.Fatalf("expected activeGrid() to report nothing for an untracked ref: g=%v record=%v ok=%v", g, record, ok)
+	}
+}
+
+// TestChatUISyncRecordSetSortSkipsUnbuiltDockedGrid covers
+// syncRecordSetSort's apply closure's own "g == nil" guard: a dock whose
+// RecordSet matches but has no built gridState yet.
+func TestChatUISyncRecordSetSortSkipsUnbuiltDockedGrid(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordID := workspaceTestRecord(t, store, session.ID)
+	if _, err := sessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "dock", Reference: ContextReference{Kind: "recordset", ObjectID: recordID}}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+	dock := u.snapshot.Workspace.Docks[0]
+	delete(u.workspace.dockGrids, dock.ID) // simulate "not built yet"
+	u.syncRecordSetSort(recordID, 0, false)
+}
+
+// TestChatUIOpenCellDetailNoRawRowIsANoOp covers openCellDetail's
+// "row == nil" guard specifically (distinct from the out-of-range column
+// case TestChatUIOpenCellDetailGuards already covers): a grid whose
+// current display row has no matching raw row at all.
+func TestChatUIOpenCellDetailNoRawRowIsANoOp(t *testing.T) {
+	u := focusedGridTestUI(t)
+	g := u.gridsByRecordSetID[u.lastGridRecordSetID]
+	g.raw = nil // CurrentIndex()'s row no longer has a raw counterpart
+	if cmd := u.openCellDetail(); cmd != nil {
+		t.Fatal("expected openCellDetail to no-op when rawRow resolves to nil")
+	}
+}
+
+// TestChatUIOpenSaveQueryDialogHTTPSuccess covers openSaveQueryDialog's
+// HTTP success branch (request.Type/Text set to "HTTP"/response.URL) --
+// every other HTTP-branch test here exercises a rejection instead.
+func TestChatUIOpenSaveQueryDialogHTTPSuccess(t *testing.T) {
+	ctx := context.Background()
+	server := "https://example.com/data"
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.AppendUser(ctx, sessions.activeID, "/http get "+server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := HTTPResponse{Method: "GET", URL: server, StatusCode: 200, ContentType: "application/json", Body: []byte(`[{"a":1}]`)}
+	query := &QueryResult{Title: "Data", Result: secureread.Result{Columns: []string{"a"}, Rows: []secureread.Row{{Data: map[string]any{"a": 1}}}}}
+	if _, err := store.AppendHTTPResponse(ctx, sessions.activeID, user.ID, response, query); err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, sessions, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.savedQueryService = &savedQueryStub{}
+	if !u.shell.FocusEntry(u.lastGridEntryID) {
+		t.Fatal("grid unavailable to focus")
+	}
+	u.openSaveQueryDialog()
+	// request.Title is record.Title (the QueryResult's own Title, "Data"),
+	// not response.URL -- only request.Type/Text ("HTTP"/response.URL) come
+	// from the HTTP branch itself; check the overlay's Type line instead of
+	// a URL that was never meant to appear in the Name field.
+	if !strings.Contains(u.shell.View().Content, "Save as project query") || !strings.Contains(u.shell.View().Content, "Type: HTTP") {
+		t.Fatalf("expected the save-query overlay opened for the HTTP result:\n%s", u.shell.View().Content)
+	}
+}
+
+// TestChatUIOpenCellDetailFetchesRelatedRecordsAsync covers openCellDetail's
+// async join-preview path directly from its own vantage point (distinct
+// from chatui_test.go's TestChatUIInlineFKJoinNavigationAndApply, which
+// drives the same underlying PreviewRelated logic through the full "j"
+// JOIN-picker UI instead of Enter's cell-detail path): a configured
+// ForeignKeyJoinApplication plus a qualified column produces a loading
+// cellDetail that resolves to related records once the fetch command runs.
+func TestChatUIOpenCellDetailFetchesRelatedRecordsAsync(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.AppendUser(ctx, sessions.activeID, "Show invoices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendQuery(ctx, sessions.activeID, user.ID, "sqlite:///fixture.db", QueryResult{
+		Title: "Invoices", DTQL: "from: {name: Invoice}\ncolumns: [{field: CustomerId}]\nlimit: 5\n",
+		Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sessions.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: &joinExecutorStub{}})
+	u, err := NewSessionChatUI(ctx, sessions, "fake-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// columnMeta's "qualified" attribution (openCellDetail's own gate for
+	// starting the async preview) needs a catalog table matching the DTQL's
+	// relation, not just a configured join application -- the JOIN-picker
+	// path chatui_test.go's TestChatUIInlineFKJoinNavigationAndApply drives
+	// doesn't share this requirement, hence the distinct setup here.
+	u.catalog = ProjectCatalog{Objects: []ProjectObject{
+		{Reference: ContextReference{Kind: "table", SourceID: "chinook", ObjectID: "main.Invoice", Title: "Invoice"}, Columns: []string{"CustomerId"}},
+	}}
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	if !u.shell.FocusEntry(u.lastGridEntryID) {
+		t.Fatal("grid unavailable to focus")
+	}
+	cmd := u.openCellDetail()
+	if cmd == nil {
+		t.Fatal("expected a batched command (overlay push + async fetch) when a join application is configured")
+	}
+	if u.pendingDetail == nil || !u.pendingDetail.loading {
+		t.Fatalf("expected the pending detail to be marked loading: %+v", u.pendingDetail)
+	}
+	drainCmd(t, u, cmd)
+	if u.pendingDetail.loading {
+		t.Fatal("expected the async fetch to clear loading")
+	}
+	if len(u.pendingDetail.related) == 0 && u.pendingDetail.relatedError == nil {
+		t.Fatalf("expected either related records or a related-fetch error: %+v", u.pendingDetail)
+	}
+}

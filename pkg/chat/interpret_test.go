@@ -31,6 +31,36 @@ func TestInterpretUsesAgentToolWithoutExecutingRows(t *testing.T) {
 	}
 }
 
+// TestInterpretCorrectsInvalidDTQLOnce is the M2 regression test (r1
+// adversarial review of #289): the browser interpret path's agent.Loop
+// budget (newLoop's browserInterpretation branch: MaxSteps=3,
+// MaxToolCalls=2) must allow exactly one self-correction -- an invalid first
+// run_dtql attempt gets a tool-level error result (not an infrastructure
+// failure; see runDTQL's dtql.Deserialize branch), and the model gets one
+// more call to read it and retry with corrected DTQL. Before this fix,
+// MaxToolCalls=1 made agent.Loop abort with a fatal ai.Error{Code:"limit"}
+// after the first (failed) attempt, so a model that needed one correction
+// could never succeed at all over the browser bridge.
+func TestInterpretCorrectsInvalidDTQLOnce(t *testing.T) {
+	corrected := "from: {schema: main, name: Invoice}\nlimit: 20\n"
+	llm := &scriptedProvider{steps: []scriptedStep{
+		// Invalid DTQL: dtql.Deserialize fails, so this is a tool-level
+		// error result, not a fatal Loop error -- the turn continues.
+		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": "not: valid: dtql: at: all"})}},
+		{toolCalls: []ai.ToolCall{toolCall("2", toolRunDTQL, map[string]any{"dtql": corrected})}},
+	}}
+	result, err := interpretWithProviderDetailed(context.Background(), InterpretRequest{Question: "Last 20 invoices", Schema: "main.Invoice: InvoiceId"}, llm)
+	if err != nil {
+		t.Fatalf("interpretWithProviderDetailed() error = %v, want the corrected attempt to succeed", err)
+	}
+	if result.DTQL != strings.TrimSpace(corrected) {
+		t.Fatalf("result.DTQL = %q, want the corrected document", result.DTQL)
+	}
+	if llm.calls != 2 {
+		t.Fatalf("model calls = %d, want exactly 2 (the failed attempt + the correction)", llm.calls)
+	}
+}
+
 func TestInterpretRejectsMissingDTQLAction(t *testing.T) {
 	llm := &scriptedProvider{steps: []scriptedStep{{text: "SELECT * FROM Invoice"}}}
 	_, err := interpretWithProviderDetailed(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)

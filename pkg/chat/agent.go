@@ -705,14 +705,20 @@ func (c *AIConversation) newLoop() *agent.Loop {
 	maxSteps := maxModelCallsPerTurn
 	maxToolCalls := maxAgentToolCalls
 	if c.browserInterpretation {
-		// Interpret needs at most one tool call; AskWithContext/
-		// StreamAskWithContext break out of ranging over loop.Run as soon as
-		// that call succeeds (see hasSuccessfulPending below), which stops
-		// agent.Loop before it ever starts a second provider round trip the
-		// browser contract never uses. MaxSteps still bounds the case where
-		// the model answers with plain text instead of calling the tool.
-		maxSteps = 2
-		maxToolCalls = 1
+		// Interpret allows one correction: the model's first run_dtql
+		// attempt can be invalid DTQL (a tool-level error result, not an
+		// infrastructure failure -- see runDTQL), and it gets exactly one
+		// more model call to read that error and retry with corrected DTQL.
+		// MaxToolCalls=2 (one failed + one corrected attempt) bounds that;
+		// MaxSteps=3 covers the worst case of three separate model calls
+		// (invalid attempt, corrected attempt, then a final plain-text
+		// call if the model answers with prose instead of a second tool
+		// call). AskWithContext/StreamAskWithContext still break out of
+		// ranging over loop.Run as soon as a tool call succeeds (see
+		// hasSuccessfulPending below), so a correctly-first-try turn never
+		// spends its full budget.
+		maxSteps = 3
+		maxToolCalls = 2
 	}
 	return &agent.Loop{
 		Provider:     c.provider,

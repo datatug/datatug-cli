@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/strongo/aichat/ai/session"
 	"github.com/strongo/aichat/tui/grid"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -129,18 +130,36 @@ const (
 	gridViewHeaders    grid.View = 4
 )
 
+// gridRecordSetRefType tags a grid row's session.EntityRef so ChatUI can
+// recover "the currently-focused grid's RecordSetID" generically from
+// chatshell.Model.FocusedRef() (see ChatUI.activeGrid in chatui_inspector.go)
+// instead of tracking a focused-grid index/field itself, the way ui.go's
+// u.activeGrid/u.gridFocused do.
+const gridRecordSetRefType = "datatug.recordset"
+
+// recordSetRef builds the per-row Ref recordSetID rows carry when non-empty
+// (transcript-appended grids); dock/bookmark/lookup grids in the SidePanel
+// or a dialog pass "" since chatshell's FocusedRef() only ever reports the
+// transcript zone's focus.
+func recordSetRef(recordSetID string) *session.EntityRef {
+	if recordSetID == "" {
+		return nil
+	}
+	return &session.EntityRef{Type: gridRecordSetRefType, Keys: map[string]string{"recordSetID": recordSetID}}
+}
+
 // newGridState builds a full-chrome grid (view switcher: Table/Charts/
 // Current row, split layout) — a chat transcript entry's own recordset grid.
-func newGridState(model GridModel, title string, width int, statistics ...secureread.RecordSetStatistics) *gridState {
-	return newProjectedGridState(model, title, width, nil, true, nil, statistics...)
+func newGridState(model GridModel, recordSetID, title string, width int, statistics ...secureread.RecordSetStatistics) *gridState {
+	return newProjectedGridState(model, recordSetID, title, width, nil, true, nil, statistics...)
 }
 
 // newMinimalGridState builds a grid with NO view switcher (no Charts/
 // Current-row views, no split layout) — main's bookmark, dock and
 // parameter-lookup grids never had one; they already show a narrow,
 // purpose-built row set where "2"/"3" would have nothing to switch to (m9).
-func newMinimalGridState(model GridModel, title string, width int) *gridState {
-	return newProjectedGridState(model, title, width, nil, false, []grid.Option{grid.WithoutViewSwitcher()})
+func newMinimalGridState(model GridModel, recordSetID, title string, width int) *gridState {
+	return newProjectedGridState(model, recordSetID, title, width, nil, false, []grid.Option{grid.WithoutViewSwitcher()})
 }
 
 // newProjectedGridState is newGridState for a dock's projected/filtered
@@ -154,8 +173,9 @@ func newMinimalGridState(model GridModel, title string, width int) *gridState {
 // (rebuildDockGrids, for a view-backed dock) pass grid.WithInitialSort so a
 // grid built from already-externally-sorted rows still knows which
 // column/direction that is.
-func newProjectedGridState(model GridModel, title string, width int, sourceRows []int, fullChrome bool, extraOpts []grid.Option, statistics ...secureread.RecordSetStatistics) *gridState {
+func newProjectedGridState(model GridModel, recordSetID, title string, width int, sourceRows []int, fullChrome bool, extraOpts []grid.Option, statistics ...secureread.RecordSetStatistics) *gridState {
 	g := &gridState{raw: model.RawRows, baseTitle: normalizeGridTitle(title)}
+	ref := recordSetRef(recordSetID)
 	if len(statistics) > 0 {
 		g.charts = InferChartCandidates(statistics[0])
 	}
@@ -181,7 +201,7 @@ func newProjectedGridState(model GridModel, title string, width int, sourceRows 
 		if i < len(sourceRows) {
 			key = sourceRows[i]
 		}
-		rows[i] = grid.Row{Key: strconv.Itoa(key), Values: values}
+		rows[i] = grid.Row{Key: strconv.Itoa(key), Values: values, Ref: ref}
 	}
 	opts := []grid.Option{
 		grid.WithTitle(g.baseTitle),
@@ -1218,7 +1238,7 @@ func (u *UI) loadSession(session ChatSession) {
 			if hiddenRecords[message.RecordSetID] || hiddenHTTP[record.HTTPResponseID] {
 				continue
 			}
-			entry := historyEntry{grid: newGridState(NewGridModel(record.Result), record.Title, u.chatPaneWidth(), record.Result.Statistics), recordSetID: record.ID}
+			entry := historyEntry{grid: newGridState(NewGridModel(record.Result), record.ID, record.Title, u.chatPaneWidth(), record.Result.Statistics), recordSetID: record.ID}
 			if previous, ok := session.RecordSets[record.RefreshParentID]; ok {
 				badge := "unchanged"
 				if !reflect.DeepEqual(record.Result.Columns, previous.Result.Columns) || !reflect.DeepEqual(record.Result.Rows, previous.Result.Rows) {
@@ -1826,7 +1846,7 @@ func (u *UI) appendTurn(turn Turn) {
 			continue
 		}
 		resultModel := NewGridModel(query.Result)
-		styled := newGridState(resultModel, query.Title, u.chatPaneWidth(), query.Result.Statistics)
+		styled := newGridState(resultModel, query.RecordSetID, query.Title, u.chatPaneWidth(), query.Result.Statistics)
 		styled.SetStyle(u.tableStyle)
 		styled.SetKeyHandler(u.handleMainGridKey)
 		u.entries = append(u.entries, historyEntry{grid: styled, recordSetID: query.RecordSetID})

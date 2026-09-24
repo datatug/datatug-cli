@@ -77,6 +77,23 @@ type ChatUI struct {
 	// blocks below the now-complete streamed narrative text. See askOpenFunc.
 	pendingTurnsMu sync.Mutex
 	pendingTurns   map[string]turnOutcome
+
+	// detailSequence guards a stale async relatedPreviewMessage from a
+	// closed/superseded cell detail Overlay (openCellDetail,
+	// chatui_inspector.go) — the ChatUI analogue of ui.go's u.detailSequence.
+	detailSequence int
+	// pendingDetail is the cell detail Overlay's *cellDetail — see
+	// openCellDetail's comment on why OnMsg (not the Overlay's own Update)
+	// applies the async relatedPreviewMessage.
+	pendingDetail *cellDetail
+
+	// gridsByRecordSetID indexes every transcript grid currently visible by
+	// its RecordSetID — the registry activeGrid() (chatui_inspector.go)
+	// consults to turn chatshell.Model.FocusedRef() (a gridRecordSetRefType
+	// session.EntityRef set on each row, see ui.go's recordSetRef) back into
+	// the actual *gridState instance, the ChatUI analogue of ui.go's
+	// u.activeGrid index into u.entries.
+	gridsByRecordSetID map[string]*gridState
 }
 
 type turnOutcome struct {
@@ -92,11 +109,12 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		ctx = context.Background()
 	}
 	u := &ChatUI{
-		ctx:          ctx,
-		conversation: conversation,
-		modelName:    modelName,
-		tableStyle:   grid.StyleLines,
-		pendingTurns: map[string]turnOutcome{},
+		ctx:                ctx,
+		conversation:       conversation,
+		modelName:          modelName,
+		tableStyle:         grid.StyleLines,
+		pendingTurns:       map[string]turnOutcome{},
+		gridsByRecordSetID: map[string]*gridState{},
 	}
 	u.workspace = newWorkspacePanel(u)
 	u.shell = chatshell.New(u,
@@ -279,11 +297,15 @@ func (u *ChatUI) appendTurnResults(turn Turn) {
 // selector (see join_block.go).
 func (u *ChatUI) appendGridResult(query QueryResult) {
 	resultModel := NewGridModel(query.Result)
-	styled := newGridState(resultModel, query.Title, u.chatWidth(), query.Result.Statistics)
+	styled := newGridState(resultModel, query.RecordSetID, query.Title, u.chatWidth(), query.Result.Statistics)
 	styled.SetStyle(u.tableStyle)
 	id := u.nextEntryID("grid")
 	u.lastGridEntryID = id
 	u.lastGridRecordSetID = query.RecordSetID
+	if query.RecordSetID != "" {
+		u.gridsByRecordSetID[query.RecordSetID] = styled
+	}
+	styled.SetKeyHandler(u.handleGridKey)
 	block := u.blockForGrid(styled.Model, query.RecordSetID)
 	u.shell.AppendBlock(block)
 	_ = id // entry ID plumbing for ReplaceBlock/Ctrl+G lands with SidePanel/GlobalKeys wiring
@@ -365,8 +387,18 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 	case savedQueryDoneMsg:
 		u.handleSavedQueryDone(msg)
 		return nil
+	case saveQueryDoneMsg:
+		u.handleSaveQueryDone(msg)
+		return nil
 	case httpDoneMsg:
 		u.handleHTTPDone(msg)
+		return nil
+	case relatedPreviewMessage:
+		if u.pendingDetail != nil && u.pendingDetail.sequence == msg.sequence {
+			u.pendingDetail.loading = false
+			u.pendingDetail.related = msg.related
+			u.pendingDetail.relatedError = msg.err
+		}
 		return nil
 	}
 	return nil
@@ -381,6 +413,7 @@ func (u *ChatUI) loadSession(session ChatSession) {
 	u.sessionID = session.ID
 	u.snapshot = session
 	u.shell.ClearTranscript()
+	u.gridsByRecordSetID = map[string]*gridState{}
 	if u.sessions != nil {
 		if name, err := u.sessions.TableStyle(u.ctx); err == nil {
 			u.tableStyle = grid.ParseStyle(name)
@@ -404,7 +437,7 @@ func (u *ChatUI) loadSession(session ChatSession) {
 			if hiddenRecords[message.RecordSetID] || hiddenHTTP[record.HTTPResponseID] {
 				continue
 			}
-			styled := newGridState(NewGridModel(record.Result), record.Title, u.chatWidth(), record.Result.Statistics)
+			styled := newGridState(NewGridModel(record.Result), record.ID, record.Title, u.chatWidth(), record.Result.Statistics)
 			if previous, ok := session.RecordSets[record.RefreshParentID]; ok {
 				styled.setVersionBadge(refreshBadge(record.Result, previous.Result))
 			}
@@ -418,6 +451,8 @@ func (u *ChatUI) loadSession(session ChatSession) {
 			}
 			styled.SetStyle(u.tableStyle)
 			u.lastGridEntryID, u.lastGridRecordSetID = u.nextEntryID("grid"), record.ID
+			u.gridsByRecordSetID[record.ID] = styled
+			styled.SetKeyHandler(u.handleGridKey)
 			u.shell.AppendBlock(u.blockForGrid(styled.Model, record.ID))
 			if note := formatLimitations(record.Result.Limitations); note != "" {
 				u.shell.AppendAssistant(note)

@@ -570,7 +570,7 @@ func TestGridTitleFooterAndScrollbarAreStructuredPresentation(t *testing.T) {
 }
 
 func TestResultTitleAppearsOnceInCardBorder(t *testing.T) {
-	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "Customers", 80)
+	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "", "Customers", 80)
 	view := ansi.Strip(g.View(80, g.Focused()))
 	if strings.Count(strings.Split(view, "\n")[0], "Customers") != 1 || strings.Count(view, "Customers") != 1 {
 		t.Fatalf("title repeated in result card:\n%s", view)
@@ -583,7 +583,7 @@ func TestResultTitleAppearsOnceInCardBorder(t *testing.T) {
 }
 
 func TestFocusedRecordSetTitleAndFooterAreReadable(t *testing.T) {
-	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "Invoices", 80)
+	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "", "Invoices", 80)
 	g.SetFocused(true)
 	lines := strings.Split(g.View(80, g.Focused()), "\n")
 	if !strings.Contains(lines[0], activeTitleStyle.Render("Invoices")) {
@@ -600,7 +600,7 @@ func TestGridScrollbarTracksCursorBeforePageScrolls(t *testing.T) {
 	for i := range rows {
 		rows[i] = secureread.Row{Data: map[string]any{"ID": i}}
 	}
-	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: rows}), "Rows", 60)
+	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: rows}), "", "Rows", 60)
 	g.SetFocused(true)
 	start, _ := g.VisibleIndices()
 	before := g.View(60, true)
@@ -722,7 +722,7 @@ func TestAltSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
 }
 
 func TestGridWithoutScrollingUsesPlainRightBorder(t *testing.T) {
-	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "Rows", 60)
+	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "", "Rows", 60)
 	view := ansi.Strip(g.view())
 	if strings.ContainsAny(view, "▏▐") {
 		t.Fatalf("non-scrolling grid has a scrollbar placeholder: %q", view)
@@ -743,7 +743,7 @@ func TestMacOptionSCyclesTableStyle(t *testing.T) {
 }
 
 func TestTableStylePresetsChangeHeaderAndDividerColors(t *testing.T) {
-	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1, "Name": "Alex"}}}}), "Rows", 60)
+	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1, "Name": "Alex"}}}}), "", "Rows", 60)
 	if g.Style().Name != grid.StyleLines.Name {
 		t.Fatal("new table did not default to Lines")
 	}
@@ -920,7 +920,7 @@ func TestGridNarrowMarkerOnlyViewReportsNoVisibleColumns(t *testing.T) {
 		Columns: []GridColumn{{Name: "First"}, {Name: "Second"}},
 		Rows:    [][]string{{"one", "two"}},
 	}
-	g := newGridState(model, "Narrow", 2)
+	g := newGridState(model, "", "Narrow", 2)
 	g.SelectColumn(1)
 	if first, last := g.VisibleColumnRange(); first != 0 || last != 0 {
 		t.Fatalf("marker-only visible range = %d-%d, want 0-0", first, last)
@@ -938,7 +938,7 @@ func TestGridNarrowViewCanRevealSelectedFinalColumn(t *testing.T) {
 	// The 8-cell table initially has room only for the right overflow marker:
 	// a non-final six-cell column also needs its divider. At offset 1, however,
 	// the left marker plus the divider-free final column fit exactly.
-	g := newGridState(model, "Narrow", 10)
+	g := newGridState(model, "", "Narrow", 10)
 	g.SelectColumn(1)
 	if g.ColumnOffset() != 1 {
 		t.Fatalf("horizontal offset = %d, want final-column offset 1", g.ColumnOffset())
@@ -1156,7 +1156,7 @@ func TestEscapeClearsSecondaryPaneHighlight(t *testing.T) {
 }
 
 func TestRecordsetHeaderRetainsViewControlsForLongTitles(t *testing.T) {
-	g := newGridState(GridModel{}, strings.Repeat("very long generated title ", 8), 70)
+	g := newGridState(GridModel{}, "", strings.Repeat("very long generated title ", 8), 70)
 	header := ansi.Strip(g.HeaderLine(70))
 	for _, want := range []string{"1 Table", "2 Charts", "3 Current row"} {
 		if !strings.Contains(header, want) {
@@ -1169,7 +1169,7 @@ func TestRecordsetHeaderRetainsViewControlsForLongTitles(t *testing.T) {
 }
 
 func TestRecordsetHeaderRetainsAllControlsAtTwentyTwoCells(t *testing.T) {
-	g := newGridState(GridModel{}, strings.Repeat("generated title ", 8), 22)
+	g := newGridState(GridModel{}, "", strings.Repeat("generated title ", 8), 22)
 	header := ansi.Strip(g.HeaderLine(22))
 	for _, want := range []string{"1", "2", "3"} {
 		if !strings.Contains(header, want) {
@@ -1426,7 +1426,7 @@ func TestCurrentRowShowsAbsentMarkerNotBlankForSparseCells(t *testing.T) {
 		Columns: []GridColumn{{Name: "First"}, {Name: "Second"}},
 		Rows:    [][]string{{"one", ""}}, // Second is sparse/absent for this row
 	}
-	g := newGridState(model, "Sparse", 60)
+	g := newGridState(model, "", "Sparse", 60)
 	g.SetView(gridViewCurrentRow)
 	content := ansi.Strip(g.ActiveViewContent(60, 10))
 	if !strings.Contains(content, "—") {

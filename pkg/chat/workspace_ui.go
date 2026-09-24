@@ -397,7 +397,7 @@ func (u *UI) ensureBookmarkGrid() *gridState {
 		return u.bookmarkGrid
 	}
 	result, _ := bookmarkResult(bookmark)
-	u.bookmarkGrid = newMinimalGridState(NewGridModel(result), bookmark.Title, u.workspacePaneWidth()) // no view switcher (m9)
+	u.bookmarkGrid = newMinimalGridState(NewGridModel(result), "", bookmark.Title, u.workspacePaneWidth()) // no view switcher (m9)
 	u.bookmarkGrid.SetStyle(u.tableStyle)
 	u.bookmarkGrid.SetKeyHandler(u.handleBookmarkGridKey)
 	u.bookmarkGridID = bookmark.ID
@@ -920,7 +920,7 @@ func (u *UI) rebuildDockGrids() {
 			view := u.snapshot.Workspace.Views[data.ViewID]
 			opts = append(opts, grid.WithInitialSort(columnIndexOf(data.Result.Columns, view.OrderBy), view.Descending))
 		}
-		next[dock.ID] = newProjectedGridState(model, dock.Title, u.workspacePaneWidth(), data.SourceRows, false, opts)
+		next[dock.ID] = newProjectedGridState(model, data.RecordSetID, dock.Title, u.workspacePaneWidth(), data.SourceRows, false, opts)
 		next[dock.ID].SetStyle(u.tableStyle)
 		next[dock.ID].SetKeyHandler(u.handleDockGridKey)
 	}

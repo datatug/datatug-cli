@@ -171,7 +171,7 @@ func (u *UI) refreshParameterLookupGrid() {
 	if p.multi {
 		title += fmt.Sprintf(" (%d selected)", len(p.selected))
 	}
-	p.grid = newMinimalGridState(model, title, max(32, min(u.width-10, 90))) // no view switcher (m9)
+	p.grid = newMinimalGridState(model, "", title, max(32, min(u.width-10, 90))) // no view switcher (m9)
 	p.grid.SetFocused(true)
 }
 

@@ -13,7 +13,7 @@ import (
 func TestExportDialogWritesCurrentRecordSet(t *testing.T) {
 	u := NewUI(context.Background(), nil, "test")
 	u.snapshot.RecordSets = map[string]RecordSet{"record-1": exportFixture("Invoices")}
-	u.entries = []historyEntry{{recordSetID: "record-1", grid: newGridState(GridModel{}, "Invoices", 80)}}
+	u.entries = []historyEntry{{recordSetID: "record-1", grid: newGridState(GridModel{}, "", "Invoices", 80)}}
 	u.activeGrid = 0
 	u.openExportDialog()
 	if u.exportDialog == nil || u.exportDialog.name.Value() != "Invoices" {
@@ -82,7 +82,7 @@ func TestExportDialogDirectoryPicker(t *testing.T) {
 func TestExportDialogDefaultNameExcludesVersionBadge(t *testing.T) {
 	u := NewUI(context.Background(), nil, "test")
 	u.snapshot.RecordSets = map[string]RecordSet{"record-1": exportFixture("Invoices")}
-	g := newGridState(GridModel{}, "Invoices", 80)
+	g := newGridState(GridModel{}, "", "Invoices", 80)
 	g.setVersionBadge("changed")
 	u.entries = []historyEntry{{recordSetID: "record-1", grid: g}}
 	u.activeGrid = 0

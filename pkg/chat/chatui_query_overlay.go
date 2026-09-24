@@ -370,7 +370,7 @@ func (p *parameterLookupOverlay) refreshGrid() {
 	if p.multi {
 		title += fmt.Sprintf(" (%d selected)", len(p.selected))
 	}
-	p.grid = newMinimalGridState(model, title, 76)
+	p.grid = newMinimalGridState(model, "", title, 76)
 	p.grid.SetFocused(true)
 }
 

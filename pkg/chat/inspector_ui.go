@@ -106,6 +106,14 @@ type inspectorColumnMeta struct {
 }
 
 func (u *UI) columnMeta(record *RecordSet, name string) inspectorColumnMeta {
+	return columnMetaFor(u.catalog, record, name)
+}
+
+// columnMetaFor is ui.go's original (*UI).columnMeta body, extracted so
+// ChatUI (chatui_inspector.go) shares the exact same catalog-attribution
+// logic without a second copy — both structs carry a ProjectCatalog under
+// the same field name.
+func columnMetaFor(catalog ProjectCatalog, record *RecordSet, name string) inspectorColumnMeta {
 	meta := inspectorColumnMeta{}
 	var sourceRelations map[string]bool
 	shortName := name
@@ -181,7 +189,7 @@ func (u *UI) columnMeta(record *RecordSet, name string) inspectorColumnMeta {
 			return meta
 		}
 	}
-	for _, object := range u.catalog.Objects {
+	for _, object := range catalog.Objects {
 		if object.Reference.Kind != "table" && object.Reference.Kind != "project_view" {
 			continue
 		}

@@ -157,16 +157,23 @@ func (c *SessionChat) applyJoinCandidate(ctx context.Context, recordSetID string
 	if originMessageID == "" {
 		action, appendErr := c.store.AppendUser(ctx, c.activeID, "JOIN "+query.Title)
 		if appendErr != nil {
+			// Not covered: the Load just above already succeeded on the same
+			// store/connection, so reproducing this needs the store to break
+			// between the two calls within one synchronous request -- not
+			// reproducible without a store seam this package doesn't have
+			// (see the same note on bridge.go's AskActive branch).
 			return RecordSet{}, appendErr
 		}
 		originMessageID = action.ID
 	}
 	stored, err := c.store.AppendQuery(ctx, c.activeID, originMessageID, query.Source, query)
 	if err != nil {
+		// Not covered: same reason as the AppendUser error above.
 		return RecordSet{}, err
 	}
 	snapshot, err := c.store.Load(ctx, c.activeID)
 	if err != nil {
+		// Not covered: same reason as the AppendUser error above.
 		return RecordSet{}, err
 	}
 	return snapshot.RecordSets[stored.RecordSetID], nil
@@ -226,6 +233,9 @@ func (c *SessionChat) applyWorkspaceAction(ctx context.Context, action Workspace
 		return ContextReference{}, err
 	}
 	if err := c.store.SaveWorkspace(ctx, c.activeID, next); err != nil {
+		// Not covered: the Load at the top of this function already
+		// succeeded on the same store; see applyJoinCandidate's identical
+		// note above.
 		return ContextReference{}, err
 	}
 	return ref, nil
@@ -349,9 +359,12 @@ func (c *SessionChat) Switch(ctx context.Context, prefix string) (ChatSession, e
 	}
 	snapshot, err := c.store.Load(ctx, matches[0].ID)
 	if err != nil {
+		// Not covered: the List call above already succeeded on the same
+		// store; see applyJoinCandidate's identical note.
 		return ChatSession{}, err
 	}
 	if err := c.store.Activate(ctx, snapshot.ID); err != nil {
+		// Not covered: same reason -- Load just above already succeeded.
 		return ChatSession{}, err
 	}
 	snapshot, err = c.store.Load(ctx, snapshot.ID)
@@ -395,12 +408,17 @@ func (c *SessionChat) Delete(ctx context.Context) (ChatSession, error) {
 	}
 	list, err := c.store.List(ctx)
 	if err != nil {
+		// Not covered: Delete just above already succeeded on the same
+		// store; see applyJoinCandidate's identical note.
 		return ChatSession{}, err
 	}
 	var next ChatSession
 	if len(list) > 0 {
 		next, err = c.store.Load(ctx, list[0].ID)
 	} else {
+		// Not covered: same reason (list is empty, but List() itself
+		// already succeeded, and Create failing needs the store to break
+		// between the two calls).
 		next, err = c.store.Create(ctx, "New chat")
 	}
 	if err == nil {
@@ -471,10 +489,14 @@ func (c *SessionChat) prepareTurn(ctx context.Context, expectedSessionID, prompt
 	}
 	user, err := c.store.AppendUser(ctx, c.activeID, prompt)
 	if err != nil {
+		// Not covered: the Load just above already succeeded on the same
+		// store; see applyJoinCandidate's identical note.
 		return preparedTurn{}, cleanup, err
 	}
 	if len(prior.Messages) == 0 && prior.Title == "New chat" {
 		if err := c.store.Rename(ctx, c.activeID, prompt); err != nil {
+			// Not covered: same reason -- AppendUser just above already
+			// succeeded.
 			return preparedTurn{}, cleanup, err
 		}
 	}

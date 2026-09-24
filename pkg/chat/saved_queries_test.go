@@ -13,9 +13,10 @@ type savedQueryStub struct {
 	vars    map[string]string
 	runErr  error
 	saveErr error
+	listErr error
 }
 
-func (s *savedQueryStub) List(context.Context) ([]SavedQuery, error) { return s.queries, nil }
+func (s *savedQueryStub) List(context.Context) ([]SavedQuery, error) { return s.queries, s.listErr }
 func (s *savedQueryStub) Run(_ context.Context, id string) (QueryResult, error) {
 	s.ranID = id
 	if s.runErr != nil {

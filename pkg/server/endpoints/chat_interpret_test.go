@@ -32,6 +32,49 @@ func TestChatInterpretRejectsUnsafeRequests(t *testing.T) {
 	}
 }
 
+func TestChatInterpretRejectsWrongContentTypeAndOversizedBody(t *testing.T) {
+	const body = `{"question":"Invoices","schema":"main.Invoice: InvoiceId","provider":{"protocol":"openai-chat","baseUrl":"https://api.deepseek.com","model":"deepseek-flash","apiKey":"secret-test-key"}}`
+	t.Run("wrong content type", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/datatug/chat/interpret", strings.NewReader(body))
+		r.Header.Set("Content-Type", "text/plain")
+		w := httptest.NewRecorder()
+		chatInterpretHandler(w, r)
+		if w.Code != http.StatusUnsupportedMediaType {
+			t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+		}
+	})
+	t.Run("oversized body", func(t *testing.T) {
+		oversized := strings.Repeat("a", maxChatInterpretBody+1)
+		r := httptest.NewRequest(http.MethodPost, "/datatug/chat/interpret", strings.NewReader(oversized))
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		chatInterpretHandler(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+		}
+	})
+}
+
+// TestChatInterpretReturnsBadGatewayOnProviderFailure covers
+// chatInterpretHandler's chat.InterpretDetailed error branch: a valid,
+// safe request whose configured provider itself fails (here, a 500 from
+// the upstream HTTP endpoint) surfaces as 502 Bad Gateway, not a 5xx from
+// this handler's own logic.
+func TestChatInterpretReturnsBadGatewayOnProviderFailure(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream unavailable", http.StatusInternalServerError)
+	}))
+	defer provider.Close()
+	body := fmt.Sprintf(`{"question":"Show last 100 orders","schema":"main.Invoice: InvoiceId","provider":{"protocol":"openai-chat","baseUrl":%q,"model":"deepseek-flash","apiKey":"test-key"}}`, provider.URL)
+	r := httptest.NewRequest(http.MethodPost, "/datatug/chat/interpret", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	chatInterpretHandler(w, r)
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
 // sseWrite writes one Server-Sent-Events data frame, matching the framing
 // openaicompat.Provider.Stream always requires (it never falls back to a
 // plain JSON response body).

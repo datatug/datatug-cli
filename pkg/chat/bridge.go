@@ -41,8 +41,32 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 	}
 	token := hex.EncodeToString(secret)
 	bridge := &BrowserBridge{listener: listener, connections: make(map[*websocket.Conn]struct{})}
-	bridge.URL = fmt.Sprintf("https://datatug.app/chat#h=127.0.0.1:%d&t=%s", listener.Addr().(*net.TCPAddr).Port, token)
+	port := listener.Addr().(*net.TCPAddr).Port
+	path := "/chat"
+	if projectID := sessions.catalog.ID; projectID != "" {
+		path = fmt.Sprintf("/store/http-127.0.0.1:%d/project/%s/chat", port, url.PathEscape(projectID))
+	}
+	bridge.URL = fmt.Sprintf("https://datatug.app%s#h=127.0.0.1:%d&t=%s", path, port, token)
 	mux := http.NewServeMux()
+	mux.HandleFunc("/datatug/projects/project_summary", func(w http.ResponseWriter, r *http.Request) {
+		if !bridge.authorize(w, r, token) {
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Query().Get("id") != sessions.catalog.ID || sessions.catalog.ID == "" {
+			http.NotFound(w, r)
+			return
+		}
+		title := sessions.catalog.Title
+		if title == "" {
+			title = sessions.catalog.ID
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": sessions.catalog.ID, "title": title, "access": "private"})
+	})
 	mux.HandleFunc("/v1/chat/session", func(w http.ResponseWriter, r *http.Request) {
 		if !bridge.authorize(w, r, token) {
 			return

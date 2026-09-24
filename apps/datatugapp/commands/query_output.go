@@ -242,6 +242,24 @@ func writeCSVRows(w io.Writer, columns []string, rows []queryRow) error {
 	return writer.Error()
 }
 
+func writeCSVHeader(w io.Writer, columns []string) error {
+	writer := csv.NewWriter(w)
+	if err := writer.Write(append([]string{keyColumn}, columns...)); err != nil {
+		return err
+	}
+	writer.Flush()
+	return writer.Error()
+}
+
+func writeCSVDataRow(w io.Writer, columns []string, row queryRow) error {
+	writer := csv.NewWriter(w)
+	if err := writer.Write(cellValues(row, columns)); err != nil {
+		return err
+	}
+	writer.Flush()
+	return writer.Error()
+}
+
 func writeGridRows(w io.Writer, columns []string, rows []queryRow) error {
 	header := append([]string{keyColumn}, columns...)
 	widths := make([]int, len(header))

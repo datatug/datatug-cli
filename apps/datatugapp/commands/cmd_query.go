@@ -75,6 +75,13 @@ exactly as a secured application would for the principal named by --as/--role/--
 Result rows go to stdout in the chosen format; the limitations the policies
 applied (row conditions, field allow-lists, the deciding rule) go to stderr.
 
+For saved federated DTQL, --format jsonl and csv stream one flat equality
+join without top-level ordering or aggregation. The joined dimension must
+declare a stable scan order and limit of at most 10000 rows; it is indexed
+in memory while fact rows and HTTP lookups stream in bounded batches.
+CSV additionally requires explicit result columns. Other federated query
+shapes can use json, yaml or grid, which collect the result before output.
+
 Examples:
   datatug query run --db ingitdb://./crm --from customers --as alice
   datatug query run --db sqlite:///tmp/crm.db -f report.dtql.yaml --as alice --role support --format csv

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dtql"
@@ -15,18 +16,67 @@ import (
 // leaf reads. The caller supplies source URLs from its project environment.
 // No joined query is delegated to a database or to an OVDB server.
 func (e *Executor) RunFederatedDTQL(ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (Result, error) {
+	stream, err := e.StreamFederatedDTQL(ctx, document, sourceURLs, variables)
+	if err != nil {
+		return Result{}, err
+	}
+	defer func() { _ = stream.Close() }()
+	rows, statistics, err := collectRows(stream.Reader)
+	if err != nil {
+		return Result{}, err
+	}
+	columns := columnsFor(stream.Query, rows)
+	if len(columns) == 0 && len(rows) > 0 {
+		for name := range rows[0].Data {
+			columns = append(columns, name)
+		}
+		sort.Strings(columns)
+	}
+	return Result{Columns: columns, Rows: rows, Statistics: statistics.finalize(columns), Limitations: *stream.limitations}, nil
+}
+
+// FederatedStream owns every opened source until Close. Reader is already
+// policy filtered; callers must close the stream even after a read error.
+type FederatedStream struct {
+	Reader      dal.RecordsReader
+	Query       dal.StructuredQuery
+	limitations *[]Limitation
+	closes      []func()
+}
+
+type onceClosingReader struct {
+	dal.RecordsReader
+	once sync.Once
+	err  error
+}
+
+func (r *onceClosingReader) Close() error {
+	r.once.Do(func() { r.err = r.RecordsReader.Close() })
+	return r.err
+}
+
+func (s *FederatedStream) Close() error {
+	err := s.Reader.Close()
+	for i := len(s.closes) - 1; i >= 0; i-- {
+		s.closes[i]()
+	}
+	s.closes = nil
+	return err
+}
+
+func (s *FederatedStream) Limitations() []Limitation {
+	return append([]Limitation(nil), (*s.limitations)...)
+}
+
+// StreamFederatedDTQL exposes the secured DALgo reader without collecting rows.
+func (e *Executor) StreamFederatedDTQL(ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (*FederatedStream, error) {
 	query, err := dtql.Deserialize(document)
 	if err != nil {
-		return Result{}, fmt.Errorf("parse federated DTQL: %w", err)
+		return nil, fmt.Errorf("parse federated DTQL: %w", err)
 	}
 	opened := map[string]dal.DB{}
 	var limitations []Limitation
 	var closes []func()
-	defer func() {
-		for i := len(closes) - 1; i >= 0; i-- {
-			closes[i]()
-		}
-	}()
 	observer, _ := ctx.Value(federatedProgressKey{}).(func(dal.FederatedProgress))
 	reader, err := dal.ExecuteFederatedQueryWithOptions(ctx, query, func(ctx context.Context, database string) (dal.QueryExecutor, error) {
 		if db, ok := opened[database]; ok {
@@ -45,22 +95,12 @@ func (e *Executor) RunFederatedDTQL(ctx context.Context, document []byte, source
 		return securedLeaf{db: db, session: e.session, variables: variables, limitations: &limitations}, nil
 	}, dal.FederatedQueryOptions{OnProgress: observer})
 	if err != nil {
-		return Result{}, err
-	}
-	rows, statistics, err := collectRows(reader)
-	if err != nil {
-		return Result{}, err
-	}
-	columns := columnsFor(query, rows)
-	// Map iteration never determines column or row order; expose the same
-	// deterministic fallback as other saved query results.
-	if len(columns) == 0 && len(rows) > 0 {
-		for name := range rows[0].Data {
-			columns = append(columns, name)
+		for i := len(closes) - 1; i >= 0; i-- {
+			closes[i]()
 		}
-		sort.Strings(columns)
+		return nil, err
 	}
-	return Result{Columns: columns, Rows: rows, Statistics: statistics.finalize(columns), Limitations: limitations}, nil
+	return &FederatedStream{Reader: &onceClosingReader{RecordsReader: reader}, Query: query, limitations: &limitations, closes: closes}, nil
 }
 
 type securedLeaf struct {

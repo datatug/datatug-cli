@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/tui/chatshell"
+	"github.com/strongo/aichat/tui/focus"
 	"github.com/strongo/aichat/tui/grid"
 	"github.com/strongo/aichat/tui/transcript"
 
@@ -92,7 +93,30 @@ type ChatUI struct {
 	// the actual *gridState instance, the ChatUI analogue of ui.go's
 	// u.activeGrid index into u.entries.
 	gridsByRecordSetID map[string]*gridState
+
+	// joinBlocksByRecordSetID indexes every transcript *JoinBlock (a grid
+	// with FK-join candidates attached, see blockForGrid) by its
+	// RecordSetID -- statusBar's ZoneTranscript branch (r1b item 5a) uses
+	// it to read JoinBlock.JoinFocused() for the focused grid, since
+	// chatshell exposes only the focused entry's session.EntityRef/ID, not
+	// the Block instance itself. A RecordSetID whose grid has no join
+	// candidates (blockForGrid returned the bare grid.Model) has no entry
+	// here.
+	joinBlocksByRecordSetID map[string]*JoinBlock
+
+	// transcriptEntryKinds indexes every non-grid transcript entry ChatUI
+	// itself appended under an explicit ID (a user message card or an HTTP
+	// document block) by "message"/"http" -- statusBar's focus.ZoneTranscript
+	// branch (r1b item 5a) consults it, via chatshell.Model.FocusedEntryID,
+	// to reproduce ui.go's messageFocused hint set (plain vs HTTP-document)
+	// for a card that isn't a grid. Reset by ClearTranscript/loadSession.
+	transcriptEntryKinds map[string]string
 }
+
+const (
+	transcriptEntryKindMessage = "message"
+	transcriptEntryKindHTTP    = "http"
+)
 
 type turnOutcome struct {
 	turn Turn
@@ -107,12 +131,14 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		ctx = context.Background()
 	}
 	u := &ChatUI{
-		ctx:                ctx,
-		conversation:       conversation,
-		modelName:          modelName,
-		tableStyle:         grid.StyleLines,
-		pendingTurns:       map[string]turnOutcome{},
-		gridsByRecordSetID: map[string]*gridState{},
+		ctx:                     ctx,
+		conversation:            conversation,
+		modelName:               modelName,
+		tableStyle:              grid.StyleLines,
+		pendingTurns:            map[string]turnOutcome{},
+		gridsByRecordSetID:      map[string]*gridState{},
+		joinBlocksByRecordSetID: map[string]*JoinBlock{},
+		transcriptEntryKinds:    map[string]string{},
 	}
 	u.workspace = newWorkspacePanel(u)
 	u.shell = chatshell.New(u,
@@ -218,6 +244,16 @@ func (u *ChatUI) appendBlockWithID(prefix string, block transcript.Block) string
 			return id
 		}
 	}
+}
+
+// appendKindedBlock is appendBlockWithID plus recording the entry's kind in
+// transcriptEntryKinds, for a user message card or HTTP document block --
+// the two non-grid transcript entries statusBar's ZoneTranscript branch
+// needs to tell apart via FocusedEntryID.
+func (u *ChatUI) appendKindedBlock(prefix, kind string, block transcript.Block) string {
+	id := u.appendBlockWithID(prefix, block)
+	u.transcriptEntryKinds[id] = kind
+	return id
 }
 
 // askCmd starts a streamed turn through SessionChat.StreamAsk — the
@@ -405,12 +441,14 @@ func (u *ChatUI) blockForGrid(gridModel *grid.Model, recordSetID string) transcr
 		}
 		return left.ID < right.ID
 	})
-	return &JoinBlock{
+	block := &JoinBlock{
 		Grid:        gridModel,
 		RecordSetID: recordSetID,
 		Candidates:  candidates,
 		Apply:       u.applyJoinCmd,
 	}
+	u.joinBlocksByRecordSetID[recordSetID] = block
+	return block
 }
 
 func (u *ChatUI) applyJoinCmd(recordSetID string, candidateID JoinCandidateID) tea.Cmd {
@@ -506,6 +544,8 @@ func (u *ChatUI) loadSession(session ChatSession) {
 	u.snapshot = session
 	u.shell.ClearTranscript()
 	u.gridsByRecordSetID = map[string]*gridState{}
+	u.joinBlocksByRecordSetID = map[string]*JoinBlock{}
+	u.transcriptEntryKinds = map[string]string{}
 	if u.sessions != nil {
 		if name, err := u.sessions.TableStyle(u.ctx); err == nil {
 			u.tableStyle = grid.ParseStyle(name)
@@ -563,7 +603,7 @@ func (u *ChatUI) loadSession(session ChatSession) {
 		}
 		switch {
 		case message.Role == "You":
-			u.shell.AppendBlock(newUserMessageBlock(text))
+			u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(text))
 		case response != nil:
 			// httpDocumentBlock (checklist item #36/#37) ports ui.go's
 			// httpDocumentView as a real transcript.Block so a saved HTTP
@@ -577,7 +617,7 @@ func (u *ChatUI) loadSession(session ChatSession) {
 					versionBadge = "changed"
 				}
 			}
-			u.shell.AppendBlock(&httpDocumentBlock{ui: u, text: text, markdown: message.Kind == "markdown", response: response, versionBadge: versionBadge})
+			u.appendKindedBlock("http", transcriptEntryKindHTTP, &httpDocumentBlock{ui: u, text: text, markdown: message.Kind == "markdown", response: response, versionBadge: versionBadge})
 		case message.Kind == "markdown":
 			u.shell.AppendAssistantMarkdown(text)
 		default:
@@ -917,17 +957,27 @@ func (u *ChatUI) topBar(width int) string {
 }
 
 // statusBar is ui.go's statusLines, ported: the grid-focused hint set
-// (checklist #28) now reflects the true focused grid via activeGrid()
+// (checklist #28) reflects the true focused grid via activeGrid()
 // (chatshell.Model.FocusedRef, see chatui_inspector.go), matching ui.go's
 // u.gridFocused segment set including its Ctrl+R/bucket-count/view-specific
-// (Charts/Current row) follow-ons. The message/join/workspace-specific
-// hint sets ui.go also had (keyed off u.messageFocused/u.joinFocused/
-// u.workspaceFocused) are not reproduced: chatshell's FocusedRef() is nil
-// for a focused userMessageBlock (it implements no EntityBlock) and for
-// any SidePanel-zone focus (documented on FocusedRef itself), so ChatUI
-// cannot yet distinguish those from "nothing/composer focused" — a
-// narrower remaining gap than the session start of this lane, not a new
-// one introduced here.
+// (Charts/Current row) follow-ons.
+//
+// The message/join/workspace-specific hint sets ui.go also had (r1b item
+// 5a, unblocked once strongo/aichat's chatshell.Model gained Zone()/
+// FocusedEntryID()) are reproduced below: Zone() == focus.ZoneSidebar for
+// the workspace pane (ui.go's u.workspaceFocused, including its tab==1/
+// tab==3 sub-sets); Zone() == focus.ZoneTranscript with activeGrid() not
+// ok but FocusedEntryID() naming a tracked entry for a plain message or
+// HTTP-document card (ui.go's u.messageFocused, both variants --
+// transcriptEntryKinds, populated wherever ChatUI appends one of those two
+// block kinds); and JoinBlock.JoinFocused() (via
+// joinBlocksByRecordSetID[recordSetID], since chatshell exposes only the
+// focused entry's ref/ID, not the Block instance) for ui.go's u.joinFocused,
+// overriding the grid hint set exactly as it did there. One divergence
+// from ui.go's literal wording: the workspace pane switches tabs with
+// ←→/h/l (chatui_sidepanel.go's updateKey), not Tab/Shift+Tab, so the
+// hint says "←→ tabs" -- porting ui.go's stale "Tab/Shift+Tab switch tabs"
+// text here would describe a key binding that does not do that.
 func (u *ChatUI) statusBar(width int) string {
 	// ui.go's mouseHint: "F2 select" while mouse reporting is on (naming
 	// what pressing F2 gets you -- the terminal's own click-drag text
@@ -947,8 +997,9 @@ func (u *ChatUI) statusBar(width int) string {
 		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.snapshot.Title), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
 	}
 	if g, _, ok := u.activeGrid(); ok && g != nil {
+		recordSetID := u.activeRecordSetID()
 		segments = []string{"1 Table", "2 Charts", "3 Current row", "j JOIN", "e export", "q save", "Enter details", "Tab panes (wide)", "Shift+↑↓ grids", "Shift+→ workspace", "Esc input"}
-		if recordSetID := u.activeRecordSetID(); recordSetID != "" {
+		if recordSetID != "" {
 			if record, ok := u.snapshot.RecordSets[recordSetID]; ok && (record.DTQL != "" || record.HTTPResponseID != "") {
 				segments = append(segments, "Ctrl+R refresh")
 			}
@@ -966,6 +1017,38 @@ func (u *ChatUI) statusBar(width int) string {
 		}
 		if u.sessions != nil {
 			segments = append([]string{"session: " + sanitizeTerminalText(u.snapshot.Title)}, segments...)
+		}
+		// ui.go's u.joinFocused: overrides the plain grid hint set with the
+		// inline JOIN selector's own, exactly as ui.go's separate
+		// (non-else) `if u.joinFocused` block did.
+		if join, ok := u.joinBlocksByRecordSetID[recordSetID]; ok && join.JoinFocused() {
+			segments = []string{"JOIN candidates", "↑↓ source", "←→ relationship", "Space add JOIN", "Enter details", "Esc grid", "Tab input"}
+		}
+	} else if id := u.shell.FocusedEntryID(); id != "" {
+		// ui.go's u.messageFocused: a focused transcript entry that isn't a
+		// grid is either a plain user-message card or an HTTP document.
+		switch u.transcriptEntryKinds[id] {
+		case transcriptEntryKindHTTP:
+			segments = []string{"HTTP document", "1 Rendered", "2 Raw", "3 Headers", "q save", "Shift+↑↓ navigate", "Esc input", mouseHint}
+		case transcriptEntryKindMessage:
+			segments = []string{"message selected", "Enter edit", "Shift+↑↓ navigate", "Esc input", mouseHint}
+		}
+	} else if u.shell.Zone() == focus.ZoneSidebar {
+		// ui.go's u.workspaceFocused, including its tab==1 (Selected/
+		// inspector) and tab==3 (Bookmarks, incl. its own grid-focused/
+		// input-mode sub-states) hint sets.
+		segments = []string{"←→ tabs", "↑↓ navigate", "PgUp/Dn details", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", "Shift+← previous", "F6/Esc input", mouseHint}
+		switch u.workspace.tab {
+		case 1:
+			segments = []string{"1 row", "2 column", "3 recordset", "↑↓ scroll", "Space attach", "b bookmark", "d dock", "←→ tabs", "Shift+← previous", mouseHint}
+		case 3:
+			segments = []string{"↑↓ browse", "Enter open grid", "a attach", "d dock", "r rename", "t/T tags", "/ search", "f filter", "x delete", "←→ tabs", "Shift+← previous", "F6/Esc input", mouseHint}
+			if u.workspace.bookmarkGridFocused {
+				segments = []string{"Tab list", "↑↓ rows", "←→ columns", "s sort", "a attach", "d dock", "Esc list"}
+			}
+			if u.workspace.bookmarkMode != "" {
+				segments = []string{"Bookmark " + u.workspace.bookmarkMode, "Enter apply", "Esc cancel"}
+			}
 		}
 	}
 	if u.shell.Busy() {

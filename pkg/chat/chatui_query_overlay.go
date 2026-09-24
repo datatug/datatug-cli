@@ -63,7 +63,7 @@ func (u *ChatUI) runSavedQuery(query SavedQuery, variables map[string]string) te
 	label := nonempty(query.Title, query.ID)
 	message := "Run query: " + label
 	store, service, ctx, sessionID := u.sessions.store, u.savedQueryService, u.ctx, u.sessionID
-	u.shell.AppendBlock(newUserMessageBlock(message))
+	u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(message))
 	busyCmd := u.shell.SetBusy(true)
 	runCmd := func() tea.Msg {
 		origin, err := store.AppendUser(ctx, sessionID, message)

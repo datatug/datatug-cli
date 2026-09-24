@@ -85,6 +85,14 @@ func (b *JoinBlock) Current() *session.EntityRef {
 	return b.Grid.Current()
 }
 
+// JoinFocused reports whether "j" has switched this block into its inline
+// JOIN candidate selector (ui.go's u.joinFocused) -- statusBar's
+// ZoneTranscript branch (r1b item 5a) reads it, via ChatUI's own
+// gridsByRecordSetID/activeJoinBlock lookup, to show ui.go's
+// "JOIN candidates ↑↓ source ←→ relationship ..." hint set instead of the
+// plain grid one while the selector has focus.
+func (b *JoinBlock) JoinFocused() bool { return b.joinFocused }
+
 // CapturesEsc satisfies transcript.EscCapturer: while the join selector has
 // focus, Esc should return to the grid (handled in Update) rather than
 // bubbling to chatshell's "return focus to composer" default — matching

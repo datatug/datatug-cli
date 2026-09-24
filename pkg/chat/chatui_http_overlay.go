@@ -92,7 +92,7 @@ func (u *ChatUI) sendHTTPRequest(spec httpRequestSpec) (tea.Cmd, error) {
 	sessionID := u.sessionID
 	store := u.sessions.store
 	ctx := u.ctx
-	u.shell.AppendBlock(newUserMessageBlock(requestText))
+	u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(requestText))
 	busyCmd := u.shell.SetBusy(true)
 	runCmd := func() tea.Msg {
 		response, query, failure := fetchHTTPRequestResult(ctx, spec, displayURL.String(), settings)

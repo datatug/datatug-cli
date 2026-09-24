@@ -2,13 +2,11 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 func TestFormatHTTPBodyTablesAndText(t *testing.T) {
@@ -35,6 +33,245 @@ func TestFormatHTTPBodyTablesAndText(t *testing.T) {
 	}
 }
 
+// TestFormatHTTPBodyInvalidAndUntabularBodies covers formatHTTPBody's own
+// "could not tabulate/parse" and unknown-format branches, none of which the
+// happy-path table above exercises.
+func TestFormatHTTPBodyInvalidAndUntabularBodies(t *testing.T) {
+	if _, text, kind := formatHTTPBody([]byte("{not json"), "application/json", "/x"); !strings.Contains(text, "Invalid JSON") || kind != "JSON" {
+		t.Fatalf("invalid JSON = %q, %q", text, kind)
+	}
+	if _, text, kind := formatHTTPBody([]byte("a,b\n\"unterminated"), "text/csv", "/x.csv"); !strings.Contains(text, "Invalid CSV") || kind != "CSV" {
+		t.Fatalf("invalid CSV = %q, %q", text, kind)
+	}
+	// An empty header cell and a duplicate header cell each get a
+	// synthesized name (tabularCSV's own dedup branches).
+	if result, text, kind := formatHTTPBody([]byte("a,,a\n1,2,3\n"), "text/csv", "/x.csv"); text != "" || kind != "CSV" ||
+		!containsString(result.Columns, "Column 2") || !containsString(result.Columns, "a") || !containsString(result.Columns, "a 2") {
+		t.Fatalf("CSV header dedup = %#v, %q, %q", result, text, kind)
+	}
+	if _, text, kind := formatHTTPBody([]byte(": not: valid: yaml: at: all: ["), "text/yaml", "/x.yaml"); !strings.Contains(text, "Invalid YAML") || kind != "YAML" {
+		t.Fatalf("invalid YAML = %q, %q", text, kind)
+	}
+	// Valid YAML that isn't tabular (a bare scalar): falls through to the
+	// plain boundedText(content) branch instead of "Invalid YAML".
+	if _, text, kind := formatHTTPBody([]byte("just a scalar"), "text/yaml", "/x.yaml"); text != "just a scalar" || kind != "YAML" {
+		t.Fatalf("scalar YAML = %q, %q", text, kind)
+	}
+	if _, text, kind := formatHTTPBody([]byte{0xff, 0xd8, 0xff}, "image/jpeg", "/x.jpg"); !strings.Contains(text, "cannot be displayed") || kind != "image/jpeg" {
+		t.Fatalf("binary response = %q, %q", text, kind)
+	}
+}
+
+// TestTabularJSONColumnsPresentButRowsNotArrays covers the "columns"+"rows"
+// matrix branch when the columns themselves are all valid but the rows
+// aren't arrays: tabularJSONArrays refuses (its own not-an-array guard),
+// and tabularJSON falls through to the generic array-of-objects scan over
+// the same rows value.
+func TestTabularJSONColumnsPresentButRowsNotArrays(t *testing.T) {
+	result, text, kind := formatHTTPBody([]byte(`{"columns":["a","b"],"rows":[{"a":1}]}`), "application/json", "/x")
+	if text != "" || len(result.Rows) != 1 || !containsString(result.Columns, "a") || kind != "JSON" {
+		t.Fatalf("non-array rows with valid columns = %#v, %q, %q", result, text, kind)
+	}
+}
+
+// TestTabularJSONBranches covers tabularJSON's own branches: a top-level
+// "data" wrapper, a non-string/empty column name in a "columns"+"rows"
+// matrix (falls through to generic row scanning), and a non-object item in
+// the generic array form.
+func TestTabularJSONBranches(t *testing.T) {
+	result, text, _ := formatHTTPBody([]byte(`{"data":[{"id":1},{"id":2}]}`), "application/json", "/x")
+	if text != "" || len(result.Rows) != 2 || !containsString(result.Columns, "id") {
+		t.Fatalf("data-wrapped JSON = %#v, %q", result, text)
+	}
+	// A non-string column name in the columns/rows matrix form makes
+	// tabularJSONArrays refuse, but tabularJSON still falls through to the
+	// generic array-of-objects scan over the same "rows" value -- here that
+	// scan also fails, since the row values aren't objects, so the overall
+	// result is untabular (rendered as JSON text instead).
+	result, text, kind := formatHTTPBody([]byte(`{"columns":[1,"b"],"rows":[[1,2]]}`), "application/json", "/x")
+	if len(result.Columns) != 0 || text == "" || kind != "JSON" {
+		t.Fatalf("non-string column name = %#v, %q, %q", result, text, kind)
+	}
+	// items that aren't all objects: array-of-objects scan refuses too.
+	result, text, kind = formatHTTPBody([]byte(`[1,2,3]`), "application/json", "/x")
+	if len(result.Columns) != 0 || text == "" || kind != "JSON" {
+		t.Fatalf("non-object items = %#v, %q, %q", result, text, kind)
+	}
+}
+
+// TestNormalizeYAMLConvertsNonStringKeyedMaps covers normalizeYAML's own
+// map[any]any branch directly -- yaml.v3 only produces one for a mapping
+// with non-string keys (a string-keyed mapping decodes straight into
+// map[string]any), which formatHTTPBody's own YAML test cases never use.
+func TestNormalizeYAMLConvertsNonStringKeyedMaps(t *testing.T) {
+	input := map[any]any{1: "a", 2: []any{map[any]any{3: "nested"}}}
+	got := normalizeYAML(input)
+	converted, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("normalizeYAML(map[any]any) = %#v (%T), want map[string]any", got, got)
+	}
+	if converted["1"] != "a" {
+		t.Fatalf("converted[\"1\"] = %v, want \"a\"", converted["1"])
+	}
+	nestedList, ok := converted["2"].([]any)
+	if !ok || len(nestedList) != 1 {
+		t.Fatalf("converted[\"2\"] = %#v, want a one-element slice", converted["2"])
+	}
+	nestedMap, ok := nestedList[0].(map[string]any)
+	if !ok || nestedMap["3"] != "nested" {
+		t.Fatalf("nested map[any]any not converted: %#v", nestedList[0])
+	}
+}
+
+// TestNormalizeHTTPValueBranches covers normalizeHTTPValue's own branches:
+// a float json.Number, a non-numeric json.Number, and the map/slice
+// re-encode branch -- formatHTTPBody's own tests only ever produce integer
+// json.Number values and scalar leaf values.
+func TestNormalizeHTTPValueBranches(t *testing.T) {
+	if got := normalizeHTTPValue(json.Number("3.14")); got != 3.14 {
+		t.Fatalf("normalizeHTTPValue(3.14) = %v (%T), want the float64", got, got)
+	}
+	if got := normalizeHTTPValue(json.Number("not-a-number")); got != "not-a-number" {
+		t.Fatalf("normalizeHTTPValue(not-a-number) = %v, want the raw string", got)
+	}
+	if got := normalizeHTTPValue(map[string]any{"x": 1}); got != `{"x":1}` {
+		t.Fatalf("normalizeHTTPValue(map) = %v, want the JSON-encoded string", got)
+	}
+	if got := normalizeHTTPValue([]any{1, 2}); got != `[1,2]` {
+		t.Fatalf("normalizeHTTPValue(slice) = %v, want the JSON-encoded string", got)
+	}
+}
+
+// TestSanitizedHTTPURLNilSource covers sanitizedHTTPURL's own nil guard.
+func TestSanitizedHTTPURLNilSource(t *testing.T) {
+	if got := sanitizedHTTPURL(nil); got != "" {
+		t.Fatalf("sanitizedHTTPURL(nil) = %q, want empty", got)
+	}
+}
+
+// TestSafeResponseHeadersRedactsUnparsableLocation covers safeResponseHeaders'
+// own url.Parse-error branch for Location/Content-Location.
+func TestSafeResponseHeadersRedactsUnparsableLocation(t *testing.T) {
+	safe := safeResponseHeaders(http.Header{"Location": {"http://[::1"}})
+	if len(safe["Location"]) != 1 || safe["Location"][0] != "[redacted]" {
+		t.Fatalf("safe[Location] = %v, want a single [redacted] entry", safe["Location"])
+	}
+}
+
+// TestHTTPResponseDisplayTextEmptyBody covers displayText's own
+// empty-response fallback.
+func TestHTTPResponseDisplayTextEmptyBody(t *testing.T) {
+	response := HTTPResponse{ContentType: "text/plain"}
+	if got := response.displayText(); got != "(empty response)" {
+		t.Fatalf("displayText() = %q, want the empty-response placeholder", got)
+	}
+}
+
+// TestBoundedTextTruncatesLongContent covers boundedText's own truncation
+// branch.
+func TestBoundedTextTruncatesLongContent(t *testing.T) {
+	long := strings.Repeat("x", 20000)
+	got := boundedText([]byte(long))
+	if !strings.HasSuffix(got, "\n… (truncated)") || len(got) >= len(long) {
+		t.Fatalf("boundedText(long) did not truncate: len=%d", len(got))
+	}
+}
+
+// TestFetchHTTPRequestResultNetworkErrors covers fetchHTTPRequestResult's
+// own request-construction and network-failure error strings.
+func TestFetchHTTPRequestResultNetworkErrors(t *testing.T) {
+	// An invalid method name (contains a space) fails http.NewRequestWithContext.
+	_, _, failure := fetchHTTPRequestResult(context.Background(), httpRequestSpec{Method: "BAD METHOD", URL: "http://example.test"}, "http://example.test")
+	if !strings.Contains(failure, "invalid request") {
+		t.Fatalf("invalid method failure = %q", failure)
+	}
+	// An unreachable host fails at the network layer -- loopback port 1 is
+	// never listening.
+	_, _, failure = fetchHTTPResult(context.Background(), "http://127.0.0.1:1", "http://127.0.0.1:1")
+	if !strings.Contains(failure, "network request failed") {
+		t.Fatalf("network failure = %q", failure)
+	}
+}
+
+// TestFetchHTTPRequestResultRejectsOversizedResponse covers
+// fetchHTTPRequestResult's own maxHTTPResponseBytes guard.
+func TestFetchHTTPRequestResultRejectsOversizedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chunk := make([]byte, 1<<20)
+		for written := 0; written <= maxHTTPResponseBytes; written += len(chunk) {
+			_, _ = w.Write(chunk)
+		}
+	}))
+	defer server.Close()
+	_, _, failure := fetchHTTPResult(context.Background(), server.URL, server.URL)
+	if !strings.Contains(failure, "too large") {
+		t.Fatalf("oversized response failure = %q", failure)
+	}
+}
+
+// TestFetchHTTPRequestResultReadErrorSurfaces covers fetchHTTPRequestResult's
+// io.ReadAll error branch: a server that hijacks the raw connection, claims
+// a Content-Length far larger than what it actually sends, then closes the
+// connection -- net/http.Client's Response.Body then reports
+// io.ErrUnexpectedEOF on read.
+func TestFetchHTTPRequestResultReadErrorSurfaces(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("ResponseWriter does not support hijacking")
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\nshort body")
+		_ = buf.Flush()
+	}))
+	defer server.Close()
+	_, _, failure := fetchHTTPResult(context.Background(), server.URL, server.URL)
+	if !strings.Contains(failure, "Couldn't read the HTTP response") {
+		t.Fatalf("read-error failure = %q", failure)
+	}
+}
+
+// TestFetchHTTPRequestResultNonGetRedirectStopsAtFirstHop covers
+// CheckRedirect's own non-GET/HEAD branch (http.ErrUseLastResponse): a POST
+// redirected by the server must not be followed.
+func TestFetchHTTPRequestResultNonGetRedirectStopsAtFirstHop(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("redirect target should not be reached for a POST")
+	}))
+	defer target.Close()
+	start := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/final", http.StatusFound)
+	}))
+	defer start.Close()
+	stored, _, failure := fetchHTTPRequestResult(context.Background(), httpRequestSpec{Method: http.MethodPost, URL: start.URL}, start.URL)
+	if failure != "" || stored.StatusCode != http.StatusFound {
+		t.Fatalf("stored = %+v, failure = %q, want the redirect response itself (not followed)", stored, failure)
+	}
+}
+
+// TestFetchHTTPRequestResultRejectsUnsafeRedirect covers CheckRedirect's own
+// unsafe-redirect branch (too many hops).
+func TestFetchHTTPRequestResultRejectsUnsafeRedirect(t *testing.T) {
+	var server *httptest.Server
+	hops := 0
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hops++
+		http.Redirect(w, r, server.URL+"/next", http.StatusFound)
+	}))
+	defer server.Close()
+	_, _, failure := fetchHTTPResult(context.Background(), server.URL, server.URL)
+	if !strings.Contains(failure, "network request failed") {
+		t.Fatalf("unsafe-redirect chain failure = %q, want a network failure (client.Do surfaces CheckRedirect's error)", failure)
+	}
+	if hops < 10 {
+		t.Fatalf("hops = %d, want at least 10 before the client gives up", hops)
+	}
+}
+
 func containsString(items []string, want string) bool {
 	for _, item := range items {
 		if item == want {
@@ -44,128 +281,18 @@ func containsString(items []string, want string) bool {
 	return false
 }
 
-func TestHTTPCommandPersistsStructuredResponseWithoutQuerySecret(t *testing.T) {
-	ctx := context.Background()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.URL.Query().Get("token") != "secret" {
-			t.Error("query parameter was not sent to server")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"name":"Ada","count":2}]`))
-	}))
-	defer server.Close()
-	store := openTestStore(t, testStorePath(t), testScope())
-	defer func() { _ = store.Close() }()
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, sessions, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd, err := u.httpCommand("get " + server.URL + "/customers?token=secret")
-	if err != nil {
-		t.Fatal(err)
-	}
-	message, ok := cmd().(httpMessage)
-	if !ok || message.err != nil {
-		t.Fatalf("HTTP command failed: %#v", message)
-	}
-	_, _ = u.Update(message)
-	if u.busy || len(u.snapshot.RecordSets) != 1 || !u.focusLatestGrid() {
-		t.Fatalf("structured result not restored: busy=%v recordsets=%d", u.busy, len(u.snapshot.RecordSets))
-	}
-	for _, message := range u.snapshot.Messages {
-		if strings.Contains(message.Text, "token=secret") {
-			t.Fatal("URL query secret persisted in chat message")
-		}
-	}
-	for _, record := range u.snapshot.RecordSets {
-		if strings.Contains(record.Source, "token=secret") || strings.Contains(record.Title, "token=secret") {
-			t.Fatal("URL query secret persisted in RecordSet metadata")
-		}
-		if record.Result.Rows[0].Data["name"] != "Ada" {
-			t.Fatalf("wrong data: %#v", record.Result.Rows)
-		}
-	}
-}
-
-func TestHTTPCommandRejectsUnsupportedURL(t *testing.T) {
-	u := NewUI(context.Background(), nil, "test")
-	for _, argument := range []string{"get file:///etc/passwd", "get https://user:pass@example.com/data", "trace https://example.com", "get not-a-url"} {
-		if _, err := u.httpCommand(argument); err == nil {
-			t.Errorf("accepted %q", argument)
-		}
-	}
-}
-
-func TestHTTPPostFormSendsBodyAndEditedHeadersAndPersistsMethod(t *testing.T) {
-	ctx := context.Background()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodPost || request.Header.Get("X-Test") != "edited" || request.Header.Get("Authorization") != "Bearer secret" {
-			t.Errorf("request method/header = %s/%q", request.Method, request.Header.Get("X-Test"))
-		}
-		body := make([]byte, 32)
-		n, _ := request.Body.Read(body)
-		if string(body[:n]) != "hello\nworld" {
-			t.Errorf("request body = %q", body[:n])
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"ok":true}]`))
-	}))
-	defer server.Close()
-	store := openTestStore(t, testStorePath(t), testScope())
-	defer func() { _ = store.Close() }()
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, sessions, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := u.httpCommand("post " + server.URL); err != nil || u.httpRequestDialog == nil {
-		t.Fatalf("POST form did not open: %v", err)
-	}
-	d := u.httpRequestDialog
-	d.body.SetValue("hello\nworld")
-	d.headers = append(d.headers, httpHeaderField{name: "X-Test", value: "edited"})
-	d.headers = append(d.headers, httpHeaderField{name: "Authorization", value: "Bearer secret"})
-	message := u.submitHTTPRequestDialog()().(httpMessage)
-	if message.err != nil {
-		t.Fatal(message.err)
-	}
-	_, _ = u.Update(message)
-	if len(u.snapshot.HTTPResponses) != 1 || len(u.snapshot.RecordSets) != 1 {
-		t.Fatalf("result was not persisted: %#v", u.snapshot.HTTPResponses)
-	}
-	for _, response := range u.snapshot.HTTPResponses {
-		if response.Method != http.MethodPost {
-			t.Fatalf("stored method = %q", response.Method)
-		}
-		if response.RequestHeaders["Authorization"][0] != "[redacted]" || response.RequestHeaders["X-Test"][0] != "[redacted]" {
-			t.Fatalf("request headers were not captured and redacted: %#v", response.RequestHeaders)
-		}
-		wide := response.headersContent(90)
-		if !strings.Contains(wide, "Request") || !strings.Contains(wide, "Response") || !strings.Contains(wide, " │ ") {
-			t.Fatalf("wide headers do not show two columns: %q", wide)
-		}
-		if strings.Contains(wide, "Bearer secret") || !strings.Contains(wide, "Authorization: [redacted]") {
-			t.Fatalf("secret leaked or header missing: %q", wide)
-		}
-		stacked := response.headersContent(50)
-		if strings.Contains(stacked, " │ ") || !strings.Contains(stacked, "Request\n") || !strings.Contains(stacked, "Response\n") {
-			t.Fatalf("narrow headers do not stack: %q", stacked)
-		}
-	}
-	if !u.focusLatestGrid() {
-		t.Fatal("result grid was not focusable")
-	}
-	if cmd := u.refreshSelectedCard(); cmd != nil {
-		t.Fatal("Ctrl+R must not silently repeat a POST")
-	}
-}
+// TestHTTPCommandPersistsStructuredResponseWithoutQuerySecret,
+// TestHTTPCommandRejectsUnsupportedURL,
+// TestHTTPPostFormSendsBodyAndEditedHeadersAndPersistsMethod,
+// TestHTTPFormHeaderEditAndDelete, TestHTTPCommandsOpenPrefilledForm,
+// TestHTTPFormSaveOpensProjectQueryDialogOnlyForSupportedRequest,
+// TestHTTPFormRendersSubmitAndSaveActions,
+// TestHTTPFormMasksConfiguredAndEditedHeaderValues,
+// TestHTTPFormLoadsConfiguredHeadersAfterURLInput,
+// TestHTTPMarkdownRendersAndRawToggleSurvivesRestore and
+// TestHTTPTableHasRawAndHeadersTabs were ported onto ChatUI's
+// runHTTPCommand/httpRequestOverlay/httpDocumentBlock in
+// chatui_http_overlay_test.go.
 
 func TestHTTPRedirectDoesNotForwardQueryInReferer(t *testing.T) {
 	var receivedReferer string
@@ -197,216 +324,5 @@ func TestSafeResponseHeadersRedactsUnknownRequestAndResponseValues(t *testing.T)
 				}
 			}
 		}
-	}
-}
-
-func TestHTTPFormHeaderEditAndDelete(t *testing.T) {
-	u := NewUI(context.Background(), nil, "test")
-	u.openHTTPRequestDialog(httpRequestSpec{Method: http.MethodGet})
-	d := u.httpRequestDialog
-	d.headerName.SetValue("X-Test")
-	d.headerValue.SetValue("first")
-	d.commitHeader()
-	if len(d.headers) != 1 || d.headers[0].value != "first" {
-		t.Fatalf("header add failed: %#v", d.headers)
-	}
-	d.setFocus(2)
-	_ = u.updateHTTPRequestDialog(tea.KeyPressMsg{Code: 'e'})
-	d.headerValue.SetValue("second")
-	d.commitHeader()
-	if len(d.headers) != 1 || d.headers[0].value != "second" {
-		t.Fatalf("header edit failed: %#v", d.headers)
-	}
-	_ = u.updateHTTPRequestDialog(tea.KeyPressMsg{Code: 'd'})
-	if len(d.headers) != 0 {
-		t.Fatalf("header delete failed: %#v", d.headers)
-	}
-}
-
-func TestHTTPCommandsOpenPrefilledForm(t *testing.T) {
-	for _, test := range []struct{ command, method, target string }{
-		{"", "GET", ""},
-		{"new", "GET", ""},
-		{"post https://example.com/items", "POST", "https://example.com/items"},
-		{"put https://example.com/items/1", "PUT", "https://example.com/items/1"},
-		{"delete https://example.com/items/1", "DELETE", "https://example.com/items/1"},
-	} {
-		u := NewUI(context.Background(), nil, "test")
-		if _, err := u.httpCommand(test.command); err != nil {
-			t.Fatalf("%q: %v", test.command, err)
-		}
-		if u.httpRequestDialog == nil || u.httpRequestDialog.method != test.method || u.httpRequestDialog.url.Value() != test.target {
-			t.Fatalf("%q did not prefill method and URL", test.command)
-		}
-	}
-}
-
-func TestHTTPFormSaveOpensProjectQueryDialogOnlyForSupportedRequest(t *testing.T) {
-	u := NewUI(context.Background(), nil, "test")
-	u.savedQueryService = &savedQueryStub{}
-	u.openHTTPRequestDialog(httpRequestSpec{Method: http.MethodPost, URL: "https://example.com/items"})
-	u.saveHTTPRequestFromDialog()
-	if u.saveQueryDialog != nil || u.httpRequestDialog == nil || !strings.Contains(u.httpRequestDialog.err, "GET only") {
-		t.Fatal("POST form must not pretend it can create an executable project query")
-	}
-	u.httpRequestDialog.method = http.MethodGet
-	u.saveHTTPRequestFromDialog()
-	if u.httpRequestDialog != nil || u.saveQueryDialog == nil || u.saveQueryDialog.request.Text != "https://example.com/items" {
-		t.Fatal("GET form did not open project query save dialog")
-	}
-}
-
-func TestHTTPFormRendersSubmitAndSaveActions(t *testing.T) {
-	u := NewUI(context.Background(), nil, "test")
-	u.width, u.height = 90, 28
-	u.openHTTPRequestDialog(httpRequestSpec{Method: http.MethodPatch, URL: "https://example.com/items/1"})
-	for i := 0; i < 8; i++ {
-		u.httpRequestDialog.headers = append(u.httpRequestDialog.headers, httpHeaderField{name: "X-Test", value: "value"})
-	}
-	view := ansi.Strip(u.View().Content)
-	for _, want := range []string{"HTTP request", "PATCH", "Submit request", "Save as project query", "more headers"} {
-		if !strings.Contains(view, want) {
-			t.Errorf("request form missing %q:\n%s", want, view)
-		}
-	}
-}
-
-func TestHTTPFormMasksConfiguredAndEditedHeaderValues(t *testing.T) {
-	u := NewUI(context.Background(), nil, "test")
-	u.width, u.height = 100, 30
-	u.openHTTPRequestDialog(httpRequestSpec{Method: http.MethodGet, URL: "https://example.test/data"})
-	d := u.httpRequestDialog
-	d.headers = append(d.headers, httpHeaderField{name: "X-Password", value: "configured-private", configured: true})
-	d.selected = 0
-	d.setFocus(2)
-	view := ansi.Strip(u.httpRequestOverlay(""))
-	if strings.Contains(view, "configured-private") || !strings.Contains(view, "X-Password: [hidden]") {
-		t.Fatalf("configured header value visible: %q", view)
-	}
-	_ = u.updateHTTPRequestDialog(tea.KeyPressMsg{Code: 'e'})
-	d.setFocus(4)
-	view = ansi.Strip(u.httpRequestOverlay(""))
-	if strings.Contains(view, "configured-private") || d.headerValue.Value() != "configured-private" {
-		t.Fatal("editing exposed or lost configured credential")
-	}
-}
-
-func TestHTTPFormLoadsConfiguredHeadersAfterURLInput(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	defer func() { _ = store.Close() }()
-	if err := store.SetHTTPRequestSetting(ctx, "project", "header", "https://api.example.test", "X-Project", "local"); err != nil {
-		t.Fatal(err)
-	}
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, sessions, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u.openHTTPRequestDialog(httpRequestSpec{Method: http.MethodGet})
-	d := u.httpRequestDialog
-	d.url.SetValue("https://api.example.test/records")
-	u.loadHTTPRequestDefaults(d)
-	found := false
-	for _, header := range d.headers {
-		if header.name == "X-Project" && header.value == "local" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("configured project header missing from form: %#v", d.headers)
-	}
-	d.headers = append(d.headers, httpHeaderField{name: "Authorization", value: "Bearer secret"})
-	d.url.SetValue("https://other.example.test/records")
-	u.loadHTTPRequestDefaults(d)
-	for _, header := range d.headers {
-		if header.name == "Authorization" || header.name == "X-Project" {
-			t.Fatalf("origin-bound header crossed hosts: %#v", d.headers)
-		}
-	}
-}
-
-func TestHTTPMarkdownRendersAndRawToggleSurvivesRestore(t *testing.T) {
-	ctx := context.Background()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		w.Header().Set("Content-Type", "text/markdown")
-		_, _ = w.Write([]byte("# Project notes\n\n**Important** details"))
-	}))
-	defer server.Close()
-	store := openTestStore(t, testStorePath(t), testScope())
-	defer func() { _ = store.Close() }()
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, sessions, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd, err := u.httpCommand("get " + server.URL + "/notes.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	message := cmd().(httpMessage)
-	if message.err != nil {
-		t.Fatal(message.err)
-	}
-	_, _ = u.Update(message)
-	if len(u.entries) < 2 || !u.entries[len(u.entries)-1].markdown {
-		t.Fatal("Markdown did not restore as a distinct message kind")
-	}
-	index := len(u.entries) - 1
-	if !u.focusStop(index) {
-		t.Fatal("Markdown message cannot be focused")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Text: "m"})
-	if !u.entries[index].showRaw || !strings.Contains(u.View().Content, "**Important**") {
-		t.Fatal("raw Markdown view not available")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if u.entries[index].showRaw {
-		t.Fatal("Enter did not return to rendered Markdown")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Text: "3"})
-	if !u.entries[index].showHeaders || !strings.Contains(u.View().Content, "Content-Type") {
-		t.Fatal("HTTP document headers tab not available")
-	}
-}
-
-func TestHTTPTableHasRawAndHeadersTabs(t *testing.T) {
-	ctx := context.Background()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Data-Version", "one")
-		_, _ = w.Write([]byte(`[{"name":"Ada"}]`))
-	}))
-	defer server.Close()
-	store := openTestStore(t, testStorePath(t), testScope())
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, sessions, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd, err := u.httpCommand("get " + server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = u.Update(cmd())
-	if !u.focusLatestGrid() {
-		t.Fatal("HTTP grid not available")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Text: "4"})
-	if !strings.Contains(u.View().Content, `"name":"Ada"`) {
-		t.Fatal("raw table response not visible")
-	}
-	_, _ = u.Update(tea.KeyPressMsg{Text: "5"})
-	if !strings.Contains(u.View().Content, "X-Data-Version") || !strings.Contains(u.View().Content, "Time to response") {
-		t.Fatal("headers and timing tab not visible")
 	}
 }

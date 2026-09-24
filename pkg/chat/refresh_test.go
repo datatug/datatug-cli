@@ -5,11 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -40,139 +38,6 @@ func TestResultVersionPreferencePersistsAndLimitsVisibleHistory(t *testing.T) {
 	hidden, _ := hiddenRefreshVersions(session, 2)
 	if !hidden["first"] || hidden["second"] || hidden["third"] {
 		t.Fatalf("wrong visible versions: %#v", hidden)
-	}
-}
-
-func TestHTTPRefreshAddsChangedImmutableVersion(t *testing.T) {
-	ctx := context.Background()
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if requests.Add(1) == 1 {
-			_, _ = w.Write([]byte(`[{"name":"Ada"}]`))
-		} else {
-			_, _ = w.Write([]byte(`[{"name":"Lin"}]`))
-		}
-	}))
-	defer server.Close()
-	store := openTestStore(t, testStorePath(t), testScope())
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, sessions, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd, err := u.httpCommand("get " + server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = u.Update(cmd())
-	if !u.focusLatestGrid() {
-		t.Fatal("initial HTTP grid not focusable")
-	}
-	_, cmd = u.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
-	if cmd == nil {
-		t.Fatal("Ctrl+R did not trigger refresh")
-	}
-	_, _ = u.Update(cmd())
-	if requests.Load() != 2 || len(u.snapshot.HTTPResponses) != 2 || len(u.snapshot.RecordSets) != 2 {
-		t.Fatalf("refresh versions not saved: requests=%d HTTP=%d records=%d", requests.Load(), len(u.snapshot.HTTPResponses), len(u.snapshot.RecordSets))
-	}
-	if !u.focusLatestGrid() || u.entries[u.activeGrid].grid.versionBadge != "changed" {
-		t.Fatal("refreshed card did not indicate changed data")
-	}
-}
-
-func TestSavedNonDTQLResultDoesNotOfferRefresh(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, sessions, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u.width = 160
-	origin, err := store.AppendUser(ctx, u.sessionID, "Run saved SQL")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = store.AppendQuery(ctx, u.sessionID, origin.ID, "sqlite:///fixture.db", QueryResult{Title: "Saved SQL", Source: "sqlite:///fixture.db", Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": 1}}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := store.Load(ctx, u.sessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u.loadSession(snapshot)
-	if !u.focusLatestGrid() {
-		t.Fatal("saved result was not focusable")
-	}
-	if strings.Contains(strings.Join(u.statusLines(), " "), "Ctrl+R refresh") {
-		t.Fatal("unsupported result advertised refresh")
-	}
-	if cmd := u.refreshSelectedCard(); cmd != nil || u.busy {
-		t.Fatal("unsupported result attempted a refresh")
-	}
-	if !strings.Contains(u.entries[len(u.entries)-1].text, "Saved SQL and HTTP") {
-		t.Fatal("unsupported refresh did not explain how to rerun the saved query")
-	}
-}
-
-func TestHTTPVersionsAcrossDocumentKeepOneVisibleGrid(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	session, err := store.Create(ctx, "Versions")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetResultVersionsToKeep(ctx, 1); err != nil {
-		t.Fatal(err)
-	}
-	previousResponseID, firstRecordID := "", ""
-	for i := 0; i < 3; i++ {
-		origin, err := store.AppendUser(ctx, session.ID, "HTTP version")
-		if err != nil {
-			t.Fatal(err)
-		}
-		response := HTTPResponse{URL: "https://example.test/data", StatusCode: 200, ContentType: "application/json", Body: []byte(`[{"id":1}]`), RefreshParentID: previousResponseID}
-		var query *QueryResult
-		if i != 1 {
-			query = &QueryResult{Title: "Data", Result: secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Data: map[string]any{"id": 1}}}}}
-		}
-		stored, err := store.AppendHTTPResponse(ctx, session.ID, origin.ID, response, query)
-		if err != nil {
-			t.Fatal(err)
-		}
-		previousResponseID = stored.ID
-		if i == 0 {
-			firstRecordID = query.RecordSetID
-		}
-		if i == 2 && query.RefreshParentID != firstRecordID {
-			t.Fatalf("table refresh lineage skipped document: %q", query.RefreshParentID)
-		}
-	}
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, sessions, "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	visible := 0
-	for _, entry := range u.entries {
-		if entry.grid != nil {
-			visible++
-		}
-	}
-	if visible != 1 || len(u.snapshot.RecordSets) != 2 || len(u.snapshot.HTTPResponses) != 3 {
-		t.Fatalf("visible=%d saved records=%d saved HTTP=%d", visible, len(u.snapshot.RecordSets), len(u.snapshot.HTTPResponses))
 	}
 }
 

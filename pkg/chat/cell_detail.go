@@ -2,13 +2,8 @@ package chat
 
 import (
 	"context"
-	"fmt"
 	"strings"
-	"time"
 
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dtql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -42,54 +37,11 @@ type cellDetail struct {
 
 func (d *cellDetail) copyValue() string { return FormatValue(d.value) }
 
-func (u *UI) openCellDetail() tea.Cmd {
-	g, entry, record := u.activeInspectorGrid()
-	selectedColumn := 0
-	var row []any
-	if g != nil {
-		selectedColumn = g.SelectedColumn()
-		row = g.rawRow(g.CurrentIndex())
-	}
-	if g == nil || row == nil || selectedColumn < 0 || selectedColumn >= len(g.Columns()) {
-		return nil
-	}
-	u.detailSequence++
-	columns := make([]string, len(g.Columns()))
-	for i, column := range g.Columns() {
-		columns[i] = column.Name
-	}
-	meta := u.columnMeta(record, columns[selectedColumn])
-	var value any
-	if selectedColumn < len(row) {
-		value = row[selectedColumn]
-	}
-	d := &cellDetail{sequence: u.detailSequence, title: g.baseTitle, column: columns[selectedColumn], value: value, columns: columns, values: append([]any(nil), row...), qualified: meta.qualified, dbType: meta.dbType}
-	u.detail = d
-	if record == nil || entry == nil || u.sessions == nil || meta.qualified == "" || meta.qualified == "ambiguous source" {
-		return nil
-	}
-	application, ok := u.sessions.joinApplication.(ForeignKeyJoinApplication)
-	if !ok {
-		return nil
-	}
-	// All values come from the structured result. Physical provenance is
-	// established by columnMeta; duplicate/derived names are never guessed.
-	physical := map[string]any{}
-	for i, column := range columns {
-		resolved := u.columnMeta(record, column)
-		if resolved.qualified != "" && resolved.qualified != "ambiguous source" && i < len(row) {
-			physical[strings.ToLower(resolved.qualified)] = row[i]
-		}
-	}
-	d.loading = true
-	sequence, selected := d.sequence, meta.qualified
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(u.ctx, 10*time.Second)
-		defer cancel()
-		related, err := application.PreviewRelated(ctx, *record, selected, physical)
-		return relatedPreviewMessage{sequence: sequence, related: related, err: err}
-	}
-}
+// serializePreviewQuery is dtql.Serialize by default; PreviewRelated always
+// builds a well-formed, valid dal.StructuredQuery from fixed components, so
+// this seam exists solely to let a test drive its otherwise-unreachable
+// serialize-error branch.
+var serializePreviewQuery = dtql.Serialize
 
 // PreviewRelated resolves only an authoritative outgoing FK and reads up to
 // five matching records through the same DTQL/policy executor as chat queries.
@@ -143,7 +95,7 @@ func (a ForeignKeyJoinApplication) PreviewRelated(ctx context.Context, record Re
 			collection = dal.NewQualifiedRootCollectionRef(fk.ToSchema, fk.ToRelation, "")
 		}
 		query := dal.From(collection).NewQuery().Where(conditions...).Limit(5).SelectColumns()
-		doc, err := dtql.Serialize(query)
+		doc, err := serializePreviewQuery(query)
 		if err != nil {
 			return nil, err
 		}
@@ -154,89 +106,6 @@ func (a ForeignKeyJoinApplication) PreviewRelated(ctx context.Context, record Re
 		previews = append(previews, relatedRecord{key: fk, result: result})
 	}
 	return previews, nil
-}
-
-func (u *UI) detailOverlay(background string) string {
-	d := u.detail
-	if d == nil {
-		return background
-	}
-	width := max(20, min(u.width-4, 84))
-	height := max(8, min(u.height-4, 28))
-	inside := max(1, width-6)
-	lines := []string{"Row · " + d.title, ""}
-	for i, name := range d.columns {
-		value := "NULL"
-		if i < len(d.values) {
-			value = formatGridValue(name, d.values[i])
-		}
-		marker := "  "
-		if name == d.column {
-			marker = "› "
-		}
-		lines = append(lines, marker+name+": "+value)
-	}
-	lines = append(lines, "", "Cell · "+d.column, "Type: "+nonempty(d.dbType, "unknown"), "Source: "+nonempty(d.qualified, "unavailable"), "Value: "+FormatValue(d.value))
-	if d.loading {
-		lines = append(lines, "", "Related records: loading…")
-	}
-	if d.relatedError != nil {
-		lines = append(lines, "", "Related records unavailable.")
-	}
-	for _, related := range d.related {
-		lines = append(lines, "", fmt.Sprintf("FK %s → %s.%s", related.key.ConstraintID, related.key.ToSchema, related.key.ToRelation))
-		for i, sourceField := range related.key.FromFields {
-			if i < len(related.key.ToFields) {
-				lines = append(lines, "  "+related.key.FromRelation+"."+sourceField+" → "+related.key.ToRelation+"."+related.key.ToFields[i])
-			}
-		}
-		for _, object := range u.catalog.Objects {
-			if !strings.EqualFold(object.Reference.ObjectID, related.key.ToSchema+"."+related.key.ToRelation) {
-				continue
-			}
-			if len(object.Columns) > 0 {
-				meta := make([]string, 0, len(object.Columns))
-				for _, column := range object.Columns {
-					label := column
-					if kind := object.ColumnTypes[column]; kind != "" {
-						label += " " + kind
-					}
-					meta = append(meta, label)
-				}
-				lines = append(lines, "Columns: "+strings.Join(meta, " · "))
-			}
-			break
-		}
-		lines = append(lines, fmt.Sprintf("Related records (showing %d, max 5):", len(related.result.Rows)))
-		for index, row := range related.result.Rows {
-			lines = append(lines, fmt.Sprintf("  Record %d", index+1))
-			for _, column := range related.result.Columns {
-				lines = append(lines, "    "+column+": "+formatGridValue(column, row.Data[column]))
-			}
-		}
-		if len(related.result.Rows) == 0 {
-			lines = append(lines, "No matching records")
-		}
-	}
-	if len(d.related) == 0 && !d.loading && d.relatedError == nil {
-		lines = append(lines, "", "No related FK records for this cell")
-	}
-	visible := max(1, height-5)
-	d.offset = min(d.offset, max(0, len(lines)-visible))
-	end := min(len(lines), d.offset+visible)
-	shown := make([]string, 0, visible+2)
-	for _, line := range lines[d.offset:end] {
-		shown = append(shown, ansi.Truncate(sanitizeTerminalText(line), inside, "…"))
-	}
-	for len(shown) < visible {
-		shown = append(shown, "")
-	}
-	shown = append(shown, fmt.Sprintf("↑↓ scroll · Y copy cell · Esc close   %d–%d/%d", d.offset+1, end, len(lines)))
-	box := lipgloss.NewStyle().Width(width-2).Height(height-2).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("51")).Background(lipgloss.Color("235")).Foreground(lipgloss.Color("252")).Render(strings.Join(shown, "\n"))
-	canvas := lipgloss.NewCanvas(u.width, u.height)
-	canvas.Compose(lipgloss.NewLayer(background))
-	canvas.Compose(lipgloss.NewLayer(box).X(max(0, (u.width-lipgloss.Width(box))/2)).Y(max(0, (u.height-lipgloss.Height(box))/2)))
-	return canvas.Render()
 }
 
 func nonempty(value, fallback string) string {

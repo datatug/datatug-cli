@@ -15,8 +15,6 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/dimetron/pi-go/pimodels"
 	"github.com/spf13/cobra"
 )
 
@@ -63,6 +61,14 @@ func chatCommand() *cobra.Command {
 	return cmd
 }
 
+// runChatProjectFunc is a seam over runChatProject: runChat's project-switch
+// loop (options.project = nextProject) is otherwise only reachable by
+// driving ChatUI's real F3 project-picker overlay end to end through
+// chat.SetRunTeaProgramForTest's runTeaProgram seam, which the coverage
+// lanes' other tests deliberately avoid.
+// Always runChatProject in production.
+var runChatProjectFunc = runChatProject
+
 func runChat(cmd *cobra.Command, options chatOptions) error {
 	if options.ai != "" {
 		if err := resolveChatAIProfile(&options, cmd); err != nil {
@@ -70,7 +76,7 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 		}
 	}
 	for {
-		nextProject, err := runChatProject(cmd, options)
+		nextProject, err := runChatProjectFunc(cmd, options)
 		if err != nil || nextProject == "" || nextProject == options.project {
 			return err
 		}
@@ -78,6 +84,21 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 		options.database = "" // resolve the new project's source independently
 	}
 }
+
+// The following are narrow seams over runChatProject's real-dependency
+// constructors, each of which can otherwise only fail after every prior
+// step in the same synchronous call has already succeeded -- no real
+// fixture can diverge, say, a just-opened store's chat.NewSessionChat call
+// from the chat.OpenSessionStore call three lines above it. Always the
+// named real function/method in production.
+var (
+	newSessionChat       = chat.NewSessionChat
+	newSessionChatUI     = chat.NewSessionChatUI
+	startBrowserBridge   = chat.StartBrowserBridge
+	setSavedQueryService = func(ui *chat.ChatUI, service chat.SavedQueryService) error {
+		return ui.SetSavedQueryService(service)
+	}
+)
 
 func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	ctx := cmd.Context()
@@ -140,11 +161,11 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if !hasQueryableProjectTables(projectCatalog, sourceURLs) {
 		conversation = unavailableSchemaConversation{database: database}
 	} else {
-		llm, modelErr := pimodels.New(ctx, options.model, chatModelOptions(options)...)
-		if modelErr != nil {
-			return "", Exit(fmt.Sprintf("configure chat model %q: %v", options.model, modelErr), exitCodeUsage)
+		provider, providerErr := chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
+		if providerErr != nil {
+			return "", Exit(fmt.Sprintf("configure chat model %q: %v", options.model, providerErr), exitCodeUsage)
 		}
-		conversation, err = chat.NewADKConversation(llm, executor, sourceURL, schemaContext, chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs))
+		conversation, err = chat.NewAIConversation(provider, executor, sourceURL, schemaContext, chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs))
 		if err != nil {
 			return "", Exit(err.Error(), exitCodeUsage)
 		}
@@ -170,7 +191,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if joinErr != nil {
 		setCatalogSourceIssue(&projectCatalog, database, "JOIN metadata unavailable: "+joinErr.Error())
 	}
-	sessions, err := chat.NewSessionChat(ctx, store, conversation, sourceURL, projectCatalog)
+	sessions, err := newSessionChat(ctx, store, conversation, sourceURL, projectCatalog)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("restore chat session: %v", err), exitCodeUsage)
 	}
@@ -178,14 +199,14 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if joinApplication != nil {
 		sessions.ConfigureJoinApplication(*joinApplication)
 	}
-	ui, err := chat.NewSessionUI(ctx, sessions, options.model)
+	ui, err := newSessionChatUI(ctx, sessions, options.model)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("render chat session: %v", err), exitCodeUsage)
 	}
-	if err := ui.SetSavedQueryService(chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session}); err != nil {
+	if err := setSavedQueryService(ui, chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session}); err != nil {
 		return "", Exit(fmt.Sprintf("list saved project queries: %v", err), exitCodeUsage)
 	}
-	bridge, err := chat.StartBrowserBridge(sessions)
+	bridge, err := startBrowserBridge(sessions)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("start browser chat: %v", err), exitCodeUsage)
 	}
@@ -209,6 +230,12 @@ func (c unavailableSchemaConversation) AskWithContext(context.Context, string, s
 
 // JOIN discovery is optional: a failed metadata read should disable JOIN
 // suggestions for this source, not prevent chat or other sources from loading.
+// openJoinMetadataDB is a seam over sql.Open: modernc.org/sqlite's driver
+// never errors eagerly for a syntactically valid DSN (the connection itself
+// is lazy), so no real fixture reaches loadChatJoinApplication's sql.Open
+// error branch. Always sql.Open in production.
+var openJoinMetadataDB = sql.Open
+
 func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *secureread.Executor, unrestricted bool) (*chat.ForeignKeyJoinApplication, func(), error) {
 	if strings.HasPrefix(sourceURL, "unavailable://") {
 		return nil, nil, nil
@@ -224,7 +251,7 @@ func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *se
 		return nil, nil, err
 	}
 	readOnlyURL := (&url.URL{Scheme: "file", Path: joinSource.Path, RawQuery: "mode=ro"}).String()
-	metadataDB, err := sql.Open("sqlite", readOnlyURL)
+	metadataDB, err := openJoinMetadataDB("sqlite", readOnlyURL)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -302,7 +329,7 @@ func projectSchemaContext(catalog chat.ProjectCatalog, urls map[string]string, s
 
 func chatProjectChoices(current, currentDir string, catalog chat.ProjectCatalog) []chat.ProjectChoice {
 	choices := []chat.ProjectChoice{{Key: current, Title: catalog.Title, Detail: currentDir}}
-	settings, err := dtconfig.GetSettings()
+	settings, err := getChatSettings()
 	if err != nil { // A direct project path can run without a project registry.
 		return choices
 	}
@@ -324,6 +351,12 @@ func sameProjectDirectory(a, b string) bool {
 	right, rightErr := os.Stat(b)
 	return leftErr == nil && rightErr == nil && left.IsDir() && right.IsDir() && os.SameFile(left, right)
 }
+
+// queryIDIndexFunc is a seam over api.QueryIDIndex: buildChatProjectCatalog's
+// QueryIDIndex error branch (a filesystem walk, not routed through
+// projectStore) has no other fault-injection point available to a test.
+// Always api.QueryIDIndex in production.
+var queryIDIndexFunc = api.QueryIDIndex
 
 func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStore datatug.ProjectStore, environment string) (chat.ProjectCatalog, map[string]string, error) {
 	project, err := projectStore.LoadProject(ctx)
@@ -401,7 +434,7 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 			}, Columns: columns, ColumnTypes: columnTypes, Issue: relation.Issue})
 		}
 	}
-	queryIDs, err := api.QueryIDIndex(projectDir)
+	queryIDs, err := queryIDIndexFunc(projectDir)
 	if err != nil {
 		return catalog, nil, err
 	}
@@ -440,15 +473,4 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 		}, QueryType: string(query.Type), QueryText: query.Text})
 	}
 	return catalog, urls, nil
-}
-
-func chatModelOptions(options chatOptions) []pimodels.Option {
-	modelOptions := []pimodels.Option{pimodels.WithThinkingLevel(options.thinking)}
-	if options.apiKey != "" {
-		modelOptions = append(modelOptions, pimodels.WithAPIKey(options.apiKey))
-	}
-	if options.baseURL != "" {
-		modelOptions = append(modelOptions, pimodels.WithBaseURL(options.baseURL))
-	}
-	return modelOptions
 }

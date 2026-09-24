@@ -4,14 +4,35 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"strings"
 	"sync"
+
+	"github.com/strongo/aichat/ai"
 )
 
 // ContextualConversation runs a stateless provider turn with context rebuilt
 // from DataTug-owned state. The provider's session is never authoritative.
 type ContextualConversation interface {
 	AskWithContext(context.Context, string, string) (Turn, error)
+}
+
+// StreamingConversation is implemented by conversations that can stream
+// progressive ai.Event values instead of buffering a whole turn (currently
+// *AIConversation). Callers type-assert for it and fall back to
+// ContextualConversation.AskWithContext when a conversation doesn't
+// implement it (for example the fixed unavailableSchemaConversation, or a
+// test fake). See AIConversation.StreamAskWithContext for the exact event
+// contract and how to recover the structured Turn once the stream drains.
+type StreamingConversation interface {
+	ContextualConversation
+	StreamAskWithContext(ctx context.Context, prompt, priorContext string) iter.Seq2[ai.Event, error]
+	// LastStreamTurn returns the structured Turn (Queries/Actions/Usage/Text)
+	// captured by the most recently completed
+	// StreamAskWithContext call, once its sequence has finished draining (or
+	// its range loop returned early). SessionChat.StreamAsk uses this to
+	// persist the same Turn Ask would have committed for an equivalent call.
+	LastStreamTurn() Turn
 }
 
 // SessionChat composes durable state with the existing AI -> DTQL pipeline.
@@ -29,6 +50,25 @@ type SessionChat struct {
 	implicitBookmarkID string
 	joinApplication    JoinApplication
 	queryExecutor      DTQLExecutor
+
+	// Test-only per-call overrides (nil in production) over specific
+	// *SessionStore call sites below. Each is checked immediately before
+	// its one targeted c.store.<Method> call, so a test can force that
+	// exact call to fail -- e.g. a second call to the same store method
+	// within one code path, after an earlier call already succeeded on the
+	// same real store -- while every other call (including other calls to
+	// the same method elsewhere in this file) still goes through the real
+	// *SessionStore. Founder directive: all new Go code aims for 100%
+	// coverage via seams, not left uncovered. See each call site's own
+	// comment for exactly which call it replaces.
+	storeAppendUserOverride    func(ctx context.Context, sessionID, prompt string) (ChatMessage, error)
+	storeAppendQueryOverride   func(ctx context.Context, sessionID, originID, source string, query QueryResult) (QueryResult, error)
+	storeLoadOverride          func(ctx context.Context, id string) (ChatSession, error)
+	storeSaveWorkspaceOverride func(ctx context.Context, sessionID string, state WorkspaceState) error
+	storeActivateOverride      func(ctx context.Context, id string) error
+	storeListOverride          func(ctx context.Context) ([]ChatSession, error)
+	storeCreateOverride        func(ctx context.Context, title string) (ChatSession, error)
+	storeRenameOverride        func(ctx context.Context, id, title string) error
 }
 
 // ConfigureQueryExecutor enables deterministic refresh of stored DTQL without
@@ -134,17 +174,29 @@ func (c *SessionChat) applyJoinCandidate(ctx context.Context, recordSetID string
 		query.Source = c.source
 	}
 	if originMessageID == "" {
-		action, appendErr := c.store.AppendUser(ctx, c.activeID, "JOIN "+query.Title)
+		appendUser := c.store.AppendUser
+		if c.storeAppendUserOverride != nil {
+			appendUser = c.storeAppendUserOverride
+		}
+		action, appendErr := appendUser(ctx, c.activeID, "JOIN "+query.Title)
 		if appendErr != nil {
 			return RecordSet{}, appendErr
 		}
 		originMessageID = action.ID
 	}
-	stored, err := c.store.AppendQuery(ctx, c.activeID, originMessageID, query.Source, query)
+	appendQuery := c.store.AppendQuery
+	if c.storeAppendQueryOverride != nil {
+		appendQuery = c.storeAppendQueryOverride
+	}
+	stored, err := appendQuery(ctx, c.activeID, originMessageID, query.Source, query)
 	if err != nil {
 		return RecordSet{}, err
 	}
-	snapshot, err := c.store.Load(ctx, c.activeID)
+	load := c.store.Load
+	if c.storeLoadOverride != nil {
+		load = c.storeLoadOverride
+	}
+	snapshot, err := load(ctx, c.activeID)
 	if err != nil {
 		return RecordSet{}, err
 	}
@@ -204,7 +256,11 @@ func (c *SessionChat) applyWorkspaceAction(ctx context.Context, action Workspace
 	if err != nil {
 		return ContextReference{}, err
 	}
-	if err := c.store.SaveWorkspace(ctx, c.activeID, next); err != nil {
+	saveWorkspace := c.store.SaveWorkspace
+	if c.storeSaveWorkspaceOverride != nil {
+		saveWorkspace = c.storeSaveWorkspaceOverride
+	}
+	if err := saveWorkspace(ctx, c.activeID, next); err != nil {
 		return ContextReference{}, err
 	}
 	return ref, nil
@@ -326,11 +382,19 @@ func (c *SessionChat) Switch(ctx context.Context, prefix string) (ChatSession, e
 	if len(matches) != 1 {
 		return ChatSession{}, fmt.Errorf("session prefix %q matched %d sessions; use an unambiguous ID", prefix, len(matches))
 	}
-	snapshot, err := c.store.Load(ctx, matches[0].ID)
+	load := c.store.Load
+	if c.storeLoadOverride != nil {
+		load = c.storeLoadOverride
+	}
+	snapshot, err := load(ctx, matches[0].ID)
 	if err != nil {
 		return ChatSession{}, err
 	}
-	if err := c.store.Activate(ctx, snapshot.ID); err != nil {
+	activate := c.store.Activate
+	if c.storeActivateOverride != nil {
+		activate = c.storeActivateOverride
+	}
+	if err := activate(ctx, snapshot.ID); err != nil {
 		return ChatSession{}, err
 	}
 	snapshot, err = c.store.Load(ctx, snapshot.ID)
@@ -372,15 +436,23 @@ func (c *SessionChat) Delete(ctx context.Context) (ChatSession, error) {
 	if err := c.store.Delete(ctx, c.activeID); err != nil {
 		return ChatSession{}, err
 	}
-	list, err := c.store.List(ctx)
+	list := c.store.List
+	if c.storeListOverride != nil {
+		list = c.storeListOverride
+	}
+	sessions, err := list(ctx)
 	if err != nil {
 		return ChatSession{}, err
 	}
 	var next ChatSession
-	if len(list) > 0 {
-		next, err = c.store.Load(ctx, list[0].ID)
+	if len(sessions) > 0 {
+		next, err = c.store.Load(ctx, sessions[0].ID)
 	} else {
-		next, err = c.store.Create(ctx, "New chat")
+		create := c.store.Create
+		if c.storeCreateOverride != nil {
+			create = c.storeCreateOverride
+		}
+		next, err = create(ctx, "New chat")
 	}
 	if err == nil {
 		c.activeID = next.ID
@@ -401,23 +473,45 @@ func (c *SessionChat) AskActive(ctx context.Context, sessionID, prompt string) (
 	return c.ask(ctx, sessionID, prompt)
 }
 
-func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string) (Turn, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	defer c.notifyChanged()
+// preparedTurn is the state ask() and streamAsk() both need before invoking
+// the agent: the just-persisted user message, the prior session snapshot
+// (for join-choice validation), the built context text, and a ctx already
+// carrying every tool observer (query/workspace/selection/bookmark/join).
+type preparedTurn struct {
+	ctx         context.Context
+	user        ChatMessage
+	prior       ChatSession
+	contextText string
+	// joinChoice, once non-nil after the agent turn, holds an
+	// attachedJoinChoiceError raised by the withAttachedJoin observer below:
+	// the model's run_dtql referenced attached-context metadata that matched
+	// more than one join edge. It is a clarification, not a failed query or
+	// a model-authored choice, so ask()/streamAsk() replace the turn's text
+	// with its question rather than persisting a query error.
+	joinChoice **attachedJoinChoiceError
+}
+
+// prepareTurn is ask() and streamAsk()'s shared setup: validate the expected
+// session and prompt, swap the implicit-bookmark target, load the prior
+// session, build the context text (including any JOIN-candidate context),
+// persist the user message, rename a fresh "New chat" session, and wire ctx
+// with every observer the agent's tool Handlers call into. Callers must
+// `defer cleanup()` immediately -- it resets c.implicitBookmarkID once the
+// whole turn (buffered or streamed) has finished, not just this setup step.
+func (c *SessionChat) prepareTurn(ctx context.Context, expectedSessionID, prompt string) (preparedTurn, func(), error) {
+	cleanup := func() { c.implicitBookmarkID = "" }
 	if expectedSessionID != "" && expectedSessionID != c.activeID {
-		return Turn{}, fmt.Errorf("chat session changed; refresh before sending")
+		return preparedTurn{}, cleanup, fmt.Errorf("chat session changed; refresh before sending")
 	}
 	if strings.TrimSpace(prompt) == "" {
-		return Turn{}, fmt.Errorf("chat prompt must not be empty")
+		return preparedTurn{}, cleanup, fmt.Errorf("chat prompt must not be empty")
 	}
 	// One subsequent agent turn may refer to the just-created bookmark without
 	// an ID. A different intervening turn expires that implicit target.
 	c.implicitBookmarkID, c.lastBookmarkID = c.lastBookmarkID, ""
-	defer func() { c.implicitBookmarkID = "" }()
 	prior, err := c.store.Load(ctx, c.activeID)
 	if err != nil {
-		return Turn{}, err
+		return preparedTurn{}, cleanup, err
 	}
 	contextText := buildSessionContext(prior, c.catalog)
 	if c.joinApplication != nil {
@@ -426,13 +520,21 @@ func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string)
 			contextText = joinContext + "\n" + boundedContextText(contextText, maxContextChars-len(joinContext)-1)
 		}
 	}
-	user, err := c.store.AppendUser(ctx, c.activeID, prompt)
+	appendUser := c.store.AppendUser
+	if c.storeAppendUserOverride != nil {
+		appendUser = c.storeAppendUserOverride
+	}
+	user, err := appendUser(ctx, c.activeID, prompt)
 	if err != nil {
-		return Turn{}, err
+		return preparedTurn{}, cleanup, err
 	}
 	if len(prior.Messages) == 0 && prior.Title == "New chat" {
-		if err := c.store.Rename(ctx, c.activeID, prompt); err != nil {
-			return Turn{}, err
+		rename := c.store.Rename
+		if c.storeRenameOverride != nil {
+			rename = c.storeRenameOverride
+		}
+		if err := rename(ctx, c.activeID, prompt); err != nil {
+			return preparedTurn{}, cleanup, err
 		}
 	}
 	ctx = withQueryObserver(ctx, func(query QueryResult) (QueryResult, error) {
@@ -461,21 +563,52 @@ func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string)
 		}
 		return c.applyJoinCandidate(ctx, recordSetID, candidateID, user.ID)
 	})
-	var joinChoice *attachedJoinChoiceError
+	joinChoice := new(*attachedJoinChoiceError)
 	ctx = withAttachedJoin(ctx, func(joinCtx context.Context, query QueryResult) (QueryResult, bool, error) {
 		result, applied, joinErr := c.joinAttachedQuery(joinCtx, prior, prompt, query)
-		if !errors.As(joinErr, &joinChoice) {
-			joinChoice = nil
+		var choice *attachedJoinChoiceError
+		if errors.As(joinErr, &choice) {
+			*joinChoice = choice
 		}
 		return result, applied, joinErr
 	})
-	turn, agentErr := c.agent.AskWithContext(ctx, prompt, contextText)
-	if joinChoice != nil {
-		// This is a clarification, not a failed query or a model-authored
-		// choice. Keep the question in chat history so the next turn can
-		// resolve it from the user's explicit answer.
-		turn, agentErr = Turn{Text: joinChoice.Error()}, nil
+	return preparedTurn{ctx: ctx, user: user, prior: prior, contextText: contextText, joinChoice: joinChoice}, cleanup, nil
+}
+
+// resolveJoinChoice replaces an agent turn with an attached-JOIN
+// clarification question when prepareTurn's withAttachedJoin observer
+// recorded one: the model referenced attached-context metadata matching
+// more than one foreign-key edge. Keeping the question in chat history (not
+// a query error) lets the next turn resolve it from the user's own answer.
+func resolveJoinChoice(joinChoice **attachedJoinChoiceError, turn Turn, agentErr error) (Turn, error) {
+	if joinChoice != nil && *joinChoice != nil {
+		return Turn{Text: (*joinChoice).Error()}, nil
 	}
+	return turn, agentErr
+}
+
+func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string) (Turn, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	defer c.notifyChanged()
+	prepared, cleanup, err := c.prepareTurn(ctx, expectedSessionID, prompt)
+	defer cleanup()
+	if err != nil {
+		return Turn{}, err
+	}
+	turn, agentErr := c.agent.AskWithContext(prepared.ctx, prompt, prepared.contextText)
+	turn, agentErr = resolveJoinChoice(prepared.joinChoice, turn, agentErr)
+	turn = finalizeTurn(turn, agentErr)
+	return c.store.AppendTurn(prepared.ctx, c.activeID, prepared.user.ID, c.source, turn)
+}
+
+// finalizeTurn applies the same fallback text rules Ask and StreamAsk both
+// need before persisting: a genuine agent error (no queries/actions at all,
+// see AIConversation.AskWithContext's own error contract) replaces the turn
+// with a friendly message; an otherwise-empty turn gets a generic one; and a
+// workspace-only turn without model prose surfaces its last action's
+// summary/error as the visible text.
+func finalizeTurn(turn Turn, agentErr error) Turn {
 	if agentErr != nil {
 		turn = Turn{Text: friendlyAgentError(agentErr)}
 	}
@@ -490,7 +623,101 @@ func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string)
 			turn.Text = last.Error
 		}
 	}
-	return c.store.AppendTurn(ctx, c.activeID, user.ID, c.source, turn)
+	return turn
+}
+
+// StreamAsk runs one turn like Ask, but through the agent's
+// StreamAskWithContext when it implements StreamingConversation, forwarding
+// its ai.Event sequence live instead of buffering the whole turn. It shares
+// the exact same persistence path as ask() -- context rebuild, AppendUser,
+// the query/workspace/bookmark/join observers installed on ctx, and a final
+// AppendTurn -- because those observers fire from inside the agent's tool
+// Handlers regardless of whether the turn streams. When the configured agent
+// does not implement StreamingConversation (a test fake, or
+// unavailableSchemaConversation), StreamAsk falls back to running the
+// ordinary buffered Ask and replays its Turn as one synthetic
+// EventTextDelta + EventCompleted pair, so callers see a uniform contract
+// either way.
+//
+// StreamAsk holds SessionChat's lock for the whole stream, exactly as Ask
+// does, so a concurrent Switch/Create/Delete waits for it to finish. Call the
+// returned func once the sequence has been fully ranged over (or abandoned)
+// to get the Turn StreamAsk persisted -- the same Turn Ask would have
+// returned for an equivalent call.
+func (c *SessionChat) StreamAsk(ctx context.Context, prompt string) (iter.Seq2[ai.Event, error], func() (Turn, error)) {
+	return c.streamAsk(ctx, "", prompt)
+}
+
+// StreamAskActive is the streaming counterpart to AskActive: it refuses a
+// browser submission if the terminal switched sessions after the browser
+// read its snapshot.
+func (c *SessionChat) StreamAskActive(ctx context.Context, sessionID, prompt string) (iter.Seq2[ai.Event, error], func() (Turn, error)) {
+	return c.streamAsk(ctx, sessionID, prompt)
+}
+
+func (c *SessionChat) streamAsk(ctx context.Context, expectedSessionID, prompt string) (iter.Seq2[ai.Event, error], func() (Turn, error)) {
+	var final Turn
+	var finalErr error
+	result := func() (Turn, error) { return final, finalErr }
+
+	streaming, ok := c.agent.(StreamingConversation)
+	if !ok {
+		seq := func(yield func(ai.Event, error) bool) {
+			turn, err := c.ask(ctx, expectedSessionID, prompt)
+			final, finalErr = turn, err
+			if err != nil {
+				aiErr := &ai.Error{Code: ai.ErrCodeUpstream, Message: err.Error()}
+				yield(ai.Event{Type: ai.EventError, Error: aiErr}, aiErr)
+				return
+			}
+			if turn.Text != "" {
+				if !yield(ai.Event{Type: ai.EventTextDelta, Text: turn.Text}, nil) {
+					return
+				}
+			}
+			yield(ai.Event{Type: ai.EventCompleted, Usage: turn.Usage.toAI(), StopReason: ai.StopReasonEnd}, nil)
+		}
+		return seq, result
+	}
+
+	seq := func(yield func(ai.Event, error) bool) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		defer c.notifyChanged()
+		prepared, cleanup, err := c.prepareTurn(ctx, expectedSessionID, prompt)
+		defer cleanup()
+		if err != nil {
+			finalErr = err
+			aiErr := &ai.Error{Code: ai.ErrCodeInvalid, Message: err.Error()}
+			yield(ai.Event{Type: ai.EventError, Error: aiErr}, aiErr)
+			return
+		}
+		var streamErr error
+		for event, err := range streaming.StreamAskWithContext(prepared.ctx, prompt, prepared.contextText) {
+			streamErr = err
+			if !yield(event, err) {
+				return
+			}
+			if err != nil {
+				break
+			}
+		}
+		// Mirror AIConversation.AskWithContext's own error contract: a fatal
+		// stream error only becomes a persisted "agent error" turn when it
+		// left nothing usable behind. When queries/actions were already
+		// captured (e.g. a tool succeeded before a later step failed), that
+		// partial Turn is the real result -- same as the non-streaming path.
+		lastTurn := streaming.LastStreamTurn()
+		var persistErr error
+		if streamErr != nil && len(lastTurn.Queries) == 0 && len(lastTurn.Actions) == 0 {
+			persistErr = fmt.Errorf("chat: agent turn: %w", streamErr)
+		}
+		lastTurn, persistErr = resolveJoinChoice(prepared.joinChoice, lastTurn, persistErr)
+		turn := finalizeTurn(lastTurn, persistErr)
+		stored, appendErr := c.store.AppendTurn(prepared.ctx, c.activeID, prepared.user.ID, c.source, turn)
+		final, finalErr = stored, appendErr
+	}
+	return seq, result
 }
 
 // An exact candidate ID does not by itself prove the user chose between

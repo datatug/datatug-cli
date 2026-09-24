@@ -1,31 +1,111 @@
 package chat
 
+// bridge_test.go covers StartBrowserBridge's own construction-error
+// branches (crypto/rand.Read and the two net.Listen calls, via the
+// readRandom/netListenTCP seams) and the /v1/chat/messages handler's
+// AskActive-error branch (via SessionChat's storeAppendUserOverride seam),
+// none of which chatui_bridge_test.go's extensive endpoint/lifecycle
+// coverage reaches -- see that file for the rest of bridge.go's HTTP
+// surface (method/origin/body/session-mismatch guards, the WebSocket
+// disconnect/upgrade-failure/Close paths, and allowedRequest's own Host
+// check).
+
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/gorilla/websocket"
 )
 
-func TestBrowserBridgeSharesSessionWithTerminal(t *testing.T) {
-	ctx := context.Background()
+// TestStartBrowserBridgeRandomFailure covers StartBrowserBridge's own
+// crypto/rand.Read error branch via the readRandom seam: the OS entropy
+// source failing is not reproducible for real, so this overrides the var.
+func TestStartBrowserBridgeRandomFailure(t *testing.T) {
+	restore := readRandom
+	t.Cleanup(func() { readRandom = restore })
+	injected := errors.New("injected rand failure")
+	readRandom = func([]byte) (int, error) { return 0, injected }
+
 	store := openTestStore(t, testStorePath(t), testScope())
-	agent := &contextualStub{turns: []Turn{{Text: "Three matching rows.", Queries: []QueryResult{{Title: "Count", DTQL: "from: {name: Customer}\nlimit: 1", Result: secureread.Result{Columns: []string{"Count"}, Rows: []secureread.Row{{Data: map[string]any{"Count": 3}}}}}}}, {Text: "Another browser reply."}, {Text: "Terminal reply."}}}
-	sessions, err := NewSessionChat(ctx, store, agent, "sqlite:///chinook.db", ProjectCatalog{ID: "demo-project-1"})
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(context.Background(), store, &contextualStub{}, "sqlite:///chinook.db")
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal, err := NewSessionUI(ctx, sessions, "test-model")
+	if _, err := StartBrowserBridge(sessions); err == nil || !errors.Is(err, injected) {
+		t.Fatalf("StartBrowserBridge error = %v, want the injected rand error wrapped", err)
+	}
+}
+
+// TestStartBrowserBridgeBothListenCallsFail covers StartBrowserBridge's own
+// final listen-error branch: the fixed port fails naturally (a real
+// listener occupies 127.0.0.1:3284) and the ephemeral-port fallback is
+// forced to fail too via the netListenTCP seam -- an OS-assigned port
+// itself failing is not reproducible for real.
+func TestStartBrowserBridgeBothListenCallsFail(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:3284")
+	if err != nil {
+		t.Skipf("port 3284 unavailable for the test setup: %v", err)
+	}
+	defer func() { _ = occupied.Close() }()
+
+	restore := netListenTCP
+	t.Cleanup(func() { netListenTCP = restore })
+	injected := errors.New("injected ephemeral listen failure")
+	netListenTCP = func(network, address string) (net.Listener, error) {
+		if address == "127.0.0.1:0" {
+			return nil, injected
+		}
+		return net.Listen(network, address)
+	}
+
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(context.Background(), store, &contextualStub{}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := StartBrowserBridge(sessions); err == nil || !errors.Is(err, injected) {
+		t.Fatalf("StartBrowserBridge error = %v, want the injected ephemeral-listen error wrapped", err)
+	}
+}
+
+// bridgeToken extracts the "h" (host:port) and "t" (capability token)
+// fragment parameters gorilla-chat clients read from BrowserBridge.URL.
+func bridgeToken(t *testing.T, bridgeURL string) (address, token string) {
+	t.Helper()
+	link, err := url.Parse(bridgeURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragment, err := url.ParseQuery(link.Fragment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fragment.Get("h"), fragment.Get("t")
+}
+
+// TestBridgeMessagesHandlerAskActiveStoreErrorSurfaces covers the
+// /v1/chat/messages handler's own sessions.AskActive-error branch (500):
+// with the requested sessionId already matched against a real
+// sessions.Snapshot call, AskActive itself only errors when
+// SessionChat.prepareTurn's store append fails -- forced here via
+// SessionChat's storeAppendUserOverride seam rather than left
+// undocumented, per the founder directive that new code seams for
+// coverage instead of leaving branches untested.
+func TestBridgeMessagesHandlerAskActiveStoreErrorSurfaces(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,165 +114,230 @@ func TestBrowserBridgeSharesSessionWithTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = bridge.Close() })
-	terminal.SetBrowserURL(bridge.URL)
-	var openedURL string
-	terminal.openBrowser = func(url string) error { openedURL = url; return nil }
-	_, _ = terminal.Update(tea.WindowSizeMsg{Width: 200, Height: 36})
-	if terminal.webLinkVisible {
-		t.Fatal("web link was visible before F5")
-	}
-	_, openCmd := terminal.Update(tea.KeyPressMsg{Code: tea.KeyF5})
-	if openCmd == nil {
-		t.Fatal("F5 did not request opening the browser")
-	}
-	_, _ = terminal.Update(openCmd())
-	if openedURL != bridge.URL || terminal.webLinkVisible {
-		t.Fatalf("F5 open result = %q, overlay=%v", openedURL, terminal.webLinkVisible)
-	}
-	terminal.openBrowser = func(string) error { return errors.New("no browser available") }
-	_, openCmd = terminal.Update(tea.KeyPressMsg{Code: tea.KeyF5})
-	_, _ = terminal.Update(openCmd())
-	visible := ansi.Strip(terminal.View().Content)
-	if !terminal.webLinkVisible || !strings.Contains(visible, bridge.URL) {
-		t.Fatalf("failed F5 did not show the URL: visible=%v urlBytes=%d", terminal.webLinkVisible, len(bridge.URL))
-	}
-	_, _ = terminal.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
-	if terminal.webLinkVisible {
-		t.Fatal("Esc did not hide failed-browser dialog")
-	}
-	link, err := url.Parse(bridge.URL)
+
+	snapshot, err := sessions.Snapshot(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(link.Path, "/project/demo-project-1/chat") {
-		t.Fatalf("project chat link path = %q", link.Path)
+
+	injected := errors.New("injected AppendUser failure")
+	sessions.storeAppendUserOverride = func(context.Context, string, string) (ChatMessage, error) {
+		return ChatMessage{}, injected
 	}
-	fragment, err := url.ParseQuery(link.Fragment)
+
+	address, token := bridgeToken(t, bridge.URL)
+	body, err := json.Marshal(map[string]string{"text": "hello", "sessionId": snapshot.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	address := "http://" + fragment.Get("h")
-	request := func(method, path string, body []byte, token, origin string) *http.Response {
-		t.Helper()
-		req, err := http.NewRequest(method, address+path, bytes.NewReader(body))
-		if err != nil {
-			t.Fatal(err)
+	req, err := http.NewRequest(http.MethodPost, "http://"+address+"/v1/chat/messages", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", "https://datatug.app")
+	req.Header.Set("X-DataTug-Chat-Capability", token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("AskActive store error: status = %d, want 500", resp.StatusCode)
+	}
+}
+
+// dialBridgeEvents opens a websocket client against the bridge's
+// /v1/chat/events endpoint with a valid subprotocol token and Origin,
+// mirroring what chatui_bridge_test.go's own websocket tests do.
+func dialBridgeEvents(t *testing.T, bridge *BrowserBridge) *websocket.Conn {
+	t.Helper()
+	address, token := bridgeToken(t, bridge.URL)
+	socket, _, err := (&websocket.Dialer{Subprotocols: []string{"datatug-chat", token}}).Dial("ws://"+address+"/v1/chat/events", http.Header{"Origin": []string{"https://datatug.app"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return socket
+}
+
+// TestBridgeEventsHandlerInitialWriteJSONFailure covers the /v1/chat/events
+// handler's own initial wsWriteJSON-error branch (the "changed" write
+// issued immediately after a successful Upgrade): forced via the
+// wsWriteJSON seam rather than the unreproducible real write-side race
+// documented in this file's own history. StartBrowserBridge captures
+// wsWriteJSON's value exactly once (see its doc comment), so the override
+// MUST be installed before calling it -- installing it after (racing the
+// handler's background connection goroutine, which is what this test
+// originally did) is both ineffective and a genuine data race.
+func TestBridgeEventsHandlerInitialWriteJSONFailure(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	restore := wsWriteJSON
+	t.Cleanup(func() { wsWriteJSON = restore })
+	injected := errors.New("injected initial WriteJSON failure")
+	wsWriteJSON = func(*websocket.Conn, any) error { return injected }
+
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bridge.Close() })
+
+	socket := dialBridgeEvents(t, bridge)
+	defer func() { _ = socket.Close() }()
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	// The handler returns immediately after the failed write without ever
+	// sending the initial "changed" notification, closing the connection
+	// (its deferred conn.Close()) -- the client's read must fail rather
+	// than receive that notification or hang.
+	var notification map[string]string
+	if err := socket.ReadJSON(&notification); err == nil {
+		t.Fatal("expected the server to close the connection after the injected write failure")
+	}
+}
+
+// TestBridgeEventsHandlerChangesWriteJSONFailure covers the /v1/chat/events
+// handler's own wsWriteJSON-error branch inside the `case <-changes:` loop,
+// distinct from the initial write above: a stateful override (installed,
+// like the test above, before StartBrowserBridge -- see wsWriteJSON's doc
+// comment on why a mid-test swap is both ineffective and racy) lets the
+// first (post-Upgrade) write through for real via `restore` and only fails
+// the second write, the one triggered by a later SessionChat.notifyChanged.
+func TestBridgeEventsHandlerChangesWriteJSONFailure(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	restore := wsWriteJSON
+	t.Cleanup(func() { wsWriteJSON = restore })
+	injected := errors.New("injected changes-loop WriteJSON failure")
+	var calls int32
+	wsWriteJSON = func(conn *websocket.Conn, v any) error {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			return restore(conn, v)
 		}
-		req.Header.Set("Origin", origin)
-		req.Header.Set("X-DataTug-Chat-Capability", token)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = resp.Body.Close() })
-		return resp
+		return injected
 	}
-	token := fragment.Get("t")
-	if resp := request("GET", "/datatug/projects/project_summary?id=demo-project-1", nil, token, "https://datatug.app"); resp.StatusCode != http.StatusOK {
-		t.Fatalf("project summary: %d", resp.StatusCode)
-	}
-	if resp := request("GET", "/datatug/projects/project_summary?id=another-project", nil, token, "https://datatug.app"); resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("other project summary: %d", resp.StatusCode)
-	}
-	socket, _, err := (&websocket.Dialer{Subprotocols: []string{"datatug-chat", token}}).Dial("ws://"+fragment.Get("h")+"/v1/chat/events", http.Header{"Origin": []string{"https://datatug.app"}})
+
+	bridge, err := StartBrowserBridge(sessions)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = socket.Close() })
+	t.Cleanup(func() { _ = bridge.Close() })
+
+	socket := dialBridgeEvents(t, bridge)
+	defer func() { _ = socket.Close() }()
 	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
 	var notification map[string]string
 	if err := socket.ReadJSON(&notification); err != nil || notification["type"] != "changed" {
 		t.Fatalf("initial socket event: %v %v", notification, err)
 	}
-	if resp := request("GET", "/v1/chat/session", nil, token, "https://other.example"); resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("foreign origin: %d", resp.StatusCode)
-	}
-	if resp := request("GET", "/v1/chat/session", nil, "wrong", "https://datatug.app"); resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("wrong token: %d", resp.StatusCode)
-	}
-	if resp := request("OPTIONS", "/v1/chat/messages", nil, "", "https://datatug.app"); resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("preflight: %d", resp.StatusCode)
-	}
-	initial, err := sessions.Snapshot(ctx)
-	if err != nil {
+
+	if _, err := sessions.Rename(ctx, "renamed to trigger notifyChanged"); err != nil {
 		t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]string{"text": "Count them", "sessionId": initial.ID})
-	if resp := request("POST", "/v1/chat/messages", body, token, "https://datatug.app"); resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("send: %d", resp.StatusCode)
-	}
-	if err := socket.ReadJSON(&notification); err != nil || notification["type"] != "changed" {
-		t.Fatalf("socket update: %v %v", notification, err)
-	}
-	_, _ = terminal.Update(bridgeTickMsg{})
-	if len(terminal.snapshot.Messages) != 3 || !strings.Contains(terminal.View().Content, "Three matching rows") {
-		t.Fatal("browser turn did not reach terminal")
-	}
-	gridIndex := -1
-	for index := range terminal.entries {
-		if terminal.entries[index].grid != nil {
-			gridIndex = index
-			break
-		}
-	}
-	if !terminal.focusGrid(gridIndex) {
-		t.Fatal("could not focus result grid")
-	}
-	body, _ = json.Marshal(map[string]string{"text": "Continue", "sessionId": initial.ID})
-	if resp := request("POST", "/v1/chat/messages", body, token, "https://datatug.app"); resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("second send: %d", resp.StatusCode)
-	}
-	_, _ = terminal.Update(bridgeTickMsg{})
-	if !terminal.gridFocused || terminal.entries[terminal.activeGrid].recordSetID == "" {
-		t.Fatal("browser update displaced terminal grid focus")
-	}
-	if _, err := sessions.Ask(ctx, "From terminal"); err != nil {
-		t.Fatal(err)
-	}
-	response := request("GET", "/v1/chat/session", nil, token, "https://datatug.app")
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("snapshot: %d", response.StatusCode)
-	}
-	var snapshot ChatSession
-	if err := json.NewDecoder(response.Body).Decode(&snapshot); err != nil {
-		t.Fatal(err)
-	}
-	if len(snapshot.Messages) != 7 || snapshot.Messages[6].Text != "Terminal reply." || len(snapshot.RecordSets) != 1 {
-		t.Fatal("terminal turn did not reach browser snapshot")
+
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := socket.ReadJSON(&notification); err == nil {
+		t.Fatal("expected the server to close the connection after the injected changes-loop write failure")
 	}
 }
 
-func TestBrowserBridgeContinuesWhileDialogsAreOpen(t *testing.T) {
+// TestBridgeEventsHandlerContextDoneReturns covers the /v1/chat/events
+// handler select loop's own `case <-r.Context().Done()` branch: the
+// bridgeBaseContext seam supplies a cancellable base context (http.Server's
+// per-connection/request contexts are children of it), so canceling it
+// here -- without the client ever closing its own socket, which would
+// instead exercise the disconnected case -- forces the server to notice
+// via r.Context() rather than a client-initiated close.
+func TestBridgeEventsHandlerContextDoneReturns(t *testing.T) {
+	base, cancel := context.WithCancel(context.Background())
+	restore := bridgeBaseContext
+	t.Cleanup(func() { bridgeBaseContext = restore })
+	bridgeBaseContext = func(net.Listener) context.Context { return base }
+
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
-	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal, err := NewSessionUI(ctx, sessions, "test-model")
+	bridge, err := StartBrowserBridge(sessions)
 	if err != nil {
 		t.Fatal(err)
 	}
-	terminal.SetBrowserURL("http://example.test")
-	t.Cleanup(func() { terminal.bridgeStop() })
-	tests := []struct {
-		name  string
-		open  func()
-		close func()
-	}{
-		{"query parameters", func() { terminal.queryParameters = &queryParametersDialog{} }, func() { terminal.queryParameters = nil }},
-		{"save query", func() { terminal.saveQueryDialog = &saveQueryDialog{} }, func() { terminal.saveQueryDialog = nil }},
-		{"HTTP setting", func() { terminal.httpSettingDraft = &httpSettingDraft{} }, func() { terminal.httpSettingDraft = nil }},
-		{"connect", func() { terminal.connectDialog = true }, func() { terminal.connectDialog = false }},
+	t.Cleanup(func() { _ = bridge.Close() })
+
+	socket := dialBridgeEvents(t, bridge)
+	defer func() { _ = socket.Close() }()
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var notification map[string]string
+	if err := socket.ReadJSON(&notification); err != nil || notification["type"] != "changed" {
+		t.Fatalf("initial socket event: %v %v", notification, err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			test.open()
-			_, command := terminal.Update(bridgeTickMsg{})
-			test.close()
-			if command == nil {
-				t.Fatal("browser change listener was not rearmed")
-			}
-		})
+
+	cancel()
+
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := socket.ReadJSON(&notification); err == nil {
+		t.Fatal("expected the server to close the connection once its base context was canceled")
+	}
+}
+
+// TestBridgeEventsHandlerChangesChannelClosedEarlyReturns covers the
+// /v1/chat/events handler select loop's own `!ok` branch on the changes
+// channel (bridge.go, restored in the r6 fix round -- see bridgeSubscribeChanges'
+// and the loop's own doc comments for why it's genuinely unreachable
+// through today's real SessionChat.SubscribeChanges, but stays as
+// defensive code rather than being deleted). The bridgeSubscribeChanges
+// seam hands the handler a channel this test can close directly -- standing
+// in for "something closed this specific subscription early" -- something
+// the real SubscribeChanges/stop() pairing can never do from outside this
+// one handler invocation.
+func TestBridgeEventsHandlerChangesChannelClosedEarlyReturns(t *testing.T) {
+	fakeChanges := make(chan struct{})
+	restore := bridgeSubscribeChanges
+	t.Cleanup(func() { bridgeSubscribeChanges = restore })
+	bridgeSubscribeChanges = func(*SessionChat) (<-chan struct{}, func()) {
+		return fakeChanges, func() {}
+	}
+
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{turns: []Turn{{Text: "ok"}}}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bridge.Close() })
+
+	socket := dialBridgeEvents(t, bridge)
+	defer func() { _ = socket.Close() }()
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var notification map[string]string
+	if err := socket.ReadJSON(&notification); err != nil || notification["type"] != "changed" {
+		t.Fatalf("initial socket event: %v %v", notification, err)
+	}
+
+	close(fakeChanges)
+
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := socket.ReadJSON(&notification); err == nil {
+		t.Fatal("expected the server to close the connection once its changes channel closed early")
 	}
 }

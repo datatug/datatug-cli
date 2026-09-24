@@ -7,10 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/pkg/secureread"
-	"google.golang.org/adk/v2/model"
-	"google.golang.org/genai"
+	"github.com/strongo/aichat/ai"
 )
 
 func TestBookmarkCrossSessionContextRestartAndDeletion(t *testing.T) {
@@ -103,80 +101,9 @@ func TestBookmarkCrossSessionContextRestartAndDeletion(t *testing.T) {
 	}
 }
 
-func TestBookmarkWorkspaceTabOpensStructuredGrid(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	catalog := ProjectCatalog{ID: testScope().ProjectID, Title: "Demo"}
-	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", catalog)
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, _ := chat.Snapshot(ctx)
-	recordID := workspaceTestRecord(t, store, session.ID)
-	ref, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "bookmark_create", Reference: ContextReference{Kind: "recordset", ObjectID: recordID}, Title: "Saved customers"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, chat, "test-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u.focusWorkspace()
-	u.setWorkspaceTab(3)
-	view := u.workspaceView(80, 30)
-	if len(u.bookmarkItems) != 1 || !strings.Contains(view, "Saved customers") || !strings.Contains(view, "Source: chinook") || !strings.Contains(view, "snapshot:") || !strings.Contains(view, "DTQL:") {
-		t.Fatalf("bookmark tab did not render: %+v", u.bookmarkItems)
-	}
-	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !u.bookmarkGridFocused || u.bookmarkGrid == nil || len(u.bookmarkGrid.Rows()) != 3 {
-		t.Fatalf("bookmark grid did not open: %+v", u.bookmarkGrid)
-	}
-	u.updateWorkspaceKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	snapshot, err := chat.Snapshot(ctx)
-	if err != nil || len(snapshot.Workspace.Attachments) != 1 || !sameReference(snapshot.Workspace.Attachments[0], ref) {
-		t.Fatalf("UI attachment did not use shared action: %+v, %v", snapshot.Workspace.Attachments, err)
-	}
-}
-
-func TestEmptyBookmarkedGridNavigation(t *testing.T) {
-	ctx := context.Background()
-	scope := testScope()
-	store := openTestStore(t, testStorePath(t), scope)
-	chat, err := NewSessionChat(ctx, store, &contextualStub{}, scope.Sources[scope.Database], ProjectCatalog{ID: scope.ProjectID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := chat.Snapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	user, err := store.AppendUser(ctx, session.ID, "show missing rows")
-	if err != nil {
-		t.Fatal(err)
-	}
-	turn, err := store.AppendTurn(ctx, session.ID, user.ID, scope.Sources[scope.Database], Turn{Queries: []QueryResult{{
-		Title: "Empty", DTQL: "from: {name: Customer}\nlimit: 1", SourceID: scope.Database,
-		Result: secureread.Result{Columns: []string{"CustomerId"}},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "bookmark_create", Reference: ContextReference{Kind: "recordset", ObjectID: turn.Queries[0].RecordSetID}}); err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, chat, "test-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u.focusWorkspace()
-	u.setWorkspaceTab(3)
-	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyDown})
-	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyUp})
-	if u.bookmarkGrid == nil || len(u.bookmarkGrid.Rows()) != 0 {
-		t.Fatalf("empty bookmark grid navigation = %+v", u.bookmarkGrid)
-	}
-}
+// TestBookmarkWorkspaceTabOpensStructuredGrid and
+// TestEmptyBookmarkedGridNavigation were ported onto ChatUI's workspacePanel
+// in chatui_sidepanel_test.go.
 
 func TestAgentBookmarkActionsAndDiscoveryUseDataTug(t *testing.T) {
 	ctx := context.Background()
@@ -186,15 +113,15 @@ func TestAgentBookmarkActionsAndDiscoveryUseDataTug(t *testing.T) {
 		t.Fatal(err)
 	}
 	recordID := workspaceTestRecord(t, store, session.ID)
-	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("workspace_action", map[string]any{"kind": "bookmark_create", "reference": map[string]any{"kind": "recordset", "objectId": recordID, "title": "Customers"}, "title": "Saved customers"}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Saved.", genai.RoleModel)},
-		{Content: genai.NewContentFromFunctionCall("workspace_action", map[string]any{"kind": "bookmark_add_tag", "tag": "incident"}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Tagged.", genai.RoleModel)},
-		{Content: genai.NewContentFromFunctionCall("find_bookmarks", map[string]any{"tags": []string{"incident"}}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Found the saved customers bookmark.", genai.RoleModel)},
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolWorkspaceAction, map[string]any{"kind": "bookmark_create", "reference": map[string]any{"kind": "recordset", "objectId": recordID, "title": "Customers"}, "title": "Saved customers"})}},
+		{text: "Saved."},
+		{toolCalls: []ai.ToolCall{toolCall("2", toolWorkspaceAction, map[string]any{"kind": "bookmark_add_tag", "tag": "incident"})}},
+		{text: "Tagged."},
+		{toolCalls: []ai.ToolCall{toolCall("3", toolFindBookmarks, map[string]any{"tags": []string{"incident"}})}},
+		{text: "Found the saved customers bookmark."},
 	}}
-	agent, err := NewADKConversation(llm, &fakeExecutor{result: secureread.Result{}}, "sqlite:///chinook.db", "- Customer: CustomerId, City")
+	agent, err := NewAIConversation(llm, &fakeExecutor{result: secureread.Result{}}, "sqlite:///chinook.db", "- Customer: CustomerId, City")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +147,7 @@ func TestAgentBookmarkActionsAndDiscoveryUseDataTug(t *testing.T) {
 		t.Fatalf("model did not receive structured tool results: %d requests", len(llm.requests))
 	}
 	for _, request := range llm.requests {
-		if strings.Contains(fmt.Sprint(request.Contents), "CustomerId=5") {
+		if strings.Contains(fmt.Sprint(request.Messages), "CustomerId=5") {
 			t.Fatal("raw row values leaked to the model")
 		}
 	}
@@ -295,15 +222,15 @@ func TestBookmarkUsesActualSafeSourceIDAcrossSessions(t *testing.T) {
 	if !strings.Contains(modelContext, "source=private") || strings.Contains(modelContext, "private-cell-value") || strings.Contains(modelContext, "sqlite:///") || strings.Contains(modelContext, "token=secret") {
 		t.Fatalf("source or private metadata leaked: %s", modelContext)
 	}
-	llm := &scriptedLLM{responses: []*model.LLMResponse{
-		{Content: genai.NewContentFromFunctionCall("find_bookmarks", map[string]any{}, genai.RoleModel)},
-		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolFindBookmarks, map[string]any{})}},
+		{toolCalls: []ai.ToolCall{toolCall("2", toolRunDTQL, map[string]any{
 			"sourceId": "private", "title": "Invoices", "dtql": "from: {name: Invoice}\nwhere:\n  op: In\n  left: {field: CustomerId}\n  right: {param: selection_1_c1}\nlimit: 20",
-		}, genai.RoleModel)},
-		{Content: genai.NewContentFromText("Done.", genai.RoleModel)},
+		})}},
+		{text: "Done."},
 	}}
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"InvoiceId"}}}
-	agent, err := NewADKConversation(llm, executor, scope.Sources[scope.Database], "- Invoice: InvoiceId, CustomerId", WithSources(scope.Sources))
+	agent, err := NewAIConversation(llm, executor, scope.Sources[scope.Database], "- Invoice: InvoiceId, CustomerId", WithSources(scope.Sources))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +245,7 @@ func TestBookmarkUsesActualSafeSourceIDAcrossSessions(t *testing.T) {
 		t.Fatalf("wrong local source/binding: source=%q params=%#v", executor.source, executor.params)
 	}
 	for _, request := range llm.requests {
-		payload := fmt.Sprint(request.Contents)
+		payload := fmt.Sprint(request.Messages)
 		if strings.Contains(payload, "private-cell-value") || strings.Contains(payload, "token=secret") || strings.Contains(payload, "sqlite:///") || strings.Contains(payload, "CustomerId=5") {
 			t.Fatalf("private bookmark data leaked into model request: %s", payload)
 		}

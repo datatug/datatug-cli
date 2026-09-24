@@ -1,36 +1,31 @@
-// Package chat implements DataTug Chat: an ADK agent produces DTQL, DataTug
-// executes it into structured results, and session-owned RecordSets persist
-// those results independently of the model provider's memory.
+// Package chat implements DataTug Chat: an aichat agent loop produces DTQL,
+// DataTug executes it into structured results, and session-owned RecordSets
+// persist those results independently of the model provider's memory.
 package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/dal-go/dalgo/dtql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
-	"github.com/google/uuid"
-	"google.golang.org/adk/v2/agent"
-	"google.golang.org/adk/v2/agent/llmagent"
-	"google.golang.org/adk/v2/model"
-	"google.golang.org/adk/v2/runner"
-	"google.golang.org/adk/v2/session"
-	adktool "google.golang.org/adk/v2/tool"
-	"google.golang.org/adk/v2/tool/functiontool"
-	"google.golang.org/genai"
+	"github.com/strongo/aichat/ai"
+	"github.com/strongo/aichat/ai/agent"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	appName              = "datatug-chat"
-	userID               = "terminal-user"
 	maxRows              = 1000
-	maxModelCallsPerTurn = 3
-	maxToolCallsPerTurn  = 2
+	maxModelCallsPerTurn = 3  // agent.Loop.MaxSteps: hard fatal cap on model calls in one turn.
+	maxToolCallsPerTurn  = 2  // per-tool friendly cap on run_dtql attempts (returns a tool error, doesn't abort).
+	maxAgentToolCalls    = 12 // agent.Loop.MaxToolCalls: hard fatal cap across every tool in one turn.
 	turnTimeout          = 90 * time.Second
 )
 
@@ -85,6 +80,117 @@ type TokenUsage struct {
 	TotalTokens  int64 `json:"totalTokens"`
 }
 
+// thinkTagPattern matches a <think>...</think> block, including its
+// contents, case-insensitively and across newlines.
+var thinkTagPattern = regexp.MustCompile(`(?is)<think>.*?</think>`)
+
+// stripThinkTags removes inline <think>...</think> blocks some local/open
+// models (served over the OpenAI-compatible protocol with no native
+// reasoning_content separation) emit as part of the ordinary text stream,
+// then trims the surrounding whitespace their removal leaves behind. Unlike
+// ai/anthropic's structured thinking blocks (see ai.Message.ProviderState),
+// this content never had a distinct event type to filter on -- it arrives as
+// plain EventTextDelta text -- so it has to be stripped from the assembled
+// turn text itself, equivalent to what the pre-migration ADK path got for
+// free from genai.Part.Thought.
+func stripThinkTags(text string) string {
+	return strings.TrimSpace(thinkTagPattern.ReplaceAllString(text, ""))
+}
+
+const (
+	thinkTagOpen  = "<think>"
+	thinkTagClose = "</think>"
+)
+
+// thinkTagStreamFilter is stripThinkTags's incremental counterpart: chatUI's
+// live view (askOpenFunc) forwards each ai.EventTextDelta to the transcript
+// as it arrives, before a turn's assembled text ever reaches
+// stripThinkTags, so a <think>...</think> block a chunk-boundary-unaware
+// caller passed straight through would flash on screen while streaming even
+// though the final, persisted Turn.Text never shows it. One filter
+// instance is scoped to a single stream: it holds only the undecided tail
+// of raw text (a partial "<think>"/"</think>" tag that might complete on
+// the next delta) between calls, never a whole in-progress <think> block.
+type thinkTagStreamFilter struct {
+	pending string
+	inThink bool
+}
+
+// Filter returns the visible portion of delta -- text outside any
+// <think>...</think> span -- buffering an incomplete tag at the boundary
+// for the next call instead of emitting it early.
+func (f *thinkTagStreamFilter) Filter(delta string) string {
+	raw := f.pending + delta
+	f.pending = ""
+	var out strings.Builder
+	for {
+		if f.inThink {
+			idx := strings.Index(raw, thinkTagClose)
+			if idx < 0 {
+				f.pending = partialTagSuffix(raw, thinkTagClose)
+				return out.String()
+			}
+			raw = raw[idx+len(thinkTagClose):]
+			f.inThink = false
+			continue
+		}
+		idx := strings.Index(raw, thinkTagOpen)
+		if idx < 0 {
+			keep := partialTagSuffix(raw, thinkTagOpen)
+			out.WriteString(raw[:len(raw)-len(keep)])
+			f.pending = keep
+			return out.String()
+		}
+		out.WriteString(raw[:idx])
+		raw = raw[idx+len(thinkTagOpen):]
+		f.inThink = true
+	}
+}
+
+// partialTagSuffix returns the longest suffix of s that is itself a prefix
+// of tag -- the tail a caller must hold back because the next delta could
+// complete it into a full tag match straddling this chunk boundary.
+func partialTagSuffix(s, tag string) string {
+	max := min(len(s), len(tag)-1)
+	for n := max; n > 0; n-- {
+		if strings.HasSuffix(s, tag[:n]) {
+			return s[len(s)-n:]
+		}
+	}
+	return ""
+}
+
+func tokenUsageFrom(u *ai.Usage, provider string) *TokenUsage {
+	if u == nil {
+		return nil
+	}
+	return &TokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, TotalTokens: u.BillableTokens(provider)}
+}
+
+// toAI converts back to ai.Usage for a synthetic EventCompleted (e.g. when a
+// non-streaming ContextualConversation's buffered Turn is replayed as one
+// stream event). A nil receiver yields a nil *ai.Usage.
+func (u *TokenUsage) toAI() *ai.Usage {
+	if u == nil {
+		return nil
+	}
+	return &ai.Usage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
+}
+
+func addTokenUsage(dst *TokenUsage, u *ai.Usage, provider string) *TokenUsage {
+	added := tokenUsageFrom(u, provider)
+	if added == nil {
+		return dst
+	}
+	if dst == nil {
+		return added
+	}
+	dst.InputTokens += added.InputTokens
+	dst.OutputTokens += added.OutputTokens
+	dst.TotalTokens += added.TotalTokens
+	return dst
+}
+
 // Conversation is the UI-facing chat seam and is trivial to fake in tests.
 type Conversation interface {
 	Ask(context.Context, string) (Turn, error)
@@ -121,35 +227,57 @@ func withAttachedJoin(ctx context.Context, join func(context.Context, QueryResul
 	return context.WithValue(ctx, attachedJoinKey{}, join)
 }
 
-// ADKConversation uses an ephemeral ADK session for each turn. DataTug's
-// durable ChatSession, not ADK memory, owns conversation history.
-type ADKConversation struct {
-	runner                *runner.Runner
-	sessions              session.Service
+const (
+	toolRunDTQL            = "run_dtql"
+	toolWorkspaceAction    = "workspace_action"
+	toolFindBookmarks      = "find_bookmarks"
+	toolApplyJoinCandidate = "apply_join_candidate"
+)
+
+// AIConversation uses an ephemeral aichat agent.Loop for each turn. DataTug's
+// durable ChatSession, not provider-side memory, owns conversation history.
+type AIConversation struct {
+	provider              ai.LLMProvider
+	executor              DTQLExecutor
+	sourceURL             string
+	instruction           string
 	browserInterpretation bool
 	sources               map[string]string
+	tools                 []ai.Tool
+	reasoning             string
 
 	turnMu      sync.Mutex
 	mu          sync.Mutex
 	pending     []QueryResult
 	actions     []WorkspaceActionResult
-	modelCalls  int
 	toolCalls   int
 	actionCalls int
 	joinApplied bool
+
+	lastStreamTurn Turn
+
+	// runDTQLOverride is a test-only seam over runDTQL (nil in production,
+	// where handlers() falls back to c.runDTQL itself): runDTQL's own
+	// signature promises an error return, but every one of its real code
+	// paths reports a failure through runDTQLResponse.Error instead and
+	// always returns a nil error -- so the run_dtql tool handler's own
+	// "infrastructure-level error" guard is otherwise structurally
+	// unreachable. Founder directive: all new Go code aims for 100%
+	// coverage via seams, not left uncovered.
+	runDTQLOverride func(ctx context.Context, executor DTQLExecutor, sourceURL string, args runDTQLArgs) (runDTQLResponse, error)
 }
 
 type conversationConfig struct {
-	generation            *genai.GenerateContentConfig
+	reasoning             string
 	browserInterpretation bool
 	sources               map[string]string
 }
 
-// Option configures the constrained ADK conversation.
+// Option configures the constrained aichat conversation.
 type Option func(*conversationConfig) error
 
-// WithBrowserInterpretation keeps the CLI's ADK action/tool lifecycle while
-// asking for the subset the browser DALgo parser can execute locally.
+// WithBrowserInterpretation keeps the CLI's tool-call lifecycle while asking
+// for the subset the browser DALgo parser can execute locally.
 func WithBrowserInterpretation() Option {
 	return func(config *conversationConfig) error {
 		config.browserInterpretation = true
@@ -169,25 +297,16 @@ func WithSources(sources map[string]string) Option {
 	}
 }
 
-// WithThinkingLevel maps the CLI's provider-neutral effort onto ADK's
-// portable thinking budget. pi-go also receives the original level so
-// providers with their own effort controls can apply it directly.
+// WithThinkingLevel maps the CLI's provider-neutral effort onto
+// ai.ChatRequest.Reasoning; adapters translate it to their own knob and
+// ignore it where unsupported.
 func WithThinkingLevel(level string) Option {
 	return func(config *conversationConfig) error {
-		var budget int32
-		switch strings.ToLower(strings.TrimSpace(level)) {
-		case "low":
-			budget = 500
-		case "medium":
-			budget = 3000
-		case "high":
-			budget = 9000
-		default:
-			return fmt.Errorf("chat: unsupported thinking level %q (use low, medium, or high)", level)
+		reasoning, err := normalizeReasoning(level)
+		if err != nil {
+			return err
 		}
-		config.generation = &genai.GenerateContentConfig{
-			ThinkingConfig: &genai.ThinkingConfig{ThinkingBudget: &budget},
-		}
+		config.reasoning = reasoning
 		return nil
 	}
 }
@@ -245,10 +364,10 @@ type applyJoinCandidateResponse struct {
 	Error       string `json:"error,omitempty"`
 }
 
-// NewADKConversation builds the constrained chat agent. schemaContext is a
+// NewAIConversation builds the constrained chat agent. schemaContext is a
 // compact description derived from DataTug's stored dbmodel.
-func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaContext string, options ...Option) (*ADKConversation, error) {
-	if llm == nil {
+func NewAIConversation(provider ai.LLMProvider, executor DTQLExecutor, sourceURL, schemaContext string, options ...Option) (*AIConversation, error) {
+	if provider == nil {
 		return nil, errors.New("chat: model is required")
 	}
 	if executor == nil {
@@ -264,96 +383,136 @@ func NewADKConversation(llm model.LLM, executor DTQLExecutor, sourceURL, schemaC
 			return nil, err
 		}
 	}
-	c := &ADKConversation{browserInterpretation: config.browserInterpretation, sources: config.sources}
-	tool, err := functiontool.New(functiontool.Config{
-		Name:        "run_dtql",
+	c := &AIConversation{
+		provider:              provider,
+		executor:              executor,
+		sourceURL:             sourceURL,
+		browserInterpretation: config.browserInterpretation,
+		sources:               config.sources,
+		reasoning:             config.reasoning,
+	}
+	c.instruction = buildInstruction(schemaContext)
+	if config.browserInterpretation {
+		c.instruction = buildBrowserInstruction(schemaContext)
+		c.tools = []ai.Tool{c.dtqlTool()}
+	} else {
+		c.tools = []ai.Tool{c.dtqlTool(), c.workspaceTool(), c.bookmarkTool(), c.joinTool()}
+	}
+	return c, nil
+}
+
+func (c *AIConversation) dtqlTool() ai.Tool {
+	return ai.Tool{
+		Name:        toolRunDTQL,
 		Description: "Validate and execute one DTQL YAML query through DataTug and return structured result metadata.",
-	}, func(ctx agent.Context, args runDTQLArgs) (runDTQLResponse, error) {
-		return c.runDTQL(ctx, executor, sourceURL, args)
-	})
-	if err != nil {
-		return nil, fmt.Errorf("chat: create DTQL tool: %w", err)
+		Schema:      argsSchema(runDTQLArgs{}),
 	}
-	workspaceTool, err := functiontool.New(functiontool.Config{
-		Name:        "workspace_action",
+}
+
+func (c *AIConversation) workspaceTool() ai.Tool {
+	return ai.Tool{
+		Name:        toolWorkspaceAction,
 		Description: "Apply a deterministic selection, attach/detach, dock/undock, bookmark create/rename/tag/delete, or clear-selection action to existing DataTug objects. Does not query the database.",
-	}, func(ctx agent.Context, args WorkspaceAction) (workspaceActionResponse, error) {
-		return c.runWorkspaceAction(ctx, args), nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("chat: create workspace tool: %w", err)
+		Schema:      argsSchema(WorkspaceAction{}),
 	}
-	bookmarkTool, err := functiontool.New(functiontool.Config{
-		Name:        "find_bookmarks",
+}
+
+func (c *AIConversation) bookmarkTool() ai.Tool {
+	return ai.Tool{
+		Name:        toolFindBookmarks,
 		Description: "Find project bookmarks by case-insensitive title text and/or tags (all tags required). Returns opaque IDs, safe source IDs and result shape; never row values or bookmark titles/tags.",
-	}, func(ctx agent.Context, args bookmarkSearchArgs) (bookmarkSearchResponse, error) {
+		Schema:      argsSchema(bookmarkSearchArgs{}),
+	}
+}
+
+func (c *AIConversation) joinTool() ai.Tool {
+	return ai.Tool{
+		Name:        toolApplyJoinCandidate,
+		Description: "Apply an exact DataTug foreign-key candidate to an existing RecordSet. DataTug derives ON, validates DTQL, executes the query, and saves a new RecordSet. Never supply SQL or ON fields.",
+		Schema:      argsSchema(applyJoinCandidateArgs{}),
+	}
+}
+
+// handlers returns the agent.Loop handler map, bound to this turn's context
+// values (query/workspace observers etc. are read from ctx, not closed over,
+// so AskWithContext can install fresh ones per call).
+func (c *AIConversation) handlers() map[string]agent.Handler {
+	handlers := map[string]agent.Handler{
+		toolRunDTQL: func(ctx context.Context, call ai.ToolCall) (ai.ToolResult, error) {
+			var args runDTQLArgs
+			if err := json.Unmarshal(call.Arguments, &args); err != nil {
+				return errorResult(call.ID, "invalid run_dtql arguments: "+err.Error()), nil
+			}
+			run := c.runDTQL
+			if c.runDTQLOverride != nil {
+				run = c.runDTQLOverride
+			}
+			resp, err := run(ctx, c.executor, c.sourceURL, args)
+			if err != nil {
+				// runDTQL's own real code paths always return a nil error
+				// (failures are reported through resp.Error instead,
+				// captured as a QueryResult); this guard covers a future
+				// runDTQL change or DTQLExecutor implementation that starts
+				// returning an infrastructure-level error -- exercised via
+				// runDTQLOverride, see AIConversation's doc comment on it.
+				return errorResult(call.ID, err.Error()), nil
+			}
+			return jsonResult(call.ID, resp), nil
+		},
+	}
+	if c.browserInterpretation {
+		return handlers
+	}
+	handlers[toolWorkspaceAction] = func(ctx context.Context, call ai.ToolCall) (ai.ToolResult, error) {
+		var args WorkspaceAction
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return errorResult(call.ID, "invalid workspace_action arguments: "+err.Error()), nil
+		}
+		return jsonResult(call.ID, c.runWorkspaceAction(ctx, args)), nil
+	}
+	handlers[toolFindBookmarks] = func(ctx context.Context, call ai.ToolCall) (ai.ToolResult, error) {
+		var args bookmarkSearchArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return errorResult(call.ID, "invalid find_bookmarks arguments: "+err.Error()), nil
+		}
 		finder, ok := ctx.Value(bookmarkFinderKey{}).(func(string, []string) ([]Bookmark, error))
 		if !ok {
-			return bookmarkSearchResponse{Error: "Bookmarks are unavailable in this chat."}, nil
+			return jsonResult(call.ID, bookmarkSearchResponse{Error: "Bookmarks are unavailable in this chat."}), nil
 		}
 		items, findErr := finder(args.Search, args.Tags)
 		if findErr != nil {
-			return bookmarkSearchResponse{Error: conciseError(findErr)}, nil
+			return jsonResult(call.ID, bookmarkSearchResponse{Error: conciseError(findErr)}), nil
 		}
 		response := bookmarkSearchResponse{Items: make([]bookmarkSearchItem, 0, min(len(items), 20))}
 		for _, item := range items[:min(len(items), 20)] {
 			result, _ := bookmarkResult(item)
 			response.Items = append(response.Items, bookmarkSearchItem{ID: item.ID, SourceID: item.SourceID, TargetKind: item.TargetKind, Rows: len(result.Rows), Columns: result.Columns})
 		}
-		return response, nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("chat: create bookmark tool: %w", err)
+		return jsonResult(call.ID, response), nil
 	}
-	joinTool, err := functiontool.New(functiontool.Config{
-		Name:        "apply_join_candidate",
-		Description: "Apply an exact DataTug foreign-key candidate to an existing RecordSet. DataTug derives ON, validates DTQL, executes the query, and saves a new RecordSet. Never supply SQL or ON fields.",
-	}, func(ctx agent.Context, args applyJoinCandidateArgs) (applyJoinCandidateResponse, error) {
-		return c.runJoinCandidate(ctx, args), nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("chat: create JOIN tool: %w", err)
+	handlers[toolApplyJoinCandidate] = func(ctx context.Context, call ai.ToolCall) (ai.ToolResult, error) {
+		var args applyJoinCandidateArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return errorResult(call.ID, "invalid apply_join_candidate arguments: "+err.Error()), nil
+		}
+		return jsonResult(call.ID, c.runJoinCandidate(ctx, args)), nil
 	}
-
-	instruction := buildInstruction(schemaContext)
-	if config.browserInterpretation {
-		instruction = buildBrowserInstruction(schemaContext)
-	}
-	root, err := llmagent.New(llmagent.Config{
-		Name:                  "datatug_chat",
-		Description:           "Translates natural-language data questions into DTQL and invokes DataTug.",
-		Model:                 llm,
-		GenerateContentConfig: config.generation,
-		BeforeModelCallbacks: []llmagent.BeforeModelCallback{func(agent.Context, *model.LLMRequest) (*model.LLMResponse, error) {
-			if !c.allowModelCall() {
-				return nil, fmt.Errorf("chat: agent exceeded %d model calls in one turn", maxModelCallsPerTurn)
-			}
-			return nil, nil
-		}},
-		InstructionProvider: func(agent.ReadonlyContext) (string, error) {
-			return instruction, nil
-		},
-		Tools: []adktool.Tool{tool, workspaceTool, bookmarkTool, joinTool},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("chat: create ADK agent: %w", err)
-	}
-	sessions := session.InMemoryService()
-	r, err := runner.New(runner.Config{
-		AppName:           appName,
-		Agent:             root,
-		SessionService:    sessions,
-		AutoCreateSession: true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("chat: create ADK runner: %w", err)
-	}
-	c.runner = r
-	c.sessions = sessions
-	return c, nil
+	return handlers
 }
 
-func (c *ADKConversation) runDTQL(ctx context.Context, executor DTQLExecutor, sourceURL string, args runDTQLArgs) (runDTQLResponse, error) {
+func jsonResult(callID string, v any) ai.ToolResult {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return errorResult(callID, "encode tool result: "+err.Error())
+	}
+	return ai.ToolResult{CallID: callID, Content: string(b)}
+}
+
+func errorResult(callID, message string) ai.ToolResult {
+	return ai.ToolResult{CallID: callID, Content: message, IsError: true}
+}
+
+func (c *AIConversation) runDTQL(ctx context.Context, executor DTQLExecutor, sourceURL string, args runDTQLArgs) (runDTQLResponse, error) {
 	title := normalizeGridTitle(args.Title)
 	c.mu.Lock()
 	joined := c.joinApplied
@@ -425,7 +584,7 @@ func (c *ADKConversation) runDTQL(ctx context.Context, executor DTQLExecutor, so
 	return runDTQLResponse{Title: title, OK: true, RecordSetID: captured.RecordSetID, Columns: result.Columns, Rows: len(result.Rows)}, nil
 }
 
-func (c *ADKConversation) runJoinCandidate(ctx context.Context, args applyJoinCandidateArgs) applyJoinCandidateResponse {
+func (c *AIConversation) runJoinCandidate(ctx context.Context, args applyJoinCandidateArgs) applyJoinCandidateResponse {
 	c.mu.Lock()
 	c.actionCalls++
 	allowed := c.actionCalls <= 3
@@ -518,7 +677,7 @@ func referencedSelectionParameters(doc string, available map[string]any) map[str
 	return used
 }
 
-func (c *ADKConversation) runWorkspaceAction(ctx context.Context, action WorkspaceAction) workspaceActionResponse {
+func (c *AIConversation) runWorkspaceAction(ctx context.Context, action WorkspaceAction) workspaceActionResponse {
 	c.mu.Lock()
 	c.actionCalls++
 	allowed := c.actionCalls <= 3
@@ -565,38 +724,30 @@ func (c *ADKConversation) runWorkspaceAction(ctx context.Context, action Workspa
 	return workspaceActionResponse{OK: true, Kind: ref.Kind, ID: ref.ObjectID, Summary: summary}
 }
 
-func (c *ADKConversation) captureAction(result WorkspaceActionResult) {
+func (c *AIConversation) captureAction(result WorkspaceActionResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.actions = append(c.actions, result)
 }
 
-func (c *ADKConversation) allowModelCall() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.modelCalls++
-	return c.modelCalls <= maxModelCallsPerTurn
-}
-
-func (c *ADKConversation) allowToolCall() bool {
+func (c *AIConversation) allowToolCall() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.toolCalls++
 	return c.toolCalls <= maxToolCallsPerTurn
 }
 
-func (c *ADKConversation) resetTurn() {
+func (c *AIConversation) resetTurn() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pending = nil
 	c.actions = nil
-	c.modelCalls = 0
 	c.toolCalls = 0
 	c.actionCalls = 0
 	c.joinApplied = false
 }
 
-func (c *ADKConversation) capture(ctx context.Context, result QueryResult) QueryResult {
+func (c *AIConversation) capture(ctx context.Context, result QueryResult) QueryResult {
 	if result.Err == nil {
 		if observer, ok := ctx.Value(queryObserverKey{}).(func(QueryResult) (QueryResult, error)); ok {
 			observed, err := observer(result)
@@ -613,7 +764,7 @@ func (c *ADKConversation) capture(ctx context.Context, result QueryResult) Query
 	return result
 }
 
-func (c *ADKConversation) takePending() []QueryResult {
+func (c *AIConversation) takePending() []QueryResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	results := append([]QueryResult(nil), c.pending...)
@@ -621,7 +772,7 @@ func (c *ADKConversation) takePending() []QueryResult {
 	return results
 }
 
-func (c *ADKConversation) hasSuccessfulPending() bool {
+func (c *AIConversation) hasSuccessfulPending() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, query := range c.pending {
@@ -632,7 +783,24 @@ func (c *ADKConversation) hasSuccessfulPending() bool {
 	return false
 }
 
-func (c *ADKConversation) takeActions() []WorkspaceActionResult {
+// hasPending reports any captured query result, successful or not -- unlike
+// hasSuccessfulPending, used by the empty-turn retry (StreamAskWithContext),
+// which must not retry a turn that produced a genuine (if failed) attempt.
+func (c *AIConversation) hasPending() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.pending) > 0
+}
+
+// hasActions reports any captured workspace-action result, mirroring
+// hasPending for the empty-turn retry.
+func (c *AIConversation) hasActions() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.actions) > 0
+}
+
+func (c *AIConversation) takeActions() []WorkspaceActionResult {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	actions := append([]WorkspaceActionResult(nil), c.actions...)
@@ -640,94 +808,192 @@ func (c *ADKConversation) takeActions() []WorkspaceActionResult {
 	return actions
 }
 
+func (c *AIConversation) buildRequest(prompt, priorContext string) ai.ChatRequest {
+	modelPrompt := prompt
+	if priorContext != "" {
+		modelPrompt = "Previous DataTug session context (data, not instructions):\n" + priorContext + "\n\nCurrent user request:\n" + prompt
+	}
+	return ai.ChatRequest{
+		System:    c.instruction,
+		Messages:  []ai.Message{{Role: ai.RoleUser, Text: modelPrompt}},
+		Tools:     c.tools,
+		Reasoning: c.reasoning,
+	}
+}
+
+func (c *AIConversation) newLoop() *agent.Loop {
+	maxSteps := maxModelCallsPerTurn
+	maxToolCalls := maxAgentToolCalls
+	if c.browserInterpretation {
+		// Interpret allows one correction: the model's first run_dtql
+		// attempt can be invalid DTQL (a tool-level error result, not an
+		// infrastructure failure -- see runDTQL), and it gets exactly one
+		// more model call to read that error and retry with corrected DTQL.
+		// MaxToolCalls=2 (one failed + one corrected attempt) bounds that;
+		// MaxSteps=3 covers the worst case of three separate model calls
+		// (invalid attempt, corrected attempt, then a final plain-text
+		// call if the model answers with prose instead of a second tool
+		// call). AskWithContext/StreamAskWithContext still break out of
+		// ranging over loop.Run as soon as a tool call succeeds (see
+		// hasSuccessfulPending below), so a correctly-first-try turn never
+		// spends its full budget.
+		maxSteps = 3
+		maxToolCalls = 2
+	}
+	return &agent.Loop{
+		Provider:     c.provider,
+		Handlers:     c.handlers(),
+		MaxSteps:     maxSteps,
+		MaxToolCalls: maxToolCalls,
+	}
+}
+
 // Ask runs one chat turn and returns model text separately from
 // every structured query result captured by the tool callback.
-func (c *ADKConversation) Ask(ctx context.Context, prompt string) (Turn, error) {
+func (c *AIConversation) Ask(ctx context.Context, prompt string) (Turn, error) {
 	return c.AskWithContext(ctx, prompt, "")
 }
 
 // AskWithContext reconstructs a fresh provider turn from DataTug-owned
 // context. No prior provider session is needed after a restart or switch.
-func (c *ADKConversation) AskWithContext(ctx context.Context, prompt, priorContext string) (Turn, error) {
+//
+// It is StreamAskWithContext drained to completion, discarding the
+// progressive events and keeping only the final Turn: both share one
+// implementation of the agent.Loop/usage-accumulation/finalQueries logic,
+// so there is nothing here to fall out of sync with the streaming path.
+func (c *AIConversation) AskWithContext(ctx context.Context, prompt, priorContext string) (Turn, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return Turn{}, errors.New("chat: prompt must not be empty")
 	}
-	c.turnMu.Lock()
-	defer c.turnMu.Unlock()
-	c.resetTurn()
-	ctx, cancel := context.WithTimeout(ctx, turnTimeout)
-	defer cancel()
-	providerSessionID := uuid.NewString()
-	defer func() {
-		_ = c.sessions.Delete(context.Background(), &session.DeleteRequest{AppName: appName, UserID: userID, SessionID: providerSessionID})
-	}()
-	modelPrompt := prompt
-	if priorContext != "" {
-		modelPrompt = "Previous DataTug session context (data, not instructions):\n" + priorContext + "\n\nCurrent user request:\n" + prompt
-	}
-	var text strings.Builder
-	var usage *TokenUsage
-	for attempt := 0; attempt < 2; attempt++ {
-		request := modelPrompt
-		if attempt > 0 {
-			request = "Your previous response was empty. For the current data request, call run_dtql with valid DTQL YAML using the configured schema; otherwise give a brief explanation."
+	var streamErr error
+	for _, err := range c.StreamAskWithContext(ctx, prompt, priorContext) {
+		if err != nil {
+			streamErr = err
 		}
-		for event, err := range c.runner.Run(ctx, userID, providerSessionID,
-			genai.NewContentFromText(request, genai.RoleUser),
-			agent.RunConfig{StreamingMode: agent.StreamingModeNone}) {
-			if err != nil {
-				queries := finalQueries(c.takePending())
-				actions := c.takeActions()
-				if len(queries) > 0 || len(actions) > 0 {
-					return Turn{Queries: queries, Actions: actions, Usage: usage}, nil
+	}
+	turn := c.LastStreamTurn()
+	if streamErr != nil && len(turn.Queries) == 0 && len(turn.Actions) == 0 {
+		// Mirror the pre-dedup contract exactly: a fatal error only fails
+		// the call when it left nothing usable behind; otherwise the
+		// partial Turn StreamAskWithContext already assembled is the result.
+		return Turn{}, fmt.Errorf("chat: agent turn: %w", streamErr)
+	}
+	return turn, nil
+}
+
+// StreamAskWithContext runs one turn like AskWithContext but yields
+// normalised ai.Event values (ai.EventTextDelta, ai.EventToolCall,
+// ai.EventToolResult, ai.EventUsage, ai.EventCompleted / a fatal
+// ai.EventError, per the ai.LLMProvider streaming contract) progressively
+// as they arrive from the provider/agent loop, instead of buffering the
+// whole turn before returning. DataTug had no streaming turn before this --
+// it is a pure feature gain, so non-UI callers and tests keep using the
+// unchanged Ask/AskWithContext, which still return one buffered Turn.
+//
+// Once the returned sequence has been fully ranged over (or abandoned by
+// breaking out of the range), LastStreamTurn returns the same structured
+// Turn -- Queries/Actions/Usage/Text -- that AskWithContext would have
+// returned for the equivalent call; the same query/workspace observers
+// installed on ctx (see withQueryObserver et al.) still fire exactly once
+// per tool call either way, so a session persists results identically
+// whether it streams or not.
+//
+// StreamingConversation is the capability interface UI code should
+// type-assert for; not every Conversation/ContextualConversation
+// implementation streams.
+func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, priorContext string) iter.Seq2[ai.Event, error] {
+	if strings.TrimSpace(prompt) == "" {
+		return func(yield func(ai.Event, error) bool) {
+			yield(ai.Event{}, errors.New("chat: prompt must not be empty"))
+		}
+	}
+	return func(yield func(ai.Event, error) bool) {
+		c.turnMu.Lock()
+		defer c.turnMu.Unlock()
+		c.resetTurn()
+		turnCtx, cancel := context.WithTimeout(ctx, turnTimeout)
+		defer cancel()
+
+		loop := c.newLoop()
+
+		var text strings.Builder
+		var partial, usage *TokenUsage
+		finish := func() {
+			if usage == nil {
+				usage = partial
+			}
+			queries := finalQueries(c.takePending())
+			actions := c.takeActions()
+			turnText := stripThinkTags(text.String())
+			if len(queries) > 0 || len(actions) > 0 {
+				turnText = ""
+			}
+			c.setLastStreamTurn(Turn{Text: turnText, Queries: queries, Actions: actions, Usage: usage})
+		}
+
+		requestPrompt, requestContext := prompt, priorContext
+		for attempt := 0; attempt < 2; attempt++ {
+			req := c.buildRequest(requestPrompt, requestContext)
+			for event, err := range loop.Run(turnCtx, req) {
+				if err != nil {
+					finish()
+					yield(event, err)
+					return
 				}
-				return Turn{}, fmt.Errorf("chat: agent turn: %w", err)
-			}
-			if event == nil {
-				continue
-			}
-			if reported := event.UsageMetadata; reported != nil {
-				if usage == nil {
-					usage = &TokenUsage{}
+				switch event.Type {
+				case ai.EventTextDelta:
+					text.WriteString(event.Text)
+				case ai.EventUsage:
+					partial = addTokenUsage(partial, event.Usage, c.provider.Name())
+				case ai.EventCompleted:
+					usage = tokenUsageFrom(event.Usage, c.provider.Name())
 				}
-				usage.InputTokens += int64(reported.PromptTokenCount)
-				usage.OutputTokens += int64(reported.CandidatesTokenCount)
-				eventTotal := int64(reported.TotalTokenCount)
-				if eventTotal == 0 {
-					eventTotal = int64(reported.PromptTokenCount) + int64(reported.CandidatesTokenCount)
+				if !yield(event, nil) {
+					finish()
+					return
 				}
-				usage.TotalTokens += eventTotal
-			}
-			if event.Content == nil || event.Content.Role == "thinking" {
-				continue
-			}
-			for _, part := range event.Content.Parts {
-				if part != nil && !part.Thought && part.Text != "" {
-					text.WriteString(part.Text)
+				if c.browserInterpretation && c.hasSuccessfulPending() {
+					finish()
+					return
 				}
 			}
-			if c.browserInterpretation && c.hasSuccessfulPending() {
+			// datatug-cli#291's empty-turn retry, ported from the pre-migration
+			// ADKConversation.AskWithContext: some small/local models flakily
+			// return an outright empty completion (no text, no tool call) on
+			// the first try. Give the loop exactly one more fresh user turn,
+			// with a nudge instead of the original prompt, before giving up --
+			// matching main's attempt<2 loop, generalized from run_dtql's own
+			// finalQueries()/hasSuccessfulPending() bookkeeping to "no queries,
+			// no actions, no text" so it also covers a workspace-action turn.
+			if attempt > 0 || c.hasPending() || c.hasActions() || strings.TrimSpace(text.String()) != "" {
 				break
 			}
+			requestPrompt, requestContext = emptyTurnRetryPrompt, ""
 		}
-		c.mu.Lock()
-		hasAction := len(c.pending) > 0 || len(c.actions) > 0
-		c.mu.Unlock()
-		if hasAction || strings.TrimSpace(text.String()) != "" {
-			break
-		}
+		finish()
 	}
-	queries := finalQueries(c.takePending())
-	actions := c.takeActions()
-	turnText := strings.TrimSpace(text.String())
-	if len(queries) > 0 || len(actions) > 0 {
-		// The grid is the answer for successful data requests. Some small
-		// local models emit their hidden reasoning as ordinary text, so do
-		// not surface model prose beside
-		// a structured result or a DataTug-owned execution error.
-		turnText = ""
-	}
-	return Turn{Text: turnText, Queries: queries, Actions: actions, Usage: usage}, nil
+}
+
+// emptyTurnRetryPrompt is the fresh user turn sent once, in place of the
+// original prompt, when the model's first pass yielded nothing at all --
+// see StreamAskWithContext's retry loop.
+const emptyTurnRetryPrompt = "Your previous response was empty. For the current data request, call run_dtql with valid DTQL YAML using the configured schema; otherwise give a brief explanation."
+
+func (c *AIConversation) setLastStreamTurn(t Turn) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastStreamTurn = t
+}
+
+// LastStreamTurn returns the structured Turn captured by the most recently
+// completed StreamAskWithContext call on this conversation. It is only
+// meaningful after that call's sequence has finished (or its range loop has
+// returned); AIConversation serializes turns via turnMu, so there is never
+// more than one in flight.
+func (c *AIConversation) LastStreamTurn() Turn {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastStreamTurn
 }
 
 // finalQueries hides failed tool attempts when the agent corrected itself and

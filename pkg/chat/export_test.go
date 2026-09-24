@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	godbf "github.com/LindsayBradford/go-dbf"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/ingr-io/ingr-go/ingr"
@@ -300,45 +299,5 @@ func TestRealChinookRecordSetExports(t *testing.T) {
 		if output.Len() == 0 {
 			t.Fatalf("%s exported nothing", format)
 		}
-	}
-}
-
-func TestChatUIBucketAndExportCommand(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := chat.Snapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	id := workspaceTestRecord(t, store, session.ID)
-	u, err := NewSessionUI(ctx, chat, "stub")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !u.focusLatestGrid() {
-		t.Fatal("grid was not restored")
-	}
-	if _, handled := u.updateGrid(tea.KeyPressMsg{Code: 'B', Text: "B"}); !handled {
-		t.Fatal("B did not toggle bucket")
-	}
-	if len(u.snapshot.Workspace.ExportBucket) != 1 || u.snapshot.Workspace.ExportBucket[0] != id {
-		t.Fatalf("bucket action did not persist: %#v", u.snapshot.Workspace.ExportBucket)
-	}
-	path := filepath.Join(t.TempDir(), "customers.csv")
-	command := u.runSessionCommand("/export current csv " + path)
-	if command == nil || !u.exporting {
-		t.Fatal("export command did not start")
-	}
-	message := command()
-	_, _ = u.Update(message)
-	if u.exporting {
-		t.Fatal("export stayed busy")
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("export missing: %v", err)
 	}
 }

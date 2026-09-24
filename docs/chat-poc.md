@@ -16,20 +16,21 @@ structured attachments, Views/Selections, and docks. The original AI → DTQL
 This phase proves one vertical slice:
 
 ```text
-user -> ADK agent -> run_dtql tool -> secureread.Executor -> DALgo backend
-     -> secureread.Result -> Bubble Table grid
+user -> ai/agent.Loop -> run_dtql tool -> secureread.Executor -> DALgo backend
+     -> secureread.Result -> tui/grid grid
 ```
 
 The model never executes SQL and never renders rows. Its only data tool accepts
 a DTQL YAML document. DataTug validates that document with `dtql.Deserialize`,
 applies the normal access-policy path, executes it through the configured DALgo
-adapter, and gives the Bubble Tea UI a structured `secureread.Result`.
+adapter, and gives the chat UI a structured `secureread.Result`.
 
-The terminal grid uses the MIT-licensed `github.com/evertras/bubble-table`
-dependency for table layout, pagination, and horizontal overflow. DataTug
-keeps a small adapter around that component so chat/query domain types remain
-independent of the table library; DataTug continues to own the result-card
-title, footer, scrollbar, focus navigation, and terminal styling.
+The terminal grid uses `github.com/strongo/aichat`'s `tui/grid` package (built
+on Charm's `bubbletea`/`bubbles`) for table layout, pagination, and horizontal
+overflow. DataTug keeps a small adapter (`gridState`, `pkg/chat/grid_state.go`)
+around that component so chat/query domain types remain independent of the
+grid library; DataTug continues to own the result-card title, footer,
+scrollbar, focus navigation, and terminal styling.
 
 ## Run
 
@@ -49,23 +50,73 @@ datatug chat \
 ```
 
 The default model is `gpt-5.6-luna`, with low reasoning effort for this small
-translation task. DataTug passes the effort both to pi-go's provider resolver
-and through ADK's portable generation configuration; exact supported levels
-remain provider-specific. `OPENAI_API_KEY` must be present. Model selection
-stays configurable through pi-go's provider resolver, for example:
+translation task. `OPENAI_API_KEY` must be present. Model selection stays
+configurable, for example:
 
 ```sh
 datatug chat --model ollama/qwen3:4b
 ```
 
-OpenAI-compatible providers can be selected with an explicit base URL. For
-example, to use the exact `deepseek-flash` model with a DeepSeek credential
-already stored by the pi harness:
+### Provider routing
+
+`--model`/`--ai <profile>` resolve to one of `strongo/aichat`'s LLM adapters
+(`ai/anthropic`, `ai/openaicompat`, or `ai/openairesponses` for the OpenAI
+models that only support the Responses API) through `pkg/chat/provider.go`'s
+`NewLLMProvider`. A model name is matched, in order, against:
+
+1. an explicit `family/model` routing prefix (`anthropic/`, `openai/`,
+   `gemini/`, `mistral/`, `xai/`/`grok/`, `ollama/`, `azure/`, `openrouter/`,
+   `opencode/`, `agentgateway/` — `grok/` routes to the `xai` family);
+2. Ollama's cloud-tag convention: a bare `:cloud` suffix or the
+   `<size>-cloud` form (e.g. `qwen3:cloud`, `deepseek-v3.2:671b-cloud`);
+3. a bare model-name prefix (`claude`, `gpt`/`gpt-5`, `gemini`, `mistral`,
+   `magistral`, `grok`).
+
+A name matching none of those is an error **unless** `--base-url` is also
+given, in which case it is treated as an intentional custom
+OpenAI-compatible endpoint (matching family `openai`) instead of silently
+defaulting to OpenAI's own API with the wrong credential.
+
+| Family | Default base URL | API key env var(s) | `OPENAI_BASE_URL`-style override |
+| --- | --- | --- | --- |
+| `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL` |
+| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `OPENAI_BASE_URL` |
+| `gemini` | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` | — |
+| `mistral` | `https://api.mistral.ai/v1` | `MISTRAL_API_KEY` | — |
+| `xai` (and `grok`) | `https://api.x.ai/v1` | `XAI_API_KEY` | — |
+| `ollama` | `http://localhost:11434/v1` | (none required) | — |
+| `azure` | none (per-deployment; `--base-url` or the env var is required) | `AZUREOPENAI_API_KEY`, then `AZURE_OPENAI_API_KEY`, then `AZURE_API_KEY` (first non-empty wins) | `AZURE_OPENAI_ENDPOINT` |
+| `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | — |
+| `opencode` | `https://opencode.ai/zen/go/v1` | `OPENCODE_API_KEY` | — |
+| `agentgateway` | `http://localhost:4000` | `AGENTGATEWAY_API_KEY` | — |
+
+`gemini`, `mistral`, `xai`, `ollama`, `openrouter`, `opencode`, and
+`agentgateway` all speak an OpenAI-compatible wire protocol (`ai/openaicompat`)
+through their own endpoint above; `anthropic` speaks its own protocol
+(`ai/anthropic`). `--base-url`/an explicit AI profile `baseUrl` always
+overrides both the family default and any `*_BASE_URL`/`*_ENDPOINT`
+environment fallback. A bare host with no `/v1` path segment anywhere (e.g.
+`https://api.deepseek.com`) gets `/v1` appended automatically; a path that
+already contains `/v1` (mid-path, for a gateway route, or as a trailing
+segment) is left alone.
+
+Responses-only OpenAI models (`gpt-5.6-luna` and the rest of the
+`gpt-5.*-codex`/`gpt-5.6-*`/`gpt-6-astra` families — see
+`responsesOnlyModelPrefixes` in `pkg/chat/provider.go`) route to
+`ai/openairesponses` instead of `ai/openaicompat`, matched after stripping
+any routing prefix (so `agentgateway/openai/gpt-6-astra` still resolves on
+its bare `gpt-6-astra` ID).
+
+`--thinking low|medium|high` (or an AI profile's `thinking:`) maps to
+`ai.ChatRequest.Reasoning`; adapters that don't support a reasoning knob
+ignore it rather than failing the call.
+
+OpenAI-compatible providers can also be selected with an explicit base URL.
+For example, to use the exact `deepseek-flash` model with a DeepSeek
+credential:
 
 ```sh
-set -a
-. ~/.pi-go/.env
-set +a
+export OPENAI_API_KEY=<your-deepseek-key>
 
 datatug chat \
   --model deepseek-flash \
@@ -89,9 +140,7 @@ ai:
 Then select the profile with:
 
 ```sh
-set -a
-. ~/.pi-go/.env
-set +a
+export OPENAI_API_KEY=<your-deepseek-key>
 
 datatug chat --ai deepseek
 ```
@@ -107,9 +156,9 @@ The `--model`, `--base-url`, and `--thinking` flags remain available as
 explicit per-run overrides. If `--ai` is omitted, the existing default model
 and credential behavior are unchanged.
 
-`apiKeyEnv` is optional. When it is omitted, pi-go/provider environment,
-OAuth, or keyless authentication behavior is used instead; when it is set,
-the named environment variable must contain a non-empty key.
+`apiKeyEnv` is optional. When it is omitted, the family's default
+environment variable(s) from the table above are checked instead; when it is
+set, the named environment variable must contain a non-empty key.
 
 Use `--database` when an environment has more than one catalog. Projects with
 access policies must also pass an appropriate `--as`, `--role`, or `--group`,
@@ -251,28 +300,32 @@ change it at any time.
 - Every Chat-generated DTQL query must include a row limit from 1 to 1000. The
   agent defaults to 100 when the user gives no count, and DataTug validates the
   bound before executing the query.
-- A turn is limited to 90 seconds, three model calls, and two DTQL tool
-  attempts (the initial query plus one correction), so a faulty agent loop
-  cannot query or bill indefinitely.
+- A turn is limited to 90 seconds and three model calls
+  (`agent.Loop.MaxSteps`); tool-call attempts are capped at 12 for the
+  terminal chat loop and 2 for the browser-bridge interpret loop (one DTQL
+  attempt plus one self-correction — see `pkg/chat/agent.go`'s `newLoop`),
+  so a faulty agent loop cannot query or bill indefinitely.
 - Applied access-policy limitations remain attached to the structured result
   and are rendered next to the grid, including for empty results.
 - Successful data turns display the DataTug-owned grid as the answer. Model
   prose is suppressed on those turns because some small local models expose
   reasoning as ordinary text even when reasoning is disabled.
 
-## pi-go reuse
+## strongo/aichat reuse
 
-DataTug imports only `github.com/dimetron/pi-go/pimodels`. That package resolves
-configurable model/provider names and returns Google ADK's `model.LLM`
-interface. DataTug owns the ADK agent, DTQL tool, prompt, session behavior, UI,
-and query execution. No pi-go coding-agent, filesystem tools, shell tools,
-skills, memory, or session persistence are embedded.
+DataTug's chat path is built entirely on `github.com/strongo/aichat`: its
+`ai.LLMProvider` adapters (`ai/anthropic`, `ai/openaicompat`,
+`ai/openairesponses`) speak to the model, `ai/agent.Loop` runs the tool-call
+loop (see [Provider routing](#provider-routing) above and
+`pkg/chat/agent.go`'s `newLoop`/`AskWithContext`/`StreamAskWithContext`), and
+`tui/chatshell` + `tui/grid` + `tui/transcript` provide the terminal shell
+(focus ring, transcript blocks, overlays, the SidePanel workspace pane, and
+the result grid). DataTug owns the DTQL tool (`run_dtql`), the workspace/join
+tools, the prompt, session persistence, and all product UI built on top of
+chatshell's `SidePanel`/`Overlay`/`GlobalKeys` extension points.
 
-The implementation also follows pi-go's useful architectural ideas: meet at
-the ADK `model.LLM` seam, keep providers separate from the agent, use a fake
-model for deterministic tool-loop tests, and keep the chat input fixed below a
-scrollable Bubble Tea history. No pi-go source was copied or adapted.
-
-pi-go is MIT licensed. Its copyright and permission notice are retained in
-`THIRD_PARTY_NOTICES.md`; that notice must accompany distributions containing
-the dependency.
+Earlier phases of this PoC evaluated Google ADK
+(`google.golang.org/adk`/`genai`) and `github.com/dimetron/pi-go/pimodels`
+for the provider/agent seam; both were fully replaced by `strongo/aichat`
+and removed from `go.mod` as part of the aichat migration (no residual
+import of either remains in the chat path or elsewhere in this module).

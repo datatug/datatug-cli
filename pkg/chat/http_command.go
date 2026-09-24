@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"gopkg.in/yaml.v3"
 )
@@ -33,103 +32,12 @@ type httpRequestSpec struct {
 	Body           string
 }
 
-type httpMessage struct {
-	sessionID string
-	snapshot  ChatSession
-	err       error
-}
-
-func (u *UI) httpCommand(argument string) (tea.Cmd, error) {
-	command, rest, _ := strings.Cut(strings.TrimSpace(argument), " ")
-	command = strings.ToLower(command)
-	if command == "header" || command == "cookie" {
-		return nil, u.httpSettingsCommand(command, strings.TrimSpace(rest))
-	}
-	if command == "" || command == "new" {
-		u.openHTTPRequestDialog(httpRequestSpec{Method: http.MethodGet, URL: strings.TrimSpace(rest)})
-		return nil, nil
-	}
-	method := strings.ToUpper(command)
-	if !supportedHTTPMethod(method) {
-		return nil, fmt.Errorf("usage: /http [new|GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS] [url] | /http header|cookie [name=value]")
-	}
-	if method != http.MethodGet || strings.TrimSpace(rest) == "" {
-		u.openHTTPRequestDialog(httpRequestSpec{Method: method, URL: strings.TrimSpace(rest)})
-		return nil, nil
-	}
-	return u.sendHTTPRequest(httpRequestSpec{Method: method, URL: strings.TrimSpace(rest)})
-}
-
 func supportedHTTPMethod(method string) bool {
 	switch method {
 	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodOptions:
 		return true
 	}
 	return false
-}
-
-func (u *UI) sendHTTPRequest(spec httpRequestSpec) (tea.Cmd, error) {
-	if !supportedHTTPMethod(spec.Method) {
-		return nil, fmt.Errorf("unsupported HTTP method")
-	}
-	if (spec.Method == http.MethodGet || spec.Method == http.MethodHead) && spec.Body != "" {
-		return nil, fmt.Errorf("GET and HEAD requests cannot have a body")
-	}
-	rawURL := spec.URL
-	parsed, err := url.ParseRequestURI(rawURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
-		return nil, fmt.Errorf("/http needs an HTTP or HTTPS URL without embedded credentials")
-	}
-	// Display and persistence never include query parameters, which may contain secrets.
-	displayURL := *parsed
-	displayURL.RawQuery, displayURL.ForceQuery, displayURL.Fragment = "", false, ""
-	requestText := "/http " + strings.ToLower(spec.Method) + " " + displayURL.String()
-	if u.sessions == nil || u.sessions.store == nil {
-		return nil, fmt.Errorf("HTTP requests need an active chat session")
-	}
-	origin, err := httpOrigin(rawURL)
-	if err != nil {
-		return nil, err
-	}
-	settings, err := u.sessions.store.HTTPRequestSettings(u.ctx, origin)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't load HTTP request settings")
-	}
-	if spec.ReplaceHeaders {
-		settings.Headers = make(map[string]string)
-	}
-	for name, value := range spec.Headers {
-		canonical, validationErr := validateHTTPSetting("header", origin, name, value)
-		if validationErr != nil {
-			return nil, fmt.Errorf("invalid request header %q", name)
-		}
-		settings.Headers[canonical] = value
-	}
-	if len(spec.Body) > maxHTTPRequestBytes {
-		return nil, fmt.Errorf("HTTP request body exceeds 1 MiB")
-	}
-	sessionID := u.sessionID
-	store := u.sessions.store
-	ctx := u.ctx
-	u.busy = true
-	u.entries = append(u.entries, historyEntry{role: "You", text: requestText}, historyEntry{role: "DataTug", text: "Fetching…"})
-	return func() tea.Msg {
-		response, query, failure := fetchHTTPRequestResult(ctx, spec, displayURL.String(), settings)
-		origin, err := store.AppendUser(ctx, sessionID, requestText)
-		if err != nil {
-			return httpMessage{sessionID: sessionID, err: err}
-		}
-		if failure != "" {
-			_, err = store.AppendTurn(ctx, sessionID, origin.ID, displayURL.String(), Turn{Text: failure})
-		} else {
-			_, err = store.AppendHTTPResponse(ctx, sessionID, origin.ID, response, query)
-		}
-		if err != nil {
-			return httpMessage{sessionID: sessionID, err: err}
-		}
-		snapshot, err := store.Load(ctx, sessionID)
-		return httpMessage{sessionID: sessionID, snapshot: snapshot, err: err}
-	}, nil
 }
 
 func fetchHTTPResult(ctx context.Context, rawURL, displayURL string, options ...HTTPRequestSettings) (HTTPResponse, *QueryResult, string) {

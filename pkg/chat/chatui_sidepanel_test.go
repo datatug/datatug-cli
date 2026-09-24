@@ -1,10 +1,13 @@
 package chat
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
 func TestWorkspacePanelViewShowsTabsAndProjectExplorer(t *testing.T) {
@@ -65,6 +68,87 @@ func TestWorkspacePanelSelectedTabEmptyState(t *testing.T) {
 	view := u.workspace.View(40, 15, true)
 	if !strings.Contains(view, "No durable selection") {
 		t.Fatalf("expected empty-selection state:\n%s", view)
+	}
+}
+
+// TestChatUIBookmarkWorkspaceTabOpensStructuredGrid is ported from the
+// legacy UI's bookmark_phase4_test.go (TestBookmarkWorkspaceTabOpensStructuredGrid):
+// same scenario (a bookmark's workspace tab renders its structured grid,
+// Enter focuses it, "a" attaches it via the shared WorkspaceAction path),
+// driven through workspacePanel directly (u.workspace.setTab/updateKey)
+// instead of u.focusWorkspace/u.setWorkspaceTab/u.updateWorkspaceKey.
+func TestChatUIBookmarkWorkspaceTabOpensStructuredGrid(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	catalog := ProjectCatalog{ID: testScope().ProjectID, Title: "Demo"}
+	chatSessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, _ := chatSessions.Snapshot(ctx)
+	recordID := workspaceTestRecord(t, store, session.ID)
+	ref, err := chatSessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "bookmark_create", Reference: ContextReference{Kind: "recordset", ObjectID: recordID}, Title: "Saved customers"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, chatSessions, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.workspace.setTab(3)
+	view := u.workspace.View(80, 30, true)
+	if len(u.workspace.bookmarkItems) != 1 || !strings.Contains(view, "Saved customers") || !strings.Contains(view, "Source: chinook") || !strings.Contains(view, "snapshot:") || !strings.Contains(view, "DTQL:") {
+		t.Fatalf("bookmark tab did not render: %+v", u.workspace.bookmarkItems)
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !u.workspace.bookmarkGridFocused || u.workspace.bookmarkGrid == nil || len(u.workspace.bookmarkGrid.Rows()) != 3 {
+		t.Fatalf("bookmark grid did not open: %+v", u.workspace.bookmarkGrid)
+	}
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	snapshot, err := chatSessions.Snapshot(ctx)
+	if err != nil || len(snapshot.Workspace.Attachments) != 1 || !sameReference(snapshot.Workspace.Attachments[0], ref) {
+		t.Fatalf("UI attachment did not use shared action: %+v, %v", snapshot.Workspace.Attachments, err)
+	}
+}
+
+// TestChatUIEmptyBookmarkedGridNavigation is ported from the legacy UI's
+// bookmark_phase4_test.go (TestEmptyBookmarkedGridNavigation).
+func TestChatUIEmptyBookmarkedGridNavigation(t *testing.T) {
+	ctx := context.Background()
+	scope := testScope()
+	store := openTestStore(t, testStorePath(t), scope)
+	chatSessions, err := NewSessionChat(ctx, store, &contextualStub{}, scope.Sources[scope.Database], ProjectCatalog{ID: scope.ProjectID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := chatSessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.AppendUser(ctx, session.ID, "show missing rows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := store.AppendTurn(ctx, session.ID, user.ID, scope.Sources[scope.Database], Turn{Queries: []QueryResult{{
+		Title: "Empty", DTQL: "from: {name: Customer}\nlimit: 1", SourceID: scope.Database,
+		Result: secureread.Result{Columns: []string{"CustomerId"}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chatSessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "bookmark_create", Reference: ContextReference{Kind: "recordset", ObjectID: turn.Queries[0].RecordSetID}}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := NewSessionChatUI(ctx, chatSessions, "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.workspace.setTab(3)
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
+	if u.workspace.bookmarkGrid == nil || len(u.workspace.bookmarkGrid.Rows()) != 0 {
+		t.Fatalf("empty bookmark grid navigation = %+v", u.workspace.bookmarkGrid)
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/ai"
 )
@@ -102,80 +101,9 @@ func TestBookmarkCrossSessionContextRestartAndDeletion(t *testing.T) {
 	}
 }
 
-func TestBookmarkWorkspaceTabOpensStructuredGrid(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t, testStorePath(t), testScope())
-	catalog := ProjectCatalog{ID: testScope().ProjectID, Title: "Demo"}
-	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", catalog)
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, _ := chat.Snapshot(ctx)
-	recordID := workspaceTestRecord(t, store, session.ID)
-	ref, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "bookmark_create", Reference: ContextReference{Kind: "recordset", ObjectID: recordID}, Title: "Saved customers"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, chat, "test-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u.focusWorkspace()
-	u.setWorkspaceTab(3)
-	view := u.workspaceView(80, 30)
-	if len(u.bookmarkItems) != 1 || !strings.Contains(view, "Saved customers") || !strings.Contains(view, "Source: chinook") || !strings.Contains(view, "snapshot:") || !strings.Contains(view, "DTQL:") {
-		t.Fatalf("bookmark tab did not render: %+v", u.bookmarkItems)
-	}
-	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !u.bookmarkGridFocused || u.bookmarkGrid == nil || len(u.bookmarkGrid.Rows()) != 3 {
-		t.Fatalf("bookmark grid did not open: %+v", u.bookmarkGrid)
-	}
-	u.updateWorkspaceKey(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	snapshot, err := chat.Snapshot(ctx)
-	if err != nil || len(snapshot.Workspace.Attachments) != 1 || !sameReference(snapshot.Workspace.Attachments[0], ref) {
-		t.Fatalf("UI attachment did not use shared action: %+v, %v", snapshot.Workspace.Attachments, err)
-	}
-}
-
-func TestEmptyBookmarkedGridNavigation(t *testing.T) {
-	ctx := context.Background()
-	scope := testScope()
-	store := openTestStore(t, testStorePath(t), scope)
-	chat, err := NewSessionChat(ctx, store, &contextualStub{}, scope.Sources[scope.Database], ProjectCatalog{ID: scope.ProjectID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := chat.Snapshot(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	user, err := store.AppendUser(ctx, session.ID, "show missing rows")
-	if err != nil {
-		t.Fatal(err)
-	}
-	turn, err := store.AppendTurn(ctx, session.ID, user.ID, scope.Sources[scope.Database], Turn{Queries: []QueryResult{{
-		Title: "Empty", DTQL: "from: {name: Customer}\nlimit: 1", SourceID: scope.Database,
-		Result: secureread.Result{Columns: []string{"CustomerId"}},
-	}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "bookmark_create", Reference: ContextReference{Kind: "recordset", ObjectID: turn.Queries[0].RecordSetID}}); err != nil {
-		t.Fatal(err)
-	}
-	u, err := NewSessionUI(ctx, chat, "test-model")
-	if err != nil {
-		t.Fatal(err)
-	}
-	u.focusWorkspace()
-	u.setWorkspaceTab(3)
-	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyDown})
-	u.updateWorkspaceKey(tea.KeyPressMsg{Code: tea.KeyUp})
-	if u.bookmarkGrid == nil || len(u.bookmarkGrid.Rows()) != 0 {
-		t.Fatalf("empty bookmark grid navigation = %+v", u.bookmarkGrid)
-	}
-}
+// TestBookmarkWorkspaceTabOpensStructuredGrid and
+// TestEmptyBookmarkedGridNavigation were ported onto ChatUI's workspacePanel
+// in chatui_sidepanel_test.go.
 
 func TestAgentBookmarkActionsAndDiscoveryUseDataTug(t *testing.T) {
 	ctx := context.Background()

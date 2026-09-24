@@ -352,7 +352,7 @@ func runStreamedSavedDTQL(ctx context.Context, out, progress io.Writer, o queryO
 		return true, err
 	}
 	if !isBoundedFederatedRowShape(parsed) {
-		return true, fmt.Errorf("streaming %s requires one flat equality join without ordering, aggregation, or subqueries and an explicit dimension scan with a stable orderBy and limit of 1..10000; add scan: {orderBy: [{field: id}], limit: 10000} to the joined source or use --format json", o.format)
+		return true, fmt.Errorf("streaming %s requires a direct single-source scan or one flat equality join without global ordering, aggregation, or subqueries; joins also require an explicit dimension scan with stable id orderBy and limit of 1..10000; use --format json for other shapes", o.format)
 	}
 	stream, err := executor.StreamFederatedDTQL(ctx, []byte(queryDef.Text), urls, variables)
 	if err != nil {
@@ -384,7 +384,14 @@ func runStreamedSavedDTQL(ctx context.Context, out, progress io.Writer, o queryO
 // choose that result semantics. Refuse generic fallback, which can collect
 // the large fact side before the first output row.
 func isBoundedFederatedRowShape(query dal.StructuredQuery) bool {
-	if query.From() == nil || dal.HasAggregation(query) || dal.HasSubquery(query) || len(query.OrderBy()) != 0 || len(query.From().Joins()) != 1 {
+	if query.From() == nil || dal.HasAggregation(query) || dal.HasSubquery(query) || len(query.OrderBy()) != 0 {
+		return false
+	}
+	if len(query.From().Joins()) == 0 {
+		root, ok := query.From().Base().(dal.CollectionRef)
+		return ok && root.Database() != "" && query.Where() == nil && len(query.Columns()) == 0 && query.Offset() == 0
+	}
+	if len(query.From().Joins()) != 1 {
 		return false
 	}
 	join := query.From().Joins()[0]

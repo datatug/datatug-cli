@@ -32,6 +32,12 @@ columns:
   - {field: name, source: c, as: countryName}
 `
 
+const streamingLookupDTQL = `from:
+  database: orders
+  name: Invoice
+  alias: o
+`
+
 func streamFixture(t *testing.T, count int) map[string]string {
 	t.Helper()
 	dir := t.TempDir()
@@ -122,6 +128,49 @@ func TestStreamedFederatedJSONLWithHTTPAndCSV(t *testing.T) {
 	}
 	if !strings.HasPrefix(csvOut.String(), "$key,invoiceId,countryName\n") || strings.Count(csvOut.String(), "\n") != count+1 {
 		t.Fatalf("CSV shape: %q", csvOut.String()[:min(100, csvOut.Len())])
+	}
+}
+
+func TestStreamedSingleSourceJSONLWithHTTPLookup(t *testing.T) {
+	const count = 120
+	urls := streamFixture(t, count)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/v1/databases/extra/records/Country/") {
+			t.Errorf("path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":{"region":"Europe"}}`)
+	}))
+	defer server.Close()
+	query, err := dtql.Deserialize([]byte(streamingLookupDTQL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isBoundedFederatedRowShape(query) {
+		t.Fatal("direct source with HTTP lookup rejected")
+	}
+	ctx := context.Background()
+	stream, err := secureread.NewExecutor(secureread.Session{Unrestricted: true}).StreamFederatedDTQL(ctx, []byte(streamingLookupDTQL), urls, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	federation := &datatug.QueryFederation{OVDBBaseURL: server.URL, Lookups: []datatug.QueryHTTPLookup{{Database: "extra", Collection: "Country", FromColumn: "country_id", Concurrency: 8, Fields: []datatug.QueryLookupField{{Source: "region", Target: "region"}}}}}
+	var progress, out bytes.Buffer
+	reader, err := streamSavedQueryLookups(ctx, stream.Reader, federation, &progress, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeStreamedRows(ctx, &out, "jsonl", nil, reader); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != count || !strings.Contains(lines[0], `"region":"Europe"`) || !strings.Contains(lines[count-1], `"id":120`) {
+		t.Fatalf("rows=%d first=%s last=%s", len(lines), lines[0], lines[len(lines)-1])
+	}
+	if !strings.Contains(progress.String(), "120 completed, 0 in flight, 0 pending") {
+		t.Fatalf("progress: %s", progress.String())
 	}
 }
 
@@ -263,7 +312,7 @@ columns:
 		}
 	}
 	_, stderr, code = runQuery(t, "", "--project", dir, "--query", "sales/money", "--env", "local", "--format", "jsonl")
-	if code == 0 || !strings.Contains(stderr, "streaming jsonl requires one flat equality join") {
+	if code == 0 || !strings.Contains(stderr, "streaming jsonl requires a direct single-source scan or one flat equality join") {
 		t.Fatalf("money JSONL should reject materialization: exit=%d stderr=%s", code, stderr)
 	}
 }

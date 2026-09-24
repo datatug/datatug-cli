@@ -68,7 +68,7 @@ func lookupValue(base *url.URL, client *http.Client, lookup datatug.QueryHTTPLoo
 		if err != nil {
 			return nil, err
 		}
-		defer response.Body.Close()
+		defer func() { _ = response.Body.Close() }()
 		if response.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("OVDB lookup %s/%s failed (%d)", lookup.Database, lookup.Collection, response.StatusCode)
 		}

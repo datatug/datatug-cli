@@ -96,7 +96,7 @@ func TestStreamedFederatedJSONLWithHTTPAndCSV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	var progress bytes.Buffer
 	reader, err := streamSavedQueryLookups(ctx, stream.Reader, federation, &progress, false)
 	if err != nil {
@@ -121,7 +121,7 @@ func TestStreamedFederatedJSONLWithHTTPAndCSV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer csvStream.Close()
+	defer func() { _ = csvStream.Close() }()
 	var csvOut bytes.Buffer
 	if err := writeStreamedRows(ctx, &csvOut, "csv", explicitStreamColumns(csvStream.Query), csvStream.Reader); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestStreamedSingleSourceJSONLWithHTTPLookup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	federation := &datatug.QueryFederation{OVDBBaseURL: server.URL, Lookups: []datatug.QueryHTTPLookup{{Database: "extra", Collection: "Country", FromColumn: "country_id", Concurrency: 8, Fields: []datatug.QueryLookupField{{Source: "region", Target: "region"}}}}}
 	var progress, out bytes.Buffer
 	reader, err := streamSavedQueryLookups(ctx, stream.Reader, federation, &progress, false)
@@ -186,7 +186,7 @@ func TestStreamedFederatedCancellationAndOutputError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	cancel()
 	if err := writeStreamedRows(ctx, io.Discard, "jsonl", nil, stream.Reader); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel: %v", err)
@@ -195,7 +195,7 @@ func TestStreamedFederatedCancellationAndOutputError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream2.Close()
+	defer func() { _ = stream2.Close() }()
 	if err := writeStreamedRows(context.Background(), failedOutput{}, "jsonl", nil, stream2.Reader); err == nil || err.Error() != "output stopped" {
 		t.Fatalf("output error: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestSavedFederatedMoneyAndStreamingFormats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer orders.Close()
+	defer func() { _ = orders.Close() }()
 	if _, err := orders.Exec(`ALTER TABLE Invoice ADD COLUMN amount TEXT`); err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestSavedFederatedMoneyAndStreamingFormats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer countries.Close()
+	defer func() { _ = countries.Close() }()
 	if _, err := countries.Exec(`ALTER TABLE Country ADD COLUMN population INTEGER`); err != nil {
 		t.Fatal(err)
 	}

@@ -20,7 +20,7 @@ func (e *Executor) RunFederatedDTQL(ctx context.Context, document []byte, source
 	if err != nil {
 		return Result{}, err
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	rows, statistics, err := collectRows(stream.Reader)
 	if err != nil {
 		return Result{}, err

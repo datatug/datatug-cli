@@ -358,7 +358,7 @@ func runStreamedSavedDTQL(ctx context.Context, out, progress io.Writer, o queryO
 	if err != nil {
 		return true, err
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 	columns := explicitStreamColumns(stream.Query)
 	if o.format == "csv" && len(columns) == 0 {
 		return true, fmt.Errorf("streaming CSV requires deterministic explicit DTQL columns; use --format jsonl")

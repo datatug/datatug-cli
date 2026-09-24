@@ -52,6 +52,23 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		// scroll; off releases the terminal's native selection/copy.
 		u.shell.SetMouseEnabled(!u.shell.MouseEnabled())
 		return nil, true
+	case "ctrl+d":
+		// ui.go's Ctrl+D: detach the most recently attached workspace item
+		// from the composer's attachment chips. ui.go only handled this
+		// while the composer (not a focused grid/message) held the key --
+		// chatshell.Model has no exported focus-zone accessor to reproduce
+		// that guard here (see M5's status-hints-follow-focus item, blocked
+		// on the same gap), so it fires regardless of the current focus
+		// zone; Ctrl+D has no other binding chatshell or ChatUI assigns, so
+		// this is a strict capability restoration, not a conflicting one.
+		if u.sessions == nil || len(u.snapshot.Workspace.Attachments) == 0 {
+			return nil, true
+		}
+		last := u.snapshot.Workspace.Attachments[len(u.snapshot.Workspace.Attachments)-1]
+		if err := u.applyWorkspaceAction(WorkspaceAction{Kind: "detach", Reference: last}); err != nil {
+			u.shell.AppendAssistant(conciseError(err))
+		}
+		return nil, true
 	}
 	return nil, false
 }

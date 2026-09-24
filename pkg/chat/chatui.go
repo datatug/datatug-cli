@@ -671,11 +671,3 @@ func (u *ChatUI) topBar(width int) string {
 func (u *ChatUI) statusBar(width int) string {
 	return padAnsiLine("model: "+u.modelName, width)
 }
-
-// globalKeys satisfies chatshell.GlobalKeysFunc — checklist items #42-#46
-// (F3/F4 pickers, Ctrl+G) land here as their Overlay/ReplaceBlock wiring is
-// completed; today it claims no keys, so chatshell's own defaults (F6 panel
-// toggle, Ctrl+←/→ split resize, Shift+arrows) already apply unchanged.
-func (u *ChatUI) globalKeys(tea.KeyPressMsg) (tea.Cmd, bool) {
-	return nil, false
-}

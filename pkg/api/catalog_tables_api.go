@@ -133,10 +133,6 @@ func getCatalogSchema(projectDir, environmentID, catalogID string, partial bool)
 	return &CatalogSchema{Relations: relations}, nil
 }
 
-func loadCatalogRelations(dbModelDir, kind, dbType string) ([]CatalogRelation, error) {
-	return loadCatalogRelationsWithMode(dbModelDir, kind, dbType, false)
-}
-
 func loadCatalogRelationsWithMode(dbModelDir, kind, dbType string, partial bool) ([]CatalogRelation, error) {
 	var out []CatalogRelation
 	schemaDirs, err := os.ReadDir(dbModelDir)

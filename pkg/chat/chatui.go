@@ -191,6 +191,21 @@ func (u *ChatUI) nextEntryID(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, u.entrySeq)
 }
 
+// appendBlockWithID appends block under a fresh nextEntryID(prefix),
+// retrying with another fresh id on the rare collision
+// chatshell.Model.AppendBlockWithID reports (an id already live in the
+// transcript, or an in-flight StartStream id) instead of silently dropping
+// the block. nextEntryID's counter is per-ChatUI and monotonically
+// increasing, so in practice this loop runs once.
+func (u *ChatUI) appendBlockWithID(prefix string, block transcript.Block) string {
+	for {
+		id := u.nextEntryID(prefix)
+		if u.shell.AppendBlockWithID(id, block) {
+			return id
+		}
+	}
+}
+
 // askCmd starts a streamed turn through SessionChat.StreamAsk — the
 // persistence-safe streaming method (Lane B): it shares Ask's exact
 // persistence path (context rebuild, AppendUser, the query/workspace/
@@ -312,15 +327,13 @@ func (u *ChatUI) appendGridResult(query QueryResult) {
 	resultModel := NewGridModel(query.Result)
 	styled := newGridState(resultModel, query.RecordSetID, query.Title, u.chatWidth(), query.Result.Statistics)
 	styled.SetStyle(u.tableStyle)
-	id := u.nextEntryID("grid")
-	u.lastGridEntryID = id
 	u.lastGridRecordSetID = query.RecordSetID
 	if query.RecordSetID != "" {
 		u.gridsByRecordSetID[query.RecordSetID] = styled
 	}
 	styled.SetKeyHandler(u.handleGridKey)
 	block := u.blockForGrid(styled.Model, query.RecordSetID)
-	u.shell.AppendBlockWithID(id, block)
+	u.lastGridEntryID = u.appendBlockWithID("grid", block)
 }
 
 // blockForGrid wraps gridModel in a JoinBlock when recordSetID has FK-join
@@ -462,10 +475,10 @@ func (u *ChatUI) loadSession(session ChatSession) {
 				}
 			}
 			styled.SetStyle(u.tableStyle)
-			u.lastGridEntryID, u.lastGridRecordSetID = u.nextEntryID("grid"), record.ID
+			u.lastGridRecordSetID = record.ID
 			u.gridsByRecordSetID[record.ID] = styled
 			styled.SetKeyHandler(u.handleGridKey)
-			u.shell.AppendBlockWithID(u.lastGridEntryID, u.blockForGrid(styled.Model, record.ID))
+			u.lastGridEntryID = u.appendBlockWithID("grid", u.blockForGrid(styled.Model, record.ID))
 			if note := formatLimitations(record.Result.Limitations); note != "" {
 				u.shell.AppendAssistant(note)
 			}

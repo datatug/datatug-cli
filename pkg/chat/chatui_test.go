@@ -371,3 +371,45 @@ func TestChatUIStatusHintsFollowFocus(t *testing.T) {
 		t.Fatalf("grid status is not contextual: %s", gridView)
 	}
 }
+
+// TestChatCommandsListsConnectHTTPQueryQueries is the M5 regression test (r1
+// adversarial review of #289): /connect, /http, /query and /queries were
+// already handled by runCommand but missing from chatCommands, so the "/"
+// menu never showed them even though typing them out fully worked.
+func TestChatCommandsListsConnectHTTPQueryQueries(t *testing.T) {
+	for _, want := range []string{"/connect", "/http", "/query", "/queries"} {
+		found := false
+		for _, c := range chatCommands {
+			if c.Name == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("chatCommands is missing %q", want)
+		}
+	}
+}
+
+// TestChatHelpTextRestoresKeyParity is the M5 regression test (r1
+// adversarial review of #289): ui.go's help text named F2/F5/Alt+S keys,
+// the HTTP response Rendered/Raw/Headers toggle and a Ctrl+R refresh key
+// that the ChatUI-era chatHelpText had dropped. It does not assert the old
+// (already stale before this migration -- see chatHelpText's comment)
+// "4 Raw/5 Headers" wording, and does not assert an "Inspector:" section,
+// since that whole workspace tab was never ported to ChatUI.
+func TestChatHelpTextRestoresKeyParity(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	cmd := u.Submit("/help")
+	drainCmd(t, u, cmd)
+	view := u.shell.View().Content
+	for _, want := range []string{
+		"F2 mouse select/wheel", "F5 open web chat", "Alt+S table style", "Ctrl+D detach last attachment",
+		"Ctrl+R refresh", "1 Rendered", "2 Raw", "3 Headers",
+		"/connect", "/http", "/query",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help text missing %q:\n%s", want, view)
+		}
+	}
+}

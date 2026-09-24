@@ -641,6 +641,14 @@ var chatCommands = []chatshell.Command{
 	{Name: "/bucket", Help: "show or clear the export bucket"},
 	{Name: "/export", Help: "export current|bucket <format> <path>"},
 	{Name: "/settings", Help: "show or change result versions to keep"},
+	// M5 (r1 adversarial review of #289): these were already handled by
+	// runCommand below, but missing from the "/" menu itself -- typing them
+	// out fully worked, but they weren't discoverable by opening "/" and
+	// browsing, unlike every other supported command.
+	{Name: "/connect", Help: "connect a database source"},
+	{Name: "/http", Help: "[new|GET|POST|PUT|PATCH|DELETE] <url> -- send an HTTP request"},
+	{Name: "/query", Help: "[search] -- run or find a saved project query"},
+	{Name: "/queries", Help: "[search] -- alias for /query"},
 }
 
 func (u *ChatUI) runCommand(input string) tea.Cmd {
@@ -762,9 +770,40 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 	return cmd
 }
 
-const chatHelpText = "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm • /bucket [clear] • /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path> • /settings versions <1-100>\n\n" +
-	"Global: Shift+Enter newline • F6/Shift+→ workspace • Shift+← previous • F3 projects • F4 sessions • Ctrl+←→ resize panes • Ctrl+G latest grid • Ctrl+C quit\n\n" +
-	"Grid: 1 Table • 2 Charts • 3 Current row • Tab panes (wide) • Shift+↑↓ select • j JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • B bucket • s sort • Enter details • e export • q save as query • Esc composer"
+// chatHelpText is ui.go's help text, restored to parity (M5, r1 adversarial
+// review of #289): the ChatUI-era version had dropped the F2/F5/Alt+S/
+// Ctrl+D global keys, the HTTP-response Raw/Headers and Ctrl+R refresh grid
+// keys, and the Inspector and Workspace sections entirely. The Composer
+// section (attachment-chip Tab navigation) is deliberately NOT restored:
+// ChatUI's topBar does not render attachment chips at all yet, a real,
+// documented gap (see chatui_sidepanel_test.go's
+// TestChatUIWorkspaceSplitAndKeyboardSelection comment) — documenting a key
+// binding for UI that doesn't exist would be worse than omitting it.
+//
+// The HTTP line intentionally reads "1 Rendered/2 Raw/3 Headers", not
+// ui.go's own "4 Raw/5 Headers" — verified against http_document_block.go's
+// Update (and ui.go's identical messageFocused switch, both keyed on
+// "1"/"2","m","enter"/"3","h"): ui.go's help text was already stale before
+// this migration; restoring the exact wording would have re-introduced a
+// pre-existing doc bug instead of parity.
+//
+// ui.go's separate "Inspector: 1 Current row • 2 Current column • 3 Current
+// recordset" line is deliberately NOT restored: that was a whole workspace
+// SidePanel tab (inspectorWorkspaceView in ui.go's inspector_ui.go, with its
+// own currentRowDetails/currentColumnDetails/currentRecordsetDetails
+// sub-views) that this migration never ported — workspaceTabs
+// (workspace_shared.go) is only {"Project", "Selected", "Docked",
+// "Bookmarks"}, four tabs, not five. cell_detail.go's cellDetail Overlay
+// (opened via the grid's "c" key) covers a single cell's value/FK-related
+// records, which is related but narrower and already documented under
+// Grid's "c cell" below. Documenting the old Inspector tab's keys here
+// would describe UI that does not exist; that is a real, separate feature
+// gap (not merely a help-text omission), left open.
+const chatHelpText = "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm • /bucket [clear] • /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path> • /connect • /http [new|GET|POST|PUT|PATCH|DELETE] [url] • /query [search] or /queries [search] • /settings versions <1-100>\n\n" +
+	"Global: Shift+Enter newline • F2 mouse select/wheel • F5 open web chat • F6/Shift+→ workspace • Shift+← previous • F3 projects • F4 sessions • Alt+S table style • Ctrl+D detach last attachment • Ctrl+←→ resize panes • Ctrl+G latest grid • Ctrl+C quit\n\n" +
+	"Workspace: Tab/Shift+Tab switch tabs • ↑↓ navigate • ←→ collapse/expand tree • selection shows details below\n\n" +
+	"Grid: 1 Table • 2 Charts • 3 Current row • Ctrl+R refresh • Tab panes (wide) • Shift+↑↓ select • j JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • B bucket • s sort • Enter details • e export • q save as query • Esc composer\n\n" +
+	"HTTP response: 1 Rendered • 2 Raw • 3 Headers"
 
 // chatExportDoneMsg reports the outcome of a background /export write —
 // the ChatUI analogue of export_ui.go's exportMessage.

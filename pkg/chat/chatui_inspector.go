@@ -453,10 +453,14 @@ type saveQueryDoneMsg struct {
 	err   error
 }
 
-// handleSaveQueryDone is called from OnMsg for a saveQueryDoneMsg.
+// handleSaveQueryDone is called from OnMsg for a saveQueryDoneMsg. On
+// failure it reports a fixed, generic message — never msg.err's text —
+// matching ui.go's savedQuerySaveMessage case: the backend error could
+// echo back request details (a bad token, a rejected header value), so it
+// must not reach the transcript.
 func (u *ChatUI) handleSaveQueryDone(msg saveQueryDoneMsg) {
 	if msg.err != nil {
-		u.shell.AppendAssistant(conciseError(msg.err))
+		u.shell.AppendAssistant("Could not save. Check the name, tags and project write access.")
 		return
 	}
 	if err := u.reloadSavedQueries(); err != nil {

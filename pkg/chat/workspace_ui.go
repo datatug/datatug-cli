@@ -8,20 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/tui/grid"
-
-	"github.com/datatug/datatug-cli/pkg/secureread"
 )
-
-var workspaceTabs = []string{"Project", "Selected", "Docked", "Bookmarks"}
-
-func workspaceTabIndex(name string) int {
-	for i, tab := range workspaceTabs {
-		if tab == name {
-			return i
-		}
-	}
-	return 0
-}
 
 func (u *UI) splitEnabled() bool { return u.width >= 104 }
 
@@ -494,15 +481,6 @@ func (u *UI) selectFromGridState(g *gridState, recordSetID, viewID, mode string)
 	u.performWorkspaceAction(WorkspaceAction{Kind: "select", RecordSetID: recordSetID, ViewID: viewID, Rows: rows, Columns: columns, Ranges: ranges, Title: title})
 }
 
-func columnIndexOf(columns []string, name string) int {
-	for i, column := range columns {
-		if column == name {
-			return i
-		}
-	}
-	return -1
-}
-
 func (u *UI) sessionPickerView(width, height int) string {
 	lines := []string{"Sessions  ↑↓ choose · Enter open · n new · Esc close"}
 	for i, session := range u.pickerSessions {
@@ -662,16 +640,6 @@ func (u *UI) bookmarksView(width, height int) string {
 		lines = append(lines, bookmarkGrid.view())
 	}
 	return strings.Join(lines, "\n")
-}
-
-type explorerNode struct {
-	id          string
-	label       string
-	depth       int
-	objectIndex int // -1 for a grouping node
-	branch      bool
-	issue       bool
-	issueFor    int // owner of an unattachable issue row
 }
 
 func (u *UI) explorerNodes() []explorerNode {
@@ -928,82 +896,6 @@ func (u *UI) rebuildDockGrids() {
 	if u.dockIndex >= len(u.snapshot.Workspace.Docks) {
 		u.dockIndex = max(0, len(u.snapshot.Workspace.Docks)-1)
 	}
-}
-
-func resultForReference(session ChatSession, ref ContextReference) (secureread.Result, bool) {
-	data, ok := gridDataForReference(session, ref)
-	return data.Result, ok
-}
-
-type referenceGridData struct {
-	Result      secureread.Result
-	SourceRows  []int
-	RecordSetID string
-	ViewID      string
-}
-
-func gridDataForReference(session ChatSession, ref ContextReference) (referenceGridData, bool) {
-	switch ref.Kind {
-	case "bookmark":
-		bookmark, ok := session.Bookmarks[ref.ObjectID]
-		if !ok {
-			return referenceGridData{}, false
-		}
-		result, sourceRows := bookmarkResult(bookmark)
-		return referenceGridData{Result: result, SourceRows: sourceRows}, true
-	case "recordset":
-		record, ok := session.RecordSets[ref.ObjectID]
-		if !ok {
-			return referenceGridData{}, false
-		}
-		rows := make([]int, len(record.Result.Rows))
-		for i := range rows {
-			rows[i] = i
-		}
-		return referenceGridData{Result: record.Result, SourceRows: rows, RecordSetID: record.ID}, true
-	case "view", "selection":
-		var view RecordSetView
-		var rows []int
-		var columns []string
-		if ref.Kind == "selection" {
-			selection, ok := session.Workspace.Selections[ref.ObjectID]
-			if !ok {
-				return referenceGridData{}, false
-			}
-			view, ok = session.Workspace.Views[selection.ViewID]
-			if !ok {
-				return referenceGridData{}, false
-			}
-			rows = selection.Rows
-			columns = selection.Columns
-		} else {
-			var ok bool
-			view, ok = session.Workspace.Views[ref.ObjectID]
-			if !ok {
-				return referenceGridData{}, false
-			}
-			rows = view.RowIndices
-			columns = view.Columns
-		}
-		record, ok := session.RecordSets[view.RecordSetID]
-		if !ok {
-			return referenceGridData{}, false
-		}
-		if len(columns) == 0 {
-			columns = record.Result.Columns
-		}
-		var selection *Selection
-		if ref.Kind == "selection" {
-			selected := session.Workspace.Selections[ref.ObjectID]
-			selection = &selected
-		}
-		projectedView := view
-		projectedView.RowIndices = rows
-		projectedView.Columns = columns
-		result, sourceRows := projectSnapshot(record, &projectedView, selection)
-		return referenceGridData{Result: result, SourceRows: sourceRows, RecordSetID: record.ID, ViewID: view.ID}, true
-	}
-	return referenceGridData{}, false
 }
 
 // handleBookmarkGridKey is the grid.KeyHandler for u.bookmarkGrid

@@ -461,12 +461,26 @@ func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string)
 		}
 		return c.applyJoinCandidate(ctx, recordSetID, candidateID, user.ID)
 	})
+	var joinChoice *attachedJoinChoiceError
+	ctx = withAttachedJoin(ctx, func(joinCtx context.Context, query QueryResult) (QueryResult, bool, error) {
+		result, applied, joinErr := c.joinAttachedQuery(joinCtx, prior, prompt, query)
+		if !errors.As(joinErr, &joinChoice) {
+			joinChoice = nil
+		}
+		return result, applied, joinErr
+	})
 	turn, agentErr := c.agent.AskWithContext(ctx, prompt, contextText)
+	if joinChoice != nil {
+		// This is a clarification, not a failed query or a model-authored
+		// choice. Keep the question in chat history so the next turn can
+		// resolve it from the user's explicit answer.
+		turn, agentErr = Turn{Text: joinChoice.Error()}, nil
+	}
 	if agentErr != nil {
 		turn = Turn{Text: friendlyAgentError(agentErr)}
 	}
 	if turn.Text == "" && len(turn.Queries) == 0 && len(turn.Actions) == 0 {
-		turn.Text = "I couldn't construct a valid query for that request."
+		turn.Text = "The AI model returned no query or answer. Try again or choose another model."
 	}
 	if turn.Text == "" && len(turn.Actions) > 0 {
 		last := turn.Actions[len(turn.Actions)-1]
@@ -658,6 +672,9 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 		return ""
 	}
 	lines := make([]string, 0, len(session.Messages)+len(refs)+1)
+	if len(refs) > 0 {
+		lines = append(lines, "Attached and docked objects are the active query scope. For an underspecified request, use them before earlier RecordSets; use an earlier RecordSet only when the user refers to it.")
+	}
 	for index, ref := range refs {
 		contextKind := "Attached"
 		if index >= len(session.Workspace.Attachments) {
@@ -677,7 +694,15 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 		if len(catalogs) > 0 {
 			for _, object := range catalogs[0].Objects {
 				if sameReference(object.Reference, ref) && len(object.Columns) > 0 {
-					line += "; columns=" + strings.Join(object.Columns, ", ")
+					definitions := make([]string, 0, len(object.Columns))
+					for _, column := range object.Columns {
+						definition := column
+						if columnType := object.ColumnTypes[column]; columnType != "" {
+							definition += " " + columnType
+						}
+						definitions = append(definitions, definition)
+					}
+					line += "; columns=" + strings.Join(definitions, ", ")
 					break
 				}
 			}
@@ -705,6 +730,7 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 	if current, ok := session.Workspace.Selections[session.Workspace.CurrentSelectionID]; ok {
 		lines = append(lines, fmt.Sprintf("Current selection (id=%s; rows=%d; not query context unless attached or docked)", current.ID, len(current.Rows)))
 	}
+	protected := len(lines)
 	start := max(0, len(session.Messages)-16)
 	for _, message := range session.Messages[start:] {
 		switch message.Kind {
@@ -719,8 +745,8 @@ func buildSessionContext(session ChatSession, catalogs ...ProjectCatalog) string
 			lines = append(lines, line)
 		}
 	}
-	for len(strings.Join(lines, "\n")) > maxContextChars && len(lines) > 1 {
-		lines = lines[1:]
+	for len(strings.Join(lines, "\n")) > maxContextChars && len(lines) > protected {
+		lines = append(lines[:protected], lines[protected+1:]...)
 	}
 	return boundedContextText(strings.Join(lines, "\n"), maxContextChars)
 }

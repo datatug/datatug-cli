@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dtql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -23,6 +25,133 @@ func joinSnapshot() ForeignKeySnapshot {
 		{ConstraintID: "fk_order_location", Schema: "main", FromRelation: "Order", FromFields: []string{"Country", "Location"}, ToSchema: "main", ToRelation: "Location", ToFields: []string{"Country", "Code"}},
 		{ConstraintID: "fk_employee_manager", Schema: "main", FromRelation: "Employee", FromFields: []string{"ManagerId"}, ToSchema: "main", ToRelation: "Employee", ToFields: []string{"EmployeeId"}},
 	}}
+}
+
+func TestAttachedCustomerJoinsFreshInvoiceQueryWithoutAnIntermediateGrid(t *testing.T) {
+	ctx := context.Background()
+	executor := &joinExecutorStub{}
+	chat := &SessionChat{source: "sqlite:///fixture.db", joinApplication: ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: executor}}
+	catalog := workspaceTestCatalog()
+	chat.catalog = catalog
+	session := ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{catalog.Objects[2].Reference}}}
+	base := QueryResult{Title: "Invoices", Source: "sqlite:///fixture.db", DTQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n"}
+	joined, applied, err := chat.joinAttachedQuery(ctx, session, "Show invoices", base)
+	if err != nil || !applied || !strings.Contains(joined.DTQL, "joins:") || !strings.Contains(joined.DTQL, "Customer") || !strings.Contains(executor.doc, "limit: 5") {
+		t.Fatalf("attached JOIN = applied %v, err %v, result %+v, executed %q", applied, err, joined, executor.doc)
+	}
+	parsed, err := dtql.Deserialize([]byte(joined.DTQL))
+	if err != nil || len(parsed.From().Joins()) != 1 || parsed.From().Joins()[0].JoinType() != dal.JoinLeft {
+		t.Fatalf("automatic attached JOIN must preserve nullable root rows: %q, %v", joined.DTQL, err)
+	}
+	if joined.Lineage != nil {
+		t.Fatalf("fresh query has no parent RecordSet: %+v", joined.Lineage)
+	}
+	executor.doc = ""
+	base.DTQL = "from: {schema: main, name: Customer}\nlimit: 5\n"
+	_, applied, err = chat.joinAttachedQuery(ctx, session, "Top 5 rows", base)
+	if err != nil || applied || executor.doc != "" {
+		t.Fatalf("single attached table was joined: applied %v, err %v, doc %q", applied, err, executor.doc)
+	}
+}
+
+func TestAttachedJoinDoesNotChangeAggregateOrImplicitOneToManyQuery(t *testing.T) {
+	ctx := context.Background()
+	executor := &joinExecutorStub{}
+	chat := &SessionChat{source: "sqlite:///fixture.db", joinApplication: ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: executor}}
+	customer := ContextReference{Kind: "table", SourceID: "local", ObjectID: "main.Customer", Title: "Customer"}
+	invoice := ContextReference{Kind: "table", SourceID: "local", ObjectID: "main.Invoice", Title: "Invoice"}
+	aggregate := QueryResult{Title: "Invoice count", Source: chat.source, DTQL: "from: {schema: main, name: Invoice}\ncolumns: [{aggregate: {function: COUNT, args: [{star: true}]}, as: Count}]\nlimit: 5\n"}
+	_, applied, err := chat.joinAttachedQuery(ctx, ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{customer}}}, "Count invoices", aggregate)
+	if err != nil || applied || executor.doc != "" {
+		t.Fatalf("aggregate should remain a valid root query: applied=%v err=%v doc=%q", applied, err, executor.doc)
+	}
+	base := QueryResult{Title: "Customers", Source: chat.source, DTQL: "from: {schema: main, name: Customer}\nlimit: 5\n"}
+	_, applied, err = chat.joinAttachedQuery(ctx, ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{invoice}}}, "Top 5 customers", base)
+	if err != nil || applied || executor.doc != "" {
+		t.Fatalf("implicit one-to-many JOIN changed customer rows: applied=%v err=%v doc=%q", applied, err, executor.doc)
+	}
+	_, applied, err = chat.joinAttachedQuery(ctx, ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{invoice}}}, "Top 5 customers with invoices", base)
+	if err == nil || applied || executor.doc != "" || !strings.Contains(err.Error(), "multiply rows") {
+		t.Fatalf("limited one-to-many JOIN changed root meaning: applied=%v err=%v doc=%q", applied, err, executor.doc)
+	}
+	base.DTQL = "from: {schema: main, name: Customer}\n"
+	joined, applied, err := chat.joinAttachedQuery(ctx, ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{invoice}}}, "Show customer invoices", base)
+	if err != nil || !applied || !strings.Contains(joined.DTQL, "Invoice") {
+		t.Fatalf("explicit one-to-many JOIN was not applied: applied=%v err=%v doc=%q", applied, err, executor.doc)
+	}
+	executor.doc = ""
+	unrelated := ContextReference{Kind: "table", SourceID: "local", ObjectID: "main.Artist", Title: "Artist"}
+	_, applied, err = chat.joinAttachedQuery(ctx, ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{unrelated}}}, "Top 5 customers", base)
+	if err != nil || applied || executor.doc != "" {
+		t.Fatalf("unrelated attached table blocked valid query: applied=%v err=%v doc=%q", applied, err, executor.doc)
+	}
+	executor.doc = ""
+	base.Source = "sqlite:///another-source.db"
+	_, applied, err = chat.joinAttachedQuery(ctx, ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{invoice}}}, "Show customer invoices", base)
+	if err != nil || applied || executor.doc != "" {
+		t.Fatalf("other-source query should not use default-source FK snapshot: applied=%v err=%v doc=%q", applied, err, executor.doc)
+	}
+}
+
+func TestAttachedJoinAsksWhenRelationshipsAmbiguous(t *testing.T) {
+	snapshot := ForeignKeySnapshot{Source: "sqlite:///fixture.db", Columns: map[string][]string{
+		"main.order": {"OrderId", "BillingAddressId", "ShippingAddressId"}, "main.address": {"AddressId", "City"},
+	}, Keys: []ForeignKey{
+		{ConstraintID: "billing", Schema: "main", FromRelation: "Order", FromFields: []string{"BillingAddressId"}, ToSchema: "main", ToRelation: "Address", ToFields: []string{"AddressId"}},
+		{ConstraintID: "shipping", Schema: "main", FromRelation: "Order", FromFields: []string{"ShippingAddressId"}, ToSchema: "main", ToRelation: "Address", ToFields: []string{"AddressId"}},
+	}}
+	executor := &joinExecutorStub{}
+	chat := &SessionChat{source: snapshot.Source, joinApplication: ForeignKeyJoinApplication{Source: snapshot.Source, Snapshot: snapshot, Executor: executor}}
+	session := ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{{Kind: "table", SourceID: "local", ObjectID: "main.Address", Title: "Address"}}}}
+	base := QueryResult{Title: "Orders", Source: snapshot.Source, DTQL: "from: {schema: main, name: Order}\nlimit: 5\n"}
+	if _, _, err := chat.joinAttachedQuery(context.Background(), session, "Show orders", base); err == nil || !strings.Contains(err.Error(), "Which relationship") || executor.doc != "" {
+		t.Fatalf("ambiguous JOIN was not held for clarification: %v, doc %q", err, executor.doc)
+	}
+	joined, applied, err := chat.joinAttachedQuery(context.Background(), session, "Show orders with billing addresses", base)
+	if err != nil || !applied || !strings.Contains(joined.DTQL, "BillingAddressId") {
+		t.Fatalf("explicit billing relationship was not applied: applied %v, err %v, dtql %q", applied, err, joined.DTQL)
+	}
+	executor.doc = ""
+	addressRoot := QueryResult{Title: "Addresses", Source: snapshot.Source, DTQL: "from: {schema: main, name: Address}\nlimit: 5\n"}
+	ordersAttached := ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{{Kind: "table", SourceID: "local", ObjectID: "main.Order", Title: "Order"}}}}
+	_, applied, err = chat.joinAttachedQuery(context.Background(), ordersAttached, "Top 5 addresses", addressRoot)
+	if err != nil || applied || executor.doc != "" {
+		t.Fatalf("multiple incoming one-to-many edges blocked root query: applied %v, err %v, doc %q", applied, err, executor.doc)
+	}
+}
+
+type ambiguousAttachedJoinAgent struct{ base QueryResult }
+
+func (a ambiguousAttachedJoinAgent) AskWithContext(ctx context.Context, _, _ string) (Turn, error) {
+	join := ctx.Value(attachedJoinKey{}).(func(context.Context, QueryResult) (QueryResult, bool, error))
+	_, _, err := join(ctx, a.base)
+	return Turn{Queries: []QueryResult{{Err: err}}}, nil
+}
+
+func TestAmbiguousAttachedJoinBecomesClarificationNotFailedQuery(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	snapshot := ForeignKeySnapshot{Source: "sqlite:///fixture.db", Columns: map[string][]string{
+		"main.order": {"OrderId", "BillingAddressId", "ShippingAddressId"}, "main.address": {"AddressId"},
+	}, Keys: []ForeignKey{
+		{ConstraintID: "billing", Schema: "main", FromRelation: "Order", FromFields: []string{"BillingAddressId"}, ToSchema: "main", ToRelation: "Address", ToFields: []string{"AddressId"}},
+		{ConstraintID: "shipping", Schema: "main", FromRelation: "Order", FromFields: []string{"ShippingAddressId"}, ToSchema: "main", ToRelation: "Address", ToFields: []string{"AddressId"}},
+	}}
+	base := QueryResult{Source: snapshot.Source, SourceID: "local", DTQL: "from: {schema: main, name: Order}\nlimit: 5\n"}
+	chat, err := NewSessionChat(ctx, store, ambiguousAttachedJoinAgent{base}, snapshot.Source,
+		ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", SourceID: "local", ObjectID: "main.Address", Title: "Address"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: snapshot.Source, Snapshot: snapshot, Executor: &joinExecutorStub{}})
+	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "attach", Reference: chat.catalog.Objects[0].Reference}); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := chat.Ask(ctx, "Show orders")
+	if err != nil || len(turn.Queries) != 0 || !strings.Contains(turn.Text, "Which relationship") {
+		t.Fatalf("ambiguous attachment turn = %+v, %v", turn, err)
+	}
 }
 
 func TestChinookInvoiceCustomerJoinThroughDALgo(t *testing.T) {
@@ -114,6 +243,34 @@ func TestChinookInvoiceCustomerJoinThroughDALgo(t *testing.T) {
 		return
 	}
 	t.Fatal("Customer to Employee FK not found")
+}
+
+func TestChinookFreshAttachedCustomerUsesLeftJoinThroughDALgo(t *testing.T) {
+	ctx := context.Background()
+	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	source := "sqlite://" + path
+	snapshot, err := LoadSQLiteForeignKeySnapshot(ctx, source, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := &SessionChat{source: source, joinApplication: ForeignKeyJoinApplication{Source: source, Snapshot: snapshot, Executor: secureread.NewExecutor(secureread.Session{Unrestricted: true})}}
+	session := ChatSession{Workspace: WorkspaceState{Attachments: []ContextReference{{Kind: "table", SourceID: "local", ObjectID: "main.Customer", Title: "Customer"}}}}
+	base := QueryResult{Title: "Newest invoices", Source: source, DTQL: "from: {name: Invoice}\norderBy: [{field: InvoiceId, desc: true}]\nlimit: 5\n"}
+	joined, applied, err := chat.joinAttachedQuery(ctx, session, "Show 5 newest invoices", base)
+	if err != nil || !applied || len(joined.Result.Rows) != 5 || !strings.Contains(joined.DTQL, "type: left") {
+		t.Fatalf("real Chinook attached LEFT JOIN = applied %v rows %d dtql %q err %v", applied, len(joined.Result.Rows), joined.DTQL, err)
+	}
+	if got := joined.Result.Rows[0].Data["InvoiceId"]; fmt.Sprint(got) != "412" {
+		t.Fatalf("newest invoice changed after attached JOIN: %#v", got)
+	}
 }
 
 func TestDiscoverJoinCandidatesKeepsCompositeAndSelfDirections(t *testing.T) {

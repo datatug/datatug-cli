@@ -73,6 +73,20 @@ func TestRunDTQLReturnsPersistedRecordSetReference(t *testing.T) {
 	}
 }
 
+func TestJoinedQueryDoesNotReportSuccessWhenPersistenceFails(t *testing.T) {
+	conversation := &ADKConversation{}
+	ctx := withAttachedJoin(context.Background(), func(_ context.Context, base QueryResult) (QueryResult, bool, error) {
+		base.DTQL = "from: {name: Invoice, joins: [{from: {name: Customer}, type: LEFT, on: [{left: {field: CustomerId, source: Invoice}, op: '==', right: {field: CustomerId, source: Customer}}]}]}\nlimit: 5"
+		base.Result = secureread.Result{Columns: []string{"InvoiceId"}}
+		return base, true, nil
+	})
+	ctx = withQueryObserver(ctx, func(QueryResult) (QueryResult, error) { return QueryResult{}, errors.New("storage unavailable") })
+	response, err := conversation.runDTQL(ctx, &fakeExecutor{}, "sqlite:///chinook.db", runDTQLArgs{DTQL: "from: {name: Invoice}\nlimit: 5"})
+	if err != nil || response.OK || response.Error == "" {
+		t.Fatalf("joined result falsely reported as saved: %+v, %v", response, err)
+	}
+}
+
 func TestRunDTQLRefusesModelAuthoredJoin(t *testing.T) {
 	executor := &fakeExecutor{}
 	conversation := &ADKConversation{}
@@ -273,6 +287,60 @@ type scriptedLLM struct {
 	errs      []error
 	requests  []*model.LLMRequest
 	calls     int
+}
+
+func TestAgentRetriesEmptyModelTurnBeforeGivingUpOnQuery(t *testing.T) {
+	llm := &scriptedLLM{responses: []*model.LLMResponse{
+		{Content: genai.NewContentFromText("", genai.RoleModel)},
+		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{
+			"title": "Latest invoices", "dtql": "from: {name: Invoice}\norderBy: [{field: InvoiceId, desc: true}]\nlimit: 100",
+		}, genai.RoleModel)},
+		{Content: genai.NewContentFromText("Done.", genai.RoleModel)},
+	}}
+	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 412}}}}}
+	conversation, err := NewADKConversation(llm, executor, "sqlite:///chinook.db", "- Invoice (schema: main): InvoiceId [INTEGER]")
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := conversation.Ask(context.Background(), "Show last 100 invoices")
+	if err != nil || len(turn.Queries) != 1 || turn.Queries[0].Err != nil || executor.calls != 1 {
+		t.Fatalf("empty model turn was not retried into a structured query: turn=%+v err=%v calls=%d", turn, err, executor.calls)
+	}
+}
+
+func TestAgentQueryAutomaticallyJoinsAttachedCustomerIntoOneRecordSet(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	catalog := workspaceTestCatalog()
+	catalog.Objects[2].Reference.SourceID = "chinook"
+	llm := &scriptedLLM{responses: []*model.LLMResponse{
+		{Content: genai.NewContentFromFunctionCall("run_dtql", map[string]any{"title": "Invoices", "dtql": "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5"}, genai.RoleModel)},
+		{Content: genai.NewContentFromText("Done.", genai.RoleModel)},
+	}}
+	baseExecutor := &fakeExecutor{}
+	conversation, err := NewADKConversation(llm, baseExecutor, "sqlite:///chinook.db", "- Invoice\n- Customer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := NewSessionChat(ctx, store, conversation, "sqlite:///chinook.db", catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "attach", Reference: catalog.Objects[2].Reference}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := joinSnapshot()
+	snapshot.Source = "sqlite:///chinook.db"
+	joinExecutor := &joinExecutorStub{}
+	chat.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: snapshot.Source, Snapshot: snapshot, Executor: joinExecutor})
+	turn, err := chat.Ask(ctx, "Show invoices")
+	if err != nil || len(turn.Queries) != 1 || turn.Queries[0].Err != nil || baseExecutor.calls != 0 {
+		t.Fatalf("attached query did not use one joined result: turn=%+v err=%v base calls=%d", turn, err, baseExecutor.calls)
+	}
+	saved, err := chat.Snapshot(ctx)
+	if err != nil || len(saved.RecordSets) != 1 || !strings.Contains(turn.Queries[0].DTQL, "Customer") || !strings.Contains(joinExecutor.doc, "joins:") {
+		t.Fatalf("joined RecordSet not persisted: records=%d query=%+v doc=%q err=%v", len(saved.RecordSets), turn.Queries[0], joinExecutor.doc, err)
+	}
 }
 
 func (m *scriptedLLM) Name() string { return "scripted" }

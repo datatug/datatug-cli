@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	bubbletable "github.com/evertras/bubble-table/table"
+	"github.com/pkg/browser"
 )
 
 const maxGridHeight = 12
@@ -532,11 +533,17 @@ type joinMessage struct {
 
 type tableStyleNoticeExpired struct{ id int }
 
+type browserOpenResult struct {
+	url string
+	err error
+}
+
 // UI is the Bubble Tea chat model: a scrollable history viewport, inline
 // bubble-table components, and a fixed bottom input.
 type UI struct {
 	ctx                  context.Context
 	browserURL           string
+	openBrowser          func(string) error
 	webLinkVisible       bool
 	bridgeEvents         <-chan struct{}
 	bridgeStop           func()
@@ -549,6 +556,8 @@ type UI struct {
 	modelName            string
 	history              viewport.Model
 	input                textarea.Model
+	attachmentFocus      int
+	composerUndo         *composerDraft
 	entries              []historyEntry
 	activeGrid           int
 	gridFocused          bool
@@ -556,6 +565,7 @@ type UI struct {
 	selectedMessage      int
 	joinFocused          bool
 	workspaceFocused     bool
+	projectDetailOffset  int
 	workspaceReturnGrid  int
 	workspaceReturnMsg   int
 	workspaceTab         int
@@ -567,7 +577,6 @@ type UI struct {
 	explorerIndex        int
 	explorerOffset       int
 	explorerCollapsed    map[string]bool
-	projectDetails       bool
 	dockIndex            int
 	dockGridFocused      bool
 	dockGrids            map[string]*gridState
@@ -609,6 +618,11 @@ type UI struct {
 	height               int
 }
 
+type composerDraft struct {
+	text        string
+	attachments []ContextReference
+}
+
 // ProjectChoice identifies a configured DataTug project, not a database.
 type ProjectChoice struct {
 	Key    string
@@ -623,9 +637,10 @@ func (u *UI) SetProjectChoices(choices []ProjectChoice) {
 
 func (u *UI) SelectedProject() string { return u.selectedProject }
 
-// SetBrowserURL enables F5 to reveal the active CLI session link.
+// SetBrowserURL enables F5 to open the active CLI session in a browser.
 func (u *UI) SetBrowserURL(url string) {
 	u.browserURL = url
+	u.openBrowser = browser.OpenURL
 	if u.sessions != nil && u.bridgeEvents == nil {
 		u.bridgeEvents, u.bridgeStop = u.sessions.SubscribeChanges()
 	}
@@ -660,8 +675,12 @@ func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI
 	composerBackground := lipgloss.Color("236")
 	inputStyles.Focused.Text = inputStyles.Focused.Text.Background(composerBackground)
 	inputStyles.Focused.Placeholder = inputStyles.Focused.Placeholder.Background(composerBackground)
+	inputStyles.Focused.Base = inputStyles.Focused.Base.Background(composerBackground)
+	inputStyles.Focused.CursorLine = inputStyles.Focused.CursorLine.Background(composerBackground)
 	inputStyles.Blurred.Text = inputStyles.Blurred.Text.Background(composerBackground)
 	inputStyles.Blurred.Placeholder = inputStyles.Blurred.Placeholder.Background(composerBackground)
+	inputStyles.Blurred.Base = inputStyles.Blurred.Base.Background(composerBackground)
+	inputStyles.Blurred.CursorLine = inputStyles.Blurred.CursorLine.Background(composerBackground)
 	input.SetStyles(inputStyles)
 	input.SetWidth(max(1, contentWidth(80)-3))
 	input.Focus()
@@ -676,6 +695,7 @@ func NewUI(ctx context.Context, conversation Conversation, modelName string) *UI
 		modelName:           modelName,
 		history:             history,
 		input:               input,
+		attachmentFocus:     -1,
 		bookmarkEditor:      bookmarkEditor,
 		activeGrid:          -1,
 		workspaceReturnGrid: -1,
@@ -726,6 +746,12 @@ func (u *UI) Init() tea.Cmd {
 
 func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	var commands []tea.Cmd
+	if result, ok := message.(browserOpenResult); ok {
+		if result.url == u.browserURL && result.err != nil {
+			u.webLinkVisible = true
+		}
+		return u, nil
+	}
 	if u.queryParameters != nil {
 		switch message.(type) {
 		case tea.WindowSizeMsg, parameterLookupMessage, bridgeTickMsg:
@@ -859,7 +885,11 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if err := u.reloadSavedQueries(); err != nil {
 			u.saveQueryError("Query saved, but the picker could not be refreshed: " + conciseError(err))
 		} else {
-			u.catalog.Objects = append(u.catalog.Objects, ProjectObject{Reference: ContextReference{Kind: "query", ProjectID: u.catalog.ID, ObjectID: msg.query.ID, Title: msg.query.Title}})
+			queryText := ""
+			if msg.draft != nil {
+				queryText = msg.draft.request.Text
+			}
+			u.catalog.Objects = append(u.catalog.Objects, ProjectObject{Reference: ContextReference{Kind: "query", ProjectID: u.catalog.ID, ObjectID: msg.query.ID, Title: msg.query.Title}, QueryType: msg.query.Type, QueryText: queryText})
 			u.saveQueryError("Saved project query: " + sanitizeTerminalText(msg.query.Title) + " [" + msg.query.Type + "]")
 		}
 		return u, nil
@@ -921,8 +951,9 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if u.detail != nil {
 			return u, nil
 		}
-		if u.mouseCapture && msg.Button == tea.MouseLeft && msg.Y == u.historyHeight()+2 {
-			if ref, ok := u.attachmentCloseAt(msg.X - responsiveGutter(u.width)); ok {
+		if u.mouseCapture && msg.Button == tea.MouseLeft {
+			if ref, ok := u.attachmentCloseAt(msg.X-responsiveGutter(u.width)-2, msg.Y-u.historyHeight()-3); ok {
+				u.rememberComposerDraft()
 				u.performWorkspaceAction(WorkspaceAction{Kind: "detach", Reference: ref})
 				return u, nil
 			}
@@ -945,6 +976,17 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return u, nil
 		}
 	case tea.KeyPressMsg:
+		if u.webLinkVisible {
+			switch msg.String() {
+			case "f5", "esc":
+				u.webLinkVisible = false
+				return u, nil
+			case "ctrl+c":
+				return u, tea.Quit
+			default:
+				return u, nil
+			}
+		}
 		if u.httpRequestDialog != nil {
 			return u, u.updateHTTPRequestDialog(msg)
 		}
@@ -1011,6 +1053,36 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return u, tea.Quit
+		case "shift+esc", "ctrl+y":
+			if u.restoreComposerDraft() {
+				return u, nil
+			}
+		case "tab", "shift+tab":
+			if !u.gridFocused && !u.messageFocused && !u.workspaceFocused && len(u.snapshot.Workspace.Attachments) > 0 {
+				count := len(u.snapshot.Workspace.Attachments)
+				if msg.String() == "tab" {
+					u.attachmentFocus = (u.attachmentFocus + 1) % (count + 1)
+				} else {
+					u.attachmentFocus = (u.attachmentFocus + count) % (count + 1)
+				}
+				if u.attachmentFocus == count {
+					u.attachmentFocus = -1
+					u.input.Focus()
+				} else {
+					u.input.Blur()
+				}
+				return u, nil
+			}
+		case "backspace", "delete":
+			if u.attachmentFocus >= 0 && u.attachmentFocus < len(u.snapshot.Workspace.Attachments) {
+				ref := u.snapshot.Workspace.Attachments[u.attachmentFocus]
+				u.rememberComposerDraft()
+				u.performWorkspaceAction(WorkspaceAction{Kind: "detach", Reference: ref})
+				if u.attachmentFocus >= len(u.snapshot.Workspace.Attachments) {
+					u.focusInput()
+				}
+				return u, nil
+			}
 		case "shift+enter":
 			if !u.gridFocused && !u.messageFocused && !u.workspaceFocused && !u.busy {
 				u.input.InsertString("\n")
@@ -1021,7 +1093,8 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return u, u.refreshSelectedCard()
 		case "f5":
 			if u.browserURL != "" {
-				u.webLinkVisible = !u.webLinkVisible
+				url, open := u.browserURL, u.openBrowser
+				return u, func() tea.Msg { return browserOpenResult{url: url, err: open(url)} }
 			}
 			return u, nil
 		case "alt+s", "ß": // macOS Option+S emits ß unless the terminal maps Option to Meta.
@@ -1076,6 +1149,11 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			u.mouseCapture = !u.mouseCapture
 			return u, nil
 		case "esc":
+			if !u.gridFocused && !u.messageFocused && !u.workspaceFocused && !u.busy && (u.input.Focused() || u.attachmentFocus >= 0) {
+				if u.clearComposerStep() {
+					return u, nil
+				}
+			}
 			if u.joinFocused {
 				u.joinFocused = false
 				if u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
@@ -1174,6 +1252,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else if msg.String() == "enter" && !u.busy {
 			prompt := strings.TrimSpace(u.input.Value())
 			if prompt != "" {
+				u.composerUndo = nil
 				u.input.Reset()
 				u.resizeComposer()
 				if u.sessions != nil && strings.HasPrefix(prompt, "/") {
@@ -1193,6 +1272,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return u, nil
 		} else if msg.String() == "ctrl+d" && len(u.snapshot.Workspace.Attachments) > 0 {
 			last := u.snapshot.Workspace.Attachments[len(u.snapshot.Workspace.Attachments)-1]
+			u.rememberComposerDraft()
 			u.performWorkspaceAction(WorkspaceAction{Kind: "detach", Reference: last})
 			return u, nil
 		}
@@ -1203,6 +1283,7 @@ func (u *UI) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		previousInput := u.input.Value()
 		u.input, cmd = u.input.Update(message)
 		if previousInput != u.input.Value() {
+			u.composerUndo = nil
 			u.commandMenuIndex = 0
 			u.commandMenuDismissed = ""
 			u.resizeComposer()
@@ -1291,6 +1372,8 @@ func (u *UI) loadSession(session ChatSession) {
 		}
 	}
 	u.workspaceTab = workspaceTabIndex(session.Workspace.ActiveTab)
+	u.attachmentFocus = -1
+	u.composerUndo = nil
 	u.dockGrids = map[string]*gridState{}
 	u.input.Focus()
 	versionsToKeep := defaultResultVersionsToKeep
@@ -1480,7 +1563,7 @@ func (u *UI) runSessionCommand(input string) tea.Cmd {
 			snapshot, err = u.sessions.Delete(u.ctx)
 		}
 	case "/help":
-		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm • /bucket [clear] • /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path> • /connect (preview) • /http [new|GET|POST|PUT|PATCH|DELETE] [url] • /http header|cookie [name=value] • /query [search] or /queries [search] • /settings versions <1-100>\n\nGlobal: Shift+Enter newline • F2 mouse select/wheel • F6/Shift+→ workspace • Shift+← previous • Alt+S table style • Ctrl+C quit\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • 4 Raw/5 Headers (HTTP) • Ctrl+R refresh • Tab panes when wide • ↑↓ active pane • Shift+↑↓ select grids/messages • j JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • B bucket • e export • q save query • s sort • Enter details • Esc composer\n\nInspector: 1 Current row • 2 Current column • 3 Current recordset"})
+		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm • /bucket [clear] • /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path> • /connect (preview) • /http [new|GET|POST|PUT|PATCH|DELETE] [url] • /http header|cookie [name=value] • /query [search] or /queries [search] • /settings versions <1-100>\n\nGlobal: Shift+Enter newline • F2 mouse select/wheel • F5 open web chat • F6/Shift+→ workspace • Shift+← previous • Alt+S table style • Ctrl+C quit\n\nComposer: Tab/Shift+Tab select attachment chips • Backspace remove focused chip • Esc clear text, then attachments • Shift+Esc restore both\n\nWorkspace: Tab/Shift+Tab switch tabs • ↑↓ navigate • ←→ collapse/expand tree • selection shows details below\n\nRecordSet: 1 Table • 2 Charts • 3 Current row • 4 Raw/5 Headers (HTTP) • Ctrl+R refresh • Tab panes when wide • ↑↓ active pane • Shift+↑↓ select grids/messages • j JOINs • Space row • c cell • r range • a attach • d dock • b bookmark • B bucket • e export • q save query • s sort • Enter details • Esc composer\n\nInspector: 1 Current row • 2 Current column • 3 Current recordset"})
 	case "/bucket":
 		switch argument {
 		case "clear":
@@ -1865,7 +1948,56 @@ func (u *UI) focusInput() {
 	u.joinFocused = false
 	u.workspaceFocused = false
 	u.dockGridFocused = false
+	u.attachmentFocus = -1
 	u.input.Focus()
+}
+
+func (u *UI) clearComposerStep() bool {
+	if u.input.Value() == "" && len(u.snapshot.Workspace.Attachments) == 0 {
+		return false
+	}
+	u.rememberComposerDraft()
+	if u.input.Value() != "" {
+		u.input.Reset()
+		u.resizeComposer()
+	} else if err := u.applyWorkspaceAction(WorkspaceAction{Kind: "detach_all"}); err != nil {
+		u.saveQueryError("Could not clear attachments: " + conciseError(err))
+		return false
+	}
+	u.focusInput()
+	return true
+}
+
+func (u *UI) rememberComposerDraft() {
+	if u.composerUndo == nil {
+		u.composerUndo = &composerDraft{
+			text:        u.input.Value(),
+			attachments: append([]ContextReference(nil), u.snapshot.Workspace.Attachments...),
+		}
+	}
+}
+
+func (u *UI) restoreComposerDraft() bool {
+	if u.composerUndo == nil || u.sessions == nil {
+		return false
+	}
+	draft := u.composerUndo
+	if err := u.applyWorkspaceAction(WorkspaceAction{Kind: "detach_all"}); err != nil {
+		u.saveQueryError("Could not restore attachments: " + conciseError(err))
+		return false
+	}
+	for _, ref := range draft.attachments {
+		if err := u.applyWorkspaceAction(WorkspaceAction{Kind: "attach", Reference: ref}); err != nil {
+			u.saveQueryError("Could not restore attachment: " + conciseError(err))
+			return false
+		}
+	}
+	u.input.SetValue(draft.text)
+	u.input.CursorEnd()
+	u.resizeComposer()
+	u.composerUndo = nil
+	u.focusInput()
+	return true
 }
 
 func (u *UI) focusWorkspace() {
@@ -1929,7 +2061,7 @@ func (u *UI) appendTurn(turn Turn) {
 		}
 	}
 	if turn.Text == "" && len(turn.Queries) == 0 {
-		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "I couldn't construct a valid query for that request."})
+		u.entries = append(u.entries, historyEntry{role: "DataTug", text: "The AI model returned no query or answer. Try again or choose another model."})
 	}
 }
 
@@ -2154,7 +2286,11 @@ func (u *UI) composerView(width int) string {
 		Width(interior).
 		MaxWidth(interior).
 		Render(strings.Repeat("▀", interior))
-	return lipgloss.JoinVertical(lipgloss.Left, top, text, fade)
+	parts := []string{top}
+	for _, line := range u.attachmentLines(interior) {
+		parts = append(parts, bar+line)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, append(parts, text, fade)...)
 }
 
 func (u *UI) View() tea.View {
@@ -2175,10 +2311,9 @@ func (u *UI) View() tea.View {
 	if commandMenu == "" {
 		commandMenu = u.commandMenuView(innerWidth)
 	}
-	attachments := u.attachmentLine(innerWidth)
 	statusText := strings.Join(u.statusLines(), "\n")
 	status := statusSurfaceStyle.Width(contentWidth(u.width)).Render(statusStyle.Render(statusText))
-	chatParts := []string{u.history.View(), spacer, attachments}
+	chatParts := []string{u.history.View(), spacer}
 	if commandMenu != "" {
 		chatParts = append(chatParts, commandMenu)
 	}
@@ -2187,7 +2322,8 @@ func (u *UI) View() tea.View {
 	body := chat
 	if u.splitEnabled() {
 		workspace := u.workspaceView(u.workspacePaneWidth(), bodyHeight)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, chat, strings.Repeat("│\n", max(0, bodyHeight-1))+"│", workspace)
+		separator := lipgloss.NewStyle().Background(lipgloss.Color("234")).Render(" ")
+		body = lipgloss.JoinHorizontal(lipgloss.Top, chat, strings.Repeat(separator+"\n", max(0, bodyHeight-1))+separator, workspace)
 	} else if u.workspaceFocused {
 		body = u.workspaceView(contentWidth(u.width), bodyHeight)
 	}
@@ -2215,6 +2351,9 @@ func (u *UI) View() tea.View {
 	if u.queryParameters != nil {
 		content = u.queryParametersOverlay(content)
 	}
+	if u.webLinkVisible && u.browserURL != "" {
+		content = u.webLinkOverlay(content)
+	}
 	view := tea.NewView(content)
 	view.AltScreen = true
 	if u.mouseCapture {
@@ -2223,6 +2362,18 @@ func (u *UI) View() tea.View {
 		view.MouseMode = tea.MouseModeNone
 	}
 	return view
+}
+
+func (u *UI) webLinkOverlay(background string) string {
+	width := max(4, min(u.width-2, max(48, len(u.browserURL)+8)))
+	url := sanitizeTerminalText(u.browserURL)
+	link := lipgloss.NewStyle().Hyperlink(u.browserURL).Render(ansi.Hardwrap(url, max(1, width-4), false))
+	lines := []string{"Couldn't open the browser. Open this URL manually:", "", link, "", "This local capability link is private. F5 or Esc hides it."}
+	box := lipgloss.NewStyle().Width(width-2).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("51")).Background(lipgloss.Color("235")).Foreground(lipgloss.Color("252")).Render(strings.Join(lines, "\n"))
+	canvas := lipgloss.NewCanvas(u.width, u.height)
+	canvas.Compose(lipgloss.NewLayer(background))
+	canvas.Compose(lipgloss.NewLayer(box).X(max(0, (u.width-lipgloss.Width(box))/2)).Y(max(0, (u.height-lipgloss.Height(box))/2)))
+	return canvas.Render()
 }
 
 func (u *UI) topBar(width int) string {
@@ -2242,28 +2393,65 @@ func (u *UI) topBar(width int) string {
 	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Width(width).Render(ansi.Truncate(label, width, "…"))
 }
 
-func (u *UI) attachmentLine(width int) string {
-	if len(u.snapshot.Workspace.Attachments) == 0 {
-		return padAnsiLine(" ", width)
-	}
-	labels := make([]string, 0, len(u.snapshot.Workspace.Attachments))
-	for _, ref := range u.snapshot.Workspace.Attachments {
-		labels = append(labels, "["+sanitizeTerminalText(ref.Title)+" ×]")
-	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("111")).Background(lipgloss.Color("235")).Width(width).Render(ansi.Truncate(strings.Join(labels, " "), width, "…"))
+type attachmentChip struct {
+	index int
+	text  string
+	x     int // close button position within the padded attachment line
 }
 
-func (u *UI) attachmentCloseAt(x int) (ContextReference, bool) {
-	if x < 0 || x >= u.chatPaneWidth() {
+func (u *UI) attachmentRows(width int) [][]attachmentChip {
+	if len(u.snapshot.Workspace.Attachments) == 0 {
+		return nil
+	}
+	available := max(1, width-2) // inputSurfaceStyle has one cell of padding on each side
+	rows := [][]attachmentChip{{}}
+	used := 0
+	for i, ref := range u.snapshot.Workspace.Attachments {
+		// Preserve the close button when a single title exceeds the composer width.
+		title := ansi.Truncate(sanitizeTerminalText(ref.Title), max(0, available-4), "")
+		chip := "[" + title + " ×]"
+		chipWidth := ansi.StringWidth(chip)
+		gap := 0
+		if used > 0 {
+			gap = 1
+		}
+		if used+gap+chipWidth > available && used > 0 {
+			rows = append(rows, []attachmentChip{})
+			used, gap = 0, 0
+		}
+		used += gap
+		rows[len(rows)-1] = append(rows[len(rows)-1], attachmentChip{index: i, text: chip, x: used + ansi.StringWidth(title) + 2})
+		used += chipWidth
+	}
+	return rows
+}
+
+func (u *UI) attachmentLines(width int) []string {
+	rows := u.attachmentRows(width)
+	lines := make([]string, 0, len(rows))
+	for _, row := range rows {
+		labels := make([]string, 0, len(row))
+		for _, chip := range row {
+			style := lipgloss.NewStyle().Foreground(lipgloss.Color("111")).Background(lipgloss.Color("236"))
+			if chip.index == u.attachmentFocus {
+				style = style.Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57"))
+			}
+			labels = append(labels, style.Render(chip.text))
+		}
+		lines = append(lines, inputSurfaceStyle.Width(width).Render(strings.Join(labels, " ")))
+	}
+	return lines
+}
+
+func (u *UI) attachmentCloseAt(x, row int) (ContextReference, bool) {
+	rows := u.attachmentRows(max(1, u.chatPaneWidth()-1))
+	if row < 0 || row >= len(rows) {
 		return ContextReference{}, false
 	}
-	position := 0
-	for _, ref := range u.snapshot.Workspace.Attachments {
-		titleWidth := ansi.StringWidth(sanitizeTerminalText(ref.Title))
-		if x == position+titleWidth+2 { // the × in "[title ×]"
-			return ref, true
+	for _, chip := range rows[row] {
+		if x == chip.x {
+			return u.snapshot.Workspace.Attachments[chip.index], true
 		}
-		position += titleWidth + 5 // bracket, space, ×, bracket, gap
 	}
 	return ContextReference{}, false
 }
@@ -2281,6 +2469,9 @@ func (u *UI) statusLines() []string {
 		mouseHint = "F2 wheel"
 	}
 	segments := []string{"model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "Enter send", "F6/Shift+→ workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", mouseHint, "Ctrl+C quit"}
+	if len(u.snapshot.Workspace.Attachments) > 0 && !u.gridFocused && !u.messageFocused && !u.workspaceFocused {
+		segments = []string{"Tab chips", "Backspace remove", "Esc clear text/attachments", "Shift+Esc restore", "Enter send", "F6 workspace", mouseHint}
+	}
 	if u.sessions != nil {
 		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.sessionTitle), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
 	}
@@ -2319,12 +2510,12 @@ func (u *UI) statusLines() []string {
 		segments = []string{"JOIN candidates", "↑↓ source", "←→ relationship", "Space add JOIN", "Enter details", "Esc grid", "Tab input"}
 	}
 	if u.workspaceFocused {
-		segments = []string{"Shift+← previous", "F6/Esc input", "←→ tabs", "↑↓ navigate", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", mouseHint}
+		segments = []string{"Shift+← previous", "F6/Esc input", "Tab ⇥ tabs", "←→ tree", "↑↓ navigate", "PgUp/Dn details", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", mouseHint}
 		if u.workspaceTab == 1 {
-			segments = []string{"1 row", "2 column", "3 recordset", "Shift+← previous", "←→ workspace tabs", "Space attach", "b bookmark", "d dock", mouseHint}
+			segments = []string{"1 row", "2 column", "3 recordset", "Shift+← previous", "Tab ⇥ workspace tabs", "Space attach", "b bookmark", "d dock", mouseHint}
 		}
 		if u.workspaceTab == 3 {
-			segments = []string{"Shift+← previous", "F6/Esc input", "←→ tabs", "↑↓ browse", "Enter open grid", "a attach", "d dock", "r rename", "t/T tags", "/ search", "f filter", "x delete", mouseHint}
+			segments = []string{"Shift+← previous", "F6/Esc input", "Tab ⇥ tabs", "↑↓ browse", "Enter open grid", "a attach", "d dock", "r rename", "t/T tags", "/ search", "f filter", "x delete", mouseHint}
 			if u.bookmarkGridFocused {
 				segments = []string{"Tab list", "↑↓ rows", "←→ columns", "s sort", "a attach", "d dock", "Esc list"}
 			}
@@ -2364,6 +2555,9 @@ func (u *UI) statusLines() []string {
 	maxWidth := max(1, contentWidth(u.width)-2)
 	if maxWidth < 100 {
 		compact := []string{"FOCUS Chat", "model: " + sanitizeTerminalText(u.modelName), "Shift+↑↓ to navigate", "Enter send", mouseHint, "Ctrl+C quit"}
+		if len(u.snapshot.Workspace.Attachments) > 0 && !u.gridFocused && !u.messageFocused && !u.workspaceFocused {
+			compact = []string{"FOCUS Chat", "Tab chips", "Esc clear", "Shift+Esc restore", "Enter send"}
+		}
 		if u.gridFocused && u.activeGrid >= 0 && u.activeGrid < len(u.entries) && u.entries[u.activeGrid].grid != nil {
 			compact = []string{"FOCUS Grid · " + sanitizeTerminalText(u.entries[u.activeGrid].grid.title), "↑↓ rows", "←→ columns", "Enter details", "e export", "q save", "Esc input"}
 			if count := len(u.snapshot.Workspace.ExportBucket); count > 0 {
@@ -2394,14 +2588,14 @@ func (u *UI) statusLines() []string {
 		if u.webLinkVisible {
 			compact = append(compact, lipgloss.NewStyle().Hyperlink(u.browserURL).Render("Open web chat"), "F5 hide link")
 		} else if u.browserURL != "" {
-			compact = append(compact, "F5 web link")
+			compact = append(compact, "F5 open web chat")
 		}
 		return wrapStatusSegments(compact, maxWidth)
 	}
 	if u.webLinkVisible {
 		segments = append(segments, lipgloss.NewStyle().Hyperlink(u.browserURL).Render("Open web chat"), "F5 hide link")
 	} else if u.browserURL != "" {
-		segments = append(segments, "F5 web link")
+		segments = append(segments, "F5 open web chat")
 	}
 	// Preserve the focus cue and primary actions on wide terminals without
 	// making an extra status row merely for the project/session shortcuts.
@@ -2459,7 +2653,7 @@ func wrapStatusSegments(segments []string, maxWidth int) []string {
 }
 
 func (u *UI) historyHeight() int {
-	return max(1, u.height-6-len(u.statusLines())-max(u.commandMenuHeight(), u.savedQueryMenuHeight())-max(0, u.input.Height()-1))
+	return max(1, u.height-5-len(u.attachmentRows(max(1, u.chatPaneWidth()-1)))-len(u.statusLines())-max(u.commandMenuHeight(), u.savedQueryMenuHeight())-max(0, u.input.Height()-1))
 }
 
 func (u *UI) resizeComposer() {

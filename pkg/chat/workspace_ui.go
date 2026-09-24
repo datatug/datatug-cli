@@ -278,20 +278,37 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 	}
 	nodes := u.explorerNodes()
 	switch msg.String() {
+	case "tab":
+		u.setWorkspaceTab(u.workspaceTab + 1)
+	case "shift+tab":
+		u.setWorkspaceTab(u.workspaceTab - 1)
 	case "1", "2", "3":
 		if u.workspaceTab == 1 {
 			u.inspectorTab = int(msg.String()[0] - '1')
 			u.inspectorOffset = 0
 		}
 	case "left", "h":
-		u.setWorkspaceTab(u.workspaceTab - 1)
+		if u.workspaceTab == 0 && u.explorerIndex >= 0 && u.explorerIndex < len(nodes) {
+			if nodes[u.explorerIndex].branch {
+				u.explorerCollapsed[nodes[u.explorerIndex].id] = true
+			} else {
+				for i := u.explorerIndex - 1; i >= 0; i-- {
+					if nodes[i].branch && nodes[i].depth < nodes[u.explorerIndex].depth {
+						u.explorerIndex = i
+						break
+					}
+				}
+			}
+		}
 	case "right", "l":
-		u.setWorkspaceTab(u.workspaceTab + 1)
+		if u.workspaceTab == 0 && u.explorerIndex >= 0 && u.explorerIndex < len(nodes) && nodes[u.explorerIndex].branch {
+			u.explorerCollapsed[nodes[u.explorerIndex].id] = false
+		}
 	case "up", "k":
 		switch u.workspaceTab {
 		case 0:
 			u.explorerIndex = max(0, u.explorerIndex-1)
-			u.projectDetails = false
+			u.projectDetailOffset = 0
 		case 1:
 			u.inspectorOffset = max(0, u.inspectorOffset-1)
 		case 2:
@@ -304,7 +321,7 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 		switch u.workspaceTab {
 		case 0:
 			u.explorerIndex = min(len(nodes)-1, u.explorerIndex+1)
-			u.projectDetails = false
+			u.projectDetailOffset = 0
 		case 1:
 			u.inspectorOffset++
 		case 2:
@@ -313,15 +330,21 @@ func (u *UI) updateWorkspaceKey(msg tea.KeyPressMsg) {
 			u.bookmarkIndex = min(len(u.bookmarkItems)-1, u.bookmarkIndex+1)
 			u.bookmarkGrid = nil
 		}
+	case "pgup", "pgdown":
+		if u.workspaceTab == 0 {
+			step := max(1, u.height/4)
+			if msg.String() == "pgup" {
+				u.projectDetailOffset = max(0, u.projectDetailOffset-step)
+			} else {
+				u.projectDetailOffset += step
+			}
+		}
 	case "enter":
 		if u.workspaceTab == 0 {
 			if u.explorerIndex >= 0 && u.explorerIndex < len(nodes) {
 				node := nodes[u.explorerIndex]
 				if node.branch {
 					u.explorerCollapsed[node.id] = !u.explorerCollapsed[node.id]
-					u.projectDetails = false
-				} else {
-					u.projectDetails = !u.projectDetails
 				}
 			}
 		} else if u.workspaceTab == 2 && len(u.snapshot.Workspace.Docks) > 0 {
@@ -628,7 +651,7 @@ func (u *UI) workspaceView(width, height int) string {
 	var body string
 	switch workspaceTabs[u.workspaceTab] {
 	case "Project":
-		body = u.projectExplorer(width, height-1)
+		body = u.projectWorkspaceCards(width, height-1)
 	case "Selected":
 		body = u.inspectorWorkspaceView(width, height-1)
 	case "Docked":
@@ -647,6 +670,116 @@ func (u *UI) workspaceView(width, height int) string {
 		lines[i] = padAnsiLine(line, width)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (u *UI) projectWorkspaceCards(width, height int) string {
+	projectTitle := "Project: " + u.catalog.Title
+	selected := u.selectedExplorerObject()
+	if selected == nil {
+		return panelCard(projectTitle, u.projectExplorer(max(1, width-2), max(1, height-2)), width, height)
+	}
+	title, detail := projectObjectDetails(*selected, width-2)
+	detailHeight := min(max(6, height/2), max(6, len(strings.Split(detail, "\n"))+2))
+	if detailHeight > height-5 {
+		detailHeight = max(3, height-5)
+	}
+	explorerHeight := max(3, height-detailHeight-1)
+	explorer := panelCard(projectTitle, u.projectExplorer(max(1, width-2), max(1, explorerHeight-2)), width, explorerHeight)
+	detailLines := strings.Split(detail, "\n")
+	visible := max(1, detailHeight-3)
+	u.projectDetailOffset = min(u.projectDetailOffset, max(0, len(detailLines)-visible))
+	start := u.projectDetailOffset
+	end := min(len(detailLines), start+visible)
+	shown := append([]string(nil), detailLines[start:end]...)
+	if len(detailLines) > visible {
+		shown = append(shown, fmt.Sprintf("PgUp/PgDn · lines %d–%d of %d", start+1, end, len(detailLines)))
+	}
+	details := panelCard(title, strings.Join(shown, "\n"), width, detailHeight)
+	return explorer + "\n" + strings.Repeat(" ", width) + "\n" + details
+}
+
+func panelCard(title, body string, width, height int) string {
+	width, height = max(1, width), max(1, height)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255")).Background(lipgloss.Color("238"))
+	contentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235"))
+	lines := []string{titleStyle.Render(padAnsiLine("  "+ansi.Truncate(sanitizeTerminalText(title), max(1, width-2), "…"), width))}
+	content := strings.Split(body, "\n")
+	for i := 1; i < height; i++ {
+		line := ""
+		if i > 1 && i-2 < len(content) {
+			line = content[i-2]
+		}
+		lines = append(lines, contentStyle.Render(padAnsiLine(" "+ansi.Truncate(line, max(1, width-2), "…"), width)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (u *UI) selectedExplorerObject() *ProjectObject {
+	nodes := u.explorerNodes()
+	if u.explorerIndex < 0 || u.explorerIndex >= len(nodes) {
+		return nil
+	}
+	node := nodes[u.explorerIndex]
+	index := node.objectIndex
+	if index < 0 && node.issue {
+		index = node.issueFor
+	}
+	if index < 0 || index >= len(u.catalog.Objects) {
+		return nil
+	}
+	object := &u.catalog.Objects[index]
+	if object.Reference.Kind == "project" {
+		return nil
+	}
+	return object
+}
+
+func projectObjectDetails(object ProjectObject, width int) (string, string) {
+	ref := object.Reference
+	var title string
+	var lines []string
+	switch ref.Kind {
+	case "table", "project_view":
+		kind := "Table"
+		if ref.Kind == "project_view" {
+			kind = "View"
+		}
+		title = kind + ": " + ref.Title
+		if len(object.Columns) == 0 {
+			lines = append(lines, "No column metadata available.")
+		} else {
+			nameWidth := len("Column")
+			for _, column := range object.Columns {
+				nameWidth = max(nameWidth, min(len(column), max(8, width/2)))
+			}
+			lines = append(lines, fmt.Sprintf("%-*s  Type", nameWidth, "Column"))
+			for _, column := range object.Columns {
+				lines = append(lines, fmt.Sprintf("%-*s  %s", nameWidth, sanitizeTerminalText(column), sanitizeTerminalText(object.ColumnTypes[column])))
+			}
+		}
+	case "query":
+		title = "Query: " + ref.Title
+		lines = append(lines, "Type: "+sanitizeTerminalText(object.QueryType))
+		if ref.SourceID != "" {
+			lines = append(lines, "Database: "+sanitizeTerminalText(ref.SourceID))
+		}
+		if object.QueryText == "" {
+			lines = append(lines, "Query text unavailable.")
+		} else {
+			for _, line := range strings.Split(sanitizeMultilineText(object.QueryText), "\n") {
+				lines = append(lines, strings.Split(ansi.Hardwrap(line, max(8, width-2), false), "\n")...)
+			}
+		}
+	case "source":
+		title = "Database: " + ref.Title
+		lines = append(lines, "Tables and views are listed above.")
+	default:
+		title = ref.Title
+	}
+	if object.Issue != "" {
+		lines = append([]string{"Status: " + sanitizeTerminalText(object.Issue)}, lines...)
+	}
+	return title, strings.Join(lines, "\n")
 }
 
 func (u *UI) bookmarksView(width, height int) string {
@@ -750,11 +883,20 @@ func (u *UI) explorerNodes() []explorerNode {
 	if u.explorerCollapsed[rootID] {
 		return nodes
 	}
+	sourceCount := 0
+	for _, object := range u.catalog.Objects {
+		if object.Reference.Kind == "source" {
+			sourceCount++
+		}
+	}
+	if sourceCount > 0 {
+		nodes = append(nodes, explorerNode{id: "group:databases", label: fmt.Sprintf("Databases (%d)", sourceCount), depth: 1, objectIndex: -1, branch: true})
+	}
 	appendGroup := func(sourceID, kind, label string, depth int) {
 		matches := make([]int, 0)
 		for i, object := range u.catalog.Objects {
 			ref := object.Reference
-			if ref.Kind == kind && ref.SourceID == sourceID {
+			if ref.Kind == kind && (ref.SourceID == sourceID || sourceID == "*") {
 				matches = append(matches, i)
 			}
 		}
@@ -780,28 +922,29 @@ func (u *UI) explorerNodes() []explorerNode {
 			}
 		}
 	}
-	for i, object := range u.catalog.Objects {
-		if object.Reference.Kind != "source" {
-			continue
+	if sourceCount > 0 && !u.explorerCollapsed["group:databases"] {
+		for i, object := range u.catalog.Objects {
+			if object.Reference.Kind != "source" {
+				continue
+			}
+			ref := object.Reference
+			id := "source:" + ref.SourceID
+			label := ref.Title
+			if object.Issue != "" {
+				label += " ⚠"
+			}
+			nodes = append(nodes, explorerNode{id: id, label: label, depth: 2, objectIndex: i, branch: true, issue: object.Issue != ""})
+			if u.explorerCollapsed[id] {
+				continue
+			}
+			if issue := object.Issue; issue != "" {
+				nodes = append(nodes, explorerNode{id: id + ":issue", label: "⚠ " + issue, depth: 3, objectIndex: -1, issue: true, issueFor: i})
+			}
+			appendGroup(ref.SourceID, "table", "Tables", 3)
+			appendGroup(ref.SourceID, "project_view", "Views", 3)
 		}
-		ref := object.Reference
-		id := "source:" + ref.SourceID
-		label := ref.Title
-		if object.Issue != "" {
-			label += " ⚠"
-		}
-		nodes = append(nodes, explorerNode{id: id, label: label, depth: 1, objectIndex: i, branch: true, issue: object.Issue != ""})
-		if u.explorerCollapsed[id] {
-			continue
-		}
-		if issue := object.Issue; issue != "" {
-			nodes = append(nodes, explorerNode{id: id + ":issue", label: "⚠ " + issue, depth: 2, objectIndex: -1, issue: true, issueFor: i})
-		}
-		appendGroup(ref.SourceID, "table", "Tables", 2)
-		appendGroup(ref.SourceID, "project_view", "Views", 2)
-		appendGroup(ref.SourceID, "query", "Queries", 2)
 	}
-	appendGroup("", "query", "Project queries", 1)
+	appendGroup("*", "query", "Queries", 1)
 	return nodes
 }
 
@@ -812,7 +955,6 @@ func (u *UI) projectExplorer(width, height int) string {
 	}
 	u.explorerIndex = min(u.explorerIndex, len(nodes)-1)
 	lines := make([]string, 0, len(nodes)+5)
-	detailsAt := -1
 	for i, node := range nodes {
 		marker := " "
 		if node.objectIndex >= 0 {
@@ -839,35 +981,6 @@ func (u *UI) projectExplorer(width, height int) string {
 			label = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Render(ansi.Truncate(label, width, "…"))
 		}
 		lines = append(lines, label)
-		if !u.projectDetails || i != u.explorerIndex {
-			continue
-		}
-		index := node.objectIndex
-		if index < 0 && node.issue {
-			index = node.issueFor
-		}
-		if index >= 0 && index < len(u.catalog.Objects) {
-			detailsAt = len(lines)
-			object := u.catalog.Objects[index]
-			lines = append(lines, "", "Details: "+object.Reference.Title)
-			if object.Issue != "" {
-				lines = append(lines, strings.Split(ansi.Hardwrap("Status: "+sanitizeTerminalText(object.Issue), max(10, width), false), "\n")...)
-			}
-			lines = append(lines, "Kind: "+object.Reference.Kind)
-			if object.Reference.SourceID != "" {
-				lines = append(lines, "Source: "+object.Reference.SourceID)
-			} else {
-				lines = append(lines, "Scope: project")
-			}
-			if len(object.Columns) > 0 {
-				lines = append(lines, "Columns: "+strings.Join(object.Columns, ", "))
-			}
-		}
-	}
-	// Details belong to the selected object, not the end of the tree. Keep
-	// the selected row and the beginning of its details visible together.
-	if detailsAt >= 0 {
-		u.explorerOffset = u.explorerIndex
 	}
 	if u.explorerIndex < u.explorerOffset {
 		u.explorerOffset = u.explorerIndex

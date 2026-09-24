@@ -38,6 +38,8 @@ func TestBuildChatProjectCatalogKeepsUnscannedSources(t *testing.T) {
 	write("environments/local/catalogs/chinook-local/chinook-local.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q,"dbModel":"chinook"}`, filepath.Join(dir, "chinook.sqlite")))
 	write("dbmodels/chinook/main/tables/Customer/main.Customer.columns.json", `{"columns":[{"name":"CustomerId","dbType":"INTEGER"}]}`)
 	write("dbmodels/chinook/main/tables/Invoice/main.Invoice.columns.json", `{"columns":[{"name":"InvoiceId","dbType":"INTEGER"}]}`)
+	write("queries/customers/customer-purchases-by-genre.query.json", `{"id":"customer-purchases-by-genre","title":"Customer purchases by genre","type":"SQL","targets":[{"catalog":"chinook-local"}]}`)
+	write("queries/customers/customer-purchases-by-genre.query.sql", "SELECT GenreName FROM Genre")
 
 	store := filestore.NewProjectStore("chat-test", dir)
 	catalog, urls, err := buildChatProjectCatalog(context.Background(), dir, store, "local")
@@ -68,6 +70,18 @@ func TestBuildChatProjectCatalogKeepsUnscannedSources(t *testing.T) {
 	}
 	if kinds["countries/main.Customer"] != "" || kinds["orders/main.Customer"] != "" {
 		t.Errorf("unscanned catalogs exposed fabricated tables: %v", kinds)
+	}
+	foundQuery := false
+	for _, object := range catalog.Objects {
+		if object.Reference.ObjectID == "customers/customer-purchases-by-genre" {
+			foundQuery = true
+			if object.Reference.Kind != "query" || object.QueryType != "SQL" || !strings.Contains(object.QueryText, "SELECT GenreName") {
+				t.Errorf("saved SQL query metadata missing: %+v", object)
+			}
+		}
+	}
+	if !foundQuery {
+		t.Fatal("saved SQL query absent from project catalog")
 	}
 
 	if err := os.Remove(filepath.Join(dir, "dbmodels/chinook/main/tables/Customer/main.Customer.columns.json")); err != nil {

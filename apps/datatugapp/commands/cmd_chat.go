@@ -177,7 +177,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if joinApplication != nil {
 		sessions.ConfigureJoinApplication(*joinApplication)
 	}
-	ui, err := chat.NewSessionUI(ctx, sessions, options.model)
+	ui, err := chat.NewSessionChatUI(ctx, sessions, options.model)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("render chat session: %v", err), exitCodeUsage)
 	}

@@ -33,7 +33,7 @@ func TestInterpretUsesAgentToolWithoutExecutingRows(t *testing.T) {
 
 func TestInterpretRejectsMissingDTQLAction(t *testing.T) {
 	llm := &scriptedProvider{steps: []scriptedStep{{text: "SELECT * FROM Invoice"}}}
-	_, err := interpretWithProvider(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)
+	_, err := interpretWithProviderDetailed(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)
 	if err == nil || !strings.Contains(err.Error(), "valid DTQL action") {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestInterpretRejectsMissingDTQLAction(t *testing.T) {
 
 func TestInterpretSanitizesProviderFailure(t *testing.T) {
 	llm := &scriptedProvider{steps: []scriptedStep{{err: &ai.Error{Code: ai.ErrCodeUpstream, Message: "secret-test-key from provider"}}}}
-	_, err := interpretWithProvider(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)
+	_, err := interpretWithProviderDetailed(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)
 	if err == nil || strings.Contains(err.Error(), "secret-test-key") || !strings.Contains(err.Error(), "provider request failed") {
 		t.Fatalf("unsafe provider error: %v", err)
 	}

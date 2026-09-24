@@ -153,11 +153,6 @@ func providerBaseURL(p InterpretProvider) string {
 	return stripTrailingV1(p.BaseURL)
 }
 
-func interpretWithProvider(ctx context.Context, req InterpretRequest, provider ai.LLMProvider) (string, error) {
-	result, err := interpretWithProviderDetailed(ctx, req, provider)
-	return result.DTQL, err
-}
-
 func interpretWithProviderDetailed(ctx context.Context, req InterpretRequest, provider ai.LLMProvider) (InterpretResult, error) {
 	conversation, err := NewAIConversation(provider, browserDTQLExecutor{}, "browser-indexeddb://active-project", req.Schema, WithBrowserInterpretation())
 	if err != nil {

@@ -24,11 +24,8 @@ import (
 )
 
 // ChatUI is the tui/chatshell-based replacement for the old, monolithic UI
-// Bubble Tea model (see ui.go). It is being built up incrementally, file by
-// file, against the Lane C acceptance checklist (see the coordinating
-// session's scratchpad); the legacy UI keeps working, unchanged, alongside
-// it until ChatUI reaches full parity and apps/datatugapp/commands/cmd_chat.go
-// (a Lane B file) is repointed at it.
+// Bubble Tea model. That legacy UI (ui.go and its supporting files) has been
+// fully retired; apps/datatugapp/commands/cmd_chat.go runs ChatUI exclusively.
 //
 // ChatUI owns no chat state chatshell.Model already owns (transcript,
 // composer, focus, busy/streaming); it holds only DataTug-specific state:
@@ -597,10 +594,10 @@ func equalColumnsAndRows(a, b secureread.Result) bool {
 // --- session-management slash commands ----------------------------------
 
 // chatCommands lists the commands the composer's "/" menu offers. The
-// dialog-backed ones (export/http/query/connect) are listed for
-// discoverability even before their Overlay forms land (see the Lane C
-// report); today they run in reduced, argument-only form or report
-// "not yet available" — never silently.
+// dialog-backed ones (export/http/query/connect) each open their own
+// chatshell.Overlay form (see chatui_export_overlay.go, chatui_http_overlay.go,
+// chatui_query_overlay.go, chatui_connect_overlay.go) when invoked bare;
+// given arguments inline they run directly instead.
 var chatCommands = []chatshell.Command{
 	{Name: "/new", Help: "start a new session"},
 	{Name: "/sessions", Help: "list sessions"},
@@ -747,10 +744,9 @@ type chatExportDoneMsg struct {
 
 // exportCommand parses and runs "/export current|bucket <format> <path>"
 // directly against the pure export.go writers (ParseExportFormat,
-// ExportRecordSetFile, ExportBucketFile) — ported from export_ui.go's
-// exportCommand, minus its dependency on the old UI's activeGrid/exporting
-// dialog fields. The interactive, dialog-driven "/export" (no arguments)
-// form is not yet available — see runCommand.
+// ExportRecordSetFile, ExportBucketFile). "/export" with no arguments
+// instead pushes the interactive dialog overlay (newExportDialogOverlay) —
+// see runCommand.
 func (u *ChatUI) exportCommand(argument string) (tea.Cmd, error) {
 	usage := func() error {
 		return fmt.Errorf("usage: /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path>")

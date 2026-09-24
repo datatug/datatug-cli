@@ -40,13 +40,6 @@ type explorerNode struct {
 	issueFor    int // owner of an unattachable issue row
 }
 
-// resultForReference is gridDataForReference, discarding the projection
-// metadata.
-func resultForReference(session ChatSession, ref ContextReference) (secureread.Result, bool) {
-	data, ok := gridDataForReference(session, ref)
-	return data.Result, ok
-}
-
 type referenceGridData struct {
 	Result      secureread.Result
 	SourceRows  []int

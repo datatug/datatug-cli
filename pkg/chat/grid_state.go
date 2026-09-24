@@ -290,11 +290,6 @@ func (g *gridState) sourceRowKey() string {
 	return ""
 }
 
-// selectedSourceRow is sourceRowKey as an int (the RecordSet's own row
-// order), or -1. Kept for parity with the pre-adoption gridState method of
-// the same name/shape.
-func (g *gridState) selectedSourceRow() int { return g.sourceIndexAt(g.CurrentIndex()) }
-
 func (g *gridState) restoreByKey(key string) {
 	if key == "" {
 		return

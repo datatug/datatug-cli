@@ -116,8 +116,8 @@ func TestWorkspacePersistenceSelectionAttachmentsDocksAndSessionIsolation(t *tes
 	if len(restored.Workspace.Docks) != 1 || len(restored.Workspace.Selections) != 2 || len(restored.RecordSets) != 1 {
 		t.Fatalf("workspace did not restore: %+v", restored.Workspace)
 	}
-	if result, ok := resultForReference(restored, pragueRef); !ok || len(result.Rows) != 2 {
-		t.Fatalf("docked view did not resolve original rows: %+v, %v", result, ok)
+	if data, ok := gridDataForReference(restored, pragueRef); !ok || len(data.Result.Rows) != 2 {
+		t.Fatalf("docked view did not resolve original rows: %+v, %v", data.Result, ok)
 	}
 	if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "undock", DockID: restored.Workspace.Docks[0].ID}); err != nil {
 		t.Fatal(err)

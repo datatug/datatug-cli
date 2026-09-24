@@ -70,11 +70,11 @@ func TestChatUIGridSortRetainsSelectedSourceRowForInspector(t *testing.T) {
 	if g == nil {
 		t.Fatal("grid not tracked by recordset ID")
 	}
-	if before := g.selectedSourceRow(); before != 0 {
+	if before := g.sourceIndexAt(g.CurrentIndex()); before != 0 {
 		t.Fatalf("source row before sort = %d, want 0", before)
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
-	if got := g.selectedSourceRow(); got != 0 || g.CurrentIndex() != 1 || g.sourceIndexAt(2) != 2 {
+	if got := g.sourceIndexAt(g.CurrentIndex()); got != 0 || g.CurrentIndex() != 1 || g.sourceIndexAt(2) != 2 {
 		t.Fatalf("sorted selection = source:%d index:%d, want source:0 index:1", got, g.CurrentIndex())
 	}
 }

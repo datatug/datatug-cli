@@ -131,14 +131,13 @@ func (u *ChatUI) handleHTTPDone(msg httpDoneMsg) {
 
 // --- httpRequestOverlay (checklist item #49) -------------------------------
 
-// httpFormMethods is already defined in http_request_ui.go (still used
-// there by the old UI) and reused here as-is.
+// httpFormMethods is defined in http_request_ui.go and reused here as-is.
 
-// httpRequestOverlay is ChatUI's chatshell.Overlay port of
-// http_request_ui.go's httpRequestDialog: method/URL/headers/body fields,
-// Ctrl+Enter submits. "Save as project query" is not yet wired to an
-// Overlay (save_query_dialog.go) — it reports "not yet available" rather
-// than silently doing nothing.
+// httpRequestOverlay is ChatUI's chatshell.Overlay port of the retired
+// legacy UI's httpRequestDialog: method/URL/headers/body fields,
+// Ctrl+Enter submits. "Save as project query" is not yet wired to its own
+// Overlay — it reports "not yet available" rather than silently doing
+// nothing (see M5 in the r1 adversarial review; still open).
 type httpRequestOverlay struct {
 	ui *ChatUI
 

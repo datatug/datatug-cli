@@ -17,15 +17,15 @@ import (
 
 // --- ChatUI-level HTTP plumbing (ported from http_command.go) ------------
 
-// runHTTPCommand ports ui.go's "/http" branch of runSessionCommand.
-// "/http header|cookie ..." (settings management, checklist deferral — see
-// the Lane C report) is not yet ported; every other form opens the request
-// dialog or sends a plain GET directly.
+// runHTTPCommand ports ui.go's "/http" branch of runSessionCommand:
+// "/http header|cookie ..." manages persisted request headers/cookies
+// (chatui_http_settings.go); every other form opens the request dialog or
+// sends a plain GET directly.
 func (u *ChatUI) runHTTPCommand(argument string) (tea.Cmd, error) {
 	command, rest, _ := strings.Cut(strings.TrimSpace(argument), " ")
 	command = strings.ToLower(command)
 	if command == "header" || command == "cookie" {
-		return nil, fmt.Errorf("/http %s isn't available in the new chat UI yet — use /http [new|GET|POST|...] [url]", command)
+		return u.httpSettingsCommand(command, strings.TrimSpace(rest))
 	}
 	if command == "" || command == "new" {
 		return u.shell.PushOverlay(newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet, URL: strings.TrimSpace(rest)})), nil

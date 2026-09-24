@@ -37,12 +37,31 @@ func TestChatUISlashHTTPNoArgsOpensDialog(t *testing.T) {
 	}
 }
 
-func TestChatUISlashHTTPHeaderReportsNotAvailable(t *testing.T) {
+// TestChatUISlashHTTPHeaderListsSettings covers the checklist's HTTP
+// header/cookie settings item: "/http header" (no further argument) lists
+// currently configured headers, matching ui.go's httpSettingsCommand.
+func TestChatUISlashHTTPHeaderListsSettings(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/http header"))
 	view := u.shell.View().Content
-	if !strings.Contains(view, "isn't available") {
-		t.Fatalf("expected a not-available message in view:\n%s", view)
+	if !strings.Contains(view, "HTTP headers for project-wide defaults") {
+		t.Fatalf("expected an HTTP headers listing in view:\n%s", view)
+	}
+}
+
+// TestChatUISlashHTTPHeaderSetPushesScopeOverlay covers saving a new header:
+// "/http header name=value" should push the CLI/project scope-choice
+// Overlay (ui.go's httpScopeOverlay) rather than mutating state directly.
+func TestChatUISlashHTTPHeaderSetPushesScopeOverlay(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	cmd, err := u.runHTTPCommand("header https://example.com X-Test=value")
+	if err != nil {
+		t.Fatalf("runHTTPCommand: %v", err)
+	}
+	drainCmd(t, u, cmd)
+	view := u.shell.View().Content
+	if !strings.Contains(view, "Save HTTP header") {
+		t.Fatalf("expected the HTTP scope overlay in view:\n%s", view)
 	}
 }
 

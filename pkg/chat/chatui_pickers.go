@@ -40,6 +40,8 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "ctrl+r":
 		return u.refreshLastRecordSet(), true
+	case "alt+s":
+		return u.cycleTableStyle(), true
 	}
 	return nil, false
 }

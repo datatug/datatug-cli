@@ -1,15 +1,70 @@
 package commands
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/datatug/datatug-core/pkg/dtconfig"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/dimetron/pi-go/pimodels"
 )
+
+func TestBuildChatProjectCatalogKeepsUnscannedSources(t *testing.T) {
+	dir := t.TempDir()
+	write := func(path, content string) {
+		t.Helper()
+		fullPath := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("datatug-project.json", `{"id":"chat-test","title":"Chat test"}`)
+	if err := os.Mkdir(filepath.Join(dir, "queries"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write("environments/local/local.env.json", `{"id":"local","dbServers":[{"driver":"sqlite3","catalogs":["chinook-local","countries","orders"]}]}`)
+	for _, id := range []string{"countries", "orders"} {
+		write(filepath.Join("environments/local/catalogs", id, id+".db.json"), fmt.Sprintf(`{"driver":"sqlite3","path":%q}`, filepath.Join(dir, id+".sqlite")))
+	}
+	write("environments/local/catalogs/chinook-local/chinook-local.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q,"dbModel":"chinook"}`, filepath.Join(dir, "chinook.sqlite")))
+	write("dbmodels/chinook/main/tables/Customer/main.Customer.columns.json", `{"columns":[{"name":"CustomerId","dbType":"INTEGER"}]}`)
+
+	store := filestore.NewProjectStore("chat-test", dir)
+	catalog, urls, err := buildChatProjectCatalog(context.Background(), dir, store, "local")
+	if err != nil {
+		t.Fatalf("buildChatProjectCatalog: %v", err)
+	}
+	kinds := map[string]string{}
+	for _, object := range catalog.Objects {
+		kinds[object.Reference.SourceID+"/"+object.Reference.ObjectID] = object.Reference.Kind
+	}
+	for _, id := range []string{"countries", "orders"} {
+		if kinds[id+"/"+id] != "source" || urls[id] == "" {
+			t.Errorf("unscanned %s missing as usable source: objects=%v urls=%v", id, kinds, urls)
+		}
+	}
+	if kinds["chinook-local/main.Customer"] != "table" {
+		t.Errorf("scanned Chinook table missing: %v", kinds)
+	}
+	if kinds["countries/main.Customer"] != "" || kinds["orders/main.Customer"] != "" {
+		t.Errorf("unscanned catalogs exposed fabricated tables: %v", kinds)
+	}
+
+	if err := os.Remove(filepath.Join(dir, "dbmodels/chinook/main/tables/Customer/main.Customer.columns.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := buildChatProjectCatalog(context.Background(), dir, store, "local"); err == nil {
+		t.Fatal("broken scanned schema must still return an error")
+	}
+}
 
 func TestChatCommandDefaults(t *testing.T) {
 	cmd := chatCommand()

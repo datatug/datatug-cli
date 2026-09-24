@@ -271,6 +271,11 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 		catalog.Objects = append(catalog.Objects, chat.ProjectObject{Reference: chat.ContextReference{
 			Kind: "source", ProjectID: project.ID, SourceID: id, ObjectID: id, Title: label,
 		}})
+		// An unscanned catalog is still a usable source. Only its table list
+		// depends on a dbModel; do not let it block another catalog's chat.
+		if database.DbModel == "" {
+			continue
+		}
 		schema, schemaErr := api.GetCatalogSchema(projectDir, environment, id)
 		if schemaErr != nil {
 			return catalog, nil, schemaErr

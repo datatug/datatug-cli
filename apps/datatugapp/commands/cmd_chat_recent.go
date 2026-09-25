@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -50,6 +51,20 @@ func applyLastChatOptions(cmd *cobra.Command, options *chatOptions) error {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	flags := cmd.Flags()
+	// A remembered directory may have been moved or deleted. Keep the other
+	// preferences, but resolve the current project's environment and database
+	// independently. A bare name may be a registered project ID.
+	if filepath.IsAbs(saved.Project) || strings.Contains(saved.Project, string(filepath.Separator)) {
+		info, statErr := os.Stat(saved.Project)
+		if statErr != nil || !info.IsDir() {
+			if !flags.Changed("project") {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: saved chat project %q is unavailable; trying the current directory instead.\n", saved.Project)
+			}
+			saved.Project = ""
+			saved.Env = ""
+			saved.Database = ""
+		}
+	}
 	if !flags.Changed("project") && saved.Project != "" {
 		options.project = saved.Project
 	}

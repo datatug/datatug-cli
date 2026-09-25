@@ -20,7 +20,7 @@ func (c *SessionChat) RefreshRecordSet(ctx context.Context, sessionID, recordSet
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.activeID != sessionID {
-		return ChatSession{}, fmt.Errorf("the active chat session changed")
+		return ChatSession{}, ErrActiveSessionChanged
 	}
 	if c.queryExecutor == nil {
 		return ChatSession{}, fmt.Errorf("query refresh is unavailable")
@@ -60,6 +60,7 @@ func (c *SessionChat) RefreshRecordSet(ctx context.Context, sessionID, recordSet
 	if err != nil {
 		return ChatSession{}, err
 	}
+	c.notifyChanged()
 	return c.store.Load(ctx, session.ID)
 }
 

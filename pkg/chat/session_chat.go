@@ -71,6 +71,8 @@ type SessionChat struct {
 	storeRenameOverride        func(ctx context.Context, id, title string) error
 }
 
+var ErrActiveSessionChanged = errors.New("session changed; refresh chat")
+
 // ConfigureQueryExecutor enables deterministic refresh of stored DTQL without
 // another model call. The caller supplies the same policy-bound executor used
 // for ordinary agent queries.
@@ -141,6 +143,26 @@ func (c *SessionChat) JoinCandidates(ctx context.Context, recordSetID string) ([
 	return c.joinApplication.Candidates(ctx, record)
 }
 
+func (c *SessionChat) JoinCandidatesActive(ctx context.Context, sessionID, recordSetID string) ([]JoinCandidate, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if sessionID != c.activeID {
+		return nil, ErrActiveSessionChanged
+	}
+	if c.joinApplication == nil {
+		return []JoinCandidate{}, nil
+	}
+	session, err := c.store.Load(ctx, c.activeID)
+	if err != nil {
+		return nil, err
+	}
+	record, ok := session.RecordSets[recordSetID]
+	if !ok {
+		return nil, fmt.Errorf("RecordSet %q is not in the active session", recordSetID)
+	}
+	return c.joinApplication.Candidates(ctx, record)
+}
+
 // ApplyJoinCandidate is the shared UI/agent operation. It records an action
 // message and persists the execution as the ordinary immutable query/grid
 // sequence, so restarts never re-execute historic joins.
@@ -149,6 +171,19 @@ func (c *SessionChat) ApplyJoinCandidate(ctx context.Context, recordSetID string
 	defer c.mu.Unlock()
 	defer c.notifyChanged()
 	return c.applyJoinCandidate(ctx, recordSetID, candidateID, "")
+}
+
+func (c *SessionChat) ApplyJoinCandidateActive(ctx context.Context, sessionID, recordSetID string, candidateID JoinCandidateID) (RecordSet, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if sessionID != c.activeID {
+		return RecordSet{}, ErrActiveSessionChanged
+	}
+	record, err := c.applyJoinCandidate(ctx, recordSetID, candidateID, "")
+	if err == nil {
+		c.notifyChanged()
+	}
+	return record, err
 }
 
 func (c *SessionChat) applyJoinCandidate(ctx context.Context, recordSetID string, candidateID JoinCandidateID, originMessageID string) (RecordSet, error) {
@@ -232,6 +267,21 @@ func (c *SessionChat) ApplyWorkspaceAction(ctx context.Context, action Workspace
 	defer c.mu.Unlock()
 	defer c.notifyChanged()
 	return c.applyWorkspaceAction(ctx, action)
+}
+
+// ApplyWorkspaceActionActive keeps the browser's session check and mutation
+// under one lock. A terminal session switch cannot slip between them.
+func (c *SessionChat) ApplyWorkspaceActionActive(ctx context.Context, sessionID string, action WorkspaceAction) (ContextReference, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if sessionID != c.activeID {
+		return ContextReference{}, ErrActiveSessionChanged
+	}
+	ref, err := c.applyWorkspaceAction(ctx, action)
+	if err == nil {
+		c.notifyChanged()
+	}
+	return ref, err
 }
 
 func (c *SessionChat) applyWorkspaceAction(ctx context.Context, action WorkspaceAction) (ContextReference, error) {
@@ -351,6 +401,48 @@ func (c *SessionChat) List(ctx context.Context) ([]ChatSession, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.store.List(ctx)
+}
+
+// BrowserSessionAction applies reversible session controls to the exact
+// session the browser displayed. The check and mutation share one lock.
+func (c *SessionChat) BrowserSessionAction(ctx context.Context, expectedID, action, value string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.activeID != expectedID {
+		return ErrActiveSessionChanged
+	}
+	switch action {
+	case "new":
+		session, err := c.store.Create(ctx, "New chat")
+		if err != nil {
+			return err
+		}
+		c.activeID = session.ID
+	case "switch":
+		if value == "" {
+			return fmt.Errorf("choose a chat session")
+		}
+		if _, err := c.store.Load(ctx, value); err != nil {
+			return err
+		}
+		if err := c.store.Activate(ctx, value); err != nil {
+			return err
+		}
+		c.activeID = value
+	case "rename":
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("session title must not be empty")
+		}
+		if err := c.store.Rename(ctx, c.activeID, value); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown session action %q", action)
+	}
+	c.lastBookmarkID = ""
+	c.implicitBookmarkID = ""
+	c.notifyChanged()
+	return nil
 }
 
 func (c *SessionChat) Create(ctx context.Context) (ChatSession, error) {

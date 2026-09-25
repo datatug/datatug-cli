@@ -93,6 +93,158 @@ func bridgeToken(t *testing.T, bridgeURL string) (address, token string) {
 	return fragment.Get("h"), fragment.Get("t")
 }
 
+func TestBridgeWorkspaceSharesStateAndRejectsStaleSession(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions.catalog = ProjectCatalog{ID: "demo", Title: "Demo", Objects: []ProjectObject{{Reference: ContextReference{Kind: "project", ObjectID: "demo", Title: "Demo"}}}}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bridge.Close() })
+	address, token := bridgeToken(t, bridge.URL)
+	request := func(method, path, body, capability string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(method, "http://"+address+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Origin", "https://datatug.app")
+		req.Header.Set("X-DataTug-Chat-Capability", capability)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	resp := request(http.MethodOptions, "/v1/chat/join_candidates", "", "")
+	if resp.StatusCode != http.StatusNoContent || !strings.Contains(resp.Header.Get("Access-Control-Allow-Headers"), "X-DataTug-Chat-Session") {
+		t.Fatalf("JOIN preflight: status %d, headers %q", resp.StatusCode, resp.Header.Get("Access-Control-Allow-Headers"))
+	}
+	_ = resp.Body.Close()
+	resp = request(http.MethodGet, "/v1/chat/catalog", "", token)
+	var catalog ProjectCatalog
+	if err := json.NewDecoder(resp.Body).Decode(&catalog); err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if catalog.ID != "demo" || len(catalog.Objects) != 1 {
+		t.Fatalf("catalog = %+v", catalog)
+	}
+	resp = request(http.MethodGet, "/v1/chat/catalog", "", "wrong")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthorized catalog: %d", resp.StatusCode)
+	}
+	snapshot, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := dialBridgeEvents(t, bridge)
+	defer func() { _ = socket.Close() }()
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var notification map[string]string
+	if err := socket.ReadJSON(&notification); err != nil {
+		t.Fatal(err)
+	}
+	resp = request(http.MethodPost, "/v1/chat/workspace", `{"sessionId":"stale","action":{"kind":"set_tab","title":"Selected"}}`, token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("stale workspace: %d", resp.StatusCode)
+	}
+	resp = request(http.MethodPost, "/v1/chat/results", `{"sessionId":"stale","recordSetId":"missing","action":"refresh"}`, token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("stale result refresh: %d", resp.StatusCode)
+	}
+	body, err := json.Marshal(map[string]any{"sessionId": snapshot.ID, "action": WorkspaceAction{Kind: "set_tab", Title: "Selected"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp = request(http.MethodPost, "/v1/chat/workspace", string(body), token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("workspace mutation: %d", resp.StatusCode)
+	}
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := socket.ReadJSON(&notification); err != nil || notification["type"] != "changed" {
+		t.Fatalf("workspace websocket event = %v, %v", notification, err)
+	}
+	snapshot, err = sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Workspace.ActiveTab != "Selected" {
+		t.Fatalf("active tab = %q", snapshot.Workspace.ActiveTab)
+	}
+	resp = request(http.MethodGet, "/v1/chat/sessions", "", token)
+	var listed []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if len(listed) != 1 || listed[0].ID != snapshot.ID {
+		t.Fatalf("session list = %+v", listed)
+	}
+	body, err = json.Marshal(map[string]string{"sessionId": snapshot.ID, "action": "rename", "value": "Browser name"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp = request(http.MethodPost, "/v1/chat/sessions", string(body), token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("rename: %d", resp.StatusCode)
+	}
+	snapshot, err = sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Title != "Browser name" {
+		t.Fatalf("renamed title = %q", snapshot.Title)
+	}
+	oldID := snapshot.ID
+	body, err = json.Marshal(map[string]string{"sessionId": oldID, "action": "new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp = request(http.MethodPost, "/v1/chat/sessions", string(body), token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("new session: %d", resp.StatusCode)
+	}
+	snapshot, err = sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ID == oldID {
+		t.Fatal("new session did not become active")
+	}
+	body, err = json.Marshal(map[string]string{"sessionId": snapshot.ID, "action": "switch", "value": oldID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp = request(http.MethodPost, "/v1/chat/sessions", string(body), token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("switch session: %d", resp.StatusCode)
+	}
+	snapshot, err = sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ID != oldID {
+		t.Fatalf("switched session = %q", snapshot.ID)
+	}
+}
+
 // TestBridgeMessagesHandlerAskActiveStoreErrorSurfaces covers the
 // /v1/chat/messages handler's own sessions.AskActive-error branch (500):
 // with the requested sessionId already matched against a real

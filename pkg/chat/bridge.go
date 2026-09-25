@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -141,6 +142,149 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 	// bridgeSubscribeChanges before calling StartBrowserBridge.
 	subscribeChanges := bridgeSubscribeChanges
 	mux := http.NewServeMux()
+	// The browser uses the same session and workspace operations as the TUI.
+	// Every mutation is scoped to the currently active session so an old tab
+	// cannot change a session selected later in the terminal.
+	mux.HandleFunc("/v1/chat/catalog", func(w http.ResponseWriter, r *http.Request) {
+		if !bridge.authorize(w, r, token) {
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sessions.catalog)
+	})
+	mux.HandleFunc("/v1/chat/sessions", func(w http.ResponseWriter, r *http.Request) {
+		if !bridge.authorize(w, r, token) {
+			return
+		}
+		if r.Method == http.MethodGet {
+			items, err := sessions.List(r.Context())
+			if err != nil {
+				http.Error(w, "unable to list chats", http.StatusInternalServerError)
+				return
+			}
+			type summary struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			}
+			out := make([]summary, 0, len(items))
+			for _, item := range items {
+				out = append(out, summary{ID: item.ID, Title: item.Title})
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(out)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			SessionID string `json:"sessionId"`
+			Action    string `json:"action"`
+			Value     string `json:"value"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request); err != nil {
+			http.Error(w, "invalid session action", http.StatusBadRequest)
+			return
+		}
+		if err := sessions.BrowserSessionAction(r.Context(), request.SessionID, request.Action, request.Value); err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, ErrActiveSessionChanged) {
+				status = http.StatusConflict
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/v1/chat/workspace", func(w http.ResponseWriter, r *http.Request) {
+		if !bridge.authorize(w, r, token) {
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			SessionID string          `json:"sessionId"`
+			Action    WorkspaceAction `json:"action"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&request); err != nil {
+			http.Error(w, "invalid workspace action", http.StatusBadRequest)
+			return
+		}
+		if _, err := sessions.ApplyWorkspaceActionActive(r.Context(), request.SessionID, request.Action); err != nil {
+			if errors.Is(err, ErrActiveSessionChanged) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/v1/chat/join_candidates", func(w http.ResponseWriter, r *http.Request) {
+		if !bridge.authorize(w, r, token) {
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		items, err := sessions.JoinCandidatesActive(r.Context(), r.Header.Get("X-DataTug-Chat-Session"), r.URL.Query().Get("recordSetId"))
+		if err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, ErrActiveSessionChanged) {
+				status = http.StatusConflict
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(items)
+	})
+	mux.HandleFunc("/v1/chat/results", func(w http.ResponseWriter, r *http.Request) {
+		if !bridge.authorize(w, r, token) {
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			SessionID   string          `json:"sessionId"`
+			RecordSetID string          `json:"recordSetId"`
+			Action      string          `json:"action"`
+			CandidateID JoinCandidateID `json:"candidateId"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request); err != nil {
+			http.Error(w, "invalid result action", http.StatusBadRequest)
+			return
+		}
+		var err error
+		switch request.Action {
+		case "join":
+			_, err = sessions.ApplyJoinCandidateActive(r.Context(), request.SessionID, request.RecordSetID, request.CandidateID)
+		case "refresh":
+			_, err = sessions.RefreshRecordSet(r.Context(), request.SessionID, request.RecordSetID)
+		default:
+			http.Error(w, "unknown result action", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, ErrActiveSessionChanged) {
+				status = http.StatusConflict
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("/datatug/projects/project_summary", func(w http.ResponseWriter, r *http.Request) {
 		if !bridge.authorize(w, r, token) {
 			return
@@ -287,7 +431,7 @@ func (b *BrowserBridge) authorize(w http.ResponseWriter, r *http.Request, token 
 	origin := r.Header.Get("Origin")
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Access-Control-Allow-Private-Network", "true")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-DataTug-Chat-Capability")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-DataTug-Chat-Capability, X-DataTug-Chat-Session")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Vary", "Origin")
 	if r.Method == http.MethodOptions {

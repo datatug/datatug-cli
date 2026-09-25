@@ -49,11 +49,19 @@ GOPATH="$real_gopath" \
 	go test -count=1 ./...
 
 # Go toolchain telemetry/build state under $HOME is not this module's to
-# fix; ignore only these specific paths, nothing else.
+# fix; ignore only these specific paths, nothing else. Telemetry lives under
+# os.UserConfigDir()/go/telemetry, which this script's own XDG_CONFIG_HOME
+# redirect (above) points at $hermetic_home/.config on Linux (CI) but
+# os.UserConfigDir ignores XDG_CONFIG_HOME on Darwin, landing telemetry
+# under $HOME/Library/Application Support/go instead (confirmed both ways:
+# this script's local macOS run left nothing behind, while the "Hermetic
+# tests" GitHub Actions job — ubuntu-latest — first failed listing exactly
+# these paths under .config/go/telemetry).
 excluded_prefixes=(
 	"$hermetic_home/Library/Application Support/go"
 	"$hermetic_home/Library/Caches/go-build"
 	"$hermetic_home/go/pkg/mod"
+	"$hermetic_home/.config/go"
 )
 
 leaked=()

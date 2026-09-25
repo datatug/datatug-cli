@@ -392,6 +392,39 @@ func TestChatUIWorkspaceSplitAndKeyboardSelection(t *testing.T) {
 	}
 }
 
+// TestPanelFocusedLayoutFitsTabStripAndHintsAtWidth130 covers the r10
+// coordinator review, which reported both the tab strip and the hints
+// bar clipped at the terminal edge in a panel-focused layout ("Project ·
+// Inspect · Docked · Bo…" / "Space attac…"). Renders at the SAME
+// panel-focused width/state the round-9 snapshot used (130 cols, panel
+// visible and FOCUSED via Shift+Right) and asserts: every rendered line
+// is exactly 130 columns wide (no overflow past the terminal edge), the
+// tab strip's full label set is intact (not cut mid-label), and no hint
+// segment/pair is truncated with an ellipsis.
+func TestPanelFocusedLayoutFitsTabStripAndHintsAtWidth130(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{Text: "ok"})
+	u.shell.Update(tea.WindowSizeMsg{Width: 130, Height: 32})
+	drainCmd(t, u, u.Submit("hello"))
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	content := u.shell.View().Content
+
+	for i, line := range strings.Split(content, "\n") {
+		if w := lipgloss.Width(line); w != 130 {
+			t.Fatalf("line %d width = %d, want 130 (terminal edge overflow/clip): %q", i, w, ansi.Strip(line))
+		}
+	}
+	plain := ansi.Strip(content)
+	if !strings.Contains(plain, "Project · Inspect · Docked · Bookmarks") {
+		t.Fatalf("expected the FULL tab strip label set intact, not clipped:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Space attach") {
+		t.Fatalf("expected the full 'Space attach' hint, not truncated:\n%s", plain)
+	}
+	if strings.Contains(plain, "…") {
+		t.Fatalf("expected no ellipsis truncation anywhere in the panel-focused view:\n%s", plain)
+	}
+}
+
 func TestWorkspacePanelF6TogglesPanelVisibility(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.Update(tea.WindowSizeMsg{Width: 120, Height: 30})

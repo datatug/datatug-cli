@@ -429,11 +429,20 @@ func (b finalTurnTextBlock) View(width int, _ bool) string {
 	if b.text == "" {
 		return ""
 	}
-	return lipgloss.NewStyle().Width(max(1, width)).Render(string(transcript.RoleAssistant) + ": " + b.text)
+	return lipgloss.NewStyle().Width(max(1, width)).Render(b.text)
 }
 
 func (b finalTurnTextBlock) Update(tea.Msg) (transcript.Block, tea.Cmd) { return b, nil }
 func (finalTurnTextBlock) Focusable() bool                              { return false }
+
+// Role satisfies transcript.Roled so the shared theme.Card wraps this
+// block with the usual "Assistant" header instead of none at all --
+// founder/coordinator (r10 review): the literal "assistant: " text prefix
+// this block used to render, with no card header, was a real bug from the
+// shared-theme cutover (every other block gets its header from
+// theme.HeaderFor via Roled; this one never did, so it fell back to
+// inlining the role name as plain text instead).
+func (finalTurnTextBlock) Role() theme.Role { return theme.RoleAssistant }
 
 // OnStreamEvent satisfies chatshell.StreamObserver; ChatUI has nothing to
 // add beyond chatshell's own built-in text-delta rendering.

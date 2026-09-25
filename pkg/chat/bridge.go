@@ -377,6 +377,8 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 		var request struct {
 			SessionID string                `json:"sessionId"`
 			Action    string                `json:"action"`
+			QueryID   string                `json:"queryId"`
+			Variables map[string]string     `json:"variables"`
 			Save      SavedQuerySaveRequest `json:"save"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&request); err != nil {
@@ -385,6 +387,8 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 		}
 		var err error
 		switch request.Action {
+		case "run_dtql":
+			err = sessions.RunSavedDTQLActive(r.Context(), request.SessionID, request.QueryID, request.Variables)
 		case "save":
 			err = sessions.SaveQueryActive(r.Context(), request.SessionID, request.Save)
 		default:

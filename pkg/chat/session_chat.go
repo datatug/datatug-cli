@@ -93,11 +93,82 @@ func (c *SessionChat) ConfigureSavedQueryService(service SavedQueryService) {
 
 func (c *SessionChat) ListSavedQueries(ctx context.Context) ([]SavedQuery, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.savedQueryService == nil {
+	service := c.savedQueryService
+	c.mu.Unlock()
+	if service == nil {
 		return nil, fmt.Errorf("saved project queries are unavailable")
 	}
-	return c.savedQueryService.List(ctx)
+	return service.List(ctx)
+}
+
+// RunSavedDTQLActive accepts only project queries whose authoritative saved
+// type is DTQL. HTTP queries are deliberately unavailable to this bridge.
+func (c *SessionChat) RunSavedDTQLActive(ctx context.Context, sessionID, queryID string, variables map[string]string) error {
+	c.mu.Lock()
+	if c.activeID != sessionID {
+		c.mu.Unlock()
+		return ErrActiveSessionChanged
+	}
+	service := c.savedQueryService
+	c.mu.Unlock()
+	if service == nil {
+		return fmt.Errorf("saved project queries are unavailable")
+	}
+	list, err := service.List(ctx)
+	if err != nil {
+		return err
+	}
+	var selected *SavedQuery
+	for i := range list {
+		if list[i].ID == queryID {
+			selected = &list[i]
+			break
+		}
+	}
+	if selected == nil || selected.Type != "DTQL" {
+		return fmt.Errorf("only saved DTQL queries can run in browser chat")
+	}
+	for key := range variables {
+		found := false
+		for _, parameter := range selected.Parameters {
+			if parameter.ID == key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("unknown query parameter")
+		}
+	}
+	runner, ok := service.(SavedDTQLRunner)
+	if !ok {
+		return fmt.Errorf("safe DTQL execution is unavailable")
+	}
+	result, err := runner.RunDTQLWithVariables(ctx, queryID, variables)
+	if err != nil {
+		return fmt.Errorf("query failed; check its parameters and data source")
+	}
+	label := selected.Title
+	if label == "" {
+		label = selected.ID
+	}
+	if result.Title == "" {
+		result.Title = label
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.activeID != sessionID {
+		return ErrActiveSessionChanged
+	}
+	origin, err := c.store.AppendUser(ctx, sessionID, "Run query: "+label)
+	if err != nil {
+		return err
+	}
+	if _, err := c.store.AppendQuery(ctx, sessionID, origin.ID, result.Source, result); err != nil {
+		return err
+	}
+	c.notifyChanged()
+	return nil
 }
 
 func (c *SessionChat) SaveQueryActive(ctx context.Context, sessionID string, request SavedQuerySaveRequest) error {

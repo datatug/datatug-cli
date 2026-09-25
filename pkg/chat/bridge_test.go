@@ -131,6 +131,17 @@ func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || len(queries) != 1 {
 		t.Fatalf("queries: %d %#v", resp.StatusCode, queries)
 	}
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_dtql","queryId":"customers"}`, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent || queryService.ranID != "customers" {
+		t.Fatalf("run DTQL: %d %q", resp.StatusCode, queryService.ranID)
+	}
+	queryService.queries = append(queryService.queries, SavedQuery{ID: "http-query", Type: "HTTP"})
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_dtql","queryId":"http-query"}`, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || queryService.ranID != "customers" {
+		t.Fatalf("HTTP query execution was exposed: %d %q", resp.StatusCode, queryService.ranID)
+	}
 	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"save","save":{"Title":"From browser","Type":"DTQL","Text":"from: customers"}}`, "")
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent || queryService.saved.Title != "From browser" {

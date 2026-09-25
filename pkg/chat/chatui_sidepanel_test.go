@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/strongo/aichat/tui/theme"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
@@ -25,6 +27,44 @@ func TestWorkspacePanelViewShowsTabsAndProjectExplorer(t *testing.T) {
 	}
 	if !strings.Contains(view, "Demo") {
 		t.Fatalf("expected project explorer content in view:\n%s", view)
+	}
+}
+
+// TestWorkspacePanelInLightThemeUsesLightSurfaceNoHardcodedDarkBackground
+// covers a real regression, founder-flagged verbatim: "project explorer in
+// light theme is black - wrong". panelCard/explorerNodesView/bookmarksView
+// used to hardcode ANSI-256 dark greys (238/235 background, a selected-row
+// "57" background) regardless of tui/theme.Dark; in a light terminal that
+// rendered the whole side panel as a near-black band. They now read
+// theme.SurfaceColors()/FocusSurfaceColors() fresh on every render, so this
+// asserts (a) none of the old literal dark codes reappear and (b) the
+// panel actually carries theme's LIGHT surface background when
+// theme.Dark is false.
+func TestWorkspacePanelInLightThemeUsesLightSurfaceNoHardcodedDarkBackground(t *testing.T) {
+	theme.SetDark(false)
+	t.Cleanup(func() { theme.SetDark(true) })
+
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = ProjectCatalog{ID: "proj1", Title: "Demo", Objects: []ProjectObject{
+		{Reference: ContextReference{Kind: "project", ObjectID: "proj1", Title: "Demo"}},
+		{Reference: ContextReference{Kind: "source", SourceID: "src1", Title: "sqlite"}},
+	}}
+	u.workspace.explorerIndex = 1 // select a row so the FocusSurfaceColors-highlighted branch renders too.
+	view := u.workspace.View(40, 15, true)
+
+	for _, stale := range []string{"48;5;238", "48;5;235", "48;5;57", "38;5;255", "38;5;252", "38;5;229", "38;5;231", "38;5;244"} {
+		if strings.Contains(view, "\x1b["+stale+"m") || strings.Contains(view, "\x1b[1;"+stale+"m") {
+			t.Fatalf("panel view still carries a hardcoded ANSI-256 colour %q, want it to come from tui/theme: %q", stale, view)
+		}
+	}
+	bg, fg := theme.SurfaceColors()
+	probe := lipgloss.NewStyle().Foreground(fg).Background(bg).Render("x")
+	prefix := strings.TrimSuffix(probe, "x\x1b[m")
+	if prefix == "" || prefix == probe {
+		t.Fatalf("could not derive a probe SGR prefix from theme.SurfaceColors(): %q", probe)
+	}
+	if !strings.Contains(view, prefix) {
+		t.Fatalf("expected the light-theme surface fill %q somewhere in the panel view: %q", prefix, view)
 	}
 }
 

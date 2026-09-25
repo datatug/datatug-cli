@@ -879,6 +879,7 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 				if err == nil {
 					u.loadSession(u.snapshot)
 					u.shell.AppendAssistant(fmt.Sprintf("Result versions to keep: %d", count))
+					u.sessions.notifyChanged()
 				}
 			}
 		}

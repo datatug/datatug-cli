@@ -1073,6 +1073,22 @@ func (u *ChatUI) topBarInfo(int) (title, context string, items []theme.MenuItem)
 // (chatui_sidepanel.go's updateKey), the workspace pane switches tabs with
 // Tab/Shift+Tab and folds/unfolds the Project explorer tree with ←→/h/l --
 // matching ui.go's own wording exactly, no divergence.
+// sessionStatusSegment is the status line's leading "project │ session │
+// rs:N │ context:N" segment. Empty titles (no project open, an untitled
+// session) are dropped rather than printed as blanks, so the segment never
+// starts with a stray " │ " that would push the status line's first row one
+// column right of the composer's left edge (founder 2026-09-25).
+func (u *ChatUI) sessionStatusSegment() string {
+	var parts []string
+	for _, title := range []string{u.catalog.Title, u.snapshot.Title} {
+		if t := sanitizeTerminalText(title); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	parts = append(parts, fmt.Sprintf("rs:%d", len(u.snapshot.RecordSets)), fmt.Sprintf("context:%d", len(u.snapshot.Workspace.Attachments)))
+	return strings.Join(parts, " │ ")
+}
+
 func (u *ChatUI) statusHintsRaw(width int) []string {
 	// ui.go's mouseHint: "F2 select" while mouse reporting is on (naming
 	// what pressing F2 gets you -- the terminal's own click-drag text
@@ -1098,7 +1114,7 @@ func (u *ChatUI) statusHintsRaw(width int) []string {
 		segments = append(segments, "F5 open web chat")
 	}
 	if u.sessions != nil {
-		segments = append([]string{fmt.Sprintf("%s │ %s │ rs:%d │ context:%d", sanitizeTerminalText(u.catalog.Title), sanitizeTerminalText(u.snapshot.Title), len(u.snapshot.RecordSets), len(u.snapshot.Workspace.Attachments))}, segments...)
+		segments = append([]string{u.sessionStatusSegment()}, segments...)
 	}
 	if g, _, ok := u.activeGrid(); ok && g != nil {
 		recordSetID := u.activeRecordSetID()

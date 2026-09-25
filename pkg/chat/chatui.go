@@ -13,13 +13,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/tui/chatshell"
 	"github.com/strongo/aichat/tui/focus"
 	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/aichat/tui/mdrender"
+	"github.com/strongo/aichat/tui/theme"
 	"github.com/strongo/aichat/tui/transcript"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -177,7 +178,7 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		chatshell.WithTopBar(u.topBar),
 		chatshell.WithStatusBar(u.statusBar),
 		chatshell.WithSidePanel(u.workspace),
-		chatshell.WithMarkdownRenderer(renderMarkdown),
+		chatshell.WithMarkdownRenderer(mdrender.Render),
 		// Mouse reporting on by default (ui.go's mouseCapture started true);
 		// F2 (globalKeys, chatui_pickers.go) toggles it via SetMouseEnabled.
 		chatshell.WithMouse(chatshell.MouseCellMotion),
@@ -696,34 +697,14 @@ func (u *ChatUI) loadSession(session ChatSession) {
 	}
 }
 
-// markdownTermRenderer is the narrow seam renderMarkdown needs from
-// *glamour.TermRenderer — just the one method it calls. newMarkdownRenderer
-// wraps glamour.NewTermRenderer behind it so tests can fault-inject both the
-// constructor and Render failure branches with a fake, without a real
-// terminal-style renderer (coverage lane A3, datatug-cli#289).
-type markdownTermRenderer interface {
-	Render(string) (string, error)
-}
-
-var newMarkdownRenderer = func(options ...glamour.TermRendererOption) (markdownTermRenderer, error) {
-	return glamour.NewTermRenderer(options...)
-}
-
-// renderMarkdown satisfies transcript.MarkdownRenderer — the same
-// glamour-backed rendering markdown_ui.go's httpDocumentView used for a
-// markdown HTTP response, now shared by every markdown transcript entry
-// (checklist item #37).
-func renderMarkdown(text string, width int) string {
-	renderer, err := newMarkdownRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(max(20, width-4)))
-	if err != nil {
-		return text
-	}
-	rendered, err := renderer.Render(text)
-	if err != nil {
-		return text
-	}
-	return strings.TrimSpace(rendered)
-}
+// renderMarkdown/newMarkdownRenderer moved to
+// github.com/strongo/aichat/tui/mdrender (mdrender.Render/
+// mdrender.NewTermRenderer): every aichat product now shares one
+// glamour-backed markdown renderer instead of each carrying its own seam
+// (strongo/aichat#chat-shared-look). NewChatUI wires it directly via
+// chatshell.WithMarkdownRenderer(mdrender.Render); http_document_block.go
+// calls mdrender.Render the same way markdown_ui.go's httpDocumentView
+// used to call renderMarkdown.
 
 // refreshBadge reports whether current differs from previous, matching
 // ui.go's inline version-badge comparisons for a refreshed RecordSet.
@@ -1051,7 +1032,10 @@ func (u *ChatUI) topBar(width int) string {
 	project := nonempty(u.catalog.Title, "Project")
 	session := nonempty(u.snapshot.Title, "New chat")
 	label := fmt.Sprintf("DataTug │ Project: %s [F3] │ Session: %s [F4] │ Workspace: [F6] │ Help: /help", sanitizeTerminalText(project), sanitizeTerminalText(session))
-	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Width(width).Render(ansi.Truncate(label, width, "…"))
+	// Colour/border/padding for this bar now live in tui/theme, shared by
+	// every aichat product (strongo/aichat#chat-shared-look) -- topBar
+	// supplies content only.
+	return theme.Bar(width, label)
 }
 
 // statusBar is ui.go's statusLines, ported: the grid-focused hint set
@@ -1173,25 +1157,30 @@ func (u *ChatUI) statusBar(width int) string {
 	// "Thinking…" hint instead).
 	if width < 100 && composerChipHints && !u.shell.Busy() {
 		compact := []string{"FOCUS Chat", "Tab chips", "Esc clear", "Shift+Esc restore", "Enter send"}
-		lines := wrapStatusSegments(compact, width)
-		for i, line := range lines {
-			lines[i] = padAnsiLine(line, width)
-		}
-		return strings.Join(lines, "\n")
+		return renderStatusLines(wrapStatusSegments(compact, width), width)
 	}
 	// M5 (r1 adversarial review of #289): ui.go's wrapStatusSegments wrapped
 	// onto a second (or further) status line instead of silently truncating
-	// on a narrow terminal, which padAnsiLine(strings.Join(...), width)
-	// alone would do (ansi.Truncate cuts the joined line, and everything
-	// past the cut is simply gone). Ported, with the "·" separator
-	// statusBar already used rather than ui.go's "•", and without ui.go's
-	// three width>=100 "drop these segments if still multi-line" passes --
-	// this only wraps for what statusBar already computed above.
-	lines := wrapStatusSegments(segments, width)
+	// on a narrow terminal, which theme.Bar(strings.Join(...), width) alone
+	// would do (ansi.Truncate cuts the joined line, and everything past the
+	// cut is simply gone). Ported, with the "·" separator statusBar already
+	// used rather than ui.go's "•", and without ui.go's three width>=100
+	// "drop these segments if still multi-line" passes -- this only wraps
+	// for what statusBar already computed above.
+	return renderStatusLines(wrapStatusSegments(segments, width), width)
+}
+
+// renderStatusLines wraps each already-wrapped status line in the shared
+// theme.Bar chrome -- colour/padding now live in tui/theme
+// (strongo/aichat#chat-shared-look), shared by every aichat product;
+// statusBar supplies content (which segments, wrapped onto which line)
+// only.
+func renderStatusLines(lines []string, width int) string {
+	styled := make([]string, len(lines))
 	for i, line := range lines {
-		lines[i] = padAnsiLine(line, width)
+		styled[i] = theme.Bar(width, line)
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(styled, "\n")
 }
 
 // wrapStatusSegments packs segments onto as few lines as fit within

@@ -2,7 +2,7 @@ package chat
 
 import (
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
+	"github.com/strongo/aichat/tui/mdrender"
 	"github.com/strongo/aichat/tui/transcript"
 )
 
@@ -40,12 +40,12 @@ func (b *httpDocumentBlock) View(width int, focused bool) string {
 			body = sanitizeMultilineText(boundedText(b.response.Body))
 		}
 	} else if b.markdown {
-		body = renderMarkdown(body, width)
+		body = mdrender.Render(body, width)
 	}
-	background := messageSurfaceBackground
-	if focused {
-		background = selectedMessageBackground
-	}
+	// The card frame (background, padding, focus highlight) is now the
+	// shared theme.Card transcript wraps every Block's View in
+	// (strongo/aichat#chat-shared-look) -- this Block supplies content
+	// only: the mode-toggle header line plus the body itself.
 	summary := ""
 	if b.response != nil {
 		summary = b.response.summary()
@@ -54,7 +54,17 @@ func (b *httpDocumentBlock) View(width int, focused bool) string {
 		summary = b.versionBadge + " · " + summary
 	}
 	header := agentStyle.Render(summary) + " " + statusStyle.Render("[1 Rendered · 2 Raw · 3 Headers] · "+mode)
-	return lipgloss.NewStyle().Width(max(1, width)).Padding(0, 1).Background(background).Render(header + "\n" + body)
+	return header + "\n" + body
+}
+
+// Title satisfies transcript.Titled: the card transcript wraps this
+// Block's View in shows the HTTP response's own summary as its header,
+// instead of an untitled card.
+func (b *httpDocumentBlock) Title() string {
+	if b.response != nil {
+		return "HTTP " + b.response.summary()
+	}
+	return "HTTP response"
 }
 
 func (b *httpDocumentBlock) Update(msg tea.Msg) (transcript.Block, tea.Cmd) {

@@ -479,13 +479,18 @@ func TestChatUIOpenSaveQueryDialogHTTPBranches(t *testing.T) {
 		t.Fatal(err)
 	}
 	u.savedQueryService = &savedQueryStub{}
+	// A themed theme.Card (strongo/aichat#chat-shared-look) takes more
+	// vertical room than the old unboxed rendering; resize past
+	// chatshell.New's 80x24 default so the focused grid and the dialog's
+	// own hint both fit without needing to scroll.
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 60})
 	if !u.shell.FocusEntry(u.lastGridEntryID) {
 		t.Fatal("grid unavailable to focus")
 	}
 	if cmd := u.openSaveQueryDialog(); cmd != nil {
 		t.Fatal("expected no command for a request with URL parameters")
 	}
-	if !strings.Contains(u.shell.View().Content, "URL parameters") {
+	if !strings.Contains(flattenView(u.shell.View().Content), "URL parameters") {
 		t.Fatalf("expected the URL-parameters hint:\n%s", u.shell.View().Content)
 	}
 }
@@ -514,13 +519,15 @@ func TestChatUIOpenSaveQueryDialogHTTPNonGETMethod(t *testing.T) {
 		t.Fatal(err)
 	}
 	u.savedQueryService = &savedQueryStub{}
+	// Same reasoning as TestChatUIOpenSaveQueryDialogHTTPBranches above.
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 60})
 	if !u.shell.FocusEntry(u.lastGridEntryID) {
 		t.Fatal("grid unavailable to focus")
 	}
 	if cmd := u.openSaveQueryDialog(); cmd != nil {
 		t.Fatal("expected no command for a non-GET request")
 	}
-	if !strings.Contains(u.shell.View().Content, "non-GET method") {
+	if !strings.Contains(flattenView(u.shell.View().Content), "non-GET method") {
 		t.Fatalf("expected the non-GET-method hint:\n%s", u.shell.View().Content)
 	}
 }

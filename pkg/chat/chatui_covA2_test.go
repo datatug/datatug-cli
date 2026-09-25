@@ -18,7 +18,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/glamour"
 	"github.com/strongo/aichat/ai"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -537,7 +536,16 @@ func TestRunCommandBucketClearAndListAndUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	// Height 100, not 30: the grid stays FOCUSED for this whole test
+	// (below), which keeps the transcript viewport scrolled to the focused
+	// entry rather than auto-following new appends to the bottom (see
+	// transcript.Model.shouldAutoFollow) -- fine at the old one-line-per-
+	// message height, but each entry is now a bordered/padded theme.Card
+	// (strongo/aichat#chat-shared-look) tall enough that a short terminal
+	// no longer shows both the focused grid AND a later appended message
+	// at once. A tall enough fixture keeps this test about command
+	// behaviour, not scroll position.
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 100})
 	if u.lastGridEntryID == "" || !u.shell.FocusEntry(u.lastGridEntryID) {
 		t.Fatal("grid was not restored")
 	}
@@ -548,11 +556,11 @@ func TestRunCommandBucketClearAndListAndUsage(t *testing.T) {
 		t.Fatalf("bucket did not record the RecordSet: %#v", u.snapshot.Workspace.ExportBucket)
 	}
 	drainCmd(t, u, u.Submit("/bucket"))
-	if !strings.Contains(u.shell.View().Content, "Export bucket · 1 RecordSets") {
+	if !strings.Contains(flattenView(u.shell.View().Content), "Export bucket · 1 RecordSets") {
 		t.Fatalf("expected the bucket listing in view:\n%s", u.shell.View().Content)
 	}
 	drainCmd(t, u, u.Submit("/bucket bogus"))
-	if !strings.Contains(u.shell.View().Content, "usage: /bucket [clear]") {
+	if !strings.Contains(flattenView(u.shell.View().Content), "usage: /bucket [clear]") {
 		t.Fatalf("expected /bucket usage error:\n%s", u.shell.View().Content)
 	}
 	drainCmd(t, u, u.Submit("/bucket clear"))
@@ -1088,41 +1096,14 @@ func TestLoadSessionHTTPDocumentVersionBadges(t *testing.T) {
 	}
 }
 
-// --- renderMarkdown (newMarkdownRenderer seam) ---------------------------
-
-// TestRenderMarkdownConstructorErrorReturnsPlainText covers renderMarkdown's
-// newMarkdownRenderer error branch: a fault-injected constructor failure
-// falls back to the raw text unrendered.
-func TestRenderMarkdownConstructorErrorReturnsPlainText(t *testing.T) {
-	restore := newMarkdownRenderer
-	t.Cleanup(func() { newMarkdownRenderer = restore })
-	injected := errors.New("injected renderer construction failure")
-	newMarkdownRenderer = func(options ...glamour.TermRendererOption) (markdownTermRenderer, error) {
-		return nil, injected
-	}
-	if got := renderMarkdown("# Heading", 80); got != "# Heading" {
-		t.Fatalf("renderMarkdown = %q, want the raw text unchanged on a constructor error", got)
-	}
-}
-
-// fakeMarkdownRenderer implements markdownTermRenderer, always failing
-// Render -- covers renderMarkdown's second (Render) error branch, which a
-// real glamour.TermRenderer given plain text essentially never fails.
-type fakeMarkdownRenderer struct{ err error }
-
-func (f fakeMarkdownRenderer) Render(string) (string, error) { return "", f.err }
-
-func TestRenderMarkdownRenderErrorReturnsPlainText(t *testing.T) {
-	restore := newMarkdownRenderer
-	t.Cleanup(func() { newMarkdownRenderer = restore })
-	injected := errors.New("injected render failure")
-	newMarkdownRenderer = func(options ...glamour.TermRendererOption) (markdownTermRenderer, error) {
-		return fakeMarkdownRenderer{err: injected}, nil
-	}
-	if got := renderMarkdown("# Heading", 80); got != "# Heading" {
-		t.Fatalf("renderMarkdown = %q, want the raw text unchanged on a Render error", got)
-	}
-}
+// renderMarkdown/newMarkdownRenderer (and their fault-injection tests) moved
+// to github.com/strongo/aichat/tui/mdrender (mdrender.Render/
+// mdrender.NewTermRenderer) as part of the shared-look cutover
+// (strongo/aichat#chat-shared-look): every aichat product now shares one
+// markdown renderer instead of each carrying its own glamour seam. That
+// package's own tests (TestRenderFallsBackOnConstructorError/
+// TestRenderFallsBackOnRenderError) cover the same two branches this used
+// to.
 
 // --- applyWorkspaceAction (testAfterApplyWorkspaceAction seam) -----------
 

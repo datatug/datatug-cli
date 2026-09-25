@@ -25,7 +25,6 @@ require (
 	github.com/NimbleMarkets/ntcharts/v2 v2.2.0
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
-	github.com/charmbracelet/glamour v1.0.0
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.87.2-0.20260923234132-f2300b27e9c2
 	github.com/dal-go/dalgo2http v0.2.0
@@ -56,7 +55,7 @@ require (
 	github.com/sneat-co/sneat-go-core v0.67.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	github.com/strongo/aichat v0.2.0
+	github.com/strongo/aichat v0.2.2-0.20260925122451-a828eb82eef6
 	github.com/strongo/buildinfo v0.3.0
 	github.com/strongo/cli-helpers v0.21.0
 	github.com/strongo/deviceauth v0.1.0
@@ -76,6 +75,7 @@ require (
 )
 
 require (
+	charm.land/glamour/v2 v2.0.1 // indirect
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.23.2 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
@@ -94,6 +94,7 @@ require (
 	github.com/catppuccin/go v0.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
+	github.com/charmbracelet/glamour v1.0.0 // indirect
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect

@@ -523,6 +523,22 @@ func TestHTTPDocumentBlockRawHeaderToggle(t *testing.T) {
 	}
 }
 
+// TestHTTPDocumentBlockTitleFallsBackWithoutResponse covers Title's
+// (transcript.Titled) no-response branch: a card header still names the
+// block generically instead of showing an empty header when response is
+// nil.
+func TestHTTPDocumentBlockTitleFallsBackWithoutResponse(t *testing.T) {
+	b := &httpDocumentBlock{text: "hello"}
+	if got := b.Title(); got != "HTTP response" {
+		t.Fatalf("Title() = %q, want %q", got, "HTTP response")
+	}
+	response := &HTTPResponse{Method: "GET", URL: "https://example.com", StatusCode: 200}
+	b2 := &httpDocumentBlock{text: "hello", response: response}
+	if got := b2.Title(); !strings.HasPrefix(got, "HTTP GET") {
+		t.Fatalf("Title() = %q, want it to start with %q", got, "HTTP GET")
+	}
+}
+
 // TestHTTPDocumentBlockShowsVersionBadgeAheadOfSummary covers View's
 // versionBadge prefix, set when a saved HTTP response was re-fetched and
 // differs from the version last shown (see runHTTPRefresh).
@@ -581,7 +597,12 @@ func TestChatUIHTTPTableHasRawAndHeadersTabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	// Height 60, not 30: the focused HTTP-response card is now bordered/
+	// padded (theme.Card, strongo/aichat#chat-shared-look) and, showing
+	// full headers, taller than the old unboxed rendering -- tall enough
+	// that a short viewport clipped part of it even though
+	// ensureBlockVisible keeps the focused entry itself in view.
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 60})
 	cmd, err := u.runHTTPCommand("get " + server.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -591,11 +612,12 @@ func TestChatUIHTTPTableHasRawAndHeadersTabs(t *testing.T) {
 		t.Fatal("HTTP grid not available")
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: '4', Text: "4"})
-	if !strings.Contains(u.shell.View().Content, `"name":"Ada"`) {
+	if !strings.Contains(flattenView(u.shell.View().Content), `"name":"Ada"`) {
 		t.Fatal("raw table response not visible")
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: '5', Text: "5"})
-	if !strings.Contains(u.shell.View().Content, "X-Data-Version") || !strings.Contains(u.shell.View().Content, "Time to response") {
+	view := flattenView(u.shell.View().Content)
+	if !strings.Contains(view, "X-Data-Version") || !strings.Contains(view, "Time to response") {
 		t.Fatal("headers and timing tab not visible")
 	}
 }

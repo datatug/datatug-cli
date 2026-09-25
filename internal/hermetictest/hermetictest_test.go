@@ -1,10 +1,23 @@
 package hermetictest
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+// saveSeams lets a test fake one or more of mkdirTemp/setenv/unsetenv/
+// removeAll and guarantees the real functions are back in place afterward,
+// even if the test fails, so no other test in this (sequential, not
+// t.Parallel) package ever runs with a fake still installed.
+func saveSeams(t *testing.T) {
+	t.Helper()
+	origMkdirTemp, origSetenv, origUnsetenv, origRemoveAll := mkdirTemp, setenv, unsetenv, removeAll
+	t.Cleanup(func() {
+		mkdirTemp, setenv, unsetenv, removeAll = origMkdirTemp, origSetenv, origUnsetenv, origRemoveAll
+	})
+}
 
 // TestSetup_RedirectsHomeXDGVars proves Setup points HOME, XDG_CONFIG_HOME
 // and XDG_CACHE_HOME at fresh subdirectories of one new temp directory, and
@@ -111,36 +124,136 @@ func TestSetup_UnsetVarsStayUnsetAfterCleanup(t *testing.T) {
 	}
 }
 
-// TestSetup_MkdirTempFailure covers Setup's own error return: a $TMPDIR
-// that is a regular file (not a directory) makes os.MkdirTemp fail before
-// any environment variable is touched.
+// TestSetup_MkdirTempFailure drives Setup's own error return through the
+// mkdirTemp seam: no environment variable is touched when the temp
+// directory itself cannot be created.
 func TestSetup_MkdirTempFailure(t *testing.T) {
-	notADir := filepath.Join(t.TempDir(), "not-a-directory")
-	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
+	saveSeams(t)
+	wantErr := errors.New("mkdir temp boom")
+	mkdirTemp = func(string, string) (string, error) { return "", wantErr }
+
+	origHome, hadHome := os.LookupEnv("HOME")
+	t.Cleanup(func() { restoreOrUnset(t, "HOME", origHome, hadHome) })
+	if err := os.Setenv("HOME", "/unchanged-home"); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("TMPDIR", notADir)
 
 	cleanup, err := Setup()
-	if err == nil {
-		cleanup()
-		t.Fatal("Setup() with a file as TMPDIR: want an error, got nil")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Setup() error = %v, want %v", err, wantErr)
+	}
+	if cleanup != nil {
+		t.Fatal("Setup() returned a non-nil cleanup alongside an error")
+	}
+	if got := os.Getenv("HOME"); got != "/unchanged-home" {
+		t.Fatalf("HOME = %q after a failed Setup, want it untouched", got)
 	}
 }
 
-// TestMain_RunsAndCleansUp is this package's own use of Main, proving it
-// runs m.Run() and returns its exit code — the same call every other
-// package in this module makes from its own TestMain (see this package's
-// doc comment). The happy path below (Setup succeeding) is what every one
-// of those call sites already exercises; Main's panic branch fires only if
-// Setup fails, which TestSetup_MkdirTempFailure proves separately without
-// needing a real *testing.M (which package testing gives no supported way
-// to fabricate outside the "go test" binary's own entrypoint).
-func TestMain_RunsAndCleansUp(t *testing.T) {
-	home := os.Getenv("HOME")
-	if home == "" {
-		t.Fatal("HOME is empty inside a test — hermetic redirection did not happen")
+// TestSetup_SetenvFailure drives Setup's setenv-error branch: when setting
+// one of the three variables fails partway through, Setup removes the temp
+// directory it already created and returns the error, touching no
+// environment variable that was already set (the first, HOME, succeeds;
+// the fake fails starting with the second call, XDG_CONFIG_HOME).
+func TestSetup_SetenvFailure(t *testing.T) {
+	saveSeams(t)
+	wantErr := errors.New("setenv boom")
+	var calls int
+	var removedDir string
+	setenv = func(key, value string) error {
+		calls++
+		if calls >= 2 {
+			return wantErr
+		}
+		return os.Setenv(key, value)
 	}
+	removeAll = func(path string) error {
+		removedDir = path
+		return os.RemoveAll(path)
+	}
+
+	origHome, hadHome := os.LookupEnv("HOME")
+	t.Cleanup(func() { restoreOrUnset(t, "HOME", origHome, hadHome) })
+
+	cleanup, err := Setup()
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Setup() error = %v, want %v", err, wantErr)
+	}
+	if cleanup != nil {
+		t.Fatal("Setup() returned a non-nil cleanup alongside an error")
+	}
+	if calls < 2 {
+		t.Fatalf("setenv called %d times, want at least 2", calls)
+	}
+	if removedDir == "" {
+		t.Fatal("Setup did not remove the temp directory it had already created")
+	}
+	if _, statErr := os.Stat(removedDir); !os.IsNotExist(statErr) {
+		t.Fatalf("temp dir %q survived the failed Setup: %v", removedDir, statErr)
+	}
+}
+
+// fakeRunner stands in for *testing.M: package testing gives no supported
+// way to fabricate a real one outside "go test"'s own entrypoint, which is
+// exactly why Main takes the narrower runner interface instead.
+type fakeRunner struct {
+	code   int
+	called bool
+}
+
+func (f *fakeRunner) Run() int {
+	f.called = true
+	return f.code
+}
+
+// TestMain_RunsAndCleansUp proves the happy path every one of this
+// module's 44 TestMain call sites relies on: Main sets up hermetic
+// isolation, runs m, returns its exact exit code, and cleans up afterward
+// (HOME restored to what it was before Main ran).
+func TestMain_RunsAndCleansUp(t *testing.T) {
+	origHome, hadHome := os.LookupEnv("HOME")
+	t.Cleanup(func() { restoreOrUnset(t, "HOME", origHome, hadHome) })
+	if err := os.Setenv("HOME", "/original-home"); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &fakeRunner{code: 7}
+	got := Main(m)
+
+	if !m.called {
+		t.Fatal("Main did not call m.Run()")
+	}
+	if got != 7 {
+		t.Fatalf("Main() = %d, want 7 (m.Run()'s own return value)", got)
+	}
+	if home := os.Getenv("HOME"); home != "/original-home" {
+		t.Fatalf("HOME after Main = %q, want /original-home (cleanup did not run)", home)
+	}
+}
+
+// TestMain_PanicsOnSetupError drives Main's panic branch: when Setup fails
+// (here, via the mkdirTemp seam), Main panics with that exact error and
+// never calls m.Run().
+func TestMain_PanicsOnSetupError(t *testing.T) {
+	saveSeams(t)
+	wantErr := errors.New("mkdir temp boom")
+	mkdirTemp = func(string, string) (string, error) { return "", wantErr }
+
+	m := &fakeRunner{code: 0}
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("Main did not panic on a Setup error")
+		}
+		gotErr, ok := r.(error)
+		if !ok || !errors.Is(gotErr, wantErr) {
+			t.Fatalf("Main panicked with %v, want %v", r, wantErr)
+		}
+		if m.called {
+			t.Fatal("Main called m.Run() despite Setup failing")
+		}
+	}()
+	Main(m)
 }
 
 func restoreOrUnset(t *testing.T, key, value string, had bool) {

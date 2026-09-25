@@ -34,7 +34,30 @@ package hermetictest
 import (
 	"os"
 	"path/filepath"
-	"testing"
+)
+
+// runner is satisfied by *testing.M — its Run method has exactly this
+// signature. Main takes this narrower interface instead of *testing.M
+// itself so this package's own tests can drive Main with a fake in place
+// of a real *testing.M, which package testing gives no supported way to
+// fabricate outside "go test"'s own entrypoint. Every existing call site
+// (func TestMain(m *testing.M) { os.Exit(hermetictest.Main(m)) }) keeps
+// compiling unchanged: *testing.M satisfies runner automatically.
+type runner interface {
+	Run() int
+}
+
+// mkdirTemp, setenv, unsetenv and removeAll are seams over the OS calls
+// Setup and its returned cleanup function make. A real filesystem and
+// environment essentially never fail on these calls, so this package's own
+// tests replace them with fakes to drive Setup's and Main's error and
+// panic branches deterministically, rather than declaring those branches
+// untestable.
+var (
+	mkdirTemp = os.MkdirTemp
+	setenv    = os.Setenv
+	unsetenv  = os.Unsetenv
+	removeAll = os.RemoveAll
 )
 
 // Main points HOME, XDG_CONFIG_HOME and XDG_CACHE_HOME at a fresh temporary
@@ -45,7 +68,7 @@ import (
 //
 // A package whose own TestMain needs to do other setup should call Setup
 // directly instead and defer its cleanup function.
-func Main(m *testing.M) int {
+func Main(m runner) int {
 	cleanup, err := Setup()
 	if err != nil {
 		panic(err)
@@ -60,7 +83,7 @@ func Main(m *testing.M) int {
 // combine hermetic isolation with other TestMain setup call this directly;
 // everyone else should prefer Main.
 func Setup() (cleanup func(), err error) {
-	dir, err := os.MkdirTemp("", "datatug-hermetic-home-")
+	dir, err := mkdirTemp("", "datatug-hermetic-home-")
 	if err != nil {
 		return nil, err
 	}
@@ -83,8 +106,8 @@ func Setup() (cleanup func(), err error) {
 		if v.sub != "" {
 			target = filepath.Join(dir, v.sub)
 		}
-		if setErr := os.Setenv(v.key, target); setErr != nil {
-			_ = os.RemoveAll(dir)
+		if setErr := setenv(v.key, target); setErr != nil {
+			_ = removeAll(dir)
 			return nil, setErr
 		}
 	}
@@ -92,11 +115,11 @@ func Setup() (cleanup func(), err error) {
 	return func() {
 		for _, r := range restores {
 			if r.wasSet {
-				_ = os.Setenv(r.key, r.value)
+				_ = setenv(r.key, r.value)
 			} else {
-				_ = os.Unsetenv(r.key)
+				_ = unsetenv(r.key)
 			}
 		}
-		_ = os.RemoveAll(dir)
+		_ = removeAll(dir)
 	}, nil
 }

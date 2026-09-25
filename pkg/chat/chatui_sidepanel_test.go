@@ -468,12 +468,18 @@ func TestPanelFocusedLayoutNeverOverflowsTerminalWidth(t *testing.T) {
 
 func TestWorkspacePanelF6TogglesPanelVisibility(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
-	u.shell.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	// 140, not 120: strongo/aichat's chat-look-polish fix gives PanelFrame
+	// content the same left/right inset Card text already had
+	// (panelPaddingCols, 2 columns each side -- previously 0), so the
+	// panel's own usable content width is narrower at any given terminal
+	// width than before. 120 columns no longer leaves tabStripHeader room
+	// for its full label set ("Bookmarks"); 140 does.
+	u.shell.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
 	// The panel is wide enough here for tabStripHeader's full label set
 	// ("Bookmarks", not the narrow "Marks" abbreviation).
 	before := strings.Contains(u.shell.View().Content, "Bookmarks")
 	if !before {
-		t.Fatalf("expected the workspace pane to render at width 120 before F6:\n%s", u.shell.View().Content)
+		t.Fatalf("expected the workspace pane to render at width 140 before F6:\n%s", u.shell.View().Content)
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
 	after := strings.Contains(u.shell.View().Content, "Bookmarks")

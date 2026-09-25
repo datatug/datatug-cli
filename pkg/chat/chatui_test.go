@@ -481,3 +481,29 @@ func TestChatUIStatusBarWrapsOnNarrowWidth(t *testing.T) {
 		}
 	}
 }
+
+// TestAutoHintRejectsEmptyKey covers the bug r12's narrower HintsInset()
+// packing exposed (caught by TestChatUIStatusBarWrapsOnNarrowWidth at
+// width 30 with an empty session/no catalog title): a Sprintf'd segment
+// whose FIRST interpolated value happens to be "" starts with a stray
+// leading space (e.g. " │ New chat │ rs:0 │ context:0"), and
+// strings.Cut(s, " ") on that string returns an EMPTY key with ok=true --
+// autoHint must not misread that as a real key/label Hint pair (which
+// theme.RenderHints then treats as one non-splittable atomic token,
+// unable to word-wrap even when it doesn't fit): an empty key means it was
+// never a Hint, just a plain segment.
+func TestAutoHintRejectsEmptyKey(t *testing.T) {
+	if _, ok := autoHint(" │ New chat │ rs:0 │ context:0"); ok {
+		t.Fatal("autoHint(\" │ New chat │ rs:0 │ context:0\") = ok, want false (empty key)")
+	}
+	if _, ok := autoHint("no spaces"); !ok {
+		t.Fatal("autoHint(\"no spaces\") = !ok, want a valid Key/Label split")
+	}
+	h, ok := autoHint("F2 select")
+	if !ok || h.Key != "F2" || h.Label != "select" {
+		t.Fatalf("autoHint(\"F2 select\") = %+v, %v, want {F2 select}, true", h, ok)
+	}
+	if _, ok := autoHint("no-space-at-all"); ok {
+		t.Fatal("autoHint(\"no-space-at-all\") = ok, want false (no space to cut on)")
+	}
+}

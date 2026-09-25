@@ -1188,7 +1188,16 @@ func autoHint(s string) (theme.Hint, bool) {
 		return theme.Hint{}, false
 	}
 	key, label, ok := strings.Cut(s, " ")
-	if !ok {
+	// An EMPTY key (s itself starts with a space, e.g. a Sprintf'd segment
+	// whose first interpolated value -- catalog.Title, before a session
+	// exists -- happened to be "") is never a real key/label pair, just a
+	// plain segment that starts with a stray leading space; misreading it
+	// as a Hint made theme.RenderHints treat the WHOLE thing as one
+	// non-splittable atomic token (a real hint pair must never be cut
+	// apart) instead of a plain, word-wrappable segment -- caught by r12's
+	// narrower HintsInset() packing width exposing a line that used to
+	// just barely fit unwrapped.
+	if !ok || key == "" {
 		return theme.Hint{}, false
 	}
 	return theme.Hint{Key: key, Label: label}, true

@@ -57,6 +57,34 @@ configurable, for example:
 datatug chat --model ollama/qwen3:4b
 ```
 
+### Shared AI API and interaction telemetry
+
+To use the shared Sneat AI API instead of a personal model API key, sign in
+with DataTug's own device flow and select the `cloud` model:
+
+```sh
+datatug auth login
+datatug chat --model cloud
+```
+
+`cloud` sends the chat request to `https://api.sneat.cloud/v0/ai/chat` with
+the DataTug-scoped Firebase session and `X-AI-Product: datatug`. A custom
+`--base-url` must be an HTTPS `/v0/` API URL, or a loopback HTTP `/v0/` URL
+for local development. A login made with `auth login --insecure-storage`
+requires `chat --insecure-storage`. Direct BYOK models remain the default.
+
+The cloud request carries a random installation UUID stored under the OS user
+config directory at `datatug/installation_id`, CLI build version, OS,
+architecture, and the existing durable chat ID as `conversationId`. The ID is
+not based on hardware and resets when that configuration is removed. Each
+turn also has a fresh interaction UUID, shared by its AI calls and a final
+client observation. Command turns are observed as deterministic interactions;
+the report contains stable command names, counts and action outcomes, never
+the prompt, command arguments, query text, result rows, tokens, or secrets.
+Reporting runs off the chat path and a telemetry failure does not fail a
+successful chat turn. The CLI waits for bounded pending reports on normal
+exit. Direct BYOK sessions do not report to the shared AI API.
+
 ### Provider routing
 
 `--model`/`--ai <profile>` resolve to one of `strongo/aichat`'s LLM adapters

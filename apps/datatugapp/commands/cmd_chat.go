@@ -16,22 +16,25 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
+	"github.com/strongo/aichat/ai"
+	"github.com/strongo/aichat/ai/cloud"
 )
 
 const defaultChatModel = "gpt-5.6-luna"
 
 type chatOptions struct {
-	project  string
-	env      string
-	database string
-	ai       string
-	model    string
-	baseURL  string
-	thinking string
-	apiKey   string
-	as       string
-	roles    []string
-	groups   []string
+	project         string
+	env             string
+	database        string
+	ai              string
+	model           string
+	baseURL         string
+	thinking        string
+	apiKey          string
+	insecureStorage bool
+	as              string
+	roles           []string
+	groups          []string
 }
 
 func chatCommand() *cobra.Command {
@@ -52,8 +55,9 @@ func chatCommand() *cobra.Command {
 	flags.StringVar(&options.env, "env", "local", "Project environment ID")
 	flags.StringVar(&options.database, "database", "", "Database catalog ID (auto-selected when the environment has one)")
 	flags.StringVar(&options.ai, "ai", "", "Configured AI profile name")
-	flags.StringVar(&options.model, "model", defaultChatModel, "Model name (for example gpt-5.6-luna, claude-haiku, or ollama/qwen3:4b)")
-	flags.StringVar(&options.baseURL, "base-url", "", "OpenAI-compatible model API base URL")
+	flags.StringVar(&options.model, "model", defaultChatModel, "Model name (for example gpt-5.6-luna, claude-haiku, ollama/qwen3:4b, or cloud)")
+	flags.StringVar(&options.baseURL, "base-url", "", "model API base URL (for cloud, the shared API /v0/ URL)")
+	flags.BoolVar(&options.insecureStorage, "insecure-storage", false, "use the plaintext DataTug auth session created with auth login --insecure-storage (cloud only)")
 	flags.StringVar(&options.thinking, "thinking", "low", "Model reasoning effort: low, medium, or high (provider support varies)")
 	flags.StringVar(&options.as, "as", "", "Principal ID used for access policies")
 	flags.StringSliceVar(&options.roles, "role", nil, "Principal role (repeatable)")
@@ -158,12 +162,26 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	executor := secureread.NewExecutor(session)
 	var conversation chat.ContextualConversation
+	var cloudClient *cloud.Client
+	var cloudContext ai.ClientContext
+	if options.model == "cloud" {
+		cloudClient, cloudContext, err = cloudChatClient(ctx, options)
+		if err != nil {
+			return "", Exit(fmt.Sprintf("configure cloud chat: %v", err), exitCodeUsage)
+		}
+	}
 	if !hasQueryableProjectTables(projectCatalog, sourceURLs) {
 		conversation = unavailableSchemaConversation{database: database}
 	} else {
-		provider, providerErr := chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
-		if providerErr != nil {
-			return "", Exit(fmt.Sprintf("configure chat model %q: %v", options.model, providerErr), exitCodeUsage)
+		var provider ai.LLMProvider
+		if cloudClient != nil {
+			provider = cloudClient
+		} else {
+			var providerErr error
+			provider, providerErr = chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
+			if providerErr != nil {
+				return "", Exit(fmt.Sprintf("configure chat model %q: %v", options.model, providerErr), exitCodeUsage)
+			}
 		}
 		conversation, err = chat.NewAIConversation(provider, executor, sourceURL, schemaContext, chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs))
 		if err != nil {
@@ -194,6 +212,10 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	sessions, err := newSessionChat(ctx, store, conversation, sourceURL, projectCatalog)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("restore chat session: %v", err), exitCodeUsage)
+	}
+	if cloudClient != nil {
+		sessions.ConfigureTelemetry(cloudClient, cloudContext)
+		defer sessions.WaitForTelemetry()
 	}
 	sessions.ConfigureQueryExecutor(executor)
 	if joinApplication != nil {

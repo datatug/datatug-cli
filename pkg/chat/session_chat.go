@@ -53,6 +53,10 @@ type SessionChat struct {
 	joinApplication    JoinApplication
 	queryExecutor      DTQLExecutor
 	savedQueryService  SavedQueryService
+	reporter           InteractionReporter
+	clientContext      ai.ClientContext
+	telemetryWG        sync.WaitGroup
+	telemetrySlots     chan struct{}
 
 	// Test-only per-call overrides (nil in production) over specific
 	// *SessionStore call sites below. Each is checked immediately before
@@ -774,10 +778,12 @@ func (c *SessionChat) AskActive(ctx context.Context, sessionID, prompt string) (
 // (for join-choice validation), the built context text, and a ctx already
 // carrying every tool observer (query/workspace/selection/bookmark/join).
 type preparedTurn struct {
-	ctx         context.Context
-	user        ChatMessage
-	prior       ChatSession
-	contextText string
+	ctx           context.Context
+	user          ChatMessage
+	prior         ChatSession
+	contextText   string
+	interactionID string
+	clientContext *ai.ClientContext
 	// joinChoice, once non-nil after the agent turn, holds an
 	// attachedJoinChoiceError raised by the withAttachedJoin observer below:
 	// the model's run_dtql referenced attached-context metadata that matched
@@ -868,7 +874,8 @@ func (c *SessionChat) prepareTurn(ctx context.Context, expectedSessionID, prompt
 		}
 		return result, applied, joinErr
 	})
-	return preparedTurn{ctx: ctx, user: user, prior: prior, contextText: contextText, joinChoice: joinChoice}, cleanup, nil
+	ctx, interactionID, clientContext := c.turnContext(ctx)
+	return preparedTurn{ctx: ctx, user: user, prior: prior, contextText: contextText, joinChoice: joinChoice, interactionID: interactionID, clientContext: clientContext}, cleanup, nil
 }
 
 // resolveJoinChoice replaces an agent turn with an attached-JOIN
@@ -895,7 +902,13 @@ func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string)
 	turn, agentErr := c.agent.AskWithContext(prepared.ctx, prompt, prepared.contextText)
 	turn, agentErr = resolveJoinChoice(prepared.joinChoice, turn, agentErr)
 	turn = finalizeTurn(turn, agentErr)
-	return c.store.AppendTurn(prepared.ctx, c.activeID, prepared.user.ID, c.source, turn)
+	stored, appendErr := c.store.AppendTurn(prepared.ctx, c.activeID, prepared.user.ID, c.source, turn)
+	if appendErr != nil {
+		c.reportTurn(prepared.ctx, prepared.interactionID, prepared.clientContext, prompt, turn, appendErr, isAIConversation(c.agent))
+		return stored, appendErr
+	}
+	c.reportTurn(prepared.ctx, prepared.interactionID, prepared.clientContext, prompt, stored, agentErr, isAIConversation(c.agent))
+	return stored, nil
 }
 
 // finalizeTurn applies the same fallback text rules Ask and StreamAsk both
@@ -992,6 +1005,7 @@ func (c *SessionChat) streamAsk(ctx context.Context, expectedSessionID, prompt s
 		for event, err := range streaming.StreamAskWithContext(prepared.ctx, prompt, prepared.contextText) {
 			streamErr = err
 			if !yield(event, err) {
+				c.reportTurn(prepared.ctx, prepared.interactionID, prepared.clientContext, prompt, Turn{}, context.Canceled, true)
 				return
 			}
 			if err != nil {
@@ -1012,6 +1026,11 @@ func (c *SessionChat) streamAsk(ctx context.Context, expectedSessionID, prompt s
 		turn := finalizeTurn(lastTurn, persistErr)
 		stored, appendErr := c.store.AppendTurn(prepared.ctx, c.activeID, prepared.user.ID, c.source, turn)
 		final, finalErr = stored, appendErr
+		if appendErr != nil {
+			c.reportTurn(prepared.ctx, prepared.interactionID, prepared.clientContext, prompt, turn, appendErr, true)
+		} else {
+			c.reportTurn(prepared.ctx, prepared.interactionID, prepared.clientContext, prompt, stored, persistErr, true)
+		}
 	}
 	return seq, result
 }

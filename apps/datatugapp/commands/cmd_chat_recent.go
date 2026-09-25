@@ -51,6 +51,7 @@ func applyLastChatOptions(cmd *cobra.Command, options *chatOptions) error {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	flags := cmd.Flags()
+	explicitCloud := flags.Changed("model") && options.model == "cloud"
 	// A remembered directory may have been moved or deleted. Keep the other
 	// preferences, but resolve the current project's environment and database
 	// independently. A bare name may be a registered project ID.
@@ -77,7 +78,7 @@ func applyLastChatOptions(cmd *cobra.Command, options *chatOptions) error {
 		options.database = saved.Database
 	}
 	sameAI := !flags.Changed("ai") || options.ai == saved.AI
-	if !flags.Changed("ai") {
+	if !flags.Changed("ai") && !explicitCloud {
 		options.ai = saved.AI
 	}
 	// Mark model overrides as changed so an AI profile does not replace one
@@ -87,6 +88,9 @@ func applyLastChatOptions(cmd *cobra.Command, options *chatOptions) error {
 		{"base-url", saved.BaseURL},
 		{"thinking", saved.Thinking},
 	} {
+		if explicitCloud && field.flag == "base-url" {
+			continue // a remembered BYOK endpoint is never a cloud bearer destination
+		}
 		if sameAI && field.value != "" && !flags.Changed(field.flag) {
 			if err := flags.Set(field.flag, field.value); err != nil {
 				return err

@@ -90,6 +90,25 @@ func useTestLastChatOptionsPath(t *testing.T) string {
 	return path
 }
 
+func TestExplicitCloudModelDoesNotReuseBYOKProfileOrEndpoint(t *testing.T) {
+	path := useTestLastChatOptionsPath(t)
+	data, _ := json.Marshal(lastChatOptions{AI: "private-provider", Model: "custom-model", BaseURL: "https://private-provider.example/v1"})
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := chatCommand()
+	if err := cmd.Flags().Set("model", "cloud"); err != nil {
+		t.Fatal(err)
+	}
+	options := chatOptions{model: "cloud"}
+	if err := applyLastChatOptions(cmd, &options); err != nil {
+		t.Fatal(err)
+	}
+	if options.ai != "" || options.model != "cloud" || options.baseURL != "" {
+		t.Fatalf("stale BYOK options leaked into cloud: %+v", options)
+	}
+}
+
 func TestChatRemembersLastStartupWithoutCredentials(t *testing.T) {
 	path := useTestLastChatOptionsPath(t)
 	cmd := chatCommand()

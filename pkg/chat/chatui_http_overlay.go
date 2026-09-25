@@ -44,9 +44,13 @@ func (u *ChatUI) runHTTPCommand(argument string) (tea.Cmd, error) {
 // httpDoneMsg reports a background HTTP request's outcome — the ChatUI
 // analogue of http_command.go's httpMessage.
 type httpDoneMsg struct {
-	sessionID string
-	snapshot  ChatSession
-	err       error
+	sessionID     string
+	interactionID string
+	userChars     int
+	userWords     int
+	requestFailed bool
+	snapshot      ChatSession
+	err           error
 }
 
 // sendHTTPRequest ports http_command.go's sendHTTPRequest, minus its direct
@@ -121,16 +125,24 @@ func (u *ChatUI) sendHTTPRequest(spec httpRequestSpec) (tea.Cmd, error) {
 	sessionID := u.sessionID
 	store := u.sessions.store
 	ctx := u.ctx
+	interactionID := u.activeCommandInteractionID
+	userChars, userWords := u.activeCommandChars, u.activeCommandWords
+	if interactionID == "" {
+		interactionID = u.sessions.NewCommandInteractionID()
+	}
+	if u.activeCommandInteractionID != "" {
+		u.activeCommandAsync = true
+	}
 	u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(requestText))
 	busyCmd := startHTTPRequestBusy(u)
 	runCmd := func() tea.Msg {
 		response, query, failure := fetchHTTPRequestResult(ctx, spec, displayURL.String(), settings)
 		origin, err := store.AppendUser(ctx, sessionID, requestText)
 		if err != nil {
-			return httpDoneMsg{sessionID: sessionID, err: err}
+			return httpDoneMsg{sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, requestFailed: failure != "", err: err}
 		}
 		snapshot, err := finalizeHTTPRequest(ctx, store, sessionID, origin.ID, displayURL.String(), failure, response, query)
-		return httpDoneMsg{sessionID: sessionID, snapshot: snapshot, err: err}
+		return httpDoneMsg{sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, requestFailed: failure != "", snapshot: snapshot, err: err}
 	}
 	if busyCmd != nil {
 		return tea.Batch(busyCmd, runCmd), nil
@@ -149,6 +161,13 @@ func (u *ChatUI) sendHTTPRequest(spec httpRequestSpec) (tea.Cmd, error) {
 // behavior unchanged.
 func (u *ChatUI) handleHTTPDone(msg httpDoneMsg) {
 	u.shell.SetBusy(false)
+	reportErr := msg.err
+	if reportErr == nil && msg.requestFailed {
+		reportErr = fmt.Errorf("HTTP request failed")
+	}
+	if u.sessions != nil {
+		u.sessions.ReportCommand(msg.interactionID, msg.sessionID, "/http", msg.userChars, msg.userWords, reportErr, true)
+	}
 	overlay := u.pendingHTTPRequest
 	u.pendingHTTPRequest = nil
 	if msg.err != nil {

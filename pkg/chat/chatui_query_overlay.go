@@ -53,9 +53,13 @@ func (u *ChatUI) selectSavedQuery(query SavedQuery) tea.Cmd {
 // savedQueryDoneMsg reports a background saved-query run's outcome — the
 // ChatUI analogue of saved_queries.go's savedQueryMessage.
 type savedQueryDoneMsg struct {
-	sessionID string
-	snapshot  ChatSession
-	err       error
+	sessionID     string
+	interactionID string
+	userChars     int
+	userWords     int
+	runFailed     bool
+	snapshot      ChatSession
+	err           error
 }
 
 // runSavedQuery ports saved_queries.go's runSavedQuery: persists a "You: Run
@@ -69,12 +73,20 @@ func (u *ChatUI) runSavedQuery(query SavedQuery, variables map[string]string) te
 	label := nonempty(query.Title, query.ID)
 	message := "Run query: " + label
 	store, service, ctx, sessionID := u.sessions.store, u.savedQueryService, u.ctx, u.sessionID
+	interactionID := u.activeCommandInteractionID
+	userChars, userWords := u.activeCommandChars, u.activeCommandWords
+	if interactionID == "" {
+		interactionID = u.sessions.NewCommandInteractionID()
+	}
+	if u.activeCommandInteractionID != "" {
+		u.activeCommandAsync = true
+	}
 	u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(message))
 	busyCmd := u.shell.SetBusy(true)
 	runCmd := func() tea.Msg {
 		origin, err := store.AppendUser(ctx, sessionID, message)
 		if err != nil {
-			return savedQueryDoneMsg{sessionID: sessionID, err: err}
+			return savedQueryDoneMsg{sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, err: err}
 		}
 		var result QueryResult
 		var runErr error
@@ -96,10 +108,10 @@ func (u *ChatUI) runSavedQuery(query SavedQuery, variables map[string]string) te
 			_, err = store.AppendQuery(ctx, sessionID, origin.ID, result.Source, result)
 		}
 		if err != nil {
-			return savedQueryDoneMsg{sessionID: sessionID, err: err}
+			return savedQueryDoneMsg{sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, runFailed: runErr != nil, err: err}
 		}
 		snapshot, err := store.Load(ctx, sessionID)
-		return savedQueryDoneMsg{sessionID: sessionID, snapshot: snapshot, err: err}
+		return savedQueryDoneMsg{sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, runFailed: runErr != nil, snapshot: snapshot, err: err}
 	}
 	// busyCmd is never nil here to warrant a guard: SetBusy(true) always
 	// returns m.spinner.Tick (charm.land/bubbles/v2 spinner.Model.Tick), a
@@ -115,6 +127,13 @@ func (u *ChatUI) runSavedQuery(query SavedQuery, variables map[string]string) te
 // handleSavedQueryDone is called from OnMsg for a savedQueryDoneMsg.
 func (u *ChatUI) handleSavedQueryDone(msg savedQueryDoneMsg) {
 	u.shell.SetBusy(false)
+	reportErr := msg.err
+	if reportErr == nil && msg.runFailed {
+		reportErr = fmt.Errorf("saved query failed")
+	}
+	if u.sessions != nil {
+		u.sessions.ReportCommand(msg.interactionID, msg.sessionID, "/query", msg.userChars, msg.userWords, reportErr, true)
+	}
 	if msg.err != nil {
 		u.shell.AppendAssistant(conciseError(msg.err))
 		return

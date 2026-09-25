@@ -30,6 +30,10 @@ const (
 
 var scopes = []string{"openid", "profile", "datatug:projects:read", "datatug:projects:write"}
 
+// userConfigDir is a seam for testing newClient's insecure file-store
+// fallback without touching the real user config directory.
+var userConfigDir = os.UserConfigDir
+
 type session struct {
 	IDToken      string
 	RefreshToken string
@@ -258,7 +262,7 @@ func newClient(rawIssuer string, insecure bool) (*deviceauth.Client, deviceauth.
 		store, err := client.NewKeyringStore()
 		return client, store, "operating system keyring", err
 	}
-	dir, err := os.UserConfigDir()
+	dir, err := userConfigDir()
 	if err != nil {
 		return nil, nil, "", err
 	}

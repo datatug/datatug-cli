@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"iter"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -975,7 +974,7 @@ func (u *ChatUI) exportCommand(argument string) (tea.Cmd, error) {
 	}
 	path = strings.TrimSpace(path)
 	if strings.HasPrefix(path, "~/") {
-		home, homeErr := os.UserHomeDir()
+		home, homeErr := userHomeDir()
 		if homeErr != nil {
 			return nil, homeErr
 		}

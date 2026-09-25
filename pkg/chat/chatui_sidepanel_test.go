@@ -22,7 +22,11 @@ func TestWorkspacePanelViewShowsTabsAndProjectExplorer(t *testing.T) {
 		{Reference: ContextReference{Kind: "source", SourceID: "src1", Title: "sqlite"}},
 	}}
 	view := u.workspace.View(40, 15, true)
-	if !strings.Contains(view, "Proj") || !strings.Contains(view, "Marks") {
+	// width 40 is exactly wide enough for the full tab strip ("●
+	// Project · Inspect · Docked · Bookmarks" is 40 columns) --
+	// tabStripHeader prefers full labels whenever they fit (founder
+	// 2026-09-25, r9: "full names when wide").
+	if !strings.Contains(view, "Project") || !strings.Contains(view, "Bookmarks") {
 		t.Fatalf("expected tab labels in view:\n%s", view)
 	}
 	if !strings.Contains(view, "Demo") {
@@ -391,14 +395,47 @@ func TestChatUIWorkspaceSplitAndKeyboardSelection(t *testing.T) {
 func TestWorkspacePanelF6TogglesPanelVisibility(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
-	before := strings.Contains(u.shell.View().Content, "Marks")
+	// The panel is wide enough here for tabStripHeader's full label set
+	// ("Bookmarks", not the narrow "Marks" abbreviation).
+	before := strings.Contains(u.shell.View().Content, "Bookmarks")
 	if !before {
 		t.Fatalf("expected the workspace pane to render at width 120 before F6:\n%s", u.shell.View().Content)
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
-	after := strings.Contains(u.shell.View().Content, "Marks")
+	after := strings.Contains(u.shell.View().Content, "Bookmarks")
 	if after {
 		t.Fatal("expected F6 to hide the workspace pane")
+	}
+}
+
+// TestWorkspacePanelTabStripHeaderShortensOnNarrowWidth covers the r9
+// coordinator regression directly: at a panel width too narrow for even
+// the mixed (active-tab-full) label set, the tab strip used to be cut down
+// by padAnsiLine's ellipsis truncation to just the active tab's label,
+// silently dropping the other three tabs. tabStripHeader must instead fall
+// back to short labels for every tab, so all four remain visible.
+func TestWorkspacePanelTabStripHeaderShortensOnNarrowWidth(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	header := u.workspace.tabStripHeader(28)
+	flat := ansi.Strip(header)
+	for _, want := range []string{"Proj", "Sel", "Dock", "Marks"} {
+		if !strings.Contains(flat, want) {
+			t.Fatalf("tab %q missing from narrow tab strip: %q", want, flat)
+		}
+	}
+	if strings.Contains(flat, "Project") {
+		t.Fatalf("expected the FULL active-tab label to have been dropped too once even the mixed set doesn't fit: %q", flat)
+	}
+	if w := lipgloss.Width(header); w > 28 {
+		t.Fatalf("tabStripHeader(28) width = %d, want <= 28: %q", w, header)
+	}
+
+	// Even narrower than the short label set itself needs: still falls
+	// back to short labels (the least-bad option) rather than panicking
+	// or returning something wider.
+	tooNarrow := u.workspace.tabStripHeader(10)
+	if !strings.Contains(ansi.Strip(tooNarrow), "Proj") {
+		t.Fatalf("expected the short-label fallback even when it still doesn't fit width 10: %q", tooNarrow)
 	}
 }
 

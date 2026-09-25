@@ -35,7 +35,7 @@ func newChipTestChatUI(t *testing.T) (*ChatUI, *SessionChat) {
 	return u, chat
 }
 
-// chipCloseCoordinates scans the rendered composer for "Customer ×]" and
+// chipCloseCoordinates scans the rendered composer for "Customer × " and
 // returns the tea.MouseClickMsg X/Y a click on the × glyph itself would
 // carry -- ansi.Strip'd column/row within the rendered content, mirroring
 // aichat's own TestMouseClickFindsCloseGlyphInRenderedView (scanning the
@@ -45,7 +45,7 @@ func chipCloseCoordinates(t *testing.T, content string) (x, y int) {
 	t.Helper()
 	for row, line := range strings.Split(content, "\n") {
 		plain := ansi.Strip(line)
-		if idx := runeIndex(plain, "×]"); idx >= 0 {
+		if idx := runeIndex(plain, "×"); idx >= 0 {
 			return idx, row
 		}
 	}
@@ -170,7 +170,7 @@ func TestChatUIComposerAttachmentChipsCanBeFocusedClearedAndRestored(t *testing.
 // observable indirectly, though: View() always renders the transcript
 // viewport at exactly historyHeight() lines (blank-padded when history is
 // shorter, scrolled when it's taller), immediately followed by the first
-// chip row -- so the RENDERED LINE INDEX the first "×]" chip glyph lands on
+// chip row -- so the RENDERED LINE INDEX the first "×" chip glyph lands on
 // is topBarHeight()+historyHeight() (no slash-command menu is open here),
 // and shrinking the chip area by N rows must move that index down by
 // exactly N lines. firstChipRowLine below measures that index; the +1/+2
@@ -290,8 +290,8 @@ func lastChipRowCloseCoordinates(t *testing.T, content string) (x, y int, ok boo
 	for row, line := range strings.Split(content, "\n") {
 		runes := []rune(ansi.Strip(line))
 		last := -1
-		for i := 0; i < len(runes)-1; i++ {
-			if runes[i] == '×' && runes[i+1] == ']' {
+		for i := 0; i < len(runes); i++ {
+			if runes[i] == '×' {
 				last = i
 			}
 		}
@@ -310,11 +310,11 @@ func lastChipRowCloseCoordinates(t *testing.T, content string) (x, y int, ok boo
 }
 
 // countChipRows counts the rendered lines carrying at least one chip's
-// close glyph ("×]") -- one per wrapped chip row.
+// close glyph ("×") -- one per wrapped chip row.
 func countChipRows(content string) int {
 	rows := 0
 	for _, line := range strings.Split(content, "\n") {
-		if strings.Contains(ansi.Strip(line), "×]") {
+		if strings.Contains(ansi.Strip(line), "×") {
 			rows++
 		}
 	}
@@ -322,13 +322,13 @@ func countChipRows(content string) int {
 }
 
 // firstChipRowLine returns the 0-based index, within content's rendered
-// lines, of the FIRST line carrying a chip's close glyph ("×]") -- see
+// lines, of the FIRST line carrying a chip's close glyph ("×") -- see
 // TestChatUIComposerShrinksAsWrappedAttachmentsAreRemoved's doc comment for
 // why that index is an externally observable proxy for
 // topBarHeight()+historyHeight(). ok is false when no chip row is rendered.
 func firstChipRowLine(content string) (line int, ok bool) {
 	for i, l := range strings.Split(content, "\n") {
-		if strings.Contains(ansi.Strip(l), "×]") {
+		if strings.Contains(ansi.Strip(l), "×") {
 			return i, true
 		}
 	}

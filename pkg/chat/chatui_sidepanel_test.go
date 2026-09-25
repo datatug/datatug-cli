@@ -409,7 +409,7 @@ func TestPanelFocusedLayoutFitsTabStripAndHintsAtWidth130(t *testing.T) {
 	content := u.shell.View().Content
 
 	for i, line := range strings.Split(content, "\n") {
-		if w := lipgloss.Width(line); w != 130 {
+		if w := ansi.StringWidth(line); w != 130 {
 			t.Fatalf("line %d width = %d, want 130 (terminal edge overflow/clip): %q", i, w, ansi.Strip(line))
 		}
 	}
@@ -422,6 +422,47 @@ func TestPanelFocusedLayoutFitsTabStripAndHintsAtWidth130(t *testing.T) {
 	}
 	if strings.Contains(plain, "…") {
 		t.Fatalf("expected no ellipsis truncation anywhere in the panel-focused view:\n%s", plain)
+	}
+}
+
+// TestPanelFocusedLayoutNeverOverflowsTerminalWidth covers the r10
+// coordinator's follow-up review, verbatim: "hints line 1 is cut at the
+// terminal edge... and the panel tab strip is clipped... Check it by
+// measuring the rendered line widths... rather than by eye... Add a test
+// that renders the panel-focused screen at 110x32 and 80x24 and asserts
+// every line's display width <= terminal width." Uses the SAME workspace-
+// focused hint set (a grid result present, panel focused via
+// Shift+Right) that produces the "Ctrl+←→ resize   Space attach" /
+// "● Project · Inspect · Docked · Bookmarks" content the coordinator's
+// own review quoted, at both required terminal sizes, measured with
+// ansi.StringWidth (the same package this codebase's own rendering code
+// uses for wrapping/truncation decisions) rather than a byte or rune
+// count that could disagree with it.
+func TestPanelFocusedLayoutNeverOverflowsTerminalWidth(t *testing.T) {
+	for _, dims := range []struct{ w, h int }{{110, 32}, {80, 24}} {
+		t.Run(fmt.Sprintf("%dx%d", dims.w, dims.h), func(t *testing.T) {
+			catalog := ProjectCatalog{ID: "chinook", Title: "Chinook"}
+			chat, err := NewSessionChat(context.Background(), openTestStore(t, testStorePath(t), testScope()), &contextualStub{turns: []Turn{{
+				Text:    "Here are the customers I found.",
+				Queries: []QueryResult{{Title: "Customers", RecordSetID: "rs1", Result: secureread.Result{Columns: []string{"ID", "Name", "City"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1, "Name": "Customer", "City": "City"}}}}}},
+			}}}, "sqlite:///fixture.db", catalog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			u, err := NewSessionChatUI(context.Background(), chat, "fake-model")
+			if err != nil {
+				t.Fatal(err)
+			}
+			u.shell.Update(tea.WindowSizeMsg{Width: dims.w, Height: dims.h})
+			drainCmd(t, u, u.Submit("Show me customers"))
+			u.shell.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+			content := u.shell.View().Content
+			for i, line := range strings.Split(content, "\n") {
+				if w := ansi.StringWidth(line); w > dims.w {
+					t.Fatalf("%dx%d: line %d display width = %d, exceeds terminal width %d: %q", dims.w, dims.h, i, w, dims.w, ansi.Strip(line))
+				}
+			}
+		})
 	}
 }
 

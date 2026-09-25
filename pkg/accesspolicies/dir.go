@@ -26,6 +26,10 @@ const DirEnv = "DATATUG_POLICIES_DIR"
 // DefaultDir is the per-user policies directory relative to the home directory.
 const DefaultDir = ".datatug/policies"
 
+// userHomeDir is a seam for testing ResolveDir's fallback without touching
+// the real home directory — mirrors pkg/personalqueries's userHomeDir seam.
+var userHomeDir = os.UserHomeDir
+
 // ErrNoPolicies is returned by Load when nothing was loaded and the caller did
 // not ask to run unrestricted.
 var ErrNoPolicies = errors.New("no access policies loaded; pass --no-policies to run unrestricted")
@@ -40,7 +44,7 @@ func ResolveDir(flagValue string) (dir string, explicit bool, err error) {
 	if fromEnv := os.Getenv(DirEnv); fromEnv != "" {
 		return fromEnv, true, nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := userHomeDir()
 	if err != nil {
 		return "", false, fmt.Errorf("resolve policies directory: %w", err)
 	}

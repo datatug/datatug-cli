@@ -90,6 +90,56 @@ func copyDemoProjectToTempDir(t *testing.T, srcDir string) string {
 	return dstDir
 }
 
+// chinookFixturePath is the real Chinook data pkg/dbcopy's own tests already
+// commit to the repo (byte-identical to a `datatug demo`-fetched
+// ~/datatug/dbs/chinook-local.sqlite — verified while building this fixture
+// wiring: both files hash to 9ebece0dad4a7ee91b9ce97a12c04e26). Every
+// invoice ID and genre/track number this file's tests assert against
+// (TestDemoProject_RunQuery_RealParameterEffect's disjoint InvoiceId sets,
+// TestDemoProject_RunQuery_SQL_RealParameterEffect_WithGrant's Rock
+// TracksPurchased counts) came from querying this exact fixture, not a
+// `datatug demo` download — so using it here keeps these two tests exactly
+// as "real dataset, real driver" as they were, without depending on
+// anything under a real developer's home directory.
+const chinookFixturePath = "../dbcopy/testdata/chinook.db"
+
+// installLocalChinookFixture points projectDir's local-environment chinook
+// catalog at a private copy of chinookFixturePath instead of the
+// "~/datatug/dbs/chinook-local.sqlite" committed demo-project-1 ships with
+// (a path meant for a real user who has run `datatug demo`; resolving it
+// through a temp HOME, as every hermetic test in this module now does,
+// finds nothing there). Both tests in this file only exercise the "local"
+// environment (demoProjectEnv), so the "prod" catalog is left untouched.
+func installLocalChinookFixture(t *testing.T, projectDir string) {
+	t.Helper()
+	src, err := os.ReadFile(chinookFixturePath)
+	if err != nil {
+		t.Fatalf("read committed chinook fixture %s: %v", chinookFixturePath, err)
+	}
+	fixtureDir := filepath.Join(projectDir, "fixtures")
+	if err := os.MkdirAll(fixtureDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", fixtureDir, err)
+	}
+	fixturePath := filepath.Join(fixtureDir, "chinook-local.sqlite")
+	if err := os.WriteFile(fixturePath, src, 0o644); err != nil {
+		t.Fatalf("write chinook fixture copy: %v", err)
+	}
+
+	catalogPath := filepath.Join(projectDir, "environments", "local", "catalogs", "chinook-local", "chinook-local.db.json")
+	catalog := struct {
+		Driver  string `json:"driver"`
+		Path    string `json:"path"`
+		DbModel string `json:"dbModel"`
+	}{Driver: "sqlite3", Path: fixturePath, DbModel: "chinook"}
+	encoded, err := json.MarshalIndent(catalog, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal chinook-local.db.json: %v", err)
+	}
+	if err := os.WriteFile(catalogPath, append(encoded, '\n'), 0o644); err != nil {
+		t.Fatalf("rewrite %s: %v", catalogPath, err)
+	}
+}
+
 // TestDemoProject_RunQuery_RealParameterEffect is AC:real-transport-and-
 // parameter-effect's own required proof (S64 brief item 4): "two different
 // Customer.ID values give different rows through exec/run_query against
@@ -112,6 +162,7 @@ func copyDemoProjectToTempDir(t *testing.T, srcDir string) string {
 func TestDemoProject_RunQuery_RealParameterEffect(t *testing.T) {
 	srcDir := resolveDemoProjectDir(t)
 	projectDir := copyDemoProjectToTempDir(t, srcDir)
+	installLocalChinookFixture(t, projectDir)
 
 	session, err := secureread.NewSession(secureread.SessionOptions{
 		As: "admin", Roles: []string{"admin"}, PoliciesDir: filepath.Join(projectDir, "policies"),
@@ -263,6 +314,7 @@ func typedValueKey(v apicontract.TypedValue) string {
 func TestDemoProject_RunQuery_SQL_RealParameterEffect_WithGrant(t *testing.T) {
 	srcDir := resolveDemoProjectDir(t)
 	projectDir := copyDemoProjectToTempDir(t, srcDir)
+	installLocalChinookFixture(t, projectDir)
 
 	session, err := secureread.NewSession(secureread.SessionOptions{
 		As: "admin", Roles: []string{"admin"}, PoliciesDir: filepath.Join(projectDir, "policies"),

@@ -6,11 +6,24 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/datatug/datatug-cli/internal/hermetictest"
 )
 
-// Keep every command test's remembered chat options out of the user's real
-// configuration directory, including tests that call runChatProject directly.
+// Keep every command test's remembered chat options — and everything else in
+// this package that resolves os.UserHomeDir/UserConfigDir/UserCacheDir —
+// out of the user's real home, config and cache directories, including
+// tests that call runChatProject directly. hermetictest.Setup covers the
+// general case (see internal/hermetictest); lastChatOptionsPath is
+// redirected on top of that because it is this package's own seam over
+// os.UserConfigDir (see cmd_chat_recent.go), not a fallback that would
+// already be caught by an env-var redirect alone.
 func TestMain(m *testing.M) {
+	hermeticCleanup, err := hermetictest.Setup()
+	if err != nil {
+		panic(err)
+	}
+
 	dir, err := os.MkdirTemp("", "datatug-chat-options-test-")
 	if err != nil {
 		panic(err)
@@ -18,6 +31,9 @@ func TestMain(m *testing.M) {
 	lastChatOptionsPath = func() (string, error) { return filepath.Join(dir, "chat-last.json"), nil }
 	code := m.Run()
 	_ = os.RemoveAll(dir)
+	// os.Exit below runs no deferred calls, so both cleanups happen here,
+	// explicitly, in the same order the rest of this function used already.
+	hermeticCleanup()
 	os.Exit(code)
 }
 

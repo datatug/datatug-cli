@@ -148,10 +148,14 @@ type SessionStore struct {
 	path       string
 }
 
+// userHomeDir is a seam for testing DefaultChatStorePath and the "~/" export
+// path expansion in chatui.go without touching the real home directory.
+var userHomeDir = os.UserHomeDir
+
 // DefaultChatStorePath keeps snapshots outside the project repository. The
 // hash distinguishes projects without exposing their path in a filename.
 func DefaultChatStorePath(projectDir string) (string, error) {
-	root, err := os.UserHomeDir()
+	root, err := userHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("find chat home: %w", err)
 	}

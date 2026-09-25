@@ -32,6 +32,11 @@ var (
 	ErrUnsafePrivateDir = errors.New("private evidence directory must be outside Git and evidence repositories")
 )
 
+// userHomeDir is a seam for testing ResolvePrivateDir's fallback without
+// touching the real home directory — mirrors pkg/personalqueries's
+// userHomeDir seam.
+var userHomeDir = os.UserHomeDir
+
 // Options are trusted server configuration, never request-controlled.
 type Options struct {
 	PrivateDir string
@@ -47,7 +52,7 @@ func ResolvePrivateDir(explicit string) (string, error) {
 		explicit = os.Getenv(DirEnv)
 	}
 	if explicit == "" {
-		home, err := os.UserHomeDir()
+		home, err := userHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolve evidence directory: %w", err)
 		}

@@ -115,3 +115,28 @@ jobs:
           cache: true
       - name: go mod tidy -diff
         run: go mod tidy -diff
+
+  # Guards the fix in internal/hermetictest and scripts/check-hermetic-tests.sh
+  # against regressing: `go test ./...` must never read or write the real
+  # user's home, XDG config, or XDG cache directories — see both files' own
+  # doc comments for why (a leaking test polluted the founder's real
+  # ~/.datatug/chat with ~395 files of litter before this job existed).
+  # A separate job, not a step folded into strongo_workflow above, so this
+  # module's own hermeticity gate is never hidden behind — or accidentally
+  # broken by an update to — the shared strongo/cicd workflow.
+  hermetic-tests:
+    name: Hermetic tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          # Must be >= go.mod's `go` directive, same constraint as release.yml.
+          go-version: '1.27.0'
+          cache: true
+      - name: check-hermetic-tests.sh
+        env:
+          # Matches strongo_workflow's cgo_enabled: true above — several
+          # tests (github.com/mattn/go-sqlite3) require cgo.
+          CGO_ENABLED: '1'
+        run: ./scripts/check-hermetic-tests.sh

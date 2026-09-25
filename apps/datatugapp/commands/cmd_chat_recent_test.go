@@ -8,6 +8,63 @@ import (
 	"testing"
 )
 
+// Keep every command test's remembered chat options out of the user's real
+// configuration directory, including tests that call runChatProject directly.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "datatug-chat-options-test-")
+	if err != nil {
+		panic(err)
+	}
+	lastChatOptionsPath = func() (string, error) { return filepath.Join(dir, "chat-last.json"), nil }
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+func TestChatMissingRememberedProjectUsesCurrentDirectory(t *testing.T) {
+	path := useTestLastChatOptionsPath(t)
+	missing := filepath.Join(t.TempDir(), "deleted-project")
+	data, _ := json.Marshal(lastChatOptions{Project: missing, Database: "old-db", Env: "old-env", AI: "deepseek"})
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := chatCommand()
+	var stderr strings.Builder
+	cmd.SetErr(&stderr)
+	options := chatOptions{project: ".", env: "local", model: defaultChatModel}
+	if err := applyLastChatOptions(cmd, &options); err != nil {
+		t.Fatal(err)
+	}
+	if options.project != "." || options.env != "local" || options.database != "" || options.ai != "deepseek" {
+		t.Fatalf("stale project leaked into chat defaults: %#v", options)
+	}
+	if !strings.Contains(stderr.String(), missing) || !strings.Contains(stderr.String(), "trying the current directory") {
+		t.Fatalf("missing recovery warning: %q", stderr.String())
+	}
+}
+
+func TestChatMissingRelativeProjectUsesCurrentDirectory(t *testing.T) {
+	path := useTestLastChatOptionsPath(t)
+	missing := "./missing-project-" + filepath.Base(t.TempDir())
+	data, _ := json.Marshal(lastChatOptions{Project: missing, Database: "old-db", Env: "old-env"})
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := chatCommand()
+	var stderr strings.Builder
+	cmd.SetErr(&stderr)
+	options := chatOptions{project: ".", env: "local"}
+	if err := applyLastChatOptions(cmd, &options); err != nil {
+		t.Fatal(err)
+	}
+	if options.project != "." || options.env != "local" || options.database != "" {
+		t.Fatalf("stale relative project leaked into chat defaults: %#v", options)
+	}
+	if !strings.Contains(stderr.String(), missing) {
+		t.Fatalf("missing recovery warning: %q", stderr.String())
+	}
+}
+
 func useTestLastChatOptionsPath(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "chat-last.json")
@@ -22,7 +79,7 @@ func TestChatRemembersLastStartupWithoutCredentials(t *testing.T) {
 	cmd := chatCommand()
 	_ = cmd.Flags().Set("model", "custom-model")
 	options := chatOptions{
-		project: "/projects/demo", env: "local", database: "chinook", ai: "deepseek",
+		project: t.TempDir(), env: "local", database: "chinook", ai: "deepseek",
 		model: "custom-model", thinking: "low", as: "alex", roles: []string{"admin"},
 		apiKey: "must-never-appear",
 	}

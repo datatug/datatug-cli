@@ -107,7 +107,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	projectDir, projectStore, err := resolveQueryProject(options.project)
 	if err != nil {
-		return "", Exit(err.Error(), exitCodeUsage)
+		return "", Exit(err.Error()+"\nChoose an existing project: datatug projects, then datatug chat --project <ID-or-directory>\nStart a new project: datatug init <ID> <directory>", exitCodeUsage)
 	}
 
 	database := options.database

@@ -389,6 +389,8 @@ github.com/strongo/aichat v0.2.2-0.20260925162305-b41528f3520b h1:UCdqsT+9p69CAw
 github.com/strongo/aichat v0.2.2-0.20260925162305-b41528f3520b/go.mod h1:ZiYqFfUKZyWWb2kf2rwUsE46dPiU3orz2vBX3B8JUqs=
 github.com/strongo/aichat v0.2.2-0.20260925164151-cd13a879819c h1:CXBWPPHoB3jsFI2EodYCwV9iWTpY1bbDQ49smVxr/7I=
 github.com/strongo/aichat v0.2.2-0.20260925164151-cd13a879819c/go.mod h1:ZiYqFfUKZyWWb2kf2rwUsE46dPiU3orz2vBX3B8JUqs=
+github.com/strongo/aichat v0.2.2-0.20260925165151-5ad7040f4dc0 h1:lxTMbKlY6CLYeQw5pHj/ntI3g5GGiO0bnxQLKnubfpY=
+github.com/strongo/aichat v0.2.2-0.20260925165151-5ad7040f4dc0/go.mod h1:ZiYqFfUKZyWWb2kf2rwUsE46dPiU3orz2vBX3B8JUqs=
 github.com/strongo/analytics v0.2.8 h1:h0snZrFba1DDI7H/RcePbq3V8MeuOrZFC8kj5ZJkp/I=
 github.com/strongo/analytics v0.2.8/go.mod h1:/pf7goR1CZtkvZHrJH5sXpJJl6IAefWCx82eSGUZ2V0=
 github.com/strongo/buildinfo v0.3.0 h1:nPbCrSA+7I3bct6mwZ24U6SHfV7TaRafoYzDucwl1Qg=

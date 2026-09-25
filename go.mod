@@ -55,7 +55,7 @@ require (
 	github.com/sneat-co/sneat-go-core v0.67.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	github.com/strongo/aichat v0.2.2-0.20260925164151-cd13a879819c
+	github.com/strongo/aichat v0.2.2-0.20260925165151-5ad7040f4dc0
 	github.com/strongo/buildinfo v0.3.0
 	github.com/strongo/cli-helpers v0.21.0
 	github.com/strongo/deviceauth v0.1.0

@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/strongo/aichat/tui/theme"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
@@ -20,11 +22,53 @@ func TestWorkspacePanelViewShowsTabsAndProjectExplorer(t *testing.T) {
 		{Reference: ContextReference{Kind: "source", SourceID: "src1", Title: "sqlite"}},
 	}}
 	view := u.workspace.View(40, 15, true)
-	if !strings.Contains(view, "Proj") || !strings.Contains(view, "Marks") {
+	// width 40 is exactly wide enough for the full tab strip ("●
+	// Project · Inspect · Docked · Bookmarks" is 40 columns) --
+	// tabStripHeader prefers full labels whenever they fit (founder
+	// 2026-09-25, r9: "full names when wide").
+	if !strings.Contains(view, "Project") || !strings.Contains(view, "Bookmarks") {
 		t.Fatalf("expected tab labels in view:\n%s", view)
 	}
 	if !strings.Contains(view, "Demo") {
 		t.Fatalf("expected project explorer content in view:\n%s", view)
+	}
+}
+
+// TestWorkspacePanelInLightThemeUsesLightSurfaceNoHardcodedDarkBackground
+// covers a real regression, founder-flagged verbatim: "project explorer in
+// light theme is black - wrong". panelCard/explorerNodesView/bookmarksView
+// used to hardcode ANSI-256 dark greys (238/235 background, a selected-row
+// "57" background) regardless of tui/theme.Dark; in a light terminal that
+// rendered the whole side panel as a near-black band. They now read
+// theme.SurfaceColors()/FocusSurfaceColors() fresh on every render, so this
+// asserts (a) none of the old literal dark codes reappear and (b) the
+// panel actually carries theme's LIGHT surface background when
+// theme.Dark is false.
+func TestWorkspacePanelInLightThemeUsesLightSurfaceNoHardcodedDarkBackground(t *testing.T) {
+	theme.SetDark(false)
+	t.Cleanup(func() { theme.SetDark(true) })
+
+	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = ProjectCatalog{ID: "proj1", Title: "Demo", Objects: []ProjectObject{
+		{Reference: ContextReference{Kind: "project", ObjectID: "proj1", Title: "Demo"}},
+		{Reference: ContextReference{Kind: "source", SourceID: "src1", Title: "sqlite"}},
+	}}
+	u.workspace.explorerIndex = 1 // select a row so the FocusSurfaceColors-highlighted branch renders too.
+	view := u.workspace.View(40, 15, true)
+
+	for _, stale := range []string{"48;5;238", "48;5;235", "48;5;57", "38;5;255", "38;5;252", "38;5;229", "38;5;231", "38;5;244"} {
+		if strings.Contains(view, "\x1b["+stale+"m") || strings.Contains(view, "\x1b[1;"+stale+"m") {
+			t.Fatalf("panel view still carries a hardcoded ANSI-256 colour %q, want it to come from tui/theme: %q", stale, view)
+		}
+	}
+	bg, fg := theme.SurfaceColors()
+	probe := lipgloss.NewStyle().Foreground(fg).Background(bg).Render("x")
+	prefix := strings.TrimSuffix(probe, "x\x1b[m")
+	if prefix == "" || prefix == probe {
+		t.Fatalf("could not derive a probe SGR prefix from theme.SurfaceColors(): %q", probe)
+	}
+	if !strings.Contains(view, prefix) {
+		t.Fatalf("expected the light-theme surface fill %q somewhere in the panel view: %q", prefix, view)
 	}
 }
 
@@ -348,17 +392,124 @@ func TestChatUIWorkspaceSplitAndKeyboardSelection(t *testing.T) {
 	}
 }
 
+// TestPanelFocusedLayoutFitsTabStripAndHintsAtWidth130 covers the r10
+// coordinator review, which reported both the tab strip and the hints
+// bar clipped at the terminal edge in a panel-focused layout ("Project ·
+// Inspect · Docked · Bo…" / "Space attac…"). Renders at the SAME
+// panel-focused width/state the round-9 snapshot used (130 cols, panel
+// visible and FOCUSED via Shift+Right) and asserts: every rendered line
+// is exactly 130 columns wide (no overflow past the terminal edge), the
+// tab strip's full label set is intact (not cut mid-label), and no hint
+// segment/pair is truncated with an ellipsis.
+func TestPanelFocusedLayoutFitsTabStripAndHintsAtWidth130(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{Text: "ok"})
+	u.shell.Update(tea.WindowSizeMsg{Width: 130, Height: 32})
+	drainCmd(t, u, u.Submit("hello"))
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	content := u.shell.View().Content
+
+	for i, line := range strings.Split(content, "\n") {
+		if w := ansi.StringWidth(line); w != 130 {
+			t.Fatalf("line %d width = %d, want 130 (terminal edge overflow/clip): %q", i, w, ansi.Strip(line))
+		}
+	}
+	plain := ansi.Strip(content)
+	if !strings.Contains(plain, "Project · Inspect · Docked · Bookmarks") {
+		t.Fatalf("expected the FULL tab strip label set intact, not clipped:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Space attach") {
+		t.Fatalf("expected the full 'Space attach' hint, not truncated:\n%s", plain)
+	}
+	if strings.Contains(plain, "…") {
+		t.Fatalf("expected no ellipsis truncation anywhere in the panel-focused view:\n%s", plain)
+	}
+}
+
+// TestPanelFocusedLayoutNeverOverflowsTerminalWidth covers the r10
+// coordinator's follow-up review, verbatim: "hints line 1 is cut at the
+// terminal edge... and the panel tab strip is clipped... Check it by
+// measuring the rendered line widths... rather than by eye... Add a test
+// that renders the panel-focused screen at 110x32 and 80x24 and asserts
+// every line's display width <= terminal width." Uses the SAME workspace-
+// focused hint set (a grid result present, panel focused via
+// Shift+Right) that produces the "Ctrl+←→ resize   Space attach" /
+// "● Project · Inspect · Docked · Bookmarks" content the coordinator's
+// own review quoted, at both required terminal sizes, measured with
+// ansi.StringWidth (the same package this codebase's own rendering code
+// uses for wrapping/truncation decisions) rather than a byte or rune
+// count that could disagree with it.
+func TestPanelFocusedLayoutNeverOverflowsTerminalWidth(t *testing.T) {
+	for _, dims := range []struct{ w, h int }{{110, 32}, {80, 24}} {
+		t.Run(fmt.Sprintf("%dx%d", dims.w, dims.h), func(t *testing.T) {
+			catalog := ProjectCatalog{ID: "chinook", Title: "Chinook"}
+			chat, err := NewSessionChat(context.Background(), openTestStore(t, testStorePath(t), testScope()), &contextualStub{turns: []Turn{{
+				Text:    "Here are the customers I found.",
+				Queries: []QueryResult{{Title: "Customers", RecordSetID: "rs1", Result: secureread.Result{Columns: []string{"ID", "Name", "City"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1, "Name": "Customer", "City": "City"}}}}}},
+			}}}, "sqlite:///fixture.db", catalog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			u, err := NewSessionChatUI(context.Background(), chat, "fake-model")
+			if err != nil {
+				t.Fatal(err)
+			}
+			u.shell.Update(tea.WindowSizeMsg{Width: dims.w, Height: dims.h})
+			drainCmd(t, u, u.Submit("Show me customers"))
+			u.shell.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+			content := u.shell.View().Content
+			for i, line := range strings.Split(content, "\n") {
+				if w := ansi.StringWidth(line); w > dims.w {
+					t.Fatalf("%dx%d: line %d display width = %d, exceeds terminal width %d: %q", dims.w, dims.h, i, w, dims.w, ansi.Strip(line))
+				}
+			}
+		})
+	}
+}
+
 func TestWorkspacePanelF6TogglesPanelVisibility(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
-	before := strings.Contains(u.shell.View().Content, "Marks")
+	// The panel is wide enough here for tabStripHeader's full label set
+	// ("Bookmarks", not the narrow "Marks" abbreviation).
+	before := strings.Contains(u.shell.View().Content, "Bookmarks")
 	if !before {
 		t.Fatalf("expected the workspace pane to render at width 120 before F6:\n%s", u.shell.View().Content)
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
-	after := strings.Contains(u.shell.View().Content, "Marks")
+	after := strings.Contains(u.shell.View().Content, "Bookmarks")
 	if after {
 		t.Fatal("expected F6 to hide the workspace pane")
+	}
+}
+
+// TestWorkspacePanelTabStripHeaderShortensOnNarrowWidth covers the r9
+// coordinator regression directly: at a panel width too narrow for even
+// the mixed (active-tab-full) label set, the tab strip used to be cut down
+// by padAnsiLine's ellipsis truncation to just the active tab's label,
+// silently dropping the other three tabs. tabStripHeader must instead fall
+// back to short labels for every tab, so all four remain visible.
+func TestWorkspacePanelTabStripHeaderShortensOnNarrowWidth(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{})
+	header := u.workspace.tabStripHeader(28)
+	flat := ansi.Strip(header)
+	for _, want := range []string{"Proj", "Sel", "Dock", "Marks"} {
+		if !strings.Contains(flat, want) {
+			t.Fatalf("tab %q missing from narrow tab strip: %q", want, flat)
+		}
+	}
+	if strings.Contains(flat, "Project") {
+		t.Fatalf("expected the FULL active-tab label to have been dropped too once even the mixed set doesn't fit: %q", flat)
+	}
+	if w := lipgloss.Width(header); w > 28 {
+		t.Fatalf("tabStripHeader(28) width = %d, want <= 28: %q", w, header)
+	}
+
+	// Even narrower than the short label set itself needs: still falls
+	// back to short labels (the least-bad option) rather than panicking
+	// or returning something wider.
+	tooNarrow := u.workspace.tabStripHeader(10)
+	if !strings.Contains(ansi.Strip(tooNarrow), "Proj") {
+		t.Fatalf("expected the short-label fallback even when it still doesn't fit width 10: %q", tooNarrow)
 	}
 }
 

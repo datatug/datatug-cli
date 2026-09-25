@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/ai/session"
 	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/aichat/tui/theme"
 	"github.com/strongo/aichat/tui/transcript"
 )
 
@@ -101,6 +102,14 @@ func (b *JoinBlock) CapturesEsc() bool {
 	return b.joinFocused
 }
 
+// SelfFramed satisfies transcript.SelfFramed: JoinBlock's View already
+// includes the embedded grid's own complete border (title/footer inline,
+// right-edge scrollbar) plus the plain-text join selector beneath it, so
+// transcript renders it directly instead of wrapping the whole thing in
+// the shared theme.Card fill, which would otherwise sit AROUND the
+// grid's own border as a second frame (strongo/aichat#chat-shared-look).
+func (b *JoinBlock) SelfFramed() bool { return true }
+
 // View satisfies transcript.Block: the grid, followed by the join area when
 // there are candidates — ported from ui.go's joinAreaView, appended below
 // gridState.view() by the old rebuildHistory.
@@ -126,7 +135,7 @@ func (b *JoinBlock) joinAreaView(focused bool, width int) string {
 	if len(groups) == 0 {
 		return ""
 	}
-	lines := []string{statusStyle.Render("  You can ") + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Render("J") + statusStyle.Render("OIN  · press j")}
+	lines := []string{statusStyle().Render("  You can ") + lipgloss.NewStyle().Bold(true).Foreground(theme.FocusColor()).Render("J") + statusStyle().Render("OIN  · press j")}
 	for sourceIndex, group := range groups {
 		source := sanitizeTerminalText(group.source.Relation)
 		if group.source.Alias != "" && !strings.EqualFold(group.source.Alias, group.source.Relation) {
@@ -157,25 +166,26 @@ func (b *JoinBlock) joinAreaView(focused bool, width int) string {
 		plain := prefix + strings.Join(labels, "  ·  ")
 		if focused && b.joinFocused && sourceIndex == b.sourceIndex {
 			selected := min(b.candidateIndex, len(labels)-1)
-			selectedLabel := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Render(labels[selected])
+			selectedBG, selectedFG := theme.FocusSurfaceColors()
+			selectedLabel := lipgloss.NewStyle().Bold(true).Foreground(selectedFG).Background(selectedBG).Render(labels[selected])
 			parts := append([]string(nil), labels...)
 			parts[selected] = selectedLabel
-			highlighted := activeTitleStyle.Render(prefix) + strings.Join(parts, "  ·  ")
+			highlighted := activeTitleStyle().Render(prefix) + strings.Join(parts, "  ·  ")
 			if lipgloss.Width(highlighted) <= width {
 				lines = append(lines, highlighted)
 			} else {
-				lines = append(lines, ansi.Truncate(activeTitleStyle.Render(prefix)+selectedLabel+statusStyle.Render(fmt.Sprintf("  (%d/%d)", selected+1, len(labels))), width, "…"))
+				lines = append(lines, ansi.Truncate(activeTitleStyle().Render(prefix)+selectedLabel+statusStyle().Render(fmt.Sprintf("  (%d/%d)", selected+1, len(labels))), width, "…"))
 			}
 		} else {
-			lines = append(lines, statusStyle.Render(ansi.Truncate(plain, width, "…")))
+			lines = append(lines, statusStyle().Render(ansi.Truncate(plain, width, "…")))
 		}
 	}
 	if focused && b.joinFocused && b.showDetails {
 		if candidate, ok := b.selectedJoin(); ok {
-			lines = append(lines, statusStyle.Render("  Foreign key • "+candidate.Cardinality))
+			lines = append(lines, statusStyle().Render("  Foreign key • "+candidate.Cardinality))
 			for _, pair := range candidate.Fields {
 				line := "  " + candidate.Source.Relation + "." + pair.SourceField + " → " + candidate.Target.Relation + "." + pair.TargetField
-				lines = append(lines, statusStyle.Render(ansi.Truncate(sanitizeTerminalText(line), width, "…")))
+				lines = append(lines, statusStyle().Render(ansi.Truncate(sanitizeTerminalText(line), width, "…")))
 			}
 		}
 	}

@@ -6,27 +6,25 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/aichat/tui/theme"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
-// statusStyle/activeTitleStyle/userStyle/inactiveBorderStyle/
-// activeBorderStyle/messageSurfaceBackground/selectedMessageBackground are
-// DataTug's shared status/message-card styles, used both by ChatUI's own
-// blocks (join_block.go, user_message_block.go) and, previously, by the
-// legacy UI.
-var (
-	statusStyle               = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	activeTitleStyle          = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("51"))
-	activeBorderStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("51"))
-	inactiveBorderStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	userStyle                 = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("45"))
-	messageSurfaceBackground  = lipgloss.Color("235")
-	selectedMessageBackground = lipgloss.Color("237")
-	// agentStyle is ui.go's original agentStyle var, kept unchanged:
-	// http_document_block.go's httpDocumentBlock still uses it.
-	agentStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-)
+// statusStyle/activeTitleStyle/agentStyle are DataTug's shared in-card text
+// styles (join_block.go, http_document_block.go) -- FUNCTIONS, not package
+// vars: every one of them must reflect tui/theme's CURRENT Dark variant on
+// every render, not whatever it was when the package first loaded (theme.
+// SetDark can change it at runtime). Every card/block these render inside
+// is now a shared theme.Card (strongo/aichat#chat-shared-look), so their
+// colours come from theme too -- never a local lipgloss.Color(...) literal.
+func statusStyle() lipgloss.Style { return lipgloss.NewStyle().Foreground(theme.MutedColor()) }
+func activeTitleStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(theme.FocusColor())
+}
+func agentStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(theme.AccentColor())
+}
 
 // ProjectChoice identifies a configured DataTug project, not a database. It
 // is ui.go's original type, moved here unchanged: ChatUI's
@@ -106,32 +104,16 @@ func formatLimitations(limitations []secureread.Limitation) string {
 	return strings.Join(lines, "; ")
 }
 
-// userMessageView renders a user prompt as an OpenCode-style card: a left
-// accent bar that brightens with selection, an elevated background, vertical
-// padding around the text and the same background behind every segment so
-// the text never resets to the terminal background. Used by ChatUI's
-// user_message_block.go.
-func userMessageView(text string, width int, selected bool) string {
-	width = max(1, width)
-	background := messageSurfaceBackground
-	barStyle := inactiveBorderStyle
-	if selected {
-		background = selectedMessageBackground
-		barStyle = activeBorderStyle
-	}
-	interior := max(1, width-1)
-	label := userStyle.Background(background).Render("You: ")
-	body := lipgloss.NewStyle().Background(background).Render(sanitizeTerminalText(text))
-	card := lipgloss.NewStyle().
-		Background(background).
-		Padding(1, 1).
-		Width(interior).
-		Render(label + body)
-	lines := strings.Split(card, "\n")
-	for i, line := range lines {
-		lines[i] = barStyle.Render("┃") + line
-	}
-	return strings.Join(lines, "\n")
+// userMessageView renders a user prompt's CONTENT only: plain sanitized
+// text, no border, no background of its own. It used to draw an
+// "OpenCode-style" card here directly (a left accent bar, its own
+// background, padding) — that framing is now theme.Card's job, applied
+// automatically by transcript around every Block's View (userMessageBlock
+// reports theme.RoleUser via the Roled capability, so it gets the exact
+// same card a plain, non-Block user message does) — drawing it AGAIN here
+// was a double frame (strongo/aichat#chat-shared-look).
+func userMessageView(text string, _ int, _ bool) string {
+	return sanitizeTerminalText(text)
 }
 
 // conciseError renders an error for the transcript: the message alone,

@@ -5,34 +5,41 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/charmbracelet/x/ansi"
+	"github.com/strongo/aichat/tui/theme"
 )
 
-// TestUserMessageCardHasBarPaddingAndSelectionState is ported unchanged
-// from ui_test.go: it exercises userMessageView (ui_shared.go) directly,
-// which never needed a UI/ChatUI type — user_message_block.go's own View
-// just calls it.
-func TestUserMessageCardHasBarPaddingAndSelectionState(t *testing.T) {
-	normal := userMessageView("hello", 40, false)
-	selected := userMessageView("hello", 40, true)
-	lines := strings.Split(normal, "\n")
-	if len(lines) != 3 {
-		t.Fatalf("user message card has %d rows, want 3 (top pad, text, bottom pad)", len(lines))
+// TestUserMessageViewReturnsPlainSanitizedText covers userMessageView
+// (ui_shared.go): its own left-accent-bar/background card rendering moved
+// to the shared theme.Card, which transcript now wraps EVERY Block in
+// automatically (userMessageBlock reports theme.RoleUser via the Roled
+// capability -- see TestUserMessageBlockReportsRoleUser) --
+// strongo/aichat#chat-shared-look. userMessageView's own job shrank to
+// exactly what theme.Card doesn't already do: sanitizing the text. Framing
+// it (padding, background, the focus/selection accent) is theme.Card's
+// job now, exercised by strongo/aichat's own theme tests, not here.
+func TestUserMessageViewReturnsPlainSanitizedText(t *testing.T) {
+	if got := userMessageView("hello", 40, false); got != "hello" {
+		t.Fatalf("userMessageView() = %q, want the sanitized text unchanged", got)
 	}
-	for _, line := range lines {
-		if got := ansi.StringWidth(line); got != 40 {
-			t.Fatalf("user message line rendered at %d cells, want 40: %q", got, line)
-		}
-		if !strings.HasPrefix(ansi.Strip(line), "┃") {
-			t.Fatalf("user message line lacks the left accent bar: %q", ansi.Strip(line))
-		}
+	if got := userMessageView("hello", 40, true); got != "hello" {
+		t.Fatalf("userMessageView() = %q, want the same regardless of selected", got)
 	}
-	if !strings.Contains(ansi.Strip(normal), "You: hello") {
-		t.Fatalf("user message card missing its label:\n%s", ansi.Strip(normal))
+	// sanitizeTerminalText is exercised elsewhere; this only confirms
+	// userMessageView actually routes through it (e.g. strips control
+	// characters) rather than returning the raw string untouched.
+	if got := userMessageView("a\x00b", 40, false); got == "a\x00b" {
+		t.Fatalf("userMessageView() did not sanitize control characters: %q", got)
 	}
-	if normal == selected {
-		t.Fatal("selected user message is indistinguishable from an unselected one")
+}
+
+// TestUserMessageBlockReportsRoleUser covers userMessageBlock.Role()
+// (transcript.Roled): it must report theme.RoleUser so the shared card
+// transcript wraps it in gets the same accent a plain, non-Block user
+// message does.
+func TestUserMessageBlockReportsRoleUser(t *testing.T) {
+	b := newUserMessageBlock("hi")
+	if got := b.Role(); got != theme.RoleUser {
+		t.Fatalf("userMessageBlock.Role() = %q, want %q", got, theme.RoleUser)
 	}
 }
 

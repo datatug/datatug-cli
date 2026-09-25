@@ -27,8 +27,37 @@ func newTestChatUI(t *testing.T, agent ContextualConversation, turns ...Turn) (*
 	if err != nil {
 		t.Fatal(err)
 	}
-	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	// Height 60, not 30: every transcript entry is now a bordered/padded
+	// theme.Card (strongo/aichat#chat-shared-look), which takes noticeably
+	// more vertical space per message than the old one-line-per-message
+	// rendering -- a fixture terminal tall enough to show a full exchange
+	// (including a long entry like /help's chatHelpText) without needing to
+	// scroll keeps these tests about command/content behaviour, not
+	// viewport scroll position.
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 60})
 	return u, sessions
+}
+
+// flattenView strips ANSI styling and theme.Card's own box-drawing border
+// characters (│╭╮╰╯┃┏┓┗┛━ -- every rune tui/theme's rounded/thick borders
+// draw) from a rendered View, then collapses all whitespace (including
+// wrap newlines and the gap a border char leaves behind) to single spaces.
+// A checked phrase can otherwise straddle a card's word-wrap boundary, or
+// have a border character land between two words that were adjacent before
+// cards existed (strongo/aichat#chat-shared-look) -- this is the
+// robust-to-wrapping content check every such test below uses instead of a
+// literal substring match on the raw rendered content.
+func flattenView(content string) string {
+	plain := ansi.Strip(content)
+	plain = strings.Map(func(r rune) rune {
+		switch r {
+		case '│', '╭', '╮', '╰', '╯', '┃', '┏', '┓', '┗', '┛', '━':
+			return ' '
+		default:
+			return r
+		}
+	}, plain)
+	return strings.Join(strings.Fields(plain), " ")
 }
 
 // drainCmd runs cmd (and, since StartStream batches a stream.Start +
@@ -184,7 +213,7 @@ func TestChatUITopBarAndStatusBarShowProjectAndSession(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = ProjectCatalog{Title: "Demo"}
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	view := u.shell.View().Content
+	view := flattenView(u.shell.View().Content)
 	if !strings.Contains(view, "Demo") {
 		t.Fatalf("expected project title in top bar:\n%s", view)
 	}
@@ -316,7 +345,7 @@ func TestChatUIShowsAppliedLimitationsIncludingEmptyResults(t *testing.T) {
 	// Word-wrapped rendering can split a checked phrase across a line
 	// boundary; collapse runs of whitespace (including the wrap newline)
 	// to a single space before matching, like the /help check below.
-	view := strings.Join(strings.Fields(ansi.Strip(u.shell.View().Content)), " ")
+	view := flattenView(u.shell.View().Content)
 	for _, want := range []string{"No rows returned.", `policy "support"`, "rows filtered by policy", "hidden columns: Email"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
@@ -332,7 +361,7 @@ func TestChatUIShowsAppliedLimitationsIncludingEmptyResults(t *testing.T) {
 func TestChatUISlashHelpDocumentsGridControls(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/help"))
-	view := strings.Join(strings.Fields(ansi.Strip(u.shell.View().Content)), " ")
+	view := flattenView(u.shell.View().Content)
 	for _, want := range []string{
 		"1 Table", "2 Charts", "3 Current row", "Tab panes", "Shift+↑↓ select",
 		"j JOINs", "Space row", "c cell", "r range", "a attach", "d dock", "b bookmark", "s sort", "Enter details", "Esc composer",
@@ -349,7 +378,7 @@ func TestChatUISlashHelpDocumentsGridControls(t *testing.T) {
 // wording).
 func TestChatUIShowsShiftArrowNavigationHint(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
-	if view := u.shell.View().Content; !strings.Contains(view, "Shift+↑↓ navigate") {
+	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "Shift+↑↓ navigate") {
 		t.Fatalf("status line missing Shift+Arrow navigation hint:\n%s", view)
 	}
 }
@@ -407,7 +436,13 @@ func TestChatHelpTextRestoresKeyParity(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	cmd := u.Submit("/help")
 	drainCmd(t, u, cmd)
-	view := u.shell.View().Content
+	// Cards word-wrap inside a narrower inner width than the old unboxed
+	// rendering (theme.Card reserves a border+padding column on each side,
+	// strongo/aichat#chat-shared-look), which can now split a checked
+	// phrase across a wrap boundary; collapse whitespace (including the
+	// wrap newline) to a single space before matching, like the other
+	// chatHelpText assertions below already do.
+	view := flattenView(u.shell.View().Content)
 	for _, want := range []string{
 		"F2 mouse select/wheel", "F5 open web chat", "Alt+S table style", "Ctrl+D detach last attachment",
 		"Ctrl+R refresh", "1 Rendered", "2 Raw", "3 Headers",
@@ -444,5 +479,31 @@ func TestChatUIStatusBarWrapsOnNarrowWidth(t *testing.T) {
 		if !strings.Contains(status, want) {
 			t.Errorf("wrapped status bar dropped segment %q:\n%s", want, status)
 		}
+	}
+}
+
+// TestAutoHintRejectsEmptyKey covers the bug r12's narrower HintsInset()
+// packing exposed (caught by TestChatUIStatusBarWrapsOnNarrowWidth at
+// width 30 with an empty session/no catalog title): a Sprintf'd segment
+// whose FIRST interpolated value happens to be "" starts with a stray
+// leading space (e.g. " │ New chat │ rs:0 │ context:0"), and
+// strings.Cut(s, " ") on that string returns an EMPTY key with ok=true --
+// autoHint must not misread that as a real key/label Hint pair (which
+// theme.RenderHints then treats as one non-splittable atomic token,
+// unable to word-wrap even when it doesn't fit): an empty key means it was
+// never a Hint, just a plain segment.
+func TestAutoHintRejectsEmptyKey(t *testing.T) {
+	if _, ok := autoHint(" │ New chat │ rs:0 │ context:0"); ok {
+		t.Fatal("autoHint(\" │ New chat │ rs:0 │ context:0\") = ok, want false (empty key)")
+	}
+	if _, ok := autoHint("no spaces"); !ok {
+		t.Fatal("autoHint(\"no spaces\") = !ok, want a valid Key/Label split")
+	}
+	h, ok := autoHint("F2 select")
+	if !ok || h.Key != "F2" || h.Label != "select" {
+		t.Fatalf("autoHint(\"F2 select\") = %+v, %v, want {F2 select}, true", h, ok)
+	}
+	if _, ok := autoHint("no-space-at-all"); ok {
+		t.Fatal("autoHint(\"no-space-at-all\") = ok, want false (no space to cut on)")
 	}
 }

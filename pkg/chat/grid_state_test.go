@@ -75,12 +75,15 @@ func TestFocusedRecordSetTitleAndFooterAreReadable(t *testing.T) {
 	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "", "Invoices", 80)
 	g.SetFocused(true)
 	lines := strings.Split(g.View(80, g.Focused()), "\n")
-	if !strings.Contains(lines[0], activeTitleStyle.Render("Invoices")) {
+	if !strings.Contains(lines[0], activeTitleStyle().Render("Invoices")) {
 		t.Fatalf("focused title has no active color: %q", lines[0])
 	}
 	footer := lines[len(lines)-1]
-	if !strings.Contains(footer, "38;5;252") || !strings.Contains(footer, "Rows 1–1") {
-		t.Fatalf("footer label is not bright enough: %q", footer)
+	if !strings.Contains(footer, "Rows 1–1") {
+		t.Fatalf("footer label missing: %q", footer)
+	}
+	if ansi.Strip(footer) == footer {
+		t.Fatalf("footer label is not styled at all: %q", footer)
 	}
 }
 
@@ -114,31 +117,50 @@ func TestGridWithoutScrollingUsesPlainRightBorder(t *testing.T) {
 	}
 }
 
+// escapeBefore returns the ANSI escape sequence immediately preceding the
+// first occurrence of marker in s (e.g. the colour styling a "┃" divider
+// glyph was rendered with), or "" if marker isn't found or nothing
+// precedes it.
+func escapeBefore(s, marker string) string {
+	idx := strings.Index(s, marker)
+	if idx < 0 {
+		return ""
+	}
+	return lastAnsiEscape(s[:idx])
+}
+
+// TestTableStylePresetsChangeHeaderAndDividerColors covers grid.Style's
+// three built-in presets (Lines/Soft/Minimal): each must still be
+// texturally distinguishable from the other two (a different divider
+// colour) and every header must still render bold — but no longer against
+// hard-coded ANSI-256 literals ("241"/"235"/"232"), since every preset's
+// colours now come from tui/theme's truecolor palette
+// (strongo/aichat#chat-shared-look) instead of a colour local to this
+// preset.
 func TestTableStylePresetsChangeHeaderAndDividerColors(t *testing.T) {
 	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1, "Name": "Alex"}}}}), "", "Rows", 60)
 	if g.Style().Name != grid.StyleLines.Name {
 		t.Fatal("new table did not default to Lines")
 	}
-	for _, tc := range []struct {
-		style grid.Style
-		color string
-	}{
-		{grid.StyleLines, "241"},
-		{grid.StyleSoft, "235"},
-		{grid.StyleMinimal, "232"},
-	} {
-		g.SetStyle(tc.style)
+	seenDividerColors := map[string]string{}
+	for _, style := range []grid.Style{grid.StyleLines, grid.StyleSoft, grid.StyleMinimal} {
+		g.SetStyle(style)
 		view := g.TableView()
-		if !strings.Contains(view, "38;5;"+tc.color+"m┃") {
-			t.Fatalf("%s column divider lacks preset color: %q", tc.style.Name, view)
+		divider := escapeBefore(view, "┃")
+		if divider == "" {
+			t.Fatalf("%s column divider not found or unstyled: %q", style.Name, view)
 		}
+		if other, ok := seenDividerColors[divider]; ok {
+			t.Fatalf("%s column divider colour is identical to %s's: %q", style.Name, other, divider)
+		}
+		seenDividerColors[divider] = style.Name
 		header := strings.Split(view, "\n")[0]
 		if !strings.Contains(header, "\x1b[1;") {
-			t.Fatalf("%s header is not bold: %q", tc.style.Name, header)
+			t.Fatalf("%s header is not bold: %q", style.Name, header)
 		}
 		card := strings.Split(g.view(), "\n")
 		if len(card) != 4 || strings.Contains(ansi.Strip(card[2]), "━") {
-			t.Fatalf("%s card still has a header/data border: %q", tc.style.Name, card)
+			t.Fatalf("%s card still has a header/data border: %q", style.Name, card)
 		}
 	}
 }
@@ -462,23 +484,25 @@ func TestGridBorderChangesWithFocus(t *testing.T) {
 	g := newGridState(NewGridModel(secureread.Result{
 		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
 	}), "", "Rows", contentWidth(80))
-	inactive := strings.Split(g.view(), "\n")[0]
+	inactiveView := g.view()
+	inactive := strings.Split(inactiveView, "\n")[0]
 	g.SetFocused(true)
 	active := strings.Split(g.view(), "\n")[0]
 	activeShape := strings.ReplaceAll(strings.ReplaceAll(ansi.Strip(active), "●", "○"), "○", "○")
 	if activeShape != ansi.Strip(inactive) || active == inactive {
 		t.Fatalf("grid border did not change with focus:\ninactive %q\nactive %q", inactive, active)
 	}
+	// The right-edge scrollbar/border uses the shared tui/theme.FocusColor()
+	// while focused (theme.BorderColor(true)) -- datatug no longer keeps
+	// its own copy of that colour literal to compare Render() output
+	// against (m12), and theme's palette is truecolor, not the old
+	// hard-coded ANSI-256 index this test used to assert; the shared
+	// border/top/bottom colour change itself is already covered above
+	// (active != inactive, same shape) -- this only confirms the glyph
+	// itself is still present on the right edge.
 	activeLines := strings.Split(g.view(), "\n")
-	// The right-edge scrollbar/border uses the shared grid's own
-	// selectedOutlineStyle (color 250) when focused — datatug no longer
-	// keeps its own copy of that style to compare Render() output against
-	// (m12); check for its ANSI color code directly instead.
-	if !strings.Contains(activeLines[1], activeBorderStyle.Render("│")) || !strings.HasSuffix(ansi.Strip(activeLines[1]), "│") || !strings.Contains(activeLines[1], "38;5;250m") {
-		t.Fatalf("focused grid side colors are wrong: %q", activeLines[1])
-	}
-	if !strings.Contains(activeLines[0], "38;5;250m╭") || !strings.Contains(activeLines[len(activeLines)-1], "38;5;250m╰") || strings.Contains(activeLines[len(activeLines)-1], "38;5;51") {
-		t.Fatalf("focused grid top/bottom border colors differ: %q / %q", activeLines[0], activeLines[len(activeLines)-1])
+	if !strings.HasSuffix(ansi.Strip(activeLines[1]), "│") {
+		t.Fatalf("focused grid right border glyph missing: %q", activeLines[1])
 	}
 }
 

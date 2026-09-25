@@ -13,13 +13,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/pkg/browser"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/tui/chatshell"
 	"github.com/strongo/aichat/tui/focus"
 	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/aichat/tui/mdrender"
+	"github.com/strongo/aichat/tui/theme"
 	"github.com/strongo/aichat/tui/transcript"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -174,10 +175,10 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		chatshell.WithTitle("DataTug"),
 		chatshell.WithCommands(chatCommands),
 		chatshell.WithGlobalKeys(u.globalKeys),
-		chatshell.WithTopBar(u.topBar),
-		chatshell.WithStatusBar(u.statusBar),
+		chatshell.WithTopBarProvider(u.topBarInfo),
+		chatshell.WithHintsProvider(u.statusHints),
 		chatshell.WithSidePanel(u.workspace),
-		chatshell.WithMarkdownRenderer(renderMarkdown),
+		chatshell.WithMarkdownRenderer(mdrender.Render),
 		// Mouse reporting on by default (ui.go's mouseCapture started true);
 		// F2 (globalKeys, chatui_pickers.go) toggles it via SetMouseEnabled.
 		chatshell.WithMouse(chatshell.MouseCellMotion),
@@ -428,11 +429,20 @@ func (b finalTurnTextBlock) View(width int, _ bool) string {
 	if b.text == "" {
 		return ""
 	}
-	return lipgloss.NewStyle().Width(max(1, width)).Render(string(transcript.RoleAssistant) + ": " + b.text)
+	return lipgloss.NewStyle().Width(max(1, width)).Render(b.text)
 }
 
 func (b finalTurnTextBlock) Update(tea.Msg) (transcript.Block, tea.Cmd) { return b, nil }
 func (finalTurnTextBlock) Focusable() bool                              { return false }
+
+// Role satisfies transcript.Roled so the shared theme.Card wraps this
+// block with the usual "Assistant" header instead of none at all --
+// founder/coordinator (r10 review): the literal "assistant: " text prefix
+// this block used to render, with no card header, was a real bug from the
+// shared-theme cutover (every other block gets its header from
+// theme.HeaderFor via Roled; this one never did, so it fell back to
+// inlining the role name as plain text instead).
+func (finalTurnTextBlock) Role() theme.Role { return theme.RoleAssistant }
 
 // OnStreamEvent satisfies chatshell.StreamObserver; ChatUI has nothing to
 // add beyond chatshell's own built-in text-delta rendering.
@@ -696,34 +706,14 @@ func (u *ChatUI) loadSession(session ChatSession) {
 	}
 }
 
-// markdownTermRenderer is the narrow seam renderMarkdown needs from
-// *glamour.TermRenderer — just the one method it calls. newMarkdownRenderer
-// wraps glamour.NewTermRenderer behind it so tests can fault-inject both the
-// constructor and Render failure branches with a fake, without a real
-// terminal-style renderer (coverage lane A3, datatug-cli#289).
-type markdownTermRenderer interface {
-	Render(string) (string, error)
-}
-
-var newMarkdownRenderer = func(options ...glamour.TermRendererOption) (markdownTermRenderer, error) {
-	return glamour.NewTermRenderer(options...)
-}
-
-// renderMarkdown satisfies transcript.MarkdownRenderer — the same
-// glamour-backed rendering markdown_ui.go's httpDocumentView used for a
-// markdown HTTP response, now shared by every markdown transcript entry
-// (checklist item #37).
-func renderMarkdown(text string, width int) string {
-	renderer, err := newMarkdownRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(max(20, width-4)))
-	if err != nil {
-		return text
-	}
-	rendered, err := renderer.Render(text)
-	if err != nil {
-		return text
-	}
-	return strings.TrimSpace(rendered)
-}
+// renderMarkdown/newMarkdownRenderer moved to
+// github.com/strongo/aichat/tui/mdrender (mdrender.Render/
+// mdrender.NewTermRenderer): every aichat product now shares one
+// glamour-backed markdown renderer instead of each carrying its own seam
+// (strongo/aichat#chat-shared-look). NewChatUI wires it directly via
+// chatshell.WithMarkdownRenderer(mdrender.Render); http_document_block.go
+// calls mdrender.Render the same way markdown_ui.go's httpDocumentView
+// used to call renderMarkdown.
 
 // refreshBadge reports whether current differs from previous, matching
 // ui.go's inline version-badge comparisons for a refreshed RecordSet.
@@ -1047,11 +1037,19 @@ func (u *ChatUI) applyWorkspaceAction(action WorkspaceAction) error {
 // read the SidePanel's own state back out generically (chatshell.SidePanel
 // exposes Title()/View()/Update(), not arbitrary product state) — tracked
 // as a follow-up alongside the richer statusBar below.
-func (u *ChatUI) topBar(width int) string {
+// topBarInfo is chatshell.TopBarProvider: CONTENT only (title, context,
+// menu items) -- chatshell renders it through the shared theme.TopBar
+// chrome (strongo/aichat#chat-shared-look), so topBarInfo never touches
+// colour itself.
+func (u *ChatUI) topBarInfo(int) (title, context string, items []theme.MenuItem) {
 	project := nonempty(u.catalog.Title, "Project")
 	session := nonempty(u.snapshot.Title, "New chat")
-	label := fmt.Sprintf("DataTug │ Project: %s [F3] │ Session: %s [F4] │ Workspace: [F6] │ Help: /help", sanitizeTerminalText(project), sanitizeTerminalText(session))
-	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")).Background(lipgloss.Color("236")).Width(width).Render(ansi.Truncate(label, width, "…"))
+	return "DataTug", "", []theme.MenuItem{
+		{Label: "Project: " + sanitizeTerminalText(project) + " [F3]"},
+		{Label: "Session: " + sanitizeTerminalText(session) + " [F4]"},
+		{Label: "Workspace: [F6]"},
+		{Label: "Help: /help"},
+	}
 }
 
 // statusBar is ui.go's statusLines, ported: the grid-focused hint set
@@ -1075,7 +1073,7 @@ func (u *ChatUI) topBar(width int) string {
 // (chatui_sidepanel.go's updateKey), the workspace pane switches tabs with
 // Tab/Shift+Tab and folds/unfolds the Project explorer tree with ←→/h/l --
 // matching ui.go's own wording exactly, no divergence.
-func (u *ChatUI) statusBar(width int) string {
+func (u *ChatUI) statusHintsRaw(width int) []string {
 	// ui.go's mouseHint: "F2 select" while mouse reporting is on (naming
 	// what pressing F2 gets you -- the terminal's own click-drag text
 	// selection/copy); "F2 wheel" while it is off, naming what a second F2
@@ -1172,51 +1170,62 @@ func (u *ChatUI) statusBar(width int) string {
 	// true; gate this branch on !Busy() too so a busy composer keeps its
 	// "Thinking…" hint instead).
 	if width < 100 && composerChipHints && !u.shell.Busy() {
-		compact := []string{"FOCUS Chat", "Tab chips", "Esc clear", "Shift+Esc restore", "Enter send"}
-		lines := wrapStatusSegments(compact, width)
-		for i, line := range lines {
-			lines[i] = padAnsiLine(line, width)
-		}
-		return strings.Join(lines, "\n")
+		return []string{"FOCUS Chat", "Tab chips", "Esc clear", "Shift+Esc restore", "Enter send"}
 	}
-	// M5 (r1 adversarial review of #289): ui.go's wrapStatusSegments wrapped
-	// onto a second (or further) status line instead of silently truncating
-	// on a narrow terminal, which padAnsiLine(strings.Join(...), width)
-	// alone would do (ansi.Truncate cuts the joined line, and everything
-	// past the cut is simply gone). Ported, with the "·" separator
-	// statusBar already used rather than ui.go's "•", and without ui.go's
-	// three width>=100 "drop these segments if still multi-line" passes --
-	// this only wraps for what statusBar already computed above.
-	lines := wrapStatusSegments(segments, width)
-	for i, line := range lines {
-		lines[i] = padAnsiLine(line, width)
-	}
-	return strings.Join(lines, "\n")
+	return segments
 }
 
-// wrapStatusSegments packs segments onto as few lines as fit within
-// maxWidth, breaking to a new line only when the next segment would not
-// fit — ui.go's wrapStatusSegments, ported verbatim (statusBar's own " · "
-// separator in place of ui.go's " • ").
-func wrapStatusSegments(segments []string, maxWidth int) []string {
-	const separator = " · "
-	lines := make([]string, 0, len(segments))
-	current := ""
-	for _, segment := range segments {
-		segment = ansi.Truncate(segment, maxWidth, "…")
-		candidate := segment
-		if current != "" {
-			candidate = current + separator + segment
-		}
-		if current != "" && ansi.StringWidth(candidate) > maxWidth {
-			lines = append(lines, current)
-			current = segment
+// autoHint splits a plain "<key> <label>" segment (e.g. "Shift+↑↓
+// navigate", "F3 projects") into a theme.Hint on its first space, so
+// statusHints below never has to classify each of statusHintsRaw's many
+// segments by hand. A segment already carrying its own ANSI styling (e.g.
+// the webLinkVisible hyperlink line) is deliberately left alone (ok:
+// false) -- splitting a styled string by a literal space risks separating
+// an opening escape sequence from its closing one, corrupting it; such a
+// segment is kept as an opaque trailing segment instead of a Hint.
+func autoHint(s string) (theme.Hint, bool) {
+	if ansi.Strip(s) != s {
+		return theme.Hint{}, false
+	}
+	key, label, ok := strings.Cut(s, " ")
+	// An EMPTY key (s itself starts with a space, e.g. a Sprintf'd segment
+	// whose first interpolated value -- catalog.Title, before a session
+	// exists -- happened to be "") is never a real key/label pair, just a
+	// plain segment that starts with a stray leading space; misreading it
+	// as a Hint made theme.RenderHints treat the WHOLE thing as one
+	// non-splittable atomic token (a real hint pair must never be cut
+	// apart) instead of a plain, word-wrappable segment -- caught by r12's
+	// narrower HintsInset() packing width exposing a line that used to
+	// just barely fit unwrapped.
+	if !ok || key == "" {
+		return theme.Hint{}, false
+	}
+	return theme.Hint{Key: key, Label: label}, true
+}
+
+// statusHints is chatshell.HintsProvider: CONTENT only (a Hint list plus
+// trailing segments) -- chatshell renders it through the shared
+// theme.RenderHints chrome (strongo/aichat#chat-shared-look, which also
+// now owns the narrow-terminal line-wrapping statusHintsRaw's compact
+// branch used to hand-wrap itself), so statusHints never touches colour or
+// wrapping.
+func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) {
+	for _, s := range u.statusHintsRaw(width) {
+		if h, ok := autoHint(s); ok {
+			hints = append(hints, h)
 			continue
 		}
-		current = candidate
+		segments = append(segments, s)
 	}
-	if current != "" {
-		lines = append(lines, current)
-	}
-	return lines
+	return hints, segments
+}
+
+// statusBar is a test convenience: the same content statusHints supplies
+// through chatshell.WithHintsProvider, rendered through the shared
+// theme.RenderHints chrome and ANSI-stripped, so plain-text assertions
+// (`strings.Contains(status, "...")`) keep working without threading
+// ansi.Strip through every call site.
+func (u *ChatUI) statusBar(width int) string {
+	hints, segments := u.statusHints(width)
+	return ansi.Strip(theme.RenderHints(width, hints, segments...))
 }

@@ -35,7 +35,7 @@ func newChipTestChatUI(t *testing.T) (*ChatUI, *SessionChat) {
 	return u, chat
 }
 
-// chipCloseCoordinates scans the rendered composer for "Customer ×]" and
+// chipCloseCoordinates scans the rendered composer for "Customer × " and
 // returns the tea.MouseClickMsg X/Y a click on the × glyph itself would
 // carry -- ansi.Strip'd column/row within the rendered content, mirroring
 // aichat's own TestMouseClickFindsCloseGlyphInRenderedView (scanning the
@@ -45,7 +45,7 @@ func chipCloseCoordinates(t *testing.T, content string) (x, y int) {
 	t.Helper()
 	for row, line := range strings.Split(content, "\n") {
 		plain := ansi.Strip(line)
-		if idx := runeIndex(plain, "×]"); idx >= 0 {
+		if idx := runeIndex(plain, "×"); idx >= 0 {
 			return idx, row
 		}
 	}
@@ -156,32 +156,19 @@ func TestChatUIComposerAttachmentChipsCanBeFocusedClearedAndRestored(t *testing.
 	}
 }
 
-// TestChatUIComposerShrinksAsWrappedAttachmentsAreRemoved ports
-// origin/main's TestComposerShrinksAsWrappedAttachmentsAreRemoved: several
-// attachments that wrap onto more than one chip row make the composer
-// taller, and detaching them (down to one) makes it shrink back --
-// chatshell's own chipsHeight/historyHeight accounting (M9 in aichat
-// v0.2.0's own changelog), exercised here only through ChatUI's real
-// attach/detach path.
-//
-// historyHeight() itself is unexported on chatshell.Model (package
-// chatshell, not this one), so it cannot be called directly the way
-// aichat's own tui/chatshell/chip_test.go does. Its growth is still
-// observable indirectly, though: View() always renders the transcript
-// viewport at exactly historyHeight() lines (blank-padded when history is
-// shorter, scrolled when it's taller), immediately followed by the first
-// chip row -- so the RENDERED LINE INDEX the first "×]" chip glyph lands on
-// is topBarHeight()+historyHeight() (no slash-command menu is open here),
-// and shrinking the chip area by N rows must move that index down by
-// exactly N lines. firstChipRowLine below measures that index; the +1/+2
-// growth this asserts mirrors origin/main's own initialHeight/
-// initialHeight+1/initialHeight+2 assertions (m2, r5 fix round on #289).
-// The row-count (chipRowsWithMany/chipRowsWithOne) and second-row-specific
-// × hit-test below remain, and are still the real behavior this test
-// protects: chip rows actually shrink as attachments are removed, and a
-// click on a wrapped (non-first) row's × glyph removes the CORRECT chip,
-// not an arbitrary one.
-func TestChatUIComposerShrinksAsWrappedAttachmentsAreRemoved(t *testing.T) {
+// TestChatUIComposerNeverWrapsChipsOverflowsInsteadWhenTheyDontFit
+// supersedes origin/main's TestComposerShrinksAsWrappedAttachmentsAreRemoved
+// (ported, then wrap-specific, under the OLD multi-row chip layout):
+// aichat's r11 redesign replaced multi-row chip wrapping with a SINGLE row
+// plus a trailing "+N" overflow pill (founder, verbatim: "keep one row:
+// show as many chips as fit plus a '+N' chip ... never overflow or clip
+// mid-chip") -- so several long-labelled attachments that would have
+// wrapped onto more than one row before now render on exactly ONE chip
+// row, with whichever chips don't fit folded into "+N" instead. Detaching
+// attachments down to a handful (all now visible, no more overflow) makes
+// the composer's chip area disappear back to zero rows once every chip is
+// gone, exercised here only through ChatUI's real attach/detach path.
+func TestChatUIComposerNeverWrapsChipsOverflowsInsteadWhenTheyDontFit(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	catalog := ProjectCatalog{ID: "chinook", Title: "Chinook"}
@@ -206,49 +193,32 @@ func TestChatUIComposerShrinksAsWrappedAttachmentsAreRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	u.shell.Update(tea.WindowSizeMsg{Width: 60, Height: 30})
-	wrapped := strings.Count(ansi.Strip(u.shell.View().Content), "VeryLongTableName")
-	if wrapped != 8 {
-		t.Fatalf("expected all 8 attachment chips visible, found %d", wrapped)
+
+	content := ansi.Strip(u.shell.View().Content)
+	if got := countChipRows(u.shell.View().Content); got != 1 {
+		t.Fatalf("chip row count with 8 long-labelled attachments at width 60 = %d, want exactly 1 (chips never wrap)", got)
 	}
-	chipRowsWithMany := countChipRows(u.shell.View().Content)
-	if chipRowsWithMany < 2 {
-		t.Fatalf("expected 8 long-labelled chips at width 60 to wrap onto more than one row, got %d row(s)", chipRowsWithMany)
+	if !strings.Contains(content, "+") {
+		t.Fatalf("expected an overflow \"+N\" pill once 8 long labels don't all fit on one row:\n%s", content)
 	}
-	firstChipLineWithMany, ok := firstChipRowLine(u.shell.View().Content)
+	if visible := strings.Count(content, "VeryLongTableName"); visible >= 8 {
+		t.Fatalf("expected fewer than 8 full chip labels visible at width 60 (the rest folded into \"+N\"), got %d:\n%s", visible, content)
+	}
+	for _, line := range strings.Split(content, "\n") {
+		if w := ansi.StringWidth(line); w > 60 {
+			t.Fatalf("chip row overflowed the terminal width (60): got %d: %q", w, line)
+		}
+	}
+	firstLineWithMany, ok := firstChipRowLine(u.shell.View().Content)
 	if !ok {
 		t.Fatal("expected a chip row line to measure historyHeight's boundary against")
 	}
 
-	// A mouse click on a chip's × glyph that lands on the SECOND (wrapped)
-	// row -- not just any row -- must remove that exact chip, proving the
-	// close-glyph hit test accounts for the row a wrapped chip actually
-	// rendered on, not just its position within the flat chip list.
-	lastLabel := "VeryLongTableName" + string(rune('A'+len(catalog.Objects)-1))
-	secondRowX, secondRowY, ok := lastChipRowCloseCoordinates(t, u.shell.View().Content)
-	if !ok {
-		t.Fatalf("expected a second chip row to click on:\n%s", ansi.Strip(u.shell.View().Content))
-	}
-	u.shell.Update(tea.MouseClickMsg{X: secondRowX, Y: secondRowY, Button: tea.MouseLeft})
-	if strings.Contains(ansi.Strip(u.shell.View().Content), lastLabel) {
-		t.Fatalf("clicking the second-row chip's × did not remove that chip (%s):\n%s", lastLabel, ansi.Strip(u.shell.View().Content))
-	}
-	// 7 chips at 2-per-row still fill the same 4 rows as 8 did (the last row
-	// now holds a single chip instead of a pair) -- row count only drops
-	// once there's no longer enough chips left to fill it, which the bulk
-	// detach below (down to 1 chip, 1 row) still covers.
-	if got := countChipRows(u.shell.View().Content); got != chipRowsWithMany {
-		t.Fatalf("chip rows after removing one of an even pair = %d, want unchanged %d", got, chipRowsWithMany)
-	}
-	// Restore it before the bulk detach below so every remaining test step
-	// (which detaches catalog.Objects[1:] by Reference, including the last
-	// one) still runs against ChatUI's real attach/detach path rather than
-	// the chip-removal undo snapshot.
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEsc, Mod: tea.ModShift})
-	if !strings.Contains(ansi.Strip(u.shell.View().Content), lastLabel) {
-		t.Fatalf("Shift+Esc did not restore the second-row chip removed above:\n%s", ansi.Strip(u.shell.View().Content))
-	}
-
-	for _, obj := range catalog.Objects[1:] {
+	// Detach every attachment -- the chip row (and the "+N" pill with it)
+	// disappears entirely, and historyHeight grows back by exactly the one
+	// row the chip area used to occupy (chipsHeight is always 0 or 1 now,
+	// never more -- see aichat's own chip.go chipsHeight doc).
+	for _, obj := range catalog.Objects {
 		if _, err := chat.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "detach", Reference: obj.Reference}); err != nil {
 			t.Fatal(err)
 		}
@@ -258,63 +228,21 @@ func TestChatUIComposerShrinksAsWrappedAttachmentsAreRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	u.syncChips()
-	chipRowsWithOne := countChipRows(u.shell.View().Content)
-	if chipRowsWithOne != 1 {
-		t.Fatalf("expected exactly 1 chip row left with 1 attachment, got %d", chipRowsWithOne)
+	if got := countChipRows(u.shell.View().Content); got != 0 {
+		t.Fatalf("chip row count after detaching every attachment = %d, want 0", got)
 	}
-	if chipRowsWithOne >= chipRowsWithMany {
-		t.Fatalf("composer's chip area did not shrink as chips were removed: many=%d one=%d", chipRowsWithMany, chipRowsWithOne)
+	if _, ok := firstChipRowLine(u.shell.View().Content); ok {
+		t.Fatal("expected no chip row line left once every attachment is detached")
 	}
-	// historyHeight grows by exactly the number of chip rows that were
-	// freed up -- origin/main's own +1/+2 assertions, ported via the
-	// externally observable first-chip-row-line proxy described above.
-	firstChipLineWithOne, ok := firstChipRowLine(u.shell.View().Content)
-	if !ok {
-		t.Fatal("expected a chip row line left with 1 attachment")
-	}
-	wantGrowth := chipRowsWithMany - chipRowsWithOne
-	if gotGrowth := firstChipLineWithOne - firstChipLineWithMany; gotGrowth != wantGrowth {
-		t.Fatalf("historyHeight growth (first-chip-row-line delta) = %d, want %d (chip rows shrank from %d to %d)", gotGrowth, wantGrowth, chipRowsWithMany, chipRowsWithOne)
-	}
-}
-
-// lastChipRowCloseCoordinates returns the tea.MouseClickMsg X/Y of the
-// close glyph belonging to the RIGHTMOST chip on the LAST rendered chip row
-// (the second, wrapped row when there are exactly two) -- the coordinate a
-// click on that row's last-added chip would carry. ok is false when fewer
-// than two chip rows are rendered (no distinct "second row" exists to
-// click).
-func lastChipRowCloseCoordinates(t *testing.T, content string) (x, y int, ok bool) {
-	t.Helper()
-	lastRow, rowCount := -1, 0
-	for row, line := range strings.Split(content, "\n") {
-		runes := []rune(ansi.Strip(line))
-		last := -1
-		for i := 0; i < len(runes)-1; i++ {
-			if runes[i] == '×' && runes[i+1] == ']' {
-				last = i
-			}
-		}
-		if last < 0 {
-			continue
-		}
-		rowCount++
-		if row > lastRow {
-			lastRow, x = row, last
-		}
-	}
-	if rowCount < 2 {
-		return 0, 0, false
-	}
-	return x, lastRow, true
+	_ = firstLineWithMany // the chip row's own line index while it existed; no delta assertion needed now that chipsHeight is always exactly 0 or 1.
 }
 
 // countChipRows counts the rendered lines carrying at least one chip's
-// close glyph ("×]") -- one per wrapped chip row.
+// close glyph ("×") -- one per wrapped chip row.
 func countChipRows(content string) int {
 	rows := 0
 	for _, line := range strings.Split(content, "\n") {
-		if strings.Contains(ansi.Strip(line), "×]") {
+		if strings.Contains(ansi.Strip(line), "×") {
 			rows++
 		}
 	}
@@ -322,13 +250,13 @@ func countChipRows(content string) int {
 }
 
 // firstChipRowLine returns the 0-based index, within content's rendered
-// lines, of the FIRST line carrying a chip's close glyph ("×]") -- see
+// lines, of the FIRST line carrying a chip's close glyph ("×") -- see
 // TestChatUIComposerShrinksAsWrappedAttachmentsAreRemoved's doc comment for
 // why that index is an externally observable proxy for
 // topBarHeight()+historyHeight(). ok is false when no chip row is rendered.
 func firstChipRowLine(content string) (line int, ok bool) {
 	for i, l := range strings.Split(content, "\n") {
-		if strings.Contains(ansi.Strip(l), "×]") {
+		if strings.Contains(ansi.Strip(l), "×") {
 			return i, true
 		}
 	}

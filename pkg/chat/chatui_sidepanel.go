@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/tui/chatshell"
 	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/aichat/tui/theme"
 )
 
 // workspacePanel is ChatUI's chatshell.SidePanel: DataTug's workspace pane
@@ -504,10 +505,11 @@ func (p *workspacePanel) explorerNodesView(width, height int) string {
 		}
 		label := fmt.Sprintf("%s%s %s %s", strings.Repeat("  ", node.depth), fold, marker, sanitizeTerminalText(node.label))
 		if node.issue {
-			label = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(ansi.Truncate(label, width, "…"))
+			label = lipgloss.NewStyle().Bold(true).Foreground(theme.AccentColor()).Render(ansi.Truncate(label, width, "…"))
 		}
 		if i == p.explorerIndex && p.focused {
-			label = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Render(ansi.Truncate(label, width, "…"))
+			bg, fg := theme.FocusSurfaceColors()
+			label = lipgloss.NewStyle().Bold(true).Foreground(fg).Background(bg).Render(ansi.Truncate(label, width, "…"))
 		}
 		lines = append(lines, label)
 	}
@@ -602,16 +604,29 @@ func projectObjectDetails(object ProjectObject, width int) (string, string) {
 // panelCard -- used by both the explorer and details cards above.
 func panelCard(title, body string, width, height int) string {
 	width, height = max(1, width), max(1, height)
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255")).Background(lipgloss.Color("238"))
-	contentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("235"))
-	lines := []string{titleStyle.Render(padAnsiLine("  "+ansi.Truncate(sanitizeTerminalText(title), max(1, width-2), "…"), width))}
+	// Both styles read background/foreground fresh from tui/theme's
+	// current variant (Dark can change at runtime) -- previously hardcoded
+	// ANSI-256 greys (238/235 background, 255/252 foreground) that only
+	// looked right in a dark terminal: in a light one, the panel rendered
+	// as a black band with barely-legible text (founder 2026-09-25:
+	// "project explorer in light theme is black - wrong").
+	bg, fg := theme.SurfaceColors()
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(fg).Background(bg)
+	contentStyle := lipgloss.NewStyle().Foreground(fg).Background(bg)
+	// Each line's own text (issue/selected-row highlighting above) may
+	// already carry its own ANSI styling, including its own reset --
+	// theme.PaintOver reasserts this panel's fill after any such reset so
+	// it never gets cut off partway through the line, the same fix
+	// Card/ComposerFrame/PanelFrame apply for their own nested content.
+	paint := func(line string) string { return theme.PaintOver(line, bg, fg) }
+	lines := []string{titleStyle.Render(paint(padAnsiLine("  "+ansi.Truncate(sanitizeTerminalText(title), max(1, width-2), "…"), width)))}
 	content := strings.Split(body, "\n")
 	for i := 1; i < height; i++ {
 		line := ""
 		if i > 1 && i-2 < len(content) {
 			line = content[i-2]
 		}
-		lines = append(lines, contentStyle.Render(padAnsiLine(" "+ansi.Truncate(line, max(1, width-2), "…"), width)))
+		lines = append(lines, contentStyle.Render(paint(padAnsiLine(" "+ansi.Truncate(line, max(1, width-2), "…"), width))))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -906,7 +921,8 @@ func (p *workspacePanel) bookmarksView(width, height int) string {
 		}
 		label := fmt.Sprintf("%s%s · %d rows · %s%s", marker, sanitizeTerminalText(bookmark.Title), len(result.Rows), bookmark.TargetKind, flags)
 		if i == p.bookmarkIndex && p.focused && !p.bookmarkGridFocused {
-			label = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("229")).Background(lipgloss.Color("57")).Render(ansi.Truncate(label, width, "…"))
+			bg, fg := theme.FocusSurfaceColors()
+			label = lipgloss.NewStyle().Bold(true).Foreground(fg).Background(bg).Render(ansi.Truncate(label, width, "…"))
 		}
 		lines = append(lines, label)
 	}
@@ -931,24 +947,61 @@ func (p *workspacePanel) bookmarksView(width, height int) string {
 
 // --- chatshell.SidePanel -------------------------------------------------
 
+// workspaceTabFullLabels/workspaceTabShortLabels are the tab strip's two
+// label sets, index-aligned with workspaceTabs.
+var (
+	workspaceTabFullLabels  = []string{"Project", "Inspect", "Docked", "Bookmarks"}
+	workspaceTabShortLabels = []string{"Proj", "Sel", "Dock", "Marks"}
+)
+
+// tabStripHeader renders the workspace panel's tab strip so it FITS width
+// instead of being cut down to just the active tab's label by padAnsiLine's
+// own last-resort ellipsis truncation (founder 2026-09-25, r9 coordinator
+// review: "side-panel tab strip still shows 'Proj'" -- at the panel's
+// actual width, the joined header no longer fit at all and lost every tab
+// but the first). It tries, in order: every label in full; the active
+// tab's full label with every OTHER tab short (founder's own example,
+// "Project · Sel · Dock · Marks" -- the active tab is the one worth
+// spelling out when space is tight); every label short -- returning the
+// first candidate that fits, so only a genuinely too-narrow panel ever
+// falls through to View()'s own padAnsiLine truncation.
+func (p *workspacePanel) tabStripHeader(width int) string {
+	render := func(labels []string) string {
+		tabs := make([]string, len(labels))
+		for i, label := range labels {
+			if i == p.tab {
+				// theme.FocusColor(), not a fixed "white" literal: a
+				// hardcoded light foreground reads fine on a dark panel
+				// but goes near-invisible on a light one (founder
+				// 2026-09-25: "the '● Proj' tab label is white-on-light").
+				tabs[i] = lipgloss.NewStyle().Bold(true).Foreground(theme.FocusColor()).Render("● " + label)
+			} else {
+				tabs[i] = lipgloss.NewStyle().Foreground(theme.MutedColor()).Render(label)
+			}
+		}
+		return strings.Join(tabs, " · ")
+	}
+	mixed := make([]string, len(workspaceTabFullLabels))
+	for i := range mixed {
+		if i == p.tab {
+			mixed[i] = workspaceTabFullLabels[i]
+		} else {
+			mixed[i] = workspaceTabShortLabels[i]
+		}
+	}
+	for _, labels := range [][]string{workspaceTabFullLabels, mixed, workspaceTabShortLabels} {
+		if header := render(labels); lipgloss.Width(header) <= width {
+			return header
+		}
+	}
+	return render(workspaceTabShortLabels)
+}
+
 // View satisfies chatshell.SidePanel.
 func (p *workspacePanel) View(width, height int, focused bool) string {
 	p.width, p.height, p.focused = width, height, focused
 	width, height = max(1, width), max(1, height)
-	tabs := make([]string, len(workspaceTabs))
-	labels := []string{"Project", "Inspect", "Docked", "Bookmarks"}
-	if width < 45 {
-		labels = []string{"Proj", "Sel", "Dock", "Marks"}
-	}
-	for i := range workspaceTabs {
-		label := labels[i]
-		if i == p.tab {
-			tabs[i] = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Render("● " + label)
-		} else {
-			tabs[i] = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Render(label)
-		}
-	}
-	header := strings.Join(tabs, " ")
+	header := p.tabStripHeader(width)
 	var body string
 	switch workspaceTabs[p.tab] {
 	case "Project":

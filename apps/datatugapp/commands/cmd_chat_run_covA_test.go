@@ -141,6 +141,11 @@ func TestRunChatProjectRequiresValidProject(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for an unresolvable --project")
 	}
+	for _, hint := range []string{"datatug projects", "datatug chat --project", "datatug init"} {
+		if !strings.Contains(err.Error(), hint) {
+			t.Fatalf("missing recovery instruction %q: %v", hint, err)
+		}
+	}
 }
 
 // TestRunChatProjectUsesRequestContext covers runChatProject's ctx==nil

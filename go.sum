@@ -369,6 +369,10 @@ github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWD
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/strongo/aichat v0.2.2-0.20260925122451-a828eb82eef6 h1:3Bq5Cau75aRJNGUK0zYvB2sMkMB1rmJa8kX3LUAQcro=
 github.com/strongo/aichat v0.2.2-0.20260925122451-a828eb82eef6/go.mod h1:ZiYqFfUKZyWWb2kf2rwUsE46dPiU3orz2vBX3B8JUqs=
+github.com/strongo/aichat v0.2.2-0.20260925131215-3efd032810c5 h1:fRyQAiaTtRrVQ6TzEOkhZEjGERJkDC7/tpIP23JGyX0=
+github.com/strongo/aichat v0.2.2-0.20260925131215-3efd032810c5/go.mod h1:ZiYqFfUKZyWWb2kf2rwUsE46dPiU3orz2vBX3B8JUqs=
+github.com/strongo/aichat v0.2.2-0.20260925133254-b1b50507db8a h1:/y1uQg1xSHr0BBEdxf6oHVPdIPITgWYEuJOOHTOaDC8=
+github.com/strongo/aichat v0.2.2-0.20260925133254-b1b50507db8a/go.mod h1:ZiYqFfUKZyWWb2kf2rwUsE46dPiU3orz2vBX3B8JUqs=
 github.com/strongo/analytics v0.2.8 h1:h0snZrFba1DDI7H/RcePbq3V8MeuOrZFC8kj5ZJkp/I=
 github.com/strongo/analytics v0.2.8/go.mod h1:/pf7goR1CZtkvZHrJH5sXpJJl6IAefWCx82eSGUZ2V0=
 github.com/strongo/buildinfo v0.3.0 h1:nPbCrSA+7I3bct6mwZ24U6SHfV7TaRafoYzDucwl1Qg=

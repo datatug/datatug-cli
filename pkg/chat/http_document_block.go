@@ -53,7 +53,7 @@ func (b *httpDocumentBlock) View(width int, focused bool) string {
 	if b.versionBadge != "" {
 		summary = b.versionBadge + " · " + summary
 	}
-	header := agentStyle.Render(summary) + " " + statusStyle.Render("[1 Rendered · 2 Raw · 3 Headers] · "+mode)
+	header := agentStyle().Render(summary) + " " + statusStyle().Render("[1 Rendered · 2 Raw · 3 Headers] · "+mode)
 	return header + "\n" + body
 }
 

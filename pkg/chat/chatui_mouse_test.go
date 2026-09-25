@@ -22,7 +22,7 @@ func TestChatUIF2TogglesMouseModeAndStatusHint(t *testing.T) {
 	if got := u.shell.View().MouseMode; got != tea.MouseModeCellMotion {
 		t.Fatalf("initial mouse mode = %v, want MouseModeCellMotion (mouse reporting on by default)", got)
 	}
-	if view := u.shell.View().Content; !strings.Contains(view, "F2 select") {
+	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "F2 select") {
 		t.Fatalf("status bar does not advertise F2 for terminal selection while mouse reporting is on:\n%s", view)
 	}
 
@@ -30,7 +30,7 @@ func TestChatUIF2TogglesMouseModeAndStatusHint(t *testing.T) {
 	if got := u.shell.View().MouseMode; got != tea.MouseModeNone {
 		t.Fatalf("mouse mode after F2 = %v, want MouseModeNone (terminal selection restored)", got)
 	}
-	if view := u.shell.View().Content; !strings.Contains(view, "F2 wheel") {
+	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "F2 wheel") {
 		t.Fatalf("status bar does not advertise restoring wheel capture after F2:\n%s", view)
 	}
 
@@ -38,7 +38,7 @@ func TestChatUIF2TogglesMouseModeAndStatusHint(t *testing.T) {
 	if got := u.shell.View().MouseMode; got != tea.MouseModeCellMotion {
 		t.Fatalf("mouse mode after second F2 = %v, want MouseModeCellMotion", got)
 	}
-	if view := u.shell.View().Content; !strings.Contains(view, "F2 select") {
+	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "F2 select") {
 		t.Fatalf("status bar did not revert to F2 select after the second F2:\n%s", view)
 	}
 }

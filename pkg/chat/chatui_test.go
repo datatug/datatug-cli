@@ -213,7 +213,7 @@ func TestChatUITopBarAndStatusBarShowProjectAndSession(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = ProjectCatalog{Title: "Demo"}
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	view := u.shell.View().Content
+	view := flattenView(u.shell.View().Content)
 	if !strings.Contains(view, "Demo") {
 		t.Fatalf("expected project title in top bar:\n%s", view)
 	}
@@ -378,7 +378,7 @@ func TestChatUISlashHelpDocumentsGridControls(t *testing.T) {
 // wording).
 func TestChatUIShowsShiftArrowNavigationHint(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
-	if view := u.shell.View().Content; !strings.Contains(view, "Shift+↑↓ navigate") {
+	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "Shift+↑↓ navigate") {
 		t.Fatalf("status line missing Shift+Arrow navigation hint:\n%s", view)
 	}
 }

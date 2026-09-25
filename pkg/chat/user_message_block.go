@@ -2,6 +2,7 @@ package chat
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/strongo/aichat/tui/theme"
 	"github.com/strongo/aichat/tui/transcript"
 )
 
@@ -26,6 +27,14 @@ func newUserMessageBlock(text string) *userMessageBlock {
 }
 
 func (b *userMessageBlock) Focusable() bool { return true }
+
+// Role satisfies transcript.Roled: this Block still renders as a RoleUser
+// card, exactly like transcript's own built-in (non-Block) plain user
+// message, since it exists only to make Enter-to-edit work, not to look
+// different from an ordinary user message (strongo/aichat#chat-shared-
+// look: a Block wrapped in the generic untitled RoleBlock card by default
+// would otherwise lose the accent a user message gets).
+func (b *userMessageBlock) Role() theme.Role { return theme.RoleUser }
 
 func (b *userMessageBlock) View(width int, focused bool) string {
 	return userMessageView(b.text, width, focused)

@@ -141,10 +141,15 @@ func TestChatUIStatusBarComposerChipHints(t *testing.T) {
 		}
 	}
 
+	// statusBar renders through the shared theme.RenderHints chrome now
+	// (strongo/aichat#chat-shared-look), which separates hints with its own
+	// spacing rather than DataTug's old literal " · " join -- check each
+	// compact hint is present instead of one exact joined string.
 	narrow := u.statusBar(80)
-	want := "FOCUS Chat · Tab chips · Esc clear · Shift+Esc restore · Enter send"
-	if !strings.Contains(narrow, want) {
-		t.Fatalf("statusBar(80) = %q, want it to contain the compact composer-chip hint set %q", narrow, want)
+	for _, want := range []string{"FOCUS Chat", "Tab chips", "Esc clear", "Shift+Esc restore", "Enter send"} {
+		if !strings.Contains(narrow, want) {
+			t.Fatalf("statusBar(80) = %q, want it to contain the compact composer-chip hint %q", narrow, want)
+		}
 	}
 
 	// Once attachments are gone, the default composer hint set returns even

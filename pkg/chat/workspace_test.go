@@ -559,12 +559,15 @@ func TestSelectedCellValueStaysOutOfModelRequest(t *testing.T) {
 	if len(llm.requests) != 1 {
 		t.Fatalf("model requests = %d", len(llm.requests))
 	}
-	prompt := llm.requests[0].Messages[0].Text
-	if strings.Contains(prompt, "Paris") {
-		t.Fatalf("selected cell value leaked to model: %s", prompt)
+	request := llm.requests[0]
+	if request.Messages[0].Text != "Use the selected cell later" || len(request.Context) != 1 {
+		t.Fatalf("current prompt and context were not separate: %+v", request)
 	}
-	if !strings.Contains(prompt, "selection_1_c1") {
-		t.Fatalf("opaque local binding missing from model prompt: %s", prompt)
+	if strings.Contains(request.Context[0].Text, "Paris") {
+		t.Fatalf("selected cell value leaked to model context: %s", request.Context[0].Text)
+	}
+	if !strings.Contains(request.Context[0].Text, "selection_1_c1") {
+		t.Fatalf("opaque local binding missing from model context: %s", request.Context[0].Text)
 	}
 }
 

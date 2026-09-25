@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -83,6 +84,12 @@ type ChatUI struct {
 	// blocks below the now-complete streamed narrative text. See askOpenFunc.
 	pendingTurnsMu sync.Mutex
 	pendingTurns   map[string]turnOutcome
+	// Set only while Submit routes a slash command. Async query/HTTP runners
+	// capture it before returning their completion message.
+	activeCommandInteractionID string
+	activeCommandChars         int
+	activeCommandWords         int
+	activeCommandAsync         bool
 
 	// detailSequence guards a stale async relatedPreviewMessage from a
 	// closed/superseded cell detail Overlay (openCellDetail,
@@ -563,6 +570,9 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 		}
 		return nil
 	case chatExportDoneMsg:
+		if u.sessions != nil {
+			u.sessions.ReportCommand(msg.interactionID, msg.sessionID, "/export", msg.userChars, msg.userWords, msg.err, true)
+		}
 		if msg.err != nil {
 			u.shell.AppendAssistant("export failed: " + msg.err.Error())
 			return nil
@@ -766,6 +776,7 @@ var chatCommands = []chatshell.Command{
 func (u *ChatUI) runCommand(input string) tea.Cmd {
 	parts := strings.SplitN(input, " ", 2)
 	command := parts[0]
+	commandSessionID := u.sessionID
 	argument := ""
 	if len(parts) == 2 {
 		argument = strings.TrimSpace(parts[1])
@@ -774,6 +785,17 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 		u.shell.AppendAssistant("this command requires a durable chat session")
 		return nil
 	}
+	interactionID := u.sessions.NewCommandInteractionID()
+	u.activeCommandInteractionID = interactionID
+	u.activeCommandChars = utf8.RuneCountInString(input)
+	u.activeCommandWords = len(strings.Fields(input))
+	u.activeCommandAsync = false
+	defer func() {
+		u.activeCommandInteractionID = ""
+		u.activeCommandChars = 0
+		u.activeCommandWords = 0
+		u.activeCommandAsync = false
+	}()
 	var snapshot ChatSession
 	var err error
 	var cmd tea.Cmd
@@ -880,7 +902,24 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 	} else if snapshot.ID != "" {
 		u.loadSession(snapshot)
 	}
+	if !u.activeCommandAsync {
+		completed := synchronousChatCommand(command)
+		if command == "/http" && cmd == nil && err == nil {
+			// Listing or removing a saved header/cookie finishes in this call.
+			completed = true
+		}
+		u.sessions.ReportCommand(interactionID, commandSessionID, command, u.activeCommandChars, u.activeCommandWords, err, completed)
+	}
 	return cmd
+}
+
+func synchronousChatCommand(command string) bool {
+	switch command {
+	case "/new", "/sessions", "/switch", "/rename", "/clear", "/delete", "/help", "/bucket", "/settings":
+		return true
+	default:
+		return false
+	}
 }
 
 // chatHelpText is ui.go's help text, restored to parity (M5, r1 adversarial
@@ -921,9 +960,13 @@ const chatHelpText = "Commands: /new • /sessions • /switch <ID> • /rename 
 // chatExportDoneMsg reports the outcome of a background /export write —
 // the ChatUI analogue of export_ui.go's exportMessage.
 type chatExportDoneMsg struct {
-	path  string
-	count int
-	err   error
+	sessionID     string
+	interactionID string
+	userChars     int
+	userWords     int
+	path          string
+	count         int
+	err           error
 }
 
 // exportCommand parses and runs "/export current|bucket <format> <path>"
@@ -991,6 +1034,15 @@ func (u *ChatUI) exportCommand(argument string) (tea.Cmd, error) {
 		return nil, fmt.Errorf("%s export needs a %s path", scope, extension)
 	}
 	ctx := u.ctx
+	sessionID := u.sessionID
+	interactionID := u.activeCommandInteractionID
+	userChars, userWords := u.activeCommandChars, u.activeCommandWords
+	if interactionID == "" && u.sessions != nil {
+		interactionID = u.sessions.NewCommandInteractionID()
+	}
+	if u.activeCommandInteractionID != "" {
+		u.activeCommandAsync = true
+	}
 	return func() tea.Msg {
 		var writeErr error
 		if scope == "bucket" {
@@ -998,7 +1050,7 @@ func (u *ChatUI) exportCommand(argument string) (tea.Cmd, error) {
 		} else {
 			writeErr = ExportRecordSetFile(ctx, records[0], format, path)
 		}
-		return chatExportDoneMsg{path: path, count: len(records), err: writeErr}
+		return chatExportDoneMsg{sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, path: path, count: len(records), err: writeErr}
 	}, nil
 }
 

@@ -166,9 +166,9 @@ func TestAgentJoinToolUsesSameApplicationOperation(t *testing.T) {
 	if len(llm.requests) == 0 || len(llm.requests[0].Messages) == 0 {
 		t.Fatal("no model request captured")
 	}
-	prompt := llm.requests[0].Messages[0].Text
-	if !strings.Contains(prompt, string(candidates[0].ID)) || strings.Contains(prompt, "private-row-value") {
-		t.Fatalf("candidate context missing or row value leaked: %q", prompt)
+	request := llm.requests[0]
+	if request.Messages[0].Text != "Join customers" || len(request.Context) != 1 || !strings.Contains(request.Context[0].Text, string(candidates[0].ID)) || strings.Contains(request.Context[0].Text, "private-row-value") {
+		t.Fatalf("candidate context missing or row value leaked: %+v", request)
 	}
 }
 
@@ -544,9 +544,9 @@ func TestAIConversationRebuildsEachTurnFromExplicitContext(t *testing.T) {
 	if len(llm.requests[1].Messages) != 1 {
 		t.Fatalf("second request inherited opaque provider history: %+v", llm.requests[1].Messages)
 	}
-	secondPrompt := llm.requests[1].Messages[0].Text
-	if !strings.Contains(secondPrompt, "RecordSet rs-1") || !strings.Contains(secondPrompt, "Current user request:\nsecond") {
-		t.Fatalf("rebuilt prompt = %q", secondPrompt)
+	second := llm.requests[1]
+	if second.Messages[0].Text != "second" || len(second.Context) != 1 || !strings.Contains(second.Context[0].Text, "RecordSet rs-1") {
+		t.Fatalf("rebuilt request = %+v", second)
 	}
 }
 

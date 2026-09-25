@@ -389,6 +389,8 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 		switch request.Action {
 		case "run_dtql":
 			err = sessions.RunSavedDTQLActive(r.Context(), request.SessionID, request.QueryID, request.Variables)
+		case "run_http":
+			err = sessions.RunSavedHTTPActive(r.Context(), request.SessionID, request.QueryID, request.Variables)
 		case "save":
 			err = sessions.SaveQueryActive(r.Context(), request.SessionID, request.Save)
 		default:
@@ -396,6 +398,73 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 			return
 		}
 		if err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, ErrActiveSessionChanged) {
+				status = http.StatusConflict
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/v1/chat/http", func(w http.ResponseWriter, r *http.Request) {
+		if !bridge.authorize(w, r, token) {
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			SessionID string `json:"sessionId"`
+			BrowserHTTPRequest
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&request); err != nil {
+			http.Error(w, "invalid HTTP request", http.StatusBadRequest)
+			return
+		}
+		if err := sessions.SendHTTPRequestActive(r.Context(), request.SessionID, request.BrowserHTTPRequest); err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, ErrActiveSessionChanged) {
+				status = http.StatusConflict
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/v1/chat/http_settings", func(w http.ResponseWriter, r *http.Request) {
+		if !bridge.authorize(w, r, token) {
+			return
+		}
+		if r.Method == http.MethodGet {
+			items, err := sessions.BrowserHTTPSettings(r.Context(), r.Header.Get("X-DataTug-Chat-Session"), r.URL.Query().Get("origin"))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(items)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			SessionID string `json:"sessionId"`
+			Action    string `json:"action"`
+			Scope     string `json:"scope"`
+			Kind      string `json:"kind"`
+			Origin    string `json:"origin"`
+			Name      string `json:"name"`
+			Value     string `json:"value"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request); err != nil {
+			http.Error(w, "invalid HTTP setting", http.StatusBadRequest)
+			return
+		}
+		if err := sessions.ChangeBrowserHTTPSetting(r.Context(), request.SessionID, request.Action, request.Scope, request.Kind, request.Origin, request.Name, request.Value); err != nil {
 			status := http.StatusBadRequest
 			if errors.Is(err, ErrActiveSessionChanged) {
 				status = http.StatusConflict

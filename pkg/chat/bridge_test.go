@@ -18,6 +18,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync/atomic"
@@ -26,6 +27,88 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+func TestBridgeHTTPUsesConfiguredHeadersAndCookies(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receivedMethod, receivedHeader, receivedCookie, receivedBody string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod, receivedHeader, receivedCookie = r.Method, r.Header.Get("Authorization"), r.Header.Get("Cookie")
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = string(body)
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer target.Close()
+	if err := store.SetHTTPRequestSetting(ctx, "project", "header", target.URL, "Authorization", "Bearer project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetHTTPRequestSetting(ctx, "project", "cookie", target.URL, "session", "private"); err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = bridge.Close() }()
+	address, token := bridgeToken(t, bridge.URL)
+	settingsURL := "http://" + address + "/v1/chat/http_settings?origin=" + url.QueryEscape(target.URL)
+	settingsReq, err := http.NewRequest(http.MethodGet, settingsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsReq.Header.Set("Origin", "https://datatug.app")
+	settingsReq.Header.Set("X-DataTug-Chat-Capability", token)
+	settingsReq.Header.Set("X-DataTug-Chat-Session", snapshot.ID)
+	settingsResp, err := http.DefaultClient.Do(settingsReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsBody, _ := io.ReadAll(settingsResp.Body)
+	_ = settingsResp.Body.Close()
+	if settingsResp.StatusCode != http.StatusOK || !bytes.Contains(settingsBody, []byte(`"Authorization"`)) || bytes.Contains(settingsBody, []byte("Bearer project")) || bytes.Contains(settingsBody, []byte("private")) {
+		t.Fatalf("masked settings: %d %s", settingsResp.StatusCode, settingsBody)
+	}
+	payload, _ := json.Marshal(map[string]any{"sessionId": snapshot.ID, "method": "POST", "url": target.URL + "/api?secret=hidden", "body": "hello"})
+	req, err := http.NewRequest(http.MethodPost, "http://"+address+"/v1/chat/http", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", "https://datatug.app")
+	req.Header.Set("X-DataTug-Chat-Capability", token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("send HTTP: %d", resp.StatusCode)
+	}
+	if receivedMethod != "POST" || receivedHeader != "Bearer project" || receivedCookie != "session=private" || receivedBody != "hello" {
+		t.Fatalf("request mismatch: method=%q header=%q cookie=%q body=%q", receivedMethod, receivedHeader, receivedCookie, receivedBody)
+	}
+	updated, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.HTTPResponses) != 1 || !strings.Contains(updated.Messages[len(updated.Messages)-2].Text, target.URL+"/api") {
+		t.Fatalf("HTTP response was not synchronized: messages=%d responses=%d", len(updated.Messages), len(updated.HTTPResponses))
+	}
+	for _, message := range updated.Messages {
+		if strings.Contains(message.Text, "secret=hidden") {
+			t.Fatal("query string stored in transcript")
+		}
+	}
+}
 
 func TestBrowserExportBufferRejectsOversizedWrite(t *testing.T) {
 	var output browserExportBuffer
@@ -137,9 +220,14 @@ func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
 		t.Fatalf("run DTQL: %d %q", resp.StatusCode, queryService.ranID)
 	}
 	queryService.queries = append(queryService.queries, SavedQuery{ID: "http-query", Type: "HTTP"})
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_http","queryId":"http-query"}`, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent || queryService.ranID != "http-query" {
+		t.Fatalf("run saved HTTP: %d %q", resp.StatusCode, queryService.ranID)
+	}
 	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_dtql","queryId":"http-query"}`, "")
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest || queryService.ranID != "customers" {
+	if resp.StatusCode != http.StatusBadRequest || queryService.ranID != "http-query" {
 		t.Fatalf("HTTP query execution was exposed: %d %q", resp.StatusCode, queryService.ranID)
 	}
 	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"save","save":{"Title":"From browser","Type":"DTQL","Text":"from: customers"}}`, "")

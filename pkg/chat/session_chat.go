@@ -101,9 +101,15 @@ func (c *SessionChat) ListSavedQueries(ctx context.Context) ([]SavedQuery, error
 	return service.List(ctx)
 }
 
-// RunSavedDTQLActive accepts only project queries whose authoritative saved
-// type is DTQL. HTTP queries are deliberately unavailable to this bridge.
 func (c *SessionChat) RunSavedDTQLActive(ctx context.Context, sessionID, queryID string, variables map[string]string) error {
+	return c.runSavedQueryActive(ctx, sessionID, queryID, variables, "DTQL")
+}
+
+func (c *SessionChat) RunSavedHTTPActive(ctx context.Context, sessionID, queryID string, variables map[string]string) error {
+	return c.runSavedQueryActive(ctx, sessionID, queryID, variables, "HTTP")
+}
+
+func (c *SessionChat) runSavedQueryActive(ctx context.Context, sessionID, queryID string, variables map[string]string, queryType string) error {
 	c.mu.Lock()
 	if c.activeID != sessionID {
 		c.mu.Unlock()
@@ -125,8 +131,8 @@ func (c *SessionChat) RunSavedDTQLActive(ctx context.Context, sessionID, queryID
 			break
 		}
 	}
-	if selected == nil || selected.Type != "DTQL" {
-		return fmt.Errorf("only saved DTQL queries can run in browser chat")
+	if selected == nil || selected.Type != queryType {
+		return fmt.Errorf("saved query type changed; refresh the query list")
 	}
 	for key := range variables {
 		found := false
@@ -140,11 +146,20 @@ func (c *SessionChat) RunSavedDTQLActive(ctx context.Context, sessionID, queryID
 			return fmt.Errorf("unknown query parameter")
 		}
 	}
-	runner, ok := service.(SavedDTQLRunner)
-	if !ok {
-		return fmt.Errorf("safe DTQL execution is unavailable")
+	var result QueryResult
+	if queryType == "HTTP" {
+		runner, ok := service.(SavedHTTPRunner)
+		if !ok {
+			return fmt.Errorf("HTTP query execution is unavailable")
+		}
+		result, err = runner.RunHTTPWithVariables(ctx, queryID, variables)
+	} else {
+		runner, ok := service.(SavedDTQLRunner)
+		if !ok {
+			return fmt.Errorf("DTQL query execution is unavailable")
+		}
+		result, err = runner.RunDTQLWithVariables(ctx, queryID, variables)
 	}
-	result, err := runner.RunDTQLWithVariables(ctx, queryID, variables)
 	if err != nil {
 		return fmt.Errorf("query failed; check its parameters and data source")
 	}

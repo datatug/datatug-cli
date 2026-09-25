@@ -54,6 +54,11 @@ type SavedDTQLRunner interface {
 	RunDTQLWithVariables(context.Context, string, map[string]string) (QueryResult, error)
 }
 
+// SavedHTTPRunner verifies the saved definition's type at execution time.
+type SavedHTTPRunner interface {
+	RunHTTPWithVariables(context.Context, string, map[string]string) (QueryResult, error)
+}
+
 type SavedQuerySaveRequest struct {
 	Title    string
 	Tags     []string

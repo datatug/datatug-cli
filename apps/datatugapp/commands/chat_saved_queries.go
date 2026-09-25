@@ -242,6 +242,18 @@ func (s chatSavedQueries) RunDTQLWithVariables(ctx context.Context, id string, r
 	return s.run(ctx, id, variables, datatug.QueryTypeDTQL)
 }
 
+func (s chatSavedQueries) RunHTTPWithVariables(ctx context.Context, id string, raw map[string]string) (chat.QueryResult, error) {
+	pairs := make([]string, 0, len(raw))
+	for name, value := range raw {
+		pairs = append(pairs, name+"="+value)
+	}
+	variables, err := accesspolicies.ParseVariables(pairs)
+	if err != nil {
+		return chat.QueryResult{}, fmt.Errorf("invalid query parameter name or value")
+	}
+	return s.run(ctx, id, variables, datatug.QueryTypeHTTP)
+}
+
 func (s chatSavedQueries) run(ctx context.Context, id string, variables map[string]any, allowedType datatug.QueryType) (chat.QueryResult, error) {
 	canonical, err := api.ResolveQueryID(s.projectDir, id)
 	if err != nil {

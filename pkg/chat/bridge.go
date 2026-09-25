@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -11,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +25,17 @@ import (
 // something else appended to the session out of band. Lives here (rather than
 // ui.go) so it survives ui.go's deletion; both UIs share the same message type.
 type bridgeTickMsg struct{}
+
+var errBrowserExportTooLarge = errors.New("export exceeds browser download limit (16 MiB)")
+
+type browserExportBuffer struct{ bytes.Buffer }
+
+func (b *browserExportBuffer) Write(data []byte) (int, error) {
+	if len(data) > (16<<20)-b.Len() {
+		return 0, errBrowserExportTooLarge
+	}
+	return b.Buffer.Write(data)
+}
 
 // browserOpenResultMsg reports the outcome of ChatUI's F5-triggered
 // u.openBrowser(url) attempt (chatui_pickers.go's globalKeys "f5" case).
@@ -247,6 +260,31 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(items)
 	})
+	mux.HandleFunc("/v1/chat/cell_detail", func(w http.ResponseWriter, r *http.Request) {
+		if !bridge.authorize(w, r, token) {
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		row, err := strconv.Atoi(r.URL.Query().Get("row"))
+		if err != nil {
+			http.Error(w, "invalid row", http.StatusBadRequest)
+			return
+		}
+		detail, err := sessions.CellDetailActive(r.Context(), r.Header.Get("X-DataTug-Chat-Session"), r.URL.Query().Get("recordSetId"), row, r.URL.Query().Get("column"))
+		if err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, ErrActiveSessionChanged) {
+				status = http.StatusConflict
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(detail)
+	})
 	mux.HandleFunc("/v1/chat/results", func(w http.ResponseWriter, r *http.Request) {
 		if !bridge.authorize(w, r, token) {
 			return
@@ -276,6 +314,124 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 			return
 		}
 		if err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, ErrActiveSessionChanged) {
+				status = http.StatusConflict
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/v1/chat/export", func(w http.ResponseWriter, r *http.Request) {
+		if !bridge.authorize(w, r, token) {
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		format, err := ParseExportFormat(r.URL.Query().Get("format"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		id := r.URL.Query().Get("recordSetId")
+		var output browserExportBuffer
+		if err := sessions.ExportRecordsActive(r.Context(), r.Header.Get("X-DataTug-Chat-Session"), id, format, &output); err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, ErrActiveSessionChanged) {
+				status = http.StatusConflict
+			} else if errors.Is(err, errBrowserExportTooLarge) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		extension := string(format)
+		if id == "" && format != ExportXLSX && format != ExportSQLite {
+			extension = "zip"
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", "attachment; filename=datatug-chat-export."+extension)
+		_, _ = w.Write(output.Bytes())
+	})
+	mux.HandleFunc("/v1/chat/queries", func(w http.ResponseWriter, r *http.Request) {
+		if !bridge.authorize(w, r, token) {
+			return
+		}
+		if r.Method == http.MethodGet {
+			items, err := sessions.ListSavedQueries(r.Context())
+			if err != nil {
+				http.Error(w, "saved queries unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(items)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			SessionID string                `json:"sessionId"`
+			Action    string                `json:"action"`
+			Save      SavedQuerySaveRequest `json:"save"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&request); err != nil {
+			http.Error(w, "invalid query action", http.StatusBadRequest)
+			return
+		}
+		var err error
+		switch request.Action {
+		case "save":
+			err = sessions.SaveQueryActive(r.Context(), request.SessionID, request.Save)
+		default:
+			http.Error(w, "unknown query action", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, ErrActiveSessionChanged) {
+				status = http.StatusConflict
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/v1/chat/settings", func(w http.ResponseWriter, r *http.Request) {
+		if !bridge.authorize(w, r, token) {
+			return
+		}
+		if r.Method == http.MethodGet {
+			count, environment, database, err := sessions.BrowserSettings(r.Context(), r.Header.Get("X-DataTug-Chat-Session"))
+			if err != nil {
+				status := http.StatusInternalServerError
+				if errors.Is(err, ErrActiveSessionChanged) {
+					status = http.StatusConflict
+				}
+				http.Error(w, "settings unavailable", status)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"versions": count, "environment": environment, "database": database})
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			SessionID string `json:"sessionId"`
+			Versions  int    `json:"versions"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request); err != nil {
+			http.Error(w, "invalid settings", http.StatusBadRequest)
+			return
+		}
+		if err := sessions.SetBrowserVersions(r.Context(), request.SessionID, request.Versions); err != nil {
 			status := http.StatusBadRequest
 			if errors.Is(err, ErrActiveSessionChanged) {
 				status = http.StatusConflict

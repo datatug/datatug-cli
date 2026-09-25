@@ -482,6 +482,28 @@ func TestChatUIStatusBarWrapsOnNarrowWidth(t *testing.T) {
 	}
 }
 
+// TestSessionStatusSegmentDropsEmptyTitles: with no project open (empty
+// catalog title) the status line's first segment must start with the
+// session title, not " │ ", so the first status row aligns with the
+// composer's left edge like the rows below it.
+func TestSessionStatusSegmentDropsEmptyTitles(t *testing.T) {
+	u, _ := newTestChatUI(t, nil)
+	u.catalog = ProjectCatalog{}
+	u.snapshot.Title = "New chat"
+	if got := u.sessionStatusSegment(); got != "New chat │ rs:0 │ context:0" {
+		t.Fatalf("no project: got %q", got)
+	}
+	u.catalog = ProjectCatalog{Title: "Chinook"}
+	if got := u.sessionStatusSegment(); got != "Chinook │ New chat │ rs:0 │ context:0" {
+		t.Fatalf("with project: got %q", got)
+	}
+	u.catalog = ProjectCatalog{}
+	u.snapshot.Title = ""
+	if got := u.sessionStatusSegment(); got != "rs:0 │ context:0" {
+		t.Fatalf("no titles: got %q", got)
+	}
+}
+
 // TestAutoHintRejectsEmptyKey covers the bug r12's narrower HintsInset()
 // packing exposed (caught by TestChatUIStatusBarWrapsOnNarrowWidth at
 // width 30 with an empty session/no catalog title): a Sprintf'd segment

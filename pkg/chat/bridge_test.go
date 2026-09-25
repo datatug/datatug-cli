@@ -11,11 +11,14 @@ package chat
 // check).
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync/atomic"
@@ -24,6 +27,98 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+func TestBridgeHTTPUsesConfiguredHeadersAndCookies(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receivedMethod, receivedHeader, receivedCookie, receivedBody string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod, receivedHeader, receivedCookie = r.Method, r.Header.Get("Authorization"), r.Header.Get("Cookie")
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = string(body)
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer target.Close()
+	if err := store.SetHTTPRequestSetting(ctx, "project", "header", target.URL, "Authorization", "Bearer project"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetHTTPRequestSetting(ctx, "project", "cookie", target.URL, "session", "private"); err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = bridge.Close() }()
+	address, token := bridgeToken(t, bridge.URL)
+	settingsURL := "http://" + address + "/v1/chat/http_settings?origin=" + url.QueryEscape(target.URL)
+	settingsReq, err := http.NewRequest(http.MethodGet, settingsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsReq.Header.Set("Origin", "https://datatug.app")
+	settingsReq.Header.Set("X-DataTug-Chat-Capability", token)
+	settingsReq.Header.Set("X-DataTug-Chat-Session", snapshot.ID)
+	settingsResp, err := http.DefaultClient.Do(settingsReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsBody, _ := io.ReadAll(settingsResp.Body)
+	_ = settingsResp.Body.Close()
+	if settingsResp.StatusCode != http.StatusOK || !bytes.Contains(settingsBody, []byte(`"Authorization"`)) || bytes.Contains(settingsBody, []byte("Bearer project")) || bytes.Contains(settingsBody, []byte("private")) {
+		t.Fatalf("masked settings: %d %s", settingsResp.StatusCode, settingsBody)
+	}
+	payload, _ := json.Marshal(map[string]any{"sessionId": snapshot.ID, "method": "POST", "url": target.URL + "/api?secret=hidden", "body": "hello"})
+	req, err := http.NewRequest(http.MethodPost, "http://"+address+"/v1/chat/http", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", "https://datatug.app")
+	req.Header.Set("X-DataTug-Chat-Capability", token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("send HTTP: %d", resp.StatusCode)
+	}
+	if receivedMethod != "POST" || receivedHeader != "Bearer project" || receivedCookie != "session=private" || receivedBody != "hello" {
+		t.Fatalf("request mismatch: method=%q header=%q cookie=%q body=%q", receivedMethod, receivedHeader, receivedCookie, receivedBody)
+	}
+	updated, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.HTTPResponses) != 1 || !strings.Contains(updated.Messages[len(updated.Messages)-2].Text, target.URL+"/api") {
+		t.Fatalf("HTTP response was not synchronized: messages=%d responses=%d", len(updated.Messages), len(updated.HTTPResponses))
+	}
+	for _, message := range updated.Messages {
+		if strings.Contains(message.Text, "secret=hidden") {
+			t.Fatal("query string stored in transcript")
+		}
+	}
+}
+
+func TestBrowserExportBufferRejectsOversizedWrite(t *testing.T) {
+	var output browserExportBuffer
+	if _, err := output.Write(bytes.Repeat([]byte{'x'}, 16<<20)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := output.Write([]byte{'y'}); !errors.Is(err, errBrowserExportTooLarge) {
+		t.Fatalf("oversized write: %v", err)
+	}
+}
 
 // TestStartBrowserBridgeRandomFailure covers StartBrowserBridge's own
 // crypto/rand.Read error branch via the readRandom seam: the OS entropy
@@ -42,6 +137,142 @@ func TestStartBrowserBridgeRandomFailure(t *testing.T) {
 	}
 	if _, err := StartBrowserBridge(sessions); err == nil || !errors.Is(err, injected) {
 		t.Fatalf("StartBrowserBridge error = %v, want the injected rand error wrapped", err)
+	}
+}
+
+func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordID := workspaceTestRecord(t, store, before.ID)
+	queryService := &savedQueryStub{queries: []SavedQuery{{ID: "customers", Title: "Customers", Type: "DTQL"}}}
+	sessions.ConfigureSavedQueryService(queryService)
+	if _, err := sessions.ApplyWorkspaceAction(ctx, WorkspaceAction{Kind: "bucket_add", RecordSetID: recordID}); err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = bridge.Close() }()
+	address, token := bridgeToken(t, bridge.URL)
+	request := func(method, path, body, sessionID string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(method, "http://"+address+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Origin", "https://datatug.app")
+		req.Header.Set("X-DataTug-Chat-Capability", token)
+		req.Header.Set("X-DataTug-Chat-Session", sessionID)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	resp := request(http.MethodGet, "/v1/chat/export?format=csv&recordSetId="+recordID, "", before.ID)
+	payload, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(payload), "Prague") {
+		t.Fatalf("result export: %d %q", resp.StatusCode, payload)
+	}
+	resp = request(http.MethodGet, "/v1/chat/cell_detail?recordSetId="+recordID+"&row=0&column=City", "", before.ID)
+	var detail BrowserCellDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || detail.Value != "Prague" {
+		t.Fatalf("cell detail: %d %#v", resp.StatusCode, detail)
+	}
+	resp = request(http.MethodGet, "/v1/chat/settings", "", before.ID)
+	var settings struct {
+		Versions int `json:"versions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&settings); err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || settings.Versions < 1 {
+		t.Fatalf("settings: %d %#v", resp.StatusCode, settings)
+	}
+	resp = request(http.MethodGet, "/v1/chat/queries", "", before.ID)
+	var queries []SavedQuery
+	if err := json.NewDecoder(resp.Body).Decode(&queries); err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(queries) != 1 {
+		t.Fatalf("queries: %d %#v", resp.StatusCode, queries)
+	}
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_dtql","queryId":"customers"}`, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent || queryService.ranID != "customers" {
+		t.Fatalf("run DTQL: %d %q", resp.StatusCode, queryService.ranID)
+	}
+	queryService.queries = append(queryService.queries, SavedQuery{ID: "http-query", Type: "HTTP"})
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_http","queryId":"http-query"}`, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent || queryService.ranID != "http-query" {
+		t.Fatalf("run saved HTTP: %d %q", resp.StatusCode, queryService.ranID)
+	}
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"run_dtql","queryId":"http-query"}`, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || queryService.ranID != "http-query" {
+		t.Fatalf("HTTP query execution was exposed: %d %q", resp.StatusCode, queryService.ranID)
+	}
+	resp = request(http.MethodPost, "/v1/chat/queries", `{"sessionId":"`+before.ID+`","action":"save","save":{"Title":"From browser","Type":"DTQL","Text":"from: customers"}}`, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent || queryService.saved.Title != "From browser" {
+		t.Fatalf("save query: %d %#v", resp.StatusCode, queryService.saved)
+	}
+	resp = request(http.MethodGet, "/v1/chat/export?format=csv", "", before.ID)
+	payload, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(string(payload), "PK") {
+		t.Fatalf("bucket export: %d %q", resp.StatusCode, payload)
+	}
+	resp = request(http.MethodGet, "/v1/chat/export?format=csv&recordSetId="+recordID, "", "stale")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("stale export: %d", resp.StatusCode)
+	}
+	resp = request(http.MethodPost, "/v1/chat/sessions", `{"sessionId":"stale","action":"delete","value":"confirm"}`, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("stale delete: %d", resp.StatusCode)
+	}
+	resp = request(http.MethodPost, "/v1/chat/sessions", `{"sessionId":"`+before.ID+`","action":"clear"}`, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unconfirmed clear: %d", resp.StatusCode)
+	}
+	resp = request(http.MethodPost, "/v1/chat/sessions", `{"sessionId":"`+before.ID+`","action":"clear","value":"confirm"}`, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("clear: %d", resp.StatusCode)
+	}
+	cleared, err := sessions.Snapshot(ctx)
+	if err != nil || len(cleared.RecordSets) != 0 || cleared.ID != before.ID {
+		t.Fatalf("clear snapshot: %#v %v", cleared, err)
+	}
+	resp = request(http.MethodPost, "/v1/chat/sessions", `{"sessionId":"`+before.ID+`","action":"delete","value":"confirm"}`, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete: %d", resp.StatusCode)
+	}
+	after, err := sessions.Snapshot(ctx)
+	if err != nil || after.ID == before.ID {
+		t.Fatalf("delete snapshot: %#v %v", after, err)
 	}
 }
 
@@ -91,6 +322,158 @@ func bridgeToken(t *testing.T, bridgeURL string) (address, token string) {
 		t.Fatal(err)
 	}
 	return fragment.Get("h"), fragment.Get("t")
+}
+
+func TestBridgeWorkspaceSharesStateAndRejectsStaleSession(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions.catalog = ProjectCatalog{ID: "demo", Title: "Demo", Objects: []ProjectObject{{Reference: ContextReference{Kind: "project", ObjectID: "demo", Title: "Demo"}}}}
+	bridge, err := StartBrowserBridge(sessions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bridge.Close() })
+	address, token := bridgeToken(t, bridge.URL)
+	request := func(method, path, body, capability string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(method, "http://"+address+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Origin", "https://datatug.app")
+		req.Header.Set("X-DataTug-Chat-Capability", capability)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+	resp := request(http.MethodOptions, "/v1/chat/join_candidates", "", "")
+	if resp.StatusCode != http.StatusNoContent || !strings.Contains(resp.Header.Get("Access-Control-Allow-Headers"), "X-DataTug-Chat-Session") {
+		t.Fatalf("JOIN preflight: status %d, headers %q", resp.StatusCode, resp.Header.Get("Access-Control-Allow-Headers"))
+	}
+	_ = resp.Body.Close()
+	resp = request(http.MethodGet, "/v1/chat/catalog", "", token)
+	var catalog ProjectCatalog
+	if err := json.NewDecoder(resp.Body).Decode(&catalog); err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if catalog.ID != "demo" || len(catalog.Objects) != 1 {
+		t.Fatalf("catalog = %+v", catalog)
+	}
+	resp = request(http.MethodGet, "/v1/chat/catalog", "", "wrong")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthorized catalog: %d", resp.StatusCode)
+	}
+	snapshot, err := sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := dialBridgeEvents(t, bridge)
+	defer func() { _ = socket.Close() }()
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var notification map[string]string
+	if err := socket.ReadJSON(&notification); err != nil {
+		t.Fatal(err)
+	}
+	resp = request(http.MethodPost, "/v1/chat/workspace", `{"sessionId":"stale","action":{"kind":"set_tab","title":"Selected"}}`, token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("stale workspace: %d", resp.StatusCode)
+	}
+	resp = request(http.MethodPost, "/v1/chat/results", `{"sessionId":"stale","recordSetId":"missing","action":"refresh"}`, token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("stale result refresh: %d", resp.StatusCode)
+	}
+	body, err := json.Marshal(map[string]any{"sessionId": snapshot.ID, "action": WorkspaceAction{Kind: "set_tab", Title: "Selected"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp = request(http.MethodPost, "/v1/chat/workspace", string(body), token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("workspace mutation: %d", resp.StatusCode)
+	}
+	_ = socket.SetReadDeadline(time.Now().Add(3 * time.Second))
+	if err := socket.ReadJSON(&notification); err != nil || notification["type"] != "changed" {
+		t.Fatalf("workspace websocket event = %v, %v", notification, err)
+	}
+	snapshot, err = sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Workspace.ActiveTab != "Selected" {
+		t.Fatalf("active tab = %q", snapshot.Workspace.ActiveTab)
+	}
+	resp = request(http.MethodGet, "/v1/chat/sessions", "", token)
+	var listed []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if len(listed) != 1 || listed[0].ID != snapshot.ID {
+		t.Fatalf("session list = %+v", listed)
+	}
+	body, err = json.Marshal(map[string]string{"sessionId": snapshot.ID, "action": "rename", "value": "Browser name"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp = request(http.MethodPost, "/v1/chat/sessions", string(body), token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("rename: %d", resp.StatusCode)
+	}
+	snapshot, err = sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Title != "Browser name" {
+		t.Fatalf("renamed title = %q", snapshot.Title)
+	}
+	oldID := snapshot.ID
+	body, err = json.Marshal(map[string]string{"sessionId": oldID, "action": "new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp = request(http.MethodPost, "/v1/chat/sessions", string(body), token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("new session: %d", resp.StatusCode)
+	}
+	snapshot, err = sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ID == oldID {
+		t.Fatal("new session did not become active")
+	}
+	body, err = json.Marshal(map[string]string{"sessionId": snapshot.ID, "action": "switch", "value": oldID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp = request(http.MethodPost, "/v1/chat/sessions", string(body), token)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("switch session: %d", resp.StatusCode)
+	}
+	snapshot, err = sessions.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ID != oldID {
+		t.Fatalf("switched session = %q", snapshot.ID)
+	}
 }
 
 // TestBridgeMessagesHandlerAskActiveStoreErrorSurfaces covers the

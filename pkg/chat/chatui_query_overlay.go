@@ -19,7 +19,13 @@ import (
 // SetSavedQueryService mirrors UI.SetSavedQueryService.
 func (u *ChatUI) SetSavedQueryService(service SavedQueryService) error {
 	u.savedQueryService = service
-	return u.reloadSavedQueries()
+	if err := u.reloadSavedQueries(); err != nil {
+		return err
+	}
+	if u.sessions != nil {
+		u.sessions.ConfigureSavedQueryService(service)
+	}
+	return nil
 }
 
 func (u *ChatUI) reloadSavedQueries() error {

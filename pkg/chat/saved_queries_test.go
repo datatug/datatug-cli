@@ -39,3 +39,11 @@ func (s *savedQueryStub) RunWithVariables(ctx context.Context, id string, variab
 	s.vars = variables
 	return s.Run(ctx, id)
 }
+
+func (s *savedQueryStub) RunDTQLWithVariables(ctx context.Context, id string, variables map[string]string) (QueryResult, error) {
+	return s.RunWithVariables(ctx, id, variables)
+}
+
+func (s *savedQueryStub) RunHTTPWithVariables(ctx context.Context, id string, variables map[string]string) (QueryResult, error) {
+	return s.RunWithVariables(ctx, id, variables)
+}

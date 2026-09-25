@@ -511,6 +511,9 @@ func (u *ChatUI) handleSaveQueryDone(msg saveQueryDoneMsg) {
 	if overlay != nil {
 		u.shell.CloseOverlay(overlay)
 	}
+	if u.sessions != nil {
+		u.sessions.notifyChanged()
+	}
 	if err := u.reloadSavedQueries(); err != nil {
 		u.shell.AppendAssistant(conciseError(err))
 		return

@@ -48,6 +48,17 @@ type SavedQueryParameterizedRunner interface {
 	RunWithVariables(context.Context, string, map[string]string) (QueryResult, error)
 }
 
+// SavedDTQLRunner verifies the saved definition's type at execution time.
+// Browser chat requires it so an HTTP query cannot be swapped in after listing.
+type SavedDTQLRunner interface {
+	RunDTQLWithVariables(context.Context, string, map[string]string) (QueryResult, error)
+}
+
+// SavedHTTPRunner verifies the saved definition's type at execution time.
+type SavedHTTPRunner interface {
+	RunHTTPWithVariables(context.Context, string, map[string]string) (QueryResult, error)
+}
+
 type SavedQuerySaveRequest struct {
 	Title    string
 	Tags     []string

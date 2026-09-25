@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -50,6 +52,7 @@ type SessionChat struct {
 	implicitBookmarkID string
 	joinApplication    JoinApplication
 	queryExecutor      DTQLExecutor
+	savedQueryService  SavedQueryService
 
 	// Test-only per-call overrides (nil in production) over specific
 	// *SessionStore call sites below. Each is checked immediately before
@@ -71,6 +74,8 @@ type SessionChat struct {
 	storeRenameOverride        func(ctx context.Context, id, title string) error
 }
 
+var ErrActiveSessionChanged = errors.New("session changed; refresh chat")
+
 // ConfigureQueryExecutor enables deterministic refresh of stored DTQL without
 // another model call. The caller supplies the same policy-bound executor used
 // for ordinary agent queries.
@@ -78,6 +83,143 @@ func (c *SessionChat) ConfigureQueryExecutor(executor DTQLExecutor) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.queryExecutor = executor
+}
+
+func (c *SessionChat) ConfigureSavedQueryService(service SavedQueryService) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.savedQueryService = service
+}
+
+func (c *SessionChat) ListSavedQueries(ctx context.Context) ([]SavedQuery, error) {
+	c.mu.Lock()
+	service := c.savedQueryService
+	c.mu.Unlock()
+	if service == nil {
+		return nil, fmt.Errorf("saved project queries are unavailable")
+	}
+	return service.List(ctx)
+}
+
+func (c *SessionChat) RunSavedDTQLActive(ctx context.Context, sessionID, queryID string, variables map[string]string) error {
+	return c.runSavedQueryActive(ctx, sessionID, queryID, variables, "DTQL")
+}
+
+func (c *SessionChat) RunSavedHTTPActive(ctx context.Context, sessionID, queryID string, variables map[string]string) error {
+	return c.runSavedQueryActive(ctx, sessionID, queryID, variables, "HTTP")
+}
+
+func (c *SessionChat) runSavedQueryActive(ctx context.Context, sessionID, queryID string, variables map[string]string, queryType string) error {
+	c.mu.Lock()
+	if c.activeID != sessionID {
+		c.mu.Unlock()
+		return ErrActiveSessionChanged
+	}
+	service := c.savedQueryService
+	c.mu.Unlock()
+	if service == nil {
+		return fmt.Errorf("saved project queries are unavailable")
+	}
+	list, err := service.List(ctx)
+	if err != nil {
+		return err
+	}
+	var selected *SavedQuery
+	for i := range list {
+		if list[i].ID == queryID {
+			selected = &list[i]
+			break
+		}
+	}
+	if selected == nil || selected.Type != queryType {
+		return fmt.Errorf("saved query type changed; refresh the query list")
+	}
+	for key := range variables {
+		found := false
+		for _, parameter := range selected.Parameters {
+			if parameter.ID == key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("unknown query parameter")
+		}
+	}
+	var result QueryResult
+	if queryType == "HTTP" {
+		runner, ok := service.(SavedHTTPRunner)
+		if !ok {
+			return fmt.Errorf("HTTP query execution is unavailable")
+		}
+		result, err = runner.RunHTTPWithVariables(ctx, queryID, variables)
+	} else {
+		runner, ok := service.(SavedDTQLRunner)
+		if !ok {
+			return fmt.Errorf("DTQL query execution is unavailable")
+		}
+		result, err = runner.RunDTQLWithVariables(ctx, queryID, variables)
+	}
+	if err != nil {
+		return fmt.Errorf("query failed; check its parameters and data source")
+	}
+	label := selected.Title
+	if label == "" {
+		label = selected.ID
+	}
+	if result.Title == "" {
+		result.Title = label
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.activeID != sessionID {
+		return ErrActiveSessionChanged
+	}
+	origin, err := c.store.AppendUser(ctx, sessionID, "Run query: "+label)
+	if err != nil {
+		return err
+	}
+	if _, err := c.store.AppendQuery(ctx, sessionID, origin.ID, result.Source, result); err != nil {
+		return err
+	}
+	c.notifyChanged()
+	return nil
+}
+
+func (c *SessionChat) SaveQueryActive(ctx context.Context, sessionID string, request SavedQuerySaveRequest) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.activeID != sessionID {
+		return ErrActiveSessionChanged
+	}
+	writer, ok := c.savedQueryService.(SavedQueryWriter)
+	if !ok {
+		return fmt.Errorf("saving project queries is unavailable")
+	}
+	request.Title = strings.TrimSpace(request.Title)
+	if request.Title == "" {
+		return fmt.Errorf("give this query a name")
+	}
+	if request.Type != "DTQL" && request.Type != "HTTP" {
+		return fmt.Errorf("unsupported query type")
+	}
+	if strings.TrimSpace(request.Text) == "" {
+		return fmt.Errorf("query text is empty")
+	}
+	if request.Type == "HTTP" {
+		if _, err := httpOrigin(request.Text); err != nil {
+			return fmt.Errorf("HTTP query URL is invalid")
+		}
+		parsed, _ := url.ParseRequestURI(request.Text)
+		if parsed.RawQuery != "" || parsed.ForceQuery {
+			return fmt.Errorf("HTTP query URL parameters cannot be saved")
+		}
+	}
+	if _, err := writer.Save(ctx, request); err != nil {
+		return fmt.Errorf("could not save query")
+	}
+	c.notifyChanged()
+	return nil
 }
 
 // SubscribeChanges reports committed changes without sending session data over
@@ -141,6 +283,26 @@ func (c *SessionChat) JoinCandidates(ctx context.Context, recordSetID string) ([
 	return c.joinApplication.Candidates(ctx, record)
 }
 
+func (c *SessionChat) JoinCandidatesActive(ctx context.Context, sessionID, recordSetID string) ([]JoinCandidate, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if sessionID != c.activeID {
+		return nil, ErrActiveSessionChanged
+	}
+	if c.joinApplication == nil {
+		return []JoinCandidate{}, nil
+	}
+	session, err := c.store.Load(ctx, c.activeID)
+	if err != nil {
+		return nil, err
+	}
+	record, ok := session.RecordSets[recordSetID]
+	if !ok {
+		return nil, fmt.Errorf("RecordSet %q is not in the active session", recordSetID)
+	}
+	return c.joinApplication.Candidates(ctx, record)
+}
+
 // ApplyJoinCandidate is the shared UI/agent operation. It records an action
 // message and persists the execution as the ordinary immutable query/grid
 // sequence, so restarts never re-execute historic joins.
@@ -149,6 +311,19 @@ func (c *SessionChat) ApplyJoinCandidate(ctx context.Context, recordSetID string
 	defer c.mu.Unlock()
 	defer c.notifyChanged()
 	return c.applyJoinCandidate(ctx, recordSetID, candidateID, "")
+}
+
+func (c *SessionChat) ApplyJoinCandidateActive(ctx context.Context, sessionID, recordSetID string, candidateID JoinCandidateID) (RecordSet, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if sessionID != c.activeID {
+		return RecordSet{}, ErrActiveSessionChanged
+	}
+	record, err := c.applyJoinCandidate(ctx, recordSetID, candidateID, "")
+	if err == nil {
+		c.notifyChanged()
+	}
+	return record, err
 }
 
 func (c *SessionChat) applyJoinCandidate(ctx context.Context, recordSetID string, candidateID JoinCandidateID, originMessageID string) (RecordSet, error) {
@@ -232,6 +407,21 @@ func (c *SessionChat) ApplyWorkspaceAction(ctx context.Context, action Workspace
 	defer c.mu.Unlock()
 	defer c.notifyChanged()
 	return c.applyWorkspaceAction(ctx, action)
+}
+
+// ApplyWorkspaceActionActive keeps the browser's session check and mutation
+// under one lock. A terminal session switch cannot slip between them.
+func (c *SessionChat) ApplyWorkspaceActionActive(ctx context.Context, sessionID string, action WorkspaceAction) (ContextReference, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if sessionID != c.activeID {
+		return ContextReference{}, ErrActiveSessionChanged
+	}
+	ref, err := c.applyWorkspaceAction(ctx, action)
+	if err == nil {
+		c.notifyChanged()
+	}
+	return ref, err
 }
 
 func (c *SessionChat) applyWorkspaceAction(ctx context.Context, action WorkspaceAction) (ContextReference, error) {
@@ -351,6 +541,112 @@ func (c *SessionChat) List(ctx context.Context) ([]ChatSession, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.store.List(ctx)
+}
+
+// BrowserSessionAction applies session controls to the exact session the
+// browser displayed. The check and mutation share one lock.
+func (c *SessionChat) BrowserSessionAction(ctx context.Context, expectedID, action, value string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.activeID != expectedID {
+		return ErrActiveSessionChanged
+	}
+	switch action {
+	case "new":
+		session, err := c.store.Create(ctx, "New chat")
+		if err != nil {
+			return err
+		}
+		c.activeID = session.ID
+	case "switch":
+		if value == "" {
+			return fmt.Errorf("choose a chat session")
+		}
+		if _, err := c.store.Load(ctx, value); err != nil {
+			return err
+		}
+		if err := c.store.Activate(ctx, value); err != nil {
+			return err
+		}
+		c.activeID = value
+	case "rename":
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("session title must not be empty")
+		}
+		if err := c.store.Rename(ctx, c.activeID, value); err != nil {
+			return err
+		}
+	case "clear":
+		if value != "confirm" {
+			return fmt.Errorf("confirm clearing this session")
+		}
+		if err := c.store.Clear(ctx, c.activeID); err != nil {
+			return err
+		}
+	case "delete":
+		if value != "confirm" {
+			return fmt.Errorf("confirm deleting this session")
+		}
+		if err := c.store.Delete(ctx, c.activeID); err != nil {
+			return err
+		}
+		items, err := c.store.List(ctx)
+		if err != nil {
+			return err
+		}
+		if len(items) > 0 {
+			if err := c.store.Activate(ctx, items[0].ID); err != nil {
+				return err
+			}
+			c.activeID = items[0].ID
+		} else {
+			next, err := c.store.Create(ctx, "New chat")
+			if err != nil {
+				return err
+			}
+			c.activeID = next.ID
+		}
+	default:
+		return fmt.Errorf("unknown session action %q", action)
+	}
+	c.lastBookmarkID = ""
+	c.implicitBookmarkID = ""
+	c.notifyChanged()
+	return nil
+}
+
+// ExportRecordsActive exports immutable snapshots from the active session.
+// The browser selects either one result or the session's explicit export bucket.
+func (c *SessionChat) ExportRecordsActive(ctx context.Context, sessionID, recordSetID string, format ExportFormat, output io.Writer) error {
+	c.mu.Lock()
+	if c.activeID != sessionID {
+		c.mu.Unlock()
+		return ErrActiveSessionChanged
+	}
+	session, err := c.store.Load(ctx, c.activeID)
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	ids := []string{recordSetID}
+	if recordSetID == "" {
+		ids = session.Workspace.ExportBucket
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("export bucket is empty")
+	}
+	records := make([]RecordSet, 0, len(ids))
+	for _, id := range ids {
+		record, ok := session.RecordSets[id]
+		if !ok {
+			return fmt.Errorf("result %q is unavailable in this session", id)
+		}
+		records = append(records, record)
+	}
+	if recordSetID == "" {
+		return ExportBucket(ctx, records, format, output)
+	}
+	return ExportRecordSets(ctx, records, format, output)
 }
 
 func (c *SessionChat) Create(ctx context.Context) (ChatSession, error) {

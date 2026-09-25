@@ -215,7 +215,7 @@ func (s chatSavedQueries) LookupParameter(ctx context.Context, queryID, paramete
 }
 
 func (s chatSavedQueries) Run(ctx context.Context, id string) (chat.QueryResult, error) {
-	return s.run(ctx, id, nil)
+	return s.run(ctx, id, nil, "")
 }
 
 func (s chatSavedQueries) RunWithVariables(ctx context.Context, id string, raw map[string]string) (chat.QueryResult, error) {
@@ -227,10 +227,34 @@ func (s chatSavedQueries) RunWithVariables(ctx context.Context, id string, raw m
 	if err != nil {
 		return chat.QueryResult{}, fmt.Errorf("invalid query parameter name or value")
 	}
-	return s.run(ctx, id, variables)
+	return s.run(ctx, id, variables, "")
 }
 
-func (s chatSavedQueries) run(ctx context.Context, id string, variables map[string]any) (chat.QueryResult, error) {
+func (s chatSavedQueries) RunDTQLWithVariables(ctx context.Context, id string, raw map[string]string) (chat.QueryResult, error) {
+	pairs := make([]string, 0, len(raw))
+	for name, value := range raw {
+		pairs = append(pairs, name+"="+value)
+	}
+	variables, err := accesspolicies.ParseVariables(pairs)
+	if err != nil {
+		return chat.QueryResult{}, fmt.Errorf("invalid query parameter name or value")
+	}
+	return s.run(ctx, id, variables, datatug.QueryTypeDTQL)
+}
+
+func (s chatSavedQueries) RunHTTPWithVariables(ctx context.Context, id string, raw map[string]string) (chat.QueryResult, error) {
+	pairs := make([]string, 0, len(raw))
+	for name, value := range raw {
+		pairs = append(pairs, name+"="+value)
+	}
+	variables, err := accesspolicies.ParseVariables(pairs)
+	if err != nil {
+		return chat.QueryResult{}, fmt.Errorf("invalid query parameter name or value")
+	}
+	return s.run(ctx, id, variables, datatug.QueryTypeHTTP)
+}
+
+func (s chatSavedQueries) run(ctx context.Context, id string, variables map[string]any, allowedType datatug.QueryType) (chat.QueryResult, error) {
 	canonical, err := api.ResolveQueryID(s.projectDir, id)
 	if err != nil {
 		return chat.QueryResult{}, err
@@ -238,6 +262,9 @@ func (s chatSavedQueries) run(ctx context.Context, id string, variables map[stri
 	definition, err := s.store.LoadQuery(ctx, canonical)
 	if err != nil {
 		return chat.QueryResult{}, err
+	}
+	if allowedType != "" && definition.Type != allowedType {
+		return chat.QueryResult{}, fmt.Errorf("query type is unavailable for browser execution")
 	}
 	var result secureread.Result
 	source := ""

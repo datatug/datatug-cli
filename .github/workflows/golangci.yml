@@ -111,7 +111,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.0'
+          go-version: '1.27.1'
           cache: true
       - name: go mod tidy -diff
         run: go mod tidy -diff
@@ -132,7 +132,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.0'
+          go-version: '1.27.1'
           cache: true
       - name: check-hermetic-tests.sh
         env:

@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out publisher
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Find latest published release
         id: release
@@ -40,7 +40,7 @@ jobs:
           sha256sum -c "datatug_${TAG#v}_checksums.txt"
 
       - name: Check out Homebrew tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: datatug/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

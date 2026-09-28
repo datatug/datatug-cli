@@ -32,10 +32,27 @@ var (
 	ErrUnsafePrivateDir = errors.New("private evidence directory must be outside Git and evidence repositories")
 )
 
-// userHomeDir is a seam for testing ResolvePrivateDir's fallback without
-// touching the real home directory — mirrors pkg/personalqueries's
-// userHomeDir seam.
-var userHomeDir = os.UserHomeDir
+// test seams for OS/FS/DB failure testing
+var (
+	userHomeDir          = os.UserHomeDir
+	osMkdirAll           = os.MkdirAll
+	osChmod              = os.Chmod
+	osOpenFile           = os.OpenFile
+	osLstat              = os.Lstat
+	sqlOpen              = sql.Open
+	jsonMarshal          = json.Marshal
+	filepathEvalSymlinks = filepath.EvalSymlinks
+	filepathAbs          = filepath.Abs
+	dbExec               = func(db *sql.DB, query string, args ...any) (sql.Result, error) {
+		return db.Exec(query, args...)
+	}
+	queryRowContext = func(db *sql.DB, ctx context.Context, query string, args ...any) *sql.Row {
+		return db.QueryRowContext(ctx, query, args...)
+	}
+	fileClose = func(f *os.File) error {
+		return f.Close()
+	}
+)
 
 // Options are trusted server configuration, never request-controlled.
 type Options struct {
@@ -139,7 +156,7 @@ func validatePrivateDir(privateDir string, roots incidentstore.RepositoryRoots) 
 }
 
 func lexicalAndResolvedPaths(path string) ([]string, error) {
-	abs, err := filepath.Abs(path)
+	abs, err := filepathAbs(path)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +177,7 @@ func resolveExistingSymlinks(path string) (string, error) {
 	current := path
 	var suffix []string
 	for {
-		resolved, err := filepath.EvalSymlinks(current)
+		resolved, err := filepathEvalSymlinks(current)
 		if err == nil {
 			for i := len(suffix) - 1; i >= 0; i-- {
 				resolved = filepath.Join(resolved, suffix[i])
@@ -188,7 +205,7 @@ func pathWithin(root, path string) bool {
 }
 
 func pathInsideGitRepository(path string) (bool, error) {
-	info, err := os.Lstat(path)
+	info, err := osLstat(path)
 	if err == nil && !info.IsDir() {
 		path = filepath.Dir(path)
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -196,7 +213,7 @@ func pathInsideGitRepository(path string) (bool, error) {
 	}
 	for current := path; ; current = filepath.Dir(current) {
 		gitMarker := filepath.Join(current, ".git")
-		if _, err := os.Lstat(gitMarker); err == nil {
+		if _, err := osLstat(gitMarker); err == nil {
 			return true, nil
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return false, err
@@ -218,7 +235,7 @@ func pathInsideGitRepository(path string) (bool, error) {
 func isBareGitRepository(path string) (bool, error) {
 	markers := []string{"HEAD", "objects", "refs"}
 	for _, marker := range markers {
-		if _, err := os.Lstat(filepath.Join(path, marker)); err != nil {
+		if _, err := osLstat(filepath.Join(path, marker)); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return false, nil
 			}
@@ -323,10 +340,10 @@ func openStore(location incidents.StoreLocation, repository *incidentstore.Repos
 	if err := validatePrivateStoreDir(dir, roots); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := osMkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create private evidence directory: %w", err)
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := osChmod(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("secure private evidence directory: %w", err)
 	}
 	if err := validatePrivateStoreDir(dir, roots); err != nil {
@@ -336,12 +353,12 @@ func openStore(location incidents.StoreLocation, repository *incidentstore.Repos
 	if err := ensurePrivateDatabaseFile(path, roots); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sqlOpen("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open snapshot sidecar: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	if _, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS snapshots (
+	if _, err = dbExec(db, `PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS snapshots (
 		snapshot_ref TEXT PRIMARY KEY,
 		store_id TEXT NOT NULL,
 		project_id TEXT NOT NULL,
@@ -355,7 +372,7 @@ func openStore(location incidents.StoreLocation, repository *incidentstore.Repos
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize snapshot sidecar: %w", err)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := osChmod(path, 0o600); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("secure snapshot sidecar: %w", err)
 	}
@@ -363,7 +380,7 @@ func openStore(location incidents.StoreLocation, repository *incidentstore.Repos
 }
 
 func validatePrivateStoreDir(dir string, roots incidentstore.RepositoryRoots) error {
-	info, err := os.Lstat(dir)
+	info, err := osLstat(dir)
 	if err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return ErrUnsafePrivateDir
@@ -378,7 +395,7 @@ func validatePrivateStoreDir(dir string, roots incidentstore.RepositoryRoots) er
 }
 
 func ensurePrivateDatabaseFile(path string, roots incidentstore.RepositoryRoots) error {
-	info, err := os.Lstat(path)
+	info, err := osLstat(path)
 	if err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 			return ErrUnsafePrivateDir
@@ -391,17 +408,17 @@ func ensurePrivateDatabaseFile(path string, roots incidentstore.RepositoryRoots)
 	if err := validatePrivateDir(path, roots); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	file, err := osOpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
 		return ensurePrivateDatabaseFile(path, roots)
 	}
 	if err != nil {
 		return fmt.Errorf("create private snapshot database: %w", err)
 	}
-	if closeErr := file.Close(); closeErr != nil {
+	if closeErr := fileClose(file); closeErr != nil {
 		return fmt.Errorf("close private snapshot database: %w", closeErr)
 	}
-	info, err = os.Lstat(path)
+	info, err = osLstat(path)
 	if err != nil {
 		return fmt.Errorf("verify private snapshot database: %w", err)
 	}
@@ -451,7 +468,7 @@ func (s *Store) PutSnapshot(ctx context.Context, ref apicontract.ExecutionRef, r
 		return "", false, err
 	}
 	recordset = normalizeRecordset(recordset)
-	payload, err := json.Marshal(recordset)
+	payload, err := jsonMarshal(recordset)
 	if err != nil {
 		return "", false, fmt.Errorf("encode snapshot: %w", err)
 	}
@@ -503,7 +520,7 @@ func (s *Store) Snapshot(ctx context.Context, ref apicontract.ExecutionRef, snap
 	}
 	var availability, changedAt, reason string
 	var payload []byte
-	err := s.db.QueryRowContext(ctx, `SELECT availability,changed_at,reason,payload FROM snapshots
+	err := queryRowContext(s.db, ctx, `SELECT availability,changed_at,reason,payload FROM snapshots
 		WHERE snapshot_ref=? AND store_id=? AND project_id=? AND execution_id=?`, snapshotRef, ref.StoreID, ref.ProjectID, ref.ExecutionID).
 		Scan(&availability, &changedAt, &reason, &payload)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -538,7 +555,7 @@ func (s *Store) State(ctx context.Context, snapshotRef string) (*apicontract.Sna
 		return nil, err
 	}
 	var state apicontract.SnapshotState
-	err := s.db.QueryRowContext(ctx, `SELECT availability,changed_at,reason FROM snapshots WHERE snapshot_ref=?`, snapshotRef).
+	err := queryRowContext(s.db, ctx, `SELECT availability,changed_at,reason FROM snapshots WHERE snapshot_ref=?`, snapshotRef).
 		Scan(&state.Availability, &state.ChangedAt, &state.Reason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrSnapshotNotFound

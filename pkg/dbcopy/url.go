@@ -322,6 +322,11 @@ func (r BackendRef) OpenProtectedForTest(ctx context.Context) (dal.DB, error) {
 	return r.open(ctx, true, true)
 }
 
+var (
+	newSQLiteDatabaseWithOptions = dalgo2sqlite.NewDatabaseWithOptions
+	newInGitDBDatabase          = dalgo2ingitdb.NewDatabase
+)
+
 func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected bool) (dal.DB, error) {
 	switch r.Scheme {
 	case "openvaultdb":
@@ -337,7 +342,7 @@ func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected b
 			// separate enforcement layer.
 			opts.StructuredQueryDialect = "sqlite"
 		}
-		db, err := dalgo2sqlite.NewDatabaseWithOptions(r.Path, dal.NewSchema(nil, nil), opts)
+		db, err := newSQLiteDatabaseWithOptions(r.Path, dal.NewSchema(nil, nil), opts)
 		if err != nil {
 			return nil, fmt.Errorf("open sqlite %q: %w", r.Path, err)
 		}
@@ -353,7 +358,7 @@ func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected b
 			// layers pkg/accesspolicies above the returned dal.DB.
 			opts = append(opts, dalgo2ingitdb.WithStoredOnlyReads())
 		}
-		db, err := dalgo2ingitdb.NewDatabase(r.Path, validator.NewCollectionsReader(), opts...)
+		db, err := newInGitDBDatabase(r.Path, validator.NewCollectionsReader(), opts...)
 		if err != nil {
 			return nil, fmt.Errorf("open ingitdb %q: %w", r.Path, err)
 		}

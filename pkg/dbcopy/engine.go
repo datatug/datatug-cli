@@ -297,10 +297,12 @@ func copyOneTable(
 // ConcurrencyAware capability of source/target. When the cap reduces an
 // explicitly-requested value >1, one warning line is emitted on stderr
 // per REQ:concurrency-cap.
+var numCPU = runtime.NumCPU
+
 func resolveParallelism(requested int, source, target dal.DB, stderr io.Writer) int {
 	defaulted := requested == 0
 	if requested == 0 {
-		requested = runtime.NumCPU() - 1
+		requested = numCPU() - 1
 		if requested < 1 {
 			requested = 1
 		}

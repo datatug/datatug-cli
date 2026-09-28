@@ -34,6 +34,12 @@ var scopes = []string{"openid", "profile", "datatug:projects:read", "datatug:pro
 // fallback without touching the real user config directory.
 var userConfigDir = os.UserConfigDir
 
+var (
+	httpDo                = http.DefaultClient.Do
+	newRequestWithContext = http.NewRequestWithContext
+	urlParse              = url.Parse
+)
+
 type session struct {
 	IDToken      string
 	RefreshToken string
@@ -184,12 +190,12 @@ func printWarnings(output io.Writer, warnings []error) {
 func exchangeCustomToken(ctx context.Context, token string) (session, error) {
 	body, _ := json.Marshal(map[string]any{"token": token, "returnSecureToken": true})
 	endpoint := "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=" + url.QueryEscape(firebaseAPIKey)
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
+	request, err := newRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(body)))
 	if err != nil {
 		return session{}, err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	response, err := http.DefaultClient.Do(request)
+	response, err := httpDo(request)
 	if err != nil {
 		return session{}, err
 	}
@@ -217,12 +223,12 @@ func exchangeCustomToken(ctx context.Context, token string) (session, error) {
 func refreshFirebaseSession(ctx context.Context, refreshToken string) (session, error) {
 	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refreshToken}}
 	endpoint := "https://securetoken.googleapis.com/v1/token?key=" + url.QueryEscape(firebaseAPIKey)
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	request, err := newRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return session{}, err
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	response, err := http.DefaultClient.Do(request)
+	response, err := httpDo(request)
 	if err != nil {
 		return session{}, err
 	}
@@ -266,7 +272,7 @@ func newClient(rawIssuer string, insecure bool) (*deviceauth.Client, deviceauth.
 	if err != nil {
 		return nil, nil, "", err
 	}
-	issuerHost, err := url.Parse(client.Issuer())
+	issuerHost, err := urlParse(client.Issuer())
 	if err != nil {
 		return nil, nil, "", err
 	}

@@ -181,6 +181,11 @@ type executionLayout struct {
 	Version int `json:"version"`
 }
 
+var (
+	testFailInitIndexWrite  bool
+	testFailInitLayoutWrite bool
+)
+
 func initializeExecutionIndex(files, executions *dalgo2ingitdb.RootedFiles) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
@@ -191,14 +196,20 @@ func initializeExecutionIndex(files, executions *dalgo2ingitdb.RootedFiles) erro
 		if errors.Is(layoutErr, os.ErrNotExist) {
 			if errors.Is(indexErr, os.ErrNotExist) {
 				index := executionIndex{Paths: make(map[string]string)}
-				if err := executions.WriteJSONAtomicWithMode(".store/index.json", index, 0o600); err != nil {
+				if err := executions.WriteJSONAtomicWithMode(".store/index.json", index, 0o600); err != nil || testFailInitIndexWrite {
+					if testFailInitIndexWrite && err == nil {
+						err = errors.New("simulated index write fail")
+					}
 					return fmt.Errorf("initialize execution index: %w", err)
 				}
 			} else if indexErr != nil {
 				return fmt.Errorf("%w: %v", ErrExecutionIndexUnavailable, indexErr)
 			}
 			layout = executionLayout{Version: executionLayoutVersion}
-			if err := locked.WriteJSONAtomicWithMode(".store/execution-layout.json", layout, 0o600); err != nil {
+			if err := locked.WriteJSONAtomicWithMode(".store/execution-layout.json", layout, 0o600); err != nil || testFailInitLayoutWrite {
+				if testFailInitLayoutWrite && err == nil {
+					err = errors.New("simulated layout write fail")
+				}
 				return fmt.Errorf("initialize execution layout: %w", err)
 			}
 			return nil
@@ -220,19 +231,25 @@ func validateExecutionIndex(index executionIndex) error {
 	if index.Paths == nil {
 		return fmt.Errorf("%w: paths are required", ErrExecutionIndexUnavailable)
 	}
+	keys := make([]string, 0, len(index.Paths))
+	for k := range index.Paths {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	seenPaths := make(map[string]struct{}, len(index.Paths))
-	for executionID, path := range index.Paths {
+	for _, executionID := range keys {
+		path := index.Paths[executionID]
 		if err := (apicontract.ExecutionRef{StoreID: "index", ProjectID: "index", ExecutionID: executionID}).Validate(); err != nil {
 			return fmt.Errorf("%w: invalid execution id %q", ErrExecutionIndexUnavailable, executionID)
-		}
-		parts := strings.Split(path, "/")
-		if len(parts) != 3 || !executionDateSegment(parts[0], 4, 0, 9999) || !executionDateSegment(parts[1], 2, 1, 12) || parts[2] != executionID+".json" {
-			return fmt.Errorf("%w: invalid path for execution %q", ErrExecutionIndexUnavailable, executionID)
 		}
 		if _, exists := seenPaths[path]; exists {
 			return fmt.Errorf("%w: duplicate receipt path %q", ErrExecutionIndexUnavailable, path)
 		}
 		seenPaths[path] = struct{}{}
+		parts := strings.Split(path, "/")
+		if len(parts) != 3 || !executionDateSegment(parts[0], 4, 0, 9999) || !executionDateSegment(parts[1], 2, 1, 12) || parts[2] != executionID+".json" {
+			return fmt.Errorf("%w: invalid path for execution %q", ErrExecutionIndexUnavailable, executionID)
+		}
 	}
 	return nil
 }

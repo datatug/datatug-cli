@@ -54,11 +54,19 @@ type RepositoryStore struct {
 	now          func() time.Time
 	// afterMergeStep is a test-only crash seam invoked after each durable
 	// event append and before projections and the final receipt are published.
-	afterMergeStep     func(int) error
-	afterAppendPrepare func() error
-	afterAppendCommit  func() error
-	afterRecovery      func(*RepositoryStore)
-	notifier           *storeNotifier
+	afterMergeStep       func(int) error
+	afterAppendPrepare   func() error
+	afterAppendCommit    func() error
+	afterRecovery        func(*RepositoryStore)
+	openIncidentIndexDir func() (incidentIndexDir, error)
+	readCatalog          func() (incidentCatalog, error)
+	foldEvents           func(events []incidents.Event, at *time.Time) (incidents.Incident, error)
+	notifier             *storeNotifier
+}
+
+type incidentIndexDir interface {
+	ReadDir(n int) ([]os.DirEntry, error)
+	Close() error
 }
 
 type storeNotifier struct {
@@ -89,6 +97,25 @@ type rootedFileOps interface {
 	WriteJSONAtomicWithMode(relativePath string, value any, mode os.FileMode) error
 	ReadJSON(relativePath string, target any) error
 	ReadDir(relativePath string) ([]os.DirEntry, error)
+}
+
+var (
+	testAfterIncidentCapability func(string) error
+	testAfterIncidentLstat      func(string) error
+)
+
+func (s *RepositoryStore) fold(events []incidents.Event, at *time.Time) (incidents.Incident, error) {
+	if s.foldEvents != nil {
+		return s.foldEvents(events, at)
+	}
+	return incidents.Fold(events, at)
+}
+
+func (s *RepositoryStore) openIncidentIndex() (incidentIndexDir, error) {
+	if s.openIncidentIndexDir != nil {
+		return s.openIncidentIndexDir()
+	}
+	return s.incidentRoot.Open(".")
 }
 
 var _ incidents.APIStore = (*RepositoryStore)(nil)
@@ -132,10 +159,22 @@ func newRepositoryStoreWithAcquisitionHook(location incidents.StoreLocation, roo
 		return nil, fmt.Errorf("open incident file capability: %w", err)
 	}
 	incidentPath := filepath.Join(abs, "incidents")
+	if testAfterIncidentCapability != nil {
+		if err := testAfterIncidentCapability(incidentPath); err != nil {
+			_ = files.Close()
+			return nil, err
+		}
+	}
 	incidentInfo, err := os.Lstat(incidentPath)
 	if err != nil || incidentInfo.Mode()&os.ModeSymlink != 0 || !incidentInfo.IsDir() {
 		_ = files.Close()
 		return nil, fmt.Errorf("open incident directory index: incidents must be a real directory")
+	}
+	if testAfterIncidentLstat != nil {
+		if err := testAfterIncidentLstat(incidentPath); err != nil {
+			_ = files.Close()
+			return nil, err
+		}
 	}
 	incidentRoot, err := os.OpenRoot(incidentPath)
 	if err != nil {
@@ -417,10 +456,10 @@ func (s *RepositoryStore) Merge(ctx context.Context, mutation incidents.MergeMut
 			Refs:    []incidents.ArtifactRef{{Kind: incidents.RefIncident, Incident: &mutation.Into}},
 			Payload: mustMarshal(incidents.MergedPayload{Into: mutation.Into, MergeID: mutation.MutationID}),
 		}
-		if _, foldErr := incidents.Fold(append(append([]incidents.Event(nil), intoEvents...), imported...), nil); foldErr != nil {
+		if _, foldErr := store.fold(append(append([]incidents.Event(nil), intoEvents...), imported...), nil); foldErr != nil {
 			return foldErr
 		}
-		if _, foldErr := incidents.Fold(append(append([]incidents.Event(nil), sourceEvents...), sourceMerged), nil); foldErr != nil {
+		if _, foldErr := store.fold(append(append([]incidents.Event(nil), sourceEvents...), sourceMerged), nil); foldErr != nil {
 			return foldErr
 		}
 		intent = mergeIntent{

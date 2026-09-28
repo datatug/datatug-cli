@@ -169,10 +169,14 @@ func resolveRecordsetSource(sourceURL, recordsetPath, collection string) (resolv
 	}
 	foreignKeys := make(datatug.ForeignKeys, len(def.ForeignKeys))
 	for i, fk := range def.ForeignKeys {
+		var refTable datatug.DBCollectionKey
+		if name := fk.RefTable.Name(); name != "" {
+			refTable = datatug.NewTableKey(name, fk.RefTable.Schema(), fk.RefTable.Catalog(), nil)
+		}
 		foreignKeys[i] = &datatug.ForeignKey{
 			Name:        fk.Name,
 			Columns:     fk.Columns,
-			RefTable:    datatug.NewTableKey(fk.RefTable.Name(), fk.RefTable.Schema(), fk.RefTable.Catalog(), nil),
+			RefTable:    refTable,
 			MatchOption: fk.MatchOption,
 			UpdateRule:  fk.UpdateRule,
 			DeleteRule:  fk.DeleteRule,

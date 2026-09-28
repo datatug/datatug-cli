@@ -8,8 +8,10 @@ import (
 
 const viewerID dtviewers.ViewerID = "gc"
 
+var lastRegisteredViewer dtviewers.Viewer
+
 func RegisterAsViewer() {
-	dtviewers.RegisterViewer(dtviewers.Viewer{
+	v := dtviewers.Viewer{
 		ID:          viewerID,
 		Name:        "Google Cloud",
 		Description: "Firestore, Cloud SQL, etc.",
@@ -19,7 +21,9 @@ func RegisterAsViewer() {
 				CloudContext: &clouds.CloudContext{TUI: tui},
 			}, focusTo)
 		},
-	})
+	}
+	lastRegisteredViewer = v
+	dtviewers.RegisterViewer(v)
 }
 
 func goHome(cContext *GCloudContext, focusTo sneatnav.FocusTo) error {

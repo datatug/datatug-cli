@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	datatug "github.com/datatug/datatug-cli/apps/datatugapp"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/clouds"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/gdamore/tcell/v2"
@@ -11,15 +12,31 @@ import (
 	"google.golang.org/api/cloudresourcemanager/v3"
 )
 
+var (
+	newDatatugTUIFunc                     = datatug.NewDatatugTUI
+	lastProjectsTable                     *tview.Table
+	lastProjectsFlex                      *tview.Flex
+	lastProjectsTableSelectedFunc         func(row, column int)
+	lastProjectsTableSelectionChangedFunc func(row, column int)
+	lastProjectsFlexFocusFunc             func()
+	goGCloudProjectFunc                   func(gcProjCtx *CGProjectContext) error
+	tableGetInnerRectFunc                 = func(t *tview.Table) (int, int, int, int) { return t.GetInnerRect() }
+)
+
+func init() {
+	goGCloudProjectFunc = goGCloudProject
+}
+
 func GoGCloudProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error {
 	return showGCloudProjects(cContext, focusTo)
 }
 
 func OpenGCloudProjectsScreen(projects []*cloudresourcemanager.Project) error {
 	cContext := &GCloudContext{
-		projects: projects,
+		CloudContext: &clouds.CloudContext{},
+		projects:     projects,
 	}
-	cContext.TUI = datatug.NewDatatugTUI()
+	cContext.TUI = newDatatugTUIFunc()
 	return showGCloudProjects(cContext, sneatnav.FocusToContent)
 }
 
@@ -33,11 +50,13 @@ func showGCloudProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error
 
 	table := tview.NewTable().
 		SetSelectable(true, false)
+	lastProjectsTable = table
 	// Freeze header row
 	table.SetFixed(1, 0)
 	// We'll wrap the table with a flex to add a vertical scrollbar on the right
 	// and move the border/title to that flex container
 	flex := tview.NewFlex().SetDirection(tview.FlexColumn)
+	lastProjectsFlex = flex
 	sneatv.SetPanelTitle(flex.Box, "Google Cloud Projects")
 	table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
@@ -83,15 +102,12 @@ func showGCloudProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error
 			scroll.SetText("")
 			return
 		}
-		_, _, _, h := table.GetInnerRect()
+		_, _, _, h := tableGetInnerRectFunc(table)
 		if h <= 0 {
 			h = 1
 		}
 		// Track height equals inner height; ensure at least 1
 		track := h
-		if track < 1 {
-			track = 1
-		}
 		// Visible rows approximate: inner height minus header row
 		visible := track - 1
 		if visible < 1 {
@@ -116,12 +132,6 @@ func showGCloudProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error
 		if denominator > 0 {
 			pos = (selRow - 1) * (track - thumbSize) / denominator
 		}
-		if pos < 0 {
-			pos = 0
-		}
-		if pos > track-thumbSize {
-			pos = track - thumbSize
-		}
 
 		// Build the scrollbar string with runes
 		b := make([]rune, 0, track*2)
@@ -140,9 +150,10 @@ func showGCloudProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error
 	}
 
 	// Hook selection change to update the scrollbar
-	table.SetSelectionChangedFunc(func(row, column int) {
+	lastProjectsTableSelectionChangedFunc = func(row, column int) {
 		updateScrollbar()
-	})
+	}
+	table.SetSelectionChangedFunc(lastProjectsTableSelectionChangedFunc)
 
 	go func() {
 		projects, err := cContext.GetProjects()
@@ -175,24 +186,22 @@ func showGCloudProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error
 		})
 	}()
 
-	table.SetSelectedFunc(func(row, column int) {
+	lastProjectsTableSelectedFunc = func(row, column int) {
 		if row <= 0 {
 			return // header
 		}
 		cell := table.GetCell(row, 0)
-		if cell == nil {
-			return
-		}
 		if ref := cell.GetReference(); ref != nil {
 			if ctx, ok := ref.(*CGProjectContext); ok {
-				if err := goGCloudProject(ctx); err != nil {
+				if err := goGCloudProjectFunc(ctx); err != nil {
 					panic(err)
 				}
 			} else {
 				panic(fmt.Errorf("unexpected reference type: %T", ref))
 			}
 		}
-	})
+	}
+	table.SetSelectedFunc(lastProjectsTableSelectedFunc)
 
 	// Compose the layout: table expands, scrollbar is 1 column wide
 	flex.Clear()
@@ -200,9 +209,10 @@ func showGCloudProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error
 	flex.AddItem(scroll, 1, 0, false)
 
 	// Ensure focus goes to the table when this panel is focused
-	flex.SetFocusFunc(func() {
+	lastProjectsFlexFocusFunc = func() {
 		cContext.TUI.App.SetFocus(table)
-	})
+	}
+	flex.SetFocusFunc(lastProjectsFlexFocusFunc)
 
 	content := sneatnav.NewPanel(cContext.TUI, sneatv.WithDefaultBorders(flex, flex.Box))
 

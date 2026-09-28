@@ -15,8 +15,11 @@ func newGCloudProjectBreadcrumbs(gcProjectCtx *CGProjectContext) sneatnav.Breadc
 	return breadcrumbs
 }
 
+var lastGCloudProjectMenu *tview.List
+
 func newGCloudProjectMenu(gcProjCtx *CGProjectContext) sneatnav.Panel {
 	list := tview.NewList()
+	lastGCloudProjectMenu = list
 	sneatv.DefaultBorderWithPadding(list.Box)
 	list.SetTitle(gcProjCtx.Project.DisplayName)
 

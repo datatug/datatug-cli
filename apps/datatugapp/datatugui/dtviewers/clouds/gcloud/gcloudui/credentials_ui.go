@@ -7,10 +7,13 @@ import (
 	"github.com/rivo/tview"
 )
 
+var lastCredentialsList *tview.List
+
 func GoCredentials(cContext *GCloudContext, focusTo sneatnav.FocusTo) error {
 	menu := newMainMenu(cContext, ScreenCredentials, false)
 
 	list := tview.NewList()
+	lastCredentialsList = list
 	sneatv.SetPanelTitle(list.Box, "Google Cloud Projects")
 
 	list.AddItem("Login", "", 'i', func() {})

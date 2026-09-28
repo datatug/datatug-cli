@@ -7,12 +7,15 @@ import (
 	"github.com/rivo/tview"
 )
 
+var lastFirestoreIndexesList *tview.List
+
 func goFirestoreIndexes(gcProjCtx *CGProjectContext) error {
 	breadcrumbs := newGCloudProjectBreadcrumbs(gcProjCtx)
 	breadcrumbs.Push(sneatv.NewBreadcrumb("Firestore", nil))
 	menu := firestoreMainMenu(gcProjCtx, firestoreScreenIndexes, "")
 
 	list := tview.NewList()
+	lastFirestoreIndexesList = list
 	sneatv.DefaultBorderWithPadding(list.Box)
 	list.SetTitle("Firestore Indexes")
 	content := sneatnav.NewPanel(gcProjCtx.TUI, sneatv.WithDefaultBorders(list, list.Box))

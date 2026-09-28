@@ -5,7 +5,10 @@ import (
 	"github.com/datatug/datatug-cli/pkg/sneatv"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
+
+var lastFirestoreMainMenu *tview.List
 
 type firestoreScreen int
 
@@ -32,6 +35,7 @@ func goFirestoreDb(gcProjCtx *CGProjectContext) error {
 
 func firestoreMainMenu(gcProjCtx *CGProjectContext, active firestoreScreen, title string) (menu sneatnav.Panel) {
 	list := sneatnav.MainMenuList(gcProjCtx.TUI)
+	lastFirestoreMainMenu = list
 	sneatv.DefaultBorderWithPadding(list.Box)
 	if title != "" {
 		list.SetTitle(title)

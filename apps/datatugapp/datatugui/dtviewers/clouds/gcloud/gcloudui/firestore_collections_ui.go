@@ -6,6 +6,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/datatug/datatug-cli/pkg/auth/gauth"
+	"github.com/datatug/datatug-cli/pkg/schemers"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/gdamore/tcell/v2"
@@ -21,6 +22,7 @@ func goFirestoreCollections(gcProjCtx *CGProjectContext) error {
 	menu := firestoreMainMenu(gcProjCtx, firestoreScreenCollections, "")
 
 	list := tview.NewList()
+	lastFirestoreCollectionsList = list
 	sneatv.DefaultBorderWithPadding(list.Box)
 	title := "Firestore Collections"
 	if gcProjCtx.Project != nil && gcProjCtx.Project.ProjectId != "" {
@@ -60,7 +62,7 @@ func goFirestoreCollections(gcProjCtx *CGProjectContext) error {
 			}
 			for _, collection := range collections {
 				list.AddItem("📋 "+collection.ID, "", 0, func() {
-					if err := goFirestoreCollection(gcProjCtx, collection, sneatnav.FocusToContent); err != nil {
+					if err := goFirestoreCollectionFunc(gcProjCtx, collection, sneatnav.FocusToContent); err != nil {
 						panic(err)
 					}
 				})
@@ -70,6 +72,12 @@ func goFirestoreCollections(gcProjCtx *CGProjectContext) error {
 
 	gcProjCtx.TUI.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToContent))
 	return nil
+}
+
+var goFirestoreCollectionFunc func(gcProjCtx *CGProjectContext, collection *schemers.Collection, focusTo sneatnav.FocusTo) error
+
+func init() {
+	goFirestoreCollectionFunc = goFirestoreCollection
 }
 
 // newFirestoreClientFunc is a seam so tests can replace newFirestoreClient.
@@ -93,6 +101,12 @@ var deleteRefreshTokenFunc = func() error {
 	return gauth.DeleteRefreshToken()
 }
 
+var (
+	lastFirestoreCollectionsList *tview.List
+	getRefreshTokenFunc          = gauth.GetRefreshToken
+	firestoreNewClient           = firestore.NewClient
+)
+
 // newFirestoreClient attempts to build a Firestore client using an OAuth2 TokenSource
 // derived from a refresh token stored by our gauth package; falls back to ADC if not available.
 func newFirestoreClient(ctx context.Context, projectID string) (*firestore.Client, error) {
@@ -101,7 +115,7 @@ func newFirestoreClient(ctx context.Context, projectID string) (*firestore.Clien
 	}
 
 	// Try to use refresh token from keychain via gauth
-	if rt, err := gauth.GetRefreshToken(); err == nil && rt != "" {
+	if rt, err := getRefreshTokenFunc(); err == nil && rt != "" {
 		// Use a desktop-app OAuth2 client with cloud-platform and datastore scopes
 		cfg := &oauth2.Config{
 			// These values mirror the desktop app config used in gauth
@@ -116,14 +130,14 @@ func newFirestoreClient(ctx context.Context, projectID string) (*firestore.Clien
 		}
 		tok := &oauth2.Token{RefreshToken: rt}
 		ts := cfg.TokenSource(ctx, tok)
-		if client, err := firestore.NewClient(ctx, projectID, option.WithTokenSource(ts)); err == nil {
+		if client, err := firestoreNewClient(ctx, projectID, option.WithTokenSource(ts)); err == nil {
 			return client, nil
 		}
 		// If it failed (e.g., invalid_grant), we will fall back to ADC below.
 	}
 
 	// Fallback: ADC
-	return firestore.NewClient(ctx, projectID)
+	return firestoreNewClient(ctx, projectID)
 }
 
 // addAuthErrorItems renders an error with recovery actions.

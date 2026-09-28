@@ -4,6 +4,12 @@ import (
 	"github.com/datatug/datatug-cli/pkg/sneatv"
 	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+)
+
+var (
+	lastMainMenuList        *tview.List
+	lastMainMenuChangedFunc func(index int, mainText string, secondaryText string, shortcut rune)
 )
 
 type Screen int
@@ -15,6 +21,7 @@ const (
 
 func newMainMenu(cContext *GCloudContext, active Screen, isInContent bool) (menu sneatnav.Panel) {
 	list := sneatnav.MainMenuList(cContext.TUI)
+	lastMainMenuList = list
 	list.SetTitle("Google Cloud")
 	sneatv.DefaultBorderWithPadding(list.Box)
 
@@ -27,14 +34,15 @@ func newMainMenu(cContext *GCloudContext, active Screen, isInContent bool) (menu
 
 	list.SetCurrentItem(int(active))
 
-	list.SetChangedFunc(func(index int, mainText string, secondaryText string, shortcut rune) {
+	lastMainMenuChangedFunc = func(index int, mainText string, secondaryText string, shortcut rune) {
 		switch index { // Not ideal
 		case 0:
 			_ = GoGCloudProjects(cContext, sneatnav.FocusToMenu)
 		case 1:
 			_ = GoCredentials(cContext, sneatnav.FocusToMenu)
 		}
-	})
+	}
+	list.SetChangedFunc(lastMainMenuChangedFunc)
 
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {

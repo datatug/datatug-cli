@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	"cloud.google.com/go/firestore"
 	"github.com/datatug/datatug-cli/pkg/schemers"
 	"github.com/datatug/datatug-cli/pkg/sneatv"
 	"github.com/datatug/datatug-cli/pkg/sneatview/databrowser"
@@ -13,6 +14,40 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"google.golang.org/api/iterator"
+)
+
+type firestoreDocRow struct {
+	id   string
+	data map[string]any
+}
+
+var (
+	lastFirestoreCollectionTable *tview.Table
+	loadFirestoreDocs            = func(ctx context.Context, client *firestore.Client, collectionID string) ([]firestoreDocRow, error) {
+		iter := client.Collection(collectionID).Limit(100).Documents(ctx)
+		var rows []firestoreDocRow
+		for {
+			snap, err := iter.Next()
+			if err != nil {
+				if errors.Is(err, iterator.Done) {
+					break
+				}
+				return nil, err
+			}
+			rows = append(rows, firestoreDocRow{
+				id:   snap.Ref.ID,
+				data: snap.Data(),
+			})
+		}
+		return rows, nil
+	}
+	closeFirestoreClient = func(c *firestore.Client) error {
+		if c == nil {
+			return nil
+		}
+		defer func() { _ = recover() }()
+		return c.Close()
+	}
 )
 
 func goFirestoreCollection(gcProjCtx *CGProjectContext, collection *schemers.Collection, focusTo sneatnav.FocusTo) error {
@@ -38,6 +73,8 @@ func goFirestoreCollection(gcProjCtx *CGProjectContext, collection *schemers.Col
 
 	// Loading placeholder
 	b.Table.SetCell(1, 0, tview.NewTableCell("Loading...").SetSelectable(false))
+
+	lastFirestoreCollectionTable = b.Table
 
 	content := sneatnav.NewPanel(gcProjCtx.TUI, sneatv.WithDefaultBorders(b, b.Box))
 
@@ -83,39 +120,24 @@ func goFirestoreCollection(gcProjCtx *CGProjectContext, collection *schemers.Col
 			})
 			return
 		}
-		defer func() { _ = client.Close() }()
+		defer func() { _ = closeFirestoreClient(client) }()
 
-		iter := client.Collection(collection.ID).Limit(100).Documents(ctx)
-		type row struct {
-			id   string
-			data map[string]any
+		rowsData, err := loadFirestoreDocs(ctx, client, collection.ID)
+		if err != nil {
+			scheduleUpdate(gcProjCtx.TUI.App, func() {
+				b.Table.Clear()
+				b.Table.SetCell(0, 0, tview.NewTableCell("Error").SetSelectable(false))
+				b.Table.SetCell(1, 0, tview.NewTableCell(err.Error()).SetSelectable(false))
+			})
+			return
 		}
-		var rows []row
 		var columns []string
-		for {
-			snap, err := iter.Next()
-			if err != nil {
-				if errors.Is(err, iterator.Done) {
-					break
-				}
-				scheduleUpdate(gcProjCtx.TUI.App, func() {
-					b.Table.Clear()
-					b.Table.SetCell(0, 0, tview.NewTableCell("Error").SetSelectable(false))
-					b.Table.SetCell(1, 0, tview.NewTableCell(err.Error()).SetSelectable(false))
-				})
-				return
-			}
-			r := row{
-				id:   snap.Ref.ID,
-				data: snap.Data(),
-			}
+		for _, r := range rowsData {
 			for col := range r.data {
 				if !slices.Contains(columns, col) {
 					columns = append(columns, col)
 				}
 			}
-			//b, _ := json.Marshal(snap.Data())
-			rows = append(rows, r)
 		}
 
 		slices.Sort(columns)
@@ -131,11 +153,11 @@ func goFirestoreCollection(gcProjCtx *CGProjectContext, collection *schemers.Col
 				b.Table.SetCell(0, i+1, cell)
 			}
 			//table.SetCell(0, 1, tview.NewTableCell("Data (JSON)").SetTextColor(headerStyle).SetSelectable(false))
-			if len(rows) == 0 {
+			if len(rowsData) == 0 {
 				b.Table.SetCell(1, 0, tview.NewTableCell("No documents").SetSelectable(false))
 				return
 			}
-			for i, r := range rows {
+			for i, r := range rowsData {
 				b.Table.SetCell(i+1, 0, tview.NewTableCell(r.id))
 				for j, col := range columns {
 					if v, hasVal := r.data[col]; hasVal {

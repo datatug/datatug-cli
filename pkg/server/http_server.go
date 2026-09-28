@@ -40,6 +40,11 @@ const (
 	responseWriteTimeout = 60 * time.Second
 )
 
+var (
+	filestoreNewStore = filestore.NewStore
+	listenAndServeFn  = func(s *http.Server) error { return s.ListenAndServe() }
+)
+
 type HttpServer struct {
 	s *http.Server
 }
@@ -91,7 +96,7 @@ func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storag
 		}
 	}
 	return func(id string) (v storage.Store, err error) {
-		if v, err = filestore.NewStore("files", pathsByID); err != nil {
+		if v, err = filestoreNewStore("files", pathsByID); err != nil {
 			err = fmt.Errorf("failed to create filestore for storage id=%v: %w", id, err)
 			return
 		}
@@ -192,7 +197,7 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	}
 	log.Printf("Serving on: http://%v:%v", agentHost, agentPort)
 
-	return s.s.ListenAndServe()
+	return listenAndServeFn(s.s)
 }
 
 func root(writer http.ResponseWriter, _ *http.Request) {

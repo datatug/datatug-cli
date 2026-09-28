@@ -51,9 +51,11 @@ func newRecordsetUI(tui *sneatnav.TUI, collectionCtx dtviewers.CollectionContext
 	schema := collectionCtx.Schema()
 	var fks []schemer.ForeignKey
 
-	go func() {
-		fks, _ = schema.GetForeignKeys(ctx, "", tableName)
-	}()
+	if schema != nil {
+		go func() {
+			fks, _ = schema.GetForeignKeys(ctx, "", tableName)
+		}()
+	}
 
 	var rs recordset.Recordset
 
@@ -152,6 +154,7 @@ func newRecordsetUI(tui *sneatnav.TUI, collectionCtx dtviewers.CollectionContext
 				collCtx.CollectionRef = dal.NewCollectionRef(refTableName, "", collectionCtx.CollectionRef.Parent())
 
 				goTable(tui, collCtx)
+				return nil
 			}
 		default:
 			return event
@@ -160,11 +163,10 @@ func newRecordsetUI(tui *sneatnav.TUI, collectionCtx dtviewers.CollectionContext
 	})
 
 	go func() {
-		var err error
-		if collectionCtx.DbContext == nil {
-			panic("collectionCtx.DbContext is nil")
-		}
-		var db dal.DB
+		var (
+			err error
+			db  dal.DB
+		)
 		db, err = collectionCtx.GetDB(context.Background())
 		if err != nil {
 			tui.App.QueueUpdateDraw(func() {

@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+var (
+	jsonMarshal    = json.Marshal
+	osReadFileSnap = os.ReadFile
+)
+
 // fixtureRecordedAt is the fetchedAt value fixtureFS reports for every
 // snapshot: the demo project's fixture files carry the true fetch date only
 // in prose (fixtures/http/README.md), not as file metadata dalgo2http can
@@ -85,11 +90,11 @@ func (f fixtureFS) Open(name string) (fs.File, error) {
 	if id == "" {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
 	}
-	body, err := os.ReadFile(filepath.Join(f.dir, id+".json"))
+	body, err := osReadFileSnap(filepath.Join(f.dir, id+".json"))
 	if err != nil {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: err}
 	}
-	envelope, err := json.Marshal(struct {
+	envelope, err := jsonMarshal(struct {
 		FetchedAt  time.Time       `json:"fetchedAt"`
 		StatusCode int             `json:"statusCode"`
 		Body       json.RawMessage `json:"body"`

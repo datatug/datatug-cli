@@ -497,6 +497,55 @@ func TestNextCollection_SchemaEmpty_TableAndView(t *testing.T) {
 	}
 }
 
+func TestNextCollection_UnknownCollectionTypePanics(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	rows := sqlmock.NewRows([]string{"TABLE_SCHEMA", "TABLE_NAME", "TABLE_TYPE"}).
+		AddRow("dbo", "OtherObj", "UNKNOWN_TYPE")
+	mock.ExpectQuery(".*").WillReturnRows(rows)
+
+	v := collectionsProvider{db: db}
+	reader, err := v.GetCollections(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("GetCollections error: %v", err)
+	}
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic on unknown collection type")
+		}
+	}()
+	_, _ = reader.NextCollection()
+}
+
+func TestNextCollection_ScanError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	rows := sqlmock.NewRows([]string{"TABLE_SCHEMA", "TABLE_NAME", "TABLE_TYPE"}).
+		AddRow(nil, nil, nil)
+	mock.ExpectQuery(".*").WillReturnRows(rows)
+
+	v := collectionsProvider{db: db}
+	reader, err := v.GetCollections(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("GetCollections error: %v", err)
+	}
+
+	_, err = reader.NextCollection()
+	if err == nil {
+		t.Fatal("expected scan error, got nil")
+	}
+}
+
 func TestNextCollection_SchemaSet(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

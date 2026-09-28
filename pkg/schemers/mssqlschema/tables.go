@@ -87,6 +87,9 @@ func (s tablesReader) NextCollection() (collectionInfo *datatug.CollectionInfo, 
 		schema = s.schema
 		err = s.rows.Scan(&name, &dbType)
 	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan table row into Table struct: %w", err)
+	}
 	var collectionType datatug.CollectionType
 	switch strings.ToLower(dbType) {
 	case "table":
@@ -101,10 +104,6 @@ func (s tablesReader) NextCollection() (collectionInfo *datatug.CollectionInfo, 
 		TableProps: datatug.TableProps{
 			DbType: dbType,
 		},
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan table row into Table struct: %w", err)
 	}
 	return &table, nil
 }

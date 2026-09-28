@@ -97,6 +97,12 @@ func (e Executor) executeMulti(request Request) (response Response, err error) {
 
 var reParameter = regexp.MustCompile(`@\w+`)
 
+var (
+	closeRowsSeam   = func(rows *sql.Rows) error { return rows.Close() }
+	columnTypesSeam = func(rows *sql.Rows) ([]*sql.ColumnType, error) { return rows.ColumnTypes() }
+	scanRowSeam     = func(rows *sql.Rows, dest ...interface{}) error { return rows.Scan(dest...) }
+)
+
 func (e Executor) executeCommand(command RequestCommand) (recordset datatug.Recordset, err error) {
 
 	var dbServer datatug.ServerRef
@@ -205,12 +211,12 @@ func (e Executor) executeQuery(db *sql.DB, driver, text string, args []interface
 		return
 	}
 	defer func() {
-		if err := rows.Close(); err != nil {
+		if err := closeRowsSeam(rows); err != nil {
 			log.Printf("Failed to close rows reader: %v", err)
 		}
 	}()
 	var columnTypes []*sql.ColumnType
-	if columnTypes, err = rows.ColumnTypes(); err != nil {
+	if columnTypes, err = columnTypesSeam(rows); err != nil {
 		return
 	}
 
@@ -228,7 +234,7 @@ func (e Executor) executeQuery(db *sql.DB, driver, text string, args []interface
 		for i := range row {
 			valPointers[i] = &row[i]
 		}
-		if err = rows.Scan(valPointers...); err != nil {
+		if err = scanRowSeam(rows, valPointers...); err != nil {
 			err = fmt.Errorf("failed to scan values for row #%v: %w", rowNumber, err)
 			return
 		}

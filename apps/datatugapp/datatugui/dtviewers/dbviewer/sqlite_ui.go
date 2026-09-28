@@ -54,6 +54,10 @@ func goSqliteHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	setDbHomeMenuInputCapture(tui, menu, tree)
 	setDbHomeTreeInputCapture(tui, tree, openNode)
 
+	if onSqliteHomeShown != nil {
+		onSqliteHomeShown(tree)
+	}
+
 	content := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(tree, tree.Box))
 
 	tui.SetPanels(menuPanel, content, sneatnav.WithFocusTo(focusTo))
@@ -61,9 +65,12 @@ func goSqliteHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	return nil
 }
 
-const demoDbsFolder = "~/datatug/demo-dbs/"
+var demoDbsFolder = "~/datatug/demo-dbs/"
 const northwindSqliteDbFileName = "northwind.sqlite"
-const northwindSqliteDbUrl = "https://raw.githubusercontent.com/jpwhite3/northwind-SQLite3/refs/heads/main/dist/northwind.db"
+var northwindSqliteDbUrl = "https://raw.githubusercontent.com/jpwhite3/northwind-SQLite3/refs/heads/main/dist/northwind.db"
+var onDownloadSetup func(cancelBtn *tview.Button, container *tview.Flex)
+var onSqliteHomeShown func(tree *tview.TreeView)
+var onDownloadChunk func(f *os.File, cancel func())
 
 func fileExists(path string) bool {
 	path = fsutils.ExpandHome(path)
@@ -180,6 +187,9 @@ func downloadFile(tui *sneatnav.TUI, from, to string) error {
 				}
 				return event
 			})
+			if onDownloadSetup != nil {
+				onDownloadSetup(cancelBtn, container)
+			}
 		})
 
 		start := time.Now()
@@ -205,10 +215,7 @@ func downloadFile(tui *sneatnav.TUI, from, to string) error {
 
 		// UI update function (also used later during/after download)
 		update := func(final bool) {
-			elapsed := time.Since(start).Seconds()
-			if elapsed <= 0 {
-				elapsed = 1e-9
-			}
+			elapsed := max(time.Since(start).Seconds(), 1e-9)
 			speed := float64(downloaded) / 1024.0 / 1024.0 / elapsed
 			var percent string
 			if total > 0 {
@@ -218,10 +225,7 @@ func downloadFile(tui *sneatnav.TUI, from, to string) error {
 				percent = "?%"
 			}
 			now := time.Now()
-			interval := now.Sub(lastTick).Seconds()
-			if interval <= 0 {
-				interval = 1e-9
-			}
+			interval := max(now.Sub(lastTick).Seconds(), 1e-9)
 			instSpeed := float64(downloaded-lastBytes) / 1024.0 / 1024.0 / interval
 			lastTick = now
 			lastBytes = downloaded
@@ -325,6 +329,9 @@ func downloadFile(tui *sneatnav.TUI, from, to string) error {
 			for {
 				n, respErr := resp.Body.Read(buf)
 				if n > 0 {
+					if onDownloadChunk != nil {
+						onDownloadChunk(f, cancel)
+					}
 					if _, writeErr := f.Write(buf[:n]); writeErr != nil {
 						copyErr = writeErr
 						return
@@ -347,38 +354,22 @@ func downloadFile(tui *sneatnav.TUI, from, to string) error {
 			select {
 			case <-ticker.C:
 				update(false)
-			case <-ctx.Done():
-				// Cancel requested
-				canceled = true
-				_ = resp.Body.Close()
-				_ = f.Close()
-				_ = os.Remove(tmp)
-				tui.App.QueueUpdateDraw(func() {
-					// Hide the Cancel button row when canceled
-					container.RemoveItem(btnRow)
-					// Move focus to progress text since the button row is gone
-					tui.SetFocus(progress)
-					_, _ = fmt.Fprintln(progress, "[yellow]Canceled.[-]")
-				})
-				doneChan <- ctx.Err()
-				return
 			case <-done:
 				// finish copy
 				_ = f.Close()
+				if canceled || errors.Is(copyErr, context.Canceled) || ctx.Err() != nil {
+					_ = os.Remove(tmp)
+					tui.App.QueueUpdateDraw(func() {
+						// Hide the Cancel button row when canceled
+						container.RemoveItem(btnRow)
+						// Move focus to progress text since the button row is gone
+						tui.SetFocus(progress)
+						_, _ = fmt.Fprintln(progress, "[yellow]Canceled.[-]")
+					})
+					doneChan <- ctx.Err()
+					return
+				}
 				if copyErr != nil {
-					// If context canceled, treat as cancel, not error
-					if canceled || errors.Is(copyErr, context.Canceled) {
-						_ = os.Remove(tmp)
-						tui.App.QueueUpdateDraw(func() {
-							// Hide the Cancel button row when canceled
-							container.RemoveItem(btnRow)
-							// Move focus to progress text since the button row is gone
-							tui.SetFocus(progress)
-							_, _ = fmt.Fprintln(progress, "[yellow]Canceled.[-]")
-						})
-						doneChan <- ctx.Err()
-						return
-					}
 					tui.App.QueueUpdateDraw(func() {
 						_, _ = fmt.Fprintf(progress, "[red]Error during download: %v[-]\n", copyErr)
 					})

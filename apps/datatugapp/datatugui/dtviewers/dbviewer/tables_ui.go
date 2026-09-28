@@ -64,11 +64,7 @@ func showCollections(tui *sneatnav.TUI, focusTo sneatnav.FocusTo, dbContext dtvi
 		if row <= 0 {
 			return
 		}
-		cell := collectionsBox.GetCell(row, 0)
-		if cell == nil {
-			return
-		}
-		ref := cell.GetReference()
+		ref := collectionsBox.GetCell(row, 0).GetReference()
 		if ref == nil {
 			return
 		}
@@ -94,29 +90,33 @@ func showCollections(tui *sneatnav.TUI, focusTo sneatnav.FocusTo, dbContext dtvi
 			t.SetSelectable(false, false)
 		})
 	}
-	setFocusAndBlurFunc(columns.Table)
+	if columns != nil {
+		setFocusAndBlurFunc(columns.Table)
+	}
 	setFocusAndBlurFunc(fks.Table)
 	setFocusAndBlurFunc(referrers.Table)
 
-	columns.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyRight:
-			tui.App.SetFocus(flex2)
-			return nil
-		case tcell.KeyLeft:
-			tui.App.SetFocus(collectionsBox)
-			return nil
-		case tcell.KeyUp:
-			row, _ := columns.GetSelection()
-			if row <= 1 {
-				tui.Header.SetFocus(sneatnav.ToBreadcrumbs, columns)
+	if columns != nil {
+		columns.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			switch event.Key() {
+			case tcell.KeyRight:
+				tui.App.SetFocus(flex2)
 				return nil
+			case tcell.KeyLeft:
+				tui.App.SetFocus(collectionsBox)
+				return nil
+			case tcell.KeyUp:
+				row, _ := columns.GetSelection()
+				if row <= 1 {
+					tui.Header.SetFocus(sneatnav.ToBreadcrumbs, columns)
+					return nil
+				}
+				return event
+			default:
+				return event
 			}
-			return event
-		default:
-			return event
-		}
-	})
+		})
+	}
 
 	fks.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
@@ -157,8 +157,13 @@ func showCollections(tui *sneatnav.TUI, focusTo sneatnav.FocusTo, dbContext dtvi
 			return event
 		}
 	})
+	if onCollectionsShown != nil {
+		onCollectionsShown(collectionsBox, columns, fks, referrers)
+	}
 	return nil
 }
+
+var onCollectionsShown func(collectionsBox *TablesBox, columns *columnsBox, fks *foreignKeysBox, referrers *referrersBox)
 
 func setDefaultInputCaptureForList(tui *sneatnav.TUI, list *tview.List) {
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {

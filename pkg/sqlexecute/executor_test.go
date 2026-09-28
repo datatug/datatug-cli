@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -829,4 +830,70 @@ func TestExecuteQuery_UNIQUEIDENTIFIER_BadBytes(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from uuid.FromBytes with invalid byte slice")
 	}
+}
+
+func TestRequestCommand_Validate_DbAndPort(t *testing.T) {
+	cmd := RequestCommand{
+		Env:  "dev",
+		Text: "SELECT 1",
+		DB:   "mydb",
+		ServerRef: datatug.ServerRef{
+			Port: 5432,
+		},
+	}
+	err := cmd.Validate()
+	if err == nil || !strings.Contains(err.Error(), "both 'db' & 'port' were provided") {
+		t.Fatalf("expected db & port error, got: %v", err)
+	}
+}
+
+func TestExecuteQuery_SeamsErrors(t *testing.T) {
+	db := openMemDB(t)
+	defer db.Close()
+	e := NewExecutor(nil, nil)
+
+	// Test closeRowsSeam error (logged in defer)
+	t.Run("closeRows error", func(t *testing.T) {
+		origClose := closeRowsSeam
+		defer func() { closeRowsSeam = origClose }()
+		closeRowsSeam = func(rows *sql.Rows) error {
+			_ = rows.Close()
+			return errors.New("simulated close rows error")
+		}
+		rs, err := e.executeQuery(db, "sqlite3", "SELECT id, name FROM items", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(rs.Rows) != 2 {
+			t.Fatalf("expected 2 rows, got %d", len(rs.Rows))
+		}
+	})
+
+	// Test columnTypesSeam error
+	t.Run("columnTypes error", func(t *testing.T) {
+		origCT := columnTypesSeam
+		defer func() { columnTypesSeam = origCT }()
+		simErr := errors.New("simulated column types error")
+		columnTypesSeam = func(rows *sql.Rows) ([]*sql.ColumnType, error) {
+			return nil, simErr
+		}
+		_, err := e.executeQuery(db, "sqlite3", "SELECT id, name FROM items", nil)
+		if !errors.Is(err, simErr) {
+			t.Fatalf("expected %v, got %v", simErr, err)
+		}
+	})
+
+	// Test scanRowSeam error
+	t.Run("scanRow error", func(t *testing.T) {
+		origScan := scanRowSeam
+		defer func() { scanRowSeam = origScan }()
+		simErr := errors.New("simulated scan error")
+		scanRowSeam = func(rows *sql.Rows, dest ...interface{}) error {
+			return simErr
+		}
+		_, err := e.executeQuery(db, "sqlite3", "SELECT id, name FROM items", nil)
+		if err == nil || !strings.Contains(err.Error(), "failed to scan values for row #1") {
+			t.Fatalf("expected scan row error, got: %v", err)
+		}
+	})
 }

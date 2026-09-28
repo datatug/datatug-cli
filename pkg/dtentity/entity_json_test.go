@@ -1,6 +1,7 @@
 package dtentity
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -60,3 +61,69 @@ func TestUnmarshalEntity_FromAuthoredYAMLShapedJSON(t *testing.T) {
 		t.Errorf("Tables = %+v, want one key named users", entity.Tables)
 	}
 }
+
+func TestUnmarshalEntity_Errors(t *testing.T) {
+	if _, err := UnmarshalEntity([]byte("{bad json")); err == nil {
+		t.Fatal("expected unmarshal error for malformed json")
+	}
+
+	origUnmarshal := jsonUnmarshal
+	defer func() { jsonUnmarshal = origUnmarshal }()
+
+	callCount := 0
+	jsonUnmarshal = func(data []byte, v any) error {
+		callCount++
+		if callCount == 2 {
+			return errors.New("tablesDoc unmarshal error")
+		}
+		return origUnmarshal(data, v)
+	}
+
+	if _, err := UnmarshalEntity([]byte(`{}`)); err == nil {
+		t.Fatal("expected error on second unmarshal")
+	}
+}
+
+func TestMarshalEntity_Errors(t *testing.T) {
+	origMarshal := jsonMarshal
+	origUnmarshal := jsonUnmarshal
+	defer func() {
+		jsonMarshal = origMarshal
+		jsonUnmarshal = origUnmarshal
+	}()
+
+	entityWithTables := &datatug.Entity{
+		ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "User", Title: "User"}},
+		Tables:      datatug.TableKeys{datatug.NewTableKey("users", "public", "", nil)},
+	}
+
+	// 1. Initial marshal error
+	jsonMarshal = func(v any) ([]byte, error) {
+		return nil, errors.New("marshal error")
+	}
+	if _, err := MarshalEntity(entityWithTables); err == nil {
+		t.Fatal("expected marshal error")
+	}
+
+	// 2. Intermediate unmarshal error
+	jsonMarshal = origMarshal
+	jsonUnmarshal = func(data []byte, v any) error {
+		return errors.New("unmarshal error")
+	}
+	if _, err := MarshalEntity(entityWithTables); err == nil {
+		t.Fatal("expected unmarshal error")
+	}
+
+	// 3. tables marshal error
+	jsonUnmarshal = origUnmarshal
+	jsonMarshal = func(v any) ([]byte, error) {
+		if _, ok := v.([]TableKeyDoc); ok {
+			return nil, errors.New("tables marshal error")
+		}
+		return origMarshal(v)
+	}
+	if _, err := MarshalEntity(entityWithTables); err == nil {
+		t.Fatal("expected tables marshal error")
+	}
+}
+

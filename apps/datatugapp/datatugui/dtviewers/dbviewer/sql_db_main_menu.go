@@ -54,5 +54,10 @@ func newSqlDbMenu(tui *sneatnav.TUI, selectedScreen SqlDbRootScreen, dbContext d
 		}
 	})
 
+	if onSqlDbMenuCreated != nil {
+		onSqlDbMenuCreated(list)
+	}
 	return sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(list, list.Box))
 }
+
+var onSqlDbMenuCreated func(list *tview.List)

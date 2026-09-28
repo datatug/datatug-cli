@@ -16,12 +16,12 @@ import (
 // leaf reads. The caller supplies source URLs from its project environment.
 // No joined query is delegated to a database or to an OVDB server.
 func (e *Executor) RunFederatedDTQL(ctx context.Context, document []byte, sourceURLs map[string]string, variables map[string]any) (Result, error) {
-	stream, err := e.StreamFederatedDTQL(ctx, document, sourceURLs, variables)
+	stream, err := streamFederatedDTQLFn(e, ctx, document, sourceURLs, variables)
 	if err != nil {
 		return Result{}, err
 	}
 	defer func() { _ = stream.Close() }()
-	rows, statistics, err := collectRows(stream.Reader)
+	rows, statistics, err := collectRowsFederatedFn(stream.Reader)
 	if err != nil {
 		return Result{}, err
 	}

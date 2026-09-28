@@ -79,6 +79,12 @@ func TestGoSettingsScreen_GetSettingsError(t *testing.T) {
 func TestGoSettingsScreen_MarshalError(t *testing.T) {
 	registerOnce.Do(func() { RegisterModule() })
 
+	origGetSettings := getSettingsFn
+	t.Cleanup(func() { getSettingsFn = origGetSettings })
+	getSettingsFn = func() (dtconfig.Settings, error) {
+		return dtconfig.Settings{}, nil
+	}
+
 	origMarshal := marshalFn
 	t.Cleanup(func() { marshalFn = origMarshal })
 	marshalFn = func(_ interface{}) ([]byte, error) {
@@ -204,4 +210,18 @@ func (e *errLexer) SetAnalyser(_ func(text string) float32) chroma.Lexer {
 
 func (e *errLexer) AnalyseText(_ string) float32 {
 	return 0
+}
+
+func TestGoSettingsScreen_MarshalSuccess(t *testing.T) {
+	registerOnce.Do(func() { RegisterModule() })
+	oldGetSettings := getSettingsFn
+	getSettingsFn = func() (dtconfig.Settings, error) {
+		return dtconfig.Settings{}, nil
+	}
+	defer func() { getSettingsFn = oldGetSettings }()
+
+	tui := newTestTUI(t)
+	if err := GoSettingsScreen(tui, sneatnav.FocusToContent); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }

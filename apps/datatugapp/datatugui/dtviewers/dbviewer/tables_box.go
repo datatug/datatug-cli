@@ -25,6 +25,7 @@ type TablesBox struct {
 	filter         string
 	collections    []*datatug.CollectionInfo
 	nextFocus      tview.Primitive
+	onSelected     func(row, col int)
 }
 
 func (b *TablesBox) SetNextFocus(next tview.Primitive) {
@@ -76,14 +77,15 @@ func NewTablesBox(tui *sneatnav.TUI, dbContext dtviewers.DbContext, collectionTy
 
 	// Enable cell selection by row and column
 	table.SetSelectable(true, false)
-	table.SetSelectedFunc(func(row, _ int) {
+	b.onSelected = func(row, _ int) {
 		cell := table.GetCell(row, 0)
 		collectionInfo := cell.Reference.(*datatug.CollectionInfo)
 		goTable(tui, dtviewers.CollectionContext{
 			CollectionRef: collectionInfo.Ref,
 			DbContext:     dbContext,
 		})
-	})
+	}
+	table.SetSelectedFunc(b.onSelected)
 	{
 		colIndex := 0
 		addHeader := func(name string, align int, expansion int) {

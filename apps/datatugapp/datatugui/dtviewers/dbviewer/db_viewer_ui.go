@@ -13,11 +13,17 @@ type RecentDB struct {
 	Path string
 }
 
+var onDbBreadcrumbAction func(action func() error)
+
 func GetDbViewersBreadcrumbs(tui *sneatnav.TUI) sneatnav.Breadcrumbs {
 	breadcrumbs := dtviewers.GetViewersBreadcrumbs(tui)
-	breadcrumbs.Push(sneatv.NewBreadcrumb("DB", func() error {
+	action := func() error {
 		return GoDbViewerSelector(tui, sneatnav.FocusToContent)
-	}))
+	}
+	if onDbBreadcrumbAction != nil {
+		onDbBreadcrumbAction(action)
+	}
+	breadcrumbs.Push(sneatv.NewBreadcrumb("DB", action))
 	return breadcrumbs
 }
 

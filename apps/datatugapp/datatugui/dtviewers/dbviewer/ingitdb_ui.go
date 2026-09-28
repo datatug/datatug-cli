@@ -7,6 +7,8 @@ import (
 	"github.com/rivo/tview"
 )
 
+var onIngitdbHomeShown func(tree *tview.TreeView)
+
 func goIngitdbBHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 	breadcrumbs := GetDbViewersBreadcrumbs(tui)
 	breadcrumbs.Push(sneatv.NewBreadcrumb("inGitDB", nil))
@@ -38,6 +40,10 @@ func goIngitdbBHome(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
 
 	setDbHomeMenuInputCapture(tui, menu, tree)
 	setDbHomeTreeInputCapture(tui, tree, openNode)
+
+	if onIngitdbHomeShown != nil {
+		onIngitdbHomeShown(tree)
+	}
 
 	content := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(tree, tree.Box))
 

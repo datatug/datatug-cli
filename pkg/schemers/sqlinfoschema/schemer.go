@@ -82,12 +82,12 @@ func (s InformationSchema) getTables(catalog string) (tables []*datatug.Collecti
        TABLE_TYPE
 FROM INFORMATION_SCHEMA.TABLES
 ORDER BY TABLE_SCHEMA, TABLE_NAME`)
-	defer func() {
-		_ = rows.Close()
-	}()
 	if err != nil {
 		return nil, fmt.Errorf("failed to query INFORMATION_SCHEMA.TABLES: %w", err)
 	}
+	defer func() {
+		_ = rows.Close()
+	}()
 	tables = make([]*datatug.CollectionInfo, 0)
 	for rows.Next() {
 		var schema, name, dbType string

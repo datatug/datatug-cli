@@ -26,14 +26,14 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dal-go/dalgo v0.87.2-0.20260923234132-f2300b27e9c2
-	github.com/dal-go/dalgo2http v0.2.0
-	github.com/dal-go/dalgo2sql v0.20.0
-	github.com/dal-go/dalgo2sqlite v0.1.11
+	github.com/dal-go/dalgo v0.88.0
+	github.com/dal-go/dalgo2http v0.2.1
+	github.com/dal-go/dalgo2sql v0.19.3
+	github.com/dal-go/dalgo2sqlite v0.2.2
 	github.com/dal-go/record v0.1.3
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.41.2-0.20260923224105-0b1c9b7a7ddd
-	github.com/datatug/sql2csv v0.0.0-20260826045256-b0d582f72f50
+	github.com/datatug/datatug-core v0.41.2
+	github.com/datatug/sql2csv v0.0.1
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/filetug/filetug v0.3.0
 	github.com/gdamore/tcell/v2 v2.13.10
@@ -42,8 +42,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/gosuri/uitable v0.0.4
-	github.com/ingitdb/dalgo2ingitdb v0.6.1
-	github.com/ingitdb/ingitdb-go/ingitdb v0.7.3
+	github.com/ingitdb/dalgo2ingitdb v0.6.2
+	github.com/ingitdb/ingitdb-go/ingitdb v0.7.7
 	github.com/ingr-io/ingr-go v0.0.2
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/go-sqlite3 v1.14.50
@@ -68,7 +68,7 @@ require (
 	github.com/xuri/excelize/v2 v2.11.0
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/oauth2 v0.36.0
-	golang.org/x/text v0.41.0
+	golang.org/x/text v0.42.0
 	google.golang.org/api v0.296.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.59.0
@@ -181,7 +181,7 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/strongo/analytics v0.2.8 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
-	github.com/strongo/dsstore v0.0.8 // indirect
+	github.com/strongo/dsstore v0.0.20 // indirect
 	github.com/strongo/strongoapp v0.31.55 // indirect
 	github.com/tiendc/go-deepcopy v1.7.2 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
@@ -204,13 +204,11 @@ require (
 	golang.org/x/crypto v0.56.0 // indirect
 	golang.org/x/exp v0.0.0-20260824195058-e88cd73687aa // indirect
 	golang.org/x/image v0.45.0 // indirect
-	golang.org/x/mod v0.40.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.49.0 // indirect
 	google.golang.org/genproto v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688 // indirect

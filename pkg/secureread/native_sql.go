@@ -2,7 +2,6 @@ package secureread
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/dal-go/dalgo/dal"
@@ -109,7 +108,7 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 // adapter dalgo2sqlite itself composes) reuses its tested TextQuery
 // execution and row-to-record conversion rather than re-implementing it.
 func openReadOnlySQLite(ctx context.Context, path string) (dal.DB, func(), error) {
-	sqlDB, err := sql.Open("sqlite", path)
+	sqlDB, err := sqlOpenNative("sqlite", path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("secureread: open sqlite %q: %w", path, err)
 	}
@@ -118,7 +117,7 @@ func openReadOnlySQLite(ctx context.Context, path string) (dal.DB, func(), error
 		_ = sqlDB.Close()
 		return nil, nil, fmt.Errorf("secureread: open sqlite %q: %w", path, pingErr)
 	}
-	if _, execErr := sqlDB.ExecContext(ctx, "PRAGMA query_only = ON"); execErr != nil {
+	if execErr := pragmaQueryOnly(ctx, sqlDB); execErr != nil {
 		_ = sqlDB.Close()
 		return nil, nil, fmt.Errorf("secureread: enable read-only session on %q: %w", path, execErr)
 	}

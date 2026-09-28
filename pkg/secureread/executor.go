@@ -108,7 +108,7 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 	if err != nil {
 		return Result{}, err
 	}
-	rows, statistics, err := collectRows(apResult.Reader)
+	rows, statistics, err := collectRowsFn(apResult.Reader)
 	if err != nil {
 		return Result{}, err
 	}

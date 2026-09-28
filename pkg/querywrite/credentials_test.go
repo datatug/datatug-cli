@@ -140,3 +140,26 @@ func TestDefaultValueCredentialReason_ScreensTheFormCoreScreens(t *testing.T) {
 		}
 	}
 }
+
+func TestJsonStringsCredentialReason_Branches(t *testing.T) {
+	const secret = "postgres://u:secret@h/db"
+
+	// 1. Secret in slice
+	_, found := jsonStringsCredentialReason([]any{secret})
+	if !found {
+		t.Fatal("expected secret found in slice")
+	}
+
+	// 2. Secret in map key
+	_, found = jsonStringsCredentialReason(map[string]any{secret: "val"})
+	if !found {
+		t.Fatal("expected secret found in map key")
+	}
+
+	// 3. Secret in map value
+	_, found = jsonStringsCredentialReason(map[string]any{"field": secret})
+	if !found {
+		t.Fatal("expected secret found in map value")
+	}
+}
+

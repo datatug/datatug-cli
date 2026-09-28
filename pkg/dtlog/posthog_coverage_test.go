@@ -353,7 +353,7 @@ func TestWritePostHogConfigToFile_CreateError(t *testing.T) {
 	defer restore()
 
 	err := writePostHogConfigToFile(context.TODO(), posthogConfig{ApiKey: "k", DistinctID: "d"})
-	assert.NoError(t, err) // function always returns nil
+	assert.Error(t, err)
 }
 
 // --- readPostHogConfig: file not found ---
@@ -485,7 +485,7 @@ func TestWritePostHogConfigToFile_EncodeError(t *testing.T) {
 	defer restore()
 
 	err := writePostHogConfigToFile(context.Background(), posthogConfig{ApiKey: "k", DistinctID: "d"})
-	assert.NoError(t, err) // function always returns nil
+	assert.Error(t, err)
 }
 
 // --- getPostHogApiKeyFromServer: body read error ---

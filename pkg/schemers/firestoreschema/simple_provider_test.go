@@ -305,3 +305,23 @@ func TestGetCollections_iterError(t *testing.T) {
 		t.Fatalf("expected errIter, got %v", err)
 	}
 }
+
+func TestDefaultSeams(t *testing.T) {
+	t.Run("firestoreDoc", func(t *testing.T) {
+		defer func() { _ = recover() }()
+		_ = firestoreDoc(nil, "path")
+	})
+	t.Run("firestoreCollections", func(t *testing.T) {
+		defer func() { _ = recover() }()
+		_ = firestoreCollections(context.Background(), nil)
+	})
+	t.Run("iterCollectionNext", func(t *testing.T) {
+		defer func() { _ = recover() }()
+		_, _ = iterCollectionNext(nil)
+	})
+	t.Run("closeFirestoreClient", func(t *testing.T) {
+		defer func() { _ = recover() }()
+		_ = closeFirestoreClient(nil)
+	})
+}
+

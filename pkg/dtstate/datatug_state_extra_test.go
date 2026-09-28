@@ -23,6 +23,7 @@ type stateSeams struct {
 	origGoAsync    func(func())
 	origAppStop    func()
 	origHadRecent  bool
+	origCloseFile  func(*os.File) error
 }
 
 func backupSeams() stateSeams {
@@ -34,6 +35,7 @@ func backupSeams() stateSeams {
 		origGoAsync:    goAsync,
 		origAppStop:    appStop,
 		origHadRecent:  hadRecentProjects,
+		origCloseFile:  closeFile,
 	}
 }
 
@@ -45,6 +47,7 @@ func (s stateSeams) restore() {
 	goAsync = s.origGoAsync
 	appStop = s.origAppStop
 	hadRecentProjects = s.origHadRecent
+	closeFile = s.origCloseFile
 }
 
 // tempStateDir creates a temp dir and points filePathFn at a file inside it.
@@ -198,6 +201,22 @@ func TestSaveState_CreateError(t *testing.T) {
 	err := SaveState(&DatatugState{})
 	if err == nil {
 		t.Fatal("expected error when parent dir does not exist, got nil")
+	}
+}
+
+func TestSaveState_CloseError(t *testing.T) {
+	s := backupSeams()
+	defer s.restore()
+	tempStateDir(t)
+	closeErr := errors.New("simulated close error")
+	closeFile = func(f *os.File) error {
+		_ = f.Close()
+		return closeErr
+	}
+
+	err := SaveState(&DatatugState{})
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("expected closeErr %v, got %v", closeErr, err)
 	}
 }
 

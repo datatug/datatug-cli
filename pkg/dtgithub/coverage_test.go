@@ -813,6 +813,25 @@ func TestCreateProject_AddReadmeSectionError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to add DataTug section to repo's root README.md")
 }
 
+func TestCreateProject_CloneRepoError(t *testing.T) {
+	client, mux := setupGHClient(t)
+
+	mux.HandleFunc("/repos/owner/repo", func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, http.StatusOK, repoJSON("repo"))
+	})
+
+	origClone := cloneRepoFunc
+	t.Cleanup(func() { cloneRepoFunc = origClone })
+	cloneRepoFunc = func(c *projectCreator) error {
+		return errors.New("simulated clone error")
+	}
+
+	c := &projectCreator{client: client, repoOwner: "owner", repoName: "repo", branch: "main", report: noopReport}
+	err := c.CreateProject(context.Background(), "title", "dir", datatug.PublicProject)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to clone GitHub repository")
+}
+
 // ---------- CreateNewProject ----------
 
 func TestCreateNewProject_Success(t *testing.T) {

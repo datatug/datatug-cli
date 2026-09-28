@@ -22,6 +22,8 @@ import (
 	"github.com/dal-go/record"
 )
 
+var readAllToRecords = dal.ReadAllToRecords
+
 // Option configures Open. The zero value of every Option's underlying
 // config is production-safe; only AllowInsecureLoopback (see its doc
 // comment) changes behavior, and only when a caller passes it explicitly.
@@ -171,7 +173,7 @@ func ExecuteQuery(ctx context.Context, db dal.DB, q dal.Query) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	records, err := dal.ReadAllToRecords(ctx, reader)
+	records, err := readAllToRecords(ctx, reader)
 	if err != nil {
 		return Result{}, err
 	}

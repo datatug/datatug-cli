@@ -35,6 +35,7 @@ var filePathFn = getFilePath
 var osOpen = os.Open
 var goAsync = func(fn func()) { go fn() }
 var appStop = func() { global.App.Stop() }
+var closeFile = func(f *os.File) error { return f.Close() }
 
 func GetDatatugState() (state *DatatugState, err error) {
 	state = new(DatatugState)
@@ -152,7 +153,7 @@ func SaveState(state *DatatugState) (err error) {
 		return
 	}
 	defer func() {
-		if errClose := f.Close(); errClose != nil {
+		if errClose := closeFile(f); errClose != nil {
 			ctx := context.Background()
 			logus.Errorf(ctx, "failed to close DataTug state file: %v", errClose)
 			if err == nil {

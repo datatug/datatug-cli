@@ -45,10 +45,12 @@ import (
 // somehow did not converge within canonicalRounds becomes one fixed
 // unstableCanonicalID, which is coarser still - such ids all share one
 // decision - and never splits a file's spellings.
+var canonicalRoundFunc = canonicalRound
+
 func CanonicalQueryID(id string) string {
 	current := id
 	for range canonicalRounds {
-		next := canonicalRound(current)
+		next := canonicalRoundFunc(current)
 		if next == current {
 			return norm.NFC.String(current)
 		}

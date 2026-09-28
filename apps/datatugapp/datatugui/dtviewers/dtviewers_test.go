@@ -508,3 +508,9 @@ func TestGetViewersListPanel_keyUpNotAtFirst(t *testing.T) {
 	evt := capture(tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone))
 	assert.NotNil(t, evt)
 }
+
+func TestDefaultSeams(t *testing.T) {
+	screenOpened("test", "Test")
+	saveCurrentScreenPath("test")
+}
+

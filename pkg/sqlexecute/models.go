@@ -64,9 +64,6 @@ func (v RequestCommand) Validate() error {
 	if v.Text == "" {
 		return validation.NewErrRequestIsMissingRequiredField("text")
 	}
-	if err := v.ServerRef.Validate(); err != nil {
-		return err
-	}
 	if v.DB != "" {
 		if v.Host != "" {
 			return validation.NewBadRequestError(errors.New("both 'db' & 'host' were provided"))
@@ -77,6 +74,9 @@ func (v RequestCommand) Validate() error {
 		if v.Port != 0 {
 			return validation.NewBadRequestError(errors.New("both 'db' & 'port' were provided"))
 		}
+	}
+	if err := v.ServerRef.Validate(); err != nil {
+		return err
 	}
 	return nil
 }

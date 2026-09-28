@@ -1019,12 +1019,58 @@ func TestGetConstraintsMethod_ForeignKey_ExistingFKInRefByTable(t *testing.T) {
 	assert.Equal(t, []string{"user_id1"}, usersTable.ReferencedBy[0].ForeignKeys[0].Columns)
 }
 
-// ---- GetDatabase tests (top-level integration) ----
+func TestGetConstraints_NonConsecutiveMultiColumnFK(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
 
-// TestGetDatabase_TablesQueryError is omitted: getTables defers rows.Close() before
-// checking err, so when Query fails rows is nil and the defer panics. This is a
-// production bug that requires refactoring to fix (guard the defer with a nil check).
-// Documented as a gap in TEST-COVERAGE.md.
+	// Interleave FK1, FK2, then FK1 again.
+	// When FK1 is seen a second time, table.ForeignKeys[last] is FK2, so it enters the else branch,
+	// where refByTable.ForeignKeys already contains FK1, hitting the reuse branch (lines 209-212).
+	rows := sqlmock.NewRows(constraintCols()).
+		AddRow("dbo", "orders", "FOREIGN KEY", "FK_orders_users_1", "user_id1",
+			"", "", "", "", "", "",
+			"testdb", "dbo", "users", "id1").
+		AddRow("dbo", "orders", "FOREIGN KEY", "FK_orders_users_2", "profile_id",
+			"", "", "", "", "", "",
+			"testdb", "dbo", "users", "pid").
+		AddRow("dbo", "orders", "FOREIGN KEY", "FK_orders_users_1", "tenant_id",
+			"", "", "", "", "", "",
+			"testdb", "dbo", "users", "tid")
+	mock.ExpectQuery(`SELECT`).WillReturnRows(rows)
+
+	ordersTable := makeTable("testdb", "dbo", "orders", datatug.CollectionTypeTable)
+	usersTable := makeTable("testdb", "dbo", "users", datatug.CollectionTypeTable)
+	tables := []*datatug.CollectionInfo{ordersTable, usersTable}
+
+	is := InformationSchema{db: db}
+	err = is.getConstraints("testdb", schemer.SortedTables{Tables: tables})
+	require.NoError(t, err)
+	require.Len(t, usersTable.ReferencedBy, 1)
+	// RefByTable contains FK1 and FK2; FK1 has both columns
+	var fk1 *datatug.RefByForeignKey
+	for _, fk := range usersTable.ReferencedBy[0].ForeignKeys {
+		if fk.Name == "FK_orders_users_1" {
+			fk1 = fk
+			break
+		}
+	}
+	require.NotNil(t, fk1)
+	assert.Equal(t, []string{"user_id1", "tenant_id"}, fk1.Columns)
+}
+
+func TestGetDatabase_TablesQueryError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectQuery(`SELECT`).WillReturnError(errors.New("db error"))
+
+	is := InformationSchema{db: db}
+	_, err = is.GetDatabase("testdb")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to retrieve tables metadata")
+}
 
 func TestGetDatabase_UnknownDBType(t *testing.T) {
 	// GetDatabase switch checks t.Name (TABLE_NAME) against "BASE TABLE"/"VIEW".

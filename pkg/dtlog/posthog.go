@@ -159,11 +159,10 @@ func writePostHogConfigToFile(ctx context.Context, config posthogConfig) error {
 		}()
 		encoder := newYamlEncoder(file)
 		if err = encoder.Encode(config); err != nil {
-			ctx := context.Background()
 			logus.Errorf(ctx, "Failed to encode PostHog config file: %v", err)
 		}
 	}
-	return nil
+	return err
 }
 
 func getPostHogApiKeyFromServer() (string, error) {

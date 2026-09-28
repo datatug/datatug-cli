@@ -14,6 +14,9 @@ func NewTUI(app *tview.Application, root sneatv.Breadcrumb) *TUI {
 		App:   app,
 		pages: tview.NewPages(),
 	}
+	tui.queueUpdateDraw = func(f func()) {
+		tui.App.QueueUpdateDraw(f)
+	}
 	tui.Header = NewHeader(tui, root)
 
 	menu := tview.NewTextView().SetText("Menu").SetBorder(true)
@@ -76,6 +79,7 @@ type TUI struct {
 	pages       *tview.Pages
 
 	globalKeyHandlers map[tcell.Key]func()
+	queueUpdateDraw   func(f func())
 	//
 	setPanelsCounter int
 }
@@ -215,7 +219,7 @@ func (tui *TUI) ShowAlert(
 	if duration > 0 {
 		go func() {
 			time.Sleep(duration)
-			tui.App.QueueUpdateDraw(func() {
+			tui.queueUpdateDraw(func() {
 				closeAlert()
 			})
 		}()

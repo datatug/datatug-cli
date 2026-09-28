@@ -76,6 +76,8 @@ func newProjectCreator(ghClient *github.Client, report datatug.StatusReporter) (
 	}
 }
 
+var cloneRepoFunc = func(c *projectCreator) error { return c.cloneRepo() }
+
 func (c *projectCreator) CreateProject(
 	ctx context.Context,
 	title, pathToProjectFromRepoRoot string,
@@ -86,7 +88,7 @@ func (c *projectCreator) CreateProject(
 		return fmt.Errorf("failed to create GitHub repository '%s/%s': %w", c.repoOwner, c.repoName, err)
 	}
 
-	if err = c.cloneRepo(); err != nil {
+	if err = cloneRepoFunc(c); err != nil {
 		return fmt.Errorf("failed to clone GitHub repository '%s/%s': %w", c.repoOwner, c.repoName, err)
 	}
 

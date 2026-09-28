@@ -1,7 +1,9 @@
 package sneatnav
 
 import (
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/datatug/datatug-cli/pkg/sneatv"
 	"github.com/gdamore/tcell/v2"
@@ -33,6 +35,8 @@ func TestActionsMenuRegistration(t *testing.T) {
 
 	menu.Clear()
 	assert.Len(t, menu.menuItems, 2)
+	menu.menuItems[0].SelectedFunc()
+	menu.menuItems[1].SelectedFunc()
 }
 
 func TestLayoutSetters(t *testing.T) {
@@ -144,3 +148,148 @@ func TestHeaderAndMenuInputCapture(t *testing.T) {
 	require.NotNil(t, event)
 	assert.Equal(t, tcell.KeyRune, event.Key())
 }
+
+func TestShowErrorModal(t *testing.T) {
+	tui := NewTUI(tview.NewApplication(), sneatv.NewBreadcrumb("Home", nil))
+	ShowErrorModal(tui, errors.New("simulated error"))
+	assert.NotNil(t, tui.Content)
+}
+
+func TestHeader_InputCaptureBranches(t *testing.T) {
+	tui := NewTUI(tview.NewApplication(), sneatv.NewBreadcrumb("Home", nil))
+	content := NewPanelWithoutBorders[*tview.TextView](tui, tview.NewTextView(), tview.NewBox())
+	menu := NewPanelWithoutBorders[*tview.TextView](tui, tview.NewTextView(), tview.NewBox())
+	tui.SetPanels(menu, content)
+
+	// KeyDown with focus.from != nil
+	tui.Header.focus.from = content
+	ret := InvokeInputCapture(tui.Header, tcell.KeyDown, 0, tcell.ModNone)
+	assert.Nil(t, ret)
+
+	// KeyDown with focus.from == nil
+	tui.Header.focus.from = nil
+	ret = InvokeInputCapture(tui.Header, tcell.KeyDown, 0, tcell.ModNone)
+	assert.Nil(t, ret)
+
+	// KeyRight when focused != ToRightMenu && breadcrumbs.IsLastItemSelected()
+	tui.Header.breadcrumbs.Blur()
+	tui.Header.focused = toNothing
+	ret = InvokeInputCapture(tui.Header, tcell.KeyRight, 0, tcell.ModNone)
+	assert.Nil(t, ret)
+
+	// KeyRight when focused == ToRightMenu
+	tui.Header.focused = ToRightMenu
+	ret = InvokeInputCapture(tui.Header, tcell.KeyRight, 0, tcell.ModNone)
+	assert.NotNil(t, ret)
+
+	// KeyLeft when focused != ToBreadcrumbs
+	tui.Header.focused = toNothing
+	ret = InvokeInputCapture(tui.Header, tcell.KeyLeft, 0, tcell.ModNone)
+	assert.Nil(t, ret)
+
+	// KeyLeft when focused == ToBreadcrumbs
+	tui.Header.focused = ToBreadcrumbs
+	ret = InvokeInputCapture(tui.Header, tcell.KeyLeft, 0, tcell.ModNone)
+	assert.NotNil(t, ret)
+
+	// Default key
+	ret = InvokeInputCapture(tui.Header, tcell.KeyF1, 0, tcell.ModNone)
+	assert.NotNil(t, ret)
+}
+
+func TestLayout_NilParameters(t *testing.T) {
+	lo := newLayout(nil, nil, nil, nil)
+	assert.NotNil(t, lo)
+}
+
+func TestTesting_InvokeInputCapture_NilCapture(t *testing.T) {
+	box := tview.NewBox()
+	assert.Nil(t, InvokeInputCapture(box, tcell.KeyEnter, 0, tcell.ModNone))
+}
+
+func TestTUI_SetPanels_PanicOverflow(t *testing.T) {
+	tui := NewTUI(tview.NewApplication(), sneatv.NewBreadcrumb("Home", nil))
+	tui.setPanelsCounter = 1000
+	assert.Panics(t, func() {
+		tui.SetPanels(nil, nil)
+	})
+}
+
+func TestTUI_ShowAlert(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	app := tview.NewApplication().SetScreen(screen)
+	tui := NewTUI(app, sneatv.NewBreadcrumb("Home", nil))
+	box := tview.NewBox()
+
+	doneCh := make(chan struct{})
+	tui.queueUpdateDraw = func(f func()) {
+		f()
+		close(doneCh)
+	}
+
+	// ShowAlert with duration > 0
+	tui.ShowAlert("Alert", "Message with timer", 5*time.Millisecond, box)
+	assert.True(t, tui.pages.HasPage(alertPage))
+
+	select {
+	case <-doneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for alert to close")
+	}
+	assert.False(t, tui.pages.HasPage(alertPage))
+	assert.Equal(t, box, tui.App.GetFocus())
+
+	// ShowAlert without duration - dismiss via modal button
+	tui.ShowAlert("Alert2", "Message without timer", 0, nil)
+	assert.True(t, tui.pages.HasPage(alertPage))
+	_, item2 := tui.pages.GetFrontPage()
+	modal2 := item2.(*tview.Modal)
+	var form *tview.Form
+	modal2.Focus(func(p tview.Primitive) {
+		if f, ok := p.(*tview.Form); ok {
+			form = f
+		}
+	})
+	require.NotNil(t, form)
+	require.Greater(t, form.GetButtonCount(), 0)
+	btn := form.GetButton(0)
+	btn.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(p tview.Primitive) {})
+	assert.False(t, tui.pages.HasPage(alertPage))
+}
+
+func TestTUI_FocusTo_Default(t *testing.T) {
+	tui := NewTUI(tview.NewApplication(), sneatv.NewBreadcrumb("Home", nil))
+	menu := NewPanelWithoutBorders[*tview.TextView](tui, tview.NewTextView(), tview.NewBox())
+	content := NewPanelWithoutBorders[*tview.TextView](tui, tview.NewTextView(), tview.NewBox())
+	tui.SetPanels(menu, content, WithFocusTo(FocusTo(99)))
+}
+
+func TestTUI_DefaultQueueUpdateDraw(t *testing.T) {
+	screen := tcell.NewSimulationScreen("UTF-8")
+	app := tview.NewApplication().SetScreen(screen)
+	tui := NewTUI(app, sneatv.NewBreadcrumb("Home", nil))
+
+	runDone := make(chan struct{})
+	go func() {
+		_ = app.Run()
+		close(runDone)
+	}()
+
+	executed := make(chan struct{})
+	go func() {
+		tui.queueUpdateDraw(func() {
+			close(executed)
+		})
+	}()
+
+	select {
+	case <-executed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queueUpdateDraw")
+	}
+
+	app.Stop()
+	<-runDone
+}
+
+

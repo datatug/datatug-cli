@@ -22,6 +22,12 @@ const (
 // getTokenFromWebFn is a seam for testing StartInteractiveLogin without a browser.
 var getTokenFromWebFn = getTokenFromWeb
 
+var tokenSourceFromConfig = func(ctx context.Context, config *oauth2.Config, token *oauth2.Token) oauth2.TokenSource {
+	return config.TokenSource(ctx, token)
+}
+
+var saveRefreshTokenFn = saveRefreshToken
+
 // getGoogleCloudClient handles the OAuth2 flow for desktop apps and caches the token locally.
 func getGoogleCloudClient(ctx context.Context) (client *http.Client, err error) {
 
@@ -53,7 +59,7 @@ func getGoogleCloudClient(ctx context.Context) (client *http.Client, err error) 
 		started := time.Now()
 
 		token = &oauth2.Token{RefreshToken: refreshToken}
-		ts := config.TokenSource(ctx, token) // Use a token source to get a fresh access token
+		ts := tokenSourceFromConfig(ctx, config, token) // Use a token source to get a fresh access token
 		token, err = ts.Token()
 
 		if err != nil {
@@ -70,7 +76,7 @@ func getGoogleCloudClient(ctx context.Context) (client *http.Client, err error) 
 			return
 		}
 		if token.RefreshToken != "" {
-			if err = saveRefreshToken(token.RefreshToken); err != nil {
+			if err = saveRefreshTokenFn(token.RefreshToken); err != nil {
 				log.Printf("Failed to save refresh token: %v", err)
 			}
 		}

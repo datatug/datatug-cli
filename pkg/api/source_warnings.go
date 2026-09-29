@@ -45,7 +45,7 @@ func warnMissingSourceFilesForEnvironment(ctx context.Context, projStore datatug
 		if source.Kind != SourceKindSQL && source.Kind != SourceKindInGitDB {
 			continue
 		}
-		ref, err := dbcopy.Parse(source.URL)
+		ref, err := dbcopyParse(source.URL)
 		if err != nil {
 			continue
 		}

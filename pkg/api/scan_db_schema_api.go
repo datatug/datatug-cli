@@ -54,11 +54,11 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 	var projFileErr error
 	getProjectSummaryWorker := func() error {
 		_, projFileErr = projectLoader.LoadProjectFile(ctx)
-		if err != nil {
+		if projFileErr != nil {
 			if datatug.ProjectDoesNotExist(projFileErr) {
 				return nil
 			}
-			return fmt.Errorf("failed to load project summary: %w", err)
+			return fmt.Errorf("failed to load project summary: %w", projFileErr)
 		}
 		return nil
 	}
@@ -71,7 +71,7 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 	}
 	scanDbWorker := func() error {
 		var scanErr error
-		if dbCatalog, scanErr = scanDbCatalog(dbServer, dbConnParams); err != nil {
+		if dbCatalog, scanErr = scanDbCatalogSeam(dbServer, dbConnParams); scanErr != nil {
 			return scanErr
 		}
 		return scanErr
@@ -96,7 +96,7 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 	}
 	if datatug.ProjectDoesNotExist(projFileErr) {
 		log.Println("Creating a new DataTug project...")
-		if project, err = newProjectWithDatabase(environment, dbServer, dbCatalog); err != nil {
+		if project, err = newProjectWithDatabaseSeam(environment, dbServer, dbCatalog); err != nil {
 			return project, err
 		}
 	} else {
@@ -126,7 +126,7 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 	if envID == "" {
 		return validation.NewErrRequestIsMissingRequiredField("envID")
 	}
-	if dbServerRef.Host == "" {
+	if dbServerRef.Driver != dbconnection.DriverSQLite3 && dbServerRef.Host == "" {
 		return validation.NewErrRequestIsMissingRequiredField("dbServerRef.Host")
 	}
 	if dbCatalog == nil {
@@ -273,7 +273,7 @@ func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Param
 	var scanner schemer.Scanner
 	switch server.Driver {
 	case "sqlserver":
-		scanner = schemer.NewScanner(mssqlschema.NewSchemaProvider())
+		scanner = schemer.NewScanner(mssqlschema.NewSchemaProvider(db))
 	case dbconnection.DriverSQLite3:
 		scanner = schemer.NewScanner(sqliteschema.NewSchemaProvider(func() (*sql.DB, error) { return db, nil }))
 	default:
@@ -319,7 +319,7 @@ func updateDbModelWithDbCatalog(envID string, dbModel *datatug.DbModel, dbCatalo
 		}
 		dbModel.Schemas = append(dbModel.Schemas, schemaModel)
 	UpdateSchemaModel:
-		if err = updateSchemaModel(envID, schemaModel, schema); err != nil {
+		if err = updateSchemaModelSeam(envID, schemaModel, schema); err != nil {
 			return fmt.Errorf("faild to update DB schema model: %w", err)
 		}
 	}

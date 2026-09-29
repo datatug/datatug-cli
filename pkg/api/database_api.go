@@ -20,7 +20,7 @@ func GetServerDatabases(request dto.GetServerDatabasesRequest) (databases []*dat
 		Text:      "select name from sys.databases where owner_sid > 0x01",
 	}
 	var response sqlexecute.Response
-	if response, err = executor.ExecuteSingle(command); err != nil {
+	if response, err = executeSingleSeam(executor, command); err != nil {
 		return nil, err
 	}
 	recordset := response.Commands[0].Items[0].Value.(datatug.Recordset)

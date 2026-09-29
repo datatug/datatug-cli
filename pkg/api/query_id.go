@@ -92,7 +92,7 @@ func QueryIDIndex(projectDir string) (map[string]string, error) {
 			return nil
 		}
 		bareID := strings.TrimSuffix(d.Name(), suffix)
-		rel, relErr := filepath.Rel(queriesDir, filepath.Dir(path))
+		rel, relErr := filepathRel(queriesDir, filepath.Dir(path))
 		if relErr != nil {
 			return relErr
 		}

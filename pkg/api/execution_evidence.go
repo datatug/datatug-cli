@@ -21,7 +21,7 @@ func ConfigureExecutionEvidence(pathsByID map[string]string, configured []incide
 	if err != nil {
 		return err
 	}
-	manager, err := executionstore.NewManager(roots, locations, options)
+	manager, err := executionstoreNewManager(roots, locations, options)
 	if err != nil {
 		return err
 	}

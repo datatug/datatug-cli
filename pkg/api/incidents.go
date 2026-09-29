@@ -142,7 +142,7 @@ func incidentFactVisibility(ctx context.Context, fact investigation.Fact, sessio
 		collection, column = fact.Physical.Collection, fact.Physical.Column
 	}
 	query := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(collection, ""))).SelectColumns(dal.Column{Expression: dal.Field(column)})
-	lines := accesspolicies.Explain(ctx, session.Policies, query, nil)
+	lines := accesspoliciesExplain(ctx, session.Policies, query, nil)
 	if len(lines) == 0 {
 		return incidents.FactHidden
 	}

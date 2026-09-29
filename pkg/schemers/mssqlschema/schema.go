@@ -9,8 +9,15 @@ import (
 )
 
 // NewSchemaProvider creates a new SchemaProvider for MS SQL Server
-func NewSchemaProvider() schemer.SchemaProvider {
-	return schemaProvider{}
+func NewSchemaProvider(db ...*sql.DB) schemer.SchemaProvider {
+	var d *sql.DB
+	if len(db) > 0 {
+		d = db[0]
+	}
+	return schemaProvider{
+		db:                  d,
+		collectionsProvider: collectionsProvider{db: d},
+	}
 }
 
 var _ schemer.SchemaProvider = (*schemaProvider)(nil)

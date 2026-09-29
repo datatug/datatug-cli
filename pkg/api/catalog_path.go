@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-
-	"github.com/mitchellh/go-homedir"
 )
 
 // ResolveCatalogPath expands a datatug.DbCatalog.Path field into an absolute
@@ -39,12 +37,12 @@ func ResolveCatalogPath(projectDir, catalogPath string) (string, error) {
 	switch {
 	case strings.HasPrefix(expanded, "~"):
 		var err error
-		expanded, err = homedir.Expand(expanded)
+		expanded, err = homedirExpand(expanded)
 		if err != nil {
 			return "", fmt.Errorf("expand %q: %w", catalogPath, err)
 		}
 	case strings.HasPrefix(expanded, "${HOME}"), strings.HasPrefix(expanded, "$HOME"):
-		home, err := homedir.Dir()
+		home, err := homedirDir()
 		if err != nil {
 			return "", fmt.Errorf("resolve $HOME for %q: %w", catalogPath, err)
 		}

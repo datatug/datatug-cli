@@ -108,7 +108,7 @@ func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *data
 	if err := query.QueryDef.Validate(); err != nil {
 		return nil, validation.NewBadRequestError(err)
 	}
-	if field, reason, found := querywrite.QueryCredentialReason(&query.QueryDef); found {
+	if field, reason, found := querywriteQueryCredentialReason(&query.QueryDef); found {
 		return nil, validation.NewBadRequestError(validation.NewErrBadRecordFieldValue(field, reason))
 	}
 	store, err := projectStoreForID(storeID, projectID)

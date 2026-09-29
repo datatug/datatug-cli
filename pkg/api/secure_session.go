@@ -1,7 +1,6 @@
 package api
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -121,7 +120,7 @@ func SecurePolicyFingerprint() string {
 // credentials or identify another session").
 func newSecurityContextID() string {
 	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
+	if _, err := randRead(buf); err != nil {
 		return "securitycontext-unavailable"
 	}
 	return hex.EncodeToString(buf)

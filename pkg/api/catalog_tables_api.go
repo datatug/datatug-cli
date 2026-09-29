@@ -175,7 +175,7 @@ func loadCatalogRelationsWithMode(dbModelDir, kind, dbType string, partial bool)
 }
 
 func readCatalogColumns(kindDir, schema, name string) ([]CatalogColumn, error) {
-	matches, err := filepath.Glob(filepath.Join(kindDir, name, "*.columns.json"))
+	matches, err := filepathGlob(filepath.Join(kindDir, name, "*.columns.json"))
 	if err != nil {
 		return nil, fmt.Errorf("find columns for %s.%s: %w", schema, name, err)
 	}

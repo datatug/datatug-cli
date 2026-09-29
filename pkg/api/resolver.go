@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/httpsource"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
@@ -253,7 +252,7 @@ func recordsetSources(projectDir string) ([]ResolvedSource, error) {
 // QueryDef IS one dalgo2http collection (BuildCollection: "Name: def.ID"),
 // so ID/Collection are both the QueryDef's own ID.
 func httpQuerySources(projectDir string) ([]ResolvedSource, error) {
-	loaded, err := httpsource.LoadHTTPQueries(projectDir)
+	loaded, err := loadHTTPQueries(projectDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolver: list HTTP query defs: %w", err)
 	}

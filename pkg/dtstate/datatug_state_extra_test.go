@@ -9,9 +9,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/datatug/datatug-cli/apps/global"
-	"github.com/rivo/tview"
 )
 
 // stateSeams holds backups of all seam vars so each test can restore them.
@@ -21,7 +18,6 @@ type stateSeams struct {
 	origFilePathFn func() string
 	origOsOpen     func(string) (*os.File, error)
 	origGoAsync    func(func())
-	origAppStop    func()
 	origHadRecent  bool
 	origCloseFile  func(*os.File) error
 }
@@ -33,7 +29,6 @@ func backupSeams() stateSeams {
 		origFilePathFn: filePathFn,
 		origOsOpen:     osOpen,
 		origGoAsync:    goAsync,
-		origAppStop:    appStop,
 		origHadRecent:  hadRecentProjects,
 		origCloseFile:  closeFile,
 	}
@@ -45,7 +40,6 @@ func (s stateSeams) restore() {
 	filePathFn = s.origFilePathFn
 	osOpen = s.origOsOpen
 	goAsync = s.origGoAsync
-	appStop = s.origAppStop
 	hadRecentProjects = s.origHadRecent
 	closeFile = s.origCloseFile
 }
@@ -225,16 +219,11 @@ func TestSaveState_PanicWhenHadRecentProjectsButNowEmpty(t *testing.T) {
 	defer s.restore()
 
 	hadRecentProjects = true
-	appStopCalled := false
-	appStop = func() { appStopCalled = true }
 
 	defer func() {
 		r := recover()
 		if r == nil {
 			t.Error("expected panic, got none")
-		}
-		if !appStopCalled {
-			t.Error("expected appStop to be called before panic")
 		}
 	}()
 
@@ -377,8 +366,6 @@ func TestSaveCurrentScreePathSync_GetStateNonNotExistError(t *testing.T) {
 	s := backupSeams()
 	defer s.restore()
 
-	appStopCalled := false
-	appStop = func() { appStopCalled = true }
 	getState = func() (*DatatugState, error) {
 		return nil, errors.New("disk failure")
 	}
@@ -387,9 +374,6 @@ func TestSaveCurrentScreePathSync_GetStateNonNotExistError(t *testing.T) {
 		r := recover()
 		if r == nil {
 			t.Error("expected panic, got none")
-		}
-		if !appStopCalled {
-			t.Error("expected appStop to be called")
 		}
 	}()
 
@@ -468,17 +452,4 @@ func TestGoAsync_DefaultBody(t *testing.T) {
 	done := make(chan struct{})
 	goAsync(func() { close(done) })
 	<-done // blocks until the goroutine body runs
-}
-
-func TestAppStop_DefaultBody(t *testing.T) {
-	s := backupSeams()
-	defer s.restore()
-
-	// Set a real (non-started) tview application so global.App.Stop() is safe to call.
-	origApp := global.App
-	global.App = tview.NewApplication()
-	defer func() { global.App = origApp }()
-
-	appStop = s.origAppStop
-	appStop() // exercises the `global.App.Stop()` call
 }

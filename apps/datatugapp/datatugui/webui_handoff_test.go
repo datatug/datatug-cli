@@ -2,24 +2,14 @@ package datatugui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/strongo/strongo-tui/pkg/uitest"
 )
-
-func newTestTUI(t *testing.T) *sneatnav.TUI {
-	t.Helper()
-	screen := tcell.NewSimulationScreen("UTF-8")
-	app := tview.NewApplication().SetScreen(screen)
-	root := sneatv.NewBreadcrumb(" test", func() error { return nil })
-	tui := sneatnav.NewTUI(app, root)
-	t.Cleanup(func() { app.Stop() })
-	return tui
-}
 
 func TestWebUIURLForScreen(t *testing.T) {
 	const origin = "https://datatug.app"
@@ -114,39 +104,40 @@ func TestOpenCurrentScreenInWebUI(t *testing.T) {
 			opened = url
 			return nil
 		}
-		OpenCurrentScreenInWebUI(newTestTUI(t))
+		if msg := OpenCurrentScreenInWebUI()(); msg != nil {
+			t.Errorf("unexpected message %#v", msg)
+		}
 		if want := DefaultWebUIOrigin + "/my"; opened != want {
 			t.Errorf("opened %q, want %q", opened, want)
 		}
 	})
 
-	t.Run("shows_alert_on_browser_error", func(t *testing.T) {
+	t.Run("alerts_on_browser_error", func(t *testing.T) {
 		openURL = func(string) error { return errors.New("no browser") }
-		// Must not panic; the error is surfaced via tui.ShowAlert.
-		OpenCurrentScreenInWebUI(newTestTUI(t))
+		alert, ok := OpenCurrentScreenInWebUI()().(nav.AlertMsg)
+		if !ok || !strings.Contains(alert.Message, "no browser") || alert.Title != "Web UI" {
+			t.Errorf("want an alert naming the error, got %#v", alert)
+		}
 	})
 }
 
-func TestRegisterWebUIHandoff(t *testing.T) {
-	restoreOpen := openURL
-	t.Cleanup(func() { openURL = restoreOpen })
-	var openedCount int
-	openURL = func(string) error {
-		openedCount++
-		return nil
+func TestWebUIActionBindsCtrlW(t *testing.T) {
+	a := webUIAction()
+	if a.ID != "WebUI" || !key.Matches(uitest.Key("ctrl+w"), a.Binding) {
+		t.Errorf("action %#v does not bind ctrl+w", a)
 	}
-
-	tui := newTestTUI(t)
-	RegisterWebUIHandoff(tui)
-
-	// The actions-menu item is registered once; a duplicate registration errors.
-	if err := tui.ActionsMenu().RegisterActionMenuItems(sneatnav.ActionMenuItem{ID: "WebUI"}); err == nil {
-		t.Error("expected WebUI actions-menu item to be already registered")
+	if _, ok := a.Msg.(OpenWebUIMsg); !ok {
+		t.Errorf("action message = %#v", a.Msg)
 	}
+}
 
-	// Ctrl+W triggers the hand-off via the app-wide input capture.
-	sneatnav.InvokeInputCapture(tui.App, tcell.KeyCtrlW, 0, tcell.ModCtrl)
-	if openedCount != 1 {
-		t.Errorf("openedCount after Ctrl+W = %d, want 1", openedCount)
+// defaultReadConfigFile is the production reader, captured before any test
+// replaces the seam. The hermetic HOME of TestMain has no config file, so it
+// reports that the file is missing.
+var defaultReadConfigFile = webUIReadConfigFile
+
+func TestDefaultConfigReaderUsesTheConfigFilePath(t *testing.T) {
+	if _, err := defaultReadConfigFile(); err == nil {
+		t.Error("the hermetic home has no settings file")
 	}
 }

@@ -178,6 +178,7 @@ require (
 	github.com/richardlehane/mscfb v1.0.7 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/sahilm/fuzzy v0.1.3 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
@@ -219,3 +220,9 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+// TEMPORARY local replace until cli-helpers with fsutil is released; must not land.
+replace github.com/strongo/cli-helpers => /Users/alex/projects/.worktrees/tview-to-bubbletea/github.com/strongo/cli-helpers
+
+// TEMPORARY local replace until strongo-tui is released and tagged; must not land.
+replace github.com/strongo/strongo-tui => /Users/alex/projects/.worktrees/tview-to-bubbletea/github.com/strongo/strongo-tui

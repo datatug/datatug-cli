@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/datatug/datatug-cli/apps/global"
 	"github.com/datatug/datatug-cli/pkg/dtroot"
 	"github.com/strongo/logus"
 )
@@ -34,7 +33,6 @@ var getState = GetDatatugState
 var filePathFn = getFilePath
 var osOpen = os.Open
 var goAsync = func(fn func()) { go fn() }
-var appStop = func() { global.App.Stop() }
 var closeFile = func(f *os.File) error { return f.Close() }
 
 func GetDatatugState() (state *DatatugState, err error) {
@@ -122,8 +120,6 @@ func SaveCurrentScreePathSync(currentScreenPath string) {
 	state, err := getState()
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			appStop()
-			time.Sleep(time.Millisecond)
 			panic(fmt.Sprintf("failed to get datatug state: %v", err))
 		}
 		state = new(DatatugState) // File does not exist
@@ -143,8 +139,6 @@ func SaveCurrentScreePath(currentScreenPath string) {
 
 func SaveState(state *DatatugState) (err error) {
 	if hadRecentProjects && len(state.RecentProjects) == 0 {
-		appStop()
-		time.Sleep(time.Millisecond)
 		panic("no recent projects found")
 	}
 	filePath := filePathFn()

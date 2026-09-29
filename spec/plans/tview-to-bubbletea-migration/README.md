@@ -53,18 +53,21 @@ sneat-cli    → internal/tui adopts pkg/nav for shared chrome
 
 **Development coupling.** While `strongo-tui` is unreleased, the `datatug-cli` worktree uses a local `replace` to the `strongo-tui` worktree. Both repos share one WB task (`tview-to-bubbletea`). Landing order is fixed: `strongo-tui` merged and tagged → `datatug-cli` `replace` removed and dependency bumped → `sneat-cli` bumped. `filetug` keeps its pinned old `strongo-tui` tag and is out of scope.
 
-**Porting idiom.** Screens stay imperative and pointer-based so the port is mechanical:
+**Design rule: idiomatic Bubble Tea, not tview in disguise.** Screens are `tea.Model` sub-models in the Elm style, as in `pkg/chat` and `sneat-cli`'s `internal/tui`: state lives in the model, `Update(msg) (Model, Cmd)` and `View()`, behaviour is reported by messages (no callback setters, no mutable widget graphs, no `SetInputCapture`-style hooks), async work is a `tea.Cmd` returning a result message, keys are `key.Binding`s shown in the actions bar. Screens are rewritten in that style, not ported line by line. `strongo-tui` reuses `bubbles/v2` (list, table, viewport, textinput, help, key) and adds only what it lacks: the shell (header and breadcrumbs, menu and content split, actions bar, alert overlay, focus ring, push/pop/replace navigation messages), a Tree, a theme/frame layer, layout helpers, a highlighter and the `navtest` harness.
 
-| Old (tview / sneatnav) | New (strongo-tui) |
+| Old (tview / sneatnav) | Idiomatic replacement |
 |---|---|
-| `tview.NewList`, `NewTable`, `NewTextView`, `NewTreeView`, `NewForm` | `widgets.NewList`, `NewTable`, `NewTextView`, `NewTree`, `NewForm` |
-| `SetInputCapture(func(*tcell.EventKey) *tcell.EventKey)` | `HandleKey(tea.KeyPressMsg) (handled bool, cmd tea.Cmd)` |
-| `tui.App.SetFocus(p)` | `tui.SetFocus(zone)` / panel `SetFocused` |
-| `tui.App.QueueUpdateDraw(f)` | `tui.Send(msg)` handled in `Update` |
-| `tui.App.Stop()` | `tui.Quit()` |
-| `sneatnav.NewPanel` / `sneatv.WithDefaultBorders` | `widgets.Frame` (border on by default, `WithoutBorders` option) |
-| `chroma2tcell.ColorizeYAMLForTview` | `highlight.YAML` (ANSI) |
-| `tview.Modal` / `Pages` alert | `tui.ShowAlert` overlay |
+| `tview.List` + `SetSelectedFunc` | `bubbles/list` (or wrapper) emitting an item-selected message |
+| `tview.Table`, `TableCell`, `TableContent` | `bubbles/table` with rows built in the model; large sets paged or virtualised in the model |
+| `tview.TextView` | `bubbles/viewport` with ANSI text |
+| `tview.TreeView` | `strongo-tui` Tree emitting node messages |
+| `tview.Form`, `InputField` | model composed of `bubbles/textinput` fields, submit and cancel messages |
+| `SetInputCapture` | `key.Binding` matched in `Update` |
+| `tui.App.QueueUpdateDraw(f)` | a `tea.Cmd` that returns a result message |
+| `tui.SetPanels(menu, content)` / `App.SetFocus` | navigation messages handled by the shell; focus ring |
+| `tui.App.Stop()` | `tea.Quit` |
+| `chroma2tcell.ColorizeYAMLForTview` | `highlight` helper (ANSI) |
+| `tview.Modal` / `Pages` alert | alert overlay message |
 
 **Testing.** Tests drive `Update()` with messages and assert on rendered `View()` text through `navtest`; no test starts a real terminal (`runTeaProgram` seam, as in `pkg/chat`). Behaviours covered by the 18 existing tview test files (5,868 lines) are ported, not dropped. Coverage is a per-task exit gate, and the final task checks the whole module.
 

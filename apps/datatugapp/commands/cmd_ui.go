@@ -99,7 +99,6 @@ func registerModules() {
 	dtproject.RegisterModule()
 
 	dbviewer.RegisterAsViewer()
-	RegisterAsViewer()
 	gcloudui.RegisterAsViewer()
 	awsui.RegisterAsViewer()
 	azureui.RegisterAsViewer()

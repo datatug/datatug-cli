@@ -24,7 +24,7 @@ datatug ui -f <path>
 
 ## Problem
 
-A data-exploration tool that ships only a Web UI requires running a server, opening a browser, and switching context away from the terminal. A pure-CLI tool covers scripting but cannot show schema diagrams, paginated tables, or interactive forms. The TUI bridges both: it stays in the terminal, supports keyboard-driven navigation, and shows DataTug viewers (project, DB viewer, FileTug, cloud viewers) without spinning up a browser.
+A data-exploration tool that ships only a Web UI requires running a server, opening a browser, and switching context away from the terminal. A pure-CLI tool covers scripting but cannot show schema diagrams, paginated tables, or interactive forms. The TUI bridges both: it stays in the terminal, supports keyboard-driven navigation, and shows DataTug viewers (project, DB viewer, cloud viewers) without spinning up a browser.
 
 The TUI is also the default surface — running `datatug` with no arguments MUST open it. Users learn the tool by typing `datatug` and exploring; the surface-area docs are inside the TUI, not on the command line.
 
@@ -64,7 +64,7 @@ A panic anywhere in the TUI MUST result in `global.App.Stop()` being called from
 
 ### Module registration
 
-The TUI registers viewers (database, FileTug, GCloud, AWS, Azure), settings, and the API service monitor at startup.
+The TUI registers viewers (database, GCloud, AWS, Azure), settings, and the API service monitor at startup.
 
 #### REQ: module-registration
 

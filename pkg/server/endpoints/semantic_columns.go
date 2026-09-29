@@ -9,6 +9,12 @@ import (
 	"github.com/datatug/datatug-core/pkg/semantic"
 )
 
+var (
+	semanticProjectStoreFor = api.ProjectStoreFor
+	httpDeclaredColumnsHook = httpDeclaredColumns
+	loadModuleEntitiesHook  = loadModuleEntities
+)
+
 // semanticColumnsHandler is GET /datatug/semantic/columns, rewritten (Task
 // 12) to the appendix's exact envelope: Scope + SourceRef carried as URL
 // query parameters (api-contract.md "Endpoint table": "GET parameters go
@@ -38,7 +44,7 @@ func computeSemanticColumns(ctx context.Context, scope apicontract.Scope, ref ap
 	if !ok {
 		return apicontract.SemanticColumnsResponse{}, newNotFound("unknown project")
 	}
-	projStore, err := api.ProjectStoreFor(scope.Project)
+	projStore, err := semanticProjectStoreFor(scope.Project)
 	if err != nil {
 		return apicontract.SemanticColumnsResponse{}, newInvalidRequest("project", err.Error())
 	}
@@ -52,7 +58,7 @@ func computeSemanticColumns(ctx context.Context, scope apicontract.Scope, ref ap
 	// directly (no EntityField.Mappings/NamePatterns pipeline applies to
 	// them) — see resolveHTTPSource's doc comment.
 	if resolvedRegistry.Kind == api.SourceKindHTTP {
-		declared, declErr := httpDeclaredColumns(projectDir, resolvedRegistry.ID)
+		declared, declErr := httpDeclaredColumnsHook(projectDir, resolvedRegistry.ID)
 		if declErr != nil {
 			return apicontract.SemanticColumnsResponse{}, declErr
 		}
@@ -65,7 +71,7 @@ func computeSemanticColumns(ctx context.Context, scope apicontract.Scope, ref ap
 		return resp, nil
 	}
 
-	entities, err := loadModuleEntities(projectDir)
+	entities, err := loadModuleEntitiesHook(projectDir)
 	if err != nil {
 		return apicontract.SemanticColumnsResponse{}, err
 	}

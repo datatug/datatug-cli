@@ -18,6 +18,16 @@ import (
 	"github.com/datatug/datatug-core/pkg/semantic"
 )
 
+var relatedProjectStoreFor = api.ProjectStoreFor
+var relatedProjectDir = api.ProjectDir
+var relatedResultValidateHook = (*apicontract.Result).Validate
+var loadModuleEntitiesHookRelated = loadModuleEntities
+var toContractRecordsetHook = toContractRecordset
+var secureExecutorHook = api.SecureExecutor
+var runStructuredRelatedHook = func(e *secureread.Executor, ctx context.Context, source string, query dal.StructuredQuery, variables map[string]any) (secureread.Result, error) {
+	return e.RunStructured(ctx, source, query, variables)
+}
+
 // semanticRelatedHandler is POST /datatug/semantic/related, decoding the
 // appendix's exact envelope — Scope + {fact:Fact,limit?} in the JSON body
 // (POST, so a semantic value is never copied into a URL — api-contract.md
@@ -65,15 +75,15 @@ func computeSemanticRelated(ctx context.Context, req apicontract.RelatedRequest)
 	if req.Fact.Physical == nil {
 		return apicontract.RelatedResponse{}, newInvalidRequest("fact.physical", "is required to compute related lookups")
 	}
-	projectDir, ok := api.ProjectDir(req.Project)
+	projectDir, ok := relatedProjectDir(req.Project)
 	if !ok {
 		return apicontract.RelatedResponse{}, newNotFound("unknown project")
 	}
-	projStore, err := api.ProjectStoreFor(req.Project)
+	projStore, err := relatedProjectStoreFor(req.Project)
 	if err != nil {
 		return apicontract.RelatedResponse{}, newInvalidRequest("project", err.Error())
 	}
-	entities, err := loadModuleEntities(projectDir)
+	entities, err := loadModuleEntitiesHookRelated(projectDir)
 	if err != nil {
 		return apicontract.RelatedResponse{}, err
 	}
@@ -119,7 +129,7 @@ func computeSemanticRelated(ctx context.Context, req apicontract.RelatedRequest)
 		lookups = lookups[:limit]
 	}
 
-	executor, ok := api.SecureExecutor()
+	executor, ok := secureExecutorHook()
 	if !ok {
 		return apicontract.RelatedResponse{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
@@ -165,7 +175,7 @@ func countRelated(ctx context.Context, executor *secureread.Executor, projStore 
 	q := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(lookup.Collection, ""))).
 		Where(dal.WhereField(lookup.Column, dal.Equal, value)).
 		SelectIntoRecord(nil)
-	result, err := executor.RunStructured(countCtx, lookupSource.URL, q, nil)
+	result, err := runStructuredRelatedHook(executor, countCtx, lookupSource.URL, q, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -223,11 +233,11 @@ func computeSemanticRelatedRows(ctx context.Context, req apicontract.RelatedRows
 	if err != nil {
 		return apicontract.Result{}, newInvalidRequest("lookupId", err.Error())
 	}
-	projectDir, ok := api.ProjectDir(req.Project)
+	projectDir, ok := relatedProjectDir(req.Project)
 	if !ok {
 		return apicontract.Result{}, newNotFound("unknown project")
 	}
-	projStore, err := api.ProjectStoreFor(req.Project)
+	projStore, err := relatedProjectStoreFor(req.Project)
 	if err != nil {
 		return apicontract.Result{}, newInvalidRequest("project", err.Error())
 	}
@@ -256,12 +266,12 @@ func computeSemanticRelatedRows(ctx context.Context, req apicontract.RelatedRows
 		Limit(limit + 1) // +1 so a full page can be distinguished from an exact-limit result, for Truncated.
 	query := builder.SelectIntoRecord(nil)
 
-	executor, ok := api.SecureExecutor()
+	executor, ok := secureExecutorHook()
 	if !ok {
 		return apicontract.Result{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
 	executionStarted := time.Now().UTC()
-	result, err := executor.RunStructured(ctx, resolved.URL, query, nil)
+	result, err := runStructuredRelatedHook(executor, ctx, resolved.URL, query, nil)
 	if err != nil {
 		if err == context.DeadlineExceeded {
 			return apicontract.Result{}, newTimeout("related rows lookup timed out")
@@ -275,7 +285,7 @@ func computeSemanticRelatedRows(ctx context.Context, req apicontract.RelatedRows
 	if truncated {
 		result.Rows = result.Rows[:limit]
 	}
-	recordset, err := toContractRecordset(result)
+	recordset, err := toContractRecordsetHook(result)
 	if err != nil {
 		return apicontract.Result{}, newContractError(codeInternal, err.Error(), "")
 	}
@@ -295,7 +305,7 @@ func computeSemanticRelatedRows(ctx context.Context, req apicontract.RelatedRows
 		}
 		response.Execution = &ref
 	}
-	if err := response.Validate(); err != nil {
+	if err := relatedResultValidateHook(&response); err != nil {
 		return apicontract.Result{}, fmt.Errorf("validate related rows response: %w", err)
 	}
 	return response, nil

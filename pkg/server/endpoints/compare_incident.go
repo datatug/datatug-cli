@@ -11,12 +11,28 @@ import (
 	"github.com/datatug/datatug-core/pkg/incidents"
 )
 
+var (
+	compareIncidentViewHook            = api.IncidentView
+	compareSecureIncidentActorHook     = api.SecureIncidentActor
+	compareAuthorizeIncidentEventHook  = authorizeIncidentEvent
+	compareRunDraftHook                = compareRunDraft
+	compareIncidentStoreAppendHook     = func(s incidents.APIStore, ctx context.Context, m incidents.Mutation) (incidents.AppendResult, error) {
+		return s.Append(ctx, m)
+	}
+	compareIncidentStoreProjectionHook = func(s incidents.APIStore, ctx context.Context, ref incidents.IncidentRef, q *time.Time) (incidents.Incident, error) {
+		return s.Projection(ctx, ref, q)
+	}
+	compareIncidentStoreEventsHook = func(s incidents.APIStore, ctx context.Context, ref incidents.IncidentRef, after uint64) ([]incidents.Event, error) {
+		return s.Events(ctx, ref, after)
+	}
+)
+
 func preflightCompareIncident(ctx context.Context, req apicontract.CompareRequest) (*incidents.ComparisonRef, error) {
 	store, stored, events, err := compareIncidentState(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	view, policy, err := api.IncidentView(ctx, stored, events)
+	view, policy, err := compareIncidentViewHook(ctx, stored, events)
 	if err != nil {
 		return nil, newAccessDenied("current access policy does not permit this incident")
 	}
@@ -37,17 +53,17 @@ func preflightCompareIncident(ctx context.Context, req apicontract.CompareReques
 		}
 		return &comparison, nil
 	}
-	actor, err := api.SecureIncidentActor(incidents.ActorViaAPI)
+	actor, err := compareSecureIncidentActorHook(incidents.ActorViaAPI)
 	if err != nil {
 		return nil, newAccessDenied(err.Error())
 	}
 	placeholder := incidents.ComparisonRef{Left: compareSidePlaceholder(req, req.Left), Right: compareSidePlaceholder(req, req.Right)}
-	draft, err := compareRunDraft(*req.Incident, actor, req.Key, placeholder)
+	draft, err := compareRunDraftHook(*req.Incident, actor, req.Key, placeholder)
 	if err != nil {
 		return nil, newContractError(codeInternal, "prepare incident comparison preflight", "")
 	}
 	mutation := incidents.Mutation{MutationID: req.MutationID, Incident: *req.Incident, Event: draft}
-	if _, err := authorizeIncidentEvent(ctx, store, mutation); err != nil {
+	if _, err := compareAuthorizeIncidentEventHook(ctx, store, mutation); err != nil {
 		return nil, err
 	}
 	return nil, nil
@@ -58,21 +74,21 @@ func appendCompareRun(ctx context.Context, req apicontract.CompareRequest, compa
 	if err != nil {
 		return err
 	}
-	actor, err := api.SecureIncidentActor(incidents.ActorViaAPI)
+	actor, err := compareSecureIncidentActorHook(incidents.ActorViaAPI)
 	if err != nil {
 		return newAccessDenied(err.Error())
 	}
-	draft, err := compareRunDraft(*req.Incident, actor, req.Key, comparison)
+	draft, err := compareRunDraftHook(*req.Incident, actor, req.Key, comparison)
 	if err != nil {
 		return newContractError(codeInternal, "prepare incident comparison event", "")
 	}
 	mutation := incidents.Mutation{MutationID: req.MutationID, Incident: *req.Incident, Event: draft}
-	seq, err := authorizeIncidentEvent(ctx, store, mutation)
+	seq, err := compareAuthorizeIncidentEventHook(ctx, store, mutation)
 	if err != nil {
 		return err
 	}
 	mutation.ExpectedSeq = &seq
-	result, err := store.Append(ctx, mutation)
+	result, err := compareIncidentStoreAppendHook(store, ctx, mutation)
 	if err != nil {
 		return incidentStoreError(err)
 	}
@@ -99,11 +115,11 @@ func compareIncidentState(ctx context.Context, req apicontract.CompareRequest) (
 	if err != nil {
 		return nil, incidents.Incident{}, nil, newNotFound("incident store not found")
 	}
-	stored, err := store.Projection(ctx, *req.Incident, nil)
+	stored, err := compareIncidentStoreProjectionHook(store, ctx, *req.Incident, nil)
 	if err != nil {
 		return nil, incidents.Incident{}, nil, incidentStoreError(err)
 	}
-	events, err := store.Events(ctx, *req.Incident, 0)
+	events, err := compareIncidentStoreEventsHook(store, ctx, *req.Incident, 0)
 	if err != nil {
 		return nil, incidents.Incident{}, nil, incidentStoreError(err)
 	}
@@ -124,8 +140,10 @@ func compareSidePlaceholder(req apicontract.CompareRequest, side apicontract.Com
 	return incidents.ExecutionRef{StoreID: req.Incident.StoreID, ProjectID: side.Project, ExecutionID: "compare-preflight"}
 }
 
+var compareRunDraftMarshalJSON = json.Marshal
+
 func compareRunDraft(incident incidents.IncidentRef, actor incidents.Actor, key []string, comparison incidents.ComparisonRef) (incidents.EventDraft, error) {
-	payload, err := json.Marshal(incidents.CompareRunPayload{Key: append([]string(nil), key...)})
+	payload, err := compareRunDraftMarshalJSON(incidents.CompareRunPayload{Key: append([]string(nil), key...)})
 	if err != nil {
 		return incidents.EventDraft{}, err
 	}

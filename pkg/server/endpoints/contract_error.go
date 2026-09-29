@@ -60,9 +60,11 @@ func (e *contractError) Error() string {
 // newRequestID returns a fresh opaque correlation ID: 16 random bytes, hex
 // encoded (api-contract.md requires every error to carry one; "Server logs
 // record a correlation ID and operation, not raw facts").
+var randRead = rand.Read
+
 func newRequestID() string {
 	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
+	if _, err := randRead(buf); err != nil {
 		// crypto/rand.Read failing is effectively unrecoverable on any real
 		// platform; fall back to a fixed marker rather than panicking a
 		// request handler over an ID string.
@@ -220,9 +222,6 @@ func targetOptions(targets []apicontract.CandidateTarget) []apicontract.TargetOp
 func httpStatusFor(code apicontract.ErrorCode) int {
 	if status := code.HTTPStatus(); status != 0 {
 		return status
-	}
-	if code == codeRevisionConflict {
-		return http.StatusConflict
 	}
 	return http.StatusInternalServerError
 }

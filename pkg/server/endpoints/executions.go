@@ -58,6 +58,31 @@ func executionListRequest(r *http.Request) (apicontract.ExecutionListRequest, er
 	return req, nil
 }
 
+var authorizeExecutionRecordContextFn = authorizeExecutionRecordContext
+var executionListValidateHook = (*apicontract.ExecutionListResponse).Validate
+var executionSeriesValidateHook = (*apicontract.ExecutionSeriesResponse).Validate
+var snapshotReadValidateHook = (*apicontract.SnapshotReadResponse).Validate
+var runSnapshotExecutionHook = func(e *secureread.Executor, ctx context.Context, collection string, snapshot apicontract.Recordset) (secureread.Result, error) {
+	return e.RunSnapshot(ctx, collection, snapshot)
+}
+var executionEvidenceStoreByIDHook = api.ExecutionEvidenceStoreByID
+var secureExecutorExecutionsHook = api.SecureExecutor
+var executionStoreExecutionsHook = func(s *executionstore.Store, ctx context.Context) ([]apicontract.ExecutionRecord, error) {
+	return s.Executions(ctx)
+}
+var executionStoreExecutionsBoundedHook = func(s *executionstore.Store, ctx context.Context, limit int) ([]apicontract.ExecutionRecord, bool, error) {
+	return s.ExecutionsBounded(ctx, limit)
+}
+var executionStoreExecutionHook = func(s *executionstore.Store, ctx context.Context, ref apicontract.ExecutionRef) (apicontract.ExecutionRecord, error) {
+	return s.Execution(ctx, ref)
+}
+var executionStoreSnapshotHook = func(s *executionstore.Store, ctx context.Context, ref apicontract.ExecutionRef, snapshotRef string) (apicontract.SnapshotReadResponse, error) {
+	return s.Snapshot(ctx, ref, snapshotRef)
+}
+var executionStoreStateHook = func(s *executionstore.Store, ctx context.Context, snapshotRef string) (*apicontract.SnapshotState, error) {
+	return s.State(ctx, snapshotRef)
+}
+
 func computeExecutionList(r *http.Request, req apicontract.ExecutionListRequest) (apicontract.ExecutionListResponse, error) {
 	if err := validateScope(req.Scope); err != nil {
 		return apicontract.ExecutionListResponse{}, err
@@ -65,11 +90,11 @@ func computeExecutionList(r *http.Request, req apicontract.ExecutionListRequest)
 	if err := req.Validate(); err != nil {
 		return apicontract.ExecutionListResponse{}, requestValidationError(err)
 	}
-	store, err := api.ExecutionEvidenceStoreByID(req.Project, req.StoreID)
+	store, err := executionEvidenceStoreByIDHook(req.Project, req.StoreID)
 	if err != nil {
 		return apicontract.ExecutionListResponse{}, newNotFound("execution evidence store not found")
 	}
-	records, err := store.Executions(r.Context())
+	records, err := executionStoreExecutionsHook(store, r.Context())
 	if err != nil {
 		return apicontract.ExecutionListResponse{}, newContractError(codeInternal, "read execution records", "")
 	}
@@ -106,7 +131,7 @@ func computeExecutionList(r *http.Request, req apicontract.ExecutionListRequest)
 		}
 		response.Executions = append(response.Executions, brief)
 	}
-	if err := response.Validate(); err != nil {
+	if err := executionListValidateHook(&response); err != nil {
 		return apicontract.ExecutionListResponse{}, newContractError(codeInternal, "validate execution list", "")
 	}
 	return response, nil
@@ -125,7 +150,7 @@ func computeExecutionShow(r *http.Request) (apicontract.ExecutionRecord, error) 
 	if err := validateScope(scope); err != nil {
 		return apicontract.ExecutionRecord{}, err
 	}
-	record, err := store.Execution(r.Context(), ref)
+	record, err := executionStoreExecutionHook(store, r.Context(), ref)
 	if err != nil {
 		return apicontract.ExecutionRecord{}, executionReadError(err)
 	}
@@ -163,11 +188,11 @@ func computeExecutionSnapshot(r *http.Request) (apicontract.SnapshotReadResponse
 	if err := validateScope(scope); err != nil {
 		return apicontract.SnapshotReadResponse{}, err
 	}
-	record, err := store.Execution(r.Context(), ref)
+	record, err := executionStoreExecutionHook(store, r.Context(), ref)
 	if err != nil || record.Scope.Environment != scope.Environment || record.SnapshotRef == "" {
 		return apicontract.SnapshotReadResponse{}, newNotFound("snapshot not found")
 	}
-	snapshot, err := store.Snapshot(r.Context(), ref, record.SnapshotRef)
+	snapshot, err := executionStoreSnapshotHook(store, r.Context(), ref, record.SnapshotRef)
 	if err != nil {
 		return apicontract.SnapshotReadResponse{}, executionReadError(err)
 	}
@@ -193,11 +218,11 @@ func computeExecutionSnapshot(r *http.Request) (apicontract.SnapshotReadResponse
 	// Available snapshots are authorized with their real recorded rows. A
 	// metadata-only preflight would incorrectly deny a valid current policy
 	// that projects away columns which RunSnapshot must instead remove.
-	executor, ok := api.SecureExecutor()
+	executor, ok := secureExecutorExecutionsHook()
 	if !ok {
 		return apicontract.SnapshotReadResponse{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
-	filtered, err := executor.RunSnapshot(r.Context(), record.Provenance.Collection, *snapshot.Recordset)
+	filtered, err := runSnapshotExecutionHook(executor, r.Context(), record.Provenance.Collection, *snapshot.Recordset)
 	if err != nil {
 		if isCurrentPolicyDenial(err) {
 			return apicontract.SnapshotReadResponse{}, newAccessDenied("current access policy does not permit this recorded evidence")
@@ -213,7 +238,7 @@ func computeExecutionSnapshot(r *http.Request) (apicontract.SnapshotReadResponse
 		snapshot.Recordset.Rows = snapshot.Recordset.Rows[:*limit]
 		snapshot.Truncated = true
 	}
-	if err := snapshot.Validate(); err != nil {
+	if err := snapshotReadValidateHook(&snapshot); err != nil {
 		return apicontract.SnapshotReadResponse{}, newContractError(codeInternal, "validate filtered snapshot", "")
 	}
 	return snapshot, nil
@@ -262,11 +287,11 @@ func computeExecutionSeriesBounded(r *http.Request, req apicontract.ExecutionSer
 	if err := req.Validate(); err != nil {
 		return apicontract.ExecutionSeriesResponse{}, requestValidationError(err)
 	}
-	store, err := api.ExecutionEvidenceStoreByID(req.Project, req.StoreID)
+	store, err := executionEvidenceStoreByIDHook(req.Project, req.StoreID)
 	if err != nil {
 		return apicontract.ExecutionSeriesResponse{}, newNotFound("execution evidence store not found")
 	}
-	records, boundedOmission, err := store.ExecutionsBounded(r.Context(), recordLimit)
+	records, boundedOmission, err := executionStoreExecutionsBoundedHook(store, r.Context(), recordLimit)
 	if err != nil {
 		return apicontract.ExecutionSeriesResponse{}, newContractError(codeInternal, "read execution records", "")
 	}
@@ -298,7 +323,7 @@ func computeExecutionSeriesBounded(r *http.Request, req apicontract.ExecutionSer
 		}
 	}
 	sort.Slice(response.Points, func(i, j int) bool { return response.Points[i].ExecutedAt < response.Points[j].ExecutedAt })
-	if err := response.Validate(); err != nil {
+	if err := executionSeriesValidateHook(&response); err != nil {
 		return apicontract.ExecutionSeriesResponse{}, newContractError(codeInternal, "validate execution series", "")
 	}
 	return response, nil
@@ -319,7 +344,7 @@ func executionReadScope(r *http.Request) (apicontract.Scope, apicontract.Executi
 	if err := ref.Validate(); err != nil {
 		return scope, ref, nil, newInvalidRequest("id", "invalid execution id")
 	}
-	store, err := api.ExecutionEvidenceStoreByID(scope.Project, scope.StoreID)
+	store, err := executionEvidenceStoreByIDHook(scope.Project, scope.StoreID)
 	if err != nil {
 		return scope, ref, nil, newNotFound("execution evidence store not found")
 	}
@@ -334,11 +359,11 @@ func executionReadError(err error) error {
 }
 
 func authorizeExecutionRecord(r *http.Request, record apicontract.ExecutionRecord) error {
-	return authorizeExecutionRecordContext(r.Context(), record)
+	return authorizeExecutionRecordContextFn(r.Context(), record)
 }
 
 func authorizeExecutionRecordContext(ctx context.Context, record apicontract.ExecutionRecord) error {
-	executor, ok := api.SecureExecutor()
+	executor, ok := secureExecutorExecutionsHook()
 	if !ok {
 		return fmt.Errorf("server has no policy-enforced session configured")
 	}
@@ -355,7 +380,7 @@ func authorizeExecutionRecordContext(ctx context.Context, record apicontract.Exe
 		columns[i] = apicontract.Column{Name: field.Column, Type: string(apicontract.ValueTypeString)}
 		probeRow[i] = apicontract.NewStringValue("datatug-policy-probe")
 	}
-	result, err := executor.RunSnapshot(ctx, record.Provenance.Collection, apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{probeRow}})
+	result, err := runSnapshotExecutionHook(executor, ctx, record.Provenance.Collection, apicontract.Recordset{Columns: columns, Rows: [][]apicontract.TypedValue{probeRow}})
 	if err != nil {
 		return fmt.Errorf("%w: metadata policy probe: %v", secureread.ErrSnapshotPolicyUnexpressible, err)
 	}
@@ -386,7 +411,7 @@ func executionBrief(r *http.Request, store *executionstore.Store, record apicont
 		ResultFingerprint: record.ResultFingerprint, SnapshotRef: record.SnapshotRef, Incident: record.Incident,
 	}
 	if record.SnapshotRef != "" {
-		state, err := store.State(r.Context(), record.SnapshotRef)
+		state, err := executionStoreStateHook(store, r.Context(), record.SnapshotRef)
 		if err != nil {
 			return brief, newContractError(codeInternal, "read snapshot state", "")
 		}

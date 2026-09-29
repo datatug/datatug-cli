@@ -17,6 +17,11 @@ import (
 	"github.com/datatug/datatug-core/pkg/storage"
 )
 
+var apiResolveSource = api.ResolveSource
+var recordsetUnmarshalJSON = json.Unmarshal
+var dalAsSchemaReader = dal.As[dbschema.SchemaReader]
+var dbcopyParse = dbcopy.Parse
+
 // recordsetDefinitionPath is the project's declared shape for a
 // non-SQL (inGitDB-backed) collection: recordsets/<source>.recordset.json,
 // per recordsets/README.md's own documented convention in
@@ -43,7 +48,7 @@ type resolvedSource struct {
 // matched by any real project — see the PR body's inventory) and its
 // separate environment-blind inGitDB-only fallback.
 func resolveSource(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment, source, collection string) (resolvedSource, error) {
-	resolved, err := api.ResolveSource(ctx, projStore, projectDir, environment, source)
+	resolved, err := apiResolveSource(ctx, projStore, projectDir, environment, source)
 	if err != nil {
 		return resolvedSource{}, newSourceUnavailable(err.Error())
 	}
@@ -72,7 +77,7 @@ func fileExists(path string) bool {
 // already-resolved sqlite:// URL (api.ResolvedSource.URL) instead of
 // building one from a bare filesystem path itself.
 func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (resolvedSource, error) {
-	ref, err := dbcopy.Parse(sourceURL)
+	ref, err := dbcopyParse(sourceURL)
 	if err != nil {
 		return resolvedSource{}, err
 	}
@@ -83,7 +88,7 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 		}
 		return resolvedSource{}, fmt.Errorf("open %s: %w", sourceURL, err)
 	}
-	reader, ok := dal.As[dbschema.SchemaReader](db)
+	reader, ok := dalAsSchemaReader(db)
 	if !ok {
 		return resolvedSource{}, fmt.Errorf("%s does not support schema introspection", sourceURL)
 	}
@@ -154,7 +159,7 @@ func resolveRecordsetSource(sourceURL, recordsetPath, collection string) (resolv
 		return resolvedSource{}, fmt.Errorf("read %s: %w", recordsetPath, err)
 	}
 	var def datatug.RecordsetDefinition
-	if err := json.Unmarshal(data, &def); err != nil {
+	if err := recordsetUnmarshalJSON(data, &def); err != nil {
 		return resolvedSource{}, fmt.Errorf("parse %s: %w", recordsetPath, err)
 	}
 	columns := make([]semantic.Column, len(def.Columns))

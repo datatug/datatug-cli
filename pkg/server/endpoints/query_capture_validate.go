@@ -16,6 +16,9 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
+var captureProjectStoreFor = api.ProjectStoreFor
+var dtqlCollectionHook = dtqlCollection
+
 // Bounds on a captured query. Names become file and directory names in a
 // git-tracked tree; the rest bounds what one capture can put into it.
 const (
@@ -208,7 +211,7 @@ func validateCaptureDTQL(text string, params []capturedParameter) (string, error
 	if err != nil {
 		return "", newInvalidRequest(field, "does not parse as DTQL: "+err.Error())
 	}
-	collection := dtqlCollection(query)
+	collection := dtqlCollectionHook(query)
 	if collection == "" {
 		return "", newInvalidRequest(field, "must read one named collection")
 	}
@@ -261,7 +264,7 @@ func dtqlCollection(query dal.StructuredQuery) string {
 // source, and an unknown environment are all 400 on query.source; the
 // resolver's own error text (which can name server paths) is not echoed.
 func checkCaptureSource(ctx context.Context, projectID, projectDir, environment, source string) error {
-	projStore, err := api.ProjectStoreFor(projectID)
+	projStore, err := captureProjectStoreFor(projectID)
 	if err != nil {
 		return captureInternal(err)
 	}

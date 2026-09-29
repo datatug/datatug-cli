@@ -58,6 +58,13 @@ type runQueryOptions struct {
 	rowLimit int
 }
 
+var execRunProjectStoreFor = api.ProjectStoreFor
+var runQueryResponseValidateHook = (*apicontract.Result).Validate
+var executionQueryDocumentHook = executionQueryDocument
+var eligibleTargetsHook = api.EligibleTargets
+var runDTQLHook = (*secureread.Executor).RunDTQL
+var resolveSourceHook = api.ResolveSource
+
 func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (apicontract.Result, error) {
 	return computeRunQueryWithOptions(ctx, req, runQueryOptions{})
 }
@@ -91,11 +98,11 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	if !ok {
 		return apicontract.Result{}, newNotFound(fmt.Sprintf("unknown project %q", req.Project))
 	}
-	projStore, err := api.ProjectStoreFor(req.Project)
+	projStore, err := execRunProjectStoreFor(req.Project)
 	if err != nil {
 		return apicontract.Result{}, newInvalidRequest("project", err.Error())
 	}
-	executor, ok := api.SecureExecutor()
+	executor, ok := secureExecutorHook()
 	if !ok {
 		return apicontract.Result{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
@@ -198,13 +205,13 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	switch {
 	case req.DTQL != "":
 		profile = apicontract.ExecutionProfileProtected
-		result, err = executor.RunDTQL(runCtx, resolved.URL, []byte(req.DTQL), variables)
+		result, err = runDTQLHook(executor, runCtx, resolved.URL, []byte(req.DTQL), variables)
 	case queryDef.Type == datatug.QueryTypeDTQL:
 		var doc string
 		doc, err = executionQueryDocument(req.Project, req.QueryID, queryDef, queryRevision)
 		if err == nil {
 			profile = apicontract.ExecutionProfileProtected
-			result, err = executor.RunDTQL(runCtx, resolved.URL, []byte(doc), variables)
+			result, err = runDTQLHook(executor, runCtx, resolved.URL, []byte(doc), variables)
 		}
 	case queryDef.Type == datatug.QueryTypeSQL:
 		// The opaque-query-grant gate itself lives centrally in
@@ -216,10 +223,10 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		// below as secureread.ErrOpaqueSQLNotGranted, mapped to
 		// UNSUPPORTED_PROTECTED_EXECUTION.
 		var text string
-		text, err = executionQueryDocument(req.Project, req.QueryID, queryDef, queryRevision)
+		text, err = executionQueryDocumentHook(req.Project, req.QueryID, queryDef, queryRevision)
 		if err == nil {
 			profile = apicontract.ExecutionProfileOpaquePrivileged
-			result, err = executor.RunNativeSQL(runCtx, resolved.URL, text, sqlQueryArgs(queryDef, variables)...)
+			result, err = runNativeSQLHook(executor, runCtx, resolved.URL, text, sqlQueryArgs(queryDef, variables)...)
 		}
 	case queryDef.Type == datatug.QueryTypeHTTP:
 		profile = apicontract.ExecutionProfileProtected
@@ -346,7 +353,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		result.Rows = result.Rows[:limit]
 	}
 
-	recordset, err := toContractRecordset(result)
+	recordset, err := toContractRecordsetHook(result)
 	if err != nil {
 		return apicontract.Result{}, newContractError(codeInternal, err.Error(), "")
 	}
@@ -384,13 +391,13 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		Truncated: truncated,
 	}
 	if req.Record {
-		ref, recordErr := recordQueryExecution(ctx, req, queryDef, queryRevision, response, executionStarted)
+		ref, recordErr := recordQueryExecutionHook(ctx, req, queryDef, queryRevision, response, executionStarted)
 		if recordErr != nil {
 			return apicontract.Result{}, recordErr
 		}
 		response.Execution = &ref
 	}
-	if err := response.Validate(); err != nil {
+	if err := runQueryResponseValidateHook(&response); err != nil {
 		return apicontract.Result{}, fmt.Errorf("validate query execution response: %w", err)
 	}
 	return response, nil
@@ -442,14 +449,14 @@ func validateDefaultBindingOrigins(req apicontract.ExecutionRequest, queryDef *d
 // newMissingParameter("source") check that used to guard it here.
 func resolveExecutionSource(ctx context.Context, projStore datatug.ProjectStore, projDir string, req apicontract.ExecutionRequest, queryDef *datatug.QueryDef) (api.ResolvedSource, error) {
 	if req.DTQL != "" {
-		resolved, err := api.ResolveSource(ctx, projStore, projDir, req.Environment, req.Source)
+		resolved, err := resolveSourceHook(ctx, projStore, projDir, req.Environment, req.Source)
 		if err != nil {
 			return api.ResolvedSource{}, newSourceUnavailable(err.Error())
 		}
 		return resolved, nil
 	}
 
-	eligible, err := api.EligibleTargets(ctx, projStore, projDir, req.Environment, queryDef)
+	eligible, err := eligibleTargetsHook(ctx, projStore, projDir, req.Environment, queryDef)
 	if err != nil {
 		return api.ResolvedSource{}, newSourceUnavailable(err.Error())
 	}
@@ -748,3 +755,8 @@ func runHTTPQuery(ctx context.Context, executor *secureread.Executor, sourceURL 
 var runStructuredHTTPQuery = func(ctx context.Context, executor *secureread.Executor, sourceURL string, query dal.Query, variables map[string]any) (secureread.Result, error) {
 	return executor.RunStructured(ctx, sourceURL, query, variables)
 }
+
+var runNativeSQLHook = func(e *secureread.Executor, ctx context.Context, sourceURL, text string, args ...dal.QueryArg) (secureread.Result, error) {
+	return e.RunNativeSQL(ctx, sourceURL, text, args...)
+}
+var recordQueryExecutionHook = recordQueryExecution

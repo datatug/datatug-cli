@@ -22,6 +22,8 @@ import (
 // reported via api.ErrCatalogNotFound the same way GetQuery/getAllQueries
 // already repurpose api.ErrQueryNotFound for both "unknown project" and
 // "unknown query" — see util_error_handling.go's handleError.
+var catalogProjectDir = api.ProjectDir
+
 func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	ref, err := newProjectRef(q)
@@ -35,7 +37,7 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	environmentID := paramAlias(q, "environment", "env")
 	catalogID := paramAlias(q, "catalog", "db")
-	projectDir, ok := api.ProjectDir(ref.ProjectID)
+	projectDir, ok := catalogProjectDir(ref.ProjectID)
 	if !ok {
 		handleError(fmt.Errorf("%w: unknown project %q", api.ErrCatalogNotFound, ref.ProjectID), w, r)
 		return

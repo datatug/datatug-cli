@@ -13,13 +13,32 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
+var measureRecordsetHook = measureRecordset
+var relatedRowsMarshalJSON = json.Marshal
+var newExecutionIDHook = newExecutionID
+var randReadHook = rand.Read
+var fingerprintRecordsetHook = apicontract.FingerprintRecordset
+var snapshotRecordsetValidateHook = (*apicontract.Recordset).Validate
+var executionRecordValidateHook = (*apicontract.ExecutionRecord).Validate
+var requireIncidentHook = func(s *executionstore.Store, ctx context.Context, ref apicontract.IncidentRef) error {
+	return s.RequireIncident(ctx, ref)
+}
+var snapshotRecordsetForStorageHook = snapshotRecordsetForStorage
+var putSnapshotHook = func(s *executionstore.Store, ctx context.Context, ref apicontract.ExecutionRef, r apicontract.Recordset, at time.Time) (string, bool, error) {
+	return s.PutSnapshot(ctx, ref, r, at)
+}
+var putExecutionHook = func(s *executionstore.Store, ctx context.Context, r apicontract.ExecutionRecord) error {
+	return s.PutExecution(ctx, r)
+}
+
 func recordQueryExecution(ctx context.Context, req apicontract.ExecutionRequest, queryDef *datatug.QueryDef, queryRevision string, result apicontract.Result, started time.Time) (apicontract.ExecutionRef, error) {
-	measurements, err := measureRecordset(result.Recordset, req.MeasurementProjections, result.Limitations, result.Truncated)
+	measurements, err := measureRecordsetHook(result.Recordset, req.MeasurementProjections, result.Limitations, result.Truncated)
 	if err != nil {
 		return apicontract.ExecutionRef{}, newInvalidRequest("measurementProjections", err.Error())
 	}
@@ -32,7 +51,7 @@ func recordQueryExecution(ctx context.Context, req apicontract.ExecutionRequest,
 }
 
 func recordRelatedRowsExecution(ctx context.Context, req apicontract.RelatedRowsRequest, result apicontract.Result, started time.Time) (apicontract.ExecutionRef, error) {
-	canonical, err := json.Marshal(struct {
+	canonical, err := relatedRowsMarshalJSON(struct {
 		LookupID string                 `json:"lookupId"`
 		Value    apicontract.TypedValue `json:"value"`
 	}{LookupID: req.LookupID, Value: req.Value})
@@ -77,19 +96,19 @@ func persistExecution(ctx context.Context, input executionInput, result apicontr
 		return apicontract.ExecutionRef{}, fmt.Errorf("open execution evidence store: %w", err)
 	}
 	if input.Incident != nil {
-		if err := store.RequireIncident(ctx, *input.Incident); err != nil {
+		if err := requireIncidentHook(store, ctx, *input.Incident); err != nil {
 			if errors.Is(err, incidentstore.ErrIncidentNotFound) {
 				return apicontract.ExecutionRef{}, newInvalidRequest("incident", "incident not found")
 			}
 			return apicontract.ExecutionRef{}, fmt.Errorf("resolve execution incident: %w", err)
 		}
 	}
-	executionID, err := newExecutionID()
+	executionID, err := newExecutionIDHook()
 	if err != nil {
 		return apicontract.ExecutionRef{}, newContractError(codeInternal, "create execution id", "")
 	}
 	ref := apicontract.ExecutionRef{StoreID: evidenceStoreID, ProjectID: input.Project, ExecutionID: executionID}
-	fingerprint, err := apicontract.FingerprintRecordset(result.Recordset)
+	fingerprint, err := fingerprintRecordsetHook(result.Recordset)
 	if err != nil {
 		return apicontract.ExecutionRef{}, fmt.Errorf("fingerprint execution result: %w", err)
 	}
@@ -119,12 +138,12 @@ func persistExecution(ctx context.Context, input executionInput, result apicontr
 		Incident: input.Incident, Measurements: normalizeMeasurements(input.Measurements),
 	}
 	if input.Snapshot {
-		snapshotRecordset, allowed, policyErr := snapshotRecordsetForStorage(input.Project, result.Provenance.Source, result.Recordset)
+		snapshotRecordset, allowed, policyErr := snapshotRecordsetForStorageHook(input.Project, result.Provenance.Source, result.Recordset)
 		if policyErr != nil {
 			return apicontract.ExecutionRef{}, policyErr
 		}
 		if allowed {
-			snapshotRef, stored, snapshotErr := store.PutSnapshot(ctx, ref, snapshotRecordset, started)
+			snapshotRef, stored, snapshotErr := putSnapshotHook(store, ctx, ref, snapshotRecordset, started)
 			if snapshotErr != nil {
 				return apicontract.ExecutionRef{}, fmt.Errorf("store execution snapshot: %w", snapshotErr)
 			}
@@ -133,13 +152,13 @@ func persistExecution(ctx context.Context, input executionInput, result apicontr
 			}
 		}
 	}
-	if err := record.Validate(); err != nil {
+	if err := executionRecordValidateHook(&record); err != nil {
 		if record.SnapshotRef != "" {
 			_ = store.RollbackSnapshot(ctx, record.SnapshotRef)
 		}
 		return apicontract.ExecutionRef{}, fmt.Errorf("validate execution record: %w", err)
 	}
-	if err := store.PutExecution(ctx, record); err != nil {
+	if err := putExecutionHook(store, ctx, record); err != nil {
 		if record.SnapshotRef != "" {
 			_ = store.RollbackSnapshot(ctx, record.SnapshotRef)
 		}
@@ -172,7 +191,7 @@ func snapshotRecordsetForStorage(projectID, sourceID string, recordset apicontra
 			filtered.Rows[rowIndex][filteredIndex] = row[originalIndex]
 		}
 	}
-	if err := filtered.Validate(); err != nil {
+	if err := snapshotRecordsetValidateHook(&filtered); err != nil {
 		return apicontract.Recordset{}, false, fmt.Errorf("validate masked snapshot: %w", err)
 	}
 	return filtered, true, nil
@@ -180,7 +199,7 @@ func snapshotRecordsetForStorage(projectID, sourceID string, recordset apicontra
 
 func newExecutionID() (string, error) {
 	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
+	if _, err := randReadHook(bytes); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(bytes), nil
@@ -358,9 +377,6 @@ func finiteDecimal(value *big.Rat) (string, bool) {
 	decimal := value.FloatString(scale)
 	if scale > 0 {
 		decimal = strings.TrimRight(strings.TrimRight(decimal, "0"), ".")
-	}
-	if decimal == "-0" || decimal == "" {
-		decimal = "0"
 	}
 	return decimal, true
 }

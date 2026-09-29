@@ -14,6 +14,8 @@ import (
 	"github.com/datatug/datatug-core/pkg/semantic"
 )
 
+var applicableProjectStoreFor = api.ProjectStoreFor
+
 // semanticApplicableHandler is POST /datatug/queries/applicable, decoding
 // the appendix's exact envelope — Scope + {values:Fact[]}, response
 // {applicable:Candidate[],notYet:Candidate[]} — as core's own
@@ -53,7 +55,7 @@ func computeSemanticApplicable(ctx context.Context, req apicontract.ApplicableRe
 	if !ok {
 		return apicontract.ApplicableResponse{}, newNotFound("unknown project")
 	}
-	projStore, err := api.ProjectStoreFor(req.Project)
+	projStore, err := applicableProjectStoreFor(req.Project)
 	if err != nil {
 		return apicontract.ApplicableResponse{}, newInvalidRequest("project", err.Error())
 	}
@@ -299,9 +301,6 @@ func finishCandidate(ctx context.Context, projStore datatug.ProjectStore, projec
 	}
 	if ambiguous == nil {
 		ambiguous = []apicontract.Ambiguous{}
-	}
-	if targets == nil {
-		targets = []apicontract.CandidateTarget{}
 	}
 	// S97: the canonical, folder-qualified id (never the bare q.ID) — a
 	// client that opens what applicable hands it (get_query, run_query)

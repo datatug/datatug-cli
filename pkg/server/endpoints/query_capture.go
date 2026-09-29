@@ -18,6 +18,8 @@ import (
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
+var authorizeProjectQueryWrite = api.AuthorizeProjectQueryWrite
+
 // POST queries/capture - "Save as project query" (hub datatug/datatug
 // executable-knowledge-library REQ:capture-from-exploration, Phase 2 plan
 // task 2). The browser saves a lookup it already ran as an ordinary project
@@ -191,7 +193,7 @@ func computeCaptureQuery(ctx context.Context, req captureQueryRequest) (captureQ
 	if condition.IfNoneMatch {
 		operation = access.Insert
 	}
-	if err := api.AuthorizeProjectQueryWrite(ctx, req.Project, queryID, operation); err != nil {
+	if err := authorizeProjectQueryWrite(ctx, req.Project, queryID, operation); err != nil {
 		if errors.Is(err, secureread.ErrAccessDenied) {
 			return captureQueryResponse{}, 0, captureAccessDenied(err)
 		}

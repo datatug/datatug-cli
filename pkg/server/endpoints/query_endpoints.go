@@ -17,6 +17,7 @@ import (
 )
 
 var getQuery = api.GetQuery
+var loadModuleQueriesHook = loadModuleQueries
 
 // getQueriesHandler is GET /datatug/queries/all_queries — restored on top of
 // the current datatug-core v0.27.3 QueryDef/QueriesFolder models (Task 17,
@@ -134,7 +135,7 @@ func getAllQueries(_ context.Context, ref dto.ProjectRef) (*datatug.QueriesFolde
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, ref.ProjectID)
 	}
-	queries, canonicalIDs, err := loadModuleQueries(projectDir)
+	queries, canonicalIDs, err := loadModuleQueriesHook(projectDir)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +197,7 @@ func getPersonalQueries(_ context.Context, ref dto.ProjectRef) (*datatug.Queries
 	if err != nil {
 		return nil, err
 	}
-	queries, canonicalIDs, err := loadModuleQueries(personalProjectDir)
+	queries, canonicalIDs, err := loadModuleQueriesHook(personalProjectDir)
 	if err != nil {
 		return nil, err
 	}

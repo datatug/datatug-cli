@@ -13,6 +13,8 @@ import (
 	"github.com/datatug/datatug-core/pkg/storage"
 )
 
+var semanticFilepathRel = filepath.Rel
+
 // loadModuleEntities reads every entities/**/*.entity.json file under dir
 // into datatug.Entity directly, bypassing datatug.ProjectStore:
 // datatug.ProjectStore's LoadQueries(ctx, folderPath) does not recurse into
@@ -72,7 +74,7 @@ func loadModuleQueries(dir string) ([]*datatug.QueryDef, map[*datatug.QueryDef]s
 		if query.ID == "" {
 			query.ID = bareID
 		}
-		rel, relErr := filepath.Rel(queriesDir, filepath.Dir(path))
+		rel, relErr := semanticFilepathRel(queriesDir, filepath.Dir(path))
 		if relErr != nil {
 			return relErr
 		}

@@ -10,6 +10,8 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
+var compareKeyProjectStoreFor = api.ProjectStoreFor
+
 type compareKeyMapping struct {
 	column string
 	entity string
@@ -52,7 +54,7 @@ func mappedCompareKey(ctx context.Context, queryID string, side apicontract.Comp
 	if err != nil {
 		return nil, newNotFound(fmt.Sprintf("query %q not found", queryID))
 	}
-	store, err := api.ProjectStoreFor(side.Project)
+	store, err := compareKeyProjectStoreFor(side.Project)
 	if err != nil {
 		return nil, newInvalidRequest("project", err.Error())
 	}

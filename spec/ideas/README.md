@@ -19,6 +19,7 @@ The Idea format follows [SpecScore](https://specscore.md/idea-specification).
 | [semantic-metadata-cli](semantic-metadata-cli.md) | Implemented | 2026-06-04 | alex | cli/entity |
 | [shared-module-system](shared-module-system.md) | Approved | 2026-06-04 | alex | — |
 | [terminal-chat-ux-acceptance](terminal-chat-ux-acceptance.md) | Draft | 2026-09-23 | alex | — |
+| [tview-to-bubbletea-migration](tview-to-bubbletea-migration.md) | Draft | 2026-09-29 | alex | — |
 
 ## Open Questions
 

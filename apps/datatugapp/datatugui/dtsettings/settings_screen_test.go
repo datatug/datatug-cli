@@ -2,226 +2,114 @@ package dtsettings
 
 import (
 	"errors"
-	"sync"
+	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/alecthomas/chroma/v2"
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/strongo/strongo-tui/pkg/nav/navtest"
+	"github.com/strongo/strongo-tui/pkg/uitest"
+	"github.com/strongo/strongo-tui/pkg/widgets"
 )
 
-// registerOnce ensures RegisterModule is called at most once per test binary.
-var registerOnce sync.Once
-
-// newTestTUI builds a headless *sneatnav.TUI using a simulation screen.
-// Unlike sneatnav.NewTestTUI it avoids calling screen.Fini() in cleanup
-// because app.Stop() already calls it internally (via tview.Application.Stop).
-func newTestTUI(t *testing.T) *sneatnav.TUI {
+// stub replaces the package seams and returns the restore function.
+func stub(t *testing.T, settings func() (dtconfig.Settings, error), marshal func(any) ([]byte, error), lexer func(string) chroma.Lexer) {
 	t.Helper()
-	screen := tcell.NewSimulationScreen("UTF-8")
-	if err := screen.Init(); err != nil {
-		t.Fatalf("simulation screen Init: %v", err)
+	oldS, oldM, oldL := getSettingsFn, marshalFn, getLexerFn
+	t.Cleanup(func() { getSettingsFn, marshalFn, getLexerFn = oldS, oldM, oldL })
+	if settings != nil {
+		getSettingsFn = settings
 	}
-	app := tview.NewApplication().SetScreen(screen)
-	root := sneatv.NewBreadcrumb("test", func() error { return nil })
-	tui := sneatnav.NewTUI(app, root)
-	t.Cleanup(func() { app.Stop() })
-	return tui
-}
-
-func TestRegisterModule(t *testing.T) {
-	// RegisterModule panics on duplicate registration; use sync.Once so
-	// this test is safe whether run alone or with others in this package.
-	registerOnce.Do(func() {
-		RegisterModule()
-	})
-	// If we reached here without panicking the registration succeeded.
-}
-
-func TestGoSettingsScreen_FocusToMenu(t *testing.T) {
-	registerOnce.Do(func() { RegisterModule() })
-	tui := newTestTUI(t)
-	if err := GoSettingsScreen(tui, sneatnav.FocusToMenu); err != nil {
-		t.Fatalf("GoSettingsScreen(FocusToMenu) unexpected error: %v", err)
+	if marshal != nil {
+		marshalFn = marshal
+	}
+	if lexer != nil {
+		getLexerFn = lexer
 	}
 }
 
-func TestGoSettingsScreen_FocusToContent(t *testing.T) {
-	registerOnce.Do(func() { RegisterModule() })
-	tui := newTestTUI(t)
-	if err := GoSettingsScreen(tui, sneatnav.FocusToContent); err != nil {
-		t.Fatalf("GoSettingsScreen(FocusToContent) unexpected error: %v", err)
+func okSettings() (dtconfig.Settings, error) { return dtconfig.Settings{}, nil }
+
+func TestModule(t *testing.T) {
+	m := Module()
+	if m.ID != datatugui.ScreenSettings || m.Text != "Settings" || m.Shortcut != 's' {
+		t.Fatalf("unexpected module: %+v", m)
 	}
 }
 
-// TestGoSettingsScreen_GetSettingsError covers the branch where getSettingsFn
-// returns an error (settingsStr = err.Error()).
-func TestGoSettingsScreen_GetSettingsError(t *testing.T) {
-	registerOnce.Do(func() { RegisterModule() })
-
-	origGet := getSettingsFn
-	t.Cleanup(func() { getSettingsFn = origGet })
-	getSettingsFn = func() (dtconfig.Settings, error) {
-		return dtconfig.Settings{}, errors.New("settings read failed")
-	}
-
-	tui := newTestTUI(t)
-	// GoSettingsScreen renders the error string but still returns nil.
-	if err := GoSettingsScreen(tui, sneatnav.FocusToMenu); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestSettingsShowsConfig(t *testing.T) {
+	stub(t, okSettings, func(any) ([]byte, error) { return []byte("server:\n  host: example.org\n"), nil }, nil)
+	h := navtest.New(t, Module().Root())
+	h.RequireContains("Config File: ~/.datatug.yaml")
+	h.RequireContains("host: example.org")
+	if !strings.Contains(h.Styled(), "\x1b[") {
+		t.Fatal("expected syntax highlighting")
 	}
 }
 
-// TestGoSettingsScreen_MarshalError covers the yaml.Marshal error branch (settingsStr = err.Error()).
-func TestGoSettingsScreen_MarshalError(t *testing.T) {
-	registerOnce.Do(func() { RegisterModule() })
-
-	origGetSettings := getSettingsFn
-	t.Cleanup(func() { getSettingsFn = origGetSettings })
-	getSettingsFn = func() (dtconfig.Settings, error) {
-		return dtconfig.Settings{}, nil
-	}
-
-	origMarshal := marshalFn
-	t.Cleanup(func() { marshalFn = origMarshal })
-	marshalFn = func(_ interface{}) ([]byte, error) {
-		return nil, errors.New("marshal failed")
-	}
-
-	tui := newTestTUI(t)
-	if err := GoSettingsScreen(tui, sneatnav.FocusToMenu); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+func TestSettingsRealMarshal(t *testing.T) {
+	stub(t, okSettings, nil, nil)
+	h := navtest.New(t, Module().Root())
+	h.RequireContains("Config File")
 }
 
-// TestGoSettingsScreen_ColorizerError covers the branch where ColorizeYAMLForTview
-// returns a non-nil error (lines 55-57). We substitute getLexerFn with a lexer
-// whose Tokenise always errors.
-func TestGoSettingsScreen_ColorizerError(t *testing.T) {
-	registerOnce.Do(func() { RegisterModule() })
-
-	orig := getLexerFn
-	t.Cleanup(func() { getLexerFn = orig })
-
-	wantErr := errors.New("tokenise failed")
-	getLexerFn = func(_ string) chroma.Lexer {
-		return &errLexer{err: wantErr}
-	}
-
-	tui := newTestTUI(t)
-	err := GoSettingsScreen(tui, sneatnav.FocusToMenu)
-	if err == nil {
-		t.Fatal("expected error from GoSettingsScreen, got nil")
-	}
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("expected %v, got %v", wantErr, err)
-	}
+func TestSettingsReadError(t *testing.T) {
+	stub(t, func() (dtconfig.Settings, error) { return dtconfig.Settings{}, errors.New("cannot read config") }, nil, nil)
+	h := navtest.New(t, Module().Root())
+	h.RequireContains("cannot read config")
 }
 
-// TestGoSettingsScreen_BreadcrumbAction invokes the Settings breadcrumb callback
-// captured via the onBreadcrumbPushed seam, covering the anonymous closure body.
-func TestGoSettingsScreen_BreadcrumbAction(t *testing.T) {
-	registerOnce.Do(func() { RegisterModule() })
-
-	var capturedAction func() error
-	onBreadcrumbPushed = func(action func() error) { capturedAction = action }
-	t.Cleanup(func() { onBreadcrumbPushed = nil })
-
-	tui := newTestTUI(t)
-	if err := GoSettingsScreen(tui, sneatnav.FocusToMenu); err != nil {
-		t.Fatalf("GoSettingsScreen: %v", err)
-	}
-	if capturedAction == nil {
-		t.Fatal("onBreadcrumbPushed was not called")
-	}
-	// Invoke the breadcrumb action — covers the closure body.
-	if err := capturedAction(); err != nil {
-		t.Fatalf("breadcrumb action: %v", err)
-	}
+func TestSettingsMarshalError(t *testing.T) {
+	stub(t, okSettings, func(any) ([]byte, error) { return nil, errors.New("cannot marshal") }, nil)
+	h := navtest.New(t, Module().Root())
+	h.RequireContains("cannot marshal")
 }
 
-// TestGoSettingsScreen_InputCapture drives the SetInputCapture closure that is
-// registered on the textView inside GoSettingsScreen, covering all switch arms.
-func TestGoSettingsScreen_InputCapture(t *testing.T) {
-	registerOnce.Do(func() { RegisterModule() })
+// failingLexer cannot tokenise.
+type failingLexer struct{ chroma.Lexer }
 
-	var captured *tview.TextView
-	onTextViewReady = func(tv *tview.TextView) { captured = tv }
-	t.Cleanup(func() { onTextViewReady = nil })
-
-	tui := newTestTUI(t)
-	if err := GoSettingsScreen(tui, sneatnav.FocusToMenu); err != nil {
-		t.Fatalf("GoSettingsScreen: %v", err)
-	}
-	if captured == nil {
-		t.Fatal("onTextViewReady was not called")
-	}
-
-	invoke := func(key tcell.Key) *tcell.EventKey {
-		return sneatnav.InvokeInputCapture(captured, key, 0, tcell.ModNone)
-	}
-
-	// KeyLeft → returns nil (focus moves to menu)
-	if got := invoke(tcell.KeyLeft); got != nil {
-		t.Errorf("KeyLeft: expected nil return, got %v", got)
-	}
-
-	// KeyUp with row > 0 (lineOffset starts at -1 before draw) → returns event.
-	if got := invoke(tcell.KeyUp); got == nil {
-		t.Error("KeyUp at row<0: expected event to be returned, got nil")
-	}
-
-	// KeyUp at row == 0 → returns nil (focus moves to breadcrumbs).
-	// ScrollToBeginning sets lineOffset=0 so GetScrollOffset returns 0.
-	captured.ScrollToBeginning()
-	if got := invoke(tcell.KeyUp); got != nil {
-		t.Errorf("KeyUp at row 0: expected nil, got %v", got)
-	}
-
-	// default key → returns event unchanged
-	if got := invoke(tcell.KeyEnter); got == nil {
-		t.Error("default key: expected event to be returned unchanged, got nil")
-	}
+func (failingLexer) Tokenise(*chroma.TokeniseOptions, string) (chroma.Iterator, error) {
+	return nil, errors.New("lexer broke")
 }
 
-// errLexer is a minimal chroma.Lexer that always errors on Tokenise.
-type errLexer struct {
-	err error
+func TestSettingsHighlightError(t *testing.T) {
+	stub(t, okSettings, nil, func(string) chroma.Lexer { return failingLexer{} })
+	h := navtest.New(t, Module().Root())
+	h.RequireContains("show settings: lexer broke")
 }
 
-func (e *errLexer) Config() *chroma.Config {
-	return &chroma.Config{Name: "error-lexer"}
-}
-
-func (e *errLexer) Tokenise(_ *chroma.TokeniseOptions, _ string) (chroma.Iterator, error) {
-	return nil, e.err
-}
-
-func (e *errLexer) SetRegistry(_ *chroma.LexerRegistry) chroma.Lexer {
-	return e
-}
-
-func (e *errLexer) SetAnalyser(_ func(text string) float32) chroma.Lexer {
-	return e
-}
-
-func (e *errLexer) AnalyseText(_ string) float32 {
-	return 0
-}
-
-func TestGoSettingsScreen_MarshalSuccess(t *testing.T) {
-	registerOnce.Do(func() { RegisterModule() })
-	oldGetSettings := getSettingsFn
-	getSettingsFn = func() (dtconfig.Settings, error) {
-		return dtconfig.Settings{}, nil
+func TestSettingsScreenKeysAndFocus(t *testing.T) {
+	var many strings.Builder
+	for i := 0; i < 60; i++ {
+		many.WriteString("key: value\n")
 	}
-	defer func() { getSettingsFn = oldGetSettings }()
+	stub(t, okSettings, func(any) ([]byte, error) { return []byte(many.String()), nil }, nil)
 
-	tui := newTestTUI(t)
-	if err := GoSettingsScreen(tui, sneatnav.FocusToContent); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	var s nav.Screen = newSettings()
+	s, _ = s.Update(tea.WindowSizeMsg{Width: 40, Height: 5})
+	msgs := uitest.Msgs(s.Init())
+	if len(msgs) != 1 {
+		t.Fatalf("Init should load once, got %v", msgs)
+	}
+	s, _ = s.Update(msgs[0])
+	b := s.(widgets.Boundary)
+	if !b.AtEdge(widgets.Up) || b.AtEdge(widgets.Down) {
+		t.Fatal("expected to sit at the top of a long text")
+	}
+	s, _ = s.Update(nav.ScreenFocusMsg{Focused: true})
+	s, _ = s.Update(uitest.Key("down"))
+	if b = s.(widgets.Boundary); b.AtEdge(widgets.Up) {
+		t.Fatal("down should scroll")
+	}
+	s, _ = s.Update(nav.ScreenFocusMsg{Focused: false})
+	s, _ = s.Update(uitest.Key("up"))
+	if s.(widgets.Boundary).AtEdge(widgets.Up) {
+		t.Fatal("an unfocused screen ignores keys")
+	}
+	if s.(nav.Titled).Title() != " Config File: ~/.datatug.yaml" {
+		t.Fatalf("title = %q", s.(nav.Titled).Title())
 	}
 }

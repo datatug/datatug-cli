@@ -1,80 +1,98 @@
 package dtviewers
 
 import (
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
-	"github.com/datatug/datatug-cli/pkg/dtlog"
-	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/strongo/strongo-tui/pkg/widgets"
 )
 
-// seams for testing
-var screenOpened = func(id, name string) { dtlog.ScreenOpened(id, name) }
-var saveCurrentScreenPath = func(path string) { dtstate.SaveCurrentScreePath(path) }
+// Title is the title of the Viewers module and of its list.
+const Title = "Viewers"
 
-func GoViewersScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
-	breadcrumbs := tui.Header.Breadcrumbs()
-	breadcrumbs.Clear()
-	breadcrumbs.Push(sneatv.NewBreadcrumb("Viewers", nil))
+// listID identifies the viewers list in its messages.
+const listID = "dtviewers.list"
 
-	menu := datatugui.NewDataTugMainMenu(tui, datatugui.RootScreenViewers)
-	content := GetViewersListPanel(tui, " Viewers ", focusTo, ViewersListOptions{WithDescription: true})
+// screenOpened is a seam over the persisted screen path and telemetry.
+var screenOpened = datatugui.ScreenOpened
 
-	tui.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
-	screenOpened("viewers", "Viewers")
-	saveCurrentScreenPath("viewers")
-	return nil
-}
-
-type ViewersListOptions struct {
-	WithDescription bool
-}
-
-func GetViewersListPanel(tui *sneatnav.TUI, title string, focusTo sneatnav.FocusTo, o ViewersListOptions) sneatnav.Panel {
-	list := tview.NewList()
-
-	for _, viewer := range viewers {
-		var description string
-		if o.WithDescription {
-			description = viewer.Description
-		}
-		list.AddItem(viewer.Name, description, viewer.Shortcut, func() {
-			_ = viewer.Action(tui, focusTo)
-		})
+// Module returns the Viewers module of the main menu: a list of the given
+// viewers whose selection pushes the viewer's page.
+func Module(viewers ...Viewer) datatugui.Module {
+	return datatugui.Module{
+		ID: datatugui.ScreenViewers, Text: Title, Shortcut: 'v',
+		Root: func() nav.Page { return nav.Page{Content: newViewersScreen(viewers)} },
 	}
-
-	// Set secondary text color to gray
-	list.SetSecondaryTextColor(tcell.ColorDarkGray)
-
-	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyESC, tcell.KeyBacktab, tcell.KeyLeft:
-			tui.SetFocus(tui.Menu)
-			return nil
-		case tcell.KeyUp:
-			if list.GetCurrentItem() == 0 {
-				tui.Header.SetFocus(sneatnav.ToBreadcrumbs, list)
-				return nil
-			}
-			return event
-		case tcell.KeyDown:
-			// Prevent jumping to first item when on last item
-			if list.GetCurrentItem() == list.GetItemCount()-1 {
-				return nil
-			}
-			return event
-		default:
-			return event
-		}
-	})
-
-	sneatv.DefaultBorderWithPadding(list.Box)
-	// Set spacing between items to 1 line by increasing vertical padding
-	list.SetBorderPadding(1, 1, 1, 1)
-	list.SetTitle(title)
-	list.SetTitleAlign(tview.AlignLeft)
-
-	return sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(list, list.Box))
 }
+
+// viewersScreen lists the viewers.
+type viewersScreen struct {
+	viewers []Viewer
+	list    widgets.List
+}
+
+var (
+	_ nav.Screen       = viewersScreen{}
+	_ nav.Titled       = viewersScreen{}
+	_ nav.ShortHelper  = viewersScreen{}
+	_ widgets.Boundary = viewersScreen{}
+	_ widgets.Editor   = viewersScreen{}
+)
+
+func newViewersScreen(viewers []Viewer) viewersScreen {
+	items := make([]list.Item, len(viewers))
+	for i, v := range viewers {
+		items[i] = widgets.MenuItem{ID: string(v.ID), Label: v.Name, Detail: v.Description, Shortcut: v.Shortcut}
+	}
+	return viewersScreen{viewers: viewers, list: widgets.NewList(listID, items...)}
+}
+
+// Init implements nav.Screen.
+func (s viewersScreen) Init() tea.Cmd { return nil }
+
+// Update implements nav.Screen.
+func (s viewersScreen) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
+	switch msg := msg.(type) {
+	case nav.ScreenFocusMsg:
+		if msg.Focused {
+			s.list.Focus()
+		} else {
+			s.list.Blur()
+		}
+		return s, nil
+	case widgets.ItemSelectedMsg:
+		if msg.ID == listID {
+			return s, open(s.viewers[msg.Index])
+		}
+		return s, nil
+	}
+	var cmd tea.Cmd
+	s.list, cmd = s.list.Update(msg)
+	return s, cmd
+}
+
+// open pushes the page of a viewer and records the screen.
+func open(v Viewer) tea.Cmd {
+	page := v.Root()
+	if page.Title == "" {
+		page.Title = v.Name
+	}
+	return tea.Batch(nav.Push(page), screenOpened(datatugui.ScreenViewers+"/"+string(v.ID), v.Name))
+}
+
+// View implements nav.Screen.
+func (s viewersScreen) View() string { return s.list.View() }
+
+// Title implements nav.Titled.
+func (viewersScreen) Title() string { return Title }
+
+// AtEdge implements widgets.Boundary.
+func (s viewersScreen) AtEdge(dir widgets.Direction) bool { return s.list.AtEdge(dir) }
+
+// Editing implements widgets.Editor.
+func (s viewersScreen) Editing() bool { return s.list.Editing() }
+
+// ShortHelp implements nav.ShortHelper.
+func (s viewersScreen) ShortHelp() []key.Binding { return s.list.ShortHelp() }

@@ -1,119 +1,102 @@
+// Package dtsettings is the Settings screen of the DataTug terminal UI: the
+// config file, syntax highlighted.
 package dtsettings
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
-	"github.com/datatug/datatug-cli/pkg/dtlog"
-	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/filetug/filetug/pkg/chroma2tcell"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	"github.com/strongo/strongo-tui/pkg/highlight"
+	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/strongo/strongo-tui/pkg/widgets"
 	"gopkg.in/yaml.v3"
 )
 
-func RegisterModule() {
-	datatugui.RegisterMainMenuItem(datatugui.RootScreenSettings,
-		datatugui.MainMenuItem{
-			Text:     "Settings",
-			Shortcut: 's',
-			Action:   GoSettingsScreen,
-		})
+const fileName = " Config File: ~/.datatug.yaml"
+
+// Seams replaced in tests.
+var (
+	// getLexerFn returns the chroma lexer of a language.
+	getLexerFn = func(s string) chroma.Lexer { return lexers.Get(s) }
+	// getSettingsFn reads the settings from the config file.
+	getSettingsFn = dtconfig.GetSettings
+	// marshalFn renders the settings as YAML.
+	marshalFn = func(v any) ([]byte, error) { return yaml.Marshal(v) }
+)
+
+// Module registers the settings screen in the main menu.
+func Module() datatugui.Module {
+	return datatugui.Module{
+		ID: datatugui.ScreenSettings, Text: "Settings", Shortcut: 's',
+		Root: func() nav.Page { return nav.Page{Content: newSettings()} },
+	}
 }
 
-// getLexerFn is the seam used in tests to substitute a custom chroma.Lexer.
-var getLexerFn = func(s string) chroma.Lexer {
-	return lexers.Get(s)
+// settingsLoaded is the result of loadSettings: the highlighted text to show.
+type settingsLoaded struct {
+	text string
+	err  error
 }
 
-// getSettingsFn is the seam used in tests to simulate dtconfig.GetSettings errors.
-var getSettingsFn func() (dtconfig.Settings, error) = dtconfig.GetSettings
-
-// marshalFn is the seam used in tests to simulate yaml.Marshal errors.
-var marshalFn = func(v interface{}) ([]byte, error) { return yaml.Marshal(v) }
-
-// onTextViewReady is a test seam; nil in production.
-// When non-nil, GoSettingsScreen calls it with the textView after SetInputCapture is registered.
-var onTextViewReady func(tv *tview.TextView)
-
-// onBreadcrumbPushed is a test seam; nil in production.
-// When non-nil, GoSettingsScreen calls it with the breadcrumb action after Push.
-var onBreadcrumbPushed func(action func() error)
-
-func GoSettingsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
-	breadcrumbs := tui.Header.Breadcrumbs()
-	breadcrumbs.Clear()
-	bcAction := func() error {
-		return GoSettingsScreen(tui, sneatnav.FocusToContent)
-	}
-	breadcrumbs.Push(sneatv.NewBreadcrumb("Settings", bcAction))
-	if onBreadcrumbPushed != nil {
-		onBreadcrumbPushed(bcAction)
-	}
-
-	textView := tview.NewTextView()
-	var settingsStr string
-	setting, err := getSettingsFn()
-	if err != nil {
-		settingsStr = err.Error()
-	}
-
-	if settingsStr == "" {
-		data, err := marshalFn(setting)
+// loadSettings reads the config off the event loop. A config that cannot be
+// read or rendered is shown as its error text, as the file itself would be.
+func loadSettings() tea.Cmd {
+	return func() tea.Msg {
+		var text string
+		settings, err := getSettingsFn()
 		if err != nil {
-			settingsStr = err.Error()
+			text = err.Error()
+		} else if data, err := marshalFn(settings); err != nil {
+			text = err.Error()
 		} else {
-			settingsStr = string(data)
+			text = string(data)
 		}
+		colored, err := highlight.Colorize(text, highlight.DefaultStyle, getLexerFn("yaml"))
+		return settingsLoaded{text: colored, err: err}
 	}
-
-	const fileName = " Config File: ~/.datatug.yaml"
-
-	settingsStr, err = chroma2tcell.ColorizeYAMLForTview(settingsStr, getLexerFn)
-	if err != nil {
-		return err
-	}
-
-	textView.
-		SetDynamicColors(true).
-		SetScrollable(true).
-		SetText(settingsStr)
-
-	content := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(textView, textView.Box))
-
-	sneatv.DefaultBorderWithPadding(textView.Box)
-	textView.SetTitle(fileName)
-	textView.SetTitleAlign(tview.AlignLeft)
-
-	textView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyLeft:
-			tui.Menu.TakeFocus()
-			return nil
-		case tcell.KeyUp:
-			row, _ := textView.GetScrollOffset()
-			if row == 0 {
-				tui.Header.SetFocus(sneatnav.ToBreadcrumbs, textView)
-				return nil
-			}
-			return event
-		default:
-			return event
-		}
-	})
-	if onTextViewReady != nil {
-		onTextViewReady(textView)
-	}
-
-	menu := datatugui.NewDataTugMainMenu(tui, datatugui.RootScreenSettings)
-	tui.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToMenu))
-	if focusTo == sneatnav.FocusToContent {
-		tui.App.SetFocus(content)
-	}
-	dtlog.ScreenOpened("settings", "Settings")
-	dtstate.SaveCurrentScreePath("settings")
-	return nil
 }
+
+// settings shows the config file.
+type settings struct {
+	pane widgets.TextPane
+}
+
+func newSettings() settings {
+	return settings{pane: widgets.NewTextPane("settings")}
+}
+
+// Init implements nav.Screen.
+func (s settings) Init() tea.Cmd { return loadSettings() }
+
+// Update implements nav.Screen.
+func (s settings) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
+	switch msg := msg.(type) {
+	case settingsLoaded:
+		if msg.err != nil {
+			return s, datatugui.ReportError("show settings", msg.err)
+		}
+		s.pane.SetContent(msg.text)
+		return s, nil
+	case nav.ScreenFocusMsg:
+		if msg.Focused {
+			s.pane.Focus()
+		} else {
+			s.pane.Blur()
+		}
+		return s, nil
+	}
+	var cmd tea.Cmd
+	s.pane, cmd = s.pane.Update(msg)
+	return s, cmd
+}
+
+// View implements nav.Screen.
+func (s settings) View() string { return s.pane.View() }
+
+// Title implements nav.Titled.
+func (s settings) Title() string { return fileName }
+
+// AtEdge implements widgets.Boundary.
+func (s settings) AtEdge(dir widgets.Direction) bool { return s.pane.AtEdge(dir) }

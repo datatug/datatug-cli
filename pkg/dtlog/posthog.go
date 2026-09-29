@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/filetug/filetug/pkg/fsutils"
 	"github.com/google/uuid"
 	"github.com/posthog/posthog-go"
+	"github.com/strongo/cli-helpers/fsutil"
 	"github.com/strongo/logus"
 	"github.com/strongo/random"
 	"gopkg.in/yaml.v3"
@@ -210,7 +210,7 @@ func readPostHogConfig() (c posthogConfig) {
 }
 
 var getPosthogConfigFilePath = func() string {
-	return fsutils.ExpandHome("~/datatug/.posthog.yaml")
+	return fsutil.ExpandHome("~/datatug/.posthog.yaml")
 }
 
 func ScreenOpened(id, name string) {

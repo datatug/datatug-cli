@@ -1,479 +1,234 @@
 package dtproject
 
 import (
-	"context"
-	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
-	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/datatug/datatug-cli/pkg/dtroot"
-	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/datatug/datatug-core/pkg/storage/filestore"
-	"github.com/filetug/filetug/pkg/fsutils"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
-	"github.com/strongo/logus"
-	"github.com/strongo/strongo-tui/pkg/colors"
+	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/strongo/strongo-tui/pkg/theme"
+	"github.com/strongo/strongo-tui/pkg/widgets"
 )
 
-var _ tview.Primitive = (*projectsPanel)(nil)
-var _ sneatnav.Cell = (*projectsPanel)(nil)
+// projectsAction is the Ref of a node of the projects tree that runs an action
+// instead of opening a project.
+type projectsAction string
 
-func GoDataTugProjectsScreen(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
-	_ = projectsBreadcrumbs(tui)
-	content, err := newDataTugProjectsPanel(tui)
-	if err != nil {
-		return err
+const (
+	actionAddExisting projectsAction = "add-existing"
+	actionCreateLocal projectsAction = "create-local"
+	actionAddToGitHub projectsAction = "add-to-github"
+	projectsTreeID                   = "projects"
+	folderEmoji                      = "📁 "
+	repoEmoji                        = "📦 "
+	githubPathFormat                 = "~/%s/github.com/"
+)
+
+// toMenu moves focus back to the main menu.
+var toMenu = key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "menu"))
+
+// projectsLoaded is the result of loadProjects.
+type projectsLoaded struct {
+	projects []*dtconfig.ProjectRef
+	recent   []string
+	err      error
+}
+
+// loadProjects reads the registered projects and the recent ones off the event
+// loop. A state file that cannot be read only means no recent projects.
+func loadProjects() tea.Cmd {
+	return func() tea.Msg {
+		settings, err := readSettings()
+		if err != nil {
+			return projectsLoaded{err: err}
+		}
+		loaded := projectsLoaded{projects: slices.Clone(settings.Projects)}
+		slices.SortFunc(loaded.projects, func(a, b *dtconfig.ProjectRef) int { return strings.Compare(a.ID, b.ID) })
+		if state, _ := readState(); state != nil {
+			for _, recent := range state.RecentProjects {
+				loaded.recent = append(loaded.recent, recent.ID)
+			}
+		}
+		return loaded
 	}
-	menu := datatugui.NewDataTugMainMenu(tui, datatugui.RootScreenProjects)
-	tui.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
-	dtstate.SaveCurrentScreePath("projects")
-	dtlog.ScreenOpened("projects", "Projects")
+}
+
+// projects is the root screen of the module: recent, local and GitHub projects
+// in one tree, with the actions that create or add a project.
+type projects struct {
+	geo    geometry
+	tree   widgets.Tree
+	loaded bool
+}
+
+var (
+	_ nav.Screen       = projects{}
+	_ nav.Titled       = projects{}
+	_ nav.ShortHelper  = projects{}
+	_ widgets.Boundary = projects{}
+)
+
+func newProjects() projects { return projects{} }
+
+// Init implements nav.Screen.
+func (p projects) Init() tea.Cmd { return loadProjects() }
+
+func (p *projects) sync() {
+	p.tree.SetSize(p.geo.w, p.geo.h)
+	if p.geo.focused {
+		p.tree.Focus()
+	} else {
+		p.tree.Blur()
+	}
+}
+
+// Update implements nav.Screen.
+func (p projects) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
+	if p.geo.track(msg) {
+		p.sync()
+		return p, nil
+	}
+	switch msg := msg.(type) {
+	case projectsLoaded:
+		if msg.err != nil {
+			return p, datatugui.ReportError("load projects", msg.err)
+		}
+		p.tree = newProjectsTree(msg)
+		p.loaded = true
+		p.sync()
+		return p, nil
+	case widgets.NodeSelectedMsg:
+		return p, selectProjectNode(msg.Node)
+	case tea.KeyPressMsg:
+		if key.Matches(msg, toMenu) {
+			return p, nav.SetFocus(nav.FocusToMenu)
+		}
+	}
+	if !p.loaded {
+		return p, nil
+	}
+	tree, cmd := p.tree.Update(msg)
+	p.tree = tree
+	return p, cmd
+}
+
+// View implements nav.Screen.
+func (p projects) View() string {
+	if !p.loaded {
+		return widgets.Fit("Loading projects...", p.geo.w, p.geo.h)
+	}
+	return p.tree.View()
+}
+
+// Title implements nav.Titled.
+func (p projects) Title() string { return "Projects" }
+
+// ShortHelp implements nav.ShortHelper.
+func (p projects) ShortHelp() []key.Binding { return append(p.tree.KeyMap.ShortHelp(), toMenu) }
+
+// AtEdge implements widgets.Boundary.
+func (p projects) AtEdge(dir widgets.Direction) bool { return !p.loaded || p.tree.AtEdge(dir) }
+
+// selectProjectNode returns what activating a node does: open the project, or
+// run the action.
+func selectProjectNode(node widgets.TreeNode) tea.Cmd {
+	switch ref := node.Ref.(type) {
+	case *dtconfig.ProjectRef:
+		if ref.ID == demoProject1LocalID {
+			return openDemoProject()
+		}
+		return openProject(*ref)
+	case projectsAction:
+		switch ref {
+		case actionCreateLocal:
+			return datatugui.Drill("New project", newCreateProject(createAtLocal))
+		case actionAddToGitHub:
+			return datatugui.Drill("Add to GitHub", newAddToGitHub())
+		default:
+			return nav.Alert("Add existing project", "Adding an existing project is not supported yet.", 0, nav.FocusToContent)
+		}
+	}
 	return nil
 }
 
-type projectsPanel struct {
-	sneatnav.PanelBase
-	tui             *sneatnav.TUI
-	projects        []*dtconfig.ProjectRef
-	selectProjectID string
-	layout          *tview.Flex
-	tree            *tview.TreeView
-	projectNodes    []*tview.TreeNode
-	details         *tview.Flex
-}
-
-func (*projectsPanel) Close() {
-}
-
-func projectsBreadcrumbs(tui *sneatnav.TUI) sneatnav.Breadcrumbs {
-	breadcrumbs := tui.Header.Breadcrumbs()
-	breadcrumbs.Clear()
-	breadcrumbs.Push(sneatv.NewBreadcrumb("Projects", func() error {
-		return GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)
-	}))
-	return breadcrumbs
-}
-
-func newDataTugProjectsPanel(tui *sneatnav.TUI) (*projectsPanel, error) {
-	ctx := context.Background()
-
-	// Create 3 separate trees
-	tree := tview.NewTreeView().SetTopLevel(1)
-	tree.SetBorder(true).SetTitle("Projects")
-	tree.SetBorderPadding(1, 1, 2, 2)
-	sneatv.DefaultBorderWithPadding(tree.Box)
-
-	layout := tview.NewFlex().SetDirection(tview.FlexColumn)
-
-	// Create a layout to hold both trees horizontally
-
-	panel := &projectsPanel{
-		PanelBase: sneatnav.NewPanelBase(tui, sneatv.WithBoxWithoutBorder(layout, layout.Box)),
-		tui:       tui,
-		layout:    layout,
-		tree:      tree,
-		details:   tview.NewFlex(),
+// newProjectsTree builds the tree of the loaded projects.
+func newProjectsTree(loaded projectsLoaded) widgets.Tree {
+	group := func(id, text string, children ...widgets.TreeNode) widgets.TreeNode {
+		return widgets.TreeNode{ID: id, Text: text, Color: theme.AccentColor(), Unselectable: true, Children: children}
+	}
+	action := func(id string, ref projectsAction, text string) widgets.TreeNode {
+		return widgets.TreeNode{ID: id, Text: text, Ref: ref, Color: theme.TreeNodeLink}
 	}
 
-	layout.SetFocusFunc(func() {
-		tui.App.SetFocus(tree)
-	})
-
-	projRefText := tview.NewTextView()
-	panel.details.AddItem(projRefText, 0, 1, false)
-
-	layout.AddItem(panel.tree, 0, 1, true)
-	layout.AddItem(panel.details, 0, 1, false)
-
-	//box := layout.Box
-	//box.SetBorder(false)
-	//box.SetBorderPadding(0, 0, 5, 0)
-	//box.SetTitle("Projects")
-
-	//sneatv.SetPanelTitle(panel.GetBox(), "Projects")
-	//sneatv.DefaultBorderWithoutPadding(panel.GetBox())
-
-	settings, err := dtconfig.GetSettings()
-	if err != nil {
-		logus.Errorf(ctx, "Failed to get app settings: %v", err)
-		//return nil, err
-	}
-
-	openProjectByRef := func(projectConfig dtconfig.ProjectRef) {
-		if projectConfig.ID == demoProject1LocalID {
-			openDatatugDemoProject(tui, projectConfig)
-		} else {
-			projectPath := fsutils.ExpandHome(projectConfig.Path)
-			store := filestore.NewProjectStore(projectConfig.ID, projectPath)
-			_, err = store.LoadProjectFile(ctx)
-			if errors.Is(err, datatug.ErrProjectDoesNotExist) {
-				tui.ShowAlert("Not able to open DataTug project", err.Error(), 0, tree)
-				return
-			}
-			projectCtx := NewProjectContext(tui, store, projectConfig)
-			GoDatatugProjectScreen(projectCtx)
-		}
-	}
-
-	panel.projects = settings.Projects
-
-	sort.Slice(panel.projects, func(i, j int) bool {
-		return panel.projects[i].ID < panel.projects[j].ID
-	})
-
-	// === DATATUG CLOUD PROJECTS TREE ===
-	rootNode := tview.NewTreeNode("root_node").
-		SetColor(tcell.ColorLightBlue).
-		SetSelectable(false)
-	tree.SetRoot(rootNode)
-
-	githubNode := tview.NewTreeNode("🐙 GitHub.com").SetColor(tcell.ColorLightYellow)
-	githubNode.SetSelectable(false)
-
-	//datatugCloud := tview.NewTreeNode("DataTug Cloud")
-	//datatugCloud.SetColor(tcell.ColorLightBlue).SetSelectable(false)
-	//rootNode.AddChild(datatugCloud)
-
-	// === LOCAL PROJECTS TREE ===
-	localProjectsNode := tview.NewTreeNode("🖥️ Local projects").
-		SetColor(tcell.ColorLightYellow).
-		SetSelectable(false)
-	//tree.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-	//	switch event.Key() {
-	//	case tcell.KeyEnter:
-	//		tree.GetSelectedFunc()(tree.GetCurrentNode())
-	//		return nil
-	//	}
-	//	return event
-	//})
-
-	const folderEmoji = "📁 "
-	const repoEmoji = "📦 "
-
-	recentNode := tview.NewTreeNode("🕘 Recent projects").
-		// The recentNode is not really selectable, but we keep it selectable to allow scroll to top
-		//SetSelectable(false).
-		SetColor(tcell.ColorLightYellow)
-
-	state, _ := dtstate.GetDatatugState()
-	if len(state.RecentProjects) == 0 {
-		recentNode.AddChild(tview.NewTreeNode(" No recent projects").SetSelectable(false).SetColor(tcell.ColorGray))
-	} else {
-		for _, recentProject := range state.RecentProjects {
-			for _, p := range panel.projects {
-				if p.ID == recentProject.ID {
-					pNode := tview.NewTreeNode(" " + p.Title)
-					pNode.SetReference(p)
-					recentNode.AddChild(pNode)
-					panel.projectNodes = append(panel.projectNodes, pNode)
-				}
+	var recent []widgets.TreeNode
+	for _, id := range loaded.recent {
+		for _, project := range loaded.projects {
+			if project.ID == id {
+				recent = append(recent, widgets.TreeNode{ID: "recent:" + id, Text: projectTitle(project), Ref: project})
 			}
 		}
 	}
-
-	var defaultGithubProjPathPrefix = fmt.Sprintf("~/%s/github.com/", dtroot.Dir)
-
-	// Add existing projects under Local projects
-	for _, p := range panel.projects {
-		if strings.HasPrefix(p.Url, "github.com/") ||
-			strings.HasPrefix(p.Path, defaultGithubProjPathPrefix) {
-			var origin string
-			if strings.HasPrefix(p.Url, "github.com/") {
-				origin = strings.TrimPrefix(p.Url, "github.com/")
-			} else {
-				origin = strings.TrimPrefix(p.Path, defaultGithubProjPathPrefix)
-			}
-
-			ids := strings.Split(strings.TrimPrefix(origin, "github.com/"), "/")
-			if len(ids) < 2 {
-				continue
-			}
-			owner, repo := ids[0], ids[1]
-			var ownerNode *tview.TreeNode
-			for _, node := range githubNode.GetChildren() {
-				if node.GetText() == folderEmoji+owner {
-					ownerNode = node
-					break
-				}
-			}
-			if ownerNode == nil {
-				ownerNode = tview.NewTreeNode(folderEmoji + owner).SetColor(tcell.ColorLightBlue).SetSelectable(false)
-				githubNode.AddChild(ownerNode)
-			}
-			repoNode := tview.NewTreeNode(repoEmoji + repo + " ")
-			ownerNode.AddChild(repoNode)
-			panel.projectNodes = append(panel.projectNodes, repoNode)
-			repoNode.SetReference(p)
-			continue
-		}
-		//title := " 📁 " + GetProjectTitle(p) + " "
-		title := GetProjectTitle(p)
-
-		projectNode := tview.NewTreeNode(repoEmoji + title + " ").SetReference(p)
-		panel.projectNodes = append(panel.projectNodes, projectNode)
-		localProjectsNode.AddChild(projectNode)
+	if len(recent) == 0 {
+		recent = []widgets.TreeNode{{ID: "recent:none", Text: "No recent projects", Color: theme.MutedColor(), Unselectable: true}}
 	}
 
-	addToGithubRepoNode := tview.NewTreeNode(" Add DataTug project to existing GitHub Repo ").
-		SetReference("local-create").
-		SetColor(colors.TreeNodeLink).
-		SetSelectedFunc(func() {
-			ShowAddToGitHubRepo(tui)
-		})
-	githubNode.AddChild(addToGithubRepoNode)
-
-	selectGithubRepoNode := tview.NewTreeNode(" Add GitHub repo with DataTug project ").
-		SetReference("local-create").
-		SetColor(colors.TreeNodeLink).
-		SetSelectedFunc(func() {
-			ShowAddToGitHubRepo(tui)
-		})
-	githubNode.AddChild(selectGithubRepoNode)
-
-	// Add a demo project first
-	demoProject1Ref := newDemoProject1Ref()
-
-	demoProjectNode := tview.NewTreeNode(
-		repoEmoji + fmt.Sprintf("%s [gray]@ %s[i]", demoProject1Ref.Title, demoProject1FullID),
-	).SetReference(demoProject1Ref)
-	localProjectsNode.AddChild(demoProjectNode)
-	panel.projectNodes = append(panel.projectNodes, demoProjectNode)
-
-	// Add actions to Local projects
-	localAddNode := tview.NewTreeNode(" Add exising ").
-		SetReference("local-add").
-		SetColor(colors.TreeNodeLink)
-	localProjectsNode.AddChild(localAddNode)
-
-	createNewLocalProjectNode := tview.NewTreeNode(" Create new local project ").
-		SetReference("local-create").
-		SetColor(colors.TreeNodeLink).
-		SetSelectedFunc(func() {
-			goCreateProjectScreen(tui, createAtLocal)
-			//panic("suxx")
-		})
-	localProjectsNode.AddChild(createNewLocalProjectNode)
-
-	localProjectsNode.SetExpanded(true)
-
-	//// DataTug demo project
-	//datatugDemoProject := &dtconfig.ProjectRef{
-	//	ID:  demoProjectsRepoID,
-	//	Origin: "cloud",
-	//}
-	//cloudDemoProjectNode := tview.NewTreeNode(" DataTug demo project ").
-	//	SetReference(datatugDemoProject) //.
-	////SetColor(tcell.ColorWhite)
-	//datatugCloud.AddChild(cloudDemoProjectNode)
-	//
-	//// Login to view action (moved to end)
-	//loginNode := tview.NewTreeNode(" Login to view personal or work projects ").
-	//	SetReference("login").
-	//	SetColor(sneatcolors.TreeNodeLink)
-	//datatugCloud.AddChild(loginNode)
-	//
-	//datatugCloud.SetExpanded(true)
-
-	rootNode.SetExpanded(true)
-
-	// Create a selection handler function
-	selectionHandler := func(node *tview.TreeNode) {
-		reference := node.GetReference()
-		if reference != nil {
-			switch ref := reference.(type) {
-			case *dtconfig.ProjectRef:
-				panel.selectProjectID = ref.ID
-				if ref.ID == demoProject1LocalID {
-					openDatatugDemoProject(tui, *ref)
-					return
-				}
-				openProjectByRef(*ref)
-			case string:
-				switch ref {
-				case "login":
-					// Handle login action
-					logus.Infof(ctx, "Login action triggered")
-				case "local-add":
-					// Handle local add action
-					logus.Infof(ctx, "Local add action triggered")
-				case "local-create":
-					// Handle local create action
-					logus.Infof(ctx, "Local create action triggered")
-				case "add":
-					// Handle GitHub add action
-					logus.Infof(ctx, "GitHub add action triggered")
-				case "create":
-					// Handle GitHub create action
-					logus.Infof(ctx, "GitHub create action triggered")
-				}
-			}
-		}
-	}
-
-	tree.SetSelectedFunc(selectionHandler)
-
-	// Set up focus and blur handlers for each tree to manage selected item styling
-	{
-		tree.SetFocusFunc(func() {
-			panel.ensureTreeHasCurrentNode(tree)
-			tree.SetGraphicsColor(tcell.ColorWhite) // tree lines
-			tree.SetBorderColor(sneatv.DefaultFocusedBorderColor)
-			// Apply active styling to current node
-			panel.applyNodeStyling(tree, true)
-		})
-
-		tree.SetBlurFunc(func() {
-			tree.SetBorderColor(sneatv.DefaultBlurBorderColor)
-			tree.SetGraphicsColor(tcell.ColorGrey) // tree lines
-			// When tree loses focus, apply dimmed styling to current node
-			panel.applyNodeStyling(tree, false)
-		})
-	}
-
-	// Main input capture function for the layout
-	layout.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if !tree.HasFocus() { // Workaround for a bug
-			panel.tui.SetFocus(tree)
-		}
-
-		switch event.Key() {
-		case tcell.KeyESC:
-			tui.SetFocus(tui.Menu)
-			return nil
-		case tcell.KeyLeft:
-			panel.tui.SetFocus(tui.Menu)
-			return nil
-		case tcell.KeyRight:
-			panel.tui.SetFocus(panel.details)
-			return event
-		case tcell.KeyUp:
-			topNodes := recentNode.GetChildren()
-			if len(topNodes) == 0 {
-				topNodes = localProjectsNode.GetChildren()
-				if len(topNodes) == 0 {
-					topNodes = githubNode.GetChildren()
-					if len(topNodes) > 0 {
-						topNodes = topNodes[0].GetChildren()
-					}
-				}
-			}
-			// Check if we're on the first non-root item
-			currentNode := tree.GetCurrentNode()
-			if currentNode != nil && currentNode == topNodes[0] {
-				tui.Header.SetFocus(sneatnav.ToBreadcrumbs, tree)
-				tree.SetCurrentNode(recentNode) // Scroll to the top in case if top of the tree is out of view
-				go func() {
-					tui.App.QueueUpdateDraw(func() {
-						// Restore the 1st selectable node
-						// The recentNode is not really selectable, but we keep it selectable to allow scrolling
-						tree.SetCurrentNode(currentNode)
-					})
-				}()
-				return nil
-			}
-			// Normal UP navigation within a tree
-			return event
-		case tcell.KeyDown:
-			return event // Normal DOWN navigation within a tree
-		//case tcell.KeyEnter:
-		//	//Handle ENTER key press on project nodes
-		//	currentNode := tree.GetCurrentNode()
-		//	if currentNode != nil {
-		//		reference := currentNode.GetReference()
-		//		if reference != nil {
-		//			switch ref := reference.(type) {
-		//			case *dtconfig.ProjectRef:
-		//				// Call goProjectDashboards when ENTER is pressed on a project node
-		//				GoDatatugProjectScreen(tui, ref)
-		//				return nil
-		//			}
-		//		}
-		//	}
-		//	return event
+	var local, github []widgets.TreeNode
+	githubPathPrefix := fmt.Sprintf(githubPathFormat, dtroot.Dir)
+	for _, project := range loaded.projects {
+		var origin string
+		switch {
+		case strings.HasPrefix(project.Url, "github.com/"):
+			origin = strings.TrimPrefix(project.Url, "github.com/")
+		case strings.HasPrefix(project.Path, githubPathPrefix):
+			origin = strings.TrimPrefix(project.Path, githubPathPrefix)
 		default:
-			return event
-		}
-	})
-
-	rootNode.AddChild(recentNode)
-	rootNode.AddChild(tview.NewTreeNode("").SetSelectable(false))
-	rootNode.AddChild(localProjectsNode)
-	rootNode.AddChild(tview.NewTreeNode("").SetSelectable(false))
-	rootNode.AddChild(githubNode)
-
-	panel.ensureTreeHasCurrentNode(tree)
-	return panel, nil
-}
-
-func (p *projectsPanel) Draw(screen tcell.Screen) {
-	p.layout.Draw(screen)
-}
-
-func (p *projectsPanel) ensureTreeHasCurrentNode(tree *tview.TreeView) {
-	if tree.GetCurrentNode() == nil {
-		if len(p.projectNodes) > 0 {
-			tree.SetCurrentNode(p.projectNodes[0])
-		}
-	}
-}
-
-const dimGray = tcell.ColorDarkSlateGray // 255 * 50 / 100
-
-func (p *projectsPanel) applyNodeStyling(tree *tview.TreeView, isActive bool) {
-	currentNode := tree.GetCurrentNode()
-	if currentNode == nil {
-		return
-	}
-
-	reference := currentNode.GetReference()
-	if reference == nil {
-		return
-	}
-
-	for _, pNode := range p.projectNodes {
-		if pNode == currentNode {
+			local = append(local, widgets.TreeNode{ID: "local:" + project.ID, Text: repoEmoji + projectTitle(project), Ref: project})
 			continue
 		}
-		if isActive {
-			pNode.SetColor(tcell.ColorWhite)
-		} else {
-			pNode.SetColor(tcell.ColorLightGray)
+		ids := strings.Split(origin, "/")
+		if len(ids) < 2 {
+			continue
 		}
+		github = addGitHubProject(github, ids[0], ids[1], project)
 	}
 
-	// Check node reference for *dtconfig.ProjectRef to determine node type
-	switch reference.(type) {
-	case *dtconfig.ProjectRef:
-		// Project link node - has *dtconfig.ProjectRef reference
-		if isActive {
-			currentNode.SetColor(tcell.ColorWhite)
-			currentNode.SetSelectedTextStyle(currentNode.GetSelectedTextStyle().Foreground(tcell.ColorBlack))
-		} else {
-			// InactiveFocused project link nodes have different color than action nodes
-			currentNode.SetColor(dimGray)
-			currentNode.SetSelectedTextStyle(currentNode.GetSelectedTextStyle().Foreground(tcell.ColorWhite))
+	demo := newDemoProject1Ref()
+	local = append(local, widgets.TreeNode{
+		ID:   "local:" + demo.ID,
+		Text: repoEmoji + demo.Title + " " + theme.GrayText("@ "+demoProject1FullID),
+		Ref:  demo,
+	})
+	local = append(local,
+		action("action:add-existing", actionAddExisting, "Add existing"),
+		action("action:create-local", actionCreateLocal, "Create new local project"),
+	)
+	github = append(github,
+		action("action:add-to-github", actionAddToGitHub, "Add DataTug project to existing GitHub Repo"),
+		action("action:add-github-repo", actionAddToGitHub, "Add GitHub repo with DataTug project"),
+	)
 
-		}
-	default:
-		// Action node - all other nodes (string references, etc.)
-		if isActive {
-			currentNode.SetColor(colors.TreeNodeLink)
-		} else {
-			// InactiveFocused action nodes have different color than project link nodes
-			currentNode.SetColor(dimGray)
-			currentNode.SetSelectedTextStyle(currentNode.GetSelectedTextStyle().Foreground(tcell.ColorWhite))
-		}
-	}
+	tree := widgets.NewTree(projectsTreeID,
+		group("recent", "🕘 Recent projects", recent...),
+		group("local", "🖥️ Local projects", local...),
+		group("github", "🐙 GitHub.com", github...),
+	)
+	tree.ExpandAll()
+	return tree
 }
 
-func (p *projectsPanel) TakeFocus() {
-	p.tui.SetFocus(p.tree)
+// addGitHubProject files a project under its owner among the GitHub nodes.
+func addGitHubProject(nodes []widgets.TreeNode, owner, repo string, project *dtconfig.ProjectRef) []widgets.TreeNode {
+	ownerID := "gh-owner:" + owner
+	i := slices.IndexFunc(nodes, func(n widgets.TreeNode) bool { return n.ID == ownerID })
+	if i < 0 {
+		nodes = append(nodes, widgets.TreeNode{ID: ownerID, Text: folderEmoji + owner, Color: theme.AccentColor(), Unselectable: true})
+		i = len(nodes) - 1
+	}
+	nodes[i].Children = append(nodes[i].Children, widgets.TreeNode{ID: "gh:" + project.ID, Text: repoEmoji + repo, Ref: project})
+	return nodes
 }

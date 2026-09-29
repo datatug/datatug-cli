@@ -354,10 +354,10 @@ func TestSavedTokenSource_And_TokenSource_Branches(t *testing.T) {
 	ctx := context.Background()
 
 	// SavedTokenSource with newClient error
-	_, err := SavedTokenSource(ctx, false)
+	_, _ = SavedTokenSource(ctx, false)
 	// Keyring may or may not succeed in CI/test environment; test with invalid auth host to force error
 	t.Setenv("DATATUG_AUTH_HOST", "::invalid")
-	_, err = SavedTokenSource(ctx, false)
+	_, err := SavedTokenSource(ctx, false)
 	require.Error(t, err)
 
 	// SavedTokenSource with DATATUG_AUTH_HOST empty (uses defaultIssuer)

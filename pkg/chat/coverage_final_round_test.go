@@ -186,7 +186,7 @@ func TestFinalRound_HTTPSettings(t *testing.T) {
 
 	// 5. HTTPRequestSettings query scan error
 	store := openTestStore(t, testStorePath(t), testScope())
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	// Replace http_request_settings table schema to force scan error
 	_, _ = store.settingsDB.Exec("DROP TABLE http_request_settings")
 	_, _ = store.settingsDB.Exec("CREATE TABLE http_request_settings (project_id INT)")
@@ -199,7 +199,7 @@ func TestFinalRound_HTTPSettings(t *testing.T) {
 func TestFinalRound_HTTPStore(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	sess, err := store.Create(ctx, "S")
 	if err != nil {
@@ -287,7 +287,7 @@ func TestFinalRound_BridgeEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer bridge.Close()
+	defer func() { _ = bridge.Close() }()
 
 	u, _ := url.Parse(bridge.URL)
 	var token string
@@ -480,7 +480,7 @@ func TestFinalRound_ExportDetails(t *testing.T) {
 func TestFinalRound_BookmarkFullBranches(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// 1. validateBookmarkSnapshot error cases
 	if err := validateBookmarkSnapshot("recordset", BookmarkSnapshot{RecordSet: RecordSet{ID: ""}}); err == nil {

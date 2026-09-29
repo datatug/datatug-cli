@@ -535,7 +535,7 @@ func TestRemaining_BridgeFullCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer bridge.Close()
+	defer func() { _ = bridge.Close() }()
 
 	handler := bridge.server.Handler
 
@@ -716,7 +716,7 @@ func TestRemaining_JoinDeepCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	_, _ = db.Exec("CREATE TABLE parent (id INTEGER PRIMARY KEY, name TEXT)")
 	_, _ = db.Exec("CREATE TABLE child (id INTEGER PRIMARY KEY, p_id INTEGER, FOREIGN KEY(p_id) REFERENCES parent(id))")

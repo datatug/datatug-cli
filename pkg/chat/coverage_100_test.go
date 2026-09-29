@@ -391,7 +391,7 @@ func TestStoreFullCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer memDB.Close()
+	defer func() { _ = memDB.Close() }()
 
 	if _, err := memDB.Exec("PRAGMA user_version = 10"); err != nil {
 		t.Fatal(err)
@@ -435,7 +435,7 @@ func TestStoreFullCoverage(t *testing.T) {
 		}
 		_, _ = mDB.Exec("PRAGMA user_version = ?", v)
 		_ = initChatSchema(mDB)
-		mDB.Close()
+		_ = mDB.Close()
 	}
 
 	// 5. migrateLegacyChatScopes
@@ -683,7 +683,7 @@ func TestStoreFullCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer migDB.Close()
+	defer func() { _ = migDB.Close() }()
 	_, _ = migDB.Exec("CREATE TABLE sessions (id TEXT, scope TEXT)")
 	_, _ = migDB.Exec("CREATE TABLE queries (session_id TEXT, source TEXT)")
 	_, _ = migDB.Exec("CREATE TABLE recordsets (session_id TEXT, source TEXT)")
@@ -910,7 +910,7 @@ func TestStoreRemaining100Coverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer memDB.Close()
+	defer func() { _ = memDB.Close() }()
 
 	// dbBeginFn error
 	dbBeginFn = func(db *sql.DB) (*sql.Tx, error) {
@@ -1063,7 +1063,7 @@ func TestStoreRemaining100Coverage(t *testing.T) {
 		t.Errorf("expected corrupt quick check error")
 	}
 	quickCheckFn = origQuickCheck
-	qcDB.Close()
+	_ = qcDB.Close()
 
 	// version >= 2 missing session_workspace, bookmarks, chat_preferences
 	for _, tableToDrop := range []string{"session_workspace", "bookmarks", "chat_preferences"} {
@@ -1073,21 +1073,22 @@ func TestStoreRemaining100Coverage(t *testing.T) {
 		}
 		_, _ = testDB.Exec("DROP TABLE " + tableToDrop)
 		version := 2
-		if tableToDrop == "bookmarks" {
+		switch tableToDrop {
+		case "bookmarks":
 			version = 3
-		} else if tableToDrop == "chat_preferences" {
+		case "chat_preferences":
 			version = 8
 		}
 		_, _ = testDB.Exec("PRAGMA user_version = ?", version)
 		if err := initChatSchema(testDB); err == nil {
 			t.Errorf("expected missing %s error", tableToDrop)
 		}
-		testDB.Close()
+		_ = testDB.Close()
 	}
 
 	// dbBeginFn error in initChatSchema
 	initDB, _ := sql.Open("sqlite", ":memory:")
-	defer initDB.Close()
+	defer func() { _ = initDB.Close() }()
 	dbBeginFn = func(db *sql.DB) (*sql.Tx, error) {
 		return nil, errors.New("begin tx error")
 	}
@@ -1145,7 +1146,7 @@ func TestStoreRemaining100Coverage(t *testing.T) {
 		if err := initChatSchema(d); err == nil {
 			t.Errorf("expected error for recordset column %s", tc.column)
 		}
-		d.Close()
+		_ = d.Close()
 	}
 	addRecordsetColumnFn = origAddRecCol
 
@@ -1172,7 +1173,7 @@ func TestStoreRemaining100Coverage(t *testing.T) {
 		if err := initChatSchema(d); err == nil {
 			t.Errorf("expected error for column %s", tc.column)
 		}
-		d.Close()
+		_ = d.Close()
 	}
 	addColumnIfMissingFn = origAddCol
 
@@ -1195,15 +1196,15 @@ func TestStoreRemaining100Coverage(t *testing.T) {
 		if err := initChatSchema(d); err == nil {
 			t.Errorf("expected duplicate column error")
 		}
-		d.Close()
+		_ = d.Close()
 	}
 
 	// 4. addColumnIfMissing error branches
 	{
 		testDB, _ := sql.Open("sqlite", ":memory:")
-		defer testDB.Close()
+		defer func() { _ = testDB.Close() }()
 		tx, _ := testDB.Begin()
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 
 		tableInfoQueryFn = func(tx *sql.Tx, table string) (*sql.Rows, error) {
 			return nil, errors.New("table info fail")
@@ -1242,7 +1243,7 @@ func TestStoreRemaining100Coverage(t *testing.T) {
 
 	// 5. Store operations error branches with active store
 	store := openTestStore(t, testStorePath(t), testScope())
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	s, err := store.Create(ctx, "Test Store Remainder")
 	if err != nil {
 		t.Fatal(err)

@@ -1707,7 +1707,7 @@ func TestClose100_Executions_Deep(t *testing.T) {
 	// 21. executions.go line 275: computeExecutionSeriesBounded store not found
 	api.ConfigureSecureSession(secureread.Session{}, map[string]string{pID: dir}, api.Capabilities{})
 	seriesReqFresh := seriesReq
-	seriesReqFresh.Scope.SecurityContextID = api.SecurityContextID()
+	seriesReqFresh.SecurityContextID = api.SecurityContextID()
 	bodySeriesFresh, _ := json.Marshal(seriesReqFresh)
 	rSeriesFresh := httptest.NewRequest(http.MethodPost, "/datatug/executions/series", bytes.NewReader(bodySeriesFresh))
 	rSeriesFresh = rSeriesFresh.WithContext(ctx)
@@ -2090,7 +2090,7 @@ func TestClose100_Incidents_Deep(t *testing.T) {
 	// --- 1. incidentCreateHandler ---
 	// validateScope error (lines 103-105)
 	badScopeReq := incidentCreateFixture(scope, "mut-bad-scope", "title")
-	badScopeReq.IncidentScope.SecurityContextID = "bad-sec"
+	badScopeReq.SecurityContextID = "bad-sec"
 	performIncidentJSON(t, router, http.MethodPost, "/datatug/incidents", badScopeReq, http.StatusConflict)
 
 	// ValidateResolvedProject error (line 109)

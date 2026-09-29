@@ -476,7 +476,7 @@ func TestTablesBox_Coverage_More(t *testing.T) {
 	box.refreshTable()
 	box.onSelected(1, 0)
 
-	box.Table.Select(1, 1)
+	box.Select(1, 1)
 	evLeft := sneatnav.InvokeInputCapture(box.Table, tcell.KeyLeft, 0, tcell.ModNone)
 	assert.NotNil(t, evLeft)
 

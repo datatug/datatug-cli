@@ -652,6 +652,7 @@ func TestBoardAPI(t *testing.T) {
 
 	b, err = GetBoard(ctx, itemRef)
 	assert.NoError(t, err)
+	assert.NotNil(t, b)
 	assert.Equal(t, "b1", loadedID)
 
 	assert.NoError(t, DeleteBoard(ctx, itemRef))

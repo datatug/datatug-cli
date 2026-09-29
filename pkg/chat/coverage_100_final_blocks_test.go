@@ -460,29 +460,29 @@ func TestFinalBlocks_Bookmark(t *testing.T) {
 	txExecContextFn = origTxExec
 
 	// 18. scanBookmark corrupt fields
-	store.db.ExecContext(ctx, "INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('corrupt1', ?, ?, 't', 'invalid json', 'recordset', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', '{}')", store.info.ProjectID, store.scope)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('corrupt1', ?, ?, 't', 'invalid json', 'recordset', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', '{}')", store.info.ProjectID, store.scope)
 	if _, err := store.bookmark(ctx, store.db, "corrupt1"); err == nil {
 		t.Fatal("expected error on corrupt tags JSON")
 	}
-	store.db.ExecContext(ctx, "DELETE FROM bookmarks WHERE id = 'corrupt1'")
+	_, _ = store.db.ExecContext(ctx, "DELETE FROM bookmarks WHERE id = 'corrupt1'")
 
-	store.db.ExecContext(ctx, "INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('corrupt2', ?, ?, 't', '[\"tag\", \"TAG\"]', 'recordset', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', '{}')", store.info.ProjectID, store.scope)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('corrupt2', ?, ?, 't', '[\"tag\", \"TAG\"]', 'recordset', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', '{}')", store.info.ProjectID, store.scope)
 	if _, err := store.bookmark(ctx, store.db, "corrupt2"); err == nil {
 		t.Fatal("expected error on duplicate un-normalized tags")
 	}
-	store.db.ExecContext(ctx, "DELETE FROM bookmarks WHERE id = 'corrupt2'")
+	_, _ = store.db.ExecContext(ctx, "DELETE FROM bookmarks WHERE id = 'corrupt2'")
 
-	store.db.ExecContext(ctx, "INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('corrupt3', ?, ?, 't', '[]', 'recordset', 'bad-date', '2025-01-01T00:00:00Z', '{}')", store.info.ProjectID, store.scope)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('corrupt3', ?, ?, 't', '[]', 'recordset', 'bad-date', '2025-01-01T00:00:00Z', '{}')", store.info.ProjectID, store.scope)
 	if _, err := store.bookmark(ctx, store.db, "corrupt3"); err == nil {
 		t.Fatal("expected error on bad created timestamp")
 	}
-	store.db.ExecContext(ctx, "DELETE FROM bookmarks WHERE id = 'corrupt3'")
+	_, _ = store.db.ExecContext(ctx, "DELETE FROM bookmarks WHERE id = 'corrupt3'")
 
-	store.db.ExecContext(ctx, "INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('corrupt4', ?, ?, 't', '[]', 'recordset', '2025-01-01T00:00:00Z', 'bad-date', '{}')", store.info.ProjectID, store.scope)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('corrupt4', ?, ?, 't', '[]', 'recordset', '2025-01-01T00:00:00Z', 'bad-date', '{}')", store.info.ProjectID, store.scope)
 	if _, err := store.bookmark(ctx, store.db, "corrupt4"); err == nil {
 		t.Fatal("expected error on bad updated timestamp")
 	}
-	store.db.ExecContext(ctx, "DELETE FROM bookmarks WHERE id = 'corrupt4'")
+	_, _ = store.db.ExecContext(ctx, "DELETE FROM bookmarks WHERE id = 'corrupt4'")
 
 	// 19. bookmarkTarget failures: view recordset not found, selection view not found, selection recordset not found
 	tx, err := store.db.BeginTx(ctx, nil)
@@ -548,37 +548,37 @@ func TestFinalBlocks_Bookmark(t *testing.T) {
 
 	// 20. recordSetsForSession errors
 	// Corrupt parameters JSON in recordsets table
-	store.db.ExecContext(ctx, "INSERT INTO recordsets (session_id, id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, 'r_corrupt1', ?, '', 't', '', '', '', '', 'bad json', '2025-01-01T00:00:00Z', '[]')", sess.ID, appended.QueryID)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO recordsets (session_id, id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, 'r_corrupt1', ?, '', 't', '', '', '', '', 'bad json', '2025-01-01T00:00:00Z', '[]')", sess.ID, appended.QueryID)
 	if _, err := recordSetsForSession(ctx, store.db, sess.ID); err == nil {
 		t.Fatal("expected error on corrupt parameters JSON")
 	}
-	store.db.ExecContext(ctx, "DELETE FROM recordsets WHERE id = 'r_corrupt1'")
+	_, _ = store.db.ExecContext(ctx, "DELETE FROM recordsets WHERE id = 'r_corrupt1'")
 
 	// Corrupt created_at timestamp
-	store.db.ExecContext(ctx, "INSERT INTO recordsets (session_id, id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, 'r_corrupt2', ?, '', 't', '', '', '', '', '{}', 'bad-date', '[]')", sess.ID, appended.QueryID)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO recordsets (session_id, id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, 'r_corrupt2', ?, '', 't', '', '', '', '', '{}', 'bad-date', '[]')", sess.ID, appended.QueryID)
 	if _, err := recordSetsForSession(ctx, store.db, sess.ID); err == nil {
 		t.Fatal("expected error on corrupt created_at timestamp")
 	}
-	store.db.ExecContext(ctx, "DELETE FROM recordsets WHERE id = 'r_corrupt2'")
+	_, _ = store.db.ExecContext(ctx, "DELETE FROM recordsets WHERE id = 'r_corrupt2'")
 
 	// Corrupt result payload
-	store.db.ExecContext(ctx, "INSERT INTO recordsets (session_id, id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, 'r_corrupt3', ?, '', 't', '', '', '', '', '{}', '2025-01-01T00:00:00Z', 'bad-result')", sess.ID, appended.QueryID)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO recordsets (session_id, id, query_id, origin_message_id, title, dtql, source, environment, database_id, parameters_json, created_at, result_json) VALUES (?, 'r_corrupt3', ?, '', 't', '', '', '', '', '{}', '2025-01-01T00:00:00Z', 'bad-result')", sess.ID, appended.QueryID)
 	if _, err := recordSetsForSession(ctx, store.db, sess.ID); err == nil {
 		t.Fatal("expected error on corrupt result payload")
 	}
-	store.db.ExecContext(ctx, "DELETE FROM recordsets WHERE id = 'r_corrupt3'")
+	_, _ = store.db.ExecContext(ctx, "DELETE FROM recordsets WHERE id = 'r_corrupt3'")
 
 	// 21. workspaceForSession errors
-	store.db.ExecContext(ctx, "INSERT INTO session_workspace (session_id, state_json) VALUES (?, 'bad json')", sess.ID)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO session_workspace (session_id, state_json) VALUES (?, 'bad json')", sess.ID)
 	if _, err := workspaceForSession(ctx, store.db, sess.ID, nil); err == nil {
 		t.Fatal("expected error on corrupt workspace JSON")
 	}
 	// Invalid loaded workspace
-	store.db.ExecContext(ctx, "UPDATE session_workspace SET state_json = '{\"views\":{\"v\":{\"id\":\"v\",\"recordSetId\":\"missing\"}}}' WHERE session_id = ?", sess.ID)
+	_, _ = store.db.ExecContext(ctx, "UPDATE session_workspace SET state_json = '{\"views\":{\"v\":{\"id\":\"v\",\"recordSetId\":\"missing\"}}}' WHERE session_id = ?", sess.ID)
 	if _, err := workspaceForSession(ctx, store.db, sess.ID, nil); err == nil {
 		t.Fatal("expected error from validateLoadedWorkspace")
 	}
-	store.db.ExecContext(ctx, "DELETE FROM session_workspace WHERE session_id = ?", sess.ID)
+	_, _ = store.db.ExecContext(ctx, "DELETE FROM session_workspace WHERE session_id = ?", sess.ID)
 
 	// 22. decodeBookmarkSnapshot validateBookmarkSnapshotFn fail
 	validateBookmarkSnapshotFn = func(targetKind string, snapshot BookmarkSnapshot) error {
@@ -592,11 +592,11 @@ func TestFinalBlocks_Bookmark(t *testing.T) {
 	validateBookmarkSnapshotFn = origValidateSnap
 
 	// 23. ensureBookmarkUnreferenced errors
-	store.db.ExecContext(ctx, "INSERT INTO session_workspace (session_id, state_json) VALUES (?, 'bad json')", sess.ID)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO session_workspace (session_id, state_json) VALUES (?, 'bad json')", sess.ID)
 	if err := store.ensureBookmarkUnreferenced(ctx, store.db, "b1"); err == nil {
 		t.Fatal("expected error on corrupt workspace in ensureBookmarkUnreferenced")
 	}
-	store.db.ExecContext(ctx, "DELETE FROM session_workspace WHERE session_id = ?", sess.ID)
+	_, _ = store.db.ExecContext(ctx, "DELETE FROM session_workspace WHERE session_id = ?", sess.ID)
 
 	// ensureBookmarkUnreferenced canceled context (line 497)
 	if err := store.ensureBookmarkUnreferenced(canceledCtx, store.db, "b1"); err == nil {
@@ -657,24 +657,24 @@ func TestFinalBlocks_Bookmark(t *testing.T) {
 	}
 
 	// 28. Valid view bookmark creation (lines 358-359)
-	store.db.ExecContext(ctx, "INSERT INTO session_workspace (session_id, state_json) VALUES (?, ?)", sess.ID, `{"views":{"view1":{"id":"view1","recordSetId":"`+appended.RecordSetID+`","title":"View 1"}}}`)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO session_workspace (session_id, state_json) VALUES (?, ?)", sess.ID, `{"views":{"view1":{"id":"view1","recordSetId":"`+appended.RecordSetID+`","title":"View 1"}}}`)
 	if bmView, err := store.CreateBookmark(ctx, sess.ID, ContextReference{Kind: "view", ObjectID: "view1"}, "View Bookmark"); err != nil {
 		t.Fatalf("expected view bookmark creation to succeed, got %v", err)
 	} else if bmView.TargetKind != "view" {
 		t.Fatalf("expected view target kind, got %s", bmView.TargetKind)
 	}
-	store.db.ExecContext(ctx, "DELETE FROM session_workspace WHERE session_id = ?", sess.ID)
+	_, _ = store.db.ExecContext(ctx, "DELETE FROM session_workspace WHERE session_id = ?", sess.ID)
 
 	// 29. ListBookmarks unknown source error (line 122) and loadBookmarks error (line 132)
 	snapUnknown, _ := encodeBookmarkSnapshotFn(BookmarkSnapshot{SourceID: "unknown_source", RecordSet: RecordSet{ID: "r_unk", Database: "unknown_source"}})
-	store.db.ExecContext(ctx, "INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('bm_unk_src', ?, ?, 't', '[]', 'recordset', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', ?)", store.info.ProjectID, store.scope, snapUnknown)
+	_, _ = store.db.ExecContext(ctx, "INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES ('bm_unk_src', ?, ?, 't', '[]', 'recordset', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', ?)", store.info.ProjectID, store.scope, snapUnknown)
 	if _, err := store.ListBookmarks(ctx); err == nil {
 		t.Fatal("expected error from ListBookmarks on unknown source")
 	}
 	if err := store.loadBookmarks(ctx, &ChatSession{}); err == nil {
 		t.Fatal("expected error from loadBookmarks when ListBookmarks fails")
 	}
-	store.db.ExecContext(ctx, "DELETE FROM bookmarks WHERE id = 'bm_unk_src'")
+	_, _ = store.db.ExecContext(ctx, "DELETE FROM bookmarks WHERE id = 'bm_unk_src'")
 }
 
 func TestFinalBlocks_Join(t *testing.T) {

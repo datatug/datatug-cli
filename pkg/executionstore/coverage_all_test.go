@@ -512,7 +512,7 @@ func TestOpenStore_SeamErrors(t *testing.T) {
 	roots := incidentstore.RepositoryRoots{Dedicated: map[string]string{"s1": repoDir}}
 	repo, err := incidentstore.OpenLocation(loc, roots)
 	require.NoError(t, err)
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 
 	opts := Options{PrivateDir: privDir}
 
@@ -628,7 +628,7 @@ func TestOpenStore_SeamErrors(t *testing.T) {
 	// 11. jsonMarshal error in PutSnapshot
 	st, err := openStore(loc, repo, Options{PrivateDir: t.TempDir()}, roots)
 	require.NoError(t, err)
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	origJsonMarshal := jsonMarshal
 	defer func() { jsonMarshal = origJsonMarshal }()
@@ -647,7 +647,7 @@ func TestOpenStore_ExistingRegularDatabaseFile(t *testing.T) {
 	roots := incidentstore.RepositoryRoots{Dedicated: map[string]string{"s1": repoDir}}
 	repo, err := incidentstore.OpenLocation(loc, roots)
 	require.NoError(t, err)
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 
 	// First open creates snapshots.sqlite
 	st1, err := openStore(loc, repo, Options{PrivateDir: privDir}, roots)
@@ -668,7 +668,7 @@ func TestStore_SnapshotNotFoundAndExistingState(t *testing.T) {
 	roots := incidentstore.RepositoryRoots{Projects: map[incidents.ProjectRef]string{project: repoDir}}
 	mgr, err := NewManager(roots, map[string]incidents.StoreLocation{"p": loc}, Options{PrivateDir: privDir})
 	require.NoError(t, err)
-	defer mgr.Close()
+	defer func() { _ = mgr.Close() }()
 
 	st, err := mgr.ProjectStore("p")
 	require.NoError(t, err)
@@ -714,7 +714,7 @@ func TestOpenStore_SecondValidateError(t *testing.T) {
 	roots := incidentstore.RepositoryRoots{Dedicated: map[string]string{"s1": repoDir}}
 	repo, err := incidentstore.OpenLocation(loc, roots)
 	require.NoError(t, err)
-	defer repo.Close()
+	defer func() { _ = repo.Close() }()
 
 	origLstat := osLstat
 	defer func() { osLstat = origLstat }()
@@ -818,7 +818,7 @@ func TestStore_SnapshotQueryRowError(t *testing.T) {
 	roots := incidentstore.RepositoryRoots{Projects: map[incidents.ProjectRef]string{project: repoDir}}
 	mgr, err := NewManager(roots, map[string]incidents.StoreLocation{"p": loc}, Options{PrivateDir: privDir})
 	require.NoError(t, err)
-	defer mgr.Close()
+	defer func() { _ = mgr.Close() }()
 
 	st, err := mgr.ProjectStore("p")
 	require.NoError(t, err)

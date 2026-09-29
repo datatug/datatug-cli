@@ -69,10 +69,11 @@ func TestGetSqlDbBreadcrumbs(t *testing.T) {
 		old := onBreadcrumbAction
 		onBreadcrumbAction = nil
 		defer func() { onBreadcrumbAction = old }()
-		if kind == "driver" {
+		switch kind {
+		case "driver":
 			driverCalled = true
 			_ = action()
-		} else if kind == "db" {
+		case "db":
 			dbCalled = true
 			_ = action()
 		}

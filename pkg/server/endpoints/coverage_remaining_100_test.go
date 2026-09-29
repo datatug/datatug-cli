@@ -126,6 +126,7 @@ func TestRemaining100_ContractDecode(t *testing.T) {
 	fields, ok := jsonObjectFields(reflect.TypeOf(testDecodeStruct{}))
 	assert.True(t, ok)
 	assert.NotNil(t, fields)
+	_ = testDecodeStruct{unexported: "x"}.unexported
 
 	// foldRune with unicode rune > r: Cyrillic capital A '\u0410'
 	folded := foldJSONName("\u0410")
@@ -470,7 +471,7 @@ func TestRemaining100_SemanticProject(t *testing.T) {
 	// walkJSONFiles with unreadable file
 	unreadableFile := filepath.Join(queriesDir, "unreadable.query.json")
 	require.NoError(t, os.WriteFile(unreadableFile, []byte(`{}`), 0000))
-	defer os.Chmod(unreadableFile, 0644)
+	defer func() { _ = os.Chmod(unreadableFile, 0644) }()
 	err = walkJSONFiles(queriesDir, ".query.json", func(path string, data []byte) error {
 		return nil
 	})
@@ -1263,7 +1264,7 @@ func TestRemaining100_CompareFacts(t *testing.T) {
 
 	// Comparison mentions binding but operator is not In
 	cmpEq := dal.NewComparison(fRef, dal.Equal, pRef)
-	cnt, safe = countNativeInBindings(cmpEq, "my_field", "my_param")
+	_, safe = countNativeInBindings(cmpEq, "my_field", "my_param")
 	assert.False(t, safe)
 
 	// *Comparison
@@ -1273,7 +1274,7 @@ func TestRemaining100_CompareFacts(t *testing.T) {
 
 	// GroupCondition Or (not safe)
 	grpOr := dal.NewGroupCondition(dal.Or, cmp)
-	cnt, safe = countNativeInBindings(grpOr, "my_field", "my_param")
+	_, safe = countNativeInBindings(grpOr, "my_field", "my_param")
 	assert.False(t, safe)
 
 	// GroupCondition And (safe)

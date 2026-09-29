@@ -15,7 +15,6 @@ import (
 var (
 	newDatatugTUIFunc                     = datatug.NewDatatugTUI
 	lastProjectsTable                     *tview.Table
-	lastProjectsFlex                      *tview.Flex
 	lastProjectsTableSelectedFunc         func(row, column int)
 	lastProjectsTableSelectionChangedFunc func(row, column int)
 	lastProjectsFlexFocusFunc             func()
@@ -56,7 +55,6 @@ func showGCloudProjects(cContext *GCloudContext, focusTo sneatnav.FocusTo) error
 	// We'll wrap the table with a flex to add a vertical scrollbar on the right
 	// and move the border/title to that flex container
 	flex := tview.NewFlex().SetDirection(tview.FlexColumn)
-	lastProjectsFlex = flex
 	sneatv.SetPanelTitle(flex.Box, "Google Cloud Projects")
 	table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {

@@ -474,7 +474,7 @@ func TestCoverage_Snapshot_ValuesAndErrors(t *testing.T) {
 	dir := t.TempDir()
 	db, err := sql.Open("sqlite", filepath.Join(dir, "empty.db"))
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	err = materializeSnapshot(context.Background(), db, "empty_table", apicontract.Recordset{})
 	assert.NoError(t, err)
 
@@ -486,7 +486,7 @@ func TestCoverage_Snapshot_ValuesAndErrors(t *testing.T) {
 	// beginTxSnapshot error
 	db2, err := sql.Open("sqlite", filepath.Join(dir, "db2.db"))
 	require.NoError(t, err)
-	defer db2.Close()
+	defer func() { _ = db2.Close() }()
 	origBegin := beginTxSnapshot
 	beginTxSnapshot = func(ctx context.Context, db *sql.DB) (*sql.Tx, error) {
 		return nil, errors.New("beginTx failed")

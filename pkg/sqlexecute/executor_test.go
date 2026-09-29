@@ -849,7 +849,7 @@ func TestRequestCommand_Validate_DbAndPort(t *testing.T) {
 
 func TestExecuteQuery_SeamsErrors(t *testing.T) {
 	db := openMemDB(t)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	e := NewExecutor(nil, nil)
 
 	// Test closeRowsSeam error (logged in defer)

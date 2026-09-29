@@ -321,7 +321,7 @@ func scanBookmark(scanner bookmarkScanner) (Bookmark, error) {
 	if bookmark.UpdatedAt, err = time.Parse(time.RFC3339Nano, updated); err != nil {
 		return Bookmark{}, fmt.Errorf("corrupt bookmark %q timestamp: %w", bookmark.ID, err)
 	}
-	if bookmark.Snapshot, err = decodeBookmarkSnapshot(bookmark.TargetKind, payload); err != nil {
+	if bookmark.Snapshot, err = decodeBookmarkSnapshotFn(bookmark.TargetKind, payload); err != nil {
 		return Bookmark{}, fmt.Errorf("corrupt bookmark %q snapshot: %w", bookmark.ID, err)
 	}
 	return bookmark, nil

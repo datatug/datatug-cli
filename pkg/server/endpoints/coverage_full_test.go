@@ -197,7 +197,7 @@ func TestSemanticSchema_Coverage(t *testing.T) {
 	assert.Error(t, err)
 
 	// 2. resolveSource inGitDB missing recordset definition
-	_, err = resolveSource(ctx, projStore, projectDir, semanticTestEnv, "support-notes", "tbl")
+	_, _ = resolveSource(ctx, projStore, projectDir, semanticTestEnv, "support-notes", "tbl")
 	// If recordset exists, let's test a non-existent path
 	tmpDir := t.TempDir()
 	_, err = resolveSource(ctx, projStore, tmpDir, semanticTestEnv, "support-notes", "tbl")

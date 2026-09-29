@@ -1,94 +1,59 @@
 package gcloudui
 
 import (
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	tea "charm.land/bubbletea/v2"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
+	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/strongo/strongo-tui/pkg/widgets"
 )
 
-func newGCloudProjectBreadcrumbs(gcProjectCtx *CGProjectContext) sneatnav.Breadcrumbs {
-	breadcrumbs := newBreadcrumbsProjects(gcProjectCtx.GCloudContext)
-	breadcrumbs.Push(sneatv.NewBreadcrumb(gcProjectCtx.Project.DisplayName, func() error {
-		return goGCloudProject(gcProjectCtx)
-	}))
-	return breadcrumbs
+const projectListID = "gcloudui.project"
+
+// Items of the project list.
+const (
+	itemFirestore = "firestore"
+	itemUsers     = "users"
+)
+
+// project is the screen of one Google Cloud project: what can be browsed in it.
+type project struct {
+	listPane
+	ctx *CGProjectContext
 }
 
-var lastGCloudProjectMenu *tview.List
+var (
+	_ nav.Screen       = project{}
+	_ nav.Titled       = project{}
+	_ nav.ShortHelper  = project{}
+	_ widgets.Boundary = project{}
+	_ widgets.Editor   = project{}
+)
 
-func newGCloudProjectMenu(gcProjCtx *CGProjectContext) sneatnav.Panel {
-	list := tview.NewList()
-	lastGCloudProjectMenu = list
-	sneatv.DefaultBorderWithPadding(list.Box)
-	list.SetTitle(gcProjCtx.Project.DisplayName)
+func newProject(ctx *CGProjectContext) project {
+	return project{
+		ctx: ctx,
+		listPane: newListPane(projectListID,
+			widgets.MenuItem{ID: itemFirestore, Label: "Firestore Database"},
+			widgets.MenuItem{ID: itemUsers, Label: "Firebase Users", Detail: "(not implemented yet)"},
+		),
+	}
+}
 
-	list.AddItem("Firestore Database", "", 0, func() {
-		_ = goFirestoreDb(gcProjCtx)
-	})
+// Init implements nav.Screen.
+func (project) Init() tea.Cmd { return nil }
 
-	list.AddItem("Firebase Users", "", 0, func() {
-	})
-
-	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyRight:
-			gcProjCtx.TUI.SetFocus(gcProjCtx.TUI.Content)
-			return nil
-		case tcell.KeyUp:
-			if list.GetCurrentItem() == 0 {
-				gcProjCtx.TUI.Header.SetFocus(sneatnav.ToBreadcrumbs, list)
-				return nil
-			}
-			return event
-		case tcell.KeyEnter:
-			gcProjCtx.TUI.Content.TakeFocus()
-			gcProjCtx.TUI.Content.InputHandler()(event, gcProjCtx.TUI.SetFocus)
-			return nil
-		default:
-			return event
+// Update implements nav.Screen.
+func (p project) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
+	if sel, ok := msg.(widgets.ItemSelectedMsg); ok && sel.ID == projectListID {
+		if menuItem(sel).ID == itemFirestore {
+			return p, datatugui.Drill("Firestore", newFirestoreDb(p.ctx))
 		}
-	})
-	return sneatnav.NewPanel(gcProjCtx.TUI, sneatv.WithDefaultBorders(list, list.Box))
+		return p, nil
+	}
+	var cmd tea.Cmd
+	p.listPane, cmd = p.listPane.update(msg)
+	return p, cmd
 }
 
-func goGCloudProject(gcProjCtx *CGProjectContext) error {
-	_ = newGCloudProjectBreadcrumbs(gcProjCtx)
-
-	//menu := newMenuWithProjects(gcProjCtx.GCloudContext)
-	menu := newGCloudProjectMenu(gcProjCtx)
-
-	content := firestoreMainMenu(gcProjCtx, firestoreScreenCollections, "")
-	gcProjCtx.TUI.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToMenu))
-	return nil
-}
-
-//func newMenuWithProjects(cContext *GCloudContext) (menu sneatnav.Panel) {
-//	list := sneatnav.MainMenuList()
-//	list.SetTitle("Projects")
-//	sneatv.DefaultBorderWithPadding(list.Box)
-//	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-//		switch event.Key() {
-//		case tcell.KeyUp:
-//			cContext.TUI.Header.SetFocus(sneatnav.ToBreadcrumbs, list)
-//		case tcell.KeyRight:
-//			cContext.TUI.Content.TakeFocus()
-//		case tcell.KeyEnter:
-//			cContext.TUI.Content.TakeFocus()
-//			cContext.TUI.Content.InputHandler()(event, cContext.TUI.SetFocus)
-//		default:
-//			return event
-//		}
-//		return event
-//	})
-//
-//	projects, err := cContext.GetProjects()
-//	if err != nil {
-//		list.AddItem("Failed to load  projects:", err.Error(), 0, nil)
-//		return sneatnav.NewPanelFromList(cContext.TUI, list)
-//	}
-//	for _, project := range projects {
-//		list.AddItem(project.DisplayName, "", 0, func() {})
-//	}
-//	return sneatnav.NewPanelFromList(cContext.TUI, list)
-//}
+// Title implements nav.Titled.
+func (p project) Title() string { return p.ctx.Project.DisplayName }

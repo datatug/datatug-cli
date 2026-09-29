@@ -2,6 +2,7 @@ package gauth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -33,18 +34,12 @@ func getGoogleCloudClient(ctx context.Context) (client *http.Client, err error) 
 
 	// Cloud Resource Manager v3 scope.
 	// Use "Desktop app" type so no client secret is needed.
-	config := &oauth2.Config{
-		ClientID:     "588648831063-393c7c5gfj70sstaioked6qpb0sfj87h.apps.googleusercontent.com", // os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
-		ClientSecret: "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",                                      // Creation date: 11 August 2025 at 16:03:21 GMT+1
-		Scopes: []string{
-			// Request broad scopes so the resulting refresh token can be reused for Firestore
-			"https://www.googleapis.com/auth/cloud-platform",
-			"https://www.googleapis.com/auth/datastore",
-			cloudresourcemanager.CloudPlatformReadOnlyScope,
-		},
-		Endpoint:    google.Endpoint,
-		RedirectURL: "http://localhost:8080/oauth2callback",
-	}
+	config := newOAuthConfig([]string{
+		// Request broad scopes so the resulting refresh token can be reused for Firestore
+		"https://www.googleapis.com/auth/cloud-platform",
+		"https://www.googleapis.com/auth/datastore",
+		cloudresourcemanager.CloudPlatformReadOnlyScope,
+	})
 
 	var refreshToken string
 	refreshToken, err = GetRefreshToken()
@@ -84,6 +79,32 @@ func getGoogleCloudClient(ctx context.Context) (client *http.Client, err error) 
 	return config.Client(ctx, token), nil
 }
 
+// newOAuthConfig returns the desktop-app OAuth2 config shared by every sign-in
+// and token-refresh path, for the given scopes.
+func newOAuthConfig(scopes []string) *oauth2.Config {
+	return &oauth2.Config{
+		ClientID:     "588648831063-393c7c5gfj70sstaioked6qpb0sfj87h.apps.googleusercontent.com", // os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
+		ClientSecret: "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",                                      // Creation date: 11 August 2025 at 16:03:21 GMT+1
+		Scopes:       scopes,
+		Endpoint:     google.Endpoint,
+		RedirectURL:  "http://localhost:8080/oauth2callback",
+	}
+}
+
+// ErrNotSignedIn is returned by TokenSource when no refresh token is stored.
+var ErrNotSignedIn = errors.New("not signed in: no stored Google refresh token")
+
+// TokenSource returns a token source for the given scopes built from the
+// refresh token stored by the Google sign-in. It returns ErrNotSignedIn when
+// there is no stored refresh token.
+func TokenSource(ctx context.Context, scopes []string) (oauth2.TokenSource, error) {
+	refreshToken, err := GetRefreshToken()
+	if err != nil || refreshToken == "" {
+		return nil, ErrNotSignedIn
+	}
+	return tokenSourceFromConfig(ctx, newOAuthConfig(scopes), &oauth2.Token{RefreshToken: refreshToken}), nil
+}
+
 // saveRefreshToken securely stores a token in the system keychain
 func saveRefreshToken(token string) error {
 	log.Println("Saving refresh token to keyring...")
@@ -109,13 +130,7 @@ func StartInteractiveLogin(ctx context.Context, scopes []string) (*oauth2.Token,
 			"https://www.googleapis.com/auth/datastore",
 		}
 	}
-	cfg := &oauth2.Config{
-		ClientID:     "588648831063-393c7c5gfj70sstaioked6qpb0sfj87h.apps.googleusercontent.com",
-		ClientSecret: "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",
-		Scopes:       scopes,
-		Endpoint:     google.Endpoint,
-		RedirectURL:  "http://localhost:8080/oauth2callback",
-	}
+	cfg := newOAuthConfig(scopes)
 	tok, err := getTokenFromWebFn(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("interactive login failed: %w", err)

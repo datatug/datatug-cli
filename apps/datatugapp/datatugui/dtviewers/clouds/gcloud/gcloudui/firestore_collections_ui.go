@@ -2,207 +2,173 @@ package gcloudui
 
 import (
 	"context"
-	"fmt"
+	"strings"
 
-	"cloud.google.com/go/firestore"
-	"github.com/datatug/datatug-cli/pkg/auth/gauth"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/schemers"
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
-	"google.golang.org/api/option"
+	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/strongo/strongo-tui/pkg/widgets"
 )
 
-func goFirestoreCollections(gcProjCtx *CGProjectContext) error {
-	breadcrumbs := newGCloudProjectBreadcrumbs(gcProjCtx)
-	breadcrumbs.Push(sneatv.NewBreadcrumb("Firestore", nil))
-	menu := firestoreMainMenu(gcProjCtx, firestoreScreenCollections, "")
+const collectionsListID = "gcloudui.collections"
 
-	list := tview.NewList()
-	lastFirestoreCollectionsList = list
-	sneatv.DefaultBorderWithPadding(list.Box)
-	title := "Firestore Collections"
-	if gcProjCtx.Project != nil && gcProjCtx.Project.ProjectId != "" {
-		title += " — " + gcProjCtx.Project.ProjectId
+// Items of the collections list that are not a collection.
+const (
+	itemCollection     = "collection"
+	itemRelogin        = "relogin"
+	itemForgetLogin    = "forget"
+	itemRetry          = "retry"
+	itemOpenCredential = "credentials"
+)
+
+// collectionsLoaded is the result of loadCollections.
+type collectionsLoaded struct {
+	collections []*schemers.Collection
+	err         error
+}
+
+// loginDone reports that the sign-in or the sign-out that was started finished;
+// the collections are loaded again.
+type loginDone struct{}
+
+// loadCollections returns the command that reads the root collections.
+func loadCollections(ctx *CGProjectContext) tea.Cmd {
+	return func() tea.Msg {
+		collections, err := ctx.Schema().GetCollections(context.Background(), nil)
+		return collectionsLoaded{collections: collections, err: err}
 	}
-	list.SetTitle(title)
-	content := sneatnav.NewPanel(gcProjCtx.TUI, sneatv.WithDefaultBorders(list, list.Box))
-
-	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyLeft {
-			gcProjCtx.TUI.SetFocus(menu)
-			return nil
-		}
-		return event
-	})
-
-	list.AddItem("Loading...", "Fetching root collections", 0, nil)
-
-	// Load collections asynchronously to avoid blocking UI
-	go func() {
-		ctx := context.Background()
-
-		collections, err := gcProjCtx.Schema().GetCollections(ctx, nil)
-		if err != nil {
-			scheduleUpdate(gcProjCtx.TUI.App, func() {
-				list.Clear()
-				addAuthErrorItems(gcProjCtx, list, err)
-			})
-			return
-		}
-
-		scheduleUpdate(gcProjCtx.TUI.App, func() {
-			list.Clear()
-			if len(collections) == 0 {
-				list.AddItem("No collections", "The Firestore database has no root collections", 0, nil)
-				return
-			}
-			for _, collection := range collections {
-				list.AddItem("📋 "+collection.ID, "", 0, func() {
-					if err := goFirestoreCollectionFunc(gcProjCtx, collection, sneatnav.FocusToContent); err != nil {
-						panic(err)
-					}
-				})
-			}
-		})
-	}()
-
-	gcProjCtx.TUI.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToContent))
-	return nil
 }
 
-var goFirestoreCollectionFunc func(gcProjCtx *CGProjectContext, collection *schemers.Collection, focusTo sneatnav.FocusTo) error
-
-func init() {
-	goFirestoreCollectionFunc = goFirestoreCollection
+// relogin returns the command that signs in again with the Firestore scopes. Its
+// outcome is not reported: the collections are loaded again either way.
+func relogin() tea.Cmd {
+	return func() tea.Msg {
+		_, _ = startInteractiveLoginFunc(context.Background(), firestoreScopes)
+		return loginDone{}
+	}
 }
 
-// newFirestoreClientFunc is a seam so tests can replace newFirestoreClient.
-var newFirestoreClientFunc = func(ctx context.Context, projectID string) (*firestore.Client, error) {
-	return newFirestoreClient(ctx, projectID)
+// forgetLogin returns the command that deletes the saved refresh token.
+func forgetLogin() tea.Cmd {
+	return func() tea.Msg {
+		_ = deleteRefreshTokenFunc()
+		return loginDone{}
+	}
 }
 
-// scheduleUpdate is a seam wrapping app.QueueUpdateDraw so tests can execute
-// the callback synchronously instead of queuing it on a non-running event loop.
-var scheduleUpdate = func(app *tview.Application, f func()) {
-	app.QueueUpdateDraw(f)
-}
-
-// startInteractiveLoginFunc is a seam for gauth.StartInteractiveLogin.
-var startInteractiveLoginFunc = func(ctx context.Context, scopes []string) (*oauth2.Token, error) {
-	return gauth.StartInteractiveLogin(ctx, scopes)
-}
-
-// deleteRefreshTokenFunc is a seam for gauth.DeleteRefreshToken.
-var deleteRefreshTokenFunc = func() error {
-	return gauth.DeleteRefreshToken()
+// collections lists the root collections of the Firestore database, or what to
+// do when they cannot be read.
+type collections struct {
+	listPane
+	ctx *CGProjectContext
 }
 
 var (
-	lastFirestoreCollectionsList *tview.List
-	getRefreshTokenFunc          = gauth.GetRefreshToken
-	firestoreNewClient           = firestore.NewClient
+	_ nav.Screen       = collections{}
+	_ nav.Titled       = collections{}
+	_ nav.ShortHelper  = collections{}
+	_ widgets.Boundary = collections{}
+	_ widgets.Editor   = collections{}
 )
 
-// newFirestoreClient attempts to build a Firestore client using an OAuth2 TokenSource
-// derived from a refresh token stored by our gauth package; falls back to ADC if not available.
-func newFirestoreClient(ctx context.Context, projectID string) (*firestore.Client, error) {
-	if projectID == "" {
-		return nil, fmt.Errorf("project ID is empty")
-	}
-
-	// Try to use refresh token from keychain via gauth
-	if rt, err := getRefreshTokenFunc(); err == nil && rt != "" {
-		// Use a desktop-app OAuth2 client with cloud-platform and datastore scopes
-		cfg := &oauth2.Config{
-			// These values mirror the desktop app config used in gauth
-			ClientID:     "588648831063-393c7c5gfj70sstaioked6qpb0sfj87h.apps.googleusercontent.com",
-			ClientSecret: "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",
-			Scopes: []string{
-				"https://www.googleapis.com/auth/cloud-platform",
-				"https://www.googleapis.com/auth/datastore",
-			},
-			Endpoint:    google.Endpoint,
-			RedirectURL: "http://localhost:8080/oauth2callback",
-		}
-		tok := &oauth2.Token{RefreshToken: rt}
-		ts := cfg.TokenSource(ctx, tok)
-		if client, err := firestoreNewClient(ctx, projectID, option.WithTokenSource(ts)); err == nil {
-			return client, nil
-		}
-		// If it failed (e.g., invalid_grant), we will fall back to ADC below.
-	}
-
-	// Fallback: ADC
-	return firestoreNewClient(ctx, projectID)
+func newCollections(ctx *CGProjectContext) collections {
+	c := collections{ctx: ctx, listPane: newListPane(collectionsListID, loadingItem())}
+	return c
 }
 
-// addAuthErrorItems renders an error with recovery actions.
-func addAuthErrorItems(gcProjCtx *CGProjectContext, list *tview.List, err error) {
-	// Show base error
-	list.AddItem("Error", err.Error(), 0, nil)
+func loadingItem() widgets.MenuItem {
+	return widgets.MenuItem{ID: "loading", Label: "Loading...", Detail: "Fetching root collections"}
+}
 
-	// Tailored hint for insufficient scopes
-	e := err.Error()
-	if containsInsufficientScopes(e) {
-		list.AddItem("Hint: Missing Firestore scopes", "Your sign-in lacks Datastore/Firestore scopes. Re-login to grant access.", 0, nil)
-		// Action: Re-login with Firestore scopes
-		list.AddItem("Re-login (add Firestore scope)", "Open browser to re-consent and save new token", 'l', func() {
-			go func() {
-				_, _ = startInteractiveLoginFunc(context.Background(), []string{
-					"https://www.googleapis.com/auth/cloud-platform",
-					"https://www.googleapis.com/auth/datastore",
-				})
-				// After login attempt, retry screen
-				scheduleUpdate(gcProjCtx.TUI.App, func() {
-					_ = goFirestoreCollections(gcProjCtx)
-				})
-			}()
-		})
-		// Action: Forget saved login
-		list.AddItem("Forget saved login", "Delete saved refresh token to force re-consent", 'f', func() {
-			_ = deleteRefreshTokenFunc()
-			_ = goFirestoreCollections(gcProjCtx)
-		})
+// Init implements nav.Screen.
+func (c collections) Init() tea.Cmd { return loadCollections(c.ctx) }
+
+// Update implements nav.Screen.
+func (c collections) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
+	switch msg := msg.(type) {
+	case collectionsLoaded:
+		c.list.SetItems(collectionItems(msg)...)
+		return c, nil
+	case loginDone:
+		return c.reload()
+	case widgets.ItemSelectedMsg:
+		if msg.ID == collectionsListID {
+			return c.selected(menuItem(msg))
+		}
+	}
+	var cmd tea.Cmd
+	c.listPane, cmd = c.listPane.update(msg)
+	return c, cmd
+}
+
+// reload shows the loading state and reads the collections again.
+func (c collections) reload() (nav.Screen, tea.Cmd) {
+	c.list.SetItems(loadingItem())
+	return c, loadCollections(c.ctx)
+}
+
+// selected acts on the chosen item.
+func (c collections) selected(item widgets.MenuItem) (nav.Screen, tea.Cmd) {
+	switch item.ID {
+	case itemCollection:
+		collection := item.Ref.(*schemers.Collection)
+		return c, datatugui.Drill(collection.ID, newCollection(c.ctx, collection))
+	case itemRelogin:
+		return c, relogin()
+	case itemForgetLogin:
+		return c, forgetLogin()
+	case itemRetry:
+		return c.reload()
+	case itemOpenCredential:
+		return c, datatugui.Drill("Credentials", newCredentials())
+	}
+	return c, nil
+}
+
+// Title implements nav.Titled.
+func (c collections) Title() string { return "Firestore Collections" + projectSuffix(c.ctx) }
+
+// collectionItems turns the result of a load into the items of the list.
+func collectionItems(msg collectionsLoaded) []list.Item {
+	if msg.err != nil {
+		return errorItems(msg.err)
+	}
+	if len(msg.collections) == 0 {
+		return []list.Item{widgets.MenuItem{ID: "empty", Label: "No collections", Detail: "The Firestore database has no root collections"}}
+	}
+	items := make([]list.Item, len(msg.collections))
+	for i, collection := range msg.collections {
+		items[i] = widgets.MenuItem{ID: itemCollection, Label: "📋 " + collection.ID, Ref: collection}
+	}
+	return items
+}
+
+// errorItems renders an error with the actions that may recover from it.
+func errorItems(err error) []list.Item {
+	items := []list.Item{widgets.MenuItem{ID: "error", Label: "Error", Detail: err.Error()}}
+	if insufficientScopes(err.Error()) {
+		items = append(items,
+			widgets.MenuItem{ID: "hint", Label: "Hint: Missing Firestore scopes", Detail: "Your sign-in lacks Datastore/Firestore scopes. Re-login to grant access."},
+			widgets.MenuItem{ID: itemRelogin, Label: "Re-login (add Firestore scope)", Detail: "Open browser to re-consent and save new token", Shortcut: 'l'},
+			widgets.MenuItem{ID: itemForgetLogin, Label: "Forget saved login", Detail: "Delete saved refresh token to force re-consent", Shortcut: 'f'},
+		)
 	} else {
-		// Generic hint for invalid_grant etc.
-		list.AddItem("Hint: Check time sync", "Ensure your system clock is correct (auto time on)", 0, nil)
+		items = append(items, widgets.MenuItem{ID: "hint", Label: "Hint: Check time sync", Detail: "Ensure your system clock is correct (auto time on)"})
 	}
-
-	// Action: Retry
-	list.AddItem("Retry", "Try loading collections again", 'r', func() {
-		_ = goFirestoreCollections(gcProjCtx)
-	})
-
-	// Action: Open Credentials screen
-	list.AddItem("Open Credentials", "Configure or refresh Google auth", 'c', func() {
-		_ = GoCredentials(gcProjCtx.GCloudContext, sneatnav.FocusToContent)
-	})
-
-	// Action: ADC login help
-	list.AddItem("How to login with gcloud (ADC)", "Run: gcloud auth application-default login", 'g', func() {})
+	return append(items,
+		widgets.MenuItem{ID: itemRetry, Label: "Retry", Detail: "Try loading collections again", Shortcut: 'r'},
+		widgets.MenuItem{ID: itemOpenCredential, Label: "Open Credentials", Detail: "Configure or refresh Google auth", Shortcut: 'c'},
+		widgets.MenuItem{ID: "adc", Label: "How to login with gcloud (ADC)", Detail: "Run: gcloud auth application-default login", Shortcut: 'g'},
+	)
 }
 
-// containsInsufficientScopes returns true if the error string indicates missing auth scopes
-func containsInsufficientScopes(errStr string) bool {
-	if errStr == "" {
-		return false
-	}
-	// Common markers from Google APIs
-	if contains(errStr, "ACCESS_TOKEN_SCOPE_INSUF") || contains(errStr, "insufficient authentication scopes") || contains(errStr, "insufficient scopes") {
-		return true
-	}
-	return false
-}
-
-// small helper to avoid importing strings for minor usage
-func contains(s, sub string) bool {
-	// simple substring search
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
+// insufficientScopes reports whether an error message says the sign-in lacks
+// the needed scopes.
+func insufficientScopes(message string) bool {
+	for _, marker := range []string{"ACCESS_TOKEN_SCOPE_INSUF", "insufficient authentication scopes", "insufficient scopes"} {
+		if strings.Contains(message, marker) {
 			return true
 		}
 	}

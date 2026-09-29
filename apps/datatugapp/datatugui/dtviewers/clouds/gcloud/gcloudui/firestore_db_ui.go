@@ -1,71 +1,59 @@
 package gcloudui
 
 import (
-	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	tea "charm.land/bubbletea/v2"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
+	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/strongo/strongo-tui/pkg/widgets"
 )
 
-var lastFirestoreMainMenu *tview.List
+const firestoreListID = "gcloudui.firestore"
 
-type firestoreScreen int
-
+// Items of the Firestore list.
 const (
-	firestoreScreenCollections = iota
-	firestoreScreenIndexes
+	itemCollections = "collections"
+	itemIndexes     = "indexes"
 )
 
-func firestoreBreadcrumbs(gcProjCtx *CGProjectContext) sneatnav.Breadcrumbs {
-	breadcrumbs := newGCloudProjectBreadcrumbs(gcProjCtx)
-	breadcrumbs.Push(sneatv.NewBreadcrumb("Firestore", nil))
-	return breadcrumbs
+// firestoreDb is the Firestore Database screen: Collections and Indexes.
+type firestoreDb struct {
+	listPane
+	ctx *CGProjectContext
 }
 
-func goFirestoreDb(gcProjCtx *CGProjectContext) error {
-	_ = firestoreBreadcrumbs(gcProjCtx)
-	menu := dtviewers.NewCloudsMenu(gcProjCtx.TUI, viewerID)
+var (
+	_ nav.Screen       = firestoreDb{}
+	_ nav.Titled       = firestoreDb{}
+	_ nav.ShortHelper  = firestoreDb{}
+	_ widgets.Boundary = firestoreDb{}
+	_ widgets.Editor   = firestoreDb{}
+)
 
-	content := firestoreMainMenu(gcProjCtx, firestoreScreenCollections, "Firestore Database")
-
-	gcProjCtx.TUI.SetPanels(menu, content, sneatnav.WithFocusTo(sneatnav.FocusToContent))
-	return nil
-}
-
-func firestoreMainMenu(gcProjCtx *CGProjectContext, active firestoreScreen, title string) (menu sneatnav.Panel) {
-	list := sneatnav.MainMenuList(gcProjCtx.TUI)
-	lastFirestoreMainMenu = list
-	sneatv.DefaultBorderWithPadding(list.Box)
-	if title != "" {
-		list.SetTitle(title)
+func newFirestoreDb(ctx *CGProjectContext) firestoreDb {
+	return firestoreDb{
+		ctx: ctx,
+		listPane: newListPane(firestoreListID,
+			widgets.MenuItem{ID: itemCollections, Label: "Collections"},
+			widgets.MenuItem{ID: itemIndexes, Label: "Indexes"},
+		),
 	}
-
-	list.AddItem("Collections", "", 0, func() {
-		_ = goFirestoreCollections(gcProjCtx)
-	})
-
-	list.AddItem("Indexes", "", 0, func() {
-		_ = goFirestoreIndexes(gcProjCtx)
-	})
-
-	list.SetCurrentItem(int(active))
-
-	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyRight:
-			gcProjCtx.TUI.SetFocus(gcProjCtx.TUI.Content)
-			return nil
-		case tcell.KeyUp:
-			if list.GetCurrentItem() == 0 {
-				gcProjCtx.TUI.Header.SetFocus(sneatnav.ToBreadcrumbs, list)
-				return nil
-			}
-			return event
-		default:
-			return event
-		}
-	})
-
-	return sneatnav.NewPanel(gcProjCtx.TUI, sneatv.WithDefaultBorders(list, list.Box))
 }
+
+// Init implements nav.Screen.
+func (firestoreDb) Init() tea.Cmd { return nil }
+
+// Update implements nav.Screen.
+func (f firestoreDb) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
+	if sel, ok := msg.(widgets.ItemSelectedMsg); ok && sel.ID == firestoreListID {
+		if menuItem(sel).ID == itemCollections {
+			return f, datatugui.Drill("Collections", newCollections(f.ctx))
+		}
+		return f, datatugui.Drill("Indexes", newIndexes(f.ctx))
+	}
+	var cmd tea.Cmd
+	f.listPane, cmd = f.listPane.update(msg)
+	return f, cmd
+}
+
+// Title implements nav.Titled.
+func (firestoreDb) Title() string { return "Firestore Database" }

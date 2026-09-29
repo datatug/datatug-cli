@@ -70,6 +70,11 @@ func InferChartCandidates(stats secureread.RecordSetStatistics) []ChartCandidate
 			candidates = append(candidates, candidate)
 		}
 	}
+	sortChartCandidates(candidates)
+	return candidates
+}
+
+func sortChartCandidates(candidates []ChartCandidate) {
 	sort.SliceStable(candidates, func(i, j int) bool {
 		left, right := candidates[i], candidates[j]
 		if left.Score != right.Score {
@@ -83,7 +88,6 @@ func InferChartCandidates(stats secureread.RecordSetStatistics) []ChartCandidate
 		}
 		return left.Spec.Dimension < right.Spec.Dimension
 	})
-	return candidates
 }
 
 func categoryCandidate(rowCount int, column secureread.ColumnStatistics) (ChartCandidate, bool) {

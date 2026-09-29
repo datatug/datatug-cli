@@ -26,12 +26,15 @@ import (
 // ui.go) so it survives ui.go's deletion; both UIs share the same message type.
 type bridgeTickMsg struct{}
 
-var errBrowserExportTooLarge = errors.New("export exceeds browser download limit (16 MiB)")
+var (
+	errBrowserExportTooLarge = errors.New("export exceeds browser download limit (16 MiB)")
+	maxBrowserExportBytes    = 16 << 20
+)
 
 type browserExportBuffer struct{ bytes.Buffer }
 
 func (b *browserExportBuffer) Write(data []byte) (int, error) {
-	if len(data) > (16<<20)-b.Len() {
+	if len(data) > maxBrowserExportBytes-b.Len() {
 		return 0, errBrowserExportTooLarge
 	}
 	return b.Buffer.Write(data)

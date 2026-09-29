@@ -26,9 +26,6 @@ func (c *SessionChat) joinAttachedQuery(ctx context.Context, session ChatSession
 		return query, false, nil
 	}
 	instances := relationInstances(parsed.From())
-	if len(instances) == 0 {
-		return query, false, nil
-	}
 	root := instances[0]
 	sourceID := query.SourceID
 	if sourceID == "" && c.store != nil {

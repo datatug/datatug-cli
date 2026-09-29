@@ -45,11 +45,13 @@ func (c *SessionChat) ConfigureTelemetry(reporter InteractionReporter, base ai.C
 	c.telemetrySlots = make(chan struct{}, 32)
 }
 
+var newUUID = clientctx.NewUUID
+
 func (c *SessionChat) turnContext(ctx context.Context) (context.Context, string, *ai.ClientContext) {
 	if c.reporter == nil {
 		return ctx, "", nil
 	}
-	id, err := clientctx.NewUUID()
+	id, err := newUUID()
 	if err != nil {
 		return ctx, "", nil
 	}
@@ -111,7 +113,7 @@ func (c *SessionChat) NewCommandInteractionID() string {
 	if c.reporter == nil {
 		return ""
 	}
-	id, err := clientctx.NewUUID()
+	id, err := newUUID()
 	if err != nil {
 		return ""
 	}

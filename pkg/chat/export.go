@@ -21,6 +21,48 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var (
+	osCreateTemp             = os.CreateTemp
+	osOpen                   = os.Open
+	osReadFile               = os.ReadFile
+	godbfSaveToFile          = godbf.SaveToFile
+	fileClose                = func(f *os.File) error { return f.Close() }
+	sqliteExecContext        = func(db *sql.DB, ctx context.Context, query string, args ...any) (sql.Result, error) {
+		return db.ExecContext(ctx, query, args...)
+	}
+	sqlitePrepareContext = func(db *sql.DB, ctx context.Context, query string) (*sql.Stmt, error) {
+		return db.PrepareContext(ctx, query)
+	}
+	sqliteStmtExecContext = func(stmt *sql.Stmt, ctx context.Context, args ...any) (sql.Result, error) {
+		return stmt.ExecContext(ctx, args...)
+	}
+	sqliteDBClose        = func(db *sql.DB) error { return db.Close() }
+	excelizeSetSheetName = func(f *excelize.File, old, new string) error { return f.SetSheetName(old, new) }
+	excelizeNewSheet     = func(f *excelize.File, name string) (int, error) { return f.NewSheet(name) }
+	excelizeSetCellValue = func(f *excelize.File, sheet, cell string, value any) error {
+		return f.SetCellValue(sheet, cell, value)
+	}
+	godbfAddNewRecord = func(t *godbf.DbfTable) (int, error) { return t.AddNewRecord() }
+	zipWriterCreate   = func(w *zip.Writer, name string) (io.Writer, error) { return w.Create(name) }
+	godbfSetFieldValueByName = func(t *godbf.DbfTable, recordIndex int, fieldName, value string) error {
+		return t.SetFieldValueByName(recordIndex, fieldName, value)
+	}
+	godbfAddField = func(t *godbf.DbfTable, kind, name string, scale uint8) error {
+		switch kind {
+		case "integer":
+			return t.AddNumberField(name, 20, 0)
+		case "float":
+			return t.AddFloatField(name, 20, scale)
+		case "boolean":
+			return t.AddBooleanField(name)
+		case "date":
+			return t.AddDateField(name)
+		default:
+			return t.AddTextField(name, 254)
+		}
+	}
+)
+
 type ExportFormat string
 
 const (
@@ -74,7 +116,7 @@ func exportRecordSets(ctx context.Context, records []RecordSet, format ExportFor
 		used := map[string]bool{}
 		for index, record := range records {
 			name := uniqueExportName(record.Title, index, used, 64) + "." + string(format)
-			entry, err := writer.Create(name)
+			entry, err := zipWriterCreate(writer, name)
 			if err != nil {
 				_ = writer.Close()
 				return err
@@ -208,15 +250,15 @@ func exportXLSX(records []RecordSet, output io.Writer) error {
 	for index, record := range records {
 		name := uniqueExportName(record.Title, index, used, 31)
 		if index == 0 {
-			if err := book.SetSheetName("Sheet1", name); err != nil {
+			if err := excelizeSetSheetName(book, "Sheet1", name); err != nil {
 				return err
 			}
-		} else if _, err := book.NewSheet(name); err != nil {
+		} else if _, err := excelizeNewSheet(book, name); err != nil {
 			return err
 		}
 		for column, title := range record.Result.Columns {
 			cell, _ := excelize.CoordinatesToCellName(column+1, 1)
-			if err := book.SetCellValue(name, cell, title); err != nil {
+			if err := excelizeSetCellValue(book, name, cell, title); err != nil {
 				return err
 			}
 		}
@@ -234,7 +276,7 @@ func exportXLSX(records []RecordSet, output io.Writer) error {
 				}
 				// Formula-looking strings are data, not executable formulas.
 				cell, _ := excelize.CoordinatesToCellName(columnIndex+1, rowIndex+2)
-				if err := book.SetCellValue(name, cell, value); err != nil {
+				if err := excelizeSetCellValue(book, name, cell, value); err != nil {
 					return err
 				}
 			}
@@ -244,14 +286,14 @@ func exportXLSX(records []RecordSet, output io.Writer) error {
 }
 
 func exportSQLite(ctx context.Context, records []RecordSet, output io.Writer) error {
-	file, err := os.CreateTemp("", "datatug-export-*.sqlite")
+	file, err := osCreateTemp("", "datatug-export-*.sqlite")
 	if err != nil {
 		return err
 	}
 	path := file.Name()
 	_ = file.Close()
 	defer func() { _ = os.Remove(path) }()
-	db, err := sql.Open("sqlite", path)
+	db, err := sqlOpenStore("sqlite", path)
 	if err != nil {
 		return err
 	}
@@ -266,12 +308,12 @@ func exportSQLite(ctx context.Context, records []RecordSet, output io.Writer) er
 			_ = db.Close()
 			return fmt.Errorf("RecordSet %q has no columns", record.Title)
 		}
-		if _, err := db.ExecContext(ctx, "CREATE TABLE "+quoteSQLite(name)+" ("+strings.Join(fields, ",")+")"); err != nil {
+		if _, err := sqliteExecContext(db, ctx, "CREATE TABLE "+quoteSQLite(name)+" ("+strings.Join(fields, ",")+")"); err != nil {
 			_ = db.Close()
 			return err
 		}
 		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(fields)), ",")
-		statement, err := db.PrepareContext(ctx, "INSERT INTO "+quoteSQLite(name)+" VALUES ("+placeholders+")")
+		statement, err := sqlitePrepareContext(db, ctx, "INSERT INTO "+quoteSQLite(name)+" VALUES ("+placeholders+")")
 		if err != nil {
 			_ = db.Close()
 			return err
@@ -284,7 +326,7 @@ func exportSQLite(ctx context.Context, records []RecordSet, output io.Writer) er
 					values[i] = number.String()
 				}
 			}
-			if _, err := statement.ExecContext(ctx, values...); err != nil {
+			if _, err := sqliteStmtExecContext(statement, ctx, values...); err != nil {
 				_ = statement.Close()
 				_ = db.Close()
 				return err
@@ -292,10 +334,10 @@ func exportSQLite(ctx context.Context, records []RecordSet, output io.Writer) er
 		}
 		_ = statement.Close()
 	}
-	if err := db.Close(); err != nil {
+	if err := sqliteDBClose(db); err != nil {
 		return err
 	}
-	input, err := os.Open(path)
+	input, err := osOpen(path)
 	if err != nil {
 		return err
 	}
@@ -348,25 +390,12 @@ func exportDBF(record RecordSet, output io.Writer) error {
 		names[i] = name
 		kind, scale := dbfColumnKind(record, column)
 		kinds[i] = kind
-		var err error
-		switch kind {
-		case "integer":
-			err = table.AddNumberField(name, 20, 0)
-		case "float":
-			err = table.AddFloatField(name, 20, scale)
-		case "boolean":
-			err = table.AddBooleanField(name)
-		case "date":
-			err = table.AddDateField(name)
-		default:
-			err = table.AddTextField(name, 254)
-		}
-		if err != nil {
+		if err := godbfAddField(table, kind, name, scale); err != nil {
 			return err
 		}
 	}
 	for _, row := range record.Result.Rows {
-		index, err := table.AddNewRecord()
+		index, err := godbfAddNewRecord(table)
 		if err != nil {
 			return err
 		}
@@ -383,22 +412,22 @@ func exportDBF(record RecordSet, output io.Writer) error {
 			if len([]byte(text)) > limit {
 				return fmt.Errorf("DBF cannot store %s value longer than %d bytes", column, limit)
 			}
-			if err := table.SetFieldValueByName(index, names[i], text); err != nil {
+			if err := godbfSetFieldValueByName(table, index, names[i], text); err != nil {
 				return err
 			}
 		}
 	}
-	file, err := os.CreateTemp("", "datatug-export-*.dbf")
+	file, err := osCreateTemp("", "datatug-export-*.dbf")
 	if err != nil {
 		return err
 	}
 	path := file.Name()
 	_ = file.Close()
 	defer func() { _ = os.Remove(path) }()
-	if err := godbf.SaveToFile(table, path); err != nil {
+	if err := godbfSaveToFile(table, path); err != nil {
 		return err
 	}
-	data, err := os.ReadFile(path)
+	data, err := osReadFile(path)
 	if err != nil {
 		return err
 	}
@@ -499,7 +528,7 @@ func exportFile(ctx context.Context, records []RecordSet, format ExportFormat, p
 		return fmt.Errorf("export target already exists: %s", path)
 	}
 	dir := filepath.Dir(path)
-	temp, err := os.CreateTemp(dir, ".datatug-export-*")
+	temp, err := osCreateTemp(dir, ".datatug-export-*")
 	if err != nil {
 		return err
 	}
@@ -514,7 +543,7 @@ func exportFile(ctx context.Context, records []RecordSet, format ExportFormat, p
 		_ = temp.Close()
 		return exportErr
 	}
-	if err := temp.Close(); err != nil {
+	if err := fileClose(temp); err != nil {
 		return err
 	}
 	// Hard-link creation is exclusive: a target created after the earlier

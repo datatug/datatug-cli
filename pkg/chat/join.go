@@ -13,6 +13,18 @@ import (
 	"github.com/dal-go/dalgo/dtql"
 )
 
+var (
+	dtqlSerialize      = dtql.Serialize
+	dtqlDeserialize    = dtql.Deserialize
+	sqliteQueryContext = func(db *sql.DB, ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+		return db.QueryContext(ctx, query, args...)
+	}
+	sqliteRowsErr = func(rows *sql.Rows) error {
+		return rows.Err()
+	}
+	canExpandQueryFn = (ForeignKeyJoinApplication).canExpandQuery
+)
+
 // RelationInstanceID identifies a node in the DTQL source tree. It is stable
 // for a given document: root is "root" and child joins append their index.
 type RelationInstanceID string
@@ -93,11 +105,11 @@ func (a ForeignKeyJoinApplication) Candidates(ctx context.Context, record Record
 	if err != nil {
 		return nil, err
 	}
-	parent, err := dtql.Deserialize([]byte(record.DTQL))
+	parent, err := dtqlDeserialize([]byte(record.DTQL))
 	if err != nil {
 		return nil, err
 	}
-	if a.Secure && !a.canExpandQuery(ctx, parent.From()) {
+	if a.Secure && !canExpandQueryFn(a, ctx, parent.From()) {
 		return []JoinCandidate{}, nil
 	}
 	candidates, err := DiscoverJoinCandidates([]byte(record.DTQL), snapshot, appliedEdges(record)...)
@@ -140,11 +152,11 @@ func (a ForeignKeyJoinApplication) apply(ctx context.Context, record RecordSet, 
 	if err != nil {
 		return QueryResult{}, err
 	}
-	q, err := dtql.Deserialize([]byte(record.DTQL))
+	q, err := dtqlDeserialize([]byte(record.DTQL))
 	if err != nil {
 		return QueryResult{}, fmt.Errorf("parse RecordSet DTQL: %w", err)
 	}
-	if a.Secure && !a.canExpandQuery(ctx, q.From()) {
+	if a.Secure && !canExpandQueryFn(a, ctx, q.From()) {
 		return QueryResult{}, fmt.Errorf("JOIN exploration cannot prove every existing source is fully readable under this policy")
 	}
 	doc, candidate, err := deriveJoinDTQL([]byte(record.DTQL), snapshot, id, joinType, appliedEdges(record)...)
@@ -206,7 +218,7 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 	if db == nil || source == "" {
 		return ForeignKeySnapshot{}, fmt.Errorf("SQLite FK metadata requires a source and database")
 	}
-	rows, err := db.QueryContext(ctx, `SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	rows, err := sqliteQueryContext(db, ctx, `SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 	if err != nil {
 		return ForeignKeySnapshot{}, err
 	}
@@ -219,14 +231,14 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 		}
 		tables = append(tables, name)
 	}
-	if err := rows.Err(); err != nil {
+	if err := sqliteRowsErr(rows); err != nil {
 		return ForeignKeySnapshot{}, err
 	}
 	snapshot := ForeignKeySnapshot{Source: source, Keys: []ForeignKey{}, Columns: map[string][]string{}}
 	primaryKeys := map[string][]string{}
 	for _, table := range tables {
 		pragma := "PRAGMA table_info('" + strings.ReplaceAll(table, "'", "''") + "')"
-		columnRows, queryErr := db.QueryContext(ctx, pragma)
+		columnRows, queryErr := sqliteQueryContext(db, ctx, pragma)
 		if queryErr != nil {
 			return ForeignKeySnapshot{}, queryErr
 		}
@@ -248,7 +260,7 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 				primary = append(primary, primaryColumn{pk, name})
 			}
 		}
-		if rowsErr := columnRows.Err(); rowsErr != nil {
+		if rowsErr := sqliteRowsErr(columnRows); rowsErr != nil {
 			_ = columnRows.Close()
 			return ForeignKeySnapshot{}, rowsErr
 		}
@@ -260,7 +272,7 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 	}
 	for _, table := range tables {
 		pragma := "PRAGMA foreign_key_list('" + strings.ReplaceAll(table, "'", "''") + "')"
-		fkRows, err := db.QueryContext(ctx, pragma)
+		fkRows, err := sqliteQueryContext(db, ctx, pragma)
 		if err != nil {
 			return ForeignKeySnapshot{}, err
 		}
@@ -268,7 +280,9 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 		byIDSequence := map[int]map[int]JoinFieldPair{}
 		for fkRows.Next() {
 			var id, seq int
-			var target, from, to, onUpdate, onDelete, match string
+			var target, from string
+			var to sql.NullString
+			var onUpdate, onDelete, match string
 			if err := fkRows.Scan(&id, &seq, &target, &from, &to, &onUpdate, &onDelete, &match); err != nil {
 				_ = fkRows.Close()
 				return ForeignKeySnapshot{}, err
@@ -281,9 +295,9 @@ func LoadSQLiteForeignKeySnapshot(ctx context.Context, source string, db *sql.DB
 			if byIDSequence[id] == nil {
 				byIDSequence[id] = map[int]JoinFieldPair{}
 			}
-			byIDSequence[id][seq] = JoinFieldPair{SourceField: from, TargetField: to}
+			byIDSequence[id][seq] = JoinFieldPair{SourceField: from, TargetField: to.String}
 		}
-		if err := fkRows.Err(); err != nil {
+		if err := sqliteRowsErr(fkRows); err != nil {
 			_ = fkRows.Close()
 			return ForeignKeySnapshot{}, err
 		}
@@ -329,7 +343,7 @@ func relationKey(schema, relation string) string {
 // DiscoverJoinCandidates walks only the query's actual relation tree. It does
 // not recursively walk metadata targets, so cyclic schemas cannot recurse.
 func DiscoverJoinCandidates(doc []byte, snapshot ForeignKeySnapshot, applied ...AppliedJoinEdge) ([]JoinCandidate, error) {
-	q, err := dtql.Deserialize(doc)
+	q, err := dtqlDeserialize(doc)
 	if err != nil {
 		return nil, fmt.Errorf("parse RecordSet DTQL: %w", err)
 	}
@@ -390,7 +404,7 @@ func deriveJoinDTQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidate
 	if candidate.ID == "" {
 		return nil, JoinCandidate{}, fmt.Errorf("selected foreign-key edge is stale or unavailable")
 	}
-	q, err := dtql.Deserialize(parent)
+	q, err := dtqlDeserialize(parent)
 	if err != nil {
 		return nil, JoinCandidate{}, fmt.Errorf("parse RecordSet DTQL: %w", err)
 	}
@@ -431,11 +445,11 @@ func deriveJoinDTQL(parent []byte, snapshot ForeignKeySnapshot, id JoinCandidate
 	}
 	candidate.Target.ID = RelationInstanceID(fmt.Sprintf("%s/%d", candidate.Source.ID, len(node.Joins())))
 	node.Join(dal.NewJoinedSource(target, joinType, on...))
-	derived, err := dtql.Serialize(q)
+	derived, err := dtqlSerialize(q)
 	if err != nil {
 		return nil, JoinCandidate{}, fmt.Errorf("derive JOIN DTQL: %w", err)
 	}
-	if _, err := dtql.Deserialize(derived); err != nil {
+	if _, err := dtqlDeserialize(derived); err != nil {
 		return nil, JoinCandidate{}, fmt.Errorf("derived JOIN is invalid: %w", err)
 	}
 	return derived, candidate, nil
@@ -667,6 +681,9 @@ func queryHasAggregate(q dal.StructuredQuery) bool {
 }
 
 func fromAtPath(from dal.FromSource, id RelationInstanceID) dal.FromSource {
+	if from == nil {
+		return nil
+	}
 	if id == "root" {
 		return from
 	}
@@ -687,6 +704,9 @@ func fromAtPath(from dal.FromSource, id RelationInstanceID) dal.FromSource {
 }
 
 func relationInstances(from dal.FromSource) []RelationInstance {
+	if from == nil {
+		return nil
+	}
 	var out []RelationInstance
 	var walk func(dal.FromSource, string)
 	walk = func(node dal.FromSource, path string) {

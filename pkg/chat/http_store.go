@@ -61,19 +61,10 @@ func (s *SessionStore) AppendHTTPResponse(ctx context.Context, sessionID, origin
 	if response.RequestHasQuery {
 		queryFlag = 1
 	}
-	headersJSON, err := json.Marshal(response.Headers)
-	if err != nil {
-		return HTTPResponse{}, fmt.Errorf("encode HTTP response headers: %w", err)
-	}
-	requestHeadersJSON, err := json.Marshal(response.RequestHeaders)
-	if err != nil {
-		return HTTPResponse{}, fmt.Errorf("encode HTTP request headers: %w", err)
-	}
-	redirectsJSON, err := json.Marshal(response.Redirects)
-	if err != nil {
-		return HTTPResponse{}, fmt.Errorf("encode HTTP redirects: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO http_responses (id, session_id, origin_message_id, method, url, status_code, content_type, headers_json, request_headers_json, response_nanos, download_nanos, final_url, redirects_json, request_has_query, body, refresh_parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, response.ID, sessionID, originID, response.Method, response.URL, response.StatusCode, response.ContentType, string(headersJSON), string(requestHeadersJSON), int64(response.TimeToResponse), int64(response.DownloadTime), response.FinalURL, string(redirectsJSON), queryFlag, response.Body, response.RefreshParentID, stamp(response.CreatedAt)); err != nil {
+	headersJSON, _ := json.Marshal(response.Headers)
+	requestHeadersJSON, _ := json.Marshal(response.RequestHeaders)
+	redirectsJSON, _ := json.Marshal(response.Redirects)
+	if _, err := txExecContextFn(tx, ctx, `INSERT INTO http_responses (id, session_id, origin_message_id, method, url, status_code, content_type, headers_json, request_headers_json, response_nanos, download_nanos, final_url, redirects_json, request_has_query, body, refresh_parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, response.ID, sessionID, originID, response.Method, response.URL, response.StatusCode, response.ContentType, string(headersJSON), string(requestHeadersJSON), int64(response.TimeToResponse), int64(response.DownloadTime), response.FinalURL, string(redirectsJSON), queryFlag, response.Body, response.RefreshParentID, stamp(response.CreatedAt)); err != nil {
 		return HTTPResponse{}, err
 	}
 	if query != nil {
@@ -91,7 +82,7 @@ func (s *SessionStore) AppendHTTPResponse(ctx context.Context, sessionID, origin
 			}
 			parentResponseID = next
 		}
-		if err := s.appendQueryTx(ctx, tx, sessionID, originID, response.URL, query, response.CreatedAt); err != nil {
+		if err := appendQueryTxFn(s, ctx, tx, sessionID, originID, response.URL, query, response.CreatedAt); err != nil {
 			return HTTPResponse{}, err
 		}
 	} else {
@@ -104,10 +95,10 @@ func (s *SessionStore) AppendHTTPResponse(ctx context.Context, sessionID, origin
 			return HTTPResponse{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, stamp(response.CreatedAt), sessionID); err != nil {
+	if _, err := txExecContextFn(tx, ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, stamp(response.CreatedAt), sessionID); err != nil {
 		return HTTPResponse{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommitFn(tx); err != nil {
 		return HTTPResponse{}, err
 	}
 	return response, nil

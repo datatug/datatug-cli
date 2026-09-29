@@ -62,8 +62,18 @@ type bookmarkSQL interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+var (
+	bookmarkBeginTxFn            = func(db *sql.DB, ctx context.Context) (*sql.Tx, error) { return db.BeginTx(ctx, nil) }
+	encodeBookmarkSnapshotFn     = encodeBookmarkSnapshot
+	decodeBookmarkSnapshotFn     = decodeBookmarkSnapshot
+	validateBookmarkSnapshotFn   = validateBookmarkSnapshot
+	recordSetsForSessionFn       = recordSetsForSession
+	workspaceForSessionFn        = workspaceForSession
+	ensureBookmarkUnreferencedFn = (*SessionStore).ensureBookmarkUnreferenced
+)
+
 func (s *SessionStore) CreateBookmark(ctx context.Context, sessionID string, ref ContextReference, title string) (Bookmark, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := bookmarkBeginTxFn(s.db, ctx)
 	if err != nil {
 		return Bookmark{}, err
 	}
@@ -79,17 +89,17 @@ func (s *SessionStore) CreateBookmark(ctx context.Context, sessionID string, ref
 	if err != nil {
 		return Bookmark{}, err
 	}
-	payload, err := encodeBookmarkSnapshot(snapshot)
+	payload, err := encodeBookmarkSnapshotFn(snapshot)
 	if err != nil {
 		return Bookmark{}, fmt.Errorf("encode bookmark snapshot: %w", err)
 	}
 	now := time.Now().UTC()
 	bookmark := Bookmark{ID: uuid.NewString(), ProjectID: s.info.ProjectID, SourceID: snapshot.SourceID, TargetKind: kind, Title: normalizeBookmarkTitle(title, fallback, ref.Title), CreatedAt: now, UpdatedAt: now, Snapshot: snapshot}
 	tagsJSON, _ := json.Marshal(bookmark.Tags)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, bookmark.ID, bookmark.ProjectID, s.scope, bookmark.Title, string(tagsJSON), bookmark.TargetKind, stamp(now), stamp(now), payload); err != nil {
+	if _, err := txExecContextFn(tx, ctx, `INSERT INTO bookmarks (id, project_id, scope, title, tags_json, target_kind, created_at, updated_at, snapshot_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, bookmark.ID, bookmark.ProjectID, s.scope, bookmark.Title, string(tagsJSON), bookmark.TargetKind, stamp(now), stamp(now), payload); err != nil {
 		return Bookmark{}, fmt.Errorf("store bookmark: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommitFn(tx); err != nil {
 		return Bookmark{}, err
 	}
 	return bookmark, nil
@@ -199,7 +209,7 @@ func (s *SessionStore) RemoveBookmarkTag(ctx context.Context, id, tag string) (B
 }
 
 func (s *SessionStore) changeBookmarkTags(ctx context.Context, id string, mutate func([]string) ([]string, error)) (Bookmark, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := bookmarkBeginTxFn(s.db, ctx)
 	if err != nil {
 		return Bookmark{}, err
 	}
@@ -219,12 +229,12 @@ func (s *SessionStore) changeBookmarkTags(ctx context.Context, id string, mutate
 	if !sameTags(bookmark.Tags, tags) {
 		now := time.Now().UTC()
 		payload, _ := json.Marshal(tags)
-		if _, err := tx.ExecContext(ctx, `UPDATE bookmarks SET tags_json = ?, updated_at = ? WHERE id = ? AND scope = ? AND project_id = ?`, string(payload), stamp(now), id, s.scope, s.info.ProjectID); err != nil {
+		if _, err := txExecContextFn(tx, ctx, `UPDATE bookmarks SET tags_json = ?, updated_at = ? WHERE id = ? AND scope = ? AND project_id = ?`, string(payload), stamp(now), id, s.scope, s.info.ProjectID); err != nil {
 			return Bookmark{}, err
 		}
 		bookmark.Tags, bookmark.UpdatedAt = tags, now
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommitFn(tx); err != nil {
 		return Bookmark{}, err
 	}
 	return bookmark, nil
@@ -233,7 +243,7 @@ func (s *SessionStore) changeBookmarkTags(ctx context.Context, id string, mutate
 // DeleteBookmark scans decoded workspaces (fail-closed), then repeats the
 // reverse-reference test in its DELETE to serialize concurrent SaveWorkspace.
 func (s *SessionStore) DeleteBookmark(ctx context.Context, id string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := bookmarkBeginTxFn(s.db, ctx)
 	if err != nil {
 		return err
 	}
@@ -241,10 +251,10 @@ func (s *SessionStore) DeleteBookmark(ctx context.Context, id string) error {
 	if _, err := s.bookmark(ctx, tx, id); err != nil {
 		return err
 	}
-	if err := s.ensureBookmarkUnreferenced(ctx, tx, id); err != nil {
+	if err := ensureBookmarkUnreferencedFn(s, ctx, tx, id); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `DELETE FROM bookmarks WHERE id = ? AND scope = ? AND project_id = ? AND NOT EXISTS (
+	result, err := txExecContextFn(tx, ctx, `DELETE FROM bookmarks WHERE id = ? AND scope = ? AND project_id = ? AND NOT EXISTS (
 		SELECT 1 FROM session_workspace w JOIN sessions se ON se.id = w.session_id WHERE se.scope = ? AND (
 			EXISTS (SELECT 1 FROM json_each(w.state_json, '$.attachments') r WHERE lower(json_extract(r.value, '$.kind')) = 'bookmark' AND json_extract(r.value, '$.objectId') = ?)
 			OR EXISTS (SELECT 1 FROM json_each(w.state_json, '$.docks') d WHERE lower(json_extract(d.value, '$.reference.kind')) = 'bookmark' AND json_extract(d.value, '$.reference.objectId') = ?)
@@ -259,7 +269,7 @@ func (s *SessionStore) DeleteBookmark(ctx context.Context, id string) error {
 	if count != 1 {
 		return errors.New("cannot delete bookmark because it is still referenced")
 	}
-	return tx.Commit()
+	return txCommitFn(tx)
 }
 
 func (s *SessionStore) bookmark(ctx context.Context, q bookmarkSQL, id string) (Bookmark, error) {
@@ -318,11 +328,11 @@ func scanBookmark(scanner bookmarkScanner) (Bookmark, error) {
 }
 
 func (s *SessionStore) bookmarkTarget(ctx context.Context, tx *sql.Tx, sessionID string, ref ContextReference) (string, BookmarkSnapshot, string, error) {
-	recordSets, err := recordSetsForSession(ctx, tx, sessionID)
+	recordSets, err := recordSetsForSessionFn(ctx, tx, sessionID)
 	if err != nil {
 		return "", BookmarkSnapshot{}, "", err
 	}
-	workspace, err := workspaceForSession(ctx, tx, sessionID, recordSets)
+	workspace, err := workspaceForSessionFn(ctx, tx, sessionID, recordSets)
 	if err != nil {
 		return "", BookmarkSnapshot{}, "", err
 	}
@@ -366,7 +376,7 @@ func (s *SessionStore) bookmarkTarget(ctx context.Context, tx *sql.Tx, sessionID
 		return "", BookmarkSnapshot{}, "", errors.New("only a RecordSet, view, or selection can be bookmarked")
 	}
 	snapshot.RecordSet.SessionID = ""
-	if err := validateBookmarkSnapshot(kind, snapshot); err != nil {
+	if err := validateBookmarkSnapshotFn(kind, snapshot); err != nil {
 		return "", BookmarkSnapshot{}, "", err
 	}
 	return kind, snapshot, fallback, nil
@@ -448,7 +458,7 @@ func decodeBookmarkSnapshot(targetKind string, payload []byte) (BookmarkSnapshot
 		return BookmarkSnapshot{}, err
 	}
 	snapshot := BookmarkSnapshot{SourceID: stored.SourceID, RecordSet: RecordSet{ID: stored.RecordSet.ID, QueryID: stored.RecordSet.QueryID, OriginMessageID: stored.RecordSet.OriginMessageID, Title: stored.RecordSet.Title, DTQL: stored.RecordSet.DTQL, Source: stored.RecordSet.Source, Environment: stored.RecordSet.Environment, Database: stored.RecordSet.Database, Parameters: stored.RecordSet.Parameters, CreatedAt: stored.RecordSet.CreatedAt, Result: result, Lineage: stored.RecordSet.Lineage}, View: stored.View, Selection: stored.Selection}
-	if err := validateBookmarkSnapshot(targetKind, snapshot); err != nil {
+	if err := validateBookmarkSnapshotFn(targetKind, snapshot); err != nil {
 		return BookmarkSnapshot{}, err
 	}
 	return snapshot, nil
@@ -549,7 +559,7 @@ func (s *SessionStore) validateBookmarkReferences(ctx context.Context, q bookmar
 }
 
 func normalizeBookmarkTitle(title, preferred, fallback string) string {
-	for _, candidate := range []string{title, preferred, fallback, "Bookmarked result"} {
+	for _, candidate := range []string{title, preferred, fallback} {
 		candidate = strings.Join(strings.Fields(sanitizeTerminalText(candidate)), " ")
 		if candidate != "" {
 			if len([]rune(candidate)) > 120 {

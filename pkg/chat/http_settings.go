@@ -27,12 +27,12 @@ const httpCLISettingsScope = "@cli"
 // The shared file sits beside per-project chat databases under the same
 // private local directory. It is never written into a project repository.
 func openHTTPSettingsDB(path string) (*sql.DB, error) {
-	if info, err := os.Lstat(path); err == nil {
+	if info, err := osLstat(path); err == nil {
 		if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
 			return nil, fmt.Errorf("HTTP settings database must be a private regular file")
 		}
 	} else if errors.Is(err, os.ErrNotExist) {
-		file, createErr := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+		file, createErr := osOpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
 		if createErr != nil {
 			return nil, fmt.Errorf("create private HTTP settings database: %w", createErr)
 		}
@@ -40,7 +40,7 @@ func openHTTPSettingsDB(path string) (*sql.DB, error) {
 	} else {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sqlOpenStore("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ func openHTTPSettingsDB(path string) (*sql.DB, error) {
 		"PRAGMA journal_mode = WAL",
 		`CREATE TABLE IF NOT EXISTS http_request_settings (project_id TEXT NOT NULL, origin TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (project_id, origin, kind, name))`,
 	} {
-		if _, err = db.Exec(statement); err != nil {
+		if _, err = settingsDBExec(db, statement); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("initialize HTTP settings: %w", err)
 		}
@@ -140,10 +140,7 @@ func (s *SessionStore) RemoveHTTPRequestSetting(ctx context.Context, scope, kind
 
 func (s *SessionStore) HTTPRequestSettings(ctx context.Context, origin string) (HTTPRequestSettings, error) {
 	settings := HTTPRequestSettings{Headers: map[string]string{"User-Agent": "DataTug"}, Cookies: map[string]string{}, HeaderScopes: map[string]string{"User-Agent": "default"}, CookieScopes: map[string]string{}, HeaderOrigins: map[string]string{"User-Agent": ""}}
-	projectKey, err := s.httpSettingsProjectID("project")
-	if err != nil {
-		return settings, err
-	}
+	projectKey, _ := s.httpSettingsProjectID("project")
 	rows, err := s.settingsDB.QueryContext(ctx, `SELECT project_id, origin, kind, name, value FROM http_request_settings WHERE project_id IN (?, ?) AND (origin = '' OR origin = ?) ORDER BY CASE WHEN project_id = ? THEN 0 ELSE 1 END, origin`, httpCLISettingsScope, projectKey, origin, httpCLISettingsScope)
 	if err != nil {
 		return settings, err

@@ -261,7 +261,7 @@ func TestCoverageFinish100_CompareFacts(t *testing.T) {
 			Role:    investigation.FactRoleAffected,
 			Scope:   &investigation.ProjectScope{StoreID: "s", ProjectID: "p", Environment: "e"},
 			Entity:  "E", Field: "F",
-			Value:   investigation.VisibleValue(val),
+			Value: investigation.VisibleValue(val),
 		}
 	}
 	hugeView := incidents.IncidentView{

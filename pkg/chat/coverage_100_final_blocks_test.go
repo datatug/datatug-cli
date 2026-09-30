@@ -796,8 +796,10 @@ func TestFinalBlocks_Join(t *testing.T) {
 
 	// Apply snapshot error
 	appApplySnapErr := ForeignKeyJoinApplication{
-		Source:   "s1",
-		Refresh:  func(ctx context.Context) (ForeignKeySnapshot, error) { return ForeignKeySnapshot{}, errors.New("refresh err") },
+		Source: "s1",
+		Refresh: func(ctx context.Context) (ForeignKeySnapshot, error) {
+			return ForeignKeySnapshot{}, errors.New("refresh err")
+		},
 		Executor: &fakeExecutor{},
 	}
 	if _, err := appApplySnapErr.Apply(ctx, rsOrders, "cand1"); err == nil {

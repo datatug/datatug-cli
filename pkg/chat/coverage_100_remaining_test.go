@@ -200,8 +200,8 @@ func TestRemaining_BrowserCellDetail(t *testing.T) {
 		ID: "demo-project",
 		Objects: []ProjectObject{
 			{
-				Reference: ContextReference{Kind: "table", SourceID: "chinook", ObjectID: "main.Invoice"},
-				Columns:   []string{"CustomerId"},
+				Reference:   ContextReference{Kind: "table", SourceID: "chinook", ObjectID: "main.Invoice"},
+				Columns:     []string{"CustomerId"},
 				ColumnTypes: map[string]string{"CustomerId": "INTEGER"},
 			},
 		},
@@ -873,4 +873,3 @@ func TestRemaining_BookmarkDeepCoverage(t *testing.T) {
 	}
 	_ = bms
 }
-

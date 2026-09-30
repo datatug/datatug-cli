@@ -230,12 +230,32 @@ func TestFinalRound_HTTPStore(t *testing.T) {
 	insertCorrupt := func(field, badVal string) {
 		_, err := store.db.Exec("INSERT INTO http_responses (id, session_id, origin_message_id, method, url, status_code, content_type, headers_json, request_headers_json, response_nanos, download_nanos, final_url, redirects_json, request_has_query, body, refresh_parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 			uuid.NewString(), sess2.ID, u.ID, "GET", "http://test", 200, "text/plain",
-			func() string { if field == "headers" { return badVal }; return "{}" }(),
-			func() string { if field == "req_headers" { return badVal }; return "{}" }(),
+			func() string {
+				if field == "headers" {
+					return badVal
+				}
+				return "{}"
+			}(),
+			func() string {
+				if field == "req_headers" {
+					return badVal
+				}
+				return "{}"
+			}(),
 			0, 0, "",
-			func() string { if field == "redirects" { return badVal }; return "[]" }(),
+			func() string {
+				if field == "redirects" {
+					return badVal
+				}
+				return "[]"
+			}(),
 			0, []byte{}, "",
-			func() string { if field == "created_at" { return badVal }; return stamp(time.Now().UTC()) }(),
+			func() string {
+				if field == "created_at" {
+					return badVal
+				}
+				return stamp(time.Now().UTC())
+			}(),
 		)
 		if err != nil {
 			t.Fatal(err)

@@ -6,7 +6,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/strongo/aichat/ai/session"
-	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/strongo-tui/pkg/grid"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
@@ -97,7 +97,7 @@ func newGridState(model GridModel, recordSetID, title string, width int, statist
 // parameter-lookup grids never had one; they already show a narrow,
 // purpose-built row set where "2"/"3" would have nothing to switch to (m9).
 func newMinimalGridState(model GridModel, recordSetID, title string, width int) *gridState {
-	return newProjectedGridState(model, recordSetID, title, width, nil, false, []grid.Option{grid.WithoutViewSwitcher()})
+	return newProjectedGridState(model, recordSetID, title, width, nil, false, []grid.Option{grid.WithoutSwitcher()})
 }
 
 // newProjectedGridState is newGridState for a dock's projected/filtered

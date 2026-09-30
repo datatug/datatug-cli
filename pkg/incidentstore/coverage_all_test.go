@@ -516,7 +516,7 @@ func TestCreate_Errors(t *testing.T) {
 			ID: mut.MutationID, Seq: 1, At: time.Now(), VisibleAt: time.Now(),
 			Incident: incidents.IncidentRef{StoreID: "ops", IncidentID: "INC-1"},
 			Actor:    mut.Reporter, Type: incidents.EventIncidentCreated,
-			Payload:  mustJSON(t, incidents.CreatedPayload{UID: "uid-1", Title: "Title"}),
+			Payload: mustJSON(t, incidents.CreatedPayload{UID: "uid-1", Title: "Title"}),
 		},
 		Projection: incidents.Incident{Ref: incidents.IncidentRef{StoreID: "ops", IncidentID: "INC-1"}, Title: "Title"},
 	}

@@ -8,9 +8,10 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/ai/session"
-	"github.com/strongo/aichat/tui/grid"
-	"github.com/strongo/aichat/tui/theme"
+	"github.com/strongo/aichat/tui/gridblock"
 	"github.com/strongo/aichat/tui/transcript"
+	"github.com/strongo/strongo-tui/pkg/grid"
+	"github.com/strongo/strongo-tui/pkg/theme"
 )
 
 // JoinBlock is a transcript.Block that pairs a query-result grid with
@@ -83,7 +84,7 @@ func (b *JoinBlock) Current() *session.EntityRef {
 	if b.Grid == nil {
 		return nil
 	}
-	return b.Grid.Current()
+	return gridblock.EntityRef(b.Grid)
 }
 
 // JoinFocused reports whether "j" has switched this block into its inline
@@ -255,10 +256,8 @@ func (b *JoinBlock) Update(msg tea.Msg) (transcript.Block, tea.Cmd) {
 	if b.Grid == nil {
 		return b, nil
 	}
-	gridBlock, cmd := b.Grid.Update(msg)
-	if updated, ok := gridBlock.(*grid.Model); ok {
-		b.Grid = updated
-	}
+	// The wrapper translates grid.PinRowMsg into tui.AddToSidebarMsg.
+	_, cmd := gridblock.Wrap(b.Grid).Update(msg)
 	return b, cmd
 }
 

@@ -324,7 +324,7 @@ func (r BackendRef) OpenProtectedForTest(ctx context.Context) (dal.DB, error) {
 
 var (
 	newSQLiteDatabaseWithOptions = dalgo2sqlite.NewDatabaseWithOptions
-	newInGitDBDatabase          = dalgo2ingitdb.NewDatabase
+	newInGitDBDatabase           = dalgo2ingitdb.NewDatabase
 )
 
 func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected bool) (dal.DB, error) {

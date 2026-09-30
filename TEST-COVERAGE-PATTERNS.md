@@ -123,78 +123,22 @@ the sqlmock `*sql.DB`:
 p := columnsProvider{ColumnsProvider: sqlinfoschema.ColumnsProvider{DB: db}}
 ```
 
-### Headless TUI pattern for tview/tcell packages (`apps/datatugapp/...`, `pkg/sneatview/sneatnav`)
+### Headless TUI pattern (Bubble Tea screens under `apps/datatugapp/datatugui/...`)
 
-All TUI packages use `tcell.NewSimulationScreen` backed by `tview.NewApplication`. The canonical
-helper — repeated across `dtapiservice`, `dtsettings`, `awsui`, `azureui`, `clouds_ui`,
-`dtviewers`, `gcloudui`, etc. — is:
-
-```go
-func newSafeTUI(t *testing.T) *sneatnav.TUI {
-    screen := tcell.NewSimulationScreen("UTF-8")
-    if err := screen.Init(); err != nil { t.Fatalf(...) }
-    app := tview.NewApplication().SetScreen(screen)
-    root := sneatv.NewBreadcrumb("test", func() error { return nil })
-    tui := sneatnav.NewTUI(app, root)
-    t.Cleanup(func() { app.Stop() }) // app.Stop() calls screen.Fini internally; do NOT call screen.Fini again
-    return tui
-}
-```
-
-`pkg/sneatview/sneatnav/testing.go` exports `InvokeInputCapture(p, key, ch, mod)` for
-driving widget key-handlers without importing tview/tcell directly from external test packages.
-
-### `registerViewer` seam for cloud viewer packages (`awsui`, `azureui`, `gcloudui`)
-
-Each viewer package exposes a `var registerViewer = dtviewers.RegisterViewer` seam. In tests,
-override it to capture the registered `Viewer` struct, then invoke its `Action` closure to cover
-the registration body without side-effects:
+Screens are Elm-style models hosted by the `strongo-tui` shell, so no terminal or
+simulation screen is needed. Drive a page with `strongo-tui/pkg/nav/navtest` and a
+component directly with `strongo-tui/pkg/uitest`:
 
 ```go
-orig := registerViewer
-t.Cleanup(func() { registerViewer = orig })
-var captured dtviewers.Viewer
-registerViewer = func(v dtviewers.Viewer) { captured = v }
-RegisterAsViewer()
-// now drive: captured.Action(tui, sneatnav.FocusToMenu)
+h := navtest.New(t, nav.Page{Title: "T", Content: newProjects()}) // Init's Cmd runs
+h.RequireContains("Demo project")
+h.Press("down", "enter")
+h.RequireContains("Second project")
 ```
 
-### `sync.Once` guard for `RegisterModule` in test binaries
-
-Packages that call `RegisterModule()` (or any function that panics on duplicate registration)
-must wrap the first call in a `var registerOnce sync.Once` and use `registerOnce.Do(...)` in
-every test that needs it. This is required in `dtapiservice`, `dtsettings`, and `dtviewers`.
-
-### `newTextViewFunc` / `newXxxFunc` seams for widget capture
-
-Production code that constructs widgets via a package-level `var newTextViewFunc = tview.NewTextView`
-seam lets tests intercept construction and grab the concrete widget:
-
-```go
-orig := newTextViewFunc
-t.Cleanup(func() { newTextViewFunc = orig })
-var captured *tview.TextView
-newTextViewFunc = func() *tview.TextView {
-    tv := tview.NewTextView()
-    captured = tv
-    return tv
-}
-```
-Use `captured` to call `GetInputCapture()` and drive every branch of the installed handler.
-
-### `panelList` reflect trick for `*tview.List` inside sneatv panels (`dtviewers`)
-
-`sneatv.WithDefaultBorders` wraps a `*tview.List` inside a `PrimitiveWithBox` interface field.
-To extract the list for direct manipulation (e.g. `SetCurrentItem`, `GetItemSelectedFunc`):
-
-```go
-func panelList(p sneatnav.Panel) *tview.List {
-    panelElem := reflect.ValueOf(p).Elem()
-    pwbField := panelElem.FieldByName("PrimitiveWithBox")
-    // ... unwrap interface → struct → Primitive field → *tview.List
-}
-```
-See `pkg/dtviewers/dtviewers_test.go` for the full implementation.
+Everything a screen reaches outside the process (project config, the network, the
+browser, the state file) sits behind a package-level `var` seam that the test
+replaces and restores. See `docs/tui-screens.md` (Test pattern) for the full rules.
 
 ### `gcloudcmds` CLI seam pattern
 
@@ -301,6 +245,3 @@ helper that sets `filePathFn` to a `t.TempDir()` path for isolation.
 - `pkg/schemers/sqliteschema` tests are in `package sqliteschema` (white-box), giving full
   access to unexported types (`collectionsReader`, `columnsReader`, `foreignKeysReader`, etc.).
   All new schemer tests should follow the same white-box pattern.
-- `app.Stop()` in tview calls `screen.Fini()` internally. Never call `screen.Fini()` separately
-  in cleanup or the test will panic with a double-Fini. The `newSafeTUI` pattern above is the
-  correct approach across all TUI packages.

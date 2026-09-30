@@ -22,9 +22,16 @@ type datasetDataCommand struct {
 	Indent string `long:"indent" description:"Pass a digit to specify number of spaces (default=1). Special value: 'TAB'."`
 }
 
+// datasetDataInitProject is a seam over the project initialisation of
+// datasetDataCommandAction (see datasetInitProject). Always the real
+// initProjectCommand in production.
+var datasetDataInitProject = func(v *datasetDataCommand) error {
+	return v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true})
+}
+
 func datasetDataCommandAction(_ *cobra.Command, _ []string) error {
 	v := &datasetDataCommand{}
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	if err := datasetDataInitProject(v); err != nil {
 		return err
 	}
 	ctx := context.Background()
@@ -51,12 +58,7 @@ func datasetDataCommandAction(_ *cobra.Command, _ []string) error {
 			yamlEncoder.SetIndent(4)
 		}
 		encoder = yamlEncoder
-		defer func() {
-			closeErr := yamlEncoder.Close()
-			if err != nil {
-				err = closeErr
-			}
-		}()
+		defer func() { _ = yamlEncoder.Close() }()
 	case "JSON":
 		jsonEncoder := json.NewEncoder(os.Stdout)
 		switch strings.ToUpper(v.Indent) {

@@ -9,8 +9,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/tui/chatshell"
-	"github.com/strongo/aichat/tui/grid"
-	"github.com/strongo/aichat/tui/theme"
+	"github.com/strongo/strongo-tui/pkg/grid"
+	"github.com/strongo/strongo-tui/pkg/theme"
 )
 
 // workspacePanel is ChatUI's chatshell.SidePanel: DataTug's workspace pane
@@ -230,7 +230,7 @@ func (p *workspacePanel) rebuildDockGrids() {
 			continue
 		}
 		model := NewGridModel(data.Result)
-		opts := []grid.Option{grid.WithoutViewSwitcher()}
+		opts := []grid.Option{grid.WithoutSwitcher()}
 		if data.ViewID != "" {
 			view := p.ui.snapshot.Workspace.Views[data.ViewID]
 			opts = append(opts, grid.WithInitialSort(columnIndexOf(data.Result.Columns, view.OrderBy), view.Descending))

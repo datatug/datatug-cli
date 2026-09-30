@@ -23,13 +23,13 @@ import (
 	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
-	"github.com/julienschmidt/httprouter"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/incidents"
 	"github.com/datatug/datatug-core/pkg/investigation"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
+	"github.com/julienschmidt/httprouter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -988,8 +988,8 @@ func TestClose100_CompareFacts_Deep(t *testing.T) {
 			Facts: []investigation.FactView{
 				investigation.VisibleFact(investigation.Fact{
 					ID: "f1", Enabled: true, Role: investigation.FactRoleAffected,
-					Layer: investigation.FactLayerCanonical,
-					Scope: &investigation.ProjectScope{StoreID: scope.StoreID, ProjectID: scope.Project, Environment: scope.Environment},
+					Layer:  investigation.FactLayerCanonical,
+					Scope:  &investigation.ProjectScope{StoreID: scope.StoreID, ProjectID: scope.Project, Environment: scope.Environment},
 					Entity: "Customer", Field: "ID", Value: investigation.NewIntegerValue("1"),
 				}),
 			},
@@ -1017,14 +1017,14 @@ func TestClose100_CompareFacts_Deep(t *testing.T) {
 			Facts: []investigation.FactView{
 				investigation.VisibleFact(investigation.Fact{
 					ID: "f1", Enabled: true, Role: investigation.FactRoleAffected,
-					Layer: investigation.FactLayerCanonical,
-					Scope: &investigation.ProjectScope{StoreID: scope.StoreID, ProjectID: scope.Project, Environment: scope.Environment},
+					Layer:  investigation.FactLayerCanonical,
+					Scope:  &investigation.ProjectScope{StoreID: scope.StoreID, ProjectID: scope.Project, Environment: scope.Environment},
 					Entity: "Customer", Field: "ID", Value: investigation.NewIntegerValue("1"),
 				}),
 				investigation.VisibleFact(investigation.Fact{
 					ID: "f2", Enabled: true, Role: investigation.FactRoleAffected,
-					Layer: investigation.FactLayerCanonical,
-					Scope: &investigation.ProjectScope{StoreID: scope.StoreID, ProjectID: scope.Project, Environment: scope.Environment},
+					Layer:  investigation.FactLayerCanonical,
+					Scope:  &investigation.ProjectScope{StoreID: scope.StoreID, ProjectID: scope.Project, Environment: scope.Environment},
 					Entity: "Customer", Field: "ID", Value: investigation.NewStringValue("not-an-int"),
 				}),
 			},
@@ -1460,9 +1460,9 @@ func TestClose100_Executions_Deep(t *testing.T) {
 	recS1.BindingsApplied = []apicontract.Binding{}
 	recS1.PolicyFingerprint = api.SecurePolicyFingerprint()
 	recS1.Measurements = []apicontract.ScalarMeasurement{{
-		Projection: pCount,
+		Projection:   pCount,
 		Completeness: apicontract.MeasurementComplete,
-		Value: func() *apicontract.TypedValue { v := apicontract.NewIntegerValue("10"); return &v }(),
+		Value:        func() *apicontract.TypedValue { v := apicontract.NewIntegerValue("10"); return &v }(),
 	}}
 	require.NoError(t, store.PutExecution(ctx, recS1))
 
@@ -1473,9 +1473,9 @@ func TestClose100_Executions_Deep(t *testing.T) {
 	recS2.BindingsApplied = []apicontract.Binding{}
 	recS2.PolicyFingerprint = api.SecurePolicyFingerprint()
 	recS2.Measurements = []apicontract.ScalarMeasurement{{
-		Projection: pCount,
+		Projection:   pCount,
 		Completeness: apicontract.MeasurementComplete,
-		Value: func() *apicontract.TypedValue { v := apicontract.NewIntegerValue("20"); return &v }(),
+		Value:        func() *apicontract.TypedValue { v := apicontract.NewIntegerValue("20"); return &v }(),
 	}}
 	require.NoError(t, store.PutExecution(ctx, recS2))
 
@@ -1547,7 +1547,7 @@ func TestClose100_Executions_Deep(t *testing.T) {
 	runSnapshotExecutionHook = func(e *secureread.Executor, c context.Context, coll string, snap apicontract.Recordset) (secureread.Result, error) {
 		return secureread.Result{
 			SnapshotRecordset: &apicontract.Recordset{Columns: []apicontract.Column{{Name: "c1"}}},
-			Limitations: []secureread.Limitation{{Kind: secureread.LimitationRowsFiltered}},
+			Limitations:       []secureread.Limitation{{Kind: secureread.LimitationRowsFiltered}},
 		}, nil
 	}
 	err = authorizeExecutionRecordContext(ctx, apicontract.ExecutionRecord{
@@ -2544,4 +2544,3 @@ func TestClose100_Incidents_Deep(t *testing.T) {
 	performIncidentRequest(t, router, http.MethodGet, eventsURL, nil, http.StatusInternalServerError)
 	incidentApplyStreamItemViewHook = origIncidentApplyStreamItemViewHook
 }
-

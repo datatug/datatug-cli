@@ -664,4 +664,3 @@ type mockFailingTx struct {
 func (m mockFailingTx) Delete(ctx context.Context, key *record.Key) error {
 	return errors.New("injected delete fail")
 }
-

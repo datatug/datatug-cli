@@ -797,7 +797,7 @@ func TestSessionChatMoreBranches(t *testing.T) {
 
 	// runSavedQueryActive: AppendUser error and AppendQuery error
 	mockSvc := &mockSavedQueryService{
-		queries: []SavedQuery{{ID: "q1", Title: "Q", Type: "DTQL"}},
+		queries:    []SavedQuery{{ID: "q1", Title: "Q", Type: "DTQL"}},
 		runDTQLRes: QueryResult{Title: "T", Source: "sqlite:///chinook.db"},
 	}
 	chat.ConfigureSavedQueryService(mockSvc)

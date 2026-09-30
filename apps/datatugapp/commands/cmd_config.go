@@ -8,12 +8,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// configPrintSettings is a seam over dtconfig.PrintSettings so tests can
+// drive the print-failure branch. Always dtconfig.PrintSettings in production.
+var configPrintSettings = dtconfig.PrintSettings
+
 func configCommandAction(_ *cobra.Command, _ []string) error {
 	settings, err := dtconfig.GetSettings()
 	if err != nil {
 		return fmt.Errorf("failed to get config: %w", err)
 	}
-	if err = dtconfig.PrintSettings(settings, dtconfig.FormatYaml, os.Stdout); err != nil {
+	if err = configPrintSettings(settings, dtconfig.FormatYaml, os.Stdout); err != nil {
 		return err
 	}
 	return nil

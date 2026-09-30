@@ -52,6 +52,13 @@ func validateAction(cmd *cobra.Command, _ []string) (err error) {
 	return nil
 }
 
+// validateProjectStore resolves the project store of an initialised command.
+// It is a seam so tests can drive the nil-store guard, which a real store
+// never trips. Always the store's own GetProjectStore in production.
+var validateProjectStore = func(v *projectBaseCommand) datatug.ProjectStore {
+	return v.store.GetProjectStore(v.projectID)
+}
+
 func validateProject(projDir string) (err error) {
 	var v projectBaseCommand
 	v.ProjectDir = projDir
@@ -61,7 +68,7 @@ func validateProject(projDir string) (err error) {
 
 	log.Printf("Project: ID=%s, path=%s", v.projectID, v.ProjectDir)
 
-	store := v.store.GetProjectStore(v.projectID)
+	store := validateProjectStore(&v)
 
 	if store == nil {
 		return fmt.Errorf("project store is nil for project ID=%s", v.projectID)

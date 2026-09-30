@@ -12,9 +12,16 @@ type datasetDefCommand struct {
 	datasetBaseCommand
 }
 
+// datasetDefInitProject is a seam over the project initialisation of
+// datasetDefCommandAction (see datasetInitProject). Always the real
+// initProjectCommand in production.
+var datasetDefInitProject = func(v *datasetDefCommand) error {
+	return v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true})
+}
+
 func datasetDefCommandAction(_ *cobra.Command, _ []string) error {
 	v := &datasetDefCommand{}
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	if err := datasetDefInitProject(v); err != nil {
 		return err
 	}
 	ctx := context.Background()

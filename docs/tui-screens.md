@@ -224,7 +224,7 @@ Use `h.Send(msg)` for any message, `h.Type`, `h.Click`, `h.Resize`, and
 
 ## Mapping from the previous imperative shell (for porters)
 
-| Previous idiom (`pkg/sneatview`, `pkg/sneatv`) | Now |
+| Previous idiom (the removed imperative shell) | Now |
 |---|---|
 | `GoXxxScreen(tui, focusTo) error` builds panels and calls `tui.SetPanels` | a `Root() nav.Page` or a `nav.Push(nav.Page{...})`; `Init` starts loading |
 | `datatugui.RegisterMainMenuItem` / `NewDataTugMainMenu(tui, active)` in each screen | `datatugui.Module` values; the shared menu is mounted by the app, pages leave `Menu` nil |

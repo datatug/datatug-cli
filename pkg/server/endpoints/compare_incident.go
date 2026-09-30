@@ -12,11 +12,11 @@ import (
 )
 
 var (
-	compareIncidentViewHook            = api.IncidentView
-	compareSecureIncidentActorHook     = api.SecureIncidentActor
-	compareAuthorizeIncidentEventHook  = authorizeIncidentEvent
-	compareRunDraftHook                = compareRunDraft
-	compareIncidentStoreAppendHook     = func(s incidents.APIStore, ctx context.Context, m incidents.Mutation) (incidents.AppendResult, error) {
+	compareIncidentViewHook           = api.IncidentView
+	compareSecureIncidentActorHook    = api.SecureIncidentActor
+	compareAuthorizeIncidentEventHook = authorizeIncidentEvent
+	compareRunDraftHook               = compareRunDraft
+	compareIncidentStoreAppendHook    = func(s incidents.APIStore, ctx context.Context, m incidents.Mutation) (incidents.AppendResult, error) {
 		return s.Append(ctx, m)
 	}
 	compareIncidentStoreProjectionHook = func(s incidents.APIStore, ctx context.Context, ref incidents.IncidentRef, q *time.Time) (incidents.Incident, error) {

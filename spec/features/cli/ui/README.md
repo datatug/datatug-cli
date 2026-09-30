@@ -12,7 +12,7 @@ status: Implementing
 
 ## Summary
 
-`datatug ui` (and the bare `datatug` invocation) launches the terminal UI — a tview-based application that lets the user browse DataTug projects, viewers, settings, and the API service monitor. The TUI is the CLI's default surface for human users; scripts and CI workflows use the other commands.
+`datatug ui` (and the bare `datatug` invocation) launches the terminal UI — a Bubble Tea application that lets the user browse DataTug projects, viewers, settings, and the API service monitor. The TUI is the CLI's default surface for human users; scripts and CI workflows use the other commands.
 
 ## Synopsis
 

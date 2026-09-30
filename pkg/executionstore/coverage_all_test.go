@@ -834,5 +834,3 @@ func TestStore_SnapshotQueryRowError(t *testing.T) {
 	_, err = st.Snapshot(context.Background(), ref, "exec-1")
 	require.ErrorContains(t, err, "read snapshot")
 }
-
-

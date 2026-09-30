@@ -1281,8 +1281,8 @@ func TestExecuteCommandsAndSelect(t *testing.T) {
 	// ExecuteSelect with From invalid where
 	badWhereReq := SelectRequest{
 		Project: "p1", Environment: "dev", Database: "db1",
-		From:    "items",
-		Where:   ":value",
+		From:  "items",
+		Where: ":value",
 	}
 	_, err = ExecuteSelect(ctx, "store1", badWhereReq)
 	assert.Error(t, err)
@@ -2772,5 +2772,3 @@ func TestCoverageFinal100_PkgApi(t *testing.T) {
 		assert.Error(t, err)
 	}
 }
-
-

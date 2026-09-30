@@ -181,6 +181,13 @@ func resolveServeSession(projectDir string, flags serveFlags) (secureread.Sessio
 	}
 }
 
+// serveOpenURL and serveStartHTTP are test seams: they default to the real
+// browser opener and the real (blocking) HTTP server start.
+var (
+	serveOpenURL   = browser.OpenURL
+	serveStartHTTP = (*server.HttpServer).ServeHTTP
+)
+
 func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	flags, err := readServeFlags(cmd)
 	if err != nil {
@@ -231,7 +238,7 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	// prints the link and opens a browser only with --open-browser.
 	fmt.Printf("DataTug agent API: %s/datatug\nDataTug web UI for this agent: %s\n", agentURL, url)
 	if flags.openBrowser {
-		if err := browser.OpenURL(url); err != nil {
+		if err := serveOpenURL(url); err != nil {
 			_, _ = fmt.Printf("failed to open browser with URL=%v: %v\n", url, err)
 		}
 	}
@@ -263,7 +270,7 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		log.Printf("serve: execution snapshot sidecars use %s (default is ~/%s; override with --%s or $%s)", caps.EvidencePrivateDir, executionstore.DefaultDir, serveEvidenceDirFlag, executionstore.DirEnv)
 	}
 	// TODO: implement graceful shutdown
-	return httpServer.ServeHTTP(pathsByID, host, port, session, caps)
+	return serveStartHTTP(&httpServer, pathsByID, host, port, session, caps)
 }
 
 // serveAgentURLs returns the plain-HTTP base URL the agent listens on and the

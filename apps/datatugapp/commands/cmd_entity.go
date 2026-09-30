@@ -27,6 +27,23 @@ const (
 	entityContinueOnErrorFlagName = "continue-on-error"
 )
 
+// Seams so tests can exercise encoder/marshal failure branches that real
+// inputs cannot reach.
+var (
+	entityJSONMarshal   = json.Marshal
+	entityJSONUnmarshal = json.Unmarshal
+	entityMarshalFile   = dtentity.MarshalEntity
+
+	newEntityYAMLEncoder = func(w io.Writer) entityYAMLEncoder { return yaml.NewEncoder(w) }
+)
+
+// entityYAMLEncoder is the subset of *yaml.Encoder that renderEntityShow uses.
+type entityYAMLEncoder interface {
+	SetIndent(spaces int)
+	Encode(v any) error
+	Close() error
+}
+
 // registerEntityProjectFlags registers the --directory/-d and --project/-p
 // flags shared by every entity subcommand.
 func registerEntityProjectFlags(cmd *cobra.Command) {
@@ -192,12 +209,12 @@ func argAt(args []string, i int) string {
 // through the model's JSON tags (which flatten the embedded ProjItemBrief, so
 // the id/title surface correctly) and then re-renders as YAML.
 func renderEntityShow(entity *datatug.Entity) (string, error) {
-	jsonData, err := json.Marshal(entity)
+	jsonData, err := entityJSONMarshal(entity)
 	if err != nil {
 		return "", err
 	}
 	var doc map[string]any
-	if err = json.Unmarshal(jsonData, &doc); err != nil {
+	if err = entityJSONUnmarshal(jsonData, &doc); err != nil {
 		return "", err
 	}
 
@@ -215,7 +232,7 @@ func renderEntityShow(entity *datatug.Entity) (string, error) {
 	delete(doc, "tables")
 
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
+	enc := newEntityYAMLEncoder(&buf)
 	enc.SetIndent(2)
 	if err = enc.Encode(doc); err != nil {
 		return "", err
@@ -226,7 +243,7 @@ func renderEntityShow(entity *datatug.Entity) (string, error) {
 
 	if hasTables {
 		buf.WriteString("# generated mapping copy (read-only)\n")
-		tablesEnc := yaml.NewEncoder(&buf)
+		tablesEnc := newEntityYAMLEncoder(&buf)
 		tablesEnc.SetIndent(2)
 		if err = tablesEnc.Encode(map[string]any{"tables": tables}); err != nil {
 			return "", err
@@ -509,13 +526,13 @@ func parseEntityDocs(data []byte) ([]*datatug.Entity, error) {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, err
 	}
-	jsonData, err := json.Marshal(doc)
+	jsonData, err := entityJSONMarshal(doc)
 	if err != nil {
 		return nil, err
 	}
 	if _, isList := doc.([]any); isList {
 		var rawEntities []json.RawMessage
-		if err = json.Unmarshal(jsonData, &rawEntities); err != nil {
+		if err = entityJSONUnmarshal(jsonData, &rawEntities); err != nil {
 			return nil, err
 		}
 		entities := make([]*datatug.Entity, len(rawEntities))
@@ -542,19 +559,19 @@ func parseFieldDocs(data []byte) ([]*datatug.EntityField, error) {
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, err
 	}
-	jsonData, err := json.Marshal(doc)
+	jsonData, err := entityJSONMarshal(doc)
 	if err != nil {
 		return nil, err
 	}
 	if _, isList := doc.([]any); isList {
 		var fields []*datatug.EntityField
-		if err = json.Unmarshal(jsonData, &fields); err != nil {
+		if err = entityJSONUnmarshal(jsonData, &fields); err != nil {
 			return nil, err
 		}
 		return fields, nil
 	}
 	field := &datatug.EntityField{}
-	if err = json.Unmarshal(jsonData, field); err != nil {
+	if err = entityJSONUnmarshal(jsonData, field); err != nil {
 		return nil, err
 	}
 	return []*datatug.EntityField{field}, nil
@@ -638,7 +655,7 @@ func marshalEntityFile(entity *datatug.Entity) ([]byte, error) {
 	if len(entity.Fields) == 0 && entity.Fields != nil {
 		entity.Fields = nil
 	}
-	return dtentity.MarshalEntity(entity)
+	return entityMarshalFile(entity)
 }
 
 func entityAddCommandAction(cmd *cobra.Command, _ []string) error {

@@ -66,6 +66,13 @@ func (v *executeSQLCommand) Validate() error {
 	return nil
 }
 
+// executeSQLFatal and executeSQLColumnTypes are test seams; they default to
+// log.Fatal and (*sql.Rows).ColumnTypes.
+var (
+	executeSQLFatal       = log.Fatal
+	executeSQLColumnTypes = (*sql.Rows).ColumnTypes
+)
+
 // Execute - executes SQL consoleCommand
 func (v *executeSQLCommand) Execute() error {
 	fmt.Printf("Executing (%+v)\n", v)
@@ -93,7 +100,7 @@ func (v *executeSQLCommand) Execute() error {
 	// Create connection pool
 
 	if db, err = sql.Open(v.Driver, connString.String()); err != nil {
-		log.Fatal("Error creating connection pool: " + err.Error())
+		executeSQLFatal("Error creating connection pool: " + err.Error())
 	}
 	// Close the database connection pool after consoleCommand executes
 	defer func() {
@@ -119,7 +126,7 @@ func (v *executeSQLCommand) Execute() error {
 	}()
 
 	var columnTypes []*sql.ColumnType
-	if columnTypes, err = rows.ColumnTypes(); err != nil {
+	if columnTypes, err = executeSQLColumnTypes(rows); err != nil {
 		return err
 	}
 	colNames := make([]interface{}, len(columnTypes))

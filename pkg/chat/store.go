@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo2http"
-	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/strongo-tui/pkg/grid"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/google/uuid"
@@ -174,31 +174,31 @@ var (
 		err := db.QueryRow("PRAGMA quick_check").Scan(&integrity)
 		return integrity, err
 	}
-	dbBeginFn                 = func(db *sql.DB) (*sql.Tx, error) { return db.Begin() }
-	txQueryFn                 = func(tx *sql.Tx, query string, args ...any) (*sql.Rows, error) { return tx.Query(query, args...) }
-	txExecFn                  = func(tx *sql.Tx, query string, args ...any) (sql.Result, error) { return tx.Exec(query, args...) }
-	txExecSchemaFn            = func(tx *sql.Tx, query string) (sql.Result, error) { return tx.Exec(query) }
-	tableInfoQueryFn          = func(tx *sql.Tx, table string) (*sql.Rows, error) {
+	dbBeginFn        = func(db *sql.DB) (*sql.Tx, error) { return db.Begin() }
+	txQueryFn        = func(tx *sql.Tx, query string, args ...any) (*sql.Rows, error) { return tx.Query(query, args...) }
+	txExecFn         = func(tx *sql.Tx, query string, args ...any) (sql.Result, error) { return tx.Exec(query, args...) }
+	txExecSchemaFn   = func(tx *sql.Tx, query string) (sql.Result, error) { return tx.Exec(query) }
+	tableInfoQueryFn = func(tx *sql.Tx, table string) (*sql.Rows, error) {
 		return tx.Query(`PRAGMA table_info(` + table + `)`)
 	}
-	execContextFn             = func(db *sql.DB, ctx context.Context, query string, args ...any) (sql.Result, error) {
+	execContextFn = func(db *sql.DB, ctx context.Context, query string, args ...any) (sql.Result, error) {
 		return db.ExecContext(ctx, query, args...)
 	}
-	dbQueryContextFn          = func(db *sql.DB, ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	dbQueryContextFn = func(db *sql.DB, ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 		return db.QueryContext(ctx, query, args...)
 	}
-	txExecContextFn           = func(tx *sql.Tx, ctx context.Context, query string, args ...any) (sql.Result, error) {
+	txExecContextFn = func(tx *sql.Tx, ctx context.Context, query string, args ...any) (sql.Result, error) {
 		return tx.ExecContext(ctx, query, args...)
 	}
-	txCommitFn                = func(tx *sql.Tx) error { return tx.Commit() }
-	txQueryRowContextFn       = func(tx *sql.Tx, ctx context.Context, query string, args ...any) *sql.Row {
+	txCommitFn          = func(tx *sql.Tx) error { return tx.Commit() }
+	txQueryRowContextFn = func(tx *sql.Tx, ctx context.Context, query string, args ...any) *sql.Row {
 		return tx.QueryRowContext(ctx, query, args...)
 	}
-	loadHTTPResponsesFn       = (*SessionStore).loadHTTPResponses
-	loadBookmarksFn           = (*SessionStore).loadBookmarks
-	loadWorkspaceFn           = (*SessionStore).loadWorkspace
-	jsonMarshalLineage        = json.Marshal
-	rowsErrFn                 = func(rows *sql.Rows) error { return rows.Err() }
+	loadHTTPResponsesFn = (*SessionStore).loadHTTPResponses
+	loadBookmarksFn     = (*SessionStore).loadBookmarks
+	loadWorkspaceFn     = (*SessionStore).loadWorkspace
+	jsonMarshalLineage  = json.Marshal
+	rowsErrFn           = func(rows *sql.Rows) error { return rows.Err() }
 )
 
 // DefaultChatStorePath keeps snapshots outside the project repository. The

@@ -1097,9 +1097,10 @@ func TestGetDatabase_WithBaseTable_NameIsBaseTable(t *testing.T) {
 
 	mock.ExpectQuery(`SELECT`).WillReturnRows(
 		sqlmock.NewRows(tablesCols()).AddRow("dbo", "BASE TABLE", "BASE TABLE"))
-	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows(columnSQLCols()))
-	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows(constraintCols()))
-	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows(indexCols()))
+	mock.MatchExpectationsInOrder(false)
+	mock.ExpectQuery(`INFORMATION_SCHEMA\.COLUMNS`).WillReturnRows(sqlmock.NewRows(columnSQLCols()))
+	mock.ExpectQuery(`KEY_COLUMN_USAGE`).WillReturnRows(sqlmock.NewRows(constraintCols()))
+	mock.ExpectQuery(`sys\.indexes`).WillReturnRows(sqlmock.NewRows(indexCols()))
 
 	is := InformationSchema{db: db}
 	db2, err := is.GetDatabase("testdb")
@@ -1116,9 +1117,10 @@ func TestGetDatabase_WithView_NameIsVIEW(t *testing.T) {
 
 	mock.ExpectQuery(`SELECT`).WillReturnRows(
 		sqlmock.NewRows(tablesCols()).AddRow("dbo", "VIEW", "VIEW"))
-	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows(columnSQLCols()))
-	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows(constraintCols()))
-	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows(indexCols()))
+	mock.MatchExpectationsInOrder(false)
+	mock.ExpectQuery(`INFORMATION_SCHEMA\.COLUMNS`).WillReturnRows(sqlmock.NewRows(columnSQLCols()))
+	mock.ExpectQuery(`KEY_COLUMN_USAGE`).WillReturnRows(sqlmock.NewRows(constraintCols()))
+	mock.ExpectQuery(`sys\.indexes`).WillReturnRows(sqlmock.NewRows(indexCols()))
 
 	is := InformationSchema{db: db}
 	db2, err := is.GetDatabase("testdb")
@@ -1138,9 +1140,9 @@ func TestGetDatabase_ColumnsError(t *testing.T) {
 		sqlmock.NewRows(tablesCols()).AddRow("dbo", "BASE TABLE", "BASE TABLE"))
 	// getColumns query fails — MatchExpectationsInOrder false so parallel queries match any order.
 	mock.MatchExpectationsInOrder(false)
-	mock.ExpectQuery(`SELECT`).WillReturnError(errors.New("columns error"))
-	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows(constraintCols()))
-	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows(indexCols()))
+	mock.ExpectQuery(`INFORMATION_SCHEMA\.COLUMNS`).WillReturnError(errors.New("columns error"))
+	mock.ExpectQuery(`KEY_COLUMN_USAGE`).WillReturnRows(sqlmock.NewRows(constraintCols()))
+	mock.ExpectQuery(`sys\.indexes`).WillReturnRows(sqlmock.NewRows(indexCols()))
 
 	is := InformationSchema{db: db}
 	_, err = is.GetDatabase("testdb")
@@ -1157,9 +1159,9 @@ func TestGetDatabase_ConstraintsError(t *testing.T) {
 	mock.ExpectQuery(`SELECT`).WillReturnRows(
 		sqlmock.NewRows(tablesCols()).AddRow("dbo", "BASE TABLE", "BASE TABLE"))
 	mock.MatchExpectationsInOrder(false)
-	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows(columnSQLCols()))
-	mock.ExpectQuery(`SELECT`).WillReturnError(errors.New("constraints error"))
-	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows(indexCols()))
+	mock.ExpectQuery(`INFORMATION_SCHEMA\.COLUMNS`).WillReturnRows(sqlmock.NewRows(columnSQLCols()))
+	mock.ExpectQuery(`KEY_COLUMN_USAGE`).WillReturnError(errors.New("constraints error"))
+	mock.ExpectQuery(`sys\.indexes`).WillReturnRows(sqlmock.NewRows(indexCols()))
 
 	is := InformationSchema{db: db}
 	_, err = is.GetDatabase("testdb")
@@ -1176,9 +1178,9 @@ func TestGetDatabase_IndexesError(t *testing.T) {
 	mock.ExpectQuery(`SELECT`).WillReturnRows(
 		sqlmock.NewRows(tablesCols()).AddRow("dbo", "BASE TABLE", "BASE TABLE"))
 	mock.MatchExpectationsInOrder(false)
-	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows(columnSQLCols()))
-	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows(constraintCols()))
-	mock.ExpectQuery(`SELECT`).WillReturnError(errors.New("indexes error"))
+	mock.ExpectQuery(`INFORMATION_SCHEMA\.COLUMNS`).WillReturnRows(sqlmock.NewRows(columnSQLCols()))
+	mock.ExpectQuery(`KEY_COLUMN_USAGE`).WillReturnRows(sqlmock.NewRows(constraintCols()))
+	mock.ExpectQuery(`sys\.indexes`).WillReturnError(errors.New("indexes error"))
 
 	is := InformationSchema{db: db}
 	_, err = is.GetDatabase("testdb")

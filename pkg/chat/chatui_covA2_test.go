@@ -763,11 +763,11 @@ func TestStatusBarChartsAndCurrentRowViewHints(t *testing.T) {
 	if !ok {
 		t.Fatal("expected the grid to be tracked by RecordSetID")
 	}
-	g.SetView(gridViewCharts)
+	g.ShowView(gridViewCharts)
 	if status := u.statusBar(160); !strings.Contains(status, "chart candidates") {
 		t.Fatalf("expected the charts-view hint:\n%s", status)
 	}
-	g.SetView(gridViewCurrentRow)
+	g.ShowView(gridViewCurrentRow)
 	if status := u.statusBar(160); !strings.Contains(status, "↑↓ inspector") {
 		t.Fatalf("expected the current-row-view hint:\n%s", status)
 	}

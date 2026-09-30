@@ -3,6 +3,7 @@ package sqlexecute
 import (
 	"database/sql"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -68,16 +69,18 @@ func (e Executor) executeMulti(request Request) (response Response, err error) {
 	var wg sync.WaitGroup
 	wg.Add(len(request.Commands))
 	response.Commands = make([]*CommandResponse, 0, len(request.Commands))
-	for _, command := range request.Commands {
+	// Each goroutine writes only its own slot, so no lock is needed.
+	commandErrs := make([]error, len(request.Commands))
+	for i, command := range request.Commands {
 		var commandResponse CommandResponse
 		response.Commands = append(response.Commands, &commandResponse)
-		go func(cmd RequestCommand) {
+		go func(i int, cmd RequestCommand) {
 			var (
 				recordset  datatug.Recordset
 				commandErr error
 			)
 			if recordset, commandErr = e.executeCommand(cmd); commandErr != nil {
-				err = commandErr
+				commandErrs[i] = commandErr
 				wg.Done()
 				return
 			}
@@ -88,9 +91,10 @@ func (e Executor) executeMulti(request Request) (response Response, err error) {
 				},
 			}
 			wg.Done()
-		}(command)
+		}(i, command)
 	}
 	wg.Wait()
+	err = errors.Join(commandErrs...)
 	response.Duration = time.Since(started)
 	return
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/pkg/browser"
 	"golang.org/x/oauth2"
@@ -76,9 +77,22 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (token *oauth2.
 	return
 }
 
+var errAuthServerStopped = errors.New("gauth: local auth server stopped before receiving the OAuth redirect")
+
+// serveDrainTimeout bounds how long waitForAuthCode waits, after the code has
+// arrived, for the HTTP server goroutine to report how it ended. Shutdown makes
+// the server return at once, so the bound only matters if Shutdown failed.
+var serveDrainTimeout = 2 * time.Second
+
 // Starts HTTP server to capture OAuth redirect
 func waitForAuthCode() (authCode string, err error) {
-	ch := make(chan string)
+	ch := make(chan string, 1)
+	// serveDone receives the server goroutine's outcome exactly once; the
+	// goroutine never touches waitForAuthCode's named results.
+	serveDone := make(chan error, 1)
+	// Read the seams once, on the caller's goroutine: the goroutines below can
+	// outlive this call.
+	serve, shutdown := authServerServe, srvShutdown
 	mux := http.NewServeMux()
 	srv := &http.Server{Addr: ":8080", Handler: mux}
 
@@ -87,22 +101,35 @@ func waitForAuthCode() (authCode string, err error) {
 		_, _ = fmt.Fprintln(w, "Login successful! You can close this window.")
 		go func() {
 			ch <- code
-			if err := srvShutdown(context.Background(), srv); err != nil {
+			if err := shutdown(context.Background(), srv); err != nil {
 				log.Print("Failed to shutdown:", err)
 			}
 		}()
 	})
 
 	go func() {
-		if serveErr := authServerServe(srv); serveErr != nil {
-			if errors.Is(serveErr, http.ErrServerClosed) {
-				err = nil
-			} else {
-				err = serveErr
-				log.Printf("HTTP server error: %v", serveErr)
-			}
+		serveErr := serve(srv)
+		if errors.Is(serveErr, http.ErrServerClosed) {
+			serveErr = nil
+		} else if serveErr != nil {
+			log.Printf("HTTP server error: %v", serveErr)
 		}
+		serveDone <- serveErr
 	}()
 
-	return <-ch, err
+	select {
+	case authCode = <-ch:
+		// Shutdown makes the server return, so it reports here promptly.
+		select {
+		case err = <-serveDone:
+		case <-time.After(serveDrainTimeout):
+		}
+	case err = <-serveDone:
+		// The server ended before any redirect arrived (for example the port
+		// is busy); do not wait for a code that can no longer come.
+		if err == nil {
+			err = errAuthServerStopped
+		}
+	}
+	return authCode, err
 }

@@ -13,8 +13,8 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/dtprojcreator"
-	"github.com/filetug/filetug/pkg/fsutils"
 	"github.com/google/go-github/v92/github"
+	"github.com/strongo/cli-helpers/fsutil"
 )
 
 func NewRepoProjectsStore(client *github.Client, branch string) *GithubRepoProjectsStore {
@@ -228,8 +228,8 @@ func (c *projectCreator) addDatatugSectionToRootReadmeFile(ctx context.Context, 
 //}
 
 func (c *projectCreator) cloneRepo() (err error) {
-	localDir := fsutils.ExpandHome("projectPath")
-	dirExists, _ := fsutils.DirExists(localDir)
+	localDir := fsutil.ExpandHome("projectPath")
+	dirExists, _ := fsutil.DirExists(localDir)
 	if !dirExists {
 		parent := filepath.Dir(localDir)
 		_ = os.MkdirAll(parent, 0o755)
@@ -238,16 +238,6 @@ func (c *projectCreator) cloneRepo() (err error) {
 			cloneUrl = fmt.Sprintf("https://github.com/%s/%s.git", c.repoOwner, c.repoName)
 			_ = cloneUrl
 		}
-		//_, err = git.PlainClone(localDir, false, &git.CloneOptions{
-		//	URL:      cloneUrl,
-		//	Progress: NewTviewProgressWriter(tui, progressView),
-		//})
-		//if err != nil {
-		//	tui.App.QueueUpdateDraw(func() {
-		//		sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to clone repository: %w", err))
-		//	})
-		//	return
-		//}
 	}
 	return nil
 }

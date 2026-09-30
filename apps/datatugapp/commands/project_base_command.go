@@ -26,6 +26,11 @@ type projectCommandOptions struct {
 	projNameRequired, projDirRequired, projNameOrDirRequired bool
 }
 
+// newProjectsStore is a seam over filestore.NewStore, which never fails
+// today but whose error return initProjectCommand must still propagate.
+// Always filestore.NewStore in production.
+var newProjectsStore = filestore.NewStore
+
 func (v *projectBaseCommand) initProjectCommand(o projectCommandOptions) error {
 	if o.projNameRequired && v.ProjectName == "" {
 		return errors.New("project name parameter is required")
@@ -60,7 +65,7 @@ func (v *projectBaseCommand) initProjectCommand(o projectCommandOptions) error {
 	}
 
 	pathsByID := getProjPathsByID(config)
-	v.store, err = filestore.NewStore("local_file_store_from_user_config", pathsByID)
+	v.store, err = newProjectsStore("local_file_store_from_user_config", pathsByID)
 	if err != nil {
 		return err
 	}

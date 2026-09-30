@@ -13,7 +13,6 @@ import (
 
 	"charm.land/fang/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
-	"github.com/datatug/datatug-cli/apps/global"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/posthog/posthog-go"
@@ -59,9 +58,8 @@ func main() {
 	defer func() {
 		r := recover()
 		if r != nil {
-			if global.App != nil {
-				global.App.Stop() // VERY IMPORTANT: restore terminal
-			}
+			// The terminal is already restored: datatugui.Run quits the Bubble
+			// Tea program, which restores it, before it raises a panic again.
 			rText := fmt.Sprintf("%v", r)
 			ctx := context.Background()
 			logus.Errorf(ctx, "panic: %s", rText)

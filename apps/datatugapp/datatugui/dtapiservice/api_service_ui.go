@@ -1,56 +1,60 @@
+// Package dtapiservice is the API Monitor screen of the DataTug terminal UI.
 package dtapiservice
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
-	"github.com/datatug/datatug-cli/pkg/dtlog"
-	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/strongo/strongo-tui/pkg/widgets"
 )
 
-func RegisterModule() {
-	datatugui.RegisterMainMenuItem(datatugui.RootScreenWebUI,
-		datatugui.MainMenuItem{
-			Text:     "API Monitor",
-			Shortcut: 'w',
-			Action:   GoApiServiceMonitor,
-		})
+const (
+	screenTitle = "Web UI & Local API Service Monitor"
+	monitorText = "Open web UI: https://datatug.app/pwa/#api=localhost:8080"
+)
+
+// Module registers the API monitor in the main menu.
+func Module() datatugui.Module {
+	return datatugui.Module{
+		ID: datatugui.ScreenAPIMonitor, Text: "API Monitor", Shortcut: 'w',
+		Root: func() nav.Page { return nav.Page{Content: newMonitor()} },
+	}
 }
 
-// newTextViewFunc is a seam that lets tests capture the textView built by GoApiServiceMonitor.
-var newTextViewFunc = func() *tview.TextView { return tview.NewTextView() }
+// monitor shows how to reach the web UI and the local API service.
+type monitor struct {
+	pane widgets.TextPane
+}
 
-func GoApiServiceMonitor(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error {
-	breadcrumbs := tui.Header.Breadcrumbs()
-	breadcrumbs.Clear()
-	breadcrumbs.Push(sneatv.NewBreadcrumb("API Monitor", func() error {
-		return GoApiServiceMonitor(tui, sneatnav.FocusToContent)
-	}))
+func newMonitor() monitor {
+	pane := widgets.NewTextPane("api-monitor")
+	pane.SetContent(monitorText)
+	return monitor{pane: pane}
+}
 
-	menu := datatugui.NewDataTugMainMenu(tui, datatugui.RootScreenWebUI)
-	textView := newTextViewFunc()
-	sneatv.DefaultBorderWithPadding(textView.Box)
-	textView.SetTitle("Web UI & Local API Service Monitor")
-	textView.SetText("Open web UI: https://datatug.app/pwa/#api=localhost:8080")
-	textView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyLeft, tcell.KeyESC, tcell.KeyBackspace:
-			tui.Menu.TakeFocus()
-			return nil
-		case tcell.KeyUp:
-			tui.SetFocus(tui.Header)
-		default:
-			return event
+// Init implements nav.Screen.
+func (m monitor) Init() tea.Cmd { return nil }
+
+// Update implements nav.Screen.
+func (m monitor) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
+	if focus, ok := msg.(nav.ScreenFocusMsg); ok {
+		if focus.Focused {
+			m.pane.Focus()
+		} else {
+			m.pane.Blur()
 		}
-		return event
-	})
-
-	content := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(textView, textView.Box))
-
-	tui.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
-	dtlog.ScreenOpened("api_monitor", "API Monitor")
-	dtstate.SaveCurrentScreePath("api_monitor")
-	return nil
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.pane, cmd = m.pane.Update(msg)
+	return m, cmd
 }
+
+// View implements nav.Screen.
+func (m monitor) View() string { return m.pane.View() }
+
+// Title implements nav.Titled.
+func (m monitor) Title() string { return screenTitle }
+
+// AtEdge implements widgets.Boundary.
+func (m monitor) AtEdge(dir widgets.Direction) bool { return m.pane.AtEdge(dir) }

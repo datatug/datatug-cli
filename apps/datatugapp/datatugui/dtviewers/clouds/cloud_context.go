@@ -1,14 +1,8 @@
 package clouds
 
-import (
-	"github.com/datatug/datatug-cli/pkg/schemers"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-)
+import "github.com/datatug/datatug-cli/pkg/schemers"
 
-type CloudContext struct {
-	TUI *sneatnav.TUI
-}
-
+// ProjectContext is a cloud project whose data can be browsed.
 type ProjectContext interface {
 	Schema() schemers.Provider
 }

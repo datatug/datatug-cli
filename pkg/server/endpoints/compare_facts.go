@@ -15,11 +15,11 @@ import (
 )
 
 var (
-	compareFactsProjectStoreFor        = api.ProjectStoreFor
-	compareFactsIncidentViewHook       = api.IncidentView
-	proveNativeFactsBindingHook        = proveNativeFactsBinding
-	resolveExecutionSourceHookCompare  = resolveExecutionSource
-	executionQueryDocumentHookCompare  = executionQueryDocument
+	compareFactsProjectStoreFor       = api.ProjectStoreFor
+	compareFactsIncidentViewHook      = api.IncidentView
+	proveNativeFactsBindingHook       = proveNativeFactsBinding
+	resolveExecutionSourceHookCompare = resolveExecutionSource
+	executionQueryDocumentHookCompare = executionQueryDocument
 )
 
 // executeCompareFactsSide binds one current-policy-visible incident cohort to

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/strongo-tui/pkg/grid"
 )
 
 func TestPadAnsiLineZeroOrNegativeWidthIsEmpty(t *testing.T) {

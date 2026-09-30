@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/strongo-tui/pkg/grid"
 )
 
 func testJoinCandidates() []JoinCandidate {

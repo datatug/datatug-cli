@@ -10,7 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/tui/chatshell"
-	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/strongo-tui/pkg/grid"
 )
 
 // handleGridKey is every transcript grid's grid.WithKeyHandler/SetKeyHandler

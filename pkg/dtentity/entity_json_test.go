@@ -126,4 +126,3 @@ func TestMarshalEntity_Errors(t *testing.T) {
 		t.Fatal("expected tables marshal error")
 	}
 }
-

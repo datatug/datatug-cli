@@ -11,9 +11,7 @@ import (
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
-	"github.com/datatug/datatug-cli/apps/global"
 	"github.com/posthog/posthog-go"
-	"github.com/rivo/tview"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -71,28 +69,6 @@ func TestMainFunc(t *testing.T) {
 			_, _ = io.Copy(&buf, r)
 			assert.True(t, strings.Contains(buf.String(), "invalid memory address or nil pointer dereference"))
 		}
-	})
-	// Cover the global.App != nil branch: set App to a non-nil Application before
-	// calling main() with a panicking getCommand. tview.NewApplication().Stop() is
-	// safe when screen == nil (returns early without sending on any channel).
-	t.Run("panic_with_app_non_nil", func(t *testing.T) {
-		osExitBackup := osExit
-		appBackup := global.App
-		getCommandBackup := getCommand
-		defer func() {
-			osExit = osExitBackup
-			global.App = appBackup
-			getCommand = getCommandBackup
-		}()
-
-		global.App = tview.NewApplication()
-		getCommand = func() (*cobra.Command, []fang.Option) { return nil, nil }
-		var exitCode int
-		osExit = func(i int) { exitCode = i }
-
-		main()
-
-		assert.Equal(t, 1, exitCode)
 	})
 	// Cover the plain-error branch: getCommand returns a command whose RunE
 	// returns a non-ExitCoder error. main must exit 1 (matching every

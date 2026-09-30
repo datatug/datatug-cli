@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/strongo-tui/pkg/grid"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
@@ -516,7 +516,7 @@ func TestCurrentRowShowsAbsentMarkerNotBlankForSparseCells(t *testing.T) {
 		Rows:    [][]string{{"one", ""}}, // Second is sparse/absent for this row
 	}
 	g := newGridState(model, "", "Sparse", 60)
-	g.SetView(gridViewCurrentRow)
+	g.ShowView(gridViewCurrentRow)
 	content := ansi.Strip(g.ActiveViewContent(60, 10))
 	if !strings.Contains(content, "—") {
 		t.Fatalf("current row view missing the absent marker: %q", content)
@@ -538,8 +538,8 @@ func TestRecordsetViewsRouteFocusAcrossSplitAndNarrowLayouts(t *testing.T) {
 	}
 	g.Update(tea.KeyPressMsg{Text: "2"})
 	wideWidth := contentWidth(180) * 75 / 100
-	if g.CurrentView() != gridViewCharts || !chooseGridLayout(wideWidth, g.NaturalWidth(), g.CurrentView()).Split || g.SecondaryFocus() {
-		t.Fatalf("wide chart state = view:%v layout:%+v secondary:%v", g.CurrentView(), chooseGridLayout(wideWidth, g.NaturalWidth(), g.CurrentView()), g.SecondaryFocus())
+	if g.ActiveView() != gridViewCharts || !chooseGridLayout(wideWidth, g.NaturalWidth(), g.ActiveView()).Split || g.SecondaryFocus() {
+		t.Fatalf("wide chart state = view:%v layout:%+v secondary:%v", g.ActiveView(), chooseGridLayout(wideWidth, g.NaturalWidth(), g.ActiveView()), g.SecondaryFocus())
 	}
 	g.ToggleSecondaryFocusIfSplit()
 	g.Update(tea.KeyPressMsg{Code: tea.KeyDown})
@@ -547,17 +547,17 @@ func TestRecordsetViewsRouteFocusAcrossSplitAndNarrowLayouts(t *testing.T) {
 		t.Fatalf("chart focus/index = %v/%d, want true/1", g.SecondaryFocus(), g.chartIndex)
 	}
 	g.Update(tea.KeyPressMsg{Text: "1"})
-	if g.CurrentView() != grid.ViewTable || g.SecondaryFocus() {
-		t.Fatalf("table return = view:%v secondary:%v", g.CurrentView(), g.SecondaryFocus())
+	if g.ActiveView() != grid.ViewTable || g.SecondaryFocus() {
+		t.Fatalf("table return = view:%v secondary:%v", g.ActiveView(), g.SecondaryFocus())
 	}
 	g.Update(tea.KeyPressMsg{Text: "3"})
-	if g.CurrentView() != gridViewCurrentRow {
-		t.Fatalf("current-row view = %v", g.CurrentView())
+	if g.ActiveView() != gridViewCurrentRow {
+		t.Fatalf("current-row view = %v", g.ActiveView())
 	}
 	narrowWidth := contentWidth(70)
 	g.SetWidth(narrowWidth)
-	if chooseGridLayout(narrowWidth, g.NaturalWidth(), g.CurrentView()).Split {
-		t.Fatalf("narrow inspector layout = %+v, want unsplit", chooseGridLayout(narrowWidth, g.NaturalWidth(), g.CurrentView()))
+	if chooseGridLayout(narrowWidth, g.NaturalWidth(), g.ActiveView()).Split {
+		t.Fatalf("narrow inspector layout = %+v, want unsplit", chooseGridLayout(narrowWidth, g.NaturalWidth(), g.ActiveView()))
 	}
 	if view := ansi.Strip(g.View(narrowWidth, true)); !strings.Contains(view, "3 Current row") || !strings.Contains(view, "Ireland") {
 		t.Fatalf("narrow inspector did not render current row:\n%s", view)

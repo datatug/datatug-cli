@@ -1,36 +1,42 @@
 package gcloudui
 
 import (
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	tea "charm.land/bubbletea/v2"
+	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/strongo/strongo-tui/pkg/widgets"
 )
 
-var lastCredentialsList *tview.List
+const credentialsListID = "gcloudui.credentials"
 
-func GoCredentials(cContext *GCloudContext, focusTo sneatnav.FocusTo) error {
-	menu := newMainMenu(cContext, ScreenCredentials, false)
-
-	list := tview.NewList()
-	lastCredentialsList = list
-	sneatv.SetPanelTitle(list.Box, "Google Cloud Projects")
-
-	list.AddItem("Login", "", 'i', func() {})
-	list.AddItem("Logout", "", 'o', func() {})
-
-	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyLeft, tcell.KeyEscape:
-			cContext.TUI.SetFocus(menu)
-			return nil
-		default:
-			return event
-		}
-	})
-
-	content := sneatnav.NewPanel(cContext.TUI, sneatv.WithDefaultBorders(list, list.Box))
-
-	cContext.TUI.SetPanels(menu, content, sneatnav.WithFocusTo(focusTo))
-	return nil
+// credentials is the Credentials screen.
+type credentials struct {
+	listPane
 }
+
+var (
+	_ nav.Screen       = credentials{}
+	_ nav.Titled       = credentials{}
+	_ nav.ShortHelper  = credentials{}
+	_ widgets.Boundary = credentials{}
+	_ widgets.Editor   = credentials{}
+)
+
+func newCredentials() credentials {
+	return credentials{listPane: newListPane(credentialsListID,
+		widgets.MenuItem{ID: "login", Label: "Login", Shortcut: 'i'},
+		widgets.MenuItem{ID: "logout", Label: "Logout", Shortcut: 'o'},
+	)}
+}
+
+// Init implements nav.Screen.
+func (credentials) Init() tea.Cmd { return nil }
+
+// Update implements nav.Screen.
+func (c credentials) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
+	var cmd tea.Cmd
+	c.listPane, cmd = c.update(msg)
+	return c, cmd
+}
+
+// Title implements nav.Titled.
+func (credentials) Title() string { return "Google Cloud Credentials" }

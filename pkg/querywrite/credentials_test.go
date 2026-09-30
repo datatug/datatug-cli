@@ -162,4 +162,3 @@ func TestJsonStringsCredentialReason_Branches(t *testing.T) {
 		t.Fatal("expected secret found in map value")
 	}
 }
-

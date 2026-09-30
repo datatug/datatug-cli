@@ -12,7 +12,7 @@ status: Implementing
 
 ## Summary
 
-`datatug dataset-data` (current name) — to become `datatug dataset data` — prints the row data of a single dataset from a DataTug project. Supports YAML, JSON, and an interactive GRID display (the GRID format draws a table in the terminal using `tview`).
+`datatug dataset-data` (current name) — to become `datatug dataset data` — prints the row data of a single dataset from a DataTug project. Supports YAML, JSON, and an interactive GRID display (the GRID format draws a table in the terminal using the `strongo-tui` grid widget).
 
 ## Synopsis
 

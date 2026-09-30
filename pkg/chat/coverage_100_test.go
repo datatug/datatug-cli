@@ -15,7 +15,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/ai/cloudproto"
-	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/strongo-tui/pkg/grid"
 )
 
 func TestTelemetryFullCoverage(t *testing.T) {
@@ -1755,4 +1755,3 @@ func TestStoreRemaining100Coverage(t *testing.T) {
 	}
 	txCommitFn = origTxCommit
 }
-

@@ -16,13 +16,13 @@ import (
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/incidents"
 	"github.com/datatug/datatug-core/pkg/investigation"
-	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -751,7 +751,7 @@ func TestRemaining100_CompareKey(t *testing.T) {
 	qNoMeta := datatug.QueryDef{
 		ID: "myq",
 		Recordsets: []datatug.RecordsetDefinition{{
-			Columns:    datatug.RecordsetColumnDefs{{Name: "id", Type: "string"}},
+			Columns: datatug.RecordsetColumnDefs{{Name: "id", Type: "string"}},
 			RecordsetBaseDef: datatug.RecordsetBaseDef{
 				PrimaryKey: &datatug.UniqueKey{Columns: []string{"id"}},
 			},
@@ -766,7 +766,7 @@ func TestRemaining100_CompareKey(t *testing.T) {
 	qMissingCol := datatug.QueryDef{
 		ID: "myq",
 		Recordsets: []datatug.RecordsetDefinition{{
-			Columns:    datatug.RecordsetColumnDefs{{Name: "other", Type: "string"}},
+			Columns: datatug.RecordsetColumnDefs{{Name: "other", Type: "string"}},
 			RecordsetBaseDef: datatug.RecordsetBaseDef{
 				PrimaryKey: &datatug.UniqueKey{Columns: []string{"id"}},
 			},

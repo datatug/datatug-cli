@@ -17,12 +17,12 @@ import (
 	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
-	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-core/pkg/incidents"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -100,7 +100,9 @@ func TestFinal_SemanticColumns_And_Schema(t *testing.T) {
 	goodDir := t.TempDir()
 	filestore.SetProjectPath(goodPID, goodDir)
 	origStore := storage.NewDatatugStore
-	storage.NewDatatugStore = func(string) (storage.Store, error) { return filestore.NewStore("files", map[string]string{goodPID: goodDir}) }
+	storage.NewDatatugStore = func(string) (storage.Store, error) {
+		return filestore.NewStore("files", map[string]string{goodPID: goodDir})
+	}
 	defer func() { storage.NewDatatugStore = origStore }()
 	api.ConfigureSecureSession(secureread.Session{}, map[string]string{goodPID: goodDir}, api.Capabilities{})
 
@@ -207,11 +209,11 @@ func TestFinal_SemanticApplicable(t *testing.T) {
 		catalogs: datatug.DbCatalogs{
 			{DbCatalogBase: datatug.DbCatalogBase{
 				ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "s1"}},
-				Driver: "sqlite", Path: "s1.db",
+				Driver:      "sqlite", Path: "s1.db",
 			}},
 			{DbCatalogBase: datatug.DbCatalogBase{
 				ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "s2"}},
-				Driver: "sqlite", Path: "s2.db",
+				Driver:      "sqlite", Path: "s2.db",
 			}},
 		},
 	}

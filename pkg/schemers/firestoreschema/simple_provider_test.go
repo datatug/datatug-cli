@@ -324,4 +324,3 @@ func TestDefaultSeams(t *testing.T) {
 		_ = closeFirestoreClient(nil)
 	})
 }
-

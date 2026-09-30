@@ -204,14 +204,15 @@ func writeYAMLRows(w io.Writer, columns []string, rows []queryRow) error {
 			mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: name}, &valueNode)
 			return nil
 		}
-		if err := add(keyColumn, row.key); err != nil {
-			return err
-		}
+		names, values := []string{keyColumn}, []any{row.key}
 		for _, column := range columns {
 			if value, ok := row.data[column]; ok {
-				if err := add(column, value); err != nil {
-					return err
-				}
+				names, values = append(names, column), append(values, value)
+			}
+		}
+		for i, name := range names {
+			if err := add(name, values[i]); err != nil {
+				return err
 			}
 		}
 		sequence.Content = append(sequence.Content, mapping)

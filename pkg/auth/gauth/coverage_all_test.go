@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/zalando/go-keyring"
@@ -100,36 +101,70 @@ func TestGetTokenFromWeb_Branches(t *testing.T) {
 	require.Equal(t, "token-ok", tok.AccessToken)
 }
 
-func TestWaitForAuthCode(t *testing.T) {
-	origServe := authServerServe
-	defer func() { authServerServe = origServe }()
-	origShutdown := srvShutdown
-	defer func() { srvShutdown = origShutdown }()
-
-	// 1. Success with shutdown error logged
-	authServerServe = func(srv *http.Server) error {
-		req := httptest.NewRequest(http.MethodGet, "/oauth2callback?code=captured-code", nil)
-		rec := httptest.NewRecorder()
-		srv.Handler.ServeHTTP(rec, req)
-		return http.ErrServerClosed
+// serveUntilShutdown mimics http.Server.ListenAndServe: it delivers one
+// redirect to the handler (when target is not empty), then blocks until the
+// shutdown seam releases it and returns result.
+func serveUntilShutdown(t *testing.T, target string, result error) (serve func(*http.Server) error, shutdown func(context.Context, *http.Server) error) {
+	t.Helper()
+	release := make(chan struct{})
+	serve = func(srv *http.Server) error {
+		if target != "" {
+			req := httptest.NewRequest(http.MethodGet, target, nil)
+			srv.Handler.ServeHTTP(httptest.NewRecorder(), req)
+		}
+		<-release
+		return result
 	}
-	srvShutdown = func(context.Context, *http.Server) error {
+	shutdown = func(context.Context, *http.Server) error {
+		close(release)
 		return errors.New("simulated shutdown error")
 	}
+	return serve, shutdown
+}
 
-	code, err := waitForAuthCode()
-	require.NoError(t, err)
-	require.Equal(t, "captured-code", code)
+func TestWaitForAuthCode(t *testing.T) {
+	origServe, origShutdown, origTimeout := authServerServe, srvShutdown, serveDrainTimeout
+	defer func() { authServerServe, srvShutdown, serveDrainTimeout = origServe, origShutdown, origTimeout }()
 
-	// 2. authServerServe returns non-closed error
-	authServerServe = func(srv *http.Server) error {
-		req := httptest.NewRequest(http.MethodGet, "/oauth2callback?code=code-err", nil)
-		rec := httptest.NewRecorder()
-		srv.Handler.ServeHTTP(rec, req)
-		return errors.New("listen error")
-	}
-	_, err = waitForAuthCode()
-	require.ErrorContains(t, err, "listen error")
+	t.Run("code captured, shutdown error logged", func(t *testing.T) {
+		authServerServe, srvShutdown = serveUntilShutdown(t, "/oauth2callback?code=captured-code", http.ErrServerClosed)
+		code, err := waitForAuthCode()
+		require.NoError(t, err)
+		require.Equal(t, "captured-code", code)
+	})
+
+	t.Run("serve error reported after the code", func(t *testing.T) {
+		authServerServe, srvShutdown = serveUntilShutdown(t, "/oauth2callback?code=code-err", errors.New("listen error"))
+		_, err := waitForAuthCode()
+		require.ErrorContains(t, err, "listen error")
+	})
+
+	t.Run("serve fails before any redirect", func(t *testing.T) {
+		authServerServe = func(*http.Server) error { return errors.New("address already in use") }
+		_, err := waitForAuthCode()
+		require.ErrorContains(t, err, "address already in use")
+	})
+
+	t.Run("server closed before any redirect", func(t *testing.T) {
+		authServerServe = func(*http.Server) error { return http.ErrServerClosed }
+		_, err := waitForAuthCode()
+		require.ErrorIs(t, err, errAuthServerStopped)
+	})
+
+	t.Run("server never reports after shutdown", func(t *testing.T) {
+		release := make(chan struct{})
+		defer close(release)
+		serveDrainTimeout = 10 * time.Millisecond
+		authServerServe = func(srv *http.Server) error {
+			srv.Handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/oauth2callback?code=late", nil))
+			<-release
+			return nil
+		}
+		srvShutdown = func(context.Context, *http.Server) error { return nil }
+		code, err := waitForAuthCode()
+		require.NoError(t, err)
+		require.Equal(t, "late", code)
+	})
 }
 
 type mockTokenSource struct {

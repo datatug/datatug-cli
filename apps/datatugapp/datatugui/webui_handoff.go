@@ -5,11 +5,12 @@ import (
 	"os"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/gdamore/tcell/v2"
 	"github.com/pkg/browser"
+	"github.com/strongo/strongo-tui/pkg/nav"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,6 +24,18 @@ var (
 // DefaultWebUIOrigin is the DataTug web UI the CLI hands off to unless
 // overridden in settings.
 const DefaultWebUIOrigin = "https://datatug.app"
+
+// OpenWebUIMsg asks the app to open the current screen in the web UI.
+type OpenWebUIMsg struct{}
+
+// webUIAction is the application-wide Ctrl+W binding.
+func webUIAction() nav.Action {
+	return nav.Action{
+		ID:      "WebUI",
+		Binding: key.NewBinding(key.WithKeys("ctrl+w"), key.WithHelp("ctrl+w", "web ui")),
+		Msg:     OpenWebUIMsg{},
+	}
+}
 
 // webUIConfigFile is the local, CLI-only `webui:` section of
 // ~/.datatug.yaml. datatug-core's dtconfig.Settings doesn't model this - it
@@ -82,22 +95,19 @@ func CurrentScreenWebUIURL() string {
 	return WebUIURLForScreen(origin, screenPath)
 }
 
-// OpenCurrentScreenInWebUI opens the current TUI screen in the web UI in the
-// default browser. Bound app-wide to Ctrl+W and the "Web UI" actions-menu item.
-func OpenCurrentScreenInWebUI(tui *sneatnav.TUI) {
-	url := CurrentScreenWebUIURL()
-	if err := openURL(url); err != nil {
-		tui.ShowAlert("Web UI", fmt.Sprintf("Failed to open browser at %s: %v", url, err), 0, nil)
+// OpenCurrentScreenInWebUI returns the command that opens the current TUI
+// screen in the web UI in the default browser. It yields an alert when the
+// browser cannot be opened. Bound app-wide to Ctrl+W.
+func OpenCurrentScreenInWebUI() tea.Cmd {
+	return func() tea.Msg {
+		url := CurrentScreenWebUIURL()
+		if err := openURL(url); err != nil {
+			return nav.AlertMsg{
+				Title:     "Web UI",
+				Message:   fmt.Sprintf("Failed to open browser at %s: %v", url, err),
+				FocusBack: nav.FocusToKeep,
+			}
+		}
+		return nil
 	}
-}
-
-// RegisterWebUIHandoff binds Ctrl+W and adds the "Web UI" actions-menu item.
-func RegisterWebUIHandoff(tui *sneatnav.TUI) {
-	openWebUI := func() { OpenCurrentScreenInWebUI(tui) }
-	tui.RegisterGlobalKeyHandler(tcell.KeyCtrlW, openWebUI)
-	_ = tui.ActionsMenu().RegisterActionMenuItems(sneatnav.ActionMenuItem{
-		ID:           "WebUI",
-		Title:        "Ctrl+W - Web UI",
-		SelectedFunc: openWebUI,
-	})
 }

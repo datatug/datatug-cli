@@ -182,7 +182,7 @@ We are open for pull requests to support other `sql` DBs.
 
 ## For developers
 
-Read [README-dev.md](docs/README-dev.md) for details on how to setup, debug, and contribute.
+Read [README-dev.md](docs/README-dev.md) for details on how to setup, debug, and contribute; the terminal UI architecture (shell, widgets, grid, navtest) is summarised there and explained in [tui-screens.md](docs/tui-screens.md).
 
 ## Sample Databases
 
@@ -204,7 +204,7 @@ Read [README-dev.md](docs/README-dev.md) for details on how to setup, debug, and
 
 ## Open Source Libraries we use
 
-- [tview](https://github.com/rivo/tview) - Terminal UI library with rich, interactive widgets — written in Golang
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea) - Terminal UI framework (The Elm Architecture) with Lip Gloss styling; shared widgets live in `strongo-tui`
 - [DALgo](https://github.com/dal-go/dalgo) - Database Abstraction Layer for Go
 - https://gihub.com/strongo/validation - helpers for requests & models validations
 

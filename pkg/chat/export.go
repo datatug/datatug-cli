@@ -22,12 +22,12 @@ import (
 )
 
 var (
-	osCreateTemp             = os.CreateTemp
-	osOpen                   = os.Open
-	osReadFile               = os.ReadFile
-	godbfSaveToFile          = godbf.SaveToFile
-	fileClose                = func(f *os.File) error { return f.Close() }
-	sqliteExecContext        = func(db *sql.DB, ctx context.Context, query string, args ...any) (sql.Result, error) {
+	osCreateTemp      = os.CreateTemp
+	osOpen            = os.Open
+	osReadFile        = os.ReadFile
+	godbfSaveToFile   = godbf.SaveToFile
+	fileClose         = func(f *os.File) error { return f.Close() }
+	sqliteExecContext = func(db *sql.DB, ctx context.Context, query string, args ...any) (sql.Result, error) {
 		return db.ExecContext(ctx, query, args...)
 	}
 	sqlitePrepareContext = func(db *sql.DB, ctx context.Context, query string) (*sql.Stmt, error) {
@@ -42,8 +42,8 @@ var (
 	excelizeSetCellValue = func(f *excelize.File, sheet, cell string, value any) error {
 		return f.SetCellValue(sheet, cell, value)
 	}
-	godbfAddNewRecord = func(t *godbf.DbfTable) (int, error) { return t.AddNewRecord() }
-	zipWriterCreate   = func(w *zip.Writer, name string) (io.Writer, error) { return w.Create(name) }
+	godbfAddNewRecord        = func(t *godbf.DbfTable) (int, error) { return t.AddNewRecord() }
+	zipWriterCreate          = func(w *zip.Writer, name string) (io.Writer, error) { return w.Create(name) }
 	godbfSetFieldValueByName = func(t *godbf.DbfTable, recordIndex int, fieldName, value string) error {
 		return t.SetFieldValueByName(recordIndex, fieldName, value)
 	}

@@ -15,6 +15,13 @@ import (
 	"github.com/strongo/logus"
 )
 
+// Seams over the OS calls initCommandAction makes, so tests can drive their
+// failure branches. Always the real functions in production.
+var (
+	initStat        = os.Stat
+	initCurrentUser = user.Current
+)
+
 func initCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init [project] [projectPath]",
@@ -38,7 +45,7 @@ func initCommandAction(cmd *cobra.Command, args []string) (err error) {
 	}
 	dataTugDirPath := path.Join(projectDir, "datatug")
 	var fileInfo os.FileInfo
-	if fileInfo, err = os.Stat(dataTugDirPath); err != nil {
+	if fileInfo, err = initStat(dataTugDirPath); err != nil {
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("failed to get info about %v: %w", dataTugDirPath, err)
 		}
@@ -99,7 +106,7 @@ func initCommandAction(cmd *cobra.Command, args []string) (err error) {
 		//},
 	}
 	var currentUser *user.User
-	if currentUser, err = user.Current(); err != nil {
+	if currentUser, err = initCurrentUser(); err != nil {
 		return err
 	}
 	if currentUser != nil {

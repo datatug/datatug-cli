@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"strings"
@@ -39,11 +40,20 @@ func (v *showProjectCommand) Execute(_ []string) error {
 		return fmt.Errorf("failed to load project from [%v]: %w", v.ProjectDir, err)
 	}
 	var wd string
-	if wd, err = os.Getwd(); err != nil {
+	if wd, err = showGetwd(); err != nil {
 		return err
 	}
-	w := os.Stdout
-	_, _ = fmt.Fprintln(w, "GetProjectStore: ", path.Join(wd, v.ProjectDir))
+	printProject(os.Stdout, path.Join(wd, v.ProjectDir), project)
+	return err
+}
+
+// showGetwd is a seam over os.Getwd so tests can drive its failure branch.
+// Always os.Getwd in production.
+var showGetwd = os.Getwd
+
+// printProject writes the human readable outline of project to w.
+func printProject(w io.Writer, projectPath string, project *datatug.Project) {
+	_, _ = fmt.Fprintln(w, "GetProjectStore: ", projectPath)
 	for _, env := range project.Environments {
 		_, _ = fmt.Fprintln(w, "\t🌎 Environment: ", env.ID)
 		for _, dbServer := range env.DbServers {
@@ -104,6 +114,4 @@ func (v *showProjectCommand) Execute(_ []string) error {
 			}
 		}
 	}
-
-	return err
 }

@@ -571,5 +571,5 @@ type emptyFromQuery struct {
 	dal.StructuredQuery
 }
 
-func (e *emptyFromQuery) From() dal.FromSource { return nil }
+func (e *emptyFromQuery) From() dal.FromSource  { return nil }
 func (e *emptyFromQuery) Columns() []dal.Column { return nil }

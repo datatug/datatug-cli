@@ -104,6 +104,10 @@ func defaultCloneOrUpdateRepo(dir, url string) error {
 // that never touches the network.
 var downloadSQLiteSource = defaultDownloadSQLiteSource
 
+// demoSQLiteSourceURL is the URL defaultDownloadSQLiteSource fetches. A package
+// var so tests can point it at a local httptest server.
+var demoSQLiteSourceURL = chinookSQLiteSourceURL
+
 func defaultDownloadSQLiteSource(dests ...string) error {
 	writers := make([]io.Writer, len(dests))
 	files := make([]*os.File, len(dests))
@@ -122,7 +126,7 @@ func defaultDownloadSQLiteSource(dests ...string) error {
 	}()
 
 	log.Println("Downloading SQLite version of Chinook database...")
-	resp, err := http.Get(chinookSQLiteSourceURL)
+	resp, err := http.Get(demoSQLiteSourceURL)
 	if err != nil {
 		return fmt.Errorf("get request failed: %w", err)
 	}
@@ -271,18 +275,27 @@ func registerDemoProject(id, path string) error {
 // real HTTP server.
 var serveDemoProjectFunc = defaultServeDemoProject
 
+// demoSetFlag and demoServeAction are seams so tests can exercise
+// defaultServeDemoProject without starting a real HTTP server.
+var (
+	demoSetFlag = func(cmd *cobra.Command, name, value string) error {
+		return cmd.Flags().Set(name, value)
+	}
+	demoServeAction = serveCommandAction
+)
+
 func defaultServeDemoProject(demoProjectDir string) error {
 	cmd := serveCommandArgs()
-	if err := cmd.Flags().Set(serveProjectFlag, demoProjectDir); err != nil {
+	if err := demoSetFlag(cmd, serveProjectFlag, demoProjectDir); err != nil {
 		return err
 	}
-	if err := cmd.Flags().Set(serveAsFlag, "admin"); err != nil {
+	if err := demoSetFlag(cmd, serveAsFlag, "admin"); err != nil {
 		return err
 	}
-	if err := cmd.Flags().Set(serveRoleFlag, "admin"); err != nil {
+	if err := demoSetFlag(cmd, serveRoleFlag, "admin"); err != nil {
 		return err
 	}
-	return serveCommandAction(cmd, nil)
+	return demoServeAction(cmd, nil)
 }
 
 func (c demoCommand) Execute() error {

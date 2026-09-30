@@ -3,58 +3,14 @@ package awsui
 import (
 	"testing"
 
-	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
-	sneatv "github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/strongo/strongo-tui/pkg/nav/navtest"
 )
 
-// newSafeTUI builds a headless TUI without the double-Fini bug:
-// only app.Stop() is called in cleanup.
-func newSafeTUI(t *testing.T) *sneatnav.TUI {
-	t.Helper()
-	screen := tcell.NewSimulationScreen("UTF-8")
-	if err := screen.Init(); err != nil {
-		t.Fatalf("simulation screen Init: %v", err)
-	}
-	app := tview.NewApplication().SetScreen(screen)
-	root := sneatv.NewBreadcrumb("test", func() error { return nil })
-	tui := sneatnav.NewTUI(app, root)
-	t.Cleanup(func() { app.Stop() })
-	return tui
-}
-
-func TestViewerID(t *testing.T) {
-	assert.Equal(t, dtviewers.ViewerID("aws"), viewerID)
-}
-
-func TestGoAwsHome_ReturnsNil(t *testing.T) {
-	tui := newSafeTUI(t)
-	err := goAwsHome(&AwsContext{TUI: tui}, sneatnav.FocusToMenu)
-	require.NoError(t, err)
-}
-
-// TestRegisterAsViewer_ActionClosure intercepts the registerViewer seam to
-// capture the Viewer, then invokes its Action to cover the closure body.
-func TestRegisterAsViewer_ActionClosure(t *testing.T) {
-	orig := registerViewer
-	t.Cleanup(func() { registerViewer = orig })
-
-	var captured dtviewers.Viewer
-	registerViewer = func(v dtviewers.Viewer) {
-		captured = v
-	}
-
-	RegisterAsViewer()
-
-	require.NotNil(t, captured.Action, "Action should be set")
-	assert.Equal(t, viewerID, captured.ID)
-
-	// Invoke the Action closure — this covers lines 17-19 of home_ui.go.
-	tui := newSafeTUI(t)
-	err := captured.Action(tui, sneatnav.FocusToMenu)
-	assert.NoError(t, err)
+func TestViewer(t *testing.T) {
+	v := Viewer()
+	assert.Equal(t, viewerID, v.ID)
+	assert.Equal(t, "Amazon Web Services", v.Name)
+	assert.Equal(t, 'a', v.Shortcut)
+	navtest.New(t, v.Root()).RequireContains("AWS is not implemented yet.")
 }

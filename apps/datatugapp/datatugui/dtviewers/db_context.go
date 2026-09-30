@@ -7,6 +7,7 @@ import (
 	"github.com/datatug/datatug-core/pkg/schemer"
 )
 
+// DbContext describes a database a viewer browses.
 type DbContext interface {
 	Name() string // A db name. For SQLite would be a file name
 	Driver() Driver
@@ -14,6 +15,7 @@ type DbContext interface {
 	GetDB(ctx context.Context) (db dal.DB, err error)
 }
 
+// Driver identifies a database driver.
 type Driver struct {
 	ID         string
 	ShortTitle string
@@ -21,6 +23,7 @@ type Driver struct {
 
 var _ DbContext = (*DbContextBase)(nil)
 
+// DbContextBase is the DbContext implementation the concrete contexts embed.
 type DbContextBase struct {
 	name   string
 	driver Driver

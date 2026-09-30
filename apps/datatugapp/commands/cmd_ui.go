@@ -3,9 +3,8 @@ package commands
 import (
 	"context"
 	"errors"
-	"strings"
 
-	datatug "github.com/datatug/datatug-cli/apps/datatugapp"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtapiservice"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtproject"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtsettings"
@@ -16,9 +15,9 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers/dbviewer"
 	"github.com/datatug/datatug-cli/pkg/dtio"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
 	"github.com/spf13/cobra"
 	"github.com/strongo/logus"
+	"github.com/strongo/strongo-tui/pkg/nav"
 )
 
 func uiCommandArgs() *cobra.Command {
@@ -34,77 +33,54 @@ func uiCommandArgs() *cobra.Command {
 	return cmd
 }
 
+// Seams over the state file and the terminal program, replaced in tests.
+var (
+	getDatatugState = dtstate.GetDatatugState
+	runApp          = datatugui.Run
+)
+
 // runUI launches the terminal UI, optionally opening filePath. It is shared
 // by the `ui` subcommand and the root command's default-to-ui fallback (a
-// bare `datatug` invocation).
+// bare `datatug` invocation). The UI starts on the screen the user left, and
+// a file to open is shown on top of it.
 func runUI(filePath string) error {
-	v := &uiCommand{}
-	return v.Execute(filePath)
-}
-
-type uiCommand struct {
-}
-
-func (v *uiCommand) Execute(filePath string) error {
-	tui := datatug.NewDatatugTUI()
-
-	registerModules()
-
-	tui.App.SetRoot(tui.Layout, true)
-
+	modules := uiModules()
+	opts := datatugui.Options{}
+	if state, err := getDatatugState(); err != nil {
+		logus.Errorf(context.Background(), "Failed to get DataTug state: %v", err)
+		opts.Start = datatugui.StartScreen(modules, "")
+	} else {
+		opts.Start = datatugui.StartScreen(modules, state.CurrentScreenPath)
+	}
 	if filePath != "" {
-		if err := openFile(filePath, tui); err != nil {
-			panic(err)
+		page, err := openFile(filePath)
+		if err != nil {
+			return err
 		}
+		opts.Initial = &page
 	}
-
-	state, err := dtstate.GetDatatugState()
-	if err != nil {
-		ctx := context.Background()
-		logus.Errorf(ctx, "Failed to get DataTug state: %v", err)
-		err = nil
-	}
-
-	goScreen := func(f func(tui *sneatnav.TUI, focusTo sneatnav.FocusTo) error) {
-		if err = f(tui, sneatnav.FocusToMenu); err != nil {
-			panic(err)
-		}
-	}
-
-	currentScreenPath := strings.Split(state.CurrentScreenPath, "/")
-	switch currentScreenPath[0] {
-	case "viewers":
-		goScreen(dtviewers.GoViewersScreen)
-	case "settings":
-		goScreen(dtsettings.GoSettingsScreen)
-	case "api_monitor":
-		goScreen(dtapiservice.GoApiServiceMonitor)
-	default:
-		goScreen(dtproject.GoDataTugProjectsScreen)
-	}
-
-	return tui.App.Run()
+	return runApp(modules, opts)
 }
 
-func openFile(filePath string, tui *sneatnav.TUI) error {
-	if dtio.IsSQLite(filePath) {
-		dbContext := dtviewers.GetSQLiteDbContext(filePath)
-		return dbviewer.GoSqlDbHome(tui, dbContext)
+// openFile returns the page that shows the database in filePath.
+func openFile(filePath string) (nav.Page, error) {
+	if !dtio.IsSQLite(filePath) {
+		return nav.Page{}, errors.New("not a SQLite file")
 	}
-	return errors.New("not a SQLite file")
+	return dbviewer.DbHomePage(dtviewers.GetSQLiteDbContext(filePath)), nil
 }
 
-func registerModules() {
-
-	dtproject.RegisterModule()
-
-	dbviewer.RegisterAsViewer()
-	RegisterAsViewer()
-	gcloudui.RegisterAsViewer()
-	awsui.RegisterAsViewer()
-	azureui.RegisterAsViewer()
-
-	dtviewers.RegisterModule()
-	dtsettings.RegisterModule()
-	dtapiservice.RegisterModule()
+// uiModules lists the root modules in main menu order.
+func uiModules() []datatugui.Module {
+	return []datatugui.Module{
+		dtproject.Module(),
+		dtviewers.Module(
+			dbviewer.Viewer(),
+			gcloudui.Viewer(),
+			awsui.Viewer(),
+			azureui.Viewer(),
+		),
+		dtsettings.Module(),
+		dtapiservice.Module(),
+	}
 }

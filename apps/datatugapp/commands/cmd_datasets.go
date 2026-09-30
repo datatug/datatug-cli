@@ -7,9 +7,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// datasetsInitProject is a seam over the project initialisation of
+// datasetsCommandAction (see datasetInitProject). Always the real
+// initProjectCommand in production.
+var datasetsInitProject = func(v *datasetsCommand) error {
+	return v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true})
+}
+
 func datasetsCommandAction(_ *cobra.Command, _ []string) error {
 	v := &datasetsCommand{}
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	if err := datasetsInitProject(v); err != nil {
 		return err
 	}
 	ctx := context.Background()

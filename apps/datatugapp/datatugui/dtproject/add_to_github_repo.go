@@ -2,27 +2,15 @@ package dtproject
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
 	"sort"
-	"strings"
-	"time"
 
-	"github.com/atotto/clipboard"
-	"github.com/datatug/datatug-cli/pkg/auth/ghauth"
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/datatug/datatug-core/pkg/storage"
-	"github.com/datatug/datatug-core/pkg/storage/filestore"
-	"github.com/filetug/filetug/pkg/fsutils"
-	"github.com/gdamore/tcell/v2"
-	"github.com/go-git/go-git/v5"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/google/go-github/v92/github"
-	"github.com/rivo/tview"
+	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/strongo/strongo-tui/pkg/theme"
+	"github.com/strongo/strongo-tui/pkg/widgets"
 	"golang.org/x/oauth2"
 )
 
@@ -39,511 +27,182 @@ Go CLI
 Uses https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow
 */
 
-// ShowAddToGitHubRepo
-// - gets user credentials for GitHub api via OAuth2 Device Flow
-// - selects repository to be used to store datatug project.
-// - adds a `datatug` directory with config and README.md to the root of an existing GitHub repo.
-// - adds a 'DataTug' section to the root README.md files linked to the `datatug` directory.
-func ShowAddToGitHubRepo(tui *sneatnav.TUI) {
+// The "add DataTug to an existing GitHub repository" flow:
+//   - gets user credentials for the GitHub API via the OAuth2 device flow;
+//   - lets the user select the repository that stores the DataTug project;
+//   - adds a `datatug` directory with config and README.md to the root of the
+//     repository, and a 'DataTug' section to the root README.md linked to it.
+
+const reposTreeID = "github-repos"
+
+// Messages of the repository picker.
+type (
+	// needAuth asks for a sign-in: there is no token, or GitHub refused it.
+	needAuth struct{}
+	// reposListed carries the repositories the user can use.
+	reposListed struct {
+		client *github.Client
+		repos  []*github.Repository
+	}
+	// connectFailed is a failure that is not about the token.
+	connectFailed struct{ err error }
+)
+
+// Refs of the picker's action nodes.
+type pickerAction string
+
+const (
+	pickerCancel pickerAction = "cancel"
+	pickerReauth pickerAction = "reauth"
+)
+
+// connectGitHub lists the repositories of the token's owner. A token GitHub
+// refuses is not an error but a request to sign in again.
+func connectGitHub(token *oauth2.Token) tea.Msg {
 	ctx := context.Background()
-
-	clientID := "Ov23liAIKfguW2oYiore"
-	clientSecret := os.Getenv("GITHUB_OAUTH_SECRET")
-
-	var startAuth func()
-
-	reauth := func() {
-		_ = ghauth.DeleteToken()
-		startAuth()
+	client, err := newGitHubClient(ctx, token)
+	if err != nil {
+		return connectFailed{err: err}
 	}
-
-	useToken := func(token *oauth2.Token) {
-		ts := oauth2.StaticTokenSource(token)
-		tc := oauth2.NewClient(ctx, ts)
-		client, err := github.NewClient(github.WithHTTPClient(tc))
-		if err != nil {
-			sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to create GitHub client: %w", err))
-			return
-		}
-
-		// List repositories
-		repos, _, err := client.Repositories.ListByAuthenticatedUser(ctx, nil)
-		if err != nil {
-			// If listing repositories fails, the token might be invalid or expired.
-			// In that case, we might want to delete it and restart auth.
-			_ = ghauth.DeleteToken()
-			startAuth()
-			return
-		}
-
-		showRepoSelection(tui, client, repos, reauth)
+	repos, _, err := client.Repositories.ListByAuthenticatedUser(ctx, nil)
+	if err != nil {
+		return needAuth{}
 	}
+	return reposListed{client: client, repos: repos}
+}
 
-	startAuth = func() {
-		go func() {
-			deviceRes, err := ghauth.RequestDeviceCode(ctx, clientID)
-			if err != nil {
-				tui.App.QueueUpdateDraw(func() {
-					sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to request device code: %w", err))
-				})
-				return
-			}
-
-			tui.App.QueueUpdateDraw(func() {
-				statusText := tview.NewTextView().
-					SetDynamicColors(true).
-					SetTextAlign(tview.AlignCenter).
-					SetText(fmt.Sprintf("\nGo to %s\n\nEnter code: [yellow]%s[-]\n\nWaiting for authorization...", deviceRes.VerificationURI, deviceRes.UserCode))
-
-				copyMessage := tview.NewTextView().
-					SetTextAlign(tview.AlignCenter).
-					SetTextColor(tcell.ColorGreen)
-
-				form := tview.NewForm().
-					AddButton("Copy Code", func() {
-						_ = clipboard.WriteAll(deviceRes.UserCode)
-						copyMessage.SetText("The code has been copied to clipboard.")
-						go func() {
-							time.Sleep(2 * time.Second)
-							tui.App.QueueUpdateDraw(func() {
-								copyMessage.SetText("")
-							})
-						}()
-					}).
-					AddButton("Cancel", func() {
-						_ = GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)
-					})
-				form.SetButtonsAlign(tview.AlignCenter).
-					SetButtonBackgroundColor(tcell.ColorDarkBlue).
-					SetButtonTextColor(tcell.ColorWhite)
-
-				flex := tview.NewFlex().
-					SetDirection(tview.FlexRow).
-					AddItem(statusText, 0, 1, false).
-					AddItem(copyMessage, 1, 0, false).
-					AddItem(form, 3, 1, true)
-
-				flex.SetBorder(true).SetTitle("GitHub Device Activation")
-
-				panel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(flex, flex.Box))
-				tui.SetPanels(nil, panel)
-
-				// Update polling message
-				updateStatus := func(attempt int) {
-					tui.App.QueueUpdateDraw(func() {
-						statusText.SetText(fmt.Sprintf("\nGo to %s\n\nEnter code: [yellow]%s[-]\n\nWaiting for authorization (attempt %d)...", deviceRes.VerificationURI, deviceRes.UserCode, attempt))
-					})
-				}
-
-				go func() {
-					token, err := ghauth.PollForToken(ctx, clientID, clientSecret, deviceRes.DeviceCode, deviceRes.Interval, updateStatus)
-					tui.App.QueueUpdateDraw(func() {
-						if err != nil {
-							sneatnav.ShowErrorModal(tui, fmt.Errorf("authentication failed: %w", err))
-							return
-						}
-
-						if err := ghauth.SaveToken(token); err != nil {
-							// Log error but proceed
-							fmt.Printf("failed to save token: %v\n", err)
-						}
-
-						useToken(token)
-					})
-				}()
-			})
-		}()
+// connect starts the flow with the token in the keyring, if there is one.
+func connect() tea.Msg {
+	token, err := getToken()
+	if err != nil || token == nil {
+		return needAuth{}
 	}
+	return connectGitHub(token)
+}
 
-	// Try to get token from keyring
-	if token, err := ghauth.GetToken(); err == nil && token != nil {
-		useToken(token)
+// signIn forgets the saved token, which is stale or being replaced, and asks the
+// user to sign in.
+func signIn() tea.Msg {
+	_ = deleteToken()
+	return needAuth{}
+}
+
+// addToGitHub is the screen that lists the user's repositories and starts the
+// setup of the selected one. Until the repositories are listed it says so.
+type addToGitHub struct {
+	geo    geometry
+	tree   widgets.Tree
+	client *github.Client
+	listed bool
+}
+
+var (
+	_ nav.Screen       = addToGitHub{}
+	_ nav.Titled       = addToGitHub{}
+	_ nav.ShortHelper  = addToGitHub{}
+	_ widgets.Boundary = addToGitHub{}
+)
+
+func newAddToGitHub() addToGitHub { return addToGitHub{} }
+
+// Init implements nav.Screen.
+func (a addToGitHub) Init() tea.Cmd { return connect }
+
+func (a *addToGitHub) sync() {
+	a.tree.SetSize(a.geo.w, a.geo.h)
+	if a.geo.focused {
+		a.tree.Focus()
 	} else {
-		startAuth()
+		a.tree.Blur()
 	}
 }
 
-func showRepoSelection(tui *sneatnav.TUI, client *github.Client, repos []*github.Repository, reauth func()) {
-	tree := tview.NewTreeView()
-	tree.SetTitle("Select GitHub Repository").SetBorder(true)
+// Update implements nav.Screen.
+func (a addToGitHub) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
+	if a.geo.track(msg) {
+		a.sync()
+		return a, nil
+	}
+	switch msg := msg.(type) {
+	case needAuth:
+		return a, datatugui.Drill("GitHub sign-in", newDeviceAuth())
+	case githubAuthenticated:
+		return a, connect
+	case connectFailed:
+		return a, datatugui.ReportError("connect to GitHub", msg.err)
+	case reposListed:
+		a.client, a.listed = msg.client, true
+		a.tree = newReposTree(msg.repos)
+		a.sync()
+		return a, nil
+	case widgets.NodeSelectedMsg:
+		return a, a.selected(msg.Node)
+	}
+	if !a.listed {
+		return a, nil
+	}
+	tree, cmd := a.tree.Update(msg)
+	a.tree = tree
+	return a, cmd
+}
 
-	root := tview.NewTreeNode("Repositories").SetSelectable(false)
-	tree.SetRoot(root)
+// selected reacts to the activation of a node.
+func (a addToGitHub) selected(node widgets.TreeNode) tea.Cmd {
+	switch ref := node.Ref.(type) {
+	case *github.Repository:
+		return datatugui.Drill("Setting up "+ref.GetFullName(), newSetupRepo(a.client, ref))
+	case pickerAction:
+		if ref == pickerReauth {
+			return signIn
+		}
+	}
+	return datatugui.Open(datatugui.ScreenProjects, nav.FocusToContent)
+}
 
-	// Group repos by owner
-	reposByOwner := make(map[string][]*github.Repository)
-	var owners []string
+// newReposTree groups repositories by owner, sorted, above the Cancel and
+// Re-authenticate actions.
+func newReposTree(repos []*github.Repository) widgets.Tree {
+	byOwner := map[string][]*github.Repository{}
 	for _, repo := range repos {
 		owner := repo.GetOwner().GetLogin()
-		if _, ok := reposByOwner[owner]; !ok {
-			owners = append(owners, owner)
-		}
-		reposByOwner[owner] = append(reposByOwner[owner], repo)
+		byOwner[owner] = append(byOwner[owner], repo)
+	}
+	owners := make([]string, 0, len(byOwner))
+	for owner := range byOwner {
+		owners = append(owners, owner)
 	}
 	sort.Strings(owners)
 
+	roots := make([]widgets.TreeNode, 0, len(owners)+2)
 	for _, owner := range owners {
-		ownerNode := tview.NewTreeNode(owner).
-			SetColor(tcell.ColorLightBlue).
-			SetSelectable(true).
-			SetExpanded(false)
-		root.AddChild(ownerNode)
-
-		ownerRepos := reposByOwner[owner]
-		sort.Slice(ownerRepos, func(i, j int) bool {
-			return ownerRepos[i].GetName() < ownerRepos[j].GetName()
-		})
-
+		ownerRepos := byOwner[owner]
+		sort.Slice(ownerRepos, func(i, j int) bool { return ownerRepos[i].GetName() < ownerRepos[j].GetName() })
+		node := widgets.TreeNode{ID: "owner:" + owner, Text: owner, Color: theme.AccentColor()}
 		for _, repo := range ownerRepos {
-			r := repo
-			repoNode := tview.NewTreeNode(repo.GetName()).
-				SetReference(r).
-				SetSelectedFunc(func() {
-					err := AddToGitHubRepo(tui, client, r, repos, reauth)
-					if err != nil {
-						sneatnav.ShowErrorModal(tui, err)
-					}
-				})
-			ownerNode.AddChild(repoNode)
+			node.Children = append(node.Children, widgets.TreeNode{ID: "repo:" + repo.GetFullName(), Text: repo.GetName(), Ref: repo})
 		}
+		roots = append(roots, node)
 	}
-
-	cancelNode := tview.NewTreeNode("Cancel").
-		SetReference("cancel").
-		SetColor(tcell.ColorRed).
-		SetSelectedFunc(func() {
-			_ = GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)
-		})
-	root.AddChild(cancelNode)
-
-	reauthNode := tview.NewTreeNode("Re-authenticate").
-		SetReference("reauth").
-		SetColor(tcell.ColorYellow).
-		SetSelectedFunc(func() {
-			reauth()
-		})
-	root.AddChild(reauthNode)
-
-	tree.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		currentNode := tree.GetCurrentNode()
-		if currentNode == nil {
-			return event
-		}
-
-		switch event.Key() {
-		case tcell.KeyEnter, tcell.KeyRune:
-			if event.Key() == tcell.KeyRune && event.Rune() != ' ' {
-				return event
-			}
-			// If it's an owner node (has children and no Repository reference), toggle expansion
-			if len(currentNode.GetChildren()) > 0 && currentNode.GetReference() == nil {
-				currentNode.SetExpanded(!currentNode.IsExpanded())
-				return nil
-			}
-			return event
-		case tcell.KeyLeft:
-			if currentNode.IsExpanded() {
-				currentNode.SetExpanded(false)
-				return nil
-			}
-			return event
-		default:
-			return event
-		}
-	})
-
-	if len(root.GetChildren()) > 0 {
-		tree.SetCurrentNode(root.GetChildren()[0])
-	}
-
-	panel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(tree, tree.Box))
-	tui.SetPanels(nil, panel)
+	roots = append(roots,
+		widgets.TreeNode{ID: "cancel", Text: "Cancel", Ref: pickerCancel, Color: theme.ErrorColor()},
+		widgets.TreeNode{ID: "reauth", Text: "Re-authenticate", Ref: pickerReauth, Color: theme.Yellow},
+	)
+	return widgets.NewTree(reposTreeID, roots...)
 }
 
-func AddToGitHubRepo(tui *sneatnav.TUI, client *github.Client, repo *github.Repository, repos []*github.Repository, reauth func()) error {
-	repoOwner := repo.GetOwner().GetLogin()
-	repoName := repo.GetName()
-	branch := repo.GetDefaultBranch()
-
-	projectID := fmt.Sprintf("github.com/%s/%s", repoOwner, repoName)
-	projectTitle := fmt.Sprintf("%s @ github.com/%s", repoName, repoOwner)
-	projectDir := "~/datatug/" + projectID
-
-	// UI for progress
-	progressView := tview.NewTextView().SetDynamicColors(true)
-	progressView.SetBorder(true).SetTitle("Setting up DataTug in " + repo.GetFullName())
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	cancelButton := tview.NewButton("Cancel").SetSelectedFunc(func() {
-		cancel()
-		if repos != nil {
-			showRepoSelection(tui, client, repos, reauth)
-		} else {
-			_ = GoDataTugProjectsScreen(tui, sneatnav.FocusToContent)
-		}
-	})
-
-	layout := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(progressView, 0, 1, false).
-		AddItem(cancelButton, 1, 0, true)
-
-	panel := sneatnav.NewPanel(tui, sneatv.WithDefaultBorders(layout, layout.Box))
-	tui.SetPanels(nil, panel)
-
-	steps := []string{
-		"Add DataTug project files to repository",
-		"Add DataTug section to /README.md",
-		"Cloning project repository to " + projectDir,
-		"Add project to DataTug app config",
+// View implements nav.Screen.
+func (a addToGitHub) View() string {
+	if !a.listed {
+		return widgets.Fit("Connecting to GitHub...", a.geo.w, a.geo.h)
 	}
-
-	updateProgress := func(currentStep int, status string) {
-		tui.App.QueueUpdateDraw(func() {
-			var sb strings.Builder
-			for i, step := range steps {
-				if i < currentStep {
-					_, _ = fmt.Fprintf(&sb, "- %s - [green]done[-]\n", step)
-				} else if i == currentStep {
-					_, _ = fmt.Fprintf(&sb, "- %s - [yellow]%s[-]\n", step, status)
-				} else {
-					_, _ = fmt.Fprintf(&sb, "- %s\n", step)
-				}
-			}
-			progressView.SetText(sb.String())
-		})
-	}
-
-	go func() {
-		// Helper to check for cancellation
-		isCancelled := func() bool {
-			select {
-			case <-ctx.Done():
-				return true
-			default:
-				return false
-			}
-		}
-
-		// 1. Create datatug directory with config and README.md in a single commit
-		updateProgress(0, "creating...")
-		if isCancelled() {
-			return
-		}
-
-		configContent := `{
-  "id": "` + repoName + `",
-  "title": "` + repoName + `"
-}`
-		configFilePath := "datatug/" + storage.ProjectSummaryFileName
-		readmeContent := "# DataTug Project\n\nThis directory contains DataTug project configuration."
-		readmeFilePath := "datatug/README.md"
-
-		// We use the Git Data API to create multiple files in a single commit.
-		// 1. Get the latest commit of the branch
-		ref, _, err := client.Git.GetRef(ctx, repoOwner, repoName, "heads/"+branch)
-		if err != nil {
-			// If the repository is empty, we need to create the first commit
-			var gErr *github.ErrorResponse
-			if errors.As(err, &gErr) && gErr.Response != nil && (gErr.Response.StatusCode == 404 || gErr.Response.StatusCode == 409) {
-				// Create initial README.md to initialize the repository
-				updateProgress(0, "initializing repository...")
-				_, _, err = client.Repositories.CreateFile(ctx, repoOwner, repoName, "README.md", &github.RepositoryContentFileOptions{
-					Message: new("feat: initial commit"),
-					Content: []byte("# " + repoName + "\n\nDataTug project repository."),
-					Branch:  new(branch),
-				})
-				if err != nil {
-					tui.App.QueueUpdateDraw(func() {
-						sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to initialize repository: %w", err))
-					})
-					return
-				}
-				// Retry getting the ref
-				ref, _, err = client.Git.GetRef(ctx, repoOwner, repoName, "heads/"+branch)
-			}
-			if err != nil {
-				tui.App.QueueUpdateDraw(func() {
-					sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to get branch ref: %w", err))
-				})
-				return
-			}
-		}
-
-		var entries []*github.TreeEntry
-
-		addEntry := func(path string, content string) {
-			// Check if files already exist to avoid overwriting or redundant commits
-			if existing, _, _, _ := client.Repositories.GetContents(ctx, repoOwner, repoName, path, &github.RepositoryContentGetOptions{Ref: branch}); existing == nil {
-				entries = append(entries, &github.TreeEntry{
-					Path:    new(path),
-					Type:    new("blob"),
-					Mode:    new("100644"),
-					Content: new(content),
-				})
-			}
-		}
-
-		addEntry(configFilePath, configContent)
-		addEntry(readmeFilePath, readmeContent)
-
-		if len(entries) > 0 {
-			tree, _, err := client.Git.CreateTree(ctx, repoOwner, repoName, *ref.Object.SHA, entries)
-			if err != nil {
-				tui.App.QueueUpdateDraw(func() {
-					sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to create tree: %w", err))
-				})
-				return
-			}
-
-			// 3. Create a commit
-			parent, _, err := client.Git.GetCommit(ctx, repoOwner, repoName, *ref.Object.SHA)
-			if err != nil {
-				tui.App.QueueUpdateDraw(func() {
-					sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to get parent commit: %w", err))
-				})
-				return
-			}
-
-			commit, _, err := client.Git.CreateCommit(ctx, repoOwner, repoName, github.Commit{
-				Message: new("chore: adds datatug project"),
-				Tree:    tree,
-				Parents: []*github.Commit{parent},
-			}, &github.CreateCommitOptions{})
-			if err != nil {
-				tui.App.QueueUpdateDraw(func() {
-					sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to create commit: %w", err))
-				})
-				return
-			}
-
-			// 4. Update the reference
-			ref.Object.SHA = commit.SHA
-			_, _, err = client.Git.UpdateRef(ctx, repoOwner, repoName, ref.GetRef(), github.UpdateRef{
-				SHA:   commit.GetSHA(),
-				Force: new(false),
-			})
-			if err != nil {
-				tui.App.QueueUpdateDraw(func() {
-					sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to update ref: %w", err))
-				})
-				return
-			}
-		}
-
-		if isCancelled() {
-			return
-		}
-
-		// 2. Add 'DataTug' section to root README.md
-		updateProgress(1, "updating...")
-		rootReadme, _, err := client.Repositories.GetReadme(ctx, repoOwner, repoName, &github.RepositoryContentGetOptions{Ref: branch})
-
-		var dataTugSectionTitleRegex = regexp.MustCompile(`\n##\s*DataTug`)
-
-		getDataTugSectionForReadmeMD := func() string {
-			const dataTugSectionTitleText = "DataTug - [github.com/datatug/datatug](https://github.com/datatug/datatug)"
-			appLink := fmt.Sprintf("[DataTug.app](https://datatug.app/#%s)", projectID)
-			msg := fmt.Sprintf("The [/datatug](./datatug) project can be opened and edited in %s.", appLink)
-			return fmt.Sprintf("\n\n## DataTug - %s\n\n%s\n\n", dataTugSectionTitleText, msg)
-		}
-
-		if err == nil {
-			content, _ := rootReadme.GetContent()
-			if !dataTugSectionTitleRegex.Match([]byte(content)) {
-				newContent := content + getDataTugSectionForReadmeMD()
-				_, _, err = client.Repositories.UpdateFile(ctx, repoOwner, repoName, rootReadme.GetPath(), &github.RepositoryContentFileOptions{
-					Message: new("chore: adds ##DataTug section to /README.md"),
-					Content: []byte(newContent),
-					SHA:     rootReadme.SHA,
-					Branch:  new(branch),
-				})
-				if err != nil {
-					tui.App.QueueUpdateDraw(func() {
-						sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to update root README.md: %w", err))
-					})
-					return
-				}
-			}
-		} else {
-			newContent := "# " + repoName + getDataTugSectionForReadmeMD()
-			_, _, err = client.Repositories.CreateFile(ctx, repoOwner, repoName, "README.md", &github.RepositoryContentFileOptions{
-				Message: new("feat: creates /README.md with ##DataTug section"),
-				Content: []byte(newContent),
-				Branch:  new(branch),
-			})
-			if err != nil {
-				tui.App.QueueUpdateDraw(func() {
-					sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to create root README.md: %w", err))
-				})
-				return
-			}
-		}
-
-		if isCancelled() {
-			return
-		}
-
-		// 3. Cloning project repository
-		updateProgress(3, "cloning...")
-		localDir := fsutils.ExpandHome(projectDir)
-		dirExists, _ := fsutils.DirExists(localDir)
-		if !dirExists {
-			parent := filepath.Dir(localDir)
-			_ = os.MkdirAll(parent, 0o755)
-			cloneUrl := repo.GetCloneURL()
-			if cloneUrl == "" {
-				cloneUrl = fmt.Sprintf("https://github.com/%s/%s.git", repoOwner, repoName)
-			}
-			_, err = git.PlainClone(localDir, false, &git.CloneOptions{
-				URL:      cloneUrl,
-				Progress: NewTviewProgressWriter(tui, progressView),
-			})
-			if err != nil {
-				tui.App.QueueUpdateDraw(func() {
-					sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to clone repository: %w", err))
-				})
-				return
-			}
-		}
-
-		if isCancelled() {
-			return
-		}
-
-		// 4. Add project to DataTug app config
-		updateProgress(4, "updating...")
-		if err := dtconfig.AddProjectToSettings(dtconfig.ProjectRef{
-			ID:    projectID,
-			Title: projectTitle,
-			Path:  projectDir,
-		}); err != nil {
-			tui.App.QueueUpdateDraw(func() {
-				sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to add repo to DataTug app config: %w", err))
-			})
-			return
-		}
-
-		updateProgress(5, "") // All done
-
-		time.Sleep(500 * time.Millisecond)
-
-		if isCancelled() {
-			return
-		}
-
-		tui.App.QueueUpdateDraw(func() {
-			store, _ := filestore.NewSingleProjectStore("~/datatug/"+projectID, projectID)
-			projectRef := dtconfig.ProjectRef{
-				ID:    projectID,
-				Title: projectTitle,
-				Path:  projectID,
-			}
-			projStore := store.GetProjectStore(projectID)
-			projectCtx := NewProjectContext(tui, projStore, projectRef)
-			GoDatatugProjectScreen(projectCtx)
-		})
-	}()
-	return nil
+	return a.tree.View()
 }
+
+// Title implements nav.Titled.
+func (a addToGitHub) Title() string { return "Select GitHub Repository" }
+
+// ShortHelp implements nav.ShortHelper.
+func (a addToGitHub) ShortHelp() []key.Binding { return a.tree.KeyMap.ShortHelp() }
+
+// AtEdge implements widgets.Boundary.
+func (a addToGitHub) AtEdge(dir widgets.Direction) bool { return !a.listed || a.tree.AtEdge(dir) }

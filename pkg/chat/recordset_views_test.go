@@ -3,7 +3,7 @@ package chat
 import (
 	"testing"
 
-	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/strongo-tui/pkg/grid"
 )
 
 // TestChooseGridLayoutBoundary is TestChooseRecordsetLayoutBoundary, ported

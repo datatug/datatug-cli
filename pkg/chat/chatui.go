@@ -17,11 +17,12 @@ import (
 	"github.com/pkg/browser"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/tui/chatshell"
-	"github.com/strongo/aichat/tui/focus"
-	"github.com/strongo/aichat/tui/grid"
+	"github.com/strongo/aichat/tui/gridblock"
 	"github.com/strongo/aichat/tui/mdrender"
-	"github.com/strongo/aichat/tui/theme"
 	"github.com/strongo/aichat/tui/transcript"
+	"github.com/strongo/strongo-tui/pkg/focus"
+	"github.com/strongo/strongo-tui/pkg/grid"
+	"github.com/strongo/strongo-tui/pkg/theme"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
@@ -125,7 +126,7 @@ type ChatUI struct {
 	// it to read JoinBlock.JoinFocused() for the focused grid, since
 	// chatshell exposes only the focused entry's session.EntityRef/ID, not
 	// the Block instance itself. A RecordSetID whose grid has no join
-	// candidates (blockForGrid returned the bare grid.Model) has no entry
+	// candidates (blockForGrid returned a plain gridblock.Block) has no entry
 	// here.
 	joinBlocksByRecordSetID map[string]*JoinBlock
 
@@ -495,15 +496,14 @@ func (u *ChatUI) appendGridResult(query QueryResult) {
 
 // blockForGrid wraps gridModel in a JoinBlock when recordSetID has FK-join
 // candidates (SessionChat.JoinCandidates), otherwise returns gridModel
-// itself — grid.Model already implements transcript.Block/EntityBlock
-// directly (see tui/grid/render.go, update.go).
+// wrapped as a transcript block by gridblock.Wrap.
 func (u *ChatUI) blockForGrid(gridModel *grid.Model, recordSetID string) transcript.Block {
 	if u.sessions == nil || recordSetID == "" {
-		return gridModel
+		return gridblock.Wrap(gridModel)
 	}
 	candidates, err := u.sessions.JoinCandidates(u.ctx, recordSetID)
 	if err != nil || len(candidates) == 0 {
-		return gridModel
+		return gridblock.Wrap(gridModel)
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		left, right := candidates[i], candidates[j]
@@ -1178,7 +1178,7 @@ func (u *ChatUI) statusHintsRaw(width int) []string {
 		if count := len(u.snapshot.Workspace.ExportBucket); count > 0 {
 			segments = append(segments, fmt.Sprintf("B bucket:%d", count))
 		}
-		switch g.CurrentView() {
+		switch g.ActiveView() {
 		case gridViewCharts:
 			segments = append(segments, "↑↓ chart candidates")
 		case gridViewCurrentRow:

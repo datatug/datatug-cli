@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
-	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -144,7 +143,7 @@ type executionClient struct {
 func newExecutionClient(cmd *cobra.Command) (executionClient, executionScope, error) {
 	agent, _ := cmd.Flags().GetString(executionAgentFlag)
 	if agent == "" {
-		settings, err := dtconfig.GetSettings()
+		settings, err := agentLoadSettings()
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return executionClient{}, executionScope{}, err
 		}

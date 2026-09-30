@@ -22,6 +22,10 @@ import (
 
 const compareAgentRequestTimeout = 75 * time.Second
 
+// agentLoadSettings reads the DataTug settings used to resolve the default
+// agent address. It is a package-level seam so tests can stay hermetic.
+var agentLoadSettings = dtconfig.GetSettings
+
 const (
 	compareAgentFlag        = "agent"
 	compareProjectFlag      = "project"
@@ -117,7 +121,7 @@ func runCompareCommand(cmd *cobra.Command, _ []string) error {
 	if err := request.Validate(); err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
-	raw, status, err := client.post(cmd.Context(), "/datatug/compare", request)
+	raw, _, err := client.post(cmd.Context(), "/datatug/compare", request)
 	asJSON, _ := cmd.Flags().GetBool(compareJSONFlag)
 	if asJSON && len(raw) != 0 {
 		if _, writeErr := cmd.OutOrStdout().Write(raw); writeErr != nil {
@@ -129,9 +133,6 @@ func runCompareCommand(cmd *cobra.Command, _ []string) error {
 			return Exit("compare failed", 1)
 		}
 		return err
-	}
-	if status < http.StatusOK || status >= http.StatusMultipleChoices {
-		return Exit("compare failed", 1)
 	}
 	if asJSON {
 		return nil
@@ -273,7 +274,7 @@ type agentHTTPClient struct {
 func newAgentHTTPClient(cmd *cobra.Command, flagName string) (agentHTTPClient, apicontract.AgentInfo, error) {
 	agent, _ := cmd.Flags().GetString(flagName)
 	if agent == "" {
-		settings, err := dtconfig.GetSettings()
+		settings, err := agentLoadSettings()
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return agentHTTPClient{}, apicontract.AgentInfo{}, err
 		}
@@ -340,10 +341,6 @@ func agentResponseError(status int, body []byte) error {
 	var response apicontract.CompareErrorResponse
 	if apicontract.DecodeStrict(body, &response) == nil && response.Error.Message != "" {
 		return fmt.Errorf("DataTug agent: %s: %s", response.Error.Code, response.Error.Message)
-	}
-	var envelope apicontract.ErrorEnvelope
-	if apicontract.DecodeStrict(body, &envelope) == nil && envelope.Error.Message != "" {
-		return fmt.Errorf("DataTug agent: %s: %s", envelope.Error.Code, envelope.Error.Message)
 	}
 	return fmt.Errorf("DataTug agent: HTTP %d", status)
 }

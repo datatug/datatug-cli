@@ -284,4 +284,3 @@ func TestGetPostHogClient_WriteConfigError(t *testing.T) {
 
 	_ = getPostHogClient()
 }
-

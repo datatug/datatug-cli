@@ -1,143 +1,49 @@
 package dtapiservice
 
 import (
-	"sync"
 	"testing"
 
-	"github.com/datatug/datatug-cli/pkg/sneatv"
-	"github.com/datatug/datatug-cli/pkg/sneatview/sneatnav"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	tea "charm.land/bubbletea/v2"
+	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
+	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/strongo/strongo-tui/pkg/nav/navtest"
+	"github.com/strongo/strongo-tui/pkg/widgets"
 )
 
-// registerOnce ensures RegisterModule is called at most once per test binary
-// run. datatugui.RegisterMainMenuItem panics on duplicate IDs.
-var registerOnce sync.Once
-
-// newTestTUI builds a headless *sneatnav.TUI wired to a simulation screen.
-// Only app.Stop() is registered as cleanup (avoiding the double-Fini that
-// would arise if screen.Fini() were also called after app.Stop()).
-func newTestTUI(t *testing.T) *sneatnav.TUI {
-	t.Helper()
-	screen := tcell.NewSimulationScreen("UTF-8")
-	app := tview.NewApplication().SetScreen(screen)
-	root := sneatv.NewBreadcrumb(" test", func() error { return nil })
-	tui := sneatnav.NewTUI(app, root)
-	t.Cleanup(func() { app.Stop() })
-	return tui
-}
-
-func TestRegisterModule(t *testing.T) {
-	registerOnce.Do(func() {
-		RegisterModule()
-	})
-	// Reaching here without panic means the function completed successfully.
-}
-
-// buildTUIWithCapture calls GoApiServiceMonitor on a fresh headless TUI and
-// returns both the TUI and the textView whose input capture we want to drive.
-func buildTUIWithCapture(t *testing.T) (*sneatnav.TUI, *tview.TextView) {
-	t.Helper()
-	registerOnce.Do(func() { RegisterModule() })
-
-	tui := newTestTUI(t)
-
-	var captured *tview.TextView
-	origNewTextView := newTextViewFunc
-	newTextViewFunc = func() *tview.TextView {
-		tv := tview.NewTextView()
-		captured = tv
-		return tv
+func TestModule(t *testing.T) {
+	m := Module()
+	if m.ID != datatugui.ScreenAPIMonitor || m.Text != "API Monitor" || m.Shortcut != 'w' {
+		t.Fatalf("unexpected module: %+v", m)
 	}
-	t.Cleanup(func() { newTextViewFunc = origNewTextView })
-
-	if err := GoApiServiceMonitor(tui, sneatnav.FocusToContent); err != nil {
-		t.Fatalf("GoApiServiceMonitor returned unexpected error: %v", err)
+	page := m.Root()
+	if page.Content == nil {
+		t.Fatal("root page has no content")
 	}
-	return tui, captured
+	h := navtest.New(t, page)
+	h.RequireContains("Open web UI: https://datatug.app/pwa/#api=localhost:8080")
+	h.RequireContains("Web UI & Local API Service Monitor")
 }
 
-func TestGoApiServiceMonitor_FocusToContent(t *testing.T) {
-	_, _ = buildTUIWithCapture(t)
-}
-
-func TestGoApiServiceMonitor_FocusToMenu(t *testing.T) {
-	registerOnce.Do(func() { RegisterModule() })
-	tui := newTestTUI(t)
-
-	if err := GoApiServiceMonitor(tui, sneatnav.FocusToMenu); err != nil {
-		t.Fatalf("GoApiServiceMonitor(FocusToMenu) returned unexpected error: %v", err)
+func TestMonitorScreen(t *testing.T) {
+	var s nav.Screen = newMonitor()
+	if cmd := s.Init(); cmd != nil {
+		t.Fatal("Init must not start work")
 	}
-}
-
-// TestGoApiServiceMonitor_BreadcrumbAction exercises the closure pushed onto
-// the breadcrumbs by GoApiServiceMonitor. After the call the breadcrumbs has
-// a pushed item whose Action() re-calls GoApiServiceMonitor; we trigger it via
-// the breadcrumbs InputHandler (KeyEnter fires items[selectedIndex].Action()).
-func TestGoApiServiceMonitor_BreadcrumbAction(t *testing.T) {
-	registerOnce.Do(func() { RegisterModule() })
-	tui := newTestTUI(t)
-
-	if err := GoApiServiceMonitor(tui, sneatnav.FocusToContent); err != nil {
-		t.Fatalf("initial GoApiServiceMonitor call failed: %v", err)
+	s, _ = s.Update(tea.WindowSizeMsg{Width: 60, Height: 5})
+	s, _ = s.Update(nav.ScreenFocusMsg{Focused: true})
+	if s.(nav.Titled).Title() != screenTitle {
+		t.Fatalf("title = %q", s.(nav.Titled).Title())
 	}
-
-	// Retrieve the concrete *sneatv.Breadcrumbs and fire KeyEnter to invoke
-	// the pushed breadcrumb's action (the re-entrant GoApiServiceMonitor call).
-	bc, ok := tui.Header.Breadcrumbs().(*sneatv.Breadcrumbs)
-	if !ok {
-		t.Skip("breadcrumbs is not *sneatv.Breadcrumbs; cannot trigger action directly")
+	if got := s.View(); got == "" {
+		t.Fatal("empty view")
 	}
-	handler := bc.InputHandler()
-	setFocus := func(p tview.Primitive) { tui.App.SetFocus(p) }
-	handler(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), setFocus)
-}
-
-func invokeCapture(tv *tview.TextView, key tcell.Key) *tcell.EventKey {
-	capture := tv.GetInputCapture()
-	if capture == nil {
-		return tcell.NewEventKey(key, 0, tcell.ModNone)
+	b := s.(widgets.Boundary)
+	if !b.AtEdge(widgets.Left) || !b.AtEdge(widgets.Up) {
+		t.Fatal("a short text is at every edge")
 	}
-	return capture(tcell.NewEventKey(key, 0, tcell.ModNone))
-}
-
-func TestGoApiServiceMonitor_InputCapture_KeyLeft(t *testing.T) {
-	_, tv := buildTUIWithCapture(t)
-	result := invokeCapture(tv, tcell.KeyLeft)
-	if result != nil {
-		t.Errorf("KeyLeft: expected nil (event consumed), got %v", result)
-	}
-}
-
-func TestGoApiServiceMonitor_InputCapture_KeyESC(t *testing.T) {
-	_, tv := buildTUIWithCapture(t)
-	result := invokeCapture(tv, tcell.KeyESC)
-	if result != nil {
-		t.Errorf("KeyESC: expected nil (event consumed), got %v", result)
-	}
-}
-
-func TestGoApiServiceMonitor_InputCapture_KeyBackspace(t *testing.T) {
-	_, tv := buildTUIWithCapture(t)
-	result := invokeCapture(tv, tcell.KeyBackspace)
-	if result != nil {
-		t.Errorf("KeyBackspace: expected nil (event consumed), got %v", result)
-	}
-}
-
-func TestGoApiServiceMonitor_InputCapture_KeyUp(t *testing.T) {
-	_, tv := buildTUIWithCapture(t)
-	result := invokeCapture(tv, tcell.KeyUp)
-	// KeyUp calls tui.SetFocus(tui.Header) then falls through to `return event`.
-	if result == nil {
-		t.Errorf("KeyUp: expected non-nil event to be returned")
-	}
-}
-
-func TestGoApiServiceMonitor_InputCapture_DefaultKey(t *testing.T) {
-	_, tv := buildTUIWithCapture(t)
-	result := invokeCapture(tv, tcell.KeyDown)
-	if result == nil {
-		t.Errorf("default key: expected non-nil event to be returned")
+	s, _ = s.Update(nav.ScreenFocusMsg{Focused: false})
+	_, cmd := s.Update(tea.MouseWheelMsg{})
+	if cmd != nil {
+		t.Fatal("unexpected command")
 	}
 }

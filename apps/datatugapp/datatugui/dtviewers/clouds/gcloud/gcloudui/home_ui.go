@@ -67,7 +67,7 @@ func (h home) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 		return h, datatugui.Drill("Credentials", newCredentials())
 	}
 	var cmd tea.Cmd
-	h.listPane, cmd = h.listPane.update(msg)
+	h.listPane, cmd = h.update(msg)
 	return h, cmd
 }
 

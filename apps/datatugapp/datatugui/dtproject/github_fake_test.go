@@ -2,7 +2,6 @@ package dtproject
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -86,16 +85,6 @@ func (f *fakeGitHub) called(route string) bool {
 		}
 	}
 	return false
-}
-
-// jsonOf marshals v for a route body.
-func jsonOf(t *testing.T, v any) string {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
 }
 
 // handle makes a route answer with fn, for answers that change between calls.

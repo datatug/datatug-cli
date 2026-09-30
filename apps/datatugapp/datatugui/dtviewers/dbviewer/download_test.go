@@ -151,7 +151,7 @@ func TestDownload_WriteFailure(t *testing.T) {
 	d = next.(download)
 	require.NoError(t, d.job.file.Close()) // the next write fails
 	next, cmd = d.Update(cmd())
-	next, cmd = next.Update(cmd())
+	_, cmd = next.Update(cmd())
 	msgs := uitest.Msgs(cmd)
 	require.Len(t, msgs, 1)
 	assert.IsType(t, nav.ErrorMsg{}, msgs[0])

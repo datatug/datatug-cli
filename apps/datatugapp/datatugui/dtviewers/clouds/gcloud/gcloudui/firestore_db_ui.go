@@ -51,7 +51,7 @@ func (f firestoreDb) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 		return f, datatugui.Drill("Indexes", newIndexes(f.ctx))
 	}
 	var cmd tea.Cmd
-	f.listPane, cmd = f.listPane.update(msg)
+	f.listPane, cmd = f.update(msg)
 	return f, cmd
 }
 

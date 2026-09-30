@@ -37,7 +37,7 @@ func (indexes) Init() tea.Cmd { return nil }
 // Update implements nav.Screen.
 func (i indexes) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 	var cmd tea.Cmd
-	i.listPane, cmd = i.listPane.update(msg)
+	i.listPane, cmd = i.update(msg)
 	return i, cmd
 }
 

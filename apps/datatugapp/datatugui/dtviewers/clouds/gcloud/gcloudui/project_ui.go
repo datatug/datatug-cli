@@ -51,7 +51,7 @@ func (p project) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 		return p, nil
 	}
 	var cmd tea.Cmd
-	p.listPane, cmd = p.listPane.update(msg)
+	p.listPane, cmd = p.update(msg)
 	return p, cmd
 }
 

@@ -201,7 +201,7 @@ func TestCreateMouse(t *testing.T) {
 	if !s.(createProject).Editing() {
 		t.Fatal("a click in the form focuses it")
 	}
-	s, _ = step(s, tea.MouseWheelMsg(tea.Mouse{X: 12, Y: 3, Button: tea.MouseWheelDown}))
+	_, _ = step(s, tea.MouseWheelMsg(tea.Mouse{X: 12, Y: 3, Button: tea.MouseWheelDown}))
 }
 
 func TestCreateOnGitHubSignedIn(t *testing.T) {

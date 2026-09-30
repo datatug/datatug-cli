@@ -99,7 +99,7 @@ func (c collections) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 		}
 	}
 	var cmd tea.Cmd
-	c.listPane, cmd = c.listPane.update(msg)
+	c.listPane, cmd = c.update(msg)
 	return c, cmd
 }
 

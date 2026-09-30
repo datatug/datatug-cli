@@ -21,7 +21,7 @@ import (
 	"github.com/filetug/filetug/pkg/fsutils"
 	"github.com/gdamore/tcell/v2"
 	"github.com/go-git/go-git/v5"
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v92/github"
 	"github.com/rivo/tview"
 	"golang.org/x/oauth2"
 )

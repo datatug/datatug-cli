@@ -366,8 +366,8 @@ github.com/strongo/validation v0.0.13 h1:EgRfP5XBZSVoiOd4805OGCOVqZndeqFONpSmdSe
 github.com/strongo/validation v0.0.13/go.mod h1:EY+//fgQhn6rr0rOvWRJuUCTSk5BIETZL2bL9CIDhbs=
 github.com/tiendc/go-deepcopy v1.7.2 h1:Ut2yYR7W9tWjTQitganoIue4UGxZwCcJy3orjrrIj44=
 github.com/tiendc/go-deepcopy v1.7.2/go.mod h1:4bKjNC2r7boYOkD2IOuZpYjmlDdzjbpTRyCx+goBCJQ=
-github.com/tuigoff/tuigoff v0.2.1 h1:t3SNtz66Yt0CYvxuSia/IqsppW0hST82N1vUZ8Q7scI=
-github.com/tuigoff/tuigoff v0.2.1/go.mod h1:plbfJzI8ZYspv5d+K9gVzJOmUkhu0y88OkPEdOJcecE=
+github.com/tuigoff/tuigoff v0.3.0 h1:sAzCH1jkjjqCc2md9OFGyfwvhSzaiUdNk7qHluYSDUI=
+github.com/tuigoff/tuigoff v0.3.0/go.mod h1:LJaZzBq+VLMspcisfUrhXoHjoC9/g7b6FwNUPbpDz7c=
 github.com/xanzy/ssh-agent v0.3.3 h1:+/15pJfg/RsTxqYcX6fHqOXZwwMP+2VyYWJeWM2qQFM=
 github.com/xanzy/ssh-agent v0.3.3/go.mod h1:6dzNDKs0J9rVPHPhaGCukekBHKqfl+L3KghI1Bc68Uw=
 github.com/xo/dburl v0.24.2 h1:aK6ASamrFjKl76h/UCBecc0BPBi97+IVmw4YWxx0rno=

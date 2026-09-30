@@ -18,10 +18,10 @@ import (
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/tui/chatshell"
 	"github.com/strongo/aichat/tui/gridblock"
-	"github.com/strongo/aichat/tui/mdrender"
 	"github.com/strongo/aichat/tui/transcript"
 	"github.com/tuigoff/tuigoff/pkg/focus"
 	"github.com/tuigoff/tuigoff/pkg/grid"
+	"github.com/tuigoff/tuigoff/pkg/mdrender"
 	"github.com/tuigoff/tuigoff/pkg/theme"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -716,7 +716,7 @@ func (u *ChatUI) loadSession(session ChatSession) {
 }
 
 // renderMarkdown/newMarkdownRenderer moved to
-// github.com/strongo/aichat/tui/mdrender (mdrender.Render/
+// github.com/tuigoff/tuigoff/pkg/mdrender (mdrender.Render/
 // mdrender.NewTermRenderer): every aichat product now shares one
 // glamour-backed markdown renderer instead of each carrying its own seam
 // (strongo/aichat#chat-shared-look). NewChatUI wires it directly via

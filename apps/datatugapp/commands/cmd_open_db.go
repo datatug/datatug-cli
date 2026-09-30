@@ -16,6 +16,7 @@ func dbCommand() *cobra.Command {
 			u, err := dburl.Parse(argAt(args, 0))
 			if err != nil {
 				fmt.Printf("db url parse error: %v\nArgs:\n\t%s", err, strings.Join(args, "\n\t"))
+				return err // u is nil here; falling through would dereference it
 			}
 			fmt.Printf("Opening database at %s", u.String())
 			return nil

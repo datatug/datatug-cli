@@ -363,9 +363,13 @@ func TestCov100fShowProject(t *testing.T) {
 }
 
 func TestCov100fOpenDB(t *testing.T) {
-	_, _, err := cov100fRun(t, func(r *cobra.Command) { r.AddCommand(dbCommand()) },
-		"db", "sqlite:////tmp/demo.db")
+	var err error
+	out := covDCaptureStdout(t, func() {
+		_, _, err = cov100fRun(t, func(r *cobra.Command) { r.AddCommand(dbCommand()) },
+			"db", "sqlite:////tmp/demo.db")
+	})
 	require.NoError(t, err)
+	assert.Equal(t, "Opening database at sqlite://tmp/demo.db", out)
 }
 
 func TestCov100fRenderCommand(t *testing.T) {
@@ -387,13 +391,18 @@ func TestCov100fRenderCommand(t *testing.T) {
 	})
 	t.Run("load and save", func(t *testing.T) {
 		dir := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "datatug-project.json"), []byte(`{"id":"render-p"}`), 0o600))
+		projectFile := filepath.Join(dir, "datatug-project.json")
+		compact := `{"id":"render-p","access":"private","created":{"at":"2026-01-02T03:04:05Z"}}`
+		require.NoError(t, os.WriteFile(projectFile, []byte(compact), 0o600))
 		cov100fSetVar(t, &renderInitProject, func(v *renderCommand) error {
 			v.ProjectDir = dir
 			return nil
 		})
-		// Save may fail for empty project; action still exercises load path.
-		_ = renderCommandAction(nil, nil)
+		require.NoError(t, renderCommandAction(nil, nil))
+		saved, err := os.ReadFile(projectFile)
+		require.NoError(t, err)
+		assert.NotEqual(t, compact, string(saved), "the project must be saved back")
+		assert.Contains(t, string(saved), `"id": "render-p"`)
 	})
 }
 

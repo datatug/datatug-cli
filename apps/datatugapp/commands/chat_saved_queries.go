@@ -154,6 +154,13 @@ func dtqlUsesParameters(node *yaml.Node) bool {
 	return false
 }
 
+// Package-level seams so tests can reach the branches a healthy sqlite driver
+// and snapshot loader never take; production always uses these defaults.
+var (
+	chatOpenSQLite             = sql.Open
+	chatLoadForeignKeySnapshot = chat.LoadSQLiteForeignKeySnapshot
+)
+
 func (s chatSavedQueries) LookupParameter(ctx context.Context, queryID, parameterID string) (*chat.SavedQueryLookup, error) {
 	canonical, err := api.ResolveQueryID(s.projectDir, queryID)
 	if err != nil {
@@ -191,12 +198,12 @@ func (s chatSavedQueries) LookupParameter(ctx context.Context, queryID, paramete
 		return nil, err
 	}
 	readOnlyURL := (&url.URL{Scheme: "file", Path: ref.Path, RawQuery: "mode=ro"}).String()
-	db, err := sql.Open("sqlite", readOnlyURL)
+	db, err := chatOpenSQLite("sqlite", readOnlyURL)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = db.Close() }()
-	snapshot, err := chat.LoadSQLiteForeignKeySnapshot(ctx, source, db)
+	snapshot, err := chatLoadForeignKeySnapshot(ctx, source, db)
 	if err != nil {
 		return nil, err
 	}

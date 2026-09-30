@@ -300,56 +300,59 @@ func runDTQLSavedQuery(ctx context.Context, executor *secureread.Executor, projS
 }
 
 func federatedDTQLURLs(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (map[string]string, error) {
+	_, urls, err := parseFederatedDTQL(ctx, projStore, projectDir, envFlag, queryDef)
+	return urls, err
+}
+
+// parseFederatedDTQL parses the query once and resolves the source URL of each
+// named database it references, returning both so callers need not re-parse.
+func parseFederatedDTQL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) (dal.StructuredQuery, map[string]string, error) {
 	parsed, err := dtql.Deserialize([]byte(queryDef.Text))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	databases := map[string]bool{}
-	var visit func(dal.FromSource)
-	visit = func(from dal.FromSource) {
-		if ref, ok := from.Base().(dal.CollectionRef); ok && ref.Database() != "" {
-			databases[ref.Database()] = true
-		}
-		for _, joined := range from.Joins() {
-			if child := joined.From(); child != nil {
-				visit(child)
-			} else {
-				visit(dal.From(joined.RecordsetSource))
-			}
-		}
-	}
-	visit(parsed.From())
+	collectFederatedDatabases(parsed.From(), databases)
 	if len(databases) > 0 {
 		envID, err := resolveQueryEnvironment(ctx, projStore, envFlag)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		urls := make(map[string]string, len(databases))
 		for database := range databases {
 			url, err := resolveQuerySourceURL(ctx, projStore, projectDir, envID, database)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			urls[database] = url
 		}
-		return urls, nil
+		return parsed, urls, nil
 	}
-	return nil, nil
+	return parsed, nil, nil
+}
+
+func collectFederatedDatabases(from dal.FromSource, databases map[string]bool) {
+	if ref, ok := from.Base().(dal.CollectionRef); ok && ref.Database() != "" {
+		databases[ref.Database()] = true
+	}
+	for _, joined := range from.Joins() {
+		if child := joined.From(); child != nil {
+			collectFederatedDatabases(child, databases)
+		} else {
+			collectFederatedDatabases(dal.From(joined.RecordsetSource), databases)
+		}
+	}
 }
 
 // runStreamedSavedDTQL handles named-database federated queries only. The
 // streaming contract keeps at most DALgo's bounded lookup batch in memory.
 func runStreamedSavedDTQL(ctx context.Context, out, progress io.Writer, o queryOptions, executor *secureread.Executor, store datatug.ProjectStore, projectDir string, queryDef *datatug.QueryDef, variables map[string]any) (bool, error) {
-	urls, err := federatedDTQLURLs(ctx, store, projectDir, o.env, queryDef)
+	parsed, urls, err := parseFederatedDTQL(ctx, store, projectDir, o.env, queryDef)
 	if err != nil {
 		return true, err
 	}
 	if len(urls) == 0 {
 		return false, nil
-	}
-	parsed, err := dtql.Deserialize([]byte(queryDef.Text))
-	if err != nil {
-		return true, err
 	}
 	if !isBoundedFederatedRowShape(parsed) {
 		return true, fmt.Errorf("streaming %s requires a direct single-source scan or one flat equality join without global ordering, aggregation, or subqueries; joins also require an explicit dimension scan with stable id orderBy and limit of 1..10000; use --format json for other shapes", o.format)

@@ -33,7 +33,7 @@ func renderCommandAction(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("ProjectDir=[%v] not found: %w", v.ProjectDir, err)
 	}
 
-	store, _ := filestore.NewSingleProjectStore(storage.SingleProjectID, v.ProjectDir)
+	store, _ := filestore.NewSingleProjectStore(v.ProjectDir, storage.SingleProjectID)
 	projectStore := store.GetProjectStore(storage.SingleProjectID)
 	datatugProject, err := projectStore.LoadProject(context.Background())
 	if err != nil {

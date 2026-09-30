@@ -12,12 +12,6 @@
 
 ## Previously uncovered branches and how they were covered
 
-### `global.App != nil` branch (main.go:35-37)
-
-**whyType:** defensive/unreachable
-
-Set `global.App = tview.NewApplication()` before invoking `main()` with a panicking `getCommand` stub (returning nil triggers a nil-pointer panic in urfave/cli). `tview.Application.Stop()` is safe when `screen == nil` (returns early). Tested in `TestMainFunc/panic_with_app_non_nil`.
-
 ### `logFatal(err)` branch (main.go:67-69)
 
 **whyType:** error-path

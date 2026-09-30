@@ -83,6 +83,12 @@ func openRepo(projectDir string) (*git.Repository, error) {
 	return repo, nil
 }
 
+// repoWorktree is a seam over (*git.Repository).Worktree. openRepo (with
+// DetectDotGit) only ever returns a repository that has a worktree, so its
+// bare-repository error cannot be reached with a real directory. Always
+// r.Worktree() in production.
+var repoWorktree = func(r *git.Repository) (*git.Worktree, error) { return r.Worktree() }
+
 // stageFiles stages exactly the given absolute paths into the index of the git
 // repository containing projectDir. It never stages anything else (no
 // `git add -A`), so unrelated staged/unstaged changes remain untouched. Each
@@ -95,7 +101,7 @@ func stageFiles(projectDir string, absPaths []string) error {
 	if err != nil {
 		return err
 	}
-	wt, err := repo.Worktree()
+	wt, err := repoWorktree(repo)
 	if err != nil {
 		return err
 	}

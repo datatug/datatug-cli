@@ -286,12 +286,10 @@ func newAgentHTTPClient(cmd *cobra.Command, flagName string) (agentHTTPClient, a
 	// an optional incident append. Preserve caller cancellation while allowing
 	// that complete server-side budget to finish.
 	client := agentHTTPClient{baseURL: strings.TrimRight(agent, "/"), client: &http.Client{Timeout: compareAgentRequestTimeout}}
-	raw, status, err := client.get(cmd.Context(), "/datatug/agent-info")
+	// do already turns every non-2xx status into an error.
+	raw, _, err := client.get(cmd.Context(), "/datatug/agent-info")
 	if err != nil {
 		return agentHTTPClient{}, apicontract.AgentInfo{}, err
-	}
-	if status < http.StatusOK || status >= http.StatusMultipleChoices {
-		return agentHTTPClient{}, apicontract.AgentInfo{}, agentResponseError(status, raw)
 	}
 	var info apicontract.AgentInfo
 	if err := apicontract.DecodeStrict(raw, &info); err != nil {

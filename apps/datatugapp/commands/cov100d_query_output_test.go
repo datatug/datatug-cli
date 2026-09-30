@@ -107,7 +107,25 @@ func TestCov100dWriteYAMLRowsFailures(t *testing.T) {
 	// The encoder may buffer until Close; fail every write and also every
 	// later one so both Encode and Close paths are reachable.
 	for after := 0; after < 3; after++ {
-		_ = writeYAMLRows(&cov100dFailWriter{after: after}, []string{"a"}, ok)
+		w := &cov100dFailWriter{after: after}
+		err := writeYAMLRows(w, []string{"a"}, ok)
+		if after >= w.calls {
+			// The writer was never asked to fail, so the write must succeed.
+			if err != nil {
+				t.Fatalf("after=%d: unexpected error %v", after, err)
+			}
+			continue
+		}
+		if err == nil {
+			t.Fatalf("after=%d: expected a write error", after)
+		}
+	}
+	var out bytes.Buffer
+	if err := writeYAMLRows(&out, []string{"a"}, ok); err != nil {
+		t.Fatalf("succeeding writer: %v", err)
+	}
+	if got, want := out.String(), "- $key: \"1\"\n  a: 1\n"; got != want {
+		t.Fatalf("yaml output %q, want %q", got, want)
 	}
 }
 

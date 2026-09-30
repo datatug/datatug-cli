@@ -26,13 +26,40 @@ type lastChatOptions struct {
 	Groups   []string `json:"groups,omitempty"`
 }
 
-var lastChatOptionsPath = func() (string, error) {
+// lastChatOptionsPath is a seam so tests never touch the real user config
+// directory. Always defaultLastChatOptionsPath in production.
+var lastChatOptionsPath = defaultLastChatOptionsPath
+
+func defaultLastChatOptionsPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "datatug", "chat-last.json"), nil
 }
+
+// lastChatTempFile is the subset of *os.File saveLastChatOptions writes through.
+type lastChatTempFile interface {
+	Name() string
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+}
+
+// Seams over the marshal and temp-file calls saveLastChatOptions makes, so
+// tests can drive their failure branches (a real temp file in a directory that
+// was just created essentially never fails a Write/Sync/Close). Always
+// json.MarshalIndent and os.CreateTemp in production.
+var (
+	lastChatMarshal    = json.MarshalIndent
+	lastChatCreateTemp = func(dir string) (lastChatTempFile, error) {
+		f, err := os.CreateTemp(dir, ".chat-last-*")
+		if err != nil {
+			return nil, err
+		}
+		return f, nil
+	}
+)
 
 func applyLastChatOptions(cmd *cobra.Command, options *chatOptions) error {
 	path, err := lastChatOptionsPath()
@@ -136,14 +163,14 @@ func saveLastChatOptions(cmd *cobra.Command, options chatOptions) error {
 	if cmd.Flags().Changed("thinking") {
 		saved.Thinking = options.thinking
 	}
-	data, err := json.MarshalIndent(saved, "", "  ")
+	data, err := lastChatMarshal(saved, "", "  ")
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	temp, err := os.CreateTemp(filepath.Dir(path), ".chat-last-*")
+	temp, err := lastChatCreateTemp(filepath.Dir(path))
 	if err != nil {
 		return err
 	}

@@ -52,14 +52,14 @@ require (
 	github.com/sneat-co/sneat-go-core v0.67.3
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	github.com/strongo/aichat v0.4.0
+	github.com/strongo/aichat v0.5.0
 	github.com/strongo/buildinfo v0.3.0
-	github.com/strongo/cli-helpers v0.21.0
+	github.com/strongo/cli-helpers v0.26.0
 	github.com/strongo/deviceauth v0.1.0
 	github.com/strongo/logus v0.4.3
 	github.com/strongo/random v0.0.2
 	github.com/strongo/slice v0.3.10
-	github.com/strongo/strongo-tui v0.1.0
+	github.com/strongo/strongo-tui v0.2.0
 	github.com/strongo/validation v0.0.13
 	github.com/xo/dburl v0.24.2
 	github.com/xuri/excelize/v2 v2.11.0
@@ -206,12 +206,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
-
-// TEMPORARY local replace until cli-helpers with fsutil is released; must not land.
-replace github.com/strongo/cli-helpers => /Users/alex/projects/.worktrees/tview-to-bubbletea/github.com/strongo/cli-helpers
-
-// TEMPORARY local replace until strongo-tui is released and tagged; must not land.
-replace github.com/strongo/strongo-tui => /Users/alex/projects/.worktrees/tview-to-bubbletea/github.com/strongo/strongo-tui
-
-// TEMPORARY local replace until aichat is released and tagged; must not land.
-replace github.com/strongo/aichat => /Users/alex/projects/.worktrees/tview-to-bubbletea/github.com/strongo/aichat

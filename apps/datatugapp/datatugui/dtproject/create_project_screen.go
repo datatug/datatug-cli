@@ -19,7 +19,7 @@ import (
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/filetug/filetug/pkg/fsutils"
 	"github.com/gdamore/tcell/v2"
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v92/github"
 	"github.com/pkg/browser"
 	"github.com/rivo/tview"
 	"github.com/strongo/validation"

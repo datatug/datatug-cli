@@ -8,10 +8,10 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/ai/session"
-	"github.com/strongo/aichat/tui/gridblock"
-	"github.com/strongo/aichat/tui/transcript"
 	"github.com/tuigoff/tuigoff/pkg/grid"
+	"github.com/tuigoff/tuigoff/pkg/gridblock"
 	"github.com/tuigoff/tuigoff/pkg/theme"
+	"github.com/tuigoff/tuigoff/pkg/transcript"
 )
 
 // JoinBlock is a transcript.Block that pairs a query-result grid with
@@ -256,7 +256,7 @@ func (b *JoinBlock) Update(msg tea.Msg) (transcript.Block, tea.Cmd) {
 	if b.Grid == nil {
 		return b, nil
 	}
-	// The wrapper translates grid.PinRowMsg into tui.AddToSidebarMsg.
+	// The grid's PinRowMsg passes through; chatshell pins its entity ref.
 	_, cmd := gridblock.Wrap(b.Grid).Update(msg)
 	return b, cmd
 }

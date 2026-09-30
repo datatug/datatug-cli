@@ -17,12 +17,12 @@ import (
 	"github.com/pkg/browser"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/tui/chatshell"
-	"github.com/strongo/aichat/tui/gridblock"
-	"github.com/strongo/aichat/tui/transcript"
 	"github.com/tuigoff/tuigoff/pkg/focus"
 	"github.com/tuigoff/tuigoff/pkg/grid"
+	"github.com/tuigoff/tuigoff/pkg/gridblock"
 	"github.com/tuigoff/tuigoff/pkg/mdrender"
 	"github.com/tuigoff/tuigoff/pkg/theme"
+	"github.com/tuigoff/tuigoff/pkg/transcript"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )

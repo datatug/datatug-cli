@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav"
 )
 
 func TestModulePageDefaults(t *testing.T) {

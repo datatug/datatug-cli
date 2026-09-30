@@ -11,8 +11,8 @@ import (
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/go-git/go-git/v5"
 	"github.com/strongo/cli-helpers/fsutil"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 const (

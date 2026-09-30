@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strongo/strongo-tui/pkg/grid"
+	"github.com/tuigoff/tuigoff/pkg/grid"
 )
 
 func TestPadAnsiLineZeroOrNegativeWidthIsEmpty(t *testing.T) {

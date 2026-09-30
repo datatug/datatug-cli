@@ -2,7 +2,7 @@
 format: https://specscore.md/plan-specification
 status: Draft
 ---
-# Plan: tview to Bubble Tea migration (datatug, sneat CLIs, strongo-tui)
+# Plan: tview to Bubble Tea migration (datatug, sneat CLIs, tuigoff)
 
 **Status:** Draft
 **Source:** idea:tview-to-bubbletea-migration
@@ -12,11 +12,11 @@ status: Draft
 
 ## Summary
 
-Move every terminal UI in the DataTug and Sneat CLIs onto Bubble Tea v2 (`charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`), using `datatug chat` (`pkg/chat`, built on `strongo/aichat/tui`) as the reference for look, structure and testing. When the work is done there is no `tview` or `tcell` reference in code, comments, docs, `go.mod` or `go.sum` of `datatug-cli`, `sneat-cli` or `strongo-tui`.
+Move every terminal UI in the DataTug and Sneat CLIs onto Bubble Tea v2 (`charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`), using `datatug chat` (`pkg/chat`, built on `strongo/aichat/tui`) as the reference for look, structure and testing. When the work is done there is no `tview` or `tcell` reference in code, comments, docs, `go.mod` or `go.sum` of `datatug-cli`, `sneat-cli` or `tuigoff`.
 
 Founder rulings (2026-09-29) that shape the plan:
 
-- Shared code goes in the shared library (`strongo/strongo-tui`), because the Sneat CLI adopts it too.
+- Shared code goes in the shared library (`tuigoff/tuigoff`), because the Sneat CLI adopts it too.
 - Libraries are migrated in place. No backward compatibility, no deprecated shims, no old and new implementations side by side.
 - `datatug filetug` is removed (it embeds filetug's tview-only Navigator, which has no Bubble Tea version).
 - `datatug` must end at 100% statement coverage.
@@ -28,7 +28,7 @@ Founder rulings (2026-09-29) that shape the plan:
 | tview/tcell production code in `datatug-cli` | 51 | 6,271 |
 | tview/tcell tests in `datatug-cli` | 18 | 5,868 |
 | Already Bubble Tea (`pkg/chat`, `pkg/auth/gauth`; imports `aichat/tui/{theme,grid,focus}` today) | — | ~44k (chat) |
-| `strongo-tui` (tview widgets, colours, themes) | ~15 | ~1,040 |
+| `tuigoff` (tview widgets, colours, themes) | ~15 | ~1,040 |
 | `sneat-cli` TUI (`internal/tui`, already Bubble Tea, no tview) | 8 | ~1,900 |
 
 tview widgets in use in `datatug-cli`: Table (81 cell uses), TextView, TreeView, List, Flex/Grid, Box, Form/InputField/Button, Modal, Pages, plus the `sneatnav` shell (header breadcrumbs, menu, content, actions bar, alerts).
@@ -38,7 +38,7 @@ tview widgets in use in `datatug-cli`: Table (81 cell uses), TextView, TreeView,
 **Shape of the end state**
 
 ```
-strongo-tui (one module, Bubble Tea only)
+tuigoff (one module, Bubble Tea only)
 ├─ pkg/nav        root tea.Model: header+breadcrumbs, menu, content, actions bar, alert overlay, focus zones, Send/Quit/Run
 ├─ pkg/theme      the one theme package (moved from aichat/tui/theme)
 ├─ pkg/focus      focus ring (moved from aichat/tui/focus)
@@ -54,18 +54,18 @@ sneat-cli    → internal/tui adopts pkg/nav for shared chrome
 
 **Sequencing.** The shell and widgets are on every screen's critical path, so they land first. Screen ports then run in parallel by area, each in its own worktree lane with its own tests. The Bubble Tea and tview models cannot share a process, so `datatug-cli` switches in one integration PR; there is no long-lived mixed state on `main`.
 
-**Dependency direction.** `aichat` depends on `strongo-tui`, never the reverse. The generic pieces of `aichat/tui` (`theme`, `focus`, and the result `grid`, untangled from `ai/session` and `transcript`) move into `strongo-tui`; `aichat` keeps only chat-specific code (chatshell, transcript, stream, mdrender, sidebar) plus a thin adapter that makes a grid a transcript block. `datatug-cli` chat and `sneat-cli` then import `strongo-tui` for theme and grid directly.
+**Dependency direction.** `aichat` depends on `tuigoff`, never the reverse. The generic pieces of `aichat/tui` (`theme`, `focus`, and the result `grid`, untangled from `ai/session` and `transcript`) move into `tuigoff`; `aichat` keeps only chat-specific code (chatshell, transcript, stream, mdrender, sidebar) plus a thin adapter that makes a grid a transcript block. `datatug-cli` chat and `sneat-cli` then import `tuigoff` for theme and grid directly.
 
-**Development coupling.** While `strongo-tui` is unreleased, the `datatug-cli` worktree uses a local `replace` to the `strongo-tui` worktree. Both repos share one WB task (`tview-to-bubbletea`). Landing order is fixed: `strongo-tui` merged and tagged → `aichat` rebased onto it, merged and tagged → `datatug-cli` `replace` removed and dependency bumped → `sneat-cli` bumped. `filetug` keeps its pinned old `strongo-tui` tag and is out of scope.
+**Development coupling.** While `tuigoff` is unreleased, the `datatug-cli` worktree uses a local `replace` to the `tuigoff` worktree. Both repos share one WB task (`tview-to-bubbletea`). Landing order is fixed: `tuigoff` merged and tagged → `aichat` rebased onto it, merged and tagged → `datatug-cli` `replace` removed and dependency bumped → `sneat-cli` bumped. `filetug` keeps its pinned old `tuigoff` tag and is out of scope.
 
-**Design rule: idiomatic Bubble Tea, not tview in disguise.** Screens are `tea.Model` sub-models in the Elm style, as in `pkg/chat` and `sneat-cli`'s `internal/tui`: state lives in the model, `Update(msg) (Model, Cmd)` and `View()`, behaviour is reported by messages (no callback setters, no mutable widget graphs, no `SetInputCapture`-style hooks), async work is a `tea.Cmd` returning a result message, keys are `key.Binding`s shown in the actions bar. Screens are rewritten in that style, not ported line by line. `strongo-tui` reuses `bubbles/v2` (list, table, viewport, textinput, help, key) and adds only what it lacks: the shell (header and breadcrumbs, menu and content split, actions bar, alert overlay, focus ring, push/pop/replace navigation messages), a Tree, a theme/frame layer, layout helpers, a highlighter and the `navtest` harness.
+**Design rule: idiomatic Bubble Tea, not tview in disguise.** Screens are `tea.Model` sub-models in the Elm style, as in `pkg/chat` and `sneat-cli`'s `internal/tui`: state lives in the model, `Update(msg) (Model, Cmd)` and `View()`, behaviour is reported by messages (no callback setters, no mutable widget graphs, no `SetInputCapture`-style hooks), async work is a `tea.Cmd` returning a result message, keys are `key.Binding`s shown in the actions bar. Screens are rewritten in that style, not ported line by line. `tuigoff` reuses `bubbles/v2` (list, table, viewport, textinput, help, key) and adds only what it lacks: the shell (header and breadcrumbs, menu and content split, actions bar, alert overlay, focus ring, push/pop/replace navigation messages), a Tree, a theme/frame layer, layout helpers, a highlighter and the `navtest` harness.
 
 | Old (tview / sneatnav) | Idiomatic replacement |
 |---|---|
 | `tview.List` + `SetSelectedFunc` | `bubbles/list` (or wrapper) emitting an item-selected message |
-| `tview.Table`, `TableCell`, `TableContent` | `strongo-tui/pkg/grid` (the result grid `datatug chat` already uses, moved out of `aichat`); rows built in the model |
+| `tview.Table`, `TableCell`, `TableContent` | `tuigoff/pkg/grid` (the result grid `datatug chat` already uses, moved out of `aichat`); rows built in the model |
 | `tview.TextView` | `bubbles/viewport` with ANSI text |
-| `tview.TreeView` | `strongo-tui` Tree emitting node messages |
+| `tview.TreeView` | `tuigoff` Tree emitting node messages |
 | `tview.Form`, `InputField` | model composed of `bubbles/textinput` fields, submit and cancel messages |
 | `SetInputCapture` | `key.Binding` matched in `Update` |
 | `tui.App.QueueUpdateDraw(f)` | a `tea.Cmd` that returns a result message |
@@ -78,29 +78,29 @@ sneat-cli    → internal/tui adopts pkg/nav for shared chrome
 
 ## Tasks
 
-### Task 1: strongo-tui — Bubble Tea toolkit (in place)
+### Task 1: tuigoff — Bubble Tea toolkit (in place)
 
 **Id:** task-1
 **Depends-On:** —
 **Status:** planning
 
-Rewrite `strongo-tui` on Bubble Tea v2 in place, with FileTug's upcoming migration as a design input: `pkg/nav` shell (focus semantics from `sneatnav`, including Up-at-top-of-menu to breadcrumbs, Right to content, Ctrl+Q quit, global key handlers suppressed while an input is focused), message-driven `pkg/widgets` (Tree, Form, Frame, Modal, layout helpers, reusing `bubbles/v2` for list, viewport and text input), `pkg/highlight`, and the `navtest` harness. Move the generic parts of `aichat/tui` into the library: `theme` and `focus` as they are, and `grid` (the result table `datatug chat` uses) made product-neutral by dropping its `ai/session` and `transcript` coupling; the grid gains whatever the DB viewer needs (large or lazy content, foreign-key navigation, fixed header columns). Fold the existing `charm/` sub-module into the root module, delete all tview/tcell code, examples and docs, tidy `go.mod`. Exit gate: 100.0% coverage on every package, `grep -ri 'tview\|tcell'` empty, README describing the message contracts.
+Rewrite `tuigoff` on Bubble Tea v2 in place, with FileTug's upcoming migration as a design input: `pkg/nav` shell (focus semantics from `sneatnav`, including Up-at-top-of-menu to breadcrumbs, Right to content, Ctrl+Q quit, global key handlers suppressed while an input is focused), message-driven `pkg/widgets` (Tree, Form, Frame, Modal, layout helpers, reusing `bubbles/v2` for list, viewport and text input), `pkg/highlight`, and the `navtest` harness. Move the generic parts of `aichat/tui` into the library: `theme` and `focus` as they are, and `grid` (the result table `datatug chat` uses) made product-neutral by dropping its `ai/session` and `transcript` coupling; the grid gains whatever the DB viewer needs (large or lazy content, foreign-key navigation, fixed header columns). Fold the existing `charm/` sub-module into the root module, delete all tview/tcell code, examples and docs, tidy `go.mod`. Exit gate: 100.0% coverage on every package, `grep -ri 'tview\|tcell'` empty, README describing the message contracts.
 
-### Task 2: strongo-tui — release
+### Task 2: tuigoff — release
 
 **Id:** task-2
 **Depends-On:** 1
 **Status:** planning
 
-Land the `strongo-tui` PR with `wb pr land`, wait for CI, tag the release (check whether the repo auto-tags before hand-tagging), and record the tag for the consumers. Any consumer still on the old tview API keeps its pinned tag.
+Land the `tuigoff` PR with `wb pr land`, wait for CI, tag the release (check whether the repo auto-tags before hand-tagging), and record the tag for the consumers. Any consumer still on the old tview API keeps its pinned tag.
 
-### Task 3: aichat — rebase onto strongo-tui
+### Task 3: aichat — rebase onto tuigoff
 
 **Id:** task-3
 **Depends-On:** 2
 **Status:** planning
 
-In `strongo/aichat`, delete `tui/theme`, `tui/focus` and `tui/grid`, import them from `strongo-tui`, keep a thin transcript-block adapter around the grid, rewrite all in-repo imports (24 theme, 18 grid, 4 focus users), keep 100% coverage, land and let it auto-tag. In `datatug-cli` (`pkg/chat`, `gauth`) and `sneat-cli`, rewrite the `aichat/tui/{theme,grid,focus}` imports to `strongo-tui` and bump `aichat`. No copies stay behind.
+In `strongo/aichat`, delete `tui/theme`, `tui/focus` and `tui/grid`, import them from `tuigoff`, keep a thin transcript-block adapter around the grid, rewrite all in-repo imports (24 theme, 18 grid, 4 focus users), keep 100% coverage, land and let it auto-tag. In `datatug-cli` (`pkg/chat`, `gauth`) and `sneat-cli`, rewrite the `aichat/tui/{theme,grid,focus}` imports to `tuigoff` and bump `aichat`. No copies stay behind.
 
 ### Task 4: datatug-cli — remove `datatug filetug` and non-UI filetug coupling
 
@@ -116,7 +116,7 @@ Delete `apps/datatugapp/commands/cmd_filetug.go` and its registration. Remove th
 **Depends-On:** 1, 4
 **Status:** planning
 
-Point `datatug-cli` at the new `strongo-tui` (local `replace` during development). Replace `apps/datatugapp/tui.go` (`NewDatatugTUI`), `apps/global/app.go`, `apps/datatugapp/commands/cmd_ui.go` (`runUI`, `openFile`, module registration), the main-menu registry (`datatug_main_menu.go`), and the panic-recovery path in `main.go` (terminal restore) with the Bubble Tea shell. Delete `pkg/sneatview/**` and `pkg/sneatv/**` (including `databrowser`) once their users are ported; no copies are kept.
+Point `datatug-cli` at the new `tuigoff` (local `replace` during development). Replace `apps/datatugapp/tui.go` (`NewDatatugTUI`), `apps/global/app.go`, `apps/datatugapp/commands/cmd_ui.go` (`runUI`, `openFile`, module registration), the main-menu registry (`datatug_main_menu.go`), and the panic-recovery path in `main.go` (terminal restore) with the Bubble Tea shell. Delete `pkg/sneatview/**` and `pkg/sneatv/**` (including `databrowser`) once their users are ported; no copies are kept.
 
 ### Task 6: Port project screens (`dtproject`)
 
@@ -156,7 +156,7 @@ Port `dtsettings` (settings screen with highlighted YAML), `dtapiservice` (API m
 **Depends-On:** 3, 6, 7, 8, 9
 **Status:** planning
 
-Remove the local `replace`, bump `strongo-tui` to the released tag, `go mod tidy` (no `tview`, `tcell` or `filetug` left in `go.mod` / `go.sum` beyond what is unavoidable and recorded), refresh the `TEST-COVERAGE*.md` docs and remove stale `cover*.out` files if they are tracked. Verification: `go build ./... && go vet ./... && go test ./...`, whole-module statement coverage 100.0%, `scripts/check-hermetic-tests.sh`, `grep -ri 'tview\|tcell'` empty, and a real-terminal smoke test (`datatug ui`, `datatug ui -f <sqlite>`) walking menu, settings, viewers, project and DB screens, resize, mouse, Ctrl+Q and a forced panic (terminal must be restored).
+Remove the local `replace`, bump `tuigoff` to the released tag, `go mod tidy` (no `tview`, `tcell` or `filetug` left in `go.mod` / `go.sum` beyond what is unavoidable and recorded), refresh the `TEST-COVERAGE*.md` docs and remove stale `cover*.out` files if they are tracked. Verification: `go build ./... && go vet ./... && go test ./...`, whole-module statement coverage 100.0%, `scripts/check-hermetic-tests.sh`, `grep -ri 'tview\|tcell'` empty, and a real-terminal smoke test (`datatug ui`, `datatug ui -f <sqlite>`) walking menu, settings, viewers, project and DB screens, resize, mouse, Ctrl+Q and a forced panic (terminal must be restored).
 
 ### Task 11: sneat-cli — adopt the shared shell
 
@@ -164,7 +164,7 @@ Remove the local `replace`, bump `strongo-tui` to the released tag, `go mod tidy
 **Depends-On:** 3
 **Status:** planning
 
-`sneat-cli` is already Bubble Tea and has no tview code, so this is convergence, not migration. Move `internal/tui` (spaces, space, contacts, contact card, confirm screens) onto `strongo-tui` `pkg/nav` and `widgets` so both CLIs share chrome, key bindings and testing harness; drop the private push/pop screen stack in favour of the shared shell where it fits. The two already-imported chat surfaces (`internal/chat`, `internal/chatapp`) are untouched. Exit gate: 100% coverage of `internal/tui`, `grep -ri 'tview\|tcell'` empty (currently one test file mentions them).
+`sneat-cli` is already Bubble Tea and has no tview code, so this is convergence, not migration. Move `internal/tui` (spaces, space, contacts, contact card, confirm screens) onto `tuigoff` `pkg/nav` and `widgets` so both CLIs share chrome, key bindings and testing harness; drop the private push/pop screen stack in favour of the shared shell where it fits. The two already-imported chat surfaces (`internal/chat`, `internal/chatapp`) are untouched. Exit gate: 100% coverage of `internal/tui`, `grep -ri 'tview\|tcell'` empty (currently one test file mentions them).
 
 ### Task 12: Docs, specs and landing
 
@@ -172,7 +172,7 @@ Remove the local `replace`, bump `strongo-tui` to the released tag, `go mod tidy
 **Depends-On:** 10, 11
 **Status:** planning
 
-Update `datatug-cli` README and `docs/` for the removed `filetug` command, add a short architecture note (shell, widgets, `navtest`), transition this plan and the idea through `specscore change-status`, and land each repo with `wb worktree land` (one call per repository) in the order `strongo-tui` → `datatug-cli` → `sneat-cli`, cleaning all branches and worktrees.
+Update `datatug-cli` README and `docs/` for the removed `filetug` command, add a short architecture note (shell, widgets, `navtest`), transition this plan and the idea through `specscore change-status`, and land each repo with `wb worktree land` (one call per repository) in the order `tuigoff` → `datatug-cli` → `sneat-cli`, cleaning all branches and worktrees.
 
 ## Risks
 
@@ -180,14 +180,14 @@ Update `datatug-cli` README and `docs/` for the removed `filetug` command, add a
 - **Table performance.** Recordsets can be large; the `grid` must handle large row sets (paging or virtualised rendering) rather than render every row. Covered by a benchmark-style test in task 1.
 - **Terminal restore on panic.** Bubble Tea restores the terminal on its own recover path, but `main.go` currently calls `global.App.Stop()` explicitly; task 5 keeps an equivalent guarantee and task 10 tests it.
 - **100% coverage across ~6k ported lines.** Each port task carries its own coverage gate so gaps cannot pile up at the end. Production seams are added where code touches the network or a TTY, not tests contorted around real processes.
-- **Cross-repo release lag.** `strongo-tui` must be tagged before `datatug-cli` can land; tasks 2 and 3 are hard gates and the `replace` directive must never reach `main`.
+- **Cross-repo release lag.** `tuigoff` must be tagged before `datatug-cli` can land; tasks 2 and 3 are hard gates and the `replace` directive must never reach `main`.
 
 ## Decisions
 
 Resolved with the founder on 2026-09-29:
 
-1. **`filetug` coupling.** Only two `fsutils` helpers are used (`ExpandHome`, `DirExists`), so task 4 moves them to a shared non-UI module (`strongo`) rather than copying them into each CLI. FileTug is also planned to migrate to Bubble Tea, so `strongo-tui` is designed for FileTug as a consumer too, and FileTug will import the same shared helpers.
-2. **`strongo-tui/charm` sub-module.** No repository in the workspace imports it (only its own `go.mod` names it), so folding it into the root module is safe and needs no migration note.
+1. **`filetug` coupling.** Only two `fsutils` helpers are used (`ExpandHome`, `DirExists`), so task 4 moves them to a shared non-UI module (`strongo`) rather than copying them into each CLI. FileTug is also planned to migrate to Bubble Tea, so `tuigoff` is designed for FileTug as a consumer too, and FileTug will import the same shared helpers.
+2. **`tuigoff/charm` sub-module.** No repository in the workspace imports it (only its own `go.mod` names it), so folding it into the root module is safe and needs no migration note.
 3. **Sneat CLI.** Task 11 goes ahead now: `sneat-cli` and `datatug` are close enough that they share one shell.
 
 ## Open Questions

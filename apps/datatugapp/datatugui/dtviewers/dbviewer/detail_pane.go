@@ -11,9 +11,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-core/pkg/schemer"
-	"github.com/strongo/strongo-tui/pkg/grid"
-	"github.com/strongo/strongo-tui/pkg/theme"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/grid"
+	"github.com/tuigoff/tuigoff/pkg/theme"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 // paneKind is the kind of schema information a detailPane shows.

@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/nav/navtest"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav/navtest"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 // stubDemo points the demo folder and URL at a temporary folder and a server.

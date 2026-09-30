@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/uitest"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/uitest"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 func updateMenu(t *testing.T, m MainMenu, msg tea.Msg) (MainMenu, []tea.Msg) {

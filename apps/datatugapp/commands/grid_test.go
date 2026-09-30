@@ -6,10 +6,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/nav/navtest"
-	"github.com/strongo/strongo-tui/pkg/uitest"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav/navtest"
+	"github.com/tuigoff/tuigoff/pkg/uitest"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 func testRecordset() datatug.Recordset {

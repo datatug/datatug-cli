@@ -7,9 +7,9 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/nav/navtest"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav/navtest"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 func TestPlaceholderViewer(t *testing.T) {

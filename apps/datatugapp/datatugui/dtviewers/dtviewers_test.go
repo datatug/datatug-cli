@@ -11,9 +11,9 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/nav/navtest"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav/navtest"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 type detailScreen struct{ text string }

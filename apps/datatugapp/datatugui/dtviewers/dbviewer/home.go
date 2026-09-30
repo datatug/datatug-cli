@@ -9,8 +9,8 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
 	"github.com/strongo/cli-helpers/fsutil"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 // Demo databases of the SQLite home screen. The folder and the URL are variables

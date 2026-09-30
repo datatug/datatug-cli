@@ -10,9 +10,9 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/pkg/dtroot"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/theme"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/theme"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 // projectsAction is the Ref of a node of the projects tree that runs an action

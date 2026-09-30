@@ -2,7 +2,7 @@ package dtproject
 
 import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
-	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav"
 )
 
 // Module returns the Projects entry of the main menu.

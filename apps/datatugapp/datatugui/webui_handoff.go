@@ -10,7 +10,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/pkg/browser"
-	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav"
 	"gopkg.in/yaml.v3"
 )
 

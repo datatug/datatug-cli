@@ -10,11 +10,11 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/strongo/strongo-tui/pkg/grid"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/nav/navtest"
-	"github.com/strongo/strongo-tui/pkg/uitest"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/grid"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav/navtest"
+	"github.com/tuigoff/tuigoff/pkg/uitest"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 // contentHarness shows the SQLite database with the keyboard on the content.

@@ -3,8 +3,8 @@ package datatugui
 import (
 	"fmt"
 
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 // Identifiers of the root modules. They are also the first element of the

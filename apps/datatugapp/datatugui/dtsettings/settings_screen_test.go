@@ -9,10 +9,10 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/nav/navtest"
-	"github.com/strongo/strongo-tui/pkg/uitest"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav/navtest"
+	"github.com/tuigoff/tuigoff/pkg/uitest"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 // stub replaces the package seams and returns the restore function.

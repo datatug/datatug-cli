@@ -16,7 +16,7 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/schemer"
 	"github.com/stretchr/testify/require"
-	"github.com/strongo/strongo-tui/pkg/nav/navtest"
+	"github.com/tuigoff/tuigoff/pkg/nav/navtest"
 )
 
 // createTestSqliteDb creates a database with three tables and a view, and runs

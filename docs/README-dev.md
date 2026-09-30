@@ -8,7 +8,7 @@ set the `Eliminate terminal in output console` to true. This is required by the 
 ## Terminal UI architecture
 
 `datatug ui` (and bare `datatug`) is a Bubble Tea v2 program built on the shared
-[`strongo-tui`](https://github.com/strongo/strongo-tui) toolkit:
+[`tuigoff`](https://github.com/tuigoff/tuigoff) toolkit:
 
 - **Shell** (`pkg/nav`): hosts pages, breadcrumbs, the shared menu, alerts and
   focus; the DataTug layer is `apps/datatugapp/datatugui` (modules and screens

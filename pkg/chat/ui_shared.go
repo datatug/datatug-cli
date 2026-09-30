@@ -5,8 +5,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/strongo/strongo-tui/pkg/grid"
-	"github.com/strongo/strongo-tui/pkg/theme"
+	"github.com/tuigoff/tuigoff/pkg/grid"
+	"github.com/tuigoff/tuigoff/pkg/theme"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )

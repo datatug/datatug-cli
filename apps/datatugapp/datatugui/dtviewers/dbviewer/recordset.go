@@ -10,8 +10,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/dal-go/dalgo/recordset"
 	"github.com/datatug/datatug-core/pkg/schemer"
-	"github.com/strongo/strongo-tui/pkg/grid"
-	"github.com/strongo/strongo-tui/pkg/theme"
+	"github.com/tuigoff/tuigoff/pkg/grid"
+	"github.com/tuigoff/tuigoff/pkg/theme"
 )
 
 // valueKind classifies a cell value for colouring.

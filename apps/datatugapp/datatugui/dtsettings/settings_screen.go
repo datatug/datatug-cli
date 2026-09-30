@@ -8,9 +8,9 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/strongo/strongo-tui/pkg/highlight"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/highlight"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 	"gopkg.in/yaml.v3"
 )
 

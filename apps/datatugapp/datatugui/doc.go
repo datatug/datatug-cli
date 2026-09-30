@@ -1,6 +1,6 @@
 // Package datatugui is the application layer of the DataTug terminal UI: the
 // registry of root modules, the shared main menu, the Bubble Tea app model that
-// hosts the strongo-tui navigation shell, and the helpers every screen uses.
+// hosts the tuigoff navigation shell, and the helpers every screen uses.
 //
 // A root module (projects, viewers, settings, API monitor) describes itself
 // with a Module value and the app is assembled from them:

@@ -10,8 +10,8 @@ import (
 	"github.com/strongo/aichat/ai/session"
 	"github.com/strongo/aichat/tui/gridblock"
 	"github.com/strongo/aichat/tui/transcript"
-	"github.com/strongo/strongo-tui/pkg/grid"
-	"github.com/strongo/strongo-tui/pkg/theme"
+	"github.com/tuigoff/tuigoff/pkg/grid"
+	"github.com/tuigoff/tuigoff/pkg/theme"
 )
 
 // JoinBlock is a transcript.Block that pairs a query-result grid with

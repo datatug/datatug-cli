@@ -4,9 +4,9 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/theme"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/theme"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 // geometry is what the shell last told a screen: its size and whether it holds

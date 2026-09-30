@@ -15,7 +15,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/ai/cloudproto"
-	"github.com/strongo/strongo-tui/pkg/grid"
+	"github.com/tuigoff/tuigoff/pkg/grid"
 )
 
 func TestTelemetryFullCoverage(t *testing.T) {

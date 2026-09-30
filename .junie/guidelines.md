@@ -24,8 +24,8 @@ This file contains specific rules and conventions for the DataTug project.
 
 ## 3. UI Development (dtviewers, dtproject)
 
-- The terminal UI is built with Bubble Tea v2 / Lip Gloss on the shared `strongo-tui` toolkit (shell, widgets, grid, navtest). See `docs/tui-screens.md` before adding or changing a screen.
-- Use the theme from `strongo-tui` `pkg/theme` (and `pkg/color`) to maintain visual consistency.
+- The terminal UI is built with Bubble Tea v2 / Lip Gloss on the shared `tuigoff` toolkit (shell, widgets, grid, navtest). See `docs/tui-screens.md` before adding or changing a screen.
+- Use the theme from `tuigoff` `pkg/theme` (and `pkg/color`) to maintain visual consistency.
 
 ## 4. Testing
 

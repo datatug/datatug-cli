@@ -5,7 +5,7 @@ import (
 	"slices"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav"
 )
 
 // RootTitle is the root breadcrumb.

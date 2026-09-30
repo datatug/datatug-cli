@@ -6,7 +6,7 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/strongo/strongo-tui/pkg/grid"
+	"github.com/tuigoff/tuigoff/pkg/grid"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )

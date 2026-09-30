@@ -1,6 +1,6 @@
 package dtviewers
 
-import "github.com/strongo/strongo-tui/pkg/nav"
+import "github.com/tuigoff/tuigoff/pkg/nav"
 
 // ViewerID identifies a viewer; it is the second element of the persisted
 // screen path, for example "viewers/sql".

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/uitest"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/uitest"
 )
 
 func TestScreenOpenedRecordsAndPersists(t *testing.T) {

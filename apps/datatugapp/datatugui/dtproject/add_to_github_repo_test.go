@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v92/github"
 	"github.com/strongo/strongo-tui/pkg/nav"
 	"github.com/strongo/strongo-tui/pkg/nav/navtest"
 	"github.com/strongo/strongo-tui/pkg/widgets"

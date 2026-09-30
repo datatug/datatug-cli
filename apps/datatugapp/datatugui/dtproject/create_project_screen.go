@@ -19,7 +19,7 @@ import (
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/storage"
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v92/github"
 	"github.com/strongo/cli-helpers/fsutil"
 	"github.com/strongo/strongo-tui/pkg/nav"
 	"github.com/strongo/strongo-tui/pkg/theme"

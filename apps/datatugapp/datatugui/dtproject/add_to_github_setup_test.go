@@ -13,7 +13,7 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/go-git/go-git/v5"
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v92/github"
 	"github.com/strongo/cli-helpers/fsutil"
 	"github.com/strongo/strongo-tui/pkg/nav"
 	"github.com/strongo/strongo-tui/pkg/nav/navtest"

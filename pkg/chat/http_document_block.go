@@ -2,8 +2,8 @@ package chat
 
 import (
 	tea "charm.land/bubbletea/v2"
-	"github.com/strongo/aichat/tui/mdrender"
 	"github.com/strongo/aichat/tui/transcript"
+	"github.com/tuigoff/tuigoff/pkg/mdrender"
 )
 
 // httpDocumentBlock is a transcript.Block port of the legacy UI's

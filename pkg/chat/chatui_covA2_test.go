@@ -1097,7 +1097,7 @@ func TestLoadSessionHTTPDocumentVersionBadges(t *testing.T) {
 }
 
 // renderMarkdown/newMarkdownRenderer (and their fault-injection tests) moved
-// to github.com/strongo/aichat/tui/mdrender (mdrender.Render/
+// to github.com/tuigoff/tuigoff/pkg/mdrender (mdrender.Render/
 // mdrender.NewTermRenderer) as part of the shared-look cutover
 // (strongo/aichat#chat-shared-look): every aichat product now shares one
 // markdown renderer instead of each carrying its own glamour seam. That

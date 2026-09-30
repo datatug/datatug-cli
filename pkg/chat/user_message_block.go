@@ -2,8 +2,8 @@ package chat
 
 import (
 	tea "charm.land/bubbletea/v2"
-	"github.com/strongo/aichat/tui/transcript"
 	"github.com/tuigoff/tuigoff/pkg/theme"
+	"github.com/tuigoff/tuigoff/pkg/transcript"
 )
 
 // userMessageEditMsg asks the product to load text back into the composer

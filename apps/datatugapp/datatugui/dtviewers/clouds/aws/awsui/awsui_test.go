@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/strongo/strongo-tui/pkg/nav/navtest"
+	"github.com/tuigoff/tuigoff/pkg/nav/navtest"
 )
 
 func TestViewer(t *testing.T) {

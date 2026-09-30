@@ -17,7 +17,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/spf13/cobra"
 	"github.com/strongo/logus"
-	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav"
 )
 
 func uiCommandArgs() *cobra.Command {

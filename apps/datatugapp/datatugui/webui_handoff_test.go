@@ -7,8 +7,8 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/uitest"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/uitest"
 )
 
 func TestWebUIURLForScreen(t *testing.T) {

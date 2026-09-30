@@ -8,7 +8,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/strongo/logus"
-	"github.com/strongo/strongo-tui/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav"
 )
 
 // Seams over telemetry and persisted state, replaced in tests.

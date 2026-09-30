@@ -18,7 +18,7 @@ How might we run every DataTug and Sneat terminal UI on one Bubble Tea toolkit, 
 
 ## Context
 
-datatug-cli's TUI is built on tview/tcell (sneatnav shell, ~50 screen files) atop strongo-tui and filetug; datatug chat and sneat-cli already run on Bubble Tea.
+datatug-cli's TUI is built on tview/tcell (sneatnav shell, ~50 screen files) atop tuigoff and filetug; datatug chat and sneat-cli already run on Bubble Tea.
 
 ## Recommended Direction
 
@@ -30,11 +30,11 @@ datatug-cli's TUI is built on tview/tcell (sneatnav shell, ~50 screen files) ato
 
 ## MVP Scope
 
-strongo-tui migrated in place with widgets and nav shell; all datatug-cli screens ported at 100% coverage; datatug filetug removed; sneat-cli adopts the shared shell.
+tuigoff migrated in place with widgets and nav shell; all datatug-cli screens ported at 100% coverage; datatug filetug removed; sneat-cli adopts the shared shell.
 
 ## Not Doing (and Why)
 
-- Port filetug itself — separate tview app pinning an old strongo-tui tag
+- Port filetug itself — separate tview app pinning an old tuigoff tag
 - Backward-compatible tview shims — founder ruled no compatibility or duplicate implementations
 
 ## Key Assumptions to Validate

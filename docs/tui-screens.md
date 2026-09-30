@@ -1,8 +1,8 @@
 # How to write a DataTug screen
 
 The DataTug terminal UI is a Bubble Tea v2 program. Every screen is an Elm-style
-model hosted by the `strongo-tui` navigation shell (`pkg/nav`); the application
-layer is `apps/datatugapp/datatugui`. Read `strongo-tui/README.md`,
+model hosted by the `tuigoff` navigation shell (`pkg/nav`); the application
+layer is `apps/datatugapp/datatugui`. Read `tuigoff/README.md`,
 `pkg/nav/doc.go` and `examples/demo` first; this guide only adds what is specific
 to DataTug. The reference for style and tests is `datatug chat` (`pkg/chat`).
 
@@ -29,10 +29,10 @@ UI.
    `nav.SetBreadcrumbs` for a flow that is not a stack.
 5. **Keys are `key.Binding`s** matched with `key.Matches` in `Update` and listed
    through `ShortHelp() []key.Binding` (shown in the actions bar).
-6. **Every table is `strongo-tui/pkg/grid`.** Lists, text, inputs, tabs and modals
-   come from `strongo-tui/pkg/widgets` (built on `bubbles/v2`); trees are
+6. **Every table is `tuigoff/pkg/grid`.** Lists, text, inputs, tabs and modals
+   come from `tuigoff/pkg/widgets` (built on `bubbles/v2`); trees are
    `widgets.Tree`; highlighted YAML is `pkg/highlight`. Colours and styles come
-   from `strongo-tui/pkg/theme`; a screen never builds a `lipgloss` style with a
+   from `tuigoff/pkg/theme`; a screen never builds a `lipgloss` style with a
    colour literal.
 7. **Optional interfaces** tell the shell more: `nav.Titled` (panel title),
    `widgets.Boundary` (`AtEdge(dir)`: may an arrow key leave the screen; without
@@ -174,11 +174,11 @@ func (p projects) Editing() bool                     { return p.grid != nil && p
 
 `newProjectsGrid` builds `grid.New(columns, rows, grid.WithID("projects"),
 grid.WithoutFrame(), ...)` with `grid.Row{Key: ref.ID, Values: ...}`; the screen
-already sits in the shell's frame. The exact API is in `strongo-tui/pkg/grid`.
+already sits in the shell's frame. The exact API is in `tuigoff/pkg/grid`.
 
 ## Test pattern
 
-Drive the shell without a terminal with `strongo-tui/pkg/nav/navtest`, and
+Drive the shell without a terminal with `tuigoff/pkg/nav/navtest`, and
 components or screens directly with `pkg/uitest`:
 
 ```go

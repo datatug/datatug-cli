@@ -125,9 +125,9 @@ p := columnsProvider{ColumnsProvider: sqlinfoschema.ColumnsProvider{DB: db}}
 
 ### Headless TUI pattern (Bubble Tea screens under `apps/datatugapp/datatugui/...`)
 
-Screens are Elm-style models hosted by the `strongo-tui` shell, so no terminal or
-simulation screen is needed. Drive a page with `strongo-tui/pkg/nav/navtest` and a
-component directly with `strongo-tui/pkg/uitest`:
+Screens are Elm-style models hosted by the `tuigoff` shell, so no terminal or
+simulation screen is needed. Drive a page with `tuigoff/pkg/nav/navtest` and a
+component directly with `tuigoff/pkg/uitest`:
 
 ```go
 h := navtest.New(t, nav.Page{Title: "T", Content: newProjects()}) // Init's Cmd runs

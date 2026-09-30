@@ -6,7 +6,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/strongo/aichat/ai/session"
-	"github.com/strongo/strongo-tui/pkg/grid"
+	"github.com/tuigoff/tuigoff/pkg/grid"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )

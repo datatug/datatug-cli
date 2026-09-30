@@ -6,9 +6,9 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/dtstate"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
-	"github.com/strongo/strongo-tui/pkg/nav"
-	"github.com/strongo/strongo-tui/pkg/nav/navtest"
-	"github.com/strongo/strongo-tui/pkg/widgets"
+	"github.com/tuigoff/tuigoff/pkg/nav"
+	"github.com/tuigoff/tuigoff/pkg/nav/navtest"
+	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
 
 // stubProjects stands in for the settings file and the state file.

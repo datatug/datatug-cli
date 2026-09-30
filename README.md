@@ -204,7 +204,7 @@ Read [README-dev.md](docs/README-dev.md) for details on how to setup, debug, and
 
 ## Open Source Libraries we use
 
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) - Terminal UI framework (The Elm Architecture) with Lip Gloss styling; shared widgets live in `strongo-tui`
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea) - Terminal UI framework (The Elm Architecture) with Lip Gloss styling; shared widgets live in `tuigoff`
 - [DALgo](https://github.com/dal-go/dalgo) - Database Abstraction Layer for Go
 - https://gihub.com/strongo/validation - helpers for requests & models validations
 

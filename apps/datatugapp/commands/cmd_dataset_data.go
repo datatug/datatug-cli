@@ -51,7 +51,7 @@ func datasetDataCommandAction(_ *cobra.Command, _ []string) error {
 		yamlEncoder := yaml.NewEncoder(os.Stdout)
 		if len(v.Indent) == 1 {
 			indent, err := strconv.Atoi(v.Indent)
-			if err != nil {
+			if err == nil {
 				yamlEncoder.SetIndent(indent)
 			}
 		} else if strings.ToUpper(v.Indent) == "TAB" {
@@ -68,7 +68,7 @@ func datasetDataCommandAction(_ *cobra.Command, _ []string) error {
 			v.Indent = "\t"
 		default:
 			indent, err := strconv.Atoi(v.Indent)
-			if err != nil {
+			if err == nil {
 				v.Indent = strings.Repeat(" ", indent)
 			}
 		}

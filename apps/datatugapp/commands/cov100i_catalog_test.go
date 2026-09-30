@@ -45,9 +45,15 @@ func TestCov100iQuerySourceURLFromCatalog(t *testing.T) {
 
 func TestCov100iSavedQueryIDLongTitle(t *testing.T) {
 	id := savedQueryID(strings.Repeat("Ab Cd!", 20))
-	assert.Contains(t, id, "-")
-	// slug capped near 48 then uuid suffix
-	assert.LessOrEqual(t, len(strings.Split(id, "-")[0])+1, 60)
+	// The slug is capped at 48 characters (47 when the cut lands on a dash),
+	// followed by "-" and an 8-character uuid prefix.
+	const suffix = 1 + 8
+	slug := id[:len(id)-suffix]
+	assert.Equal(t, "-", id[len(slug):len(slug)+1])
+	assert.LessOrEqual(t, len(slug), 48)
+	assert.GreaterOrEqual(t, len(slug), 47)
+	assert.True(t, strings.HasPrefix(slug, "ab-cd-ab-cd-"), slug)
+	assert.False(t, strings.HasSuffix(slug, "-"), slug)
 }
 
 func TestCov100iRunDTQLAndHTTPVariableParseErrors(t *testing.T) {

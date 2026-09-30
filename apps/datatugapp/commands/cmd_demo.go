@@ -228,8 +228,12 @@ func verifySQLiteFiles(paths []string) error {
 	return nil
 }
 
+// demoSQLOpen is a seam over sql.Open, whose error return a registered
+// driver never trips. Always sql.Open in production.
+var demoSQLOpen = sql.Open
+
 func verifySQLiteFile(path string) error {
-	db, err := sql.Open("sqlite", path)
+	db, err := demoSQLOpen("sqlite", path)
 	if err != nil {
 		return err
 	}

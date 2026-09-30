@@ -46,7 +46,7 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	}
 
 	projectStore := v.store.GetProjectStore(v.projectID)
-	datatugProject, err := api.UpdateDbSchema(context.Background(), projectStore, v.projectID, v.Environment, v.Driver, v.DbModel, connParams)
+	datatugProject, err := scanUpdateDbSchema(context.Background(), projectStore, v.projectID, v.Environment, v.Driver, v.DbModel, connParams)
 	if err != nil {
 		return err
 	}
@@ -59,6 +59,17 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 
 	return nil
 }
+
+// scanUpdateDbSchema is a seam over api.UpdateDbSchema so tests can drive the
+// save step with a project the scanner itself does not produce (a project
+// freshly built from a scan does not pass save-time validation). Always
+// api.UpdateDbSchema in production.
+var scanUpdateDbSchema = api.UpdateDbSchema
+
+// scanNewConnectionString is a seam over dbconnection.NewConnectionString,
+// whose error return the fixed, always-valid options connectionParams passes
+// can never trip. Always dbconnection.NewConnectionString in production.
+var scanNewConnectionString = dbconnection.NewConnectionString
 
 // connectionParams builds DB connection parameters from the scan flags.
 func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
@@ -79,7 +90,7 @@ func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
 		options = append(options, "port="+strconv.Itoa(v.Port))
 	}
 
-	connParams, err := dbconnection.NewConnectionString(v.Driver, v.Host, v.User, v.Password, v.Database, options...)
+	connParams, err := scanNewConnectionString(v.Driver, v.Host, v.User, v.Password, v.Database, options...)
 	if err != nil {
 		return nil, fmt.Errorf("invalid connection string: %w", err)
 	}

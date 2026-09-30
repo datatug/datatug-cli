@@ -267,17 +267,26 @@ func TestCov100gChatSavedQueryRunAndLookup(t *testing.T) {
 	_, err = svc.RunDTQLWithVariables(ctx, "sql-q", nil)
 	require.Error(t, err) // wrong type
 
-	_, err = svc.RunHTTPWithVariables(ctx, "http-q", nil)
-	// HTTP may fail due to https enforcement; still exercises the run path.
-	_ = err
+	// The real HTTP source needs a keyField config this fixture does not
+	// have, so the structured HTTP runner is replaced with one that records
+	// its inputs; the saved-query plumbing around it is what is under test.
+	var httpProject string
+	covDSetVar(t, &runStructuredHTTPQuery, func(_ context.Context, _ *secureread.Executor, projectDir string, _ dal.Query, _ map[string]any) (secureread.Result, error) {
+		httpProject = projectDir
+		return secureread.Result{Columns: []string{"ok"}, Rows: []secureread.Row{{Data: map[string]any{"ok": true}}}}, nil
+	})
+	httpResult, err := svc.RunHTTPWithVariables(ctx, "http-q", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "http://"+projectDir, httpProject)
+	require.Len(t, httpResult.Result.Rows, 1)
+	assert.Equal(t, true, httpResult.Result.Rows[0].Data["ok"])
 
 	_, err = svc.RunWithVariables(ctx, "customers", map[string]string{"=bad": "x"})
 	require.Error(t, err)
 
 	lookup, err := svc.LookupParameter(ctx, "customers", "CustomerId")
-	// Lookup may return nil if FK discovery finds nothing; error-free is enough for coverage.
 	require.NoError(t, err)
-	_ = lookup
+	assert.Nil(t, lookup, "the fixture database has no foreign keys, so no lookup is discovered")
 
 	lookup, err = svc.LookupParameter(ctx, "sql-q", "CustomerId")
 	require.NoError(t, err)

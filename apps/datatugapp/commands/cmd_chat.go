@@ -137,8 +137,8 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	schemaContext := ""
 	healthyRelations := 0
+	var healthy api.CatalogSchema
 	if storedSchema != nil {
-		var healthy api.CatalogSchema
 		for _, relation := range storedSchema.Relations {
 			if relation.Issue == "" {
 				healthy.Relations = append(healthy.Relations, relation)
@@ -183,7 +183,19 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 				return "", Exit(fmt.Sprintf("configure chat model %q: %v", options.model, providerErr), exitCodeUsage)
 			}
 		}
-		conversation, err = chat.NewAIConversation(provider, executor, sourceURL, schemaContext, chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs))
+		conversationOptions := []chat.Option{chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs)}
+		// Narrowing applies to the stored-schema context only: the degraded
+		// multi-source context is left exactly as it is.
+		if healthyRelations > 0 && sourceErr == nil {
+			narrower, narrowErr := chatTableNarrower(projectDir, cloudClient, healthy.Relations)
+			if narrowErr != nil {
+				return "", Exit(fmt.Sprintf("configure table narrowing: %v", narrowErr), exitCodeUsage)
+			}
+			if narrower != nil {
+				conversationOptions = append(conversationOptions, chat.WithTableNarrowing(narrower))
+			}
+		}
+		conversation, err = chat.NewAIConversation(provider, executor, sourceURL, schemaContext, conversationOptions...)
 		if err != nil {
 			return "", Exit(err.Error(), exitCodeUsage)
 		}

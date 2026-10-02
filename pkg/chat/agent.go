@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo/dtql"
+	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/ai/agent"
@@ -70,6 +71,10 @@ type Turn struct {
 	Queries    []QueryResult
 	Actions    []WorkspaceActionResult
 	Usage      *TokenUsage
+	// Narrowing is the table-narrowing decision made before the model was asked,
+	// nil when this conversation does not narrow. It is provenance, kept even when
+	// the turn failed.
+	Narrowing *narrowing.Record
 }
 
 // TokenUsage is the usage reported by the model provider for a turn.
@@ -245,6 +250,11 @@ type AIConversation struct {
 	sources               map[string]string
 	tools                 []ai.Tool
 	reasoning             string
+	// narrower, when set, narrows the schema context to the tables a decision
+	// selects before each turn's model is asked; instructionFor rebuilds the
+	// system instruction around that narrowed context.
+	narrower       TableNarrower
+	instructionFor func(schemaContext string) string
 
 	turnMu      sync.Mutex
 	mu          sync.Mutex
@@ -271,6 +281,28 @@ type conversationConfig struct {
 	reasoning             string
 	browserInterpretation bool
 	sources               map[string]string
+	narrower              TableNarrower
+}
+
+// TableNarrower decides, for one user prompt, which tables' definitions the
+// model is shown. It never fails: any problem is a fallback to the full schema,
+// recorded in the returned Outcome (see package narrowing).
+type TableNarrower interface {
+	Narrow(ctx context.Context, prompt string) narrowing.Outcome
+}
+
+// WithTableNarrowing makes the conversation decide, before each turn's model
+// call, which tables the model needs to see, and pass only those definitions as
+// schema context. When the decision does not narrow (disabled, uncertain, timed
+// out, stopped) the model gets the full schema, exactly as without this option.
+func WithTableNarrowing(narrower TableNarrower) Option {
+	return func(config *conversationConfig) error {
+		if narrower == nil {
+			return errors.New("chat: table narrower is required")
+		}
+		config.narrower = narrower
+		return nil
+	}
 }
 
 // Option configures the constrained aichat conversation.
@@ -390,10 +422,14 @@ func NewAIConversation(provider ai.LLMProvider, executor DTQLExecutor, sourceURL
 		browserInterpretation: config.browserInterpretation,
 		sources:               config.sources,
 		reasoning:             config.reasoning,
+		narrower:              config.narrower,
+		instructionFor:        buildInstruction,
 	}
-	c.instruction = buildInstruction(schemaContext)
 	if config.browserInterpretation {
-		c.instruction = buildBrowserInstruction(schemaContext)
+		c.instructionFor = buildBrowserInstruction
+	}
+	c.instruction = c.instructionFor(schemaContext)
+	if config.browserInterpretation {
 		c.tools = []ai.Tool{c.dtqlTool()}
 	} else {
 		c.tools = []ai.Tool{c.dtqlTool(), c.workspaceTool(), c.bookmarkTool(), c.joinTool()}
@@ -809,6 +845,24 @@ func (c *AIConversation) takeActions() []WorkspaceActionResult {
 }
 
 func (c *AIConversation) buildRequest(ctx context.Context, prompt, priorContext string) ai.ChatRequest {
+	return c.buildRequestWith(ctx, c.instruction, prompt, priorContext)
+}
+
+// narrowTurn asks the narrower which tables this turn's model needs. It returns
+// the system instruction to use (the narrowed one, or the conversation's own
+// when nothing was narrowed) and the decision's record (nil without a narrower).
+func (c *AIConversation) narrowTurn(ctx context.Context, prompt string) (string, *narrowing.Record) {
+	if c.narrower == nil {
+		return c.instruction, nil
+	}
+	outcome := c.narrower.Narrow(ctx, prompt)
+	if outcome.Context == "" {
+		return c.instruction, &outcome.Record
+	}
+	return c.instructionFor(outcome.Context), &outcome.Record
+}
+
+func (c *AIConversation) buildRequestWith(ctx context.Context, system, prompt, priorContext string) ai.ChatRequest {
 	var contextBlocks []ai.ContextBlock
 	if priorContext != "" {
 		contextBlocks = []ai.ContextBlock{{
@@ -817,7 +871,7 @@ func (c *AIConversation) buildRequest(ctx context.Context, prompt, priorContext 
 		}}
 	}
 	return ai.ChatRequest{
-		System:        c.instruction,
+		System:        system,
 		Context:       contextBlocks,
 		Messages:      []ai.Message{{Role: ai.RoleUser, Text: prompt}},
 		Tools:         c.tools,
@@ -881,7 +935,7 @@ func (c *AIConversation) AskWithContext(ctx context.Context, prompt, priorContex
 		// Mirror the pre-dedup contract exactly: a fatal error only fails
 		// the call when it left nothing usable behind; otherwise the
 		// partial Turn StreamAskWithContext already assembled is the result.
-		return Turn{}, fmt.Errorf("chat: agent turn: %w", streamErr)
+		return Turn{Narrowing: turn.Narrowing}, fmt.Errorf("chat: agent turn: %w", streamErr)
 	}
 	return turn, nil
 }
@@ -919,6 +973,9 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 		turnCtx, cancel := context.WithTimeout(ctx, turnTimeout)
 		defer cancel()
 
+		// The narrowing decision runs before the model is asked, so the model
+		// is only ever shown the selected tables' definitions.
+		system, narrowed := c.narrowTurn(turnCtx, prompt)
 		loop := c.newLoop()
 
 		var text strings.Builder
@@ -933,12 +990,12 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 			if len(queries) > 0 || len(actions) > 0 {
 				turnText = ""
 			}
-			c.setLastStreamTurn(Turn{Text: turnText, Queries: queries, Actions: actions, Usage: usage})
+			c.setLastStreamTurn(Turn{Text: turnText, Queries: queries, Actions: actions, Usage: usage, Narrowing: narrowed})
 		}
 
 		requestPrompt, requestContext := prompt, priorContext
 		for attempt := 0; attempt < 2; attempt++ {
-			req := c.buildRequest(turnCtx, requestPrompt, requestContext)
+			req := c.buildRequestWith(turnCtx, system, requestPrompt, requestContext)
 			for event, err := range loop.Run(turnCtx, req) {
 				if err != nil {
 					finish()

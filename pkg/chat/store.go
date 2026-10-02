@@ -46,6 +46,8 @@ type ChatSession struct {
 	HTTPResponses map[string]HTTPResponse
 	Bookmarks     map[string]Bookmark
 	Workspace     WorkspaceState
+	// Narrowings are the table-narrowing decisions made before each AI turn.
+	Narrowings []StoredNarrowing
 }
 
 type ChatMessage struct {
@@ -271,6 +273,10 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 		}
 	}
 	if err = initChatSchemaFn(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err = ensureNarrowingSchema(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -618,6 +624,9 @@ func (s *SessionStore) Load(ctx context.Context, id string) (ChatSession, error)
 	if err := loadWorkspaceFn(s, ctx, &item); err != nil {
 		return ChatSession{}, err
 	}
+	if err := s.loadNarrowings(ctx, &item); err != nil {
+		return ChatSession{}, err
+	}
 	if err := validateBookmarkRefsFn(s, ctx, s.db, item.Workspace); err != nil {
 		return ChatSession{}, err
 	}
@@ -909,7 +918,7 @@ func (s *SessionStore) Clear(ctx context.Context, id string) error {
 	if err := sessionExistsFn(ctx, tx, id, s.scope); err != nil {
 		return err
 	}
-	for _, table := range []string{"session_workspace", "recordsets", "queries", "messages", "http_responses"} {
+	for _, table := range []string{"session_workspace", "recordsets", "queries", "messages", "http_responses", "narrowing_decisions"} {
 		if _, err := txExecContextFn(tx, ctx, "DELETE FROM "+table+" WHERE session_id = ?", id); err != nil {
 			return err
 		}
@@ -1078,6 +1087,11 @@ func (s *SessionStore) AppendTurn(ctx context.Context, sessionID, originID, sour
 			kind = "markdown"
 		}
 		if err := insertMessageFn(ctx, tx, sessionID, ChatMessage{ID: uuid.NewString(), Role: "DataTug", Kind: kind, Text: turn.Text, CreatedAt: now}); err != nil {
+			return Turn{}, err
+		}
+	}
+	if turn.Narrowing != nil {
+		if err := insertNarrowingFn(ctx, tx, sessionID, originID, *turn.Narrowing, now); err != nil {
 			return Turn{}, err
 		}
 	}

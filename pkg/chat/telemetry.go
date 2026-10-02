@@ -90,6 +90,10 @@ func (c *SessionChat) reportTurn(ctx context.Context, interactionID string, clie
 	if !usedAI {
 		report.DetectionSteps = []cloudproto.DetectionStep{{Method: "deterministic", Detector: "datatug.chat", Result: "unavailable_schema"}}
 	}
+	if turn.Narrowing != nil {
+		// Counts, mechanism, engine and model only: no table names, no question text.
+		report.DetectionSteps = append(report.DetectionSteps, turn.Narrowing.DetectionSteps()...)
+	}
 	for _, query := range turn.Queries {
 		actionStatus := "succeeded"
 		if query.Err != nil {

@@ -7,6 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
+
+	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
+	"github.com/strongo/aichat/ai/aiconfig"
 )
 
 // The cloud decision engine forwards the user's questions and the schema's table
@@ -82,13 +86,74 @@ func loadConsent(path string) (consentFile, error) {
 	return file, nil
 }
 
+// consentTempFile is the part of *os.File replaceFile writes through.
+type consentTempFile interface {
+	Name() string
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+}
+
+// Seams over the consent lock's timing and the temporary file, so tests need not
+// wait for the lock or break the disk. Always these values in production.
+var (
+	consentLockWait   = 5 * time.Second
+	consentLockStale  = 30 * time.Second
+	consentCreateTemp = func(dir string) (consentTempFile, error) {
+		file, err := os.CreateTemp(dir, ".decision-consent-*")
+		if err != nil {
+			return nil, err
+		}
+		return file, nil
+	}
+	consentRename = os.Rename
+)
+
+// lockConsent takes a lock file next to the consent store, so that concurrent
+// `datatug chat` processes do not lose each other's entries. The lock is a file
+// created exclusively (portable, unlike flock); one older than consentLockStale
+// belongs to a process that died and is taken over.
+func lockConsent(path string) (func(), error) {
+	lock := path + ".lock"
+	deadline := time.Now().Add(consentLockWait)
+	for {
+		file, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_ = file.Close()
+			return func() { _ = os.Remove(lock) }, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+		if info, statErr := os.Stat(lock); statErr == nil && time.Since(info.ModTime()) > consentLockStale {
+			_ = os.Remove(lock)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("another datatug process is writing it; try again")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // writeDecisionConsent records (or, for "forget", removes) the user's choice for
-// the project, privately (file 0600, directory 0700).
+// the project. The store is read, changed and replaced under a lock, and replaced
+// atomically (a temporary file in the same directory, synced, then renamed), so a
+// reader never sees a partial file, no concurrent writer's entry is lost, and the
+// file is always private (0600) whatever mode an earlier file had.
 func writeDecisionConsent(projectDir, choice string) (string, error) {
 	path, err := chatConsentPath()
 	if err != nil {
 		return "", err
 	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return path, err
+	}
+	unlock, err := lockConsent(path)
+	if err != nil {
+		return path, fmt.Errorf("%s: %w", path, err)
+	}
+	defer unlock()
 	file, err := loadConsent(path)
 	if err != nil {
 		return path, fmt.Errorf("%s: %w; fix or delete it first", path, err)
@@ -102,10 +167,41 @@ func writeDecisionConsent(projectDir, choice string) (string, error) {
 		file.Projects[consentKey(projectDir)] = choice
 	}
 	payload, _ := json.MarshalIndent(file, "", "  ") // plain strings: cannot fail
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return path, err
+	return path, replaceFile(path, payload)
+}
+
+// replaceFile writes payload to a temporary file beside path, syncs it and renames
+// it over path. The temporary file is created private (0600), so path is too.
+func replaceFile(path string, payload []byte) error {
+	temp, err := consentCreateTemp(filepath.Dir(path))
+	if err != nil {
+		return err
 	}
-	return path, os.WriteFile(path, payload, 0o600)
+	_, writeErr := temp.Write(payload)
+	syncErr := temp.Sync()
+	closeErr := temp.Close()
+	if err := errors.Join(writeErr, syncErr, closeErr); err != nil {
+		_ = os.Remove(temp.Name())
+		return err
+	}
+	if err := consentRename(temp.Name(), path); err != nil {
+		_ = os.Remove(temp.Name())
+		return err
+	}
+	return nil
+}
+
+// consentAdvice is what `--cloud-decision <choice>` tells the user beyond
+// "recorded": consent only matters when the project requests the decider (or the
+// user turns it on for a session), so say what to do when it does not.
+func consentAdvice(projectDir, choice string) string {
+	if choice != consentAllow {
+		return ""
+	}
+	if requested := narrowing.LoadSettings(projectDir).Decision; requested == "auto" || requested == "cloud" {
+		return ""
+	}
+	return fmt.Sprintf("this project does not request the cloud decider (no \"decision: auto\" in %s), so the consent is recorded but nothing is turned on; to use it for a session run: %s=auto datatug chat", narrowing.SettingsFile, chatDecisionEnvPrefix+aiconfig.EnvDecision)
 }
 
 // setCloudDecisionConsent handles `datatug chat --cloud-decision allow|refuse|forget`.

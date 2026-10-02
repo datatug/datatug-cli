@@ -68,7 +68,8 @@ not shown can cost a describe_relation round trip.
                                           user config directory (refuse|forget)
   A project's "decision: auto" in ai/table-rules.yaml only REQUESTS it: it is
   ignored, with a notice, until you allow it. Whenever it is on, the chat says so
-  at start. After a failure it is not asked again for five minutes;
+  at start: as a system line at the top of the chat (the terminal UI hides what
+  is printed before it starts), and on stderr for non-interactive runs. After a failure it is not asked again for five minutes;
   DATATUG_AI_DECISION_TIMEOUT sets how long it may take per turn (default 1.5s).
   Schemas above 255 tables are not sent to it.`,
 		Args: cobra.NoArgs,
@@ -133,6 +134,7 @@ var (
 	setSavedQueryService = func(ui *chat.ChatUI, service chat.SavedQueryService) error {
 		return ui.SetSavedQueryService(service)
 	}
+	setSessionNotices = func(ui *chat.ChatUI, lines []string) { ui.SetSessionNotices(lines) }
 )
 
 func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
@@ -151,6 +153,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			return "", Exit(consentErr.Error(), exitCodeUsage)
 		}
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "cloud decision engine for this project: %s (stored in %s)\n", options.cloudDecision, path)
+		if advice := consentAdvice(projectDir, options.cloudDecision); advice != "" {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: %s\n", advice)
+		}
 	}
 
 	database := options.database
@@ -202,6 +207,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	executor := secureread.NewExecutor(session)
 	var conversation chat.ContextualConversation
 	var foreignKeys []narrowing.Link // set once the source's foreign keys are read
+	var sessionNotices []string      // shown inside the chat as well as on stderr
 	var cloudClient *cloud.Client
 	var cloudContext ai.ClientContext
 	if options.model == "cloud" {
@@ -230,13 +236,16 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			choice, consentPath, consentWarning := readDecisionConsent(projectDir)
 			if consentWarning != "" {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", consentWarning)
+				sessionNotices = append(sessionNotices, "Warning: table narrowing: "+consentWarning)
 			}
 			narrower, warnings, notices := chatTableNarrower(projectDir, cloudClient, healthy.Relations, func() []narrowing.Link { return foreignKeys }, consentState{choice, consentPath})
-			for _, warning := range warnings {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", warning)
-			}
 			for _, notice := range notices {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "table narrowing: %s\n", notice)
+				sessionNotices = append(sessionNotices, "Table narrowing: "+notice)
+			}
+			for _, warning := range warnings {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", warning)
+				sessionNotices = append(sessionNotices, "Warning: table narrowing: "+warning)
 			}
 			if narrower != nil {
 				conversationOptions = append(conversationOptions, chat.WithTableNarrowing(narrower))
@@ -286,6 +295,11 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	ui, err := newSessionChatUI(ctx, sessions, options.model)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("render chat session: %v", err), exitCodeUsage)
+	}
+	if len(sessionNotices) > 0 {
+		// The terminal UI uses the alternate screen: what was printed to stderr
+		// above is not visible until the user quits, so show it in the chat too.
+		setSessionNotices(ui, sessionNotices)
 	}
 	if err := setSavedQueryService(ui, chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session}); err != nil {
 		return "", Exit(fmt.Sprintf("list saved project queries: %v", err), exitCodeUsage)

@@ -450,3 +450,44 @@ func TestDisabledDeciderReportsNothing(t *testing.T) {
 		t.Fatalf("narrowings = %+v", session.Narrowings)
 	}
 }
+
+// Once the turn has used its describe_relation calls the tool is no longer offered,
+// so a model cannot spend the turn's remaining steps asking for it.
+func TestDescribeRelationIsWithdrawnOnceTheTurnHasSpentIt(t *testing.T) {
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolDescribeRelation, map[string]any{"name": "Track"})}},
+		{toolCalls: []ai.ToolCall{toolCall("2", toolDescribeRelation, map[string]any{"name": "Album"})}},
+		{toolCalls: []ai.ToolCall{toolCall("3", toolRunDTQL, map[string]any{"title": "Tracks", "dtql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
+		{text: "Done."},
+	}}
+	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"Name"}}}
+	conversation, err := NewAIConversation(llm, executor, "sqlite:///chinook.db", chinookFullSchema(), WithTableNarrowing(chinookNarrower(t, narrowingScorer(narrowingMusicSales))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := conversation.AskWithContext(context.Background(), narrowingQuestion, "")
+	if err != nil || len(turn.Queries) != 1 || turn.Queries[0].Err != nil {
+		t.Fatalf("the turn failed: %+v, %v", turn, err)
+	}
+	if len(llm.requests) != 4 {
+		t.Fatalf("model calls = %d", len(llm.requests))
+	}
+	for i, offered := range []bool{true, true, false, false} {
+		if got := slices.Contains(toolNames(llm.requests[i]), "describe_relation"); got != offered {
+			t.Errorf("request %d offers describe_relation = %v, want %v (%v)", i, got, offered, toolNames(llm.requests[i]))
+		}
+	}
+	// Withdrawing it leaves every other tool in place, and the next turn has it again.
+	if !slices.Contains(toolNames(llm.requests[3]), toolRunDTQL) {
+		t.Errorf("run_dtql went missing: %v", toolNames(llm.requests[3]))
+	}
+	conversation.resetTurn()
+	llm2 := &scriptedProvider{steps: []scriptedStep{{text: "ok"}}}
+	conversation.provider = llm2
+	if _, err := conversation.AskWithContext(context.Background(), narrowingQuestion, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(toolNames(llm2.requests[0]), "describe_relation") {
+		t.Errorf("the next turn does not offer describe_relation again: %v", toolNames(llm2.requests[0]))
+	}
+}

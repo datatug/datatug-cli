@@ -49,6 +49,11 @@ type ChatUI struct {
 
 	sessionID string
 	snapshot  ChatSession
+	// sessionNotices are the start-of-session lines (what the table-narrowing
+	// decision does, and warnings about its configuration). They are shown as
+	// system lines at the top of the transcript, are never stored as messages and
+	// never reach the model.
+	sessionNotices []string
 
 	// lastGridEntryID is the transcript entry ID of the most recently
 	// appended grid/join block — Ctrl+G's target (checklist #45).
@@ -207,6 +212,17 @@ func NewSessionChatUI(ctx context.Context, sessions *SessionChat, modelName stri
 	}
 	u.loadSession(snapshot)
 	return u, nil
+}
+
+// SetSessionNotices shows lines at the top of the chat as system entries, visibly
+// apart from the model's replies, and keeps showing them whenever the transcript
+// is rebuilt (a switched or cleared session). They are not messages: they are not
+// stored in the session and never sent to the model. The terminal UI runs on the
+// alternate screen, so a line printed to stderr before it starts is not seen until
+// the user quits.
+func (u *ChatUI) SetSessionNotices(lines []string) {
+	u.sessionNotices = append([]string(nil), lines...)
+	u.loadSession(u.snapshot)
 }
 
 // SetProjectChoices mirrors UI.SetProjectChoices.
@@ -645,6 +661,9 @@ func (u *ChatUI) loadSession(session ChatSession) {
 	u.snapshot = session
 	u.syncChips()
 	u.shell.ClearTranscript()
+	for _, line := range u.sessionNotices {
+		u.shell.AppendSystem(line)
+	}
 	u.gridsByRecordSetID = map[string]*gridState{}
 	u.joinBlocksByRecordSetID = map[string]*JoinBlock{}
 	u.transcriptEntryKinds = map[string]string{}

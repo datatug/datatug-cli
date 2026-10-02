@@ -353,6 +353,9 @@ func (f *fakeAICloud) handler(t *testing.T) http.Handler {
 	})
 }
 
+// lastSessionNotices are the lines the last runThroughChat showed inside the chat.
+var lastSessionNotices []string
+
 // chatRun describes one `datatug chat` session against the fake AI cloud.
 type chatRun struct {
 	dir, database string
@@ -383,6 +386,11 @@ func runThroughChat(t *testing.T, fake *fakeAICloud, run chatRun) string {
 		sessions = s
 		return s, err
 	}
+	lastSessionNotices = nil
+	covDSetVar(t, &setSessionNotices, func(ui *chat.ChatUI, lines []string) {
+		lastSessionNotices = append([]string(nil), lines...)
+		ui.SetSessionNotices(lines)
+	})
 	var askErr error
 	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) {
 		for _, question := range run.questions {
@@ -690,4 +698,197 @@ func TestChatKeepsTheForeignKeyPathBetweenSelectedTables(t *testing.T) {
 	askThroughChat(t, fake, dir, database, "Which artists sell the most?")
 	require.Len(t, fake.chatRequests, 1)
 	assert.Equal(t, []string{"Album", "Artist", "InvoiceLine", "Track"}, listedTables(schemaOf(fake.chatRequests[0])))
+}
+
+// The terminal UI hides what is printed before it starts, so the same lines are
+// shown as system lines at the top of the chat.
+func TestSessionNoticesAreShownInsideTheChat(t *testing.T) {
+	probs := map[string]float64{"Invoice": 0.96}
+	t.Run("engine on via the environment", func(t *testing.T) {
+		covDSetVar(t, &chatGetenv, narrowingEnv(map[string]string{"DATATUG_AI_DECISION_PROVIDER": "auto"}))
+		dir, database := narrowingProject(t)
+		stderr := runThroughChat(t, &fakeAICloud{probs: probs}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}})
+		require.Len(t, lastSessionNotices, 1)
+		assert.Contains(t, lastSessionNotices[0], "Table narrowing: the cloud decision engine is ON (enabled by the DATATUG_AI_DECISION_PROVIDER environment variable)")
+		assert.Contains(t, stderr, strings.TrimPrefix(lastSessionNotices[0], "Table narrowing: "), "stderr keeps the same line for non-TUI runs")
+	})
+	t.Run("engine on via consent", func(t *testing.T) {
+		covDSetVar(t, &chatGetenv, narrowingEnv(nil))
+		dir, database := narrowingProject(t)
+		writeRules(t, dir, "decision: auto\n")
+		runThroughChat(t, &fakeAICloud{probs: probs}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}, flag: "allow"})
+		require.Len(t, lastSessionNotices, 1)
+		assert.Contains(t, lastSessionNotices[0], "is ON (enabled by your consent for this project")
+	})
+	t.Run("project request without consent", func(t *testing.T) {
+		covDSetVar(t, &chatGetenv, narrowingEnv(nil))
+		dir, database := narrowingProject(t)
+		writeRules(t, dir, "decision: cloud\n")
+		runThroughChat(t, &fakeAICloud{}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}})
+		require.Len(t, lastSessionNotices, 1)
+		assert.Contains(t, lastSessionNotices[0], "NOT enabled")
+		assert.Contains(t, lastSessionNotices[0], "datatug chat --cloud-decision allow")
+	})
+	t.Run("disabled: nothing", func(t *testing.T) {
+		covDSetVar(t, &chatGetenv, narrowingEnv(map[string]string{"DATATUG_AI_DECISION_PROVIDER": "disabled"}))
+		dir, database := narrowingProject(t)
+		writeRules(t, dir, "decision: auto\n")
+		runThroughChat(t, &fakeAICloud{}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}})
+		assert.Empty(t, lastSessionNotices)
+	})
+	t.Run("rule warnings and an unreadable consent store, after the notice", func(t *testing.T) {
+		covDSetVar(t, &chatGetenv, narrowingEnv(nil))
+		dir, database := narrowingProject(t)
+		writeRules(t, dir, "decision: auto\nrules:\n  - phrase: x\n    tables: [invoice]\n")
+		path, err := chatConsentPath()
+		require.NoError(t, err)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+		require.NoError(t, os.WriteFile(path, []byte("{broken"), 0o600))
+		runThroughChat(t, &fakeAICloud{}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}})
+		require.Len(t, lastSessionNotices, 3)
+		assert.Contains(t, lastSessionNotices[0], "Warning: table narrowing: "+path+" is not readable")
+		assert.Contains(t, lastSessionNotices[1], "Table narrowing: this project's")
+		assert.Contains(t, lastSessionNotices[2], "Warning: table narrowing: table rule 1")
+	})
+}
+
+func TestAllowingWithoutAProjectRequestSaysSo(t *testing.T) {
+	covDSetVar(t, &chatGetenv, narrowingEnv(nil))
+	dir, database := narrowingProject(t)
+	stderr := runThroughChat(t, &fakeAICloud{}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}, flag: "allow"})
+	assert.Contains(t, stderr, "note: this project does not request the cloud decider")
+	assert.Contains(t, stderr, "the consent is recorded but nothing is turned on")
+	assert.Contains(t, stderr, "DATATUG_AI_DECISION_PROVIDER=auto datatug chat")
+
+	writeRules(t, dir, "decision: auto\n")
+	stderr = runThroughChat(t, &fakeAICloud{}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}, flag: "allow"})
+	assert.NotContains(t, stderr, "note:")
+	stderr = runThroughChat(t, &fakeAICloud{}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}, flag: "refuse"})
+	assert.NotContains(t, stderr, "note:")
+}
+
+// Concurrent `datatug chat` processes recording consent for different projects
+// neither corrupt the store nor lose each other's entries.
+func TestConcurrentConsentWritersKeepEveryEntryAndValidJSON(t *testing.T) {
+	configDir := t.TempDir()
+	covDSetVar(t, &chatUserConfigDir, func() (string, error) { return configDir, nil })
+	root := t.TempDir()
+	const writers = 40
+	var wg sync.WaitGroup
+	errs := make(chan error, writers)
+	for i := range writers {
+		dir := filepath.Join(root, strconv.Itoa(i))
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := writeDecisionConsent(dir, "allow")
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	path, err := chatConsentPath()
+	require.NoError(t, err)
+	file, err := loadConsent(path)
+	require.NoError(t, err, "the store is valid JSON")
+	assert.Len(t, file.Projects, writers, "no writer's entry was lost")
+	for i := range writers {
+		assert.Equal(t, "allow", file.Projects[consentKey(filepath.Join(root, strconv.Itoa(i)))])
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	require.NoError(t, err)
+	assert.Len(t, entries, 1, "no temporary or lock file is left behind")
+}
+
+func TestConsentWriteIsPrivateWhateverTheOldFileWas(t *testing.T) {
+	configDir := t.TempDir()
+	covDSetVar(t, &chatUserConfigDir, func() (string, error) { return configDir, nil })
+	path, err := chatConsentPath()
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(`{"projects":{}}`), 0o644))
+	require.NoError(t, os.Chmod(path, 0o644))
+	_, err = writeDecisionConsent(t.TempDir(), "allow")
+	require.NoError(t, err)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+func TestConsentLock(t *testing.T) {
+	configDir := t.TempDir()
+	covDSetVar(t, &chatUserConfigDir, func() (string, error) { return configDir, nil })
+	path, err := chatConsentPath()
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+	lock := path + ".lock"
+
+	t.Run("a stale lock from a dead process is taken over", func(t *testing.T) {
+		require.NoError(t, os.WriteFile(lock, nil, 0o600))
+		old := time.Now().Add(-time.Hour)
+		require.NoError(t, os.Chtimes(lock, old, old))
+		_, err := writeDecisionConsent(t.TempDir(), "allow")
+		require.NoError(t, err)
+		_, statErr := os.Stat(lock)
+		assert.True(t, os.IsNotExist(statErr))
+	})
+	t.Run("a held lock times out with a clear error", func(t *testing.T) {
+		covDSetVar(t, &consentLockWait, 30*time.Millisecond)
+		require.NoError(t, os.WriteFile(lock, nil, 0o600))
+		t.Cleanup(func() { _ = os.Remove(lock) })
+		_, err := writeDecisionConsent(t.TempDir(), "allow")
+		require.ErrorContains(t, err, "another datatug process is writing it")
+	})
+	t.Run("a lock that cannot be created", func(t *testing.T) {
+		covDSkipIfRoot(t)
+		require.NoError(t, os.Chmod(filepath.Dir(path), 0o500))
+		t.Cleanup(func() { _ = os.Chmod(filepath.Dir(path), 0o700) })
+		_, err := writeDecisionConsent(t.TempDir(), "allow")
+		require.Error(t, err)
+	})
+}
+
+type failingConsentTemp struct {
+	name                     string
+	writeErr, syncErr, close error
+}
+
+func (f failingConsentTemp) Name() string                { return f.name }
+func (f failingConsentTemp) Write(b []byte) (int, error) { return len(b), f.writeErr }
+func (f failingConsentTemp) Sync() error                 { return f.syncErr }
+func (f failingConsentTemp) Close() error                { return f.close }
+
+func TestConsentReplaceFailures(t *testing.T) {
+	configDir := t.TempDir()
+	covDSetVar(t, &chatUserConfigDir, func() (string, error) { return configDir, nil })
+	dir := t.TempDir()
+	tests := []struct {
+		name   string
+		create func(string) (consentTempFile, error)
+		rename func(string, string) error
+		want   string
+	}{
+		{"the temporary file cannot be created", func(string) (consentTempFile, error) { return nil, errors.New("no temp") }, os.Rename, "no temp"},
+		{"the write fails", func(d string) (consentTempFile, error) {
+			return failingConsentTemp{name: filepath.Join(d, "t"), writeErr: errors.New("disk full")}, nil
+		}, os.Rename, "disk full"},
+		{"the sync fails", func(d string) (consentTempFile, error) {
+			return failingConsentTemp{name: filepath.Join(d, "t"), syncErr: errors.New("sync failed")}, nil
+		}, os.Rename, "sync failed"},
+		{"the rename fails", func(d string) (consentTempFile, error) {
+			return failingConsentTemp{name: filepath.Join(d, "t")}, nil
+		}, func(string, string) error { return errors.New("rename refused") }, "rename refused"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			covDSetVar(t, &consentCreateTemp, tt.create)
+			covDSetVar(t, &consentRename, tt.rename)
+			_, err := writeDecisionConsent(dir, "allow")
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
 }

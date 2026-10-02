@@ -172,13 +172,15 @@ Only you can turn it on, so that opening a cloned repository never starts forwar
 - `DATATUG_AI_DECISION_PROVIDER=auto` (or `cloud`, the same plus a warning when the chat is not using `--model cloud`)
   turns it on for that session. `DATATUG_AI_DECISION_PROVIDER=disabled` always wins over everything below.
 - `datatug chat --cloud-decision allow` records your consent for this project (identified by its directory, so a copy
-  elsewhere does not inherit it) in `datatug/decision-consent.json` in your user config directory, outside the project.
+  elsewhere does not inherit it, and a project you move or rename needs consent again) in `datatug/decision-consent.json` in your user config directory, outside the project.
   `--cloud-decision refuse` records a refusal; `--cloud-decision forget` removes the record.
 - A project's own `decision: auto|cloud` only **requests** it. Without your consent it is ignored, and the chat prints one
   line at start saying so, what would be sent and to whom, and the commands above.
 
-Whenever it is on, the chat prints one line at start naming where the setting came from, what is sent to whom, and how to
-turn it off. `DATATUG_AI_DECISION_TIMEOUT` (a Go duration, default `1500ms`) sets how long it may take per turn. It is off
+Whenever it is on, the chat shows one line at start, as a system line at the top of the chat (the terminal UI hides
+anything printed before it starts) and on stderr for non-interactive runs, naming where the setting came from, what is sent
+to whom, and how to turn it off. Rule and configuration warnings appear the same way. These lines are not messages: they
+are not stored in the session and never sent to the model. `DATATUG_AI_DECISION_TIMEOUT` (a Go duration, default `1500ms`) sets how long it may take per turn. It is off
 by default pending a decision on how TypeSafe AI may handle this data.
 
 Telemetry for a decision carries counts and the engine and model ids only (for example `narrowed:before=11:after=3`),

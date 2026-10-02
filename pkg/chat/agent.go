@@ -933,6 +933,24 @@ func (c *AIConversation) buildRequestWith(ctx context.Context, system string, to
 	}
 }
 
+// describeLimiter stops offering describe_relation once the turn has used its
+// calls, so the model has to answer with what it has instead of asking again until
+// the turn runs out of model calls.
+type describeLimiter struct {
+	ai.LLMProvider
+	conversation *AIConversation
+}
+
+func (l describeLimiter) Stream(ctx context.Context, req ai.ChatRequest) iter.Seq2[ai.Event, error] {
+	l.conversation.mu.Lock()
+	spent := l.conversation.describes >= maxDescribeCallsPerTurn
+	l.conversation.mu.Unlock()
+	if spent {
+		req.Tools = slices.DeleteFunc(slices.Clone(req.Tools), func(tool ai.Tool) bool { return tool.Name == toolDescribeRelation })
+	}
+	return l.LLMProvider.Stream(ctx, req)
+}
+
 func (c *AIConversation) newLoop(narrowed bool) *agent.Loop {
 	maxSteps := maxModelCallsPerTurn
 	if narrowed {
@@ -956,12 +974,16 @@ func (c *AIConversation) newLoop(narrowed bool) *agent.Loop {
 		maxSteps = 3
 		maxToolCalls = 2
 	}
-	return &agent.Loop{
+	loop := &agent.Loop{
 		Provider:     c.provider,
 		Handlers:     c.handlers(),
 		MaxSteps:     maxSteps,
 		MaxToolCalls: maxToolCalls,
 	}
+	if narrowed {
+		loop.Provider = describeLimiter{LLMProvider: c.provider, conversation: c}
+	}
+	return loop
 }
 
 // Ask runs one chat turn and returns model text separately from

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"iter"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -237,6 +238,7 @@ const (
 	toolWorkspaceAction    = "workspace_action"
 	toolFindBookmarks      = "find_bookmarks"
 	toolApplyJoinCandidate = "apply_join_candidate"
+	toolDescribeRelation   = "describe_relation"
 )
 
 // AIConversation uses an ephemeral aichat agent.Loop for each turn. DataTug's
@@ -289,6 +291,9 @@ type conversationConfig struct {
 // recorded in the returned Outcome (see package narrowing).
 type TableNarrower interface {
 	Narrow(ctx context.Context, prompt string) narrowing.Outcome
+	// Describe returns one table's definition from the local schema, so that a
+	// model that was not shown a table can read it (describe_relation).
+	Describe(name string) (string, bool)
 }
 
 // WithTableNarrowing makes the conversation decide, before each turn's model
@@ -461,6 +466,26 @@ func (c *AIConversation) bookmarkTool() ai.Tool {
 	}
 }
 
+type describeRelationArgs struct {
+	Name string `json:"name" jsonschema:"Exact name of an omitted relation, as listed in the schema note"`
+}
+
+type describeRelationResponse struct {
+	OK         bool   `json:"ok"`
+	Definition string `json:"definition,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+// describeTool is offered only on a turn whose schema was narrowed, so a turn
+// that was not narrowed sends exactly the request it always did.
+func (c *AIConversation) describeTool() ai.Tool {
+	return ai.Tool{
+		Name:        toolDescribeRelation,
+		Description: "Read the definition (columns) of a relation that the schema note lists as omitted. Read-only; does not query the database.",
+		Schema:      argsSchema(describeRelationArgs{}),
+	}
+}
+
 func (c *AIConversation) joinTool() ai.Tool {
 	return ai.Tool{
 		Name:        toolApplyJoinCandidate,
@@ -495,6 +520,18 @@ func (c *AIConversation) handlers() map[string]agent.Handler {
 			}
 			return jsonResult(call.ID, resp), nil
 		},
+	}
+	handlers[toolDescribeRelation] = func(_ context.Context, call ai.ToolCall) (ai.ToolResult, error) {
+		var args describeRelationArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return errorResult(call.ID, "invalid describe_relation arguments: "+err.Error()), nil
+		}
+		if c.narrower != nil {
+			if definition, ok := c.narrower.Describe(args.Name); ok {
+				return jsonResult(call.ID, describeRelationResponse{OK: true, Definition: definition}), nil
+			}
+		}
+		return jsonResult(call.ID, describeRelationResponse{Error: "No such relation. Use an exact name from the schema note."}), nil
 	}
 	if c.browserInterpretation {
 		return handlers
@@ -845,24 +882,26 @@ func (c *AIConversation) takeActions() []WorkspaceActionResult {
 }
 
 func (c *AIConversation) buildRequest(ctx context.Context, prompt, priorContext string) ai.ChatRequest {
-	return c.buildRequestWith(ctx, c.instruction, prompt, priorContext)
+	return c.buildRequestWith(ctx, c.instruction, c.tools, prompt, priorContext)
 }
 
 // narrowTurn asks the narrower which tables this turn's model needs. It returns
-// the system instruction to use (the narrowed one, or the conversation's own
-// when nothing was narrowed) and the decision's record (nil without a narrower).
-func (c *AIConversation) narrowTurn(ctx context.Context, prompt string) (string, *narrowing.Record) {
+// the system instruction and tools to use (the narrowed instruction plus the
+// describe_relation tool, or the conversation's own when nothing was narrowed,
+// which is exactly the request without narrowing), and the decision's record
+// (nil without a narrower).
+func (c *AIConversation) narrowTurn(ctx context.Context, prompt string) (string, []ai.Tool, *narrowing.Record) {
 	if c.narrower == nil {
-		return c.instruction, nil
+		return c.instruction, c.tools, nil
 	}
 	outcome := c.narrower.Narrow(ctx, prompt)
 	if outcome.Context == "" {
-		return c.instruction, &outcome.Record
+		return c.instruction, c.tools, &outcome.Record
 	}
-	return c.instructionFor(outcome.Context), &outcome.Record
+	return c.instructionFor(outcome.Context), append(slices.Clone(c.tools), c.describeTool()), &outcome.Record
 }
 
-func (c *AIConversation) buildRequestWith(ctx context.Context, system, prompt, priorContext string) ai.ChatRequest {
+func (c *AIConversation) buildRequestWith(ctx context.Context, system string, tools []ai.Tool, prompt, priorContext string) ai.ChatRequest {
 	var contextBlocks []ai.ContextBlock
 	if priorContext != "" {
 		contextBlocks = []ai.ContextBlock{{
@@ -874,14 +913,18 @@ func (c *AIConversation) buildRequestWith(ctx context.Context, system, prompt, p
 		System:        system,
 		Context:       contextBlocks,
 		Messages:      []ai.Message{{Role: ai.RoleUser, Text: prompt}},
-		Tools:         c.tools,
+		Tools:         tools,
 		Reasoning:     c.reasoning,
 		ClientContext: clientContextFrom(ctx),
 	}
 }
 
-func (c *AIConversation) newLoop() *agent.Loop {
+func (c *AIConversation) newLoop(narrowed bool) *agent.Loop {
 	maxSteps := maxModelCallsPerTurn
+	if narrowed {
+		// One more model call, for reading an omitted relation's definition.
+		maxSteps++
+	}
 	maxToolCalls := maxAgentToolCalls
 	if c.browserInterpretation {
 		// Interpret allows one correction: the model's first run_dtql
@@ -975,8 +1018,8 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 
 		// The narrowing decision runs before the model is asked, so the model
 		// is only ever shown the selected tables' definitions.
-		system, narrowed := c.narrowTurn(turnCtx, prompt)
-		loop := c.newLoop()
+		system, tools, narrowed := c.narrowTurn(turnCtx, prompt)
+		loop := c.newLoop(narrowed != nil && narrowed.Narrowed)
 
 		var text strings.Builder
 		var partial, usage *TokenUsage
@@ -995,7 +1038,7 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 
 		requestPrompt, requestContext := prompt, priorContext
 		for attempt := 0; attempt < 2; attempt++ {
-			req := c.buildRequestWith(turnCtx, system, requestPrompt, requestContext)
+			req := c.buildRequestWith(turnCtx, system, tools, requestPrompt, requestContext)
 			for event, err := range loop.Run(turnCtx, req) {
 				if err != nil {
 					finish()

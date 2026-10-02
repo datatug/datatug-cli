@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/chat"
@@ -106,18 +107,27 @@ func TestNarrowShrinksChinookContext(t *testing.T) {
 			if !slices.Equal(rec.Selected, tt.wantSelected) || !slices.Equal(rec.Potential, tt.wantPotential) || rec.Verdict != tt.wantVerdict {
 				t.Fatalf("selected=%v potential=%v verdict=%q", rec.Selected, rec.Potential, rec.Verdict)
 			}
-			// The model's context holds exactly the kept tables' definitions, plus a
-			// one-line note that the list is a selection.
-			var kept []api.CatalogRelation
+			// The model's context is a note, then exactly the kept tables' definitions.
+			var kept, omitted []api.CatalogRelation
 			for _, relation := range narrowingtest.Chinook() {
 				if slices.Contains(tt.wantKept, relation.Name) {
 					kept = append(kept, relation)
+				} else {
+					omitted = append(omitted, relation)
 				}
 			}
-			want := chat.FormatSchemaContext(&api.CatalogSchema{Relations: kept}) +
-				fmt.Sprintf("\nNote: DataTug narrowed this schema to the %d of 11 relations judged relevant to this request. Do not guess the names of other relations.", len(tt.wantKept))
-			if out.Context != want {
-				t.Fatalf("context =\n%s\nwant\n%s", out.Context, want)
+			note, listing, _ := strings.Cut(out.Context, "\n- ")
+			listing = "- " + listing
+			if want := chat.FormatSchemaContext(&api.CatalogSchema{Relations: kept}); listing != want {
+				t.Fatalf("listing =\n%s\nwant\n%s", listing, want)
+			}
+			wantNote := fmt.Sprintf("Note: DataTug narrowed this schema to the %d of 11 relations judged relevant to this request. Omitted relations (names only):", len(tt.wantKept))
+			for _, relation := range omitted {
+				wantNote += fmt.Sprintf(" %q", relation.Name)
+			}
+			wantNote += ". If the request needs one of them, call describe_relation with its exact name to read its definition; do not guess the names of other relations."
+			if note != wantNote {
+				t.Fatalf("note =\n%s\nwant\n%s", note, wantNote)
 			}
 			for _, relation := range narrowingtest.Chinook() {
 				if listed := strings.Contains(out.Context, "- "+relation.Name+" ("); listed != slices.Contains(tt.wantKept, relation.Name) {
@@ -438,11 +448,13 @@ func TestWideTablesAreCappedAndNamesStayUnique(t *testing.T) {
 	if d := candidates[0].Description; len(d) > 512+4 || !strings.HasSuffix(d, " ...") || !strings.HasPrefix(d, "column_000, column_001") {
 		t.Fatalf("wide description = %d bytes %q", len(d), d[max(0, len(d)-20):])
 	}
-	// A column list that never fits at all still produces a bounded description.
-	huge := api.CatalogRelation{Name: "Huge", Columns: []api.CatalogColumn{{Name: strings.Repeat("c", 600)}}}
-	n = narrower(t, newScorer(nil), func(c *narrowing.Config) { c.Relations = []api.CatalogRelation{huge} })
-	if n.Candidates()[0] != "Huge" {
-		t.Fatal("candidates")
+	// One very long column name is cut by itself and does not hide the later columns.
+	huge := api.CatalogRelation{Name: "Huge", Columns: []api.CatalogColumn{{Name: strings.Repeat("c", 600)}, {Name: "second"}, {Name: "ünï" + strings.Repeat("é", 100)}}}
+	probe := newScorer(nil)
+	narrower(t, probe, func(c *narrowing.Config) { c.Relations = []api.CatalogRelation{huge} }).Narrow(context.Background(), "q")
+	d := probe.Requests()[0].Questions[0].Candidates[0].Description
+	if !strings.HasPrefix(d, strings.Repeat("c", 64)+"~, second, ünï") || !utf8.ValidString(d) || len(d) > 512+4 {
+		t.Fatalf("description = %q", d)
 	}
 }
 
@@ -518,10 +530,10 @@ func TestDetectionStepsForOtherEngines(t *testing.T) {
 			t.Errorf("%+v -> %+v", c.rec, steps)
 		}
 	}
-	// No engine asked, not deterministic (the decider is disabled): one honest step.
+	// No engine asked, not deterministic (the decider is disabled): no step at all.
 	disabled := narrowing.Record{FallbackReason: narrowing.ReasonDisabled, CandidatesBefore: 11}
-	if steps := disabled.DetectionSteps(); steps[0].Detector != "datatug.narrow.tables" || steps[0].Result != "full_schema:reason=disabled:before=11" {
-		t.Fatalf("steps = %+v", steps)
+	if steps := disabled.DetectionSteps(); steps != nil {
+		t.Fatalf("a disabled decider reported a detection step: %+v", steps)
 	}
 	// A calibrated record whose top pick has no score keeps no confidence.
 	odd := narrowing.Record{Engine: "jev", Provenance: "calibrated", Selected: []string{"Ghost"}}
@@ -658,12 +670,8 @@ type scoringProvider struct {
 
 func (p scoringProvider) Name() string { return "scoring" }
 
-func TestLoadRules(t *testing.T) {
-	dir := t.TempDir()
-	if rules, err := narrowing.LoadRules(dir); err != nil || rules != nil {
-		t.Fatalf("a project without rules = %v, %v", rules, err)
-	}
-	write := func(content string) {
+func TestLoadSettings(t *testing.T) {
+	write := func(t *testing.T, dir, content string) {
 		t.Helper()
 		path := filepath.Join(dir, "ai", "table-rules.yaml")
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -673,28 +681,134 @@ func TestLoadRules(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("rules:\n  - phrase: Sales by country\n    tables: [Invoice, Customer]\n")
-	rules, err := narrowing.LoadRules(dir)
-	if err != nil || len(rules) != 1 || rules[0].Phrase != "Sales by country" || !slices.Equal(rules[0].Tables, []string{"Invoice", "Customer"}) {
-		t.Fatalf("rules = %+v, %v", rules, err)
-	}
-	write("rules: [not, a, rule")
-	if _, err := narrowing.LoadRules(dir); err == nil || !strings.Contains(err.Error(), "ai/table-rules.yaml") {
-		t.Fatalf("malformed file error = %v", err)
-	}
-	// A rules path that is a directory cannot be read.
-	if err := os.RemoveAll(filepath.Join(dir, "ai")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "ai", "table-rules.yaml"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := narrowing.LoadRules(dir); err == nil || !strings.Contains(err.Error(), "read table rules") {
-		t.Fatalf("unreadable file error = %v", err)
-	}
+	t.Run("no file is no settings", func(t *testing.T) {
+		if s := narrowing.LoadSettings(t.TempDir()); s.Decision != "" || s.Rules != nil || s.Warnings != nil {
+			t.Fatalf("settings = %+v", s)
+		}
+	})
+	t.Run("a good file", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "decision: auto\nrules:\n  - phrase: Sales by country\n    tables: [Invoice, Customer]\n")
+		s := narrowing.LoadSettings(dir)
+		if s.Decision != "auto" || len(s.Warnings) != 0 || len(s.Rules) != 1 || s.Rules[0].Phrase != "Sales by country" || !slices.Equal(s.Rules[0].Tables, []string{"Invoice", "Customer"}) {
+			t.Fatalf("settings = %+v", s)
+		}
+	})
+	// A bad file never stops the chat: it is a warning, the good rules survive, and
+	// no warning echoes the file's content.
+	t.Run("problems are warnings", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, `decision: [x]
+mystery: 1
+rules:
+  - phrase: Good one
+    tables: [Invoice]
+  - phrase: Typo
+    tabels: [Invoice]
+  - tables: [Invoice]
+  - phrase: Empty
+    tables: []
+  - phrase: good ONE!
+    tables: [Customer]
+  - just a string
+`)
+		s := narrowing.LoadSettings(dir)
+		if s.Decision != "" || len(s.Rules) != 1 || s.Rules[0].Phrase != "Good one" {
+			t.Fatalf("settings = %+v", s)
+		}
+		joined := strings.Join(s.Warnings, "\n")
+		for _, want := range []string{`"decision" must be a word`, `unknown key "mystery"`, `rule 2 has the unknown key "tabels"`, "rule 3 has no phrase", `rule 4 ("Empty") names no tables`, "rule 5 repeats the phrase", "rule 6 is not a mapping"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("missing warning %q in\n%s", want, joined)
+			}
+		}
+		if len(s.Warnings) != 7 {
+			t.Errorf("warnings = %d:\n%s", len(s.Warnings), joined)
+		}
+	})
+	t.Run("rules that are not a list", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "rules: nope\n")
+		if s := narrowing.LoadSettings(dir); len(s.Warnings) != 1 || !strings.Contains(s.Warnings[0], `"rules" must be a list`) {
+			t.Fatalf("settings = %+v", s)
+		}
+	})
+	t.Run("malformed YAML does not echo its content", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "secret-token: [oops")
+		s := narrowing.LoadSettings(dir)
+		if len(s.Warnings) != 1 || strings.Contains(s.Warnings[0], "secret-token") || !strings.Contains(s.Warnings[0], "not a valid YAML mapping") {
+			t.Fatalf("warnings = %+v", s.Warnings)
+		}
+	})
+	t.Run("a directory in place of the file", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "ai", "table-rules.yaml"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if s := narrowing.LoadSettings(dir); len(s.Warnings) != 1 || !strings.Contains(s.Warnings[0], "not a regular file") {
+			t.Fatalf("settings = %+v", s)
+		}
+	})
+	t.Run("a file over 64 KiB", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "decision: auto\n# "+strings.Repeat("x", 70<<10))
+		if s := narrowing.LoadSettings(dir); s.Decision != "" || len(s.Warnings) != 1 || !strings.Contains(s.Warnings[0], "larger than 64 KiB") {
+			t.Fatalf("settings = %+v", s)
+		}
+	})
+	t.Run("a symbolic link is never followed", func(t *testing.T) {
+		dir, outside := t.TempDir(), t.TempDir()
+		if err := os.WriteFile(filepath.Join(outside, "elsewhere.yaml"), []byte("decision: auto\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, "ai"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(outside, "elsewhere.yaml"), filepath.Join(dir, "ai", "table-rules.yaml")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		if s := narrowing.LoadSettings(dir); s.Decision != "" || len(s.Warnings) != 1 || !strings.Contains(s.Warnings[0], "symbolic link") {
+			t.Fatalf("file link: %+v", s)
+		}
+		// The directory itself may be the link.
+		other := t.TempDir()
+		if err := os.WriteFile(filepath.Join(outside, "table-rules.yaml"), []byte("decision: auto\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(other, "ai")); err != nil {
+			t.Fatal(err)
+		}
+		if s := narrowing.LoadSettings(other); s.Decision != "" || len(s.Warnings) != 1 || !strings.Contains(s.Warnings[0], "its directory is a symbolic link") {
+			t.Fatalf("directory link: %+v", s)
+		}
+	})
+	t.Run("a parent that is a file cannot be inspected", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "ai"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if s := narrowing.LoadSettings(dir); len(s.Warnings) != 1 || !strings.Contains(s.Warnings[0], "cannot be inspected") {
+			t.Fatalf("settings = %+v", s)
+		}
+	})
+	t.Run("an unreadable file", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root reads everything")
+		}
+		dir := t.TempDir()
+		write(t, dir, "decision: auto\n")
+		path := filepath.Join(dir, "ai", "table-rules.yaml")
+		if err := os.Chmod(path, 0); err != nil {
+			t.Fatal(err)
+		}
+		if s := narrowing.LoadSettings(dir); len(s.Warnings) != 1 || !strings.Contains(s.Warnings[0], "cannot be opened") {
+			t.Fatalf("settings = %+v", s)
+		}
+	})
 }
 
 const (
 	wantFullBytes     = 1829
-	wantNarrowedBytes = 894
+	wantNarrowedBytes = 1111
 )

@@ -16,14 +16,25 @@
 //  3. The full schema, which is exactly what the chat did before this package.
 //
 // Every way the engine can fail to give a usable answer lands on rung 3: not
-// configured, an error, a timeout, an uncalibrated answer, an uncertain answer,
-// none-of-these, or a stopped engine (quota, budget, misconfigured). A stop is
-// never read as "ask a bigger paid model to decide": it is recorded in the
-// Record, and the chat simply keeps its full context.
+// configured, an error, a timeout, an incomplete or uncalibrated answer, an
+// uncertain answer, none-of-these, or a stopped engine (quota, budget,
+// misconfigured). A stop is never read as "ask a bigger paid model to decide": it
+// is recorded in the Record, and the chat simply keeps its full context. After a
+// failure the engine is not asked again for a cool-down, so a slow or refusing
+// service costs one wait, not one per turn.
 //
-// Ambiguity is preserved, not hidden: tables the engine judged only possibly
-// relevant stay in the model's context next to the selected ones, and an
-// uncertain answer keeps the whole schema.
+// A wrong narrowing would be silent, so three things make it recoverable and
+// visible: tables the engine judged only possibly relevant stay in the model's
+// context; tables on the foreign-key path between selected tables are added, and
+// the previous turn's tables are carried into a follow-up; and the model is told
+// the names of the omitted tables and can read any one's definition with the
+// describe_relation tool (Narrower.Describe). The user sees one line naming the
+// tables the model was given (Record.Notice).
+//
+// What leaves the machine when an engine is configured: the user's question and
+// up to three earlier questions of the session, every table name and its column
+// names (never types or row data), the interaction id and the client context
+// the cloud client already sends. See the README.
 package narrowing
 
 import (
@@ -31,26 +42,49 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/strongo/aichat/ai/decision"
 )
 
 const (
-	defaultTimeout = 3 * time.Second
-	defaultProduct = "datatug"
+	defaultTimeout  = 1500 * time.Millisecond
+	defaultCoolDown = 5 * time.Minute
+	defaultProduct  = "datatug"
 	// questionID names the one relevance question asked of the engine.
 	questionID = "tables"
 	// questionInstructions is the criterion applied to each candidate table.
 	questionInstructions = "Is this table needed to answer the user's question?"
-	// maxDescriptionBytes caps one candidate's description (its column names), so
-	// a very wide table cannot make the request unbounded.
+	// maxCandidates is the most tables put in one question. Above it the engine is
+	// not asked (the full schema is kept); rules still apply.
+	maxCandidates = 255
+	// maxColumnBytes caps one column name in a candidate's description, and
+	// maxDescriptionBytes the whole description, so neither one very long name nor
+	// a very wide table can make the request unbounded or hide later columns.
+	maxColumnBytes      = 64
 	maxDescriptionBytes = 512
 	// maxRecordedScores caps the scores kept in a Record.
 	maxRecordedScores = 32
+	// maxPreviousQuestions and maxQuestionBytes bound the history sent along.
+	maxPreviousQuestions = 3
+	maxQuestionBytes     = 500
+	// maxPathHops is the longest foreign-key path closed between two selected tables.
+	maxPathHops = 5
+	// maxOmittedBytes bounds the omitted-table names listed in the note.
+	maxOmittedBytes = 4096
 )
+
+// Link is one foreign-key relationship between two tables (either direction;
+// the schema is optional and matched case-insensitively with the table name).
+type Link struct {
+	FromSchema, From string
+	ToSchema, To     string
+}
 
 // Config assembles a Narrower. The engine, the clock and the formatter are
 // injected so that tests need no network and no wall clock.
@@ -60,6 +94,9 @@ type Config struct {
 	Relations []api.CatalogRelation
 	// Rules are the project's deterministic knowledge, tried before the engine.
 	Rules []Rule
+	// Links, when set, returns the schema's foreign keys, read each turn. They let
+	// the decision keep the tables on the path between selected tables.
+	Links func() []Link
 	// Engine scores candidate tables. Nil means no engine: only rules narrow.
 	Engine decision.ScoredProvider
 	// Policy turns the engine's probabilities into a verdict. It must be valid
@@ -70,8 +107,11 @@ type Config struct {
 	Format func(*api.CatalogSchema) string
 	// Product is sent to the engine; default "datatug".
 	Product string
-	// Timeout bounds the engine call; default 3s.
+	// Timeout bounds the engine call; default 1.5s.
 	Timeout time.Duration
+	// CoolDown is how long the engine is left alone after a failure or a stop;
+	// default 5 minutes.
+	CoolDown time.Duration
 	// Now is the clock; default time.Now.
 	Now func() time.Time
 }
@@ -87,17 +127,29 @@ type Outcome struct {
 // usable; build one with New. It is safe for concurrent use.
 type Narrower struct {
 	relations []api.CatalogRelation
-	ids       []string
-	candidate []decision.Candidate
-	taxonomy  decision.Taxonomy
-	chain     decision.Chain // the project rules, when there are any
-	engine    decision.ScoredProvider
-	policy    decision.SelectionPolicy
-	format    func(*api.CatalogSchema) string
-	product   string
-	timeout   time.Duration
-	now       func() time.Time
-	fullBytes int
+	// ids has one entry per relation: its candidate id, or "" for a relation that
+	// cannot be a candidate (an empty name), which always stays in the schema.
+	ids        []string
+	candidate  []decision.Candidate
+	candidates []int // indexes into relations that are candidates, in schema order
+	byQual     map[string]int
+	byName     map[string]int // lower-cased name -> index, only when unique
+	taxonomy   decision.Taxonomy
+	chain      decision.Chain // the project rules, when there are any
+	links      func() []Link
+	engine     decision.ScoredProvider
+	policy     decision.SelectionPolicy
+	format     func(*api.CatalogSchema) string
+	product    string
+	timeout    time.Duration
+	coolDown   time.Duration
+	now        func() time.Time
+	fullBytes  int
+	warnings   []string
+
+	mu        sync.Mutex
+	coolUntil time.Time
+	coolStop  string
 }
 
 // ScorerOf returns p as a decision.ScoredProvider, which a decision engine must
@@ -124,11 +176,13 @@ func New(cfg Config) (*Narrower, error) {
 	}
 	n := &Narrower{
 		relations: slices.Clone(cfg.Relations),
+		links:     cfg.Links,
 		engine:    cfg.Engine,
 		policy:    cfg.Policy,
 		format:    cfg.Format,
 		product:   cfg.Product,
 		timeout:   cfg.Timeout,
+		coolDown:  cfg.CoolDown,
 		now:       cfg.Now,
 	}
 	if n.product == "" {
@@ -137,26 +191,112 @@ func New(cfg Config) (*Narrower, error) {
 	if n.timeout <= 0 {
 		n.timeout = defaultTimeout
 	}
+	if n.coolDown <= 0 {
+		n.coolDown = defaultCoolDown
+	}
 	if n.now == nil {
 		n.now = time.Now
 	}
-	n.ids = candidateIDs(n.relations)
-	for i, relation := range n.relations {
-		n.candidate = append(n.candidate, decision.Candidate{ID: n.ids[i], Description: describe(relation)})
-	}
-	n.taxonomy = decision.Taxonomy{Modules: []decision.ModuleSpec{{Name: moduleName, Intents: []string{intentName}, Scopes: n.ids}}}
+	n.index()
 	if ruleProvider != nil {
 		n.chain = decision.Chain{Providers: []decision.Provider{ruleProvider}, Policy: &n.policy}
 	}
 	n.fullBytes = len(n.format(&api.CatalogSchema{Relations: n.relations}))
+	n.warnings = n.ruleWarnings(cfg.Rules)
 	return n, nil
 }
 
+// index names the candidates and builds the lookups.
+func (n *Narrower) index() {
+	n.ids = candidateIDs(n.relations)
+	n.byQual = make(map[string]int, len(n.relations))
+	names := make(map[string]int, len(n.relations))
+	n.byName = map[string]int{}
+	for i, relation := range n.relations {
+		if n.ids[i] == "" {
+			continue
+		}
+		n.candidates = append(n.candidates, i)
+		n.candidate = append(n.candidate, decision.Candidate{ID: n.ids[i], Description: describe(relation)})
+		n.byQual[strings.ToLower(relation.Schema+"."+relation.Name)] = i
+		lower := strings.ToLower(relation.Name)
+		names[lower]++
+		n.byName[lower] = i
+	}
+	for lower, count := range names {
+		if count > 1 {
+			delete(n.byName, lower)
+		}
+	}
+	scopes := make([]string, 0, len(n.candidates))
+	for _, i := range n.candidates {
+		scopes = append(scopes, n.ids[i])
+	}
+	n.taxonomy = decision.Taxonomy{Modules: []decision.ModuleSpec{{Name: moduleName, Intents: []string{intentName}, Scopes: scopes}}}
+}
+
 // Candidates returns the ids the engine is asked about, in schema order.
-func (n *Narrower) Candidates() []string { return slices.Clone(n.ids) }
+func (n *Narrower) Candidates() []string {
+	out := make([]string, 0, len(n.candidates))
+	for _, i := range n.candidates {
+		out = append(out, n.ids[i])
+	}
+	return out
+}
+
+// Warnings are problems found when the narrower was built, in words for the user:
+// a rule that names a table the schema lacks never fires. They never stop a chat.
+func (n *Narrower) Warnings() []string { return slices.Clone(n.warnings) }
+
+func (n *Narrower) ruleWarnings(set []Rule) []string {
+	var out []string
+	for i, rule := range set {
+		for _, table := range rule.Tables {
+			if _, ok := n.lookup(table, true); ok {
+				continue
+			}
+			message := fmt.Sprintf("table rule %d (%s) names the table %s, which the schema does not have; the rule never fires", i+1, quoted(rule.Phrase), quoted(table))
+			if i, ok := n.lookup(table, false); ok {
+				message += fmt.Sprintf(" (did you mean %s? table names are case-sensitive)", quoted(n.ids[i]))
+			}
+			out = append(out, message)
+		}
+	}
+	return out
+}
+
+// lookup finds a candidate by id (exact) or, when exact is false, by a
+// case-insensitive name.
+func (n *Narrower) lookup(name string, exact bool) (int, bool) {
+	for _, i := range n.candidates {
+		if exact && n.ids[i] == name {
+			return i, true
+		}
+		if !exact && strings.EqualFold(n.ids[i], name) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// Describe returns the definition of one table of the schema, as it would appear
+// in the model's context. It is the read-only lookup behind describe_relation:
+// the model can recover a table the narrowing left out. The name is matched
+// exactly, then case-insensitively.
+func (n *Narrower) Describe(name string) (string, bool) {
+	i, ok := n.lookup(name, true)
+	if !ok {
+		i, ok = n.lookup(strings.TrimSpace(name), false)
+	}
+	if !ok {
+		return "", false
+	}
+	return n.format(&api.CatalogSchema{Relations: []api.CatalogRelation{n.relations[i]}}), true
+}
 
 // candidateIDs names each relation by its table name, qualified by schema when
-// two relations share a name, and made unique if even that collides.
+// two relations share a name, and made unique if even that collides. A relation
+// without a name has no id.
 func candidateIDs(relations []api.CatalogRelation) []string {
 	count := make(map[string]int, len(relations))
 	for _, relation := range relations {
@@ -165,6 +305,9 @@ func candidateIDs(relations []api.CatalogRelation) []string {
 	ids := make([]string, len(relations))
 	seen := make(map[string]bool, len(relations))
 	for i, relation := range relations {
+		if strings.TrimSpace(relation.Name) == "" {
+			continue
+		}
 		id := relation.Name
 		if count[id] > 1 && relation.Schema != "" {
 			id = relation.Schema + "." + relation.Name
@@ -178,12 +321,12 @@ func candidateIDs(relations []api.CatalogRelation) []string {
 	return ids
 }
 
-// describe is a candidate's description for the engine: its column names. No
-// column types, no values: names only.
+// describe is a candidate's description for the engine: its column names, each
+// cut to a bounded length. No column types, no values: names only.
 func describe(relation api.CatalogRelation) string {
 	var b strings.Builder
 	for i, column := range relation.Columns {
-		piece := column.Name
+		piece := truncateBytes(column.Name, maxColumnBytes)
 		if i > 0 {
 			piece = ", " + piece
 		}
@@ -196,13 +339,25 @@ func describe(relation api.CatalogRelation) string {
 	return b.String()
 }
 
+// truncateBytes cuts s to at most limit bytes at a character boundary.
+func truncateBytes(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "~"
+}
+
 // Narrow decides which tables the model sees for prompt. It never fails: every
 // problem is a fallback to the full schema, recorded in the returned Record.
 func (n *Narrower) Narrow(ctx context.Context, prompt string) Outcome {
 	start := n.now()
 	rec := Record{
 		DecidedAt: start, Policy: n.policy.Name,
-		CandidatesBefore: len(n.ids), CandidatesAfter: len(n.ids),
+		CandidatesBefore: len(n.candidates), CandidatesAfter: len(n.candidates),
 		ContextBytesBefore: n.fullBytes, ContextBytesAfter: n.fullBytes,
 	}
 	kept := n.decide(ctx, prompt, start, &rec)
@@ -215,9 +370,10 @@ func (n *Narrower) Narrow(ctx context.Context, prompt string) Outcome {
 	return out
 }
 
-// decide runs the ladder and returns the ids to keep, or nil to keep everything.
-func (n *Narrower) decide(ctx context.Context, prompt string, start time.Time, rec *Record) []string {
-	if len(n.ids) == 0 {
+// decide runs the ladder and returns the candidate indexes to keep, or nil to
+// keep everything.
+func (n *Narrower) decide(ctx context.Context, prompt string, start time.Time, rec *Record) []int {
+	if len(n.candidates) == 0 {
 		rec.FallbackReason = ReasonNoCandidates
 		return nil
 	}
@@ -229,25 +385,68 @@ func (n *Narrower) decide(ctx context.Context, prompt string, start time.Time, r
 	if ok && d.Actionable() {
 		rec.Mechanism, rec.Provenance, rec.Verdict = MechanismDeterministic, string(d.Provenance()), string(d.Outcome)
 		rec.Selected = slices.Clone(d.RequiredScopes)
-		return d.RequiredScopes
+		return n.indexesOf(d.RequiredScopes)
 	}
-	if n.engine == nil {
+	switch {
+	case n.engine == nil:
 		rec.FallbackReason = ReasonDisabled
 		return nil
+	case len(n.candidates) > maxCandidates:
+		rec.FallbackReason = ReasonTooManyCandidates
+		return nil
+	case n.coolingDown(rec):
+		return nil
 	}
-	return n.ask(ctx, prompt, rec)
+	return n.ask(ctx, prompt, historyFrom(ctx), rec)
 }
 
-// ask puts the one relevance question to the engine and applies the policy.
-func (n *Narrower) ask(ctx context.Context, prompt string, rec *Record) []string {
-	req := decision.ScoreRequest{
-		Product: n.product,
-		Text:    prompt,
-		Questions: []decision.Question{{
-			ID: questionID, Kind: decision.KindRelevance,
-			Instructions: questionInstructions, Candidates: n.candidate,
-		}},
+// indexesOf maps candidate ids to relation indexes.
+func (n *Narrower) indexesOf(ids []string) []int {
+	var out []int
+	for _, i := range n.candidates {
+		if slices.Contains(ids, n.ids[i]) {
+			out = append(out, i)
+		}
 	}
+	return out
+}
+
+// coolingDown reports whether the engine is being left alone after a failure,
+// and records why.
+func (n *Narrower) coolingDown(rec *Record) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if !n.now().Before(n.coolUntil) {
+		return false
+	}
+	rec.FallbackReason, rec.StoppedBy = ReasonCoolingDown, n.coolStop
+	return true
+}
+
+// remember starts the cool-down after a failure or a stop.
+func (n *Narrower) remember(stop string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.coolUntil, n.coolStop = n.now().Add(n.coolDown), stop
+}
+
+// coolsDown lists the engine outcomes after which the engine is left alone: it
+// is slow, failing, refusing or misbehaving, and asking again next turn would
+// only repeat the wait. A request the engine rejected as invalid or a call the
+// user cancelled says nothing about the engine.
+func coolsDown(outcome string) bool {
+	switch outcome {
+	case decision.AttemptRejected, decision.AttemptCancelled:
+		return false
+	}
+	return true
+}
+
+// ask puts the one relevance question to the engine, applies the policy, and
+// widens a selection with the carried tables and the foreign-key paths between
+// them. It returns nil to keep everything.
+func (n *Narrower) ask(ctx context.Context, prompt string, history History, rec *Record) []int {
+	req := n.request(prompt, history)
 	rec.Engine = n.engine.Name()
 	callCtx, cancel := context.WithTimeout(ctx, n.timeout)
 	defer cancel()
@@ -259,16 +458,25 @@ func (n *Narrower) ask(ctx context.Context, prompt string, rec *Record) []string
 		judged.Outcome, judged.Detail = outcome, boundedDetail(err.Error())
 		rec.Attempts = append(rec.Attempts, attemptsOf(append(slices.Clone(report.Attempts), judged))...)
 		rec.FallbackReason = outcome
+		stop := ""
 		switch outcome {
 		case decision.AttemptQuota, decision.AttemptBudget, decision.AttemptMisconfigured:
-			rec.StoppedBy = outcome
+			rec.StoppedBy, stop = outcome, outcome
+		}
+		if coolsDown(outcome) {
+			n.remember(stop)
 		}
 		return nil
 	}
-	if verr := decision.ValidateScoreResult(req, res); verr != nil {
+	verr := decision.ValidateScoreResult(req, res)
+	if verr == nil {
+		verr = n.complete(res.Answers[questionID])
+	}
+	if verr != nil {
 		judged.Outcome, judged.Detail = decision.AttemptInvalid, decision.InvalidDetail(verr)
 		rec.Attempts = append(rec.Attempts, attemptsOf(append(slices.Clone(report.Attempts), judged))...)
 		rec.FallbackReason = decision.AttemptInvalid
+		n.remember("")
 		return nil
 	}
 	answer := res.Answers[questionID]
@@ -297,7 +505,186 @@ func (n *Narrower) ask(ctx context.Context, prompt string, rec *Record) []string
 		return nil
 	}
 	rec.Mechanism, rec.Selected = MechanismEngine, sel.Picks
-	return append(slices.Clone(sel.Picks), sel.Potential...)
+	return n.widen(sel, history, rec)
+}
+
+// request is the one relevance question, with the session's recent questions as
+// context so that a follow-up is scored with what it follows.
+func (n *Narrower) request(prompt string, history History) decision.ScoreRequest {
+	req := decision.ScoreRequest{
+		Product: n.product,
+		Text:    prompt,
+		Questions: []decision.Question{{
+			ID: questionID, Kind: decision.KindRelevance,
+			Instructions: questionInstructions, Candidates: n.candidate,
+		}},
+	}
+	if previous := history.Questions[max(0, len(history.Questions)-maxPreviousQuestions):]; len(previous) > 0 {
+		trimmed := make([]string, len(previous))
+		for i, q := range previous {
+			trimmed[i] = truncateBytes(q, maxQuestionBytes)
+		}
+		req.Context = map[string]any{"previousQuestions": trimmed}
+	}
+	return req
+}
+
+// complete checks the engine scored every candidate exactly once: a partial or
+// repeating answer cannot be trusted to have judged the tables it left out.
+func (n *Narrower) complete(answer decision.Answer) error {
+	seen := make(map[string]bool, len(answer.Scores))
+	for _, s := range answer.Scores {
+		if seen[s.ID] {
+			return errors.New("a candidate was scored twice")
+		}
+		seen[s.ID] = true
+	}
+	if len(seen) != len(n.candidates) {
+		return errors.New("not every candidate was scored")
+	}
+	return nil
+}
+
+// widen turns a policy selection into the tables to keep: the selected and the
+// possibly relevant tables, plus the previous turn's tables (a follow-up is
+// about the same data) unless the engine is confidently about something else,
+// plus the tables on the foreign-key path between all of them.
+func (n *Narrower) widen(sel decision.Selection, history History, rec *Record) []int {
+	keep := map[int]bool{}
+	for _, id := range append(slices.Clone(sel.Picks), sel.Potential...) {
+		i, _ := n.lookup(id, true) // the engine's ids were validated as candidates
+		keep[i] = true
+	}
+	var previous []int
+	for _, id := range history.Kept {
+		if i, ok := n.lookup(id, true); ok {
+			previous = append(previous, i)
+		}
+	}
+	adjacency := n.adjacency()
+	var carried []int
+	if !n.topicChanged(sel, previous, adjacency) {
+		for _, i := range previous {
+			if !keep[i] {
+				keep[i] = true
+				carried = append(carried, i)
+			}
+		}
+	}
+	var endpoints []int
+	for i := range keep {
+		endpoints = append(endpoints, i)
+	}
+	slices.Sort(endpoints)
+	var closure []int
+	for _, i := range n.pathTables(endpoints, adjacency) {
+		if !keep[i] {
+			keep[i] = true
+			closure = append(closure, i)
+		}
+	}
+	rec.Carried, rec.Closure = n.idsOf(carried), n.idsOf(closure)
+	var out []int
+	for _, i := range n.candidates {
+		if keep[i] {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// topicChanged is the rule for dropping the previous turn's tables: the engine is
+// confident (a strong pick) about tables that are neither among the previous
+// ones nor foreign-key neighbours of them. Without a previous turn or without
+// foreign-key information a follow-up is always assumed, since keeping more is
+// the safe error.
+func (n *Narrower) topicChanged(sel decision.Selection, previous []int, adjacency map[int][]int) bool {
+	if len(previous) == 0 || len(sel.Strong) == 0 || len(adjacency) == 0 {
+		return false
+	}
+	for _, id := range sel.Strong {
+		i, _ := n.lookup(id, true)
+		if slices.Contains(previous, i) {
+			return false
+		}
+		for _, neighbour := range adjacency[i] {
+			if slices.Contains(previous, neighbour) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// adjacency is the foreign-key graph over the candidates, built from the
+// current links. It is empty when no links are known.
+func (n *Narrower) adjacency() map[int][]int {
+	if n.links == nil {
+		return nil
+	}
+	graph := map[int][]int{}
+	for _, link := range n.links() {
+		from, okFrom := n.resolve(link.FromSchema, link.From)
+		to, okTo := n.resolve(link.ToSchema, link.To)
+		if okFrom && okTo && from != to {
+			graph[from] = append(graph[from], to)
+			graph[to] = append(graph[to], from)
+		}
+	}
+	return graph
+}
+
+// resolve finds the candidate a link end names.
+func (n *Narrower) resolve(schema, name string) (int, bool) {
+	if i, ok := n.byQual[strings.ToLower(schema+"."+name)]; ok {
+		return i, true
+	}
+	i, ok := n.byName[strings.ToLower(name)]
+	return i, ok
+}
+
+// pathTables returns the tables on a shortest foreign-key path (at most
+// maxPathHops hops) between every pair of endpoints that are connected,
+// endpoints included.
+func (n *Narrower) pathTables(endpoints []int, graph map[int][]int) []int {
+	var out []int
+	for _, from := range endpoints {
+		parent := map[int]int{from: -1}
+		depth := map[int]int{from: 0}
+		queue := []int{from}
+		for len(queue) > 0 {
+			at := queue[0]
+			queue = queue[1:]
+			if depth[at] == maxPathHops {
+				continue
+			}
+			for _, next := range graph[at] {
+				if _, seen := parent[next]; !seen {
+					parent[next], depth[next] = at, depth[at]+1
+					queue = append(queue, next)
+				}
+			}
+		}
+		for _, to := range endpoints {
+			if _, reached := parent[to]; !reached || to == from {
+				continue
+			}
+			for at := to; at != -1; at = parent[at] {
+				out = append(out, at)
+			}
+		}
+	}
+	return out
+}
+
+func (n *Narrower) idsOf(indexes []int) []string {
+	var out []string
+	for _, i := range n.candidates {
+		if slices.Contains(indexes, i) {
+			out = append(out, n.ids[i])
+		}
+	}
+	return out
 }
 
 // score calls the engine, using its traced form when it has one.
@@ -339,33 +726,60 @@ func outcomeOf(ctx context.Context, err error) string {
 	return decision.AttemptError
 }
 
-// apply keeps the relations whose ids are in kept (schema order), records them,
-// and returns the narrowed schema context, or "" when nothing was dropped.
-func (n *Narrower) apply(kept []string, rec *Record) string {
+// apply keeps the relations whose indexes are in kept (schema order; a relation
+// that cannot be a candidate always stays), records them, and returns the
+// narrowed schema context, or "" when nothing was dropped.
+func (n *Narrower) apply(kept []int, rec *Record) string {
 	var (
 		relations []api.CatalogRelation
 		ids       []string
+		omitted   []string
 	)
-	for i, id := range n.ids {
-		if slices.Contains(kept, id) {
-			relations = append(relations, n.relations[i])
-			ids = append(ids, id)
+	for i, relation := range n.relations {
+		switch {
+		case n.ids[i] == "":
+			relations = append(relations, relation)
+		case slices.Contains(kept, i):
+			relations = append(relations, relation)
+			ids = append(ids, n.ids[i])
+		default:
+			omitted = append(omitted, n.ids[i])
 		}
 	}
-	if len(ids) == len(n.ids) {
+	if len(omitted) == 0 {
 		rec.FallbackReason = ReasonNoReduction
 		return ""
 	}
-	text := n.format(&api.CatalogSchema{Relations: relations}) +
-		fmt.Sprintf(noteFormat, len(ids), len(n.ids))
+	// The note comes first: no table or column name can precede it, so none can
+	// pass for it.
+	text := noteFor(len(ids), len(n.candidates), omitted) + "\n" + n.format(&api.CatalogSchema{Relations: relations})
 	rec.Narrowed, rec.Kept = true, ids
 	rec.CandidatesAfter, rec.ContextBytesAfter = len(ids), len(text)
 	return text
 }
 
-// noteFormat tells the model the list is a selection, so that it does not invent
-// the name of a table it was not shown.
-const noteFormat = "\nNote: DataTug narrowed this schema to the %d of %d relations judged relevant to this request. Do not guess the names of other relations."
+// noteFor tells the model the list is a selection, names (names only) the
+// tables left out, and says how to get one: a model that cannot see a table it
+// needs must be able to ask for it. Names are quoted, so a hostile name cannot
+// break the line.
+func noteFor(kept, total int, omitted []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Note: DataTug narrowed this schema to the %d of %d relations judged relevant to this request. Omitted relations (names only):", kept, total)
+	listed := 0
+	for _, name := range omitted {
+		piece := " " + strconv.Quote(name)
+		if b.Len()+len(piece) > maxOmittedBytes {
+			break
+		}
+		b.WriteString(piece)
+		listed++
+	}
+	if listed < len(omitted) {
+		fmt.Fprintf(&b, " and %d more", len(omitted)-listed)
+	}
+	b.WriteString(". If the request needs one of them, call describe_relation with its exact name to read its definition; do not guess the names of other relations.")
+	return b.String()
+}
 
 // boundedDetail keeps an error text short enough to store.
 func boundedDetail(text string) string {

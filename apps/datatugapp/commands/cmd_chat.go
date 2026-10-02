@@ -12,6 +12,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -42,7 +43,27 @@ func chatCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "chat",
 		Short: "Ask questions about project data using DTQL",
-		Args:  cobra.NoArgs,
+		Long: `Ask questions about project data using DTQL.
+
+Table narrowing: before each AI turn the chat can decide which of the project's
+tables the model needs and show it only those definitions. The model is told
+which tables were left out and can read any of them with describe_relation, and
+the chat prints one line naming the tables it was given. It never changes the
+answer path when it cannot decide: the full schema is sent, exactly as without it.
+
+  Project rules (always on, local): <project>/ai/table-rules.yaml maps an exact
+  question to the tables it needs; a match never calls out.
+
+  Cloud decider (OFF by default): with --model cloud it asks the DataTug AI cloud,
+  which relays to TypeSafe AI's Jev decision model. That sends your question, up
+  to three earlier questions of the session, and every table name with its column
+  names (no types, no rows) to the DataTug cloud and to TypeSafe AI. Opt in with
+  DATATUG_AI_DECISION_PROVIDER=auto (or cloud) or "decision: auto" in the
+  project's ai/table-rules.yaml; the environment wins. After a failure the cloud
+  decider is not asked again for five minutes; DATATUG_AI_DECISION_TIMEOUT sets
+  how long it may take per turn (default 1.5s). Schemas above 255 tables are not
+  sent to it.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := applyLastChatOptions(cmd, &options); err != nil {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: load previous chat options: %v\n", err)
@@ -162,6 +183,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	executor := secureread.NewExecutor(session)
 	var conversation chat.ContextualConversation
+	var foreignKeys []narrowing.Link // set once the source's foreign keys are read
 	var cloudClient *cloud.Client
 	var cloudContext ai.ClientContext
 	if options.model == "cloud" {
@@ -187,9 +209,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		// Narrowing applies to the stored-schema context only: the degraded
 		// multi-source context is left exactly as it is.
 		if healthyRelations > 0 && sourceErr == nil {
-			narrower, narrowErr := chatTableNarrower(projectDir, cloudClient, healthy.Relations)
-			if narrowErr != nil {
-				return "", Exit(fmt.Sprintf("configure table narrowing: %v", narrowErr), exitCodeUsage)
+			narrower, warnings := chatTableNarrower(projectDir, cloudClient, healthy.Relations, func() []narrowing.Link { return foreignKeys })
+			for _, warning := range warnings {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", warning)
 			}
 			if narrower != nil {
 				conversationOptions = append(conversationOptions, chat.WithTableNarrowing(narrower))
@@ -220,6 +242,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	if joinErr != nil {
 		setCatalogSourceIssue(&projectCatalog, database, "JOIN metadata unavailable: "+joinErr.Error())
+	}
+	if joinApplication != nil {
+		foreignKeys = foreignKeyLinks(joinApplication.Snapshot.Keys)
 	}
 	sessions, err := newSessionChat(ctx, store, conversation, sourceURL, projectCatalog)
 	if err != nil {

@@ -16,6 +16,13 @@ func TestChinookHasElevenTables(t *testing.T) {
 	}
 }
 
+func TestChinookLinks(t *testing.T) {
+	links := ChinookLinks()
+	if len(links) != 11 || links[0].From != "Album" || links[0].To != "Artist" || links[0].FromSchema != "main" {
+		t.Fatalf("ChinookLinks() = %+v", links)
+	}
+}
+
 func relevance(ids ...string) decision.ScoreRequest {
 	q := decision.Question{ID: "q", Kind: decision.KindRelevance}
 	for _, id := range ids {
@@ -39,6 +46,20 @@ func TestScorerAnswersAndRecords(t *testing.T) {
 	}
 	if (&Scorer{}).Name() != "fake-jev" {
 		t.Fatal("default name")
+	}
+}
+
+func TestScorerScriptsAnswersByQuestionText(t *testing.T) {
+	s := &Scorer{Probabilities: map[string]float64{"a": 0.9}, ByText: map[string]map[string]float64{"later": {"b": 0.8}}, Floor: 0.1}
+	req := relevance("a", "b")
+	req.Text = "later"
+	res, err := s.Score(context.Background(), req)
+	if err != nil || res.Answers["q"].Scores[0].ID != "b" {
+		t.Fatalf("scripted answer = %+v, %v", res, err)
+	}
+	req.Text = "other"
+	if res, _ = s.Score(context.Background(), req); res.Answers["q"].Scores[0].ID != "a" {
+		t.Fatalf("default answer = %+v", res)
 	}
 }
 

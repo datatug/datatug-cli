@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,43 +47,55 @@ func writeRules(t *testing.T, dir, content string) {
 func TestChatTableNarrowerSelection(t *testing.T) {
 	relations := narrowingtest.Chinook()
 	const rules = "rules:\n  - phrase: Sales by country\n    tables: [Invoice, Customer]\n"
+	optIn := func(value string) map[string]string { return map[string]string{"DATATUG_AI_DECISION_PROVIDER": value} }
 	tests := []struct {
-		name    string
-		env     map[string]string
-		cloud   bool
-		rules   string
-		wantNil bool
-		wantErr string
+		name         string
+		env          map[string]string
+		cloud        bool
+		settings     string
+		wantNil      bool
+		wantWarnings []string
 	}{
-		{name: "BYOK model without rules is unchanged", wantNil: true},
-		{name: "decider disabled without rules is unchanged", env: map[string]string{"DATATUG_AI_DECISION_PROVIDER": "disabled"}, cloud: true, wantNil: true},
-		{name: "cloud model: the cloud decider narrows", cloud: true},
-		{name: "cloud decider required and available", env: map[string]string{"DATATUG_AI_DECISION_PROVIDER": "cloud"}, cloud: true},
-		{name: "cloud decider required but not signed in", env: map[string]string{"DATATUG_AI_DECISION_PROVIDER": "cloud"}, wantErr: "needs --model cloud"},
-		{name: "unknown provider", env: map[string]string{"DATATUG_AI_DECISION_PROVIDER": "jev"}, wantErr: "unknown value"},
-		{name: "project rules narrow even without the cloud", rules: rules},
-		{name: "project rules narrow with the decider disabled", env: map[string]string{"DATATUG_AI_DECISION_PROVIDER": "disabled"}, cloud: true, rules: rules},
-		{name: "unreadable rules", rules: "rules: [oops", wantErr: "ai/table-rules.yaml"},
-		{name: "rule without tables", rules: "rules:\n  - phrase: x\n", wantErr: "needs a phrase"},
+		// The default is OFF: the question text and the schema names go to a third
+		// party only when the user opts in.
+		{name: "default: cloud model, nothing opted in", cloud: true, wantNil: true},
+		{name: "default: BYOK model", wantNil: true},
+		{name: "env auto with the cloud model", env: optIn("auto"), cloud: true},
+		{name: "env cloud with the cloud model", env: optIn("cloud"), cloud: true},
+		{name: "env auto without the cloud model is silent", env: optIn("auto"), wantNil: true},
+		{name: "env cloud without the cloud model warns", env: optIn("cloud"), wantNil: true, wantWarnings: []string{"not using --model cloud"}},
+		{name: "env disabled", env: optIn("disabled"), cloud: true, wantNil: true},
+		{name: "unsupported value warns and is disabled", env: optIn("jev"), cloud: true, wantNil: true, wantWarnings: []string{`unsupported decision provider "jev"`}},
+		{name: "project setting opts in", cloud: true, settings: "decision: auto\n"},
+		{name: "environment overrides the project setting", env: optIn("disabled"), cloud: true, settings: "decision: auto\n", wantNil: true},
+		{name: "unsupported project setting warns and is disabled", cloud: true, settings: "decision: maybe\n", wantNil: true, wantWarnings: []string{`unsupported decision provider "maybe"`}},
+		{name: "rules narrow even without any opt-in", settings: rules},
+		{name: "rules and opt-in", env: optIn("auto"), cloud: true, settings: rules},
+		{name: "rules still apply with the decider disabled", env: optIn("disabled"), cloud: true, settings: rules},
+		{name: "a rule that never fires is a warning", settings: "rules:\n  - phrase: Sales by country\n    tables: [invoice]\n", wantWarnings: []string{"never fires", `did you mean "Invoice"`}},
+		{name: "a malformed file is a warning and never blocks", settings: "rules: [oops", wantNil: true, wantWarnings: []string{"not a valid YAML mapping"}},
+		{name: "a bad timeout is a warning", env: map[string]string{"DATATUG_AI_DECISION_PROVIDER": "auto", "DATATUG_AI_DECISION_TIMEOUT": "soon"}, cloud: true, wantWarnings: []string{"is not a positive duration"}},
+		{name: "a good timeout", env: map[string]string{"DATATUG_AI_DECISION_PROVIDER": "auto", "DATATUG_AI_DECISION_TIMEOUT": "800ms"}, cloud: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			covDSetVar(t, &chatGetenv, narrowingEnv(tt.env))
 			dir := t.TempDir()
-			if tt.rules != "" {
-				writeRules(t, dir, tt.rules)
+			if tt.settings != "" {
+				writeRules(t, dir, tt.settings)
 			}
 			var client *cloud.Client
 			if tt.cloud {
 				client = narrowingCloudClient(t)
 			}
-			narrower, err := chatTableNarrower(dir, client, relations)
-			if tt.wantErr != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.wantErr)
-				return
+			narrower, warnings := chatTableNarrower(dir, client, relations, nil)
+			joined := strings.Join(warnings, "\n")
+			for _, want := range tt.wantWarnings {
+				assert.Contains(t, joined, want)
 			}
-			require.NoError(t, err)
+			if len(tt.wantWarnings) == 0 {
+				assert.Empty(t, warnings)
+			}
 			if tt.wantNil {
 				assert.Nil(t, narrower)
 				return
@@ -95,20 +108,42 @@ func TestChatTableNarrowerSelection(t *testing.T) {
 		covDSetVar(t, &chatGetenv, narrowingEnv(nil))
 		dir := t.TempDir()
 		writeRules(t, dir, rules)
-		narrower, err := chatTableNarrower(dir, nil, relations)
-		require.NoError(t, err)
+		narrower, warnings := chatTableNarrower(dir, nil, relations, nil)
+		require.Empty(t, warnings)
 		out := narrower.Narrow(context.Background(), "Sales by country?")
 		assert.True(t, out.Record.Narrowed)
 		assert.Equal(t, narrowing.MechanismDeterministic, out.Record.Mechanism)
 		assert.Equal(t, []string{"Customer", "Invoice"}, out.Record.Kept)
+		// No rule matches and no decider is opted in: the full schema, no step reported.
+		other := narrower.Narrow(context.Background(), "something else")
+		assert.False(t, other.Record.Narrowed)
+		assert.Equal(t, narrowing.ReasonDisabled, other.Record.FallbackReason)
+		assert.Empty(t, other.Record.DetectionSteps())
 	})
 
 	t.Run("the cloud decider is not a scorer", func(t *testing.T) {
-		covDSetVar(t, &chatGetenv, narrowingEnv(nil))
+		covDSetVar(t, &chatGetenv, narrowingEnv(optIn("auto")))
 		covDSetVar(t, &chatScorerOf, func(decision.Provider) (decision.ScoredProvider, error) { return nil, errors.New("cannot score") })
-		_, err := chatTableNarrower(t.TempDir(), narrowingCloudClient(t), relations)
-		require.ErrorContains(t, err, "cannot score")
+		narrower, warnings := chatTableNarrower(t.TempDir(), narrowingCloudClient(t), relations, nil)
+		assert.Nil(t, narrower)
+		require.Len(t, warnings, 1)
+		assert.Contains(t, warnings[0], "cannot score")
 	})
+
+	t.Run("a narrower that cannot be built is a warning", func(t *testing.T) {
+		covDSetVar(t, &chatGetenv, narrowingEnv(optIn("auto")))
+		covDSetVar(t, &chatNarrowingNew, func(narrowing.Config) (*narrowing.Narrower, error) { return nil, errors.New("bad config") })
+		narrower, warnings := chatTableNarrower(t.TempDir(), narrowingCloudClient(t), relations, nil)
+		assert.Nil(t, narrower)
+		require.Len(t, warnings, 1)
+		assert.Contains(t, warnings[0], "table narrowing is off: bad config")
+	})
+}
+
+func TestForeignKeyLinks(t *testing.T) {
+	links := foreignKeyLinks([]chat.ForeignKey{{Schema: "main", FromRelation: "Track", ToSchema: "main", ToRelation: "Album"}})
+	assert.Equal(t, []narrowing.Link{{FromSchema: "main", From: "Track", ToSchema: "main", To: "Album"}}, links)
+	assert.Empty(t, foreignKeyLinks(nil))
 }
 
 // narrowingProject writes a project whose stored schema is all 11 Chinook tables.
@@ -242,7 +277,7 @@ func listedTables(schema string) []string {
 // answer narrows the 11 Chinook tables of the stored schema to the selected few
 // before the AI conversation is created; the chat model receives only those.
 func TestChatNarrowsSchemaContextEndToEnd(t *testing.T) {
-	covDSetVar(t, &chatGetenv, narrowingEnv(nil))
+	covDSetVar(t, &chatGetenv, narrowingEnv(map[string]string{"DATATUG_AI_DECISION_PROVIDER": "auto"}))
 	dir, database := narrowingProject(t)
 	fake := &fakeAICloud{probs: map[string]float64{"Invoice": 0.96, "InvoiceLine": 0.71, "Customer": 0.42}}
 	askThroughChat(t, fake, dir, database, musicQuestion)
@@ -276,8 +311,8 @@ func TestChatKeepsTheFullSchemaWhenTheDeciderCannotHelp(t *testing.T) {
 		wantCalls  int
 		wantResult string
 	}{
-		{"server without the score route", nil, http.StatusNotImplemented, 1, "full_schema:reason=unsupported:before=11"},
-		{"allowance exhausted", nil, http.StatusTooManyRequests, 1, "full_schema:reason=stopped_quota:before=11"},
+		{"server without the score route", map[string]string{"DATATUG_AI_DECISION_PROVIDER": "auto"}, http.StatusNotImplemented, 1, "full_schema:reason=unsupported:before=11"},
+		{"allowance exhausted", map[string]string{"DATATUG_AI_DECISION_PROVIDER": "auto"}, http.StatusTooManyRequests, 1, "full_schema:reason=stopped_quota:before=11"},
 		{"decider disabled", map[string]string{"DATATUG_AI_DECISION_PROVIDER": "disabled"}, 0, 0, ""},
 	}
 	for _, tt := range tests {
@@ -321,7 +356,21 @@ func TestChatRuleBypassesTheEngineEndToEnd(t *testing.T) {
 	assert.Equal(t, "deterministic", fake.interactions[0].DetectionSteps[0].Method)
 }
 
-func TestChatNarrowingConfigurationErrorIsAUsageError(t *testing.T) {
+// By default nothing is sent to the decider: the question text and the schema
+// names stay on the machine until the user opts in.
+func TestChatSendsNothingToTheDeciderByDefault(t *testing.T) {
+	covDSetVar(t, &chatGetenv, narrowingEnv(nil))
+	dir, database := narrowingProject(t)
+	fake := &fakeAICloud{probs: map[string]float64{"Invoice": 0.96}}
+	askThroughChat(t, fake, dir, database, musicQuestion)
+	assert.Empty(t, fake.scoreCalls)
+	require.Len(t, fake.chatRequests, 1)
+	assert.Len(t, listedTables(schemaOf(fake.chatRequests[0])), 11)
+	assert.Empty(t, fake.interactions[0].DetectionSteps)
+}
+
+// A bad configuration is a warning on stderr, never a reason the chat will not start.
+func TestChatNarrowingConfigurationProblemsAreWarnings(t *testing.T) {
 	covDSetVar(t, &chatGetenv, narrowingEnv(map[string]string{"DATATUG_AI_DECISION_PROVIDER": "nonsense"}))
 	covDCloudSeams(t, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "tok", Expiry: time.Now().Add(time.Hour)}))
 	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) { return nil, nil }))
@@ -330,6 +379,23 @@ func TestChatNarrowingConfigurationErrorIsAUsageError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) }))
 	t.Cleanup(srv.Close)
 	dir, database := narrowingProject(t)
-	_, err := runChatProject(chatCommand(), chatOptions{project: dir, env: "local", database: database, model: "cloud", baseURL: srv.URL + "/v0/", thinking: "low"})
-	require.ErrorContains(t, err, "configure table narrowing")
+	writeRules(t, dir, "rules:\n  - phrase: x\n    tabels: [Invoice]\n")
+	cmd := chatCommand()
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+	_, err := runChatProject(cmd, chatOptions{project: dir, env: "local", database: database, model: "cloud", baseURL: srv.URL + "/v0/", thinking: "low"})
+	require.NoError(t, err)
+	assert.Contains(t, stderr.String(), `warning: table narrowing: unsupported decision provider "nonsense"`)
+	assert.Contains(t, stderr.String(), `rule 1 has the unknown key "tabels"`)
+}
+
+// The foreign keys of the scanned source reach the decision, so that the tables
+// on the path between selected tables are kept.
+func TestChatKeepsTheForeignKeyPathBetweenSelectedTables(t *testing.T) {
+	covDSetVar(t, &chatGetenv, narrowingEnv(map[string]string{"DATATUG_AI_DECISION_PROVIDER": "auto"}))
+	dir, database := narrowingProject(t)
+	fake := &fakeAICloud{probs: map[string]float64{"Artist": 0.95, "InvoiceLine": 0.9}}
+	askThroughChat(t, fake, dir, database, "Which artists sell the most?")
+	require.Len(t, fake.chatRequests, 1)
+	assert.Equal(t, []string{"Album", "Artist", "InvoiceLine", "Track"}, listedTables(schemaOf(fake.chatRequests[0])))
 }

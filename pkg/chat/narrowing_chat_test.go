@@ -139,6 +139,8 @@ func TestConversationFallsBackToTheFullSchemaExactlyAsToday(t *testing.T) {
 // model is asked.
 type orderingNarrower struct{ events *[]string }
 
+func (orderingNarrower) Describe(string) (string, bool) { return "", false }
+
 func (o orderingNarrower) Narrow(context.Context, string) narrowing.Outcome {
 	*o.events = append(*o.events, "narrow")
 	return narrowing.Outcome{Context: "- Invoice (schema: main; TABLE): InvoiceId", Record: narrowing.Record{Narrowed: true}}
@@ -392,21 +394,21 @@ func TestNarrowingStorageFailures(t *testing.T) {
 	})
 	t.Run("load: scan fails", func(t *testing.T) {
 		// SQLite lets a TEXT PRIMARY KEY hold NULL, which cannot be scanned into a string.
-		exec(`INSERT INTO narrowing_decisions (id, session_id, origin_message_id, decision_json, created_at) VALUES (NULL, ?, 'm', '{}', '2026-10-02T12:00:00Z')`, session.ID)
+		exec(`INSERT INTO narrowing_decisions (id, session_id, origin_message_id, decision_json, created_at) VALUES (NULL, ?, ?, '{}', '2026-10-02T12:00:00Z')`, session.ID, user.ID)
 		defer exec(`DELETE FROM narrowing_decisions`)
 		if _, err := store.Load(ctx, session.ID); err == nil {
 			t.Fatal("Load accepted a row it cannot scan")
 		}
 	})
 	t.Run("load: corrupt JSON", func(t *testing.T) {
-		exec(`INSERT INTO narrowing_decisions (id, session_id, origin_message_id, decision_json, created_at) VALUES ('x', ?, 'm', 'not json', '2026-10-02T12:00:00Z')`, session.ID)
+		exec(`INSERT INTO narrowing_decisions (id, session_id, origin_message_id, decision_json, created_at) VALUES ('x', ?, ?, 'not json', '2026-10-02T12:00:00Z')`, session.ID, user.ID)
 		defer exec(`DELETE FROM narrowing_decisions`)
 		if _, err := store.Load(ctx, session.ID); err == nil || !strings.Contains(err.Error(), "corrupt narrowing decision") {
 			t.Fatalf("Load error = %v", err)
 		}
 	})
 	t.Run("load: corrupt timestamp", func(t *testing.T) {
-		exec(`INSERT INTO narrowing_decisions (id, session_id, origin_message_id, decision_json, created_at) VALUES ('x', ?, 'm', '{}', 'yesterday')`, session.ID)
+		exec(`INSERT INTO narrowing_decisions (id, session_id, origin_message_id, decision_json, created_at) VALUES ('x', ?, ?, '{}', 'yesterday')`, session.ID, user.ID)
 		defer exec(`DELETE FROM narrowing_decisions`)
 		if _, err := store.Load(ctx, session.ID); err == nil || !strings.Contains(err.Error(), "corrupt narrowing decision timestamp") {
 			t.Fatalf("Load error = %v", err)

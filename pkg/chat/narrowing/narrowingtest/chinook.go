@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 )
 
 // chinookTables is Chinook's table list: name and "column:type" pairs, read from
@@ -41,4 +42,19 @@ func Chinook() []api.CatalogRelation {
 		relations = append(relations, relation)
 	}
 	return relations
+}
+
+// ChinookLinks returns Chinook's foreign keys.
+func ChinookLinks() []narrowing.Link {
+	pairs := [][2]string{
+		{"Album", "Artist"}, {"Customer", "Employee"}, {"Employee", "Employee"},
+		{"Invoice", "Customer"}, {"InvoiceLine", "Invoice"}, {"InvoiceLine", "Track"},
+		{"Track", "Album"}, {"Track", "MediaType"}, {"Track", "Genre"},
+		{"PlaylistTrack", "Playlist"}, {"PlaylistTrack", "Track"},
+	}
+	links := make([]narrowing.Link, 0, len(pairs))
+	for _, pair := range pairs {
+		links = append(links, narrowing.Link{FromSchema: "main", From: pair[0], ToSchema: "main", To: pair[1]})
+	}
+	return links
 }

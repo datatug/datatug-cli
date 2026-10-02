@@ -17,7 +17,10 @@ type Scorer struct {
 	// Probabilities are the relevance probabilities by candidate id; a candidate
 	// not listed scores Floor.
 	Probabilities map[string]float64
-	Floor         float64
+	// ByText, when it has an entry for the question text, replaces Probabilities
+	// for that question (a scripted conversation).
+	ByText map[string]map[string]float64
+	Floor  float64
 	// Calibrated is the answer's flag; Jev's are calibrated, an LLM emulator's not.
 	Calibrated bool
 	// Model and Usage are reported back.
@@ -68,10 +71,14 @@ func (s *Scorer) Score(ctx context.Context, req decision.ScoreRequest) (decision
 		res.Answers = s.Raw
 		return res, nil
 	}
+	probabilities := s.Probabilities
+	if byText, ok := s.ByText[req.Text]; ok {
+		probabilities = byText
+	}
 	for _, q := range req.Questions {
 		scores := make([]decision.Score, 0, len(q.Candidates))
 		for _, c := range q.Candidates {
-			p, ok := s.Probabilities[c.ID]
+			p, ok := probabilities[c.ID]
 			if !ok {
 				p = s.Floor
 			}

@@ -54,7 +54,12 @@ func insertNarrowing(ctx context.Context, tx *sql.Tx, sessionID, originID string
 }
 
 func (s *SessionStore) loadNarrowings(ctx context.Context, item *ChatSession) error {
-	rows, err := dbQueryContextFn(s.db, ctx, `SELECT id, origin_message_id, decision_json, created_at FROM narrowing_decisions WHERE session_id = ? ORDER BY rowid`, item.ID)
+	// A CLI that predates this table clears a session without clearing its
+	// decisions. Decisions whose user message is gone are orphans: prune them
+	// (best effort) and never show them.
+	const live = `origin_message_id IN (SELECT id FROM messages WHERE session_id = ?)`
+	_, _ = execContextFn(s.db, ctx, `DELETE FROM narrowing_decisions WHERE session_id = ? AND NOT `+live, item.ID, item.ID)
+	rows, err := dbQueryContextFn(s.db, ctx, `SELECT id, origin_message_id, decision_json, created_at FROM narrowing_decisions WHERE session_id = ? AND `+live+` ORDER BY rowid`, item.ID, item.ID)
 	if err != nil {
 		return err
 	}
@@ -74,6 +79,21 @@ func (s *SessionStore) loadNarrowings(ctx context.Context, item *ChatSession) er
 		item.Narrowings = append(item.Narrowings, stored)
 	}
 	return rowsErrFn(rows)
+}
+
+// narrowingHistory is what the session already knows when a follow-up arrives:
+// the user's earlier questions and the tables the previous narrowed turn kept.
+func narrowingHistory(session ChatSession) narrowing.History {
+	var history narrowing.History
+	for _, message := range session.Messages {
+		if message.Role == "You" {
+			history.Questions = append(history.Questions, message.Text)
+		}
+	}
+	if count := len(session.Narrowings); count > 0 {
+		history.Kept = session.Narrowings[count-1].Record.Kept
+	}
+	return history
 }
 
 // NarrowingFor returns the decision stored for a user message, if any.

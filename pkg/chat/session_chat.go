@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/strongo/aichat/ai"
 )
 
@@ -874,6 +875,7 @@ func (c *SessionChat) prepareTurn(ctx context.Context, expectedSessionID, prompt
 		}
 		return result, applied, joinErr
 	})
+	ctx = narrowing.WithHistory(ctx, narrowingHistory(prior))
 	ctx, interactionID, clientContext := c.turnContext(ctx)
 	return preparedTurn{ctx: ctx, user: user, prior: prior, contextText: contextText, joinChoice: joinChoice, interactionID: interactionID, clientContext: clientContext}, cleanup, nil
 }

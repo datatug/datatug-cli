@@ -24,6 +24,7 @@ import (
 	"github.com/tuigoff/tuigoff/pkg/theme"
 	"github.com/tuigoff/tuigoff/pkg/transcript"
 
+	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -473,6 +474,18 @@ func (u *ChatUI) appendTurnResults(turn Turn) {
 			u.shell.AppendAssistant(limitationText)
 		}
 	}
+	if notice := narrowingNotice(turn.Narrowing); notice != "" {
+		u.shell.AppendAssistant(notice)
+	}
+}
+
+// narrowingNotice is the one line that tells the user the model was not shown the
+// whole schema, and which tables it was shown ("" when it was).
+func narrowingNotice(record *narrowing.Record) string {
+	if record == nil {
+		return ""
+	}
+	return record.Notice()
 }
 
 // appendGridResult builds a grid.Model for query (via the existing
@@ -652,6 +665,15 @@ func (u *ChatUI) loadSession(session ChatSession) {
 		}
 	}
 	hiddenRecords, hiddenHTTP := hiddenRefreshVersions(session, versionsToKeep)
+	// The narrowing notice of a turn follows that turn's messages, as it does live.
+	pendingNotice := ""
+	flushNotice := func() {
+		if pendingNotice != "" {
+			u.shell.AppendAssistant(pendingNotice)
+			pendingNotice = ""
+		}
+	}
+	defer flushNotice()
 	for _, message := range session.Messages {
 		if message.Kind == "grid" {
 			record := session.RecordSets[message.RecordSetID]
@@ -692,6 +714,10 @@ func (u *ChatUI) loadSession(session ChatSession) {
 		}
 		switch {
 		case message.Role == "You":
+			flushNotice()
+			if stored, ok := session.NarrowingFor(message.ID); ok {
+				pendingNotice = stored.Record.Notice()
+			}
 			u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(text))
 		case response != nil:
 			// httpDocumentBlock (checklist item #36/#37) ports ui.go's

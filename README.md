@@ -109,6 +109,57 @@ the two never disagree. See
 DataTug turns scattered data into a connected, navigable workspace — combining the speed of the CLI with the clarity of
 a Web UI for exploration, troubleshooting, and collaboration.
 
+## `datatug chat`: table narrowing
+
+A project can have hundreds of tables, and `datatug chat` normally shows the AI model all of their definitions on every
+turn. Table narrowing decides, before each turn, which tables the model needs and shows it only those. Your own project
+rules are always on; the decision model is off until you opt in.
+
+**What it does.** Before the model is asked, the chat picks the tables for the question: first your project rules, then
+(if you opted in) a decision model. Tables judged only possibly relevant stay in; so do the tables on the foreign-key
+path between selected tables (when the source's foreign keys are known) and the tables the previous turn used, so
+a follow-up such as "and by genre?" keeps what it follows. The model is told the names of the tables that were left
+out and can read any one's definition with the read-only `describe_relation` tool. The chat prints one line naming the
+tables the model was given, and the decision (engine, model, scores, tables before and after) is stored with the chat
+session.
+
+**It never makes the chat worse than before.** If the decision is disabled, slow (more than 1.5 s by default), failing,
+refused (allowance spent, wrong endpoint), unsure, incomplete, or the schema is larger than 255 tables, the model gets
+the full schema, exactly as it did without narrowing. After a failure the decision model is not asked again for five
+minutes.
+
+**Project rules (local, always on).** `<project>/ai/table-rules.yaml` (the format is provisional, until the decision
+layer is specified):
+
+```yaml
+decision: disabled        # disabled (default) | auto | cloud, see below
+rules:
+  - phrase: Which countries buy the most music?   # exact question; case, spacing, trailing ?!. ignored
+    tables: [Invoice, Customer]                   # exact table names
+```
+
+A matching rule decides on its own and nothing leaves your machine. A rule that names a table the schema does not have,
+or has an unknown key, is reported as a warning when the chat starts and never fires. A malformed file, a symbolic link,
+a directory in its place or a file over 64 KiB is ignored with a warning; the chat starts anyway.
+
+**The decision model (off by default).** With `--model cloud` the chat can ask the DataTug AI cloud, which relays to
+**TypeSafe AI's Jev** decision model (an external model, not an LLM: it scores each table's relevance). When you opt in,
+this is sent to the DataTug cloud and from there to TypeSafe AI:
+
+- your question, and up to the three earlier questions of the session (verbatim);
+- every table name, with its column names (no column types, no rows, no values);
+- the usual identifiers the cloud client already sends: an interaction id, your installation id and client version, and
+  your sign-in token, which authenticates you to the DataTug cloud.
+
+Opt in with `DATATUG_AI_DECISION_PROVIDER=auto` (use it when signed in with `--model cloud`) or `cloud` (the same, and
+warn when it cannot be used), or with `decision: auto` in the project's `ai/table-rules.yaml`; the environment variable
+wins. `disabled` turns it off again; any other value is reported and treated as `disabled`.
+`DATATUG_AI_DECISION_TIMEOUT` (a Go duration, default `1500ms`) sets how long it may take per turn.
+This is off by default pending a decision on how TypeSafe AI may handle this data.
+
+Telemetry for a decision carries counts and the engine and model ids only (for example `narrowed:before=11:after=3`),
+never table names or question text, and is sent only when a decision was actually made.
+
 ## What it is and why?
 
 This is an agent service for https://datatug.app that you can run on your local machine, or some server to allow DataTug

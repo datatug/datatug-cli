@@ -2,6 +2,7 @@ package narrowing
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,11 @@ const (
 	ReasonDisabled     = "disabled"
 	ReasonNoCandidates = "no_candidates"
 	ReasonNoReduction  = "no_reduction"
+	// ReasonTooManyCandidates: more tables than one engine question may hold.
+	ReasonTooManyCandidates = "too_many_candidates"
+	// ReasonCoolingDown: the engine failed or refused recently and is left alone
+	// for a while.
+	ReasonCoolingDown = "cooling_down"
 )
 
 // Score is one candidate's probability as the engine reported it.
@@ -87,6 +93,11 @@ type Record struct {
 	Strong    []string `json:"strong,omitempty"`
 	Potential []string `json:"potential,omitempty"`
 	Proposed  []string `json:"proposed,omitempty"`
+	// Carried are tables kept because the previous turn kept them (a follow-up is
+	// about the same data); Closure are tables kept because they lie on the
+	// foreign-key path between selected tables.
+	Carried []string `json:"carried,omitempty"`
+	Closure []string `json:"closure,omitempty"`
 	// Kept are the tables whose definitions reached the model, in schema order.
 	Kept   []string `json:"kept,omitempty"`
 	Scores []Score  `json:"scores,omitempty"`
@@ -113,16 +124,38 @@ func (r Record) Summary() string {
 	return fmt.Sprintf("full_schema:reason=%s:before=%d", reason, r.CandidatesBefore)
 }
 
+// maxNoticeTables bounds the table names the user-facing line lists.
+const maxNoticeTables = 12
+
+// Notice is the one line shown to the user when the model was given fewer tables
+// than the schema holds ("" when nothing was narrowed). Names are quoted so that
+// a hostile name cannot add lines.
+func (r Record) Notice() string {
+	if !r.Narrowed {
+		return ""
+	}
+	names := make([]string, 0, len(r.Kept))
+	for _, name := range r.Kept[:min(len(r.Kept), maxNoticeTables)] {
+		names = append(names, strconv.Quote(name))
+	}
+	line := fmt.Sprintf("Context narrowed to %d of %d tables: %s", r.CandidatesAfter, r.CandidatesBefore, strings.Join(names, ", "))
+	if len(r.Kept) > maxNoticeTables {
+		line += fmt.Sprintf(" and %d more", len(r.Kept)-maxNoticeTables)
+	}
+	return line + "."
+}
+
 // DetectionSteps renders the decision as the cloud interaction report's
 // detection steps: one for the rung that decided or, when an engine was asked
-// and the full schema was kept, one for that engine. The steps carry counts,
+// and the full schema was kept, one for that engine; none when no rule matched
+// and no engine was asked (the decider is disabled). The steps carry counts,
 // mechanism and the engine and model ids, but no table names or question text.
 func (r Record) DetectionSteps() []cloudproto.DetectionStep {
 	switch {
 	case r.Mechanism == MechanismDeterministic:
 		return []cloudproto.DetectionStep{{Method: "deterministic", Detector: "datatug.narrow.rules", Result: r.Summary()}}
 	case r.Engine == "":
-		return []cloudproto.DetectionStep{{Method: "deterministic", Detector: "datatug.narrow.tables", Result: r.Summary()}}
+		return nil
 	}
 	step := cloudproto.DetectionStep{Method: engineMethod(r.Engine), Detector: "datatug.narrow.tables", Version: safeDimension(r.Model), Result: r.Summary()}
 	if top := r.topPickProbability(); top > 0 {

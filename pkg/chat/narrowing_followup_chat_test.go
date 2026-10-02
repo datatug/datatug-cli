@@ -171,17 +171,163 @@ func TestThreeTurnConversationKeepsTheJoinPath(t *testing.T) {
 }
 
 func TestNarrowingHistory(t *testing.T) {
+	enabled := func(origin string, kept ...string) StoredNarrowing {
+		return StoredNarrowing{OriginMessageID: origin, Record: narrowing.Record{DeciderEnabled: true, Kept: kept}}
+	}
 	session := ChatSession{
 		Messages: []ChatMessage{
-			{Role: "You", Text: "one"}, {Role: "DataTug", Text: "answer"}, {Role: "You", Text: "two"},
+			{ID: "m1", Role: "You", Text: "typed before the user opted in"}, {ID: "a1", Role: "DataTug", Text: "answer"},
+			{ID: "m2", Role: "You", Text: "one"}, {ID: "m3", Role: "You", Text: "two"}, {ID: "m4", Role: "You", Text: "no decision recorded"},
 		},
-		Narrowings: []StoredNarrowing{{Record: narrowing.Record{Kept: []string{"A"}}}, {Record: narrowing.Record{Kept: []string{"B", "C"}}}},
+		Narrowings: []StoredNarrowing{
+			{OriginMessageID: "m1", Record: narrowing.Record{Kept: []string{"A"}}},
+			enabled("m2", "A", "B"), enabled("m3", "B", "C"),
+		},
 	}
+	// Only questions asked while the decider was enabled are history.
 	if got := narrowingHistory(session); !reflect.DeepEqual(got, narrowing.History{Questions: []string{"one", "two"}, Kept: []string{"B", "C"}}) {
 		t.Fatalf("history = %+v", got)
 	}
 	if got := narrowingHistory(ChatSession{}); len(got.Questions) != 0 || len(got.Kept) != 0 {
 		t.Fatalf("empty history = %+v", got)
+	}
+}
+
+// A session restored after the user opted in: a question typed before that was
+// never sent and is not sent now; a question asked since is history.
+func TestQuestionsTypedBeforeOptInAreNeverSent(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	build := func(engine decision.ScoredProvider, steps int) *SessionChat {
+		t.Helper()
+		narrower, err := narrowing.New(narrowing.Config{
+			Relations: narrowingtest.Chinook(), Engine: engine, Policy: decision.NarrowingPolicy(), Format: FormatSchemaContext,
+			Rules: []narrowing.Rule{{Phrase: "never matches", Tables: []string{"Invoice"}}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		script := make([]scriptedStep, steps)
+		for i := range script {
+			script[i] = scriptedStep{text: "ok"}
+		}
+		conversation, err := NewAIConversation(&scriptedProvider{steps: script}, &fakeExecutor{}, "sqlite:///chinook.db", chinookFullSchema(), WithTableNarrowing(narrower))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions, err := NewSessionChat(ctx, store, conversation, "sqlite:///chinook.db")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sessions
+	}
+	// Before the opt-in: the decider is off.
+	before := build(nil, 1)
+	if _, err := before.Ask(ctx, "my private question typed before opting in"); err != nil {
+		t.Fatal(err)
+	}
+	// After the opt-in, the same (restored) session continues.
+	engine := narrowingScorer(narrowingMusicSales)
+	after := build(engine, 2)
+	for _, q := range []string{"first question after opting in", "and a follow-up"} {
+		if _, err := after.Ask(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	requests := engine.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("engine requests = %d", len(requests))
+	}
+	if requests[0].Context != nil {
+		t.Fatalf("the question typed before opting in was sent: %+v", requests[0].Context)
+	}
+	if previous, _ := requests[1].Context["previousQuestions"].([]string); !reflect.DeepEqual(previous, []string{"first question after opting in"}) {
+		t.Fatalf("follow-up history = %q", previous)
+	}
+	for _, request := range requests {
+		if strings.Contains(fmt.Sprint(request), "private question") {
+			t.Fatal("a question typed before opting in reached the engine")
+		}
+	}
+}
+
+// describe_relation is bounded: past the limit the model gets a final refusal, and
+// the turn still completes.
+func TestDescribeRelationIsLimitedPerTurnAndDegradesGracefully(t *testing.T) {
+	llm := &scriptedProvider{steps: []scriptedStep{
+		{toolCalls: []ai.ToolCall{toolCall("1", toolDescribeRelation, map[string]any{"name": "Track"})}},
+		{toolCalls: []ai.ToolCall{toolCall("2", toolDescribeRelation, map[string]any{"name": "Album"})}},
+		{toolCalls: []ai.ToolCall{toolCall("3", toolDescribeRelation, map[string]any{"name": "Artist"})}},
+		{toolCalls: []ai.ToolCall{toolCall("4", toolRunDTQL, map[string]any{"title": "Tracks", "dtql": "from: {name: Track}\ncolumns: [{field: Name}]\nlimit: 5"})}},
+		{text: "Done."},
+	}}
+	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"Name"}}}
+	conversation, err := NewAIConversation(llm, executor, "sqlite:///chinook.db", chinookFullSchema(), WithTableNarrowing(chinookNarrower(t, narrowingScorer(narrowingMusicSales))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := conversation.AskWithContext(context.Background(), narrowingQuestion, "")
+	if err != nil || len(turn.Queries) != 1 || turn.Queries[0].Err != nil {
+		t.Fatalf("the turn failed: %+v, %v", turn, err)
+	}
+	var results []string
+	for _, message := range llm.requests[3].Messages {
+		for _, result := range message.ToolResults {
+			results = append(results, result.Content)
+		}
+	}
+	if len(results) != 3 || !strings.Contains(results[1], "Album") || !strings.Contains(results[2], "Limit of 2 describe_relation calls reached") || strings.Contains(results[2], `"ok":true`) {
+		t.Fatalf("tool results = %q", results)
+	}
+	// The count starts again with the next turn.
+	conversation.resetTurn()
+	if conversation.describes != 0 {
+		t.Fatalf("describe count not reset: %d", conversation.describes)
+	}
+}
+
+// What narrowing really costs in model input, measured on Chinook: the bytes of
+// every request the model receives in a turn, summed over the turn's model calls
+// (each tool round trip re-sends the whole request).
+func TestNetInputBytesOnChinook(t *testing.T) {
+	run := func(describe bool, options ...Option) (calls int, total int) {
+		t.Helper()
+		var steps []scriptedStep
+		if describe {
+			steps = append(steps, scriptedStep{toolCalls: []ai.ToolCall{toolCall("1", toolDescribeRelation, map[string]any{"name": "Track"})}})
+		}
+		steps = append(steps,
+			scriptedStep{toolCalls: []ai.ToolCall{toolCall("2", toolRunDTQL, map[string]any{"title": "Sales", "dtql": "from: {name: Invoice}\ncolumns: [{field: BillingCountry}]\nlimit: 5"})}},
+			scriptedStep{text: "Here."})
+		llm := &scriptedProvider{steps: steps}
+		conversation, err := NewAIConversation(llm, &fakeExecutor{result: secureread.Result{Columns: []string{"BillingCountry"}}}, "sqlite:///chinook.db", chinookFullSchema(), options...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := conversation.AskWithContext(context.Background(), narrowingQuestion, ""); err != nil {
+			t.Fatal(err)
+		}
+		for _, req := range llm.requests {
+			encoded, _ := json.Marshal(req)
+			total += len(encoded)
+		}
+		return len(llm.requests), total
+	}
+	baseCalls, base := run(false)
+	narrowedCalls, narrowed := run(false, WithTableNarrowing(chinookNarrower(t, narrowingScorer(narrowingMusicSales))))
+	describedCalls, described := run(true, WithTableNarrowing(chinookNarrower(t, narrowingScorer(narrowingMusicSales))))
+	percent := func(n int) float64 { return 100 * float64(n-base) / float64(base) }
+	t.Logf("no narrowing:          %d model calls, %d input bytes", baseCalls, base)
+	t.Logf("narrowed 3 of 11:      %d model calls, %d input bytes (%+.1f%%)", narrowedCalls, narrowed, percent(narrowed))
+	t.Logf("narrowed + 1 describe: %d model calls, %d input bytes (%+.1f%%)", describedCalls, described, percent(described))
+	if narrowed >= base {
+		t.Fatalf("narrowing cost more than it saved: %d vs %d", narrowed, base)
+	}
+	if described <= base {
+		t.Fatalf("a describe round trip is expected to cost more than not narrowing: %d vs %d", described, base)
+	}
+	if baseCalls != 2 || narrowedCalls != 2 || describedCalls != 3 {
+		t.Fatalf("model calls = %d %d %d", baseCalls, narrowedCalls, describedCalls)
 	}
 }
 

@@ -30,31 +30,63 @@ var (
 	chatNarrowingNew = narrowing.New
 )
 
+// consentState is the user's own recorded choice for this project and where it is stored.
+type consentState struct{ choice, path string }
+
+// sentToThirdParty says what the cloud decision engine sends, and to whom.
+const sentToThirdParty = "your question, up to three earlier questions of the session, and every table name with its column names (no types, no rows) to the DataTug cloud and, through it, to TypeSafe AI's Jev decision model"
+
 // chatTableNarrower builds the decision that narrows a chat turn's schema context
 // to the tables a question needs, or returns nil when the chat should keep
-// sending its full schema. Anything wrong with the configuration is returned as a
-// warning for the user and never stops the chat.
+// sending its full schema. A problem with the configuration is returned as a
+// warning and never stops the chat; notices tell the user what is, or is not,
+// being forwarded and how to change it.
 //
 // Two rungs can narrow. The project's own deterministic rules
 // (ai/table-rules.yaml) are local and always apply; they never call out. The
 // cloud decider (TypeSafe AI's Jev behind the DataTug AI cloud) is OFF unless the
-// user opts in, because it forwards the question text and the table and column
-// names to a third party: set DATATUG_AI_DECISION_PROVIDER or the project's
-// "decision:" setting to "auto" (use it when signed in with --model cloud) or
-// "cloud" (same, and warn when it cannot be used). Anything else, or an
-// unsupported value, means disabled.
-func chatTableNarrower(projectDir string, cloudClient *cloud.Client, relations []api.CatalogRelation, links func() []narrowing.Link) (chat.TableNarrower, []string) {
+// USER turns it on, because it forwards the question text and the schema names to
+// a third party:
+//
+//   - DATATUG_AI_DECISION_PROVIDER=auto|cloud turns it on (for the session);
+//     =disabled always wins over everything else.
+//   - A project's "decision: auto|cloud" only REQUESTS it. It takes effect only
+//     when the user has allowed it for this project (datatug chat --cloud-decision
+//     allow, stored in the user's config directory); otherwise it is ignored and
+//     a notice says so.
+//
+// "cloud" is "auto" plus a warning when the chat is not using --model cloud.
+func chatTableNarrower(projectDir string, cloudClient *cloud.Client, relations []api.CatalogRelation, links func() []narrowing.Link, consent consentState) (chat.TableNarrower, []string, []string) {
 	settings := narrowing.LoadSettings(projectDir)
 	warnings := settings.Warnings
-	cfg := aiconfig.Config{Decision: aiconfig.Decision{Provider: "disabled"}}
-	if settings.Decision != "" {
-		cfg.Decision.Provider = settings.Decision
+	var notices []string
+	provider, source := "disabled", ""
+	requested := settings.Decision
+	if requested != "" && requested != "disabled" && requested != "auto" && requested != "cloud" {
+		warnings = append(warnings, fmt.Sprintf("unsupported decision setting %q in the project (use disabled, auto or cloud); it is ignored", requested))
+		requested = ""
 	}
-	cfg.ApplyEnv(chatGetenv, chatDecisionEnvPrefix)
+	envName := chatDecisionEnvPrefix + aiconfig.EnvDecision
+	switch env := chatGetenv(envName); {
+	case env != "":
+		provider, source = env, "the "+envName+" environment variable"
+		if env != "disabled" && env != "auto" && env != "cloud" {
+			warnings = append(warnings, fmt.Sprintf("unsupported decision provider %q in %s (use disabled, auto or cloud); table narrowing by the cloud decider is off", env, envName))
+			provider = "disabled"
+		}
+	case requested == "auto" || requested == "cloud":
+		switch consent.choice {
+		case consentAllow:
+			provider, source = requested, fmt.Sprintf("your consent for this project, stored in %s", consent.path)
+		case consentRefuse:
+		default:
+			if cloudClient != nil {
+				notices = append(notices, fmt.Sprintf("this project's %s asks to use the cloud decision engine, which would send %s. It is NOT enabled. To allow it for this project run: datatug chat --cloud-decision allow (stored in %s). To allow it for one session only: %s=auto datatug chat. To refuse and stop this message: datatug chat --cloud-decision refuse.", narrowing.SettingsFile, sentToThirdParty, consentWhere(consent.path), envName))
+			}
+		}
+	}
 	var engine decision.ScoredProvider
-	switch cfg.Decision.Provider {
-	case "disabled":
-	case "auto", "cloud":
+	if provider == "auto" || provider == "cloud" {
 		switch {
 		case cloudClient != nil:
 			scorer, err := chatScorerOf(cloudClient.Decider())
@@ -62,12 +94,15 @@ func chatTableNarrower(projectDir string, cloudClient *cloud.Client, relations [
 				warnings = append(warnings, fmt.Sprintf("the cloud decision engine is unavailable: %v", err))
 			} else {
 				engine = scorer
+				off := fmt.Sprintf("set %s=disabled", envName)
+				if consent.choice == consentAllow && chatGetenv(envName) == "" {
+					off = fmt.Sprintf("run datatug chat --cloud-decision refuse (or set %s=disabled)", envName)
+				}
+				notices = append(notices, fmt.Sprintf("the cloud decision engine is ON (enabled by %s): each turn sends %s. To turn it off: %s.", source, sentToThirdParty, off))
 			}
-		case cfg.Decision.Provider == "cloud":
+		case provider == "cloud":
 			warnings = append(warnings, "the decision provider is \"cloud\" but the chat is not using --model cloud (run datatug auth login first); table narrowing by the cloud decider is off")
 		}
-	default:
-		warnings = append(warnings, fmt.Sprintf("unsupported decision provider %q (use disabled, auto or cloud); table narrowing by the cloud decider is off", cfg.Decision.Provider))
 	}
 	timeout := time.Duration(0)
 	if raw := chatGetenv(chatDecisionTimeoutEnv); raw != "" {
@@ -79,16 +114,24 @@ func chatTableNarrower(projectDir string, cloudClient *cloud.Client, relations [
 		}
 	}
 	if engine == nil && len(settings.Rules) == 0 {
-		return nil, warnings
+		return nil, warnings, notices
 	}
 	narrower, err := chatNarrowingNew(narrowing.Config{
 		Relations: relations, Rules: settings.Rules, Links: links, Engine: engine, Timeout: timeout,
 		Policy: decision.NarrowingPolicy(), Format: chat.FormatSchemaContext,
 	})
 	if err != nil {
-		return nil, append(warnings, fmt.Sprintf("table narrowing is off: %v", err))
+		return nil, append(warnings, fmt.Sprintf("table narrowing is off: %v", err)), notices
 	}
-	return narrower, append(warnings, narrower.Warnings()...)
+	return narrower, append(warnings, narrower.Warnings()...), notices
+}
+
+// consentWhere names the consent store for a message, even when it could not be located.
+func consentWhere(path string) string {
+	if path == "" {
+		return "the datatug folder of your user config directory"
+	}
+	return path
 }
 
 // foreignKeyLinks turns the chat's foreign-key snapshot into narrowing links.

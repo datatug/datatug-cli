@@ -28,7 +28,11 @@ const (
 	maxModelCallsPerTurn = 3  // agent.Loop.MaxSteps: hard fatal cap on model calls in one turn.
 	maxToolCallsPerTurn  = 2  // per-tool friendly cap on run_dtql attempts (returns a tool error, doesn't abort).
 	maxAgentToolCalls    = 12 // agent.Loop.MaxToolCalls: hard fatal cap across every tool in one turn.
-	turnTimeout          = 90 * time.Second
+	// maxDescribeCallsPerTurn bounds describe_relation: each call is another model
+	// round trip that re-sends the whole request, so reading omitted tables must stay
+	// the exception. A narrowed turn is given that many extra model calls.
+	maxDescribeCallsPerTurn = 2
+	turnTimeout             = 90 * time.Second
 )
 
 // DTQLExecutor is the existing DataTug query boundary used by Chat.
@@ -265,6 +269,7 @@ type AIConversation struct {
 	toolCalls   int
 	actionCalls int
 	joinApplied bool
+	describes   int
 
 	lastStreamTurn Turn
 
@@ -525,6 +530,14 @@ func (c *AIConversation) handlers() map[string]agent.Handler {
 		var args describeRelationArgs
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {
 			return errorResult(call.ID, "invalid describe_relation arguments: "+err.Error()), nil
+		}
+		c.mu.Lock()
+		c.describes++
+		overLimit := c.describes > maxDescribeCallsPerTurn
+		c.mu.Unlock()
+		if overLimit {
+			// A final refusal, not a failure: the turn goes on with what the model has.
+			return jsonResult(call.ID, describeRelationResponse{Error: fmt.Sprintf("Limit of %d describe_relation calls reached for this turn. Answer with the relations you have, or tell the user which relation you could not read.", maxDescribeCallsPerTurn)}), nil
 		}
 		if c.narrower != nil {
 			if definition, ok := c.narrower.Describe(args.Name); ok {
@@ -818,6 +831,7 @@ func (c *AIConversation) resetTurn() {
 	c.toolCalls = 0
 	c.actionCalls = 0
 	c.joinApplied = false
+	c.describes = 0
 }
 
 func (c *AIConversation) capture(ctx context.Context, result QueryResult) QueryResult {
@@ -922,8 +936,8 @@ func (c *AIConversation) buildRequestWith(ctx context.Context, system string, to
 func (c *AIConversation) newLoop(narrowed bool) *agent.Loop {
 	maxSteps := maxModelCallsPerTurn
 	if narrowed {
-		// One more model call, for reading an omitted relation's definition.
-		maxSteps++
+		// Extra model calls for reading omitted relations' definitions.
+		maxSteps += maxDescribeCallsPerTurn
 	}
 	maxToolCalls := maxAgentToolCalls
 	if c.browserInterpretation {

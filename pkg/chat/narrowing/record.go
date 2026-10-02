@@ -70,6 +70,11 @@ type Record struct {
 	// deterministic, calibrated or self_reported.
 	Provenance string `json:"provenance,omitempty"`
 	Policy     string `json:"policy,omitempty"`
+	// DeciderEnabled is true when a decision engine was configured when the
+	// question was asked. The question of a turn is only reused as history for a
+	// later question if it was (a question typed before the user opted in must
+	// never be sent after).
+	DeciderEnabled bool `json:"deciderEnabled,omitempty"`
 	// Verdict is the selection policy's judgement, for example "several" or
 	// "uncertain: only_potential".
 	Verdict string `json:"verdict,omitempty"`

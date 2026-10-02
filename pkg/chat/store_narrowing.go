@@ -82,11 +82,14 @@ func (s *SessionStore) loadNarrowings(ctx context.Context, item *ChatSession) er
 }
 
 // narrowingHistory is what the session already knows when a follow-up arrives:
-// the user's earlier questions and the tables the previous narrowed turn kept.
+// the user's earlier questions (only those asked while the decision engine was
+// enabled) and the tables the previous narrowed turn kept.
 func narrowingHistory(session ChatSession) narrowing.History {
 	var history narrowing.History
 	for _, message := range session.Messages {
-		if message.Role == "You" {
+		// Only a question typed while the decision engine was enabled may be sent
+		// again as history: one typed before the user opted in was never sent.
+		if stored, ok := session.NarrowingFor(message.ID); message.Role == "You" && ok && stored.Record.DeciderEnabled {
 			history.Questions = append(history.Questions, message.Text)
 		}
 	}

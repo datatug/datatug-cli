@@ -34,6 +34,7 @@ type chatOptions struct {
 	apiKey          string
 	insecureStorage bool
 	as              string
+	cloudDecision   string
 	roles           []string
 	groups          []string
 }
@@ -47,22 +48,29 @@ func chatCommand() *cobra.Command {
 
 Table narrowing: before each AI turn the chat can decide which of the project's
 tables the model needs and show it only those definitions. The model is told
-which tables were left out and can read any of them with describe_relation, and
-the chat prints one line naming the tables it was given. It never changes the
-answer path when it cannot decide: the full schema is sent, exactly as without it.
+which tables were left out and can read up to two of them per turn with
+describe_relation, and the chat prints one line naming the tables it was given.
+When it cannot decide, or would save little, the full schema is sent as before.
+Narrowing is a trade-off: it saves schema bytes (about 40% of the schema context
+on the 11-table Chinook sample, more on larger schemas) but a table the model is
+not shown can cost a describe_relation round trip.
 
   Project rules (always on, local): <project>/ai/table-rules.yaml maps an exact
   question to the tables it needs; a match never calls out.
 
-  Cloud decider (OFF by default): with --model cloud it asks the DataTug AI cloud,
-  which relays to TypeSafe AI's Jev decision model. That sends your question, up
-  to three earlier questions of the session, and every table name with its column
-  names (no types, no rows) to the DataTug cloud and to TypeSafe AI. Opt in with
-  DATATUG_AI_DECISION_PROVIDER=auto (or cloud) or "decision: auto" in the
-  project's ai/table-rules.yaml; the environment wins. After a failure the cloud
-  decider is not asked again for five minutes; DATATUG_AI_DECISION_TIMEOUT sets
-  how long it may take per turn (default 1.5s). Schemas above 255 tables are not
-  sent to it.`,
+  Cloud decider (OFF until YOU turn it on): with --model cloud it asks the
+  DataTug AI cloud, which relays to TypeSafe AI's Jev decision model. That sends
+  your question, up to three earlier questions of the session, and every table
+  name with its column names (no types, no rows) to the DataTug cloud and to
+  TypeSafe AI. Only you can turn it on:
+    DATATUG_AI_DECISION_PROVIDER=auto     for this session (=disabled always wins)
+    datatug chat --cloud-decision allow   for this project, remembered in your
+                                          user config directory (refuse|forget)
+  A project's "decision: auto" in ai/table-rules.yaml only REQUESTS it: it is
+  ignored, with a notice, until you allow it. Whenever it is on, the chat says so
+  at start. After a failure it is not asked again for five minutes;
+  DATATUG_AI_DECISION_TIMEOUT sets how long it may take per turn (default 1.5s).
+  Schemas above 255 tables are not sent to it.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := applyLastChatOptions(cmd, &options); err != nil {
@@ -80,6 +88,7 @@ answer path when it cannot decide: the full schema is sent, exactly as without i
 	flags.StringVar(&options.baseURL, "base-url", "", "model API base URL (for cloud, the shared API /v0/ URL)")
 	flags.BoolVar(&options.insecureStorage, "insecure-storage", false, "use the plaintext DataTug auth session created with auth login --insecure-storage (cloud only)")
 	flags.StringVar(&options.thinking, "thinking", "low", "Model reasoning effort: low, medium, or high (provider support varies)")
+	flags.StringVar(&options.cloudDecision, "cloud-decision", "", "Record your choice about the cloud decision engine for this project: allow, refuse or forget (it is off until you allow it)")
 	flags.StringVar(&options.as, "as", "", "Principal ID used for access policies")
 	flags.StringSliceVar(&options.roles, "role", nil, "Principal role (repeatable)")
 	flags.StringSliceVar(&options.groups, "group", nil, "Principal group (repeatable)")
@@ -106,7 +115,8 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 			return err
 		}
 		options.project = nextProject
-		options.database = "" // resolve the new project's source independently
+		options.database = ""      // resolve the new project's source independently
+		options.cloudDecision = "" // a consent choice is for the project it was given for
 	}
 }
 
@@ -133,6 +143,14 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	projectDir, projectStore, err := resolveQueryProject(options.project)
 	if err != nil {
 		return "", Exit(err.Error()+"\nChoose an existing project: datatug projects, then datatug chat --project <ID-or-directory>\nStart a new project: datatug init <ID> <directory>", exitCodeUsage)
+	}
+
+	if options.cloudDecision != "" {
+		path, consentErr := setCloudDecisionConsent(projectDir, options.cloudDecision)
+		if consentErr != nil {
+			return "", Exit(consentErr.Error(), exitCodeUsage)
+		}
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "cloud decision engine for this project: %s (stored in %s)\n", options.cloudDecision, path)
 	}
 
 	database := options.database
@@ -209,9 +227,16 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		// Narrowing applies to the stored-schema context only: the degraded
 		// multi-source context is left exactly as it is.
 		if healthyRelations > 0 && sourceErr == nil {
-			narrower, warnings := chatTableNarrower(projectDir, cloudClient, healthy.Relations, func() []narrowing.Link { return foreignKeys })
+			choice, consentPath, consentWarning := readDecisionConsent(projectDir)
+			if consentWarning != "" {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", consentWarning)
+			}
+			narrower, warnings, notices := chatTableNarrower(projectDir, cloudClient, healthy.Relations, func() []narrowing.Link { return foreignKeys }, consentState{choice, consentPath})
 			for _, warning := range warnings {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", warning)
+			}
+			for _, notice := range notices {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "table narrowing: %s\n", notice)
 			}
 			if narrower != nil {
 				conversationOptions = append(conversationOptions, chat.WithTableNarrowing(narrower))

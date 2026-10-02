@@ -77,6 +77,11 @@ const (
 	maxPathHops = 5
 	// maxOmittedBytes bounds the omitted-table names listed in the note.
 	maxOmittedBytes = 4096
+	// minReductionPercent is how much smaller (note included) the narrowed schema
+	// context must be than the full one. A narrowing that saves less is not worth
+	// what it risks (a table the model does not see, a longer note, a describe
+	// round trip), so the full schema is kept and no_reduction is recorded.
+	minReductionPercent = 25
 )
 
 // Link is one foreign-key relationship between two tables (either direction;
@@ -356,7 +361,7 @@ func truncateBytes(s string, limit int) string {
 func (n *Narrower) Narrow(ctx context.Context, prompt string) Outcome {
 	start := n.now()
 	rec := Record{
-		DecidedAt: start, Policy: n.policy.Name,
+		DecidedAt: start, Policy: n.policy.Name, DeciderEnabled: n.engine != nil,
 		CandidatesBefore: len(n.candidates), CandidatesAfter: len(n.candidates),
 		ContextBytesBefore: n.fullBytes, ContextBytesAfter: n.fullBytes,
 	}
@@ -431,16 +436,10 @@ func (n *Narrower) remember(stop string) {
 }
 
 // coolsDown lists the engine outcomes after which the engine is left alone: it
-// is slow, failing, refusing or misbehaving, and asking again next turn would
-// only repeat the wait. A request the engine rejected as invalid or a call the
-// user cancelled says nothing about the engine.
-func coolsDown(outcome string) bool {
-	switch outcome {
-	case decision.AttemptRejected, decision.AttemptCancelled:
-		return false
-	}
-	return true
-}
+// is slow, failing, refusing, rejecting the request or misbehaving, and asking
+// again next turn would only repeat the wait. Only a call the user cancelled says
+// nothing about the engine.
+func coolsDown(outcome string) bool { return outcome != decision.AttemptCancelled }
 
 // ask puts the one relevance question to the engine, applies the policy, and
 // widens a selection with the carried tables and the foreign-key paths between
@@ -594,26 +593,45 @@ func (n *Narrower) widen(sel decision.Selection, history History, rec *Record) [
 }
 
 // topicChanged is the rule for dropping the previous turn's tables: the engine is
-// confident (a strong pick) about tables that are neither among the previous
-// ones nor foreign-key neighbours of them. Without a previous turn or without
-// foreign-key information a follow-up is always assumed, since keeping more is
-// the safe error.
+// confident (a strong pick) about tables that cannot be reached from any of the
+// previous ones through foreign keys (within the same hop limit the path closure
+// uses, so whatever is reachable would be joined to them). Without a previous turn
+// or without foreign-key information a follow-up is always assumed, since keeping
+// more is the safe error.
 func (n *Narrower) topicChanged(sel decision.Selection, previous []int, adjacency map[int][]int) bool {
 	if len(previous) == 0 || len(sel.Strong) == 0 || len(adjacency) == 0 {
 		return false
 	}
 	for _, id := range sel.Strong {
 		i, _ := n.lookup(id, true)
-		if slices.Contains(previous, i) {
+		if slices.Contains(previous, i) || reaches(i, previous, adjacency) {
 			return false
-		}
-		for _, neighbour := range adjacency[i] {
-			if slices.Contains(previous, neighbour) {
-				return false
-			}
 		}
 	}
 	return true
+}
+
+// reaches reports whether any target is within maxPathHops foreign-key hops of from.
+func reaches(from int, targets []int, graph map[int][]int) bool {
+	depth := map[int]int{from: 0}
+	queue := []int{from}
+	for len(queue) > 0 {
+		at := queue[0]
+		queue = queue[1:]
+		if slices.Contains(targets, at) {
+			return true
+		}
+		if depth[at] == maxPathHops {
+			continue
+		}
+		for _, next := range graph[at] {
+			if _, seen := depth[next]; !seen {
+				depth[next] = depth[at] + 1
+				queue = append(queue, next)
+			}
+		}
+	}
+	return false
 }
 
 // adjacency is the foreign-key graph over the candidates, built from the
@@ -728,7 +746,8 @@ func outcomeOf(ctx context.Context, err error) string {
 
 // apply keeps the relations whose indexes are in kept (schema order; a relation
 // that cannot be a candidate always stays), records them, and returns the
-// narrowed schema context, or "" when nothing was dropped.
+// narrowed schema context, or "" when nothing was dropped or the narrowed context
+// (note included) is not at least minReductionPercent smaller than the full one.
 func (n *Narrower) apply(kept []int, rec *Record) string {
 	var (
 		relations []api.CatalogRelation
@@ -753,6 +772,10 @@ func (n *Narrower) apply(kept []int, rec *Record) string {
 	// The note comes first: no table or column name can precede it, so none can
 	// pass for it.
 	text := noteFor(len(ids), len(n.candidates), omitted) + "\n" + n.format(&api.CatalogSchema{Relations: relations})
+	if len(text)*100 > n.fullBytes*(100-minReductionPercent) {
+		rec.FallbackReason = ReasonNoReduction
+		return ""
+	}
 	rec.Narrowed, rec.Kept = true, ids
 	rec.CandidatesAfter, rec.ContextBytesAfter = len(ids), len(text)
 	return text

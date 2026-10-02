@@ -109,6 +109,83 @@ the two never disagree. See
 DataTug turns scattered data into a connected, navigable workspace — combining the speed of the CLI with the clarity of
 a Web UI for exploration, troubleshooting, and collaboration.
 
+## `datatug chat`: table narrowing
+
+`datatug chat` normally shows the AI model the definitions of all of a project's tables on every turn. Table narrowing
+decides, before each turn, which tables the model needs and shows it only those. Your own project rules are always on;
+the decision model is off until **you** turn it on.
+
+**What it does.** Before the model is asked, the chat picks the tables for the question: first your project rules, then
+(if you turned it on) a decision model. Tables judged only possibly relevant stay in; so do the tables on the
+foreign-key path between selected tables (when the source's foreign keys are known) and, for a follow-up such as "and by
+genre?", the tables the previous turn used. The model is told the names of the tables that were left out and can read
+up to two of them per turn with the read-only `describe_relation` tool. The chat prints one line naming the tables the
+model was given, and the decision (engine, model, scores, tables before and after) is stored with the chat session.
+
+**What it costs and saves, honestly.** Narrowing removes schema bytes from every request, but the model's request also
+holds fixed instructions and tool definitions, and a table the model was not shown can cost a `describe_relation`
+round trip, which re-sends the whole request. Measured on the 11-table Chinook sample, summed over every model call of
+a turn:
+
+| | model calls | input bytes | vs no narrowing |
+|---|---|---|---|
+| no narrowing | 2 | 22,059 | |
+| narrowed to 3 of 11 tables | 2 | 21,369 | -3.1% |
+| narrowed, and the model reads 1 omitted table | 3 | 32,785 | +48.6% |
+
+The schema context alone goes from 1,829 to 1,111 bytes (-39%, the note naming the omitted tables included). The saving
+grows with the schema (hundreds of tables, wide tables) and is small on a schema as small as Chinook's. Narrowing is
+applied only when the narrowed context is at least 25% smaller than the full one; otherwise the full schema is kept.
+It is not a guarantee of a better answer: a wrong narrowing is possible, which is why the omitted tables are named and
+readable.
+
+**When it cannot decide, the chat sends the full schema,** exactly as it did without narrowing: the decision model is
+off, slow (more than 1.5 s by default), failing, refused (allowance spent, wrong endpoint), unsure, incomplete, the
+schema is larger than 255 tables, or the narrowing would save less than 25%. After a failure the decision model is not
+asked again for five minutes.
+
+**Project rules (local, always on).** `<project>/ai/table-rules.yaml` (the format is provisional, until the decision
+layer is specified):
+
+```yaml
+decision: auto            # a REQUEST for the decision model; see below. disabled (default) | auto | cloud
+rules:
+  - phrase: Which countries buy the most music?   # exact question; case, spacing, trailing ?!. ignored
+    tables: [Invoice, Customer]                   # exact table names
+```
+
+A matching rule decides on its own and nothing leaves your machine. A rule that names a table the schema does not have,
+or has an unknown key, is reported as a warning when the chat starts and never fires. A malformed file, a symbolic link,
+a directory in its place or a file over 64 KiB is ignored with a warning; the chat starts anyway.
+
+**The decision model (off until you turn it on).** With `--model cloud` the chat can ask the DataTug AI cloud, which
+relays to **TypeSafe AI's Jev** decision model (an external model, not an LLM: it scores each table's relevance). When
+it is on, this is sent to the DataTug cloud and from there to TypeSafe AI:
+
+- your question, and up to the three earlier questions of the session that were asked while it was on (verbatim);
+- every table name, with its column names (no column types, no rows, no values);
+- the usual identifiers the cloud client already sends: an interaction id, your installation id and client version, and
+  your sign-in token, which authenticates you to the DataTug cloud.
+
+Only you can turn it on, so that opening a cloned repository never starts forwarding your questions:
+
+- `DATATUG_AI_DECISION_PROVIDER=auto` (or `cloud`, the same plus a warning when the chat is not using `--model cloud`)
+  turns it on for that session. `DATATUG_AI_DECISION_PROVIDER=disabled` always wins over everything below.
+- `datatug chat --cloud-decision allow` records your consent for this project (identified by its directory, so a copy
+  elsewhere does not inherit it, and a project you move or rename needs consent again) in `datatug/decision-consent.json` in your user config directory, outside the project.
+  `--cloud-decision refuse` records a refusal; `--cloud-decision forget` removes the record.
+- A project's own `decision: auto|cloud` only **requests** it. Without your consent it is ignored, and the chat prints one
+  line at start saying so, what would be sent and to whom, and the commands above.
+
+Whenever it is on, the chat shows one line at start, as a system line at the top of the chat (the terminal UI hides
+anything printed before it starts) and on stderr for non-interactive runs, naming where the setting came from, what is sent
+to whom, and how to turn it off. Rule and configuration warnings appear the same way. These lines are not messages: they
+are not stored in the session and never sent to the model. `DATATUG_AI_DECISION_TIMEOUT` (a Go duration, default `1500ms`) sets how long it may take per turn. It is off
+by default pending a decision on how TypeSafe AI may handle this data.
+
+Telemetry for a decision carries counts and the engine and model ids only (for example `narrowed:before=11:after=3`),
+never table names or question text, and is sent only when a decision was actually made.
+
 ## What it is and why?
 
 This is an agent service for https://datatug.app that you can run on your local machine, or some server to allow DataTug

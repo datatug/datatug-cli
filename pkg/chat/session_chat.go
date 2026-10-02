@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/strongo/aichat/ai"
 )
 
@@ -874,6 +875,7 @@ func (c *SessionChat) prepareTurn(ctx context.Context, expectedSessionID, prompt
 		}
 		return result, applied, joinErr
 	})
+	ctx = narrowing.WithHistory(ctx, narrowingHistory(prior))
 	ctx, interactionID, clientContext := c.turnContext(ctx)
 	return preparedTurn{ctx: ctx, user: user, prior: prior, contextText: contextText, joinChoice: joinChoice, interactionID: interactionID, clientContext: clientContext}, cleanup, nil
 }
@@ -885,7 +887,7 @@ func (c *SessionChat) prepareTurn(ctx context.Context, expectedSessionID, prompt
 // a query error) lets the next turn resolve it from the user's own answer.
 func resolveJoinChoice(joinChoice **attachedJoinChoiceError, turn Turn, agentErr error) (Turn, error) {
 	if joinChoice != nil && *joinChoice != nil {
-		return Turn{Text: (*joinChoice).Error()}, nil
+		return Turn{Text: (*joinChoice).Error(), Narrowing: turn.Narrowing}, nil
 	}
 	return turn, agentErr
 }
@@ -919,7 +921,7 @@ func (c *SessionChat) ask(ctx context.Context, expectedSessionID, prompt string)
 // summary/error as the visible text.
 func finalizeTurn(turn Turn, agentErr error) Turn {
 	if agentErr != nil {
-		turn = Turn{Text: friendlyAgentError(agentErr)}
+		turn = Turn{Text: friendlyAgentError(agentErr), Narrowing: turn.Narrowing}
 	}
 	if turn.Text == "" && len(turn.Queries) == 0 && len(turn.Actions) == 0 {
 		turn.Text = "The AI model returned no query or answer. Try again or choose another model."

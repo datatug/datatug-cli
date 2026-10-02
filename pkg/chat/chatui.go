@@ -24,6 +24,7 @@ import (
 	"github.com/tuigoff/tuigoff/pkg/theme"
 	"github.com/tuigoff/tuigoff/pkg/transcript"
 
+	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -48,6 +49,11 @@ type ChatUI struct {
 
 	sessionID string
 	snapshot  ChatSession
+	// sessionNotices are the start-of-session lines (what the table-narrowing
+	// decision does, and warnings about its configuration). They are shown as
+	// system lines at the top of the transcript, are never stored as messages and
+	// never reach the model.
+	sessionNotices []string
 
 	// lastGridEntryID is the transcript entry ID of the most recently
 	// appended grid/join block — Ctrl+G's target (checklist #45).
@@ -206,6 +212,17 @@ func NewSessionChatUI(ctx context.Context, sessions *SessionChat, modelName stri
 	}
 	u.loadSession(snapshot)
 	return u, nil
+}
+
+// SetSessionNotices shows lines at the top of the chat as system entries, visibly
+// apart from the model's replies, and keeps showing them whenever the transcript
+// is rebuilt (a switched or cleared session). They are not messages: they are not
+// stored in the session and never sent to the model. The terminal UI runs on the
+// alternate screen, so a line printed to stderr before it starts is not seen until
+// the user quits.
+func (u *ChatUI) SetSessionNotices(lines []string) {
+	u.sessionNotices = append([]string(nil), lines...)
+	u.loadSession(u.snapshot)
 }
 
 // SetProjectChoices mirrors UI.SetProjectChoices.
@@ -473,6 +490,18 @@ func (u *ChatUI) appendTurnResults(turn Turn) {
 			u.shell.AppendAssistant(limitationText)
 		}
 	}
+	if notice := narrowingNotice(turn.Narrowing); notice != "" {
+		u.shell.AppendAssistant(notice)
+	}
+}
+
+// narrowingNotice is the one line that tells the user the model was not shown the
+// whole schema, and which tables it was shown ("" when it was).
+func narrowingNotice(record *narrowing.Record) string {
+	if record == nil {
+		return ""
+	}
+	return record.Notice()
 }
 
 // appendGridResult builds a grid.Model for query (via the existing
@@ -632,6 +661,9 @@ func (u *ChatUI) loadSession(session ChatSession) {
 	u.snapshot = session
 	u.syncChips()
 	u.shell.ClearTranscript()
+	for _, line := range u.sessionNotices {
+		u.shell.AppendSystem(line)
+	}
 	u.gridsByRecordSetID = map[string]*gridState{}
 	u.joinBlocksByRecordSetID = map[string]*JoinBlock{}
 	u.transcriptEntryKinds = map[string]string{}
@@ -652,6 +684,15 @@ func (u *ChatUI) loadSession(session ChatSession) {
 		}
 	}
 	hiddenRecords, hiddenHTTP := hiddenRefreshVersions(session, versionsToKeep)
+	// The narrowing notice of a turn follows that turn's messages, as it does live.
+	pendingNotice := ""
+	flushNotice := func() {
+		if pendingNotice != "" {
+			u.shell.AppendAssistant(pendingNotice)
+			pendingNotice = ""
+		}
+	}
+	defer flushNotice()
 	for _, message := range session.Messages {
 		if message.Kind == "grid" {
 			record := session.RecordSets[message.RecordSetID]
@@ -692,6 +733,10 @@ func (u *ChatUI) loadSession(session ChatSession) {
 		}
 		switch {
 		case message.Role == "You":
+			flushNotice()
+			if stored, ok := session.NarrowingFor(message.ID); ok {
+				pendingNotice = stored.Record.Notice()
+			}
 			u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(text))
 		case response != nil:
 			// httpDocumentBlock (checklist item #36/#37) ports ui.go's

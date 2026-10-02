@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"iter"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/dal-go/dalgo/dtql"
+	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/ai/agent"
@@ -26,7 +28,11 @@ const (
 	maxModelCallsPerTurn = 3  // agent.Loop.MaxSteps: hard fatal cap on model calls in one turn.
 	maxToolCallsPerTurn  = 2  // per-tool friendly cap on run_dtql attempts (returns a tool error, doesn't abort).
 	maxAgentToolCalls    = 12 // agent.Loop.MaxToolCalls: hard fatal cap across every tool in one turn.
-	turnTimeout          = 90 * time.Second
+	// maxDescribeCallsPerTurn bounds describe_relation: each call is another model
+	// round trip that re-sends the whole request, so reading omitted tables must stay
+	// the exception. A narrowed turn is given that many extra model calls.
+	maxDescribeCallsPerTurn = 2
+	turnTimeout             = 90 * time.Second
 )
 
 // DTQLExecutor is the existing DataTug query boundary used by Chat.
@@ -70,6 +76,10 @@ type Turn struct {
 	Queries    []QueryResult
 	Actions    []WorkspaceActionResult
 	Usage      *TokenUsage
+	// Narrowing is the table-narrowing decision made before the model was asked,
+	// nil when this conversation does not narrow. It is provenance, kept even when
+	// the turn failed.
+	Narrowing *narrowing.Record
 }
 
 // TokenUsage is the usage reported by the model provider for a turn.
@@ -232,6 +242,7 @@ const (
 	toolWorkspaceAction    = "workspace_action"
 	toolFindBookmarks      = "find_bookmarks"
 	toolApplyJoinCandidate = "apply_join_candidate"
+	toolDescribeRelation   = "describe_relation"
 )
 
 // AIConversation uses an ephemeral aichat agent.Loop for each turn. DataTug's
@@ -245,6 +256,11 @@ type AIConversation struct {
 	sources               map[string]string
 	tools                 []ai.Tool
 	reasoning             string
+	// narrower, when set, narrows the schema context to the tables a decision
+	// selects before each turn's model is asked; instructionFor rebuilds the
+	// system instruction around that narrowed context.
+	narrower       TableNarrower
+	instructionFor func(schemaContext string) string
 
 	turnMu      sync.Mutex
 	mu          sync.Mutex
@@ -253,6 +269,7 @@ type AIConversation struct {
 	toolCalls   int
 	actionCalls int
 	joinApplied bool
+	describes   int
 
 	lastStreamTurn Turn
 
@@ -271,6 +288,31 @@ type conversationConfig struct {
 	reasoning             string
 	browserInterpretation bool
 	sources               map[string]string
+	narrower              TableNarrower
+}
+
+// TableNarrower decides, for one user prompt, which tables' definitions the
+// model is shown. It never fails: any problem is a fallback to the full schema,
+// recorded in the returned Outcome (see package narrowing).
+type TableNarrower interface {
+	Narrow(ctx context.Context, prompt string) narrowing.Outcome
+	// Describe returns one table's definition from the local schema, so that a
+	// model that was not shown a table can read it (describe_relation).
+	Describe(name string) (string, bool)
+}
+
+// WithTableNarrowing makes the conversation decide, before each turn's model
+// call, which tables the model needs to see, and pass only those definitions as
+// schema context. When the decision does not narrow (disabled, uncertain, timed
+// out, stopped) the model gets the full schema, exactly as without this option.
+func WithTableNarrowing(narrower TableNarrower) Option {
+	return func(config *conversationConfig) error {
+		if narrower == nil {
+			return errors.New("chat: table narrower is required")
+		}
+		config.narrower = narrower
+		return nil
+	}
 }
 
 // Option configures the constrained aichat conversation.
@@ -390,10 +432,14 @@ func NewAIConversation(provider ai.LLMProvider, executor DTQLExecutor, sourceURL
 		browserInterpretation: config.browserInterpretation,
 		sources:               config.sources,
 		reasoning:             config.reasoning,
+		narrower:              config.narrower,
+		instructionFor:        buildInstruction,
 	}
-	c.instruction = buildInstruction(schemaContext)
 	if config.browserInterpretation {
-		c.instruction = buildBrowserInstruction(schemaContext)
+		c.instructionFor = buildBrowserInstruction
+	}
+	c.instruction = c.instructionFor(schemaContext)
+	if config.browserInterpretation {
 		c.tools = []ai.Tool{c.dtqlTool()}
 	} else {
 		c.tools = []ai.Tool{c.dtqlTool(), c.workspaceTool(), c.bookmarkTool(), c.joinTool()}
@@ -422,6 +468,26 @@ func (c *AIConversation) bookmarkTool() ai.Tool {
 		Name:        toolFindBookmarks,
 		Description: "Find project bookmarks by case-insensitive title text and/or tags (all tags required). Returns opaque IDs, safe source IDs and result shape; never row values or bookmark titles/tags.",
 		Schema:      argsSchema(bookmarkSearchArgs{}),
+	}
+}
+
+type describeRelationArgs struct {
+	Name string `json:"name" jsonschema:"Exact name of an omitted relation, as listed in the schema note"`
+}
+
+type describeRelationResponse struct {
+	OK         bool   `json:"ok"`
+	Definition string `json:"definition,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+// describeTool is offered only on a turn whose schema was narrowed, so a turn
+// that was not narrowed sends exactly the request it always did.
+func (c *AIConversation) describeTool() ai.Tool {
+	return ai.Tool{
+		Name:        toolDescribeRelation,
+		Description: "Read the definition (columns) of a relation that the schema note lists as omitted. Read-only; does not query the database.",
+		Schema:      argsSchema(describeRelationArgs{}),
 	}
 }
 
@@ -459,6 +525,26 @@ func (c *AIConversation) handlers() map[string]agent.Handler {
 			}
 			return jsonResult(call.ID, resp), nil
 		},
+	}
+	handlers[toolDescribeRelation] = func(_ context.Context, call ai.ToolCall) (ai.ToolResult, error) {
+		var args describeRelationArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return errorResult(call.ID, "invalid describe_relation arguments: "+err.Error()), nil
+		}
+		c.mu.Lock()
+		c.describes++
+		overLimit := c.describes > maxDescribeCallsPerTurn
+		c.mu.Unlock()
+		if overLimit {
+			// A final refusal, not a failure: the turn goes on with what the model has.
+			return jsonResult(call.ID, describeRelationResponse{Error: fmt.Sprintf("Limit of %d describe_relation calls reached for this turn. Answer with the relations you have, or tell the user which relation you could not read.", maxDescribeCallsPerTurn)}), nil
+		}
+		if c.narrower != nil {
+			if definition, ok := c.narrower.Describe(args.Name); ok {
+				return jsonResult(call.ID, describeRelationResponse{OK: true, Definition: definition}), nil
+			}
+		}
+		return jsonResult(call.ID, describeRelationResponse{Error: "No such relation. Use an exact name from the schema note."}), nil
 	}
 	if c.browserInterpretation {
 		return handlers
@@ -745,6 +831,7 @@ func (c *AIConversation) resetTurn() {
 	c.toolCalls = 0
 	c.actionCalls = 0
 	c.joinApplied = false
+	c.describes = 0
 }
 
 func (c *AIConversation) capture(ctx context.Context, result QueryResult) QueryResult {
@@ -809,6 +896,26 @@ func (c *AIConversation) takeActions() []WorkspaceActionResult {
 }
 
 func (c *AIConversation) buildRequest(ctx context.Context, prompt, priorContext string) ai.ChatRequest {
+	return c.buildRequestWith(ctx, c.instruction, c.tools, prompt, priorContext)
+}
+
+// narrowTurn asks the narrower which tables this turn's model needs. It returns
+// the system instruction and tools to use (the narrowed instruction plus the
+// describe_relation tool, or the conversation's own when nothing was narrowed,
+// which is exactly the request without narrowing), and the decision's record
+// (nil without a narrower).
+func (c *AIConversation) narrowTurn(ctx context.Context, prompt string) (string, []ai.Tool, *narrowing.Record) {
+	if c.narrower == nil {
+		return c.instruction, c.tools, nil
+	}
+	outcome := c.narrower.Narrow(ctx, prompt)
+	if outcome.Context == "" {
+		return c.instruction, c.tools, &outcome.Record
+	}
+	return c.instructionFor(outcome.Context), append(slices.Clone(c.tools), c.describeTool()), &outcome.Record
+}
+
+func (c *AIConversation) buildRequestWith(ctx context.Context, system string, tools []ai.Tool, prompt, priorContext string) ai.ChatRequest {
 	var contextBlocks []ai.ContextBlock
 	if priorContext != "" {
 		contextBlocks = []ai.ContextBlock{{
@@ -817,17 +924,39 @@ func (c *AIConversation) buildRequest(ctx context.Context, prompt, priorContext 
 		}}
 	}
 	return ai.ChatRequest{
-		System:        c.instruction,
+		System:        system,
 		Context:       contextBlocks,
 		Messages:      []ai.Message{{Role: ai.RoleUser, Text: prompt}},
-		Tools:         c.tools,
+		Tools:         tools,
 		Reasoning:     c.reasoning,
 		ClientContext: clientContextFrom(ctx),
 	}
 }
 
-func (c *AIConversation) newLoop() *agent.Loop {
+// describeLimiter stops offering describe_relation once the turn has used its
+// calls, so the model has to answer with what it has instead of asking again until
+// the turn runs out of model calls.
+type describeLimiter struct {
+	ai.LLMProvider
+	conversation *AIConversation
+}
+
+func (l describeLimiter) Stream(ctx context.Context, req ai.ChatRequest) iter.Seq2[ai.Event, error] {
+	l.conversation.mu.Lock()
+	spent := l.conversation.describes >= maxDescribeCallsPerTurn
+	l.conversation.mu.Unlock()
+	if spent {
+		req.Tools = slices.DeleteFunc(slices.Clone(req.Tools), func(tool ai.Tool) bool { return tool.Name == toolDescribeRelation })
+	}
+	return l.LLMProvider.Stream(ctx, req)
+}
+
+func (c *AIConversation) newLoop(narrowed bool) *agent.Loop {
 	maxSteps := maxModelCallsPerTurn
+	if narrowed {
+		// Extra model calls for reading omitted relations' definitions.
+		maxSteps += maxDescribeCallsPerTurn
+	}
 	maxToolCalls := maxAgentToolCalls
 	if c.browserInterpretation {
 		// Interpret allows one correction: the model's first run_dtql
@@ -845,12 +974,16 @@ func (c *AIConversation) newLoop() *agent.Loop {
 		maxSteps = 3
 		maxToolCalls = 2
 	}
-	return &agent.Loop{
+	loop := &agent.Loop{
 		Provider:     c.provider,
 		Handlers:     c.handlers(),
 		MaxSteps:     maxSteps,
 		MaxToolCalls: maxToolCalls,
 	}
+	if narrowed {
+		loop.Provider = describeLimiter{LLMProvider: c.provider, conversation: c}
+	}
+	return loop
 }
 
 // Ask runs one chat turn and returns model text separately from
@@ -881,7 +1014,7 @@ func (c *AIConversation) AskWithContext(ctx context.Context, prompt, priorContex
 		// Mirror the pre-dedup contract exactly: a fatal error only fails
 		// the call when it left nothing usable behind; otherwise the
 		// partial Turn StreamAskWithContext already assembled is the result.
-		return Turn{}, fmt.Errorf("chat: agent turn: %w", streamErr)
+		return Turn{Narrowing: turn.Narrowing}, fmt.Errorf("chat: agent turn: %w", streamErr)
 	}
 	return turn, nil
 }
@@ -919,7 +1052,10 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 		turnCtx, cancel := context.WithTimeout(ctx, turnTimeout)
 		defer cancel()
 
-		loop := c.newLoop()
+		// The narrowing decision runs before the model is asked, so the model
+		// is only ever shown the selected tables' definitions.
+		system, tools, narrowed := c.narrowTurn(turnCtx, prompt)
+		loop := c.newLoop(narrowed != nil && narrowed.Narrowed)
 
 		var text strings.Builder
 		var partial, usage *TokenUsage
@@ -933,12 +1069,12 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 			if len(queries) > 0 || len(actions) > 0 {
 				turnText = ""
 			}
-			c.setLastStreamTurn(Turn{Text: turnText, Queries: queries, Actions: actions, Usage: usage})
+			c.setLastStreamTurn(Turn{Text: turnText, Queries: queries, Actions: actions, Usage: usage, Narrowing: narrowed})
 		}
 
 		requestPrompt, requestContext := prompt, priorContext
 		for attempt := 0; attempt < 2; attempt++ {
-			req := c.buildRequest(turnCtx, requestPrompt, requestContext)
+			req := c.buildRequestWith(turnCtx, system, tools, requestPrompt, requestContext)
 			for event, err := range loop.Run(turnCtx, req) {
 				if err != nil {
 					finish()

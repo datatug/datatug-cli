@@ -12,6 +12,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -33,6 +34,7 @@ type chatOptions struct {
 	apiKey          string
 	insecureStorage bool
 	as              string
+	cloudDecision   string
 	roles           []string
 	groups          []string
 }
@@ -42,7 +44,35 @@ func chatCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "chat",
 		Short: "Ask questions about project data using DTQL",
-		Args:  cobra.NoArgs,
+		Long: `Ask questions about project data using DTQL.
+
+Table narrowing: before each AI turn the chat can decide which of the project's
+tables the model needs and show it only those definitions. The model is told
+which tables were left out and can read up to two of them per turn with
+describe_relation, and the chat prints one line naming the tables it was given.
+When it cannot decide, or would save little, the full schema is sent as before.
+Narrowing is a trade-off: it saves schema bytes (about 40% of the schema context
+on the 11-table Chinook sample, more on larger schemas) but a table the model is
+not shown can cost a describe_relation round trip.
+
+  Project rules (always on, local): <project>/ai/table-rules.yaml maps an exact
+  question to the tables it needs; a match never calls out.
+
+  Cloud decider (OFF until YOU turn it on): with --model cloud it asks the
+  DataTug AI cloud, which relays to TypeSafe AI's Jev decision model. That sends
+  your question, up to three earlier questions of the session, and every table
+  name with its column names (no types, no rows) to the DataTug cloud and to
+  TypeSafe AI. Only you can turn it on:
+    DATATUG_AI_DECISION_PROVIDER=auto     for this session (=disabled always wins)
+    datatug chat --cloud-decision allow   for this project, remembered in your
+                                          user config directory (refuse|forget)
+  A project's "decision: auto" in ai/table-rules.yaml only REQUESTS it: it is
+  ignored, with a notice, until you allow it. Whenever it is on, the chat says so
+  at start: as a system line at the top of the chat (the terminal UI hides what
+  is printed before it starts), and on stderr for non-interactive runs. After a failure it is not asked again for five minutes;
+  DATATUG_AI_DECISION_TIMEOUT sets how long it may take per turn (default 1.5s).
+  Schemas above 255 tables are not sent to it.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := applyLastChatOptions(cmd, &options); err != nil {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: load previous chat options: %v\n", err)
@@ -59,6 +89,7 @@ func chatCommand() *cobra.Command {
 	flags.StringVar(&options.baseURL, "base-url", "", "model API base URL (for cloud, the shared API /v0/ URL)")
 	flags.BoolVar(&options.insecureStorage, "insecure-storage", false, "use the plaintext DataTug auth session created with auth login --insecure-storage (cloud only)")
 	flags.StringVar(&options.thinking, "thinking", "low", "Model reasoning effort: low, medium, or high (provider support varies)")
+	flags.StringVar(&options.cloudDecision, "cloud-decision", "", "Record your choice about the cloud decision engine for this project: allow, refuse or forget (it is off until you allow it)")
 	flags.StringVar(&options.as, "as", "", "Principal ID used for access policies")
 	flags.StringSliceVar(&options.roles, "role", nil, "Principal role (repeatable)")
 	flags.StringSliceVar(&options.groups, "group", nil, "Principal group (repeatable)")
@@ -85,7 +116,8 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 			return err
 		}
 		options.project = nextProject
-		options.database = "" // resolve the new project's source independently
+		options.database = ""      // resolve the new project's source independently
+		options.cloudDecision = "" // a consent choice is for the project it was given for
 	}
 }
 
@@ -102,6 +134,7 @@ var (
 	setSavedQueryService = func(ui *chat.ChatUI, service chat.SavedQueryService) error {
 		return ui.SetSavedQueryService(service)
 	}
+	setSessionNotices = func(ui *chat.ChatUI, lines []string) { ui.SetSessionNotices(lines) }
 )
 
 func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
@@ -112,6 +145,17 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	projectDir, projectStore, err := resolveQueryProject(options.project)
 	if err != nil {
 		return "", Exit(err.Error()+"\nChoose an existing project: datatug projects, then datatug chat --project <ID-or-directory>\nStart a new project: datatug init <ID> <directory>", exitCodeUsage)
+	}
+
+	if options.cloudDecision != "" {
+		path, consentErr := setCloudDecisionConsent(projectDir, options.cloudDecision)
+		if consentErr != nil {
+			return "", Exit(consentErr.Error(), exitCodeUsage)
+		}
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "cloud decision engine for this project: %s (stored in %s)\n", options.cloudDecision, path)
+		if advice := consentAdvice(projectDir, options.cloudDecision); advice != "" {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "note: %s\n", advice)
+		}
 	}
 
 	database := options.database
@@ -137,8 +181,8 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	schemaContext := ""
 	healthyRelations := 0
+	var healthy api.CatalogSchema
 	if storedSchema != nil {
-		var healthy api.CatalogSchema
 		for _, relation := range storedSchema.Relations {
 			if relation.Issue == "" {
 				healthy.Relations = append(healthy.Relations, relation)
@@ -162,6 +206,8 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	executor := secureread.NewExecutor(session)
 	var conversation chat.ContextualConversation
+	var foreignKeys []narrowing.Link // set once the source's foreign keys are read
+	var sessionNotices []string      // shown inside the chat as well as on stderr
 	var cloudClient *cloud.Client
 	var cloudContext ai.ClientContext
 	if options.model == "cloud" {
@@ -183,7 +229,29 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 				return "", Exit(fmt.Sprintf("configure chat model %q: %v", options.model, providerErr), exitCodeUsage)
 			}
 		}
-		conversation, err = chat.NewAIConversation(provider, executor, sourceURL, schemaContext, chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs))
+		conversationOptions := []chat.Option{chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs)}
+		// Narrowing applies to the stored-schema context only: the degraded
+		// multi-source context is left exactly as it is.
+		if healthyRelations > 0 && sourceErr == nil {
+			choice, consentPath, consentWarning := readDecisionConsent(projectDir)
+			if consentWarning != "" {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", consentWarning)
+				sessionNotices = append(sessionNotices, "Warning: table narrowing: "+consentWarning)
+			}
+			narrower, warnings, notices := chatTableNarrower(projectDir, cloudClient, healthy.Relations, func() []narrowing.Link { return foreignKeys }, consentState{choice, consentPath})
+			for _, notice := range notices {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "table narrowing: %s\n", notice)
+				sessionNotices = append(sessionNotices, "Table narrowing: "+notice)
+			}
+			for _, warning := range warnings {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", warning)
+				sessionNotices = append(sessionNotices, "Warning: table narrowing: "+warning)
+			}
+			if narrower != nil {
+				conversationOptions = append(conversationOptions, chat.WithTableNarrowing(narrower))
+			}
+		}
+		conversation, err = chat.NewAIConversation(provider, executor, sourceURL, schemaContext, conversationOptions...)
 		if err != nil {
 			return "", Exit(err.Error(), exitCodeUsage)
 		}
@@ -209,6 +277,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if joinErr != nil {
 		setCatalogSourceIssue(&projectCatalog, database, "JOIN metadata unavailable: "+joinErr.Error())
 	}
+	if joinApplication != nil {
+		foreignKeys = foreignKeyLinks(joinApplication.Snapshot.Keys)
+	}
 	sessions, err := newSessionChat(ctx, store, conversation, sourceURL, projectCatalog)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("restore chat session: %v", err), exitCodeUsage)
@@ -224,6 +295,11 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	ui, err := newSessionChatUI(ctx, sessions, options.model)
 	if err != nil {
 		return "", Exit(fmt.Sprintf("render chat session: %v", err), exitCodeUsage)
+	}
+	if len(sessionNotices) > 0 {
+		// The terminal UI uses the alternate screen: what was printed to stderr
+		// above is not visible until the user quits, so show it in the chat too.
+		setSessionNotices(ui, sessionNotices)
 	}
 	if err := setSavedQueryService(ui, chatSavedQueries{projectDir: projectDir, store: projectStore, executor: executor, env: options.env, projectID: projectCatalog.ID, session: session}); err != nil {
 		return "", Exit(fmt.Sprintf("list saved project queries: %v", err), exitCodeUsage)

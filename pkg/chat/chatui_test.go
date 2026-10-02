@@ -529,3 +529,30 @@ func TestAutoHintRejectsEmptyKey(t *testing.T) {
 		t.Fatal("autoHint(\"no-space-at-all\") = ok, want false (no space to cut on)")
 	}
 }
+
+// Session notices are system lines at the top of the transcript: shown, kept
+// across a rebuilt transcript, and never a stored message.
+func TestSessionNoticesAreSystemLinesNotMessages(t *testing.T) {
+	u, sessions := newTestChatUI(t, nil)
+	u.SetSessionNotices([]string{"Table narrowing: the cloud decision engine is ON", "Warning: table narrowing: bad rule"})
+	view := flattenView(u.shell.View().Content)
+	if !strings.Contains(view, "Table narrowing: the cloud decision engine is ON") || !strings.Contains(view, "Warning: table narrowing: bad rule") {
+		t.Fatalf("notices not shown: %s", view)
+	}
+	if strings.Index(view, "engine is ON") > strings.Index(view, "bad rule") {
+		t.Fatalf("notices out of order: %s", view)
+	}
+	snapshot, err := sessions.Snapshot(context.Background())
+	if err != nil || len(snapshot.Messages) != 0 {
+		t.Fatalf("a notice became a stored message: %+v, %v", snapshot.Messages, err)
+	}
+	// A rebuilt transcript still starts with them, and a later turn follows them.
+	u.loadSession(snapshot)
+	if !strings.Contains(flattenView(u.shell.View().Content), "engine is ON") {
+		t.Fatalf("notices lost on reload")
+	}
+	u.SetSessionNotices(nil)
+	if strings.Contains(flattenView(u.shell.View().Content), "engine is ON") {
+		t.Fatalf("cleared notices still shown")
+	}
+}

@@ -81,21 +81,24 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 	if err != nil {
 		return resolvedSource{}, err
 	}
+	// shown is the source in a form safe for an error text: a password inside
+	// a source URL must never reach an error, a log or a client.
+	shown := ref.String()
 	db, err := ref.Open(ctx)
 	if err != nil {
 		if errors.Is(err, dbcopy.ErrSourceFileMissing) {
 			return resolvedSource{}, newSourceUnavailable(err.Error())
 		}
-		return resolvedSource{}, fmt.Errorf("open %s: %w", sourceURL, err)
+		return resolvedSource{}, fmt.Errorf("open %s: %w", shown, dbcopy.RedactError(err))
 	}
 	reader, ok := dalAsSchemaReader(db)
 	if !ok {
-		return resolvedSource{}, fmt.Errorf("%s does not support schema introspection", sourceURL)
+		return resolvedSource{}, fmt.Errorf("%s does not support schema introspection", shown)
 	}
 	collRef := dal.NewRootCollectionRef(collection, "")
 	def, err := reader.DescribeCollection(ctx, &collRef)
 	if err != nil {
-		return resolvedSource{}, fmt.Errorf("describe %s.%s: %w", sourceURL, collection, err)
+		return resolvedSource{}, fmt.Errorf("describe %s.%s: %w", shown, collection, dbcopy.RedactError(err))
 	}
 	columns := make([]semantic.Column, len(def.Fields))
 	for i, f := range def.Fields {
@@ -112,7 +115,7 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 	var referencedBy datatug.ReferencedBys
 	referrers, err := reader.ListReferrers(ctx, &collRef)
 	if err != nil && !errors.Is(err, dal.ErrNotSupported) {
-		return resolvedSource{}, fmt.Errorf("list referrers for %s.%s: %w", sourceURL, collection, err)
+		return resolvedSource{}, fmt.Errorf("list referrers for %s.%s: %w", shown, collection, dbcopy.RedactError(err))
 	}
 	for _, ref := range referrers {
 		cols := make([]string, len(ref.Fields))

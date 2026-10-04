@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
@@ -91,7 +92,7 @@ func writeContractError(w http.ResponseWriter, r *http.Request, err error) {
 		ce = contractErrAccessDenied(err.Error())
 	default:
 		ce = &contractError{Code: codeInternal, Message: unclassifiedErrorMessage, RequestID: newRequestID()}
-		log.Printf("%s: request %s: answered 500 INTERNAL: %v", r.URL.Path, ce.RequestID, err)
+		log.Printf("%s: request %s: answered 500 INTERNAL: %v", r.URL.Path, ce.RequestID, dbcopy.RedactError(err))
 	}
 	status := httpStatusFor(ce.Code)
 	if ce.Code == codeInternal {

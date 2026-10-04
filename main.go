@@ -13,6 +13,7 @@ import (
 
 	"charm.land/fang/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	_ "github.com/denisenkom/go-mssqldb"
 	"github.com/posthog/posthog-go"
@@ -60,7 +61,9 @@ func main() {
 		if r != nil {
 			// The terminal is already restored: datatugui.Run quits the Bubble
 			// Tea program, which restores it, before it raises a panic again.
-			rText := fmt.Sprintf("%v", r)
+			// The panic text goes to the log, to telemetry and to stderr, so a
+			// source URL it quotes must not carry its password to any of them.
+			rText := dbcopy.RedactText(fmt.Sprintf("%v", r))
 			ctx := context.Background()
 			logus.Errorf(ctx, "panic: %s", rText)
 			timestamp := time.Now()
@@ -71,7 +74,7 @@ func main() {
 				"panic",
 				rText,
 			))
-			_, _ = fmt.Fprintln(os.Stderr, "panic:", r)
+			_, _ = fmt.Fprintln(os.Stderr, "panic:", rText)
 			debug.PrintStack()
 		}
 		if !skipTelemetry {
@@ -147,7 +150,11 @@ var getCommand = func() (*cobra.Command, []fang.Option) {
 
 func preserveErrorTextCase(w io.Writer, styles fang.Styles, err error) {
 	styles.ErrorText = styles.ErrorText.UnsetTransform()
-	fang.DefaultErrorHandler(w, styles, err)
+	// Every error a command returns is printed here: redact it once, so a
+	// password inside a source URL never reaches the terminal whichever
+	// command built the error.
+	redacted := errors.New(dbcopy.RedactText(err.Error()))
+	fang.DefaultErrorHandler(w, styles, redacted)
 }
 
 // isVersionJSONInvocation reports whether args would dispatch root to the

@@ -17,6 +17,7 @@ import (
 	"github.com/dal-go/dalgo2http"
 	"github.com/tuigoff/tuigoff/pkg/grid"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -282,12 +283,17 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 	}
 	// Keep the persisted scope identity byte-for-byte compatible with Phase 3.
 	// ProjectID is an additional bookmark boundary, not a session-scope change.
+	//
+	// The sources enter the identity redacted, so a password inside a source
+	// URL never feeds the persisted scope hash. A source with nothing to hide
+	// is unchanged, which keeps every existing scope identity.
+	sources := redactSources(scope.Sources)
 	encoded, _ := json.Marshal(struct {
 		Environment       string
 		Database          string
 		AccessFingerprint string
 		Sources           map[string]string
-	}{scope.Environment, scope.Database, scope.AccessFingerprint, scope.Sources})
+	}{scope.Environment, scope.Database, scope.AccessFingerprint, sources})
 	sum := sha256.Sum256(encoded)
 	newScope := hex.EncodeToString(sum[:])
 	legacy, _ := json.Marshal(struct {
@@ -296,7 +302,7 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 		AccessFingerprint string
 	}{scope.Environment, scope.Database, scope.AccessFingerprint})
 	legacySum := sha256.Sum256(legacy)
-	if err := migrateLegacyChatScopesFn(db, hex.EncodeToString(legacySum[:]), newScope, scope.Sources[scope.Database]); err != nil {
+	if err := migrateLegacyChatScopesFn(db, hex.EncodeToString(legacySum[:]), newScope, sources[scope.Database]); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -367,6 +373,16 @@ func migrateLegacyChatScopes(db *sql.DB, oldScope, newScope, selectedURL string)
 		}
 	}
 	return tx.Commit()
+}
+
+// redactSources returns a copy of sources with every URL passed through
+// dbcopy.RedactSourceURL.
+func redactSources(sources map[string]string) map[string]string {
+	redacted := make(map[string]string, len(sources))
+	for id, source := range sources {
+		redacted[id] = dbcopy.RedactSourceURL(source)
+	}
+	return redacted
 }
 
 func initChatSchema(db *sql.DB) error {
@@ -1026,6 +1042,10 @@ func (s *SessionStore) checkOrigin(ctx context.Context, tx *sql.Tx, sessionID, o
 }
 
 func (s *SessionStore) appendQueryTx(ctx context.Context, tx *sql.Tx, sessionID, originID, source string, query *QueryResult, now time.Time) error {
+	// The chat database is a file on disk: it never holds a password from a
+	// source URL. A source named "env:NAME" is stored as is, because it
+	// carries the variable's name and not its value.
+	source = dbcopy.RedactSourceURL(source)
 	query.QueryID = uuid.NewString()
 	parameters := query.Parameters
 	if parameters == nil {

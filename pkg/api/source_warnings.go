@@ -50,7 +50,7 @@ func warnMissingSourceFilesForEnvironment(ctx context.Context, projStore datatug
 			continue
 		}
 		if err := dbcopy.CheckSourceFile(ref.Path); err != nil {
-			log.Printf("serve: WARNING: project %q environment %q source %q: %v", projectID, env.ID, source.ID, err)
+			log.Printf("serve: WARNING: project %q environment %q source %q: %v", projectID, env.ID, source.ID, dbcopy.RedactError(err))
 		}
 	}
 }

@@ -1,6 +1,10 @@
 package commands
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
+)
 
 var (
 	//ErrUnknownProjectName signals an unknown project was requested/referred
@@ -30,6 +34,11 @@ func (e *exitError) ExitCode() int { return e.code }
 // Exit returns an error that carries a specific process exit code. Returning
 // it from a command's RunE propagates up to main, which exits with code —
 // the same contract github.com/urfave/cli/v3's cli.Exit provided.
+//
+// The message is passed through dbcopy.RedactText first. Every command error
+// is built here, and many of them quote a source URL or a driver error that
+// does, so this one call keeps a password out of stdout, stderr and the exit
+// text whatever the caller formatted.
 func Exit(message string, code int) error {
-	return &exitError{msg: message, code: code}
+	return &exitError{msg: dbcopy.RedactText(message), code: code}
 }

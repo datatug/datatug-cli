@@ -70,10 +70,10 @@ func TestReadPostgresDescriptor(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	good := filepath.Join(dir, "good.json")
-	assert.NoError(t, os.WriteFile(good, []byte(`{"dsnEnv":"SHOP_PG_URL"}`), 0o600))
+	assert.NoError(t, os.WriteFile(good, []byte(`{"dsnEnv":"DATATUG_SHOP_PG_URL"}`), 0o600))
 	descriptor, err := ReadPostgresDescriptor(good)
 	assert.NoError(t, err)
-	assert.Equal(t, "SHOP_PG_URL", descriptor.DSNEnv)
+	assert.Equal(t, "DATATUG_SHOP_PG_URL", descriptor.DSNEnv)
 
 	bad := filepath.Join(dir, "bad.json")
 	assert.NoError(t, os.WriteFile(bad, []byte(`{"dsnEnv":"SHOP_PG_URL","password":"s3cret"}`), 0o600))

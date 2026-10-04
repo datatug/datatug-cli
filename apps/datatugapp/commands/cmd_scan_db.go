@@ -6,8 +6,10 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/spf13/cobra"
@@ -27,6 +29,7 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	v.DbModel, _ = flags.GetString("dbmodel")
 	v.Environment, _ = flags.GetString("env")
 	v.Path, _ = flags.GetString("path")
+	v.DSNEnv, _ = flags.GetString("dsn-env")
 
 	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
 		return err
@@ -51,6 +54,14 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	// The descriptor goes down before the project that points at it: an orphan
+	// descriptor is harmless, a project that names a missing one is not.
+	if descriptor, ok := connParams.(descriptorWriter); ok {
+		if err = descriptor.WriteDescriptor(v.ProjectDir); err != nil {
+			return err
+		}
+	}
+
 	log.Println("Saving project", datatugProject.ID, "...")
 	saveStore, _ := filestore.NewSingleProjectStore(v.ProjectDir, datatugProject.ID)
 	if err = saveStore.GetProjectStore(datatugProject.ID).SaveProject(context.Background(), datatugProject); err != nil {
@@ -59,6 +70,17 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 
 	return nil
 }
+
+// descriptorWriter is implemented by connection parameters that need a file
+// beside the project: PostgreSQL's connection descriptor.
+type descriptorWriter interface {
+	WriteDescriptor(projectDir string) error
+}
+
+// scanLookupEnv is the environment a PostgreSQL scan reads its connection URL
+// from, a seam so tests never touch the process environment. Always
+// os.LookupEnv in production.
+var scanLookupEnv = os.LookupEnv
 
 // scanUpdateDbSchema is a seam over api.UpdateDbSchema so tests can drive the
 // save step with a project the scanner itself does not produce (a project
@@ -73,6 +95,12 @@ var scanNewConnectionString = dbconnection.NewConnectionString
 
 // connectionParams builds DB connection parameters from the scan flags.
 func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
+	if v.Driver == api.DriverPostgres {
+		return v.postgresConnectionParams()
+	}
+	if v.DSNEnv != "" {
+		return nil, fmt.Errorf("--dsn-env applies only to -D %s", api.DriverPostgres)
+	}
 	if v.Driver == dbconnection.DriverSQLite3 {
 		if v.Path == "" {
 			return nil, fmt.Errorf("scanning a sqlite3 database requires --path to the database file")
@@ -97,6 +125,43 @@ func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
 	return connParams, nil
 }
 
+// postgresConnectionParams builds the parameters of a PostgreSQL scan. The only
+// way to connect is a connection URL held in an environment variable named by
+// --dsn-env: the URL carries the host, port, user and password together, so a
+// password is never on a command line (the process list and the shell history
+// would keep it) or in a project file, and each of those flags is refused
+// instead of being quietly ignored.
+func (v *scanDbCommand) postgresConnectionParams() (dbconnection.Params, error) {
+	var refused []string
+	for _, flag := range []struct {
+		name  string
+		given bool
+	}{{"--server", v.Host != ""}, {"--port", v.Port != 0}, {"--user", v.User != ""}, {"--password", v.Password != ""}} {
+		if flag.given {
+			refused = append(refused, flag.name)
+		}
+	}
+	if len(refused) > 0 {
+		return nil, fmt.Errorf("%s not accepted for a postgres scan: the host, port, user and password come from the connection URL in an environment variable. Put the URL there and pass --dsn-env NAME, so a password never appears on a command line or in a project file", strings.Join(refused, ", "))
+	}
+	if v.DSNEnv == "" {
+		return nil, fmt.Errorf("scanning a postgres database requires --dsn-env NAME, the environment variable that holds the connection URL (postgres://user:password@host/database)")
+	}
+	if !dbcopy.ValidEnvName(v.DSNEnv) {
+		return nil, fmt.Errorf("--dsn-env must be an environment variable name: upper-case letters, digits and underscores, starting with a letter")
+	}
+	// The project will name this variable in its descriptor, and a project is
+	// only allowed to name some variables: say so now, not when it is opened.
+	if err := dbcopy.CheckDescriptorEnvName(v.DSNEnv, scanLookupEnv); err != nil {
+		return nil, fmt.Errorf("--dsn-env: %w", err)
+	}
+	params, err := api.NewPostgresScanParams(scanLookupEnv, v.DSNEnv, v.Environment, v.Database)
+	if err != nil {
+		return nil, err // not params: a nil *PostgresScanParams would be a non-nil Params
+	}
+	return params, nil
+}
+
 func scanCommandArgs() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "scan",
@@ -107,7 +172,7 @@ func scanCommandArgs() *cobra.Command {
 	flags := cmd.Flags()
 	flags.StringP("project", "p", "", "Registered project id/name to scan into")
 	flags.StringP("directory", "d", "", "Path to the project directory (alternative to --project)")
-	flags.StringP("driver", "D", "", "DB driver, e.g. sqlserver")
+	flags.StringP("driver", "D", "", "DB driver: sqlserver, sqlite3 or postgres")
 	flags.StringP("server", "s", "", "Network server / host name")
 	flags.Int("port", 0, "Server network port (default if omitted)")
 	flags.StringP("user", "U", "", "DB login user")
@@ -116,6 +181,7 @@ func scanCommandArgs() *cobra.Command {
 	flags.String("dbmodel", "", "ID of DB model (required for newly scanned databases)")
 	flags.String("env", "", "Environment the DB belongs to. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.")
 	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3)")
+	flags.String("dsn-env", "", "Environment variable that holds the PostgreSQL connection URL (required for -D postgres; the password stays in the variable and is never written to the project). The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
 	_ = cmd.MarkFlagRequired("db")
 	_ = cmd.MarkFlagRequired("env")
 	return cmd
@@ -133,4 +199,5 @@ type scanDbCommand struct {
 	DbModel     string
 	Environment string
 	Path        string
+	DSNEnv      string
 }

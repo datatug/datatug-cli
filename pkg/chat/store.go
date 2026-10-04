@@ -288,12 +288,15 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 	// URL never feeds the persisted scope hash. A source with nothing to hide
 	// is unchanged, which keeps every existing scope identity.
 	sources := redactSources(scope.Sources)
+	// An env:NAME source enters the identity with a hash of where the variable
+	// points now, so repointing it at another database is another scope. Any
+	// other source enters unchanged.
 	encoded, _ := json.Marshal(struct {
 		Environment       string
 		Database          string
 		AccessFingerprint string
 		Sources           map[string]string
-	}{scope.Environment, scope.Database, scope.AccessFingerprint, sources})
+	}{scope.Environment, scope.Database, scope.AccessFingerprint, scopeIdentitySources(sources)})
 	sum := sha256.Sum256(encoded)
 	newScope := hex.EncodeToString(sum[:])
 	legacy, _ := json.Marshal(struct {
@@ -373,6 +376,16 @@ func migrateLegacyChatScopes(db *sql.DB, oldScope, newScope, selectedURL string)
 		}
 	}
 	return tx.Commit()
+}
+
+// scopeIdentitySources returns a copy of sources with every source passed
+// through dbcopy.SourceScopeIdentity.
+func scopeIdentitySources(sources map[string]string) map[string]string {
+	identities := make(map[string]string, len(sources))
+	for id, source := range sources {
+		identities[id] = dbcopy.SourceScopeIdentity(source)
+	}
+	return identities
 }
 
 // redactSources returns a copy of sources with every URL passed through

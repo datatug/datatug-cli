@@ -261,6 +261,11 @@ func newProjectWithDatabase(environment string, dbServer datatug.ServerRef, dbCa
 }
 
 func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Params) (dbCatalog *datatug.DbCatalog, err error) {
+	if server.Driver == DriverPostgres {
+		// PostgreSQL is read through DALgo's schema reader, and opened from an
+		// environment variable: there is no connection string to give database/sql.
+		return scanPostgresCatalog(context.Background(), connectionParams)
+	}
 	var db *sql.DB
 
 	if db, err = sql.Open(server.Driver, connectionParams.ConnectionString()); err != nil {

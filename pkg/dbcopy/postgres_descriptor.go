@@ -8,8 +8,23 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strings"
+	"unicode"
 
 	"github.com/datatug/datatug-cli/pkg/openvaultdb"
+)
+
+const (
+	// DescriptorEnvPrefix is the name prefix a project descriptor's dsnEnv may
+	// always carry: a variable the operator named for DataTug.
+	DescriptorEnvPrefix = "DATATUG_"
+
+	// DescriptorEnvAllowList names the operator-set variable that lists, comma or
+	// space separated, the other variables a project descriptor may name. It
+	// follows the shape of the OpenVaultDB descriptor, whose token is bound to a
+	// destination the operator sets (pkg/openvaultdb/source.go): the project
+	// file proposes, the operator's own environment decides.
+	DescriptorEnvAllowList = "DATATUG_DSN_ENV_ALLOW"
 )
 
 // maxPostgresDescriptorBytes caps a descriptor file; a real one is a few dozen bytes.
@@ -33,8 +48,41 @@ func (d PostgresDescriptor) SourceURL() string {
 	return envPrefix + d.DSNEnv
 }
 
-// ReadPostgresDescriptor reads and strictly decodes the descriptor at path.
+// CheckDescriptorEnvName reports whether a project descriptor may name the
+// environment variable name. A project file is not trusted: a cloned project
+// could otherwise select any database whose URL the operator keeps in the
+// environment. So a descriptor may name only a variable whose name starts with
+// DATATUG_, or one the operator lists in DATATUG_DSN_ENV_ALLOW. name must
+// already match ValidEnvName, which keeps the error free to quote it.
+func CheckDescriptorEnvName(name string, lookupEnv func(string) (string, bool)) error {
+	if strings.HasPrefix(name, DescriptorEnvPrefix) {
+		return nil
+	}
+	if listed, found := lookupEnv(DescriptorEnvAllowList); found {
+		for _, allowed := range strings.FieldsFunc(listed, isAllowListSeparator) {
+			if allowed == name {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf(
+		"PostgreSQL connection descriptor names %s, which is not allowed: a project file may name only environment variables that start with %s or that the operator lists in %s",
+		name, DescriptorEnvPrefix, DescriptorEnvAllowList,
+	)
+}
+
+func isAllowListSeparator(r rune) bool { return r == ',' || unicode.IsSpace(r) }
+
+// ReadPostgresDescriptor reads and strictly decodes the descriptor at path, and
+// refuses a dsnEnv that CheckDescriptorEnvName does not allow in the process
+// environment.
 func ReadPostgresDescriptor(path string) (PostgresDescriptor, error) {
+	return readPostgresDescriptor(path, os.LookupEnv)
+}
+
+// readPostgresDescriptor is ReadPostgresDescriptor over an injected environment
+// lookup, so tests never touch the process environment.
+func readPostgresDescriptor(path string, lookupEnv func(string) (string, bool)) (PostgresDescriptor, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return PostgresDescriptor{}, fmt.Errorf("open PostgreSQL connection descriptor: %w", err)
@@ -47,7 +95,14 @@ func ReadPostgresDescriptor(path string) (PostgresDescriptor, error) {
 	if len(data) > maxPostgresDescriptorBytes {
 		return PostgresDescriptor{}, errors.New("invalid PostgreSQL connection descriptor size")
 	}
-	return DecodePostgresDescriptor(data)
+	descriptor, err := DecodePostgresDescriptor(data)
+	if err != nil {
+		return PostgresDescriptor{}, err
+	}
+	if err = CheckDescriptorEnvName(descriptor.DSNEnv, lookupEnv); err != nil {
+		return PostgresDescriptor{}, err
+	}
+	return descriptor, nil
 }
 
 // DecodePostgresDescriptor strictly decodes a descriptor: one JSON object, no

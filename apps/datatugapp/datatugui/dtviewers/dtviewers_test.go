@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo2sql"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -154,3 +155,21 @@ func TestCollectionContext(t *testing.T) {
 }
 
 func widgetsSelected(id string) tea.Msg { return widgets.ItemSelectedMsg{ID: id} }
+
+// TestNewSqlDBContext_SetsSQLiteStructuredQueryDialect proves the viewer opens
+// its database with the sqlite structured-query dialect, so every structured
+// read goes through the safe compiler rather than the legacy text emitter.
+func TestNewSqlDBContext_SetsSQLiteStructuredQueryDialect(t *testing.T) {
+	var got dalgo2sql.DbOptions
+	orig := newSQLDatabase
+	t.Cleanup(func() { newSQLDatabase = orig })
+	newSQLDatabase = func(db *sql.DB, schema dal.Schema, opts dalgo2sql.DbOptions) dal.DB {
+		got = opts
+		return orig(db, schema, opts)
+	}
+	c := NewSqlDBContext(Driver{ID: "x"}, "name", func(context.Context, string) (*sql.DB, error) { return &sql.DB{}, nil }, nil)
+	db, err := c.GetDB(context.Background())
+	require.NoError(t, err)
+	assert.NotNil(t, db)
+	assert.Equal(t, "sqlite", got.StructuredQueryDialect)
+}

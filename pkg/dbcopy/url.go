@@ -270,8 +270,9 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 }
 
 // OpenProtected is Open, except an "ingitdb" BackendRef is opened with
-// dalgo2ingitdb.WithStoredOnlyReads() and SQLite uses the validated,
-// parameter-bound structured-query dialect. Other schemes behave like Open.
+// dalgo2ingitdb.WithStoredOnlyReads(). SQLite uses the validated,
+// parameter-bound structured-query dialect on both paths. Other schemes
+// behave like Open.
 //
 // pkg/secureread.openSource uses this for policy-secured sessions; direct
 // `query run` uses it for SQLite structured queries. A policy-secured session
@@ -292,7 +293,7 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 // NOT layer under pkg/accesspolicies here — pkg/accesspolicies remains the
 // sole enforcement layer for every source this CLI opens.
 //
-// The sqlite scheme opts protected reads into dalgo2sql's
+// The sqlite scheme opts every read, protected or not, into dalgo2sql's
 // DbOptions.StructuredQueryDialect: "sqlite" (bounded, parameter-bound
 // structured-query compilation): dal-go/dalgo2sql#179 added FROM-source
 // alias support to compileStructuredSQL, which used to unconditionally
@@ -305,9 +306,10 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 // get the dialect's real guarantees: every dal.Constant value becomes a
 // genuine `?` placeholder + bound arg (not a quoted-string literal), and
 // unsupported shapes (such as joins and cursors) fail closed. GROUP BY and
-// HAVING are compiled by dalgo2sql's aggregation path. The plain
-// Open path (db copy / introspection) is unaffected — it never sets
-// StructuredQueryDialect, so it keeps using the legacy emitSQL rendering.
+// HAVING are compiled by dalgo2sql's aggregation path. The plain Open path
+// (db copy / introspection) sets the same dialect, so it never reaches the
+// legacy emitSQL renderer; only the ingitdb hardening differs between Open
+// and OpenProtected.
 func (r BackendRef) OpenProtected(ctx context.Context) (dal.DB, error) {
 	return r.open(ctx, false, true)
 }
@@ -335,13 +337,14 @@ func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected b
 		if err := CheckSourceFile(r.Path); err != nil {
 			return nil, err
 		}
-		var opts dalgo2sql.DbOptions
-		if protected {
-			// The validated dialect binds values and supports native
-			// aggregation. Caller-side policies, when enabled, remain a
-			// separate enforcement layer.
-			opts.StructuredQueryDialect = "sqlite"
-		}
+		// Every SQLite open, protected or not, compiles structured reads
+		// with the validated dialect: it binds values and supports native
+		// aggregation, and unlike the legacy text emitter it has no limit
+		// on non-ASCII identifiers or on tab, newline and backslash values
+		// (dalgo2sql SQL-01 makes the legacy emitter refuse those).
+		// Caller-side policies, when enabled, remain a separate
+		// enforcement layer.
+		opts := dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"}
 		db, err := newSQLiteDatabaseWithOptions(r.Path, dal.NewSchema(nil, nil), opts)
 		if err != nil {
 			return nil, fmt.Errorf("open sqlite %q: %w", r.Path, err)

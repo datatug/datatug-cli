@@ -89,7 +89,9 @@ func ResolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 			return s, nil
 		}
 	}
-	return ResolvedSource{}, fmt.Errorf("%w: unknown source %q in environment %q", ErrSourceUnavailable, source, environment)
+	// source is what a client sent: a client may send a whole source string where
+	// an ID belongs, so only a plain name is echoed.
+	return ResolvedSource{}, fmt.Errorf("%w: unknown source %q in environment %q", ErrSourceUnavailable, dbcopy.SourceIDDisplay(source), environment)
 }
 
 // ListSources enumerates every source this project's registry can resolve

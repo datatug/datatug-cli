@@ -19,11 +19,13 @@ func dbCommand() *cobra.Command {
 		Use:   "db",
 		Short: "Opens database viewer",
 		RunE: func(_ *cobra.Command, args []string) error {
-			u, err := dburl.Parse(argAt(args, 0))
-			if err != nil {
-				return errDBURLParse // u is nil here; falling through would dereference it
+			arg := argAt(args, 0)
+			if _, err := dburl.Parse(arg); err != nil {
+				return errDBURLParse
 			}
-			fmt.Printf("Opening database at %s", dbcopy.RedactSourceURL(u.String()))
+			// What is printed is built from the scheme, host, port and path of the
+			// argument; the user name, the password and the query string are not in it.
+			fmt.Printf("Opening database at %s", dbcopy.SourceDisplay(arg))
 			return nil
 		},
 	}

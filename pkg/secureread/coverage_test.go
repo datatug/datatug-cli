@@ -202,14 +202,18 @@ func TestCoverage_NativeSQL_Errors(t *testing.T) {
 
 	// sqlOpenNative error
 	origOpen := sqlOpenNative
+	openCause := errors.New("simulated sql.Open error")
 	sqlOpenNative = func(driver, path string) (*sql.DB, error) {
-		return nil, errors.New("simulated sql.Open error")
+		return nil, openCause
 	}
 	tmp := filepath.Join(t.TempDir(), "test.db")
 	_ = os.WriteFile(tmp, []byte(""), 0644)
 	_, err = e.RunNativeSQL(context.Background(), "sqlite://"+tmp, "SELECT 1")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "simulated sql.Open error")
+	// The driver's own text is not shown (it can quote the DSN); the cause is kept.
+	assert.NotContains(t, err.Error(), "simulated sql.Open error")
+	assert.ErrorContains(t, err, "open sqlite source")
+	assert.ErrorIs(t, err, openCause)
 	sqlOpenNative = origOpen
 
 	// pragmaQueryOnly error

@@ -149,12 +149,12 @@ func TestParse_LiteralCredentialsNeverEchoedByErrors(t *testing.T) {
 	}
 }
 
-func TestParse_LiteralPostgresRawIsRedacted(t *testing.T) {
+func TestParse_LiteralPostgresRawIsTheDisplayForm(t *testing.T) {
 	t.Parallel()
 	ref, err := Parse("postgres://alice:s3cret@db.example.com:5432/shop?sslmode=require&password=other")
 	assert.NoError(t, err)
 	assert.Equal(t, "postgres", ref.Scheme)
-	assert.Equal(t, "postgres://alice:xxxxx@db.example.com:5432/shop?sslmode=require&password=xxxxx", ref.Raw)
+	assert.Equal(t, "postgres://db.example.com:5432/shop", ref.Raw)
 	assert.Contains(t, ref.Path, "s3cret", "Path stays the real URL: Open needs it")
 }
 
@@ -170,8 +170,8 @@ func TestParse_EveryNonEnvSchemeKeepsRawVerbatim(t *testing.T) {
 func TestBackendRef_StringFallsBackToPath(t *testing.T) {
 	t.Parallel()
 	ref := BackendRef{Scheme: "postgres", Path: "postgres://alice:s3cret@h/db"}
-	assert.Equal(t, "postgres://alice:xxxxx@h/db", ref.String())
-	assert.Equal(t, "postgres://alice:xxxxx@h/db", fmt.Sprintf("%v", ref))
+	assert.Equal(t, "postgres://h/db", ref.String())
+	assert.Equal(t, "postgres://h/db", fmt.Sprintf("%v", ref))
 }
 
 func TestParse_InputThatIsNotAURLIsNeverEchoed(t *testing.T) {
@@ -184,12 +184,13 @@ func TestParse_InputThatIsNotAURLIsNeverEchoed(t *testing.T) {
 	}
 }
 
-func TestParse_UnknownSchemeErrorStillNamesSchemeAndShowsRedactedURL(t *testing.T) {
+func TestParse_UnknownSchemeErrorNamesTheSchemeAndNothingElse(t *testing.T) {
 	t.Parallel()
 	_, err := Parse("mysql://alice:s3cret@db.example.com/shop")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), `unsupported scheme "mysql"`)
-	assert.Contains(t, err.Error(), "mysql://alice:xxxxx@db.example.com/shop")
+	assert.NotContains(t, err.Error(), "db.example.com")
+	assert.NotContains(t, err.Error(), "alice")
 	assert.Contains(t, err.Error(), "env:NAME")
 }
 
@@ -235,15 +236,15 @@ func TestParse_IngitdbNeverEchoesAPassword(t *testing.T) {
 	}
 	_, err := Parse("ingitdb://https://alice:s3cret@github.com/org/repo")
 	assert.ErrorContains(t, err, "looks remote")
-	assert.ErrorContains(t, err, "ingitdb://https://xxxxx@github.com/org/repo")
+	assert.ErrorContains(t, err, "ingitdb://https://github.com/org/repo")
 	_, err = Parse("ingitdb://https://TOKEN:x-oauth-basic@github.com/org/repo")
-	assert.ErrorContains(t, err, "ingitdb://https://xxxxx@github.com/org/repo")
+	assert.ErrorContains(t, err, "ingitdb://https://github.com/org/repo")
 	assert.NotContains(t, err.Error(), "x-oauth-basic")
 	_, err = Parse("ingitdb://alice:s3cret@github.com/org/repo")
 	assert.ErrorContains(t, err, "credentials are not supported")
 	// A token written as the user name has no colon and is still a credential.
 	_, err = Parse("ingitdb://https://s3cret@github.com/org/repo")
-	assert.ErrorContains(t, err, "ingitdb://https://xxxxx@github.com/org/repo")
+	assert.ErrorContains(t, err, "ingitdb://https://github.com/org/repo")
 	_, err = Parse("ingitdb://s3cret@github.com/org/repo")
 	assert.ErrorContains(t, err, "credentials are not supported")
 	assert.ErrorContains(t, err, "./dir", "the error says how to write a directory that holds an at sign")
@@ -306,17 +307,13 @@ func TestParse_SqliteParseErrorIsRedacted(t *testing.T) {
 	assert.NotContains(t, err.Error(), "s3cret")
 }
 
-func TestParse_BareSchemeStringNamesTheSchemeOnly(t *testing.T) {
+func TestParse_BareSchemeStringNamesNothing(t *testing.T) {
 	t.Parallel()
-	_, err := Parse("mongodb:localhost/test")
-	assert.ErrorContains(t, err, `unsupported scheme "mongodb"`)
-	assert.ErrorContains(t, err, "supported schemes are "+strings.Join(supportedSchemes, ", "))
-	assert.NotContains(t, err.Error(), "localhost")
-	_, err = Parse("alice:s3cret@db.example.com/shop")
-	assert.NotContains(t, err.Error(), "alice")
-	assert.NotContains(t, err.Error(), "unsupported scheme")
-	_, err = Parse("12345:rest")
-	assert.NotContains(t, err.Error(), "12345")
+	for _, input := range []string{"mongodb:localhost/test", "alice:s3cret", "ghp1234567890:x-oauth-basic", "postgres:alice:s3cret@h/db", "12345:rest", "alice:s3cret@db.example.com/shop", "s3cret", "host=db password=s3cret", ""} {
+		_, err := Parse(input)
+		assert.Error(t, err, input)
+		assert.Equal(t, "unsupported source: expected a URL such as sqlite://..., or env:NAME; supported schemes are "+strings.Join(supportedSchemes, ", "), err.Error(), input)
+	}
 }
 
 func TestParse_HTTPDirectoryWithAnAtSignNeedsTheDotForm(t *testing.T) {

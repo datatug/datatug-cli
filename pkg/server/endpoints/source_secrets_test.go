@@ -59,8 +59,8 @@ func TestResolveSQLSourceURLNeverEchoesAPassword(t *testing.T) {
 	if strings.Contains(err.Error(), endpointSecret) {
 		t.Fatalf("error leaks the password: %v", err)
 	}
-	if !strings.Contains(err.Error(), "postgres://alice:xxxxx@127.0.0.1:1/shop") || !errors.Is(err, dbcopy.ErrPostgresNotWired) {
-		t.Fatalf("error = %v, want the redacted source and the wrapped cause", err)
+	if !strings.Contains(err.Error(), "postgres://127.0.0.1:1/shop") || strings.Contains(err.Error(), "alice") || !errors.Is(err, dbcopy.ErrPostgresNotWired) {
+		t.Fatalf("error = %v, want the display form of the source and the wrapped cause", err)
 	}
 }
 

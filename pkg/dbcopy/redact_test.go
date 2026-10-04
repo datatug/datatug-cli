@@ -58,6 +58,15 @@ func TestRedactSourceURL(t *testing.T) {
 		{"http host and path with an at sign in the query", "http://localhost:8080/x?email=a@b.com", "http://localhost:8080/x?email=a@b.com"},
 		{"http credentials still hidden next to a port-like password", "https://alice:s3cret@host:8080/x", "https://alice:xxxxx@host:8080/x"},
 		{"ingitdb wrapping a URL with a token as the user name", "ingitdb://https://s3cret@github.com/org/repo", "ingitdb://https://xxxxx@github.com/org/repo"},
+		// Finding 1 of the review of #320: inside a wrapped URL the userinfo is masked whole, even when it reads as host or host:port.
+		{"wrapped URL whose password starts with digits and a slash", "ingitdb://https://alice:42/s3cret@github.com/org/repo", "ingitdb://https://xxxxx@github.com/org/repo"},
+		{"wrapped URL whose token is a user name with digits and a slash", "ingitdb://https://s3cret:42/x@github.com/org/repo", "ingitdb://https://xxxxx@github.com/org/repo"},
+		{"wrapped URL whose token holds a slash and no colon", "ingitdb://https://s3/cret@github.com/org/repo", "ingitdb://https://xxxxx@github.com/org/repo"},
+		{"wrapped URL with an empty user name", "ingitdb://https://:s3/cret@github.com/org/repo", "ingitdb://https://xxxxx@github.com/org/repo"},
+		// Finding 3: an empty user name is userinfo too.
+		{"path scheme with an empty user name and a slash in the password", "ingitdb://:s3/cret@github.com/org/repo", "ingitdb://:xxxxx@github.com/org/repo"},
+		// Finding 4: the drive-path exemption is scoped to http and https; it must not hide a PostgreSQL password that starts with a slash.
+		{"one-letter postgres user with a password that starts with a slash", "postgres://C:/s3cret@db.example.com/shop", "postgres://C:xxxxx@db.example.com/shop"},
 		{"ingitdb wrapping a URL with no userinfo", "ingitdb://https://github.com/org/repo", "ingitdb://https://github.com/org/repo"},
 		{"password made of a port-like number is still userinfo", "postgres://u:123@h/db", "postgres://u:xxxxx@h/db"},
 		{"keyword DSN", "host=db user=u password=s3cret dbname=x", "host=db user=u password=xxxxx dbname=x"},
@@ -128,7 +137,7 @@ func TestBackendRef_FormattingNeverPrintsTheSecret(t *testing.T) {
 		ref.String(), ref.GoString(),
 	} {
 		assert.NotContains(t, rendered, "s3cret")
-		assert.Contains(t, rendered, "postgres://alice:xxxxx@db.example.com:5432/shop")
+		assert.Contains(t, rendered, "postgres://db.example.com:5432/shop")
 	}
 }
 

@@ -62,8 +62,8 @@ func TestQuery_PostgresPasswordOnTheCommandLineNeverAppears(t *testing.T) {
 		t.Fatalf("exit %d, want %d: %s", code, exitCodeDatabase, stderr)
 	}
 	assertNoSecret(t, stdout, stderr)
-	if !strings.Contains(stderr, "postgres://alice:xxxxx@127.0.0.1:1/shop") {
-		t.Errorf("stderr should show the redacted URL: %q", stderr)
+	if !strings.Contains(stderr, "postgres://127.0.0.1:1/shop") || strings.Contains(stderr, "alice") {
+		t.Errorf("stderr should show the display form of the URL, without the user: %q", stderr)
 	}
 
 	t.Setenv("DT01_QUERY_PG", literal)
@@ -80,7 +80,7 @@ func TestQuery_PostgresPasswordOnTheCommandLineNeverAppears(t *testing.T) {
 	}
 }
 
-func TestQuery_DriverErrorsThatQuoteTheURLAreRedacted(t *testing.T) {
+func TestQuery_DriverErrorsThatQuoteTheURLAreNeverShown(t *testing.T) {
 	literal := "postgres://alice:" + sourceSecret + "@127.0.0.1:1/shop"
 	original := openBackend
 	t.Cleanup(func() { openBackend = original })
@@ -100,14 +100,15 @@ func TestQuery_HelpDocumentsTheEnvForm(t *testing.T) {
 	}
 }
 
-func TestExit_RedactsSecretsInEveryMessage(t *testing.T) {
-	err := Exit("open postgres://alice:"+sourceSecret+"@h/db: connection refused", 4)
-	assertNoSecret(t, err.Error())
-	var coder ExitCoder
-	if !errors.As(err, &coder) || coder.ExitCode() != 4 {
-		t.Fatalf("Exit must keep its code: %v", err)
+// Exit shows its message as it is: no message path relies on a redactor (the
+// top-level handler in main.go keeps one as a last line of defence).
+func TestExit_KeepsItsMessageAndItsCode(t *testing.T) {
+	err := Exit("--overwrite must be one of recreate, reload", 2)
+	if err.Error() != "--overwrite must be one of recreate, reload" {
+		t.Errorf("the message must pass unchanged: %q", err.Error())
 	}
-	if plain := Exit("--overwrite must be one of recreate, reload", 2); plain.Error() != "--overwrite must be one of recreate, reload" {
-		t.Errorf("a message without secrets must pass unchanged: %q", plain.Error())
+	var coder ExitCoder
+	if !errors.As(err, &coder) || coder.ExitCode() != 2 {
+		t.Fatalf("Exit must keep its code: %v", err)
 	}
 }

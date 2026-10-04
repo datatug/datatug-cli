@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+// This file is the last line of defence, not the way a source is shown: a
+// recogniser of secrets in text cannot be finished, so every message that names a
+// source is built by SourceDisplay (display.go) and none relies on what is here.
+// What is here remains for text written by code that does not build its own
+// (see RedactText), for callers that hold a secret as a plain value (a password
+// given as a flag), and for the top-level handlers in main.go.
+
 // redactedMarker replaces every secret RedactSourceURL and RedactText remove.
 // It is the placeholder PostgreSQL's own tools print for a hidden password.
 const redactedMarker = "xxxxx"
@@ -61,10 +68,10 @@ func isHostOnly(scheme, rest string) bool {
 	return hostOnlyAuthority.MatchString(authority)
 }
 
-// userinfoShape is "user:password@..." at the start of a string: a user name,
-// a colon, and anything up to an "@". A password may hold "/", so the match
-// does not stop at one.
-var userinfoShape = regexp.MustCompile(`^[^/@:]+:[^@]*@`)
+// userinfoShape is "user:password@..." at the start of a string: a user name
+// (which may be empty), a colon, and anything up to an "@". A password may hold
+// "/", so the match does not stop at one.
+var userinfoShape = regexp.MustCompile(`^[^/@:]*:[^@]*@`)
 
 // driveLetterPath is a Windows path such as C:\dir or C:/dir.
 var driveLetterPath = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
@@ -198,9 +205,14 @@ var sensitiveQueryKeys = []string{"pass", "pwd", "secret", "token", "key", "auth
 // It works on the text and never parses, so it cannot fail and a malformed URL
 // is still redacted. It prefers to over-redact: the userinfo ends at the last
 // "@" in the string, so a password that holds an unescaped "@", "/" or "?" is
-// still removed whole. The one exemption is an http or https URL whose
-// authority is a plain host or host:port (see isHostOnly), whose "@" belongs to
-// the path.
+// still removed whole. There are two exemptions, both for http and https
+// only, whose URLs name a local project directory: an authority that is a plain
+// host or host:port (see isHostOnly), whose "@" belongs to the path, and a
+// Windows drive path (see redactUserinfo).
+//
+// Nothing that is shown may depend on this function: a recogniser of secrets
+// can always be beaten by one more shape of string. Use SourceDisplay to show a
+// source.
 func RedactSourceURL(raw string) string {
 	location := schemePrefix.FindStringIndex(raw)
 	if location == nil {
@@ -226,8 +238,17 @@ func RedactSourceURL(raw string) string {
 }
 
 // RedactText returns text with every URL inside it passed through
-// RedactSourceURL and every "password=..." keyword value removed. Use it on
-// any message, log line or stored string that could carry a source URL.
+// RedactSourceURL and every "password=..." keyword value removed.
+//
+// It is a last line of defence and nothing else: the top-level error and panic
+// handlers (main.go) and the sinks that print text written by code that does not
+// build it (an HTTP error body, a chat error) run text through it in case
+// something slipped by. No message path relies on it. Every message that names a
+// source builds the name with SourceDisplay from parts that passed a strict
+// check, and every parser and driver error is classified, never quoted, so there
+// is no secret in the text for this to find. A recogniser of secrets in text
+// cannot be finished (it was patched three times and each round found another
+// shape of string that got through), so do not add a message that needs it.
 func RedactText(text string) string {
 	text = quotedURLInText.ReplaceAllStringFunc(text, func(quoted string) string {
 		quote := quoted[:1]
@@ -239,7 +260,9 @@ func RedactText(text string) string {
 
 // RedactError returns err with a message passed through RedactText. It wraps
 // err, so errors.Is and errors.As still see the original; only Error() text is
-// redacted. A nil err stays nil.
+// redacted. A nil err stays nil. Like RedactText it is a last line of defence
+// for text that code outside this package wrote; no message that names a source
+// may rely on it (see SourceDisplay and BackendRef.OpenFailure).
 func RedactError(err error) error {
 	return redactErrorWith(err, nil)
 }
@@ -286,14 +309,15 @@ func redactUserinfo(scheme, rest string) string {
 // redactWholeUserinfo masks the whole userinfo of rest, a wrapped URL such as
 // "https://TOKEN@host/x" or "https://TOKEN:x-oauth-basic@host/x" (what follows
 // "ingitdb://"). The user name may itself be the secret (GitHub's token form),
-// so the userinfo is masked whole, colon or not.
-// The wrapped scheme decides whether an "@" is userinfo or path.
+// so the userinfo is masked whole, colon or not, and whatever stands before the
+// last "@" is userinfo: there is no host-only exemption here, so a password such
+// as "42/s3cret" cannot hide behind a port-like prefix. A wrapped URL is always
+// refused by Parse and never opened, so masking "https://host/x@y" costs nothing.
 func redactWholeUserinfo(rest string) string {
 	prefix := schemePrefix.FindString(rest)
 	inner := rest[len(prefix):]
-	scheme := strings.ToLower(strings.TrimSuffix(prefix, "://"))
 	at := strings.LastIndexByte(inner, '@')
-	if at < 0 || isHostOnly(scheme, inner) {
+	if at < 0 {
 		return rest
 	}
 	return prefix + redactedMarker + inner[at:]

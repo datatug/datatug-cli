@@ -375,12 +375,13 @@ func migrateLegacyChatScopes(db *sql.DB, oldScope, newScope, selectedURL string)
 	return tx.Commit()
 }
 
-// redactSources returns a copy of sources with every URL passed through
-// dbcopy.RedactSourceURL.
+// redactSources returns a copy of sources with every source replaced by its
+// display form (dbcopy.SourceDisplay): built from the scheme, host, port and path,
+// never from userinfo or a query string.
 func redactSources(sources map[string]string) map[string]string {
 	redacted := make(map[string]string, len(sources))
 	for id, source := range sources {
-		redacted[id] = dbcopy.RedactSourceURL(source)
+		redacted[id] = dbcopy.SourceDisplay(source)
 	}
 	return redacted
 }
@@ -1043,9 +1044,10 @@ func (s *SessionStore) checkOrigin(ctx context.Context, tx *sql.Tx, sessionID, o
 
 func (s *SessionStore) appendQueryTx(ctx context.Context, tx *sql.Tx, sessionID, originID, source string, query *QueryResult, now time.Time) error {
 	// The chat database is a file on disk: it never holds a password from a
-	// source URL. A source named "env:NAME" is stored as is, because it
+	// source URL. What it stores is the display form of the source (see
+	// dbcopy.SourceDisplay); a source named "env:NAME" is stored as is, because it
 	// carries the variable's name and not its value.
-	source = dbcopy.RedactSourceURL(source)
+	source = dbcopy.SourceDisplay(source)
 	query.QueryID = uuid.NewString()
 	parameters := query.Parameters
 	if parameters == nil {

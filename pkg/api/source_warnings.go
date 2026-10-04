@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 
-	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
@@ -49,8 +48,10 @@ func warnMissingSourceFilesForEnvironment(ctx context.Context, projStore datatug
 		if err != nil {
 			continue
 		}
-		if err := dbcopy.CheckSourceFile(ref.Path); err != nil {
-			log.Printf("serve: WARNING: project %q environment %q source %q: %v", projectID, env.ID, source.ID, dbcopy.RedactError(err))
+		// CheckFile stats only a file-backed source: a PostgreSQL ref's Path is its
+		// URL, and its message shows the display form of the path, never a secret.
+		if err := ref.CheckFile(); err != nil {
+			log.Printf("serve: WARNING: project %q environment %q source %q: %v", projectID, env.ID, source.ID, err)
 		}
 	}
 }

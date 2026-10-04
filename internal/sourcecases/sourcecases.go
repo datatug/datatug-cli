@@ -1,0 +1,214 @@
+// Package sourcecases generates the source strings the DT-0C property test
+// feeds to every command path that takes a source: every scheme the CLI knows,
+// in lower, upper and mixed case, bare and wrapped in another scheme, with a
+// generated secret in each position a parser can read as userinfo or a user can
+// put one: userinfo (with and without a user name), a token standing alone as
+// the user name, the position a parser misreads as userinfo ("alice:42/secret@"),
+// the query string and the fragment.
+//
+// The secrets are generated, not typed, so a test that finds one in an output
+// has found a real leak and not a coincidence with a fixed word. Generation is
+// deterministic: the same call returns the same cases.
+package sourcecases
+
+import (
+	"math/rand/v2"
+	"strings"
+	"unicode"
+)
+
+// Case is one source string a user could type.
+type Case struct {
+	// Name is unique across All.
+	Name string
+	// Source is the string given to the command.
+	Source string
+	// Secrets are the literals Source holds that must never appear in an output.
+	Secrets []string
+	// Style says what the secret looks like ("with spaces", "digits only", ...).
+	Style string
+	// Position says where the secret is ("userinfo", "query", ...).
+	Position string
+	// Wrapped is true when Source is a URL inside another scheme's URL.
+	Wrapped bool
+}
+
+// Schemes are the schemes the CLI knows: everything Parse dispatches, and the
+// postgresql alias.
+var Schemes = []string{"sqlite", "ingitdb", "postgres", "postgresql", "http", "https", "openvaultdb"}
+
+// wrapperSchemes name a file or directory, so a URL may be written after them.
+var wrapperSchemes = []string{"ingitdb", "sqlite", "openvaultdb", "http", "https"}
+
+// innerSchemes are the schemes of a URL written inside a wrapper.
+var innerSchemes = []string{"https", "http", "postgres"}
+
+var secretStyles = []string{"word", "digits only", "with spaces", "with slash", "with at sign", "digits then slash", "with question mark", "with hash", "percent-encoded"}
+
+// queryParameters are secret-named parameters; one is picked per style.
+var queryParameters = []string{"password", "token", "api_key", "sslpassword", "secret", "key", "pwd", "auth", "credential"}
+
+// All returns every case.
+func All() []Case {
+	g := &generator{random: rand.New(rand.NewPCG(20261004, 7))}
+	var cases []Case
+	for _, scheme := range Schemes {
+		for casing := 0; casing < 3; casing++ {
+			cases = append(cases, g.positions(cased(scheme, casing), "db.example.com:5432/shop?sslmode=require", "", false)...)
+		}
+	}
+	for _, outer := range wrapperSchemes {
+		for _, inner := range innerSchemes {
+			for casing := 0; casing < 3; casing++ {
+				prefix := cased(inner, (casing+1)%3) + "://"
+				cases = append(cases, g.positions(cased(outer, casing), "github.com/org/repo", prefix, true)...)
+			}
+		}
+	}
+	return cases
+}
+
+// CommandCases returns the cases a command-level test runs: the styles that
+// stress the readers most (spaces, an "@", digits before a slash, digits only, a
+// plain word, a token), so the many command runs stay quick.
+func CommandCases() []Case {
+	var cases []Case
+	for _, c := range All() {
+		switch c.Style {
+		case "with spaces", "digits then slash", "with at sign", "word", "digits only", "token", "token with slash":
+			cases = append(cases, c)
+		}
+	}
+	return cases
+}
+
+// Leaks returns the secrets of c found in texts: a whole secret, or any run of
+// four or more letters and digits of it (so a password cut at a space or a slash
+// and leaked in part still counts).
+func Leaks(c Case, texts ...string) []string {
+	var found []string
+	for _, secret := range c.Secrets {
+		candidates := []string{secret}
+		for _, fragment := range strings.FieldsFunc(secret, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+			if len(fragment) >= 4 {
+				candidates = append(candidates, fragment)
+			}
+		}
+		for _, candidate := range candidates {
+			for _, text := range texts {
+				if strings.Contains(text, candidate) {
+					found = append(found, candidate)
+					break
+				}
+			}
+		}
+	}
+	return found
+}
+
+// cased returns scheme in lower case (0), upper case (1) or mixed case (2).
+func cased(scheme string, casing int) string {
+	switch casing {
+	case 1:
+		return strings.ToUpper(scheme)
+	case 2:
+		return mixedCase(scheme)
+	}
+	return scheme
+}
+
+// mixedCase upper-cases every other letter, starting with the first.
+func mixedCase(s string) string {
+	runes := []rune(s)
+	for i := 0; i < len(runes); i += 2 {
+		runes[i] = unicode.ToUpper(runes[i])
+	}
+	return string(runes)
+}
+
+type generator struct{ random *rand.Rand }
+
+func (g *generator) letters(n int, alphabet string) string {
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = alphabet[g.random.IntN(len(alphabet))]
+	}
+	return string(out)
+}
+
+// word is n letters and digits that starts with a letter.
+func (g *generator) word(n int) string {
+	return g.letters(1, "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ") + g.letters(n-1, "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789")
+}
+
+func (g *generator) secret(style string) string {
+	switch style {
+	case "digits only":
+		return g.letters(8, "0123456789")
+	case "with spaces":
+		return g.word(5) + " " + g.word(5) + " " + g.word(5)
+	case "with slash":
+		return g.word(5) + "/" + g.word(5)
+	case "with at sign":
+		return g.word(5) + "@" + g.word(5)
+	case "digits then slash":
+		return "42/" + g.word(8)
+	case "with question mark":
+		return g.word(5) + "?" + g.word(5)
+	case "with hash":
+		return g.word(5) + "#" + g.word(5)
+	case "percent-encoded":
+		return g.word(5) + "%2F" + g.word(5)
+	case "token":
+		return "ghp_" + g.word(12)
+	case "token with slash":
+		return g.word(3) + "/" + g.word(8)
+	}
+	return g.word(8)
+}
+
+// positions returns the cases for one scheme (cased) in front of tail. When
+// wrapped, tail follows prefix, a URL's scheme ("https://"), after the outer
+// scheme; the caller has put the right casing on both.
+func (g *generator) positions(scheme, tail, prefix string, wrapped bool) []Case {
+	var cases []Case
+	name := func(position, style string, extra ...string) string {
+		parts := append([]string{scheme + "://" + prefix, position, style}, extra...)
+		return strings.Join(parts, " | ")
+	}
+	add := func(position, style, source string, secrets ...string) {
+		cases = append(cases, Case{Name: name(position, style), Source: source, Secrets: secrets, Style: style, Position: position, Wrapped: wrapped})
+	}
+	head := scheme + "://" + prefix
+	hostPath, query, _ := strings.Cut(tail, "?")
+	if query != "" {
+		query += "&"
+	}
+
+	for _, style := range secretStyles {
+		password := g.secret(style)
+		add("userinfo", style, head+"alice:"+password+"@"+tail, password)
+		password = g.secret(style)
+		add("empty user name", style, head+":"+password+"@"+tail, password)
+		if style != "digits then slash" {
+			password = "42/" + g.secret(style)
+			add("misread as userinfo", style, head+"alice:"+password+"@"+tail, password)
+			password = "42/" + g.secret(style)
+			add("empty user name misread as userinfo", style, head+":"+password+"@"+tail, password)
+		}
+		if style != "with hash" {
+			value := g.secret(style)
+			parameter := queryParameters[g.random.IntN(len(queryParameters))]
+			add("query", style, head+hostPath+"?"+query+parameter+"="+value, value)
+			value = g.secret(style)
+			add("fragment", style, head+tail+"#"+value, value)
+		}
+	}
+	token := g.secret("token")
+	add("token as user name", "token", head+token+"@"+tail, token)
+	if wrapped {
+		token = g.secret("token with slash")
+		add("token as user name", "token with slash", head+token+"@"+tail, token)
+	}
+	return cases
+}

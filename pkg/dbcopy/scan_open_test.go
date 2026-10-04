@@ -164,3 +164,74 @@ func TestPostgresDefaultSchemaIsTheReadersDefault(t *testing.T) {
 	assert.Equal(t, dalgo2postgres.DefaultSchema, PostgresDefaultSchema)
 	assert.Equal(t, "public", PostgresDefaultSchema)
 }
+
+func TestOpenSchemaScan_RefusesAUserNameThatHoldsAColon(t *testing.T) {
+	for name, raw := range colonInUserURLs {
+		stubNewPostgresDatabase(t, func(string, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+			t.Fatal("a URL whose user name is the password must never reach the driver: " + name)
+			return nil, nil
+		})
+		url := strings.ReplaceAll(raw, "SECRET", "TOPSECRET")
+		ref, err := ParseWithEnv("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": url}))
+		require.NoError(t, err, name+": Parse accepts the shape, so the open path must refuse it")
+
+		db, err := ref.OpenSchemaScan(context.Background())
+		assert.Nil(t, db, name)
+		if assert.Error(t, err, name) {
+			assert.ErrorContains(t, err, "literal colon", name)
+			assert.ErrorContains(t, err, "env:SHOP_PG_URL", name)
+			for _, quoted := range []string{"TOPSECRET", "SECRET", "alice", "db.example.com"} {
+				assert.NotContains(t, err.Error(), quoted, name)
+			}
+		}
+	}
+}
+
+// pgx quotes a URL it cannot parse in an error of its own, with the password
+// masked and the URL written again (ParseConfigError), so the text is not the
+// URL as it was given. The real driver constructor fails on these before it
+// dials anything.
+func TestOpenSchemaScan_APgxParseErrorNamesTheSourceNotItsURL(t *testing.T) {
+	for name, tail := range map[string]string{
+		"an unknown sslmode":      "db.example.com:5433/shop?sslmode=bogus",
+		"a bad connect_timeout":   "db.example.com:5433/shop?connect_timeout=soon",
+		"a port out of range":     "db.example.com:70000/shop",
+		"an option and a service": "db.example.com/shop?application_name=billing&sslmode=bogus",
+	} {
+		ref, err := ParseWithEnv("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": "postgres://alice:s3cret@" + tail}))
+		require.NoError(t, err, name)
+
+		db, err := ref.OpenSchemaScan(context.Background())
+		assert.Nil(t, db, name)
+		if assert.Error(t, err, name) {
+			assert.ErrorContains(t, err, "cannot parse", name+": this is pgx's own parse error")
+			assert.ErrorContains(t, err, "env:SHOP_PG_URL", name)
+			// pgx's own words about the option it cannot read ("sslmode is invalid")
+			// stay; the URL it quotes does not.
+			for _, shown := range []string{"s3cret", "alice", "db.example.com", "shop", "sslmode=", "connect_timeout=", "application_name", "postgres://", "5433"} {
+				assert.NotContains(t, err.Error(), shown, name)
+			}
+		}
+	}
+}
+
+func TestNamedSourceError_NamesEveryPostgresURLInTheText(t *testing.T) {
+	t.Parallel()
+	const url = "postgres://alice:s3cret@db.example.com:5433/shop"
+	for name, tc := range map[string]struct{ text, want string }{
+		"the URL as given, as text and as a literal": {`open ` + url + ` and "` + url + `"`, `open env:X and "env:X"`},
+		"pgx's rendering of the URL":                 {"cannot parse `postgres://alice:xxxxx@db.example.com:5433/shop?sslmode=bogus`: bad", "cannot parse `env:X`: bad"},
+		"the postgresql alias":                       {"cannot parse `postgresql://alice:xxxxx@db.example.com/shop`: bad", "cannot parse `env:X`: bad"},
+		"an upper-case scheme":                       {"dial POSTGRES://alice:xxxxx@db.example.com/shop: refused", "dial env:X: refused"},
+		"a URL in quotes":                            {`open "postgres://alice:xxxxx@db.example.com/shop?sslmode=bogus" failed`, `open "env:X" failed`},
+		"two URLs":                                   {"from postgres://a@h1/d to postgresql://b@h2/d done", "from env:X to env:X done"},
+		"no URL":                                     {"connection refused", "connection refused"},
+	} {
+		got := namedSourceError{err: errors.New(tc.text), url: url, name: "env:X"}.Error()
+		assert.Equal(t, tc.want, got, name)
+	}
+	// A source with no URL of its own still never shows another, and punctuation
+	// that follows a URL in the text stays.
+	assert.Equal(t, "dial env:X: refused (env:X).", namedSourceError{err: errors.New("dial postgres://h/d: refused (postgres://h/d)."), name: "env:X"}.Error())
+	assert.Equal(t, "a bare postgres:// is no URL", namedSourceError{err: errors.New("a bare postgres:// is no URL"), name: "env:X"}.Error())
+}

@@ -88,6 +88,12 @@ type descriptorWriter interface {
 // os.LookupEnv in production.
 var scanLookupEnv = os.LookupEnv
 
+// scanPostgresAvailable is the answer to whether this release can scan
+// PostgreSQL, a seam so a test can stand in for a datatug-core whose project
+// model records postgres servers. Always api.CheckPostgresScanAvailable in
+// production, which lifts itself on the day datatug-core accepts the driver.
+var scanPostgresAvailable = api.CheckPostgresScanAvailable
+
 // scanUpdateDbSchema is a seam over api.UpdateDbSchema so tests can drive the
 // save step with a project the scanner itself does not produce (a project
 // freshly built from a scan does not pass save-time validation). Always
@@ -138,6 +144,13 @@ func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
 // would keep it) or in a project file, and each of those flags is refused
 // instead of being quietly ignored.
 func (v *scanDbCommand) postgresConnectionParams() (dbconnection.Params, error) {
+	// Say that the scan does not exist before asking for anything: a user must not
+	// be sent to put a production password in a variable, one refusal after
+	// another, for a scan that cannot run, nor have the host and user of that
+	// database logged.
+	if err := scanPostgresAvailable(); err != nil {
+		return nil, err
+	}
 	var refused []string
 	for _, flag := range []struct {
 		name  string

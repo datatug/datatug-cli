@@ -29,6 +29,11 @@ var (
 	// errSplitPostgresPassword names the shape and the fix and quotes none of the
 	// URL: the text after the split is part of the password.
 	errSplitPostgresPassword = errors.New("the PostgreSQL URL holds a literal '@' after its host, so it is read differently from how it was written (a password that holds '/', '?' or '#' ends the host early): percent-encode '@', '/', '?' and '#' in the user name and the password, for example '/' as %2F")
+
+	// errPostgresUserHoldsColon names the shape and the fix and quotes none of the
+	// URL: the user name it refuses is most likely the user and the password
+	// joined by an encoded colon.
+	errPostgresUserHoldsColon = errors.New("the PostgreSQL URL has a user name that holds a colon (a percent-encoded ':' between the user and the password joins them into one name): write user:password with a literal colon between them")
 )
 
 // atSignAfterAuthority reports whether rawURL holds an "@" after the end of its
@@ -56,8 +61,11 @@ func atSignAfterAuthority(rawURL string) bool {
 // It refuses a URL with a literal "@" after the authority (see
 // atSignAfterAuthority): such a URL is not read the way it was written, and
 // refusing it is the only way to keep the rest of a password out of the host,
-// database and scope that are printed or hashed. No error quotes the URL, which
-// holds the password.
+// database and scope that are printed or hashed. It also refuses a user name
+// that holds a colon, however the URL spells it (see errPostgresUserHoldsColon):
+// "alice%3Apw@host" has no literal colon, so net/url reads the user "alice:pw"
+// and no password, and the password would be printed as the user, where no
+// redactor looks for a secret. No error quotes the URL, which holds the password.
 func ParsePostgresTarget(rawURL string) (PostgresTarget, error) {
 	target, _, err := parsePostgresURL(rawURL)
 	return target, err
@@ -85,6 +93,9 @@ func parsePostgresURL(rawURL string) (PostgresTarget, url.Values, error) {
 		if value := query.Get(override.key); value != "" {
 			*override.into = value
 		}
+	}
+	if strings.Contains(target.User, ":") {
+		return PostgresTarget{}, nil, errPostgresUserHoldsColon
 	}
 	port := parsed.Port()
 	if value := query.Get("port"); value != "" {
@@ -136,8 +147,31 @@ func destinationParts(ref BackendRef, lookupEnv func(string) (string, bool)) []s
 			return append([]string{ref.Scheme}, resolvedPostgresParts(target, query, lookupEnv)...)
 		}
 	}
+	if ref.Scheme == "postgres" {
+		// A URL that cannot be read is not known to hold a user and a password
+		// apart (a password may be the user name), so the whole userinfo is left
+		// out: the identity binds to where the URL points, never to who.
+		return []string{ref.Scheme, RedactSourceURL(maskPostgresUserinfo(ref.Path))}
+	}
 	// Whatever else the variable holds, bind to its URL with the secrets redacted.
 	return []string{ref.Scheme, RedactSourceURL(ref.Path)}
+}
+
+// maskPostgresUserinfo returns rawURL with everything in front of the last "@"
+// replaced by the redaction marker, as RedactSourceURL finds the end of a
+// userinfo (a password may hold an unescaped "@", "/" or "?"). A text with no
+// scheme or no "@" comes back unchanged.
+func maskPostgresUserinfo(rawURL string) string {
+	location := schemePrefix.FindStringIndex(rawURL)
+	if location == nil {
+		return rawURL
+	}
+	prefix, rest := rawURL[:location[1]], rawURL[location[1]:]
+	at := strings.LastIndexByte(rest, '@')
+	if at < 0 {
+		return rawURL
+	}
+	return prefix + redactedMarker + rest[at:]
 }
 
 // resolvedPostgresParts lists the host, port, database, user and service a

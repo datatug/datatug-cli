@@ -171,6 +171,26 @@ var validatePostgresServer = datatug.ServerRef.Validate
 // model cannot record the server it scanned.
 const postgresScanUnavailable = "scanning PostgreSQL is not available in this release: a DataTug project cannot record a postgres server yet"
 
+// checkPostgresServer is nil when the project model can record server, and the
+// answer that a PostgreSQL scan is not available, with the model's own reason,
+// when it cannot.
+func checkPostgresServer(server datatug.ServerRef) error {
+	if err := validatePostgresServer(server); err != nil {
+		return fmt.Errorf("%s: %w", postgresScanUnavailable, err)
+	}
+	return nil
+}
+
+// CheckPostgresScanAvailable is nil when this release can scan PostgreSQL and
+// otherwise says that it cannot. It asks the project model about a postgres
+// server that names nothing of the operator's database, so a caller can answer
+// before it reads a flag, an environment variable or a connection URL: a user
+// told that the scan does not exist must not first be asked to put a password
+// in a variable for it. scanDbCatalog asks again, about the real server.
+func CheckPostgresScanAvailable() error {
+	return checkPostgresServer(datatug.ServerRef{Driver: DriverPostgres, Host: "localhost"})
+}
+
 // scanPostgresCatalog scans a PostgreSQL database through DALgo's schema reader.
 // It opens the source through dbcopy, so a driver error comes back scrubbed with
 // the real URL; what the scan itself reads is scrubbed the same way.

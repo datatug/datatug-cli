@@ -148,3 +148,47 @@ func TestWarnMissingSourceFiles_StillWarnsOfAMissingOpenVaultDescriptor(t *testi
 	assert.Contains(t, logged.String(), "WARNING")
 	assert.Contains(t, logged.String(), "missing.json")
 }
+
+// A generic URL encoder turns "alice:SECRET" into "alice%3ASECRET": net/url reads
+// that as a user name and no password, and the scan would log the password as
+// "user=...". Nothing is logged, hashed or opened for it: no parameters exist.
+func TestNewPostgresScanParams_RefusesAUserNameThatHoldsAColon(t *testing.T) {
+	for name, url := range map[string]string{
+		"an upper-case escape": "postgres://alice%3ATOPSECRET@db.example.com/shop",
+		"a lower-case escape":  "postgres://alice%3aTOPSECRET@db.example.com/shop",
+		"the postgresql alias": "postgresql://alice%3ATOPSECRET@db.example.com:5433/shop?sslmode=require",
+		"a colon in the query": "postgres://db.example.com/shop?user=alice:TOPSECRET",
+	} {
+		params, err := NewPostgresScanParams(envOf(map[string]string{"SHOP_PG_URL": url}), "SHOP_PG_URL", "prod", "shop")
+		assert.Nil(t, params, name)
+		if assert.Error(t, err, name) {
+			assert.ErrorContains(t, err, "SHOP_PG_URL", name)
+			assert.ErrorContains(t, err, "literal colon", name)
+			for _, quoted := range []string{"TOPSECRET", "alice", "db.example.com", "shop"} {
+				assert.NotContains(t, err.Error(), quoted, name)
+			}
+		}
+	}
+}
+
+// The check that the scan cannot be saved is asked once, for a server that names
+// nothing of the operator's database, so the command can answer before it reads
+// a flag or an environment variable.
+func TestCheckPostgresScanAvailable(t *testing.T) {
+	err := CheckPostgresScanAvailable()
+	if assert.Error(t, err, "the project model cannot record a postgres server in this release") {
+		assert.ErrorContains(t, err, "scanning PostgreSQL is not available in this release")
+		assert.ErrorContains(t, err, "cannot record a postgres server yet")
+		assert.ErrorContains(t, err, "unexpected value: postgres", "the project model's own reason follows")
+	}
+
+	var asked []datatug.ServerRef
+	original := validatePostgresServer
+	t.Cleanup(func() { validatePostgresServer = original })
+	validatePostgresServer = func(server datatug.ServerRef) error {
+		asked = append(asked, server)
+		return nil
+	}
+	assert.NoError(t, CheckPostgresScanAvailable(), "the refusal lifts itself when the project model accepts the driver")
+	assert.Equal(t, []datatug.ServerRef{{Driver: DriverPostgres, Host: "localhost"}}, asked)
+}

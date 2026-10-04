@@ -264,8 +264,8 @@ func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Param
 	if server.Driver == DriverPostgres {
 		// Ask whether the project can record the server before opening anything:
 		// a scan that cannot be saved must not connect and read a schema first.
-		if err = validatePostgresServer(server); err != nil {
-			return nil, fmt.Errorf("%s: %w", postgresScanUnavailable, err)
+		if err = checkPostgresServer(server); err != nil {
+			return nil, err
 		}
 		// PostgreSQL is read through DALgo's schema reader, and opened from an
 		// environment variable: there is no connection string to give database/sql.

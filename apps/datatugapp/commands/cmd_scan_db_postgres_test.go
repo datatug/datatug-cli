@@ -32,6 +32,24 @@ func useScanEnv(t *testing.T, values map[string]string) {
 	covDSetVar(t, &scanLookupEnv, scanEnvOf(values))
 }
 
+// liftPostgresRefusal stands in for a datatug-core whose project model records
+// postgres servers: the command no longer answers that the scan is not available,
+// so what comes after that answer can be tested.
+func liftPostgresRefusal(t *testing.T) {
+	t.Helper()
+	covDSetVar(t, &scanPostgresAvailable, func() error { return nil })
+}
+
+// captureScanLog returns what the standard logger writes until the test ends.
+func captureScanLog(t *testing.T) *strings.Builder {
+	t.Helper()
+	var logged strings.Builder
+	saved := log.Writer()
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(saved) })
+	return &logged
+}
+
 func shopScanEnv() map[string]string {
 	return map[string]string{"DATATUG_SHOP_PG_URL": "postgres://alice:" + scanPgSecret + "@db.example.com:5433/shop"}
 }
@@ -41,6 +59,7 @@ func TestScanCommand_RegistersDsnEnvFlag(t *testing.T) {
 }
 
 func TestScanConnectionParams_PostgresFromAnEnvironmentVariable(t *testing.T) {
+	liftPostgresRefusal(t)
 	useScanEnv(t, shopScanEnv())
 	v := &scanDbCommand{Driver: "postgres", DSNEnv: "DATATUG_SHOP_PG_URL", Database: "shop", Environment: "prod"}
 
@@ -56,6 +75,7 @@ func TestScanConnectionParams_PostgresFromAnEnvironmentVariable(t *testing.T) {
 }
 
 func TestScanConnectionParams_PostgresRefusesAPasswordOnTheCommandLine(t *testing.T) {
+	liftPostgresRefusal(t)
 	useScanEnv(t, shopScanEnv())
 	v := &scanDbCommand{Driver: "postgres", DSNEnv: "DATATUG_SHOP_PG_URL", Database: "shop", Environment: "prod", Password: scanPgSecret}
 
@@ -69,6 +89,7 @@ func TestScanConnectionParams_PostgresRefusesAPasswordOnTheCommandLine(t *testin
 }
 
 func TestScanConnectionParams_PostgresTakesTheServerFromTheVariableOnly(t *testing.T) {
+	liftPostgresRefusal(t)
 	useScanEnv(t, shopScanEnv())
 	for name, v := range map[string]*scanDbCommand{
 		"--server": {Host: "other-host"},
@@ -94,6 +115,7 @@ func TestScanConnectionParams_PostgresTakesTheServerFromTheVariableOnly(t *testi
 }
 
 func TestScanConnectionParams_PostgresNeedsAValidAllowedVariable(t *testing.T) {
+	liftPostgresRefusal(t)
 	tests := []struct {
 		name   string
 		env    map[string]string
@@ -155,6 +177,7 @@ func stubScannedProject(t *testing.T, seen *dbconnection.Params) {
 }
 
 func TestScanCommandAction_PostgresWritesTheDescriptorBesideTheProject(t *testing.T) {
+	liftPostgresRefusal(t)
 	useScanEnv(t, shopScanEnv())
 	var seen dbconnection.Params
 	stubScannedProject(t, &seen)
@@ -186,6 +209,7 @@ func TestScanCommandAction_PostgresWritesTheDescriptorBesideTheProject(t *testin
 }
 
 func TestScanCommandAction_PostgresRefusalsWriteNothing(t *testing.T) {
+	liftPostgresRefusal(t)
 	useScanEnv(t, shopScanEnv())
 	covDSetVar(t, &scanUpdateDbSchema, func(context.Context, api.ProjectLoader, string, string, string, string, dbconnection.Params) (*datatug.Project, error) {
 		t.Fatal("a refused scan must not reach the database")
@@ -204,6 +228,7 @@ func TestScanCommandAction_PostgresRefusalsWriteNothing(t *testing.T) {
 }
 
 func TestScanCommandAction_PostgresWritesNoDescriptorForAFailedScan(t *testing.T) {
+	liftPostgresRefusal(t)
 	useScanEnv(t, shopScanEnv())
 	covDSetVar(t, &scanUpdateDbSchema, func(context.Context, api.ProjectLoader, string, string, string, string, dbconnection.Params) (*datatug.Project, error) {
 		return nil, assert.AnError
@@ -218,6 +243,7 @@ func TestScanCommandAction_PostgresWritesNoDescriptorForAFailedScan(t *testing.T
 }
 
 func TestScanCommandAction_PostgresDescriptorWriteFailureStopsBeforeTheSave(t *testing.T) {
+	liftPostgresRefusal(t)
 	useScanEnv(t, shopScanEnv())
 	stubScannedProject(t, nil)
 	dir := t.TempDir()
@@ -232,6 +258,7 @@ func TestScanCommandAction_PostgresDescriptorWriteFailureStopsBeforeTheSave(t *t
 // A project that cannot be saved must not leave a descriptor behind: a directory
 // holding connections/<env>/<db>.json and no project is a half-written scan.
 func TestScanCommandAction_PostgresWritesNoDescriptorForAProjectThatCannotBeSaved(t *testing.T) {
+	liftPostgresRefusal(t)
 	useScanEnv(t, shopScanEnv())
 	covDSetVar(t, &scanUpdateDbSchema, func(context.Context, api.ProjectLoader, string, string, string, string, dbconnection.Params) (*datatug.Project, error) {
 		return &datatug.Project{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "scanned"}}}, nil // no access, no creation time: not valid
@@ -248,10 +275,12 @@ func TestScanCommandAction_PostgresWritesNoDescriptorForAProjectThatCannotBeSave
 	assert.Empty(t, entries, "no descriptor and no project: the directory is as it was")
 }
 
-// The scan that ships today, driven through the real api.UpdateDbSchema: it stops
-// with a clear message before it connects to anything, in a directory with no
-// project and leaves the directory as it was.
+// The second place the scan that ships today is refused, with the command's own
+// answer lifted: the real api.UpdateDbSchema stops with a clear message before it
+// connects to anything, in a directory with no project, and leaves the directory
+// as it was.
 func TestScanCommandAction_PostgresAnswersThatTheScanIsNotAvailableAndWritesNothing(t *testing.T) {
+	liftPostgresRefusal(t)
 	// A server that is not there: if the scan did connect, it would be refused at once.
 	useScanEnv(t, map[string]string{"DATATUG_SHOP_PG_URL": "postgres://alice:" + scanPgSecret + "@127.0.0.1:1/shop"})
 	dir := t.TempDir()
@@ -271,19 +300,17 @@ func TestScanCommandAction_PostgresAnswersThatTheScanIsNotAvailableAndWritesNoth
 // refused before the scan logs a host or connects, and neither the refusal nor
 // the log line holds any of the password.
 func TestScanCommandAction_PostgresRefusesAPasswordThatSplitsTheURLBeforeItLogsAnything(t *testing.T) {
+	liftPostgresRefusal(t)
 	for name, url := range map[string]string{
 		"slash":         "postgres://alice:42/TOPSECRET@db.example.com/shop",
 		"question mark": "postgres://alice:42?TOPSECRET@db.example.com/shop",
 		"hash":          "postgres://alice:42#TOPSECRET@db.example.com/shop",
 	} {
 		useScanEnv(t, map[string]string{"DATATUG_SHOP_PG_URL": url})
-		var logged strings.Builder
-		saved := log.Writer()
-		log.SetOutput(&logged)
+		logged := captureScanLog(t)
 		dir := t.TempDir()
 
 		err := covDRunScan("-d", dir, "-D", "postgres", "--dsn-env", "DATATUG_SHOP_PG_URL", "--env", "prod", "--db", "shop")
-		log.SetOutput(saved)
 
 		if assert.Error(t, err, name) {
 			assert.ErrorContains(t, err, "percent-encode", name)
@@ -307,5 +334,82 @@ func TestScanCommand_HelpSaysPostgresIsNotAvailableYet(t *testing.T) {
 	} {
 		assert.Contains(t, text, "not available in this release", name)
 		assert.Contains(t, text, "postgres", name)
+	}
+}
+
+// The scan that ships today answers first, before it asks for a flag, a variable
+// or a URL: a user told that the scan does not exist must not first be asked to
+// put a production password in a variable for it. The log holds no line that
+// names a server or a user, and the directory is as it was.
+func TestScanCommandAction_PostgresAnswersThatTheScanIsNotAvailableBeforeAskingForAnything(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		args []string
+	}{
+		{"no --dsn-env", shopScanEnv(), nil},
+		{"a variable that is not set", nil, []string{"--dsn-env", "DATATUG_SHOP_PG_URL"}},
+		{"a variable the operator did not set aside", map[string]string{"PROD_DATABASE_URL": "postgres://alice:" + scanPgSecret + "@h/shop"}, []string{"--dsn-env", "PROD_DATABASE_URL"}},
+		{"a name that is no variable name", shopScanEnv(), []string{"--dsn-env", "postgres://alice:" + scanPgSecret + "@h/shop"}},
+		{"a password on the command line", shopScanEnv(), []string{"--dsn-env", "DATATUG_SHOP_PG_URL", "-P", scanPgSecret}},
+		{"a URL that holds the password as its user", map[string]string{"DATATUG_SHOP_PG_URL": "postgres://alice%3A" + scanPgSecret + "@db.example.com/shop"}, []string{"--dsn-env", "DATATUG_SHOP_PG_URL"}},
+		{"a URL that splits the password", map[string]string{"DATATUG_SHOP_PG_URL": "postgres://alice:42/" + scanPgSecret + "@db.example.com/shop"}, []string{"--dsn-env", "DATATUG_SHOP_PG_URL"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			useScanEnv(t, tc.env)
+			covDSetVar(t, &scanUpdateDbSchema, func(context.Context, api.ProjectLoader, string, string, string, string, dbconnection.Params) (*datatug.Project, error) {
+				t.Fatal("a scan that is not available must not reach the database")
+				return nil, nil
+			})
+			logged := captureScanLog(t)
+			dir := t.TempDir()
+
+			err := covDRunScan(append([]string{"-d", dir, "-D", "postgres", "--env", "prod", "--db", "shop"}, tc.args...)...)
+			if assert.Error(t, err) {
+				assert.ErrorContains(t, err, "scanning PostgreSQL is not available in this release")
+				for _, asked := range []string{"requires --dsn-env", "environment variable name", "DATATUG_DSN_ENV_ALLOW", "is not set", "not accepted for a postgres scan", "percent-encode", "literal colon", scanPgSecret} {
+					assert.NotContains(t, err.Error(), asked)
+				}
+			}
+			for _, shown := range []string{"server=", "user=", "port=", "alice", "db.example.com", scanPgSecret} {
+				assert.NotContains(t, logged.String(), shown)
+			}
+			entries, readErr := os.ReadDir(dir)
+			require.NoError(t, readErr)
+			assert.Empty(t, entries, "the directory is left as it was")
+		})
+	}
+}
+
+// A user name that holds a colon is most likely the user and the password joined
+// by an encoded colon ("alice%3Apw"). It is refused before the scan logs a line
+// that names the user, and neither the refusal nor the log holds the password.
+func TestScanCommandAction_PostgresRefusesAUserNameThatHoldsAColonBeforeItLogsAnything(t *testing.T) {
+	liftPostgresRefusal(t)
+	for name, url := range map[string]string{
+		"an upper-case escape": "postgres://alice%3ATOPSECRET@db.example.com/shop",
+		"a lower-case escape":  "postgres://alice%3aTOPSECRET@db.example.com/shop",
+		"a colon in the query": "postgres://db.example.com/shop?user=alice:TOPSECRET",
+	} {
+		useScanEnv(t, map[string]string{"DATATUG_SHOP_PG_URL": url})
+		covDSetVar(t, &scanUpdateDbSchema, func(context.Context, api.ProjectLoader, string, string, string, string, dbconnection.Params) (*datatug.Project, error) {
+			t.Fatal("a URL whose user is the password must not reach the scan: " + name)
+			return nil, nil
+		})
+		logged := captureScanLog(t)
+		dir := t.TempDir()
+
+		err := covDRunScan("-d", dir, "-D", "postgres", "--dsn-env", "DATATUG_SHOP_PG_URL", "--env", "prod", "--db", "shop")
+		if assert.Error(t, err, name) {
+			assert.ErrorContains(t, err, "literal colon", name)
+			assert.NotContains(t, err.Error(), "TOPSECRET", name)
+		}
+		assert.NotContains(t, logged.String(), "TOPSECRET", name)
+		assert.NotContains(t, logged.String(), "user=", name, "no line names the user")
+		assert.NotContains(t, logged.String(), "server=", name)
+		entries, readErr := os.ReadDir(dir)
+		require.NoError(t, readErr)
+		assert.Empty(t, entries, name)
 	}
 }

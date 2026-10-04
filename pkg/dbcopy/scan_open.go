@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -47,12 +48,14 @@ func ParseWithEnv(rawURL string, lookupEnv func(string) (string, bool)) (Backend
 // connect to the wrong host and print the rest of the password as the database.
 //
 // The driver quotes the URL, password included, in its open and ping errors, so
-// every error leaves here with the URL replaced by the name the source was
-// given (the "env:NAME" it was opened from, never the URL: it carries every
-// connection option, not only the password) and with every secret the URL holds
-// scrubbed, exactly as Open's errors are. What the driver says about the target
-// itself, such as pgx's "user=alice database=shop", is not a secret and stays.
-// The context is reserved for future use, as in Open.
+// every error leaves here with every PostgreSQL URL in it, as given or as pgx
+// writes it again in a parse error, replaced by the name the source was given
+// (the "env:NAME" it was opened from, never the URL: it carries every connection
+// option, not only the password) and with every secret the URL holds scrubbed,
+// exactly as Open's errors are. What the driver says about the target in words of
+// its own, such as pgx's "user=alice database=shop" after a failed connection, or
+// the value of an option it cannot read ("parsing \"soon\""), is not a secret and
+// stays. The context is reserved for future use, as in Open.
 func (r BackendRef) OpenSchemaScan(_ context.Context) (SchemaScanDB, error) {
 	if r.Scheme != "postgres" {
 		return nil, fmt.Errorf("a schema scan through DALgo is available for postgres sources only, not %s", r.Scheme)
@@ -76,11 +79,21 @@ type namedSourceError struct {
 }
 
 func (e namedSourceError) Error() string {
-	if e.url == "" {
-		return e.err.Error() // there is no URL to find: replacing "" would break the text up
+	text := e.err.Error()
+	if e.url != "" { // with no URL there is nothing to find: replacing "" would break the text up
+		text = strings.ReplaceAll(text, strconv.Quote(e.url), strconv.Quote(e.name))
+		text = strings.ReplaceAll(text, e.url, e.name)
 	}
-	text := strings.ReplaceAll(e.err.Error(), strconv.Quote(e.url), strconv.Quote(e.name))
-	return strings.ReplaceAll(text, e.url, e.name)
+	// A driver may write the URL again in a spelling of its own (pgx's parse
+	// error prints the URL as net/url renders it, with the password masked), which
+	// is not the URL as it was given. Any PostgreSQL URL in an error of this open
+	// is this source in some spelling.
+	return postgresURLInText.ReplaceAllLiteralString(text, e.name)
 }
+
+// postgresURLInText finds a postgres:// or postgresql:// URL anywhere in a text:
+// up to the next space, quote or backtick, and not counting the punctuation that
+// follows it in a sentence. A URL holds no space (net/url escapes it).
+var postgresURLInText = regexp.MustCompile("(?i)postgres(?:ql)?://[^\\s\"'`]*[^\\s\"'`.,:;)]")
 
 func (e namedSourceError) Unwrap() error { return e.err }

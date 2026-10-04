@@ -241,3 +241,77 @@ func TestSourceScopeIdentity_APartLeftOutOfTheURLIsWhatTheEnvironmentSays(t *tes
 	assert.Equal(t, identity(full+"?service=prod", nil), identity(full, map[string]string{"PGSERVICE": "prod"}))
 	assert.Equal(t, identity(full+"?service=prod", nil), identity(full+"?service=prod", map[string]string{"PGSERVICE": "staging"}), "the URL's service wins")
 }
+
+// colonInUserURLs are PostgreSQL URLs whose user name holds a colon. A generic
+// URL encoder turns "alice:SECRET" into "alice%3ASECRET", and net/url reads a
+// userinfo with no literal colon as a user name and no password: the password
+// becomes the user, which a scan logs ("user=...") and pgx prints in its errors,
+// and which no redactor knows as a secret. The marker SECRET stands for the part
+// that must never be printed.
+var colonInUserURLs = map[string]string{
+	"an upper-case escape":              "postgres://alice%3ASECRET@db.example.com/shop",
+	"a lower-case escape":               "postgres://alice%3aSECRET@db.example.com/shop",
+	"the postgresql alias, port, query": "postgresql://alice%3ASECRET@db.example.com:5433/shop?sslmode=require",
+	"an escape and a literal colon":     "postgres://alice%3ASECRET:pw@db.example.com/shop",
+	"a colon in the user query":         "postgres://db.example.com/shop?user=alice:SECRET",
+}
+
+func TestParsePostgresTarget_RefusesAUserNameThatHoldsAColon(t *testing.T) {
+	t.Parallel()
+	for name, raw := range colonInUserURLs {
+		got, err := ParsePostgresTarget(raw)
+		assert.Equal(t, PostgresTarget{}, got, name)
+		if assert.Error(t, err, name) {
+			for _, quoted := range []string{"SECRET", "alice", "db.example.com", "shop", "pw"} {
+				assert.NotContains(t, err.Error(), quoted, name+": the error quotes nothing of the URL")
+			}
+			assert.Contains(t, err.Error(), "literal colon", name)
+		}
+	}
+}
+
+func TestParsePostgresTarget_AColonInThePasswordIsStillAPassword(t *testing.T) {
+	t.Parallel()
+	for raw, want := range map[string]PostgresTarget{
+		"postgres://alice:pa:ss@h/shop":        {"h", 0, "shop", "alice"},
+		"postgres://alice:pa%3Ass@h:5433/shop": {"h", 5433, "shop", "alice"},
+		"postgres://alice:@h/shop":             {"h", 0, "shop", "alice"},
+	} {
+		got, err := ParsePostgresTarget(raw)
+		assert.NoError(t, err, raw)
+		assert.Equal(t, want, got, raw)
+	}
+}
+
+func TestSourceScopeIdentity_AColonInTheUserNeverReachesTheIdentity(t *testing.T) {
+	t.Parallel()
+	for name, raw := range colonInUserURLs {
+		if strings.Contains(raw, "?user=") {
+			continue // the user is a query parameter here: not a userinfo to mask
+		}
+		identity := func(url, secret string) string {
+			url = strings.ReplaceAll(url, "SECRET", secret)
+			return sourceScopeIdentity("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": url}))
+		}
+		first := identity(raw, "FIRST")
+		assert.True(t, strings.HasPrefix(first, "env:SHOP_PG_URL#"), name)
+		assert.NotEqual(t, "env:SHOP_PG_URL#unresolved", first, name)
+		assert.Equal(t, first, identity(raw, "SECOND"), name+": a password rotation is not a new scope")
+		assert.NotEqual(t, first, identity(strings.ReplaceAll(raw, "db.example.com", "other.example.com"), "FIRST"), name+": another host is another scope")
+	}
+}
+
+func TestMaskPostgresUserinfo(t *testing.T) {
+	t.Parallel()
+	for raw, want := range map[string]string{
+		"postgres://alice:pw@h/shop":       "postgres://xxxxx@h/shop",
+		"postgres://alice%3Apw@h:5433/db":  "postgres://xxxxx@h:5433/db",
+		"postgres://alice:p@ss@h/shop":     "postgres://xxxxx@h/shop",
+		"postgres://alice:42/pw@h/shop":    "postgres://xxxxx@h/shop",
+		"postgres://h/shop":                "postgres://h/shop",
+		"postgres://h/shop?sslmode=prefer": "postgres://h/shop?sslmode=prefer",
+		"not a url, alice:pw@h":            "not a url, alice:pw@h",
+	} {
+		assert.Equal(t, want, maskPostgresUserinfo(raw), raw)
+	}
+}

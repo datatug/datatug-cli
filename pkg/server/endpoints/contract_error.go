@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
@@ -52,9 +53,9 @@ type contractError struct {
 
 func (e *contractError) Error() string {
 	if e.Field != "" {
-		return fmt.Sprintf("%s: %s: %s", e.Code, e.Field, e.Message)
+		return fmt.Sprintf("%s: %s: %s", e.Code, e.Field, dbcopy.RedactText(e.Message))
 	}
-	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+	return fmt.Sprintf("%s: %s", e.Code, dbcopy.RedactText(e.Message))
 }
 
 // newRequestID returns a fresh opaque correlation ID: 16 random bytes, hex
@@ -250,7 +251,10 @@ func (e *contractError) envelope() apicontract.ErrorEnvelope {
 	if e.RequestID == "" {
 		e.RequestID = newRequestID()
 	}
+	// Message is redacted here, the one place every contract error becomes a
+	// response: many handlers pass an executor's or a driver's own error text
+	// on as the message, and that text can quote a source URL and its password.
 	return apicontract.ErrorEnvelope{Error: apicontract.ErrorBody{
-		Code: string(e.Code), Message: e.Message, Field: e.Field, RequestID: e.RequestID, Targets: e.Targets,
+		Code: string(e.Code), Message: dbcopy.RedactText(e.Message), Field: e.Field, RequestID: e.RequestID, Targets: e.Targets,
 	}}
 }

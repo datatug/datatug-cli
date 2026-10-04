@@ -8,6 +8,7 @@ import (
 	"net/url"
 
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
 
 const maxChatInterpretBody = 20 << 10
@@ -62,5 +63,5 @@ func writeChatError(w http.ResponseWriter, status int, message string) {
 		} `json:"error"`
 	}{Error: struct {
 		Message string `json:"message"`
-	}{Message: message}})
+	}{Message: dbcopy.RedactText(message)}})
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/dal-go/dalgo/dtql"
 	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/ai/agent"
@@ -1162,7 +1163,11 @@ func friendlyQueryError(err error) string {
 	if err == nil {
 		return ""
 	}
-	message := strings.TrimSpace(err.Error())
+	// The text goes to the chat message, the model and the store: a driver
+	// error that quotes a source URL must not carry its password there.
+	// Redact before truncating so a cut can never split a URL into a form the
+	// redaction no longer recognises.
+	message := dbcopy.RedactText(strings.TrimSpace(err.Error()))
 	if len(message) > 240 {
 		message = message[:237] + "..."
 	}

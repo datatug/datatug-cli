@@ -292,7 +292,7 @@ func (s chatSavedQueries) run(ctx context.Context, id string, variables map[stri
 			result, err = runSQLSavedQuery(ctx, s.executor, s.store, s.projectDir, s.env, definition, variables)
 		}
 	case datatug.QueryTypeHTTP:
-		source = "http://" + s.projectDir
+		source = dbcopy.ProjectSourceURL(s.projectDir)
 		result, err = runHTTPSavedQuery(ctx, s.executor, s.projectDir, definition, variables)
 	default:
 		return chat.QueryResult{}, fmt.Errorf("query type %s is not runnable in chat", definition.Type)

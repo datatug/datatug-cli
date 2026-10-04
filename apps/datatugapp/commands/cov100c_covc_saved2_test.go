@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
@@ -72,6 +73,17 @@ func TestCovCQuerySourceURLFromCatalog(t *testing.T) {
 	}
 	if got, err := querySourceURLFromCatalog(mk("ingitdb", "data"), "/p"); err != nil || got != "ingitdb:///p/data" {
 		t.Fatalf("ingitdb: %q %v", got, err)
+	}
+	// A relative project directory that holds an "@" must still give a URL Parse accepts.
+	for _, dir := range []string{"my@proj", "@acme/proj"} {
+		got, err := querySourceURLFromCatalog(mk("ingitdb", "data"), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref, err := dbcopy.Parse(got)
+		if err != nil || !strings.HasSuffix(ref.Path, dir+"/data") {
+			t.Fatalf("%s: %q parses to %q, %v", dir, got, ref.Path, err)
+		}
 	}
 	if _, err := querySourceURLFromCatalog(mk("oracle", "x"), "/p"); err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("unsupported driver: %v", err)

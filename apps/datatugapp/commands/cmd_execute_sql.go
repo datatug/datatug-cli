@@ -7,9 +7,9 @@ import (
 	"io"
 	"log"
 	"os"
-	"regexp"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/datatug/sql2csv"
 	"github.com/google/uuid"
@@ -73,6 +73,22 @@ var (
 	executeSQLColumnTypes = (*sql.Rows).ColumnTypes
 )
 
+// String describes the command for a message, with the password hidden. %+v
+// uses it, so printing the command can never print the password.
+func (v *executeSQLCommand) String() string {
+	hidden := *v
+	if hidden.Password != "" {
+		hidden.Password = "xxxxx"
+	}
+	type fields executeSQLCommand // no String method: avoids recursing
+	return fmt.Sprintf("%+v", fields(hidden))
+}
+
+// redact removes the command's password, and every URL secret, from text.
+func (v *executeSQLCommand) redact(text string) string {
+	return dbcopy.RedactTextWithSecrets(text, v.Password)
+}
+
 // Execute - executes SQL consoleCommand
 func (v *executeSQLCommand) Execute() error {
 	fmt.Printf("Executing (%+v)\n", v)
@@ -95,12 +111,12 @@ func (v *executeSQLCommand) Execute() error {
 
 	var db *sql.DB
 
-	log.Printf("Connecting to: %v\n", regexp.MustCompile("password=.+?(;|$)").ReplaceAllString(connString.String(), "password=******"))
+	log.Printf("Connecting to: %v\n", v.redact(connString.String()))
 
 	// Create connection pool
 
 	if db, err = sql.Open(v.Driver, connString.String()); err != nil {
-		executeSQLFatal("Error creating connection pool: " + err.Error())
+		executeSQLFatal("Error creating connection pool: " + v.redact(err.Error()))
 	}
 	// Close the database connection pool after consoleCommand executes
 	defer func() {
@@ -116,6 +132,7 @@ func (v *executeSQLCommand) Execute() error {
 
 	var rows *sql.Rows
 	if rows, err = db.Query(v.CommandText); err != nil {
+		err = dbcopy.RedactErrorWithLiterals(err, v.Password)
 		log.Printf("Failed to updateUrlConfig %v: %v", v.CommandText, err)
 		return err
 	}

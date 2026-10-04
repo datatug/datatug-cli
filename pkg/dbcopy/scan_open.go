@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
@@ -39,16 +41,46 @@ func ParseWithEnv(rawURL string, lookupEnv func(string) (string, bool)) (Backend
 // it with exact identifiers, so a table is looked up under the name PostgreSQL
 // reports (the driver's default folds every name to lower case).
 //
+// The URL is checked before the driver sees it (ParsePostgresTarget): a URL that
+// net/url and pgx read differently from how it was written, such as a password
+// with an unescaped "/" after digits, is refused, because the driver would
+// connect to the wrong host and print the rest of the password as the database.
+//
 // The driver quotes the URL, password included, in its open and ping errors, so
-// every error leaves here scrubbed with the real URL, exactly as Open's are.
+// every error leaves here with the URL replaced by the name the source was
+// given (the "env:NAME" it was opened from, never the URL: it carries every
+// connection option, not only the password) and with every secret the URL holds
+// scrubbed, exactly as Open's errors are. What the driver says about the target
+// itself, such as pgx's "user=alice database=shop", is not a secret and stays.
 // The context is reserved for future use, as in Open.
 func (r BackendRef) OpenSchemaScan(_ context.Context) (SchemaScanDB, error) {
 	if r.Scheme != "postgres" {
 		return nil, fmt.Errorf("a schema scan through DALgo is available for postgres sources only, not %s", r.Scheme)
 	}
+	if _, err := ParsePostgresTarget(r.Path); err != nil {
+		return nil, fmt.Errorf("source %s: %w", r, err)
+	}
 	db, err := newPostgresDatabase(r.Path, dalgo2postgres.WithIdentifierMode(dalgo2postgres.IdentifierExact))
 	if err != nil {
-		return nil, RedactErrorWithSecrets(err, r.Path)
+		return nil, RedactErrorWithSecrets(namedSourceError{err: err, url: r.Path, name: r.String()}, r.Path)
 	}
 	return db, nil
 }
+
+// namedSourceError is err with the URL of a source replaced, wherever the driver
+// wrote it as text or as a Go string literal, by the name the source was given.
+type namedSourceError struct {
+	err  error
+	url  string
+	name string
+}
+
+func (e namedSourceError) Error() string {
+	if e.url == "" {
+		return e.err.Error() // there is no URL to find: replacing "" would break the text up
+	}
+	text := strings.ReplaceAll(e.err.Error(), strconv.Quote(e.url), strconv.Quote(e.name))
+	return strings.ReplaceAll(text, e.url, e.name)
+}
+
+func (e namedSourceError) Unwrap() error { return e.err }

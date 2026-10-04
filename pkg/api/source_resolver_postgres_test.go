@@ -73,6 +73,7 @@ func TestSourceURLFromCatalog_PostgresRefusesWhatItCannotTrust(t *testing.T) {
 	assert.ErrorContains(t, err, dbcopy.DescriptorEnvAllowList)
 
 	t.Setenv(dbcopy.DescriptorEnvAllowList, "SHOP_PG_URL")
+	t.Setenv("SHOP_PG_URL", "postgres://alice:s3cret@db.example.com/shop")
 	url, err := sourceURLFromCatalog(catalog("listed.json"), dir)
 	require.NoError(t, err)
 	assert.Equal(t, "env:SHOP_PG_URL", url)
@@ -95,7 +96,50 @@ func TestSourceURLFromCatalog_UnsupportedDriverListsPostgres(t *testing.T) {
 	}
 }
 
+func TestSourceURLFromCatalog_PostgresResolvesItsVariableAndRefusesAnotherEngine(t *testing.T) {
+	dir := t.TempDir()
+	writeDescriptor(t, dir, "shop.json", `{"dsnEnv":"DATATUG_SHOP_PG_URL"}`)
+	catalog := datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "shop"}}, Driver: "postgres", Path: "shop.json"}}
+
+	// A variable that is not set is refused when the catalog is resolved, naming only the variable.
+	_, err := sourceURLFromCatalog(catalog, dir)
+	assert.ErrorContains(t, err, `catalog "shop"`)
+	assert.ErrorContains(t, err, "DATATUG_SHOP_PG_URL is not set")
+
+	// A variable that holds another engine would be opened as that engine while
+	// the policy still named the collection by the postgres label.
+	for value, scheme := range map[string]string{
+		"sqlite:///tmp/private-" + pgSecret + ".db": "sqlite",
+		"ingitdb://./private-crm":                   "ingitdb",
+		"http://./private-project":                  "http",
+		"openvaultdb://./private-vault.json":        "openvaultdb",
+	} {
+		t.Setenv("DATATUG_SHOP_PG_URL", value)
+		url, err := sourceURLFromCatalog(catalog, dir)
+		assert.Empty(t, url, scheme)
+		if assert.Error(t, err, scheme) {
+			assert.ErrorContains(t, err, "DATATUG_SHOP_PG_URL must hold a postgres:// URL, not a "+scheme+" source")
+			assert.NotContains(t, err.Error(), "private", scheme, "the error never shows the value")
+			assert.NotContains(t, err.Error(), pgSecret, scheme)
+		}
+	}
+
+	// A value that is no source at all is refused without being shown.
+	t.Setenv("DATATUG_SHOP_PG_URL", "host=db user=alice password="+pgSecret)
+	_, err = sourceURLFromCatalog(catalog, dir)
+	if assert.Error(t, err) {
+		assert.ErrorContains(t, err, "DATATUG_SHOP_PG_URL")
+		assert.NotContains(t, err.Error(), pgSecret)
+	}
+
+	t.Setenv("DATATUG_SHOP_PG_URL", "postgresql://alice:"+pgSecret+"@db.example.com/shop")
+	url, err := sourceURLFromCatalog(catalog, dir)
+	require.NoError(t, err)
+	assert.Equal(t, "env:DATATUG_SHOP_PG_URL", url)
+}
+
 func TestListSources_ExposesAPostgresCatalogThroughItsDescriptor(t *testing.T) {
+	t.Setenv("DATATUG_SHOP_PG_URL", "postgres://alice:s3cret@db.example.com/shop")
 	dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, storage.QueriesFolder), 0o755))
 	writeDescriptor(t, dir, "connections/prod/shop.json", `{"dsnEnv":"DATATUG_SHOP_PG_URL"}`)
@@ -112,4 +156,20 @@ func TestListSources_ExposesAPostgresCatalogThroughItsDescriptor(t *testing.T) {
 	assert.Equal(t, "shop", sources[0].ID)
 	assert.Equal(t, SourceKindSQL, sources[0].Kind)
 	assert.Equal(t, "env:DATATUG_SHOP_PG_URL", sources[0].URL)
+}
+
+func TestListSources_LeavesOutAPostgresCatalogWhoseVariableDoesNotResolve(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, storage.QueriesFolder), 0o755))
+	writeDescriptor(t, dir, "connections/prod/shop.json", `{"dsnEnv":"DATATUG_SHOP_PG_URL"}`)
+	store := mockProjectStore{
+		loadEnvDbCatalogsFunc: func(context.Context, string, ...datatug.StoreOption) (datatug.DbCatalogs, error) {
+			return datatug.DbCatalogs{
+				{DbCatalogBase: datatug.DbCatalogBase{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "shop"}}, Driver: "postgres", Path: "connections/prod/shop.json"}},
+			}, nil
+		},
+	}
+	sources, err := ListSources(context.Background(), store, dir, "prod")
+	require.NoError(t, err)
+	assert.Empty(t, sources, "a source that cannot be resolved is not offered")
 }

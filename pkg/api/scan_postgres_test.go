@@ -200,7 +200,17 @@ func stubOpenSchemaScan(t *testing.T, stub func(dbcopy.BackendRef, context.Conte
 	t.Cleanup(func() { openSchemaScan = original })
 }
 
+// acceptPostgresServer stands in for a datatug-core whose project model records
+// postgres servers, so the scan itself can be tested.
+func acceptPostgresServer(t *testing.T) {
+	t.Helper()
+	original := validatePostgresServer
+	validatePostgresServer = func(datatug.ServerRef) error { return nil }
+	t.Cleanup(func() { validatePostgresServer = original })
+}
+
 func TestScanDbCatalog_Postgres(t *testing.T) {
+	acceptPostgresServer(t)
 	db := &fakeScanDB{}
 	var opened dbcopy.BackendRef
 	stubOpenSchemaScan(t, func(ref dbcopy.BackendRef, _ context.Context) (dbcopy.SchemaScanDB, error) {
@@ -243,6 +253,7 @@ func TestScanDbCatalog_Postgres(t *testing.T) {
 
 func TestScanDbCatalog_PostgresErrors(t *testing.T) {
 	t.Run("the connection parameters did not come from a variable", func(t *testing.T) {
+		acceptPostgresServer(t)
 		stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
 			t.Fatal("nothing may be opened without a variable")
 			return nil, nil
@@ -253,6 +264,7 @@ func TestScanDbCatalog_PostgresErrors(t *testing.T) {
 		assert.ErrorContains(t, err, "--dsn-env")
 	})
 	t.Run("the database cannot be opened", func(t *testing.T) {
+		acceptPostgresServer(t)
 		cause := errors.New("connection refused")
 		stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) { return nil, cause })
 		catalog, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres, Host: "h"}, newShopParams(t))
@@ -261,6 +273,7 @@ func TestScanDbCatalog_PostgresErrors(t *testing.T) {
 		assert.ErrorContains(t, err, "failed to open PostgreSQL")
 	})
 	t.Run("the scan fails and its message is scrubbed with the real URL", func(t *testing.T) {
+		acceptPostgresServer(t)
 		db := &fakeScanDB{listErr: fmt.Errorf("lost connection to %s", shopEnv()["SHOP_PG_URL"])}
 		stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) { return db, nil })
 		_, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres, Host: "h"}, newShopParams(t))

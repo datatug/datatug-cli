@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
@@ -22,9 +23,42 @@ type fakeReader struct {
 	referrers   map[string][]dbschema.Referrer
 	errs        map[string]error // method name -> error
 	refs        []dal.CollectionRef
+	flight      *flightRecorder // when set, every call is held in flight for its delay
+}
+
+// flightRecorder counts the calls that are in flight at once and keeps the peak.
+type flightRecorder struct {
+	mu      sync.Mutex
+	current int
+	peak    int
+	delay   time.Duration
+}
+
+// hold marks one call in flight, keeps it there for the delay, and returns what
+// ends it.
+func (r *flightRecorder) hold() (release func()) {
+	r.mu.Lock()
+	r.current++
+	r.peak = max(r.peak, r.current)
+	r.mu.Unlock()
+	time.Sleep(r.delay)
+	return func() {
+		r.mu.Lock()
+		r.current--
+		r.mu.Unlock()
+	}
+}
+
+func (r *flightRecorder) peakInFlight() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.peak
 }
 
 func (f *fakeReader) record(method string, ref *dal.CollectionRef) error {
+	if f.flight != nil {
+		defer f.flight.hold()()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.calls == nil {

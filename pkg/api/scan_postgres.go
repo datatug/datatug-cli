@@ -35,9 +35,11 @@ var (
 
 // PostgresScanParams are the connection parameters of a PostgreSQL scan. The
 // connection is an environment variable that holds the whole URL, so these
-// parameters hold the variable's name, never the URL's password: they are safe
-// to log and to print. They carry the host, port and user of the URL to name the
-// server in the project, and the catalog the project knows the database as.
+// parameters print as the variable's name, never as the URL: no verb of fmt shows
+// the password or the rest of the URL, for the parameters or a pointer to them
+// (String and GoString). Their accessors do carry the host, port and user of the
+// URL, which name the server in the project and the log line of a scan; the
+// password is the only part of the URL that is never shown.
 type PostgresScanParams struct {
 	dsnEnv         string
 	catalog        string
@@ -108,7 +110,13 @@ func (p *PostgresScanParams) User() string { return p.target.User }
 func (p *PostgresScanParams) ConnectionString() string { return p.ref.Raw }
 
 // String implements dbconnection.Params, with the same text as ConnectionString.
-func (p *PostgresScanParams) String() string { return p.ref.Raw }
+// It has a value receiver so that the parameters print the same through a
+// pointer and as a value: fmt cannot call a method on the unexported fields that
+// hold the URL, and would print them as they are.
+func (p PostgresScanParams) String() string { return p.ref.Raw }
+
+// GoString makes %#v print the same text as String, not the fields.
+func (p PostgresScanParams) GoString() string { return p.String() }
 
 // DSNEnv is the name of the environment variable that holds the URL.
 func (p *PostgresScanParams) DSNEnv() string { return p.dsnEnv }
@@ -122,8 +130,10 @@ func (p *PostgresScanParams) Path() string { return p.descriptorPath }
 func (p *PostgresScanParams) SourceRef() dbcopy.BackendRef { return p.ref }
 
 // WriteDescriptor writes the connection descriptor into projectDir: a file that
-// names the environment variable and nothing else, so no project file holds the
-// password, the user or the host. It replaces a descriptor already there.
+// names the environment variable and nothing else, so the descriptor holds no
+// password, user or host. (The project's server entry records the host and port
+// of the URL at scan time, never the user or the password.) It replaces a
+// descriptor already there.
 func (p *PostgresScanParams) WriteDescriptor(projectDir string) error {
 	// A struct of one string cannot fail to marshal.
 	data, _ := json.MarshalIndent(dbcopy.PostgresDescriptor{DSNEnv: p.dsnEnv}, "", "  ")
@@ -146,6 +156,20 @@ type postgresScanSource interface {
 // openSchemaScan opens a source for a schema scan, a seam so tests scan without
 // a server. Always dbcopy.BackendRef.OpenSchemaScan in production.
 var openSchemaScan = dbcopy.BackendRef.OpenSchemaScan
+
+// validatePostgresServer is the project model's check of a server entry, a seam
+// so a test can stand in for a datatug-core that records postgres servers.
+// Always datatug.ServerRef.Validate in production.
+//
+// A scan ends by recording its server in the project, and datatug-core does not
+// accept a postgres server yet, so every scan would fail at its end, after it had
+// connected and read the whole schema. scanDbCatalog asks first and says so. The
+// refusal lifts itself on the day datatug-core accepts the driver.
+var validatePostgresServer = datatug.ServerRef.Validate
+
+// postgresScanUnavailable is what a PostgreSQL scan answers while the project
+// model cannot record the server it scanned.
+const postgresScanUnavailable = "scanning PostgreSQL is not available in this release: a DataTug project cannot record a postgres server yet"
 
 // scanPostgresCatalog scans a PostgreSQL database through DALgo's schema reader.
 // It opens the source through dbcopy, so a driver error comes back scrubbed with

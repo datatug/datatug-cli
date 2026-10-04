@@ -54,9 +54,15 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// The descriptor goes down before the project that points at it: an orphan
-	// descriptor is harmless, a project that names a missing one is not.
+	// The descriptor goes down before the project that points at it: a project
+	// that names a missing one is worse than a descriptor with no project. But a
+	// project that cannot be saved must leave no descriptor behind, in a directory
+	// with no project, so the project is validated (as SaveProject does first)
+	// before anything is written.
 	if descriptor, ok := connParams.(descriptorWriter); ok {
+		if err = datatugProject.Validate(); err != nil {
+			return fmt.Errorf("failed to save datatug project [%v]: project validation failed: %w", datatugProject.ID, err)
+		}
 		if err = descriptor.WriteDescriptor(v.ProjectDir); err != nil {
 			return err
 		}
@@ -136,13 +142,13 @@ func (v *scanDbCommand) postgresConnectionParams() (dbconnection.Params, error) 
 	for _, flag := range []struct {
 		name  string
 		given bool
-	}{{"--server", v.Host != ""}, {"--port", v.Port != 0}, {"--user", v.User != ""}, {"--password", v.Password != ""}} {
+	}{{"--server", v.Host != ""}, {"--port", v.Port != 0}, {"--user", v.User != ""}, {"--password", v.Password != ""}, {"--path", v.Path != ""}} {
 		if flag.given {
 			refused = append(refused, flag.name)
 		}
 	}
 	if len(refused) > 0 {
-		return nil, fmt.Errorf("%s not accepted for a postgres scan: the host, port, user and password come from the connection URL in an environment variable. Put the URL there and pass --dsn-env NAME, so a password never appears on a command line or in a project file", strings.Join(refused, ", "))
+		return nil, fmt.Errorf("%s not accepted for a postgres scan: the host, port, user and password come from the connection URL in an environment variable, and --path is for sqlite3 files. Put the URL there and pass --dsn-env NAME, so a password never appears on a command line or in a project file", strings.Join(refused, ", "))
 	}
 	if v.DSNEnv == "" {
 		return nil, fmt.Errorf("scanning a postgres database requires --dsn-env NAME, the environment variable that holds the connection URL (postgres://user:password@host/database)")
@@ -166,13 +172,15 @@ func scanCommandArgs() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Adds or updates DB metadata",
-		Long:  "Adds or updates DB metadata from a specific server in a specific environment",
-		RunE:  scanCommandAction,
+		Long: "Adds or updates DB metadata from a specific server in a specific environment.\n\n" +
+			"Scanning PostgreSQL (-D postgres --dsn-env NAME) is not available in this release: a DataTug project cannot record a postgres server yet, " +
+			"so the scan stops before it connects.",
+		RunE: scanCommandAction,
 	}
 	flags := cmd.Flags()
 	flags.StringP("project", "p", "", "Registered project id/name to scan into")
 	flags.StringP("directory", "d", "", "Path to the project directory (alternative to --project)")
-	flags.StringP("driver", "D", "", "DB driver: sqlserver, sqlite3 or postgres")
+	flags.StringP("driver", "D", "", "DB driver: sqlserver or sqlite3 (postgres is not available in this release: a project cannot record a postgres server yet)")
 	flags.StringP("server", "s", "", "Network server / host name")
 	flags.Int("port", 0, "Server network port (default if omitted)")
 	flags.StringP("user", "U", "", "DB login user")
@@ -181,7 +189,7 @@ func scanCommandArgs() *cobra.Command {
 	flags.String("dbmodel", "", "ID of DB model (required for newly scanned databases)")
 	flags.String("env", "", "Environment the DB belongs to. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.")
 	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3)")
-	flags.String("dsn-env", "", "Environment variable that holds the PostgreSQL connection URL (required for -D postgres; the password stays in the variable and is never written to the project). The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
+	flags.String("dsn-env", "", "Environment variable that holds the PostgreSQL connection URL, for -D postgres (not available in this release: a project cannot record a postgres server yet). The password stays in the variable and is never written to the project. The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
 	_ = cmd.MarkFlagRequired("db")
 	_ = cmd.MarkFlagRequired("env")
 	return cmd

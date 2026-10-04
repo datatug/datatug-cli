@@ -9,6 +9,12 @@
 // returns. It cannot tell a view from a table, so every collection is reported
 // as a table; and it reads a single schema, so a foreign key into another schema
 // is left out of the scan.
+//
+// A scan opens connections to somebody's server, so the provider bounds how many
+// reads and counts it has in flight at once (maxConcurrentReads): the core
+// scanner starts a goroutine per table for each of them, and without a bound a
+// schema of a few dozen tables would ask for more connections than a default
+// PostgreSQL server grants.
 package dalgoschema
 
 import (
@@ -36,6 +42,11 @@ const (
 
 	// constraintTypeUnique is the type ListConstraints gives a UNIQUE constraint.
 	constraintTypeUnique = "unique"
+
+	// maxConcurrentReads is how many calls to the reader and the counter the
+	// provider has in flight at once. Each call holds a connection of the scanned
+	// server's pool, and the core scanner starts them without a limit.
+	maxConcurrentReads = 4
 )
 
 // RecordsCounter reads the number of records of one table. A nil count with a
@@ -49,12 +60,13 @@ type RecordsCounter interface {
 // it. counter may be nil, in which case no table has a record count.
 //
 // The provider is safe for the concurrent use the scanner makes of it: it reads
-// each table's description, indexes and constraints once and shares them.
+// each table's description, indexes and constraints once and shares them, and it
+// never has more than maxConcurrentReads calls to reader and counter in flight.
 func NewSchemaProvider(reader dbschema.SchemaReader, counter RecordsCounter, catalog, schema string) schemer.SchemaProvider {
 	if reader == nil {
 		panic("reader cannot be nil")
 	}
-	return &provider{reader: reader, counter: counter, catalog: catalog, schema: schema}
+	return &provider{reader: reader, counter: counter, catalog: catalog, schema: schema, slots: make(chan struct{}, maxConcurrentReads)}
 }
 
 type provider struct {
@@ -63,8 +75,31 @@ type provider struct {
 	catalog string
 	schema  string
 
+	// slots holds one entry for every call to the reader or the counter in flight.
+	slots chan struct{}
+
 	defs    memo[*dbschema.CollectionDef]
 	indexes memo[[]dbschema.IndexDef]
+
+	listedMu sync.Mutex
+	// listed is the names of the collections the reader last listed, nil until it
+	// has.
+	listed map[string]bool
+}
+
+// limited runs call once one of the slots is free, and releases the slot when it
+// returns. It stops waiting when ctx ends. A call holds a slot only while it
+// talks to the reader or the counter, never while it waits for another call, so
+// no two calls can wait on each other.
+func limited[V any](ctx context.Context, slots chan struct{}, call func() (V, error)) (V, error) {
+	select {
+	case slots <- struct{}{}:
+		defer func() { <-slots }()
+		return call()
+	case <-ctx.Done():
+		var none V
+		return none, ctx.Err()
+	}
 }
 
 var _ schemer.SchemaProvider = (*provider)(nil)
@@ -125,7 +160,7 @@ func (p *provider) key(ref *dal.CollectionRef) string {
 
 func (p *provider) describe(ctx context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {
 	return p.defs.get(p.key(ref), func() (*dbschema.CollectionDef, error) {
-		def, err := p.reader.DescribeCollection(ctx, ref)
+		def, err := limited(ctx, p.slots, func() (*dbschema.CollectionDef, error) { return p.reader.DescribeCollection(ctx, ref) })
 		if err != nil {
 			return nil, fmt.Errorf("describe %s: %w", ref.Name(), err)
 		}
@@ -135,7 +170,7 @@ func (p *provider) describe(ctx context.Context, ref *dal.CollectionRef) (*dbsch
 
 func (p *provider) listIndexes(ctx context.Context, ref *dal.CollectionRef) ([]dbschema.IndexDef, error) {
 	return p.indexes.get(p.key(ref), func() ([]dbschema.IndexDef, error) {
-		indexes, err := p.reader.ListIndexes(ctx, ref)
+		indexes, err := limited(ctx, p.slots, func() ([]dbschema.IndexDef, error) { return p.reader.ListIndexes(ctx, ref) })
 		if err != nil {
 			return nil, fmt.Errorf("list indexes of %s: %w", ref.Name(), err)
 		}
@@ -143,11 +178,43 @@ func (p *provider) listIndexes(ctx context.Context, ref *dal.CollectionRef) ([]d
 	})
 }
 
+// listCollections reads the collections the reader reports and remembers their
+// names, so a key to a collection that is not among them can be told apart.
+func (p *provider) listCollections(ctx context.Context) ([]dal.CollectionRef, map[string]bool, error) {
+	refs, err := limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return p.reader.ListCollections(ctx, nil) })
+	if err != nil {
+		return nil, nil, fmt.Errorf("list collections: %w", err)
+	}
+	names := make(map[string]bool, len(refs))
+	for i := range refs {
+		names[refs[i].Name()] = true
+	}
+	p.listedMu.Lock()
+	p.listed = names
+	p.listedMu.Unlock()
+	return refs, names, nil
+}
+
+// isListed reports whether the reader lists a collection of that name, reading
+// the listing first if nobody has.
+func (p *provider) isListed(ctx context.Context, name string) (bool, error) {
+	p.listedMu.Lock()
+	names := p.listed
+	p.listedMu.Unlock()
+	if names == nil {
+		var err error
+		if _, names, err = p.listCollections(ctx); err != nil {
+			return false, err
+		}
+	}
+	return names[name], nil
+}
+
 // GetCollections lists every collection the reader reports, as a table.
 func (p *provider) GetCollections(ctx context.Context, _ *record.Key) (schemer.CollectionsReader, error) {
-	refs, err := p.reader.ListCollections(ctx, nil)
+	refs, _, err := p.listCollections(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list collections: %w", err)
+		return nil, err
 	}
 	collections := make([]*datatug.CollectionInfo, len(refs))
 	for i := range refs {
@@ -295,9 +362,11 @@ func (r *indexColumnsReader) NextIndexColumn() (*schemer.IndexColumn, error) {
 // GetConstraints returns the table's foreign keys and unique constraints, one
 // row per constraint column, the way the scanner groups them. It leaves out the
 // primary key, which the scanner takes from the columns: it would otherwise add
-// every key column twice. A foreign key into another schema is left out too:
-// the scan holds one schema, and the scanner fails on a key whose table it does
-// not have.
+// every key column twice. A foreign key into another schema is left out too, and
+// so is one into a table of this schema the reader did not list (it lists the
+// tables the role may use but reads every key from the catalogs): the scan holds
+// the tables it was told about, and the scanner fails on a key whose table it
+// does not have.
 func (p *provider) GetConstraints(ctx context.Context, _, schema, table string) (schemer.ConstraintsReader, error) {
 	ref := p.ref(schema, table)
 	def, err := p.describe(ctx, ref)
@@ -311,6 +380,15 @@ func (p *provider) GetConstraints(ctx context.Context, _, schema, table string) 
 		if key.ReferencedNamespace != "" {
 			log.Printf("dalgoschema: foreign key %s of %s.%s is left out: it references %s.%s, outside the scanned schema",
 				key.Name, scanned, table, key.ReferencedNamespace, key.ReferencedCollection)
+			continue
+		}
+		listed, err := p.isListed(ctx, key.ReferencedCollection)
+		if err != nil {
+			return nil, err
+		}
+		if !listed {
+			log.Printf("dalgoschema: foreign key %s of %s.%s is left out: it references %s.%s, which the reader did not list (the role may not see it)",
+				key.Name, scanned, table, scanned, key.ReferencedCollection)
 			continue
 		}
 		for i, field := range key.Fields {
@@ -341,7 +419,7 @@ func (p *provider) GetConstraints(ctx context.Context, _, schema, table string) 
 // table. The reader lists a constraint's name and type; the columns are those
 // of the unique index of the same name.
 func (p *provider) uniqueConstraints(ctx context.Context, ref *dal.CollectionRef, tableRef schemer.TableRef) ([]*schemer.Constraint, error) {
-	listed, err := p.reader.ListConstraints(ctx, ref)
+	listed, err := limited(ctx, p.slots, func() ([]dbschema.ConstraintDef, error) { return p.reader.ListConstraints(ctx, ref) })
 	if err != nil {
 		if errors.Is(err, dal.ErrNotSupported) {
 			return nil, nil
@@ -435,7 +513,7 @@ func (r *foreignKeysReader) NextForeignKey() (schemer.ForeignKey, error) {
 // and columns; the key's name and the referenced columns come from describing
 // the referencing table, and are left empty if no key of it matches.
 func (p *provider) GetReferrers(ctx context.Context, schema, table string) ([]schemer.ForeignKey, error) {
-	referrers, err := p.reader.ListReferrers(ctx, p.ref(schema, table))
+	referrers, err := limited(ctx, p.slots, func() ([]dbschema.Referrer, error) { return p.reader.ListReferrers(ctx, p.ref(schema, table)) })
 	if err != nil {
 		if errors.Is(err, dal.ErrNotSupported) {
 			return nil, nil
@@ -474,7 +552,7 @@ func (p *provider) RecordsCount(ctx context.Context, _, schema, table string) (*
 	if p.counter == nil {
 		return nil, nil
 	}
-	return p.counter.CountRecords(ctx, schema, table)
+	return limited(ctx, p.slots, func() (*int, error) { return p.counter.CountRecords(ctx, schema, table) })
 }
 
 func fieldNames(fields []dal.FieldName) []string {

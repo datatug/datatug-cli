@@ -3,9 +3,13 @@ package dalgoschema
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
@@ -514,4 +518,141 @@ func TestDescribeIsSharedBetweenBareAndQualifiedReferences(t *testing.T) {
 	_, err = provider.GetForeignKeys(context.Background(), "public", "Order")
 	require.NoError(t, err)
 	assert.Equal(t, 1, reader.callCount("DescribeCollection"))
+}
+
+// flightCounter is a RecordsCounter whose every count is held in flight.
+type flightCounter struct{ flight *flightRecorder }
+
+func (c flightCounter) CountRecords(context.Context, string, string) (*int, error) {
+	defer c.flight.hold()()
+	return intPtr(1), nil
+}
+
+// manyTablesReader describes n tables of one column each, no keys.
+func manyTablesReader(n int) *fakeReader {
+	reader := &fakeReader{defs: map[string]*dbschema.CollectionDef{}}
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("Table%03d", i)
+		reader.collections = append(reader.collections, name)
+		reader.defs[name] = &dbschema.CollectionDef{Name: name, Fields: []dbschema.FieldDef{{Name: "Id", Type: dbschema.Int}}, PrimaryKey: fields("Id")}
+	}
+	return reader
+}
+
+// The core scanner starts a goroutine per table for its description, its
+// indexes and its count, and none of them is limited. Left alone, a schema of
+// a hundred tables would open hundreds of connections to the scanned server at
+// once, and PostgreSQL refuses clients past max_connections (100 by default).
+func TestScanCatalog_BoundsTheReadsInFlight(t *testing.T) {
+	const tables = 100
+	flight := &flightRecorder{delay: 2 * time.Millisecond}
+	reader := manyTablesReader(tables)
+	reader.flight = flight
+
+	catalog, err := schemer.NewScanner(NewSchemaProvider(reader, flightCounter{flight}, "shop", "public")).ScanCatalog(context.Background(), "shop")
+	require.NoError(t, err)
+	require.Len(t, catalog.Schemas, 1)
+	assert.Len(t, catalog.Schemas[0].Tables, tables)
+	for _, table := range catalog.Schemas[0].Tables {
+		require.NotNil(t, table.RecordsCount, table.Name())
+	}
+
+	assert.Equal(t, tables, reader.callCount("DescribeCollection"))
+	assert.Equal(t, tables, reader.callCount("ListIndexes"))
+	assert.Equal(t, tables, reader.callCount("ListConstraints"))
+	peak := flight.peakInFlight()
+	assert.Equal(t, 4, maxConcurrentReads, "a handful of connections: a few reads in parallel, never one per table")
+	assert.LessOrEqual(t, peak, maxConcurrentReads, "reads and counts together never exceed the bound")
+	assert.Greater(t, peak, 1, "the bound limits the reads, it does not serialize them")
+}
+
+// The reader lists tables by the privileges of the role but reads foreign keys
+// from the catalogs, which hold every key. A least-privilege role therefore
+// meets a key to a table it was not told about, and the core scanner fails a
+// whole scan on such a key.
+func TestScanCatalog_LeavesOutAForeignKeyToATableTheReaderDidNotList(t *testing.T) {
+	reader := shopReader()
+	reader.defs["OrderLine"].ForeignKeys = append(reader.defs["OrderLine"].ForeignKeys, dbschema.ForeignKeyDef{
+		Name: "fk_line_hidden", Fields: fields("Sku"), ReferencedCollection: "Hidden", ReferencedFields: fields("Sku"),
+	})
+	var logged strings.Builder
+	saved := log.Writer()
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(saved) })
+
+	catalog, err := schemer.NewScanner(newShopProvider(reader, nil)).ScanCatalog(context.Background(), "shop")
+	require.NoError(t, err)
+	line := catalog.Schemas[0].Tables[2]
+	require.Equal(t, "OrderLine", line.Name())
+	require.Len(t, line.ForeignKeys, 1, "the key to the table that was not listed is left out")
+	assert.Equal(t, "fk_line_order", line.ForeignKeys[0].Name)
+	assert.Contains(t, logged.String(), "fk_line_hidden")
+	assert.Contains(t, logged.String(), "Hidden")
+	assert.Contains(t, logged.String(), "did not list")
+}
+
+func TestGetConstraints_ListsTheCollectionsItselfWhenNobodyDid(t *testing.T) {
+	ctx := context.Background()
+	reader := shopReader()
+	reader.defs["Order"].ForeignKeys = []dbschema.ForeignKeyDef{
+		{Name: "fk_hidden", Fields: fields("CustomerId"), ReferencedCollection: "Hidden", ReferencedFields: fields("Id")},
+	}
+	provider := newShopProvider(reader, nil)
+
+	constraints, err := provider.GetConstraints(ctx, "shop", "public", "Order")
+	require.NoError(t, err)
+	_, err = constraints.NextConstraint()
+	assert.ErrorIs(t, err, io.EOF, "the only key points at a table that is not listed")
+	_, err = provider.GetConstraints(ctx, "shop", "public", "OrderLine")
+	require.NoError(t, err)
+	assert.Equal(t, 1, reader.callCount("ListCollections"), "the listing is read once and shared")
+
+	reader = shopReader()
+	reader.errs = map[string]error{"ListCollections": errors.New("boom")}
+	_, err = newShopProvider(reader, nil).GetConstraints(ctx, "shop", "public", "Order")
+	assert.ErrorContains(t, err, "list collections")
+	assert.ErrorContains(t, err, "boom")
+}
+
+func TestLimited_StopsWaitingForASlotWhenTheContextEnds(t *testing.T) {
+	slots := make(chan struct{}, 1)
+	slots <- struct{}{} // the only slot is taken
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	called := false
+	got, err := limited(ctx, slots, func() (int, error) { called = true; return 7, nil })
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, got)
+	assert.False(t, called, "nothing is read once the context has ended")
+	assert.Len(t, slots, 1, "a call that never got a slot gives none back")
+
+	<-slots
+	got, err = limited(context.Background(), slots, func() (int, error) { return 7, nil })
+	assert.NoError(t, err)
+	assert.Equal(t, 7, got)
+	assert.Empty(t, slots, "the slot is back after the call")
+
+	boom := errors.New("boom")
+	_, err = limited(context.Background(), slots, func() (int, error) { return 0, boom })
+	assert.ErrorIs(t, err, boom)
+	assert.Empty(t, slots, "a failed call gives its slot back too")
+}
+
+func TestProvider_AReadStopsWaitingWhenTheScanIsCancelled(t *testing.T) {
+	reader := shopReader()
+	provider := newShopProvider(reader, fakeCounter{}).(*provider)
+	for range maxConcurrentReads {
+		provider.slots <- struct{}{} // every slot is busy
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := provider.GetCollections(ctx, nil)
+	assert.ErrorIs(t, err, context.Canceled)
+	_, err = provider.RecordsCount(ctx, "shop", "public", "Customer")
+	assert.ErrorIs(t, err, context.Canceled)
+	_, err = provider.GetForeignKeys(ctx, "public", "Order")
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, reader.callCount("ListCollections")+reader.callCount("DescribeCollection"), "nothing reached the reader")
 }

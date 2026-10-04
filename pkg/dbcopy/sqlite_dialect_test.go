@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
@@ -12,6 +13,8 @@ import (
 	"github.com/dal-go/dalgo2sqlite"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
+	"github.com/ingitdb/dalgo2ingitdb"
+	"github.com/ingitdb/ingitdb-go/ingitdb/validator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,16 +66,18 @@ func TestOpen_SQLiteSetsStructuredQueryDialect(t *testing.T) {
 
 // TestCopyRows_SQLiteSourceNonASCIIAndEscapedFilterValue is the read-path
 // acceptance: a column with a non-ASCII name, filtered by a value holding a
-// backslash and a newline, is read through the source Open returns.
+// backslash, a newline and a bracketed fragment, is read through the source
+// Open returns. The bracketed fragment makes this fail on the legacy emitter,
+// which strips every [...] pair from the statement, string literals included.
 func TestCopyRows_SQLiteSourceNonASCIIAndEscapedFilterValue(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	const tricky = "a\\b\nc"
+	const tricky = "a\\b\n[c]"
 	path := filepath.Join(t.TempDir(), "src.db")
 	makeSQLiteFile(t, path,
 		`CREATE TABLE people (id INTEGER PRIMARY KEY, "naïve" TEXT)`,
 		`INSERT INTO people (id, "naïve") VALUES (1, 'plain')`,
-		`INSERT INTO people (id, "naïve") VALUES (2, 'a\b`+"\n"+`c')`,
+		`INSERT INTO people (id, "naïve") VALUES (2, 'a\b`+"\n"+`[c]')`,
 	)
 	src, err := BackendRef{Scheme: "sqlite", Path: path}.Open(ctx)
 	require.NoError(t, err)
@@ -125,4 +130,74 @@ type captureInsertsTx struct {
 func (c captureInsertsTx) InsertMulti(_ context.Context, records []record.Record, _ ...dal.InsertOption) error {
 	*c.inserted = append(*c.inserted, records...)
 	return nil
+}
+
+// copyInvoicesWhere copies the Chinook Invoice table, filtered by one
+// predicate, from a source opened through BackendRef.Open (so with the
+// production dialect) and returns the number of rows copied.
+func copyInvoicesWhere(t *testing.T, field string, op filter.OperatorToken, value string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	chinook, err := filepath.Abs("testdata/chinook.db")
+	require.NoError(t, err)
+	src, err := BackendRef{Scheme: "sqlite", Path: chinook}.Open(ctx)
+	require.NoError(t, err)
+	tgt, err := dalgo2ingitdb.NewDatabase(t.TempDir(), validator.NewCollectionsReader())
+	require.NoError(t, err)
+	summary, err := Copy(ctx, src, tgt, CopyOpts{Filters: &filter.Directives{
+		IncludeTables: []string{"Invoice"},
+		Where: map[string]*filter.PredicateGroup{
+			"Invoice": {
+				Operator:   filter.And,
+				Conditions: []filter.Predicate{{Field: field, Operator: op, Value: value}},
+			},
+		},
+	}})
+	require.NoError(t, err)
+	return summary.RowsByTable["Invoice"]
+}
+
+// TestCopy_SQLiteSourceDateFilter pins `--where` on a DATETIME column to the
+// counts the legacy emitter returned (verified with sqlite3 against the
+// fixture: 329 at or after 2010-01-01, 83 before, 412 in all). SQLite stores
+// the column as text, so the date must reach the compiler as a text constant;
+// as a time.Time its range guard (typeof IN integer, real) matches no row.
+func TestCopy_SQLiteSourceDateFilter(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		op   filter.OperatorToken
+		want int64
+	}{
+		"greater or equal": {filter.OpGreaterOrEqual, 329},
+		"less than":        {filter.OpLessThan, 83},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, copyInvoicesWhere(t, "InvoiceDate", tc.op, "2010-01-01"))
+		})
+	}
+}
+
+// TestSQLiteTextTimeConstants covers the rewrite directly: a time.Time
+// constant becomes its RFC 3339 text, every other condition shape is kept,
+// and the input slice is not modified.
+func TestSQLiteTextTimeConstants(t *testing.T) {
+	t.Parallel()
+	when := time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC)
+	group := dal.NewGroupCondition(dal.And, dal.WhereField("a", dal.Equal, 1))
+	fieldCmp := dal.WhereField("a", dal.Equal, dal.Field("b"))
+	in := []dal.Condition{
+		dal.WhereField("d", dal.GreaterOrEqual, when),
+		dal.WhereField("s", dal.Equal, "x"),
+		fieldCmp,
+		group,
+	}
+	got := sqliteTextTimeConstants(in)
+	require.Len(t, got, 4)
+	assert.Equal(t, dal.WhereField("d", dal.GreaterOrEqual, "2010-01-01T00:00:00Z"), got[0])
+	assert.Equal(t, in[1], got[1])
+	assert.Equal(t, fieldCmp, got[2])
+	assert.Equal(t, group, got[3])
+	assert.Equal(t, dal.WhereField("d", dal.GreaterOrEqual, when), in[0], "input untouched")
+	assert.Empty(t, sqliteTextTimeConstants(nil))
 }

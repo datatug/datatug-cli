@@ -9,18 +9,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// trickyValue holds a backslash and a newline, which the legacy text emitter
-// refuses to render and the sqlite dialect binds as a parameter.
-const trickyValue = "a\\b\nc"
+// trickyValue holds a backslash, a newline and a bracketed fragment. The legacy
+// text emitter refuses the first two and strips every [...] pair from the
+// statement, string literals included; the sqlite dialect binds the value as a
+// parameter.
+const trickyValue = "a\\b\n[c]"
 
 // TestViewerReads_NonASCIIColumnAndEscapedFilterValue is the viewer's read-path
 // acceptance: the content load reads a table with a non-ASCII column name, and
-// the foreign-key preview filters it by a value with a backslash and a newline.
+// the foreign-key preview filters it by a value with a backslash, a newline and
+// a bracketed fragment.
 func TestViewerReads_NonASCIIColumnAndEscapedFilterValue(t *testing.T) {
 	path := createTestSqliteDb(t,
 		`CREATE TABLE people (id INTEGER PRIMARY KEY, "naïve" TEXT)`,
 		`INSERT INTO people (id, "naïve") VALUES (1, 'plain')`,
-		`INSERT INTO people (id, "naïve") VALUES (2, 'a\b`+"\n"+`c')`,
+		`INSERT INTO people (id, "naïve") VALUES (2, 'a\b`+"\n"+`[c]')`,
 	)
 	db := dtviewers.GetSQLiteDbContext(path)
 

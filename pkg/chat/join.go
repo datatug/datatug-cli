@@ -98,7 +98,7 @@ type ForeignKeyJoinApplication struct {
 }
 
 func (a ForeignKeyJoinApplication) Candidates(ctx context.Context, record RecordSet) ([]JoinCandidate, error) {
-	if a.Source == "" || record.Source != a.Source {
+	if a.Source == "" || !storedSourceNames(record.Source, a.Source) {
 		return []JoinCandidate{}, nil
 	}
 	snapshot, err := a.snapshot(ctx)
@@ -145,7 +145,7 @@ func (a ForeignKeyJoinApplication) apply(ctx context.Context, record RecordSet, 
 	if a.Executor == nil {
 		return QueryResult{}, fmt.Errorf("JOIN exploration has no secure query executor")
 	}
-	if a.Source == "" || record.Source != a.Source {
+	if a.Source == "" || !storedSourceNames(record.Source, a.Source) {
 		return QueryResult{}, fmt.Errorf("selected foreign-key edge is not available for this source")
 	}
 	snapshot, err := a.snapshot(ctx)

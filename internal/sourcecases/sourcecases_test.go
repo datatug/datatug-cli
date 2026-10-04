@@ -59,7 +59,7 @@ func TestAll_CoversEverySchemeCasingAndPosition(t *testing.T) {
 			wrapped++
 		}
 	}
-	for _, position := range []string{"userinfo", "empty user name", "token as user name", "misread as userinfo", "empty user name misread as userinfo", "query", "fragment"} {
+	for _, position := range []string{"userinfo", "empty user name", "token as user name", "user name with a slash", "misread as userinfo", "empty user name misread as userinfo", "query", "fragment"} {
 		if !wantPositions[position] {
 			t.Errorf("no case with the secret in position %q", position)
 		}
@@ -71,6 +71,48 @@ func TestAll_CoversEverySchemeCasingAndPosition(t *testing.T) {
 	}
 	if wrapped == 0 || wrapped == len(cases) {
 		t.Fatalf("%d of %d cases are wrapped", wrapped, len(cases))
+	}
+}
+
+// A user name or a token that holds a slash puts the colon or the "@" after a
+// slash. It is a shape of every scheme, bare and wrapped: it was once generated
+// only inside a wrapped URL, which hid that the path schemes showed it.
+func TestAll_ASlashInTheUserNameOrTokenIsGeneratedForEverySchemeBareAndWrapped(t *testing.T) {
+	t.Parallel()
+	counts := map[string]map[bool]int{}
+	for _, c := range All() {
+		if c.Style != "token with slash" && c.Style != "user name with slash" {
+			continue
+		}
+		scheme := strings.ToLower(c.Source[:strings.Index(c.Source, "://")])
+		key := c.Style + " " + scheme
+		if counts[key] == nil {
+			counts[key] = map[bool]int{}
+		}
+		counts[key][c.Wrapped]++
+		for _, secret := range c.Secrets {
+			if !strings.Contains(secret, "/") && c.Style == "token with slash" {
+				t.Fatalf("case %q: the secret %q holds no slash", c.Name, secret)
+			}
+		}
+		before, _, _ := strings.Cut(c.Source, "@")
+		if userinfo := before[strings.LastIndex(before, "://")+3:]; !strings.Contains(userinfo, "/") {
+			t.Fatalf("case %q: no slash stands in the userinfo %q", c.Name, userinfo)
+		}
+	}
+	for _, scheme := range Schemes {
+		for _, style := range []string{"token with slash", "user name with slash"} {
+			if counts[style+" "+scheme][false] == 0 {
+				t.Errorf("no bare %s case for %s", style, scheme)
+			}
+		}
+	}
+	for _, scheme := range wrapperSchemes {
+		for _, style := range []string{"token with slash", "user name with slash"} {
+			if counts[style+" "+scheme][true] == 0 {
+				t.Errorf("no wrapped %s case for %s", style, scheme)
+			}
+		}
 	}
 }
 
@@ -95,7 +137,7 @@ func TestCommandCases_IsASmallerSetWithTheNastiestStyles(t *testing.T) {
 	}
 	for _, c := range some {
 		switch c.Style {
-		case "with spaces", "digits then slash", "with at sign", "word", "digits only", "token", "token with slash":
+		case "with spaces", "digits then slash", "with at sign", "word", "digits only", "token", "token with slash", "user name with slash":
 		default:
 			t.Fatalf("unexpected style %q in the command set", c.Style)
 		}
@@ -126,5 +168,32 @@ func TestMixedCase(t *testing.T) {
 	t.Parallel()
 	if got := mixedCase("postgres"); got != "PoStGrEs" {
 		t.Fatalf("mixedCase = %q", got)
+	}
+}
+
+func TestWithoutGeneratedIdentifiers(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, in, want string }{
+		{"uuid", "id 6f1c2a9e-3b4d-4c5e-8f60-1a2b3c4d5e6f end", "id   end"},
+		{"timestamp with a fraction", "at 2026-10-05T10:11:12.123456789Z end", "at   end"},
+		{"timestamp with an offset", "at 2026-10-05T10:11:12+02:00 end", "at   end"},
+		{"timestamp without a fraction", "at 2026-10-05T10:11:12Z end", "at   end"},
+		{"digest", "scope 8df98b088eef33da4a2c7e1f0b9d6a3c5e7f9b1d3a5c7e9f1b3d5a7c9e1f3b5d end", "scope   end"},
+		{"file name", "/h/.datatug/chat/8df98b088eef33da4a2c7e1f.sqlite", "/h/.datatug/chat/ .sqlite"},
+		{"digits of a password stay", "pw 12345678 and abc12 and 2026-10-05", "pw 12345678 and abc12 and 2026-10-05"},
+		{"a short hex run stays", "token f69f5 and 0123456789abcdef", "token f69f5 and 0123456789abcdef"},
+	}
+	for _, tc := range tests {
+		if got := WithoutGeneratedIdentifiers(tc.in); got != tc.want {
+			t.Errorf("%s: WithoutGeneratedIdentifiers(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+	// A secret that sits inside an identifier by chance is not a leak; one that stands beside it is.
+	c := Case{Secrets: []string{"12345678"}}
+	if got := Leaks(c, WithoutGeneratedIdentifiers("t 2026-10-05T10:11:12.123456789Z")); len(got) != 0 {
+		t.Errorf("a run of digits in a timestamp: %v", got)
+	}
+	if got := Leaks(c, WithoutGeneratedIdentifiers("t 2026-10-05T10:11:12Z password 12345678")); len(got) == 0 {
+		t.Errorf("a secret beside a timestamp is still found: %v", got)
 	}
 }

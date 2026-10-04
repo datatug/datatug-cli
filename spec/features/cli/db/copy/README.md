@@ -88,7 +88,7 @@ The command MUST introspect the source schema via the DALgo `dbschema` package (
 
 #### REQ: source-introspection-failure
 
-If the source URL parses cleanly but the source backend cannot be opened (file missing, connection refused, auth failure), the command MUST exit `4` (connection failure) with stderr naming the source URL and the underlying error.
+If the source URL parses cleanly but the source backend cannot be opened (file missing, connection refused, auth failure), the command MUST exit `4` (connection failure) with stderr naming the source as it is displayed (scheme, host, port and path, never a user name, a password or a query string) and a fixed reason: the file or directory does not exist, permission denied, the attempt timed out or was cancelled, or the connection was refused; for any other cause, a sentence saying the driver could not open the source. The driver's own text MUST NOT be shown, because a driver can quote the connection string, which holds the password.
 
 If introspection succeeds in opening the source but `ListTables` returns an empty list, the command MUST exit `0` after emitting a single stderr line "source has no tables; nothing to copy". No target writes occur.
 
@@ -351,7 +351,7 @@ From the source Idea:
 
 **Given** a SQLite file path `./does-not-exist.db` that the filesystem does not have
 **When** the user runs `datatug db copy --from sqlite:///./does-not-exist.db --to sqlite:///tmp/out.db`
-**Then** the command exits `4`; stderr names the source URL and the underlying error (e.g. "no such file or directory").
+**Then** the command exits `4`; stderr names the source as it is displayed and says the file does not exist, in a fixed sentence and not in the driver's words.
 
 ### AC: concurrency-cap-warns-on-explicit-request
 

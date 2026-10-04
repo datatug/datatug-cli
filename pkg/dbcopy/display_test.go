@@ -74,6 +74,28 @@ func TestSourceDisplay(t *testing.T) {
 		{"openvaultdb path", "openvaultdb:///tmp/c.json", "openvaultdb:///tmp/c.json"},
 		{"internal unavailable source", "unavailable://Chinook%20db", "unavailable://Chinook%20db"},
 		{"path that holds an at sign in a later segment", "https:///Users/alex/team@work/project", "https:///Users/alex/team@work/project"},
+		// What stands in front of the last "@" is userinfo unless the text is certainly a path (it starts with "/", "./",
+		// "../", "~/", "\\" or a drive letter): a user name or a token may hold a slash.
+		{"ingitdb token that holds a slash", "ingitdb://ab/cdefghij@github.com/org/repo", "ingitdb://github.com/org/repo"},
+		{"http user name that holds a slash", "http://team/alice:s3cret@host/x", "http://host/x"},
+		{"https user name that holds a slash and no password", "https://team/s3cret@host/x", "https://host/x"},
+		{"openvaultdb user name that holds a slash", "openvaultdb://alice/s3cret@host/c.json", "openvaultdb://host/c.json"},
+		{"sqlite token that holds a slash", "sqlite://ab/s3cret@host/x.db", "sqlite://host/x.db"},
+		{"sqlite without slashes and a token that holds a slash", "sqlite:ab/s3cret@host/x.db", "sqlite:host/x.db"},
+		{"relative directory with an at sign in a later segment reads as userinfo", "ingitdb://dir/team@work/project", "ingitdb://work/project"},
+		{"explicit relative directory keeps its at sign", "ingitdb://./dir/team@work/project", "ingitdb://./dir/team@work/project"},
+		{"parent-relative directory keeps its at sign", "http://../team@work/project", "http://../team@work/project"},
+		{"home directory keeps its at sign", "ingitdb://~/team@work/project", "ingitdb://~/team@work/project"},
+		{"UNC path keeps its at sign", `sqlite://\\server\share@x\db.sqlite`, `sqlite://\\server\share@x\db.sqlite`},
+		{"relative directory without an at sign", "ingitdb://dir/project", "ingitdb://dir/project"},
+		// The file schemes dburl reads are paths, not hosts.
+		{"sqlite3 relative file", "sqlite3:./x.db", "sqlite3:./x.db"},
+		{"sqlite3 absolute file", "sqlite3:///tmp/a/x.db", "sqlite3:///tmp/a/x.db"},
+		{"sqlite3 key in the query", "SQLITE3:///tmp/a/x.db?_pragma_key=s3cret", "sqlite3:///tmp/a/x.db"},
+		{"file scheme", "file:./x.db?mode=ro", "file:./x.db"},
+		{"duckdb file", "duckdb:///tmp/x.duckdb", "duckdb:///tmp/x.duckdb"},
+		{"modernc sqlite alias", "mq:///tmp/x.db", "mq:///tmp/x.db"},
+		{"file scheme with a token that holds a slash", "file://ab/s3cret@host/x.db", "file://host/x.db"},
 		{"windows drive path under http", `http://C:\work\a@b`, `http://C:\work\a@b`},
 		{"windows drive path with slashes under https", `https://C:/work/a@b/proj`, `https://C:/work/a@b/proj`},
 		{"windows drive path under sqlite", `sqlite://C:\data\x.db`, `sqlite://C:\data\x.db`},
@@ -118,11 +140,37 @@ func TestSourceDisplay(t *testing.T) {
 
 func TestSourceIDDisplay(t *testing.T) {
 	t.Parallel()
-	for _, id := range []string{"chinook", "Chinook-local_2.db", "a"} {
+	// A plain name: letters and digits of any script, "." "_" and "-".
+	for _, id := range []string{"chinook", "Chinook-local_2.db", "a", "Café", "データ-1", "Straße.v2"} {
 		assert.Equal(t, id, SourceIDDisplay(id))
 	}
-	for _, id := range []string{"", "postgres://alice:s3cret@h/db", "alice:s3cret@h", "s3 cret", "-lead", strings.Repeat("a", 129), "a/b"} {
-		assert.Equal(t, InvalidSourceID, SourceIDDisplay(id), id)
+	for _, id := range []string{"", "postgres://alice:s3cret@h/db", "alice:s3cret@h", "s3 cret", "-lead", strings.Repeat("a", 129), strings.Repeat("é", 129), "a/b", "a\x00b", "a\u202eb"} {
+		assert.Equal(t, SourceIDNotShown, SourceIDDisplay(id), id)
+	}
+	assert.Equal(t, "<source id not shown>", SourceIDNotShown, "the placeholder says what it is: the ID is not hidden because it is wrong")
+	assert.Equal(t, strings.Repeat("é", 128), SourceIDDisplay(strings.Repeat("é", 128)))
+}
+
+func TestPathDisplay(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		// A path with no scheme (what `datatug db ./chinook.sqlite` takes) is shown as it is, minus query and fragment.
+		"./chinook.sqlite":          "./chinook.sqlite",
+		"chinook.sqlite?key=s3cret": "chinook.sqlite",
+		`C:\data\x.db`:              `C:\data\x.db`,
+		"/tmp/a/x.db#s3cret":        "/tmp/a/x.db",
+		"sqlite3:./x.db":            "sqlite3:./x.db",
+		// A text that starts like userinfo is shown without it.
+		"s3cret@host/db":    "host/db",
+		"ab/s3cret@host/db": "host/db",
+		// A URL is shown as SourceDisplay shows it.
+		"postgres://alice:s3cret@db.example.com/shop": "postgres://db.example.com/shop",
+		// What cannot be shown is named as such.
+		"gone\x00.db": unprintablePath,
+		"":            unprintablePath,
+	} {
+		assert.Equal(t, want, PathDisplay(in), in)
+		assert.NotContains(t, PathDisplay(in), "s3cret", in)
 	}
 }
 

@@ -241,11 +241,12 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	ctx = httpsource.ContextWithDispatch(ctx, dalgo2http.ModeLiveThenSnapshot, false, 0)
 	db, err := openBackend(ctx, backend)
 	if err != nil {
-		// backend.Raw is the display form of --db: a password given in the URL
-		// never reaches the message, and env:NAME names the variable without its
-		// value. OpenFailure says what failed in a fixed sentence: a driver's own
-		// text can quote the URL it was given.
-		return Exit(fmt.Sprintf("open %s: %v", backend.Raw, backend.OpenFailure(err)), exitCodeDatabase)
+		// OpenFailure names the source (its display form: a password given in the
+		// URL never reaches the message, and env:NAME names the variable without
+		// its value) and says what failed in a fixed sentence: a driver's own text
+		// can quote the URL it was given. It already says which source failed, so
+		// nothing is put in front of it.
+		return Exit(backend.OpenFailure(err).Error(), exitCodeDatabase)
 	}
 	stderr := cmd.ErrOrStderr()
 	if len(loaded) == 0 {

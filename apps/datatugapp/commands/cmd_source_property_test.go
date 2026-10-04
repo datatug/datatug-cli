@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"io/fs"
 	"log"
 	"os"
@@ -9,7 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/datatug/datatug-cli/internal/sourcecases"
+	"github.com/datatug/datatug-cli/pkg/chat"
 )
 
 // TestProperty_NoCommandPathEchoesASourceSecret is the DT-0C acceptance
@@ -20,9 +24,11 @@ import (
 //
 // The command paths are `datatug db <url>`, `datatug db copy --from <url>` and
 // `--to <url>`, and `datatug query run --db <url>`, each with the string itself
-// and with `env:NAME` where the variable holds it. (`datatug chat` takes no
-// source string: it reads its sources from the project. `datatug scan --dsn-env`
-// is not in this tree yet; its refusals are covered where it lands.)
+// and with `env:NAME` where the variable holds it, and `datatug chat --database
+// <source>`, which takes a catalog ID but is given whatever was typed there (its
+// stdout, stderr, error, the conversation it opens, the schema context sent to the
+// model, and the remembered options and chat store it writes). `datatug scan
+// --dsn-env` is not in this tree yet; its refusals are covered where it lands.
 //
 // Nothing here relies on a redactor: Exit no longer calls one, and the
 // top-level handler in main.go that does is not run.
@@ -43,6 +49,51 @@ func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
 	savedLog := log.Writer()
 	log.SetOutput(&logged)
 	t.Cleanup(func() { log.SetOutput(savedLog) })
+
+	// No file holds a secret in its name or its content. A random identifier (a
+	// chat session's UUID) can hold a short run of a generated secret by chance, so
+	// what a case's command wrote is read for that case alone, in a directory of its own.
+	checkFiles := func(root string, cases ...sourcecases.Case) {
+		t.Helper()
+		walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || path == root {
+				return err
+			}
+			content := []byte(nil)
+			if !entry.IsDir() {
+				if content, err = os.ReadFile(path); err != nil {
+					return err
+				}
+			}
+			for _, c := range cases {
+				// A chat store holds a UUID and a timestamp per row, and is named by a
+				// hash: none comes from a source, and a run of a secret can match one.
+				if leaked := sourcecases.Leaks(c, sourcecases.WithoutGeneratedIdentifiers(path), sourcecases.WithoutGeneratedIdentifiers(string(content))); len(leaked) > 0 {
+					t.Errorf("%s: %q was written to %s", c.Name, leaked, path)
+				}
+			}
+			return nil
+		})
+		if walkErr != nil {
+			t.Fatal(walkErr)
+		}
+	}
+
+	// `datatug chat` keeps its chat store under the home directory and remembers
+	// its options in the user config directory: both go to a directory of the
+	// case's own, which is read back. Its terminal program never starts, and the
+	// conversation it opens is kept so that what it says can be read.
+	var caseHome string
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) { return nil, nil }))
+	savedOptionsPath, savedNewSessionChat := lastChatOptionsPath, newSessionChat
+	t.Cleanup(func() { lastChatOptionsPath, newSessionChat = savedOptionsPath, savedNewSessionChat })
+	lastChatOptionsPath = func() (string, error) { return filepath.Join(caseHome, "chat-last.json"), nil }
+	var conversation chat.ContextualConversation
+	newSessionChat = func(ctx context.Context, store *chat.SessionStore, agent chat.ContextualConversation, source string, catalogs ...chat.ProjectCatalog) (*chat.SessionChat, error) {
+		conversation = agent
+		return savedNewSessionChat(ctx, store, agent, source, catalogs...)
+	}
+	chatProject := writeChatRunProjectFixture(t)
 
 	cases := sourcecases.CommandCases()
 	failed := 0
@@ -70,6 +121,25 @@ func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
 			queryOut, queryErr, _ := runQuery(t, "", "--db", source, "--from", "customers", "--no-policies")
 			note(queryOut, queryErr, nil)
 		}
+
+		// `datatug chat --database <source>`: a source string where a catalog ID belongs.
+		chatCmd := chatCommand()
+		var chatOut, chatErrOut bytes.Buffer
+		chatCmd.SetOut(&chatOut)
+		chatCmd.SetErr(&chatErrOut)
+		conversation = nil
+		caseHome = t.TempDir()
+		t.Setenv("HOME", caseHome)
+		_, chatErr := runChatProject(chatCmd, chatOptions{project: chatProject, env: "local", database: c.Source, model: defaultChatModel, thinking: "low"})
+		note(chatOut.String(), chatErrOut.String(), chatErr)
+		if conversation != nil {
+			turn, askErr := conversation.AskWithContext(context.Background(), "Show customers", "")
+			note(turn.Text, "", askErr)
+		}
+		// The context the model is given when the selected source is unavailable.
+		texts = append(texts, projectSchemaContext(chat.ProjectCatalog{}, map[string]string{}, c.Source))
+		checkFiles(caseHome, c)
+		checkFiles(chatProject, c)
 		texts = append(texts, logged.String())
 		logged.Reset()
 
@@ -87,26 +157,7 @@ func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
 	// No file was written with a secret in its name or its content, and nothing
 	// was written where a relative source pointed.
 	for _, root := range []string{workdir, dir} {
-		walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil || path == root {
-				return err
-			}
-			content := []byte(nil)
-			if !entry.IsDir() {
-				if content, err = os.ReadFile(path); err != nil {
-					return err
-				}
-			}
-			for _, c := range cases {
-				if leaked := sourcecases.Leaks(c, path, string(content)); len(leaked) > 0 {
-					t.Errorf("%s: %q was written to %s", c.Name, leaked, path)
-				}
-			}
-			return nil
-		})
-		if walkErr != nil {
-			t.Fatal(walkErr)
-		}
+		checkFiles(root, cases...)
 	}
 	if entries, err := os.ReadDir(workdir); err != nil || len(entries) != 0 {
 		t.Errorf("a command wrote %d file(s) where a relative source pointed: %v, %v", len(entries), entries, err)

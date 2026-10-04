@@ -234,10 +234,18 @@ func resolveQuerySourceURL(ctx context.Context, projStore datatug.ProjectStore, 
 		}
 		return querySourceURLFromCatalog(catalog, projectDir)
 	}
-	if lastErr != nil {
-		return "", fmt.Errorf("database %q not found in environment %q: %w", database, envID, lastErr)
+	// database is what the command was given, and a source string can be typed
+	// where a catalog ID belongs: only a plain name is echoed, and the error from
+	// loading the catalog is left out for any other, because it quotes the path
+	// the name was turned into.
+	shown := dbcopy.SourceIDDisplay(database)
+	if lastErr != nil && shown == database {
+		return "", fmt.Errorf("database %q not found in environment %q: %w", shown, envID, lastErr)
 	}
-	return "", fmt.Errorf("environment %q has no DB servers configured; cannot resolve database %q", envID, database)
+	if lastErr != nil {
+		return "", fmt.Errorf("database %q not found in environment %q", shown, envID)
+	}
+	return "", fmt.Errorf("environment %q has no DB servers configured; cannot resolve database %q", envID, shown)
 }
 
 func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (string, error) {

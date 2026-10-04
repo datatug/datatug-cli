@@ -25,9 +25,11 @@ import (
 // read as a source. Nothing from the input is in it.
 const UnparsableSource = "<unparsable source>"
 
-// InvalidSourceID is what SourceIDDisplay returns for a source ID that is not
-// a plain name.
-const InvalidSourceID = "<invalid source id>"
+// SourceIDNotShown is what SourceIDDisplay returns for a source ID that is not
+// a plain name. It does not say the ID is wrong: a valid ID may hold a space or a
+// slash, and a client may send a source string where an ID belongs; either way
+// the text is not echoed.
+const SourceIDNotShown = "<source id not shown>"
 
 // maxLocalPath bounds the path SourceDisplay shows for a file or a directory.
 const maxLocalPath = 4096
@@ -52,15 +54,29 @@ var (
 
 	// plainSourceID is a plain name for a source in a project: a database model
 	// or a catalog ID.
-	plainSourceID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+	plainSourceID = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}._-]{0,127}$`)
 )
 
-// localSchemes are the schemes whose text after "://" is a path on this
-// machine, not a host: a file, a project directory, or an internal stand-in
-// for a source that could not be resolved ("unavailable").
-var localSchemes = map[string]bool{
-	"sqlite": true, "ingitdb": true, "openvaultdb": true, "http": true, "https": true, "unavailable": true,
-}
+// localSchemes are the schemes whose text after "://" or ":" is a path on this
+// machine, not a host: a file, a project directory, an internal stand-in for a
+// source that could not be resolved ("unavailable"), and every scheme dburl reads
+// as a file (sqlite3, file, duckdb, moderncsqlite and their aliases), which the
+// `datatug db <url>` viewer command takes.
+var localSchemes = sync.OnceValue(func() map[string]bool {
+	local := map[string]bool{
+		"sqlite": true, "ingitdb": true, "openvaultdb": true, "http": true, "https": true, "unavailable": true,
+	}
+	for _, scheme := range dburl.BaseSchemes() {
+		if !scheme.Opaque {
+			continue
+		}
+		local[strings.ToLower(scheme.Driver)] = true
+		for _, alias := range scheme.Aliases {
+			local[strings.ToLower(alias)] = true
+		}
+	}
+	return local
+})
 
 // knownSourceSchemes is every scheme SourceDisplay can show: the ones Parse
 // dispatches, the postgres alias, the internal stand-in, and every scheme the
@@ -88,9 +104,15 @@ var knownSourceSchemes = sync.OnceValue(func() map[string]bool {
 // "host:port/path" that follows a user name and a password is shown without
 // them: whatever precedes the last "@" is userinfo, because a password may hold
 // an "@", a "/", a "?" or only digits and a parser may read it as a host and a
-// port. An "env:NAME" source is shown as it is, because it names a variable and
-// holds no value. A string that is not led by a known scheme yields
-// UnparsableSource.
+// port. The same holds for a file or a directory unless the text is certainly a
+// path (see readsAsPath): an explicit path ("/abs/a@b", "./a@b", "../a@b",
+// "~/a@b", a UNC path, a drive path) is shown as typed; any other text that holds
+// an "@" is userinfo and a host, even when a slash comes before the colon or
+// the "@". Two shapes stay paths by design: an explicit path, and "X:/..." or
+// "X:\..." (read as a Windows drive path even when it was meant as user X with a
+// password that starts with a slash). An "env:NAME" source is shown as it is,
+// because it names a variable and holds no value. A string that is not led by a
+// known scheme yields UnparsableSource.
 func SourceDisplay(raw string) string {
 	if name, isEnv := strings.CutPrefix(raw, envPrefix); isEnv {
 		if ValidEnvName(name) {
@@ -117,7 +139,7 @@ func SourceDisplay(raw string) string {
 // false when what follows cannot be shown at all.
 func displayAfterScheme(scheme, rest string) (string, bool) {
 	switch {
-	case localSchemes[scheme] && schemePrefix.MatchString(rest):
+	case localSchemes()[scheme] && schemePrefix.MatchString(rest):
 		// A path scheme that wraps a URL ("ingitdb://https://u:p@host/x"). Parse
 		// refuses it, and nothing may stand in front of the host: even a user
 		// name alone is a token, so every "@" ends userinfo.
@@ -127,24 +149,47 @@ func displayAfterScheme(scheme, rest string) (string, bool) {
 			return "", false
 		}
 		return inner + "://" + hostPortPath(rest[len(prefix):], urlPathSegments), true
-	case localSchemes[scheme]:
+	case localSchemes()[scheme]:
 		return localTextDisplay(rest), true
 	default:
 		return hostPortPath(rest, 1), true
 	}
 }
 
+// explicitPathStart is how a text starts when it is certainly a path: absolute
+// ("/"), relative with a dot ("./" and "../"), in the home directory ("~/") or a
+// Windows UNC path. A Windows drive path ("C:\dir", "C:/dir") is the other
+// certain form; see driveLetterPath.
+var explicitPathStart = regexp.MustCompile(`^(?:/|\./|\.\./|~/|\\\\)`)
+
+// readsAsPath reports whether text, what follows "scheme://" of a scheme that
+// names a file or a directory (or a bare path), is a path and not userinfo
+// followed by a host. It decides by what is certain, not by what looks like
+// credentials: text without an "@" is a path, and text with one is a path only
+// when it starts like one (see explicitPathStart and driveLetterPath).
+// Otherwise everything up to the last "@" is userinfo, because a user name, a
+// password or a token may hold a ":" or a "/" in any place, so no shape of the
+// text in front of the "@" tells userinfo from a directory.
+//
+// Two shapes stay paths by design. An explicit path ("/abs/a@b", "./a@b") is
+// shown as it was typed. "X:/..." and "X:\..." read as a Windows drive path, even
+// when it was meant as user X with a password that starts with a slash. A
+// relative directory that holds an "@" and starts with neither is written with
+// a dot: ./dir (see LocalSourceURL).
+func readsAsPath(text string) bool {
+	return !strings.Contains(text, "@") || explicitPathStart.MatchString(text) || driveLetterPath.MatchString(text)
+}
+
 // localTextDisplay returns what to show for rest, the text after "scheme://" of
 // a path scheme, or a bare path: the path as it is, minus its query string and
-// fragment. When rest starts like credentials ("user:password@host", with the
-// user name possibly empty, or a first segment that holds an "@") the text
-// before the last "@" is not a path but userinfo, and only what follows it is
-// shown, read as a host, a port and a path.
+// fragment. When rest does not read as a path (see readsAsPath) the text before
+// the last "@" is userinfo, and only what follows it is shown, read as a host, a
+// port and a path.
 func localTextDisplay(rest string) string {
-	if looksLikeUserinfo(rest) || holdsAtInFirstSegment(rest) {
-		return hostPortPath(rest, urlPathSegments)
+	if readsAsPath(rest) {
+		return localPathDisplay(rest)
 	}
-	return localPathDisplay(rest)
+	return hostPortPath(rest, urlPathSegments)
 }
 
 // urlPathSegments is how many path segments the text after a host may have
@@ -256,15 +301,15 @@ func localPathDisplay(path string) string {
 	return path
 }
 
-// SourceIDDisplay returns id when it is a plain name (letters, digits, "." "_"
-// and "-", at most 128 characters, starting with a letter or a digit) and
-// InvalidSourceID otherwise. Use it to name a source ID a client sent in a
+// SourceIDDisplay returns id when it is a plain name (letters and digits of any
+// script, "." "_" and "-", at most 128 characters, starting with a letter or a
+// digit) and SourceIDNotShown otherwise. Use it to name a source ID a client sent in a
 // message: a client may send a whole source string where an ID belongs.
 func SourceIDDisplay(id string) string {
 	if plainSourceID.MatchString(id) {
 		return id
 	}
-	return InvalidSourceID
+	return SourceIDNotShown
 }
 
 // Display returns the text to show for this source in a message. It is built

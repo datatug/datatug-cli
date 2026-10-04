@@ -58,13 +58,15 @@ func resolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 	case api.SourceKindInGitDB:
 		recordsetPath := recordsetDefinitionPath(projectDir, resolved.ID)
 		if !fileExists(recordsetPath) {
-			return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has no recordset definition at %s", dbcopy.SourceIDDisplay(source), recordsetPath))
+			// source matched the registry, so resolved.ID is a registered ID and not
+			// something a client made up: it is named as it is.
+			return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has no recordset definition at %s", resolved.ID, recordsetPath))
 		}
 		return resolveRecordsetSource(resolved.URL, recordsetPath, collection)
 	case api.SourceKindHTTP:
 		return resolveHTTPSource(projectDir, resolved.ID, collection)
 	default:
-		return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has an unsupported kind %q", dbcopy.SourceIDDisplay(source), resolved.Kind))
+		return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has an unsupported kind %q", resolved.ID, resolved.Kind))
 	}
 }
 

@@ -336,10 +336,10 @@ func TestCheckSourceFile_ShowsTheDisplayFormOfThePath(t *testing.T) {
 func TestBackendRef_CheckFileOnlyChecksFileBackedSources(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "gone")
-	for _, scheme := range []string{"sqlite", "ingitdb"} {
+	for _, scheme := range []string{"sqlite", "ingitdb", "openvaultdb"} {
 		assert.ErrorIs(t, BackendRef{Scheme: scheme, Path: missing}.CheckFile(), ErrSourceFileMissing, scheme)
 	}
-	for _, scheme := range []string{"postgres", "http", "https", "openvaultdb", ""} {
+	for _, scheme := range []string{"postgres", "http", "https", ""} {
 		assert.NoError(t, BackendRef{Scheme: scheme, Path: "postgres://alice:s3cret@h/db"}.CheckFile(), scheme)
 	}
 	assert.NoError(t, BackendRef{Scheme: "sqlite", Path: t.TempDir()}.CheckFile())

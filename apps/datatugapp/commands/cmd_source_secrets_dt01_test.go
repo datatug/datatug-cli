@@ -28,6 +28,12 @@ func TestDBOpen_NeverPrintsThePassword(t *testing.T) {
 		// Go reads this as host "alice", port 42; it is a password that holds a slash.
 		{"password that starts with digits and holds a slash", "postgres://alice:42/" + sourceSecret + "@db.example.com/shop", "postgres://db.example.com/shop"},
 		{"upper-case scheme", "POSTGRES://alice:" + sourceSecret + "@db.example.com:5432/shop", "postgres://db.example.com:5432/shop"},
+		// Harmless arguments dburl takes are named as they were typed: a file path with no scheme, and the file schemes.
+		{"bare relative file", "./chinook.sqlite", "./chinook.sqlite"},
+		{"bare file name", "chinook.sqlite", "chinook.sqlite"},
+		{"sqlite3 relative file", "sqlite3:./x.db", "sqlite3:./x.db"},
+		{"sqlite3 absolute file", "sqlite3:///tmp/a/x.db", "sqlite3:///tmp/a/x.db"},
+		{"sqlite file with a token that holds a slash", "sqlite://ab/" + sourceSecret + "@db.example.com/x.db", "sqlite://db.example.com/x.db"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := dbCommand()

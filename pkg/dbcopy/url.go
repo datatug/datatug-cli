@@ -97,14 +97,14 @@ var ErrSourceFileMissing = errors.New("source file does not exist")
 // than BackendRef.Open (pkg/secureread's read-only native-SQL connection)
 // can perform the identical check.
 //
-// The path in the message is the display form of path (see pathDisplay): the
+// The path in the message is the display form of path (see PathDisplay): the
 // query string and the fragment are cut off, a path that starts like userinfo
 // is shown without it, and a URL handed in by mistake is shown as SourceDisplay
 // shows it, so no caller can put a secret in the message by passing what the
 // source string held.
 func CheckSourceFile(path string) error {
 	if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
-		return &missingSourceFileError{shown: pathDisplay(path)}
+		return &missingSourceFileError{shown: PathDisplay(path)}
 	}
 	return nil
 }
@@ -124,10 +124,10 @@ func (e *missingSourceFileError) Unwrap() error { return ErrSourceFileMissing }
 // out.
 const unprintablePath = "<unprintable path>"
 
-// pathDisplay returns the text to show for path, a file or directory path a
-// source resolved to (BackendRef.Path), or a URL when a caller hands in a Path
-// that is one.
-func pathDisplay(path string) string {
+// PathDisplay returns the text to show for path, a file or directory path a
+// source resolved to (BackendRef.Path), a path given with no scheme, or a URL
+// when a caller hands in one.
+func PathDisplay(path string) string {
 	var shown string
 	if schemePrefix.MatchString(path) {
 		shown = SourceDisplay(path)
@@ -307,18 +307,21 @@ func errUnsupportedSource() error {
 }
 
 // refuseUserinfo returns an error when rest, the text after "scheme://" of a
-// scheme that names a file or directory, is shaped like credentials: either
-// "user:password@host" (the user name may be empty) or, for a project directory
-// (ingitdb, http, https), a first path segment that holds an "@". Whoever writes
-// that means a remote server with credentials, which these schemes do not take;
-// refusing it keeps the password out of every later message that quotes the
-// path. The error shows the display form of the source (see SourceDisplay), so
-// it names the host and the path that follow the credentials and never the
-// credentials.
+// scheme that names a file or directory, is credentials and not a path. For a
+// project directory (ingitdb, http, https) that is any text that does not read
+// as a path (see readsAsPath): "user:password@host", "token@host" and a user
+// name or a token that holds a slash. For sqlite and openvaultdb it is the
+// "user:password@host" shape only: dburl drops the userinfo of a sqlite URL and
+// nothing prints an OpenVaultDB path, and what either shows is built by
+// SourceDisplay, which reads the same text as userinfo. Whoever writes
+// credentials means a remote server, which these schemes do not take; refusing it
+// keeps the password out of every later message that quotes the path. The error
+// shows the display form of the source (see SourceDisplay), so it names the host
+// and the path that follow the credentials and never the credentials.
 func refuseUserinfo(scheme, display, rest string) error {
 	userinfoShaped := looksLikeUserinfo(rest)
 	projectDirectory := scheme == "ingitdb" || scheme == "http" || scheme == "https"
-	tokenShaped := projectDirectory && holdsAtInFirstSegment(rest)
+	tokenShaped := projectDirectory && !readsAsPath(rest)
 	if !userinfoShaped && !tokenShaped {
 		return nil
 	}
@@ -421,27 +424,18 @@ func ProjectSourceURL(projectDir string) string {
 }
 
 // LocalSourceURL returns the "scheme://path" source URL that names the local
-// directory path for a scheme that takes one (http, https, ingitdb). A relative
-// path whose first segment holds an "@" or that is shaped like
-// "user:password@host" (a:b/c@d) is written "./path", because Parse refuses
-// "scheme://my@proj" and "scheme://a:b/c@d" as URLs that carry credentials.
-// Every caller that builds such a URL from a directory it was given verbatim
-// goes through here, so a directory such as my@proj keeps working.
+// directory path for a scheme that takes one (http, https, ingitdb). A path that
+// holds an "@" and does not start like a path (see readsAsPath): a relative
+// directory such as my@proj or team/a@b, or one shaped like "user:password@host"
+// (a:b/c@d), is written "./path", because Parse refuses "scheme://my@proj" and
+// "scheme://a:b/c@d" as URLs that carry credentials. Every caller that builds
+// such a URL from a directory it was given verbatim goes through here, so a
+// directory such as my@proj keeps working.
 func LocalSourceURL(scheme, path string) string {
-	if holdsAtInFirstSegment(path) || looksLikeUserinfo(path) {
+	if !readsAsPath(path) {
 		return scheme + "://./" + path
 	}
 	return scheme + "://" + path
-}
-
-// holdsAtInFirstSegment reports whether the first path segment of rest holds an
-// "@" and so reads as "user@host". A Windows drive path never does.
-func holdsAtInFirstSegment(rest string) bool {
-	if driveLetterPath.MatchString(rest) {
-		return false
-	}
-	first, _, _ := strings.Cut(rest, "/")
-	return strings.Contains(first, "@")
 }
 
 // Open opens the underlying DALgo dal.DB for this BackendRef.
@@ -564,11 +558,13 @@ func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected b
 }
 
 // CheckFile reports ErrSourceFileMissing when this source is backed by a file or
-// directory (sqlite, ingitdb) and that does not exist; for every other source it
-// returns nil. It is CheckSourceFile for a caller that holds the ref: a
-// PostgreSQL ref's Path is its URL and is not a path to stat.
+// directory (sqlite, ingitdb, or the connection descriptor of openvaultdb) and
+// that does not exist; for every other source it returns nil. It is
+// CheckSourceFile for a caller that holds the ref: a PostgreSQL ref's Path is its
+// URL and is not a path to stat. Open itself calls it for sqlite and ingitdb
+// only: openvaultdb reports its own missing descriptor.
 func (r BackendRef) CheckFile() error {
-	if r.Scheme != "sqlite" && r.Scheme != "ingitdb" {
+	if r.Scheme != "sqlite" && r.Scheme != "ingitdb" && r.Scheme != "openvaultdb" {
 		return nil
 	}
 	return CheckSourceFile(r.Path)

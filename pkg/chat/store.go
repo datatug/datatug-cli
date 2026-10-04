@@ -281,12 +281,14 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	// Keep the persisted scope identity byte-for-byte compatible with Phase 3.
 	// ProjectID is an additional bookmark boundary, not a session-scope change.
 	//
-	// The sources enter the identity redacted, so a password inside a source
-	// URL never feeds the persisted scope hash. A source with nothing to hide
-	// is unchanged, which keeps every existing scope identity.
+	// The sources enter the identity as their display form (dbcopy.SourceDisplay),
+	// so a password inside a source URL never feeds the persisted scope hash. The
+	// display form drops what a source string holds beyond its scheme, host, port
+	// and path, so a store written under the identity main computed (the sources
+	// through dbcopy.RedactSourceURL, see previousScopeIdentity) is moved to the
+	// new one below, with its bookmarks and preferences.
 	sources := redactSources(scope.Sources)
 	encoded, _ := json.Marshal(struct {
 		Environment       string
@@ -302,7 +304,12 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 		AccessFingerprint string
 	}{scope.Environment, scope.Database, scope.AccessFingerprint})
 	legacySum := sha256.Sum256(legacy)
-	if err := migrateLegacyChatScopesFn(db, hex.EncodeToString(legacySum[:]), newScope, sources[scope.Database]); err != nil {
+	previous := previousScopeIdentity(scope)
+	if err := migrateLegacyChatScopesFn(db, hex.EncodeToString(legacySum[:]), newScope, previous.selected); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := moveChatScope(db, previous.scope, newScope); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

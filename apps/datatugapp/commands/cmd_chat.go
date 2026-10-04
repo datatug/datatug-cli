@@ -323,7 +323,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 type unavailableSchemaConversation struct{ database string }
 
 func (c unavailableSchemaConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {
-	return chat.Turn{Text: "I can't query " + c.database + " because its source or schema is unavailable. Open Project explorer for details."}, nil
+	// c.database is what --database was given, and a source string can be typed
+	// where a catalog ID belongs: only a plain name is echoed.
+	return chat.Turn{Text: "I can't query " + dbcopy.SourceIDDisplay(c.database) + " because its source or schema is unavailable. Open Project explorer for details."}, nil
 }
 
 // JOIN discovery is optional: a failed metadata read should disable JOIN
@@ -401,7 +403,9 @@ func hasQueryableProjectTables(catalog chat.ProjectCatalog, urls map[string]stri
 
 func projectSchemaContext(catalog chat.ProjectCatalog, urls map[string]string, selectedSource string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Selected source %q has unavailable schema or connection. Do not query it. For another listed source, always set sourceId in run_dtql.\n", selectedSource)
+	// selectedSource is what --database was given (see unavailableSchemaConversation)
+	// and this text goes to the model provider: only a plain name is sent.
+	fmt.Fprintf(&b, "Selected source %q has unavailable schema or connection. Do not query it. For another listed source, always set sourceId in run_dtql.\n", dbcopy.SourceIDDisplay(selectedSource))
 	for _, object := range catalog.Objects {
 		ref := object.Reference
 		if (ref.Kind != "table" && ref.Kind != "project_view") || object.Issue != "" || ref.SourceID == selectedSource {

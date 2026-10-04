@@ -62,8 +62,11 @@ func TestQuery_PostgresPasswordOnTheCommandLineNeverAppears(t *testing.T) {
 		t.Fatalf("exit %d, want %d: %s", code, exitCodeDatabase, stderr)
 	}
 	assertNoSecret(t, stdout, stderr)
-	if !strings.Contains(stderr, "postgres://127.0.0.1:1/shop") || strings.Contains(stderr, "alice") {
-		t.Errorf("stderr should show the display form of the URL, without the user: %q", stderr)
+	if strings.Contains(stderr, "alice") || strings.Contains(stderr, "127.0.0.1:1/shop?") {
+		t.Errorf("stderr must not show the user or the query of the URL: %q", stderr)
+	}
+	if !strings.Contains(stderr, dbcopy.ErrPostgresNotWired.Error()) {
+		t.Errorf("stderr should say that PostgreSQL is not wired yet: %q", stderr)
 	}
 
 	t.Setenv("DT01_QUERY_PG", literal)
@@ -72,11 +75,39 @@ func TestQuery_PostgresPasswordOnTheCommandLineNeverAppears(t *testing.T) {
 		t.Fatalf("exit %d, want %d: %s", code, exitCodeDatabase, stderr)
 	}
 	assertNoSecret(t, stdout, stderr)
-	if !strings.Contains(stderr, "open env:DT01_QUERY_PG:") {
-		t.Errorf("stderr should name the variable: %q", stderr)
-	}
 	if strings.Contains(stderr, "alice") || strings.Contains(stderr, "127.0.0.1") {
 		t.Errorf("an env source must not echo any part of the variable's value: %q", stderr)
+	}
+}
+
+// The open failure names the source once: OpenFailure already says which source
+// failed, so the command no longer puts "open <source>:" in front of it. An env
+// source is named by its variable, never by what the variable holds.
+func TestQuery_OpenFailureNamesTheSourceOnce(t *testing.T) {
+	original := openBackend
+	t.Cleanup(func() { openBackend = original })
+	openBackend = func(_ context.Context, ref dbcopy.BackendRef) (dal.DB, error) {
+		return nil, ref.OpenFailure(errors.New("driver text that is never shown"))
+	}
+	t.Setenv("DT01_QUERY_NAMED", "postgres://alice:"+sourceSecret+"@127.0.0.1:1/shop")
+	for source, want := range map[string]string{
+		"sqlite:///x.db":       `open sqlite source "sqlite:///x.db": the driver could not open the source`,
+		"env:DT01_QUERY_NAMED": `open postgres source "env:DT01_QUERY_NAMED": the driver could not open the source`,
+	} {
+		stdout, stderr, code := runQuery(t, "", "--db", source, "--from", "customers", "--no-policies")
+		if code != exitCodeDatabase {
+			t.Fatalf("%s: exit %d, want %d: %s", source, code, exitCodeDatabase, stderr)
+		}
+		assertNoSecret(t, stdout, stderr)
+		if !strings.Contains(stderr, want) {
+			t.Errorf("%s: stderr %q lacks %q", source, stderr, want)
+		}
+		if strings.Contains(stderr, "open "+source+":") || strings.Count(stderr, source) != 1 {
+			t.Errorf("%s: stderr names the source more than once: %q", source, stderr)
+		}
+		if strings.Contains(stderr, "never shown") || strings.Contains(stderr, "alice") {
+			t.Errorf("%s: stderr shows the driver text or the user: %q", source, stderr)
+		}
 	}
 }
 

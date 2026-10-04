@@ -12,6 +12,7 @@ import (
 	"github.com/dal-go/dalgo2sql"
 	"github.com/dal-go/dalgo2sqlite"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeEnv returns a lookup function over a fixed map, so these tests never
@@ -252,7 +253,7 @@ func TestParse_IngitdbNeverEchoesAPassword(t *testing.T) {
 
 func TestParse_IngitdbDirectoryWithAnAtSignNeedsTheDotForm(t *testing.T) {
 	t.Parallel()
-	for _, dir := range []string{"my@proj", "@acme/proj", "my@proj/data/ingitdb", "a@b"} {
+	for _, dir := range []string{"my@proj", "@acme/proj", "my@proj/data/ingitdb", "a@b", "team/a@b", "a/b/c@d/e"} {
 		_, err := Parse("ingitdb://" + dir)
 		assert.ErrorContains(t, err, "credentials are not supported", dir)
 		assert.NotContains(t, err.Error(), dir, "the directory is not echoed")
@@ -268,7 +269,10 @@ func TestParse_IngitdbDirectoryWithAnAtSignNeedsTheDotForm(t *testing.T) {
 		"demo":          "ingitdb://demo",
 		"./a@b":         "ingitdb://./a@b",
 		"/abs/a@b/proj": "ingitdb:///abs/a@b/proj",
-		"team/a@b":      "ingitdb://team/a@b",
+		"team/a@b":      "ingitdb://./team/a@b",
+		"team/dir":      "ingitdb://team/dir",
+		"../a@b":        "ingitdb://../a@b",
+		"~/a@b":         "ingitdb://~/a@b",
 		`C:\work\a@b`:   `ingitdb://C:\work\a@b`,
 		"a:b/c@d":       "ingitdb://./a:b/c@d",
 	} {
@@ -318,7 +322,7 @@ func TestParse_BareSchemeStringNamesNothing(t *testing.T) {
 
 func TestParse_HTTPDirectoryWithAnAtSignNeedsTheDotForm(t *testing.T) {
 	t.Parallel()
-	for _, dir := range []string{"my@proj", "@acme/proj", "my@proj/queries", "a@b", "a:b@c/d", "a:b/c@d", "alice:42/s3cret@host/x"} {
+	for _, dir := range []string{"my@proj", "@acme/proj", "my@proj/queries", "a@b", "a:b@c/d", "a:b/c@d", "alice:42/s3cret@host/x", "team/a@b"} {
 		_, err := Parse("http://" + dir)
 		assert.ErrorContains(t, err, "credentials are not supported", dir)
 		assert.ErrorContains(t, err, "./dir", "the error says how to write it")
@@ -336,7 +340,8 @@ func TestParse_HTTPDirectoryWithAnAtSignNeedsTheDotForm(t *testing.T) {
 		"demo":             "http://demo",
 		"./a@b":            "http://./a@b",
 		"/abs/a@b/proj":    "http:///abs/a@b/proj",
-		"team/a@b":         "http://team/a@b",
+		"team/a@b":         "http://./team/a@b",
+		"team/dir":         "http://team/dir",
 		`C:\work\a@b`:      `http://C:\work\a@b`,
 		"C:/work/a@b/proj": "http://C:/work/a@b/proj",
 	} {
@@ -391,4 +396,74 @@ func TestOpen_ErrorsAreScrubbedOfTheRealURLsSecrets(t *testing.T) {
 	_, err = BackendRef{Scheme: "http", Path: filepath.Join(t.TempDir(), "nope") + "?api_key=K3Y-secret"}.Open(context.Background())
 	assert.Error(t, err)
 	assert.NotContains(t, err.Error(), "K3Y-secret")
+}
+
+// A user name or a token that holds a slash puts the colon or the "@" after a
+// slash, so it used to read as a relative path and was shown whole. What stands
+// in front of the last "@" is userinfo unless the text is certainly a path.
+func TestParse_ProjectDirectorySchemesRefuseAUserNameOrTokenThatHoldsASlash(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		"ingitdb://ab/cdefghij@github.com/org/repo",
+		"ingitdb://team/alice:s3cretpass@github.com/org/repo",
+		"INGITDB://ab/cdefghij@github.com/org/repo",
+		"http://team/alice:s3cretpass@host/x",
+		"https://team/alice:s3cretpass@host/x",
+		"HTTP://ab/cdefghij@host/x",
+		"http://ab/cdefghij@host",
+	} {
+		_, err := Parse(input)
+		require.Error(t, err, input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		assert.ErrorContains(t, err, "./dir", "the error says how to write a directory that holds an at sign")
+		for _, secret := range []string{"s3cretpass", "cdefghij", "alice", "ab/", "team/"} {
+			assert.NotContains(t, err.Error(), secret, input)
+		}
+	}
+	_, err := Parse("ingitdb://ab/cdefghij@github.com/org/repo")
+	assert.ErrorContains(t, err, `"ingitdb://github.com/org/repo"`)
+}
+
+// sqlite and openvaultdb accept a path that holds an "@" in a later segment
+// (dburl drops the userinfo of a sqlite URL, and nothing prints an OpenVaultDB
+// path), so Parse takes these strings; what it shows of them holds no token.
+func TestParse_SqliteAndOpenVaultDBNeverShowATokenThatHoldsASlash(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		"sqlite://ab/cdefghij@github.com/org/repo",
+		"sqlite:ab/cdefghij@github.com/org/repo",
+		"openvaultdb://alice/cdefghij@host/c.json",
+	} {
+		ref, err := Parse(input)
+		require.NoError(t, err, input)
+		for _, shown := range []string{ref.Raw, ref.String(), ref.Display(), fmt.Sprintf("%v %+v %#v", ref, ref, ref), PathDisplay(ref.Path)} {
+			assert.NotContains(t, shown, "cdefghij", input)
+			assert.NotContains(t, shown, "alice", input)
+		}
+		if ref.Scheme == "sqlite" {
+			err = ref.CheckFile()
+			require.ErrorIs(t, err, ErrSourceFileMissing, input)
+			assert.NotContains(t, err.Error(), "cdefghij", input)
+		}
+	}
+}
+
+// A directory that is certainly a path keeps its "@": the explicit forms.
+func TestParse_ExplicitPathsKeepTheirAtSign(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		"ingitdb://./team/a@b",
+		"ingitdb:///abs/team@work/proj",
+		"ingitdb://../team/a@b",
+		"ingitdb://~/team/a@b",
+		`ingitdb://\\server\share@x\proj`,
+		`ingitdb://C:\work\a@b`,
+		"http://./team/a@b",
+		"https:///abs/team@work/proj",
+		"http://../a@b/p",
+	} {
+		ref, err := Parse(input)
+		require.NoError(t, err, input)
+		assert.Equal(t, input, ref.Raw, "an explicit path is shown as it was typed")
+	}
 }

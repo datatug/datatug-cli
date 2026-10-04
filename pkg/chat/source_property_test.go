@@ -64,7 +64,9 @@ func TestProperty_ChatStoreNeverPersistsASourceSecret(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	stored := storeBytes(t, path)
+	// The store holds a UUID and a timestamp per row: a run of a generated secret
+	// can appear in one by chance, so those are left out of what is searched.
+	stored := sourcecases.WithoutGeneratedIdentifiers(storeBytes(t, path))
 	failed := 0
 	for _, c := range cases {
 		if leaked := sourcecases.Leaks(c, stored, back.String()); len(leaked) > 0 {

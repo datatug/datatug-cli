@@ -4,7 +4,8 @@
 // generated secret in each position a parser can read as userinfo or a user can
 // put one: userinfo (with and without a user name), a token standing alone as
 // the user name, the position a parser misreads as userinfo ("alice:42/secret@"),
-// the query string and the fragment.
+// a token or a user name that holds a slash (so no colon or "@" comes before a
+// slash), the query string and the fragment.
 //
 // The secrets are generated, not typed, so a test that finds one in an output
 // has found a real leak and not a coincidence with a fixed word. Generation is
@@ -13,6 +14,7 @@ package sourcecases
 
 import (
 	"math/rand/v2"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -75,7 +77,7 @@ func CommandCases() []Case {
 	var cases []Case
 	for _, c := range All() {
 		switch c.Style {
-		case "with spaces", "digits then slash", "with at sign", "word", "digits only", "token", "token with slash":
+		case "with spaces", "digits then slash", "with at sign", "word", "digits only", "token", "token with slash", "user name with slash":
 			cases = append(cases, c)
 		}
 	}
@@ -104,6 +106,24 @@ func Leaks(c Case, texts ...string) []string {
 		}
 	}
 	return found
+}
+
+// generatedIdentifier finds the identifiers a program makes for itself: a UUID, an
+// RFC 3339 timestamp (with or without a fraction), and a hexadecimal digest of 24
+// or more digits (a SHA-256 scope hash, a hash-named file).
+var generatedIdentifier = regexp.MustCompile(
+	`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}` +
+		`|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})` +
+		`|[0-9a-fA-F]{24,}`)
+
+// WithoutGeneratedIdentifiers returns text with every UUID, RFC 3339 timestamp
+// and long hexadecimal digest replaced by a space. Read a file a program wrote
+// through it before calling Leaks: those identifiers are random or time-based,
+// so a run of four or more characters of a generated secret (all eight digits of
+// a digits-only password, five hexadecimal letters of a short one) appears in one
+// now and then by chance, and none is made from a source string.
+func WithoutGeneratedIdentifiers(text string) string {
+	return generatedIdentifier.ReplaceAllString(text, " ")
 }
 
 // cased returns scheme in lower case (0), upper case (1) or mixed case (2).
@@ -169,7 +189,8 @@ func (g *generator) secret(style string) string {
 
 // positions returns the cases for one scheme (cased) in front of tail. When
 // wrapped, tail follows prefix, a URL's scheme ("https://"), after the outer
-// scheme; the caller has put the right casing on both.
+// scheme; the caller has put the right casing on both. Every position is
+// generated for every scheme, bare and wrapped.
 func (g *generator) positions(scheme, tail, prefix string, wrapped bool) []Case {
 	var cases []Case
 	name := func(position, style string, extra ...string) string {
@@ -206,9 +227,12 @@ func (g *generator) positions(scheme, tail, prefix string, wrapped bool) []Case 
 	}
 	token := g.secret("token")
 	add("token as user name", "token", head+token+"@"+tail, token)
-	if wrapped {
-		token = g.secret("token with slash")
-		add("token as user name", "token with slash", head+token+"@"+tail, token)
-	}
+	token = g.secret("token with slash")
+	add("token as user name", "token with slash", head+token+"@"+tail, token)
+	// A user name with a slash in it puts the colon after a slash, so the text
+	// does not start like "user:password@host" and a reader that looks for that
+	// shape takes it for a path.
+	user, password := g.secret("token with slash"), g.secret("word")
+	add("user name with a slash", "user name with slash", head+user+":"+password+"@"+tail, user, password)
 	return cases
 }

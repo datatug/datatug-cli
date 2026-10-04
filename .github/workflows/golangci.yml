@@ -61,7 +61,7 @@ jobs:
       contents: write
     # Pin the shared workflow exactly so it cannot change underneath this job.
     # v1.20.0 adds the opt-in conventional PR-title gate enabled below.
-    uses: strongo/cicd/.github/workflows/workflow.yml@v1.20.5
+    uses: strongo/cicd/.github/workflows/workflow.yml@v1.21.0
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     with:

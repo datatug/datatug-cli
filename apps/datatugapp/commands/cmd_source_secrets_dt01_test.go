@@ -90,6 +90,7 @@ func TestDBCopy_NeverEchoesAPasswordFromEitherSide(t *testing.T) {
 		"ingitdb://alice:" + sourceSecret + "@github.com/org/repo",
 		"https://alice:" + sourceSecret + "@api.example.com/x",
 		"http://alice:" + sourceSecret + "@host/x",
+		"http://alice:42/" + sourceSecret + "@host/x",
 		"sqlite://alice:" + sourceSecret + "@host/x.db",
 		"env:DT01_COPY_PG",
 		"env:" + sourceSecret,

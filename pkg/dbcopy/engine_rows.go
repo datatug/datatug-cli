@@ -20,6 +20,7 @@ import (
 	"io"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
@@ -38,6 +39,39 @@ const defaultRowBatchSize = 500
 // and unlikely to collide with values that appear in numeric or short-
 // string PK columns.
 const compositePKSeparator = "__"
+
+// sqliteAdapterName is the dal.Adapter Name of a dalgo2sqlite source.
+const sqliteAdapterName = "dalgo2sqlite"
+
+// sqliteTextTimeConstants returns conds with every time.Time constant
+// replaced by its RFC 3339 text. SQLite stores DATE, DATETIME, TIME and
+// TIMESTAMP columns as text, and dalgo2sql's sqlite dialect guards a range
+// comparison against a non-string constant with typeof(col) IN ('integer',
+// 'real'), which no text column passes: the filter would silently match no
+// row. As text the compiler guards with typeof(col) = 'text' and binds the
+// value, which compares the way the legacy text emitter did. Other
+// conditions are returned unchanged; the input is not modified.
+func sqliteTextTimeConstants(conds []dal.Condition) []dal.Condition {
+	out := make([]dal.Condition, len(conds))
+	for i, c := range conds {
+		out[i] = c
+		cmp, ok := c.(dal.Comparison)
+		if !ok {
+			continue
+		}
+		constant, ok := cmp.Right.(dal.Constant)
+		if !ok {
+			continue
+		}
+		t, ok := constant.Value.(time.Time)
+		if !ok {
+			continue
+		}
+		cmp.Right = dal.Constant{Value: t.Format(time.RFC3339Nano)}
+		out[i] = cmp
+	}
+	return out
+}
 
 // copyRows streams every row from the source collection identified by def
 // into the target via tx.InsertMulti, in batches of defaultRowBatchSize.
@@ -75,10 +109,11 @@ func copyRows(
 	}
 
 	// Source-side read. Use a StructuredQuery (works on both backends):
-	// dalgo2sql converts it to text via q.String(); dalgo2ingitdb only
-	// accepts StructuredQuery and rejects TextQuery outright. The query
-	// projects every column (no WHERE / LIMIT) into a map[string]any
-	// record via the default record factory in each driver.
+	// dalgo2sqlite compiles it with the sqlite structured-query dialect
+	// BackendRef.Open sets (bound parameters); dalgo2ingitdb only accepts
+	// StructuredQuery and rejects TextQuery outright. The query projects
+	// every column into a map[string]any record via the default record
+	// factory in each driver.
 	colRef := dal.NewRootCollectionRef(def.Name, "")
 	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(colRef))
 	if opts.Filters != nil {
@@ -87,6 +122,9 @@ func copyRows(
 			conds, err := filter.CompileWhereForTable(def.Name, group, def)
 			if err != nil {
 				return 0, fmt.Errorf("compile where for %q: %w", def.Name, err)
+			}
+			if adapterName(src) == sqliteAdapterName {
+				conds = sqliteTextTimeConstants(conds)
 			}
 			if len(conds) > 0 {
 				builder = builder.Where(conds...)

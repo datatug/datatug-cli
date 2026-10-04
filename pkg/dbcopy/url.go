@@ -277,7 +277,7 @@ func refuseUserinfo(scheme, rest string) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"invalid %s URL: credentials are not supported (%s:// names a local path; write a relative path as ./path)",
+		"invalid %s URL: credentials are not supported (%s:// names a local path; write a relative path as ./dir)",
 		scheme, scheme,
 	)
 }
@@ -359,7 +359,12 @@ func parseHTTPSource(rawURL string) (BackendRef, error) {
 	// A project directory never starts with "user:password@host". Anyone who
 	// writes that means a remote endpoint with credentials, which this scheme
 	// does not take; refusing it keeps the password out of every later error
-	// that quotes the path.
+	// that quotes the path. The text redactor cannot do this job for http(s): it
+	// cannot tell "alice:42/abc@host" (a password) from "localhost:8080/@me" (a
+	// path), so Parse refuses the userinfo shape first, as the path schemes do.
+	if err := refuseUserinfo(scheme, rest); err != nil {
+		return BackendRef{}, err
+	}
 	if holdsAtInFirstSegment(rest) {
 		return BackendRef{}, fmt.Errorf(
 			"invalid %s URL: credentials are not supported (%s:// names a local datatug project directory, not a remote endpoint; write a relative directory that holds an \"@\" as ./dir)",
@@ -380,12 +385,14 @@ func ProjectSourceURL(projectDir string) string {
 
 // LocalSourceURL returns the "scheme://path" source URL that names the local
 // directory path for a scheme that takes one (http, https, ingitdb). A relative
-// path whose first segment holds an "@" is written "./path", because Parse
-// refuses "scheme://my@proj" as a URL that carries credentials. Every caller
+// path whose first segment holds an "@" or that is shaped like
+// "user:password@host" (a:b/c@d) is written "./path", because Parse refuses
+// "scheme://my@proj" and "scheme://a:b/c@d" as URLs that carry credentials.
+// Every caller
 // that builds such a URL from a directory it was given verbatim goes through
 // here, so a directory such as my@proj keeps working.
 func LocalSourceURL(scheme, path string) string {
-	if holdsAtInFirstSegment(path) {
+	if holdsAtInFirstSegment(path) || looksLikeUserinfo(path) {
 		return scheme + "://./" + path
 	}
 	return scheme + "://" + path

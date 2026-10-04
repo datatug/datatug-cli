@@ -270,6 +270,11 @@ func redactUserinfo(scheme, rest string) string {
 	if isHostOnly(scheme, rest) {
 		return rest
 	}
+	// "C:\work\a@b" under http(s) is a Windows project directory, not userinfo
+	// (http(s) names a local directory and never takes credentials).
+	if (scheme == "http" || scheme == "https") && driveLetterPath.MatchString(rest) {
+		return rest
+	}
 	userinfo := rest[:at]
 	colon := strings.IndexByte(userinfo, ':')
 	if colon < 0 {
@@ -279,15 +284,16 @@ func redactUserinfo(scheme, rest string) string {
 }
 
 // redactWholeUserinfo masks the whole userinfo of rest, a wrapped URL such as
-// "https://TOKEN@host/x" (what follows "ingitdb://"). redactUserinfo has
-// already hidden a password; this hides a user name that is itself the secret.
+// "https://TOKEN@host/x" or "https://TOKEN:x-oauth-basic@host/x" (what follows
+// "ingitdb://"). The user name may itself be the secret (GitHub's token form),
+// so the userinfo is masked whole, colon or not.
 // The wrapped scheme decides whether an "@" is userinfo or path.
 func redactWholeUserinfo(rest string) string {
 	prefix := schemePrefix.FindString(rest)
 	inner := rest[len(prefix):]
 	scheme := strings.ToLower(strings.TrimSuffix(prefix, "://"))
 	at := strings.LastIndexByte(inner, '@')
-	if at < 0 || isHostOnly(scheme, inner) || strings.IndexByte(inner[:at], ':') >= 0 {
+	if at < 0 || isHostOnly(scheme, inner) {
 		return rest
 	}
 	return prefix + redactedMarker + inner[at:]

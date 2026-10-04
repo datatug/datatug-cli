@@ -277,7 +277,7 @@ func refuseUserinfo(scheme, rest string) error {
 		return nil
 	}
 	return fmt.Errorf(
-		"invalid %s URL: credentials are not supported (%s:// names a local path; write a relative path as ./path)",
+		"invalid %s URL: credentials are not supported (%s:// names a local path; write a relative path as ./dir)",
 		scheme, scheme,
 	)
 }
@@ -359,7 +359,12 @@ func parseHTTPSource(rawURL string) (BackendRef, error) {
 	// A project directory never starts with "user:password@host". Anyone who
 	// writes that means a remote endpoint with credentials, which this scheme
 	// does not take; refusing it keeps the password out of every later error
-	// that quotes the path.
+	// that quotes the path. The text redactor cannot do this job for http(s): it
+	// cannot tell "alice:42/abc@host" (a password) from "localhost:8080/@me" (a
+	// path), so Parse refuses the userinfo shape first, as the path schemes do.
+	if err := refuseUserinfo(scheme, rest); err != nil {
+		return BackendRef{}, err
+	}
 	if holdsAtInFirstSegment(rest) {
 		return BackendRef{}, fmt.Errorf(
 			"invalid %s URL: credentials are not supported (%s:// names a local datatug project directory, not a remote endpoint; write a relative directory that holds an \"@\" as ./dir)",
@@ -380,12 +385,14 @@ func ProjectSourceURL(projectDir string) string {
 
 // LocalSourceURL returns the "scheme://path" source URL that names the local
 // directory path for a scheme that takes one (http, https, ingitdb). A relative
-// path whose first segment holds an "@" is written "./path", because Parse
-// refuses "scheme://my@proj" as a URL that carries credentials. Every caller
+// path whose first segment holds an "@" or that is shaped like
+// "user:password@host" (a:b/c@d) is written "./path", because Parse refuses
+// "scheme://my@proj" and "scheme://a:b/c@d" as URLs that carry credentials.
+// Every caller
 // that builds such a URL from a directory it was given verbatim goes through
 // here, so a directory such as my@proj keeps working.
 func LocalSourceURL(scheme, path string) string {
-	if holdsAtInFirstSegment(path) {
+	if holdsAtInFirstSegment(path) || looksLikeUserinfo(path) {
 		return scheme + "://./" + path
 	}
 	return scheme + "://" + path
@@ -458,8 +465,9 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 }
 
 // OpenProtected is Open, except an "ingitdb" BackendRef is opened with
-// dalgo2ingitdb.WithStoredOnlyReads() and SQLite uses the validated,
-// parameter-bound structured-query dialect. Other schemes behave like Open.
+// dalgo2ingitdb.WithStoredOnlyReads(). SQLite uses the validated,
+// parameter-bound structured-query dialect on both paths. Other schemes
+// behave like Open.
 //
 // pkg/secureread.openSource uses this for policy-secured sessions; direct
 // `query run` uses it for SQLite structured queries. A policy-secured session
@@ -480,7 +488,7 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 // NOT layer under pkg/accesspolicies here — pkg/accesspolicies remains the
 // sole enforcement layer for every source this CLI opens.
 //
-// The sqlite scheme opts protected reads into dalgo2sql's
+// The sqlite scheme opts every read, protected or not, into dalgo2sql's
 // DbOptions.StructuredQueryDialect: "sqlite" (bounded, parameter-bound
 // structured-query compilation): dal-go/dalgo2sql#179 added FROM-source
 // alias support to compileStructuredSQL, which used to unconditionally
@@ -493,9 +501,10 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 // get the dialect's real guarantees: every dal.Constant value becomes a
 // genuine `?` placeholder + bound arg (not a quoted-string literal), and
 // unsupported shapes (such as joins and cursors) fail closed. GROUP BY and
-// HAVING are compiled by dalgo2sql's aggregation path. The plain
-// Open path (db copy / introspection) is unaffected — it never sets
-// StructuredQueryDialect, so it keeps using the legacy emitSQL rendering.
+// HAVING are compiled by dalgo2sql's aggregation path. The plain Open path
+// (db copy / introspection) sets the same dialect, so it never reaches the
+// legacy emitSQL renderer; only the ingitdb hardening differs between Open
+// and OpenProtected.
 func (r BackendRef) OpenProtected(ctx context.Context) (dal.DB, error) {
 	return r.open(ctx, false, true)
 }
@@ -536,13 +545,14 @@ func (r BackendRef) openSource(ctx context.Context, insecureAllowLoopback, prote
 		if err := CheckSourceFile(r.Path); err != nil {
 			return nil, err
 		}
-		var opts dalgo2sql.DbOptions
-		if protected {
-			// The validated dialect binds values and supports native
-			// aggregation. Caller-side policies, when enabled, remain a
-			// separate enforcement layer.
-			opts.StructuredQueryDialect = "sqlite"
-		}
+		// Every SQLite open, protected or not, compiles structured reads
+		// with the validated dialect: it binds values and supports native
+		// aggregation, and unlike the legacy text emitter it has no limit
+		// on non-ASCII identifiers or on tab, newline and backslash values
+		// (dalgo2sql SQL-01 makes the legacy emitter refuse those).
+		// Caller-side policies, when enabled, remain a separate
+		// enforcement layer.
+		opts := dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"}
 		db, err := newSQLiteDatabaseWithOptions(r.Path, dal.NewSchema(nil, nil), opts)
 		if err != nil {
 			return nil, fmt.Errorf("open sqlite %q: %w", r.Path, err)

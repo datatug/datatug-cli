@@ -226,6 +226,7 @@ func TestParse_IngitdbNeverEchoesAPassword(t *testing.T) {
 		"ingitdb://github.com/org/repo?password=s3cret",
 		"ingitdb://alice:s3cret@github.com/org/repo",
 		"ingitdb://alice:s3/cret@github.com/org/repo",
+		"ingitdb://https://s3cret:x-oauth-basic@github.com/org/repo",
 	} {
 		_, err := Parse(input)
 		assert.Error(t, err, input)
@@ -234,7 +235,10 @@ func TestParse_IngitdbNeverEchoesAPassword(t *testing.T) {
 	}
 	_, err := Parse("ingitdb://https://alice:s3cret@github.com/org/repo")
 	assert.ErrorContains(t, err, "looks remote")
-	assert.ErrorContains(t, err, "ingitdb://https://alice:xxxxx@github.com/org/repo")
+	assert.ErrorContains(t, err, "ingitdb://https://xxxxx@github.com/org/repo")
+	_, err = Parse("ingitdb://https://TOKEN:x-oauth-basic@github.com/org/repo")
+	assert.ErrorContains(t, err, "ingitdb://https://xxxxx@github.com/org/repo")
+	assert.NotContains(t, err.Error(), "x-oauth-basic")
 	_, err = Parse("ingitdb://alice:s3cret@github.com/org/repo")
 	assert.ErrorContains(t, err, "credentials are not supported")
 	// A token written as the user name has no colon and is still a credential.
@@ -265,6 +269,7 @@ func TestParse_IngitdbDirectoryWithAnAtSignNeedsTheDotForm(t *testing.T) {
 		"/abs/a@b/proj": "ingitdb:///abs/a@b/proj",
 		"team/a@b":      "ingitdb://team/a@b",
 		`C:\work\a@b`:   `ingitdb://C:\work\a@b`,
+		"a:b/c@d":       "ingitdb://./a:b/c@d",
 	} {
 		assert.Equal(t, want, LocalSourceURL("ingitdb", dir), dir)
 	}
@@ -316,7 +321,7 @@ func TestParse_BareSchemeStringNamesTheSchemeOnly(t *testing.T) {
 
 func TestParse_HTTPDirectoryWithAnAtSignNeedsTheDotForm(t *testing.T) {
 	t.Parallel()
-	for _, dir := range []string{"my@proj", "@acme/proj", "my@proj/queries", "a@b", "a:b@c/d"} {
+	for _, dir := range []string{"my@proj", "@acme/proj", "my@proj/queries", "a@b", "a:b@c/d", "a:b/c@d", "alice:42/s3cret@host/x"} {
 		_, err := Parse("http://" + dir)
 		assert.ErrorContains(t, err, "credentials are not supported", dir)
 		assert.ErrorContains(t, err, "./dir", "the error says how to write it")
@@ -344,6 +349,24 @@ func TestParse_HTTPDirectoryWithAnAtSignNeedsTheDotForm(t *testing.T) {
 		ref, err := Parse(ProjectSourceURL(dir))
 		assert.NoError(t, err, dir)
 		assert.Equal(t, dir, ref.Path)
+	}
+}
+
+func TestParse_HTTPAndHTTPSRefuseAPasswordThatReadsAsHostAndPort(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		"http://alice:42/s3cret@host/x",
+		"https://alice:42/s3cret@host/x",
+	} {
+		_, err := Parse(input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		assert.NotContains(t, err.Error(), "s3cret", input)
+		assert.NotContains(t, err.Error(), "alice", input)
+	}
+	// A real project path that merely holds a colon and an at sign later is a path.
+	for _, input := range []string{"http://./a:b/c@d", "http:///abs/a:b/c@d", `http://C:\work\a:b@c`} {
+		_, err := Parse(input)
+		assert.NoError(t, err, input)
 	}
 }
 

@@ -28,6 +28,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.88.0
 	github.com/dal-go/dalgo2http v0.2.1
+	github.com/dal-go/dalgo2postgres v0.2.4
 	github.com/dal-go/dalgo2sql v0.19.3
 	github.com/dal-go/dalgo2sqlite v0.2.2
 	github.com/dal-go/record v0.1.3
@@ -104,7 +105,6 @@ require (
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/dal-go/dalgo2firestore v0.10.3 // indirect
 	github.com/dal-go/dalgo2mysql v0.2.0 // indirect
-	github.com/dal-go/dalgo2postgres v0.2.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dlclark/regexp2/v2 v2.6.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect

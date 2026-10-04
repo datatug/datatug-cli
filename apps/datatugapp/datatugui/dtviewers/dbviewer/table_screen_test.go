@@ -289,3 +289,25 @@ func TestTableScreen_PreviewRowCanBeViewedAndCopied(t *testing.T) {
 	h.Press("enter")
 	h.RequireContains("users #1")
 }
+
+// A NULL foreign-key cell references nothing. The recordset carries a NULL as
+// its column's zero value, never as nil, so the preview query compares the key
+// with "" and lists no parent row; in particular it does not list the parent
+// whose key is NULL, which `col IS NULL` would.
+func TestTableScreen_NullForeignKeyCellListsNoParent(t *testing.T) {
+	path := createTestSqliteDb(t,
+		`CREATE TABLE parents (id INTEGER PRIMARY KEY, code TEXT UNIQUE, label TEXT)`,
+		`CREATE TABLE kids (id INTEGER PRIMARY KEY, parent_code TEXT, FOREIGN KEY(parent_code) REFERENCES parents(code))`,
+		`INSERT INTO parents (id, code, label) VALUES (1, NULL, 'null-parent')`,
+		`INSERT INTO parents (id, code, label) VALUES (2, 'p', 'real-parent')`,
+		`INSERT INTO kids (id, parent_code) VALUES (1, NULL)`,
+		`INSERT INTO kids (id, parent_code) VALUES (2, 'p')`,
+	)
+	db := dtviewers.GetSQLiteDbContext(path)
+	h := navtest.New(t, nav.Page{Title: "T", Content: newTableScreen(tableContext(db, "kids"))})
+	h.Press("right") // parent_code of the first row: NULL
+	h.RequireNotContains("null-parent").RequireNotContains("real-parent")
+
+	h.Press("down") // parent_code of the second row: 'p'
+	h.RequireContains("real-parent").RequireNotContains("null-parent")
+}

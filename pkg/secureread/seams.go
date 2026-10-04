@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 
+	"github.com/dal-go/dalgo2sql"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
@@ -26,8 +27,11 @@ var (
 	stmtExecSnapshot = func(ctx context.Context, stmt *sql.Stmt, args ...any) (sql.Result, error) {
 		return stmt.ExecContext(ctx, args...)
 	}
-	sqlOpenNative   = sql.Open
-	pragmaQueryOnly = func(ctx context.Context, db *sql.DB) error {
+	sqlOpenNative = sql.Open
+	// newNativeSQLDatabase is a seam over dalgo2sql.NewDatabase so a test can
+	// see the options the native-SQL connection is wrapped with.
+	newNativeSQLDatabase = dalgo2sql.NewDatabase
+	pragmaQueryOnly      = func(ctx context.Context, db *sql.DB) error {
 		_, err := db.ExecContext(ctx, "PRAGMA query_only = ON")
 		return err
 	}

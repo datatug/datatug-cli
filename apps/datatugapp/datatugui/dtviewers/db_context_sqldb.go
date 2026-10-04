@@ -12,6 +12,23 @@ import (
 	"github.com/strongo/cli-helpers/fsutil"
 )
 
+// newSQLDatabase is a seam over dalgo2sql.NewDatabase so a test can see the
+// options the viewer opens its database with. Always dalgo2sql.NewDatabase in
+// production.
+var newSQLDatabase = dalgo2sql.NewDatabase
+
+// sqlDatabaseOptions returns the dalgo2sql options for a database/sql driver.
+// SQLite gets the safe structured-query compiler, not the legacy text emitter:
+// no limit on non-ASCII identifiers or on tab, newline and backslash values.
+// Any other driver keeps the defaults, because the sqlite dialect emits
+// SQLite-only SQL.
+func sqlDatabaseOptions(driverID string) dalgo2sql.DbOptions {
+	if driverID == "sqlite3" {
+		return dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"}
+	}
+	return dalgo2sql.DbOptions{}
+}
+
 // SqlDBGetter opens the SQL database for a driver name.
 type SqlDBGetter func(ctx context.Context, driverName string) (sqlDB *sql.DB, err error)
 
@@ -33,8 +50,7 @@ func NewSqlDBContext(driver Driver, name string, getSqlDB SqlDBGetter, schema sc
 				if err != nil {
 					return nil, err
 				}
-				db := dalgo2sql.NewDatabase(sqlLiteDB, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{})
-				return db, nil
+				return newSQLDatabase(sqlLiteDB, dal.NewSchema(nil, nil), sqlDatabaseOptions(driver.ID)), nil
 			},
 		},
 		GetSqlDB: getSqlDB,

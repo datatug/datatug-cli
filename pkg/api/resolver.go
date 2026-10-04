@@ -191,7 +191,7 @@ func sourceKey(kind SourceKind, id string) string { return string(kind) + "\x00"
 // inGitDB store directory (data/ingitdb) as a pkg/dbcopy-parseable
 // ingitdb:// URL.
 func semanticIngitdbPath(projectDir string) string {
-	return "ingitdb://" + filepath.Join(projectDir, storage.DataFolder, "ingitdb")
+	return dbcopy.LocalSourceURL("ingitdb", filepath.Join(projectDir, storage.DataFolder, "ingitdb"))
 }
 
 func dedupeNonEmpty(values ...string) []string {

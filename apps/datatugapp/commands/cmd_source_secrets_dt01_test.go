@@ -24,6 +24,8 @@ func TestDBOpen_NeverPrintsThePassword(t *testing.T) {
 		{"postgres", "postgres://alice:" + sourceSecret + "@db.example.com/shop"},
 		{"password with an escaped space", "postgres://alice:s3cr3t%20DT01@db.example.com/shop"},
 		{"mysql with a query password", "mysql://alice@db.example.com/shop?password=" + sourceSecret},
+		// Go reads this as host "alice", port 42; it is a password that holds a slash.
+		{"password that starts with digits and holds a slash", "postgres://alice:42/" + sourceSecret + "@db.example.com/shop"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := dbCommand()
@@ -68,8 +70,20 @@ func TestDBOpen_ParseFailureShowsNeitherTheArgumentsNorTheParserText(t *testing.
 // Every message `db copy` writes about --from or --to, whichever scheme.
 func TestDBCopy_NeverEchoesAPasswordFromEitherSide(t *testing.T) {
 	t.Setenv("DT01_COPY_PG", "postgres://alice:"+sourceSecret+"@127.0.0.1:1/shop")
+	// Both sides must reach Open: the other side is a real, empty SQLite file.
+	dir := t.TempDir()
+	emptySource := "sqlite://" + filepath.Join(dir, "in.db")
+	emptyTarget := "sqlite://" + filepath.Join(dir, "out.db")
+	for _, path := range []string{filepath.Join(dir, "in.db"), filepath.Join(dir, "out.db")} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	secretURLs := []string{
 		"postgres://alice:" + sourceSecret + "@127.0.0.1:1/shop?sslmode=disable",
+		"postgres://alice:42/" + sourceSecret + "@127.0.0.1:1/shop",
+		"ingitdb://" + sourceSecret + "@github.com/org/repo",
+		"ingitdb://https://" + sourceSecret + "@github.com/org/repo",
 		"postgres://alice:" + sourceSecret + "@127.0.0.1:bad/shop",
 		"mysql://alice:" + sourceSecret + "@db.example.com/shop",
 		"ingitdb://https://alice:" + sourceSecret + "@github.com/org/repo",
@@ -84,9 +98,9 @@ func TestDBCopy_NeverEchoesAPasswordFromEitherSide(t *testing.T) {
 		for _, side := range []string{"from", "to"} {
 			argv := []string{"db", "copy", "--" + side, secretURL}
 			if side == "from" {
-				argv = append(argv, "--to", "sqlite:///tmp/dt01-out.db")
+				argv = append(argv, "--to", emptyTarget)
 			} else {
-				argv = append(argv, "--from", "sqlite:///tmp/dt01-in.db")
+				argv = append(argv, "--from", emptySource)
 			}
 			stdout, stderr, err := runCopy(t, argv...)
 			if err == nil {
@@ -98,9 +112,20 @@ func TestDBCopy_NeverEchoesAPasswordFromEitherSide(t *testing.T) {
 			}
 		}
 	}
-	_, _, err := runCopy(t, "db", "copy", "--from", "postgres://alice:"+sourceSecret+"@127.0.0.1:1/shop", "--to", "sqlite:///tmp/dt01-out.db")
+	_, _, err := runCopy(t, "db", "copy", "--from", "postgres://alice:"+sourceSecret+"@127.0.0.1:1/shop", "--to", emptyTarget)
 	if err == nil || !strings.Contains(err.Error(), "open --from") {
 		t.Fatalf("the failing side should still be named: %v", err)
+	}
+	// The --to side reaches Open too (the source file exists), and says so.
+	for _, secretURL := range []string{
+		"postgres://alice:" + sourceSecret + "@127.0.0.1:1/shop",
+		"postgres://alice:42/" + sourceSecret + "@127.0.0.1:1/shop",
+	} {
+		stdout, stderr, err := runCopy(t, "db", "copy", "--from", emptySource, "--to", secretURL)
+		if err == nil || !strings.Contains(err.Error(), "open --to") {
+			t.Fatalf("the --to side should reach Open and be named: %v", err)
+		}
+		assertNoSecret(t, stdout.String(), stderr.String(), err.Error())
 	}
 }
 

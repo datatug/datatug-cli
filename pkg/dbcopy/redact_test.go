@@ -44,7 +44,18 @@ func TestRedactSourceURL(t *testing.T) {
 		{"windows drive path is a path", `ingitdb://C:\work\a@b`, `ingitdb://C:\work\a@b`},
 		{"path that holds an at sign after a port", "http://localhost:8080/users/@me", "http://localhost:8080/users/@me"},
 		{"scoped package path", "https://registry.example.com/@scope/pkg", "https://registry.example.com/@scope/pkg"},
-		{"host only with an at sign in the query", "postgres://h:5432/db?email=a@b.example", "postgres://h:5432/db?email=a@b.example"},
+		// A database URL has no host-only exemption: its userinfo ends at the last "@", so an unescaped "/" in a password cannot hide it behind a port-like prefix.
+		{"postgres host with an at sign in the query is over-redacted", "postgres://h:5432/db?email=a@b.example", "postgres://h:xxxxx@b.example"},
+		{"postgres password that starts with digits and holds a slash", "postgres://alice:42/s3cret@db.example.com/shop", "postgres://alice:xxxxx@db.example.com/shop"},
+		{"postgres password that is all digits before a slash", "postgresql://alice:5432/s3cret@db.example.com/shop", "postgresql://alice:xxxxx@db.example.com/shop"},
+		{"ipv6 host and path that holds an at sign", "http://[::1]:8080/users/@me", "http://[::1]:8080/users/@me"},
+		{"ipv6 host without a port and path that holds an at sign", "https://[2001:db8::1]/users/@me", "https://[2001:db8::1]/users/@me"},
+		{"http host with an at sign in the query", "http://localhost:8080?email=a@b.com", "http://localhost:8080?email=a@b.com"},
+		{"http host with an at sign in the fragment", "http://localhost:8080#a@b.com", "http://localhost:8080#a@b.com"},
+		{"http host and path with an at sign in the query", "http://localhost:8080/x?email=a@b.com", "http://localhost:8080/x?email=a@b.com"},
+		{"http credentials still hidden next to a port-like password", "https://alice:s3cret@host:8080/x", "https://alice:xxxxx@host:8080/x"},
+		{"ingitdb wrapping a URL with a token as the user name", "ingitdb://https://s3cret@github.com/org/repo", "ingitdb://https://xxxxx@github.com/org/repo"},
+		{"ingitdb wrapping a URL with no userinfo", "ingitdb://https://github.com/org/repo", "ingitdb://https://github.com/org/repo"},
 		{"password made of a port-like number is still userinfo", "postgres://u:123@h/db", "postgres://u:xxxxx@h/db"},
 		{"keyword DSN", "host=db user=u password=s3cret dbname=x", "host=db user=u password=xxxxx dbname=x"},
 		{"keyword DSN with spaces around equals", "host=db PASSWORD = s3cret dbname=x", "host=db PASSWORD = xxxxx dbname=x"},
@@ -87,6 +98,8 @@ func TestRedactText(t *testing.T) {
 		{"single-quoted URL whose password holds a space", `parse 'postgres://alice:p ass s3cret@h/db': bad`, `parse 'postgres://alice:xxxxx@h/db': bad`},
 		{"ingitdb wrapping a URL", `ingitdb URL "ingitdb://https://alice:s3cret@github.com/org/repo" looks remote`, `ingitdb URL "ingitdb://https://alice:xxxxx@github.com/org/repo" looks remote`},
 		{"harmless URL with an at sign in the path", "GET http://localhost:8080/users/@me failed", "GET http://localhost:8080/users/@me failed"},
+		{"harmless URL with an ipv6 host and an at sign in the path", "GET http://[::1]:8080/users/@me failed", "GET http://[::1]:8080/users/@me failed"},
+		{"postgres URL whose password starts with digits and holds a slash", "dial postgres://alice:42/s3cret@db.example.com/shop failed", "dial postgres://alice:xxxxx@db.example.com/shop failed"},
 		{"harmless prose with an address", "mail bob@example.com about http://localhost:8080 today", "mail bob@example.com about http://localhost:8080 today"},
 		{"PGPASSWORD in an environment dump", "PGPASSWORD=s3cret PGUSER=u", "PGPASSWORD=xxxxx PGUSER=u"},
 		{"json body", `response {"password":"s3cret"} rejected`, `response {"password":"xxxxx"} rejected`},
@@ -130,29 +143,31 @@ func TestSourceSecrets(t *testing.T) {
 		name string
 		in   string
 		want []string
+		// subset: want is a subset of the secrets, in any order and spelling count.
+		subset bool
 	}{
-		{"password", "postgres://alice:s3cret@h/db", []string{"s3cret"}},
-		{"percent-encoded password lists both spellings", "postgres://alice:p%40ss%2Fw@h/db", []string{"p%40ss%2Fw", "p@ss/w", "p%40ss%2Fw", "p@ss/w"}},
-		{"query parameters", "postgres://h/db?sslmode=require&password=s3cret&api_key=k%20k#frag", []string{"s3cret", "k%20k", "k k", "k+k"}},
-		{"keyword", "host=db password='it is s3cret'", []string{"it is s3cret", "it+is+s3cret", "it%20is%20s3cret"}},
-		{"user without password", "postgres://alice@h/db", nil},
-		{"no secret", "postgres://h:5432/db?sslmode=require", nil},
-		{"host and port only, at sign in the path", "postgres://h:5432/a@b", nil},
-		{"sqlite path is never userinfo", "sqlite://a:b@c.db", nil},
-		{"bare path with colon and at sign", "/tmp/x:y@z.db", nil},
-		{"bare project path with a secret-named parameter", "api.example.com/v1?api_key=K", []string{"K"}},
-		{"empty password", "postgres://alice:@h/db", nil},
+		{"password", "postgres://alice:s3cret@h/db", []string{"s3cret"}, false},
+		{"percent-encoded password lists both spellings", "postgres://alice:p%40ss%2Fw@h/db", []string{"p%40ss%2Fw", "p@ss/w"}, true},
+		{"query parameters", "postgres://h/db?sslmode=require&password=s3cret&api_key=k%20k#frag", []string{"s3cret", "k%20k", "k k", "k+k"}, true},
+		{"keyword", "host=db password='it is s3cret'", []string{"it is s3cret", "it+is+s3cret", "it%20is%20s3cret"}, true},
+		{"user without password", "postgres://alice@h/db", nil, false},
+		{"no secret", "postgres://h:5432/db?sslmode=require", nil, false},
+		{"http host and port only, at sign in the path", "http://h:5432/a@b", nil, false},
+		{"postgres host and port only, at sign in the path reads as userinfo", "postgres://h:5432/a@b", []string{"5432/a"}, true},
+		{"sqlite path is never userinfo", "sqlite://a:b@c.db", nil, false},
+		{"bare path with colon and at sign", "/tmp/x:y@z.db", nil, false},
+		{"bare project path with a secret-named parameter", "api.example.com/v1?api_key=K", []string{"K"}, false},
+		{"empty password", "postgres://alice:@h/db", nil, false},
+		{"password that starts with digits and holds a slash", "postgres://alice:42/s3cret@h/db", []string{"42/s3cret", "42%2Fs3cret"}, true},
+		{"http host and path with an at sign", "http://localhost:8080/users/@me", nil, false},
+		{"http ipv6 host and path with an at sign", "http://[::1]:8080/users/@me", nil, false},
+		{"http host with an at sign in the query", "http://localhost:8080?email=a@b.com", nil, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := sourceSecrets(tc.in)
-			if tc.name == "percent-encoded password lists both spellings" {
-				assert.Contains(t, got, "p%40ss%2Fw")
-				assert.Contains(t, got, "p@ss/w")
-				return
-			}
-			if tc.name == "query parameters" || tc.name == "keyword" {
+			if tc.subset {
 				for _, want := range tc.want {
 					assert.Contains(t, got, want)
 				}

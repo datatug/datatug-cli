@@ -312,6 +312,15 @@ func parseInGitDB(rawURL string) (BackendRef, error) {
 	if err := refuseUserinfo("ingitdb", rest); err != nil {
 		return BackendRef{}, err
 	}
+	// "ingitdb://TOKEN@github.com/org/repo": a token written as the user name has
+	// no colon, so the check above passes it, and the missing-file error would
+	// quote it. A local directory never starts with "user@host"; one that holds
+	// an "@" is written ./dir (see LocalSourceURL).
+	if holdsAtInFirstSegment(rest) {
+		return BackendRef{}, fmt.Errorf(
+			"invalid ingitdb URL: credentials are not supported (ingitdb:// names a local directory, not a remote repository; write a relative directory that holds an \"@\" as ./dir)",
+		)
+	}
 
 	// ingitdb://./relative  → rest = "./relative"      (local, OK)
 	// ingitdb://relative    → rest = "relative"        (local, OK)
@@ -366,10 +375,20 @@ func parseHTTPSource(rawURL string) (BackendRef, error) {
 // segment holds an "@" (my@proj, @acme/proj) is written "./dir", because Parse
 // refuses "http://my@proj" as a URL that carries credentials.
 func ProjectSourceURL(projectDir string) string {
-	if holdsAtInFirstSegment(projectDir) {
-		return "http://./" + projectDir
+	return LocalSourceURL("http", projectDir)
+}
+
+// LocalSourceURL returns the "scheme://path" source URL that names the local
+// directory path for a scheme that takes one (http, https, ingitdb). A relative
+// path whose first segment holds an "@" is written "./path", because Parse
+// refuses "scheme://my@proj" as a URL that carries credentials. Every caller
+// that builds such a URL from a directory it was given verbatim goes through
+// here, so a directory such as my@proj keeps working.
+func LocalSourceURL(scheme, path string) string {
+	if holdsAtInFirstSegment(path) {
+		return scheme + "://./" + path
 	}
-	return "http://" + projectDir
+	return scheme + "://" + path
 }
 
 // holdsAtInFirstSegment reports whether the first path segment of rest holds an

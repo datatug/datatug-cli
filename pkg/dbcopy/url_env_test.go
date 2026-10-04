@@ -237,6 +237,37 @@ func TestParse_IngitdbNeverEchoesAPassword(t *testing.T) {
 	assert.ErrorContains(t, err, "ingitdb://https://alice:xxxxx@github.com/org/repo")
 	_, err = Parse("ingitdb://alice:s3cret@github.com/org/repo")
 	assert.ErrorContains(t, err, "credentials are not supported")
+	// A token written as the user name has no colon and is still a credential.
+	_, err = Parse("ingitdb://https://s3cret@github.com/org/repo")
+	assert.ErrorContains(t, err, "ingitdb://https://xxxxx@github.com/org/repo")
+	_, err = Parse("ingitdb://s3cret@github.com/org/repo")
+	assert.ErrorContains(t, err, "credentials are not supported")
+	assert.ErrorContains(t, err, "./dir", "the error says how to write a directory that holds an at sign")
+}
+
+func TestParse_IngitdbDirectoryWithAnAtSignNeedsTheDotForm(t *testing.T) {
+	t.Parallel()
+	for _, dir := range []string{"my@proj", "@acme/proj", "my@proj/data/ingitdb", "a@b"} {
+		_, err := Parse("ingitdb://" + dir)
+		assert.ErrorContains(t, err, "credentials are not supported", dir)
+		assert.NotContains(t, err.Error(), dir, "the directory is not echoed")
+
+		source := LocalSourceURL("ingitdb", dir)
+		assert.Equal(t, "ingitdb://./"+dir, source)
+		ref, err := Parse(source)
+		assert.NoError(t, err, dir)
+		assert.Equal(t, "./"+dir, ref.Path, "the same relative directory")
+		assert.Equal(t, "ingitdb", ref.Scheme)
+	}
+	for dir, want := range map[string]string{
+		"demo":          "ingitdb://demo",
+		"./a@b":         "ingitdb://./a@b",
+		"/abs/a@b/proj": "ingitdb:///abs/a@b/proj",
+		"team/a@b":      "ingitdb://team/a@b",
+		`C:\work\a@b`:   `ingitdb://C:\work\a@b`,
+	} {
+		assert.Equal(t, want, LocalSourceURL("ingitdb", dir), dir)
+	}
 }
 
 func TestParse_PathSchemesRefuseUserinfoButKeepRealPaths(t *testing.T) {
@@ -254,7 +285,7 @@ func TestParse_PathSchemesRefuseUserinfoButKeepRealPaths(t *testing.T) {
 		"sqlite://./a@b.db",
 		"sqlite:a@b:c.db",
 		"ingitdb://./a@b:c",
-		"ingitdb://a@b",
+		"ingitdb://./a@b",
 		`ingitdb://C:\work\a@b`,
 		"openvaultdb:///a@b:c.json",
 	} {

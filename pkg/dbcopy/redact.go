@@ -36,14 +36,28 @@ var (
 	colonSecret = regexp.MustCompile(`(?i)\b(password|passwd|pwd)(:)([^\s:/&;,"'][^\s&;,"']*)`)
 )
 
-// hostOnlyAuthority is an authority that is just "host" or "host:port".
-var hostOnlyAuthority = regexp.MustCompile(`^[^@:]*(:[0-9]+)?$`)
+// hostOnlyAuthority is an authority that is just "host" or "host:port": a name
+// or IPv4 address, or a bracketed IPv6 address, and an optional numeric port.
+var hostOnlyAuthority = regexp.MustCompile(`^(\[[0-9A-Fa-f:.]*\]|[^@:\[\]]*)(:[0-9]+)?$`)
 
 // isHostOnly reports whether the authority of rest, the text after "scheme://",
-// is a plain "host" or "host:port": the authority ends at the first "/", so
-// there is no userinfo and any "@" further on belongs to the path.
-func isHostOnly(rest string) bool {
-	authority, _, _ := strings.Cut(rest, "/")
+// is a plain "host" or "host:port", so that there is no userinfo and any "@"
+// further on belongs to the path, the query or the fragment.
+//
+// Only http and https get the exemption: their URLs name a local project
+// directory or a web endpoint, never hold a password, and are full of "@" in
+// paths ("/users/@me") and queries ("?email=a@b.com"). For every other scheme
+// the userinfo ends at the last "@" and nothing is exempt, because a PostgreSQL
+// password may hold an unescaped "/" (postgres://alice:42/abc@host/db reads as
+// host "alice", port 42, but is a password "42/abc") and hiding it is the point.
+func isHostOnly(scheme, rest string) bool {
+	if scheme != "http" && scheme != "https" {
+		return false
+	}
+	authority := rest
+	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+		authority = rest[:end]
+	}
 	return hostOnlyAuthority.MatchString(authority)
 }
 
@@ -63,8 +77,9 @@ func looksLikeUserinfo(rest string) bool {
 	return !driveLetterPath.MatchString(rest) && userinfoShape.MatchString(rest)
 }
 
-// pathSchemes name a file or directory after "://", so what follows is never
-// "user:password@host" and must not be read as userinfo.
+// pathSchemes name a file or directory after "://": what follows is a path, not
+// userinfo, unless it is shaped like "user:password@host" (looksLikeUserinfo),
+// which Parse refuses and the redactor still hides.
 var pathSchemes = map[string]bool{"sqlite": true, "ingitdb": true, "openvaultdb": true}
 
 // sourceSecrets returns the literal secrets raw holds, in every spelling a
@@ -81,7 +96,7 @@ func sourceSecrets(raw string) []string {
 		// Only a URL names a password in front of an "@": in a bare path (a
 		// sqlite file, a project directory) ":" and "@" are just characters.
 		if scheme := strings.ToLower(strings.TrimSuffix(raw[:location[1]], "://")); !pathSchemes[scheme] {
-			if at := strings.LastIndexByte(rest, '@'); at >= 0 && !isHostOnly(rest) {
+			if at := strings.LastIndexByte(rest, '@'); at >= 0 && !isHostOnly(scheme, rest) {
 				if _, password, found := strings.Cut(rest[:at], ":"); found {
 					add(password)
 				}
@@ -183,7 +198,9 @@ var sensitiveQueryKeys = []string{"pass", "pwd", "secret", "token", "key", "auth
 // It works on the text and never parses, so it cannot fail and a malformed URL
 // is still redacted. It prefers to over-redact: the userinfo ends at the last
 // "@" in the string, so a password that holds an unescaped "@", "/" or "?" is
-// still removed whole.
+// still removed whole. The one exemption is an http or https URL whose
+// authority is a plain host or host:port (see isHostOnly), whose "@" belongs to
+// the path.
 func RedactSourceURL(raw string) string {
 	location := schemePrefix.FindStringIndex(raw)
 	if location == nil {
@@ -194,13 +211,15 @@ func RedactSourceURL(raw string) string {
 	scheme := strings.ToLower(strings.TrimSuffix(prefix, "://"))
 	switch {
 	case !pathSchemes[scheme]:
-		rest = redactUserinfo(rest)
+		rest = redactUserinfo(scheme, rest)
 	case schemePrefix.MatchString(rest):
 		// A path scheme wrapping a URL ("ingitdb://https://u:p@host/x"): the
-		// wrapped URL carries the userinfo.
-		rest = RedactSourceURL(rest)
+		// wrapped URL carries the userinfo. Nothing may stand in front of the
+		// host there, so a user name alone ("https://TOKEN@host/x") is a token
+		// and is masked whole.
+		rest = redactWholeUserinfo(RedactSourceURL(rest))
 	case looksLikeUserinfo(rest):
-		rest = redactUserinfo(rest)
+		rest = redactUserinfo(scheme, rest)
 	}
 	rest = redactQuery(rest)
 	return redactKeywordSecrets(prefix + rest)
@@ -241,15 +260,14 @@ func redactKeywordSecrets(text string) string {
 
 // redactUserinfo replaces the password in a leading "user:password@" with the
 // marker. A user name alone ("user@host") holds no secret and is kept.
-func redactUserinfo(rest string) string {
+func redactUserinfo(scheme, rest string) string {
 	at := strings.LastIndexByte(rest, '@')
 	if at < 0 {
 		return rest
 	}
-	// "host:8080/users/@me" is a path that holds an "@", not userinfo: the
-	// authority ends at the first "/", and one that is a plain "host" or
-	// "host:port" has no room for a password.
-	if isHostOnly(rest) {
+	// "host:8080/users/@me" is a path that holds an "@", not userinfo (see
+	// isHostOnly for the schemes that get this reading).
+	if isHostOnly(scheme, rest) {
 		return rest
 	}
 	userinfo := rest[:at]
@@ -258,6 +276,21 @@ func redactUserinfo(rest string) string {
 		return rest
 	}
 	return userinfo[:colon+1] + redactedMarker + rest[at:]
+}
+
+// redactWholeUserinfo masks the whole userinfo of rest, a wrapped URL such as
+// "https://TOKEN@host/x" (what follows "ingitdb://"). redactUserinfo has
+// already hidden a password; this hides a user name that is itself the secret.
+// The wrapped scheme decides whether an "@" is userinfo or path.
+func redactWholeUserinfo(rest string) string {
+	prefix := schemePrefix.FindString(rest)
+	inner := rest[len(prefix):]
+	scheme := strings.ToLower(strings.TrimSuffix(prefix, "://"))
+	at := strings.LastIndexByte(inner, '@')
+	if at < 0 || isHostOnly(scheme, inner) || strings.IndexByte(inner[:at], ':') >= 0 {
+		return rest
+	}
+	return prefix + redactedMarker + inner[at:]
 }
 
 // redactQuery replaces the value of every secret-named query parameter.

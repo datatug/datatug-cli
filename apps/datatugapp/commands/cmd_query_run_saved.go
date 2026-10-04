@@ -259,7 +259,7 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (st
 		if err != nil {
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
-		return "ingitdb://" + path, nil
+		return dbcopy.LocalSourceURL("ingitdb", path), nil
 	default:
 		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3 or ingitdb)", catalog.Driver)
 	}

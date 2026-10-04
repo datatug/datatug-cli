@@ -1,6 +1,7 @@
 package dbcopy
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -37,10 +38,27 @@ func TestRedactSourceURL(t *testing.T) {
 		{"openvaultdb path is never userinfo", "openvaultdb:///a@b:c.json", "openvaultdb:///a@b:c.json"},
 		{"sqlite key parameter", "sqlite:///x.db?_pragma_key=s3cret&mode=ro", "sqlite:///x.db?_pragma_key=xxxxx&mode=ro"},
 		{"env reference", "env:SHOP_PG_URL", "env:SHOP_PG_URL"},
+		{"ingitdb wrapping a URL with a password", "ingitdb://https://alice:s3cret@github.com/org/repo", "ingitdb://https://alice:xxxxx@github.com/org/repo"},
+		{"ingitdb path shaped like userinfo", "ingitdb://alice:s3cret@github.com/org/repo", "ingitdb://alice:xxxxx@github.com/org/repo"},
+		{"sqlite path shaped like userinfo", "sqlite://alice:s3cret@host/x.db", "sqlite://alice:xxxxx@host/x.db"},
+		{"windows drive path is a path", `ingitdb://C:\work\a@b`, `ingitdb://C:\work\a@b`},
+		{"path that holds an at sign after a port", "http://localhost:8080/users/@me", "http://localhost:8080/users/@me"},
+		{"scoped package path", "https://registry.example.com/@scope/pkg", "https://registry.example.com/@scope/pkg"},
+		{"host only with an at sign in the query", "postgres://h:5432/db?email=a@b.example", "postgres://h:5432/db?email=a@b.example"},
+		{"password made of a port-like number is still userinfo", "postgres://u:123@h/db", "postgres://u:xxxxx@h/db"},
 		{"keyword DSN", "host=db user=u password=s3cret dbname=x", "host=db user=u password=xxxxx dbname=x"},
 		{"keyword DSN with spaces around equals", "host=db PASSWORD = s3cret dbname=x", "host=db PASSWORD = xxxxx dbname=x"},
 		{"keyword DSN quoted value", `password='it\'s a secret' host=x`, `password=xxxxx host=x`},
 		{"keyword DSN sslpassword", "sslpassword=s3cret", "sslpassword=xxxxx"},
+		{"PGPASSWORD", "PGPASSWORD=s3cret psql", "PGPASSWORD=xxxxx psql"},
+		{"prefixed name", "db_password=s3cret host=x", "db_password=xxxxx host=x"},
+		{"double-quoted value with a space", `host=x password="it is s3cret" dbname=y`, `host=x password=xxxxx dbname=y`},
+		{"json member", `{"user":"u","password":"s3cret"}`, `{"user":"u","password":"xxxxx"}`},
+		{"json member with spaces and an escaped quote", `{"db_password" : "s3\"cret"}`, `{"db_password" : "xxxxx"}`},
+		{"json member holding a number", `{"password":12345}`, `{"password":"xxxxx"}`},
+		{"colon form", "Password:s3cret", "Password:xxxxx"},
+		{"colon form is prose when a space follows", "Password: required", "Password: required"},
+		{"word that only ends in pwd is still a keyword", "cwd=/tmp and pwd=/home", "cwd=/tmp and pwd=xxxxx"},
 		{"plain text", "just some words", "just some words"},
 		{"empty", "", ""},
 	}
@@ -65,6 +83,14 @@ func TestRedactText(t *testing.T) {
 		{"keyword in prose", "failed with password=s3cret and more", "failed with password=xxxxx and more"},
 		{"url-escaped quote form", `parse "postgres://u:s3\"cret@h/db": bad`, `parse "postgres://u:xxxxx@h/db": bad`},
 		{"nothing to redact", "sqlite:///tmp/x.db is missing", "sqlite:///tmp/x.db is missing"},
+		{"quoted URL whose password holds a space", `parse "postgres://alice:p ass s3cret@h/db": bad`, `parse "postgres://alice:xxxxx@h/db": bad`},
+		{"single-quoted URL whose password holds a space", `parse 'postgres://alice:p ass s3cret@h/db': bad`, `parse 'postgres://alice:xxxxx@h/db': bad`},
+		{"ingitdb wrapping a URL", `ingitdb URL "ingitdb://https://alice:s3cret@github.com/org/repo" looks remote`, `ingitdb URL "ingitdb://https://alice:xxxxx@github.com/org/repo" looks remote`},
+		{"harmless URL with an at sign in the path", "GET http://localhost:8080/users/@me failed", "GET http://localhost:8080/users/@me failed"},
+		{"harmless prose with an address", "mail bob@example.com about http://localhost:8080 today", "mail bob@example.com about http://localhost:8080 today"},
+		{"PGPASSWORD in an environment dump", "PGPASSWORD=s3cret PGUSER=u", "PGPASSWORD=xxxxx PGUSER=u"},
+		{"json body", `response {"password":"s3cret"} rejected`, `response {"password":"xxxxx"} rejected`},
+		{"prose that names the word", "the password must not be empty", "the password must not be empty"},
 		{"empty", "", ""},
 	}
 	for _, tc := range tests {
@@ -88,4 +114,87 @@ func TestBackendRef_FormattingNeverPrintsTheSecret(t *testing.T) {
 		assert.NotContains(t, rendered, "s3cret")
 		assert.Contains(t, rendered, "postgres://alice:xxxxx@db.example.com:5432/shop")
 	}
+}
+
+func TestRedactError_KeepsAnErrorThatHoldsNoSecret(t *testing.T) {
+	t.Parallel()
+	original := fmt.Errorf("open sqlite: %w", ErrSourceFileMissing)
+	assert.Same(t, original, RedactError(original), "nothing to hide: the error itself comes back")
+	assert.NoError(t, RedactErrorWithSecrets(nil, "postgres://u:p@h/db"))
+	assert.NoError(t, RedactErrorWithLiterals(nil, "p"))
+}
+
+func TestSourceSecrets(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"password", "postgres://alice:s3cret@h/db", []string{"s3cret"}},
+		{"percent-encoded password lists both spellings", "postgres://alice:p%40ss%2Fw@h/db", []string{"p%40ss%2Fw", "p@ss/w", "p%40ss%2Fw", "p@ss/w"}},
+		{"query parameters", "postgres://h/db?sslmode=require&password=s3cret&api_key=k%20k#frag", []string{"s3cret", "k%20k", "k k", "k+k"}},
+		{"keyword", "host=db password='it is s3cret'", []string{"it is s3cret", "it+is+s3cret", "it%20is%20s3cret"}},
+		{"user without password", "postgres://alice@h/db", nil},
+		{"no secret", "postgres://h:5432/db?sslmode=require", nil},
+		{"host and port only, at sign in the path", "postgres://h:5432/a@b", nil},
+		{"sqlite path is never userinfo", "sqlite://a:b@c.db", nil},
+		{"bare path with colon and at sign", "/tmp/x:y@z.db", nil},
+		{"bare project path with a secret-named parameter", "api.example.com/v1?api_key=K", []string{"K"}},
+		{"empty password", "postgres://alice:@h/db", nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := sourceSecrets(tc.in)
+			if tc.name == "percent-encoded password lists both spellings" {
+				assert.Contains(t, got, "p%40ss%2Fw")
+				assert.Contains(t, got, "p@ss/w")
+				return
+			}
+			if tc.name == "query parameters" || tc.name == "keyword" {
+				for _, want := range tc.want {
+					assert.Contains(t, got, want)
+				}
+				return
+			}
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestRedactErrorWithSecrets_RemovesTheLiteralPasswordInAnyShape(t *testing.T) {
+	t.Parallel()
+	const source = "postgres://alice:p%40ss%2Fw0rd@db.example.com:5432/shop?password=q%3Dz"
+	for _, message := range []string{
+		`dial "postgres://alice:p%40ss%2Fw0rd@db.example.com:5432/shop": refused`,
+		"failed to connect to `host=db.example.com user=alice password=p@ss/w0rd`: refused",
+		"pq: password authentication failed for user alice (p@ss/w0rd)",
+		"decoded q=z and encoded q%3Dz and plus q%3Dz",
+		"pgx: dsn p%40ss%2Fw0rd",
+	} {
+		err := RedactErrorWithSecrets(fmt.Errorf("open: %w", ErrPostgresNotWired), source) // chain check below
+		assert.ErrorIs(t, err, ErrPostgresNotWired)
+
+		redacted := RedactErrorWithSecrets(errors.New(message), source)
+		for _, secret := range []string{"p%40ss%2Fw0rd", "p@ss/w0rd", "w0rd", "q%3Dz", "q=z"} {
+			assert.NotContains(t, redacted.Error(), secret, message)
+		}
+	}
+	original := fmt.Errorf("dial p@ss/w0rd: %w", ErrPostgresNotWired)
+	redacted := RedactErrorWithSecrets(original, source)
+	assert.ErrorIs(t, redacted, ErrPostgresNotWired, "the chain survives")
+	assert.Equal(t, "dial xxxxx: PostgreSQL backend not yet wired", redacted.Error())
+	// A source that holds no secret leaves the error alone.
+	plain := errors.New("boom")
+	assert.Same(t, plain, RedactErrorWithSecrets(plain, "sqlite:///tmp/x.db"))
+}
+
+func TestRedactErrorWithLiteralsAndTextWithSecrets(t *testing.T) {
+	t.Parallel()
+	err := RedactErrorWithLiterals(errors.New("login failed for p ss;w0rd on h"), "p ss;w0rd")
+	assert.Equal(t, "login failed for xxxxx on h", err.Error())
+	assert.Equal(t, "server=h;password=xxxxx;database=d", RedactTextWithSecrets("server=h;password=p ss;w0rd;database=d", "p ss;w0rd"))
+	assert.Equal(t, "nothing here", RedactTextWithSecrets("nothing here", ""))
+	assert.Equal(t, "nothing here", RedactTextWithSecrets("nothing here"))
 }

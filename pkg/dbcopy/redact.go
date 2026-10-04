@@ -17,14 +17,159 @@ var (
 	// urlInText finds a URL anywhere inside free text, up to the next space.
 	urlInText = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://\S+`)
 
-	// keywordSecret finds the libpq "password=..." form of a connection string.
+	// quotedURLInText finds a URL inside a pair of double or single quotes, the
+	// way a %q-formatted error quotes it. A quoted URL may hold spaces and
+	// backslash-escaped quotes, which urlInText would stop at.
+	quotedURLInText = regexp.MustCompile(`"[A-Za-z][A-Za-z0-9+.-]*://(?:[^"\\]|\\.)*"|'[A-Za-z][A-Za-z0-9+.-]*://(?:[^'\\]|\\.)*'`)
+
+	// keywordSecret finds the libpq "password=..." form of a connection string
+	// and its relatives: PGPASSWORD=..., db_password=..., sslpassword=....
 	// A quoted value may hold spaces and backslash-escaped quotes.
-	keywordSecret = regexp.MustCompile(`(?i)\b(password|passwd|pwd|sslpassword)(\s*=\s*)('(?:[^'\\]|\\.)*'|[^\s&;]+)`)
+	keywordSecret = regexp.MustCompile(`(?i)([A-Za-z0-9_.-]*(?:password|passwd|pwd))(\s*=\s*)('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|[^\s&;,]+)`)
+
+	// jsonSecret finds a JSON member whose name says it is a password.
+	jsonSecret = regexp.MustCompile(`(?i)("[A-Za-z0-9_.-]*(?:password|passwd|pwd)"\s*:\s*)("(?:[^"\\]|\\.)*"|[^\s,}\]]+)`)
+
+	// colonSecret finds "Password:value", a value written straight after the
+	// colon. "password: required" (a space after the colon) is prose, not a
+	// secret, and is left alone.
+	colonSecret = regexp.MustCompile(`(?i)\b(password|passwd|pwd)(:)([^\s:/&;,"'][^\s&;,"']*)`)
 )
+
+// hostOnlyAuthority is an authority that is just "host" or "host:port".
+var hostOnlyAuthority = regexp.MustCompile(`^[^@:]*(:[0-9]+)?$`)
+
+// isHostOnly reports whether the authority of rest, the text after "scheme://",
+// is a plain "host" or "host:port": the authority ends at the first "/", so
+// there is no userinfo and any "@" further on belongs to the path.
+func isHostOnly(rest string) bool {
+	authority, _, _ := strings.Cut(rest, "/")
+	return hostOnlyAuthority.MatchString(authority)
+}
+
+// userinfoShape is "user:password@..." at the start of a string: a user name,
+// a colon, and anything up to an "@". A password may hold "/", so the match
+// does not stop at one.
+var userinfoShape = regexp.MustCompile(`^[^/@:]+:[^@]*@`)
+
+// driveLetterPath is a Windows path such as C:\dir or C:/dir.
+var driveLetterPath = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
+
+// looksLikeUserinfo reports whether rest, the text after "scheme://" of a
+// scheme that names a file or directory, is shaped like "user:password@host"
+// instead of like a path. A path that starts "./" or "/" never is; a Windows
+// drive path never is.
+func looksLikeUserinfo(rest string) bool {
+	return !driveLetterPath.MatchString(rest) && userinfoShape.MatchString(rest)
+}
 
 // pathSchemes name a file or directory after "://", so what follows is never
 // "user:password@host" and must not be read as userinfo.
 var pathSchemes = map[string]bool{"sqlite": true, "ingitdb": true, "openvaultdb": true}
+
+// sourceSecrets returns the literal secrets raw holds, in every spelling a
+// driver might echo: the password of a "user:password@" prefix and the value of
+// every secret-named query parameter, each raw, percent-decoded and
+// percent-encoded again. A caller that holds the real URL uses it to scrub an
+// error the driver wrote, whatever shape the driver gave the URL in.
+func sourceSecrets(raw string) []string {
+	var secrets []string
+	add := func(value string) { secrets = append(secrets, secretSpellings(value)...) }
+	rest := raw
+	if location := schemePrefix.FindStringIndex(raw); location != nil {
+		rest = raw[location[1]:]
+		// Only a URL names a password in front of an "@": in a bare path (a
+		// sqlite file, a project directory) ":" and "@" are just characters.
+		if scheme := strings.ToLower(strings.TrimSuffix(raw[:location[1]], "://")); !pathSchemes[scheme] {
+			if at := strings.LastIndexByte(rest, '@'); at >= 0 && !isHostOnly(rest) {
+				if _, password, found := strings.Cut(rest[:at], ":"); found {
+					add(password)
+				}
+			}
+		}
+	}
+	if _, query, found := strings.Cut(rest, "?"); found {
+		query, _, _ = strings.Cut(query, "#")
+		for _, pair := range strings.Split(query, "&") {
+			if key, value, hasValue := strings.Cut(pair, "="); hasValue && isSensitiveQueryKey(key) {
+				add(value)
+			}
+		}
+	}
+	for _, match := range keywordSecret.FindAllStringSubmatch(raw, -1) {
+		add(strings.Trim(match[3], `'"`))
+	}
+	return secrets
+}
+
+// secretSpellings returns value as written, percent-decoded and percent-encoded
+// again: the spellings a driver may use when it echoes a secret. An empty value
+// has none.
+func secretSpellings(value string) []string {
+	if value == "" {
+		return nil
+	}
+	spellings := []string{value}
+	if decoded, err := url.PathUnescape(value); err == nil && decoded != value {
+		spellings = append(spellings, decoded)
+		value = decoded
+	}
+	for _, encoded := range []string{url.QueryEscape(value), url.PathEscape(value)} {
+		if encoded != value {
+			spellings = append(spellings, encoded)
+		}
+	}
+	return spellings
+}
+
+// RedactTextWithSecrets is RedactText for text that may hold secrets the
+// caller knows as plain values (a password it was given as a flag): besides
+// everything RedactText removes it replaces every literal in secrets, in the
+// spellings secretSpellings lists.
+func RedactTextWithSecrets(text string, secrets ...string) string {
+	var spellings []string
+	for _, secret := range secrets {
+		spellings = append(spellings, secretSpellings(secret)...)
+	}
+	return RedactText(scrubSecrets(text, spellings))
+}
+
+// RedactErrorWithSecrets is RedactError for an error written by code that was
+// handed source, the real URL: besides the URL-shaped text RedactError finds,
+// it removes every literal secret source holds, so a driver that formats the
+// connection string in its own way still cannot put the password in a message.
+func RedactErrorWithSecrets(err error, source string) error {
+	return redactErrorWith(err, sourceSecrets(source))
+}
+
+// RedactErrorWithLiterals is RedactError for an error written by code that was
+// handed secrets as plain values (a password given as a flag): it also removes
+// every literal in secrets, in the spellings secretSpellings lists.
+func RedactErrorWithLiterals(err error, secrets ...string) error {
+	var spellings []string
+	for _, secret := range secrets {
+		spellings = append(spellings, secretSpellings(secret)...)
+	}
+	return redactErrorWith(err, spellings)
+}
+
+func redactErrorWith(err error, secrets []string) error {
+	if err == nil {
+		return nil
+	}
+	if RedactText(scrubSecrets(err.Error(), secrets)) == err.Error() {
+		return err
+	}
+	return redactedError{err: err, secrets: secrets}
+}
+
+// scrubSecrets replaces every literal secret in text with the marker.
+func scrubSecrets(text string, secrets []string) string {
+	for _, secret := range secrets {
+		text = strings.ReplaceAll(text, secret, redactedMarker)
+	}
+	return text
+}
 
 // sensitiveQueryKeys are the fragments that mark a query parameter as a secret.
 var sensitiveQueryKeys = []string{"pass", "pwd", "secret", "token", "key", "auth", "credential"}
@@ -47,7 +192,14 @@ func RedactSourceURL(raw string) string {
 	prefix := raw[:location[1]]
 	rest := raw[location[1]:]
 	scheme := strings.ToLower(strings.TrimSuffix(prefix, "://"))
-	if !pathSchemes[scheme] {
+	switch {
+	case !pathSchemes[scheme]:
+		rest = redactUserinfo(rest)
+	case schemePrefix.MatchString(rest):
+		// A path scheme wrapping a URL ("ingitdb://https://u:p@host/x"): the
+		// wrapped URL carries the userinfo.
+		rest = RedactSourceURL(rest)
+	case looksLikeUserinfo(rest):
 		rest = redactUserinfo(rest)
 	}
 	rest = redactQuery(rest)
@@ -58,6 +210,10 @@ func RedactSourceURL(raw string) string {
 // RedactSourceURL and every "password=..." keyword value removed. Use it on
 // any message, log line or stored string that could carry a source URL.
 func RedactText(text string) string {
+	text = quotedURLInText.ReplaceAllStringFunc(text, func(quoted string) string {
+		quote := quoted[:1]
+		return quote + RedactSourceURL(quoted[1:len(quoted)-1]) + quote
+	})
 	text = urlInText.ReplaceAllStringFunc(text, RedactSourceURL)
 	return redactKeywordSecrets(text)
 }
@@ -66,19 +222,21 @@ func RedactText(text string) string {
 // err, so errors.Is and errors.As still see the original; only Error() text is
 // redacted. A nil err stays nil.
 func RedactError(err error) error {
-	if err == nil {
-		return nil
-	}
-	return redactedError{err: err}
+	return redactErrorWith(err, nil)
 }
 
-type redactedError struct{ err error }
+type redactedError struct {
+	err     error
+	secrets []string
+}
 
-func (e redactedError) Error() string { return RedactText(e.err.Error()) }
+func (e redactedError) Error() string { return RedactText(scrubSecrets(e.err.Error(), e.secrets)) }
 func (e redactedError) Unwrap() error { return e.err }
 
 func redactKeywordSecrets(text string) string {
-	return keywordSecret.ReplaceAllString(text, "${1}${2}"+redactedMarker)
+	text = keywordSecret.ReplaceAllString(text, "${1}${2}"+redactedMarker)
+	text = jsonSecret.ReplaceAllString(text, `${1}"`+redactedMarker+`"`)
+	return colonSecret.ReplaceAllString(text, "${1}${2}"+redactedMarker)
 }
 
 // redactUserinfo replaces the password in a leading "user:password@" with the
@@ -86,6 +244,12 @@ func redactKeywordSecrets(text string) string {
 func redactUserinfo(rest string) string {
 	at := strings.LastIndexByte(rest, '@')
 	if at < 0 {
+		return rest
+	}
+	// "host:8080/users/@me" is a path that holds an "@", not userinfo: the
+	// authority ends at the first "/", and one that is a plain "host" or
+	// "host:port" has no room for a password.
+	if isHostOnly(rest) {
 		return rest
 	}
 	userinfo := rest[:at]

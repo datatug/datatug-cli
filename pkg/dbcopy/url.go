@@ -199,6 +199,9 @@ func parseURL(rawURL string) (BackendRef, error) {
 		if path == "" {
 			return BackendRef{}, fmt.Errorf("OpenVaultDB connection descriptor path is required")
 		}
+		if err := refuseUserinfo("openvaultdb", path); err != nil {
+			return BackendRef{}, err
+		}
 		return BackendRef{Scheme: "openvaultdb", Path: path, Raw: rawURL}, nil
 	}
 	// Intercept ingitdb:// before delegating to dburl — dburl doesn't know
@@ -225,9 +228,14 @@ func parseURL(rawURL string) (BackendRef, error) {
 
 	// sqlite:// — delegated to dburl, which understands the scheme.
 	if strings.HasPrefix(rawURL, "sqlite://") || strings.HasPrefix(rawURL, "sqlite:") {
+		if strings.HasPrefix(rawURL, "sqlite://") {
+			if err := refuseUserinfo("sqlite", strings.TrimPrefix(rawURL, "sqlite://")); err != nil {
+				return BackendRef{}, err
+			}
+		}
 		u, err := dburl.Parse(rawURL)
 		if err != nil {
-			return BackendRef{}, fmt.Errorf("invalid sqlite URL %q: %w", rawURL, err)
+			return BackendRef{}, fmt.Errorf("invalid sqlite URL %q: %w", RedactSourceURL(rawURL), RedactError(err))
 		}
 		// dburl puts the filesystem path in DSN for sqlite.
 		return BackendRef{Scheme: "sqlite", Path: u.DSN, Raw: rawURL}, nil
@@ -235,8 +243,15 @@ func parseURL(rawURL string) (BackendRef, error) {
 
 	// Everything else: unknown scheme. A string that is not scheme:// shaped
 	// may be anything the user mistyped, a password included, so it is not
-	// echoed; a URL is echoed with its secrets redacted.
+	// echoed; a URL is echoed with its secrets redacted. A "scheme:rest" string
+	// (mongodb:localhost/test) still gets its scheme named, and only that.
 	if !schemePrefix.MatchString(rawURL) {
+		if scheme, rest, found := strings.Cut(rawURL, ":"); found && bareSchemeToken.MatchString(scheme) && !strings.Contains(rest, "@") {
+			return BackendRef{}, fmt.Errorf(
+				"unsupported scheme %q: supported schemes are %s, or %s",
+				scheme, strings.Join(supportedSchemes, ", "), EnvSourceForm,
+			)
+		}
 		return BackendRef{}, fmt.Errorf(
 			"unsupported source: expected a URL such as sqlite://..., or %s; supported schemes are %s",
 			EnvSourceForm, strings.Join(supportedSchemes, ", "),
@@ -246,6 +261,24 @@ func parseURL(rawURL string) (BackendRef, error) {
 	return BackendRef{}, fmt.Errorf(
 		"unsupported scheme %q in URL %q: supported schemes are %s, or %s",
 		scheme, RedactSourceURL(rawURL), strings.Join(supportedSchemes, ", "), EnvSourceForm,
+	)
+}
+
+// bareSchemeToken is the "scheme" of a "scheme:rest" string that has no "//".
+var bareSchemeToken = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]{0,31}$`)
+
+// refuseUserinfo returns an error when rest, the text after "scheme://" of a
+// scheme that names a file or directory, is shaped like "user:password@host".
+// Whoever writes that means a remote server with credentials, which these
+// schemes do not take; refusing it keeps the password out of every later
+// message that quotes the path. The error never echoes rest.
+func refuseUserinfo(scheme, rest string) error {
+	if !looksLikeUserinfo(rest) {
+		return nil
+	}
+	return fmt.Errorf(
+		"invalid %s URL: credentials are not supported (%s:// names a local path; write a relative path as ./path)",
+		scheme, scheme,
 	)
 }
 
@@ -259,7 +292,7 @@ func parseInGitDB(rawURL string) (BackendRef, error) {
 	if rest == "" {
 		return BackendRef{}, fmt.Errorf(
 			"invalid ingitdb URL %q: missing local path (ingitdb:// MVP supports local paths only)",
-			rawURL,
+			RedactSourceURL(rawURL),
 		)
 	}
 
@@ -272,8 +305,12 @@ func parseInGitDB(rawURL string) (BackendRef, error) {
 		strings.HasPrefix(rest, "https://"):
 		return BackendRef{}, fmt.Errorf(
 			"ingitdb URL %q looks remote; ingitdb:// MVP supports local paths only",
-			rawURL,
+			RedactSourceURL(rawURL),
 		)
+	}
+
+	if err := refuseUserinfo("ingitdb", rest); err != nil {
+		return BackendRef{}, err
 	}
 
 	// ingitdb://./relative  → rest = "./relative"      (local, OK)
@@ -314,13 +351,35 @@ func parseHTTPSource(rawURL string) (BackendRef, error) {
 	// writes that means a remote endpoint with credentials, which this scheme
 	// does not take; refusing it keeps the password out of every later error
 	// that quotes the path.
-	if first, _, _ := strings.Cut(rest, "/"); strings.Contains(first, "@") {
+	if holdsAtInFirstSegment(rest) {
 		return BackendRef{}, fmt.Errorf(
-			"invalid %s URL: credentials are not supported (%s:// names a local datatug project directory, not a remote endpoint)",
+			"invalid %s URL: credentials are not supported (%s:// names a local datatug project directory, not a remote endpoint; write a relative directory that holds an \"@\" as ./dir)",
 			scheme, scheme,
 		)
 	}
 	return BackendRef{Scheme: scheme, Path: rest, Raw: rawURL}, nil
+}
+
+// ProjectSourceURL returns the http:// source URL that names the datatug
+// project directory projectDir, the way the commands and the server build one
+// from a directory they were given verbatim. A relative directory whose first
+// segment holds an "@" (my@proj, @acme/proj) is written "./dir", because Parse
+// refuses "http://my@proj" as a URL that carries credentials.
+func ProjectSourceURL(projectDir string) string {
+	if holdsAtInFirstSegment(projectDir) {
+		return "http://./" + projectDir
+	}
+	return "http://" + projectDir
+}
+
+// holdsAtInFirstSegment reports whether the first path segment of rest holds an
+// "@" and so reads as "user@host". A Windows drive path never does.
+func holdsAtInFirstSegment(rest string) bool {
+	if driveLetterPath.MatchString(rest) {
+		return false
+	}
+	first, _, _ := strings.Cut(rest, "/")
+	return strings.Contains(first, "@")
 }
 
 // extractScheme pulls the scheme prefix from a URL string for use in error
@@ -437,7 +496,20 @@ var (
 	newInGitDBDatabase           = dalgo2ingitdb.NewDatabase
 )
 
+// open opens the source and redacts whatever it returns as an error. r.Path
+// holds the real URL (a PostgreSQL password included), and a driver quotes the
+// DSN it was given in its open and ping errors in whatever shape it likes, so
+// every literal secret r.Path holds is scrubbed from the message as well as the
+// URL-shaped text. errors.Is and errors.As still see the driver's own error.
 func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected bool) (dal.DB, error) {
+	db, err := r.openSource(ctx, insecureAllowLoopback, protected)
+	if err != nil {
+		return nil, RedactErrorWithSecrets(err, r.Path)
+	}
+	return db, nil
+}
+
+func (r BackendRef) openSource(ctx context.Context, insecureAllowLoopback, protected bool) (dal.DB, error) {
 	switch r.Scheme {
 	case "openvaultdb":
 		return openvaultdb.OpenSource(r.Path)

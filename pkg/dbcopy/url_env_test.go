@@ -1,10 +1,16 @@
 package dbcopy
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo2sql"
+	"github.com/dal-go/dalgo2sqlite"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -210,4 +216,128 @@ func TestRedactError(t *testing.T) {
 	assert.Contains(t, redacted.Error(), "postgres://alice:xxxxx@h/db")
 	assert.ErrorIs(t, redacted, ErrPostgresNotWired, "the wrapped chain must survive redaction")
 	assert.ErrorIs(t, fmt.Errorf("open: %w", redacted), ErrPostgresNotWired)
+}
+
+func TestParse_IngitdbNeverEchoesAPassword(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		"ingitdb://https://alice:s3cret@github.com/org/repo",
+		"ingitdb://http://alice:s3cret@github.com/org/repo?token=s3cret",
+		"ingitdb://github.com/org/repo?password=s3cret",
+		"ingitdb://alice:s3cret@github.com/org/repo",
+		"ingitdb://alice:s3/cret@github.com/org/repo",
+	} {
+		_, err := Parse(input)
+		assert.Error(t, err, input)
+		assert.NotContains(t, err.Error(), "s3cret", input)
+		assert.NotContains(t, err.Error(), "s3/cret", input)
+	}
+	_, err := Parse("ingitdb://https://alice:s3cret@github.com/org/repo")
+	assert.ErrorContains(t, err, "looks remote")
+	assert.ErrorContains(t, err, "ingitdb://https://alice:xxxxx@github.com/org/repo")
+	_, err = Parse("ingitdb://alice:s3cret@github.com/org/repo")
+	assert.ErrorContains(t, err, "credentials are not supported")
+}
+
+func TestParse_PathSchemesRefuseUserinfoButKeepRealPaths(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		"sqlite://alice:s3cret@host/x.db",
+		"openvaultdb://alice:s3cret@host/c.json",
+	} {
+		_, err := Parse(input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		assert.NotContains(t, err.Error(), "s3cret", input)
+	}
+	for _, input := range []string{
+		"sqlite:///tmp/a@b:c.db",
+		"sqlite://./a@b.db",
+		"sqlite:a@b:c.db",
+		"ingitdb://./a@b:c",
+		"ingitdb://a@b",
+		`ingitdb://C:\work\a@b`,
+		"openvaultdb:///a@b:c.json",
+	} {
+		_, err := Parse(input)
+		assert.NoError(t, err, input)
+	}
+}
+
+func TestParse_SqliteParseErrorIsRedacted(t *testing.T) {
+	t.Parallel()
+	_, err := Parse("sqlite://%zz:s3cret@")
+	assert.Error(t, err)
+	assert.NotContains(t, err.Error(), "s3cret")
+}
+
+func TestParse_BareSchemeStringNamesTheSchemeOnly(t *testing.T) {
+	t.Parallel()
+	_, err := Parse("mongodb:localhost/test")
+	assert.ErrorContains(t, err, `unsupported scheme "mongodb"`)
+	assert.ErrorContains(t, err, "supported schemes are "+strings.Join(supportedSchemes, ", "))
+	assert.NotContains(t, err.Error(), "localhost")
+	_, err = Parse("alice:s3cret@db.example.com/shop")
+	assert.NotContains(t, err.Error(), "alice")
+	assert.NotContains(t, err.Error(), "unsupported scheme")
+	_, err = Parse("12345:rest")
+	assert.NotContains(t, err.Error(), "12345")
+}
+
+func TestParse_HTTPDirectoryWithAnAtSignNeedsTheDotForm(t *testing.T) {
+	t.Parallel()
+	for _, dir := range []string{"my@proj", "@acme/proj", "my@proj/queries", "a@b", "a:b@c/d"} {
+		_, err := Parse("http://" + dir)
+		assert.ErrorContains(t, err, "credentials are not supported", dir)
+		assert.ErrorContains(t, err, "./dir", "the error says how to write it")
+		assert.NotContains(t, err.Error(), "@"+dir, "the directory is not echoed")
+		assert.NotContains(t, err.Error(), dir)
+
+		source := ProjectSourceURL(dir)
+		assert.Equal(t, "http://./"+dir, source)
+		ref, err := Parse(source)
+		assert.NoError(t, err, dir)
+		assert.Equal(t, "./"+dir, ref.Path, "the same relative directory")
+		assert.Equal(t, "http", ref.Scheme)
+	}
+	for dir, want := range map[string]string{
+		"demo":             "http://demo",
+		"./a@b":            "http://./a@b",
+		"/abs/a@b/proj":    "http:///abs/a@b/proj",
+		"team/a@b":         "http://team/a@b",
+		`C:\work\a@b`:      `http://C:\work\a@b`,
+		"C:/work/a@b/proj": "http://C:/work/a@b/proj",
+	} {
+		assert.Equal(t, want, ProjectSourceURL(dir), dir)
+	}
+	for _, dir := range []string{`C:\work\a@b`, "C:/work/a@b/proj"} {
+		ref, err := Parse(ProjectSourceURL(dir))
+		assert.NoError(t, err, dir)
+		assert.Equal(t, dir, ref.Path)
+	}
+}
+
+func TestOpen_ErrorsAreScrubbedOfTheRealURLsSecrets(t *testing.T) {
+	// not parallel: it swaps a package seam
+	original := newSQLiteDatabaseWithOptions
+	t.Cleanup(func() { newSQLiteDatabaseWithOptions = original })
+	newSQLiteDatabaseWithOptions = func(string, dal.Schema, dalgo2sql.DbOptions) (*dalgo2sqlite.Database, error) {
+		return nil, fmt.Errorf(`dial "postgres://alice:s3cret@db.example.com/shop": %w`, ErrSourceFileMissing)
+	}
+	file := filepath.Join(t.TempDir(), "x.db")
+	assert.NoError(t, os.WriteFile(file, nil, 0o600))
+	_, err := BackendRef{Scheme: "sqlite", Path: file}.Open(context.Background())
+	assert.Error(t, err)
+	assert.NotContains(t, err.Error(), "s3cret")
+	assert.ErrorIs(t, err, ErrSourceFileMissing)
+
+	// A driver that formats the DSN its own way is scrubbed by literal value.
+	postgres := BackendRef{Scheme: "postgres", Path: "postgres://alice:s3cret@127.0.0.1:1/shop?sslmode=disable"}
+	_, err = postgres.Open(context.Background())
+	assert.ErrorIs(t, err, ErrPostgresNotWired, "an error without secrets is returned as it was")
+	assert.Equal(t, ErrPostgresNotWired, err)
+
+	// An http source whose path carries a secret-named parameter.
+	_, err = BackendRef{Scheme: "http", Path: filepath.Join(t.TempDir(), "nope") + "?api_key=K3Y-secret"}.Open(context.Background())
+	assert.Error(t, err)
+	assert.NotContains(t, err.Error(), "K3Y-secret")
 }

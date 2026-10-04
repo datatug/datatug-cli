@@ -15,6 +15,7 @@ import (
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/httpsource"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -539,7 +540,7 @@ var runStructuredHTTPQuery = func(ctx context.Context, executor *secureread.Exec
 }
 
 func runHTTPSavedQuery(ctx context.Context, executor *secureread.Executor, projectDir string, queryDef *datatug.QueryDef, variables map[string]any) (secureread.Result, error) {
-	sourceURL := "http://" + projectDir
+	sourceURL := dbcopy.ProjectSourceURL(projectDir)
 	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(queryDef.ID, "")))
 	var missing []string
 	for _, p := range queryDef.Parameters {

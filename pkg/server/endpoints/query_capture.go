@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"io"
 	"log"
 	"net/http"
@@ -318,7 +319,7 @@ func captureAccessDenied(err error) *contractError {
 		return newAccessDenied(captureAccessDeniedMessage + ": " + denied.Reason)
 	}
 	ce := newAccessDenied(captureAccessDeniedMessage)
-	log.Printf("queries/capture: request %s: answered 403 ACCESS_DENIED: %v", ce.RequestID, err)
+	log.Printf("queries/capture: request %s: answered 403 ACCESS_DENIED: %v", ce.RequestID, dbcopy.RedactError(err))
 	return ce
 }
 
@@ -331,6 +332,6 @@ func captureInternal(err error) *contractError {
 		return newContractError(codeInternal, errCaptureStoreUnavailable.Error(), "")
 	}
 	ce := newContractError(codeInternal, "the query could not be saved; the agent log has the details", "")
-	log.Printf("queries/capture: request %s: %v", ce.RequestID, err)
+	log.Printf("queries/capture: request %s: %v", ce.RequestID, dbcopy.RedactError(err))
 	return ce
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"log"
 	"net/http"
 
@@ -94,7 +95,7 @@ func (w *legacyQueryWriteResponse) WriteHeader(status int) {
 // what went wrong.
 func (w *legacyQueryWriteResponse) Write(b []byte) (int, error) {
 	if w.replaced {
-		log.Printf("%s: request %s: withheld from the client: %s", w.route, w.requestID, bytes.TrimSpace(b))
+		log.Printf("%s: request %s: withheld from the client: %s", w.route, w.requestID, dbcopy.RedactText(string(bytes.TrimSpace(b))))
 		return len(b), nil
 	}
 	w.wroteHeader = true
@@ -125,7 +126,7 @@ func (w *legacyQueryWriteResponse) classify() (status int, code, message string)
 // request ID.
 func (w *legacyQueryWriteResponse) replace(status int, code, message string) {
 	w.requestID = newRequestID()
-	log.Printf("%s: request %s: answered %d %s: %v", w.route, w.requestID, status, code, w.err)
+	log.Printf("%s: request %s: answered %d %s: %v", w.route, w.requestID, status, code, dbcopy.RedactError(w.err))
 	w.replaced = true
 	w.Header().Set("Content-Type", "application/json")
 	w.ResponseWriter.WriteHeader(status)

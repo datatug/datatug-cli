@@ -19,7 +19,10 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	if err == nil {
 		return false
 	}
-	_, _ = fmt.Fprintln(os.Stderr, err)
+	// The error text can quote a source URL a driver was handed: redact it
+	// before it reaches stderr or the response body.
+	message := dbcopy.RedactText(err.Error())
+	_, _ = fmt.Fprintln(os.Stderr, message)
 	//_, _ = fmt.Println("Error:", err)
 	responseHeader := w.Header()
 	origin := r.Header.Get("Origin")
@@ -27,7 +30,7 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 		responseHeader.Set("Access-Control-Allow-Origin", origin)
 	}
 	responseHeader.Set("Content-Type", "application/json")
-	response := ErrorResponse{Error: err.Error()}
+	response := ErrorResponse{Error: message}
 	switch {
 	// A policy refusal is structured with code ACCESS_DENIED (hub Feature
 	// core-investigation-loop, "Errors are structured (code, message,
@@ -109,7 +112,7 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	}
 	encoder := json.NewEncoder(w)
 	if err2 := encoder.Encode(response); err2 != nil {
-		log.Printf("Failed to encode error to response stream: %v.\nOriginal error: %v", err2, err)
+		log.Printf("Failed to encode error to response stream: %v.\nOriginal error: %v", err2, message)
 	}
 	return true
 }

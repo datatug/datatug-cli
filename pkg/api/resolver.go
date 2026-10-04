@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
@@ -259,7 +260,7 @@ func httpQuerySources(projectDir string) ([]ResolvedSource, error) {
 	if len(loaded) == 0 {
 		return nil, nil
 	}
-	url := "http://" + projectDir
+	url := dbcopy.ProjectSourceURL(projectDir)
 	var out []ResolvedSource
 	for _, lq := range loaded {
 		if lq.Def == nil {

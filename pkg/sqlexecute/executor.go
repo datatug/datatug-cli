@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/google/uuid"
@@ -158,7 +159,8 @@ func (e Executor) executeCommand(command RequestCommand) (recordset datatug.Reco
 		return
 	}
 
-	fmt.Println(connParams)
+	// The connection string holds the password: print it redacted.
+	fmt.Println(dbcopy.RedactTextWithSecrets(connParams.String(), command.Password))
 	//fmt.Println(envDb.ServerRef.driver, connParams.String())
 	//fmt.Println(command.Text)
 	var db *sql.DB

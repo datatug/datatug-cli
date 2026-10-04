@@ -52,7 +52,7 @@ func dbSchemesHelp() string {
 	for i, scheme := range schemes {
 		labeled[i] = scheme + "://"
 	}
-	return strings.Join(labeled, ", ")
+	return strings.Join(labeled, ", ") + ", or " + dbcopy.EnvSourceForm + " naming an environment variable that holds one"
 }
 
 // queryCommand is the `query` resource group; the bare group shows help.
@@ -86,6 +86,7 @@ Examples:
   datatug query run --db ingitdb://./crm --from customers --as alice
   datatug query run --db sqlite:///tmp/crm.db -f report.dtql.yaml --as alice --role support --format csv
   datatug query run --db ingitdb://./crm --from products --var minPrice=10 --format json
+  datatug query run --db env:SHOP_PG_URL -f report.dtql.yaml --as alice   # SHOP_PG_URL holds the whole connection URL
   datatug query run --project ./demo-project-1 --query customers/customer-invoices --as alice --var CustomerId=5
   datatug query run --project demo-project-1 --query reference/country-facts --env local --var name=Brazil`,
 		SilenceUsage: true,
@@ -240,7 +241,10 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	ctx = httpsource.ContextWithDispatch(ctx, dalgo2http.ModeLiveThenSnapshot, false, 0)
 	db, err := openBackend(ctx, backend)
 	if err != nil {
-		return Exit(fmt.Sprintf("open %s: %v", o.db, err), exitCodeDatabase)
+		// backend.Raw is the redacted form of --db: a password given in the
+		// URL never reaches the message, and env:NAME names the variable
+		// without its value.
+		return Exit(fmt.Sprintf("open %s: %v", backend.Raw, err), exitCodeDatabase)
 	}
 	stderr := cmd.ErrOrStderr()
 	if len(loaded) == 0 {

@@ -29,8 +29,10 @@ var _ ProjectLoader = (datatug.ProjectStore)(nil)
 
 // UpdateDbSchema updates DB schema
 func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID, environment, driver, dbModelID string, dbConnParams dbconnection.Params) (project *datatug.Project, err error) {
-	log.Printf("Updating DB info for project=%v, env=%v, driver=%v, dbModelID=%v, dbCatalog=%v, connStr=%v",
-		projectID, environment, driver, dbModelID, dbConnParams.Catalog(), dbConnParams.String())
+	// dbConnParams.String() is the connection string, password included: log
+	// the parts that identify the target instead.
+	log.Printf("Updating DB info for project=%v, env=%v, driver=%v, dbModelID=%v, dbCatalog=%v, server=%v, port=%v, user=%v",
+		projectID, environment, driver, dbModelID, dbConnParams.Catalog(), dbConnParams.Server(), dbConnParams.Port(), dbConnParams.User())
 
 	if dbConnParams.Catalog() == "" {
 		return nil, validation.NewErrRequestIsMissingRequiredField("dbConnParams.catalog")

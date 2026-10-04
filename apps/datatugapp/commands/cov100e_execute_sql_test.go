@@ -26,6 +26,8 @@ var (
 	cov100eResults    = map[string]cov100eResult{}
 	cov100eCloseErr   bool
 	cov100eRowsClosed bool
+	// cov100ePrepareError, when set, is the error every Prepare returns.
+	cov100ePrepareError string
 )
 
 const cov100eDriverName = "cov100e_fake"
@@ -37,6 +39,9 @@ func (cov100eDrv) Open(string) (driver.Conn, error) { return cov100eConn{}, nil 
 type cov100eConn struct{}
 
 func (cov100eConn) Prepare(q string) (driver.Stmt, error) {
+	if cov100ePrepareError != "" {
+		return nil, errors.New(cov100ePrepareError)
+	}
 	if q == "fail" {
 		return nil, errors.New("prepare failed")
 	}

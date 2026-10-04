@@ -208,11 +208,10 @@ func TestCovDDBCommandRejectsUnparseableURL(t *testing.T) {
 	var err error
 	out := covDCaptureStdout(t, func() { err = cmd.RunE(cmd, []string{"a", "b"}) }) // no usable URL
 	require.Error(t, err)
-	// The parse error is both printed (with the args) and returned, so cobra
-	// prints it a second time.
-	assert.Contains(t, out, "db url parse error: "+err.Error())
-	assert.Contains(t, out, "Args:\n\ta\n\tb")
-	assert.NotContains(t, out, "Opening database at")
+	// The error is returned and says nothing about the arguments: a database
+	// URL can hold a password and the parser's own text quotes it.
+	assert.Equal(t, "db url parse error: the argument is not a valid database URL", err.Error())
+	assert.Empty(t, out)
 }
 
 func TestCovDExecuteSQLColumnTypesError(t *testing.T) {

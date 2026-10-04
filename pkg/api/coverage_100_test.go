@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -2770,5 +2772,41 @@ func TestCoverageFinal100_PkgApi(t *testing.T) {
 		assert.Error(t, err)
 		_, err = scanDbCatalog(datatug.ServerRef{Driver: "unsupported_driver"}, sqlParams)
 		assert.Error(t, err)
+	}
+}
+
+// UpdateDbSchema logs what it is about to scan: the line names the target and
+// never holds the connection string, which carries the password.
+func TestUpdateDbSchema_LogLineNeverHoldsThePassword(t *testing.T) {
+	params, err := dbconnection.NewConnectionString("sqlserver", "db.example.com", "alice", "s3cr3t;DT01", "shop", "port=1433")
+	require.NoError(t, err)
+	var logged bytes.Buffer
+	saved := log.Writer()
+	log.SetOutput(&logged)
+	defer log.SetOutput(saved)
+
+	_, err = UpdateDbSchema(context.Background(), nil, "", "dev", "sqlserver", "m1", params)
+	assert.Error(t, err, "the empty project id is refused after the log line")
+	assert.NotContains(t, logged.String(), "s3cr3t")
+	assert.NotContains(t, logged.String(), "DT01")
+	assert.Contains(t, logged.String(), "server=db.example.com")
+	assert.Contains(t, logged.String(), "user=alice")
+}
+
+// A project directory such as my@proj must still give an http source URL that
+// dbcopy.Parse accepts.
+func TestHTTPQuerySources_ProjectDirectoryWithAnAtSign(t *testing.T) {
+	origLoadHTTP := loadHTTPQueries
+	t.Cleanup(func() { loadHTTPQueries = origLoadHTTP })
+	loadHTTPQueries = func(string) ([]httpsource.LoadedQuery, error) {
+		return []httpsource.LoadedQuery{{Def: &datatug.QueryDef{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "web"}}}}}, nil
+	}
+	for _, dir := range []string{"my@proj", "@acme/proj"} {
+		sources, err := httpQuerySources(dir)
+		require.NoError(t, err)
+		require.Len(t, sources, 1)
+		ref, err := dbcopy.Parse(sources[0].URL)
+		require.NoError(t, err, dir)
+		assert.Equal(t, "./"+dir, ref.Path)
 	}
 }

@@ -103,3 +103,22 @@ func TestWarnMissingSourceFiles_NoWarningWhenFileExists(t *testing.T) {
 		t.Fatalf("expected no WARNING log line for an existing file, got %q", buf.String())
 	}
 }
+
+// A missing source file's warning quotes the file path; a secret-named
+// parameter in it is redacted like any other source text in a log line.
+func TestWarnMissingSourceFiles_RedactsSecretsInTheLogLine(t *testing.T) {
+	dir := t.TempDir()
+	projectID := "warn-test-redacted"
+	registerWarnTestEnvironment(t, projectID, dir, filepath.Join(dir, "password=s3cr3t-DT01.sqlite"))
+
+	buf := captureLog(t)
+	WarnMissingSourceFiles(context.Background(), map[string]string{projectID: dir})
+
+	out := buf.String()
+	if !strings.Contains(out, "WARNING") {
+		t.Fatalf("expected a WARNING log line, got %q", out)
+	}
+	if strings.Contains(out, "s3cr3t-DT01") || !strings.Contains(out, "password=xxxxx") {
+		t.Fatalf("warning must redact the secret: %q", out)
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -29,6 +30,50 @@ func TestPreserveErrorTextCase(t *testing.T) {
 	preserveErrorTextCase(&output, styles, errors.New(`AI profile "deepseek" is invalid`))
 	assert.Contains(t, output.String(), `AI profile "deepseek" is invalid`)
 	assert.NotContains(t, output.String(), "Ai profile")
+}
+
+func TestPreserveErrorTextCaseRedactsSourceURLs(t *testing.T) {
+	var output bytes.Buffer
+	preserveErrorTextCase(&output, fang.Styles{ErrorText: lipgloss.NewStyle()}, errors.New(`open "postgres://alice:s3cr3t-DT01@db.example.com/shop": refused; password=s3cr3t-DT01`))
+	assert.NotContains(t, output.String(), "s3cr3t-DT01")
+	assert.Contains(t, output.String(), "postgres://alice:xxxxx@db.example.com/shop")
+}
+
+func TestMainPanicTextIsRedacted(t *testing.T) {
+	getCommandBackup, osExitBackup, osStderrBackup := getCommand, osExit, os.Stderr
+	enqueueBackup, startBackup := dtlogEnqueue, dtlogStart
+	defer func() {
+		getCommand, osExit, os.Stderr = getCommandBackup, osExitBackup, osStderrBackup
+		dtlogEnqueue, dtlogStart = enqueueBackup, startBackup
+	}()
+	var enqueued []string
+	dtlogEnqueue = func(message posthog.Message) {
+		enqueued = append(enqueued, fmt.Sprintf("%+v", message))
+	}
+	dtlogStart = func() {}
+	getCommand = func() (*cobra.Command, []fang.Option) {
+		panic("lost connection to postgres://alice:s3cr3t-DT01@db.example.com/shop")
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	var exitCode int
+	osExit = func(code int) { exitCode = code }
+
+	main()
+
+	_ = w.Close()
+	var stderr bytes.Buffer
+	_, _ = io.Copy(&stderr, r)
+	assert.Equal(t, 1, exitCode)
+	assert.NotContains(t, stderr.String(), "s3cr3t-DT01")
+	assert.Contains(t, stderr.String(), "postgres://alice:xxxxx@db.example.com/shop")
+	for _, event := range enqueued {
+		assert.NotContains(t, event, "s3cr3t-DT01")
+	}
+	assert.NotEmpty(t, enqueued, "the panic must still be reported")
 }
 
 func TestMainFunc(t *testing.T) {

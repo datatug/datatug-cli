@@ -134,6 +134,90 @@ func TestScanJourneyHonoursTheDbModel(t *testing.T) {
 	assert.FileExists(t, filepath.Join(other, "dbmodels", "shop", "shop.dbmodel.json"))
 }
 
+// A "?" anywhere in the path of the database is refused before anything else happens,
+// with no file looked at and no folder made: the open of a source reads it as the start
+// of the driver's own parameters. It does not depend on the system's file names, as the
+// file is not even there.
+func TestScanJourneyRefusesAQuestionMarkInThePathBeforeAnythingElse(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "work", "shop")
+	for _, path := range []string{"shop?.db", filepath.Join("data?", "shop.db"), "shop.db?mode=rw"} {
+		_, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", path, "--db", "shop", "--env", "local")
+
+		require.Error(t, err, path)
+		assert.ErrorContains(t, err, `"?"`, path)
+		assert.ErrorContains(t, err, "rename the file", path)
+		assert.NoDirExists(t, projectDir, "no folder is made for a path that is refused: %s", path)
+	}
+}
+
+// A catalog that the project holds is on a model, and a scan keeps it there: a rescan
+// that forgets --dbmodel does not fork the project onto a second model named as the
+// database, and one that names another model is refused, naming both.
+func TestScanJourneyKeepsTheModelOfACatalogTheProjectHolds(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "shop.db")
+	writeJourneyDB(t, dbPath)
+	scanInto := func(projectDir string, extra ...string) (string, error) {
+		return runScanCommand(t, append([]string{"-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local"}, extra...)...)
+	}
+
+	t.Run("a rescan without the flag stays on the model that was asked for", func(t *testing.T) {
+		projectDir := filepath.Join(t.TempDir(), "retail")
+		_, err := scanInto(projectDir, "--dbmodel", "retail-model")
+		require.NoError(t, err)
+		first := treeHashes(t, projectDir, "")
+
+		stderr, err := scanInto(projectDir)
+
+		require.NoError(t, err)
+		assert.Empty(t, stderr)
+		assert.Equal(t, first, treeHashes(t, projectDir, ""), "nothing changed: no second model, no change of the catalog file")
+		assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "shop"), "no model named as the database was made")
+		assert.Equal(t, "retail-model", readJSONMap(t, filepath.Join(projectDir, "environments", "local", "catalogs", "shop", "shop.db.json"))["dbModel"])
+
+		// The flag that names the model that is recorded is as good as no flag.
+		stderr, err = scanInto(projectDir, "--dbmodel", "retail-model")
+		require.NoError(t, err)
+		assert.Empty(t, stderr)
+		assert.Equal(t, first, treeHashes(t, projectDir, ""))
+	})
+
+	t.Run("a rescan that names another model is refused, naming both, and writes nothing", func(t *testing.T) {
+		for name, firstArgs := range map[string][]string{
+			"the first scan gave a model":  {"--dbmodel", "retail-model"},
+			"the first scan gave no model": nil,
+		} {
+			projectDir := filepath.Join(t.TempDir(), "retail")
+			_, err := scanInto(projectDir, firstArgs...)
+			require.NoError(t, err, name)
+			recorded := "shop"
+			if firstArgs != nil {
+				recorded = "retail-model"
+			}
+			first := treeHashes(t, projectDir, "")
+
+			_, err = scanInto(projectDir, "--dbmodel", "other-model")
+
+			require.Error(t, err, name)
+			assert.ErrorContains(t, err, "other-model", name)
+			assert.ErrorContains(t, err, recorded, name)
+			assert.ErrorContains(t, err, "--dbmodel", name)
+			assert.Equal(t, first, treeHashes(t, projectDir, ""), "%s: nothing was written", name)
+			assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "other-model"), name)
+		}
+	})
+
+	t.Run("the same database in another environment is a catalog of its own", func(t *testing.T) {
+		projectDir := filepath.Join(t.TempDir(), "retail")
+		_, err := scanInto(projectDir, "--dbmodel", "retail-model")
+		require.NoError(t, err)
+
+		_, err = runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "dev", "--dbmodel", "other-model")
+
+		require.NoError(t, err, "the project holds no catalog of this database in dev yet")
+		assert.Equal(t, "other-model", readJSONMap(t, filepath.Join(projectDir, "environments", "dev", "catalogs", "shop", "shop.db.json"))["dbModel"])
+	})
+}
+
 // The id of a new project is the --project flag, or else the name of its folder, is
 // a valid project id, and is never made up: scanning the same database into folders
 // of the same name makes projects of the same id.

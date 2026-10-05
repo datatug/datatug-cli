@@ -57,7 +57,7 @@ The id of a new project (a folder that holds no project file) MUST be the value 
 
 #### REQ: names-are-plain
 
-`--db`, `--env` and `--dbmodel` are the names of folders of the project (`environments/<env>/`, `environments/<env>/catalogs/<db>/` and `dbmodels/<model>/`), so each MUST be a plain name: letters and digits of any script, `.`, `_` and `-`, starting with a letter or a digit, at most 128 characters, and a name that is a folder name on every system a project is opened on (see [REQ: unusable-names-left-out](#req-unusable-names-left-out)). A value that is not MUST be refused before anything is read or written, with a message that names the flag, and the message MUST NOT repeat a value that is not a plain name (a flag given a connection string must not echo it).
+`--db`, `--env` and `--dbmodel` are the names of folders of the project (`environments/<env>/`, `environments/<env>/catalogs/<db>/` and `dbmodels/<model>/`), so each MUST be a plain name: letters and digits of any script, `.`, `_` and `-`, starting with a letter or a digit, at most 128 characters, and a name that is a folder name on every system a project is opened on (see [REQ: unusable-names-left-out](#req-unusable-names-left-out)). A value that is not MUST be refused before anything is read or written, with a message that names the flag, and the message MUST NOT repeat a value that is not a plain name (a flag given a connection string must not echo it). This holds for every driver. For `sqlserver` the value of `--db` is also the name of the database on the server (it goes into the connection string), so a SQL Server database whose name is not a plain name (a space, a `$` as in `ReportServer$INSTANCE`) cannot be scanned until the id of the catalog in the project is separated from the name of the database on the server; that is a task after launch.
 
 #### REQ: driver-selection
 
@@ -77,7 +77,7 @@ For a network database the connection string MUST be built via `pkg/datatug-core
 
 #### REQ: dbmodel-default
 
-When `--dbmodel` is omitted, the DB model ID MUST default to the value of `--db`. This makes single-database projects easy to scan while preserving the ability to map multiple physical databases onto one logical model. When it is given, it MUST be the model: the `dbModel` of the catalog file, the folder `dbmodels/<model>/`, and the model file in it.
+When `--dbmodel` is omitted, the DB model ID MUST default to the value of `--db`. This makes single-database projects easy to scan while preserving the ability to map multiple physical databases onto one logical model. When it is given, it MUST be the model: the `dbModel` of the catalog file, the folder `dbmodels/<model>/`, and the model file in it. A catalog that the project already records in that environment (its catalog file) stays on the model that file names: a scan without `--dbmodel` MUST keep that model, and a scan whose `--dbmodel` names another model MUST be refused, before anything is written, with a message that names both models, because a scan onto the other model would leave the tables of the first in the project for good and make a second model of the same database. A `--dbmodel` that names the recorded model is accepted. A catalog file that cannot be read, or that names no model that can be a folder name, records nothing.
 
 ### Output to project store
 
@@ -93,21 +93,31 @@ A scan MUST write the files of [Project layout written by a scan](#project-layou
 
 The path of a SQLite file in the catalog file MUST be relative to the project folder, with `/` separators, when the file is inside the project folder; relative to the home directory with a leading `~/` when it is under the home directory; and absolute otherwise. A `--path` that is relative is the file from the working directory the scan was run in. Every reader MUST resolve the stored path to the file that was scanned, from any working directory (`ResolveCatalogPath` in `pkg/api/catalog_path.go`).
 
+#### REQ: sqlite-path-has-no-question-mark
+
+A SQLite scan MUST refuse a `--path` that has a `?` in it, before it reads or writes anything (no project folder is made, no database is opened), with a message that names the character and says to rename the file. The scan could read such a file, but the project could not open it again: the open of a source (`pkg/dbcopy`) hands the bare path to the driver, which reads a `?` as the start of its own parameters, opens the name before it and creates a file of that name beside it. The refusal is the limit of that open path, not of the scan, and lifts on the day that open reads such a name back. A `#` or a `%` in the path is not refused: they are read back to the same file (see [REQ: sqlite-pure-go](#req-sqlite-pure-go)).
+
 #### REQ: unusable-names-left-out
 
 A table or view, or a schema, whose name cannot be a folder name on every system a project is opened on MUST be left out of the project and named on stderr, with the reason, one line for each; the scan MUST still exit `0` and write everything else. A name cannot be a folder name when it is empty, is `.` or `..`, is longer than 200 bytes, ends in a dot or a space, is one Windows reserves for a device (`con`, `prn`, `aux`, `nul`, `com1` to `com9`, `lpt1` to `lpt9`, with or without an extension), or holds a control character or one of `/ \ : * ? " < > |`. A schema, or a table or view, whose name differs only by case from one of its kind that is kept in the same folder MUST be left out the same way, as the two would be one folder on a case-insensitive file system; the first in byte order of the names is the one kept. A table or view whose columns file, named `<schema>.<T>.columns.json`, would have a name longer than 255 bytes (which two names that are each valid can make) MUST be left out the same way.
 
 #### REQ: idempotent-rescan
 
-Re-running `scan` against the same project, environment, and database MUST be idempotent on a database whose schema has not changed: the resulting on-disk files MUST be byte-identical to the prior run, and a file that would not change MUST NOT be written again. This is the property that makes scans `git diff`-able.
+Re-running `scan` against the same project, environment, and database MUST be idempotent on a database whose schema has not changed: the resulting on-disk files MUST be byte-identical to the prior run, and a columns file that would not change MUST NOT be written again (the other files, which are the project file, the environment file, the model file, the catalog file and the `README.md`, are written again with the same bytes). This is the property that makes scans `git diff`-able.
 
 #### REQ: rescan-removes-dropped-tables
 
-A table or view that an environment's earlier scan wrote, and that the database no longer has, MUST be taken back by the next scan of that environment: the environment is removed from the `byEnv` of its columns, and when no environment has the table or view any more, its folder `dbmodels/<model>/<schema>/<tables|views>/<T>/` MUST be removed. A scan MUST remove nothing else: only a folder directly in `tables` or `views` of a schema of the model, that holds nothing but one columns file, and whose columns list the environment of the scan. A folder that holds anything else is left, and named on stderr; one whose columns do not list the environment of the scan is not the scan's, and is left. A scan MUST NOT remove a folder that is, or is inside, a symbolic link, at any level from `dbmodels` down: it MUST refuse, with an error that names the folder, before it writes anything. When the model also feeds another catalog in the same environment, the scan does not know what that database has: it MUST leave the folder, and name it.
+A table or view that an environment's earlier scan wrote, and that the database no longer has, MUST be taken back by the next scan of that environment: the environment is removed from the `byEnv` of its columns, and when no environment has the table or view any more, its folder `dbmodels/<model>/<schema>/<tables|views>/<T>/` MUST be removed, and the scan MUST say so on stderr, one line for each folder removed, that names the folder (`removed: <folder>: <table or view> is no longer in the database`). Only that folder is removed: the `tables` and `views` folders of the schema, and the folder of the schema, stay, even when the last table or view of a schema went (less deletion is safer; a clone of the project from git has none of them, as git keeps no empty folder).
+
+A scan MUST remove nothing else, and MUST decide first whether a folder is its own: a folder directly in `tables` or `views` of a schema of the model is the scan's only when it holds exactly one columns file that lists the environment of the scan. Any other folder (a person's own, one that cannot be listed, one with no columns file or whose file cannot be read, one whose columns do not list the environment of the scan, another environment's) is not the scan's: it MUST be left, and the scan MUST say nothing of it and MUST NOT fail for it, whatever it holds and whatever it is linked to. A folder that is the scan's and holds anything but that one columns file is left, and named on stderr. When the model also feeds another catalog in the same environment, the scan does not know what that database has: it MUST leave the folder, and name it.
+
+A scan MUST NOT take back a folder that is its own through a link: when the folder, or any folder above it from `dbmodels` down, is not a plain folder as `Lstat` reports it (which a symbolic link is not, nor a Windows junction, nor any other reparse point), or cannot be inspected, it MUST refuse, with an error that names the folder, before it writes anything.
 
 #### REQ: rescan-keeps-other-environments
 
 Scanning the same `--db` for a second `--env` MUST keep the state the first environment's scan wrote. The `byEnv` of each column of a columns file MUST list every environment whose scan found that column in that table or view, the columns of the scan in the order the scan found them, followed by the columns that only other environments have. A table or view that only another environment has MUST stay as it is. The environments the columns files list MUST be among those the model file lists, and every environment of the model file that has the table or view MUST be in the `byEnv` of its columns.
+
+The file holds one set of attributes for a column (its type, nullability, default and place) and one order of the columns: those of the last scan. So when the databases of two environments differ in a column they share, or one has a column that is not the last, a scan of one environment writes the file again with its own attributes and order, though no database changed since the scan of the other; a rescan of an environment is byte-identical only until another environment whose columns differ is scanned. That is the limit of [REQ: idempotent-rescan](#req-idempotent-rescan) for a project with more than one environment, and a test pins it.
 
 ### Sensitive data handling
 
@@ -120,13 +130,13 @@ Database passwords MUST NOT appear in stdout or stderr at any verbosity. The cur
 | Flag | Aliases | Type | Required | Description |
 |---|---|---|---|---|
 | `--driver` | `-D` | string | yes | DB driver. Supported: `sqlite3`, `sqlserver`. |
-| `--path` |  | string | yes (`sqlite3`) | The SQLite database file. It must exist. |
+| `--path` |  | string | yes (`sqlite3`) | The SQLite database file. It must exist, and its path must have no `?` in it. |
 | `--server` | `-s` | string | yes (network DBs) | Network host. |
 | `--port` |  | int | no | Network port; driver-default if omitted. |
 | `--user` | `-U` | string | no | DB user. |
 | `--password` | `-P` | string | no | DB password. |
-| `--db` |  | string | yes | Catalog/database ID to scan: a plain name. |
-| `--dbmodel` |  | string | no | DB model ID: a plain name. Defaults to `--db`. |
+| `--db` |  | string | yes | Catalog/database ID to scan: a plain name (for `sqlserver` also the name of the database on the server). |
+| `--dbmodel` |  | string | no | DB model ID: a plain name. Defaults to the model the project records for the catalog, or else `--db`. |
 | `--env` |  | string | yes | Environment ID (`LOCAL`, `DEV`, etc.): a plain name. |
 | `--project` / `--directory` | `-p` / `-d` | string | (one of, or cwd) | Project context. See [parent feature](../README.md). A `--directory` that does not exist is made. With `--directory`, `--project` is the id of a new project; without it the id is the name of the folder (see [REQ: new-project-id](#req-new-project-id)). |
 
@@ -197,13 +207,13 @@ Given the project of the previous criterion, `datatug scan` run again with the s
 
 **Requirements:** scan#req:rescan-removes-dropped-tables
 
-Given that project, after one table is dropped from the database and another added, `datatug scan` run again exits `0`; the folder of the dropped table is gone, the folder of the new table is there, and every other file is as it was. A folder that is, or is in, a symbolic link is never removed: the scan refuses, names it, and writes nothing, at each level from `dbmodels` down; and a folder or file that is not the folder of a table or view of the model is not touched. (`TestScanJourneySQLite`, `TestSaveScannedProject_RescanTakesBackWhatTheDatabaseDropped`, `TestSaveScannedProject_RescanTakesBackAWholeSchema`, `TestSaveScannedProject_RescanNeverRemovesThroughASymbolicLink`, `TestSaveScannedProject_RescanLeavesWhatItDidNotWrite`.)
+Given that project, after one table is dropped from the database and another added, `datatug scan` run again exits `0` and says on stderr one line that names the folder it removed; the folder of the dropped table is gone, the folder of the new table is there, and every other file is as it was. A folder that is its own and is, or is in, a link (a symbolic link, or what `Lstat` reports as anything but a plain folder, as it does a Windows junction) is never removed: the scan refuses, names it, and writes nothing, at each level from `dbmodels` down. A folder that is not the scan's (a person's own folder with a `README.md`, a folder whose columns list only another environment, even one that is linked) is not touched, not named, and does not fail the scan, on this scan or any later one; a folder of the scan's own that holds a file the scan did not write stays and is named. The empty `tables`, `views` and schema folders stay. (`TestScanJourneySQLite`, `TestScanJourneyLeavesAFolderOfItsOwnAlone`, `TestSaveScannedProject_RescanTakesBackWhatTheDatabaseDropped`, `TestSaveScannedProject_RescanTakesBackAWholeSchema`, `TestSaveScannedProject_RescanNeverRemovesThroughASymbolicLink`, `TestSaveScannedProject_RescanLeavesWhatItDidNotWrite`, `TestApplyRetractions`.)
 
 ### AC: second-environment-keeps-the-first
 
 **Requirements:** scan#req:rescan-keeps-other-environments, scan#req:rescan-removes-dropped-tables
 
-Given a SQLite file scanned as `--db shop --env local`, scanning another file for `--db shop --env dev` lists `dev` and `local` in the `byEnv` of every column both have, lists `dev` only for a column or table only `dev` has and `local` only for a table only `local` has (which the scan of `dev` does not remove), and the model file lists both environments; a rescan of either changes nothing; a table that `dev` drops goes when `local` does not have it either. (`TestScanJourneySecondEnvironmentKeepsTheFirst`, `TestSaveScannedProject_SecondEnvironmentKeepsTheFirst`.)
+Given a SQLite file scanned as `--db shop --env local`, scanning another file for `--db shop --env dev` lists `dev` and `local` in the `byEnv` of every column both have, lists `dev` only for a column or table only `dev` has and `local` only for a table only `local` has (which the scan of `dev` does not remove), and the model file lists both environments; each environment's catalog file names its own database file, after the second scan and after every rescan; a rescan of either, with the other not scanned in between and no shared column differing, changes nothing; a table that `dev` drops goes when `local` does not have it either. Where the two databases differ in a column they share, or in its place, the file holds the attributes and order of the last scan, and the scan of the other environment writes them again. (`TestScanJourneySecondEnvironmentKeepsTheFirst`, `TestSaveScannedProject_SecondEnvironmentKeepsTheFirst`, `TestScanJourneyASharedColumnHoldsTheAttributesOfTheLastScan`, `TestSaveScannedProject_ASharedColumnHoldsTheAttributesAndOrderOfTheLastScan`.)
 
 ### AC: scan-creates-the-project-folder
 
@@ -229,11 +239,17 @@ Scanning into `./shop-project` makes the project `shop-project`, into any folder
 
 `datatug scan ... --db shop --dbmodel retail` writes `dbModel: retail` in the catalog file and the tables under `dbmodels/retail/`. (`TestScanJourneyHonoursTheDbModel`, `TestScanDbCatalog_SQLite3_CatalogIsMappedOntoTheModelThatWasAskedFor`.)
 
+### AC: recorded-model-is-kept
+
+**Requirements:** scan#req:dbmodel-default
+
+Given a project scanned with `--db shop --dbmodel retail-model`, `datatug scan` run again without `--dbmodel` exits `0`, says nothing on stderr, makes no `dbmodels/shop/` and leaves every file as it was; the same with `--dbmodel retail-model`. With `--dbmodel other-model` it exits non-zero with a message that names `retail-model` and `other-model`, and writes nothing; so it does with `--dbmodel` naming another model when the first scan gave none (the model was `shop`). The same database in another environment, which the project does not record, takes the model it is given. (`TestScanJourneyKeepsTheModelOfACatalogTheProjectHolds`, `TestResolveScanDbModel`.)
+
 ### AC: names-must-be-plain
 
 **Requirements:** scan#req:names-are-plain
 
-`datatug scan` with `--db ../evil`, `--env a:b`, `--dbmodel x/y`, or `--db con` exits non-zero with a message that names the flag, repeats the value only when it is a plain name, and writes nothing. (`TestScanJourneyRefusesNamesThatAreNotPlain`, `TestCheckScanName`.)
+`datatug scan` with `--db ../evil`, `--env a:b`, `--dbmodel x/y`, or `--db con` exits non-zero with a message that names the flag, repeats the value only when it is a plain name, and writes nothing. The function that saves a scan checks the three ids itself, for any caller: an id such as `../../outside` is refused before anything is listed, written or removed. (`TestScanJourneyRefusesNamesThatAreNotPlain`, `TestCheckScanName`, `TestSaveScannedProject_RefusesIdsThatAreNotPlainNames`.)
 
 ### AC: sqlite-mistakes-are-read-past
 
@@ -273,9 +289,9 @@ Given a SQLite file with tables named `t[1]`, `t1` and `a[b`, each with columns 
 
 ### AC: sqlite-path-is-a-path
 
-**Requirements:** scan#req:sqlite-pure-go
+**Requirements:** scan#req:sqlite-pure-go, scan#req:sqlite-path-has-no-question-mark
 
-Given a SQLite file named `shop#1 50%.db`, `datatug scan --path` that file reads it, and creates no other file beside it; the path in the catalog file is resolved by `ResolveCatalogPath` and by every reader of the project (the source of a saved query, chat and `serve`) to that file, and a query through the source reads it. A `?` in the name is read back to the same path, but opening that path is not the scan's: the open of a source (`pkg/dbcopy`) hands the bare path to the driver, which reads a `?` as the start of its own parameters. (`TestScanJourneyPathWithURICharacters`, `TestScanDbCatalog_SQLite3_PathWithURICharactersIsReadBack`.)
+Given a SQLite file named `shop#1 50%.db`, `datatug scan --path` that file reads it, and creates no other file beside it; the path in the catalog file is resolved by `ResolveCatalogPath` and by every reader of the project (the source of a saved query, chat and `serve`) to that file, and a query through the source reads it. A file whose path has a `?` is refused: `datatug scan --path` it exits non-zero, with a message that names `"?"` and says to rename the file, before anything is read or written, and no file is made. (`TestScanJourneyPathWithURICharacters`, `TestScanDbCatalog_SQLite3_PathWithURICharactersIsReadBack`, `TestCheckSQLitePath`.)
 
 ### AC: existing-readme-is-kept
 

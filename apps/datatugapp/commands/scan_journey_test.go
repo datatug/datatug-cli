@@ -325,7 +325,8 @@ func TestScanJourneySQLite(t *testing.T) {
 			dropOrderLineAddInvoice(t, dbPath)
 			stderr, err = runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
 			require.NoError(t, err)
-			assert.Empty(t, stderr)
+			assert.Equal(t, `removed: dbmodels/shop/main/tables/order_line: table "order_line" of schema "main" is no longer in the database`+"\n", stderr,
+				"one line for the folder that was removed, which names it")
 			second := treeHashes(t, projectDir, "data/")
 			added, removed, changed := diffTrees(first, second)
 			assert.Equal(t, []string{"dbmodels/shop/main/tables/Invoice/main.Invoice.columns.json"}, added)
@@ -669,10 +670,11 @@ CREATE TABLE "` + attachName + `" (c TEXT);`)
 	assert.Empty(t, entries, "nothing was created in the working directory")
 }
 
-// The path of the database is a path, not a URI: a file whose name has a "#", a
-// "?" or a "%" in it is scanned, not another file made beside it, and it is read back
-// as the same file by the readers of the project: the source of a saved query, of
-// chat and of serve is a URL, which cut the path at the first "#" or "?".
+// The path of the database is a path, not a URI: a file whose name has a "#" or a
+// "%" in it is scanned, not another file made beside it, and it is read back as the
+// same file by the readers of the project: the source of a saved query, of chat and of
+// serve is a URL, which cut the path at the first "#" or "?". A file whose name has a
+// "?" is refused: the open of a source cannot read such a name back yet.
 func TestScanJourneyPathWithURICharacters(t *testing.T) {
 	names := []string{"shop#1 50%.db", "100%.db", "a%23b.db"}
 	if runtime.GOOS != "windows" { // a file name cannot have a "?" there
@@ -693,6 +695,24 @@ func TestScanJourneyPathWithURICharacters(t *testing.T) {
 
 			stderr, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
 
+			if strings.Contains(name, "?") {
+				// The scan could read this file, but the project could not open it again: the
+				// open of a source (pkg/dbcopy, BackendRef.Open) hands the bare path to
+				// dalgo2sqlite, whose driver reads a "?" in it as the start of its own
+				// parameters, opens the file named before it and creates that. So the scan
+				// refuses the file before it reads or writes anything, and says to rename it.
+				require.Error(t, err)
+				assert.ErrorContains(t, err, `"?"`, "the message names the character")
+				assert.ErrorContains(t, err, "rename the file")
+				assert.ErrorContains(t, err, "--path")
+				assert.Empty(t, stderr)
+				assert.Empty(t, projectFiles(t, projectDir, ""), "nothing was written")
+				entries, readErr := os.ReadDir(dbDir)
+				require.NoError(t, readErr)
+				require.Len(t, entries, 1, "the file was not opened, so no other database was made beside it")
+				assert.Equal(t, name, entries[0].Name())
+				return
+			}
 			require.NoError(t, err)
 			assert.Empty(t, stderr)
 			schema, err := api.GetCatalogSchema(projectDir, "local", "shop")
@@ -729,14 +749,6 @@ func TestScanJourneyPathWithURICharacters(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, map[string]string{"shop": sourceURL}, urls)
 			assert.NotEmpty(t, chatCatalog.Objects)
-			if strings.Contains(name, "?") {
-				// Everything above is the file that was scanned. Opening it is not: the
-				// open of a source (pkg/dbcopy, BackendRef.Open) hands the bare path to
-				// dalgo2sqlite, whose driver reads a "?" in it as the start of its own
-				// parameters and opens the file named before it, so a file with a "?" in
-				// its name is not opened by a query. That is not the scan's to fix.
-				return
-			}
 			query := &datatug.QueryDef{
 				ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "first-names"}},
 				Type:        datatug.QueryTypeSQL,

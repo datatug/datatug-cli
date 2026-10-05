@@ -104,19 +104,24 @@ type retraction struct {
 	dir     string // the folder of the table or view, which is removed when content is nil
 	file    string // its columns file
 	content []byte // what the file holds after, or nil when the folder is removed
+	what    string // the table or view, said as in a message
+	rel     string // dir, below the project folder, with "/" separators, for the message of its removal
 }
 
 // planRetractions finds what the scan of environment takes back, and changes nothing.
 // It looks at the folder of every table and view that model has on disk, in any
-// schema, that the scan does not write (layout), and:
+// schema, that the scan does not write (layout).
 //
-//   - leaves it, saying nothing, when it is not a folder, or no column of its file
-//     lists environment: what the scan did not write is not the scan's to remove;
-//   - leaves it, naming it, when it holds anything but one columns file, or the file
-//     cannot be read, or the model is also fed by another catalog in environment
-//     (otherCatalogs), whose tables this scan does not know;
-//   - refuses, with an error, when the folder, or any folder above it from the
-//     dbmodels folder down, is a symbolic link: a folder is never removed through one;
+// A folder is the scan's only when it holds exactly one columns file that lists
+// environment: any other is a person's, or another environment's, and is left, saying
+// nothing, and it never makes the scan fail, a link or not, and a folder that cannot
+// be listed cannot be shown to be the scan's. Of a folder that is the scan's, the scan
+//
+//   - leaves it, naming it, when it holds anything but that one columns file, or the
+//     model is also fed by another catalog in environment (otherCatalogs), whose
+//     tables this scan does not know;
+//   - refuses, with an error, when it is going to take it back and the folder, or any
+//     folder above it from the dbmodels folder down, is a link (see refuseLinks);
 //   - otherwise takes it back: its file without environment, or the folder when no
 //     environment is left.
 func planRetractions(projectDir, model, environment string, layout scannedLayout, otherCatalogs []string, warnings io.Writer) ([]retraction, error) {
@@ -145,15 +150,12 @@ func planRetractions(projectDir, model, environment string, layout scannedLayout
 			}
 			for _, entry := range entries {
 				name := entry.Name()
-				dir := filepath.Join(kindDir, name)
-				if layout.has(schema, kind, name) || !isFolder(dir) {
+				if layout.has(schema, kind, name) || !isFolder(filepath.Join(kindDir, name)) {
 					continue
 				}
 				what := fmt.Sprintf("%s %q of schema %q", relationKind(kind), name, schema)
-				if err = refuseSymbolicLinks(projectDir, what, storage.DbModelsFolder, model, schema, kind, name); err != nil {
-					return nil, err
-				}
-				retracted, err := planRetraction(dir, what, model, environment, otherCatalogs, warnings)
+				parts := []string{storage.DbModelsFolder, model, schema, kind, name}
+				retracted, err := planRetraction(projectDir, parts, what, model, environment, otherCatalogs, warnings)
 				if err != nil {
 					return nil, err
 				}
@@ -166,50 +168,81 @@ func planRetractions(projectDir, model, environment string, layout scannedLayout
 	return retractions, nil
 }
 
-// planRetraction is planRetractions for the one folder dir of what (a table or view,
-// said as in a message), or nil when the scan leaves it.
-func planRetraction(dir, what, model, environment string, otherCatalogs []string, warnings io.Writer) (*retraction, error) {
+// planRetraction is planRetractions for the one folder below projectDir that parts
+// name, of what (a table or view, said as in a message), or nil when the scan leaves it.
+func planRetraction(projectDir string, parts []string, what, model, environment string, otherCatalogs []string, warnings io.Writer) (*retraction, error) {
+	dir := filepath.Join(append([]string{projectDir}, parts...)...)
 	entries, err := scanReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list the folder of %s: %w", what, err)
+		return nil, nil // a folder that cannot be listed cannot be shown to be the scan's
+	}
+	file, previous := columnsFileListing(dir, entries, environment)
+	if file == "" {
+		return nil, nil // not the scan's: nothing to say of it
 	}
 	leaves := func(reason string) (*retraction, error) {
 		_, _ = fmt.Fprintf(warnings, "warning: %s is no longer in the database, and its folder stays: %s\n", what, reason)
 		return nil, nil
 	}
-	var columnsFiles []string
+	columnsFiles := 0
 	for _, entry := range entries {
-		if !entry.Type().IsRegular() || !strings.HasSuffix(entry.Name(), "."+storage.ColumnsFileSuffix+".json") {
+		if !isColumnsFile(entry) {
 			return leaves(fmt.Sprintf("it holds %q, which a scan did not write", entry.Name()))
 		}
-		columnsFiles = append(columnsFiles, filepath.Join(dir, entry.Name()))
+		columnsFiles++
 	}
-	if len(columnsFiles) != 1 {
-		return leaves(fmt.Sprintf("it holds %d columns files, and a table or view has one", len(columnsFiles)))
-	}
-	file := columnsFiles[0]
-	data, err := os.ReadFile(file)
-	var previous datatug.ColumnModels
-	if err == nil {
-		previous, err = parseColumnsFile(data)
-	}
-	if err != nil {
-		return leaves("its columns file cannot be read")
-	}
-	if !anyColumnListsEnvironment(previous, environment) {
-		return nil, nil
+	if columnsFiles != 1 {
+		return leaves(fmt.Sprintf("it holds %d columns files, and a table or view has one", columnsFiles))
 	}
 	if len(otherCatalogs) > 0 {
 		return leaves(fmt.Sprintf("database model %q is also fed by catalog %s in environment %q, and this scan does not know what that database has", model, strings.Join(quoted(otherCatalogs), ", "), environment))
 	}
+	if err = refuseLinks(projectDir, what, parts...); err != nil {
+		return nil, err
+	}
+	rel := filepath.ToSlash(filepath.Join(parts...))
 	remaining := mergeColumns(previous, nil, environment)
 	if len(remaining) == 0 {
-		return &retraction{dir: dir, file: file}, nil
+		return &retraction{dir: dir, file: file, what: what, rel: rel}, nil
 	}
 	// A column that is left lists the environments that have it: the file is the one
 	// mergeColumns writes, as the scan of an environment that has the table would.
 	content, _ := json.MarshalIndent(filestore.TableModelColumnsFile{Columns: remaining}, "", "\t")
-	return &retraction{dir: dir, file: file, content: append(content, '\n')}, nil
+	return &retraction{dir: dir, file: file, content: append(content, '\n'), what: what, rel: rel}, nil
+}
+
+// columnsFileListing is the one columns file among entries (the entries of dir) whose
+// columns list environment, and its columns; both are zero when no file, or more than
+// one, does. A file that cannot be read, or is not a columns file, lists nothing.
+func columnsFileListing(dir string, entries []os.DirEntry, environment string) (string, datatug.ColumnModels) {
+	var listing string
+	var columns datatug.ColumnModels
+	count := 0
+	for _, entry := range entries {
+		if !isColumnsFile(entry) {
+			continue
+		}
+		file := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(file)
+		var parsed datatug.ColumnModels
+		if err == nil {
+			parsed, err = parseColumnsFile(data)
+		}
+		if err != nil || !anyColumnListsEnvironment(parsed, environment) {
+			continue
+		}
+		listing, columns = file, parsed
+		count++
+	}
+	if count != 1 {
+		return "", nil
+	}
+	return listing, columns
+}
+
+// isColumnsFile is whether entry is a regular file named as a columns file is.
+func isColumnsFile(entry os.DirEntry) bool {
+	return entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), "."+storage.ColumnsFileSuffix+".json")
 }
 
 // anyColumnListsEnvironment is whether the state of any column in columns lists environment.
@@ -237,28 +270,32 @@ func isFolder(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-// refuseSymbolicLinks is an error when any of parts, taken one below the other from
-// projectDir down (projectDir itself may be, or be reached through, a link: it is the
-// project), is a symbolic link or cannot be inspected: what is removed there is not
-// known to be in the project.
-func refuseSymbolicLinks(projectDir, what string, parts ...string) error {
+// refuseLinks is an error when any of parts, taken one below the other from projectDir
+// down (projectDir itself may be, or be reached through, a link: it is the project), is
+// not a plain folder as Lstat reports it, which a symbolic link is not, nor a Windows
+// junction (Go reports it as irregular, and not as a link), nor any other reparse point,
+// or when it cannot be inspected: what is removed or written there is not known to be in
+// the project.
+func refuseLinks(projectDir, what string, parts ...string) error {
 	path := projectDir
 	for _, part := range parts {
 		path = filepath.Join(path, part)
-		if info, err := os.Lstat(path); err != nil || info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%s is no longer in the database, but its folder is not removed: %s is a symbolic link, or cannot be inspected, and a scan never removes a folder through a link; remove the folder yourself if it is to go, and scan again", what, path)
+		if info, err := scanLstat(path); err != nil || !info.IsDir() {
+			return fmt.Errorf("%s is no longer in the database, but its folder is not removed: %s is a link (a symbolic link or a junction), or is not a plain folder, or cannot be inspected, and a scan never removes a folder through a link; remove the folder yourself if it is to go, and scan again", what, path)
 		}
 	}
 	return nil
 }
 
-// applyRetractions does what planRetractions found.
-func applyRetractions(retractions []retraction) error {
+// applyRetractions does what planRetractions found, and says on removed the folder
+// of each table or view it removes, one line each.
+func applyRetractions(retractions []retraction, removed io.Writer) error {
 	for _, r := range retractions {
 		if r.content == nil {
 			if err := scanRemoveAll(r.dir); err != nil {
 				return fmt.Errorf("failed to remove the folder %s of a table or view that the database no longer has: %w", r.dir, err)
 			}
+			_, _ = fmt.Fprintf(removed, "removed: %s: %s is no longer in the database\n", r.rel, r.what)
 			continue
 		}
 		if err := scanWriteFile(r.file, r.content, 0o644); err != nil {

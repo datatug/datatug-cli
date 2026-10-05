@@ -31,6 +31,12 @@ type ScannedCatalog struct {
 	Driver      string // the driver of the scan, such as "sqlite3"
 	Environment string // the environment the scan was run for
 	ID          string // the catalog (database) id, as given to --db
+
+	// Server is the server the scan read, as ScannedServer says it. It tells which
+	// server holds the catalog when the project has more than one of the driver, such as
+	// two SQL Server hosts that each have a database of this id; it is not needed
+	// otherwise.
+	Server datatug.ServerRef
 }
 
 // SaveScannedProject saves project, a project UpdateDbSchema returned, and then
@@ -48,10 +54,24 @@ type ScannedCatalog struct {
 // A scan of an environment keeps what the scans of the other environments of the same
 // database model wrote (see mergeColumns), and takes back what its own earlier scans
 // wrote of a table or view that the database no longer has (see planRetractions): the
-// folder of one that no environment has is removed. Nothing is written when a folder
-// that is to be removed is, or is inside, a symbolic link.
+// folder of one that no environment has is removed, and said on warnings, one line
+// each. Nothing is written when a folder that is to be removed is, or is inside, a link.
+//
+// The environment, the catalog and the database model of the scan are names of folders
+// of the project, and one that is not a plain name (see CheckScanName) is refused
+// before anything is read, written or removed: this function removes folders, and it
+// does not take its ids on trust from whoever calls it.
 func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, projectDir string, project *datatug.Project, scanned ScannedCatalog, warnings io.Writer) error {
 	server, catalog := findScannedCatalog(project, scanned)
+	names := []struct{ flag, value string }{{"--env", scanned.Environment}, {"--db", scanned.ID}}
+	if catalog != nil {
+		names = append(names, struct{ flag, value string }{"--dbmodel", catalog.DbModel})
+	}
+	for _, name := range names {
+		if err := CheckScanName(name.flag, name.value); err != nil {
+			return err
+		}
+	}
 	var layout scannedLayout
 	var retractions []retraction
 	if catalog != nil {
@@ -95,7 +115,7 @@ func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, project
 	// What the database no longer has goes before what it has is written: on a file
 	// system that does not tell a folder named Customer from one named customer, the
 	// folder of a renamed table is the folder of the new name.
-	if err := applyRetractions(retractions); err != nil {
+	if err := applyRetractions(retractions, warnings); err != nil {
 		return err
 	}
 	for _, folder := range layout.folders {
@@ -132,13 +152,24 @@ func saveKeepingReadme(ctx context.Context, store datatug.ProjectStore, projectD
 }
 
 // findScannedCatalog is the catalog of project that scanned names, with the
-// server that holds it, or nil.
+// server that holds it, or nil. When the project has more than one server of the
+// driver it is the one the scan read (scanned.Server): the catalog of another server
+// that has a database of the same id is not the one the scan found.
 func findScannedCatalog(project *datatug.Project, scanned ScannedCatalog) (*datatug.ProjDbServer, *datatug.DbCatalog) {
 	driver := project.DbDrivers.GetByID(scanned.Driver)
 	if driver == nil {
 		return nil, nil
 	}
-	for _, server := range driver.Servers {
+	servers := driver.Servers
+	if len(servers) > 1 {
+		ref := scanned.Server
+		ref.Driver = scanned.Driver
+		servers = datatug.ProjDbServers{}
+		if server := driver.Servers.GetProjDbServer(ref); server != nil {
+			servers = datatug.ProjDbServers{server}
+		}
+	}
+	for _, server := range servers {
 		if catalog := server.Catalogs.GetByID(scanned.ID); catalog != nil {
 			return server, catalog
 		}

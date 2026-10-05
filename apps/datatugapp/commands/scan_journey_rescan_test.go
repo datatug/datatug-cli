@@ -68,15 +68,21 @@ func TestScanJourneySecondEnvironmentKeepsTheFirst(t *testing.T) {
 	devPath := filepath.Join(t.TempDir(), "dev.db")
 	writeJourneyDB(t, localPath)
 	writeDevDB(t, devPath)
-	scan := func(env, path string) {
+	scan := func(env, path string) string {
 		t.Helper()
 		stderr, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", path, "--db", "shop", "--env", env)
 		require.NoError(t, err)
-		assert.Empty(t, stderr)
+		return stderr
+	}
+	catalogPath := func(env string) any {
+		return readJSONMap(t, filepath.Join(projectDir, "environments", env, "catalogs", "shop", "shop.db.json"))["path"]
+	}
+	removedLine := func(name string) string {
+		return `removed: dbmodels/shop/main/tables/` + name + `: table "` + name + `" of schema "main" is no longer in the database` + "\n"
 	}
 
-	scan("local", localPath)
-	scan("dev", devPath)
+	assert.Empty(t, scan("local", localPath))
+	assert.Empty(t, scan("dev", devPath))
 
 	assert.Equal(t, []string{"dev", "local"}, modelEnvironments(t, projectDir))
 	assert.Equal(t, map[string][]string{
@@ -92,16 +98,20 @@ func TestScanJourneySecondEnvironmentKeepsTheFirst(t *testing.T) {
 	assert.Equal(t, map[string][]string{
 		"CustomerId": {"dev", "local"}, "full_name": {"dev", "local"},
 	}, columnsFileOf(t, projectDir, "views", "customer_names"))
-	for _, env := range []string{"local", "dev"} {
-		assert.FileExists(t, filepath.Join(projectDir, "environments", env, "catalogs", "shop", "shop.db.json"))
-	}
+	// Each environment's catalog file names its own database file.
+	assert.Equal(t, localPath, catalogPath("local"))
+	assert.Equal(t, devPath, catalogPath("dev"))
 
 	// Scanning either again, with nothing changed in its database, changes nothing.
 	both := treeHashes(t, projectDir, "")
-	scan("local", localPath)
+	assert.Empty(t, scan("local", localPath))
 	assert.Equal(t, both, treeHashes(t, projectDir, ""), "a rescan of local")
-	scan("dev", devPath)
+	assert.Equal(t, localPath, catalogPath("local"))
+	assert.Equal(t, devPath, catalogPath("dev"))
+	assert.Empty(t, scan("dev", devPath))
 	assert.Equal(t, both, treeHashes(t, projectDir, ""), "a rescan of dev")
+	assert.Equal(t, localPath, catalogPath("local"), "a rescan of dev does not point local's catalog at dev's file")
+	assert.Equal(t, devPath, catalogPath("dev"))
 
 	// A table that dev drops stays while local has it, and goes with the last
 	// environment that had it.
@@ -110,7 +120,7 @@ func TestScanJourneySecondEnvironmentKeepsTheFirst(t *testing.T) {
 	_, err = db.Exec(`DROP TABLE Invoice; CREATE TABLE Receipt (ReceiptId INTEGER PRIMARY KEY)`)
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
-	scan("dev", devPath)
+	assert.Equal(t, removedLine("Invoice"), scan("dev", devPath), "one line for the folder that goes")
 	assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "shop", "main", "tables", "Invoice"), "no environment has Invoice any more")
 	assert.Equal(t, map[string][]string{"ReceiptId": {"dev"}}, columnsFileOf(t, projectDir, "tables", "Receipt"))
 	assert.Equal(t, map[string][]string{
@@ -122,10 +132,89 @@ func TestScanJourneySecondEnvironmentKeepsTheFirst(t *testing.T) {
 	_, err = db.Exec(`DROP TABLE order_line`)
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
-	scan("local", localPath)
+	assert.Equal(t, removedLine("order_line"), scan("local", localPath))
 	assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "shop", "main", "tables", "order_line"), "local was the only environment that had order_line")
+	assert.Equal(t, localPath, catalogPath("local"))
+	assert.Equal(t, devPath, catalogPath("dev"))
 	assert.Equal(t, map[string][]string{
 		"CustomerId": {"dev", "local"}, "FirstName": {"dev", "local"}, "LastName": {"dev", "local"}, "Email": {"dev"},
 	}, columnsFileOf(t, projectDir, "tables", "Customer"), "what local has still is listed for local")
 	assert.Equal(t, []string{"dev", "local"}, modelEnvironments(t, projectDir))
+}
+
+// writeShopDB creates a database of one table, Customer, made as ddl says.
+func writeShopDB(t *testing.T, path, ddl string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	_, err = db.Exec(ddl)
+	require.NoError(t, err)
+}
+
+// The columns file of a table holds one set of column attributes and one order, the last
+// scan's (the limit that REQ rescan-keeps-other-environments states): two environments
+// whose databases differ in a column they share, or in its place, rewrite each other's
+// file with each scan, though no database changed. Scanning one environment again, with
+// nothing scanned in between, changes nothing.
+func TestScanJourneyASharedColumnHoldsTheAttributesOfTheLastScan(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "shop-project")
+	localPath := filepath.Join(t.TempDir(), "local.db")
+	devPath := filepath.Join(t.TempDir(), "dev.db")
+	writeShopDB(t, localPath, `CREATE TABLE Customer (CustomerId INTEGER PRIMARY KEY, Name TEXT)`)
+	writeShopDB(t, devPath, `CREATE TABLE Customer (Name VARCHAR(40), CustomerId BIGINT PRIMARY KEY)`)
+	scan := func(env, path string) {
+		t.Helper()
+		stderr, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", path, "--db", "shop", "--env", env)
+		require.NoError(t, err)
+		assert.Empty(t, stderr)
+	}
+	file := filepath.Join(projectDir, "dbmodels", "shop", "main", "tables", "Customer", "main.Customer.columns.json")
+	typed := func() (columns []string, content string) {
+		data, err := os.ReadFile(file)
+		require.NoError(t, err)
+		for _, column := range readJSONMap(t, file)["columns"].([]any) {
+			column := column.(map[string]any)
+			columns = append(columns, column["name"].(string)+" "+column["dbType"].(string))
+		}
+		return columns, string(data)
+	}
+
+	scan("local", localPath)
+	afterLocal, _ := typed()
+	scan("dev", devPath)
+	afterDev, contentAfterDev := typed()
+	scan("local", localPath)
+	afterLocalAgain, contentAfterLocalAgain := typed()
+
+	assert.Equal(t, []string{"CustomerId INTEGER", "Name TEXT"}, afterLocal)
+	assert.Equal(t, []string{"Name VARCHAR(40)", "CustomerId BIGINT"}, afterDev, "dev's attributes and order, the last scan's")
+	assert.Equal(t, afterLocal, afterLocalAgain, "local's again, when local is scanned again")
+	assert.NotEqual(t, contentAfterDev, contentAfterLocalAgain, "a scan of one rewrites what the scan of the other wrote, though no database changed")
+	assert.Equal(t, map[string][]string{"CustomerId": {"dev", "local"}, "Name": {"dev", "local"}}, columnsFileOf(t, projectDir, "tables", "Customer"))
+
+	before := treeHashes(t, projectDir, "")
+	scan("local", localPath)
+	assert.Equal(t, before, treeHashes(t, projectDir, ""), "a rescan of the same environment, with no other scanned in between, changes nothing")
+}
+
+// A folder of the person's own in the folder of tables is not a table of a scan: a scan
+// says nothing of it, however often it runs.
+func TestScanJourneyLeavesAFolderOfItsOwnAlone(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "shop-project")
+	dbPath := filepath.Join(t.TempDir(), "shop.db")
+	writeJourneyDB(t, dbPath)
+	_, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
+	require.NoError(t, err)
+	mine := filepath.Join(projectDir, "dbmodels", "shop", "main", "tables", "my-notes")
+	require.NoError(t, os.MkdirAll(mine, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(mine, "README.md"), []byte("what I know about the shop"), 0o644))
+	before := treeHashes(t, projectDir, "")
+
+	for scan := 1; scan <= 2; scan++ {
+		stderr, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
+		require.NoError(t, err, "scan %d", scan)
+		assert.Empty(t, stderr, "scan %d says nothing of a folder that is not a table", scan)
+		assert.Equal(t, before, treeHashes(t, projectDir, ""), "scan %d", scan)
+	}
 }

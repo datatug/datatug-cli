@@ -41,6 +41,18 @@ func loggedUser(driver string, params dbconnection.Params) string {
 	return fmt.Sprintf(", user=%v", params.User())
 }
 
+// ScannedServer is the server a scan of driver with dbConnParams reads, as the project
+// records it. SQLite is file-based: the project model forbids host/port for sqlite3
+// (the file path is carried on the catalog instead).
+func ScannedServer(driver string, dbConnParams dbconnection.Params) datatug.ServerRef {
+	server := datatug.ServerRef{Driver: driver}
+	if driver != dbconnection.DriverSQLite3 {
+		server.Host = dbConnParams.Server()
+		server.Port = dbConnParams.Port()
+	}
+	return server
+}
+
 // UpdateDbSchema updates DB schema
 func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID, environment, driver, dbModelID string, dbConnParams dbconnection.Params) (project *datatug.Project, err error) {
 	// dbConnParams.String() is the connection string, password included: log
@@ -80,13 +92,7 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 		}
 		return nil
 	}
-	// SQLite is file-based: the project model forbids host/port for sqlite3
-	// (the file path is carried on the catalog instead).
-	dbServer := datatug.ServerRef{Driver: driver}
-	if driver != dbconnection.DriverSQLite3 {
-		dbServer.Host = dbConnParams.Server()
-		dbServer.Port = dbConnParams.Port()
-	}
+	dbServer := ScannedServer(driver, dbConnParams)
 	scanDbWorker := func() error {
 		var scanErr error
 		if dbCatalog, scanErr = scanDbCatalogSeam(ctx, dbServer, dbConnParams); scanErr != nil {

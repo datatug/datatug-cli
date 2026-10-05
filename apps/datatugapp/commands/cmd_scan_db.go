@@ -41,13 +41,28 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 
 	// A database, a model and an environment are names of folders of the project: a
 	// name that cannot be one is refused before anything is read or written.
-	if v.DbModel == "" {
-		v.DbModel = v.Database
-	}
-	for _, name := range []struct{ flag, value string }{{"--db", v.Database}, {"--env", v.Environment}, {"--dbmodel", v.DbModel}} {
+	for _, name := range []struct{ flag, value string }{{"--db", v.Database}, {"--env", v.Environment}} {
 		if err := api.CheckScanName(name.flag, name.value); err != nil {
 			return err
 		}
+	}
+	if v.DbModel != "" {
+		if err := api.CheckScanName("--dbmodel", v.DbModel); err != nil {
+			return err
+		}
+	}
+	// A database file whose path has a "?" in it is read by the scan and not opened
+	// again by the project: it is refused now, before the project is looked at.
+	if v.Driver == dbconnection.DriverSQLite3 {
+		if err := api.CheckSQLitePath(v.Path); err != nil {
+			return err
+		}
+	}
+	// A database the project already holds stays on its model: a scan without --dbmodel
+	// keeps it, and one that names another is refused, naming both.
+	var err error
+	if v.DbModel, err = api.ResolveScanDbModel(v.ProjectDir, v.Environment, v.Database, v.DbModel); err != nil {
+		return err
 	}
 	// A project folder that is not there is made, once the scan has read something: a
 	// scan that fails makes nothing.
@@ -108,7 +123,7 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	log.Println("Saving project", datatugProject.ID, "...")
 	saveStore, _ := filestore.NewSingleProjectStore(v.ProjectDir, datatugProject.ID)
 	savedProject := saveStore.GetProjectStore(datatugProject.ID)
-	scanned := api.ScannedCatalog{Driver: v.Driver, Environment: v.Environment, ID: v.Database}
+	scanned := api.ScannedCatalog{Driver: v.Driver, Environment: v.Environment, ID: v.Database, Server: api.ScannedServer(v.Driver, connParams)}
 	return api.SaveScannedProject(ctx, savedProject, v.ProjectDir, datatugProject, scanned, stderr)
 }
 
@@ -264,10 +279,10 @@ func scanCommandArgs() *cobra.Command {
 	flags.Int("port", 0, "Server network port (default if omitted)")
 	flags.StringP("user", "U", "", "DB login user")
 	flags.StringP("password", "P", "", "DB login password")
-	flags.String("db", "", "ID of database to scan: a plain name, as it is the name of a folder of the project")
-	flags.String("dbmodel", "", "ID of DB model: a plain name (default: the ID of the database)")
+	flags.String("db", "", "ID of database to scan: a plain name, as it is the name of a folder of the project (for sqlserver also the name of the database on the server)")
+	flags.String("dbmodel", "", "ID of DB model: a plain name (default: the model the project already records for the database in this environment, else the ID of the database)")
 	flags.String("env", "", "Environment the DB belongs to: a plain name. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.")
-	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3)")
+	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3); it must exist, and its path must have no \"?\" in it")
 	flags.String("dsn-env", "", "Environment variable that holds the PostgreSQL connection URL, for -D postgres (not available in this release: a project cannot record a postgres server yet). The password stays in the variable and is never written to the project. The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
 	_ = cmd.MarkFlagRequired("db")
 	_ = cmd.MarkFlagRequired("env")

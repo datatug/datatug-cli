@@ -117,6 +117,26 @@ func TestCreateLocalProjectFailures(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+	t.Run("a file or a link where the datatug folder belongs is refused, and nothing is written through it", func(t *testing.T) {
+		root := t.TempDir()
+		outside := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "p"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(root, "p", "datatug")); err != nil {
+			t.Skipf("cannot make a symbolic link here (Windows needs a privilege for it; the refusal there is covered by internal/plainfs with a faked Lstat): %v", err)
+		}
+		_, err := createLocalProject("p", "T", root)
+		if err == nil || !contains(err.Error(), "failed to create project directory") || !contains(err.Error(), "datatug: is a link") {
+			t.Fatalf("err = %v", err)
+		}
+		if contains(err.Error(), outside) {
+			t.Fatalf("the message says where the link leads: %v", err)
+		}
+		if entries, readErr := os.ReadDir(outside); readErr != nil || len(entries) != 0 {
+			t.Fatalf("something was made outside the project: %v %v", entries, readErr)
+		}
+	})
 	t.Run("the config cannot be written", func(t *testing.T) {
 		root := t.TempDir()
 		if err := os.MkdirAll(filepath.Join(root, "p", "datatug", "datatug-project.json"), 0o755); err != nil {

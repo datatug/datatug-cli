@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/stretchr/testify/assert"
@@ -353,9 +354,17 @@ func TestSaveScannedProject_KeepsAReadmeThatIsAlreadyThere(t *testing.T) {
 	t.Run("a README that cannot be put back is an error that says so", func(t *testing.T) {
 		projectDir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(projectDir, "README.md"), []byte(mine), 0o600))
-		setSeam(t, &readmeWriteFile, func(string, []byte, os.FileMode) error { return errors.New("disk full") })
+		ops := plainfs.OSOps()
+		open := ops.OpenFile
+		ops.OpenFile = func(name string, flag int, perm fs.FileMode) (plainfs.File, error) {
+			if filepath.Base(name) == "README.md" && flag&os.O_WRONLY != 0 {
+				return nil, errors.New("disk full")
+			}
+			return open(name, flag, perm)
+		}
+		setSeam(t, &scanOps, ops)
 		err := SaveScannedProject(ctx, layoutStore(projectDir), projectDir, layoutProject(t, "/data/shop.db", schema), layoutScanned, &bytes.Buffer{})
-		assert.ErrorContains(t, err, "failed to put back the README.md of the project: disk full")
+		assert.ErrorContains(t, err, "failed to put back the README.md of the project: README.md: disk full")
 	})
 }
 
@@ -414,6 +423,23 @@ func TestSaveScannedProject_Failures(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Join(projectDir, "dbmodels", "shop", "main", "tables", "Customer", "main.Customer.columns.json"), 0o755))
 		err := SaveScannedProject(ctx, layoutStore(projectDir), projectDir, layoutProject(t, "/data/shop.db", schema), layoutScanned, &bytes.Buffer{})
 		assert.ErrorContains(t, err, `failed to write the columns file of table "Customer" of schema "main"`)
+		assert.ErrorContains(t, err, "is not a plain file", "a folder in its place is refused, and not read")
+	})
+
+	t.Run("the columns file cannot be opened for writing", func(t *testing.T) {
+		projectDir := t.TempDir()
+		useOps(t, func(ops *plainfs.Ops) {
+			open := ops.OpenFile
+			ops.OpenFile = func(name string, flag int, perm fs.FileMode) (plainfs.File, error) {
+				if strings.HasSuffix(name, ".columns.json") && flag&os.O_WRONLY != 0 {
+					return nil, errors.New("no space left")
+				}
+				return open(name, flag, perm)
+			}
+		})
+		err := SaveScannedProject(ctx, layoutStore(projectDir), projectDir, layoutProject(t, "/data/shop.db", schema), layoutScanned, &bytes.Buffer{})
+		assert.ErrorContains(t, err, `failed to write the columns file of table "Customer" of schema "main"`)
+		assert.ErrorContains(t, err, "no space left")
 	})
 }
 

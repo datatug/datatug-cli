@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 
+	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/datatug/datatug-core/pkg/storage"
@@ -60,6 +60,11 @@ type ScannedCatalog struct {
 // of it there) has no earlier scan of its own, so it takes nothing back: what is in the
 // model for that environment was written by something else. Nothing is written when a
 // folder that is to be removed is, or is inside, a link.
+//
+// The scan writes only plain files in plain folders of the project: it does not write through a
+// link. What datatug-core's store writes it writes under the same rule, and the files and folders
+// that this package writes and removes go through one walk (see package plainfs), which refuses a
+// link, or anything that is not a plain folder or a plain file, naming its path inside the project.
 //
 // The environment, the catalog and the database model of the scan are names of folders
 // of the project, and one that is not a plain name (see CheckScanName), or that differs
@@ -132,7 +137,7 @@ func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, project
 	// What the database no longer has goes before what it has is written: on a file
 	// system that does not tell a folder named Customer from one named customer, the
 	// folder of a renamed table is the folder of the new name.
-	if err := applyRetractions(retractions, warnings); err != nil {
+	if err := applyRetractions(scanTree(projectDir), retractions, warnings); err != nil {
 		return err
 	}
 	for _, folder := range layout.folders {
@@ -152,8 +157,9 @@ func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, project
 // README, and again after the README of the project was edited. The README is read
 // before the save and put back after it, whether the save worked or not.
 func saveKeepingReadme(ctx context.Context, store datatug.ProjectStore, projectDir string, project *datatug.Project) error {
+	tree := scanTree(projectDir)
 	path := filepath.Join(projectDir, "README.md")
-	original, readErr := os.ReadFile(path)
+	original, readErr := tree.ReadFile(path)
 	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
 		return fmt.Errorf("failed to read the README.md of the project, which a scan keeps: %w", readErr)
 	}
@@ -162,7 +168,7 @@ func saveKeepingReadme(ctx context.Context, store datatug.ProjectStore, projectD
 		return saveErr // there was no README: the generated one stays
 	}
 	var putBackErr error
-	if err := readmeWriteFile(path, original, 0o644); err != nil { // the file exists, so its permissions stay
+	if err := tree.WriteFile(path, original, 0o644); err != nil { // the file exists, so its permissions stay
 		putBackErr = fmt.Errorf("failed to put back the README.md of the project: %w", err)
 	}
 	return errors.Join(saveErr, putBackErr)
@@ -371,14 +377,20 @@ func folderNameProblem(name string) string {
 // holds them was validated by SaveProject.
 func writeScannedColumnsFile(projectDir, model, schema, folder, environment string, table *datatug.CollectionInfo) error {
 	name := table.Name()
+	tree := scanTree(projectDir)
 	dir := filepath.Join(projectDir, storage.DbModelsFolder, model, schema, folder, name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := tree.MkdirAll(dir); err != nil {
 		return fmt.Errorf("failed to create the folder of %s %q of schema %q: %w", relationKind(folder), name, schema, err)
 	}
 	path := filepath.Join(dir, storage.JsonFileName(schema+"."+name, storage.ColumnsFileSuffix))
 	// A file that is not there, or cannot be read or is not a columns file, has no state
-	// to keep: what is written in its place says what the scan found.
-	existing, _ := os.ReadFile(path)
+	// to keep: what is written in its place says what the scan found. A link, or anything
+	// that is not a plain file, in its place is not that: it is refused, and not read, as
+	// the write that follows would refuse it.
+	existing, readErr := tree.ReadFile(path)
+	if errors.Is(readErr, plainfs.ErrNotPlain) {
+		return fmt.Errorf("failed to write the columns file of %s %q of schema %q: %w", relationKind(folder), name, schema, readErr)
+	}
 	previous, _ := parseColumnsFile(existing)
 	file := filestore.TableModelColumnsFile{Columns: mergeColumns(previous, table.Columns, environment)}
 	// Columns, their state by environment and their plain fields cannot fail to marshal.
@@ -387,7 +399,7 @@ func writeScannedColumnsFile(projectDir, model, schema, folder, environment stri
 	if bytes.Equal(existing, content) {
 		return nil
 	}
-	if err := os.WriteFile(path, content, 0o644); err != nil {
+	if err := tree.WriteFile(path, content, 0o644); err != nil {
 		return fmt.Errorf("failed to write the columns file of %s %q of schema %q: %w", relationKind(folder), name, schema, err)
 	}
 	return nil

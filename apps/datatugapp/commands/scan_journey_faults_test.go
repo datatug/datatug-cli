@@ -85,13 +85,16 @@ func TestScanJourneyDoesNotCreateTheProjectFolderForAScanThatFails(t *testing.T)
 }
 
 // Without --driver the message names --driver, which is the flag that is missing,
-// and not --server, which is a flag of another driver.
+// and not --server, which is a flag of another driver. It is the first thing the scan checks:
+// a project that already holds the database under another driver does not change what the
+// message says, and neither does a project folder that is not there.
 func TestScanJourneyMissingDriverNamesTheFlag(t *testing.T) {
 	projectDir := t.TempDir()
 	for _, args := range [][]string{
 		{"--path", "shop.db"},
 		{"--server", "localhost"},
 		{},
+		{"-D", ""},
 	} {
 		_, err := runScanCommand(t, append([]string{"-d", projectDir, "--db", "shop", "--env", "local"}, args...)...)
 		require.Error(t, err, args)
@@ -99,6 +102,54 @@ func TestScanJourneyMissingDriverNamesTheFlag(t *testing.T) {
 		assert.NotContains(t, err.Error(), "--server", "the message does not send the user after another flag")
 	}
 	assert.Empty(t, projectFiles(t, projectDir, ""), "nothing was written")
+
+	t.Run("a project that already holds the database under another driver", func(t *testing.T) {
+		projectDir := filepath.Join(t.TempDir(), "company")
+		sqlitePath := filepath.Join(projectDir, "data", "shop.db")
+		writeJourneyDB(t, sqlitePath)
+		_, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", sqlitePath, "--db", "shop", "--env", "local")
+		require.NoError(t, err)
+		before := treeHashes(t, projectDir, "")
+
+		for _, args := range [][]string{{}, {"-D", ""}, {"--path", sqlitePath}} {
+			_, err = runScanCommand(t, append([]string{"-d", projectDir, "--db", "shop", "--env", "local"}, args...)...)
+
+			require.Error(t, err, args)
+			assert.ErrorContains(t, err, "--driver", "the flag that is missing, and not the database the project holds under another driver")
+			assert.NotContains(t, err.Error(), "use another --db")
+		}
+		assert.Equal(t, before, treeHashes(t, projectDir, ""), "nothing was written")
+	})
+
+	t.Run("before the project is looked at", func(t *testing.T) {
+		_, err := runScanCommand(t, "--db", "shop", "--env", "local") // no project, no driver
+
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "--driver")
+	})
+}
+
+// A driver the scan does not read is refused, naming the flag and what it takes, before anything is
+// read or written; a value that is not a plain name is not repeated (it may be a connection string).
+func TestScanJourneyUnsupportedDriverNamesTheFlag(t *testing.T) {
+	const secret = "s3cretpassword"
+	for name, driver := range map[string]string{"a driver of another database": "mysql", "a connection string": "postgres://alice:" + secret + "@db.example.com/shop"} {
+		t.Run(name, func(t *testing.T) {
+			projectDir := filepath.Join(t.TempDir(), "company")
+
+			stderr, err := runScanCommand(t, "-d", projectDir, "-D", driver, "--db", "shop", "--env", "local")
+
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "--driver")
+			assert.ErrorContains(t, err, "sqlite3, sqlserver or postgres", "and what it takes")
+			assert.NotContains(t, err.Error(), secret)
+			assert.NotContains(t, err.Error(), "db.example.com")
+			assert.NotContains(t, stderr, secret)
+			assert.NoDirExists(t, projectDir, "nothing was made")
+		})
+	}
+	_, err := runScanCommand(t, "-d", t.TempDir(), "-D", "mysql", "--db", "shop", "--env", "local")
+	assert.ErrorContains(t, err, `"mysql"`, "a plain name is said as it was typed")
 }
 
 // --dbmodel is the id of the database model of the catalog, and its folder in the

@@ -237,22 +237,27 @@ func TestCov100cUnitHelpers(t *testing.T) {
 		blocker := filepath.Join(dir, "file")
 		require.NoError(t, os.WriteFile(blocker, nil, 0o600))
 		// mkdir fails: parent is a regular file; first write staged then cleaned.
-		err := atomicWriteFiles([]fileWrite{
+		err := atomicWriteFiles(dir, []fileWrite{
 			{path: filepath.Join(dir, "ok.txt"), content: []byte("x")},
 			{path: filepath.Join(blocker, "sub", "f"), content: []byte("x")},
 		})
 		require.Error(t, err)
 		assert.NoFileExists(t, filepath.Join(dir, "ok.txt.tmp-0"))
 
+		// the project folder cannot be made: it is below a file.
+		err = atomicWriteFiles(filepath.Join(blocker, "project"), []fileWrite{{path: filepath.Join(blocker, "project", "f"), content: []byte("x")}})
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "failed to create the project folder")
+
 		// stage fails: temp path is a directory.
 		target := filepath.Join(dir, "t.txt")
 		require.NoError(t, os.MkdirAll(target+".tmp-0", 0o755))
-		require.Error(t, atomicWriteFiles([]fileWrite{{path: target, content: []byte("x")}}))
+		require.Error(t, atomicWriteFiles(dir, []fileWrite{{path: target, content: []byte("x")}}))
 
 		// rename fails: final path is a non-empty directory.
 		final := filepath.Join(dir, "final")
 		require.NoError(t, os.MkdirAll(filepath.Join(final, "child"), 0o755))
-		err = atomicWriteFiles([]fileWrite{
+		err = atomicWriteFiles(dir, []fileWrite{
 			{path: filepath.Join(dir, "first.txt"), content: []byte("x")},
 			{path: final, content: []byte("x")},
 		})

@@ -8,12 +8,11 @@ import (
 	"fmt"
 	"io/fs"
 	"net/url"
-	"os"
 	"path"
 	"path/filepath"
 	"regexp"
-	"strings"
 
+	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/schemers/dalgoschema"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -161,13 +160,13 @@ func (p *PostgresScanParams) SourceRef() dbcopy.BackendRef { return p.ref }
 // project's server entry is the driver alone). It replaces a descriptor already
 // there, and does not write one that is as it would be written.
 //
-// It does not follow a link. A project is not trusted (ResolveDescriptorPath refuses a
-// descriptor that a link leads out of the folder to), so a link at connections, at
-// connections/<env> or at the descriptor itself is refused, naming the path in the project
-// that it is, before anything is read through it or written: the scan would otherwise read
-// a file of the machine into memory, truncate it and write the descriptor there. A folder
-// or a file the project has in a place of the path that is not a plain folder, or not a
-// plain file, is refused the same way.
+// It writes only a plain file in plain folders of the project, as every write of a scan does
+// (see package plainfs): it does not write through a link. A project is not trusted
+// (ResolveDescriptorPath refuses a descriptor that a link leads out of the folder to), so a link
+// at connections, at connections/<env> or at the descriptor itself is refused, naming the path
+// in the project that it is, before anything is read through it or written. A folder or a file
+// the project has in a place of the path that is not a plain folder, or not a plain file, is
+// refused the same way.
 //
 // It returns the function that takes the write back, for a scan whose save fails: the
 // descriptor this write made is removed, with the folders it made, and a descriptor
@@ -176,103 +175,51 @@ func (p *PostgresScanParams) WriteDescriptor(projectDir string) (undo func() err
 	// A struct of one string cannot fail to marshal.
 	data, _ := json.MarshalIndent(dbcopy.PostgresDescriptor{DSNEnv: p.dsnEnv}, "", "  ")
 	content := append(data, '\n')
+	tree := scanTree(projectDir)
 	file := filepath.Join(projectDir, filepath.FromSlash(p.descriptorPath))
 	// The folders first: they are looked at with Lstat, so the descriptor is never read
 	// through a link in front of it. A descriptor that is there has its folders there, so
 	// when nothing has to be written nothing was made.
-	made, err := makeFolders(projectDir, path.Dir(p.descriptorPath))
+	made, err := tree.MakeFolders(filepath.Dir(file))
 	if err != nil {
+		_ = undoFolders(tree, made) // the folders this write made are not left behind
 		return nil, fmt.Errorf("create the connection descriptor folder: %w", err)
 	}
-	if err = checkDescriptorFile(file, p.descriptorPath); err != nil {
-		_ = undoFolders(made) // the folders this write made are not left behind
-		return nil, fmt.Errorf("write the connection descriptor: %w", err)
+	previous, readErr := tree.ReadFile(file)
+	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+		_ = undoFolders(tree, made)
+		return nil, fmt.Errorf("write the connection descriptor: %w", readErr)
 	}
-	previous, readErr := os.ReadFile(file)
 	existed := readErr == nil
 	if existed && bytes.Equal(previous, content) {
 		return func() error { return nil }, nil
 	}
-	if err = scanWriteFile(file, content, 0o644); err != nil {
-		_ = undoFolders(made) // the folders this write made are not left behind
+	if err = tree.WriteFile(file, content, 0o644); err != nil {
+		_ = undoFolders(tree, made)
 		return nil, fmt.Errorf("write the connection descriptor: %w", err)
 	}
 	return func() error {
+		tree := scanTree(projectDir) // the walk of the undo is as much a walk as the write's: nothing is trusted that was looked at before
 		if existed {
-			if err := scanWriteFile(file, previous, 0o644); err != nil {
+			if err := tree.WriteFile(file, previous, 0o644); err != nil {
 				return fmt.Errorf("put back the connection descriptor: %w", err)
 			}
 			return nil
 		}
-		if err := scanRemove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := tree.Remove(file); err != nil {
 			return fmt.Errorf("remove the connection descriptor: %w", err)
 		}
-		return undoFolders(made)
+		return undoFolders(tree, made)
 	}, nil
 }
 
-// checkDescriptorFile is an error when what the project has at file, whose path in the project
-// is rel, is not a plain file: a link (to anything, a file that is not there included), a folder
-// or anything else that is not a regular file. A file that is not there is fine, and so is one
-// that cannot be looked at for a reason that is not "it is not there" (it is refused, with the
-// reason).
-func checkDescriptorFile(file, rel string) error {
-	info, err := scanLstat(file)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return nil
-	case err != nil:
-		return fmt.Errorf("look at %s: %w", rel, err)
-	case info.Mode()&fs.ModeSymlink != 0:
-		return fmt.Errorf("%s is a link, and a scan does not write through a link: remove it, or put the descriptor in a file of the project", rel)
-	case !info.Mode().IsRegular():
-		return fmt.Errorf("%s is not a file, and a scan does not replace what is not a file: remove it, or scan into another environment or database", rel)
-	}
-	return nil
-}
-
-// makeFolders makes the folder rel (slash separated) below base, with the folders above
-// it, and returns the folders it made, outermost first: the ones that were not there. A
-// folder is looked at with Lstat, and one that is a link, or is not a folder, is refused,
-// naming its path below base, and the folders this call made are taken back: the descriptor
-// goes into folders of the project, not into a place a link leads to.
-func makeFolders(base, rel string) (made []string, err error) {
-	current := base
-	parts := strings.Split(rel, "/")
-	for i, part := range parts {
-		current = filepath.Join(current, part)
-		known := strings.Join(parts[:i+1], "/")
-		info, statErr := scanLstat(current)
-		switch {
-		case errors.Is(statErr, fs.ErrNotExist):
-			if err = scanMkdir(current, 0o755); err != nil {
-				_ = undoFolders(made)
-				return nil, err
-			}
-			made = append(made, current)
-		case statErr != nil:
-			_ = undoFolders(made)
-			return nil, fmt.Errorf("look at %s: %w", known, statErr)
-		case info.Mode()&fs.ModeSymlink != 0:
-			_ = undoFolders(made)
-			return nil, fmt.Errorf("%s is a link, and a scan does not write through a link: remove it, or put the descriptor in a folder of the project", known)
-		case !info.IsDir():
-			_ = undoFolders(made)
-			return nil, fmt.Errorf("%s is not a folder, and a scan does not replace what is not a folder: remove it, or scan into another environment or database", known)
-		}
-	}
-	return made, nil
-}
-
-// undoFolders removes the folders, innermost first. A folder that cannot be listed any
-// more is gone, and one that holds something is somebody else's now: both stay as they are.
-func undoFolders(made []string) error {
+// undoFolders removes the folders that a write made (outermost first, as MakeFolders lists
+// them), innermost first. A folder that is not there any more is gone, and one that holds
+// something is somebody else's now: both stay as they are.
+func undoFolders(tree plainfs.Tree, made []string) error {
 	var errs []error
 	for i := len(made) - 1; i >= 0; i-- {
-		if entries, err := scanReadDir(made[i]); err != nil || len(entries) > 0 {
-			continue
-		}
-		if err := scanRemove(made[i]); err != nil {
+		if err := tree.RemoveEmptyFolder(made[i]); err != nil {
 			errs = append(errs, fmt.Errorf("remove the folder the connection descriptor was written in: %w", err))
 		}
 	}
@@ -310,7 +257,9 @@ func OpenSchemaScanForTest() func(dbcopy.BackendRef, context.Context) (dbcopy.Sc
 // scanPostgresCatalog scans a PostgreSQL database through DALgo's schema reader.
 // It opens the source through dbcopy, so a driver error comes back classified
 // (see BackendRef.OpenFailure), never as the driver wrote it; what the scan
-// itself reads is reported the same way.
+// itself reads is reported the same way. It counts no records: no project file
+// holds a count, and a count would be a full read of every table of somebody's
+// database, so the provider is given no counter.
 func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
 	params, ok := connectionParams.(postgresScanSource)
 	if !ok {
@@ -324,7 +273,7 @@ func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Para
 	defer func() { _ = scanDB.Close() }()
 
 	catalogID := connectionParams.Catalog()
-	provider := dalgoschema.NewSchemaProvider(scanDB, recordsCounterOf(scanDB, source), catalogID, dbcopy.PostgresDefaultSchema)
+	provider := dalgoschema.NewSchemaProvider(scanDB, nil, catalogID, dbcopy.PostgresDefaultSchema)
 	dbCatalog, err := schemer.NewScanner(provider).ScanCatalog(ctx, catalogID)
 	if err != nil {
 		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", source.OpenFailure(err))
@@ -332,36 +281,4 @@ func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Para
 	dbCatalog.ID = catalogID
 	dbCatalog.Driver = DriverPostgres
 	return dbCatalog, nil
-}
-
-// recordsCounterOf is what counts the records of the tables of a scan, or nil, which counts
-// nothing. A scan counts only through a reader that can tell a view from a table
-// (dalgoschema.ViewLister), so that a view is never counted: the reader of dalgo2postgres lists the
-// views of a server with its tables and cannot tell them apart, so every view would be a table to
-// the scanner, and a server that runs COUNT(*) natively (dalgo2sql declares it for PostgreSQL)
-// would run a count on every table and every view of the database, with no timeout, for numbers
-// that nothing stores. Through that reader a scan counts nothing; the day its reader lists its
-// views, the tables are counted again.
-func recordsCounterOf(scanDB dbcopy.SchemaScanDB, source dbcopy.BackendRef) dalgoschema.RecordsCounter {
-	if _, tellsViews := scanDB.(dalgoschema.ViewLister); !tellsViews {
-		return nil
-	}
-	return classifiedCounter{counter: dalgoschema.NewNativeCounter(scanDB), source: source}
-}
-
-// classifiedCounter reports the error of a count as the open of the source reports its
-// own (BackendRef.OpenFailure): a fixed sentence built from the display form of the
-// source, never the driver's words. The scanner logs the error of a count, and a driver
-// can quote the connection string in whatever shape it likes.
-type classifiedCounter struct {
-	counter dalgoschema.RecordsCounter
-	source  dbcopy.BackendRef
-}
-
-func (c classifiedCounter) CountRecords(ctx context.Context, schema, table string) (*int, error) {
-	count, err := c.counter.CountRecords(ctx, schema, table)
-	if err != nil {
-		return nil, c.source.OpenFailure(err)
-	}
-	return count, nil
 }

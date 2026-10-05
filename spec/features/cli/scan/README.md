@@ -39,6 +39,10 @@ DataTug projects encode database schemas as versionable on-disk files. Authoring
 
 `scan` MUST be invoked inside a project context — either via the cwd being a DataTug project, via `--project <id>`, or via `--directory <path>` (`-d`; the shared CLI conventions, [REQ: project-or-dir-resolution](../README.md#req-project-or-dir-resolution), call this flag `--dir`, but `--directory` is the name `scan` defines). If no project context can be resolved, the command MUST exit `3` (NotFound).
 
+#### REQ: project-folder-link
+
+When the last part of the folder given with `--directory` (or the working directory, when `--directory` is `.`) is a link (a symbolic link, or a Windows junction), `scan` MUST print the folder it leads to, name `--follow-project-link`, write nothing and exit non-zero, before the database is read; with `--follow-project-link` it MUST go on and write into the folder the link leads to. A folder that is not there, a file and a folder that is not a link are looked at as they always were. The folders above the last part are the person's own, and are not looked at; a project folder named with `--project` is a registered path and is not looked at either. A command that only reads a project is not changed. The help of `--follow-project-link` says what it does.
+
 #### REQ: project-folder-created
 
 When `--directory` names a folder that does not exist, `scan` MUST make it (with the folders above it) once it has read the database, and the folder is then a project. A scan that fails before it has read the database MUST make no folder. A `--directory` that is a file, or that cannot be looked at, MUST be refused, with a message that names it, before anything is read.
@@ -67,7 +71,7 @@ The id of a new project (a folder that holds no project file) MUST be the value 
 
 #### REQ: driver-selection
 
-`--driver`/`-D` MUST specify the database driver; a scan without it is refused with a message that names `--driver` (and not a flag of one driver, such as `--server`). Supported values today: `sqlite3` (the file given by `--path`), `sqlserver` and `postgres` (the connection URL held in the variable given by `--dsn-env`; see [PostgreSQL](#postgresql)). The set of supported drivers MUST match the drivers the binary links: `sqlserver` by the import in `main.go`, the SQLite scan's own pure-Go driver by the import in `pkg/api/scan_db_schema_api.go` (see [REQ: sqlite-pure-go](#req-sqlite-pure-go)), which is where the scan opens it, and the PostgreSQL adapter (`dalgo2postgres`) by the import in `pkg/dbcopy/scan_open.go`.
+`--driver`/`-D` MUST specify the database driver; a scan without one, and a scan whose value is not a driver it reads, is refused with a message that names `--driver` and the drivers it reads (and not a flag of one driver, such as `--server`). This is the first thing the scan checks, before the project is looked at: a project that already holds the database under another driver, or no project at all, does not change what the message says. A value that is not a plain name is not repeated in the message (the flag may have been given a connection string). Supported values today: `sqlite3` (the file given by `--path`), `sqlserver` and `postgres` (the connection URL held in the variable given by `--dsn-env`; see [PostgreSQL](#postgresql)). The set of supported drivers MUST match the drivers the binary links: `sqlserver` by the import in `main.go`, the SQLite scan's own pure-Go driver by the import in `pkg/api/scan_db_schema_api.go` (see [REQ: sqlite-pure-go](#req-sqlite-pure-go)), which is where the scan opens it, and the PostgreSQL adapter (`dalgo2postgres`) by the import in `pkg/dbcopy/scan_open.go`.
 
 #### REQ: sqlite-pure-go
 
@@ -91,7 +95,11 @@ One database is one model in every environment. When `--dbmodel` is omitted and 
 
 #### REQ: persist-via-project-store
 
-The scan result MUST be written into the project folder, in the layout of [Project layout written by a scan](#project-layout-written-by-a-scan) and nowhere else. The project file, the environment files, the database model files and the catalog file MUST be written through datatug-core's project store (`SaveProject`, and `SaveEnvDbCatalog` for the catalog file). datatug-core has no writer for the per-table files today (its writers are commented out), so, for launch, the CLI writes those files itself (`pkg/api/scan_layout.go`), using datatug-core's own file type for them (`filestore.TableModelColumnsFile`). A later task may move that writer, and the readers of these files (`pkg/api/catalog_tables_api.go`), into datatug-core; the files will not change when it does.
+The scan result MUST be written into the project folder, in the layout of [Project layout written by a scan](#project-layout-written-by-a-scan) and nowhere else. The project file, the environment files, the database model files and the catalog file MUST be written through datatug-core's project store (`SaveProject`, and `SaveEnvDbCatalog` for the catalog file). datatug-core has no writer for the per-table files today (its writers are commented out), so, for launch, the CLI writes those files itself (`pkg/api/scan_layout.go`), using datatug-core's own file type for them (`filestore.TableModelColumnsFile`), and only as plain files in plain folders of the project (see [REQ: writes-plain-files-in-plain-folders](#req-writes-plain-files-in-plain-folders)). A later task may move that writer, and the readers of these files (`pkg/api/catalog_tables_api.go`), into datatug-core; the files will not change when it does.
+
+#### REQ: writes-plain-files-in-plain-folders
+
+A command writes only plain files in plain folders of the project: it does not write through a link. Every file a scan writes (the project file, the `README.md` it keeps, the environment file, the catalog file, the model file, the columns files, the connection descriptor of a PostgreSQL scan) and every folder it makes or removes, is reached from the project folder down by looking at each part with `Lstat` (`internal/plainfs`, the one walk of the CLI; datatug-core's file store has the same rule for what it writes). A part that is a link (a symbolic link, a junction or any other reparse point) or is not a plain folder, or a file that is not a plain file, is refused, with an error that names its path inside the project and never where a link leads, before anything is written through it; a file is opened without following a link where the platform can say so; every error of the operating system is returned. A rename lands only on a path that was checked the same way. What a scan reads to decide what it writes (the files it keeps state from) is read the same way, and a link in its place is refused. The project folder itself, as the person gave it, may be a link (see [REQ: project-folder-link](#req-project-folder-link)).
 
 #### REQ: project-layout
 
@@ -117,7 +125,7 @@ The first scan of a catalog in an environment (the project holds no catalog file
 
 A scan MUST remove nothing else, and MUST decide first whether a folder is its own: a folder directly in `tables` or `views` of a schema of the model is the scan's only when it holds the one file a scan writes there, named for the folder, `<schema>.<T>.columns.json` (the schema and `<T>`, the name of the folder, compared exactly), as a regular file, and that file is a columns file that lists the environment of the scan. The name of the file is part of the test, so a copy or a rename of the folder of a table, whose file keeps the name it had in the old folder (`tables/Customer.bak` or `tables/Old-2019`, holding `main.Customer.columns.json` or `main.Old.columns.json`), is not the scan's, and a snapshot of an older table, which no scan can write again, is not lost. Any other folder (a person's own, a copy or a rename, one that cannot be listed, one with no such file or whose file cannot be read, one whose columns do not list the environment of the scan, another environment's) is not the scan's: it MUST be left, and the scan MUST say nothing of it and MUST NOT fail for it, whatever it holds and whatever it is linked to, on this scan and on every later one. A folder that is the scan's and holds anything but that one file (a differently named columns file included) is left, and named on stderr. When the model also feeds another catalog in the same environment, the scan does not know what that database has: it MUST leave the folder, and name it.
 
-A scan MUST NOT take back a folder that is its own through a link: when the folder, or any folder above it from `dbmodels` down, is not a plain folder as `Lstat` reports it (which a symbolic link is not, nor a Windows junction, nor any other reparse point), or cannot be inspected, it MUST refuse, with an error that names the folder, before it writes anything.
+A scan MUST NOT take back a folder that is its own through a link: when the folder, or any folder above it from `dbmodels` down, is not a plain folder as `Lstat` reports it (which a symbolic link is not, nor a Windows junction, nor any other reparse point), or cannot be inspected, it MUST refuse, with an error that names the folder inside the project, before it writes anything.
 
 #### REQ: rescan-keeps-other-environments
 
@@ -139,7 +147,7 @@ No file a PostgreSQL scan writes MUST hold a host, a port, a user name, a passwo
 
 #### REQ: postgres-descriptor-follows-the-project
 
-The project MUST be validated before the descriptor is written, so a project that cannot be saved leaves no descriptor in a folder with no project. When the save fails after the descriptor was written, the scan MUST take the descriptor back: remove one it made, with the folders it made (a folder that holds anything else stays), and put back one that was there, as it was; a descriptor that is as the scan would write it is not written again. The writer MUST NOT follow a link, as the reader does not: the project is not trusted, and a scan that read, truncated and wrote through a link at `connections`, at `connections/<env>` or at the descriptor file would overwrite a file of the machine, and exit `0` on a project that no reader opens. Each of the three is looked at without following it (`Lstat`), and a link, or anything that is not a folder (the two folders) or not a regular file (the descriptor), is refused, naming its path in the project and not where it leads, before anything is read through it, written, or saved: what a link leads to is never read or written, and nothing the scan made on the way is left behind. A rescan with another `--dsn-env` MUST update the descriptor and the `path` of the catalog together: the catalog names the descriptor the scan wrote now, never one an earlier scan, or a person, left, and nothing else in the project changes.
+The project MUST be validated before the descriptor is written, so a project that cannot be saved leaves no descriptor in a folder with no project. When the save fails after the descriptor was written, the scan MUST take the descriptor back: remove one it made, with the folders it made (a folder that holds anything else stays), and put back one that was there, as it was; a descriptor that is as the scan would write it is not written again. The writer MUST NOT follow a link, as the reader does not (see [REQ: writes-plain-files-in-plain-folders](#req-writes-plain-files-in-plain-folders)). Each of `connections`, `connections/<env>` and the descriptor file is looked at without following it (`Lstat`), and a link, or anything that is not a folder (the two folders) or not a regular file (the descriptor), is refused, naming its path in the project and not where it leads, before anything is read through it, written, or saved: what a link leads to is never read or written, and nothing the scan made on the way is left behind. A rescan with another `--dsn-env` MUST update the descriptor and the `path` of the catalog together: the catalog names the descriptor the scan wrote now, never one an earlier scan, or a person, left, and nothing else in the project changes.
 
 #### REQ: postgres-and-sqlite-in-one-environment
 
@@ -147,7 +155,7 @@ A project records its servers by driver (and by host and port for the drivers th
 
 #### REQ: postgres-says-no-credentials
 
-The line the scan logs to name what it connects to MUST be built by `dbcopy.SourceDisplay`: the scheme, the host, the port and the database of the URL (`connecting to postgres://db.example.com:5432/shop`), and never a user name, a password or a query string. Every error of the open of the source, of the read of the catalog and of the count of the records of a table MUST be the classified open failure (`open postgres source "env:<VARIABLE>": <a fixed sentence>`), never the words of the driver, which can quote the URL; the driver's own error stays reachable through `errors.Is` and `errors.As`. A scan counts the records of a table only through a reader that can tell its views (`dalgoschema.ViewLister`), and never of a view; a count that fails does not fail the scan. The reader of `dalgo2postgres` cannot (it lists the views of a server with its tables, so each view would be a table to the scanner), and the server it opens runs `COUNT(*)` natively, so a scan through it counts nothing at all: a count would be a full read of every table and every view of somebody's database, with no timeout, for numbers that no project file holds. The day that reader tells its views, the tables are counted again.
+The line the scan logs to name what it connects to MUST be built by `dbcopy.SourceDisplay`: the scheme, the host, the port and the database of the URL (`connecting to postgres://db.example.com:5432/shop`), and never a user name, a password or a query string. Every error of the open of the source and of the read of the catalog MUST be the classified open failure (`open postgres source "env:<VARIABLE>": <a fixed sentence>`), never the words of the driver, which can quote the URL; the driver's own error stays reachable through `errors.Is` and `errors.As`. The sentence says why where it can be told without reading the driver's words: a rejected user or password (SQLSTATE `28P01`), a connection the server's access rules do not allow (SQLSTATE `28000`: the user, the database, the address or the encryption of the connection), a database that does not exist, a server that cannot be reached, a timeout, a failed TLS handshake. A PostgreSQL scan counts no records: no project file holds a count, and a count would be a full read of every table and every view of somebody's database, with no timeout, so the scan is given no counter, whatever the reader can do.
 
 #### REQ: postgres-names-are-exact
 
@@ -167,8 +175,8 @@ Database passwords MUST NOT appear in stdout or stderr at any verbosity. The cur
 
 | Flag | Aliases | Type | Required | Description |
 |---|---|---|---|---|
-| `--driver` | `-D` | string | yes | DB driver. Supported: `sqlite3`, `sqlserver`, `postgres`. |
-| `--path` |  | string | yes (`sqlite3`) | The SQLite database file. It must exist, and its whole path (from the working directory, for a relative one) must have no `?` in it. |
+| `--driver` | `-D` | string | yes | DB driver. Supported: `sqlite3`, `sqlserver`, `postgres`. An empty or another value is refused first, naming `--driver`. |
+| `--path` |  | string | yes (`sqlite3`) | The SQLite database file. It must exist. |
 | `--dsn-env` |  | string | yes (`postgres`) | The environment variable that holds the PostgreSQL connection URL. Its name starts with `DATATUG_` or is listed in `DATATUG_DSN_ENV_ALLOW`. The URL is never written to the project. |
 | `--server` | `-s` | string | yes (`sqlserver`) | Network host. |
 | `--port` |  | int | no | Network port; driver-default if omitted. |
@@ -177,6 +185,7 @@ Database passwords MUST NOT appear in stdout or stderr at any verbosity. The cur
 | `--db` |  | string | yes | Catalog/database ID to scan: a plain name (for `sqlserver` also the name of the database on the server). |
 | `--dbmodel` |  | string | no | DB model ID: a plain name. Defaults to the model the project records for the catalog, else the model the other environments record for it (when they agree), or else `--db`. |
 | `--env` |  | string | yes | Environment ID (`LOCAL`, `DEV`, etc.): a plain name. |
+| `--follow-project-link` |  | bool | no | Write into the project folder even when the last part of the folder given with `--directory` is a link. Without it the scan prints the folder the link leads to and stops (see [REQ: project-folder-link](#req-project-folder-link)). |
 | `--project` / `--directory` | `-p` / `-d` | string | (one of, or cwd) | Project context. See [parent feature](../README.md). A `--directory` that does not exist is made. With `--directory`, `--project` is the id of a new project; without it the id is the name of the folder (see [REQ: new-project-id](#req-new-project-id)). |
 
 ## Project layout written by a scan
@@ -271,7 +280,19 @@ Scanning into `./shop-project` makes the project `shop-project`, into any folder
 
 **Requirements:** scan#req:driver-selection
 
-`datatug scan --directory ./proj --db shop --env local` exits non-zero with a message that names `--driver`, and does not name `--server`. (`TestScanJourneyMissingDriverNamesTheFlag`.)
+`datatug scan --directory ./proj --db shop --env local` exits non-zero with a message that names `--driver`, and does not name `--server`; so does an empty `-D`, in a folder that holds the database under another driver as well as in one that holds nothing, and with no project at all. `-D mysql`, or a value that is a connection string, exits non-zero with a message that names `--driver` and the drivers a scan reads, and repeats the value only when it is a plain name. (`TestScanJourneyMissingDriverNamesTheFlag`, `TestScanJourneyUnsupportedDriverNamesTheFlag`.)
+
+### AC: scan-writes-no-file-through-a-link
+
+**Requirements:** scan#req:writes-plain-files-in-plain-folders
+
+Given a project folder where any file a scan writes, or any folder above one (for `-D sqlite3` and for `-D postgres`, in a folder that has none of the project yet and in one that has all of it), is a link to a place outside the folder, to a file or a folder that is there or to nothing, `datatug scan` exits non-zero with a message that names that path of the project and not where it leads, and the tree outside is byte-identical afterwards, with nothing new in it. A scan into a clean folder writes the same files, byte for byte, as the scan of the version before this rule. (`TestScanJourneyWritesNothingThroughALink`, `TestScanJourneyIntoACleanFolderWritesWhatMainWrote`, `TestSaveScannedProject_WritesNoFileThroughALink`, `TestSaveScannedProject_KeepsNoReadmeThroughALink`.)
+
+### AC: project-folder-that-is-a-link-stops-the-scan
+
+**Requirements:** scan#req:project-folder-link
+
+Given `--directory ./link`, `./link/` or `.` (from a working directory entered through a link), where the link leads to a project folder, `datatug scan` exits non-zero, prints the folder the link leads to and the name of `--follow-project-link`, and writes nothing, for `-D sqlite3` and `-D postgres` (the server is not opened); with `--follow-project-link` it writes into the folder the link leads to. (`TestScanStopsAtAProjectFolderThatIsALink`, `TestScanStopsAtTheWorkingDirectoryThatIsALink`, `TestPostgresScanStopsAtAProjectFolderThatIsALink`, `TestCheckProjectFolderLink`.)
 
 ### AC: dbmodel-is-honoured
 

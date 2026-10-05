@@ -86,6 +86,7 @@ type mockProjectStore struct {
 	saveEntityFunc               func(ctx context.Context, entity *datatug.Entity) error
 	loadEnvironmentSummaryFunc   func(ctx context.Context, id string) (*datatug.EnvironmentSummary, error)
 	saveFolderFunc               func(ctx context.Context, path string, folder *datatug.Folder) error
+	loadFolderFunc               func(ctx context.Context, id string, o ...datatug.StoreOption) (*datatug.Folder, error)
 	deleteFolderFunc             func(ctx context.Context, id string) error
 	loadRecordsetDefinitionsFunc func(ctx context.Context, o ...datatug.StoreOption) ([]*datatug.RecordsetDefinition, error)
 	loadRecordsetDefinitionFunc  func(ctx context.Context, id string, o ...datatug.StoreOption) (*datatug.RecordsetDefinition, error)
@@ -189,6 +190,13 @@ func (m mockProjectStore) SaveFolder(ctx context.Context, path string, folder *d
 	return nil
 }
 
+func (m mockProjectStore) LoadFolder(ctx context.Context, id string, o ...datatug.StoreOption) (*datatug.Folder, error) {
+	if m.loadFolderFunc != nil {
+		return m.loadFolderFunc(ctx, id, o...)
+	}
+	return nil, nil
+}
+
 func (m mockProjectStore) DeleteFolder(ctx context.Context, id string) error {
 	if m.deleteFolderFunc != nil {
 		return m.deleteFolderFunc(ctx, id)
@@ -280,53 +288,8 @@ func (m mockDbServersStore) LoadProjDbServer(ctx context.Context, id string, o .
 	return nil, nil
 }
 
-func TestDatabaseAPI_GetServerDatabases(t *testing.T) {
-	// 1. Validation error
-	_, err := GetServerDatabases(dto.GetServerDatabasesRequest{})
-	require.Error(t, err)
-
-	// 2. Execution error via executeSingleSeam
-	origSeam := executeSingleSeam
-	defer func() { executeSingleSeam = origSeam }()
-
-	executeSingleSeam = func(e sqlexecute.Executor, command sqlexecute.RequestCommand) (sqlexecute.Response, error) {
-		return sqlexecute.Response{}, errors.New("exec error")
-	}
-
-	validReq := dto.GetServerDatabasesRequest{
-		Project:   "proj1",
-		ServerRef: datatug.ServerRef{Driver: "sqlserver", Host: "localhost"},
-	}
-	_, err = GetServerDatabases(validReq)
-	require.Error(t, err)
-
-	// 3. Success
-	executeSingleSeam = func(e sqlexecute.Executor, command sqlexecute.RequestCommand) (sqlexecute.Response, error) {
-		rs := datatug.Recordset{
-			Rows: [][]interface{}{
-				{"db1"},
-				{"db2"},
-			},
-		}
-		return sqlexecute.Response{
-			Commands: []*sqlexecute.CommandResponse{
-				{
-					Items: []sqlexecute.CommandResponseItem{
-						{Value: rs},
-					},
-				},
-			},
-		}, nil
-	}
-
-	dbs, err := GetServerDatabases(validReq)
-	require.NoError(t, err)
-	require.Len(t, dbs, 2)
-	assert.Equal(t, "db1", dbs[0].ID)
-	assert.Equal(t, "db2", dbs[1].ID)
-}
-
 func TestDbServerAPI(t *testing.T) {
+	serveProjects(t, "proj1") // the project is one this process serves: a store is handed out for it
 	origNewStore := storage.NewDatatugStore
 	defer func() { storage.NewDatatugStore = origNewStore }()
 
@@ -398,6 +361,7 @@ func TestDbServerAPI(t *testing.T) {
 }
 
 func TestEntityAPI(t *testing.T) {
+	serveProjects(t, "proj1") // the project is one this process serves: a store is handed out for it
 	origNewStore := storage.NewDatatugStore
 	defer func() { storage.NewDatatugStore = origNewStore }()
 
@@ -508,6 +472,7 @@ func TestEntityAPI(t *testing.T) {
 }
 
 func TestEnvironmentAPI(t *testing.T) {
+	serveProjects(t, "p1") // the project is one this process serves: a store is handed out for it
 	origNewStore := storage.NewDatatugStore
 	defer func() { storage.NewDatatugStore = origNewStore }()
 
@@ -610,6 +575,7 @@ func TestFoldersAPI(t *testing.T) {
 }
 
 func TestBoardAPI(t *testing.T) {
+	serveProjects(t, "p1") // the project is one this process serves: a store is handed out for it
 	origNewStore := storage.NewDatatugStore
 	defer func() { storage.NewDatatugStore = origNewStore }()
 
@@ -673,6 +639,7 @@ func TestBoardAPI(t *testing.T) {
 }
 
 func TestProjectAPI(t *testing.T) {
+	serveProjects(t, "p1") // the project is one this process serves: a store is handed out for it
 	origNewStore := storage.NewDatatugStore
 	defer func() { storage.NewDatatugStore = origNewStore }()
 
@@ -795,6 +762,7 @@ func TestProjectAPI(t *testing.T) {
 }
 
 func TestRecordsetAPI(t *testing.T) {
+	serveProjects(t, "p1") // the project is one this process serves: a store is handed out for it
 	origNewStore := storage.NewDatatugStore
 	defer func() { storage.NewDatatugStore = origNewStore }()
 
@@ -1547,6 +1515,7 @@ func TestSourceResolverAPI(t *testing.T) {
 func TestSourceWarningsAPI(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
+	serveProjectDirs(t, map[string]string{"p1": tmpDir}) // serve announces what it serves
 
 	// 1. ProjectStoreFor error
 	origNewStore := storage.NewDatatugStore

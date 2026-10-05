@@ -84,6 +84,11 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	// filesystem error.
 	case errors.Is(err, api.ErrCatalogNotFound):
 		w.WriteHeader(http.StatusNotFound)
+	// A delete of a project item the project does not have (api.ErrItemNotFound):
+	// the answer of dbserver-delete, as a 404 with the sentence that says the item is
+	// not found, where a delete that fails is a 500.
+	case errors.Is(err, api.ErrItemNotFound):
+		w.WriteHeader(http.StatusNotFound)
 	case errors.Is(err, api.ErrAmbiguousQueryID):
 		response.Code = "INVALID_REQUEST"
 		response.Field = "query"

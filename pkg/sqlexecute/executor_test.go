@@ -591,10 +591,10 @@ func TestExecuteCommand_GetCatalogSummaryError(t *testing.T) {
 	}
 }
 
-// TestExecuteCommand_DefaultDriver_InvalidMode covers the "invalid connection parameters"
-// error path. Port != 0 causes options=["mode=<port>"] which is not a valid mode string,
-// so NewConnectionString returns an error → "invalid connection parameters: ..." wrapping.
-func TestExecuteCommand_DefaultDriver_InvalidMode(t *testing.T) {
+// TestExecuteCommand_DefaultDriver_PortOfAnUnregisteredDriver covers a server with a port
+// whose driver is not registered: the port is part of the connection string (see
+// serverConnectionParams), and it is sql.Open that refuses the driver.
+func TestExecuteCommand_DefaultDriver_PortOfAnUnregisteredDriver(t *testing.T) {
 	e := NewExecutor(nil, nil)
 	cmd := RequestCommand{
 		Env:  "dev",
@@ -607,7 +607,7 @@ func TestExecuteCommand_DefaultDriver_InvalidMode(t *testing.T) {
 	}
 	_, err := e.executeCommand(cmd)
 	if err == nil {
-		t.Fatal("expected error for invalid connection parameters (bad mode)")
+		t.Fatal("expected error for a driver that is not registered")
 	}
 }
 

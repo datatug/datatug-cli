@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/storage"
@@ -34,25 +35,24 @@ func GetProjectSummary(ctx context.Context, ref dto.ProjectRef) (projSummary *da
 	if err = ValidateProjectIdentifier("project", ref.ProjectID); err != nil {
 		return nil, err
 	}
-	// storage.NewDatatugStore, not storage.GetStore/GetProjectStore: the
-	// latter resolve through a package-private `stores` map or a store
-	// stashed on ctx via storage.ContextWithDatatugStore — datatug serve
-	// (ServeHTTP) wires neither, only storage.NewDatatugStore (the
-	// factory storage/vars.go's own TODO calls out as GetStore's
-	// replacement). GetProjects/ExecuteSelect/RunQuery already go through
-	// NewDatatugStore; project_summary/project_full/create_project did not,
-	// so every one of those requests failed with "no store configured for
-	// id=..." once the request even reached this far (previously masked by
-	// the nil apicore.GetAuthTokenFromHttpRequest panic — see auth_hook.go).
-	store, err := storage.NewDatatugStore(ref.StoreID)
+	// projectStoreForID goes through storage.NewDatatugStore, not
+	// storage.GetStore/GetProjectStore: the latter resolve through a
+	// package-private `stores` map or a store stashed on ctx via
+	// storage.ContextWithDatatugStore — datatug serve (ServeHTTP) wires
+	// neither, only storage.NewDatatugStore (the factory storage/vars.go's own
+	// TODO calls out as GetStore's replacement). GetProjects/ExecuteSelect/
+	// RunQuery already go through NewDatatugStore; project_summary/
+	// project_full/create_project did not, so every one of those requests
+	// failed with "no store configured for id=..." once the request even
+	// reached this far (previously masked by the nil
+	// apicore.GetAuthTokenFromHttpRequest panic — see auth_hook.go).
+	project, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	//goland:noinspection GoNilness
-	project := store.GetProjectStore(ref.ProjectID)
 	projectFile, err := project.LoadProjectFile(ctx)
 	if err != nil {
-		return projSummary, fmt.Errorf("failed to load project file: %w", err)
+		return nil, itemNotFound("project", dbcopy.SourceIDDisplay(ref.ProjectID), err)
 	}
 	return &datatug.ProjectSummary{ProjectFile: projectFile}, err
 }
@@ -88,11 +88,13 @@ func GetProjectFull(ctx context.Context, ref dto.ProjectRef) (*datatug.Project, 
 		return nil, err
 	}
 	// See the NewDatatugStore comment in GetProjectSummary above.
-	store, err := storage.NewDatatugStore(ref.StoreID)
+	project, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	//goland:noinspection GoNilness
-	project := store.GetProjectStore(ref.ProjectID)
-	return project.LoadProject(ctx)
+	loaded, err := project.LoadProject(ctx)
+	if err != nil {
+		return nil, itemNotFound("project", dbcopy.SourceIDDisplay(ref.ProjectID), err)
+	}
+	return loaded, nil
 }

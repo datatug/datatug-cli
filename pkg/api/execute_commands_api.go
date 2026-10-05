@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
-	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 
@@ -167,11 +166,10 @@ func ExecuteCommands(ctx context.Context, storeID string, request ExecuteCommand
 	if err != nil {
 		return ExecuteCommandsResponse{}, err
 	}
-	dtStore, err := storage.NewDatatugStore(storeID)
+	projStore, err := projectStoreForID(storeID, request.Project)
 	if err != nil {
 		return ExecuteCommandsResponse{}, err
 	}
-	projStore := dtStore.GetProjectStore(request.Project)
 
 	start := time.Now()
 	response := ExecuteCommandsResponse{Commands: make([]CommandExecutionResult, len(request.Commands))}

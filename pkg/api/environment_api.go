@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/strongo/validation"
@@ -27,5 +28,9 @@ func GetEnvironmentSummary(ctx context.Context, ref dto.ProjectItemRef) (*datatu
 	if err != nil {
 		return nil, err
 	}
-	return store.LoadEnvironmentSummary(ctx, ref.ID)
+	summary, err := store.LoadEnvironmentSummary(ctx, ref.ID)
+	if err != nil {
+		return nil, itemNotFound("environment", dbcopy.SourceIDDisplay(ref.ID), err)
+	}
+	return summary, nil
 }

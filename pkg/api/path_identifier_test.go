@@ -92,6 +92,7 @@ func TestGetCatalogTables_RefusesAnUnsafeIDWithoutReadingAnyFile(t *testing.T) {
 // A project store joins an environment ID into a path of its own, so the ID is
 // checked before the store is asked.
 func TestGetEnvironmentSummary_RefusesAnUnsafeEnvironmentBeforeTheStore(t *testing.T) {
+	serveProjects(t, "p1") // the project is one this process serves: a store is handed out for it
 	origNewStore := storage.NewDatatugStore
 	defer func() { storage.NewDatatugStore = origNewStore }()
 	asked := 0

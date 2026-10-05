@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -123,7 +124,7 @@ func getCatalogSchema(projectDir, environmentID, catalogID string, partial bool)
 	}{{"tables", "BASE TABLE"}, {"views", "VIEW"}} {
 		items, err := loadCatalogRelationsWithMode(dbModelDir, kind.dir, kind.dbType, partial)
 		if err != nil {
-			return nil, err
+			return nil, catalogReadFailed(catalogID, environmentID, err)
 		}
 		relations = append(relations, items...)
 	}
@@ -248,11 +249,11 @@ func GetCatalogTables(projectDir, environmentID, catalogID string) (*CatalogTabl
 	// spec/features/cli/scan/README.md.
 	tables, err := listCatalogTables(dbModelDir, "tables", "BASE TABLE")
 	if err != nil {
-		return nil, err
+		return nil, catalogReadFailed(catalogID, environmentID, err)
 	}
 	views, err := listCatalogTables(dbModelDir, "views", "VIEW")
 	if err != nil {
-		return nil, err
+		return nil, catalogReadFailed(catalogID, environmentID, err)
 	}
 	// Never nil (-> JSON `null`) even when empty: the client
 	// (EnvDbPageComponent) reads `.tables.length`/`.views.length`
@@ -267,11 +268,23 @@ func GetCatalogTables(projectDir, environmentID, catalogID string) (*CatalogTabl
 	return &CatalogTables{Tables: tables, Views: views}, nil
 }
 
+// catalogReadFailed is the answer for a catalog whose files cannot be read: the file of the
+// catalog, the folders of its model, the files of its columns. It is one sentence built from
+// the catalog and the environment, each named only when it is a plain name (see
+// dbcopy.SourceIDDisplay), and from nothing the file system said, whatever the failure was: a
+// file error quotes the path it built from the project folder, and says whether the path is a
+// file or a folder. The cause goes to the log of the server, redacted.
+func catalogReadFailed(catalogID, environmentID string, cause error) error {
+	shownCatalog, shownEnvironment := dbcopy.SourceIDDisplay(catalogID), dbcopy.SourceIDDisplay(environmentID)
+	log.Printf("api: catalog %q in environment %q could not be read: %s", shownCatalog, shownEnvironment, dbcopy.RedactText(cause.Error()))
+	return fmt.Errorf("catalog %q in environment %q could not be read", shownCatalog, shownEnvironment)
+}
+
 // catalogDbModel reads the dbModel of a catalog. environmentID and catalogID
 // are request path segments, and a source string can be sent where an ID belongs:
-// each message shows an ID only when it is a plain name, and carries the file
-// error, which quotes the path the ID was turned into, only then (see
-// LookupError, dbcopy.SourceIDDisplay).
+// each message shows an ID only when it is a plain name (see LookupError,
+// dbcopy.SourceIDDisplay), and none carries the file error, which quotes the path
+// the ID was turned into (see catalogReadFailed).
 func catalogDbModel(projectDir, environmentID, catalogID string) (string, error) {
 	path := filepath.Join(
 		projectDir, storage.EnvironmentsFolder, environmentID, storage.EnvDbCatalogsFolder, catalogID,
@@ -282,11 +295,11 @@ func catalogDbModel(projectDir, environmentID, catalogID string) (string, error)
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("%w: catalog %q in environment %q", ErrCatalogNotFound, dbcopy.SourceIDDisplay(catalogID), dbcopy.SourceIDDisplay(environmentID))
 		}
-		return "", LookupError("read the file of catalog %q in environment %q", err, catalogID, environmentID)
+		return "", catalogReadFailed(catalogID, environmentID, err)
 	}
 	var file catalogDbModelFile
 	if err := json.Unmarshal(data, &file); err != nil {
-		return "", LookupError("parse the file of catalog %q in environment %q", err, catalogID, environmentID)
+		return "", catalogReadFailed(catalogID, environmentID, err)
 	}
 	if file.DbModel == "" {
 		return "", LookupError("catalog %q (environment %q) has no dbModel set", nil, catalogID, environmentID)

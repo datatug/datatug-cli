@@ -2,9 +2,11 @@ package endpoints
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/sneat-co/sneat-go-core/apicore"
 )
@@ -12,6 +14,10 @@ import (
 // deleteProjItem is the shared DELETE handler for a project item named by
 // the request's query parameters (queries/delete_query is the only route
 // that reaches a project write through it).
+//
+// A delete of an item the project does not have (api.ErrItemNotFound) is answered with a 404,
+// where apicore answers every error it does not know with a 500 and a bad request with a 400
+// only: the answer is apicore's, with the status of a missing item (see missingItemWriter).
 //
 // The verify options must never be nil: `datatug serve` registers
 // apicore.Execute as the handler (pkg/server/http_server.go), and the first
@@ -28,15 +34,37 @@ func deleteProjItem(del func(ctx context.Context, ref dto.ProjectItemRef) error)
 			handleError(err, w, r)
 			return
 		}
+		missing := false
 		worker := func(ctx context.Context) (responseDTO apicore.ResponseDTO, err error) {
 			if err := del(ctx, ref); err != nil {
+				missing = errors.Is(err, api.ErrItemNotFound)
 				return nil, err
 			}
 			return deletedItemResponse{}, nil
 		}
-		handle(w, r, nil, VerifyRequest{AuthRequired: true}, http.StatusOK, getContextFromRequest, worker)
+		handle(missingItemWriter{ResponseWriter: w, missing: &missing}, r, nil, VerifyRequest{AuthRequired: true}, http.StatusOK, getContextFromRequest, worker)
 	}
 }
+
+// missingItemWriter is the response writer of a delete: it writes what apicore writes, with
+// the status 404 in place of the 500 that apicore gives an error it does not know when the
+// worker found the item missing.
+type missingItemWriter struct {
+	http.ResponseWriter
+	// missing is set by the worker, before apicore writes its answer.
+	missing *bool
+}
+
+// WriteHeader writes the status, which is 404 for the answer of a missing item.
+func (w missingItemWriter) WriteHeader(status int) {
+	if *w.missing && status == http.StatusInternalServerError {
+		status = http.StatusNotFound
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+// Unwrap lets http.ResponseController reach the writer that is wrapped.
+func (w missingItemWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // deletedItemResponse is the body a successful delete answers with: an
 // empty JSON object, so the route keeps its 200 OK. apicore.ReturnJSON

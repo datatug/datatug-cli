@@ -9,7 +9,6 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
-	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 
@@ -89,11 +88,10 @@ func ExecuteSelect(ctx context.Context, storeID string, request SelectRequest) (
 	if err != nil {
 		return QueryResultResponse{}, err
 	}
-	store, err := storage.NewDatatugStore(storeID)
+	projStore, err := projectStoreForID(storeID, request.Project)
 	if err != nil {
 		return QueryResultResponse{}, err
 	}
-	projStore := store.GetProjectStore(request.Project)
 	sourceURL, driver, err := resolveSourceURL(ctx, projStore, request.Environment, request.Database, projDir)
 	if err != nil {
 		return QueryResultResponse{}, err

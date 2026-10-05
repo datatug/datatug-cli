@@ -25,7 +25,7 @@ func GetRecordsetsSummary(ctx context.Context, ref dto.ProjectRef) (*dto.ProjRec
 	}
 	datasetDefinitions, err := store.LoadRecordsetDefinitions(ctx)
 	if err != nil {
-		return nil, err
+		return nil, itemsNotLoaded("recordsets", dbcopy.SourceIDDisplay(ref.ProjectID), err)
 	}
 	root := dto.ProjRecordsetSummary{}
 	root.ID = "/"

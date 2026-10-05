@@ -209,6 +209,9 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
+	// The flag the source was typed on is what a failure of a PostgreSQL source says its connection string is read
+	// from (an env:NAME source says the variable).
+	backend = backend.WithFlag("--db")
 	// A PostgreSQL source is a preview that is off unless the person turns it on: that is the first
 	// thing they are told, before anything about policies, which turning it on would not change.
 	if err = dbcopy.CheckPostgresRead(backend, 0); err != nil {
@@ -257,7 +260,10 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 		// URL never reaches the message, and env:NAME names the variable without
 		// its value) and says what failed in a fixed sentence: a driver's own text
 		// can quote the URL it was given. It already says which source failed, so
-		// nothing is put in front of it.
+		// nothing is put in front of it. A PostgreSQL source is not named by its
+		// display form (that holds the host and the port): its text is the adapter's
+		// sentence and where the connection string is read from (the --db flag, or
+		// the variable of an env:NAME source).
 		return Exit(backend.OpenFailure(err).Error(), exitCodeDatabase)
 	}
 	stderr := cmd.ErrOrStderr()

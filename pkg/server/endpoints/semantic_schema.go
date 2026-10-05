@@ -127,11 +127,12 @@ func resolveSQLSourceURL(ctx context.Context, sourceID, sourceURL, collection st
 	db, err := ref.Open(ctx)
 	if err != nil {
 		// A source that is refused, whose data file is not there or that cannot be opened is
-		// unavailable, and the answer names it by its ID: Open's own error holds the display form
-		// of the source (the path of a file, the host of a database), and goes to the log. The
-		// fixed refusals of a PostgreSQL source (dbcopy.ErrPostgresPreview while the preview is
-		// off, and the refusal of a URL that turns the read-only session off) name no source, and
-		// are answered as they are.
+		// unavailable. A file source is named in the answer by its ID: Open's own error holds the
+		// display form of the source (the path of a file), and goes to the log. A PostgreSQL source
+		// names no source in its text: the adapter's sentence for the failure and where its
+		// connection string is read from (the variable), no host, port or database; so do its fixed
+		// refusals (dbcopy.ErrPostgresPreview while the preview is off, and the refusal of a URL that
+		// turns the read-only session off). They are answered, and logged, as they are.
 		return resolvedSource{}, unavailableOr(sourceID, err, err)
 	}
 	reader, ok := dalAsSchemaReader(db)

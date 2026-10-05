@@ -38,8 +38,8 @@ func TestUpdateDbSchema_LogLineNeverHoldsThePostgresUser(t *testing.T) {
 
 	_, err = UpdateDbSchema(context.Background(), nil, "", "prod", DriverPostgres, "shop", params)
 	assert.Error(t, err, "the empty project id is refused after the log line")
-	assert.Contains(t, logged.String(), "connecting to postgres://db.example.com:5433/shop\n")
-	for _, hidden := range []string{token, "user=", "server=", "port=", "sslmode", "QUERYSECRET"} {
+	assert.Contains(t, logged.String(), "connecting; the PostgreSQL connection string is read from the environment variable DATATUG_SHOP_PG_URL\n")
+	for _, hidden := range []string{token, "user=", "server=", "port=", "sslmode", "QUERYSECRET", "db.example.com", "5433", "shop?"} {
 		assert.NotContains(t, logged.String(), hidden)
 	}
 }

@@ -34,7 +34,8 @@ stand-in for the PostgreSQL server (see there).
 **1. Scan a database.** The sample is a SQLite file made with the `sqlite3` program (any SQLite file works). `sqlite3`
 comes with macOS; on Linux install the package `sqlite3` (`apt install sqlite3`, `dnf install sqlite`), or use a SQLite
 file you have. The scan writes a project, a folder of plain files, and prints its progress on stderr and nothing on
-stdout.
+stdout. The first time the CLI runs in a terminal it also prints a short notice about anonymous usage telemetry on stderr,
+once; [Telemetry](#telemetry) says what is sent and how to turn it off.
 
 ```console
 $ sqlite3 shop.db "
@@ -86,7 +87,7 @@ variable and never the URL: the host, the port, the user and the password stay i
 reads every schema the role can use (the system schemas apart), and `show` lists each schema, with its views as views.
 The output below is for a database with the two tables Customer and Invoice in the schema `public`; the output for your
 database lists its own schemas and tables. The test of this README runs this step against a stand-in for the
-server, and the scan of a real server is tested by the CI job "Journey (PostgreSQL)".
+server, and the scan of a real server is tested by the CI job "Journey (PostgreSQL <major>)", on PostgreSQL 17 and 18.
 
 ```console
 $ export DATATUG_SHOP_URL='postgres://USER:PASSWORD@localhost:5432/shop'

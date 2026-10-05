@@ -137,7 +137,7 @@ func TestRunDTQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = "Query failed: the connection to the PostgreSQL server was lost and could not be made again"
+	const want = "Query failed: the connection failed; the PostgreSQL connection string is the one the source was given"
 	if response.OK || response.Error != want {
 		t.Errorf("response = %+v, want the error %q", response, want)
 	}
@@ -150,6 +150,38 @@ func TestRunDTQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.T
 			if strings.Contains(shown, marker) {
 				t.Errorf("%q is in what the chat answered or logged: %s", marker, shown)
 			}
+		}
+	}
+}
+
+// A source of the chat is "env:NAME" in the usual case, and the failure it answers names the variable the connection
+// string is read from (and not the fallback hint of a source given as a literal URL), with the adapter's sentence and
+// nothing of the URL the variable holds.
+func TestRunDTQL_AnEnvSourceThatCannotBeReachedNamesTheVariable(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	const variable = "DATATUG_CHAT_SHOP_PG_URL"
+	t.Setenv(variable, "postgres://alice:"+chatPostgresPassword+"@db.example.com:5433/shop")
+	t.Cleanup(dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+		return nil, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5433", Database: "shop"}
+	}))
+	secured, err := secureread.NewSession(secureread.SessionOptions{NoPolicies: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conversation := &AIConversation{}
+	response, err := conversation.runDTQL(context.Background(), secureread.NewExecutor(secured), "env:"+variable, runDTQLArgs{DTQL: "from: {name: customers}\nlimit: 5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const want = "Query failed: the server could not be reached; the PostgreSQL connection string is read from the environment variable " + variable
+	if response.OK || response.Error != want {
+		t.Errorf("response = %+v, want the error %q", response, want)
+	}
+	for _, shown := range []string{chatPostgresPassword, "alice", "db.example.com", "5433"} {
+		if strings.Contains(response.Error, shown) {
+			t.Errorf("%q is in what the chat answered: %s", shown, response.Error)
 		}
 	}
 }

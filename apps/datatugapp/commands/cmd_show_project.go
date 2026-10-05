@@ -312,6 +312,16 @@ func showText(value string) string {
 	return value
 }
 
+// showDriverText is the driver of a source as the text shows it: a real driver is a plain name and is shown as
+// any name is, and the label that stands in place of one that is not (it holds a space) is shown as it is, with
+// no quotes, as the specification says.
+func showDriverText(driver string) string {
+	if driver == showUnknownDriver {
+		return driver
+	}
+	return showText(driver)
+}
+
 // writeShowText prints the document as plain text: one item per line, two spaces of indent for each level,
 // no tab, no emoji.
 func writeShowText(w io.Writer, doc *showDocument) error {
@@ -328,9 +338,9 @@ func writeShowText(w io.Writer, doc *showDocument) error {
 		for _, source := range env.Sources {
 			sources++
 			if source.DSNEnv == "" {
-				line(1, "Source %s (%s)", showText(source.ID), showText(source.Driver))
+				line(1, "Source %s (%s)", showText(source.ID), showDriverText(source.Driver))
 			} else {
-				line(1, "Source %s (%s, URL in $%s)", showText(source.ID), showText(source.Driver), showText(source.DSNEnv))
+				line(1, "Source %s (%s, URL in $%s)", showText(source.ID), showDriverText(source.Driver), showText(source.DSNEnv))
 			}
 			if source.NotScanned {
 				line(2, "not scanned")

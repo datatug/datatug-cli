@@ -30,14 +30,19 @@ var errPostgresOpenFailed = errors.New("the PostgreSQL driver could not open the
 // sharedPostgres is a PostgreSQL database that lives as long as the process: the cache hands the
 // same one to every open of a source. Closing it does nothing, because callers close what they
 // opened (pkg/secureread does after every read) and the next open must find the pool open; the
-// process's exit closes it. The embedded database keeps every capability the adapter has.
-type sharedPostgres struct{ *dalgo2postgres.Database }
+// process's exit closes it. The embedded database keeps every capability the adapter has. hint is the hint of the
+// source it was opened for (BackendRef.connectionHint), which every failure of a call carries.
+type sharedPostgres struct {
+	*dalgo2postgres.Database
+	hint string
+}
 
 // Close does nothing: see sharedPostgres.
 func (*sharedPostgres) Close() error { return nil }
 
-// handleCache keeps one opened PostgreSQL database for each resolved connection string, for the
-// life of the process. The key is a hash of the connection string, so that no dump of the cache
+// handleCache keeps one opened PostgreSQL database for each resolved connection string and hint, for the
+// life of the process (two sources that hold one connection string and are read from different places are two
+// handles, so that each handle says where its own string is read from). The key is a hash of the two, so that no dump of the cache
 // (a debugger, a %+v of a struct that holds it) shows a user name, a password or a host; it never
 // appears in an error or a log.
 type handleCache struct {
@@ -75,8 +80,8 @@ var postgresHandles = &handleCache{}
 // other caller is opening it, and waiting for that caller's attempt when one is. It returns when the
 // outcome is known, or when ctx ends. A failed attempt is not remembered: the next call, after the
 // attempt ended, opens again.
-func (c *handleCache) get(ctx context.Context, connection string, open func() (*dalgo2postgres.Database, error)) (*sharedPostgres, error) {
-	db, attempt, err := c.join(ctx, sha256.Sum256([]byte(connection)), open)
+func (c *handleCache) get(ctx context.Context, connection, hint string, open func() (*dalgo2postgres.Database, error)) (*sharedPostgres, error) {
+	db, attempt, err := c.join(ctx, sha256.Sum256([]byte(connection+"\x00"+hint)), hint, open)
 	if attempt == nil {
 		return db, err
 	}
@@ -86,7 +91,7 @@ func (c *handleCache) get(ctx context.Context, connection string, open func() (*
 // join returns the handle the cache holds for key, or the attempt that is opening it, starting one
 // with open when there is none, or the error of a context that has ended before one was started (a
 // request that is gone does not dial).
-func (c *handleCache) join(ctx context.Context, key [sha256.Size]byte, open func() (*dalgo2postgres.Database, error)) (*sharedPostgres, *openAttempt, error) {
+func (c *handleCache) join(ctx context.Context, key [sha256.Size]byte, hint string, open func() (*dalgo2postgres.Database, error)) (*sharedPostgres, *openAttempt, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entries == nil {
@@ -105,7 +110,7 @@ func (c *handleCache) join(ctx context.Context, key [sha256.Size]byte, open func
 			return nil, nil, err
 		}
 		entry.attempt = &openAttempt{done: make(chan struct{})}
-		go c.run(entry, entry.attempt, open)
+		go c.run(entry, entry.attempt, hint, open)
 	}
 	return nil, entry.attempt, nil
 }
@@ -119,7 +124,7 @@ func (c *handleCache) join(ctx context.Context, key [sha256.Size]byte, open func
 // its stand-in inside the opener). A Goexit is a failure of the open, the fixed one: without that, the
 // attempt would stay in its entry for good and a caller whose context never ends would wait for it
 // for ever.
-func (c *handleCache) run(entry *handleEntry, attempt *openAttempt, open func() (*dalgo2postgres.Database, error)) {
+func (c *handleCache) run(entry *handleEntry, attempt *openAttempt, hint string, open func() (*dalgo2postgres.Database, error)) {
 	var db *dalgo2postgres.Database
 	var err error
 	returned := false
@@ -131,7 +136,7 @@ func (c *handleCache) run(entry *handleEntry, attempt *openAttempt, open func() 
 		attempt.err = err
 		c.mu.Lock()
 		if err == nil && attempt.panicked == nil {
-			attempt.db = &sharedPostgres{Database: db}
+			attempt.db = &sharedPostgres{Database: db, hint: hint}
 			entry.db = attempt.db
 		}
 		entry.attempt = nil
@@ -175,7 +180,7 @@ func (r BackendRef) openPostgres(ctx context.Context, forWrite bool) (dal.DB, er
 	if err != nil {
 		return nil, err
 	}
-	db, err := postgresHandles.get(ctx, connection, func() (*dalgo2postgres.Database, error) {
+	db, err := postgresHandles.get(ctx, connection, r.connectionHint(), func() (*dalgo2postgres.Database, error) {
 		return newPostgresDatabaseWithOptions(connection, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{},
 			dalgo2postgres.WithIdentifierMode(dalgo2postgres.IdentifierExact))
 	})

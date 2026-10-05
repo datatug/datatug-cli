@@ -155,6 +155,8 @@ type BackendRef struct {
 	// input stays "env:NAME" because the value of the variable is never copied
 	// here. The name is historical: Raw is never the input as typed.
 	Raw string
+	// flag is the name of the flag the source was given on, for the hint of a failure (see WithFlag).
+	flag string
 }
 
 // String returns the display form of the source (see Display), so printing a

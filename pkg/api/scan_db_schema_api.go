@@ -32,22 +32,22 @@ type ProjectLoader interface {
 
 var _ ProjectLoader = (datatug.ProjectStore)(nil)
 
-// scanTargetDisplayer is what the connection parameters of a scan say about where they
-// connect, when they hold a connection URL: its scheme, host, port and database, built by
-// dbcopy.SourceDisplay, never its user, password or query.
-type scanTargetDisplayer interface {
-	Display() string
+// scanTargetLogger is what the connection parameters of a scan say about where they
+// connect, when they hold a connection URL: where the URL is read from, and nothing it
+// holds (not its host, port or database either).
+type scanTargetLogger interface {
+	LogTarget() string
 }
 
-// loggedTarget is the part of the scan's log line that names what the scan connects to.
+// loggedTarget is the part of the scan's log line that says what the scan connects to.
 // For a driver whose connection is a URL held in an environment variable (PostgreSQL) it
-// is what the display function of the sources makes of the URL: the scheme, host, port and
-// database, and never a user name, a password or a query string, which a URL can hold
-// whatever the operator put there. For the others it is the server, the port and the user
-// of the connection parameters, flags the operator typed.
+// is where the URL is read from, the name of the variable, and never a part of the URL: not
+// its user, password or query string, and not its host, port or database, which are the
+// operator's own connection and have no place in a log. For the others it is the server,
+// the port and the user of the connection parameters, flags the operator typed.
 func loggedTarget(params dbconnection.Params) string {
-	if displayer, ok := params.(scanTargetDisplayer); ok {
-		return fmt.Sprintf("connecting to %s", displayer.Display())
+	if logger, ok := params.(scanTargetLogger); ok {
+		return fmt.Sprintf("connecting; %s", logger.LogTarget())
 	}
 	return fmt.Sprintf("server=%v, port=%v, user=%v", params.Server(), params.Port(), params.User())
 }

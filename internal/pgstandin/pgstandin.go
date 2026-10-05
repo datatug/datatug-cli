@@ -1,10 +1,11 @@
 // Package pgstandin gives the tests of this module a PostgreSQL database that has no server: a real
 // *dalgo2postgres.Database whose connection pool lost its server, so that every call that needs a
 // connection fails the way a read fails when the server was restarted, the password was changed or
-// the connection limit was reached: with the error pgx writes, which names the user and holds the whole
-// configuration. A test of a command, a route or a chat puts it behind the opener of PostgreSQL databases
-// and looks for a marker in the user name and the password in everything the code under test printed,
-// answered or logged.
+// the connection limit was reached: with the adapter's own connection error, a fixed sentence that holds
+// nothing of the configuration (dalgo2postgres v0.6.0 and later; before it the call failed with the text pgx
+// writes, which names the user). A test of a command, a route or a chat puts it behind the opener of PostgreSQL
+// databases and looks for a marker in the user name and the password in everything the code under test
+// printed, answered or logged.
 //
 // Nothing is dialled: the one connection the database is opened with runs over an in-memory pipe against
 // a few lines of the protocol, and every later dial fails. Test code only: nothing in this module's binaries

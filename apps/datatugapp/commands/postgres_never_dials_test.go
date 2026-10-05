@@ -39,3 +39,27 @@ func TestTheOpenerOfThisTestBinaryIsTheOneThatStopsTheRun(t *testing.T) {
 func TestThePreviewSwitchIsOffUnlessATestTurnsItOn(t *testing.T) {
 	assert.ErrorIs(t, dbcopy.CheckPostgresPreview(), dbcopy.ErrPostgresPreview)
 }
+
+// The journey tests of CI put the real constructors back, both the one of the scan and the one of every other
+// open (`query run`, chat, serve and the copy), for the length of one test. A real opener behind only one of them
+// let the first journey test panic on the stop-the-run opener of this test binary (review r1 of #339). The URL here
+// is one pgx refuses to read, so the real constructor answers with an error and dials nothing; the stop-the-run
+// opener would panic.
+func TestTheRealPostgresOpenersAreBackForOneTest(t *testing.T) {
+	const refusedByPgx = "postgres://h/db?sslmode=not-a-mode"
+	ref := dbcopy.BackendRef{Scheme: "postgres", Raw: refusedByPgx, Path: refusedByPgx}
+	t.Run("put back", func(t *testing.T) {
+		t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+		useTheRealPostgresOpeners(t)
+		assert.NotPanics(t, func() {
+			_, err := ref.Open(t.Context())
+			assert.Error(t, err)
+			_, err = ref.OpenSchemaScan(t.Context())
+			assert.Error(t, err)
+		})
+	})
+	t.Run("and gone again when the test ends", func(t *testing.T) {
+		t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+		assert.Panics(t, func() { _, _ = ref.Open(t.Context()) })
+	})
+}

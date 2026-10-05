@@ -625,7 +625,12 @@ func TestShowDoesNotPrintADriverThatIsNotAPlainName(t *testing.T) {
 		for _, args := range [][]string{{"-d", projectDir}, {"-d", projectDir, "--format", "json"}} {
 			stdout, stderr, err := runShowCommand(t, args...)
 			require.NoError(t, err, driver)
-			assert.Contains(t, stdout, "unknown driver")
+			if len(args) == 2 { // the text: the label is printed as it is, with no quotes
+				assert.Contains(t, stdout, "\n  Source shop (unknown driver)\n")
+				assert.NotContains(t, stdout, `"unknown driver"`)
+			} else {
+				assert.Contains(t, stdout, "unknown driver")
+			}
 			for _, part := range []string{"hunter2", "db.internal", "postgres://", "prod"} {
 				assert.NotContains(t, stdout+stderr, part)
 			}

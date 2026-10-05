@@ -44,7 +44,7 @@ datatug query run --db <url> (-f <dtql-file>|--from <collection>) \
 
 #### REQ: db-url
 
-`--db <url>` MUST be required and MUST accept the same URL schemes as `db copy` (`sqlite://`, `ingitdb://`, `postgres://`). A missing or unparsable URL MUST exit 2. A database that cannot be opened MUST exit 4.
+`--db <url>` MUST be required and MUST accept the same URL schemes as `db copy` (`sqlite://`, `ingitdb://`, `postgres://`). A missing or unparsable URL MUST exit 2. A database that cannot be opened MUST exit 4. A PostgreSQL source that cannot be reached, whether at the open or in the middle of the read, MUST exit 4 with one line on stderr: the sentence the adapter chose for the failure, then where the connection string is read from, by the name of the variable (`the PostgreSQL connection string is read from the environment variable NAME` for an `env:NAME` source) or of the flag (`from the --db flag` for a URL), and nothing of the connection: no host, port, database, user, password, text of a driver or path of the machine. (`TestQuery_APostgresSourceIsOpenedReadOnlyAndItsFailuresAreClassified`, `TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence`.) A query on a PostgreSQL source orders NULLs first when ascending and last when descending, as every other source does, including over a column whose not-null constraint is not validated (PostgreSQL 18), where an `orderBy` with a `limit` returns the same rows as on a column with no such constraint; the job `Journey (PostgreSQL <major>)` runs it against a real server of each major version, 17 and 18. (`TestPostgresQueryJourneyOrdersNullsByDALgosRule`.)
 
 ### Policies
 
@@ -280,7 +280,7 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 - Undecodable query or policy document, unsupported document kind, bad `--var`, unresolved query parameter, missing explicit policies directory, zero policies without `--no-policies`, `--no-policies` with `--policy`: exit 2, naming the file, variable or directory.
 - Denied by policy, including a missing variable, a hidden-field reference or a query the check cannot classify: exit 5; stdout stays empty because the denial is raised before any row is written.
 - Column alias under a field-restricted policy, or a parameter outside a where right-hand side: exit 2.
-- Database cannot be opened: exit 4, naming the source as it is displayed (scheme, host, port and path, never a user name, a password or a query string) and a fixed reason; the driver's own text is never shown, because a driver can quote the connection string. The adapter refuses the rewritten query (unsupported operator): exit 4 with the adapter's error.
+- Database cannot be opened: exit 4, naming the source as it is displayed (scheme, host, port and path, never a user name, a password or a query string) and a fixed reason; the driver's own text is never shown, because a driver can quote the connection string. A PostgreSQL source is the exception: it is not named by its display form (that holds the host and the port) and the line is the adapter's sentence and where the connection string is read from (see the `--db` requirement above). The adapter refuses the rewritten query (unsupported operator): exit 4 with the adapter's error.
 - A data field named `$key`, or a write to stdout failing: exit 1.
 
 ## Rehearse Integration

@@ -12,6 +12,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
+	"github.com/dal-go/dalgo2postgres"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -279,11 +280,42 @@ func TestScanDbCatalog_PostgresErrors(t *testing.T) {
 		_, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres}, newShopParams(t))
 		if assert.Error(t, err) {
 			assert.ErrorContains(t, err, "failed to get dbCatalog metadata")
-			assert.EqualError(t, err, `failed to get dbCatalog metadata: open postgres source "env:SHOP_PG_URL": the driver could not open the source (its own message is not shown: a driver can quote the connection string)`)
+			assert.EqualError(t, err, "failed to get dbCatalog metadata: the catalog could not be read (the server's own message is not shown: a driver can quote the connection string)")
 			assert.NotContains(t, err.Error(), pgSecret)
 			assert.NotContains(t, err.Error(), "lost connection", "the driver's words are not shown")
 			assert.ErrorIs(t, err, cause, "the driver's own error is kept for errors.Is, never printed")
+			assert.False(t, dbcopy.IsPostgresConnectionFailure(err), "a read the server refuses is not a failure to connect, so the scan does not exit 4 and the text does not point at the connection string")
 		}
 		assert.Equal(t, 1, db.closed, "the pool is released after a failed scan too")
+	})
+	t.Run("a read that fails because the connection failed is the connection failure, with the hint", func(t *testing.T) {
+		for name, cause := range map[string]error{
+			"the adapter's connection error": &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5433", Database: "shop"},
+			"a wrapped one":                  fmt.Errorf("list the schemas: %w", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}),
+		} {
+			stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
+				return &fakeScanDB{listErr: cause}, nil
+			})
+			_, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres}, newShopParams(t))
+			assert.EqualError(t, err, "failed to get dbCatalog metadata: the server could not be reached; the PostgreSQL connection string is read from the environment variable SHOP_PG_URL", name)
+			assert.True(t, dbcopy.IsPostgresConnectionFailure(err), name)
+			assert.ErrorIs(t, err, cause, name)
+		}
+	})
+	t.Run("a read that ends by the clock or by a cancel is told as that, with the hint", func(t *testing.T) {
+		for name, tc := range map[string]struct {
+			cause error
+			want  string
+		}{
+			"deadline": {context.DeadlineExceeded, "the attempt timed out"},
+			"cancel":   {fmt.Errorf("list: %w", context.Canceled), "the attempt was cancelled"},
+		} {
+			stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
+				return &fakeScanDB{listErr: tc.cause}, nil
+			})
+			_, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres}, newShopParams(t))
+			assert.EqualError(t, err, "failed to get dbCatalog metadata: "+tc.want+"; the PostgreSQL connection string is read from the environment variable SHOP_PG_URL", name)
+			assert.True(t, dbcopy.IsPostgresConnectionFailure(err), name)
+		}
 	})
 }

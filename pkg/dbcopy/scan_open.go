@@ -46,10 +46,11 @@ func ParseWithEnv(rawURL string, lookupEnv func(string) (string, bool)) (Backend
 // connect to the wrong host and print the rest of the password as the database.
 //
 // The driver quotes the URL, password included, in its open and ping errors, so
-// its message is never shown: the error is OpenFailure's, a fixed sentence built
-// from the display form of the source (the "env:NAME" it was opened from, never
-// the URL: it carries every connection option, not only the password) that says
-// why only for a cause that can be told apart without reading the message. The
+// its message is never shown: the error is OpenFailure's, which for a PostgreSQL
+// source is the adapter's own fixed sentence for the failure (told by its kind and
+// SQLSTATE) and where the connection string is read from (the variable of the
+// "env:NAME" it was opened from, never a part of the URL: it carries every
+// connection option, not only the password, and its host and port). The
 // driver's own error stays reachable through errors.Is and errors.As, exactly as
 // it does for Open. The context is reserved for future use: this open is
 // synchronous and does not honor cancellation (Open's does, for a postgres source).

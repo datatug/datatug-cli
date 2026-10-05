@@ -106,16 +106,17 @@ func TestExecutor_APostgresSourceReadThroughPoliciesIsRefusedBeforeItIsOpened(t 
 }
 
 // A session with no policy has nothing to refuse: with the preview on, the source is opened (here by a
-// stand-in that says the server is down), and the failure is the classified one, naming the source as the
-// display function does.
+// stand-in that says the server is down), and the failure is the adapter's sentence and the hint of where the
+// connection string is read from, naming no part of the connection.
 func TestExecutor_APostgresSourceWithNoPolicyIsOpenedOnceThePreviewIsOn(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
-	calls := standInForPostgres(t, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork})
+	calls := standInForPostgres(t, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5433", Database: "shop"})
 	executor := NewExecutor(sessions(t)["an unrestricted session"])
 	for name, read := range reads(executor) {
 		err := read()
 		if assert.Error(t, err, name) {
-			assert.Contains(t, err.Error(), `open postgres source "postgres://db.example.com:5433/shop": the server could not be reached`, name)
+			assert.Contains(t, err.Error(), "the server could not be reached; the PostgreSQL connection string is the one the source was given", name)
+			assert.NotContains(t, err.Error(), "db.example.com", name)
 			assert.NotContains(t, err.Error(), pgPassword, name)
 			assert.NotContains(t, err.Error(), pgUser, name)
 			assert.NotContains(t, err.Error(), pgQuery, name)
@@ -139,7 +140,7 @@ func TestRunNativeSQL_APostgresSourceIsRefusedAndTheMessageNamesPostgreSQL(t *te
 }
 
 // A session with no policy reads a source that opened and whose pool cannot make a connection again (the server was
-// restarted, the password was changed): every way the executor reads shows one fixed sentence, and nothing of what
+// restarted, the password was changed): every way the executor reads shows the adapter's fixed sentence and the hint, and nothing of what
 // pgx writes, which names the user and holds the password.
 func TestExecutor_AReadThatLosesItsConnectionShowsOneFixedSentence(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
@@ -153,7 +154,7 @@ func TestExecutor_AReadThatLosesItsConnectionShowsOneFixedSentence(t *testing.T)
 	for name, read := range reads(executor) {
 		err := read()
 		if assert.Error(t, err, name) {
-			assert.Contains(t, err.Error(), "the connection to the PostgreSQL server was lost and could not be made again", name)
+			assert.Contains(t, err.Error(), "the connection failed; the PostgreSQL connection string is the one the source was given", name)
 			for _, shown := range []string{err.Error(), fmt.Sprintf("%+v", err), fmt.Sprintf("%#v", err)} {
 				assert.NotContains(t, shown, pgPassword, name)
 				assert.NotContains(t, shown, pgUser, name)

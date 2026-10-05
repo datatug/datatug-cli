@@ -68,6 +68,8 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return Exit(fmt.Sprintf("--to: %v", err), 2)
 	}
+	// A failure of a PostgreSQL side says which flag its connection string is read from (or its variable).
+	srcRef, tgtRef = srcRef.WithFlag("--from"), tgtRef.WithFlag("--to")
 
 	// Open both backends (REQ:exit-codes — 4 for connection failures). The source is opened as a
 	// read; the target is the one open that is written through, so a PostgreSQL target is not

@@ -119,17 +119,19 @@ func TestQuery_APostgresSourceIsOpenedReadOnlyAndItsFailuresAreClassified(t *tes
 		wantCode int
 		wantText string
 	}{
-		"a rejected password":    {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28P01"}, exitCodeDatabase, "the server rejected the user or the password"},
-		"a server that is down":  {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}, exitCodeDatabase, "the server could not be reached"},
-		"a database that is not": {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "3D000"}, exitCodeDatabase, "the database does not exist"},
-		"a timeout":              {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTimeout}, exitCodeDatabase, "the attempt timed out"},
+		"a rejected password":    {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28P01"}, exitCodeDatabase, "the server refused the connection: password authentication failed (SQLSTATE 28P01)"},
+		"a server that is down":  {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5433", Database: "shop"}, exitCodeDatabase, "the server could not be reached"},
+		"a database that is not": {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "3D000"}, exitCodeDatabase, "the server refused the connection: the database does not exist (SQLSTATE 3D000)"},
+		"a timeout":              {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTimeout}, exitCodeDatabase, "the connection timed out or was canceled"},
 		"a TLS failure":          {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTLS}, exitCodeDatabase, "the TLS handshake with the server failed"},
-		"anything else":          {errors.New("dial " + pgMarkedSource + ": boom"), exitCodeDatabase, "the driver could not open the source"},
+		"anything else":          {errors.New("dial " + pgMarkedSource + ": boom"), exitCodeDatabase, "the driver could not open the source (its own message is not shown: a driver can quote the connection string)"},
 	} {
 		opens := standInForPostgres(t, tc.cause)
 		stdout, stderr, code := runQuery(t, "", "--db", pgMarkedSource, "--from", "customers", "--no-policies")
 		assert.Equal(t, tc.wantCode, code, name)
-		assert.Contains(t, stderr, `open postgres source "postgres://db.example.com:5433/shop": `+tc.wantText, name)
+		assert.Contains(t, stderr, tc.wantText+"; "+queryHint, name)
+		assert.NotContains(t, stderr, "db.example.com", name)
+		assert.NotContains(t, stderr, "5433", name)
 		assert.Empty(t, stdout, name)
 		assertNoPgMarkers(t, name, stdout, stderr)
 		require.Len(t, opens.dsns, 1, name)
@@ -139,9 +141,14 @@ func TestQuery_APostgresSourceIsOpenedReadOnlyAndItsFailuresAreClassified(t *tes
 	}
 }
 
+// queryHint is what a failure of the PostgreSQL source of --db says about where its connection string is read from.
+const queryHint = "the PostgreSQL connection string is read from the --db flag"
+
 // A source that opened and whose pool cannot make a connection again (the server was restarted, the password was changed,
-// the connection limit was reached) fails a read with the text pgx writes, which names the user and holds the whole
-// configuration. The command shows one fixed sentence, and nothing of the user, the password or the parameter.
+// the connection limit was reached) fails a read with the adapter's connection error. The command shows the same text as
+// an open that fails gives (the adapter's sentence and the hint of the flag), and nothing of the user, the password or
+// the parameter. (Before the adapter classified such a failure, the read failed with the text pgx writes, which names the
+// user, and the command showed a sentence of its own.)
 func TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	// The stand-in is built here, on the goroutine of the test: the opener runs on another one, where a failure of
@@ -152,8 +159,9 @@ func TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence(t *testing.T) {
 	}))
 	stdout, stderr, code := runQuery(t, "", "--db", pgMarkedSource, "--from", "customers", "--no-policies")
 	assert.Equal(t, exitCodeDatabase, code)
-	assert.Contains(t, stderr, "the connection to the PostgreSQL server was lost and could not be made again\n")
+	assert.Contains(t, stderr, "the connection failed; "+queryHint+"\n")
 	assert.NotContains(t, stderr, "failed to connect")
+	assert.NotContains(t, stderr, "db.example.com")
 	assert.Empty(t, stdout)
 	assertNoPgMarkers(t, "lost connection", stdout, stderr)
 }
@@ -213,7 +221,12 @@ func TestDBCopy_OnlyTheTargetIsOpenedForWriting(t *testing.T) {
 	file := emptySQLiteFile(t)
 	_, _, err = runCopy(t, "db", "copy", "--from", file, "--to", pgMarkedSource+"&default_transaction_read_only=off")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `open --to: open postgres source "postgres://db.example.com:5433/shop": the server could not be reached`)
+	assert.Contains(t, err.Error(), "open --to: the server could not be reached; the PostgreSQL connection string is read from the --to flag")
+	assert.NotContains(t, err.Error(), "db.example.com")
+	var coder ExitCoder
+	if assert.ErrorAs(t, err, &coder) {
+		assert.Equal(t, 4, coder.ExitCode(), "a target that cannot be opened exits 4")
+	}
 	require.Len(t, opens.dsns, 1)
 	assert.NotContains(t, opens.dsns[0], "default_transaction_read_only=on")
 	assert.Contains(t, opens.dsns[0], "default_transaction_read_only=off")
@@ -227,6 +240,27 @@ func TestDBCopy_OnlyTheTargetIsOpenedForWriting(t *testing.T) {
 	assert.Contains(t, err.Error(), "default_transaction_read_only")
 	assert.Zero(t, opens.calls.Load())
 	assertNoPgMarkers(t, "from", err.Error())
+}
+
+// A PostgreSQL --from that cannot be reached says it by the adapter's sentence and names the flag it was typed in, exits
+// 4, and shows nothing of the connection string, whichever side of the copy it is on (the text of --to is above).
+func TestDBCopy_AnUnreachableFromSideNamesTheFromFlag(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	opens := standInForPostgres(t, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5433", Database: "shop"})
+
+	stdout, stderr, err := runCopy(t, "db", "copy", "--from", pgMarkedSource, "--to", emptySQLiteFile(t))
+
+	require.Error(t, err)
+	assert.EqualError(t, err, "open --from: the server could not be reached; the PostgreSQL connection string is read from the --from flag")
+	var coder ExitCoder
+	if assert.ErrorAs(t, err, &coder) {
+		assert.Equal(t, 4, coder.ExitCode())
+	}
+	assert.Equal(t, int32(1), opens.calls.Load())
+	for _, shown := range []string{"db.example.com", "5433", "shop"} {
+		assert.NotContains(t, err.Error(), shown)
+	}
+	assertNoPgMarkers(t, "from", stdout.String(), stderr.String(), err.Error())
 }
 
 // The help of `db copy` says that --to is the only place a PostgreSQL database is opened for writing, and that the

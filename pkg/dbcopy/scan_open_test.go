@@ -71,7 +71,10 @@ func TestOpenSchemaScan_OpensThePostgresURLWithExactIdentifiers(t *testing.T) {
 // openedSchemaScanFailure is the sentence OpenSchemaScan returns when the driver
 // cannot open the source named env:SHOP_PG_URL for a reason that cannot be told
 // apart without reading the driver's message.
-const openedSchemaScanFailure = `open postgres source "env:SHOP_PG_URL": ` + openedSchemaScanFailureReason
+const openedSchemaScanFailure = openedSchemaScanFailureReason + "; " + scanHint
+
+// scanHint is the hint of the source named env:SHOP_PG_URL.
+const scanHint = "the PostgreSQL connection string is read from the environment variable SHOP_PG_URL"
 
 // openedSchemaScanFailureReason is the reason that sentence gives.
 const openedSchemaScanFailureReason = `the driver could not open the source (its own message is not shown: a driver can quote the connection string)`
@@ -109,7 +112,7 @@ func TestOpenSchemaScan_NamesACauseThatNeedsNoMessageToRecognise(t *testing.T) {
 		ref, err := ParseWithEnv("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": "postgres://alice:s3cret@h/shop"}))
 		require.NoError(t, err)
 		_, err = ref.OpenSchemaScan(context.Background())
-		assert.EqualError(t, err, `open postgres source "env:SHOP_PG_URL": `+want)
+		assert.EqualError(t, err, want+"; "+scanHint)
 		assert.ErrorIs(t, err, cause)
 	}
 }
@@ -124,14 +127,14 @@ func TestOpenSchemaScan_NamesTheFailureTheAdapterReportsByKindAndSQLState(t *tes
 		err  *dalgo2postgres.ConnectionError
 		want string
 	}{
-		{"a wrong password", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28P01"}, "the server rejected the user or the password"},
-		{"a user the server does not authorize", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28000"}, "the server does not authorize this user for this connection (its access rules: user, database, address or encryption)"},
-		{"a database that does not exist", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "3D000"}, "the database does not exist"},
+		{"a wrong password", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28P01"}, "the server refused the connection: password authentication failed (SQLSTATE 28P01)"},
+		{"a user the server does not authorize", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28000"}, "the server refused the connection: the user is not authorized (SQLSTATE 28000)"},
+		{"a database that does not exist", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "3D000"}, "the server refused the connection: the database does not exist (SQLSTATE 3D000)"},
 		{"a server that cannot be reached", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}, "the server could not be reached"},
-		{"an attempt that timed out", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTimeout}, "the attempt timed out"},
+		{"an attempt that timed out", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTimeout}, "the connection timed out or was canceled"},
 		{"a TLS handshake that failed", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTLS}, "the TLS handshake with the server failed"},
-		{"a server error of another code", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "53300"}, openedSchemaScanFailureReason},
-		{"a failure of another kind", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureInvalidDSN}, openedSchemaScanFailureReason},
+		{"a server error of another code", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "53300"}, "the server refused the connection: too many connections (SQLSTATE 53300)"},
+		{"a failure of another kind", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureInvalidDSN}, "the connection string cannot be parsed, or a file or service it names cannot be read"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// The adapter names the host, the port and the database in its own text: none may be shown.
@@ -144,8 +147,8 @@ func TestOpenSchemaScan_NamesTheFailureTheAdapterReportsByKindAndSQLState(t *tes
 
 			_, err = ref.OpenSchemaScan(context.Background())
 
-			assert.EqualError(t, err, `open postgres source "env:SHOP_PG_URL": `+tc.want)
-			for _, shown := range []string{"10.0.0.5", "54329", "shopdb", "SQLSTATE", "dalgo2postgres"} {
+			assert.EqualError(t, err, tc.want+"; "+scanHint)
+			for _, shown := range []string{"10.0.0.5", "54329", "shopdb", "dalgo2postgres"} {
 				assert.NotContains(t, err.Error(), shown)
 			}
 			var kept *dalgo2postgres.ConnectionError
@@ -295,7 +298,7 @@ func TestOpenSchemaScan_APgxParseErrorIsClassifiedNotQuoted(t *testing.T) {
 		db, err := ref.OpenSchemaScan(context.Background())
 		assert.Nil(t, db, name)
 		if assert.Error(t, err, name) {
-			assert.EqualError(t, err, openedSchemaScanFailure, name)
+			assert.EqualError(t, err, "the connection string cannot be parsed, or a file or service it names cannot be read; "+scanHint, name)
 			// Neither pgx's own words about the option it cannot read nor the URL it
 			// quotes are shown.
 			for _, shown := range []string{"s3cret", "alice", "db.example.com", "shop", "sslmode=", "connect_timeout=", "application_name", "postgres://", "5433", "cannot parse"} {

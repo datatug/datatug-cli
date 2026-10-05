@@ -154,9 +154,13 @@ func TestRoutes_APolicyReadOfAPostgresSourceIsUnavailable(t *testing.T) {
 	assert.False(t, opened)
 }
 
+// routeLostConnection is what a route answers when a PostgreSQL source that opened loses its connection for good: the
+// adapter's sentence for it and the hint of where the connection string is read from.
+const routeLostConnection = "the connection failed; the PostgreSQL connection string is read from the environment variable DATATUG_DT02_ROUTES_PG_URL"
+
 // A source that opened and whose pool cannot make a connection again (the server was restarted, the password was
-// changed) is unavailable as well, and the route shows one fixed sentence: not the text pgx writes, which names the
-// user, in the body or in the agent log.
+// changed) is unavailable as well, and the route shows the same text as for a source that cannot be opened: the
+// adapter's fixed sentence and the hint, not the text pgx writes, which names the user, in the body or in the agent log.
 func TestRoutes_APostgresSourceWhoseConnectionIsLostIsUnavailableWithAFixedSentence(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	// The stand-in is built here, on the goroutine of the test: the opener runs on another one, where a failure of
@@ -170,7 +174,7 @@ func TestRoutes_APostgresSourceWhoseConnectionIsLostIsUnavailableWithAFixedSente
 	status, env, body := getSemanticColumns(t, pgRouteSource)
 	assert.Equal(t, http.StatusServiceUnavailable, status)
 	assert.Equal(t, string(apicontract.ErrCodeSourceUnavailable), env.Error.Code)
-	assert.Equal(t, "the connection to the PostgreSQL server was lost and could not be made again", env.Error.Message)
+	assert.Equal(t, routeLostConnection, env.Error.Message)
 	assertNoRouteMarkers(t, "semantic/columns", body, logged.String())
 	assert.False(t, strings.Contains(body, "failed to connect"))
 }
@@ -194,6 +198,6 @@ func TestRoutes_ARunQueryOnAPostgresSourceWhoseConnectionIsLostIsUnavailableWith
 	status, env, body := postAdhocRunQuery(t, pgRouteSource)
 	assert.Equal(t, http.StatusServiceUnavailable, status)
 	assert.Equal(t, string(apicontract.ErrCodeSourceUnavailable), env.Error.Code)
-	assert.Equal(t, "the connection to the PostgreSQL server was lost and could not be made again", env.Error.Message)
+	assert.Equal(t, routeLostConnection, env.Error.Message)
 	assertNoRouteMarkers(t, "exec/run_query", body)
 }

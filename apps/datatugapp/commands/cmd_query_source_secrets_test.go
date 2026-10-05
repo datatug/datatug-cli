@@ -83,7 +83,9 @@ func TestQuery_PostgresPasswordOnTheCommandLineNeverAppears(t *testing.T) {
 
 // The open failure names the source once: OpenFailure already says which source
 // failed, so the command no longer puts "open <source>:" in front of it. An env
-// source is named by its variable, never by what the variable holds.
+// source is named by its variable, never by what the variable holds. A PostgreSQL source is not named by its
+// display form (it holds the host): the failure says the sentence and the variable or the flag its connection
+// string is read from.
 func TestQuery_OpenFailureNamesTheSourceOnce(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1") // with the preview off the command answers before the open this test replaces
 	original := openBackend
@@ -94,8 +96,12 @@ func TestQuery_OpenFailureNamesTheSourceOnce(t *testing.T) {
 	t.Setenv("DT01_QUERY_NAMED", "postgres://alice:"+sourceSecret+"@127.0.0.1:1/shop")
 	for source, want := range map[string]string{
 		"sqlite:///x.db":       `open sqlite source "sqlite:///x.db": the driver could not open the source`,
-		"env:DT01_QUERY_NAMED": `open postgres source "env:DT01_QUERY_NAMED": the driver could not open the source`,
+		"env:DT01_QUERY_NAMED": `the driver could not open the source (its own message is not shown: a driver can quote the connection string); the PostgreSQL connection string is read from the environment variable DT01_QUERY_NAMED`,
 	} {
+		named := source
+		if strings.HasPrefix(source, "env:") {
+			named = strings.TrimPrefix(source, "env:") // a PostgreSQL source is named by its variable
+		}
 		stdout, stderr, code := runQuery(t, "", "--db", source, "--from", "customers", "--no-policies")
 		if code != exitCodeDatabase {
 			t.Fatalf("%s: exit %d, want %d: %s", source, code, exitCodeDatabase, stderr)
@@ -104,7 +110,7 @@ func TestQuery_OpenFailureNamesTheSourceOnce(t *testing.T) {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("%s: stderr %q lacks %q", source, stderr, want)
 		}
-		if strings.Contains(stderr, "open "+source+":") || strings.Count(stderr, source) != 1 {
+		if strings.Contains(stderr, "open "+source+":") || strings.Count(stderr, named) != 1 {
 			t.Errorf("%s: stderr names the source more than once: %q", source, stderr)
 		}
 		if strings.Contains(stderr, "never shown") || strings.Contains(stderr, "alice") {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"github.com/dal-go/dalgo2postgres"
 	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/schemers/dalgoschema"
@@ -120,11 +121,10 @@ func (p PostgresScanParams) String() string { return p.ref.Raw }
 // GoString makes %#v print the same text as String, not the fields.
 func (p PostgresScanParams) GoString() string { return p.String() }
 
-// Display is what the scan says it connects to: the scheme, host, port and database of
-// the URL (dbcopy.SourceDisplay), never its user, its password or its query string. It
-// is built from parts that each passed a strict check, never from a scrubbed copy of the
-// URL.
-func (p *PostgresScanParams) Display() string { return dbcopy.SourceDisplay(p.ref.Path) }
+// LogTarget is what the scan logs of what it connects to: where the connection string is
+// read from (the environment variable), the same words the failure of the scan uses, and
+// nothing the string holds: not its host, port, database, user, password or query string.
+func (p *PostgresScanParams) LogTarget() string { return p.ref.ConnectionHint() }
 
 // DSNEnv is the name of the environment variable that holds the URL.
 func (p *PostgresScanParams) DSNEnv() string { return p.dsnEnv }
@@ -237,6 +237,29 @@ func OpenSchemaScanForTest() func(dbcopy.BackendRef, context.Context) (dbcopy.Sc
 	return openSchemaScan
 }
 
+// catalogReadFailure is the error the scan reports for err, the failure of its read of the catalog. A connection that
+// failed during the read (the adapter's connection error, or the end of a context: the clock or a cancel) is the
+// failure OpenFailure reports, which points at where the connection string is read from; the scan exits 4 for it. Any
+// other failure, a statement the server refused or an error of the scanner, is not a failure to connect and is not
+// told as one: it is one fixed sentence that says only that the read failed, with no hint and no word of the
+// driver's, which can quote the connection string. The cause stays reachable through errors.Is and errors.As.
+func catalogReadFailure(source dbcopy.BackendRef, err error) error {
+	var connectionErr *dalgo2postgres.ConnectionError
+	if errors.As(err, &connectionErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return source.OpenFailure(err)
+	}
+	return &catalogReadError{cause: err}
+}
+
+// catalogReadError is the failure of a read of the catalog that is not a connection failure.
+type catalogReadError struct{ cause error }
+
+func (*catalogReadError) Error() string {
+	return "the catalog could not be read (the server's own message is not shown: a driver can quote the connection string)"
+}
+
+func (e *catalogReadError) Unwrap() error { return e.cause }
+
 // scanPostgresCatalog scans a PostgreSQL database through DALgo's schema reader.
 // It opens the source through dbcopy, so a driver error comes back classified
 // (see BackendRef.OpenFailure), never as the driver wrote it; what the scan
@@ -259,7 +282,7 @@ func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Para
 	provider := dalgoschema.NewSchemaProvider(scanDB, nil, catalogID, dbcopy.PostgresDefaultSchema)
 	dbCatalog, err := schemer.NewScanner(provider).ScanCatalog(ctx, catalogID)
 	if err != nil {
-		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", source.OpenFailure(err))
+		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", catalogReadFailure(source, err))
 	}
 	dbCatalog.ID = catalogID
 	dbCatalog.Driver = DriverPostgres

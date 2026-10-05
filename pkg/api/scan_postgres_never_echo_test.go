@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"strings"
 	"testing"
@@ -24,6 +25,12 @@ func TestUpdateDbSchema_LogLineNeverHoldsThePostgresUser(t *testing.T) {
 		return "postgres://" + token + "@db.example.com:5433/shop?sslmode=require&password=QUERYSECRET", true
 	}, "DATATUG_SHOP_PG_URL", "prod", "shop")
 	require.NoError(t, err)
+	// The scan is refused for its empty project id before it opens anything; if that order ever
+	// changes, the test stops here and does not reach a host.
+	stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
+		t.Error("the empty project id is refused before the source is opened")
+		return nil, errors.New("not a source of this test")
+	})
 	var logged bytes.Buffer
 	saved := log.Writer()
 	log.SetOutput(&logged)

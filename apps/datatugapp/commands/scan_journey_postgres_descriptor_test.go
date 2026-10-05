@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -106,4 +107,118 @@ func TestSaveScanned(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A project is not trusted: a link in the path of the descriptor, at connections, at
+// connections/<env> or at the descriptor, that leads out of the project folder is refused before
+// anything is written or saved, and what the link leads to is not touched. The scan used to read it,
+// truncate it, and write the descriptor there, and exit 0 on a project that no reader opens.
+func TestScanJourneyPostgresRefusesALinkWhereTheDescriptorGoes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating a symbolic link needs a privilege on Windows")
+	}
+	const before = "a file of the machine, not the scan's to touch\n"
+	for _, link := range []string{"connections", "connections/local", "connections/local/shop.json"} {
+		t.Run(link, func(t *testing.T) {
+			projectDir := filepath.Join(t.TempDir(), "shop-project")
+			outside := t.TempDir()
+			require.NoError(t, os.MkdirAll(filepath.Join(projectDir, filepath.Dir(link)), 0o755))
+			target := outside // a folder, for the links that stand for one
+			switch link {
+			case "connections":
+				require.NoError(t, os.MkdirAll(filepath.Join(outside, "local"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(outside, "local", "shop.json"), []byte(before), 0o600))
+			case "connections/local":
+				require.NoError(t, os.WriteFile(filepath.Join(outside, "shop.json"), []byte(before), 0o600))
+			default:
+				target = filepath.Join(outside, "shop.json")
+				require.NoError(t, os.WriteFile(target, []byte(before), 0o600))
+			}
+			require.NoError(t, os.Symlink(target, filepath.Join(projectDir, link)))
+			usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return newJourneyPgDatabase() })
+			treeBefore := treeWithLinks(t, projectDir)
+
+			_, err := runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", "local")...)
+
+			require.Error(t, err, "a scan that would write through a link fails")
+			assert.ErrorContains(t, err, link, "and names the path of the project that is the link")
+			assert.NotContains(t, err.Error(), outside, "not where it leads")
+			assert.Equal(t, treeBefore, treeWithLinks(t, projectDir), "nothing was written into the project, and no project was saved")
+			for _, file := range projectFiles(t, outside, "") {
+				content, readErr := os.ReadFile(filepath.Join(outside, file))
+				require.NoError(t, readErr)
+				assert.Equal(t, before, string(content), "what the link leads to is as it was: %s", file)
+			}
+			assert.Len(t, projectFiles(t, outside, ""), 1, "and nothing was made beside it")
+		})
+	}
+}
+
+// One id under two drivers in one environment is refused, naming both, before the database is read
+// and before anything is written: the catalog file is kept by environment and id, so the second scan
+// would take the first one's catalog file and its tables. Another id, or another environment, is fine.
+func TestScanJourneyOneDatabaseIdUnderTwoDriversIsRefused(t *testing.T) {
+	for _, order := range []string{"sqlite first", "postgres first"} {
+		t.Run(order, func(t *testing.T) {
+			projectDir := filepath.Join(t.TempDir(), "company")
+			require.NoError(t, os.Mkdir(projectDir, 0o755))
+			sqlitePath := filepath.Join(projectDir, "data", "shop.db")
+			writeJourneyDB(t, sqlitePath)
+			opener := usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return newJourneyPgDatabase() })
+			scanSQLite := func() (string, error) {
+				return runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", sqlitePath, "--db", "shop", "--env", "local")
+			}
+			scanPostgres := func(env string) (string, error) {
+				return runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", env)...)
+			}
+			first, second, firstDriver, secondDriver := scanSQLite, func() (string, error) { return scanPostgres("local") }, "sqlite3", "postgres"
+			if order == "postgres first" {
+				first, second, firstDriver, secondDriver = func() (string, error) { return scanPostgres("local") }, scanSQLite, "postgres", "sqlite3"
+			}
+			_, err := first()
+			require.NoError(t, err)
+			opened := len(opener.opened)
+			treeBefore := treeHashes(t, projectDir, "")
+
+			stderr, err := second()
+
+			require.Error(t, err)
+			assert.ErrorContains(t, err, `--db "shop"`)
+			assert.ErrorContains(t, err, `"`+firstDriver+`"`, "the driver the project has")
+			assert.ErrorContains(t, err, "-D "+secondDriver, "and the one the scan is")
+			assert.ErrorContains(t, err, "use another --db")
+			assert.Empty(t, stderr)
+			assert.Equal(t, opened, len(opener.opened), "it is refused before the database is read: no source was opened")
+			assert.Equal(t, treeBefore, treeHashes(t, projectDir, ""), "nothing was written or taken back: the tables of the first are still there")
+
+			// The catalog files are kept by environment: the same id in another environment is not in the way.
+			_, err = scanPostgres("prod")
+			require.NoError(t, err, "the id is the first scan's in the environment local only")
+		})
+	}
+}
+
+// treeWithLinks lists everything under dir by slash-separated path, without following a link: a
+// folder as "dir", a link as "link -> where it leads", a file as its content.
+func treeWithLinks(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	tree := map[string]string{}
+	require.NoError(t, filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		require.NoError(t, err)
+		rel, _ := filepath.Rel(dir, path)
+		switch {
+		case entry.Type()&os.ModeSymlink != 0:
+			target, linkErr := os.Readlink(path)
+			require.NoError(t, linkErr)
+			tree[filepath.ToSlash(rel)] = "link -> " + target
+		case entry.IsDir():
+			tree[filepath.ToSlash(rel)] = "dir"
+		default:
+			content, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			tree[filepath.ToSlash(rel)] = string(content)
+		}
+		return nil
+	}))
+	return tree
 }

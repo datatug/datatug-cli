@@ -82,7 +82,7 @@ func TestSetOpenSchemaScanForTest_ReplacesTheOpenAndPutsItBack(t *testing.T) {
 	assert.Equal(t, 1, opened)
 
 	restore()
-	_, err = openSchemaScan(dbcopy.BackendRef{Scheme: "sqlite"}, context.Background())
-	assert.ErrorContains(t, err, "postgres sources only", "the open that was there is back: it opens postgres and nothing else")
+	assert.Panics(t, func() { _, _ = openSchemaScan(dbcopy.BackendRef{Scheme: "sqlite"}, context.Background()) },
+		"the open that was there is back: this test binary's, which stops the run on any open (TestMain)")
 	assert.Equal(t, 1, opened)
 }

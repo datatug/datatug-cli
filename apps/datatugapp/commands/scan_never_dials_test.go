@@ -41,3 +41,13 @@ func TestNeverDialStopsTheRunOnAnyRealOpen(t *testing.T) {
 		assert.NotContains(t, message, "alice")
 	}
 }
+
+// The test binary of this package has the open that stops the run (the init above), which the test
+// above cannot show: it calls the function itself. This one asks the scan what it opens through,
+// and a source that is not a PostgreSQL one, which the real open answers with an error and dials
+// nothing for, still stops the run: so the test fails if that init is ever deleted.
+func TestTheOpenOfThisTestBinaryIsTheOneThatStopsTheRun(t *testing.T) {
+	ref := dbcopy.BackendRef{Scheme: "sqlite", Raw: "env:DATATUG_SHOP_PG_URL"}
+
+	assert.Panics(t, func() { _, _ = api.OpenSchemaScanForTest()(ref, context.Background()) })
+}

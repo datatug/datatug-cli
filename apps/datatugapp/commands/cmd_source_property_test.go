@@ -33,11 +33,12 @@ import (
 // it would write are read all the same), and `datatug scan
 // -D postgres`, whose `--dsn-env` is given the variable that holds the source and
 // the source itself where a variable name belongs, and whose `--db` and `--env`
-// are given the source where a name belongs. The scan's own answer that
-// PostgreSQL cannot be scanned yet is lifted (liftPostgresRefusal) so that what
-// comes after it is read; the real api.UpdateDbSchema still stops before it
-// connects, as TestScanCommandAction_PostgresAnswersThatTheScanIsNotAvailable...
-// holds, so no case reaches a server.
+// are given the source where a name belongs. The scan runs for real, against a fake
+// server (propertyPgServer) behind the one seam through which it opens a PostgreSQL
+// source: the fake fails at the open, at the listing of the tables and at a count,
+// each in words that quote the URL it was given, and then works, so that what comes
+// after each is read. The seam's default in this test binary stops the run on any
+// open that no test stood in for (scan_never_dials_test.go), so no case dials a server.
 //
 // Nothing here relies on a redactor: Exit no longer calls one, and the
 // top-level handler in main.go that does is not run.

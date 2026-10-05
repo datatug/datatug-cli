@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -32,6 +33,11 @@ const postgresDescriptorFolder = "connections"
 // which it names on its log line. A host list, or the path of a socket, is refused. (The
 // project records no host: the server of a PostgreSQL project is its driver.)
 var recordableHost = regexp.MustCompile(`^[A-Za-z0-9:][A-Za-z0-9._:-]*$`)
+
+// queryKeysThatOverrideTheTarget are the keys of the query of a PostgreSQL URL that replace the
+// host, the port or the database that its authority and its path name (the user is replaced the
+// same way, and is never named by a scan).
+var queryKeysThatOverrideTheTarget = []string{"host", "port", "dbname", "database"}
 
 // PostgresScanParams are the connection parameters of a PostgreSQL scan. The
 // connection is an environment variable that holds the whole URL, so these
@@ -76,6 +82,16 @@ func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, enviro
 	}
 	if !recordableHost.MatchString(target.Host) {
 		return nil, fmt.Errorf("the host in environment variable %s cannot be recorded in a project: use a host name or an address", dsnEnv)
+	}
+	// The query of a URL overrides its authority and its path (pgx applies it after them, and
+	// dbcopy.ParsePostgresTarget does the same), so the line that names what the scan connects
+	// to, which is built from the authority and the path, would name a place the scan does not
+	// connect to. Only the name of the key is said: the value is part of the URL.
+	parsed, _ := url.Parse(ref.Path) // ParsePostgresTarget has parsed it
+	for _, key := range queryKeysThatOverrideTheTarget {
+		if parsed.Query().Has(key) {
+			return nil, fmt.Errorf("the URL in environment variable %s sets %q in its query, which the connection uses in place of the host, port or database the rest of the URL names: write the host and port in the authority and the database in the path", dsnEnv, key)
+		}
 	}
 	if !dbcopy.IsPlainSourceID(environment) || !dbcopy.IsPlainSourceID(catalog) {
 		// The flags are what the user typed, and a source string can be typed where
@@ -145,6 +161,14 @@ func (p *PostgresScanParams) SourceRef() dbcopy.BackendRef { return p.ref }
 // project's server entry is the driver alone). It replaces a descriptor already
 // there, and does not write one that is as it would be written.
 //
+// It does not follow a link. A project is not trusted (ResolveDescriptorPath refuses a
+// descriptor that a link leads out of the folder to), so a link at connections, at
+// connections/<env> or at the descriptor itself is refused, naming the path in the project
+// that it is, before anything is read through it or written: the scan would otherwise read
+// a file of the machine into memory, truncate it and write the descriptor there. A folder
+// or a file the project has in a place of the path that is not a plain folder, or not a
+// plain file, is refused the same way.
+//
 // It returns the function that takes the write back, for a scan whose save fails: the
 // descriptor this write made is removed, with the folders it made, and a descriptor
 // that was there before is put back as it was.
@@ -153,16 +177,23 @@ func (p *PostgresScanParams) WriteDescriptor(projectDir string) (undo func() err
 	data, _ := json.MarshalIndent(dbcopy.PostgresDescriptor{DSNEnv: p.dsnEnv}, "", "  ")
 	content := append(data, '\n')
 	file := filepath.Join(projectDir, filepath.FromSlash(p.descriptorPath))
+	// The folders first: they are looked at with Lstat, so the descriptor is never read
+	// through a link in front of it. A descriptor that is there has its folders there, so
+	// when nothing has to be written nothing was made.
+	made, err := makeFolders(projectDir, path.Dir(p.descriptorPath))
+	if err != nil {
+		return nil, fmt.Errorf("create the connection descriptor folder: %w", err)
+	}
+	if err = checkDescriptorFile(file, p.descriptorPath); err != nil {
+		_ = undoFolders(made) // the folders this write made are not left behind
+		return nil, fmt.Errorf("write the connection descriptor: %w", err)
+	}
 	previous, readErr := os.ReadFile(file)
 	existed := readErr == nil
 	if existed && bytes.Equal(previous, content) {
 		return func() error { return nil }, nil
 	}
-	made, err := makeFolders(projectDir, path.Dir(p.descriptorPath))
-	if err != nil {
-		return nil, fmt.Errorf("create the connection descriptor folder: %w", err)
-	}
-	if err = os.WriteFile(file, content, 0o644); err != nil {
+	if err = scanWriteFile(file, content, 0o644); err != nil {
 		_ = undoFolders(made) // the folders this write made are not left behind
 		return nil, fmt.Errorf("write the connection descriptor: %w", err)
 	}
@@ -180,20 +211,55 @@ func (p *PostgresScanParams) WriteDescriptor(projectDir string) (undo func() err
 	}, nil
 }
 
+// checkDescriptorFile is an error when what the project has at file, whose path in the project
+// is rel, is not a plain file: a link (to anything, a file that is not there included), a folder
+// or anything else that is not a regular file. A file that is not there is fine, and so is one
+// that cannot be looked at for a reason that is not "it is not there" (it is refused, with the
+// reason).
+func checkDescriptorFile(file, rel string) error {
+	info, err := scanLstat(file)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return fmt.Errorf("look at %s: %w", rel, err)
+	case info.Mode()&fs.ModeSymlink != 0:
+		return fmt.Errorf("%s is a link, and a scan does not write through a link: remove it, or put the descriptor in a file of the project", rel)
+	case !info.Mode().IsRegular():
+		return fmt.Errorf("%s is not a file, and a scan does not replace what is not a file: remove it, or scan into another environment or database", rel)
+	}
+	return nil
+}
+
 // makeFolders makes the folder rel (slash separated) below base, with the folders above
-// it, and returns the folders it made, outermost first: the ones that were not there.
+// it, and returns the folders it made, outermost first: the ones that were not there. A
+// folder is looked at with Lstat, and one that is a link, or is not a folder, is refused,
+// naming its path below base, and the folders this call made are taken back: the descriptor
+// goes into folders of the project, not into a place a link leads to.
 func makeFolders(base, rel string) (made []string, err error) {
 	current := base
-	for _, part := range strings.Split(rel, "/") {
+	parts := strings.Split(rel, "/")
+	for i, part := range parts {
 		current = filepath.Join(current, part)
-		if _, statErr := os.Stat(current); statErr == nil {
-			continue
-		}
-		if err = scanMkdir(current, 0o755); err != nil {
+		known := strings.Join(parts[:i+1], "/")
+		info, statErr := scanLstat(current)
+		switch {
+		case errors.Is(statErr, fs.ErrNotExist):
+			if err = scanMkdir(current, 0o755); err != nil {
+				_ = undoFolders(made)
+				return nil, err
+			}
+			made = append(made, current)
+		case statErr != nil:
 			_ = undoFolders(made)
-			return nil, err
+			return nil, fmt.Errorf("look at %s: %w", known, statErr)
+		case info.Mode()&fs.ModeSymlink != 0:
+			_ = undoFolders(made)
+			return nil, fmt.Errorf("%s is a link, and a scan does not write through a link: remove it, or put the descriptor in a folder of the project", known)
+		case !info.IsDir():
+			_ = undoFolders(made)
+			return nil, fmt.Errorf("%s is not a folder, and a scan does not replace what is not a folder: remove it, or scan into another environment or database", known)
 		}
-		made = append(made, current)
 	}
 	return made, nil
 }
@@ -233,6 +299,14 @@ func SetOpenSchemaScanForTest(open func(dbcopy.BackendRef, context.Context) (dbc
 	return func() { openSchemaScan = previous }
 }
 
+// OpenSchemaScanForTest is how a PostgreSQL scan opens its source now: what a test stood in
+// with (SetOpenSchemaScanForTest), or else what the test binary stops the run with, or else the
+// real open. A test of the package that runs the real scan command reads it to prove that its
+// binary has the open that stops the run, not the one that dials.
+func OpenSchemaScanForTest() func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
+	return openSchemaScan
+}
+
 // scanPostgresCatalog scans a PostgreSQL database through DALgo's schema reader.
 // It opens the source through dbcopy, so a driver error comes back classified
 // (see BackendRef.OpenFailure), never as the driver wrote it; what the scan
@@ -250,8 +324,7 @@ func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Para
 	defer func() { _ = scanDB.Close() }()
 
 	catalogID := connectionParams.Catalog()
-	counter := classifiedCounter{counter: dalgoschema.NewNativeCounter(scanDB), source: source}
-	provider := dalgoschema.NewSchemaProvider(scanDB, counter, catalogID, dbcopy.PostgresDefaultSchema)
+	provider := dalgoschema.NewSchemaProvider(scanDB, recordsCounterOf(scanDB, source), catalogID, dbcopy.PostgresDefaultSchema)
 	dbCatalog, err := schemer.NewScanner(provider).ScanCatalog(ctx, catalogID)
 	if err != nil {
 		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", source.OpenFailure(err))
@@ -259,6 +332,21 @@ func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Para
 	dbCatalog.ID = catalogID
 	dbCatalog.Driver = DriverPostgres
 	return dbCatalog, nil
+}
+
+// recordsCounterOf is what counts the records of the tables of a scan, or nil, which counts
+// nothing. A scan counts only through a reader that can tell a view from a table
+// (dalgoschema.ViewLister), so that a view is never counted: the reader of dalgo2postgres lists the
+// views of a server with its tables and cannot tell them apart, so every view would be a table to
+// the scanner, and a server that runs COUNT(*) natively (dalgo2sql declares it for PostgreSQL)
+// would run a count on every table and every view of the database, with no timeout, for numbers
+// that nothing stores. Through that reader a scan counts nothing; the day its reader lists its
+// views, the tables are counted again.
+func recordsCounterOf(scanDB dbcopy.SchemaScanDB, source dbcopy.BackendRef) dalgoschema.RecordsCounter {
+	if _, tellsViews := scanDB.(dalgoschema.ViewLister); !tellsViews {
+		return nil
+	}
+	return classifiedCounter{counter: dalgoschema.NewNativeCounter(scanDB), source: source}
 }
 
 // classifiedCounter reports the error of a count as the open of the source reports its

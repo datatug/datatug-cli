@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"path/filepath"
 	"strings"
 
@@ -39,10 +40,16 @@ func ResolveDescriptorPath(projectDir, catalogPath string) (string, error) {
 		return "", fmt.Errorf("relative catalog path has no project directory to resolve against")
 	}
 	file := filepath.Join(projectDir, local)
-	// A file that is not there is not a link to anywhere: the read of it says so.
+	// A file that is not there is not a link to anywhere: the read of it says so. A path that
+	// the look cannot classify for another reason is not passed on to the reader, which would
+	// open what the look could not follow (on Windows, EvalSymlinks fails on some reparse
+	// points that an open follows).
 	resolved, err := scanEvalSymlinks(file)
-	if err != nil {
+	if errors.Is(err, fs.ErrNotExist) {
 		return file, nil
+	}
+	if err != nil {
+		return "", errDescriptorOutsideProject
 	}
 	root, err := scanEvalSymlinks(projectDir)
 	if err != nil {

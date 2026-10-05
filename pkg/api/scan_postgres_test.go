@@ -85,6 +85,14 @@ func TestNewPostgresScanParams_Refuses(t *testing.T) {
 		{"no host", map[string]string{"SHOP_PG_URL": "postgres:///shop"}, "SHOP_PG_URL", "prod", "shop", "names no host"},
 		{"a host a project cannot record", map[string]string{"SHOP_PG_URL": "postgres://alice:" + pgSecret + "@h/shop?host=%2Fvar%2Frun%2Fpostgresql"}, "SHOP_PG_URL", "prod", "shop", "cannot be recorded"},
 		{"a host list", map[string]string{"SHOP_PG_URL": "postgres://alice:" + pgSecret + "@a,b/shop"}, "SHOP_PG_URL", "prod", "shop", "cannot be recorded"},
+		// The query of a URL overrides its authority and its path (pgx and the parser of the target
+		// agree), so the line that names what the scan connects to, built from the authority and the
+		// path, would name a place the scan does not connect to.
+		{"a host in the query", map[string]string{"SHOP_PG_URL": "postgres://alice:" + pgSecret + "@a.example.com/shop?host=b.internal"}, "SHOP_PG_URL", "prod", "shop", `sets "host" in its query`},
+		{"a host in the query of a URL with none in its authority", map[string]string{"SHOP_PG_URL": "postgres:///shop?host=b.internal"}, "SHOP_PG_URL", "prod", "shop", `sets "host" in its query`},
+		{"a port in the query", map[string]string{"SHOP_PG_URL": "postgres://alice:" + pgSecret + "@a.example.com:5433/shop?port=6543"}, "SHOP_PG_URL", "prod", "shop", `sets "port" in its query`},
+		{"a dbname in the query", map[string]string{"SHOP_PG_URL": "postgres://alice:" + pgSecret + "@a.example.com/shop?sslmode=require&dbname=other"}, "SHOP_PG_URL", "prod", "shop", `sets "dbname" in its query`},
+		{"a database in the query", map[string]string{"SHOP_PG_URL": "postgres://alice:" + pgSecret + "@a.example.com/shop?database=other"}, "SHOP_PG_URL", "prod", "shop", `sets "database" in its query`},
 		{"an environment that is not a plain name", shopEnv(), "SHOP_PG_URL", "../prod", "shop", "plain name"},
 		{"a database that is not a plain name", shopEnv(), "SHOP_PG_URL", "prod", "sub/shop", "plain name"},
 		{"a database that is the parent directory", shopEnv(), "SHOP_PG_URL", "prod", "..", "plain name"},

@@ -65,7 +65,9 @@ type ScannedCatalog struct {
 // of the project, and one that is not a plain name (see CheckScanName), or that differs
 // only by case from one the project has (see CheckScanNamesAgainstProject), is refused
 // before anything is read, written or removed: this function removes folders, and it
-// does not take its ids on trust from whoever calls it.
+// does not take its ids on trust from whoever calls it. A catalog that the project
+// records under another driver in the same environment is refused the same way (see
+// CheckScanDriverAgainstProject).
 func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, projectDir string, project *datatug.Project, scanned ScannedCatalog, warnings io.Writer) error {
 	server, catalog := findScannedCatalog(project, scanned)
 	names := []struct{ flag, value string }{{"--env", scanned.Environment}, {"--db", scanned.ID}}
@@ -80,6 +82,9 @@ func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, project
 		}
 	}
 	if err := CheckScanNamesAgainstProject(projectDir, scanned.Environment, scanned.ID, model); err != nil {
+		return err
+	}
+	if err := CheckScanDriverAgainstProject(projectDir, scanned.Environment, scanned.ID, scanned.Driver); err != nil {
 		return err
 	}
 	var layout scannedLayout

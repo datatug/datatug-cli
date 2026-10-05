@@ -79,6 +79,11 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	if err = api.CheckScanNamesAgainstProject(v.ProjectDir, v.Environment, v.Database, v.DbModel); err != nil {
 		return err
 	}
+	// A database id the environment already records under another driver is refused now, before
+	// the database is read: a catalog file is kept by environment and id, whatever the driver.
+	if err = api.CheckScanDriverAgainstProject(v.ProjectDir, v.Environment, v.Database, v.Driver); err != nil {
+		return err
+	}
 	// A project folder that is not there is made, once the scan has read something: a
 	// scan that fails makes nothing.
 	projectDirIsNew, err := checkProjectDir(v.ProjectDir)

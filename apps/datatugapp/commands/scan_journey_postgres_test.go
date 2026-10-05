@@ -2,10 +2,12 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -193,24 +195,99 @@ func pgScanArgs(projectDir, variable, database, env string, more ...string) []st
 	return append([]string{"-d", projectDir, "-D", "postgres", "--dsn-env", variable, "--db", database, "--env", env}, more...)
 }
 
-// assertNoSourceIn fails t when any file under dir, or the name of one, holds a part
-// of the connection URL of the fake server.
-func assertNoSourceIn(t *testing.T, dir string) {
-	t.Helper()
+// connectionKeys are the keys that a project file holds only for a connection: a file of a
+// project that has any of them, at any depth, holds a host, a port, a user or a password,
+// however its value is written (a port is a number in JSON, and ":54329" is not in the text).
+var connectionKeys = []string{"host", "port", "user", "password", "server"}
+
+// sourceLeaksIn is what is wrong with the tree under dir: each file, or name of one, that holds a
+// part of the connection URL of the fake server (the secret, the user, the host, the port, the
+// scheme or the query), and each key of a decoded .json file, at any depth, that is one of
+// connectionKeys. It is empty for a tree that holds no part of the connection.
+func sourceLeaksIn(dir string) (leaks []string, err error) {
 	parts := []string{journeyPgSecret, journeyPgUser, journeyPgHost, ":" + journeyPgPort, "sslmode", "postgres://"}
-	require.NoError(t, filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
-		require.NoError(t, err)
+	err = filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
 		text := path
 		if !entry.IsDir() {
 			content, readErr := os.ReadFile(path)
-			require.NoError(t, readErr)
+			if readErr != nil {
+				return readErr
+			}
 			text += "\n" + string(content)
+			if strings.HasSuffix(path, ".json") {
+				var decoded any
+				if json.Unmarshal(content, &decoded) == nil {
+					for _, key := range keysNamed(decoded, connectionKeys) {
+						leaks = append(leaks, fmt.Sprintf("%s holds the key %q", path, key))
+					}
+				}
+			}
 		}
 		for _, part := range parts {
-			assert.NotContains(t, text, part, "no file of the project holds a part of the connection URL: %s", path)
+			if strings.Contains(text, part) {
+				leaks = append(leaks, fmt.Sprintf("%s holds %q", path, part))
+			}
 		}
 		return nil
-	}))
+	})
+	return leaks, err
+}
+
+// keysNamed is each key of the decoded JSON value, at any depth, that is one of names (in any case).
+func keysNamed(value any, names []string) (found []string) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, inner := range typed {
+			if slices.ContainsFunc(names, func(name string) bool { return strings.EqualFold(name, key) }) {
+				found = append(found, key)
+			}
+			found = append(found, keysNamed(inner, names)...)
+		}
+	case []any:
+		for _, inner := range typed {
+			found = append(found, keysNamed(inner, names)...)
+		}
+	}
+	return found
+}
+
+// assertNoSourceIn fails t when any file under dir, or the name of one, holds a part of the
+// connection URL of the fake server, or a .json file of the tree has a key that only a connection
+// has (see connectionKeys).
+func assertNoSourceIn(t *testing.T, dir string) {
+	t.Helper()
+	leaks, err := sourceLeaksIn(dir)
+	require.NoError(t, err)
+	assert.Empty(t, leaks, "no file of the project holds a part of the connection")
+}
+
+// The check of the tree finds a port written as a JSON number, which a search for ":54329" does
+// not, at any depth, and finds nothing in a tree of names that only look like it.
+func TestAssertNoSourceInFindsAConnectionKeyAtAnyDepth(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.json"), []byte(`{"dbServers":[{"driver":"postgres","catalogs":["shop"]}]}`), 0o644))
+	leaks, err := sourceLeaksIn(dir)
+	require.NoError(t, err)
+	assert.Empty(t, leaks, "dbServers is not a server: the keys are matched whole")
+
+	for _, body := range []string{`{"port": 54329}`, `{"a":{"b":[{"Host":"x"}]}}`, `{"user":"u"}`, `{"password":""}`, `{"server":"s"}`} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "b.json"), []byte(body), 0o644))
+		leaks, err = sourceLeaksIn(dir)
+		require.NoError(t, err)
+		assert.NotEmpty(t, leaks, body)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.json"), []byte(`not json, with no part of a connection`), 0o644))
+	leaks, err = sourceLeaksIn(dir)
+	require.NoError(t, err)
+	assert.Empty(t, leaks, "a .json file that does not decode is still searched for the parts, and holds none")
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.json"), []byte("the "+journeyPgHost+" host"), 0o644))
+	leaks, err = sourceLeaksIn(dir)
+	require.NoError(t, err)
+	assert.Len(t, leaks, 1)
 }
 
 func TestScanJourneyPostgres(t *testing.T) {
@@ -306,6 +383,38 @@ func TestScanJourneyPostgres(t *testing.T) {
 	require.Len(t, sources, 1)
 	assert.Equal(t, "shop", sources[0].ID)
 	assert.Equal(t, "env:"+journeyPgVar, sources[0].URL)
+
+	// Serve lists the tables of the database from the same files, with their schemas and exact
+	// names, and chat's project catalog holds the same tables and views, under the source that
+	// resolved.
+	listed, err := api.GetCatalogTables(projectDir, "local", "shop")
+	require.NoError(t, err)
+	var listedTables, listedViews []string
+	for _, table := range listed.Tables {
+		listedTables = append(listedTables, table.Schema+"."+table.Name)
+	}
+	for _, view := range listed.Views {
+		listedViews = append(listedViews, view.Schema+"."+view.Name)
+	}
+	assert.Equal(t, []string{"public.Customer", "public.order_line", "sales.Invoice"}, listedTables)
+	assert.Equal(t, []string{"public.customer_names", "sales.OpenInvoices"}, listedViews)
+	chatCatalog, urls, err := buildChatProjectCatalog(ctx, projectDir, projStore, "local")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"shop": "env:" + journeyPgVar}, urls)
+	objects := map[string][]string{}
+	for _, object := range chatCatalog.Objects {
+		assert.Empty(t, object.Issue, "the source resolved and nothing about %s is unavailable", object.Reference.ObjectID)
+		objects[object.Reference.Kind+" "+object.Reference.ObjectID] = object.Columns
+	}
+	assert.Equal(t, map[string][]string{
+		"project " + project.ID:              nil,
+		"source shop":                        nil,
+		"table public.Customer":              {"CustomerId", "FirstName", "LastName"},
+		"table public.order_line":            {"order_id", "line_no", "customer_id", "sku", "qty"},
+		"project_view public.customer_names": {"CustomerId", "full_name"},
+		"table sales.Invoice":                {"InvoiceId", "Total"},
+		"project_view sales.OpenInvoices":    {"InvoiceId"},
+	}, objects)
 
 	// 4. I push the folder; a colleague opens the link: the web app lists the database and
 	// its tables, in both schemas.

@@ -21,8 +21,13 @@ import (
 // can resolve it.
 func registerWarnTestEnvironment(t *testing.T, projectID, dir, dbPath string) {
 	t.Helper()
-	// No queries folder is made: a project that a scan or init wrote has none
-	// (git keeps no empty folder), and its sources must still list.
+	// httpQuerySources (ListSources' HTTP branch) walks <projectDir>/queries
+	// and errors if it does not exist (unlike recordsetSources, which
+	// tolerates a missing directory) — every real project has this folder,
+	// so create it here rather than changing that pre-existing behavior.
+	if err := os.MkdirAll(filepath.Join(dir, "queries"), 0o755); err != nil {
+		t.Fatalf("mkdir queries dir: %v", err)
+	}
 	filestore.SetProjectPath(projectID, dir)
 	pathsByID := map[string]string{projectID: dir}
 	storage.NewDatatugStore = func(string) (storage.Store, error) {

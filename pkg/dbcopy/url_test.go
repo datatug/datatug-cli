@@ -172,14 +172,14 @@ func TestOpen_HTTP_NoQueriesErrors(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestOpen_Postgres_ReturnsErrPostgresNotWired(t *testing.T) {
+func TestOpen_Postgres_AnswersThePreviewSentenceWhileTheSwitchIsOff(t *testing.T) {
 	t.Parallel()
 	ref, err := Parse("postgres://user@host/db")
 	assert.NoError(t, err)
 	db, openErr := ref.Open(context.Background())
 	assert.Nil(t, db)
-	assert.True(t, errors.Is(openErr, ErrPostgresNotWired),
-		"expected ErrPostgresNotWired, got %v", openErr)
+	assert.True(t, errors.Is(openErr, ErrPostgresPreview),
+		"expected ErrPostgresPreview, got %v", openErr)
 }
 
 // TestOpen_SQLite_OpensChinookFixture exercises the sqlite Open path against

@@ -2,6 +2,8 @@ package dbviewer
 
 import (
 	"errors"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -290,10 +292,10 @@ func TestTableScreen_PreviewRowCanBeViewedAndCopied(t *testing.T) {
 	h.RequireContains("users #1")
 }
 
-// A NULL foreign-key cell references nothing. The recordset carries a NULL as
-// its column's zero value, never as nil, so the preview query compares the key
-// with "" and lists no parent row; in particular it does not list the parent
-// whose key is NULL, which `col IS NULL` would.
+// A NULL foreign-key cell references nothing. The recordset carries a NULL as nil
+// (dalgo2sql since v0.26.5; before it, as its column's zero value, and the preview
+// query compared the key with ""), and no preview query is sent for it: in
+// particular the parent whose key is NULL is not listed, which `col IS NULL` would.
 func TestTableScreen_NullForeignKeyCellListsNoParent(t *testing.T) {
 	path := createTestSqliteDb(t,
 		`CREATE TABLE parents (id INTEGER PRIMARY KEY, code TEXT UNIQUE, label TEXT)`,
@@ -310,4 +312,44 @@ func TestTableScreen_NullForeignKeyCellListsNoParent(t *testing.T) {
 
 	h.Press("down") // parent_code of the second row: 'p'
 	h.RequireContains("real-parent").RequireNotContains("null-parent")
+}
+
+// A NULL is shown as NULL in a table of a SQLite file, in a number, a text, a boolean and a time column, where
+// the recordset reader used to return the zero value of the column's type and the viewer showed 0, an empty
+// text, NO and a zero date. A row that holds values shows them.
+func TestTableScreen_NullCellsAreShownAsNullInEveryKindOfColumn(t *testing.T) {
+	path := createTestSqliteDb(t,
+		`CREATE TABLE readings (id INTEGER PRIMARY KEY, n INTEGER, s TEXT, b BOOLEAN, ts DATETIME)`,
+		`INSERT INTO readings (id, n, s, b, ts) VALUES (1, NULL, NULL, NULL, NULL)`,
+		`INSERT INTO readings (id, n, s, b, ts) VALUES (2, 0, '', 0, '2024-01-02 03:04:05')`,
+		`INSERT INTO readings (id, n, s, b, ts) VALUES (3, 7, 'seven', 1, '2024-05-06 07:08:09')`,
+	)
+	db := dtviewers.GetSQLiteDbContext(path)
+	h := navtest.New(t, nav.Page{Title: "T", Content: newTableScreen(tableContext(db, "readings"))})
+	h.RequireContains("seven")
+	view := h.View()
+
+	lineOf := func(id string) string {
+		for _, line := range strings.Split(view, "\n") {
+			if regexp.MustCompile(`│\s+` + id + `┃`).MatchString(line) {
+				return line
+			}
+		}
+		t.Fatalf("no line for the row %s in\n%s", id, view)
+		return ""
+	}
+	null := lineOf("1")
+	assert.Equal(t, 4, strings.Count(null, "NULL"), "a NULL in each of the four kinds of column: %s", null)
+	for _, value := range []string{"NO", "0001-01-01", "YES"} {
+		assert.NotContains(t, null, value)
+	}
+	zero := lineOf("2")
+	assert.NotContains(t, zero, "NULL", "a zero value is not a NULL: %s", zero)
+	assert.Contains(t, zero, "NO")
+	assert.Contains(t, zero, "2024-01-02 03:04:05")
+	full := lineOf("3")
+	assert.NotContains(t, full, "NULL")
+	assert.Contains(t, full, "seven")
+	assert.Contains(t, full, "YES")
+	assert.Equal(t, 4, strings.Count(view, "NULL"), "no other cell is a NULL")
 }

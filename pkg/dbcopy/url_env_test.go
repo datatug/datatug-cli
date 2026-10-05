@@ -212,12 +212,12 @@ func TestParse_HTTPCredentialsAreRefusedWithoutEcho(t *testing.T) {
 func TestRedactError(t *testing.T) {
 	t.Parallel()
 	assert.NoError(t, RedactError(nil))
-	original := fmt.Errorf("dial postgres://alice:s3cret@h/db: %w", ErrPostgresNotWired)
+	original := fmt.Errorf("dial postgres://alice:s3cret@h/db: %w", ErrPostgresPreview)
 	redacted := RedactError(original)
 	assert.NotContains(t, redacted.Error(), "s3cret")
 	assert.Contains(t, redacted.Error(), "postgres://alice:xxxxx@h/db")
-	assert.ErrorIs(t, redacted, ErrPostgresNotWired, "the wrapped chain must survive redaction")
-	assert.ErrorIs(t, fmt.Errorf("open: %w", redacted), ErrPostgresNotWired)
+	assert.ErrorIs(t, redacted, ErrPostgresPreview, "the wrapped chain must survive redaction")
+	assert.ErrorIs(t, fmt.Errorf("open: %w", redacted), ErrPostgresPreview)
 }
 
 func TestParse_IngitdbNeverEchoesAPassword(t *testing.T) {
@@ -389,8 +389,8 @@ func TestOpen_ErrorsAreScrubbedOfTheRealURLsSecrets(t *testing.T) {
 	// A driver that formats the DSN its own way is scrubbed by literal value.
 	postgres := BackendRef{Scheme: "postgres", Path: "postgres://alice:s3cret@127.0.0.1:1/shop?sslmode=disable"}
 	_, err = postgres.Open(context.Background())
-	assert.ErrorIs(t, err, ErrPostgresNotWired, "an error without secrets is returned as it was")
-	assert.Equal(t, ErrPostgresNotWired, err)
+	assert.ErrorIs(t, err, ErrPostgresPreview, "an error without secrets is returned as it was")
+	assert.Equal(t, ErrPostgresPreview, err)
 
 	// An http source whose path carries a secret-named parameter.
 	_, err = BackendRef{Scheme: "http", Path: filepath.Join(t.TempDir(), "nope") + "?api_key=K3Y-secret"}.Open(context.Background())

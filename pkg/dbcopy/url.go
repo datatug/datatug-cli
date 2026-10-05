@@ -9,10 +9,9 @@
 //   - sqlite://         fully wired via dalgo2sqlite
 //   - ingitdb://        fully wired via dalgo2ingitdb; local-paths-only
 //     (REQ:ingitdb-url-local-only)
-//   - postgres://       parses; Open returns ErrPostgresNotWired until a
-//     PostgreSQL DALgo driver implements the three capability
-//     interfaces (dbschema.SchemaReader, ddl.SchemaModifier,
-//     dal.ConcurrencyAware)
+//   - postgres://       fully wired via dal-go/dalgo2postgres, behind the
+//     preview switch (see PostgresPreviewEnv): a read-only session
+//     unless the person says otherwise (see postgresConnectionString)
 //   - env:NAME          resolves the environment variable NAME, which holds
 //     any other supported URL (the way to give PostgreSQL its password
 //     without writing it in a project file or on a command line); see
@@ -74,11 +73,6 @@ var envNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 func ValidEnvName(name string) bool {
 	return envNamePattern.MatchString(name)
 }
-
-// ErrPostgresNotWired is returned by BackendRef.Open for postgres:// URLs
-// until a PostgreSQL DALgo driver implements the three capability interfaces
-// (dbschema.SchemaReader, ddl.SchemaModifier, dal.ConcurrencyAware).
-var ErrPostgresNotWired = errors.New("PostgreSQL backend not yet wired")
 
 // ErrSourceFileMissing is wrapped by CheckSourceFile (and, through it, by
 // Open's sqlite/ingitdb branches) when a file-backed source does not exist
@@ -214,6 +208,11 @@ func parseEnvSource(rawURL string, lookupEnv func(string) (string, bool)) (Backe
 	}
 	ref, err := parseURL(value)
 	if err != nil {
+		if refusal := postgresURLRefusal(err); refusal != nil {
+			// A fixed sentence about the shape of the URL that quotes none of it, so the
+			// variable's value stays out of the message and the person is still told what to fix.
+			return BackendRef{}, fmt.Errorf("environment variable %s does not hold a usable PostgreSQL URL: %w", name, refusal)
+		}
 		return BackendRef{}, fmt.Errorf("environment variable %s does not hold a supported source URL (supported schemes: %s)", name, strings.Join(supportedSchemes, ", "))
 	}
 	ref.Raw = rawURL
@@ -255,13 +254,30 @@ func parseURL(rawURL string) (BackendRef, error) {
 	case "http", "https":
 		return parseHTTPSource(scheme, display, rest)
 	case "postgres", "postgresql":
-		// Recognized but not opened. Parse via dburl to validate shape; carry the
-		// full URL, its scheme in lower case, in Path for the driver.
+		// Parse via dburl to validate shape; carry the full URL, its scheme in lower
+		// case, in Path for the driver.
 		path := scheme + "://" + rest
 		if _, err := dburl.Parse(path); err != nil {
 			// The parser's own error quotes the URL, and so would any fragment of
 			// it: say only that the URL is malformed.
 			return BackendRef{}, fmt.Errorf("invalid postgres URL %q: not a valid connection URL (check the host, the port and the percent-encoding of the user and password)", display)
+		}
+		// Every way into a PostgreSQL source passes through here (Parse, an env source, a
+		// typed URL, and so Open and OpenProtected), so the shapes that net/url and the driver
+		// read differently from how they were written are refused here, once: a password split
+		// by an unescaped "/", "?" or "#" (which also catches a second URL written inside the
+		// source), and a user name that holds a colon or a percent sign. The sentences quote
+		// nothing of the URL, and neither does the message: the display form of a URL like these
+		// can show the end of a password (what follows the last "@" is read as the host). A URL
+		// whose query sets the host, the port or the database is refused too: the line that names
+		// the source is built from the authority and the path, and would name a place the
+		// connection does not go to.
+		_, query, err := parsePostgresURL(path)
+		if err == nil {
+			err = targetOverrideRefusal(query)
+		}
+		if err != nil {
+			return BackendRef{}, fmt.Errorf("invalid postgres URL: %w", err)
 		}
 		return BackendRef{Scheme: "postgres", Path: path, Raw: display}, nil
 	case "sqlite":
@@ -453,8 +469,10 @@ func LocalSourceURL(scheme, path string) string {
 //   - sqlite:      opens via dalgo2sqlite.NewDatabase.
 //   - ingitdb:     opens via dalgo2ingitdb.NewDatabase with the default
 //     validator-backed CollectionsReader.
-//   - postgres:    returns ErrPostgresNotWired (no DALgo Postgres driver
-//     yet exposes the three capability interfaces).
+//   - postgres:    opens via dalgo2postgres.NewDatabaseWithOptions, only while
+//     the preview switch is on (see PostgresPreviewEnv), read-only
+//     (see postgresConnectionString), and one handle for the
+//     process per connection string (see handleCache).
 //   - http/https:  opens via httpsource.Open, translating every HTTP
 //     QueryDef under the project directory (r.Path) into a
 //     dalgo2http collection.
@@ -466,11 +484,22 @@ func LocalSourceURL(scheme, path string) string {
 // column is returned exactly as the provider evaluates it, matching every
 // dalgo2sql/dalgo2ingitdb release before Task 13 (S110).
 //
-// The context is reserved for future use; today's driver constructors are
-// synchronous and do not honor cancellation. That's acceptable for the MVP
+// The context matters to a postgres source: the open returns when it ends, with
+// the context's own error, and the attempt goes on and keeps the handle it opens
+// for the next caller (see handleCache). The constructors of the other schemes
+// are synchronous and do not honor cancellation. That's acceptable for the MVP
 // CLI verb.
 func (r BackendRef) Open(ctx context.Context) (dal.DB, error) {
-	return r.open(ctx, false, false)
+	return r.open(ctx, openMode{})
+}
+
+// OpenForWrite is Open for the one connection that is written through: the target of
+// `datatug db copy --to`. It differs from Open only for a postgres source, which Open and
+// OpenProtected open with a read-only session and refuse when the URL turns that off (see
+// postgresConnectionString); this opens it without the read-only default and keeps the URL's own
+// setting. Nothing else opens a PostgreSQL source for writing.
+func (r BackendRef) OpenForWrite(ctx context.Context) (dal.DB, error) {
+	return r.open(ctx, openMode{forWrite: true})
 }
 
 // OpenForTest is Open, except that for an "http"/"https" BackendRef every
@@ -490,7 +519,7 @@ func (r BackendRef) Open(ctx context.Context) (dal.DB, error) {
 // Go code, only when a caller explicitly calls THIS method instead of
 // Open. NEVER call this from production code.
 func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
-	return r.open(ctx, true, false)
+	return r.open(ctx, openMode{insecureAllowLoopback: true})
 }
 
 // OpenProtected is Open, except an "ingitdb" BackendRef is opened with
@@ -535,7 +564,7 @@ func (r BackendRef) OpenForTest(ctx context.Context) (dal.DB, error) {
 // legacy emitSQL renderer; only the ingitdb hardening differs between Open
 // and OpenProtected.
 func (r BackendRef) OpenProtected(ctx context.Context) (dal.DB, error) {
-	return r.open(ctx, false, true)
+	return r.open(ctx, openMode{protected: true})
 }
 
 // OpenProtectedForTest combines OpenProtected's provider-side read
@@ -545,7 +574,7 @@ func (r BackendRef) OpenProtected(ctx context.Context) (dal.DB, error) {
 // RunStructured uses in production, just against a loopback test server.
 // NEVER call this from production code.
 func (r BackendRef) OpenProtectedForTest(ctx context.Context) (dal.DB, error) {
-	return r.open(ctx, true, true)
+	return r.open(ctx, openMode{insecureAllowLoopback: true, protected: true})
 }
 
 var (
@@ -553,13 +582,22 @@ var (
 	newInGitDBDatabase           = dalgo2ingitdb.NewDatabase
 )
 
+// openMode is how one open differs from another: the test-only escape hatch of an http(s)
+// source, the provider-side read hardening of a protected read, and the one connection that is
+// written through, the target of `datatug db copy`.
+type openMode struct {
+	insecureAllowLoopback bool
+	protected             bool
+	forWrite              bool
+}
+
 // open opens the source and turns whatever it returns as an error into one
 // that is safe to show (see OpenFailure). r.Path holds the real URL (a
 // PostgreSQL password included), and a driver quotes the DSN it was given in its
 // open and ping errors in whatever shape it likes, so a driver's own message is
 // never shown. errors.Is and errors.As still see the driver's own error.
-func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected bool) (dal.DB, error) {
-	db, err := r.openSource(ctx, insecureAllowLoopback, protected)
+func (r BackendRef) open(ctx context.Context, mode openMode) (dal.DB, error) {
+	db, err := r.openSource(ctx, mode)
 	if err != nil {
 		return nil, r.OpenFailure(err)
 	}
@@ -579,7 +617,7 @@ func (r BackendRef) CheckFile() error {
 	return CheckSourceFile(r.Path)
 }
 
-func (r BackendRef) openSource(ctx context.Context, insecureAllowLoopback, protected bool) (dal.DB, error) {
+func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, error) {
 	switch r.Scheme {
 	case "openvaultdb":
 		return openvaultdb.OpenSource(r.Path)
@@ -608,7 +646,7 @@ func (r BackendRef) openSource(ctx context.Context, insecureAllowLoopback, prote
 			return nil, err
 		}
 		var opts []dalgo2ingitdb.DatabaseOption
-		if protected {
+		if mode.protected {
 			// See OpenProtected's doc comment: the inGitDB protected path
 			// layers pkg/accesspolicies above the returned dal.DB.
 			opts = append(opts, dalgo2ingitdb.WithStoredOnlyReads())
@@ -620,11 +658,12 @@ func (r BackendRef) openSource(ctx context.Context, insecureAllowLoopback, prote
 		return db, nil
 
 	case "postgres":
-		return nil, ErrPostgresNotWired
+		// The preview switch is asked first, inside openPostgres.
+		return r.openPostgres(ctx, mode.forWrite)
 
 	case "http", "https":
 		var opts []httpsource.Option
-		if insecureAllowLoopback {
+		if mode.insecureAllowLoopback {
 			opts = append(opts, httpsource.AllowInsecureLoopback())
 		}
 		db, err := httpsource.Open(ctx, r.Path, opts...)

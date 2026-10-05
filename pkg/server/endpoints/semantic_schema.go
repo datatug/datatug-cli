@@ -80,6 +80,16 @@ func resolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 	}
 }
 
+// unavailableOr answers a failure of a source that dbcopy built a fixed sentence for (a source that is refused, cannot
+// be opened, or whose connection was lost) as SOURCE_UNAVAILABLE with that sentence, and any other failure as
+// otherwise. The sentence is the one dbcopy.UnavailableSource finds in cause, never cause's own text.
+func unavailableOr(cause, otherwise error) error {
+	if unavailable := dbcopy.UnavailableSource(cause); unavailable != nil {
+		return newSourceUnavailable(unavailable.Error())
+	}
+	return otherwise
+}
+
 // recordsetUnavailable is the answer for a source whose recordset definition cannot be used:
 // it is not there, it is not a file, it cannot be read, it cannot be parsed, or the ID of the
 // source is not a name of a file. They are one answer, a sentence built from the source (named
@@ -114,10 +124,12 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 		}
 		// Open's error says which source failed and why, in a fixed sentence built
 		// from the display form, so naming the source again in front of it would say
-		// it twice. The one exception is dbcopy.ErrPostgresNotWired, which names no
-		// source: the answer for a PostgreSQL source is "PostgreSQL backend not yet
-		// wired", and the client knows which source it asked for.
-		return resolvedSource{}, err
+		// it twice. The exceptions are the fixed refusals of a PostgreSQL source
+		// (dbcopy.ErrPostgresPreview while the preview is off, and the refusal of a URL
+		// that turns the read-only session off), which name no source: the client knows
+		// which source it asked for. A source that is refused or cannot be opened is
+		// unavailable, as one whose file is missing is.
+		return resolvedSource{}, unavailableOr(err, err)
 	}
 	reader, ok := dalAsSchemaReader(db)
 	if !ok {
@@ -126,7 +138,7 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 	collRef := dal.NewRootCollectionRef(collection, "")
 	def, err := reader.DescribeCollection(ctx, &collRef)
 	if err != nil {
-		return resolvedSource{}, fmt.Errorf("describe %s.%s: %w", shown, collection, dbcopy.RedactError(err))
+		return resolvedSource{}, unavailableOr(err, fmt.Errorf("describe %s.%s: %w", shown, collection, dbcopy.RedactError(err)))
 	}
 	columns := make([]semantic.Column, len(def.Fields))
 	for i, f := range def.Fields {
@@ -143,7 +155,7 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 	var referencedBy datatug.ReferencedBys
 	referrers, err := reader.ListReferrers(ctx, &collRef)
 	if err != nil && !errors.Is(err, dal.ErrNotSupported) {
-		return resolvedSource{}, fmt.Errorf("list referrers for %s.%s: %w", shown, collection, dbcopy.RedactError(err))
+		return resolvedSource{}, unavailableOr(err, fmt.Errorf("list referrers for %s.%s: %w", shown, collection, dbcopy.RedactError(err)))
 	}
 	for _, ref := range referrers {
 		cols := make([]string, len(ref.Fields))

@@ -21,7 +21,7 @@ status: Implemented
 - `DATETIME` / `NUMERIC(p,s)` SQLite types are recognized as `dbschema.Time` and `dbschema.Decimal` respectively (fixed upstream in `dalgo2sqlite`). `dbschema.Decimal` and `dbschema.Bytes` map to inGitDB's `Float` and `String` column types respectively — lossy carriers documented in `dalgo2ingitdb/type_mapping.go`.
 - Composite-PK tables are copied with each row's target record ID as the `__`-joined `fmt.Sprintf("%v", v)` of every PK column (in the order `DescribeCollection` reports them); for example `PlaylistTrack`'s `(PlaylistId=1, TrackId=3402)` lands at `<projectPath>/PlaylistTrack/$records/1__3402.yaml`.
 - inGitDB → SQLite row streaming works through `dalgo2sql` accepting `map[string]any` Record data alongside the existing struct path (fixed upstream). End-to-end reverse-direction E2E is not yet wired in tests; the building blocks are in place.
-- PostgreSQL is recognized as a URL scheme but deferred from the MVP E2E bar until a PostgreSQL DALgo driver lands `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware`. The `ingitdb://` URL scheme dispatches to the inGitDB driver against a local-filesystem path.
+- PostgreSQL is a preview: it is opened through `dalgo2postgres` (which implements `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware`) only while the environment variable `DATATUG_PREVIEW_POSTGRES` is `1`. A `--from` is read through a read-only session and `--to` is the one place DataTug opens a PostgreSQL database for writing. It stays outside the MVP E2E bar (SQLite ↔ inGitDB) until the real-server journey test of CI runs `db copy` with a PostgreSQL side; the preview switch is not removed before that test passes. The `ingitdb://` URL scheme dispatches to the inGitDB driver against a local-filesystem path.
 
 The verb is a pure primitive: either side can be any DALgo-supported URL. A `--parallel-streams` flag governs per-table parallelism with a safety cap derived from the DALgo `ConcurrencyAware` capability. A non-empty target requires an explicit `--overwrite=recreate` (drop tables and recreate from source schema) or `--overwrite=reload` (truncate tables and reload data, preserving schema).
 
@@ -70,7 +70,7 @@ The MVP URL parser MUST accept these schemes:
 |---|---|---|---|
 | `sqlite` | `sqlite:///absolute/path.db` or `sqlite://./relative/path.db` | `dalgo2sqlite` (lives in `dal-go/dalgo2sqlite`) | E2E-tested |
 | `ingitdb` | `ingitdb://./path-to-project` (local-filesystem path) | `dalgo2ingitdb` (lives in `ingitdb/ingitdb-cli`) | E2E-tested |
-| `postgres` | `postgres://user:pw@host:port/dbname?sslmode=...` | TBD (no driver currently exposes `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware`) | **Deferred** — scheme recognized; opening MUST exit `1` with a "PostgreSQL backend not yet wired" message until a driver is registered. |
+| `postgres` | `postgres://user:pw@host:port/dbname?sslmode=...` | `dalgo2postgres` (lives in `dal-go/dalgo2postgres`) | **Preview** — while `DATATUG_PREVIEW_POSTGRES` is not `1`, opening MUST exit `4` with one fixed sentence that says PostgreSQL sources are a preview and names the variable, before the URL is read any further and without a connection. With it set, a URL on either side whose query sets `host`, `port`, `dbname` or `database` is refused by the URL parser with exit `2`; `--from` opens through a read-only session (a `--from` URL that turns `default_transaction_read_only` off is refused, and so is one whose query sets `service` or `servicefile`) and `--to` opens for writing. Not in the MVP E2E bar. |
 
 #### REQ: ingitdb-url-local-only
 
@@ -197,7 +197,7 @@ If a copy fails midway (mid-stream insert error, target connection drop, source 
 | `dal.Adapter` (source/target) | DALgo `dbschema` introspection + DDL application + row read/write | `dal-go/dalgo` (shipped via dbschema + ddl + concurrency-capability Features) |
 | `dalgo2ingitdb` | inGitDB DALgo driver (read + write + dbschema + DDL coverage; advertises `ConcurrencyAvailable`) | `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` |
 | `dalgo2sqlite` | SQLite DALgo driver (read + write + dbschema + DDL coverage; advertises `NoConcurrency`) | `dal-go/dalgo2sqlite` |
-| PostgreSQL driver | TBD — deferred until a driver implements `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware`. `dalgo2sql` covers data-plane today but not the schema/concurrency capabilities. | `dal-go/dalgo2sql` (data-plane only today) |
+| PostgreSQL driver | `dalgo2postgres` implements `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware` over `dalgo2sql`'s data plane. The CLI opens it behind the preview switch (see REQ:supported-schemes). | `dal-go/dalgo2postgres` |
 
 ### Data flow
 
@@ -231,23 +231,23 @@ If a copy fails midway (mid-stream insert error, target connection drop, source 
 - **DALgo `ConcurrencyAware`** — `dal-go/dalgo` — **Implemented**.
 - **`dalgo2ingitdb`** — `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` — **Ready** (implements `dbschema.SchemaReader`, `ddl.SchemaModifier`, embeds `dal.ConcurrencyAvailable`).
 - **`dalgo2sqlite`** — `dal-go/dalgo2sqlite` — **Ready** (implements `dbschema.SchemaReader`, `ddl.SchemaModifier`, embeds `dal.NoConcurrency`).
-- **PostgreSQL driver** — none of `dalgo2sql` / a hypothetical `dalgo2postgres` currently exposes the three capability interfaces. The `postgres://` scheme is recognized but disabled until a driver lands; see the MVP-status column in REQ:supported-schemes.
+- **PostgreSQL driver** — `dalgo2postgres` exposes the three capability interfaces and the CLI opens it, behind the preview switch `DATATUG_PREVIEW_POSTGRES`; see the MVP-status column in REQ:supported-schemes.
 - **URL parser** — `github.com/xo/dburl` is the existing parser used by `datatug db <url>` (the viewer Feature). The `ingitdb://` scheme MUST be registered with `dburl` (either via `dburl.Register` if available or via a small wrapper in `pkg/dbcopy/url.go`).
 
 ## Testing Strategy
 
-E2E tests against the canonical Chinook fixture. PostgreSQL pairs are deferred until a Postgres DALgo driver implements the three capability interfaces.
+E2E tests against the canonical Chinook fixture. The PostgreSQL pairs are wired behind the preview switch and have no E2E test yet: the tests of the preview stop at the open of the database (with fakes, no server), so the copy engine is not yet run against the PostgreSQL adapter. The real-server journey test of CI takes them, and the preview switch is not removed before they pass.
 
 | Source → Target | E2E test target |
 |---|---|
 | SQLite → inGitDB | yes (MVP minimum) |
 | inGitDB → SQLite | yes (MVP minimum) |
-| SQLite → PostgreSQL | deferred (no driver) |
-| inGitDB → PostgreSQL | deferred (no driver) |
-| PostgreSQL → SQLite | deferred (no driver) |
-| PostgreSQL → inGitDB | deferred (no driver) |
+| SQLite → PostgreSQL | preview, not tested against a server yet |
+| inGitDB → PostgreSQL | preview, not tested against a server yet |
+| PostgreSQL → SQLite | preview, not tested against a server yet |
+| PostgreSQL → inGitDB | preview, not tested against a server yet |
 
-Per the source Idea: "If the primitive ships and only one direction (e.g. SQLite→inGitDB) is wired for E2E, that is still a shippable MVP — the contract is set, additional backends fill in." The two SQLite↔inGitDB directions are the MVP bar; the four PostgreSQL pairs fill in when the Postgres driver lands.
+Per the source Idea: "If the primitive ships and only one direction (e.g. SQLite→inGitDB) is wired for E2E, that is still a shippable MVP — the contract is set, additional backends fill in." The two SQLite↔inGitDB directions are the MVP bar; the four PostgreSQL pairs fill in when the journey test of CI runs them against a real server.
 
 Unit tests cover: URL scheme dispatch (REQ:supported-schemes), the type-mapping table (REQ:type-mapping-coverage), the concurrency-cap rule (REQ:concurrency-cap), the empty-target detection (REQ:empty-target-check), the reload schema-match validator (REQ:reload-schema-match).
 

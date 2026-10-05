@@ -24,8 +24,8 @@ import (
 // or to nothing; the scan is refused, names the path of the link inside the project, and the
 // tree outside is byte-identical afterwards, with nothing new in it.
 
-// sentinel is the content of every file that lies outside the project in these tests: not a
-// project file, so that a write through a link changes it.
+// sentinel is the content of every file outside the project in these tests: a file at the same
+// relative path outside the project, with content of its own.
 const sentinel = "a file that is not the project's, and that a scan does not write\n"
 
 // useOps makes every write of a scan in this test go through the real calls of the operating
@@ -169,7 +169,7 @@ func TestSaveScannedProject_KeepsNoReadmeThroughALink(t *testing.T) {
 	outside := t.TempDir()
 	require.NoError(t, os.Mkdir(projectDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(outside, "README.md"), []byte(sentinel), 0o644))
-	// Put back, the README would hold the same bytes: the time of its last change tells a write.
+	// The time of its last change is compared as well as its bytes.
 	longAgo := time.Date(2001, time.February, 3, 4, 5, 6, 0, time.UTC)
 	require.NoError(t, os.Chtimes(filepath.Join(outside, "README.md"), longAgo, longAgo))
 	linkOrSkip(t, filepath.Join(outside, "README.md"), filepath.Join(projectDir, "README.md"))
@@ -184,5 +184,5 @@ func TestSaveScannedProject_KeepsNoReadmeThroughALink(t *testing.T) {
 	assert.Equal(t, before, treeWithLinks(t, outside))
 	info, statErr := os.Stat(filepath.Join(outside, "README.md"))
 	require.NoError(t, statErr)
-	assert.True(t, info.ModTime().Equal(longAgo), "what the link leads to was not written, not even with the bytes it had")
+	assert.True(t, info.ModTime().Equal(longAgo), "what is outside is as it was, bytes and time")
 }

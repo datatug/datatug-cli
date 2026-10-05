@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/datatug/datatug-cli/pkg/httpsource"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -178,15 +180,33 @@ func TestExecRunQuery_HTTPSource_AddressBlocked_MapsToSourceUnavailable(t *testi
 // wording. No network is involved: NewDB's own config validation rejects
 // this before any request is attempted, so this too runs through the real,
 // unmodified production path.
+//
+// The refusal comes from the open, and an open failure of a source of any other
+// kind is answered with the sentence dbcopy built for it. The HTTP source keeps
+// its own answer: the sentence that names only the query, and the snapshot that
+// the project recorded for it (a fixture is written, so the list is not empty).
 func TestExecRunQuery_HTTPSource_SchemeError_MapsToSourceUnavailable(t *testing.T) {
-	projectDir, projectID := writeRunQueryHTTPTestProject(t, "http://example.com/widgets?key={key}")
+	projectDir, projectID := writeRunQueryHTTPTestProjectWithFixture(t, "http://example.com/widgets?key={key}")
 	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
 
-	status, env := postRunQuery(t, httpRunQueryRequest(scope))
+	status, env, raw := postRunQueryRaw(t, httpRunQueryRequest(scope))
 	if status != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d (code=%q message=%q)", status, http.StatusServiceUnavailable, env.Error.Code, env.Error.Message)
 	}
 	if env.Error.Code != string(apicontract.ErrCodeSourceUnavailable) {
 		t.Errorf("code = %q, want %q", env.Error.Code, apicontract.ErrCodeSourceUnavailable)
+	}
+	if want := `query "reference/widget": its HTTP source is unreachable or misconfigured`; env.Error.Message != want {
+		t.Errorf("message = %q, want %q", env.Error.Message, want)
+	}
+	wantID, wantRecordedAt, ok := httpsource.SnapshotIdentity(projectDir, "widget")
+	if !ok {
+		t.Fatalf("SnapshotIdentity: no fixture found (test setup bug)")
+	}
+	if env.Details == nil || len(env.Details.AvailableSnapshots) != 1 {
+		t.Fatalf("details.availableSnapshots = %+v, want exactly one entry (body: %s)", env.Details, raw)
+	}
+	if got := env.Details.AvailableSnapshots[0]; got.SnapshotID != wantID || got.RecordedAt != wantRecordedAt.UTC().Format(time.RFC3339) {
+		t.Errorf("availableSnapshots[0] = %+v, want %q recorded %s", got, wantID, wantRecordedAt.UTC().Format(time.RFC3339))
 	}
 }

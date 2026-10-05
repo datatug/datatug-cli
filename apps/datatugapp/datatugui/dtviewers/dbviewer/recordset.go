@@ -39,13 +39,18 @@ type cellValue struct {
 
 func (v cellValue) String() string { return v.text }
 
-// newCellValue formats a value read from a recordset.
+// nullText is what a NULL is shown as: a NULL is no value, and is never shown as 0, an empty text, NO
+// or a zero date, which are values.
+const nullText = "NULL"
+
+// newCellValue formats a value read from a recordset. A NULL is nil there (dalgo2sql since v0.26.5
+// holds each result column with a mark for its NULL cells) and is shown as nullText.
 func newCellValue(v any, err error) cellValue {
 	if err != nil {
 		return cellValue{fmt.Sprintf("ERROR: %v", err), kindError}
 	}
 	if v == nil {
-		return cellValue{}
+		return cellValue{nullText, kindNull}
 	}
 	if t := reflect.TypeOf(v); t.Kind() == reflect.Slice {
 		item := t.Elem().String()
@@ -168,6 +173,8 @@ func (s recordsetSource) cellStyle(_ grid.Row, column int, value any) lipgloss.S
 	style := lipgloss.NewStyle()
 	v, _ := value.(cellValue)
 	switch v.kind {
+	case kindNull:
+		style = style.Foreground(theme.DarkGray).Italic(true)
 	case kindString:
 		style = style.Foreground(theme.LightSteelBlue)
 	case kindBool:

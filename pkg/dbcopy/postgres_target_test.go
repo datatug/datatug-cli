@@ -155,7 +155,9 @@ func TestSourceScopeIdentity_BindsEnvNameToTheDatabaseItPointsAt(t *testing.T) {
 	assert.Equal(t, base, identity("postgres://alice:rotated@db.example.com:5432/shop"))
 	assert.Equal(t, base, identity("postgresql://alice:s3cret@db.example.com:5432/shop?sslmode=require"))
 	assert.Equal(t, base, identity("postgres://alice:s3cret@DB.Example.COM/shop"), "host case and the default port do not make a new scope")
-	assert.Equal(t, base, identity("postgres://alice:s3cret@other.example.net/shop?host=db.example.com"))
+	// A URL whose query names the host is refused by Parse (the line that names a source would name
+	// another place), so the variable does not resolve: its identity is the one of any variable that does not.
+	assert.Equal(t, "env:SHOP_PG_URL#unresolved", identity("postgres://alice:s3cret@other.example.net/shop?host=db.example.com"))
 
 	// Repointing the variable at another database is another scope.
 	for name, repointed := range map[string]string{
@@ -185,13 +187,22 @@ func TestSourceScopeIdentity_AnUnreadablePostgresURLStillBindsToItsRedactedForm(
 	identity := func(url string) string {
 		return sourceScopeIdentity("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": url}))
 	}
-	// pgx would refuse this port, but the URL is shaped like a PostgreSQL URL.
-	base := identity("postgres://alice:s3cret@h/shop?port=notaport")
+	// pgx would refuse this port, and so does Parse now: the variable does not resolve, and its
+	// identity is the one of any variable that does not, which holds no secret.
+	const unresolved = "env:SHOP_PG_URL#unresolved"
+	assert.Equal(t, unresolved, identity("postgres://alice:s3cret@h/shop?port=notaport"))
+	assert.Equal(t, unresolved, identity("postgres://alice:rotated@other/shop?port=notaport"))
+
+	// A ref that Parse did not build still binds to where its URL points, never to who.
+	bound := func(url string) string {
+		return "env:SHOP_PG_URL#" + identityDigest(destinationParts(BackendRef{Scheme: "postgres", Path: url}, fakeEnv(nil)))
+	}
+	base := bound("postgres://alice:s3cret@h/shop?port=notaport")
 	assert.True(t, strings.HasPrefix(base, "env:SHOP_PG_URL#"), base)
-	assert.NotEqual(t, "env:SHOP_PG_URL#unresolved", base)
+	assert.NotEqual(t, unresolved, base)
 	assert.NotContains(t, base, "s3cret")
-	assert.Equal(t, base, identity("postgres://alice:rotated@h/shop?port=notaport"))
-	assert.NotEqual(t, base, identity("postgres://alice:s3cret@other/shop?port=notaport"))
+	assert.Equal(t, base, bound("postgres://alice:rotated@h/shop?port=notaport"))
+	assert.NotEqual(t, base, bound("postgres://alice:s3cret@other/shop?port=notaport"))
 }
 
 func TestSourceScopeIdentity_AVariableThatDoesNotResolveIsItsOwnScope(t *testing.T) {
@@ -271,10 +282,19 @@ func TestSourceScopeIdentity_ASplitPasswordNeverReachesTheIdentity(t *testing.T)
 			url := strings.ReplaceAll(raw, "SECRET", secret)
 			return sourceScopeIdentity("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": url}))
 		}
+		// Parse refuses the shape, so the variable does not resolve: the identity of any variable that does
+		// not, and no part of the password is an input of it.
 		first := identity("FIRST")
-		assert.True(t, strings.HasPrefix(first, "env:SHOP_PG_URL#"), name)
-		assert.NotEqual(t, "env:SHOP_PG_URL#unresolved", first, name)
+		assert.Equal(t, "env:SHOP_PG_URL#unresolved", first, name)
 		assert.Equal(t, first, identity("SECOND"), name+": the part of the password after the split is not an input of the identity")
+
+		// A ref that Parse did not build still binds to where its URL points.
+		bound := func(secret string) string {
+			url := strings.ReplaceAll(raw, "SECRET", secret)
+			return "env:SHOP_PG_URL#" + identityDigest(destinationParts(BackendRef{Scheme: "postgres", Path: url}, fakeEnv(nil)))
+		}
+		assert.NotEqual(t, "env:SHOP_PG_URL#unresolved", bound("FIRST"), name)
+		assert.Equal(t, bound("FIRST"), bound("SECOND"), name+": the part of the password after the split is not an input of the identity")
 	}
 }
 
@@ -377,11 +397,20 @@ func TestSourceScopeIdentity_AColonInTheUserNeverReachesTheIdentity(t *testing.T
 			url = strings.ReplaceAll(url, "SECRET", secret)
 			return sourceScopeIdentity("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": url}))
 		}
-		first := identity(raw, "FIRST")
-		assert.True(t, strings.HasPrefix(first, "env:SHOP_PG_URL#"), name)
+		// Parse refuses the shape, so the variable does not resolve: the identity of any variable that does
+		// not, and no part of the user name or the password is an input of it.
+		assert.Equal(t, "env:SHOP_PG_URL#unresolved", identity(raw, "FIRST"), name)
+		assert.Equal(t, identity(raw, "FIRST"), identity(raw, "SECOND"), name)
+
+		// A ref that Parse did not build still binds to where its URL points, never to who.
+		bound := func(url, secret string) string {
+			url = strings.ReplaceAll(url, "SECRET", secret)
+			return "env:SHOP_PG_URL#" + identityDigest(destinationParts(BackendRef{Scheme: "postgres", Path: url}, fakeEnv(nil)))
+		}
+		first := bound(raw, "FIRST")
 		assert.NotEqual(t, "env:SHOP_PG_URL#unresolved", first, name)
-		assert.Equal(t, first, identity(raw, "SECOND"), name+": a password rotation is not a new scope")
-		assert.NotEqual(t, first, identity(strings.ReplaceAll(raw, "db.example.com", "other.example.com"), "FIRST"), name+": another host is another scope")
+		assert.Equal(t, first, bound(raw, "SECOND"), name+": a password rotation is not a new scope")
+		assert.NotEqual(t, first, bound(strings.ReplaceAll(raw, "db.example.com", "other.example.com"), "FIRST"), name+": another host is another scope")
 	}
 }
 

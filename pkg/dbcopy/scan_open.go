@@ -34,8 +34,9 @@ func ParseWithEnv(rawURL string, lookupEnv func(string) (string, bool)) (Backend
 }
 
 // OpenSchemaScan opens a postgres source for reading its schema and nothing
-// else. It is not Open: Open keeps answering that PostgreSQL is not available
-// for queries, and the handle returned here is for the scan only. DataTug opens
+// else. It is not Open: Open is behind the preview switch (PostgresPreviewEnv)
+// and keeps one handle for the process, and the handle returned here is for the
+// scan only, which is not behind the switch (it reads the catalog). DataTug opens
 // it with exact identifiers, so a table is looked up under the name PostgreSQL
 // reports (the driver's default folds every name to lower case).
 //
@@ -50,7 +51,8 @@ func ParseWithEnv(rawURL string, lookupEnv func(string) (string, bool)) (Backend
 // the URL: it carries every connection option, not only the password) that says
 // why only for a cause that can be told apart without reading the message. The
 // driver's own error stays reachable through errors.Is and errors.As, exactly as
-// it does for Open. The context is reserved for future use, as in Open.
+// it does for Open. The context is reserved for future use: this open is
+// synchronous and does not honor cancellation (Open's does, for a postgres source).
 func (r BackendRef) OpenSchemaScan(_ context.Context) (SchemaScanDB, error) {
 	if r.Scheme != "postgres" {
 		return nil, fmt.Errorf("a schema scan through DALgo is available for postgres sources only, not %s", r.Scheme)

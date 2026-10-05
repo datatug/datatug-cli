@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"os"
 	"path/filepath"
 
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
@@ -31,3 +32,4 @@ var scanDbCatalogSeam = scanDbCatalog
 var accesspoliciesExplain = accesspolicies.Explain
 var querywriteQueryCredentialReason = querywrite.QueryCredentialReason
 var newProjectWithDatabaseSeam = newProjectWithDatabase
+var readmeWriteFile = os.WriteFile

@@ -37,8 +37,10 @@ import (
 // .github/workflows/golangci.yml): a released binary has cgo off.
 
 // writeJourneyDB creates the database every journey scans: a mixed-case table, a
-// table whose composite primary key is in a different order from its columns,
-// and a view.
+// table whose composite primary key is in a different order from its columns, a
+// foreign key, a UNIQUE column and an index (every real database has keys, and
+// what the scan found of them must still pass the validation that saves the
+// project), and a view.
 func writeJourneyDB(t *testing.T, path string) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
@@ -47,7 +49,8 @@ func writeJourneyDB(t *testing.T, path string) {
 	defer func() { _ = db.Close() }()
 	_, err = db.Exec(`
 CREATE TABLE Customer (CustomerId INTEGER PRIMARY KEY, FirstName TEXT NOT NULL, LastName TEXT);
-CREATE TABLE order_line (order_id INTEGER NOT NULL, line_no INTEGER NOT NULL, sku TEXT, qty INTEGER, PRIMARY KEY (line_no, order_id));
+CREATE TABLE order_line (order_id INTEGER NOT NULL, line_no INTEGER NOT NULL, customer_id INTEGER REFERENCES Customer(CustomerId), sku TEXT UNIQUE, qty INTEGER, PRIMARY KEY (line_no, order_id));
+CREATE INDEX order_line_qty ON order_line(qty);
 CREATE VIEW customer_names AS SELECT CustomerId, FirstName || ' ' || LastName AS full_name FROM Customer;
 INSERT INTO Customer VALUES (1, 'Ada', 'Lovelace'), (2, 'Alan', 'Turing');`)
 	require.NoError(t, err)
@@ -242,6 +245,7 @@ func TestScanJourneySQLite(t *testing.T) {
 				"main.order_line (BASE TABLE)": {
 					{Name: "order_id", PKPos: 2, DbType: "INTEGER"},
 					{Name: "line_no", PKPos: 1, DbType: "INTEGER"},
+					{Name: "customer_id", DbType: "INTEGER"},
 					{Name: "sku", DbType: "TEXT"},
 					{Name: "qty", DbType: "INTEGER"},
 				},
@@ -283,7 +287,7 @@ func TestScanJourneySQLite(t *testing.T) {
 				"project " + project.ID:            nil,
 				"source shop":                      nil,
 				"table main.Customer":              {"CustomerId", "FirstName", "LastName"},
-				"table main.order_line":            {"order_id", "line_no", "sku", "qty"},
+				"table main.order_line":            {"order_id", "line_no", "customer_id", "sku", "qty"},
 				"project_view main.customer_names": {"CustomerId", "full_name"},
 			}, objects)
 
@@ -482,4 +486,92 @@ func TestScanJourneyRelativePath(t *testing.T) {
 	sourceURL, err := resolveQuerySourceURL(context.Background(), store.GetProjectStore(id), projectDir, "local", "shop")
 	require.NoError(t, err)
 	assert.Equal(t, "sqlite://"+filepath.Join(workDir, "shop.db"), sourceURL)
+}
+
+// The names of the tables, views and indexes of the scanned file are names, and
+// nothing else: a file is not trusted, and a scan run in a working directory must
+// not create files there because of what is in the database it was asked to read.
+// Every one of these names is a valid folder name, so every table is in the project.
+func TestScanJourneyNamesInTheFileAreNotSQL(t *testing.T) {
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+	projectDir := filepath.Join(t.TempDir(), "crafted-project")
+	require.NoError(t, os.Mkdir(projectDir, 0o755))
+	dbDir := t.TempDir()
+	dbPath := filepath.Join(dbDir, "crafted.db")
+	attachName := `x'); ATTACH DATABASE 'p.db' AS p; CREATE TABLE p.t(c); --`
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec(`
+CREATE TABLE "it's" (id INTEGER PRIMARY KEY, code TEXT UNIQUE);
+CREATE TABLE "a]b" (id INTEGER PRIMARY KEY, its_id INTEGER REFERENCES "it's"(id), qty INTEGER);
+CREATE INDEX "ix'); ATTACH DATABASE 'q.db' AS q; --" ON "a]b"(qty);
+CREATE TABLE "` + attachName + `" (c TEXT);`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	stderr, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "crafted", "--env", "local")
+
+	require.NoError(t, err, "a table named with an apostrophe or a bracket is a table")
+	assert.Empty(t, stderr)
+	schema, err := api.GetCatalogSchema(projectDir, "local", "crafted")
+	require.NoError(t, err)
+	assert.Equal(t, map[string][]journeyColumn{
+		"main.it's (BASE TABLE)":               {{Name: "id", PKPos: 1, DbType: "INTEGER"}, {Name: "code", DbType: "TEXT"}},
+		"main.a]b (BASE TABLE)":                {{Name: "id", PKPos: 1, DbType: "INTEGER"}, {Name: "its_id", DbType: "INTEGER"}, {Name: "qty", DbType: "INTEGER"}},
+		"main." + attachName + " (BASE TABLE)": {{Name: "c", DbType: "TEXT"}},
+	}, relationColumns(schema))
+	for _, dir := range []string{workDir, projectDir, dbDir} {
+		for _, name := range []string{"p.db", "q.db"} {
+			assert.NoFileExists(t, filepath.Join(dir, name), "the scan made a file because of a name in the database")
+		}
+	}
+	entries, err := os.ReadDir(workDir)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "nothing was created in the working directory")
+}
+
+// The path of the database is a path, not a URI: a file whose name has a "#", a
+// "?" or a "%" in it is scanned, not another file made beside it.
+func TestScanJourneyPathWithURICharacters(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "shop-project")
+	require.NoError(t, os.Mkdir(projectDir, 0o755))
+	dbDir := t.TempDir()
+	dbPath := filepath.Join(dbDir, "shop#1 50%.db")
+	writeJourneyDB(t, dbPath)
+
+	stderr, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
+
+	require.NoError(t, err)
+	assert.Empty(t, stderr)
+	schema, err := api.GetCatalogSchema(projectDir, "local", "shop")
+	require.NoError(t, err)
+	assert.Len(t, schema.Relations, 3, "the tables and the view of the file that was named")
+	catalogFile := readJSONMap(t, filepath.Join(projectDir, "environments", "local", "catalogs", "shop", "shop.db.json"))
+	assert.Equal(t, dbPath, catalogFile["path"])
+	entries, err := os.ReadDir(dbDir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "no other database was created beside it")
+	assert.Equal(t, "shop#1 50%.db", entries[0].Name())
+}
+
+// A scan into a folder that has a README.md (a repository's, or the project's own
+// that its owner edited) leaves it as it is, on the first scan and on every rescan.
+func TestScanJourneyKeepsTheReadmeOfTheFolder(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "shop-project")
+	require.NoError(t, os.Mkdir(projectDir, 0o755))
+	dbPath := filepath.Join(t.TempDir(), "shop.db")
+	writeJourneyDB(t, dbPath)
+	readme := filepath.Join(projectDir, "README.md")
+	const mine = "# Shop analytics\n\nHow we look at the shop database.\n"
+	require.NoError(t, os.WriteFile(readme, []byte(mine), 0o644))
+
+	for scan := 1; scan <= 2; scan++ {
+		_, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
+		require.NoError(t, err, "scan %d", scan)
+		content, err := os.ReadFile(readme)
+		require.NoError(t, err)
+		assert.Equal(t, mine, string(content), "scan %d", scan)
+	}
+	assert.FileExists(t, filepath.Join(projectDir, "datatug-project.json"))
 }

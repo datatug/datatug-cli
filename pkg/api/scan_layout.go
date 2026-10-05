@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -35,10 +37,12 @@ type ScannedCatalog struct {
 // catalog file and one columns file for each table and view.
 //
 // The project is saved without the schemas of its database models: a model file
-// is an id and its environments, and the tables are the columns files. A table or
-// view, or a schema, whose name cannot be a folder name, or that differs from
-// another by case only, is left out of the project and named on warnings; the
-// others are still written. Nothing is written when the project is invalid.
+// is an id and its environments, and the tables are the columns files. A schema, or
+// a table or view, whose name cannot be a folder name, or that differs from another
+// of its kind in the same folder by case only, or whose columns file would have a
+// name longer than a file can have, is left out of the project and named on
+// warnings; the others are still written. Nothing is written when the project is
+// invalid.
 func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, projectDir string, project *datatug.Project, scanned ScannedCatalog, warnings io.Writer) error {
 	saved := *project
 	saved.DbModels = make(datatug.DbModels, len(project.DbModels))
@@ -47,7 +51,7 @@ func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, project
 		withoutSchemas.Schemas = nil
 		saved.DbModels[i] = &withoutSchemas
 	}
-	if err := store.SaveProject(ctx, &saved); err != nil {
+	if err := saveKeepingReadme(ctx, store, projectDir, &saved); err != nil {
 		return fmt.Errorf("failed to save datatug project [%v]: %w", project.ID, err)
 	}
 
@@ -71,17 +75,19 @@ func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, project
 		return fmt.Errorf("failed to save the catalog file of %q: %w", scanned.ID, err)
 	}
 
-	for _, schema := range catalog.Schemas {
-		if problem := folderNameProblem(schema.ID); problem != "" {
-			_, _ = fmt.Fprintf(warnings, "warning: schema %q is left out of the project: %s\n", schema.ID, problem)
-			continue
-		}
+	schemas := foldersThatFit(catalog.Schemas,
+		func(schema *datatug.DbSchema) string { return schema.ID },
+		folderNameProblem,
+		func(schema *datatug.DbSchema, reason string) {
+			_, _ = fmt.Fprintf(warnings, "warning: schema %q is left out of the project: %s\n", schema.ID, reason)
+		})
+	for _, schema := range schemas {
 		relations := []struct {
 			folder string
 			tables []*datatug.CollectionInfo
 		}{{"tables", schema.Tables}, {"views", schema.Views}}
 		for _, relation := range relations {
-			for _, table := range folderSafeTables(schema.ID, relation.folder, relation.tables, warnings) {
+			for _, table := range tablesThatFit(schema.ID, relation.folder, relation.tables, warnings) {
 				if err := writeScannedColumnsFile(projectDir, catalog.DbModel, schema.ID, relation.folder, scanned.Environment, table); err != nil {
 					return err
 				}
@@ -89,6 +95,29 @@ func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, project
 		}
 	}
 	return nil
+}
+
+// saveKeepingReadme saves project, and leaves the README.md of the project folder
+// as it was if there was one. datatug-core writes a README.md of generated text on
+// every save and replaces what is there, which `datatug init` is entitled to do to
+// a folder it makes but a scan is not: it runs in a folder that holds a repository's
+// README, and again after the README of the project was edited. The README is read
+// before the save and put back after it, whether the save worked or not.
+func saveKeepingReadme(ctx context.Context, store datatug.ProjectStore, projectDir string, project *datatug.Project) error {
+	path := filepath.Join(projectDir, "README.md")
+	original, readErr := os.ReadFile(path)
+	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+		return fmt.Errorf("failed to read the README.md of the project, which a scan keeps: %w", readErr)
+	}
+	saveErr := store.SaveProject(ctx, project)
+	if readErr != nil {
+		return saveErr // there was no README: the generated one stays
+	}
+	var putBackErr error
+	if err := readmeWriteFile(path, original, 0o644); err != nil { // the file exists, so its permissions stay
+		putBackErr = fmt.Errorf("failed to put back the README.md of the project: %w", err)
+	}
+	return errors.Join(saveErr, putBackErr)
 }
 
 // findScannedCatalog is the catalog of project that scanned names, with the
@@ -106,39 +135,75 @@ func findScannedCatalog(project *datatug.Project, scanned ScannedCatalog) (*data
 	return nil, nil
 }
 
-// folderSafeTables is the tables that can be written as folders of one schema's
-// tables or views folder, in name order. Each table that cannot is named on
-// warnings, with the reason, and left out: a name that cannot be a folder name,
-// and any name that differs by case only from one that is kept (the first in name
-// order stays), as two such folders are one on a case-insensitive file system.
-func folderSafeTables(schema, folder string, tables []*datatug.CollectionInfo, warnings io.Writer) []*datatug.CollectionInfo {
-	sorted := append([]*datatug.CollectionInfo(nil), tables...)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Name() < sorted[j].Name() })
-	var kept []*datatug.CollectionInfo
+// foldersThatFit is the items that can be written as folders of one parent folder,
+// in name order. Each item that cannot is handed to leftOut, with the reason, and
+// left out: one whose name has a problem (problem is "" when it has none), and any
+// whose name differs by case only from one that is kept (the first in name order
+// stays), as two such folders are one on a case-insensitive file system.
+func foldersThatFit[T any](items []T, name func(T) string, problem func(name string) string, leftOut func(item T, reason string)) []T {
+	sorted := append([]T(nil), items...)
+	sort.SliceStable(sorted, func(i, j int) bool { return name(sorted[i]) < name(sorted[j]) })
+	var kept []T
 	keptByFoldedName := map[string]string{}
-	for _, table := range sorted {
-		name := table.Name()
-		if problem := folderNameProblem(name); problem != "" {
-			_, _ = fmt.Fprintf(warnings, "warning: %s %q of schema %q is left out of the project: %s\n", relationKind(folder), name, schema, problem)
+	for _, item := range sorted {
+		itemName := name(item)
+		if reason := problem(itemName); reason != "" {
+			leftOut(item, reason)
 			continue
 		}
-		if first, ok := keptByFoldedName[strings.ToLower(name)]; ok {
-			_, _ = fmt.Fprintf(warnings, "warning: %s %q of schema %q is left out of the project: its name differs only by case from %q, which is kept, and the two would be one folder on a case-insensitive file system\n", relationKind(folder), name, schema, first)
+		if first, ok := keptByFoldedName[strings.ToLower(itemName)]; ok {
+			leftOut(item, fmt.Sprintf("its name differs only by case from %q, which is kept, and the two would be one folder on a case-insensitive file system", first))
 			continue
 		}
-		keptByFoldedName[strings.ToLower(name)] = name
-		kept = append(kept, table)
+		keptByFoldedName[strings.ToLower(itemName)] = itemName
+		kept = append(kept, item)
 	}
 	return kept
+}
+
+// tablesThatFit is the tables (or views) that can be written as folders of one
+// schema's tables or views folder, with their columns files: foldersThatFit, and a
+// table whose columns file would have too long a name is left out too. Each one left
+// out is named on warnings.
+func tablesThatFit(schema, folder string, tables []*datatug.CollectionInfo, warnings io.Writer) []*datatug.CollectionInfo {
+	return foldersThatFit(tables,
+		func(table *datatug.CollectionInfo) string { return table.Name() },
+		func(name string) string {
+			if problem := folderNameProblem(name); problem != "" {
+				return problem
+			}
+			return columnsFileNameProblem(schema, name)
+		},
+		func(table *datatug.CollectionInfo, reason string) {
+			_, _ = fmt.Fprintf(warnings, "warning: %s %q of schema %q is left out of the project: %s\n", relationKind(folder), table.Name(), schema, reason)
+		})
+}
+
+// columnsFileNameProblem is why the columns file of a table cannot be written, or
+// "" when it can: its name, <schema>.<name>.columns.json, is longer than a file name
+// can be on most file systems, which two names that are each a valid folder name can
+// make.
+func columnsFileNameProblem(schema, name string) string {
+	file := storage.JsonFileName(schema+"."+name, storage.ColumnsFileSuffix)
+	if len(file) > maxFileNameBytes {
+		return fmt.Sprintf("its columns file would be named \"<schema>.<name>.columns.json\", %d bytes, and a file name can have %d", len(file), maxFileNameBytes)
+	}
+	return ""
 }
 
 // relationKind is "table" for the tables folder and "view" for the views folder,
 // for the words of a message.
 func relationKind(folder string) string { return strings.TrimSuffix(folder, "s") }
 
-// maxFolderNameBytes keeps a folder name, and the "<schema>.<name>.columns.json"
-// file inside it, within the 255 bytes most file systems allow for a name.
+// maxFolderNameBytes is the longest name of a schema, table or view that a scan
+// writes as a folder: well within the 255 bytes most file systems allow for a name.
+// The columns file in a table's folder is named "<schema>.<name>.columns.json", so
+// its name can be longer than either, and has its own limit, maxFileNameBytes.
 const maxFolderNameBytes = 200
+
+// maxFileNameBytes is the longest name a file has on the file systems a project is
+// opened on (ext4, APFS and NTFS allow 255 bytes).
+const maxFileNameBytes = 255
 
 // windowsDeviceNames are names Windows reserves, with or without an extension: a
 // folder cannot have one, and a project is pushed and opened on any system.
@@ -214,8 +279,10 @@ func sqliteCatalogPath(projectDir, dbPath string) (string, error) {
 		return "", err
 	}
 	if rel, ok := relativeInside(projectAbsolute, absolute); ok {
-		// A first segment that starts like a home directory would be read as one.
-		if strings.HasPrefix(rel, "~") || strings.HasPrefix(rel, "$HOME") {
+		// A path that starts with "~" or "$" may be read as a home directory
+		// ("~", "$HOME", "${HOME}": ResolveCatalogPath expands each), so a file
+		// in a first folder named like that is written "./<folder>/...".
+		if strings.HasPrefix(rel, "~") || strings.HasPrefix(rel, "$") {
 			rel = "./" + rel
 		}
 		return rel, nil

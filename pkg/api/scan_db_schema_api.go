@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"time"
 
@@ -269,23 +270,36 @@ func newProjectWithDatabase(environment string, dbServer datatug.ServerRef, dbCa
 // stub that fails on its first use.
 const sqliteScanDriver = "sqlite"
 
-// checkSQLiteFile is nil when connectionParams name an existing SQLite file. A
-// scan must not open a path that is not one: SQLite creates an empty database
-// there, and the scan of a mistyped path would succeed with no tables.
-func checkSQLiteFile(connectionParams dbconnection.Params) error {
+// existingSQLiteFile is the path of the SQLite file connectionParams name, which
+// must be an existing file. A scan must not open a path that is not one: SQLite
+// creates an empty database there, and the scan of a mistyped path would succeed
+// with no tables.
+func existingSQLiteFile(connectionParams dbconnection.Params) (string, error) {
 	withPath, ok := connectionParams.(interface{ Path() string })
 	if !ok || withPath.Path() == "" {
-		return fmt.Errorf("a SQLite scan needs connection parameters that name the database file")
+		return "", fmt.Errorf("a SQLite scan needs connection parameters that name the database file")
 	}
 	path := withPath.Path()
 	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("cannot scan SQLite database: %w", err)
+		return "", fmt.Errorf("cannot scan SQLite database: %w", err)
 	}
 	if info.IsDir() {
-		return fmt.Errorf("cannot scan SQLite database: %s is a folder, not a database file", path)
+		return "", fmt.Errorf("cannot scan SQLite database: %s is a folder, not a database file", path)
 	}
-	return nil
+	return path, nil
+}
+
+// sqliteReadOnlyDSN is the connection string with which a scan opens the SQLite
+// file at path: read-only, so that nothing the scan runs can change the database
+// and a path is never created, and with the path escaped. The driver opens a
+// "file:" connection string as a URI, where "?", "#" and "%" are not part of the
+// file name, so a file named a#b.db would otherwise be read as a file named a, which
+// is created, empty, if it is not there. It is the path that existingSQLiteFile
+// checked that is opened.
+func sqliteReadOnlyDSN(path string) string {
+	uri := url.URL{Scheme: "file", OmitHost: true, Path: path, RawQuery: "mode=ro"}
+	return uri.String()
 }
 
 // driverTitle is the title of a driver item in a project. datatug-core refuses
@@ -317,13 +331,16 @@ func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Param
 	var db *sql.DB
 
 	driverName := server.Driver
+	dsn := connectionParams.ConnectionString()
 	if server.Driver == dbconnection.DriverSQLite3 {
-		if err = checkSQLiteFile(connectionParams); err != nil {
+		var path string
+		if path, err = existingSQLiteFile(connectionParams); err != nil {
 			return nil, err
 		}
 		driverName = sqliteScanDriver
+		dsn = sqliteReadOnlyDSN(path)
 	}
-	if db, err = sql.Open(driverName, connectionParams.ConnectionString()); err != nil {
+	if db, err = sql.Open(driverName, dsn); err != nil {
 		return nil, fmt.Errorf("failed to open SQL db: %w", err)
 	}
 

@@ -200,16 +200,16 @@ func TestSaveScannedProject_LeavesOutNamesThatCannotBeFolders(t *testing.T) {
 
 	require.NoError(t, SaveScannedProject(context.Background(), layoutStore(projectDir), projectDir, project, layoutScanned, &warnings), "a name left out is not a failure")
 
-	// Each is named, with its schema and the reason, in name order; the rest of the
-	// scan is written.
+	// Each is named, with its schema and the reason, in name order, a schema before
+	// the tables of the schemas after it; the rest of the scan is written.
 	assert.Equal(t, strings.Join([]string{
+		`warning: schema "archive/old" is left out of the project: its name has the character "/", which a folder name cannot have on every system`,
 		`warning: table "Orders" of schema "main" is left out of the project: its name differs only by case from "ORDERS", which is kept, and the two would be one folder on a case-insensitive file system`,
 		`warning: table "a/b" of schema "main" is left out of the project: its name has the character "/", which a folder name cannot have on every system`,
 		`warning: table "nul" of schema "main" is left out of the project: its name is one Windows reserves for a device`,
 		`warning: table "orders" of schema "main" is left out of the project: its name differs only by case from "ORDERS", which is kept, and the two would be one folder on a case-insensitive file system`,
 		`warning: view "totals" of schema "main" is left out of the project: its name differs only by case from "Totals", which is kept, and the two would be one folder on a case-insensitive file system`,
 		`warning: view "v:1" of schema "main" is left out of the project: its name has the character ":", which a folder name cannot have on every system`,
-		`warning: schema "archive/old" is left out of the project: its name has the character "/", which a folder name cannot have on every system`,
 		``,
 	}, "\n"), warnings.String())
 	var written []string
@@ -224,6 +224,138 @@ func TestSaveScannedProject_LeavesOutNamesThatCannotBeFolders(t *testing.T) {
 		"dbmodels/shop/main/views/Totals/main.Totals.columns.json",
 	}, written)
 	assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "shop", "archive"))
+}
+
+// A schema is a folder like a table: two that differ only by case are one folder on
+// macOS and Windows, so the first in byte order is kept and the others are named.
+func TestSaveScannedProject_LeavesOutSchemasThatDifferOnlyByCase(t *testing.T) {
+	projectDir := t.TempDir()
+	one := func(schema string) *datatug.DbSchema {
+		return layoutSchema(schema, []*datatug.CollectionInfo{layoutTable("Customer", layoutColumn("id", "INTEGER", 1))}, nil)
+	}
+	project := layoutProject(t, "/data/shop.db", one("sales"), one("Sales"), one("SALES"), one("other"))
+	var warnings bytes.Buffer
+
+	require.NoError(t, SaveScannedProject(context.Background(), layoutStore(projectDir), projectDir, project, layoutScanned, &warnings))
+
+	assert.Equal(t, strings.Join([]string{
+		`warning: schema "Sales" is left out of the project: its name differs only by case from "SALES", which is kept, and the two would be one folder on a case-insensitive file system`,
+		`warning: schema "sales" is left out of the project: its name differs only by case from "SALES", which is kept, and the two would be one folder on a case-insensitive file system`,
+		``,
+	}, "\n"), warnings.String())
+	var written []string
+	for _, file := range filesUnder(t, projectDir) {
+		if strings.HasPrefix(file, "dbmodels/shop/") && !strings.HasSuffix(file, ".dbmodel.json") {
+			written = append(written, file)
+		}
+	}
+	assert.Equal(t, []string{
+		"dbmodels/shop/SALES/tables/Customer/SALES.Customer.columns.json",
+		"dbmodels/shop/other/tables/Customer/other.Customer.columns.json",
+	}, written, "exactly as the schema names are written, with their case")
+}
+
+// The columns file of a table is named <schema>.<name>.columns.json and sits in
+// the table's folder: a table whose file name would be longer than the 255 bytes a
+// file name can have is left out and named, and the others are written; it does not
+// fail the scan half way.
+func TestSaveScannedProject_LeavesOutATableWhoseColumnsFileNameIsTooLong(t *testing.T) {
+	projectDir := t.TempDir()
+	schemaName := strings.Repeat("s", 150)
+	fits := strings.Repeat("t", 255-len(schemaName)-len(".columns.json")-1) // the file name is exactly 255 bytes
+	tooLong := fits + "t"
+	project := layoutProject(t, "/data/shop.db", layoutSchema(schemaName,
+		[]*datatug.CollectionInfo{
+			layoutTable(fits, layoutColumn("id", "INTEGER", 1)),
+			layoutTable(tooLong, layoutColumn("id", "INTEGER", 1)),
+			layoutTable("short", layoutColumn("id", "INTEGER", 1)),
+		},
+		[]*datatug.CollectionInfo{layoutView(tooLong, layoutColumn("id", "INTEGER", 0))},
+	))
+	require.Equal(t, 255, len(schemaName+"."+fits+".columns.json"))
+	var warnings bytes.Buffer
+
+	require.NoError(t, SaveScannedProject(context.Background(), layoutStore(projectDir), projectDir, project, layoutScanned, &warnings), "a table left out is not a failure")
+
+	assert.Equal(t, strings.Join([]string{
+		`warning: table "` + tooLong + `" of schema "` + schemaName + `" is left out of the project: its columns file would be named "<schema>.<name>.columns.json", 256 bytes, and a file name can have 255`,
+		`warning: view "` + tooLong + `" of schema "` + schemaName + `" is left out of the project: its columns file would be named "<schema>.<name>.columns.json", 256 bytes, and a file name can have 255`,
+		``,
+	}, "\n"), warnings.String())
+	var written []string
+	for _, file := range filesUnder(t, projectDir) {
+		if strings.HasPrefix(file, "dbmodels/shop/"+schemaName+"/") {
+			written = append(written, strings.TrimPrefix(file, "dbmodels/shop/"+schemaName+"/"))
+		}
+	}
+	assert.Equal(t, []string{
+		"tables/short/" + schemaName + ".short.columns.json",
+		"tables/" + fits + "/" + schemaName + "." + fits + ".columns.json",
+	}, written)
+}
+
+// SaveProject writes a README.md of generated text; a scan into a folder that has
+// one (a repository's, or the project's own after the user edited it) must not
+// replace it, as a scan saved nothing before and replaced nothing.
+func TestSaveScannedProject_KeepsAReadmeThatIsAlreadyThere(t *testing.T) {
+	ctx := context.Background()
+	table := layoutTable("Customer", layoutColumn("id", "INTEGER", 1))
+	schema := layoutSchema("main", []*datatug.CollectionInfo{table}, nil)
+	const mine = "# My notes\n\nWritten by hand, not by DataTug.\n"
+
+	t.Run("a README that is there is kept, by a first scan and by a rescan", func(t *testing.T) {
+		projectDir := t.TempDir()
+		readme := filepath.Join(projectDir, "README.md")
+		require.NoError(t, os.WriteFile(readme, []byte(mine), 0o600))
+		for scan := 1; scan <= 2; scan++ {
+			require.NoError(t, SaveScannedProject(ctx, layoutStore(projectDir), projectDir, layoutProject(t, "/data/shop.db", schema), layoutScanned, &bytes.Buffer{}), "scan %d", scan)
+			content, err := os.ReadFile(readme)
+			require.NoError(t, err)
+			assert.Equal(t, mine, string(content), "scan %d", scan)
+		}
+		info, err := os.Stat(readme)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "the file is the user's, with its permissions")
+		assert.FileExists(t, filepath.Join(projectDir, "datatug-project.json"), "and the rest of the project is written")
+	})
+
+	t.Run("without one, the generated README is written", func(t *testing.T) {
+		projectDir := t.TempDir()
+		require.NoError(t, SaveScannedProject(ctx, layoutStore(projectDir), projectDir, layoutProject(t, "/data/shop.db", schema), layoutScanned, &bytes.Buffer{}))
+		content, err := os.ReadFile(filepath.Join(projectDir, "README.md"))
+		require.NoError(t, err)
+		assert.NotEmpty(t, content)
+		assert.NotEqual(t, mine, string(content))
+	})
+
+	t.Run("a project that cannot be saved leaves the README as it was", func(t *testing.T) {
+		projectDir := t.TempDir()
+		readme := filepath.Join(projectDir, "README.md")
+		require.NoError(t, os.WriteFile(readme, []byte(mine), 0o600))
+		project := layoutProject(t, "/data/shop.db", schema)
+		project.Access = ""
+		err := SaveScannedProject(ctx, layoutStore(projectDir), projectDir, project, layoutScanned, &bytes.Buffer{})
+		assert.ErrorContains(t, err, "project validation failed")
+		content, readErr := os.ReadFile(readme)
+		require.NoError(t, readErr)
+		assert.Equal(t, mine, string(content))
+	})
+
+	t.Run("a README that cannot be read stops the scan before it writes anything", func(t *testing.T) {
+		projectDir := t.TempDir()
+		require.NoError(t, os.Mkdir(filepath.Join(projectDir, "README.md"), 0o755))
+		err := SaveScannedProject(ctx, layoutStore(projectDir), projectDir, layoutProject(t, "/data/shop.db", schema), layoutScanned, &bytes.Buffer{})
+		assert.ErrorContains(t, err, "failed to read the README.md of the project, which a scan keeps")
+		assert.Equal(t, []string(nil), filesUnder(t, projectDir), "no file was written")
+	})
+
+	t.Run("a README that cannot be put back is an error that says so", func(t *testing.T) {
+		projectDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(projectDir, "README.md"), []byte(mine), 0o600))
+		setSeam(t, &readmeWriteFile, func(string, []byte, os.FileMode) error { return errors.New("disk full") })
+		err := SaveScannedProject(ctx, layoutStore(projectDir), projectDir, layoutProject(t, "/data/shop.db", schema), layoutScanned, &bytes.Buffer{})
+		assert.ErrorContains(t, err, "failed to put back the README.md of the project: disk full")
+	})
 }
 
 func TestSaveScannedProject_Failures(t *testing.T) {
@@ -297,6 +429,9 @@ func TestSqliteCatalogPath(t *testing.T) {
 		"next to the project file":                 {filepath.Join(projectDir, "shop.db"), "shop.db"},
 		"a first folder that starts like a home":   {filepath.Join(projectDir, "~backup", "shop.db"), "./~backup/shop.db"},
 		"a first folder that starts like $HOME":    {filepath.Join(projectDir, "$HOME", "shop.db"), "./$HOME/shop.db"},
+		"a first folder that starts like ${HOME}":  {filepath.Join(projectDir, "${HOME}", "shop.db"), "./${HOME}/shop.db"},
+		"a first folder that starts like $HOME...": {filepath.Join(projectDir, "$HOMEWORK", "shop.db"), "./$HOMEWORK/shop.db"},
+		"a dollar sign after the first character":  {filepath.Join(projectDir, "data$", "shop.db"), "data$/shop.db"},
 		"a folder whose name starts with two dots": {filepath.Join(projectDir, "..old", "shop.db"), "..old/shop.db"},
 		"under the home directory":                 {filepath.Join(home, "dbs", "shop.db"), "~/dbs/shop.db"},
 		"beside the project, not inside it":        {filepath.Join(root, "work", "shop.db"), filepath.Join(root, "work", "shop.db")},

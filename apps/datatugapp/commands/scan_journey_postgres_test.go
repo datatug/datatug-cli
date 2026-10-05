@@ -720,8 +720,9 @@ func TestScanJourneyPostgresNamesThatCannotBeFolders(t *testing.T) {
 func TestScanJourneyPostgresReadErrorsAreClassified(t *testing.T) {
 	hint := "the PostgreSQL connection string is read from the environment variable " + journeyPgVar
 	for _, tc := range []struct {
-		name string
-		err  error
+		name  string
+		err   error
+		phase string
 		// want is the whole message, and code the exit code of the command.
 		want string
 		code int
@@ -744,10 +745,27 @@ func TestScanJourneyPostgresReadErrorsAreClassified(t *testing.T) {
 			want: "failed to get dbCatalog metadata: the attempt timed out; " + hint,
 			code: 4,
 		},
+		{
+			name:  "a pooled connection fails while reading a table",
+			err:   &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork},
+			phase: "description",
+			want:  "failed to get dbCatalog metadata: the server could not be reached; " + hint,
+			code:  4,
+		},
+		{
+			name:  "a pooled connection fails while reading indexes",
+			err:   &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork},
+			phase: "indexes",
+			want:  "failed to get dbCatalog metadata: the server could not be reached; " + hint,
+			code:  4,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			projectDir := filepath.Join(t.TempDir(), "shop-project")
-			boom := &failingPgDatabase{fakePgDatabase: newJourneyPgDatabase(), err: tc.err}
+			var boom dbcopy.SchemaScanDB = &failingPgDatabase{fakePgDatabase: newJourneyPgDatabase(), err: tc.err}
+			if tc.phase != "" {
+				boom = &failedReadPgDatabase{fakePgDatabase: newJourneyPgDatabase(), err: tc.err, phase: tc.phase}
+			}
 			usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return boom })
 
 			_, err := runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", "local")...)
@@ -779,6 +797,27 @@ func (f *failingPgDatabase) ListCollections(context.Context, *record.Key) ([]dal
 }
 
 func (f *failingPgDatabase) ListSchemas(context.Context) ([]string, error) { return nil, f.err }
+
+// failedReadPgDatabase answers the listings and fails one call made by a scan worker.
+type failedReadPgDatabase struct {
+	*fakePgDatabase
+	err   error
+	phase string
+}
+
+func (f *failedReadPgDatabase) DescribeCollection(ctx context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+	if f.phase == "description" {
+		return nil, f.err
+	}
+	return f.fakePgDatabase.DescribeCollection(ctx, ref)
+}
+
+func (f *failedReadPgDatabase) ListIndexes(ctx context.Context, ref *dal.CollectionRef) ([]dbschema.IndexDef, error) {
+	if f.phase == "indexes" {
+		return nil, f.err
+	}
+	return f.fakePgDatabase.ListIndexes(ctx, ref)
+}
 
 // propertyPgModes are the ways the fake server of the property test answers a scan.
 var propertyPgModes = []string{"the open fails", "the listing fails", "it works"}

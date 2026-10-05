@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sync"
 
 	"github.com/dal-go/dalgo2postgres"
 	"github.com/datatug/datatug-cli/internal/plainfs"
@@ -28,8 +29,8 @@ const DriverPostgres = "postgres"
 // descriptors: a PostgreSQL catalog's path points at one of them.
 const postgresDescriptorFolder = "connections"
 
-// recordableHost is a host name or an address: what a scan accepts of the host of its URL,
-// which it names on its log line. A host list, or the path of a socket, is refused. (The
+// recordableHost is a host name or an address: what a scan accepts of the host of its URL.
+// A host list, or the path of a socket, is refused. (The
 // project records no host: the server of a PostgreSQL project is its driver.)
 var recordableHost = regexp.MustCompile(`^[A-Za-z0-9:][A-Za-z0-9._:-]*$`)
 
@@ -39,8 +40,7 @@ var recordableHost = regexp.MustCompile(`^[A-Za-z0-9:][A-Za-z0-9._:-]*$`)
 // the password or the rest of the URL, for the parameters or a pointer to them
 // (String and GoString). Their accessors do carry the host, port and user of the
 // URL, as dbconnection.Params has them; the scan records none of them in a project
-// (ScannedServer), and names what it connects to by Display, which holds no user and
-// no password.
+// (ScannedServer), and its log names only the environment variable.
 type PostgresScanParams struct {
 	dsnEnv         string
 	catalog        string
@@ -58,7 +58,7 @@ var _ dbconnection.Params = (*PostgresScanParams)(nil)
 // The environment and the catalog each name a file under the project's
 // connections folder, so each must be a plain name (dbcopy.IsPlainSourceID, the one
 // definition: the routes that read the project apply the same). The host of the URL is
-// named on the log line of the scan, so it must be a host name or an address.
+// required to be one host name or address, which dbconnection.Params.Server may expose to callers.
 func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, environment, catalog string) (*PostgresScanParams, error) {
 	ref, err := dbcopy.ParseWithEnv("env:"+dsnEnv, lookupEnv)
 	if err != nil {
@@ -74,6 +74,7 @@ func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, enviro
 		return nil, fmt.Errorf("the URL in environment variable %s names no host (a unix-socket connection cannot be scanned yet)", dsnEnv)
 	}
 	if !recordableHost.MatchString(target.Host) {
+		// Even though the scan does not save the host, generic Params callers can read Server().
 		return nil, fmt.Errorf("the host in environment variable %s cannot be recorded in a project: use a host name or an address", dsnEnv)
 	}
 	if !dbcopy.IsPlainSourceID(environment) || !dbcopy.IsPlainSourceID(catalog) {
@@ -237,6 +238,12 @@ func OpenSchemaScanForTest() func(dbcopy.BackendRef, context.Context) (dbcopy.Sc
 	return openSchemaScan
 }
 
+// isConnectionReadError identifies a failed connection, timeout or cancellation in a reader error.
+func isConnectionReadError(err error) bool {
+	var connectionErr *dalgo2postgres.ConnectionError
+	return errors.As(err, &connectionErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
 // catalogReadFailure is the error the scan reports for err, the failure of its read of the catalog. A connection that
 // failed during the read (the adapter's connection error, or the end of a context: the clock or a cancel) is the
 // failure OpenFailure reports, which points at where the connection string is read from; the scan exits 4 for it. Any
@@ -244,8 +251,7 @@ func OpenSchemaScanForTest() func(dbcopy.BackendRef, context.Context) (dbcopy.Sc
 // told as one: it is one fixed sentence that says only that the read failed, with no hint and no word of the
 // driver's, which can quote the connection string. The cause stays reachable through errors.Is and errors.As.
 func catalogReadFailure(source dbcopy.BackendRef, err error) error {
-	var connectionErr *dalgo2postgres.ConnectionError
-	if errors.As(err, &connectionErr) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if isConnectionReadError(err) {
 		return source.OpenFailure(err)
 	}
 	return &catalogReadError{cause: err}
@@ -279,9 +285,25 @@ func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Para
 	defer func() { _ = scanDB.Close() }()
 
 	catalogID := connectionParams.Catalog()
-	provider := dalgoschema.NewSchemaProvider(scanDB, nil, catalogID, dbcopy.PostgresDefaultSchema)
+	var readMu sync.Mutex
+	var connectionReadError error
+	provider := dalgoschema.NewSchemaProviderWithErrorObserver(scanDB, nil, catalogID, dbcopy.PostgresDefaultSchema, func(readErr error) {
+		if !isConnectionReadError(readErr) {
+			return
+		}
+		readMu.Lock()
+		if connectionReadError == nil {
+			connectionReadError = readErr
+		}
+		readMu.Unlock()
+	})
 	dbCatalog, err := schemer.NewScanner(provider).ScanCatalog(ctx, catalogID)
 	if err != nil {
+		readMu.Lock()
+		if connectionReadError != nil {
+			err = errors.Join(err, connectionReadError)
+		}
+		readMu.Unlock()
 		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", catalogReadFailure(source, err))
 	}
 	dbCatalog.ID = catalogID

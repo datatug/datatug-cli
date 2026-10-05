@@ -616,27 +616,32 @@ func TestGetConstraints_ListsTheCollectionsItselfWhenNobodyDid(t *testing.T) {
 
 func TestLimited_StopsWaitingForASlotWhenTheContextEnds(t *testing.T) {
 	slots := make(chan struct{}, 1)
+	var observed []error
+	observe := func(err error) { observed = append(observed, err) }
 	slots <- struct{}{} // the only slot is taken
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	called := false
-	got, err := limited(ctx, slots, func() (int, error) { called = true; return 7, nil })
+	got, err := limited(ctx, slots, func() (int, error) { called = true; return 7, nil }, observe)
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Zero(t, got)
 	assert.False(t, called, "nothing is read once the context has ended")
 	assert.Len(t, slots, 1, "a call that never got a slot gives none back")
+	assert.Equal(t, []error{context.Canceled}, observed, "the observer sees the interrupted read")
 
 	<-slots
-	got, err = limited(context.Background(), slots, func() (int, error) { return 7, nil })
+	got, err = limited(context.Background(), slots, func() (int, error) { return 7, nil }, observe)
 	assert.NoError(t, err)
 	assert.Equal(t, 7, got)
 	assert.Empty(t, slots, "the slot is back after the call")
+	assert.Len(t, observed, 1, "a successful read is not observed as a failure")
 
 	boom := errors.New("boom")
-	_, err = limited(context.Background(), slots, func() (int, error) { return 0, boom })
+	_, err = limited(context.Background(), slots, func() (int, error) { return 0, boom }, observe)
 	assert.ErrorIs(t, err, boom)
 	assert.Empty(t, slots, "a failed call gives its slot back too")
+	assert.Equal(t, []error{context.Canceled, boom}, observed, "the observer gets the unflattened failure")
 }
 
 func TestProvider_AReadStopsWaitingWhenTheScanIsCancelled(t *testing.T) {

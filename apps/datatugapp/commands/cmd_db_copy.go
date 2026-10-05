@@ -123,6 +123,7 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 			"db copy: replicated schema for %d/%d collections (%d skipped), copied %d rows\n",
 			summary.Created, summary.Tables, len(summary.Skipped), summary.RowsCopied,
 		)
+		dbcopy.WriteSkippedIndexes(errWriter, summary)
 	}
 	return nil
 }

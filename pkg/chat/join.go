@@ -645,7 +645,7 @@ func qualifyJoinExpression(expression dal.Expression, source string, single bool
 		// arguments. An aggregate whose text says more than that would be
 		// rebuilt as a different aggregate, so it is refused.
 		if value.String() != dal.NewAggregate(value.FuncName(), distinct, value.FuncArgs()...).String() {
-			return nil, fmt.Errorf("this aggregate form is not supported here: %s", value.String())
+			return nil, fmt.Errorf("this aggregate form is not supported here: %s; remove it from the query before adding a JOIN", value.FuncName())
 		}
 		args := make([]dal.Expression, len(value.FuncArgs()))
 		for i, arg := range value.FuncArgs() {

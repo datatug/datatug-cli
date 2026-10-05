@@ -93,10 +93,16 @@ type SchemaLister interface {
 // each table's description, indexes and constraints once and shares them, and it
 // never has more than maxConcurrentReads calls to reader and counter in flight.
 func NewSchemaProvider(reader dbschema.SchemaReader, counter RecordsCounter, catalog, schema string) schemer.SchemaProvider {
+	return NewSchemaProviderWithErrorObserver(reader, counter, catalog, schema, nil)
+}
+
+// NewSchemaProviderWithErrorObserver calls observe for each reader failure before
+// the scanner can flatten its error chain. The observer must be safe for concurrent calls.
+func NewSchemaProviderWithErrorObserver(reader dbschema.SchemaReader, counter RecordsCounter, catalog, schema string, observe func(error)) schemer.SchemaProvider {
 	if reader == nil {
 		panic("reader cannot be nil")
 	}
-	return &provider{reader: reader, counter: counter, catalog: catalog, schema: schema, slots: make(chan struct{}, maxConcurrentReads)}
+	return &provider{reader: reader, counter: counter, catalog: catalog, schema: schema, slots: make(chan struct{}, maxConcurrentReads), observe: observe}
 }
 
 type provider struct {
@@ -106,7 +112,8 @@ type provider struct {
 	schema  string
 
 	// slots holds one entry for every call to the reader or the counter in flight.
-	slots chan struct{}
+	slots   chan struct{}
+	observe func(error)
 
 	defs    memo[*dbschema.CollectionDef]
 	indexes memo[[]dbschema.IndexDef]
@@ -122,14 +129,28 @@ type provider struct {
 // returns. It stops waiting when ctx ends. A call holds a slot only while it
 // talks to the reader or the counter, never while it waits for another call, so
 // no two calls can wait on each other.
-func limited[V any](ctx context.Context, slots chan struct{}, call func() (V, error)) (V, error) {
+func limited[V any](ctx context.Context, slots chan struct{}, call func() (V, error), observers ...func(error)) (V, error) {
 	select {
 	case slots <- struct{}{}:
 		defer func() { <-slots }()
-		return call()
+		value, err := call()
+		if err != nil {
+			for _, observe := range observers {
+				if observe != nil {
+					observe(err)
+				}
+			}
+		}
+		return value, err
 	case <-ctx.Done():
 		var none V
-		return none, ctx.Err()
+		err := ctx.Err()
+		for _, observe := range observers {
+			if observe != nil {
+				observe(err)
+			}
+		}
+		return none, err
 	}
 }
 
@@ -194,7 +215,7 @@ func relationKey(schema, name string) string { return schema + "\x00" + name }
 
 func (p *provider) describe(ctx context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {
 	return p.defs.get(p.key(ref), func() (*dbschema.CollectionDef, error) {
-		def, err := limited(ctx, p.slots, func() (*dbschema.CollectionDef, error) { return p.reader.DescribeCollection(ctx, ref) })
+		def, err := limited(ctx, p.slots, func() (*dbschema.CollectionDef, error) { return p.reader.DescribeCollection(ctx, ref) }, p.observe)
 		if err != nil {
 			return nil, fmt.Errorf("describe %s: %w", ref.Name(), err)
 		}
@@ -204,7 +225,7 @@ func (p *provider) describe(ctx context.Context, ref *dal.CollectionRef) (*dbsch
 
 func (p *provider) listIndexes(ctx context.Context, ref *dal.CollectionRef) ([]dbschema.IndexDef, error) {
 	return p.indexes.get(p.key(ref), func() ([]dbschema.IndexDef, error) {
-		indexes, err := limited(ctx, p.slots, func() ([]dbschema.IndexDef, error) { return p.reader.ListIndexes(ctx, ref) })
+		indexes, err := limited(ctx, p.slots, func() ([]dbschema.IndexDef, error) { return p.reader.ListIndexes(ctx, ref) }, p.observe)
 		if err != nil {
 			return nil, fmt.Errorf("list indexes of %s: %w", ref.Name(), err)
 		}
@@ -216,7 +237,7 @@ func (p *provider) listIndexes(ctx context.Context, ref *dal.CollectionRef) ([]d
 // views of a scan are each listed schema by schema.
 func (p *provider) listSchemas(ctx context.Context, lister SchemaLister) ([]string, error) {
 	return p.schemas.get("schemas", func() ([]string, error) {
-		schemas, err := limited(ctx, p.slots, func() ([]string, error) { return lister.ListSchemas(ctx) })
+		schemas, err := limited(ctx, p.slots, func() ([]string, error) { return lister.ListSchemas(ctx) }, p.observe)
 		if err != nil {
 			return nil, fmt.Errorf("list schemas: %w", err)
 		}
@@ -233,7 +254,7 @@ func (p *provider) listBySchema(ctx context.Context, lister SchemaLister, what s
 	}
 	var refs []dal.CollectionRef
 	for _, schema := range schemas {
-		inSchema, err := limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return list(schema) })
+		inSchema, err := limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return list(schema) }, p.observe)
 		if err != nil {
 			return nil, fmt.Errorf("list %s of schema %q: %w", what, schema, err)
 		}
@@ -253,7 +274,7 @@ func (p *provider) listCollections(ctx context.Context) ([]dal.CollectionRef, ma
 			return lister.ListSchemaCollections(ctx, schema)
 		})
 	} else {
-		refs, err = limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return p.reader.ListCollections(ctx, nil) })
+		refs, err = limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return p.reader.ListCollections(ctx, nil) }, p.observe)
 		if err != nil {
 			err = fmt.Errorf("list collections: %w", err)
 		}
@@ -298,7 +319,7 @@ func (p *provider) listViews(ctx context.Context) (map[string]bool, error) {
 			return reader.ListSchemaViews(ctx, schema)
 		})
 	case ViewLister:
-		refs, err = limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return reader.ListViews(ctx) })
+		refs, err = limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return reader.ListViews(ctx) }, p.observe)
 		if err != nil {
 			err = fmt.Errorf("list views: %w", err)
 		}
@@ -538,7 +559,7 @@ func (p *provider) GetConstraints(ctx context.Context, _, schema, table string) 
 // table. The reader lists a constraint's name and type; the columns are those
 // of the unique index of the same name.
 func (p *provider) uniqueConstraints(ctx context.Context, ref *dal.CollectionRef, tableRef schemer.TableRef) ([]*schemer.Constraint, error) {
-	listed, err := limited(ctx, p.slots, func() ([]dbschema.ConstraintDef, error) { return p.reader.ListConstraints(ctx, ref) })
+	listed, err := limited(ctx, p.slots, func() ([]dbschema.ConstraintDef, error) { return p.reader.ListConstraints(ctx, ref) }, p.observe)
 	if err != nil {
 		if errors.Is(err, dal.ErrNotSupported) {
 			return nil, nil
@@ -632,7 +653,7 @@ func (r *foreignKeysReader) NextForeignKey() (schemer.ForeignKey, error) {
 // and columns; the key's name and the referenced columns come from describing
 // the referencing table, and are left empty if no key of it matches.
 func (p *provider) GetReferrers(ctx context.Context, schema, table string) ([]schemer.ForeignKey, error) {
-	referrers, err := limited(ctx, p.slots, func() ([]dbschema.Referrer, error) { return p.reader.ListReferrers(ctx, p.ref(schema, table)) })
+	referrers, err := limited(ctx, p.slots, func() ([]dbschema.Referrer, error) { return p.reader.ListReferrers(ctx, p.ref(schema, table)) }, p.observe)
 	if err != nil {
 		if errors.Is(err, dal.ErrNotSupported) {
 			return nil, nil
@@ -671,7 +692,7 @@ func (p *provider) RecordsCount(ctx context.Context, _, schema, table string) (*
 	if p.counter == nil {
 		return nil, nil
 	}
-	return limited(ctx, p.slots, func() (*int, error) { return p.counter.CountRecords(ctx, schema, table) })
+	return limited(ctx, p.slots, func() (*int, error) { return p.counter.CountRecords(ctx, schema, table) }, p.observe)
 }
 
 // defaultText is the text a column's default is saved as: the expression the reader

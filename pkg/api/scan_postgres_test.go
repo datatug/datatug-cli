@@ -163,8 +163,10 @@ func TestPostgresScanParams_WriteDescriptorErrors(t *testing.T) {
 // fakeScanDB is the handle a schema scan reads through, over a two-table shop.
 type fakeScanDB struct {
 	dal.DB
-	closed  int
-	listErr error
+	closed      int
+	listErr     error
+	describeErr error
+	indexErr    error
 }
 
 func (f *fakeScanDB) Close() error { f.closed++; return nil }
@@ -177,6 +179,9 @@ func (f *fakeScanDB) ListCollections(context.Context, *record.Key) ([]dal.Collec
 }
 
 func (f *fakeScanDB) DescribeCollection(_ context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+	if f.describeErr != nil {
+		return nil, f.describeErr
+	}
 	switch ref.Name() {
 	case "Customer":
 		return &dbschema.CollectionDef{Name: "Customer",
@@ -192,7 +197,10 @@ func (f *fakeScanDB) DescribeCollection(_ context.Context, ref *dal.CollectionRe
 	return nil, fmt.Errorf("collection %q not found", ref.Name())
 }
 
-func (*fakeScanDB) ListIndexes(context.Context, *dal.CollectionRef) ([]dbschema.IndexDef, error) {
+func (f *fakeScanDB) ListIndexes(context.Context, *dal.CollectionRef) ([]dbschema.IndexDef, error) {
+	if f.indexErr != nil {
+		return nil, f.indexErr
+	}
 	return nil, nil
 }
 
@@ -255,6 +263,24 @@ func TestScanDbCatalog_Postgres(t *testing.T) {
 }
 
 func TestScanDbCatalog_PostgresErrors(t *testing.T) {
+	t.Run("a pooled connection fails while reading a table or its indexes", func(t *testing.T) {
+		for _, phase := range []string{"description", "indexes"} {
+			t.Run(phase, func(t *testing.T) {
+				cause := &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}
+				db := &fakeScanDB{}
+				if phase == "description" {
+					db.describeErr = cause
+				} else {
+					db.indexErr = cause
+				}
+				stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) { return db, nil })
+				_, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres}, newShopParams(t))
+				assert.EqualError(t, err, "failed to get dbCatalog metadata: the server could not be reached; the PostgreSQL connection string is read from the environment variable SHOP_PG_URL")
+				assert.True(t, dbcopy.IsPostgresConnectionFailure(err))
+				assert.ErrorIs(t, err, cause)
+			})
+		}
+	})
 	t.Run("the connection parameters did not come from a variable", func(t *testing.T) {
 		stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
 			t.Fatal("nothing may be opened without a variable")

@@ -22,14 +22,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// pgxConnectError is the error pgx writes when a connection cannot be made, built by pgx itself: its text names the
-// user and its value holds the whole configuration, the password included. dialErr is what the dial failed with.
 // testHint is the hint of the source the tests of this file call the adapter for.
 const testHint = "the PostgreSQL connection string is read from the --db flag"
 
 // lostSentence is the sentence of a failure of pgx's that the adapter did not classify, with the hint of the source.
 const lostSentence = "the connection to the PostgreSQL server was lost and could not be made again; " + testHint
 
+// pgxConnectError is the error pgx writes when a connection cannot be made, built by pgx itself: its text names the
+// user and its value holds the whole configuration, the password included. dialErr is what the dial failed with.
 func pgxConnectError(t *testing.T, dialErr error) error {
 	t.Helper()
 	config, err := pgconn.ParseConfig("postgres://" + markerUser + ":" + markerPassword + "@127.0.0.1:5432/shop?sslmode=disable&x=" + markerQuery)

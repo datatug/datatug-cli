@@ -68,6 +68,10 @@ type SourceSummary struct {
 	RowsByTable   map[string]int64
 	RowSkips      map[string]string // table → reason (e.g. composite PK, no PK)
 	TargetBackend string            // adapter name of target, for error messages
+
+	// SkippedIndexes lists the indexes of the source that were not copied to a PostgreSQL target
+	// because the driver cannot recreate them (see unrecreatableIndex).
+	SkippedIndexes []SkippedIndex
 }
 
 // Copy replicates the source database into the target — schema first,
@@ -90,7 +94,15 @@ type SourceSummary struct {
 // advertises SupportsConcurrentConnections()==false. When the cap reduces
 // an explicitly-requested value >1, one warning line is emitted on stderr.
 //
+// A PostgreSQL target takes only names it can write: before the first change to it, every table
+// name of the source and, for each table, every column, primary-key column, index name and index
+// column is checked, and a name that is refused ends the copy with a *RefusedNameError that names
+// the object of the source and changes nothing. An index the driver cannot recreate (it holds an
+// expression, a condition, an operator class or an ordering of nulls) is skipped, and listed in
+// SourceSummary.SkippedIndexes.
+//
 // Errors:
+//   - *RefusedNameError — a PostgreSQL target cannot take a name of the source; nothing was changed.
 //   - ErrSourceHasNoTables — source introspects cleanly but has zero
 //     collections.
 //   - any other error — wrapped with the failing operation and table name.
@@ -130,6 +142,19 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 		return summary, nil
 	}
 
+	// 1b. A PostgreSQL target takes only names it can write. Every name the copy is about to
+	//     write is checked, from the source, before the first change to the target
+	//     (REQ:names-checked-before-writes); the definitions read for it are the ones copied.
+	var described map[string]describedTable
+	if isPostgresTarget(target) {
+		var skipped []SkippedIndex
+		described, skipped, err = checkPostgresTarget(ctx, source, refs, opts.Overwrite != "reload")
+		if err != nil {
+			return summary, err
+		}
+		summary.SkippedIndexes = skipped
+	}
+
 	// 2. If --overwrite is omitted, pre-flight verify the target is "empty
 	//    for this copy" (REQ:empty-target-check). Any source-named target
 	//    table with >=1 row aborts BEFORE we touch the target.
@@ -144,7 +169,8 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 	}
 
 	// 3. If --overwrite=recreate, drop target tables that match source names
-	//    BEFORE we introspect each one (REQ:recreate-drops-first).
+	//    after the PostgreSQL source-name preflight (when applicable), before
+	//    creating and copying each table (REQ:recreate-drops-first).
 	if opts.Overwrite == "recreate" {
 		for _, ref := range refs {
 			if err := ddl.DropCollection(ctx, target, ref.Name(), ddl.IfExists()); err != nil {
@@ -202,7 +228,7 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 				if workerCtx.Err() != nil {
 					return
 				}
-				if err := copyOneTable(workerCtx, source, target, ref, opts, stderr, &summary, &mu); err != nil {
+				if err := copyOneTable(workerCtx, source, target, ref, described, opts, stderr, &summary, &mu); err != nil {
 					recordErr(err)
 					return
 				}
@@ -223,12 +249,13 @@ func copyOneTable(
 	ctx context.Context,
 	source, target dal.DB,
 	ref dal.CollectionRef,
+	described map[string]describedTable,
 	opts CopyOpts,
 	stderr io.Writer,
 	summary *SourceSummary,
 	mu *sync.Mutex,
 ) error {
-	def, err := dbschema.DescribeCollection(ctx, source, &ref)
+	def, err := describeSource(ctx, source, &ref, described)
 	if err != nil {
 		// dalgo2sqlite rejects DATETIME / NUMERIC today (see upstream
 		// issue). Log the skip on stderr so the user knows, and continue
@@ -290,6 +317,15 @@ func copyOneTable(
 		opts.Progress.FinishTable(def.Name, rowsCopied, 0)
 	}
 	return nil
+}
+
+// describeSource returns the definition of ref: the one read before the copy began when described
+// holds it (a PostgreSQL target, see checkPostgresTarget), else it reads it now.
+func describeSource(ctx context.Context, source dal.DB, ref *dal.CollectionRef, described map[string]describedTable) (*dbschema.CollectionDef, error) {
+	if table, ok := described[ref.Name()]; ok {
+		return table.def, table.err
+	}
+	return dbschema.DescribeCollection(ctx, source, ref)
 }
 
 // resolveParallelism computes the effective worker count from the

@@ -107,10 +107,10 @@ github.com/dal-go/dalgo2http v0.2.1 h1:Dr66xPjJSo2u2JGP6jJgAfCTphgCqGH0IbgYoupsg
 github.com/dal-go/dalgo2http v0.2.1/go.mod h1:9D70F2oimIPSz9r5iKki5xuepReCAMSSla9TmgmuVcs=
 github.com/dal-go/dalgo2mysql v0.2.0 h1:JKjZWNbHqJebTNh+OKrNwa+nhzAV/jptsrC1d3xk5EQ=
 github.com/dal-go/dalgo2mysql v0.2.0/go.mod h1:3CMbIvu4cocKLpAbY4SDfsahC1rxFSFWjbnATxbKg0s=
-github.com/dal-go/dalgo2postgres v0.5.0 h1:Qcxv0uZDr81r9Tja4kxzMKdDaEtXV7O1cnR171qfw7k=
-github.com/dal-go/dalgo2postgres v0.5.0/go.mod h1:nj9TbVU/rP7ADRoVf6NoY7LzThPYrJPFeCiIaXxckuI=
-github.com/dal-go/dalgo2sql v0.26.6 h1:sO8Wwe0DdUoYoKcnpip9hw1PsUjo0SYV130ZnYXMu4o=
-github.com/dal-go/dalgo2sql v0.26.6/go.mod h1:TsbNshPBVEsnUNb6c8+xym/fZZc+D5HKY9iX8Ncxf1I=
+github.com/dal-go/dalgo2postgres v0.6.0 h1:hVAYufg74Smg/AjuoeTbDIRcGb+3XjivnXgw5ffQKog=
+github.com/dal-go/dalgo2postgres v0.6.0/go.mod h1:nj9TbVU/rP7ADRoVf6NoY7LzThPYrJPFeCiIaXxckuI=
+github.com/dal-go/dalgo2sql v0.26.7 h1:3mZiw4XJZ33UhhE+mWFrGCIUmvLeNMZQWiCmqhBliww=
+github.com/dal-go/dalgo2sql v0.26.7/go.mod h1:TsbNshPBVEsnUNb6c8+xym/fZZc+D5HKY9iX8Ncxf1I=
 github.com/dal-go/dalgo2sqlite v0.2.2 h1:CeM1s+WgtSn7oyeVffMRu5e1xu4G8BsFZHrAGujc/3g=
 github.com/dal-go/dalgo2sqlite v0.2.2/go.mod h1:P9k6p7FcAUVKfrrCs7y8YQRead/B5zTe8q9nFoXQPZ0=
 github.com/dal-go/record v0.1.4 h1:21IJNlUASNw9TytcB5V5a2jHQKa1pycr//dGvj8zNH8=
@@ -119,8 +119,8 @@ github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMF
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/cliformat v0.0.3 h1:d9p5vo7r8BH6qSKyTHQ9Al2sT6QHsQTK9KRlihaJdIU=
 github.com/datatug/cliformat v0.0.3/go.mod h1:DwX9tWHiyH+vZtbVEVOyHOEOw1Km9AzhgHoqI0PowAc=
-github.com/datatug/datatug-core v0.42.4 h1:xDF3MkfOZBMWoG1KAilb03S5O2S6bpKYeTX7AKfRuM4=
-github.com/datatug/datatug-core v0.42.4/go.mod h1:OzB8L05fiVKQp1tTXh8UuPTZIlmcYev/cnDjOr4SHD8=
+github.com/datatug/datatug-core v0.43.0 h1:dR5fs/pXJrHzjPvVWAfMVPnytd4XJvb8PeDtF+btkGI=
+github.com/datatug/datatug-core v0.43.0/go.mod h1:OzB8L05fiVKQp1tTXh8UuPTZIlmcYev/cnDjOr4SHD8=
 github.com/datatug/sql2csv v0.0.1 h1:mmQI9gWAqVKtnwwNKPEPamplV0g1+KaTovME7/7+SIY=
 github.com/datatug/sql2csv v0.0.1/go.mod h1:nZwHW70TWPF2PTXyCa4hysB+nVgY/AcF6m/KclO3fvs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

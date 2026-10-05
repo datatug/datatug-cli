@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -271,6 +272,13 @@ var createGitHubRepoProject = func(ctx context.Context, client *github.Client, o
 	return err
 }
 
+// CreateLocalProject is the writer of the "Locally" tab of the create screen: it writes a new project
+// under location and registers it, and returns the registered project. It is exported so that the commands
+// of the CLI can be tested against the project the wizard makes (the two must agree on where a project is).
+func CreateLocalProject(projectID, title, location string) (dtconfig.ProjectRef, error) {
+	return createLocalProject(projectID, title, location)
+}
+
 // createLocalProject writes a new project under location.
 //
 // The directory is named after projectID, not the title: the id is the
@@ -279,28 +287,45 @@ var createGitHubRepoProject = func(ctx context.Context, client *github.Client, o
 // separators, "..", whitespace or characters a file system cannot store.
 // The title is recorded inside the project file, where it belongs.
 func createLocalProject(projectID, title, location string) (projectRef dtconfig.ProjectRef, err error) {
+	// The screen checks the form before it gets here; a caller that is not the screen (CreateLocalProject is
+	// exported) gets the same check, so an ID such as "../x" never becomes a part of a path.
+	if err = validateNewProject(projectID, title); err != nil {
+		return projectRef, err
+	}
 	projectPath := filepath.Join(fsutil.ExpandHome(location), projectID)
-	datatugDir := filepath.Join(projectPath, "datatug")
-	// The folder of the project is the one the person chose, and is made as it always was. What
-	// is below it is made and written only as plain folders and plain files (see package
-	// plainfs): a link, or a file, where the datatug folder or its project file belong is refused,
-	// and nothing is written through it.
+	projectFile := filepath.Join(projectPath, storage.ProjectSummaryFileName)
+	// Nothing is written over a project that is there. The project file is the file a scan, init and a
+	// clone use, and it is written with truncation: a folder that holds one already is another project
+	// (its title, its access and its repository would be lost), and an ID that is registered already names
+	// another project (the settings would refuse it only after its file had been replaced).
+	if err = refuseExistingProject(projectID, projectPath, projectFile); err != nil {
+		return projectRef, err
+	}
+	// The project file is at the root of the project folder: that is where every reader of a project
+	// looks for it (datatug-core's file store, `datatug show`, serve, chat) and where a scan writes it
+	// (issue 263: it used to be written in a folder datatug of the project folder, where nothing read it).
+	//
+	// The folder of the project is the one the person chose, and is made as it always was. What is
+	// below it is made and written only as plain folders and plain files (see package plainfs): a link,
+	// or a folder, where the project file belongs is refused, and nothing is written through it.
 	if err = os.MkdirAll(projectPath, 0o755); err != nil {
 		return projectRef, fmt.Errorf("failed to create project directory: %w", err)
 	}
 	tree := plainfs.New(projectPath, 0o755)
-	if err = tree.MkdirAll(datatugDir); err != nil {
-		return projectRef, fmt.Errorf("failed to create project directory: %w", err)
-	}
 
-	// Marshalled rather than formatted into a template: a title is free text, so
-	// a quote or a backslash in it would otherwise write a file that is not
-	// JSON. Two strings cannot fail to marshal.
-	configContent, _ := json.MarshalIndent(struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
-	}{ID: projectID, Title: title}, "", "  ")
-	if err = tree.WriteFile(filepath.Join(datatugDir, storage.ProjectSummaryFileName), configContent, 0o644); err != nil {
+	// The file is what datatug-core's own project store writes (and `datatug init` and a scan write): a
+	// project file with no access or no time of creation is not a valid project, so a scan into the new
+	// project could not save it. A new project is private; sharing it is a later choice. It is marshalled
+	// rather than formatted into a template: a title is free text, so a quote or a backslash in it would
+	// otherwise write a file that is not JSON. A value of these types cannot fail to marshal.
+	configContent, _ := json.MarshalIndent(datatug.ProjectFile{
+		Created: &datatug.ProjectCreated{At: now()},
+		ProjectItem: datatug.ProjectItem{
+			ProjItemBrief: datatug.ProjItemBrief{ID: projectID, Title: title},
+			Access:        "private",
+		},
+	}, "", "  ")
+	if err = tree.WriteFile(projectFile, configContent, 0o644); err != nil {
 		return projectRef, fmt.Errorf("failed to create project config: %w", err)
 	}
 
@@ -309,9 +334,32 @@ func createLocalProject(projectID, title, location string) (projectRef dtconfig.
 	// empty made the second locally created project collide with the first.
 	projectRef = dtconfig.ProjectRef{ID: projectID, Path: projectPath, Title: title}
 	if err = addProjectToSettings(projectRef); err != nil {
+		// The project file was not there before this call (refuseExistingProject), and a project that is
+		// not registered cannot be opened: leaving the file would refuse every retry of the wizard with
+		// "open that project". The folder stays, as the person chose it; the removal cannot lose anything.
+		_ = os.Remove(projectFile)
 		return projectRef, fmt.Errorf("failed to update app settings: %w", err)
 	}
 	return projectRef, nil
+}
+
+// refuseExistingProject is the error of a new project whose ID is registered already or whose folder holds a
+// project file already. A link or a folder in the place of the file is not a project file: the writer
+// refuses it with its own text.
+func refuseExistingProject(projectID, projectPath, projectFile string) error {
+	settings, err := readSettings()
+	if err != nil && !errors.Is(err, fs.ErrNotExist) { // no settings file: nothing is registered
+		return fmt.Errorf("failed to read app settings: %w", err)
+	}
+	for _, registered := range settings.Projects {
+		if registered != nil && registered.ID == projectID {
+			return fmt.Errorf("a project with the ID %q is already registered: open it, or choose another ID", projectID)
+		}
+	}
+	if info, statErr := os.Lstat(projectFile); statErr == nil && info.Mode().IsRegular() {
+		return fmt.Errorf("the folder %q already holds a project: open that project, or choose another ID or location", projectPath)
+	}
+	return nil
 }
 
 // createProject is the wizard that creates a project, locally or in GitHub.

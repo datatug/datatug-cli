@@ -18,6 +18,95 @@
 
 </table>
 
+## Quick start
+
+Install the CLI (macOS and Linux with Homebrew; the other ways are in [Installation](#installation)):
+
+```bash
+brew install --cask datatug/tap/datatug
+```
+
+Then scan a database, look at what was scanned, and run a query. Every command and every output block below is run
+by a test of this repository ([quickstart_doc_test.go](apps/datatugapp/commands/quickstart_doc_test.go)), so what you
+read here is what the CLI prints. The test runs the commands in the process of the test, and runs step 4 against a
+stand-in for the PostgreSQL server (see there).
+
+**1. Scan a database.** The sample is a SQLite file made with the `sqlite3` program (any SQLite file works). `sqlite3`
+comes with macOS; on Linux install the package `sqlite3` (`apt install sqlite3`, `dnf install sqlite`), or use a SQLite
+file you have. The scan writes a project, a folder of plain files, and prints its progress on stderr and nothing on
+stdout.
+
+```console
+$ sqlite3 shop.db "
+CREATE TABLE Customer (CustomerId INTEGER PRIMARY KEY, FirstName TEXT NOT NULL, LastName TEXT);
+CREATE TABLE Invoice (InvoiceId INTEGER PRIMARY KEY, CustomerId INTEGER, Total NUMERIC);
+CREATE VIEW CustomerNames AS SELECT CustomerId, FirstName || ' ' || LastName AS FullName FROM Customer;
+INSERT INTO Customer VALUES (1, 'Ada', 'Lovelace'), (2, 'Alan', 'Turing');
+INSERT INTO Invoice VALUES (1, 1, 12.5), (2, 2, 40);
+"
+$ datatug scan -d shop-project -D sqlite3 --path shop.db --db shop --env local
+```
+
+**2. Look at what was scanned.** `datatug show` lists the project: each environment, each source with its driver, each
+schema, each table and view with its columns, their types and their place in the primary key (`pk`; `pk 2` is the
+second column of a key of several). `--format json` prints the same as one JSON document.
+
+```console
+$ datatug show -d shop-project
+Project shop-project
+Environment local
+  Source shop (sqlite3)
+    Schema main
+      Table Customer
+        CustomerId INTEGER pk
+        FirstName TEXT
+        LastName TEXT
+      Table Invoice
+        InvoiceId INTEGER pk
+        CustomerId INTEGER
+        Total NUMERIC
+      View CustomerNames
+        CustomerId INTEGER
+        FullName -
+```
+
+**3. Run a query.** The query reads the database file; `--no-policies` runs it without [access policies](spec/features/cli/query/README.md)
+(the line `access: running without access policies` goes to stderr).
+
+```console
+$ datatug query run --db sqlite://./shop.db --from Customer --no-policies
+$key               CustomerId  FirstName  LastName
+__dalgo_record_id  1           Ada        Lovelace
+__dalgo_record_id  2           Alan       Turing
+```
+
+**4. Scan PostgreSQL the same way.** Put the connection URL in an environment variable whose name starts with
+`DATATUG_`, and pass the name of the variable with `--driver postgres --dsn-env`. The project stores the name of the
+variable and never the URL: the host, the port, the user and the password stay in your environment. A PostgreSQL scan
+reads every schema the role can use (the system schemas apart), and `show` lists each schema, with its views as views.
+The output below is for a database with the two tables Customer and Invoice in the schema `public`; the output for your
+database lists its own schemas and tables. The test of this README runs this step against a stand-in for the
+server, and the scan of a real server is tested by the CI job "Journey (PostgreSQL)".
+
+```console
+$ export DATATUG_SHOP_URL='postgres://USER:PASSWORD@localhost:5432/shop'
+$ datatug scan -d shop-pg-project --driver postgres --dsn-env DATATUG_SHOP_URL --db shop --env prod
+$ datatug show -d shop-pg-project
+Project shop-pg-project
+Environment prod
+  Source shop (postgres, URL in $DATATUG_SHOP_URL)
+    Schema public
+      Table Customer
+        CustomerId int pk
+        FirstName string
+        LastName string
+      Table Invoice
+        InvoiceId int pk
+        Total decimal
+```
+
+What else works, and what does not yet, is in [Supported databases](#supported-databases).
+
 ![datatug-cli-employees-2.png](docs/screenshots/datatug-cli-employees-2.png)
 
 <!-- dev-approach:v1 -->
@@ -94,7 +183,10 @@ fleet-wide counterpart to `self-update`: `datatug self-update` is exactly
 the two never disagree. See
 [spec/features/cli/install](spec/features/cli/install/README.md).
 
-## What you can do with DataTug
+## Where DataTug is going
+
+This is the direction of the product, not a list of what the released CLI does: what works today is in the
+[Quick start](#quick-start) and in [Supported databases](#supported-databases).
 
 - Explore data everywhere — SQL databases, cloud data sources, logs, and APIs (HTTP / REST)
 - CLI-first workflows with a Web UI — dashboards, charts, and shared views
@@ -193,14 +285,15 @@ never table names or question text, and is sent only when a decision was actuall
 This is an agent service for https://datatug.app that you can run on your local machine, or some server to allow DataTug
 app to scan databases & execute SQL requests.
 
-It can be run with your user account credentials (*e.g. trusted connection*) or under some service account.
+It runs on your machine under your user account. The connection URL of a PostgreSQL source stays in an environment
+variable of yours, and a project never holds it.
 
 ## Would you steal my data?
 
 No, we won't.
 
-The project is **free and open source** codes available at https://github.com/datatug/datatug. You are welcome to
-check - we do not look into your data.
+The project is **free and open source**, and the code of this CLI is at https://github.com/datatug/datatug-cli. You are
+welcome to check - we do not look into your data.
 
 The CLI does send a small amount of anonymous usage telemetry, which you can switch off: see [Telemetry](#telemetry).
 
@@ -271,15 +364,14 @@ understand & easy to compare JSON files.
 
 We recommend to check-in the project to some source versioning control system like GIT.
 
-You can run commands for different projects by passing path to DataTugProject folder. E.g.:
+You can run commands for different projects by passing the path to the project folder. E.g.:
 
 ```
-> datatug show --project ~/my-datatug-projects/DemoProject
+> datatug show -d ~/my-datatug-projects/DemoProject
 ```
 
-Paths to the DataTug project files, and their names are stored in `~/datatug.yaml` in the root of your user's home
-directory.
-This allows you to address a DataTug project in a console using a short alias. Like this:
+A project can be registered under a short name with `datatug projects add`: the paths to the registered projects, and
+their names, are stored in `~/.datatug.yaml` in your user's home directory. Then a project is addressed by its name:
 
 ```
 > datatug show -p DemoProject
@@ -303,28 +395,27 @@ Then verify the installed CLI:
 
 ## How to run?
 
-Check the [CLI](https://github.com/datatug/datatug) section on how to run DataTug agent.
+Start with the [Quick start](#quick-start). `datatug --help` lists every command, and `datatug serve` runs the agent that
+the web app talks to (see [spec/features/cli/serve](spec/features/cli/serve/README.md)).
 
 ## Supported databases
 
-At the moment we any DB supported by [DALgo](https://github.com/dal-go/dalgo). Like:
+| Database | Scan (`datatug scan`) | Query (`datatug query run`) |
+|---|---|---|
+| SQLite | supported | supported |
+| PostgreSQL | supported: every schema the role can use, tables and views, columns with their defaults, primary keys (no foreign keys or indexes yet); the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_POSTGRES=1` |
+| inGitDB | not supported yet | supported: `--db ingitdb://./path-to-the-database` |
+| OpenVaultDB | not supported yet | not tested in this release |
+| SQL Server | accepted by `scan -D sqlserver`, not tested in this release | not supported yet |
+| Firestore | not supported yet | not supported yet |
 
-- [dalgo2firestore](https://github.com/dal-go/dalgo2firestore)
-- [dalgo2sql](https://github.com/dal-go/dalgo2sql)
+A database that is not in this table is not supported by this release. We are open for pull requests.
 
-### Supported `sql` Databases:
-
-Datatug can work with `sql` DBs if a relevant driver has been linked into `datatug`
-
-- **SQLite** - via  [github.com/mattn/go-sqlite3](https://github.com/mattn/go-sqlite3 )
-- **Microsoft SQL Server** - via [go-mssqldb](https://github.com/denisenkom/go-mssqldb)
-- **PostgreSQL** - via [dalgo2postgres](https://github.com/dal-go/dalgo2postgres). `datatug scan -D postgres --dsn-env
-  DATATUG_SHOP_PG_URL --db shop --env local` reads the connection URL from the environment variable (it is never written to
-  the project) and saves every schema the role can use, the system schemas apart: tables, views and materialized views
-  (as views), columns with their defaults (the text of the SQL expression) and primary keys, a folder for each schema.
-  The scan does not save foreign keys or indexes yet.
-
-We are open for pull requests to support other `sql` DBs.
+**PostgreSQL**, via [dalgo2postgres](https://github.com/dal-go/dalgo2postgres). `datatug scan -D postgres --dsn-env
+DATATUG_SHOP_PG_URL --db shop --env local` reads the connection URL from the environment variable (it is never written to
+the project) and saves every schema the role can use, the system schemas apart: tables, views and materialized views
+(as views), columns with their defaults (the text of the SQL expression) and primary keys, a folder for each schema.
+The scan does not save foreign keys or indexes yet.
 
 ## For developers
 
@@ -332,21 +423,10 @@ Read [README-dev.md](docs/README-dev.md) for details on how to setup, debug, and
 
 ## Sample Databases
 
-### By Database Platform
+SQLite samples to scan and query:
 
-- SQLite
-    - [Chinook Database](https://github.com/lerocha/chinook-database)
-    - [Northwind](https://github.com/jpwhite3/northwind-SQLite3)
-- MS SQL Server
-    - [Northwind](https://github.com/Microsoft/sql-server-samples/tree/master/samples/databases/northwind-pubs)
-- Oracle
-    - [Northwind](https://github.com/dshifflet/NorthwindOracle_DDL)
-
-### Northwind Database
-
-- [SQLite](https://github.com/jpwhite3/northwind-SQLite3)
-- [MS SQL Server](https://github.com/Microsoft/sql-server-samples/tree/master/samples/databases/northwind-pubs)
-- [Oracle](https://github.com/dshifflet/NorthwindOracle_DDL)
+- [Chinook Database](https://github.com/lerocha/chinook-database)
+- [Northwind](https://github.com/jpwhite3/northwind-SQLite3)
 
 ## Open Source Libraries we use
 

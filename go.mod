@@ -53,6 +53,7 @@ require (
 	github.com/posthog/posthog-go v1.24.3
 	github.com/sneat-co/sneat-go-core v0.67.3
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
 	github.com/strongo/aichat v0.7.0
 	github.com/strongo/buildinfo v0.3.0
@@ -168,7 +169,6 @@ require (
 	github.com/sahilm/fuzzy v0.1.3 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/strongo/analytics v0.2.8 // indirect
 	github.com/strongo/decimal v0.1.2 // indirect
 	github.com/strongo/strongoapp v0.31.55 // indirect

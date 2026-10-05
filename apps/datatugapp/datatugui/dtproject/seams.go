@@ -1,6 +1,8 @@
 package dtproject
 
 import (
+	"time"
+
 	"github.com/atotto/clipboard"
 	"github.com/datatug/datatug-cli/pkg/auth/ghauth"
 	"github.com/datatug/datatug-cli/pkg/dtstate"
@@ -25,6 +27,7 @@ var (
 	openURL              = browser.OpenURL
 	copyToClipboard      = clipboard.WriteAll
 	tick                 = tea.Tick
+	now                  = time.Now
 
 	getToken          = ghauth.GetToken
 	saveToken         = ghauth.SaveToken

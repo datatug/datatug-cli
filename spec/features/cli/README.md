@@ -23,7 +23,7 @@ DataTug spans a TUI, a Web UI agent, a project file format, and connectors to se
 - Flag names drift between releases (e.g., `--project` vs `-p` vs `--dir` vs `-d` already coexist across commands today).
 - Default behaviors are non-obvious. `datatug` with no subcommand currently launches the TUI; `datatug serve` opens a browser to a remote URL by default.
 - Exit codes are inconsistent. Several commands `log.Fatal` or `panic` rather than return a structured error.
-- Output shapes (`projects` emits CSV; `dataset-data` emits YAML/JSON/GRID; `show` emits decorated text) are not pinned, so script authors cannot rely on them.
+- Output shapes (`projects` emits CSV; `dataset-data` emits YAML/JSON/GRID; `show` emits plain text or JSON, see its spec) are not pinned, so script authors cannot rely on them.
 
 Pinning the contract surface lets the implementation evolve without breaking users' scripts, dashboards, and CI checks.
 
@@ -37,7 +37,7 @@ Pinning the contract surface lets the implementation evolve without breaking use
 | [projects/](projects/README.md) | List & manage user-level project registry (with [`add`](projects/add/README.md)) |
 | [serve/](serve/README.md) | Run HTTP server providing the DataTug Web UI's API |
 | [scan/](scan/README.md) | Scan a database and update project metadata |
-| [show/](show/README.md) | Print a human-readable summary of a project |
+| [show/](show/README.md) | List what a scan wrote into a project: environments, sources, schemas, tables, columns |
 | [validate/](validate/README.md) | Validate a DataTug project on disk |
 | [render/](render/README.md) | Re-render `README.md` files inside a project |
 | [dataset/](dataset/README.md) | Inspect datasets — with [`def`](dataset/def/README.md) and [`data`](dataset/data/README.md) subcommands |

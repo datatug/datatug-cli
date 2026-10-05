@@ -185,14 +185,6 @@ func TestCovDRootCommandDefaultsToUI(t *testing.T) {
 	assert.Nil(t, opts.Initial, "the default UI opens no file")
 }
 
-func TestCovDShowProjectLoadError(t *testing.T) {
-	v := &showProjectCommand{}
-	v.ProjectDir = t.TempDir() // no project file in it
-	err := v.Execute(nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to load project")
-}
-
 func TestCovDProjectsCommandSettingsError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -46,8 +47,10 @@ func (g GithubRepoProjectsStore) CreateNewProject(
 ) (
 	project *datatug.Project, err error,
 ) {
-	ids := strings.Split(projectID, "/")
-	repoOwner, repoName, projectDir := ids[0], ids[1], path.Join(ids[2:]...)
+	repoOwner, repoName, projectDir, err := splitProjectID(projectID)
+	if err != nil {
+		return nil, err
+	}
 	_, _, _ = repoOwner, repoName, title
 
 	pathToProjectFromRepoRoot := path.Join(projectDir)
@@ -58,6 +61,20 @@ func (g GithubRepoProjectsStore) CreateNewProject(
 	}
 
 	return
+}
+
+// ErrMalformedProjectID is the error of a project ID that is not "owner/repo" or "owner/repo/directory".
+var ErrMalformedProjectID = errors.New(`a GitHub project ID is "owner/repo" or "owner/repo/directory"`)
+
+// splitProjectID reads a project ID as owner, repository and the directory of the project in the
+// repository (empty for the root of the repository). The owner and the repository must not be blank, and
+// the directory must stay inside the repository: no part of it is "..".
+func splitProjectID(projectID string) (owner, repo, dir string, err error) {
+	ids := strings.Split(projectID, "/")
+	if len(ids) < 2 || strings.TrimSpace(ids[0]) == "" || strings.TrimSpace(ids[1]) == "" || slices.Contains(ids[2:], "..") {
+		return "", "", "", fmt.Errorf("%w, not %q", ErrMalformedProjectID, projectID)
+	}
+	return ids[0], ids[1], path.Join(ids[2:]...), nil
 }
 
 type projectCreator struct {

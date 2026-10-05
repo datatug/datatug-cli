@@ -147,7 +147,8 @@ jobs:
   # any released binary, while every test of strongo_workflow passed, as it runs with
   # cgo on. This job runs the scan's SQLite tests, and the journey of a first user (a
   # SQLite file scanned into a folder, then read the way chat, saved queries, serve and
-  # the web app read it), in a build with cgo off. Those tests make their database
+  # the web app read it), in a build with cgo off, and the test that runs the quick start
+  # of the README (TestQuickStartOfTheREADMEIsTrue). Those tests make their database
   # files with the pure-Go driver and import no cgo one, so cgo off is all they need.
   scan-without-cgo:
     name: Scan without cgo
@@ -162,7 +163,7 @@ jobs:
       - name: Scan a SQLite file with cgo off
         env:
           CGO_ENABLED: '0'
-        run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney' ./pkg/api/ ./apps/datatugapp/commands/
+        run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue' ./pkg/api/ ./apps/datatugapp/commands/
 
   # The PostgreSQL scan (`datatug scan -D postgres --dsn-env NAME`) against a real server. Every
   # other test of the scan reads through a fake schema reader and the test binary refuses to

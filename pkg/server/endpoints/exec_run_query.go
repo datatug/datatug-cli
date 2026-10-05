@@ -329,6 +329,15 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		if collection != "" && errors.Is(err, dal.ErrNotSupported) {
 			return apicontract.Result{}, newAccessDenied(fmt.Sprintf("query %q: a policy-protected condition or projection cannot be safely enforced on its HTTP source", req.QueryID))
 		}
+		// A source that is refused (the preview of PostgreSQL sources is off, a read of one
+		// through policies), cannot be opened, or lost its connection: the sentence dbcopy
+		// built for it, which holds nothing the person typed, and not the text of err. It is
+		// asked last, after every classification above that is more specific: an HTTP source
+		// whose descriptor is refused when it is opened is an open failure too, and keeps its
+		// own answer, which names only the query and carries the snapshots recorded for it.
+		if unavailable := dbcopy.UnavailableSource(err); unavailable != nil {
+			return apicontract.Result{}, newSourceUnavailable(unavailable.Error())
+		}
 		return apicontract.Result{}, newInvalidRequest("", err.Error())
 	}
 	if collection == "" {

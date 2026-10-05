@@ -38,8 +38,9 @@ func (e *openError) Unwrap() error { return e.cause }
 // errors.Is and errors.As still see the driver's own error.
 //
 // The errors this package wrote itself (the missing-file error CheckSourceFile
-// returns, an error OpenFailure returned before, ErrPostgresNotWired) carry text
-// built from the display form of the source and pass through unchanged. They are recognised by what they are, never
+// returns, an error OpenFailure returned before, the fixed refusals such as
+// ErrPostgresPreview) carry text built from the display form of the source or from
+// no source at all, and pass through unchanged. They are recognised by what they are, never
 // by errors.Is: a driver can wrap one of them around its own text. A nil err
 // stays nil.
 func (r BackendRef) OpenFailure(err error) error {
@@ -47,10 +48,10 @@ func (r BackendRef) OpenFailure(err error) error {
 		return nil
 	}
 	switch err.(type) { //nolint:errorlint // an exact match is the point: see the doc comment
-	case *missingSourceFileError, *openError:
+	case *missingSourceFileError, *openError, *refusedError:
 		return err
 	}
-	if err == ErrPostgresNotWired || err == errUnsupportedBackend { //nolint:errorlint // an exact match is the point: see the doc comment
+	if err == errUnsupportedBackend { //nolint:errorlint // an exact match is the point: see the doc comment
 		return err
 	}
 	return &openError{

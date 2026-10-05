@@ -86,7 +86,7 @@ func (e *Executor) StreamFederatedDTQL(ctx context.Context, document []byte, sou
 		if url == "" {
 			return nil, fmt.Errorf("database %q is not configured", database)
 		}
-		db, closeSource, err := openSource(ctx, url, false)
+		db, closeSource, err := openSource(ctx, url, false, len(e.session.Policies))
 		if err != nil {
 			return nil, fmt.Errorf("open database %q: %w", database, err)
 		}

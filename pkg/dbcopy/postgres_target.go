@@ -34,7 +34,65 @@ var (
 	// URL: the user name it refuses is most likely the user and the password
 	// joined by an encoded colon.
 	errPostgresUserHoldsColon = errors.New("the PostgreSQL URL has a user name that holds a colon (a percent-encoded ':' between the user and the password joins them into one name): write user:password with a literal colon between them")
+
+	// errPostgresUserHoldsPercent names the shape and the fix and quotes none of the
+	// URL: a user name that still holds a percent sign after the URL was decoded
+	// was encoded twice, and "alice%253Apw" decodes to "alice%3Apw", the user and the
+	// password joined by a colon that a second decoding would read.
+	errPostgresUserHoldsPercent = errors.New("the PostgreSQL URL has a user name that holds a percent sign after it is decoded (a user name or a password encoded twice, such as a percent-encoded ':' between them, joins them into one name): percent-encode the user name and the password once")
 )
+
+// queryKeysThatOverrideTheTarget are the keys of the query of a PostgreSQL URL that replace the
+// host, the port or the database that its authority and its path name (pgx applies the query after
+// them, and ParsePostgresTarget does the same; the user is replaced the same way, and is never
+// named by the line that names a source). The line that names what a command connects to is built
+// from the authority and the path, so a URL that sets one of these would name a place the command
+// does not connect to: parseURL refuses it (see targetOverrideRefusals).
+var queryKeysThatOverrideTheTarget = []string{"host", "port", "dbname", "database"}
+
+// targetOverrideRefusals holds, for each of queryKeysThatOverrideTheTarget, the refusal of a URL that
+// sets it. Each is a fixed sentence that names the key and nothing of the URL (the value is part
+// of it).
+var targetOverrideRefusals = func() map[string]error {
+	refusals := make(map[string]error, len(queryKeysThatOverrideTheTarget))
+	for _, key := range queryKeysThatOverrideTheTarget {
+		refusals[key] = errors.New("the PostgreSQL URL sets " + strconv.Quote(key) + " in its query, which the connection uses in place of the host, port or database the rest of the URL names: write the host and port in the authority and the database in the path")
+	}
+	return refusals
+}()
+
+// targetOverrideRefusal returns the refusal for the first of queryKeysThatOverrideTheTarget that
+// query sets, or nil when it sets none.
+func targetOverrideRefusal(query url.Values) error {
+	for _, key := range queryKeysThatOverrideTheTarget {
+		if query.Has(key) {
+			return targetOverrideRefusals[key]
+		}
+	}
+	return nil
+}
+
+// postgresURLRefusals are the errors parseURL returns for a URL it will not read: each a fixed
+// sentence that says what is wrong and quotes none of the URL.
+var postgresURLRefusals = func() []error {
+	refusals := []error{errSplitPostgresPassword, errPostgresUserHoldsColon, errPostgresUserHoldsPercent, errUnreadablePostgresURL}
+	for _, key := range queryKeysThatOverrideTheTarget {
+		refusals = append(refusals, targetOverrideRefusals[key])
+	}
+	return refusals
+}()
+
+// postgresURLRefusal returns the refusal of postgresURLRefusals that err is or wraps, or nil
+// when err is another error. A caller that must not show err itself (it may be about a variable's
+// value) shows the refusal.
+func postgresURLRefusal(err error) error {
+	for _, refusal := range postgresURLRefusals {
+		if errors.Is(err, refusal) {
+			return refusal
+		}
+	}
+	return nil
+}
 
 // atSignAfterAuthority reports whether rawURL holds an "@" after the end of its
 // authority, the part up to the first "/", "?" or "#". In a well-formed URL the
@@ -65,7 +123,10 @@ func atSignAfterAuthority(rawURL string) bool {
 // that holds a colon, however the URL spells it (see errPostgresUserHoldsColon):
 // "alice%3Apw@host" has no literal colon, so net/url reads the user "alice:pw"
 // and no password, and the password would be printed as the user, where no
-// redactor looks for a secret. No error quotes the URL, which holds the password.
+// redactor looks for a secret; and one that still holds a percent sign once it is
+// decoded (see errPostgresUserHoldsPercent), which a doubly encoded colon leaves
+// behind. No error quotes the URL, which holds the password. Parse applies the
+// same checks to every postgres source, so a source Parse accepts passes them.
 func ParsePostgresTarget(rawURL string) (PostgresTarget, error) {
 	target, _, err := parsePostgresURL(rawURL)
 	return target, err
@@ -96,6 +157,9 @@ func parsePostgresURL(rawURL string) (PostgresTarget, url.Values, error) {
 	}
 	if strings.Contains(target.User, ":") {
 		return PostgresTarget{}, nil, errPostgresUserHoldsColon
+	}
+	if strings.Contains(target.User, "%") {
+		return PostgresTarget{}, nil, errPostgresUserHoldsPercent
 	}
 	port := parsed.Port()
 	if value := query.Get("port"); value != "" {

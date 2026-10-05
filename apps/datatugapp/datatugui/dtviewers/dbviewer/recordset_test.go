@@ -26,7 +26,7 @@ func TestNewCellValue(t *testing.T) {
 		kind  valueKind
 	}{
 		{"error", nil, errors.New("boom"), "ERROR: boom", kindError},
-		{"null", nil, nil, "", kindNull},
+		{"null", nil, nil, "NULL", kindNull},
 		{"string", "alice", nil, "alice", kindString},
 		{"bytes", []byte("raw"), nil, "[]byte - 3", kindSlice},
 		{"ints", []int{1, 2}, nil, "[]int - 2", kindSlice},
@@ -115,4 +115,44 @@ func TestRecordsetSource_Grid(t *testing.T) {
 	view := uitest.Plain(g.View(60, true))
 	assert.Contains(t, view, "name")
 	assert.Contains(t, view, "ERROR: unreadable")
+}
+
+// A NULL is nil in a recordset (dalgo2sql since v0.26.5, for SQLite and PostgreSQL alike), and the viewer shows it as
+// NULL, in a cell of its own style: never as 0, an empty text, NO or the zero time, which are values.
+func TestRecordsetSource_ANullIsShownAsNullInEveryKindOfColumn(t *testing.T) {
+	rs := &testRecordset{name: "readings", rows: 2, columns: []recordset.Column[any]{
+		&testColumn{name: "n", values: []any{nil, int64(0)}, typ: reflect.TypeFor[int64]()},
+		&testColumn{name: "s", values: []any{nil, ""}, typ: reflect.TypeFor[string]()},
+		&testColumn{name: "b", values: []any{nil, false}, typ: reflect.TypeFor[bool]()},
+		&testColumn{name: "ts", values: []any{nil, time.Time{}}, typ: reflect.TypeFor[time.Time]()},
+	}}
+	src := newRecordsetSource(rs, nil)
+
+	null, zero := src.Row(0), src.Row(1)
+	for column := range 4 {
+		got := null.Values[column].(cellValue)
+		assert.Equal(t, "NULL", got.String(), "column %d", column)
+		assert.Equal(t, kindNull, got.kind, "column %d", column)
+	}
+	// The zero values are values, and read as what they are.
+	assert.Equal(t, "0", zero.Values[0].(cellValue).String())
+	assert.Equal(t, "", zero.Values[1].(cellValue).String())
+	assert.Equal(t, "NO", zero.Values[2].(cellValue).String())
+	assert.Equal(t, "0001-01-01", zero.Values[3].(cellValue).String())
+	for column := range 4 {
+		assert.NotEqual(t, kindNull, zero.Values[column].(cellValue).kind, "column %d: a zero value is not a NULL", column)
+	}
+}
+
+// The NULL cell has a style of its own: not that of an empty text, a zero, NO or a date.
+func TestRecordsetSource_ANullCellHasItsOwnStyle(t *testing.T) {
+	src := newRecordsetSource(&testRecordset{name: "t"}, nil)
+	null := src.cellStyle(grid.Row{}, 1, newCellValue(nil, nil))
+	assert.True(t, null.GetItalic(), "a NULL is set apart from text in the same colour")
+	assert.Equal(t, theme.DarkGray, null.GetForeground())
+	for name, value := range map[string]any{"text": "", "zero": int64(0), "no": false, "date": time.Time{}, "float": 0.0, "bytes": []byte(nil)} {
+		other := src.cellStyle(grid.Row{}, 1, newCellValue(value, nil))
+		assert.NotEqual(t, null.GetForeground(), other.GetForeground(), name)
+		assert.False(t, other.GetItalic(), name)
+	}
 }

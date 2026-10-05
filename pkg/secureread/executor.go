@@ -62,7 +62,7 @@ func (e *Executor) RunStructuredInsecureForTest(ctx context.Context, sourceURL s
 }
 
 func (e *Executor) runStructured(ctx context.Context, sourceURL string, query dal.Query, variables map[string]any, insecureAllowLoopback bool) (Result, error) {
-	db, closeSource, err := openSource(ctx, sourceURL, insecureAllowLoopback)
+	db, closeSource, err := openSource(ctx, sourceURL, insecureAllowLoopback, len(e.session.Policies))
 	if err != nil {
 		return Result{}, err
 	}
@@ -141,13 +141,22 @@ func (e *Executor) runThroughPolicies(ctx context.Context, db dal.DB, query dal.
 // comment describes, and it is what wires dalgo2ingitdb v0.4.0's
 // WithStoredOnlyReads() option in for every source this package opens.
 //
+// policies is how many access policies the session reads through. A PostgreSQL
+// source read through one or more of them is refused here, before the source is
+// opened (dbcopy.CheckPostgresRead): the preview of PostgreSQL sources does not
+// serve policy-enforced reads yet. A session with no policy (Unrestricted) reads a
+// PostgreSQL source as any other, once the preview is on.
+//
 // insecureAllowLoopback, when true, opens an http(s):// source via
 // dbcopy.BackendRef.OpenProtectedForTest instead of OpenProtected (see
 // Executor.RunStructuredInsecureForTest's doc comment) — every other
 // scheme is unaffected either way.
-func openSource(ctx context.Context, sourceURL string, insecureAllowLoopback bool) (dal.DB, func(), error) {
+func openSource(ctx context.Context, sourceURL string, insecureAllowLoopback bool, policies int) (dal.DB, func(), error) {
 	ref, err := dbcopy.Parse(sourceURL)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err = dbcopy.CheckPostgresRead(ref, policies); err != nil {
 		return nil, nil, err
 	}
 	var db dal.DB

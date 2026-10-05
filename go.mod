@@ -26,10 +26,10 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dal-go/dalgo v0.89.4
+	github.com/dal-go/dalgo v0.89.6
 	github.com/dal-go/dalgo2http v0.2.1
-	github.com/dal-go/dalgo2postgres v0.4.0
-	github.com/dal-go/dalgo2sql v0.26.0
+	github.com/dal-go/dalgo2postgres v0.4.1
+	github.com/dal-go/dalgo2sql v0.26.6
 	github.com/dal-go/dalgo2sqlite v0.2.2
 	github.com/dal-go/record v0.1.4
 	github.com/datatug/cliformat v0.0.3
@@ -44,6 +44,7 @@ require (
 	github.com/ingitdb/dalgo2ingitdb v0.6.2
 	github.com/ingitdb/ingitdb-go/ingitdb v0.7.7
 	github.com/ingr-io/ingr-go v0.0.2
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mattn/go-sqlite3 v1.14.50
 	github.com/mitchellh/go-homedir v1.1.0
@@ -135,7 +136,6 @@ require (
 	github.com/ingitdb/dalgo2ingitdb4github v0.2.3 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.10.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	//github.com/jackc/pgx/v5 v5.7.6 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect

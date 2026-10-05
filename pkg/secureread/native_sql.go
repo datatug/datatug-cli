@@ -57,9 +57,10 @@ var nativeSQLLimitation = Limitation{
 // gives a syntactically valid but policy-forbidden write attempt.
 //
 // Only sqlite:// sources support native SQL today: dalgo2ingitdb executes
-// only dal.StructuredQuery ("only StructuredQuery is supported"), and
-// postgres:// is not wired at all (dbcopy.ErrPostgresNotWired). A source
-// without a SQL-text execution surface fails with ErrNativeSQLUnsupported.
+// only dal.StructuredQuery ("only StructuredQuery is supported"), and a
+// postgres:// source takes structured queries only (its read-only session is
+// for those, not for SQL text). A source without a SQL-text execution surface
+// fails with ErrNativeSQLUnsupported.
 // A future SQL-capable adapter for another scheme should add a read-only
 // dal.DB.RunReadonlyTransaction branch alongside this PRAGMA one, per the
 // brief's "PRAGMA query_only for SQLite; read-only tx elsewhere" design.
@@ -70,6 +71,9 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	ref, err := dbcopy.Parse(sourceURL)
 	if err != nil {
 		return Result{}, err
+	}
+	if ref.Scheme == "postgres" {
+		return Result{}, fmt.Errorf("%w: PostgreSQL sources take structured queries only", ErrNativeSQLUnsupported)
 	}
 	if ref.Scheme != "sqlite" {
 		return Result{}, fmt.Errorf("%w: scheme %q", ErrNativeSQLUnsupported, ref.Scheme)

@@ -3,18 +3,24 @@ package commands
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo2postgres"
+	"github.com/dal-go/dalgo2sql"
 	"github.com/datatug/datatug-cli/internal/sourcecases"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
@@ -42,7 +48,33 @@ import (
 //
 // Nothing here relies on a redactor: Exit no longer calls one, and the
 // top-level handler in main.go that does is not run.
+//
+// This is the property with the preview switch of PostgreSQL sources off, which is how every command meets
+// a PostgreSQL source unless the person turns the preview on; the next test runs it again with the switch on.
 func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
+	checkNoCommandPathEchoesASourceSecret(t)
+}
+
+// TestProperty_NoCommandPathEchoesASourceSecret_WithThePreviewOn is the same property with the preview switch on, so
+// that the path a PostgreSQL source takes once it is opened is inside it: every command that takes a source now opens
+// a PostgreSQL one through the opener, which here fails with an error that quotes the connection string it was given
+// (the URL as the command resolved it, the session defaults and the password included), as a driver does. No
+// generated secret reaches an output, an error, the log or a file.
+func TestProperty_NoCommandPathEchoesASourceSecret_WithThePreviewOn(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	var opens atomic.Int32
+	t.Cleanup(dbcopy.SetPostgresOpenerForTest(func(dsn string, _ dal.Schema, _ dalgo2sql.DbOptions, _ ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+		opens.Add(1)
+		return nil, fmt.Errorf("failed to connect to %q: dial tcp: refused (connection string %s)", dsn, dsn)
+	}))
+	checkNoCommandPathEchoesASourceSecret(t)
+	if opens.Load() == 0 {
+		t.Error("no generated source reached the opener: the run did not exercise the path this test is for")
+	}
+}
+
+func checkNoCommandPathEchoesASourceSecret(t *testing.T) {
+	t.Helper()
 	// A relative path a source names lands in this directory, so a stray write is
 	// found below.
 	workdir := t.TempDir()

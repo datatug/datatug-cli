@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -32,11 +31,6 @@ const postgresDescriptorFolder = "connections"
 // which it names on its log line. A host list, or the path of a socket, is refused. (The
 // project records no host: the server of a PostgreSQL project is its driver.)
 var recordableHost = regexp.MustCompile(`^[A-Za-z0-9:][A-Za-z0-9._:-]*$`)
-
-// queryKeysThatOverrideTheTarget are the keys of the query of a PostgreSQL URL that replace the
-// host, the port or the database that its authority and its path name (the user is replaced the
-// same way, and is never named by a scan).
-var queryKeysThatOverrideTheTarget = []string{"host", "port", "dbname", "database"}
 
 // PostgresScanParams are the connection parameters of a PostgreSQL scan. The
 // connection is an environment variable that holds the whole URL, so these
@@ -72,25 +66,14 @@ func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, enviro
 	if ref.Scheme != "postgres" {
 		return nil, fmt.Errorf("environment variable %s must hold a postgres:// URL, not a %s source", dsnEnv, ref.Scheme)
 	}
-	target, err := dbcopy.ParsePostgresTarget(ref.Path)
-	if err != nil {
-		return nil, fmt.Errorf("environment variable %s: %w", dsnEnv, err)
-	}
+	// ParseWithEnv has read the URL with this same function and refused one it cannot read, so the error is
+	// never set here; a target that came back empty would be refused below, as one that names no host.
+	target, _ := dbcopy.ParsePostgresTarget(ref.Path)
 	if target.Host == "" {
 		return nil, fmt.Errorf("the URL in environment variable %s names no host (a unix-socket connection cannot be scanned yet)", dsnEnv)
 	}
 	if !recordableHost.MatchString(target.Host) {
 		return nil, fmt.Errorf("the host in environment variable %s cannot be recorded in a project: use a host name or an address", dsnEnv)
-	}
-	// The query of a URL overrides its authority and its path (pgx applies it after them, and
-	// dbcopy.ParsePostgresTarget does the same), so the line that names what the scan connects
-	// to, which is built from the authority and the path, would name a place the scan does not
-	// connect to. Only the name of the key is said: the value is part of the URL.
-	parsed, _ := url.Parse(ref.Path) // ParsePostgresTarget has parsed it
-	for _, key := range queryKeysThatOverrideTheTarget {
-		if parsed.Query().Has(key) {
-			return nil, fmt.Errorf("the URL in environment variable %s sets %q in its query, which the connection uses in place of the host, port or database the rest of the URL names: write the host and port in the authority and the database in the path", dsnEnv, key)
-		}
 	}
 	if !dbcopy.IsPlainSourceID(environment) || !dbcopy.IsPlainSourceID(catalog) {
 		// The flags are what the user typed, and a source string can be typed where

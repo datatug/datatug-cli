@@ -103,11 +103,13 @@ func firstLine(text string) string {
 	return line
 }
 
-// realPgFixtureDDL is the database every real journey scans, in the schema public: the
+// realPgFixtureDDL is the database every real journey scans. In the schema public: the
 // customer and invoice tables with a foreign key, a mixed-case table with mixed-case columns,
 // a composite primary key whose order differs from the order of the columns, a table without a
-// primary key, a view, the type matrix of the adapter, a column with a default and NOT NULL
-// columns; and a second schema with a table, which the shipped reader does not read.
+// primary key, a view, the type matrix of the adapter, columns with a default (now(), a
+// constant) and NOT NULL columns. And a second schema, sales, with a table of the same name as
+// one of public (customer, with other columns: an identity column, a constant default, now(), a
+// sequence and a generated column), a table of its own, a view and a materialized view.
 var realPgFixtureDDL = []string{
 	`CREATE TABLE customer (
 		id bigint PRIMARY KEY,
@@ -149,7 +151,16 @@ var realPgFixtureDDL = []string{
 		c_varchar varchar(40))`,
 	`INSERT INTO customer (id, name) VALUES (1, 'Ada Lovelace'), (2, 'Alan Turing')`,
 	`CREATE SCHEMA sales`,
+	`CREATE SEQUENCE sales.ticket_seq`,
+	`CREATE TABLE sales.customer (
+		id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+		label text NOT NULL DEFAULT 'new',
+		opened timestamptz NOT NULL DEFAULT now(),
+		ticket integer NOT NULL DEFAULT nextval('sales.ticket_seq'),
+		doubled integer GENERATED ALWAYS AS (id * 2) STORED)`,
 	`CREATE TABLE sales.refund (id integer PRIMARY KEY, amount numeric(12,2))`,
+	`CREATE VIEW sales.customer_labels AS SELECT id, label FROM sales.customer`,
+	`CREATE MATERIALIZED VIEW sales.customer_tickets AS SELECT id, ticket FROM sales.customer`,
 }
 
 // newRealPgServer skips the test unless the CI job's server is there, then makes a role and a
@@ -225,11 +236,6 @@ var realPgWant = map[string][]realCol{
 	"audit_log": {
 		{"at", "time", 0, true}, {"message", "string", 0, true},
 	},
-	// KNOWN GAP: the shipped reader lists a view with the tables and cannot tell them apart, so
-	// the scan saves the view as a table (this entry moves to the views when the adapter learns to).
-	"customer_names": {
-		{"id", "int", 0, true}, {"name", "string", 0, true},
-	},
 	"type_matrix": {
 		{"id", "int", 1, false},
 		{"c_smallint", "int", 0, true}, {"c_integer", "int", 0, true}, {"c_bigint", "int", 0, true},
@@ -241,20 +247,87 @@ var realPgWant = map[string][]realCol{
 	},
 }
 
+// realPgWantViews is what the scan records of the views of schema public: a view is saved
+// as a view, where the layout keeps views.
+var realPgWantViews = map[string][]realCol{
+	"customer_names": {
+		{"id", "int", 0, true}, {"name", "string", 0, true},
+	},
+}
+
+// realPgWantSales is what the scan records of the tables of schema sales, and realPgWantSalesViews
+// of its views and materialized views. The table customer is not the customer of schema public.
+var (
+	realPgWantSales = map[string][]realCol{
+		"customer": {
+			{"id", "int", 1, false}, {"label", "string", 0, false}, {"opened", "time", 0, false}, {"ticket", "int", 0, false}, {"doubled", "int", 0, true},
+		},
+		"refund": {
+			{"id", "int", 1, false}, {"amount", "decimal", 0, true},
+		},
+	}
+	realPgWantSalesViews = map[string][]realCol{
+		"customer_labels":  {{"id", "int", 0, true}, {"label", "string", 0, true}},
+		"customer_tickets": {{"id", "int", 0, true}, {"ticket", "int", 0, true}},
+	}
+)
+
+// realPgWantDefaults is the default the scan records of each column that has one, by the folder
+// of the relation in the model (<schema>/<tables|views>/<name>): the text of the SQL expression as
+// the server stores it, and nothing for a column that has none. An identity column has none; a
+// generated column is the text the reader builds from its expression.
+var realPgWantDefaults = map[string]map[string]string{
+	"public/tables/customer":       {"created": "now()"},
+	"public/tables/invoice":        {"total": "0", "status": "'open'::text"},
+	"public/tables/MixedCase":      {},
+	"public/tables/order_line":     {},
+	"public/tables/audit_log":      {},
+	"public/tables/type_matrix":    {},
+	"public/views/customer_names":  {},
+	"sales/tables/customer":        {"label": "'new'::text", "opened": "now()", "ticket": "nextval('sales.ticket_seq'::regclass)", "doubled": "GENERATED ALWAYS AS ((id * 2))"},
+	"sales/tables/refund":          {},
+	"sales/views/customer_labels":  {},
+	"sales/views/customer_tickets": {},
+}
+
+// realPgRelations is every relation the scan is expected to save, by the folder of it in the model
+// (<schema>/<tables|views>/<name>), with the columns it records.
+func realPgRelations() map[string][]realCol {
+	relations := map[string][]realCol{}
+	for folder, group := range map[string]map[string][]realCol{
+		"public/tables": realPgWant, "public/views": realPgWantViews, "sales/tables": realPgWantSales, "sales/views": realPgWantSalesViews,
+	} {
+		for name, columns := range group {
+			relations[folder+"/"+name] = columns
+		}
+	}
+	return relations
+}
+
 // storedColumn is a column of a columns file of the project, as the file holds it.
 type storedColumn struct {
-	Name       string `json:"name"`
-	Ordinal    int    `json:"ordinalPosition"`
-	PKPosition int    `json:"pkPosition"`
-	IsNullable bool   `json:"isNullable"`
-	DbType     string `json:"dbType"`
+	Name       string  `json:"name"`
+	Ordinal    int     `json:"ordinalPosition"`
+	PKPosition int     `json:"pkPosition"`
+	IsNullable bool    `json:"isNullable"`
+	DbType     string  `json:"dbType"`
+	Default    *string `json:"default"`
 }
 
 // storedColumns reads the columns file of the table of schema public of the model shop.
 func storedColumns(t *testing.T, projectDir, table string) []storedColumn {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(projectDir, "dbmodels", "shop", "public", "tables", table, "public."+table+".columns.json"))
-	require.NoError(t, err, table)
+	return storedColumnsOf(t, projectDir, "public/tables/"+table)
+}
+
+// storedColumnsOf reads the columns file of the relation at folder (<schema>/<tables|views>/<name>)
+// of the model shop.
+func storedColumnsOf(t *testing.T, projectDir, folder string) []storedColumn {
+	t.Helper()
+	schema, _, _ := strings.Cut(folder, "/")
+	name := folder[strings.LastIndex(folder, "/")+1:]
+	data, err := os.ReadFile(filepath.Join(projectDir, "dbmodels", "shop", filepath.FromSlash(folder), schema+"."+name+".columns.json"))
+	require.NoError(t, err, folder)
 	var file struct {
 		Columns []storedColumn `json:"columns"`
 	}
@@ -399,8 +472,9 @@ func TestPostgresScanJourney(t *testing.T) {
 	t.Logf("log of the first scan:\n%s", logged.String())
 
 	var wantFiles []string
-	for table := range realPgWant {
-		wantFiles = append(wantFiles, "dbmodels/shop/public/tables/"+table+"/public."+table+".columns.json")
+	for folder := range realPgRelations() {
+		schema, _, _ := strings.Cut(folder, "/")
+		wantFiles = append(wantFiles, "dbmodels/shop/"+folder+"/"+schema+"."+folder[strings.LastIndex(folder, "/")+1:]+".columns.json")
 	}
 	wantFiles = append(wantFiles,
 		"README.md",
@@ -411,7 +485,7 @@ func TestPostgresScanJourney(t *testing.T) {
 		"environments/local/local.env.json")
 	slices.Sort(wantFiles)
 	assert.Equal(t, wantFiles, projectFiles(t, projectDir, ""),
-		"the files of the scan: one columns file per table of schema public, the view among them as a table, and nothing of schema sales")
+		"the files of the scan: one columns file per table and view of each schema, a view and a materialized view among the views, and the two tables called customer each in its own schema")
 
 	store, id := filestore.NewSingleProjectStore(projectDir, "")
 	projStore := store.GetProjectStore(id)
@@ -428,21 +502,29 @@ func TestPostgresScanJourney(t *testing.T) {
 	schema, err := api.GetCatalogSchema(projectDir, "local", "shop")
 	require.NoError(t, err)
 	wantRelations := map[string][]journeyColumn{}
-	for table, columns := range realPgWant {
-		key := "public." + table + " (BASE TABLE)"
+	for folder, columns := range realPgRelations() {
+		parts := strings.Split(folder, "/")
+		dbType := map[string]string{"tables": "BASE TABLE", "views": "VIEW"}[parts[1]]
+		key := parts[0] + "." + parts[2] + " (" + dbType + ")"
 		for _, column := range columns {
 			wantRelations[key] = append(wantRelations[key], journeyColumn{Name: column.name, PKPos: column.pk, DbType: column.dbType})
 		}
 	}
 	assert.Equal(t, wantRelations, relationColumns(schema))
-	for table, columns := range realPgWant {
+	for folder, columns := range realPgRelations() {
 		var stored []realCol
-		for i, column := range storedColumns(t, projectDir, table) {
-			assert.Equal(t, i+1, column.Ordinal, "%s.%s keeps its place in the table", table, column.Name)
+		defaults := map[string]string{}
+		for i, column := range storedColumnsOf(t, projectDir, folder) {
+			assert.Equal(t, i+1, column.Ordinal, "%s.%s keeps its place in the table", folder, column.Name)
 			stored = append(stored, realCol{column.Name, column.DbType, column.PKPosition, column.IsNullable})
+			if column.Default != nil {
+				defaults[column.Name] = *column.Default
+			}
 		}
-		assert.Equal(t, columns, stored, "the columns file of %s", table)
+		assert.Equal(t, columns, stored, "the columns file of %s", folder)
+		assert.Equal(t, realPgWantDefaults[folder], defaults, "the defaults recorded in the columns file of %s", folder)
 	}
+	assert.Len(t, realPgWantDefaults, len(realPgRelations()), "every relation has its defaults listed, the empty ones too")
 
 	// The length of a bounded text column is recorded, and a text column with no bound has none:
 	// varchar(40) is 40, text has no charMaxLength at all.
@@ -450,13 +532,10 @@ func TestPostgresScanJourney(t *testing.T) {
 	assert.EqualValues(t, 40, matrix["c_varchar"]["charMaxLength"], "type_matrix.c_varchar is varchar(40)")
 	assert.NotContains(t, matrix["c_text"], "charMaxLength", "type_matrix.c_text is text, which has no length")
 
-	// The scan records no default of a column. KNOWN GAP: the provider of the reader does not set
-	// the field of the model, so DEFAULT now(), DEFAULT 0 and DEFAULT 'open' of the fixture are lost.
-	t.Log("KNOWN GAP: the scan does not record column defaults: customer.created (DEFAULT now()), invoice.total (DEFAULT 0) and invoice.status (DEFAULT 'open') are saved without one")
-	for table, column := range map[string]string{"customer": "created", "invoice": "total"} {
-		assert.NotContains(t, storedColumnMaps(t, projectDir, table)[column], "default", "KNOWN GAP: the scan does not record column defaults (%s.%s)", table, column)
-	}
-	assert.NotContains(t, storedColumnMaps(t, projectDir, "invoice")["status"], "default", "KNOWN GAP: the scan does not record column defaults (invoice.status)")
+	// A column that has no default has no "default" key in its file at all (a column of the
+	// type matrix, and the identity column of sales.customer, which the server reports apart).
+	assert.NotContains(t, matrix["c_text"], "default")
+	assert.NotContains(t, storedColumnMaps(t, projectDir, "customer")["email"], "default")
 
 	// 3. The readers of serve, chat and the web app see the same tables, in the one schema.
 	listed, err := api.GetCatalogTables(projectDir, "local", "shop")
@@ -465,17 +544,19 @@ func TestPostgresScanJourney(t *testing.T) {
 	for _, table := range listed.Tables {
 		listedTables = append(listedTables, table.Schema+"."+table.Name)
 	}
-	wantTables := []string{"public.MixedCase", "public.audit_log", "public.customer", "public.customer_names", "public.invoice", "public.order_line", "public.type_matrix"}
+	wantTables := []string{"public.MixedCase", "public.audit_log", "public.customer", "public.invoice", "public.order_line", "public.type_matrix", "sales.customer", "sales.refund"}
+	wantViews := []string{"public.customer_names", "sales.customer_labels", "sales.customer_tickets"}
 	assert.Equal(t, wantTables, listedTables)
-	t.Log("KNOWN GAP: a view is saved as a table: the shipped reader lists a view with the tables and cannot tell them apart (customer_names is among the tables, and the scan saves no view)")
-	t.Log("KNOWN GAP: only the schema public is read: the table sales.refund of the second schema is not saved")
-	assert.Empty(t, listed.Views, "KNOWN GAP: the shipped reader cannot tell a view from a table, so customer_names is saved as a table and the scan saves no view")
+	var listedViews []string
+	for _, view := range listed.Views {
+		listedViews = append(listedViews, view.Schema+"."+view.Name)
+	}
+	assert.Equal(t, wantViews, listedViews, "a view and a materialized view are views, in the schema they are in")
 	envs, catalogs, tables, views := webReaderTables(t, projectDir)
 	assert.Equal(t, []string{"local"}, envs)
 	assert.Equal(t, []string{"shop"}, catalogs)
-	assert.Equal(t, wantTables, tables, "KNOWN GAP: only the schema public is read, so sales.refund is not saved")
-	assert.Empty(t, views, "KNOWN GAP: a view is saved as a table")
-	assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "shop", "sales"), "KNOWN GAP: only the schema public is read")
+	assert.Equal(t, wantTables, tables, "every schema is read: the table customer of sales is not the one of public")
+	assert.Equal(t, wantViews, views)
 	sources, err := api.ListSources(ctx, projStore, projectDir, "local")
 	require.NoError(t, err)
 	require.Len(t, sources, 1)

@@ -17,6 +17,7 @@ import (
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/schemers/dalgoschema"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/stretchr/testify/assert"
@@ -56,6 +57,34 @@ type pgRelation struct {
 
 func pgField(name string, kind dbschema.Type, nullable bool) dbschema.FieldDef {
 	return dbschema.FieldDef{Name: dal.FieldName(name), Type: kind, Nullable: nullable}
+}
+
+// storedDefaults is the default of each column of the columns file of a table or view of the
+// model shop that has one, by the name of the column.
+func storedDefaults(t *testing.T, projectDir, schema, folder, name string) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(projectDir, "dbmodels", "shop", schema, folder, name, schema+"."+name+".columns.json"))
+	require.NoError(t, err, name)
+	var file struct {
+		Columns []struct {
+			Name    string  `json:"name"`
+			Default *string `json:"default"`
+		} `json:"columns"`
+	}
+	require.NoError(t, json.Unmarshal(data, &file), string(data))
+	defaults := map[string]string{}
+	for _, column := range file.Columns {
+		if column.Default != nil {
+			defaults[column.Name] = *column.Default
+		}
+	}
+	return defaults
+}
+
+// pgFieldDefault is field with the default the reader reports: the text of the SQL expression.
+func pgFieldDefault(field dbschema.FieldDef, expression string) dbschema.FieldDef {
+	field.Default = dbschema.DefaultLiteral{Value: expression}
+	return field
 }
 
 // fakePgDatabase is the schema reader a PostgreSQL scan reads through. It lists the
@@ -103,6 +132,40 @@ func (f *fakePgDatabase) ListViews(context.Context) ([]dal.CollectionRef, error)
 	}
 	return refs, nil
 }
+
+// ListSchemas, ListSchemaCollections and ListSchemaViews are the reader's own methods that the
+// scan looks for (dalgoschema.SchemaLister): the schemas of the server in name order, and the
+// relations and the views of one, each by a reference that names its schema.
+func (f *fakePgDatabase) ListSchemas(context.Context) ([]string, error) {
+	var schemas []string
+	for _, relation := range f.relations {
+		if !slices.Contains(schemas, relation.schema) {
+			schemas = append(schemas, relation.schema)
+		}
+	}
+	slices.Sort(schemas)
+	return schemas, nil
+}
+
+func (f *fakePgDatabase) listSchema(schema string, viewsOnly bool) []dal.CollectionRef {
+	var refs []dal.CollectionRef
+	for _, relation := range f.relations {
+		if relation.schema == schema && (relation.view || !viewsOnly) {
+			refs = append(refs, dal.NewQualifiedRootCollectionRef(relation.schema, relation.name, ""))
+		}
+	}
+	return refs
+}
+
+func (f *fakePgDatabase) ListSchemaCollections(_ context.Context, schema string) ([]dal.CollectionRef, error) {
+	return f.listSchema(schema, false), nil
+}
+
+func (f *fakePgDatabase) ListSchemaViews(_ context.Context, schema string) ([]dal.CollectionRef, error) {
+	return f.listSchema(schema, true), nil
+}
+
+var _ dalgoschema.SchemaLister = (*fakePgDatabase)(nil)
 
 func (f *fakePgDatabase) DescribeCollection(_ context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {
 	relation, ok := f.find(ref)
@@ -455,6 +518,85 @@ func TestScanJourneyPostgres(t *testing.T) {
 	assert.Equal(t, []string{"public.Customer", "sales.Invoice", "sales.Payment"}, tables)
 }
 
+// A column's default is saved in the field the columns file has for it, as the text of the
+// expression the reader reported; a column with none, and an identity column, have no such field;
+// and what is saved is saved again by a rescan, byte for byte. The relations of the journey above
+// have no default, so that their files stay the files of main (TestScanJourneyIntoACleanFolderWritesWhatMainWrote).
+func TestScanJourneyPostgresSavesColumnDefaults(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "shop-project")
+	identity := pgField("Id", dbschema.Int, false)
+	identity.AutoIncrement = true
+	fake := &fakePgDatabase{relations: []pgRelation{
+		{schema: "public", name: "Item", primaryKey: []dal.FieldName{"Id"}, fields: []dbschema.FieldDef{
+			identity,
+			pgFieldDefault(pgField("Status", dbschema.String, false), "'new'::text"),
+			pgFieldDefault(pgField("Made", dbschema.Time, false), "now()"),
+			pgFieldDefault(pgField("Qty", dbschema.Int, false), "0"),
+			pgFieldDefault(pgField("Hits", dbschema.Int, false), "nextval('sales.hits_seq'::regclass)"),
+			pgFieldDefault(pgField("Double", dbschema.Int, true), `GENERATED ALWAYS AS (("Qty" * 2))`),
+			pgField("Note", dbschema.String, true),
+		}},
+		{schema: "sales", name: "Tickets", view: true, fields: []dbschema.FieldDef{pgField("Id", dbschema.Int, true)}},
+	}}
+	usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return fake })
+	scan := func() {
+		t.Helper()
+		stderr, err := runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", "local")...)
+		require.NoError(t, err)
+		assert.Empty(t, stderr)
+	}
+
+	scan()
+
+	assert.Equal(t, map[string]string{
+		"Status": "'new'::text",
+		"Made":   "now()",
+		"Qty":    "0",
+		"Hits":   "nextval('sales.hits_seq'::regclass)",
+		"Double": `GENERATED ALWAYS AS (("Qty" * 2))`,
+	}, storedDefaults(t, projectDir, "public", "tables", "Item"))
+	assert.Empty(t, storedDefaults(t, projectDir, "sales", "views", "Tickets"))
+	first := treeHashes(t, projectDir, "")
+	scan()
+	assert.Equal(t, first, treeHashes(t, projectDir, ""), "a rescan of an unchanged database leaves the folder byte-identical")
+}
+
+// A project scanned before views were told from tables holds a view as a table. The next scan
+// takes that folder back, with the line a dropped table gets, and saves the view among the views;
+// every other file stays as it was.
+func TestScanJourneyPostgresMovesAViewSavedAsATableToTheViews(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "shop-project")
+	fake := newJourneyPgDatabase()
+	for i := range fake.relations {
+		if fake.relations[i].name == "customer_names" {
+			fake.relations[i].view = false // as the reader of the release before could not tell
+		}
+	}
+	usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return fake })
+	scan := func() string {
+		t.Helper()
+		stderr, err := runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", "local")...)
+		require.NoError(t, err)
+		return stderr
+	}
+	assert.Empty(t, scan())
+	require.FileExists(t, filepath.Join(projectDir, "dbmodels", "shop", "public", "tables", "customer_names", "public.customer_names.columns.json"))
+	before := treeHashes(t, projectDir, "")
+
+	for i := range fake.relations {
+		if fake.relations[i].name == "customer_names" {
+			fake.relations[i].view = true
+		}
+	}
+	stderr := scan()
+
+	assert.Equal(t, `removed: dbmodels/shop/public/tables/customer_names: table "customer_names" of schema "public" is no longer in the database`+"\n", stderr)
+	added, removed, changed := diffTrees(before, treeHashes(t, projectDir, ""))
+	assert.Equal(t, []string{"dbmodels/shop/public/views/customer_names/public.customer_names.columns.json"}, added)
+	assert.Equal(t, []string{"dbmodels/shop/public/tables/customer_names/public.customer_names.columns.json"}, removed)
+	assert.Empty(t, changed)
+}
+
 // A PostgreSQL scan never writes the connection into a file, and never says more of it than
 // the scheme, the host, the port and the database: no user name, no password, no query string.
 func TestScanJourneyPostgresNamesTheServerWithoutTheCredentials(t *testing.T) {
@@ -558,6 +700,7 @@ func TestScanJourneyPostgresNamesThatCannotBeFolders(t *testing.T) {
 		{schema: "public", name: "con", fields: field},
 		{schema: "Reports", name: "Sales", fields: field},
 		{schema: "reports", name: "Other", fields: field},
+		{schema: "x/y", name: "Hidden", fields: field},
 	}}
 	usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return fake })
 
@@ -565,8 +708,8 @@ func TestScanJourneyPostgresNamesThatCannotBeFolders(t *testing.T) {
 
 	require.NoError(t, err, "what a scan leaves out never fails it")
 	lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
-	assert.Len(t, lines, 4, stderr)
-	for _, left := range []string{`table "a/b" of schema "public"`, `table "con" of schema "public"`, `table "customer" of schema "public"`, `schema "reports"`} {
+	assert.Len(t, lines, 5, stderr)
+	for _, left := range []string{`table "a/b" of schema "public"`, `table "con" of schema "public"`, `table "customer" of schema "public"`, `schema "reports"`, `schema "x/y" is left out`} {
 		assert.Contains(t, stderr, left)
 	}
 	_, _, tables, _ := webReaderTables(t, projectDir)
@@ -596,6 +739,8 @@ type failingPgDatabase struct {
 func (f *failingPgDatabase) ListCollections(context.Context, *record.Key) ([]dal.CollectionRef, error) {
 	return nil, f.err
 }
+
+func (f *failingPgDatabase) ListSchemas(context.Context) ([]string, error) { return nil, f.err }
 
 // propertyPgModes are the ways the fake server of the property test answers a scan.
 var propertyPgModes = []string{"the open fails", "the listing fails", "it works"}

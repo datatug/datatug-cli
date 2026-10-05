@@ -256,7 +256,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 			return apicontract.Result{}, ce
 		}
 		if errors.Is(err, dbcopy.ErrSourceFileMissing) {
-			return apicontract.Result{}, newSourceUnavailable(err.Error())
+			return apicontract.Result{}, sourceUnavailableAnswer(resolved.ID, err)
 		}
 		// dal-go/dalgo2http v0.2.0's Phase 1 HTTP bounds (adopted alongside
 		// this stream): a live response over the adapter's 2 MiB cap fails
@@ -335,7 +335,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		// asked last, after every classification above that is more specific: an HTTP source
 		// whose descriptor is refused when it is opened is an open failure too, and keeps its
 		// own answer, which names only the query and carries the snapshots recorded for it.
-		if unavailable := dbcopy.UnavailableSource(err); unavailable != nil {
+		if unavailable := api.SourceUnavailable(resolved.ID, err); unavailable != nil {
 			return apicontract.Result{}, newSourceUnavailable(unavailable.Error())
 		}
 		return apicontract.Result{}, newInvalidRequest("", err.Error())

@@ -72,7 +72,7 @@ func TestProperty_ServeNeverEchoesASourceSecret(t *testing.T) {
 		}
 
 		// A source URL the server opens.
-		_, err := resolveSQLSourceURL(ctx, c.Source, "customers")
+		_, err := resolveSQLSourceURL(ctx, "src", c.Source, "customers")
 		note(err)
 		respond(err)
 

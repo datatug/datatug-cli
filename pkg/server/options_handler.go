@@ -7,19 +7,27 @@ import (
 	"github.com/datatug/datatug-cli/pkg/server/endpoints"
 )
 
-// globalOptionsHandler handles OPTIONS requests
+// What a refused preflight answers: sentences that are fixed, and name nothing the request sent.
+const (
+	preflightIncompleteSentence = "a preflight request needs an Origin and an Access-Control-Request-Method"
+	preflightOriginSentence     = "the origin of this request is not one this agent answers"
+)
+
+// globalOptionsHandler handles OPTIONS requests. It is served behind the request guard (see
+// endpoints.RequestGuard), which has already refused a Host that is not this server's and an
+// Origin that is not on the list; it checks the origin again, so that it holds when it is called
+// without the guard.
 func globalOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
 	accessControlRequestMethod := r.Header.Get("Access-Control-Request-Method")
 	if origin == "" || accessControlRequestMethod == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		_, _ = fmt.Fprintln(w, "origin: ", origin)
-		_, _ = fmt.Fprintln(w, "accessControlRequestMethod: ", accessControlRequestMethod)
+		_, _ = fmt.Fprintln(w, preflightIncompleteSentence)
 		return
 	}
 	if !endpoints.IsSupportedOrigin(origin) {
 		w.WriteHeader(http.StatusForbidden)
-		_, _ = fmt.Fprintf(w, "Unsupported origin: %v", origin)
+		_, _ = fmt.Fprintln(w, preflightOriginSentence)
 		return
 	}
 	// Set CORS headers BEFORE calling w.WriteHeader() or w.Write()

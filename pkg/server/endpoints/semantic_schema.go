@@ -55,7 +55,7 @@ func resolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 	}
 	switch resolved.Kind {
 	case api.SourceKindSQL:
-		return resolveSQLSourceURL(ctx, resolved.URL, collection)
+		return resolveSQLSourceURL(ctx, resolved.ID, resolved.URL, collection)
 	case api.SourceKindInGitDB:
 		// The ID of the source is joined into the path of its definition, and it is read out
 		// of a file of the project (the ID of a recordset definition, the model of a catalog),
@@ -80,14 +80,21 @@ func resolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 	}
 }
 
-// unavailableOr answers a failure of a source that dbcopy built a fixed sentence for (a source that is refused, cannot
-// be opened, or whose connection was lost) as SOURCE_UNAVAILABLE with that sentence, and any other failure as
-// otherwise. The sentence is the one dbcopy.UnavailableSource finds in cause, never cause's own text.
-func unavailableOr(cause, otherwise error) error {
-	if unavailable := dbcopy.UnavailableSource(cause); unavailable != nil {
+// unavailableOr answers a failure of the source whose ID is sourceID that dbcopy built a sentence for (a source that
+// is refused, whose data file is not there, that cannot be opened, or whose connection was lost) as SOURCE_UNAVAILABLE
+// with the sentence of api.SourceUnavailable, which names the source by its ID and never by the display form that
+// dbcopy's own sentence holds (that is logged), and any other failure as otherwise.
+func unavailableOr(sourceID string, cause, otherwise error) error {
+	if unavailable := api.SourceUnavailable(sourceID, cause); unavailable != nil {
 		return newSourceUnavailable(unavailable.Error())
 	}
 	return otherwise
+}
+
+// sourceUnavailableAnswer answers err, a failure of the source whose ID is sourceID, as SOURCE_UNAVAILABLE with a
+// sentence built from the ID (see api.SourceUnavailable).
+func sourceUnavailableAnswer(sourceID string, err error) *contractError {
+	return newSourceUnavailable(api.SourceUnavailable(sourceID, err).Error())
 }
 
 // recordsetUnavailable is the answer for a source whose recordset definition cannot be used:
@@ -109,7 +116,7 @@ func fileExists(path string) bool {
 // resolveSQLSourceURL is resolveSQLSource's own logic, taking an
 // already-resolved sqlite:// URL (api.ResolvedSource.URL) instead of
 // building one from a bare filesystem path itself.
-func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (resolvedSource, error) {
+func resolveSQLSourceURL(ctx context.Context, sourceID, sourceURL, collection string) (resolvedSource, error) {
 	ref, err := dbcopyParse(sourceURL)
 	if err != nil {
 		return resolvedSource{}, err
@@ -119,17 +126,13 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 	shown := ref.String()
 	db, err := ref.Open(ctx)
 	if err != nil {
-		if errors.Is(err, dbcopy.ErrSourceFileMissing) {
-			return resolvedSource{}, newSourceUnavailable(err.Error())
-		}
-		// Open's error says which source failed and why, in a fixed sentence built
-		// from the display form, so naming the source again in front of it would say
-		// it twice. The exceptions are the fixed refusals of a PostgreSQL source
-		// (dbcopy.ErrPostgresPreview while the preview is off, and the refusal of a URL
-		// that turns the read-only session off), which name no source: the client knows
-		// which source it asked for. A source that is refused or cannot be opened is
-		// unavailable, as one whose file is missing is.
-		return resolvedSource{}, unavailableOr(err, err)
+		// A source that is refused, whose data file is not there or that cannot be opened is
+		// unavailable, and the answer names it by its ID: Open's own error holds the display form
+		// of the source (the path of a file, the host of a database), and goes to the log. The
+		// fixed refusals of a PostgreSQL source (dbcopy.ErrPostgresPreview while the preview is
+		// off, and the refusal of a URL that turns the read-only session off) name no source, and
+		// are answered as they are.
+		return resolvedSource{}, unavailableOr(sourceID, err, err)
 	}
 	reader, ok := dalAsSchemaReader(db)
 	if !ok {
@@ -138,7 +141,7 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 	collRef := dal.NewRootCollectionRef(collection, "")
 	def, err := reader.DescribeCollection(ctx, &collRef)
 	if err != nil {
-		return resolvedSource{}, unavailableOr(err, fmt.Errorf("describe %s.%s: %w", shown, collection, dbcopy.RedactError(err)))
+		return resolvedSource{}, unavailableOr(sourceID, err, fmt.Errorf("describe %s.%s: %w", shown, collection, dbcopy.RedactError(err)))
 	}
 	columns := make([]semantic.Column, len(def.Fields))
 	for i, f := range def.Fields {
@@ -155,7 +158,7 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 	var referencedBy datatug.ReferencedBys
 	referrers, err := reader.ListReferrers(ctx, &collRef)
 	if err != nil && !errors.Is(err, dal.ErrNotSupported) {
-		return resolvedSource{}, unavailableOr(err, fmt.Errorf("list referrers for %s.%s: %w", shown, collection, dbcopy.RedactError(err)))
+		return resolvedSource{}, unavailableOr(sourceID, err, fmt.Errorf("list referrers for %s.%s: %w", shown, collection, dbcopy.RedactError(err)))
 	}
 	for _, ref := range referrers {
 		cols := make([]string, len(ref.Fields))

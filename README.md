@@ -318,6 +318,11 @@ Datatug can work with `sql` DBs if a relevant driver has been linked into `datat
 
 - **SQLite** - via  [github.com/mattn/go-sqlite3](https://github.com/mattn/go-sqlite3 )
 - **Microsoft SQL Server** - via [go-mssqldb](https://github.com/denisenkom/go-mssqldb)
+- **PostgreSQL** - via [dalgo2postgres](https://github.com/dal-go/dalgo2postgres). `datatug scan -D postgres --dsn-env
+  DATATUG_SHOP_PG_URL --db shop --env local` reads the connection URL from the environment variable (it is never written to
+  the project) and saves every schema the role can use, the system schemas apart: tables, views and materialized views
+  (as views), columns with their defaults (the text of the SQL expression) and primary keys, a folder for each schema.
+  The scan does not save foreign keys or indexes yet.
 
 We are open for pull requests to support other `sql` DBs.
 

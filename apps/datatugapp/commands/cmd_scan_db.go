@@ -307,16 +307,17 @@ func scanCommandArgs() *cobra.Command {
 		Use:   "scan",
 		Short: "Adds or updates DB metadata",
 		Long: "Adds or updates DB metadata from a specific server in a specific environment.\n\n" +
-			"Scanning PostgreSQL (-D postgres --dsn-env NAME) reads the tables of the schema public and saves them like any other scan. " +
+			"Scanning PostgreSQL (-D postgres --dsn-env NAME) reads every schema the role can use, the system schemas apart: its tables, with views and materialized views as views, " +
+			"the columns of each with their defaults (the text of the SQL expression) and the primary keys, and saves them like any other scan, a folder for each schema. " +
 			"The connection URL (host, port, user and password) stays in the environment variable: the project holds the name of the variable in a connection descriptor, " +
 			"connections/<env>/<db>.json, and the driver and the database id in its environment file, and never a host, a port, a user or a password. " +
-			"A view of the server is saved as a table, and no other schema is read.",
+			"The scan does not save foreign keys or indexes.",
 		RunE: scanCommandAction,
 	}
 	flags := cmd.Flags()
 	flags.StringP("project", "p", "", "Registered project id/name to scan into; with --directory, the id of a new project (default: the name of the folder)")
 	flags.StringP("directory", "d", "", "Path to the project directory (alternative to --project); made if it does not exist")
-	flags.StringP("driver", "D", "", "DB driver: sqlserver, sqlite3 or postgres (postgres reads the schema public, the connection URL comes from the environment variable of --dsn-env)")
+	flags.StringP("driver", "D", "", "DB driver: sqlserver, sqlite3 or postgres (postgres reads every schema, the connection URL comes from the environment variable of --dsn-env)")
 	flags.StringP("server", "s", "", "Network server / host name")
 	flags.Int("port", 0, "Server network port (default if omitted)")
 	flags.StringP("user", "U", "", "DB login user")

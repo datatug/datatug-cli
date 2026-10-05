@@ -106,6 +106,10 @@ type postgresCalls interface {
 	Update(context.Context, *dalrecord.Key, []update.Update, ...dal.Precondition) error
 	UpdateMulti(context.Context, []*dalrecord.Key, []update.Update, ...dal.Precondition) error
 	ListCollections(context.Context, *dalrecord.Key) ([]dal.CollectionRef, error)
+	ListSchemas(context.Context) ([]string, error)
+	ListSchemaCollections(context.Context, string) ([]dal.CollectionRef, error)
+	ListViews(context.Context) ([]dal.CollectionRef, error)
+	ListSchemaViews(context.Context, string) ([]dal.CollectionRef, error)
 	DescribeCollection(context.Context, *dal.CollectionRef) (*dbschema.CollectionDef, error)
 	ListIndexes(context.Context, *dal.CollectionRef) ([]dbschema.IndexDef, error)
 	ListConstraints(context.Context, *dal.CollectionRef) ([]dbschema.ConstraintDef, error)
@@ -163,6 +167,10 @@ func postgresCallTable() map[string]func(postgresCalls) error {
 			return c.UpdateMulti(ctx, []*dalrecord.Key{key}, []update.Update{update.ByFieldName("status", "x")})
 		},
 		"ListCollections":             func(c postgresCalls) error { _, err := c.ListCollections(ctx, nil); return err },
+		"ListSchemas":                 func(c postgresCalls) error { _, err := c.ListSchemas(ctx); return err },
+		"ListSchemaCollections":       func(c postgresCalls) error { _, err := c.ListSchemaCollections(ctx, "sales"); return err },
+		"ListViews":                   func(c postgresCalls) error { _, err := c.ListViews(ctx); return err },
+		"ListSchemaViews":             func(c postgresCalls) error { _, err := c.ListSchemaViews(ctx, "sales"); return err },
 		"DescribeCollection":          func(c postgresCalls) error { _, err := c.DescribeCollection(ctx, &ref); return err },
 		"ListIndexes":                 func(c postgresCalls) error { _, err := c.ListIndexes(ctx, &ref); return err },
 		"ListConstraints":             func(c postgresCalls) error { _, err := c.ListConstraints(ctx, &ref); return err },

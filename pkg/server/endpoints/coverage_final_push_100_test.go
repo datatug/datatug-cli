@@ -130,7 +130,7 @@ func TestFinal_SemanticColumns_And_Schema(t *testing.T) {
 	_ = os.Remove(filepath.Join(badEntDir, "corrupt.entity.json"))
 
 	// 4. semantic_schema.go:88 dbcopy.Parse / ref.Open error with postgres
-	_, err = resolveSQLSourceURL(ctx, "postgres://localhost/mydb", "items")
+	_, err = resolveSQLSourceURL(ctx, "src", "postgres://localhost/mydb", "items")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "PostgreSQL")
 
@@ -144,7 +144,7 @@ func TestFinal_SemanticColumns_And_Schema(t *testing.T) {
 
 	dbFile := filepath.Join(t.TempDir(), "test.db")
 	_ = os.WriteFile(dbFile, []byte{}, 0644)
-	_, err = resolveSQLSourceURL(ctx, "sqlite://"+dbFile, "items")
+	_, err = resolveSQLSourceURL(ctx, "src", "sqlite://"+dbFile, "items")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "list referrers")
 }

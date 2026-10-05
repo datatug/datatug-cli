@@ -9,10 +9,19 @@ type router interface {
 	HandlerFunc(method, path string, handler http.HandlerFunc)
 }
 
+// registerRoutes registers the route table with router, every route behind the request guard of
+// caps (see RequestGuard): no route of the table is served any other way.
 func registerRoutes(path string, router router, wrapper wrapper, writeOnly bool, caps Capabilities) {
 	if router == nil {
 		panic("router == nil")
 	}
+	registerRoutesOn(path, guardedRouter{router: router, guard: caps.RequestGuard()}, wrapper, writeOnly, caps)
+}
+
+// registerRoutesOn is the route table: the routes, as they are registered with router. It is
+// called with the guarded router of registerRoutes, and with a bare one only by the test that
+// holds the guard to serving every route as it is served without it.
+func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly bool, caps Capabilities) {
 	path = strings.TrimRight(path, "/") + "/datatug"
 	route(router, wrapper, http.MethodGet, path+"/ping", Ping)
 	route(router, wrapper, http.MethodGet, path+"/agent-info", AgentInfo)
@@ -129,7 +138,7 @@ func environmentsRoutes(path string, router router, wrap wrapper, writeOnly bool
 func dbServerRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
 	if !writeOnly {
 		route(router, wrap, http.MethodGet, path+"/dbserver-summary", getDbServerSummary)
-		route(router, wrap, http.MethodGet, path+"/dbserver-databases", getServerDatabases)
+		route(router, wrap, http.MethodGet, path+"/dbserver-databases", requireLiveConnections(caps, getServerDatabases))
 	}
 	route(router, wrap, http.MethodPost, path+"/dbserver-add", requireWriteCapability(caps, addDbServer))
 	route(router, wrap, http.MethodDelete, path+"/dbserver-delete", requireWriteCapability(caps, deleteDbServer))

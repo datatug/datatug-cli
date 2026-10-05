@@ -28,6 +28,17 @@ const (
 // cmd_serve.go's --allow-writes flag).
 type Capabilities struct {
 	AllowWrites bool
+	// AllowLiveConnections opens the routes that connect to a database server that the served
+	// project records, under the identity of the person who runs the server (today
+	// dbserver-databases, which lists the databases of a SQL Server server). It defaults false:
+	// without it such a route answers 403 before anything is connected to (see
+	// requireLiveConnections, and `datatug serve --allow-live-connections`).
+	AllowLiveConnections bool
+	// ServedHost and ServedPort are the host and the port that the server listens on. The Host
+	// of a request must be a loopback name or address, or ServedHost, on ServedPort (see
+	// RequestGuard). A ServedPort of 0 accepts any port.
+	ServedHost string
+	ServedPort int
 }
 
 // RegisterDatatugHandlers registers datatug HTTP handlers with every write

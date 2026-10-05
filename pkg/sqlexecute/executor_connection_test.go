@@ -1,6 +1,7 @@
 package sqlexecute
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"os"
@@ -47,7 +48,7 @@ func TestServerConnectionParams(t *testing.T) {
 		{"an IPv6 host", datatug.ServerRef{Driver: "sqlserver", Host: "::1", Port: 1}, RequestCommand{}, "server=::1;port=1;trusted_connection=yes"},
 		{"no host (a driver that has a default)", datatug.ServerRef{Driver: "postgres"}, RequestCommand{}, "server=;trusted_connection=yes"},
 		{"the highest port", datatug.ServerRef{Driver: "sqlserver", Host: "h", Port: 65535}, RequestCommand{}, "server=h;port=65535;trusted_connection=yes"},
-		{"a user and a database", datatug.ServerRef{Driver: "sqlserver", Host: "h"}, RequestCommand{Credentials: datatug.Credentials{Username: "u", Password: "p"}, DB: "shop"}, "server=h;user id=u;password=p;database=shop"},
+		{"a user, a password and a database are not written", datatug.ServerRef{Driver: "sqlserver", Host: "h"}, RequestCommand{Credentials: datatug.Credentials{Username: "u", Password: "p"}, DB: "shop"}, "server=h;trusted_connection=yes"},
 	} {
 		params, err := serverConnectionParams(tc.server, tc.command)
 		if err != nil {
@@ -92,20 +93,20 @@ func TestServerConnectionParams_RefusesWhatIsNotAHostOrAPort(t *testing.T) {
 func TestExecuteCommand_TheConnectionIsBuiltFromTheServer(t *testing.T) {
 	capturedDSNs = nil
 	recordset, err := executorOfServer(datatug.ServerRef{Driver: "dsncapture", Host: "db1.example.com", Port: 1433}).
-		executeCommand(RequestCommand{Env: "dev", DB: "shop", Text: "SELECT n"})
+		executeCommand(context.Background(), RequestCommand{Env: "dev", DB: "shop", Text: "SELECT n"})
 	if err != nil {
 		t.Fatalf("a server with a port: %v", err)
 	}
 	if len(recordset.Rows) != 1 {
 		t.Errorf("rows = %v, want one", recordset.Rows)
 	}
-	if want := []string{"server=db1.example.com;port=1433;trusted_connection=yes;database=shop"}; strings.Join(capturedDSNs, "|") != strings.Join(want, "|") {
+	if want := []string{"server=db1.example.com;port=1433;trusted_connection=yes"}; strings.Join(capturedDSNs, "|") != strings.Join(want, "|") {
 		t.Errorf("the driver was opened with %q, want %q", capturedDSNs, want)
 	}
 
 	capturedDSNs = nil
 	_, err = executorOfServer(datatug.ServerRef{Driver: "dsncapture", Host: "db1.example.com;key=value"}).
-		executeCommand(RequestCommand{Env: "dev", DB: "shop", Text: "SELECT n"})
+		executeCommand(context.Background(), RequestCommand{Env: "dev", DB: "shop", Text: "SELECT n"})
 	if err == nil || !strings.Contains(err.Error(), "invalid connection parameters") || strings.Contains(err.Error(), "key=value") {
 		t.Errorf("a host with a ';' gave %v, want the refusal of the parameters, which does not echo the host", err)
 	}
@@ -137,7 +138,7 @@ func TestExecuteCommand_SQLite3_OpensTheFileItsNameIsReadOnlyAndNothingElse(t *t
 				t.Fatal(err)
 			}
 
-			recordset, err := sqliteExecutor(path).executeCommand(RequestCommand{Env: "dev", Text: "SELECT name FROM marker"})
+			recordset, err := sqliteExecutor(path).executeCommand(context.Background(), RequestCommand{Env: "dev", Text: "SELECT name FROM marker"})
 			if err != nil {
 				t.Fatalf("the file was not opened as the file its name is: %v", err)
 			}
@@ -146,8 +147,8 @@ func TestExecuteCommand_SQLite3_OpensTheFileItsNameIsReadOnlyAndNothingElse(t *t
 			}
 			// The executor reads the rows of a statement, and a statement that cannot write is
 			// not reported by the rows it has: the file is read again to see it was not written.
-			_, _ = sqliteExecutor(path).executeCommand(RequestCommand{Env: "dev", Text: "INSERT INTO marker VALUES ('x')"})
-			recordset, err = sqliteExecutor(path).executeCommand(RequestCommand{Env: "dev", Text: "SELECT name FROM marker"})
+			_, _ = sqliteExecutor(path).executeCommand(context.Background(), RequestCommand{Env: "dev", Text: "INSERT INTO marker VALUES ('x')"})
+			recordset, err = sqliteExecutor(path).executeCommand(context.Background(), RequestCommand{Env: "dev", Text: "SELECT name FROM marker"})
 			if err != nil || len(recordset.Rows) != 1 {
 				t.Errorf("the file was written through a connection that is read-only: rows %v, err %v", recordset.Rows, err)
 			}

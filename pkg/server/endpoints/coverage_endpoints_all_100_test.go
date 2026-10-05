@@ -809,7 +809,7 @@ func TestCoverageFinish100_SemanticColumns_And_Schema(t *testing.T) {
 		return nil, false
 	}
 	defer func() { dalAsSchemaReader = origAsReader }()
-	_, err = resolveSQLSourceURL(ctx, sqliteURL, "coll")
+	_, err = resolveSQLSourceURL(ctx, "src", sqliteURL, "coll")
 	assert.Error(t, err)
 	dalAsSchemaReader = origAsReader
 }

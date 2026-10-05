@@ -54,7 +54,7 @@ func TestUnclassifiedErrorLogsRedactSourceURLs(t *testing.T) {
 
 func TestResolveSQLSourceURLNeverEchoesAPassword(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "") // the preview is off: nothing is dialled
-	_, err := resolveSQLSourceURL(context.Background(), "postgres://alice:"+endpointSecret+"@127.0.0.1:1/shop", "customers")
+	_, err := resolveSQLSourceURL(context.Background(), "src", "postgres://alice:"+endpointSecret+"@127.0.0.1:1/shop", "customers")
 	if err == nil {
 		t.Fatal("PostgreSQL sources are a preview and are switched off; the open must fail")
 	}

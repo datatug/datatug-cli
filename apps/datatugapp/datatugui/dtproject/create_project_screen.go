@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
+	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-cli/pkg/dtgithub"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
@@ -280,7 +281,15 @@ var createGitHubRepoProject = func(ctx context.Context, client *github.Client, o
 func createLocalProject(projectID, title, location string) (projectRef dtconfig.ProjectRef, err error) {
 	projectPath := filepath.Join(fsutil.ExpandHome(location), projectID)
 	datatugDir := filepath.Join(projectPath, "datatug")
-	if err = os.MkdirAll(datatugDir, 0o755); err != nil {
+	// The folder of the project is the one the person chose, and is made as it always was. What
+	// is below it is made and written only as plain folders and plain files (see package
+	// plainfs): a link, or a file, where the datatug folder or its project file belong is refused,
+	// and nothing is written through it.
+	if err = os.MkdirAll(projectPath, 0o755); err != nil {
+		return projectRef, fmt.Errorf("failed to create project directory: %w", err)
+	}
+	tree := plainfs.New(projectPath, 0o755)
+	if err = tree.MkdirAll(datatugDir); err != nil {
 		return projectRef, fmt.Errorf("failed to create project directory: %w", err)
 	}
 
@@ -291,7 +300,7 @@ func createLocalProject(projectID, title, location string) (projectRef dtconfig.
 		ID    string `json:"id"`
 		Title string `json:"title"`
 	}{ID: projectID, Title: title}, "", "  ")
-	if err = os.WriteFile(filepath.Join(datatugDir, storage.ProjectSummaryFileName), configContent, 0o644); err != nil {
+	if err = tree.WriteFile(filepath.Join(datatugDir, storage.ProjectSummaryFileName), configContent, 0o644); err != nil {
 		return projectRef, fmt.Errorf("failed to create project config: %w", err)
 	}
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/executionstore"
@@ -32,16 +33,18 @@ var scanDbCatalogSeam = scanCatalog
 var accesspoliciesExplain = accesspolicies.Explain
 var querywriteQueryCredentialReason = querywrite.QueryCredentialReason
 var newProjectWithDatabaseSeam = newProjectWithDatabase
-var readmeWriteFile = os.WriteFile
 
-// What a rescan does to the folder of a table that the database no longer has (see
-// scan_rescan.go): listing it, looking at it and what is above it for a link, removing
-// it and rewriting its columns file.
-var (
-	scanReadDir   = os.ReadDir
-	scanLstat     = os.Lstat
-	scanRemoveAll = os.RemoveAll
-	scanWriteFile = os.WriteFile
-	scanRemove    = os.Remove // the connection descriptor of a PostgreSQL scan, and the folders it made
-	scanMkdir     = os.Mkdir  // a folder of the connection descriptor of a PostgreSQL scan
-)
+// scanReadDir is how a rescan lists the folders of the tables and views it may take back (see
+// scan_rescan.go): a read, which a test makes fail. Always os.ReadDir in production.
+var scanReadDir = os.ReadDir
+
+// scanOps are the calls of the operating system that every write of a scan into the project
+// folder is made with (see scanTree), so that a test makes one fail, or makes Lstat report a
+// junction on a platform that has none. Always the real ones in production.
+var scanOps = plainfs.OSOps()
+
+// scanTree is the project folder at projectDir as a scan writes into it: only plain files in
+// plain folders, never through a link (see package plainfs). Folders are made with the mode 0755.
+func scanTree(projectDir string) plainfs.Tree {
+	return plainfs.NewWithOps(projectDir, 0o755, scanOps)
+}

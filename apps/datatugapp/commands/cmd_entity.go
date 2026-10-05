@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-cli/pkg/dtentity"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/spf13/cobra"
@@ -277,6 +278,7 @@ func entityFieldRmCommandArgs() *cobra.Command {
 	}
 	registerEntityProjectFlags(cmd)
 	registerGitFlag(cmd)
+	registerFollowProjectLinkFlag(cmd)
 	return cmd
 }
 
@@ -291,8 +293,9 @@ func entityFieldRmCommandAction(cmd *cobra.Command, args []string) error {
 	v := &projectBaseCommand{}
 	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
 	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
+	v.FollowProjectLink, _ = cmd.Flags().GetBool(followProjectLinkFlagName)
 
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true, writesProject: true}); err != nil {
 		return err
 	}
 
@@ -334,7 +337,7 @@ func entityFieldRmCommandAction(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	entityPath := filepath.Join(v.ProjectDir, "entities", name, name+".entity.json")
-	if err = atomicWriteFiles([]fileWrite{{path: entityPath, content: content}}); err != nil {
+	if err = atomicWriteFiles(v.ProjectDir, []fileWrite{{path: entityPath, content: content}}); err != nil {
 		return err
 	}
 	if err = applyGit(v.ProjectDir, mode, []string{entityPath}); err != nil {
@@ -364,6 +367,7 @@ func entityFieldSetCommandArgs() *cobra.Command {
 	cmd.Flags().String(entityFieldTitleFlagName, "", "Field title")
 	cmd.Flags().Bool(entityFieldKeyFlagName, false, "Whether the field is a key field")
 	registerGitFlag(cmd)
+	registerFollowProjectLinkFlag(cmd)
 	return cmd
 }
 
@@ -385,8 +389,9 @@ func entityFieldSetCommandAction(cmd *cobra.Command, args []string) error {
 	v := &projectBaseCommand{}
 	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
 	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
+	v.FollowProjectLink, _ = cmd.Flags().GetBool(followProjectLinkFlagName)
 
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true, writesProject: true}); err != nil {
 		return err
 	}
 
@@ -440,7 +445,7 @@ func entityFieldSetCommandAction(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	entityPath := filepath.Join(v.ProjectDir, "entities", name, name+".entity.json")
-	if err = atomicWriteFiles([]fileWrite{{path: entityPath, content: content}}); err != nil {
+	if err = atomicWriteFiles(v.ProjectDir, []fileWrite{{path: entityPath, content: content}}); err != nil {
 		return err
 	}
 	if err = applyGit(v.ProjectDir, mode, []string{entityPath}); err != nil {
@@ -462,6 +467,7 @@ func entityFieldAddCommandArgs() *cobra.Command {
 	registerEntityProjectFlags(cmd)
 	registerEntityDefinitionFlags(cmd)
 	registerGitFlag(cmd)
+	registerFollowProjectLinkFlag(cmd)
 	return cmd
 }
 
@@ -513,6 +519,7 @@ func entityAddCommandArgs() *cobra.Command {
 	registerEntityProjectFlags(cmd)
 	registerEntityDefinitionFlags(cmd)
 	registerGitFlag(cmd)
+	registerFollowProjectLinkFlag(cmd)
 	return cmd
 }
 
@@ -619,33 +626,50 @@ type fileWrite struct {
 // write fails, all staged temp files are removed and nothing is committed.
 // Renames happen after all temps are staged, so a fully-validated batch is
 // committed together. Reusable by other authoring commands.
-func atomicWriteFiles(writes []fileWrite) error {
+//
+// Every path is inside root, the project folder, and is written only as a plain
+// file in plain folders of it (see package plainfs): a link in the place of a
+// file or of a folder above it is refused, naming its path in the project and not
+// where it leads, and so is a rename onto anything but a plain file. A temp file
+// is made only where the rename that follows will be checked.
+func atomicWriteFiles(root string, writes []fileWrite) error {
+	// The project folder is the person's own to have named, and is made when it is not there, with
+	// the folders above it, as it always was; what is below it is made only as plain folders.
+	if err := os.MkdirAll(root, 0o777); err != nil {
+		return fmt.Errorf("failed to create the project folder %q: %w", root, err)
+	}
+	tree := plainfs.New(root, 0o777)
 	type staged struct{ temp, final string }
 	var stagedFiles []staged
 	cleanup := func() {
 		for _, s := range stagedFiles {
-			_ = os.Remove(s.temp)
+			_ = tree.Remove(s.temp)
 		}
 	}
 	for i, w := range writes {
-		if err := os.MkdirAll(filepath.Dir(w.path), 0777); err != nil {
-			cleanup()
-			return fmt.Errorf("failed to create directory for %s: %w", w.path, err)
-		}
 		temp := fmt.Sprintf("%s.tmp-%d", w.path, i)
-		if err := os.WriteFile(temp, w.content, 0666); err != nil {
+		if err := tree.WriteFile(temp, w.content, 0o666); err != nil {
 			cleanup()
-			return fmt.Errorf("failed to stage %s: %w", w.path, err)
+			return fmt.Errorf("failed to stage %s: %w", pathInProject(root, w.path), err)
 		}
 		stagedFiles = append(stagedFiles, staged{temp: temp, final: w.path})
 	}
 	for _, s := range stagedFiles {
-		if err := os.Rename(s.temp, s.final); err != nil {
+		if err := tree.Rename(s.temp, s.final); err != nil {
 			cleanup()
-			return fmt.Errorf("failed to commit %s: %w", s.final, err)
+			return fmt.Errorf("failed to commit %s: %w", pathInProject(root, s.final), err)
 		}
 	}
 	return nil
+}
+
+// pathInProject is path as a message names it: below the project folder root, with "/"
+// separators.
+func pathInProject(root, path string) string {
+	if rel, err := filepath.Rel(root, path); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(path)
 }
 
 // marshalEntityFile marshals an entity to the canonical on-disk JSON form,
@@ -663,8 +687,9 @@ func entityAddCommandAction(cmd *cobra.Command, _ []string) error {
 	v := &projectBaseCommand{}
 	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
 	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
+	v.FollowProjectLink, _ = cmd.Flags().GetBool(followProjectLinkFlagName)
 
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true, writesProject: true}); err != nil {
 		return err
 	}
 
@@ -714,9 +739,9 @@ func entityAddCommandAction(cmd *cobra.Command, _ []string) error {
 
 	var written []string
 	if continueOnError {
-		written, err = addEntitiesContinueOnError(w, entities, entityExists, entityFilePath)
+		written, err = addEntitiesContinueOnError(v.ProjectDir, w, entities, entityExists, entityFilePath)
 	} else {
-		written, err = addEntitiesAtomic(w, entities, entityExists, entityFilePath)
+		written, err = addEntitiesAtomic(v.ProjectDir, w, entities, entityExists, entityFilePath)
 	}
 	// Stage exactly the files actually written, even on partial failure.
 	if stageErr := applyGit(v.ProjectDir, mode, written); stageErr != nil {
@@ -730,6 +755,7 @@ func entityAddCommandAction(cmd *cobra.Command, _ []string) error {
 // nothing is written. Prints a per-item report and returns an error (non-zero
 // exit) if any item failed.
 func addEntitiesAtomic(
+	root string,
 	w io.Writer,
 	entities []*datatug.Entity,
 	entityExists func(id string) bool,
@@ -782,7 +808,7 @@ func addEntitiesAtomic(
 		return nil, fmt.Errorf("entity add failed (atomic mode, nothing written): %s", strings.Join(failures, "; "))
 	}
 
-	if err := atomicWriteFiles(writes); err != nil {
+	if err := atomicWriteFiles(root, writes); err != nil {
 		return nil, err
 	}
 	written := make([]string, len(writes))
@@ -799,6 +825,7 @@ func addEntitiesAtomic(
 // independently, passing items are written, failures are collected and
 // reported. Returns an error (non-zero exit) if any item failed.
 func addEntitiesContinueOnError(
+	root string,
 	w io.Writer,
 	entities []*datatug.Entity,
 	entityExists func(id string) bool,
@@ -823,7 +850,7 @@ func addEntitiesContinueOnError(
 			path := entityFilePath(entity.ID)
 			content, err := marshalEntityFile(entity)
 			if err == nil {
-				err = atomicWriteFiles([]fileWrite{{path: path, content: content}})
+				err = atomicWriteFiles(root, []fileWrite{{path: path, content: content}})
 			}
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("%s (%v)", entity.ID, err))
@@ -850,8 +877,9 @@ func entityFieldAddCommandAction(cmd *cobra.Command, args []string) error {
 	v := &projectBaseCommand{}
 	v.ProjectDir, _ = cmd.Flags().GetString(entityDirFlagName)
 	v.ProjectName, _ = cmd.Flags().GetString(entityProjectFlagName)
+	v.FollowProjectLink, _ = cmd.Flags().GetBool(followProjectLinkFlagName)
 
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true, writesProject: true}); err != nil {
 		return err
 	}
 
@@ -940,7 +968,7 @@ func entityFieldAddCommandAction(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err = atomicWriteFiles([]fileWrite{{path: entityPath, content: content}}); err != nil {
+		if err = atomicWriteFiles(v.ProjectDir, []fileWrite{{path: entityPath, content: content}}); err != nil {
 			return err
 		}
 		if err = applyGit(v.ProjectDir, mode, []string{entityPath}); err != nil {

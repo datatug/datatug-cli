@@ -23,12 +23,14 @@ var (
 )
 
 func initCommand() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "init [project] [projectPath]",
 		Short: "Creates a new datatug project",
 		Long:  "Creates a new datatug project in specified directory using a connection to some database",
 		RunE:  initCommandAction,
 	}
+	registerFollowProjectLinkFlag(cmd)
+	return cmd
 }
 
 // initCommandAction reads two optional positional arguments: project (ID)
@@ -40,6 +42,14 @@ func initCommandAction(cmd *cobra.Command, args []string) (err error) {
 
 	projectID := argAt(args, 0)
 	projectDir := argAt(args, 1)
+	// The project folder is the person's to name, but a link in its place leads the files of the
+	// project somewhere else: the command stops there unless it is told to go on.
+	followLink, _ := cmd.Flags().GetBool(followProjectLinkFlagName)
+	if projectDir != "" {
+		if err = checkProjectFolderLink(projectDir, followLink); err != nil {
+			return err
+		}
+	}
 	if err = os.MkdirAll(projectDir, 0777); err != nil {
 		return err
 	}

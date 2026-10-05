@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -33,8 +34,14 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	v.Environment, _ = flags.GetString("env")
 	v.Path, _ = flags.GetString("path")
 	v.DSNEnv, _ = flags.GetString("dsn-env")
+	v.FollowProjectLink, _ = flags.GetBool(followProjectLinkFlagName)
 
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	// The driver is the first thing looked at: a scan without one the scan reads cannot go on,
+	// whatever the project holds.
+	if err := checkScanDriver(v.Driver); err != nil {
+		return err
+	}
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true, writesProject: true}); err != nil {
 		return err
 	}
 	log.Println("Initiating project...")
@@ -205,11 +212,29 @@ var scanUpdateDbSchema = api.UpdateDbSchema
 // can never trip. Always dbconnection.NewConnectionString in production.
 var scanNewConnectionString = dbconnection.NewConnectionString
 
+// scanDrivers are the drivers a scan reads, in the order the messages name them.
+var scanDrivers = []string{dbconnection.DriverSQLite3, "sqlserver", api.DriverPostgres}
+
+// checkScanDriver is an error, naming --driver and the drivers a scan reads, when driver is not
+// one of them. The value is said as it was typed only when it is a plain name: the flag may have
+// been given a connection string.
+func checkScanDriver(driver string) error {
+	if driver == "" {
+		return fmt.Errorf("--driver (-D) is required: the database driver to scan, %s", scanDriverNames())
+	}
+	if !slices.Contains(scanDrivers, driver) {
+		return fmt.Errorf("--driver (-D) %q is not a driver a scan reads: use %s", dbcopy.SourceIDDisplay(driver), scanDriverNames())
+	}
+	return nil
+}
+
+// scanDriverNames is "sqlite3, sqlserver or postgres".
+func scanDriverNames() string {
+	return strings.Join(scanDrivers[:len(scanDrivers)-1], ", ") + " or " + scanDrivers[len(scanDrivers)-1]
+}
+
 // connectionParams builds DB connection parameters from the scan flags.
 func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
-	if v.Driver == "" {
-		return nil, fmt.Errorf("--driver (-D) is required: the database driver to scan, sqlite3, sqlserver or postgres")
-	}
 	if v.Driver == api.DriverPostgres {
 		return v.postgresConnectionParams()
 	}
@@ -301,6 +326,7 @@ func scanCommandArgs() *cobra.Command {
 	flags.String("env", "", "Environment the DB belongs to: a plain name. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.")
 	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3); it must exist")
 	flags.String("dsn-env", "", "Environment variable that holds the PostgreSQL connection URL, for -D postgres (postgres://user:password@host/database). The host, port, user and password stay in the variable and are never written to the project, which holds only the name of the variable. The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
+	registerFollowProjectLinkFlag(cmd)
 	_ = cmd.MarkFlagRequired("db")
 	_ = cmd.MarkFlagRequired("env")
 	return cmd

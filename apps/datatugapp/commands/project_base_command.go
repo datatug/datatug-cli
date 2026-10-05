@@ -20,10 +20,19 @@ type projectBaseCommand struct {
 	ProjectName string `short:"p" long:"project"  required:"false" description:"GetProjectStore name"`
 	projectID   string
 	store       storage.Store
+
+	// FollowProjectLink is --follow-project-link of a command that writes into the project folder
+	// it was given: it goes on when the last part of that folder is a link.
+	FollowProjectLink bool
 }
 
 type projectCommandOptions struct {
 	projNameRequired, projDirRequired, projNameOrDirRequired bool
+
+	// writesProject is set by a command that writes into the project folder it was given with
+	// -d: it stops when that folder is a link, unless the person said to go on (see
+	// checkProjectFolderLink). A command that only reads does not set it.
+	writesProject bool
 }
 
 // newProjectsStore is a seam over filestore.NewStore, which never fails
@@ -42,6 +51,11 @@ func (v *projectBaseCommand) initProjectCommand(o projectCommandOptions) error {
 		return errors.New("either project name or project directory is required")
 	}
 	if v.ProjectDir != "" && v.projectID == "" {
+		if o.writesProject {
+			if err := checkProjectFolderLink(v.ProjectDir, v.FollowProjectLink); err != nil {
+				return err
+			}
+		}
 		v.store, v.projectID = filestore.NewSingleProjectStore(v.ProjectDir, v.projectID)
 		return nil
 	}

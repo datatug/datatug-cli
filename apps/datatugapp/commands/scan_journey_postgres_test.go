@@ -14,7 +14,6 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
-	"github.com/dal-go/dalgo/recordset"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -599,7 +598,7 @@ func (f *failingPgDatabase) ListCollections(context.Context, *record.Key) ([]dal
 }
 
 // propertyPgModes are the ways the fake server of the property test answers a scan.
-var propertyPgModes = []string{"the open fails", "the listing fails", "a count fails", "it works"}
+var propertyPgModes = []string{"the open fails", "the listing fails", "it works"}
 
 // propertyPgServer is the fake server of TestProperty_NoCommandPathEchoesASourceSecret. It
 // fails as a driver can: with the URL it was given, password included, in its words.
@@ -616,8 +615,6 @@ func (s *propertyPgServer) open(ref dbcopy.BackendRef, _ context.Context) (dbcop
 		return nil, words
 	case propertyPgModes[1]:
 		return &failingPgDatabase{fakePgDatabase: newJourneyPgDatabase(), err: words}, nil
-	case propertyPgModes[2]:
-		return &countFailingPgDatabase{fakePgDatabase: newJourneyPgDatabase(), err: words}, nil
 	}
 	return newJourneyPgDatabase(), nil
 }
@@ -634,24 +631,6 @@ func (s *propertyPgServer) assertReached(t *testing.T, perCase int) {
 			t.Errorf("the fake server was asked for %q, which is not a variable", ref.Display())
 		}
 	}
-}
-
-// countFailingPgDatabase is a fake server that runs COUNT(*) natively and whose count fails.
-type countFailingPgDatabase struct {
-	*fakePgDatabase
-	err error
-}
-
-func (*countFailingPgDatabase) QueryCapabilities() dal.QueryCapabilities {
-	return dal.QueryCapabilities{Aggregate: dal.AggregateCapabilities{Count: true}}
-}
-
-func (c *countFailingPgDatabase) ExecuteQueryToRecordsReader(context.Context, dal.Query) (dal.RecordsReader, error) {
-	return nil, c.err
-}
-
-func (*countFailingPgDatabase) ExecuteQueryToRecordsetReader(context.Context, dal.Query, ...recordset.Option) (dal.RecordsetReader, error) {
-	return nil, dal.ErrNotSupported
 }
 
 // Two PostgreSQL databases of two hosts, scanned into one environment of one project, are both

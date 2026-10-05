@@ -13,11 +13,13 @@ func (s schemaProvider) RecordsCount(_ context.Context, catalog, schema, object 
 	if err != nil {
 		return
 	}
+	quotedObject := quoteIdentifier(object)
 	var query string
 	if schema == "" {
-		query = fmt.Sprintf("SELECT COUNT(1) FROM [%s]", object)
+		query = "SELECT COUNT(1) FROM " + quotedObject
 	} else {
-		query = fmt.Sprintf("SELECT COUNT(1) FROM [%s].[%s]", schema, object)
+		quotedSchema := quoteIdentifier(schema)
+		query = "SELECT COUNT(1) FROM " + quotedSchema + "." + quotedObject
 	}
 	var rows *sql.Rows
 	rows, err = sqliteDB.Query(query)

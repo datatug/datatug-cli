@@ -5,11 +5,41 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2http"
 )
+
+// Open fails with the error of LoadHTTPQueries when the queries of the project cannot
+// be listed, not with the "no HTTP queries" answer of a project that has none.
+func TestOpen_HTTPQueriesCannotBeListed(t *testing.T) {
+	root := t.TempDir()
+	queries := filepath.Join(root, "queries")
+	if err := os.MkdirAll(queries, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(queries, "q1.query.json"), `{"id": "q1", "type": "HTTP"}`)
+	cause := errors.New("disk unreadable")
+	origReadFile := osReadFile
+	t.Cleanup(func() { osReadFile = origReadFile })
+	osReadFile = func(string) ([]byte, error) { return nil, cause }
+
+	db, err := Open(context.Background(), root)
+
+	if !errors.Is(err, cause) {
+		t.Fatalf("Open error = %v, want it to wrap %v", err, cause)
+	}
+	if !strings.Contains(err.Error(), "read "+filepath.Join(queries, "q1.query.json")) {
+		t.Fatalf("Open error = %q, want it to name the file it could not read", err.Error())
+	}
+	if db != nil {
+		t.Fatalf("Open db = %v, want nil with the error", db)
+	}
+}
 
 func TestOpen_NoHTTPQueries(t *testing.T) {
 	root := t.TempDir()

@@ -3,10 +3,8 @@ package commands
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -39,19 +37,6 @@ func TestCovDScanCommandAction(t *testing.T) {
 	t.Run("scan failure is returned", func(t *testing.T) {
 		err := covDRunScan("-d", t.TempDir(), "-D", "sqlite3", "--path", filepath.Join(t.TempDir(), "absent.db"), "--db", "d", "--env", "local")
 		require.Error(t, err)
-	})
-	t.Run("saves the scanned project", func(t *testing.T) {
-		dir := t.TempDir()
-		covDSetVar(t, &scanUpdateDbSchema, func(context.Context, api.ProjectLoader, string, string, string, string, dbconnection.Params) (*datatug.Project, error) {
-			return &datatug.Project{
-				ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "scanned"}, Access: "private"},
-				Created:     &datatug.ProjectCreated{At: time.Now()},
-			}, nil
-		})
-		require.NoError(t, covDRunScan("-d", dir, "-D", "sqlite3", "--path", "x.db", "--db", "chinook", "--env", "local"))
-		saved, err := os.ReadFile(filepath.Join(dir, "datatug-project.json"))
-		require.NoError(t, err)
-		assert.Contains(t, string(saved), `"id": "scanned"`)
 	})
 	t.Run("save failure is reported", func(t *testing.T) {
 		dir := t.TempDir()

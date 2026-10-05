@@ -2,6 +2,7 @@ package httpsource
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -45,6 +46,11 @@ func LoadHTTPQueries(projectDir string) ([]LoadedQuery, error) {
 	var out []LoadedQuery
 	err := filepath.WalkDir(queriesDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			// A project with no queries folder has no HTTP queries: git keeps no
+			// empty folder, so a project made by scan or init has none once pushed.
+			if path == queriesDir && errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
 		if d.IsDir() || !strings.HasSuffix(d.Name(), suffix) {

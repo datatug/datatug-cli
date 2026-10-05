@@ -25,7 +25,8 @@ func (s schemaProvider) GetConstraints(_ context.Context, _, schema, table strin
 	var constraints []*schemer.Constraint
 
 	// Foreign keys — one Constraint per (FK, column); grouped by FK id.
-	fkRows, err := db.Query(fmt.Sprintf("PRAGMA foreign_key_list('%s')", table))
+	fkSQL := pragmaSQL("foreign_key_list", table)
+	fkRows, err := db.Query(fkSQL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read foreign keys for %s: %w", table, err)
 	}
@@ -78,7 +79,8 @@ func (s schemaProvider) GetConstraints(_ context.Context, _, schema, table strin
 }
 
 func (s schemaProvider) uniqueConstraintIndexes(db *sql.DB, table string) ([]string, error) {
-	rows, err := db.Query(fmt.Sprintf("PRAGMA index_list('%s')", table))
+	sqlText := pragmaSQL("index_list", table)
+	rows, err := db.Query(sqlText)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list indexes for %s: %w", table, err)
 	}
@@ -98,7 +100,8 @@ func (s schemaProvider) uniqueConstraintIndexes(db *sql.DB, table string) ([]str
 }
 
 func (s schemaProvider) indexColumnNames(db *sql.DB, index string) ([]string, error) {
-	rows, err := db.Query(fmt.Sprintf("PRAGMA index_info('%s')", index))
+	sqlText := pragmaSQL("index_info", index)
+	rows, err := db.Query(sqlText)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read columns of index %s: %w", index, err)
 	}

@@ -5,7 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"strings"
+	"net/url"
+	"os"
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/schemers/mssqlschema"
@@ -17,6 +18,7 @@ import (
 	"github.com/strongo/random"
 	"github.com/strongo/slice"
 	"github.com/strongo/validation"
+	_ "modernc.org/sqlite" // registers the pure-Go "sqlite" driver sqliteScanDriver names
 )
 
 // ProjectLoader defines an interface to load project info
@@ -125,8 +127,9 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 	}
 	dbModel := project.DbModels.GetByID(dbCatalog.DbModel)
 	if dbModel == nil {
-		err = fmt.Errorf("db model not found by ID: %v. there is %v db models in the project: %v", dbCatalog.DbModel, len(project.DbModels), strings.Join(project.DbModels.IDs(), ", "))
-		return
+		// A project that already holds another database has no model for this one.
+		dbModel = &datatug.DbModel{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: dbCatalog.DbModel}}}
+		project.DbModels = append(project.DbModels, dbModel)
 	}
 	if err = updateDbModelWithDbCatalog(environment, dbModel, dbCatalog); err != nil {
 		err = fmt.Errorf("failed to update dbModel with database: %w", err)
@@ -195,6 +198,7 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 			if db == nil {
 				db = new(datatug.ProjDbDriver)
 				db.ID = dbServerRef.Driver
+				db.Title = driverTitle(dbServerRef.Driver)
 				project.DbDrivers = append(project.DbDrivers, db)
 			}
 			projDbServer = &datatug.ProjDbServer{
@@ -254,7 +258,7 @@ func newProjectWithDatabase(environment string, dbServer datatug.ServerRef, dbCa
 		},
 		DbDrivers: datatug.ProjDbDrivers{
 			{
-				ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: dbServer.Driver}},
+				ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: dbServer.Driver, Title: driverTitle(dbServer.Driver)}},
 				Servers: datatug.ProjDbServers{
 					{
 						ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: dbServer.GetID()}},
@@ -271,6 +275,59 @@ func newProjectWithDatabase(environment string, dbServer datatug.ServerRef, dbCa
 	return project, err
 }
 
+// sqliteScanDriver is the database/sql driver a SQLite scan opens: modernc.org/sqlite,
+// which is pure Go and is the driver the rest of the CLI opens SQLite files with. A
+// release is built with cgo off, where the cgo driver registered as "sqlite3" is a
+// stub that fails on its first use.
+const sqliteScanDriver = "sqlite"
+
+// existingSQLiteFile is the path of the SQLite file connectionParams name, which
+// must be an existing file. A scan must not open a path that is not one: SQLite
+// creates an empty database there, and the scan of a mistyped path would succeed
+// with no tables.
+func existingSQLiteFile(connectionParams dbconnection.Params) (string, error) {
+	withPath, ok := connectionParams.(interface{ Path() string })
+	if !ok || withPath.Path() == "" {
+		return "", fmt.Errorf("a SQLite scan needs connection parameters that name the database file")
+	}
+	path := withPath.Path()
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("cannot scan SQLite database: %w", err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("cannot scan SQLite database: %s is a folder, not a database file", path)
+	}
+	return path, nil
+}
+
+// sqliteReadOnlyDSN is the connection string with which a scan opens the SQLite
+// file at path: read-only, so that nothing the scan runs can change the database
+// and a path is never created, and with the path escaped. The driver opens a
+// "file:" connection string as a URI, where "?", "#" and "%" are not part of the
+// file name, so a file named a#b.db would otherwise be read as a file named a, which
+// is created, empty, if it is not there. It is the path that existingSQLiteFile
+// checked that is opened.
+func sqliteReadOnlyDSN(path string) string {
+	uri := url.URL{Scheme: "file", OmitHost: true, Path: path, RawQuery: "mode=ro"}
+	return uri.String()
+}
+
+// driverTitle is the title of a driver item in a project. datatug-core refuses
+// to save a driver item without one, so every place that builds one gives it this.
+func driverTitle(driver string) string {
+	switch driver {
+	case dbconnection.DriverSQLite3:
+		return "SQLite"
+	case "sqlserver":
+		return "SQL Server"
+	case DriverPostgres:
+		return "PostgreSQL"
+	default:
+		return driver
+	}
+}
+
 func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Params) (dbCatalog *datatug.DbCatalog, err error) {
 	if server.Driver == DriverPostgres {
 		// Ask whether the project can record the server before opening anything:
@@ -284,7 +341,17 @@ func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Param
 	}
 	var db *sql.DB
 
-	if db, err = sql.Open(server.Driver, connectionParams.ConnectionString()); err != nil {
+	driverName := server.Driver
+	dsn := connectionParams.ConnectionString()
+	if server.Driver == dbconnection.DriverSQLite3 {
+		var path string
+		if path, err = existingSQLiteFile(connectionParams); err != nil {
+			return nil, err
+		}
+		driverName = sqliteScanDriver
+		dsn = sqliteReadOnlyDSN(path)
+	}
+	if db, err = sql.Open(driverName, dsn); err != nil {
 		return nil, fmt.Errorf("failed to open SQL db: %w", err)
 	}
 
@@ -350,21 +417,18 @@ func updateDbModelWithDbCatalog(envID string, dbModel *datatug.DbModel, dbCatalo
 }
 
 func updateSchemaModel(envID string, schema *datatug.Schema, dbSchema *datatug.DbSchema) (err error) {
-	updateTables := func(tables []*datatug.CollectionInfo) (result datatug.TableModels) {
+	updateTables := func(tables []*datatug.CollectionInfo) (result datatug.TableModels, err error) {
 		for _, table := range tables {
 			tableModel := schema.Tables.GetByKey(table.DBCollectionKey)
 			if tableModel == nil {
-				// datatug-core v0.17.0's datatug.TableModel (the persisted,
-				// git-tracked schema type) no longer carries PrimaryKey/
-				// ForeignKeys/ReferencedBy/Indexes/AlternateKeys - only the
-				// live-scanned datatug.CollectionInfo (table, above) does.
-				// The vendored copy this replaced kept those fields on
-				// TableModel and copied them here; that data is dropped on
-				// persist until datatug-core's TableModel carries it again
-				// (or a project-level decision accepts CollectionInfo/
-				// DbCatalog, re-derived by re-scanning, as the source of
-				// truth for it instead of the git-tracked DbModel). Flagged
-				// in the PR - not a scope call for this migration.
+				// datatug-core's datatug.TableModel (the git-tracked schema type)
+				// carries no keys, indexes or references, only the live-scanned
+				// datatug.CollectionInfo (table, above) does, so they are not in
+				// the model. Nor is anything else a scan found: SaveScannedProject
+				// saves the model as an id and its environments and writes the
+				// columns of each table as files of their own, in the layout
+				// that spec/features/cli/scan/README.md describes; keys are not
+				// stored in a project yet.
 				tableModel = &datatug.TableModel{
 					DBCollectionKey: table.DBCollectionKey,
 					ByEnv:           make(datatug.StateByEnv),
@@ -384,12 +448,14 @@ func updateSchemaModel(envID string, schema *datatug.Schema, dbSchema *datatug.D
 				}
 				result = append(result, tableModel)
 			} else {
-				panic(errNotImplementedYet)
+				return nil, fmt.Errorf("updating the table %q the db model already holds in schema %q: %w", table.Name(), dbSchema.ID, errNotImplementedYet)
 			}
 		}
 		return
 	}
-	schema.Tables = updateTables(dbSchema.Tables)
-	schema.Views = updateTables(dbSchema.Views)
-	return nil
+	if schema.Tables, err = updateTables(dbSchema.Tables); err != nil {
+		return err
+	}
+	schema.Views, err = updateTables(dbSchema.Views)
+	return err
 }

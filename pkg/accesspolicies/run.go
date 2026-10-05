@@ -46,43 +46,14 @@ type Result struct {
 // the reader through access.SecureReadSession. Denials wrap
 // access.ErrAccessDenied; refused queries wrap ErrInvalidQuery.
 func Run(ctx context.Context, session dal.ReadSession, query dal.Query, o Options) (Result, error) {
-	if len(o.Policies) == 0 && !o.Unrestricted {
-		return Result{}, ErrNoPolicies
-	}
-	bindings := map[string]any{}
-	for name, value := range o.Variables {
-		bindings[name] = value
-	}
-	if o.Principal != nil {
-		if o.Principal.ID != nil {
-			bindings["currentUser"] = o.Principal.ID
-		}
-		ctx = access.WithPrincipal(ctx, *o.Principal)
-	}
-	if len(o.Variables) > 0 {
-		ctx = access.WithVariables(ctx, o.Variables)
-	}
-	query, err := substituteParams(query, o.Variables)
+	ctx, result, err := prepareRead(ctx, query, o)
 	if err != nil {
-		return Result{}, err
+		return result, err
 	}
-	result := Result{Query: query}
+	query = result.Query
 	if len(o.Policies) == 0 {
 		result.Reader, err = session.ExecuteQueryToRecordsReader(ctx, query)
 		return result, err
-	}
-	result.Lines = Explain(ctx, o.Policies, query, bindings)
-	if structured, ok := query.(dal.StructuredQuery); ok && restricted(result.Lines) {
-		if aliases := aliasedColumns(structured); len(aliases) > 0 {
-			return result, fmt.Errorf("%w: column aliases are not supported under field-restricted policies: %s", ErrInvalidQuery, strings.Join(aliases, ", "))
-		}
-		hidden, err := hiddenReferences(structured, result.Lines)
-		if err != nil {
-			return result, fmt.Errorf("%w: cannot verify the query against field-restricted policies: %v", access.ErrAccessDenied, err)
-		}
-		if len(hidden) > 0 {
-			return result, fmt.Errorf("%w: the query selects, filters or sorts on fields the policies hide: %s", access.ErrAccessDenied, strings.Join(hidden, ", "))
-		}
 	}
 	secured := access.SecureReadSession(session, Policies(o.Policies)...)
 	result.Reader, err = secured.ExecuteQueryToRecordsReader(ctx, query)
@@ -182,4 +153,46 @@ func paramNames(expression dal.Expression) []string {
 		return []string{p.String()}
 	}
 	return nil
+}
+
+// prepareRead shares identity, substitution and field checks across keyed and keyless reads.
+func prepareRead(ctx context.Context, query dal.Query, o Options) (context.Context, Result, error) {
+	if len(o.Policies) == 0 && !o.Unrestricted {
+		return ctx, Result{}, ErrNoPolicies
+	}
+	bindings := map[string]any{}
+	for name, value := range o.Variables {
+		bindings[name] = value
+	}
+	if o.Principal != nil {
+		if o.Principal.ID != nil {
+			bindings["currentUser"] = o.Principal.ID
+		}
+		ctx = access.WithPrincipal(ctx, *o.Principal)
+	}
+	if len(o.Variables) > 0 {
+		ctx = access.WithVariables(ctx, o.Variables)
+	}
+	query, err := substituteParams(query, o.Variables)
+	if err != nil {
+		return ctx, Result{}, err
+	}
+	result := Result{Query: query}
+	if len(o.Policies) == 0 {
+		return ctx, result, nil
+	}
+	result.Lines = Explain(ctx, o.Policies, query, bindings)
+	if structured, ok := query.(dal.StructuredQuery); ok && restricted(result.Lines) {
+		if aliases := aliasedColumns(structured); len(aliases) > 0 {
+			return ctx, result, fmt.Errorf("%w: column aliases are not supported under field-restricted policies: %s", ErrInvalidQuery, strings.Join(aliases, ", "))
+		}
+		hidden, err := hiddenReferences(structured, result.Lines)
+		if err != nil {
+			return ctx, result, fmt.Errorf("%w: cannot verify the query against field-restricted policies: %v", access.ErrAccessDenied, err)
+		}
+		if len(hidden) > 0 {
+			return ctx, result, fmt.Errorf("%w: the query selects, filters or sorts on fields the policies hide: %s", access.ErrAccessDenied, strings.Join(hidden, ", "))
+		}
+	}
+	return ctx, result, nil
 }

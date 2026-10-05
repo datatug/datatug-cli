@@ -297,17 +297,21 @@ func (s realPgServer) leaksIn(t *testing.T, dir string) (leaks []string) {
 	return leaks
 }
 
+// partsIn is each part of the connection that text holds.
+func (s realPgServer) partsIn(text string) (found []string) {
+	for _, part := range s.parts() {
+		if strings.Contains(text, part) {
+			found = append(found, part)
+		}
+	}
+	return found
+}
+
 // outputLeaks is each part of the connection that output holds, other than inside the display
 // form of source, the one line a scan is meant to name the server in (scheme, host, port and
 // database: never the user, the password or the query).
-func (s realPgServer) outputLeaks(output, source string) (leaks []string) {
-	text := strings.ReplaceAll(output, dbcopy.SourceDisplay(source), "<the display form of the source>")
-	for _, part := range s.parts() {
-		if strings.Contains(text, part) {
-			leaks = append(leaks, part)
-		}
-	}
-	return leaks
+func (s realPgServer) outputLeaks(output, source string) []string {
+	return s.partsIn(strings.ReplaceAll(output, dbcopy.SourceDisplay(source), "<the display form of the source>"))
 }
 
 // This is the first stage of the whole-journey test of the plan: the PostgreSQL scan, read by
@@ -472,16 +476,21 @@ func TestPostgresScanJourneyFailures(t *testing.T) {
 			if failure.sourceURL == "" {
 				assert.Equal(t, "environment variable "+variable+" is not set", message)
 			} else {
-				assert.Contains(t, message, fmt.Sprintf("open postgres source %q: ", dbcopy.SourceDisplay(failure.sourceURL)), "the classified message names the source by its display form")
+				// The message names the source by the variable it was read from, never by the URL, and
+				// says no more of the cause than a driver error lets it tell apart without reading
+				// its words: a wrong password, a database that does not exist and a host that does
+				// not answer read the same to the user.
+				assert.Contains(t, message, `failed to open PostgreSQL: open postgres source "env:`+variable+`": the driver could not open the source (its own message is not shown`)
 			}
 			for _, driver := range driverText {
 				assert.NotContains(t, message, driver, "the driver's text is never shown")
 				assert.NotContains(t, stderr, driver)
 				assert.NotContains(t, logged.String(), driver)
 			}
-			for _, output := range []string{message, stderr, logged.String()} {
-				assert.Empty(t, server.outputLeaks(output, failure.sourceURL), "no part of the connection but the display form of the source is in the output")
+			for _, output := range []string{message, stderr} {
+				assert.Empty(t, server.partsIn(output), "no part of the connection is in what a scan that failed says to the user")
 			}
+			assert.Empty(t, server.outputLeaks(logged.String(), failure.sourceURL), "the log names the server by its display form at most")
 			assert.NoDirExists(t, projectDir, "a scan that fails makes nothing")
 		})
 	}

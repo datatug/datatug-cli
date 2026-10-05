@@ -13,6 +13,7 @@ import (
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/ai/cloud"
 	"github.com/strongo/aichat/ai/cloudproto"
+	"github.com/strongo/aichat/ai/decision"
 )
 
 func TestCloudChatCorrelatesServerCallAndClientInteraction(t *testing.T) {
@@ -79,6 +80,148 @@ func TestCloudChatCorrelatesServerCallAndClientInteraction(t *testing.T) {
 	}
 	if b, _ := json.Marshal(report); strings.Contains(string(b), "Show the first customer") || strings.Contains(string(b), "Here is the answer") {
 		t.Fatalf("report contains raw conversation: %s", b)
+	}
+}
+
+func TestCloudChatKeepsQuestionIDsWithoutTelemetry(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	var ids []string
+	var reports int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/ai/chat":
+			var req ai.ChatRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Error(err)
+			}
+			ids = append(ids, req.InteractionID)
+			w.Header().Set("Content-Type", cloudproto.ContentTypeSSE)
+			_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventStarted})
+			_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventTextDelta, Text: "answer"})
+			_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventCompleted, StopReason: ai.StopReasonEnd})
+		case "/v0/ai/interactions":
+			reports++
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			t.Errorf("unexpected route %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	provider := cloud.New(cloud.Config{BaseURL: server.URL + "/v0/", Product: "datatug", Token: func(context.Context) (string, error) { return "test-token", nil }})
+	agent, err := NewAIConversation(provider, &fakeExecutor{}, "sqlite:///chinook.db", "- Customer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := NewSessionChat(ctx, store, agent, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prompt := range []string{"first", "second"} {
+		if _, err := sessions.Ask(ctx, prompt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(ids) != 2 || ids[0] == "" || ids[1] == "" || ids[0] == ids[1] || reports != 0 {
+		t.Fatalf("IDs=%v reports=%d", ids, reports)
+	}
+}
+
+func TestCloudQuestionIDSurvivesScoreToolFollowupAndNextTurn(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	var scoreIDs, chatIDs []string
+	var reports int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/ai/score":
+			var req cloudproto.ScoreRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Error(err)
+			}
+			scoreIDs = append(scoreIDs, req.InteractionID)
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"code":"invalid","message":"model refused"},"limit":{"v":1,"reason":"model_class"}}`))
+		case "/v0/ai/chat":
+			var req ai.ChatRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Error(err)
+			}
+			chatIDs = append(chatIDs, req.InteractionID)
+			w.Header().Set("Content-Type", cloudproto.ContentTypeSSE)
+			_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventStarted})
+			if len(chatIDs) == 1 {
+				call := toolCall("tool-1", toolRunDTQL, map[string]any{"title": "Invoices", "dtql": "from: {name: Invoice}\nlimit: 1"})
+				_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventToolCall, ToolCall: &call})
+				_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventCompleted, StopReason: ai.StopReasonToolCalls})
+			} else {
+				_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventTextDelta, Text: "done"})
+				_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventCompleted, StopReason: ai.StopReasonEnd})
+			}
+		case "/v0/ai/interactions":
+			reports++
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			t.Errorf("unexpected route %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	provider := cloud.New(cloud.Config{BaseURL: server.URL + "/v0/", Product: "datatug", Token: func(context.Context) (string, error) { return "token", nil }})
+	conversation, err := NewAIConversation(provider, &fakeExecutor{}, "sqlite:///chinook.db", chinookFullSchema(), WithTableNarrowing(chinookNarrower(t, provider.Decider().(decision.ScoredProvider))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := NewSessionChat(ctx, store, conversation, "sqlite:///chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prompt := range []string{"first question", "second question"} {
+		if _, err := sessions.Ask(ctx, prompt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The narrower suppresses a second score call during its cooldown after
+	// the refusal; the next chat message still receives a fresh UUID.
+	if len(scoreIDs) != 1 || len(chatIDs) != 3 || scoreIDs[0] == "" || chatIDs[2] == "" || scoreIDs[0] != chatIDs[0] || chatIDs[0] != chatIDs[1] || chatIDs[0] == chatIDs[2] || reports != 0 {
+		t.Fatalf("score=%v chat=%v reports=%d", scoreIDs, chatIDs, reports)
+	}
+}
+
+func TestCloudQuestionIDSurvivesTransportRetry(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t, testStorePath(t), testScope())
+	defer func() { _ = store.Close() }()
+	var ids []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req ai.ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+		}
+		ids = append(ids, req.InteractionID)
+		if len(ids) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"code":"upstream","message":"temporary"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", cloudproto.ContentTypeSSE)
+		_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventStarted})
+		_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventTextDelta, Text: "answer"})
+		_ = cloudproto.WriteEvent(w, ai.Event{Type: ai.EventCompleted, StopReason: ai.StopReasonEnd})
+	}))
+	defer server.Close()
+	provider := cloud.New(cloud.Config{BaseURL: server.URL + "/v0/", Product: "datatug", Token: func(context.Context) (string, error) { return "token", nil }})
+	conversation, err := NewAIConversation(provider, &fakeExecutor{}, "sqlite:///fixture.db", "- Customer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := NewSessionChat(ctx, store, conversation, "sqlite:///fixture.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.Ask(ctx, "question"); err != nil || len(ids) != 2 || ids[0] == "" || ids[0] != ids[1] {
+		t.Fatalf("retry changed question identity: ids=%v err=%v", ids, err)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"sort"
@@ -35,6 +36,11 @@ type chatOptions struct {
 	insecureStorage bool
 	as              string
 	cloudDecision   string
+	cloudModel      string
+	cloudProject    string
+	cloudIdentity   string // saved preference's login scope, verified at cloud preflight
+	cloudScope      string // saved preference's local project, verified at cloud preflight
+	cloudAPI        string // saved preference's API base, verified at cloud preflight
 	roles           []string
 	groups          []string
 }
@@ -90,6 +96,8 @@ not shown can cost a describe_relation round trip.
 	flags.BoolVar(&options.insecureStorage, "insecure-storage", false, "use the plaintext DataTug auth session created with auth login --insecure-storage (cloud only)")
 	flags.StringVar(&options.thinking, "thinking", "low", "Model reasoning effort: low, medium, or high (provider support varies)")
 	flags.StringVar(&options.cloudDecision, "cloud-decision", "", "Record your choice about the cloud decision engine for this project: allow, refuse or forget (it is off until you allow it)")
+	flags.StringVar(&options.cloudModel, "cloud-model", "", "choose a hosted model listed by datatug plan (cloud only)")
+	flags.StringVar(&options.cloudProject, "cloud-project", "", "opaque cloud-registered project ID hint, verified by the server (cloud only)")
 	flags.StringVar(&options.as, "as", "", "Principal ID used for access policies")
 	flags.StringSliceVar(&options.roles, "role", nil, "Principal role (repeatable)")
 	flags.StringSliceVar(&options.groups, "group", nil, "Principal group (repeatable)")
@@ -118,6 +126,9 @@ func runChat(cmd *cobra.Command, options chatOptions) error {
 		options.project = nextProject
 		options.database = ""      // resolve the new project's source independently
 		options.cloudDecision = "" // a consent choice is for the project it was given for
+		options.cloudModel, options.cloudProject = "", ""
+		options.cloudIdentity, options.cloudScope = "", ""
+		options.cloudAPI = ""
 	}
 }
 
@@ -221,18 +232,33 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	var sessionNotices []string      // shown inside the chat as well as on stderr
 	var cloudClient *cloud.Client
 	var cloudContext ai.ClientContext
+	var hostedSession cloudSession
 	if options.model == "cloud" {
-		cloudClient, cloudContext, err = cloudChatClient(ctx, options)
+		cloudSession, loadErr := loadCloudSession(ctx, options)
+		if loadErr != nil {
+			return "", Exit(fmt.Sprintf("configure cloud chat: %v", loadErr), exitCodeUsage)
+		}
+		plan, planErr := resolveCloudSelection(ctx, cmd, &options, cloudSession)
+		if planErr != nil {
+			return "", Exit(fmt.Sprintf("configure cloud chat: %v", planErr), exitCodeUsage)
+		}
+		if plan.V == 1 {
+			notice := fmt.Sprintf("Hosted AI payer: %s (%s), %s; %d of %d questions left until %s", plan.AccountTitle, plan.AccountID, plan.EffectivePlan, *plan.AI.Left, *plan.AI.Limit, plan.AI.ResetsAt)
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), notice)
+			sessionNotices = append(sessionNotices, notice)
+		}
+		cloudClient, cloudContext, err = cloudChatClientFromSession(options, cloudSession)
 		if err != nil {
 			return "", Exit(fmt.Sprintf("configure cloud chat: %v", err), exitCodeUsage)
 		}
+		hostedSession = cloudSession
 	}
 	if !hasQueryableProjectTables(projectCatalog, sourceURLs) {
 		conversation = unavailableSchemaConversation{database: database}
 	} else {
 		var provider ai.LLMProvider
 		if cloudClient != nil {
-			provider = cloudClient
+			provider = cloudUserProvider{cloudClient}
 		} else {
 			var providerErr error
 			provider, providerErr = chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
@@ -241,6 +267,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			}
 		}
 		conversationOptions := []chat.Option{chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs)}
+		if cloudClient != nil {
+			conversationOptions = append(conversationOptions, chat.WithHostedModel(options.cloudModel))
+		}
 		// Narrowing applies to the stored-schema context only: the degraded
 		// multi-source context is left exactly as it is.
 		if healthyRelations > 0 && sourceErr == nil {
@@ -307,6 +336,13 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if err != nil {
 		return "", Exit(fmt.Sprintf("render chat session: %v", err), exitCodeUsage)
 	}
+	if cloudClient != nil {
+		ui.SetHostedPlanLookup(func(ctx context.Context) (string, error) {
+			var output strings.Builder
+			err := writeHostedPlan(ctx, hostedSession, options.cloudProject, &output)
+			return output.String(), err
+		})
+	}
 	if len(sessionNotices) > 0 {
 		// The terminal UI uses the alternate screen: what was printed to stderr
 		// above is not visible until the user quits, so show it in the chat too.
@@ -329,6 +365,17 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		return "", err
 	}
 	return ui.SelectedProject(), nil
+}
+
+func writeHostedPlan(ctx context.Context, session cloudSession, project string, w io.Writer) error {
+	plan, err := session.getPlan(ctx, project)
+	if err != nil {
+		return err
+	}
+	if err := plan.requirePersonalFreeOrPro(); err != nil {
+		return err
+	}
+	return writePlan(w, plan)
 }
 
 type unavailableSchemaConversation struct{ database string }

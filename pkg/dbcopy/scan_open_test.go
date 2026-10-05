@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/dal-go/dalgo2postgres"
@@ -66,7 +68,14 @@ func TestOpenSchemaScan_OpensThePostgresURLWithExactIdentifiers(t *testing.T) {
 	assert.NoError(t, db.Close())
 }
 
-func TestOpenSchemaScan_ScrubsTheRealURLFromDriverErrors(t *testing.T) {
+// openedSchemaScanFailure is the sentence OpenSchemaScan returns when the driver
+// cannot open the source named env:SHOP_PG_URL for a reason that cannot be told
+// apart without reading the driver's message.
+const openedSchemaScanFailure = `open postgres source "env:SHOP_PG_URL": the driver could not open the source (its own message is not shown: a driver can quote the connection string)`
+
+// The error of a failed open is classified, never quoted: whatever the driver
+// wrote, a pattern scrubber is not what keeps a secret out.
+func TestOpenSchemaScan_ReturnsTheClassifiedOpenFailureNotTheDriversText(t *testing.T) {
 	cause := errors.New("connection refused")
 	stubNewPostgresDatabase(t, func(dsn string, _ ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
 		// dalgo2postgres quotes the DSN it was given in its open and ping errors.
@@ -79,8 +88,26 @@ func TestOpenSchemaScan_ScrubsTheRealURLFromDriverErrors(t *testing.T) {
 	assert.Nil(t, db)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "s3cret")
-	assert.Contains(t, err.Error(), "xxxxx")
-	assert.ErrorIs(t, err, cause)
+	assert.EqualError(t, err, openedSchemaScanFailure)
+	assert.ErrorIs(t, err, cause, "the driver's own error is kept for errors.Is, never printed")
+}
+
+// A cause that can be told apart without reading the driver's message is named.
+func TestOpenSchemaScan_NamesACauseThatNeedsNoMessageToRecognise(t *testing.T) {
+	for want, cause := range map[string]error{
+		"the connection was refused": fmt.Errorf("dial tcp 10.0.0.5:5432: %w", syscall.ECONNREFUSED),
+		"the attempt timed out":      context.DeadlineExceeded,
+		"permission denied":          fs.ErrPermission,
+	} {
+		stubNewPostgresDatabase(t, func(dsn string, _ ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+			return nil, fmt.Errorf("dalgo2postgres: PingContext(%q): %w", dsn, cause)
+		})
+		ref, err := ParseWithEnv("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": "postgres://alice:s3cret@h/shop"}))
+		require.NoError(t, err)
+		_, err = ref.OpenSchemaScan(context.Background())
+		assert.EqualError(t, err, `open postgres source "env:SHOP_PG_URL": `+want)
+		assert.ErrorIs(t, err, cause)
+	}
 }
 
 // pgxConnectText is what pgx v5 writes when a connection attempt fails, as
@@ -90,7 +117,7 @@ func pgxConnectText(user, database, cause string) string {
 	return fmt.Sprintf("failed to connect to `user=%s database=%s`: %s", user, database, cause)
 }
 
-func TestOpenSchemaScan_ADriverErrorHoldsNoPasswordWhateverTheShapeOfTheURL(t *testing.T) {
+func TestOpenSchemaScan_ADriverErrorHoldsNoPasswordWhateverTheShapeOfTheURL(t *testing.T) { // and none of its words
 	// The stub answers with pgx's real text for the connection the driver was
 	// handed: the user and the database as they read out of the URL.
 	stubNewPostgresDatabase(t, func(dsn string, _ ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
@@ -111,7 +138,7 @@ func TestOpenSchemaScan_ADriverErrorHoldsNoPasswordWhateverTheShapeOfTheURL(t *t
 			for _, secret := range []string{"s3cret", "s3/cret", "s3%2Fcret", "p@ss", "ss@"} {
 				assert.NotContains(t, err.Error(), secret, raw)
 			}
-			assert.Contains(t, err.Error(), "database=shop", raw+": the target is named, only the password is hidden")
+			assert.EqualError(t, err, openedSchemaScanFailure, raw+": the driver's words, which name the user and the database, are not shown")
 		}
 	}
 }
@@ -137,7 +164,7 @@ func TestOpenSchemaScan_RefusesAURLThatSplitsThePassword(t *testing.T) {
 	}
 }
 
-func TestOpenSchemaScan_NamesTheSourceInsteadOfQuotingItsURL(t *testing.T) {
+func TestOpenSchemaScan_NamesTheSourceInsteadOfQuotingItsURLOrTheDriversWords(t *testing.T) {
 	const url = "postgres://alice:s3cret@db.example.com:5433/shop?options=-csearch_path%3Dprivate_schema"
 	stubNewPostgresDatabase(t, func(dsn string, _ ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
 		// The driver quotes the URL both ways: as a Go string literal and as text.
@@ -148,16 +175,17 @@ func TestOpenSchemaScan_NamesTheSourceInsteadOfQuotingItsURL(t *testing.T) {
 
 	_, err = ref.OpenSchemaScan(context.Background())
 	require.Error(t, err)
-	assert.Equal(t, `dalgo2postgres: PingContext("env:SHOP_PG_URL"): dial env:SHOP_PG_URL: connection refused`, err.Error(),
+	assert.Equal(t, openedSchemaScanFailure, err.Error(),
 		"the error names the variable: the URL carries every connection option, not only the password")
+	assert.NotContains(t, err.Error(), "dalgo2postgres", "the driver's words are not shown")
 }
 
-func TestOpenSchemaScan_AnEmptyURLIsLeftAloneInTheErrorText(t *testing.T) {
+func TestOpenSchemaScan_AnErrorOfADriverGivenNoURLIsClassifiedToo(t *testing.T) {
 	stubNewPostgresDatabase(t, func(string, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
 		return nil, errors.New("no connection string")
 	})
 	_, err := BackendRef{Scheme: "postgres", Raw: "env:SHOP_PG_URL"}.OpenSchemaScan(context.Background())
-	assert.EqualError(t, err, "no connection string")
+	assert.EqualError(t, err, openedSchemaScanFailure)
 }
 
 func TestPostgresDefaultSchemaIsTheReadersDefault(t *testing.T) {
@@ -191,7 +219,7 @@ func TestOpenSchemaScan_RefusesAUserNameThatHoldsAColon(t *testing.T) {
 // masked and the URL written again (ParseConfigError), so the text is not the
 // URL as it was given. The real driver constructor fails on these before it
 // dials anything.
-func TestOpenSchemaScan_APgxParseErrorNamesTheSourceNotItsURL(t *testing.T) {
+func TestOpenSchemaScan_APgxParseErrorIsClassifiedNotQuoted(t *testing.T) {
 	for name, tail := range map[string]string{
 		"an unknown sslmode":      "db.example.com:5433/shop?sslmode=bogus",
 		"a bad connect_timeout":   "db.example.com:5433/shop?connect_timeout=soon",
@@ -204,34 +232,12 @@ func TestOpenSchemaScan_APgxParseErrorNamesTheSourceNotItsURL(t *testing.T) {
 		db, err := ref.OpenSchemaScan(context.Background())
 		assert.Nil(t, db, name)
 		if assert.Error(t, err, name) {
-			assert.ErrorContains(t, err, "cannot parse", name+": this is pgx's own parse error")
-			assert.ErrorContains(t, err, "env:SHOP_PG_URL", name)
-			// pgx's own words about the option it cannot read ("sslmode is invalid")
-			// stay; the URL it quotes does not.
-			for _, shown := range []string{"s3cret", "alice", "db.example.com", "shop", "sslmode=", "connect_timeout=", "application_name", "postgres://", "5433"} {
+			assert.EqualError(t, err, openedSchemaScanFailure, name)
+			// Neither pgx's own words about the option it cannot read nor the URL it
+			// quotes are shown.
+			for _, shown := range []string{"s3cret", "alice", "db.example.com", "shop", "sslmode=", "connect_timeout=", "application_name", "postgres://", "5433", "cannot parse"} {
 				assert.NotContains(t, err.Error(), shown, name)
 			}
 		}
 	}
-}
-
-func TestNamedSourceError_NamesEveryPostgresURLInTheText(t *testing.T) {
-	t.Parallel()
-	const url = "postgres://alice:s3cret@db.example.com:5433/shop"
-	for name, tc := range map[string]struct{ text, want string }{
-		"the URL as given, as text and as a literal": {`open ` + url + ` and "` + url + `"`, `open env:X and "env:X"`},
-		"pgx's rendering of the URL":                 {"cannot parse `postgres://alice:xxxxx@db.example.com:5433/shop?sslmode=bogus`: bad", "cannot parse `env:X`: bad"},
-		"the postgresql alias":                       {"cannot parse `postgresql://alice:xxxxx@db.example.com/shop`: bad", "cannot parse `env:X`: bad"},
-		"an upper-case scheme":                       {"dial POSTGRES://alice:xxxxx@db.example.com/shop: refused", "dial env:X: refused"},
-		"a URL in quotes":                            {`open "postgres://alice:xxxxx@db.example.com/shop?sslmode=bogus" failed`, `open "env:X" failed`},
-		"two URLs":                                   {"from postgres://a@h1/d to postgresql://b@h2/d done", "from env:X to env:X done"},
-		"no URL":                                     {"connection refused", "connection refused"},
-	} {
-		got := namedSourceError{err: errors.New(tc.text), url: url, name: "env:X"}.Error()
-		assert.Equal(t, tc.want, got, name)
-	}
-	// A source with no URL of its own still never shows another, and punctuation
-	// that follows a URL in the text stays.
-	assert.Equal(t, "dial env:X: refused (env:X).", namedSourceError{err: errors.New("dial postgres://h/d: refused (postgres://h/d)."), name: "env:X"}.Error())
-	assert.Equal(t, "a bare postgres:// is no URL", namedSourceError{err: errors.New("a bare postgres:// is no URL"), name: "env:X"}.Error())
 }

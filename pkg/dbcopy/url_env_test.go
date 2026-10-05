@@ -527,3 +527,63 @@ func TestParse_ExplicitPathsKeepTheirAtSign(t *testing.T) {
 		assert.Equal(t, input, ref.Raw, "an explicit path is shown as it was typed")
 	}
 }
+
+// A text that holds a second "scheme://" in front of its last "@" is not a path,
+// whatever it starts with: an explicit path start ("/", "./", "../", "~/", a
+// drive letter, a UNC start) does not make a URL written after it a directory.
+// Parse refuses it, and the refusal names only what follows the "@".
+func TestParse_ASecondURLAfterAnExplicitPathStartIsRefusedWithoutEcho(t *testing.T) {
+	t.Parallel()
+	for _, scheme := range []string{"sqlite", "ingitdb", "openvaultdb", "http", "https", "SQLITE", "Http"} {
+		for _, start := range []string{"/", "./", "../", "~/", "C:/", `C:\`, `\\host\`} {
+			for _, userinfo := range []string{"carol:pw-Zk39x", "tok_Zk39xq", "carol:42/pw-Zk39x"} {
+				input := scheme + "://" + start + "https://" + userinfo + "@git.example/team/repo"
+				_, err := Parse(input)
+				require.Error(t, err, input)
+				assert.ErrorContains(t, err, "credentials are not supported", input)
+				assert.ErrorContains(t, err, "://git.example/team/repo", "the refusal names what follows the at sign: %s", input)
+				for _, secret := range []string{"carol", "pw-Zk39x", "tok_Zk39xq", "42/"} {
+					assert.NotContains(t, err.Error(), secret, input)
+				}
+			}
+		}
+	}
+	// The form with no slashes is refused too.
+	for _, input := range []string{"sqlite:/https://tok_Zk39xq@git.example/x", "SQLite:./postgres://carol:pw-Zk39x@git.example/x"} {
+		_, err := Parse(input)
+		require.Error(t, err, input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		for _, secret := range []string{"carol", "pw-Zk39x", "tok_Zk39xq"} {
+			assert.NotContains(t, err.Error(), secret, input)
+		}
+	}
+	// Only the text in front of the last "@" counts: a path that holds a URL after it,
+	// or a colon in front of it, is still a path.
+	for _, input := range []string{
+		"sqlite:///data/team@work/https://x",
+		"sqlite:/data/team@work/https://x",
+		"ingitdb://./a:b/c@d",
+		`ingitdb://\\server\share\a@b\proj`,
+	} {
+		ref, err := Parse(input)
+		require.NoError(t, err, input)
+		assert.Equal(t, input, ref.Raw, "a path is shown as it was typed")
+	}
+}
+
+// A user name with a slash after a UNC start puts the colon after the slash, so
+// the text does not look like "user:password@host", and it is credentials all the
+// same: refused, with only what follows the "@" named.
+func TestParse_AUserNameWithASlashAfterAUNCStartIsRefusedWithoutEcho(t *testing.T) {
+	t.Parallel()
+	for _, scheme := range []string{"sqlite", "ingitdb", "openvaultdb", "http", "https", "HTTP"} {
+		input := scheme + `://\\corp/carol:pw-Zk39x@host.example/x`
+		_, err := Parse(input)
+		require.Error(t, err, input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		assert.ErrorContains(t, err, "://host.example/x", input)
+		for _, secret := range []string{"carol", "pw-Zk39x", "corp"} {
+			assert.NotContains(t, err.Error(), secret, input)
+		}
+	}
+}

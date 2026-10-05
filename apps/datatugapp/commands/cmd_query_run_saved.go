@@ -185,7 +185,9 @@ func resolveQueryEnvironment(ctx context.Context, projStore datatug.ProjectStore
 // resolveQueryDatabase picks the database catalog a saved SQL/DTQL query
 // runs against: the query's first declared target naming a Catalog, else
 // the resolved environment's only database catalog, erroring with the full
-// candidate list otherwise.
+// candidate list otherwise. envID is what --env was given, and a source string
+// can be typed there: each message shows it only when it is a plain name (see
+// api.LookupError).
 func resolveQueryDatabase(ctx context.Context, projStore datatug.ProjectStore, envID string, queryDef *datatug.QueryDef) (string, error) {
 	for _, target := range queryDef.Targets {
 		if target.Catalog != "" {
@@ -194,16 +196,16 @@ func resolveQueryDatabase(ctx context.Context, projStore datatug.ProjectStore, e
 	}
 	catalogs, err := projStore.LoadEnvDbCatalogs(ctx, envID)
 	if err != nil {
-		return "", fmt.Errorf("load database catalogs for environment %q: %w", envID, err)
+		return "", api.LookupError("load database catalogs for environment %q", err, envID)
 	}
 	switch len(catalogs) {
 	case 0:
-		return "", fmt.Errorf("environment %q has no database catalogs configured", envID)
+		return "", api.LookupError("environment %q has no database catalogs configured", nil, envID)
 	case 1:
 		return catalogs[0].GetID(), nil
 	default:
 		return "", fmt.Errorf("environment %q has %d database catalogs (%s); query %q does not declare which one to use (targets[].catalog)",
-			envID, len(catalogs), strings.Join(catalogs.IDs(), ", "), queryDef.ID)
+			dbcopy.SourceIDDisplay(envID), len(catalogs), strings.Join(catalogs.IDs(), ", "), queryDef.ID)
 	}
 }
 

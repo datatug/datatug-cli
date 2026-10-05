@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"os"
 	"path/filepath"
 
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
@@ -23,6 +24,7 @@ var randRead = rand.Read
 var executionstoreNewManager = executionstore.NewManager
 var filepathRel = filepath.Rel
 var filepathGlob = filepath.Glob
+var readCatalogFile = os.ReadFile
 var dbcopyParse = dbcopy.Parse
 var updateSchemaModelSeam = updateSchemaModel
 var loadHTTPQueries = httpsource.LoadHTTPQueries

@@ -274,7 +274,9 @@ func parseURL(rawURL string) (BackendRef, error) {
 // the scheme, reads the path; the scheme it is given is lower case.
 func parseSQLite(rawURL, lowerURL, rest string, slashes bool) (BackendRef, error) {
 	display := SourceDisplay(rawURL)
-	if slashes {
+	// "sqlite:rest" keeps a relative path that holds an "@" (see readsAsPath), but a
+	// second URL in front of the last "@" is credentials in either form.
+	if slashes || holdsSecondURL(rest) {
 		if err := refuseUserinfo("sqlite", display, rest); err != nil {
 			return BackendRef{}, err
 		}

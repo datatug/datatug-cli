@@ -471,7 +471,7 @@ func resolveExecutionSource(ctx context.Context, projStore datatug.ProjectStore,
 	}
 	switch len(eligible) {
 	case 0:
-		return api.ResolvedSource{}, newSourceUnavailable(fmt.Sprintf("query %q has no eligible source in environment %q", req.QueryID, req.Environment))
+		return api.ResolvedSource{}, newSourceUnavailable(fmt.Sprintf("query %q has no eligible source in environment %q", req.QueryID, dbcopy.SourceIDDisplay(req.Environment)))
 	case 1:
 		return eligible[0], nil
 	default:

@@ -263,7 +263,9 @@ func dtqlCollection(query dal.StructuredQuery) string {
 // catalog sources, through the same resolver saved-query execution uses
 // (api.EligibleTargets). An unregistered source, a recordset or HTTP
 // source, and an unknown environment are all 400 on query.source; the
-// resolver's own error text (which can name server paths) is not echoed.
+// resolver's own error text (which can name server paths) is not echoed, and the
+// source and the environment are named only when each is a plain name: a client
+// may send a source string for either.
 func checkCaptureSource(ctx context.Context, projectID, projectDir, environment, source string) error {
 	projStore, err := captureProjectStoreFor(projectID)
 	if err != nil {
@@ -278,5 +280,5 @@ func checkCaptureSource(ctx context.Context, projectID, projectDir, environment,
 			}
 		}
 	}
-	return newInvalidRequest("query.source", fmt.Sprintf("source %q is not a catalog source of environment %q that a saved query can target", dbcopy.SourceIDDisplay(source), environment))
+	return newInvalidRequest("query.source", fmt.Sprintf("source %q is not a catalog source of environment %q that a saved query can target", dbcopy.SourceIDDisplay(source), dbcopy.SourceIDDisplay(environment)))
 }

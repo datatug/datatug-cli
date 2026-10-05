@@ -194,8 +194,9 @@ func CheckPostgresScanAvailable() error {
 }
 
 // scanPostgresCatalog scans a PostgreSQL database through DALgo's schema reader.
-// It opens the source through dbcopy, so a driver error comes back scrubbed with
-// the real URL; what the scan itself reads is scrubbed the same way.
+// It opens the source through dbcopy, so a driver error comes back classified
+// (see BackendRef.OpenFailure), never as the driver wrote it; what the scan
+// itself reads is reported the same way.
 func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
 	params, ok := connectionParams.(postgresScanSource)
 	if !ok {
@@ -212,7 +213,7 @@ func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Para
 	provider := dalgoschema.NewSchemaProvider(scanDB, dalgoschema.NewNativeCounter(scanDB), catalogID, dbcopy.PostgresDefaultSchema)
 	dbCatalog, err := schemer.NewScanner(provider).ScanCatalog(ctx, catalogID)
 	if err != nil {
-		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", dbcopy.RedactErrorWithSecrets(err, source.Path))
+		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", source.OpenFailure(err))
 	}
 	dbCatalog.ID = catalogID
 	dbCatalog.Driver = DriverPostgres

@@ -13,7 +13,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/datatug/datatug-cli/internal/sourcecases"
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
 // TestProperty_NoCommandPathEchoesASourceSecret is the DT-0C acceptance
@@ -40,6 +42,13 @@ import (
 // Nothing here relies on a redactor: Exit no longer calls one, and the
 // top-level handler in main.go that does is not run.
 func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
+	// The scan runs below lift the command's own refusal, and rely on the project
+	// model of datatug-core still refusing a postgres server to stop before it
+	// connects. When a datatug-core upgrade accepts one, this property would call the
+	// real OpenSchemaScan and dial the generated hosts from a unit test: fail here
+	// instead, before any case runs.
+	requirePostgresScanUnavailable(t, api.CheckPostgresScanAvailable)
+
 	// A relative path a source names lands in this directory, so a stray write is
 	// found below.
 	workdir := t.TempDir()
@@ -169,6 +178,29 @@ func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
 			turn, askErr := conversation.AskWithContext(context.Background(), "Show customers", "")
 			note(turn.Text, "", askErr)
 		}
+		// --env takes the ID of an environment, and a source string can be typed there
+		// too. `datatug chat` with no --database and `datatug query run` of a saved query
+		// both pick the database of that environment, and say so when it has none.
+		chatCmd = chatCommand()
+		chatOut.Reset()
+		chatErrOut.Reset()
+		chatCmd.SetOut(&chatOut)
+		chatCmd.SetErr(&chatErrOut)
+		_, chatErr = runChatProject(chatCmd, chatOptions{project: chatProject, env: c.Source, model: defaultChatModel, thinking: "low"})
+		note(chatOut.String(), chatErrOut.String(), chatErr)
+		if chatErr == nil || !strings.Contains(chatErr.Error(), "database catalogs") {
+			t.Errorf("%s: chat --env did not stop at the environment's database catalogs: %v", c.Name, chatErr)
+		}
+		projectDir, projectStore, projectErr := resolveQueryProject(chatProject)
+		if projectErr != nil {
+			t.Fatal(projectErr)
+		}
+		_, envErr := resolveSQLOrDTQLSourceURL(context.Background(), projectStore, projectDir, c.Source, &datatug.QueryDef{ID: "saved"})
+		note("", "", envErr)
+		if envErr == nil || !strings.Contains(envErr.Error(), "database catalogs") {
+			t.Errorf("%s: a saved query with --env did not stop at the environment's database catalogs: %v", c.Name, envErr)
+		}
+
 		// The context the model is given when the selected source is unavailable.
 		texts = append(texts, projectSchemaContext(chat.ProjectCatalog{}, map[string]string{}, c.Source))
 		checkFiles(caseHome, c)
@@ -194,5 +226,19 @@ func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(workdir); err != nil || len(entries) != 0 {
 		t.Errorf("a command wrote %d file(s) where a relative source pointed: %v, %v", len(entries), entries, err)
+	}
+}
+
+// requirePostgresScanUnavailable fails t at once when check, the answer to "can
+// this release scan PostgreSQL", is nil: a test that lifts the command's refusal
+// and counts on the project model refusing the server would then reach the real
+// driver.
+func requirePostgresScanUnavailable(t interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}, check func() error) {
+	t.Helper()
+	if check() == nil {
+		t.Fatalf("this release can scan PostgreSQL now: the scan runs of this property would open the generated hosts for real; stub the scan open in the api package before lifting the refusal")
 	}
 }

@@ -95,12 +95,18 @@ func moveChatScope(db *sql.DB, oldScope, newScope string) error {
 
 // storedSourceNames reports whether stored, the Source of a stored result (a
 // source is stored as its display form), names live, a source string of this
-// scope: the string itself, or its display form. A source that cannot be shown
+// scope: the string itself, its display form, or the masked form an earlier
+// version stored (dbcopy.RedactSourceURL, which keeps the user name and masks the
+// password and the secret query parameters), so a record set written before the
+// upgrade can still be refreshed and joined. A source that cannot be shown
 // (dbcopy.UnparsableSource) names nothing.
 func storedSourceNames(stored, live string) bool {
 	if stored == live {
 		return true
 	}
 	shown := dbcopy.SourceDisplay(live)
-	return shown != dbcopy.UnparsableSource && stored == shown
+	if shown != dbcopy.UnparsableSource && stored == shown {
+		return true
+	}
+	return stored == dbcopy.RedactSourceURL(live)
 }

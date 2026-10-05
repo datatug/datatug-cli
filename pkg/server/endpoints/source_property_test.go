@@ -108,6 +108,42 @@ func TestProperty_ServeNeverEchoesASourceSecret(t *testing.T) {
 			t.Fatalf("%s: checkCaptureSource returned %v, want the not-a-catalog-source contract error", c.Name, err)
 		}
 		texts = append(texts, captureErr.Message)
+
+		// The environment is a field a client fills with whatever it likes, too: the
+		// same requests with a source string as the environment and a plain source.
+		// The capture message names the environment, whatever the failure.
+		err = checkCaptureSource(ctx, "demo", projectDir, c.Source, "chinook")
+		if !errors.As(err, &captureErr) || !strings.Contains(captureErr.Message, "is not a catalog source of environment") {
+			t.Fatalf("%s: checkCaptureSource with a bad environment returned %v, want the not-a-catalog-source contract error", c.Name, err)
+		}
+		texts = append(texts, captureErr.Message)
+		// A saved query that has no eligible source in the environment, and the
+		// resolver's own failure to list the environment's catalogs.
+		eligibleTargetsHook = func(context.Context, datatug.ProjectStore, string, string, *datatug.QueryDef) ([]api.ResolvedSource, error) {
+			return nil, nil
+		}
+		catalogStore := mockStoreWithCatalogs{err: errors.New("no catalogs")}
+		for _, request := range []struct {
+			name       string
+			req        apicontract.ExecutionRequest
+			wantPhrase string
+		}{
+			{"saved query with no eligible source", apicontract.ExecutionRequest{QueryID: "q", Environment: c.Source}, "has no eligible source in environment"},
+			{"ad-hoc DTQL", apicontract.ExecutionRequest{DTQL: "from: {name: t}", Source: "chinook", Environment: c.Source}, "list catalogs for environment"},
+		} {
+			_, err = resolveExecutionSource(ctx, catalogStore, projectDir, request.req, &datatug.QueryDef{ID: "q"})
+			var contract *contractError
+			if !errors.As(err, &contract) || !strings.Contains(contract.Message, request.wantPhrase) {
+				t.Fatalf("%s: resolveExecutionSource (%s, bad environment) returned %v, want a contract error that says %q: the property does not reach the message it is meant to read", c.Name, request.name, err, request.wantPhrase)
+			}
+			texts = append(texts, contract.Message) // before the sink that redacts it
+			w := httptest.NewRecorder()
+			writeContractResponse(w, httptest.NewRequest(http.MethodPost, "/datatug/exec/run_query", nil), contract, nil)
+			texts = append(texts, w.Body.String())
+		}
+		eligibleTargetsHook = func(context.Context, datatug.ProjectStore, string, string, *datatug.QueryDef) ([]api.ResolvedSource, error) {
+			return []api.ResolvedSource{{ID: "chinook", Label: "Chinook"}, {ID: "orders", Label: "Orders"}}, nil
+		}
 		texts = append(texts, logged.String())
 		logged.Reset()
 

@@ -261,6 +261,12 @@ func TestStoredSourceNames(t *testing.T) {
 		{"the string itself", "sqlite:///chinook.db", "sqlite:///chinook.db", true},
 		{"the display form of a path with a hash", "ingitdb:///tmp/a", hashSource, true},
 		{"the display form of a URL with a password and a query", "postgres://db.example.com/shop", "postgres://alice:s3cret@db.example.com/shop?sslmode=require", true},
+		// An earlier version stored a source masked (dbcopy.RedactSourceURL), not shown: the
+		// stored text of a record set it wrote is still its source.
+		{"the masked form an earlier version stored, with a key in the query", "sqlite:///x.db?token=xxxxx", "sqlite:///x.db?token=Zk39xq-key", true},
+		{"the masked form an earlier version stored, with a password", "postgres://carol:xxxxx@db.example.com/shop", "postgres://carol:pw-Zk39x@db.example.com/shop", true},
+		{"the masked form of another source", "postgres://carol:xxxxx@other.example.com/shop", "postgres://carol:pw-Zk39x@db.example.com/shop", false},
+		{"a masked form that is not the live one", "sqlite:///x.db?token=xxxxx", "sqlite:///y.db?token=Zk39xq-key", false},
 		{"another source", "sqlite:///other.db", "sqlite:///chinook.db", false},
 		{"nothing stored for nothing live", "", "", true},
 		{"a source that cannot be shown names nothing", dbcopy.UnparsableSource, "", false},

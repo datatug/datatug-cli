@@ -252,7 +252,7 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (st
 		if err != nil {
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
-		return dbcopy.LocalSourceURL("sqlite", path), nil
+		return api.LocalSQLiteSourceURL(path), nil
 	case "ingitdb":
 		if catalog.Path == "" {
 			return "", fmt.Errorf("catalog %q has no path configured for its ingitdb driver", catalog.ID)

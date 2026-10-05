@@ -3,17 +3,21 @@ package commands
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -305,8 +309,126 @@ func TestScanJourneySQLite(t *testing.T) {
 				listedNames = append(listedNames, table.Schema+"."+table.Name)
 			}
 			assert.Equal(t, []string{"main.Customer", "main.order_line", "main.customer_names"}, listedNames)
+
+			// 5. I scan again. Nothing changed in the database, so nothing changes in the
+			// folder: every file is as it was, by content.
+			first := treeHashes(t, projectDir, "data/")
+			require.Len(t, first, 8)
+			stderr, err = runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
+			require.NoError(t, err)
+			assert.Empty(t, stderr, "a rescan with nothing to leave out says nothing on stderr")
+			assert.Equal(t, first, treeHashes(t, projectDir, "data/"), "a rescan of an unchanged database leaves the folder byte-identical")
+
+			// 6. A table is dropped from the database and another is added; I scan again.
+			// The dropped table's folder is gone, the new one's is there, and nothing else
+			// in the folder changed.
+			dropOrderLineAddInvoice(t, dbPath)
+			stderr, err = runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
+			require.NoError(t, err)
+			assert.Equal(t, `removed: dbmodels/shop/main/tables/order_line: table "order_line" of schema "main" is no longer in the database`+"\n", stderr,
+				"one line for the folder that was removed, which names it")
+			second := treeHashes(t, projectDir, "data/")
+			added, removed, changed := diffTrees(first, second)
+			assert.Equal(t, []string{"dbmodels/shop/main/tables/Invoice/main.Invoice.columns.json"}, added)
+			assert.Equal(t, []string{"dbmodels/shop/main/tables/order_line/main.order_line.columns.json"}, removed)
+			assert.Empty(t, changed, "every other file is as the first scan wrote it")
+			assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "shop", "main", "tables", "order_line"), "the folder of the dropped table is removed, not left empty")
+			assert.DirExists(t, filepath.Join(projectDir, "dbmodels", "shop", "main", "views", "customer_names"), "the view is still in the database")
+
+			_, _, tables, views = webReaderTables(t, projectDir)
+			assert.Equal(t, []string{"main.Customer", "main.Invoice"}, tables)
+			assert.Equal(t, []string{"main.customer_names"}, views)
+			schema, err = api.GetCatalogSchema(projectDir, "local", "shop")
+			require.NoError(t, err)
+			assert.Equal(t, map[string][]journeyColumn{
+				"main.Customer (BASE TABLE)": {
+					{Name: "CustomerId", PKPos: 1, DbType: "INTEGER"},
+					{Name: "FirstName", DbType: "TEXT"},
+					{Name: "LastName", DbType: "TEXT"},
+				},
+				"main.customer_names (VIEW)": {
+					{Name: "CustomerId", DbType: "INTEGER"},
+					{Name: "full_name"},
+				},
+				"main.Invoice (BASE TABLE)": {
+					{Name: "InvoiceId", PKPos: 1, DbType: "INTEGER"},
+					{Name: "Total", DbType: "NUMERIC"},
+				},
+			}, relationColumns(schema))
+			project, err = projStore.LoadProject(ctx)
+			require.NoError(t, err)
+			require.NoError(t, project.Validate())
 		})
 	}
+}
+
+// dropOrderLineAddInvoice changes the journey's database the way a developer does
+// between two scans: one table is dropped (with its index), another is added.
+func dropOrderLineAddInvoice(t *testing.T, path string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	_, err = db.Exec(`DROP TABLE order_line; CREATE TABLE Invoice (InvoiceId INTEGER PRIMARY KEY, Total NUMERIC);`)
+	require.NoError(t, err)
+}
+
+// treeHashes is the SHA-256 of the content of every file under dir, by slash-separated
+// path, except those under skip when it is not empty. A folder that holds no file is
+// not in it, so it also lists the empty folders: as "path/" with an empty hash.
+func treeHashes(t *testing.T, dir, skip string) map[string]string {
+	t.Helper()
+	hashes := map[string]string{}
+	require.NoError(t, filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return relErr
+		}
+		name := filepath.ToSlash(rel)
+		if name == "." || (skip != "" && strings.HasPrefix(name+"/", skip)) {
+			return nil
+		}
+		if entry.IsDir() {
+			children, readErr := os.ReadDir(path)
+			if readErr == nil && len(children) == 0 {
+				hashes[name+"/"] = ""
+			}
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		sum := sha256.Sum256(data)
+		hashes[name] = hex.EncodeToString(sum[:])
+		return nil
+	}))
+	return hashes
+}
+
+// diffTrees is what differs between two treeHashes, each list in path order: the
+// paths only in after, only in before, and in both with another content.
+func diffTrees(before, after map[string]string) (added, removed, changed []string) {
+	for name, hash := range after {
+		switch old, ok := before[name]; {
+		case !ok:
+			added = append(added, name)
+		case old != hash:
+			changed = append(changed, name)
+		}
+	}
+	for name := range before {
+		if _, ok := after[name]; !ok {
+			removed = append(removed, name)
+		}
+	}
+	sort.Strings(added)
+	sort.Strings(removed)
+	sort.Strings(changed)
+	return added, removed, changed
 }
 
 // writeCRMDB creates a second database to scan beside the journey's: it holds a
@@ -515,7 +637,9 @@ CREATE TABLE "` + attachName + `" (c TEXT);`)
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 
-	stderr, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "crafted", "--env", "local")
+	// The folder of the project has brackets in its name, which no project id can have:
+	// the project is named with --project.
+	stderr, err := runScanCommand(t, "-d", projectDir, "--project", "crafted", "-D", "sqlite3", "--path", dbPath, "--db", "crafted", "--env", "local")
 
 	require.NoError(t, err, "a table named with an apostrophe or a bracket is a table")
 	assert.Empty(t, stderr)
@@ -546,28 +670,103 @@ CREATE TABLE "` + attachName + `" (c TEXT);`)
 	assert.Empty(t, entries, "nothing was created in the working directory")
 }
 
-// The path of the database is a path, not a URI: a file whose name has a "#", a
-// "?" or a "%" in it is scanned, not another file made beside it.
+// The path of the database is a path, not a URI: a file whose name has a "#" or a
+// "%" in it is scanned, not another file made beside it, and it is read back as the
+// same file by the readers of the project: the source of a saved query, of chat and of
+// serve is a URL, which cut the path at the first "#" or "?". A file whose name has a
+// "?" is refused: the open of a source cannot read such a name back yet.
 func TestScanJourneyPathWithURICharacters(t *testing.T) {
-	projectDir := filepath.Join(t.TempDir(), "shop-project")
-	require.NoError(t, os.Mkdir(projectDir, 0o755))
-	dbDir := t.TempDir()
-	dbPath := filepath.Join(dbDir, "shop#1 50%.db")
-	writeJourneyDB(t, dbPath)
+	names := []string{"shop#1 50%.db", "100%.db", "a%23b.db"}
+	if runtime.GOOS != "windows" { // a file name cannot have a "?" there
+		names = append(names, "what?mode=rw.db")
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			projectDir := filepath.Join(t.TempDir(), "shop-project")
+			require.NoError(t, os.Mkdir(projectDir, 0o755))
+			dbDir := t.TempDir()
+			dbPath := filepath.Join(dbDir, name)
+			// Made under a plain name and then moved: the driver that makes the file reads
+			// a "?" in the name it is given as the start of its own parameters.
+			plain := filepath.Join(t.TempDir(), "plain.db")
+			writeJourneyDB(t, plain)
+			require.NoError(t, os.Rename(plain, dbPath))
 
-	stderr, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
+			stderr, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
 
-	require.NoError(t, err)
-	assert.Empty(t, stderr)
-	schema, err := api.GetCatalogSchema(projectDir, "local", "shop")
-	require.NoError(t, err)
-	assert.Len(t, schema.Relations, 3, "the tables and the view of the file that was named")
-	catalogFile := readJSONMap(t, filepath.Join(projectDir, "environments", "local", "catalogs", "shop", "shop.db.json"))
-	assert.Equal(t, dbPath, catalogFile["path"])
-	entries, err := os.ReadDir(dbDir)
-	require.NoError(t, err)
-	require.Len(t, entries, 1, "no other database was created beside it")
-	assert.Equal(t, "shop#1 50%.db", entries[0].Name())
+			if strings.Contains(name, "?") {
+				// The scan could read this file, but the project could not open it again: the
+				// open of a source (pkg/dbcopy, BackendRef.Open) hands the bare path to
+				// dalgo2sqlite, whose driver reads a "?" in it as the start of its own
+				// parameters, opens the file named before it and creates that. So the scan
+				// refuses the file before it reads or writes anything, and says to rename it.
+				require.Error(t, err)
+				assert.ErrorContains(t, err, `"?"`, "the message names the character")
+				assert.ErrorContains(t, err, "rename the file")
+				assert.ErrorContains(t, err, "--path")
+				assert.Empty(t, stderr)
+				assert.Empty(t, projectFiles(t, projectDir, ""), "nothing was written")
+				entries, readErr := os.ReadDir(dbDir)
+				require.NoError(t, readErr)
+				require.Len(t, entries, 1, "the file was not opened, so no other database was made beside it")
+				assert.Equal(t, name, entries[0].Name())
+				return
+			}
+			require.NoError(t, err)
+			assert.Empty(t, stderr)
+			schema, err := api.GetCatalogSchema(projectDir, "local", "shop")
+			require.NoError(t, err)
+			assert.Len(t, schema.Relations, 3, "the tables and the view of the file that was named")
+			catalogFile := readJSONMap(t, filepath.Join(projectDir, "environments", "local", "catalogs", "shop", "shop.db.json"))
+			assert.Equal(t, dbPath, catalogFile["path"])
+			resolved, err := api.ResolveCatalogPath(projectDir, catalogFile["path"].(string))
+			require.NoError(t, err)
+			assert.Equal(t, dbPath, resolved)
+			entries, err := os.ReadDir(dbDir)
+			require.NoError(t, err)
+			require.Len(t, entries, 1, "no other database was created beside it")
+			assert.Equal(t, name, entries[0].Name())
+
+			// The readers open that file: they resolve the source to it, and a query
+			// through it reads the rows of the file that was scanned.
+			store, id := filestore.NewSingleProjectStore(projectDir, "")
+			projStore := store.GetProjectStore(id)
+			sourceURL, err := resolveQuerySourceURL(ctx, projStore, projectDir, "local", "shop")
+			require.NoError(t, err)
+			ref, err := dbcopy.Parse(sourceURL)
+			require.NoError(t, err)
+			assert.Equal(t, dbPath, ref.Path, "the source is the file that was scanned")
+			sources, err := api.ListSources(ctx, projStore, projectDir, "local")
+			require.NoError(t, err)
+			require.Len(t, sources, 1)
+			assert.Equal(t, sourceURL, sources[0].URL)
+			resolvedSource, err := api.ResolveSource(ctx, projStore, projectDir, "local", "shop")
+			require.NoError(t, err)
+			assert.Equal(t, sourceURL, resolvedSource.URL)
+
+			chatCatalog, urls, err := buildChatProjectCatalog(ctx, projectDir, projStore, "local")
+			require.NoError(t, err)
+			assert.Equal(t, map[string]string{"shop": sourceURL}, urls)
+			assert.NotEmpty(t, chatCatalog.Objects)
+			query := &datatug.QueryDef{
+				ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "first-names"}},
+				Type:        datatug.QueryTypeSQL,
+				Text:        "SELECT FirstName FROM Customer ORDER BY CustomerId",
+				Targets:     []datatug.QueryDefTarget{{Catalog: "shop"}},
+			}
+			result, err := runSQLSavedQuery(ctx, secureread.NewExecutor(secureread.Session{Unrestricted: true}), projStore, projectDir, "local", query, nil)
+			require.NoError(t, err)
+			var firstNames []any
+			for _, row := range result.Rows {
+				firstNames = append(firstNames, row.Data["FirstName"])
+			}
+			assert.Equal(t, []any{"Ada", "Alan"}, firstNames)
+			entries, err = os.ReadDir(dbDir)
+			require.NoError(t, err)
+			assert.Len(t, entries, 1, "opening the source made no other file either")
+		})
+	}
 }
 
 // A scan into a folder that has a README.md (a repository's, or the project's own

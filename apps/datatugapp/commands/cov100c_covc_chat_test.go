@@ -167,8 +167,9 @@ func TestCovCChatLookupParameterSourceKinds(t *testing.T) {
 	if _, err := covCChatService(t, dir, true).LookupParameter(ctx, "f/inv", "CustomerId"); err == nil {
 		t.Fatal("missing sqlite file accepted")
 	}
-	// an unparseable source URL
-	dir = covCWriteProject(t, covCMerge(envFor("sqlite3", "/tmp/covc%zz/x.sqlite"), query))
+	// an unparseable source URL: a "%" in a SQLite path is written into its URL escaped, so
+	// it parses (see api.LocalSQLiteSourceURL); a control character is not a URL's
+	dir = covCWriteProject(t, covCMerge(envFor("sqlite3", `/tmp/covc\u0001/x.sqlite`), query))
 	if _, err := covCChatService(t, dir, true).LookupParameter(ctx, "f/inv", "CustomerId"); err == nil {
 		t.Fatal("unparseable source accepted")
 	}

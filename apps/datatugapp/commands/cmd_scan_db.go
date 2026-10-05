@@ -2,9 +2,12 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -35,8 +38,48 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	log.Println("Initiating project...")
-	if _, err := os.Stat(v.ProjectDir); os.IsNotExist(err) {
-		return fmt.Errorf("ProjectDir=[%v] not found: %w", v.ProjectDir, err)
+
+	// A database, a model and an environment are names of folders of the project: a
+	// name that cannot be one is refused before anything is read or written.
+	for _, name := range []struct{ flag, value string }{{"--db", v.Database}, {"--env", v.Environment}} {
+		if err := api.CheckScanName(name.flag, name.value); err != nil {
+			return err
+		}
+	}
+	if v.DbModel != "" {
+		if err := api.CheckScanName("--dbmodel", v.DbModel); err != nil {
+			return err
+		}
+	}
+	// A database file whose path has a "?" in it is read by the scan and not opened
+	// again by the project: it is refused now, before the project is looked at. The path
+	// that is looked at is the whole path of the file, which a relative --path is not.
+	if v.Driver == dbconnection.DriverSQLite3 && v.Path != "" {
+		absolutePath, absErr := scanFilepathAbs(v.Path)
+		if absErr != nil {
+			return fmt.Errorf("cannot tell where --path %q is: %w", v.Path, absErr)
+		}
+		if err := api.CheckSQLitePath(v.Path, absolutePath); err != nil {
+			return err
+		}
+	}
+	// A database the project already holds stays on its model: a scan without --dbmodel
+	// keeps it, and one that names another is refused, naming both. The same database in
+	// another environment is on the model the other environments record for it.
+	var err error
+	if v.DbModel, err = api.ResolveScanDbModel(v.ProjectDir, v.Environment, v.Database, v.DbModel); err != nil {
+		return err
+	}
+	// A name that differs only by case from one the project has is one folder on some
+	// file systems: it is refused now, before the database is read.
+	if err = api.CheckScanNamesAgainstProject(v.ProjectDir, v.Environment, v.Database, v.DbModel); err != nil {
+		return err
+	}
+	// A project folder that is not there is made, once the scan has read something: a
+	// scan that fails makes nothing.
+	projectDirIsNew, err := checkProjectDir(v.ProjectDir)
+	if err != nil {
+		return err
 	}
 
 	connParams, err := v.connectionParams()
@@ -44,12 +87,24 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if v.DbModel == "" {
-		v.DbModel = v.Database
+	// The id of a new project is --project, or else the name of its folder, and is
+	// checked when the project is made: the project of a folder that exists has its
+	// own.
+	newProjectID := v.ProjectName
+	if newProjectID == "" {
+		absoluteDir, absErr := scanFilepathAbs(v.ProjectDir)
+		if absErr != nil {
+			return fmt.Errorf("cannot tell the name of the project folder %q: %w", v.ProjectDir, absErr)
+		}
+		newProjectID = filepath.Base(absoluteDir)
 	}
 
 	projectStore := v.store.GetProjectStore(v.projectID)
-	datatugProject, err := scanUpdateDbSchema(context.Background(), projectStore, v.projectID, v.Environment, v.Driver, v.DbModel, connParams)
+	// What the scan leaves out of the database it reads is named on stderr, as is what
+	// it leaves out of the project.
+	stderr := cmd.ErrOrStderr()
+	ctx := api.WithScanWarnings(context.Background(), stderr)
+	datatugProject, err := scanUpdateDbSchema(ctx, projectStore, newProjectID, v.Environment, v.Driver, v.DbModel, connParams)
 	if err != nil {
 		return err
 	}
@@ -59,10 +114,18 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	// project that cannot be saved must leave no descriptor behind, in a directory
 	// with no project, so the project is validated (as SaveProject does first)
 	// before anything is written.
-	if descriptor, ok := connParams.(descriptorWriter); ok {
+	descriptor, hasDescriptor := connParams.(descriptorWriter)
+	if hasDescriptor {
 		if err = datatugProject.Validate(); err != nil {
 			return fmt.Errorf("failed to save datatug project [%v]: project validation failed: %w", datatugProject.ID, err)
 		}
+	}
+	if projectDirIsNew {
+		if err = scanMkdirAll(v.ProjectDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create the project folder %q: %w", v.ProjectDir, err)
+		}
+	}
+	if hasDescriptor {
 		if err = descriptor.WriteDescriptor(v.ProjectDir); err != nil {
 			return err
 		}
@@ -71,11 +134,37 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	log.Println("Saving project", datatugProject.ID, "...")
 	saveStore, _ := filestore.NewSingleProjectStore(v.ProjectDir, datatugProject.ID)
 	savedProject := saveStore.GetProjectStore(datatugProject.ID)
-	scanned := api.ScannedCatalog{Driver: v.Driver, Environment: v.Environment, ID: v.Database}
-	// What the scan leaves out of the project is named on stderr.
-	stderr := cmd.ErrOrStderr()
-	return api.SaveScannedProject(context.Background(), savedProject, v.ProjectDir, datatugProject, scanned, stderr)
+	scanned := api.ScannedCatalog{Driver: v.Driver, Environment: v.Environment, ID: v.Database, Server: api.ScannedServer(v.Driver, connParams)}
+	return api.SaveScannedProject(ctx, savedProject, v.ProjectDir, datatugProject, scanned, stderr)
 }
+
+// checkProjectDir is whether the project folder dir is not there yet, and an error
+// when it cannot be one: it is a file, an address, or it cannot be looked at.
+func checkProjectDir(dir string) (isNew bool, err error) {
+	if strings.Contains(dir, "://") {
+		// A registered project that lives at an address, not on this machine: there is no
+		// folder to scan into, and none to make.
+		return false, fmt.Errorf("project folder %q is not a folder on this machine", dir)
+	}
+	info, err := os.Stat(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("cannot use project folder %q: %w", dir, err)
+	case !info.IsDir():
+		return false, fmt.Errorf("project folder %q is a file, not a folder", dir)
+	}
+	return false, nil
+}
+
+// scanMkdirAll is a seam over os.MkdirAll, which checkProjectDir has already shown
+// can make the folder a scan makes. Always os.MkdirAll in production.
+var scanMkdirAll = os.MkdirAll
+
+// scanFilepathAbs is a seam over filepath.Abs, which fails only when the working
+// directory is gone. Always filepath.Abs in production.
+var scanFilepathAbs = filepath.Abs
 
 // descriptorWriter is implemented by connection parameters that need a file
 // beside the project: PostgreSQL's connection descriptor.
@@ -107,6 +196,9 @@ var scanNewConnectionString = dbconnection.NewConnectionString
 
 // connectionParams builds DB connection parameters from the scan flags.
 func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
+	if v.Driver == "" {
+		return nil, fmt.Errorf("--driver (-D) is required: the database driver to scan, sqlite3 or sqlserver")
+	}
 	if v.Driver == api.DriverPostgres {
 		return v.postgresConnectionParams()
 	}
@@ -191,17 +283,17 @@ func scanCommandArgs() *cobra.Command {
 		RunE: scanCommandAction,
 	}
 	flags := cmd.Flags()
-	flags.StringP("project", "p", "", "Registered project id/name to scan into")
-	flags.StringP("directory", "d", "", "Path to the project directory (alternative to --project)")
+	flags.StringP("project", "p", "", "Registered project id/name to scan into; with --directory, the id of a new project (default: the name of the folder)")
+	flags.StringP("directory", "d", "", "Path to the project directory (alternative to --project); made if it does not exist")
 	flags.StringP("driver", "D", "", "DB driver: sqlserver or sqlite3 (postgres is not available in this release: a project cannot record a postgres server yet)")
 	flags.StringP("server", "s", "", "Network server / host name")
 	flags.Int("port", 0, "Server network port (default if omitted)")
 	flags.StringP("user", "U", "", "DB login user")
 	flags.StringP("password", "P", "", "DB login password")
-	flags.String("db", "", "ID of database to scan")
-	flags.String("dbmodel", "", "ID of DB model (required for newly scanned databases)")
-	flags.String("env", "", "Environment the DB belongs to. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.")
-	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3)")
+	flags.String("db", "", "ID of database to scan: a plain name, as it is the name of a folder of the project (for sqlserver also the name of the database on the server)")
+	flags.String("dbmodel", "", "ID of DB model: a plain name (default: the model the project already records for the database in this environment, else the model the other environments record for it when they agree, else the ID of the database)")
+	flags.String("env", "", "Environment the DB belongs to: a plain name. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.")
+	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3); it must exist, and its whole path (from the working directory, for a relative one) must have no \"?\" in it")
 	flags.String("dsn-env", "", "Environment variable that holds the PostgreSQL connection URL, for -D postgres (not available in this release: a project cannot record a postgres server yet). The password stays in the variable and is never written to the project. The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
 	_ = cmd.MarkFlagRequired("db")
 	_ = cmd.MarkFlagRequired("env")

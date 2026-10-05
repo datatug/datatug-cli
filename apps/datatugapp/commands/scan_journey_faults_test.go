@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -206,7 +207,7 @@ func TestScanJourneyKeepsTheModelOfACatalogTheProjectHolds(t *testing.T) {
 		}
 	})
 
-	t.Run("the same database in another environment is a catalog of its own", func(t *testing.T) {
+	t.Run("the same database in another environment is a catalog of its own, on the model it is given", func(t *testing.T) {
 		projectDir := filepath.Join(t.TempDir(), "retail")
 		_, err := scanInto(projectDir, "--dbmodel", "retail-model")
 		require.NoError(t, err)
@@ -215,6 +216,81 @@ func TestScanJourneyKeepsTheModelOfACatalogTheProjectHolds(t *testing.T) {
 
 		require.NoError(t, err, "the project holds no catalog of this database in dev yet")
 		assert.Equal(t, "other-model", readJSONMap(t, filepath.Join(projectDir, "environments", "dev", "catalogs", "shop", "shop.db.json"))["dbModel"])
+	})
+
+	scanEnv := func(projectDir, env string, extra ...string) (string, error) {
+		return runScanCommand(t, append([]string{"-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", env}, extra...)...)
+	}
+
+	t.Run("the same database in another environment, with no flag, is on the model the project records for it", func(t *testing.T) {
+		projectDir := filepath.Join(t.TempDir(), "retail")
+		_, err := scanInto(projectDir, "--dbmodel", "retail-model")
+		require.NoError(t, err)
+
+		stderr, err := scanEnv(projectDir, "dev")
+
+		require.NoError(t, err)
+		assert.Empty(t, stderr)
+		assert.Equal(t, "retail-model", readJSONMap(t, filepath.Join(projectDir, "environments", "dev", "catalogs", "shop", "shop.db.json"))["dbModel"])
+		assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "shop"), "no second model of the same database was made")
+		modelFile := readJSONMap(t, filepath.Join(projectDir, "dbmodels", "retail-model", "retail-model.dbmodel.json"))
+		var environments []string
+		for _, env := range modelFile["environments"].([]any) {
+			environments = append(environments, env.(map[string]any)["id"].(string))
+		}
+		assert.ElementsMatch(t, []string{"local", "dev"}, environments, "the model lists both environments")
+		columns := readJSONMap(t, filepath.Join(projectDir, "dbmodels", "retail-model", "main", "tables", "Customer", "main.Customer.columns.json"))["columns"].([]any)
+		for _, column := range columns {
+			byEnv := column.(map[string]any)["byEnv"].(map[string]any)
+			assert.Len(t, byEnv, 2, "each column lists every environment that has it")
+			assert.Contains(t, byEnv, "dev")
+			assert.Contains(t, byEnv, "local")
+		}
+	})
+
+	t.Run("environments that record different models are refused, naming each, and nothing is written", func(t *testing.T) {
+		projectDir := filepath.Join(t.TempDir(), "retail")
+		_, err := scanInto(projectDir, "--dbmodel", "retail-model")
+		require.NoError(t, err)
+		_, err = scanEnv(projectDir, "dev", "--dbmodel", "other-model")
+		require.NoError(t, err)
+		before := treeHashes(t, projectDir, "")
+
+		_, err = scanEnv(projectDir, "prod")
+
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `model "retail-model" in environment "local"`)
+		assert.ErrorContains(t, err, `model "other-model" in environment "dev"`)
+		assert.ErrorContains(t, err, "--dbmodel")
+		assert.Equal(t, before, treeHashes(t, projectDir, ""), "nothing was written")
+
+		_, err = scanEnv(projectDir, "prod", "--dbmodel", "retail-model")
+		require.NoError(t, err, "the flag settles it")
+	})
+
+	// datatug-core keeps writing a catalog file to the flat place (catalogs/<db>.db.json)
+	// when it is the one that is there: a rescan finds the model in it, and does not fork
+	// the project onto a model called as the database.
+	t.Run("a catalog file in the flat place records its model too", func(t *testing.T) {
+		projectDir := filepath.Join(t.TempDir(), "retail")
+		_, err := scanInto(projectDir, "--dbmodel", "retail-model")
+		require.NoError(t, err)
+		catalogs := filepath.Join(projectDir, "environments", "local", "catalogs")
+		require.NoError(t, os.Rename(filepath.Join(catalogs, "shop", "shop.db.json"), filepath.Join(catalogs, "shop.db.json")))
+		require.NoError(t, os.Remove(filepath.Join(catalogs, "shop")))
+		first := treeHashes(t, projectDir, "")
+
+		stderr, err := scanInto(projectDir)
+
+		require.NoError(t, err)
+		assert.Empty(t, stderr)
+		assert.Equal(t, first, treeHashes(t, projectDir, ""), "nothing changed: the file stays where it was, and no second model was made")
+		assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "shop"))
+
+		_, err = scanInto(projectDir, "--dbmodel", "other-model")
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "retail-model")
+		assert.Equal(t, first, treeHashes(t, projectDir, ""))
 	})
 }
 
@@ -423,7 +499,12 @@ func TestScanJourneyFolderThatCannotBeMadeOrNamed(t *testing.T) {
 	assert.ErrorContains(t, err, "read-only file system")
 	assert.NoDirExists(t, projectDir)
 
-	covDSetVar(t, &scanFilepathAbs, func(string) (string, error) { return "", errors.New("no working directory") })
+	covDSetVar(t, &scanFilepathAbs, func(path string) (string, error) {
+		if path == projectDir {
+			return "", errors.New("no working directory")
+		}
+		return filepath.Abs(path)
+	})
 	_, err = runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "cannot tell the name of the project folder")
@@ -432,4 +513,100 @@ func TestScanJourneyFolderThatCannotBeMadeOrNamed(t *testing.T) {
 	_, err = runScanCommand(t, "-d", projectDir, "--project", "shop", "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
 	require.Error(t, err, "the folder cannot be made: the seam still refuses")
 	assert.ErrorContains(t, err, "failed to create the project folder")
+}
+
+// The "?" is looked for in the whole path of the file, as the open of a source gets it,
+// and not in the path as it was typed: a relative --path is the file from the working
+// directory, which can be the folder with the "?" in it, and a database kept inside a
+// project whose folder has one is in that folder too.
+func TestScanJourneyRefusesAQuestionMarkInAFolderAboveTheFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a folder name cannot have a ? on Windows")
+	}
+	root := t.TempDir()
+	// Made under a plain name and moved: the driver that makes the file reads a "?" in
+	// the name it is given as the start of its own parameters.
+	plain := filepath.Join(root, "plain")
+	writeJourneyDB(t, filepath.Join(plain, "shop.db"))
+	folder := filepath.Join(root, "what?")
+	require.NoError(t, os.Rename(plain, folder))
+	projectDir := filepath.Join(root, "work", "shop")
+
+	for name, c := range map[string]struct {
+		typed string // the --path that was typed
+		args  []string
+	}{
+		"a relative path, from a working directory that has one":                       {"shop.db", []string{"-d", projectDir}},
+		"a relative path to a database in the project, which is the working directory": {"shop.db", []string{"-d", "."}},
+		"a relative path that names the working directory":                             {"./shop.db", []string{"-d", projectDir}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Chdir(folder)
+			before := treeHashes(t, folder, "")
+
+			_, err := runScanCommand(t, append(c.args, "--path", c.typed, "-D", "sqlite3", "--db", "shop", "--env", "local")...)
+
+			require.Error(t, err)
+			assert.ErrorContains(t, err, `"?"`)
+			assert.ErrorContains(t, err, "rename the file")
+			assert.ErrorContains(t, err, `--path "`+c.typed+`"`, "the message names the path that was typed")
+			assert.ErrorContains(t, err, "shop.db", "and the file it is")
+			assert.NoDirExists(t, projectDir, "no folder was made")
+			assert.Equal(t, before, treeHashes(t, folder, ""), "nothing was read into the folder, and the database was not opened: no other file is beside it")
+		})
+	}
+
+	// A path that cannot be made absolute (the working directory is gone) is an error that
+	// names --path, and nothing is made.
+	t.Run("a path that cannot be made absolute", func(t *testing.T) {
+		t.Chdir(folder)
+		covDSetVar(t, &scanFilepathAbs, func(string) (string, error) { return "", errors.New("no working directory") })
+
+		_, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", "shop.db", "--db", "shop", "--env", "local")
+
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "cannot tell where --path")
+		assert.ErrorContains(t, err, "no working directory")
+		assert.NoDirExists(t, projectDir)
+	})
+}
+
+// An id that differs from one the project has by case only is one folder on a file system
+// that does not tell the two apart (macOS and Windows by default), whatever it does here:
+// the scan of crm onto the model "Shop" would take the folders of the model "shop" for its
+// own and remove every table that crm does not have. Each of the three is refused, naming
+// the flag and the name the project has, before the database is read, with the project as
+// it was.
+func TestScanJourneyRefusesANameThatDiffersOnlyByCaseFromOneTheProjectHas(t *testing.T) {
+	shopPath := filepath.Join(t.TempDir(), "shop.db")
+	crmPath := filepath.Join(t.TempDir(), "crm.db")
+	writeJourneyDB(t, shopPath)
+	writeCRMDB(t, crmPath)
+	projectDir := filepath.Join(t.TempDir(), "shop-project")
+	stderr, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", shopPath, "--db", "shop", "--env", "dev")
+	require.NoError(t, err)
+	require.Empty(t, stderr)
+	before := treeHashes(t, projectDir, "")
+
+	for name, c := range map[string]struct {
+		args     []string
+		wantFlag string
+		existing string
+	}{
+		"--env":                        {[]string{"--path", shopPath, "--db", "shop", "--env", "Dev"}, `--env "Dev"`, `"dev"`},
+		"--db":                         {[]string{"--path", shopPath, "--db", "Shop", "--env", "dev"}, `--db "Shop"`, `catalog "shop" of environment "dev"`},
+		"--dbmodel":                    {[]string{"--path", crmPath, "--db", "crm", "--env", "dev", "--dbmodel", "Shop"}, `--dbmodel`, `database model "shop"`},
+		"the default model, from --db": {[]string{"--path", crmPath, "--db", "Shop", "--env", "prod"}, `(--dbmodel, or else --db)`, `database model "shop"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stderr, err := runScanCommand(t, append([]string{"-d", projectDir, "-D", "sqlite3"}, c.args...)...)
+
+			require.Error(t, err)
+			assert.ErrorContains(t, err, c.wantFlag)
+			assert.ErrorContains(t, err, c.existing)
+			assert.ErrorContains(t, err, "differs only by case")
+			assert.Empty(t, stderr, "nothing was removed, so nothing was said")
+			assert.Equal(t, before, treeHashes(t, projectDir, ""), "the project is as it was, with its tables")
+		})
+	}
 }

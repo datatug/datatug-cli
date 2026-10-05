@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -217,4 +218,83 @@ func TestScanJourneyLeavesAFolderOfItsOwnAlone(t *testing.T) {
 		assert.Empty(t, stderr, "scan %d says nothing of a folder that is not a table", scan)
 		assert.Equal(t, before, treeHashes(t, projectDir, ""), "scan %d", scan)
 	}
+}
+
+// copyFolderOf copies the files of the folder from, which holds files only, to the
+// folder to, as `cp -r` does.
+func copyFolderOf(t *testing.T, from, to string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(to, 0o755))
+	entries, err := os.ReadDir(from)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		data, readErr := os.ReadFile(filepath.Join(from, entry.Name()))
+		require.NoError(t, readErr)
+		require.NoError(t, os.WriteFile(filepath.Join(to, entry.Name()), data, 0o644))
+	}
+}
+
+// A person copies the folder of a table or view (a snapshot of an older table), or
+// renames one: the file inside keeps the name the scan gave it in the old folder, which
+// is not a file a scan writes in the new one, so the folder is the person's. A scan
+// removes the folder of a table the database dropped, and only that: it neither removes
+// nor names the copy or the renamed folder, now or on any later scan.
+func TestScanJourneyLeavesACopyOrARenameOfATableFolderAlone(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "shop-project")
+	dbPath := filepath.Join(t.TempDir(), "shop.db")
+	writeJourneyDB(t, dbPath)
+	writeShopDBMore(t, dbPath, `CREATE TABLE Legacy (LegacyId INTEGER PRIMARY KEY)`)
+	scan := func() (string, error) {
+		return runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
+	}
+	stderr, err := scan()
+	require.NoError(t, err)
+	require.Empty(t, stderr)
+
+	tables := filepath.Join(projectDir, "dbmodels", "shop", "main", "tables")
+	views := filepath.Join(projectDir, "dbmodels", "shop", "main", "views")
+	copyFolderOf(t, filepath.Join(tables, "Customer"), filepath.Join(tables, "Customer.bak"))     // its table is still in the database
+	copyFolderOf(t, filepath.Join(tables, "order_line"), filepath.Join(tables, "order_line.bak")) // its table is dropped below
+	copyFolderOf(t, filepath.Join(views, "customer_names"), filepath.Join(views, "customer_names.bak"))
+	require.NoError(t, os.Rename(filepath.Join(tables, "Legacy"), filepath.Join(tables, "Legacy-2019"))) // its table is dropped below
+	writeShopDBMore(t, dbPath, `DROP TABLE order_line; DROP TABLE Legacy`)
+	theirs := []string{"tables/Customer.bak/", "tables/order_line.bak/", "views/customer_names.bak/", "tables/Legacy-2019/"}
+	ofTheirs := func() map[string]string {
+		kept := map[string]string{}
+		for name, hash := range treeHashes(t, projectDir, "") {
+			for _, folder := range theirs {
+				if strings.HasPrefix(name, "dbmodels/shop/main/"+folder) {
+					kept[name] = hash
+				}
+			}
+		}
+		return kept
+	}
+	mine := ofTheirs()
+	require.Len(t, mine, 4, "a file in each of the person's folders")
+
+	stderr, err = scan()
+
+	require.NoError(t, err)
+	assert.Equal(t, `removed: dbmodels/shop/main/tables/order_line: table "order_line" of schema "main" is no longer in the database`+"\n", stderr,
+		"the folder of the table the database dropped goes, with one line, and it is the only one")
+	assert.NoDirExists(t, filepath.Join(tables, "order_line"))
+	assert.Equal(t, mine, ofTheirs(), "the copies and the renamed folder are as they were")
+	settled := treeHashes(t, projectDir, "")
+	for again := 1; again <= 2; again++ {
+		stderr, err = scan()
+		require.NoError(t, err, "rescan %d", again)
+		assert.Empty(t, stderr, "rescan %d names nothing: they are not tables of the scan's", again)
+		assert.Equal(t, settled, treeHashes(t, projectDir, ""), "rescan %d leaves the tree as it is", again)
+	}
+}
+
+// writeShopDBMore runs statements against the existing database at path.
+func writeShopDBMore(t *testing.T, path, statements string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	_, err = db.Exec(statements)
+	require.NoError(t, err)
 }

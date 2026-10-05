@@ -112,14 +112,17 @@ type retraction struct {
 // It looks at the folder of every table and view that model has on disk, in any
 // schema, that the scan does not write (layout).
 //
-// A folder is the scan's only when it holds exactly one columns file that lists
-// environment: any other is a person's, or another environment's, and is left, saying
-// nothing, and it never makes the scan fail, a link or not, and a folder that cannot
-// be listed cannot be shown to be the scan's. Of a folder that is the scan's, the scan
+// A folder is the scan's only when it holds the one file a scan writes there, named for
+// the folder, <schema>.<name>.columns.json, and that file lists environment: a copy or a
+// rename of a folder, whose file keeps the name it had in the old folder, is a person's,
+// and so is any other folder, or one that is another environment's. A folder that is not
+// the scan's is left, saying nothing, and it never makes the scan fail, a link or not; a
+// folder that cannot be listed cannot be shown to be the scan's. Of a folder that is the
+// scan's, the scan
 //
-//   - leaves it, naming it, when it holds anything but that one columns file, or the
-//     model is also fed by another catalog in environment (otherCatalogs), whose
-//     tables this scan does not know;
+//   - leaves it, naming it, when it holds anything but that file, or the model is also
+//     fed by another catalog in environment (otherCatalogs), whose tables this scan does
+//     not know;
 //   - refuses, with an error, when it is going to take it back and the folder, or any
 //     folder above it from the dbmodels folder down, is a link (see refuseLinks);
 //   - otherwise takes it back: its file without environment, or the folder when no
@@ -176,23 +179,22 @@ func planRetraction(projectDir string, parts []string, what, model, environment 
 	if err != nil {
 		return nil, nil // a folder that cannot be listed cannot be shown to be the scan's
 	}
-	file, previous := columnsFileListing(dir, entries, environment)
-	if file == "" {
+	// The one file a scan writes in the folder of a table or view: parts are the folder
+	// of dbmodels, the model, the schema, tables or views, and the table or view.
+	own := storage.JsonFileName(parts[2]+"."+parts[4], storage.ColumnsFileSuffix)
+	file := filepath.Join(dir, own)
+	previous, ok := columnsListing(file, entries, environment)
+	if !ok {
 		return nil, nil // not the scan's: nothing to say of it
 	}
 	leaves := func(reason string) (*retraction, error) {
 		_, _ = fmt.Fprintf(warnings, "warning: %s is no longer in the database, and its folder stays: %s\n", what, reason)
 		return nil, nil
 	}
-	columnsFiles := 0
 	for _, entry := range entries {
-		if !isColumnsFile(entry) {
+		if entry.Name() != own {
 			return leaves(fmt.Sprintf("it holds %q, which a scan did not write", entry.Name()))
 		}
-		columnsFiles++
-	}
-	if columnsFiles != 1 {
-		return leaves(fmt.Sprintf("it holds %d columns files, and a table or view has one", columnsFiles))
 	}
 	if len(otherCatalogs) > 0 {
 		return leaves(fmt.Sprintf("database model %q is also fed by catalog %s in environment %q, and this scan does not know what that database has", model, strings.Join(quoted(otherCatalogs), ", "), environment))
@@ -211,38 +213,27 @@ func planRetraction(projectDir string, parts []string, what, model, environment 
 	return &retraction{dir: dir, file: file, content: append(content, '\n'), what: what, rel: rel}, nil
 }
 
-// columnsFileListing is the one columns file among entries (the entries of dir) whose
-// columns list environment, and its columns; both are zero when no file, or more than
-// one, does. A file that cannot be read, or is not a columns file, lists nothing.
-func columnsFileListing(dir string, entries []os.DirEntry, environment string) (string, datatug.ColumnModels) {
-	var listing string
-	var columns datatug.ColumnModels
-	count := 0
+// columnsListing is the columns of the file at path, and whether the folder that holds
+// it is the scan's by it: path is the file of a table or view that a scan writes, entries
+// are those of its folder, and the file is there as a regular file, is a columns file, and
+// lists environment. A file that cannot be read, or is not a columns file, lists nothing.
+func columnsListing(path string, entries []os.DirEntry, environment string) (datatug.ColumnModels, bool) {
+	name := filepath.Base(path)
 	for _, entry := range entries {
-		if !isColumnsFile(entry) {
+		if entry.Name() != name || !entry.Type().IsRegular() {
 			continue
 		}
-		file := filepath.Join(dir, entry.Name())
-		data, err := os.ReadFile(file)
-		var parsed datatug.ColumnModels
+		data, err := os.ReadFile(path)
+		var columns datatug.ColumnModels
 		if err == nil {
-			parsed, err = parseColumnsFile(data)
+			columns, err = parseColumnsFile(data)
 		}
-		if err != nil || !anyColumnListsEnvironment(parsed, environment) {
-			continue
+		if err != nil || !anyColumnListsEnvironment(columns, environment) {
+			return nil, false
 		}
-		listing, columns = file, parsed
-		count++
+		return columns, true
 	}
-	if count != 1 {
-		return "", nil
-	}
-	return listing, columns
-}
-
-// isColumnsFile is whether entry is a regular file named as a columns file is.
-func isColumnsFile(entry os.DirEntry) bool {
-	return entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), "."+storage.ColumnsFileSuffix+".json")
+	return nil, false
 }
 
 // anyColumnListsEnvironment is whether the state of any column in columns lists environment.

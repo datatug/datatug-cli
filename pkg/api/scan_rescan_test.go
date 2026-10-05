@@ -3,6 +3,8 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -74,6 +76,34 @@ func columnsOf(t *testing.T, projectDir, kind, name string) map[string][]string 
 
 func tableDir(projectDir, kind, name string) string {
 	return filepath.Join(projectDir, "dbmodels", "shop", "main", kind, name)
+}
+
+// hashesUnder is the SHA-256 of the content of every file under dir, by slash-separated
+// path, and "path/" with no hash for each folder that holds nothing: a tree is the same
+// when this is.
+func hashesUnder(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	hashes := map[string]string{}
+	require.NoError(t, filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil || rel == "." {
+			return relErr
+		}
+		if entry.IsDir() {
+			if children, readErr := os.ReadDir(path); readErr == nil && len(children) == 0 {
+				hashes[filepath.ToSlash(rel)+"/"] = ""
+			}
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		sum := sha256.Sum256(data)
+		hashes[filepath.ToSlash(rel)] = hex.EncodeToString(sum[:])
+		return readErr
+	}))
+	return hashes
 }
 
 func TestMergeColumns(t *testing.T) {
@@ -331,9 +361,14 @@ func TestSaveScannedProject_RescanLeavesWhatItDidNotWrite(t *testing.T) {
 		"a columns file that is a folder": {func(t *testing.T, projectDir string) {
 			require.NoError(t, os.MkdirAll(filepath.Join(old(projectDir), "extra.columns.json"), 0o755))
 		}, `it holds "extra.columns.json", which a scan did not write`},
-		"two columns files": {func(t *testing.T, projectDir string) {
+		"a second columns file, which lists nothing": {func(t *testing.T, projectDir string) {
 			require.NoError(t, os.WriteFile(filepath.Join(old(projectDir), "Old.columns.json"), []byte(`{}`), 0o600))
-		}, `it holds 2 columns files, and a table or view has one`},
+		}, `it holds "Old.columns.json", which a scan did not write`},
+		"a second columns file that lists the environment": {func(t *testing.T, projectDir string) {
+			data, err := os.ReadFile(filepath.Join(old(projectDir), "main.Old.columns.json"))
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(old(projectDir), "copy.columns.json"), data, 0o600))
+		}, `it holds "copy.columns.json", which a scan did not write`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			projectDir := t.TempDir()
@@ -358,10 +393,12 @@ func TestSaveScannedProject_RescanLeavesWhatItDidNotWrite(t *testing.T) {
 		"a columns file that is not JSON": func(t *testing.T, projectDir string) {
 			require.NoError(t, os.WriteFile(filepath.Join(old(projectDir), "main.Old.columns.json"), []byte("not json"), 0o600))
 		},
-		"two columns files that both list the environment": func(t *testing.T, projectDir string) {
-			data, err := os.ReadFile(filepath.Join(old(projectDir), "main.Old.columns.json"))
-			require.NoError(t, err)
-			require.NoError(t, os.WriteFile(filepath.Join(old(projectDir), "copy.columns.json"), data, 0o600))
+		"a columns file that is a folder": func(t *testing.T, projectDir string) {
+			require.NoError(t, os.Remove(filepath.Join(old(projectDir), "main.Old.columns.json")))
+			require.NoError(t, os.MkdirAll(filepath.Join(old(projectDir), "main.Old.columns.json"), 0o755))
+		},
+		"a columns file that is not named for the folder, whatever it lists": func(t *testing.T, projectDir string) {
+			require.NoError(t, os.Rename(filepath.Join(old(projectDir), "main.Old.columns.json"), filepath.Join(old(projectDir), "main.Customer.columns.json")))
 		},
 		"a folder of the person's own": func(t *testing.T, projectDir string) {
 			require.NoError(t, os.RemoveAll(old(projectDir)))
@@ -433,6 +470,95 @@ func TestSaveScannedProject_RescanLeavesWhatItDidNotWrite(t *testing.T) {
 		assert.Equal(t, `warning: table "Old" of schema "main" is no longer in the database, and its folder stays: database model "shop" is also fed by catalog "shop_archive" in environment "dev", and this scan does not know what that database has`+"\n", warnings.String())
 		assert.DirExists(t, old(projectDir))
 	})
+}
+
+// A person copies the folder of a table, or renames it. The file inside keeps the name the
+// scan gave it for the old folder, <schema>.<old name>.columns.json, which is not the
+// file a scan writes in a folder of the new name: the folder is not the scan's, so a
+// scan neither removes it, nor names it, nor fails for it, however often it runs, and the
+// copy of an older table (which no scan can write again) is not lost.
+func TestSaveScannedProject_RescanLeavesACopyOrARenameOfATableFolderAlone(t *testing.T) {
+	copyFolder := func(t *testing.T, from, to string) {
+		t.Helper()
+		require.NoError(t, os.MkdirAll(to, 0o755))
+		entries, err := os.ReadDir(from)
+		require.NoError(t, err)
+		for _, entry := range entries {
+			data, err := os.ReadFile(filepath.Join(from, entry.Name()))
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(to, entry.Name()), data, 0o644))
+		}
+	}
+	kinds := map[string]struct {
+		scan   func(tables ...string) rescanScan
+		folder string
+	}{
+		"table": {func(names ...string) rescanScan {
+			var tables []*datatug.CollectionInfo
+			for _, name := range names {
+				tables = append(tables, rescanTable(name, "id"))
+			}
+			return rescanScan{env: "dev", tables: tables}
+		}, "tables"},
+		"view": {func(names ...string) rescanScan {
+			var views []*datatug.CollectionInfo
+			for _, name := range names {
+				views = append(views, layoutView(name, layoutColumn("id", "INTEGER", 0)))
+			}
+			return rescanScan{env: "dev", views: views}
+		}, "views"},
+	}
+	for kind, k := range kinds {
+		type change struct {
+			do     func(t *testing.T, projectDir string)
+			folder string // the folder of the person's that is left, and the file in it
+			file   string
+		}
+		for name, c := range map[string]change{
+			"a copy of a folder whose table is still in the database": {func(t *testing.T, projectDir string) {
+				copyFolder(t, tableDir(projectDir, k.folder, "Customer"), tableDir(projectDir, k.folder, "Customer.bak"))
+			}, "Customer.bak", "main.Customer.columns.json"},
+			"a copy of a folder whose table the database dropped": {func(t *testing.T, projectDir string) {
+				copyFolder(t, tableDir(projectDir, k.folder, "Old"), tableDir(projectDir, k.folder, "Old.bak"))
+			}, "Old.bak", "main.Old.columns.json"},
+			"a folder renamed, its file keeping the old name": {func(t *testing.T, projectDir string) {
+				require.NoError(t, os.Rename(tableDir(projectDir, k.folder, "Old"), tableDir(projectDir, k.folder, "Old-2019")))
+			}, "Old-2019", "main.Old.columns.json"},
+		} {
+			t.Run(kind+": "+name, func(t *testing.T) {
+				projectDir := t.TempDir()
+				_, err := k.scan("Customer", "Old").save(t, projectDir)
+				require.NoError(t, err)
+				c.do(t, projectDir)
+				_, statErr := os.Stat(tableDir(projectDir, k.folder, "Old"))
+				oldIsThere := statErr == nil
+
+				// The database dropped Old: its own folder, if it is still there, is the only one
+				// that goes, with one line.
+				warnings, err := k.scan("Customer").save(t, projectDir)
+				require.NoError(t, err, "a copy or a rename never fails the scan")
+				if oldIsThere {
+					assert.Equal(t, `removed: dbmodels/shop/main/`+k.folder+`/Old: `+kind+` "Old" of schema "main" is no longer in the database`+"\n", warnings)
+				} else {
+					assert.Empty(t, warnings)
+				}
+				assert.NoDirExists(t, tableDir(projectDir, k.folder, "Old"))
+				assert.FileExists(t, filepath.Join(tableDir(projectDir, k.folder, c.folder), c.file), "the person's folder is still there")
+
+				// Then the tree is as it is, for as many scans as follow.
+				// (The project file holds the time its project was made, which this test's
+				// scans, each building a new project, change: the tables are what is compared.)
+				models := filepath.Join(projectDir, "dbmodels")
+				settled := hashesUnder(t, models)
+				for scan := 1; scan <= 2; scan++ {
+					warnings, err := k.scan("Customer").save(t, projectDir)
+					require.NoError(t, err, "rescan %d", scan)
+					assert.Empty(t, warnings, "rescan %d names nothing: the copy is not a table of the scan's", scan)
+					assert.Equal(t, settled, hashesUnder(t, models), "rescan %d", scan)
+				}
+			})
+		}
+	}
 }
 
 func TestOtherCatalogsOfModel(t *testing.T) {
@@ -844,14 +970,111 @@ func TestScannedServer(t *testing.T) {
 
 func TestCheckSQLitePath(t *testing.T) {
 	for _, path := range []string{"shop.db", "/data/shop#1 50%.db", `C:\data\shop.db`, ""} {
-		assert.NoError(t, CheckSQLitePath(path), path)
+		assert.NoError(t, CheckSQLitePath(path, path), path)
 	}
 	for _, path := range []string{"what?mode=rw.db", "/data/what?/shop.db", "?"} {
-		err := CheckSQLitePath(path)
+		err := CheckSQLitePath(path, path)
 		require.Error(t, err, path)
 		assert.ErrorContains(t, err, `"?"`, "the message names the character")
 		assert.ErrorContains(t, err, "rename the file")
 		assert.ErrorContains(t, err, path)
+	}
+
+	// The path the open of a source gets is the whole path of the file, which a relative
+	// --path is not: the file is checked where it is, and the message still names the path
+	// that was typed, and the file it is.
+	err := CheckSQLitePath("shop.db", "/work/what?/shop.db")
+	require.Error(t, err, "a ? in a folder above the file, which the typed path does not show")
+	assert.ErrorContains(t, err, `"?"`)
+	assert.ErrorContains(t, err, "rename the file")
+	assert.ErrorContains(t, err, `--path "shop.db"`)
+	assert.ErrorContains(t, err, "/work/what?/shop.db")
+	assert.NoError(t, CheckSQLitePath("/a?/../shop.db", "/shop.db"), "a ? that the path leaves again is not in the file's path")
+}
+
+func TestCheckScanNamesAgainstProject(t *testing.T) {
+	projectDir := t.TempDir()
+	for _, dir := range []string{"environments/dev/catalogs/shop", "environments/prod", "dbmodels/shop", "dbmodels/retail"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(projectDir, filepath.FromSlash(dir)), 0o755))
+	}
+	// A catalog in the flat place, as datatug-core also reads it, and a file where a
+	// folder of a model could be: each is a name in its folder.
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "environments", "dev", "catalogs", "crm.db.json"), []byte(`{}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "dbmodels", "Notes"), []byte(`x`), 0o600))
+
+	for _, c := range []struct{ env, id, model string }{
+		{"dev", "shop", "shop"},      // the names the project has, as they are written
+		{"prod", "shop", "retail"},   // a catalog of its own in an environment that has none
+		{"qa", "archive", "archive"}, // names that are new
+		{"dev", "crm", "crm"},        // the flat file's own name
+		{"dev", "shop2", "shop-2"},   // different by more than case
+		{"dev", "x", ""},             // no model: nothing to compare
+	} {
+		assert.NoError(t, CheckScanNamesAgainstProject(projectDir, c.env, c.id, c.model), "%+v", c)
+	}
+	assert.NoError(t, CheckScanNamesAgainstProject(filepath.Join(projectDir, "no", "such", "folder"), "DEV", "Shop", "SHOP"), "a project that is not there has no names")
+
+	for name, c := range map[string]struct {
+		env, id, model string
+		wantFlag       string
+		wantExisting   string
+	}{
+		"an environment":                   {"DEV", "shop", "shop", `--env "DEV"`, `"dev"`},
+		"a catalog":                        {"dev", "Shop", "shop", `--db "Shop"`, `catalog "shop" of environment "dev"`},
+		"a catalog in the flat place":      {"dev", "CRM", "crm", `--db "CRM"`, `catalog "crm" of environment "dev"`},
+		"a model":                          {"dev", "x", "Retail", `--dbmodel`, `database model "retail"`},
+		"a model that is a file":           {"dev", "x", "notes", `--dbmodel`, `database model "Notes"`},
+		"the environment, before the rest": {"Dev", "SHOP", "SHOP", `--env "Dev"`, `"dev"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := CheckScanNamesAgainstProject(projectDir, c.env, c.id, c.model)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, c.wantFlag)
+			assert.ErrorContains(t, err, c.wantExisting)
+			assert.ErrorContains(t, err, "differs only by case")
+			assert.ErrorContains(t, err, "one folder")
+		})
+	}
+}
+
+// A scan of one database must not take what another database of the project wrote for its
+// own, whatever the file system does with the case of a name: on one that does not tell
+// Shop from shop, the folder of the model "Shop" is the folder of the model "shop", and the
+// tables that the scan of crm does not find would go from it. The ids that differ only by
+// case from what the project has are refused before anything is written, by the function
+// that saves a scan, for any caller.
+func TestSaveScannedProject_RefusesIdsThatDifferOnlyByCaseFromTheProjects(t *testing.T) {
+	projectDir := t.TempDir()
+	_, err := rescanScan{env: "dev", tables: []*datatug.CollectionInfo{rescanTable("Customer", "id"), rescanTable("Old", "id")}}.save(t, projectDir)
+	require.NoError(t, err)
+	before := hashesUnder(t, projectDir)
+
+	for name, c := range map[string]struct{ env, id, model, flag string }{
+		"an environment": {"DEV", "shop", "shop", "--env"},
+		"a catalog":      {"dev", "Shop", "shop", "--db"},
+		"a model":        {"dev", "crm", "SHOP", "--dbmodel"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			catalog := &datatug.DbCatalog{
+				DbCatalogBase: datatug.DbCatalogBase{
+					ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: c.id}},
+					Driver:      "sqlite3", Path: "/data/crm.db", DbModel: c.model,
+				},
+				Schemas: datatug.DbSchemas{layoutSchema("main", []*datatug.CollectionInfo{rescanTable("Customer", "id")}, nil)},
+			}
+			project, err := newProjectWithDatabase("shop-project", c.env, datatug.ServerRef{Driver: "sqlite3"}, catalog)
+			require.NoError(t, err)
+			var warnings bytes.Buffer
+
+			err = SaveScannedProject(context.Background(), layoutStore(projectDir), projectDir, project,
+				ScannedCatalog{Driver: "sqlite3", Environment: c.env, ID: c.id}, &warnings)
+
+			require.Error(t, err)
+			assert.ErrorContains(t, err, c.flag)
+			assert.ErrorContains(t, err, "differs only by case")
+			assert.Empty(t, warnings.String(), "nothing was removed, so nothing was said")
+			assert.Equal(t, before, hashesUnder(t, projectDir), "nothing was written or removed, and the folder of Old is still there")
+		})
 	}
 }
 
@@ -913,11 +1136,84 @@ func TestResolveScanDbModel(t *testing.T) {
 		assert.ErrorContains(t, err, `catalog "shop" of environment "dev"`)
 	})
 
-	t.Run("the same catalog of another environment is not the one that is recorded", func(t *testing.T) {
+	// catalogFile writes the catalog file of catalog id in environment, as the nested file
+	// or as the flat one datatug-core also reads and keeps writing to when it is there.
+	writeCatalog := func(t *testing.T, projectDir, env, id string, flat bool, content string) {
+		t.Helper()
+		path := filepath.Join(projectDir, "environments", env, "catalogs", id, id+".db.json")
+		if flat {
+			path = filepath.Join(projectDir, "environments", env, "catalogs", id+".db.json")
+		}
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	}
+	modelOf := func(model string) string {
+		return `{"id":"shop","driver":"sqlite3","path":"/data/shop.db","dbModel":"` + model + `"}`
+	}
+
+	t.Run("a catalog file in the flat place is read too: the model it names is the one that is recorded", func(t *testing.T) {
+		projectDir := t.TempDir()
+		writeCatalog(t, projectDir, "dev", "shop", true, modelOf("retail"))
+		model, err := ResolveScanDbModel(projectDir, "dev", "shop", "")
+		require.NoError(t, err)
+		assert.Equal(t, "retail", model, "datatug-core keeps writing to the flat file when it is there, so the scan keeps its model")
+		_, err = ResolveScanDbModel(projectDir, "dev", "shop", "sales")
+		assert.ErrorContains(t, err, `database model "retail"`)
+		model, err = ResolveScanDbModel(projectDir, "dev", "shop", "retail")
+		require.NoError(t, err)
+		assert.Equal(t, "retail", model)
+	})
+
+	t.Run("the same catalog of another environment, with no flag, is on the model that environment records", func(t *testing.T) {
 		projectDir := scannedOnto(t, "retail")
 		model, err := ResolveScanDbModel(projectDir, "prod", "shop", "")
 		require.NoError(t, err)
-		assert.Equal(t, "shop", model)
+		assert.Equal(t, "retail", model, "one database is one model, in every environment of the project")
+	})
+
+	t.Run("the flag is the model of a catalog the project does not hold in that environment, whatever another records", func(t *testing.T) {
+		projectDir := scannedOnto(t, "retail")
+		model, err := ResolveScanDbModel(projectDir, "prod", "shop", "sales")
+		require.NoError(t, err)
+		assert.Equal(t, "sales", model)
+	})
+
+	t.Run("environments that all record the same model give it, whatever layout their files have", func(t *testing.T) {
+		projectDir := scannedOnto(t, "retail")
+		writeCatalog(t, projectDir, "local", "shop", true, modelOf("retail"))
+		model, err := ResolveScanDbModel(projectDir, "prod", "shop", "")
+		require.NoError(t, err)
+		assert.Equal(t, "retail", model)
+	})
+
+	t.Run("environments that record different models are refused, naming each", func(t *testing.T) {
+		projectDir := scannedOnto(t, "retail")
+		writeCatalog(t, projectDir, "local", "shop", false, modelOf("sales"))
+		writeCatalog(t, projectDir, "qa", "shop", true, modelOf("sales"))
+		model, err := ResolveScanDbModel(projectDir, "prod", "shop", "")
+		require.Error(t, err)
+		assert.Empty(t, model)
+		assert.ErrorContains(t, err, `catalog "shop" of environment "prod"`)
+		assert.ErrorContains(t, err, `model "retail" in environment "dev"`)
+		assert.ErrorContains(t, err, `model "sales" in environments "local", "qa"`)
+		assert.ErrorContains(t, err, "--dbmodel")
+		model, err = ResolveScanDbModel(projectDir, "prod", "shop", "retail")
+		require.NoError(t, err, "the flag settles it")
+		assert.Equal(t, "retail", model)
+	})
+
+	t.Run("what another environment records of another database, or cannot be read, or is not a model name, says nothing", func(t *testing.T) {
+		projectDir := scannedOnto(t, "retail")
+		writeCatalog(t, projectDir, "local", "crm", false, `{"id":"crm","dbModel":"crm-model"}`)
+		writeCatalog(t, projectDir, "qa", "shop", false, "not json")
+		writeCatalog(t, projectDir, "uat", "shop", false, `{"id":"shop","dbModel":"../../outside"}`)
+		require.NoError(t, os.WriteFile(filepath.Join(projectDir, "environments", "README.md"), []byte("not an environment"), 0o600))
+		model, err := ResolveScanDbModel(projectDir, "prod", "shop", "")
+		require.NoError(t, err)
+		assert.Equal(t, "retail", model, "only dev's catalog file of shop records a model")
+		model, err = ResolveScanDbModel(projectDir, "prod", "other", "")
+		require.NoError(t, err)
+		assert.Equal(t, "other", model, "a database no environment records is on the model called as it")
 	})
 
 	t.Run("a catalog file that records no usable model records nothing", func(t *testing.T) {

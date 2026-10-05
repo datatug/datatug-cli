@@ -58,19 +58,25 @@ type ScannedCatalog struct {
 // each. Nothing is written when a folder that is to be removed is, or is inside, a link.
 //
 // The environment, the catalog and the database model of the scan are names of folders
-// of the project, and one that is not a plain name (see CheckScanName) is refused
+// of the project, and one that is not a plain name (see CheckScanName), or that differs
+// only by case from one the project has (see CheckScanNamesAgainstProject), is refused
 // before anything is read, written or removed: this function removes folders, and it
 // does not take its ids on trust from whoever calls it.
 func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, projectDir string, project *datatug.Project, scanned ScannedCatalog, warnings io.Writer) error {
 	server, catalog := findScannedCatalog(project, scanned)
 	names := []struct{ flag, value string }{{"--env", scanned.Environment}, {"--db", scanned.ID}}
+	model := ""
 	if catalog != nil {
-		names = append(names, struct{ flag, value string }{"--dbmodel", catalog.DbModel})
+		model = catalog.DbModel
+		names = append(names, struct{ flag, value string }{"--dbmodel", model})
 	}
 	for _, name := range names {
 		if err := CheckScanName(name.flag, name.value); err != nil {
 			return err
 		}
+	}
+	if err := CheckScanNamesAgainstProject(projectDir, scanned.Environment, scanned.ID, model); err != nil {
+		return err
 	}
 	var layout scannedLayout
 	var retractions []retraction

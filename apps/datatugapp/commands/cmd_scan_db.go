@@ -52,16 +52,27 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	// A database file whose path has a "?" in it is read by the scan and not opened
-	// again by the project: it is refused now, before the project is looked at.
-	if v.Driver == dbconnection.DriverSQLite3 {
-		if err := api.CheckSQLitePath(v.Path); err != nil {
+	// again by the project: it is refused now, before the project is looked at. The path
+	// that is looked at is the whole path of the file, which a relative --path is not.
+	if v.Driver == dbconnection.DriverSQLite3 && v.Path != "" {
+		absolutePath, absErr := scanFilepathAbs(v.Path)
+		if absErr != nil {
+			return fmt.Errorf("cannot tell where --path %q is: %w", v.Path, absErr)
+		}
+		if err := api.CheckSQLitePath(v.Path, absolutePath); err != nil {
 			return err
 		}
 	}
 	// A database the project already holds stays on its model: a scan without --dbmodel
-	// keeps it, and one that names another is refused, naming both.
+	// keeps it, and one that names another is refused, naming both. The same database in
+	// another environment is on the model the other environments record for it.
 	var err error
 	if v.DbModel, err = api.ResolveScanDbModel(v.ProjectDir, v.Environment, v.Database, v.DbModel); err != nil {
+		return err
+	}
+	// A name that differs only by case from one the project has is one folder on some
+	// file systems: it is refused now, before the database is read.
+	if err = api.CheckScanNamesAgainstProject(v.ProjectDir, v.Environment, v.Database, v.DbModel); err != nil {
 		return err
 	}
 	// A project folder that is not there is made, once the scan has read something: a
@@ -280,9 +291,9 @@ func scanCommandArgs() *cobra.Command {
 	flags.StringP("user", "U", "", "DB login user")
 	flags.StringP("password", "P", "", "DB login password")
 	flags.String("db", "", "ID of database to scan: a plain name, as it is the name of a folder of the project (for sqlserver also the name of the database on the server)")
-	flags.String("dbmodel", "", "ID of DB model: a plain name (default: the model the project already records for the database in this environment, else the ID of the database)")
+	flags.String("dbmodel", "", "ID of DB model: a plain name (default: the model the project already records for the database in this environment, else the model the other environments record for it when they agree, else the ID of the database)")
 	flags.String("env", "", "Environment the DB belongs to: a plain name. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.")
-	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3); it must exist, and its path must have no \"?\" in it")
+	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3); it must exist, and its whole path (from the working directory, for a relative one) must have no \"?\" in it")
 	flags.String("dsn-env", "", "Environment variable that holds the PostgreSQL connection URL, for -D postgres (not available in this release: a project cannot record a postgres server yet). The password stays in the variable and is never written to the project. The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
 	_ = cmd.MarkFlagRequired("db")
 	_ = cmd.MarkFlagRequired("env")

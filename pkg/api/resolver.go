@@ -134,9 +134,9 @@ func ListSources(ctx context.Context, projStore datatug.ProjectStore, projectDir
 }
 
 // catalogSources enumerates every catalog registered under environment
-// (SQL and inGitDB drivers only — the two schemes sourceURLFromCatalog
-// opens), each exposed under both its DbModel and its own catalog ID (see
-// ResolvedSource's doc comment).
+// whose driver sourceURLFromCatalog resolves (sqlite3, ingitdb, openvaultdb
+// and postgres), each exposed under both its DbModel and its own catalog ID
+// (see ResolvedSource's doc comment).
 //
 // It lists catalogs via ProjectStore.LoadEnvDbCatalogs rather than walking
 // env.DbServers[].Catalogs: datatug-core's filestore implementation
@@ -148,8 +148,9 @@ func ListSources(ctx context.Context, projStore datatug.ProjectStore, projectDir
 // finds nothing whenever an EnvDbServer record's own Catalogs list is
 // empty or stale, even though the catalog itself loads fine — verified
 // against this package's own resolver_test.go fixture. A catalog whose
-// driver sourceURLFromCatalog does not support (e.g. a future postgres3
-// catalog) is skipped rather than failing the whole listing.
+// driver sourceURLFromCatalog does not support (e.g. a future oracle
+// catalog), or whose path or environment variable does not resolve, is
+// skipped rather than failing the whole listing.
 func catalogSources(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string) ([]ResolvedSource, error) {
 	catalogs, err := projStore.LoadEnvDbCatalogs(ctx, environment)
 	if err != nil {

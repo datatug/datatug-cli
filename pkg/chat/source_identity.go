@@ -18,9 +18,17 @@ import (
 // is found by its ID, and the display form is only compared with what is stored.
 
 // previousIdentity is how the store identified a scope before the sources in it
-// became their display form, the way main computed it: the sources passed through
-// dbcopy.RedactSourceURL, hashed with the environment, the database and the access
-// fingerprint. It is frozen on purpose: it is what an existing chat store holds.
+// became their display form, the way main computed it (5778d72): the sources
+// passed through dbcopy.RedactSourceURL, then dbcopy.SourceScopeIdentity (which
+// adds the destination hash of an env:NAME source), hashed with the environment,
+// the database and the access fingerprint. It is what an existing chat store
+// holds.
+//
+// It calls the live RedactSourceURL, which this change altered for two shapes of
+// a path-scheme source: an empty user name before the colon, and a wrapped URL
+// whose userinfo reads as a host. Parse refuses both now, so no chat opens a
+// source of either shape, and a store written under one of them is not looked
+// for. Every other shape is held by the goldens in source_identity_test.go.
 type previousIdentity struct {
 	// scope is the hash a session of that store was stored under.
 	scope string
@@ -29,18 +37,18 @@ type previousIdentity struct {
 }
 
 func previousScopeIdentity(scope ChatScope) previousIdentity {
-	sources := make(map[string]string, len(scope.Sources))
+	redacted := make(map[string]string, len(scope.Sources))
 	for id, source := range scope.Sources {
-		sources[id] = dbcopy.RedactSourceURL(source)
+		redacted[id] = dbcopy.RedactSourceURL(source)
 	}
 	encoded, _ := json.Marshal(struct {
 		Environment       string
 		Database          string
 		AccessFingerprint string
 		Sources           map[string]string
-	}{scope.Environment, scope.Database, scope.AccessFingerprint, sources})
+	}{scope.Environment, scope.Database, scope.AccessFingerprint, scopeIdentitySources(redacted)})
 	sum := sha256.Sum256(encoded)
-	return previousIdentity{scope: hex.EncodeToString(sum[:]), selected: sources[scope.Database]}
+	return previousIdentity{scope: hex.EncodeToString(sum[:]), selected: redacted[scope.Database]}
 }
 
 // previousScope is the scope hash main wrote for scope.

@@ -30,25 +30,55 @@ func identityScope(sources map[string]string) ChatScope {
 	return ChatScope{ProjectID: "demo-project", Environment: "local", Database: "db", AccessFingerprint: "admin-policy-v1", Sources: sources}
 }
 
-// The scope hashes the store on main (61a21bd) wrote for these scopes, read from
-// a session stored by that code. previousScope must keep producing them: they are
-// what an existing chat store holds.
+// The scope hashes the store on main wrote for these scopes, read from a session
+// stored by that code (the first three by 61a21bd, the env ones by 5778d72, which
+// added the destination hash of an env:NAME source). previousScope must keep
+// producing them: they are what an existing chat store holds. env is the
+// environment the store was opened in, and sameAsNow says whether the identity
+// this code computes is the same hash, so there is nothing to move.
 var previousScopeGoldens = []struct {
-	name    string
-	sources map[string]string
-	golden  string
+	name      string
+	sources   map[string]string
+	env       map[string]string
+	golden    string
+	sameAsNow bool
 }{
-	{"a path with a hash", map[string]string{"db": "sqlite:///chinook.db", "recordset": "ingitdb:///tmp/a#b/data/ingitdb", "http": "http:///tmp/a#b"}, "515d7b89a35dc405bba5f94cde3439ec9d592e02bc35ec04a9792595533df89e"},
-	{"a secret in the query", map[string]string{"db": "sqlite:///chinook.db", "private": "sqlite:///private.db?token=secret"}, "59cd3145c35f611941f6309367448994a103b8d3765b709f9c23f4bdc7f49860"},
-	{"nothing to hide", map[string]string{"db": "sqlite:///chinook.db"}, "55deb21c421094638d3158498a52927fd0e5644e949ffb79c68534cfae343a4c"},
+	{"a path with a hash", map[string]string{"db": "sqlite:///chinook.db", "recordset": "ingitdb:///tmp/a#b/data/ingitdb", "http": "http:///tmp/a#b"}, nil, "515d7b89a35dc405bba5f94cde3439ec9d592e02bc35ec04a9792595533df89e", false},
+	{"a secret in the query", map[string]string{"db": "sqlite:///chinook.db", "private": "sqlite:///private.db?token=secret"}, nil, "59cd3145c35f611941f6309367448994a103b8d3765b709f9c23f4bdc7f49860", false},
+	{"nothing to hide", map[string]string{"db": "sqlite:///chinook.db"}, nil, "55deb21c421094638d3158498a52927fd0e5644e949ffb79c68534cfae343a4c", true},
+	{"an env source", map[string]string{"db": "sqlite:///chinook.db", "shop": "env:DT0C_GOLDEN_PG"}, goldenEnv, "5bd5d0ac41133f1a87bab40ee90d7e1184e0fc84edce11384ef8d88b327914a0", true},
+	{"an env source and a lossy source", map[string]string{"db": "sqlite:///chinook.db", "shop": "env:DT0C_GOLDEN_PG", "recordset": "ingitdb:///tmp/a#b/data/ingitdb"}, goldenEnv, "bed2dd6e52d1d6e4c5d95e1f4542633bcbeed242291db1d7bf43ea614177581b", false},
+	{"an env source that is not set", map[string]string{"db": "sqlite:///chinook.db", "gone": "env:DT0C_GOLDEN_UNSET"}, nil, "2eead47c393d046ac810fab2a1e84617d605155f4a439ac7d1d7b657cd59dbd8", true},
 }
 
+// goldenEnv is the variable the env goldens were computed with; its password is
+// not part of any identity.
+var goldenEnv = map[string]string{"DT0C_GOLDEN_PG": "postgres://alice:s3cret@db-a.example.com:5432/shop"}
+
 func TestPreviousScope_IsTheHashTheStoreWroteOnMain(t *testing.T) {
-	t.Parallel()
 	for _, tc := range previousScopeGoldens {
+		for name, value := range tc.env {
+			t.Setenv(name, value)
+		}
 		if got := previousScope(identityScope(tc.sources)); got != tc.golden {
 			t.Errorf("%s: previousScope = %s, want %s", tc.name, got, tc.golden)
 		}
+	}
+}
+
+// An env source keeps main's identity under a rotated password and moves with
+// the database the variable points at: previousScope hashes what main hashed.
+func TestPreviousScope_FollowsWhereAnEnvSourcePoints(t *testing.T) {
+	sources := map[string]string{"shop": "env:DT0C_GOLDEN_PG"}
+	t.Setenv("DT0C_GOLDEN_PG", "postgres://alice:s3cret@db-a.example.com:5432/shop")
+	original := previousScope(identityScope(sources))
+	t.Setenv("DT0C_GOLDEN_PG", "postgres://alice:rotated@db-a.example.com:5432/shop")
+	if got := previousScope(identityScope(sources)); got != original {
+		t.Errorf("a rotated password changed the previous scope: %s != %s", got, original)
+	}
+	t.Setenv("DT0C_GOLDEN_PG", "postgres://alice:s3cret@db-b.example.com:5432/shop")
+	if got := previousScope(identityScope(sources)); got == original {
+		t.Error("repointing the variable kept the previous scope")
 	}
 }
 
@@ -59,12 +89,15 @@ func TestOpenSessionStore_MovesWhatThePreviousScopeIdentityHeld(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range previousScopeGoldens {
 		t.Run(tc.name, func(t *testing.T) {
+			for name, value := range tc.env {
+				t.Setenv(name, value)
+			}
 			path := testStorePath(t)
 			scope := identityScope(tc.sources)
 			store := openTestStore(t, path, scope)
 			unchanged := store.scope == tc.golden
-			if want := tc.name == "nothing to hide"; unchanged != want {
-				t.Fatalf("the scope hash equals main's: %v, want %v", unchanged, want)
+			if unchanged != tc.sameAsNow {
+				t.Fatalf("the scope hash equals main's: %v, want %v", unchanged, tc.sameAsNow)
 			}
 			// What the older store left behind, written under its own hash.
 			for _, statement := range []string{

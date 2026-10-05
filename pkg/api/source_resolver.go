@@ -85,8 +85,38 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
 		return dbcopy.LocalSourceURL("ingitdb", path), nil
+	case DriverPostgres:
+		// The catalog's path names a connection descriptor, a project file that
+		// names an environment variable and nothing else; the variable holds the
+		// connection URL, password included. The source is "env:NAME", so no
+		// project file and no message ever holds the URL.
+		if catalog.Path == "" {
+			return "", fmt.Errorf("catalog %q has no connection descriptor path configured for its postgres driver", catalog.ID)
+		}
+		path, err := ResolveCatalogPath(projDir, catalog.Path)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		descriptor, err := dbcopy.ReadPostgresDescriptor(path)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		// The variable must hold a postgres URL: a catalog labelled postgres whose
+		// variable held a sqlite or http source would otherwise be opened as that
+		// engine while policy naming still used the postgres label. Resolving it
+		// also refuses a variable that is not set. No error names the value, only
+		// the variable and the scheme.
+		source := descriptor.SourceURL()
+		ref, err := dbcopyParse(source)
+		if err != nil {
+			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+		}
+		if ref.Scheme != DriverPostgres {
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a postgres:// URL, not a %s source", catalog.ID, descriptor.DSNEnv, ref.Scheme)
+		}
+		return source, nil
 	default:
-		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb or openvaultdb)", catalog.Driver)
+		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb or postgres)", catalog.Driver)
 	}
 }
 

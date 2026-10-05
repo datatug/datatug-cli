@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/posthog/posthog-go"
-	"github.com/strongo/cli-helpers/fsutil"
 	"github.com/strongo/logus"
 	"github.com/strongo/random"
 	"gopkg.in/yaml.v3"
@@ -36,7 +35,7 @@ type yamlEncoder interface {
 
 // seams for testing
 var (
-	getPostHogApiKeyFromServerFunc = getPostHogApiKeyFromServer
+	getPostHogApiKeyFromServerFunc = fetchPostHogApiKey
 	posthogNewWithConfig           = newClientFromConfig
 	osCreate                       = os.Create
 	httpDoRequest                  = func(req *http.Request) (*http.Response, error) {
@@ -150,8 +149,15 @@ func getPostHogClient() posthog.Client {
 	return client
 }
 
+var errNoStateFolder = errors.New("the home folder cannot be resolved")
+
 func writePostHogConfigToFile(ctx context.Context, config posthogConfig) error {
-	file, err := osCreate(getPosthogConfigFilePath())
+	path := getPosthogConfigFilePath()
+	if path == "" {
+		logus.Warningf(ctx, "Not writing the PostHog config file: %v", errNoStateFolder)
+		return errNoStateFolder
+	}
+	file, err := osCreate(path)
 	if err != nil {
 		logus.Errorf(ctx, "Failed to create PostHog config file: %v", err)
 	} else {
@@ -164,6 +170,16 @@ func writePostHogConfigToFile(ctx context.Context, config posthogConfig) error {
 		}
 	}
 	return err
+}
+
+// fetchPostHogApiKey is the default of getPostHogApiKeyFromServerFunc. It
+// refuses in a test binary, before any request: a test that reaches it would
+// make a real request to raw.githubusercontent.com, so it fails instead.
+func fetchPostHogApiKey() (string, error) {
+	if inTestBinary() {
+		panic("dtlog: the PostHog API key must not be fetched in a test binary; fake getPostHogApiKeyFromServerFunc")
+	}
+	return getPostHogApiKeyFromServer()
 }
 
 func getPostHogApiKeyFromServer() (string, error) {
@@ -198,6 +214,9 @@ func getPostHogApiKeyFromServer() (string, error) {
 
 func readPostHogConfig() (c posthogConfig) {
 	name := getPosthogConfigFilePath()
+	if name == "" {
+		return
+	}
 	data, err := os.ReadFile(name)
 	if err != nil {
 		ctx := context.Background()
@@ -210,8 +229,10 @@ func readPostHogConfig() (c posthogConfig) {
 	return
 }
 
+// getPosthogConfigFilePath is "" when the home folder cannot be resolved: the
+// callers then read and create nothing.
 var getPosthogConfigFilePath = func() string {
-	return fsutil.ExpandHome("~/datatug/.posthog.yaml")
+	return stateFile(".posthog.yaml")
 }
 
 func ScreenOpened(id, name string) {

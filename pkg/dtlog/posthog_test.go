@@ -282,5 +282,11 @@ func TestGetPostHogClient_WriteConfigError(t *testing.T) {
 		posthogNewWithConfig = oldNewClient
 	}()
 
+	// The key fetch is faked: without this the test made a real request to
+	// raw.githubusercontent.com (the default now panics in a test binary).
+	oldFetch := getPostHogApiKeyFromServerFunc
+	getPostHogApiKeyFromServerFunc = func() (string, error) { return "test-key", nil }
+	defer func() { getPostHogApiKeyFromServerFunc = oldFetch }()
+
 	_ = getPostHogClient()
 }

@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/posthog/posthog-go"
 	"github.com/stretchr/testify/assert"
@@ -60,12 +61,12 @@ func resetState(t *testing.T) {
 	mu.Lock()
 	oldPh, oldInit, oldStarted, oldQueue, oldID, oldSession := ph, initialized, started, queue, posthogDistinctID, sessionID
 	mu.Unlock()
-	oldShown := noticeShownThisRun.Load()
+	oldShown := heldBackThisRun.Load()
 	t.Cleanup(func() {
 		mu.Lock()
 		ph, initialized, started, queue, posthogDistinctID, sessionID = oldPh, oldInit, oldStarted, oldQueue, oldID, oldSession
 		mu.Unlock()
-		noticeShownThisRun.Store(oldShown)
+		heldBackThisRun.Store(oldShown)
 	})
 }
 
@@ -80,6 +81,16 @@ func TestEnabled_Matrix(t *testing.T) {
 		"nothing set":                   {vars{}, true},
 		"telemetry 1":                   {vars{telemetry: "1"}, true},
 		"telemetry on":                  {vars{telemetry: "on"}, true},
+		"telemetry yes":                 {vars{telemetry: "yes"}, true},
+		"telemetry TRUE":                {vars{telemetry: "TRUE"}, true},
+		"telemetry true padded":         {vars{telemetry: " true "}, true},
+		"telemetry blank":               {vars{telemetry: "  "}, true},
+		"telemetry no":                  {vars{telemetry: "no"}, false},
+		"telemetry n":                   {vars{telemetry: "n"}, false},
+		"telemetry disabled":            {vars{telemetry: "disabled"}, false},
+		"telemetry never":               {vars{telemetry: "never"}, false},
+		"telemetry typo of":             {vars{telemetry: "of"}, false},
+		"telemetry garbage":             {vars{telemetry: "garbage"}, false},
 		"telemetry 0":                   {vars{telemetry: "0"}, false},
 		"telemetry false":               {vars{telemetry: "false"}, false},
 		"telemetry off":                 {vars{telemetry: "off"}, false},
@@ -102,7 +113,7 @@ func TestEnabled_Matrix(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			resetState(t)
-			noticeShownThisRun.Store(false)
+			heldBackThisRun.Store(false)
 			t.Setenv(EnvTelemetry, tc.vars.telemetry)
 			t.Setenv(EnvDoNotTrack, tc.vars.doNotTrack)
 			t.Setenv(EnvCI, tc.vars.ci)
@@ -113,19 +124,19 @@ func TestEnabled_Matrix(t *testing.T) {
 
 func TestEnabled_FalseOnTheRunThatPrintedTheNotice(t *testing.T) {
 	resetState(t)
-	noticeShownThisRun.Store(true)
+	heldBackThisRun.Store(true)
 	assert.False(t, Enabled())
 }
 
 // Every variable turns every sender off: no client, no queue, no request, no file.
 func TestOff_NoSenderTouchesAnything(t *testing.T) {
 	for _, tc := range []struct{ name, value string }{
-		{EnvTelemetry, "0"}, {EnvTelemetry, "false"}, {EnvTelemetry, "off"},
+		{EnvTelemetry, "0"}, {EnvTelemetry, "false"}, {EnvTelemetry, "off"}, {EnvTelemetry, "no"}, {EnvTelemetry, "typo"},
 		{EnvDoNotTrack, "1"}, {EnvCI, "true"},
 	} {
 		t.Run(tc.name+"="+tc.value, func(t *testing.T) {
 			resetState(t)
-			noticeShownThisRun.Store(false)
+			heldBackThisRun.Store(false)
 			touched := noSender(t)
 			t.Setenv(tc.name, tc.value)
 			mock := &mockPosthogClient{}
@@ -135,7 +146,7 @@ func TestOff_NoSenderTouchesAnything(t *testing.T) {
 
 			// A whole run, as main drives it.
 			var stderr bytes.Buffer
-			ShowNoticeOnce(&stderr)
+			ShowNoticeOnce(&stderr, true)
 			Start()
 			Enqueue(StartedEvent())
 			ScreenOpened("viewers/sqlite", "SQLite Viewer")
@@ -166,13 +177,13 @@ func TestOff_NoSenderTouchesAnything(t *testing.T) {
 func TestNoticeRun_SendsNothing(t *testing.T) {
 	resetState(t)
 	touched := noSender(t)
-	noticeShownThisRun.Store(false)
+	heldBackThisRun.Store(false)
 	mock := &mockPosthogClient{}
 	mu.Lock()
 	started, initialized, ph, queue = false, false, nil, nil
 	mu.Unlock()
 
-	ShowNoticeOnce(&bytes.Buffer{})
+	ShowNoticeOnce(&bytes.Buffer{}, true)
 	Start()
 	Enqueue(StartedEvent())
 	mu.Lock()
@@ -201,7 +212,7 @@ func TestExportedAPIIsClassified(t *testing.T) {
 		"StartedEvent":    "builds an event",
 		"ExitedEvent":     "builds an event",
 		"PanicEvent":      "builds an event",
-		"NoticeText":      "const",
+		"Notice":          "builds the notice text",
 		"EnvTelemetry":    "const",
 		"EnvDoNotTrack":   "const",
 		"EnvCI":           "const",
@@ -272,6 +283,8 @@ func TestClientIsReachedOnlyThroughTheGate(t *testing.T) {
 					case "posthogNewWithConfig":
 						sawNew = true
 						assert.Equal(t, "getPostHogClient", fn.Name.Name, "a client may be created only by getPostHogClient")
+					case "newPosthogClient":
+						assert.Equal(t, "newClientFromConfig", fn.Name.Name, "the SDK's constructor may be called only by newClientFromConfig")
 					case "getPostHogClient":
 						sawGet = true
 						assert.Equal(t, "Start", fn.Name.Name, "getPostHogClient may be called only from Start, which asks Enabled")
@@ -282,6 +295,50 @@ func TestClientIsReachedOnlyThroughTheGate(t *testing.T) {
 		}
 	}
 	assert.True(t, sawEnqueue && sawNew && sawGet, "the scan found nothing to check: has the code been renamed?")
+}
+
+// The SDK's constructors (posthog.New, posthog.NewWithConfig) are named once in
+// this package, as the default of the newPosthogClient seam: a function that
+// called either directly would create a client around the gate. Anywhere,
+// in a function or a variable, a mention fails.
+func TestSDKConstructorsAreNamedOnlyByTheSeam(t *testing.T) {
+	mentions := 0
+	for _, f := range parsePackage(t, ".") {
+		allowed := map[ast.Node]bool{}
+		for _, decl := range f.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				if vs, ok := spec.(*ast.ValueSpec); ok && len(vs.Names) == 1 && vs.Names[0].Name == "newPosthogClient" {
+					for _, v := range vs.Values {
+						allowed[v] = true
+					}
+				}
+			}
+		}
+		var walk func(n ast.Node, ok bool)
+		walk = func(n ast.Node, inSeam bool) {
+			ast.Inspect(n, func(c ast.Node) bool {
+				if c != n && allowed[c] {
+					walk(c, true)
+					return false
+				}
+				sel, isSel := c.(*ast.SelectorExpr)
+				if !isSel {
+					return true
+				}
+				if id, isID := sel.X.(*ast.Ident); isID && id.Name == "posthog" && (sel.Sel.Name == "New" || sel.Sel.Name == "NewWithConfig") {
+					mentions++
+					assert.True(t, inSeam, "posthog.%s is named outside the newPosthogClient seam: a client must be created only through newClientFromConfig", sel.Sel.Name)
+				}
+				return true
+			})
+		}
+		walk(f, false)
+	}
+	assert.Equal(t, 1, mentions, "the scan found the seam once: has the code been renamed?")
 }
 
 // Nothing outside this package may import the PostHog client: it can only
@@ -321,15 +378,20 @@ func TestNoOtherPackageImportsPostHog(t *testing.T) {
 
 func parsePackage(t *testing.T, dir string) []*ast.File {
 	t.Helper()
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
+	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
+	fset := token.NewFileSet()
 	var files []*ast.File
-	for _, pkg := range pkgs {
-		for _, f := range pkg.Files {
-			files = append(files, f)
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
 		}
+		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
+		require.NoError(t, err)
+		files = append(files, f)
 	}
+	require.NotEmpty(t, files)
 	return files
 }
 
@@ -358,36 +420,66 @@ func TestRealClientIsCreatedOutsideATestBinary(t *testing.T) {
 // --- items 2 and 3: the notice ---
 
 func TestNotice_AtMostSixLinesAndSaysWhatItMust(t *testing.T) {
-	lines := strings.Split(strings.TrimRight(NoticeText, "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(Notice(runtime.GOOS), "\n"), "\n")
 	assert.LessOrEqual(t, len(lines), 6)
 	for _, want := range []string{
 		EventStarted, EventExited, EventScreen, "crash",
 		"No database content, query text, path, host or credential",
-		"export " + EnvTelemetry + "=0", EnvDoNotTrack, EnvCI,
+		EnvDoNotTrack, EnvCI, "shell profile",
+		"a random install id", "session id", "DataTug version", "screen's name", "Go type of the error",
 	} {
-		assert.Contains(t, NoticeText, want)
+		assert.Contains(t, Notice("linux"), want)
 	}
-	assert.True(t, strings.HasSuffix(NoticeText, "\n"))
+	assert.Contains(t, Notice("linux"), "export "+EnvTelemetry+"=0")
+	assert.NotContains(t, Notice("linux"), "setx")
+	assert.True(t, strings.HasSuffix(Notice("linux"), "\n"))
+}
+
+// Windows has no export, and a variable set in one window is gone in the next:
+// the line that turns telemetry off for good is setx there.
+func TestNotice_WindowsGivesSetxNotExport(t *testing.T) {
+	text := Notice("windows")
+	assert.Contains(t, text, "setx "+EnvTelemetry+" 0")
+	assert.NotContains(t, text, "export")
+	assert.LessOrEqual(t, len(strings.Split(strings.TrimRight(text, "\n"), "\n")), 6)
+	assert.Contains(t, text, EventStarted)
+}
+
+// The notice names a field only when the event carries it (the wire tests pin
+// each event's fields): the DataTug version is on the screen event alone, the
+// session on the three events but not the crash report.
+func TestNotice_FieldClaimsMatchTheEvents(t *testing.T) {
+	prepareFixture(t)
+	_, started := wire(t, StartedEvent())
+	_, screen := wire(t, screenEvent("viewers", "Viewers"))
+	_, crash := wire(t, capturePanic("x"))
+	assert.NotContains(t, started, "$app_version", "the notice says only a screen event adds the DataTug version")
+	assert.Contains(t, screen, "$app_version")
+	assert.Contains(t, started, "$session_id")
+	assert.Contains(t, screen, "$session_id")
+	assert.NotContains(t, crash, "$session_id", "the notice says a crash report adds no session")
+	assert.Contains(t, Notice("linux"), "Started, exited and screen events add a session id")
+	assert.Contains(t, Notice("linux"), "a screen event adds the DataTug version")
 }
 
 func TestShowNoticeOnce_FirstRunPrintsMarksAndHoldsBack(t *testing.T) {
 	resetState(t)
-	noticeShownThisRun.Store(false)
+	heldBackThisRun.Store(false)
 	marker := filepath.Join(t.TempDir(), "datatug", ".telemetry-notice-shown")
 	oldPath := noticeMarkerPath
 	noticeMarkerPath = func() string { return marker }
 	defer func() { noticeMarkerPath = oldPath }()
 
 	var first bytes.Buffer
-	ShowNoticeOnce(&first)
-	assert.Equal(t, NoticeText, first.String())
+	ShowNoticeOnce(&first, true)
+	assert.Equal(t, Notice(runtime.GOOS), first.String())
 	assert.FileExists(t, marker)
 	assert.False(t, Enabled(), "nothing is sent on the run that printed the notice")
 
 	// The next run: the marker exists, no notice, telemetry on.
-	noticeShownThisRun.Store(false)
+	heldBackThisRun.Store(false)
 	var second bytes.Buffer
-	ShowNoticeOnce(&second)
+	ShowNoticeOnce(&second, true)
 	assert.Empty(t, second.String())
 	assert.True(t, Enabled())
 }
@@ -402,11 +494,11 @@ func TestShowNoticeOnce_UnwritableMarkerPrintsAgainAndDoesNotFail(t *testing.T) 
 			noSender(t)
 			fail()
 			var first, second bytes.Buffer
-			ShowNoticeOnce(&first)
-			noticeShownThisRun.Store(false)
-			ShowNoticeOnce(&second)
-			assert.Equal(t, NoticeText, first.String())
-			assert.Equal(t, NoticeText, second.String(), "an unwritten marker means the notice is printed again")
+			ShowNoticeOnce(&first, true)
+			heldBackThisRun.Store(false)
+			ShowNoticeOnce(&second, true)
+			assert.Equal(t, Notice(runtime.GOOS), first.String())
+			assert.Equal(t, Notice(runtime.GOOS), second.String(), "an unwritten marker means the notice is printed again")
 			assert.False(t, Enabled())
 		})
 	}
@@ -414,6 +506,166 @@ func TestShowNoticeOnce_UnwritableMarkerPrintsAgainAndDoesNotFail(t *testing.T) 
 
 func TestNoticeMarkerPath_IsInTheCLIStateFolder(t *testing.T) {
 	assert.True(t, strings.HasSuffix(filepath.ToSlash(noticeMarkerPath()), "/datatug/.telemetry-notice-shown"), noticeMarkerPath())
+	assert.True(t, filepath.IsAbs(noticeMarkerPath()))
+}
+
+func TestStateFile_NeedsAnAbsoluteHome(t *testing.T) {
+	old := userHomeDir
+	defer func() { userHomeDir = old }()
+	abs := t.TempDir()
+	for name, tc := range map[string]struct {
+		home string
+		err  error
+		want string
+	}{
+		"resolved":   {home: abs, want: filepath.Join(abs, "datatug", "f")},
+		"error":      {err: errors.New("$HOME is not defined"), want: ""},
+		"empty":      {home: "", want: ""},
+		"relative":   {home: "some/dir", want: ""},
+		"tilde text": {home: "~", want: ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			userHomeDir = func() (string, error) { return tc.home, tc.err }
+			assert.Equal(t, tc.want, stateFile("f"))
+		})
+	}
+}
+
+// With no home folder (a service without User=, a container) the first run
+// creates nothing, in the working directory or anywhere, and sends nothing.
+// Before this was fixed it created a folder named "~" in the working directory.
+func TestShowNoticeOnce_HomeUnresolvedCreatesNothingAndSendsNothing(t *testing.T) {
+	resetState(t)
+	heldBackThisRun.Store(false)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("home", "")
+	assert.Empty(t, noticeMarkerPath(), "the real home cannot be resolved here")
+
+	var out bytes.Buffer
+	ShowNoticeOnce(&out, true)
+
+	entries, err := os.ReadDir(cwd)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "nothing may be created in the working directory")
+	assert.Equal(t, Notice(runtime.GOOS), out.String(), "a person at a terminal is still told")
+	assert.False(t, Enabled(), "nothing is sent on a run that could not record the notice")
+
+	// Nor does the configuration file of the client.
+	assert.Empty(t, getPosthogConfigFilePath())
+	assert.Equal(t, posthogConfig{}, readPostHogConfig())
+	err = writePostHogConfigToFile(t.Context(), posthogConfig{ApiKey: "k"})
+	assert.ErrorIs(t, err, errNoStateFolder)
+	entries, err = os.ReadDir(cwd)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
+}
+
+func TestWritePostHogConfig_NeverCreatesAFileWithoutAPath(t *testing.T) {
+	touched := noSender(t)
+	old := getPosthogConfigFilePath
+	getPosthogConfigFilePath = func() string { return "" }
+	defer func() { getPosthogConfigFilePath = old }()
+	assert.ErrorIs(t, writePostHogConfigToFile(t.Context(), posthogConfig{}), errNoStateFolder)
+	assert.NotContains(t, *touched, "config file")
+}
+
+// A run whose stderr nobody reads (a script, a service, shell completion with
+// 2>/dev/null) prints nothing, records nothing and sends nothing: the notice
+// waits for the first run in a terminal.
+func TestShowNoticeOnce_NotATerminalPrintsAndRecordsNothingAndSendsNothing(t *testing.T) {
+	resetState(t)
+	heldBackThisRun.Store(false)
+	touched := noSender(t)
+	var out bytes.Buffer
+
+	ShowNoticeOnce(&out, false)
+
+	assert.Empty(t, out.String())
+	assert.NotContains(t, *touched, "marker dir")
+	assert.NotContains(t, *touched, "marker write")
+	assert.False(t, Enabled())
+
+	// The first run in a terminal then prints and records it.
+	heldBackThisRun.Store(false)
+	ShowNoticeOnce(&out, true)
+	assert.Equal(t, Notice(runtime.GOOS), out.String())
+	assert.Contains(t, *touched, "marker write")
+}
+
+// A person who was told earlier is measured on a run with stderr discarded.
+func TestShowNoticeOnce_MarkerExistsAndNotATerminalStaysOn(t *testing.T) {
+	resetState(t)
+	heldBackThisRun.Store(false)
+	marker := filepath.Join(t.TempDir(), ".telemetry-notice-shown")
+	require.NoError(t, os.WriteFile(marker, nil, 0o600))
+	oldPath := noticeMarkerPath
+	noticeMarkerPath = func() string { return marker }
+	defer func() { noticeMarkerPath = oldPath }()
+	var out bytes.Buffer
+
+	ShowNoticeOnce(&out, false)
+
+	assert.Empty(t, out.String())
+	assert.True(t, Enabled())
+}
+
+// The second run, end to end in this package: the marker exists, no notice, and
+// the started event reaches the client.
+func TestSecondRun_SendsTheStartedEvent(t *testing.T) {
+	resetState(t)
+	heldBackThisRun.Store(false)
+	marker := filepath.Join(t.TempDir(), ".telemetry-notice-shown")
+	require.NoError(t, os.WriteFile(marker, nil, 0o600))
+	oldPath := noticeMarkerPath
+	noticeMarkerPath = func() string { return marker }
+	defer func() { noticeMarkerPath = oldPath }()
+	_, restoreConfig := withTempConfig(t, "api_key: k\ndistinct_id: install-id\n")
+	defer restoreConfig()
+	mock := &mockPosthogClient{}
+	oldFetch, oldNew := getPostHogApiKeyFromServerFunc, posthogNewWithConfig
+	defer func() { getPostHogApiKeyFromServerFunc, posthogNewWithConfig = oldFetch, oldNew }()
+	getPostHogApiKeyFromServerFunc = func() (string, error) { return "", errors.New("not fetched") }
+	posthogNewWithConfig = func(string, posthog.Config) (posthog.Client, error) { return mock, nil }
+	mu.Lock()
+	started, initialized, ph, queue = false, false, nil, nil
+	mu.Unlock()
+
+	var out bytes.Buffer
+	ShowNoticeOnce(&out, true)
+	Start()
+	Enqueue(StartedEvent())
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		done := initialized
+		mu.Unlock()
+		if done || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	assert.Empty(t, out.String())
+	require.Len(t, mock.enqueued, 1)
+	assert.Equal(t, EventStarted, mock.enqueued[0].(posthog.Capture).Event)
+}
+
+// Neither real sender can run in a test binary: the key fetch refuses before
+// any request, the client refuses before any event.
+func TestTheKeyFetchCannotRunInATestBinary(t *testing.T) {
+	assert.Panics(t, func() { _, _ = fetchPostHogApiKey() })
+}
+
+func TestTheKeyFetchRunsOutsideATestBinary(t *testing.T) {
+	oldIn, oldDo := inTestBinary, httpDoRequest
+	defer func() { inTestBinary, httpDoRequest = oldIn, oldDo }()
+	inTestBinary = func() bool { return false }
+	httpDoRequest = func(*http.Request) (*http.Response, error) { return nil, errors.New("offline") }
+	_, err := fetchPostHogApiKey()
+	assert.Error(t, err)
 }
 
 // --- item 4: what is sent is what the notice says ---
@@ -569,13 +821,15 @@ func TestPanicValue(t *testing.T) {
 			_ = s[len(os.Args)+5]
 		}()
 		assert.Contains(t, got, "index out of range")
-		var nilMap string
+		// A failed type assertion is a *runtime.TypeAssertionError, the case that
+		// needs the "*" trimmed from the type name.
+		var assertion string
 		func() {
-			defer func() { nilMap = panicValue(recover()) }()
-			var m map[string]int
-			m["x"] = 1
+			defer func() { assertion = panicValue(recover()) }()
+			var v any = "text"
+			_ = v.(int)
 		}()
-		assert.Contains(t, nilMap, "nil map")
+		assert.Contains(t, assertion, "interface conversion")
 	})
 	t.Run("an error of another package that merely implements runtime.Error is its type only", func(t *testing.T) {
 		assert.Equal(t, "dtlog.fakeRuntimeError", panicValue(fakeRuntimeError{}))

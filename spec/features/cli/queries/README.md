@@ -1,13 +1,13 @@
 ---
 format: https://specscore.md/feature-specification
-status: Planned
+status: Implementing
 ---
 
 # Feature: Queries
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/queries?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/queries?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/queries?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/queries?op=request-change) |
 
-**Status:** Planned
+**Status:** Implementing
 **Source Ideas:** —
 
 ## Summary
@@ -41,7 +41,7 @@ Running `datatug queries` used to crash the binary; it now lists the queries, or
 
 #### REQ: one-id-per-line
 
-The command MUST print exactly one query ID per line on stdout. Order is by ID, so the output is stable. (Mirrors [datasets REQ: one-id-per-line](../datasets/README.md#req-one-id-per-line) for consistency.)
+The command MUST print exactly one query ID per line on stdout. Order is by ID, so the output is stable. A query whose ID is not made of plain names (letters, digits, `.`, `_` and `-`, with `/` between folders) is not printed: stdout holds only IDs that `query run` can address, and one line on stderr says how many queries were skipped. (Mirrors [datasets REQ: one-id-per-line](../datasets/README.md#req-one-id-per-line) for consistency.)
 
 #### REQ: empty-project-prints-nothing
 
@@ -65,6 +65,7 @@ The command MUST NOT call `panic`: not in an empty folder, not in a folder that 
 | Exit code | Meaning |
 |---|---|
 | `0` | Listing succeeded (or empty) |
+| `2` | `--project` and `--dir` both given |
 | `3` | Project not resolved |
 | `1` | Generic runtime error |
 
@@ -82,7 +83,7 @@ The command MUST NOT call `panic`: not in an empty folder, not in a folder that 
 
 **Requirements:** queries#req:one-id-per-line
 
-Against a project with N queries, `datatug queries` exits `0` and prints exactly N lines.
+Against a project with N queries with plain IDs, `datatug queries` exits `0` and prints exactly N lines; a query with a non-plain ID is skipped and counted on stderr.
 
 ### AC: no-panic
 

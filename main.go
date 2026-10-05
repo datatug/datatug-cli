@@ -19,6 +19,7 @@ import (
 	"github.com/strongo/buildinfo"
 	"github.com/strongo/buildinfo/fangcmd"
 	"github.com/strongo/logus"
+	"golang.org/x/term"
 
 	//_ "github.com/jackc/pgx/v5"
 	_ "github.com/mattn/go-sqlite3"
@@ -47,6 +48,13 @@ var dtlogStart = dtlog.Start
 // notice, so tests can prove when it is and is not printed without writing to
 // the person's home.
 var dtlogNotice = dtlog.ShowNoticeOnce
+
+// stderrIsTerminal says whether stderr is a terminal a person reads. The notice
+// is printed, and recorded as shown, only then: a run with stderr discarded or
+// captured (a script, a service, shell completion) did not tell anyone.
+var stderrIsTerminal = func() bool { return isTerminal(os.Stderr) }
+
+func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
 
 func main() {
 
@@ -108,7 +116,7 @@ func main() {
 
 	if !skipTelemetry {
 		// The notice comes first: on the run that prints it nothing is sent.
-		dtlogNotice(os.Stderr)
+		dtlogNotice(os.Stderr, stderrIsTerminal())
 		dtlogStart()
 		dtlogEnqueue(dtlog.StartedEvent())
 	}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -143,10 +144,41 @@ func TestQueries_FailuresAreErrorsNotPanics(t *testing.T) {
 	})
 }
 
-func TestQueries_ANonPlainIDIsNotEchoed(t *testing.T) {
-	t.Chdir(queriesProject(t, "fine", "with space and $ymbols"))
-	out, err := runQueries(t)
+// A query whose file name is not a plain name is not echoed (it may name a
+// path or hold a secret) and is not printed as an ID either: a script that pipes
+// the listing into `query run` must never receive a line that names no query.
+// Stdout holds only real IDs; stderr says how many were left out.
+func TestQueries_ANonPlainIDIsSkippedNotPrintedAsAnID(t *testing.T) {
+	t.Chdir(queriesProject(t, "fine", "folder/ok-one", "with space and $ymbols", "folder/also bad!"))
+	out, errOut, err := cov100fRun(t, func(r *cobra.Command) { r.AddCommand(queriesCommand()) }, "queries")
 	require.NoError(t, err)
-	assert.Contains(t, out, "fine\n")
-	assert.NotContains(t, out, "$ymbols")
+	assert.Equal(t, "fine\nfolder/ok-one\n", out.String(), "stdout holds the plain IDs and nothing else")
+	assert.NotContains(t, out.String()+errOut.String(), "$ymbols")
+	assert.NotContains(t, out.String()+errOut.String(), "bad!")
+	assert.NotContains(t, out.String(), "not shown")
+	assert.Equal(t, "2 saved queries skipped: their IDs are not plain names (letters, digits, '.', '_' and '-', with '/' between folders)\n", errOut.String())
+}
+
+func TestQueries_OneSkippedQueryIsSingular(t *testing.T) {
+	t.Chdir(queriesProject(t, "with space"))
+	out, errOut, err := cov100fRun(t, func(r *cobra.Command) { r.AddCommand(queriesCommand()) }, "queries")
+	require.NoError(t, err)
+	assert.Empty(t, out.String())
+	assert.Contains(t, errOut.String(), "1 saved query skipped")
+}
+
+func TestQueries_PlainIDsPrintNothingOnStderr(t *testing.T) {
+	t.Chdir(queriesProject(t, "a", "b/c"))
+	_, errOut, err := cov100fRun(t, func(r *cobra.Command) { r.AddCommand(queriesCommand()) }, "queries")
+	require.NoError(t, err)
+	assert.Empty(t, errOut.String())
+}
+
+// A query whose name is the placeholder text itself is skipped like any other
+// non-plain name: only IsPlainSourceID decides.
+func TestQueries_ThePlaceholderTextIsNotAPlainID(t *testing.T) {
+	assert.False(t, plainQueryID(dbcopy.SourceIDNotShown))
+	assert.False(t, plainQueryID("a//b"))
+	assert.False(t, plainQueryID(""))
+	assert.True(t, plainQueryID("a/b-c_d.e"))
 }

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/auth/device"
+	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/ai/clientctx"
 	"github.com/strongo/aichat/ai/cloud"
@@ -117,4 +119,24 @@ func validateAIAPIURL(raw string) error {
 		}
 	}
 	return fmt.Errorf("cloud AI base URL must use HTTPS, except for a loopback development server")
+}
+
+// chatReportConfigurer is what enableChatReports needs of a chat session.
+type chatReportConfigurer interface {
+	ConfigureTelemetry(chat.InteractionReporter, ai.ClientContext)
+}
+
+// enableChatReports turns on the metadata report that `chat --model cloud`
+// sends per turn (the install id, the conversation id, the length of the
+// message, its outcome and the names of the actions that ran). It is usage
+// telemetry like the CLI's own events, so it asks the same function and is
+// off whenever telemetry is off: with DO_NOT_TRACK, DATATUG_TELEMETRY or CI
+// set, on the run that printed the first-run notice and on a run that could
+// not tell anyone. The answers of the cloud service are not affected.
+func enableChatReports(sessions chatReportConfigurer, reporter chat.InteractionReporter, base ai.ClientContext) bool {
+	if !dtlog.Enabled() {
+		return false
+	}
+	sessions.ConfigureTelemetry(reporter, base)
+	return true
 }

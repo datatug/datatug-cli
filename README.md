@@ -208,14 +208,16 @@ The CLI does send a small amount of anonymous usage telemetry, which you can swi
 
 **What is sent.** The CLI sends anonymous usage events and crash reports to [PostHog](https://posthog.com)
 (`eu.i.posthog.com`), through [`pkg/dtlog`](pkg/dtlog), the only code in this repository that can send them. We use them
-to learn which commands and screens are used and where the CLI crashes, so we can fix what people hit.
+to learn which commands and screens are used and where the CLI crashes, so we can fix what people hit. With telemetry on
+the CLI also fetches its PostHog project key from `raw.githubusercontent.com`, at most once a day: that request carries no
+data of yours (GitHub sees the IP address it comes from, as any web server does), and it is not made when telemetry is off.
 
 | Event | When | Fields it carries |
 |---|---|---|
 | `DataTug CLI started` | a command starts | the common fields below |
 | `DataTug CLI exited` | a command ends | the common fields below |
 | `Screen opened` | a screen of the terminal UI opens | the common fields, `$app_name` (`DataTug`), `$app_version`, `$screen_id` and `$screen_name` (fixed labels of DataTug's own screens, such as `viewers/sqlite` and `SQLite Viewer`) |
-| `$exception` (crash report) | the CLI crashes with a panic | `distinct_id`, the SDK and system fields below, and one exception: its `type` (`panic`), its `value` (the Go type of the panic value, such as `string` or `*errors.errorString`; for a crash of the Go runtime itself, such as an index out of range, its message, which names numbers and types only) and its stack: function names, source file *names* (no directory), line numbers and code addresses; and `$debug_images`: the build id, load address and architecture of the executable (not its path) |
+| `$exception` (crash report) | the CLI crashes with a panic | `distinct_id`, the SDK and system fields below, and one exception: its `type` (`panic`), its `value` (the Go type of the panic value, such as `string` or `*errors.errorString`; for a crash of the Go runtime itself, such as an index out of range, its message, which names numbers and types only) and its stack: function names, source file *names* (no directory), line numbers and code addresses; and `$debug_images`: the type, build id, load address, link address, size and architecture of the executable (not its path) |
 
 The common fields: `uuid` (a random id of the event), `distinct_id` (a random id of this install, kept in
 `~/datatug/.posthog.yaml`), `timestamp`, the
@@ -226,29 +228,41 @@ comes from.
 
 **What is not sent.** No database content, no query text, no project or database name, no path, no host, no user name, no
 command-line argument and no credential. The text of a panic is not sent either, because it can hold a path or a host: it
-goes to stderr and to the local log only. A test builds each event and fails when its fields change, so this list and the
-notice cannot drift from the code.
+goes to stderr and to the local log only. A test builds each event as `pkg/dtlog` hands it to the PostHog client and fails
+when its fields change, so this list cannot drift from the code, and another test fails when any other package imports the
+PostHog client. The notice is checked by tests for the claims it makes about the fields (such as which event carries the
+DataTug version), and by a reader against this list when either changes.
 
-**The first run.** The first time the CLI runs with telemetry on it prints a notice on stderr (at most six lines) saying
-the above in brief, and nothing is sent on that run. Events start with the next run. The notice is printed once per user:
-the CLI records that it was shown in the file `~/datatug/.telemetry-notice-shown` (delete it to see the notice again).
-If that file cannot be written the notice is printed again next time, and the run does not fail.
+**The first run.** The first time the CLI runs with telemetry on in a terminal (stderr is a terminal) it prints a notice
+on stderr (at most six lines) saying the above in brief, and nothing is sent on that run. Events start with the next run.
+The notice is printed once per user: the CLI records that it was shown in the file `~/datatug/.telemetry-notice-shown`
+(delete it to see the notice again). If that file cannot be written the notice is printed again next time, and the run
+does not fail. A run whose stderr is not a terminal (a script, a service, shell completion with `2>/dev/null`) tells
+nobody, so it prints nothing, writes no marker and sends nothing: the notice waits for the first run in a terminal. The
+same holds when the home folder cannot be resolved (a service without a home): nothing is created and nothing is sent.
 
-**Turn it off.** Any one of these turns telemetry off completely: no notice, no client, no request, no file:
+**Turn it off.** Telemetry is on only when `DATATUG_TELEMETRY` is empty or one of `1`, `true`, `on`, `yes`; any other value
+turns it off, so a typo never leaves you measured. Any one of these turns telemetry off completely: no notice, no client,
+no request, no file:
 
 ```
-export DATATUG_TELEMETRY=0     # 0, false or off, in any case
-export DO_NOT_TRACK=1          # any value but empty or 0 (https://consoledonottrack.com)
-export CI=true                 # any value but empty or false: set by most CI systems
+DATATUG_TELEMETRY=0     # 0, false, off, no, or any value other than 1, true, on, yes
+DO_NOT_TRACK=1          # any value but empty or 0 (https://consoledonottrack.com)
+CI=true                 # any value but empty or false: set by most CI systems
 ```
 
-`datatug --help` names the variable too. `datatug version --json` never sends telemetry, whatever you set.
+A variable set in one terminal is gone in the next. To turn telemetry off for good, add `export DATATUG_TELEMETRY=0` to
+your shell profile (`~/.zshrc`, `~/.bashrc`), or on Windows run `setx DATATUG_TELEMETRY 0` once. `datatug --help` names the
+variable too. `datatug version --json` never sends telemetry, whatever you set.
 
-**Not covered here.** `datatug chat --model cloud` is a separate thing: you choose to use the DataTug cloud AI service,
-your questions go to it to be answered, and it also receives a metadata report of each turn (the length of your message in
-characters and words, its status and outcome, the names of the actions that ran, and your install id, OS and DataTug
-version; not the text of your question and not your rows). `DATATUG_TELEMETRY` does not switch that off: use another
-`--model`. Chat with your own AI profile reports nowhere.
+**Chat with the DataTug cloud AI.** `datatug chat --model cloud` is your choice to use the DataTug cloud AI service: your
+questions go to it to be answered, whatever the switch says, because that is what the command does. It also sends a
+metadata report of each turn (the length of your message in characters and words, its status and outcome, the names of the
+actions that ran, the conversation id, and your install id, OS and DataTug version; not the text of your question and not
+your rows). That report is usage telemetry and follows the same switch: with `DATATUG_TELEMETRY`, `DO_NOT_TRACK` or `CI`
+turning telemetry off, or on the first run, it is not sent. Its install id is a different random id from the one above,
+kept in `datatug/installation_id` in your user configuration folder (`os.UserConfigDir`). Chat with your own AI profile
+reports nowhere.
 
 ## Where are metadata stored?
 

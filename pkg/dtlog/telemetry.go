@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/posthog/posthog-go"
-	"github.com/strongo/cli-helpers/fsutil"
 	"github.com/strongo/logus"
 )
 
@@ -23,7 +22,9 @@ import (
 // can send, because nothing outside it imports the PostHog client (a test
 // walks the module to prove it).
 const (
-	// EnvTelemetry set to 0, false or off (any case) turns telemetry off.
+	// EnvTelemetry turns telemetry off unless it is empty or one of 1, true, on
+	// or yes (any case): 0, false, off, no and any value this list does not
+	// know turn it off, so a typo never leaves a person measured.
 	EnvTelemetry = "DATATUG_TELEMETRY"
 	// EnvDoNotTrack set to anything but an empty string or 0 turns telemetry
 	// off (https://consoledonottrack.com).
@@ -41,20 +42,30 @@ const (
 	PanicEventTitle = "panic"
 )
 
-// NoticeText is printed on stderr the first time the CLI runs with telemetry
-// on. At most six lines; a test holds it to that and to what it must say.
-const NoticeText = `DataTug sends anonymous usage events: "DataTug CLI started", "DataTug CLI exited", "Screen opened" (terminal UI) and crash reports.
-Each carries a random install id, a session id and its timing, the OS name and version, and the Go and DataTug versions; a crash report adds the Go type of the error and its stack frames.
+// Notice returns the text printed on stderr the first time the CLI runs with
+// telemetry on, in a terminal. At most six lines; a test holds it to that and
+// to what it must say. The line that turns telemetry off is the one that
+// lasts: a shell profile line (setx on Windows, which has no export), because
+// a variable set in one terminal is gone in the next.
+func Notice(goos string) string {
+	off := "To turn it off for good, add this line to your shell profile: export " + EnvTelemetry + "=0"
+	if goos == "windows" {
+		off = "To turn it off for good, run: setx " + EnvTelemetry + " 0 (it applies to terminals you open afterwards)"
+	}
+	return `DataTug sends anonymous usage events: "` + EventStarted + `", "` + EventExited + `", "` + EventScreen + `" (terminal UI) and crash reports.
+Each carries a random install id, the OS name and version, and the Go and PostHog library versions. Started, exited and screen events add a session id and its timing; a screen event adds the DataTug version and the screen's name; a crash report adds the Go type of the error and its stack frames.
 No database content, query text, path, host or credential is sent. Details: https://github.com/datatug/datatug-cli#telemetry
 Nothing is sent on this run; events start with the next one.
-To turn it off, run: export DATATUG_TELEMETRY=0 (DO_NOT_TRACK=1 and CI=true turn it off too).
+` + off + ` (` + EnvDoNotTrack + `=1 and ` + EnvCI + `=true turn it off too).
 `
+}
 
 const noticeMarkerFile = ".telemetry-notice-shown"
 
 // seams for testing
 var (
-	noticeMarkerPath = func() string { return fsutil.ExpandHome("~/datatug/" + noticeMarkerFile) }
+	userHomeDir      = os.UserHomeDir
+	noticeMarkerPath = func() string { return stateFile(noticeMarkerFile) }
 	statFile         = os.Stat
 	mkdirAll         = os.MkdirAll
 	writeFile        = os.WriteFile
@@ -65,20 +76,37 @@ var (
 	newPosthogClient = posthog.NewWithConfig
 )
 
-// noticeShownThisRun is true on the run that printed the first-run notice:
-// nothing is sent on it, so nobody is measured before they were told.
-var noticeShownThisRun atomic.Bool
+// stateFile returns the path of the file called name in the CLI's state folder
+// (~/datatug), or "" when the home folder cannot be resolved to an absolute
+// path. The caller then creates nothing: a relative path would put a folder in
+// whatever directory the CLI runs in (a service with no HOME, a container).
+func stateFile(name string) string {
+	home, err := userHomeDir()
+	if err != nil || !filepath.IsAbs(home) {
+		return ""
+	}
+	return filepath.Join(home, "datatug", name)
+}
+
+// heldBackThisRun is true on a run that must send nothing because the person
+// has not been told yet: the run that printed the first-run notice, or one that
+// could not (stderr is not a terminal) or could not record that it did.
+var heldBackThisRun atomic.Bool
 
 // Enabled reports whether telemetry is on for this process. It is the one
 // function that decides: Start, Enqueue and so every event ask it, and when it
 // says no no client is created, no event is queued and no request leaves.
 func Enabled() bool {
-	return envAllows() && !noticeShownThisRun.Load()
+	return envAllows() && !heldBackThisRun.Load()
 }
 
+// envAllows is the environment's answer. DATATUG_TELEMETRY fails closed: it is
+// on only when empty or one of 1, true, on, yes; DO_NOT_TRACK and CI turn it
+// off when set to anything but the values below.
 func envAllows() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(EnvTelemetry))) {
-	case "0", "false", "off":
+	case "", "1", "true", "on", "yes":
+	default:
 		return false
 	}
 	if v := os.Getenv(EnvDoNotTrack); v != "" && v != "0" {
@@ -90,21 +118,35 @@ func envAllows() bool {
 	return true
 }
 
-// ShowNoticeOnce prints NoticeText on w the first time it runs with telemetry
-// on and leaves a marker in the CLI's state folder (~/datatug) so it is printed
-// once per user. When the marker cannot be written the notice is printed again
-// next time and the run does not fail. With telemetry off it does nothing at
+// ShowNoticeOnce prints Notice on w the first time it runs with telemetry on
+// and leaves a marker in the CLI's state folder (~/datatug) so it is printed
+// once per user. interactive says whether w is a terminal a person reads: when
+// it is not (a script, a service, shell completion with stderr discarded) the
+// notice is not printed and no marker is written, so it waits for the first
+// run in a terminal. Until the notice has been shown and recorded nothing is
+// sent: not on the run that printed it, not on a run that could not print it
+// and not when the marker cannot be written (the notice is then printed again
+// next time and the run does not fail). With telemetry off it does nothing at
 // all: nothing printed, nothing created.
-func ShowNoticeOnce(w io.Writer) {
+func ShowNoticeOnce(w io.Writer, interactive bool) {
 	if !envAllows() {
 		return
 	}
 	marker := noticeMarkerPath()
-	if _, err := statFile(marker); err == nil {
+	if marker != "" {
+		if _, err := statFile(marker); err == nil {
+			return
+		}
+	}
+	heldBackThisRun.Store(true)
+	if !interactive {
 		return
 	}
-	_, _ = io.WriteString(w, NoticeText)
-	noticeShownThisRun.Store(true)
+	_, _ = io.WriteString(w, Notice(runtime.GOOS))
+	if marker == "" {
+		logus.Warningf(context.Background(), "could not record that the telemetry notice was shown: the home folder cannot be resolved")
+		return
+	}
 	if err := mkdirAll(filepath.Dir(marker), 0o755); err != nil {
 		logus.Warningf(context.Background(), "could not record that the telemetry notice was shown: %v", err)
 		return

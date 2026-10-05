@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -66,8 +67,34 @@ func queriesCommandAction(cmd *cobra.Command, _ []string) error {
 	}
 	sort.Strings(ids)
 	out := cmd.OutOrStdout()
+	skipped := 0
 	for _, id := range ids {
-		_, _ = fmt.Fprintln(out, dbcopy.QueryIDDisplay(id))
+		if !plainQueryID(id) {
+			skipped++
+			continue
+		}
+		_, _ = fmt.Fprintln(out, id)
+	}
+	if skipped > 0 {
+		noun := "queries"
+		if skipped == 1 {
+			noun = "query"
+		}
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%d saved %s skipped: their IDs are not plain names (letters, digits, '.', '_' and '-', with '/' between folders)\n", skipped, noun)
 	}
 	return nil
+}
+
+// plainQueryID reports whether id, the folders and name of a saved query joined
+// by "/", is made of plain names. Such an ID is safe to print and to pass on to
+// `query run`; anything else is a file name a person chose, which may hold a
+// path or a secret and which no command can address. (dbcopy.QueryIDDisplay is
+// for naming an ID a client sent in a message; its placeholder is not an ID.)
+func plainQueryID(id string) bool {
+	for _, part := range strings.Split(id, "/") {
+		if !dbcopy.IsPlainSourceID(part) {
+			return false
+		}
+	}
+	return true
 }

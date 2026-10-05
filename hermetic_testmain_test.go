@@ -26,6 +26,6 @@ func TestMain(m *testing.M) {
 	}
 	dtlogStart = func() {}
 	dtlogEnqueue = func(posthog.Message) {}
-	dtlogNotice = func(io.Writer) {}
+	dtlogNotice = func(io.Writer, bool) {}
 	os.Exit(hermetictest.Main(m))
 }

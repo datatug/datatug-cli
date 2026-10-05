@@ -13,8 +13,9 @@ import (
 const rootHelp = `DataTug CLI: scans databases into DataTug projects, serves them to the DataTug app and runs queries against them.
 
 Telemetry: DataTug sends anonymous usage events and crash reports (the first run
-prints exactly which). Turn it off with DATATUG_TELEMETRY=0; DO_NOT_TRACK=1 and
-CI=true turn it off too. Details: https://github.com/datatug/datatug-cli#telemetry`
+in a terminal prints exactly which). Turn it off with DATATUG_TELEMETRY=0 (any
+value other than 1, true, on, yes turns it off); DO_NOT_TRACK=1 and CI=true turn
+it off too. Details: https://github.com/datatug/datatug-cli#telemetry`
 
 // DatatugCommand builds the `datatug` root command tree.
 //

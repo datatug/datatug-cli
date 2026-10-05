@@ -296,7 +296,7 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		return "", Exit(fmt.Sprintf("restore chat session: %v", err), exitCodeUsage)
 	}
 	if cloudClient != nil {
-		sessions.ConfigureTelemetry(cloudClient, cloudContext)
+		enableChatReports(sessions, cloudClient, cloudContext)
 		defer sessions.WaitForTelemetry()
 	}
 	sessions.ConfigureQueryExecutor(executor)

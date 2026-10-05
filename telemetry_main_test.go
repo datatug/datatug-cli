@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"charm.land/fang/v2"
@@ -30,11 +31,12 @@ func trivialRoot() (*cobra.Command, []fang.Option) {
 // binary).
 func realDtlog(t *testing.T) (run func(args ...string) string) {
 	t.Helper()
-	oldGet, oldStart, oldEnqueue, oldNotice, oldArgs, oldStderr, oldExit := getCommand, dtlogStart, dtlogEnqueue, dtlogNotice, os.Args, os.Stderr, osExit
+	oldGet, oldStart, oldEnqueue, oldNotice, oldArgs, oldStderr, oldExit, oldTTY := getCommand, dtlogStart, dtlogEnqueue, dtlogNotice, os.Args, os.Stderr, osExit, stderrIsTerminal
 	t.Cleanup(func() {
-		getCommand, dtlogStart, dtlogEnqueue, dtlogNotice, os.Args, os.Stderr, osExit = oldGet, oldStart, oldEnqueue, oldNotice, oldArgs, oldStderr, oldExit
+		getCommand, dtlogStart, dtlogEnqueue, dtlogNotice, os.Args, os.Stderr, osExit, stderrIsTerminal = oldGet, oldStart, oldEnqueue, oldNotice, oldArgs, oldStderr, oldExit, oldTTY
 	})
 	getCommand = trivialRoot
+	stderrIsTerminal = func() bool { return true } // a person at a terminal; a test of a script says otherwise
 	dtlogStart, dtlogEnqueue, dtlogNotice = dtlog.Start, dtlog.Enqueue, dtlog.ShowNoticeOnce
 	osExit = func(int) {}
 	return func(args ...string) string {
@@ -77,17 +79,67 @@ func TestMain_TelemetryOff_NothingPrintedNothingSetUp(t *testing.T) {
 	}
 }
 
-// The first run with telemetry on prints the notice on stderr, leaves the
-// marker, and sends nothing: no client is created (one would panic here).
-// The second run does not print it.
+// The first run with telemetry on, in a terminal, prints the notice on stderr,
+// leaves the marker, and sends nothing: no client is created (one would panic
+// here). That the second run prints nothing and sends its events is proved in
+// pkg/dtlog (TestSecondRun_SendsTheStartedEvent), where the client is a fake.
 func TestMain_FirstRun_PrintsTheNoticeOnceAndSendsNothing(t *testing.T) {
 	run := realDtlog(t)
 	_ = os.RemoveAll(filepath.Dir(homeMarker(t)))
 
 	first := run()
-	assert.Equal(t, dtlog.NoticeText, first)
+	assert.Equal(t, dtlog.Notice(runtime.GOOS), first)
 	assert.FileExists(t, homeMarker(t))
 	assert.False(t, dtlog.Enabled(), "nothing is sent on the run that printed the notice")
+}
+
+// A run whose stderr is not a terminal (a script, a service, shell completion
+// with 2>/dev/null) tells nobody: no notice, no marker, nothing sent (a client
+// would panic here).
+func TestMain_FirstRun_StderrNotATerminal_PrintsAndRecordsNothing(t *testing.T) {
+	run := realDtlog(t)
+	stderrIsTerminal = func() bool { return false }
+	_ = os.RemoveAll(filepath.Dir(homeMarker(t)))
+
+	stderr := run()
+
+	assert.Empty(t, stderr)
+	assert.NoFileExists(t, homeMarker(t))
+	assert.False(t, dtlog.Enabled(), "nothing is sent on a run that could not tell anyone")
+}
+
+// main hands the notice the answer of stderrIsTerminal, and by default that
+// asks the real os.Stderr: a pipe or a file is not a terminal.
+func TestMain_StderrIsTerminal_IsFalseForAPipeAndAFile(t *testing.T) {
+	oldStderr := os.Stderr
+	defer func() { os.Stderr = oldStderr }()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	defer func() { _ = r.Close(); _ = w.Close() }()
+	os.Stderr = w
+	assert.False(t, stderrIsTerminal())
+
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	require.NoError(t, err)
+	defer func() { _ = devNull.Close() }()
+	assert.False(t, isTerminal(devNull), "/dev/null is a character device but not a terminal")
+}
+
+func TestMain_PassesTheTerminalAnswerToTheNotice(t *testing.T) {
+	oldGet, oldStart, oldEnqueue, oldNotice, oldArgs, oldTTY := getCommand, dtlogStart, dtlogEnqueue, dtlogNotice, os.Args, stderrIsTerminal
+	defer func() {
+		getCommand, dtlogStart, dtlogEnqueue, dtlogNotice, os.Args, stderrIsTerminal = oldGet, oldStart, oldEnqueue, oldNotice, oldArgs, oldTTY
+	}()
+	getCommand = trivialRoot
+	os.Args = []string{"datatug"}
+	for _, answer := range []bool{true, false} {
+		stderrIsTerminal = func() bool { return answer }
+		var got *bool
+		dtlogNotice = func(_ io.Writer, interactive bool) { got = &interactive }
+		main()
+		require.NotNil(t, got)
+		assert.Equal(t, answer, *got)
+	}
 }
 
 func TestMain_NoticeComesBeforeStart(t *testing.T) {
@@ -97,7 +149,7 @@ func TestMain_NoticeComesBeforeStart(t *testing.T) {
 	}()
 	getCommand = trivialRoot
 	var order []string
-	dtlogNotice = func(io.Writer) { order = append(order, "notice") }
+	dtlogNotice = func(io.Writer, bool) { order = append(order, "notice") }
 	dtlogStart = func() { order = append(order, "start") }
 	dtlogEnqueue = func(msg posthog.Message) { order = append(order, msg.(posthog.Capture).Event) }
 	os.Args = []string{"datatug"}
@@ -112,7 +164,7 @@ func TestMain_VersionJSON_PrintsNoNotice(t *testing.T) {
 	defer func() { getCommand, dtlogNotice, os.Args = oldGet, oldNotice, oldArgs }()
 	getCommand = func() (*cobra.Command, []fang.Option) { return versionJSONStubRoot(), nil }
 	noticed := false
-	dtlogNotice = func(io.Writer) { noticed = true }
+	dtlogNotice = func(io.Writer, bool) { noticed = true }
 	os.Args = []string{"datatug", "version", "--json"}
 
 	main()

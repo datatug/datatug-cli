@@ -71,7 +71,10 @@ func TestOpenSchemaScan_OpensThePostgresURLWithExactIdentifiers(t *testing.T) {
 // openedSchemaScanFailure is the sentence OpenSchemaScan returns when the driver
 // cannot open the source named env:SHOP_PG_URL for a reason that cannot be told
 // apart without reading the driver's message.
-const openedSchemaScanFailure = `open postgres source "env:SHOP_PG_URL": the driver could not open the source (its own message is not shown: a driver can quote the connection string)`
+const openedSchemaScanFailure = `open postgres source "env:SHOP_PG_URL": ` + openedSchemaScanFailureReason
+
+// openedSchemaScanFailureReason is the reason that sentence gives.
+const openedSchemaScanFailureReason = `the driver could not open the source (its own message is not shown: a driver can quote the connection string)`
 
 // The error of a failed open is classified, never quoted: whatever the driver
 // wrote, a pattern scrubber is not what keeps a secret out.
@@ -95,6 +98,7 @@ func TestOpenSchemaScan_ReturnsTheClassifiedOpenFailureNotTheDriversText(t *test
 // A cause that can be told apart without reading the driver's message is named.
 func TestOpenSchemaScan_NamesACauseThatNeedsNoMessageToRecognise(t *testing.T) {
 	for want, cause := range map[string]error{
+		// A driver that wraps the system error it got (dalgo2postgres does not: see the test below).
 		"the connection was refused": fmt.Errorf("dial tcp 10.0.0.5:5432: %w", syscall.ECONNREFUSED),
 		"the attempt timed out":      context.DeadlineExceeded,
 		"permission denied":          fs.ErrPermission,
@@ -107,6 +111,46 @@ func TestOpenSchemaScan_NamesACauseThatNeedsNoMessageToRecognise(t *testing.T) {
 		_, err = ref.OpenSchemaScan(context.Background())
 		assert.EqualError(t, err, `open postgres source "env:SHOP_PG_URL": `+want)
 		assert.ErrorIs(t, err, cause)
+	}
+}
+
+// dalgo2postgres returns a *ConnectionError, which hides the driver's error from errors.Is and
+// errors.As on purpose (it says what failed by Kind and SQLState instead), so the causes it
+// reports are named from those two fields, with this package's own sentences: never from the
+// error's text, which names the host, the port and the database.
+func TestOpenSchemaScan_NamesTheFailureTheAdapterReportsByKindAndSQLState(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  *dalgo2postgres.ConnectionError
+		want string
+	}{
+		{"a wrong password", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28P01"}, "the server rejected the user or the password"},
+		{"a user the server does not accept", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28000"}, "the server rejected the user or the password"},
+		{"a database that does not exist", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "3D000"}, "the database does not exist"},
+		{"a server that cannot be reached", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}, "the server could not be reached"},
+		{"an attempt that timed out", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTimeout}, "the attempt timed out"},
+		{"a TLS handshake that failed", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTLS}, "the TLS handshake with the server failed"},
+		{"a server error of another code", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "53300"}, openedSchemaScanFailureReason},
+		{"a failure of another kind", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureInvalidDSN}, openedSchemaScanFailureReason},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The adapter names the host, the port and the database in its own text: none may be shown.
+			tc.err.Host, tc.err.Port, tc.err.Database = "10.0.0.5", "54329", "shopdb"
+			stubNewPostgresDatabase(t, func(string, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+				return nil, fmt.Errorf("opening: %w", tc.err) // wrapped: errors.As finds it
+			})
+			ref, err := ParseWithEnv("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": "postgres://alice:s3cret@h/shop"}))
+			require.NoError(t, err)
+
+			_, err = ref.OpenSchemaScan(context.Background())
+
+			assert.EqualError(t, err, `open postgres source "env:SHOP_PG_URL": `+tc.want)
+			for _, shown := range []string{"10.0.0.5", "54329", "shopdb", "SQLSTATE", "dalgo2postgres"} {
+				assert.NotContains(t, err.Error(), shown)
+			}
+			var kept *dalgo2postgres.ConnectionError
+			assert.ErrorAs(t, err, &kept, "the adapter's own error is kept for errors.As, never printed")
+		})
 	}
 }
 

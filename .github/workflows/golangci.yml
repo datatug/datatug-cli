@@ -172,8 +172,12 @@ jobs:
   # job only: an administrator's, to the maintenance database, on a container that lives as long
   # as the job. The tests skip when it is not set, which `go test` reports as success, so
   # scripts/check-journey-postgres.sh fails the job on any SKIP and on a missing PASS line for
-  # either test by name. Not a required check (that is a repository setting): a red job is a
-  # real finding about the scan, not a flake.
+  # either test by name. Not a required check for merging a pull request (that is a repository
+  # setting). It IS a gate on the release: this job is part of the workflow named "Go CI", and
+  # release.yml requires "Go CI" green for the exact commit before it tags or publishes anything,
+  # so a red run of this job on main holds the release until it is re-run or fixed. A red job is
+  # a finding about the scan, except when the service container itself is the cause (the image
+  # pull, the health check): re-run it then.
   journey-postgres:
     name: Journey (PostgreSQL)
     runs-on: ubuntu-latest

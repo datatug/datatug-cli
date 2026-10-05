@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"net"
 	"syscall"
+
+	"github.com/dal-go/dalgo2postgres"
 )
 
 // errUnsupportedBackend is what open returns for a BackendRef whose scheme Parse
@@ -30,7 +32,8 @@ func (e *openError) Unwrap() error { return e.cause }
 // quotes the whole DSN), so a driver's message is never shown, whatever it holds:
 // the error says which source could not be opened and, for the few causes that
 // can be told apart without reading the message (a missing file, a refused
-// permission, a timeout, a cancelled attempt, a refused connection), why.
+// permission, a timeout, a cancelled attempt, a refused connection, and for PostgreSQL a rejected
+// password, a missing database, an unreachable server, a failed TLS handshake), why.
 // errors.Is and errors.As still see the driver's own error.
 //
 // The errors this package wrote itself (the missing-file error CheckSourceFile
@@ -71,5 +74,33 @@ func openFailureReason(err error) string {
 	case errors.Is(err, syscall.ECONNREFUSED):
 		return "the connection was refused"
 	}
+	if reason, ok := connectionErrorReason(err); ok {
+		return reason
+	}
 	return "the driver could not open the source (its own message is not shown: a driver can quote the connection string)"
+}
+
+// connectionErrorReason names the failure a *dalgo2postgres.ConnectionError reports, from its
+// Kind and SQLState only. The adapter hides the driver's error from errors.Is and errors.As
+// on purpose, so the cases above never see a PostgreSQL failure; and the error's own text names
+// the host, the port and the database, so it is never printed. A kind or code it does not know
+// is not named.
+func connectionErrorReason(err error) (string, bool) {
+	var pg *dalgo2postgres.ConnectionError
+	if !errors.As(err, &pg) {
+		return "", false
+	}
+	switch {
+	case pg.Kind == dalgo2postgres.FailureServer && (pg.SQLState == "28P01" || pg.SQLState == "28000"):
+		return "the server rejected the user or the password", true
+	case pg.Kind == dalgo2postgres.FailureServer && pg.SQLState == "3D000":
+		return "the database does not exist", true
+	case pg.Kind == dalgo2postgres.FailureNetwork:
+		return "the server could not be reached", true
+	case pg.Kind == dalgo2postgres.FailureTimeout:
+		return "the attempt timed out", true
+	case pg.Kind == dalgo2postgres.FailureTLS:
+		return "the TLS handshake with the server failed", true
+	}
+	return "", false
 }

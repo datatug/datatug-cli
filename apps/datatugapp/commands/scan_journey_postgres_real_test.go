@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -54,7 +56,7 @@ type realPgServer struct {
 // parts are the pieces of the connection that no file of a project may hold, and that the
 // output of a scan may hold only inside the display form of its source.
 func (s realPgServer) parts() []string {
-	return []string{s.password, s.user, s.host, ":" + s.port, "sslmode", "postgres://"}
+	return []string{s.password, s.user, s.host, ":" + s.port, "port " + s.port, "port=" + s.port, "sslmode", "postgres://"}
 }
 
 // urlFor is the connection URL of the fixture role with the parts replaced: the database, the
@@ -260,13 +262,45 @@ func storedColumns(t *testing.T, projectDir, table string) []storedColumn {
 	return file.Columns
 }
 
+// storedColumnMaps reads the columns file of the table the way storedColumns does, but keeps
+// every key of each column, so that a key the file must not hold can be looked for.
+func storedColumnMaps(t *testing.T, projectDir, table string) map[string]map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(projectDir, "dbmodels", "shop", "public", "tables", table, "public."+table+".columns.json"))
+	require.NoError(t, err, table)
+	var file struct {
+		Columns []map[string]any `json:"columns"`
+	}
+	require.NoError(t, json.Unmarshal(data, &file), string(data))
+	byName := map[string]map[string]any{}
+	for _, column := range file.Columns {
+		byName[fmt.Sprint(column["name"])] = column
+	}
+	return byName
+}
+
+// runScanCommandAllOutputs runs the scan command as runScanCommand does and also returns what it
+// wrote to its standard output, which the scan is expected to leave empty.
+func runScanCommandAllOutputs(t *testing.T, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	root := DatatugCommand()
+	var out, errOut bytes.Buffer
+	root.SetArgs(append([]string{"scan"}, args...))
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SilenceUsage, root.SilenceErrors = true, true
+	err = root.Execute()
+	return out.String(), errOut.String(), err
+}
+
 // realPgScanArgs are the flags of a scan of the fixture into projectDir as environment local.
 func realPgScanArgs(projectDir, variable string) []string {
 	return []string{"-d", projectDir, "-D", "postgres", "--dsn-env", variable, "--db", "shop", "--env", "local"}
 }
 
-// leaksIn is each file under dir, or name of one, that holds a part of the connection, and each
-// key of a decoded .json file, at any depth, that only a connection has (connectionKeys).
+// leaksIn is each file under dir, or name of one, that holds a part of the connection, each
+// key of a decoded .json file, at any depth, that only a connection has (connectionKeys), and
+// each value of one, under whatever key, that is the port.
 func (s realPgServer) leaksIn(t *testing.T, dir string) (leaks []string) {
 	t.Helper()
 	require.NoError(t, filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
@@ -285,6 +319,9 @@ func (s realPgServer) leaksIn(t *testing.T, dir string) (leaks []string) {
 				for _, key := range keysNamed(decoded, connectionKeys) {
 					leaks = append(leaks, fmt.Sprintf("%s holds the key %q", path, key))
 				}
+				if numbersEqual(decoded, s.port) > 0 {
+					leaks = append(leaks, fmt.Sprintf("%s holds the value %s", path, s.port))
+				}
 			}
 		}
 		for _, part := range s.parts() {
@@ -295,6 +332,30 @@ func (s realPgServer) leaksIn(t *testing.T, dir string) (leaks []string) {
 		return nil
 	}))
 	return leaks
+}
+
+// numbersEqual counts the values of a decoded JSON document, at any depth and under any key,
+// that are the number port, or the text of it.
+func numbersEqual(value any, port string) (count int) {
+	switch v := value.(type) {
+	case map[string]any:
+		for _, inner := range v {
+			count += numbersEqual(inner, port)
+		}
+	case []any:
+		for _, inner := range v {
+			count += numbersEqual(inner, port)
+		}
+	case string:
+		if v == port {
+			count++
+		}
+	case float64:
+		if number, err := strconv.ParseFloat(port, 64); err == nil && v == number {
+			count++
+		}
+	}
+	return count
 }
 
 // partsIn is each part of the connection that text holds.
@@ -325,9 +386,10 @@ func TestPostgresScanJourney(t *testing.T) {
 	var stderrs []string
 	scan := func() string {
 		t.Helper()
-		stderr, err := runScanCommand(t, realPgScanArgs(projectDir, realPgScanVar)...)
+		stdout, stderr, err := runScanCommandAllOutputs(t, realPgScanArgs(projectDir, realPgScanVar)...)
 		require.NoError(t, err, "the scan of the real server exits 0")
-		stderrs = append(stderrs, stderr)
+		assert.Empty(t, stdout, "the scan writes nothing to its standard output")
+		stderrs = append(stderrs, stdout, stderr) // stdout is searched for the connection too
 		return stderr
 	}
 
@@ -382,6 +444,14 @@ func TestPostgresScanJourney(t *testing.T) {
 		assert.Equal(t, columns, stored, "the columns file of %s", table)
 	}
 
+	// The scan records no default of a column. KNOWN GAP: the provider of the reader does not set
+	// the field of the model, so DEFAULT now(), DEFAULT 0 and DEFAULT 'open' of the fixture are lost.
+	t.Log("KNOWN GAP: the scan does not record column defaults: customer.created (DEFAULT now()), invoice.total (DEFAULT 0) and invoice.status (DEFAULT 'open') are saved without one")
+	for table, column := range map[string]string{"customer": "created", "invoice": "total"} {
+		assert.NotContains(t, storedColumnMaps(t, projectDir, table)[column], "default", "KNOWN GAP: the scan does not record column defaults (%s.%s)", table, column)
+	}
+	assert.NotContains(t, storedColumnMaps(t, projectDir, "invoice")["status"], "default", "KNOWN GAP: the scan does not record column defaults (invoice.status)")
+
 	// 3. The readers of serve, chat and the web app see the same tables, in the one schema.
 	listed, err := api.GetCatalogTables(projectDir, "local", "shop")
 	require.NoError(t, err)
@@ -391,6 +461,8 @@ func TestPostgresScanJourney(t *testing.T) {
 	}
 	wantTables := []string{"public.MixedCase", "public.audit_log", "public.customer", "public.customer_names", "public.invoice", "public.order_line", "public.type_matrix"}
 	assert.Equal(t, wantTables, listedTables)
+	t.Log("KNOWN GAP: a view is saved as a table: the shipped reader lists a view with the tables and cannot tell them apart (customer_names is among the tables, and the scan saves no view)")
+	t.Log("KNOWN GAP: only the schema public is read: the table sales.refund of the second schema is not saved")
 	assert.Empty(t, listed.Views, "KNOWN GAP: the shipped reader cannot tell a view from a table, so customer_names is saved as a table and the scan saves no view")
 	envs, catalogs, tables, views := webReaderTables(t, projectDir)
 	assert.Equal(t, []string{"local"}, envs)
@@ -446,16 +518,19 @@ func TestPostgresScanJourneyFailures(t *testing.T) {
 		return address
 	}
 	// driverText is what the server, the driver and the adapter say: none of it may reach the user.
-	driverText := []string{"FATAL", "SQLSTATE", "28P01", "3D000", "password authentication", "does not exist", "dial tcp", "connection refused", "dalgo2postgres", "pgconn", "failed to connect", "role ", "ConnectionError"}
+	driverText := []string{"FATAL", "SQLSTATE", "28P01", "3D000", "password authentication", `" does not exist`, "dial tcp", "connection refused", "dalgo2postgres", "pgconn", "failed to connect", "role ", "ConnectionError"}
 
+	wrongPassword := "Wrong" + randomHex(t, 6)
 	for _, failure := range []struct {
 		name      string
 		sourceURL string // the URL in the variable; empty leaves it unset
+		reason    string // what the scan says of the cause, after the name of the source
+		secret    string // a part of the URL of this failure that may not be shown, beyond those of the fixture
 	}{
-		{"a wrong password", server.urlFor("", "Wrong"+randomHex(t, 6), "")},
-		{"a database that does not exist", server.urlFor("dt_scan_missing_"+randomHex(t, 6), "", "")},
-		{"a host that does not answer", server.urlFor("", "", closedPort())},
-		{"a variable that is not set", ""},
+		{"a wrong password", server.urlFor("", wrongPassword, ""), "the server rejected the user or the password", wrongPassword},
+		{"a database that does not exist", server.urlFor("dt_scan_missing_"+randomHex(t, 6), "", ""), "the database does not exist", ""},
+		{"a host that does not answer", server.urlFor("", "", closedPort()), "the server could not be reached", ""},
+		{"a variable that is not set", "", "", ""},
 	} {
 		t.Run(failure.name, func(t *testing.T) {
 			projectDir := filepath.Join(t.TempDir(), "shop-project")
@@ -468,7 +543,7 @@ func TestPostgresScanJourneyFailures(t *testing.T) {
 				require.NoError(t, os.Unsetenv(variable))
 			}
 
-			stderr, err := runScanCommand(t, realPgScanArgs(projectDir, variable)...)
+			stdout, stderr, err := runScanCommandAllOutputs(t, realPgScanArgs(projectDir, variable)...)
 
 			require.Error(t, err, "the scan exits non-zero")
 			message := err.Error()
@@ -476,19 +551,25 @@ func TestPostgresScanJourneyFailures(t *testing.T) {
 			if failure.sourceURL == "" {
 				assert.Equal(t, "environment variable "+variable+" is not set", message)
 			} else {
-				// The message names the source by the variable it was read from, never by the URL, and
-				// says no more of the cause than a driver error lets it tell apart without reading
-				// its words: a wrong password, a database that does not exist and a host that does
-				// not answer read the same to the user.
-				assert.Contains(t, message, `failed to open PostgreSQL: open postgres source "env:`+variable+`": the driver could not open the source (its own message is not shown`)
+				// The whole message, as the user reads it: the runner's own prefix (two workers run, one
+				// fails), the scan's, the source named by the variable it was read from, never by the
+				// URL, and the cause in this repository's own sentence, told apart by the adapter's
+				// Kind and SQLSTATE and not by its words.
+				assert.Equal(t, `failed 1 out of 2 workers, 1st error: failed to open PostgreSQL: open postgres source "env:`+variable+`": `+failure.reason, message)
 			}
+			assert.Empty(t, stdout, "a scan that fails writes nothing to its standard output")
 			for _, driver := range driverText {
 				assert.NotContains(t, message, driver, "the driver's text is never shown")
 				assert.NotContains(t, stderr, driver)
 				assert.NotContains(t, logged.String(), driver)
 			}
-			for _, output := range []string{message, stderr} {
+			for _, output := range []string{message, stdout, stderr} {
 				assert.Empty(t, server.partsIn(output), "no part of the connection is in what a scan that failed says to the user")
+			}
+			if failure.secret != "" {
+				for name, output := range map[string]string{"message": message, "stdout": stdout, "stderr": stderr, "log": logged.String()} {
+					assert.NotContains(t, output, failure.secret, "the secret of the URL that failed is not in the %s", name)
+				}
 			}
 			assert.Empty(t, server.outputLeaks(logged.String(), failure.sourceURL), "the log names the server by its display form at most")
 			assert.NoDirExists(t, projectDir, "a scan that fails makes nothing")
@@ -509,7 +590,7 @@ func TestRealPgLeakChecksFindEachPartOfTheConnection(t *testing.T) {
 		display := dbcopy.SourceDisplay(server.scanURL)
 		assert.Equal(t, "postgres://10.1.2.3:54329/dt_db", display, "the display form holds the host, port and database")
 		assert.Empty(t, server.outputLeaks("open postgres source \""+display+"\": the driver could not open it", server.scanURL))
-		for _, part := range []string{"s3cret", "dt_user", "10.1.2.3", ":54329", "sslmode"} {
+		for _, part := range []string{"s3cret", "dt_user", "10.1.2.3", ":54329", "port 54329", "port=54329", "sslmode"} {
 			assert.NotEmpty(t, server.outputLeaks("connecting to "+display+" with "+part, server.scanURL), part)
 		}
 	})
@@ -519,7 +600,10 @@ func TestRealPgLeakChecksFindEachPartOfTheConnection(t *testing.T) {
 		assert.Empty(t, server.leaksIn(t, dir), "an empty folder holds nothing")
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "a.json"), []byte(`{"driver":"postgres","catalogs":["shop"]}`), 0o644))
 		assert.Empty(t, server.leaksIn(t, dir), "the driver name is not a part of the connection")
-		for _, body := range []string{`{"password":"x"}`, `{"a":[{"Port":1}]}`, "uses s3cret", "dt_user", "at 10.1.2.3", "port :54329", "postgres://x"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "c.json"), []byte(`{"count":5432,"rows":[1,2.5,"54"],"nested":{"ok":true,"none":null}}`), 0o644))
+		assert.Empty(t, server.leaksIn(t, dir), "numbers and texts that are not the port are not a leak")
+		require.NoError(t, os.Remove(filepath.Join(dir, "c.json")))
+		for _, body := range []string{`{"password":"x"}`, `{"a":[{"Port":1}]}`, "uses s3cret", "dt_user", "at 10.1.2.3", "port :54329", "listens on port 54329", "port=54329", `{"x":54329}`, `{"x":[54329]}`, `{"a":[{"b":"54329"}]}`, "postgres://x"} {
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "b.json"), []byte(body), 0o644))
 			assert.NotEmpty(t, server.leaksIn(t, dir), body)
 		}

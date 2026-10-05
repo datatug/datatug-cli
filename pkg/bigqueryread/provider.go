@@ -28,7 +28,7 @@ const fullScope = "https://www.googleapis.com/auth/bigquery"
 
 var findADC = google.FindDefaultCredentials
 
-var ErrIdentity = errors.New("Google execution identity or granted scopes unavailable; explicitly sign in with Google BigQuery read-only and openid scopes, then preview again")
+var ErrIdentity = errors.New("google execution identity or granted scopes unavailable; explicitly sign in with Google BigQuery read-only and openid scopes, then preview again")
 
 // GoogleProvider uses the existing explicit Google login's refresh-token source.
 // It never opens a browser or uses ADC. Granted scope comes only from the Google
@@ -108,7 +108,7 @@ func sessionNonce(dir string) (string, error) {
 	if err != nil {
 		return "", ErrIdentity
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	after, err := f.Stat()
 	if err != nil || !os.SameFile(before, after) {
 		return "", ErrIdentity
@@ -188,7 +188,7 @@ func (p *GoogleProvider) authorizeToken(ctx context.Context, token *oauth2.Token
 	if err != nil {
 		return bigquery.Identity{}, nil, ErrIdentity
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		return bigquery.Identity{}, nil, ErrIdentity
 	}

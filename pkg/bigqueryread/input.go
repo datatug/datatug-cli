@@ -197,7 +197,7 @@ func driverQuery(query dal.Query, parameters bool) (dal.Query, error) {
 				}
 			case dal.Array:
 				if v.Operator == dal.In {
-					v.Right = dal.Constant{Value: p.Value}
+					v.Right = dal.Constant(p)
 				}
 			case *dal.Array:
 				if p == nil {

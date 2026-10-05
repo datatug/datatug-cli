@@ -366,7 +366,7 @@ func TestBigQueryCobraPrivateExportsAndPermissionDenials(t *testing.T) {
 		t.Fatal(string(raw))
 	}
 	receiptFile := filepath.Join(h.dir, "receipt-fixture.json")
-	raw, e = h.execute("run", "--preview", previewFile, "--approve-digest", preview.ApprovalDigest, "--receipt-out", receiptFile)
+	_, e = h.execute("run", "--preview", previewFile, "--approve-digest", preview.ApprovalDigest, "--receipt-out", receiptFile)
 	if e != nil {
 		t.Fatal(e)
 	}

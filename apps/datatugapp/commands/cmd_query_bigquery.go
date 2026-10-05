@@ -105,7 +105,7 @@ func decodeBigQueryFileLimit(name string, stdin io.Reader, target any, limit int
 	if err != nil {
 		return bigqueryread.ErrInput
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return bigqueryread.DecodeLimit(f, target, limit)
 }
 func bigQueryPolicyOptions(cmd *cobra.Command) (accesspolicies.Options, error) {
@@ -462,7 +462,7 @@ func writeBigQueryExport(path string, value any, dir string) error {
 		return bigqueryread.ErrInput
 	}
 	name := f.Name()
-	defer os.Remove(name)
+	defer func() { _ = os.Remove(name) }()
 	if err = f.Chmod(0600); err == nil {
 		_, err = f.Write(raw)
 	}

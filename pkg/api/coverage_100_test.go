@@ -1930,9 +1930,10 @@ func TestScanDbSchemaAPI(t *testing.T) {
 			{DBCollectionKey: datatug.NewTableKey("widgets", "dbo", "catalog", nil)},
 		},
 	}
-	assert.Panics(t, func() {
-		_ = updateSchemaModel("dev", existingSchema, dbSchema)
-	})
+	// A table the model already holds is an error, not a panic.
+	err = updateSchemaModel("dev", existingSchema, dbSchema)
+	assert.ErrorIs(t, err, errNotImplementedYet)
+	assert.ErrorContains(t, err, `"widgets"`)
 
 	_, err = scanDbCatalog(datatug.ServerRef{Driver: "unsupported"}, params)
 	assert.Error(t, err)
@@ -2663,21 +2664,26 @@ func TestCoverageFinal100_PkgApi(t *testing.T) {
 		}, "p_dm", "dev", "sqlite3", "m1", params)
 		assert.Error(t, err)
 
+		// A project that already holds another database has no model for this one:
+		// the scan adds it, instead of stopping.
 		scanDbCatalogSeam = func(server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
-			return &datatug.DbCatalog{ID: "c_missing", Driver: "sqlite3", Path: "/a.db"}, nil
+			return &datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "c_missing"}}, Driver: "sqlite3", Path: "/a.db", DbModel: "ignored"}}, nil
 		}
-		_, err = UpdateDbSchema(ctx, mockProjectStore{
+		p, err = UpdateDbSchema(ctx, mockProjectStore{
 			loadProjectFileFunc: func(ctx context.Context) (datatug.ProjectFile, error) {
 				return datatug.ProjectFile{}, nil
 			},
 			loadProjectFunc: func(ctx context.Context, o ...datatug.StoreOption) (*datatug.Project, error) {
 				return &datatug.Project{
 					DbDrivers: datatug.ProjDbDrivers{},
-					DbModels:  datatug.DbModels{},
+					DbModels: datatug.DbModels{
+						{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "other_model"}}},
+					},
 				}, nil
 			},
 		}, "p_dm", "dev", "sqlite3", "m_missing", params)
-		assert.Error(t, err)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"other_model", "m_missing"}, p.DbModels.IDs(), "the other database's model stays, this one's is added")
 
 		// hits line 119 and line 323
 		scanDbCatalogSeam = func(server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {

@@ -8,6 +8,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -180,8 +181,10 @@ func TestRunChatProjectNoDatabaseCatalogsConfigured(t *testing.T) {
 
 // TestRunChatProjectCatalogBuildFailure covers runChatProject's
 // buildChatProjectCatalog error branch ("load project explorer"): a valid,
-// unambiguous database resolves, but the project has no queries/ directory
-// at all, so buildChatProjectCatalog's own QueryIDIndex call fails.
+// unambiguous database resolves, but the project's query index cannot be read.
+// (A project with no queries/ directory is not such a project: git keeps no empty
+// folder, so a project that `datatug scan` made has none once pushed, and chat
+// must open it. TestScanJourneySQLite is the proof.)
 func TestRunChatProjectCatalogBuildFailure(t *testing.T) {
 	dir := t.TempDir()
 	write := func(path, content string) {
@@ -194,10 +197,10 @@ func TestRunChatProjectCatalogBuildFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("datatug-project.json", `{"id":"no-queries-dir","title":"No queries dir"}`)
+	write("datatug-project.json", `{"id":"unreadable-queries","title":"Unreadable queries"}`)
 	write("environments/local/local.env.json", `{"id":"local","dbServers":[{"driver":"sqlite3","catalogs":["orders"]}]}`)
 	write("environments/local/catalogs/orders/orders.db.json", fmt.Sprintf(`{"driver":"sqlite3","path":%q}`, filepath.Join(dir, "orders.sqlite")))
-	// Deliberately no "queries" directory.
+	covDSetVar(t, &queryIDIndexFunc, func(string) (map[string]string, error) { return nil, errors.New("queries folder unreadable") })
 
 	cmd := chatCommand()
 	options := chatOptions{project: dir, env: "local", model: defaultChatModel, thinking: "low"}

@@ -5,13 +5,16 @@ import (
 	"path/filepath"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3" // registers the "sqlite3" database/sql driver (CGO)
-
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// These tests make their database files with the pure-Go driver the scan itself
+// opens (the "sqlite" driver scan_db_schema_api.go imports), and import no cgo
+// driver, so they run in a build with cgo off: the "Scan without cgo" job of
+// .github/workflows/golangci.yml runs them so, as a release is built.
 
 // TestScanDbCatalog_SQLite3 proves the sqlite3 scan path is wired end-to-end:
 // scanDbCatalog opens the file, dispatches to the sqlite schemer, and returns
@@ -19,7 +22,7 @@ import (
 func TestScanDbCatalog_SQLite3(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	require.NoError(t, err)
 	_, err = db.Exec(`CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT NOT NULL)`)
 	require.NoError(t, err)
@@ -55,7 +58,7 @@ func TestScanDbCatalog_SQLite3(t *testing.T) {
 func TestScanDbCatalog_SQLite3_IndexesFKsConstraints(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	require.NoError(t, err)
 	for _, q := range []string{
 		`CREATE TABLE artist (id INTEGER PRIMARY KEY, name TEXT UNIQUE)`,
@@ -102,4 +105,31 @@ func TestScanDbCatalog_SQLite3_IndexesFKsConstraints(t *testing.T) {
 
 	// Reverse reference: artist is referenced by album
 	assert.NotEmpty(t, tables["artist"].ReferencedBy, "artist must record that album references it")
+}
+
+// A scan never creates a database: opening a path that is not a file would make
+// SQLite write an empty one there, and the scan of a mistyped path would succeed
+// with no tables.
+func TestScanDbCatalog_SQLite3_RefusesWhatIsNotADatabaseFile(t *testing.T) {
+	server := datatug.ServerRef{Driver: dbconnection.DriverSQLite3}
+	dir := t.TempDir()
+
+	missing := filepath.Join(dir, "typo.db")
+	_, err := scanDbCatalog(server, dbconnection.NewSQLite3ConnectionParams(missing, "main", dbconnection.ModeReadOnly))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "cannot scan SQLite database")
+	assert.ErrorContains(t, err, missing)
+	assert.NoFileExists(t, missing, "the scan must not create the file it was asked to read")
+
+	_, err = scanDbCatalog(server, dbconnection.NewSQLite3ConnectionParams(dir, "main", dbconnection.ModeReadOnly))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "is a folder, not a database file")
+
+	// Parameters with an empty path, and parameters that have no path at all.
+	emptyPathParams, err := dbconnection.NewConnectionString("sqlserver", "host1", "user", "pass", "db1")
+	require.NoError(t, err)
+	_, err = scanDbCatalog(server, emptyPathParams)
+	assert.ErrorContains(t, err, "name the database file")
+	_, err = scanDbCatalog(server, struct{ dbconnection.Params }{emptyPathParams})
+	assert.ErrorContains(t, err, "name the database file")
 }

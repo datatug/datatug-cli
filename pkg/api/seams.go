@@ -22,6 +22,7 @@ var homedirDir = homedir.Dir
 var randRead = rand.Read
 var executionstoreNewManager = executionstore.NewManager
 var filepathRel = filepath.Rel
+var filepathAbs = filepath.Abs
 var filepathGlob = filepath.Glob
 var dbcopyParse = dbcopy.Parse
 var updateSchemaModelSeam = updateSchemaModel

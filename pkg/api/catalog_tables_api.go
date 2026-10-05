@@ -69,6 +69,10 @@ type CatalogTables struct {
 type CatalogColumn struct {
 	Name   string `json:"name"`
 	DbType string `json:"dbType,omitempty"`
+	// PrimaryKeyPosition is the column's 1-based place in its table's primary
+	// key, read from the columns file's pkPosition; 0 when it is not part of
+	// the key.
+	PrimaryKeyPosition int `json:"pkPosition,omitempty"`
 }
 
 // CatalogRelation describes one stored table or view and its columns.
@@ -198,9 +202,10 @@ func readCatalogColumns(kindDir, schema, name string) ([]CatalogColumn, error) {
 
 // catalogDbModelFile is the minimal shape this reads out of
 // environments/<env>/catalogs/<catalog>/<catalog>.db.json — a
-// datatug.DbCatalogBase-shaped file every demo/real project already writes
-// (e.g. datatug-demo-projects' chinook-local.db.json:
-// {"driver":"sqlite3","path":"...","dbModel":"chinook"}). Decoded locally,
+// datatug.DbCatalogBase-shaped file that `datatug scan` writes and every
+// demo project has (e.g. datatug-demo-projects' chinook-local.db.json:
+// {"driver":"sqlite3","path":"...","dbModel":"chinook"}); its fields are in
+// "Project layout written by a scan" of spec/features/cli/scan/README.md. Decoded locally,
 // into only the one field this needs, rather than via
 // datatug.DbCatalogBase itself, so this stays independent of that struct's
 // own (stricter) Validate() rules.
@@ -221,8 +226,10 @@ func GetCatalogTables(projectDir, environmentID, catalogID string) (*CatalogTabl
 	dbModelDir := filepath.Join(projectDir, storage.DbModelsFolder, dbModelID)
 	// "tables"/"views": datatug-core's own TablesFolder/ViewsFolder
 	// constants are commented out (pkg/storage/file_names.go) — these are
-	// the literal directory names datatug-cli's scan/demo tooling already
-	// writes (see datatug-demo-projects/demo-project-1/dbmodels/chinook/main/tables/*).
+	// the literal folder names of the layout `datatug scan` writes
+	// (scan_layout.go) and the demo project has; the layout is written down
+	// once, in "Project layout written by a scan" of
+	// spec/features/cli/scan/README.md.
 	tables, err := listCatalogTables(dbModelDir, "tables", "BASE TABLE")
 	if err != nil {
 		return nil, err

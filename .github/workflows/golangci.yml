@@ -140,3 +140,26 @@ jobs:
           # tests (github.com/mattn/go-sqlite3) require cgo.
           CGO_ENABLED: '1'
         run: ./scripts/check-hermetic-tests.sh
+
+  # A release is built with CGO_ENABLED=0 (.goreleaser.yaml), where the cgo SQLite
+  # driver (github.com/mattn/go-sqlite3, registered as "sqlite3") is a stub that
+  # fails on first use. A scan that opened that driver could read no SQLite file in
+  # any released binary, while every test of strongo_workflow passed, as it runs with
+  # cgo on. This job runs the scan's SQLite tests, and the journey of a first user (a
+  # SQLite file scanned into a folder, then read the way chat, saved queries, serve and
+  # the web app read it), in a build with cgo off. Those tests make their database
+  # files with the pure-Go driver and import no cgo one, so cgo off is all they need.
+  scan-without-cgo:
+    name: Scan without cgo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          # Must be >= go.mod's `go` directive, same constraint as release.yml.
+          go-version: '1.27.1'
+          cache: true
+      - name: Scan a SQLite file with cgo off
+        env:
+          CGO_ENABLED: '0'
+        run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney' ./pkg/api/ ./apps/datatugapp/commands/

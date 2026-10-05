@@ -5,7 +5,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/url"
 
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -18,8 +17,7 @@ const maxChatInterpretBody = 20 << 10
 func chatInterpretHandler(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
 	if origin != "" {
-		u, err := url.Parse(origin)
-		if err != nil || u.String() != origin || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || !IsSupportedOrigin(origin) {
+		if !IsSupportedOrigin(origin) {
 			writeChatError(w, http.StatusForbidden, "origin is not allowed")
 			return
 		}

@@ -52,7 +52,7 @@ func layoutProject(t *testing.T, dbPath string, schemas ...*datatug.DbSchema) *d
 		},
 		Schemas: schemas,
 	}
-	project, err := newProjectWithDatabase("dev", datatug.ServerRef{Driver: "sqlite3"}, catalog)
+	project, err := newProjectWithDatabase("shop-project", "dev", datatug.ServerRef{Driver: "sqlite3"}, catalog)
 	require.NoError(t, err)
 	return project
 }
@@ -158,7 +158,7 @@ func TestSaveScannedProject_KeepsThePathOfOtherDrivers(t *testing.T) {
 		Schemas: datatug.DbSchemas{layoutSchema("dbo", []*datatug.CollectionInfo{layoutTable("Customer", layoutColumn("id", "int", 1))}, nil)},
 	}
 	server := datatug.ServerRef{Driver: "sqlserver", Host: "db.internal", Port: 1433}
-	project, err := newProjectWithDatabase("prod", server, catalog)
+	project, err := newProjectWithDatabase("shop-project", "prod", server, catalog)
 	require.NoError(t, err)
 
 	require.NoError(t, SaveScannedProject(context.Background(), layoutStore(projectDir), projectDir, project, ScannedCatalog{Driver: "sqlserver", Environment: "prod", ID: "shop"}, &bytes.Buffer{}))

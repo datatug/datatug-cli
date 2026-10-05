@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,6 +31,12 @@ type ScannedCatalog struct {
 	Driver      string // the driver of the scan, such as "sqlite3"
 	Environment string // the environment the scan was run for
 	ID          string // the catalog (database) id, as given to --db
+
+	// Server is the server the scan read, as ScannedServer says it. It tells which
+	// server holds the catalog when the project has more than one of the driver, such as
+	// two SQL Server hosts that each have a database of this id; it is not needed
+	// otherwise.
+	Server datatug.ServerRef
 }
 
 // SaveScannedProject saves project, a project UpdateDbSchema returned, and then
@@ -43,7 +50,45 @@ type ScannedCatalog struct {
 // name longer than a file can have, is left out of the project and named on
 // warnings; the others are still written. Nothing is written when the project is
 // invalid.
+//
+// A scan of an environment keeps what the scans of the other environments of the same
+// database model wrote (see mergeColumns), and takes back what its own earlier scans
+// wrote of a table or view that the database no longer has (see planRetractions): the
+// folder of one that no environment has is removed, and said on warnings, one line
+// each. Nothing is written when a folder that is to be removed is, or is inside, a link.
+//
+// The environment, the catalog and the database model of the scan are names of folders
+// of the project, and one that is not a plain name (see CheckScanName), or that differs
+// only by case from one the project has (see CheckScanNamesAgainstProject), is refused
+// before anything is read, written or removed: this function removes folders, and it
+// does not take its ids on trust from whoever calls it.
 func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, projectDir string, project *datatug.Project, scanned ScannedCatalog, warnings io.Writer) error {
+	server, catalog := findScannedCatalog(project, scanned)
+	names := []struct{ flag, value string }{{"--env", scanned.Environment}, {"--db", scanned.ID}}
+	model := ""
+	if catalog != nil {
+		model = catalog.DbModel
+		names = append(names, struct{ flag, value string }{"--dbmodel", model})
+	}
+	for _, name := range names {
+		if err := CheckScanName(name.flag, name.value); err != nil {
+			return err
+		}
+	}
+	if err := CheckScanNamesAgainstProject(projectDir, scanned.Environment, scanned.ID, model); err != nil {
+		return err
+	}
+	var layout scannedLayout
+	var retractions []retraction
+	if catalog != nil {
+		var err error
+		layout = layoutOfCatalog(catalog, warnings)
+		retractions, err = planRetractions(projectDir, catalog.DbModel, scanned.Environment, layout, otherCatalogsOfModel(project, catalog.DbModel, scanned.Environment, catalog.ID), warnings)
+		if err != nil {
+			return fmt.Errorf("failed to save datatug project [%v]: %w", project.ID, err)
+		}
+	}
+
 	saved := *project
 	saved.DbModels = make(datatug.DbModels, len(project.DbModels))
 	for i, model := range project.DbModels {
@@ -54,8 +99,6 @@ func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, project
 	if err := saveKeepingReadme(ctx, store, projectDir, &saved); err != nil {
 		return fmt.Errorf("failed to save datatug project [%v]: %w", project.ID, err)
 	}
-
-	server, catalog := findScannedCatalog(project, scanned)
 	if catalog == nil {
 		return fmt.Errorf("failed to save datatug project [%v]: the scan of catalog %q (driver %q) is not in the project", project.ID, scanned.ID, scanned.Driver)
 	}
@@ -75,22 +118,16 @@ func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, project
 		return fmt.Errorf("failed to save the catalog file of %q: %w", scanned.ID, err)
 	}
 
-	schemas := foldersThatFit(catalog.Schemas,
-		func(schema *datatug.DbSchema) string { return schema.ID },
-		folderNameProblem,
-		func(schema *datatug.DbSchema, reason string) {
-			_, _ = fmt.Fprintf(warnings, "warning: schema %q is left out of the project: %s\n", schema.ID, reason)
-		})
-	for _, schema := range schemas {
-		relations := []struct {
-			folder string
-			tables []*datatug.CollectionInfo
-		}{{"tables", schema.Tables}, {"views", schema.Views}}
-		for _, relation := range relations {
-			for _, table := range tablesThatFit(schema.ID, relation.folder, relation.tables, warnings) {
-				if err := writeScannedColumnsFile(projectDir, catalog.DbModel, schema.ID, relation.folder, scanned.Environment, table); err != nil {
-					return err
-				}
+	// What the database no longer has goes before what it has is written: on a file
+	// system that does not tell a folder named Customer from one named customer, the
+	// folder of a renamed table is the folder of the new name.
+	if err := applyRetractions(retractions, warnings); err != nil {
+		return err
+	}
+	for _, folder := range layout.folders {
+		for _, table := range folder.tables {
+			if err := writeScannedColumnsFile(projectDir, catalog.DbModel, folder.schema, folder.kind, scanned.Environment, table); err != nil {
+				return err
 			}
 		}
 	}
@@ -121,13 +158,24 @@ func saveKeepingReadme(ctx context.Context, store datatug.ProjectStore, projectD
 }
 
 // findScannedCatalog is the catalog of project that scanned names, with the
-// server that holds it, or nil.
+// server that holds it, or nil. When the project has more than one server of the
+// driver it is the one the scan read (scanned.Server): the catalog of another server
+// that has a database of the same id is not the one the scan found.
 func findScannedCatalog(project *datatug.Project, scanned ScannedCatalog) (*datatug.ProjDbServer, *datatug.DbCatalog) {
 	driver := project.DbDrivers.GetByID(scanned.Driver)
 	if driver == nil {
 		return nil, nil
 	}
-	for _, server := range driver.Servers {
+	servers := driver.Servers
+	if len(servers) > 1 {
+		ref := scanned.Server
+		ref.Driver = scanned.Driver
+		servers = datatug.ProjDbServers{}
+		if server := driver.Servers.GetProjDbServer(ref); server != nil {
+			servers = datatug.ProjDbServers{server}
+		}
+	}
+	for _, server := range servers {
 		if catalog := server.Catalogs.GetByID(scanned.ID); catalog != nil {
 			return server, catalog
 		}
@@ -159,6 +207,75 @@ func foldersThatFit[T any](items []T, name func(T) string, problem func(name str
 		kept = append(kept, item)
 	}
 	return kept
+}
+
+// scannedFolder is the tables, or the views, of one schema that a scan writes: the
+// ones that fit as folders.
+type scannedFolder struct {
+	schema string
+	kind   string // "tables" or "views", the name of the folder
+	tables []*datatug.CollectionInfo
+}
+
+// folderKey names the folder of one table or view in a model: <schema>/<kind>/<name>.
+type folderKey struct{ schema, kind, name string }
+
+// scannedLayout is what a scan writes of a catalog, in the order it writes it.
+type scannedLayout struct {
+	folders []scannedFolder
+	written map[folderKey]bool
+}
+
+// has is whether the scan writes the folder of the table or view name, of kind
+// "tables" or "views", in schema.
+func (l scannedLayout) has(schema, kind, name string) bool {
+	return l.written[folderKey{schema, kind, name}]
+}
+
+// layoutOfCatalog is the schemas, tables and views of catalog that can be written,
+// in name order. Each one that cannot is named on warnings, with the reason.
+func layoutOfCatalog(catalog *datatug.DbCatalog, warnings io.Writer) scannedLayout {
+	layout := scannedLayout{written: map[folderKey]bool{}}
+	schemas := foldersThatFit(catalog.Schemas,
+		func(schema *datatug.DbSchema) string { return schema.ID },
+		folderNameProblem,
+		func(schema *datatug.DbSchema, reason string) {
+			_, _ = fmt.Fprintf(warnings, "warning: schema %q is left out of the project: %s\n", schema.ID, reason)
+		})
+	for _, schema := range schemas {
+		relations := []struct {
+			folder string
+			tables []*datatug.CollectionInfo
+		}{{"tables", schema.Tables}, {"views", schema.Views}}
+		for _, relation := range relations {
+			fitting := tablesThatFit(schema.ID, relation.folder, relation.tables, warnings)
+			layout.folders = append(layout.folders, scannedFolder{schema: schema.ID, kind: relation.folder, tables: fitting})
+			for _, table := range fitting {
+				layout.written[folderKey{schema.ID, relation.folder, table.Name()}] = true
+			}
+		}
+	}
+	return layout
+}
+
+// otherCatalogsOfModel is the ids of the catalogs, other than catalogID, that the
+// database model feeds in environment: a model can map several databases of an
+// environment, and then no scan of one of them knows what the others have.
+func otherCatalogsOfModel(project *datatug.Project, model, environment, catalogID string) (others []string) {
+	dbModel := project.DbModels.GetByID(model)
+	if dbModel == nil {
+		return nil
+	}
+	modelEnv := dbModel.Environments.GetByID(environment)
+	if modelEnv == nil {
+		return nil
+	}
+	for _, catalog := range modelEnv.DbCatalogs {
+		if catalog.ID != catalogID {
+			others = append(others, catalog.ID)
+		}
+	}
+	return others
 }
 
 // tablesThatFit is the tables (or views) that can be written as folders of one
@@ -237,26 +354,28 @@ func folderNameProblem(name string) string {
 // writeScannedColumnsFile writes the columns file of one table or view, in the folder the
 // readers look in: dbmodels/<model>/<schema>/<tables|views>/<name>/<schema>.<name>.columns.json.
 // It is datatug-core's own file type for it, with the state of each column in the
-// environment of the scan, as the demo's files have. The columns are valid: the
-// project that holds them was validated by SaveProject.
+// environment of the scan, as the demo's files have, and with the state in the other
+// environments that an earlier scan wrote (see mergeColumns). A file that is as it
+// would be written is not written again. The columns are valid: the project that
+// holds them was validated by SaveProject.
 func writeScannedColumnsFile(projectDir, model, schema, folder, environment string, table *datatug.CollectionInfo) error {
-	columns := make(datatug.ColumnModels, len(table.Columns))
-	for i, column := range table.Columns {
-		columns[i] = &datatug.ColumnModel{
-			ColumnInfo: *column,
-			ByEnv:      datatug.StateByEnv{environment: &datatug.EnvState{Status: "exists"}},
-		}
-	}
-	file := filestore.TableModelColumnsFile{Columns: columns}
 	name := table.Name()
 	dir := filepath.Join(projectDir, storage.DbModelsFolder, model, schema, folder, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create the folder of %s %q of schema %q: %w", relationKind(folder), name, schema, err)
 	}
+	path := filepath.Join(dir, storage.JsonFileName(schema+"."+name, storage.ColumnsFileSuffix))
+	// A file that is not there, or cannot be read or is not a columns file, has no state
+	// to keep: what is written in its place says what the scan found.
+	existing, _ := os.ReadFile(path)
+	previous, _ := parseColumnsFile(existing)
+	file := filestore.TableModelColumnsFile{Columns: mergeColumns(previous, table.Columns, environment)}
 	// Columns, their state by environment and their plain fields cannot fail to marshal.
 	data, _ := json.MarshalIndent(file, "", "\t")
-	path := filepath.Join(dir, storage.JsonFileName(schema+"."+name, storage.ColumnsFileSuffix))
 	content := append(data, '\n')
+	if bytes.Equal(existing, content) {
+		return nil
+	}
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		return fmt.Errorf("failed to write the columns file of %s %q of schema %q: %w", relationKind(folder), name, schema, err)
 	}

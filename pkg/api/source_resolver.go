@@ -77,7 +77,7 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		if err != nil {
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
-		return dbcopy.LocalSourceURL("sqlite", path), nil
+		return LocalSQLiteSourceURL(path), nil
 	case "ingitdb":
 		if catalog.Path == "" {
 			return "", fmt.Errorf("catalog %q has no path configured for its ingitdb driver", catalog.ID)
@@ -120,6 +120,23 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 	default:
 		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb or postgres)", catalog.Driver)
 	}
+}
+
+// LocalSQLiteSourceURL is the "sqlite://" source URL of the SQLite file at path, the
+// path of a catalog as ResolveCatalogPath returns it: a URL that dbcopy.Parse reads
+// back to that path. A file name may hold "%", "#" and "?", which a URL does not
+// read as part of a path (a file named a#b.db is the file a, and one named a%23b.db
+// is a#b.db), so they are written as percent-encoded, and then the path starts like
+// one ("./") when it is relative, as the host of a URL cannot be encoded.
+func LocalSQLiteSourceURL(path string) string {
+	if !strings.ContainsAny(path, "%#?") {
+		return dbcopy.LocalSourceURL("sqlite", path)
+	}
+	escaped := strings.NewReplacer("%", "%25", "#", "%23", "?", "%3F").Replace(path)
+	if !filepath.IsAbs(path) && !strings.HasPrefix(path, "./") && !strings.HasPrefix(path, "../") {
+		escaped = "./" + escaped
+	}
+	return dbcopy.LocalSourceURL("sqlite", escaped)
 }
 
 // loadQueryDocument reads a saved query's text/document sidecar file

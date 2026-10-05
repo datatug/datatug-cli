@@ -37,3 +37,47 @@ func UnsafeIdentifiers() []UnsafeIdentifier {
 		{"too long", strings.Repeat("a", 129)},
 	}
 }
+
+// UnsafePathIdentifiers returns the texts that a check of an ID made of folders (a
+// recordset definition, a folder path) must refuse: every unsafe identifier but the
+// text that is a valid path of two plain names, and the paths whose own folders are
+// unsafe, empty or both.
+func UnsafePathIdentifiers() []UnsafeIdentifier {
+	var out []UnsafeIdentifier
+	for _, unsafe := range UnsafeIdentifiers() {
+		if unsafe.ID == "a/b" {
+			continue
+		}
+		out = append(out, unsafe)
+	}
+	return append(out,
+		UnsafeIdentifier{"empty folder", "a//b"},
+		UnsafeIdentifier{"trailing slash", "a/"},
+		UnsafeIdentifier{"current directory folder", "a/./b"},
+		UnsafeIdentifier{"parent directory folder", "a/../b"},
+		UnsafeIdentifier{"hidden folder", "a/.hidden"},
+		UnsafeIdentifier{"backslash after a folder", `a/b\c`},
+		UnsafeIdentifier{"too many folders", strings.Repeat("a/", 300) + "a"},
+	)
+}
+
+// UnsafeHosts returns the texts that a check of the host of a db server must refuse:
+// the unsafe identifiers (but the name of 129 letters, which is a host name), the
+// shapes that are not a host (a space, user information, a path, a zone) and a host
+// over the 253 characters a name can have.
+func UnsafeHosts() []UnsafeIdentifier {
+	var out []UnsafeIdentifier
+	for _, unsafe := range UnsafeIdentifiers() {
+		if unsafe.Name == "too long" {
+			continue
+		}
+		out = append(out, unsafe)
+	}
+	return append(out,
+		UnsafeIdentifier{"space", "a b"},
+		UnsafeIdentifier{"user information", "user@host"},
+		UnsafeIdentifier{"path after a host", "host/x"},
+		UnsafeIdentifier{"zone", "fe80::1%eth0"},
+		UnsafeIdentifier{"too long for a host", strings.Repeat("a", 254)},
+	)
+}

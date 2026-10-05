@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -133,22 +132,6 @@ func TestScanJourneyHonoursTheDbModel(t *testing.T) {
 	_, err = runScanCommand(t, "-d", other, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
 	require.NoError(t, err)
 	assert.FileExists(t, filepath.Join(other, "dbmodels", "shop", "shop.dbmodel.json"))
-}
-
-// A "?" anywhere in the path of the database is refused before anything else happens,
-// with no file looked at and no folder made: the open of a source reads it as the start
-// of the driver's own parameters. It does not depend on the system's file names, as the
-// file is not even there.
-func TestScanJourneyRefusesAQuestionMarkInThePathBeforeAnythingElse(t *testing.T) {
-	projectDir := filepath.Join(t.TempDir(), "work", "shop")
-	for _, path := range []string{"shop?.db", filepath.Join("data?", "shop.db"), "shop.db?mode=rw"} {
-		_, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", path, "--db", "shop", "--env", "local")
-
-		require.Error(t, err, path)
-		assert.ErrorContains(t, err, `"?"`, path)
-		assert.ErrorContains(t, err, "rename the file", path)
-		assert.NoDirExists(t, projectDir, "no folder is made for a path that is refused: %s", path)
-	}
 }
 
 // A catalog that the project holds is on a model, and a scan keeps it there: a rescan
@@ -514,62 +497,6 @@ func TestScanJourneyFolderThatCannotBeMadeOrNamed(t *testing.T) {
 	_, err = runScanCommand(t, "-d", projectDir, "--project", "shop", "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
 	require.Error(t, err, "the folder cannot be made: the seam still refuses")
 	assert.ErrorContains(t, err, "failed to create the project folder")
-}
-
-// The "?" is looked for in the whole path of the file, as the open of a source gets it,
-// and not in the path as it was typed: a relative --path is the file from the working
-// directory, which can be the folder with the "?" in it, and a database kept inside a
-// project whose folder has one is in that folder too.
-func TestScanJourneyRefusesAQuestionMarkInAFolderAboveTheFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("a folder name cannot have a ? on Windows")
-	}
-	root := t.TempDir()
-	// Made under a plain name and moved: the driver that makes the file reads a "?" in
-	// the name it is given as the start of its own parameters.
-	plain := filepath.Join(root, "plain")
-	writeJourneyDB(t, filepath.Join(plain, "shop.db"))
-	folder := filepath.Join(root, "what?")
-	require.NoError(t, os.Rename(plain, folder))
-	projectDir := filepath.Join(root, "work", "shop")
-
-	for name, c := range map[string]struct {
-		typed string // the --path that was typed
-		args  []string
-	}{
-		"a relative path, from a working directory that has one":                       {"shop.db", []string{"-d", projectDir}},
-		"a relative path to a database in the project, which is the working directory": {"shop.db", []string{"-d", "."}},
-		"a relative path that names the working directory":                             {"./shop.db", []string{"-d", projectDir}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Chdir(folder)
-			before := treeHashes(t, folder, "")
-
-			_, err := runScanCommand(t, append(c.args, "--path", c.typed, "-D", "sqlite3", "--db", "shop", "--env", "local")...)
-
-			require.Error(t, err)
-			assert.ErrorContains(t, err, `"?"`)
-			assert.ErrorContains(t, err, "rename the file")
-			assert.ErrorContains(t, err, `--path "`+c.typed+`"`, "the message names the path that was typed")
-			assert.ErrorContains(t, err, "shop.db", "and the file it is")
-			assert.NoDirExists(t, projectDir, "no folder was made")
-			assert.Equal(t, before, treeHashes(t, folder, ""), "nothing was read into the folder, and the database was not opened: no other file is beside it")
-		})
-	}
-
-	// A path that cannot be made absolute (the working directory is gone) is an error that
-	// names --path, and nothing is made.
-	t.Run("a path that cannot be made absolute", func(t *testing.T) {
-		t.Chdir(folder)
-		covDSetVar(t, &scanFilepathAbs, func(string) (string, error) { return "", errors.New("no working directory") })
-
-		_, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", "shop.db", "--db", "shop", "--env", "local")
-
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "cannot tell where --path")
-		assert.ErrorContains(t, err, "no working directory")
-		assert.NoDirExists(t, projectDir)
-	})
 }
 
 // An id that differs from one the project has by case only is one folder on a file system

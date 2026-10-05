@@ -82,10 +82,29 @@ func resolveStoreID(explicit, projectID string, configured []string) (string, er
 	case 1:
 		return configured[0], nil
 	case 0:
-		return "", fmt.Errorf("%w: no store configured for project %q", ErrUnknownStoreID, dbcopy.SourceIDDisplay(projectID))
+		return "", errNoStoreConfigured(projectID)
 	default:
 		return "", fmt.Errorf("%w: project %q", ErrAmbiguousStore, dbcopy.SourceIDDisplay(projectID))
 	}
+}
+
+// errNoStoreConfigured is the answer for a project that nothing serves (see
+// ResolveStoreID), shown with the project's ID only when it is a plain name.
+func errNoStoreConfigured(projectID string) error {
+	return fmt.Errorf("%w: no store configured for project %q", ErrUnknownStoreID, dbcopy.SourceIDDisplay(projectID))
+}
+
+// servedProjectDir returns the directory of a project this process serves, and for any
+// other project the answer of a route that resolves its store (see ResolveStoreID).
+// An entry that takes the project from the request itself, and so is not reached
+// through such a route, asks it before it asks for a project store: a project the
+// process does not serve has no folder to open, and its ID is not turned into one.
+func servedProjectDir(projectID string) (string, error) {
+	dir, served := projectDir(projectID)
+	if !served {
+		return "", errNoStoreConfigured(projectID)
+	}
+	return dir, nil
 }
 
 // storeFor resolves storeID via storage.NewDatatugStore — the mechanism
@@ -108,6 +127,9 @@ func storeFor(storeID string) (storage.Store, error) {
 // every remaining storage.GetProjectStore(ctx, storeID, projectID) call
 // site — see storeFor's doc comment.
 func projectStoreForID(storeID, projectID string) (datatug.ProjectStore, error) {
+	if err := ValidateProjectIdentifier("project", projectID); err != nil {
+		return nil, err
+	}
 	store, err := storeFor(storeID)
 	if err != nil {
 		return nil, err

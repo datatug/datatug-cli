@@ -910,10 +910,19 @@ func TestExecuteSelectHandler(t *testing.T) {
 		executeSelectHandler(w, r)
 	})
 
-	t.Run("missing proj uses default", func(t *testing.T) {
-		defer func() { recover() }() //nolint:errcheck
+	t.Run("missing proj is left empty, for the request's own answer", func(t *testing.T) {
+		var got api.SelectRequest
+		saved := executeSelectFunc
+		defer func() { executeSelectFunc = saved }()
+		executeSelectFunc = func(_ context.Context, _ string, request api.SelectRequest) (api.QueryResultResponse, error) {
+			got = request
+			return api.QueryResultResponse{}, nil
+		}
 		w := httptest.NewRecorder()
 		r := makeRequest(http.MethodGet, "/exec/select?env=dev&db=mydb", "")
 		executeSelectHandler(w, r)
+		if got.Project != "" || got.Environment != "dev" || got.Database != "mydb" {
+			t.Errorf("got Project=%q Environment=%q Database=%q, want no project and dev/mydb", got.Project, got.Environment, got.Database)
+		}
 	})
 }

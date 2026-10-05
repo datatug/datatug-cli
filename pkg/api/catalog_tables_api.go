@@ -291,6 +291,12 @@ func catalogDbModel(projectDir, environmentID, catalogID string) (string, error)
 	if file.DbModel == "" {
 		return "", LookupError("catalog %q (environment %q) has no dbModel set", nil, catalogID, environmentID)
 	}
+	// The model is joined into the path of its tables, and is read from a file a project
+	// holds, which may have come from anywhere: only a plain name is used, and the answer
+	// names the catalog and nothing of the model.
+	if !dbcopy.IsPlainSourceID(file.DbModel) {
+		return "", LookupError("catalog %q (environment %q) names a database model that is not a plain name", nil, catalogID, environmentID)
+	}
 	return file.DbModel, nil
 }
 

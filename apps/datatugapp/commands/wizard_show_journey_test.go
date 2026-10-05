@@ -43,11 +43,22 @@ func TestProjectCreatedInTheWizardIsReadByTheRestOfTheCLI(t *testing.T) {
 }
 
 // A project whose project file is in a folder datatug of the project folder (what the wizard wrote
-// before) is not found where the rest of the CLI looks.
+// before) is not found where the rest of the CLI looks, and the answer says where the file is and where
+// it belongs, by the folder and by the registered name.
 func TestShowDoesNotLookOneFolderDeeper(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	folder := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(folder, "datatug"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(folder, "datatug", "datatug-project.json"), []byte(`{"id":"deep"}`), 0o644))
-	_, _, err := runShowCommand(t, "-d", folder)
+	want := `"` + folder + `" is not a DataTug project: its project file is in the folder datatug, where an earlier version of the terminal UI wrote it; move datatug/datatug-project.json up into "` + folder + `"`
+	stdout, _, err := runShowCommand(t, "-d", folder)
 	assert.Equal(t, 3, exitCodeOf(t, err))
+	require.Error(t, err)
+	assert.Equal(t, want, err.Error())
+	assert.Empty(t, stdout)
+
+	registerProjectForTest(t, "deep", folder)
+	_, _, err = runShowCommand(t, "-p", "deep")
+	assert.Equal(t, 3, exitCodeOf(t, err))
+	assert.EqualError(t, err, want)
 }

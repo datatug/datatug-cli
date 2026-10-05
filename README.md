@@ -28,11 +28,13 @@ brew install --cask datatug/tap/datatug
 
 Then scan a database, look at what was scanned, and run a query. Every command and every output block below is run
 by a test of this repository ([quickstart_doc_test.go](apps/datatugapp/commands/quickstart_doc_test.go)), so what you
-read here is what the CLI prints.
+read here is what the CLI prints. The test runs the commands in the process of the test, and runs step 4 against a
+stand-in for the PostgreSQL server (see there).
 
-**1. Scan a database.** The sample is a SQLite file made with the `sqlite3` program (any SQLite file works, and
-`sqlite3` comes with macOS and most Linux systems). The scan writes a project, a folder of plain files, and prints its
-progress on stderr and nothing on stdout.
+**1. Scan a database.** The sample is a SQLite file made with the `sqlite3` program (any SQLite file works). `sqlite3`
+comes with macOS; on Linux install the package `sqlite3` (`apt install sqlite3`, `dnf install sqlite`), or use a SQLite
+file you have. The scan writes a project, a folder of plain files, and prints its progress on stderr and nothing on
+stdout.
 
 ```console
 $ sqlite3 shop.db "
@@ -81,7 +83,9 @@ __dalgo_record_id  2           Alan       Turing
 **4. Scan PostgreSQL the same way.** Put the connection URL in an environment variable whose name starts with
 `DATATUG_`, and pass the name of the variable with `--driver postgres --dsn-env`. The project stores the name of the
 variable and never the URL: the host, the port, the user and the password stay in your environment. A PostgreSQL scan
-reads the tables of the schema `public`.
+reads the tables of the schema `public`. The output below is for a database with the two tables Customer and Invoice;
+the output for your database lists its own tables. The test of this README runs this step against a stand-in for the
+server, and the scan of a real server is tested by the CI job "Journey (PostgreSQL)".
 
 ```console
 $ export DATATUG_SHOP_URL='postgres://USER:PASSWORD@localhost:5432/shop'
@@ -176,7 +180,10 @@ fleet-wide counterpart to `self-update`: `datatug self-update` is exactly
 the two never disagree. See
 [spec/features/cli/install](spec/features/cli/install/README.md).
 
-## What you can do with DataTug
+## Where DataTug is going
+
+This is the direction of the product, not a list of what the released CLI does: what works today is in the
+[Quick start](#quick-start) and in [Supported databases](#supported-databases).
 
 - Explore data everywhere — SQL databases, cloud data sources, logs, and APIs (HTTP / REST)
 - CLI-first workflows with a Web UI — dashboards, charts, and shared views
@@ -275,7 +282,8 @@ never table names or question text, and is sent only when a decision was actuall
 This is an agent service for https://datatug.app that you can run on your local machine, or some server to allow DataTug
 app to scan databases & execute SQL requests.
 
-It can be run with your user account credentials (*e.g. trusted connection*) or under some service account.
+It runs on your machine under your user account. The connection URL of a PostgreSQL source stays in an environment
+variable of yours, and a project never holds it.
 
 ## Would you steal my data?
 
@@ -331,10 +339,12 @@ the web app talks to (see [spec/features/cli/serve](spec/features/cli/serve/READ
 |---|---|---|
 | SQLite | supported | supported |
 | PostgreSQL | supported: the tables of the schema `public`; the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_POSTGRES=1` |
-| SQL Server | not supported yet | not supported yet |
+| inGitDB | not supported yet | supported: `--db ingitdb://./path-to-the-database` |
+| OpenVaultDB | not supported yet | not tested in this release |
+| SQL Server | accepted by `scan -D sqlserver`, not tested in this release | not supported yet |
 | Firestore | not supported yet | not supported yet |
 
-Other databases are not supported by this release. We are open for pull requests.
+A database that is not in this table is not supported by this release. We are open for pull requests.
 
 ## For developers
 
@@ -342,21 +352,10 @@ Read [README-dev.md](docs/README-dev.md) for details on how to setup, debug, and
 
 ## Sample Databases
 
-### By Database Platform
+SQLite samples to scan and query:
 
-- SQLite
-    - [Chinook Database](https://github.com/lerocha/chinook-database)
-    - [Northwind](https://github.com/jpwhite3/northwind-SQLite3)
-- MS SQL Server
-    - [Northwind](https://github.com/Microsoft/sql-server-samples/tree/master/samples/databases/northwind-pubs)
-- Oracle
-    - [Northwind](https://github.com/dshifflet/NorthwindOracle_DDL)
-
-### Northwind Database
-
-- [SQLite](https://github.com/jpwhite3/northwind-SQLite3)
-- [MS SQL Server](https://github.com/Microsoft/sql-server-samples/tree/master/samples/databases/northwind-pubs)
-- [Oracle](https://github.com/dshifflet/NorthwindOracle_DDL)
+- [Chinook Database](https://github.com/lerocha/chinook-database)
+- [Northwind](https://github.com/jpwhite3/northwind-SQLite3)
 
 ## Open Source Libraries we use
 

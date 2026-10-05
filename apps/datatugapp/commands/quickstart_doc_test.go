@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"log"
 	"net/url"
@@ -34,9 +33,17 @@ import (
 // transcript that runs any other fails the test: datatug (the command tree of this package, in this
 // process), sqlite3 (which runs its second argument on the database file of its first, as the
 // program of that name does) and export (which sets an environment variable of the quick start).
-// A block that is not a console block, such as the installation commands, is not run.
+// The only other block of the section is the installation command, which is not run: it must be the one
+// ```bash block, and say exactly quickStartInstall. A block of any other kind (or with no kind) fails the
+// test, so that changing the kind of a block never takes it out of the test without a word.
 
 const quickStartDatabaseVariable = "DATATUG_SHOP_URL"
+
+// quickStartInstall is the one command of the quick start that is shown and not run.
+const quickStartInstall = "brew install --cask datatug/tap/datatug"
+
+// quickStartAccessLine is the line the README says the query writes to stderr.
+const quickStartAccessLine = "access: running without access policies"
 
 // quickStartSection is the README from the heading "## Quick start" to the next heading of the same level.
 func quickStartSection(readme string) (string, error) {
@@ -61,24 +68,26 @@ func quickStartSection(readme string) (string, error) {
 	return strings.Join(lines[start:end], "\n"), nil
 }
 
-// consoleBlocks are the contents of the ```console blocks of text, in order.
-func consoleBlocks(text string) (blocks []string) {
+// fencedBlock is a fenced block of the README: its kind (the word after the three backticks) and its lines.
+type fencedBlock struct {
+	kind string
+	body string
+}
+
+// fencedBlocks are the fenced blocks of text, in order.
+func fencedBlocks(text string) (blocks []fencedBlock) {
 	var current []string
-	inConsole, inOther := false, false
+	kind, in := "", false
 	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
 		switch {
-		case inConsole && strings.HasPrefix(line, "```"):
-			blocks = append(blocks, strings.Join(current, "\n"))
-			current, inConsole = nil, false
-		case inConsole:
+		case in && trimmed == "```":
+			blocks = append(blocks, fencedBlock{kind: kind, body: strings.Join(current, "\n")})
+			current, in = nil, false
+		case in:
 			current = append(current, line)
-		case inOther && strings.HasPrefix(line, "```"):
-			inOther = false
-		case inOther:
-		case strings.TrimSpace(line) == "```console":
-			inConsole = true
-		case strings.HasPrefix(line, "```"):
-			inOther = true
+		case strings.HasPrefix(trimmed, "```"):
+			kind, in = strings.TrimSpace(strings.TrimPrefix(trimmed, "```")), true
 		}
 	}
 	return blocks
@@ -175,24 +184,47 @@ func quickStartPostgres() *fakePgDatabase {
 	return &fakePgDatabase{relations: []pgRelation{customer, invoice}}
 }
 
+// quickStartRun is what a run of the quick start did: each datatug command it ran (the words after
+// "datatug") and what that command wrote to stderr, as the process would show it (what the command wrote
+// to its error stream, and the log, which is where the scan reports its progress).
+type quickStartRun struct {
+	commands [][]string
+	stderr   []string
+}
+
 // runQuickStart runs the quick start of readme in a new folder and returns the first way in which it
-// is not true, and the datatug commands it ran, each as the words after "datatug".
-func runQuickStart(t *testing.T, readme string) (ran [][]string, err error) {
+// is not true, and what it ran.
+func runQuickStart(t *testing.T, readme string) (run quickStartRun, err error) {
 	t.Helper()
 	section, err := quickStartSection(readme)
 	if err != nil {
-		return nil, err
+		return run, err
 	}
-	blocks := consoleBlocks(section)
-	if len(blocks) == 0 {
-		return nil, errors.New("the quick start has no console block")
+	var consoles []string
+	installs := 0
+	for _, block := range fencedBlocks(section) {
+		switch {
+		case block.kind == "console":
+			consoles = append(consoles, block.body)
+		case block.kind == "bash" && installs == 0 && block.body == quickStartInstall:
+			installs++
+		default:
+			return run, fmt.Errorf("the quick start has a fenced block that is neither a console block nor the one installation command %q: kind %q, %q", quickStartInstall, block.kind, block.body)
+		}
+	}
+	if len(consoles) == 0 {
+		return run, errors.New("the quick start has no console block")
+	}
+	if installs != 1 {
+		return run, fmt.Errorf("the quick start shows the installation command %q %d times, not once", quickStartInstall, installs)
 	}
 
 	t.Chdir(t.TempDir())
 	// The scan reports its progress through the log, with the time of each line: that is not output
-	// the README shows.
+	// the README shows, and it is stderr.
 	oldLog := log.Writer()
-	log.SetOutput(io.Discard)
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
 	t.Cleanup(func() { log.SetOutput(oldLog) })
 
 	t.Cleanup(api.SetOpenSchemaScanForTest(func(ref dbcopy.BackendRef, _ context.Context) (dbcopy.SchemaScanDB, error) {
@@ -203,33 +235,33 @@ func runQuickStart(t *testing.T, readme string) (ran [][]string, err error) {
 	}))
 	var exported []string
 
-	for _, block := range blocks {
+	for _, block := range consoles {
 		steps, parseErr := parseTranscript(block)
 		if parseErr != nil {
-			return ran, parseErr
+			return run, parseErr
 		}
 		for _, step := range steps {
 			if len(step.words) == 0 {
-				return ran, errors.New("a command is empty")
+				return run, errors.New("a command is empty")
 			}
 			command := strings.Join(step.words, " ")
 			switch step.words[0] {
 			case "sqlite3":
 				if len(step.words) != 3 {
-					return ran, fmt.Errorf("%q: sqlite3 takes a file and the statements to run on it", command)
+					return run, fmt.Errorf("%q: sqlite3 takes a file and the statements to run on it", command)
 				}
 				if err = runQuickStartSQLite(step.words[1], step.words[2]); err != nil {
-					return ran, fmt.Errorf("%q: %w", command, err)
+					return run, fmt.Errorf("%q: %w", command, err)
 				}
 			case "export":
 				if len(step.words) != 2 || !strings.Contains(step.words[1], "=") {
-					return ran, fmt.Errorf("%q: export takes NAME=value", command)
+					return run, fmt.Errorf("%q: export takes NAME=value", command)
 				}
 				name, value, _ := strings.Cut(step.words[1], "=")
 				t.Setenv(name, value)
 				exported = append(exported, value)
 			case "datatug":
-				ran = append(ran, step.words[1:])
+				logged.Reset()
 				root := DatatugCommand()
 				var stdout, stderr bytes.Buffer
 				root.SetArgs(step.words[1:])
@@ -237,21 +269,23 @@ func runQuickStart(t *testing.T, readme string) (ran [][]string, err error) {
 				root.SetErr(&stderr)
 				root.SilenceUsage, root.SilenceErrors = true, true
 				if err = root.Execute(); err != nil {
-					return ran, fmt.Errorf("%q failed: %w", command, err)
+					return run, fmt.Errorf("%q failed: %w", command, err)
 				}
+				run.commands = append(run.commands, step.words[1:])
+				run.stderr = append(run.stderr, stderr.String()+logged.String())
 				if stdout.String() != step.want {
-					return ran, fmt.Errorf("%q wrote\n%s\nand the README says it writes\n%s", command, stdout.String(), step.want)
+					return run, fmt.Errorf("%q wrote\n%s\nand the README says it writes\n%s", command, stdout.String(), step.want)
 				}
 				continue
 			default:
-				return ran, fmt.Errorf("the quick start runs %q, a program this test does not run", step.words[0])
+				return run, fmt.Errorf("the quick start runs %q, a program this test does not run", step.words[0])
 			}
 			if step.want != "" {
-				return ran, fmt.Errorf("%q writes nothing, and the README shows output for it", command)
+				return run, fmt.Errorf("%q writes nothing, and the README shows output for it", command)
 			}
 		}
 	}
-	return ran, checkNoConnectionInFolder(exported)
+	return run, checkNoConnectionInFolder(exported)
 }
 
 // checkNoConnectionInFolder is an error when a file of the folder the quick start ran in holds a
@@ -301,33 +335,31 @@ func readREADME(t *testing.T) string {
 	return string(data)
 }
 
+// The commands of the quick start, exactly: a change of the commands of the README (or a block that is
+// no longer run) changes this list, and the author reads what the quick start now says.
+var quickStartCommands = [][]string{
+	{"scan", "-d", "shop-project", "-D", "sqlite3", "--path", "shop.db", "--db", "shop", "--env", "local"},
+	{"show", "-d", "shop-project"},
+	{"query", "run", "--db", "sqlite://./shop.db", "--from", "Customer", "--no-policies"},
+	{"scan", "-d", "shop-pg-project", "--driver", "postgres", "--dsn-env", quickStartDatabaseVariable, "--db", "shop", "--env", "prod"},
+	{"show", "-d", "shop-pg-project"},
+}
+
 // The quick start of the README is true: every command runs, and writes what the README says.
 func TestQuickStartOfTheREADMEIsTrue(t *testing.T) {
-	ran, err := runQuickStart(t, readREADME(t))
+	run, err := runQuickStart(t, readREADME(t))
 	require.NoError(t, err)
 
-	// The four steps are all there: scan the SQLite sample, show it, run a query, and scan PostgreSQL by
-	// the name of the variable that holds its URL.
-	var verbs []string
-	for _, words := range ran {
-		verb := words[0]
-		if verb == "query" {
-			verb += " " + words[1]
-		}
-		verbs = append(verbs, verb)
-	}
-	assert.Contains(t, verbs, "scan")
-	assert.Contains(t, verbs, "show")
-	assert.Contains(t, verbs, "query run")
-	var scans []string
-	for _, words := range ran {
-		if words[0] == "scan" {
-			scans = append(scans, strings.Join(words, " "))
-		}
-	}
-	require.Len(t, scans, 2, "one scan of SQLite and one of PostgreSQL")
-	assert.Contains(t, scans[0], "-D sqlite3")
-	assert.Contains(t, scans[1], "--driver postgres --dsn-env "+quickStartDatabaseVariable)
+	// The five commands are all there, in this order: scan the SQLite sample, show it, run a query, and scan
+	// and show PostgreSQL by the name of the variable that holds its URL.
+	assert.Equal(t, quickStartCommands, run.commands)
+
+	// What the README says of stderr: the scan reports its progress there (and writes nothing to stdout, which
+	// the empty output under it checks), and the query says it runs without access policies.
+	require.Len(t, run.stderr, len(quickStartCommands))
+	assert.Contains(t, run.stderr[0], "Scanner completed", "the scan reports its progress on stderr")
+	assert.Contains(t, run.stderr[2], quickStartAccessLine)
+	assert.Empty(t, run.stderr[1], "show writes only to stdout")
 }
 
 // The test fails when a command or an output block of the quick start is changed without the other.
@@ -360,6 +392,21 @@ func TestQuickStartTestCatchesAChangeOfOnlyOneSide(t *testing.T) {
 		{"output with no command above it", func(r string) string {
 			return strings.Replace(r, "\n$ datatug show -d shop-project\n", "\nsomething\n$ datatug show -d shop-project\n", 1)
 		}, "output with no command above it"},
+		{"the kind of a console block changes", func(r string) string {
+			return strings.Replace(r, "```console\n$ datatug show -d shop-project\n", "```text\n$ datatug show -d shop-project\n", 1)
+		}, "neither a console block nor the one installation command"},
+		{"a block has no kind", func(r string) string {
+			return strings.Replace(r, "```console\n$ datatug show -d shop-project\n", "```\n$ datatug show -d shop-project\n", 1)
+		}, "neither a console block nor the one installation command"},
+		{"the installation command changes", func(r string) string {
+			return strings.Replace(r, "```bash\nbrew install --cask datatug/tap/datatug\n```", "```bash\nbrew install datatug\n```", 1)
+		}, "neither a console block nor the one installation command"},
+		{"the installation command is shown twice", func(r string) string {
+			return strings.Replace(r, "```bash\nbrew install --cask datatug/tap/datatug\n```", "```bash\nbrew install --cask datatug/tap/datatug\n```\n\n```bash\nbrew install --cask datatug/tap/datatug\n```", 1)
+		}, "neither a console block nor the one installation command"},
+		{"the installation command is gone", func(r string) string {
+			return strings.Replace(r, "```bash\nbrew install --cask datatug/tap/datatug\n```", "", 1)
+		}, "not once"},
 		{"the quick start is gone", func(r string) string {
 			return strings.Replace(r, "## Quick start", "## Something else", 1)
 		}, `no section "## Quick start"`},
@@ -412,4 +459,10 @@ func TestCheckNoConnectionInFolder(t *testing.T) {
 	assert.ErrorContains(t, checkNoConnectionInFolder([]string{connection}), "b.json")
 	require.NoError(t, os.WriteFile("b.json", []byte(`hunter2`), 0o644))
 	assert.ErrorContains(t, checkNoConnectionInFolder([]string{connection}), "hunter2")
+}
+
+// A quick start with the installation command and nothing to run is not a quick start.
+func TestQuickStartWithNoConsoleBlockFails(t *testing.T) {
+	_, err := runQuickStart(t, "## Quick start\n\n```bash\n"+quickStartInstall+"\n```\n")
+	assert.ErrorContains(t, err, "no console block")
 }

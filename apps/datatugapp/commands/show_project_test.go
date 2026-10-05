@@ -2,6 +2,8 @@ package commands
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -298,6 +301,7 @@ func TestShowFailsWhenAStoredFileCannotBeRead(t *testing.T) {
 		require.NoError(t, os.WriteFile(catalog, []byte("not json"), 0o644))
 		stdout, _, err := runShowCommand(t, "-d", projectDir)
 		assert.Equal(t, 1, exitCodeOf(t, err))
+		assert.EqualError(t, err, `environment "local": its catalogs cannot be read`, "no path of the project in the answer")
 		assert.Empty(t, stdout)
 	})
 	t.Run("a columns file that is not JSON", func(t *testing.T) {
@@ -376,11 +380,13 @@ func TestShowListsEnvironmentsAndSourcesInOrder(t *testing.T) {
 	}, headings)
 }
 
-// An environment file that lists a server that is not there lists nothing for it.
-func TestShowSkipsAServerThatIsNotThere(t *testing.T) {
+// What the environment file lists is not what is listed: an environment whose folder of catalogs is gone has
+// no source, whatever its file says.
+func TestShowListsNoSourceForAnEnvironmentWithoutCatalogs(t *testing.T) {
 	projectDir := scannedJourneyProject(t)
 	envFile := filepath.Join(projectDir, "environments", "local", "local.env.json")
-	require.NoError(t, os.WriteFile(envFile, []byte(`{"id":"local","dbServers":[null]}`), 0o644))
+	require.NoError(t, os.WriteFile(envFile, []byte(`{"id":"local","dbServers":[null,{"driver":"sqlite3","catalogs":["shop"]}]}`), 0o644))
+	require.NoError(t, os.RemoveAll(filepath.Join(projectDir, "environments", "local", "catalogs")))
 	stdout, _, err := runShowCommand(t, "-d", projectDir)
 	require.NoError(t, err)
 	assert.Equal(t, "Project shop-project\nEnvironment local\nNo database has been scanned into this project yet: scan one with datatug scan.\n", stdout)
@@ -413,4 +419,225 @@ func TestShowActionWithoutAContext(t *testing.T) {
 	require.Nil(t, cmd.Context())
 	require.NoError(t, showCommandAction(cmd, nil))
 	assert.Equal(t, showJourneySQLite, out.String())
+}
+
+// writeProjectFiles writes the files (path relative to the folder, content) into the folder.
+func writeProjectFiles(t *testing.T, folder string, files map[string]string) {
+	t.Helper()
+	for name, content := range files {
+		full := filepath.Join(folder, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o755))
+		require.NoError(t, os.WriteFile(full, []byte(content), 0o644))
+	}
+}
+
+// demoShapedProject is a project of the shape of datatug-demo-projects/demo-project-1, which `show` must
+// list as chat does: environments whose file lists a catalog that has no folder (QA), catalogs that were
+// registered and never scanned (no dbModel), an inGitDB catalog, one catalog folder the environment file
+// does not list, and one source that was scanned.
+func demoShapedProject(t *testing.T) string {
+	t.Helper()
+	folder := t.TempDir()
+	writeProjectFiles(t, folder, map[string]string{
+		"datatug-project.json": `{"id":"demo"}`,
+		// the environment files list catalogs: QA lists one that has no folder, local does not list "unlisted"
+		"environments/QA/QA.env.json":                                     `{"id":"QA","dbServers":[{"driver":"sqlite3","catalogs":["chinook-local"]}]}`,
+		"environments/local/local.env.json":                               `{"id":"local","dbServers":[{"driver":"sqlite3","catalogs":["orders","chinook-local","geo"]}]}`,
+		"environments/local/catalogs/orders/orders.db.json":               `{"driver":"sqlite3","path":"fixtures/orders.sqlite"}`,
+		"environments/local/catalogs/geo/geo.db.json":                     `{"driver":"ingitdb","path":"data/geo"}`,
+		"environments/local/catalogs/chinook-local/chinook-local.db.json": `{"driver":"sqlite3","path":"x.sqlite","dbModel":"chinook"}`,
+		"environments/local/catalogs/unlisted/unlisted.db.json":           `{"driver":"sqlite3","path":"u.sqlite","dbModel":"chinook"}`,
+		"dbmodels/chinook/main/tables/Album/main.Album.columns.json":      `{"columns":[{"name":"AlbumId","dbType":"INTEGER","pkPosition":1},{"name":"Title","dbType":"TEXT"}]}`,
+	})
+	return folder
+}
+
+// What chat lists, show lists: the sources are the catalogs the environment holds (not the catalogs its
+// file lists), and a source that was never scanned is listed as a source that is not scanned, not a failure.
+func TestShowListsTheSourcesChatListsOnAProjectOfTheShapeOfTheDemo(t *testing.T) {
+	projectDir := demoShapedProject(t)
+	want := `Project demo
+Environment QA
+Environment local
+  Source chinook-local (sqlite3)
+    Schema main
+      Table Album
+        AlbumId INTEGER pk
+        Title TEXT
+  Source geo (ingitdb)
+    not scanned
+  Source orders (sqlite3)
+    not scanned
+  Source unlisted (sqlite3)
+    Schema main
+      Table Album
+        AlbumId INTEGER pk
+        Title TEXT
+`
+	stdout, stderr, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.Equal(t, want, stdout)
+	assert.Empty(t, stderr)
+
+	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	var doc showDocument
+	require.NoError(t, json.Unmarshal([]byte(stdout), &doc), stdout)
+	require.Len(t, doc.Environments, 2)
+	require.Len(t, doc.Environments[1].Sources, 4)
+	orders := doc.Environments[1].Sources[2]
+	assert.Equal(t, showSource{ID: "orders", Driver: "sqlite3", NotScanned: true, Schemas: []showSchema{}}, orders)
+	assert.Contains(t, stdout, `"notScanned": true`)
+	assert.Contains(t, stdout, `"schemas": []`)
+}
+
+// A name that holds a line break or a terminal escape sequence is printed quoted, so that it forges no line
+// of the output and acts on no terminal; the JSON of the same project is the encoder's, and holds the names
+// as they are.
+func TestShowQuotesNamesThatAreNotPrintable(t *testing.T) {
+	forged := "a\nEnvironment prod\n  Source billing (sqlite3)"
+	escape := "b\x1b[2Jc"
+	dbPath := filepath.Join(t.TempDir(), "billing.db")
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE t ("` + forged + `" TEXT, "` + escape + `" TEXT, " padded " TEXT)`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	projectDir := filepath.Join(t.TempDir(), "billing-project")
+	_, err = runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "billing", "--env", "local")
+	require.NoError(t, err)
+
+	stdout, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.Equal(t, `Project billing-project
+Environment local
+  Source billing (sqlite3)
+    Schema main
+      Table t
+        "a\nEnvironment prod\n  Source billing (sqlite3)" TEXT
+        "b\x1b[2Jc" TEXT
+        " padded " TEXT
+`, stdout)
+	for _, b := range []byte(strings.TrimSuffix(stdout, "\n")) {
+		assert.False(t, b < 0x20 && b != '\n', "no control byte in the output: %q", stdout)
+	}
+	headings := 0
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.HasPrefix(line, "Environment ") {
+			headings++
+		}
+	}
+	assert.Equal(t, 1, headings, "no line was forged")
+
+	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, `"name": "a\nEnvironment prod\n  Source billing (sqlite3)"`)
+}
+
+func TestShowText(t *testing.T) {
+	for value, want := range map[string]string{
+		"Customer":      "Customer",
+		"order line":    "order line",
+		"café":          "café",
+		"":              `""`,
+		" lead":         `" lead"`,
+		"trail ":        `"trail "`,
+		"tab\there":     `"tab\there"`,
+		"line\u2028two": `"line\u2028two"`,
+		"bad\xffutf8":   `"bad\xffutf8"`,
+	} {
+		assert.Equal(t, want, showText(value), "%q", value)
+	}
+}
+
+// The driver is printed only when it is a plain name: a catalog file can hold anything, a URL with a password
+// included.
+func TestShowDoesNotPrintADriverThatIsNotAPlainName(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	catalog := filepath.Join(projectDir, "environments", "local", "catalogs", "shop", "shop.db.json")
+	for _, driver := range []string{"postgres://u:hunter2@db.internal.example/shop", "sqlite3\nEnvironment prod", ""} {
+		content, err := json.Marshal(map[string]string{"id": "shop", "driver": driver, "path": "shop.db", "dbModel": "shop"})
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(catalog, content, 0o644))
+		for _, args := range [][]string{{"-d", projectDir}, {"-d", projectDir, "--format", "json"}} {
+			stdout, stderr, err := runShowCommand(t, args...)
+			require.NoError(t, err, driver)
+			assert.Contains(t, stdout, "unknown driver")
+			for _, part := range []string{"hunter2", "db.internal", "postgres://", "prod"} {
+				assert.NotContains(t, stdout+stderr, part)
+			}
+		}
+	}
+}
+
+// The first line names the project by its file; a file that holds no ID leaves the folder's own name
+// (and not "." or the path as it was given).
+func TestShowNamesAProjectWithNoIDByItsFolder(t *testing.T) {
+	folder := filepath.Join(t.TempDir(), "orders-project")
+	writeProjectFiles(t, folder, map[string]string{"datatug-project.json": `{}`})
+	stdout, _, err := runShowCommand(t, "-d", folder)
+	require.NoError(t, err)
+	assert.Equal(t, "Project orders-project\nNo database has been scanned into this project yet: scan one with datatug scan.\n", stdout)
+
+	t.Chdir(folder)
+	stdout, _, err = runShowCommand(t)
+	require.NoError(t, err)
+	assert.Equal(t, "Project orders-project\nNo database has been scanned into this project yet: scan one with datatug scan.\n", stdout)
+
+	// If the folder cannot be made absolute, the folder as given is named.
+	old := absPath
+	t.Cleanup(func() { absPath = old })
+	absPath = func(string) (string, error) { return "", errors.New("no working directory") }
+	assert.Equal(t, "named-as-given", showProjectID(&datatug.Project{}, "x/named-as-given"))
+}
+
+// A path that is a file is not a folder with a project in it: the sentence of a folder that is not a project,
+// not the system's text.
+func TestShowAFileIsNotAProject(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "shop.db")
+	require.NoError(t, os.WriteFile(file, []byte("SQLite format 3"), 0o644))
+	stdout, _, err := runShowCommand(t, "-d", file)
+	assert.Equal(t, 3, exitCodeOf(t, err))
+	require.Error(t, err)
+	assert.Equal(t, notAProjectSentence(file), err.Error())
+	assert.NotContains(t, err.Error(), "not a directory")
+	assert.Empty(t, stdout)
+}
+
+// A project registered at an address is not a folder of this machine: it exits 2, as the address given as the
+// folder does.
+func TestShowByRegisteredNameAtAnAddress(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, dtconfig.AddProjectToSettings(dtconfig.ProjectRef{ID: "remote-one", Url: "https://example.com/acme/repo"}))
+	stdout, _, err := runShowCommand(t, "-p", "remote-one")
+	assert.Equal(t, 2, exitCodeOf(t, err))
+	assert.ErrorContains(t, err, "https://example.com/acme/repo")
+	assert.Empty(t, stdout)
+}
+
+// catalogsStore is a project store whose list of the catalogs of an environment is the one given.
+type catalogsStore struct {
+	datatug.ProjectStore
+	catalogs datatug.DbCatalogs
+	err      error
+}
+
+func (s catalogsStore) LoadEnvDbCatalogs(context.Context, string, ...datatug.StoreOption) (datatug.DbCatalogs, error) {
+	return s.catalogs, s.err
+}
+
+// A list of catalogs with a hole in it lists the others; a list that cannot be had is the failure of the
+// environment, said without the store's text.
+func TestReadShowDocumentSkipsAHoleAndNamesTheEnvironmentOfAFailure(t *testing.T) {
+	project := &datatug.Project{ID: "p", Environments: datatug.Environments{{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "local"}}}}}
+	catalog := &datatug.DbCatalog{}
+	catalog.ID = "orders"
+	catalog.Driver = "sqlite3"
+	doc, err := readShowDocument(context.Background(), catalogsStore{catalogs: datatug.DbCatalogs{nil, catalog}}, project, t.TempDir())
+	require.NoError(t, err)
+	require.Len(t, doc.Environments, 1)
+	assert.Equal(t, []showSource{{ID: "orders", Driver: "sqlite3", NotScanned: true, Schemas: []showSchema{}}}, doc.Environments[0].Sources)
+
+	_, err = readShowDocument(context.Background(), catalogsStore{err: errors.New("open /secret/path: denied")}, project, t.TempDir())
+	assert.EqualError(t, err, `environment "local": its catalogs cannot be read`)
 }

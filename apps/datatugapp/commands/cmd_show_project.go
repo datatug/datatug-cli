@@ -12,7 +12,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -87,10 +91,11 @@ func showCommandAction(cmd *cobra.Command, _ []string) error {
 		ctx = context.Background()
 	}
 	// A folder with no project file is not a project (and a project that lacks one of its other files is a
-	// project that cannot be loaded, which is another failure).
+	// project that cannot be loaded, which is another failure). A path that is a file, not a folder, has no
+	// project file in it either.
 	_, err := os.Stat(filepath.Join(v.ProjectDir, storage.ProjectSummaryFileName))
-	if errors.Is(err, fs.ErrNotExist) {
-		return Exit(fmt.Sprintf(`"%s" is not a DataTug project: make one with datatug scan -d "%s" -D sqlite3 --path <database file> --db <name> --env <environment>`, v.ProjectDir, v.ProjectDir), exitCodeNotFound)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return Exit(notAProjectSentence(v.ProjectDir), exitCodeNotFound)
 	}
 	projectStore := v.store.GetProjectStore(v.projectID)
 	project, err := projectStore.LoadProject(ctx)
@@ -105,6 +110,16 @@ func showCommandAction(cmd *cobra.Command, _ []string) error {
 		return writeShowJSON(cmd.OutOrStdout(), doc)
 	}
 	return writeShowText(cmd.OutOrStdout(), doc)
+}
+
+// notAProjectSentence is the one sentence of a folder that holds no project: it names the folder and the command
+// that makes a project. A folder with a project file one folder deeper, in the folder datatug (where the create
+// screen of the terminal UI wrote it until issue 263 was fixed), is told so, and where the file belongs.
+func notAProjectSentence(folder string) string {
+	if _, err := os.Stat(filepath.Join(folder, "datatug", storage.ProjectSummaryFileName)); err == nil {
+		return fmt.Sprintf(`"%s" is not a DataTug project: its project file is in the folder datatug, where an earlier version of the terminal UI wrote it; move datatug/%s up into "%s"`, folder, storage.ProjectSummaryFileName, folder)
+	}
+	return fmt.Sprintf(`"%s" is not a DataTug project: make one with datatug scan -d "%s" -D sqlite3 --path <database file> --db <name> --env <environment>`, folder, folder)
 }
 
 // exitCodeNotFound is the exit code of a project, a dataset, a file or a database that is not there (the
@@ -125,10 +140,13 @@ type showEnvironment struct {
 // showSource is one database of an environment. DSNEnv is, for a PostgreSQL source, the name of the
 // environment variable that holds its URL: the project holds nothing else of the connection.
 type showSource struct {
-	ID      string       `json:"id"`
-	Driver  string       `json:"driver"`
-	DSNEnv  string       `json:"dsnEnv,omitempty"`
-	Schemas []showSchema `json:"schemas"`
+	ID     string `json:"id"`
+	Driver string `json:"driver"`
+	DSNEnv string `json:"dsnEnv,omitempty"`
+	// NotScanned is true for a source the project records and no scan has described (its catalog has no
+	// dbModel): it has no schemas to list.
+	NotScanned bool         `json:"notScanned,omitempty"`
+	Schemas    []showSchema `json:"schemas"`
 }
 
 type showSchema struct {
@@ -150,24 +168,52 @@ type showColumn struct {
 	PrimaryKeyPosition int    `json:"primaryKeyPosition,omitempty"`
 }
 
-// readShowDocument reads the project into the document. The tables and the columns come from
-// api.GetCatalogSchema, the reader that chat and serve use for the same files, so that what is listed
-// here cannot differ from what they find. Environments and sources are in the order of their IDs.
+// showUnknownDriver is what is printed in place of a driver that is not a plain name: the catalog file is
+// read from a project that may have come from anywhere, and a driver there can hold anything (a URL with a
+// password, a line break).
+const showUnknownDriver = "unknown driver"
+
+// absPath is the absolute path of a folder, a seam for the failure of the working directory.
+var absPath = filepath.Abs
+
+// showProjectID is the ID the first line shows. A project file with no ID leaves the ID the command was
+// given (the single-project placeholder "."), and the folder's own name is the better answer then.
+func showProjectID(project *datatug.Project, projectDir string) string {
+	if project.ID != "" && project.ID != storage.SingleProjectID {
+		return project.ID
+	}
+	abs, err := absPath(projectDir)
+	if err != nil {
+		abs = projectDir
+	}
+	return filepath.Base(abs)
+}
+
+// readShowDocument reads the project into the document. The sources of an environment are its catalogs,
+// listed as chat lists them (the store's LoadEnvDbCatalogs, which lists the catalogs folder of the
+// environment: a catalog the environment file does not list is a source, and a catalog the file lists that
+// has no folder is not one, see pkg/api/resolver.go catalogSources). The tables and the columns of a
+// source come from api.GetCatalogSchema, the reader that chat and serve use for the same files, so that
+// what is listed here cannot differ from what they find. A source whose catalog has no dbModel was never
+// scanned and is listed as such. Environments and sources are in the order of their IDs.
 func readShowDocument(ctx context.Context, store datatug.ProjectStore, project *datatug.Project, projectDir string) (*showDocument, error) {
-	doc := &showDocument{Project: project.ID, Environments: []showEnvironment{}}
+	doc := &showDocument{Project: showProjectID(project, projectDir), Environments: []showEnvironment{}}
 	for _, env := range project.Environments {
 		shown := showEnvironment{ID: env.ID, Sources: []showSource{}}
-		for _, server := range env.DbServers {
-			if server == nil {
+		catalogs, err := store.LoadEnvDbCatalogs(ctx, env.ID)
+		if err != nil {
+			// The store's text quotes a path of the project: the answer names the environment only.
+			return nil, fmt.Errorf("environment %q: its catalogs cannot be read", dbcopy.SourceIDDisplay(env.ID))
+		}
+		for _, catalog := range catalogs {
+			if catalog == nil {
 				continue
 			}
-			for _, catalogID := range server.Catalogs {
-				source, err := readShowSource(ctx, store, projectDir, env.ID, server.GetID(), catalogID)
-				if err != nil {
-					return nil, err
-				}
-				shown.Sources = append(shown.Sources, source)
+			source, err := readShowSource(projectDir, env.ID, catalog)
+			if err != nil {
+				return nil, err
 			}
+			shown.Sources = append(shown.Sources, source)
 		}
 		sort.Slice(shown.Sources, func(i, j int) bool { return shown.Sources[i].ID < shown.Sources[j].ID })
 		doc.Environments = append(doc.Environments, shown)
@@ -176,21 +222,23 @@ func readShowDocument(ctx context.Context, store datatug.ProjectStore, project *
 	return doc, nil
 }
 
-func readShowSource(ctx context.Context, store datatug.ProjectStore, projectDir, envID, serverID, catalogID string) (showSource, error) {
-	failed := func(reason string) error {
-		return fmt.Errorf("source %q in environment %q: %s", dbcopy.SourceIDDisplay(catalogID), dbcopy.SourceIDDisplay(envID), reason)
+func readShowSource(projectDir, envID string, catalog *datatug.DbCatalog) (showSource, error) {
+	driver := showUnknownDriver
+	if dbcopy.IsPlainSourceID(catalog.Driver) {
+		driver = catalog.Driver
 	}
-	catalog, err := store.LoadEnvDbCatalog(ctx, envID, serverID, catalogID)
-	if err != nil {
-		return showSource{}, failed("its catalog file cannot be read")
-	}
-	source := showSource{ID: catalogID, Driver: catalog.Driver, Schemas: []showSchema{}}
+	source := showSource{ID: catalog.ID, Driver: driver, Schemas: []showSchema{}}
 	if catalog.Driver == api.DriverPostgres {
+		var err error
 		if source.DSNEnv, err = showDescriptorVariable(projectDir, catalog.Path); err != nil {
-			return showSource{}, failed(err.Error())
+			return showSource{}, fmt.Errorf("source %q in environment %q: %s", dbcopy.SourceIDDisplay(catalog.ID), dbcopy.SourceIDDisplay(envID), err.Error())
 		}
 	}
-	schema, err := api.GetCatalogSchema(projectDir, envID, catalogID)
+	if catalog.DbModel == "" {
+		source.NotScanned = true
+		return source, nil
+	}
+	schema, err := api.GetCatalogSchema(projectDir, envID, catalog.ID)
 	if err != nil {
 		return showSource{}, err
 	}
@@ -234,6 +282,22 @@ func showDescriptorVariable(projectDir, descriptorPath string) (string, error) {
 	return descriptor.DSNEnv, nil
 }
 
+// showText is a value that comes from the project as the text prints it: as it is when every character is
+// printable and it has no space at either end, and else as a quoted string (a name may hold a line break or a
+// terminal escape sequence, which would forge lines of the output or act on the terminal). A name of an
+// ordinary kind is never changed.
+func showText(value string) string {
+	if value == "" || !utf8.ValidString(value) || strings.TrimSpace(value) != value {
+		return strconv.Quote(value)
+	}
+	for _, r := range value {
+		if !unicode.IsPrint(r) {
+			return strconv.Quote(value)
+		}
+	}
+	return value
+}
+
 // writeShowText prints the document as plain text: one item per line, two spaces of indent for each level,
 // no tab, no emoji.
 func writeShowText(w io.Writer, doc *showDocument) error {
@@ -243,25 +307,28 @@ func writeShowText(w io.Writer, doc *showDocument) error {
 		_, _ = fmt.Fprintf(&out, format, args...)
 		out.WriteByte('\n')
 	}
-	line(0, "Project %s", doc.Project)
+	line(0, "Project %s", showText(doc.Project))
 	sources := 0
 	for _, env := range doc.Environments {
-		line(0, "Environment %s", env.ID)
+		line(0, "Environment %s", showText(env.ID))
 		for _, source := range env.Sources {
 			sources++
 			if source.DSNEnv == "" {
-				line(1, "Source %s (%s)", source.ID, source.Driver)
+				line(1, "Source %s (%s)", showText(source.ID), showText(source.Driver))
 			} else {
-				line(1, "Source %s (%s, URL in $%s)", source.ID, source.Driver, source.DSNEnv)
+				line(1, "Source %s (%s, URL in $%s)", showText(source.ID), showText(source.Driver), showText(source.DSNEnv))
+			}
+			if source.NotScanned {
+				line(2, "not scanned")
 			}
 			for _, schema := range source.Schemas {
-				line(2, "Schema %s", schema.Name)
+				line(2, "Schema %s", showText(schema.Name))
 				for _, kind := range []struct {
 					label     string
 					relations []showRelation
 				}{{"Table", schema.Tables}, {"View", schema.Views}} {
 					for _, relation := range kind.relations {
-						line(3, "%s %s", kind.label, relation.Name)
+						line(3, "%s %s", kind.label, showText(relation.Name))
 						writeShowColumns(line, relation)
 					}
 				}
@@ -286,17 +353,18 @@ func writeShowColumns(line func(depth int, format string, args ...any), relation
 		}
 	}
 	for _, column := range relation.Columns {
-		dbType := column.Type
-		if dbType == "" {
-			dbType = "-"
+		dbType := "-"
+		if column.Type != "" {
+			dbType = showText(column.Type)
 		}
+		name := showText(column.Name)
 		switch {
 		case column.PrimaryKeyPosition == 0:
-			line(4, "%s %s", column.Name, dbType)
+			line(4, "%s %s", name, dbType)
 		case keyColumns == 1:
-			line(4, "%s %s pk", column.Name, dbType)
+			line(4, "%s %s pk", name, dbType)
 		default:
-			line(4, "%s %s pk %d", column.Name, dbType, column.PrimaryKeyPosition)
+			line(4, "%s %s pk %d", name, dbType, column.PrimaryKeyPosition)
 		}
 	}
 }

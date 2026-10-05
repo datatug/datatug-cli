@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -287,6 +288,14 @@ func CreateLocalProject(projectID, title, location string) (dtconfig.ProjectRef,
 // The title is recorded inside the project file, where it belongs.
 func createLocalProject(projectID, title, location string) (projectRef dtconfig.ProjectRef, err error) {
 	projectPath := filepath.Join(fsutil.ExpandHome(location), projectID)
+	projectFile := filepath.Join(projectPath, storage.ProjectSummaryFileName)
+	// Nothing is written over a project that is there. The project file is the file a scan, init and a
+	// clone use, and it is written with truncation: a folder that holds one already is another project
+	// (its title, its access and its repository would be lost), and an ID that is registered already names
+	// another project (the settings would refuse it only after its file had been replaced).
+	if err = refuseExistingProject(projectID, projectPath, projectFile); err != nil {
+		return projectRef, err
+	}
 	// The project file is at the root of the project folder: that is where every reader of a project
 	// looks for it (datatug-core's file store, `datatug show`, serve, chat) and where a scan writes it
 	// (issue 263: it used to be written in a folder datatug of the project folder, where nothing read it).
@@ -311,7 +320,7 @@ func createLocalProject(projectID, title, location string) (projectRef dtconfig.
 			Access:        "private",
 		},
 	}, "", "  ")
-	if err = tree.WriteFile(filepath.Join(projectPath, storage.ProjectSummaryFileName), configContent, 0o644); err != nil {
+	if err = tree.WriteFile(projectFile, configContent, 0o644); err != nil {
 		return projectRef, fmt.Errorf("failed to create project config: %w", err)
 	}
 
@@ -323,6 +332,25 @@ func createLocalProject(projectID, title, location string) (projectRef dtconfig.
 		return projectRef, fmt.Errorf("failed to update app settings: %w", err)
 	}
 	return projectRef, nil
+}
+
+// refuseExistingProject is the error of a new project whose ID is registered already or whose folder holds a
+// project file already. A link or a folder in the place of the file is not a project file: the writer
+// refuses it with its own text.
+func refuseExistingProject(projectID, projectPath, projectFile string) error {
+	settings, err := readSettings()
+	if err != nil && !errors.Is(err, fs.ErrNotExist) { // no settings file: nothing is registered
+		return fmt.Errorf("failed to read app settings: %w", err)
+	}
+	for _, registered := range settings.Projects {
+		if registered != nil && registered.ID == projectID {
+			return fmt.Errorf("a project with the ID %q is already registered: open it, or choose another ID", projectID)
+		}
+	}
+	if info, statErr := os.Lstat(projectFile); statErr == nil && info.Mode().IsRegular() {
+		return fmt.Errorf("the folder %q already holds a project: open that project, or choose another ID or location", projectPath)
+	}
+	return nil
 }
 
 // createProject is the wizard that creates a project, locally or in GitHub.

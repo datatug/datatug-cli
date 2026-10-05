@@ -175,6 +175,73 @@ func TestCreateLocalProjectFailures(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+	t.Run("a folder that already holds a project file is refused, and the file is not touched", func(t *testing.T) {
+		stub(t, &readSettings, func() (dtconfig.Settings, error) { return dtconfig.Settings{}, os.ErrNotExist })
+		var added bool
+		stub(t, &addProjectToSettings, func(dtconfig.ProjectRef) error { added = true; return nil })
+		root := t.TempDir()
+		file := filepath.Join(root, "p", "datatug-project.json")
+		const scanned = `{"id":"p","title":"Scanned","access":"public","repository":{"url":"https://example.com/acme/p"}}`
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(scanned), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := createLocalProject("p", "New title", root)
+		if err == nil || !contains(err.Error(), "already holds a project") || !contains(err.Error(), filepath.Join(root, "p")) {
+			t.Fatalf("err = %v", err)
+		}
+		if data, readErr := os.ReadFile(file); readErr != nil || string(data) != scanned {
+			t.Fatalf("the project file was changed: %q, %v", data, readErr)
+		}
+		if added {
+			t.Fatal("a refused project was registered")
+		}
+	})
+	t.Run("an ID that is registered is refused before anything is written", func(t *testing.T) {
+		stub(t, &readSettings, func() (dtconfig.Settings, error) {
+			return dtconfig.Settings{Projects: []*dtconfig.ProjectRef{{ID: "taken", Path: "/elsewhere/taken"}}}, nil
+		})
+		stub(t, &addProjectToSettings, func(dtconfig.ProjectRef) error { t.Fatal("registered"); return nil })
+		root := t.TempDir()
+		_, err := createLocalProject("taken", "T", root)
+		if err == nil || !contains(err.Error(), `"taken" is already registered`) {
+			t.Fatalf("err = %v", err)
+		}
+		if _, statErr := os.Stat(filepath.Join(root, "taken")); !os.IsNotExist(statErr) {
+			t.Fatalf("the folder of a refused project was made: %v", statErr)
+		}
+	})
+	t.Run("the same ID in a folder that holds the registered project leaves its file as it was", func(t *testing.T) {
+		root := t.TempDir()
+		file := filepath.Join(root, "taken", "datatug-project.json")
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(`{"id":"taken"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stub(t, &readSettings, func() (dtconfig.Settings, error) {
+			return dtconfig.Settings{Projects: []*dtconfig.ProjectRef{{ID: "taken", Path: filepath.Dir(file)}}}, nil
+		})
+		if _, err := createLocalProject("taken", "Other", root); err == nil {
+			t.Fatal("no error")
+		}
+		if data, _ := os.ReadFile(file); string(data) != `{"id":"taken"}` {
+			t.Fatalf("the registered project's file was changed: %q", data)
+		}
+	})
+	t.Run("the settings cannot be read", func(t *testing.T) {
+		stub(t, &readSettings, func() (dtconfig.Settings, error) { return dtconfig.Settings{}, errors.New("corrupt") })
+		root := t.TempDir()
+		if _, err := createLocalProject("p", "T", root); err == nil || !contains(err.Error(), "failed to read app settings") {
+			t.Fatalf("err = %v", err)
+		}
+		if _, statErr := os.Stat(filepath.Join(root, "p")); !os.IsNotExist(statErr) {
+			t.Fatalf("something was written: %v", statErr)
+		}
+	})
 	t.Run("and the failure is shown", func(t *testing.T) {
 		s := mount(newCreateProject(createAtLocal), 80, 20, true)
 		_, msgs := step(s, projectCreated{err: errors.New("boom")})

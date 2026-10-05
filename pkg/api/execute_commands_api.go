@@ -161,12 +161,17 @@ func ExecuteCommands(ctx context.Context, storeID string, request ExecuteCommand
 	if !ok {
 		return ExecuteCommandsResponse{}, errors.New("execute_commands: server has no policy-enforced session configured")
 	}
+	// A project this process does not serve is refused before a project store is asked
+	// for it, with the answer of the routes that resolve the store of their project.
+	projDir, err := servedProjectDir(request.Project)
+	if err != nil {
+		return ExecuteCommandsResponse{}, err
+	}
 	dtStore, err := storage.NewDatatugStore(storeID)
 	if err != nil {
 		return ExecuteCommandsResponse{}, err
 	}
 	projStore := dtStore.GetProjectStore(request.Project)
-	projDir, _ := projectDir(request.Project)
 
 	start := time.Now()
 	response := ExecuteCommandsResponse{Commands: make([]CommandExecutionResult, len(request.Commands))}

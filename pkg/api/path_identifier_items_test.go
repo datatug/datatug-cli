@@ -71,6 +71,52 @@ func TestValidateServerRef(t *testing.T) {
 		}
 		assertRefusal(t, c.Name, "host", c.ID, ValidateServerRef(datatug.ServerRef{Driver: "sqlserver", Host: c.ID}))
 	}
+	for _, c := range unrecordedServers() {
+		assertRefusal(t, c.name, c.field, c.value, ValidateServerRef(c.server))
+	}
+}
+
+// unrecordedServer is a server reference that passes the rules of a plain name and of a
+// host, and that the validation of datatug.ServerRef refuses with a message that quotes
+// the value: the driver is not one it knows, or the server is a sqlite3 one that has a
+// host (a user name and a password typed with a colon are a host to the rule of a host).
+type unrecordedServer struct {
+	name   string
+	field  string
+	value  string
+	server datatug.ServerRef
+}
+
+func unrecordedServers() []unrecordedServer {
+	return []unrecordedServer{
+		{"a plain driver that no store records", "driver", "mongodb", datatug.ServerRef{Driver: "mongodb", Host: "localhost"}},
+		{"a plain driver with a long name", "driver", "oracle2-private", datatug.ServerRef{Driver: "oracle2-private", Host: "localhost"}},
+		{"a user and a password typed as the host of a sqlite3 server", "host", "alice:s3cretpw", datatug.ServerRef{Driver: "sqlite3", Host: "alice:s3cretpw"}},
+		{"a host name given to a sqlite3 server", "host", "db.example.com", datatug.ServerRef{Driver: "sqlite3", Host: "db.example.com"}},
+	}
+}
+
+// The drivers that ValidateServerRef lets through are the ones datatug.ServerRef accepts, so
+// that its own refusal, which quotes the driver, is never the one a client reads. A driver
+// that datatug-core learns to accept makes this test fail, until it is added to dbServerDrivers.
+func TestDbServerDrivers_AreTheOnesTheServerRefAccepts(t *testing.T) {
+	for _, driver := range []string{"sqlite3", "sqlserver", "mysql", "oracle", "postgres", "mongodb", "ingitdb", "openvaultdb", "sqlite"} {
+		server := datatug.ServerRef{Driver: driver, Host: "localhost"}
+		if driver == "sqlite3" {
+			server.Host = ""
+		}
+		accepted := server.Validate() == nil
+		listed := false
+		for _, known := range dbServerDrivers {
+			listed = listed || known == driver
+		}
+		if accepted != listed {
+			t.Errorf("driver %q: datatug.ServerRef accepts it: %v, dbServerDrivers lists it: %v", driver, accepted, listed)
+		}
+		if err := ValidateServerRef(server); (err == nil) != listed {
+			t.Errorf("driver %q: ValidateServerRef = %v, want a refusal exactly when the driver is not listed", driver, err)
+		}
+	}
 }
 
 // A project that this process serves is a key of the served projects and needs no more;
@@ -306,6 +352,29 @@ func idEntries() []idEntry {
 			return route.call(datatug.ServerRef{Driver: "sqlserver", Host: v})
 		}})
 	}
+	// Values that pass the rules of a name and of a host, and that the validation of
+	// datatug.ServerRef refuses with a message that quotes them.
+	for _, route := range []struct {
+		name string
+		call func(server datatug.ServerRef) error
+	}{
+		{"AddDbServer", func(s datatug.ServerRef) error {
+			return AddDbServer(ctx, plainProject(), datatug.ProjDbServer{Server: s})
+		}},
+		{"UpdateDbServer", func(s datatug.ServerRef) error {
+			return UpdateDbServer(ctx, plainProject(), datatug.ProjDbServer{Server: s})
+		}},
+		{"DeleteDbServer", func(s datatug.ServerRef) error { return DeleteDbServer(ctx, plainProject(), s) }},
+		{"GetDbServerSummary", func(s datatug.ServerRef) error { _, err := GetDbServerSummary(ctx, plainProject(), s); return err }},
+	} {
+		route := route
+		for _, c := range unrecordedServers() {
+			c := c
+			add(idEntry{name: route.name + " (" + c.name + ")", position: c.field,
+				unsafe: []sourcecases.UnsafeIdentifier{{Name: c.name, ID: c.value}},
+				call:   func(string) error { return route.call(c.server) }})
+		}
+	}
 	for _, name := range []string{"AddDbServer", "UpdateDbServer"} {
 		name := name
 		add(idEntry{name: name + " (id)", position: "id", unsafe: hosts, emptyIsOK: true, call: func(v string) error {
@@ -366,6 +435,7 @@ func TestEntries_RefuseAnUnsafeIDBeforeAnyProjectStoreIsAsked(t *testing.T) {
 // store: each of these does, and is not refused.
 func TestEntries_APlainRequestReachesTheStore(t *testing.T) {
 	asked := askedStores(t)
+	serveProjects(t, "p1") // CreateFolder takes its project from the request: it must be served
 	ctx := context.Background()
 	for name, call := range map[string]func() error{
 		"GetBoard":      func() error { _, err := GetBoard(ctx, itemRef("b1")); return err },
@@ -415,6 +485,7 @@ func TestEntries_APlainRequestReachesTheStore(t *testing.T) {
 // text names the item, and the ID only when it is a plain name.
 func TestEntries_AStoreFailureIsOneFixedAnswerThatQuotesNoPath(t *testing.T) {
 	ctx := context.Background()
+	serveProjects(t, "p1") // CreateFolder takes its project from the request: it must be served
 	causes := []error{
 		fmt.Errorf("failed to load board[b1] from project: %w", errors.New("file does not exist")),
 		errors.New("open /Users/operator/some-project/boards/b1/board.json: no such file or directory"),

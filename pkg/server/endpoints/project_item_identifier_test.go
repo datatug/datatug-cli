@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -160,6 +162,37 @@ func itemRoutes(t *testing.T, project string) []itemRoute {
 	add(itemRoute{name: "dbserver-add (host)", position: "host", unsafe: hosts, send: func(v string) *httptest.ResponseRecorder {
 		return sendBody(t, addDbServer, http.MethodPost, "/datatug/dbserver-add?project="+url.QueryEscape(project), addServer("sqlserver", v))
 	}})
+	// Values that pass the rules of a name and of a host, and that the validation of the
+	// server reference refuses with a message that quotes them.
+	for _, c := range []struct {
+		name, position, driver, host string
+	}{
+		{"a plain driver that no store records", "driver", "mongodb", "localhost"},
+		{"a user and a password typed as the host of a sqlite3 server", "host", "sqlite3", "alice:s3cretpw"},
+		{"a host name given to a sqlite3 server", "host", "sqlite3", "db.example.com"},
+	} {
+		c := c
+		value := c.driver
+		if c.position == "host" {
+			value = c.host
+		}
+		unsafe := []sourcecases.UnsafeIdentifier{{Name: c.name, ID: value}}
+		for _, r := range []struct {
+			name, path, method string
+			handler            http.HandlerFunc
+		}{
+			{"dbserver-summary", "/datatug/dbserver-summary", http.MethodGet, getDbServerSummary},
+			{"dbserver-delete", "/datatug/dbserver-delete", http.MethodDelete, deleteDbServer},
+		} {
+			r := r
+			add(itemRoute{name: r.name + " (" + c.name + ")", position: c.position, unsafe: unsafe, send: func(string) *httptest.ResponseRecorder {
+				return sendQuery(r.handler, r.method, r.path, url.Values{"project": {project}, "driver": {c.driver}, "host": {c.host}})
+			}})
+		}
+		add(itemRoute{name: "dbserver-add (" + c.name + ")", position: c.position, unsafe: unsafe, send: func(string) *httptest.ResponseRecorder {
+			return sendBody(t, addDbServer, http.MethodPost, "/datatug/dbserver-add?project="+url.QueryEscape(project), addServer(c.driver, c.host))
+		}})
+	}
 	add(itemRoute{name: "dbserver-add (id)", position: "id", unsafe: hosts, emptyOK: true, send: func(v string) *httptest.ResponseRecorder {
 		body := addServer("sqlserver", "localhost")
 		body["id"] = v
@@ -210,8 +243,7 @@ func itemRoutes(t *testing.T, project string) []itemRoute {
 	add(itemRoute{name: "folders/create_folder (project)", position: "project", unsafe: identifiers, send: func(v string) *httptest.ResponseRecorder {
 		return sendBody(t, createFolder, http.MethodPut, "/datatug/folders/create_folder", map[string]any{"storage": "files", "project": v, "name": "n"})
 	}})
-	// An empty project of exec/select is the single project of a one-project store.
-	add(itemRoute{name: "exec/select (project)", position: "project", unsafe: identifiers, emptyOK: true, send: func(v string) *httptest.ResponseRecorder {
+	add(itemRoute{name: "exec/select (project)", position: "project", unsafe: identifiers, send: func(v string) *httptest.ResponseRecorder {
 		return sendQuery(executeSelectHandler, http.MethodGet, "/datatug/exec/select", url.Values{"project": {v}, "environment": {"local"}, "db": {"chinook"}, "sql": {"SELECT 1"}})
 	}})
 	add(itemRoute{name: "exec/execute_commands (project)", position: "project", unsafe: identifiers, send: func(v string) *httptest.ResponseRecorder {
@@ -222,6 +254,69 @@ func itemRoutes(t *testing.T, project string) []itemRoute {
 		return sendBody(t, addDbServer, http.MethodPost, "/datatug/dbserver-add?project="+url.QueryEscape(v), addServer("sqlserver", "localhost"))
 	}})
 	return routes
+}
+
+// jsonTexts returns every string of the JSON document body (its keys and its values, as
+// they read once decoded: JSON writes a backslash, a NUL, "<", ">" and "&" escaped), or
+// body itself when it is not JSON.
+func jsonTexts(body string) []string {
+	var document any
+	if err := json.Unmarshal([]byte(body), &document); err != nil {
+		return []string{body}
+	}
+	var texts []string
+	var walk func(v any)
+	walk = func(v any) {
+		switch v := v.(type) {
+		case string:
+			texts = append(texts, v)
+		case []any:
+			for _, item := range v {
+				walk(item)
+			}
+		case map[string]any:
+			for key, item := range v {
+				texts = append(texts, key)
+				walk(item)
+			}
+		}
+	}
+	walk(document)
+	return texts
+}
+
+// echoes reports whether value is in body, as it is written and as it reads once decoded.
+func echoes(body, value string) bool {
+	if strings.Contains(body, value) {
+		return true
+	}
+	for _, text := range jsonTexts(body) {
+		if strings.Contains(text, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestEchoes_SeesAValueThatJSONWritesEscaped(t *testing.T) {
+	for _, value := range []string{`a\b`, "a\x00b", "a<b>&c"} {
+		raw, err := json.Marshal(map[string]any{"error": map[string]string{"message": "bad value: " + value}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), value) {
+			t.Fatalf("%q is written as it is: the test proves nothing about escaping", value)
+		}
+		if !echoes(string(raw), value) {
+			t.Errorf("an echo of %q in %s is not seen", value, raw)
+		}
+		if echoes(string(raw), value+"-not-there") {
+			t.Errorf("a value that is not in %s is seen", raw)
+		}
+	}
+	if !echoes("plain text, not JSON: a<b", "a<b") || echoes("plain text", "a<b") {
+		t.Error("a body that is not JSON is read as text")
+	}
 }
 
 func TestRoutes_RefuseAnUnsafeProjectItemIDBeforeAnyProjectStoreIsAsked(t *testing.T) {
@@ -244,7 +339,7 @@ func TestRoutes_RefuseAnUnsafeProjectItemIDBeforeAnyProjectStoreIsAsked(t *testi
 				t.Errorf("%s: %s as the %s: status = %d, want 400: %s", r.name, c.Name, r.position, w.Code, body)
 			case c.ID != "" && !strings.Contains(body, r.position):
 				t.Errorf("%s: %s as the %s: the body does not name the field: %s", r.name, c.Name, r.position, body)
-			case len(c.ID) >= 3 && strings.Contains(body, c.ID):
+			case len(c.ID) >= 3 && echoes(body, c.ID):
 				t.Errorf("%s: %s as the %s: the body echoes the value: %s", r.name, c.Name, r.position, body)
 			}
 			if *asked != 0 {
@@ -373,5 +468,189 @@ func TestRoutes_AnItemTheStoreCannotLoadIsOneAnswerThatQuotesNoPath(t *testing.T
 				}
 			}
 		})
+	}
+}
+
+// A route that takes its project from the request itself and opens its project store
+// refuses a project this process does not serve, as a route that resolves the store of its
+// project does (see api.ResolveStoreID), before any project store is asked for.
+func TestRoutes_AProjectThatIsNotServedIsRefusedBeforeAnyProjectStoreIsAsked(t *testing.T) {
+	withApicoreHandle(t)
+	previousStore := storage.NewDatatugStore
+	t.Cleanup(func() { storage.NewDatatugStore = previousStore })
+	scope, _ := captureTestSetup(t, "alice", []string{"admin"}, true)
+	asked := countProjectStoreAsks(t)
+
+	routes := map[string]func(project string) *httptest.ResponseRecorder{
+		"exec/select": func(project string) *httptest.ResponseRecorder {
+			return sendQuery(executeSelectHandler, http.MethodGet, "/datatug/exec/select", url.Values{"project": {project}, "environment": {scope.Environment}, "db": {"chinook"}, "sql": {"SELECT 1"}})
+		},
+		"exec/select (from)": func(project string) *httptest.ResponseRecorder {
+			return sendQuery(executeSelectHandler, http.MethodGet, "/datatug/exec/select", url.Values{"proj": {project}, "env": {scope.Environment}, "db": {"chinook"}, "from": {"Customer"}})
+		},
+		"exec/execute_commands": func(project string) *httptest.ResponseRecorder {
+			body := map[string]any{"commands": []map[string]any{{"type": "SQL", "text": "SELECT 1", "env": scope.Environment, "db": "chinook"}}}
+			return sendBody(t, executeCommandsHandler, http.MethodPost, "/datatug/exec/execute_commands?project="+url.QueryEscape(project), body)
+		},
+		"folders/create_folder": func(project string) *httptest.ResponseRecorder {
+			return sendBody(t, createFolder, http.MethodPut, "/datatug/folders/create_folder", map[string]any{"storage": "files", "project": project, "path": "a", "name": "b"})
+		},
+	}
+	const notServed = "not-served"
+	for name, send := range routes {
+		*asked = 0
+		w := send(notServed)
+		body := w.Body.String()
+		if w.Code != http.StatusBadRequest || !strings.Contains(body, "unknown storage id") || !strings.Contains(body, `\"`+notServed+`\"`) {
+			t.Errorf("%s: a project that is not served: %d %s, want a 400 that says no store is configured for the project", name, w.Code, body)
+		}
+		if *asked != 0 {
+			t.Errorf("%s: a project that is not served reached %d project stores, want 0", name, *asked)
+		}
+
+		// The count means something only if the same request for the served project does
+		// reach the project store, and is not refused for its project.
+		*asked = 0
+		w = send(scope.Project)
+		if strings.Contains(w.Body.String(), "unknown storage id") {
+			t.Errorf("%s: the served project was refused: %d %s", name, w.Code, w.Body.String())
+		}
+		if *asked == 0 {
+			t.Errorf("%s: the served project never reached the project store, so the counts prove nothing: %d %s", name, w.Code, w.Body.String())
+		}
+	}
+}
+
+// listTree returns every file and folder under dir, with the size of each file, so that two
+// listings differ when something was made or written.
+func listTree(t *testing.T, dir string) []string {
+	t.Helper()
+	var entries []string
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		entries = append(entries, rel+" "+strconv.FormatInt(info.Size(), 10))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entries
+}
+
+// The file store of a project this process does not hold is rooted at the working
+// directory of the process. A request for such a project, made while the working directory
+// is a project folder, reads nothing from it and writes nothing to it.
+func TestRoutes_AProjectThatIsNotServedIsNotLookedForInTheWorkingDirectory(t *testing.T) {
+	withApicoreHandle(t)
+	previousStore := storage.NewDatatugStore
+	t.Cleanup(func() { storage.NewDatatugStore = previousStore })
+	captureTestSetup(t, "alice", []string{"admin"}, true) // serves one project, with the real file store
+
+	t.Run("a folder that holds a project", func(t *testing.T) {
+		// A project with an environment, a catalog and a database, which is not served.
+		otherDir, _ := writeSemanticTestProject(t)
+		t.Chdir(otherDir)
+		before := listTree(t, otherDir)
+
+		for name, send := range map[string]func() *httptest.ResponseRecorder{
+			"exec/select": func() *httptest.ResponseRecorder {
+				return sendQuery(executeSelectHandler, http.MethodGet, "/datatug/exec/select", url.Values{"project": {"not-served"}, "environment": {semanticTestEnv}, "db": {semanticTestSource}, "sql": {"SELECT 1 AS one"}})
+			},
+			"exec/execute_commands": func() *httptest.ResponseRecorder {
+				body := map[string]any{"commands": []map[string]any{{"type": "SQL", "text": "SELECT 1 AS one", "env": semanticTestEnv, "db": semanticTestSource}}}
+				return sendBody(t, executeCommandsHandler, http.MethodPost, "/datatug/exec/execute_commands?project=not-served", body)
+			},
+			"folders/create_folder": func() *httptest.ResponseRecorder {
+				return sendBody(t, createFolder, http.MethodPut, "/datatug/folders/create_folder", map[string]any{"storage": "files", "project": "not-served", "path": "reports", "name": "new-folder"})
+			},
+		} {
+			w := send()
+			body := w.Body.String()
+			if w.Code != http.StatusBadRequest || !strings.Contains(body, "unknown storage id") {
+				t.Errorf("%s: %d %s, want a 400 that says no store is configured for the project", name, w.Code, body)
+			}
+			if strings.Contains(body, `"one"`) || strings.Contains(body, "rows") {
+				t.Errorf("%s: the answer holds a result read from the working directory: %s", name, body)
+			}
+		}
+		if after := listTree(t, otherDir); !reflect.DeepEqual(before, after) {
+			t.Errorf("the working directory changed:\n before %v\n after  %v", before, after)
+		}
+		if _, err := os.Stat(filepath.Join(otherDir, "folders")); err == nil {
+			t.Error("a folder was made in the working directory")
+		}
+	})
+}
+
+// The web client sends the project in the query of an entity save, and the whole entity,
+// its ID included, in the body. The entity is saved under that ID, and the ID is what is
+// checked: the title is free text.
+func TestRoutes_SaveEntityKeepsTheIDOfTheBody(t *testing.T) {
+	withApicoreHandle(t)
+	previousStore := storage.NewDatatugStore
+	t.Cleanup(func() { storage.NewDatatugStore = previousStore })
+	scope, _ := captureTestSetup(t, "alice", []string{"admin"}, true)
+	projectDir, ok := api.ProjectDir(scope.Project)
+	if !ok {
+		t.Fatal("the project is not served")
+	}
+	target := "/datatug/entities/save_entity?project=" + url.QueryEscape(scope.Project)
+
+	w := sendBody(t, saveEntity, http.MethodPut, target, map[string]any{"id": "Order", "title": "Customer order (draft)"})
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("an entity with a plain ID and a title that is free text: %d %s, want 201", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, "entities", "Order", "Order.entity.json")); err != nil {
+		t.Errorf("the entity is not saved under the ID of its body: %v", err)
+	}
+
+	// The ID of the body is the one that is checked: an ID that is not a plain name is
+	// refused for what it is, whatever the title says.
+	w = sendBody(t, saveEntity, http.MethodPut, target, map[string]any{"id": "bad id", "title": "Order"})
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "entityID") || echoes(w.Body.String(), "bad id") {
+		t.Errorf("an entity with an ID that is not a plain name: %d %s, want a 400 that names entityID and not the value", w.Code, w.Body.String())
+	}
+
+	// The id of the query, when there is one, is the ID of the entity (as it was).
+	w = sendBody(t, saveEntity, http.MethodPut, target+"&id=Shipment", map[string]any{"id": "ignored", "title": "Shipment"})
+	if w.Code != http.StatusCreated {
+		t.Errorf("an entity saved with an id in the query: %d %s, want 201", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, "entities", "Shipment", "Shipment.entity.json")); err != nil {
+		t.Errorf("the entity is not saved under the id of the query: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, "entities", "ignored")); err == nil {
+		t.Error("the entity was saved under the ID of its body although the query had one")
+	}
+}
+
+// A request to exec/select that names no project is not given one: it gets the missing-field
+// answer of its own validation, whatever store is configured.
+func TestRoutes_ExecSelectWithNoProjectIsAskedForOne(t *testing.T) {
+	withApicoreHandle(t)
+	previousStore := storage.NewDatatugStore
+	t.Cleanup(func() { storage.NewDatatugStore = previousStore })
+	captureTestSetup(t, "alice", []string{"admin"}, true)
+	asked := countProjectStoreAsks(t)
+
+	w := sendQuery(executeSelectHandler, http.MethodGet, "/datatug/exec/select", url.Values{"environment": {semanticTestEnv}, "db": {"chinook"}, "sql": {"SELECT 1"}})
+
+	body := w.Body.String()
+	if w.Code != http.StatusBadRequest || !strings.Contains(body, "project") || !strings.Contains(body, "missing required field") || strings.Contains(body, "plain name") {
+		t.Errorf("no project: %d %s, want a 400 that says the project is missing", w.Code, body)
+	}
+	if *asked != 0 {
+		t.Errorf("no project reached %d project stores, want 0", *asked)
 	}
 }

@@ -187,3 +187,48 @@ func TestOpen_SQLiteFileThatVanishesAfterTheCheckIsNotCreated(t *testing.T) {
 	assert.Error(t, err)
 	assert.Empty(t, directoryNames(t, dir), "the open made the file that had gone")
 }
+
+// protectedSQLiteFile makes a database file named name in a folder of its own, with one
+// row (a marker that names it), and write-protects it. It skips the test when the file
+// can be written anyway (a process that is run as root), which would prove nothing.
+func protectedSQLiteFile(t *testing.T, name string) (dir, path string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("a file mode is not what keeps a file from being written on Windows")
+	}
+	dir = t.TempDir()
+	path = filepath.Join(dir, name)
+	moveSQLiteFile(t, path, name)
+	require.NoError(t, os.Chmod(path, 0o444))
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	if f, err := os.OpenFile(path, os.O_WRONLY, 0); err == nil {
+		_ = f.Close()
+		t.Skip("the file can be written by this process (run as root?): the test would prove nothing")
+	}
+	return dir, path
+}
+
+// A database file that is write-protected is opened, as it always was: SQLite opens a file
+// that it may not write read-only, whatever the open asked for when it can not create, and
+// the rows of the file that was named are read, and no file is made beside it.
+func TestOpen_AWriteProtectedSQLiteFileIsOpenedAndRead(t *testing.T) {
+	for _, name := range []string{"shop.db", "what?mode=rw.db", "a#b.db", "with space.db"} {
+		t.Run(name, func(t *testing.T) {
+			if runtime.GOOS == "windows" && strings.Contains(name, "?") {
+				t.Skip("a file name cannot have a ? on Windows")
+			}
+			dir, path := protectedSQLiteFile(t, name)
+			before := directoryNames(t, dir)
+
+			for opener, open := range map[string]func(BackendRef, context.Context) (dal.DB, error){
+				"Open": BackendRef.Open, "OpenProtected": BackendRef.OpenProtected,
+			} {
+				marker := openedMarker(t, func(ctx context.Context) (dal.DB, error) {
+					return open(BackendRef{Scheme: "sqlite", Path: path}, ctx)
+				})
+				assert.Equal(t, name, marker, opener+" did not read the file that was named")
+				assert.Equal(t, before, directoryNames(t, dir), opener+" made a file beside it")
+			}
+		})
+	}
+}

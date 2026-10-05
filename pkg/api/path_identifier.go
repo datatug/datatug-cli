@@ -2,6 +2,7 @@ package api
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -81,20 +82,41 @@ func validateHost(field, host string) error {
 	return nil
 }
 
+// dbServerDrivers are the drivers datatug.ServerRef.Validate accepts. A driver that is a
+// plain name and is not one of them is refused by ValidateServerRef with a fixed message:
+// the one of datatug.ServerRef quotes the driver.
+var dbServerDrivers = []string{"sqlite3", "sqlserver", "mysql", "oracle"}
+
+// DriverRule is the sentence that says which drivers a db server can have.
+var DriverRule = "must be one of " + strings.Join(dbServerDrivers, ", ")
+
+// SQLiteHostRule is the sentence that says a sqlite3 server, which is a file, has no host.
+const SQLiteHostRule = "cannot be used with sqlite3"
+
 // ValidateServerRef refuses a db server whose driver or host a project could not record
 // under the file name of the server (the driver is a folder of the project, and the driver and
 // the host are the ID of the server, which is a file name): the driver must be a plain
-// name and the host a host. An empty driver or host passes, as it is the missing-field
-// answer of datatug.ServerRef.Validate (and a sqlite3 server has no host). The error
-// names the field and the rule and nothing of the value.
+// name that a db server can have, and the host a host, and none for a sqlite3 server. An
+// empty driver or host passes, as it is the missing-field answer of
+// datatug.ServerRef.Validate. The error names the field and the rule and nothing of the
+// value: the refusals of datatug.ServerRef.Validate that are left for the routes to give
+// do not quote the driver or the host (see DriverRule and SQLiteHostRule).
 func ValidateServerRef(server datatug.ServerRef) error {
 	if server.Driver != "" {
 		if err := ValidateIdentifier("driver", server.Driver); err != nil {
 			return err
 		}
+		if !slices.Contains(dbServerDrivers, server.Driver) {
+			return validation.NewErrBadRequestFieldValue("driver", DriverRule)
+		}
 	}
 	if server.Host != "" {
-		return validateHost("host", server.Host)
+		if err := validateHost("host", server.Host); err != nil {
+			return err
+		}
+		if server.Driver == "sqlite3" {
+			return validation.NewErrBadRequestFieldValue("host", SQLiteHostRule)
+		}
 	}
 	return nil
 }
@@ -103,8 +125,11 @@ func ValidateServerRef(server datatug.ServerRef) error {
 // serves that project (the ID is then a key it holds, whatever the project is called) or
 // the ID is a plain name. A project ID is never joined into a path by this package, but
 // it names the project directory the store opens, so an ID that is neither served nor a
-// plain name is refused before a store is asked for it; a plain name that is not served
-// is left to the unknown-project answer of the route.
+// plain name is refused before a store is asked for it. It does not say that a plain name
+// is served: a route that resolves the store of its project does (see ResolveStoreID), and
+// so does each entry that takes the project from the request itself and opens its store
+// (ExecuteSelect, ExecuteCommands, CreateFolder; see servedProjectDir), with the same
+// answer, before a project store is asked for.
 func ValidateProjectIdentifier(field, id string) error {
 	if _, served := projectDir(id); served {
 		return nil

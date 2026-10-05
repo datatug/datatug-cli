@@ -672,7 +672,7 @@ CREATE TABLE "` + attachName + `" (c TEXT);`)
 }
 
 // The path of the database is a path, not a URI: a file whose name has a "?", a "#", a
-// "%" or a space in it, or that is in a folder whose name has one, is scanned, not
+// "%", a space, a tab or a newline in it, or that is in a folder whose name has one, is scanned, not
 // another file made beside it, and it is read back as the same file by the readers of the
 // project: the source of a saved query, of chat and of serve is a URL, which cut the
 // path at the first "#" or "?", and the driver of the open of a source reads a "?" in a
@@ -684,7 +684,11 @@ func TestScanJourneyPathWithURICharacters(t *testing.T) {
 	if runtime.GOOS != "windows" { // a file name cannot have a "?" there
 		places = append(places,
 			place{"", "what?mode=rw.db"}, place{"", "?.db"}, place{"", "all ?#% together.db"},
-			place{"what?", "shop.db"}, place{"what?mode=rw", "shop.db"}, place{"my folder #1 50% ?", "what?.db"})
+			place{"what?", "shop.db"}, place{"what?mode=rw", "shop.db"}, place{"my folder #1 50% ?", "what?.db"},
+			// A control character in a name is not a URL's: the readers of the project are
+			// given the path written escaped (see api.LocalSQLiteSourceURL).
+			place{"", "tab\there.db"}, place{"", "new\nline.db"}, place{"", "carriage\rreturn.db"},
+			place{"tab\tfolder", "shop.db"}, place{"new\nline folder", "new\nline.db"})
 	} else {
 		places = append(places, place{"my folder #1 50%", "shop.db"})
 	}

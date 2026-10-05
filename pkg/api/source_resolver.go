@@ -126,17 +126,33 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 // path of a catalog as ResolveCatalogPath returns it: a URL that dbcopy.Parse reads
 // back to that path. A file name may hold "%", "#" and "?", which a URL does not
 // read as part of a path (a file named a#b.db is the file a, and one named a%23b.db
-// is a#b.db), so they are written as percent-encoded, and then the path starts like
-// one ("./") when it is relative, as the host of a URL cannot be encoded.
+// is a#b.db), and a control character (a tab, a newline), which dbcopy.Parse refuses
+// in a URL, so each is written as percent-encoded, and then the path starts like one
+// ("./") when it is relative, as the host of a URL cannot be encoded.
 func LocalSQLiteSourceURL(path string) string {
-	if !strings.ContainsAny(path, "%#?") {
+	escaped := escapeSQLitePath(path)
+	if escaped == path {
 		return dbcopy.LocalSourceURL("sqlite", path)
 	}
-	escaped := strings.NewReplacer("%", "%25", "#", "%23", "?", "%3F").Replace(path)
 	if !filepath.IsAbs(path) && !strings.HasPrefix(path, "./") && !strings.HasPrefix(path, "../") {
 		escaped = "./" + escaped
 	}
 	return dbcopy.LocalSourceURL("sqlite", escaped)
+}
+
+// escapeSQLitePath writes "%", "#", "?" and every control character of path
+// (a byte below a space, and the delete character) as percent-encoded.
+func escapeSQLitePath(path string) string {
+	var escaped strings.Builder
+	for i := 0; i < len(path); i++ {
+		switch c := path[i]; {
+		case c == '%' || c == '#' || c == '?' || c < ' ' || c == 0x7f:
+			fmt.Fprintf(&escaped, "%%%02X", c)
+		default:
+			escaped.WriteByte(c)
+		}
+	}
+	return escaped.String()
 }
 
 // loadQueryDocument reads a saved query's text/document sidecar file

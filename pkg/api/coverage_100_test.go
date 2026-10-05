@@ -33,6 +33,7 @@ import (
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/strongo/validation"
 )
 
 type mockSQLDriver struct{}
@@ -558,7 +559,7 @@ func TestFoldersAPI(t *testing.T) {
 	// DeleteFolder missing projectID
 	assert.Error(t, DeleteFolder(ctx, dto.ProjectItemRef{}))
 
-	// Store error
+	// A project that is not served is refused before the store is asked for it.
 	storage.NewDatatugStore = func(string) (storage.Store, error) {
 		return nil, errors.New("store err")
 	}
@@ -568,7 +569,13 @@ func TestFoldersAPI(t *testing.T) {
 		Name:       "f1",
 	}
 	_, err = CreateFolder(ctx, createReq)
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, ErrUnknownStoreID.Error())
+	assert.True(t, validation.IsBadRequestError(err), "the route is answered by apicore, which gives 400 to a bad request only")
+
+	// Store error
+	serveProjects(t, "p1")
+	_, err = CreateFolder(ctx, createReq)
+	assert.EqualError(t, err, "store err")
 
 	delRef := dto.ProjectItemRef{ProjectRef: dto.ProjectRef{ProjectID: "p1"}, ID: "f1"}
 	assert.Error(t, DeleteFolder(ctx, delRef))

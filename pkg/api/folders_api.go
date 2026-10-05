@@ -31,6 +31,13 @@ func CreateFolder(ctx context.Context, request dto.CreateFolder) (folder *datatu
 	if err = ValidateIdentifier("name", request.Name); err != nil {
 		return nil, err
 	}
+	// The project comes from the body here, not from a query that a route resolved the
+	// store of (see ResolveStoreID), so a project this process does not serve is refused
+	// here, before a project store is asked for it, with the same text. The route is
+	// answered by apicore, which gives a status of 400 to a bad request only.
+	if _, err = servedProjectDir(request.ProjectID); err != nil {
+		return nil, validation.NewBadRequestError(err)
+	}
 	store, err := projectStoreForID(request.StoreID, request.ProjectID)
 	if err != nil {
 		return nil, err

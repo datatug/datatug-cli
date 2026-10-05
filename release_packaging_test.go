@@ -114,7 +114,7 @@ func TestReleaseWorkflow_ChecksTheTapAfterPublishing(t *testing.T) {
 		}
 		var runsScript bool
 		for _, step := range job.Steps {
-			if strings.Contains(step.Run, "scripts/check-homebrew-cask.sh") {
+			if strings.Contains(step.Run, "scripts/verify-homebrew-cask.sh") {
 				runsScript = true
 			}
 		}
@@ -125,9 +125,15 @@ func TestReleaseWorkflow_ChecksTheTapAfterPublishing(t *testing.T) {
 		if !strings.Contains(job.If, "needs.release.outputs.tag") {
 			t.Errorf("job %q must run only when the release cut a tag (if: needs.release.outputs.tag != ''), got %q", name, job.If)
 		}
+		// Without !cancelled() the implicit success() skips the job when a smoke
+		// test fails after the release went public, which is when the question
+		// "did the tap move" is still open.
+		if !strings.Contains(job.If, "!cancelled()") {
+			t.Errorf("job %q must also run when a later job of the release failed (if: !cancelled() && ...), got %q", name, job.If)
+		}
 	}
 	if !found {
-		t.Error("no job after `release` runs scripts/check-homebrew-cask.sh")
+		t.Error("no job after `release` runs scripts/verify-homebrew-cask.sh")
 	}
 }
 
@@ -244,6 +250,131 @@ func TestCheckHomebrewCaskScript(t *testing.T) {
 			}
 			if !strings.Contains(stderr.String(), tt.wantStderr) {
 				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tt.wantStderr)
+			}
+		})
+	}
+}
+
+// fakeGH stands in for the gh CLI so the verify script's retry logic can be
+// exercised without a network. State lives in the directory named by FAKE_DIR:
+//
+//   - the Nth `gh api` call prints cask.N and fails when cask.N does not exist;
+//   - the Nth `gh release download` call fails when dl_fail.N exists, otherwise
+//     writes the release's checksums file;
+//   - each call appends to api.calls or dl.calls, which the tests count.
+const fakeGH = `#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+  release)
+    echo x >> "$FAKE_DIR/dl.calls"
+    n=$(wc -l < "$FAKE_DIR/dl.calls" | tr -d ' ')
+    [[ -e "$FAKE_DIR/dl_fail.$n" ]] && { echo "gh: HTTP 502" >&2; exit 1; }
+    dir=""
+    while [[ $# -gt 0 ]]; do
+      [[ "$1" == "--dir" ]] && dir="$2"
+      shift
+    done
+    cp "$FAKE_DIR/checksums.txt" "$dir/datatug_0.56.0_checksums.txt"
+    ;;
+  api)
+    echo x >> "$FAKE_DIR/api.calls"
+    n=$(wc -l < "$FAKE_DIR/api.calls" | tr -d ' ')
+    [[ -e "$FAKE_DIR/cask.$n" ]] || { echo "gh: HTTP 502" >&2; exit 1; }
+    cat "$FAKE_DIR/cask.$n"
+    ;;
+  *) echo "unexpected gh call: $*" >&2; exit 64 ;;
+esac
+`
+
+func TestVerifyHomebrewCaskScript(t *testing.T) {
+	t.Parallel()
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not available")
+	}
+	script, err := filepath.Abs(filepath.Join("scripts", "verify-homebrew-cask.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := [4]string{sumDarwinArm64, sumDarwinAmd64, sumLinuxArm64, sumLinuxAmd64}
+	fresh := caskFixture("0.56.0", current)
+	stale := caskFixture("0.43.1", current)
+
+	tests := []struct {
+		name         string
+		tag          string
+		casks        []string // cask.N contents; "" means the Nth read fails
+		dlFail       []int    // download call numbers that fail
+		wantExit     int
+		wantStderr   string
+		notStderr    string
+		wantAPICalls int
+		wantDLCalls  int
+	}{
+		{name: "current at once", tag: "v0.56.0", casks: []string{fresh}, wantAPICalls: 1, wantDLCalls: 1},
+		{name: "current after two stale reads", tag: "v0.56.0", casks: []string{stale, stale, fresh}, wantAPICalls: 3, wantDLCalls: 3},
+		{name: "current after a failed read", tag: "v0.56.0", casks: []string{"", fresh}, wantAPICalls: 2, wantDLCalls: 2},
+		{name: "current after a failed download", tag: "v0.56.0", casks: []string{fresh, fresh}, dlFail: []int{1}, wantAPICalls: 1, wantDLCalls: 2},
+		{name: "always stale says stale, not unreadable", tag: "v0.56.0", casks: []string{stale, stale, stale, stale}, wantExit: 1, wantStderr: "is not at v0.56.0", notStderr: "could not read", wantAPICalls: 4, wantDLCalls: 4},
+		{name: "tap never readable says unreadable, not stale", tag: "v0.56.0", casks: []string{"", "", "", ""}, wantExit: 1, wantStderr: "could not read datatug/homebrew-tap", notStderr: "is not at", wantAPICalls: 4, wantDLCalls: 4},
+		{name: "downloads never work says unreadable", tag: "v0.56.0", casks: []string{fresh, fresh, fresh, fresh}, dlFail: []int{1, 2, 3, 4}, wantExit: 1, wantStderr: "could not read", notStderr: "is not at", wantAPICalls: 0, wantDLCalls: 4},
+		{name: "a bad tag is not retried", tag: "v0.56.0-rc1", casks: []string{fresh}, wantExit: 2, wantStderr: "vX.Y.Z", wantAPICalls: 1, wantDLCalls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			write := func(name, content string) {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ghPath := filepath.Join(dir, "gh")
+			if err := os.WriteFile(ghPath, []byte(fakeGH), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			write("checksums.txt", checksumsFixture("0.56.0"))
+			write("api.calls", "")
+			write("dl.calls", "")
+			for i, c := range tt.casks {
+				if c != "" {
+					write(fmt.Sprintf("cask.%d", i+1), c)
+				}
+			}
+			for _, n := range tt.dlFail {
+				write(fmt.Sprintf("dl_fail.%d", n), "")
+			}
+			cmd := exec.Command(bash, script, tt.tag)
+			cmd.Env = append(os.Environ(), "GH="+ghPath, "FAKE_DIR="+dir, "GITHUB_REPOSITORY=datatug/datatug-cli", "ATTEMPTS=4", "INTERVAL=0")
+			// The final ::error:: line goes to stdout so GitHub shows it as an
+			// annotation; read both streams.
+			var stderr strings.Builder
+			cmd.Stdout = &stderr
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			exit := 0
+			if ee, ok := err.(*exec.ExitError); ok {
+				exit = ee.ExitCode()
+			} else if err != nil {
+				t.Fatalf("run script: %v", err)
+			}
+			if exit != tt.wantExit {
+				t.Fatalf("exit code = %d, want %d; stderr: %s", exit, tt.wantExit, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.wantStderr) {
+				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tt.wantStderr)
+			}
+			if tt.notStderr != "" && strings.Contains(stderr.String(), tt.notStderr) {
+				t.Errorf("stderr = %q, must not contain %q", stderr.String(), tt.notStderr)
+			}
+			for file, want := range map[string]int{"api.calls": tt.wantAPICalls, "dl.calls": tt.wantDLCalls} {
+				raw, err := os.ReadFile(filepath.Join(dir, file))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := strings.Count(string(raw), "x"); got != want {
+					t.Errorf("%s: %d calls, want %d", file, got, want)
+				}
 			}
 		})
 	}

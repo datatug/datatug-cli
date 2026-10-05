@@ -169,7 +169,8 @@ func Copy(ctx context.Context, source, target dal.DB, opts CopyOpts) (SourceSumm
 	}
 
 	// 3. If --overwrite=recreate, drop target tables that match source names
-	//    BEFORE we introspect each one (REQ:recreate-drops-first).
+	//    after the PostgreSQL source-name preflight (when applicable), before
+	//    creating and copying each table (REQ:recreate-drops-first).
 	if opts.Overwrite == "recreate" {
 		for _, ref := range refs {
 			if err := ddl.DropCollection(ctx, target, ref.Name(), ddl.IfExists()); err != nil {

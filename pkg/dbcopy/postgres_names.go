@@ -42,9 +42,9 @@ const (
 
 // postgresNameRefusal is the one rule of the names written to a PostgreSQL target: it returns why name
 // is refused, or "" when it is accepted. A name is accepted when it is a plain identifier of at most
-// 63 bytes after lower-casing (the driver writes names in lower case). The length is that of the
-// lower-cased name and the characters are those of the name as given, as the driver reads them, so a
-// capital outside ASCII whose lower case is an ASCII letter is refused.
+// 63 bytes after lower-casing for length validation. The target's IdentifierExact mode preserves
+// the name's casing when writing it. The character rule applies to the name as given, so a capital
+// outside ASCII whose lower case is an ASCII letter is refused.
 //
 // A test holds this verdict equal to the driver's for a table of names (see
 // TestPostgresNameRefusal_AgreesWithTheDriver): when the driver changes its rule, that test fails.

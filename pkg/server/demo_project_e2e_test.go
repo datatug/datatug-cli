@@ -26,15 +26,10 @@ const (
 	demoProjectDirEnvVar  = "DATATUG_DEMO_PROJECT_DIR"
 	demoProjectID         = "datatug-demo-project"
 	demoProjectEnv        = "local"
-	// demoProjectSource is the "chinook" DbModel/source id
-	// datatug-demo-projects/demo-project-1's own environments/local/
-	// catalogs/chinook-local/chinook-local.db.json declares
-	// (dbModel:"chinook") and its entities/Customer/Customer.entity.json
-	// maps Customer.ID's Mappings to (source:"chinook", ...) — see
-	// pkg/api/resolver.go's ResolvedSource doc comment for why the stable
-	// DbModel, not the environment-specific catalog id "chinook-local", is
-	// the appendix's SourceRef.source.
-	demoProjectSource = "chinook"
+	// These saved queries target the local Chinook catalog. Addressing that
+	// catalog directly keeps the tests stable when the demo project gains
+	// other catalogs with the same DbModel alias.
+	demoProjectSource = "chinook-local"
 )
 
 // resolveDemoProjectDir returns the real demo-project-1 checkout to copy

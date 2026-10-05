@@ -200,6 +200,54 @@ No, we won't.
 The project is **free and open source** codes available at https://github.com/datatug/datatug. You are welcome to
 check - we do not look into your data.
 
+The CLI does send a small amount of anonymous usage telemetry, which you can switch off: see [Telemetry](#telemetry).
+
+## Telemetry
+
+**What is sent.** The CLI sends anonymous usage events and crash reports to [PostHog](https://posthog.com)
+(`eu.i.posthog.com`), through [`pkg/dtlog`](pkg/dtlog), the only code in this repository that can send them. We use them
+to learn which commands and screens are used and where the CLI crashes, so we can fix what people hit.
+
+| Event | When | Fields it carries |
+|---|---|---|
+| `DataTug CLI started` | a command starts | the common fields below |
+| `DataTug CLI exited` | a command ends | the common fields below |
+| `Screen opened` | a screen of the terminal UI opens | the common fields, `$app_name` (`DataTug`), `$app_version`, `$screen_id` and `$screen_name` (fixed labels of DataTug's own screens, such as `viewers/sqlite` and `SQLite Viewer`) |
+| `$exception` (crash report) | the CLI crashes with a panic | `distinct_id`, the SDK and system fields below, and one exception: its `type` (`panic`), its `value` (the Go type of the panic value, such as `string` or `*errors.errorString`; for a crash of the Go runtime itself, such as an index out of range, its message, which names numbers and types only) and its stack: function names, source file *names* (no directory), line numbers and code addresses; and `$debug_images`: the build id, load address and architecture of the executable (not its path) |
+
+The common fields: `uuid` (a random id of the event), `distinct_id` (a random id of this install, kept in
+`~/datatug/.posthog.yaml`), `timestamp`, the
+session (`$session_id`, `$session_start_time`, `$session_duration`), and what the PostHog Go SDK adds: `$lib`,
+`$lib_version`, `$os`, `$os_version`, `$os_distro`, `$go_version`, `$geoip_disable` and `$is_server`. `$geoip_disable` asks
+PostHog not to look up your location; as for any web request, PostHog's server still receives the IP address the request
+comes from.
+
+**What is not sent.** No database content, no query text, no project or database name, no path, no host, no user name, no
+command-line argument and no credential. The text of a panic is not sent either, because it can hold a path or a host: it
+goes to stderr and to the local log only. A test builds each event and fails when its fields change, so this list and the
+notice cannot drift from the code.
+
+**The first run.** The first time the CLI runs with telemetry on it prints a notice on stderr (at most six lines) saying
+the above in brief, and nothing is sent on that run. Events start with the next run. The notice is printed once per user:
+the CLI records that it was shown in the file `~/datatug/.telemetry-notice-shown` (delete it to see the notice again).
+If that file cannot be written the notice is printed again next time, and the run does not fail.
+
+**Turn it off.** Any one of these turns telemetry off completely: no notice, no client, no request, no file:
+
+```
+export DATATUG_TELEMETRY=0     # 0, false or off, in any case
+export DO_NOT_TRACK=1          # any value but empty or 0 (https://consoledonottrack.com)
+export CI=true                 # any value but empty or false: set by most CI systems
+```
+
+`datatug --help` names the variable too. `datatug version --json` never sends telemetry, whatever you set.
+
+**Not covered here.** `datatug chat --model cloud` is a separate thing: you choose to use the DataTug cloud AI service,
+your questions go to it to be answered, and it also receives a metadata report of each turn (the length of your message in
+characters and words, its status and outcome, the names of the actions that ran, and your install id, OS and DataTug
+version; not the text of your question and not your rows). `DATATUG_TELEMETRY` does not switch that off: use another
+`--model`. Chat with your own AI profile reports nowhere.
+
 ## Where are metadata stored?
 
 When DataTug agent scans or compare your database it stores meta information in a datatug project as set of simple to

@@ -12,7 +12,7 @@ status: Planned
 
 ## Summary
 
-`datatug queries` lists the named queries stored in a DataTug project (and, in future, manages them — create, rename, delete). Today the command is a placeholder — its action `panic`s with `"not implemented"`. This spec pins the intended contract so the placeholder can be replaced with a real implementation without re-inventing the surface.
+`datatug queries` lists the named queries stored in a DataTug project (and, in future, manages them — create, rename, delete). The listing is implemented; creating, renaming and deleting queries from the CLI is not. The command used to be a placeholder whose action `panic`ked with `"not implemented"`.
 
 ## Synopsis
 
@@ -27,7 +27,7 @@ DataTug projects store reusable parameterized queries as first-class artifacts (
 - A scriptable enumeration of queries in a project.
 - A future path to `new`, `rename`, `delete` queries from the CLI.
 
-The current placeholder is a footgun (running `datatug queries` crashes the binary). A spec'd placeholder lets the team prioritize implementation against a known contract.
+Running `datatug queries` used to crash the binary; it now lists the queries, or exits `3` outside a project.
 
 ## Behavior
 
@@ -41,7 +41,7 @@ The current placeholder is a footgun (running `datatug queries` crashes the bina
 
 #### REQ: one-id-per-line
 
-The command MUST print exactly one query ID per line on stdout. Order MUST match the order the project store returns. (Mirrors [datasets REQ: one-id-per-line](../datasets/README.md#req-one-id-per-line) for consistency.)
+The command MUST print exactly one query ID per line on stdout. Order is by ID, so the output is stable. (Mirrors [datasets REQ: one-id-per-line](../datasets/README.md#req-one-id-per-line) for consistency.)
 
 #### REQ: empty-project-prints-nothing
 
@@ -51,7 +51,7 @@ If the project contains zero named queries, the command MUST exit `0` and write 
 
 #### REQ: no-panic
 
-The command MUST NOT call `panic`. The current implementation does — fixing it is the first step of making this feature `Implementing`.
+The command MUST NOT call `panic`: not in an empty folder, not in a folder that is not a project and not in a project with no query. (A panic is also a telemetry event.)
 
 ## Parameters
 
@@ -68,8 +68,6 @@ The command MUST NOT call `panic`. The current implementation does — fixing it
 | `3` | Project not resolved |
 | `1` | Generic runtime error |
 
-(Until implemented, the current command crashes with code `10` via the panic-recovery path.)
-
 ## Interaction with Other Features
 
 | Feature | Interaction |
@@ -84,13 +82,13 @@ The command MUST NOT call `panic`. The current implementation does — fixing it
 
 **Requirements:** queries#req:one-id-per-line
 
-Against a project with N queries, `datatug queries` exits `0` and prints exactly N lines. (Not yet met — current implementation panics.)
+Against a project with N queries, `datatug queries` exits `0` and prints exactly N lines.
 
 ### AC: no-panic
 
 **Requirements:** queries#req:no-panic
 
-`datatug queries` does NOT panic. (Not yet met.)
+`datatug queries` does NOT panic, in an empty folder, in a folder that is not a project and in a project with no query.
 
 ## Open Questions
 

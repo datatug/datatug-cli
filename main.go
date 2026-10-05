@@ -9,14 +9,12 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"charm.land/fang/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	_ "github.com/denisenkom/go-mssqldb"
-	"github.com/posthog/posthog-go"
 	"github.com/spf13/cobra"
 	"github.com/strongo/buildinfo"
 	"github.com/strongo/buildinfo/fangcmd"
@@ -45,6 +43,11 @@ var dtlogEnqueue = dtlog.Enqueue
 // doc comment.
 var dtlogStart = dtlog.Start
 
+// dtlogNotice is a seam over dtlog.ShowNoticeOnce, the first-run telemetry
+// notice, so tests can prove when it is and is not printed without writing to
+// the person's home.
+var dtlogNotice = dtlog.ShowNoticeOnce
+
 func main() {
 
 	// skipTelemetry is set below, before fang.Execute runs, but declared
@@ -66,19 +69,14 @@ func main() {
 			rText := dbcopy.RedactText(fmt.Sprintf("%v", r))
 			ctx := context.Background()
 			logus.Errorf(ctx, "panic: %s", rText)
-			timestamp := time.Now()
-			distinctID := dtlog.DistinctID()
-			dtlogEnqueue(posthog.NewDefaultException(
-				timestamp,
-				distinctID,
-				"panic",
-				rText,
-			))
+			// The report carries the Go type of the panic value and the stack,
+			// never its text: rText stays on stderr and in the log.
+			dtlogEnqueue(dtlog.PanicEvent(r))
 			_, _ = fmt.Fprintln(os.Stderr, "panic:", rText)
 			debug.PrintStack()
 		}
 		if !skipTelemetry {
-			dtlogEnqueue(posthog.Capture{Event: "DataTug CLI exited"})
+			dtlogEnqueue(dtlog.ExitedEvent())
 		}
 		dtlog.Close()
 		//time.Sleep(10 * time.Millisecond) // Allow some time for event to be sent
@@ -109,8 +107,10 @@ func main() {
 	skipTelemetry = isVersionJSONInvocation(root, args)
 
 	if !skipTelemetry {
+		// The notice comes first: on the run that prints it nothing is sent.
+		dtlogNotice(os.Stderr)
 		dtlogStart()
-		dtlogEnqueue(posthog.Capture{Event: "DataTug CLI started"})
+		dtlogEnqueue(dtlog.StartedEvent())
 	}
 
 	if err := fang.Execute(context.Background(), root, fangOpts...); err != nil {

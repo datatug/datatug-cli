@@ -50,6 +50,14 @@ func (v SelectRequest) Validate() error {
 	if v.Database == "" {
 		return validation.NewErrRequestIsMissingRequiredField("database")
 	}
+	// The project store joins both into a path of its own (see ValidateIdentifier),
+	// so a request that holds anything but a plain name is refused before any lookup.
+	if err := ValidateIdentifier("environment", v.Environment); err != nil {
+		return err
+	}
+	if err := ValidateIdentifier("database", v.Database); err != nil {
+		return err
+	}
 	if v.Where != "" && !strings.Contains(v.Where, ":") {
 		return validation.NewErrBadRequestFieldValue("where", "should have : char to separate field from value")
 	}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
 
 // ResolveCatalogPath expands a datatug.DbCatalog.Path field into an absolute
@@ -32,6 +34,12 @@ import (
 func ResolveCatalogPath(projectDir, catalogPath string) (string, error) {
 	if catalogPath == "" {
 		return "", errors.New("empty catalog path")
+	}
+	// A URL is not a file or a directory, and joined to the project folder it would
+	// become a relative path that a later message shows whole, credentials and all:
+	// it is refused here, and the message shows nothing of it.
+	if dbcopy.PathHoldsURL(catalogPath) {
+		return "", errors.New("the catalog path is a URL, not a file or a directory (a catalog's path names a local file; keep credentials out of a project)")
 	}
 	expanded := catalogPath
 	switch {

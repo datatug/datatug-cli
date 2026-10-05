@@ -11,6 +11,7 @@ import (
 
 	"github.com/datatug/datatug-cli/internal/sourcecases"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
 // TestGetCatalogTablesHandler_HTTP covers Task 17 item A.2 end to end
@@ -136,5 +137,41 @@ func TestGetCatalogTablesHandler_RefusesAnUnsafeEnvironmentOrCatalogBeforeAnyRea
 	}
 	if reads != 0 {
 		t.Fatalf("%d refused requests went on to read, want 0", reads)
+	}
+}
+
+// The project of the request is quoted in the 404 only when it is a plain name: a
+// source string can be sent where a project ID belongs. The project is configured
+// here, so that the request gets past the store lookup, and the directory lookup
+// (catalogProjectDir) finds nothing.
+func TestGetCatalogTablesHandler_UnknownProjectNamesOnlyAPlainName(t *testing.T) {
+	const typed = "postgres://alice:s3cretpw@db.example.com/shop"
+	session, err := secureread.NewSession(secureread.SessionOptions{NoPolicies: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api.ConfigureSecureSession(session, map[string]string{typed: t.TempDir(), "no-such-project": t.TempDir()}, api.Capabilities{})
+	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
+	previous := catalogProjectDir
+	catalogProjectDir = func(string) (string, bool) { return "", false }
+	t.Cleanup(func() { catalogProjectDir = previous })
+
+	get := func(project string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		query := url.Values{"project": {project}, "environment": {"local"}, "catalog": {"chinook-local"}}
+		getCatalogTablesHandler(rr, httptest.NewRequest(http.MethodGet, "/datatug/catalog-tables?"+query.Encode(), nil))
+		return rr
+	}
+	rr := get(typed)
+	if rr.Code != http.StatusNotFound || !strings.Contains(rr.Body.String(), "unknown project") {
+		t.Fatalf("status = %d, want the 404 for an unknown project, body = %s", rr.Code, rr.Body.String())
+	}
+	for _, leaked := range []string{"s3cretpw", "alice", "db.example.com"} {
+		if strings.Contains(rr.Body.String(), leaked) {
+			t.Errorf("the 404 shows %q: %s", leaked, rr.Body.String())
+		}
+	}
+	if rr := get("no-such-project"); rr.Code != http.StatusNotFound || !strings.Contains(rr.Body.String(), `unknown project \"no-such-project\"`) {
+		t.Errorf("a plain project should be named in the 404: %d %s", rr.Code, rr.Body.String())
 	}
 }

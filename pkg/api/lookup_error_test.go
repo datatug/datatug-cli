@@ -21,6 +21,9 @@ func TestLookupError(t *testing.T) {
 		{"plain IDs keep the cause", cause, []string{"chinook", "local"}, `database "chinook" in "local": ` + cause.Error(), true},
 		{"a source string is not shown and the cause is dropped", cause, []string{secretID, "local"}, `database "` + dbcopy.SourceIDNotShown + `" in "local"`, false},
 		{"the second ID decides too", cause, []string{"chinook", secretID}, `database "chinook" in "` + dbcopy.SourceIDNotShown + `"`, false},
+		// SourceIDNotShown is itself text a client can send: the ID that is that text is
+		// not a plain name, so the cause, which quotes the path it became, is left out.
+		{"the placeholder text as an ID is not a plain name", cause, []string{dbcopy.SourceIDNotShown, "local"}, `database "` + dbcopy.SourceIDNotShown + `" in "local"`, false},
 		{"no cause gives the bare message", nil, []string{"chinook", "local"}, `database "chinook" in "local"`, false},
 	} {
 		err := LookupError("database %q in %q", tc.cause, tc.ids...)

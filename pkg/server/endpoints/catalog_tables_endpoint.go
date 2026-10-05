@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
 
 // getCatalogTablesHandler is GET /datatug/catalog-tables (Task 17 item A.2,
@@ -41,7 +42,7 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	projectDir, ok := catalogProjectDir(ref.ProjectID)
 	if !ok {
-		handleError(fmt.Errorf("%w: unknown project %q", api.ErrCatalogNotFound, ref.ProjectID), w, r)
+		handleError(fmt.Errorf("%w: unknown project %q", api.ErrCatalogNotFound, dbcopy.SourceIDDisplay(ref.ProjectID)), w, r)
 		return
 	}
 	environmentID := paramAlias(q, "environment", "env")

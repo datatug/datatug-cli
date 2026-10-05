@@ -548,8 +548,14 @@ func TestParse_ASecondURLAfterAnExplicitPathStartIsRefusedWithoutEcho(t *testing
 			}
 		}
 	}
-	// The form with no slashes is refused too.
-	for _, input := range []string{"sqlite:/https://tok_Zk39xq@git.example/x", "SQLite:./postgres://carol:pw-Zk39x@git.example/x"} {
+	// The form with no slashes is refused too, a UNC start with a colon in front of the
+	// last "@" included: it is credentials, as it is with the slashes.
+	for _, input := range []string{
+		"sqlite:/https://tok_Zk39xq@git.example/x",
+		"SQLite:./postgres://carol:pw-Zk39x@git.example/x",
+		`sqlite:\\carol:pw-Zk39x@git.example/x`,
+		`SQLITE:\\corp/carol:pw-Zk39x@git.example/x`,
+	} {
 		_, err := Parse(input)
 		require.Error(t, err, input)
 		assert.ErrorContains(t, err, "credentials are not supported", input)
@@ -564,10 +570,75 @@ func TestParse_ASecondURLAfterAnExplicitPathStartIsRefusedWithoutEcho(t *testing
 		"sqlite:/data/team@work/https://x",
 		"ingitdb://./a:b/c@d",
 		`ingitdb://\\server\share\a@b\proj`,
+		// A UNC path with an "@" and no colon is still a path without the slashes.
+		`sqlite:\\server\share\a@b.db`,
 	} {
 		ref, err := Parse(input)
 		require.NoError(t, err, input)
 		assert.Equal(t, input, ref.Raw, "a path is shown as it was typed")
+	}
+}
+
+// No server name holds an "@", so a token written as the user name straight after a
+// UNC start ("\\tok@host/x") is credentials and not a path: refused, with only
+// what follows the "@" named. A UNC path whose share holds an "@" is still a path.
+func TestParse_ATokenAfterAUNCStartIsRefusedWithoutEcho(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		`http://\\tok_Zk39xq@host.example/x`,
+		`HTTPS://\\tok_Zk39xq@host.example/x`,
+		`sqlite://\\tok_Zk39xq@host.example/x.db`,
+		`sqlite:\\tok_Zk39xq@host.example/x.db`,
+		`ingitdb://\\tok_Zk39xq@git.example/team/repo`,
+		`openvaultdb://\\tok_Zk39xq@host.example/c.json`,
+	} {
+		_, err := Parse(input)
+		require.Error(t, err, input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		host, _, _ := strings.Cut(input[strings.LastIndex(input, "@")+1:], "/")
+		assert.ErrorContains(t, err, host, "the refusal names what follows the at sign: %s", input)
+		assert.NotContains(t, err.Error(), "tok_Zk39xq", input)
+	}
+	for _, input := range []string{
+		`ingitdb://\\server\share@x\proj`,
+		`http://\\server\share@x`,
+		`sqlite:\\server/share@x.db`,
+	} {
+		ref, err := Parse(input)
+		require.NoError(t, err, input)
+		assert.Equal(t, input, ref.Raw, "a path is shown as it was typed")
+	}
+}
+
+// A drive path written with a doubled slash ("C://work/a@b") holds "C://", which
+// matches the pattern of a second URL as a one-letter scheme. The drive letter is a
+// drive, not a scheme, so it is a path as it always was and Parse accepts it, for
+// every scheme that reads a path. What follows the drive letter is still searched:
+// "C:/https://tok@host" is a second URL.
+func TestParse_ADrivePathWithADoubledSlashIsNotASecondURL(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		`http://C://work/a@b/proj`,
+		`https://C://work/a@b`,
+		`HTTPS://c://work/a@b`,
+		`openvaultdb://C://work/a@b/ovdb.json`,
+		`sqlite://C://work/a@b.db`,
+	} {
+		_, err := Parse(input)
+		require.NoError(t, err, input)
+	}
+	for _, input := range []string{
+		`http://C:/https://tok_Zk39xq@git.example/x`,
+		`https://C://https://tok_Zk39xq@git.example/x`,
+		`openvaultdb://C:\postgres://carol:pw-Zk39x@git.example/x`,
+		`sqlite://C://https://tok_Zk39xq@git.example/x`,
+	} {
+		_, err := Parse(input)
+		require.Error(t, err, input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		for _, secret := range []string{"carol", "pw-Zk39x", "tok_Zk39xq"} {
+			assert.NotContains(t, err.Error(), secret, input)
+		}
 	}
 }
 

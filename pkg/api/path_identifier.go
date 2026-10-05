@@ -20,8 +20,13 @@ func ValidateIdentifier(field, id string) error {
 	if dbcopy.IsPlainSourceID(id) {
 		return nil
 	}
-	return validation.NewErrBadRequestFieldValue(field, "must be a plain name: letters, digits, '.', '_' and '-', at most 128 characters, starting with a letter or a digit")
+	return validation.NewErrBadRequestFieldValue(field, PlainNameRule)
 }
+
+// PlainNameRule is the sentence that says what a plain name is. Every refusal made
+// by ValidateIdentifier, and the contract routes' own answer for an environment,
+// carry it, and nothing of the value they refused.
+const PlainNameRule = "must be a plain name: letters, digits, '.', '_' and '-', at most 128 characters, starting with a letter or a digit"
 
 // ValidateCatalogIdentifiers is the check of the two IDs that GET
 // /datatug/catalog-tables turns into folder names, environment first. Both the

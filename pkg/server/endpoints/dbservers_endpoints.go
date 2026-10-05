@@ -23,7 +23,8 @@ func addDbServer(w http.ResponseWriter, r *http.Request) {
 
 // getDbServerSummary returns summary about environment
 func getDbServerSummary(w http.ResponseWriter, r *http.Request) {
-	log.Println(r.Method, r.RequestURI)
+	// The path only: the query string can hold a source string a client typed.
+	log.Println(r.Method, r.URL.Path)
 	q := r.URL.Query()
 	dbServer := datatug.ServerRef{
 		Driver: q.Get("driver"),
@@ -48,7 +49,8 @@ var deleteDbServerFunc = api.DeleteDbServer
 
 // deleteDbServer removes a DB server from project
 func deleteDbServer(w http.ResponseWriter, r *http.Request) {
-	log.Println(r.Method, r.RequestURI)
+	// The path only: the query string can hold a source string a client typed.
+	log.Println(r.Method, r.URL.Path)
 	q := r.URL.Query()
 	var err error
 	dbServer, err := newDbServerFromQueryParams(q)

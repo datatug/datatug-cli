@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/internal/sourcecases"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/storage"
@@ -119,5 +120,124 @@ func TestGetEnvironmentSummary_RefusesAnUnsafeEnvironmentBeforeTheStore(t *testi
 	}
 	if asked != 0 {
 		t.Fatalf("the store was asked %d times for an unsafe ID, want 0", asked)
+	}
+}
+
+// The legacy routes (exec/select and exec/execute_commands) look an environment and
+// a database up in the project store, which joins each into a path of its own. They
+// are checked in the request's own Validate, before any lookup, so the same check
+// holds whatever calls the route's function.
+
+// countLookups replaces the project store with one that counts the lookups of an
+// environment and of a database (all three kinds a store joins into a path) and
+// configures an executor, so a request that passes its checks reaches the store.
+func countLookups(t *testing.T) *int {
+	t.Helper()
+	lookups := new(int)
+	projectStore := mockProjectStore{
+		loadEnvironmentFunc: func(context.Context, string, ...datatug.StoreOption) (*datatug.Environment, error) {
+			*lookups++
+			return &datatug.Environment{DbServers: []*datatug.EnvDbServer{{ServerRef: datatug.ServerRef{Driver: "sqlite3"}}}}, nil
+		},
+		loadEnvDbCatalogFunc: func(context.Context, string, string, string, ...datatug.StoreOption) (datatug.DbCatalog, error) {
+			*lookups++
+			return datatug.DbCatalog{}, os.ErrNotExist
+		},
+		loadEnvDbCatalogsFunc: func(context.Context, string, ...datatug.StoreOption) (datatug.DbCatalogs, error) {
+			*lookups++
+			return nil, os.ErrNotExist
+		},
+	}
+	previous := storage.NewDatatugStore
+	storage.NewDatatugStore = func(string) (storage.Store, error) {
+		return mockStore{getProjectStoreFunc: func(string) datatug.ProjectStore { return projectStore }}, nil
+	}
+	t.Cleanup(func() { storage.NewDatatugStore = previous })
+	session, err := secureread.NewSession(secureread.SessionOptions{NoPolicies: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ConfigureSecureSession(session, map[string]string{"p1": t.TempDir()}, Capabilities{})
+	t.Cleanup(func() { ConfigureSecureSession(secureread.Session{}, nil, Capabilities{}) })
+	return lookups
+}
+
+// unsafeRefusal reports what is wrong with err, the answer to a request that holds
+// the unsafe ID c: a bad-request error that names field and echoes nothing of c.
+func unsafeRefusal(err error, field string, c sourcecases.UnsafeIdentifier) string {
+	switch {
+	case err == nil:
+		return "no error"
+	case !validation.IsBadRequestError(err):
+		return "not a bad-request error: " + err.Error()
+	case c.ID != "" && !strings.Contains(err.Error(), "["+field+"]"):
+		return "does not name the field " + field + ": " + err.Error()
+	case len(c.ID) >= 3 && strings.Contains(err.Error(), c.ID):
+		return "echoes the ID: " + err.Error()
+	}
+	return ""
+}
+
+func TestExecuteSelect_RefusesAnUnsafeEnvironmentOrDatabaseBeforeAnyLookup(t *testing.T) {
+	lookups := countLookups(t)
+	ctx := context.Background()
+	request := func(environment, database string) SelectRequest {
+		return SelectRequest{Project: "p1", Environment: environment, Database: database, SQL: "SELECT 1"}
+	}
+
+	// The counter is live: a plain pair reaches the store.
+	if _, err := ExecuteSelect(ctx, "files", request("local", "chinook")); err == nil || *lookups == 0 {
+		t.Fatalf("plain IDs: err = %v, lookups = %d, want a lookup that finds nothing", err, *lookups)
+	}
+	*lookups = 0
+
+	for _, c := range sourcecases.UnsafeIdentifiers() {
+		for field, pair := range map[string][2]string{"environment": {c.ID, "chinook"}, "database": {"local", c.ID}} {
+			_, err := ExecuteSelect(ctx, "files", request(pair[0], pair[1]))
+			if problem := unsafeRefusal(err, field, c); problem != "" {
+				t.Errorf("%s as the %s: ExecuteSelect: %s", c.Name, field, problem)
+			}
+			// The request's own check gives the same answer.
+			if problem := unsafeRefusal(request(pair[0], pair[1]).Validate(), field, c); problem != "" {
+				t.Errorf("%s as the %s: Validate: %s", c.Name, field, problem)
+			}
+		}
+	}
+	if *lookups != 0 {
+		t.Fatalf("an unsafe ID reached %d store lookups, want 0", *lookups)
+	}
+}
+
+func TestExecuteCommands_RefusesAnUnsafeEnvironmentOrDatabaseBeforeAnyLookup(t *testing.T) {
+	lookups := countLookups(t)
+	ctx := context.Background()
+	request := func(environment, database string) ExecuteCommandsRequest {
+		return ExecuteCommandsRequest{Project: "p1", Commands: []ExecuteCommandRequest{
+			{Type: "SQL", Text: "SELECT 1", Env: "local", DB: "chinook"},
+			{Type: "SQL", Text: "SELECT 1", Env: environment, DB: database},
+		}}
+	}
+
+	// The counter is live: a plain pair reaches the store.
+	if _, err := ExecuteCommands(ctx, "files", request("local", "chinook")); err == nil || *lookups == 0 {
+		t.Fatalf("plain IDs: err = %v, lookups = %d, want a lookup that finds nothing", err, *lookups)
+	}
+	*lookups = 0
+
+	for _, c := range sourcecases.UnsafeIdentifiers() {
+		for field, pair := range map[string][2]string{"env": {c.ID, "chinook"}, "db": {"local", c.ID}} {
+			// The first command is plain and the second is not: no command of the
+			// request is looked up before the whole request has been checked.
+			_, err := ExecuteCommands(ctx, "files", request(pair[0], pair[1]))
+			if problem := unsafeRefusal(err, field, c); problem != "" {
+				t.Errorf("%s as the %s: ExecuteCommands: %s", c.Name, field, problem)
+			}
+			if problem := unsafeRefusal(request(pair[0], pair[1]).Validate(), field, c); problem != "" {
+				t.Errorf("%s as the %s: Validate: %s", c.Name, field, problem)
+			}
+		}
+	}
+	if *lookups != 0 {
+		t.Fatalf("an unsafe ID reached %d store lookups, want 0", *lookups)
 	}
 }

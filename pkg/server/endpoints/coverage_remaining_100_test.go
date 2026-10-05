@@ -1194,19 +1194,19 @@ func TestRemaining100_CompareFacts(t *testing.T) {
 	assert.Error(t, err)
 
 	// proveNativeFactsBinding: unknown project
-	_, err = proveNativeFactsBinding(ctx, "q1", apicontract.CompareSideSpec{Project: "unknown_proj"}, "E", "F")
+	_, err = proveNativeFactsBinding(ctx, "q1", apicontract.CompareSideSpec{Project: "unknown_proj", Environment: "local"}, "E", "F")
 	assert.Error(t, err)
 
 	// proveNativeFactsBinding: ResolveStoreID error
 	tempDir := t.TempDir()
 	api.ConfigureSecureSession(secureread.Session{}, map[string]string{"facts_proj": tempDir}, api.Capabilities{})
 	defer api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{})
-	_, err = proveNativeFactsBinding(ctx, "q1", apicontract.CompareSideSpec{Project: "facts_proj", StoreID: "bad_store"}, "E", "F")
+	_, err = proveNativeFactsBinding(ctx, "q1", apicontract.CompareSideSpec{Project: "facts_proj", Environment: "local", StoreID: "bad_store"}, "E", "F")
 	assert.Error(t, err)
 
 	// proveNativeFactsBinding: query not found
 	filestore.SetProjectPath("facts_proj", tempDir)
-	_, err = proveNativeFactsBinding(ctx, "nonexistent_query", apicontract.CompareSideSpec{Project: "facts_proj", StoreID: api.LocalStoreID}, "E", "F")
+	_, err = proveNativeFactsBinding(ctx, "nonexistent_query", apicontract.CompareSideSpec{Project: "facts_proj", Environment: "local", StoreID: api.LocalStoreID}, "E", "F")
 	assert.Error(t, err)
 
 	// proveNativeFactsBinding: compareFactsProjectStoreFor error
@@ -1217,7 +1217,7 @@ func TestRemaining100_CompareFacts(t *testing.T) {
 	qDir := filepath.Join(tempDir, "queries")
 	require.NoError(t, os.MkdirAll(qDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(qDir, "facts_q.query.json"), []byte(`{"id":"facts_q"}`), 0644))
-	_, err = proveNativeFactsBinding(ctx, "facts_q", apicontract.CompareSideSpec{Project: "facts_proj", StoreID: api.LocalStoreID}, "E", "F")
+	_, err = proveNativeFactsBinding(ctx, "facts_q", apicontract.CompareSideSpec{Project: "facts_proj", Environment: "local", StoreID: api.LocalStoreID}, "E", "F")
 	assert.Error(t, err)
 	compareFactsProjectStoreFor = origStore
 
@@ -1225,7 +1225,7 @@ func TestRemaining100_CompareFacts(t *testing.T) {
 	qSQL := datatug.QueryDef{ID: "facts_q", Type: datatug.QueryTypeSQL}
 	data, _ := json.Marshal(qSQL)
 	require.NoError(t, os.WriteFile(filepath.Join(qDir, "facts_q.query.json"), data, 0644))
-	_, err = proveNativeFactsBinding(ctx, "facts_q", apicontract.CompareSideSpec{Project: "facts_proj", StoreID: api.LocalStoreID}, "E", "F")
+	_, err = proveNativeFactsBinding(ctx, "facts_q", apicontract.CompareSideSpec{Project: "facts_proj", Environment: "local", StoreID: api.LocalStoreID}, "E", "F")
 	assert.Error(t, err)
 
 	// matchingCohortParameter cases

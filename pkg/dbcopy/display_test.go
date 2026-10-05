@@ -123,6 +123,12 @@ func TestSourceDisplay(t *testing.T) {
 		{"ingitdb token after a UNC start", `ingitdb://\\tok:x-oauth-basic@github.com/org/repo`, "ingitdb://github.com/org/repo"},
 		{"sqlite userinfo after a UNC start", `sqlite://\\alice:s3cret@host/x.db`, "sqlite://host/x.db"},
 		{"openvaultdb userinfo after a UNC start", `openvaultdb://\\alice:s3cret@host/c.json`, "openvaultdb://host/c.json"},
+		// No server name holds an "@": a token written as the user name straight after a UNC start is credentials.
+		{"http token as the user name after a UNC start", `http://\\tok_Zk39xq@host.example/x`, "http://host.example/x"},
+		{"https token as the user name after a UNC start", `https://\\tok_Zk39xq@host.example/team/repo`, "https://host.example/team/repo"},
+		{"sqlite token as the user name after a UNC start", `sqlite://\\tok_Zk39xq@host.example/x.db`, "sqlite://host.example/x.db"},
+		{"ingitdb token as the user name after a UNC start", `ingitdb://\\tok_Zk39xq@git.example/team/repo`, "ingitdb://git.example/team/repo"},
+		{"openvaultdb token as the user name after a UNC start", `openvaultdb://\\tok_Zk39xq@host.example/c.json`, "openvaultdb://host.example/c.json"},
 		{"UNC path with a colon and no at sign", `sqlite://\\server:445\share\db.sqlite`, `sqlite://\\server:445\share\db.sqlite`},
 		{"relative directory without an at sign", "ingitdb://dir/project", "ingitdb://dir/project"},
 		// A second "scheme://" in front of the last "@" is not a path, whatever the text starts with: only what follows
@@ -162,6 +168,12 @@ func TestSourceDisplay(t *testing.T) {
 		{"windows drive path under http", `http://C:\work\a@b`, `http://C:\work\a@b`},
 		{"windows drive path with slashes under https", `https://C:/work/a@b/proj`, `https://C:/work/a@b/proj`},
 		{"windows drive path under sqlite", `sqlite://C:\data\x.db`, `sqlite://C:\data\x.db`},
+		// A drive path written with a doubled slash ("C://work/a@b") is a path, not a
+		// second URL, and Parse accepts it. "C://" also reads as a wrapped URL whose
+		// scheme is not known, so nothing of it is shown: it is never a leak.
+		{"drive path with a doubled slash and an at sign under https", `https://C://work/a@b/proj`, UnparsableSource},
+		{"drive path with a doubled slash and an at sign under sqlite", `sqlite://C://work/a@b.db`, UnparsableSource},
+		{"https drive start and a second URL", `https://C:/https://tok_Zk39xq@git.example/team/repo`, "https://git.example/team/repo"},
 		{"http project directory", "http://./demo-project-1", "http://./demo-project-1"},
 		{"http credentials", "https://alice:s3cret@api.example.com/x", "https://api.example.com/x"},
 		{"http password that reads as host and port", "HTTP://alice:42/s3cret@host/x", "http://host/x"},
@@ -214,6 +226,21 @@ func TestSourceIDDisplay(t *testing.T) {
 	assert.Equal(t, strings.Repeat("é", 128), SourceIDDisplay(strings.Repeat("é", 128)))
 }
 
+// A query ID is folders and a name joined with "/": it is shown only when every part
+// is a plain name, and as the placeholder otherwise, a whole source string included.
+func TestQueryIDDisplay(t *testing.T) {
+	t.Parallel()
+	for _, id := range []string{"customer-invoices", "customers/customer-invoices", "a/b/c", "Café/données-1.v2"} {
+		assert.Equal(t, id, QueryIDDisplay(id))
+	}
+	for _, id := range []string{
+		"", "/", "a//b", "/a", "a/", "../x", "a/./b", "a/../b", "postgres://alice:s3cret@h/db", "alice:s3cret@h/x",
+		"a b/c", `a\b/c`, "a\x00b/c", strings.Repeat("a", 129) + "/b", SourceIDNotShown,
+	} {
+		assert.Equal(t, SourceIDNotShown, QueryIDDisplay(id), id)
+	}
+}
+
 func TestPathDisplay(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string]string{
@@ -260,4 +287,32 @@ func TestBackendRef_DisplayBuildsFromTheParts(t *testing.T) {
 	assert.Equal(t, "openvaultdb:///c.json", BackendRef{Scheme: "openvaultdb", Path: "/c.json"}.Display())
 	assert.Equal(t, UnparsableSource, BackendRef{Scheme: "nosuch", Path: "s3cret"}.Display())
 	assert.Equal(t, UnparsableSource, BackendRef{}.Display())
+}
+
+// The path field of a catalog names a file or a directory. One that is a URL, or
+// holds a URL in front of its last "@", is neither, and what follows the scheme may
+// be credentials: PathHoldsURL says so, so that no message shows it as a path.
+func TestPathHoldsURL(t *testing.T) {
+	t.Parallel()
+	for path, want := range map[string]bool{
+		"https://tok_Zk39xq@git.example/x":      true,
+		"HTTPS://carol:pw@git.example/x":        true,
+		"https://git.example/x":                 true,
+		"postgres://carol:pw@db.example/shop":   true,
+		"./https://tok_Zk39xq@git.example/x":    true,
+		"/srv/https://tok_Zk39xq@git.example/x": true,
+		`C:/https://tok_Zk39xq@git.example/x`:   true,
+		`C://https://tok_Zk39xq@git.example/x`:  true,
+		"dbs/chinook.sqlite":                    false,
+		"~/datatug/dbs/chinook.sqlite":          false,
+		"/data/team@work/https://x":             false,
+		"./team@work/a.db":                      false,
+		`C:\work\a@b.db`:                        false,
+		"C://work/a@b.db":                       false,
+		"c://work/a.db":                         false,
+		`\\server\share@x\a.db`:                 false,
+		"":                                      false,
+	} {
+		assert.Equal(t, want, PathHoldsURL(path), "%q", path)
+	}
 }

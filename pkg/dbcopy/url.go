@@ -275,8 +275,10 @@ func parseURL(rawURL string) (BackendRef, error) {
 func parseSQLite(rawURL, lowerURL, rest string, slashes bool) (BackendRef, error) {
 	display := SourceDisplay(rawURL)
 	// "sqlite:rest" keeps a relative path that holds an "@" (see readsAsPath), but a
-	// second URL in front of the last "@" is credentials in either form.
-	if slashes || holdsSecondURL(rest) {
+	// second URL in front of the last "@" is credentials in either form, and so is a
+	// UNC start with a colon in front of it ("sqlite:\\alice:pw@host"): a UNC path
+	// with an "@" and no colon still passes refuseUserinfo.
+	if slashes || holdsSecondURL(rest) || strings.HasPrefix(rest, `\\`) {
 		if err := refuseUserinfo("sqlite", display, rest); err != nil {
 			return BackendRef{}, err
 		}

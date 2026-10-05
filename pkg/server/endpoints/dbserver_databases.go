@@ -18,7 +18,8 @@ import (
 // (db-server.service.ts's getServerDatabases) sends "proj"; paramAlias also
 // accepts the contract's "project"/"environment" names.
 func getServerDatabases(w http.ResponseWriter, r *http.Request) {
-	log.Println(r.Method, r.RequestURI)
+	// The path only: the query string can hold a source string a client typed.
+	log.Println(r.Method, r.URL.Path)
 	q := r.URL.Query()
 	request := dto.GetServerDatabasesRequest{
 		Project:     paramAlias(q, "proj", urlParamProjectID),

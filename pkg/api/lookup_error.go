@@ -23,7 +23,8 @@ func LookupError(format string, cause error, ids ...string) error {
 	plain := true
 	for i, id := range ids {
 		shown[i] = dbcopy.SourceIDDisplay(id)
-		plain = plain && shown[i] == id
+		// Not shown[i] == id: SourceIDNotShown is text a client can send as an ID.
+		plain = plain && dbcopy.IsPlainSourceID(id)
 	}
 	message := fmt.Sprintf(format, shown...)
 	if cause == nil || !plain {

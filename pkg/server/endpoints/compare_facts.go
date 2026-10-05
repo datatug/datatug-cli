@@ -93,6 +93,12 @@ func visibleFactCohort(view incidents.IncidentView, side apicontract.CompareSide
 }
 
 func proveNativeFactsBinding(ctx context.Context, queryID string, side apicontract.CompareSideSpec, entity, field string) (string, error) {
+	// The source below is resolved in side.Environment, which the project store turns
+	// into a folder name, before computeRunQuery's own scope check runs: a name that
+	// is not a plain name goes no further.
+	if api.ValidateIdentifier("environment", side.Environment) != nil {
+		return "", newInvalidRequest("environment", api.PlainNameRule)
+	}
 	projectDir, ok := api.ProjectDir(side.Project)
 	if !ok {
 		return "", newNotFound(fmt.Sprintf("unknown project %q", side.Project))

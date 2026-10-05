@@ -257,11 +257,16 @@ func (g *generator) positions(scheme, tail, prefix string, wrapped bool) []Case 
 // follows whole, and a second URL written after the start (a URL that holds
 // userinfo, or a token as the user name) is shown with its credentials. A user
 // name with a slash in it, after a UNC start, is the same door: the slash comes
-// before the colon, so the text does not look like "user:password@host".
+// before the colon, so the text does not look like "user:password@host". So is a
+// token as the user name straight after a UNC start: it has no colon at all.
 func (g *generator) afterPathStart(scheme, tail string) []Case {
+	// The scheme cycles fastest and its casing once per cycle, so over nine second
+	// URLs every inner scheme is written in lower, upper and mixed case: the casing a
+	// user types is a shape of its own.
 	inner := innerSchemes[g.rotation%len(innerSchemes)]
+	casing := (g.rotation / len(innerSchemes)) % 3
 	g.rotation++
-	innerHead := cased(inner, g.rotation%3) + "://"
+	innerHead := cased(inner, casing) + "://"
 	var cases []Case
 	add := func(position, style, source string, secrets ...string) {
 		cases = append(cases, Case{
@@ -280,5 +285,9 @@ func (g *generator) afterPathStart(scheme, tail string) []Case {
 	add("second URL after a dot start", "token", scheme+"://./"+innerHead+token+"@"+tail, token)
 	user, password := g.secret("token with slash"), g.secret("word")
 	add("user name with a slash after a UNC start", "user name with slash", scheme+`://\\`+user+":"+password+"@"+tail, user, password)
+	// A token as the user name straight after a UNC start has no colon and no
+	// separator: it stands where a server name does, and no server name holds an "@".
+	token = g.secret("token")
+	add("token as the user name after a UNC start", "token", scheme+`://\\`+token+"@"+tail, token)
 	return cases
 }

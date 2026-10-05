@@ -1,6 +1,7 @@
 package sourcecases
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -235,6 +236,8 @@ func TestAll_UserinfoAfterAUNCStartIsGeneratedForEverySchemeBareAndWrapped(t *te
 func TestAll_ASecondURLAfterAPathStartIsGeneratedForEveryScheme(t *testing.T) {
 	t.Parallel()
 	counts := map[string]map[string]int{}
+	// innerSeen holds every (scheme, casing) of a second URL: the casing a user types
+	// ("https://") is a shape of its own, not only the upper and the mixed one.
 	innerSeen := map[string]bool{}
 	for _, c := range All() {
 		switch c.Position {
@@ -253,7 +256,24 @@ func TestAll_ASecondURLAfterAPathStartIsGeneratedForEveryScheme(t *testing.T) {
 			if cut < 0 || !strings.Contains(inner[cut:], c.Secrets[0]+"@") {
 				t.Fatalf("case %q: %q holds no second URL whose userinfo is the secret", c.Name, c.Source)
 			}
-			innerSeen[strings.ToLower(inner[:cut])] = true
+			for casing := 0; casing < 3; casing++ {
+				if inner[:cut] == cased(strings.ToLower(inner[:cut]), casing) {
+					innerSeen[strings.ToLower(inner[:cut])+"/"+strconv.Itoa(casing)] = true
+				}
+			}
+			if counts[c.Position] == nil {
+				counts[c.Position] = map[string]int{}
+			}
+			counts[c.Position][scheme]++
+		case "token as the user name after a UNC start":
+			// No colon and no separator: the token is the whole of the first segment, the
+			// place a server name goes.
+			scheme := strings.ToLower(c.Source[:strings.Index(c.Source, "://")])
+			rest := c.Source[strings.Index(c.Source, "://")+3:]
+			userinfo, _, _ := strings.Cut(rest, "@")
+			if !strings.HasPrefix(userinfo, `\\`) || strings.ContainsAny(userinfo[2:], `\/:`) || userinfo[2:] != c.Secrets[0] {
+				t.Fatalf("case %q: %q is not a token as the user name straight after a UNC start", c.Name, c.Source)
+			}
 			if counts[c.Position] == nil {
 				counts[c.Position] = map[string]int{}
 			}
@@ -271,7 +291,7 @@ func TestAll_ASecondURLAfterAPathStartIsGeneratedForEveryScheme(t *testing.T) {
 			counts[c.Position][scheme]++
 		}
 	}
-	for _, position := range []string{"second URL after an absolute start", "second URL after a dot start", "user name with a slash after a UNC start"} {
+	for _, position := range []string{"second URL after an absolute start", "second URL after a dot start", "user name with a slash after a UNC start", "token as the user name after a UNC start"} {
 		for _, scheme := range Schemes {
 			if counts[position][scheme] == 0 {
 				t.Errorf("no case of %q for %s", position, scheme)
@@ -279,8 +299,10 @@ func TestAll_ASecondURLAfterAPathStartIsGeneratedForEveryScheme(t *testing.T) {
 		}
 	}
 	for _, inner := range innerSchemes {
-		if !innerSeen[inner] {
-			t.Errorf("no second URL uses the scheme %s", inner)
+		for casing, name := range []string{"lower case", "upper case", "mixed case"} {
+			if !innerSeen[inner+"/"+strconv.Itoa(casing)] {
+				t.Errorf("no second URL uses the scheme %s in %s", inner, name)
+			}
 		}
 	}
 }

@@ -225,9 +225,31 @@ var secondURL = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://`)
 // holdsSecondURL reports whether the part of text in front of its last "@" holds
 // a "scheme://": a URL written after the start of what was meant as a path. Whoever
 // wrote one meant a remote server with credentials, whatever the text starts with.
+// The drive letter of a drive path is a drive and not a scheme, so the search starts
+// after "C:": "C://work/a@b" is a path, and "C:/https://tok@host" holds a URL.
 func holdsSecondURL(text string) bool {
 	at := strings.LastIndexByte(text, '@')
-	return at >= 0 && secondURL.MatchString(text[:at])
+	if at < 0 {
+		return false
+	}
+	from := 0
+	if driveLetterPath.MatchString(text) {
+		from = len("C:")
+	}
+	return secondURL.MatchString(text[from:at])
+}
+
+// PathHoldsURL reports whether path, the path field of a catalog, is a URL
+// ("https://tok@host/x") or holds one in front of its last "@" ("./https://tok@host"):
+// it is then not a file or a directory, and what follows its scheme may be
+// credentials, so a caller refuses it before it is joined to a folder, which would
+// turn it into a relative path that a message shows whole. A drive path
+// ("C://work/a@b.db") is a path: its drive letter is not a scheme.
+func PathHoldsURL(path string) bool {
+	if driveLetterPath.MatchString(path) {
+		path = path[len("C:"):]
+	}
+	return schemePrefix.MatchString(path) || holdsSecondURL(path)
 }
 
 // readsAsPath reports whether text, what follows "scheme://" of a scheme that
@@ -250,8 +272,15 @@ func holdsSecondURL(text string) bool {
 // "C:/https://tok@host") is not a path whatever the text starts with: an explicit
 // start does not make a URL written after it a directory. A UNC start
 // ("\\server\share") is explicit only while no ":" stands in front of the last
-// "@": "\\alice:s3cret@host" and "\\corp/u:p@host" start with two backslashes and
-// are credentials all the same, and no server or share name holds a colon.
+// "@" and the server name holds no "@": "\\alice:s3cret@host", "\\corp/u:p@host"
+// and "\\tok@host" start with two backslashes and are credentials all the same, and
+// no server or share name holds a colon, nor a server name an "@".
+//
+// Known limits, shapes that stay paths because nothing in the text tells them from
+// one: a token with a slash and no colon after a UNC start ("\\team/tok@host/x":
+// "team" is the server and "tok@host" a share), and user information straight
+// after an absolute start with no second scheme ("sqlite:///user:pw@host/db": an
+// absolute path may hold an "@" anywhere). Both are shown as typed.
 func readsAsPath(text string) bool {
 	at := strings.LastIndexByte(text, '@')
 	if at < 0 {
@@ -263,7 +292,22 @@ func readsAsPath(text string) bool {
 	if driveLetterPath.MatchString(text) {
 		return true
 	}
-	return explicitPathStart.MatchString(text) && (!strings.HasPrefix(text, `\\`) || !strings.Contains(text[:at], ":"))
+	return explicitPathStart.MatchString(text) && (!strings.HasPrefix(text, `\\`) || uncReadsAsPath(text, at))
+}
+
+// uncReadsAsPath reports whether text, which starts with "\\" and holds an "@"
+// at index at (the last), is a UNC path and not credentials: no ":" stands in
+// front of the "@", and the server name, the first segment, holds no "@" ("\\tok@host/x"
+// is a token as the user name: no server name holds one).
+func uncReadsAsPath(text string, at int) bool {
+	if strings.Contains(text[:at], ":") {
+		return false
+	}
+	server := text[2:]
+	if end := strings.IndexAny(server, `\/`); end >= 0 {
+		server = server[:end]
+	}
+	return !strings.Contains(server, "@")
 }
 
 // localTextDisplay returns what to show for rest, the text after "scheme://" of
@@ -396,6 +440,19 @@ func SourceIDDisplay(id string) string {
 		return id
 	}
 	return SourceIDNotShown
+}
+
+// QueryIDDisplay returns id, a saved query's ID, when every "/"-separated part of it
+// is a plain name (see IsPlainSourceID) and SourceIDNotShown otherwise: a query ID is
+// the folders of the query and its name, and a client may send a whole source string
+// where one belongs. Use it to name a query ID a client sent in a message.
+func QueryIDDisplay(id string) string {
+	for _, part := range strings.Split(id, "/") {
+		if !IsPlainSourceID(part) {
+			return SourceIDNotShown
+		}
+	}
+	return id
 }
 
 // IsPlainSourceID reports whether id is a plain name for a source in a project:

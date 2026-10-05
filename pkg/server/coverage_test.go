@@ -10,6 +10,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
 
@@ -101,5 +102,26 @@ func TestHttpServer_ServeHTTP_Defaults(t *testing.T) {
 	}
 	if capturedServer.Addr != "localhost:8989" {
 		t.Fatalf("captured Addr = %q, want localhost:8989", capturedServer.Addr)
+	}
+}
+
+// A server is given the projects it serves as a map. A call with no map (nil) serves no project,
+// as a call with an empty one does: whether a project is served does not depend on which of
+// the two the caller made, so a plain name that nothing serves is refused all the same.
+func TestHttpServer_ServeHTTP_ANilSetOfProjectsServesNoProject(t *testing.T) {
+	origListen, origStore := listenAndServeFn, storage.NewDatatugStore
+	t.Cleanup(func() {
+		listenAndServeFn, storage.NewDatatugStore = origListen, origStore
+		api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{})
+	})
+	listenAndServeFn = func(*http.Server) error { return nil }
+
+	s := NewHttpServer()
+	if err := s.ServeHTTP(nil, "", 0, unrestrictedTestSession(t), api.Capabilities{}); err != nil {
+		t.Fatalf("ServeHTTP failed: %v", err)
+	}
+
+	if _, err := api.ProjectStoreFor("a-plain-name"); !errors.Is(err, api.ErrUnknownStoreID) {
+		t.Errorf("a project that nothing serves was handed a store: %v", err)
 	}
 }

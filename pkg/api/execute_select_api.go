@@ -94,7 +94,7 @@ func ExecuteSelect(ctx context.Context, storeID string, request SelectRequest) (
 	}
 	sourceURL, driver, err := resolveSourceURL(ctx, projStore, request.Environment, request.Database, projDir)
 	if err != nil {
-		return QueryResultResponse{}, err
+		return QueryResultResponse{}, sourceLookupAnswer(err)
 	}
 
 	var result secureread.Result

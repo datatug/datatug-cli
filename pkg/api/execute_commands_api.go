@@ -180,7 +180,7 @@ func ExecuteCommands(ctx context.Context, storeID string, request ExecuteCommand
 		}
 		sourceURL, _, err := resolveSourceURL(ctx, projStore, command.Env, command.DB, projDir)
 		if err != nil {
-			return ExecuteCommandsResponse{}, fmt.Errorf("command %d: %w", i, err)
+			return ExecuteCommandsResponse{}, fmt.Errorf("command %d: %w", i, sourceLookupAnswer(err))
 		}
 		result, err := executor.RunNativeSQL(ctx, sourceURL, command.Text)
 		if err != nil {

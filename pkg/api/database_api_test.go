@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -90,6 +91,18 @@ func databasesRequest(project string, server datatug.ServerRef) dto.GetServerDat
 	return dto.GetServerDatabasesRequest{Project: project, Environment: "local", ServerRef: server}
 }
 
+// connectionStringTexts are texts that a connection string reads as its own syntax (a
+// separator, an assignment, a quoted value), tried in the project, the driver and the host
+// with the shared set of unsafe texts.
+func connectionStringTexts() []sourcecases.UnsafeIdentifier {
+	return []sourcecases.UnsafeIdentifier{
+		{Name: "a semicolon", ID: "a;b"},
+		{Name: "an equals sign", ID: "a=b"},
+		{Name: "a key and a value", ID: "key=value;other=value"},
+		{Name: "a brace", ID: "a{b}"},
+	}
+}
+
 func TestGetServerDatabases_RefusesAnUnsafeValueInEveryPositionBeforeAnythingIsDialled(t *testing.T) {
 	f := newServerDatabasesFixture(t, recordedServer("sqlserver", "localhost", 1433))
 	ctx := context.Background()
@@ -101,11 +114,11 @@ func TestGetServerDatabases_RefusesAnUnsafeValueInEveryPositionBeforeAnythingIsD
 		build  func(value string) dto.GetServerDatabasesRequest
 	}
 	positions := []position{
-		{"project", "project", sourcecases.UnsafeIdentifiers(), func(v string) dto.GetServerDatabasesRequest { return databasesRequest(v, plain) }},
-		{"driver", "driver", sourcecases.UnsafeIdentifiers(), func(v string) dto.GetServerDatabasesRequest {
+		{"project", "project", slices.Concat(sourcecases.UnsafeIdentifiers(), connectionStringTexts()), func(v string) dto.GetServerDatabasesRequest { return databasesRequest(v, plain) }},
+		{"driver", "driver", slices.Concat(sourcecases.UnsafeIdentifiers(), connectionStringTexts()), func(v string) dto.GetServerDatabasesRequest {
 			return databasesRequest("p1", datatug.ServerRef{Driver: v, Host: "localhost", Port: 1433})
 		}},
-		{"host", "host", sourcecases.UnsafeHosts(), func(v string) dto.GetServerDatabasesRequest {
+		{"host", "host", slices.Concat(sourcecases.UnsafeHosts(), connectionStringTexts()), func(v string) dto.GetServerDatabasesRequest {
 			return databasesRequest("p1", datatug.ServerRef{Driver: "sqlserver", Host: v, Port: 1433})
 		}},
 	}

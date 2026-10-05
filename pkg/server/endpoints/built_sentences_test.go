@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -11,8 +12,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/dal-go/dalgo/access"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
@@ -68,6 +71,21 @@ func answerMessage(body string) string {
 	return body
 }
 
+// httpQueriesNotListed is the answer for a project whose HTTP query definitions cannot be listed.
+const httpQueriesNotListed = "the HTTP query definitions of the project could not be listed"
+
+// brokenQueries is what is at the queries of a project whose definitions cannot be listed, with
+// an environment that lists no catalog, for the routes that resolve a source.
+func brokenQueries(file func(path, content string) func(dir string)) map[string]func(string) {
+	environment := file("environments/local/local.env.json", "{}")
+	return map[string]func(string){
+		"a file that is not JSON": func(dir string) {
+			environment(dir)
+			file("queries/broken.query.json", "{not json")(dir)
+		},
+	}
+}
+
 func TestRoutes_AStoreFailureAnswersOneBuiltSentenceWhateverIsAtThePath(t *testing.T) {
 	withApicoreHandle(t)
 	previousStore := storage.NewDatatugStore
@@ -98,6 +116,12 @@ func TestRoutes_AStoreFailureAnswersOneBuiltSentenceWhateverIsAtThePath(t *testi
 		handler http.HandlerFunc
 		path    string
 		query   func(project string) url.Values
+		// method is GET unless the route is another.
+		method string
+		// body is the JSON body of a route that reads one.
+		body func(project string) any
+		// status is the status of the answer: 500 unless the route is another.
+		status int
 		// sentence is the answer, for the project.
 		sentence func(project string) string
 		// breakages are what is at the path of what the route reads.
@@ -145,6 +169,66 @@ func TestRoutes_AStoreFailureAnswersOneBuiltSentenceWhateverIsAtThePath(t *testi
 			},
 		},
 		{
+			name: "projects/projects_summary", handler: getProjects, path: "/datatug/projects/projects_summary",
+			query:    func(string) url.Values { return url.Values{} },
+			sentence: func(string) string { return "the projects could not be listed" },
+			breakages: map[string]func(string){
+				"missing":                           nothing,
+				"a folder where a file is expected": folder("datatug-project.json"),
+				"a file that is not JSON":           file("datatug-project.json", "{not json"),
+			},
+		},
+		{
+			name: "queries/all_queries", handler: getQueriesHandler, path: "/datatug/queries/all_queries",
+			query:    func(p string) url.Values { return url.Values{"project": {p}} },
+			sentence: func(p string) string { return fmt.Sprintf("queries of project %q could not be loaded", p) },
+			breakages: map[string]func(string){
+				"a file that is not JSON": file("queries/broken.query.json", "{not json"),
+			},
+		},
+		{
+			name: "semantic/columns", handler: semanticColumnsHandler, path: "/datatug/semantic/columns", status: http.StatusServiceUnavailable,
+			query: func(p string) url.Values {
+				return url.Values{"project": {p}, "environment": {"local"}, "securityContextId": {api.SecurityContextID()}, "source": {"s"}, "collection": {"c"}}
+			},
+			sentence:  func(string) string { return httpQueriesNotListed },
+			breakages: brokenQueries(file),
+		},
+		{
+			name: "exec/run_query", handler: runQueryHandler, path: "/datatug/exec/run_query", method: http.MethodPost, status: http.StatusServiceUnavailable,
+			query: func(string) url.Values { return url.Values{} },
+			body: func(p string) any {
+				return apicontract.ExecutionRequest{Project: p, Environment: "local", SecurityContextID: api.SecurityContextID(), Source: "s", DTQL: "from: {name: t}\n", Mode: apicontract.ProvenanceModeLive}
+			},
+			sentence:  func(string) string { return httpQueriesNotListed },
+			breakages: brokenQueries(file),
+		},
+		{
+			name: "exec/select", handler: executeSelectHandler, path: "/datatug/exec/select",
+			query: func(p string) url.Values {
+				return url.Values{"proj": {p}, "env": {"local"}, "db": {"chinook"}, "sql": {"select 1"}}
+			},
+			sentence: func(string) string { return `environment "local" not found` },
+			breakages: map[string]func(string){
+				"missing":                           nothing,
+				"a folder where a file is expected": folder("environments/local/local.env.json"),
+				"a file that is not JSON":           file("environments/local/local.env.json", "{not json"),
+			},
+		},
+		{
+			name: "exec/execute_commands", handler: executeCommandsHandler, path: "/datatug/exec/execute_commands", method: http.MethodPost,
+			query: func(p string) url.Values { return url.Values{"project": {p}} },
+			body: func(string) any {
+				return map[string]any{"commands": []map[string]any{{"type": "SQL", "env": "local", "db": "chinook", "text": "select 1"}}}
+			},
+			sentence: func(string) string { return `command 0: environment "local" not found` },
+			breakages: map[string]func(string){
+				"missing":                           nothing,
+				"a folder where a file is expected": folder("environments/local/local.env.json"),
+				"a file that is not JSON":           file("environments/local/local.env.json", "{not json"),
+			},
+		},
+		{
 			name: "recordsets/recordsets_summary", handler: getRecordsetsSummary, path: "/datatug/recordsets/recordsets_summary",
 			query:    func(p string) url.Values { return url.Values{"project": {p}} },
 			sentence: func(p string) string { return fmt.Sprintf("recordsets of project %q could not be loaded", p) },
@@ -159,10 +243,22 @@ func TestRoutes_AStoreFailureAnswersOneBuiltSentenceWhateverIsAtThePath(t *testi
 				dir, project := serveBlankProject(t)
 				breakage(dir)
 
-				w := sendQuery(route.handler, http.MethodGet, route.path, route.query(project))
+				method, status := route.method, route.status
+				if method == "" {
+					method = http.MethodGet
+				}
+				if status == 0 {
+					status = http.StatusInternalServerError
+				}
+				var w *httptest.ResponseRecorder
+				if route.body != nil {
+					w = sendBody(t, route.handler, method, route.path+"?"+route.query(project).Encode(), route.body(project))
+				} else {
+					w = sendQuery(route.handler, method, route.path, route.query(project))
+				}
 				body := w.Body.String()
-				if want := route.sentence(project); w.Code != http.StatusInternalServerError || answerMessage(body) != want {
-					t.Errorf("%d %s, want a 500 whose message is exactly %q", w.Code, body, want)
+				if want := route.sentence(project); w.Code != status || answerMessage(body) != want {
+					t.Errorf("%d %s, want a %d whose message is exactly %q", w.Code, body, status, want)
 				}
 				for _, leak := range []string{dir, filepath.Base(dir), "no such file", "not a directory", "is a directory", "invalid character", "failed to load", "does not exist", "open ", "read "} {
 					if strings.Contains(body, leak) {
@@ -170,6 +266,37 @@ func TestRoutes_AStoreFailureAnswersOneBuiltSentenceWhateverIsAtThePath(t *testi
 					}
 				}
 			})
+		}
+	}
+}
+
+// The personal queries of the serving principal are kept outside the project, in a folder of
+// their own: the answer for one that cannot be loaded is the same sentence, which names
+// neither the folder of the project nor that one.
+func TestRoutes_ThePersonalQueriesThatCannotBeLoadedAreOneBuiltSentence(t *testing.T) {
+	personalRoot := t.TempDir()
+	t.Setenv("DATATUG_PERSONAL_DIR", personalRoot)
+	projectDir := t.TempDir()
+	const project = "personal-sentence-project"
+	queries := filepath.Join(personalRoot, project, "queries")
+	if err := os.MkdirAll(queries, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(queries, "broken.query.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api.ConfigureSecureSession(secureread.Session{Principal: &access.Principal{ID: "alice"}}, map[string]string{project: projectDir}, api.Capabilities{})
+	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
+
+	w := sendQuery(getQueriesHandler, http.MethodGet, "/datatug/queries/all_queries", url.Values{"project": {project}, "root": {"personal"}})
+
+	body := w.Body.String()
+	if want := fmt.Sprintf("queries of project %q could not be loaded", project); w.Code != http.StatusInternalServerError || answerMessage(body) != want {
+		t.Errorf("%d %s, want a 500 whose message is exactly %q", w.Code, body, want)
+	}
+	for _, leak := range []string{personalRoot, filepath.Base(personalRoot), projectDir, "invalid character", "load queries from", "parse "} {
+		if strings.Contains(body, leak) {
+			t.Errorf("the answer holds %q: %s", leak, body)
 		}
 	}
 }

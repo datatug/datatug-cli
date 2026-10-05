@@ -160,7 +160,7 @@ func catalogSources(ctx context.Context, projStore datatug.ProjectStore, project
 		// of an answer: it goes to the log, and the answer names the environment (when it is a
 		// plain name).
 		log.Printf("resolver: list catalogs for environment %q: %s", dbcopy.SourceIDDisplay(environment), dbcopy.RedactText(err.Error()))
-		return nil, LookupError("resolver: list catalogs for environment %q", nil, environment)
+		return nil, LookupError("could not list catalogs for environment %q", nil, environment)
 	}
 	seen := map[string]bool{}
 	var out []ResolvedSource
@@ -216,9 +216,13 @@ func dedupeNonEmpty(values ...string) []string {
 	return out
 }
 
-// errRecordsetsNotListed is the answer for a project whose recordset definitions cannot be
+// recordsetsNotListed is the answer for a project whose recordset definitions cannot be
 // listed, read or parsed: the cause quotes a path of the project folder, and goes to the log.
 const recordsetsNotListed = "the recordset definitions of the project could not be listed"
+
+// httpQueriesNotListed is the answer for a project whose HTTP query definitions cannot be
+// listed, read or parsed, with the same rule.
+const httpQueriesNotListed = "the HTTP query definitions of the project could not be listed"
 
 // recordsetsFailed logs the cause of a failed listing of the recordset definitions and
 // returns the answer for it.
@@ -233,10 +237,10 @@ func recordsetsFailed(cause error) error {
 // sharing the project's one inGitDB store (semanticIngitdbPath).
 //
 // A source ID is joined into a path by the routes that read the definition, and the file is a
-// project file that may hold anything, so a definition is a source by the ID it declares only
-// when that is a plain source ID (see dbcopy.IsPlainSourceID); a file that declares another is
-// skipped, with one line in the log that names the file and not the ID (which may be a source
-// string). A file that declares none is a source by its file name.
+// project file that may hold anything, so a definition is a source only when its source ID is a
+// plain source ID (see dbcopy.IsPlainSourceID): the ID it declares, or its file name when it
+// declares none. A file whose source ID is another is skipped, with one line in the log that
+// names the file and not the ID (which may be a source string).
 func recordsetSources(projectDir string) ([]ResolvedSource, error) {
 	dir := filepath.Join(projectDir, storage.RecordsetsFolder)
 	entries, err := os.ReadDir(dir)
@@ -263,11 +267,11 @@ func recordsetSources(projectDir string) ([]ResolvedSource, error) {
 			return nil, recordsetsFailed(err)
 		}
 		if def.ID != "" {
-			if !dbcopy.IsPlainSourceID(def.ID) {
-				log.Printf("resolver: skipping the recordset definition file %q: the ID it declares is not a plain source ID", entry.Name())
-				continue
-			}
 			id = def.ID
+		}
+		if !dbcopy.IsPlainSourceID(id) {
+			log.Printf("resolver: skipping the recordset definition file %q: its source ID is not a plain source ID", entry.Name())
+			continue
 		}
 		label := def.Title
 		if label == "" {
@@ -285,7 +289,9 @@ func recordsetSources(projectDir string) ([]ResolvedSource, error) {
 func httpQuerySources(projectDir string) ([]ResolvedSource, error) {
 	loaded, err := loadHTTPQueries(projectDir)
 	if err != nil {
-		return nil, fmt.Errorf("resolver: list HTTP query defs: %w", err)
+		// The cause quotes a path of the project folder, and goes to the log.
+		log.Printf("resolver: %s: %s", httpQueriesNotListed, dbcopy.RedactText(err.Error()))
+		return nil, errors.New(httpQueriesNotListed)
 	}
 	if len(loaded) == 0 {
 		return nil, nil

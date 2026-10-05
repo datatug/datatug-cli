@@ -107,9 +107,10 @@ const maxPort = 65535
 
 // serverConnectionParams builds the connection of a server that is not a file from the parts
 // of the server, which are checked first: the host is a host name or an address (see
-// dbcopy.IsRecordableHost: no character that separates the keys of the connection string) and the port a port number, written as the port of the string. The errors say
-// which part is refused and nothing of its value. The user, the password and the database of
-// the command are the caller's own, and are written as they are given.
+// dbcopy.IsRecordableHost: no character that separates the keys of the connection string)
+// and the port a port number, written as the port of the string. The errors say which part
+// is refused and nothing of its value. The user, the password and the database of the
+// command are the caller's own, and are written as they are given.
 func serverConnectionParams(server datatug.ServerRef, command RequestCommand) (dbconnection.Params, error) {
 	if server.Host != "" && !dbcopy.IsRecordableHost(server.Host) {
 		return nil, errors.New("the host is not a host name or an address")

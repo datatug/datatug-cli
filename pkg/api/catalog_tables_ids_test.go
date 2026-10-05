@@ -50,31 +50,45 @@ func TestProperty_GetCatalogTablesNeverEchoesASourceString(t *testing.T) {
 	}
 }
 
-// A catalog file that cannot be read, parsed or used says so, in one sentence built from the
-// catalog and the environment: a plain ID is named, any other ID is not shown, and the file
-// error, which quotes the path of the file, is never in the answer (it is logged). A file that
-// cannot be read and a file that cannot be parsed are the same answer.
+// A catalog file that cannot be used says so, in one sentence built from the catalog and the
+// environment: a plain ID is named, any other ID is not shown, and the file error, which quotes
+// the path of the file, is never in the answer (it is logged). A catalog file that is not there,
+// is not a file, cannot be read and cannot be parsed are the same answer, an ErrCatalogNotFound
+// (a 404). A file that holds no model, or one that is not a plain name, is another.
 func TestCatalogDbModel_NamesAPlainIDAndNeverAnyOther(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		prepare  func(t *testing.T, file string)
 		wantText string
+		// notFound is true when the answer is an ErrCatalogNotFound.
+		notFound bool
 		// causes are what the file error says, which no answer holds.
 		causes []string
 	}{
-		{"unreadable", func(t *testing.T, file string) { mustMkdir(t, file) }, "could not be read", []string{"is a directory", "read "}},
-		{"unparsable", func(t *testing.T, file string) { mustWrite(t, file, "{malformed") }, "could not be read", []string{"invalid character", "parse "}},
-		{"no dbModel", func(t *testing.T, file string) { mustWrite(t, file, `{"id":"x"}`) }, "has no dbModel set", nil},
+		{"missing", func(t *testing.T, file string) {}, "catalog not found", true, []string{"no such file", "open "}},
+		{"a file where the folder is expected", func(t *testing.T, file string) {
+			mustWrite(t, filepath.Dir(file), "x")
+		}, "catalog not found", true, []string{"not a directory", "open "}},
+		{"unreadable", func(t *testing.T, file string) { mustMkdir(t, file) }, "catalog not found", true, []string{"is a directory", "read "}},
+		{"unparsable", func(t *testing.T, file string) { mustWrite(t, file, "{malformed") }, "catalog not found", true, []string{"invalid character", "parse "}},
+		{"no dbModel", func(t *testing.T, file string) { mustWrite(t, file, `{"id":"x"}`) }, "has no dbModel set", false, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, id := range []string{"broken", "my broken catalog", "ingitdb://alice:s3cretpw@host/x"} {
 				dir := t.TempDir()
 				file := filepath.Join(dir, storage.EnvironmentsFolder, "dev", storage.EnvDbCatalogsFolder, id, storage.JsonFileName(id, storage.DbCatalogFileSuffix))
-				mustMkdir(t, filepath.Dir(file))
+				mustMkdir(t, filepath.Dir(filepath.Dir(file)))
+				if tc.name != "a file where the folder is expected" {
+					mustMkdir(t, filepath.Dir(file))
+				}
 				tc.prepare(t, file)
+				logged := captureLog(t)
 				_, err := catalogDbModel(dir, "dev", id)
 				if err == nil || !strings.Contains(err.Error(), tc.wantText) {
 					t.Fatalf("%q: error = %v, want %q", id, err, tc.wantText)
+				}
+				if errors.Is(err, ErrCatalogNotFound) != tc.notFound {
+					t.Errorf("%q: errors.Is(err, ErrCatalogNotFound) = %v, want %v", id, !tc.notFound, tc.notFound)
 				}
 				plain := dbcopy.SourceIDDisplay(id) == id
 				if plain != strings.Contains(err.Error(), `"`+id+`"`) {
@@ -88,6 +102,14 @@ func TestCatalogDbModel_NamesAPlainIDAndNeverAnyOther(t *testing.T) {
 					if strings.Contains(err.Error(), cause) {
 						t.Errorf("%q: the answer holds %q: %v", id, cause, err)
 					}
+				}
+				if strings.Contains(logged.String(), "s3cretpw") {
+					t.Errorf("%q: the log holds the password: %q", id, logged.String())
+				}
+				// What the file system said is for the log, unless an ID that is not a plain name
+				// is in it (it quotes the path built from the ID).
+				if said := len(tc.causes) > 0 && strings.Contains(logged.String(), tc.causes[0]); said != (plain && len(tc.causes) > 0) {
+					t.Errorf("%q: what the file system said is in the log = %v, want %v: %q", id, said, plain, logged.String())
 				}
 			}
 		})

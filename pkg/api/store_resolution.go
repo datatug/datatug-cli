@@ -133,11 +133,10 @@ func storeFor(storeID string) (storage.Store, error) {
 // about which projects there is a store for is kept here, once, and not in each entry: the
 // project's ID must be a served project or a plain name (see ValidateProjectIdentifier), and
 // when a session is configured (see sessionConfigured) it must be a project that this process
-// serves. A plain name that is not served is a valid name and the file store reads the
-// project path it has for it, which is nothing, as the working directory; the answer here is
-// the one of the routes that resolve the store of their project (see ResolveStoreID), as a
-// bad request. With no session (a handler under test, or a command that is not serve) any
-// plain name is handed a store.
+// serves. A plain name that is not served has no project folder, so no store is handed out for
+// it: the answer is the one of the routes that resolve the store of their project (see
+// ResolveStoreID), as a bad request. With no session (a handler under test, or a command that
+// is not serve) any plain name is handed a store.
 func projectStoreForID(storeID, projectID string) (datatug.ProjectStore, error) {
 	if err := ValidateProjectIdentifier("project", projectID); err != nil {
 		return nil, err

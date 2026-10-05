@@ -1577,7 +1577,8 @@ func TestSourceWarningsAPI(t *testing.T) {
 		logged := captureLog(t)
 		WarnMissingSourceFiles(ctx, map[string]string{"p1": tmpDir})
 		assert.Equal(t, 1, listAttempts, "the sources of the environment were listed, and the listing failed")
-		assert.Empty(t, logged.String(), "no listing, so no warning about a missing file")
+		assert.NotContains(t, logged.String(), "gone.db", "no listing, so no warning about a missing file")
+		assert.Contains(t, logged.String(), "queries unreadable", "the listing that failed is in the log, with its cause")
 
 		// The same environment, listed, does warn about the missing file.
 		loadHTTPQueries = func(string) ([]httpsource.LoadedQuery, error) { return nil, nil }

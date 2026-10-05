@@ -2,6 +2,7 @@ package endpoints
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -72,6 +73,22 @@ func TestRoutes_DbServerDatabasesRefusesAProjectThatIsNotServed(t *testing.T) {
 		t.Errorf("a project that is not served reached %d project stores, want 0", *asked)
 	}
 	_ = scope
+
+	// The answer is the one of the other routes that take the project from the query: a bad
+	// request that names the storage, with the same sentence.
+	var answer struct {
+		Error, Code, Field string
+	}
+	if err := json.Unmarshal([]byte(body), &answer); err != nil {
+		t.Fatal(err)
+	}
+	if answer.Code != "INVALID_REQUEST" || answer.Field != "storage" {
+		t.Errorf("a project that is not served: code %q and field %q, want INVALID_REQUEST and storage: %s", answer.Code, answer.Field, body)
+	}
+	other := sendQuery(getBoard, http.MethodGet, "/datatug/boards/board", url.Values{"project": {"not-served"}, "id": {"b1"}})
+	if other.Code != w.Code || other.Body.String() != body {
+		t.Errorf("the board route answers %d %s for a project that is not served, the route of the databases %d %s: want the same", other.Code, other.Body.String(), w.Code, body)
+	}
 }
 
 // A request whose context cannot be made is answered as an error, and nothing is looked up.

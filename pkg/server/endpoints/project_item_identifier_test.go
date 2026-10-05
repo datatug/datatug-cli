@@ -189,12 +189,20 @@ func itemRoutes(t *testing.T, project string) []itemRoute {
 		}})
 	}
 	// The port of a db server reference is a number: any other text is refused, and the
-	// answer shows nothing of it.
+	// answer shows nothing of it. Every unsafe text of the shared set is one (an empty text is
+	// no port at all, and is not tried), with the texts that are specific to a port.
 	ports := []sourcecases.UnsafeIdentifier{
 		{Name: "a path as the port", ID: "../../x"},
 		{Name: "a user and a password as the port", ID: "alice:s3cretpw"},
 		{Name: "a word as the port", ID: "abc"},
 		{Name: "a decimal number as the port", ID: "14.33"},
+		{Name: "a semicolon as the port", ID: "1433;key=value"},
+		{Name: "a brace as the port", ID: "{1433}"},
+	}
+	for _, c := range identifiers {
+		if c.ID != "" {
+			ports = append(ports, c)
+		}
 	}
 	for _, r := range []struct {
 		name, path, method string

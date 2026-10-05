@@ -44,10 +44,15 @@ When DataTug agent is started with a `serve` command it listens on HTTP port (*b
 | PUT | /boards/save_board | |
 | DELETE | /boards/delete_board | 404 when the project has no such board; 500 when the delete fails |
 
-The routes answer with sentences that they build from the kind of what was asked for and its ID
-(`board "b1" not found`, `could not delete board "b1"`), and read only what the served project
-records. What the project store or a driver said, and the paths of the server, are in the log of
-the server and are not in an answer.
+The routes of the table above that load a board, an entity, a recordset definition, a folder or a
+db server, and `environment-summary`, `projects/projects_summary`, `projects/project_summary`,
+`projects/project_full`, `catalog-tables`, `queries/all_queries`, the semantic routes, and the
+resolution of the source of `exec/select`, `exec/execute_commands` and `exec/run_query`, answer
+with a sentence that they build from the kind of what was asked for and its ID
+(`board "b1" not found`, `could not delete board "b1"`) when the project store, a driver or a file
+of the project cannot be read, and read only what the served project records. What the store or
+the driver said, which quotes the paths of the server, is in the log of the server and is not in
+the answer.
 
 ### Endpoint: POST /execute
 

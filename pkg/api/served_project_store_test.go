@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,9 +19,9 @@ import (
 
 // Every project store this package hands out comes from one helper (projectStoreForID),
 // which refuses a project this process does not serve whenever a session is configured.
-// A plain name that is not served passes the check of a name, so the check of a name does
-// not stand in for it: without the helper, a store is opened over a project that nothing
-// serves.
+// The check of a name does not say whether a project is served, and a project that is not
+// served has no project folder: the helper says so, for every entry that reaches a project
+// store.
 
 // projectStoreEntries are the entries of this package that take a project and reach its
 // project store, each called with the project in its argument and plain values everywhere
@@ -146,11 +147,19 @@ func TestProjectStoreHelper_HandsOutAStoreWhenNoSessionIsConfigured(t *testing.T
 	}
 }
 
-// storeCallSites returns, for the non-test source files of this package, the functions that
-// call a method or a function of the given names, as "file: function".
+// storeCallSites returns, for the non-test source files of this package, the declarations
+// that call a method or a function of the given names, as "file: declaration calls name".
 func storeCallSites(t *testing.T, names ...string) []string {
 	t.Helper()
-	files, err := filepath.Glob("*.go")
+	return storeCallSitesIn(t, ".", names...)
+}
+
+// storeCallSitesIn is storeCallSites for the non-test source files of the folder dir. It walks
+// every declaration of a file: a function (named by it), and a variable, whose value may be a
+// function literal, which is how the seams of a package are written (named by the variable).
+func storeCallSitesIn(t *testing.T, dir string, names ...string) []string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,20 +169,17 @@ func storeCallSites(t *testing.T, names ...string) []string {
 	}
 	var sites []string
 	fileSet := token.NewFileSet()
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") {
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
 			continue
 		}
-		parsed, err := parser.ParseFile(fileSet, file, nil, 0)
+		parsed, err := parser.ParseFile(fileSet, path, nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
+		file := filepath.Base(path)
 		for _, declaration := range parsed.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Body == nil {
-				continue
-			}
-			ast.Inspect(function.Body, func(node ast.Node) bool {
+			ast.Inspect(declaration, func(node ast.Node) bool {
 				call, ok := node.(*ast.CallExpr)
 				if !ok {
 					return true
@@ -186,7 +192,7 @@ func storeCallSites(t *testing.T, names ...string) []string {
 					called = fn.Name
 				}
 				if wanted[called] {
-					sites = append(sites, file+": "+function.Name.Name+" calls "+called)
+					sites = append(sites, file+": "+declarationName(declaration)+" calls "+called)
 				}
 				return true
 			})
@@ -194,6 +200,23 @@ func storeCallSites(t *testing.T, names ...string) []string {
 	}
 	sort.Strings(sites)
 	return sites
+}
+
+// declarationName names a top-level declaration: a function by its name, a variable or a
+// constant by the first name it declares.
+func declarationName(declaration ast.Decl) string {
+	switch d := declaration.(type) {
+	case *ast.FuncDecl:
+		return d.Name.Name
+	case *ast.GenDecl:
+		for _, spec := range d.Specs {
+			if value, ok := spec.(*ast.ValueSpec); ok && len(value.Names) > 0 {
+				return d.Tok.String() + " " + value.Names[0].Name
+			}
+		}
+		return d.Tok.String()
+	}
+	return "a declaration"
 }
 
 // A new entry that reaches a project store by a call of its own, and not by the helper, is
@@ -212,10 +235,64 @@ func TestProjectStoreHelper_IsTheOnlyCallerOfGetProjectStore(t *testing.T) {
 	}
 }
 
+// The handlers of the routes (pkg/server/endpoints) and the server (pkg/server) get a project
+// store only through pkg/api, so that the rule about which projects there is a store for is
+// kept in one place: none of them asks a store for a project store, or for a store.
+func TestProjectStores_AreNotAskedForOutsidePkgAPI(t *testing.T) {
+	for _, dir := range []string{"../server/endpoints", "../server"} {
+		for _, name := range []string{"GetProjectStore", "NewDatatugStore"} {
+			if got := storeCallSitesIn(t, dir, name); len(got) != 0 {
+				t.Errorf("%s asks for a store by %s: %s", dir, name, strings.Join(got, ", "))
+			}
+		}
+	}
+}
+
 // The walk above sees a call by a name: it must see one, or it proves nothing.
 func TestStoreCallSites_SeesACallByItsName(t *testing.T) {
 	sites := storeCallSites(t, "projectStoreForID")
 	if len(sites) < 10 {
 		t.Fatalf("the walk found %d calls of projectStoreForID, want the entries of the package: %v", len(sites), sites)
+	}
+}
+
+// A call in a function literal that a package-level variable holds, the way the seams of a
+// package are written, and a call by a function of another package are seen, and a test file
+// is not walked.
+func TestStoreCallSites_SeesACallInAPackageLevelFunctionLiteral(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, source string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("seam.go", "package p\n\nvar seam = func() { store.GetProjectStore(\"x\") }\n\nfunc plain() { storage.NewDatatugStore(\"x\") }\n\nconst other = 1\n\ntype T struct{}\n")
+	write("seam_test.go", "package p\n\nfunc inATest() { GetProjectStore() }\n")
+
+	if got, want := storeCallSitesIn(t, dir, "GetProjectStore", "NewDatatugStore"), "seam.go: plain calls NewDatatugStore,seam.go: var seam calls GetProjectStore"; strings.Join(got, ",") != want {
+		t.Errorf("the walk found %v, want %s", got, want)
+	}
+}
+
+func TestDeclarationName(t *testing.T) {
+	for _, tc := range []struct {
+		source, want string
+	}{
+		{"package p\nfunc f() {}", "f"},
+		{"package p\nvar a, b = 1, 2", "var a"},
+		{"package p\nconst c = 1", "const c"},
+		{"package p\nimport \"os\"", "import"},
+		{"package p\ntype T struct{}", "type"},
+	} {
+		parsed, err := parser.ParseFile(token.NewFileSet(), "x.go", tc.source, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := declarationName(parsed.Decls[0]); got != tc.want {
+			t.Errorf("declarationName(%q) = %q, want %q", tc.source, got, tc.want)
+		}
+	}
+	if got := declarationName(&ast.BadDecl{}); got != "a declaration" {
+		t.Errorf("declarationName of a bad declaration = %q", got)
 	}
 }

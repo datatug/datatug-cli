@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -18,13 +20,22 @@ func validateProjectInput(projectID string) (err error) {
 	return ValidateProjectIdentifier("project", projectID)
 }
 
+// projectsNotListed is the answer for a store that cannot list its projects: the cause
+// quotes the path of a project file, and goes to the log.
+const projectsNotListed = "the projects could not be listed"
+
 // GetProjects return all projects
 func GetProjects(ctx context.Context, storeID string) ([]datatug.ProjectBrief, error) {
 	dal, err := storage.NewDatatugStore(storeID)
 	if err != nil {
 		return nil, err
 	}
-	return dal.GetProjects(ctx)
+	projects, err := dal.GetProjects(ctx)
+	if err != nil {
+		log.Printf("api: %s: %s", projectsNotListed, dbcopy.RedactText(err.Error()))
+		return nil, errors.New(projectsNotListed)
+	}
+	return projects, nil
 }
 
 // GetProjectSummary returns project summary

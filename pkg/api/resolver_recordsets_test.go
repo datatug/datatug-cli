@@ -15,9 +15,9 @@ import (
 )
 
 // The recordset definitions of a project are sources, each by the ID that its file declares
-// (or by its file name). A source ID is joined into a path by the routes that read the
-// definition, and a project file may hold anything: a definition whose own ID is not a plain
-// source ID is not a source, and nothing is made of it.
+// (or by its file name when it declares none). A source ID is joined into a path by the routes
+// that read the definition, and a project file may hold anything: a definition whose source ID,
+// whichever of the two it is, is not a plain source ID is not a source, and nothing is made of it.
 
 func writeRecordsetFile(t *testing.T, projectDir, name, content string) {
 	t.Helper()
@@ -30,7 +30,11 @@ func TestRecordsetSources_AFileWhoseIDIsNotAPlainSourceIDIsSkippedWithOneLogLine
 	projectDir := t.TempDir()
 	writeRecordsetFile(t, projectDir, "notes.recordset.json", `{"id":"support-notes","title":"Notes"}`)
 	writeRecordsetFile(t, projectDir, "noid.recordset.json", `{"title":"A file name is its ID"}`)
+	// A file that declares no ID is a source by its file name, which must be a plain source ID
+	// too: the ID is "" here, and the name is what is checked.
+	writeRecordsetFile(t, projectDir, "my notes.recordset.json", `{"title":"A file name with a space"}`)
 	unsafe := map[string]string{
+		"my notes.recordset.json":  "",
 		"traversal.recordset.json": "../../outside/x",
 		"slashed.recordset.json":   "a/b",
 		"url.recordset.json":       "ingitdb://alice:s3cretpw@host/x",
@@ -40,7 +44,9 @@ func TestRecordsetSources_AFileWhoseIDIsNotAPlainSourceIDIsSkippedWithOneLogLine
 		"long.recordset.json":      strings.Repeat("a", 129),
 	}
 	for name, id := range unsafe {
-		writeRecordsetFile(t, projectDir, name, fmt.Sprintf(`{"id":%q}`, id))
+		if id != "" {
+			writeRecordsetFile(t, projectDir, name, fmt.Sprintf(`{"id":%q}`, id))
+		}
 	}
 	logged := captureLog(t)
 
@@ -58,7 +64,7 @@ func TestRecordsetSources_AFileWhoseIDIsNotAPlainSourceIDIsSkippedWithOneLogLine
 	}
 	sort.Strings(ids)
 	if got, want := strings.Join(ids, ","), "noid,support-notes"; got != want {
-		t.Errorf("sources = %s, want %s: a file with an ID that is not a plain source ID is not a source", got, want)
+		t.Errorf("sources = %s, want %s: a file with a source ID that is not a plain source ID is not a source", got, want)
 	}
 	lines := strings.Split(strings.TrimSpace(logged.String()), "\n")
 	if len(lines) != len(unsafe) {
@@ -131,7 +137,7 @@ func TestResolveSource_AFailedListingOfCatalogsNamesNoPath(t *testing.T) {
 
 	_, err := ResolveSource(context.Background(), store, projectDir, "local", "chinook")
 
-	if err == nil || err.Error() != `resolver: list catalogs for environment "local"` {
+	if err == nil || err.Error() != `could not list catalogs for environment "local"` {
 		t.Fatalf("got %v, want exactly the sentence that names the environment", err)
 	}
 	if errors.Is(err, cause) || strings.Contains(err.Error(), projectDir) {

@@ -44,9 +44,10 @@ func GetServerDatabases(ctx context.Context, request dto.GetServerDatabasesReque
 		return nil, err
 	}
 	// The project comes from the query and not from a route that resolved the store of its
-	// project, so a project this process does not serve is refused here, as a bad request.
+	// project, so a project this process does not serve is refused here, with the answer of
+	// those routes (see projectNotServed).
 	if _, err = servedProjectDir(request.Project); err != nil {
-		return nil, validation.NewBadRequestError(err)
+		return nil, projectNotServed{err}
 	}
 	if err = validateDbServer(request.ServerRef); err != nil {
 		return nil, err

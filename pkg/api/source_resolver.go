@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +29,7 @@ import (
 func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, environment, database, projDir string) (sourceURL, driver string, err error) {
 	env, err := projStore.LoadEnvironment(ctx, environment)
 	if err != nil {
-		return "", "", LookupError("load environment %q", err, environment)
+		return "", "", sourceLookupFailed(`environment %q not found`, "load environment %q", err, environment)
 	}
 	var lastErr error
 	for _, server := range env.DbServers {
@@ -45,9 +47,41 @@ func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, envir
 	// environment and database are what a client sent, and a source string can be
 	// sent where an ID belongs: see LookupError.
 	if lastErr != nil {
-		return "", "", LookupError("database %q not found in environment %q", lastErr, database, environment)
+		return "", "", sourceLookupFailed("database %q not found in environment %q", "database %q not found in environment %q", lastErr, database, environment)
 	}
 	return "", "", LookupError("environment %q has no DB servers configured; cannot resolve database %q", nil, environment, database)
+}
+
+// sourceLookupError is the failure of the lookup of the environment or the database of a
+// source (see resolveSourceURL): its own text is LookupError's, which names the lookup's
+// cause when the IDs are plain names, and answer is the sentence for a client, built from the
+// kind and the IDs and from nothing the store said (the cause quotes the path the store built
+// from the project folder).
+type sourceLookupError struct {
+	error
+	answer string
+}
+
+// Unwrap lets errors.Is and errors.As see what LookupError wrapped.
+func (e sourceLookupError) Unwrap() error { return e.error }
+
+// sourceLookupFailed builds the failure of a lookup: the error as LookupError gives it for
+// format, cause and ids, and the answer for a client as LookupError gives answerFormat
+// with no cause.
+func sourceLookupFailed(answerFormat, format string, cause error, ids ...string) error {
+	return sourceLookupError{error: LookupError(format, cause, ids...), answer: LookupError(answerFormat, nil, ids...).Error()}
+}
+
+// sourceLookupAnswer is the answer of a route to the error of resolveSourceURL: the failure
+// of a lookup is the one sentence it was built with, and its text goes to the log of the
+// server; any other error is unchanged.
+func sourceLookupAnswer(err error) error {
+	var failure sourceLookupError
+	if !errors.As(err, &failure) {
+		return err
+	}
+	log.Printf("api: %s: %s", failure.answer, dbcopy.RedactText(failure.Error()))
+	return errors.New(failure.answer)
 }
 
 // sourceURLFromCatalog maps a resolved DbCatalog to the pkg/dbcopy URL

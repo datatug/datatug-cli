@@ -637,6 +637,16 @@ func qualifyJoinExpression(expression dal.Expression, source string, single bool
 		}
 		return dal.Binary(left, value.Operator, right), nil
 	case dal.AggregateFunc:
+		distinct := false
+		if named, ok := value.(dal.DistinctAggregateFunc); ok {
+			distinct = named.IsDistinct()
+		}
+		// The rebuild below keeps only the name, the distinct flag and the
+		// arguments. An aggregate whose text says more than that would be
+		// rebuilt as a different aggregate, so it is refused.
+		if value.String() != dal.NewAggregate(value.FuncName(), distinct, value.FuncArgs()...).String() {
+			return nil, fmt.Errorf("this aggregate form is not supported here: %s", value.String())
+		}
 		args := make([]dal.Expression, len(value.FuncArgs()))
 		for i, arg := range value.FuncArgs() {
 			var err error
@@ -644,10 +654,6 @@ func qualifyJoinExpression(expression dal.Expression, source string, single bool
 			if err != nil {
 				return nil, err
 			}
-		}
-		distinct := false
-		if named, ok := value.(dal.DistinctAggregateFunc); ok {
-			distinct = named.IsDistinct()
 		}
 		return dal.NewAggregate(value.FuncName(), distinct, args...), nil
 	default:

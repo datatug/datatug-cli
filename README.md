@@ -61,6 +61,8 @@ Environment overrides: `DATATUG_VERSION`, `DATATUG_INSTALL_DIR` (default: `%LOCA
 brew install --cask datatug/tap/datatug
 ```
 
+Homebrew gets a release only when the maintainers promote it, so it can be behind the direct installers (curl and PowerShell, which always take the latest release). `brew list --cask --versions datatug` shows the version installed.
+
 The direct installers and Homebrew package do not require Go. See the full
 [installation guide](https://datatug.io/install/) or the official
 [AI-agent instructions](https://datatug.io/agent-instructions/install/).

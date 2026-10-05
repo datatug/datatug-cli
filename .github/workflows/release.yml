@@ -1,7 +1,11 @@
 name: Release artifacts
 
 # Each merge to main still computes a version and publishes the GitHub release
-# artifacts. Package-manager distribution is a separate manual workflow.
+# artifacts. Package-manager distribution is a separate manual workflow
+# ("Publish latest packages", publish-packages.yml): by the owner's decision of
+# 2026-09-23 a merge never updates the Homebrew tap. The tap is therefore behind
+# until someone starts that workflow; the warn-homebrew-cask-behind job below
+# says so after every release. It only warns and can never fail or delay one.
 #
 # datatug-cli is pre-1.0: allow_major_version_bump stays false, so a stray
 # `feat!:` is capped to a minor bump instead of jumping to v1.0.0.
@@ -74,3 +78,38 @@ jobs:
       NOTARIZE_ISSUER_ID: ${{ secrets.NOTARIZE_ISSUER_ID }}
       NOTARIZE_KEY_ID: ${{ secrets.NOTARIZE_KEY_ID }}
       NOTARIZE_KEY: ${{ secrets.NOTARIZE_KEY }}
+
+  # Says, as one ::warning:: annotation, when the Homebrew tap is behind the
+  # release that was just published, and names the workflow that fixes it. It
+  # never fails the run: the script exits 0 for every outcome (--warn-only), a
+  # job that dies for another reason is made green by continue-on-error, and it
+  # runs after the release, so it cannot hold a release back. `tag` is empty
+  # when no release went public (a docs or chore merge cut no tag) and there is
+  # nothing to compare then. It reads the public tap with the workflow's own
+  # token and needs no secret. Two attempts, five seconds apart: the tap does
+  # not move during a release, so a second read only covers a failed call.
+  warn-homebrew-cask-behind:
+    name: Warn when the Homebrew cask is behind
+    needs: release
+    # !cancelled() keeps the job running when a smoke test after publication
+    # failed: the release is public then and the tap question is still open.
+    if: ${{ !cancelled() && needs.release.outputs.tag != '' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # The job sits inside the workflow-level `release` concurrency group and gh
+    # has no request timeout: without a limit a stalled call would hold every
+    # later release. The script's worst case is well under a minute.
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the checker
+        uses: actions/checkout@v7
+
+      - name: Compare the tap's cask with the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+          ATTEMPTS: '2'
+          INTERVAL: '5'
+        run: bash scripts/verify-homebrew-cask.sh --warn-only "$TAG"

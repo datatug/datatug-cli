@@ -326,9 +326,9 @@ func TestScanCommandAction_PostgresRefusesAPasswordThatSplitsTheURLBeforeItLogsA
 	}
 }
 
-// The help says what works: the scan of PostgreSQL reads the schema public, takes its
-// connection from an environment variable, and keeps the host, the port, the user and
-// the password out of the project.
+// The help says what works: the scan of PostgreSQL reads every schema, a view as a view and the
+// default of a column, takes its connection from an environment variable, and keeps the host, the
+// port, the user and the password out of the project. It says what the scan does not save.
 func TestScanCommand_HelpSaysWhatPostgresDoes(t *testing.T) {
 	cmd := scanCommandArgs()
 	for name, text := range map[string]string{
@@ -340,7 +340,13 @@ func TestScanCommand_HelpSaysWhatPostgresDoes(t *testing.T) {
 		assert.NotContains(t, text, "not available", name)
 		assert.NotContains(t, text, "cannot record a postgres server", name)
 	}
-	assert.Contains(t, cmd.Long, "schema public")
+	assert.Contains(t, cmd.Long, "every schema")
+	assert.Contains(t, cmd.Long, "views and materialized views as views")
+	assert.Contains(t, cmd.Long, "default")
+	assert.Contains(t, cmd.Long, "does not save foreign keys or indexes")
+	assert.NotContains(t, cmd.Long, "saved as a table", "a view is a view now")
+	assert.NotContains(t, cmd.Long, "no other schema is read", "every schema is read now")
+	assert.Contains(t, cmd.Flags().Lookup("driver").Usage, "postgres reads every schema")
 	assert.Contains(t, cmd.Long, "connections/<env>/<db>.json")
 	assert.Contains(t, cmd.Long, "never a host, a port, a user or a password")
 	assert.Contains(t, cmd.Flags().Lookup("driver").Usage, "sqlserver, sqlite3 or postgres")

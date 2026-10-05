@@ -172,6 +172,22 @@ func (s *sharedPostgres) ListCollections(ctx context.Context, parent *dalrecord.
 	return guarded(s.Database.ListCollections(ctx, parent))
 }
 
+func (s *sharedPostgres) ListSchemas(ctx context.Context) ([]string, error) {
+	return guarded(s.Database.ListSchemas(ctx))
+}
+
+func (s *sharedPostgres) ListSchemaCollections(ctx context.Context, schema string) ([]dal.CollectionRef, error) {
+	return guarded(s.Database.ListSchemaCollections(ctx, schema))
+}
+
+func (s *sharedPostgres) ListViews(ctx context.Context) ([]dal.CollectionRef, error) {
+	return guarded(s.Database.ListViews(ctx))
+}
+
+func (s *sharedPostgres) ListSchemaViews(ctx context.Context, schema string) ([]dal.CollectionRef, error) {
+	return guarded(s.Database.ListSchemaViews(ctx, schema))
+}
+
 func (s *sharedPostgres) DescribeCollection(ctx context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {
 	return guarded(s.Database.DescribeCollection(ctx, ref))
 }

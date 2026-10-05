@@ -21,6 +21,16 @@ import (
 // can resolve it.
 func registerWarnTestEnvironment(t *testing.T, projectID, dir, dbPath string) {
 	t.Helper()
+	registerWarnTestEnvironmentWithDriver(t, "sqlite3", projectID, dir, dbPath)
+}
+
+// registerWarnTestEnvironmentWithDriver is registerWarnTestEnvironment for a
+// catalog of the given driver (sqlite3, or openvaultdb, whose path is the
+// connection descriptor). The environment's server stays a sqlite3 one: an
+// environment's server driver is validated against a fixed list, a catalog's is
+// not.
+func registerWarnTestEnvironmentWithDriver(t *testing.T, driver, projectID, dir, dbPath string) {
+	t.Helper()
 	// httpQuerySources (ListSources' HTTP branch) walks <projectDir>/queries
 	// and errors if it does not exist (unlike recordsetSources, which
 	// tolerates a missing directory) — every real project has this folder,
@@ -42,7 +52,7 @@ func registerWarnTestEnvironment(t *testing.T, projectID, dir, dbPath string) {
 		t.Fatalf("SaveEnvironment: %v", err)
 	}
 	serverID := (&datatug.EnvDbServer{ServerRef: datatug.ServerRef{Driver: "sqlite3"}}).GetID()
-	catalog := &datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{Driver: "sqlite3", Path: dbPath, DbModel: "chinook"}}
+	catalog := &datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{Driver: driver, Path: dbPath, DbModel: "chinook"}}
 	catalog.ID = "chinook-local"
 	if err := projStore.SaveEnvDbCatalog(ctx, env.ID, serverID, catalog.ID, catalog); err != nil {
 		t.Fatalf("SaveEnvDbCatalog: %v", err)
@@ -104,12 +114,12 @@ func TestWarnMissingSourceFiles_NoWarningWhenFileExists(t *testing.T) {
 	}
 }
 
-// A missing source file's warning quotes the file path; a secret-named
-// parameter in it is redacted like any other source text in a log line.
-func TestWarnMissingSourceFiles_RedactsSecretsInTheLogLine(t *testing.T) {
+// A missing source file's warning names the file path as the display form of
+// the path: the query string of a catalog path never reaches the log line.
+func TestWarnMissingSourceFiles_NeverLogsTheQueryOfThePath(t *testing.T) {
 	dir := t.TempDir()
 	projectID := "warn-test-redacted"
-	registerWarnTestEnvironment(t, projectID, dir, filepath.Join(dir, "password=s3cr3t-DT01.sqlite"))
+	registerWarnTestEnvironment(t, projectID, dir, filepath.Join(dir, "x.sqlite")+"?password=s3cr3t-DT01")
 
 	buf := captureLog(t)
 	WarnMissingSourceFiles(context.Background(), map[string]string{projectID: dir})
@@ -118,7 +128,38 @@ func TestWarnMissingSourceFiles_RedactsSecretsInTheLogLine(t *testing.T) {
 	if !strings.Contains(out, "WARNING") {
 		t.Fatalf("expected a WARNING log line, got %q", out)
 	}
-	if strings.Contains(out, "s3cr3t-DT01") || !strings.Contains(out, "password=xxxxx") {
-		t.Fatalf("warning must redact the secret: %q", out)
+	if strings.Contains(out, "s3cr3t-DT01") || !strings.Contains(out, "x.sqlite") {
+		t.Fatalf("warning must name the file and not the secret: %q", out)
+	}
+}
+
+// An OpenVaultDB source is backed by a connection descriptor file, so `serve`
+// warns at startup when the descriptor is missing, as it does for a SQLite file
+// and an inGitDB directory; one that exists gets no warning.
+func TestWarnMissingSourceFiles_WarnsAboutAMissingOpenVaultDBDescriptor(t *testing.T) {
+	dir := t.TempDir()
+	projectID := "warn-test-ovdb-missing"
+	missing := filepath.Join(dir, "orders-ovdb.json")
+	registerWarnTestEnvironmentWithDriver(t, "openvaultdb", projectID, dir, missing)
+
+	buf := captureLog(t)
+	WarnMissingSourceFiles(context.Background(), map[string]string{projectID: dir})
+
+	out := buf.String()
+	if !strings.Contains(out, "WARNING") || !strings.Contains(out, missing) {
+		t.Fatalf("expected a WARNING that names the missing descriptor %q, got %q", missing, out)
+	}
+
+	present := filepath.Join(dir, "present-ovdb.json")
+	if err := os.WriteFile(present, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write descriptor: %v", err)
+	}
+	presentProject := "warn-test-ovdb-present"
+	presentDir := t.TempDir()
+	registerWarnTestEnvironmentWithDriver(t, "openvaultdb", presentProject, presentDir, present)
+	buf = captureLog(t)
+	WarnMissingSourceFiles(context.Background(), map[string]string{presentProject: presentDir})
+	if strings.Contains(buf.String(), "WARNING") {
+		t.Fatalf("expected no WARNING for an existing descriptor, got %q", buf.String())
 	}
 }

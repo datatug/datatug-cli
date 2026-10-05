@@ -20,12 +20,20 @@ func TestDBOpen_NeverPrintsThePassword(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		arg  string
+		want string
 	}{
-		{"postgres", "postgres://alice:" + sourceSecret + "@db.example.com/shop"},
-		{"password with an escaped space", "postgres://alice:s3cr3t%20DT01@db.example.com/shop"},
-		{"mysql with a query password", "mysql://alice@db.example.com/shop?password=" + sourceSecret},
+		{"postgres", "postgres://alice:" + sourceSecret + "@db.example.com/shop", "postgres://db.example.com/shop"},
+		{"password with an escaped space", "postgres://alice:s3cr3t%20DT01@db.example.com/shop", "postgres://db.example.com/shop"},
+		{"mysql with a query password", "mysql://alice@db.example.com/shop?password=" + sourceSecret, "mysql://db.example.com/shop"},
 		// Go reads this as host "alice", port 42; it is a password that holds a slash.
-		{"password that starts with digits and holds a slash", "postgres://alice:42/" + sourceSecret + "@db.example.com/shop"},
+		{"password that starts with digits and holds a slash", "postgres://alice:42/" + sourceSecret + "@db.example.com/shop", "postgres://db.example.com/shop"},
+		{"upper-case scheme", "POSTGRES://alice:" + sourceSecret + "@db.example.com:5432/shop", "postgres://db.example.com:5432/shop"},
+		// Harmless arguments dburl takes are named as they were typed: a file path with no scheme, and the file schemes.
+		{"bare relative file", "./chinook.sqlite", "./chinook.sqlite"},
+		{"bare file name", "chinook.sqlite", "chinook.sqlite"},
+		{"sqlite3 relative file", "sqlite3:./x.db", "sqlite3:./x.db"},
+		{"sqlite3 absolute file", "sqlite3:///tmp/a/x.db", "sqlite3:///tmp/a/x.db"},
+		{"sqlite file with a token that holds a slash", "sqlite://ab/" + sourceSecret + "@db.example.com/x.db", "sqlite://db.example.com/x.db"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := dbCommand()
@@ -38,8 +46,8 @@ func TestDBOpen_NeverPrintsThePassword(t *testing.T) {
 			if strings.Contains(out, "s3cr3t") || strings.Contains(out, "DT01") {
 				t.Fatalf("stdout leaks the password: %q", out)
 			}
-			if !strings.Contains(out, "Opening database at ") || !strings.Contains(out, "xxxxx") {
-				t.Fatalf("stdout = %q, want the redacted URL", out)
+			if out != "Opening database at "+tc.want {
+				t.Fatalf("stdout = %q, want the display form %q", out, tc.want)
 			}
 		})
 	}

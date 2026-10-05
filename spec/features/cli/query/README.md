@@ -280,7 +280,7 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 - Undecodable query or policy document, unsupported document kind, bad `--var`, unresolved query parameter, missing explicit policies directory, zero policies without `--no-policies`, `--no-policies` with `--policy`: exit 2, naming the file, variable or directory.
 - Denied by policy, including a missing variable, a hidden-field reference or a query the check cannot classify: exit 5; stdout stays empty because the denial is raised before any row is written.
 - Column alias under a field-restricted policy, or a parameter outside a where right-hand side: exit 2.
-- Database cannot be opened, or the adapter refuses the rewritten query (unsupported operator): exit 4 with the adapter's error.
+- Database cannot be opened: exit 4, naming the source as it is displayed (scheme, host, port and path, never a user name, a password or a query string) and a fixed reason; the driver's own text is never shown, because a driver can quote the connection string. The adapter refuses the rewritten query (unsupported operator): exit 4 with the adapter's error.
 - A data field named `$key`, or a write to stdout failing: exit 1.
 
 ## Rehearse Integration

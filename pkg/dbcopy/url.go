@@ -89,18 +89,55 @@ var ErrPostgresNotWired = errors.New("PostgreSQL backend not yet wired")
 // driver's own opaque "unable to open database file" text reach an HTTP 500.
 var ErrSourceFileMissing = errors.New("source file does not exist")
 
-// CheckSourceFile reports ErrSourceFileMissing (wrapping path and a
+// CheckSourceFile reports ErrSourceFileMissing (wrapping the path and a
 // `datatug demo` recovery hint) when path does not exist on disk, and nil
 // when it does or when the stat fails for any other reason (permissions,
 // etc. — left for the underlying driver to report on its own terms). It is
 // exported so callers that open a file-backed source through a path other
 // than BackendRef.Open (pkg/secureread's read-only native-SQL connection)
 // can perform the identical check.
+//
+// The path in the message is the display form of path (see PathDisplay): the
+// query string and the fragment are cut off, a path that starts like userinfo
+// is shown without it, and a URL handed in by mistake is shown as SourceDisplay
+// shows it, so no caller can put a secret in the message by passing what the
+// source string held.
 func CheckSourceFile(path string) error {
 	if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
-		return fmt.Errorf("%w: %s (run `datatug demo` to fetch the demo project's data fixtures)", ErrSourceFileMissing, path)
+		return &missingSourceFileError{shown: PathDisplay(path)}
 	}
 	return nil
+}
+
+// missingSourceFileError is the error CheckSourceFile returns. Its type is how
+// BackendRef.OpenFailure knows the text is this package's own: it is built from
+// the display form of the path and from nothing a driver wrote.
+type missingSourceFileError struct{ shown string }
+
+func (e *missingSourceFileError) Error() string {
+	return fmt.Sprintf("%s: %s (run `datatug demo` to fetch the demo project's data fixtures)", ErrSourceFileMissing, e.shown)
+}
+
+func (e *missingSourceFileError) Unwrap() error { return ErrSourceFileMissing }
+
+// unprintablePath is shown in place of a path that SourceDisplay's checks leave
+// out.
+const unprintablePath = "<unprintable path>"
+
+// PathDisplay returns the text to show for path, a file or directory path a
+// source resolved to (BackendRef.Path), a path given with no scheme, or a URL
+// when a caller hands in one.
+func PathDisplay(path string) string {
+	var shown string
+	if schemePrefix.MatchString(path) {
+		shown = SourceDisplay(path)
+	} else {
+		shown = localTextDisplay(path)
+	}
+	if shown == "" {
+		return unprintablePath
+	}
+	return shown
 }
 
 // BackendRef is a parsed --from/--to URL.
@@ -118,24 +155,19 @@ type BackendRef struct {
 	//                NOT a literal remote endpoint; the project's own query
 	//                definitions name the actual remote endpoints.
 	Path string
-	// Raw is the original input string, preserved for error messages, with
-	// every secret redacted (see RedactSourceURL): a postgres:// URL shows
-	// "user:xxxxx@host", and an "env:NAME" input stays "env:NAME" because the
-	// value of the variable is never copied here.
+	// Raw is the text to show for the source in a message: the display form of
+	// the input (see SourceDisplay), built from its scheme, host, port and path
+	// and never holding userinfo, a query string or a fragment. An "env:NAME"
+	// input stays "env:NAME" because the value of the variable is never copied
+	// here. The name is historical: Raw is never the input as typed.
 	Raw string
 }
 
-// String returns the redacted source, so printing a BackendRef with %v or %+v
-// can never put a password in a log or message.
-func (r BackendRef) String() string {
-	source := r.Raw
-	if source == "" {
-		source = r.Path
-	}
-	return RedactSourceURL(source)
-}
+// String returns the display form of the source (see Display), so printing a
+// BackendRef with %v or %+v can never put a password in a log or message.
+func (r BackendRef) String() string { return r.Display() }
 
-// GoString makes %#v print the same redacted text as String.
+// GoString makes %#v print the same display text as String.
 func (r BackendRef) GoString() string { return r.String() }
 
 // Parse parses a CLI URL argument into a BackendRef. It returns an error for
@@ -158,12 +190,7 @@ func parseSource(rawURL string, lookupEnv func(string) (string, bool)) (BackendR
 	if strings.HasPrefix(rawURL, envPrefix) {
 		return parseEnvSource(rawURL, lookupEnv)
 	}
-	ref, err := parseURL(rawURL)
-	if err != nil {
-		return BackendRef{}, err
-	}
-	ref.Raw = RedactSourceURL(ref.Raw)
-	return ref, nil
+	return parseURL(rawURL)
 }
 
 // parseEnvSource resolves "env:NAME" to the URL the variable holds and parses
@@ -193,139 +220,160 @@ func parseEnvSource(rawURL string, lookupEnv func(string) (string, bool)) (Backe
 	return ref, nil
 }
 
+// parseURL dispatches rawURL on its scheme, which is read case-insensitively
+// (RFC 3986), and builds every error from fixed sentences and the display form
+// of rawURL (see SourceDisplay): nothing the user typed is quoted, and no parser
+// error is wrapped, because both can hold a password in a shape no pattern
+// recognises.
 func parseURL(rawURL string) (BackendRef, error) {
-	if strings.HasPrefix(rawURL, "openvaultdb://") {
-		path := strings.TrimPrefix(rawURL, "openvaultdb://")
-		if path == "" {
+	head := schemeHead.FindStringSubmatch(rawURL)
+	if head == nil {
+		return BackendRef{}, errUnsupportedSource()
+	}
+	scheme, separator, rest := strings.ToLower(head[1]), head[2], rawURL[len(head[0]):]
+	if separator == ":" {
+		// "scheme:rest" without "//": sqlite:file.db is the one form that means
+		// something. Any other is not named, because what stands before the colon
+		// may be a user name or a token ("TOKEN:x-oauth-basic").
+		if scheme == "sqlite" {
+			return parseSQLite(rawURL, scheme+separator+rest, rest, false)
+		}
+		return BackendRef{}, errUnsupportedSource()
+	}
+	display := SourceDisplay(rawURL)
+	switch scheme {
+	case "openvaultdb":
+		if rest == "" {
 			return BackendRef{}, fmt.Errorf("OpenVaultDB connection descriptor path is required")
 		}
-		if err := refuseUserinfo("openvaultdb", path); err != nil {
+		if err := refuseUserinfo(scheme, display, rest); err != nil {
 			return BackendRef{}, err
 		}
-		return BackendRef{Scheme: "openvaultdb", Path: path, Raw: rawURL}, nil
-	}
-	// Intercept ingitdb:// before delegating to dburl — dburl doesn't know
-	// the scheme and would reject it.
-	if strings.HasPrefix(rawURL, "ingitdb://") {
-		return parseInGitDB(rawURL)
-	}
-
-	// http:// / https:// — see parseHTTPSource.
-	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
-		return parseHTTPSource(rawURL)
-	}
-
-	// postgres:// — recognized but not opened. Parse via dburl to validate
-	// shape; carry the full original URL in Path for the future driver.
-	if strings.HasPrefix(rawURL, "postgres://") || strings.HasPrefix(rawURL, "postgresql://") {
-		if _, err := dburl.Parse(rawURL); err != nil {
-			// The parser's own error quotes the URL, and so would any
-			// fragment of it: say only that the URL is malformed.
-			return BackendRef{}, fmt.Errorf("invalid postgres URL %q: not a valid connection URL (check the host, the port and the percent-encoding of the user and password)", RedactSourceURL(rawURL))
+		return BackendRef{Scheme: scheme, Path: rest, Raw: display}, nil
+	case "ingitdb":
+		return parseInGitDB(display, rest)
+	case "http", "https":
+		return parseHTTPSource(scheme, display, rest)
+	case "postgres", "postgresql":
+		// Recognized but not opened. Parse via dburl to validate shape; carry the
+		// full URL, its scheme in lower case, in Path for the driver.
+		path := scheme + "://" + rest
+		if _, err := dburl.Parse(path); err != nil {
+			// The parser's own error quotes the URL, and so would any fragment of
+			// it: say only that the URL is malformed.
+			return BackendRef{}, fmt.Errorf("invalid postgres URL %q: not a valid connection URL (check the host, the port and the percent-encoding of the user and password)", display)
 		}
-		return BackendRef{Scheme: "postgres", Path: rawURL, Raw: rawURL}, nil
+		return BackendRef{Scheme: "postgres", Path: path, Raw: display}, nil
+	case "sqlite":
+		return parseSQLite(rawURL, scheme+separator+rest, rest, true)
 	}
+	return BackendRef{}, errUnsupportedScheme(scheme)
+}
 
-	// sqlite:// — delegated to dburl, which understands the scheme.
-	if strings.HasPrefix(rawURL, "sqlite://") || strings.HasPrefix(rawURL, "sqlite:") {
-		if strings.HasPrefix(rawURL, "sqlite://") {
-			if err := refuseUserinfo("sqlite", strings.TrimPrefix(rawURL, "sqlite://")); err != nil {
-				return BackendRef{}, err
-			}
+// parseSQLite handles sqlite://path and sqlite:path. dburl, which understands
+// the scheme, reads the path; the scheme it is given is lower case.
+func parseSQLite(rawURL, lowerURL, rest string, slashes bool) (BackendRef, error) {
+	display := SourceDisplay(rawURL)
+	if slashes {
+		if err := refuseUserinfo("sqlite", display, rest); err != nil {
+			return BackendRef{}, err
 		}
-		u, err := dburl.Parse(rawURL)
-		if err != nil {
-			return BackendRef{}, fmt.Errorf("invalid sqlite URL %q: %w", RedactSourceURL(rawURL), RedactError(err))
-		}
-		// dburl puts the filesystem path in DSN for sqlite.
-		return BackendRef{Scheme: "sqlite", Path: u.DSN, Raw: rawURL}, nil
 	}
+	u, err := dburl.Parse(lowerURL)
+	if err != nil {
+		return BackendRef{}, fmt.Errorf("invalid sqlite URL %q: not a valid sqlite URL (check the path and the percent-encoding)", display)
+	}
+	// dburl puts the filesystem path in DSN for sqlite.
+	return BackendRef{Scheme: "sqlite", Path: u.DSN, Raw: display}, nil
+}
 
-	// Everything else: unknown scheme. A string that is not scheme:// shaped
-	// may be anything the user mistyped, a password included, so it is not
-	// echoed; a URL is echoed with its secrets redacted. A "scheme:rest" string
-	// (mongodb:localhost/test) still gets its scheme named, and only that.
-	if !schemePrefix.MatchString(rawURL) {
-		if scheme, rest, found := strings.Cut(rawURL, ":"); found && bareSchemeToken.MatchString(scheme) && !strings.Contains(rest, "@") {
-			return BackendRef{}, fmt.Errorf(
-				"unsupported scheme %q: supported schemes are %s, or %s",
-				scheme, strings.Join(supportedSchemes, ", "), EnvSourceForm,
-			)
-		}
-		return BackendRef{}, fmt.Errorf(
-			"unsupported source: expected a URL such as sqlite://..., or %s; supported schemes are %s",
-			EnvSourceForm, strings.Join(supportedSchemes, ", "),
-		)
-	}
-	scheme := extractScheme(rawURL)
-	return BackendRef{}, fmt.Errorf(
-		"unsupported scheme %q in URL %q: supported schemes are %s, or %s",
-		scheme, RedactSourceURL(rawURL), strings.Join(supportedSchemes, ", "), EnvSourceForm,
+// errUnsupportedScheme is the error for a "scheme://" that Parse does not
+// dispatch. It names the scheme, as REQ:unknown-scheme-rejected asks, and
+// shows nothing else of the URL.
+func errUnsupportedScheme(scheme string) error {
+	return fmt.Errorf(
+		"unsupported scheme %q: supported schemes are %s, or %s",
+		scheme, strings.Join(supportedSchemes, ", "), EnvSourceForm,
 	)
 }
 
-// bareSchemeToken is the "scheme" of a "scheme:rest" string that has no "//".
-var bareSchemeToken = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]{0,31}$`)
+// errUnsupportedSource is the error for a string that does not start with a
+// "scheme://". Whatever it is, it may hold a password, so none of it is shown.
+func errUnsupportedSource() error {
+	return fmt.Errorf(
+		"unsupported source: expected a URL such as sqlite://..., or %s; supported schemes are %s",
+		EnvSourceForm, strings.Join(supportedSchemes, ", "),
+	)
+}
 
 // refuseUserinfo returns an error when rest, the text after "scheme://" of a
-// scheme that names a file or directory, is shaped like "user:password@host".
-// Whoever writes that means a remote server with credentials, which these
-// schemes do not take; refusing it keeps the password out of every later
-// message that quotes the path. The error never echoes rest.
-func refuseUserinfo(scheme, rest string) error {
-	if !looksLikeUserinfo(rest) {
+// scheme that names a file or directory, is credentials and not a path: any text
+// that does not read as a path (see readsAsPath), such as "user:password@host",
+// "token@host", a user name or a token that holds a slash, and a relative path
+// that holds an "@" and does not start like a path ("team/a@b"). It is the same
+// rule for every one of these schemes. Whoever writes credentials means a remote
+// server, which they do not take, and refusing it keeps the password out of every
+// later message that quotes the path. A relative path with an "@" is refused for
+// the same reason it cannot be told from credentials: SourceDisplay, which builds
+// every message, reads what stands before the last "@" as userinfo, and dburl
+// reads "sqlite://a@b.db" as user a and opens b.db. Write it with a dot, ./path
+// (see LocalSourceURL). The error shows the display form of the source (see
+// SourceDisplay), so it names the host and the path that follow the credentials
+// and never the credentials.
+func refuseUserinfo(scheme, display, rest string) error {
+	userinfoShaped := looksLikeUserinfo(rest)
+	if !userinfoShaped && readsAsPath(rest) {
 		return nil
 	}
-	return fmt.Errorf(
-		"invalid %s URL: credentials are not supported (%s:// names a local path; write a relative path as ./dir)",
-		scheme, scheme,
-	)
+	var advice string
+	switch {
+	case scheme == "http" || scheme == "https":
+		advice = fmt.Sprintf(`%s:// names a local datatug project directory, not a remote endpoint; write a relative directory that holds an "@" as ./dir`, scheme)
+	case scheme == "ingitdb" && !userinfoShaped:
+		advice = `ingitdb:// names a local directory, not a remote repository; write a relative directory that holds an "@" as ./dir`
+	default:
+		advice = fmt.Sprintf("%s:// names a local path; write a relative path as ./path", scheme)
+	}
+	return fmt.Errorf("invalid %s URL %q: credentials are not supported (%s)", scheme, display, advice)
 }
 
 // parseInGitDB handles the ingitdb:// scheme. MVP is local-paths-only per
 // REQ:ingitdb-url-local-only: remote-looking URLs must be rejected with a
-// message naming "local paths only".
-func parseInGitDB(rawURL string) (BackendRef, error) {
-	const prefix = "ingitdb://"
-	rest := strings.TrimPrefix(rawURL, prefix)
-
+// message naming "local paths only". display is the display form of the whole
+// source and rest the text after "ingitdb://".
+func parseInGitDB(display, rest string) (BackendRef, error) {
 	if rest == "" {
 		return BackendRef{}, fmt.Errorf(
 			"invalid ingitdb URL %q: missing local path (ingitdb:// MVP supports local paths only)",
-			RedactSourceURL(rawURL),
+			display,
 		)
 	}
 
-	// Reject obvious remote forms.
+	// Reject obvious remote forms: a well-known host, or any URL wrapped in the
+	// scheme ("ingitdb://https://TOKEN@github.com/org/repo").
+	lower := strings.ToLower(rest)
 	switch {
-	case strings.HasPrefix(rest, "github.com/"),
-		strings.HasPrefix(rest, "gitlab.com/"),
-		strings.HasPrefix(rest, "bitbucket.org/"),
-		strings.HasPrefix(rest, "http://"),
-		strings.HasPrefix(rest, "https://"):
+	case strings.HasPrefix(lower, "github.com/"),
+		strings.HasPrefix(lower, "gitlab.com/"),
+		strings.HasPrefix(lower, "bitbucket.org/"),
+		schemePrefix.MatchString(rest):
 		return BackendRef{}, fmt.Errorf(
 			"ingitdb URL %q looks remote; ingitdb:// MVP supports local paths only",
-			RedactSourceURL(rawURL),
+			display,
 		)
 	}
 
-	if err := refuseUserinfo("ingitdb", rest); err != nil {
-		return BackendRef{}, err
-	}
 	// "ingitdb://TOKEN@github.com/org/repo": a token written as the user name has
-	// no colon, so the check above passes it, and the missing-file error would
-	// quote it. A local directory never starts with "user@host"; one that holds
+	// no colon. A local directory never starts with "user@host"; one that holds
 	// an "@" is written ./dir (see LocalSourceURL).
-	if holdsAtInFirstSegment(rest) {
-		return BackendRef{}, fmt.Errorf(
-			"invalid ingitdb URL: credentials are not supported (ingitdb:// names a local directory, not a remote repository; write a relative directory that holds an \"@\" as ./dir)",
-		)
+	if err := refuseUserinfo("ingitdb", display, rest); err != nil {
+		return BackendRef{}, err
 	}
 
 	// ingitdb://./relative  → rest = "./relative"      (local, OK)
 	// ingitdb://relative    → rest = "relative"        (local, OK)
 	// ingitdb:///absolute   → rest = "/absolute"       (local, OK)
-	return BackendRef{Scheme: "ingitdb", Path: rest, Raw: rawURL}, nil
+	return BackendRef{Scheme: "ingitdb", Path: rest, Raw: display}, nil
 }
 
 // parseHTTPSource handles the http:// and https:// schemes.
@@ -347,31 +395,23 @@ func parseInGitDB(rawURL string) (BackendRef, error) {
 // parseInGitDB does; scheme is already unambiguous (http/https), so any
 // unresolvable path simply fails later, in Open, with a clear error naming
 // the path.
-func parseHTTPSource(rawURL string) (BackendRef, error) {
-	scheme := extractScheme(rawURL)
-	rest := strings.TrimPrefix(rawURL, scheme+"://")
+func parseHTTPSource(scheme, display, rest string) (BackendRef, error) {
 	if rest == "" {
 		return BackendRef{}, fmt.Errorf(
 			"invalid %s URL %q: missing project path (%s:// opens the datatug project at this local path, serving its HTTP QueryDefs as dalgo2http collections)",
-			scheme, rawURL, scheme,
+			scheme, display, scheme,
 		)
 	}
-	// A project directory never starts with "user:password@host". Anyone who
-	// writes that means a remote endpoint with credentials, which this scheme
-	// does not take; refusing it keeps the password out of every later error
-	// that quotes the path. The text redactor cannot do this job for http(s): it
-	// cannot tell "alice:42/abc@host" (a password) from "localhost:8080/@me" (a
+	// A project directory never starts with "user:password@host" or "token@host".
+	// Anyone who writes that means a remote endpoint with credentials, which this
+	// scheme does not take; refusing it keeps the password out of every later
+	// error that quotes the path. A text redactor cannot do this job for http(s):
+	// it cannot tell "alice:42/abc@host" (a password) from "localhost:8080/@me" (a
 	// path), so Parse refuses the userinfo shape first, as the path schemes do.
-	if err := refuseUserinfo(scheme, rest); err != nil {
+	if err := refuseUserinfo(scheme, display, rest); err != nil {
 		return BackendRef{}, err
 	}
-	if holdsAtInFirstSegment(rest) {
-		return BackendRef{}, fmt.Errorf(
-			"invalid %s URL: credentials are not supported (%s:// names a local datatug project directory, not a remote endpoint; write a relative directory that holds an \"@\" as ./dir)",
-			scheme, scheme,
-		)
-	}
-	return BackendRef{Scheme: scheme, Path: rest, Raw: rawURL}, nil
+	return BackendRef{Scheme: scheme, Path: rest, Raw: display}, nil
 }
 
 // ProjectSourceURL returns the http:// source URL that names the datatug
@@ -384,38 +424,19 @@ func ProjectSourceURL(projectDir string) string {
 }
 
 // LocalSourceURL returns the "scheme://path" source URL that names the local
-// directory path for a scheme that takes one (http, https, ingitdb). A relative
-// path whose first segment holds an "@" or that is shaped like
-// "user:password@host" (a:b/c@d) is written "./path", because Parse refuses
-// "scheme://my@proj" and "scheme://a:b/c@d" as URLs that carry credentials.
-// Every caller
-// that builds such a URL from a directory it was given verbatim goes through
-// here, so a directory such as my@proj keeps working.
+// file or directory path for a scheme that takes one (sqlite, openvaultdb,
+// ingitdb, http, https). A path that holds an "@" and does not start like a path
+// (see readsAsPath): a relative directory such as my@proj or team/a@b, or one
+// shaped like "user:password@host" (a:b/c@d), is written "./path", because Parse
+// refuses "scheme://my@proj" and "scheme://a@b.db" as URLs that carry
+// credentials (and dburl reads the second as user a and opens b.db). Every caller
+// that builds such a URL from a path it was given verbatim goes through here, so
+// a directory such as my@proj keeps working.
 func LocalSourceURL(scheme, path string) string {
-	if holdsAtInFirstSegment(path) || looksLikeUserinfo(path) {
+	if !readsAsPath(path) {
 		return scheme + "://./" + path
 	}
 	return scheme + "://" + path
-}
-
-// holdsAtInFirstSegment reports whether the first path segment of rest holds an
-// "@" and so reads as "user@host". A Windows drive path never does.
-func holdsAtInFirstSegment(rest string) bool {
-	if driveLetterPath.MatchString(rest) {
-		return false
-	}
-	first, _, _ := strings.Cut(rest, "/")
-	return strings.Contains(first, "@")
-}
-
-// extractScheme pulls the scheme prefix from a URL string for use in error
-// messages, without depending on a successful parse. Returns the substring
-// before the first ":" or the full string if no colon.
-func extractScheme(rawURL string) string {
-	if i := strings.Index(rawURL, ":"); i > 0 {
-		return rawURL[:i]
-	}
-	return rawURL
 }
 
 // Open opens the underlying DALgo dal.DB for this BackendRef.
@@ -524,17 +545,30 @@ var (
 	newInGitDBDatabase           = dalgo2ingitdb.NewDatabase
 )
 
-// open opens the source and redacts whatever it returns as an error. r.Path
-// holds the real URL (a PostgreSQL password included), and a driver quotes the
-// DSN it was given in its open and ping errors in whatever shape it likes, so
-// every literal secret r.Path holds is scrubbed from the message as well as the
-// URL-shaped text. errors.Is and errors.As still see the driver's own error.
+// open opens the source and turns whatever it returns as an error into one
+// that is safe to show (see OpenFailure). r.Path holds the real URL (a
+// PostgreSQL password included), and a driver quotes the DSN it was given in its
+// open and ping errors in whatever shape it likes, so a driver's own message is
+// never shown. errors.Is and errors.As still see the driver's own error.
 func (r BackendRef) open(ctx context.Context, insecureAllowLoopback, protected bool) (dal.DB, error) {
 	db, err := r.openSource(ctx, insecureAllowLoopback, protected)
 	if err != nil {
-		return nil, RedactErrorWithSecrets(err, r.Path)
+		return nil, r.OpenFailure(err)
 	}
 	return db, nil
+}
+
+// CheckFile reports ErrSourceFileMissing when this source is backed by a file or
+// directory (sqlite, ingitdb, or the connection descriptor of openvaultdb) and
+// that does not exist; for every other source it returns nil. It is
+// CheckSourceFile for a caller that holds the ref: a PostgreSQL ref's Path is its
+// URL and is not a path to stat. Open itself calls it for sqlite and ingitdb
+// only: openvaultdb reports its own missing descriptor.
+func (r BackendRef) CheckFile() error {
+	if r.Scheme != "sqlite" && r.Scheme != "ingitdb" && r.Scheme != "openvaultdb" {
+		return nil
+	}
+	return CheckSourceFile(r.Path)
 }
 
 func (r BackendRef) openSource(ctx context.Context, insecureAllowLoopback, protected bool) (dal.DB, error) {
@@ -542,7 +576,7 @@ func (r BackendRef) openSource(ctx context.Context, insecureAllowLoopback, prote
 	case "openvaultdb":
 		return openvaultdb.OpenSource(r.Path)
 	case "sqlite":
-		if err := CheckSourceFile(r.Path); err != nil {
+		if err := r.CheckFile(); err != nil {
 			return nil, err
 		}
 		// Every SQLite open, protected or not, compiles structured reads
@@ -555,12 +589,12 @@ func (r BackendRef) openSource(ctx context.Context, insecureAllowLoopback, prote
 		opts := dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"}
 		db, err := newSQLiteDatabaseWithOptions(r.Path, dal.NewSchema(nil, nil), opts)
 		if err != nil {
-			return nil, fmt.Errorf("open sqlite %q: %w", r.Path, err)
+			return nil, err
 		}
 		return db, nil
 
 	case "ingitdb":
-		if err := CheckSourceFile(r.Path); err != nil {
+		if err := r.CheckFile(); err != nil {
 			return nil, err
 		}
 		var opts []dalgo2ingitdb.DatabaseOption
@@ -571,7 +605,7 @@ func (r BackendRef) openSource(ctx context.Context, insecureAllowLoopback, prote
 		}
 		db, err := newInGitDBDatabase(r.Path, validator.NewCollectionsReader(), opts...)
 		if err != nil {
-			return nil, fmt.Errorf("open ingitdb %q: %w", r.Path, err)
+			return nil, err
 		}
 		return db, nil
 
@@ -585,12 +619,12 @@ func (r BackendRef) openSource(ctx context.Context, insecureAllowLoopback, prote
 		}
 		db, err := httpsource.Open(ctx, r.Path, opts...)
 		if err != nil {
-			return nil, fmt.Errorf("open %s source %q: %w", r.Scheme, r.Path, err)
+			return nil, err
 		}
 		return db, nil
 
 	default:
 		// Defense in depth — Parse should have rejected this already.
-		return nil, fmt.Errorf("unsupported scheme %q (this is a bug; Parse should have caught it)", r.Scheme)
+		return nil, errUnsupportedBackend
 	}
 }

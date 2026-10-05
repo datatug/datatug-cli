@@ -110,7 +110,10 @@ func parsePostgresURL(rawURL string) (PostgresTarget, url.Values, error) {
 }
 
 // SourceScopeIdentity returns the text that stands for source in a persisted
-// scope identity, such as the key of a chat session store.
+// scope identity, such as the key of a chat session store. It is never the display
+// form alone (SourceDisplay): that drops the user name and the query of a URL and
+// cuts a path at its "?" and "#", so two sources that are different places would
+// share a scope. And it never holds a password.
 //
 // An "env:NAME" source names a variable, and the variable can be repointed at
 // another database while its name stays: under the name alone, record sets read
@@ -123,21 +126,62 @@ func parsePostgresURL(rawURL string) (PostgresTarget, url.Values, error) {
 // PGUSER and PGSERVICE), and the database is the user when nothing names one, as
 // pgx resolves them; the contents of a connection service file and the operating
 // system's user name are not part of the identity. A variable that cannot be
-// resolved is its own scope. Every other source is returned unchanged.
+// resolved is its own scope.
+//
+// A literal PostgreSQL URL is identified the same way: "postgres" and the hash of
+// where it points and as whom, so two roles on one host and database are two
+// scopes, and the spelling of the URL (the postgresql alias, the case of the host,
+// the default port) is not part of it.
+//
+// A file or a directory is identified by its whole path, with the "?" and "#"
+// the display form cuts off (a sqlite URL's query holds driver options, which can
+// include a key, and is not part of its path). When that is not the display form,
+// the identity is the display form and a hash of the whole path, so the text holds
+// nothing the display form does not. A source that Parse refuses can hold
+// credentials: its identity is its display form.
 func SourceScopeIdentity(source string) string {
 	return sourceScopeIdentity(source, os.LookupEnv)
 }
 
 func sourceScopeIdentity(source string, lookupEnv func(string) (string, bool)) string {
-	if !strings.HasPrefix(source, envPrefix) {
-		return source
+	if source == "" {
+		return ""
 	}
 	ref, err := parseSource(source, lookupEnv)
-	if err != nil {
-		return source + "#unresolved"
+	if strings.HasPrefix(source, envPrefix) {
+		if err != nil {
+			return source + "#unresolved"
+		}
+		return source + "#" + identityDigest(destinationParts(ref, lookupEnv))
 	}
-	sum := sha256.Sum256([]byte(strings.Join(destinationParts(ref, lookupEnv), "\x00")))
-	return source + "#" + hex.EncodeToString(sum[:12])
+	switch {
+	case err != nil:
+		return SourceDisplay(source)
+	case ref.Scheme == "postgres":
+		return ref.Scheme + "#" + identityDigest(destinationParts(ref, lookupEnv))
+	}
+	whole := ref.Scheme + "://" + wholeLocalPath(ref)
+	if whole == ref.Raw {
+		return whole
+	}
+	return ref.Raw + "#" + identityDigest([]string{whole})
+}
+
+// identityDigest is the hash of parts that an identity carries: 96 bits are
+// enough to tell two destinations apart.
+func identityDigest(parts []string) string {
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:12])
+}
+
+// wholeLocalPath is the path ref names, as Parse kept it: a sqlite DSN is the file
+// and, after a "?", the options of the driver, which are not part of the identity.
+func wholeLocalPath(ref BackendRef) string {
+	if ref.Scheme == "sqlite" {
+		path, _, _ := strings.Cut(ref.Path, "?")
+		return path
+	}
+	return ref.Path
 }
 
 // destinationParts lists what a resolved env source points at, with no secret.

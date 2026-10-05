@@ -74,9 +74,6 @@ func TestURL_CoverageBranches(t *testing.T) {
 	_, err = Parse("ingitdb://")
 	assert.ErrorContains(t, err, "missing local path")
 
-	// 6. extractScheme with no colon
-	assert.Equal(t, "nourl", extractScheme("nourl"))
-
 	// 7. OpenProtectedForTest
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
@@ -99,22 +96,29 @@ func TestURL_CoverageBranches(t *testing.T) {
 	// 10. SQLite open error via seam
 	origSQLite := newSQLiteDatabaseWithOptions
 	defer func() { newSQLiteDatabaseWithOptions = origSQLite }()
+	sqliteCause := errors.New("mock sqlite open fail")
 	newSQLiteDatabaseWithOptions = func(dbPath string, schema dal.Schema, opts dalgo2sql.DbOptions) (*dalgo2sqlite.Database, error) {
-		return nil, errors.New("mock sqlite open fail")
+		return nil, sqliteCause
 	}
 	_, err = sqlRef.Open(context.Background())
-	assert.ErrorContains(t, err, "mock sqlite open fail")
+	// A driver's message is never shown (see BackendRef.OpenFailure); the cause is kept.
+	assert.ErrorContains(t, err, "open sqlite source")
+	assert.NotContains(t, err.Error(), "mock sqlite open fail")
+	assert.ErrorIs(t, err, sqliteCause)
 	newSQLiteDatabaseWithOptions = origSQLite
 
 	// 11. InGitDB open error via seam
 	ingitRef := BackendRef{Scheme: "ingitdb", Path: dbPath}
 	origInGitDB := newInGitDBDatabase
 	defer func() { newInGitDBDatabase = origInGitDB }()
+	ingitCause := errors.New("mock ingitdb open fail")
 	newInGitDBDatabase = func(dir string, r ingitdb.CollectionsReader, opts ...dalgo2ingitdb.DatabaseOption) (dal.DB, error) {
-		return nil, errors.New("mock ingitdb open fail")
+		return nil, ingitCause
 	}
 	_, err = ingitRef.Open(context.Background())
-	assert.ErrorContains(t, err, "mock ingitdb open fail")
+	assert.ErrorContains(t, err, "open ingitdb source")
+	assert.NotContains(t, err.Error(), "mock ingitdb open fail")
+	assert.ErrorIs(t, err, ingitCause)
 	newInGitDBDatabase = origInGitDB
 }
 

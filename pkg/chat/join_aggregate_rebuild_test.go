@@ -21,25 +21,52 @@ func (a extraTextAggregate) String() string {
 func TestQualifyJoinExpression_RefusesAggregateWithExtraText(t *testing.T) {
 	base := dal.NewAggregate("first", false, dal.NewFieldRef("", "name"))
 	stub := extraTextAggregate{AggregateFunc: base, extra: " ORDER BY salary"}
-
-	got, err := qualifyJoinExpression(stub, "src", true)
-	if err == nil {
-		t.Fatalf("expected the aggregate to be refused, got %v", got)
-	}
-	if !strings.Contains(err.Error(), "this aggregate form is not supported here") {
-		t.Fatalf("unexpected error: %v", err)
+	for name, expression := range map[string]dal.Expression{
+		"at the root":                stub,
+		"on the right of arithmetic": dal.Binary(dal.Constant{Value: 1}, dal.Add, stub),
+		"inside a plain aggregate":   dal.NewAggregate(dal.SUM, false, stub),
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := qualifyJoinExpression(expression, "src", true)
+			if err == nil {
+				t.Fatalf("expected the aggregate to be refused, got %v", got)
+			}
+			if !strings.Contains(err.Error(), "this aggregate form is not supported here: FIRST; remove it from the query before adding a JOIN") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if strings.Contains(err.Error(), "salary") {
+				t.Fatalf("the refusal repeats an argument: %v", err)
+			}
+		})
 	}
 }
 
 func TestQualifyJoinExpression_KeepsPlainAggregates(t *testing.T) {
-	for _, distinct := range []bool{false, true} {
-		agg := dal.NewAggregate("count", distinct, dal.NewFieldRef("", "id"))
-		got, err := qualifyJoinExpression(agg, "src", true)
-		if err != nil {
-			t.Fatalf("distinct=%v: %v", distinct, err)
-		}
-		if want := dal.NewAggregate("count", distinct, dal.NewFieldRef("src", "id")).String(); got.String() != want {
-			t.Fatalf("distinct=%v: got %q, want %q", distinct, got.String(), want)
-		}
+	field := dal.NewFieldRef("", "x")
+	qualified := dal.NewFieldRef("src", "x")
+	for name, tc := range map[string]struct{ input, want dal.Expression }{
+		"count star":                  {dal.NewAggregate(dal.COUNT, false, dal.Star()), dal.NewAggregate(dal.COUNT, false, dal.Star())},
+		"count distinct":              {dal.NewAggregate(dal.COUNT, true, field), dal.NewAggregate(dal.COUNT, true, qualified)},
+		"sum":                         {dal.NewAggregate(dal.SUM, false, field), dal.NewAggregate(dal.SUM, false, qualified)},
+		"avg":                         {dal.NewAggregate("AVG", false, field), dal.NewAggregate("AVG", false, qualified)},
+		"min":                         {dal.NewAggregate(dal.MIN, false, field), dal.NewAggregate(dal.MIN, false, qualified)},
+		"max":                         {dal.NewAggregate(dal.MAX, false, field), dal.NewAggregate(dal.MAX, false, qualified)},
+		"first":                       {dal.NewAggregate(dal.FIRST, false, field), dal.NewAggregate(dal.FIRST, false, qualified)},
+		"last":                        {dal.NewAggregate(dal.LAST, false, field), dal.NewAggregate(dal.LAST, false, qualified)},
+		"sum distinct":                {dal.NewAggregate(dal.SUM, true, field), dal.NewAggregate(dal.SUM, true, qualified)},
+		"avg distinct":                {dal.NewAggregate("AVG", true, field), dal.NewAggregate("AVG", true, qualified)},
+		"lower-case name":             {dal.NewAggregate("sum", false, field), dal.NewAggregate("sum", false, qualified)},
+		"arithmetic argument":         {dal.NewAggregate(dal.SUM, false, dal.Binary(field, dal.Multiply, dal.Constant{Value: 2})), dal.NewAggregate(dal.SUM, false, dal.Binary(qualified, dal.Multiply, dal.Constant{Value: 2}))},
+		"aggregate inside arithmetic": {dal.Binary(dal.NewAggregate(dal.SUM, false, field), dal.Add, dal.Constant{Value: 1}), dal.Binary(dal.NewAggregate(dal.SUM, false, qualified), dal.Add, dal.Constant{Value: 1})},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := qualifyJoinExpression(tc.input, "src", true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.String() != tc.want.String() {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

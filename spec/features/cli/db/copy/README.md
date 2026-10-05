@@ -100,13 +100,21 @@ The command MUST create target tables (and primary-key declarations) via the DAL
 
 For indexes, the command MUST apply each non-primary index via `ddl.CreateIndex` after the table is created and BEFORE row data is loaded for that table. The order is: `CreateTable` → `CreateIndex` (×N) → row stream. This order is engine-agnostic; per-engine performance hints (e.g. "drop indexes, bulk-load, recreate indexes") are out of scope for MVP.
 
+#### REQ: names-checked-before-writes
+
+For a PostgreSQL target, the command MUST check every source table name and every name in a definition it will write (table, column, primary-key column, index and index column) before the first target change. It MUST use the adapter's rule: a plain identifier of at most 63 UTF-8 bytes after lower-casing. A refused name MUST leave the target unchanged, name its source object, say how to rename or exclude it, and exit `1`.
+
+#### REQ: index-not-recreated
+
+For a PostgreSQL target, an index whose source definition cannot be recreated from column names (for example an expression, condition, operator class or null ordering) MUST be skipped without refusing the copy. The command MUST copy the tables and other indexes and report each skipped index once, naming the index and why it was skipped.
+
 #### REQ: type-mapping-coverage
 
 The MVP type-mapping table MUST cover every column type appearing in the canonical Chinook fixture across both directed pairs of the MVP backends (SQLite ↔ inGitDB). Types outside that closed set MUST fail at schema-creation time (exit `1`) with a per-column error naming the unsupported source type and the target backend. The exact mapping table is plan-time content; this REQ pins the coverage bar. (PostgreSQL pairs are out of MVP scope; when the Postgres driver lands, the type-mapping table extends to the four additional directed pairs.)
 
 #### REQ: recreate-drops-first
 
-When `--overwrite=recreate` is supplied, BEFORE introspecting the source the command MUST drop every source-table-named table that exists on the target via `ddl.DropTable` (`IfExists()`). Indexes on dropped tables are dropped transitively per the DDL surface's contract. Tables on the target that are NOT in the source MUST be left alone. After all relevant drops complete, the command proceeds to introspect-and-create as in REQ:target-schema-via-ddl.
+When `--overwrite=recreate` is supplied, the command MUST drop every source-table-named table that exists on the target via `ddl.DropTable` (`IfExists()`). For a PostgreSQL target, the command MUST first read the source definitions and perform REQ:names-checked-before-writes; for other targets the drops precede source definition reads. Indexes on dropped tables are dropped transitively per the DDL surface's contract. Tables on the target that are NOT in the source MUST be left alone. After all relevant drops complete, the command proceeds to introspect-and-create as in REQ:target-schema-via-ddl.
 
 ### Row streaming
 
@@ -180,7 +188,7 @@ If a copy fails midway (mid-stream insert error, target connection drop, source 
 | Exit code | Meaning |
 |---|---|
 | `0` | All source tables copied successfully (or source had no tables) |
-| `1` | Generic runtime error (mid-copy failure, schema mismatch on reload, non-empty target without overwrite, type-mapping gap) |
+| `1` | Generic runtime error (mid-copy failure, a name refused by a PostgreSQL target, schema mismatch on reload, non-empty target without overwrite, type-mapping gap) |
 | `2` | Invalid flags (missing required, unsupported `--overwrite` value, unknown scheme, remote `ingitdb://`) |
 | `4` | Could not connect to source or target |
 
@@ -392,6 +400,24 @@ From the source Idea:
 **Given** a SQLite target at `./out.db` containing two tables: `users` (also in source) and `audit_log` (not in source)
 **When** the user runs `datatug db copy --from sqlite:///./in.db --to sqlite:///./out.db --overwrite=recreate` where `--from` has only the table `users`
 **Then** the command exits `0`; on `./out.db` after copy, `users` exists with source data; `audit_log` is unchanged (table + rows still present).
+
+### AC: postgres-refuses-a-name-before-changing-the-target
+
+**Requirements:** copy#req:names-checked-before-writes
+
+Given a PostgreSQL target with two tables holding rows and a SQLite source whose third table has a name with a space or a name of 64 bytes, `db copy --overwrite=recreate` exits `1`, names that source table and how to rename or exclude it, and leaves both target tables and their rows unchanged. The same rule applies to a refused column, primary-key column or index name in a definition the copy will write. (`TestCopy_ToPostgres_ARefusedNameIsRefusedBeforeAnyStatement`, `TestDBCopy_ToPostgres_ARefusedNameExitsOneAndChangesNothing`, `TestPostgresCopyJourneyRefusesANameAndLeavesTheTargetAsItWas`.)
+
+### AC: postgres-reports-an-index-it-cannot-recreate
+
+**Requirements:** copy#req:index-not-recreated
+
+Given a source with ordinary indexes and an index whose definition uses an expression or condition, a copy to PostgreSQL creates every table and every ordinary index, skips the index it cannot recreate, and reports that index once with a reason. (`TestCopy_ToPostgres_AnIndexTheDriverCannotRecreateIsSkippedAndReported`.)
+
+### AC: other-targets-keep-their-names
+
+**Requirements:** copy#req:names-checked-before-writes
+
+A SQLite or inGitDB target accepts source names under its existing rules, including names a PostgreSQL target refuses. (`TestCopy_ToOtherTargets_TakesTheNamesAPostgresTargetRefuses`.)
 
 ### AC: reload-rejects-schema-mismatch
 

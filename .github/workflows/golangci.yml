@@ -165,8 +165,8 @@ jobs:
           CGO_ENABLED: '0'
         run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue' ./pkg/api/ ./apps/datatugapp/commands/
 
-  # The PostgreSQL scan (`datatug scan -D postgres --dsn-env NAME`) and the query
-  # (`datatug query run`, behind the preview switch) against a real server. Every
+  # The PostgreSQL scan (`datatug scan -D postgres --dsn-env NAME`), query
+  # (`datatug query run`) and copy (`datatug db copy`) against a real server. Every
   # other test of the scan reads through a fake schema reader and the test binary refuses to
   # dial (apps/datatugapp/commands/scan_never_dials_test.go), so this is the one place the scan
   # meets PostgreSQL: the real command, the real opener and the real DALgo reader, with a role and

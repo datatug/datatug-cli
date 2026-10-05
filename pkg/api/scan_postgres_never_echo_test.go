@@ -14,11 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The scan's log line names what it connects to as the display function of the sources
-// does (the scheme, the host, the port and the database) and never the user of a PostgreSQL
-// connection URL, which is read out of the URL and can be a token, nor its password or its
-// query string. A driver whose user is a flag the operator typed still logs it (see
-// TestUpdateDbSchema_LogLineNeverHoldsThePassword).
+// The scan's log line names the variable that holds the PostgreSQL URL and nothing
+// inside the URL, including a user that may be a token. A driver whose user is
+// a flag the operator typed still logs it (see TestUpdateDbSchema_LogLineNeverHoldsThePassword).
 func TestUpdateDbSchema_LogLineNeverHoldsThePostgresUser(t *testing.T) {
 	const token = "ghp_TOKENASUSERNAME1234"
 	params, err := NewPostgresScanParams(func(string) (string, bool) {

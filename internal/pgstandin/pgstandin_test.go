@@ -4,13 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"testing"
 
+	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dbschema"
+	"github.com/dal-go/dalgo/ddl"
 	"github.com/dal-go/dalgo2postgres"
+	"github.com/dal-go/dalgo2sql"
 	dalrecord "github.com/dal-go/record"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -97,3 +103,83 @@ func TestUnreachable_TheLibpqVariablesOfTheShellDoNotReachAStandIn(t *testing.T)
 
 // libpqChildEnv tells the run of the test above that it is the second one.
 const libpqChildEnv = "DATATUG_TEST_STANDIN_CHILD"
+
+// A stand-in that accepts every statement records the ones a call sent, in order, and not the empty statement the
+// adapter verifies the connection with.
+func TestRecording_AnAcceptingServerRecordsEveryStatementOfACall(t *testing.T) {
+	t.Parallel()
+	db, recorder := Recording(t, true)
+	assert.Empty(t, recorder.Statements(), "the check of the connection is not a statement")
+
+	err := db.CreateCollection(context.Background(), dbschema.CollectionDef{
+		Name:       "orders",
+		Fields:     []dbschema.FieldDef{{Name: "id", Type: dbschema.Int}},
+		PrimaryKey: []dal.FieldName{"id"},
+	})
+	require.NoError(t, err)
+
+	statements := recorder.Statements()
+	require.Len(t, statements, 3)
+	assert.Equal(t, "begin", statements[0])
+	assert.Contains(t, statements[1], `CREATE TABLE "orders"`)
+	assert.Equal(t, "commit", statements[2])
+	statements[0] = "changed"
+	assert.Equal(t, "begin", recorder.Statements()[0], "Statements returns a copy")
+}
+
+// A stand-in that accepts none fails the first statement with an error of the server's own kind, so that a call that
+// returns another error is known not to have reached a statement.
+func TestRecording_ARefusingServerFailsAnyStatementWithAServerError(t *testing.T) {
+	t.Parallel()
+	db, recorder := Recording(t, false)
+
+	err := db.DropCollection(context.Background(), "orders")
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "begin tx")
+	assert.Equal(t, []string{"begin"}, recorder.Statements())
+	assert.NotErrorIs(t, err, dalgo2sql.ErrUnsafeName)
+}
+
+// A statement with parameters is sent in the extended protocol, which the stand-in does not speak: the call fails and
+// nothing is recorded; the connection stays usable for the next statement.
+func TestRecording_AStatementWithParametersIsAnsweredWithAnErrorAndNotRecorded(t *testing.T) {
+	t.Parallel()
+	db, recorder := Recording(t, true, "orders")
+	record := dalrecord.NewRecordWithData(dalrecord.NewKeyWithID("orders", "1"), map[string]any{"status": "new"})
+
+	require.Error(t, db.Get(context.Background(), record))
+	assert.Empty(t, recorder.Statements())
+
+	require.NoError(t, db.DropCollection(context.Background(), "orders", ddl.IfExists()))
+	assert.Contains(t, recorder.Statements(), `DROP TABLE IF EXISTS "orders"`)
+}
+
+// The server of a stand-in ends its connection when the client goes, before the startup message and after it, and does
+// not wait for a message that cannot come.
+func TestServeRecording_EndsWhenTheClientGoes(t *testing.T) {
+	t.Parallel()
+	startup := &pgproto3.StartupMessage{ProtocolVersion: pgproto3.ProtocolVersionNumber, Parameters: map[string]string{"user": "standin"}}
+	for name, talk := range map[string]func(t *testing.T, client net.Conn){
+		"before the startup message": func(*testing.T, net.Conn) {},
+		"after the greeting": func(t *testing.T, client net.Conn) {
+			frontend := pgproto3.NewFrontend(client, client)
+			frontend.Send(startup)
+			require.NoError(t, frontend.Flush())
+			for range 2 { // the authentication and the readiness
+				_, err := frontend.Receive()
+				require.NoError(t, err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			client, peer := net.Pipe()
+			done := make(chan struct{})
+			go func() { serveRecording(peer, &Recorder{}, true); close(done) }()
+			talk(t, client)
+			require.NoError(t, client.Close())
+			<-done
+		})
+	}
+}

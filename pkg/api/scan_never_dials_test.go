@@ -16,7 +16,7 @@ import (
 func TestTheOpenOfThisTestBinaryStopsTheRunOnAnyOpen(t *testing.T) {
 	// A source that is not a PostgreSQL one: were the real open in place, it would answer with an
 	// error and dial nothing. The guard stops the run for any source, and names it as the display
-	// function does.
+	// function does for a source reference, without displaying its URL.
 	ref := dbcopy.BackendRef{Scheme: "sqlite", Raw: "env:DATATUG_SHOP_PG_URL", Path: "postgres://alice:" + pgSecret + "@db.example.com/shop"}
 
 	var message any

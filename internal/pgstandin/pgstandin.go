@@ -18,6 +18,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -75,14 +76,7 @@ func Unreachable(tb testing.TB, user, password string, keyedTables ...string) *d
 	name := stdlib.RegisterConnConfig(config)
 	tb.Cleanup(func() { stdlib.UnregisterConnConfig(name) })
 
-	options := dalgo2sql.DbOptions{}
-	for _, table := range keyedTables {
-		if options.Recordsets == nil {
-			options.Recordsets = map[string]*dalgo2sql.Recordset{}
-		}
-		options.Recordsets[table] = dalgo2sql.NewRecordset(table, dalgo2sql.Table, []dal.FieldRef{dal.Field("id")})
-	}
-	db, err := dalgo2postgres.NewDatabaseWithOptions(name, dal.NewSchema(nil, nil), options,
+	db, err := dalgo2postgres.NewDatabaseWithOptions(name, dal.NewSchema(nil, nil), keyedOptions(keyedTables),
 		dalgo2postgres.WithIdentifierMode(dalgo2postgres.IdentifierExact))
 	require.NoError(tb, err, "pgstandin: the database opens against the in-memory server")
 	tb.Cleanup(func() { _ = db.Close() })
@@ -109,4 +103,118 @@ func serve(conn net.Conn) {
 			_, err = backend.Receive()
 		}
 	}
+}
+
+// keyedOptions declares each of keyedTables with a key column "id".
+func keyedOptions(keyedTables []string) dalgo2sql.DbOptions {
+	options := dalgo2sql.DbOptions{}
+	for _, table := range keyedTables {
+		if options.Recordsets == nil {
+			options.Recordsets = map[string]*dalgo2sql.Recordset{}
+		}
+		options.Recordsets[table] = dalgo2sql.NewRecordset(table, dalgo2sql.Table, []dal.FieldRef{dal.Field("id")})
+	}
+	return options
+}
+
+// Recorder keeps the text of every statement that the in-memory servers of one [Recording] were sent, in the order
+// they arrived. The statement the driver verifies a connection with is not one of them.
+type Recorder struct {
+	mu         sync.Mutex
+	statements []string
+}
+
+func (r *Recorder) record(statement string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.statements = append(r.statements, statement)
+}
+
+// Statements returns the statements recorded so far, a copy.
+func (r *Recorder) Statements() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.statements...)
+}
+
+// connectionCheck is the statement pgx's driver sends to verify a connection (a comment, which the server answers as an
+// empty query).
+const connectionCheck = "-- ping"
+
+// refusedStatement is the error every statement of a stand-in that accepts none is answered with.
+const refusedStatement = "the stand-in server refuses every statement"
+
+// Recording opens a *dalgo2postgres.Database as BackendRef does (the exact identifier mode), against in-memory servers
+// that record each statement they are sent. A server answers a statement with success when accept is true, and with an
+// error of the server's own kind (SQLSTATE XX000, so not a connection failure) when it is false: the second is a
+// handle that fails on any statement, and a call that returns another error did not reach one. Only the simple
+// protocol is spoken; a statement sent in the extended protocol, which a call with parameters does, is answered with an
+// error and not recorded. The database is closed when the test ends. keyedTables are declared as in [Unreachable].
+//
+// Nothing is dialled: every connection of the pool is an in-memory pipe, and the pool makes as many as it needs.
+func Recording(tb testing.TB, accept bool, keyedTables ...string) (*dalgo2postgres.Database, *Recorder) {
+	tb.Helper()
+	config, err := pgx.ParseConfig("postgres://standin:standin@127.0.0.1:5432/shop?sslmode=disable")
+	require.NoError(tb, err, "pgstandin: the configuration is readable")
+	recorder := &Recorder{}
+	config.DialFunc = func(context.Context, string, string) (net.Conn, error) {
+		client, peer := net.Pipe()
+		go serveRecording(peer, recorder, accept)
+		return client, nil
+	}
+	name := stdlib.RegisterConnConfig(config)
+	tb.Cleanup(func() { stdlib.UnregisterConnConfig(name) })
+	db, err := dalgo2postgres.NewDatabaseWithOptions(name, dal.NewSchema(nil, nil), keyedOptions(keyedTables),
+		dalgo2postgres.WithIdentifierMode(dalgo2postgres.IdentifierExact))
+	require.NoError(tb, err, "pgstandin: the database opens against the in-memory server")
+	tb.Cleanup(func() { _ = db.Close() })
+	return db, recorder
+}
+
+// serveRecording is the server of [Recording]: it accepts the startup message and then answers what the client sends
+// until the client ends the connection.
+func serveRecording(conn net.Conn, recorder *Recorder, accept bool) {
+	defer func() { _ = conn.Close() }()
+	backend := pgproto3.NewBackend(conn, conn)
+	if _, err := backend.ReceiveStartupMessage(); err != nil {
+		return
+	}
+	backend.Send(&pgproto3.AuthenticationOk{})
+	backend.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
+	failed := false // a message of the extended protocol was answered with an error: the rest is skipped up to the Sync
+	for backend.Flush() == nil {
+		message, err := backend.Receive()
+		if err != nil {
+			return
+		}
+		switch m := message.(type) {
+		case *pgproto3.Terminate:
+			return
+		case *pgproto3.Query:
+			answerQuery(backend, recorder, m.String, accept)
+		case *pgproto3.Sync:
+			failed = false
+			backend.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
+		default:
+			if !failed {
+				failed = true
+				backend.Send(&pgproto3.ErrorResponse{Severity: "ERROR", Code: "XX000", Message: refusedStatement})
+			}
+		}
+	}
+}
+
+// answerQuery records statement, unless it is the empty one, and answers it.
+func answerQuery(backend *pgproto3.Backend, recorder *Recorder, statement string, accept bool) {
+	switch {
+	case statement == connectionCheck:
+		backend.Send(&pgproto3.EmptyQueryResponse{})
+	case accept:
+		recorder.record(statement)
+		backend.Send(&pgproto3.CommandComplete{CommandTag: []byte("OK")})
+	default:
+		recorder.record(statement)
+		backend.Send(&pgproto3.ErrorResponse{Severity: "ERROR", Code: "XX000", Message: refusedStatement})
+	}
+	backend.Send(&pgproto3.ReadyForQuery{TxStatus: 'I'})
 }

@@ -444,6 +444,12 @@ func TestPostgresScanJourney(t *testing.T) {
 		assert.Equal(t, columns, stored, "the columns file of %s", table)
 	}
 
+	// The length of a bounded text column is recorded, and a text column with no bound has none:
+	// varchar(40) is 40, text has no charMaxLength at all.
+	matrix := storedColumnMaps(t, projectDir, "type_matrix")
+	assert.EqualValues(t, 40, matrix["c_varchar"]["charMaxLength"], "type_matrix.c_varchar is varchar(40)")
+	assert.NotContains(t, matrix["c_text"], "charMaxLength", "type_matrix.c_text is text, which has no length")
+
 	// The scan records no default of a column. KNOWN GAP: the provider of the reader does not set
 	// the field of the model, so DEFAULT now(), DEFAULT 0 and DEFAULT 'open' of the fixture are lost.
 	t.Log("KNOWN GAP: the scan does not record column defaults: customer.created (DEFAULT now()), invoice.total (DEFAULT 0) and invoice.status (DEFAULT 'open') are saved without one")
@@ -551,11 +557,11 @@ func TestPostgresScanJourneyFailures(t *testing.T) {
 			if failure.sourceURL == "" {
 				assert.Equal(t, "environment variable "+variable+" is not set", message)
 			} else {
-				// The whole message, as the user reads it: the runner's own prefix (two workers run, one
-				// fails), the scan's, the source named by the variable it was read from, never by the
-				// URL, and the cause in this repository's own sentence, told apart by the adapter's
-				// Kind and SQLSTATE and not by its words.
-				assert.Equal(t, `failed 1 out of 2 workers, 1st error: failed to open PostgreSQL: open postgres source "env:`+variable+`": `+failure.reason, message)
+				// The whole message, as the user reads it: the scan's, with no count of workers in front of
+				// it (two workers run and one fails, and the error is the one's own), the source named by the
+				// variable it was read from, never by the URL, and the cause in this repository's own
+				// sentence, told apart by the adapter's Kind and SQLSTATE and not by its words.
+				assert.Equal(t, `failed to open PostgreSQL: open postgres source "env:`+variable+`": `+failure.reason, message)
 			}
 			assert.Empty(t, stdout, "a scan that fails writes nothing to its standard output")
 			for _, driver := range driverText {

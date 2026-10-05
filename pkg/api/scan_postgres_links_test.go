@@ -8,14 +8,15 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// The writer of the connection descriptor does not follow a link. A project is not trusted
-// (ResolveDescriptorPath refuses a descriptor that a link leads out of the folder to), and a
-// scan that wrote through such a link would read a file of the machine into memory, truncate it
-// and put the descriptor there, and exit 0 on a project that no reader opens.
+// The writer of the connection descriptor does not follow a link: a command writes only plain
+// files in plain folders of the project. A project is not trusted (ResolveDescriptorPath refuses a
+// descriptor that a link leads out of the folder to), so a link at connections, at
+// connections/<env> or at the descriptor is refused, naming its path in the project.
 
 const outsideBefore = "not the scan's to touch\n"
 
@@ -101,20 +102,21 @@ func TestWriteDescriptor_RefusesADanglingLinkAndANonFileWhereTheDescriptorGoes(t
 		_, err := newShopParams(t).WriteDescriptor(dir)
 
 		assert.ErrorContains(t, err, "connections/prod/shop.json")
-		assert.ErrorContains(t, err, "not a file")
+		assert.ErrorContains(t, err, "not a plain file")
 	})
 }
 
 func TestWriteDescriptor_ALinkThatCannotBeLookedAtIsRefused(t *testing.T) {
 	boom := errors.New("cannot look")
-	original := scanLstat
-	t.Cleanup(func() { scanLstat = original })
-	scanLstat = func(name string) (fs.FileInfo, error) {
-		if filepath.Base(name) == "prod" {
-			return nil, boom
+	useOps(t, func(ops *plainfs.Ops) {
+		lstat := ops.Lstat
+		ops.Lstat = func(name string) (fs.FileInfo, error) {
+			if filepath.Base(name) == "prod" {
+				return nil, boom
+			}
+			return lstat(name)
 		}
-		return original(name)
-	}
+	})
 	dir := t.TempDir()
 
 	undo, err := newShopParams(t).WriteDescriptor(dir)
@@ -129,14 +131,15 @@ func TestWriteDescriptor_ADescriptorThatCannotBeLookedAtIsRefused(t *testing.T) 
 	boom := errors.New("cannot look")
 	dir := t.TempDir()
 	writeDescriptor(t, dir, "connections/prod/shop.json", `{"dsnEnv":"DATATUG_OLD_PG_URL"}`)
-	original := scanLstat
-	t.Cleanup(func() { scanLstat = original })
-	scanLstat = func(name string) (fs.FileInfo, error) {
-		if filepath.Base(name) == "shop.json" {
-			return nil, boom
+	useOps(t, func(ops *plainfs.Ops) {
+		lstat := ops.Lstat
+		ops.Lstat = func(name string) (fs.FileInfo, error) {
+			if filepath.Base(name) == "shop.json" {
+				return nil, boom
+			}
+			return lstat(name)
 		}
-		return original(name)
-	}
+	})
 
 	undo, err := newShopParams(t).WriteDescriptor(dir)
 
@@ -168,9 +171,15 @@ func TestResolveDescriptorPath_RefusesAFileItCannotClassify(t *testing.T) {
 // leaves no folder behind that the write made.
 func TestWriteDescriptor_AFileThatCannotBeWrittenLeavesNoFolderBehind(t *testing.T) {
 	boom := errors.New("no space")
-	original := scanWriteFile
-	t.Cleanup(func() { scanWriteFile = original })
-	scanWriteFile = func(string, []byte, os.FileMode) error { return boom }
+	useOps(t, func(ops *plainfs.Ops) {
+		open := ops.OpenFile
+		ops.OpenFile = func(name string, flag int, perm fs.FileMode) (plainfs.File, error) {
+			if flag&os.O_WRONLY != 0 {
+				return nil, boom
+			}
+			return open(name, flag, perm)
+		}
+	})
 	dir := t.TempDir()
 
 	undo, err := newShopParams(t).WriteDescriptor(dir)
@@ -179,4 +188,30 @@ func TestWriteDescriptor_AFileThatCannotBeWrittenLeavesNoFolderBehind(t *testing
 	assert.ErrorIs(t, err, boom)
 	assert.ErrorContains(t, err, "write the connection descriptor")
 	assert.NoDirExists(t, filepath.Join(dir, "connections"), "the folders made on the way are removed again")
+}
+
+// A descriptor that is there and cannot be read, for a reason that is not "it is not there", is
+// refused with the reason, and what the write made on the way is taken back.
+func TestWriteDescriptor_ADescriptorThatCannotBeReadIsRefused(t *testing.T) {
+	boom := errors.New("access denied")
+	dir := t.TempDir()
+	writeDescriptor(t, dir, "connections/prod/shop.json", `{"dsnEnv":"DATATUG_OLD_PG_URL"}`)
+	useOps(t, func(ops *plainfs.Ops) {
+		open := ops.OpenFile
+		ops.OpenFile = func(name string, flag int, perm fs.FileMode) (plainfs.File, error) {
+			if flag&os.O_WRONLY == 0 {
+				return nil, boom
+			}
+			return open(name, flag, perm)
+		}
+	})
+
+	undo, err := newShopParams(t).WriteDescriptor(dir)
+
+	assert.Nil(t, undo)
+	assert.ErrorIs(t, err, boom)
+	assert.ErrorContains(t, err, "connections/prod/shop.json")
+	content, readErr := os.ReadFile(descriptorFile(dir))
+	require.NoError(t, readErr)
+	assert.JSONEq(t, `{"dsnEnv":"DATATUG_OLD_PG_URL"}`, string(content), "what was there is as it was")
 }

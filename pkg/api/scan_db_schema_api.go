@@ -99,30 +99,28 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 	var (
 		dbCatalog *datatug.DbCatalog
 	)
-	var projFileErr error
+	var projFileErr, loadErr, scanErr error
 	getProjectSummaryWorker := func() error {
 		_, projFileErr = projectLoader.LoadProjectFile(ctx)
 		if projFileErr != nil {
 			if datatug.ProjectDoesNotExist(projFileErr) {
 				return nil
 			}
-			return fmt.Errorf("failed to load project summary: %w", projFileErr)
+			loadErr = fmt.Errorf("failed to load project summary: %w", projFileErr)
+			return loadErr
 		}
 		return nil
 	}
 	dbServer := ScannedServer(driver, dbConnParams)
 	scanDbWorker := func() error {
-		var scanErr error
-		if dbCatalog, scanErr = scanDbCatalogSeam(ctx, dbServer, dbConnParams); scanErr != nil {
-			return scanErr
-		}
+		dbCatalog, scanErr = scanDbCatalogSeam(ctx, dbServer, dbConnParams)
 		return scanErr
 	}
 	if err = parallel.Run(
 		getProjectSummaryWorker,
 		scanDbWorker,
 	); err != nil {
-		return project, err
+		return project, onlyFailure(err, loadErr, scanErr)
 	}
 
 	if dbCatalog.Path == "" {
@@ -167,6 +165,23 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 		return
 	}
 	return project, err
+}
+
+// onlyFailure is what a scan says when the workers it ran at the same time did not all work: the
+// error of the one that failed, as it is, when exactly one did, and else runnerErr, which says how
+// many failed. The runner puts a count in front of the error of the first ("failed 1 out of 2
+// workers, 1st error: "), which tells the person nothing to act on when there is only one.
+func onlyFailure(runnerErr error, workerErrs ...error) error {
+	var failed []error
+	for _, err := range workerErrs {
+		if err != nil {
+			failed = append(failed, err)
+		}
+	}
+	if len(failed) == 1 {
+		return failed[0]
+	}
+	return runnerErr
 }
 
 func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServerRef datatug.ServerRef, dbCatalog *datatug.DbCatalog) (err error) {

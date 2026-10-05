@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -199,7 +200,7 @@ func planRetraction(projectDir string, parts []string, what, model, environment 
 	if len(otherCatalogs) > 0 {
 		return leaves(fmt.Sprintf("database model %q is also fed by catalog %s in environment %q, and this scan does not know what that database has", model, strings.Join(quoted(otherCatalogs), ", "), environment))
 	}
-	if err = refuseLinks(projectDir, what, parts...); err != nil {
+	if err = refuseLinks(scanTree(projectDir), what, dir); err != nil {
 		return nil, err
 	}
 	rel := filepath.ToSlash(filepath.Join(parts...))
@@ -261,36 +262,35 @@ func isFolder(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-// refuseLinks is an error when any of parts, taken one below the other from projectDir
-// down (projectDir itself may be, or be reached through, a link: it is the project), is
-// not a plain folder as Lstat reports it, which a symbolic link is not, nor a Windows
-// junction (Go reports it as irregular, and not as a link), nor any other reparse point,
-// or when it cannot be inspected: what is removed or written there is not known to be in
-// the project.
-func refuseLinks(projectDir, what string, parts ...string) error {
-	path := projectDir
-	for _, part := range parts {
-		path = filepath.Join(path, part)
-		if info, err := scanLstat(path); err != nil || !info.IsDir() {
-			return fmt.Errorf("%s is no longer in the database, but its folder is not removed: %s is a link (a symbolic link or a junction), or is not a plain folder, or cannot be inspected, and a scan never removes a folder through a link; remove the folder yourself if it is to go, and scan again", what, path)
-		}
+// refuseLinks is an error when any folder of the way from the project folder down to dir, the
+// folder of what (a table or view, said as in a message), is not a plain folder as Lstat
+// reports it, which a symbolic link is not, nor a Windows junction (Go reports it as irregular,
+// and not as a link), nor any other reparse point, or when it cannot be inspected: what is
+// removed or written there is not known to be in the project. The project folder itself may be,
+// or be reached through, a link: it is the project. The message names the folder inside the
+// project, and not where a link leads.
+func refuseLinks(tree plainfs.Tree, what, dir string) error {
+	if _, err := tree.CheckFolders(dir); err != nil {
+		return fmt.Errorf("%s is no longer in the database, but its folder is not removed: %w; a scan never removes a folder through a link (a symbolic link or a junction), or one that is not a plain folder: remove the folder yourself if it is to go, and scan again", what, err)
 	}
 	return nil
 }
 
-// applyRetractions does what planRetractions found, and says on removed the folder
-// of each table or view it removes, one line each.
-func applyRetractions(retractions []retraction, removed io.Writer) error {
+// applyRetractions does what planRetractions found, in tree (the project folder), and says on
+// removed the folder of each table or view it removes, one line each. A folder is removed, and
+// a columns file written, only as a plain folder and a plain file of the project (see package
+// plainfs): what planRetractions checked is checked again as it is written.
+func applyRetractions(tree plainfs.Tree, retractions []retraction, removed io.Writer) error {
 	for _, r := range retractions {
 		if r.content == nil {
-			if err := scanRemoveAll(r.dir); err != nil {
-				return fmt.Errorf("failed to remove the folder %s of a table or view that the database no longer has: %w", r.dir, err)
+			if err := tree.RemoveAll(r.dir); err != nil {
+				return fmt.Errorf("failed to remove the folder %s of a table or view that the database no longer has: %w", r.rel, err)
 			}
 			_, _ = fmt.Fprintf(removed, "removed: %s: %s is no longer in the database\n", r.rel, r.what)
 			continue
 		}
-		if err := scanWriteFile(r.file, r.content, 0o644); err != nil {
-			return fmt.Errorf("failed to update the columns file %s of a table or view that the database no longer has: %w", r.file, err)
+		if err := tree.WriteFile(r.file, r.content, 0o644); err != nil {
+			return fmt.Errorf("failed to update the columns file of a table or view that the database no longer has, in %s: %w", r.rel, err)
 		}
 	}
 	return nil

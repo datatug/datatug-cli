@@ -130,6 +130,29 @@ func TestSourceDisplay(t *testing.T) {
 		{"ingitdb token as the user name after a UNC start", `ingitdb://\\tok_Zk39xq@git.example/team/repo`, "ingitdb://git.example/team/repo"},
 		{"openvaultdb token as the user name after a UNC start", `openvaultdb://\\tok_Zk39xq@host.example/c.json`, "openvaultdb://host.example/c.json"},
 		{"UNC path with a colon and no at sign", `sqlite://\\server:445\share\db.sqlite`, `sqlite://\\server:445\share\db.sqlite`},
+		// A Windows WebDAV path writes the server as host@SSL, host@port or host@SSL@port: those server names
+		// are paths and are shown as typed, in any case of "SSL". Any other text in front of a second "@" in the
+		// server name is a token as the user name.
+		{"sqlite WebDAV UNC path over SSL", `sqlite://\\host.example@SSL\share\db.sqlite`, `sqlite://\\host.example@SSL\share\db.sqlite`},
+		{"http WebDAV UNC path with a port", `http://\\host.example@8080\share\proj`, `http://\\host.example@8080\share\proj`},
+		{"ingitdb WebDAV UNC path over SSL with a port", `ingitdb://\\host.example@SSL@8443\share\proj`, `ingitdb://\\host.example@SSL@8443\share\proj`},
+		{"openvaultdb WebDAV UNC path over SSL in lower case", `openvaultdb://\\host.example@ssl\share\c.json`, `openvaultdb://\\host.example@ssl\share\c.json`},
+		{"https WebDAV UNC path with slashes", `https://\\host.example@SSL/share/proj`, `https://\\host.example@SSL/share/proj`},
+		{"WebDAV UNC path with an at sign in the share", `sqlite://\\host.example@SSL\share\a@b\db.sqlite`, `sqlite://\\host.example@SSL\share\a@b\db.sqlite`},
+		{"token and SSL and a host in the server name", `http://\\tok_Zk39xq@SSL@host.example/x`, "http://host.example/x"},
+		{"token and a port that is out of range", `ingitdb://\\tok_Zk39xq@99999/team/repo`, "ingitdb://99999/team/repo"},
+		{"token and three at signs in the server name", `sqlite://\\tok_Zk39xq@SSL@8443@host.example/x.db`, "sqlite://host.example/x.db"},
+		{"a server name that is not a host in front of SSL", `https://\\tok_Zk39xq!@SSL/x`, "https://SSL/x"},
+		{"no server name in front of SSL", `openvaultdb://\\@SSL/c.json`, "openvaultdb://SSL/c.json"},
+		// A UNC path has a server name: with a separator straight after the two backslashes the first segment is
+		// empty, and what follows up to the "@" is a token, not a share.
+		{"http token after a UNC start and a backslash", `http://\\\tok_Zk39xq@host.example/x`, "http://host.example/x"},
+		{"https token after a UNC start and a slash", `https://\\/tok_Zk39xq@host.example/team/repo`, "https://host.example/team/repo"},
+		{"sqlite token after a UNC start and a backslash", `sqlite://\\\tok_Zk39xq@host.example/x.db`, "sqlite://host.example/x.db"},
+		{"sqlite token after a UNC start and a slash", `sqlite://\\/tok_Zk39xq@host.example/x.db`, "sqlite://host.example/x.db"},
+		{"ingitdb token after a UNC start and a backslash", `ingitdb://\\\tok_Zk39xq@git.example/team/repo`, "ingitdb://git.example/team/repo"},
+		{"openvaultdb token after a UNC start and a slash", `openvaultdb://\\/tok_Zk39xq@host.example/c.json`, "openvaultdb://host.example/c.json"},
+		{"UNC path with an empty server name and no at sign", `sqlite://\\\share\db.sqlite`, `sqlite://\\\share\db.sqlite`},
 		{"relative directory without an at sign", "ingitdb://dir/project", "ingitdb://dir/project"},
 		// A second "scheme://" in front of the last "@" is not a path, whatever the text starts with: only what follows
 		// the "@" is shown. A user name with a slash after a UNC start is userinfo for the same reason.

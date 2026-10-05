@@ -232,7 +232,8 @@ func TestAll_UserinfoAfterAUNCStartIsGeneratedForEverySchemeBareAndWrapped(t *te
 
 // A text that starts like a path ("/", "./") and then holds a second URL is not a
 // path: whoever typed it wrote credentials. A slash in the user name after a UNC
-// start puts the colon after a slash. All three are shapes of every scheme.
+// start puts the colon after a slash, and a token straight after a UNC start, or
+// after it and one more separator, has no colon at all. All are shapes of every scheme.
 func TestAll_ASecondURLAfterAPathStartIsGeneratedForEveryScheme(t *testing.T) {
 	t.Parallel()
 	counts := map[string]map[string]int{}
@@ -278,6 +279,23 @@ func TestAll_ASecondURLAfterAPathStartIsGeneratedForEveryScheme(t *testing.T) {
 				counts[c.Position] = map[string]int{}
 			}
 			counts[c.Position][scheme]++
+		case "token as the user name after a UNC start and a backslash", "token as the user name after a UNC start and a slash":
+			// A UNC path has a server name. A separator straight after the two backslashes
+			// leaves the first segment empty, and the token stands where a share does.
+			scheme := strings.ToLower(c.Source[:strings.Index(c.Source, "://")])
+			rest := c.Source[strings.Index(c.Source, "://")+3:]
+			userinfo, _, _ := strings.Cut(rest, "@")
+			separator := `\`
+			if strings.HasSuffix(c.Position, "a slash") {
+				separator = "/"
+			}
+			if !strings.HasPrefix(userinfo, `\\`+separator) || strings.ContainsAny(userinfo[3:], `\/:`) || userinfo[3:] != c.Secrets[0] {
+				t.Fatalf("case %q: %q is not a token after a UNC start and one more separator (%q)", c.Name, c.Source, separator)
+			}
+			if counts[c.Position] == nil {
+				counts[c.Position] = map[string]int{}
+			}
+			counts[c.Position][scheme]++
 		case "user name with a slash after a UNC start":
 			scheme := strings.ToLower(c.Source[:strings.Index(c.Source, "://")])
 			rest := c.Source[strings.Index(c.Source, "://")+3:]
@@ -291,7 +309,11 @@ func TestAll_ASecondURLAfterAPathStartIsGeneratedForEveryScheme(t *testing.T) {
 			counts[c.Position][scheme]++
 		}
 	}
-	for _, position := range []string{"second URL after an absolute start", "second URL after a dot start", "user name with a slash after a UNC start", "token as the user name after a UNC start"} {
+	for _, position := range []string{
+		"second URL after an absolute start", "second URL after a dot start", "user name with a slash after a UNC start",
+		"token as the user name after a UNC start", "token as the user name after a UNC start and a backslash",
+		"token as the user name after a UNC start and a slash",
+	} {
 		for _, scheme := range Schemes {
 			if counts[position][scheme] == 0 {
 				t.Errorf("no case of %q for %s", position, scheme)

@@ -188,7 +188,7 @@ func computeCaptureQuery(ctx context.Context, req captureQueryRequest) (captureQ
 
 	projectDir, ok := api.ProjectDir(req.Project)
 	if !ok {
-		return captureQueryResponse{}, 0, newNotFound(fmt.Sprintf("unknown project %q", req.Project))
+		return captureQueryResponse{}, 0, newNotFound(fmt.Sprintf("unknown project %q", dbcopy.SourceIDDisplay(req.Project)))
 	}
 	operation := access.Update
 	if condition.IfNoneMatch {

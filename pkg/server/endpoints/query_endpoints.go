@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
@@ -133,7 +134,7 @@ func getAllQueries(_ context.Context, ref dto.ProjectRef) (*datatug.QueriesFolde
 	}
 	projectDir, ok := api.ProjectDir(ref.ProjectID)
 	if !ok {
-		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, ref.ProjectID)
+		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, dbcopy.SourceIDDisplay(ref.ProjectID))
 	}
 	queries, canonicalIDs, err := loadModuleQueriesHook(projectDir)
 	if err != nil {
@@ -180,7 +181,7 @@ func getPersonalQueries(_ context.Context, ref dto.ProjectRef) (*datatug.Queries
 	// opened is 404 for root=personal too (not an empty folder read from
 	// whatever ~/.datatug/projects/<id>/ happens to hold), whoever asks.
 	if _, ok := api.ProjectDir(ref.ProjectID); !ok {
-		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, ref.ProjectID)
+		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, dbcopy.SourceIDDisplay(ref.ProjectID))
 	}
 	principalID := api.SecurePrincipalID()
 	rootID := datatug.RootUserFolderPrefix + principalID

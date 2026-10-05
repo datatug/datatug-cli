@@ -142,12 +142,14 @@ func isLocalScheme(scheme string) bool {
 // port. The same holds for a file or a directory unless the text is certainly a
 // path (see readsAsPath): an explicit path ("/abs/a@b", "./a@b", "../a@b",
 // "~/a@b", a UNC path, a drive path) is shown as typed, unless it holds a second
-// "scheme://" in front of its last "@" or is a UNC start with a ":" in front of it
-// (that is a URL or credentials, whatever the text starts with); any other text
-// that holds an "@" is userinfo and a host, even when a slash comes before the
-// colon or the "@". Two shapes stay paths by design: an explicit path, and "X:/..."
-// or "X:\..." (read as a Windows drive path even when it was meant as user X with a
-// password that starts with a slash). An "env:NAME" source is shown as it is,
+// "scheme://" in front of its last "@", or is a UNC start with a ":" in front of it,
+// or one whose server name (the first segment) is empty or holds an "@" (a Windows
+// WebDAV server name, "host@SSL" or "host@8080", excepted): that is a URL or
+// credentials, whatever the text starts with. Any other text that holds an "@" is
+// userinfo and a host, even when a slash comes before the colon or the "@". Two
+// shapes stay paths by design: an explicit path, and "X:/..." or "X:\..." (read as
+// a Windows drive path even when it was meant as user X with a password that
+// starts with a slash). An "env:NAME" source is shown as it is,
 // because it names a variable and holds no value. A string that is not led by a
 // known scheme yields UnparsableSource.
 func SourceDisplay(raw string) string {
@@ -272,15 +274,18 @@ func PathHoldsURL(path string) bool {
 // "C:/https://tok@host") is not a path whatever the text starts with: an explicit
 // start does not make a URL written after it a directory. A UNC start
 // ("\\server\share") is explicit only while no ":" stands in front of the last
-// "@" and the server name holds no "@": "\\alice:s3cret@host", "\\corp/u:p@host"
-// and "\\tok@host" start with two backslashes and are credentials all the same, and
-// no server or share name holds a colon, nor a server name an "@".
+// "@" and the first segment is a server name (see uncServerName):
+// "\\alice:s3cret@host", "\\corp/u:p@host", "\\tok@host" and "\\\tok@host" start
+// with two backslashes and are credentials all the same, since no server or share
+// name holds a colon, a server name is not empty, and it holds an "@" only in the
+// forms of a Windows WebDAV path ("\\host@SSL\share", "\\host@8080\share").
 //
 // Known limits, shapes that stay paths because nothing in the text tells them from
 // one, and are shown as typed: after a UNC start, a token that holds a slash and no
 // colon (the text before the slash reads as the server and what follows as a share),
-// and user information straight after an absolute start with no second scheme (an
-// absolute path may hold an "@" anywhere).
+// a token as the user name that is followed by "SSL" or a port number (it reads as a
+// WebDAV server name), and user information straight after an absolute start with no
+// second scheme (an absolute path may hold an "@" anywhere).
 func readsAsPath(text string) bool {
 	at := strings.LastIndexByte(text, '@')
 	if at < 0 {
@@ -297,8 +302,7 @@ func readsAsPath(text string) bool {
 
 // uncReadsAsPath reports whether text, which starts with "\\" and holds an "@"
 // at index at (the last), is a UNC path and not credentials: no ":" stands in
-// front of the "@", and the server name, the first segment, holds no "@" ("\\tok@host/x"
-// is a token as the user name: no server name holds one).
+// front of the "@", and the server name, the first segment, is one (see uncServerName).
 func uncReadsAsPath(text string, at int) bool {
 	if strings.Contains(text[:at], ":") {
 		return false
@@ -307,7 +311,33 @@ func uncReadsAsPath(text string, at int) bool {
 	if end := strings.IndexAny(server, `\/`); end >= 0 {
 		server = server[:end]
 	}
-	return !strings.Contains(server, "@")
+	return uncServerName(server)
+}
+
+// uncServerName reports whether server, the first segment after a UNC start, can be
+// the name of a server. A UNC path has one, so an empty segment is not: with a
+// separator straight after the two backslashes ("\\\tok@host/x", "\\/tok@host/x") the
+// text in front of the "@" is a token and not a share. A server name holds no "@",
+// except in the forms a Windows WebDAV path writes, "host@SSL", "host@port" and
+// "host@SSL@port" ("\\host@SSL\share", "\\host@8080\share"); the host is then a host
+// name and "SSL" is read in any case. Any other "@" in the first segment is a token
+// as the user name ("\\tok@host/x").
+func uncServerName(server string) bool {
+	if server == "" {
+		return false
+	}
+	host, options, hasOptions := strings.Cut(server, "@")
+	if !hasOptions {
+		return true
+	}
+	if !hostName.MatchString(host) {
+		return false
+	}
+	secure, port, hasPort := strings.Cut(options, "@")
+	if !hasPort {
+		return strings.EqualFold(options, "ssl") || validPort(options)
+	}
+	return strings.EqualFold(secure, "ssl") && validPort(port)
 }
 
 // localTextDisplay returns what to show for rest, the text after "scheme://" of

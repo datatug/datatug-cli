@@ -8,6 +8,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dtql"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/incidents"
@@ -101,14 +102,14 @@ func proveNativeFactsBinding(ctx context.Context, queryID string, side apicontra
 	}
 	projectDir, ok := api.ProjectDir(side.Project)
 	if !ok {
-		return "", newNotFound(fmt.Sprintf("unknown project %q", side.Project))
+		return "", newNotFound(fmt.Sprintf("unknown project %q", dbcopy.SourceIDDisplay(side.Project)))
 	}
 	if resolved, err := api.ResolveStoreID(side.StoreID, side.Project); err != nil || resolved != side.StoreID {
 		return "", newInvalidRequest("storeId", "does not identify the exact configured project store")
 	}
 	canonicalID, err := api.ResolveQueryID(projectDir, queryID)
 	if err != nil {
-		return "", newNotFound(fmt.Sprintf("query %q not found", queryID))
+		return "", newNotFound(fmt.Sprintf("query %q not found", dbcopy.QueryIDDisplay(queryID)))
 	}
 	projectStore, err := compareFactsProjectStoreFor(side.Project)
 	if err != nil {
@@ -116,7 +117,7 @@ func proveNativeFactsBinding(ctx context.Context, queryID string, side apicontra
 	}
 	queryDef, err := projectStore.LoadQuery(ctx, canonicalID)
 	if err != nil {
-		return "", newNotFound(fmt.Sprintf("query %q not found", queryID))
+		return "", newNotFound(fmt.Sprintf("query %q not found", dbcopy.QueryIDDisplay(queryID)))
 	}
 	if queryDef.Type != datatug.QueryTypeDTQL {
 		return "", newSourceUnavailable("facts comparison requires a saved structured DTQL query with native set binding")

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
 
@@ -55,7 +56,7 @@ func ResolveQueryID(projectDir, id string) (string, error) {
 		if _, ok := canonicalToBare[id]; ok {
 			return id, nil
 		}
-		return "", fmt.Errorf("%w: %q", ErrQueryNotFound, id)
+		return "", fmt.Errorf("%w: %q", ErrQueryNotFound, dbcopy.QueryIDDisplay(id))
 	}
 	var matches []string
 	for canonical, bare := range canonicalToBare {
@@ -65,12 +66,12 @@ func ResolveQueryID(projectDir, id string) (string, error) {
 	}
 	switch len(matches) {
 	case 0:
-		return "", fmt.Errorf("%w: %q", ErrQueryNotFound, id)
+		return "", fmt.Errorf("%w: %q", ErrQueryNotFound, dbcopy.QueryIDDisplay(id))
 	case 1:
 		return matches[0], nil
 	default:
 		sort.Strings(matches)
-		return "", fmt.Errorf("%w: %q matches %s", ErrAmbiguousQueryID, id, strings.Join(matches, ", "))
+		return "", fmt.Errorf("%w: %q matches %s", ErrAmbiguousQueryID, dbcopy.QueryIDDisplay(id), strings.Join(matches, ", "))
 	}
 }
 

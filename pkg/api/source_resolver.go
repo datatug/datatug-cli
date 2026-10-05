@@ -139,7 +139,7 @@ func LoadQueryDocument(projectID, queryID string, queryType datatug.QueryType) (
 func loadQueryDocument(projectID, queryID string, queryType datatug.QueryType) (string, error) {
 	dir, ok := projectDir(projectID)
 	if !ok || dir == "" {
-		return "", fmt.Errorf("no project directory configured for project %q", projectID)
+		return "", fmt.Errorf("no project directory configured for project %q", dbcopy.SourceIDDisplay(projectID))
 	}
 	folder, id := queryFolderAndID(queryID)
 	fileName := fmt.Sprintf("%s.%s.%s", id, storage.QueryFileSuffix, strings.ToLower(string(queryType)))

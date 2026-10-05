@@ -287,6 +287,11 @@ func CreateLocalProject(projectID, title, location string) (dtconfig.ProjectRef,
 // separators, "..", whitespace or characters a file system cannot store.
 // The title is recorded inside the project file, where it belongs.
 func createLocalProject(projectID, title, location string) (projectRef dtconfig.ProjectRef, err error) {
+	// The screen checks the form before it gets here; a caller that is not the screen (CreateLocalProject is
+	// exported) gets the same check, so an ID such as "../x" never becomes a part of a path.
+	if err = validateNewProject(projectID, title); err != nil {
+		return projectRef, err
+	}
 	projectPath := filepath.Join(fsutil.ExpandHome(location), projectID)
 	projectFile := filepath.Join(projectPath, storage.ProjectSummaryFileName)
 	// Nothing is written over a project that is there. The project file is the file a scan, init and a
@@ -329,6 +334,10 @@ func createLocalProject(projectID, title, location string) (projectRef dtconfig.
 	// empty made the second locally created project collide with the first.
 	projectRef = dtconfig.ProjectRef{ID: projectID, Path: projectPath, Title: title}
 	if err = addProjectToSettings(projectRef); err != nil {
+		// The project file was not there before this call (refuseExistingProject), and a project that is
+		// not registered cannot be opened: leaving the file would refuse every retry of the wizard with
+		// "open that project". The folder stays, as the person chose it; the removal cannot lose anything.
+		_ = os.Remove(projectFile)
 		return projectRef, fmt.Errorf("failed to update app settings: %w", err)
 	}
 	return projectRef, nil

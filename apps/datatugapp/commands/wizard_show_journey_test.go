@@ -50,7 +50,9 @@ func TestShowDoesNotLookOneFolderDeeper(t *testing.T) {
 	folder := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(folder, "datatug"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(folder, "datatug", "datatug-project.json"), []byte(`{"id":"deep"}`), 0o644))
-	want := `"` + folder + `" is not a DataTug project: its project file is in the folder datatug, where an earlier version of the terminal UI wrote it; move datatug/datatug-project.json up into "` + folder + `"`
+	want := `"` + folder + `" is not a DataTug project: its project file is in the folder datatug, where an earlier version of the terminal UI wrote it; ` +
+		`to keep this project, move datatug/datatug-project.json up into "` + folder + `" and add to it "access": "private" and "created": {"at": "<a time, such as 2026-01-02T15:04:05Z>"}, which a scan needs; ` +
+		`or make a new project in another folder with datatug scan -d "<new folder>" -D sqlite3 --path <database file> --db <name> --env <environment>`
 	stdout, _, err := runShowCommand(t, "-d", folder)
 	assert.Equal(t, 3, showExitCodeOf(t, err))
 	require.Error(t, err)
@@ -61,4 +63,39 @@ func TestShowDoesNotLookOneFolderDeeper(t *testing.T) {
 	_, _, err = runShowCommand(t, "-p", "deep")
 	assert.Equal(t, 3, showExitCodeOf(t, err))
 	assert.EqualError(t, err, want)
+}
+
+// The remedy that show gives for a project file one folder deeper is a whole one: a person who does what it
+// says (moves the file up and adds the two fields it names) can list the project and scan into it. Without
+// the two fields the scan refuses the file, which is why the sentence names them.
+func TestShowRemedyForTheOldWizardPathWorksWhenFollowed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	folder := t.TempDir()
+	deep := filepath.Join(folder, "datatug", "datatug-project.json")
+	require.NoError(t, os.Mkdir(filepath.Join(folder, "datatug"), 0o755))
+	require.NoError(t, os.WriteFile(deep, []byte(`{"id":"deep","title":"Deep"}`), 0o644))
+	_, _, err := runShowCommand(t, "-d", folder)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `"access": "private" and "created": {"at": "`)
+
+	// Step 1 of the sentence: move the file up. The project is listed, and a scan into it is refused.
+	moved := filepath.Join(folder, "datatug-project.json")
+	require.NoError(t, os.Rename(deep, moved))
+	require.NoError(t, os.Remove(filepath.Join(folder, "datatug")))
+	stdout, _, err := runShowCommand(t, "-d", folder)
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Project deep\n")
+	dbPath := filepath.Join(t.TempDir(), "shop.db")
+	writeJourneyDB(t, dbPath)
+	scanArgs := []string{"-d", folder, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local"}
+	_, err = runScanCommand(t, scanArgs...)
+	require.Error(t, err, "the moved file has no access and no creation time: that is why the sentence says to add them")
+
+	// Step 2: add the two fields, as the sentence says.
+	require.NoError(t, os.WriteFile(moved, []byte(`{"id":"deep","title":"Deep","access":"private","created":{"at":"2026-01-02T15:04:05Z"}}`), 0o644))
+	_, err = runScanCommand(t, scanArgs...)
+	require.NoError(t, err)
+	stdout, _, err = runShowCommand(t, "-d", folder)
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Project deep\nEnvironment local\n  Source shop (sqlite3)\n")
 }

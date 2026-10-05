@@ -114,12 +114,19 @@ func showCommandAction(cmd *cobra.Command, _ []string) error {
 
 // notAProjectSentence is the one sentence of a folder that holds no project: it names the folder and the command
 // that makes a project. A folder with a project file one folder deeper, in the folder datatug (where the create
-// screen of the terminal UI wrote it until issue 263 was fixed), is told so, and where the file belongs.
+// screen of the terminal UI wrote it until issue 263 was fixed), is told so, and what to do about it as a whole:
+// that file holds an ID and a title and nothing else, so moving it up lets `show` list the project, and a scan
+// into it needs the two fields that a project file is not valid without (its access and the time it was made);
+// the other way out is a new project.
 func notAProjectSentence(folder string) string {
+	const makeProject = `datatug scan -d "%s" -D sqlite3 --path <database file> --db <name> --env <environment>`
 	if _, err := os.Stat(filepath.Join(folder, "datatug", storage.ProjectSummaryFileName)); err == nil {
-		return fmt.Sprintf(`"%s" is not a DataTug project: its project file is in the folder datatug, where an earlier version of the terminal UI wrote it; move datatug/%s up into "%s"`, folder, storage.ProjectSummaryFileName, folder)
+		return fmt.Sprintf(`"%s" is not a DataTug project: its project file is in the folder datatug, where an earlier version of the terminal UI wrote it; `+
+			`to keep this project, move datatug/%s up into "%s" and add to it "access": "private" and "created": {"at": "<a time, such as 2026-01-02T15:04:05Z>"}, which a scan needs; `+
+			`or make a new project in another folder with `+makeProject,
+			folder, storage.ProjectSummaryFileName, folder, "<new folder>")
 	}
-	return fmt.Sprintf(`"%s" is not a DataTug project: make one with datatug scan -d "%s" -D sqlite3 --path <database file> --db <name> --env <environment>`, folder, folder)
+	return fmt.Sprintf(`"%s" is not a DataTug project: make one with `+makeProject, folder, folder)
 }
 
 // exitCodeNotFound is the exit code of a project, a dataset, a file or a database that is not there (the
@@ -145,8 +152,12 @@ type showSource struct {
 	DSNEnv string `json:"dsnEnv,omitempty"`
 	// NotScanned is true for a source the project records and no scan has described (its catalog has no
 	// dbModel): it has no schemas to list.
-	NotScanned bool         `json:"notScanned,omitempty"`
-	Schemas    []showSchema `json:"schemas"`
+	NotScanned bool `json:"notScanned,omitempty"`
+	// Empty is true for a source that was scanned and has no table and no view to list: a database with none,
+	// or a catalog whose model has no files (its dbmodels folder was removed). It is not "notScanned": a scan
+	// did describe the source, and what it described is nothing.
+	Empty   bool         `json:"empty,omitempty"`
+	Schemas []showSchema `json:"schemas"`
 }
 
 type showSchema struct {
@@ -242,6 +253,7 @@ func readShowSource(projectDir, envID string, catalog *datatug.DbCatalog) (showS
 	if err != nil {
 		return showSource{}, err
 	}
+	source.Empty = len(schema.Relations) == 0
 	// The relations are in the order of their schema and name: the relations of one schema are together.
 	for _, relation := range schema.Relations {
 		if len(source.Schemas) == 0 || source.Schemas[len(source.Schemas)-1].Name != relation.Schema {
@@ -283,11 +295,13 @@ func showDescriptorVariable(projectDir, descriptorPath string) (string, error) {
 }
 
 // showText is a value that comes from the project as the text prints it: as it is when every character is
-// printable and it has no space at either end, and else as a quoted string (a name may hold a line break or a
-// terminal escape sequence, which would forge lines of the output or act on the terminal). A name of an
-// ordinary kind is never changed.
+// printable and it has no space at all and no double quote, and else as a quoted string (a name may hold a
+// line break or a terminal escape sequence, which would forge lines of the output or act on the terminal; a
+// name with a space or a quote in it, such as a column "Order Details" or "id INTEGER pk", could not be told
+// from the name, the type and the key that follow it on the line). A name of an ordinary kind, one word
+// of printable characters, is never changed. JSON is exact and is never quoted this way.
 func showText(value string) string {
-	if value == "" || !utf8.ValidString(value) || strings.TrimSpace(value) != value {
+	if value == "" || !utf8.ValidString(value) || strings.ContainsAny(value, ` "`) {
 		return strconv.Quote(value)
 	}
 	for _, r := range value {
@@ -320,6 +334,9 @@ func writeShowText(w io.Writer, doc *showDocument) error {
 			}
 			if source.NotScanned {
 				line(2, "not scanned")
+			}
+			if source.Empty {
+				line(2, "no tables or views")
 			}
 			for _, schema := range source.Schemas {
 				line(2, "Schema %s", showText(schema.Name))

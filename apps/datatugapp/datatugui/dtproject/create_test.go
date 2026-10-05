@@ -175,6 +175,51 @@ func TestCreateLocalProjectFailures(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+	t.Run("a registration that fails leaves no project file, so the next try is not refused", func(t *testing.T) {
+		stub(t, &readSettings, func() (dtconfig.Settings, error) { return dtconfig.Settings{}, os.ErrNotExist })
+		registered := false
+		stub(t, &addProjectToSettings, func(dtconfig.ProjectRef) error {
+			if !registered {
+				registered = true
+				return errors.New("settings are not writable")
+			}
+			return nil
+		})
+		root := t.TempDir()
+		if _, err := createLocalProject("p", "T", root); err == nil || !contains(err.Error(), "failed to update app settings") {
+			t.Fatalf("err = %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(root, "p", "datatug-project.json")); !os.IsNotExist(err) {
+			t.Fatalf("the project file of a project that was not registered is still there: %v", err)
+		}
+		ref, err := createLocalProject("p", "T", root)
+		if err != nil || ref.ID != "p" {
+			t.Fatalf("the second try: ref = %+v, err = %v", ref, err)
+		}
+		if _, err = os.Stat(filepath.Join(root, "p", "datatug-project.json")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("an ID or a title the screen would refuse is refused here too, and nothing is written", func(t *testing.T) {
+		stub(t, &addProjectToSettings, func(dtconfig.ProjectRef) error { t.Fatal("registered"); return nil })
+		root := t.TempDir()
+		for _, tt := range []struct{ id, title string }{
+			{"../x", "T"}, {"Upper", "T"}, {"", "T"}, {"p", " "},
+		} {
+			if _, err := createLocalProject(tt.id, tt.title, root); err == nil {
+				t.Errorf("createLocalProject(%q, %q) = nil, want an error", tt.id, tt.title)
+			}
+			if _, err := CreateLocalProject(tt.id, tt.title, root); err == nil {
+				t.Errorf("CreateLocalProject(%q, %q) = nil, want an error", tt.id, tt.title)
+			}
+		}
+		if entries, err := os.ReadDir(root); err != nil || len(entries) != 0 {
+			t.Fatalf("something was made in %s: %v, %v", root, entries, err)
+		}
+		if _, err := os.Stat(filepath.Join(filepath.Dir(root), "x")); !os.IsNotExist(err) {
+			t.Fatalf("a folder was made outside the location: %v", err)
+		}
+	})
 	t.Run("a folder that already holds a project file is refused, and the file is not touched", func(t *testing.T) {
 		stub(t, &readSettings, func() (dtconfig.Settings, error) { return dtconfig.Settings{}, os.ErrNotExist })
 		var added bool

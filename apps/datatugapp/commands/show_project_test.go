@@ -390,6 +390,64 @@ func TestShowListsNoSourceForAnEnvironmentWithoutCatalogs(t *testing.T) {
 	stdout, _, err := runShowCommand(t, "-d", projectDir)
 	require.NoError(t, err)
 	assert.Equal(t, "Project shop-project\nEnvironment local\nNo database has been scanned into this project yet: scan one with datatug scan.\n", stdout)
+	// In JSON the environment is there and has no source; the list of environments is empty only for a project that has none.
+	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"project":"shop-project","environments":[{"id":"local","sources":[]}]}`, stdout)
+}
+
+// A source that was scanned and has nothing to list says so on one line, and in JSON, and is not the line
+// of a source that was never scanned: the model of its catalog has no file (its folder was removed), as it
+// has none for a database with no table.
+func TestShowSaysSoForAScannedSourceWithNoTableOrView(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(projectDir, "dbmodels")))
+	stdout, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.Equal(t, "Project shop-project\nEnvironment local\n  Source shop (sqlite3)\n    no tables or views\n", stdout)
+	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"project":"shop-project","environments":[{"id":"local","sources":[{"id":"shop","driver":"sqlite3","empty":true,"schemas":[]}]}]}`, stdout)
+
+	// A source that is not scanned is said to be that, and not to be empty; a source with tables is neither.
+	stdout, _, err = runShowCommand(t, "-d", demoShapedProject(t))
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "not scanned\n")
+	assert.NotContains(t, stdout, "no tables or views")
+	stdout, _, err = runShowCommand(t, "-d", scannedJourneyProject(t))
+	require.NoError(t, err)
+	assert.NotContains(t, stdout, "no tables or views")
+}
+
+// A name with a space or a double quote is printed quoted, so that on its line it is told from the type and
+// the key that follow it; a name of one word is as it is. JSON is exact.
+func TestShowQuotesNamesWithASpaceOrAQuote(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "shop.db")
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE "Order Details" ("id INTEGER pk" INTEGER PRIMARY KEY, "say ""hi""" TEXT, plain TEXT)`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	projectDir := filepath.Join(t.TempDir(), "spaces-project")
+	_, err = runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
+	require.NoError(t, err)
+
+	stdout, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.Equal(t, `Project spaces-project
+Environment local
+  Source shop (sqlite3)
+    Schema main
+      Table "Order Details"
+        "id INTEGER pk" INTEGER pk
+        "say \"hi\"" TEXT
+        plain TEXT
+`, stdout)
+	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, `"name": "Order Details"`)
+	assert.Contains(t, stdout, `"name": "id INTEGER pk"`)
+	assert.Contains(t, stdout, `"name": "say \"hi\""`)
 }
 
 // A project file that cannot be read is a failure of the command, and the settings file of the user
@@ -537,7 +595,12 @@ Environment local
 func TestShowText(t *testing.T) {
 	for value, want := range map[string]string{
 		"Customer":      "Customer",
-		"order line":    "order line",
+		"order line":    `"order line"`, // a space: the name could not be told from the type and the key after it
+		"Order Details": `"Order Details"`,
+		"id INTEGER pk": `"id INTEGER pk"`,
+		`say "hi"`:      `"say \"hi\""`,
+		`a"b`:           `"a\"b"`,
+		"double  space": `"double  space"`,
 		"café":          "café",
 		"":              `""`,
 		" lead":         `" lead"`,

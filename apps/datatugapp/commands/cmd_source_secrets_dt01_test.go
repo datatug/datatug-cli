@@ -77,6 +77,7 @@ func TestDBOpen_ParseFailureShowsNeitherTheArgumentsNorTheParserText(t *testing.
 
 // Every message `db copy` writes about --from or --to, whichever scheme.
 func TestDBCopy_NeverEchoesAPasswordFromEitherSide(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "") // the preview is off: the side that is PostgreSQL stops at its sentence
 	t.Setenv("DT01_COPY_PG", "postgres://alice:"+sourceSecret+"@127.0.0.1:1/shop")
 	// Both sides must reach Open: the other side is a real, empty SQLite file.
 	dir := t.TempDir()
@@ -126,16 +127,17 @@ func TestDBCopy_NeverEchoesAPasswordFromEitherSide(t *testing.T) {
 		t.Fatalf("the failing side should still be named: %v", err)
 	}
 	// The --to side reaches Open too (the source file exists), and says so.
-	for _, secretURL := range []string{
-		"postgres://alice:" + sourceSecret + "@127.0.0.1:1/shop",
-		"postgres://alice:42/" + sourceSecret + "@127.0.0.1:1/shop",
-	} {
-		stdout, stderr, err := runCopy(t, "db", "copy", "--from", emptySource, "--to", secretURL)
-		if err == nil || !strings.Contains(err.Error(), "open --to") {
-			t.Fatalf("the --to side should reach Open and be named: %v", err)
-		}
-		assertNoSecret(t, stdout.String(), stderr.String(), err.Error())
+	stdout, stderr, err := runCopy(t, "db", "copy", "--from", emptySource, "--to", "postgres://alice:"+sourceSecret+"@127.0.0.1:1/shop")
+	if err == nil || !strings.Contains(err.Error(), "open --to") {
+		t.Fatalf("the --to side should reach Open and be named: %v", err)
 	}
+	assertNoSecret(t, stdout.String(), stderr.String(), err.Error())
+	// A password split by a "/" is refused by Parse, before any open, and the side is named all the same.
+	stdout, stderr, err = runCopy(t, "db", "copy", "--from", emptySource, "--to", "postgres://alice:42/"+sourceSecret+"@127.0.0.1:1/shop")
+	if err == nil || !strings.Contains(err.Error(), "--to:") {
+		t.Fatalf("the --to side should be refused by Parse and be named: %v", err)
+	}
+	assertNoSecret(t, stdout.String(), stderr.String(), err.Error())
 }
 
 // `datatug updateUrlConfig` was printing its own parameters, password included.

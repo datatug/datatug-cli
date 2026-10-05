@@ -56,6 +56,7 @@ func TestQuery_EnvSourceErrorsNameTheVariableOnly(t *testing.T) {
 }
 
 func TestQuery_PostgresPasswordOnTheCommandLineNeverAppears(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "") // the preview is off: nothing is dialled, and the answer is its sentence
 	literal := "postgres://alice:" + sourceSecret + "@127.0.0.1:1/shop?sslmode=disable"
 	stdout, stderr, code := runQuery(t, "", "--db", literal, "--from", "customers", "--no-policies")
 	if code != exitCodeDatabase {
@@ -65,8 +66,8 @@ func TestQuery_PostgresPasswordOnTheCommandLineNeverAppears(t *testing.T) {
 	if strings.Contains(stderr, "alice") || strings.Contains(stderr, "127.0.0.1:1/shop?") {
 		t.Errorf("stderr must not show the user or the query of the URL: %q", stderr)
 	}
-	if !strings.Contains(stderr, dbcopy.ErrPostgresNotWired.Error()) {
-		t.Errorf("stderr should say that PostgreSQL is not wired yet: %q", stderr)
+	if !strings.Contains(stderr, dbcopy.ErrPostgresPreview.Error()) {
+		t.Errorf("stderr should say that PostgreSQL sources are a preview and are switched off: %q", stderr)
 	}
 
 	t.Setenv("DT01_QUERY_PG", literal)
@@ -84,6 +85,7 @@ func TestQuery_PostgresPasswordOnTheCommandLineNeverAppears(t *testing.T) {
 // failed, so the command no longer puts "open <source>:" in front of it. An env
 // source is named by its variable, never by what the variable holds.
 func TestQuery_OpenFailureNamesTheSourceOnce(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1") // with the preview off the command answers before the open this test replaces
 	original := openBackend
 	t.Cleanup(func() { openBackend = original })
 	openBackend = func(_ context.Context, ref dbcopy.BackendRef) (dal.DB, error) {
@@ -112,6 +114,7 @@ func TestQuery_OpenFailureNamesTheSourceOnce(t *testing.T) {
 }
 
 func TestQuery_DriverErrorsThatQuoteTheURLAreNeverShown(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1") // with the preview off the command answers before the open this test replaces
 	literal := "postgres://alice:" + sourceSecret + "@127.0.0.1:1/shop"
 	original := openBackend
 	t.Cleanup(func() { openBackend = original })

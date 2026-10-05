@@ -194,9 +194,18 @@ func TestOpenSchemaScan_RefusesAURLThatSplitsThePassword(t *testing.T) {
 			return nil, nil
 		})
 		url := strings.ReplaceAll(raw, "SECRET", "TOPSECRET")
-		ref, err := ParseWithEnv("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": url}))
-		require.NoError(t, err, name+": Parse accepts the shape, so the open path must refuse it")
+		// Parse refuses the shape (every way into a source passes through it) ...
+		_, parseErr := ParseWithEnv("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": url}))
+		if assert.Error(t, parseErr, name) {
+			assert.ErrorContains(t, parseErr, "percent-encode", name)
+			assert.ErrorContains(t, parseErr, "SHOP_PG_URL", name)
+			for _, quoted := range []string{"TOPSECRET", "SECRET", "alice", "db.example.com"} {
+				assert.NotContains(t, parseErr.Error(), quoted, name)
+			}
+		}
 
+		// ... and the open of the scan still checks the URL of a ref that Parse did not build.
+		ref := BackendRef{Scheme: "postgres", Raw: "env:SHOP_PG_URL", Path: url}
 		db, err := ref.OpenSchemaScan(context.Background())
 		assert.Nil(t, db, name)
 		if assert.Error(t, err, name) {
@@ -244,9 +253,18 @@ func TestOpenSchemaScan_RefusesAUserNameThatHoldsAColon(t *testing.T) {
 			return nil, nil
 		})
 		url := strings.ReplaceAll(raw, "SECRET", "TOPSECRET")
-		ref, err := ParseWithEnv("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": url}))
-		require.NoError(t, err, name+": Parse accepts the shape, so the open path must refuse it")
+		// Parse refuses the shape (every way into a source passes through it) ...
+		_, parseErr := ParseWithEnv("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": url}))
+		if assert.Error(t, parseErr, name) {
+			assert.ErrorContains(t, parseErr, "literal colon", name)
+			assert.ErrorContains(t, parseErr, "SHOP_PG_URL", name)
+			for _, quoted := range []string{"TOPSECRET", "SECRET", "alice", "db.example.com"} {
+				assert.NotContains(t, parseErr.Error(), quoted, name)
+			}
+		}
 
+		// ... and the open of the scan still checks the URL of a ref that Parse did not build.
+		ref := BackendRef{Scheme: "postgres", Raw: "env:SHOP_PG_URL", Path: url}
 		db, err := ref.OpenSchemaScan(context.Background())
 		assert.Nil(t, db, name)
 		if assert.Error(t, err, name) {
@@ -264,6 +282,7 @@ func TestOpenSchemaScan_RefusesAUserNameThatHoldsAColon(t *testing.T) {
 // URL as it was given. The real driver constructor fails on these before it
 // dials anything.
 func TestOpenSchemaScan_APgxParseErrorIsClassifiedNotQuoted(t *testing.T) {
+	useRealPostgresConstructors(t) // on purpose: pgx refuses each URL below before it dials
 	for name, tail := range map[string]string{
 		"an unknown sslmode":      "db.example.com:5433/shop?sslmode=bogus",
 		"a bad connect_timeout":   "db.example.com:5433/shop?connect_timeout=soon",

@@ -26,10 +26,10 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dal-go/dalgo v0.89.4
+	github.com/dal-go/dalgo v0.89.6
 	github.com/dal-go/dalgo2http v0.2.1
-	github.com/dal-go/dalgo2postgres v0.4.0
-	github.com/dal-go/dalgo2sql v0.26.0
+	github.com/dal-go/dalgo2postgres v0.4.1
+	github.com/dal-go/dalgo2sql v0.26.5
 	github.com/dal-go/dalgo2sqlite v0.2.2
 	github.com/dal-go/record v0.1.4
 	github.com/datatug/cliformat v0.0.3

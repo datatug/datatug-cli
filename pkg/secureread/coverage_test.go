@@ -340,7 +340,7 @@ func TestCoverage_Federated(t *testing.T) {
 	assert.Error(t, err)
 
 	// securedLeaf ExecuteQueryToRecordsReader error with valid DB
-	dbOpen, _, _ := openSource(context.Background(), "sqlite://"+ordersPath, false)
+	dbOpen, _, _ := openSource(context.Background(), "sqlite://"+ordersPath, false, 0)
 	leafWithDB := securedLeaf{
 		db:          dbOpen,
 		session:     Session{Unrestricted: true},

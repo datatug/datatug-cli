@@ -17,12 +17,14 @@ func dbCopyCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "copy",
 		Short: "Copy a database from one DALgo URL to another (schema-only first slice).",
-		Long:  "Replicates the source schema (collections, primary keys, indexes) to the target. Row data is not yet copied; see docs/upstream-issues/.",
-		RunE:  dbCopyAction,
+		Long: "Replicates the source schema (collections, primary keys, indexes) to the target. Row data is not yet copied; see docs/upstream-issues/.\n\n" +
+			"PostgreSQL (postgres://) is a preview: it opens only while " + dbcopy.PostgresPreviewEnv + "=1. A PostgreSQL --from is read through a read-only session, " +
+			"and a --from URL that turns the session's default_transaction_read_only off is refused. --to is the only place a PostgreSQL database is opened for writing.",
+		RunE: dbCopyAction,
 	}
 	flags := cmd.Flags()
-	flags.String("from", "", "Source DALgo URL (sqlite://, ingitdb://). Required.")
-	flags.String("to", "", "Target DALgo URL (sqlite://, ingitdb://). Required.")
+	flags.String("from", "", "Source DALgo URL (sqlite://, ingitdb://, postgres:// read-only). Required.")
+	flags.String("to", "", "Target DALgo URL (sqlite://, ingitdb://, postgres://: the only way DataTug opens PostgreSQL for writing). Required.")
 	flags.String("overwrite", "", "Conflict policy when target already contains source-named collections. One of: recreate, reload.")
 	flags.Int("parallel-streams", 0, "Maximum number of source tables copied concurrently. Capped to 1 when either driver advertises no concurrency.")
 	flags.Bool("progress", false, "Emit per-table progress lines on stderr.")
@@ -67,12 +69,14 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 		return Exit(fmt.Sprintf("--to: %v", err), 2)
 	}
 
-	// Open both backends (REQ:exit-codes — 4 for connection failures).
+	// Open both backends (REQ:exit-codes — 4 for connection failures). The source is opened as a
+	// read; the target is the one open that is written through, so a PostgreSQL target is not
+	// opened read-only.
 	src, err := srcRef.Open(ctx)
 	if err != nil {
 		return Exit(fmt.Sprintf("open --from: %v", err), 4)
 	}
-	tgt, err := tgtRef.Open(ctx)
+	tgt, err := tgtRef.OpenForWrite(ctx)
 	if err != nil {
 		return Exit(fmt.Sprintf("open --to: %v", err), 4)
 	}

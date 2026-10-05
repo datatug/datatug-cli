@@ -34,7 +34,29 @@ var (
 	// URL: the user name it refuses is most likely the user and the password
 	// joined by an encoded colon.
 	errPostgresUserHoldsColon = errors.New("the PostgreSQL URL has a user name that holds a colon (a percent-encoded ':' between the user and the password joins them into one name): write user:password with a literal colon between them")
+
+	// errPostgresUserHoldsPercent names the shape and the fix and quotes none of the
+	// URL: a user name that still holds a percent sign after the URL was decoded
+	// was encoded twice, and "alice%253Apw" decodes to "alice%3Apw", the user and the
+	// password joined by a colon that a second decoding would read.
+	errPostgresUserHoldsPercent = errors.New("the PostgreSQL URL has a user name that holds a percent sign after it is decoded (a user name or a password encoded twice, such as a percent-encoded ':' between them, joins them into one name): percent-encode the user name and the password once")
 )
+
+// postgresURLRefusals are the errors parsePostgresURL returns for a URL it will not read: each a
+// fixed sentence that says what is wrong and quotes none of the URL.
+var postgresURLRefusals = []error{errSplitPostgresPassword, errPostgresUserHoldsColon, errPostgresUserHoldsPercent, errUnreadablePostgresURL}
+
+// postgresURLRefusal returns the refusal of postgresURLRefusals that err is or wraps, or nil
+// when err is another error. A caller that must not show err itself (it may be about a variable's
+// value) shows the refusal.
+func postgresURLRefusal(err error) error {
+	for _, refusal := range postgresURLRefusals {
+		if errors.Is(err, refusal) {
+			return refusal
+		}
+	}
+	return nil
+}
 
 // atSignAfterAuthority reports whether rawURL holds an "@" after the end of its
 // authority, the part up to the first "/", "?" or "#". In a well-formed URL the
@@ -65,7 +87,10 @@ func atSignAfterAuthority(rawURL string) bool {
 // that holds a colon, however the URL spells it (see errPostgresUserHoldsColon):
 // "alice%3Apw@host" has no literal colon, so net/url reads the user "alice:pw"
 // and no password, and the password would be printed as the user, where no
-// redactor looks for a secret. No error quotes the URL, which holds the password.
+// redactor looks for a secret; and one that still holds a percent sign once it is
+// decoded (see errPostgresUserHoldsPercent), which a doubly encoded colon leaves
+// behind. No error quotes the URL, which holds the password. Parse applies the
+// same checks to every postgres source, so a source Parse accepts passes them.
 func ParsePostgresTarget(rawURL string) (PostgresTarget, error) {
 	target, _, err := parsePostgresURL(rawURL)
 	return target, err
@@ -96,6 +121,9 @@ func parsePostgresURL(rawURL string) (PostgresTarget, url.Values, error) {
 	}
 	if strings.Contains(target.User, ":") {
 		return PostgresTarget{}, nil, errPostgresUserHoldsColon
+	}
+	if strings.Contains(target.User, "%") {
+		return PostgresTarget{}, nil, errPostgresUserHoldsPercent
 	}
 	port := parsed.Port()
 	if value := query.Get("port"); value != "" {

@@ -183,6 +183,11 @@ func (p contentPane) previewFor(row, column int) (contentPane, tea.Cmd) {
 		return p.resize(p.w, p.h).focus(p.focused), nil
 	}
 	value, _ := col.GetValue(row)
+	if value == nil {
+		// A NULL references nothing: no query is sent, because `key = NULL` finds no row and
+		// `key IS NULL` would list the parent row whose own key is NULL.
+		return p.resize(p.w, p.h).focus(p.focused), nil
+	}
 	q := dal.From(dal.NewCollectionRef(fk.To.Name, "", nil)).NewQuery().
 		WhereField(fk.To.Columns[0], dal.Equal, dal.NewConstant(value)).
 		SelectIntoRecordset()

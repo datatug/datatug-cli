@@ -52,17 +52,18 @@ func TestUnclassifiedErrorLogsRedactSourceURLs(t *testing.T) {
 }
 
 func TestResolveSQLSourceURLNeverEchoesAPassword(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "") // the preview is off: nothing is dialled
 	_, err := resolveSQLSourceURL(context.Background(), "postgres://alice:"+endpointSecret+"@127.0.0.1:1/shop", "customers")
 	if err == nil {
-		t.Fatal("postgres is not wired yet; the open must fail")
+		t.Fatal("PostgreSQL sources are a preview and are switched off; the open must fail")
 	}
 	if strings.Contains(err.Error(), endpointSecret) {
 		t.Fatalf("error leaks the password: %v", err)
 	}
 	// Open's error says which source failed and why, in a fixed sentence built from
-	// no part of the URL, and is returned as it is: a PostgreSQL source that is not
-	// wired is answered by the sentence about PostgreSQL, which names nothing typed.
-	if err.Error() != dbcopy.ErrPostgresNotWired.Error() || !errors.Is(err, dbcopy.ErrPostgresNotWired) {
+	// no part of the URL, and is returned as it is: a PostgreSQL source while the
+	// preview is off is answered by the sentence about the preview, which names nothing typed.
+	if err.Error() != dbcopy.ErrPostgresPreview.Error() || !errors.Is(err, dbcopy.ErrPostgresPreview) {
 		t.Fatalf("error = %v, want Open's own error, returned as it is", err)
 	}
 	for _, shown := range []string{"alice", "127.0.0.1", "shop"} {

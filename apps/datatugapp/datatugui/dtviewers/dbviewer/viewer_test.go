@@ -3,6 +3,7 @@ package dbviewer
 import (
 	"testing"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/stretchr/testify/assert"
 	"github.com/tuigoff/tuigoff/pkg/nav"
 	"github.com/tuigoff/tuigoff/pkg/nav/navtest"
@@ -40,11 +41,25 @@ func TestChooser_DrillsIntoInGitDBByShortcut(t *testing.T) {
 	assert.Equal(t, "inGitDB", h.Model().Breadcrumbs()[1].Title)
 }
 
-func TestChooser_PostgresIsNotSupported(t *testing.T) {
+// With the preview switch off, the viewer answers a PostgreSQL choice with the preview sentence: the one every path
+// that would open a PostgreSQL source answers.
+func TestChooser_PostgresWithThePreviewOffAnswersThePreviewSentence(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "")
 	h := navtest.New(t, Viewer().Root())
 	h.Press("p")
 	assert.True(t, h.Model().AlertOpen())
-	h.RequireContains("PostgreSQL is not supported yet.")
+	h.RequireContains("PostgreSQL sources are a preview")
+	h.RequireContains(dbcopy.PostgresPreviewEnv + "=1")
+	assert.Len(t, h.Model().Breadcrumbs(), 1)
+}
+
+// With the switch on, the viewer still opens no PostgreSQL source and says so.
+func TestChooser_PostgresIsNotSupportedInTheViewerYet(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	h := navtest.New(t, Viewer().Root())
+	h.Press("p")
+	assert.True(t, h.Model().AlertOpen())
+	h.RequireContains("PostgreSQL is not supported in the viewer yet.")
 	assert.Len(t, h.Model().Breadcrumbs(), 1)
 }
 

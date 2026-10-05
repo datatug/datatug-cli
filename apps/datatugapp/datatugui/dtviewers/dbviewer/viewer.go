@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui/dtviewers"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/tuigoff/tuigoff/pkg/nav"
 	"github.com/tuigoff/tuigoff/pkg/widgets"
 )
@@ -87,8 +88,17 @@ func (c chooser) choose(item list.Item) tea.Cmd {
 	case chooserInGitDB:
 		return datatugui.Drill("inGitDB", newHome(homeInGitDB))
 	}
-	return nav.Alert("PostgreSQL", "PostgreSQL is not supported yet.", 3*time.Second, nav.FocusToContent)
+	// PostgreSQL sources are a preview (dbcopy.PostgresPreviewEnv): while it is off the viewer says so, in
+	// the one sentence every path that would open one answers. The viewer opens no PostgreSQL source in
+	// either case, so nothing is opened here.
+	if err := dbcopy.CheckPostgresPreview(); err != nil {
+		return nav.Alert("PostgreSQL", err.Error(), postgresAlertTime, nav.FocusToContent)
+	}
+	return nav.Alert("PostgreSQL", "PostgreSQL is not supported in the viewer yet.", 3*time.Second, nav.FocusToContent)
 }
+
+// postgresAlertTime is how long the preview sentence stays on screen: it is a whole sentence, not a word.
+const postgresAlertTime = 8 * time.Second
 
 // View implements nav.Screen.
 func (c chooser) View() string { return c.list.View() }

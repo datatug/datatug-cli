@@ -93,9 +93,10 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 		}
 		// Open's error says which source failed and why, in a fixed sentence built
 		// from the display form, so naming the source again in front of it would say
-		// it twice. The one exception is dbcopy.ErrPostgresNotWired, which names no
-		// source: the answer for a PostgreSQL source is "PostgreSQL backend not yet
-		// wired", and the client knows which source it asked for.
+		// it twice. The exceptions are the fixed refusals of a PostgreSQL source
+		// (dbcopy.ErrPostgresPreview while the preview is off, and the refusal of a URL
+		// that turns the read-only session off), which name no source: the client knows
+		// which source it asked for.
 		return resolvedSource{}, err
 	}
 	reader, ok := dalAsSchemaReader(db)

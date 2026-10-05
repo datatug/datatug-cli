@@ -34,8 +34,9 @@ func ParseWithEnv(rawURL string, lookupEnv func(string) (string, bool)) (Backend
 }
 
 // OpenSchemaScan opens a postgres source for reading its schema and nothing
-// else. It is not Open: Open keeps answering that PostgreSQL is not available
-// for queries, and the handle returned here is for the scan only. DataTug opens
+// else. It is not Open: Open is behind the preview switch (PostgresPreviewEnv)
+// and keeps one handle for the process, and the handle returned here is for the
+// scan only, which is not behind the switch (it reads the catalog). DataTug opens
 // it with exact identifiers, so a table is looked up under the name PostgreSQL
 // reports (the driver's default folds every name to lower case).
 //

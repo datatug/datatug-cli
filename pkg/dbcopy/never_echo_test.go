@@ -96,11 +96,14 @@ func TestParse_EmptyUserNameIsRefused(t *testing.T) {
 // protects a PostgreSQL password, and no test held it.
 func TestParse_PostgresOneLetterUserWithAPasswordThatStartsWithASlash(t *testing.T) {
 	t.Parallel()
+	// Net/url reads "C" as the host and the rest of the password as the path: Parse refuses the shape
+	// (a literal "@" after the authority), and the refusal names nothing of the URL.
 	ref, err := Parse("postgres://C:/s3cret@db.example.com/shop")
-	require.NoError(t, err)
-	assert.Equal(t, "postgres://db.example.com/shop", ref.Raw)
-	assert.Equal(t, "postgres://db.example.com/shop", ref.String())
-	assert.NotContains(t, fmt.Sprintf("%v %+v %#v", ref, ref, ref), "s3cret")
+	require.Error(t, err)
+	assert.Equal(t, BackendRef{}, ref)
+	assert.ErrorContains(t, err, "percent-encode")
+	assert.NotContains(t, fmt.Sprintf("%v %+v %#v", err, err, err), "s3cret")
+	assert.NotContains(t, err.Error(), "db.example.com")
 	// And the exemption itself stays scoped to http and https paths.
 	for _, input := range []string{`http://C:\work\a@b`, `https://C:/work/a@b/proj`} {
 		parsed, err := Parse(input)
@@ -289,8 +292,8 @@ func TestOpen_PostgresKeepsItsOwnSentinelText(t *testing.T) {
 	t.Parallel()
 	ref, err := Parse("postgres://alice:s3cret@127.0.0.1:1/shop")
 	require.NoError(t, err)
-	_, err = ref.Open(context.Background())
-	require.ErrorIs(t, err, ErrPostgresNotWired)
+	_, err = ref.Open(context.Background()) // the preview switch is off: nothing is dialled
+	require.ErrorIs(t, err, ErrPostgresPreview)
 	assert.NotContains(t, err.Error(), "s3cret")
 	assert.NotContains(t, err.Error(), "alice")
 }
@@ -375,7 +378,7 @@ func TestOpenFailure_ReasonsAreFixedSentences(t *testing.T) {
 	assert.Same(t, own, ref.OpenFailure(own))
 	classified := ref.OpenFailure(errors.New("driver says s3cret"))
 	assert.Same(t, classified, ref.OpenFailure(classified), "classifying twice changes nothing")
-	assert.Equal(t, ErrPostgresNotWired, ref.OpenFailure(ErrPostgresNotWired))
+	assert.Equal(t, ErrPostgresPreview, ref.OpenFailure(ErrPostgresPreview))
 	assert.Equal(t, errUnsupportedBackend, ref.OpenFailure(errUnsupportedBackend))
 	// A driver that wraps one of this package's sentinels around its own text does
 	// not get its text through.

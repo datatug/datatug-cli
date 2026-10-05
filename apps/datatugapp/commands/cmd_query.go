@@ -182,10 +182,12 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 // able to request that itself — see cmd_query_http_provenance_test.go.
 // Production code always runs with this default. SQLite uses the validated
 // structured-query dialect so grouped DTQL is rendered as native SQL (and
-// literals remain bound parameters); other sources keep their existing open
-// behavior. Both paths retain the HTTPS-only HTTP-source enforcement.
+// literals remain bound parameters), and PostgreSQL opens as a protected read:
+// a read-only session, behind the preview switch; other sources keep their
+// existing open behavior. Both paths retain the HTTPS-only HTTP-source
+// enforcement.
 var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
-	if backend.Scheme == "sqlite" {
+	if backend.Scheme == "sqlite" || backend.Scheme == "postgres" {
 		return backend.OpenProtected(ctx)
 	}
 	return backend.Open(ctx)
@@ -225,6 +227,14 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	// A PostgreSQL source is a preview, and a read of one through policies is not available in it:
+	// both are answered before the source is opened.
+	if err = dbcopy.CheckPostgresRead(backend, len(loaded)); err != nil {
+		if errors.Is(err, dbcopy.ErrPostgresPolicyReads) {
+			return Exit(err.Error(), exitCodeUsage)
+		}
+		return Exit(err.Error(), exitCodeDatabase)
 	}
 	// This ad-hoc `datatug query run --db http://...` path predates
 	// pkg/httpsource.Open's fail-closed ModeLive default (see Open's own doc

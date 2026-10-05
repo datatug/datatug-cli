@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -152,6 +153,26 @@ func itemRoutes(t *testing.T, project string) []itemRoute {
 			return sendQuery(r.handler, r.method, r.path, url.Values{"project": {project}, "driver": {"sqlserver"}, "host": {v}})
 		}})
 	}
+	// The port of a db server reference is a number: any other text is refused, and the
+	// answer shows nothing of it.
+	ports := []sourcecases.UnsafeIdentifier{
+		{Name: "a path as the port", ID: "../../x"},
+		{Name: "a user and a password as the port", ID: "alice:s3cretpw"},
+		{Name: "a word as the port", ID: "abc"},
+		{Name: "a decimal number as the port", ID: "14.33"},
+	}
+	for _, r := range []struct {
+		name, path, method string
+		handler            http.HandlerFunc
+	}{
+		{"dbserver-delete", "/datatug/dbserver-delete", http.MethodDelete, deleteDbServer},
+		{"dbserver-databases", "/datatug/dbserver-databases", http.MethodGet, getServerDatabases},
+	} {
+		r := r
+		add(itemRoute{name: r.name + " (port)", position: "port", unsafe: ports, send: func(v string) *httptest.ResponseRecorder {
+			return sendQuery(r.handler, r.method, r.path, url.Values{"project": {project}, "driver": {"sqlserver"}, "host": {"localhost"}, "port": {v}})
+		}})
+	}
 	addServer := func(driver, host string) map[string]any {
 		id := driver + ":" + host
 		return map[string]any{"id": id, "title": "S", "server": map[string]any{"driver": driver, "host": host}, "catalogs": []any{}}
@@ -170,6 +191,7 @@ func itemRoutes(t *testing.T, project string) []itemRoute {
 		{"a plain driver that no store records", "driver", "mongodb", "localhost"},
 		{"a user and a password typed as the host of a sqlite3 server", "host", "sqlite3", "alice:s3cretpw"},
 		{"a host name given to a sqlite3 server", "host", "sqlite3", "db.example.com"},
+		{"a host name given to an https-json server", "host", "https-json", "db.example.com"},
 	} {
 		c := c
 		value := c.driver
@@ -249,6 +271,12 @@ func itemRoutes(t *testing.T, project string) []itemRoute {
 	add(itemRoute{name: "exec/execute_commands (project)", position: "project", unsafe: identifiers, send: func(v string) *httptest.ResponseRecorder {
 		body := map[string]any{"commands": []map[string]any{{"type": "SQL", "text": "SELECT 1", "env": "local", "db": "chinook"}}}
 		return sendBody(t, executeCommandsHandler, http.MethodPost, "/datatug/exec/execute_commands?project="+url.QueryEscape(v), body)
+	}})
+	add(itemRoute{name: "queries/create_query (project)", position: "project", unsafe: identifiers, send: func(v string) *httptest.ResponseRecorder {
+		return sendBody(t, createQuery, http.MethodPost, "/datatug/queries/create_query", map[string]any{"storage": "local", "project": v, "query": legacyQueryBody("q1")})
+	}})
+	add(itemRoute{name: "queries/update_query (project)", position: "project", unsafe: identifiers, send: func(v string) *httptest.ResponseRecorder {
+		return sendBody(t, updateQuery, http.MethodPut, "/datatug/queries/update_query?id=q1", map[string]any{"storage": "local", "project": v, "ID": "q1", "query": legacyQueryBody("q1")})
 	}})
 	add(itemRoute{name: "dbserver-add (project)", position: "project", unsafe: identifiers, send: func(v string) *httptest.ResponseRecorder {
 		return sendBody(t, addDbServer, http.MethodPost, "/datatug/dbserver-add?project="+url.QueryEscape(v), addServer("sqlserver", "localhost"))
@@ -427,8 +455,13 @@ func TestRoutes_AnItemTheStoreCannotLoadIsOneAnswerThatQuotesNoPath(t *testing.T
 		folder string
 		route  http.HandlerFunc
 		path   string
-		// layout makes the four IDs in the project.
+		// layout makes the IDs in the project.
 		layout func(dir string)
+		// ids are the IDs asked for; the four above when empty.
+		ids []string
+		// driver is set for a db server, whose ID is asked for as the host of a server of
+		// this driver, and is shown as driver:host.
+		driver string
 	}{
 		{"board", "boards", getBoard, "/datatug/boards/board", func(dir string) {
 			write(filepath.Join(dir, "isfile"), "x")
@@ -436,29 +469,49 @@ func TestRoutes_AnItemTheStoreCannotLoadIsOneAnswerThatQuotesNoPath(t *testing.T
 				t.Fatal(err)
 			}
 			write(filepath.Join(dir, "notjson", "board.json"), "{not json")
-		}},
+		}, nil, ""},
 		{"entity", "entities", getEntity, "/datatug/entities/entity", func(dir string) {
 			write(filepath.Join(dir, "isfile"), "x")
 			if err := os.MkdirAll(filepath.Join(dir, "isfolder"), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			write(filepath.Join(dir, "notjson", "notjson.entity.json"), "{not json")
-		}},
+		}, nil, ""},
 		{"recordset", "recordsets", getRecordsetDefinition, "/datatug/recordsets/recordset_definition", func(dir string) {
 			write(filepath.Join(dir, "isfile"), "x")
 			if err := os.MkdirAll(filepath.Join(dir, "isfolder"), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			write(filepath.Join(dir, "notjson.recordset.json"), "{not json")
-		}},
+		}, nil, ""},
+		// A db server is one file of its driver's folder: missing, a folder of that name, and
+		// a file that is not JSON.
+		{name: "db server", folder: filepath.Join("dbs", "sqlserver"), route: getDbServerSummary, path: "/datatug/dbserver-summary", driver: "sqlserver",
+			ids: []string{"missing", "isfolder", "notjson"}, layout: func(dir string) {
+				if err := os.MkdirAll(filepath.Join(dir, "sqlserver:isfolder.dbserver.json"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				write(filepath.Join(dir, "sqlserver:notjson.dbserver.json"), "{not json")
+			}},
 	} {
 		t.Run(kind.name, func(t *testing.T) {
+			if kind.driver != "" && runtime.GOOS == "windows" {
+				t.Skip("the file of a db server has a ':' in its name, which Windows does not allow")
+			}
 			folder := filepath.Join(projectDir, kind.folder)
 			kind.layout(folder)
-			for _, id := range []string{"missing", "isfile", "isfolder", "notjson"} {
-				w := sendQuery(kind.route, http.MethodGet, kind.path, url.Values{"project": {scope.Project}, "id": {id}})
+			ids := kind.ids
+			if len(ids) == 0 {
+				ids = []string{"missing", "isfile", "isfolder", "notjson"}
+			}
+			for _, id := range ids {
+				values, shown := url.Values{"project": {scope.Project}, "id": {id}}, id
+				if kind.driver != "" {
+					values, shown = url.Values{"project": {scope.Project}, "driver": {kind.driver}, "host": {id}}, kind.driver+":"+id
+				}
+				w := sendQuery(kind.route, http.MethodGet, kind.path, values)
 				body := w.Body.String()
-				if w.Code != http.StatusInternalServerError || !strings.Contains(body, kind.name+` \"`+id+`\" not found`) {
+				if w.Code != http.StatusInternalServerError || !strings.Contains(body, kind.name+` \"`+shown+`\" not found`) {
 					t.Errorf("%s %q: %d %s, want the answer that names the %s and the ID and says it is not found", kind.name, id, w.Code, body, kind.name)
 				}
 				for _, leak := range []string{projectDir, "no such file", "not a directory", "is a directory", "invalid character", "failed to load", filepath.Base(projectDir)} {
@@ -495,6 +548,12 @@ func TestRoutes_AProjectThatIsNotServedIsRefusedBeforeAnyProjectStoreIsAsked(t *
 		"folders/create_folder": func(project string) *httptest.ResponseRecorder {
 			return sendBody(t, createFolder, http.MethodPut, "/datatug/folders/create_folder", map[string]any{"storage": "files", "project": project, "path": "a", "name": "b"})
 		},
+		"queries/create_query": func(project string) *httptest.ResponseRecorder {
+			return sendBody(t, createQuery, http.MethodPost, "/datatug/queries/create_query", map[string]any{"storage": "local", "project": project, "query": legacyQueryBody("q1")})
+		},
+		"queries/update_query": func(project string) *httptest.ResponseRecorder {
+			return sendBody(t, updateQuery, http.MethodPut, "/datatug/queries/update_query?id=q1", map[string]any{"storage": "local", "project": project, "ID": "q1", "query": legacyQueryBody("q1")})
+		},
 	}
 	const notServed = "not-served"
 	for name, send := range routes {
@@ -519,6 +578,11 @@ func TestRoutes_AProjectThatIsNotServedIsRefusedBeforeAnyProjectStoreIsAsked(t *
 			t.Errorf("%s: the served project never reached the project store, so the counts prove nothing: %d %s", name, w.Code, w.Body.String())
 		}
 	}
+}
+
+// legacyQueryBody is a valid root query of the legacy queries routes.
+func legacyQueryBody(id string) map[string]any {
+	return map[string]any{"id": id, "folderPath": "~", "title": id, "type": "SQL"}
 }
 
 // listTree returns every file and folder under dir, with the size of each file, so that two
@@ -547,9 +611,9 @@ func listTree(t *testing.T, dir string) []string {
 	return entries
 }
 
-// The file store of a project this process does not hold is rooted at the working
-// directory of the process. A request for such a project, made while the working directory
-// is a project folder, reads nothing from it and writes nothing to it.
+// A request for a project this process does not serve, made while the working directory is
+// a project folder, reads nothing from that folder and writes nothing to it, whatever the
+// route (the legacy routes that take the project from the request body included).
 func TestRoutes_AProjectThatIsNotServedIsNotLookedForInTheWorkingDirectory(t *testing.T) {
 	withApicoreHandle(t)
 	previousStore := storage.NewDatatugStore
@@ -572,6 +636,12 @@ func TestRoutes_AProjectThatIsNotServedIsNotLookedForInTheWorkingDirectory(t *te
 			},
 			"folders/create_folder": func() *httptest.ResponseRecorder {
 				return sendBody(t, createFolder, http.MethodPut, "/datatug/folders/create_folder", map[string]any{"storage": "files", "project": "not-served", "path": "reports", "name": "new-folder"})
+			},
+			"queries/create_query": func() *httptest.ResponseRecorder {
+				return sendBody(t, createQuery, http.MethodPost, "/datatug/queries/create_query", map[string]any{"storage": "local", "project": "not-served", "query": legacyQueryBody("new-query")})
+			},
+			"queries/update_query": func() *httptest.ResponseRecorder {
+				return sendBody(t, updateQuery, http.MethodPut, "/datatug/queries/update_query?id=new-query", map[string]any{"storage": "local", "project": "not-served", "ID": "new-query", "query": legacyQueryBody("new-query")})
 			},
 		} {
 			w := send()

@@ -44,18 +44,27 @@ func ValidateCatalogIdentifiers(environmentID, catalogID string) error {
 	return ValidateIdentifier("catalog", catalogID)
 }
 
+// MaxPathIdentifierLength is the most bytes an ID made of folders has in all, whatever its
+// parts are: a folder tree of a project is nowhere near it, and a longer ID is a text that
+// no file system opens, which would be quoted whole in an answer and in the log.
+const MaxPathIdentifierLength = 512
+
 // PlainPathRule is the sentence that says what an ID made of folders is: the folders
-// and the name of a recordset definition or of a folder, each a plain name.
-const PlainPathRule = "must be plain names separated by '/': each of letters, digits, '.', '_' and '-', at most 128 characters, starting with a letter or a digit"
+// and the name of a recordset definition or of a folder, each a plain name, and at most
+// MaxPathIdentifierLength bytes in all.
+const PlainPathRule = "must be plain names separated by '/': each of letters, digits, '.', '_' and '-', at most 128 characters, starting with a letter or a digit; at most 512 bytes in all"
 
 // ValidatePathIdentifier refuses an ID with folders that a client sent and that becomes
 // a path under the project (a recordset definition, a folder): it returns nil when
 // every "/"-separated part of id is a plain name (see ValidateIdentifier), and a
 // bad-request error for field otherwise. A part that is empty, "." or ".." is not a
 // plain name, so there is no absolute path, no "a//b", no trailing slash and no way
-// out of the folder that holds the item; the error names the field and the rule and
-// nothing of id.
+// out of the folder that holds the item; so is an id of more than MaxPathIdentifierLength
+// bytes in all. The error names the field and the rule and nothing of id.
 func ValidatePathIdentifier(field, id string) error {
+	if len(id) > MaxPathIdentifierLength {
+		return validation.NewErrBadRequestFieldValue(field, PlainPathRule)
+	}
 	for _, part := range strings.Split(id, "/") {
 		if !dbcopy.IsPlainSourceID(part) {
 			return validation.NewErrBadRequestFieldValue(field, PlainPathRule)
@@ -82,25 +91,32 @@ func validateHost(field, host string) error {
 	return nil
 }
 
-// dbServerDrivers are the drivers datatug.ServerRef.Validate accepts. A driver that is a
-// plain name and is not one of them is refused by ValidateServerRef with a fixed message:
-// the one of datatug.ServerRef quotes the driver.
-var dbServerDrivers = []string{"sqlite3", "sqlserver", "mysql", "oracle"}
+// dbServerDrivers are the drivers datatug.ServerRef.Validate accepts (datatug-core
+// v0.42.3: the drivers of a file or a URL, then the drivers of a server). A driver that is
+// a plain name and is not one of them is refused by ValidateServerRef with a fixed
+// message: the one of datatug.ServerRef quotes the driver.
+var dbServerDrivers = []string{"sqlite3", "ingitdb", "openvaultdb", "https-json", "sqlserver", "mysql", "oracle", "postgres"}
+
+// hostlessDrivers are the drivers of dbServerDrivers whose server is a file or a URL and
+// has no host: datatug.ServerRef.Validate refuses a host for them, and for sqlite3 it
+// quotes it.
+var hostlessDrivers = []string{"sqlite3", "ingitdb", "openvaultdb", "https-json"}
 
 // DriverRule is the sentence that says which drivers a db server can have.
 var DriverRule = "must be one of " + strings.Join(dbServerDrivers, ", ")
 
-// SQLiteHostRule is the sentence that says a sqlite3 server, which is a file, has no host.
-const SQLiteHostRule = "cannot be used with sqlite3"
+// HostlessRule is the sentence that says a db server of a driver of hostlessDrivers has
+// no host; driver is one of them, a plain name.
+func HostlessRule(driver string) string { return "cannot be used with " + driver }
 
 // ValidateServerRef refuses a db server whose driver or host a project could not record
-// under the file name of the server (the driver is a folder of the project, and the driver and
-// the host are the ID of the server, which is a file name): the driver must be a plain
-// name that a db server can have, and the host a host, and none for a sqlite3 server. An
-// empty driver or host passes, as it is the missing-field answer of
-// datatug.ServerRef.Validate. The error names the field and the rule and nothing of the
-// value: the refusals of datatug.ServerRef.Validate that are left for the routes to give
-// do not quote the driver or the host (see DriverRule and SQLiteHostRule).
+// under the file name of the server (the driver is a folder of the project, and the driver
+// and the host are the ID of the server, which is a file name): the driver must be a plain
+// name that a db server can have, and the host a host, and none for a server of a file or a
+// URL (sqlite3 and the like). An empty driver or host passes, as it is the missing-field
+// answer of datatug.ServerRef.Validate. The error names the field and the rule and nothing
+// of the value: the refusals of datatug.ServerRef.Validate that are left for the routes to
+// give do not quote the driver or the host (see DriverRule and HostlessRule).
 func ValidateServerRef(server datatug.ServerRef) error {
 	if server.Driver != "" {
 		if err := ValidateIdentifier("driver", server.Driver); err != nil {
@@ -114,8 +130,8 @@ func ValidateServerRef(server datatug.ServerRef) error {
 		if err := validateHost("host", server.Host); err != nil {
 			return err
 		}
-		if server.Driver == "sqlite3" {
-			return validation.NewErrBadRequestFieldValue("host", SQLiteHostRule)
+		if slices.Contains(hostlessDrivers, server.Driver) {
+			return validation.NewErrBadRequestFieldValue("host", HostlessRule(server.Driver))
 		}
 	}
 	return nil
@@ -127,9 +143,9 @@ func ValidateServerRef(server datatug.ServerRef) error {
 // it names the project directory the store opens, so an ID that is neither served nor a
 // plain name is refused before a store is asked for it. It does not say that a plain name
 // is served: a route that resolves the store of its project does (see ResolveStoreID), and
-// so does each entry that takes the project from the request itself and opens its store
-// (ExecuteSelect, ExecuteCommands, CreateFolder; see servedProjectDir), with the same
-// answer, before a project store is asked for.
+// so does each entry that takes the project from the body of the request itself and opens
+// its store (ExecuteSelect, ExecuteCommands, CreateFolder, CreateQuery, UpdateQuery; see
+// servedProjectDir), with the same answer, before a project store is asked for.
 func ValidateProjectIdentifier(field, id string) error {
 	if _, served := projectDir(id); served {
 		return nil

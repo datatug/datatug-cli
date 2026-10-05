@@ -360,7 +360,7 @@ func TestUnsafePathIdentifiers_CoverEveryWayOutOfAFolder(t *testing.T) {
 		}
 		names[unsafe.Name], ids[unsafe.ID] = true, true
 	}
-	for _, want := range []string{"..", "/etc/passwd", `a\b`, "a\x00b", "a%2Fb", "../../etc", "a/../b", "a//b", "a/", ""} {
+	for _, want := range []string{"..", "/etc/passwd", `a\b`, "a\x00b", "a%2Fb", "../../etc", "a/../b", "a//b", "a/", "", strings.Repeat("a/", 300) + "a"} {
 		if !ids[want] {
 			t.Errorf("no unsafe path identifier %q", want)
 		}

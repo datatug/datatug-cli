@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -26,13 +28,28 @@ import (
 // stores that were asked for.
 
 func TestValidatePathIdentifier(t *testing.T) {
-	for _, id := range []string{"a", "a/b", "folder/set-1/data.v2", "données/été", strings.Repeat("a", 128) + "/b"} {
+	// The longest ID accepted is MaxPathIdentifierLength bytes of plain names.
+	longest := strings.Repeat("a/", (MaxPathIdentifierLength-2)/2) + "aa"
+	for _, id := range []string{"a", "a/b", "folder/set-1/data.v2", "données/été", strings.Repeat("a", 128) + "/b", longest} {
 		if err := ValidatePathIdentifier("recordset", id); err != nil {
 			t.Errorf("ValidatePathIdentifier(%q) = %v, want a path of plain names accepted", id, err)
 		}
 	}
+	if len(longest) != MaxPathIdentifierLength {
+		t.Fatalf("the longest ID tried is %d bytes, want %d", len(longest), MaxPathIdentifierLength)
+	}
 	for _, c := range sourcecases.UnsafePathIdentifiers() {
 		assertRefusal(t, c.Name, "recordset", c.ID, ValidatePathIdentifier("recordset", c.ID))
+	}
+	// One byte over the limit is refused, whatever the parts are; the limit is on the whole ID.
+	for _, id := range []string{longest + "b", strings.Repeat("a", 128) + strings.Repeat("/"+strings.Repeat("b", 100), 4)} {
+		if len(id) <= MaxPathIdentifierLength {
+			t.Fatalf("%d bytes is not over the limit of %d", len(id), MaxPathIdentifierLength)
+		}
+		assertRefusal(t, "over the limit in all", "recordset", id, ValidatePathIdentifier("recordset", id))
+	}
+	if !strings.Contains(PlainPathRule, strconv.Itoa(MaxPathIdentifierLength)) {
+		t.Errorf("the rule %q does not say the limit of %d", PlainPathRule, MaxPathIdentifierLength)
 	}
 }
 
@@ -59,6 +76,24 @@ func TestValidateServerRef(t *testing.T) {
 	if err := ValidateServerRef(datatug.ServerRef{Driver: "sqlite3"}); err != nil {
 		t.Errorf("a server reference with no host is refused: %v", err)
 	}
+	// The drivers of a file or a URL have no host, whatever the core says about it: the
+	// refusal is the fixed sentence of the driver, and a host is not quoted.
+	for _, driver := range hostlessDrivers {
+		if err := ValidateServerRef(datatug.ServerRef{Driver: driver}); err != nil {
+			t.Errorf("a %s server with no host is refused: %v", driver, err)
+		}
+		err := ValidateServerRef(datatug.ServerRef{Driver: driver, Host: "db.example.com"})
+		assertRefusal(t, "a host given to a "+driver+" server", "host", "db.example.com", err)
+		if err != nil && !strings.Contains(err.Error(), HostlessRule(driver)) {
+			t.Errorf("a host given to a %s server: %v, want %q", driver, err, HostlessRule(driver))
+		}
+	}
+	// A server driver may have a host, and postgres may have none.
+	for _, server := range []datatug.ServerRef{{Driver: "postgres"}, {Driver: "postgres", Host: "db.example.com", Port: 5432}, {Driver: "mysql", Host: "db.example.com"}} {
+		if err := ValidateServerRef(server); err != nil {
+			t.Errorf("%+v is refused: %v", server, err)
+		}
+	}
 	for _, c := range sourcecases.UnsafeIdentifiers() {
 		if c.ID == "" {
 			continue
@@ -79,7 +114,8 @@ func TestValidateServerRef(t *testing.T) {
 // unrecordedServer is a server reference that passes the rules of a plain name and of a
 // host, and that the validation of datatug.ServerRef refuses with a message that quotes
 // the value: the driver is not one it knows, or the server is a sqlite3 one that has a
-// host (a user name and a password typed with a colon are a host to the rule of a host).
+// host (a user name and a password typed with a colon are a host to the rule of a host), or a
+// file or a URL that has one.
 type unrecordedServer struct {
 	name   string
 	field  string
@@ -93,28 +129,63 @@ func unrecordedServers() []unrecordedServer {
 		{"a plain driver with a long name", "driver", "oracle2-private", datatug.ServerRef{Driver: "oracle2-private", Host: "localhost"}},
 		{"a user and a password typed as the host of a sqlite3 server", "host", "alice:s3cretpw", datatug.ServerRef{Driver: "sqlite3", Host: "alice:s3cretpw"}},
 		{"a host name given to a sqlite3 server", "host", "db.example.com", datatug.ServerRef{Driver: "sqlite3", Host: "db.example.com"}},
+		{"a host name given to an inGitDB server", "host", "db.example.com", datatug.ServerRef{Driver: "ingitdb", Host: "db.example.com"}},
+		{"a host name given to an https-json server", "host", "db.example.com", datatug.ServerRef{Driver: "https-json", Host: "db.example.com"}},
 	}
+}
+
+// driverCandidates are the drivers the test below tries: the ones a db server has had, or
+// could have, in a datatug-core, and every driver the core names as accepted when it refuses
+// an unknown one (a core that lists them in its answer), so a driver added there is tried
+// without a change here.
+func driverCandidates() []string {
+	candidates := []string{"sqlite3", "sqlserver", "mysql", "oracle", "postgres", "mongodb", "ingitdb", "openvaultdb", "https-json", "sqlite"}
+	err := datatug.ServerRef{Driver: "no-such-driver"}.Validate()
+	if err == nil {
+		return candidates
+	}
+	if _, listed, found := strings.Cut(err.Error(), "accepted drivers: "); found {
+		for _, driver := range strings.Split(listed, ", ") {
+			if driver = strings.TrimSpace(driver); driver != "" && !slices.Contains(candidates, driver) {
+				candidates = append(candidates, driver)
+			}
+		}
+	}
+	return candidates
 }
 
 // The drivers that ValidateServerRef lets through are the ones datatug.ServerRef accepts, so
 // that its own refusal, which quotes the driver, is never the one a client reads. A driver
-// that datatug-core learns to accept makes this test fail, until it is added to dbServerDrivers.
+// that datatug-core learns to accept makes this test fail, until it is added to dbServerDrivers
+// (and, when it is a driver with no host, to hostlessDrivers).
 func TestDbServerDrivers_AreTheOnesTheServerRefAccepts(t *testing.T) {
-	for _, driver := range []string{"sqlite3", "sqlserver", "mysql", "oracle", "postgres", "mongodb", "ingitdb", "openvaultdb", "sqlite"} {
-		server := datatug.ServerRef{Driver: driver, Host: "localhost"}
-		if driver == "sqlite3" {
-			server.Host = ""
+	for _, driver := range driverCandidates() {
+		// A driver is accepted when the core takes it with a host or without one: the drivers
+		// of a file or a URL have none, a server driver has one.
+		withHost := datatug.ServerRef{Driver: driver, Host: "localhost"}
+		noHost := datatug.ServerRef{Driver: driver}
+		server := withHost
+		if withHost.Validate() != nil && noHost.Validate() == nil {
+			server = noHost
 		}
 		accepted := server.Validate() == nil
-		listed := false
-		for _, known := range dbServerDrivers {
-			listed = listed || known == driver
-		}
+		listed := slices.Contains(dbServerDrivers, driver)
 		if accepted != listed {
 			t.Errorf("driver %q: datatug.ServerRef accepts it: %v, dbServerDrivers lists it: %v", driver, accepted, listed)
 		}
 		if err := ValidateServerRef(server); (err == nil) != listed {
 			t.Errorf("driver %q: ValidateServerRef = %v, want a refusal exactly when the driver is not listed", driver, err)
+		}
+		// The drivers without a host are the ones for which the core refuses one.
+		if accepted {
+			if hostless := slices.Contains(hostlessDrivers, driver); hostless != (withHost.Validate() != nil) {
+				t.Errorf("driver %q: datatug.ServerRef refuses a host: %v, hostlessDrivers lists it: %v", driver, withHost.Validate() != nil, hostless)
+			}
+		}
+	}
+	for _, want := range []string{"sqlite3", "https-json", "postgres"} {
+		if !slices.Contains(driverCandidates(), want) {
+			t.Errorf("the drivers tried do not hold %q", want)
 		}
 	}
 }

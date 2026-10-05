@@ -62,7 +62,9 @@ var ErrLegacyQueryWriteConflict = errors.New("the query kept changing while it w
 // principal - a read-only one included - could write any query, an id such
 // as "../x" addressed a file outside the project's queries/ tree, and an
 // unvalidated query (a target carrying a password) reached git-tracked
-// files. Now, before the store is touched: the folder path and id must be
+// files. Now, before the store is touched: the project of the request body
+// must be one this process serves (400 otherwise: the answer of a route that
+// resolves its store), the folder path and id must be
 // safe path segments, and a folder must be one this build's store really
 // writes to (requireFolderSupport; 400 otherwise), the serving principal
 // must be authorized for a project write through AuthorizeProjectQueryWrite
@@ -84,6 +86,15 @@ var ErrLegacyQueryWriteConflict = errors.New("the query kept changing while it w
 // capture field at all, so a request's "capture" block never decodes and
 // is never stored.
 func saveLegacyQuery(ctx context.Context, storeID, projectID string, query *datatug.QueryDefWithFolderPath, mode legacyWriteMode) (*datatug.QueryDefWithFolderPath, error) {
+	// The project is the one in the body of the request, which no route resolved a store
+	// for: it is a project this process serves, as for every other entry of that kind
+	// (see servedProjectDir), before anything is authorized or opened.
+	if err := ValidateProjectIdentifier("project", projectID); err != nil {
+		return nil, err
+	}
+	if _, err := servedProjectDir(projectID); err != nil {
+		return nil, validation.NewBadRequestError(err)
+	}
 	queryID, err := legacyQueryID(query.FolderPath, query.ID)
 	if err != nil {
 		return nil, validation.NewBadRequestError(err)

@@ -15,10 +15,11 @@ import (
 )
 
 // Every route that reads its project from the query resolves the store of that project
-// first (see ResolveStoreID), and so refuses a project this process does not serve. Three
-// entries take the project from the request itself, and open its project store: they refuse
-// a project that is not served too, with the same answer, before the factory of the stores
-// is asked for anything.
+// first (see ResolveStoreID), and so refuses a project this process does not serve. Five
+// entries take the project from the body of the request itself, and open its project store
+// (ExecuteSelect, ExecuteCommands, CreateFolder, CreateQuery, UpdateQuery): they refuse a
+// project that is not served too, with the same answer, before the factory of the stores is
+// asked for anything.
 
 // storeAsks counts what the store factory is asked for.
 type storeAsks struct {
@@ -71,11 +72,11 @@ func serveProjects(t *testing.T, ids ...string) {
 	for _, id := range ids {
 		paths[id] = t.TempDir()
 	}
-	ConfigureSecureSession(session, paths, Capabilities{})
+	ConfigureSecureSession(session, paths, Capabilities{AllowWrites: true})
 	t.Cleanup(func() { ConfigureSecureSession(secureread.Session{}, nil, Capabilities{}) })
 }
 
-// servedProjectEntries are the entries that take the project from the request itself.
+// servedProjectEntries are the entries that take the project from the body of the request.
 func servedProjectEntries() map[string]func(project string) error {
 	ctx := context.Background()
 	return map[string]func(project string) error{
@@ -95,6 +96,14 @@ func servedProjectEntries() map[string]func(project string) error {
 		},
 		"CreateFolder": func(project string) error {
 			_, err := CreateFolder(ctx, dto.CreateFolder{ProjectRef: dto.ProjectRef{ProjectID: project, StoreID: "files"}, Path: "a", Name: "b"})
+			return err
+		},
+		"CreateQuery": func(project string) error {
+			_, err := CreateQuery(ctx, createRequest(project, legacyQuery("~", "q1")))
+			return err
+		},
+		"UpdateQuery": func(project string) error {
+			_, err := UpdateQuery(ctx, updateRequest(project, "q1", legacyQuery("~", "q1")))
 			return err
 		},
 	}

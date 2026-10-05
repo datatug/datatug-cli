@@ -1,7 +1,6 @@
 package endpoints
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -41,7 +40,8 @@ func newDbServerFromQueryParams(query url.Values) (dbServer datatug.ServerRef, e
 	dbServer.Host = query.Get("host")
 	if port := strings.TrimSpace(query.Get("port")); port != "" {
 		if dbServer.Port, err = strconv.Atoi(port); err != nil {
-			err = validation.NewBadRequestError(fmt.Errorf("port parameter is not a number: %w", err))
+			// The text of the client is not in the answer (nor is the parse error, which quotes it).
+			err = validation.NewErrBadRequestFieldValue("port", "must be a number")
 			return
 		}
 	}

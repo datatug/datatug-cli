@@ -57,6 +57,7 @@ func UnsafePathIdentifiers() []UnsafeIdentifier {
 		UnsafeIdentifier{"parent directory folder", "a/../b"},
 		UnsafeIdentifier{"hidden folder", "a/.hidden"},
 		UnsafeIdentifier{"backslash after a folder", `a/b\c`},
+		UnsafeIdentifier{"too many folders", strings.Repeat("a/", 300) + "a"},
 	)
 }
 

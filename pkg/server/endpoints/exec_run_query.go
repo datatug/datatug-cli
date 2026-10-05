@@ -96,7 +96,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 
 	projDir, ok := api.ProjectDir(req.Project)
 	if !ok {
-		return apicontract.Result{}, newNotFound(fmt.Sprintf("unknown project %q", req.Project))
+		return apicontract.Result{}, newNotFound(fmt.Sprintf("unknown project %q", dbcopy.SourceIDDisplay(req.Project)))
 	}
 	projStore, err := execRunProjectStoreFor(req.Project)
 	if err != nil {
@@ -127,7 +127,10 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 			if errors.Is(resolveErr, api.ErrAmbiguousQueryID) {
 				return apicontract.Result{}, newInvalidRequest("queryId", resolveErr.Error())
 			}
-			return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", req.QueryID))
+			// req.QueryID is what a client sent: only folders and a name that are plain
+			// names are quoted. (The two messages below name canonicalID, an ID of
+			// the project's own index.)
+			return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", dbcopy.QueryIDDisplay(req.QueryID)))
 		}
 		req.QueryID = canonicalID
 		if req.Record {
@@ -471,7 +474,7 @@ func resolveExecutionSource(ctx context.Context, projStore datatug.ProjectStore,
 	}
 	switch len(eligible) {
 	case 0:
-		return api.ResolvedSource{}, newSourceUnavailable(fmt.Sprintf("query %q has no eligible source in environment %q", req.QueryID, req.Environment))
+		return api.ResolvedSource{}, newSourceUnavailable(fmt.Sprintf("query %q has no eligible source in environment %q", req.QueryID, dbcopy.SourceIDDisplay(req.Environment)))
 	case 1:
 		return eligible[0], nil
 	default:

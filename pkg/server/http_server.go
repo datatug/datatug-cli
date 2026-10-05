@@ -176,15 +176,7 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	router := httprouter.New()
 	router.GlobalOPTIONS = http.HandlerFunc(globalOptionsHandler)
 	router.HandlerFunc(http.MethodGet, "/", root)
-	logWrapper := func(handler http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/agent-info" {
-				log.Println(r.Method, r.ContentLength, r.RequestURI)
-			}
-			handler(w, r)
-		}
-	}
-	endpoints.RegisterDatatugHandlersWithCapabilities("", router, endpoints.RegisterAllHandlers, logWrapper, func(r *http.Request) (context.Context, error) {
+	endpoints.RegisterDatatugHandlersWithCapabilities("", router, endpoints.RegisterAllHandlers, logRequests, func(r *http.Request) (context.Context, error) {
 		return r.Context(), nil
 	}, apicore.Execute, endpoints.Capabilities{AllowWrites: caps.AllowWrites})
 
@@ -232,4 +224,17 @@ func root(writer http.ResponseWriter, _ *http.Request) {
 </body>
 </html>
 `, filestore.GetProjectPath(storage.SingleProjectID))
+}
+
+// logRequests logs the method, the length of the body and the path of every request
+// but the agent-info poll, then runs handler. The query string is not logged: a
+// client can put a source string in it (an environment, a database, a source), and
+// percent-encoding hides its punctuation, not its password.
+func logRequests(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/agent-info" {
+			log.Println(r.Method, r.ContentLength, r.URL.Path)
+		}
+		handler(w, r)
+	}
 }

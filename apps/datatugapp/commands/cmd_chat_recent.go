@@ -103,7 +103,10 @@ func applyLastChatOptions(cmd *cobra.Command, options *chatOptions) error {
 	if !flags.Changed("database") &&
 		(!flags.Changed("project") || options.project == saved.Project) &&
 		(!flags.Changed("env") || options.env == saved.Env) {
-		options.database = saved.Database
+		// A file an older version wrote holds whatever was typed, a source string with
+		// its password included: only a plain name is applied, and the next start
+		// overwrites the rest.
+		options.database = rememberedDatabase(saved.Database)
 	}
 	sameAI := !flags.Changed("ai") || options.ai == saved.AI
 	if !flags.Changed("ai") && !explicitCloud {
@@ -146,11 +149,11 @@ func applyLastChatOptions(cmd *cobra.Command, options *chatOptions) error {
 }
 
 // rememberedDatabase is the --database value that is written to the user's
-// config directory: a plain catalog ID, or nothing. A source string can be typed
-// where a catalog ID belongs, and a file in the config directory must not hold a
-// password.
+// config directory, and the one read back from it: a plain catalog ID, or
+// nothing. A source string can be typed where a catalog ID belongs, and a file in
+// the config directory must not hold a password.
 func rememberedDatabase(database string) string {
-	if dbcopy.SourceIDDisplay(database) != database {
+	if !dbcopy.IsPlainSourceID(database) {
 		return ""
 	}
 	return database

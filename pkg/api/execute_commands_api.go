@@ -94,7 +94,12 @@ func (v ExecuteCommandRequest) Validate() error {
 	if v.DB == "" {
 		return validation.NewErrRequestIsMissingRequiredField("db")
 	}
-	return nil
+	// The project store joins both into a path of its own (see ValidateIdentifier),
+	// so a command that holds anything but a plain name is refused before any lookup.
+	if err := ValidateIdentifier("env", v.Env); err != nil {
+		return err
+	}
+	return ValidateIdentifier("db", v.DB)
 }
 
 // ExecuteCommandsResponse is POST /datatug/exec/execute_commands's response,

@@ -245,10 +245,13 @@ func RedactSourceURL(raw string) string {
 // build it (an HTTP error body, a chat error) run text through it in case
 // something slipped by. No message path relies on it. Every message that names a
 // source builds the name with SourceDisplay from parts that passed a strict
-// check, and every parser and driver error is classified, never quoted, so there
-// is no secret in the text for this to find. A recogniser of secrets in text
-// cannot be finished (it was patched three times and each round found another
-// shape of string that got through), so do not add a message that needs it.
+// check, and every parser error and every driver error of opening a source is
+// classified, never quoted (see BackendRef.OpenFailure), so there is no secret in
+// the text for this to find. A driver error after a source is open still passes
+// through RedactError: it is the one place left that relies on a recogniser. A
+// recogniser of secrets in text cannot be finished (it was patched three times
+// and each round found another shape of string that got through), so do not add a
+// message that needs it.
 func RedactText(text string) string {
 	text = quotedURLInText.ReplaceAllStringFunc(text, func(quoted string) string {
 		quote := quoted[:1]

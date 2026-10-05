@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
@@ -74,15 +75,16 @@ func resolveStoreID(explicit, projectID string, configured []string) (string, er
 				return explicit, nil
 			}
 		}
-		return "", fmt.Errorf("%w: %q is not configured for project %q", ErrUnknownStoreID, explicit, projectID)
+		// explicit and projectID are what a client sent: only a plain name is quoted.
+		return "", fmt.Errorf("%w: %q is not configured for project %q", ErrUnknownStoreID, dbcopy.SourceIDDisplay(explicit), dbcopy.SourceIDDisplay(projectID))
 	}
 	switch len(configured) {
 	case 1:
 		return configured[0], nil
 	case 0:
-		return "", fmt.Errorf("%w: no store configured for project %q", ErrUnknownStoreID, projectID)
+		return "", fmt.Errorf("%w: no store configured for project %q", ErrUnknownStoreID, dbcopy.SourceIDDisplay(projectID))
 	default:
-		return "", fmt.Errorf("%w: project %q", ErrAmbiguousStore, projectID)
+		return "", fmt.Errorf("%w: project %q", ErrAmbiguousStore, dbcopy.SourceIDDisplay(projectID))
 	}
 }
 

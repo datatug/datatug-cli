@@ -274,7 +274,11 @@ func parseURL(rawURL string) (BackendRef, error) {
 // the scheme, reads the path; the scheme it is given is lower case.
 func parseSQLite(rawURL, lowerURL, rest string, slashes bool) (BackendRef, error) {
 	display := SourceDisplay(rawURL)
-	if slashes {
+	// "sqlite:rest" keeps a relative path that holds an "@" (see readsAsPath), but a
+	// second URL in front of the last "@" is credentials in either form, and so is a
+	// UNC start with a colon in front of it ("sqlite:\\alice:pw@host"): a UNC path
+	// with an "@" and no colon still passes refuseUserinfo.
+	if slashes || holdsSecondURL(rest) || strings.HasPrefix(rest, `\\`) {
 		if err := refuseUserinfo("sqlite", display, rest); err != nil {
 			return BackendRef{}, err
 		}
@@ -431,9 +435,13 @@ func ProjectSourceURL(projectDir string) string {
 // refuses "scheme://my@proj" and "scheme://a@b.db" as URLs that carry
 // credentials (and dburl reads the second as user a and opens b.db). Every caller
 // that builds such a URL from a path it was given verbatim goes through here, so
-// a directory such as my@proj keeps working.
+// a directory such as my@proj keeps working. A path that starts with a UNC start
+// ("\\server\share") is written as it is, never with the dot: it is not a relative
+// directory, and "./" in front of two backslashes names a path that does not exist.
+// A WebDAV path ("\\host@SSL\share") is a path and Parse takes it; one that holds
+// credentials after the UNC start is left for Parse to refuse.
 func LocalSourceURL(scheme, path string) string {
-	if !readsAsPath(path) {
+	if !readsAsPath(path) && !strings.HasPrefix(path, `\\`) {
 		return scheme + "://./" + path
 	}
 	return scheme + "://" + path

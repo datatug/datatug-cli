@@ -5,8 +5,11 @@
 // put one: userinfo (with and without a user name), a token standing alone as
 // the user name, the position a parser misreads as userinfo ("alice:42/secret@"),
 // a token or a user name that holds a slash (so no colon or "@" comes before a
-// slash), userinfo after a UNC start ("\\alice:secret@"), the query string and
-// the fragment.
+// slash), userinfo after a UNC start ("\\alice:secret@"), a user name with a slash
+// after a UNC start, a token as the user name straight after a UNC start and after a
+// UNC start and one more separator (a backslash or a slash), a second URL written
+// after an explicit path start ("/" or "./") that holds the userinfo, the query
+// string and the fragment.
 //
 // The secrets are generated, not typed, so a test that finds one in an output
 // has found a real leak and not a coincidence with a fixed word. Generation is
@@ -147,7 +150,12 @@ func mixedCase(s string) string {
 	return string(runes)
 }
 
-type generator struct{ random *rand.Rand }
+type generator struct {
+	random *rand.Rand
+	// rotation counts the second URLs written, so that they cycle through
+	// innerSchemes and every scheme of the CLI meets every inner scheme.
+	rotation int
+}
 
 func (g *generator) letters(n int, alphabet string) string {
 	out := make([]byte, n)
@@ -239,5 +247,58 @@ func (g *generator) positions(scheme, tail, prefix string, wrapped bool) []Case 
 	// one all the same: a reader that takes every UNC start for a path shows it.
 	password = g.secret("word")
 	add("userinfo after a UNC start", "word", head+`\\alice:`+password+"@"+tail, password)
+	if !wrapped {
+		cases = append(cases, g.afterPathStart(scheme, tail)...)
+	}
+	return cases
+}
+
+// afterPathStart returns the cases for a scheme whose text after "://" starts
+// like a path and holds more than a path. "/" and "./" read as a path, so a
+// reader that takes every text that starts like one for a path shows what
+// follows whole, and a second URL written after the start (a URL that holds
+// userinfo, or a token as the user name) is shown with its credentials. A user
+// name with a slash in it, after a UNC start, is the same door: the slash comes
+// before the colon, so the text does not look like "user:password@host". So is a
+// token as the user name straight after a UNC start: it has no colon at all. So is
+// a token after a UNC start and one more separator, backslash or slash: the first
+// segment, where a server name goes, is empty.
+func (g *generator) afterPathStart(scheme, tail string) []Case {
+	// The scheme cycles fastest and its casing once per cycle, so over nine second
+	// URLs every inner scheme is written in lower, upper and mixed case: the casing a
+	// user types is a shape of its own.
+	inner := innerSchemes[g.rotation%len(innerSchemes)]
+	casing := (g.rotation / len(innerSchemes)) % 3
+	g.rotation++
+	innerHead := cased(inner, casing) + "://"
+	var cases []Case
+	add := func(position, style, source string, secrets ...string) {
+		cases = append(cases, Case{
+			Name:     strings.Join([]string{scheme + "://", position, style}, " | "),
+			Source:   source,
+			Secrets:  secrets,
+			Style:    style,
+			Position: position,
+			// The second URL is a URL inside another scheme's text.
+			Wrapped: strings.Contains(position, "second URL"),
+		})
+	}
+	password := g.secret("word")
+	add("second URL after an absolute start", "word", scheme+":///"+innerHead+"alice:"+password+"@"+tail, password)
+	token := g.secret("token")
+	add("second URL after a dot start", "token", scheme+"://./"+innerHead+token+"@"+tail, token)
+	user, password := g.secret("token with slash"), g.secret("word")
+	add("user name with a slash after a UNC start", "user name with slash", scheme+`://\\`+user+":"+password+"@"+tail, user, password)
+	// A token as the user name straight after a UNC start has no colon and no
+	// separator: it stands where a server name does, and no server name holds an "@".
+	token = g.secret("token")
+	add("token as the user name after a UNC start", "token", scheme+`://\\`+token+"@"+tail, token)
+	// A UNC path has a server name. With one more separator straight after the two
+	// backslashes the first segment is empty, so the token stands where a share does
+	// and nothing stands where the server name goes.
+	token = g.secret("token")
+	add("token as the user name after a UNC start and a backslash", "token", scheme+`://\\\`+token+"@"+tail, token)
+	token = g.secret("token")
+	add("token as the user name after a UNC start and a slash", "token", scheme+`://\\/`+token+"@"+tail, token)
 	return cases
 }

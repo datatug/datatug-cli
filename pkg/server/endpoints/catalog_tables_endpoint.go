@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
 
 // getCatalogTablesHandler is GET /datatug/catalog-tables (Task 17 item A.2,
@@ -24,6 +25,10 @@ import (
 // "unknown query" — see util_error_handling.go's handleError.
 var catalogProjectDir = api.ProjectDir
 
+// getCatalogTablesFunc reads the tables of a catalog, a seam so a test can count
+// the requests that got as far as reading.
+var getCatalogTablesFunc = api.GetCatalogTables
+
 func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	ref, err := newProjectRef(q)
@@ -35,13 +40,20 @@ func getCatalogTablesHandler(w http.ResponseWriter, r *http.Request) {
 		handleError(err, w, r)
 		return
 	}
-	environmentID := paramAlias(q, "environment", "env")
-	catalogID := paramAlias(q, "catalog", "db")
 	projectDir, ok := catalogProjectDir(ref.ProjectID)
 	if !ok {
-		handleError(fmt.Errorf("%w: unknown project %q", api.ErrCatalogNotFound, ref.ProjectID), w, r)
+		handleError(fmt.Errorf("%w: unknown project %q", api.ErrCatalogNotFound, dbcopy.SourceIDDisplay(ref.ProjectID)), w, r)
 		return
 	}
-	tables, err := api.GetCatalogTables(projectDir, environmentID, catalogID)
+	environmentID := paramAlias(q, "environment", "env")
+	catalogID := paramAlias(q, "catalog", "db")
+	// Both become folder names under the project: refuse anything but a plain name
+	// before either reaches a file path. The refusal is a 400 whose message names
+	// the parameter and echoes nothing.
+	if err := api.ValidateCatalogIdentifiers(environmentID, catalogID); err != nil {
+		handleError(err, w, r)
+		return
+	}
+	tables, err := getCatalogTablesFunc(projectDir, environmentID, catalogID)
 	returnJSON(w, r, http.StatusOK, err, tables)
 }

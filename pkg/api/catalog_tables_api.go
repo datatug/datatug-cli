@@ -232,6 +232,9 @@ type catalogDbModelFile struct {
 // Read-only; unlike exec/select or dbserver-databases this touches no live
 // database connection.
 func GetCatalogTables(projectDir, environmentID, catalogID string) (*CatalogTables, error) {
+	if err := ValidateCatalogIdentifiers(environmentID, catalogID); err != nil {
+		return nil, err
+	}
 	dbModelID, err := catalogDbModel(projectDir, environmentID, catalogID)
 	if err != nil {
 		return nil, err
@@ -274,7 +277,7 @@ func catalogDbModel(projectDir, environmentID, catalogID string) (string, error)
 		projectDir, storage.EnvironmentsFolder, environmentID, storage.EnvDbCatalogsFolder, catalogID,
 		storage.JsonFileName(catalogID, storage.DbCatalogFileSuffix),
 	)
-	data, err := os.ReadFile(path)
+	data, err := readCatalogFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("%w: catalog %q in environment %q", ErrCatalogNotFound, dbcopy.SourceIDDisplay(catalogID), dbcopy.SourceIDDisplay(environmentID))

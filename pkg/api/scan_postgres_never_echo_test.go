@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"log"
+	"strings"
 	"testing"
 
+	"github.com/datatug/datatug-cli/internal/sourcecases"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,4 +49,30 @@ func TestNewPostgresScanParams_NamesOnlyAPlainEnvironmentAndDatabase(t *testing.
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `environment "prod" and database "`+dbcopy.SourceIDNotShown+`"`)
 	assert.NotContains(t, err.Error(), "s3cretpw")
+}
+
+// The environment and the catalog of a PostgreSQL scan name folders in the project,
+// and a plain name is what dbcopy.IsPlainSourceID says it is: the scan has no
+// definition of its own, so an ID that the catalog route accepts is one the scan can
+// write, and the other way round.
+func TestNewPostgresScanParams_UsesTheOneDefinitionOfAPlainName(t *testing.T) {
+	ids := []string{"prod", "données", "Chinook1", "a.b_c-d", "1st", strings.Repeat("a", 128), strings.Repeat("a", 129), "_x", "my env", dbcopy.SourceIDNotShown}
+	for _, unsafe := range sourcecases.UnsafeIdentifiers() {
+		ids = append(ids, unsafe.ID)
+	}
+	accepted := 0
+	for _, id := range ids {
+		want := dbcopy.IsPlainSourceID(id)
+		_, errEnvironment := NewPostgresScanParams(envOf(shopEnv()), "SHOP_PG_URL", id, "shop")
+		_, errCatalog := NewPostgresScanParams(envOf(shopEnv()), "SHOP_PG_URL", "prod", id)
+		if (errEnvironment == nil) != want || (errCatalog == nil) != want {
+			t.Errorf("%q: IsPlainSourceID = %v, the scan took it as an environment: %v, as a database: %v", id, want, errEnvironment == nil, errCatalog == nil)
+		}
+		if want {
+			accepted++
+		}
+	}
+	if accepted < 5 {
+		t.Fatalf("only %d of the IDs are plain names: the test does not reach the accepting side", accepted)
+	}
 }

@@ -272,15 +272,18 @@ func TestScanDbCatalog_PostgresErrors(t *testing.T) {
 		assert.ErrorIs(t, err, cause)
 		assert.ErrorContains(t, err, "failed to open PostgreSQL")
 	})
-	t.Run("the scan fails and its message is scrubbed with the real URL", func(t *testing.T) {
+	t.Run("the scan fails and its error is classified, never the driver's words", func(t *testing.T) {
 		acceptPostgresServer(t)
-		db := &fakeScanDB{listErr: fmt.Errorf("lost connection to %s", shopEnv()["SHOP_PG_URL"])}
+		cause := fmt.Errorf("lost connection to %s", shopEnv()["SHOP_PG_URL"])
+		db := &fakeScanDB{listErr: cause}
 		stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) { return db, nil })
 		_, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres, Host: "h"}, newShopParams(t))
 		if assert.Error(t, err) {
 			assert.ErrorContains(t, err, "failed to get dbCatalog metadata")
+			assert.EqualError(t, err, `failed to get dbCatalog metadata: open postgres source "env:SHOP_PG_URL": the driver could not open the source (its own message is not shown: a driver can quote the connection string)`)
 			assert.NotContains(t, err.Error(), pgSecret)
-			assert.Contains(t, err.Error(), "xxxxx")
+			assert.NotContains(t, err.Error(), "lost connection", "the driver's words are not shown")
+			assert.ErrorIs(t, err, cause, "the driver's own error is kept for errors.Is, never printed")
 		}
 		assert.Equal(t, 1, db.closed, "the pool is released after a failed scan too")
 	})

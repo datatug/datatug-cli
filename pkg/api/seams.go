@@ -24,6 +24,7 @@ var randRead = rand.Read
 var executionstoreNewManager = executionstore.NewManager
 var filepathRel = filepath.Rel
 var filepathAbs = filepath.Abs
+var readCatalogFile = os.ReadFile
 var dbcopyParse = dbcopy.Parse
 var updateSchemaModelSeam = updateSchemaModel
 var loadHTTPQueries = httpsource.LoadHTTPQueries

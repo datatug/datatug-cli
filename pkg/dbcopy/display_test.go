@@ -61,6 +61,21 @@ func TestSourceDisplay(t *testing.T) {
 		{"transport on a scheme nothing knows", "nosuch+unix://alice:s3cret@h/shop", UnparsableSource},
 		{"transport with nothing before it", "+unix://alice:s3cret@h/shop", UnparsableSource},
 		{"transport on a scheme that is not a database", "ingitdb+tcp://alice:s3cret@h/shop", UnparsableSource},
+		// Only the transports dburl knows are shown after a "+": tcp, udp and unix, in any case.
+		{"upper-case transport", "MySQL+TCP://alice:s3cret@db.example.com:3306/shop", "mysql+tcp://db.example.com:3306/shop"},
+		{"udp transport", "mysql+udp://alice:s3cret@db.example.com:3306/shop", "mysql+udp://db.example.com:3306/shop"},
+		{"transport that is not one of the three", "mysql+tok_Zk39xq://carol:pw-Zk39x@db.example.com/shop", UnparsableSource},
+		{"transport that is a word", "postgres+secretword://db.example.com/shop", UnparsableSource},
+		{"transport that holds a second plus sign", "mysql+unix+x://db.example.com/shop", UnparsableSource},
+		{"transport that is empty", "mysql+://db.example.com/shop", UnparsableSource},
+		// A short alias dburl registers itself is local when the scheme it resolves to is.
+		{"sqlite short alias with a relative file", "sq:./chinook.db", "sq:./chinook.db"},
+		{"sqlite short alias with an absolute file", "SQ:///tmp/chinook.db?mode=ro", "sq:///tmp/chinook.db"},
+		{"sqlite short alias with userinfo", "sq://carol:pw-Zk39x@host.example/chinook.db", "sq://host.example/chinook.db"},
+		{"sqlite short alias and a second URL", "sq:///https://tok_Zk39xq@git.example/x.db", "sq://git.example/x.db"},
+		{"a short alias of a database is still a host", "pg://carol:pw-Zk39x@db.example.com:5432/shop", "pg://db.example.com:5432/shop"},
+		{"a short alias of a database is not a file", "my:./shop", "my:/shop"},
+		{"a short alias with a transport is a host", "sq+unix://carol:pw-Zk39x@host.example/x", "sq+unix://host.example/x"},
 
 		// A local path: scheme and path as they are, minus query and fragment.
 		{"sqlite absolute path", "sqlite:///tmp/foo.db", "sqlite:///tmp/foo.db"},
@@ -108,8 +123,63 @@ func TestSourceDisplay(t *testing.T) {
 		{"ingitdb token after a UNC start", `ingitdb://\\tok:x-oauth-basic@github.com/org/repo`, "ingitdb://github.com/org/repo"},
 		{"sqlite userinfo after a UNC start", `sqlite://\\alice:s3cret@host/x.db`, "sqlite://host/x.db"},
 		{"openvaultdb userinfo after a UNC start", `openvaultdb://\\alice:s3cret@host/c.json`, "openvaultdb://host/c.json"},
+		// No server name holds an "@": a token written as the user name straight after a UNC start is credentials.
+		{"http token as the user name after a UNC start", `http://\\tok_Zk39xq@host.example/x`, "http://host.example/x"},
+		{"https token as the user name after a UNC start", `https://\\tok_Zk39xq@host.example/team/repo`, "https://host.example/team/repo"},
+		{"sqlite token as the user name after a UNC start", `sqlite://\\tok_Zk39xq@host.example/x.db`, "sqlite://host.example/x.db"},
+		{"ingitdb token as the user name after a UNC start", `ingitdb://\\tok_Zk39xq@git.example/team/repo`, "ingitdb://git.example/team/repo"},
+		{"openvaultdb token as the user name after a UNC start", `openvaultdb://\\tok_Zk39xq@host.example/c.json`, "openvaultdb://host.example/c.json"},
 		{"UNC path with a colon and no at sign", `sqlite://\\server:445\share\db.sqlite`, `sqlite://\\server:445\share\db.sqlite`},
+		// A Windows WebDAV path writes the server as host@SSL, host@port or host@SSL@port: those server names
+		// are paths and are shown as typed, in any case of "SSL". Any other text in front of a second "@" in the
+		// server name is a token as the user name.
+		{"sqlite WebDAV UNC path over SSL", `sqlite://\\host.example@SSL\share\db.sqlite`, `sqlite://\\host.example@SSL\share\db.sqlite`},
+		{"http WebDAV UNC path with a port", `http://\\host.example@8080\share\proj`, `http://\\host.example@8080\share\proj`},
+		{"ingitdb WebDAV UNC path over SSL with a port", `ingitdb://\\host.example@SSL@8443\share\proj`, `ingitdb://\\host.example@SSL@8443\share\proj`},
+		{"openvaultdb WebDAV UNC path over SSL in lower case", `openvaultdb://\\host.example@ssl\share\c.json`, `openvaultdb://\\host.example@ssl\share\c.json`},
+		{"https WebDAV UNC path with slashes", `https://\\host.example@SSL/share/proj`, `https://\\host.example@SSL/share/proj`},
+		{"WebDAV UNC path with an at sign in the share", `sqlite://\\host.example@SSL\share\a@b\db.sqlite`, `sqlite://\\host.example@SSL\share\a@b\db.sqlite`},
+		{"token and SSL and a host in the server name", `http://\\tok_Zk39xq@SSL@host.example/x`, "http://host.example/x"},
+		{"token and a port that is out of range", `ingitdb://\\tok_Zk39xq@99999/team/repo`, "ingitdb://99999/team/repo"},
+		{"token and three at signs in the server name", `sqlite://\\tok_Zk39xq@SSL@8443@host.example/x.db`, "sqlite://host.example/x.db"},
+		{"a server name that is not a host in front of SSL", `https://\\tok_Zk39xq!@SSL/x`, "https://SSL/x"},
+		{"no server name in front of SSL", `openvaultdb://\\@SSL/c.json`, "openvaultdb://SSL/c.json"},
+		// A UNC path has a server name: with a separator straight after the two backslashes the first segment is
+		// empty, and what follows up to the "@" is a token, not a share.
+		{"http token after a UNC start and a backslash", `http://\\\tok_Zk39xq@host.example/x`, "http://host.example/x"},
+		{"https token after a UNC start and a slash", `https://\\/tok_Zk39xq@host.example/team/repo`, "https://host.example/team/repo"},
+		{"sqlite token after a UNC start and a backslash", `sqlite://\\\tok_Zk39xq@host.example/x.db`, "sqlite://host.example/x.db"},
+		{"sqlite token after a UNC start and a slash", `sqlite://\\/tok_Zk39xq@host.example/x.db`, "sqlite://host.example/x.db"},
+		{"ingitdb token after a UNC start and a backslash", `ingitdb://\\\tok_Zk39xq@git.example/team/repo`, "ingitdb://git.example/team/repo"},
+		{"openvaultdb token after a UNC start and a slash", `openvaultdb://\\/tok_Zk39xq@host.example/c.json`, "openvaultdb://host.example/c.json"},
+		{"UNC path with an empty server name and no at sign", `sqlite://\\\share\db.sqlite`, `sqlite://\\\share\db.sqlite`},
 		{"relative directory without an at sign", "ingitdb://dir/project", "ingitdb://dir/project"},
+		// A second "scheme://" in front of the last "@" is not a path, whatever the text starts with: only what follows
+		// the "@" is shown. A user name with a slash after a UNC start is userinfo for the same reason.
+		{"ingitdb absolute start and a second URL", "ingitdb:///https://carol:pw-Zk39x@git.example/team/repo", "ingitdb://git.example/team/repo"},
+		{"ingitdb dot start and a second URL with a token", "ingitdb://./https://tok_Zk39xq@git.example/team/repo", "ingitdb://git.example/team/repo"},
+		{"ingitdb dot start and a second URL whose password holds a slash", "ingitdb://./https://carol:42/pw-Zk39x@git.example/team/repo", "ingitdb://git.example/team/repo"},
+		{"ingitdb parent start and a second URL", "ingitdb://../postgres://carol:pw-Zk39x@git.example/team/repo", "ingitdb://git.example/team/repo"},
+		{"ingitdb home start and a second URL", "ingitdb://~/http://tok_Zk39xq@git.example/team/repo", "ingitdb://git.example/team/repo"},
+		{"ingitdb drive start and a second URL", `ingitdb://C:/https://tok_Zk39xq@git.example/team/repo`, "ingitdb://git.example/team/repo"},
+		{"ingitdb drive start with a backslash and a second URL", `ingitdb://C:\https://tok_Zk39xq@git.example/team/repo`, "ingitdb://git.example/team/repo"},
+		{"ingitdb UNC start and a second URL", `ingitdb://\\host\https://tok_Zk39xq@git.example/team/repo`, "ingitdb://git.example/team/repo"},
+		{"sqlite absolute start and a second URL", "sqlite:///postgres://carol:pw-Zk39x@db.example/shop", "sqlite://db.example/shop"},
+		{"sqlite without slashes and a second URL", "sqlite:/https://tok_Zk39xq@git.example/x", "sqlite:git.example/x"},
+		{"http absolute start and a second URL", "http:///https://carol:pw-Zk39x@git.example/team/repo", "http://git.example/team/repo"},
+		{"https dot start and a second URL", "https://./http://tok_Zk39xq@git.example/team/repo", "https://git.example/team/repo"},
+		{"openvaultdb absolute start and a second URL", "openvaultdb:///https://carol:pw-Zk39x@git.example/c.json", "openvaultdb://git.example/c.json"},
+		{"file scheme and a second URL", "file:///https://tok_Zk39xq@git.example/x.db", "file://git.example/x.db"},
+		{"upper-case schemes and a second URL", "SQLITE:///HTTPS://tok_Zk39xq@git.example/x", "sqlite://git.example/x"},
+		{"second URL whose host cannot be shown", "sqlite:///https://carol:pw-Zk39x@git_host!/x", "sqlite:///x"},
+		{"UNC start and a user name that holds a slash", `http://\\corp/carol:pw-Zk39x@host.example/x`, "http://host.example/x"},
+		{"ingitdb UNC start and a user name that holds a slash", `ingitdb://\\corp/carol:pw-Zk39x@git.example/team/repo`, "ingitdb://git.example/team/repo"},
+		{"sqlite UNC start and a token that holds a slash and no colon", `sqlite://\\ab/tok_Zk39xq@host.example/x.db`, `sqlite://\\ab/tok_Zk39xq@host.example/x.db`},
+		// Only text in front of the last "@" counts: a "scheme://" after it, or a path that merely holds a colon, stays a path.
+		{"a second URL after the at sign stays a path", "sqlite:///data/team@work/https://x", "sqlite:///data/team@work/https://x"},
+		{"a single slash after a scheme name is a directory", "ingitdb:///srv/https:/x@work/project", "ingitdb:///srv/https:/x@work/project"},
+		{"explicit path with a colon in front of the at sign", "ingitdb://./a:b/c@d", "ingitdb://./a:b/c@d"},
+		{"UNC path with a slash in front of the at sign and no colon", `sqlite://\\server\share\a@b\db.sqlite`, `sqlite://\\server\share\a@b\db.sqlite`},
 		// The file schemes dburl reads are paths, not hosts.
 		{"sqlite3 relative file", "sqlite3:./x.db", "sqlite3:./x.db"},
 		{"sqlite3 absolute file", "sqlite3:///tmp/a/x.db", "sqlite3:///tmp/a/x.db"},
@@ -121,6 +191,12 @@ func TestSourceDisplay(t *testing.T) {
 		{"windows drive path under http", `http://C:\work\a@b`, `http://C:\work\a@b`},
 		{"windows drive path with slashes under https", `https://C:/work/a@b/proj`, `https://C:/work/a@b/proj`},
 		{"windows drive path under sqlite", `sqlite://C:\data\x.db`, `sqlite://C:\data\x.db`},
+		// A drive path written with a doubled slash ("C://work/a@b") is a path, not a
+		// second URL, and Parse accepts it. "C://" also reads as a wrapped URL whose
+		// scheme is not known, so nothing of it is shown: it is never a leak.
+		{"drive path with a doubled slash and an at sign under https", `https://C://work/a@b/proj`, UnparsableSource},
+		{"drive path with a doubled slash and an at sign under sqlite", `sqlite://C://work/a@b.db`, UnparsableSource},
+		{"https drive start and a second URL", `https://C:/https://tok_Zk39xq@git.example/team/repo`, "https://git.example/team/repo"},
 		{"http project directory", "http://./demo-project-1", "http://./demo-project-1"},
 		{"http credentials", "https://alice:s3cret@api.example.com/x", "https://api.example.com/x"},
 		{"http password that reads as host and port", "HTTP://alice:42/s3cret@host/x", "http://host/x"},
@@ -173,6 +249,21 @@ func TestSourceIDDisplay(t *testing.T) {
 	assert.Equal(t, strings.Repeat("é", 128), SourceIDDisplay(strings.Repeat("é", 128)))
 }
 
+// A query ID is folders and a name joined with "/": it is shown only when every part
+// is a plain name, and as the placeholder otherwise, a whole source string included.
+func TestQueryIDDisplay(t *testing.T) {
+	t.Parallel()
+	for _, id := range []string{"customer-invoices", "customers/customer-invoices", "a/b/c", "Café/données-1.v2"} {
+		assert.Equal(t, id, QueryIDDisplay(id))
+	}
+	for _, id := range []string{
+		"", "/", "a//b", "/a", "a/", "../x", "a/./b", "a/../b", "postgres://alice:s3cret@h/db", "alice:s3cret@h/x",
+		"a b/c", `a\b/c`, "a\x00b/c", strings.Repeat("a", 129) + "/b", SourceIDNotShown,
+	} {
+		assert.Equal(t, SourceIDNotShown, QueryIDDisplay(id), id)
+	}
+}
+
 func TestPathDisplay(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string]string{
@@ -219,4 +310,32 @@ func TestBackendRef_DisplayBuildsFromTheParts(t *testing.T) {
 	assert.Equal(t, "openvaultdb:///c.json", BackendRef{Scheme: "openvaultdb", Path: "/c.json"}.Display())
 	assert.Equal(t, UnparsableSource, BackendRef{Scheme: "nosuch", Path: "s3cret"}.Display())
 	assert.Equal(t, UnparsableSource, BackendRef{}.Display())
+}
+
+// The path field of a catalog names a file or a directory. One that is a URL, or
+// holds a URL in front of its last "@", is neither, and what follows the scheme may
+// be credentials: PathHoldsURL says so, so that no message shows it as a path.
+func TestPathHoldsURL(t *testing.T) {
+	t.Parallel()
+	for path, want := range map[string]bool{
+		"https://tok_Zk39xq@git.example/x":      true,
+		"HTTPS://carol:pw@git.example/x":        true,
+		"https://git.example/x":                 true,
+		"postgres://carol:pw@db.example/shop":   true,
+		"./https://tok_Zk39xq@git.example/x":    true,
+		"/srv/https://tok_Zk39xq@git.example/x": true,
+		`C:/https://tok_Zk39xq@git.example/x`:   true,
+		`C://https://tok_Zk39xq@git.example/x`:  true,
+		"dbs/chinook.sqlite":                    false,
+		"~/datatug/dbs/chinook.sqlite":          false,
+		"/data/team@work/https://x":             false,
+		"./team@work/a.db":                      false,
+		`C:\work\a@b.db`:                        false,
+		"C://work/a@b.db":                       false,
+		"c://work/a.db":                         false,
+		`\\server\share@x\a.db`:                 false,
+		"":                                      false,
+	} {
+		assert.Equal(t, want, PathHoldsURL(path), "%q", path)
+	}
 }

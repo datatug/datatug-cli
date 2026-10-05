@@ -171,11 +171,13 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	}
 	// --database takes the ID of a catalog of the environment, and what is typed
 	// there can be a whole source string with its password. A typed value that is
-	// neither a source of the project nor a plain name is refused here, naming
-	// nothing of it, so that no later step holds it: not the connect screen, the
-	// settings the browser reads, the scope the store hashes or the stand-in
-	// source of a failed lookup.
-	if _, known := sourceURLs[database]; options.database != "" && !known && dbcopy.SourceIDDisplay(database) != database {
+	// neither a source of the project, a catalog of the environment (whether or not
+	// its source resolves: it opens the degraded session that shows the issue) nor a
+	// plain name is refused here, naming nothing of it, so that no later step holds
+	// it: not the connect screen, the settings the browser reads, the scope the store
+	// hashes or the stand-in source of a failed lookup.
+	_, known := sourceURLs[database]
+	if options.database != "" && !known && !projectCatalogHasSource(projectCatalog, database) && !dbcopy.IsPlainSourceID(database) {
 		return "", Exit("--database takes the ID of a catalog of the environment (a name such as chinook-local), not a source URL or a path", exitCodeUsage)
 	}
 	sourceURL, sourceErr := resolveQuerySourceURL(ctx, projectStore, projectDir, options.env, database)
@@ -584,4 +586,16 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 		}, QueryType: string(query.Type), QueryText: query.Text})
 	}
 	return catalog, urls, nil
+}
+
+// projectCatalogHasSource reports whether the environment has a catalog with this
+// ID: buildChatProjectCatalog adds a "source" object for every catalog of the
+// environment, whether or not its source resolves.
+func projectCatalogHasSource(catalog chat.ProjectCatalog, id string) bool {
+	for _, object := range catalog.Objects {
+		if object.Reference.Kind == "source" && object.Reference.SourceID == id {
+			return true
+		}
+	}
+	return false
 }

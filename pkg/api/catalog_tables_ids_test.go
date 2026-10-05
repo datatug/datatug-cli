@@ -10,11 +10,14 @@ import (
 	"github.com/datatug/datatug-cli/internal/sourcecases"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/strongo/validation"
 )
 
 // The catalog and environment IDs of GET .../tables are request path segments,
-// and a source string can be sent where an ID belongs. No message shows one
-// unless it is a plain name.
+// and a source string can be sent where an ID belongs. GetCatalogTables refuses
+// anything but a plain name before it reads a file, and catalogDbModel, which
+// builds the message of a catalog that is not there, names an ID only when it is
+// a plain name: neither message shows a source string.
 func TestProperty_GetCatalogTablesNeverEchoesASourceString(t *testing.T) {
 	dir := t.TempDir()
 	failed := 0
@@ -22,8 +25,13 @@ func TestProperty_GetCatalogTablesNeverEchoesASourceString(t *testing.T) {
 		var texts []string
 		for _, ids := range [][2]string{{"local", c.Source}, {c.Source, "chinook-local"}, {c.Source, c.Source}} {
 			_, err := GetCatalogTables(dir, ids[0], ids[1])
+			if err == nil || !validation.IsBadRequestError(err) {
+				t.Fatalf("%s: GetCatalogTables(%q, %q) = %v, want a bad-request refusal", c.Name, ids[0], ids[1], err)
+			}
+			texts = append(texts, err.Error())
+			_, err = catalogDbModel(dir, ids[0], ids[1])
 			if !errors.Is(err, ErrCatalogNotFound) {
-				t.Fatalf("%s: GetCatalogTables(%q, %q) = %v, want ErrCatalogNotFound", c.Name, ids[0], ids[1], err)
+				t.Fatalf("%s: catalogDbModel(%q, %q) = %v, want ErrCatalogNotFound", c.Name, ids[0], ids[1], err)
 			}
 			texts = append(texts, err.Error())
 		}

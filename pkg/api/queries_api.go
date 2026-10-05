@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/access"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/querywrite"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
@@ -269,7 +270,7 @@ func GetQuery(ctx context.Context, ref dto.ProjectItemRef) (query *datatug.Query
 	}
 	projectDir, ok := ProjectDir(ref.ProjectID)
 	if !ok {
-		return nil, fmt.Errorf("%w: unknown project %q", ErrQueryNotFound, ref.ProjectID)
+		return nil, fmt.Errorf("%w: unknown project %q", ErrQueryNotFound, dbcopy.SourceIDDisplay(ref.ProjectID))
 	}
 	canonicalID, err := ResolveQueryID(projectDir, ref.ID)
 	if err != nil {

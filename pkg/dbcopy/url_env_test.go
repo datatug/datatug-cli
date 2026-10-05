@@ -481,6 +481,45 @@ func TestLocalSourceURL_WritesTheDotFormForSqliteAndOpenVaultDB(t *testing.T) {
 	assert.Equal(t, "sqlite://plain/proj.db", LocalSourceURL("sqlite", "plain/proj.db"))
 }
 
+// A path given verbatim is written as it is when it starts with a UNC start: the
+// dot form is for a relative directory, and "./" in front of two backslashes makes a
+// relative path that does not exist. A WebDAV UNC path is a path and Parse takes it
+// as it was written; text that holds credentials after a UNC start is left for Parse
+// to refuse, which shows nothing of them, and is not turned into a relative path that
+// every later message would show whole.
+func TestLocalSourceURL_DoesNotWriteTheDotFormForAUNCStart(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{
+		`\\host.example@SSL\share\proj`,
+		`\\host.example@8080\share\proj`,
+		`\\server\share\proj`,
+	} {
+		source := LocalSourceURL("http", path)
+		assert.Equal(t, "http://"+path, source)
+		ref, err := Parse(source)
+		require.NoError(t, err, source)
+		assert.Equal(t, source, ref.Raw)
+	}
+	for _, path := range []string{
+		`\\tok_Zk39xq@host.example\proj`,
+		`\\alice:pw-Zk39x@host.example\proj`,
+		`\\\tok_Zk39xq@host.example\proj`,
+	} {
+		for _, scheme := range []string{"http", "sqlite", "ingitdb", "openvaultdb"} {
+			source := LocalSourceURL(scheme, path)
+			assert.Equal(t, scheme+"://"+path, source)
+			_, err := Parse(source)
+			require.Error(t, err, source)
+			assert.ErrorContains(t, err, "credentials are not supported", source)
+			for _, secret := range []string{"tok_Zk39xq", "alice", "pw-Zk39x"} {
+				assert.NotContains(t, err.Error(), secret, source)
+			}
+		}
+	}
+	// A relative directory that holds an "@" still gets the dot form.
+	assert.Equal(t, "http://./team@work", LocalSourceURL("http", "team@work"))
+}
+
 // A UNC start counts as a path, and "\\alice:password@host" starts with one all
 // the same: it is refused as credentials, and the refusal shows no credentials.
 func TestParse_UserinfoAfterAUNCStartIsRefusedWithoutEcho(t *testing.T) {
@@ -525,5 +564,179 @@ func TestParse_ExplicitPathsKeepTheirAtSign(t *testing.T) {
 		ref, err := Parse(input)
 		require.NoError(t, err, input)
 		assert.Equal(t, input, ref.Raw, "an explicit path is shown as it was typed")
+	}
+}
+
+// A text that holds a second "scheme://" in front of its last "@" is not a path,
+// whatever it starts with: an explicit path start ("/", "./", "../", "~/", a
+// drive letter, a UNC start) does not make a URL written after it a directory.
+// Parse refuses it, and the refusal names only what follows the "@".
+func TestParse_ASecondURLAfterAnExplicitPathStartIsRefusedWithoutEcho(t *testing.T) {
+	t.Parallel()
+	for _, scheme := range []string{"sqlite", "ingitdb", "openvaultdb", "http", "https", "SQLITE", "Http"} {
+		for _, start := range []string{"/", "./", "../", "~/", "C:/", `C:\`, `\\host\`} {
+			for _, userinfo := range []string{"carol:pw-Zk39x", "tok_Zk39xq", "carol:42/pw-Zk39x"} {
+				input := scheme + "://" + start + "https://" + userinfo + "@git.example/team/repo"
+				_, err := Parse(input)
+				require.Error(t, err, input)
+				assert.ErrorContains(t, err, "credentials are not supported", input)
+				assert.ErrorContains(t, err, "://git.example/team/repo", "the refusal names what follows the at sign: %s", input)
+				for _, secret := range []string{"carol", "pw-Zk39x", "tok_Zk39xq", "42/"} {
+					assert.NotContains(t, err.Error(), secret, input)
+				}
+			}
+		}
+	}
+	// The form with no slashes is refused too, a UNC start with a colon in front of the
+	// last "@" included: it is credentials, as it is with the slashes.
+	for _, input := range []string{
+		"sqlite:/https://tok_Zk39xq@git.example/x",
+		"SQLite:./postgres://carol:pw-Zk39x@git.example/x",
+		`sqlite:\\carol:pw-Zk39x@git.example/x`,
+		`SQLITE:\\corp/carol:pw-Zk39x@git.example/x`,
+	} {
+		_, err := Parse(input)
+		require.Error(t, err, input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		for _, secret := range []string{"carol", "pw-Zk39x", "tok_Zk39xq"} {
+			assert.NotContains(t, err.Error(), secret, input)
+		}
+	}
+	// Only the text in front of the last "@" counts: a path that holds a URL after it,
+	// or a colon in front of it, is still a path.
+	for _, input := range []string{
+		"sqlite:///data/team@work/https://x",
+		"sqlite:/data/team@work/https://x",
+		"ingitdb://./a:b/c@d",
+		`ingitdb://\\server\share\a@b\proj`,
+		// A UNC path with an "@" and no colon is still a path without the slashes.
+		`sqlite:\\server\share\a@b.db`,
+	} {
+		ref, err := Parse(input)
+		require.NoError(t, err, input)
+		assert.Equal(t, input, ref.Raw, "a path is shown as it was typed")
+	}
+}
+
+// No server name holds an "@", so a token written as the user name straight after a
+// UNC start ("\\tok@host/x") is credentials and not a path: refused, with only
+// what follows the "@" named. A UNC path whose share holds an "@" is still a path.
+func TestParse_ATokenAfterAUNCStartIsRefusedWithoutEcho(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		`http://\\tok_Zk39xq@host.example/x`,
+		`HTTPS://\\tok_Zk39xq@host.example/x`,
+		`sqlite://\\tok_Zk39xq@host.example/x.db`,
+		`sqlite:\\tok_Zk39xq@host.example/x.db`,
+		`ingitdb://\\tok_Zk39xq@git.example/team/repo`,
+		`openvaultdb://\\tok_Zk39xq@host.example/c.json`,
+		// A UNC path has a server name: a separator straight after the two backslashes
+		// leaves the first segment empty, and the token stands where a share would.
+		`http://\\\tok_Zk39xq@host.example/x`,
+		`https://\\/tok_Zk39xq@host.example/x`,
+		`sqlite://\\\tok_Zk39xq@host.example/x.db`,
+		`sqlite://\\/tok_Zk39xq@host.example/x.db`,
+		`sqlite:\\\tok_Zk39xq@host.example/x.db`,
+		`SQLITE:\\/tok_Zk39xq@host.example/x.db`,
+		`ingitdb://\\\tok_Zk39xq@git.example/team/repo`,
+		`ingitdb://\\/tok_Zk39xq@git.example/team/repo`,
+		`openvaultdb://\\\tok_Zk39xq@host.example/c.json`,
+		`openvaultdb://\\/tok_Zk39xq@host.example/c.json`,
+		// A token in front of "SSL" or a port is still a token when it is not a host name,
+		// and a server name holds at most "host@SSL@port".
+		`http://\\tok_Zk39xq!@SSL/x`,
+		`sqlite://\\tok_Zk39xq@SSL@host.example/x.db`,
+		`ingitdb://\\tok_Zk39xq@SSL@8443@git.example/team/repo`,
+	} {
+		_, err := Parse(input)
+		require.Error(t, err, input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		host, _, _ := strings.Cut(input[strings.LastIndex(input, "@")+1:], "/")
+		assert.ErrorContains(t, err, host, "the refusal names what follows the at sign: %s", input)
+		assert.NotContains(t, err.Error(), "tok_Zk39xq", input)
+	}
+	for _, input := range []string{
+		`ingitdb://\\server\share@x\proj`,
+		`http://\\server\share@x`,
+		`sqlite:\\server/share@x.db`,
+		// A WebDAV server name holds an "@": see TestParse_AWebDAVUNCPathIsAPath.
+		`http://\\host.example@SSL\share\proj`,
+		`ingitdb://\\host.example@8080\share\proj`,
+	} {
+		ref, err := Parse(input)
+		require.NoError(t, err, input)
+		assert.Equal(t, input, ref.Raw, "a path is shown as it was typed")
+	}
+}
+
+// A Windows WebDAV path writes the server name as host@SSL, host@port or
+// host@SSL@port, so its first segment holds an "@" and it is a path all the same:
+// Parse accepts it, for every scheme that reads a path, and shows it as typed. A
+// UNC path reaches SQLite only in the form without slashes ("sqlite:\\server\share"):
+// dburl does not read "sqlite://\\server\share" with or without an "@".
+func TestParse_AWebDAVUNCPathIsAPath(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		`http://\\host.example@SSL\share\proj`,
+		`https://\\host.example@8080\share\proj`,
+		`http://\\host.example@ssl@8443\share\proj`,
+		`ingitdb://\\host.example@SSL\share\proj`,
+		`openvaultdb://\\host.example@8080\share\c.json`,
+		`sqlite:\\host.example@SSL\share\db.sqlite`,
+		`sqlite:\\host.example@SSL@8443\share\db.sqlite`,
+		`sqlite:\\host.example@8080/share/db.sqlite`,
+	} {
+		ref, err := Parse(input)
+		require.NoError(t, err, input)
+		assert.Equal(t, input, ref.Raw, "a WebDAV path is shown as it was typed")
+	}
+}
+
+// A drive path written with a doubled slash ("C://work/a@b") holds "C://", which
+// matches the pattern of a second URL as a one-letter scheme. The drive letter is a
+// drive, not a scheme, so it is a path as it always was and Parse accepts it, for
+// every scheme that reads a path. What follows the drive letter is still searched:
+// "C:/https://tok@host" is a second URL.
+func TestParse_ADrivePathWithADoubledSlashIsNotASecondURL(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		`http://C://work/a@b/proj`,
+		`https://C://work/a@b`,
+		`HTTPS://c://work/a@b`,
+		`openvaultdb://C://work/a@b/ovdb.json`,
+		`sqlite://C://work/a@b.db`,
+	} {
+		_, err := Parse(input)
+		require.NoError(t, err, input)
+	}
+	for _, input := range []string{
+		`http://C:/https://tok_Zk39xq@git.example/x`,
+		`https://C://https://tok_Zk39xq@git.example/x`,
+		`openvaultdb://C:\postgres://carol:pw-Zk39x@git.example/x`,
+		`sqlite://C://https://tok_Zk39xq@git.example/x`,
+	} {
+		_, err := Parse(input)
+		require.Error(t, err, input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		for _, secret := range []string{"carol", "pw-Zk39x", "tok_Zk39xq"} {
+			assert.NotContains(t, err.Error(), secret, input)
+		}
+	}
+}
+
+// A user name with a slash after a UNC start puts the colon after the slash, so
+// the text does not look like "user:password@host", and it is credentials all the
+// same: refused, with only what follows the "@" named.
+func TestParse_AUserNameWithASlashAfterAUNCStartIsRefusedWithoutEcho(t *testing.T) {
+	t.Parallel()
+	for _, scheme := range []string{"sqlite", "ingitdb", "openvaultdb", "http", "https", "HTTP"} {
+		input := scheme + `://\\corp/carol:pw-Zk39x@host.example/x`
+		_, err := Parse(input)
+		require.Error(t, err, input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		assert.ErrorContains(t, err, "://host.example/x", input)
+		for _, secret := range []string{"carol", "pw-Zk39x", "corp"} {
+			assert.NotContains(t, err.Error(), secret, input)
+		}
 	}
 }

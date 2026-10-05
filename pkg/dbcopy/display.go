@@ -96,17 +96,38 @@ var knownSourceSchemes = sync.OnceValue(func() map[string]bool {
 	return known
 })
 
+// sourceTransports are the transports dburl reads after a "+" in a scheme
+// ("mysql+unix"), and the only ones SourceDisplay shows: anything else after a "+"
+// is text a user chose, and may be a token.
+var sourceTransports = map[string]bool{"tcp": true, "udp": true, "unix": true}
+
 // knownSourceScheme reports whether scheme (lower case) is one SourceDisplay can
 // show: a scheme of knownSourceSchemes, or one dburl takes that its own list of
 // base schemes leaves out: the short aliases it registers itself ("my" for mysql)
 // and a scheme followed by a transport ("mysql+unix"). A "+transport" is accepted
-// only after a scheme dburl knows.
+// only after a scheme dburl knows, and only when it is tcp, udp or unix.
 func knownSourceScheme(scheme string) bool {
 	if knownSourceSchemes()[scheme] {
 		return true
 	}
-	base, _, _ := strings.Cut(scheme, "+")
+	base, transport, hasTransport := strings.Cut(scheme, "+")
+	if hasTransport && !sourceTransports[transport] {
+		return false
+	}
 	return dburl.Protocols(base) != nil
+}
+
+// isLocalScheme reports whether the text after scheme (lower case) is a path on
+// this machine and not a host: a scheme of localSchemes, or a short alias dburl
+// registers itself ("sq" for sqlite3) for a scheme that is. dburl lists the
+// scheme an alias resolves to first, and a scheme with a transport ("sq+unix")
+// resolves to nothing, so it is a host.
+func isLocalScheme(scheme string) bool {
+	if localSchemes()[scheme] {
+		return true
+	}
+	protocols := dburl.Protocols(scheme)
+	return len(protocols) > 0 && localSchemes()[strings.ToLower(protocols[0])]
 }
 
 // SourceDisplay returns the text to show for the source string raw. It is the
@@ -120,11 +141,15 @@ func knownSourceScheme(scheme string) bool {
 // an "@", a "/", a "?" or only digits and a parser may read it as a host and a
 // port. The same holds for a file or a directory unless the text is certainly a
 // path (see readsAsPath): an explicit path ("/abs/a@b", "./a@b", "../a@b",
-// "~/a@b", a UNC path, a drive path) is shown as typed; any other text that holds
-// an "@" is userinfo and a host, even when a slash comes before the colon or
-// the "@". Two shapes stay paths by design: an explicit path, and "X:/..." or
-// "X:\..." (read as a Windows drive path even when it was meant as user X with a
-// password that starts with a slash). An "env:NAME" source is shown as it is,
+// "~/a@b", a UNC path, a drive path) is shown as typed, unless it holds a second
+// "scheme://" in front of its last "@", or is a UNC start with a ":" in front of it,
+// or one whose server name (the first segment) is empty or holds an "@" (a Windows
+// WebDAV server name, "host@SSL" or "host@8080", excepted): that is a URL or
+// credentials, whatever the text starts with. Any other text that holds an "@" is
+// userinfo and a host, even when a slash comes before the colon or the "@". Two
+// shapes stay paths by design: an explicit path, and "X:/..." or "X:\..." (read as
+// a Windows drive path even when it was meant as user X with a password that
+// starts with a slash). An "env:NAME" source is shown as it is,
 // because it names a variable and holds no value. A string that is not led by a
 // known scheme yields UnparsableSource.
 func SourceDisplay(raw string) string {
@@ -153,7 +178,7 @@ func SourceDisplay(raw string) string {
 // false when what follows cannot be shown at all.
 func displayAfterScheme(scheme, rest string) (string, bool) {
 	switch {
-	case localSchemes()[scheme] && schemePrefix.MatchString(rest):
+	case isLocalScheme(scheme) && schemePrefix.MatchString(rest):
 		// A path scheme that wraps a URL ("ingitdb://https://u:p@host/x"). Parse
 		// refuses it, and nothing may stand in front of the host: even a user
 		// name alone is a token, so every "@" ends userinfo.
@@ -165,7 +190,7 @@ func displayAfterScheme(scheme, rest string) (string, bool) {
 		return inner + "://" + hostPortPath(rest[len(prefix):], urlPathSegments), true
 	case scheme == unavailableScheme:
 		return unavailableDisplay(rest), true
-	case localSchemes()[scheme]:
+	case isLocalScheme(scheme):
 		return localTextDisplay(rest), true
 	default:
 		return hostPortPath(rest, 1), true
@@ -196,14 +221,48 @@ func unavailableDisplay(rest string) string {
 // certain form; see driveLetterPath.
 var explicitPathStart = regexp.MustCompile(`^(?:/|\./|\.\./|~/|\\\\)`)
 
+// secondURL finds a "scheme://" anywhere in a text.
+var secondURL = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://`)
+
+// holdsSecondURL reports whether the part of text in front of its last "@" holds
+// a "scheme://": a URL written after the start of what was meant as a path. Whoever
+// wrote one meant a remote server with credentials, whatever the text starts with.
+// The drive letter of a drive path is a drive and not a scheme, so the search starts
+// after "C:": "C://work/a@b" is a path, and "C:/https://tok@host" holds a URL.
+func holdsSecondURL(text string) bool {
+	at := strings.LastIndexByte(text, '@')
+	if at < 0 {
+		return false
+	}
+	from := 0
+	if driveLetterPath.MatchString(text) {
+		from = len("C:")
+	}
+	return secondURL.MatchString(text[from:at])
+}
+
+// PathHoldsURL reports whether path, the path field of a catalog, is a URL
+// ("https://tok@host/x") or holds one in front of its last "@" ("./https://tok@host"):
+// it is then not a file or a directory, and what follows its scheme may be
+// credentials, so a caller refuses it before it is joined to a folder, which would
+// turn it into a relative path that a message shows whole. A drive path
+// ("C://work/a@b.db") is a path: its drive letter is not a scheme.
+func PathHoldsURL(path string) bool {
+	if driveLetterPath.MatchString(path) {
+		path = path[len("C:"):]
+	}
+	return schemePrefix.MatchString(path) || holdsSecondURL(path)
+}
+
 // readsAsPath reports whether text, what follows "scheme://" of a scheme that
 // names a file or a directory (or a bare path), is a path and not userinfo
 // followed by a host. It decides by what is certain, not by what looks like
 // credentials: text without an "@" is a path, and text with one is a path only
-// when it starts like one (see explicitPathStart and driveLetterPath).
-// Otherwise everything up to the last "@" is userinfo, because a user name, a
-// password or a token may hold a ":" or a "/" in any place, so no shape of the
-// text in front of the "@" tells userinfo from a directory.
+// when it starts like one (see explicitPathStart and driveLetterPath) and holds no
+// second URL in front of its last "@" (see holdsSecondURL). Otherwise everything
+// up to the last "@" is userinfo, because a user name, a password or a token may
+// hold a ":" or a "/" in any place, so no shape of the text in front of the "@"
+// tells userinfo from a directory.
 //
 // Two shapes stay paths by design. An explicit path ("/abs/a@b", "./a@b") is
 // shown as it was typed. "X:/..." and "X:\..." read as a Windows drive path, even
@@ -211,15 +270,74 @@ var explicitPathStart = regexp.MustCompile(`^(?:/|\./|\.\./|~/|\\\\)`)
 // relative directory that holds an "@" and starts with neither is written with
 // a dot: ./dir (see LocalSourceURL).
 //
-// A UNC start ("\\server\share") is explicit only while the text does not read
-// as "user:password@host" (see userinfoShape): "\\alice:s3cret@host" starts with
-// two backslashes and is credentials all the same. The other explicit starts
-// begin with a character that userinfoShape stops at, so none can match it.
+// A second URL in front of the last "@" ("/https://tok@host", "./https://u:p@host",
+// "C:/https://tok@host") is not a path whatever the text starts with: an explicit
+// start does not make a URL written after it a directory. A UNC start
+// ("\\server\share") is explicit only while no ":" stands in front of the last
+// "@" and the first segment is a server name (see uncServerName):
+// "\\alice:s3cret@host", "\\corp/u:p@host", "\\tok@host" and "\\\tok@host" start
+// with two backslashes and are credentials all the same, since no server or share
+// name holds a colon, a server name is not empty, and it holds an "@" only in the
+// forms of a Windows WebDAV path ("\\host@SSL\share", "\\host@8080\share").
+//
+// Known limits, shapes that stay paths because nothing in the text tells them from
+// one, and are shown as typed: after a UNC start, a token that holds a slash and no
+// colon (the text before the slash reads as the server and what follows as a share),
+// a token as the user name that is followed by "SSL" or a port number (it reads as a
+// WebDAV server name), and user information straight after an absolute start with no
+// second scheme (an absolute path may hold an "@" anywhere).
 func readsAsPath(text string) bool {
-	if !strings.Contains(text, "@") || driveLetterPath.MatchString(text) {
+	at := strings.LastIndexByte(text, '@')
+	if at < 0 {
 		return true
 	}
-	return explicitPathStart.MatchString(text) && (!strings.HasPrefix(text, `\\`) || !userinfoShape.MatchString(text))
+	if holdsSecondURL(text) {
+		return false
+	}
+	if driveLetterPath.MatchString(text) {
+		return true
+	}
+	return explicitPathStart.MatchString(text) && (!strings.HasPrefix(text, `\\`) || uncReadsAsPath(text, at))
+}
+
+// uncReadsAsPath reports whether text, which starts with "\\" and holds an "@"
+// at index at (the last), is a UNC path and not credentials: no ":" stands in
+// front of the "@", and the server name, the first segment, is one (see uncServerName).
+func uncReadsAsPath(text string, at int) bool {
+	if strings.Contains(text[:at], ":") {
+		return false
+	}
+	server := text[2:]
+	if end := strings.IndexAny(server, `\/`); end >= 0 {
+		server = server[:end]
+	}
+	return uncServerName(server)
+}
+
+// uncServerName reports whether server, the first segment after a UNC start, can be
+// the name of a server. A UNC path has one, so an empty segment is not: with a
+// separator straight after the two backslashes ("\\\tok@host/x", "\\/tok@host/x") the
+// text in front of the "@" is a token and not a share. A server name holds no "@",
+// except in the forms a Windows WebDAV path writes, "host@SSL", "host@port" and
+// "host@SSL@port" ("\\host@SSL\share", "\\host@8080\share"); the host is then a host
+// name and "SSL" is read in any case. Any other "@" in the first segment is a token
+// as the user name ("\\tok@host/x").
+func uncServerName(server string) bool {
+	if server == "" {
+		return false
+	}
+	host, options, hasOptions := strings.Cut(server, "@")
+	if !hasOptions {
+		return true
+	}
+	if !hostName.MatchString(host) {
+		return false
+	}
+	secure, port, hasPort := strings.Cut(options, "@")
+	if !hasPort {
+		return strings.EqualFold(options, "ssl") || validPort(options)
+	}
+	return strings.EqualFold(secure, "ssl") && validPort(port)
 }
 
 // localTextDisplay returns what to show for rest, the text after "scheme://" of
@@ -348,10 +466,33 @@ func localPathDisplay(path string) string {
 // digit) and SourceIDNotShown otherwise. Use it to name a source ID a client sent in a
 // message: a client may send a whole source string where an ID belongs.
 func SourceIDDisplay(id string) string {
-	if plainSourceID.MatchString(id) {
+	if IsPlainSourceID(id) {
 		return id
 	}
 	return SourceIDNotShown
+}
+
+// QueryIDDisplay returns id, a saved query's ID, when every "/"-separated part of it
+// is a plain name (see IsPlainSourceID) and SourceIDNotShown otherwise: a query ID is
+// the folders of the query and its name, and a client may send a whole source string
+// where one belongs. Use it to name a query ID a client sent in a message.
+func QueryIDDisplay(id string) string {
+	for _, part := range strings.Split(id, "/") {
+		if !IsPlainSourceID(part) {
+			return SourceIDNotShown
+		}
+	}
+	return id
+}
+
+// IsPlainSourceID reports whether id is a plain name for a source in a project:
+// letters and digits of any script, "." "_" and "-", at most 128 characters,
+// starting with a letter or a digit. It is the one definition of a plain name:
+// SourceIDDisplay shows an ID only when it holds, and an ID that becomes a folder
+// or file name must satisfy it. Compare with it, not with SourceIDDisplay(id) ==
+// id, because SourceIDNotShown is itself text a client can send.
+func IsPlainSourceID(id string) bool {
+	return plainSourceID.MatchString(id)
 }
 
 // Display returns the text to show for this source in a message. It is built

@@ -25,13 +25,8 @@ const DriverPostgres = "postgres"
 // descriptors: a PostgreSQL catalog's path points at one of them.
 const postgresDescriptorFolder = "connections"
 
-var (
-	// plainName is a name safe to use as one segment of a file path.
-	plainName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
-	// recordableHost is a host a project can record under its server's file name.
-	recordableHost = regexp.MustCompile(`^[A-Za-z0-9:][A-Za-z0-9._:-]*$`)
-)
+// recordableHost is a host a project can record under its server's file name.
+var recordableHost = regexp.MustCompile(`^[A-Za-z0-9:][A-Za-z0-9._:-]*$`)
 
 // PostgresScanParams are the connection parameters of a PostgreSQL scan. The
 // connection is an environment variable that holds the whole URL, so these
@@ -55,7 +50,8 @@ var _ dbconnection.Params = (*PostgresScanParams)(nil)
 // will write. lookupEnv reads the environment.
 //
 // The environment and the catalog each name a file under the project's
-// connections folder, so each must be a plain name. The host of the URL names
+// connections folder, so each must be a plain name (dbcopy.IsPlainSourceID, the one
+// definition: the routes that read the project apply the same). The host of the URL names
 // the server in the project, so it must be one a project can record.
 func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, environment, catalog string) (*PostgresScanParams, error) {
 	ref, err := dbcopy.ParseWithEnv("env:"+dsnEnv, lookupEnv)
@@ -75,10 +71,10 @@ func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, enviro
 	if !recordableHost.MatchString(target.Host) {
 		return nil, fmt.Errorf("the host in environment variable %s cannot be recorded in a project: use a host name or an address", dsnEnv)
 	}
-	if !plainName.MatchString(environment) || !plainName.MatchString(catalog) {
+	if !dbcopy.IsPlainSourceID(environment) || !dbcopy.IsPlainSourceID(catalog) {
 		// The flags are what the user typed, and a source string can be typed where
 		// a name belongs: only a plain name is echoed.
-		return nil, fmt.Errorf("environment %q and database %q must each be a plain name (letters, digits, '.', '_' and '-') to name the connection descriptor under %s/", dbcopy.SourceIDDisplay(environment), dbcopy.SourceIDDisplay(catalog), postgresDescriptorFolder)
+		return nil, fmt.Errorf("environment %q and database %q must each be a plain name (letters, digits, '.', '_' and '-', at most 128 characters, starting with a letter or a digit) to name the connection descriptor under %s/", dbcopy.SourceIDDisplay(environment), dbcopy.SourceIDDisplay(catalog), postgresDescriptorFolder)
 	}
 	return &PostgresScanParams{
 		dsnEnv:         dsnEnv,
@@ -194,8 +190,9 @@ func CheckPostgresScanAvailable() error {
 }
 
 // scanPostgresCatalog scans a PostgreSQL database through DALgo's schema reader.
-// It opens the source through dbcopy, so a driver error comes back scrubbed with
-// the real URL; what the scan itself reads is scrubbed the same way.
+// It opens the source through dbcopy, so a driver error comes back classified
+// (see BackendRef.OpenFailure), never as the driver wrote it; what the scan
+// itself reads is reported the same way.
 func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
 	params, ok := connectionParams.(postgresScanSource)
 	if !ok {
@@ -212,7 +209,7 @@ func scanPostgresCatalog(ctx context.Context, connectionParams dbconnection.Para
 	provider := dalgoschema.NewSchemaProvider(scanDB, dalgoschema.NewNativeCounter(scanDB), catalogID, dbcopy.PostgresDefaultSchema)
 	dbCatalog, err := schemer.NewScanner(provider).ScanCatalog(ctx, catalogID)
 	if err != nil {
-		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", dbcopy.RedactErrorWithSecrets(err, source.Path))
+		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", source.OpenFailure(err))
 	}
 	dbCatalog.ID = catalogID
 	dbCatalog.Driver = DriverPostgres

@@ -33,22 +33,16 @@ import (
 // it would write are read all the same), and `datatug scan
 // -D postgres`, whose `--dsn-env` is given the variable that holds the source and
 // the source itself where a variable name belongs, and whose `--db` and `--env`
-// are given the source where a name belongs. The scan's own answer that
-// PostgreSQL cannot be scanned yet is lifted (liftPostgresRefusal) so that what
-// comes after it is read; the real api.UpdateDbSchema still stops before it
-// connects, as TestScanCommandAction_PostgresAnswersThatTheScanIsNotAvailable...
-// holds, so no case reaches a server.
+// are given the source where a name belongs. The scan runs for real, against a fake
+// server (propertyPgServer) behind the one seam through which it opens a PostgreSQL
+// source: the fake fails at the open, at the listing of the tables and at a count,
+// each in words that quote the URL it was given, and then works, so that what comes
+// after each is read. The seam's default in this test binary stops the run on any
+// open that no test stood in for (scan_never_dials_test.go), so no case dials a server.
 //
 // Nothing here relies on a redactor: Exit no longer calls one, and the
 // top-level handler in main.go that does is not run.
 func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
-	// The scan runs below lift the command's own refusal, and rely on the project
-	// model of datatug-core still refusing a postgres server to stop before it
-	// connects. When a datatug-core upgrade accepts one, this property would call the
-	// real OpenSchemaScan and dial the generated hosts from a unit test: fail here
-	// instead, before any case runs.
-	requirePostgresScanUnavailable(t, api.CheckPostgresScanAvailable)
-
 	// A relative path a source names lands in this directory, so a stray write is
 	// found below.
 	workdir := t.TempDir()
@@ -111,11 +105,13 @@ func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
 	}
 	chatProject := writeChatRunProjectFixture(t)
 
-	// `datatug scan -D postgres` reads its connection URL from a variable.
-	liftPostgresRefusal(t)
+	// `datatug scan -D postgres` reads its connection URL from a variable, and opens it
+	// through the fake server.
 	const scanVariable = "DATATUG_PROPERTY_SOURCE"
 	var scanValue string
 	covDSetVar(t, &scanLookupEnv, func(name string) (string, bool) { return scanValue, name == scanVariable })
+	server := &propertyPgServer{}
+	t.Cleanup(api.SetOpenSchemaScanForTest(server.open))
 
 	cases := sourcecases.CommandCases()
 	failed := 0
@@ -144,11 +140,22 @@ func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
 			note(queryOut, queryErr, nil)
 		}
 
-		// `datatug scan -D postgres`: the source in the variable, and where a name belongs.
+		// `datatug scan -D postgres`: the source in the variable, which the fake server fails
+		// in each way it can and then serves, each scan into a folder of its own; and the
+		// source where a name belongs, which is refused before anything is opened.
 		scanValue = c.Source
+		for _, mode := range propertyPgModes {
+			server.mode = mode
+			scanDir := t.TempDir()
+			var scanErr error
+			out := covDCaptureStdout(t, func() {
+				scanErr = covDRunScan("-d", scanDir, "-D", "postgres", "--dsn-env", scanVariable, "--env", "prod", "--db", "shop")
+			})
+			note(out, "", scanErr)
+			checkFiles(scanDir, c)
+		}
 		scanDir := t.TempDir()
 		for _, args := range [][]string{
-			{"--dsn-env", scanVariable, "--env", "prod", "--db", "shop"},
 			{"--dsn-env", c.Source, "--env", "prod", "--db", "shop"},
 			{"--dsn-env", scanVariable, "--env", "prod", "--db", c.Source},
 			{"--dsn-env", scanVariable, "--env", c.Source, "--db", "shop"},
@@ -219,6 +226,11 @@ func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
 		t.Errorf("%d of %d generated sources leaked a secret through a command", failed, len(cases))
 	}
 
+	// The scans reached the fake server, in every way it can fail and in the way it works,
+	// and it was asked for the source of the variable and nothing else: it was the only
+	// thing the scans opened, and no scan dialled a server.
+	server.assertReached(t, len(propertyPgModes))
+
 	// No file was written with a secret in its name or its content, and nothing
 	// was written where a relative source pointed.
 	for _, root := range []string{workdir, dir} {
@@ -226,19 +238,5 @@ func TestProperty_NoCommandPathEchoesASourceSecret(t *testing.T) {
 	}
 	if entries, err := os.ReadDir(workdir); err != nil || len(entries) != 0 {
 		t.Errorf("a command wrote %d file(s) where a relative source pointed: %v, %v", len(entries), entries, err)
-	}
-}
-
-// requirePostgresScanUnavailable fails t at once when check, the answer to "can
-// this release scan PostgreSQL", is nil: a test that lifts the command's refusal
-// and counts on the project model refusing the server would then reach the real
-// driver.
-func requirePostgresScanUnavailable(t interface {
-	Helper()
-	Fatalf(format string, args ...any)
-}, check func() error) {
-	t.Helper()
-	if check() == nil {
-		t.Fatalf("this release can scan PostgreSQL now: the scan runs of this property would open the generated hosts for real; stub the scan open in the api package before lifting the refusal")
 	}
 }

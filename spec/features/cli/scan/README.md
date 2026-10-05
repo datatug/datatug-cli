@@ -21,6 +21,8 @@ datatug scan --project <id> --driver <driver> --server <host> --db <name> --env 
   [--port <n>] [--user <name>] [--password <pw>] [--dbmodel <id>]
 
 datatug scan --directory <path> --driver sqlite3 --path <file> --db <name> --env <env>
+
+datatug scan --directory <path> --driver postgres --dsn-env <VARIABLE> --db <name> --env <env>
 ```
 
 ## Problem
@@ -65,7 +67,7 @@ The id of a new project (a folder that holds no project file) MUST be the value 
 
 #### REQ: driver-selection
 
-`--driver`/`-D` MUST specify the database driver; a scan without it is refused with a message that names `--driver` (and not a flag of one driver, such as `--server`). Supported values today: `sqlite3` (the file given by `--path`) and `sqlserver`. `postgres` is refused with a message that says the scan is not available in this release: a DataTug project cannot record a postgres server yet, and the scan stops before it connects. The set of supported drivers MUST match the drivers the binary links: `sqlserver` by the import in `main.go`, and the SQLite scan's own pure-Go driver by the import in `pkg/api/scan_db_schema_api.go` (see [REQ: sqlite-pure-go](#req-sqlite-pure-go)), which is where the scan opens it.
+`--driver`/`-D` MUST specify the database driver; a scan without it is refused with a message that names `--driver` (and not a flag of one driver, such as `--server`). Supported values today: `sqlite3` (the file given by `--path`), `sqlserver` and `postgres` (the connection URL held in the variable given by `--dsn-env`; see [PostgreSQL](#postgresql)). The set of supported drivers MUST match the drivers the binary links: `sqlserver` by the import in `main.go`, the SQLite scan's own pure-Go driver by the import in `pkg/api/scan_db_schema_api.go` (see [REQ: sqlite-pure-go](#req-sqlite-pure-go)), which is where the scan opens it, and the PostgreSQL adapter (`dalgo2postgres`) by the import in `pkg/dbcopy/scan_open.go`.
 
 #### REQ: sqlite-pure-go
 
@@ -81,9 +83,9 @@ For a network database the connection string MUST be built via `pkg/datatug-core
 
 #### REQ: dbmodel-default
 
-When `--dbmodel` is omitted, the DB model ID MUST default to the value of `--db`. This makes single-database projects easy to scan while preserving the ability to map multiple physical databases onto one logical model. When it is given, it MUST be the model: the `dbModel` of the catalog file, the folder `dbmodels/<model>/`, and the model file in it. A catalog that the project already records in that environment (its catalog file) stays on the model that file names: a scan without `--dbmodel` MUST keep that model, and a scan whose `--dbmodel` names another model MUST be refused, before anything is written, with a message that names both models, because a scan onto the other model would leave the tables of the first in the project for good and make a second model of the same database. A `--dbmodel` that names the recorded model is accepted. A catalog file that cannot be read, or that names no model that can be a folder name, records nothing. A catalog file is read as every reader reads it, through the project store: in the nested place (`catalogs/<db>/<db>.db.json`) and in the flat one (`catalogs/<db>.db.json`), which datatug-core keeps writing to when it is the one that is there.
+When `--dbmodel` is omitted, the project records no catalog of that id in this environment, and no other environment records one, the DB model ID MUST default to the value of `--db` (a catalog the project records stays on its model, and one the other environments record is put on the model they agree on: both are below). This makes single-database projects easy to scan while preserving the ability to map multiple physical databases onto one logical model. When it is given, it MUST be the model: the `dbModel` of the catalog file, the folder `dbmodels/<model>/`, and the model file in it. A catalog that the project already records in that environment (its catalog file) stays on the model that file names: a scan without `--dbmodel` MUST keep that model, and a scan whose `--dbmodel` names another model MUST be refused, before anything is written, with a message that names both models, because a scan onto the other model would leave the tables of the first in the project for good and make a second model of the same database. A `--dbmodel` that names the recorded model is accepted. A catalog file that cannot be read, or that names no model that can be a folder name, records nothing. A catalog file is read as every reader reads it, through the project store: in the nested place (`catalogs/<db>/<db>.db.json`) and in the flat one (`catalogs/<db>.db.json`), which datatug-core keeps writing to when it is the one that is there.
 
-One database is one model in every environment. When `--dbmodel` is omitted and the project records no catalog of that id in this environment, the model MUST be the one the other environments record for a catalog of that id, when they all name the same one (the model of the first environment that was scanned is the model of the next, with no flag); when they name different models the scan MUST be refused, before anything is written, with a message that names each model and its environments and says to scan with `--dbmodel`; and when none records one, the model is `--db`. A `--dbmodel` that is given is the model of a catalog the project does not record in this environment, whatever the other environments record: the flag settles it.
+One database is one model in every environment. When `--dbmodel` is omitted and the project records no catalog of that id in this environment, the model MUST be the one the other environments record for a catalog of that id, when they all name the same one (the model of the first environment that was scanned is the model of the next, with no flag); when they name different models the scan MUST be refused, before anything is written, with a message that names each model and its environments and says to scan with `--dbmodel`; and when none records one, the model is `--db`. When the model taken from the other environments is not the one `--db` would give, the scan MUST say so, in one line on stderr that names the model and the environments it was taken from (`note: database "shop" is on database model "retail" in environment "local", so this scan of environment "dev" puts it on that model too; --dbmodel chooses another`); a model that is called as the database is what no flag would give anyway, and is not said. A `--dbmodel` that is given is the model of a catalog the project does not record in this environment, whatever the other environments record: the flag settles it.
 
 ### Output to project store
 
@@ -115,6 +117,8 @@ Re-running `scan` against the same project, environment, and database MUST be id
 
 A table or view that an environment's earlier scan wrote, and that the database no longer has, MUST be taken back by the next scan of that environment: the environment is removed from the `byEnv` of its columns, and when no environment has the table or view any more, its folder `dbmodels/<model>/<schema>/<tables|views>/<T>/` MUST be removed, and the scan MUST say so on stderr, one line for each folder removed, that names the folder (`removed: <folder>: <table or view> is no longer in the database`). Only that folder is removed: the `tables` and `views` folders of the schema, and the folder of the schema, stay, even when the last table or view of a schema went (less deletion is safer; a clone of the project from git has none of them, as git keeps no empty folder).
 
+The first scan of a catalog in an environment (the project holds no catalog file of it in that environment) has no earlier scan of its own to take back, so it MUST remove nothing and say nothing of the tables that are already in the model for that environment: a model file that a person made, or that an older scan wrote, can list no catalog for an environment whose columns files list it, and a new catalog scanned onto that model must not take the tables of another database for its own.
+
 A scan MUST remove nothing else, and MUST decide first whether a folder is its own: a folder directly in `tables` or `views` of a schema of the model is the scan's only when it holds the one file a scan writes there, named for the folder, `<schema>.<T>.columns.json` (the schema and `<T>`, the name of the folder, compared exactly), as a regular file, and that file is a columns file that lists the environment of the scan. The name of the file is part of the test, so a copy or a rename of the folder of a table, whose file keeps the name it had in the old folder (`tables/Customer.bak` or `tables/Old-2019`, holding `main.Customer.columns.json` or `main.Old.columns.json`), is not the scan's, and a snapshot of an older table, which no scan can write again, is not lost. Any other folder (a person's own, a copy or a rename, one that cannot be listed, one with no such file or whose file cannot be read, one whose columns do not list the environment of the scan, another environment's) is not the scan's: it MUST be left, and the scan MUST say nothing of it and MUST NOT fail for it, whatever it holds and whatever it is linked to, on this scan and on every later one. A folder that is the scan's and holds anything but that one file (a differently named columns file included) is left, and named on stderr. When the model also feeds another catalog in the same environment, the scan does not know what that database has: it MUST leave the folder, and name it.
 
 A scan MUST NOT take back a folder that is its own through a link: when the folder, or any folder above it from `dbmodels` down, is not a plain folder as `Lstat` reports it (which a symbolic link is not, nor a Windows junction, nor any other reparse point), or cannot be inspected, it MUST refuse, with an error that names the folder, before it writes anything.
@@ -124,6 +128,38 @@ A scan MUST NOT take back a folder that is its own through a link: when the fold
 Scanning the same `--db` for a second `--env` MUST keep the state the first environment's scan wrote. The `byEnv` of each column of a columns file MUST list every environment whose scan found that column in that table or view, the columns of the scan in the order the scan found them, followed by the columns that only other environments have. A table or view that only another environment has MUST stay as it is. The environments the columns files list MUST be among those the model file lists, and every environment of the model file that has the table or view MUST be in the `byEnv` of its columns.
 
 The file holds one set of attributes for a column (its type, nullability, default and place) and one order of the columns: those of the last scan. So when the databases of two environments differ in a column they share, or one has a column that is not the last, a scan of one environment writes the file again with its own attributes and order, though no database changed since the scan of the other; a rescan of an environment is byte-identical only until another environment whose columns differ is scanned. That is the limit of [REQ: idempotent-rescan](#req-idempotent-rescan) for a project with more than one environment, and a test pins it.
+
+### PostgreSQL
+
+A PostgreSQL scan (`-D postgres`) reads a database through DALgo's schema reader, writes the layout of every other scan, and adds one file, the connection descriptor. The rules below hold for it and for no other driver.
+
+#### REQ: postgres-connection-from-environment
+
+The connection of a PostgreSQL scan MUST be a `postgres://` or `postgresql://` URL held in the environment variable named by `--dsn-env`. The URL carries the host, port, user and password together, so a password is never on a command line (the process list and the shell history keep it) or in a project file: `--server`, `--port`, `--user`, `--password` and `--path` MUST be refused, each named, and so MUST a variable whose name is not an environment variable name, one that is not set, one whose name does not start with `DATATUG_` and is not listed in `DATATUG_DSN_ENV_ALLOW` (a project file must not be able to select any variable of the machine), a URL that net/url and pgx read differently from how it was written (an unescaped `/`, `?` or `#` after digits in the password, or a user name that holds a colon), and a URL whose query sets `host`, `port`, `dbname` or `database` (the query is applied after the authority and the path and replaces what they name, so the line that says what the scan connects to would name a place the scan does not connect to: the host and port go in the authority and the database in the path). No refusal repeats a part of the URL; the last one names the key, which is not part of it.
+
+#### REQ: postgres-project-holds-no-connection
+
+No file a PostgreSQL scan writes MUST hold a host, a port, a user name, a password, a query string or a URL: not the project file, the environment file, the database model file, a columns file, the catalog file or the descriptor. The server of the environment file is the driver and nothing else (`{"driver": "postgres", "catalogs": ["shop"]}`), as is the server of the project: two PostgreSQL databases on two hosts are two catalogs of one server of the project. The catalog file holds the driver `postgres`, the id, the model, and as its `path` the project-relative path of the connection descriptor, `connections/<env>/<db>.json`. The descriptor MUST hold the name of the environment variable and nothing else (`{"dsnEnv": "DATATUG_SHOP_PG_URL"}`), and MUST lie inside the project folder: every reader MUST refuse a catalog whose `path` is absolute, starts with `~` or `$`, leaves the project folder through `..`, is a URL, leads out of the folder through a link, or is a path whose link check fails for any reason but "there is no such file" (a path that cannot be classified is not handed to the reader), without repeating the path in its message (`ResolveDescriptorPath` in `pkg/api/descriptor_path.go`). The reader resolves the catalog to the source `env:<VARIABLE>`, never to the URL.
+
+#### REQ: postgres-descriptor-follows-the-project
+
+The project MUST be validated before the descriptor is written, so a project that cannot be saved leaves no descriptor in a folder with no project. When the save fails after the descriptor was written, the scan MUST take the descriptor back: remove one it made, with the folders it made (a folder that holds anything else stays), and put back one that was there, as it was; a descriptor that is as the scan would write it is not written again. The writer MUST NOT follow a link, as the reader does not: the project is not trusted, and a scan that read, truncated and wrote through a link at `connections`, at `connections/<env>` or at the descriptor file would overwrite a file of the machine, and exit `0` on a project that no reader opens. Each of the three is looked at without following it (`Lstat`), and a link, or anything that is not a folder (the two folders) or not a regular file (the descriptor), is refused, naming its path in the project and not where it leads, before anything is read through it, written, or saved: what a link leads to is never read or written, and nothing the scan made on the way is left behind. A rescan with another `--dsn-env` MUST update the descriptor and the `path` of the catalog together: the catalog names the descriptor the scan wrote now, never one an earlier scan, or a person, left, and nothing else in the project changes.
+
+#### REQ: postgres-and-sqlite-in-one-environment
+
+A project records its servers by driver (and by host and port for the drivers that have them), so a SQLite catalog and a PostgreSQL catalog scanned into one environment of one project MUST both be kept, in either order, each resolving to its own source (the file, and the variable), and a rescan of either MUST leave the other as it was. Two servers that the project records by their driver alone MUST NOT be taken for one another by anything that reads the project. A catalog file is kept by environment and id, and not by driver, so one `--db` under two drivers in one environment (for any two drivers, a SQLite file and a PostgreSQL database among them) is one catalog file that two servers list, and the scan of the second would put its own catalog file in the place of the first's and take the first's tables back as the ones its database no longer has: a scan whose `--db` the environment already records under another driver MUST be refused, before the database is read or anything is written, with a message that names both drivers and says to use another `--db`. The same id in another environment is not in the way.
+
+#### REQ: postgres-says-no-credentials
+
+The line the scan logs to name what it connects to MUST be built by `dbcopy.SourceDisplay`: the scheme, the host, the port and the database of the URL (`connecting to postgres://db.example.com:5432/shop`), and never a user name, a password or a query string. Every error of the open of the source, of the read of the catalog and of the count of the records of a table MUST be the classified open failure (`open postgres source "env:<VARIABLE>": <a fixed sentence>`), never the words of the driver, which can quote the URL; the driver's own error stays reachable through `errors.Is` and `errors.As`. A scan counts the records of a table only through a reader that can tell its views (`dalgoschema.ViewLister`), and never of a view; a count that fails does not fail the scan. The reader of `dalgo2postgres` cannot (it lists the views of a server with its tables, so each view would be a table to the scanner), and the server it opens runs `COUNT(*)` natively, so a scan through it counts nothing at all: a count would be a full read of every table and every view of somebody's database, with no timeout, for numbers that no project file holds. The day that reader tells its views, the tables are counted again.
+
+#### REQ: postgres-names-are-exact
+
+PostgreSQL names are case-sensitive, and the scan opens the adapter in exact identifier mode, so a table, a view, a schema and a column are in the project under the name the server reports, with its case; a test pins the mode, because the default of the adapter folds every name to lower case. Tables that differ only by case, and names that cannot be folder names, follow [REQ: unusable-names-left-out](#req-unusable-names-left-out): each is named on stderr, left out, and the scan exits `0`. The schema `public` and every other schema the reader reports each get a folder of their own under the model (`dbmodels/<model>/<schema>/`). What a scan reads is what the reader lists: the reader of `dalgo2postgres` lists the tables and views of the schema `public`, and does not tell a view from a table, so with it a view is recorded as a table and no other schema is read; a reader that names the schema of each collection it lists, and that can tell its views (`dalgoschema.ViewLister`), is recorded in the schemas and views it says. Foreign keys are not stored in the project.
+
+#### REQ: postgres-help-says-what-works
+
+The help of `scan` MUST say what works: that `-D postgres` takes its connection from the variable of `--dsn-env`, which stays in the environment and is never written to the project; that the scan reads the schema `public`, saves a view as a table, and records the driver and the database id in the environment file and the name of the variable in a descriptor; and that the project never holds a host, a port, a user or a password. The text of `--driver` MUST name `postgres` among the drivers.
 
 ### Sensitive data handling
 
@@ -135,9 +171,10 @@ Database passwords MUST NOT appear in stdout or stderr at any verbosity. The cur
 
 | Flag | Aliases | Type | Required | Description |
 |---|---|---|---|---|
-| `--driver` | `-D` | string | yes | DB driver. Supported: `sqlite3`, `sqlserver`. |
+| `--driver` | `-D` | string | yes | DB driver. Supported: `sqlite3`, `sqlserver`, `postgres`. |
 | `--path` |  | string | yes (`sqlite3`) | The SQLite database file. It must exist, and its whole path (from the working directory, for a relative one) must have no `?` in it. |
-| `--server` | `-s` | string | yes (network DBs) | Network host. |
+| `--dsn-env` |  | string | yes (`postgres`) | The environment variable that holds the PostgreSQL connection URL. Its name starts with `DATATUG_` or is listed in `DATATUG_DSN_ENV_ALLOW`. The URL is never written to the project. |
+| `--server` | `-s` | string | yes (`sqlserver`) | Network host. |
 | `--port` |  | int | no | Network port; driver-default if omitted. |
 | `--user` | `-U` | string | no | DB user. |
 | `--password` | `-P` | string | no | DB password. |
@@ -154,13 +191,14 @@ This is the one place the files of a scan are written down. It is the layout of 
 |---|---|---|
 | `datatug-project.json` | `SaveProject` | `id`, `access`, `created` |
 | `README.md` | `SaveProject` | generated text, on the first scan; a `README.md` already in the folder is kept as it is: `SaveProject` replaces it on every save, so the scan puts it back (`saveKeepingReadme`, `pkg/api/scan_layout.go`) |
-| `environments/<env>/<env>.env.json` | `SaveProject` | `id`; `dbServers[]` with `driver`, `host` and `port` (network engines only: none for `sqlite3`) and `catalogs[]`, the ids of the databases scanned on that server |
-| `environments/<env>/catalogs/<db>/<db>.db.json` | `SaveEnvDbCatalog` | `id`; `driver`; `path` (`sqlite3`; see [REQ: sqlite-path-stored-portably](#req-sqlite-path-stored-portably)); `dbModel`, the model id; `schemas`, always `[]` |
+| `environments/<env>/<env>.env.json` | `SaveProject` | `id`; `dbServers[]` with `driver`, `host` and `port` (`sqlserver` only: none for `sqlite3` or `postgres`, see [REQ: postgres-project-holds-no-connection](#req-postgres-project-holds-no-connection)) and `catalogs[]`, the ids of the databases scanned on that server |
+| `environments/<env>/catalogs/<db>/<db>.db.json` | `SaveEnvDbCatalog` | `id`; `driver`; `path` (`sqlite3`: see [REQ: sqlite-path-stored-portably](#req-sqlite-path-stored-portably); `postgres`: the path of the connection descriptor); `dbModel`, the model id; `schemas`, always `[]` |
+| `connections/<env>/<db>.json` | the CLI (`postgres` only) | `dsnEnv`, the name of the environment variable that holds the connection URL, and nothing else |
 | `dbmodels/<model>/<model>.dbmodel.json` | `SaveProject` | `id`; `environments[]` with `id` and `DbCatalogs[]` of `id` (no schemas, no tables) |
 | `dbmodels/<model>/<schema>/tables/<T>/<schema>.<T>.columns.json` | the CLI | `columns[]`, in the engine's column order, each with `name`, `ordinalPosition`, `pkPosition` (the 1-based place in the primary key, left out when the column is not in it), `isNullable`, `dbType`, the other column properties the engine reports (such as `default` and `charMaxLength`), and `byEnv`, which holds each environment that has the column, each with `status` `exists` (see [REQ: rescan-keeps-other-environments](#req-rescan-keeps-other-environments)) |
 | `dbmodels/<model>/<schema>/views/<T>/<schema>.<T>.columns.json` | the CLI | the same, for a view |
 
-A table or view is the folder `<T>`: the readers list tables and views by folder name, and read the columns from the one file in it whose name ends in `.columns.json`, found by listing the folder: a `[` in a table name, or in the path of the project, is a character of a name and not a pattern, so `t[1]` and `t1` are two tables. Nothing else is written. In particular the project holds no foreign keys, no indexes, no record counts and no DDL, and no password. A scan of PostgreSQL (not available in this release) will record its driver and its catalog id only, and no host, port, user or password in any project file.
+A table or view is the folder `<T>`: the readers list tables and views by folder name, and read the columns from the one file in it whose name ends in `.columns.json`, found by listing the folder: a `[` in a table name, or in the path of the project, is a character of a name and not a pattern, so `t[1]` and `t1` are two tables. Nothing else is written. In particular the project holds no foreign keys, no indexes, no record counts and no DDL, and no password. A scan of PostgreSQL records its driver and its catalog id only, and the name of an environment variable in a descriptor, and no host, port, user, password or URL in any project file (see [PostgreSQL](#postgresql)).
 
 The readers of the layout are `GetCatalogTables` and `GetCatalogSchema` (`pkg/api/catalog_tables_api.go`; chat, `serve` and saved queries), source resolution (`pkg/api/source_resolver.go`) and the web app's GitHub reader, which reads the environment folders, the `catalogs` of the environment file, the `dbModel` of the catalog file and the folder names under `dbmodels/<model>/<schema>/tables` and `views`.
 
@@ -328,6 +366,90 @@ Running `datatug scan ... --password secret123` with logging enabled does NOT pr
 **Requirements:** scan#req:dbmodel-default
 
 `datatug scan ... --db sample` (no `--dbmodel`) writes metadata under `dbModel: sample`.
+
+### AC: scans-postgres-into-project
+
+**Requirements:** scan#req:driver-selection, scan#req:postgres-project-holds-no-connection, scan#req:postgres-names-are-exact, scan#req:persist-via-project-store
+
+Given a PostgreSQL database (a fake schema reader behind the one seam through which the scan opens a source) with mixed-case names, two schemas, a view and a composite primary key, `datatug scan --directory ./shop --driver postgres --dsn-env DATATUG_SHOP_PG_URL --db shop --env local` exits `0`; the folder holds exactly the files of the layout and the descriptor; `LoadProject` loads it and `Validate` accepts it; the tables, views and columns of both schemas are listed under their exact names, with the position of each primary-key column; the web reader's walk finds the same, and so do the table list of `serve` (`GetCatalogTables`) and the project catalog of `chat`, which holds the tables as tables and the views as views and marks the source resolved; the source resolves to `env:DATATUG_SHOP_PG_URL`; and no file of the folder, or name of one, holds the host, the port, the user, the password, the query string or the URL of the fake server, and no `.json` file has a key named `host`, `port`, `user`, `password` or `server` at any depth (a port written as a number is not found by a search of the text). (`TestScanJourneyPostgres`, `TestAssertNoSourceInFindsAConnectionKeyAtAnyDepth`.)
+
+### AC: postgres-second-scan-is-quiet
+
+**Requirements:** scan#req:idempotent-rescan, scan#req:rescan-removes-dropped-tables
+
+Given the project of the previous criterion, a second scan exits `0`, says nothing on stderr and leaves every file with the content it had (compared by SHA-256); after a table is dropped from the database and another added, a scan exits `0`, says on stderr one line that names the folder it removed, and the folder of the dropped table is gone, the new one is there and every other file is as it was. (`TestScanJourneyPostgres`.)
+
+### AC: postgres-connection-is-refused-before-anything-is-opened
+
+**Requirements:** scan#req:postgres-connection-from-environment, scan#req:no-password-in-logs
+
+`datatug scan -D postgres` with no `--dsn-env`, with a variable that is not set, with a name that is not allowed, with a password on the command line (`-P`), with a URL whose user holds the password, with a URL whose password splits it, or with a URL whose query sets `host`, `port`, `dbname` or `database`, exits non-zero with a message that says what to do and repeats no part of the URL (the last names only the key), before the source is opened, with nothing logged that names a server or a user, and the folder is as it was. (`TestScanCommandAction_PostgresRefusesBeforeItOpensOrLogsAnything`, `TestNewPostgresScanParams_Refuses`.)
+
+### AC: postgres-descriptor-is-inside-the-project
+
+**Requirements:** scan#req:postgres-project-holds-no-connection
+
+A catalog of the driver `postgres` whose `path` is `/etc/shop.json`, `../shop.json`, `~/shop.json`, `$HOME/shop.json`, a URL, or a file that a link leads out of the project folder to, resolves to no source, and the message repeats no part of the path. A path whose link check fails for a reason other than "there is no such file" resolves to no source either. A descriptor that names a variable the operator did not set aside, or that holds any field but `dsnEnv`, is refused. (`TestResolveDescriptorPath`, `TestResolveDescriptorPath_RefusesALinkThatLeadsOutOfTheProject`, `TestResolveDescriptorPath_RefusesAFileItCannotClassify`, `TestSourceURLFromCatalog_PostgresRefusesWhatItCannotTrust`.)
+
+### AC: postgres-failed-save-takes-back-the-descriptor
+
+**Requirements:** scan#req:postgres-descriptor-follows-the-project
+
+Given a folder where the save of the project fails after the descriptor was written (a file where the folder of the models belongs), `datatug scan -D postgres` exits non-zero and leaves no `connections` folder; given a descriptor that was there, it is as it was. A rescan with another `--dsn-env` changes the descriptor, the catalog file still names it, and no other file changes. (`TestScanJourneyPostgresFailedSaveTakesBackTheDescriptor`, `TestScanJourneyPostgresRescanWithAnotherVariableUpdatesTheDescriptor`, `TestUpdateDbSchema_PostgresRescanUpdatesTheCatalogPathWithTheDescriptor`, `TestWriteDescriptor_UndoRemovesTheDescriptorAndTheFoldersItMade`, `TestWriteDescriptor_UndoLeavesTheFoldersThatWereThereAndWhatIsInThem`, `TestWriteDescriptor_UndoPutsBackADescriptorThatWasThere`.)
+
+### AC: postgres-descriptor-is-not-written-through-a-link
+
+**Requirements:** scan#req:postgres-descriptor-follows-the-project
+
+Given a project where `connections`, `connections/local` or `connections/local/shop.json` is a link to a place outside the project folder (to a folder that holds a file of that name, or to a file), `datatug scan -D postgres --db shop --env local` exits non-zero with a message that names that path of the project and not where it leads, before anything is saved: the project folder is as it was, and the file the link leads to has the content it had and nothing is made beside it. A link to nothing, a folder where the descriptor goes, and a file or a link that cannot be looked at are refused the same way. (`TestScanJourneyPostgresRefusesALinkWhereTheDescriptorGoes`, `TestWriteDescriptor_RefusesALinkAnywhereOnItsPath`, `TestWriteDescriptor_RefusesADanglingLinkAndANonFileWhereTheDescriptorGoes`, `TestWriteDescriptor_ALinkThatCannotBeLookedAtIsRefused`, `TestWriteDescriptor_ADescriptorThatCannotBeLookedAtIsRefused`, `TestWriteDescriptor_AFileThatCannotBeWrittenLeavesNoFolderBehind`.)
+
+### AC: one-database-id-has-one-driver
+
+**Requirements:** scan#req:postgres-and-sqlite-in-one-environment
+
+Given a project that holds the SQLite catalog `shop` in environment `local`, `datatug scan -D postgres --db shop --env local` exits non-zero with a message that names `sqlite3` and `postgres` and says to use another `--db`, before the PostgreSQL source is opened, and the folder is as it was; the same holds for a SQLite scan of a `shop` that the project holds as a PostgreSQL catalog. The same scan into environment `prod` works. (`TestScanJourneyOneDatabaseIdUnderTwoDriversIsRefused`, `TestCheckScanDriverAgainstProject`, `TestSaveScannedProject_RefusesADatabaseThatIsAnotherDriversInTheEnvironment`.)
+
+### AC: postgres-and-sqlite-share-an-environment
+
+**Requirements:** scan#req:postgres-and-sqlite-in-one-environment
+
+A SQLite file and a PostgreSQL database scanned into one project and one environment, in either order, are both in the environment file, each under its own driver and with no host or port; each resolves to its own source; and a rescan of both leaves the folder byte-identical. Two PostgreSQL databases of two hosts are two catalogs of the one server of the project. (`TestScanJourneyPostgresAndSQLiteInOneEnvironment`, `TestScanJourneyTwoPostgresDatabasesInOneEnvironment`.)
+
+### AC: postgres-prints-no-credentials
+
+**Requirements:** scan#req:postgres-says-no-credentials
+
+The scan of a server whose URL holds a user, a password and a query string logs `connecting to postgres://<host>:<port>/<database>` and nothing of the user, the password or the query; when the open of the server, the listing of its tables or the count of the records of one fails in words that quote the URL, the error or the log line is the classified open failure, which names the source as `env:<VARIABLE>`, and no secret is in the output, the log or any file (checked against every generated source string, `TestProperty_NoCommandPathEchoesASourceSecret`); a view is not counted, and a server whose reader cannot tell its views (the reader that ships) is not counted at all, though it runs `COUNT(*)` natively: no count query is sent. No test dials a server: the open is a seam, and the default of the seam in the test binary of `pkg/api` and of `apps/datatugapp/commands` stops the run. (`TestScanJourneyPostgresNamesTheServerWithoutTheCredentials`, `TestScanJourneyPostgresReadErrorsAreClassified`, `TestScanDbCatalog_PostgresReportsACountThatFailsAsAClassifiedFailure`, `TestScanDbCatalog_PostgresCountsTheRecordsOfATableAndNotOfAView`, `TestScanDbCatalog_PostgresRunsNoCountThroughAReaderThatCannotTellItsViews`, `TestNeverDialStopsTheRunOnAnyRealOpen`, `TestTheOpenOfThisTestBinaryStopsTheRunOnAnyOpen`, `TestTheOpenOfThisTestBinaryIsTheOneThatStopsTheRun`.)
+
+### AC: postgres-names-keep-their-case
+
+**Requirements:** scan#req:postgres-names-are-exact, scan#req:unusable-names-left-out
+
+Given tables named `Customer` and `customer`, `a/b` and `con` in schema `public`, and schemas `Reports` and `reports`, `datatug scan -D postgres` exits `0`, names on stderr the table that differs by case, `a/b`, `con` and the schema that differs by case, one line each, and writes every other table under the folder of its own schema; the adapter is opened in exact identifier mode. (`TestScanJourneyPostgresNamesThatCannotBeFolders`, `TestOpenSchemaScan_PinsTheExactIdentifierMode`, `TestScanCatalog_ReadsEachCollectionInTheSchemaItsReferenceNames`.)
+
+### AC: postgres-help-names-the-driver
+
+**Requirements:** scan#req:postgres-help-says-what-works
+
+`datatug scan --help` names `postgres` among the drivers, says that the connection comes from the variable of `--dsn-env` and is never written to the project, that the schema `public` is read and a view is saved as a table, and does not say that the scan is not available. (`TestScanCommand_HelpSaysWhatPostgresDoes`.)
+
+### AC: first-scan-takes-nothing-back
+
+**Requirements:** scan#req:rescan-removes-dropped-tables
+
+Given a model file whose environment lists no catalog while the columns files of the model list the environment, a first scan of a new catalog onto that model removes no folder and says nothing of the tables that are there; the rescan of that catalog, once recorded, takes back what its database dropped. (`TestSaveScannedProject_AFirstScanOfACatalogTakesNothingBack`.)
+
+### AC: model-taken-from-other-environments-is-said
+
+**Requirements:** scan#req:dbmodel-default
+
+A scan with no `--dbmodel` of a catalog that another environment records on the model `retail-model` puts it on that model and says so in one line on stderr that names the model and the environment; a model called as the database is not said. (`TestScanJourneyKeepsTheModelOfACatalogTheProjectHolds`, `TestResolveScanDbModelNoted`.)
+
+### AC: names-are-one-definition
+
+**Requirements:** scan#req:names-are-plain
+
+Every name that `--env`, `--db` or `--dbmodel` accepts is a name every route of `serve` accepts for an environment or a catalog, so that a project a scan writes can always be browsed; a name that differs only by case from another that is there as written is not refused for it. (`TestEveryNameTheScanAcceptsIsOneTheRoutesOfServeAccept`, `TestCheckScanNamesAgainstProject`.)
 
 ## Open Questions
 

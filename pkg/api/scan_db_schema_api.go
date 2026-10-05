@@ -32,21 +32,41 @@ type ProjectLoader interface {
 
 var _ ProjectLoader = (datatug.ProjectStore)(nil)
 
-// loggedUser is the ", user=..." part of the scan's log line: the user of the
-// connection parameters, except for PostgreSQL, whose user comes out of a URL.
-func loggedUser(driver string, params dbconnection.Params) string {
-	if driver == DriverPostgres {
-		return ""
+// scanTargetDisplayer is what the connection parameters of a scan say about where they
+// connect, when they hold a connection URL: its scheme, host, port and database, built by
+// dbcopy.SourceDisplay, never its user, password or query.
+type scanTargetDisplayer interface {
+	Display() string
+}
+
+// loggedTarget is the part of the scan's log line that names what the scan connects to.
+// For a driver whose connection is a URL held in an environment variable (PostgreSQL) it
+// is what the display function of the sources makes of the URL: the scheme, host, port and
+// database, and never a user name, a password or a query string, which a URL can hold
+// whatever the operator put there. For the others it is the server, the port and the user
+// of the connection parameters, flags the operator typed.
+func loggedTarget(params dbconnection.Params) string {
+	if displayer, ok := params.(scanTargetDisplayer); ok {
+		return fmt.Sprintf("connecting to %s", displayer.Display())
 	}
-	return fmt.Sprintf(", user=%v", params.User())
+	return fmt.Sprintf("server=%v, port=%v, user=%v", params.Server(), params.Port(), params.User())
+}
+
+// serverHasHost is whether a project records the host and the port of a server of driver.
+// It does not for SQLite (the project model forbids them: the file path is carried on the
+// catalog instead) and not for PostgreSQL, whose host, port, user and password are in a
+// connection URL that stays in an environment variable: a project is pushed to places the
+// URL must never reach, so its server is the driver and nothing else.
+func serverHasHost(driver string) bool {
+	return driver != dbconnection.DriverSQLite3 && driver != DriverPostgres
 }
 
 // ScannedServer is the server a scan of driver with dbConnParams reads, as the project
-// records it. SQLite is file-based: the project model forbids host/port for sqlite3
-// (the file path is carried on the catalog instead).
+// records it: for a driver with a host (see serverHasHost) the host and the port of the
+// connection parameters, and for the others the driver only.
 func ScannedServer(driver string, dbConnParams dbconnection.Params) datatug.ServerRef {
 	server := datatug.ServerRef{Driver: driver}
-	if driver != dbconnection.DriverSQLite3 {
+	if serverHasHost(driver) {
 		server.Host = dbConnParams.Server()
 		server.Port = dbConnParams.Port()
 	}
@@ -56,11 +76,9 @@ func ScannedServer(driver string, dbConnParams dbconnection.Params) datatug.Serv
 // UpdateDbSchema updates DB schema
 func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID, environment, driver, dbModelID string, dbConnParams dbconnection.Params) (project *datatug.Project, err error) {
 	// dbConnParams.String() is the connection string, password included: log
-	// the parts that identify the target instead. The user is one of them for a
-	// driver whose user is a flag the operator typed. A PostgreSQL user is read out
-	// of the connection URL, where the user name can be a token, so it is not logged.
-	log.Printf("Updating DB info for project=%v, env=%v, driver=%v, dbModelID=%v, dbCatalog=%v, server=%v, port=%v%s",
-		projectID, environment, driver, dbModelID, dbConnParams.Catalog(), dbConnParams.Server(), dbConnParams.Port(), loggedUser(driver, dbConnParams))
+	// the parts that identify the target instead (see loggedTarget).
+	log.Printf("Updating DB info for project=%v, env=%v, driver=%v, dbModelID=%v, dbCatalog=%v, %s",
+		projectID, environment, driver, dbModelID, dbConnParams.Catalog(), loggedTarget(dbConnParams))
 
 	if dbConnParams.Catalog() == "" {
 		return nil, validation.NewErrRequestIsMissingRequiredField("dbConnParams.catalog")
@@ -155,7 +173,7 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 	if envID == "" {
 		return validation.NewErrRequestIsMissingRequiredField("envID")
 	}
-	if dbServerRef.Driver != dbconnection.DriverSQLite3 && dbServerRef.Host == "" {
+	if serverHasHost(dbServerRef.Driver) && dbServerRef.Host == "" {
 		return validation.NewErrRequestIsMissingRequiredField("dbServerRef.Host")
 	}
 	if dbCatalog == nil {
@@ -224,8 +242,12 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 		updated := false
 		for j, db := range projDbServer.Catalogs {
 			if db.ID == dbCatalog.ID {
-				// restore path as path might be normalized if pointing to user's directory
-				dbCatalog.Path = projDbServer.Catalogs[j].Path
+				// restore path as path might be normalized if pointing to user's directory.
+				// A PostgreSQL catalog's path is the connection descriptor the scan is writing
+				// now: the catalog and the descriptor are updated together, never apart.
+				if dbServerRef.Driver != DriverPostgres {
+					dbCatalog.Path = projDbServer.Catalogs[j].Path
+				}
 				// TODO: currently replaces catalog with new info, should merge to preserver comments
 				projDbServer.Catalogs[j] = dbCatalog
 				updated = true
@@ -391,11 +413,6 @@ func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Param
 // SQLite catalog, and why, is named on the warnings of ctx (see WithScanWarnings).
 func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (dbCatalog *datatug.DbCatalog, err error) {
 	if server.Driver == DriverPostgres {
-		// Ask whether the project can record the server before opening anything:
-		// a scan that cannot be saved must not connect and read a schema first.
-		if err = checkPostgresServer(server); err != nil {
-			return nil, err
-		}
 		// PostgreSQL is read through DALgo's schema reader, and opened from an
 		// environment variable: there is no connection string to give database/sql.
 		return scanPostgresCatalog(ctx, connectionParams)

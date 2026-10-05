@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log"
 	"strings"
 	"testing"
@@ -13,16 +14,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The scan's log line names the target and never the user of a PostgreSQL
-// connection URL, which is read out of the URL and can be a token. A driver whose
-// user is a flag the operator typed still logs it (see
+// The scan's log line names what it connects to as the display function of the sources
+// does (the scheme, the host, the port and the database) and never the user of a PostgreSQL
+// connection URL, which is read out of the URL and can be a token, nor its password or its
+// query string. A driver whose user is a flag the operator typed still logs it (see
 // TestUpdateDbSchema_LogLineNeverHoldsThePassword).
 func TestUpdateDbSchema_LogLineNeverHoldsThePostgresUser(t *testing.T) {
 	const token = "ghp_TOKENASUSERNAME1234"
 	params, err := NewPostgresScanParams(func(string) (string, bool) {
-		return "postgres://" + token + "@db.example.com:5433/shop", true
+		return "postgres://" + token + "@db.example.com:5433/shop?sslmode=require&password=QUERYSECRET", true
 	}, "DATATUG_SHOP_PG_URL", "prod", "shop")
 	require.NoError(t, err)
+	// The scan is refused for its empty project id before it opens anything; if that order ever
+	// changes, the test stops here and does not reach a host.
+	stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
+		t.Error("the empty project id is refused before the source is opened")
+		return nil, errors.New("not a source of this test")
+	})
 	var logged bytes.Buffer
 	saved := log.Writer()
 	log.SetOutput(&logged)
@@ -30,9 +38,10 @@ func TestUpdateDbSchema_LogLineNeverHoldsThePostgresUser(t *testing.T) {
 
 	_, err = UpdateDbSchema(context.Background(), nil, "", "prod", DriverPostgres, "shop", params)
 	assert.Error(t, err, "the empty project id is refused after the log line")
-	assert.Contains(t, logged.String(), "server=db.example.com, port=5433")
-	assert.NotContains(t, logged.String(), token)
-	assert.NotContains(t, logged.String(), "user=")
+	assert.Contains(t, logged.String(), "connecting to postgres://db.example.com:5433/shop\n")
+	for _, hidden := range []string{token, "user=", "server=", "port=", "sslmode", "QUERYSECRET"} {
+		assert.NotContains(t, logged.String(), hidden)
+	}
 }
 
 // A scan flag is what the user typed, and a source string can be typed where an

@@ -3,11 +3,9 @@ package commands
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
@@ -58,35 +56,5 @@ func TestResolveQueryDatabase_NamesTheEnvironmentOnlyWhenItIsAPlainName(t *testi
 				t.Errorf("the loader's error, which quotes the path, is carried for an environment that is not a plain name: %v", err)
 			}
 		})
-	}
-}
-
-// recordingT is the part of testing.T that requirePostgresScanUnavailable uses,
-// recording instead of stopping.
-type recordingT struct{ failures []string }
-
-func (*recordingT) Helper() {}
-func (r *recordingT) Fatalf(format string, args ...any) {
-	r.failures = append(r.failures, fmt.Sprintf(format, args...))
-}
-
-// The command property stops at once when a datatug-core upgrade lets the scan
-// reach a server; while the scan is not available it says nothing.
-func TestRequirePostgresScanUnavailable(t *testing.T) {
-	refused := &recordingT{}
-	requirePostgresScanUnavailable(refused, func() error { return errors.New("not available") })
-	if len(refused.failures) != 0 {
-		t.Fatalf("a scan that is not available failed the guard: %v", refused.failures)
-	}
-	open := &recordingT{}
-	requirePostgresScanUnavailable(open, func() error { return nil })
-	if len(open.failures) != 1 || !strings.Contains(open.failures[0], "would open the generated hosts") {
-		t.Fatalf("a scan that is available must fail the guard loudly: %v", open.failures)
-	}
-	// The release this branch is built on does not scan PostgreSQL.
-	actual := &recordingT{}
-	requirePostgresScanUnavailable(actual, api.CheckPostgresScanAvailable)
-	if len(actual.failures) != 0 {
-		t.Fatalf("api.CheckPostgresScanAvailable() is nil: %v", actual.failures)
 	}
 }

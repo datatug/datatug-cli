@@ -101,6 +101,10 @@ func TestPostgresConnectionString_RefusesAReadThatTurnsReadOnlyOff(t *testing.T)
 		"options=-c%20default_transaction_read_only%3Doff",
 		"options=-c%20DEFAULT_TRANSACTION_READ_ONLY%3dOFF",
 		"options=--default_transaction_read_only%3Doff",
+		// options is read as the server reads it (see optionsText).
+		"options=-c%20default-transaction-read-only%3Doff",
+		"options=--default-transaction-read-only%3Doff",
+		"options=-c%20default_transaction_read%5C_only%3Doff",
 	} {
 		got, err := postgresConnectionString("postgres://"+markerUser+":"+markerPassword+"@h/db?x="+markerQuery+"&"+query, false)
 		assert.Empty(t, got, query)

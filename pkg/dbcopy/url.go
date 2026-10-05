@@ -484,8 +484,10 @@ func LocalSourceURL(scheme, path string) string {
 // column is returned exactly as the provider evaluates it, matching every
 // dalgo2sql/dalgo2ingitdb release before Task 13 (S110).
 //
-// The context is reserved for future use; today's driver constructors are
-// synchronous and do not honor cancellation. That's acceptable for the MVP
+// The context matters to a postgres source: the open returns when it ends, with
+// the context's own error, and the attempt goes on and keeps the handle it opens
+// for the next caller (see handleCache). The constructors of the other schemes
+// are synchronous and do not honor cancellation. That's acceptable for the MVP
 // CLI verb.
 func (r BackendRef) Open(ctx context.Context) (dal.DB, error) {
 	return r.open(ctx, openMode{})

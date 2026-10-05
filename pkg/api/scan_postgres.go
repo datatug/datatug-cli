@@ -66,10 +66,9 @@ func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, enviro
 	if ref.Scheme != "postgres" {
 		return nil, fmt.Errorf("environment variable %s must hold a postgres:// URL, not a %s source", dsnEnv, ref.Scheme)
 	}
-	target, err := dbcopy.ParsePostgresTarget(ref.Path)
-	if err != nil {
-		return nil, fmt.Errorf("environment variable %s: %w", dsnEnv, err)
-	}
+	// ParseWithEnv has read the URL with this same function and refused one it cannot read, so the error is
+	// never set here; a target that came back empty would be refused below, as one that names no host.
+	target, _ := dbcopy.ParsePostgresTarget(ref.Path)
 	if target.Host == "" {
 		return nil, fmt.Errorf("the URL in environment variable %s names no host (a unix-socket connection cannot be scanned yet)", dsnEnv)
 	}

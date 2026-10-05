@@ -109,7 +109,9 @@ func TestQuery_APostgresSourceReadThroughPoliciesIsRefused(t *testing.T) {
 
 // With the switch on and no policy, the source is opened as a protected read: the connection string the adapter gets
 // has the read-only session and the other defaults, and the failure of the open is the classified one, with the exit
-// code of its class and nothing of the source but the display form.
+// code of its class and nothing of the source but the display form. Every class of failure of an open exits with 4, as
+// the specs of `query run` and `db copy` require (the database cannot be opened): the classes differ in the sentence,
+// which is the adapter's own, chosen by kind and SQLSTATE and never by text.
 func TestQuery_APostgresSourceIsOpenedReadOnlyAndItsFailuresAreClassified(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	for name, tc := range map[string]struct {
@@ -142,8 +144,11 @@ func TestQuery_APostgresSourceIsOpenedReadOnlyAndItsFailuresAreClassified(t *tes
 // configuration. The command shows one fixed sentence, and nothing of the user, the password or the parameter.
 func TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	// The stand-in is built here, on the goroutine of the test: the opener runs on another one, where a failure of
+	// the setup (FailNow) would end that goroutine and not the test.
+	standIn := pgstandin.Unreachable(t, pgMarkerUser, pgMarkerPassword)
 	t.Cleanup(dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
-		return pgstandin.Unreachable(t, pgMarkerUser, pgMarkerPassword), nil
+		return standIn, nil
 	}))
 	stdout, stderr, code := runQuery(t, "", "--db", pgMarkedSource, "--from", "customers", "--no-policies")
 	assert.Equal(t, exitCodeDatabase, code)
@@ -153,8 +158,6 @@ func TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence(t *testing.T) {
 	assertNoPgMarkers(t, "lost connection", stdout, stderr)
 }
 
-// Every class of failure of an open exits with 4, as the specs of `query run` and `db copy` require (the database cannot be
-// opened): the classes differ in the sentence, which is the adapter's own, chosen by kind and SQLSTATE and never by text.
 // A URL that turns the read-only session off is refused by the read, and the refusal names the parameter and the
 // one place that writes, and nothing of the URL.
 func TestQuery_AURLThatTurnsReadOnlyOffIsRefused(t *testing.T) {

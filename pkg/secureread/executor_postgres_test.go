@@ -143,8 +143,11 @@ func TestRunNativeSQL_APostgresSourceIsRefusedAndTheMessageNamesPostgreSQL(t *te
 // pgx writes, which names the user and holds the password.
 func TestExecutor_AReadThatLosesItsConnectionShowsOneFixedSentence(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	// The stand-in is built here, on the goroutine of the test: the opener runs on another one, where a failure of
+	// the setup (FailNow) would end that goroutine and not the test.
+	standIn := pgstandin.Unreachable(t, pgUser, pgPassword)
 	t.Cleanup(dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
-		return pgstandin.Unreachable(t, pgUser, pgPassword), nil
+		return standIn, nil
 	}))
 	executor := NewExecutor(sessions(t)["an unrestricted session"])
 	for name, read := range reads(executor) {

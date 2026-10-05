@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -364,6 +365,45 @@ func TestOpen_APanicOfTheOpenerReachesEveryCallerThatWaited(t *testing.T) {
 	db, err := next.await(context.Background())
 	assert.NoError(t, err)
 	assert.NotNil(t, db)
+}
+
+// An opener whose goroutine ends through runtime.Goexit (a failing test does, with FailNow, when it builds its stand-in
+// inside the opener) neither returns nor panics. Its attempt still ends, with the fixed failure, for every caller that
+// waited, and the entry does not keep the dead attempt: the next call opens again. The callers wait with a context that
+// ends, so that a regression is a failure of the test and not a hang.
+func TestOpen_AnOpenerThatEndsItsGoroutineEndsTheAttemptWithAFailure(t *testing.T) {
+	previewOn(t)
+	cache := &handleCache{}
+	release := make(chan struct{})
+	open := func() (*dalgo2postgres.Database, error) {
+		<-release
+		runtime.Goexit()
+		return &dalgo2postgres.Database{}, nil // not reached
+	}
+	key := [32]byte{4}
+	_, first, err := cache.join(context.Background(), key, open)
+	require.NoError(t, err)
+	_, second, err := cache.join(context.Background(), key, open)
+	require.NoError(t, err)
+	close(release)
+
+	for name, attempt := range map[string]*openAttempt{"the caller that started it": first, "the caller that joined it": second} {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		db, awaitErr := attempt.await(ctx)
+		cancel()
+		assert.Nil(t, db, name)
+		assert.Same(t, errPostgresOpenFailed, awaitErr, name+": the attempt ended, with the fixed failure, and was not waited for until the context ended")
+	}
+
+	db, next, err := cache.join(context.Background(), key, func() (*dalgo2postgres.Database, error) { return &dalgo2postgres.Database{}, nil })
+	require.NoError(t, err)
+	require.Nil(t, db)
+	require.NotNil(t, next, "the dead attempt is not kept: the next call opens again")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	opened, err := next.await(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, opened)
 }
 
 // A constructor that fails with an error that wraps a context error (a driver's text around a deadline) is the bare

@@ -112,20 +112,34 @@ func (c *handleCache) join(ctx context.Context, key [sha256.Size]byte, open func
 
 // run is the attempt: it calls open, keeps the handle when there is one, and lets the next call
 // start another attempt when there is not.
+//
+// Its bookkeeping is a defer, so that every way the goroutine can end ends the attempt: open returns,
+// open panics (recovered here and handed to the callers that wait), or open ends the goroutine through
+// runtime.Goexit, which neither returns nor panics (a failing test does it with FailNow when it builds
+// its stand-in inside the opener). A Goexit is a failure of the open, the fixed one: without that, the
+// attempt would stay in its entry for good and a caller whose context never ends would wait for it
+// for ever.
 func (c *handleCache) run(entry *handleEntry, attempt *openAttempt, open func() (*dalgo2postgres.Database, error)) {
 	var db *dalgo2postgres.Database
-	func() {
-		defer func() { attempt.panicked = recover() }()
-		db, attempt.err = open()
+	var err error
+	returned := false
+	defer func() {
+		attempt.panicked = recover()
+		if !returned && attempt.panicked == nil {
+			err = errPostgresOpenFailed
+		}
+		attempt.err = err
+		c.mu.Lock()
+		if err == nil && attempt.panicked == nil {
+			attempt.db = &sharedPostgres{Database: db}
+			entry.db = attempt.db
+		}
+		entry.attempt = nil
+		c.mu.Unlock()
+		close(attempt.done)
 	}()
-	c.mu.Lock()
-	if attempt.err == nil && attempt.panicked == nil {
-		attempt.db = &sharedPostgres{Database: db}
-		entry.db = attempt.db
-	}
-	entry.attempt = nil
-	c.mu.Unlock()
-	close(attempt.done)
+	db, err = open()
+	returned = true
 }
 
 // await waits for the outcome of the attempt, or for ctx to end.

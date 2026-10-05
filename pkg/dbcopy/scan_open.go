@@ -51,7 +51,8 @@ func ParseWithEnv(rawURL string, lookupEnv func(string) (string, bool)) (Backend
 // the URL: it carries every connection option, not only the password) that says
 // why only for a cause that can be told apart without reading the message. The
 // driver's own error stays reachable through errors.Is and errors.As, exactly as
-// it does for Open. The context is reserved for future use, as in Open.
+// it does for Open. The context is reserved for future use: this open is
+// synchronous and does not honor cancellation (Open's does, for a postgres source).
 func (r BackendRef) OpenSchemaScan(_ context.Context) (SchemaScanDB, error) {
 	if r.Scheme != "postgres" {
 		return nil, fmt.Errorf("a schema scan through DALgo is available for postgres sources only, not %s", r.Scheme)

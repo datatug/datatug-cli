@@ -9,8 +9,11 @@ import "os"
 //
 // The switch is a preview: it stays until the whole path of a PostgreSQL source has
 // had its security review, and a later change removes it. Removing it is deleting
-// CheckPostgresPreview and its calls (BackendRef.openPostgres, and CheckPostgresRead
-// while that exists).
+// CheckPostgresPreview and the calls that exist for it: the one in
+// BackendRef.openPostgres, the one in CheckPostgresRead (which stays while a read
+// through policies is refused), the one in the chooser of the table viewer
+// (dbviewer), and the call of `datatug query run` that is made before the policies
+// are loaded (CheckPostgresRead with no policy), which asks nothing else.
 const PostgresPreviewEnv = "DATATUG_PREVIEW_POSTGRES"
 
 // refusedError is an error this package built from a fixed sentence that holds

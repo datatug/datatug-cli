@@ -117,8 +117,11 @@ func TestThePreviewSwitchIsOffUnlessATestTurnsItOn(t *testing.T) {
 func TestRunDTQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	const user = "USERMARKER-dt02-chat"
+	// The stand-in is built here, on the goroutine of the test: the opener runs on another one, where a failure of
+	// the setup (FailNow) would end that goroutine and not the test.
+	standIn := pgstandin.Unreachable(t, user, chatPostgresPassword)
 	t.Cleanup(dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
-		return pgstandin.Unreachable(t, user, chatPostgresPassword), nil
+		return standIn, nil
 	}))
 	secured, err := secureread.NewSession(secureread.SessionOptions{NoPolicies: true})
 	if err != nil {

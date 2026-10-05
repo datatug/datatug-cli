@@ -15,6 +15,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -29,6 +31,25 @@ import (
 
 // errDialRefused is what every dial after the first fails with.
 var errDialRefused = errors.New("the dial is refused: no server")
+
+// The libpq variables of the developer's shell (PGSERVICE, PGTARGETSESSIONATTRS, PGHOST, ...) are read by pgx
+// whenever it builds a configuration, which this package and the tests that build pgx's own errors do; a stand-in
+// built from a shell that names a service that is not there, or asks for a server that accepts writes, would fail to
+// set up, or behave unlike the one of a machine with no such variables. They are cleared when the package is
+// imported, before any test runs and so before any test can be parallel (a test cannot use t.Setenv there). Nothing is
+// dialled in any case.
+func init() { unsetLibpqVariables(os.Environ(), os.Unsetenv) }
+
+// unsetLibpqVariables unsets, through unset, every variable of environ (the "NAME=value" entries of os.Environ) whose
+// name starts with PG, in any case (names are case-insensitive on Windows).
+func unsetLibpqVariables(environ []string, unset func(name string) error) {
+	for _, entry := range environ {
+		name, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(strings.ToUpper(name), "PG") {
+			_ = unset(name)
+		}
+	}
+}
 
 // Unreachable opens a *dalgo2postgres.Database as the user, with the password, against an in-memory server that
 // answers the one connection the adapter verifies the source with, and then goes away for good. It uses the exact

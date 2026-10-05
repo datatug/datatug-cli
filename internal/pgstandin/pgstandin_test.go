@@ -3,6 +3,8 @@ package pgstandin
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"testing"
 
 	dalrecord "github.com/dal-go/record"
@@ -50,3 +52,33 @@ func TestUnreachable_ANamedTableIsKeyedSoAKeyedCallReachesTheConnection(t *testi
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "USERMARKER-standin")
 }
+
+// Only the variables of libpq are unset, whatever the case of their names: the rest of the environment is not touched.
+func TestUnsetLibpqVariables_UnsetsEveryPGVariableAndNothingElse(t *testing.T) {
+	t.Parallel()
+	var unset []string
+	unsetLibpqVariables([]string{"PGSERVICE=none", "PGHOST=h", "pgtargetsessionattrs=read-write", "HOME=/home/x", "PATH=/bin", "=C:=C:\\", "NOTPG=1", "PG"},
+		func(name string) error { unset = append(unset, name); return nil })
+	assert.Equal(t, []string{"PGSERVICE", "PGHOST", "pgtargetsessionattrs", "PG"}, unset)
+}
+
+// A shell that names a service that is not there, and asks for a server that accepts writes, does not reach a stand-in:
+// the variables are cleared when the package is imported. The test runs the binary of the package again with such a
+// shell (a variable of a test that is parallel cannot be set from within), and the stand-in must open and fail a read
+// as it does with no variables at all. Without the clearing the configuration is not readable, which fails the setup.
+func TestUnreachable_TheLibpqVariablesOfTheShellDoNotReachAStandIn(t *testing.T) {
+	if os.Getenv(libpqChildEnv) == "1" {
+		db := Unreachable(t, "USERMARKER-standin", "PWMARKER-standin")
+		_, err := db.ListCollections(context.Background(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "USERMARKER-standin")
+		return
+	}
+	command := exec.Command(os.Args[0], "-test.run=^TestUnreachable_TheLibpqVariablesOfTheShellDoNotReachAStandIn$", "-test.count=1")
+	command.Env = append(os.Environ(), libpqChildEnv+"=1", "PGSERVICE=no-such-service-in-this-shell", "PGTARGETSESSIONATTRS=read-write", "PGHOST=host.invalid")
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, string(output))
+}
+
+// libpqChildEnv tells the run of the test above that it is the second one.
+const libpqChildEnv = "DATATUG_TEST_STANDIN_CHILD"

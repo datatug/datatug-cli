@@ -123,13 +123,19 @@ func turnsReadOnlyOff(query url.Values) bool {
 			}
 		case "options":
 			for _, value := range values {
-				if strings.Contains(asciiLower(value), readOnlyParameter) {
+				if strings.Contains(asciiLower(optionsText(value)), readOnlyParameter) {
 					return true
 				}
 			}
 		}
 	}
 	return false
+}
+
+// optionsText is value as the server reads the text of an options parameter before it looks for a name in it: a
+// backslash is dropped, and a dash stands for an underscore.
+func optionsText(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, `\`, ""), "-", "_")
 }
 
 // spellsOn reports whether value is a spelling of true that PostgreSQL reads as a boolean.

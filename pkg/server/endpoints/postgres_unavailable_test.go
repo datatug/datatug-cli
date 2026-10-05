@@ -159,8 +159,11 @@ func TestRoutes_APolicyReadOfAPostgresSourceIsUnavailable(t *testing.T) {
 // user, in the body or in the agent log.
 func TestRoutes_APostgresSourceWhoseConnectionIsLostIsUnavailableWithAFixedSentence(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	// The stand-in is built here, on the goroutine of the test: the opener runs on another one, where a failure of
+	// the setup (FailNow) would end that goroutine and not the test.
+	standIn := pgstandin.Unreachable(t, pgRouteUser, pgRoutePassword)
 	standInOpener(t, func() (*dalgo2postgres.Database, error) {
-		return pgstandin.Unreachable(t, pgRouteUser, pgRoutePassword), nil
+		return standIn, nil
 	})
 
 	logged := captureAgentLog(t)
@@ -176,8 +179,11 @@ func TestRoutes_APostgresSourceWhoseConnectionIsLostIsUnavailableWithAFixedSente
 // unavailable, with one fixed sentence, and the body shows nothing pgx wrote.
 func TestRoutes_ARunQueryOnAPostgresSourceWhoseConnectionIsLostIsUnavailableWithAFixedSentence(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	// The stand-in is built here, on the goroutine of the test: the opener runs on another one, where a failure of
+	// the setup (FailNow) would end that goroutine and not the test.
+	standIn := pgstandin.Unreachable(t, pgRouteUser, pgRoutePassword)
 	standInOpener(t, func() (*dalgo2postgres.Database, error) {
-		return pgstandin.Unreachable(t, pgRouteUser, pgRoutePassword), nil
+		return standIn, nil
 	})
 	unrestricted, err := secureread.NewSession(secureread.SessionOptions{NoPolicies: true})
 	require.NoError(t, err)

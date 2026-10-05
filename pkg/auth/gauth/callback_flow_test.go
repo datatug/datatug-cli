@@ -65,7 +65,7 @@ func TestGoogleCallbackStatePKCEAndSingleDelivery(t *testing.T) {
 	exchanges := 0
 	seenState := ""
 	challenge := ""
-	openBrowser = func(raw string) error {
+	openBrowser = func(_ context.Context, raw string) error {
 		srv := <-ready
 		select {
 		case <-l.closed:
@@ -135,7 +135,7 @@ func TestGoogleCallbackCancellationBindFailureAndDenial(t *testing.T) {
 			if name == "invalid-redirect" {
 				config.RedirectURL = "http://0.0.0.0:8080/oauth2callback"
 			}
-			openBrowser = func(raw string) error {
+			openBrowser = func(_ context.Context, raw string) error {
 				browsers++
 				srv := <-ready
 				u, _ := url.Parse(raw)
@@ -186,7 +186,7 @@ func TestGoogleCallbackServerStopDrainsOwnership(t *testing.T) {
 	authServerServe = func(srv *http.Server, _ net.Listener) error { ready <- srv; return errors.New("private serve detail") }
 	originalShutdown := srvShutdown
 	srvShutdown = func(ctx context.Context, srv *http.Server) error { shutdowns++; return originalShutdown(ctx, srv) }
-	openBrowser = func(string) error { <-ready; return nil }
+	openBrowser = func(context.Context, string) error { <-ready; return nil }
 	configExchangeFn = func(context.Context, *oauth2.Config, string, ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
 		t.Fatal("stopped server exchanged token")
 		return nil, nil

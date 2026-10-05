@@ -16,11 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pkg/browser"
 	"golang.org/x/oauth2"
 )
 
-var openBrowser = browser.OpenURL
+var openBrowser = launchAuthBrowser
 var isTesting = testing.Testing
 var authListen = net.Listen
 var authServerServe = func(srv *http.Server, listener net.Listener) error { return srv.Serve(listener) }
@@ -110,7 +109,7 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 		result <- response
 		_, _ = fmt.Fprintln(w, "Consent received. You can close this window.")
 	})
-	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, MaxHeaderBytes: 16 << 10}
+	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, MaxHeaderBytes: 16 << 10}
 	serve, shutdown := authServerServe, srvShutdown
 	go func() {
 		done <- serve(srv, listener)
@@ -120,6 +119,9 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 		finish, stop := context.WithTimeout(context.Background(), authDrainTimeout)
 		_ = shutdown(finish, srv)
 		stop()
+		// Shutdown stops accepting but cannot drain an incomplete request body
+		// once its deadline expires. Close owns and tears down all connections.
+		_ = srv.Close()
 		_ = listener.Close()
 		select {
 		case <-done:
@@ -127,7 +129,7 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 		}
 	}
 	authURL := config.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.S256ChallengeOption(verifier))
-	if err = openBrowser(authURL); err != nil {
+	if err = openBrowser(ctx, authURL); err != nil {
 		closeFlow()
 		return nil, errAuthFlow
 	}

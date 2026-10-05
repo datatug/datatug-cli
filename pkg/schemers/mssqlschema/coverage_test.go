@@ -598,3 +598,57 @@ func TestNextCollection_RowsErr(t *testing.T) {
 		t.Fatal("expected error from row iteration, got nil")
 	}
 }
+
+// ---- RecordsCount puts the names of the server into SQL as quoted names ----
+
+// A name the server reports is data: a database is not trusted, and a name that ends
+// its bracket and goes on would put a statement of its own into the count query.
+// SQL Server's own quoting (QUOTENAME) doubles each "]" in a name, which keeps any
+// name, this one too, inside its brackets as the one name it is.
+func TestSchemaProvider_RecordsCount_QuotesTheNamesTheServerReports(t *testing.T) {
+	for _, c := range []struct {
+		name, schema, object, want string
+	}{
+		{"plain", "dbo", "Users", "SELECT COUNT(1) FROM [dbo].[Users]"},
+		{"a name with a space", "my schema", "my table", "SELECT COUNT(1) FROM [my schema].[my table]"},
+		{"a table that ends its bracket", "dbo", "x]; DROP TABLE Users; --", "SELECT COUNT(1) FROM [dbo].[x]]; DROP TABLE Users; --]"},
+		{"a schema that ends its bracket", "dbo].[Users]; DELETE FROM [dbo", "t", "SELECT COUNT(1) FROM [dbo]].[Users]]; DELETE FROM [dbo].[t]"},
+		{"a name that is only brackets", "]]", "]", "SELECT COUNT(1) FROM []]]]].[]]]"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+			if err != nil {
+				t.Fatalf("sqlmock.New: %v", err)
+			}
+			defer func() { _ = db.Close() }()
+			mock.ExpectQuery(c.want).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(7))
+
+			count, err := schemaProvider{db: db}.RecordsCount(context.Background(), "testdb", c.schema, c.object)
+
+			if err != nil {
+				t.Fatalf("RecordsCount: %v (the query was not the one expected: %s)", err, c.want)
+			}
+			if count == nil || *count != 7 {
+				t.Fatalf("count = %v, want 7", count)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("unmet expectations: %v", err)
+			}
+		})
+	}
+}
+
+func TestQuoteIdentifier(t *testing.T) {
+	for name, want := range map[string]string{
+		"Users":   "[Users]",
+		"a]b":     "[a]]b]",
+		"]":       "[]]]",
+		"[a]":     "[[a]]]",
+		"it's":    "[it's]",
+		`say "x"`: `[say "x"]`,
+	} {
+		if got := quoteIdentifier(name); got != want {
+			t.Errorf("quoteIdentifier(%q) = %q, want %q", name, got, want)
+		}
+	}
+}

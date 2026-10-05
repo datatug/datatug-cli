@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/datatug/datatug-core/pkg/schemer"
 )
@@ -55,7 +56,7 @@ func (schemaProvider) IsBulkProvider() bool {
 
 func (s schemaProvider) RecordsCount(_ context.Context, catalog, schema, object string) (*int, error) {
 	_ = catalog
-	query := fmt.Sprintf("SELECT COUNT(1) FROM [%v].[%v]", schema, object)
+	query := fmt.Sprintf("SELECT COUNT(1) FROM %s.%s", quoteIdentifier(schema), quoteIdentifier(object))
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get records count for %v.%v: %w", schema, object, err)
@@ -68,4 +69,14 @@ func (s schemaProvider) RecordsCount(_ context.Context, catalog, schema, object 
 		return &count, rows.Scan(&count)
 	}
 	return nil, nil
+}
+
+// quoteIdentifier is name as a SQL Server delimited identifier, as QUOTENAME(name)
+// writes it: in square brackets, with each "]" in the name doubled, which is the only
+// way out of a bracket. The names this package puts into a statement are read from the
+// server being scanned, and a server is not trusted: a name is data, and a schema
+// or table named x]; DROP TABLE t; -- is one name, not a statement. (An identifier
+// cannot be a bound parameter in SQL Server, so it is quoted, not bound.)
+func quoteIdentifier(name string) string {
+	return "[" + strings.ReplaceAll(name, "]", "]]") + "]"
 }

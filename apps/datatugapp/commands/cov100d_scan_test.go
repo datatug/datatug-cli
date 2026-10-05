@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -24,10 +25,14 @@ func TestCovDScanCommandAction(t *testing.T) {
 	t.Run("project is required", func(t *testing.T) {
 		require.Error(t, covDRunScan("--db", "d", "--env", "local"))
 	})
-	t.Run("project directory must exist", func(t *testing.T) {
-		err := covDRunScan("-d", filepath.Join(t.TempDir(), "absent"), "--db", "d", "--env", "local")
+	t.Run("project directory that is a file is refused", func(t *testing.T) {
+		// A folder that is not there is made by the scan (TestScanJourneyCreatesTheProjectFolder);
+		// one that is a file cannot be.
+		file := filepath.Join(t.TempDir(), "a-file")
+		require.NoError(t, os.WriteFile(file, []byte("x"), 0o600))
+		err := covDRunScan("-d", file, "-D", "sqlite3", "--db", "d", "--env", "local")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "not found")
+		assert.Contains(t, err.Error(), "is a file, not a folder")
 	})
 	t.Run("connection params error", func(t *testing.T) {
 		err := covDRunScan("-d", t.TempDir(), "-D", "sqlite3", "--db", "d", "--env", "local") // no --path

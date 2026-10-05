@@ -27,8 +27,16 @@ var filepathAbs = filepath.Abs
 var dbcopyParse = dbcopy.Parse
 var updateSchemaModelSeam = updateSchemaModel
 var loadHTTPQueries = httpsource.LoadHTTPQueries
-var scanDbCatalogSeam = scanDbCatalog
+var scanDbCatalogSeam = scanCatalog
 var accesspoliciesExplain = accesspolicies.Explain
 var querywriteQueryCredentialReason = querywrite.QueryCredentialReason
 var newProjectWithDatabaseSeam = newProjectWithDatabase
 var readmeWriteFile = os.WriteFile
+
+// What a rescan does to the folder of a table that the database no longer has (see
+// scan_rescan.go): listing it, removing it and rewriting its columns file.
+var (
+	scanReadDir   = os.ReadDir
+	scanRemoveAll = os.RemoveAll
+	scanWriteFile = os.WriteFile
+)

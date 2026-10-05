@@ -3,7 +3,10 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"log"
 	"net/url"
 	"os"
@@ -13,9 +16,9 @@ import (
 	"github.com/datatug/datatug-cli/pkg/schemers/sqliteschema"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
+	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/parallel"
 	"github.com/datatug/datatug-core/pkg/schemer"
-	"github.com/strongo/random"
 	"github.com/strongo/slice"
 	"github.com/strongo/validation"
 	_ "modernc.org/sqlite" // registers the pure-Go "sqlite" driver sqliteScanDriver names
@@ -86,7 +89,7 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 	}
 	scanDbWorker := func() error {
 		var scanErr error
-		if dbCatalog, scanErr = scanDbCatalogSeam(dbServer, dbConnParams); scanErr != nil {
+		if dbCatalog, scanErr = scanDbCatalogSeam(ctx, dbServer, dbConnParams); scanErr != nil {
 			return scanErr
 		}
 		return scanErr
@@ -104,14 +107,18 @@ func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID,
 		}
 	}
 
-	if dbCatalog.DbModel != "" {
-		dbCatalog.DbModel = dbModelID
-	} else if dbCatalog.DbModel == "" {
-		dbCatalog.DbModel = dbCatalog.ID
-	}
+	// The catalog is mapped onto the database model that was asked for, which the
+	// command defaults to the id of the database.
+	dbCatalog.DbModel = dbModelID
 	if datatug.ProjectDoesNotExist(projFileErr) {
 		log.Println("Creating a new DataTug project...")
-		if project, err = newProjectWithDatabaseSeam(environment, dbServer, dbCatalog); err != nil {
+		// The id of a new project is the one it was given (the command takes it from
+		// its --project flag, or else from the name of the project folder), is checked
+		// here, and is never made up: the project of a folder that exists has its own.
+		if err = dto.ValidateProjectID(projectID); err != nil {
+			return nil, fmt.Errorf("the id of the new project, %q, is not valid: %w. A new project is named by --project, or else by the name of its folder", projectID, err)
+		}
+		if project, err = newProjectWithDatabaseSeam(projectID, environment, dbServer, dbCatalog); err != nil {
 			return project, err
 		}
 	} else {
@@ -226,13 +233,13 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 	return nil
 }
 
-func newProjectWithDatabase(environment string, dbServer datatug.ServerRef, dbCatalog *datatug.DbCatalog) (project *datatug.Project, err error) {
+func newProjectWithDatabase(projectID, environment string, dbServer datatug.ServerRef, dbCatalog *datatug.DbCatalog) (project *datatug.Project, err error) {
 	if dbCatalog.Driver == "" {
 		dbCatalog.Driver = dbServer.Driver
 	}
 	project = &datatug.Project{
 		ProjectItem: datatug.ProjectItem{
-			ProjItemBrief: datatug.ProjItemBrief{ID: random.ID(9)},
+			ProjItemBrief: datatug.ProjItemBrief{ID: projectID},
 			Access:        "private",
 		},
 		Created: &datatug.ProjectCreated{
@@ -308,9 +315,50 @@ func existingSQLiteFile(connectionParams dbconnection.Params) (string, error) {
 // file name, so a file named a#b.db would otherwise be read as a file named a, which
 // is created, empty, if it is not there. It is the path that existingSQLiteFile
 // checked that is opened.
+//
+// A database in WAL mode that nobody has open (see isIdleWALDatabase) is opened as
+// immutable as well, which is what stops SQLite creating a -wal and a -shm file beside
+// it: a read-only connection to a WAL database creates both unless it is told that the
+// file cannot change. Nothing is lost by it: no one has the database open, so there
+// is no WAL to read. Any other database is opened as it always was, and a WAL database
+// that is open is read with its WAL.
 func sqliteReadOnlyDSN(path string) string {
-	uri := url.URL{Scheme: "file", OmitHost: true, Path: path, RawQuery: "mode=ro"}
+	query := "mode=ro"
+	if isIdleWALDatabase(path) {
+		query += "&immutable=1"
+	}
+	uri := url.URL{Scheme: "file", OmitHost: true, Path: path, RawQuery: query}
 	return uri.String()
+}
+
+// sqliteHeaderSize is the part of a SQLite file that says whether it is in WAL mode:
+// the 16-byte magic string, the 2-byte page size, and the file format write and read
+// versions (bytes 18 and 19), which are 2 for a database in WAL mode and 1 otherwise.
+const sqliteHeaderSize = 20
+
+// isIdleWALDatabase is whether the file at path is a SQLite database in WAL mode that
+// no connection has open: its header says WAL, and it has no -wal and no -shm file,
+// which every connection to a WAL database keeps beside it (the last one to close
+// removes them). A file that cannot be read, or is not a SQLite file, is not one.
+func isIdleWALDatabase(path string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = file.Close() }()
+	header := make([]byte, sqliteHeaderSize)
+	if _, err = io.ReadFull(file, header); err != nil {
+		return false
+	}
+	if string(header[:16]) != "SQLite format 3\x00" || header[18] != 2 || header[19] != 2 {
+		return false
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if _, err = os.Lstat(path + suffix); !errors.Is(err, fs.ErrNotExist) {
+			return false
+		}
+	}
+	return true
 }
 
 // driverTitle is the title of a driver item in a project. datatug-core refuses
@@ -328,7 +376,14 @@ func driverTitle(driver string) string {
 	}
 }
 
-func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Params) (dbCatalog *datatug.DbCatalog, err error) {
+// scanDbCatalog is scanCatalog with nothing said about what it leaves out.
+func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
+	return scanCatalog(context.Background(), server, connectionParams)
+}
+
+// scanCatalog reads the catalog connectionParams name. What it leaves out of a
+// SQLite catalog, and why, is named on the warnings of ctx (see WithScanWarnings).
+func scanCatalog(ctx context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (dbCatalog *datatug.DbCatalog, err error) {
 	if server.Driver == DriverPostgres {
 		// Ask whether the project can record the server before opening anything:
 		// a scan that cannot be saved must not connect and read a schema first.
@@ -337,7 +392,7 @@ func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Param
 		}
 		// PostgreSQL is read through DALgo's schema reader, and opened from an
 		// environment variable: there is no connection string to give database/sql.
-		return scanPostgresCatalog(context.Background(), connectionParams)
+		return scanPostgresCatalog(ctx, connectionParams)
 	}
 	var db *sql.DB
 
@@ -365,12 +420,12 @@ func scanDbCatalog(server datatug.ServerRef, connectionParams dbconnection.Param
 	case "sqlserver":
 		scanner = schemer.NewScanner(mssqlschema.NewSchemaProvider(db))
 	case dbconnection.DriverSQLite3:
-		scanner = schemer.NewScanner(sqliteschema.NewSchemaProvider(func() (*sql.DB, error) { return db, nil }))
+		scanner = schemer.NewScanner(sqliteschema.NewSchemaProviderWithWarnings(func() (*sql.DB, error) { return db, nil }, scanWarningsFrom(ctx)))
 	default:
 		return nil, fmt.Errorf("unsupported DB driver: %v", server.Driver)
 	}
 
-	dbCatalog, err = scanner.ScanCatalog(context.Background(), connectionParams.Catalog())
+	dbCatalog, err = scanner.ScanCatalog(ctx, connectionParams.Catalog())
 	if err != nil {
 		return dbCatalog, fmt.Errorf("failed to get dbCatalog metadata: %w", err)
 	}

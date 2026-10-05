@@ -2643,7 +2643,7 @@ func TestCoverageFinal100_PkgApi(t *testing.T) {
 		testDbPath := filepath.Join(t.TempDir(), "test.db")
 		params := dbconnection.NewSQLite3ConnectionParams(testDbPath, "main", dbconnection.ModeReadOnly)
 
-		scanDbCatalogSeam = func(server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
+		scanDbCatalogSeam = func(_ context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
 			return &datatug.DbCatalog{
 				ID:      "c_model",
 				Driver:  "sqlite3",
@@ -2660,7 +2660,7 @@ func TestCoverageFinal100_PkgApi(t *testing.T) {
 		assert.Equal(t, "target_model", p.DbModels[0].ID)
 
 		// hits line 100
-		newProjectWithDatabaseSeam = func(environment string, dbServer datatug.ServerRef, dbCatalog *datatug.DbCatalog) (*datatug.Project, error) {
+		newProjectWithDatabaseSeam = func(projectID, environment string, dbServer datatug.ServerRef, dbCatalog *datatug.DbCatalog) (*datatug.Project, error) {
 			return nil, errors.New("new proj error")
 		}
 		_, err = UpdateDbSchema(ctx, mockProjectStore{
@@ -2671,7 +2671,7 @@ func TestCoverageFinal100_PkgApi(t *testing.T) {
 		assert.Error(t, err)
 		newProjectWithDatabaseSeam = origNewProj
 
-		scanDbCatalogSeam = func(server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
+		scanDbCatalogSeam = func(_ context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
 			return &datatug.DbCatalog{ID: ""}, nil
 		}
 		_, err = UpdateDbSchema(ctx, mockProjectStore{
@@ -2686,7 +2686,7 @@ func TestCoverageFinal100_PkgApi(t *testing.T) {
 
 		// A project that already holds another database has no model for this one:
 		// the scan adds it, instead of stopping.
-		scanDbCatalogSeam = func(server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
+		scanDbCatalogSeam = func(_ context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
 			return &datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "c_missing"}}, Driver: "sqlite3", Path: "/a.db", DbModel: "ignored"}}, nil
 		}
 		p, err = UpdateDbSchema(ctx, mockProjectStore{
@@ -2706,7 +2706,7 @@ func TestCoverageFinal100_PkgApi(t *testing.T) {
 		assert.Equal(t, []string{"other_model", "m_missing"}, p.DbModels.IDs(), "the other database's model stays, this one's is added")
 
 		// hits line 119 and line 323
-		scanDbCatalogSeam = func(server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
+		scanDbCatalogSeam = func(_ context.Context, server datatug.ServerRef, connectionParams dbconnection.Params) (*datatug.DbCatalog, error) {
 			return &datatug.DbCatalog{
 				ID:      "c_update_err",
 				Driver:  "sqlite3",

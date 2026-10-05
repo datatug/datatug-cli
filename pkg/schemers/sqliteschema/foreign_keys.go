@@ -18,7 +18,7 @@ func (s schemaProvider) GetForeignKeysReader(_ context.Context, schema, table st
 	if table == "" {
 		return nil, fmt.Errorf("collection name cannot be empty")
 	}
-	sqlText := fmt.Sprintf("PRAGMA foreign_key_list('%s')", table)
+	sqlText := pragmaSQL("foreign_key_list", table)
 	rows, err := db.Query(sqlText)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve columns: %w", err)

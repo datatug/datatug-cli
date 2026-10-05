@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/storage"
@@ -70,6 +71,10 @@ type CatalogTables struct {
 type CatalogColumn struct {
 	Name   string `json:"name"`
 	DbType string `json:"dbType,omitempty"`
+	// PrimaryKeyPosition is the column's 1-based place in its table's primary
+	// key, read from the columns file's pkPosition; 0 when it is not part of
+	// the key.
+	PrimaryKeyPosition int `json:"pkPosition,omitempty"`
 }
 
 // CatalogRelation describes one stored table or view and its columns.
@@ -175,10 +180,21 @@ func loadCatalogRelationsWithMode(dbModelDir, kind, dbType string, partial bool)
 	return out, nil
 }
 
+// readCatalogColumns reads the columns file in the folder of one table or view. It
+// lists the folder rather than matching a pattern over a path that holds the name:
+// a name or a project path with a "[" in it (a valid folder name) is not a pattern.
 func readCatalogColumns(kindDir, schema, name string) ([]CatalogColumn, error) {
-	matches, err := filepathGlob(filepath.Join(kindDir, name, "*.columns.json"))
+	folder := filepath.Join(kindDir, name)
+	entries, err := os.ReadDir(folder)
 	if err != nil {
 		return nil, fmt.Errorf("find columns for %s.%s: %w", schema, name, err)
+	}
+	suffix := "." + storage.ColumnsFileSuffix + ".json"
+	var matches []string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), suffix) {
+			matches = append(matches, filepath.Join(folder, entry.Name()))
+		}
 	}
 	if len(matches) != 1 {
 		return nil, fmt.Errorf("relation %s.%s has %d columns files; want 1", schema, name, len(matches))
@@ -199,9 +215,10 @@ func readCatalogColumns(kindDir, schema, name string) ([]CatalogColumn, error) {
 
 // catalogDbModelFile is the minimal shape this reads out of
 // environments/<env>/catalogs/<catalog>/<catalog>.db.json — a
-// datatug.DbCatalogBase-shaped file every demo/real project already writes
-// (e.g. datatug-demo-projects' chinook-local.db.json:
-// {"driver":"sqlite3","path":"...","dbModel":"chinook"}). Decoded locally,
+// datatug.DbCatalogBase-shaped file that `datatug scan` writes and every
+// demo project has (e.g. datatug-demo-projects' chinook-local.db.json:
+// {"driver":"sqlite3","path":"...","dbModel":"chinook"}); its fields are in
+// "Project layout written by a scan" of spec/features/cli/scan/README.md. Decoded locally,
 // into only the one field this needs, rather than via
 // datatug.DbCatalogBase itself, so this stays independent of that struct's
 // own (stricter) Validate() rules.
@@ -225,8 +242,10 @@ func GetCatalogTables(projectDir, environmentID, catalogID string) (*CatalogTabl
 	dbModelDir := filepath.Join(projectDir, storage.DbModelsFolder, dbModelID)
 	// "tables"/"views": datatug-core's own TablesFolder/ViewsFolder
 	// constants are commented out (pkg/storage/file_names.go) — these are
-	// the literal directory names datatug-cli's scan/demo tooling already
-	// writes (see datatug-demo-projects/demo-project-1/dbmodels/chinook/main/tables/*).
+	// the literal folder names of the layout `datatug scan` writes
+	// (scan_layout.go) and the demo project has; the layout is written down
+	// once, in "Project layout written by a scan" of
+	// spec/features/cli/scan/README.md.
 	tables, err := listCatalogTables(dbModelDir, "tables", "BASE TABLE")
 	if err != nil {
 		return nil, err

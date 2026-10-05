@@ -59,7 +59,18 @@ type executeSQLCommand struct {
 	OutputFormat string
 }
 
+// errExecuteSQLPostgresDriver is the one answer to a PostgreSQL driver name. It is
+// static, so that no part of the connection the caller typed is in it.
+var errExecuteSQLPostgresDriver = errors.New("the PostgreSQL drivers (pgx, pgx/v5) are not available to this command: the PostgreSQL adapter opens a source from a connection URL held in an environment variable (env:NAME), never from a password on a command line")
+
 func (v *executeSQLCommand) Validate() error {
+	// The PostgreSQL adapter's import registers these two names with database/sql
+	// in the binary, and this command opens a driver by the name it is given, with
+	// the host, user and password of its flags.
+	switch v.Driver {
+	case "pgx", "pgx/v5":
+		return validation.NewBadRequestError(errExecuteSQLPostgresDriver)
+	}
 	if v.Query != "" && v.CommandText != "" {
 		return validation.NewBadRequestError(errors.New("either 'query' or 'consoleCommand-text' arguments should be specified but not both at the same time"))
 	}

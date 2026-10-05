@@ -172,8 +172,26 @@ func stubScannedProject(t *testing.T, seen *dbconnection.Params) {
 		return &datatug.Project{
 			ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "scanned"}, Access: "private"},
 			Created:     &datatug.ProjectCreated{At: time.Now()},
+			DbDrivers:   postgresCatalogDrivers("shop", params.(interface{ Path() string }).Path()),
 		}, nil
 	})
+}
+
+// postgresCatalogDrivers holds what a scan returns for a catalog of the postgres
+// driver: the catalog, on a server. datatug-core does not record a postgres
+// server yet, so this stand-in server is one it accepts; nothing reads it.
+func postgresCatalogDrivers(catalog, path string) datatug.ProjDbDrivers {
+	server := datatug.ServerRef{Driver: "sqlite3"}
+	return datatug.ProjDbDrivers{{
+		ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "postgres", Title: "PostgreSQL"}},
+		Servers: datatug.ProjDbServers{{
+			ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: server.GetID()}},
+			Server:      server,
+			Catalogs: datatug.DbCatalogs{{
+				DbCatalogBase: datatug.DbCatalogBase{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: catalog}}, Driver: "postgres", Path: path, DbModel: catalog},
+			}},
+		}},
+	}}
 }
 
 func TestScanCommandAction_PostgresWritesTheDescriptorBesideTheProject(t *testing.T) {

@@ -70,11 +70,11 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 
 	log.Println("Saving project", datatugProject.ID, "...")
 	saveStore, _ := filestore.NewSingleProjectStore(v.ProjectDir, datatugProject.ID)
-	if err = saveStore.GetProjectStore(datatugProject.ID).SaveProject(context.Background(), datatugProject); err != nil {
-		return fmt.Errorf("failed to save datatug project [%v]: %w", datatugProject.ID, err)
-	}
-
-	return nil
+	savedProject := saveStore.GetProjectStore(datatugProject.ID)
+	scanned := api.ScannedCatalog{Driver: v.Driver, Environment: v.Environment, ID: v.Database}
+	// What the scan leaves out of the project is named on stderr.
+	stderr := cmd.ErrOrStderr()
+	return api.SaveScannedProject(context.Background(), savedProject, v.ProjectDir, datatugProject, scanned, stderr)
 }
 
 // descriptorWriter is implemented by connection parameters that need a file
@@ -95,9 +95,9 @@ var scanLookupEnv = os.LookupEnv
 var scanPostgresAvailable = api.CheckPostgresScanAvailable
 
 // scanUpdateDbSchema is a seam over api.UpdateDbSchema so tests can drive the
-// save step with a project the scanner itself does not produce (a project
-// freshly built from a scan does not pass save-time validation). Always
-// api.UpdateDbSchema in production.
+// save step with a project the scanner itself does not produce (an invalid
+// one, or one that lacks the scanned catalog). Always api.UpdateDbSchema in
+// production.
 var scanUpdateDbSchema = api.UpdateDbSchema
 
 // scanNewConnectionString is a seam over dbconnection.NewConnectionString,

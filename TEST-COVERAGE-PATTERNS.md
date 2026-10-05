@@ -58,8 +58,9 @@ Rather than building a special DB state, create the trigger in the test DB, then
 
 ### End-to-end SQLite scan via `scanDbCatalog` (`pkg/api`)
 
-Use `t.TempDir()` + `sql.Open("sqlite3", path)` to create a file DB, populate it, close it,
-then call `scanDbCatalog(server, params)` with:
+Use `t.TempDir()` + `sql.Open("sqlite", path)` (the pure-Go driver the scan itself opens; it
+needs no cgo, and these tests run in the `Scan without cgo` CI job) to create a file DB,
+populate it, close it, then call `scanDbCatalog(server, params)` with:
 ```go
 params := dbconnection.NewSQLite3ConnectionParams(dbPath, "main", dbconnection.ModeReadOnly)
 server := datatug.ServerRef{Driver: dbconnection.DriverSQLite3, Host: "localhost"}

@@ -18,6 +18,90 @@
 
 </table>
 
+## Quick start
+
+Install the CLI (macOS and Linux with Homebrew; the other ways are in [Installation](#installation)):
+
+```bash
+brew install --cask datatug/tap/datatug
+```
+
+Then scan a database, look at what was scanned, and run a query. Every command and every output block below is run
+by a test of this repository ([quickstart_doc_test.go](apps/datatugapp/commands/quickstart_doc_test.go)), so what you
+read here is what the CLI prints.
+
+**1. Scan a database.** The sample is a SQLite file made with the `sqlite3` program (any SQLite file works, and
+`sqlite3` comes with macOS and most Linux systems). The scan writes a project, a folder of plain files, and prints its
+progress on stderr and nothing on stdout.
+
+```console
+$ sqlite3 shop.db "
+CREATE TABLE Customer (CustomerId INTEGER PRIMARY KEY, FirstName TEXT NOT NULL, LastName TEXT);
+CREATE TABLE Invoice (InvoiceId INTEGER PRIMARY KEY, CustomerId INTEGER, Total NUMERIC);
+CREATE VIEW CustomerNames AS SELECT CustomerId, FirstName || ' ' || LastName AS FullName FROM Customer;
+INSERT INTO Customer VALUES (1, 'Ada', 'Lovelace'), (2, 'Alan', 'Turing');
+INSERT INTO Invoice VALUES (1, 1, 12.5), (2, 2, 40);
+"
+$ datatug scan -d shop-project -D sqlite3 --path shop.db --db shop --env local
+```
+
+**2. Look at what was scanned.** `datatug show` lists the project: each environment, each source with its driver, each
+schema, each table and view with its columns, their types and their place in the primary key (`pk`; `pk 2` is the
+second column of a key of several). `--format json` prints the same as one JSON document.
+
+```console
+$ datatug show -d shop-project
+Project shop-project
+Environment local
+  Source shop (sqlite3)
+    Schema main
+      Table Customer
+        CustomerId INTEGER pk
+        FirstName TEXT
+        LastName TEXT
+      Table Invoice
+        InvoiceId INTEGER pk
+        CustomerId INTEGER
+        Total NUMERIC
+      View CustomerNames
+        CustomerId INTEGER
+        FullName -
+```
+
+**3. Run a query.** The query reads the database file; `--no-policies` runs it without [access policies](spec/features/cli/query/README.md)
+(the line `access: running without access policies` goes to stderr).
+
+```console
+$ datatug query run --db sqlite://./shop.db --from Customer --no-policies
+$key               CustomerId  FirstName  LastName
+__dalgo_record_id  1           Ada        Lovelace
+__dalgo_record_id  2           Alan       Turing
+```
+
+**4. Scan PostgreSQL the same way.** Put the connection URL in an environment variable whose name starts with
+`DATATUG_`, and pass the name of the variable with `--driver postgres --dsn-env`. The project stores the name of the
+variable and never the URL: the host, the port, the user and the password stay in your environment. A PostgreSQL scan
+reads the tables of the schema `public`.
+
+```console
+$ export DATATUG_SHOP_URL='postgres://USER:PASSWORD@localhost:5432/shop'
+$ datatug scan -d shop-pg-project --driver postgres --dsn-env DATATUG_SHOP_URL --db shop --env prod
+$ datatug show -d shop-pg-project
+Project shop-pg-project
+Environment prod
+  Source shop (postgres, URL in $DATATUG_SHOP_URL)
+    Schema public
+      Table Customer
+        CustomerId int pk
+        FirstName string
+        LastName string
+      Table Invoice
+        InvoiceId int pk
+        Total decimal
+```
+
+What else works, and what does not yet, is in [Supported databases](#supported-databases).
+
 ![datatug-cli-employees-2.png](docs/screenshots/datatug-cli-employees-2.png)
 
 <!-- dev-approach:v1 -->
@@ -197,8 +281,8 @@ It can be run with your user account credentials (*e.g. trusted connection*) or 
 
 No, we won't.
 
-The project is **free and open source** codes available at https://github.com/datatug/datatug. You are welcome to
-check - we do not look into your data.
+The project is **free and open source**, and the code of this CLI is at https://github.com/datatug/datatug-cli. You are
+welcome to check - we do not look into your data.
 
 ## Where are metadata stored?
 
@@ -207,15 +291,14 @@ understand & easy to compare JSON files.
 
 We recommend to check-in the project to some source versioning control system like GIT.
 
-You can run commands for different projects by passing path to DataTugProject folder. E.g.:
+You can run commands for different projects by passing the path to the project folder. E.g.:
 
 ```
-> datatug show --project ~/my-datatug-projects/DemoProject
+> datatug show -d ~/my-datatug-projects/DemoProject
 ```
 
-Paths to the DataTug project files, and their names are stored in `~/datatug.yaml` in the root of your user's home
-directory.
-This allows you to address a DataTug project in a console using a short alias. Like this:
+A project can be registered under a short name with `datatug projects add`: the paths to the registered projects, and
+their names, are stored in `~/.datatug.yaml` in your user's home directory. Then a project is addressed by its name:
 
 ```
 > datatug show -p DemoProject
@@ -239,23 +322,19 @@ Then verify the installed CLI:
 
 ## How to run?
 
-Check the [CLI](https://github.com/datatug/datatug) section on how to run DataTug agent.
+Start with the [Quick start](#quick-start). `datatug --help` lists every command, and `datatug serve` runs the agent that
+the web app talks to (see [spec/features/cli/serve](spec/features/cli/serve/README.md)).
 
 ## Supported databases
 
-At the moment we any DB supported by [DALgo](https://github.com/dal-go/dalgo). Like:
+| Database | Scan (`datatug scan`) | Query (`datatug query run`) |
+|---|---|---|
+| SQLite | supported | supported |
+| PostgreSQL | supported: the tables of the schema `public`; the connection URL stays in an environment variable | preview, read-only: set `DATATUG_PREVIEW_POSTGRES=1` |
+| SQL Server | not supported yet | not supported yet |
+| Firestore | not supported yet | not supported yet |
 
-- [dalgo2firestore](https://github.com/dal-go/dalgo2firestore)
-- [dalgo2sql](https://github.com/dal-go/dalgo2sql)
-
-### Supported `sql` Databases:
-
-Datatug can work with `sql` DBs if a relevant driver has been linked into `datatug`
-
-- **SQLite** - via  [github.com/mattn/go-sqlite3](https://github.com/mattn/go-sqlite3 )
-- **Microsoft SQL Server** - via [go-mssqldb](https://github.com/denisenkom/go-mssqldb)
-
-We are open for pull requests to support other `sql` DBs.
+Other databases are not supported by this release. We are open for pull requests.
 
 ## For developers
 

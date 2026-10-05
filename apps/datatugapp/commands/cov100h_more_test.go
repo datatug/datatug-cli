@@ -30,6 +30,7 @@ func TestCov100hConsoleCommandArgsExecute(t *testing.T) {
 func TestCov100hShowCommandArgs(t *testing.T) {
 	cmd := showCommandArgs()
 	require.Equal(t, "show", cmd.Name())
+	t.Chdir(t.TempDir()) // not a project
 	require.Error(t, cmd.ExecuteContext(context.Background()))
 }
 

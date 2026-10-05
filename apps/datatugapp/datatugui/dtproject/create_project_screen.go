@@ -271,6 +271,13 @@ var createGitHubRepoProject = func(ctx context.Context, client *github.Client, o
 	return err
 }
 
+// CreateLocalProject is the writer of the "Locally" tab of the create screen: it writes a new project
+// under location and registers it, and returns the registered project. It is exported so that the commands
+// of the CLI can be tested against the project the wizard makes (the two must agree on where a project is).
+func CreateLocalProject(projectID, title, location string) (dtconfig.ProjectRef, error) {
+	return createLocalProject(projectID, title, location)
+}
+
 // createLocalProject writes a new project under location.
 //
 // The directory is named after projectID, not the title: the id is the
@@ -280,27 +287,31 @@ var createGitHubRepoProject = func(ctx context.Context, client *github.Client, o
 // The title is recorded inside the project file, where it belongs.
 func createLocalProject(projectID, title, location string) (projectRef dtconfig.ProjectRef, err error) {
 	projectPath := filepath.Join(fsutil.ExpandHome(location), projectID)
-	datatugDir := filepath.Join(projectPath, "datatug")
-	// The folder of the project is the one the person chose, and is made as it always was. What
-	// is below it is made and written only as plain folders and plain files (see package
-	// plainfs): a link, or a file, where the datatug folder or its project file belong is refused,
-	// and nothing is written through it.
+	// The project file is at the root of the project folder: that is where every reader of a project
+	// looks for it (datatug-core's file store, `datatug show`, serve, chat) and where a scan writes it
+	// (issue 263: it used to be written in a folder datatug of the project folder, where nothing read it).
+	//
+	// The folder of the project is the one the person chose, and is made as it always was. What is
+	// below it is made and written only as plain folders and plain files (see package plainfs): a link,
+	// or a folder, where the project file belongs is refused, and nothing is written through it.
 	if err = os.MkdirAll(projectPath, 0o755); err != nil {
 		return projectRef, fmt.Errorf("failed to create project directory: %w", err)
 	}
 	tree := plainfs.New(projectPath, 0o755)
-	if err = tree.MkdirAll(datatugDir); err != nil {
-		return projectRef, fmt.Errorf("failed to create project directory: %w", err)
-	}
 
-	// Marshalled rather than formatted into a template: a title is free text, so
-	// a quote or a backslash in it would otherwise write a file that is not
-	// JSON. Two strings cannot fail to marshal.
-	configContent, _ := json.MarshalIndent(struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
-	}{ID: projectID, Title: title}, "", "  ")
-	if err = tree.WriteFile(filepath.Join(datatugDir, storage.ProjectSummaryFileName), configContent, 0o644); err != nil {
+	// The file is what datatug-core's own project store writes (and `datatug init` and a scan write): a
+	// project file with no access or no time of creation is not a valid project, so a scan into the new
+	// project could not save it. A new project is private; sharing it is a later choice. It is marshalled
+	// rather than formatted into a template: a title is free text, so a quote or a backslash in it would
+	// otherwise write a file that is not JSON. A value of these types cannot fail to marshal.
+	configContent, _ := json.MarshalIndent(datatug.ProjectFile{
+		Created: &datatug.ProjectCreated{At: now()},
+		ProjectItem: datatug.ProjectItem{
+			ProjItemBrief: datatug.ProjItemBrief{ID: projectID, Title: title},
+			Access:        "private",
+		},
+	}, "", "  ")
+	if err = tree.WriteFile(filepath.Join(projectPath, storage.ProjectSummaryFileName), configContent, 0o644); err != nil {
 		return projectRef, fmt.Errorf("failed to create project config: %w", err)
 	}
 

@@ -2,10 +2,12 @@ package dtproject
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/datatugui"
@@ -85,6 +87,8 @@ func TestCreateLocalProjectEndToEnd(t *testing.T) {
 	stub(t, &addProjectToSettings, func(ref dtconfig.ProjectRef) error { added = ref; return nil })
 	stub(t, &newProjectStore, func(string, string) datatugStore { return &fakeStore{title: "Made"} })
 	stub(t, &bumpRecentProject, func(string) {})
+	madeAt := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	stub(t, &now, func() time.Time { return madeAt })
 
 	s := mount(newCreateProject(createAtLocal), 80, 20, true)
 	s, msgs := step(s, widgets.SubmitMsg{Values: map[string]string{
@@ -94,8 +98,26 @@ func TestCreateLocalProjectEndToEnd(t *testing.T) {
 	if created.err != nil || created.ref.ID != "made" || added.Path != filepath.Join(root, "made") {
 		t.Fatalf("created = %+v, added = %+v", created, added)
 	}
-	if _, err := os.Stat(filepath.Join(root, "made", "datatug", "datatug-project.json")); err != nil {
+	// The file is at the root of the project folder, where every reader of a project looks for it (issue 263)
+	// and where a scan writes it; nothing is written one folder deeper.
+	if _, err := os.Stat(filepath.Join(root, "made", "datatug-project.json")); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "made", "datatug")); !os.IsNotExist(err) {
+		t.Fatalf("a folder datatug was made in the project: %v", err)
+	}
+	// It is a project file that can be saved over (a scan into the new project does): it holds the access
+	// and the time the project was made, which a project is not valid without.
+	data, err := os.ReadFile(filepath.Join(root, "made", "datatug-project.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file datatug.ProjectFile
+	if err = json.Unmarshal(data, &file); err != nil {
+		t.Fatalf("%v: %s", err, data)
+	}
+	if err = file.Validate(); err != nil || file.ID != "made" || file.Title != `Made "quoted" \ project` || !file.Created.At.Equal(madeAt) {
+		t.Fatalf("file = %+v, err = %v", file, err)
 	}
 
 	_, msgs = step(s, created)
@@ -117,29 +139,30 @@ func TestCreateLocalProjectFailures(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
-	t.Run("a file or a link where the datatug folder belongs is refused, and nothing is written through it", func(t *testing.T) {
+	t.Run("a link where the project file belongs is refused, and nothing is written through it", func(t *testing.T) {
 		root := t.TempDir()
 		outside := t.TempDir()
 		if err := os.MkdirAll(filepath.Join(root, "p"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(outside, filepath.Join(root, "p", "datatug")); err != nil {
+		target := filepath.Join(outside, "target.json")
+		if err := os.Symlink(target, filepath.Join(root, "p", "datatug-project.json")); err != nil {
 			t.Skipf("cannot make a symbolic link here (Windows needs a privilege for it; the refusal there is covered by internal/plainfs with a faked Lstat): %v", err)
 		}
 		_, err := createLocalProject("p", "T", root)
-		if err == nil || !contains(err.Error(), "failed to create project directory") || !contains(err.Error(), "datatug: is a link") {
+		if err == nil || !contains(err.Error(), "failed to create project config") || !contains(err.Error(), "datatug-project.json: is a link") {
 			t.Fatalf("err = %v", err)
 		}
 		if contains(err.Error(), outside) {
 			t.Fatalf("the message says where the link leads: %v", err)
 		}
-		if entries, readErr := os.ReadDir(outside); readErr != nil || len(entries) != 0 {
-			t.Fatalf("something was made outside the project: %v %v", entries, readErr)
+		if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+			t.Fatalf("something was written outside the project: %v", statErr)
 		}
 	})
 	t.Run("the config cannot be written", func(t *testing.T) {
 		root := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(root, "p", "datatug", "datatug-project.json"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(root, "p", "datatug-project.json"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := createLocalProject("p", "T", root); err == nil || !contains(err.Error(), "failed to create project config") {
@@ -387,5 +410,19 @@ func TestNormalizeRepoName(t *testing.T) {
 		if got := normalizeRepoName(in); got != want {
 			t.Errorf("normalizeRepoName(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// CreateLocalProject is the writer of the create screen, for a caller outside the package.
+func TestCreateLocalProjectIsExported(t *testing.T) {
+	var added dtconfig.ProjectRef
+	stub(t, &addProjectToSettings, func(ref dtconfig.ProjectRef) error { added = ref; return nil })
+	root := t.TempDir()
+	ref, err := CreateLocalProject("exported", "Exported", root)
+	if err != nil || ref != added || ref.Path != filepath.Join(root, "exported") {
+		t.Fatalf("ref = %+v, added = %+v, err = %v", ref, added, err)
+	}
+	if _, err = os.Stat(filepath.Join(root, "exported", "datatug-project.json")); err != nil {
+		t.Fatal(err)
 	}
 }

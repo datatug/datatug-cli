@@ -25,6 +25,16 @@ var refusedPostgresURLs = map[string]struct{ url, want string }{
 	"a doubly encoded colon in the user":         {"postgres://" + markerUser + "%253A" + markerPassword + "@db.example.com/shop?x=" + markerQuery, "percent sign"},
 	"a percent sign in the user query parameter": {"postgres://db.example.com/shop?user=" + markerUser + "%25" + markerPassword + "&x=" + markerQuery, "percent sign"},
 	"a port that is not a number":                {"postgres://" + markerUser + ":" + markerPassword + "@db.example.com/shop?port=" + markerQuery, "cannot be read"},
+
+	// The query of a URL replaces the host, the port and the database that its authority and its path name
+	// (pgx and ParsePostgresTarget agree), so the line that names what a command connects to, built from the
+	// authority and the path, would name a place the command does not connect to. Only the name of the key is
+	// said: its value is part of the URL.
+	"a host in the query":             {"postgres://" + markerUser + ":" + markerPassword + "@a.example.com/shop?host=b.internal&x=" + markerQuery, `sets "host" in its query`},
+	"a socket directory in the query": {"postgres:///shop?host=%2Fvar%2Frun%2Fpostgresql&x=" + markerQuery, `sets "host" in its query`},
+	"a port in the query":             {"postgres://" + markerUser + ":" + markerPassword + "@a.example.com:5433/shop?port=6543&x=" + markerQuery, `sets "port" in its query`},
+	"a dbname in the query":           {"postgres://" + markerUser + ":" + markerPassword + "@a.example.com/shop?sslmode=require&dbname=other&x=" + markerQuery, `sets "dbname" in its query`},
+	"a database in the query":         {"postgres://" + markerUser + ":" + markerPassword + "@a.example.com/shop?database=other&x=" + markerQuery, `sets "database" in its query`},
 }
 
 func TestParse_RefusesTheShapesThatAreReadDifferentlyFromHowTheyWereWritten(t *testing.T) {

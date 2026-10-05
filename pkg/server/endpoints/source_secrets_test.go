@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
 const endpointSecret = "s3cr3t-DT01"
@@ -61,10 +62,11 @@ func TestResolveSQLSourceURLNeverEchoesAPassword(t *testing.T) {
 		t.Fatalf("error leaks the password: %v", err)
 	}
 	// Open's error says which source failed and why, in a fixed sentence built from
-	// no part of the URL, and is returned as it is: a PostgreSQL source while the
-	// preview is off is answered by the sentence about the preview, which names nothing typed.
-	if err.Error() != dbcopy.ErrPostgresPreview.Error() || !errors.Is(err, dbcopy.ErrPostgresPreview) {
-		t.Fatalf("error = %v, want Open's own error, returned as it is", err)
+	// no part of the URL: a PostgreSQL source while the preview is off is answered by the
+	// sentence about the preview, which names nothing typed, as a source that is unavailable.
+	var unavailable *contractError
+	if !errors.As(err, &unavailable) || unavailable.Code != apicontract.ErrCodeSourceUnavailable || unavailable.Message != dbcopy.ErrPostgresPreview.Error() {
+		t.Fatalf("error = %v, want SOURCE_UNAVAILABLE with the sentence of the preview", err)
 	}
 	for _, shown := range []string{"alice", "127.0.0.1", "shop"} {
 		if strings.Contains(err.Error(), shown) {

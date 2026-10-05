@@ -257,6 +257,12 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		if errors.Is(err, dbcopy.ErrSourceFileMissing) {
 			return apicontract.Result{}, newSourceUnavailable(err.Error())
 		}
+		// A source that is refused (the preview of PostgreSQL sources is off, a read of one
+		// through policies), cannot be opened, or lost its connection: the sentence dbcopy
+		// built for it, which holds nothing the person typed, and not the text of err.
+		if unavailable := dbcopy.UnavailableSource(err); unavailable != nil {
+			return apicontract.Result{}, newSourceUnavailable(unavailable.Error())
+		}
 		// dal-go/dalgo2http v0.2.0's Phase 1 HTTP bounds (adopted alongside
 		// this stream): a live response over the adapter's 2 MiB cap fails
 		// explicitly with ErrResponseTooLarge rather than a misleading JSON

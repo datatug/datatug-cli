@@ -12,6 +12,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2postgres"
 	"github.com/dal-go/dalgo2sql"
+	"github.com/datatug/datatug-cli/internal/pgstandin"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -71,6 +72,9 @@ func TestQuery_APostgresSourceWithThePreviewOffAnswersThePreviewSentence(t *test
 		"with a policy":  {"--policies-dir", dir, "--as", "alice"},
 		"an env source":  {"--no-policies"},
 		"a typed source": {"--no-policies", "-f", "-"},
+		// No policy flag at all and no policies directory: the person is told about the preview first, not about
+		// the policies, which turning the preview on would not change.
+		"no policy flag": {},
 	} {
 		source := pgMarkedSource
 		if name == "an env source" {
@@ -131,6 +135,22 @@ func TestQuery_APostgresSourceIsOpenedReadOnlyAndItsFailuresAreClassified(t *tes
 		assert.Contains(t, opens.dsns[0], "statement_timeout=30000", name)
 		assert.Contains(t, opens.dsns[0], "connect_timeout=10", name)
 	}
+}
+
+// A source that opened and whose pool cannot make a connection again (the server was restarted, the password was changed,
+// the connection limit was reached) fails a read with the text pgx writes, which names the user and holds the whole
+// configuration. The command shows one fixed sentence, and nothing of the user, the password or the parameter.
+func TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	t.Cleanup(dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+		return pgstandin.Unreachable(t, pgMarkerUser, pgMarkerPassword), nil
+	}))
+	stdout, stderr, code := runQuery(t, "", "--db", pgMarkedSource, "--from", "customers", "--no-policies")
+	assert.Equal(t, exitCodeDatabase, code)
+	assert.Contains(t, stderr, "the connection to the PostgreSQL server was lost and could not be made again\n")
+	assert.NotContains(t, stderr, "failed to connect")
+	assert.Empty(t, stdout)
+	assertNoPgMarkers(t, "lost connection", stdout, stderr)
 }
 
 // Every class of failure of an open exits with 4, as the specs of `query run` and `db copy` require (the database cannot be

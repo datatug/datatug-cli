@@ -2,12 +2,14 @@ package secureread
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2postgres"
 	"github.com/dal-go/dalgo2sql"
+	"github.com/datatug/datatug-cli/internal/pgstandin"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -134,4 +136,26 @@ func TestRunNativeSQL_APostgresSourceIsRefusedAndTheMessageNamesPostgreSQL(t *te
 	assert.Contains(t, err.Error(), "PostgreSQL")
 	assert.NotContains(t, err.Error(), pgPassword)
 	assert.Zero(t, calls.Load())
+}
+
+// A session with no policy reads a source that opened and whose pool cannot make a connection again (the server was
+// restarted, the password was changed): every way the executor reads shows one fixed sentence, and nothing of what
+// pgx writes, which names the user and holds the password.
+func TestExecutor_AReadThatLosesItsConnectionShowsOneFixedSentence(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	t.Cleanup(dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+		return pgstandin.Unreachable(t, pgUser, pgPassword), nil
+	}))
+	executor := NewExecutor(sessions(t)["an unrestricted session"])
+	for name, read := range reads(executor) {
+		err := read()
+		if assert.Error(t, err, name) {
+			assert.Contains(t, err.Error(), "the connection to the PostgreSQL server was lost and could not be made again", name)
+			for _, shown := range []string{err.Error(), fmt.Sprintf("%+v", err), fmt.Sprintf("%#v", err)} {
+				assert.NotContains(t, shown, pgPassword, name)
+				assert.NotContains(t, shown, pgUser, name)
+				assert.NotContains(t, shown, pgQuery, name)
+			}
+		}
+	}
 }

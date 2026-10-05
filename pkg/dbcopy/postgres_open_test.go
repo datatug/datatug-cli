@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
@@ -50,36 +52,25 @@ func TestOpen_APostgresSourceReachesTheAdapterWithTheSessionDefaults(t *testing.
 	assert.Equal(t, dal.NewSchema(nil, nil), fake.schemas[0], "no schema is declared: records are keyed by the key the adapter reads")
 	assert.Equal(t, dalgo2sql.DbOptions{}, fake.options[0], "no recordset is declared, as for SQLite")
 	assert.Len(t, fake.extras[0], 1, "exactly one adapter option: the exact identifier mode (names are used as the scan stored them)")
+	assert.True(t, identifierModeIsExact(fake.extras[0]), "the adapter is given the exact identifier mode, not its default of folded names")
 }
 
-// The same four parameters reach the adapter for every read, and a copy target is the one open that
-// is not read-only.
-func TestOpen_EveryReadIsReadOnlyAndTheCopyTargetIsNot(t *testing.T) {
-	previewOn(t)
-	for name, tc := range map[string]struct {
-		open       func(BackendRef, context.Context) (dal.DB, error)
-		wantReadOn bool
-	}{
-		"Open":          {func(r BackendRef, c context.Context) (dal.DB, error) { return r.Open(c) }, true},
-		"OpenProtected": {func(r BackendRef, c context.Context) (dal.DB, error) { return r.OpenProtected(c) }, true},
-		"OpenForWrite":  {func(r BackendRef, c context.Context) (dal.DB, error) { return r.OpenForWrite(c) }, false},
-	} {
-		fake := &fakeOpener{}
-		stubPostgresOpener(t, fake.open)
-		ref, err := Parse("postgres://alice:pw@db.example.com/shop")
-		require.NoError(t, err)
-		_, err = tc.open(ref, context.Background())
-		require.NoError(t, err, name)
-		require.Len(t, fake.dsns, 1, name)
-		if tc.wantReadOn {
-			assert.Contains(t, fake.dsns[0], "default_transaction_read_only=on", name)
-		} else {
-			assert.NotContains(t, fake.dsns[0], "default_transaction_read_only", name)
-		}
-		for _, always := range []string{"statement_timeout=30000", "timezone=UTC", "application_name=datatug", "connect_timeout=10"} {
-			assert.Contains(t, fake.dsns[0], always, name)
-		}
-	}
+// identifierModeIsExact tells, with no server, whether the options the adapter was given make the identifier mode
+// exact and not the adapter's default (names folded to lower case). The adapter refuses, before it opens any
+// connection, a DbOptions.IdentifierCase that disagrees with the mode an option set; a string it reads as misread is
+// refused after that and before the driver is asked. So the exact mode, given beside the folding case, is the "disagree"
+// refusal, and the folding mode, or no mode, is the refusal of the string.
+func identifierModeIsExact(options []dalgo2postgres.Option) bool {
+	_, err := dalgo2postgres.NewDatabaseWithOptions(`"not a connection string"`, dal.NewSchema(nil, nil),
+		dalgo2sql.DbOptions{IdentifierCase: dalgo2sql.IdentifierCaseFoldLower}, options...)
+	return err != nil && strings.Contains(err.Error(), "disagree")
+}
+
+// The check above is not vacuous: options that set the folding mode, or none, are not the exact mode.
+func TestIdentifierModeIsExact_TellsTheModesApart(t *testing.T) {
+	assert.True(t, identifierModeIsExact([]dalgo2postgres.Option{dalgo2postgres.WithIdentifierMode(dalgo2postgres.IdentifierExact)}))
+	assert.False(t, identifierModeIsExact([]dalgo2postgres.Option{dalgo2postgres.WithIdentifierMode(dalgo2postgres.IdentifierFoldLower)}), "the folding mode is not the exact one")
+	assert.False(t, identifierModeIsExact(nil), "no option is not the exact mode either")
 }
 
 // A URL that turns read-only off is refused on every read, before the opener, and the person who
@@ -212,6 +203,185 @@ func TestOpen_ConcurrentOpensOfOneSourceOpenOnce(t *testing.T) {
 	assert.EqualValues(t, 1, calls.Load())
 	for _, handle := range handles {
 		assert.Same(t, handles[0], handle)
+	}
+}
+
+// The callers of a source that is being opened share the outcome of that one open, success or failure: a burst of
+// callers of an unreachable source dials it once, not once after another, each for as long as the connect timeout.
+// The callers join the attempt in flight before it ends (the open is held until all of them have), so the count is
+// not a race. A call after the attempt ended opens again: a failure is not remembered.
+func TestOpen_TheCallersOfASourceBeingOpenedShareItsOutcome(t *testing.T) {
+	previewOn(t)
+	for name, tc := range map[string]struct {
+		cause   error
+		wantErr bool
+	}{
+		"a failure": {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}, true},
+		"a success": {nil, false},
+	} {
+		var calls atomic.Int32
+		release := make(chan struct{})
+		cache := &handleCache{}
+		open := func() (*dalgo2postgres.Database, error) {
+			calls.Add(1)
+			<-release
+			if tc.cause != nil {
+				return nil, tc.cause
+			}
+			return &dalgo2postgres.Database{}, nil
+		}
+		key := [32]byte{1}
+
+		const callers = 8
+		attempts := make([]*openAttempt, callers)
+		for i := range attempts {
+			db, attempt, err := cache.join(context.Background(), key, open)
+			require.NoError(t, err, name)
+			require.Nil(t, db, name)
+			attempts[i] = attempt
+			assert.Same(t, attempts[0], attempt, name+": every caller joins the attempt in flight")
+		}
+		close(release)
+
+		var handles []*sharedPostgres
+		for _, attempt := range attempts {
+			db, err := attempt.await(context.Background())
+			handles = append(handles, db)
+			if tc.wantErr {
+				assert.Same(t, tc.cause, err, name)
+			} else {
+				assert.NoError(t, err, name)
+			}
+		}
+		assert.EqualValues(t, 1, calls.Load(), name+": one dial for the whole burst")
+		for _, handle := range handles {
+			assert.Same(t, handles[0], handle, name)
+		}
+
+		// The attempt is over: the next call decides afresh (a failure is not remembered, a handle is reused).
+		again, next, err := cache.join(context.Background(), key, open)
+		require.NoError(t, err, name)
+		if tc.wantErr {
+			require.NotNil(t, next, name+": a call after a failed attempt opens again")
+			_, _ = next.await(context.Background())
+			assert.EqualValues(t, 2, calls.Load(), name)
+		} else {
+			assert.Nil(t, next, name)
+			assert.Same(t, handles[0], again, name+": a call after a successful attempt gets the handle")
+			assert.EqualValues(t, 1, calls.Load(), name)
+		}
+	}
+}
+
+// A caller whose context ends stops waiting, with the classified sentence for a cancelled or a timed out attempt,
+// while the open goes on; the handle it opens is kept, and the next caller gets it with no second open.
+func TestOpen_ACallerWhoseContextEndsStopsWaitingAndTheOpenGoesOn(t *testing.T) {
+	previewOn(t)
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	stubPostgresOpener(t, func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+		return &dalgo2postgres.Database{}, nil
+	})
+	ref := parseMarked(t)
+
+	// The first caller starts the open, and the test waits until it is under way. The second joins it, whenever it
+	// gets to: a context that has ended is answered whether the caller is already waiting or not.
+	first, cancelFirst := context.WithCancel(context.Background())
+	firstResult := make(chan error, 1)
+	go func() { _, err := ref.Open(first); firstResult <- err }()
+	<-started
+	cancelFirst()
+	err := <-firstResult
+	require.Error(t, err)
+	assert.EqualError(t, err, `open postgres source "postgres://db.example.com:5433/shop": the attempt was cancelled`)
+	assertNoMarkers(t, "cancelled", err)
+
+	second, cancelSecond := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancelSecond()
+	_, err = ref.Open(second)
+	require.Error(t, err)
+	assert.EqualError(t, err, `open postgres source "postgres://db.example.com:5433/shop": the attempt timed out`)
+	assertNoMarkers(t, "timed out", err)
+	assert.EqualValues(t, 1, calls.Load(), "both callers waited on one open")
+
+	close(release)
+	handle, err := ref.Open(context.Background())
+	require.NoError(t, err, "the open that went on after the callers left is kept")
+	assert.NotNil(t, handle)
+	assert.EqualValues(t, 1, calls.Load(), "and no second open was made for it")
+}
+
+// A caller whose context has ended before there is anything to wait for does not start an open: a request that is
+// gone does not dial. A handle that is already open is still answered, and a source whose open is under way is waited
+// for only until the context ends.
+func TestOpen_ACallerWhoseContextHasEndedDoesNotStartAnOpen(t *testing.T) {
+	previewOn(t)
+	fake := &fakeOpener{}
+	stubPostgresOpener(t, fake.open)
+	ref := parseMarked(t)
+	ended, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	db, err := ref.Open(ended)
+	assert.Nil(t, db)
+	assert.EqualError(t, err, `open postgres source "postgres://db.example.com:5433/shop": the attempt was cancelled`)
+	assert.Empty(t, fake.dsns, "no open was started")
+
+	opened, err := ref.Open(context.Background())
+	require.NoError(t, err)
+	again, err := ref.Open(ended)
+	require.NoError(t, err, "a handle that is open is answered whatever the context")
+	assert.Same(t, opened, again)
+}
+
+// An opener that panics (the stop-the-run opener of a test binary does) panics in the caller, not in a goroutine
+// nobody can recover, and in every caller that waited for the same attempt.
+func TestOpen_APanicOfTheOpenerReachesEveryCallerThatWaited(t *testing.T) {
+	previewOn(t)
+	cache := &handleCache{}
+	release := make(chan struct{})
+	open := func() (*dalgo2postgres.Database, error) {
+		<-release
+		panic("the opener stops the run")
+	}
+	key := [32]byte{2}
+	_, first, err := cache.join(context.Background(), key, open)
+	require.NoError(t, err)
+	_, second, err := cache.join(context.Background(), key, open)
+	require.NoError(t, err)
+	close(release)
+	assert.PanicsWithValue(t, "the opener stops the run", func() { _, _ = first.await(context.Background()) })
+	assert.PanicsWithValue(t, "the opener stops the run", func() { _, _ = second.await(context.Background()) })
+
+	_, next, err := cache.join(context.Background(), key, func() (*dalgo2postgres.Database, error) { return &dalgo2postgres.Database{}, nil })
+	require.NoError(t, err)
+	require.NotNil(t, next, "a panic is not remembered either")
+	db, err := next.await(context.Background())
+	assert.NoError(t, err)
+	assert.NotNil(t, db)
+}
+
+// A constructor that fails with an error that wraps a context error (a driver's text around a deadline) is the bare
+// context error: classified as a timeout or a cancellation, and nothing of the driver's text is kept.
+func TestOpen_AContextErrorOfTheConstructorIsTheBareContextError(t *testing.T) {
+	previewOn(t)
+	hostile := func(cause error) error { return fmt.Errorf("dial %q: %w", markedPostgresURL, cause) }
+	for name, tc := range map[string]struct {
+		cause error
+		want  string
+	}{
+		"a deadline":     {hostile(context.DeadlineExceeded), "the attempt timed out"},
+		"a cancellation": {hostile(context.Canceled), "the attempt was cancelled"},
+	} {
+		stubPostgresOpener(t, (&fakeOpener{err: tc.cause}).open)
+		_, err := parseMarked(t).Open(context.Background())
+		assert.EqualError(t, err, `open postgres source "postgres://db.example.com:5433/shop": `+tc.want, name)
+		assertNoMarkers(t, name, err)
 	}
 }
 

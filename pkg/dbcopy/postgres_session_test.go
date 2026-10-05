@@ -52,6 +52,19 @@ func TestPostgresConnectionString_Table(t *testing.T) {
 		{"an options string that sets something else", "postgres://h/db?options=-c%20search_path%3Dsales", false,
 			"postgres://h/db?options=-c%20search_path%3Dsales&" + defaultSession},
 
+		// Names are compared as ASCII, as the server compares them: a key that only lower-cases to the
+		// name of a parameter, because Unicode folds a letter of it to an ASCII one, is not that parameter,
+		// so the default is still appended (the adapter refuses a setting whose name is not plain ASCII).
+		{"a key that Unicode folds to the read-only parameter", "postgres://h/db?default_transact%C4%B0on_read_only=on", false,
+			"postgres://h/db?default_transact%C4%B0on_read_only=on&" + defaultSession},
+		{"a key that Unicode folds to the timeout", "postgres://h/db?statement_t%C4%B0meout=0", false,
+			"postgres://h/db?statement_t%C4%B0meout=0&" + defaultSession},
+		{"an options string whose Unicode folds to the read-only parameter is not the parameter", "postgres://h/db?options=-c%20default_transact%C4%B0on_read_only%3Doff", false,
+			"postgres://h/db?options=-c%20default_transact%C4%B0on_read_only%3Doff&" + defaultSession},
+
+		// A service or a service file in the URL of a write is kept as typed.
+		{"a target that names a service", "postgres://h/db?service=mine", true, "postgres://h/db?service=mine&" + writeSession},
+
 		// The copy target is the one connection that is written through: no read-only default.
 		{"a target", "postgres://h/db", true, "postgres://h/db?" + writeSession},
 		{"a target whose URL turns read-only off", "postgres://h/db?default_transaction_read_only=off", true,
@@ -94,6 +107,21 @@ func TestPostgresConnectionString_RefusesAReadThatTurnsReadOnlyOff(t *testing.T)
 		assert.Same(t, errPostgresReadOnlyOff, err, query)
 		assertNoMarkers(t, query, err)
 	}
+}
+
+// A URL that names a service or a service file is refused on a read, whatever the case of the name: a service
+// file can set the session, in a spelling the URL does not show, beside the read-only default. Only the name of
+// the setting is said, and nothing of the URL.
+func TestPostgresConnectionString_RefusesAReadThatNamesAServiceFile(t *testing.T) {
+	t.Parallel()
+	for _, query := range []string{"service=mine", "servicefile=%2Ftmp%2Fpg_service.conf", "SERVICE=mine", "ServiceFile=x", "sslmode=disable&service="} {
+		got, err := postgresConnectionString("postgres://"+markerUser+":"+markerPassword+"@h/db?x="+markerQuery+"&"+query, false)
+		assert.Empty(t, got, query)
+		assert.Same(t, errPostgresServiceFile, err, query)
+		assertNoMarkers(t, query, err)
+	}
+	assert.Contains(t, errPostgresServiceFile.Error(), "service")
+	assert.Contains(t, errPostgresServiceFile.Error(), "servicefile")
 }
 
 // The refusal says what is wrong and where writing is allowed, and quotes nothing of the URL.

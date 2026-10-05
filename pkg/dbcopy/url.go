@@ -268,8 +268,15 @@ func parseURL(rawURL string) (BackendRef, error) {
 		// by an unescaped "/", "?" or "#" (which also catches a second URL written inside the
 		// source), and a user name that holds a colon or a percent sign. The sentences quote
 		// nothing of the URL, and neither does the message: the display form of a URL like these
-		// can show the end of a password (what follows the last "@" is read as the host).
-		if _, _, err := parsePostgresURL(path); err != nil {
+		// can show the end of a password (what follows the last "@" is read as the host). A URL
+		// whose query sets the host, the port or the database is refused too: the line that names
+		// the source is built from the authority and the path, and would name a place the
+		// connection does not go to.
+		_, query, err := parsePostgresURL(path)
+		if err == nil {
+			err = targetOverrideRefusal(query)
+		}
+		if err != nil {
 			return BackendRef{}, fmt.Errorf("invalid postgres URL: %w", err)
 		}
 		return BackendRef{Scheme: "postgres", Path: path, Raw: display}, nil
@@ -650,7 +657,7 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 
 	case "postgres":
 		// The preview switch is asked first, inside openPostgres.
-		return r.openPostgres(mode.forWrite)
+		return r.openPostgres(ctx, mode.forWrite)
 
 	case "http", "https":
 		var opts []httpsource.Option

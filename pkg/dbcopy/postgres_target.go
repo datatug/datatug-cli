@@ -42,9 +42,45 @@ var (
 	errPostgresUserHoldsPercent = errors.New("the PostgreSQL URL has a user name that holds a percent sign after it is decoded (a user name or a password encoded twice, such as a percent-encoded ':' between them, joins them into one name): percent-encode the user name and the password once")
 )
 
-// postgresURLRefusals are the errors parsePostgresURL returns for a URL it will not read: each a
-// fixed sentence that says what is wrong and quotes none of the URL.
-var postgresURLRefusals = []error{errSplitPostgresPassword, errPostgresUserHoldsColon, errPostgresUserHoldsPercent, errUnreadablePostgresURL}
+// queryKeysThatOverrideTheTarget are the keys of the query of a PostgreSQL URL that replace the
+// host, the port or the database that its authority and its path name (pgx applies the query after
+// them, and ParsePostgresTarget does the same; the user is replaced the same way, and is never
+// named by the line that names a source). The line that names what a command connects to is built
+// from the authority and the path, so a URL that sets one of these would name a place the command
+// does not connect to: parseURL refuses it (see targetOverrideRefusals).
+var queryKeysThatOverrideTheTarget = []string{"host", "port", "dbname", "database"}
+
+// targetOverrideRefusals holds, for each of queryKeysThatOverrideTheTarget, the refusal of a URL that
+// sets it. Each is a fixed sentence that names the key and nothing of the URL (the value is part
+// of it).
+var targetOverrideRefusals = func() map[string]error {
+	refusals := make(map[string]error, len(queryKeysThatOverrideTheTarget))
+	for _, key := range queryKeysThatOverrideTheTarget {
+		refusals[key] = errors.New("the PostgreSQL URL sets " + strconv.Quote(key) + " in its query, which the connection uses in place of the host, port or database the rest of the URL names: write the host and port in the authority and the database in the path")
+	}
+	return refusals
+}()
+
+// targetOverrideRefusal returns the refusal for the first of queryKeysThatOverrideTheTarget that
+// query sets, or nil when it sets none.
+func targetOverrideRefusal(query url.Values) error {
+	for _, key := range queryKeysThatOverrideTheTarget {
+		if query.Has(key) {
+			return targetOverrideRefusals[key]
+		}
+	}
+	return nil
+}
+
+// postgresURLRefusals are the errors parseURL returns for a URL it will not read: each a fixed
+// sentence that says what is wrong and quotes none of the URL.
+var postgresURLRefusals = func() []error {
+	refusals := []error{errSplitPostgresPassword, errPostgresUserHoldsColon, errPostgresUserHoldsPercent, errUnreadablePostgresURL}
+	for _, key := range queryKeysThatOverrideTheTarget {
+		refusals = append(refusals, targetOverrideRefusals[key])
+	}
+	return refusals
+}()
 
 // postgresURLRefusal returns the refusal of postgresURLRefusals that err is or wraps, or nil
 // when err is another error. A caller that must not show err itself (it may be about a variable's

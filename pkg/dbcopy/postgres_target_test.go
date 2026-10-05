@@ -155,7 +155,9 @@ func TestSourceScopeIdentity_BindsEnvNameToTheDatabaseItPointsAt(t *testing.T) {
 	assert.Equal(t, base, identity("postgres://alice:rotated@db.example.com:5432/shop"))
 	assert.Equal(t, base, identity("postgresql://alice:s3cret@db.example.com:5432/shop?sslmode=require"))
 	assert.Equal(t, base, identity("postgres://alice:s3cret@DB.Example.COM/shop"), "host case and the default port do not make a new scope")
-	assert.Equal(t, base, identity("postgres://alice:s3cret@other.example.net/shop?host=db.example.com"))
+	// A URL whose query names the host is refused by Parse (the line that names a source would name
+	// another place), so the variable does not resolve: its identity is the one of any variable that does not.
+	assert.Equal(t, "env:SHOP_PG_URL#unresolved", identity("postgres://alice:s3cret@other.example.net/shop?host=db.example.com"))
 
 	// Repointing the variable at another database is another scope.
 	for name, repointed := range map[string]string{

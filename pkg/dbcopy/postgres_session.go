@@ -31,16 +31,37 @@ var postgresSessionDefaults = []sessionDefault{
 // readOnlyParameter names the parameter that decides whether a session may write.
 const readOnlyParameter = "default_transaction_read_only"
 
+// errPostgresServiceFile is what a read of a PostgreSQL source whose URL names a service or a
+// service file is refused with: a service file sets parameters of the session that the URL does
+// not show, so a read takes its settings from the URL alone. It names the two settings, not the
+// URL. (A service file that the environment names, PGSERVICE or PGSERVICEFILE, is the
+// operator's own, as the rest of the environment is, and is not refused.)
+var errPostgresServiceFile error = &refusedError{"the PostgreSQL URL names a service or a service file (service, servicefile): a read of a PostgreSQL source takes its settings from the URL alone, so write them in the URL"}
+
+// asciiLower lower-cases the ASCII letters of s and nothing else. The server compares the names of
+// its parameters as ASCII, so a letter that Unicode folds to an ASCII one (U+0130, the dotted
+// capital I, lower-cases to "i") must not turn a key into the name of a parameter.
+func asciiLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return r
+	}, s)
+}
+
 // postgresConnectionString is the one function that assembles the options of a PostgreSQL
 // connection and the only place that reads the parameters of its URL. It returns rawURL with every
 // session default (see postgresSessionDefaults) that the URL does not set appended to its query,
 // before any fragment; what the person typed is not rewritten, the user name and the password
-// included. Parameter names are compared without regard to case, as the server compares them.
+// included. Parameter names are compared without regard to the case of their ASCII letters, as the
+// server compares them (see asciiLower).
 //
 // A read (forWrite false) is refused with errPostgresReadOnlyOff when the URL turns the read-only
 // session off: whatever it writes for off, and an "options" parameter that mentions the parameter
-// at all. Only the target of `datatug db copy` is opened with forWrite true: it gets no read-only
-// default, and a URL's own setting is kept as typed.
+// at all; and with errPostgresServiceFile when it names a service or a service file. Only the
+// target of `datatug db copy` is opened with forWrite true: it gets no read-only default, and a
+// URL's own settings are kept as typed.
 //
 // The URL is read as net/url, which the driver uses too, reads it. A URL that cannot be read
 // returns errUnreadablePostgresURL. No error quotes the URL.
@@ -52,10 +73,15 @@ func postgresConnectionString(rawURL string, forWrite bool) (string, error) {
 	query := parsed.Query()
 	set := make(map[string]bool, len(query))
 	for key := range query {
-		set[strings.ToLower(key)] = true
+		set[asciiLower(key)] = true
 	}
-	if !forWrite && turnsReadOnlyOff(query) {
-		return "", errPostgresReadOnlyOff
+	if !forWrite {
+		if set["service"] || set["servicefile"] {
+			return "", errPostgresServiceFile
+		}
+		if turnsReadOnlyOff(query) {
+			return "", errPostgresReadOnlyOff
+		}
 	}
 	var added []string
 	for _, def := range postgresSessionDefaults {
@@ -88,7 +114,7 @@ func postgresConnectionString(rawURL string, forWrite bool) (string, error) {
 // through the server's -c syntax, mentions it.
 func turnsReadOnlyOff(query url.Values) bool {
 	for key, values := range query {
-		switch strings.ToLower(key) {
+		switch asciiLower(key) {
 		case readOnlyParameter:
 			for _, value := range values {
 				if !spellsOn(value) {
@@ -97,7 +123,7 @@ func turnsReadOnlyOff(query url.Values) bool {
 			}
 		case "options":
 			for _, value := range values {
-				if strings.Contains(strings.ToLower(value), readOnlyParameter) {
+				if strings.Contains(asciiLower(value), readOnlyParameter) {
 					return true
 				}
 			}
@@ -108,7 +134,7 @@ func turnsReadOnlyOff(query url.Values) bool {
 
 // spellsOn reports whether value is a spelling of true that PostgreSQL reads as a boolean.
 func spellsOn(value string) bool {
-	switch strings.ToLower(value) {
+	switch asciiLower(value) {
 	case "on", "true", "yes", "1", "t", "y":
 		return true
 	}

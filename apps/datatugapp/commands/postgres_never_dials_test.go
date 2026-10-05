@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"os"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
@@ -15,6 +16,7 @@ import (
 // that needs a database stands in with a fake of its own (standInForPostgres).
 func init() {
 	dbcopy.SetPostgresOpenerForTest(neverDialPostgres)
+	_ = os.Unsetenv(dbcopy.PostgresPreviewEnv)
 }
 
 // neverDialPostgres panics: a test that reaches it did not stand in, and the next thing the real constructor
@@ -31,4 +33,9 @@ func TestTheOpenerOfThisTestBinaryIsTheOneThatStopsTheRun(t *testing.T) {
 	assert.NoError(t, err)
 	assert.PanicsWithValue(t, "a test of a command opened a PostgreSQL database for real: it must stand in with standInForPostgres and never dial",
 		func() { _, _ = ref.Open(t.Context()) })
+}
+
+// The switch of the developer's shell does not reach a test: the init above clears it.
+func TestThePreviewSwitchIsOffUnlessATestTurnsItOn(t *testing.T) {
+	assert.ErrorIs(t, dbcopy.CheckPostgresPreview(), dbcopy.ErrPostgresPreview)
 }

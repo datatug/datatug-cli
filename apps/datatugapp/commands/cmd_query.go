@@ -209,6 +209,11 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
+	// A PostgreSQL source is a preview that is off unless the person turns it on: that is the first
+	// thing they are told, before anything about policies, which turning it on would not change.
+	if err = dbcopy.CheckPostgresRead(backend, 0); err != nil {
+		return Exit(err.Error(), exitCodeDatabase)
+	}
 	loaded, err := accesspolicies.Load(accesspolicies.LoadOptions{Dir: o.policiesDir, Files: o.policies, None: o.noPolicies})
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
@@ -228,13 +233,10 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	// A PostgreSQL source is a preview, and a read of one through policies is not available in it:
-	// both are answered before the source is opened.
+	// With the preview on, a read of a PostgreSQL source through policies is not available in it: that is
+	// answered before the source is opened.
 	if err = dbcopy.CheckPostgresRead(backend, len(loaded)); err != nil {
-		if errors.Is(err, dbcopy.ErrPostgresPolicyReads) {
-			return Exit(err.Error(), exitCodeUsage)
-		}
-		return Exit(err.Error(), exitCodeDatabase)
+		return Exit(err.Error(), exitCodeUsage)
 	}
 	// This ad-hoc `datatug query run --db http://...` path predates
 	// pkg/httpsource.Open's fail-closed ModeLive default (see Open's own doc

@@ -42,4 +42,6 @@ var (
 	scanLstat     = os.Lstat
 	scanRemoveAll = os.RemoveAll
 	scanWriteFile = os.WriteFile
+	scanRemove    = os.Remove // the connection descriptor of a PostgreSQL scan, and the folders it made
+	scanMkdir     = os.Mkdir  // a folder of the connection descriptor of a PostgreSQL scan
 )

@@ -26,14 +26,14 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.8
-	github.com/dal-go/dalgo v0.88.0
+	github.com/dal-go/dalgo v0.89.4
 	github.com/dal-go/dalgo2http v0.2.1
-	github.com/dal-go/dalgo2postgres v0.2.4
-	github.com/dal-go/dalgo2sql v0.19.3
+	github.com/dal-go/dalgo2postgres v0.4.0
+	github.com/dal-go/dalgo2sql v0.26.0
 	github.com/dal-go/dalgo2sqlite v0.2.2
-	github.com/dal-go/record v0.1.3
+	github.com/dal-go/record v0.1.4
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.41.2
+	github.com/datatug/datatug-core v0.42.3
 	github.com/datatug/sql2csv v0.0.1
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/go-git/go-git/v5 v5.19.2
@@ -58,9 +58,9 @@ require (
 	github.com/strongo/cli-helpers v0.26.0
 	github.com/strongo/deviceauth v0.1.0
 	github.com/strongo/logus v0.4.3
-	github.com/strongo/random v0.0.2
-	github.com/strongo/slice v0.3.10
-	github.com/strongo/validation v0.0.13
+	github.com/strongo/random v0.0.3
+	github.com/strongo/slice v0.3.12
+	github.com/strongo/validation v0.0.15
 	github.com/tuigoff/tuigoff v0.4.0
 	github.com/xo/dburl v0.24.2
 	github.com/xuri/excelize/v2 v2.11.0
@@ -70,7 +70,7 @@ require (
 	google.golang.org/api v0.296.0
 	google.golang.org/grpc v1.83.2
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.59.0
+	modernc.org/sqlite v1.60.1
 )
 
 require (
@@ -202,7 +202,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	modernc.org/libc v1.75.7 // indirect
+	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )

@@ -91,11 +91,13 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		// The catalog's path names a connection descriptor, a project file that
 		// names an environment variable and nothing else; the variable holds the
 		// connection URL, password included. The source is "env:NAME", so no
-		// project file and no message ever holds the URL.
+		// project file and no message ever holds the URL. The descriptor must be a
+		// file inside the project folder (ResolveDescriptorPath): a project file is
+		// not trusted to point a reader at any other file of the machine.
 		if catalog.Path == "" {
 			return "", fmt.Errorf("catalog %q has no connection descriptor path configured for its postgres driver", catalog.ID)
 		}
-		path, err := ResolveCatalogPath(projDir, catalog.Path)
+		path, err := ResolveDescriptorPath(projDir, catalog.Path)
 		if err != nil {
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}

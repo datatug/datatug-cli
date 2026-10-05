@@ -55,12 +55,21 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	// keeps it, and one that names another is refused, naming both. The same database in
 	// another environment is on the model the other environments record for it.
 	var err error
-	if v.DbModel, err = api.ResolveScanDbModel(v.ProjectDir, v.Environment, v.Database, v.DbModel); err != nil {
+	var modelNote string
+	if v.DbModel, modelNote, err = api.ResolveScanDbModelNoted(v.ProjectDir, v.Environment, v.Database, v.DbModel); err != nil {
 		return err
+	}
+	if modelNote != "" {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), modelNote)
 	}
 	// A name that differs only by case from one the project has is one folder on some
 	// file systems: it is refused now, before the database is read.
 	if err = api.CheckScanNamesAgainstProject(v.ProjectDir, v.Environment, v.Database, v.DbModel); err != nil {
+		return err
+	}
+	// A database id the environment already records under another driver is refused now, before
+	// the database is read: a catalog file is kept by environment and id, whatever the driver.
+	if err = api.CheckScanDriverAgainstProject(v.ProjectDir, v.Environment, v.Database, v.Driver); err != nil {
 		return err
 	}
 	// A project folder that is not there is made, once the scan has read something: a
@@ -101,7 +110,8 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	// that names a missing one is worse than a descriptor with no project. But a
 	// project that cannot be saved must leave no descriptor behind, in a directory
 	// with no project, so the project is validated (as SaveProject does first)
-	// before anything is written.
+	// before anything is written, and a save that fails takes back the descriptor
+	// this scan wrote: it removes one the scan made and puts back one that was there.
 	descriptor, hasDescriptor := connParams.(descriptorWriter)
 	if hasDescriptor {
 		if err = datatugProject.Validate(); err != nil {
@@ -113,8 +123,9 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("failed to create the project folder %q: %w", v.ProjectDir, err)
 		}
 	}
+	undoDescriptor := func() error { return nil }
 	if hasDescriptor {
-		if err = descriptor.WriteDescriptor(v.ProjectDir); err != nil {
+		if undoDescriptor, err = descriptor.WriteDescriptor(v.ProjectDir); err != nil {
 			return err
 		}
 	}
@@ -123,7 +134,24 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	saveStore, _ := filestore.NewSingleProjectStore(v.ProjectDir, datatugProject.ID)
 	savedProject := saveStore.GetProjectStore(datatugProject.ID)
 	scanned := api.ScannedCatalog{Driver: v.Driver, Environment: v.Environment, ID: v.Database, Server: api.ScannedServer(v.Driver, connParams)}
-	return api.SaveScannedProject(ctx, savedProject, v.ProjectDir, datatugProject, scanned, stderr)
+	return saveScanned(func() error {
+		return api.SaveScannedProject(ctx, savedProject, v.ProjectDir, datatugProject, scanned, stderr)
+	}, undoDescriptor)
+}
+
+// saveScanned runs save, and when it fails takes back what the scan wrote beside the
+// project (undo): a descriptor that points at a project that was not saved is worse than
+// none. An undo that fails is said with the failure of the save, which is what the person
+// needs to know first.
+func saveScanned(save, undo func() error) error {
+	err := save()
+	if err == nil {
+		return nil
+	}
+	if undoErr := undo(); undoErr != nil {
+		return errors.Join(err, fmt.Errorf("and the connection descriptor this scan wrote could not be taken back: %w", undoErr))
+	}
+	return err
 }
 
 // checkProjectDir is whether the project folder dir is not there yet, and an error
@@ -155,21 +183,16 @@ var scanMkdirAll = os.MkdirAll
 var scanFilepathAbs = filepath.Abs
 
 // descriptorWriter is implemented by connection parameters that need a file
-// beside the project: PostgreSQL's connection descriptor.
+// beside the project: PostgreSQL's connection descriptor. It returns the function
+// that takes the write back, for a scan whose save fails.
 type descriptorWriter interface {
-	WriteDescriptor(projectDir string) error
+	WriteDescriptor(projectDir string) (undo func() error, err error)
 }
 
 // scanLookupEnv is the environment a PostgreSQL scan reads its connection URL
 // from, a seam so tests never touch the process environment. Always
 // os.LookupEnv in production.
 var scanLookupEnv = os.LookupEnv
-
-// scanPostgresAvailable is the answer to whether this release can scan
-// PostgreSQL, a seam so a test can stand in for a datatug-core whose project
-// model records postgres servers. Always api.CheckPostgresScanAvailable in
-// production, which lifts itself on the day datatug-core accepts the driver.
-var scanPostgresAvailable = api.CheckPostgresScanAvailable
 
 // scanUpdateDbSchema is a seam over api.UpdateDbSchema so tests can drive the
 // save step with a project the scanner itself does not produce (an invalid
@@ -185,7 +208,7 @@ var scanNewConnectionString = dbconnection.NewConnectionString
 // connectionParams builds DB connection parameters from the scan flags.
 func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
 	if v.Driver == "" {
-		return nil, fmt.Errorf("--driver (-D) is required: the database driver to scan, sqlite3 or sqlserver")
+		return nil, fmt.Errorf("--driver (-D) is required: the database driver to scan, sqlite3, sqlserver or postgres")
 	}
 	if v.Driver == api.DriverPostgres {
 		return v.postgresConnectionParams()
@@ -224,13 +247,6 @@ func (v *scanDbCommand) connectionParams() (dbconnection.Params, error) {
 // would keep it) or in a project file, and each of those flags is refused
 // instead of being quietly ignored.
 func (v *scanDbCommand) postgresConnectionParams() (dbconnection.Params, error) {
-	// Say that the scan does not exist before asking for anything: a user must not
-	// be sent to put a production password in a variable, one refusal after
-	// another, for a scan that cannot run, nor have the host and user of that
-	// database logged.
-	if err := scanPostgresAvailable(); err != nil {
-		return nil, err
-	}
 	var refused []string
 	for _, flag := range []struct {
 		name  string
@@ -266,14 +282,16 @@ func scanCommandArgs() *cobra.Command {
 		Use:   "scan",
 		Short: "Adds or updates DB metadata",
 		Long: "Adds or updates DB metadata from a specific server in a specific environment.\n\n" +
-			"Scanning PostgreSQL (-D postgres --dsn-env NAME) is not available in this release: a DataTug project cannot record a postgres server yet, " +
-			"so the scan stops before it connects.",
+			"Scanning PostgreSQL (-D postgres --dsn-env NAME) reads the tables of the schema public and saves them like any other scan. " +
+			"The connection URL (host, port, user and password) stays in the environment variable: the project holds the name of the variable in a connection descriptor, " +
+			"connections/<env>/<db>.json, and the driver and the database id in its environment file, and never a host, a port, a user or a password. " +
+			"A view of the server is saved as a table, and no other schema is read.",
 		RunE: scanCommandAction,
 	}
 	flags := cmd.Flags()
 	flags.StringP("project", "p", "", "Registered project id/name to scan into; with --directory, the id of a new project (default: the name of the folder)")
 	flags.StringP("directory", "d", "", "Path to the project directory (alternative to --project); made if it does not exist")
-	flags.StringP("driver", "D", "", "DB driver: sqlserver or sqlite3 (postgres is not available in this release: a project cannot record a postgres server yet)")
+	flags.StringP("driver", "D", "", "DB driver: sqlserver, sqlite3 or postgres (postgres reads the schema public, the connection URL comes from the environment variable of --dsn-env)")
 	flags.StringP("server", "s", "", "Network server / host name")
 	flags.Int("port", 0, "Server network port (default if omitted)")
 	flags.StringP("user", "U", "", "DB login user")
@@ -282,7 +300,7 @@ func scanCommandArgs() *cobra.Command {
 	flags.String("dbmodel", "", "ID of DB model: a plain name (default: the model the project already records for the database in this environment, else the model the other environments record for it when they agree, else the ID of the database)")
 	flags.String("env", "", "Environment the DB belongs to: a plain name. E.g.: LOCAL, DEV, SIT, UAT, PERF, PROD.")
 	flags.String("path", "", "Path to the SQLite database file (required for -D sqlite3); it must exist")
-	flags.String("dsn-env", "", "Environment variable that holds the PostgreSQL connection URL, for -D postgres (not available in this release: a project cannot record a postgres server yet). The password stays in the variable and is never written to the project. The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
+	flags.String("dsn-env", "", "Environment variable that holds the PostgreSQL connection URL, for -D postgres (postgres://user:password@host/database). The host, port, user and password stay in the variable and are never written to the project, which holds only the name of the variable. The name must start with "+dbcopy.DescriptorEnvPrefix+" or be listed in "+dbcopy.DescriptorEnvAllowList)
 	_ = cmd.MarkFlagRequired("db")
 	_ = cmd.MarkFlagRequired("env")
 	return cmd

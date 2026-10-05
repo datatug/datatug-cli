@@ -2,10 +2,10 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -46,33 +46,51 @@ func postgresProjectLoaders() map[string]ProjectLoader {
 		"an existing project": mockProjectStore{
 			loadProjectFileFunc: func(context.Context) (datatug.ProjectFile, error) { return datatug.ProjectFile{}, nil },
 			loadProjectFunc: func(context.Context, ...datatug.StoreOption) (*datatug.Project, error) {
-				return &datatug.Project{}, nil
+				return &datatug.Project{
+					ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "shop-project"}, Access: "private"},
+					Created:     &datatug.ProjectCreated{At: time.Now()},
+					DbDrivers:   datatug.ProjDbDrivers{},
+				}, nil
 			},
 		},
 	}
 }
 
-// The project model cannot record a postgres server yet, so a scan could only
-// fail at the end, after it had connected to the server and read the whole
-// schema. It stops before it opens anything.
-func TestUpdateDbSchema_PostgresStopsBeforeItOpensAnything(t *testing.T) {
-	// The scan runs in its own goroutine, where a test cannot stop itself: the
-	// stub notes that it was reached.
-	opened := false
-	stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
-		opened = true
-		return nil, errors.New("the database was opened")
-	})
+// The scan reads the database through the seam it is opened by, once, and returns a
+// project that records the driver and the catalog and nothing of the connection: no host,
+// no port, no user, no URL, and a catalog whose path is the connection descriptor.
+func TestUpdateDbSchema_PostgresReturnsAProjectThatRecordsTheDriverAndTheCatalogOnly(t *testing.T) {
 	for name, loader := range postgresProjectLoaders() {
-		opened = false
-		project, err := UpdateDbSchema(context.Background(), loader, "shop-project", "prod", DriverPostgres, "shop", newShopParams(t))
-		assert.False(t, opened, name+": a scan that cannot be saved must not open the database")
-		assert.Nil(t, project, name)
-		if assert.Error(t, err, name) {
-			assert.ErrorContains(t, err, "scanning PostgreSQL is not available in this release", name)
-			assert.NotContains(t, err.Error(), pgSecret, name)
-			assert.NotContains(t, err.Error(), "alice", name)
-		}
+		t.Run(name, func(t *testing.T) {
+			opened := 0
+			stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
+				opened++
+				return &fakeScanDB{}, nil
+			})
+
+			project, err := UpdateDbSchema(context.Background(), loader, "shop-project", "prod", DriverPostgres, "shop", newShopParams(t))
+
+			require.NoError(t, err)
+			assert.Equal(t, 1, opened, "the database is opened once")
+			require.Len(t, project.DbDrivers, 1)
+			driver := project.DbDrivers[0]
+			assert.Equal(t, DriverPostgres, driver.ID)
+			assert.Equal(t, "PostgreSQL", driver.Title, "the project model refuses a driver without a title")
+			require.Len(t, driver.Servers, 1)
+			assert.Equal(t, datatug.ServerRef{Driver: DriverPostgres}, driver.Servers[0].Server, "the server is the driver and nothing else")
+			require.Len(t, driver.Servers[0].Catalogs, 1)
+			catalog := driver.Servers[0].Catalogs[0]
+			assert.Equal(t, "shop", catalog.ID)
+			assert.Equal(t, DriverPostgres, catalog.Driver)
+			assert.Equal(t, "connections/prod/shop.json", catalog.Path)
+			assert.Equal(t, "shop", catalog.DbModel)
+			env := project.Environments.GetByID("prod")
+			require.NotNil(t, env)
+			require.Len(t, env.DbServers, 1)
+			assert.Equal(t, datatug.ServerRef{Driver: DriverPostgres}, env.DbServers[0].ServerRef)
+			assert.Equal(t, []string{"shop"}, env.DbServers[0].Catalogs)
+			require.NoError(t, project.Validate(), "the project model accepts what the scan returns")
+		})
 	}
 }
 
@@ -111,22 +129,23 @@ func TestWarnMissingSourceFiles_SaysNothingOfAPostgresCatalog(t *testing.T) {
 	assert.Empty(t, strings.TrimSpace(logged.String()), "a database server has no file to be missing")
 }
 
-// With the project model as it is today, scanDbCatalog refuses a postgres server
-// and says what is missing; the open is never reached.
-func TestScanDbCatalog_PostgresIsRefusedWhileTheProjectModelCannotRecordIt(t *testing.T) {
-	opened := false
+// The project model records a postgres server by its driver alone (its host and port are
+// optional there, and a project holds neither), and scanDbCatalog reads the database for
+// that server.
+func TestScanDbCatalog_PostgresReadsTheDatabaseForAServerThatIsTheDriverAlone(t *testing.T) {
+	server := datatug.ServerRef{Driver: DriverPostgres}
+	require.NoError(t, server.Validate(), "the project model accepts a postgres server with no host and no port")
+	opened := 0
 	stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
-		opened = true
-		return nil, errors.New("the database was opened")
+		opened++
+		return &fakeScanDB{}, nil
 	})
-	catalog, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres, Host: "db.example.com", Port: 5433}, newShopParams(t))
-	assert.Nil(t, catalog)
-	assert.False(t, opened)
-	if assert.Error(t, err) {
-		assert.ErrorContains(t, err, "scanning PostgreSQL is not available in this release")
-		assert.ErrorContains(t, err, "cannot record a postgres server yet")
-		assert.ErrorContains(t, err, "unexpected value: postgres", "the project model's own reason follows")
-	}
+
+	catalog, err := scanDbCatalog(server, newShopParams(t))
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, opened)
+	assert.Equal(t, "shop", catalog.ID)
 }
 
 // Skipping a postgres catalog must not silence the warning for the other sources
@@ -171,24 +190,19 @@ func TestNewPostgresScanParams_RefusesAUserNameThatHoldsAColon(t *testing.T) {
 	}
 }
 
-// The check that the scan cannot be saved is asked once, for a server that names
-// nothing of the operator's database, so the command can answer before it reads
-// a flag or an environment variable.
-func TestCheckPostgresScanAvailable(t *testing.T) {
-	err := CheckPostgresScanAvailable()
-	if assert.Error(t, err, "the project model cannot record a postgres server in this release") {
-		assert.ErrorContains(t, err, "scanning PostgreSQL is not available in this release")
-		assert.ErrorContains(t, err, "cannot record a postgres server yet")
-		assert.ErrorContains(t, err, "unexpected value: postgres", "the project model's own reason follows")
-	}
+// The project model of the datatug-core this release is built on records a postgres
+// server by its driver alone, and a driver item with the title this scan gives it: the two
+// things a PostgreSQL scan could not be saved without. A datatug-core that stopped
+// accepting either would turn the scan into one that reads a schema and then cannot save.
+func TestTheProjectModelRecordsAPostgresServerByItsDriverAlone(t *testing.T) {
+	assert.Equal(t, "PostgreSQL", driverTitle(DriverPostgres))
+	server := datatug.ServerRef{Driver: DriverPostgres}
+	project, err := newProjectWithDatabase("shop-project", "prod", server, &datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{
+		ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "shop"}}, Driver: DriverPostgres, Path: "connections/prod/shop.json", DbModel: "shop"}})
+	require.NoError(t, err)
+	assert.NoError(t, project.Validate())
 
-	var asked []datatug.ServerRef
-	original := validatePostgresServer
-	t.Cleanup(func() { validatePostgresServer = original })
-	validatePostgresServer = func(server datatug.ServerRef) error {
-		asked = append(asked, server)
-		return nil
-	}
-	assert.NoError(t, CheckPostgresScanAvailable(), "the refusal lifts itself when the project model accepts the driver")
-	assert.Equal(t, []datatug.ServerRef{{Driver: DriverPostgres, Host: "localhost"}}, asked)
+	// A host and a port are not refused either, by the model: it is the scan that leaves them out.
+	assert.NoError(t, datatug.ServerRef{Driver: DriverPostgres, Host: "db.example.com", Port: 5433}.Validate())
+	assert.Equal(t, datatug.ServerRef{Driver: DriverPostgres}, ScannedServer(DriverPostgres, newShopParams(t)), "whatever the URL names, the project records the driver alone")
 }

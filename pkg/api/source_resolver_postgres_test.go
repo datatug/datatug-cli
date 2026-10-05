@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,11 +30,13 @@ func TestSourceURLFromCatalog_PostgresNamesTheVariableAndNeverHoldsItsValue(t *t
 	assert.Equal(t, "env:DATATUG_SHOP_PG_URL", url)
 	assert.NotContains(t, url, "s3cret")
 
-	// An absolute descriptor path works the same way.
+	// An absolute path is not inside the project by being written down: the descriptor of a
+	// catalog is named relative to the project folder, wherever the project is cloned to.
 	absolute := filepath.Join(dir, "connections", "prod", "shop.json")
-	url, err = sourceURLFromCatalog(datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{Driver: "postgres", Path: absolute}}, "")
-	require.NoError(t, err)
-	assert.Equal(t, "env:DATATUG_SHOP_PG_URL", url)
+	url, err = sourceURLFromCatalog(datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "shop"}}, Driver: "postgres", Path: absolute}}, dir)
+	assert.Empty(t, url)
+	assert.ErrorIs(t, err, errDescriptorOutsideProject)
+	assert.ErrorContains(t, err, `catalog "shop"`)
 }
 
 func TestSourceURLFromCatalog_PostgresRefusesWhatItCannotTrust(t *testing.T) {
@@ -83,12 +84,16 @@ func TestSourceURLFromCatalog_PostgresRefusesWhatItCannotTrust(t *testing.T) {
 	_, err = sourceURLFromCatalog(catalog("foreign.json"), dir)
 	assert.ErrorContains(t, err, "PROD_DATABASE_URL", "the operator's list does not open every variable")
 
-	original := homedirExpand
-	homedirExpand = func(string) (string, error) { return "", errors.New("no home") }
-	t.Cleanup(func() { homedirExpand = original })
-	_, err = sourceURLFromCatalog(catalog("~/shop.json"), dir)
-	assert.ErrorContains(t, err, `catalog "shop"`)
-	assert.ErrorContains(t, err, "no home")
+	// A descriptor that is not a file of the project is not read, whoever names it: the home
+	// directory, an absolute path and a path that leaves the folder are all refused, and the
+	// message does not repeat the path.
+	for _, outside := range []string{"~/shop.json", "$HOME/shop.json", "${HOME}/shop.json", "../shop.json", "connections/../../shop.json", "/etc/shop.json"} {
+		_, err = sourceURLFromCatalog(catalog(outside), dir)
+		if assert.ErrorIs(t, err, errDescriptorOutsideProject, outside) {
+			assert.ErrorContains(t, err, `catalog "shop"`, outside)
+			assert.NotContains(t, err.Error(), outside, outside)
+		}
+	}
 }
 
 func TestSourceURLFromCatalog_UnsupportedDriverListsPostgres(t *testing.T) {

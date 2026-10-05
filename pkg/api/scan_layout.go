@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -55,13 +56,18 @@ type ScannedCatalog struct {
 // database model wrote (see mergeColumns), and takes back what its own earlier scans
 // wrote of a table or view that the database no longer has (see planRetractions): the
 // folder of one that no environment has is removed, and said on warnings, one line
-// each. Nothing is written when a folder that is to be removed is, or is inside, a link.
+// each. The first scan of a catalog in an environment (the project holds no catalog file
+// of it there) has no earlier scan of its own, so it takes nothing back: what is in the
+// model for that environment was written by something else. Nothing is written when a
+// folder that is to be removed is, or is inside, a link.
 //
 // The environment, the catalog and the database model of the scan are names of folders
 // of the project, and one that is not a plain name (see CheckScanName), or that differs
 // only by case from one the project has (see CheckScanNamesAgainstProject), is refused
 // before anything is read, written or removed: this function removes folders, and it
-// does not take its ids on trust from whoever calls it.
+// does not take its ids on trust from whoever calls it. A catalog that the project
+// records under another driver in the same environment is refused the same way (see
+// CheckScanDriverAgainstProject).
 func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, projectDir string, project *datatug.Project, scanned ScannedCatalog, warnings io.Writer) error {
 	server, catalog := findScannedCatalog(project, scanned)
 	names := []struct{ flag, value string }{{"--env", scanned.Environment}, {"--db", scanned.ID}}
@@ -78,14 +84,19 @@ func SaveScannedProject(ctx context.Context, store datatug.ProjectStore, project
 	if err := CheckScanNamesAgainstProject(projectDir, scanned.Environment, scanned.ID, model); err != nil {
 		return err
 	}
+	if err := CheckScanDriverAgainstProject(projectDir, scanned.Environment, scanned.ID, scanned.Driver); err != nil {
+		return err
+	}
 	var layout scannedLayout
 	var retractions []retraction
 	if catalog != nil {
 		var err error
 		layout = layoutOfCatalog(catalog, warnings)
-		retractions, err = planRetractions(projectDir, catalog.DbModel, scanned.Environment, layout, otherCatalogsOfModel(project, catalog.DbModel, scanned.Environment, catalog.ID), warnings)
-		if err != nil {
-			return fmt.Errorf("failed to save datatug project [%v]: %w", project.ID, err)
+		if slices.Contains(catalogIDsOf(projectDir, scanned.Environment), catalog.ID) {
+			retractions, err = planRetractions(projectDir, catalog.DbModel, scanned.Environment, layout, otherCatalogsOfModel(project, catalog.DbModel, scanned.Environment, catalog.ID), warnings)
+			if err != nil {
+				return fmt.Errorf("failed to save datatug project [%v]: %w", project.ID, err)
+			}
 		}
 	}
 

@@ -27,7 +27,7 @@ import (
 func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, environment, database, projDir string) (sourceURL, driver string, err error) {
 	env, err := projStore.LoadEnvironment(ctx, environment)
 	if err != nil {
-		return "", "", fmt.Errorf("load environment %q: %w", environment, err)
+		return "", "", LookupError("load environment %q", err, environment)
 	}
 	var lastErr error
 	for _, server := range env.DbServers {
@@ -42,10 +42,12 @@ func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, envir
 		sourceURL, err = sourceURLFromCatalog(catalog, projDir)
 		return sourceURL, catalog.Driver, err
 	}
+	// environment and database are what a client sent, and a source string can be
+	// sent where an ID belongs: see LookupError.
 	if lastErr != nil {
-		return "", "", fmt.Errorf("database %q not found in environment %q (tried %d server(s), last error: %w)", database, environment, len(env.DbServers), lastErr)
+		return "", "", LookupError("database %q not found in environment %q", lastErr, database, environment)
 	}
-	return "", "", fmt.Errorf("environment %q has no DB servers configured; cannot resolve database %q", environment, database)
+	return "", "", LookupError("environment %q has no DB servers configured; cannot resolve database %q", nil, environment, database)
 }
 
 // sourceURLFromCatalog maps a resolved DbCatalog to the pkg/dbcopy URL
@@ -66,7 +68,7 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		if err != nil {
 			return "", err
 		}
-		return "openvaultdb://" + path, nil
+		return dbcopy.LocalSourceURL("openvaultdb", path), nil
 	case "sqlite3", "sqlite":
 		if catalog.Path == "" {
 			return "", fmt.Errorf("catalog %q has no path configured for its sqlite driver", catalog.ID)
@@ -75,7 +77,7 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		if err != nil {
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
-		return "sqlite://" + path, nil
+		return dbcopy.LocalSourceURL("sqlite", path), nil
 	case "ingitdb":
 		if catalog.Path == "" {
 			return "", fmt.Errorf("catalog %q has no path configured for its ingitdb driver", catalog.ID)

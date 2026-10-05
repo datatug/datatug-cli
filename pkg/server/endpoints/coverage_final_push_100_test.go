@@ -132,7 +132,7 @@ func TestFinal_SemanticColumns_And_Schema(t *testing.T) {
 	// 4. semantic_schema.go:88 dbcopy.Parse / ref.Open error with postgres
 	_, err = resolveSQLSourceURL(ctx, "postgres://localhost/mydb", "items")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "postgres")
+	assert.Contains(t, err.Error(), "PostgreSQL")
 
 	// 5. semantic_schema.go:114 ListReferrers error
 	origDalAs := dalAsSchemaReader

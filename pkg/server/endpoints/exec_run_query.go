@@ -467,7 +467,7 @@ func resolveExecutionSource(ctx context.Context, projStore datatug.ProjectStore,
 			}
 		}
 		return api.ResolvedSource{}, newTargetRequired(
-			fmt.Sprintf("source %q is not an authorized target for query %q", req.Source, req.QueryID), targetOptions(candidateTargets(eligible)))
+			fmt.Sprintf("source %q is not an authorized target for query %q", dbcopy.SourceIDDisplay(req.Source), req.QueryID), targetOptions(candidateTargets(eligible)))
 	}
 	switch len(eligible) {
 	case 0:

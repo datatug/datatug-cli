@@ -369,7 +369,8 @@ func TestCov100fOpenDB(t *testing.T) {
 			"db", "sqlite:////tmp/demo.db")
 	})
 	require.NoError(t, err)
-	assert.Equal(t, "Opening database at sqlite://tmp/demo.db", out)
+	// The display form of the argument as it was typed (dburl's own string drops a slash).
+	assert.Equal(t, "Opening database at sqlite:////tmp/demo.db", out)
 }
 
 func TestCov100fRenderCommand(t *testing.T) {

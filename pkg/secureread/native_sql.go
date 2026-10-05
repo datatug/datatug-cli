@@ -79,12 +79,14 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	// existence check to surface dbcopy.ErrSourceFileMissing the same way
 	// Open's sqlite branch does — see pkg/server/endpoints/exec_run_query.go
 	// and util_error_handling.go for where that maps to SOURCE_UNAVAILABLE.
-	if err := dbcopy.CheckSourceFile(ref.Path); err != nil {
+	if err := ref.CheckFile(); err != nil {
 		return Result{}, err
 	}
 	db, closeDB, err := openReadOnlySQLite(ctx, ref.Path)
 	if err != nil {
-		return Result{}, err
+		// The driver's own text can quote the DSN: say which source failed and
+		// keep the cause for errors.Is and errors.As (see BackendRef.OpenFailure).
+		return Result{}, ref.OpenFailure(err)
 	}
 	defer closeDB()
 
@@ -110,16 +112,16 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 func openReadOnlySQLite(ctx context.Context, path string) (dal.DB, func(), error) {
 	sqlDB, err := sqlOpenNative("sqlite", path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("secureread: open sqlite %q: %w", path, err)
+		return nil, nil, fmt.Errorf("secureread: open sqlite: %w", err)
 	}
 	sqlDB.SetMaxOpenConns(1) // one physical connection: PRAGMA query_only must stick to the connection every query reuses
 	if pingErr := sqlDB.PingContext(ctx); pingErr != nil {
 		_ = sqlDB.Close()
-		return nil, nil, fmt.Errorf("secureread: open sqlite %q: %w", path, pingErr)
+		return nil, nil, fmt.Errorf("secureread: open sqlite: %w", pingErr)
 	}
 	if execErr := pragmaQueryOnly(ctx, sqlDB); execErr != nil {
 		_ = sqlDB.Close()
-		return nil, nil, fmt.Errorf("secureread: enable read-only session on %q: %w", path, execErr)
+		return nil, nil, fmt.Errorf("secureread: enable read-only session: %w", execErr)
 	}
 	// The sqlite structured-query dialect is set like on every other SQLite
 	// open in this CLI, so no structured read can reach dalgo2sql's legacy

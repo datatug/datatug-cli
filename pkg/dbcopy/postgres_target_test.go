@@ -48,10 +48,94 @@ func TestParsePostgresTarget_RefusesWhatItCannotRead(t *testing.T) {
 	}
 }
 
-func TestSourceScopeIdentity_NonEnvSourcesAreUnchanged(t *testing.T) {
+// A source whose display form is the whole of it is its own identity, so a store
+// that holds such a source keeps its scope.
+func TestSourceScopeIdentity_ASourceWithNothingToHideIsItsOwnIdentity(t *testing.T) {
 	t.Parallel()
-	for _, source := range []string{"sqlite:///tmp/shop.db", "ingitdb://./crm", "unavailable://shop", "postgres://alice:xxxxx@h/db", ""} {
+	for _, source := range []string{"sqlite:///tmp/shop.db", "ingitdb://./crm", "ingitdb:///tmp/a b/crm", "http://./proj", "openvaultdb:///tmp/c.json", "unavailable://shop", ""} {
 		assert.Equal(t, source, sourceScopeIdentity(source, fakeEnv(nil)), source)
+	}
+	assert.Equal(t, "sqlite:///tmp/shop.db", sourceScopeIdentity("SQLITE:///tmp/shop.db", fakeEnv(nil)), "the scheme is read case-insensitively")
+}
+
+// A literal PostgreSQL URL is identified like an env source: by where it points
+// and as whom (host, port, database and user), never by its password. Two roles on
+// one host and database are two scopes, and the identity holds neither the user
+// name nor the password.
+func TestSourceScopeIdentity_ALiteralPostgresURLFollowsItsDestinationAndNeverItsPassword(t *testing.T) {
+	t.Parallel()
+	identity := func(url string, env map[string]string) string { return sourceScopeIdentity(url, fakeEnv(env)) }
+	base := identity("postgres://reader:s3cret@db.example.com:5432/shop", nil)
+	assert.True(t, strings.HasPrefix(base, "postgres#"), base)
+	assert.NotContains(t, base, "db.example.com", "the identity is a digest of the destination")
+	for _, secret := range []string{"reader", "s3cret"} {
+		assert.NotContains(t, base, secret)
+	}
+
+	// The same destination is the same scope, whatever the password, the connection options or the spelling.
+	assert.Equal(t, base, identity("postgres://reader:rotated@db.example.com:5432/shop", nil))
+	assert.Equal(t, base, identity("postgresql://reader:s3cret@db.example.com:5432/shop?sslmode=require", nil))
+	assert.Equal(t, base, identity("POSTGRES://reader:s3cret@DB.Example.COM/shop", nil), "host case and the default port do not make a new scope")
+
+	// Another role, host, port or database is another scope.
+	for name, other := range map[string]string{
+		"user":     "postgres://admin:s3cret@db.example.com:5432/shop",
+		"host":     "postgres://reader:s3cret@staging.example.com:5432/shop",
+		"port":     "postgres://reader:s3cret@db.example.com:5433/shop",
+		"database": "postgres://reader:s3cret@db.example.com:5432/warehouse",
+	} {
+		assert.NotEqual(t, base, identity(other, nil), name)
+	}
+
+	// What the URL leaves out is what libpq's environment says, as for an env source.
+	assert.NotEqual(t,
+		identity("postgres://db.example.com/shop", map[string]string{"PGUSER": "reader"}),
+		identity("postgres://db.example.com/shop", map[string]string{"PGUSER": "admin"}))
+
+	// A URL that cannot be read (a password that splits it) still binds to where it
+	// points, and shows no part of the password.
+	split := identity("postgres://alice:42/TOPSECRET@db.example.com/shop", nil)
+	assert.NotContains(t, split, "TOPSECRET")
+	assert.NotContains(t, split, "alice")
+	assert.Equal(t, split, identity("postgres://alice:42/OTHERSECRET@db.example.com/shop", nil), "the split password is not part of the identity")
+}
+
+// A file or a directory is identified by its whole path, with its "#" and "?"
+// (which the display form cuts off), so two directories whose names differ after
+// a "#" are two scopes. The identity text itself shows only the display form and
+// a digest of the whole path.
+func TestSourceScopeIdentity_ALocalPathEntersWhole(t *testing.T) {
+	t.Parallel()
+	identity := func(source string) string { return sourceScopeIdentity(source, fakeEnv(nil)) }
+	first, second := identity("ingitdb:///tmp/a#b/data/ingitdb"), identity("ingitdb:///tmp/a#c/data/ingitdb")
+	assert.NotEqual(t, first, second)
+	assert.True(t, strings.HasPrefix(first, "ingitdb:///tmp/a#"), first)
+	assert.NotContains(t, first, "data/ingitdb", "the text shows the display form and a digest, not the whole path")
+	assert.Equal(t, first, identity("INGITDB:///tmp/a#b/data/ingitdb"))
+
+	assert.NotEqual(t, identity("ingitdb:///tmp/a?x=1"), identity("ingitdb:///tmp/a?x=2"), "a query is part of a directory name")
+	assert.NotEqual(t, identity("http:///tmp/a#b"), identity("http:///tmp/a#c"))
+
+	// The query of a sqlite URL holds driver options, which can include a key: it is
+	// not part of the identity, and neither is anything else that is not the file.
+	assert.Equal(t, identity("sqlite:///private.db"), identity("sqlite:///private.db?_pragma_key=s3cret"))
+	assert.NotContains(t, identity("sqlite:///private.db?_pragma_key=s3cret"), "s3cret")
+	assert.Equal(t, identity("sqlite:///private.db"), identity("sqlite:///private.db#frag"))
+	assert.NotEqual(t, identity("sqlite:///private.db"), identity("sqlite:///other.db"))
+	assert.NotEqual(t, "sqlite:file.db", identity("sqlite:file.db"), "the no-slash form is not the display form")
+}
+
+// A literal source that Parse refuses can hold credentials: its identity is the
+// display form, which holds none.
+func TestSourceScopeIdentity_ARefusedLiteralSourceIsItsDisplayForm(t *testing.T) {
+	t.Parallel()
+	for source, want := range map[string]string{
+		"http://alice:s3cretpw@host/x":           "http://host/x",
+		"ingitdb://s3cretpw@github.com/org/repo": "ingitdb://github.com/org/repo",
+		"mongodb://alice:s3cretpw@host/db":       UnparsableSource,
+		"alice:s3cretpw@host/shop":               UnparsableSource,
+	} {
+		assert.Equal(t, want, sourceScopeIdentity(source, fakeEnv(nil)), source)
 	}
 }
 

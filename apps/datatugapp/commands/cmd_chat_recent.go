@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/spf13/cobra"
 )
 
@@ -144,13 +145,24 @@ func applyLastChatOptions(cmd *cobra.Command, options *chatOptions) error {
 	return nil
 }
 
+// rememberedDatabase is the --database value that is written to the user's
+// config directory: a plain catalog ID, or nothing. A source string can be typed
+// where a catalog ID belongs, and a file in the config directory must not hold a
+// password.
+func rememberedDatabase(database string) string {
+	if dbcopy.SourceIDDisplay(database) != database {
+		return ""
+	}
+	return database
+}
+
 func saveLastChatOptions(cmd *cobra.Command, options chatOptions) error {
 	path, err := lastChatOptionsPath()
 	if err != nil {
 		return err
 	}
 	saved := lastChatOptions{
-		Project: options.project, Env: options.env, Database: options.database,
+		Project: options.project, Env: options.env, Database: rememberedDatabase(options.database),
 		AI: options.ai, As: options.as,
 		Roles: append([]string(nil), options.roles...), Groups: append([]string(nil), options.groups...),
 	}

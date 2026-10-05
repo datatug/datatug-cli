@@ -46,7 +46,7 @@ var serializePreviewQuery = dtql.Serialize
 // PreviewRelated resolves only an authoritative outgoing FK and reads up to
 // five matching records through the same DTQL/policy executor as chat queries.
 func (a ForeignKeyJoinApplication) PreviewRelated(ctx context.Context, record RecordSet, selected string, row map[string]any) ([]relatedRecord, error) {
-	if record.Source != a.Source || a.Executor == nil {
+	if !storedSourceNames(record.Source, a.Source) || a.Executor == nil {
 		return nil, nil
 	}
 	snapshot, err := a.snapshot(ctx)

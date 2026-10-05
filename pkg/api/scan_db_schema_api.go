@@ -29,12 +29,23 @@ type ProjectLoader interface {
 
 var _ ProjectLoader = (datatug.ProjectStore)(nil)
 
+// loggedUser is the ", user=..." part of the scan's log line: the user of the
+// connection parameters, except for PostgreSQL, whose user comes out of a URL.
+func loggedUser(driver string, params dbconnection.Params) string {
+	if driver == DriverPostgres {
+		return ""
+	}
+	return fmt.Sprintf(", user=%v", params.User())
+}
+
 // UpdateDbSchema updates DB schema
 func UpdateDbSchema(ctx context.Context, projectLoader ProjectLoader, projectID, environment, driver, dbModelID string, dbConnParams dbconnection.Params) (project *datatug.Project, err error) {
 	// dbConnParams.String() is the connection string, password included: log
-	// the parts that identify the target instead.
-	log.Printf("Updating DB info for project=%v, env=%v, driver=%v, dbModelID=%v, dbCatalog=%v, server=%v, port=%v, user=%v",
-		projectID, environment, driver, dbModelID, dbConnParams.Catalog(), dbConnParams.Server(), dbConnParams.Port(), dbConnParams.User())
+	// the parts that identify the target instead. The user is one of them for a
+	// driver whose user is a flag the operator typed. A PostgreSQL user is read out
+	// of the connection URL, where the user name can be a token, so it is not logged.
+	log.Printf("Updating DB info for project=%v, env=%v, driver=%v, dbModelID=%v, dbCatalog=%v, server=%v, port=%v%s",
+		projectID, environment, driver, dbModelID, dbConnParams.Catalog(), dbConnParams.Server(), dbConnParams.Port(), loggedUser(driver, dbConnParams))
 
 	if dbConnParams.Catalog() == "" {
 		return nil, validation.NewErrRequestIsMissingRequiredField("dbConnParams.catalog")

@@ -169,6 +169,15 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 	if err != nil {
 		return "", Exit(fmt.Sprintf("load project explorer: %v", err), exitCodeUsage)
 	}
+	// --database takes the ID of a catalog of the environment, and what is typed
+	// there can be a whole source string with its password. A typed value that is
+	// neither a source of the project nor a plain name is refused here, naming
+	// nothing of it, so that no later step holds it: not the connect screen, the
+	// settings the browser reads, the scope the store hashes or the stand-in
+	// source of a failed lookup.
+	if _, known := sourceURLs[database]; options.database != "" && !known && dbcopy.SourceIDDisplay(database) != database {
+		return "", Exit("--database takes the ID of a catalog of the environment (a name such as chinook-local), not a source URL or a path", exitCodeUsage)
+	}
 	sourceURL, sourceErr := resolveQuerySourceURL(ctx, projectStore, projectDir, options.env, database)
 	if sourceErr != nil {
 		sourceURL = "unavailable://" + url.PathEscape(database)
@@ -323,7 +332,9 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 type unavailableSchemaConversation struct{ database string }
 
 func (c unavailableSchemaConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {
-	return chat.Turn{Text: "I can't query " + c.database + " because its source or schema is unavailable. Open Project explorer for details."}, nil
+	// c.database is what --database was given, and a source string can be typed
+	// where a catalog ID belongs: only a plain name is echoed.
+	return chat.Turn{Text: "I can't query " + dbcopy.SourceIDDisplay(c.database) + " because its source or schema is unavailable. Open Project explorer for details."}, nil
 }
 
 // JOIN discovery is optional: a failed metadata read should disable JOIN
@@ -401,7 +412,9 @@ func hasQueryableProjectTables(catalog chat.ProjectCatalog, urls map[string]stri
 
 func projectSchemaContext(catalog chat.ProjectCatalog, urls map[string]string, selectedSource string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Selected source %q has unavailable schema or connection. Do not query it. For another listed source, always set sourceId in run_dtql.\n", selectedSource)
+	// selectedSource is what --database was given (see unavailableSchemaConversation)
+	// and this text goes to the model provider: only a plain name is sent.
+	fmt.Fprintf(&b, "Selected source %q has unavailable schema or connection. Do not query it. For another listed source, always set sourceId in run_dtql.\n", dbcopy.SourceIDDisplay(selectedSource))
 	for _, object := range catalog.Objects {
 		ref := object.Reference
 		if (ref.Kind != "table" && ref.Kind != "project_view") || object.Issue != "" || ref.SourceID == selectedSource {

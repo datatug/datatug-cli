@@ -220,7 +220,7 @@ func resolveQueryDatabase(ctx context.Context, projStore datatug.ProjectStore, e
 func resolveQuerySourceURL(ctx context.Context, projStore datatug.ProjectStore, projectDir, envID, database string) (string, error) {
 	env, err := projStore.LoadEnvironment(ctx, envID)
 	if err != nil {
-		return "", fmt.Errorf("load environment %q: %w", envID, err)
+		return "", api.LookupError("load environment %q", err, envID)
 	}
 	var lastErr error
 	for _, server := range env.DbServers {
@@ -234,10 +234,12 @@ func resolveQuerySourceURL(ctx context.Context, projStore datatug.ProjectStore, 
 		}
 		return querySourceURLFromCatalog(catalog, projectDir)
 	}
+	// database and envID are what the command was given, and a source string can
+	// be typed where an ID belongs: see api.LookupError.
 	if lastErr != nil {
-		return "", fmt.Errorf("database %q not found in environment %q: %w", database, envID, lastErr)
+		return "", api.LookupError("database %q not found in environment %q", lastErr, database, envID)
 	}
-	return "", fmt.Errorf("environment %q has no DB servers configured; cannot resolve database %q", envID, database)
+	return "", api.LookupError("environment %q has no DB servers configured; cannot resolve database %q", nil, envID, database)
 }
 
 func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (string, error) {
@@ -250,7 +252,7 @@ func querySourceURLFromCatalog(catalog datatug.DbCatalog, projectDir string) (st
 		if err != nil {
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
-		return "sqlite://" + path, nil
+		return dbcopy.LocalSourceURL("sqlite", path), nil
 	case "ingitdb":
 		if catalog.Path == "" {
 			return "", fmt.Errorf("catalog %q has no path configured for its ingitdb driver", catalog.ID)

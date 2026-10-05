@@ -73,7 +73,7 @@ func TestChatStoreNeverPersistsASourcePassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSource := "postgres://alice:xxxxx@db.example.com:5432/shop?sslmode=require"
+	wantSource := "postgres://db.example.com:5432/shop"
 	if got := restored.RecordSets[turn.Queries[0].RecordSetID].Source; got != wantSource {
 		t.Fatalf("recordset source = %q, want %q", got, wantSource)
 	}

@@ -33,14 +33,11 @@ func (c *SessionChat) RefreshRecordSet(ctx context.Context, sessionID, recordSet
 	if !ok || record.HTTPResponseID != "" {
 		return ChatSession{}, fmt.Errorf("query result is unavailable for refresh")
 	}
-	allowed := false
-	for _, source := range c.store.info.Sources {
-		if source == record.Source {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
+	// The result stores the display form of its source (see source_identity.go),
+	// which is not an identity: the live source is the one of the same ID in this
+	// scope, and the stored text must name it.
+	live, ok := c.store.info.Sources[record.Database]
+	if !ok || !storedSourceNames(record.Source, live) {
 		return ChatSession{}, fmt.Errorf("the saved data source is no longer available")
 	}
 	doc := strings.TrimSpace(record.DTQL)
@@ -48,7 +45,7 @@ func (c *SessionChat) RefreshRecordSet(ctx context.Context, sessionID, recordSet
 	if err != nil || query.Limit() < 1 || query.Limit() > maxRows {
 		return ChatSession{}, fmt.Errorf("the saved query is no longer valid")
 	}
-	result, err := c.queryExecutor.RunDTQL(ctx, record.Source, []byte(doc), record.Parameters)
+	result, err := c.queryExecutor.RunDTQL(ctx, live, []byte(doc), record.Parameters)
 	if err != nil {
 		return ChatSession{}, fmt.Errorf("query failed: %s", publicQueryError(err, record.Parameters))
 	}
@@ -56,7 +53,7 @@ func (c *SessionChat) RefreshRecordSet(ctx context.Context, sessionID, recordSet
 	if err != nil {
 		return ChatSession{}, err
 	}
-	_, err = c.store.AppendQuery(ctx, session.ID, origin.ID, record.Source, QueryResult{Title: record.Title, DTQL: doc, Source: record.Source, SourceID: record.Database, Parameters: record.Parameters, Result: result, RefreshParentID: record.ID})
+	_, err = c.store.AppendQuery(ctx, session.ID, origin.ID, live, QueryResult{Title: record.Title, DTQL: doc, Source: live, SourceID: record.Database, Parameters: record.Parameters, Result: result, RefreshParentID: record.ID})
 	if err != nil {
 		return ChatSession{}, err
 	}

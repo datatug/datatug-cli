@@ -58,13 +58,15 @@ func resolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 	case api.SourceKindInGitDB:
 		recordsetPath := recordsetDefinitionPath(projectDir, resolved.ID)
 		if !fileExists(recordsetPath) {
-			return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has no recordset definition at %s", source, recordsetPath))
+			// source matched the registry, so resolved.ID is a registered ID and not
+			// something a client made up: it is named as it is.
+			return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has no recordset definition at %s", resolved.ID, recordsetPath))
 		}
 		return resolveRecordsetSource(resolved.URL, recordsetPath, collection)
 	case api.SourceKindHTTP:
 		return resolveHTTPSource(projectDir, resolved.ID, collection)
 	default:
-		return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has an unsupported kind %q", source, resolved.Kind))
+		return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has an unsupported kind %q", resolved.ID, resolved.Kind))
 	}
 }
 
@@ -89,7 +91,10 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 		if errors.Is(err, dbcopy.ErrSourceFileMissing) {
 			return resolvedSource{}, newSourceUnavailable(err.Error())
 		}
-		return resolvedSource{}, fmt.Errorf("open %s: %w", shown, dbcopy.RedactError(err))
+		// Open's error already says which source failed and why, in a fixed
+		// sentence built from the display form: naming the source again in front of
+		// it would say it twice.
+		return resolvedSource{}, err
 	}
 	reader, ok := dalAsSchemaReader(db)
 	if !ok {

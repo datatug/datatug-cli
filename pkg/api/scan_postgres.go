@@ -76,7 +76,9 @@ func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, enviro
 		return nil, fmt.Errorf("the host in environment variable %s cannot be recorded in a project: use a host name or an address", dsnEnv)
 	}
 	if !plainName.MatchString(environment) || !plainName.MatchString(catalog) {
-		return nil, fmt.Errorf("environment %q and database %q must each be a plain name (letters, digits, '.', '_' and '-') to name the connection descriptor under %s/", environment, catalog, postgresDescriptorFolder)
+		// The flags are what the user typed, and a source string can be typed where
+		// a name belongs: only a plain name is echoed.
+		return nil, fmt.Errorf("environment %q and database %q must each be a plain name (letters, digits, '.', '_' and '-') to name the connection descriptor under %s/", dbcopy.SourceIDDisplay(environment), dbcopy.SourceIDDisplay(catalog), postgresDescriptorFolder)
 	}
 	return &PostgresScanParams{
 		dsnEnv:         dsnEnv,

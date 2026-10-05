@@ -12,6 +12,7 @@ import (
 	"github.com/dal-go/dalgo/dtql"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/querywrite"
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
@@ -277,5 +278,5 @@ func checkCaptureSource(ctx context.Context, projectID, projectDir, environment,
 			}
 		}
 	}
-	return newInvalidRequest("query.source", fmt.Sprintf("source %q is not a catalog source of environment %q that a saved query can target", source, environment))
+	return newInvalidRequest("query.source", fmt.Sprintf("source %q is not a catalog source of environment %q that a saved query can target", dbcopy.SourceIDDisplay(source), environment))
 }

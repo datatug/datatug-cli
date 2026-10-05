@@ -277,10 +277,10 @@ func PathHoldsURL(path string) bool {
 // no server or share name holds a colon, nor a server name an "@".
 //
 // Known limits, shapes that stay paths because nothing in the text tells them from
-// one: a token with a slash and no colon after a UNC start ("\\team/tok@host/x":
-// "team" is the server and "tok@host" a share), and user information straight
-// after an absolute start with no second scheme ("sqlite:///user:pw@host/db": an
-// absolute path may hold an "@" anywhere). Both are shown as typed.
+// one, and are shown as typed: after a UNC start, a token that holds a slash and no
+// colon (the text before the slash reads as the server and what follows as a share),
+// and user information straight after an absolute start with no second scheme (an
+// absolute path may hold an "@" anywhere).
 func readsAsPath(text string) bool {
 	at := strings.LastIndexByte(text, '@')
 	if at < 0 {

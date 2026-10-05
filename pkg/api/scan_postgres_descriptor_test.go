@@ -14,6 +14,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/recordset"
 	"github.com/dal-go/record"
+	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
@@ -85,9 +86,15 @@ func TestWriteDescriptor_ADescriptorAsItWouldBeWrittenIsNotWrittenAgain(t *testi
 	stamp := fs.FileMode(0o640)
 	require.NoError(t, os.Chmod(descriptorFile(dir), stamp))
 	var writes int
-	original := scanWriteFile
-	t.Cleanup(func() { scanWriteFile = original })
-	scanWriteFile = func(name string, data []byte, perm os.FileMode) error { writes++; return original(name, data, perm) }
+	useOps(t, func(ops *plainfs.Ops) {
+		open := ops.OpenFile
+		ops.OpenFile = func(name string, flag int, perm fs.FileMode) (plainfs.File, error) {
+			if flag&os.O_WRONLY != 0 {
+				writes++
+			}
+			return open(name, flag, perm)
+		}
+	})
 
 	undo, err := params.WriteDescriptor(dir)
 	require.NoError(t, err)
@@ -102,42 +109,38 @@ func TestWriteDescriptor_ADescriptorAsItWouldBeWrittenIsNotWrittenAgain(t *testi
 
 func TestWriteDescriptor_UndoReportsWhatItCannotTakeBack(t *testing.T) {
 	boom := errors.New("disk on fire")
-	restore := func(t *testing.T) {
-		t.Helper()
-		removeOriginal, writeOriginal := scanRemove, scanWriteFile
-		t.Cleanup(func() { scanRemove, scanWriteFile = removeOriginal, writeOriginal })
-	}
 	t.Run("the descriptor cannot be removed", func(t *testing.T) {
-		restore(t)
 		undo, err := newShopParams(t).WriteDescriptor(t.TempDir())
 		require.NoError(t, err)
-		scanRemove = func(string) error { return boom }
+		useOps(t, func(ops *plainfs.Ops) { ops.Remove = func(string) error { return boom } })
 		err = undo()
 		assert.ErrorIs(t, err, boom)
 		assert.ErrorContains(t, err, "remove the connection descriptor")
 	})
 	t.Run("a folder it made cannot be removed", func(t *testing.T) {
-		restore(t)
 		undo, err := newShopParams(t).WriteDescriptor(t.TempDir())
 		require.NoError(t, err)
-		original := scanRemove
-		scanRemove = func(name string) error {
-			if strings.HasSuffix(name, ".json") {
-				return original(name)
+		useOps(t, func(ops *plainfs.Ops) {
+			remove := ops.Remove
+			ops.Remove = func(name string) error {
+				if strings.HasSuffix(name, ".json") {
+					return remove(name)
+				}
+				return boom
 			}
-			return boom
-		}
+		})
 		err = undo()
 		assert.ErrorIs(t, err, boom)
 		assert.ErrorContains(t, err, "remove the folder the connection descriptor was written in")
 	})
 	t.Run("the descriptor that was there cannot be put back", func(t *testing.T) {
-		restore(t)
 		dir := t.TempDir()
 		writeDescriptor(t, dir, "connections/prod/shop.json", `{"dsnEnv":"DATATUG_OLD_PG_URL"}`)
 		undo, err := newShopParams(t).WriteDescriptor(dir)
 		require.NoError(t, err)
-		scanWriteFile = func(string, []byte, os.FileMode) error { return boom }
+		useOps(t, func(ops *plainfs.Ops) {
+			ops.OpenFile = func(string, int, fs.FileMode) (plainfs.File, error) { return nil, boom }
+		})
 		err = undo()
 		assert.ErrorIs(t, err, boom)
 		assert.ErrorContains(t, err, "put back the connection descriptor")
@@ -146,15 +149,16 @@ func TestWriteDescriptor_UndoReportsWhatItCannotTakeBack(t *testing.T) {
 
 func TestWriteDescriptor_AFolderThatCannotBeMadeLeavesNoneBehind(t *testing.T) {
 	dir := t.TempDir()
-	original := scanMkdir
-	t.Cleanup(func() { scanMkdir = original })
 	boom := errors.New("no space")
-	scanMkdir = func(name string, perm os.FileMode) error {
-		if strings.HasSuffix(name, "prod") {
-			return boom
+	useOps(t, func(ops *plainfs.Ops) {
+		mkdir := ops.Mkdir
+		ops.Mkdir = func(name string, perm fs.FileMode) error {
+			if strings.HasSuffix(name, "prod") {
+				return boom
+			}
+			return mkdir(name, perm)
 		}
-		return original(name, perm)
-	}
+	})
 
 	undo, err := newShopParams(t).WriteDescriptor(dir)
 
@@ -162,19 +166,6 @@ func TestWriteDescriptor_AFolderThatCannotBeMadeLeavesNoneBehind(t *testing.T) {
 	assert.ErrorIs(t, err, boom)
 	assert.ErrorContains(t, err, "create the connection descriptor folder")
 	assert.NoDirExists(t, filepath.Join(dir, "connections"), "connections/ was made on the way, and is removed again")
-}
-
-func TestMakeFolders_ReturnsOnlyTheFoldersItMade(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "a"), 0o755))
-
-	made, err := makeFolders(dir, "a/b/c")
-
-	require.NoError(t, err)
-	assert.Equal(t, []string{filepath.Join(dir, "a", "b"), filepath.Join(dir, "a", "b", "c")}, made)
-	made, err = makeFolders(dir, "a/b/c")
-	require.NoError(t, err)
-	assert.Empty(t, made, "nothing to make")
 }
 
 // ResolveDescriptorPath reads the path of a catalog as the project file says it, and does
@@ -256,43 +247,6 @@ func TestPostgresScanParams_DisplayNamesTheServerWithoutTheCredentials(t *testin
 	sqlServer, err := dbconnection.NewConnectionString("sqlserver", "db.example.com", "sa", "pw-never-shown", "shop", "port=1434")
 	require.NoError(t, err)
 	assert.Equal(t, "server=db.example.com, port=1434, user=sa", loggedTarget(sqlServer), "a flag the operator typed is named as it was")
-}
-
-// A count that fails is reported as the open of the source is, never in the driver's words, and
-// does not fail the scan: the scanner logs it and goes on. A view is not counted.
-func TestScanDbCatalog_PostgresReportsACountThatFailsAsAClassifiedFailure(t *testing.T) {
-	cause := errors.New("connection lost to " + shopEnv()["SHOP_PG_URL"])
-	db := &countingScanDB{fakeScanDB: &fakeScanDB{}, err: cause}
-	stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) { return db, nil })
-	logged := captureLog(t)
-
-	catalog, err := scanDbCatalog(shopServer(), newShopParams(t))
-
-	require.NoError(t, err, "a count that fails is not a scan that fails")
-	require.NotNil(t, catalog)
-	assert.Equal(t, int32(2), db.counts.Load(), "both tables are counted")
-	assert.Contains(t, logged.String(), "failed to retrieve records count")
-	assert.Contains(t, logged.String(), `open postgres source "env:SHOP_PG_URL"`, "the failure is the classified one")
-	for _, shown := range []string{pgSecret, "alice", "db.example.com", "connection lost"} {
-		assert.NotContains(t, logged.String(), shown)
-	}
-}
-
-func TestScanDbCatalog_PostgresCountsTheRecordsOfATableAndNotOfAView(t *testing.T) {
-	db := &countingScanDB{fakeScanDB: &fakeScanDB{}, rows: 42, views: []string{"Order"}}
-	stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) { return db, nil })
-
-	catalog, err := scanDbCatalog(shopServer(), newShopParams(t))
-
-	require.NoError(t, err)
-	require.Len(t, catalog.Schemas, 1)
-	require.Len(t, catalog.Schemas[0].Tables, 1)
-	require.NotNil(t, catalog.Schemas[0].Tables[0].RecordsCount)
-	assert.Equal(t, 42, *catalog.Schemas[0].Tables[0].RecordsCount)
-	require.Len(t, catalog.Schemas[0].Views, 1)
-	assert.Equal(t, "Order", catalog.Schemas[0].Views[0].Name())
-	assert.Nil(t, catalog.Schemas[0].Views[0].RecordsCount)
-	assert.Equal(t, int32(1), db.counts.Load(), "the view is not counted")
 }
 
 func TestScanDbCatalog_PostgresClassifiesAnOpenThatFailsInTheDriversWords(t *testing.T) {

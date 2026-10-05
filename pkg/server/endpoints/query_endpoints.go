@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -138,9 +139,19 @@ func getAllQueries(_ context.Context, ref dto.ProjectRef) (*datatug.QueriesFolde
 	}
 	queries, canonicalIDs, err := loadModuleQueriesHook(projectDir)
 	if err != nil {
-		return nil, err
+		return nil, queriesNotLoaded(ref.ProjectID, err)
 	}
 	return buildQueriesFolderTree(queries, canonicalIDs, datatug.RootSharedFolderName), nil
+}
+
+// queriesNotLoaded is the answer for the queries of a project that cannot be loaded (listed,
+// read or parsed): one sentence built from the ID of the project, as it may be shown (see
+// dbcopy.SourceIDDisplay), and from nothing the cause said, which quotes the path of a folder
+// of queries. The cause goes to the log of the server.
+func queriesNotLoaded(projectID string, cause error) error {
+	shown := dbcopy.SourceIDDisplay(projectID)
+	log.Printf("queries of project %q could not be loaded: %s", shown, dbcopy.RedactText(cause.Error()))
+	return fmt.Errorf("queries of project %q could not be loaded", shown)
 }
 
 // getPersonalQueries loads the serving principal's own personal root
@@ -200,7 +211,7 @@ func getPersonalQueries(_ context.Context, ref dto.ProjectRef) (*datatug.Queries
 	}
 	queries, canonicalIDs, err := loadModuleQueriesHook(personalProjectDir)
 	if err != nil {
-		return nil, err
+		return nil, queriesNotLoaded(ref.ProjectID, err)
 	}
 	return buildQueriesFolderTree(queries, canonicalIDs, rootID), nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -412,11 +413,21 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	return response, nil
 }
 
+// executionQueryDocument is the text of a saved query: the revision's own, or the document
+// beside its "<id>.query.json" in the served project. A document that cannot be read fails with a
+// sentence built from the ID of the query (an ID of the project's own index), and what the read
+// said, which quotes the path of the file, goes to the log of the server.
 func executionQueryDocument(projectID, queryID string, queryDef *datatug.QueryDef, queryRevision string) (string, error) {
 	if queryRevision != "" {
 		return queryDef.Text, nil
 	}
-	return api.LoadQueryDocument(projectID, queryID, queryDef.Type)
+	document, err := api.LoadQueryDocument(projectID, queryID, queryDef.Type)
+	if err != nil {
+		answer := fmt.Sprintf("query %q has no readable document", queryID)
+		log.Printf("exec/run_query: %s: %s", answer, dbcopy.RedactText(err.Error()))
+		return "", errors.New(answer)
+	}
+	return document, nil
 }
 
 func validateDefaultBindingOrigins(req apicontract.ExecutionRequest, queryDef *datatug.QueryDef) error {

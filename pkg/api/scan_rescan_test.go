@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/datatug/datatug-cli/internal/plainfs"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/stretchr/testify/assert"
@@ -625,13 +626,14 @@ func TestSaveScannedProject_RescanNeverRemovesThroughASymbolicLink(t *testing.T)
 		})
 	}
 
-	// A folder that is a link is refused only when the scan would take it back: one that
-	// lists only another environment is not the scan's, and the scan neither refuses nor
-	// says anything about it, whatever the folder is linked to.
+	// A folder that is a link is refused only when the scan would take it back, or write into it:
+	// the folder of a table that lists only another environment is not the scan's, and the scan
+	// neither refuses nor says anything about it, whatever the folder is linked to. (The folder of
+	// the model is written into by every scan, for its model file, so a link there is refused: see
+	// TestSaveScannedProject_WritesNoFileThroughALink.)
 	t.Run("a linked folder that lists only another environment is not the scan's", func(t *testing.T) {
 		for name, linked := range map[string]string{
 			"the folder of the table": "dbmodels/shop/main/tables/Old",
-			"the folder of the model": "dbmodels/shop",
 		} {
 			t.Run(name, func(t *testing.T) {
 				projectDir := t.TempDir()
@@ -671,13 +673,15 @@ func TestSaveScannedProject_RescanNeverRemovesThroughASymbolicLink(t *testing.T)
 					_, err := scanBoth.save(t, projectDir)
 					require.NoError(t, err)
 					junction := filepath.Join(projectDir, filepath.FromSlash(linked))
-					setSeam(t, &scanLstat, func(path string) (os.FileInfo, error) {
-						info, statErr := os.Lstat(path)
-						require.NoError(t, statErr)
-						if path == junction {
-							return lstat(path, info)
+					useOps(t, func(ops *plainfs.Ops) {
+						ops.Lstat = func(path string) (os.FileInfo, error) {
+							info, statErr := os.Lstat(path)
+							require.NoError(t, statErr)
+							if path == junction {
+								return lstat(path, info)
+							}
+							return info, nil
 						}
-						return info, nil
 					})
 					filesBefore := filesUnder(t, projectDir)
 
@@ -685,8 +689,9 @@ func TestSaveScannedProject_RescanNeverRemovesThroughASymbolicLink(t *testing.T)
 
 					require.Error(t, err, "refused")
 					assert.ErrorContains(t, err, `table "Old" of schema "main" is no longer in the database, but its folder is not removed`)
-					assert.ErrorContains(t, err, "is a link")
-					assert.ErrorContains(t, err, junction)
+					assert.ErrorContains(t, err, "a scan never removes a folder through a link")
+					assert.ErrorContains(t, err, linked+": ", "the folder is named inside the project")
+					assert.NotContains(t, err.Error(), projectDir, "and not by the folder the project is in")
 					assert.Empty(t, warnings)
 					assert.Equal(t, filesBefore, filesUnder(t, projectDir), "nothing is removed or written")
 				})
@@ -771,7 +776,7 @@ func TestSaveScannedProject_RescanFailures(t *testing.T) {
 
 	t.Run("the folder cannot be removed", func(t *testing.T) {
 		projectDir := scanTwo(t)
-		setSeam(t, &scanRemoveAll, func(string) error { return errors.New("busy") })
+		useOps(t, func(ops *plainfs.Ops) { ops.RemoveAll = func(string) error { return errors.New("busy") } })
 		_, err := rescan.save(t, projectDir)
 		assert.ErrorContains(t, err, "failed to remove the folder")
 		assert.ErrorContains(t, err, "busy")
@@ -781,7 +786,15 @@ func TestSaveScannedProject_RescanFailures(t *testing.T) {
 		projectDir := scanTwo(t)
 		_, err := rescanScan{env: "prod", tables: []*datatug.CollectionInfo{rescanTable("Old", "id")}}.save(t, projectDir)
 		require.NoError(t, err)
-		setSeam(t, &scanWriteFile, func(string, []byte, os.FileMode) error { return errors.New("read-only") })
+		useOps(t, func(ops *plainfs.Ops) {
+			open := ops.OpenFile
+			ops.OpenFile = func(name string, flag int, perm fs.FileMode) (plainfs.File, error) {
+				if strings.HasSuffix(name, ".columns.json") && flag&os.O_WRONLY != 0 {
+					return nil, errors.New("read-only")
+				}
+				return open(name, flag, perm)
+			}
+		})
 		_, err = rescan.save(t, projectDir)
 		assert.ErrorContains(t, err, "failed to update the columns file")
 		assert.ErrorContains(t, err, "read-only")
@@ -798,7 +811,7 @@ func TestApplyRetractions(t *testing.T) {
 	require.NoError(t, os.WriteFile(file, []byte("old"), 0o600))
 
 	var said bytes.Buffer
-	require.NoError(t, applyRetractions([]retraction{
+	require.NoError(t, applyRetractions(scanTree(dir), []retraction{
 		{dir: removed, what: `table "t" of schema "main"`, rel: "dbmodels/m/main/tables/t"},
 		{dir: rewritten, file: file, content: []byte("new"), what: `table "u" of schema "main"`, rel: "dbmodels/m/main/tables/u"},
 	}, &said))
@@ -809,7 +822,7 @@ func TestApplyRetractions(t *testing.T) {
 	assert.Equal(t, "new", string(content))
 	assert.Equal(t, "removed: dbmodels/m/main/tables/t: table \"t\" of schema \"main\" is no longer in the database\n", said.String(),
 		"a line for the folder that was removed, none for the file that was written again")
-	require.NoError(t, applyRetractions(nil, &said))
+	require.NoError(t, applyRetractions(scanTree(dir), nil, &said))
 }
 
 func TestLayoutOfCatalogFilesAreWrittenInNameOrder(t *testing.T) {

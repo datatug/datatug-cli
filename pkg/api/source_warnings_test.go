@@ -74,6 +74,7 @@ func TestWarnMissingSourceFiles_LogsOneWarningPerMissingFile(t *testing.T) {
 	registerWarnTestEnvironment(t, projectID, dir, missingPath)
 
 	buf := captureLog(t)
+	serveProjectDirs(t, map[string]string{projectID: dir}) // serve announces what it serves
 	WarnMissingSourceFiles(context.Background(), map[string]string{projectID: dir})
 
 	out := buf.String()
@@ -100,6 +101,7 @@ func TestWarnMissingSourceFiles_NoWarningWhenFileExists(t *testing.T) {
 	registerWarnTestEnvironment(t, projectID, dir, existingPath)
 
 	buf := captureLog(t)
+	serveProjectDirs(t, map[string]string{projectID: dir}) // serve announces what it serves
 	WarnMissingSourceFiles(context.Background(), map[string]string{projectID: dir})
 
 	if strings.Contains(buf.String(), "WARNING") {
@@ -115,6 +117,7 @@ func TestWarnMissingSourceFiles_NeverLogsTheQueryOfThePath(t *testing.T) {
 	registerWarnTestEnvironment(t, projectID, dir, filepath.Join(dir, "x.sqlite")+"?password=s3cr3t-DT01")
 
 	buf := captureLog(t)
+	serveProjectDirs(t, map[string]string{projectID: dir}) // serve announces what it serves
 	WarnMissingSourceFiles(context.Background(), map[string]string{projectID: dir})
 
 	out := buf.String()
@@ -136,6 +139,7 @@ func TestWarnMissingSourceFiles_WarnsAboutAMissingOpenVaultDBDescriptor(t *testi
 	registerWarnTestEnvironmentWithDriver(t, "openvaultdb", projectID, dir, missing)
 
 	buf := captureLog(t)
+	serveProjectDirs(t, map[string]string{projectID: dir}) // serve announces what it serves
 	WarnMissingSourceFiles(context.Background(), map[string]string{projectID: dir})
 
 	out := buf.String()

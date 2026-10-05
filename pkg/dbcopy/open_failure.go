@@ -33,7 +33,8 @@ func (e *openError) Unwrap() error { return e.cause }
 // the error says which source could not be opened and, for the few causes that
 // can be told apart without reading the message (a missing file, a refused
 // permission, a timeout, a cancelled attempt, a refused connection, and for PostgreSQL a rejected
-// password, a missing database, an unreachable server, a failed TLS handshake), why.
+// password, a connection the server's access rules do not allow, a missing database, an
+// unreachable server, a failed TLS handshake), why.
 // errors.Is and errors.As still see the driver's own error.
 //
 // The errors this package wrote itself (the missing-file error CheckSourceFile
@@ -92,8 +93,12 @@ func connectionErrorReason(err error) (string, bool) {
 		return "", false
 	}
 	switch {
-	case pg.Kind == dalgo2postgres.FailureServer && (pg.SQLState == "28P01" || pg.SQLState == "28000"):
+	case pg.Kind == dalgo2postgres.FailureServer && pg.SQLState == "28P01":
 		return "the server rejected the user or the password", true
+	case pg.Kind == dalgo2postgres.FailureServer && pg.SQLState == "28000":
+		// The server refuses this user on this connection before it asks for a password: by the
+		// user, the database, the address or the encryption of the connection (its access rules).
+		return "the server does not authorize this user for this connection (its access rules: user, database, address or encryption)", true
 	case pg.Kind == dalgo2postgres.FailureServer && pg.SQLState == "3D000":
 		return "the database does not exist", true
 	case pg.Kind == dalgo2postgres.FailureNetwork:

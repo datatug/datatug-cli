@@ -398,7 +398,7 @@ func TestOpen_FailuresAreClassifiedAndNeverShowTheSource(t *testing.T) {
 		want  string
 	}{
 		"a rejected password":      {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28P01", Host: "db.example.com"}, prefix + "the server rejected the user or the password"},
-		"a user that is refused":   {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28000"}, prefix + "the server rejected the user or the password"},
+		"a user that is refused":   {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28000"}, prefix + "the server does not authorize this user for this connection (its access rules: user, database, address or encryption)"},
 		"a database that is not":   {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "3D000", Database: "shop"}, prefix + "the database does not exist"},
 		"a server that is down":    {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5433"}, prefix + "the server could not be reached"},
 		"a timeout":                {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTimeout}, prefix + "the attempt timed out"},

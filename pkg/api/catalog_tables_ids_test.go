@@ -50,30 +50,45 @@ func TestProperty_GetCatalogTablesNeverEchoesASourceString(t *testing.T) {
 	}
 }
 
-// A catalog file that cannot be read, parsed or used says so. A plain ID is
-// named, with the file error that says why; any other ID is not shown and the
-// file error, which quotes its path, is left out.
+// A catalog file that cannot be used says so, in one sentence built from the catalog and the
+// environment: a plain ID is named, any other ID is not shown, and the file error, which quotes
+// the path of the file, is never in the answer (it is logged). A catalog file that is not there,
+// is not a file, cannot be read and cannot be parsed are the same answer, an ErrCatalogNotFound
+// (a 404). A file that holds no model, or one that is not a plain name, is another.
 func TestCatalogDbModel_NamesAPlainIDAndNeverAnyOther(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		prepare  func(t *testing.T, file string)
 		wantText string
-		// cause is what a plain ID's message carries of the file error.
-		cause string
+		// notFound is true when the answer is an ErrCatalogNotFound.
+		notFound bool
+		// causes are what the file error says, which no answer holds.
+		causes []string
 	}{
-		{"unreadable", func(t *testing.T, file string) { mustMkdir(t, file) }, "read the file of catalog", "is a directory"},
-		{"unparsable", func(t *testing.T, file string) { mustWrite(t, file, "{malformed") }, "parse the file of catalog", "invalid character"},
-		{"no dbModel", func(t *testing.T, file string) { mustWrite(t, file, `{"id":"x"}`) }, "has no dbModel set", ""},
+		{"missing", func(t *testing.T, file string) {}, "catalog not found", true, []string{"no such file", "open "}},
+		{"a file where the folder is expected", func(t *testing.T, file string) {
+			mustWrite(t, filepath.Dir(file), "x")
+		}, "catalog not found", true, []string{"not a directory", "open "}},
+		{"unreadable", func(t *testing.T, file string) { mustMkdir(t, file) }, "catalog not found", true, []string{"is a directory", "read "}},
+		{"unparsable", func(t *testing.T, file string) { mustWrite(t, file, "{malformed") }, "catalog not found", true, []string{"invalid character", "parse "}},
+		{"no dbModel", func(t *testing.T, file string) { mustWrite(t, file, `{"id":"x"}`) }, "has no dbModel set", false, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, id := range []string{"broken", "my broken catalog", "ingitdb://alice:s3cretpw@host/x"} {
 				dir := t.TempDir()
 				file := filepath.Join(dir, storage.EnvironmentsFolder, "dev", storage.EnvDbCatalogsFolder, id, storage.JsonFileName(id, storage.DbCatalogFileSuffix))
-				mustMkdir(t, filepath.Dir(file))
+				mustMkdir(t, filepath.Dir(filepath.Dir(file)))
+				if tc.name != "a file where the folder is expected" {
+					mustMkdir(t, filepath.Dir(file))
+				}
 				tc.prepare(t, file)
+				logged := captureLog(t)
 				_, err := catalogDbModel(dir, "dev", id)
 				if err == nil || !strings.Contains(err.Error(), tc.wantText) {
 					t.Fatalf("%q: error = %v, want %q", id, err, tc.wantText)
+				}
+				if errors.Is(err, ErrCatalogNotFound) != tc.notFound {
+					t.Errorf("%q: errors.Is(err, ErrCatalogNotFound) = %v, want %v", id, !tc.notFound, tc.notFound)
 				}
 				plain := dbcopy.SourceIDDisplay(id) == id
 				if plain != strings.Contains(err.Error(), `"`+id+`"`) {
@@ -82,8 +97,86 @@ func TestCatalogDbModel_NamesAPlainIDAndNeverAnyOther(t *testing.T) {
 				if !plain && (strings.Contains(err.Error(), dir) || strings.Contains(err.Error(), "s3cretpw") || strings.Contains(err.Error(), "my broken")) {
 					t.Errorf("%q: the error shows what the ID was turned into: %v", id, err)
 				}
-				if plain && !strings.Contains(err.Error(), tc.cause) {
-					t.Errorf("%q: a plain ID keeps the file error: %v", id, err)
+				// Whatever the ID is, the answer holds nothing of the file error or of the path.
+				for _, cause := range append(tc.causes, dir, filepath.Base(dir)) {
+					if strings.Contains(err.Error(), cause) {
+						t.Errorf("%q: the answer holds %q: %v", id, cause, err)
+					}
+				}
+				if strings.Contains(logged.String(), "s3cretpw") {
+					t.Errorf("%q: the log holds the password: %q", id, logged.String())
+				}
+				// What the file system said is for the log, unless an ID that is not a plain name
+				// is in it (it quotes the path built from the ID).
+				if said := len(tc.causes) > 0 && strings.Contains(logged.String(), tc.causes[0]); said != (plain && len(tc.causes) > 0) {
+					t.Errorf("%q: what the file system said is in the log = %v, want %v: %q", id, said, plain, logged.String())
+				}
+			}
+		})
+	}
+}
+
+// What is listed under the model of a catalog is read from folders of the project: a folder
+// that cannot be listed is the same answer as a catalog file that cannot be read, from every
+// entry that lists it, and the answer holds no path.
+func TestCatalogRelations_AFolderThatCannotBeListedIsOneBuiltSentence(t *testing.T) {
+	for name, layout := range map[string]func(t *testing.T, models string){
+		"a file where the model's folder is expected": func(t *testing.T, models string) {
+			mustMkdir(t, models)
+			mustWrite(t, filepath.Join(models, "shop-model"), "x")
+		},
+		"a file where a table's folder is expected": func(t *testing.T, models string) {
+			mustMkdir(t, filepath.Join(models, "shop-model", "main"))
+			mustWrite(t, filepath.Join(models, "shop-model", "main", "tables"), "x")
+		},
+		"a table with two files of columns": func(t *testing.T, models string) {
+			table := filepath.Join(models, "shop-model", "main", "tables", "Customer")
+			mustMkdir(t, table)
+			mustWrite(t, filepath.Join(table, "a."+storage.ColumnsFileSuffix+".json"), `{}`)
+			mustWrite(t, filepath.Join(table, "b."+storage.ColumnsFileSuffix+".json"), `{}`)
+		},
+		"a table whose columns file is not JSON": func(t *testing.T, models string) {
+			table := filepath.Join(models, "shop-model", "main", "tables", "Customer")
+			mustMkdir(t, table)
+			mustWrite(t, filepath.Join(table, "Customer."+storage.ColumnsFileSuffix+".json"), `{not json`)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			catalog := filepath.Join(dir, storage.EnvironmentsFolder, "dev", storage.EnvDbCatalogsFolder, "shop")
+			mustMkdir(t, catalog)
+			mustWrite(t, filepath.Join(catalog, storage.JsonFileName("shop", storage.DbCatalogFileSuffix)), `{"dbModel":"shop-model"}`)
+			layout(t, filepath.Join(dir, storage.DbModelsFolder))
+
+			const want = `catalog "shop" in environment "dev" could not be read`
+			for entry, call := range map[string]func() error{
+				"GetCatalogSchema":        func() error { _, err := GetCatalogSchema(dir, "dev", "shop"); return err },
+				"GetCatalogSchemaPartial": func() error { _, err := GetCatalogSchemaPartial(dir, "dev", "shop"); return err },
+				"GetCatalogTables":        func() error { _, err := GetCatalogTables(dir, "dev", "shop"); return err },
+			} {
+				err := call()
+				if name == "a table whose columns file is not JSON" && entry == "GetCatalogTables" {
+					// The tables are listed by their folders: the columns file is not read.
+					if err != nil {
+						t.Errorf("%s: %v, want the tables listed", entry, err)
+					}
+					continue
+				}
+				if name == "a table with two files of columns" && entry == "GetCatalogTables" {
+					if err != nil {
+						t.Errorf("%s: %v, want the tables listed", entry, err)
+					}
+					continue
+				}
+				if entry == "GetCatalogSchemaPartial" && strings.HasPrefix(name, "a table ") {
+					// A partial load keeps the relation and says nothing of the file.
+					if err != nil {
+						t.Errorf("%s: %v, want the relation kept with an issue", entry, err)
+					}
+					continue
+				}
+				if err == nil || err.Error() != want {
+					t.Errorf("%s: %v, want exactly %q", entry, err, want)
 				}
 			}
 		})

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -56,13 +57,22 @@ func resolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 	case api.SourceKindSQL:
 		return resolveSQLSourceURL(ctx, resolved.URL, collection)
 	case api.SourceKindInGitDB:
+		// The ID of the source is joined into the path of its definition, and it is read out
+		// of a file of the project (the ID of a recordset definition, the model of a catalog),
+		// which may hold anything: only a plain source ID is a name of a file in the folder of
+		// the recordsets.
+		if !dbcopy.IsPlainSourceID(resolved.ID) {
+			return resolvedSource{}, recordsetUnavailable(resolved.ID, errors.New("the ID of the source is not a plain source ID"))
+		}
 		recordsetPath := recordsetDefinitionPath(projectDir, resolved.ID)
 		if !fileExists(recordsetPath) {
-			// source matched the registry, so resolved.ID is a registered ID and not
-			// something a client made up: it is named as it is.
-			return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has no recordset definition at %s", resolved.ID, recordsetPath))
+			return resolvedSource{}, recordsetUnavailable(resolved.ID, fmt.Errorf("%s: %w", recordsetPath, os.ErrNotExist))
 		}
-		return resolveRecordsetSource(resolved.URL, recordsetPath, collection)
+		definition, err := resolveRecordsetSource(resolved.URL, recordsetPath, collection)
+		if err != nil {
+			return resolvedSource{}, recordsetUnavailable(resolved.ID, err)
+		}
+		return definition, nil
 	case api.SourceKindHTTP:
 		return resolveHTTPSource(projectDir, resolved.ID, collection)
 	default:
@@ -78,6 +88,17 @@ func unavailableOr(cause, otherwise error) error {
 		return newSourceUnavailable(unavailable.Error())
 	}
 	return otherwise
+}
+
+// recordsetUnavailable is the answer for a source whose recordset definition cannot be used:
+// it is not there, it is not a file, it cannot be read, it cannot be parsed, or the ID of the
+// source is not a name of a file. They are one answer, a sentence built from the source (named
+// when its ID is a plain name) and from nothing the file system said, which quotes a path of
+// the server and says whether it is missing, a file or a folder. The cause goes to the log.
+func recordsetUnavailable(sourceID string, cause error) *contractError {
+	shown := dbcopy.SourceIDDisplay(sourceID)
+	log.Printf("semantic: the recordset definition of source %q cannot be used: %s", shown, dbcopy.RedactText(cause.Error()))
+	return newSourceUnavailable(fmt.Sprintf("source %q has no readable recordset definition", shown))
 }
 
 func fileExists(path string) bool {

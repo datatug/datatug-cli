@@ -31,12 +31,10 @@ func GetEntity(ctx context.Context, ref dto.ProjectItemRef) (entity *datatug.Ent
 	if err = validateEntityInput(ref.ProjectID, ref.ID); err != nil {
 		return
 	}
-	store, err := storeFor(ref.StoreID)
+	projectStore, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	//goland:noinspection GoNilness
-	projectStore := store.GetProjectStore(ref.ProjectID)
 	entity, err = projectStore.LoadEntity(ctx, ref.ID)
 	if err != nil {
 		return nil, itemNotFound("entity", dbcopy.SourceIDDisplay(ref.ID), err)
@@ -49,13 +47,15 @@ func GetAllEntities(ctx context.Context, ref dto.ProjectRef) (entity datatug.Ent
 	if err = validateProjectInput(ref.ProjectID); err != nil {
 		return
 	}
-	store, err := storeFor(ref.StoreID)
+	projectStore, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	//goland:noinspection GoNilness
-	projectStore := store.GetProjectStore(ref.ProjectID)
-	return projectStore.LoadEntities(ctx)
+	entities, err := projectStore.LoadEntities(ctx)
+	if err != nil {
+		return nil, itemsNotLoaded("entities", dbcopy.SourceIDDisplay(ref.ProjectID), err)
+	}
+	return entities, nil
 }
 
 // DeleteEntity deletes board
@@ -63,16 +63,13 @@ func DeleteEntity(ctx context.Context, ref dto.ProjectItemRef) error {
 	if err := validateEntityInput(ref.ProjectID, ref.ID); err != nil {
 		return err
 	}
-	store, err := storeFor(ref.StoreID)
+	projectStore, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return err
 	}
-	//goland:noinspection GoNilness
-	projectStore := store.GetProjectStore(ref.ProjectID)
-	if err = projectStore.DeleteEntity(ctx, ref.ID); err != nil {
-		return itemWriteFailed("delete", "entity", dbcopy.SourceIDDisplay(ref.ID), err)
-	}
-	return nil
+	return deleteItem("entity", dbcopy.SourceIDDisplay(ref.ID),
+		func() error { _, err := projectStore.LoadEntity(ctx, ref.ID); return err },
+		func() error { return projectStore.DeleteEntity(ctx, ref.ID) })
 }
 
 // SaveEntity saves board
@@ -90,12 +87,10 @@ func SaveEntity(ctx context.Context, ref dto.ProjectRef, entity *datatug.Entity)
 		return fmt.Errorf("entity is not valid: %w", err)
 	}
 	log.Printf("Saving entity: %+v", entity)
-	store, err := storeFor(ref.StoreID)
+	projectStore, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return err
 	}
-	//goland:noinspection GoNilness
-	projectStore := store.GetProjectStore(ref.ProjectID)
 	if err = projectStore.SaveEntity(ctx, entity); err != nil {
 		return itemWriteFailed("save", "entity", dbcopy.SourceIDDisplay(entity.ID), err)
 	}

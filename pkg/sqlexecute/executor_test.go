@@ -591,10 +591,12 @@ func TestExecuteCommand_GetCatalogSummaryError(t *testing.T) {
 	}
 }
 
-// TestExecuteCommand_DefaultDriver_InvalidMode covers the "invalid connection parameters"
-// error path. Port != 0 causes options=["mode=<port>"] which is not a valid mode string,
-// so NewConnectionString returns an error → "invalid connection parameters: ..." wrapping.
-func TestExecuteCommand_DefaultDriver_InvalidMode(t *testing.T) {
+// TestExecuteCommand_DefaultDriver_PortOfAnUnregisteredDriver covers a server with a port
+// whose driver is not registered in this test binary: the server passes the checks of the
+// command, the connection string is built, and it is sql.Open that refuses the driver, so
+// nothing is dialled. The test asserts that refusal: were a driver of that name linked into
+// this binary, the error would be another and the test would fail.
+func TestExecuteCommand_DefaultDriver_PortOfAnUnregisteredDriver(t *testing.T) {
 	e := NewExecutor(nil, nil)
 	cmd := RequestCommand{
 		Env:  "dev",
@@ -606,8 +608,8 @@ func TestExecuteCommand_DefaultDriver_InvalidMode(t *testing.T) {
 		},
 	}
 	_, err := e.executeCommand(cmd)
-	if err == nil {
-		t.Fatal("expected error for invalid connection parameters (bad mode)")
+	if err == nil || !strings.Contains(err.Error(), "unknown driver") {
+		t.Fatalf("got %v, want the refusal of sql.Open for a driver that is not registered", err)
 	}
 }
 

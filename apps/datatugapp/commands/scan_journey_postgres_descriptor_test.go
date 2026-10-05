@@ -111,8 +111,7 @@ func TestSaveScanned(t *testing.T) {
 
 // A project is not trusted: a link in the path of the descriptor, at connections, at
 // connections/<env> or at the descriptor, that leads out of the project folder is refused before
-// anything is written or saved, and what the link leads to is not touched. The scan used to read it,
-// truncate it, and write the descriptor there, and exit 0 on a project that no reader opens.
+// anything is written or saved, and what the link leads to is not touched.
 func TestScanJourneyPostgresRefusesALinkWhereTheDescriptorGoes(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating a symbolic link needs a privilege on Windows")

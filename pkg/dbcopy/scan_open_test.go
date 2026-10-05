@@ -125,7 +125,7 @@ func TestOpenSchemaScan_NamesTheFailureTheAdapterReportsByKindAndSQLState(t *tes
 		want string
 	}{
 		{"a wrong password", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28P01"}, "the server rejected the user or the password"},
-		{"a user the server does not accept", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28000"}, "the server rejected the user or the password"},
+		{"a user the server does not authorize", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28000"}, "the server does not authorize this user for this connection (its access rules: user, database, address or encryption)"},
 		{"a database that does not exist", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "3D000"}, "the database does not exist"},
 		{"a server that cannot be reached", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}, "the server could not be reached"},
 		{"an attempt that timed out", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTimeout}, "the attempt timed out"},

@@ -24,6 +24,12 @@ import (
 
 // pgxConnectError is the error pgx writes when a connection cannot be made, built by pgx itself: its text names the
 // user and its value holds the whole configuration, the password included. dialErr is what the dial failed with.
+// testHint is the hint of the source the tests of this file call the adapter for.
+const testHint = "the PostgreSQL connection string is read from the --db flag"
+
+// lostSentence is the sentence of a failure of pgx's that the adapter did not classify, with the hint of the source.
+const lostSentence = "the connection to the PostgreSQL server was lost and could not be made again; " + testHint
+
 func pgxConnectError(t *testing.T, dialErr error) error {
 	t.Helper()
 	config, err := pgconn.ParseConfig("postgres://" + markerUser + ":" + markerPassword + "@127.0.0.1:5432/shop?sslmode=disable&x=" + markerQuery)
@@ -36,17 +42,18 @@ func pgxConnectError(t *testing.T, dialErr error) error {
 	return err
 }
 
-// The one road every error of a call into the adapter takes: an error that holds pgx's connect error or its
-// configuration error becomes one fixed sentence that names nothing and holds nothing of its cause; any other error
-// is not touched.
+// The second road of every error of a call into the adapter: an error of pgx's that the adapter did not classify (it
+// classifies every failure of a connection, so none gets here from a conforming adapter) and that holds pgx's connect
+// error or its configuration error becomes one fixed sentence that names nothing and holds nothing of its cause, with
+// the hint of the source; any other error is not touched.
 func TestGuardPostgresError(t *testing.T) {
 	t.Parallel()
 	plain := errors.New("an error of DataTug's or DALgo's own")
-	assert.NoError(t, guardPostgresError(nil))
-	assert.Same(t, plain, guardPostgresError(plain), "an error that is not pgx's connection error passes through as it is")
-	assert.ErrorIs(t, guardPostgresError(dal.ErrNoMoreRecords), dal.ErrNoMoreRecords)
+	assert.NoError(t, guardPostgresError(testHint, nil))
+	assert.Same(t, plain, guardPostgresError(testHint, plain), "an error that is not a connection error passes through as it is")
+	assert.ErrorIs(t, guardPostgresError(testHint, dal.ErrNoMoreRecords), dal.ErrNoMoreRecords)
 	statement := &pgconn.PgError{Severity: "ERROR", Code: "42P01", Message: `relation "orders" does not exist`}
-	assert.Same(t, statement, guardPostgresError(statement), "a statement's error is the next task's (the hints for a wrong name)")
+	assert.Same(t, statement, guardPostgresError(testHint, statement), "a statement's error is the next task's (the hints for a wrong name)")
 
 	for name, tc := range map[string]struct {
 		cause     error
@@ -55,23 +62,23 @@ func TestGuardPostgresError(t *testing.T) {
 		timedOut  bool
 		canceled  bool
 	}{
-		"a refused dial":          {pgxConnectError(t, errors.New("connection refused")), "the connection to the PostgreSQL server was lost and could not be made again", "", false, false},
-		"a dial that is late":     {pgxConnectError(t, context.DeadlineExceeded), "the connection to the PostgreSQL server was lost and could not be made again", "", true, false},
-		"a dial that is canceled": {pgxConnectError(t, context.Canceled), "the connection to the PostgreSQL server was lost and could not be made again", "", false, true},
+		"a refused dial":          {pgxConnectError(t, errors.New("connection refused")), lostSentence, "", false, false},
+		"a dial that is late":     {pgxConnectError(t, context.DeadlineExceeded), lostSentence, "", true, false},
+		"a dial that is canceled": {pgxConnectError(t, context.Canceled), lostSentence, "", false, true},
 		"a server that refuses the password": {
 			pgxConnectError(t, &pgconn.PgError{Severity: "FATAL", Code: "28P01", Message: `password authentication failed for user "` + markerUser + `"`}),
-			"the connection to the PostgreSQL server was lost and could not be made again (SQLSTATE 28P01)", "28P01", false, false},
+			"the connection to the PostgreSQL server was lost and could not be made again (SQLSTATE 28P01); " + testHint, "28P01", false, false},
 		"a server code that is not a code": {
 			pgxConnectError(t, &pgconn.PgError{Severity: "FATAL", Code: "role " + markerUser, Message: markerPassword}),
-			"the connection to the PostgreSQL server was lost and could not be made again", "", false, false},
-		"wrapped by the caller":     {fmt.Errorf("list collections: %w", pgxConnectError(t, errors.New("down"))), "the connection to the PostgreSQL server was lost and could not be made again", "", false, false},
-		"joined with another error": {errors.Join(plain, pgxConnectError(t, errors.New("down"))), "the connection to the PostgreSQL server was lost and could not be made again", "", false, false},
+			lostSentence, "", false, false},
+		"wrapped by the caller":     {fmt.Errorf("list collections: %w", pgxConnectError(t, errors.New("down"))), lostSentence, "", false, false},
+		"joined with another error": {errors.Join(plain, pgxConnectError(t, errors.New("down"))), lostSentence, "", false, false},
 		"a connection string pgx cannot parse": {func() error {
 			_, err := pgconn.ParseConfig("postgres://" + markerUser + ":" + markerPassword + "@h:notaport/db?x=" + markerQuery)
 			return err
-		}(), "the connection to the PostgreSQL server was lost and could not be made again", "", false, false},
+		}(), lostSentence, "", false, false},
 	} {
-		got := guardPostgresError(tc.cause)
+		got := guardPostgresError(testHint, tc.cause)
 		require.Error(t, got, name)
 		assert.Equal(t, tc.wantText, got.Error(), name)
 		assertNoMarkers(t, name, got)
@@ -185,9 +192,10 @@ func postgresCallTable() map[string]func(postgresCalls) error {
 }
 
 // A database whose server went away, behind the shared handle: every call of the adapter that fails for want of a
-// connection answers one fixed sentence, whichever road it takes (a read, a transaction, a schema read, a write, a
-// DDL statement). The same call on the adapter itself shows pgx's text, which names the user: so the table is not
-// vacuous, each call is run on both and the difference is the guard.
+// connection answers the adapter's fixed sentence and the hint of the source, whichever road it takes (a read, a
+// transaction, a schema read, a write, a DDL statement). The same call on the adapter itself answers its connection
+// error, which is what the guard turns into that text (a call that answers anything else, a failure of the guard's
+// own road, would not be found by this table: so each call is run on both, and the table is not vacuous).
 func TestSharedPostgres_EveryCallThatNeedsAConnectionAnswersAFixedSentence(t *testing.T) {
 	t.Parallel()
 	for name, call := range postgresCallTable() {
@@ -198,17 +206,21 @@ func TestSharedPostgres_EveryCallThatNeedsAConnectionAnswersAFixedSentence(t *te
 			raw := call(db)
 			if name == "CanExecuteJoin" {
 				// It asks what the dialect runs on the server, not the server: it answers without a connection.
-				assert.Equal(t, raw, call(&sharedPostgres{Database: db}), "the answer of a call that needs no connection is the adapter's")
+				assert.Equal(t, raw, call(&sharedPostgres{Database: db, hint: testHint}), "the answer of a call that needs no connection is the adapter's")
 				return
 			}
 			require.Error(t, raw)
-			require.Contains(t, raw.Error(), markerUser, "the adapter's own error shows the user (else this call proves nothing)")
+			var adapterErr *dalgo2postgres.ConnectionError
+			require.ErrorAs(t, raw, &adapterErr, "the adapter classifies a connection that fails at this call")
+			assertNoMarkers(t, name, raw)
 
-			guarded := call(&sharedPostgres{Database: db})
+			guarded := call(&sharedPostgres{Database: db, hint: testHint})
 			require.Error(t, guarded)
-			assert.Equal(t, "the connection to the PostgreSQL server was lost and could not be made again", guarded.Error())
+			assert.Equal(t, postgresFailureText(adapterSentence(adapterErr), testHint), guarded.Error())
+			assert.NotEmpty(t, adapterSentence(adapterErr))
 			assertNoMarkers(t, name, guarded)
 			assert.Nil(t, errors.Unwrap(guarded))
+			assert.NotNil(t, UnavailableSource(guarded), "a route answers it as the source being unavailable")
 		})
 	}
 }
@@ -249,21 +261,21 @@ func TestSharedPostgres_ReadersAreGuardedToo(t *testing.T) {
 	connectErr := pgxConnectError(t, errors.New("down"))
 	endless := errors.New("not touched")
 
-	records := guardedRecordsReader{&fakeRecordsReader{err: connectErr}}
+	records := guardedRecordsReader{&fakeRecordsReader{err: connectErr}, testHint}
 	_, err := records.Next()
 	require.Error(t, err)
 	assertNoMarkers(t, "records", err)
-	assert.Equal(t, "the connection to the PostgreSQL server was lost and could not be made again", err.Error())
-	_, err = guardedRecordsReader{&fakeRecordsReader{err: dal.ErrNoMoreRecords}}.Next()
+	assert.Equal(t, lostSentence, err.Error())
+	_, err = guardedRecordsReader{&fakeRecordsReader{err: dal.ErrNoMoreRecords}, testHint}.Next()
 	assert.ErrorIs(t, err, dal.ErrNoMoreRecords)
-	_, err = guardedRecordsReader{&fakeRecordsReader{err: endless}}.Next()
+	_, err = guardedRecordsReader{&fakeRecordsReader{err: endless}, testHint}.Next()
 	assert.Same(t, endless, err)
 
-	sets := guardedRecordsetReader{&fakeRecordsetReader{err: connectErr}}
+	sets := guardedRecordsetReader{&fakeRecordsetReader{err: connectErr}, testHint}
 	_, _, err = sets.Next()
 	require.Error(t, err)
 	assertNoMarkers(t, "recordset", err)
-	_, _, err = guardedRecordsetReader{&fakeRecordsetReader{}}.Next()
+	_, _, err = guardedRecordsetReader{&fakeRecordsetReader{}, testHint}.Next()
 	assert.NoError(t, err)
 	assert.NoError(t, sets.Close(), "what the reader does besides Next is the reader's own")
 }
@@ -271,7 +283,7 @@ func TestSharedPostgres_ReadersAreGuardedToo(t *testing.T) {
 // The calls that open a reader answer a guarded reader, and the failure of the call itself is guarded.
 func TestSharedPostgres_TheCallsThatOpenAReaderAnswerAGuardedReader(t *testing.T) {
 	t.Parallel()
-	shared := &sharedPostgres{Database: &dalgo2postgres.Database{DB: readerDB{err: pgxConnectError(t, errors.New("down"))}}}
+	shared := &sharedPostgres{Database: &dalgo2postgres.Database{DB: readerDB{err: pgxConnectError(t, errors.New("down"))}}, hint: testHint}
 	ctx := context.Background()
 	query := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("orders", ""))).SelectColumns()
 

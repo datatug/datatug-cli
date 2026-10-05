@@ -34,7 +34,8 @@ stand-in for the PostgreSQL server (see there).
 **1. Scan a database.** The sample is a SQLite file made with the `sqlite3` program (any SQLite file works). `sqlite3`
 comes with macOS; on Linux install the package `sqlite3` (`apt install sqlite3`, `dnf install sqlite`), or use a SQLite
 file you have. The scan writes a project, a folder of plain files, and prints its progress on stderr and nothing on
-stdout.
+stdout. The first time the CLI runs in a terminal it also prints a short notice about anonymous usage telemetry on stderr,
+once; [Telemetry](#telemetry) says what is sent and how to turn it off.
 
 ```console
 $ sqlite3 shop.db "

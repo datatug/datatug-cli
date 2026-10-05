@@ -155,24 +155,26 @@ func TestRoutes_AFileSourceIsAnsweredByItsIDAndNeverByItsPath(t *testing.T) {
 	}
 }
 
-// The same holds for a PostgreSQL source: the answer names the ID of the source, and the display form
-// of the source (the variable that holds its URL here, its host, port and database otherwise) is in the log.
+// A PostgreSQL source that cannot be opened is answered as every PostgreSQL failure is: the adapter's fixed sentence and
+// the hint of where its connection string is read from (the variable here), which name no host, port, database, user or
+// password. The answer and the log say the same.
 func TestRoutes_APostgresSourceThatCannotBeOpenedIsAnsweredByItsID(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	standInOpener(t, func() (*dalgo2postgres.Database, error) {
-		return nil, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}
+		return nil, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5433", Database: "shop"}
 	})
 	logged := captureAgentLog(t)
 	status, env, body := getSemanticColumns(t, pgRouteSource)
 	assert.Equal(t, http.StatusServiceUnavailable, status)
 	assert.Equal(t, string(apicontract.ErrCodeSourceUnavailable), env.Error.Code)
-	assert.Equal(t, `source "shop" could not be opened`, env.Error.Message)
-	for _, shown := range []string{"db.example.com", "5433", "postgres://", "env:", "DATATUG_DT02_ROUTES_PG_URL"} {
+	const want = "the server could not be reached; the PostgreSQL connection string is read from the environment variable DATATUG_DT02_ROUTES_PG_URL"
+	assert.Equal(t, want, env.Error.Message)
+	for _, shown := range []string{"db.example.com", "5433", "postgres://", "env:"} {
 		assert.NotContains(t, body, shown)
+		assert.NotContains(t, logged.String(), shown)
 	}
 	assertNoRouteMarkers(t, "semantic/columns", body, logged.String())
-	// The source is recorded as the variable that holds its URL, which is how dbcopy shows it.
-	assert.Contains(t, logged.String(), `open postgres source "env:DATATUG_DT02_ROUTES_PG_URL"`, "the text of dbcopy, with the display form of the source, is in the log of the server")
+	assert.Contains(t, logged.String(), want, "the log of the server says the same")
 }
 
 // A source whose related rows are asked for is answered by its ID too.

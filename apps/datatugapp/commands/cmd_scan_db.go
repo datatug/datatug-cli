@@ -19,6 +19,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// scanExitCodeConnection is the exit code of a scan whose database cannot be connected to (spec/features/cli/scan).
+const scanExitCodeConnection = 4
+
 func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	flags := cmd.Flags()
 	v := &scanDbCommand{}
@@ -110,6 +113,11 @@ func scanCommandAction(cmd *cobra.Command, _ []string) error {
 	ctx := api.WithScanWarnings(context.Background(), stderr)
 	datatugProject, err := scanUpdateDbSchema(ctx, projectStore, newProjectID, v.Environment, v.Driver, v.DbModel, connParams)
 	if err != nil {
+		if dbcopy.IsPostgresConnectionFailure(err) {
+			// The specification of `scan` names 4 for a database that cannot be connected to. The text is the
+			// error's own: it names no part of the connection.
+			return Exit(err.Error(), scanExitCodeConnection)
+		}
 		return err
 	}
 

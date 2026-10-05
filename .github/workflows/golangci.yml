@@ -165,7 +165,8 @@ jobs:
           CGO_ENABLED: '0'
         run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue' ./pkg/api/ ./apps/datatugapp/commands/
 
-  # The PostgreSQL scan (`datatug scan -D postgres --dsn-env NAME`) against a real server. Every
+  # The PostgreSQL scan (`datatug scan -D postgres --dsn-env NAME`) and the query
+  # (`datatug query run`, behind the preview switch) against a real server. Every
   # other test of the scan reads through a fake schema reader and the test binary refuses to
   # dial (apps/datatugapp/commands/scan_never_dials_test.go), so this is the one place the scan
   # meets PostgreSQL: the real command, the real opener and the real DALgo reader, with a role and
@@ -173,18 +174,31 @@ jobs:
   # job only: an administrator's, to the maintenance database, on a container that lives as long
   # as the job. The tests skip when it is not set, which `go test` reports as success, so
   # scripts/check-journey-postgres.sh fails the job on any SKIP and on a missing PASS line for
-  # either test by name. Not a required check for merging a pull request (that is a repository
+  # each test by name. Not a required check for merging a pull request (that is a repository
   # setting). It IS a gate on the release: this job is part of the workflow named "Go CI", and
   # release.yml requires "Go CI" green for the exact commit before it tags or publishes anything,
   # so a red run of this job on main holds the release until it is re-run or fixed. A red job is
   # a finding about the scan, except when the service container itself is the cause (the image
   # pull, the health check): re-run it then.
+  #
+  # The job runs on every major version of the matrix below, and each run is a job of the workflow
+  # that the release waits for: a release needs both green. 18 is in it because a fix of the adapter
+  # is about a constraint that only PostgreSQL 18 has (a not-null constraint that is not validated);
+  # 17 stays because the first journey was written on it. The tests read the version from the
+  # server and check it against DATATUG_TEST_POSTGRES_MAJOR, so a matrix that stopped changing the
+  # image would fail and not test one version twice. The image tag is written from the matrix, so a
+  # bot that updates the tag of a service finds none here: a version is added to the matrix, or
+  # dropped from it, on purpose.
   journey-postgres:
-    name: Journey (PostgreSQL)
+    name: Journey (PostgreSQL ${{ matrix.postgres }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['17', '18']
     services:
       postgres:
-        image: postgres:17
+        image: postgres:${{ matrix.postgres }}
         env:
           POSTGRES_PASSWORD: ci-only-service-password
         ports:
@@ -196,6 +210,7 @@ jobs:
           --health-retries 20
     env:
       DATATUG_TEST_POSTGRES_URL: postgres://postgres:ci-only-service-password@127.0.0.1:54329/postgres?sslmode=disable
+      DATATUG_TEST_POSTGRES_MAJOR: ${{ matrix.postgres }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -203,7 +218,7 @@ jobs:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
           go-version: '1.27.1'
           cache: true
-      - name: Scan a real PostgreSQL server
+      - name: Scan and query a real PostgreSQL server
         env:
           # The test binary of the commands package links the cgo SQLite driver, as in
           # strongo_workflow above.

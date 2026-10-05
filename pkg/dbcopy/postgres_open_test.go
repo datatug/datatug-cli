@@ -24,6 +24,9 @@ import (
 // previewOn turns the preview switch on for one test.
 func previewOn(t *testing.T) { t.Helper(); t.Setenv(PostgresPreviewEnv, "1") }
 
+// markedHint is the hint of a source that no flag and no variable names.
+const markedHint = "the PostgreSQL connection string is the one the source was given"
+
 func parseMarked(t *testing.T) BackendRef {
 	t.Helper()
 	ref, err := Parse(markedPostgresURL)
@@ -236,7 +239,7 @@ func TestOpen_TheCallersOfASourceBeingOpenedShareItsOutcome(t *testing.T) {
 		const callers = 8
 		attempts := make([]*openAttempt, callers)
 		for i := range attempts {
-			db, attempt, err := cache.join(context.Background(), key, open)
+			db, attempt, err := cache.join(context.Background(), key, "", open)
 			require.NoError(t, err, name)
 			require.Nil(t, db, name)
 			attempts[i] = attempt
@@ -260,7 +263,7 @@ func TestOpen_TheCallersOfASourceBeingOpenedShareItsOutcome(t *testing.T) {
 		}
 
 		// The attempt is over: the next call decides afresh (a failure is not remembered, a handle is reused).
-		again, next, err := cache.join(context.Background(), key, open)
+		again, next, err := cache.join(context.Background(), key, "", open)
 		require.NoError(t, err, name)
 		if tc.wantErr {
 			require.NotNil(t, next, name+": a call after a failed attempt opens again")
@@ -299,14 +302,14 @@ func TestOpen_ACallerWhoseContextEndsStopsWaitingAndTheOpenGoesOn(t *testing.T) 
 	cancelFirst()
 	err := <-firstResult
 	require.Error(t, err)
-	assert.EqualError(t, err, `open postgres source "postgres://db.example.com:5433/shop": the attempt was cancelled`)
+	assert.EqualError(t, err, "the attempt was cancelled; "+markedHint)
 	assertNoMarkers(t, "cancelled", err)
 
 	second, cancelSecond := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancelSecond()
 	_, err = ref.Open(second)
 	require.Error(t, err)
-	assert.EqualError(t, err, `open postgres source "postgres://db.example.com:5433/shop": the attempt timed out`)
+	assert.EqualError(t, err, "the attempt timed out; "+markedHint)
 	assertNoMarkers(t, "timed out", err)
 	assert.EqualValues(t, 1, calls.Load(), "both callers waited on one open")
 
@@ -330,7 +333,7 @@ func TestOpen_ACallerWhoseContextHasEndedDoesNotStartAnOpen(t *testing.T) {
 
 	db, err := ref.Open(ended)
 	assert.Nil(t, db)
-	assert.EqualError(t, err, `open postgres source "postgres://db.example.com:5433/shop": the attempt was cancelled`)
+	assert.EqualError(t, err, "the attempt was cancelled; "+markedHint)
 	assert.Empty(t, fake.dsns, "no open was started")
 
 	opened, err := ref.Open(context.Background())
@@ -351,15 +354,15 @@ func TestOpen_APanicOfTheOpenerReachesEveryCallerThatWaited(t *testing.T) {
 		panic("the opener stops the run")
 	}
 	key := [32]byte{2}
-	_, first, err := cache.join(context.Background(), key, open)
+	_, first, err := cache.join(context.Background(), key, "", open)
 	require.NoError(t, err)
-	_, second, err := cache.join(context.Background(), key, open)
+	_, second, err := cache.join(context.Background(), key, "", open)
 	require.NoError(t, err)
 	close(release)
 	assert.PanicsWithValue(t, "the opener stops the run", func() { _, _ = first.await(context.Background()) })
 	assert.PanicsWithValue(t, "the opener stops the run", func() { _, _ = second.await(context.Background()) })
 
-	_, next, err := cache.join(context.Background(), key, func() (*dalgo2postgres.Database, error) { return &dalgo2postgres.Database{}, nil })
+	_, next, err := cache.join(context.Background(), key, "", func() (*dalgo2postgres.Database, error) { return &dalgo2postgres.Database{}, nil })
 	require.NoError(t, err)
 	require.NotNil(t, next, "a panic is not remembered either")
 	db, err := next.await(context.Background())
@@ -381,9 +384,9 @@ func TestOpen_AnOpenerThatEndsItsGoroutineEndsTheAttemptWithAFailure(t *testing.
 		return &dalgo2postgres.Database{}, nil // not reached
 	}
 	key := [32]byte{4}
-	_, first, err := cache.join(context.Background(), key, open)
+	_, first, err := cache.join(context.Background(), key, "", open)
 	require.NoError(t, err)
-	_, second, err := cache.join(context.Background(), key, open)
+	_, second, err := cache.join(context.Background(), key, "", open)
 	require.NoError(t, err)
 	close(release)
 
@@ -395,7 +398,7 @@ func TestOpen_AnOpenerThatEndsItsGoroutineEndsTheAttemptWithAFailure(t *testing.
 		assert.Same(t, errPostgresOpenFailed, awaitErr, name+": the attempt ended, with the fixed failure, and was not waited for until the context ended")
 	}
 
-	db, next, err := cache.join(context.Background(), key, func() (*dalgo2postgres.Database, error) { return &dalgo2postgres.Database{}, nil })
+	db, next, err := cache.join(context.Background(), key, "", func() (*dalgo2postgres.Database, error) { return &dalgo2postgres.Database{}, nil })
 	require.NoError(t, err)
 	require.Nil(t, db)
 	require.NotNil(t, next, "the dead attempt is not kept: the next call opens again")
@@ -420,7 +423,7 @@ func TestOpen_AContextErrorOfTheConstructorIsTheBareContextError(t *testing.T) {
 	} {
 		stubPostgresOpener(t, (&fakeOpener{err: tc.cause}).open)
 		_, err := parseMarked(t).Open(context.Background())
-		assert.EqualError(t, err, `open postgres source "postgres://db.example.com:5433/shop": `+tc.want, name)
+		assert.EqualError(t, err, tc.want+"; "+markedHint, name)
 		assertNoMarkers(t, name, err)
 	}
 }
@@ -431,24 +434,24 @@ func TestOpen_AContextErrorOfTheConstructorIsTheBareContextError(t *testing.T) {
 // quotes them.
 func TestOpen_FailuresAreClassifiedAndNeverShowTheSource(t *testing.T) {
 	previewOn(t)
-	const prefix = `open postgres source "postgres://db.example.com:5433/shop": `
+	const suffix = "; " + markedHint
 	hostile := fmt.Sprintf("dial %q: password=%s user=%s", markedPostgresURL, markerPassword, markerUser)
 	for name, tc := range map[string]struct {
 		cause error
 		want  string
 	}{
-		"a rejected password":      {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28P01", Host: "db.example.com"}, prefix + "the server rejected the user or the password"},
-		"a user that is refused":   {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28000"}, prefix + "the server does not authorize this user for this connection (its access rules: user, database, address or encryption)"},
-		"a database that is not":   {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "3D000", Database: "shop"}, prefix + "the database does not exist"},
-		"a server that is down":    {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5433"}, prefix + "the server could not be reached"},
-		"a timeout":                {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTimeout}, prefix + "the attempt timed out"},
-		"a TLS failure":            {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTLS}, prefix + "the TLS handshake with the server failed"},
-		"another server code":      {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "53300"}, prefix + openedFailureReason},
-		"a URL the driver refuses": {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureInvalidDSN}, prefix + openedFailureReason},
-		"wrapped by the caller":    {fmt.Errorf("opening: %w", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}), prefix + "the server could not be reached"},
-		"text the driver wrote":    {errors.New(hostile), prefix + openedFailureReason},
-		"a wrapped driver text":    {fmt.Errorf("pgx: %w", errors.New(hostile)), prefix + openedFailureReason},
-		"a joined driver text":     {errors.Join(errors.New(hostile), errors.New(markerQuery)), prefix + openedFailureReason},
+		"a rejected password":      {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28P01", Host: "db.example.com"}, "the server refused the connection: password authentication failed (SQLSTATE 28P01)" + suffix},
+		"a user that is refused":   {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "28000"}, "the server refused the connection: the user is not authorized (SQLSTATE 28000)" + suffix},
+		"a database that is not":   {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "3D000", Database: "shop"}, "the server refused the connection: the database does not exist (SQLSTATE 3D000)" + suffix},
+		"a server that is down":    {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5433"}, "the server could not be reached" + suffix},
+		"a timeout":                {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTimeout}, "the connection timed out or was canceled" + suffix},
+		"a TLS failure":            {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureTLS}, "the TLS handshake with the server failed" + suffix},
+		"another server code":      {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureServer, SQLState: "53300"}, "the server refused the connection: too many connections (SQLSTATE 53300)" + suffix},
+		"a URL the driver refuses": {&dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureInvalidDSN}, "the connection string cannot be parsed, or a file or service it names cannot be read" + suffix},
+		"wrapped by the caller":    {fmt.Errorf("opening: %w", &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork}), "the server could not be reached" + suffix},
+		"text the driver wrote":    {errors.New(hostile), openedFailureReason + suffix},
+		"a wrapped driver text":    {fmt.Errorf("pgx: %w", errors.New(hostile)), openedFailureReason + suffix},
+		"a joined driver text":     {errors.Join(errors.New(hostile), errors.New(markerQuery)), openedFailureReason + suffix},
 	} {
 		fake := &fakeOpener{err: tc.cause}
 		stubPostgresOpener(t, fake.open)
@@ -459,6 +462,8 @@ func TestOpen_FailuresAreClassifiedAndNeverShowTheSource(t *testing.T) {
 		if assert.Error(t, err, name) {
 			assert.EqualError(t, err, tc.want, name)
 			assertNoMarkers(t, name, err)
+			assert.NotContains(t, err.Error(), "db.example.com", name)
+			assert.NotContains(t, err.Error(), "5433", name)
 		}
 	}
 }
@@ -483,7 +488,7 @@ func TestOpen_AnEnvSourceIsNamedByItsVariable(t *testing.T) {
 	ref, err := ParseWithEnv("env:DATATUG_SHOP_PG_URL", fakeEnv(map[string]string{"DATATUG_SHOP_PG_URL": markedPostgresURL}))
 	require.NoError(t, err)
 	_, err = ref.OpenProtected(context.Background())
-	assert.EqualError(t, err, `open postgres source "env:DATATUG_SHOP_PG_URL": the server could not be reached`)
+	assert.EqualError(t, err, "the server could not be reached; the PostgreSQL connection string is read from the environment variable DATATUG_SHOP_PG_URL")
 	assertNoMarkers(t, "env source", err)
 }
 

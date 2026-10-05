@@ -209,6 +209,9 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
+	// The flag the source was typed on is what a failure of a PostgreSQL source says its connection string is read
+	// from (an env:NAME source says the variable).
+	backend = backend.WithFlag("--db")
 	// A PostgreSQL source is a preview that is off unless the person turns it on: that is the first
 	// thing they are told, before anything about policies, which turning it on would not change.
 	if err = dbcopy.CheckPostgresRead(backend, 0); err != nil {

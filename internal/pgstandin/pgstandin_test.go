@@ -3,10 +3,12 @@ package pgstandin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"testing"
 
+	"github.com/dal-go/dalgo2postgres"
 	dalrecord "github.com/dal-go/record"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
@@ -14,20 +16,27 @@ import (
 )
 
 // The database the package hands out is a real adapter whose server has gone away: a call that needs a connection
-// fails with the text pgx writes for it, which names the user, and the failure holds pgx's own *pgconn.ConnectError,
-// which holds the whole configuration. That is what a read of a source sees once its pool cannot make a connection
-// again, and it is what the tests of the packages that print errors must keep out of their outputs.
-func TestUnreachable_AReadFailsWithTheTextAndTheTypesPgxWrites(t *testing.T) {
+// fails with the adapter's own connection error, which says what failed by a fixed sentence and holds nothing of the
+// configuration: not the user in its text and not pgx's error in its chain. That is what a read of a source sees once
+// its pool cannot make a connection again, and the tests of the packages that print errors rest on it: they look for
+// the user and the password in what they print, and the markers are not there to find unless the code under test
+// puts them there.
+// (Before dalgo2postgres v0.6.0 the failure held pgx's own error and its text named the user; the test then asserted
+// that, and the stand-in's purpose was to hand code a text with a secret in it. The adapter now keeps it out itself.)
+func TestUnreachable_AReadFailsWithTheAdaptersConnectionErrorAndNothingOfThePool(t *testing.T) {
 	t.Parallel()
 	db := Unreachable(t, "USERMARKER-standin", "PWMARKER-standin")
 
 	_, err := db.ListCollections(context.Background(), nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "USERMARKER-standin", "pgx names the user in the text")
+	var adapterErr *dalgo2postgres.ConnectionError
+	require.ErrorAs(t, err, &adapterErr, "the failure is the adapter's own connection error")
+	assert.Empty(t, adapterErr.Host+adapterErr.Port+adapterErr.Database, "a call after the open names no part of the connection")
+	assert.NotContains(t, err.Error(), "USERMARKER-standin")
+	assert.NotContains(t, err.Error(), "PWMARKER-standin")
 	var connectErr *pgconn.ConnectError
-	require.True(t, errors.As(err, &connectErr), "and the failure holds pgx's own error")
-	assert.Equal(t, "PWMARKER-standin", connectErr.Config.Password, "which holds the password too")
-	assert.ErrorIs(t, err, errDialRefused)
+	assert.False(t, errors.As(err, &connectErr), "pgx's own error, which holds the password, is not reachable")
+	assert.NotErrorIs(t, err, errDialRefused)
 }
 
 // Two stand-ins are two databases, each against its own server and its own configuration.
@@ -37,9 +46,12 @@ func TestUnreachable_TwoStandInsAreIndependent(t *testing.T) {
 	second := Unreachable(t, "SECONDUSER", "pw")
 	_, firstErr := first.ListCollections(context.Background(), nil)
 	_, secondErr := second.ListCollections(context.Background(), nil)
-	assert.Contains(t, firstErr.Error(), "FIRSTUSER")
-	assert.NotContains(t, firstErr.Error(), "SECONDUSER")
-	assert.Contains(t, secondErr.Error(), "SECONDUSER")
+	require.Error(t, firstErr)
+	require.Error(t, secondErr)
+	assert.NotContains(t, firstErr.Error()+secondErr.Error(), "FIRSTUSER")
+	assert.NotContains(t, firstErr.Error()+secondErr.Error(), "SECONDUSER")
+	assert.NotSame(t, first, second)
+	assert.NotEqual(t, fmt.Sprintf("%p", first.DB), fmt.Sprintf("%p", second.DB), "each has its own pool")
 }
 
 // A table named as keyed is declared with a key column "id", so that the calls that read or write a record by its
@@ -50,7 +62,9 @@ func TestUnreachable_ANamedTableIsKeyedSoAKeyedCallReachesTheConnection(t *testi
 	record := dalrecord.NewRecordWithData(dalrecord.NewKeyWithID("orders", "1"), map[string]any{"status": "new"})
 	err := db.Get(context.Background(), record)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "USERMARKER-standin")
+	var adapterErr *dalgo2postgres.ConnectionError
+	assert.ErrorAs(t, err, &adapterErr, "a keyed call reaches the connection: without the declaration it would fail before it, with another error")
+	assert.NotContains(t, err.Error(), "USERMARKER-standin")
 }
 
 // Only the variables of libpq are unset, whatever the case of their names: the rest of the environment is not touched.
@@ -71,7 +85,8 @@ func TestUnreachable_TheLibpqVariablesOfTheShellDoNotReachAStandIn(t *testing.T)
 		db := Unreachable(t, "USERMARKER-standin", "PWMARKER-standin")
 		_, err := db.ListCollections(context.Background(), nil)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "USERMARKER-standin")
+		var adapterErr *dalgo2postgres.ConnectionError
+		assert.ErrorAs(t, err, &adapterErr)
 		return
 	}
 	command := exec.Command(os.Args[0], "-test.run=^TestUnreachable_TheLibpqVariablesOfTheShellDoNotReachAStandIn$", "-test.count=1")

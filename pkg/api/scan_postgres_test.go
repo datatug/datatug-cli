@@ -279,7 +279,7 @@ func TestScanDbCatalog_PostgresErrors(t *testing.T) {
 		_, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres}, newShopParams(t))
 		if assert.Error(t, err) {
 			assert.ErrorContains(t, err, "failed to get dbCatalog metadata")
-			assert.EqualError(t, err, `failed to get dbCatalog metadata: open postgres source "env:SHOP_PG_URL": the driver could not open the source (its own message is not shown: a driver can quote the connection string)`)
+			assert.EqualError(t, err, "failed to get dbCatalog metadata: the driver could not open the source (its own message is not shown: a driver can quote the connection string); the PostgreSQL connection string is read from the environment variable SHOP_PG_URL")
 			assert.NotContains(t, err.Error(), pgSecret)
 			assert.NotContains(t, err.Error(), "lost connection", "the driver's words are not shown")
 			assert.ErrorIs(t, err, cause, "the driver's own error is kept for errors.Is, never printed")

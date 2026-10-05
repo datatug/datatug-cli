@@ -598,18 +598,20 @@ func TestPostgresScanJourneyFailures(t *testing.T) {
 		require.NoError(t, listener.Close(), "the port is closed again, so nothing answers on it")
 		return address
 	}
-	// driverText is what the server, the driver and the adapter say: none of it may reach the user.
-	driverText := []string{"FATAL", "SQLSTATE", "28P01", "3D000", "password authentication", `" does not exist`, "dial tcp", "connection refused", "dalgo2postgres", "pgconn", "failed to connect", "role ", "ConnectionError"}
+	// driverText is what the server, the driver and the adapter say in their own words: none of it may reach the user.
+	// (The adapter's own fixed sentences are shown, with the SQLSTATE they name: "the server refused the connection:
+	// password authentication failed (SQLSTATE 28P01)".)
+	driverText := []string{"FATAL", `" does not exist`, "dial tcp", "connection refused", "dalgo2postgres", "pgconn", "failed to connect", "role ", "ConnectionError"}
 
 	wrongPassword := "Wrong" + randomHex(t, 6)
 	for _, failure := range []struct {
 		name      string
 		sourceURL string // the URL in the variable; empty leaves it unset
-		reason    string // what the scan says of the cause, after the name of the source
+		reason    string // what the scan says of the cause: the adapter's sentence
 		secret    string // a part of the URL of this failure that may not be shown, beyond those of the fixture
 	}{
-		{"a wrong password", server.urlFor("", wrongPassword, ""), "the server rejected the user or the password", wrongPassword},
-		{"a database that does not exist", server.urlFor("dt_scan_missing_"+randomHex(t, 6), "", ""), "the database does not exist", ""},
+		{"a wrong password", server.urlFor("", wrongPassword, ""), "the server refused the connection: password authentication failed (SQLSTATE 28P01)", wrongPassword},
+		{"a database that does not exist", server.urlFor("dt_scan_missing_"+randomHex(t, 6), "", ""), "the server refused the connection: the database does not exist (SQLSTATE 3D000)", ""},
 		{"a host that does not answer", server.urlFor("", "", closedPort()), "the server could not be reached", ""},
 		{"a variable that is not set", "", "", ""},
 	} {
@@ -633,10 +635,15 @@ func TestPostgresScanJourneyFailures(t *testing.T) {
 				assert.Equal(t, "environment variable "+variable+" is not set", message)
 			} else {
 				// The whole message, as the user reads it: the scan's, with no count of workers in front of
-				// it (two workers run and one fails, and the error is the one's own), the source named by the
-				// variable it was read from, never by the URL, and the cause in this repository's own
-				// sentence, told apart by the adapter's Kind and SQLSTATE and not by its words.
-				assert.Equal(t, `failed to open PostgreSQL: open postgres source "env:`+variable+`": `+failure.reason, message)
+				// it (two workers run and one fails, and the error is the one's own), the cause in the adapter's
+				// own fixed sentence (told apart by its Kind and SQLSTATE and not by a driver's words), and the
+				// hint of where the connection string is read from: the variable, never the URL.
+				assert.Equal(t, "failed to open PostgreSQL: "+failure.reason+"; the PostgreSQL connection string is read from the environment variable "+variable, message)
+				// And the exit code of the specification of `scan` for a database that cannot be connected to.
+				var coder ExitCoder
+				if assert.ErrorAs(t, err, &coder, "the scan exits with a code of its own") {
+					assert.Equal(t, 4, coder.ExitCode())
+				}
 			}
 			assert.Empty(t, stdout, "a scan that fails writes nothing to its standard output")
 			for _, driver := range driverText {

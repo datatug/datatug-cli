@@ -25,6 +25,10 @@ func logOf(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
+// pgFailure is the text of an open of the PostgreSQL source of the test below that failed for a cause that is told
+// apart by nothing, with the hint of a source that no flag and no variable names.
+const pgFailure = "the driver could not open the source (its own message is not shown: a driver can quote the connection string); the PostgreSQL connection string is the one the source was given"
+
 func TestSourceUnavailable_BuildsTheSentenceFromTheID(t *testing.T) {
 	logged := logOf(t)
 	fileRef, err := dbcopy.Parse("sqlite:///private/data/MARKER-path/x.db")
@@ -45,7 +49,9 @@ func TestSourceUnavailable_BuildsTheSentenceFromTheID(t *testing.T) {
 		{"a data file that is not there", missing, `the data file of source "chinook" does not exist (run ` + "`datatug demo`" + ` to fetch the demo project's data fixtures)`},
 		{"the sentinel alone", fmt.Errorf("wrapped: %w", dbcopy.ErrSourceFileMissing), `the data file of source "chinook" does not exist (run ` + "`datatug demo`" + ` to fetch the demo project's data fixtures)`},
 		{"an open failure of a file source", fileRef.OpenFailure(errors.New("unable to open database file")), `source "chinook" could not be opened`},
-		{"an open failure of a PostgreSQL source", pgRef.OpenFailure(errors.New("dial tcp: refused")), `source "chinook" could not be opened`},
+		// A failure of a PostgreSQL source names no source (the sentence and the hint of where its connection string is read
+		// from): it is answered as it is.
+		{"an open failure of a PostgreSQL source", pgRef.OpenFailure(errors.New("dial tcp: refused")), pgFailure},
 		{"the same under a wrapper", fmt.Errorf("open: %w", fileRef.OpenFailure(errors.New("x"))), `source "chinook" could not be opened`},
 		// The sentences that name no source are shown as they are.
 		{"the preview is off", dbcopy.ErrPostgresPreview, dbcopy.ErrPostgresPreview.Error()},
@@ -73,8 +79,8 @@ func TestSourceUnavailable_BuildsTheSentenceFromTheID(t *testing.T) {
 	}
 	logged.Reset()
 	_ = SourceUnavailable("shop", pgRef.OpenFailure(errors.New("dial tcp: refused")))
-	if !strings.Contains(logged.String(), "MARKER-host.example.com") || strings.Contains(logged.String(), "alice") {
-		t.Errorf("the log holds the display form of the PostgreSQL source and no password: %q", logged.String())
+	if !strings.Contains(logged.String(), pgFailure) || strings.Contains(logged.String(), "MARKER-host.example.com") || strings.Contains(logged.String(), "alice") {
+		t.Errorf("the log holds the sentence of the PostgreSQL failure and nothing of the host, the user or the password: %q", logged.String())
 	}
 }
 

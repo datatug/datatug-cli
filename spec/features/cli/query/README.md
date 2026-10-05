@@ -44,7 +44,7 @@ datatug query run --db <url> (-f <dtql-file>|--from <collection>) \
 
 #### REQ: db-url
 
-`--db <url>` MUST be required and MUST accept the same URL schemes as `db copy` (`sqlite://`, `ingitdb://`, `postgres://`). A missing or unparsable URL MUST exit 2. A database that cannot be opened MUST exit 4.
+`--db <url>` MUST be required and MUST accept the same URL schemes as `db copy` (`sqlite://`, `ingitdb://`, `postgres://`). A missing or unparsable URL MUST exit 2. A database that cannot be opened MUST exit 4. A PostgreSQL source that cannot be reached, whether at the open or in the middle of the read, MUST exit 4 with one line on stderr: the sentence the adapter chose for the failure, then where the connection string is read from, by the name of the variable (`the PostgreSQL connection string is read from the environment variable NAME` for an `env:NAME` source) or of the flag (`from the --db flag` for a URL), and nothing of the connection: no host, port, database, user, password, text of a driver or path of the machine. (`TestQuery_APostgresSourceIsOpenedReadOnlyAndItsFailuresAreClassified`, `TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence`.) A query on a PostgreSQL source orders NULLs first when ascending and last when descending, as every other source does, including over a column whose not-null constraint is not validated (PostgreSQL 18), where an `orderBy` with a `limit` returns the same rows as on a column with no such constraint; the job `Journey (PostgreSQL <major>)` runs it against a real server of each major version, 17 and 18. (`TestPostgresQueryJourneyOrdersNullsByDALgosRule`.)
 
 ### Policies
 

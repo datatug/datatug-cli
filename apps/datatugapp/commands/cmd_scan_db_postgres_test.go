@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dal-go/dalgo2postgres"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
@@ -277,18 +277,22 @@ func TestScanCommandAction_PostgresWritesNoDescriptorForAProjectThatCannotBeSave
 }
 
 // A PostgreSQL scan whose server cannot be opened fails with the classified failure, in no
-// word of the driver's, and leaves the directory as it was: no descriptor, no project.
+// word of the driver's, exits with 4 (the code of the specification of `scan` for a database that cannot be connected
+// to) and leaves the directory as it was: no descriptor, no project.
 func TestScanCommandAction_PostgresThatCannotBeOpenedWritesNothing(t *testing.T) {
 	useScanEnv(t, shopScanEnv())
-	cause := errors.New("dial tcp: PingContext(" + shopScanEnv()["DATATUG_SHOP_PG_URL"] + "): connection refused")
+	cause := &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5432", Database: "shop"}
 	t.Cleanup(api.SetOpenSchemaScanForTest(func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) { return nil, cause }))
 	dir := t.TempDir()
 
 	err := covDRunScan("-d", dir, "-D", "postgres", "--dsn-env", "DATATUG_SHOP_PG_URL", "--env", "prod", "--db", "shop")
 
 	if assert.Error(t, err) {
-		assert.ErrorContains(t, err, "failed to open PostgreSQL")
-		assert.ErrorContains(t, err, `open postgres source "env:DATATUG_SHOP_PG_URL"`)
+		assert.EqualError(t, err, "failed to open PostgreSQL: the server could not be reached; the PostgreSQL connection string is read from the environment variable DATATUG_SHOP_PG_URL")
+		var coder ExitCoder
+		if assert.ErrorAs(t, err, &coder) {
+			assert.Equal(t, 4, coder.ExitCode(), "a database that cannot be connected to")
+		}
 		for _, shown := range []string{scanPgSecret, "alice", "db.example.com", "PingContext"} {
 			assert.NotContains(t, err.Error(), shown)
 		}

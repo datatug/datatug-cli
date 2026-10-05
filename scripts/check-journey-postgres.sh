@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# check-journey-postgres.sh runs the PostgreSQL scan journey (the tests of
-# apps/datatugapp/commands/scan_journey_postgres_real_test.go) against the server of
-# the CI job "Journey (PostgreSQL)" and fails the job unless every one of them ran
+# check-journey-postgres.sh runs the PostgreSQL journey (the tests of
+# apps/datatugapp/commands/scan_journey_postgres_real_test.go and
+# query_journey_postgres_real_test.go) against the server of the CI job
+# "Journey (PostgreSQL <major>)" and fails the job unless every one of them ran
 # and passed.
 #
 # `go test` reports a test that skips as success. These tests skip when
@@ -18,6 +19,7 @@ set -euo pipefail
 required_tests=(
 	TestPostgresScanJourney
 	TestPostgresScanJourneyFailures
+	TestPostgresQueryJourneyOrdersNullsByDALgosRule
 )
 
 # check reads the verbose output of `go test` in file $1 and prints each problem. It

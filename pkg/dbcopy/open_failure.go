@@ -21,6 +21,10 @@ var errUnsupportedBackend = errors.New("unsupported scheme (this is a bug; Parse
 type openError struct {
 	message string
 	cause   error
+	// postgres is true for the failure of a PostgreSQL source, whose text names no source (see OpenFailure). The text
+	// of any other holds the display form of the source: the path of its file, or the scheme, the host, the port and
+	// the database of a URL.
+	postgres bool
 }
 
 func (e *openError) Error() string { return e.message }
@@ -32,10 +36,12 @@ func (e *openError) Unwrap() error { return e.cause }
 // quotes the whole DSN), so a driver's message is never shown, whatever it holds:
 // the error says which source could not be opened and, for the few causes that
 // can be told apart without reading the message (a missing file, a refused
-// permission, a timeout, a cancelled attempt, a refused connection, and for PostgreSQL a rejected
-// password, a connection the server's access rules do not allow, a missing database, an
-// unreachable server, a failed TLS handshake), why.
+// permission, a timeout, a cancelled attempt, a refused connection), why.
 // errors.Is and errors.As still see the driver's own error.
+//
+// A PostgreSQL source is not named at all: the text is the sentence the adapter chose for the failure and the hint of
+// where the connection string is read from (the name of the variable or of the flag), the text a call that fails
+// after the open gives too (see postgresFailureText). The display form of a PostgreSQL URL holds its host.
 //
 // The errors this package wrote itself (the missing-file error CheckSourceFile
 // returns, an error OpenFailure returned before, the fixed refusals such as
@@ -54,10 +60,23 @@ func (r BackendRef) OpenFailure(err error) error {
 	if err == errUnsupportedBackend { //nolint:errorlint // an exact match is the point: see the doc comment
 		return err
 	}
+	if r.Scheme == "postgres" {
+		return &openError{message: postgresFailureText(postgresFailureReason(err), r.connectionHint()), cause: err, postgres: true}
+	}
 	return &openError{
 		message: fmt.Sprintf("open %s source %q: %s", r.Scheme, r.Display(), openFailureReason(err)),
 		cause:   err,
 	}
+}
+
+// postgresFailureReason is the sentence of a PostgreSQL failure: the adapter's own when err holds its connection
+// error, else the sentence openFailureReason gives for the few causes that can be told apart without reading a message.
+func postgresFailureReason(err error) string {
+	var adapterErr *dalgo2postgres.ConnectionError
+	if errors.As(err, &adapterErr) {
+		return adapterSentence(adapterErr)
+	}
+	return openFailureReason(err)
 }
 
 // openFailureReason says why err happened in a fixed sentence, or says only that
@@ -76,37 +95,5 @@ func openFailureReason(err error) string {
 	case errors.Is(err, syscall.ECONNREFUSED):
 		return "the connection was refused"
 	}
-	if reason, ok := connectionErrorReason(err); ok {
-		return reason
-	}
 	return "the driver could not open the source (its own message is not shown: a driver can quote the connection string)"
-}
-
-// connectionErrorReason names the failure a *dalgo2postgres.ConnectionError reports, from its
-// Kind and SQLState only. The adapter hides the driver's error from errors.Is and errors.As
-// on purpose, so the cases above never see a PostgreSQL failure; and the error's own text names
-// the host, the port and the database, so it is never printed. A kind or code it does not know
-// is not named.
-func connectionErrorReason(err error) (string, bool) {
-	var pg *dalgo2postgres.ConnectionError
-	if !errors.As(err, &pg) {
-		return "", false
-	}
-	switch {
-	case pg.Kind == dalgo2postgres.FailureServer && pg.SQLState == "28P01":
-		return "the server rejected the user or the password", true
-	case pg.Kind == dalgo2postgres.FailureServer && pg.SQLState == "28000":
-		// The server refuses this user on this connection before it asks for a password: by the
-		// user, the database, the address or the encryption of the connection (its access rules).
-		return "the server does not authorize this user for this connection (its access rules: user, database, address or encryption)", true
-	case pg.Kind == dalgo2postgres.FailureServer && pg.SQLState == "3D000":
-		return "the database does not exist", true
-	case pg.Kind == dalgo2postgres.FailureNetwork:
-		return "the server could not be reached", true
-	case pg.Kind == dalgo2postgres.FailureTimeout:
-		return "the attempt timed out", true
-	case pg.Kind == dalgo2postgres.FailureTLS:
-		return "the TLS handshake with the server failed", true
-	}
-	return "", false
 }

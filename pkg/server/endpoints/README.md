@@ -95,11 +95,13 @@ from the ID of the source:
 | `the data file of source "<id>" does not exist (run `datatug demo` to fetch the demo project's data fixtures)` | the ID |
 | `source "<id>" could not be opened` | the ID |
 
-The text of `pkg/dbcopy`, which holds the display form of the source (the path of its file, the
-host, the port and the database of a PostgreSQL one), is in the log of the server. The fixed
-sentences that name no source (the preview of PostgreSQL sources is off, a read through policies
-is not available, a URL that turns the read-only session off, a connection that was lost) are
-answered as they are. The CLI's own commands (`datatug query run`, `datatug db copy`) show the
+The text of `pkg/dbcopy`, which holds the display form of the source (the path of its file), is in
+the log of the server. The fixed sentences that name no source (the preview of PostgreSQL sources
+is off, a read through policies is not available, a URL that turns the read-only session off) are
+answered as they are, and so is the failure of a PostgreSQL source, whether it could not be opened or
+lost its connection: the sentence the adapter chose for the failure and the hint of where its connection
+string is read from (`the server could not be reached; the PostgreSQL connection string is read from the
+environment variable <NAME>`), which hold no host, port, database, user or password. The log says the same. The CLI's own commands (`datatug query run`, `datatug db copy`) show the
 sentences of `pkg/dbcopy`: a person at their own terminal sees their own paths.
 
 ### Endpoint: POST /execute

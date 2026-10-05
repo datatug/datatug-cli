@@ -260,7 +260,7 @@ func TestScanDbCatalog_PostgresClassifiesAnOpenThatFailsInTheDriversWords(t *tes
 	for _, shown := range []string{pgSecret, "alice", "db.example.com", "PingContext"} {
 		assert.NotContains(t, err.Error(), shown)
 	}
-	assert.ErrorContains(t, err, `open postgres source "env:SHOP_PG_URL"`)
+	assert.ErrorContains(t, err, "the PostgreSQL connection string is read from the environment variable SHOP_PG_URL")
 }
 
 // shopServer is the server of a PostgreSQL scan as a project records it: the driver alone.

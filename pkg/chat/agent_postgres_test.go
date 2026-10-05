@@ -137,7 +137,7 @@ func TestRunDTQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = "Query failed: the connection to the PostgreSQL server was lost and could not be made again"
+	const want = "Query failed: the connection failed; the PostgreSQL connection string is the one the source was given"
 	if response.OK || response.Error != want {
 		t.Errorf("response = %+v, want the error %q", response, want)
 	}

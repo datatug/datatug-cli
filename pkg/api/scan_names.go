@@ -34,27 +34,6 @@ func CheckScanName(flag, value string) error {
 	return nil
 }
 
-// CheckSQLitePath is an error when the SQLite database file has a "?" in its path, and
-// nil otherwise: path is the --path as it was typed, and absolute is the file it is,
-// which is what the open of a source gets, so it is the one that is looked at (a relative
-// path is the file from a working directory that can have a "?" in its own path, and a
-// database inside a project whose folder has one has it too). A scan reads such a file,
-// but the project could not open it again: the open of a source (pkg/dbcopy) hands the
-// bare path to the driver, which reads a "?" in it as the start of its own parameters,
-// opens the name before it and creates a file of that name. So the scan refuses the
-// file before it reads or writes anything, and the message names the character and says
-// to rename the file. It lifts on the day that open reads such a name back.
-func CheckSQLitePath(path, absolute string) error {
-	if !strings.Contains(absolute, "?") {
-		return nil
-	}
-	subject := fmt.Sprintf("--path %q has the character \"?\" in it", path)
-	if !strings.Contains(path, "?") {
-		subject = fmt.Sprintf("--path %q is the file %q, which has the character \"?\" in its path", path, absolute)
-	}
-	return fmt.Errorf("%s, and the project could not open the file again, because the open of a source reads a \"?\" in a path as the start of the driver's own parameters, and opens another name; rename the file (or the folder it is in, or move it to a path with no \"?\") and scan again", subject)
-}
-
 // CheckScanNamesAgainstProject is an error when the environment, the catalog id or the
 // database model of a scan differs only by case from a name the project already has in
 // the same place: an environment in environments/, a catalog in the folder of the

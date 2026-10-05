@@ -281,11 +281,11 @@ func PathHoldsURL(path string) bool {
 // forms of a Windows WebDAV path ("\\host@SSL\share", "\\host@8080\share").
 //
 // Known limits, shapes that stay paths because nothing in the text tells them from
-// one, and are shown as typed: after a UNC start, a token that holds a slash and no
-// colon (the text before the slash reads as the server and what follows as a share),
-// a token as the user name that is followed by "SSL" or a port number (it reads as a
-// WebDAV server name), and user information straight after an absolute start with no
-// second scheme (an absolute path may hold an "@" anywhere).
+// one, and are shown as typed: after a UNC start, a token that holds either separator
+// and no colon (the text before the separator reads as the server and what follows as a
+// share), a token as the user name that is followed by "SSL" or a port number (it reads
+// as a WebDAV server name), and user information straight after an explicit start with
+// no second scheme (an explicit path may hold an "@" anywhere).
 func readsAsPath(text string) bool {
 	at := strings.LastIndexByte(text, '@')
 	if at < 0 {

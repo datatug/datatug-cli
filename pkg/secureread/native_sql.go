@@ -110,7 +110,9 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 // adapter dalgo2sqlite itself composes) reuses its tested TextQuery
 // execution and row-to-record conversion rather than re-implementing it.
 func openReadOnlySQLite(ctx context.Context, path string) (dal.DB, func(), error) {
-	sqlDB, err := sqlOpenNative("sqlite", path)
+	// The path is handed over as a "file:" URI: a bare path with a "?" in it is read by the
+	// driver as the file before it and its parameters (see dbcopy.SQLiteFileURI).
+	sqlDB, err := sqlOpenNative("sqlite", dbcopy.SQLiteFileURI(path))
 	if err != nil {
 		return nil, nil, fmt.Errorf("secureread: open sqlite: %w", err)
 	}

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -670,49 +671,40 @@ CREATE TABLE "` + attachName + `" (c TEXT);`)
 	assert.Empty(t, entries, "nothing was created in the working directory")
 }
 
-// The path of the database is a path, not a URI: a file whose name has a "#" or a
-// "%" in it is scanned, not another file made beside it, and it is read back as the
-// same file by the readers of the project: the source of a saved query, of chat and of
-// serve is a URL, which cut the path at the first "#" or "?". A file whose name has a
-// "?" is refused: the open of a source cannot read such a name back yet.
+// The path of the database is a path, not a URI: a file whose name has a "?", a "#", a
+// "%" or a space in it, or that is in a folder whose name has one, is scanned, not
+// another file made beside it, and it is read back as the same file by the readers of the
+// project: the source of a saved query, of chat and of serve is a URL, which cut the
+// path at the first "#" or "?", and the driver of the open of a source reads a "?" in a
+// bare path as the start of its own parameters, so it opens, and creates, the name
+// before it. The folder that holds the database holds only that file afterwards.
 func TestScanJourneyPathWithURICharacters(t *testing.T) {
-	names := []string{"shop#1 50%.db", "100%.db", "a%23b.db"}
+	type place struct{ folder, name string }
+	places := []place{{"", "shop#1 50%.db"}, {"", "100%.db"}, {"", "a%23b.db"}, {"", "with space.db"}}
 	if runtime.GOOS != "windows" { // a file name cannot have a "?" there
-		names = append(names, "what?mode=rw.db")
+		places = append(places,
+			place{"", "what?mode=rw.db"}, place{"", "?.db"}, place{"", "all ?#% together.db"},
+			place{"what?", "shop.db"}, place{"what?mode=rw", "shop.db"}, place{"my folder #1 50% ?", "what?.db"})
+	} else {
+		places = append(places, place{"my folder #1 50%", "shop.db"})
 	}
-	for _, name := range names {
-		t.Run(name, func(t *testing.T) {
+	for _, p := range places {
+		t.Run(filepath.Join(p.folder, p.name), func(t *testing.T) {
 			ctx := context.Background()
 			projectDir := filepath.Join(t.TempDir(), "shop-project")
 			require.NoError(t, os.Mkdir(projectDir, 0o755))
-			dbDir := t.TempDir()
+			dbDir := filepath.Join(t.TempDir(), p.folder)
+			require.NoError(t, os.MkdirAll(dbDir, 0o755))
+			name := p.name
 			dbPath := filepath.Join(dbDir, name)
-			// Made under a plain name and then moved: the driver that makes the file reads
-			// a "?" in the name it is given as the start of its own parameters.
+			// Made under a plain name and then moved: the driver that makes the file reads a
+			// "?" in the name it is given as the start of its own parameters.
 			plain := filepath.Join(t.TempDir(), "plain.db")
 			writeJourneyDB(t, plain)
 			require.NoError(t, os.Rename(plain, dbPath))
 
 			stderr, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
 
-			if strings.Contains(name, "?") {
-				// The scan could read this file, but the project could not open it again: the
-				// open of a source (pkg/dbcopy, BackendRef.Open) hands the bare path to
-				// dalgo2sqlite, whose driver reads a "?" in it as the start of its own
-				// parameters, opens the file named before it and creates that. So the scan
-				// refuses the file before it reads or writes anything, and says to rename it.
-				require.Error(t, err)
-				assert.ErrorContains(t, err, `"?"`, "the message names the character")
-				assert.ErrorContains(t, err, "rename the file")
-				assert.ErrorContains(t, err, "--path")
-				assert.Empty(t, stderr)
-				assert.Empty(t, projectFiles(t, projectDir, ""), "nothing was written")
-				entries, readErr := os.ReadDir(dbDir)
-				require.NoError(t, readErr)
-				require.Len(t, entries, 1, "the file was not opened, so no other database was made beside it")
-				assert.Equal(t, name, entries[0].Name())
-				return
-			}
 			require.NoError(t, err)
 			assert.Empty(t, stderr)
 			schema, err := api.GetCatalogSchema(projectDir, "local", "shop")
@@ -762,11 +754,63 @@ func TestScanJourneyPathWithURICharacters(t *testing.T) {
 				firstNames = append(firstNames, row.Data["FirstName"])
 			}
 			assert.Equal(t, []any{"Ada", "Alan"}, firstNames)
+
+			// The other open of a source, the one a structured read and `datatug db copy`
+			// use, reads the same file.
+			db, err := ref.OpenProtected(ctx)
+			require.NoError(t, err)
+			rows, err := db.ExecuteQueryToRecordsReader(ctx, dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("Customer", ""))).SelectIntoRecord(nil))
+			require.NoError(t, err)
+			first, err := rows.Next()
+			require.NoError(t, err)
+			assert.Equal(t, "Ada", first.Data().(map[string]any)["FirstName"])
+			if closer, ok := db.(interface{ Close() error }); ok {
+				require.NoError(t, closer.Close())
+			}
 			entries, err = os.ReadDir(dbDir)
 			require.NoError(t, err)
 			assert.Len(t, entries, 1, "opening the source made no other file either")
 		})
 	}
+}
+
+// A relative --path run from a working directory whose path has a "?" is the file from
+// there: the scan, the project and every reader of it take it for the one file, and the
+// working directory holds nothing else afterwards.
+func TestScanJourneyRelativePathFromAWorkingDirectoryWithAQuestionMark(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a folder name cannot have a ? on Windows")
+	}
+	ctx := context.Background()
+	root := t.TempDir()
+	workDir := filepath.Join(root, "what?")
+	require.NoError(t, os.Mkdir(workDir, 0o755))
+	writeJourneyDB(t, filepath.Join(root, "plain.db"))
+	require.NoError(t, os.Rename(filepath.Join(root, "plain.db"), filepath.Join(workDir, "shop.db")))
+	projectDir := filepath.Join(root, "work", "shop")
+	t.Chdir(workDir)
+	before := treeHashes(t, workDir, "")
+
+	_, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", "shop.db", "--db", "shop", "--env", "local")
+
+	require.NoError(t, err)
+	assert.Equal(t, before, treeHashes(t, workDir, ""), "the working directory holds the database and nothing else")
+	store, id := filestore.NewSingleProjectStore(projectDir, "")
+	projStore := store.GetProjectStore(id)
+	query := &datatug.QueryDef{
+		ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "first-names"}},
+		Type:        datatug.QueryTypeSQL,
+		Text:        "SELECT FirstName FROM Customer ORDER BY CustomerId",
+		Targets:     []datatug.QueryDefTarget{{Catalog: "shop"}},
+	}
+	result, err := runSQLSavedQuery(ctx, secureread.NewExecutor(secureread.Session{Unrestricted: true}), projStore, projectDir, "local", query, nil)
+	require.NoError(t, err)
+	var firstNames []any
+	for _, row := range result.Rows {
+		firstNames = append(firstNames, row.Data["FirstName"])
+	}
+	assert.Equal(t, []any{"Ada", "Alan"}, firstNames)
+	assert.Equal(t, before, treeHashes(t, workDir, ""), "reading the project made no other file")
 }
 
 // A scan into a folder that has a README.md (a repository's, or the project's own

@@ -11,6 +11,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/datatug/datatug-cli/pkg/chat"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
@@ -167,12 +168,22 @@ func TestCovCChatLookupParameterSourceKinds(t *testing.T) {
 	if _, err := covCChatService(t, dir, true).LookupParameter(ctx, "f/inv", "CustomerId"); err == nil {
 		t.Fatal("missing sqlite file accepted")
 	}
-	// an unparseable source URL: a "%" in a SQLite path is written into its URL escaped, so
-	// it parses (see api.LocalSQLiteSourceURL); a control character is not a URL's
-	dir = covCWriteProject(t, covCMerge(envFor("sqlite3", `/tmp/covc\u0001/x.sqlite`), query))
-	if _, err := covCChatService(t, dir, true).LookupParameter(ctx, "f/inv", "CustomerId"); err == nil {
-		t.Fatal("unparseable source accepted")
+	// a "%" or a control character in a SQLite path is written into its URL escaped, so
+	// that it parses (see api.LocalSQLiteSourceURL): the source of such a file is the file's
+	dir = covCWriteProject(t, covCMerge(envFor("sqlite3", `/tmp/covc\u0001/100%/x.sqlite`), query))
+	if _, err := covCChatService(t, dir, true).LookupParameter(ctx, "f/inv", "CustomerId"); !errors.Is(err, dbcopy.ErrSourceFileMissing) {
+		t.Fatalf("a path with a control character and a percent sign: %v, want the answer for a file that is not there", err)
 	}
+	// an unparseable source URL: no source of a project is one, so the parse is a seam
+	origParse := chatParseSource
+	t.Cleanup(func() { chatParseSource = origParse })
+	chatParseSource = func(string) (dbcopy.BackendRef, error) {
+		return dbcopy.BackendRef{}, errors.New("covC unparseable source")
+	}
+	if _, err := covCChatService(t, dir, true).LookupParameter(ctx, "f/inv", "CustomerId"); err == nil || err.Error() != "covC unparseable source" {
+		t.Fatalf("unparseable source: %v, want the parse error", err)
+	}
+	chatParseSource = origParse
 	// a file that is not a database
 	garbage := filepath.Join(t.TempDir(), "garbage.sqlite")
 	if err := os.WriteFile(garbage, []byte(strings.Repeat("not a database ", 100)), 0o644); err != nil {

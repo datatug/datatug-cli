@@ -17,6 +17,9 @@ func GetEnvironmentSummary(ctx context.Context, ref dto.ProjectItemRef) (*datatu
 		return nil, validation.NewErrRequestIsMissingRequiredField("envID")
 	}
 	// The store joins the ID into a path of its own, so the ID is checked first.
+	if err := ValidateProjectIdentifier("project", ref.ProjectID); err != nil {
+		return nil, err
+	}
 	if err := ValidateIdentifier("envID", ref.ID); err != nil {
 		return nil, err
 	}

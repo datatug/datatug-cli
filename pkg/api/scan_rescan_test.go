@@ -970,30 +970,6 @@ func TestScannedServer(t *testing.T) {
 	assert.Equal(t, datatug.ServerRef{Driver: "sqlserver", Host: "db.example.com", Port: 1434}, ScannedServer("sqlserver", connection))
 }
 
-func TestCheckSQLitePath(t *testing.T) {
-	for _, path := range []string{"shop.db", "/data/shop#1 50%.db", `C:\data\shop.db`, ""} {
-		assert.NoError(t, CheckSQLitePath(path, path), path)
-	}
-	for _, path := range []string{"what?mode=rw.db", "/data/what?/shop.db", "?"} {
-		err := CheckSQLitePath(path, path)
-		require.Error(t, err, path)
-		assert.ErrorContains(t, err, `"?"`, "the message names the character")
-		assert.ErrorContains(t, err, "rename the file")
-		assert.ErrorContains(t, err, path)
-	}
-
-	// The path the open of a source gets is the whole path of the file, which a relative
-	// --path is not: the file is checked where it is, and the message still names the path
-	// that was typed, and the file it is.
-	err := CheckSQLitePath("shop.db", "/work/what?/shop.db")
-	require.Error(t, err, "a ? in a folder above the file, which the typed path does not show")
-	assert.ErrorContains(t, err, `"?"`)
-	assert.ErrorContains(t, err, "rename the file")
-	assert.ErrorContains(t, err, `--path "shop.db"`)
-	assert.ErrorContains(t, err, "/work/what?/shop.db")
-	assert.NoError(t, CheckSQLitePath("/a?/../shop.db", "/shop.db"), "a ? that the path leaves again is not in the file's path")
-}
-
 func TestCheckScanNamesAgainstProject(t *testing.T) {
 	projectDir := t.TempDir()
 	for _, dir := range []string{"environments/dev/catalogs/shop", "environments/prod", "dbmodels/shop", "dbmodels/retail"} {

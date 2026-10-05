@@ -159,6 +159,11 @@ func dtqlUsesParameters(node *yaml.Node) bool {
 var (
 	chatOpenSQLite             = sql.Open
 	chatLoadForeignKeySnapshot = chat.LoadSQLiteForeignKeySnapshot
+	// chatParseSource: the source of a SQLite catalog is written with every character
+	// of its path that a URL does not read as part of a path escaped (see
+	// api.LocalSQLiteSourceURL), so no catalog of a project names a source that does
+	// not parse; this is how a source that does not is reached.
+	chatParseSource = dbcopy.Parse
 )
 
 func (s chatSavedQueries) LookupParameter(ctx context.Context, queryID, parameterID string) (*chat.SavedQueryLookup, error) {
@@ -187,7 +192,7 @@ func (s chatSavedQueries) LookupParameter(ctx context.Context, queryID, paramete
 	if err != nil {
 		return nil, err
 	}
-	ref, err := dbcopy.Parse(source)
+	ref, err := chatParseSource(source)
 	if err != nil {
 		return nil, err
 	}

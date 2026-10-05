@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/strongo/validation"
 )
 
@@ -68,9 +67,6 @@ func executeSelectHandler(w http.ResponseWriter, r *http.Request) {
 		SQL:         query.Get("sql"),
 		Where:       query.Get("where"),
 		Limit:       int(limit),
-	}
-	if request.Project == "" {
-		request.Project = storage.SingleProjectID
 	}
 	if cols != "" {
 		request.Columns = strings.Split(cols, ",")

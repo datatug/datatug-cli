@@ -595,7 +595,9 @@ func (r BackendRef) openSource(ctx context.Context, insecureAllowLoopback, prote
 		// Caller-side policies, when enabled, remain a separate
 		// enforcement layer.
 		opts := dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"}
-		db, err := newSQLiteDatabaseWithOptions(r.Path, dal.NewSchema(nil, nil), opts)
+		// The driver is given the path as a "file:" URI (see SQLiteFileURI): a bare path
+		// with a "?" in it is read as the file before it and its parameters.
+		db, err := newSQLiteDatabaseWithOptions(SQLiteFileURI(r.Path), dal.NewSchema(nil, nil), opts)
 		if err != nil {
 			return nil, err
 		}

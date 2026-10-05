@@ -347,3 +347,52 @@ func TestUnsafeIdentifiers_CoversEveryWayOutOfAFolder(t *testing.T) {
 		}
 	}
 }
+
+// The IDs a check of a path made of folders must refuse (a recordset definition, a
+// folder) cover each way out of the folder that holds them, and hold no text that is a
+// valid path of plain names: "a/b" is one, so the identifier list is not used as it is.
+func TestUnsafePathIdentifiers_CoverEveryWayOutOfAFolder(t *testing.T) {
+	t.Parallel()
+	names, ids := map[string]bool{}, map[string]bool{}
+	for _, unsafe := range UnsafePathIdentifiers() {
+		if unsafe.Name == "" || names[unsafe.Name] || ids[unsafe.ID] {
+			t.Fatalf("every identifier needs a distinct name and text: %+v", unsafe)
+		}
+		names[unsafe.Name], ids[unsafe.ID] = true, true
+	}
+	for _, want := range []string{"..", "/etc/passwd", `a\b`, "a\x00b", "a%2Fb", "../../etc", "a/../b", "a//b", "a/", "", strings.Repeat("a/", 300) + "a"} {
+		if !ids[want] {
+			t.Errorf("no unsafe path identifier %q", want)
+		}
+	}
+	for _, valid := range []string{"a/b", "a", "a/b/c"} {
+		if ids[valid] {
+			t.Errorf("%q is a path of plain names, not an unsafe one", valid)
+		}
+	}
+}
+
+// The hosts a check of a db-server host must refuse cover each way out of a folder and
+// the shapes that are not a host (a space, user information, a path, a zone), and
+// hold no text that is a valid host: a name of 129 letters is one.
+func TestUnsafeHosts_CoverEveryWayOutOfAFolderAndEveryShapeThatIsNotAHost(t *testing.T) {
+	t.Parallel()
+	names, ids := map[string]bool{}, map[string]bool{}
+	for _, unsafe := range UnsafeHosts() {
+		if unsafe.Name == "" || names[unsafe.Name] || ids[unsafe.ID] {
+			t.Fatalf("every host needs a distinct name and text: %+v", unsafe)
+		}
+		names[unsafe.Name], ids[unsafe.ID] = true, true
+	}
+	for _, want := range []string{"..", "/etc/passwd", "a/b", `a\b`, "a\x00b", "a%2Fb", "../../etc", "a b", "user@host", "host/x", ""} {
+		if !ids[want] {
+			t.Errorf("no unsafe host %q", want)
+		}
+	}
+	if ids[strings.Repeat("a", 129)] {
+		t.Error("a host of 129 letters is a host name, not an unsafe one")
+	}
+	if !ids[strings.Repeat("a", 254)] {
+		t.Error("a host over 253 characters is not in the list")
+	}
+}

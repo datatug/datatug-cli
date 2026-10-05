@@ -14,7 +14,7 @@ func validateProjectInput(projectID string) (err error) {
 	if projectID == "" {
 		return validation.NewErrRequestIsMissingRequiredField("projectID")
 	}
-	return nil
+	return ValidateProjectIdentifier("project", projectID)
 }
 
 // GetProjects return all projects
@@ -30,6 +30,9 @@ func GetProjects(ctx context.Context, storeID string) ([]datatug.ProjectBrief, e
 func GetProjectSummary(ctx context.Context, ref dto.ProjectRef) (projSummary *datatug.ProjectSummary, err error) {
 	if ref.ProjectID == "" {
 		return nil, validation.NewErrRequestIsMissingRequiredField("id")
+	}
+	if err = ValidateProjectIdentifier("project", ref.ProjectID); err != nil {
+		return nil, err
 	}
 	// storage.NewDatatugStore, not storage.GetStore/GetProjectStore: the
 	// latter resolve through a package-private `stores` map or a store
@@ -81,6 +84,9 @@ func CreateProject(ctx context.Context, request dto.CreateProjectRequest) (*data
 
 // GetProjectFull returns full project metadata
 func GetProjectFull(ctx context.Context, ref dto.ProjectRef) (*datatug.Project, error) {
+	if err := ValidateProjectIdentifier("project", ref.ProjectID); err != nil {
+		return nil, err
+	}
 	// See the NewDatatugStore comment in GetProjectSummary above.
 	store, err := storage.NewDatatugStore(ref.StoreID)
 	if err != nil {

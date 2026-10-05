@@ -5,7 +5,8 @@
 // put one: userinfo (with and without a user name), a token standing alone as
 // the user name, the position a parser misreads as userinfo ("alice:42/secret@"),
 // a token or a user name that holds a slash (so no colon or "@" comes before a
-// slash), the query string and the fragment.
+// slash), userinfo after a UNC start ("\\alice:secret@"), the query string and
+// the fragment.
 //
 // The secrets are generated, not typed, so a test that finds one in an output
 // has found a real leak and not a coincidence with a fixed word. Generation is
@@ -234,5 +235,9 @@ func (g *generator) positions(scheme, tail, prefix string, wrapped bool) []Case 
 	// shape takes it for a path.
 	user, password := g.secret("token with slash"), g.secret("word")
 	add("user name with a slash", "user name with slash", head+user+":"+password+"@"+tail, user, password)
+	// A UNC start ("\\") reads as a path, and "\\alice:password@host" starts with
+	// one all the same: a reader that takes every UNC start for a path shows it.
+	password = g.secret("word")
+	add("userinfo after a UNC start", "word", head+`\\alice:`+password+"@"+tail, password)
 	return cases
 }

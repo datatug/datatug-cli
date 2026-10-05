@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
 
@@ -244,6 +245,11 @@ func GetCatalogTables(projectDir, environmentID, catalogID string) (*CatalogTabl
 	return &CatalogTables{Tables: tables, Views: views}, nil
 }
 
+// catalogDbModel reads the dbModel of a catalog. environmentID and catalogID
+// are request path segments, and a source string can be sent where an ID belongs:
+// each message shows an ID only when it is a plain name, and carries the file
+// error, which quotes the path the ID was turned into, only then (see
+// LookupError, dbcopy.SourceIDDisplay).
 func catalogDbModel(projectDir, environmentID, catalogID string) (string, error) {
 	path := filepath.Join(
 		projectDir, storage.EnvironmentsFolder, environmentID, storage.EnvDbCatalogsFolder, catalogID,
@@ -252,16 +258,16 @@ func catalogDbModel(projectDir, environmentID, catalogID string) (string, error)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("%w: catalog %q in environment %q", ErrCatalogNotFound, catalogID, environmentID)
+			return "", fmt.Errorf("%w: catalog %q in environment %q", ErrCatalogNotFound, dbcopy.SourceIDDisplay(catalogID), dbcopy.SourceIDDisplay(environmentID))
 		}
-		return "", fmt.Errorf("read catalog file %s: %w", path, err)
+		return "", LookupError("read the file of catalog %q in environment %q", err, catalogID, environmentID)
 	}
 	var file catalogDbModelFile
 	if err := json.Unmarshal(data, &file); err != nil {
-		return "", fmt.Errorf("parse catalog file %s: %w", path, err)
+		return "", LookupError("parse the file of catalog %q in environment %q", err, catalogID, environmentID)
 	}
 	if file.DbModel == "" {
-		return "", fmt.Errorf("catalog %q (environment %q) has no dbModel set", catalogID, environmentID)
+		return "", LookupError("catalog %q (environment %q) has no dbModel set", nil, catalogID, environmentID)
 	}
 	return file.DbModel, nil
 }

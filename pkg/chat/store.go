@@ -283,22 +283,22 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 	}
 	// ProjectID is an additional bookmark boundary, not a session-scope change.
 	//
-	// The sources enter the identity as their display form (dbcopy.SourceDisplay),
-	// so a password inside a source URL never feeds the persisted scope hash. The
-	// display form drops what a source string holds beyond its scheme, host, port
-	// and path, so a store written under the identity main computed (the sources
-	// through dbcopy.RedactSourceURL, see previousScopeIdentity) is moved to the
-	// new one below, with its bookmarks and preferences.
-	sources := redactSources(scope.Sources)
+	// Each source enters the identity as dbcopy.SourceScopeIdentity says: where it
+	// points, never a password. That is not the display form the store keeps for a
+	// source (dbcopy.SourceDisplay), which drops the user name of a URL and cuts a
+	// path at a "?" or a "#": two roles of one database, or two directories that
+	// differ after a "#", would share a scope. A store written under the identity
+	// main computed (see previousScopeIdentity) is moved to this one below, with
+	// its bookmarks and preferences.
+	//
 	// An env:NAME source enters the identity with a hash of where the variable
-	// points now, so repointing it at another database is another scope. Any
-	// other source enters unchanged.
+	// points now, so repointing it at another database is another scope.
 	encoded, _ := json.Marshal(struct {
 		Environment       string
 		Database          string
 		AccessFingerprint string
 		Sources           map[string]string
-	}{scope.Environment, scope.Database, scope.AccessFingerprint, scopeIdentitySources(sources)})
+	}{scope.Environment, scope.Database, scope.AccessFingerprint, scopeIdentitySources(scope.Sources)})
 	sum := sha256.Sum256(encoded)
 	newScope := hex.EncodeToString(sum[:])
 	legacy, _ := json.Marshal(struct {
@@ -393,17 +393,6 @@ func scopeIdentitySources(sources map[string]string) map[string]string {
 		identities[id] = dbcopy.SourceScopeIdentity(source)
 	}
 	return identities
-}
-
-// redactSources returns a copy of sources with every source replaced by its
-// display form (dbcopy.SourceDisplay): built from the scheme, host, port and path,
-// never from userinfo or a query string.
-func redactSources(sources map[string]string) map[string]string {
-	redacted := make(map[string]string, len(sources))
-	for id, source := range sources {
-		redacted[id] = dbcopy.SourceDisplay(source)
-	}
-	return redacted
 }
 
 func initChatSchema(db *sql.DB) error {

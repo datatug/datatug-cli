@@ -1,6 +1,7 @@
 package dbcopy
 
 import (
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -64,7 +65,7 @@ var (
 // `datatug db <url>` viewer command takes.
 var localSchemes = sync.OnceValue(func() map[string]bool {
 	local := map[string]bool{
-		"sqlite": true, "ingitdb": true, "openvaultdb": true, "http": true, "https": true, "unavailable": true,
+		"sqlite": true, "ingitdb": true, "openvaultdb": true, "http": true, "https": true, unavailableScheme: true,
 	}
 	for _, scheme := range dburl.BaseSchemes() {
 		if !scheme.Opaque {
@@ -82,7 +83,7 @@ var localSchemes = sync.OnceValue(func() map[string]bool {
 // dispatches, the postgres alias, the internal stand-in, and every scheme the
 // `datatug db <url>` viewer command takes through dburl.
 var knownSourceSchemes = sync.OnceValue(func() map[string]bool {
-	known := map[string]bool{"postgresql": true, "unavailable": true}
+	known := map[string]bool{"postgresql": true, unavailableScheme: true}
 	for _, scheme := range supportedSchemes {
 		known[scheme] = true
 	}
@@ -94,6 +95,19 @@ var knownSourceSchemes = sync.OnceValue(func() map[string]bool {
 	}
 	return known
 })
+
+// knownSourceScheme reports whether scheme (lower case) is one SourceDisplay can
+// show: a scheme of knownSourceSchemes, or one dburl takes that its own list of
+// base schemes leaves out: the short aliases it registers itself ("my" for mysql)
+// and a scheme followed by a transport ("mysql+unix"). A "+transport" is accepted
+// only after a scheme dburl knows.
+func knownSourceScheme(scheme string) bool {
+	if knownSourceSchemes()[scheme] {
+		return true
+	}
+	base, _, _ := strings.Cut(scheme, "+")
+	return dburl.Protocols(base) != nil
+}
 
 // SourceDisplay returns the text to show for the source string raw. It is the
 // only way the CLI names a source in a message.
@@ -125,7 +139,7 @@ func SourceDisplay(raw string) string {
 		return UnparsableSource
 	}
 	scheme := strings.ToLower(head[1])
-	if !knownSourceSchemes()[scheme] {
+	if !knownSourceScheme(scheme) {
 		return UnparsableSource
 	}
 	shown, ok := displayAfterScheme(scheme, raw[len(head[0]):])
@@ -149,11 +163,31 @@ func displayAfterScheme(scheme, rest string) (string, bool) {
 			return "", false
 		}
 		return inner + "://" + hostPortPath(rest[len(prefix):], urlPathSegments), true
+	case scheme == unavailableScheme:
+		return unavailableDisplay(rest), true
 	case localSchemes()[scheme]:
 		return localTextDisplay(rest), true
 	default:
 		return hostPortPath(rest, 1), true
 	}
+}
+
+// unavailableScheme is the scheme of the internal stand-in for a source that
+// could not be resolved: "unavailable://" and the ID the source was asked for,
+// escaped as one path segment. Nothing opens it.
+const unavailableScheme = "unavailable"
+
+// unavailableDisplay returns what SourceDisplay shows after "unavailable://":
+// the text itself when it is one escaped path segment whose ID is a plain name
+// (see SourceIDDisplay), and nothing otherwise. The ID is what a user typed
+// where a catalog ID belongs, and may be a whole source string with its password:
+// escaping its "?" and "#" keeps them out of the query and fragment cut, so the
+// text cannot be shown as a path the way a file's is.
+func unavailableDisplay(rest string) string {
+	if id, err := url.PathUnescape(rest); err == nil && plainSourceID.MatchString(id) {
+		return rest
+	}
+	return ""
 }
 
 // explicitPathStart is how a text starts when it is certainly a path: absolute
@@ -176,8 +210,16 @@ var explicitPathStart = regexp.MustCompile(`^(?:/|\./|\.\./|~/|\\\\)`)
 // when it was meant as user X with a password that starts with a slash. A
 // relative directory that holds an "@" and starts with neither is written with
 // a dot: ./dir (see LocalSourceURL).
+//
+// A UNC start ("\\server\share") is explicit only while the text does not read
+// as "user:password@host" (see userinfoShape): "\\alice:s3cret@host" starts with
+// two backslashes and is credentials all the same. The other explicit starts
+// begin with a character that userinfoShape stops at, so none can match it.
 func readsAsPath(text string) bool {
-	return !strings.Contains(text, "@") || explicitPathStart.MatchString(text) || driveLetterPath.MatchString(text)
+	if !strings.Contains(text, "@") || driveLetterPath.MatchString(text) {
+		return true
+	}
+	return explicitPathStart.MatchString(text) && (!strings.HasPrefix(text, `\\`) || !userinfoShape.MatchString(text))
 }
 
 // localTextDisplay returns what to show for rest, the text after "scheme://" of

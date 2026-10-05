@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
@@ -17,12 +18,11 @@ import (
 // drops the user name and the query of a URL, so it is not an identity: a source
 // is found by its ID, and the display form is only compared with what is stored.
 
-// previousIdentity is how the store identified a scope before the sources in it
-// became their display form, the way main computed it (5778d72): the sources
-// passed through dbcopy.RedactSourceURL, then dbcopy.SourceScopeIdentity (which
-// adds the destination hash of an env:NAME source), hashed with the environment,
-// the database and the access fingerprint. It is what an existing chat store
-// holds.
+// previousIdentity is how the store identified a scope before it identified each
+// source by where it points, the way main computed it (5778d72): the sources passed
+// through dbcopy.RedactSourceURL, then (an env:NAME source only) given the
+// destination hash of its variable, hashed with the environment, the database and
+// the access fingerprint. It is what an existing chat store holds.
 //
 // It calls the live RedactSourceURL, which this change altered for two shapes of
 // a path-scheme source: an empty user name before the colon, and a wrapped URL
@@ -38,17 +38,31 @@ type previousIdentity struct {
 
 func previousScopeIdentity(scope ChatScope) previousIdentity {
 	redacted := make(map[string]string, len(scope.Sources))
+	identities := make(map[string]string, len(scope.Sources))
 	for id, source := range scope.Sources {
 		redacted[id] = dbcopy.RedactSourceURL(source)
+		identities[id] = previousSourceIdentity(redacted[id])
 	}
 	encoded, _ := json.Marshal(struct {
 		Environment       string
 		Database          string
 		AccessFingerprint string
 		Sources           map[string]string
-	}{scope.Environment, scope.Database, scope.AccessFingerprint, scopeIdentitySources(redacted)})
+	}{scope.Environment, scope.Database, scope.AccessFingerprint, identities})
 	sum := sha256.Sum256(encoded)
 	return previousIdentity{scope: hex.EncodeToString(sum[:]), selected: redacted[scope.Database]}
+}
+
+// previousSourceIdentity is what dbcopy.SourceScopeIdentity returned for the
+// redacted source when main wrote the store: the source unchanged, except an
+// env:NAME source, which carries a hash of where the variable points. The function
+// has since been extended to every other source, and a store written before is
+// found under what it was.
+func previousSourceIdentity(redacted string) string {
+	if strings.HasPrefix(redacted, "env:") {
+		return dbcopy.SourceScopeIdentity(redacted)
+	}
+	return redacted
 }
 
 // previousScope is the scope hash main wrote for scope.

@@ -1,9 +1,15 @@
 package commands
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -75,6 +81,54 @@ func TestRememberedDatabase_OnlyAPlainCatalogIDIsWrittenToTheConfigDirectory(t *
 	} {
 		if got := rememberedDatabase(in); got != want {
 			t.Errorf("rememberedDatabase(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A value for --database that is neither a source of the project nor a plain
+// name is refused at the entry, naming nothing that was typed: it would
+// otherwise reach the connect screen, the settings the browser reads, the scope
+// the store hashes and the stand-in source of a failed lookup.
+func TestChatDatabaseThatIsASourceStringIsRefusedAtTheEntry(t *testing.T) {
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) { return nil, nil }))
+	dir := writeChatRunProjectFixture(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	savedOptionsPath := lastChatOptionsPath
+	t.Cleanup(func() { lastChatOptionsPath = savedOptionsPath })
+	lastChatOptionsPath = func() (string, error) { return filepath.Join(home, "chat-last.json"), nil }
+
+	for _, typed := range []string{typedSource, "postgres://db.example.com/shop?password=" + sourceSecret, "my db", "a/b", "sqlite:///tmp/x.db#" + sourceSecret} {
+		cmd := chatCommand()
+		var stdout, stderr bytes.Buffer
+		cmd.SetOut(&stdout)
+		cmd.SetErr(&stderr)
+		_, err := runChatProject(cmd, chatOptions{project: dir, env: "local", database: typed, model: defaultChatModel, thinking: "low"})
+		var exit ExitCoder
+		if !errors.As(err, &exit) || exit.ExitCode() != exitCodeUsage {
+			t.Fatalf("--database %q: error = %v, want a usage error", typed, err)
+		}
+		if !strings.Contains(err.Error(), "--database takes the ID of a catalog") {
+			t.Errorf("--database %q: the refusal does not say what --database takes: %v", typed, err)
+		}
+		for _, text := range []string{err.Error(), stdout.String(), stderr.String()} {
+			for _, leaked := range []string{sourceSecret, "alice", "db.example.com", "my db", "a/b"} {
+				if strings.Contains(text, leaked) {
+					t.Errorf("--database %q: the refusal shows %q: %s", typed, leaked, text)
+				}
+			}
+		}
+	}
+	// Nothing was opened or written for a refused value.
+	if entries, err := os.ReadDir(home); err != nil || len(entries) != 0 {
+		t.Errorf("a refused --database wrote %d file(s) under the home directory: %v, %v", len(entries), entries, err)
+	}
+
+	// A catalog of the project, and a plain name the project does not have, are not refused here.
+	for _, database := range []string{"chinook-local", "no-such-catalog"} {
+		cmd := chatCommand()
+		if _, err := runChatProject(cmd, chatOptions{project: dir, env: "local", database: database, model: defaultChatModel, thinking: "low"}); err != nil {
+			t.Errorf("--database %q: %v", database, err)
 		}
 	}
 }

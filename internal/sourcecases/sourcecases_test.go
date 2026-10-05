@@ -197,3 +197,34 @@ func TestWithoutGeneratedIdentifiers(t *testing.T) {
 		t.Errorf("a secret beside a timestamp is still found: %v", got)
 	}
 }
+
+// "\\alice:secret@host" starts with a UNC prefix, which reads as a path, and is
+// credentials all the same. It is a shape of every scheme, bare and wrapped.
+func TestAll_UserinfoAfterAUNCStartIsGeneratedForEverySchemeBareAndWrapped(t *testing.T) {
+	t.Parallel()
+	bare, wrapped := map[string]int{}, map[string]int{}
+	for _, c := range All() {
+		if c.Position != "userinfo after a UNC start" {
+			continue
+		}
+		scheme := strings.ToLower(c.Source[:strings.Index(c.Source, "://")])
+		if c.Wrapped {
+			wrapped[scheme]++
+		} else {
+			bare[scheme]++
+		}
+		if !strings.Contains(c.Source, `\\alice:`+c.Secrets[0]+"@") {
+			t.Errorf("case %q: %q is not userinfo after a UNC start", c.Name, c.Source)
+		}
+	}
+	for _, scheme := range Schemes {
+		if bare[scheme] == 0 {
+			t.Errorf("no bare case of userinfo after a UNC start for %s", scheme)
+		}
+	}
+	for _, scheme := range wrapperSchemes {
+		if wrapped[scheme] == 0 {
+			t.Errorf("no wrapped case of userinfo after a UNC start for %s", scheme)
+		}
+	}
+}

@@ -87,3 +87,61 @@ func TestSessionStoreScopeOfAnUnsetEnvSourceIsItsOwn(t *testing.T) {
 		t.Fatal("a variable that gained a value kept the scope it had while unset")
 	}
 }
+
+// A source is identified by where it points and as whom, not by the display form
+// the store keeps for it: two roles of one PostgreSQL database, and two
+// directories whose names differ after a "#", are two scopes and do not see each
+// other's stored results.
+func TestSessionStoreScopeSeparatesWhatTheDisplayFormWouldMerge(t *testing.T) {
+	ctx := context.Background()
+	scopeOf := func(source string) ChatScope {
+		return ChatScope{ProjectID: "shop-project", Environment: "prod", Database: "shop", AccessFingerprint: "admin-policy-v1", Sources: map[string]string{"shop": source}}
+	}
+	for name, pair := range map[string][2]string{
+		"two roles of one database": {"postgres://reader:one@db.example.com:5432/shop", "postgres://admin:two@db.example.com:5432/shop"},
+		"two directories":           {"ingitdb:///tmp/a#b/data/ingitdb", "ingitdb:///tmp/a#c/data/ingitdb"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := testStorePath(t)
+			first := openTestStore(t, path, scopeOf(pair[0]))
+			session, err := first.Create(ctx, "Orders")
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstScope := first.scope
+			_ = first.Close()
+
+			second := openTestStore(t, path, scopeOf(pair[1]))
+			if second.scope == firstScope {
+				t.Fatal("two sources that are different places share a scope")
+			}
+			if list, err := second.List(ctx); err != nil || len(list) != 0 {
+				t.Fatalf("List under the second source = %+v, %v", list, err)
+			}
+			if _, err := second.Load(ctx, session.ID); err == nil {
+				t.Fatal("a session of the first source opened under the second")
+			}
+			_ = second.Close()
+
+			// The first source's scope is stable, and a rotated password does not change it.
+			again := openTestStore(t, path, scopeOf(strings.Replace(pair[0], ":one@", ":rotated@", 1)))
+			if again.scope != firstScope {
+				t.Fatal("reopening the first source (with a rotated password) changed its scope")
+			}
+			if list, err := again.List(ctx); err != nil || len(list) != 1 {
+				t.Fatalf("List under the first source = %+v, %v", list, err)
+			}
+			_ = again.Close()
+
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, secret := range []string{"one@", ":two", "rotated"} {
+				if strings.Contains(string(raw), secret) {
+					t.Fatalf("the chat store file holds %q", secret)
+				}
+			}
+		})
+	}
+}

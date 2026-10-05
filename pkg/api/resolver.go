@@ -89,9 +89,9 @@ func ResolveSource(ctx context.Context, projStore datatug.ProjectStore, projectD
 			return s, nil
 		}
 	}
-	// source is what a client sent: a client may send a whole source string where
-	// an ID belongs, so only a plain name is echoed.
-	return ResolvedSource{}, fmt.Errorf("%w: unknown source %q in environment %q", ErrSourceUnavailable, dbcopy.SourceIDDisplay(source), environment)
+	// source and environment are what a client sent: a client may send a whole
+	// source string where an ID belongs, so only a plain name is echoed.
+	return ResolvedSource{}, fmt.Errorf("%w: unknown source %q in environment %q", ErrSourceUnavailable, dbcopy.SourceIDDisplay(source), dbcopy.SourceIDDisplay(environment))
 }
 
 // ListSources enumerates every source this project's registry can resolve
@@ -154,7 +154,7 @@ func ListSources(ctx context.Context, projStore datatug.ProjectStore, projectDir
 func catalogSources(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string) ([]ResolvedSource, error) {
 	catalogs, err := projStore.LoadEnvDbCatalogs(ctx, environment)
 	if err != nil {
-		return nil, fmt.Errorf("resolver: list catalogs for environment %q: %w", environment, err)
+		return nil, LookupError("resolver: list catalogs for environment %q", err, environment)
 	}
 	seen := map[string]bool{}
 	var out []ResolvedSource

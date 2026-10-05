@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dal-go/dalgo2postgres"
 	"github.com/datatug/datatug-cli/internal/sourcecases"
 )
 
@@ -22,6 +23,8 @@ import (
 //     every way a ref is printed (%v, %+v, %#v, String, GoString, Display),
 //   - the error Open, OpenFailure and CheckFile return for the accepted ref, even
 //     when the driver quotes the whole DSN it was given,
+//   - the error OpenSchemaScan returns for the accepted ref, even when the driver
+//     quotes the whole DSN it was given,
 //   - the error CheckSourceFile returns for the string and for the ref's Path,
 //   - the error Parse returns for an "env:NAME" source whose variable holds it.
 //
@@ -53,6 +56,7 @@ func TestProperty_NothingThisPackageShowsHoldsASecret(t *testing.T) {
 			add(openErr)
 			add(ref.OpenFailure(quotingDriverError(ref.Path)))
 			add(ref.OpenFailure(fmt.Errorf("dial %q: %w", c.Source, ErrSourceFileMissing)))
+			add(openSchemaScanFailure(t, ref))
 		}
 
 		_, err = parseSource("env:SHOP_PG_URL", fakeEnv(map[string]string{"SHOP_PG_URL": c.Source}))
@@ -100,4 +104,16 @@ func TestSourceDisplay_HarmlessSourcesAreShownUnmodified(t *testing.T) {
 			t.Errorf("SourceDisplay(%q) = %q, want %q", source, shown, want)
 		}
 	}
+}
+
+// openSchemaScanFailure is the error OpenSchemaScan returns for ref when the
+// driver refuses to open it and quotes the whole DSN it was given, as the
+// PostgreSQL driver does.
+func openSchemaScanFailure(t *testing.T, ref BackendRef) error {
+	t.Helper()
+	stubNewPostgresDatabase(t, func(dsn string, _ ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
+		return nil, quotingDriverError(dsn)
+	})
+	_, err := ref.OpenSchemaScan(context.Background())
+	return err
 }

@@ -31,7 +31,7 @@ func identityScope(sources map[string]string) ChatScope {
 }
 
 // The scope hashes the store on main wrote for these scopes, read from a session
-// stored by that code (the first three by 61a21bd, the env ones by 5778d72, which
+// stored by that code (the first three by 61a21bd, the others by 5778d72, which
 // added the destination hash of an env:NAME source). previousScope must keep
 // producing them: they are what an existing chat store holds. env is the
 // environment the store was opened in, and sameAsNow says whether the identity
@@ -49,6 +49,8 @@ var previousScopeGoldens = []struct {
 	{"an env source", map[string]string{"db": "sqlite:///chinook.db", "shop": "env:DT0C_GOLDEN_PG"}, goldenEnv, "5bd5d0ac41133f1a87bab40ee90d7e1184e0fc84edce11384ef8d88b327914a0", true},
 	{"an env source and a lossy source", map[string]string{"db": "sqlite:///chinook.db", "shop": "env:DT0C_GOLDEN_PG", "recordset": "ingitdb:///tmp/a#b/data/ingitdb"}, goldenEnv, "bed2dd6e52d1d6e4c5d95e1f4542633bcbeed242291db1d7bf43ea614177581b", false},
 	{"an env source that is not set", map[string]string{"db": "sqlite:///chinook.db", "gone": "env:DT0C_GOLDEN_UNSET"}, nil, "2eead47c393d046ac810fab2a1e84617d605155f4a439ac7d1d7b657cd59dbd8", true},
+	{"a literal postgres source", map[string]string{"db": "sqlite:///chinook.db", "shop": "postgres://reader:s3cret@db.example.com:5432/shop"}, nil, "d9a54112ca1cf1cf7e8c5b53589324c22c20c247e4f495608374d67056a17f76", false},
+	{"a directory with a query and a project directory", map[string]string{"db": "sqlite:///chinook.db", "a": "ingitdb:///tmp/a?x=1", "b": "http://./proj"}, nil, "ca89f375790149aaec7f3dbf5080d38c3f242721566c4ac1b3152b5c8e8d601b", false},
 }
 
 // goldenEnv is the variable the env goldens were computed with; its password is

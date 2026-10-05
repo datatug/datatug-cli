@@ -91,7 +91,10 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 		if errors.Is(err, dbcopy.ErrSourceFileMissing) {
 			return resolvedSource{}, newSourceUnavailable(err.Error())
 		}
-		return resolvedSource{}, fmt.Errorf("open %s: %w", shown, dbcopy.RedactError(err))
+		// Open's error already says which source failed and why, in a fixed
+		// sentence built from the display form: naming the source again in front of
+		// it would say it twice.
+		return resolvedSource{}, err
 	}
 	reader, ok := dalAsSchemaReader(db)
 	if !ok {

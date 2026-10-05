@@ -424,27 +424,87 @@ func TestParse_ProjectDirectorySchemesRefuseAUserNameOrTokenThatHoldsASlash(t *t
 	assert.ErrorContains(t, err, `"ingitdb://github.com/org/repo"`)
 }
 
-// sqlite and openvaultdb accept a path that holds an "@" in a later segment
-// (dburl drops the userinfo of a sqlite URL, and nothing prints an OpenVaultDB
-// path), so Parse takes these strings; what it shows of them holds no token.
-func TestParse_SqliteAndOpenVaultDBNeverShowATokenThatHoldsASlash(t *testing.T) {
+// The sqlite:// and openvaultdb:// forms refuse a relative path that holds an "@"
+// and does not start like a path, as the project directory schemes do: dburl reads
+// "sqlite://a@b.db" as user a and opens b.db, and every message that names such a
+// path shows what follows the "@" as a host. What a user means by it is written
+// with a dot, and what Parse refuses shows no token.
+func TestParse_SqliteAndOpenVaultDBRefuseARelativePathThatHoldsAnAtSign(t *testing.T) {
 	t.Parallel()
 	for _, input := range []string{
 		"sqlite://ab/cdefghij@github.com/org/repo",
-		"sqlite:ab/cdefghij@github.com/org/repo",
+		"sqlite://data/my@db.sqlite",
+		"sqlite://a@b.db",
+		"sqlite://@acme/proj",
 		"openvaultdb://alice/cdefghij@host/c.json",
+		"openvaultdb://data/my@db.json",
 	} {
+		_, err := Parse(input)
+		require.Error(t, err, input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		assert.ErrorContains(t, err, "write a relative path as ./path", input)
+		for _, secret := range []string{"cdefghij", "alice", "ab/", "my@db", "a@b"} {
+			assert.NotContains(t, err.Error(), secret, input)
+		}
+	}
+	// The dot form is a path, and keeps its "@".
+	for _, input := range []string{"sqlite://./data/my@db.sqlite", "sqlite://./@acme/proj", "openvaultdb://./data/my@db.json", "sqlite:///abs/my@db.sqlite"} {
 		ref, err := Parse(input)
 		require.NoError(t, err, input)
-		for _, shown := range []string{ref.Raw, ref.String(), ref.Display(), fmt.Sprintf("%v %+v %#v", ref, ref, ref), PathDisplay(ref.Path)} {
-			assert.NotContains(t, shown, "cdefghij", input)
-			assert.NotContains(t, shown, "alice", input)
+		assert.Equal(t, input, ref.Raw, "an explicit path is shown as it was typed")
+	}
+	// The form without slashes always names the file whole, so it is accepted; what
+	// is shown of it holds no token.
+	ref, err := Parse("sqlite:ab/cdefghij@github.com/org/repo")
+	require.NoError(t, err)
+	for _, shown := range []string{ref.Raw, ref.String(), ref.Display(), fmt.Sprintf("%v %+v %#v", ref, ref, ref), PathDisplay(ref.Path)} {
+		assert.NotContains(t, shown, "cdefghij")
+	}
+	err = ref.CheckFile()
+	require.ErrorIs(t, err, ErrSourceFileMissing)
+	assert.NotContains(t, err.Error(), "cdefghij")
+}
+
+// LocalSourceURL writes a relative path that holds an "@" in the dot form for
+// sqlite and openvaultdb too, and the URL it gives names the same file: dburl
+// would read "sqlite://@acme/proj.db" as user @acme and open acme/proj.db.
+func TestLocalSourceURL_WritesTheDotFormForSqliteAndOpenVaultDB(t *testing.T) {
+	t.Parallel()
+	for scheme, path := range map[string]string{"sqlite": "@acme/proj.db", "openvaultdb": "team/a@b.json"} {
+		source := LocalSourceURL(scheme, path)
+		assert.Equal(t, scheme+"://./"+path, source)
+		ref, err := Parse(source)
+		require.NoError(t, err, source)
+		assert.Equal(t, "./"+path, ref.Path, "the URL names the file it was built from")
+	}
+	assert.Equal(t, "sqlite:///abs/@acme/proj.db", LocalSourceURL("sqlite", "/abs/@acme/proj.db"))
+	assert.Equal(t, "sqlite://plain/proj.db", LocalSourceURL("sqlite", "plain/proj.db"))
+}
+
+// A UNC start counts as a path, and "\\alice:password@host" starts with one all
+// the same: it is refused as credentials, and the refusal shows no credentials.
+func TestParse_UserinfoAfterAUNCStartIsRefusedWithoutEcho(t *testing.T) {
+	t.Parallel()
+	for _, input := range []string{
+		`http://\\alice:s3cretpass@host/x`,
+		`https://\\alice:s3cretpass@host/x`,
+		`ingitdb://\\tok:x-oauth-basic@github.com/org/repo`,
+		`sqlite://\\alice:s3cretpass@host/x.db`,
+		`openvaultdb://\\alice:s3cretpass@host/c.json`,
+		`HTTP://\\alice:s3cretpass@host/x`,
+	} {
+		_, err := Parse(input)
+		require.Error(t, err, input)
+		assert.ErrorContains(t, err, "credentials are not supported", input)
+		for _, secret := range []string{"s3cretpass", "alice", "tok", "x-oauth-basic", `\\`} {
+			assert.NotContains(t, err.Error(), secret, input)
 		}
-		if ref.Scheme == "sqlite" {
-			err = ref.CheckFile()
-			require.ErrorIs(t, err, ErrSourceFileMissing, input)
-			assert.NotContains(t, err.Error(), "cdefghij", input)
-		}
+	}
+	// A real UNC path keeps its "@".
+	for _, input := range []string{`ingitdb://\\server\share@x\proj`, `http://\\server\share@x\proj`} {
+		ref, err := Parse(input)
+		require.NoError(t, err, input)
+		assert.Equal(t, input, ref.Raw, "a UNC path is shown as it was typed")
 	}
 }
 

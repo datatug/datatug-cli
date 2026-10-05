@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -13,8 +14,10 @@ import (
 // TestProperty_ChatStoreNeverPersistsASourceSecret is the DT-0C acceptance
 // property for the chat store, a file on disk: for every generated source string,
 // given both as a source of the session's scope and as the source of a stored
-// query, no secret of four or more characters is in any file the store wrote or
-// in the source it reads back.
+// query, and again as the stand-in the chat command makes for a catalog it could
+// not resolve ("unavailable://" and the escaped text, which hides its "?" and "#"
+// from the display form's cut), no secret of four or more characters is in any
+// file the store wrote or in the source it reads back.
 func TestProperty_ChatStoreNeverPersistsASourceSecret(t *testing.T) {
 	ctx := context.Background()
 	path := testStorePath(t)
@@ -25,12 +28,15 @@ func TestProperty_ChatStoreNeverPersistsASourceSecret(t *testing.T) {
 	scope.Sources = map[string]string{"shop": "sqlite:///shop.db"}
 	for i, c := range cases {
 		scope.Sources[fmt.Sprintf("source-%d", i)] = c.Source
+		scope.Sources[fmt.Sprintf("stand-in-%d", i)] = standIn(c.Source)
 	}
-	// What the scope hashes holds no secret either.
-	for id, shown := range redactSources(scope.Sources) {
+	// What the scope hashes holds no secret either. A digest (a run of hexadecimal
+	// digits) of where a source points can hold a run of a secret by chance, and is
+	// not made from the text of the source.
+	for id, identity := range scopeIdentitySources(scope.Sources) {
 		for _, c := range cases {
-			if leaked := sourcecases.Leaks(c, shown); len(leaked) > 0 {
-				t.Errorf("%s: source %s is hashed as %q, which holds %q", c.Name, id, shown, leaked)
+			if leaked := sourcecases.Leaks(c, sourcecases.WithoutGeneratedIdentifiers(identity)); len(leaked) > 0 {
+				t.Errorf("%s: source %s is hashed as %q, which holds %q", c.Name, id, identity, leaked)
 			}
 		}
 	}
@@ -46,8 +52,10 @@ func TestProperty_ChatStoreNeverPersistsASourceSecret(t *testing.T) {
 	}
 	result := secureread.Result{Columns: []string{"id"}, Rows: []secureread.Row{{Key: "1", Data: map[string]any{"id": int64(1)}}}}
 	for _, c := range cases {
-		if _, err := store.AppendTurn(ctx, session.ID, user.ID, c.Source, Turn{Queries: []QueryResult{{Title: "Rows", DTQL: "from: {name: t}", SourceID: "shop", Result: result}}}); err != nil {
-			t.Fatalf("%s: %v", c.Name, err)
+		for _, source := range []string{c.Source, standIn(c.Source)} {
+			if _, err := store.AppendTurn(ctx, session.ID, user.ID, source, Turn{Queries: []QueryResult{{Title: "Rows", DTQL: "from: {name: t}", SourceID: "shop", Result: result}}}); err != nil {
+				t.Fatalf("%s: %v", c.Name, err)
+			}
 		}
 	}
 	restored, err := store.Load(ctx, session.ID)
@@ -80,3 +88,7 @@ func TestProperty_ChatStoreNeverPersistsASourceSecret(t *testing.T) {
 		t.Errorf("%d of %d generated sources were persisted by the chat store", failed, len(cases))
 	}
 }
+
+// standIn is the source the chat command gives a catalog it could not resolve,
+// built from whatever was typed as the catalog ID.
+func standIn(typed string) string { return "unavailable://" + url.PathEscape(typed) }

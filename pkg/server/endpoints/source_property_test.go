@@ -3,6 +3,7 @@ package endpoints
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,16 +13,20 @@ import (
 
 	"github.com/datatug/datatug-cli/internal/sourcecases"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/storage"
 )
 
 // TestProperty_ServeNeverEchoesASourceSecret is the DT-0C acceptance property at
-// the serve layer. A source string reaches a response in two ways: a source URL
-// the server opens (resolveSQLSourceURL builds the error), and a source a client
-// sent where an ID belongs (the unknown-source and unauthorized-target messages).
-// For every generated source string no secret of four or more characters is in
-// the error text, in the HTTP body, in stderr or in the log.
+// the serve layer. A source string reaches a response in three ways: a source URL
+// the server opens (resolveSQLSourceURL builds the error), a source a client sent
+// where an ID belongs (the unknown-source and unauthorized-target messages), and
+// an environment or a database a legacy route looks up (exec/select and
+// exec/execute_commands, which TestProperty_LegacyRoutesNeverEchoASourceSecret
+// holds). For every generated source string no secret of four or more characters
+// is in the error text, in the HTTP body, in stderr or in the log.
 //
 // The client-sent source is read through every message that echoes one: the
 // unknown-source message (ad-hoc DTQL), the not-an-authorized-target message (a
@@ -115,5 +120,87 @@ func TestProperty_ServeNeverEchoesASourceSecret(t *testing.T) {
 	}
 	if failed > 0 {
 		t.Errorf("%d of %d generated sources leaked a secret through a serve response", failed, len(cases))
+	}
+}
+
+// legacyRouteStore is the project store behind exec/select and
+// exec/execute_commands: one environment with one DB server, and a catalog
+// loader that fails the way the file store's does, naming what it could not
+// load and the ID it was given.
+type legacyRouteStore struct{ datatug.ProjectStore }
+
+func (legacyRouteStore) LoadEnvironment(_ context.Context, id string, _ ...datatug.StoreOption) (*datatug.Environment, error) {
+	if id != "local" {
+		return nil, fmt.Errorf("failed to load environment[%s] from project: %w", id, os.ErrNotExist)
+	}
+	return &datatug.Environment{DbServers: []*datatug.EnvDbServer{{ServerRef: datatug.ServerRef{Driver: "sqlite3"}}}}, nil
+}
+
+func (legacyRouteStore) LoadEnvDbCatalog(_ context.Context, env, _, id string, _ ...datatug.StoreOption) (datatug.DbCatalog, error) {
+	return datatug.DbCatalog{}, fmt.Errorf("failed to load env db catalog[%s/%s] from project: %w", env, id, os.ErrNotExist)
+}
+
+type legacyRouteStoreFactory struct{ storage.Store }
+
+func (legacyRouteStoreFactory) GetProjectStore(string) datatug.ProjectStore {
+	return legacyRouteStore{}
+}
+
+// The legacy routes (exec/select, exec/execute_commands) take an environment and
+// a database in the request, and a client can send a source string for either.
+// For every generated source string no secret of four or more characters is in
+// the error the route returns (read before any sink), in what handleError writes
+// to the response body, or on stderr. handleError redacts its text, and this
+// property is meant to hold without it.
+func TestProperty_LegacyRoutesNeverEchoASourceSecret(t *testing.T) {
+	ctx := context.Background()
+	origStore := storage.NewDatatugStore
+	t.Cleanup(func() { storage.NewDatatugStore = origStore })
+	storage.NewDatatugStore = func(string) (storage.Store, error) { return legacyRouteStoreFactory{}, nil }
+	session, err := secureread.NewSession(secureread.SessionOptions{NoPolicies: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api.ConfigureSecureSession(session, map[string]string{"demo": t.TempDir()}, api.Capabilities{})
+	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
+	logged := captureAgentLog(t)
+
+	cases := sourcecases.CommandCases()
+	failed := 0
+	for _, c := range cases {
+		var texts []string
+		for _, request := range []struct {
+			name              string
+			environment, base string
+			wantPhrase        string
+		}{
+			{"database", "local", c.Source, "not found in environment"},
+			{"environment", c.Source, "chinook", "load environment"},
+		} {
+			_, errSelect := api.ExecuteSelect(ctx, "files", api.SelectRequest{Project: "demo", Environment: request.environment, Database: request.base, SQL: "SELECT 1"})
+			_, errCommands := api.ExecuteCommands(ctx, "files", api.ExecuteCommandsRequest{Project: "demo", Commands: []api.ExecuteCommandRequest{
+				{Type: "SQL", Text: "SELECT 1", Env: request.environment, DB: request.base},
+			}})
+			for route, err := range map[string]error{"exec/select": errSelect, "exec/execute_commands": errCommands} {
+				if err == nil || !strings.Contains(err.Error(), request.wantPhrase) {
+					t.Fatalf("%s: %s with a bad %s returned %v, want a message with %q: the property does not reach the message it is meant to read", c.Name, route, request.name, err, request.wantPhrase)
+				}
+				texts = append(texts, err.Error()) // before the sink that redacts it
+				w := httptest.NewRecorder()
+				stderr := captureStderr(t, func() { handleError(err, w, httptest.NewRequest(http.MethodGet, "/datatug/"+route, nil)) })
+				texts = append(texts, w.Body.String(), stderr)
+			}
+		}
+		texts = append(texts, logged.String())
+		logged.Reset()
+		if leaked := sourcecases.Leaks(c, texts...); len(leaked) > 0 {
+			failed++
+			if failed <= 20 {
+				t.Errorf("%s\n  leaked %q in:\n    %s", c.Name, leaked, strings.Join(texts, "\n    "))
+			}
+		}
+	}
+	if failed > 0 {
+		t.Errorf("%d of %d generated sources leaked through a legacy route", failed, len(cases))
 	}
 }

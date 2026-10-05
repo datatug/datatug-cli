@@ -307,22 +307,22 @@ func errUnsupportedSource() error {
 }
 
 // refuseUserinfo returns an error when rest, the text after "scheme://" of a
-// scheme that names a file or directory, is credentials and not a path. For a
-// project directory (ingitdb, http, https) that is any text that does not read
-// as a path (see readsAsPath): "user:password@host", "token@host" and a user
-// name or a token that holds a slash. For sqlite and openvaultdb it is the
-// "user:password@host" shape only: dburl drops the userinfo of a sqlite URL and
-// nothing prints an OpenVaultDB path, and what either shows is built by
-// SourceDisplay, which reads the same text as userinfo. Whoever writes
-// credentials means a remote server, which these schemes do not take; refusing it
-// keeps the password out of every later message that quotes the path. The error
-// shows the display form of the source (see SourceDisplay), so it names the host
-// and the path that follow the credentials and never the credentials.
+// scheme that names a file or directory, is credentials and not a path: any text
+// that does not read as a path (see readsAsPath), such as "user:password@host",
+// "token@host", a user name or a token that holds a slash, and a relative path
+// that holds an "@" and does not start like a path ("team/a@b"). It is the same
+// rule for every one of these schemes. Whoever writes credentials means a remote
+// server, which they do not take, and refusing it keeps the password out of every
+// later message that quotes the path. A relative path with an "@" is refused for
+// the same reason it cannot be told from credentials: SourceDisplay, which builds
+// every message, reads what stands before the last "@" as userinfo, and dburl
+// reads "sqlite://a@b.db" as user a and opens b.db. Write it with a dot, ./path
+// (see LocalSourceURL). The error shows the display form of the source (see
+// SourceDisplay), so it names the host and the path that follow the credentials
+// and never the credentials.
 func refuseUserinfo(scheme, display, rest string) error {
 	userinfoShaped := looksLikeUserinfo(rest)
-	projectDirectory := scheme == "ingitdb" || scheme == "http" || scheme == "https"
-	tokenShaped := projectDirectory && !readsAsPath(rest)
-	if !userinfoShaped && !tokenShaped {
+	if !userinfoShaped && readsAsPath(rest) {
 		return nil
 	}
 	var advice string
@@ -424,13 +424,14 @@ func ProjectSourceURL(projectDir string) string {
 }
 
 // LocalSourceURL returns the "scheme://path" source URL that names the local
-// directory path for a scheme that takes one (http, https, ingitdb). A path that
-// holds an "@" and does not start like a path (see readsAsPath): a relative
-// directory such as my@proj or team/a@b, or one shaped like "user:password@host"
-// (a:b/c@d), is written "./path", because Parse refuses "scheme://my@proj" and
-// "scheme://a:b/c@d" as URLs that carry credentials. Every caller that builds
-// such a URL from a directory it was given verbatim goes through here, so a
-// directory such as my@proj keeps working.
+// file or directory path for a scheme that takes one (sqlite, openvaultdb,
+// ingitdb, http, https). A path that holds an "@" and does not start like a path
+// (see readsAsPath): a relative directory such as my@proj or team/a@b, or one
+// shaped like "user:password@host" (a:b/c@d), is written "./path", because Parse
+// refuses "scheme://my@proj" and "scheme://a@b.db" as URLs that carry
+// credentials (and dburl reads the second as user a and opens b.db). Every caller
+// that builds such a URL from a path it was given verbatim goes through here, so
+// a directory such as my@proj keeps working.
 func LocalSourceURL(scheme, path string) string {
 	if !readsAsPath(path) {
 		return scheme + "://./" + path

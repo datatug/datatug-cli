@@ -55,6 +55,12 @@ func TestSourceDisplay(t *testing.T) {
 		// Other schemes the viewer command accepts through dburl.
 		{"mysql through dburl", "mysql://alice:s3cret@db.example.com:3306/shop?password=x", "mysql://db.example.com:3306/shop"},
 		{"mysql alias through dburl", "MariaDB://alice:s3cret@db.example.com/shop", "mariadb://db.example.com/shop"},
+		{"short alias dburl registers itself", "my://alice:s3cret@localhost/shop", "my://localhost/shop"},
+		{"scheme with a transport", "MySQL+Unix://alice:s3cret@/var/run/mysqld.sock/shop", "mysql+unix://"},
+		{"scheme with a transport and a host", "postgres+tcp://alice:s3cret@db.example.com:5432/shop", "postgres+tcp://db.example.com:5432/shop"},
+		{"transport on a scheme nothing knows", "nosuch+unix://alice:s3cret@h/shop", UnparsableSource},
+		{"transport with nothing before it", "+unix://alice:s3cret@h/shop", UnparsableSource},
+		{"transport on a scheme that is not a database", "ingitdb+tcp://alice:s3cret@h/shop", UnparsableSource},
 
 		// A local path: scheme and path as they are, minus query and fragment.
 		{"sqlite absolute path", "sqlite:///tmp/foo.db", "sqlite:///tmp/foo.db"},
@@ -72,7 +78,17 @@ func TestSourceDisplay(t *testing.T) {
 		{"ingitdb empty user name and a slash in the password", "ingitdb://:s3/cret@github.com/org/repo", "ingitdb://github.com/org/repo"},
 		{"ingitdb with nothing after the scheme", "ingitdb://", "ingitdb://"},
 		{"openvaultdb path", "openvaultdb:///tmp/c.json", "openvaultdb:///tmp/c.json"},
-		{"internal unavailable source", "unavailable://Chinook%20db", "unavailable://Chinook%20db"},
+		// The stand-in for a source that could not be resolved shows only the plain ID it stands for.
+		{"internal unavailable source", "unavailable://shop", "unavailable://shop"},
+		{"internal unavailable source of a non-ASCII ID", "unavailable://Caf%C3%A9-local", "unavailable://Caf%C3%A9-local"},
+		{"internal unavailable source of an ID with a space", "unavailable://Chinook%20db", "unavailable://"},
+		{"internal unavailable source of an escaped source URL", "unavailable://postgres:%2F%2Falice:s3cret@db.example.com%2Fshop%3Fpassword=s3cret", "unavailable://"},
+		{"internal unavailable source of an escaped query", "unavailable://postgres:%2F%2Fdb.example.com%2Fshop%3Fpassword=s3cret", "unavailable://"},
+		{"internal unavailable source of an escaped fragment", "unavailable://sqlite:%2F%2F%2Fx.db%23s3cret", "unavailable://"},
+		{"internal unavailable source with a raw query", "unavailable://shop?password=s3cret", "unavailable://"},
+		{"internal unavailable source with a raw fragment", "unavailable://shop#s3cret", "unavailable://"},
+		{"internal unavailable source that is not an escaped segment", "unavailable://shop%zz", "unavailable://"},
+		{"internal unavailable source with nothing after it", "unavailable://", "unavailable://"},
 		{"path that holds an at sign in a later segment", "https:///Users/alex/team@work/project", "https:///Users/alex/team@work/project"},
 		// What stands in front of the last "@" is userinfo unless the text is certainly a path (it starts with "/", "./",
 		// "../", "~/", "\\" or a drive letter): a user name or a token may hold a slash.
@@ -87,6 +103,12 @@ func TestSourceDisplay(t *testing.T) {
 		{"parent-relative directory keeps its at sign", "http://../team@work/project", "http://../team@work/project"},
 		{"home directory keeps its at sign", "ingitdb://~/team@work/project", "ingitdb://~/team@work/project"},
 		{"UNC path keeps its at sign", `sqlite://\\server\share@x\db.sqlite`, `sqlite://\\server\share@x\db.sqlite`},
+		// A UNC start counts as a path only when it does not read as "user:password@host".
+		{"http userinfo after a UNC start", `http://\\alice:s3cret@host/x`, "http://host/x"},
+		{"ingitdb token after a UNC start", `ingitdb://\\tok:x-oauth-basic@github.com/org/repo`, "ingitdb://github.com/org/repo"},
+		{"sqlite userinfo after a UNC start", `sqlite://\\alice:s3cret@host/x.db`, "sqlite://host/x.db"},
+		{"openvaultdb userinfo after a UNC start", `openvaultdb://\\alice:s3cret@host/c.json`, "openvaultdb://host/c.json"},
+		{"UNC path with a colon and no at sign", `sqlite://\\server:445\share\db.sqlite`, `sqlite://\\server:445\share\db.sqlite`},
 		{"relative directory without an at sign", "ingitdb://dir/project", "ingitdb://dir/project"},
 		// The file schemes dburl reads are paths, not hosts.
 		{"sqlite3 relative file", "sqlite3:./x.db", "sqlite3:./x.db"},

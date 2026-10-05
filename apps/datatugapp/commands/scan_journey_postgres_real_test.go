@@ -314,12 +314,6 @@ type storedColumn struct {
 	Default    *string `json:"default"`
 }
 
-// storedColumns reads the columns file of the table of schema public of the model shop.
-func storedColumns(t *testing.T, projectDir, table string) []storedColumn {
-	t.Helper()
-	return storedColumnsOf(t, projectDir, "public/tables/"+table)
-}
-
 // storedColumnsOf reads the columns file of the relation at folder (<schema>/<tables|views>/<name>)
 // of the model shop.
 func storedColumnsOf(t *testing.T, projectDir, folder string) []storedColumn {

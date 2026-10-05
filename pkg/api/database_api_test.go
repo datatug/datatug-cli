@@ -59,7 +59,7 @@ func newServerDatabasesFixture(t *testing.T, recorded ...datatug.ProjDbServer) *
 	}
 	previousSeam := executeSingleSeam
 	t.Cleanup(func() { executeSingleSeam = previousSeam })
-	executeSingleSeam = func(_ sqlexecute.Executor, command sqlexecute.RequestCommand) (sqlexecute.Response, error) {
+	executeSingleSeam = func(_ context.Context, _ sqlexecute.Executor, command sqlexecute.RequestCommand) (sqlexecute.Response, error) {
 		f.executed = append(f.executed, command)
 		return f.executorAnswer(command)
 	}

@@ -184,7 +184,8 @@ func ExecuteCommands(ctx context.Context, storeID string, request ExecuteCommand
 		}
 		result, err := executor.RunNativeSQL(ctx, sourceURL, command.Text)
 		if err != nil {
-			return ExecuteCommandsResponse{}, fmt.Errorf("command %d: %w", i, err)
+			// A source that is not there or cannot be opened is answered by its ID (see SourceUnavailable).
+			return ExecuteCommandsResponse{}, fmt.Errorf("command %d: %w", i, sourceFailureAnswer(command.DB, err))
 		}
 		commandID := command.ID
 		if commandID == "" {

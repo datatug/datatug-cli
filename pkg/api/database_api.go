@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"time"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/sqlexecute"
@@ -22,6 +23,13 @@ const (
 	// the text that lists the databases is the one of SQL Server.
 	dbServerDatabasesDriverSentence = "the databases of a db server are listed for a sqlserver server only"
 )
+
+// dbServerDatabasesTimeout is how long the route waits for a server to list its databases: the
+// connection and the query, together. It is a variable only so a test can shorten it. It stays
+// under the write deadline of the HTTP server, so the answer of a server that accepts the
+// connection and never answers is the route's own failure sentence and not a connection that is
+// closed with no answer.
+var dbServerDatabasesTimeout = 15 * time.Second
 
 // listDatabasesText lists the databases of a SQL Server server that are not its own.
 const listDatabasesText = "select name from sys.databases where owner_sid > 0x01"
@@ -61,7 +69,9 @@ func GetServerDatabases(ctx context.Context, request dto.GetServerDatabasesReque
 	}
 
 	command := sqlexecute.RequestCommand{ServerRef: server, Text: listDatabasesText}
-	response, err := executeSingleSeam(sqlexecute.NewExecutor(nil, nil), command)
+	ctx, cancel := context.WithTimeout(ctx, dbServerDatabasesTimeout)
+	defer cancel()
+	response, err := executeWithin(ctx, sqlexecute.NewExecutor(nil, nil), command)
 	if err != nil {
 		return nil, itemWriteFailed("list", "the databases of db server", serverShown(server), err)
 	}
@@ -75,6 +85,31 @@ func GetServerDatabases(ctx context.Context, request dto.GetServerDatabasesReque
 		databases[i].ID = name
 	}
 	return databases, nil
+}
+
+// executeWithin runs the command with ctx, which is the request's context with the deadline of
+// the route: the executor is given it, so the query ends with it (QueryContext), and the call
+// returns the context's error as soon as it ends even when the driver does not end its own
+// attempt to connect, which a driver is not made to do on every platform.
+func executeWithin(ctx context.Context, executor sqlexecute.Executor, command sqlexecute.RequestCommand) (sqlexecute.Response, error) {
+	if err := ctx.Err(); err != nil {
+		return sqlexecute.Response{}, err
+	}
+	type executed struct {
+		response sqlexecute.Response
+		err      error
+	}
+	done := make(chan executed, 1)
+	go func() {
+		response, err := executeSingleSeam(ctx, executor, command)
+		done <- executed{response, err}
+	}()
+	select {
+	case result := <-done:
+		return result.response, result.err
+	case <-ctx.Done():
+		return sqlexecute.Response{}, ctx.Err()
+	}
 }
 
 // recordedDbServer looks the server that a client named up in the db servers of the project,

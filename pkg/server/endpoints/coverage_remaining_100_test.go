@@ -282,9 +282,8 @@ func TestRemaining100_BoardAndEntityAndFolderEndpoints(t *testing.T) {
 
 		w = httptest.NewRecorder()
 		r = httptest.NewRequest(http.MethodGet, "/recordset/data?id=r1", nil)
-		assert.Panics(t, func() {
-			getRecordsetData(w, r)
-		})
+		getRecordsetData(w, r)
+		assert.Equal(t, http.StatusNotImplemented, w.Code)
 	})
 
 	// getEntities without invalid project query
@@ -589,7 +588,7 @@ func TestRemaining100_SemanticSchema_Errors(t *testing.T) {
 	apiResolveSource = origResolve
 
 	// resolveSQLSourceURL with open error
-	_, err = resolveSQLSourceURL(ctx, "sqlite://nonexistent/path/cannot/open/db.sqlite", "coll")
+	_, err = resolveSQLSourceURL(ctx, "src", "sqlite://nonexistent/path/cannot/open/db.sqlite", "coll")
 	assert.Error(t, err)
 
 	// foreignKey with refTable.Name() != "" via recordsetUnmarshalJSON seam

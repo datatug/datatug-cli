@@ -14,11 +14,8 @@ var returnJSON = func(w http.ResponseWriter, r *http.Request, statusCode int, er
 	if handleError(err, w, r) {
 		return
 	}
+	writeCORSOrigin(w, r)
 	responseHeader := w.Header()
-	origin := r.Header.Get("Origin")
-	if origin != "" {
-		responseHeader.Set("Access-Control-Allow-Origin", origin)
-	}
 	switch r.Method {
 	case http.MethodOptions:
 		panic("An attempt to return JSON content on OPTIONS request")

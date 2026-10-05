@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,6 +79,7 @@ func TestCov100eReadServeFlags_EachFlagMissing(t *testing.T) {
 		{serveGroupFlag, func(c *cobra.Command) { c.Flags().StringArray(serveGroupFlag, nil, "") }},
 		{serveAllowWritesFlag, func(c *cobra.Command) { c.Flags().Bool(serveAllowWritesFlag, false, "") }},
 		{serveAllowOpaqueSQLFlag, func(c *cobra.Command) { c.Flags().Bool(serveAllowOpaqueSQLFlag, false, "") }},
+		{serveAllowLiveConnsFlag, func(c *cobra.Command) { c.Flags().Bool(serveAllowLiveConnsFlag, false, "") }},
 		{serveHTTPOfflineFlag, func(c *cobra.Command) { c.Flags().Bool(serveHTTPOfflineFlag, false, "") }},
 		{serveExecTimeoutFlag, func(c *cobra.Command) { c.Flags().Duration(serveExecTimeoutFlag, 0, "") }},
 		{serveEvidenceDirFlag, func(c *cobra.Command) { c.Flags().String(serveEvidenceDirFlag, "", "") }},
@@ -166,7 +168,7 @@ func TestCov100eServe_AllOptions(t *testing.T) {
 	cmd := serveCommandArgs()
 	for k, v := range map[string]string{
 		serveOpenBrowserFlag: "true", serveAllowWritesFlag: "true", serveAllowOpaqueSQLFlag: "true",
-		serveHTTPOfflineFlag: "true", serveExecTimeoutFlag: "5s", serveAsFlag: "alice",
+		serveHTTPOfflineFlag: "true", serveExecTimeoutFlag: "5s", serveAsFlag: "alice", serveAllowLiveConnsFlag: "true",
 	} {
 		if err := cmd.Flags().Set(k, v); err != nil {
 			t.Fatal(err)
@@ -179,7 +181,7 @@ func TestCov100eServe_AllOptions(t *testing.T) {
 	if call.host != "0.0.0.0" || call.port != 9000 || call.paths["cfg"] != "/x" {
 		t.Fatalf("call = %+v", call)
 	}
-	if !call.caps.AllowWrites || !call.caps.AllowOpaqueSQL || !call.caps.HTTPOffline ||
+	if !call.caps.AllowWrites || !call.caps.AllowOpaqueSQL || !call.caps.AllowLiveConnections || !call.caps.HTTPOffline ||
 		call.caps.ExecTimeout != 5*time.Second || call.caps.EvidencePrivateDir != "/ev" {
 		t.Fatalf("caps = %+v", call.caps)
 	}
@@ -265,5 +267,28 @@ func TestCov100eFirstNonZeroHelpers(t *testing.T) {
 	}
 	if firstNonZeroDuration(0, time.Second) != time.Second || firstNonZeroDuration(0) != 0 || firstNonZeroDuration(time.Minute, time.Second) != time.Minute {
 		t.Fatal("firstNonZeroDuration")
+	}
+}
+
+// The live connection of the databases route is a capability that is off unless the flag is
+// given, and the flag says in its help what it allows.
+func TestServe_AllowLiveConnectionsIsOffByDefault(t *testing.T) {
+	cov100eHome(t, "")
+	call, _ := cov100eSeams(t, nil)
+	if err := serveCommandAction(serveCommandArgs(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if call.caps.AllowLiveConnections {
+		t.Fatal("live connections are allowed with no flag")
+	}
+
+	flag := serveCommandArgs().Flags().Lookup(serveAllowLiveConnsFlag)
+	if flag == nil || flag.DefValue != "false" {
+		t.Fatalf("flag = %+v, want one that defaults to false", flag)
+	}
+	for _, word := range []string{"connect", "db server", "dbserver-databases", "403"} {
+		if !strings.Contains(flag.Usage, word) {
+			t.Errorf("the help of --%s does not say %q: %s", serveAllowLiveConnsFlag, word, flag.Usage)
+		}
 	}
 }

@@ -113,6 +113,11 @@ func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storag
 // (api.Capabilities's own doc comment) — see cmd_serve.go's --allow-writes/
 // --allow-opaque-sql flags.
 func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int, session secureread.Session, caps api.Capabilities) error {
+	// A server serves the projects of a map, and a nil one is a server that serves none (a
+	// session counts as configured by having a map: see api.ConfigureSecureSession).
+	if pathsByID == nil {
+		pathsByID = map[string]string{}
+	}
 	storage.NewDatatugStore = newDatatugStoreFactory(pathsByID)
 	if err := api.ConfigureExecutionEvidence(pathsByID, caps.IncidentStores, executionstore.Options{
 		PrivateDir: caps.EvidencePrivateDir,

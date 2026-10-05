@@ -20,7 +20,7 @@ func TestDbServerHandlers_LogTheMethodAndThePathNeverTheQueryString(t *testing.T
 	t.Cleanup(func() {
 		getServerDatabasesFunc, getDbServerSummaryFunc, deleteDbServerFunc = origDatabases, origSummary, origDelete
 	})
-	getServerDatabasesFunc = func(dto.GetServerDatabasesRequest) ([]*datatug.DbCatalog, error) { return nil, nil }
+	getServerDatabasesFunc = func(context.Context, dto.GetServerDatabasesRequest) ([]*datatug.DbCatalog, error) { return nil, nil }
 	getDbServerSummaryFunc = func(context.Context, dto.ProjectRef, datatug.ServerRef) (*datatug.ProjDbServer, error) {
 		return &datatug.ProjDbServer{}, nil
 	}

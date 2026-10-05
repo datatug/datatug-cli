@@ -19,13 +19,34 @@ import (
 	"github.com/strongo/validation"
 )
 
-// The IDs of a board, an entity, a recordset definition, a db server and a folder, the
-// host of a db server and the project that holds them are joined into file paths by the
-// project store. Each entry of this package that takes one refuses what is not a plain
-// name (or, for an ID with folders, not plain names between slashes; for a host, not a
-// host) before the store is asked, with an answer that names the field and nothing of
-// the value. These tests send every unsafe text to every entry, and count the project
-// stores that were asked for.
+// What the tests of this file cover, exactly.
+//
+// The values: the ID of a board, of an entity, of a recordset definition, of a db server that
+// is saved and of a folder; the driver and the host of a db server; the name of the recordset
+// that rows are added to, removed from or updated in; the project that holds them. The project
+// store joins each into a file path, so each entry listed below refuses what is not a plain
+// name (or, for an ID with folders, not plain names between slashes; for a host, not a host)
+// before the store is asked, with an answer that names the field and nothing of the value. The
+// tests send every unsafe text to every entry (idEntries), and count the project stores that
+// were asked for.
+//
+// The entries: GetBoard, DeleteBoard, SaveBoard, CreateBoard, GetEntity, DeleteEntity,
+// SaveEntity, GetDatasetDefinition, CreateFolder (path and name), DeleteFolder, AddDbServer,
+// UpdateDbServer, DeleteDbServer and GetDbServerSummary (the driver and the host; and for
+// AddDbServer and UpdateDbServer the id), and AddRowsToRecordset, RemoveRowsFromRecordset and
+// UpdateRowsInRecordset (the recordset). The project is tried in every one of these entries but
+// RemoveRowsFromRecordset and UpdateRowsInRecordset, and in GetAllEntities,
+// GetRecordsetsSummary, GetProjectSummary, GetProjectFull and GetEnvironmentSummary.
+//
+// Also tried here: the Validate of SelectRequest and ExecuteCommandsRequest (their project),
+// projectStoreForID and ProjectStoreFor (an unsafe project), and the database model that the
+// file of a catalog names (GetCatalogTables and GetCatalogSchema).
+//
+// Not covered by these tests: GetServerDatabases (database_api_test.go tries every unsafe text
+// in each of its positions, with a count of the calls that reach the executor); ExecuteSelect,
+// ExecuteCommands, CreateQuery and UpdateQuery as entries (served_project_test.go tries their
+// project); the entries of queries_api.go; and the catalog and environment IDs of
+// GetCatalogTables (catalog_tables_ids_test.go).
 
 func TestValidatePathIdentifier(t *testing.T) {
 	// The longest ID accepted is MaxPathIdentifierLength bytes of plain names.
@@ -681,6 +702,7 @@ func TestCatalogDbModel_RefusesAModelThatIsNotAPlainName(t *testing.T) {
 // and the legacy routes that take the project in a body) refuse a project that is neither
 // served nor a plain name, before the factory is asked for a project store.
 func TestProjectStoreChokePoints_RefuseAnUnsafeProject(t *testing.T) {
+	serveProjects(t, "p1") // the plain project of the counts below is one this process serves
 	asked := askedStores(t)
 	for _, c := range sourcecases.UnsafeIdentifiers() {
 		_, err := projectStoreForID("files", c.ID)

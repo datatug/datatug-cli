@@ -20,12 +20,46 @@ import (
 	"github.com/datatug/datatug-core/pkg/storage"
 )
 
-// The ID of a board, an entity, a recordset definition, a db server and a folder, the
-// host and the driver of a db server and the project of any of them are joined into file
-// paths by the project store. Every route that takes one refuses what is not a plain name
-// (an ID with folders: not plain names between slashes; a host: not a host) with a 400
-// that names the field and echoes nothing, before the project store is asked for, over the
-// real request lifecycle, a real project folder and a counter of the project stores asked.
+// What the tests of this file cover, exactly.
+//
+// The values: the ID of a board, of an entity, of a recordset definition and of a folder; the
+// driver, the host and the port of a db server, and the ID of a db server that is saved; the
+// project. The project store joins each into a file path (the driver and the host of a db
+// server into the name of its file, and for dbserver-databases into the connection that is
+// made), so every route listed below refuses what is not a plain name (an ID with folders: not
+// plain names between slashes; a host: not a host; a port: not a number) with a 400 that names
+// the field and echoes nothing, before the project store is asked for, over the real request
+// lifecycle, a real project folder and a counter of the project stores asked.
+//
+// The routes with an ID of an item (itemRoutes): boards/board, boards/delete_board,
+// boards/save_board, entities/entity, entities/delete_entity, entities/save_entity,
+// recordsets/recordset_definition, folders/delete_folder and folders/create_folder (its path
+// and its name).
+//
+// The routes with a db server: dbserver-summary, dbserver-delete and dbserver-databases (the
+// driver, the host, the values that pass the rules of a name and of a host and that the
+// validation of the server reference refuses with a message that quotes them, and, for
+// dbserver-delete and dbserver-databases, the port), and dbserver-add (the driver, the host,
+// the same values and the id).
+//
+// The routes with a project: every route above, and boards/create_board, entities/all_entities,
+// recordsets/recordsets_summary, environment-summary, projects/project_summary,
+// projects/project_full, exec/select, exec/execute_commands, queries/create_query and
+// queries/update_query.
+//
+// No other route is exercised by this file. Among the routes that take a project or an ID and
+// are not listed: queries/all_queries, queries/get_query, queries/delete_query,
+// queries/capture, catalog-tables, exec/run_query, the semantic routes, the compare route and
+// the execution and incident routes.
+//
+// The other tests of the file: a request with plain values reaches the store (so the counts
+// mean something), an item the store cannot load is one answer that quotes no path (board,
+// entity, recordset and db server), a project that is not served is refused before a store is
+// asked (exec/select, exec/execute_commands, folders/create_folder, queries/create_query and
+// queries/update_query), and reads nothing from the working directory, and an entity is
+// saved under the ID of its body. The refusals of dbserver-databases that need no store (an
+// unrecorded server, a project that is not served) and the deletes of a missing item are in
+// dbserver_databases_test.go and delete_routes_test.go.
 
 type askCountingStore struct {
 	storage.Store
@@ -144,6 +178,7 @@ func itemRoutes(t *testing.T, project string) []itemRoute {
 	}{
 		{"dbserver-summary", "/datatug/dbserver-summary", http.MethodGet, getDbServerSummary},
 		{"dbserver-delete", "/datatug/dbserver-delete", http.MethodDelete, deleteDbServer},
+		{"dbserver-databases", "/datatug/dbserver-databases", http.MethodGet, getServerDatabases},
 	} {
 		r := r
 		add(itemRoute{name: r.name + " (driver)", position: "driver", unsafe: identifiers, send: func(v string) *httptest.ResponseRecorder {
@@ -154,12 +189,20 @@ func itemRoutes(t *testing.T, project string) []itemRoute {
 		}})
 	}
 	// The port of a db server reference is a number: any other text is refused, and the
-	// answer shows nothing of it.
+	// answer shows nothing of it. Every unsafe text of the shared set is one (an empty text is
+	// no port at all, and is not tried), with the texts that are specific to a port.
 	ports := []sourcecases.UnsafeIdentifier{
 		{Name: "a path as the port", ID: "../../x"},
 		{Name: "a user and a password as the port", ID: "alice:s3cretpw"},
 		{Name: "a word as the port", ID: "abc"},
 		{Name: "a decimal number as the port", ID: "14.33"},
+		{Name: "a semicolon as the port", ID: "1433;key=value"},
+		{Name: "a brace as the port", ID: "{1433}"},
+	}
+	for _, c := range identifiers {
+		if c.ID != "" {
+			ports = append(ports, c)
+		}
 	}
 	for _, r := range []struct {
 		name, path, method string
@@ -205,6 +248,7 @@ func itemRoutes(t *testing.T, project string) []itemRoute {
 		}{
 			{"dbserver-summary", "/datatug/dbserver-summary", http.MethodGet, getDbServerSummary},
 			{"dbserver-delete", "/datatug/dbserver-delete", http.MethodDelete, deleteDbServer},
+			{"dbserver-databases", "/datatug/dbserver-databases", http.MethodGet, getServerDatabases},
 		} {
 			r := r
 			add(itemRoute{name: r.name + " (" + c.name + ")", position: c.position, unsafe: unsafe, send: func(string) *httptest.ResponseRecorder {
@@ -237,6 +281,7 @@ func itemRoutes(t *testing.T, project string) []itemRoute {
 		{"folders/delete_folder", "/datatug/folders/delete_folder", http.MethodDelete, deleteFolder, url.Values{"id": {"f1"}}},
 		{"dbserver-summary", "/datatug/dbserver-summary", http.MethodGet, getDbServerSummary, url.Values{"driver": {"sqlserver"}, "host": {"localhost"}}},
 		{"dbserver-delete", "/datatug/dbserver-delete", http.MethodDelete, deleteDbServer, url.Values{"driver": {"sqlserver"}, "host": {"localhost"}}},
+		{"dbserver-databases", "/datatug/dbserver-databases", http.MethodGet, getServerDatabases, url.Values{"driver": {"sqlserver"}, "host": {"localhost"}}},
 		{"environment-summary", "/datatug/environment-summary", http.MethodGet, getEnvironmentSummary, url.Values{"id": {"local"}}},
 		{"projects/project_summary", "/datatug/projects/project_summary", http.MethodGet, getProjectSummary, nil},
 		{"projects/project_full", "/datatug/projects/project_full", http.MethodGet, getProjectFull, nil},

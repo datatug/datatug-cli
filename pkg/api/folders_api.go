@@ -65,8 +65,7 @@ func DeleteFolder(ctx context.Context, ref dto.ProjectItemRef) error {
 	if err != nil {
 		return err
 	}
-	if err = store.DeleteFolder(ctx, ref.ID); err != nil {
-		return itemWriteFailed("delete", "folder", dbcopy.QueryIDDisplay(ref.ID), err)
-	}
-	return nil
+	return deleteItem("folder", dbcopy.QueryIDDisplay(ref.ID),
+		func() error { _, err := store.LoadFolder(ctx, ref.ID); return err },
+		func() error { return store.DeleteFolder(ctx, ref.ID) })
 }

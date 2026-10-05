@@ -15,7 +15,9 @@ import (
 
 // getServerDatabases returns databases hosted at server. The web client
 // (db-server.service.ts's getServerDatabases) sends "proj"; paramAlias also
-// accepts the contract's "project"/"environment" names.
+// accepts the contract's "project"/"environment" names. The server is one that the served
+// project records: the project and the server are checked, and the server is looked up in
+// the project, before anything is connected to (see api.GetServerDatabases).
 func getServerDatabases(w http.ResponseWriter, r *http.Request) {
 	// The path only: the query string can hold a source string a client typed.
 	log.Println(r.Method, r.URL.Path)
@@ -29,10 +31,18 @@ func getServerDatabases(w http.ResponseWriter, r *http.Request) {
 		handleError(err, w, r)
 		return
 	}
-	databases, err := getServerDatabasesFunc(request)
+	ctx, err := getContextFromRequest(r)
+	if err != nil {
+		handleError(err, w, r)
+		return
+	}
+	databases, err := getServerDatabasesFunc(ctx, request)
 	returnJSON(w, r, http.StatusOK, err, databases)
 }
 
+// getServerDatabasesFunc lists the databases of a db server that the served project records
+// (see api.GetServerDatabases), a seam so that a test counts the requests that got as far as
+// the project.
 var getServerDatabasesFunc = api.GetServerDatabases
 
 func newDbServerFromQueryParams(query url.Values) (dbServer datatug.ServerRef, err error) {

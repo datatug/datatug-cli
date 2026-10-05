@@ -1,7 +1,6 @@
 package api
 
 import (
-	"regexp"
 	"slices"
 	"strings"
 
@@ -76,16 +75,11 @@ func ValidatePathIdentifier(field, id string) error {
 // HostRule is the sentence that says what the host of a db server is.
 const HostRule = "must be a host name or an address: letters, digits, '.', '_', ':' and '-', at most 253 characters, starting with a letter, a digit or ':'"
 
-// serverHost is the host of a db server that a project can record under the file name
-// of the server: the characters of a host name or an address (an IPv6 one included),
-// none of which is a separator, a percent sign or a space. It is the character set of
-// the host a PostgreSQL scan records.
-var serverHost = regexp.MustCompile(`^[A-Za-z0-9:][A-Za-z0-9._:-]{0,252}$`)
-
-// validateHost refuses a host that is not one a project can record: the host is part
-// of the ID of a db server, which is part of a file name.
+// validateHost refuses a host that is not one a project can record (see
+// dbcopy.IsRecordableHost, the one rule for it): the host is part of the ID of a db server,
+// which is part of a file name, and of the connection string that reaches the server.
 func validateHost(field, host string) error {
-	if !serverHost.MatchString(host) {
+	if !dbcopy.IsRecordableHost(host) {
 		return validation.NewErrBadRequestFieldValue(field, HostRule)
 	}
 	return nil

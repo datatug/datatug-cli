@@ -57,10 +57,9 @@ func DeleteBoard(ctx context.Context, ref dto.ProjectItemRef) error {
 	if err != nil {
 		return err
 	}
-	if err = store.DeleteBoard(ctx, ref.ID); err != nil {
-		return itemWriteFailed("delete", "board", dbcopy.SourceIDDisplay(ref.ID), err)
-	}
-	return nil
+	return deleteItem("board", dbcopy.SourceIDDisplay(ref.ID),
+		func() error { _, err := store.LoadBoard(ctx, ref.ID); return err },
+		func() error { return store.DeleteBoard(ctx, ref.ID) })
 }
 
 // SaveBoard saves board

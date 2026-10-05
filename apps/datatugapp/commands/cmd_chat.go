@@ -361,7 +361,7 @@ func loadChatJoinApplication(ctx context.Context, sourceURL string, executor *se
 	if err := dbcopy.CheckSourceFile(joinSource.Path); err != nil {
 		return nil, nil, err
 	}
-	readOnlyURL := (&url.URL{Scheme: "file", Path: joinSource.Path, RawQuery: "mode=ro"}).String()
+	readOnlyURL := dbcopy.SQLiteFileURIMode(joinSource.Path, dbcopy.SQLiteReadOnly)
 	metadataDB, err := openJoinMetadataDB("sqlite", readOnlyURL)
 	if err != nil {
 		return nil, nil, err

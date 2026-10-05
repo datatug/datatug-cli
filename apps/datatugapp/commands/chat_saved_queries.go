@@ -202,7 +202,7 @@ func (s chatSavedQueries) LookupParameter(ctx context.Context, queryID, paramete
 	if err := dbcopy.CheckSourceFile(ref.Path); err != nil {
 		return nil, err
 	}
-	readOnlyURL := (&url.URL{Scheme: "file", Path: ref.Path, RawQuery: "mode=ro"}).String()
+	readOnlyURL := dbcopy.SQLiteFileURIMode(ref.Path, dbcopy.SQLiteReadOnly)
 	db, err := chatOpenSQLite("sqlite", readOnlyURL)
 	if err != nil {
 		return nil, err

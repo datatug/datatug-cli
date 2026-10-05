@@ -59,10 +59,10 @@ func DeleteDbServer(ctx context.Context, ref dto.ProjectRef, dbServer datatug.Se
 	if err != nil {
 		return err
 	}
-	if err = store.DbServersStore(dbServer.Driver).DeleteProjDbServer(ctx, dbServer.GetID()); err != nil {
-		return itemWriteFailed("delete", "db server", serverShown(dbServer), err)
-	}
-	return nil
+	servers := store.DbServersStore(dbServer.Driver)
+	return deleteItem("db server", serverShown(dbServer),
+		func() error { _, err := servers.LoadProjDbServer(ctx, dbServer.GetID()); return err },
+		func() error { return servers.DeleteProjDbServer(ctx, dbServer.GetID()) })
 }
 
 // GetDbServerSummary returns summary on DB server

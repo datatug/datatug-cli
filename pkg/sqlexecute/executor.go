@@ -102,6 +102,29 @@ func (e Executor) executeMulti(request Request) (response Response, err error) {
 
 var reParameter = regexp.MustCompile(`@\w+`)
 
+// maxPort is the highest port number.
+const maxPort = 65535
+
+// serverConnectionParams builds the connection of a server that is not a file from the parts
+// of the server, which are checked first: the host is a host name or an address (see
+// dbcopy.IsRecordableHost: no character that separates the keys of the connection string)
+// and the port a port number, written as the port of the string. The errors say which part
+// is refused and nothing of its value. The user, the password and the database of the
+// command are the caller's own, and are written as they are given.
+func serverConnectionParams(server datatug.ServerRef, command RequestCommand) (dbconnection.Params, error) {
+	if server.Host != "" && !dbcopy.IsRecordableHost(server.Host) {
+		return nil, errors.New("the host is not a host name or an address")
+	}
+	if server.Port < 0 || server.Port > maxPort {
+		return nil, errors.New("the port is not a port number")
+	}
+	var options []string
+	if server.Port != 0 {
+		options = append(options, "port="+strconv.Itoa(server.Port))
+	}
+	return dbconnection.NewConnectionString(server.Driver, server.Host, command.Username, command.Password, command.DB, options...)
+}
+
 var (
 	closeRowsSeam   = func(rows *sql.Rows) error { return rows.Close() }
 	columnTypesSeam = func(rows *sql.Rows) ([]*sql.ColumnType, error) { return rows.ColumnTypes() }
@@ -125,11 +148,9 @@ func (e Executor) executeCommand(command RequestCommand) (recordset datatug.Reco
 			return recordset, fmt.Errorf("execute command does not have valid server parameters: %w", err)
 		}
 	}
-	var options []string
-	if dbServer.Port != 0 {
-		options = append(options, fmt.Sprintf("mode=%v", dbServer.Port))
-	}
-	var connParams dbconnection.Params
+	// connectionString is what the driver is opened with, and shown is the same without a
+	// secret in it.
+	var connectionString, shown string
 
 	switch dbServer.Driver {
 	case "sqlite3":
@@ -142,29 +163,26 @@ func (e Executor) executeCommand(command RequestCommand) (recordset datatug.Reco
 			err = fmt.Errorf("failed to expand path for SQLite3 connection string: %w", err)
 			return datatug.Recordset{}, err
 		}
-		connParams = dbconnection.NewSQLite3ConnectionParams(fullPath, command.DB, dbconnection.ModeReadOnly)
+		// A "file:" URI, read-only: a path with a "?", a "#" or a "%" in it is the file it
+		// names (see dbcopy.SQLiteFileURIMode), and a file that is not there is not made.
+		connectionString = dbcopy.SQLiteFileURIMode(fullPath, dbconnection.ModeReadOnly)
+		shown = connectionString
 	default:
-		connParams, err = dbconnection.NewConnectionString(
-			dbServer.Driver,
-			dbServer.Host,
-			command.Username,
-			command.Password,
-			command.DB,
-			options...,
-		)
-	}
-
-	if err != nil {
-		err = fmt.Errorf("invalid connection parameters: %w", err)
-		return
+		var connParams dbconnection.Params
+		if connParams, err = serverConnectionParams(dbServer, command); err != nil {
+			err = fmt.Errorf("invalid connection parameters: %w", err)
+			return
+		}
+		connectionString = connParams.ConnectionString()
+		shown = connParams.String()
 	}
 
 	// The connection string holds the password: print it redacted.
-	fmt.Println(dbcopy.RedactTextWithSecrets(connParams.String(), command.Password))
+	fmt.Println(dbcopy.RedactTextWithSecrets(shown, command.Password))
 	//fmt.Println(envDb.ServerRef.driver, connParams.String())
 	//fmt.Println(command.Text)
 	var db *sql.DB
-	if db, err = sql.Open(dbServer.Driver, connParams.ConnectionString()); err != nil {
+	if db, err = sql.Open(dbServer.Driver, connectionString); err != nil {
 		return
 	}
 	defer func() {

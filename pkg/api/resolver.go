@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -154,7 +156,11 @@ func ListSources(ctx context.Context, projStore datatug.ProjectStore, projectDir
 func catalogSources(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment string) ([]ResolvedSource, error) {
 	catalogs, err := projStore.LoadEnvDbCatalogs(ctx, environment)
 	if err != nil {
-		return nil, LookupError("resolver: list catalogs for environment %q", err, environment)
+		// The store's error quotes the path it built from the project folder, which is no part
+		// of an answer: it goes to the log, and the answer names the environment (when it is a
+		// plain name).
+		log.Printf("resolver: list catalogs for environment %q: %s", dbcopy.SourceIDDisplay(environment), dbcopy.RedactText(err.Error()))
+		return nil, LookupError("could not list catalogs for environment %q", nil, environment)
 	}
 	seen := map[string]bool{}
 	var out []ResolvedSource
@@ -210,10 +216,31 @@ func dedupeNonEmpty(values ...string) []string {
 	return out
 }
 
+// recordsetsNotListed is the answer for a project whose recordset definitions cannot be
+// listed, read or parsed: the cause quotes a path of the project folder, and goes to the log.
+const recordsetsNotListed = "the recordset definitions of the project could not be listed"
+
+// httpQueriesNotListed is the answer for a project whose HTTP query definitions cannot be
+// listed, read or parsed, with the same rule.
+const httpQueriesNotListed = "the HTTP query definitions of the project could not be listed"
+
+// recordsetsFailed logs the cause of a failed listing of the recordset definitions and
+// returns the answer for it.
+func recordsetsFailed(cause error) error {
+	log.Printf("resolver: %s: %s", recordsetsNotListed, dbcopy.RedactText(cause.Error()))
+	return errors.New(recordsetsNotListed)
+}
+
 // recordsetSources enumerates <projectDir>/recordsets/*.recordset.json
 // definitions as project-level inGitDB sources (top-level only — the same
 // non-recursive convention recordsetDefinitionPath already assumes),
 // sharing the project's one inGitDB store (semanticIngitdbPath).
+//
+// A source ID is joined into a path by the routes that read the definition, and the file is a
+// project file that may hold anything, so a definition is a source only when its source ID is a
+// plain source ID (see dbcopy.IsPlainSourceID): the ID it declares, or its file name when it
+// declares none. A file whose source ID is another is skipped, with one line in the log that
+// names the file and not the ID (which may be a source string).
 func recordsetSources(projectDir string) ([]ResolvedSource, error) {
 	dir := filepath.Join(projectDir, storage.RecordsetsFolder)
 	entries, err := os.ReadDir(dir)
@@ -221,7 +248,7 @@ func recordsetSources(projectDir string) ([]ResolvedSource, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("resolver: list %s: %w", dir, err)
+		return nil, recordsetsFailed(err)
 	}
 	suffix := "." + storage.RecordsetFileSuffix + ".json"
 	url := semanticIngitdbPath(projectDir)
@@ -231,16 +258,20 @@ func recordsetSources(projectDir string) ([]ResolvedSource, error) {
 			continue
 		}
 		id := strings.TrimSuffix(entry.Name(), suffix)
-		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		data, err := readRecordsetFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
-			return nil, fmt.Errorf("resolver: read %s: %w", entry.Name(), err)
+			return nil, recordsetsFailed(err)
 		}
 		var def datatug.RecordsetDefinition
 		if err := json.Unmarshal(data, &def); err != nil {
-			return nil, fmt.Errorf("resolver: parse %s: %w", entry.Name(), err)
+			return nil, recordsetsFailed(err)
 		}
 		if def.ID != "" {
 			id = def.ID
+		}
+		if !dbcopy.IsPlainSourceID(id) {
+			log.Printf("resolver: skipping the recordset definition file %q: its source ID is not a plain source ID", entry.Name())
+			continue
 		}
 		label := def.Title
 		if label == "" {
@@ -258,7 +289,9 @@ func recordsetSources(projectDir string) ([]ResolvedSource, error) {
 func httpQuerySources(projectDir string) ([]ResolvedSource, error) {
 	loaded, err := loadHTTPQueries(projectDir)
 	if err != nil {
-		return nil, fmt.Errorf("resolver: list HTTP query defs: %w", err)
+		// The cause quotes a path of the project folder, and goes to the log.
+		log.Printf("resolver: %s: %s", httpQueriesNotListed, dbcopy.RedactText(err.Error()))
+		return nil, errors.New(httpQueriesNotListed)
 	}
 	if len(loaded) == 0 {
 		return nil, nil

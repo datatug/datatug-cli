@@ -10,7 +10,6 @@ import (
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/storage"
 )
 
 // secureMu guards the package-level state ConfigureSecureSession sets once,
@@ -234,16 +233,22 @@ func ProjectDir(projectID string) (string, bool) {
 	return projectDir(projectID)
 }
 
+// sessionConfigured reports whether ConfigureSecureSession has been given the set of
+// projects this process serves: a nil set is the state of a process that has not been
+// configured (a handler under test, or a command that does not serve), and an empty one is
+// a session that serves no project. Only a configured session can say which projects are
+// not served.
+func sessionConfigured() bool {
+	secureMu.RLock()
+	defer secureMu.RUnlock()
+	return projectDirs != nil
+}
+
 // ProjectStoreFor returns the datatug.ProjectStore for projectID, over the
 // same storeID convention RunQuery/ExecuteSelect already use
-// (storage.NewDatatugStore("")), for resolver calls that need one.
+// (storage.NewDatatugStore("")), for resolver calls that need one. It is
+// projectStoreForID with that store ID: a project this process does not serve is
+// refused whenever a session is configured.
 func ProjectStoreFor(projectID string) (datatug.ProjectStore, error) {
-	if err := ValidateProjectIdentifier("project", projectID); err != nil {
-		return nil, err
-	}
-	store, err := storage.NewDatatugStore("")
-	if err != nil {
-		return nil, err
-	}
-	return store.GetProjectStore(projectID), nil
+	return projectStoreForID("", projectID)
 }

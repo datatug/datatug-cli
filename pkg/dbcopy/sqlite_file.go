@@ -6,6 +6,14 @@ import (
 	"strings"
 )
 
+// The modes a SQLite file is opened in (SQLite's own names for them).
+const (
+	// SQLiteReadOnly opens the file for reading only.
+	SQLiteReadOnly = "ro"
+	// SQLiteReadWrite opens the file for reading and writing, and never creates it.
+	SQLiteReadWrite = "rw"
+)
+
 // SQLiteFileURI is the "file:" URI of the SQLite file at path, the form in which a
 // SQLite driver is handed a file name that may hold any character a file name can.
 //
@@ -27,13 +35,30 @@ import (
 // the empty host ("file:////host/share/x.db"): the start of the name is never read as the
 // host of the URI, which SQLite refuses.
 func SQLiteFileURI(path string) string {
-	return sqliteFileURI(filepath.ToSlash(path), filepath.VolumeName(path))
+	return SQLiteFileURIMode(path, SQLiteReadWrite)
+}
+
+// SQLiteFileURIMode is the one builder of the "file:" URI of a SQLite file: SQLiteFileURI is
+// the read-write form of it, and every other place that hands a driver the path of a file
+// (a read-only open of a scan, of chat, of a viewer) builds the URI with it, in the mode it
+// needs, so that the name of the file is read back as the file it is whatever it holds.
+// mode is one of SQLiteReadOnly and SQLiteReadWrite; options are further "name=value"
+// parameters of the URI that SQLite knows (such as "immutable=1"), written after the mode as
+// they are given, so they are never a part of a path or of anything a client sent.
+func SQLiteFileURIMode(path, mode string, options ...string) string {
+	return sqliteFileURIMode(filepath.ToSlash(path), filepath.VolumeName(path), mode, options)
 }
 
 // sqliteFileURI is SQLiteFileURI for the path name in the slash form and the volume of
 // the path (empty on a system with no drive letters), so that the forms of a system
 // that is not the one running can be told.
 func sqliteFileURI(name, volume string) string {
+	return sqliteFileURIMode(name, volume, SQLiteReadWrite, nil)
+}
+
+// sqliteFileURIMode is SQLiteFileURIMode for the path name in the slash form and the volume
+// of the path.
+func sqliteFileURIMode(name, volume, mode string, options []string) string {
 	if volume != "" && !strings.HasPrefix(name, "/") {
 		name = "/" + name
 	}
@@ -44,5 +69,9 @@ func sqliteFileURI(name, volume string) string {
 	if strings.HasPrefix(escaped, "/") {
 		scheme = "file://" // an empty host, then the path from the root
 	}
-	return scheme + escaped + "?mode=rw"
+	query := "mode=" + mode
+	for _, option := range options {
+		query += "&" + option
+	}
+	return scheme + escaped + "?" + query
 }

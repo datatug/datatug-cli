@@ -7,6 +7,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo2sql"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/schemers/sqliteschema"
 	"github.com/datatug/datatug-core/pkg/schemer"
 	"github.com/strongo/cli-helpers/fsutil"
@@ -65,7 +66,9 @@ func GetSQLiteDbContext(path string) *SqlDBContext {
 	path = fsutil.ExpandHome(path)
 
 	getSqlDB := func(_ context.Context, driverName string) (*sql.DB, error) {
-		return sql.Open(driverName, path) // Open SQL database by file path
+		// The file is opened by its URI (see dbcopy.SQLiteFileURIMode), read-write and
+		// never created: a path with a "?", a "#" or a "%" in it is the file it names.
+		return sql.Open(driverName, dbcopy.SQLiteFileURIMode(path, dbcopy.SQLiteReadWrite))
 	}
 
 	schema := sqliteschema.NewSchemaProvider(func() (*sql.DB, error) {

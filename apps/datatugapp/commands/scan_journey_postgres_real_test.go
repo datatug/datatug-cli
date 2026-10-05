@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dal-go/dalgo2postgres"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -27,9 +28,9 @@ import (
 // This file is the journey of scan_journey_postgres_test.go run against a REAL PostgreSQL
 // server: the real cobra command, the real opener (dbcopy.BackendRef.OpenSchemaScan), the
 // real DALgo reader, and the readers behind chat, serve and the web app over what the scan
-// wrote. It runs in one CI job only ("Journey (PostgreSQL)" of .github/workflows/golangci.yml,
-// which has a postgres:17 service and sets DATATUG_TEST_POSTGRES_URL), and skips everywhere
-// else: no other test dials. scripts/check-journey-postgres.sh runs it there and fails the job
+// wrote. It runs in one CI job only ("Journey (PostgreSQL <major>)" of .github/workflows/golangci.yml,
+// which has a postgres service of each major version of its matrix (17 and 18) and sets
+// DATATUG_TEST_POSTGRES_URL), and skips everywhere else: no other test dials. scripts/check-journey-postgres.sh runs it there and fails the job
 // when any of its tests skips or does not print its PASS line.
 //
 // The server is an administrator's connection URL. The test makes a role and a database of its
@@ -53,10 +54,9 @@ type realPgServer struct {
 	host, port, user, password, database string
 }
 
-// parts are the pieces of the connection that no file of a project may hold, and that the
-// output of a scan may hold only inside the display form of its source.
+// parts are the pieces of the connection that no file of a project and no output of a scan may hold.
 func (s realPgServer) parts() []string {
-	return []string{s.password, s.user, s.host, ":" + s.port, "port " + s.port, "port=" + s.port, "sslmode", "postgres://"}
+	return []string{s.password, s.user, s.host, s.database, ":" + s.port, "port " + s.port, "port=" + s.port, "sslmode", "postgres://"}
 }
 
 // urlFor is the connection URL of the fixture role with the parts replaced: the database, the
@@ -172,7 +172,7 @@ func newRealPgServer(t *testing.T) realPgServer {
 	t.Helper()
 	adminURL, ok := os.LookupEnv(realPgAdminVar)
 	if !ok || adminURL == "" {
-		t.Skipf("%s is not set: this test runs against a real PostgreSQL server, which only the CI job \"Journey (PostgreSQL)\" provides", realPgAdminVar)
+		t.Skipf("%s is not set: this test runs against a real PostgreSQL server, which only the CI job \"Journey (PostgreSQL <major>)\" provides", realPgAdminVar)
 	}
 	admin, err := url.Parse(adminURL)
 	require.NoError(t, err, "%s is not a URL", realPgAdminVar)
@@ -203,8 +203,18 @@ func newRealPgServer(t *testing.T) realPgServer {
 	execAll(t, server.scanURL, realPgFixtureDDL...)
 
 	t.Setenv(realPgScanVar, server.scanURL)
-	t.Cleanup(api.SetOpenSchemaScanForTest(dbcopy.BackendRef.OpenSchemaScan))
+	useTheRealPostgresOpeners(t)
 	return server
+}
+
+// useTheRealPostgresOpeners puts the real PostgreSQL constructors back for the length of the test, in place of the
+// ones that stop the run in this test binary (scan_never_dials_test.go and postgres_never_dials_test.go): the open
+// of the scan, and the open every other command goes through (`query run`, chat, serve, the copy). Both are
+// needed: with only the first, a command other than the scan stops the run.
+func useTheRealPostgresOpeners(t *testing.T) {
+	t.Helper()
+	t.Cleanup(api.SetOpenSchemaScanForTest(dbcopy.BackendRef.OpenSchemaScan))
+	t.Cleanup(dbcopy.SetPostgresOpenerForTest(dalgo2postgres.NewDatabaseWithOptions))
 }
 
 // realCol is a column as the scan is expected to record it from the fixture.
@@ -435,13 +445,6 @@ func (s realPgServer) partsIn(text string) (found []string) {
 	return found
 }
 
-// outputLeaks is each part of the connection that output holds, other than inside the display
-// form of source, the one line a scan is meant to name the server in (scheme, host, port and
-// database: never the user, the password or the query).
-func (s realPgServer) outputLeaks(output, source string) []string {
-	return s.partsIn(strings.ReplaceAll(output, dbcopy.SourceDisplay(source), "<the display form of the source>"))
-}
-
 // This is the first stage of the whole-journey test of the plan: the PostgreSQL scan, read by
 // the readers of chat, serve and the web app, against a real server.
 func TestPostgresScanJourney(t *testing.T) {
@@ -580,9 +583,9 @@ func TestPostgresScanJourney(t *testing.T) {
 	// 6. Nothing of the connection is in a file of the project, or in what the scan said.
 	assert.Empty(t, server.leaksIn(t, projectDir), "no file of the project holds the host, the port, the user or the password of the server")
 	for _, output := range append(stderrs, logged.String()) {
-		assert.Empty(t, server.outputLeaks(output, server.scanURL), "the output holds no part of the connection but the display form of the source")
+		assert.Empty(t, server.partsIn(output), "the output holds no part of the connection: no host, port, database, user or password")
 	}
-	assert.Contains(t, logged.String(), dbcopy.SourceDisplay(server.scanURL), "the line that names what the scan connects to")
+	assert.Contains(t, logged.String(), "connecting; the PostgreSQL connection string is read from the environment variable "+realPgScanVar+"\n", "the line that says what the scan connects to")
 }
 
 // The scan of a server it cannot use fails with the classified message and none of the
@@ -659,7 +662,7 @@ func TestPostgresScanJourneyFailures(t *testing.T) {
 					assert.NotContains(t, output, failure.secret, "the secret of the URL that failed is not in the %s", name)
 				}
 			}
-			assert.Empty(t, server.outputLeaks(logged.String(), failure.sourceURL), "the log names the server by its display form at most")
+			assert.Empty(t, server.partsIn(logged.String()), "the log names no part of the connection")
 			assert.NoDirExists(t, projectDir, "a scan that fails makes nothing")
 		})
 	}
@@ -674,12 +677,14 @@ func TestRealPgLeakChecksFindEachPartOfTheConnection(t *testing.T) {
 		host:    "10.1.2.3", port: "54329", user: "dt_user", password: "s3cret", database: "dt_db",
 	}
 
-	t.Run("output may name the server only by the display form of the source", func(t *testing.T) {
+	t.Run("output may name nothing of the connection, not even by the display form of the source", func(t *testing.T) {
 		display := dbcopy.SourceDisplay(server.scanURL)
 		assert.Equal(t, "postgres://10.1.2.3:54329/dt_db", display, "the display form holds the host, port and database")
-		assert.Empty(t, server.outputLeaks("open postgres source \""+display+"\": the driver could not open it", server.scanURL))
-		for _, part := range []string{"s3cret", "dt_user", "10.1.2.3", ":54329", "port 54329", "port=54329", "sslmode"} {
-			assert.NotEmpty(t, server.outputLeaks("connecting to "+display+" with "+part, server.scanURL), part)
+		assert.NotEmpty(t, server.partsIn("connecting to "+display), "the display form is a leak")
+		assert.Empty(t, server.partsIn("connecting; the PostgreSQL connection string is read from the environment variable DATATUG_TEST_PG_URL"),
+			"where the string is read from is not")
+		for _, part := range []string{"s3cret", "dt_user", "10.1.2.3", ":54329", "port 54329", "port=54329", "sslmode", "dt_db"} {
+			assert.NotEmpty(t, server.partsIn("connecting with "+part), part)
 		}
 	})
 

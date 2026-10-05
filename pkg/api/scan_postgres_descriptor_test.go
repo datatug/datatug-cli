@@ -234,16 +234,16 @@ func TestResolveDescriptorPath_RefusesAProjectFolderThatCannotBeLookedAt(t *test
 	assert.ErrorIs(t, err, errDescriptorOutsideProject)
 }
 
-// The scan says what it connects to as the display function of the sources does: the scheme,
-// the host, the port and the database, and no user, no password, no query string.
-func TestPostgresScanParams_DisplayNamesTheServerWithoutTheCredentials(t *testing.T) {
+// The scan says where the connection string of a PostgreSQL source is read from (the variable) and nothing the
+// string holds: no host, no port, no database, no user, no password, no query string.
+func TestPostgresScanParams_LogTargetNamesTheVariableAndNothingTheURLHolds(t *testing.T) {
 	params := newShopParams(t)
 
-	assert.Equal(t, "postgres://db.example.com:5433/shop", params.Display())
-	for _, hidden := range []string{pgSecret, "alice", "sslmode", "require"} {
-		assert.NotContains(t, params.Display(), hidden)
+	assert.Equal(t, "the PostgreSQL connection string is read from the environment variable SHOP_PG_URL", params.LogTarget())
+	for _, hidden := range []string{pgSecret, "alice", "sslmode", "require", "db.example.com", "5433", "shop"} {
+		assert.NotContains(t, params.LogTarget(), hidden)
 	}
-	assert.Equal(t, "connecting to postgres://db.example.com:5433/shop", loggedTarget(params))
+	assert.Equal(t, "connecting; the PostgreSQL connection string is read from the environment variable SHOP_PG_URL", loggedTarget(params))
 	sqlServer, err := dbconnection.NewConnectionString("sqlserver", "db.example.com", "sa", "pw-never-shown", "shop", "port=1434")
 	require.NoError(t, err)
 	assert.Equal(t, "server=db.example.com, port=1434, user=sa", loggedTarget(sqlServer), "a flag the operator typed is named as it was")

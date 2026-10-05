@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The query journey of the real PostgreSQL server of the CI job "Journey (PostgreSQL)", which runs on
+// The query journey of the real PostgreSQL server of the CI job "Journey (PostgreSQL <major>)", which runs on
 // every major version in realPgMajorVar's matrix: `datatug query run` (behind the preview switch)
 // reads a table, with the real command, the real opener and the real DALgo adapter.
 //

@@ -87,7 +87,7 @@ variable and never the URL: the host, the port, the user and the password stay i
 reads every schema the role can use (the system schemas apart), and `show` lists each schema, with its views as views.
 The output below is for a database with the two tables Customer and Invoice in the schema `public`; the output for your
 database lists its own schemas and tables. The test of this README runs this step against a stand-in for the
-server, and the scan of a real server is tested by the CI job "Journey (PostgreSQL)".
+server, and the scan of a real server is tested by the CI job "Journey (PostgreSQL <major>)", on PostgreSQL 17 and 18.
 
 ```console
 $ export DATATUG_SHOP_URL='postgres://USER:PASSWORD@localhost:5432/shop'

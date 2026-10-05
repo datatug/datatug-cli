@@ -48,6 +48,22 @@ func TestAdapterSentence(t *testing.T) {
 	assert.Equal(t, "db.example.com", original.Host, "the error it was given is left as it was")
 }
 
+// The adapter writes the parts it names after the sentence, each behind "; ". What a later release of the adapter adds
+// to its text is not known today, and a test cannot set a field that does not exist yet: so the sentence is cut at the
+// first "; ", and a part added after it is never shown. The text here is the shape of such a release.
+func TestBareSentence_CutsAtTheFirstSeparatorTheAdapterWritesItsPartsAfter(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ text, want string }{
+		"the parts of today":               {`dalgo2postgres: PingContext: the server could not be reached; host "db.example.com", port 5433, database "shop"`, "the server could not be reached"},
+		"a part of a later release":        {`dalgo2postgres: the server could not be reached; role "alice", host "db.example.com"`, "the server could not be reached"},
+		"a sentence with a code":           {`dalgo2postgres: PingContext: the server refused the connection: password authentication failed (SQLSTATE 28P01); user "alice"`, "the server refused the connection: password authentication failed (SQLSTATE 28P01)"},
+		"a sentence of no parts":           {"dalgo2postgres: the connection failed", "the connection failed"},
+		"a text that holds nothing to cut": {"", ""},
+	} {
+		assert.Equal(t, tc.want, bareSentence(tc.text), name)
+	}
+}
+
 // The hint says where the connection string is read from, by the name of the variable or of the flag, never by its value.
 func TestConnectionHint(t *testing.T) {
 	t.Parallel()
@@ -62,6 +78,8 @@ func TestConnectionHint(t *testing.T) {
 	assert.Equal(t, lead+"the --to flag", literal.WithFlag("--to").connectionHint())
 	assert.Equal(t, "the PostgreSQL connection string is the one the source was given", literal.connectionHint(), "no flag is known")
 	assert.Empty(t, literal.flag, "WithFlag returns a copy: the source it was called on is as it was")
+	assert.Equal(t, env.connectionHint(), env.ConnectionHint(), "the exported form is the same text, for a command that logs where the string is read from")
+	assert.Equal(t, lead+"the --db flag", literal.WithFlag("--db").ConnectionHint())
 }
 
 // Whatever fails to open a PostgreSQL source, the person reads one sentence and the hint, and never the host, the

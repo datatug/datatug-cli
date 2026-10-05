@@ -14,6 +14,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
+	"github.com/dal-go/dalgo2postgres"
 	"github.com/dal-go/record"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -597,9 +598,9 @@ func TestScanJourneyPostgresMovesAViewSavedAsATableToTheViews(t *testing.T) {
 	assert.Empty(t, changed)
 }
 
-// A PostgreSQL scan never writes the connection into a file, and never says more of it than
-// the scheme, the host, the port and the database: no user name, no password, no query string.
-func TestScanJourneyPostgresNamesTheServerWithoutTheCredentials(t *testing.T) {
+// A PostgreSQL scan never writes the connection into a file, and never says of it more than where the
+// connection string is read from: no host, no port, no database, no user name, no password, no query string.
+func TestScanJourneyPostgresNamesNothingOfTheConnection(t *testing.T) {
 	projectDir := filepath.Join(t.TempDir(), "shop-project")
 	logged := captureScanLog(t)
 	usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return newJourneyPgDatabase() })
@@ -607,8 +608,8 @@ func TestScanJourneyPostgresNamesTheServerWithoutTheCredentials(t *testing.T) {
 	stderr, err := runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", "local")...)
 	require.NoError(t, err)
 
-	assert.Contains(t, logged.String(), "postgres://"+journeyPgHost+":"+journeyPgPort+"/shop", "the line that names what the scan connects to")
-	for _, shown := range []string{journeyPgSecret, journeyPgUser, "sslmode"} {
+	assert.Contains(t, logged.String(), "connecting; the PostgreSQL connection string is read from the environment variable "+journeyPgVar+"\n", "the line that says what the scan connects to")
+	for _, shown := range []string{journeyPgSecret, journeyPgUser, journeyPgHost, ":" + journeyPgPort, "sslmode", "postgres://"} {
 		assert.NotContains(t, logged.String(), shown)
 		assert.NotContains(t, stderr, shown)
 	}
@@ -717,17 +718,54 @@ func TestScanJourneyPostgresNamesThatCannotBeFolders(t *testing.T) {
 }
 
 func TestScanJourneyPostgresReadErrorsAreClassified(t *testing.T) {
-	projectDir := filepath.Join(t.TempDir(), "shop-project")
-	boom := &failingPgDatabase{fakePgDatabase: newJourneyPgDatabase(), err: errors.New("lost connection to " + journeyPgURL("shop"))}
-	usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return boom })
+	hint := "the PostgreSQL connection string is read from the environment variable " + journeyPgVar
+	for _, tc := range []struct {
+		name string
+		err  error
+		// want is the whole message, and code the exit code of the command.
+		want string
+		code int
+	}{
+		{
+			name: "a read the server refuses is a failure of the read, with no word of the connection string and exit 1",
+			err:  errors.New("lost connection to " + journeyPgURL("shop")),
+			want: "failed to get dbCatalog metadata: the catalog could not be read (the server's own message is not shown: a driver can quote the connection string)",
+			code: 1,
+		},
+		{
+			name: "a connection that fails during the read is a connection failure: the adapter's sentence, the hint, exit 4",
+			err:  &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: journeyPgHost, Port: journeyPgPort, Database: "shop"},
+			want: "failed to get dbCatalog metadata: the server could not be reached; " + hint,
+			code: 4,
+		},
+		{
+			name: "a read that ends by the clock is a connection failure too",
+			err:  fmt.Errorf("read the catalog: %w", context.DeadlineExceeded),
+			want: "failed to get dbCatalog metadata: the attempt timed out; " + hint,
+			code: 4,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectDir := filepath.Join(t.TempDir(), "shop-project")
+			boom := &failingPgDatabase{fakePgDatabase: newJourneyPgDatabase(), err: tc.err}
+			usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return boom })
 
-	_, err := runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", "local")...)
+			_, err := runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", "local")...)
 
-	require.Error(t, err)
-	for _, shown := range []string{journeyPgSecret, journeyPgUser, journeyPgHost, "lost connection"} {
-		assert.NotContains(t, err.Error(), shown)
+			require.Error(t, err)
+			assert.EqualError(t, err, tc.want)
+			var coder ExitCoder
+			if tc.code == 1 {
+				assert.False(t, errors.As(err, &coder), "a plain failure has no code of its own: it exits 1")
+			} else if assert.ErrorAs(t, err, &coder) {
+				assert.Equal(t, tc.code, coder.ExitCode())
+			}
+			for _, shown := range []string{journeyPgSecret, journeyPgUser, journeyPgHost, ":" + journeyPgPort, "lost connection"} {
+				assert.NotContains(t, err.Error(), shown)
+			}
+			assert.NoDirExists(t, projectDir, "a scan that fails makes nothing")
+		})
 	}
-	assert.NoDirExists(t, projectDir, "a scan that fails makes nothing")
 }
 
 // failingPgDatabase is a fake server whose listing of the tables fails.

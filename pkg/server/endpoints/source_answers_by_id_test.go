@@ -22,11 +22,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// An answer names a source by its ID only: where a route answers that the data file of a source is
-// not there, or that a source could not be opened, the sentence is built at the route from the ID
-// of the source, for every scheme and every serve route. The text of pkg/dbcopy, which holds the
-// display form of the source (the path of its data file, the host and database of a PostgreSQL
-// one), goes to the log of the server.
+// An answer names a file source by its ID only: where a route answers that the data file of a source
+// is not there, or that a source could not be opened, the sentence is built at the route from the ID
+// of the source. The text of pkg/dbcopy, which holds the display form of the source (the path of its
+// data file), goes to the log of the server. A PostgreSQL source is named by no ID and no display
+// form: its answer, and its line in the log, are the adapter's sentence for the failure and where the
+// connection string is read from (the variable), which hold no host, port or database.
 
 // chinookCatalogID is the ID of the catalog of the project's one SQLite source (its model is the
 // source "chinook"): exec/select and exec/execute_commands name a source by the catalog.
@@ -158,7 +159,7 @@ func TestRoutes_AFileSourceIsAnsweredByItsIDAndNeverByItsPath(t *testing.T) {
 // A PostgreSQL source that cannot be opened is answered as every PostgreSQL failure is: the adapter's fixed sentence and
 // the hint of where its connection string is read from (the variable here), which name no host, port, database, user or
 // password. The answer and the log say the same.
-func TestRoutes_APostgresSourceThatCannotBeOpenedIsAnsweredByItsID(t *testing.T) {
+func TestRoutes_APostgresSourceThatCannotBeOpenedIsAnsweredWithTheSentenceAndTheHint(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	standInOpener(t, func() (*dalgo2postgres.Database, error) {
 		return nil, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5433", Database: "shop"}

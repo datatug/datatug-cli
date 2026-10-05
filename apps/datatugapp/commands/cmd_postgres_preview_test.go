@@ -223,6 +223,10 @@ func TestDBCopy_OnlyTheTargetIsOpenedForWriting(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "open --to: the server could not be reached; the PostgreSQL connection string is read from the --to flag")
 	assert.NotContains(t, err.Error(), "db.example.com")
+	var coder ExitCoder
+	if assert.ErrorAs(t, err, &coder) {
+		assert.Equal(t, 4, coder.ExitCode(), "a target that cannot be opened exits 4")
+	}
 	require.Len(t, opens.dsns, 1)
 	assert.NotContains(t, opens.dsns[0], "default_transaction_read_only=on")
 	assert.Contains(t, opens.dsns[0], "default_transaction_read_only=off")
@@ -236,6 +240,27 @@ func TestDBCopy_OnlyTheTargetIsOpenedForWriting(t *testing.T) {
 	assert.Contains(t, err.Error(), "default_transaction_read_only")
 	assert.Zero(t, opens.calls.Load())
 	assertNoPgMarkers(t, "from", err.Error())
+}
+
+// A PostgreSQL --from that cannot be reached says it by the adapter's sentence and names the flag it was typed in, exits
+// 4, and shows nothing of the connection string, whichever side of the copy it is on (the text of --to is above).
+func TestDBCopy_AnUnreachableFromSideNamesTheFromFlag(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	opens := standInForPostgres(t, &dalgo2postgres.ConnectionError{Kind: dalgo2postgres.FailureNetwork, Host: "db.example.com", Port: "5433", Database: "shop"})
+
+	stdout, stderr, err := runCopy(t, "db", "copy", "--from", pgMarkedSource, "--to", emptySQLiteFile(t))
+
+	require.Error(t, err)
+	assert.EqualError(t, err, "open --from: the server could not be reached; the PostgreSQL connection string is read from the --from flag")
+	var coder ExitCoder
+	if assert.ErrorAs(t, err, &coder) {
+		assert.Equal(t, 4, coder.ExitCode())
+	}
+	assert.Equal(t, int32(1), opens.calls.Load())
+	for _, shown := range []string{"db.example.com", "5433", "shop"} {
+		assert.NotContains(t, err.Error(), shown)
+	}
+	assertNoPgMarkers(t, "from", stdout.String(), stderr.String(), err.Error())
 }
 
 // The help of `db copy` says that --to is the only place a PostgreSQL database is opened for writing, and that the

@@ -29,10 +29,19 @@ func adapterSentence(err *dalgo2postgres.ConnectionError) string {
 	if !sqlStateShape.MatchString(bare.SQLState) {
 		bare.SQLState = ""
 	}
-	text := strings.TrimPrefix(bare.Error(), adapterTextPrefix)
+	return bareSentence(bare.Error())
+}
+
+// bareSentence is the sentence in text, the Error() of the adapter's connection error: without its prefix and the step
+// that failed, and cut at the first "; ", where the adapter writes the parts it names. The clearing of the parts
+// known today is not enough: a part that a later release of the adapter adds to its text would be printed, so what
+// follows the first separator is never shown (no sentence of the adapter holds one).
+func bareSentence(text string) string {
+	text = strings.TrimPrefix(text, adapterTextPrefix)
 	for _, step := range adapterSteps {
 		text = strings.TrimPrefix(text, step+": ")
 	}
+	text, _, _ = strings.Cut(text, "; ")
 	return text
 }
 
@@ -58,6 +67,11 @@ func (r BackendRef) connectionHint() string {
 	}
 	return "the PostgreSQL connection string is the one the source was given"
 }
+
+// ConnectionHint is the hint of a failure of this PostgreSQL source (see connectionHint): where its connection string
+// is read from, by the name of the variable or of the flag, and never by a value. A command that logs what it connects
+// to says this and no part of the string.
+func (r BackendRef) ConnectionHint() string { return r.connectionHint() }
 
 // postgresFailureText is the one text of a PostgreSQL source that cannot be reached: the sentence and the hint.
 func postgresFailureText(sentence, hint string) string { return sentence + "; " + hint }

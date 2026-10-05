@@ -31,6 +31,13 @@ func trivialRoot() (*cobra.Command, []fang.Option) {
 // binary).
 func realDtlog(t *testing.T) (run func(args ...string) string) {
 	t.Helper()
+	// The test owns its home, so it never deletes one: a fresh temporary home
+	// has no datatug folder. HOME and USERPROFILE both, because
+	// os.UserHomeDir reads USERPROFILE on Windows.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	testHome = home
 	oldGet, oldStart, oldEnqueue, oldNotice, oldArgs, oldStderr, oldExit, oldTTY := getCommand, dtlogStart, dtlogEnqueue, dtlogNotice, os.Args, os.Stderr, osExit, stderrIsTerminal
 	t.Cleanup(func() {
 		getCommand, dtlogStart, dtlogEnqueue, dtlogNotice, os.Args, os.Stderr, osExit, stderrIsTerminal = oldGet, oldStart, oldEnqueue, oldNotice, oldArgs, oldStderr, oldExit, oldTTY
@@ -52,11 +59,13 @@ func realDtlog(t *testing.T) (run func(args ...string) string) {
 	}
 }
 
+// testHome is the temporary home realDtlog gave the running test.
+var testHome string
+
 func homeMarker(t *testing.T) string {
 	t.Helper()
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-	return filepath.Join(home, "datatug", ".telemetry-notice-shown")
+	require.NotEmpty(t, testHome, "homeMarker needs realDtlog first")
+	return filepath.Join(testHome, "datatug", ".telemetry-notice-shown")
 }
 
 // With telemetry off a run of main prints nothing about telemetry and sets up
@@ -69,7 +78,6 @@ func TestMain_TelemetryOff_NothingPrintedNothingSetUp(t *testing.T) {
 		t.Run(tc.name+"="+tc.value, func(t *testing.T) {
 			run := realDtlog(t)
 			t.Setenv(tc.name, tc.value)
-			_ = os.RemoveAll(filepath.Dir(homeMarker(t)))
 
 			stderr := run()
 
@@ -85,7 +93,6 @@ func TestMain_TelemetryOff_NothingPrintedNothingSetUp(t *testing.T) {
 // pkg/dtlog (TestSecondRun_SendsTheStartedEvent), where the client is a fake.
 func TestMain_FirstRun_PrintsTheNoticeOnceAndSendsNothing(t *testing.T) {
 	run := realDtlog(t)
-	_ = os.RemoveAll(filepath.Dir(homeMarker(t)))
 
 	first := run()
 	assert.Equal(t, dtlog.Notice(runtime.GOOS), first)
@@ -99,13 +106,14 @@ func TestMain_FirstRun_PrintsTheNoticeOnceAndSendsNothing(t *testing.T) {
 func TestMain_FirstRun_StderrNotATerminal_PrintsAndRecordsNothing(t *testing.T) {
 	run := realDtlog(t)
 	stderrIsTerminal = func() bool { return false }
-	_ = os.RemoveAll(filepath.Dir(homeMarker(t)))
 
 	stderr := run()
 
 	assert.Empty(t, stderr)
 	assert.NoFileExists(t, homeMarker(t))
-	assert.False(t, dtlog.Enabled(), "nothing is sent on a run that could not tell anyone")
+	// That nothing is sent on such a run is proved in pkg/dtlog
+	// (TestShowNoticeOnce_NotATerminalPrintsAndRecordsNothingAndSendsNothing);
+	// dtlog's held-back flag cannot be reset from here.
 }
 
 // main hands the notice the answer of stderrIsTerminal, and by default that

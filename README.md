@@ -208,8 +208,8 @@ The CLI does send a small amount of anonymous usage telemetry, which you can swi
 
 **What is sent.** The CLI sends anonymous usage events and crash reports to [PostHog](https://posthog.com)
 (`eu.i.posthog.com`), through [`pkg/dtlog`](pkg/dtlog), the only code in this repository that can send them. We use them
-to learn which commands and screens are used and where the CLI crashes, so we can fix what people hit. With telemetry on
-the CLI also fetches its PostHog project key from `raw.githubusercontent.com`, at most once a day: that request carries no
+to learn how often the CLI is run, which screens are opened and where it crashes, so we can fix what people hit. With telemetry on
+the CLI also fetches its PostHog project key from `raw.githubusercontent.com`, once a day when that succeeds (it is retried on each run until it does): that request carries no
 data of yours (GitHub sees the IP address it comes from, as any web server does), and it is not made when telemetry is off.
 
 | Event | When | Fields it carries |
@@ -258,7 +258,7 @@ variable too. `datatug version --json` never sends telemetry, whatever you set.
 **Chat with the DataTug cloud AI.** `datatug chat --model cloud` is your choice to use the DataTug cloud AI service: your
 questions go to it to be answered, whatever the switch says, because that is what the command does. It also sends a
 metadata report of each turn (the length of your message in characters and words, its status and outcome, the names of the
-actions that ran, the conversation id, and your install id, OS and DataTug version; not the text of your question and not
+actions that ran, the conversation id, a random id of the turn, the client type and feature labels, and your install id, OS, CPU architecture and DataTug version; not the text of your question and not
 your rows). That report is usage telemetry and follows the same switch: with `DATATUG_TELEMETRY`, `DO_NOT_TRACK` or `CI`
 turning telemetry off, or on the first run, it is not sent. Its install id is a different random id from the one above,
 kept in `datatug/installation_id` in your user configuration folder (`os.UserConfigDir`). Chat with your own AI profile

@@ -420,8 +420,15 @@ func TestRealClientIsCreatedOutsideATestBinary(t *testing.T) {
 // --- items 2 and 3: the notice ---
 
 func TestNotice_AtMostSixLinesAndSaysWhatItMust(t *testing.T) {
-	lines := strings.Split(strings.TrimRight(Notice(runtime.GOOS), "\n"), "\n")
-	assert.LessOrEqual(t, len(lines), 6)
+	// At most six lines, none longer than 150 characters (two rows on a
+	// 100-column terminal): newlines alone would let one line wrap to many rows.
+	for _, goos := range []string{runtime.GOOS, "linux", "windows"} {
+		lines := strings.Split(strings.TrimRight(Notice(goos), "\n"), "\n")
+		assert.LessOrEqual(t, len(lines), 6)
+		for _, line := range lines {
+			assert.LessOrEqual(t, len(line), 150, "a notice line must stay short: %q", line)
+		}
+	}
 	for _, want := range []string{
 		EventStarted, EventExited, EventScreen, "crash",
 		"No database content, query text, path, host or credential",
@@ -690,6 +697,22 @@ func wire(t *testing.T, msg posthog.Message) (top map[string]any, props map[stri
 	return top, props
 }
 
+// The fields the SDK (posthog-go v1.24.3) may put on a stack frame and on a
+// debug image. Each is a code position, an address or a build identifier; none
+// holds a path, a host name or a process id.
+var (
+	allowedFrameKeys = []string{"filename", "lineno", "function", "in_app", "synthetic", "platform", "lang",
+		"instruction_addr", "symbol_addr", "image_addr", "client_resolved", "inline"}
+	allowedDebugImageKeys = []string{"type", "debug_id", "code_id", "image_addr", "image_size", "image_vmaddr", "arch"}
+)
+
+func assertKeysWithin(t *testing.T, got map[string]any, allowed []string, what string) {
+	t.Helper()
+	for k := range got {
+		assert.Contains(t, allowed, k, "%s carries a field this test does not know: %q", what, k)
+	}
+}
+
 func keys(m map[string]any) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -773,11 +796,27 @@ func TestWire_Panic(t *testing.T) {
 	assert.Equal(t, "panic", item["type"])
 	assert.Equal(t, "string", item["value"], "the value of a crash report is the Go type, never the text")
 
-	frames := item["stacktrace"].(map[string]any)["frames"].([]any)
+	stacktrace := item["stacktrace"].(map[string]any)
+	assert.Equal(t, []string{"frames", "type"}, keys(stacktrace))
+	frames := stacktrace["frames"].([]any)
 	require.NotEmpty(t, frames)
 	for _, raw := range frames {
-		file := raw.(map[string]any)["filename"].(string)
+		frame := raw.(map[string]any)
+		file := frame["filename"].(string)
 		assert.False(t, strings.ContainsAny(file, `/\`), "a frame names its source file only, not its path: %q", file)
+		// The scrub is a deny list, so the fields of a frame are pinned: an SDK
+		// upgrade that adds one fails here until it is read and listed.
+		assertKeysWithin(t, frame, allowedFrameKeys, "stack frame")
+	}
+
+	// $debug_images identifies the running executable and is absent where the
+	// SDK cannot read it; where present, its fields are pinned the same way.
+	if images, ok := props["$debug_images"].([]any); ok {
+		for _, raw := range images {
+			image := raw.(map[string]any)
+			assertKeysWithin(t, image, allowedDebugImageKeys, "debug image")
+			assert.NotContains(t, image, "code_file", "the path of the binary is not sent")
+		}
 	}
 
 	whole, err := json.Marshal(top)

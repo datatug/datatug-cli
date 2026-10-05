@@ -136,7 +136,7 @@ The first time the CLI runs with telemetry on, with stderr a terminal, it MUST p
 
 #### REQ: telemetry-fields-match-notice
 
-The fields of each event MUST be exactly those the notice and the [README's Telemetry section](../../../README.md#telemetry) list. A test MUST build each event as it is handed to the PostHog client and assert its exact set of fields, so that adding a field fails the test until the notice and the README say it.
+The [README's Telemetry section](../../../README.md#telemetry) MUST list every field of each event, and the notice MUST summarise them and name no field an event does not carry. A test MUST build each event as it is handed to the PostHog client and assert its exact set of fields, so that adding a field fails the test until the README (and, where it changes what the notice says, the notice) says it.
 
 ### Output format conventions
 

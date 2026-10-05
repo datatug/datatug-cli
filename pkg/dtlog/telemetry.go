@@ -33,8 +33,9 @@ const (
 	EnvCI = "CI"
 )
 
-// The names and the title of what is sent. NoticeText and the README list the
-// fields of each; a test builds each event and fails when the fields change.
+// The names and the title of what is sent. Notice summarises the fields of
+// each and the README lists every one; a test builds each event and fails when
+// the fields change.
 const (
 	EventStarted    = "DataTug CLI started"
 	EventExited     = "DataTug CLI exited"
@@ -52,10 +53,11 @@ func Notice(goos string) string {
 	if goos == "windows" {
 		off = "To turn it off for good, run: setx " + EnvTelemetry + " 0 (it applies to terminals you open afterwards)"
 	}
-	return `DataTug sends anonymous usage events: "` + EventStarted + `", "` + EventExited + `", "` + EventScreen + `" (terminal UI) and crash reports.
-Each carries a random install id, the OS name and version, and the Go and PostHog library versions. Started, exited and screen events add a session id and its timing; a screen event adds the DataTug version and the screen's name; a crash report adds the Go type of the error and its stack frames.
-No database content, query text, path, host or credential is sent. Details: https://github.com/datatug/datatug-cli#telemetry
-Nothing is sent on this run; events start with the next one.
+	return `DataTug sends anonymous usage events: "` + EventStarted + `", "` + EventExited + `", "` + EventScreen + `" (terminal UI), and crash reports.
+Each carries a random install id, the OS name and version, and the Go and PostHog library versions.
+Started, exited and screen events add a session id and timing; a screen event adds the DataTug version and the screen's name.
+A crash report adds the Go type of the error and its stack frames. Details: https://github.com/datatug/datatug-cli#telemetry
+No database content, query text, path, host or credential is sent. Nothing is sent on this run; events start with the next one.
 ` + off + ` (` + EnvDoNotTrack + `=1 and ` + EnvCI + `=true turn it off too).
 `
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -53,10 +54,11 @@ func resolveSourceURL(ctx context.Context, projStore datatug.ProjectStore, envir
 }
 
 // sourceLookupError is the failure of the lookup of the environment or the database of a
-// source (see resolveSourceURL): its own text is LookupError's, which names the lookup's
-// cause when the IDs are plain names, and answer is the sentence for a client, built from the
-// kind and the IDs and from nothing the store said (the cause quotes the path the store built
-// from the project folder).
+// source, or of the read of the connection descriptor of its catalog (see resolveSourceURL):
+// its own text is LookupError's, which names the cause when the IDs are plain names, and
+// answer is the sentence for a client, built from the kind and the IDs and from nothing the
+// store or the operating system said (the cause quotes the path the store built from the
+// project folder, or the path of the descriptor).
 type sourceLookupError struct {
 	error
 	answer string
@@ -137,6 +139,13 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		}
 		descriptor, err := dbcopy.ReadPostgresDescriptor(path)
 		if err != nil {
+			// A descriptor that is not there, is a folder or cannot be read fails with the
+			// text of the operating system, which quotes the path of the file in the served
+			// project: the answer for a client is built from the ID of the catalog.
+			var pathErr *fs.PathError
+			if errors.As(err, &pathErr) {
+				return "", sourceLookupFailed("catalog %q: the PostgreSQL connection descriptor cannot be read", "catalog %q", err, catalog.ID)
+			}
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
 		// The variable must hold a postgres URL: a catalog labelled postgres whose

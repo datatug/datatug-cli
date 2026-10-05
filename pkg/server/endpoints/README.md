@@ -46,13 +46,14 @@ When DataTug agent is started with a `serve` command it listens on HTTP port (*b
 
 The routes of the table above that load a board, an entity, a recordset definition, a folder or a
 db server, and `environment-summary`, `projects/projects_summary`, `projects/project_summary`,
-`projects/project_full`, `catalog-tables`, `queries/all_queries`, the semantic routes, and the
-resolution of the source of `exec/select`, `exec/execute_commands` and `exec/run_query`, answer
-with a sentence that they build from the kind of what was asked for and its ID
-(`board "b1" not found`, `could not delete board "b1"`) when the project store, a driver or a file
-of the project cannot be read, and read only what the served project records. What the store or
-the driver said, which quotes the paths of the server, is in the log of the server and is not in
-the answer.
+`projects/project_full`, `catalog-tables`, `queries/all_queries`, the semantic routes, the
+resolution of the source of `exec/select`, `exec/execute_commands` and `exec/run_query` (the
+connection descriptor of a PostgreSQL catalog included), and the document of a saved query of
+`exec/run_query`, answer with a sentence that they build from the kind of what was asked for and
+its ID (`board "b1" not found`, `could not delete board "b1"`) when the project store, a driver or
+a file of the project cannot be read, and read only what the served project records. What the
+store or the driver said, which quotes the paths of the server, is in the log of the server and is
+not in the answer.
 
 ### Endpoint: POST /execute
 

@@ -248,6 +248,27 @@ func TestProjectStores_AreNotAskedForOutsidePkgAPI(t *testing.T) {
 	}
 }
 
+// The file store opens a project folder by constructors of its own (filestore.NewProjectStore,
+// NewSingleProjectStore and NewStore): a way to a project store that does not go through the
+// helper. This package calls one in two places, the scan, which is given a folder and not the ID
+// of a project that is served, and the server packages call none (pkg/server keeps its one
+// factory of stores in a variable, and the walk does not count a variable as a call).
+func TestFileStoreConstructors_AreCalledByTheScanOnly(t *testing.T) {
+	constructors := []string{"NewProjectStore", "NewSingleProjectStore", "NewStore"}
+	want := []string{
+		"scan_driver.go: recordedCatalogDriver calls NewProjectStore",
+		"scan_names.go: recordedDbModel calls NewProjectStore",
+	}
+	if got := storeCallSites(t, constructors...); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("the calls of the file store's constructors are\n  %s\nwant only the scan's\n  %s\nan entry gets its project store from projectStoreForID", strings.Join(got, "\n  "), strings.Join(want, "\n  "))
+	}
+	for _, dir := range []string{"../server/endpoints", "../server"} {
+		if got := storeCallSitesIn(t, dir, constructors...); len(got) != 0 {
+			t.Errorf("%s opens a project folder by a constructor of the file store: %s", dir, strings.Join(got, ", "))
+		}
+	}
+}
+
 // The walk above sees a call by a name: it must see one, or it proves nothing.
 func TestStoreCallSites_SeesACallByItsName(t *testing.T) {
 	sites := storeCallSites(t, "projectStoreForID")

@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
@@ -71,6 +73,9 @@ func answerMessage(body string) string {
 	return body
 }
 
+// descriptorSentence is the answer for a PostgreSQL catalog whose connection descriptor cannot be read.
+const descriptorSentence = `catalog "shop": the PostgreSQL connection descriptor cannot be read`
+
 // httpQueriesNotListed is the answer for a project whose HTTP query definitions cannot be listed.
 const httpQueriesNotListed = "the HTTP query definitions of the project could not be listed"
 
@@ -83,6 +88,27 @@ func brokenQueries(file func(path, content string) func(dir string)) map[string]
 			environment(dir)
 			file("queries/broken.query.json", "{not json")(dir)
 		},
+	}
+}
+
+// postgresCatalog records, in the project at dir, the environment "local" with one server and
+// the PostgreSQL catalog "shop", whose connection descriptor is the file
+// connections/prod/shop.json of the project (not written: what is at that path is the
+// breakage of the test).
+func postgresCatalog(t *testing.T, dir string) {
+	t.Helper()
+	store := filestore.NewProjectStore("setup", dir)
+	ctx := context.Background()
+	server := datatug.ServerRef{Driver: "postgres", Host: "db.example.com"}
+	env := &datatug.Environment{DbServers: datatug.EnvDbServers{{ServerRef: server}}}
+	env.ID = "local"
+	if err := store.SaveEnvironment(ctx, env); err != nil {
+		t.Fatal(err)
+	}
+	catalog := &datatug.DbCatalog{DbCatalogBase: datatug.DbCatalogBase{Driver: "postgres", Path: "connections/prod/shop.json"}}
+	catalog.ID = "shop"
+	if err := store.SaveEnvDbCatalog(ctx, "local", (&datatug.EnvDbServer{ServerRef: server}).GetID(), "shop", catalog); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -226,6 +252,35 @@ func TestRoutes_AStoreFailureAnswersOneBuiltSentenceWhateverIsAtThePath(t *testi
 				"missing":                           nothing,
 				"a folder where a file is expected": folder("environments/local/local.env.json"),
 				"a file that is not JSON":           file("environments/local/local.env.json", "{not json"),
+			},
+		},
+		{
+			name: "exec/select, a PostgreSQL catalog", handler: executeSelectHandler, path: "/datatug/exec/select",
+			query: func(p string) url.Values {
+				return url.Values{"proj": {p}, "env": {"local"}, "db": {"shop"}, "sql": {"select 1"}}
+			},
+			sentence: func(string) string { return descriptorSentence },
+			breakages: map[string]func(string){
+				"a descriptor that is not there": func(dir string) { postgresCatalog(t, dir) },
+				"a descriptor that is a folder": func(dir string) {
+					postgresCatalog(t, dir)
+					folder("connections/prod/shop.json")(dir)
+				},
+			},
+		},
+		{
+			name: "exec/execute_commands, a PostgreSQL catalog", handler: executeCommandsHandler, path: "/datatug/exec/execute_commands", method: http.MethodPost,
+			query: func(p string) url.Values { return url.Values{"project": {p}} },
+			body: func(string) any {
+				return map[string]any{"commands": []map[string]any{{"type": "SQL", "env": "local", "db": "shop", "text": "select 1"}}}
+			},
+			sentence: func(string) string { return "command 0: " + descriptorSentence },
+			breakages: map[string]func(string){
+				"a descriptor that is not there": func(dir string) { postgresCatalog(t, dir) },
+				"a descriptor that is a folder": func(dir string) {
+					postgresCatalog(t, dir)
+					folder("connections/prod/shop.json")(dir)
+				},
 			},
 		},
 		{

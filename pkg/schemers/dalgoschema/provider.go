@@ -6,9 +6,13 @@
 // of reach, so what a scan can report is what the reader reports: the portable
 // column type (a type the reader cannot map is a string), the primary key,
 // foreign keys, unique constraints and indexes, under the exact names the reader
-// returns. It cannot tell a view from a table, so every collection is reported
-// as a table; and it reads a single schema, so a foreign key into another schema
-// is left out of the scan.
+// returns. A SchemaReader cannot tell a view from a table, so unless the reader
+// also is a ViewLister every collection is reported as a table (the PostgreSQL
+// reader of dalgo2postgres is not one yet: a view of its server is a table of the
+// scan); a collection is in the schema its reference names, or else in the schema
+// the provider was given, which is the only one a reader that lists no schema in
+// its references reads, so for that reader a foreign key into another schema is
+// left out of the scan.
 //
 // A scan opens connections to somebody's server, so the provider bounds how many
 // reads and counts it has in flight at once (maxConcurrentReads): the core
@@ -37,6 +41,9 @@ const (
 	// dbTypeBaseTable is the DbType the scanner knows a table by.
 	dbTypeBaseTable = "BASE TABLE"
 
+	// dbTypeView is the DbType the scanner knows a view by.
+	dbTypeView = "VIEW"
+
 	// indexType names every index: the reader does not report the index method.
 	indexType = "INDEX"
 
@@ -55,9 +62,18 @@ type RecordsCounter interface {
 	CountRecords(ctx context.Context, schema, table string) (*int, error)
 }
 
+// ViewLister is the optional capability of a reader that can tell a view from a
+// table: it lists the collections that are views, each by the reference that
+// ListCollections gave it (a view is among the collections ListCollections lists).
+// A scan reports a collection it lists as a view, and does not count its records.
+type ViewLister interface {
+	ListViews(ctx context.Context) ([]dal.CollectionRef, error)
+}
+
 // NewSchemaProvider returns a schemer.SchemaProvider that reads catalog through
-// reader. schema is the schema the reader inspects; every table is reported in
-// it. counter may be nil, in which case no table has a record count.
+// reader. schema is the schema the reader inspects: every collection whose
+// reference does not name another is reported in it. counter may be nil, in which
+// case no table has a record count.
 //
 // The provider is safe for the concurrent use the scanner makes of it: it reads
 // each table's description, indexes and constraints once and shares them, and it
@@ -82,8 +98,8 @@ type provider struct {
 	indexes memo[[]dbschema.IndexDef]
 
 	listedMu sync.Mutex
-	// listed is the names of the collections the reader last listed, nil until it
-	// has.
+	// listed is the collections the reader last listed, by schema and name (see key),
+	// nil until it has.
 	listed map[string]bool
 }
 
@@ -155,8 +171,11 @@ func (p *provider) schemaOf(ref *dal.CollectionRef) string {
 }
 
 func (p *provider) key(ref *dal.CollectionRef) string {
-	return p.schemaOf(ref) + "\x00" + ref.Name()
+	return relationKey(p.schemaOf(ref), ref.Name())
 }
+
+// relationKey identifies a table or view of one schema.
+func relationKey(schema, name string) string { return schema + "\x00" + name }
 
 func (p *provider) describe(ctx context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {
 	return p.defs.get(p.key(ref), func() (*dbschema.CollectionDef, error) {
@@ -187,7 +206,7 @@ func (p *provider) listCollections(ctx context.Context) ([]dal.CollectionRef, ma
 	}
 	names := make(map[string]bool, len(refs))
 	for i := range refs {
-		names[refs[i].Name()] = true
+		names[p.key(&refs[i])] = true
 	}
 	p.listedMu.Lock()
 	p.listed = names
@@ -195,9 +214,9 @@ func (p *provider) listCollections(ctx context.Context) ([]dal.CollectionRef, ma
 	return refs, names, nil
 }
 
-// isListed reports whether the reader lists a collection of that name, reading
-// the listing first if nobody has.
-func (p *provider) isListed(ctx context.Context, name string) (bool, error) {
+// isListed reports whether the reader lists a collection of that name in schema,
+// reading the listing first if nobody has.
+func (p *provider) isListed(ctx context.Context, schema, name string) (bool, error) {
 	p.listedMu.Lock()
 	names := p.listed
 	p.listedMu.Unlock()
@@ -207,21 +226,52 @@ func (p *provider) isListed(ctx context.Context, name string) (bool, error) {
 			return false, err
 		}
 	}
-	return names[name], nil
+	return names[relationKey(schema, name)], nil
 }
 
-// GetCollections lists every collection the reader reports, as a table.
+// listViews reads which of the collections the reader lists are views, by schema and
+// name (see relationKey): none when the reader cannot tell (it is no ViewLister).
+func (p *provider) listViews(ctx context.Context) (map[string]bool, error) {
+	lister, ok := p.reader.(ViewLister)
+	if !ok {
+		return nil, nil
+	}
+	refs, err := limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return lister.ListViews(ctx) })
+	if err != nil {
+		return nil, fmt.Errorf("list views: %w", err)
+	}
+	views := make(map[string]bool, len(refs))
+	for i := range refs {
+		views[p.key(&refs[i])] = true
+	}
+	return views, nil
+}
+
+// GetCollections lists every collection the reader reports: a table, or a view when
+// the reader says it is one (see ViewLister), in the schema its reference names or
+// else in the provider's own. A reference that names its schema stays the reference
+// the columns of the collection are read through, so that two collections of one name
+// in two schemas are two.
 func (p *provider) GetCollections(ctx context.Context, _ *record.Key) (schemer.CollectionsReader, error) {
 	refs, _, err := p.listCollections(ctx)
 	if err != nil {
 		return nil, err
 	}
+	views, err := p.listViews(ctx)
+	if err != nil {
+		return nil, err
+	}
 	collections := make([]*datatug.CollectionInfo, len(refs))
 	for i := range refs {
-		collections[i] = &datatug.CollectionInfo{
-			DBCollectionKey: datatug.NewCollectionKey(datatug.CollectionTypeTable, refs[i].Name(), p.schema, p.catalog, nil),
-			TableProps:      datatug.TableProps{DbType: dbTypeBaseTable},
+		kind, dbType := datatug.CollectionTypeTable, dbTypeBaseTable
+		if views[p.key(&refs[i])] {
+			kind, dbType = datatug.CollectionTypeView, dbTypeView
 		}
+		key := datatug.NewCollectionKey(kind, refs[i].Name(), p.schemaOf(&refs[i]), p.catalog, nil)
+		if refs[i].Schema() != "" {
+			key.Ref = refs[i]
+		}
+		collections[i] = &datatug.CollectionInfo{DBCollectionKey: key, TableProps: datatug.TableProps{DbType: dbType}}
 	}
 	return &collectionsReader{items: collections}, nil
 }
@@ -382,7 +432,7 @@ func (p *provider) GetConstraints(ctx context.Context, _, schema, table string) 
 				key.Name, scanned, table, key.ReferencedNamespace, key.ReferencedCollection)
 			continue
 		}
-		listed, err := p.isListed(ctx, key.ReferencedCollection)
+		listed, err := p.isListed(ctx, scanned, key.ReferencedCollection)
 		if err != nil {
 			return nil, err
 		}

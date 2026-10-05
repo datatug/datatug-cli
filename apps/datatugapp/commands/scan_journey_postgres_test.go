@@ -1,0 +1,586 @@
+package commands
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dbschema"
+	"github.com/dal-go/dalgo/recordset"
+	"github.com/dal-go/record"
+	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// This file is the PostgreSQL twin of the journey in scan_journey_test.go: the real
+// scan command, the real scanner and the readers behind chat, saved queries, serve and
+// the web app, over a fake schema reader behind the one seam through which a PostgreSQL
+// scan opens its source. No test of the scan dials a server: the opener that stands in
+// for the real one fails the test when it is asked for anything it was not set up for,
+// and the real server is the CI test of the scan against PostgreSQL.
+
+const (
+	journeyPgSecret = "Zk39x-pg-p4ss"
+	journeyPgUser   = "alice"
+	journeyPgHost   = "db.example.com"
+	journeyPgPort   = "54329"
+	journeyPgVar    = "DATATUG_JOURNEY_PG_URL"
+)
+
+// journeyPgURL is the connection URL of the fake server: every part a project must
+// never hold is in it.
+func journeyPgURL(database string) string {
+	return "postgres://" + journeyPgUser + ":" + journeyPgSecret + "@" + journeyPgHost + ":" + journeyPgPort + "/" + database + "?sslmode=require"
+}
+
+// pgRelation is a table or a view of the fake server.
+type pgRelation struct {
+	schema, name string
+	view         bool
+	fields       []dbschema.FieldDef
+	primaryKey   []dal.FieldName
+	foreignKeys  []dbschema.ForeignKeyDef
+	indexes      []dbschema.IndexDef
+}
+
+func pgField(name string, kind dbschema.Type, nullable bool) dbschema.FieldDef {
+	return dbschema.FieldDef{Name: dal.FieldName(name), Type: kind, Nullable: nullable}
+}
+
+// fakePgDatabase is the schema reader a PostgreSQL scan reads through. It lists the
+// relations of more than one schema, with a view, mixed-case names and a composite key,
+// and it tells a view from a table, as the reader of a real server could.
+type fakePgDatabase struct {
+	dal.DB
+	mu        sync.Mutex
+	relations []pgRelation
+	closed    int
+}
+
+var _ dbcopy.SchemaScanDB = (*fakePgDatabase)(nil)
+
+func (f *fakePgDatabase) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed++
+	return nil
+}
+
+func (f *fakePgDatabase) find(ref *dal.CollectionRef) (pgRelation, bool) {
+	for _, relation := range f.relations {
+		if relation.name == ref.Name() && (ref.Schema() == "" || relation.schema == ref.Schema()) {
+			return relation, true
+		}
+	}
+	return pgRelation{}, false
+}
+
+func (f *fakePgDatabase) ListCollections(context.Context, *record.Key) ([]dal.CollectionRef, error) {
+	refs := make([]dal.CollectionRef, len(f.relations))
+	for i, relation := range f.relations {
+		refs[i] = dal.NewQualifiedRootCollectionRef(relation.schema, relation.name, "")
+	}
+	return refs, nil
+}
+
+func (f *fakePgDatabase) ListViews(context.Context) ([]dal.CollectionRef, error) {
+	var refs []dal.CollectionRef
+	for _, relation := range f.relations {
+		if relation.view {
+			refs = append(refs, dal.NewQualifiedRootCollectionRef(relation.schema, relation.name, ""))
+		}
+	}
+	return refs, nil
+}
+
+func (f *fakePgDatabase) DescribeCollection(_ context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {
+	relation, ok := f.find(ref)
+	if !ok {
+		return nil, fmt.Errorf("relation %q does not exist", ref.Name())
+	}
+	return &dbschema.CollectionDef{Name: relation.name, Fields: relation.fields, PrimaryKey: relation.primaryKey, ForeignKeys: relation.foreignKeys}, nil
+}
+
+func (f *fakePgDatabase) ListIndexes(_ context.Context, ref *dal.CollectionRef) ([]dbschema.IndexDef, error) {
+	relation, _ := f.find(ref)
+	return relation.indexes, nil
+}
+
+func (*fakePgDatabase) ListConstraints(context.Context, *dal.CollectionRef) ([]dbschema.ConstraintDef, error) {
+	return nil, &dbschema.NotSupportedError{Op: "ListConstraints"}
+}
+
+func (*fakePgDatabase) ListReferrers(context.Context, *dal.CollectionRef) ([]dbschema.Referrer, error) {
+	return nil, &dbschema.NotSupportedError{Op: "ListReferrers"}
+}
+
+// newJourneyPgDatabase is the PostgreSQL twin of writeJourneyDB: a mixed-case table, a
+// table whose composite primary key is in a different order from its columns, a
+// foreign key, an index and a view in schema public, and a table and a view of the
+// same kind in a second schema.
+func newJourneyPgDatabase() *fakePgDatabase {
+	return &fakePgDatabase{relations: []pgRelation{
+		{schema: "public", name: "Customer",
+			fields:     []dbschema.FieldDef{pgField("CustomerId", dbschema.Int, false), pgField("FirstName", dbschema.String, false), pgField("LastName", dbschema.String, true)},
+			primaryKey: []dal.FieldName{"CustomerId"}},
+		{schema: "public", name: "order_line",
+			fields: []dbschema.FieldDef{pgField("order_id", dbschema.Int, false), pgField("line_no", dbschema.Int, false), pgField("customer_id", dbschema.Int, true), pgField("sku", dbschema.String, true), pgField("qty", dbschema.Int, true)},
+			// The key is (line_no, order_id): not the order of the columns.
+			primaryKey:  []dal.FieldName{"line_no", "order_id"},
+			foreignKeys: []dbschema.ForeignKeyDef{{Name: "fk_order_line_customer", Fields: []dal.FieldName{"customer_id"}, ReferencedCollection: "Customer", ReferencedFields: []dal.FieldName{"CustomerId"}}},
+			indexes:     []dbschema.IndexDef{{Name: "order_line_qty", Collection: "order_line", Fields: []dal.FieldName{"qty"}}}},
+		{schema: "public", name: "customer_names", view: true,
+			fields: []dbschema.FieldDef{pgField("CustomerId", dbschema.Int, true), pgField("full_name", dbschema.String, true)}},
+		{schema: "sales", name: "Invoice",
+			fields:     []dbschema.FieldDef{pgField("InvoiceId", dbschema.Int, false), pgField("Total", dbschema.Decimal, true)},
+			primaryKey: []dal.FieldName{"InvoiceId"}},
+		{schema: "sales", name: "OpenInvoices", view: true,
+			fields: []dbschema.FieldDef{pgField("InvoiceId", dbschema.Int, true)}},
+	}}
+}
+
+// pgOpener is the opener a PostgreSQL scan test stands in with: it is the only way a
+// scan under test opens a source, and it never dials. A scan that reaches it for a
+// source it was not set up for fails the test.
+type pgOpener struct {
+	t       *testing.T
+	mu      sync.Mutex
+	sources map[string]func() dbcopy.SchemaScanDB // by "env:NAME"
+	opened  []dbcopy.BackendRef
+}
+
+func (o *pgOpener) open(ref dbcopy.BackendRef, _ context.Context) (dbcopy.SchemaScanDB, error) {
+	o.t.Helper()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.opened = append(o.opened, ref)
+	db, ok := o.sources[ref.Raw]
+	if !ok {
+		o.t.Errorf("a scan opened %q, and this test was not set up for it: it must never dial", ref.Raw)
+		return nil, errors.New("not a source of this test")
+	}
+	return db(), nil
+}
+
+// serve makes the fake server db the one that the variable names, with the connection
+// URL of the database in the variable.
+func (o *pgOpener) serve(variable, database string, db func() dbcopy.SchemaScanDB) {
+	o.t.Setenv(variable, journeyPgURL(database))
+	o.sources["env:"+variable] = db
+}
+
+// usePostgres puts db behind the seam through which the scan opens PostgreSQL, and the
+// connection URL of the fake server into the variable the scan names.
+func usePostgres(t *testing.T, variable, database string, db func() dbcopy.SchemaScanDB) *pgOpener {
+	t.Helper()
+	opener := &pgOpener{t: t, sources: map[string]func() dbcopy.SchemaScanDB{}}
+	opener.serve(variable, database, db)
+	t.Cleanup(api.SetOpenSchemaScanForTest(opener.open))
+	return opener
+}
+
+func pgScanArgs(projectDir, variable, database, env string, more ...string) []string {
+	return append([]string{"-d", projectDir, "-D", "postgres", "--dsn-env", variable, "--db", database, "--env", env}, more...)
+}
+
+// assertNoSourceIn fails t when any file under dir, or the name of one, holds a part
+// of the connection URL of the fake server.
+func assertNoSourceIn(t *testing.T, dir string) {
+	t.Helper()
+	parts := []string{journeyPgSecret, journeyPgUser, journeyPgHost, ":" + journeyPgPort, "sslmode", "postgres://"}
+	require.NoError(t, filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		require.NoError(t, err)
+		text := path
+		if !entry.IsDir() {
+			content, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			text += "\n" + string(content)
+		}
+		for _, part := range parts {
+			assert.NotContains(t, text, part, "no file of the project holds a part of the connection URL: %s", path)
+		}
+		return nil
+	}))
+}
+
+func TestScanJourneyPostgres(t *testing.T) {
+	ctx := context.Background()
+	projectDir := filepath.Join(t.TempDir(), "shop-project")
+	require.NoError(t, os.Mkdir(projectDir, 0o755))
+	fake := newJourneyPgDatabase()
+	opener := usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return fake })
+	scan := func() (string, error) {
+		return runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", "local")...)
+	}
+
+	// 1. I scan my PostgreSQL database into a folder. Exit 0, the folder is a project.
+	stderr, err := scan()
+	require.NoError(t, err)
+	assert.Empty(t, stderr, "a scan with nothing to leave out says nothing on stderr")
+	require.Len(t, opener.opened, 1)
+	assert.Equal(t, 1, fake.closed, "the connection is released")
+
+	// The scan writes the layout every reader reads, the descriptor, and nothing else.
+	assert.Equal(t, []string{
+		"README.md",
+		"connections/local/shop.json",
+		"datatug-project.json",
+		"dbmodels/shop/public/tables/Customer/public.Customer.columns.json",
+		"dbmodels/shop/public/tables/order_line/public.order_line.columns.json",
+		"dbmodels/shop/public/views/customer_names/public.customer_names.columns.json",
+		"dbmodels/shop/sales/tables/Invoice/sales.Invoice.columns.json",
+		"dbmodels/shop/sales/views/OpenInvoices/sales.OpenInvoices.columns.json",
+		"dbmodels/shop/shop.dbmodel.json",
+		"environments/local/catalogs/shop/shop.db.json",
+		"environments/local/local.env.json",
+	}, projectFiles(t, projectDir, ""), "the files of the scan")
+
+	// The catalog file holds the driver, the path of the descriptor and the model; the
+	// environment file names the driver and the catalog id, and no host, port or user.
+	catalogFile := readJSONMap(t, filepath.Join(projectDir, "environments", "local", "catalogs", "shop", "shop.db.json"))
+	assert.Equal(t, "postgres", catalogFile["driver"])
+	assert.Equal(t, "shop", catalogFile["dbModel"])
+	assert.Equal(t, "connections/local/shop.json", catalogFile["path"])
+	envFile := readJSONMap(t, filepath.Join(projectDir, "environments", "local", "local.env.json"))
+	assert.Equal(t, []any{map[string]any{"driver": "postgres", "catalogs": []any{"shop"}}}, envFile["dbServers"])
+	descriptor := readJSONMap(t, filepath.Join(projectDir, "connections", "local", "shop.json"))
+	assert.Equal(t, map[string]any{"dsnEnv": journeyPgVar}, descriptor, "the descriptor names the variable and nothing else")
+	modelFile := readJSONMap(t, filepath.Join(projectDir, "dbmodels", "shop", "shop.dbmodel.json"))
+	assert.NotContains(t, modelFile, "schemas")
+	assertNoSourceIn(t, projectDir)
+
+	store, id := filestore.NewSingleProjectStore(projectDir, "")
+	projStore := store.GetProjectStore(id)
+	project, err := projStore.LoadProject(ctx)
+	require.NoError(t, err)
+	require.NoError(t, project.Validate())
+	assert.Equal(t, []string{"local"}, project.Environments.IDs())
+	assert.Equal(t, []string{"shop"}, project.DbModels.IDs())
+
+	// 2. I list what it found: tables, views and columns under their exact names, and the
+	// position of each primary-key column, in both schemas.
+	want := map[string][]journeyColumn{
+		"public.Customer (BASE TABLE)": {
+			{Name: "CustomerId", PKPos: 1, DbType: "int"},
+			{Name: "FirstName", DbType: "string"},
+			{Name: "LastName", DbType: "string"},
+		},
+		"public.customer_names (VIEW)": {
+			{Name: "CustomerId", DbType: "int"},
+			{Name: "full_name", DbType: "string"},
+		},
+		"public.order_line (BASE TABLE)": {
+			{Name: "order_id", PKPos: 2, DbType: "int"},
+			{Name: "line_no", PKPos: 1, DbType: "int"},
+			{Name: "customer_id", DbType: "int"},
+			{Name: "sku", DbType: "string"},
+			{Name: "qty", DbType: "int"},
+		},
+		"sales.Invoice (BASE TABLE)": {
+			{Name: "InvoiceId", PKPos: 1, DbType: "int"},
+			{Name: "Total", DbType: "decimal"},
+		},
+		"sales.OpenInvoices (VIEW)": {
+			{Name: "InvoiceId", DbType: "int"},
+		},
+	}
+	schema, err := api.GetCatalogSchema(projectDir, "local", "shop")
+	require.NoError(t, err)
+	assert.Equal(t, want, relationColumns(schema))
+
+	// 3. I run a query, open chat, start serve: the source resolves, to the variable that
+	// holds the URL, and never to the URL. (Opening a PostgreSQL source for a query is the
+	// next task's.)
+	sources, err := api.ListSources(ctx, projStore, projectDir, "local")
+	require.NoError(t, err)
+	require.Len(t, sources, 1)
+	assert.Equal(t, "shop", sources[0].ID)
+	assert.Equal(t, "env:"+journeyPgVar, sources[0].URL)
+
+	// 4. I push the folder; a colleague opens the link: the web app lists the database and
+	// its tables, in both schemas.
+	envs, catalogs, tables, views := webReaderTables(t, projectDir)
+	assert.Equal(t, []string{"local"}, envs)
+	assert.Equal(t, []string{"shop"}, catalogs)
+	assert.Equal(t, []string{"public.Customer", "public.order_line", "sales.Invoice"}, tables)
+	assert.Equal(t, []string{"public.customer_names", "sales.OpenInvoices"}, views)
+
+	// 5. I scan again. Nothing changed in the database, so nothing changes in the folder:
+	// every file is as it was, by content.
+	first := treeHashes(t, projectDir, "")
+	require.Len(t, first, 11)
+	stderr, err = scan()
+	require.NoError(t, err)
+	assert.Empty(t, stderr, "a rescan with nothing to leave out says nothing on stderr")
+	assert.Equal(t, first, treeHashes(t, projectDir, ""), "a rescan of an unchanged database leaves the folder byte-identical")
+
+	// 6. A table is dropped from the database and another is added; I scan again. The
+	// dropped table's folder is gone, with its line, and nothing else changed.
+	fake.relations = append(fake.relations[:1], fake.relations[2:]...)
+	fake.relations = append(fake.relations, pgRelation{schema: "sales", name: "Payment",
+		fields:     []dbschema.FieldDef{pgField("PaymentId", dbschema.Int, false)},
+		primaryKey: []dal.FieldName{"PaymentId"}})
+	stderr, err = scan()
+	require.NoError(t, err)
+	assert.Equal(t, `removed: dbmodels/shop/public/tables/order_line: table "order_line" of schema "public" is no longer in the database`+"\n", stderr,
+		"one line for the folder that was removed, which names it")
+	added, removed, changed := diffTrees(first, treeHashes(t, projectDir, ""))
+	assert.Equal(t, []string{"dbmodels/shop/sales/tables/Payment/sales.Payment.columns.json"}, added)
+	assert.Equal(t, []string{"dbmodels/shop/public/tables/order_line/public.order_line.columns.json"}, removed)
+	assert.Empty(t, changed, "every other file is as the first scan wrote it")
+	assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "shop", "public", "tables", "order_line"), "the folder of the dropped table is removed, not left empty")
+	assertNoSourceIn(t, projectDir)
+	project, err = projStore.LoadProject(ctx)
+	require.NoError(t, err)
+	require.NoError(t, project.Validate())
+	_, _, tables, _ = webReaderTables(t, projectDir)
+	assert.Equal(t, []string{"public.Customer", "sales.Invoice", "sales.Payment"}, tables)
+}
+
+// A PostgreSQL scan never writes the connection into a file, and never says more of it than
+// the scheme, the host, the port and the database: no user name, no password, no query string.
+func TestScanJourneyPostgresNamesTheServerWithoutTheCredentials(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "shop-project")
+	logged := captureScanLog(t)
+	usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return newJourneyPgDatabase() })
+
+	stderr, err := runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", "local")...)
+	require.NoError(t, err)
+
+	assert.Contains(t, logged.String(), "postgres://"+journeyPgHost+":"+journeyPgPort+"/shop", "the line that names what the scan connects to")
+	for _, shown := range []string{journeyPgSecret, journeyPgUser, "sslmode"} {
+		assert.NotContains(t, logged.String(), shown)
+		assert.NotContains(t, stderr, shown)
+	}
+}
+
+// Two servers that a project records by driver alone do not collide: a SQLite file and a
+// PostgreSQL database scanned into one environment of one project are both kept, each
+// resolves to its own source, and a rescan of either leaves the other as it was. So are two
+// PostgreSQL databases: the project records the driver and not the host, so they are on one
+// server of the project, each with its own descriptor.
+func TestScanJourneyPostgresAndSQLiteInOneEnvironment(t *testing.T) {
+	for _, order := range []string{"sqlite first", "postgres first"} {
+		t.Run(order, func(t *testing.T) {
+			ctx := context.Background()
+			projectDir := filepath.Join(t.TempDir(), "company")
+			require.NoError(t, os.Mkdir(projectDir, 0o755))
+			sqlitePath := filepath.Join(projectDir, "data", "crm.db")
+			writeCRMDB(t, sqlitePath)
+			fake := newJourneyPgDatabase()
+			usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return fake })
+			scanSQLite := func() {
+				t.Helper()
+				stderr, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", sqlitePath, "--db", "crm", "--env", "local")
+				require.NoError(t, err)
+				assert.Empty(t, stderr)
+			}
+			scanPostgres := func() {
+				t.Helper()
+				stderr, err := runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", "local")...)
+				require.NoError(t, err)
+				assert.Empty(t, stderr)
+			}
+			if order == "sqlite first" {
+				scanSQLite()
+				scanPostgres()
+			} else {
+				scanPostgres()
+				scanSQLite()
+			}
+
+			store, id := filestore.NewSingleProjectStore(projectDir, "")
+			projStore := store.GetProjectStore(id)
+			project, err := projStore.LoadProject(ctx)
+			require.NoError(t, err)
+			require.NoError(t, project.Validate())
+			env := project.Environments.GetByID("local")
+			require.NotNil(t, env)
+			drivers := map[string][]string{}
+			for _, server := range env.DbServers {
+				drivers[server.Driver] = server.Catalogs
+				assert.Empty(t, server.Host, "no host is recorded: %s", server.Driver)
+				assert.Zero(t, server.Port, "no port is recorded: %s", server.Driver)
+			}
+			assert.Equal(t, map[string][]string{"sqlite3": {"crm"}, "postgres": {"shop"}}, drivers, "both servers are kept, each with its own database")
+
+			sources, err := api.ListSources(ctx, projStore, projectDir, "local")
+			require.NoError(t, err)
+			urls := map[string]string{}
+			for _, source := range sources {
+				urls[source.ID] = source.URL
+			}
+			assert.Equal(t, map[string]string{"crm": "sqlite://" + sqlitePath, "shop": "env:" + journeyPgVar}, urls, "each database resolves to its own source")
+			for database, driver := range map[string]string{"crm": "sqlite3", "shop": "postgres"} {
+				catalog, err := projStore.LoadEnvDbCatalog(ctx, "local", "", database)
+				require.NoError(t, err)
+				assert.Equal(t, driver, catalog.Driver, database)
+			}
+			assertNoSourceIn(t, projectDir)
+
+			// A rescan of either leaves the other as it was.
+			before := treeHashes(t, projectDir, "data/")
+			scanSQLite()
+			scanPostgres()
+			assert.Equal(t, before, treeHashes(t, projectDir, "data/"), "a rescan of both leaves the folder byte-identical")
+		})
+	}
+}
+
+// PostgreSQL names are case-sensitive: tables that differ only by case, and names that cannot
+// be folder names, follow the rules of the SQLite scan. Each is named on stderr and left out,
+// the scan exits 0, and every other table of every schema is written under its own folder.
+func TestScanJourneyPostgresNamesThatCannotBeFolders(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "shop-project")
+	field := []dbschema.FieldDef{pgField("id", dbschema.Int, false)}
+	fake := &fakePgDatabase{relations: []pgRelation{
+		{schema: "public", name: "Customer", fields: field, primaryKey: []dal.FieldName{"id"}},
+		{schema: "public", name: "customer", fields: field, primaryKey: []dal.FieldName{"id"}},
+		{schema: "public", name: "a/b", fields: field},
+		{schema: "public", name: "con", fields: field},
+		{schema: "Reports", name: "Sales", fields: field},
+		{schema: "reports", name: "Other", fields: field},
+	}}
+	usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return fake })
+
+	stderr, err := runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", "local")...)
+
+	require.NoError(t, err, "what a scan leaves out never fails it")
+	lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
+	assert.Len(t, lines, 4, stderr)
+	for _, left := range []string{`table "a/b" of schema "public"`, `table "con" of schema "public"`, `table "customer" of schema "public"`, `schema "reports"`} {
+		assert.Contains(t, stderr, left)
+	}
+	_, _, tables, _ := webReaderTables(t, projectDir)
+	assert.Equal(t, []string{"Reports.Sales", "public.Customer"}, tables, "the table that sorts first of two that differ by case is kept, in its own schema's folder")
+}
+
+func TestScanJourneyPostgresReadErrorsAreClassified(t *testing.T) {
+	projectDir := filepath.Join(t.TempDir(), "shop-project")
+	boom := &failingPgDatabase{fakePgDatabase: newJourneyPgDatabase(), err: errors.New("lost connection to " + journeyPgURL("shop"))}
+	usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return boom })
+
+	_, err := runScanCommand(t, pgScanArgs(projectDir, journeyPgVar, "shop", "local")...)
+
+	require.Error(t, err)
+	for _, shown := range []string{journeyPgSecret, journeyPgUser, journeyPgHost, "lost connection"} {
+		assert.NotContains(t, err.Error(), shown)
+	}
+	assert.NoDirExists(t, projectDir, "a scan that fails makes nothing")
+}
+
+// failingPgDatabase is a fake server whose listing of the tables fails.
+type failingPgDatabase struct {
+	*fakePgDatabase
+	err error
+}
+
+func (f *failingPgDatabase) ListCollections(context.Context, *record.Key) ([]dal.CollectionRef, error) {
+	return nil, f.err
+}
+
+// propertyPgModes are the ways the fake server of the property test answers a scan.
+var propertyPgModes = []string{"the open fails", "the listing fails", "a count fails", "it works"}
+
+// propertyPgServer is the fake server of TestProperty_NoCommandPathEchoesASourceSecret. It
+// fails as a driver can: with the URL it was given, password included, in its words.
+type propertyPgServer struct {
+	mode   string
+	opened []dbcopy.BackendRef
+}
+
+func (s *propertyPgServer) open(ref dbcopy.BackendRef, _ context.Context) (dbcopy.SchemaScanDB, error) {
+	s.opened = append(s.opened, ref)
+	words := errors.New("dalgo2postgres: PingContext(" + fmt.Sprintf("%q", ref.Path) + "): lost connection to " + ref.Path)
+	switch s.mode {
+	case propertyPgModes[0]:
+		return nil, words
+	case propertyPgModes[1]:
+		return &failingPgDatabase{fakePgDatabase: newJourneyPgDatabase(), err: words}, nil
+	case propertyPgModes[2]:
+		return &countFailingPgDatabase{fakePgDatabase: newJourneyPgDatabase(), err: words}, nil
+	}
+	return newJourneyPgDatabase(), nil
+}
+
+// assertReached fails t when the scans did not reach the fake server at least perCase times,
+// or reached it for anything but a variable.
+func (s *propertyPgServer) assertReached(t *testing.T, perCase int) {
+	t.Helper()
+	if len(s.opened) < perCase {
+		t.Errorf("the scans of the property reached the fake server %d times: the property does not reach what comes after the open", len(s.opened))
+	}
+	for _, ref := range s.opened {
+		if !strings.HasPrefix(ref.Raw, "env:") {
+			t.Errorf("the fake server was asked for %q, which is not a variable", ref.Display())
+		}
+	}
+}
+
+// countFailingPgDatabase is a fake server that runs COUNT(*) natively and whose count fails.
+type countFailingPgDatabase struct {
+	*fakePgDatabase
+	err error
+}
+
+func (*countFailingPgDatabase) QueryCapabilities() dal.QueryCapabilities {
+	return dal.QueryCapabilities{Aggregate: dal.AggregateCapabilities{Count: true}}
+}
+
+func (c *countFailingPgDatabase) ExecuteQueryToRecordsReader(context.Context, dal.Query) (dal.RecordsReader, error) {
+	return nil, c.err
+}
+
+func (*countFailingPgDatabase) ExecuteQueryToRecordsetReader(context.Context, dal.Query, ...recordset.Option) (dal.RecordsetReader, error) {
+	return nil, dal.ErrNotSupported
+}
+
+// Two PostgreSQL databases of two hosts, scanned into one environment of one project, are both
+// kept on the one server the project records (the driver), each resolving to the variable of its
+// own descriptor.
+func TestScanJourneyTwoPostgresDatabasesInOneEnvironment(t *testing.T) {
+	ctx := context.Background()
+	projectDir := filepath.Join(t.TempDir(), "company")
+	opener := usePostgres(t, journeyPgVar, "shop", func() dbcopy.SchemaScanDB { return newJourneyPgDatabase() })
+	const otherVar = "DATATUG_JOURNEY_PG_CRM_URL"
+	opener.serve(otherVar, "crm", func() dbcopy.SchemaScanDB {
+		return &fakePgDatabase{relations: []pgRelation{{schema: "public", name: "Deal", fields: []dbschema.FieldDef{pgField("Id", dbschema.Int, false)}, primaryKey: []dal.FieldName{"Id"}}}}
+	})
+
+	for _, scan := range []struct{ variable, database string }{{journeyPgVar, "shop"}, {otherVar, "crm"}} {
+		stderr, err := runScanCommand(t, pgScanArgs(projectDir, scan.variable, scan.database, "local")...)
+		require.NoError(t, err)
+		assert.Empty(t, stderr)
+	}
+
+	store, id := filestore.NewSingleProjectStore(projectDir, "")
+	projStore := store.GetProjectStore(id)
+	project, err := projStore.LoadProject(ctx)
+	require.NoError(t, err)
+	require.NoError(t, project.Validate())
+	env := project.Environments.GetByID("local")
+	require.NotNil(t, env)
+	require.Len(t, env.DbServers, 1, "the project records the driver, so both are on one server")
+	assert.Equal(t, datatug.ServerRef{Driver: "postgres"}, env.DbServers[0].ServerRef)
+	assert.Equal(t, []string{"shop", "crm"}, env.DbServers[0].Catalogs)
+	sources, err := api.ListSources(ctx, projStore, projectDir, "local")
+	require.NoError(t, err)
+	urls := map[string]string{}
+	for _, source := range sources {
+		urls[source.ID] = source.URL
+	}
+	assert.Equal(t, map[string]string{"shop": "env:" + journeyPgVar, "crm": "env:" + otherVar}, urls)
+	assert.Equal(t, map[string]any{"dsnEnv": otherVar}, readJSONMap(t, filepath.Join(projectDir, "connections", "local", "crm.json")))
+	assertNoSourceIn(t, projectDir)
+	assert.Equal(t, 2, len(opener.opened))
+}

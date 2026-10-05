@@ -230,7 +230,8 @@ func TestScanJourneyKeepsTheModelOfACatalogTheProjectHolds(t *testing.T) {
 		stderr, err := scanEnv(projectDir, "dev")
 
 		require.NoError(t, err)
-		assert.Empty(t, stderr)
+		assert.Equal(t, `note: database "shop" is on database model "retail-model" in environment "local", so this scan of environment "dev" puts it on that model too; --dbmodel chooses another`+"\n", stderr,
+			"one line says that the model is not the one the database id gives")
 		assert.Equal(t, "retail-model", readJSONMap(t, filepath.Join(projectDir, "environments", "dev", "catalogs", "shop", "shop.db.json"))["dbModel"])
 		assert.NoDirExists(t, filepath.Join(projectDir, "dbmodels", "shop"), "no second model of the same database was made")
 		modelFile := readJSONMap(t, filepath.Join(projectDir, "dbmodels", "retail-model", "retail-model.dbmodel.json"))

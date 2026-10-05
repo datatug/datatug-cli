@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
@@ -17,15 +16,19 @@ import (
 // CheckScanName is an error that names flag (such as "--db") when value cannot be the
 // id of a database, a database model or an environment in a project: each is the name
 // of a folder of the project, so it must be a plain name (letters and digits of any
-// script, ".", "_" and "-", at most 128 characters, starting with a letter or a digit,
-// as every source id is, see dbcopy.SourceIDDisplay) that is also a folder name on
-// every system a project is opened on (see folderNameProblem). A value that is not a
-// plain name is not in the message: it may be a connection string.
+// script, ".", "_" and "-", at most 128 characters, starting with a letter or a digit)
+// that is also a folder name on every system a project is opened on (see
+// folderNameProblem). There is one definition of a plain name, the one the routes of
+// serve apply to an environment or a catalog a client sends (ValidateIdentifier, built on
+// dbcopy.IsPlainSourceID), and a scan adds to it only what a folder needs: so a name the
+// scan accepts is one every route accepts, and a project a scan writes can always be
+// browsed. A value that is not a plain name is not in the message: it may be a
+// connection string.
 func CheckScanName(flag, value string) error {
 	if value == "" {
 		return fmt.Errorf("%s must not be empty", flag)
 	}
-	if dbcopy.SourceIDDisplay(value) != value {
+	if ValidateIdentifier(flag, value) != nil {
 		return fmt.Errorf("%s is not a plain name: use letters, digits, \".\", \"_\" and \"-\", starting with a letter or a digit, at most 128 characters, because it is the name of a folder of the project", flag)
 	}
 	if problem := folderNameProblem(value); problem != "" {
@@ -96,14 +99,20 @@ const catalogFileSuffix = "." + storage.DbCatalogFileSuffix + ".json"
 // only, or "" when none does. A file that stands for a name has it followed by suffix,
 // which is taken off ("" for none). A folder that cannot be listed has no names.
 func nameThatDiffersOnlyByCase(dir, suffix, name string) string {
-	entries, _ := os.ReadDir(dir)
+	entries, _ := scanReadDir(dir)
+	differs := ""
 	for _, entry := range entries {
 		existing := strings.TrimSuffix(entry.Name(), suffix)
-		if existing != name && strings.EqualFold(existing, name) {
-			return existing
+		switch {
+		case existing == name:
+			// The project has this very name: it is the folder that the scan means, on any
+			// file system, whatever other names there are that differ from it by case.
+			return ""
+		case differs == "" && strings.EqualFold(existing, name):
+			differs = existing
 		}
 	}
-	return ""
+	return differs
 }
 
 // ResolveScanDbModel is the database model a scan of catalog catalogID in environment
@@ -123,14 +132,40 @@ func nameThatDiffersOnlyByCase(dir, suffix, name string) string {
 // A model the catalog file names that cannot be the name of a folder, or a catalog file
 // that cannot be read, records nothing: the scan writes the file anew.
 func ResolveScanDbModel(projectDir, environment, catalogID, flag string) (string, error) {
+	model, _, err := resolveScanDbModel(projectDir, environment, catalogID, flag)
+	return model, err
+}
+
+// ResolveScanDbModelNoted is ResolveScanDbModel that also returns a sentence, one line,
+// for a scan that is put on a model the database id did not give, by what the other
+// environments record: a scan with no --dbmodel of a catalog this environment does not
+// record yet, which a person who named no model would not expect to find on a model of
+// another name. It is empty for every other answer, and when the model taken is called
+// as the database (that is what no flag gives anyway).
+func ResolveScanDbModelNoted(projectDir, environment, catalogID, flag string) (model, note string, err error) {
+	model, takenFrom, err := resolveScanDbModel(projectDir, environment, catalogID, flag)
+	if err != nil || len(takenFrom) == 0 || model == catalogID {
+		return model, "", err
+	}
+	noun := "environment"
+	if len(takenFrom) > 1 {
+		noun = "environments"
+	}
+	return model, fmt.Sprintf("note: database %q is on database model %q in %s %s, so this scan of environment %q puts it on that model too; --dbmodel chooses another",
+		catalogID, model, noun, strings.Join(quoted(takenFrom), ", "), environment), nil
+}
+
+// resolveScanDbModel is ResolveScanDbModel that also returns the environments the model
+// was taken from, when that is where it came from: those the other environments name.
+func resolveScanDbModel(projectDir, environment, catalogID, flag string) (model string, takenFrom []string, err error) {
 	recorded := recordedDbModel(projectDir, environment, catalogID)
 	switch {
 	case recorded != "" && flag != "" && flag != recorded:
-		return "", fmt.Errorf("--dbmodel %q: catalog %q of environment %q is on database model %q in this project, and scanning it onto %q would leave the tables of %q in the project and make a second model of the same database; scan without --dbmodel, or with --dbmodel %s, to keep the model", flag, catalogID, environment, recorded, flag, recorded, recorded)
+		return "", nil, fmt.Errorf("--dbmodel %q: catalog %q of environment %q is on database model %q in this project, and scanning it onto %q would leave the tables of %q in the project and make a second model of the same database; scan without --dbmodel, or with --dbmodel %s, to keep the model", flag, catalogID, environment, recorded, flag, recorded, recorded)
 	case recorded != "":
-		return recorded, nil
+		return recorded, nil, nil
 	case flag != "":
-		return flag, nil
+		return flag, nil, nil
 	}
 	byModel := modelsOfOtherEnvironments(projectDir, environment, catalogID)
 	models := make([]string, 0, len(byModel))
@@ -140,9 +175,9 @@ func ResolveScanDbModel(projectDir, environment, catalogID, flag string) (string
 	sort.Strings(models)
 	switch len(models) {
 	case 0:
-		return catalogID, nil
+		return catalogID, nil, nil
 	case 1:
-		return models[0], nil
+		return models[0], byModel[models[0]], nil
 	}
 	described := make([]string, len(models))
 	for i, model := range models {
@@ -153,7 +188,7 @@ func ResolveScanDbModel(projectDir, environment, catalogID, flag string) (string
 		}
 		described[i] = fmt.Sprintf("model %q in %s %s", model, noun, strings.Join(quoted(environments), ", "))
 	}
-	return "", fmt.Errorf("catalog %q of environment %q is not in this project yet, and the project records the database on more than one database model (%s): scan with --dbmodel <model> to say which", catalogID, environment, strings.Join(described, "; "))
+	return "", nil, fmt.Errorf("catalog %q of environment %q is not in this project yet, and the project records the database on more than one database model (%s): scan with --dbmodel <model> to say which", catalogID, environment, strings.Join(described, "; "))
 }
 
 // recordedDbModel is the database model the project records for catalog catalogID in

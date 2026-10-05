@@ -106,7 +106,8 @@ func TestPostgresScanParams_WriteDescriptor(t *testing.T) {
 	params := newShopParams(t)
 	dir := t.TempDir()
 
-	require.NoError(t, params.WriteDescriptor(dir))
+	_, err := params.WriteDescriptor(dir)
+	require.NoError(t, err)
 	file := filepath.Join(dir, "connections", "prod", "shop.json")
 	data, err := os.ReadFile(file)
 	require.NoError(t, err)
@@ -124,7 +125,8 @@ func TestPostgresScanParams_WriteDescriptor(t *testing.T) {
 	// Writing again replaces the file.
 	again, err := NewPostgresScanParams(envOf(map[string]string{"OTHER_PG_URL": "postgres://u:p@h/shop"}), "OTHER_PG_URL", "prod", "shop")
 	require.NoError(t, err)
-	require.NoError(t, again.WriteDescriptor(dir))
+	_, err = again.WriteDescriptor(dir)
+	require.NoError(t, err)
 	data, err = os.ReadFile(file)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"dsnEnv":"OTHER_PG_URL"}`, string(data))
@@ -136,13 +138,13 @@ func TestPostgresScanParams_WriteDescriptorErrors(t *testing.T) {
 	t.Run("the folder cannot be created", func(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "connections"), []byte("a file"), 0o600))
-		err := params.WriteDescriptor(dir)
+		_, err := params.WriteDescriptor(dir)
 		assert.ErrorContains(t, err, "create the connection descriptor folder")
 	})
 	t.Run("the file cannot be written", func(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, "connections", "prod", "shop.json"), 0o755))
-		err := params.WriteDescriptor(dir)
+		_, err := params.WriteDescriptor(dir)
 		assert.ErrorContains(t, err, "write the connection descriptor")
 	})
 }
@@ -200,17 +202,7 @@ func stubOpenSchemaScan(t *testing.T, stub func(dbcopy.BackendRef, context.Conte
 	t.Cleanup(func() { openSchemaScan = original })
 }
 
-// acceptPostgresServer stands in for a datatug-core whose project model records
-// postgres servers, so the scan itself can be tested.
-func acceptPostgresServer(t *testing.T) {
-	t.Helper()
-	original := validatePostgresServer
-	validatePostgresServer = func(datatug.ServerRef) error { return nil }
-	t.Cleanup(func() { validatePostgresServer = original })
-}
-
 func TestScanDbCatalog_Postgres(t *testing.T) {
-	acceptPostgresServer(t)
 	db := &fakeScanDB{}
 	var opened dbcopy.BackendRef
 	stubOpenSchemaScan(t, func(ref dbcopy.BackendRef, _ context.Context) (dbcopy.SchemaScanDB, error) {
@@ -219,7 +211,7 @@ func TestScanDbCatalog_Postgres(t *testing.T) {
 	})
 	params := newShopParams(t)
 
-	catalog, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres, Host: "db.example.com", Port: 5433}, params)
+	catalog, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres}, params)
 	require.NoError(t, err)
 	require.NotNil(t, catalog)
 
@@ -253,31 +245,28 @@ func TestScanDbCatalog_Postgres(t *testing.T) {
 
 func TestScanDbCatalog_PostgresErrors(t *testing.T) {
 	t.Run("the connection parameters did not come from a variable", func(t *testing.T) {
-		acceptPostgresServer(t)
 		stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) {
 			t.Fatal("nothing may be opened without a variable")
 			return nil, nil
 		})
 		params := dbconnection.NewSQLite3ConnectionParams("/tmp/x.db", "shop", dbconnection.ModeReadOnly)
-		catalog, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres, Host: "h"}, params)
+		catalog, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres}, params)
 		assert.Nil(t, catalog)
 		assert.ErrorContains(t, err, "--dsn-env")
 	})
 	t.Run("the database cannot be opened", func(t *testing.T) {
-		acceptPostgresServer(t)
 		cause := errors.New("connection refused")
 		stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) { return nil, cause })
-		catalog, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres, Host: "h"}, newShopParams(t))
+		catalog, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres}, newShopParams(t))
 		assert.Nil(t, catalog)
 		assert.ErrorIs(t, err, cause)
 		assert.ErrorContains(t, err, "failed to open PostgreSQL")
 	})
 	t.Run("the scan fails and its error is classified, never the driver's words", func(t *testing.T) {
-		acceptPostgresServer(t)
 		cause := fmt.Errorf("lost connection to %s", shopEnv()["SHOP_PG_URL"])
 		db := &fakeScanDB{listErr: cause}
 		stubOpenSchemaScan(t, func(dbcopy.BackendRef, context.Context) (dbcopy.SchemaScanDB, error) { return db, nil })
-		_, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres, Host: "h"}, newShopParams(t))
+		_, err := scanDbCatalog(datatug.ServerRef{Driver: DriverPostgres}, newShopParams(t))
 		if assert.Error(t, err) {
 			assert.ErrorContains(t, err, "failed to get dbCatalog metadata")
 			assert.EqualError(t, err, `failed to get dbCatalog metadata: open postgres source "env:SHOP_PG_URL": the driver could not open the source (its own message is not shown: a driver can quote the connection string)`)

@@ -742,17 +742,19 @@ func TestSaveScannedProject_RescanFailures(t *testing.T) {
 	}
 	rescan := rescanScan{env: "dev", tables: []*datatug.CollectionInfo{rescanTable("Customer", "id")}}
 
+	// The catalog is recorded by the scan that scanTwo made, so what follows is a rescan:
+	// the first scan of a catalog has none of its own to take back, and lists nothing.
 	t.Run("the model folder cannot be listed", func(t *testing.T) {
-		projectDir := t.TempDir()
-		require.NoError(t, os.MkdirAll(filepath.Join(projectDir, "dbmodels"), 0o755))
+		projectDir := scanTwo(t)
+		require.NoError(t, os.RemoveAll(filepath.Join(projectDir, "dbmodels", "shop")))
 		require.NoError(t, os.WriteFile(filepath.Join(projectDir, "dbmodels", "shop"), []byte("a file where the model folder belongs"), 0o600))
 		_, err := rescan.save(t, projectDir)
 		assert.ErrorContains(t, err, `failed to list the schemas of database model "shop"`)
 	})
 
 	t.Run("the tables folder cannot be listed", func(t *testing.T) {
-		projectDir := t.TempDir()
-		require.NoError(t, os.MkdirAll(filepath.Join(projectDir, "dbmodels", "shop", "main"), 0o755))
+		projectDir := scanTwo(t)
+		require.NoError(t, os.RemoveAll(filepath.Join(projectDir, "dbmodels", "shop", "main", "tables")))
 		require.NoError(t, os.WriteFile(filepath.Join(projectDir, "dbmodels", "shop", "main", "tables"), []byte("a file where the folder belongs"), 0o600))
 		_, err := rescan.save(t, projectDir)
 		assert.ErrorContains(t, err, `failed to list the tables of schema "main" of database model "shop"`)
@@ -1035,7 +1037,31 @@ func TestCheckScanNamesAgainstProject(t *testing.T) {
 			assert.ErrorContains(t, err, "one folder")
 		})
 	}
+
+	// A project made on a file system that tells the case of a name apart can hold two
+	// models that differ only by case. A scan of the model that is there under its own name
+	// means that folder, and is not refused for the other one; a name that neither is, but
+	// differs from them by case, is still refused, naming the first.
+	t.Run("a project that has the very name, and another that differs by case", func(t *testing.T) {
+		setSeam(t, &scanReadDir, func(string) ([]os.DirEntry, error) {
+			return []os.DirEntry{namedEntry("Shop"), namedEntry("shop"), namedEntry("SHOP")}, nil
+		})
+		assert.NoError(t, CheckScanNamesAgainstProject(projectDir, "dev", "x", "shop"), "shop is there as it is written")
+		assert.NoError(t, CheckScanNamesAgainstProject(projectDir, "dev", "x", "Shop"))
+		assert.NoError(t, CheckScanNamesAgainstProject(projectDir, "dev", "x", "SHOP"))
+		err := CheckScanNamesAgainstProject(projectDir, "dev", "x", "sHop")
+		require.Error(t, err)
+		assert.ErrorContains(t, err, `database model "Shop"`, "the first the folder lists")
+	})
 }
+
+// namedEntry is a folder entry of a given name.
+type namedEntry string
+
+func (e namedEntry) Name() string             { return string(e) }
+func (namedEntry) IsDir() bool                { return true }
+func (namedEntry) Type() fs.FileMode          { return fs.ModeDir }
+func (namedEntry) Info() (fs.FileInfo, error) { return nil, errors.New("no info") }
 
 // A scan of one database must not take what another database of the project wrote for its
 // own, whatever the file system does with the case of a name: on one that does not tell

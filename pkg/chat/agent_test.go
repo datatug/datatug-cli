@@ -526,6 +526,22 @@ func TestAIConversation_AppliesThinkingLevelToRequests(t *testing.T) {
 	}
 }
 
+func TestAIConversation_AppliesHostedModelToEveryRequest(t *testing.T) {
+	llm := &scriptedProvider{steps: []scriptedStep{{text: "first"}, {text: "second"}}}
+	conversation, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///fixture.db", "- Customer", WithHostedModel("opaque-hosted-model"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, prompt := range []string{"first question", "second question"} {
+		if _, err := conversation.Ask(context.Background(), prompt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(llm.requests) != 2 || llm.requests[0].Model != "opaque-hosted-model" || llm.requests[1].Model != "opaque-hosted-model" {
+		t.Fatalf("selected model did not reach each request: %+v", llm.requests)
+	}
+}
+
 func TestAIConversationRebuildsEachTurnFromExplicitContext(t *testing.T) {
 	llm := &scriptedProvider{steps: []scriptedStep{{text: "First answer"}, {text: "Second answer"}}}
 	conversation, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///fixture.db", "- Customer")

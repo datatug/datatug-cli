@@ -257,6 +257,7 @@ type AIConversation struct {
 	sources               map[string]string
 	tools                 []ai.Tool
 	reasoning             string
+	model                 string
 	// narrower, when set, narrows the schema context to the tables a decision
 	// selects before each turn's model is asked; instructionFor rebuilds the
 	// system instruction around that narrowed context.
@@ -287,6 +288,7 @@ type AIConversation struct {
 
 type conversationConfig struct {
 	reasoning             string
+	model                 string
 	browserInterpretation bool
 	sources               map[string]string
 	narrower              TableNarrower
@@ -350,6 +352,15 @@ func WithThinkingLevel(level string) Option {
 			return err
 		}
 		config.reasoning = reasoning
+		return nil
+	}
+}
+
+// WithHostedModel selects one opaque model ID for every call in a turn. An
+// empty value leaves model selection to the serving cloud.
+func WithHostedModel(model string) Option {
+	return func(config *conversationConfig) error {
+		config.model = model
 		return nil
 	}
 }
@@ -433,6 +444,7 @@ func NewAIConversation(provider ai.LLMProvider, executor DTQLExecutor, sourceURL
 		browserInterpretation: config.browserInterpretation,
 		sources:               config.sources,
 		reasoning:             config.reasoning,
+		model:                 config.model,
 		narrower:              config.narrower,
 		instructionFor:        buildInstruction,
 	}
@@ -930,6 +942,7 @@ func (c *AIConversation) buildRequestWith(ctx context.Context, system string, to
 		Messages:      []ai.Message{{Role: ai.RoleUser, Text: prompt}},
 		Tools:         tools,
 		Reasoning:     c.reasoning,
+		Model:         c.model,
 		ClientContext: clientContextFrom(ctx),
 	}
 }

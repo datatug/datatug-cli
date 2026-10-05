@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -36,6 +37,56 @@ func newTestChatUI(t *testing.T, agent ContextualConversation, turns ...Turn) (*
 	// viewport scroll position.
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 60})
 	return u, sessions
+}
+
+func TestChatUIPlanCommandRefreshesHostedUsage(t *testing.T) {
+	u, _ := newTestChatUI(t, nil)
+	// Direct-provider chat has no hosted plan lookup.
+	drainCmd(t, u, u.Submit("/plan"))
+	if !strings.Contains(flattenView(u.shell.View().Content), "available in hosted cloud chat") {
+		t.Fatal("direct-provider /plan did not explain its scope")
+	}
+	var calls int
+	u.SetHostedPlanLookup(func(context.Context) (string, error) {
+		calls++
+		if calls == 2 {
+			return "", errors.New("usage temporarily unavailable")
+		}
+		return "3 of 7 questions left", nil
+	})
+	drainCmd(t, u, u.Submit("/plan extra"))
+	if calls != 0 || !strings.Contains(flattenView(u.shell.View().Content), "usage: /plan") {
+		t.Fatal("/plan accepted arguments")
+	}
+	command := u.Submit("/plan")
+	if command == nil || calls != 0 {
+		t.Fatal("/plan performed its lookup on the UI update path")
+	}
+	drainCmd(t, u, command)
+	if calls != 1 || !strings.Contains(flattenView(u.shell.View().Content), "3 of 7 questions left") {
+		t.Fatal("/plan did not display refreshed usage")
+	}
+	drainCmd(t, u, u.Submit("/plan"))
+	if calls != 2 || !strings.Contains(flattenView(u.shell.View().Content), "usage is temporarily unavailable") {
+		t.Fatal("/plan did not explain a failed refresh")
+	}
+}
+
+func TestChatUIRefreshesHostedUsageAfterSuccessfulTurn(t *testing.T) {
+	u, _ := newTestChatUI(t, nil, Turn{Text: "answer"})
+	var calls int
+	u.SetHostedPlanLookup(func(context.Context) (string, error) {
+		calls++
+		return "Hosted AI: 2 of 7 questions left", nil
+	})
+	drainCmd(t, u, u.Submit("question"))
+	if calls != 1 || !strings.Contains(flattenView(u.shell.View().Content), "2 of 7 questions left") {
+		t.Fatalf("usage not refreshed after answer: calls=%d", calls)
+	}
+	u.OnMsg(hostedPlanMsg{err: errors.New("unavailable")})
+	if !strings.Contains(flattenView(u.shell.View().Content), "usage is temporarily unavailable") {
+		t.Fatal("failed refresh did not explain unavailable usage")
+	}
 }
 
 // flattenView strips ANSI styling and theme.Card's own box-drawing border

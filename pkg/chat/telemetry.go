@@ -48,18 +48,18 @@ func (c *SessionChat) ConfigureTelemetry(reporter InteractionReporter, base ai.C
 var newUUID = clientctx.NewUUID
 
 func (c *SessionChat) turnContext(ctx context.Context) (context.Context, string, *ai.ClientContext) {
-	if c.reporter == nil {
-		return ctx, "", nil
-	}
 	id, err := newUUID()
 	if err != nil {
 		return ctx, "", nil
+	}
+	ctx = cloud.WithInteractionID(ctx, id)
+	if c.reporter == nil {
+		return ctx, id, nil
 	}
 	client := c.clientContext
 	// DataTug's durable chat session is its conversation identity. There is
 	// no separate application session ID, so we do not invent one.
 	client.ConversationID = c.activeID
-	ctx = cloud.WithInteractionID(ctx, id)
 	return withClientContext(ctx, &client), id, &client
 }
 

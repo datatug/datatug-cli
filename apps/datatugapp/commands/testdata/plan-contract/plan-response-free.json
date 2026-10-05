@@ -1,0 +1,57 @@
+{
+  "v": 1,
+  "payer": "personal",
+  "accountId": "p7Xk2",
+  "accountTitle": "Alex Example",
+  "role": "owner",
+  "plan": "free",
+  "effectivePlan": "free",
+  "status": "none",
+  "period": "none",
+  "founding": false,
+  "limits": {
+    "contributors": 1,
+    "projectGuests": 2,
+    "aiQuestions": 7,
+    "aiModelClasses": [
+      "fast"
+    ],
+    "aiPaysFor": "owner"
+  },
+  "ai": {
+    "unit": "questions",
+    "enforced": true,
+    "periodId": "2026-03",
+    "used": 3,
+    "limit": 7,
+    "left": 4,
+    "resetsAt": "2026-04-01T00:00:00Z",
+    "today": {
+      "used": 3,
+      "limit": 17
+    },
+    "blocked": null,
+    "models": [
+      {
+        "id": "example-fast",
+        "class": "fast",
+        "weight": 1,
+        "default": true
+      }
+    ]
+  },
+  "ownKeyWorks": true,
+  "canUpgrade": true,
+  "upgradeUrl": "https://example.com/pricing",
+  "supportEmail": "support@example.com",
+  "accounts": [
+    {
+      "accountId": "p7Xk2",
+      "kind": "personal",
+      "title": "Alex Example",
+      "plan": "free",
+      "role": "owner",
+      "pays": true
+    }
+  ]
+}

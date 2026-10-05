@@ -303,6 +303,9 @@ func (f *fakeAICloud) handler(t *testing.T) http.Handler {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		switch strings.TrimPrefix(r.URL.Path, "/v0/") {
+		case "datatug/plan":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(contractFixture(t, "plan-response-free.json"))
 		case cloudproto.PathScore:
 			var req cloudproto.ScoreRequest
 			assert.NoError(t, json.NewDecoder(r.Body).Decode(&req))
@@ -673,7 +676,13 @@ func TestChatNarrowingConfigurationProblemsAreWarnings(t *testing.T) {
 	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) { return nil, nil }))
 	restoreSettings := getChatSettings
 	t.Cleanup(func() { getChatSettings = restoreSettings })
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) }))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v0/datatug/plan" {
+			_, _ = w.Write(contractFixture(t, "plan-response-free.json"))
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
 	t.Cleanup(srv.Close)
 	dir, database := narrowingProject(t)
 	writeRules(t, dir, "rules:\n  - phrase: x\n    tabels: [Invoice]\n")
@@ -723,33 +732,35 @@ func TestSessionNoticesAreShownInsideTheChat(t *testing.T) {
 		covDSetVar(t, &chatGetenv, narrowingEnv(map[string]string{"DATATUG_AI_DECISION_PROVIDER": "auto"}))
 		dir, database := narrowingProject(t)
 		stderr := runThroughChat(t, &fakeAICloud{probs: probs}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}})
-		require.Len(t, lastSessionNotices, 1)
-		assert.Contains(t, lastSessionNotices[0], "Table narrowing: the cloud decision engine is ON (enabled by the DATATUG_AI_DECISION_PROVIDER environment variable)")
-		assert.Contains(t, stderr, strings.TrimPrefix(lastSessionNotices[0], "Table narrowing: "), "stderr keeps the same line for non-TUI runs")
+		require.Len(t, lastSessionNotices, 2)
+		assert.Contains(t, lastSessionNotices[0], "Hosted AI payer:")
+		assert.Contains(t, lastSessionNotices[1], "Table narrowing: the cloud decision engine is ON (enabled by the DATATUG_AI_DECISION_PROVIDER environment variable)")
+		assert.Contains(t, stderr, strings.TrimPrefix(lastSessionNotices[1], "Table narrowing: "), "stderr keeps the same line for non-TUI runs")
 	})
 	t.Run("engine on via consent", func(t *testing.T) {
 		covDSetVar(t, &chatGetenv, narrowingEnv(nil))
 		dir, database := narrowingProject(t)
 		writeRules(t, dir, "decision: auto\n")
 		runThroughChat(t, &fakeAICloud{probs: probs}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}, flag: "allow"})
-		require.Len(t, lastSessionNotices, 1)
-		assert.Contains(t, lastSessionNotices[0], "is ON (enabled by your consent for this project")
+		require.Len(t, lastSessionNotices, 2)
+		assert.Contains(t, lastSessionNotices[1], "is ON (enabled by your consent for this project")
 	})
 	t.Run("project request without consent", func(t *testing.T) {
 		covDSetVar(t, &chatGetenv, narrowingEnv(nil))
 		dir, database := narrowingProject(t)
 		writeRules(t, dir, "decision: cloud\n")
 		runThroughChat(t, &fakeAICloud{}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}})
-		require.Len(t, lastSessionNotices, 1)
-		assert.Contains(t, lastSessionNotices[0], "NOT enabled")
-		assert.Contains(t, lastSessionNotices[0], "datatug chat --cloud-decision allow")
+		require.Len(t, lastSessionNotices, 2)
+		assert.Contains(t, lastSessionNotices[1], "NOT enabled")
+		assert.Contains(t, lastSessionNotices[1], "datatug chat --cloud-decision allow")
 	})
 	t.Run("disabled: nothing", func(t *testing.T) {
 		covDSetVar(t, &chatGetenv, narrowingEnv(map[string]string{"DATATUG_AI_DECISION_PROVIDER": "disabled"}))
 		dir, database := narrowingProject(t)
 		writeRules(t, dir, "decision: auto\n")
 		runThroughChat(t, &fakeAICloud{}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}})
-		assert.Empty(t, lastSessionNotices)
+		require.Len(t, lastSessionNotices, 1)
+		assert.Contains(t, lastSessionNotices[0], "Hosted AI payer:")
 	})
 	t.Run("rule warnings and an unreadable consent store, after the notice", func(t *testing.T) {
 		covDSetVar(t, &chatGetenv, narrowingEnv(nil))
@@ -760,10 +771,10 @@ func TestSessionNoticesAreShownInsideTheChat(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
 		require.NoError(t, os.WriteFile(path, []byte("{broken"), 0o600))
 		runThroughChat(t, &fakeAICloud{}, chatRun{dir: dir, database: database, questions: []string{musicQuestion}})
-		require.Len(t, lastSessionNotices, 3)
-		assert.Contains(t, lastSessionNotices[0], "Warning: table narrowing: "+path+" is not readable")
-		assert.Contains(t, lastSessionNotices[1], "Table narrowing: this project's")
-		assert.Contains(t, lastSessionNotices[2], "Warning: table narrowing: table rule 1")
+		require.Len(t, lastSessionNotices, 4)
+		assert.Contains(t, lastSessionNotices[1], "Warning: table narrowing: "+path+" is not readable")
+		assert.Contains(t, lastSessionNotices[2], "Table narrowing: this project's")
+		assert.Contains(t, lastSessionNotices[3], "Warning: table narrowing: table rule 1")
 	})
 }
 

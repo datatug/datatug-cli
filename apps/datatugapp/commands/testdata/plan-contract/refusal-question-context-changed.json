@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "question_context_changed",
+    "message": "This question belongs to a different payer or product. Start a new question with a fresh UUID for the account you selected, or use your own key. If your client uses a derived question key, send a genuinely new message or wait for its current window to end."
+  }
+}

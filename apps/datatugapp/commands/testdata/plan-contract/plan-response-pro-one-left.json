@@ -1,0 +1,72 @@
+{
+  "v": 1,
+  "payer": "personal",
+  "accountId": "p7Xk2",
+  "accountTitle": "Alex Example",
+  "role": "owner",
+  "plan": "pro",
+  "effectivePlan": "pro",
+  "status": "active",
+  "period": "month",
+  "paidUntil": "2026-03-20T10:12:00Z",
+  "founding": false,
+  "limits": {
+    "contributors": 1,
+    "projectGuests": 3,
+    "aiQuestions": 11,
+    "aiModelClasses": [
+      "fast",
+      "standard"
+    ],
+    "aiPaysFor": "owner"
+  },
+  "ai": {
+    "unit": "questions",
+    "enforced": true,
+    "periodId": "2026-03",
+    "used": 10,
+    "limit": 11,
+    "left": 1,
+    "resetsAt": "2026-04-01T00:00:00Z",
+    "today": {
+      "used": 4,
+      "limit": 17
+    },
+    "blocked": null,
+    "models": [
+      {
+        "id": "example-fast",
+        "class": "fast",
+        "weight": 1,
+        "default": true
+      },
+      {
+        "id": "example-fast-b",
+        "class": "fast",
+        "weight": 1,
+        "default": false
+      },
+      {
+        "id": "example-standard",
+        "class": "standard",
+        "weight": 3,
+        "default": false
+      }
+    ]
+  },
+  "ownKeyWorks": true,
+  "canUpgrade": true,
+  "upgradeUrl": "https://example.com/pricing",
+  "manageUrl": "https://billing.example/p/login/abc",
+  "supportEmail": "support@example.com",
+  "accounts": [
+    {
+      "accountId": "p7Xk2",
+      "kind": "personal",
+      "title": "Alex Example",
+      "plan": "pro",
+      "role": "owner",
+      "pays": true
+    }
+  ]
+}

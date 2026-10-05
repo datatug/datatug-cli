@@ -24,7 +24,8 @@ The commands are:
 - `connect --auth google --ledger <absolute-private-directory>` deliberately
   opens Google consent using the existing credential storage owner. Its callback
   binds IPv4 loopback before browser launch, uses random state and PKCE, admits
-  one matching GET callback, and closes under a bounded context. Read-only plus
+  one matching GET callback, launches an owned cancellable OS opener, and closes
+  its listener and accepted HTTP connections under a bounded context. Read-only plus
   `openid` is the baseline; `--enable-cancellation` separately requests BigQuery
   scope. It separately attests the fresh consent token and stored credential and
   refuses success if their account/grant bindings differ. Other operations never
@@ -38,7 +39,8 @@ The commands are:
 - `run` accepts `--preview` and exact `--approve-digest`, with the same protected
   source/query/context. It reauthorizes and rechecks before one submission and
   emits the first typed page. `--receipt-out` writes only receipt/cursor to a
-  private `receipt-*.json` artifact within the ledger directory, without rows.
+  private `receipt-*.json` artifact within the ledger directory, without rows. Artifacts are committed before stdout, and operation, persistence
+  and output failures remain distinct.
 - `page --receipt <receipt-or-page-json>` reads the next page of that job.
   `--cursor` can supply the original opaque cursor separately. `--reconnect` is
   deliberate same-subject reauthorization, preserving original approval,
@@ -52,6 +54,8 @@ No cap/row/page/wall bound can be renewed through a continuation flag. Ctrl-C,
 local close and expiry keep known job receipts or `submission_unknown`; cancellation
 is never inferred from stopping local waiting. Error output preserves existing
 receipt authority when available and never includes raw service errors or tokens.
+Policy stderr contains policy/rule/field metadata, never predicate literals,
+bindings or explanations; explicit preview JSON retains the requested parameters.
 Output is `--format json` only. Preview recovery is bounded to 2 MiB and page
 recovery to 5 MiB; compact receipt artifacts retain the 256 KiB input bound.
 

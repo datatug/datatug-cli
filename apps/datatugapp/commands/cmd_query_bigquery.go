@@ -134,6 +134,76 @@ func bigQueryPolicyOptions(cmd *cobra.Command) (accesspolicies.Options, error) {
 	}
 	return accesspolicies.Options{Principal: principal, Variables: variables, Policies: loaded, Unrestricted: none}, nil
 }
+
+// BigQuery diagnostics expose policy/rule/field metadata only. Condition,
+// Bindings, Via and Explanation can contain literal or caller values and belong
+// solely to the explicitly requested preview, never stderr.
+func bigQueryPolicyDiagnostic(line accesspolicies.Line) string {
+	decision := "denies"
+	if line.Allowed {
+		decision = "allows"
+	}
+	var report strings.Builder
+	fmt.Fprintf(&report, "access: policy %q rule %q %s query", line.Policy, line.Rule, decision)
+	if len(line.FieldLists) > 0 {
+		fmt.Fprintf(&report, "; fields %q", line.FieldLists)
+	}
+	if line.Condition != "" {
+		report.WriteString("; predicate applied (values redacted)")
+	}
+	return report.String()
+}
+
+type bigQuerySurfaceError struct {
+	message string
+	cause   error
+}
+
+func (e *bigQuerySurfaceError) Error() string { return e.message }
+func (e *bigQuerySurfaceError) Unwrap() error { return e.cause }
+func (*bigQuerySurfaceError) ExitCode() int   { return exitCodeDatabase }
+
+// Commit the private recovery handle independently of the output stream. Keep
+// operation, persistence and stdout failures together, with safe diagnostics.
+func writeBigQueryResult(cmd *cobra.Command, value any, previewOut, receiptOut, dir string) error {
+	var exportError error
+	if previewOut != "" || receiptOut != "" {
+		path, artifact := previewOut, value
+		if receiptOut != "" {
+			path = receiptOut
+			switch v := value.(type) {
+			case bigquery.Page:
+				v.Rows = nil
+				v.Schema = nil
+				artifact = v
+			case bigQueryControl:
+				v.Rows = nil
+				v.Schema = nil
+				artifact = v
+			default:
+				exportError = bigqueryread.ErrInput
+			}
+		}
+		if exportError == nil {
+			_, exportError = bigQueryDeps.ledger(dir)
+		}
+		if exportError == nil {
+			exportError = writeBigQueryExport(path, artifact, dir)
+		}
+		if exportError != nil {
+			exportError = &bigQuerySurfaceError{"BigQuery private recovery artifact failed", exportError}
+		}
+	}
+	var outputError error
+	if err := json.NewEncoder(cmd.OutOrStdout()).Encode(value); err != nil {
+		outputError = &bigQuerySurfaceError{"BigQuery result output failed", err}
+	}
+	return errors.Join(exportError, outputError)
+}
+func finishBigQueryResult(value any, operationError error, write func(any) error) error {
+	return errors.Join(bigQueryFailure(operationError), write(value))
+}
+
 func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 	f := cmd.Flags()
 	file, _ := f.GetString("file")
@@ -173,6 +243,7 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 	if receiptOut != "" && (!validBigQueryExport(receiptOut, dir, "receipt-") || operation == "preview" || operation == "connect") {
 		return Exit("--receipt-out requires receipt-*.json in the private ledger directory", exitCodeUsage)
 	}
+	write := func(value any) error { return writeBigQueryResult(cmd, value, previewOut, receiptOut, dir) }
 	if operation == "connect" {
 		if auth != "google" {
 			return Exit("connect uses --auth google; configure user ADC explicitly outside DataTug for --auth adc", exitCodeUsage)
@@ -227,7 +298,7 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 	}
 	recoverError := func(e error) error {
 		if previous.Receipt.RunID != "" {
-			_ = json.NewEncoder(cmd.OutOrStdout()).Encode(previous)
+			return finishBigQueryResult(previous, e, write)
 		}
 		return bigQueryFailure(e)
 	}
@@ -245,8 +316,7 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 	}
 	if project, _ := f.GetString("execution-project"); project != "" && previous.Receipt.RunID != "" {
 		if previous.Receipt.Job == nil || previous.Receipt.Job.ProjectID != project {
-			_ = json.NewEncoder(cmd.OutOrStdout()).Encode(previous)
-			return Exit("execution project changed; existing job cannot be rerouted", exitCodeUsage)
+			return finishBigQueryResult(previous, Exit("execution project changed; existing job cannot be rerouted", exitCodeUsage), write)
 		}
 	}
 	cursorOverride, _ := f.GetString("cursor")
@@ -271,7 +341,7 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 		return recoverError(err)
 	}
 	for _, line := range lines {
-		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), line.String())
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), bigQueryPolicyDiagnostic(line))
 	}
 	ledger, err := bigQueryDeps.ledger(dir)
 	if err != nil {
@@ -285,32 +355,10 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 	if err != nil {
 		return recoverError(err)
 	}
-	write := func(value any) error {
-		if err := json.NewEncoder(cmd.OutOrStdout()).Encode(value); err != nil {
-			return err
-		}
-		if previewOut != "" {
-			return writeBigQueryExport(previewOut, value, dir)
-		}
-		if receiptOut != "" {
-			var page bigquery.Page
-			switch v := value.(type) {
-			case bigquery.Page:
-				page = v
-			case bigQueryControl:
-				page = v.Page
-			}
-			page.Rows = nil
-			page.Schema = nil
-			return writeBigQueryExport(receiptOut, page, dir)
-		}
-		return nil
-	}
 	if reconnect {
 		rotated, e := client.RebindJob(cmd.Context(), previous.Receipt, previous.Cursor)
 		if e != nil {
-			_ = write(previous)
-			return bigQueryFailure(e)
+			return finishBigQueryResult(previous, e, write)
 		}
 		previous.Receipt = rotated.Receipt
 		previous.Cursor = rotated.Cursor
@@ -338,7 +386,7 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 		if e != nil {
 			return bigQueryFailure(e)
 		}
-		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "execution: Google subject %s; project %s; estimate %s bytes; maximum %s bytes; approval %s\n", preview.Execution.Principal.Subject, project, preview.EstimatedBytes, cap, preview.ApprovalDigest)
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "execution: estimate %s bytes; maximum %s bytes; approval %s (review identity and source in preview JSON)\n", preview.EstimatedBytes, cap, preview.ApprovalDigest)
 		return write(preview)
 	case "run":
 		project, _ := f.GetString("execution-project")
@@ -355,32 +403,27 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 	case "page":
 		run, e := client.Resume(cmd.Context(), previous.Receipt, previous.Cursor)
 		if run == nil {
-			_ = write(previous)
-			return bigQueryFailure(e)
+			return finishBigQueryResult(previous, e, write)
 		}
 		return writeBigQueryRun(run, e, write)
 	case "status":
 		if previous.Receipt.Job == nil {
-			return Exit("submission is unresolved; no verified job reference exists", exitCodeDatabase)
+			return finishBigQueryResult(previous, Exit("submission is unresolved; no verified job reference exists", exitCodeDatabase), write)
 		}
 		status, e := client.Status(cmd.Context(), *previous.Receipt.Job)
-		if e != nil {
-			_ = write(previous)
-			return bigQueryFailure(e)
+		if status.State != "" {
+			previous.Status = &status
 		}
-		previous.Status = &status
-		return write(previous)
+		return finishBigQueryResult(previous, e, write)
 	case "cancel":
 		if previous.Receipt.Job == nil {
-			return Exit("no verified job reference to cancel", exitCodeDatabase)
+			return finishBigQueryResult(previous, Exit("no verified job reference to cancel", exitCodeDatabase), write)
 		}
 		result, e := client.CancelJob(cmd.Context(), *previous.Receipt.Job)
-		if e != nil {
-			_ = write(previous)
-			return bigQueryFailure(e)
+		if result.State != "" {
+			previous.Cancel = &result
 		}
-		previous.Cancel = &result
-		return write(previous)
+		return finishBigQueryResult(previous, e, write)
 	}
 	return errors.New("unknown BigQuery operation")
 }
@@ -411,13 +454,7 @@ func writeBigQueryRun(run *bigquery.Run, operationError error, write func(any) e
 	if cursorErr == nil {
 		page.Cursor = cursor
 	}
-	if err := write(page); err != nil {
-		return err
-	}
-	if operationError != nil {
-		return bigQueryFailure(operationError)
-	}
-	return cursorErr
+	return errors.Join(bigQueryFailure(operationError), bigQueryFailure(cursorErr), write(page))
 }
 
 // Errors never disclose query/parameter/token values or raw provider responses.
@@ -434,6 +471,10 @@ func bigQueryFailure(err error) error {
 		return Exit("unsupported or invalid BigQuery query", exitCodeUsage)
 	case errors.Is(err, bigqueryread.ErrIdentity):
 		return Exit(err.Error(), exitCodeDatabase)
+	}
+	var exitCoder ExitCoder
+	if errors.As(err, &exitCoder) {
+		return err
 	}
 	var stable *bigquery.Error
 	if errors.As(err, &stable) {

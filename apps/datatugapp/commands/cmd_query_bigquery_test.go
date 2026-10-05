@@ -524,3 +524,93 @@ func TestBigQueryCobraInvalidSourceRetainsKnownReceipt(t *testing.T) {
 		t.Fatal(err, string(raw), h.requests, before)
 	}
 }
+
+func TestBigQueryCobraDiagnosticsRedactPolicyVariablesAndLiterals(t *testing.T) {
+	h := newCliBQHarness(t)
+	raw, err := os.ReadFile(h.policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := `where:
+      op: "=="
+      left: {field: ownerID}
+      right: {param: currentUser}`
+	replacement := `where:
+      and:
+      - {op: ==, left: {field: ownerID}, right: {param: currentUser}}
+      - {op: ==, left: {field: ownerID}, right: {param: policyvar}}
+      - {op: ==, left: {field: ownerID}, right: {value: private-policy-literal-fixture}}`
+	if !strings.Contains(string(raw), original) {
+		t.Fatal("policy fixture changed")
+	}
+	if err = os.WriteFile(h.policy, []byte(strings.Replace(string(raw), original, replacement, 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	root := &cobra.Command{Use: "datatug", SilenceErrors: true, SilenceUsage: true}
+	root.AddCommand(queryCommand())
+	root.SetArgs([]string{"query", "bigquery", "preview", "--file", h.file, "--ledger", h.dir, "--auth", "adc", "--policy", h.policy, "--policies-dir", h.dir + "/policies", "--as", "private-policy-binding-fixture", "--var", `min="10"`, "--var", `policyvar="private-policy-variable-fixture"`, "--execution-project", "job-project", "--maximum-bytes-billed", "1000"})
+	var out, diag bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&diag)
+	if err = root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"private-policy-binding-fixture", "private-policy-variable-fixture", "private-policy-literal-fixture"} {
+		if strings.Contains(diag.String(), marker) || !strings.Contains(out.String(), marker) {
+			t.Fatal("diagnostic leaked or preview omitted deliberate parameter", marker, diag.String())
+		}
+	}
+	if !strings.Contains(diag.String(), `policy "fixture" rule "own" allows`) || !strings.Contains(diag.String(), "fields") {
+		t.Fatal("useful policy metadata lost", diag.String())
+	}
+}
+
+type bigQueryBrokenOutput struct{}
+
+func (bigQueryBrokenOutput) Write([]byte) (int, error) { return 0, os.ErrClosed }
+func TestBigQueryCobraRecoveryBeforeBrokenOutput(t *testing.T) {
+	for _, failure := range []string{"", "ambiguous", "malformed"} {
+		t.Run(failure, func(t *testing.T) {
+			h := newCliBQHarness(t)
+			preview, previewPath := h.preview()
+			h.failure = failure
+			receiptPath := filepath.Join(h.dir, "receipt-recovery.json")
+			root := &cobra.Command{Use: "datatug", SilenceErrors: true, SilenceUsage: true}
+			root.AddCommand(queryCommand())
+			root.SetArgs([]string{"query", "bigquery", "run", "--file", h.file, "--ledger", h.dir, "--auth", "adc", "--policy", h.policy, "--policies-dir", h.dir + "/policies", "--as", "alice", "--var", `min="10"`, "--preview", previewPath, "--approve-digest", preview.ApprovalDigest, "--receipt-out", receiptPath})
+			root.SetOut(bigQueryBrokenOutput{})
+			root.SetErr(io.Discard)
+			err := root.Execute()
+			if !errors.Is(err, os.ErrClosed) || !strings.Contains(err.Error(), "result output failed") || h.paid != 1 {
+				t.Fatal(err, h.paid)
+			}
+			raw, readError := os.ReadFile(receiptPath)
+			var result bigquery.Page
+			if readError != nil || json.Unmarshal(raw, &result) != nil || result.Receipt.RunID == "" || len(result.Rows) != 0 {
+				t.Fatal(readError, string(raw))
+			}
+			if failure == "ambiguous" && (!strings.Contains(err.Error(), "submission_unknown") || result.Receipt.State != "submission_unknown") {
+				t.Fatal(err, result)
+			}
+			if failure == "malformed" && (!strings.Contains(err.Error(), "malformed_wire") || result.Receipt.Job == nil) {
+				t.Fatal(err, result)
+			}
+			if failure == "" && (result.Receipt.Job == nil || result.Cursor == "") {
+				t.Fatal(result)
+			}
+		})
+	}
+}
+func TestBigQueryResultRetainsPersistenceAndOutputErrors(t *testing.T) {
+	h := newCliBQHarness(t)
+	obstructed := filepath.Join(h.dir, "receipt-blocked.json")
+	if err := os.Mkdir(obstructed, 0700); err != nil {
+		t.Fatal(err)
+	}
+	cmd := &cobra.Command{}
+	cmd.SetOut(bigQueryBrokenOutput{})
+	err := writeBigQueryResult(cmd, bigquery.Page{}, "", obstructed, h.dir)
+	if !errors.Is(err, os.ErrClosed) || !errors.Is(err, bigqueryread.ErrInput) || !strings.Contains(err.Error(), "private recovery artifact failed") || !strings.Contains(err.Error(), "result output failed") {
+		t.Fatal(err)
+	}
+}

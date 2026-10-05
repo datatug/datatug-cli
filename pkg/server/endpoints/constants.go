@@ -55,6 +55,11 @@ func fillProjectRef(ref *dto.ProjectRef, q url.Values) error {
 	if ref.ProjectID == "" {
 		return nil
 	}
+	// A project that is neither served nor a plain name is refused here, with an answer
+	// that names the project and nothing of it, before a store is resolved for it.
+	if err := api.ValidateProjectIdentifier("project", ref.ProjectID); err != nil {
+		return err
+	}
 	storeID, err := api.ResolveStoreID(q.Get(urlParamStoreID), ref.ProjectID)
 	if err != nil {
 		return err
@@ -110,6 +115,9 @@ func projectRefByID(q url.Values) (ref dto.ProjectRef, err error) {
 	ref.ProjectID = q.Get(urlParamID)
 	if ref.ProjectID == "" {
 		return ref, nil
+	}
+	if err = api.ValidateProjectIdentifier("project", ref.ProjectID); err != nil {
+		return ref, err
 	}
 	storeID, err := api.ResolveStoreID(q.Get(urlParamStoreID), ref.ProjectID)
 	if err != nil {

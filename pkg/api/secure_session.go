@@ -238,6 +238,9 @@ func ProjectDir(projectID string) (string, bool) {
 // same storeID convention RunQuery/ExecuteSelect already use
 // (storage.NewDatatugStore("")), for resolver calls that need one.
 func ProjectStoreFor(projectID string) (datatug.ProjectStore, error) {
+	if err := ValidateProjectIdentifier("project", projectID); err != nil {
+		return nil, err
+	}
 	store, err := storage.NewDatatugStore("")
 	if err != nil {
 		return nil, err

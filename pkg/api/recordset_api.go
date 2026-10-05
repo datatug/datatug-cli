@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/strongo/validation"
@@ -14,6 +15,9 @@ import (
 func GetRecordsetsSummary(ctx context.Context, ref dto.ProjectRef) (*dto.ProjRecordsetSummary, error) {
 	if ref.ProjectID == "" {
 		return nil, validation.NewErrRequestIsMissingRequiredField("project")
+	}
+	if err := ValidateProjectIdentifier("project", ref.ProjectID); err != nil {
+		return nil, err
 	}
 	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
@@ -75,13 +79,24 @@ func getRecordsetFolder(folder *dto.ProjRecordsetSummary, paths []string) *dto.P
 	return folder
 }
 
-// GetDatasetDefinition returns definition of a dataset by ID
+// recordsetIDField is the field the refusal of a recordset definition ID names.
+const recordsetIDField = "recordsetID"
+
+// GetDatasetDefinition returns definition of a dataset by ID. The ID is the folders
+// and the name of the definition under the project's recordsets, joined into a path
+// by the store, so each must be a plain name before the store is asked.
 func GetDatasetDefinition(ctx context.Context, ref dto.ProjectItemRef) (dataset *datatug.RecordsetDefinition, err error) {
+	if err = validateProjectPathItem(ref.ProjectID, recordsetIDField, ref.ID); err != nil {
+		return nil, err
+	}
 	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	return store.LoadRecordsetDefinition(ctx, ref.ID)
+	if dataset, err = store.LoadRecordsetDefinition(ctx, ref.ID); err != nil {
+		return nil, itemNotFound("recordset", dbcopy.QueryIDDisplay(ref.ID), err)
+	}
+	return dataset, nil
 }
 
 // GetRecordset saves board
@@ -114,7 +129,12 @@ func (v RecordsetRequestParams) Validate() error {
 	if v.Recordset == "" {
 		return validation.NewErrRequestIsMissingRequiredField("recordset")
 	}
-	return nil
+	// The routes that take these are not implemented yet; the recordset is named by the
+	// same rule as a definition's ID for the day they are.
+	if err := ValidateProjectIdentifier("project", v.Project); err != nil {
+		return err
+	}
+	return ValidatePathIdentifier("recordset", v.Recordset)
 }
 
 // Validate returns error if not valid

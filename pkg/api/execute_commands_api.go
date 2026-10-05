@@ -47,6 +47,9 @@ func (v ExecuteCommandsRequest) Validate() error {
 	if len(v.Commands) == 0 {
 		return validation.NewErrRequestIsMissingRequiredField("commands")
 	}
+	if err := ValidateProjectIdentifier("project", v.Project); err != nil {
+		return err
+	}
 	for i, c := range v.Commands {
 		if err := c.Validate(); err != nil {
 			return fmt.Errorf("invalid command at index %v: %w", i, err)

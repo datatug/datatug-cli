@@ -108,6 +108,9 @@ func storeFor(storeID string) (storage.Store, error) {
 // every remaining storage.GetProjectStore(ctx, storeID, projectID) call
 // site — see storeFor's doc comment.
 func projectStoreForID(storeID, projectID string) (datatug.ProjectStore, error) {
+	if err := ValidateProjectIdentifier("project", projectID); err != nil {
+		return nil, err
+	}
 	store, err := storeFor(storeID)
 	if err != nil {
 		return nil, err

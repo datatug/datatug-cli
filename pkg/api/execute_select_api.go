@@ -52,6 +52,9 @@ func (v SelectRequest) Validate() error {
 	}
 	// The project store joins both into a path of its own (see ValidateIdentifier),
 	// so a request that holds anything but a plain name is refused before any lookup.
+	if err := ValidateProjectIdentifier("project", v.Project); err != nil {
+		return err
+	}
 	if err := ValidateIdentifier("environment", v.Environment); err != nil {
 		return err
 	}

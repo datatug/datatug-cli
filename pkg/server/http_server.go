@@ -178,12 +178,22 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	// function is entirely local.
 	security.AddKnownHosts("datatug.app", "app.incidentius.com")
 
+	// The routes of the table, the page at "/" and the answer to every OPTIONS request are all
+	// registered behind the one request guard (endpoints.RequestGuard): a request is answered
+	// only when it comes from one of this server's own pages or from a tool on this machine.
+	endpointCaps := endpoints.Capabilities{
+		AllowWrites:          caps.AllowWrites,
+		AllowLiveConnections: caps.AllowLiveConnections,
+		ServedHost:           agentHost,
+		ServedPort:           agentPort,
+	}
+	guard := endpointCaps.RequestGuard()
 	router := httprouter.New()
-	router.GlobalOPTIONS = http.HandlerFunc(globalOptionsHandler)
-	router.HandlerFunc(http.MethodGet, "/", root)
+	router.GlobalOPTIONS = http.HandlerFunc(guard.Wrap(globalOptionsHandler))
+	router.HandlerFunc(http.MethodGet, "/", guard.Wrap(root))
 	endpoints.RegisterDatatugHandlersWithCapabilities("", router, endpoints.RegisterAllHandlers, logRequests, func(r *http.Request) (context.Context, error) {
 		return r.Context(), nil
-	}, apicore.Execute, endpoints.Capabilities{AllowWrites: caps.AllowWrites})
+	}, apicore.Execute, endpointCaps)
 
 	s.s = &http.Server{
 		Addr:           fmt.Sprintf("%v:%v", agentHost, agentPort),

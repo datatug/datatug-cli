@@ -41,6 +41,11 @@ var (
 type Capabilities struct {
 	AllowWrites    bool
 	AllowOpaqueSQL bool
+	// AllowLiveConnections is `datatug serve --allow-live-connections`: the routes that connect
+	// to a database server that the served project records (dbserver-databases) answer 403
+	// without it. It is off by default: such a connection is made under the identity of the
+	// person who runs the server.
+	AllowLiveConnections bool
 	// HTTPOffline is `datatug serve --http-offline` (Phase 1 Task 14, item
 	// 7): when true, every HTTP-typed saved query's LIVE fetch fails as
 	// SOURCE_UNAVAILABLE without ever touching the network (see

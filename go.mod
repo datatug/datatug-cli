@@ -28,7 +28,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.89.6
 	github.com/dal-go/dalgo2http v0.2.1
-	github.com/dal-go/dalgo2postgres v0.4.1
+	github.com/dal-go/dalgo2postgres v0.5.0
 	github.com/dal-go/dalgo2sql v0.26.6
 	github.com/dal-go/dalgo2sqlite v0.2.2
 	github.com/dal-go/record v0.1.4
@@ -68,6 +68,7 @@ require (
 	github.com/xuri/excelize/v2 v2.11.0
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/oauth2 v0.36.0
+	golang.org/x/term v0.45.0
 	golang.org/x/text v0.42.0
 	google.golang.org/api v0.296.0
 	google.golang.org/grpc v1.83.2
@@ -195,7 +196,6 @@ require (
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect

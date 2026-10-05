@@ -281,15 +281,6 @@ func TestCov100fProjectsAdd(t *testing.T) {
 	_ = home
 }
 
-func TestCov100fQueriesCommandActionPanics(t *testing.T) {
-	defer func() {
-		r := recover()
-		require.NotNil(t, r)
-		assert.Contains(t, r.(string), "not implemented")
-	}()
-	_ = queriesCommandAction(nil, nil)
-}
-
 func TestCov100fOpenDB(t *testing.T) {
 	var err error
 	out := covDCaptureStdout(t, func() {

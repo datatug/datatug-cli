@@ -4,15 +4,17 @@
 //
 // A SchemaReader describes a table by name and keeps native names and types out
 // of reach, so what a scan can report is what the reader reports: the portable
-// column type (a type the reader cannot map is a string), the primary key,
-// foreign keys, unique constraints and indexes, under the exact names the reader
-// returns. A SchemaReader cannot tell a view from a table, so unless the reader
-// also is a ViewLister every collection is reported as a table (the PostgreSQL
-// reader of dalgo2postgres is not one yet: a view of its server is a table of the
-// scan); a collection is in the schema its reference names, or else in the schema
-// the provider was given, which is the only one a reader that lists no schema in
-// its references reads, so for that reader a foreign key into another schema is
-// left out of the scan.
+// column type (a type the reader cannot map is a string), the column's default as
+// the text of its expression, the primary key, foreign keys, unique constraints and
+// indexes, under the exact names the reader returns.
+//
+// A SchemaReader cannot tell a view from a table, so unless the reader also is a
+// ViewLister or a SchemaLister every collection is reported as a table. A reader
+// that is a SchemaLister (the PostgreSQL reader of dalgo2postgres) is read in every
+// schema it lists, not in one: a collection is in the schema its reference names, or
+// else in the schema the provider was given, which is the only one a reader that
+// lists no schema in its references reads, so for that reader a foreign key into
+// another schema is left out of the scan.
 //
 // A scan opens connections to somebody's server, so the provider bounds how many
 // reads and counts it has in flight at once (maxConcurrentReads): the core
@@ -70,6 +72,18 @@ type ViewLister interface {
 	ListViews(ctx context.Context) ([]dal.CollectionRef, error)
 }
 
+// SchemaLister is the optional capability of a reader that holds more than one schema:
+// it lists the schemas, and the collections and the views of each, every reference
+// naming the schema it is in. dbschema has no interface for it, so a reader declares
+// these methods as its own: dalgo2postgres does. A scan reads every schema such a
+// reader lists, in the order it lists them, and a collection it lists as a view is
+// reported as a view.
+type SchemaLister interface {
+	ListSchemas(ctx context.Context) ([]string, error)
+	ListSchemaCollections(ctx context.Context, schema string) ([]dal.CollectionRef, error)
+	ListSchemaViews(ctx context.Context, schema string) ([]dal.CollectionRef, error)
+}
+
 // NewSchemaProvider returns a schemer.SchemaProvider that reads catalog through
 // reader. schema is the schema the reader inspects: every collection whose
 // reference does not name another is reported in it. counter may be nil, in which
@@ -96,6 +110,7 @@ type provider struct {
 
 	defs    memo[*dbschema.CollectionDef]
 	indexes memo[[]dbschema.IndexDef]
+	schemas memo[[]string]
 
 	listedMu sync.Mutex
 	// listed is the collections the reader last listed, by schema and name (see key),
@@ -197,12 +212,54 @@ func (p *provider) listIndexes(ctx context.Context, ref *dal.CollectionRef) ([]d
 	})
 }
 
-// listCollections reads the collections the reader reports and remembers their
-// names, so a key to a collection that is not among them can be told apart.
-func (p *provider) listCollections(ctx context.Context) ([]dal.CollectionRef, map[string]bool, error) {
-	refs, err := limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return p.reader.ListCollections(ctx, nil) })
+// listSchemas reads the schemas of a reader that lists them, once: the collections and the
+// views of a scan are each listed schema by schema.
+func (p *provider) listSchemas(ctx context.Context, lister SchemaLister) ([]string, error) {
+	return p.schemas.get("schemas", func() ([]string, error) {
+		schemas, err := limited(ctx, p.slots, func() ([]string, error) { return lister.ListSchemas(ctx) })
+		if err != nil {
+			return nil, fmt.Errorf("list schemas: %w", err)
+		}
+		return schemas, nil
+	})
+}
+
+// listBySchema reads what list answers for each schema of the reader, in the order it lists the
+// schemas. what names it in an error ("collections", "views").
+func (p *provider) listBySchema(ctx context.Context, lister SchemaLister, what string, list func(schema string) ([]dal.CollectionRef, error)) ([]dal.CollectionRef, error) {
+	schemas, err := p.listSchemas(ctx, lister)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list collections: %w", err)
+		return nil, err
+	}
+	var refs []dal.CollectionRef
+	for _, schema := range schemas {
+		inSchema, err := limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return list(schema) })
+		if err != nil {
+			return nil, fmt.Errorf("list %s of schema %q: %w", what, schema, err)
+		}
+		refs = append(refs, inSchema...)
+	}
+	return refs, nil
+}
+
+// listCollections reads the collections the reader reports, of every schema when it lists
+// them (see SchemaLister), and remembers their names, so a key to a collection that is not
+// among them can be told apart.
+func (p *provider) listCollections(ctx context.Context) ([]dal.CollectionRef, map[string]bool, error) {
+	var refs []dal.CollectionRef
+	var err error
+	if lister, ok := p.reader.(SchemaLister); ok {
+		refs, err = p.listBySchema(ctx, lister, "collections", func(schema string) ([]dal.CollectionRef, error) {
+			return lister.ListSchemaCollections(ctx, schema)
+		})
+	} else {
+		refs, err = limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return p.reader.ListCollections(ctx, nil) })
+		if err != nil {
+			err = fmt.Errorf("list collections: %w", err)
+		}
+	}
+	if err != nil {
+		return nil, nil, err
 	}
 	names := make(map[string]bool, len(refs))
 	for i := range refs {
@@ -230,15 +287,26 @@ func (p *provider) isListed(ctx context.Context, schema, name string) (bool, err
 }
 
 // listViews reads which of the collections the reader lists are views, by schema and
-// name (see relationKey): none when the reader cannot tell (it is no ViewLister).
+// name (see relationKey): of every schema when the reader lists them (see SchemaLister),
+// of its own when it is a ViewLister, and none when it cannot tell.
 func (p *provider) listViews(ctx context.Context) (map[string]bool, error) {
-	lister, ok := p.reader.(ViewLister)
-	if !ok {
+	var refs []dal.CollectionRef
+	var err error
+	switch reader := p.reader.(type) {
+	case SchemaLister:
+		refs, err = p.listBySchema(ctx, reader, "views", func(schema string) ([]dal.CollectionRef, error) {
+			return reader.ListSchemaViews(ctx, schema)
+		})
+	case ViewLister:
+		refs, err = limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return reader.ListViews(ctx) })
+		if err != nil {
+			err = fmt.Errorf("list views: %w", err)
+		}
+	default:
 		return nil, nil
 	}
-	refs, err := limited(ctx, p.slots, func() ([]dal.CollectionRef, error) { return lister.ListViews(ctx) })
 	if err != nil {
-		return nil, fmt.Errorf("list views: %w", err)
+		return nil, err
 	}
 	views := make(map[string]bool, len(refs))
 	for i := range refs {
@@ -315,6 +383,7 @@ func (p *provider) GetColumns(ctx context.Context, _ string, filter schemer.Colu
 		column.PrimaryKeyPosition = primaryKey[field.Name]
 		column.IsNullable = field.Nullable
 		column.DbType = field.Type.String()
+		column.Default = defaultText(field.Default)
 		if field.Length != nil && (field.Type == dbschema.String || field.Type == dbschema.Bytes) {
 			length := *field.Length
 			column.CharMaxLength = &length
@@ -603,6 +672,33 @@ func (p *provider) RecordsCount(ctx context.Context, _, schema, table string) (*
 		return nil, nil
 	}
 	return limited(ctx, p.slots, func() (*int, error) { return p.counter.CountRecords(ctx, schema, table) })
+}
+
+// defaultText is the text a column's default is saved as: the expression the reader
+// reports. The PostgreSQL reader reports it as a DefaultLiteral whose value is the text of
+// the SQL expression, which is kept as it is; the other values a DefaultLiteral holds are
+// written as SQL writes them. nil when the column has no default, or has one of a kind
+// the reader has no way to say (a pointer to a default, which no reader answers).
+func defaultText(expr dbschema.DefaultExpr) *string {
+	var text string
+	switch typed := expr.(type) {
+	case nil:
+		return nil
+	case dbschema.DefaultLiteral:
+		switch value := typed.Value.(type) {
+		case nil:
+			text = "NULL"
+		case string:
+			text = value
+		default:
+			text = fmt.Sprint(value)
+		}
+	case dbschema.DefaultCurrentTimestamp:
+		text = "CURRENT_TIMESTAMP"
+	default:
+		return nil // a kind of default this scan does not know is not recorded as an empty one
+	}
+	return &text
 }
 
 func fieldNames(fields []dal.FieldName) []string {

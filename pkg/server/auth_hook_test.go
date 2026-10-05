@@ -81,9 +81,9 @@ func TestServeHTTP_ProjectSummary_ReturnsSummary(t *testing.T) {
 // minimalCreateProjectPolicy is the smallest access policy document
 // accesspolicies.Load can decode, used only to prove a *loaded policy set*
 // exists for the "anonymous refused" half of
-// TestServeHTTP_CreateProject_AuthGate — its rules are never evaluated
-// because the request never reaches the executor: the auth hook refuses it
-// before secureread even runs.
+// TestServeHTTP_AuthGate_RefusesAnAnonymousRequestWhenAPolicySetExists — its
+// rules are never evaluated because the request never reaches the
+// executor: the auth hook refuses it before secureread even runs.
 const minimalCreateProjectPolicy = `apiVersion: dalgo.io/access/v1
 kind: AccessPolicy
 metadata:
@@ -102,19 +102,7 @@ bindings:
 `
 
 // postCreateProject POSTs a minimally-valid create_project request body and
-// returns whatever the transport gives back: either a normal
-// *http.Response, or a transport-level error when the handler panics before
-// writing anything (see the doc comment on
-// TestServeHTTP_CreateProject_AuthGate's "accepted" subtest for why that
-// happens, and why it is still a clean, positive signal here).
-//
-// "id" and "title" are the fields CreateProjectRequest.Validate requires in
-// the body, besides the "store" query param — datatug-core v0.39.0 made the
-// id mandatory and caller-supplied. It has to be a valid one (lower-case
-// ASCII letters, digits, "-" and "_", starting and ending with a letter or
-// a digit): an invalid id is refused by Validate inside api.CreateProject,
-// which is past the auth gate these subtests are about, so it would make
-// the "accepted" subtest pass for the wrong reason.
+// returns the answer.
 func postCreateProject(t *testing.T, baseURL string) (*http.Response, error) {
 	t.Helper()
 	body, err := json.Marshal(map[string]string{"id": "new-project", "title": "New Project"})
@@ -124,109 +112,97 @@ func postCreateProject(t *testing.T, baseURL string) (*http.Response, error) {
 	return testHTTPClient.Post(baseURL+"/datatug/projects/create_project?store=files", "application/json", bytes.NewReader(body))
 }
 
-// TestServeHTTP_CreateProject_AuthGate is brief S36's item 1 regression test
-// for the AuthRequired path specifically (VerifyRequest{AuthRequired: true}
-// in project_endpoints.go's createProject): the serve principal is accepted,
-// an anonymous request is refused once a policy set exists.
-func TestServeHTTP_CreateProject_AuthGate(t *testing.T) {
+// TestServeHTTP_CreateProject_IsNotImplemented: the store of the files has no way to create a
+// project, so with writes allowed the route answers 501 with a built sentence, whoever asks, and
+// does not stop the connection with no answer (the file store's CreateProject panics). Without
+// writes it is refused with the write capability's own 403, as every write route is.
+func TestServeHTTP_CreateProject_IsNotImplemented(t *testing.T) {
 	pathsByID := authHookProjectFixture(t, "auth-hook-project")
+	session, err := secureread.NewSession(secureread.SessionOptions{As: "agent1", NoPolicies: true})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
 
-	t.Run("accepted for the serve principal", func(t *testing.T) {
-		session, err := secureread.NewSession(secureread.SessionOptions{As: "agent1", NoPolicies: true})
-		if err != nil {
-			t.Fatalf("NewSession: %v", err)
-		}
+	t.Run("answered 501 when writes are allowed", func(t *testing.T) {
 		baseURL := startServeHTTPWithSessionAndCapabilities(t, pathsByID, session, writeCapabilityForAuthGateTests)
-
 		resp, err := postCreateProject(t, baseURL)
 		if err != nil {
-			// apicore.VerifyRequest accepted this session (it never wrote a
-			// 401) and the request reached api.CreateProject ->
-			// storage.NewDatatugStore(...).CreateProject, which is
-			// datatug-core's FsStore.CreateProject — unconditionally
-			// `panic("not implemented")` today (datatug-apps'
-			// project.service.ts already documents create_project as
-			// unused over the local agent for exactly this reason, routing
-			// through the Firestore-backed path instead). net/http
-			// recovers that panic per-connection and closes it without
-			// writing a response, which surfaces here as a transport error
-			// rather than a clean status code.
-			//
-			// That is the strongest signal this subtest can get, and it is
-			// positive on two counts, not one: the request got past the
-			// auth gate, AND past dto.CreateProjectRequest.Validate inside
-			// api.CreateProject — a body Validate refuses returns an error
-			// cleanly and never panics, so it could not reach here. If
-			// datatug-core ever implements FsStore.CreateProject, this
-			// branch stops firing and the status-code assertions below
-			// carry both checks instead.
-			t.Logf("createProject reached the (separately unimplemented) FsStore.CreateProject past the auth gate: %v", err)
-			return
+			t.Fatalf("postCreateProject: %v (a request that stops the connection with no answer)", err)
 		}
 		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode == http.StatusUnauthorized {
-			t.Fatalf("createProject refused the serve principal with 401")
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusNotImplemented {
+			t.Fatalf("status = %d, want 501 (%s)", resp.StatusCode, body)
 		}
-		// Not only "not a 401": a 400 would mean the request never got as
-		// far as the store, because Validate refused the body — which is
-		// how this subtest could pass while testing nothing. It did exactly
-		// that until datatug-core v0.39.0's mandatory `id` was added to
-		// postCreateProject's body: the request was refused one layer past
-		// the gate, and the assertion above still held.
-		if resp.StatusCode == http.StatusBadRequest {
-			body, _ := io.ReadAll(resp.Body)
-			t.Fatalf("createProject refused the request body with 400 (%s): the body must be valid enough to reach the store, or this subtest proves nothing about the auth gate", body)
+		if want := `{"error":"creating a project is not implemented by this agent yet","code":"NOT_IMPLEMENTED"}` + "\n"; string(body) != want {
+			t.Errorf("body = %q, want %q", body, want)
 		}
 	})
 
-	t.Run("refused for an anonymous request when a policy set exists", func(t *testing.T) {
-		policiesDir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(policiesDir, "policy.yaml"), []byte(minimalCreateProjectPolicy), 0o600); err != nil {
-			t.Fatalf("write policy: %v", err)
-		}
-		policies, err := accesspolicies.Load(accesspolicies.LoadOptions{Dir: policiesDir})
-		if err != nil {
-			t.Fatalf("accesspolicies.Load: %v", err)
-		}
-		if len(policies) == 0 {
-			t.Fatalf("expected at least one loaded policy document")
-		}
-		// secureread.NewSession refuses to build this Session at all
-		// (ErrNoPrincipal: a policy set with no --as/--role/--group), which
-		// is resolveServeSession's own defense against ever starting serve
-		// this way. This test builds the Session directly instead,
-		// precisely to prove the HTTP-level hook (api.AuthTokenFromHTTPRequest)
-		// still refuses this state on its own rather than assuming that
-		// upstream guard always ran (see auth_hook.go's doc comment).
-		anonymousWithPolicies := secureread.Session{Policies: policies, Principal: nil, Unrestricted: false}
-		baseURL := startServeHTTPWithSessionAndCapabilities(t, pathsByID, anonymousWithPolicies, writeCapabilityForAuthGateTests)
-
+	t.Run("refused by the write capability when writes are not allowed", func(t *testing.T) {
+		baseURL := startServeHTTPWithSession(t, pathsByID, session)
 		resp, err := postCreateProject(t, baseURL)
 		if err != nil {
-			t.Fatalf("postCreateProject: unexpected transport error (want a clean refusal, not a request that reached the handler): %v", err)
+			t.Fatalf("postCreateProject: %v", err)
 		}
 		defer func() { _ = resp.Body.Close() }()
-		// Not a 401: sneat-go-core's apicore.Execute has a separate,
-		// pre-existing gap on this exact path — when VerifyRequest returns
-		// facade.ErrUnauthorized, Execute only logs it and returns
-		// (api_http.go: "if err != nil { logus.Errorf(...); return }"),
-		// unlike the getContext error branch a few lines below it, which
-		// does call httpserver.HandleError. No WriteHeader ever happens, so
-		// Go's server sends an implicit 200 with an empty body rather than
-		// a real 401 — flagged to the lead session as an upstream fix
-		// candidate for sneat-go-core, out of this repo's scope. What this
-		// subtest can assert, and what actually matters for
-		// REQ:server-acl-all-reads, is the refusal itself: the request
-		// never reaches api.CreateProject, so the body carries no created
-		// project (and, unlike the "accepted" subtest above, no transport
-		// error either — proof this path never reached the panicking
-		// FsStore.CreateProject at all).
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			t.Fatalf("read body: %v", err)
-		}
-		if len(body) != 0 {
-			t.Fatalf("anonymous createProject body = %q, want empty (refused before the handler ran)", body)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", resp.StatusCode)
 		}
 	})
+}
+
+// TestServeHTTP_AuthGate_RefusesAnAnonymousRequestWhenAPolicySetExists is brief S36's item 1
+// regression test for the AuthRequired path: the serve principal is accepted (see
+// TestServeHTTP_ProjectSummary_ReturnsSummary), an anonymous request is refused once a policy
+// set exists. It asks a route that answers through apicore, which is where the hook runs
+// (api.AuthTokenFromHTTPRequest, wired as apicore.GetAuthTokenFromHttpRequest by ServeHTTP).
+func TestServeHTTP_AuthGate_RefusesAnAnonymousRequestWhenAPolicySetExists(t *testing.T) {
+	const projectID = "auth-hook-project"
+	pathsByID := authHookProjectFixture(t, projectID)
+	policiesDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(policiesDir, "policy.yaml"), []byte(minimalCreateProjectPolicy), 0o600); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+	policies, err := accesspolicies.Load(accesspolicies.LoadOptions{Dir: policiesDir})
+	if err != nil {
+		t.Fatalf("accesspolicies.Load: %v", err)
+	}
+	if len(policies) == 0 {
+		t.Fatalf("expected at least one loaded policy document")
+	}
+	// secureread.NewSession refuses to build this Session at all
+	// (ErrNoPrincipal: a policy set with no --as/--role/--group), which
+	// is resolveServeSession's own defense against ever starting serve
+	// this way. This test builds the Session directly instead,
+	// precisely to prove the HTTP-level hook (api.AuthTokenFromHTTPRequest)
+	// still refuses this state on its own rather than assuming that
+	// upstream guard always ran (see auth_hook.go's doc comment).
+	anonymousWithPolicies := secureread.Session{Policies: policies, Principal: nil, Unrestricted: false}
+	baseURL := startServeHTTPWithSession(t, pathsByID, anonymousWithPolicies)
+
+	resp, err := testHTTPClient.Get(baseURL + "/datatug/projects/project_summary?id=" + projectID)
+	if err != nil {
+		t.Fatalf("GET project_summary: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	// Not a 401: sneat-go-core's apicore.Execute has a separate,
+	// pre-existing gap on this exact path — when VerifyRequest returns
+	// facade.ErrUnauthorized, Execute only logs it and returns
+	// (api_http.go: "if err != nil { logus.Errorf(...); return }"),
+	// unlike the getContext error branch a few lines below it, which
+	// does call httpserver.HandleError. No WriteHeader ever happens, so
+	// Go's server sends an implicit 200 with an empty body rather than
+	// a real 401 — flagged to the lead session as an upstream fix
+	// candidate for sneat-go-core, out of this repo's scope. What this
+	// test can assert, and what actually matters for
+	// REQ:server-acl-all-reads, is the refusal itself: the request
+	// never reaches the worker, so the body carries no summary.
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if len(body) != 0 {
+		t.Fatalf("anonymous project_summary body = %q, want empty (refused before the handler ran)", body)
+	}
 }

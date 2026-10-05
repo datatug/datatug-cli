@@ -17,6 +17,8 @@ All seams are package-level `var` overrides in `posthog.go`:
 | `httpDoRequest` | `posthog.go` | direct call to `http.DefaultClient.Do(req)` in `getPostHogApiKeyFromServer` |
 | `posthogAPIKeyURL` | `posthog.go` | hard-coded const URL string in `getPostHogApiKeyFromServer` |
 | `newYamlEncoder` | `posthog.go` | direct call to `yaml.NewEncoder(file)` in `writePostHogConfigToFile` |
+| `noticeMarkerPath`, `statFile`, `mkdirAll`, `writeFile` | `telemetry.go` | the first-run notice marker in `~/datatug` |
+| `inTestBinary`, `newPosthogClient` | `telemetry.go` | the one creation of a real PostHog client, which panics in a test binary |
 | `postInitFlush` | `posthog.go` | inline goroutine body in `init()` that sets `ph`, `initialized`, drains `queue` |
 
 ## Documented gaps

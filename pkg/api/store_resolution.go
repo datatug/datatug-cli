@@ -128,9 +128,11 @@ func storeFor(storeID string) (storage.Store, error) {
 // every remaining storage.GetProjectStore(ctx, storeID, projectID) call
 // site — see storeFor's doc comment.
 //
-// It is the one place this package gets a project store from (ProjectStoreFor and every
-// entry call it, and a test fails on a call of GetProjectStore anywhere else), so the rule
-// about which projects there is a store for is kept here, once, and not in each entry: the
+// It is the one place an entry gets the store of a served project from (ProjectStoreFor and
+// every entry call it, and a test fails on a call of GetProjectStore anywhere else); the scan
+// opens the folder it is given and builds its own store (see
+// TestFileStoreConstructors_AreCalledByTheScanOnly). So the rule about which projects there
+// is a store for is kept here, once, and not in each entry: the
 // project's ID must be a served project or a plain name (see ValidateProjectIdentifier), and
 // when a session is configured (see sessionConfigured) it must be a project that this process
 // serves. A plain name that is not served has no project folder, so no store is handed out for

@@ -119,7 +119,8 @@ func parseQueriesRoot(q url.Values) (string, error) {
 	case queriesRootShared, queriesRootPersonal:
 		return root, nil
 	default:
-		return "", fmt.Errorf("%w: must be %q or %q, got %q", ErrInvalidQueriesRoot, queriesRootShared, queriesRootPersonal, root)
+		// The value is not quoted: it is what the client wrote.
+		return "", fmt.Errorf("%w: must be %q or %q", ErrInvalidQueriesRoot, queriesRootShared, queriesRootPersonal)
 	}
 }
 

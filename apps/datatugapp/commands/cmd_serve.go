@@ -30,6 +30,7 @@ const (
 	serveGroupFlag             = "group"
 	serveAllowWritesFlag       = "allow-writes"
 	serveAllowOpaqueSQLFlag    = "allow-opaque-sql"
+	serveAllowLiveConnsFlag    = "allow-live-connections"
 	serveHTTPOfflineFlag       = "http-offline"
 	serveExecTimeoutFlag       = "exec-timeout"
 	serveEvidenceDirFlag       = "evidence-dir"
@@ -55,6 +56,7 @@ type serveFlags struct {
 	groups            []string
 	allowWrites       bool
 	allowOpaqueSQL    bool
+	allowLiveConns    bool
 	httpOffline       bool
 	execTimeout       time.Duration
 	evidenceDir       string
@@ -91,6 +93,9 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.allowOpaqueSQL, err = flags.GetBool(serveAllowOpaqueSQLFlag); err != nil {
+		return f, err
+	}
+	if f.allowLiveConns, err = flags.GetBool(serveAllowLiveConnsFlag); err != nil {
 		return f, err
 	}
 	if f.httpOffline, err = flags.GetBool(serveHTTPOfflineFlag); err != nil {
@@ -244,21 +249,25 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 	}
 	httpServer := server.NewHttpServer()
 	caps := api.Capabilities{
-		AllowWrites:        flags.allowWrites,
-		AllowOpaqueSQL:     flags.allowOpaqueSQL,
-		HTTPOffline:        flags.httpOffline,
-		ExecTimeout:        flags.execTimeout,
-		IncidentStores:     runtimeSettings.Server.IncidentStores,
-		EvidencePrivateDir: firstNonEmpty(flags.evidenceDir, runtimeSettings.Server.EvidenceDir),
-		EvidenceByteCap:    firstNonZero(flags.snapshotByteCap, runtimeSettings.Server.SnapshotByteCap),
-		EvidenceRetention:  firstNonZeroDuration(flags.snapshotRetention, runtimeSettings.Server.SnapshotRetention),
-		SnapshotPolicies:   runtimeSettings.Server.SnapshotPolicies,
+		AllowWrites:          flags.allowWrites,
+		AllowOpaqueSQL:       flags.allowOpaqueSQL,
+		AllowLiveConnections: flags.allowLiveConns,
+		HTTPOffline:          flags.httpOffline,
+		ExecTimeout:          flags.execTimeout,
+		IncidentStores:       runtimeSettings.Server.IncidentStores,
+		EvidencePrivateDir:   firstNonEmpty(flags.evidenceDir, runtimeSettings.Server.EvidenceDir),
+		EvidenceByteCap:      firstNonZero(flags.snapshotByteCap, runtimeSettings.Server.SnapshotByteCap),
+		EvidenceRetention:    firstNonZeroDuration(flags.snapshotRetention, runtimeSettings.Server.SnapshotRetention),
+		SnapshotPolicies:     runtimeSettings.Server.SnapshotPolicies,
 	}
 	if caps.AllowWrites {
 		log.Printf("serve: --allow-writes set; project-mutation routes are enabled")
 	}
 	if caps.AllowOpaqueSQL {
 		log.Printf("serve: --allow-opaque-sql set; native SQL executes with opaque-privileged provenance (no row/column enforcement)")
+	}
+	if caps.AllowLiveConnections {
+		log.Printf("serve: --allow-live-connections set; routes that connect to a db server recorded in the project (the list of its databases) connect under the identity of the person who runs this server")
 	}
 	if caps.HTTPOffline {
 		log.Printf("serve: --http-offline set; every HTTP-typed saved query's live fetch fails as SOURCE_UNAVAILABLE without touching the network")
@@ -336,6 +345,7 @@ func serveCommandArgs() *cobra.Command {
 	flags.StringArray(serveGroupFlag, nil, "Principal group, repeatable")
 	flags.Bool(serveAllowWritesFlag, false, "Enable project-mutation routes (create/save/delete project, query, board, entity, recordset rows); refused by default (api-contract.md: writes need an explicit capability)")
 	flags.Bool(serveAllowOpaqueSQLFlag, false, "Allow native SQL execution with opaque-privileged provenance (no row/column enforcement); refused by default (REQ:opaque-sql-limitation)")
+	flags.Bool(serveAllowLiveConnsFlag, false, "Allow the routes that connect to a db server recorded in the served project (GET /datatug/dbserver-databases lists the databases of a SQL Server server) to open that connection, under the identity of the person who runs this server; refused with 403 by default")
 	flags.Bool(serveHTTPOfflineFlag, false, "Make every HTTP-typed saved query's live fetch fail as SOURCE_UNAVAILABLE without touching the network, so an explicit mode:snapshot request is the only way to get rows (offline demos); off by default")
 	flags.Duration(serveExecTimeoutFlag, 0, "Per-request execution timeout for exec/run_query (default 10s, api-contract.md's configured upper bound is 30s; values above it are clamped down)")
 	flags.String(serveEvidenceDirFlag, "", "Server-private execution snapshot directory (default $"+executionstore.DirEnv+" or ~/"+executionstore.DefaultDir+")")

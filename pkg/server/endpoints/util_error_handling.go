@@ -15,6 +15,10 @@ import (
 	"github.com/strongo/validation"
 )
 
+// sourceFileMissingSentence is the answer for the data file of a source that is not there when the
+// route that answers does not know which source it was asked for.
+const sourceFileMissingSentence = "the data file of a source does not exist"
+
 func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	if err == nil {
 		return false
@@ -24,13 +28,10 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	message := dbcopy.RedactText(err.Error())
 	_, _ = fmt.Fprintln(os.Stderr, message)
 	//_, _ = fmt.Println("Error:", err)
-	responseHeader := w.Header()
-	origin := r.Header.Get("Origin")
-	if origin != "" {
-		responseHeader.Set("Access-Control-Allow-Origin", origin)
-	}
-	responseHeader.Set("Content-Type", "application/json")
+	writeCORSOrigin(w, r)
+	w.Header().Set("Content-Type", "application/json")
 	response := ErrorResponse{Error: message}
+	var unavailable *api.SourceUnavailableError
 	switch {
 	// A policy refusal is structured with code ACCESS_DENIED (hub Feature
 	// core-investigation-loop, "Errors are structured (code, message,
@@ -59,8 +60,17 @@ func handleError(err error, w http.ResponseWriter, r *http.Request) bool {
 	// covers (see pkg/dbcopy.CheckSourceFile) — surfaced with that code
 	// rather than the driver's own raw "unable to open database file" text
 	// reaching a bare 500.
+	//
+	// A route that knows which source it asked for answers through api.SourceUnavailable, a
+	// sentence built from the ID of the source, so that no answer holds the path of a data file
+	// or the host of a database. An error of a missing file that did not come through it is
+	// answered with a sentence that names no source, and never with its own text.
+	case errors.As(err, &unavailable):
+		response.Code = "SOURCE_UNAVAILABLE"
+		w.WriteHeader(http.StatusServiceUnavailable)
 	case errors.Is(err, dbcopy.ErrSourceFileMissing):
 		response.Code = "SOURCE_UNAVAILABLE"
+		response.Error = sourceFileMissingSentence
 		w.WriteHeader(http.StatusServiceUnavailable)
 	// api.ResolveStoreID (S87): an explicit ?storage= naming a store this
 	// session did not configure for the request's project, or (today
@@ -129,4 +139,15 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 	Code  string `json:"code,omitempty"`
 	Field string `json:"field,omitempty"`
+}
+
+// writeNotImplemented answers a route that this agent does not implement: 501 with a sentence that the
+// route built, in the envelope of the legacy routes.
+func writeNotImplemented(w http.ResponseWriter, r *http.Request, sentence string) {
+	writeCORSOrigin(w, r)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotImplemented)
+	if err := json.NewEncoder(w).Encode(ErrorResponse{Error: sentence, Code: "NOT_IMPLEMENTED"}); err != nil {
+		log.Printf("Failed to encode error to response stream: %v", err)
+	}
 }

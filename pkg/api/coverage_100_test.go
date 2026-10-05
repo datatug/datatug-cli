@@ -2024,7 +2024,7 @@ func TestCoverageRemaining100(t *testing.T) {
 	assert.Error(t, err)
 
 	// 6. default executeSingleSeam
-	_, _ = executeSingleSeam(sqlexecute.Executor{}, sqlexecute.RequestCommand{})
+	_, _ = executeSingleSeam(context.Background(), sqlexecute.Executor{}, sqlexecute.RequestCommand{})
 
 	// 7. getRecordsetFolder match
 	rootFolder := &dto.ProjRecordsetSummary{

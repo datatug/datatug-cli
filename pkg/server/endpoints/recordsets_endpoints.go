@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -62,12 +62,36 @@ func getRecordsetDefinition(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// getRecordsetData returns data
+// recordsetDataNotImplementedSentence is the answer of recordsets/recordset_data, which this agent
+// does not implement.
+const recordsetDataNotImplementedSentence = "reading the data of a recordset is not implemented by this agent yet"
+
+// getRecordsetData is not implemented: it answers 501 with a built sentence.
 func getRecordsetData(w http.ResponseWriter, r *http.Request) {
-	var ref dto.ProjectItemRef
-	getProjectItem(w, r, &ref, func(ctx context.Context) (responseDTO apicore.ResponseDTO, err error) {
-		return api.GetRecordset(ctx, ref)
-	})
+	writeNotImplemented(w, r, recordsetDataNotImplementedSentence)
+}
+
+// maxRecordsetRowsCount is the largest number of rows that a client may announce with the `count` of
+// recordset_add_rows: the number only sizes the list that the rows are read into.
+const maxRecordsetRowsCount = 1000
+
+// recordsetCountSentence is the answer for a `count` that is not a whole number from 0 to
+// maxRecordsetRowsCount: it names nothing the client wrote.
+var recordsetCountSentence = fmt.Sprintf("must be a whole number from 0 to %d", maxRecordsetRowsCount)
+
+// parseRecordsetRowsCount reads the `count` of recordset_add_rows: absent is 0, and anything that is not a
+// whole number from 0 to maxRecordsetRowsCount is a bad request that says what a count is and nothing
+// of the text that was sent (nor does the log: the parse error of the number quotes it).
+func parseRecordsetRowsCount(query url.Values) (int, error) {
+	text := query.Get("count")
+	if text == "" {
+		return 0, nil
+	}
+	count, err := strconv.Atoi(text)
+	if err != nil || count < 0 || count > maxRecordsetRowsCount {
+		return 0, validation.NewErrBadRequestFieldValue("count", recordsetCountSentence)
+	}
+	return count, nil
 }
 
 // addRowsToRecordset adds rows to a recordset
@@ -79,16 +103,17 @@ func addRowsToRecordset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := strconv.Atoi(r.URL.Query().Get("count"))
+	count, err := parseRecordsetRowsCount(r.URL.Query())
 	if err != nil {
-		log.Println(fmt.Errorf("WARNING: count parameter is not supplied or invalid: %w", err))
+		handleError(err, w, r)
+		return
 	}
 	rows := make([]api.RowValues, 0, count)
 
 	decoder := json.NewDecoder(r.Body)
 	if err = decoder.Decode(&rows); err != nil {
-		err = validation.NewErrBadRequestFieldValue("body", err.Error())
-		handleError(err, w, r)
+		// The decoder's text can quote what the client wrote.
+		handleError(validation.NewErrBadRequestFieldValue("body", "must be a JSON list of rows"), w, r)
 		return
 	}
 	numberOfRecords, err := api.AddRowsToRecordset(params, nil)

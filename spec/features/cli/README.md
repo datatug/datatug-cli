@@ -45,7 +45,7 @@ Pinning the contract surface lets the implementation evolve without breaking use
 | [demo/](demo/README.md) | Install and run the bundled demo (Chinook) project |
 | [console/](console/README.md) | Interactive console (placeholder; not implemented) |
 | [db/](db/README.md) | Open a database viewer by URL |
-| [queries/](queries/README.md) | Queries management (placeholder; not implemented) |
+| [queries/](queries/README.md) | Queries management (lists saved queries) |
 | [execute/](execute/README.md) | Execute an SQL query/command (currently exposed under the name `updateUrlConfig`) |
 | [query/](query/README.md) | `query run` — run an ad-hoc DTQL query through the user's access policies (`~/.datatug/policies/`): rows to stdout, applied limitations to stderr |
 | [version/](version/README.md) | CLI version reporting |
@@ -124,7 +124,19 @@ A panic from any command MUST be caught by the top-level recovery in `main.go`, 
 
 #### REQ: telemetry-events
 
-The CLI emits PostHog telemetry events (`DataTug CLI started`, `DataTug CLI exited`, panic exceptions) via `pkg/dtlog`. Telemetry MUST be enqueued asynchronously and MUST NOT block command exit beyond the existing `dtlog.Close()` flush. Telemetry MUST NOT include database contents, query text, or user-supplied credentials.
+The CLI emits PostHog telemetry events (`DataTug CLI started`, `DataTug CLI exited`, `Screen opened` and panic exceptions) via `pkg/dtlog`, which is the only package that may import the PostHog client. Telemetry MUST be enqueued asynchronously and MUST NOT block command exit beyond the existing `dtlog.Close()` flush. Telemetry MUST NOT include database contents, query text, a path, a project or database name, a host, a user name, a command-line argument or a credential. In particular the text of a panic MUST NOT be sent: a panic exception carries the Go type of the panic value (and, for a panic of the Go runtime itself, its message) and a stack whose frames name source files without their directories.
+
+#### REQ: telemetry-opt-out
+
+Telemetry MUST fail closed. It is on only when `DATATUG_TELEMETRY` is empty or one of `1`, `true`, `on`, `yes` (any case, trimmed); any other value (`0`, `false`, `off`, `no`, `disabled`, a typo) turns it off. It MUST also be off when `DO_NOT_TRACK` is set to anything but an empty string or `0`, or `CI` is set to anything but an empty string or `false`. When it is off the CLI MUST create no telemetry client, queue no event, make no request for telemetry (including the fetch of the PostHog API key), print no notice and create no file for telemetry. One function (`dtlog.Enabled`) decides, and every sender MUST ask it: that includes the per-turn usage report of `datatug chat --model cloud`, which is off whenever telemetry is off (the answers of the cloud service are not). `datatug --help` MUST name `DATATUG_TELEMETRY`.
+
+#### REQ: telemetry-first-run-notice
+
+The first time the CLI runs with telemetry on, with stderr a terminal, it MUST print a notice on stderr of at most six lines: that anonymous usage events are sent, which events and the fields each carries (and only the fields it carries), that no database content, query text, path, host or credential is sent, and the line that turns it off for good (a shell profile line; `setx` on Windows). It MUST record that the notice was shown in a marker file in the CLI's state folder (`~/datatug/.telemetry-notice-shown`) and not print it again. Nothing MUST be sent on the run that prints the notice, nor on any run that could not tell the person: when stderr is not a terminal (a script, a service, shell completion with stderr discarded) the CLI prints nothing, writes no marker and sends nothing, so the notice waits for the first run in a terminal; when the marker cannot be written the notice MUST be printed again on the next run and the run MUST NOT fail. When the home folder cannot be resolved to an absolute path the CLI MUST create no file or folder for telemetry (not even a relative one in the working directory) and send nothing. `datatug version --json` MUST print no notice and write no marker.
+
+#### REQ: telemetry-fields-match-notice
+
+The [README's Telemetry section](../../../README.md#telemetry) MUST list every field of each event, and the notice MUST summarise them and name no field an event does not carry. A test MUST build each event as it is handed to the PostHog client and assert its exact set of fields, so that adding a field fails the test until the README (and, where it changes what the notice says, the notice) says it.
 
 ### Output format conventions
 
@@ -194,11 +206,35 @@ The user-level config file MUST be valid YAML. Comments are preserved on read wh
 
 A panic inside any command exits the process with code `10`, leaves the terminal in a usable state (no leftover TUI screen), and writes the panic message plus a stack trace to stderr.
 
+### AC: telemetry-off-sends-nothing
+
+**Requirements:** cli#req:telemetry-opt-out
+
+With `DATATUG_TELEMETRY=0` (or `no`, or any value not on the list of REQ telemetry-opt-out; or `DO_NOT_TRACK=1`, or `CI=true`) a run of any command prints no telemetry notice, creates no `~/datatug/.telemetry-notice-shown`, creates no PostHog client and makes no request for telemetry, and `datatug chat --model cloud` sends no usage report.
+
+### AC: telemetry-first-run-notice
+
+**Requirements:** cli#req:telemetry-first-run-notice
+
+On a machine with no `~/datatug/.telemetry-notice-shown`, the first `datatug` run with telemetry on and stderr a terminal writes the notice (at most six lines, naming `DATATUG_TELEMETRY=0`) to stderr, creates the marker and sends no event; the second run prints no notice and sends its events. A first run with stderr not a terminal prints nothing, creates no marker and sends no event.
+
+### AC: telemetry-panic-carries-no-text
+
+**Requirements:** cli#req:telemetry-events
+
+A panic whose text contains a path or a host produces a crash report whose exception value is the Go type of the panic value and whose frames name no directory; the text appears on stderr only.
+
+### AC: telemetry-fields-are-pinned
+
+**Requirements:** cli#req:telemetry-fields-match-notice
+
+A test fails when any event gains or loses a field.
+
 ## Open Questions
 
 - Several existing command names violate the [REQ: singular-resource-names](#req-singular-resource-names) / [REQ: verb-subcommands](#req-verb-subcommands) conventions: `projects` (should be `project list`), `datasets` (should be `dataset list`), `queries` (should be `query list`), `updateUrlConfig` (should be `execute` or `query run`), `dataset-def` and `dataset-data` (should be `dataset def` / `dataset data` subcommands of [`dataset`](dataset/README.md)). Should this spec define a deprecation path with aliases, or wait for a 1.0 break?
 - The implementation currently mixes `log.Fatal`, returned errors, and `panic` for failure paths. Should this spec mandate the migration to returned errors in scope, or split that into a separate refactor feature?
-- Telemetry is opt-out today (no flag). Should there be a `--no-telemetry` flag and/or a `DATATUG_TELEMETRY=0` env var pinned in this feature?
+- Should there be a `--no-telemetry` flag as well as the three environment variables of [REQ: telemetry-opt-out](#req-telemetry-opt-out)? Not added: the variables also cover tools that run `datatug` for a person.
 - Should the user-level config path be overridable via `DATATUG_CONFIG` to support reproducible CI?
 - `datatug --version` / `-v` is not currently wired (the urfave/cli v3 default would expose them, but the build does not inject version metadata via ldflags). Should the [version/](version/README.md) feature spec drive that wiring?
 

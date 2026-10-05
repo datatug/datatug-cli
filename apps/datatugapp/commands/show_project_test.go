@@ -32,9 +32,9 @@ func runShowCommand(t *testing.T, args ...string) (stdout, stderr string, err er
 	return out.String(), errOut.String(), err
 }
 
-// exitCodeOf is the process exit code of an error, as main.go resolves it: the code the error
+// showExitCodeOf is the process exit code of an error, as main.go resolves it: the code the error
 // carries, 1 for any other error, and 0 for none.
-func exitCodeOf(t *testing.T, err error) int {
+func showExitCodeOf(t *testing.T, err error) int {
 	t.Helper()
 	if err == nil {
 		return 0
@@ -140,7 +140,7 @@ func TestShowFormatJSON(t *testing.T) {
 	assert.Equal(t, want, got)
 
 	_, _, err = runShowCommand(t, "-d", projectDir, "--format", "yaml")
-	assert.Equal(t, 2, exitCodeOf(t, err), "a format the command does not print is an invalid argument")
+	assert.Equal(t, 2, showExitCodeOf(t, err), "a format the command does not print is an invalid argument")
 	assert.ErrorContains(t, err, `"yaml"`)
 }
 
@@ -213,19 +213,19 @@ func TestShowRefusesAPostgresSourceWithAnUnusableDescriptor(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(descriptor, []byte(`{"dsnEnv":"SOMETHING_ELSE"}`), 0o644))
 	stdout, _, err := runShowCommand(t, "-d", projectDir)
-	assert.Equal(t, 1, exitCodeOf(t, err))
+	assert.Equal(t, 1, showExitCodeOf(t, err))
 	assert.ErrorContains(t, err, "not allowed")
 	assert.Empty(t, stdout)
 
 	require.NoError(t, os.Remove(descriptor))
 	_, _, err = runShowCommand(t, "-d", projectDir)
-	assert.Equal(t, 1, exitCodeOf(t, err))
+	assert.Equal(t, 1, showExitCodeOf(t, err))
 	assert.ErrorContains(t, err, `source "shop"`)
 
 	catalog := filepath.Join(projectDir, "environments", "local", "catalogs", "shop", "shop.db.json")
 	require.NoError(t, os.WriteFile(catalog, []byte(`{"id":"shop","driver":"postgres","path":"../outside.json","dbModel":"shop"}`), 0o644))
 	_, _, err = runShowCommand(t, "-d", projectDir)
-	assert.Equal(t, 1, exitCodeOf(t, err))
+	assert.Equal(t, 1, showExitCodeOf(t, err))
 	assert.ErrorContains(t, err, "connection descriptor")
 }
 
@@ -249,7 +249,7 @@ func TestShowAFolderThatIsNotAProject(t *testing.T) {
 	notProject := t.TempDir()
 	for _, folder := range []string{notProject, filepath.Join(notProject, "does-not-exist")} {
 		stdout, _, err := runShowCommand(t, "-d", folder)
-		assert.Equal(t, 3, exitCodeOf(t, err), folder)
+		assert.Equal(t, 3, showExitCodeOf(t, err), folder)
 		assert.Empty(t, stdout)
 		require.Error(t, err)
 		assert.Equal(t, `"`+folder+`" is not a DataTug project: make one with datatug scan -d "`+folder+`" -D sqlite3 --path <database file> --db <name> --env <environment>`, err.Error())
@@ -268,10 +268,10 @@ func TestShowWithoutAFolderReadsTheCurrentOne(t *testing.T) {
 
 	t.Chdir(t.TempDir())
 	_, _, err = runShowCommand(t)
-	assert.Equal(t, 3, exitCodeOf(t, err), "the current folder is not a project")
+	assert.Equal(t, 3, showExitCodeOf(t, err), "the current folder is not a project")
 
 	_, _, err = runShowCommand(t, "-p", "shop-project", "-d", projectDir)
-	assert.Equal(t, 2, exitCodeOf(t, err))
+	assert.Equal(t, 2, showExitCodeOf(t, err))
 	assert.ErrorContains(t, err, "--project")
 	assert.ErrorContains(t, err, "--directory")
 }
@@ -281,12 +281,12 @@ func TestShowByRegisteredName(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // a person with no settings file: nothing is registered
 	projectDir := scannedJourneyProject(t)
 	_, _, err := runShowCommand(t, "-p", "no-such-project-registered")
-	assert.Equal(t, 3, exitCodeOf(t, err))
+	assert.Equal(t, 3, showExitCodeOf(t, err))
 	assert.ErrorContains(t, err, `"no-such-project-registered"`)
 
 	registerProjectForTest(t, "shop-project", projectDir)
 	_, _, err = runShowCommand(t, "-p", "another-project")
-	assert.Equal(t, 3, exitCodeOf(t, err), "a name that is not among the registered ones")
+	assert.Equal(t, 3, showExitCodeOf(t, err), "a name that is not among the registered ones")
 	stdout, _, err := runShowCommand(t, "-p", "Shop-Project")
 	require.NoError(t, err)
 	assert.Equal(t, showJourneySQLite, stdout)
@@ -300,7 +300,7 @@ func TestShowFailsWhenAStoredFileCannotBeRead(t *testing.T) {
 		catalog := filepath.Join(projectDir, "environments", "local", "catalogs", "shop", "shop.db.json")
 		require.NoError(t, os.WriteFile(catalog, []byte("not json"), 0o644))
 		stdout, _, err := runShowCommand(t, "-d", projectDir)
-		assert.Equal(t, 1, exitCodeOf(t, err))
+		assert.Equal(t, 1, showExitCodeOf(t, err))
 		assert.EqualError(t, err, `environment "local": its catalogs cannot be read`, "no path of the project in the answer")
 		assert.Empty(t, stdout)
 	})
@@ -309,13 +309,13 @@ func TestShowFailsWhenAStoredFileCannotBeRead(t *testing.T) {
 		columns := filepath.Join(projectDir, "dbmodels", "shop", "main", "tables", "Customer", "main.Customer.columns.json")
 		require.NoError(t, os.WriteFile(columns, []byte("not json"), 0o644))
 		stdout, _, err := runShowCommand(t, "-d", projectDir)
-		assert.Equal(t, 1, exitCodeOf(t, err))
+		assert.Equal(t, 1, showExitCodeOf(t, err))
 		assert.ErrorContains(t, err, `catalog "shop" in environment "local" could not be read`)
 		assert.Empty(t, stdout)
 	})
 	t.Run("a project at an address", func(t *testing.T) {
 		_, _, err := runShowCommand(t, "-d", "https://example.com/acme/repo")
-		assert.Equal(t, 2, exitCodeOf(t, err), "show reads a folder of this machine")
+		assert.Equal(t, 2, showExitCodeOf(t, err), "show reads a folder of this machine")
 		assert.ErrorContains(t, err, "https://example.com/acme/repo")
 	})
 }
@@ -398,14 +398,14 @@ func TestShowFailsWhenTheProjectCannotBeLoaded(t *testing.T) {
 	projectDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(projectDir, "datatug-project.json"), []byte("not json"), 0o644))
 	_, _, err := runShowCommand(t, "-d", projectDir)
-	assert.Equal(t, 1, exitCodeOf(t, err))
+	assert.Equal(t, 1, showExitCodeOf(t, err))
 	assert.ErrorContains(t, err, "failed to load project")
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	require.NoError(t, os.Mkdir(filepath.Join(home, ".datatug.yaml"), 0o755))
 	_, _, err = runShowCommand(t, "-p", "anything")
-	assert.Equal(t, 1, exitCodeOf(t, err))
+	assert.Equal(t, 1, showExitCodeOf(t, err))
 	assert.ErrorContains(t, err, "settings")
 }
 
@@ -597,7 +597,7 @@ func TestShowAFileIsNotAProject(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "shop.db")
 	require.NoError(t, os.WriteFile(file, []byte("SQLite format 3"), 0o644))
 	stdout, _, err := runShowCommand(t, "-d", file)
-	assert.Equal(t, 3, exitCodeOf(t, err))
+	assert.Equal(t, 3, showExitCodeOf(t, err))
 	require.Error(t, err)
 	assert.Equal(t, notAProjectSentence(file), err.Error())
 	assert.NotContains(t, err.Error(), "not a directory")
@@ -610,7 +610,7 @@ func TestShowByRegisteredNameAtAnAddress(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	require.NoError(t, dtconfig.AddProjectToSettings(dtconfig.ProjectRef{ID: "remote-one", Url: "https://example.com/acme/repo"}))
 	stdout, _, err := runShowCommand(t, "-p", "remote-one")
-	assert.Equal(t, 2, exitCodeOf(t, err))
+	assert.Equal(t, 2, showExitCodeOf(t, err))
 	assert.ErrorContains(t, err, "https://example.com/acme/repo")
 	assert.Empty(t, stdout)
 }

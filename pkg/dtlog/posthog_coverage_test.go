@@ -437,21 +437,6 @@ func (context_deadline_exceeded_sentinel) Is(target error) bool {
 
 // --- cover default seam bodies ---
 
-// TestSeamBodies_PosthogNewWithConfig exercises the default posthogNewWithConfig seam body
-// (which calls the real posthog.NewWithConfig). A valid API key must produce either a non-nil
-// client with no error, or an error with a nil client — never both nil.
-func TestSeamBodies_PosthogNewWithConfig(t *testing.T) {
-	client, err := posthogNewWithConfig("phc_test", posthog.Config{Endpoint: "https://eu.i.posthog.com"})
-	// posthog.NewWithConfig either succeeds or fails; it must not return (nil, nil).
-	assert.False(t, client == nil && err == nil, "expected either a client or an error, got neither")
-	if err != nil {
-		assert.Nil(t, client)
-	} else {
-		assert.NotNil(t, client)
-		assert.NoError(t, client.Close())
-	}
-}
-
 // TestSeamBodies_HttpDoRequest exercises the default httpDoRequest seam body using a local
 // test server so no real network call is needed.
 func TestSeamBodies_HttpDoRequest(t *testing.T) {

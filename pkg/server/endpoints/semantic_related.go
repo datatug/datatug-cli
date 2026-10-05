@@ -279,6 +279,10 @@ func computeSemanticRelatedRows(ctx context.Context, req apicontract.RelatedRows
 		if isAccessDenied(err) {
 			return apicontract.Result{}, contractErrAccessDenied(err.Error())
 		}
+		// A source whose data file is not there or that cannot be opened is answered by its ID.
+		if unavailable := api.SourceUnavailable(source, err); unavailable != nil {
+			return apicontract.Result{}, newSourceUnavailable(unavailable.Error())
+		}
 		return apicontract.Result{}, newInvalidRequest("", err.Error())
 	}
 	truncated := len(result.Rows) > limit

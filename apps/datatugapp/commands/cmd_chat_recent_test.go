@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/internal/hermetictest"
+	"github.com/datatug/datatug-cli/pkg/dtlog"
 )
 
 // Keep every command test's remembered chat options — and everything else in
@@ -18,7 +19,15 @@ import (
 // redirected on top of that because it is this package's own seam over
 // os.UserConfigDir (see cmd_chat_recent.go), not a fallback that would
 // already be caught by an env-var redirect alone.
+//
+// It also clears the three variables that turn telemetry off. CI sets CI, and a
+// developer may have DO_NOT_TRACK exported; the chat tests that expect the cloud
+// usage report must not depend on either. A test of the off switch sets them
+// itself with t.Setenv.
 func TestMain(m *testing.M) {
+	for _, name := range []string{dtlog.EnvTelemetry, dtlog.EnvDoNotTrack, dtlog.EnvCI} {
+		_ = os.Unsetenv(name)
+	}
 	hermeticCleanup, err := hermetictest.Setup()
 	if err != nil {
 		panic(err)

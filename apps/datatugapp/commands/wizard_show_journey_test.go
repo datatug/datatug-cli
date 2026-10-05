@@ -52,13 +52,13 @@ func TestShowDoesNotLookOneFolderDeeper(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(folder, "datatug", "datatug-project.json"), []byte(`{"id":"deep"}`), 0o644))
 	want := `"` + folder + `" is not a DataTug project: its project file is in the folder datatug, where an earlier version of the terminal UI wrote it; move datatug/datatug-project.json up into "` + folder + `"`
 	stdout, _, err := runShowCommand(t, "-d", folder)
-	assert.Equal(t, 3, exitCodeOf(t, err))
+	assert.Equal(t, 3, showExitCodeOf(t, err))
 	require.Error(t, err)
 	assert.Equal(t, want, err.Error())
 	assert.Empty(t, stdout)
 
 	registerProjectForTest(t, "deep", folder)
 	_, _, err = runShowCommand(t, "-p", "deep")
-	assert.Equal(t, 3, exitCodeOf(t, err))
+	assert.Equal(t, 3, showExitCodeOf(t, err))
 	assert.EqualError(t, err, want)
 }

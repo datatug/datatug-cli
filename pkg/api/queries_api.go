@@ -285,7 +285,12 @@ func GetQuery(ctx context.Context, ref dto.ProjectItemRef) (query *datatug.Query
 	}
 	canonicalID, err := ResolveQueryID(projectDir, ref.ID)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, ErrQueryNotFound) || errors.Is(err, ErrAmbiguousQueryID) {
+			return nil, err
+		}
+		// The queries tree could not be walked: the error quotes the path of the queries folder,
+		// so the answer is the sentence of queries/all_queries and the cause is logged.
+		return nil, itemsNotLoaded("queries", dbcopy.SourceIDDisplay(ref.ProjectID), err)
 	}
 	store, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {

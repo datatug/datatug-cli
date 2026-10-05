@@ -1,6 +1,7 @@
 package sqlexecute
 
 import (
+	"context"
 	"database/sql"
 	"encoding/binary"
 	"errors"
@@ -37,7 +38,8 @@ func NewExecutor(
 	}
 }
 
-// Execute executes DataTug commands
+// Execute executes DataTug commands, with no deadline: see ExecuteSingleContext for a call that
+// ends with its context.
 func (e Executor) Execute(request Request) (response Response, err error) {
 	if len(request.Commands) == 1 {
 		return e.ExecuteSingle(request.Commands[0])
@@ -45,10 +47,18 @@ func (e Executor) Execute(request Request) (response Response, err error) {
 	return e.executeMulti(request)
 }
 
-// ExecuteSingle executes single DB command
+// ExecuteSingle executes single DB command, with no deadline: see ExecuteSingleContext.
 func (e Executor) ExecuteSingle(command RequestCommand) (response Response, err error) {
+	return e.ExecuteSingleContext(context.Background(), command)
+}
+
+// ExecuteSingleContext executes single DB command. The query runs with ctx (QueryContext), so a
+// connection that ends its context, with a deadline or a cancellation, ends the call with the
+// error of the context: a server that accepts the connection and never answers does not hold
+// the caller.
+func (e Executor) ExecuteSingleContext(ctx context.Context, command RequestCommand) (response Response, err error) {
 	var recordset datatug.Recordset
-	if recordset, err = e.executeCommand(command); err != nil {
+	if recordset, err = e.executeCommand(ctx, command); err != nil {
 		return
 	}
 	response.Commands = []*CommandResponse{
@@ -80,7 +90,7 @@ func (e Executor) executeMulti(request Request) (response Response, err error) {
 				recordset  datatug.Recordset
 				commandErr error
 			)
-			if recordset, commandErr = e.executeCommand(cmd); commandErr != nil {
+			if recordset, commandErr = e.executeCommand(context.Background(), cmd); commandErr != nil {
 				commandErrs[i] = commandErr
 				wg.Done()
 				return
@@ -109,9 +119,15 @@ const maxPort = 65535
 // of the server, which are checked first: the host is a host name or an address (see
 // dbcopy.IsRecordableHost: no character that separates the keys of the connection string)
 // and the port a port number, written as the port of the string. The errors say which part
-// is refused and nothing of its value. The user, the password and the database of the
-// command are the caller's own, and are written as they are given.
-func serverConnectionParams(server datatug.ServerRef, command RequestCommand) (dbconnection.Params, error) {
+// is refused and nothing of its value.
+//
+// The user, the password and the database of the command are not written into the string: the
+// connection is made with the identity of the person who runs the program (a trusted
+// connection) and no caller passes them. A value that holds a ";" or a "=" would start another
+// key of the string, and the driver reads a later key over an earlier one, so a caller that
+// needs one of them has to check it for the string first (a user or a database with no ";", "=",
+// "{", "}" or control character, a password quoted) and add it here with a test that tries each.
+func serverConnectionParams(server datatug.ServerRef, _ RequestCommand) (dbconnection.Params, error) {
 	if server.Host != "" && !dbcopy.IsRecordableHost(server.Host) {
 		return nil, errors.New("the host is not a host name or an address")
 	}
@@ -122,7 +138,7 @@ func serverConnectionParams(server datatug.ServerRef, command RequestCommand) (d
 	if server.Port != 0 {
 		options = append(options, "port="+strconv.Itoa(server.Port))
 	}
-	return dbconnection.NewConnectionString(server.Driver, server.Host, command.Username, command.Password, command.DB, options...)
+	return dbconnection.NewConnectionString(server.Driver, server.Host, "", "", "", options...)
 }
 
 var (
@@ -131,7 +147,7 @@ var (
 	scanRowSeam     = func(rows *sql.Rows, dest ...interface{}) error { return rows.Scan(dest...) }
 )
 
-func (e Executor) executeCommand(command RequestCommand) (recordset datatug.Recordset, err error) {
+func (e Executor) executeCommand(ctx context.Context, command RequestCommand) (recordset datatug.Recordset, err error) {
 
 	var dbServer datatug.ServerRef
 
@@ -207,7 +223,7 @@ func (e Executor) executeCommand(command RequestCommand) (recordset datatug.Reco
 		args = append(args, p.Value)
 	}
 
-	if recordset, err = e.executeQuery(db, dbServer.Driver, queryText, args); err != nil {
+	if recordset, err = e.executeQuery(ctx, db, dbServer.Driver, queryText, args); err != nil {
 		parameters := reParameter.FindAllString(queryText, -1)
 		if strings.HasPrefix(err.Error(), "not enough args to execute query:") {
 			if len(parameters) > 0 {
@@ -218,7 +234,7 @@ func (e Executor) executeCommand(command RequestCommand) (recordset datatug.Reco
 					args = append(args, nil)
 					queryText = strings.ReplaceAll(queryText, p, fmt.Sprintf(":%v", len(args)))
 				}
-				return e.executeQuery(db, dbServer.Driver, queryText, args)
+				return e.executeQuery(ctx, db, dbServer.Driver, queryText, args)
 			}
 		}
 		return
@@ -227,10 +243,10 @@ func (e Executor) executeCommand(command RequestCommand) (recordset datatug.Reco
 }
 
 // TODO: Return slice of recordsets
-func (e Executor) executeQuery(db *sql.DB, driver, text string, args []interface{}) (recordset datatug.Recordset, err error) {
+func (e Executor) executeQuery(ctx context.Context, db *sql.DB, driver, text string, args []interface{}) (recordset datatug.Recordset, err error) {
 	started := time.Now()
 	var rows *sql.Rows
-	if rows, err = db.Query(text, args...); err != nil {
+	if rows, err = db.QueryContext(ctx, text, args...); err != nil {
 		log.Printf("Failed to execute %v: %v", text, err)
 		return
 	}

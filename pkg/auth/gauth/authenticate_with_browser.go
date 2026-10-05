@@ -7,8 +7,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"github.com/pkg/browser"
-	"golang.org/x/oauth2"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,6 +15,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pkg/browser"
+	"golang.org/x/oauth2"
 )
 
 var openBrowser = browser.OpenURL
@@ -111,7 +112,10 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 	})
 	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, MaxHeaderBytes: 16 << 10}
 	serve, shutdown := authServerServe, srvShutdown
-	go func() { done <- serve(srv, listener) }()
+	go func() {
+		done <- serve(srv, listener)
+		close(done)
+	}()
 	closeFlow := func() {
 		finish, stop := context.WithTimeout(context.Background(), authDrainTimeout)
 		_ = shutdown(finish, srv)
@@ -131,7 +135,7 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 	select {
 	case response = <-result:
 	case <-done:
-		_ = listener.Close()
+		closeFlow()
 		return nil, errAuthServerStopped
 	case <-ctx.Done():
 		closeFlow()

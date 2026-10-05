@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"golang.org/x/oauth2"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/oauth2"
 )
 
 type callbackListener struct {
@@ -176,5 +177,27 @@ func TestGoogleCallbackCancellationBindFailureAndDenial(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGoogleCallbackServerStopDrainsOwnership(t *testing.T) {
+	l, ready := callbackFixture(t)
+	shutdowns := 0
+	authServerServe = func(srv *http.Server, _ net.Listener) error { ready <- srv; return errors.New("private serve detail") }
+	originalShutdown := srvShutdown
+	srvShutdown = func(ctx context.Context, srv *http.Server) error { shutdowns++; return originalShutdown(ctx, srv) }
+	openBrowser = func(string) error { <-ready; return nil }
+	configExchangeFn = func(context.Context, *oauth2.Config, string, ...oauth2.AuthCodeOption) (*oauth2.Token, error) {
+		t.Fatal("stopped server exchanged token")
+		return nil, nil
+	}
+	_, err := getTokenFromWeb(context.Background(), &oauth2.Config{RedirectURL: "http://localhost:8080/oauth2callback"})
+	if err == nil || strings.Contains(err.Error(), "private") || shutdowns != 1 {
+		t.Fatal(err, shutdowns)
+	}
+	select {
+	case <-l.closed:
+	default:
+		t.Fatal("stopped callback retained listener")
 	}
 }

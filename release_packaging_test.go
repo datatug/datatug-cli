@@ -24,6 +24,7 @@ type releaseWorkflow struct {
 	Jobs map[string]struct {
 		Needs   yamlStrings       `yaml:"needs"`
 		If      string            `yaml:"if"`
+		Timeout int               `yaml:"timeout-minutes"`
 		With    map[string]any    `yaml:"with"`
 		Secrets map[string]string `yaml:"secrets"`
 		Steps   []struct {
@@ -131,6 +132,13 @@ func TestReleaseWorkflow_ChecksTheTapAfterPublishing(t *testing.T) {
 		if !strings.Contains(job.If, "!cancelled()") {
 			t.Errorf("job %q must also run when a later job of the release failed (if: !cancelled() && ...), got %q", name, job.If)
 		}
+		// The job runs inside the workflow's `release` concurrency group and gh
+		// has no request timeout of its own: without a limit a stalled call holds
+		// every later release for GitHub's six-hour default. The script's worst
+		// case is about 2.5 minutes.
+		if job.Timeout < 1 || job.Timeout > 10 {
+			t.Errorf("job %q needs timeout-minutes between 1 and 10 so a stalled gh call cannot hold later releases, got %d", name, job.Timeout)
+		}
 	}
 	if !found {
 		t.Error("no job after `release` runs scripts/verify-homebrew-cask.sh")
@@ -212,7 +220,7 @@ func TestCheckHomebrewCaskScript(t *testing.T) {
 		{name: "tap is ahead", tag: "v0.56.0", cask: caskFixture("0.57.0", current), wantExit: 1, wantStderr: "0.57.0"},
 		{name: "tap has a prefix of the version", tag: "v0.5.0", cask: caskFixture("0.55.0", current), wantExit: 1, wantStderr: "0.55.0"},
 		{name: "version right, one checksum wrong", tag: "v0.56.0", cask: caskFixture("0.56.0", stale), checksums: checksumsFixture("0.56.0"), wantExit: 1, wantStderr: "linux_amd64"},
-		{name: "checksums lack an archive", tag: "v0.56.0", cask: caskFixture("0.56.0", current), checksums: "garbage\n", wantExit: 1, wantStderr: "darwin_arm64"},
+		{name: "checksums lack an archive", tag: "v0.56.0", cask: caskFixture("0.56.0", current), checksums: "garbage\n", wantExit: 3, wantStderr: "darwin_arm64"},
 		{name: "cask has no version line", tag: "v0.56.0", cask: "cask \"datatug\" do\nend\n", wantExit: 1, wantStderr: "no version"},
 		{name: "tag is not a stable release", tag: "v0.56.0-rc1", cask: caskFixture("0.56.0", current), wantExit: 2, wantStderr: "vX.Y.Z"},
 		{name: "cask file is missing", tag: "v0.56.0", wantExit: 2, wantStderr: "cask file"},
@@ -305,6 +313,7 @@ func TestVerifyHomebrewCaskScript(t *testing.T) {
 		tag          string
 		casks        []string // cask.N contents; "" means the Nth read fails
 		dlFail       []int    // download call numbers that fail
+		checksums    string   // the release's checksums file; empty means a complete one
 		wantExit     int
 		wantStderr   string
 		notStderr    string
@@ -318,6 +327,8 @@ func TestVerifyHomebrewCaskScript(t *testing.T) {
 		{name: "always stale says stale, not unreadable", tag: "v0.56.0", casks: []string{stale, stale, stale, stale}, wantExit: 1, wantStderr: "is not at v0.56.0", notStderr: "could not read", wantAPICalls: 4, wantDLCalls: 4},
 		{name: "tap never readable says unreadable, not stale", tag: "v0.56.0", casks: []string{"", "", "", ""}, wantExit: 1, wantStderr: "could not read datatug/homebrew-tap", notStderr: "is not at", wantAPICalls: 4, wantDLCalls: 4},
 		{name: "downloads never work says unreadable", tag: "v0.56.0", casks: []string{fresh, fresh, fresh, fresh}, dlFail: []int{1, 2, 3, 4}, wantExit: 1, wantStderr: "could not read", notStderr: "is not at", wantAPICalls: 0, wantDLCalls: 4},
+		{name: "stale reads then a failed read still says stale", tag: "v0.56.0", casks: []string{stale, stale, stale, ""}, wantExit: 1, wantStderr: "is not at v0.56.0", notStderr: "could not read datatug/homebrew-tap", wantAPICalls: 4, wantDLCalls: 4},
+		{name: "checksums lacking an archive is not retried and not called stale", tag: "v0.56.0", casks: []string{fresh}, checksums: "garbage\n", wantExit: 3, wantStderr: "has no checksum for", notStderr: "is not at", wantAPICalls: 1, wantDLCalls: 1},
 		{name: "a bad tag is not retried", tag: "v0.56.0-rc1", casks: []string{fresh}, wantExit: 2, wantStderr: "vX.Y.Z", wantAPICalls: 1, wantDLCalls: 1},
 	}
 	for _, tt := range tests {
@@ -333,7 +344,11 @@ func TestVerifyHomebrewCaskScript(t *testing.T) {
 			if err := os.WriteFile(ghPath, []byte(fakeGH), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			write("checksums.txt", checksumsFixture("0.56.0"))
+			sums := tt.checksums
+			if sums == "" {
+				sums = checksumsFixture("0.56.0")
+			}
+			write("checksums.txt", sums)
 			write("api.calls", "")
 			write("dl.calls", "")
 			for i, c := range tt.casks {

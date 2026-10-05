@@ -13,7 +13,8 @@
 # GH (the gh command, default gh), ATTEMPTS (default 5), INTERVAL (seconds
 # between attempts, default 30).
 #
-# Exit codes: 0 current, 1 not current or unreadable, 2 bad usage.
+# Exit codes: 0 current, 1 not current or unreadable, 2 bad usage, 3 the
+# release's checksums file lacks an archive (reported at once, not retried).
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
@@ -32,11 +33,13 @@ check="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-homebrew-cask.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# The last thing learned about the tap: "stale" once a read compared and found
+# it behind, kept through later failed reads so the final message does not
+# turn a known-stale tap into an unknown one.
 reason="read"
 for ((attempt = 1; attempt <= attempts; attempt++)); do
   # gh refuses to overwrite a file from an earlier attempt.
   rm -f "$work"/*
-  reason="read"
   if "$gh" release download "$tag" --repo "$repo" --pattern '*_checksums.txt' --dir "$work" &&
     "$gh" api -H 'Accept: application/vnd.github.raw' "repos/$tap/contents/Casks/datatug.rb" >"$work/datatug.rb"; then
     checksums="$(find "$work" -name '*_checksums.txt' | head -n 1)"

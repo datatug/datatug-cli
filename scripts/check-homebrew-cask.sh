@@ -7,7 +7,9 @@
 # <checksums-file> is the release's datatug_<version>_checksums.txt; when given,
 # the cask must also carry the SHA-256 of each macOS and Linux archive in it.
 #
-# Exit codes: 0 current, 1 the cask is not the release's, 2 bad usage.
+# Exit codes: 0 current, 1 the cask is not the release's, 2 bad usage, 3 the
+# release's checksums file has no checksum for an archive (the tap was never
+# compared: retrying cannot help, and it says nothing about the tap).
 set -euo pipefail
 
 if [[ $# -lt 2 || $# -gt 3 ]]; then
@@ -49,7 +51,7 @@ if [[ -n "$checksums" ]]; then
     hash="$(awk -v asset="$asset" '$2 == asset { print $1 }' "$checksums")"
     if [[ ! "$hash" =~ ^[0-9a-f]{64}$ ]]; then
       echo "the release's checksums file has no checksum for $asset ($platform)" >&2
-      exit 1
+      exit 3
     fi
     if ! grep -q "sha256 \"$hash\"" "$cask"; then
       echo "the tap's cask does not carry the checksum of $asset ($platform)" >&2

@@ -304,33 +304,15 @@ func TestCreateFolder(t *testing.T) {
 
 // ---- project endpoints ----
 
+// createProject is not implemented: it answers 501 with a built sentence and reads nothing of the
+// request (see TestRoutes_ARouteThatIsNotImplementedAnswers501WithABuiltSentence).
 func TestCreateProject(t *testing.T) {
-	cap := &handleCapture{}
-	withFakeHandleCapture(t, cap, func() {
-		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodPost, "/?store=s1", `{"id":"test","title":"test"}`)
-		endpoints := ProjectAgentEndpoints{}
-		endpoints.createProject(w, r)
-		if !cap.workerCalled {
-			t.Error("expected worker to be called")
-		}
-		// The content-length floor has to admit the shortest body that can
-		// carry both mandatory fields. Sized for `{"title":""}` before
-		// datatug-core v0.39.0 made `id` caller-supplied, it would now be
-		// describing a request shape that no longer exists — and a floor
-		// raised past this body would reject a perfectly valid create with
-		// a length error instead of ever reaching Validate.
-		const shortestValidBody = `{"id":"a","title":"t"}`
-		minLength := cap.verifyOptions.MinimumContentLength()
-		if minLength > int64(len(shortestValidBody)) {
-			t.Errorf("MinimumContentLength() = %d, want at most %d (the length of %s)",
-				minLength, len(shortestValidBody), shortestValidBody)
-		}
-		if minLength <= int64(len(`{"title":""}`)) {
-			t.Errorf("MinimumContentLength() = %d, want more than %d: a body that short cannot name both `id` and `title`",
-				minLength, len(`{"title":""}`))
-		}
-	})
+	w := httptest.NewRecorder()
+	r := makeRequest(http.MethodPost, "/?store=s1", `{"id":"test","title":"test"}`)
+	ProjectAgentEndpoints{}.createProject(w, r)
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("expected 501, got %d", w.Code)
+	}
 }
 
 func TestDeleteProject(t *testing.T) {
@@ -703,14 +685,13 @@ func TestGetRecordsetDefinition(t *testing.T) {
 }
 
 func TestGetRecordsetData(t *testing.T) {
-	// api.GetRecordset panics "not implemented yet" — use recover to cover the handler path
-	cap := &handleCapture{}
-	withFakeHandleCapture(t, cap, func() {
-		defer func() { recover() }() //nolint:errcheck
-		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodGet, "/?storage=s1&project=p1&id=rs1", "")
-		getRecordsetData(w, r)
-	})
+	// api.GetRecordset panics "not implemented yet": the route answers 501 and never calls it.
+	w := httptest.NewRecorder()
+	r := makeRequest(http.MethodGet, "/?storage=s1&project=p1&id=rs1", "")
+	getRecordsetData(w, r)
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("expected 501, got %d", w.Code)
+	}
 }
 
 func TestAddRowsToRecordset(t *testing.T) {
@@ -738,12 +719,12 @@ func TestAddRowsToRecordset(t *testing.T) {
 		}
 	})
 
-	t.Run("valid request with count warning", func(t *testing.T) {
+	t.Run("valid request with no count", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		body := `[]`
 		r := httptest.NewRequest(http.MethodPost, "/?project=p1&recordset=rs1&data=d1", bytes.NewBufferString(body))
 		addRowsToRecordset(w, r)
-		// count not provided triggers warning, but execution continues
+		// count not provided is 0: execution continues
 	})
 
 	t.Run("valid request with count", func(t *testing.T) {

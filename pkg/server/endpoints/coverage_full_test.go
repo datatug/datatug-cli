@@ -209,11 +209,11 @@ func TestSemanticSchema_Coverage(t *testing.T) {
 	assert.NoError(t, err)
 
 	// 4. resolveSQLSourceURL invalid URL
-	_, err = resolveSQLSourceURL(ctx, "invalid:////", "tbl")
+	_, err = resolveSQLSourceURL(ctx, "src", "invalid:////", "tbl")
 	assert.Error(t, err)
 
 	// 5. resolveSQLSourceURL non-existent DB file (dbcopy.ErrSourceFileMissing)
-	_, err = resolveSQLSourceURL(ctx, "sqlite://file:"+filepath.Join(tmpDir, "missing.db"), "tbl")
+	_, err = resolveSQLSourceURL(ctx, "src", "sqlite://file:"+filepath.Join(tmpDir, "missing.db"), "tbl")
 	assert.Error(t, err)
 
 	// 6. resolveRecordsetSource with PrimaryKey and ForeignKeys

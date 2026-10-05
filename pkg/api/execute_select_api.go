@@ -118,7 +118,9 @@ func ExecuteSelect(ctx context.Context, storeID string, request SelectRequest) (
 		}
 	}
 	if err != nil {
-		return QueryResultResponse{}, err
+		// A source that is not there or cannot be opened is answered by its ID: the text of the
+		// error holds the display form of the source (see SourceUnavailable).
+		return QueryResultResponse{}, sourceFailureAnswer(request.Database, err)
 	}
 	return resultToResponse(result, executionProfile, request.Database, collection), nil
 }

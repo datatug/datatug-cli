@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"os"
 	"path/filepath"
@@ -15,8 +16,8 @@ import (
 	"github.com/mitchellh/go-homedir"
 )
 
-var executeSingleSeam = func(e sqlexecute.Executor, command sqlexecute.RequestCommand) (sqlexecute.Response, error) {
-	return e.ExecuteSingle(command)
+var executeSingleSeam = func(ctx context.Context, e sqlexecute.Executor, command sqlexecute.RequestCommand) (sqlexecute.Response, error) {
+	return e.ExecuteSingleContext(ctx, command)
 }
 
 var homedirExpand = homedir.Expand

@@ -120,7 +120,7 @@ This is the one place the files of a scan are written down. It is the layout of 
 | `dbmodels/<model>/<schema>/tables/<T>/<schema>.<T>.columns.json` | the CLI | `columns[]`, in the engine's column order, each with `name`, `ordinalPosition`, `pkPosition` (the 1-based place in the primary key, left out when the column is not in it), `isNullable`, `dbType`, the other column properties the engine reports (such as `default` and `charMaxLength`), and `byEnv`, which holds `<env>` with `status` `exists` |
 | `dbmodels/<model>/<schema>/views/<T>/<schema>.<T>.columns.json` | the CLI | the same, for a view |
 
-A table or view is the folder `<T>`: the readers list tables and views by folder name, and read the columns from the one `*.columns.json` file in it. Nothing else is written. In particular the project holds no foreign keys, no indexes, no record counts and no DDL, and no password. A scan of PostgreSQL (not available in this release) will record its driver and its catalog id only, and no host, port, user or password in any project file.
+A table or view is the folder `<T>`: the readers list tables and views by folder name, and read the columns from the one file in it whose name ends in `.columns.json`, found by listing the folder: a `[` in a table name, or in the path of the project, is a character of a name and not a pattern, so `t[1]` and `t1` are two tables. Nothing else is written. In particular the project holds no foreign keys, no indexes, no record counts and no DDL, and no password. A scan of PostgreSQL (not available in this release) will record its driver and its catalog id only, and no host, port, user or password in any project file.
 
 The readers of the layout are `GetCatalogTables` and `GetCatalogSchema` (`pkg/api/catalog_tables_api.go`; chat, `serve` and saved queries), source resolution (`pkg/api/source_resolver.go`) and the web app's GitHub reader, which reads the environment folders, the `catalogs` of the environment file, the `dbModel` of the catalog file and the folder names under `dbmodels/<model>/<schema>/tables` and `views`.
 
@@ -180,6 +180,12 @@ Given a SQLite file with a table named `a/b`, `datatug scan` exits `0`, names `a
 **Requirements:** scan#req:sqlite-pure-go
 
 Given a SQLite file with tables named `it's` and `a]b`, and one named `x'); ATTACH DATABASE 'p.db' AS p; CREATE TABLE p.t(c); --`, `datatug scan`, run from an empty working directory, exits `0`; the three tables are in the project with their columns; and no `p.db` exists anywhere. (`TestScanJourneyNamesInTheFileAreNotSQL`, `TestScanDbCatalog_SQLite3_NamesInTheFileAreNotSQL`.)
+
+### AC: names-with-brackets-are-read
+
+**Requirements:** scan#req:project-layout
+
+Given a SQLite file with tables named `t[1]`, `t1` and `a[b`, each with columns of its own, scanned into a project folder whose own path has a `[` in it, chat's catalog of the project lists each table with its own columns and no issue. (`TestScanJourneyNamesInTheFileAreNotSQL`, `TestGetCatalogSchemaNamesAndPathsWithBrackets`.)
 
 ### AC: sqlite-path-is-a-path
 

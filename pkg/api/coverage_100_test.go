@@ -1566,24 +1566,49 @@ func TestSourceWarningsAPI(t *testing.T) {
 	// 3. warnMissingSourceFilesForEnvironment with env == nil
 	warnMissingSourceFilesForEnvironment(ctx, mockProjectStore{}, "p1", tmpDir, nil)
 
-	// 4. warnMissingSourceFilesForEnvironment with ListSources error
-	storage.NewDatatugStore = func(string) (storage.Store, error) {
-		return mockStore{
-			getProjectStoreFunc: func(projectID string) datatug.ProjectStore {
-				return mockProjectStore{
-					loadEnvironmentsFunc: func(ctx context.Context, o ...datatug.StoreOption) (datatug.Environments, error) {
-						return datatug.Environments{
-							{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "dev"}}},
-						}, nil
-					},
-					loadEnvironmentFunc: func(ctx context.Context, id string, o ...datatug.StoreOption) (*datatug.Environment, error) {
-						return nil, errors.New("env err")
-					},
-				}
-			},
-		}, nil
+	// 4. warnMissingSourceFilesForEnvironment with ListSources error: the environment
+	// has a catalog whose database file is missing, which is a warning when its sources
+	// are listed, and the project's HTTP queries cannot be listed, so there is no
+	// listing and no warning.
+	{
+		origLoadHTTP := loadHTTPQueries
+		t.Cleanup(func() { loadHTTPQueries = origLoadHTTP })
+		listAttempts := 0
+		loadHTTPQueries = func(string) ([]httpsource.LoadedQuery, error) {
+			listAttempts++
+			return nil, errors.New("queries unreadable")
+		}
+		storage.NewDatatugStore = func(string) (storage.Store, error) {
+			return mockStore{
+				getProjectStoreFunc: func(projectID string) datatug.ProjectStore {
+					return mockProjectStore{
+						loadEnvironmentsFunc: func(ctx context.Context, o ...datatug.StoreOption) (datatug.Environments, error) {
+							return datatug.Environments{
+								{ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "dev"}}},
+							}, nil
+						},
+						loadEnvDbCatalogsFunc: func(ctx context.Context, envID string, o ...datatug.StoreOption) (datatug.DbCatalogs, error) {
+							return datatug.DbCatalogs{{DbCatalogBase: datatug.DbCatalogBase{
+								ProjectItem: datatug.ProjectItem{ProjItemBrief: datatug.ProjItemBrief{ID: "gone"}},
+								Driver:      "sqlite3",
+								Path:        filepath.Join(tmpDir, "gone.db"),
+							}}}, nil
+						},
+					}
+				},
+			}, nil
+		}
+		logged := captureLog(t)
+		WarnMissingSourceFiles(ctx, map[string]string{"p1": tmpDir})
+		assert.Equal(t, 1, listAttempts, "the sources of the environment were listed, and the listing failed")
+		assert.Empty(t, logged.String(), "no listing, so no warning about a missing file")
+
+		// The same environment, listed, does warn about the missing file.
+		loadHTTPQueries = func(string) ([]httpsource.LoadedQuery, error) { return nil, nil }
+		WarnMissingSourceFiles(ctx, map[string]string{"p1": tmpDir})
+		assert.Contains(t, logged.String(), "gone.db", "the control: a listing that works warns")
+		loadHTTPQueries = origLoadHTTP
 	}
-	WarnMissingSourceFiles(ctx, map[string]string{"p1": tmpDir})
 
 	// 5. warnMissingSourceFilesForEnvironment with missing file warning
 	dbMissing := filepath.Join(tmpDir, "missing.db")
@@ -2465,14 +2490,9 @@ func TestCoverageFinal100_PkgApi(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, ct5.Tables)
 
-		origGlob := filepathGlob
-		t.Cleanup(func() { filepathGlob = origGlob })
-		filepathGlob = func(pattern string) ([]string, error) {
-			return nil, errors.New("glob failed")
-		}
-		_, err = readCatalogColumns(tabModelDir, "s1", "t1")
-		assert.Error(t, err)
-		filepathGlob = origGlob
+		// A relation whose folder is not there cannot be listed.
+		_, err = readCatalogColumns(tabModelDir, "s1", "t_no_folder")
+		assert.ErrorContains(t, err, "find columns for s1.t_no_folder")
 
 		colDir := filepath.Join(tabModelDir, "t_badread")
 		require.NoError(t, os.MkdirAll(colDir, 0755))

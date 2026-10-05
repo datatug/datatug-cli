@@ -35,6 +35,42 @@ func TestGetCatalogSchemaPartialKeepsHealthyRelations(t *testing.T) {
 	}
 }
 
+// A "[" in a table name, or in the path of the project, is a character of a folder
+// name and not a pattern: each table reads its own columns file (t[1] is not t1, and
+// a[b is not a malformed pattern), and the issue of a table with no file is its own.
+func TestGetCatalogSchemaNamesAndPathsWithBrackets(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "project [1]")
+	writeCatalogFile(t, dir, "local", "shop", "shop")
+	writeColumnsFile(t, dir, "shop", "main", "tables", "t[1]", `{"columns":[{"name":"in_brackets"}]}`)
+	writeColumnsFile(t, dir, "shop", "main", "tables", "t1", `{"columns":[{"name":"in_t1"}]}`)
+	writeColumnsFile(t, dir, "shop", "main", "views", "a[b", `{"columns":[{"name":"in_a_open_bracket"}]}`)
+	writeTableDir(t, dir, "shop", "main", "tables", "t2") // no columns file: it must not borrow one from t[1]'s folder
+
+	got, err := GetCatalogSchemaPartial(dir, "local", "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	columnsByRelation := map[string]string{}
+	issueByRelation := map[string]string{}
+	for _, relation := range got.Relations {
+		names := make([]string, len(relation.Columns))
+		for i, column := range relation.Columns {
+			names[i] = column.Name
+		}
+		columnsByRelation[relation.Name] = strings.Join(names, ",")
+		issueByRelation[relation.Name] = relation.Issue
+	}
+	wantColumns := map[string]string{"t[1]": "in_brackets", "t1": "in_t1", "t2": "", "a[b": "in_a_open_bracket"}
+	if !reflect.DeepEqual(columnsByRelation, wantColumns) {
+		t.Fatalf("columns by relation = %v, want %v", columnsByRelation, wantColumns)
+	}
+	for name, issue := range issueByRelation {
+		if (name == "t2") != (issue != "") {
+			t.Fatalf("issue of %q = %q: only t2, which has no columns file, has one", name, issue)
+		}
+	}
+}
+
 // writeCatalogFile reproduces datatug-demo-projects/demo-project-1's own
 // environments/<env>/catalogs/<catalog>/<catalog>.db.json shape
 // ({"driver":"sqlite3","path":"...","dbModel":"..."}) — the file

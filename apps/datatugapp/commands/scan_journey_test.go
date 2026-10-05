@@ -491,11 +491,13 @@ func TestScanJourneyRelativePath(t *testing.T) {
 // The names of the tables, views and indexes of the scanned file are names, and
 // nothing else: a file is not trusted, and a scan run in a working directory must
 // not create files there because of what is in the database it was asked to read.
-// Every one of these names is a valid folder name, so every table is in the project.
+// Every one of these names is a valid folder name, so every table is in the project,
+// and chat reads each one's own columns: a "[" in a name is not a pattern to the
+// reader (t[1] is not a table t1), and neither is a "[" in the path of the project.
 func TestScanJourneyNamesInTheFileAreNotSQL(t *testing.T) {
 	workDir := t.TempDir()
 	t.Chdir(workDir)
-	projectDir := filepath.Join(t.TempDir(), "crafted-project")
+	projectDir := filepath.Join(t.TempDir(), "crafted [project]")
 	require.NoError(t, os.Mkdir(projectDir, 0o755))
 	dbDir := t.TempDir()
 	dbPath := filepath.Join(dbDir, "crafted.db")
@@ -506,6 +508,9 @@ func TestScanJourneyNamesInTheFileAreNotSQL(t *testing.T) {
 CREATE TABLE "it's" (id INTEGER PRIMARY KEY, code TEXT UNIQUE);
 CREATE TABLE "a]b" (id INTEGER PRIMARY KEY, its_id INTEGER REFERENCES "it's"(id), qty INTEGER);
 CREATE INDEX "ix'); ATTACH DATABASE 'q.db' AS q; --" ON "a]b"(qty);
+CREATE TABLE "t[1]" (id INTEGER PRIMARY KEY, only_in_brackets TEXT);
+CREATE TABLE t1 (id INTEGER PRIMARY KEY, only_in_t1 TEXT);
+CREATE TABLE "a[b" (id INTEGER PRIMARY KEY, only_in_a_open_bracket TEXT);
 CREATE TABLE "` + attachName + `" (c TEXT);`)
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
@@ -514,13 +519,23 @@ CREATE TABLE "` + attachName + `" (c TEXT);`)
 
 	require.NoError(t, err, "a table named with an apostrophe or a bracket is a table")
 	assert.Empty(t, stderr)
-	schema, err := api.GetCatalogSchema(projectDir, "local", "crafted")
-	require.NoError(t, err)
-	assert.Equal(t, map[string][]journeyColumn{
+	want := map[string][]journeyColumn{
 		"main.it's (BASE TABLE)":               {{Name: "id", PKPos: 1, DbType: "INTEGER"}, {Name: "code", DbType: "TEXT"}},
 		"main.a]b (BASE TABLE)":                {{Name: "id", PKPos: 1, DbType: "INTEGER"}, {Name: "its_id", DbType: "INTEGER"}, {Name: "qty", DbType: "INTEGER"}},
+		"main.t[1] (BASE TABLE)":               {{Name: "id", PKPos: 1, DbType: "INTEGER"}, {Name: "only_in_brackets", DbType: "TEXT"}},
+		"main.t1 (BASE TABLE)":                 {{Name: "id", PKPos: 1, DbType: "INTEGER"}, {Name: "only_in_t1", DbType: "TEXT"}},
+		"main.a[b (BASE TABLE)":                {{Name: "id", PKPos: 1, DbType: "INTEGER"}, {Name: "only_in_a_open_bracket", DbType: "TEXT"}},
 		"main." + attachName + " (BASE TABLE)": {{Name: "c", DbType: "TEXT"}},
-	}, relationColumns(schema))
+	}
+	schema, err := api.GetCatalogSchema(projectDir, "local", "crafted")
+	require.NoError(t, err, "chat reads every table, whatever its name and wherever the project is")
+	assert.Equal(t, want, relationColumns(schema))
+	partial, err := api.GetCatalogSchemaPartial(projectDir, "local", "crafted")
+	require.NoError(t, err)
+	assert.Equal(t, want, relationColumns(partial))
+	for _, relation := range partial.Relations {
+		assert.Empty(t, relation.Issue, "%s.%s: chat found nothing wrong with its columns file", relation.Schema, relation.Name)
+	}
 	for _, dir := range []string{workDir, projectDir, dbDir} {
 		for _, name := range []string{"p.db", "q.db"} {
 			assert.NoFileExists(t, filepath.Join(dir, name), "the scan made a file because of a name in the database")

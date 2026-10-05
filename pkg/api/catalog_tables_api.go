@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/datatug/datatug-core/pkg/storage"
 )
@@ -178,10 +179,21 @@ func loadCatalogRelationsWithMode(dbModelDir, kind, dbType string, partial bool)
 	return out, nil
 }
 
+// readCatalogColumns reads the columns file in the folder of one table or view. It
+// lists the folder rather than matching a pattern over a path that holds the name:
+// a name or a project path with a "[" in it (a valid folder name) is not a pattern.
 func readCatalogColumns(kindDir, schema, name string) ([]CatalogColumn, error) {
-	matches, err := filepathGlob(filepath.Join(kindDir, name, "*.columns.json"))
+	folder := filepath.Join(kindDir, name)
+	entries, err := os.ReadDir(folder)
 	if err != nil {
 		return nil, fmt.Errorf("find columns for %s.%s: %w", schema, name, err)
+	}
+	suffix := "." + storage.ColumnsFileSuffix + ".json"
+	var matches []string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), suffix) {
+			matches = append(matches, filepath.Join(folder, entry.Name()))
+		}
 	}
 	if len(matches) != 1 {
 		return nil, fmt.Errorf("relation %s.%s has %d columns files; want 1", schema, name, len(matches))

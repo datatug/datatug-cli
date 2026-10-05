@@ -200,8 +200,9 @@ func TestSaveScannedProject_LeavesOutNamesThatCannotBeFolders(t *testing.T) {
 
 	require.NoError(t, SaveScannedProject(context.Background(), layoutStore(projectDir), projectDir, project, layoutScanned, &warnings), "a name left out is not a failure")
 
-	// Each is named, with its schema and the reason, in name order, a schema before
-	// the tables of the schemas after it; the rest of the scan is written.
+	// Each is named, with its schema and the reason: the schemas first, in name order,
+	// then the tables and the views of each kept schema, in name order; the rest of the
+	// scan is written.
 	assert.Equal(t, strings.Join([]string{
 		`warning: schema "archive/old" is left out of the project: its name has the character "/", which a folder name cannot have on every system`,
 		`warning: table "Orders" of schema "main" is left out of the project: its name differs only by case from "ORDERS", which is kept, and the two would be one folder on a case-insensitive file system`,

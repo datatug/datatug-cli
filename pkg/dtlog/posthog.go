@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/posthog/posthog-go"
-	"github.com/strongo/cli-helpers/fsutil"
 	"github.com/strongo/logus"
 	"github.com/strongo/random"
 	"gopkg.in/yaml.v3"
@@ -36,12 +35,10 @@ type yamlEncoder interface {
 
 // seams for testing
 var (
-	getPostHogApiKeyFromServerFunc = getPostHogApiKeyFromServer
-	posthogNewWithConfig           = func(apiKey string, config posthog.Config) (posthog.Client, error) {
-		return posthog.NewWithConfig(apiKey, config)
-	}
-	osCreate      = os.Create
-	httpDoRequest = func(req *http.Request) (*http.Response, error) {
+	getPostHogApiKeyFromServerFunc = fetchPostHogApiKey
+	posthogNewWithConfig           = newClientFromConfig
+	osCreate                       = os.Create
+	httpDoRequest                  = func(req *http.Request) (*http.Response, error) {
 		return http.DefaultClient.Do(req)
 	}
 	posthogAPIKeyURL = "https://raw.githubusercontent.com/datatug/datatug-cli/refs/heads/main/envs/prod/posthog-api-key.txt"
@@ -83,6 +80,9 @@ type posthogConfig struct {
 // not skipped for this invocation, after resolving isVersionJSONInvocation,
 // so `version --json` never reaches getPostHogClient at all.
 func Start() {
+	if !Enabled() {
+		return
+	}
 	mu.Lock()
 	if started {
 		mu.Unlock()
@@ -149,8 +149,15 @@ func getPostHogClient() posthog.Client {
 	return client
 }
 
+var errNoStateFolder = errors.New("the home folder cannot be resolved")
+
 func writePostHogConfigToFile(ctx context.Context, config posthogConfig) error {
-	file, err := osCreate(getPosthogConfigFilePath())
+	path := getPosthogConfigFilePath()
+	if path == "" {
+		logus.Warningf(ctx, "Not writing the PostHog config file: %v", errNoStateFolder)
+		return errNoStateFolder
+	}
+	file, err := osCreate(path)
 	if err != nil {
 		logus.Errorf(ctx, "Failed to create PostHog config file: %v", err)
 	} else {
@@ -163,6 +170,16 @@ func writePostHogConfigToFile(ctx context.Context, config posthogConfig) error {
 		}
 	}
 	return err
+}
+
+// fetchPostHogApiKey is the default of getPostHogApiKeyFromServerFunc. It
+// refuses in a test binary, before any request: a test that reaches it would
+// make a real request to raw.githubusercontent.com, so it fails instead.
+func fetchPostHogApiKey() (string, error) {
+	if inTestBinary() {
+		panic("dtlog: the PostHog API key must not be fetched in a test binary; fake getPostHogApiKeyFromServerFunc")
+	}
+	return getPostHogApiKeyFromServer()
 }
 
 func getPostHogApiKeyFromServer() (string, error) {
@@ -197,6 +214,9 @@ func getPostHogApiKeyFromServer() (string, error) {
 
 func readPostHogConfig() (c posthogConfig) {
 	name := getPosthogConfigFilePath()
+	if name == "" {
+		return
+	}
 	data, err := os.ReadFile(name)
 	if err != nil {
 		ctx := context.Background()
@@ -209,28 +229,17 @@ func readPostHogConfig() (c posthogConfig) {
 	return
 }
 
+// getPosthogConfigFilePath is "" when the home folder cannot be resolved: the
+// callers then read and create nothing.
 var getPosthogConfigFilePath = func() string {
-	return fsutil.ExpandHome("~/datatug/.posthog.yaml")
+	return stateFile(".posthog.yaml")
 }
 
 func ScreenOpened(id, name string) {
 	if id == "" {
 		panic("id is empty")
 	}
-	props := posthog.NewProperties().
-		Set("$app_name", "DataTug").
-		Set("$app_version", version).
-		Set("$screen_id", id)
-
-	if name != "" {
-		props.Set("$screen_name", name)
-	}
-
-	m := posthog.Capture{
-		Event:      "Screen opened",
-		Properties: props,
-	}
-	Enqueue(m)
+	Enqueue(screenEvent(id, name))
 }
 
 func DistinctID() string {
@@ -254,6 +263,9 @@ func withSession(p posthog.Properties) posthog.Properties {
 // for an invocation that deliberately never starts telemetry (`version
 // --json`; see Start's own doc comment).
 func Enqueue(msg posthog.Message) {
+	if !Enabled() {
+		return
+	}
 	mu.Lock()
 	if !started {
 		mu.Unlock()
@@ -272,6 +284,18 @@ func enqueue(msg posthog.Message) {
 	if ph == nil {
 		return
 	}
+	msg = prepare(msg)
+	if err := ph.Enqueue(msg); err != nil {
+		ctx := context.Background()
+		logus.Errorf(ctx, "posthog.enqueue failed: %v", err)
+	}
+}
+
+// prepare adds what every event carries: the install's distinct id, a
+// timestamp and, for an event (not a crash report), the session fields. It is
+// the last step before the client, so a test of its output is a test of what
+// is sent.
+func prepare(msg posthog.Message) posthog.Message {
 	switch m := msg.(type) {
 	case posthog.Capture:
 		if m.DistinctId == "" {
@@ -291,8 +315,5 @@ func enqueue(msg posthog.Message) {
 		}
 		msg = m
 	}
-	if err := ph.Enqueue(msg); err != nil {
-		ctx := context.Background()
-		logus.Errorf(ctx, "posthog.enqueue failed: %v", err)
-	}
+	return msg
 }

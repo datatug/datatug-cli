@@ -1,18 +1,18 @@
 ---
 format: https://specscore.md/feature-specification
-status: Planned
+status: Implementing
 ---
 
 # Feature: Queries
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/queries?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/queries?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/queries?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/cli/queries?op=request-change) |
 
-**Status:** Planned
+**Status:** Implementing
 **Source Ideas:** —
 
 ## Summary
 
-`datatug queries` lists the named queries stored in a DataTug project (and, in future, manages them — create, rename, delete). Today the command is a placeholder — its action `panic`s with `"not implemented"`. This spec pins the intended contract so the placeholder can be replaced with a real implementation without re-inventing the surface.
+`datatug queries` lists the named queries stored in a DataTug project (and, in future, manages them — create, rename, delete). The listing is implemented; creating, renaming and deleting queries from the CLI is not. The command used to be a placeholder whose action `panic`ked with `"not implemented"`.
 
 ## Synopsis
 
@@ -27,7 +27,7 @@ DataTug projects store reusable parameterized queries as first-class artifacts (
 - A scriptable enumeration of queries in a project.
 - A future path to `new`, `rename`, `delete` queries from the CLI.
 
-The current placeholder is a footgun (running `datatug queries` crashes the binary). A spec'd placeholder lets the team prioritize implementation against a known contract.
+Running `datatug queries` used to crash the binary; it now lists the queries, or exits `3` outside a project.
 
 ## Behavior
 
@@ -41,7 +41,7 @@ The current placeholder is a footgun (running `datatug queries` crashes the bina
 
 #### REQ: one-id-per-line
 
-The command MUST print exactly one query ID per line on stdout. Order MUST match the order the project store returns. (Mirrors [datasets REQ: one-id-per-line](../datasets/README.md#req-one-id-per-line) for consistency.)
+The command MUST print exactly one query ID per line on stdout. Order is by ID, so the output is stable. A query whose ID is not made of plain names (letters, digits, `.`, `_` and `-`, with `/` between folders) is not printed: stdout holds only IDs that `query run` can address, and one line on stderr says how many queries were skipped. (Mirrors [datasets REQ: one-id-per-line](../datasets/README.md#req-one-id-per-line) for consistency.)
 
 #### REQ: empty-project-prints-nothing
 
@@ -51,7 +51,7 @@ If the project contains zero named queries, the command MUST exit `0` and write 
 
 #### REQ: no-panic
 
-The command MUST NOT call `panic`. The current implementation does — fixing it is the first step of making this feature `Implementing`.
+The command MUST NOT call `panic`: not in an empty folder, not in a folder that is not a project and not in a project with no query. (A panic is also a telemetry event.)
 
 ## Parameters
 
@@ -65,10 +65,9 @@ The command MUST NOT call `panic`. The current implementation does — fixing it
 | Exit code | Meaning |
 |---|---|
 | `0` | Listing succeeded (or empty) |
+| `2` | `--project` and `--dir` both given |
 | `3` | Project not resolved |
 | `1` | Generic runtime error |
-
-(Until implemented, the current command crashes with code `10` via the panic-recovery path.)
 
 ## Interaction with Other Features
 
@@ -84,13 +83,13 @@ The command MUST NOT call `panic`. The current implementation does — fixing it
 
 **Requirements:** queries#req:one-id-per-line
 
-Against a project with N queries, `datatug queries` exits `0` and prints exactly N lines. (Not yet met — current implementation panics.)
+Against a project with N queries with plain IDs, `datatug queries` exits `0` and prints exactly N lines; a query with a non-plain ID is skipped and counted on stderr.
 
 ### AC: no-panic
 
 **Requirements:** queries#req:no-panic
 
-`datatug queries` does NOT panic. (Not yet met.)
+`datatug queries` does NOT panic, in an empty folder, in a folder that is not a project and in a project with no query.
 
 ## Open Questions
 

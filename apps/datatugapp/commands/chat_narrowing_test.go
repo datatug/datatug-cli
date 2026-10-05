@@ -20,6 +20,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/datatug/datatug-cli/pkg/chat/narrowing/narrowingtest"
+	"github.com/datatug/datatug-cli/pkg/dtlog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/strongo/aichat/ai"
@@ -460,6 +461,20 @@ func TestChatNarrowsSchemaContextEndToEnd(t *testing.T) {
 	require.Len(t, steps, 1)
 	assert.Equal(t, "jev", steps[0].Method)
 	assert.Equal(t, "narrowed:before=11:after=3", steps[0].Result)
+}
+
+// The chat report is gated at its call site: with telemetry off the real
+// `datatug chat` wiring sends no interaction report, while the answer itself
+// is unaffected.
+func TestChatSendsNoInteractionReportWhenTelemetryIsOff(t *testing.T) {
+	t.Setenv(dtlog.EnvDoNotTrack, "1")
+	covDSetVar(t, &chatGetenv, narrowingEnv(map[string]string{"DATATUG_AI_DECISION_PROVIDER": "auto"}))
+	dir, database := narrowingProject(t)
+	fake := &fakeAICloud{probs: map[string]float64{"Invoice": 0.96}}
+	askThroughChat(t, fake, dir, database, musicQuestion)
+
+	require.Len(t, fake.chatRequests, 1, "the chat is still answered")
+	assert.Empty(t, fake.interactions, "no interaction report is sent with telemetry off")
 }
 
 // With the decider failing, disabled or stopped, the model receives exactly the

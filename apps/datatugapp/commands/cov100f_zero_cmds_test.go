@@ -281,15 +281,6 @@ func TestCov100fProjectsAdd(t *testing.T) {
 	_ = home
 }
 
-func TestCov100fQueriesCommandActionPanics(t *testing.T) {
-	defer func() {
-		r := recover()
-		require.NotNil(t, r)
-		assert.Contains(t, r.(string), "not implemented")
-	}()
-	_ = queriesCommandAction(nil, nil)
-}
-
 func TestCov100fShowProject(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "datatug-project.json"), []byte(`{"id":"show-p"}`), 0o600))

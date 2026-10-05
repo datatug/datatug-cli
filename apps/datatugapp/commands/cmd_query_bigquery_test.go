@@ -135,6 +135,9 @@ func (h *cliBQHarness) transport(r *http.Request) (*http.Response, error) {
 		return cliBQResponse(`{"tableReference":{"projectId":"source-project","datasetId":"ds","tableId":"tbl"},"type":"TABLE","schema":{"fields":[{"name":"n","type":"INTEGER","mode":"NULLABLE"},{"name":"ownerID","type":"STRING","mode":"NULLABLE"}]}}`), nil
 	case strings.HasSuffix(r.URL.Path, "/cancel"):
 		h.cancels++
+		if h.failure == "cancel-malformed" {
+			return cliBQResponse(`{"job":{}}`), nil
+		}
 		return cliBQResponse(`{"job":{"jobReference":{"projectId":"job-project","jobId":"j","location":"EU"},"status":{"state":"DONE"}}}`), nil
 	case r.Method == "POST":
 		var m map[string]any
@@ -612,5 +615,88 @@ func TestBigQueryResultRetainsPersistenceAndOutputErrors(t *testing.T) {
 	err := writeBigQueryResult(cmd, bigquery.Page{}, "", obstructed, h.dir)
 	if !errors.Is(err, os.ErrClosed) || !errors.Is(err, bigqueryread.ErrInput) || !strings.Contains(err.Error(), "private recovery artifact failed") || !strings.Contains(err.Error(), "result output failed") {
 		t.Fatal(err)
+	}
+}
+
+func TestBigQueryCobraCurrentControlRecoveryAfterExpiry(t *testing.T) {
+	for _, operation := range []string{"status", "cancel", "partial-cancel"} {
+		t.Run(operation, func(t *testing.T) {
+			h := newCliBQHarness(t)
+			preview, path := h.preview()
+			page, err := h.run(preview, path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.clock.now = page.Receipt.ExecutionDeadline.Add(time.Second)
+			priorFile := h.save("prior-control.json", page)
+			export := filepath.Join(h.dir, "receipt-control.json")
+			op := operation
+			args := []string{"--receipt", priorFile, "--receipt-out", export}
+			if op != "status" {
+				op = "cancel"
+				args = append(args, "--enable-cancellation")
+			}
+			if operation == "partial-cancel" {
+				h.failure = "cancel-malformed"
+			}
+			beforeAuth, beforeRequests := h.provider.calls, h.requests
+			raw, err := h.execute(op, args...)
+			if (err != nil) != (operation == "partial-cancel") {
+				t.Fatal(operation, err, string(raw))
+			}
+			var control bigQueryControl
+			if json.Unmarshal(raw, &control) != nil {
+				t.Fatal(string(raw))
+			}
+			if control.Receipt.Counters.Bytes <= page.Receipt.Counters.Bytes || control.Receipt.Counters.Rows != page.Receipt.Counters.Rows || control.Cursor != page.Cursor || !control.Receipt.ExecutionDeadline.Equal(page.Receipt.ExecutionDeadline) || control.Receipt.Job == nil || *control.Receipt.Job != *page.Receipt.Job {
+				t.Fatal("stale or renewed recovery authority", control, page)
+			}
+			if op == "status" && (control.Status == nil || control.Status.State != "completed" || control.Receipt.BilledBytes == nil || *control.Receipt.BilledBytes != "100") {
+				t.Fatal(control)
+			}
+			if op == "cancel" && (control.Cancel == nil || control.Cancel.State == "") {
+				t.Fatal(control)
+			}
+			if operation == "partial-cancel" && (control.Cancel.State != "unknown" || control.Receipt.State != page.Receipt.State || !strings.Contains(err.Error(), "cancellation_unknown")) {
+				t.Fatal(err, control)
+			}
+			exported, readErr := os.ReadFile(export)
+			var recovery bigQueryControl
+			if readErr != nil || json.Unmarshal(exported, &recovery) != nil || recovery.Receipt.Counters != control.Receipt.Counters || recovery.Cursor != control.Cursor || len(recovery.Rows) != 0 || len(recovery.Schema) != 0 || (recovery.Status == nil) != (control.Status == nil) || (recovery.Cancel == nil) != (control.Cancel == nil) {
+				t.Fatal(readErr, string(exported), control)
+			}
+			if h.provider.calls != beforeAuth+1 || h.requests != beforeRequests+1 || h.pageGets != 0 || h.paid != 1 {
+				t.Fatal("snapshot authorized, read rows or replayed", h.provider.calls, h.requests, h.pageGets, h.paid)
+			}
+		})
+	}
+}
+func TestBigQueryCobraSnapshotFailurePreservesKnownArtifactAndControl(t *testing.T) {
+	h := newCliBQHarness(t)
+	preview, path := h.preview()
+	page, err := h.run(preview, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Status may truthfully observe a known trusted job, but this edited receipt
+	// must never be promoted into current ledger authority by Snapshot.
+	page.Receipt.ApprovalDigest = "edited-receipt-authority"
+	h.failure = "cancel-malformed"
+	export := filepath.Join(h.dir, "receipt-snapshot-failure.json")
+	raw, err := h.execute("cancel", "--enable-cancellation", "--receipt", h.save("edited-control.json", page), "--receipt-out", export)
+	var control bigQueryControl
+	if err == nil || !strings.Contains(err.Error(), "cancellation_unknown") || !strings.Contains(err.Error(), "cursor_invalid") || json.Unmarshal(raw, &control) != nil || control.Cancel == nil || control.Cancel.State != "unknown" {
+		t.Fatal(err, string(raw))
+	}
+	if control.Receipt.ApprovalDigest != page.Receipt.ApprovalDigest || control.Receipt.Counters != page.Receipt.Counters || control.Cursor != page.Cursor || control.Receipt.Job == nil || *control.Receipt.Job != *page.Receipt.Job {
+		t.Fatal("discarded or falsely refreshed prior recovery artifact", control, page)
+	}
+	exported, readErr := os.ReadFile(export)
+	var recovery bigQueryControl
+	if readErr != nil || json.Unmarshal(exported, &recovery) != nil || recovery.Cancel == nil || recovery.Cancel.State != "unknown" || recovery.Receipt.ApprovalDigest != page.Receipt.ApprovalDigest || recovery.Cursor != page.Cursor {
+		t.Fatal(readErr, string(exported))
+	}
+	if h.paid != 1 || h.pageGets != 0 || h.cancels != 1 {
+		t.Fatal("replayed recovery", h.paid, h.pageGets, h.cancels)
 	}
 }

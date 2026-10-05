@@ -204,6 +204,25 @@ func finishBigQueryResult(value any, operationError error, write func(any) error
 	return errors.Join(bigQueryFailure(operationError), write(value))
 }
 
+// A control operation and its local snapshot share one original budget. A
+// snapshot failure keeps the caller's prior recovery artifact and the meaningful
+// control outcome; it never restarts the window or resumes delivery.
+func finishBigQueryControl(ctx context.Context, client *bigquery.Client, previous bigQueryControl, controlError error, write func(any) error) error {
+	snapshot, snapshotError := client.Snapshot(ctx, previous.Receipt)
+	if snapshotError == nil {
+		previous.Receipt = snapshot.Receipt
+		previous.Cursor = snapshot.Cursor
+	}
+	return errors.Join(bigQueryFailure(controlError), bigQueryFailure(snapshotError), write(previous))
+}
+func bigQueryControlContext(parent context.Context, receipt bigquery.Receipt) (context.Context, context.CancelFunc) {
+	budget := 15 * time.Second
+	if ms := receipt.Bounds.HTTPMs; ms > 0 && ms < 15000 {
+		budget = time.Duration(ms) * time.Millisecond
+	}
+	return context.WithTimeout(parent, budget)
+}
+
 func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 	f := cmd.Flags()
 	file, _ := f.GetString("file")
@@ -410,20 +429,26 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 		if previous.Receipt.Job == nil {
 			return finishBigQueryResult(previous, Exit("submission is unresolved; no verified job reference exists", exitCodeDatabase), write)
 		}
-		status, e := client.Status(cmd.Context(), *previous.Receipt.Job)
+		ctx, finish := bigQueryControlContext(cmd.Context(), previous.Receipt)
+		defer finish()
+		previous.Status, previous.Cancel = nil, nil
+		status, e := client.Status(ctx, *previous.Receipt.Job)
 		if status.State != "" {
 			previous.Status = &status
 		}
-		return finishBigQueryResult(previous, e, write)
+		return finishBigQueryControl(ctx, client, previous, e, write)
 	case "cancel":
 		if previous.Receipt.Job == nil {
 			return finishBigQueryResult(previous, Exit("no verified job reference to cancel", exitCodeDatabase), write)
 		}
-		result, e := client.CancelJob(cmd.Context(), *previous.Receipt.Job)
+		ctx, finish := bigQueryControlContext(cmd.Context(), previous.Receipt)
+		defer finish()
+		previous.Status, previous.Cancel = nil, nil
+		result, e := client.CancelJob(ctx, *previous.Receipt.Job)
 		if result.State != "" {
 			previous.Cancel = &result
 		}
-		return finishBigQueryResult(previous, e, write)
+		return finishBigQueryControl(ctx, client, previous, e, write)
 	}
 	return errors.New("unknown BigQuery operation")
 }

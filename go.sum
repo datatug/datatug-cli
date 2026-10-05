@@ -101,8 +101,8 @@ github.com/cyphar/filepath-securejoin v0.7.0 h1:s0Y3ITPy6sQn5xt54DuYvTF8hu134ooY
 github.com/cyphar/filepath-securejoin v0.7.0/go.mod h1:ymLGms/u3BYaviIiuKFnUx8EkQEZeK6cInNoAPJA3o4=
 github.com/dal-go/dalgo v0.89.6 h1:Yso1wMJ/+eHvSY1YUUqC7V/qsLrrf+kTYHTk5p0bAaI=
 github.com/dal-go/dalgo v0.89.6/go.mod h1:Pvqn4YCOqLxKeim0M/0wzGDwtuaZKi18TRdaZ3PCS3c=
-github.com/dal-go/dalgo2bigquery v0.1.0 h1:mNFtraGoKRu8+VO9VQfPUvRyWPik/IpBT5W3hfYcoJU=
-github.com/dal-go/dalgo2bigquery v0.1.0/go.mod h1:Wur9tUtzwHPV9/SydkTpRPCbzzDzw/bvdGxZ4hrKdk4=
+github.com/dal-go/dalgo2bigquery v0.1.1 h1:YtbtuAK2ZP+WTxe9j/kL5MRk19I1CdntCKdmBKwgDQI=
+github.com/dal-go/dalgo2bigquery v0.1.1/go.mod h1:Wur9tUtzwHPV9/SydkTpRPCbzzDzw/bvdGxZ4hrKdk4=
 github.com/dal-go/dalgo2firestore v0.10.3 h1:AQSFCh0T+mao61lg2flJYqgbU/lpWIQ6bUYr89Drf04=
 github.com/dal-go/dalgo2firestore v0.10.3/go.mod h1:qWHAAOz9AVKdseFVQaaaoIUtzZFxFnQnzMUqaPTavTA=
 github.com/dal-go/dalgo2http v0.2.1 h1:Dr66xPjJSo2u2JGP6jJgAfCTphgCqGH0IbgYoupsgzU=

@@ -1,6 +1,6 @@
 # DataTug BigQuery CLI composition
 
-This package connects the released `github.com/dal-go/dalgo2bigquery v0.1.0`
+This package connects the released `github.com/dal-go/dalgo2bigquery v0.1.1`
 protocol to the actual `datatug query bigquery` Cobra commands. Fixture tests
 exercise protected preview, approval, one submission and two pages through the
 real command tree. Live Google authentication and paid execution have **not been
@@ -46,7 +46,11 @@ The commands are:
   deliberate same-subject reauthorization, preserving original approval,
   counters, deadline and job; it cannot replay a query. `status` and separately
   enabled `cancel` use the same receipt and truthful authoritative control
-  outcome. Control outputs retain receipt/cursor and do not replay prior rows.
+  outcome. Control and the driver's local authoritative `Snapshot` share one
+  bounded context. The latest receipt/counters/billing and original issued cursor
+  are exported with meaningful control outcomes, including partial failures. A
+  failed snapshot preserves the previous artifact and both errors. Control
+  outputs do not read or replay rows, even after execution expiry.
 
 Every operation reuses the same private `--ledger` directory. A new directory
 is a new authorization and budget session, not continuation of an existing job.

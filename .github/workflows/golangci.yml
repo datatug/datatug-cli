@@ -164,6 +164,18 @@ jobs:
         env:
           CGO_ENABLED: '0'
         run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue' ./pkg/api/ ./apps/datatugapp/commands/
+      - name: Export SQLite to native inGitDB with cgo off
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          go test -count=1 -run TestExportInGitDB_RecordsFormatsRoundTrip ./pkg/dbcopy/
+          go build -o "$RUNNER_TEMP/datatug-export-smoke" .
+          export_parent=$(mktemp -d "$RUNNER_TEMP/datatug-export.XXXXXX")
+          "$RUNNER_TEMP/datatug-export-smoke" db export \
+            --from "sqlite://$PWD/pkg/dbcopy/testdata/chinook.db" \
+            --to "ingitdb://$export_parent/native" --records-format csv
+          test -f "$export_parent/native/Artist/records.csv"
+          test -f "$export_parent/native/Artist/.collection/definition.yaml"
 
   # The PostgreSQL scan (`datatug scan -D postgres --dsn-env NAME`), query
   # (`datatug query run`) and copy (`datatug db copy`) against a real server. Every

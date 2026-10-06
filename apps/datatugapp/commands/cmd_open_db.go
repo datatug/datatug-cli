@@ -28,6 +28,7 @@ func dbCommand() *cobra.Command {
 		},
 	}
 	cmd.AddCommand(dbCopyCommand())
+	cmd.AddCommand(dbExportCommand())
 	return cmd
 }
 

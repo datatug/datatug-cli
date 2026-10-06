@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,8 +30,9 @@ import (
 )
 
 type exportTable struct {
-	ref dal.CollectionRef
-	def dbschema.CollectionDef
+	ref      dal.CollectionRef
+	def      dbschema.CollectionDef
+	nativeID string
 }
 
 // ExportInGitDB streams a DALgo database into a native inGitDB project. The
@@ -60,15 +62,19 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 	}
 	defs := make([]exportTable, 0, len(refs))
 	seenNames := map[string]bool{}
+	nativeIDs := map[string]string{}
+	sourceIDs := map[string]string{}
+	caseFoldedIDs := map[string]string{}
 	for _, ref := range refs {
 		if ref.Schema() != "" || ref.Database() != "" || ref.Parent() != nil {
 			return nil, fmt.Errorf("source collection %q has a namespace, database, or parent that native root export cannot preserve", ref.Path())
 		}
-		if err := safeExportName(ref.Name()); err != nil {
+		nativeID, err := nativeCollectionID(ref.Name())
+		if err != nil {
 			return nil, err
 		}
 		if format == ingitdb.RecordFormatINGR {
-			if err := safeINGRHeaderName(ref.Name()); err != nil {
+			if err := safeINGRHeaderName(nativeID); err != nil {
 				return nil, fmt.Errorf("source collection %q: %w", ref.Name(), err)
 			}
 		}
@@ -76,6 +82,15 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 			return nil, fmt.Errorf("duplicate source collection name %q", ref.Name())
 		}
 		seenNames[ref.Name()] = true
+		if prior, exists := nativeIDs[nativeID]; exists {
+			return nil, fmt.Errorf("source collections %q and %q map to the same native ID %q", prior, ref.Name(), nativeID)
+		}
+		if prior, exists := caseFoldedIDs[strings.ToLower(nativeID)]; exists {
+			return nil, fmt.Errorf("source collections %q and %q have native IDs that alias on case-insensitive filesystems", prior, ref.Name())
+		}
+		nativeIDs[nativeID] = ref.Name()
+		sourceIDs[ref.Name()] = nativeID
+		caseFoldedIDs[strings.ToLower(nativeID)] = ref.Name()
 		def, err := dbschema.DescribeCollection(ctx, source, &ref)
 		if err != nil {
 			return nil, fmt.Errorf("describe source collection %q: %w", ref.Name(), err)
@@ -103,7 +118,7 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 		if _, err := dalgo2ingitdb.ExportCollectionDefinition(*def); err != nil {
 			return nil, fmt.Errorf("map source collection %q: %w", ref.Name(), err)
 		}
-		defs = append(defs, exportTable{ref: ref, def: *def})
+		defs = append(defs, exportTable{ref: ref, def: *def, nativeID: nativeID})
 	}
 	if err := validateExportRelationships(defs); err != nil {
 		return nil, err
@@ -146,14 +161,26 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		count, err := exportCollection(ctx, source, stage, table.ref, def, constraintsChecked, format)
+		count, err := exportCollection(ctx, source, stage, table.ref, def, table.nativeID, sourceIDs, constraintsChecked, format)
 		if err != nil {
 			return nil, fmt.Errorf("export %q: %w", def.Name, err)
 		}
-		registry[def.Name] = def.Name
+		registry[table.nativeID] = table.nativeID
 		counts[def.Name] = count
 	}
 	if err := os.MkdirAll(filepath.Join(stage, ".ingitdb"), 0o755); err != nil {
+		return nil, err
+	}
+	// This mapping retains the logical source name even for providers without
+	// native DDL. Collection IDs and filesystem paths are transport names.
+	mapping, err := json.MarshalIndent(struct {
+		Format      string            `json:"format"`
+		Collections map[string]string `json:"collections"`
+	}{Format: "datatug-source-collections/v1", Collections: nativeIDs}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(stage, ".ingitdb", "source-collections.json"), append(mapping, '\n'), 0o644); err != nil {
 		return nil, err
 	}
 	if viewReader, ok := dal.As[dbschema.SourceViewReader](source); ok {
@@ -197,7 +224,7 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 
 func reserveExportCollectionDirs(stage string, tables []exportTable, mkdir func(string, os.FileMode) error) error {
 	for _, table := range tables {
-		if err := mkdir(filepath.Join(stage, table.def.Name), 0o755); err != nil {
+		if err := mkdir(filepath.Join(stage, table.nativeID), 0o755); err != nil {
 			return fmt.Errorf("reserve source collection %q: %w", table.def.Name, err)
 		}
 	}
@@ -254,6 +281,42 @@ func safeExportName(name string) error {
 	return nil
 }
 
+// nativeCollectionID keeps ordinary collection IDs stable. The dt_ prefix is
+// reserved, including its ASCII case variants, so hex-encoded source names
+// cannot collide with a literal source name that resembles an encoded ID.
+func nativeCollectionID(name string) (string, error) {
+	if name == "" || !utf8.ValidString(name) || strings.ContainsRune(name, 0) {
+		return "", fmt.Errorf("unsafe collection name %q", name)
+	}
+	for _, char := range name {
+		if unicode.IsControl(char) {
+			return "", fmt.Errorf("unsafe collection name %q contains a control character", name)
+		}
+	}
+	id := name
+	if ingitdb.ValidateCollectionID(name) != nil || (len(name) >= 3 && strings.ToLower(name[:3]) == "dt_") || windowsDeviceName(name) {
+		id = "dt_" + hex.EncodeToString([]byte(name))
+	}
+	// A collection ID is one directory entry. Reject names that would only
+	// fail after export work has begun on common filesystems.
+	if len(id) > 255 {
+		return "", fmt.Errorf("native collection ID for %q exceeds 255 bytes", name)
+	}
+	if err := ingitdb.ValidateCollectionID(id); err != nil {
+		return "", fmt.Errorf("native collection ID for %q: %w", name, err)
+	}
+	return id, nil
+}
+
+func windowsDeviceName(name string) bool {
+	base := strings.ToUpper(strings.SplitN(name, ".", 2)[0])
+	switch base {
+	case "CON", "PRN", "AUX", "NUL":
+		return true
+	}
+	return len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && base[3] >= '1' && base[3] <= '9'
+}
+
 func safeSourceFieldName(name string) error {
 	if name == "" || !utf8.ValidString(name) {
 		return fmt.Errorf("unsafe source field name %q", name)
@@ -276,12 +339,21 @@ func safeINGRHeaderName(name string) error {
 	return nil
 }
 
-func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.CollectionRef, def dbschema.CollectionDef, constraintsChecked bool, format ingitdb.RecordFormat) (int64, error) {
+func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.CollectionRef, def dbschema.CollectionDef, nativeID string, sourceIDs map[string]string, constraintsChecked bool, format ingitdb.RecordFormat) (int64, error) {
 	colDef, err := dalgo2ingitdb.ExportCollectionDefinition(def)
 	if err != nil {
 		return 0, err
 	}
 	colDef.RecordFile = exportRecordFile(format)
+	colDef.ID = nativeID
+	for i := range colDef.SourceSchema.ForeignKeys {
+		original := colDef.SourceSchema.ForeignKeys[i].ReferencedCollection
+		targetID, ok := sourceIDs[original]
+		if !ok {
+			return 0, fmt.Errorf("source foreign key targets missing collection %q", original)
+		}
+		colDef.SourceSchema.ForeignKeys[i].ReferencedCollection = targetID
+	}
 	if format == ingitdb.RecordFormatCSV {
 		colDef.ColumnsOrder = append([]string{"$ID"}, colDef.ColumnsOrder...)
 	}
@@ -300,7 +372,7 @@ func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.
 	if err := colDef.Validate(); err != nil {
 		return 0, err
 	}
-	colDir := filepath.Join(stage, def.Name)
+	colDir := filepath.Join(stage, nativeID)
 	if err := os.MkdirAll(filepath.Join(colDir, ingitdb.SchemaDir), 0o755); err != nil {
 		return 0, err
 	}
@@ -316,7 +388,7 @@ func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.
 		return 0, err
 	}
 	defer func() { _ = file.Close() }()
-	writer, err := newExportRecordsWriter(file, format, def.Name, def.Fields)
+	writer, err := newExportRecordsWriter(file, format, nativeID, def.Fields)
 	if err != nil {
 		return 0, err
 	}

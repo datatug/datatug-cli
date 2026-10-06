@@ -10,14 +10,12 @@ import (
 )
 
 // dbCopyCommand wires `datatug db copy --from <url> --to <url>` per
-// spec/features/cli/db/copy/README.md. The first slice is schema-only;
-// see the engine package doc and the upstream issues for the row-CRUD
-// follow-up.
+// spec/features/cli/db/copy/README.md.
 func dbCopyCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "copy",
-		Short: "Copy a database from one DALgo URL to another (schema-only first slice).",
-		Long: "Replicates the source schema (collections, primary keys, indexes) to the target. Row data is not yet copied; see docs/upstream-issues/.\n\n" +
+		Short: "Copy a database from one DALgo URL to another.",
+		Long: "Copies source collections and rows through DALgo adapters. For a complete, atomic native inGitDB export, use `datatug db export`.\n\n" +
 			"PostgreSQL (postgres://) is a preview: it opens only while " + dbcopy.PostgresPreviewEnv + "=1. A PostgreSQL --from is read through a read-only session, " +
 			"and a --from URL that turns the session's default_transaction_read_only off is refused. --to is the only place a PostgreSQL database is opened for writing.",
 		RunE: dbCopyAction,

@@ -21,17 +21,9 @@ import (
 	_ "modernc.org/sqlite" // pure-Go sqlite driver: verifying an on-disk demo db file needs no cgo
 )
 
-// The real demo lives in github.com/datatug/datatug-demo-projects (plural) -
-// a full DataTug project (demo-project-1: Customer/Invoice/Country entities,
-// DTQL/SQL/HTTP queries, an admin/support access policy) checked into git,
-// not synthesized. This replaces the old `datatug demo`, which cloned the
-// LEGACY, singular github.com/datatug/datatug-demo-project and then
-// programmatically built a minimal project around a downloaded Chinook
-// SQLite file, only to panic on save (storage.NewDatatugStore was never
-// wired - see datatug/datatug spec/research/2026-09-09-current-state-audit.md).
-// Cloning the real, already-complete project makes both failure modes
-// impossible: there is no legacy clone left to reach, and no project-save
-// call that could hit the unwired store.
+// The canonical demo repository contains one complete DataTug project under
+// demo-project-1. Its singular repository name preserves the original project
+// history, entities, queries and access policy. CLI and TUI use the same clone.
 const (
 	// demoOrgRepo matches the "clone GitHub projects under here" convention
 	// documented on pkg/dtroot (~/datatug/github.com/...) and already used by
@@ -39,7 +31,7 @@ const (
 	// (apps/datatugapp/datatugui/dtproject/datatug_demo_project.go) - cloning
 	// to the same path means the CLI `demo` command and the TUI share one
 	// clone instead of each keeping a separate copy.
-	demoOrgRepo           = "github.com/datatug/datatug-demo-projects"
+	demoOrgRepo           = "github.com/datatug/datatug-demo-project"
 	demoReposGitURL       = "https://" + demoOrgRepo + ".git"
 	demoProjectFolder     = "demo-project-1"
 	demoProjectRegistryID = "demo-project-1"
@@ -54,7 +46,7 @@ func demoCommandArgs() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "demo",
 		Short: "Installs & serves the demo project",
-		Long:  "Clones/refreshes the datatug-demo-projects repo, verifies its SQLite fixture(s), registers demo-project-1, then serves it (equivalent to `serve --project <dir> --as admin --role admin`)",
+		Long:  "Clones/refreshes the datatug-demo-project repo, verifies its SQLite fixture(s), registers demo-project-1, then serves it (equivalent to `serve --project <dir> --as admin --role admin`)",
 		RunE:  demoCommandAction,
 	}
 	cmd.Flags().Bool("reset-db", false, "Re-downloads the demo SQLite fixture file(s) from the internet")

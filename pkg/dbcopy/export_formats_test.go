@@ -43,18 +43,9 @@ func (aliasingSource) DescribeCollection(_ context.Context, ref *dal.CollectionR
 }
 
 func TestExportInGitDB_FilesystemAliasCannotOverwriteCollection(t *testing.T) {
-	probe := t.TempDir()
-	if err := os.Mkdir(filepath.Join(probe, "Foo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(filepath.Join(probe, "foo")); os.IsNotExist(err) {
-		t.Skip("filesystem treats case variants as distinct; injected reservation test covers the error path")
-	} else if err != nil {
-		t.Fatal(err)
-	}
 	dest := filepath.Join(t.TempDir(), "native")
 	_, err := ExportInGitDB(context.Background(), aliasingSource{}, dest)
-	if err == nil || !strings.Contains(err.Error(), "reserve source collection") {
+	if err == nil || !strings.Contains(err.Error(), "alias on case-insensitive filesystems") {
 		t.Fatalf("case-aliasing source collections accepted: %v", err)
 	}
 	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
@@ -64,7 +55,8 @@ func TestExportInGitDB_FilesystemAliasCannotOverwriteCollection(t *testing.T) {
 
 func TestReserveExportCollectionDirs_MkdirFailure(t *testing.T) {
 	stage := t.TempDir()
-	tables := []exportTable{{def: dbschema.CollectionDef{Name: "first"}}, {def: dbschema.CollectionDef{Name: "second"}}}
+	tables := []exportTable{{def: dbschema.CollectionDef{Name: "first"}, nativeID: "first"},
+		{def: dbschema.CollectionDef{Name: "second"}, nativeID: "second"}}
 	calls := 0
 	err := reserveExportCollectionDirs(stage, tables, func(path string, mode os.FileMode) error {
 		calls++

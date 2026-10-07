@@ -455,7 +455,7 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 		bounds := bigquery.DefaultBounds()
 		bounds.PageSize, _ = f.GetInt("page-size")
 		if pilot {
-			bounds.MaxRows, bounds.MaxPages = 2, 1
+			bounds = bigQueryPilotBounds()
 		}
 		preview, e = client.Preview(cmd.Context(), plan, bigquery.Execution{JobProject: project, Principal: identity.Principal, MaximumBytesBilled: cap, SessionBudgetBytes: budget}, bounds)
 		if e != nil {

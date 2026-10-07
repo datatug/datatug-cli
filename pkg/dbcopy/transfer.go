@@ -169,6 +169,9 @@ func CopyToSink(ctx context.Context, source dal.DB, sink CopySink, opts CopyOpts
 
 func stageCopyRows(ctx context.Context, source dal.DB, table CopyTable, plan CopySinkPlan, opts CopyOpts, writer io.Writer) (rows int64, err error) {
 	encode := func(row dbschema.SourceRow) error {
+		if err := normalizeSQLiteBooleanValues(table, row); err != nil {
+			return fmt.Errorf("normalize source row from %q: %w", table.Ref.Path(), err)
+		}
 		line, err := plan.EncodeRow(table, row)
 		if err != nil {
 			return fmt.Errorf("encode source row from %q: %w", table.Ref.Path(), err)
@@ -183,7 +186,7 @@ func stageCopyRows(ctx context.Context, source dal.DB, table CopyTable, plan Cop
 		return nil
 	}
 
-	if opts.Filters == nil || opts.Filters.IsEmpty() {
+	if opts.Filters == nil || !opts.Filters.HasRowFilters() {
 		if sourceRows, ok := dal.As[dbschema.SourceRowsReader](source); ok {
 			cursor, err := sourceRows.OpenSourceRows(ctx, &table.Ref)
 			if err != nil {
@@ -254,4 +257,46 @@ func stageCopyRows(ctx context.Context, source dal.DB, table CopyTable, plan Cop
 		}
 	}
 	return rows, nil
+}
+
+func normalizeSQLiteBooleanValues(table CopyTable, row dbschema.SourceRow) error {
+	definition := table.Definition
+	if definition == nil || definition.SourceDefinition == nil || definition.SourceDefinition.Dialect != "sqlite" {
+		return nil
+	}
+	for _, field := range definition.Fields {
+		name := string(field.Name)
+		declared := sourceDeclaredType(definition.SourceDefinition, name)
+		if declared != "bool" && declared != "boolean" {
+			continue
+		}
+		if field.Type != dbschema.Bool {
+			return fmt.Errorf("SQLite column %q declares %s but its portable type is %s", name, declared, field.Type)
+		}
+		value, exists := row.Values[name]
+		if !exists {
+			return fmt.Errorf("SQLite boolean column %q is missing from the source row", name)
+		}
+		if value == nil {
+			continue
+		}
+		boolean, err := sqliteBooleanValue(value)
+		if err != nil {
+			return fmt.Errorf("SQLite boolean column %q: %w", name, err)
+		}
+		row.Values[name] = boolean
+	}
+	return nil
+}
+
+func sqliteBooleanValue(value any) (bool, error) {
+	switch v := value.(type) {
+	case bool:
+		return v, nil
+	case int64:
+		if v == 0 || v == 1 {
+			return v == 1, nil
+		}
+	}
+	return false, fmt.Errorf("value has unsupported representation %T; expected BOOLEAN, INTEGER 0/1, or NULL", value)
 }

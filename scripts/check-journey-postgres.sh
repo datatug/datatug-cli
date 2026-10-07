@@ -20,6 +20,7 @@ required_tests=(
 	TestPostgresScanJourney
 	TestPostgresScanJourneyFailures
 	TestPostgresQueryJourneyOrdersNullsByDALgosRule
+	TestPostgresDatabaseCompareJourneyPreservesExactValuesAndChanges
 	TestPostgresCopyJourneyRefusesANameAndLeavesTheTargetAsItWas
 	TestPostgresToBigQueryProviderNeutralCopyPreservesRows
 )

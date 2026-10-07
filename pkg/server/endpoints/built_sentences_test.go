@@ -35,7 +35,14 @@ var projectSequence atomic.Int64
 // returns its folder and its ID (a plain name).
 func serveBlankProject(t *testing.T) (dir, projectID string) {
 	t.Helper()
-	dir = t.TempDir()
+	const privatePathMarker = "datatug-private-path-redaction-marker-8f6e27d3"
+	dir = filepath.Join(t.TempDir(), privatePathMarker)
+	if !strings.Contains(dir, privatePathMarker) {
+		t.Fatalf("test path must contain the injected private marker %q", privatePathMarker)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	projectID = fmt.Sprintf("blank-project-%d", projectSequence.Add(1))
 	filestore.SetProjectPath(projectID, dir)
 	session, err := secureread.NewSession(secureread.SessionOptions{NoPolicies: true})
@@ -315,7 +322,7 @@ func TestRoutes_AStoreFailureAnswersOneBuiltSentenceWhateverIsAtThePath(t *testi
 				if want := route.sentence(project); w.Code != status || answerMessage(body) != want {
 					t.Errorf("%d %s, want a %d whose message is exactly %q", w.Code, body, status, want)
 				}
-				for _, leak := range []string{dir, filepath.Base(dir), "no such file", "not a directory", "is a directory", "invalid character", "failed to load", "does not exist", "open ", "read "} {
+				for _, leak := range []string{dir, filepath.Base(dir), "datatug-private-path-redaction-marker-8f6e27d3", "no such file", "not a directory", "is a directory", "invalid character", "failed to load", "does not exist", "open ", "read "} {
 					if strings.Contains(body, leak) {
 						t.Errorf("the answer holds %q: %s", leak, body)
 					}

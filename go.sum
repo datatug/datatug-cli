@@ -101,8 +101,6 @@ github.com/cyphar/filepath-securejoin v0.7.0 h1:s0Y3ITPy6sQn5xt54DuYvTF8hu134ooY
 github.com/cyphar/filepath-securejoin v0.7.0/go.mod h1:ymLGms/u3BYaviIiuKFnUx8EkQEZeK6cInNoAPJA3o4=
 github.com/dal-go/dalgo v0.93.0 h1:jcigrWhdgkOJjf9LFLvDAqrsVzxHtpVEZH7oLhV6b7I=
 github.com/dal-go/dalgo v0.93.0/go.mod h1:Pvqn4YCOqLxKeim0M/0wzGDwtuaZKi18TRdaZ3PCS3c=
-github.com/dal-go/dalgo2bigquery v0.2.0 h1:sun/IlfcBRIf95kkR/Ripzvg/tGVQoZxqUsK85Hnjbo=
-github.com/dal-go/dalgo2bigquery v0.2.0/go.mod h1:Wur9tUtzwHPV9/SydkTpRPCbzzDzw/bvdGxZ4hrKdk4=
 github.com/dal-go/dalgo2bigquery v0.3.0 h1:Eee2Jagh9z37rHYslClHbbAbhIDSRkO6dgfrs0ZSajE=
 github.com/dal-go/dalgo2bigquery v0.3.0/go.mod h1:L0/fJIifu05reJzXM/npsXAhfm0pFV4DBFAEPdz/uR8=
 github.com/dal-go/dalgo2firestore v0.10.3 h1:AQSFCh0T+mao61lg2flJYqgbU/lpWIQ6bUYr89Drf04=
@@ -111,10 +109,6 @@ github.com/dal-go/dalgo2http v0.2.1 h1:Dr66xPjJSo2u2JGP6jJgAfCTphgCqGH0IbgYoupsg
 github.com/dal-go/dalgo2http v0.2.1/go.mod h1:9D70F2oimIPSz9r5iKki5xuepReCAMSSla9TmgmuVcs=
 github.com/dal-go/dalgo2mysql v0.2.0 h1:JKjZWNbHqJebTNh+OKrNwa+nhzAV/jptsrC1d3xk5EQ=
 github.com/dal-go/dalgo2mysql v0.2.0/go.mod h1:3CMbIvu4cocKLpAbY4SDfsahC1rxFSFWjbnATxbKg0s=
-github.com/dal-go/dalgo2postgres v0.8.0 h1:VoXWCeLl4fv3FtuEhU9XH2B6+M84zZIYkQT3MaI+WAE=
-github.com/dal-go/dalgo2postgres v0.8.0/go.mod h1:dLvoQfhAFUe1m3uA+8k906jYZK/f84Js5MSsyn+vc1Y=
-github.com/dal-go/dalgo2postgres v0.9.0 h1:Fc9w0/iEkm3HRPrLnBoKxipcxPk+DX+OGy43CHUViVw=
-github.com/dal-go/dalgo2postgres v0.9.0/go.mod h1:dLvoQfhAFUe1m3uA+8k906jYZK/f84Js5MSsyn+vc1Y=
 github.com/dal-go/dalgo2postgres v0.9.1 h1:UGGEIQXTlTr/9pneyz9fSKT6x+CJhvugX/6PMBukPUc=
 github.com/dal-go/dalgo2postgres v0.9.1/go.mod h1:dLvoQfhAFUe1m3uA+8k906jYZK/f84Js5MSsyn+vc1Y=
 github.com/dal-go/dalgo2sql v0.29.0 h1:qoHJJKyDhfNW+KZHSwtjGbahIEHy7VizFsxY2igCAxk=
@@ -127,8 +121,6 @@ github.com/danieljoos/wincred v1.2.3 h1:v7dZC2x32Ut3nEfRH+vhoZGvN72+dQ/snVXo/vMF
 github.com/danieljoos/wincred v1.2.3/go.mod h1:6qqX0WNrS4RzPZ1tnroDzq9kY3fu1KwE7MRLQK4X0bs=
 github.com/datatug/cliformat v0.0.3 h1:d9p5vo7r8BH6qSKyTHQ9Al2sT6QHsQTK9KRlihaJdIU=
 github.com/datatug/cliformat v0.0.3/go.mod h1:DwX9tWHiyH+vZtbVEVOyHOEOw1Km9AzhgHoqI0PowAc=
-github.com/datatug/datatug-core v0.44.0 h1:Bw70Xi6KEDTvsknP6cmg4pTE9z8kxp9tdwho6ZBb/TQ=
-github.com/datatug/datatug-core v0.44.0/go.mod h1:OzB8L05fiVKQp1tTXh8UuPTZIlmcYev/cnDjOr4SHD8=
 github.com/datatug/datatug-core v0.45.0 h1:Iek0ldXEK1Vodpy6V+tNJuJ5aUuHLPe5swtCucrZPVc=
 github.com/datatug/datatug-core v0.45.0/go.mod h1:OzB8L05fiVKQp1tTXh8UuPTZIlmcYev/cnDjOr4SHD8=
 github.com/datatug/sql2csv v0.0.1 h1:mmQI9gWAqVKtnwwNKPEPamplV0g1+KaTovME7/7+SIY=

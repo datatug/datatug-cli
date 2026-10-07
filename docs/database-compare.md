@@ -19,7 +19,7 @@ datatug compare chinook-sqlite chinook-postgresql \
   --left-environment dev --right-environment QA \
   --left-source env:DEMO_CHINOOK_SQLITE_URL \
   --right-source env:DEMO_CHINOOK_QA_PG_URL \
-  --right-schema public --details --limit 20
+  --right-schema chinook --details --limit 20
 ```
 
 An explicit source binding must use the provider declared by that project connection. It supplies the executable source, not a replacement identity. The edition must still belong to the selected environment. If a binding is omitted, a not-ready hosted edition is refused. The command does not read `source`, `descriptor`, manifest, or webpage URLs from the connection registry as database URLs.

@@ -3,12 +3,26 @@ package commands
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
+	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	bqwriter "github.com/dal-go/dalgo2bigquery"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
+
+type copyHTTPTransport func(*http.Request) (*http.Response, error)
+
+func (f copyHTTPTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func copyHTTPResponse(req *http.Request, status int, body string) *http.Response {
+	return &http.Response{StatusCode: status, Status: http.StatusText(status), Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: req}
+}
 
 // runCopy invokes the copy command with the given argv slice (no "datatug"
 // prefix; pass starting from "db"). Captures stderr and stdout. Returns
@@ -69,6 +83,95 @@ func TestDBCopy_OverwriteBogus_Exit2(t *testing.T) {
 	assert.Contains(t, msg, "merge")
 	assert.Contains(t, msg, "recreate")
 	assert.Contains(t, msg, "reload")
+}
+
+func TestDBCopy_BigQueryRejectsOverwriteBeforeOpeningSource(t *testing.T) {
+	t.Parallel()
+	_, _, err := runCopy(t, "db", "copy",
+		"--from", "sqlite:///tmp/source-does-not-exist.db",
+		"--to", "bigquery://demodb/research?location=US",
+		"--overwrite", "recreate",
+	)
+	if ec, ok := err.(ExitCoder); !ok || ec.ExitCode() != 2 {
+		t.Fatalf("error = %v, want exit 2", err)
+	}
+	assert.Contains(t, err.Error(), "never replace existing tables")
+}
+
+func TestDBCopyRecoverBigQueryPollsSameJobWithoutResubmitting(t *testing.T) {
+	target, err := dbcopy.Parse("bigquery://demodb/research?location=US")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := bqwriter.LoadJobRef{JobID: "job-123", ProjectID: "demodb", DatasetID: "research", TableID: "People", Location: "US"}
+	var jobGets, jobPosts int
+	client := &http.Client{Transport: copyHTTPTransport(func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/jobs/job-123"):
+			jobGets++
+			return copyHTTPResponse(req, http.StatusOK, `{"jobReference":{"projectId":"demodb","jobId":"job-123","location":"US"},"configuration":{"load":{"destinationTable":{"projectId":"demodb","datasetId":"research","tableId":"People"}}},"status":{"state":"DONE"},"statistics":{"load":{"outputRows":"3"}}}`), nil
+		case req.Method == http.MethodPost && strings.Contains(req.URL.Path, "/jobs"):
+			jobPosts++
+			return copyHTTPResponse(req, http.StatusInternalServerError, `{}`), nil
+		default:
+			t.Errorf("unexpected recovery request: %s %s", req.Method, req.URL)
+			return copyHTTPResponse(req, http.StatusInternalServerError, `{}`), nil
+		}
+	})}
+	var stderr bytes.Buffer
+	if err := dbCopyRecoverBigQuery(context.Background(), target, ref, client, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if jobGets != 1 || jobPosts != 0 {
+		t.Fatalf("recovery sent GET=%d POST=%d, want one GET and no resubmission", jobGets, jobPosts)
+	}
+	assert.Contains(t, stderr.String(), "recovered BigQuery load job job-123")
+	assert.Contains(t, stderr.String(), "verified 3 rows")
+}
+
+func TestDBCopyRecoverBigQueryRejectsMismatchedTargetAndDuplicateJSONKeys(t *testing.T) {
+	target, err := dbcopy.Parse("bigquery://demodb/research?location=US")
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate := `{"jobId":"job-1","jobId":"job-2","projectId":"demodb","datasetId":"research","tableId":"People","location":"US"}`
+	if _, err := decodeBigQueryLoadJobRef(duplicate); err == nil {
+		t.Fatal("duplicate reference keys were accepted")
+	}
+	ref := bqwriter.LoadJobRef{JobID: "job-1", ProjectID: "demodb", DatasetID: "other", TableID: "People", Location: "US"}
+	if err := dbCopyRecoverBigQuery(context.Background(), target, ref, &http.Client{}, io.Discard); err == nil || !strings.Contains(err.Error(), "does not match --to") {
+		t.Fatalf("mismatched target error = %v", err)
+	}
+	_, _, err = runCopy(t, "db", "copy", "--to", "bigquery://demodb/research?location=US", "--recover-job-ref", duplicate)
+	if coder, ok := err.(ExitCoder); !ok || coder.ExitCode() != 2 || !strings.Contains(err.Error(), "invalid --recover-job-ref") {
+		t.Fatalf("invalid recovery command error = %v, want exit 2 before credentials", err)
+	}
+	_, _, err = runCopy(t, "db", "copy", "--from", "sqlite:///source.db", "--to", "bigquery://demodb/research?location=US", "--recover-job-ref", "{}")
+	if coder, ok := err.(ExitCoder); !ok || coder.ExitCode() != 2 || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("mixed recovery/copy command error = %v, want exit 2", err)
+	}
+}
+
+func TestBigQueryRecoveryHintContainsOnlyCredentialFreeReference(t *testing.T) {
+	target, err := dbcopy.Parse("bigquery://demodb/research?location=US")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := bqwriter.LoadJobRef{JobID: "job-123", ProjectID: "demodb", DatasetID: "research", TableID: "People", Location: "US"}
+	hint := bigQueryRecoveryHint(target, ref)
+	for _, want := range []string{"Do not rerun", "--recover-job-ref", `"jobId":"job-123"`, `"tableId":"People"`, "bigquery://demodb/research?location=US"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("recovery hint missing %q: %s", want, hint)
+		}
+	}
+	if strings.Contains(hint, "password") || strings.Contains(hint, "rows") {
+		t.Fatalf("recovery hint includes non-reference material: %s", hint)
+	}
+	joined := errors.Join(&bqwriter.LoadOutcomeUnknownError{Job: ref}, dbcopy.ErrStagingCleanup)
+	message := bigQueryCopyRecoveryMessage(target, ref, joined)
+	if !strings.Contains(message, "staged source data may remain in temporary storage") || !strings.Contains(message, "--recover-job-ref") {
+		t.Fatalf("joined uncertain outcome did not report recovery and staging cleanup: %s", message)
+	}
 }
 
 // REQ:unknown-scheme-rejected — exit 2 with substrings naming the bad

@@ -25,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -41,7 +42,7 @@ import (
 
 // supportedSchemes is the MVP-supported scheme list, used both for dispatch
 // and to construct the error message for REQ:unknown-scheme-rejected.
-var supportedSchemes = []string{"sqlite", "ingitdb", "postgres", "http", "https", "openvaultdb"}
+var supportedSchemes = []string{"sqlite", "ingitdb", "postgres", "http", "https", "openvaultdb", "bigquery"}
 
 // SupportedSchemes returns the exact schemes Parse/Open dispatch, in
 // dispatch order. It is the single source of truth other packages should
@@ -149,6 +150,11 @@ type BackendRef struct {
 	//                NOT a literal remote endpoint; the project's own query
 	//                definitions name the actual remote endpoints.
 	Path string
+	// BigQuery destination selectors. Credentials are never accepted in the URL;
+	// callers provide local Google credentials separately.
+	ProjectID string
+	DatasetID string
+	Location  string
 	// Raw is the text to show for the source in a message: the display form of
 	// the input (see SourceDisplay), built from its scheme, host, port and path
 	// and never holding userinfo, a query string or a fragment. An "env:NAME"
@@ -251,6 +257,8 @@ func parseURL(rawURL string) (BackendRef, error) {
 			return BackendRef{}, err
 		}
 		return BackendRef{Scheme: scheme, Path: rest, Raw: display}, nil
+	case "bigquery":
+		return parseBigQueryDestination(rest, display)
 	case "ingitdb":
 		return parseInGitDB(display, rest)
 	case "http", "https":
@@ -286,6 +294,32 @@ func parseURL(rawURL string) (BackendRef, error) {
 		return parseSQLite(rawURL, scheme+separator+rest, rest, true)
 	}
 	return BackendRef{}, errUnsupportedScheme(scheme)
+}
+
+var (
+	bigQueryProjectID = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
+	bigQueryDatasetID = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	bigQueryLocation  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+)
+
+func parseBigQueryDestination(rest, display string) (BackendRef, error) {
+	u, err := url.Parse("bigquery://" + rest)
+	if err != nil || u.Host == "" || u.User != nil || u.Port() != "" || u.Fragment != "" || u.ForceQuery {
+		return BackendRef{}, fmt.Errorf("invalid BigQuery destination: expected bigquery://PROJECT/DATASET?location=LOCATION")
+	}
+	project := u.Hostname()
+	if !bigQueryProjectID.MatchString(project) || len(u.Path) < 2 || strings.Contains(strings.TrimPrefix(u.Path, "/"), "/") {
+		return BackendRef{}, fmt.Errorf("invalid BigQuery destination: expected a project and one dataset name")
+	}
+	dataset := strings.TrimPrefix(u.Path, "/")
+	if len(dataset) > 1024 || !bigQueryDatasetID.MatchString(dataset) {
+		return BackendRef{}, fmt.Errorf("invalid BigQuery destination dataset")
+	}
+	query := u.Query()
+	if len(query) != 1 || len(query["location"]) != 1 || !bigQueryLocation.MatchString(query.Get("location")) {
+		return BackendRef{}, fmt.Errorf("BigQuery destination requires one explicit location")
+	}
+	return BackendRef{Scheme: "bigquery", ProjectID: project, DatasetID: dataset, Location: query.Get("location"), Raw: display}, nil
 }
 
 // parseSQLite handles sqlite://path and sqlite:path. dburl, which understands
@@ -495,6 +529,19 @@ func (r BackendRef) Open(ctx context.Context) (dal.DB, error) {
 	return r.open(ctx, openMode{})
 }
 
+// OpenForCopy opens a source for a provider-neutral database copy. PostgreSQL
+// copy reads preserve exact NUMERIC text and may target an explicit schema;
+// other sources keep their regular DALgo read behavior.
+func (r BackendRef) OpenForCopy(ctx context.Context, postgresSchema string) (dal.DB, error) {
+	if postgresSchema != "" && r.Scheme != "postgres" {
+		return nil, fmt.Errorf("--from-schema is supported only for PostgreSQL sources")
+	}
+	if r.Scheme == "postgres" {
+		return r.open(ctx, openMode{postgresSchema: postgresSchema, exactNumericValues: true})
+	}
+	return r.open(ctx, openMode{})
+}
+
 // OpenForWrite is Open for the one connection that is written through: the target of
 // `datatug db copy --to`. It differs from Open only for a postgres source, which Open and
 // OpenProtected open with a read-only session and refuse when the URL turns that off (see
@@ -591,6 +638,8 @@ type openMode struct {
 	insecureAllowLoopback bool
 	protected             bool
 	forWrite              bool
+	postgresSchema        string
+	exactNumericValues    bool
 }
 
 // open opens the source and turns whatever it returns as an error into one
@@ -661,7 +710,7 @@ func (r BackendRef) openSource(ctx context.Context, mode openMode) (dal.DB, erro
 
 	case "postgres":
 		// The preview switch is asked first, inside openPostgres.
-		return r.openPostgres(ctx, mode.forWrite)
+		return r.openPostgres(ctx, mode)
 
 	case "http", "https":
 		var opts []httpsource.Option

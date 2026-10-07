@@ -1051,7 +1051,11 @@ func integerString(value any) (string, bool) {
 			return i.String(), true
 		}
 	case float64:
-		if math.IsInf(v, 0) || math.IsNaN(v) {
+		// Even an integral float outside this interval may already have lost
+		// source integer precision before it reached the DALgo reader. Refuse it
+		// instead of treating the rounded value as an exact integer.
+		const maxExactFloatInteger = float64(1<<53 - 1)
+		if math.IsInf(v, 0) || math.IsNaN(v) || v > maxExactFloatInteger || v < -maxExactFloatInteger {
 			return "", false
 		}
 		rat := new(big.Rat).SetFloat64(v)

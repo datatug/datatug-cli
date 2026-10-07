@@ -8,12 +8,9 @@ The existing agent-backed query comparison remains available with `--query`, `--
 
 ## Compare two environments
 
-The DemoDB project declares the SQLite edition in `dev` and the PostgreSQL edition in `QA`. A hosted-pending edition is metadata about a future public endpoint; the CLI never opens that metadata URL. Supply an explicit source for each side when one is not otherwise executable. Put PostgreSQL connection strings in environment variables and pass `env:VARIABLE`, so the DSN does not appear in shell history or process arguments:
+The DemoDB project declares the SQLite edition in `dev` and the PostgreSQL edition in `QA`. A hosted-pending edition is metadata about a future public endpoint; the CLI never opens that metadata URL. Supply an explicit source for each side when one is not otherwise executable. Populate PostgreSQL connection variables through a secret manager or another secure input method, then pass `env:VARIABLE`; this keeps the DSN out of DataTug's command arguments and process list. Avoid typing a literal DSN in an `export` command if your shell records commands in history.
 
 ```sh
-export DEMO_CHINOOK_SQLITE_URL='sqlite:///path/to/chinook.sqlite'
-export DEMO_CHINOOK_QA_PG_URL='postgres://USER:PASSWORD@HOST:5432/chinook'
-export DATATUG_PREVIEW_POSTGRES=1
 datatug compare chinook-sqlite chinook-postgresql \
   --project ./demo-project-1 \
   --left-environment dev --right-environment QA \

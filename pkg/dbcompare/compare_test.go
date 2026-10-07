@@ -338,6 +338,11 @@ func TestNormalizeExactValuesAndRejectsUnrepresentableTypes(t *testing.T) {
 	value, err = normalizeValue(dbschema.FieldDef{Type: dbschema.Int}, uint64(9007199254740993))
 	require.NoError(t, err)
 	require.Equal(t, "9007199254740993", value.Text)
+	value, err = normalizeValue(dbschema.FieldDef{Type: dbschema.Int}, float64(9007199254740991))
+	require.NoError(t, err)
+	require.Equal(t, "9007199254740991", value.Text)
+	_, err = normalizeValue(dbschema.FieldDef{Type: dbschema.Int}, float64(9007199254740992))
+	require.Error(t, err, "integral floats above the exact-safe integer range may already be rounded")
 
 	value, err = normalizeValue(dbschema.FieldDef{Type: dbschema.Bytes}, []byte{0, 0xff})
 	require.NoError(t, err)

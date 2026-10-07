@@ -81,7 +81,7 @@ func (LocalProjectQueryAdapter) GetQuery(ctx context.Context, request dto.GetQue
 	if err := requireLocalReadPrincipal(); err != nil {
 		return nil, err
 	}
-	if err := request.ProjectRef.Validate(); err != nil {
+	if err := request.Validate(); err != nil {
 		return nil, err
 	}
 	if request.StoreID != LocalStoreID {
@@ -199,7 +199,7 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		if err := json.Unmarshal(data, &journal); err != nil {
 			return nil, ErrProjectMutationOutcomeUncertain
 		}
-		if err := journal.OperationReceipt.MatchSaveRetry(scope, request); err != nil {
+		if err := journal.MatchSaveRetry(scope, request); err != nil {
 			return nil, err
 		}
 		if journal.Complete {
@@ -364,7 +364,7 @@ func previewLocalQueryRevision(ctx context.Context, query datatug.QueryDefWithFo
 	if err != nil {
 		return localQueryPreview{}, err
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	store, ok := filestore.NewProjectStore("preview", dir).(datatug.RevisionedQueriesStore)
 	if !ok {
 		return localQueryPreview{}, dto.ErrUnsupportedCapability
@@ -415,7 +415,7 @@ func writeLocalQueryJournal(path string, record localQueryJournal) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
 		return err
@@ -440,8 +440,9 @@ func writeLocalQueryJournal(path string, record localQueryJournal) error {
 	if err != nil {
 		return err
 	}
-	defer dir.Close()
-	return dir.Sync()
+	syncErr := dir.Sync()
+	closeErr := dir.Close()
+	return errors.Join(syncErr, closeErr)
 }
 
 type gitState struct{ root, gitDir, branch, head string }

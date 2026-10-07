@@ -74,6 +74,10 @@ func TestPostgresToBigQueryProviderNeutralCopyPreservesRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The PostgreSQL reader's default-schema listing returns unqualified
+	// CollectionRefs. The BigQuery mapper only adds a schema prefix when the
+	// source ref carries one, so these target table names intentionally remain
+	// unqualified for the default public-schema copy.
 	sourceRef = sourceRef.WithFlag("--from")
 	source, err := sourceRef.OpenForCopy(context.Background(), "")
 	if err != nil {
@@ -97,19 +101,28 @@ func TestPostgresToBigQueryProviderNeutralCopyPreservesRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.RowsCopied != 6 || plan.rowsByTable["public__customer"] != 2 || plan.rowsByTable["public__invoice"] != 1 || plan.rowsByTable["public__audit_log"] != 1 || plan.rowsByTable["public__pg_no_key"] != 2 {
+	if summary.RowsCopied != 8 || plan.rowsByTable["customer"] != 2 || plan.rowsByTable["customer_names"] != 2 || plan.rowsByTable["invoice"] != 1 || plan.rowsByTable["audit_log"] != 1 || plan.rowsByTable["pg_no_key"] != 2 {
 		t.Fatalf("PostgreSQL copy rows: summary=%#v counts=%#v", summary, plan.rowsByTable)
 	}
 	var foundTotal bool
-	for _, row := range plan.ndjsonByTable["public__invoice"] {
+	for _, row := range plan.ndjsonByTable["invoice"] {
 		if row["id"] == "31" && row["total"] == "12345678901234567890.12345678" && row["status"] == "paid" {
 			foundTotal = true
 		}
 	}
 	if !foundTotal {
-		t.Fatalf("typed PostgreSQL numeric row did not retain exact value: %#v", plan.ndjsonByTable["public__invoice"])
+		t.Fatalf("typed PostgreSQL numeric row did not retain exact value: %#v", plan.ndjsonByTable["invoice"])
 	}
-	if got := plan.ndjsonByTable["public__pg_no_key"]; len(got) != 2 || got[0]["payload"] != "duplicate" || got[1]["payload"] != "duplicate" {
+	var foundTimestamp bool
+	for _, row := range plan.ndjsonByTable["audit_log"] {
+		if row["at"] == "2024-10-01T08:30:45" && row["message"] == "source row" {
+			foundTimestamp = true
+		}
+	}
+	if !foundTimestamp {
+		t.Fatalf("PostgreSQL timestamp row did not retain its wall-clock value: %#v", plan.ndjsonByTable["audit_log"])
+	}
+	if got := plan.ndjsonByTable["pg_no_key"]; len(got) != 2 || got[0]["payload"] != "duplicate" || got[1]["payload"] != "duplicate" {
 		t.Fatalf("keyless duplicate PostgreSQL rows were not preserved: %#v", got)
 	}
 }

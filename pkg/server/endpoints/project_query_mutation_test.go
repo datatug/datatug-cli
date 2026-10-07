@@ -91,6 +91,34 @@ func TestLocalSaveQueryStagesPairAndRejectsStaleOrChangedReplay(t *testing.T) {
 	require.Contains(t, staleHead.Body.String(), "BRANCH_HEAD_CONFLICT")
 }
 
+func TestLocalBranchesExposeCurrentHeadForFirstConditionalSave(t *testing.T) {
+	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
+	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
+	current := runGit(t, projectDir, "symbolic-ref", "--short", "HEAD")
+	head := runGit(t, projectDir, "rev-parse", "HEAD")
+	runGit(t, projectDir, "branch", "feature")
+	url := "/datatug/projects/branches?storage=local&project=" + scope.Project
+	w := httptest.NewRecorder()
+	projectBranchesHandler(w, httptest.NewRequest(http.MethodGet, url, nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	var branches api.ProjectBranches
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &branches))
+	require.Equal(t, current, branches.CurrentBranch)
+	require.Contains(t, branches.Branches, api.ProjectBranch{Name: current, Head: head})
+	require.Contains(t, branches.Branches, api.ProjectBranch{Name: "feature", Head: head})
+
+	request := saveLocalQueryRequest(scope.Project, branches.CurrentBranch, head)
+	created, _ := postLocalSave(t, request)
+	require.Equal(t, http.StatusOK, created.Code, created.Body.String())
+
+	api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{})
+	denied := httptest.NewRecorder()
+	projectBranchesHandler(denied, httptest.NewRequest(http.MethodGet, url, nil))
+	require.Equal(t, http.StatusForbidden, denied.Code)
+	require.NotContains(t, denied.Body.String(), head)
+}
+
 func TestLocalSaveQueryReadOnlyActorCannotReplay(t *testing.T) {
 	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
 	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})

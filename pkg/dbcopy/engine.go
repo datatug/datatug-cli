@@ -72,6 +72,7 @@ type SourceSummary struct {
 	// SkippedIndexes lists the indexes of the source that were not copied to a PostgreSQL target
 	// because the driver cannot recreate them (see unrecreatableIndex).
 	SkippedIndexes []SkippedIndex
+	Warnings       []string
 }
 
 // Copy replicates the source database into the target — schema first,

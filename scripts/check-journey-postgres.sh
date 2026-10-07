@@ -21,6 +21,7 @@ required_tests=(
 	TestPostgresScanJourneyFailures
 	TestPostgresQueryJourneyOrdersNullsByDALgosRule
 	TestPostgresCopyJourneyRefusesANameAndLeavesTheTargetAsItWas
+	TestPostgresToBigQueryProviderNeutralCopyPreservesRows
 )
 
 # check reads the verbose output of `go test` in file $1 and prints each problem. It

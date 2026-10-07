@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/dal-go/dalgo/dal"
@@ -160,11 +161,11 @@ func (a *openAttempt) await(ctx context.Context) (*sharedPostgres, error) {
 	}
 }
 
-// openPostgres opens this postgres source through the adapter, in exact identifier mode (names are
-// used as the scan stored them; nothing is folded), with no recordset declared (a record is keyed
-// by the primary key the adapter reads from the catalog, and by its position when the source has
-// none: there is no second key rule here) and the session defaults of postgresConnectionString.
-// forWrite is true only for the target of `datatug db copy`.
+// openPostgres opens this PostgreSQL source through the adapter, in exact identifier mode (names
+// are used as the scan stored them; nothing is folded), with no recordset declared (a record is
+// keyed by the primary key the adapter reads from the catalog, and by its position when the source
+// has none), and the session defaults of postgresConnectionString. Copy sources opt in to exact
+// NUMERIC reads; ordinary opens retain dalgo2sql's legacy float64 behavior.
 //
 // The preview switch is asked first, before the URL is read any further. One handle is kept for each
 // connection string (see handleCache), and the callers of a source that is being opened share the
@@ -172,17 +173,23 @@ func (a *openAttempt) await(ctx context.Context) (*sharedPostgres, error) {
 // which says what failed by its kind and its SQLSTATE and holds nothing of the connection string;
 // or a context error, bare, when the attempt ended with the context of the caller or the connect
 // timeout; or errPostgresOpenFailed. BackendRef.OpenFailure turns each into a fixed sentence.
-func (r BackendRef) openPostgres(ctx context.Context, forWrite bool) (dal.DB, error) {
+func (r BackendRef) openPostgres(ctx context.Context, mode openMode) (dal.DB, error) {
 	if err := CheckPostgresPreview(); err != nil {
 		return nil, err
 	}
-	connection, err := postgresConnectionString(r.Path, forWrite)
+	connection, err := postgresConnectionString(r.Path, mode.forWrite)
 	if err != nil {
 		return nil, err
 	}
-	db, err := postgresHandles.get(ctx, connection, r.connectionHint(), func() (*dalgo2postgres.Database, error) {
-		return newPostgresDatabaseWithOptions(connection, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{},
-			dalgo2postgres.WithIdentifierMode(dalgo2postgres.IdentifierExact))
+	cacheIdentity := fmt.Sprintf("%s\x00schema=%s\x00exact-numeric=%t", connection, mode.postgresSchema, mode.exactNumericValues)
+	db, err := postgresHandles.get(ctx, cacheIdentity, r.connectionHint(), func() (*dalgo2postgres.Database, error) {
+		options := []dalgo2postgres.Option{dalgo2postgres.WithIdentifierMode(dalgo2postgres.IdentifierExact)}
+		if mode.postgresSchema != "" {
+			options = append(options, dalgo2postgres.WithSchema(mode.postgresSchema))
+		}
+		dbOptions := dalgo2sql.DbOptions{ExactNumericValues: mode.exactNumericValues}
+		return newPostgresDatabaseWithOptions(connection, dal.NewSchema(nil, nil), dbOptions,
+			options...)
 	})
 	if err != nil {
 		var adapterErr *dalgo2postgres.ConnectionError

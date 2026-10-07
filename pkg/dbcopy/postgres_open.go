@@ -164,8 +164,8 @@ func (a *openAttempt) await(ctx context.Context) (*sharedPostgres, error) {
 // openPostgres opens this PostgreSQL source through the adapter, in exact identifier mode (names
 // are used as the scan stored them; nothing is folded), with no recordset declared (a record is
 // keyed by the primary key the adapter reads from the catalog, and by its position when the source
-// has none), and the session defaults of postgresConnectionString. Copy sources opt in to exact
-// NUMERIC reads; ordinary opens retain dalgo2sql's legacy float64 behavior.
+// has none), and the session defaults of postgresConnectionString. Copy/export sources opt in to
+// exact NUMERIC and raw BYTEA reads; ordinary opens retain dalgo2sql's legacy conversions.
 //
 // The preview switch is asked first, before the URL is read any further. One handle is kept for each
 // connection string (see handleCache), and the callers of a source that is being opened share the
@@ -181,13 +181,16 @@ func (r BackendRef) openPostgres(ctx context.Context, mode openMode) (dal.DB, er
 	if err != nil {
 		return nil, err
 	}
-	cacheIdentity := fmt.Sprintf("%s\x00schema=%s\x00exact-numeric=%t", connection, mode.postgresSchema, mode.exactNumericValues)
+	cacheIdentity := fmt.Sprintf("%s\x00schema=%s\x00exact-numeric=%t\x00preserve-binary=%t", connection, mode.postgresSchema, mode.exactNumericValues, mode.preserveBinaryValues)
 	db, err := postgresHandles.get(ctx, cacheIdentity, r.connectionHint(), func() (*dalgo2postgres.Database, error) {
 		options := []dalgo2postgres.Option{dalgo2postgres.WithIdentifierMode(dalgo2postgres.IdentifierExact)}
 		if mode.postgresSchema != "" {
 			options = append(options, dalgo2postgres.WithSchema(mode.postgresSchema))
 		}
-		dbOptions := dalgo2sql.DbOptions{ExactNumericValues: mode.exactNumericValues}
+		dbOptions := dalgo2sql.DbOptions{
+			ExactNumericValues:   mode.exactNumericValues,
+			PreserveBinaryValues: mode.preserveBinaryValues,
+		}
 		return newPostgresDatabaseWithOptions(connection, dal.NewSchema(nil, nil), dbOptions,
 			options...)
 	})

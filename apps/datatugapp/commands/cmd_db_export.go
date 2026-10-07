@@ -11,7 +11,7 @@ import (
 )
 
 var openExportSource = func(ctx context.Context, ref dbcopy.BackendRef) (dal.DB, error) {
-	return ref.Open(ctx)
+	return ref.OpenForExport(ctx)
 }
 
 var runNativeExport = dbcopy.ExportInGitDB

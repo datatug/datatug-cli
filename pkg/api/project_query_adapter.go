@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -251,7 +252,7 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 	}
 	shouldPut := true
 	if pending {
-		if journal.QueryID != queryID || journal.Result.Revision == "" || journal.Result.BranchHead != state.head || journal.Result.Query.Type != request.Query.Type {
+		if journal.QueryID != queryID || journal.Result.Revision == "" || journal.Result.BranchHead != state.head || journal.Result.Query.Type != request.Query.Type || len(journal.MetadataBytes) == 0 {
 			return nil, ErrProjectMutationOutcomeUncertain
 		}
 		if current != nil && string(current.Revision) == journal.Result.Revision {
@@ -273,16 +274,16 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		if current != nil && !reflect.DeepEqual(current.Query.Capture, request.Query.Capture) {
 			return nil, clientCaptureRefusal("save_query cannot alter capture provenance")
 		}
-		previewRevision, err := previewLocalQueryRevision(ctx, query)
+		preview, err := previewLocalQueryRevision(ctx, query)
 		if err != nil {
 			return nil, err
 		}
 		journal = localQueryJournal{
 			OperationReceipt: dto.OperationReceipt{
 				Scope: scope, OperationID: request.OperationID, PayloadDigest: digest,
-				Result: dto.SaveQueryResponse{Query: request.Query, Revision: string(previewRevision), BranchHead: state.head},
+				Result: dto.SaveQueryResponse{Query: request.Query, Revision: string(preview.revision), BranchHead: state.head},
 			},
-			QueryID: queryID,
+			QueryID: queryID, MetadataBytes: preview.metadata, BodyBytes: preview.body,
 		}
 		if current != nil {
 			journal.PreviousRevision = string(current.Revision)
@@ -315,8 +316,15 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 	if err != nil || beforeStage.branch != state.branch || beforeStage.head != state.head {
 		return nil, ErrProjectMutationOutcomeUncertain
 	}
-	if err := stageLocalQueryPair(ctx, state.root, projectDir, queryID, query.Type, journal.OldType); err != nil {
+	if err := stageLocalQueryPair(ctx, state.root, projectDir, queryID, query.Type, journal.OldType, journal.MetadataBytes, journal.BodyBytes); err != nil {
 		return nil, fmt.Errorf("query saved but staging failed: %w", ErrProjectMutationOutcomeUncertain)
+	}
+	// The index receives only the bytes frozen in the pending intent. An
+	// external editor can still change the worktree after Core's PutQuery;
+	// refuse completion unless the current pair remains that exact revision.
+	stagedPair, err := revisioned.LoadQueryRevision(ctx, queryID)
+	if err != nil || string(stagedPair.Revision) != journal.Result.Revision {
+		return nil, ErrProjectMutationOutcomeUncertain
 	}
 	afterStage, err := localGitState(ctx, projectDir)
 	if err != nil || afterStage.branch != state.branch || afterStage.head != state.head {
@@ -336,27 +344,44 @@ type localQueryJournal struct {
 	QueryID          string            `json:"queryId"`
 	PreviousRevision string            `json:"previousRevision,omitempty"`
 	OldType          datatug.QueryType `json:"oldType,omitempty"`
+	MetadataBytes    []byte            `json:"metadataBytes"`
+	BodyBytes        []byte            `json:"bodyBytes"`
 }
 
 // previewLocalQueryRevision runs the exact Core serializer in a private
 // temporary filestore before the durable intent is written. The resulting
 // revision identifies the exact metadata and body bytes a retry must find;
 // equality of decoded QueryDef values alone would not prove those bytes.
-func previewLocalQueryRevision(ctx context.Context, query datatug.QueryDefWithFolderPath) (datatug.QueryRevision, error) {
+type localQueryPreview struct {
+	revision datatug.QueryRevision
+	metadata []byte
+	body     []byte
+}
+
+func previewLocalQueryRevision(ctx context.Context, query datatug.QueryDefWithFolderPath) (localQueryPreview, error) {
 	dir, err := os.MkdirTemp("", "datatug-query-preview-*")
 	if err != nil {
-		return "", err
+		return localQueryPreview{}, err
 	}
 	defer os.RemoveAll(dir)
 	store, ok := filestore.NewProjectStore("preview", dir).(datatug.RevisionedQueriesStore)
 	if !ok {
-		return "", dto.ErrUnsupportedCapability
+		return localQueryPreview{}, dto.ErrUnsupportedCapability
 	}
 	stored, err := store.PutQuery(ctx, &query, datatug.QueryWriteCondition{IfNoneMatch: true})
 	if err != nil {
-		return "", err
+		return localQueryPreview{}, err
 	}
-	return stored.Revision, nil
+	base := filepath.Join(dir, "queries", filepath.FromSlash(query.FolderPath), query.ID+".query")
+	metadata, err := os.ReadFile(base + ".json")
+	if err != nil {
+		return localQueryPreview{}, err
+	}
+	body, err := os.ReadFile(base + "." + strings.ToLower(string(query.Type)))
+	if err != nil {
+		return localQueryPreview{}, err
+	}
+	return localQueryPreview{revision: stored.Revision, metadata: metadata, body: body}, nil
 }
 
 // localMutationReceiptPath is shared by every project mutation kind so one
@@ -449,7 +474,17 @@ func localGitOutput(ctx context.Context, dir string, args ...string) (string, er
 	return strings.TrimSpace(string(output)), nil
 }
 
-func stageLocalQueryPair(ctx context.Context, root, projectDir, queryID string, newType, oldType datatug.QueryType) error {
+func localGitInput(ctx context.Context, dir string, input []byte, args ...string) (string, error) {
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	command.Stdin = bytes.NewReader(input)
+	output, err := command.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func stageLocalQueryPair(ctx context.Context, root, projectDir, queryID string, newType, oldType datatug.QueryType, metadata, body []byte) error {
 	// macOS may hand serve a /var/... path while Git canonicalizes it to
 	// /private/var/.... Resolve both before checking containment.
 	root, err := filepath.EvalSymlinks(root)
@@ -465,13 +500,34 @@ func stageLocalQueryPair(ctx context.Context, root, projectDir, queryID string, 
 		return validation.NewBadRequestError(errors.New("project directory is outside its Git repository"))
 	}
 	base := filepath.ToSlash(filepath.Join(rel, "queries", queryID+".query"))
-	paths := []string{":(literal)" + base + ".json", ":(literal)" + base + "." + strings.ToLower(string(newType))}
-	if oldType != "" && oldType != newType {
-		oldPath := ":(literal)" + base + "." + strings.ToLower(string(oldType))
-		if _, err := localGitOutput(ctx, root, "ls-files", "--error-unmatch", "--", oldPath); err == nil {
-			paths = append(paths, oldPath)
+	paths := []string{base + ".json", base + "." + strings.ToLower(string(newType))}
+	var expectedOIDs [2]string
+	for i, content := range [][]byte{metadata, body} {
+		blobOID, err := localGitInput(ctx, root, content, "hash-object", "-w", "--stdin")
+		if err != nil {
+			return err
+		}
+		expectedOIDs[i] = blobOID
+		if _, err := localGitOutput(ctx, root, "update-index", "--add", "--cacheinfo", "100644", blobOID, paths[i]); err != nil {
+			return err
 		}
 	}
-	_, err = localGitOutput(ctx, root, append([]string{"add", "-A", "--"}, paths...)...)
-	return err
+	if oldType != "" && oldType != newType {
+		oldPath := base + "." + strings.ToLower(string(oldType))
+		if _, err := localGitOutput(ctx, root, "ls-files", "--error-unmatch", "--", ":(literal)"+oldPath); err == nil {
+			if _, err := localGitOutput(ctx, root, "update-index", "--force-remove", "--", oldPath); err != nil {
+				return err
+			}
+			if _, err := localGitOutput(ctx, root, "ls-files", "--error-unmatch", "--", ":(literal)"+oldPath); err == nil {
+				return ErrProjectMutationOutcomeUncertain
+			}
+		}
+	}
+	for i, path := range paths {
+		stagedOID, err := localGitOutput(ctx, root, "rev-parse", ":"+path)
+		if err != nil || stagedOID != expectedOIDs[i] {
+			return ErrProjectMutationOutcomeUncertain
+		}
+	}
+	return nil
 }

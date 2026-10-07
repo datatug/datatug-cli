@@ -285,3 +285,58 @@ func TestLocalSaveQueryRetryInFolder(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, created.Revision, replay.Revision)
 }
+
+type editAfterPutStore struct {
+	storage.Store
+	afterPut func()
+}
+
+func (s editAfterPutStore) GetProjectStore(id string) datatug.ProjectStore {
+	return editAfterPutProject{ProjectStore: s.Store.GetProjectStore(id), afterPut: s.afterPut}
+}
+
+type editAfterPutProject struct {
+	datatug.ProjectStore
+	afterPut func()
+}
+
+func (p editAfterPutProject) LoadQueryRevision(ctx context.Context, id string, options ...datatug.StoreOption) (*datatug.StoredQuery, error) {
+	return p.ProjectStore.(datatug.RevisionedQueriesStore).LoadQueryRevision(ctx, id, options...)
+}
+
+func (p editAfterPutProject) PutQuery(ctx context.Context, query *datatug.QueryDefWithFolderPath, condition datatug.QueryWriteCondition) (*datatug.StoredQuery, error) {
+	stored, err := p.ProjectStore.(datatug.RevisionedQueriesStore).PutQuery(ctx, query, condition)
+	if err == nil {
+		p.afterPut()
+	}
+	return stored, err
+}
+
+func (p editAfterPutProject) DeleteQueryRevision(ctx context.Context, id string, revision datatug.QueryRevision) error {
+	return p.ProjectStore.(datatug.RevisionedQueriesStore).DeleteQueryRevision(ctx, id, revision)
+}
+
+func TestLocalSaveQueryNeverStagesForeignEditAfterPut(t *testing.T) {
+	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
+	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
+	branch, head := runGit(t, projectDir, "symbolic-ref", "--short", "HEAD"), runGit(t, projectDir, "rev-parse", "HEAD")
+	request := saveLocalQueryRequest(scope.Project, branch, head)
+	original := storage.NewDatatugStore
+	t.Cleanup(func() { storage.NewDatatugStore = original })
+	const foreign = "SELECT FirstName FROM Customer -- external editor"
+	storage.NewDatatugStore = func(id string) (storage.Store, error) {
+		base, err := original(id)
+		return editAfterPutStore{Store: base, afterPut: func() {
+			require.NoError(t, os.WriteFile(filepath.Join(projectDir, "queries", "customer.query.dtql"), []byte(foreign), 0o600))
+		}}, err
+	}
+	w, _ := postLocalSave(t, request)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "OUTCOME_UNCERTAIN")
+	require.Equal(t, request.Query.Text, runGit(t, projectDir, "show", ":queries/customer.query.dtql"))
+	body, err := os.ReadFile(filepath.Join(projectDir, "queries", "customer.query.dtql"))
+	require.NoError(t, err)
+	require.Equal(t, foreign, string(body))
+	retry, _ := postLocalSave(t, request)
+	require.Equal(t, http.StatusConflict, retry.Code, retry.Body.String())
+}

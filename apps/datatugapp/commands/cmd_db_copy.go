@@ -31,7 +31,7 @@ func dbCopyCommand() *cobra.Command {
 		RunE: dbCopyAction,
 	}
 	flags := cmd.Flags()
-	flags.String("from", "", "Source DALgo URL (sqlite://, ingitdb://, postgres:// read-only). Required.")
+	flags.String("from", "", "Source URL (sqlite://, ingitdb://, postgres:// read-only, http(s):// DataTug project, openvaultdb://). Required.")
 	flags.String("from-schema", "", "PostgreSQL source schema to read; defaults to public.")
 	flags.String("to", "", "Target DALgo URL (sqlite://, ingitdb://, postgres://: the only way DataTug opens PostgreSQL for writing; bigquery://PROJECT/DATASET?location=LOCATION). Required.")
 	flags.String("recover-job-ref", "", "Recover the same uncertain BigQuery load job using the credential-free JSON reference printed by an interrupted `db copy`; requires --to and does not resubmit source rows.")
@@ -208,7 +208,7 @@ func dbCopyToBigQuery(ctx context.Context, source dal.DB, sourceRef dbcopy.Backe
 	if err != nil {
 		var uncertain *bqwriter.LoadOutcomeUnknownError
 		if errors.As(err, &uncertain) {
-			return Exit(bigQueryRecoveryHint(target, uncertain.Job), 1)
+			return Exit(bigQueryCopyRecoveryMessage(target, uncertain.Job, err), 1)
 		}
 		return Exit(err.Error(), 1)
 	}
@@ -282,6 +282,14 @@ func bigQueryRecoveryHint(target dbcopy.BackendRef, ref bqwriter.LoadJobRef) str
 	destination := fmt.Sprintf("bigquery://%s/%s?location=%s", target.ProjectID, target.DatasetID, target.Location)
 	return fmt.Sprintf("BigQuery load outcome is uncertain. Do not rerun this copy; recover the same job with:\n  datatug db copy --to '%s' --recover-job-ref '%s'",
 		destination, string(data))
+}
+
+func bigQueryCopyRecoveryMessage(target dbcopy.BackendRef, ref bqwriter.LoadJobRef, copyErr error) string {
+	message := bigQueryRecoveryHint(target, ref)
+	if errors.Is(copyErr, dbcopy.ErrStagingCleanup) {
+		message += "\nWarning: local staging cleanup failed; staged source data may remain in temporary storage."
+	}
+	return message
 }
 
 // buildDirectivesFromFlags constructs a *filter.Directives from the

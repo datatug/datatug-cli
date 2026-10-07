@@ -40,11 +40,16 @@ type CopySinkPlan interface {
 
 type copyPlanWarnings interface{ Warnings() []string }
 
+var removeCopyStagingDir = os.RemoveAll
+
+// ErrStagingCleanup means temporary source rows may remain on local disk.
+var ErrStagingCleanup = errors.New("transfer staging cleanup failed; temporary source files may remain")
+
 // CopyToSink performs a provider-neutral transfer. It fully introspects and
 // stages every supported source row before calling Prepare, so an unsupported
 // schema or value cannot leave a partially created destination.
-func CopyToSink(ctx context.Context, source dal.DB, sink CopySink, opts CopyOpts) (SourceSummary, error) {
-	summary := SourceSummary{TargetBackend: "provider-bulk-writer", RowsByTable: map[string]int64{}, RowSkips: map[string]string{}}
+func CopyToSink(ctx context.Context, source dal.DB, sink CopySink, opts CopyOpts) (summary SourceSummary, retErr error) {
+	summary = SourceSummary{TargetBackend: "provider-bulk-writer", RowsByTable: map[string]int64{}, RowSkips: map[string]string{}}
 	if source == nil || sink == nil {
 		return summary, errors.New("copy source and target are required")
 	}
@@ -91,8 +96,13 @@ func CopyToSink(ctx context.Context, source dal.DB, sink CopySink, opts CopyOpts
 		return summary, fmt.Errorf("create transfer staging directory: %w", err)
 	}
 	defer func() {
-		if cleanupErr := os.RemoveAll(stageDir); cleanupErr != nil && err == nil {
-			err = fmt.Errorf("remove transfer staging directory: %w", cleanupErr)
+		if removeCopyStagingDir(stageDir) != nil {
+			// The underlying OS error can contain the machine-specific temp path.
+			if retErr != nil {
+				retErr = errors.Join(retErr, ErrStagingCleanup)
+			} else {
+				retErr = ErrStagingCleanup
+			}
 		}
 	}()
 	staged := make(map[string]string, len(tables))

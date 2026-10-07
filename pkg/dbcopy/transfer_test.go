@@ -3,7 +3,9 @@ package dbcopy
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,6 +81,38 @@ func TestCopyToSinkPreservesPhysicalRowsFromKeylessSQLiteTable(t *testing.T) {
 	}
 	if !plan.prepared || plan.loadedRows != 3 || summary.RowsCopied != 3 || tableRows != 3 {
 		t.Fatalf("copy summary=%#v plan=%#v", summary, plan)
+	}
+}
+
+func TestCopyToSinkReportsStagingCleanupFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cleanup.db")
+	raw, err := sqlOpen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{`CREATE TABLE items (id INTEGER PRIMARY KEY)`, `INSERT INTO items VALUES (1)`} {
+		if _, err := raw.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	source, err := dalgo2sqlite.NewDatabase(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removeStagingDir := removeCopyStagingDir
+	removeCopyStagingDir = func(dir string) error {
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		return errors.New("simulated staging cleanup failure")
+	}
+	t.Cleanup(func() { removeCopyStagingDir = removeStagingDir })
+	_, err = CopyToSink(context.Background(), source, recordingCopySink{plan: &recordingCopyPlan{}}, CopyOpts{})
+	if !errors.Is(err, ErrStagingCleanup) {
+		t.Fatalf("CopyToSink cleanup error = %v, want it surfaced", err)
 	}
 }
 

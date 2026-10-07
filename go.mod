@@ -29,7 +29,7 @@ require (
 	github.com/dal-go/dalgo v0.93.0
 	github.com/dal-go/dalgo2bigquery v0.2.0
 	github.com/dal-go/dalgo2http v0.2.1
-	github.com/dal-go/dalgo2postgres v0.7.0
+	github.com/dal-go/dalgo2postgres v0.8.0
 	github.com/dal-go/dalgo2sql v0.28.0
 	github.com/dal-go/dalgo2sqlite v0.3.0
 	github.com/dal-go/record v0.1.4

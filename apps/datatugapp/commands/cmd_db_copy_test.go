@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -165,6 +166,11 @@ func TestBigQueryRecoveryHintContainsOnlyCredentialFreeReference(t *testing.T) {
 	}
 	if strings.Contains(hint, "password") || strings.Contains(hint, "rows") {
 		t.Fatalf("recovery hint includes non-reference material: %s", hint)
+	}
+	joined := errors.Join(&bqwriter.LoadOutcomeUnknownError{Job: ref}, dbcopy.ErrStagingCleanup)
+	message := bigQueryCopyRecoveryMessage(target, ref, joined)
+	if !strings.Contains(message, "staged source data may remain in temporary storage") || !strings.Contains(message, "--recover-job-ref") {
+		t.Fatalf("joined uncertain outcome did not report recovery and staging cleanup: %s", message)
 	}
 }
 

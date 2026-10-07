@@ -16,7 +16,6 @@ import (
 
 	"github.com/dal-go/dalgo/dbschema"
 	bqwriter "github.com/dal-go/dalgo2bigquery"
-	bq "google.golang.org/api/bigquery/v2"
 )
 
 type BigQueryCopySink struct{ Writer *bqwriter.LoadWriter }
@@ -28,12 +27,10 @@ type bigQueryMappedField struct {
 }
 
 type bigQueryMappedTable struct {
-	table       CopyTable
-	targetName  string
-	fields      []bigQueryMappedField
-	schema      []bqwriter.Field
-	primaryKey  *bq.TableConstraintsPrimaryKey
-	foreignKeys []*bq.TableConstraintsForeignKeys
+	table      CopyTable
+	targetName string
+	fields     []bigQueryMappedField
+	schema     []bqwriter.Field
 }
 
 type bigQueryCopyPlan struct {
@@ -101,16 +98,7 @@ func (s BigQueryCopySink) Preflight(_ context.Context, tables []CopyTable) (Copy
 			return nil, fmt.Errorf("source collection %q has no fields", table.Ref.Path())
 		}
 		if len(table.Definition.PrimaryKey) > 0 {
-			columns := make([]string, len(table.Definition.PrimaryKey))
-			for i, sourcePK := range table.Definition.PrimaryKey {
-				field, ok := mappedField(mapped, string(sourcePK))
-				if !ok {
-					return nil, fmt.Errorf("primary key field %q is missing from %q", sourcePK, table.Ref.Path())
-				}
-				columns[i] = field.target.Name
-			}
-			mapped.primaryKey = &bq.TableConstraintsPrimaryKey{Columns: columns}
-			plan.warns = append(plan.warns, fmt.Sprintf("%s: BigQuery records the primary key as NOT ENFORCED; uniqueness is not checked", table.Ref.Path()))
+			plan.warns = append(plan.warns, fmt.Sprintf("%s: source primary key metadata (%d columns) was not declared in BigQuery because BigQuery does not enforce keys and the staged rows are not independently validated for uniqueness", table.Ref.Path(), len(table.Definition.PrimaryKey)))
 		}
 		if len(table.Definition.Indexes) > 0 {
 			plan.warns = append(plan.warns, fmt.Sprintf("%s: BigQuery has no secondary indexes; %d source index definitions are not represented", table.Ref.Path(), len(table.Definition.Indexes)))
@@ -121,54 +109,11 @@ func (s BigQueryCopySink) Preflight(_ context.Context, tables []CopyTable) (Copy
 	for _, key := range plan.order {
 		mapped := plan.tables[key]
 		for _, fk := range mapped.table.Definition.ForeignKeys {
-			_, referenced, ok := plan.findReferenced(mapped.table, fk.ReferencedNamespace, fk.ReferencedCollection)
-			if !ok {
-				plan.warns = append(plan.warns, fmt.Sprintf("%s: foreign key %q was not declared because referenced collection %q is outside the selected transfer", key, fk.Name, fk.ReferencedCollection))
-				continue
-			}
-			refFields := fk.ReferencedFields
-			if len(refFields) == 0 {
-				refFields = referenced.table.Definition.PrimaryKey
-			}
-			if len(fk.Fields) == 0 || len(fk.Fields) != len(refFields) || len(refFields) != len(referenced.table.Definition.PrimaryKey) {
-				plan.warns = append(plan.warns, fmt.Sprintf("%s: foreign key %q was not declared because BigQuery only accepts references to a matching primary key", key, fk.Name))
-				continue
-			}
-			columnRefs := make([]*bq.TableConstraintsForeignKeysColumnReferences, len(fk.Fields))
-			valid := true
-			for i := range fk.Fields {
-				local, localOK := mappedField(mapped, string(fk.Fields[i]))
-				foreign, foreignOK := mappedField(referenced, string(refFields[i]))
-				if !localOK || !foreignOK || string(referenced.table.Definition.PrimaryKey[i]) != string(refFields[i]) {
-					valid = false
-					break
-				}
-				columnRefs[i] = &bq.TableConstraintsForeignKeysColumnReferences{ReferencingColumn: local.target.Name, ReferencedColumn: foreign.target.Name}
-			}
-			if !valid {
-				plan.warns = append(plan.warns, fmt.Sprintf("%s: foreign key %q was not declared because its target columns do not match the referenced primary key", key, fk.Name))
-				continue
-			}
-			mapped.foreignKeys = append(mapped.foreignKeys, &bq.TableConstraintsForeignKeys{
-				Name: fk.Name,
-				ReferencedTable: &bq.TableConstraintsForeignKeysReferencedTable{
-					ProjectId: s.WriterProjectID(), DatasetId: s.WriterDatasetID(), TableId: referenced.targetName,
-				},
-				ColumnReferences: columnRefs,
-			})
-			warning := fmt.Sprintf("%s: BigQuery records foreign key %q as NOT ENFORCED; referential integrity is not checked", key, fk.Name)
-			if fk.OnDelete != "" || fk.OnUpdate != "" {
-				warning += " and source referential actions are not preserved"
-			}
-			plan.warns = append(plan.warns, warning)
+			plan.warns = append(plan.warns, fmt.Sprintf("%s: source foreign key %q was not declared in BigQuery because BigQuery does not enforce keys and the staged rows are not independently validated for referential integrity", key, fk.Name))
 		}
 	}
 	return plan, nil
 }
-
-// The writer intentionally exposes only destination identity, not credentials.
-func (s BigQueryCopySink) WriterProjectID() string { return s.Writer.ProjectID() }
-func (s BigQueryCopySink) WriterDatasetID() string { return s.Writer.DatasetID() }
 
 func (p *bigQueryCopyPlan) Warnings() []string { return append([]string(nil), p.warns...) }
 
@@ -216,22 +161,8 @@ func (p *bigQueryCopyPlan) Prepare(ctx context.Context) error {
 	}
 	for _, key := range p.order {
 		mapped := p.tables[key]
-		constraints := (*bq.TableConstraints)(nil)
-		if mapped.primaryKey != nil {
-			constraints = &bq.TableConstraints{PrimaryKey: mapped.primaryKey}
-		}
-		if err := p.writer.CreateTable(ctx, mapped.targetName, mapped.schema, constraints); err != nil {
+		if err := p.writer.CreateTable(ctx, mapped.targetName, mapped.schema, nil); err != nil {
 			return fmt.Errorf("create table %q: %w", mapped.targetName, err)
-		}
-	}
-	for _, key := range p.order {
-		mapped := p.tables[key]
-		if len(mapped.foreignKeys) == 0 {
-			continue
-		}
-		constraints := &bq.TableConstraints{ForeignKeys: mapped.foreignKeys, PrimaryKey: mapped.primaryKey}
-		if err := p.writer.SetConstraints(ctx, mapped.targetName, constraints); err != nil {
-			return fmt.Errorf("declare constraints for %q: %w", mapped.targetName, err)
 		}
 	}
 	return nil
@@ -244,31 +175,6 @@ func (p *bigQueryCopyPlan) LoadTable(ctx context.Context, table CopyTable, rows 
 	}
 	receipt, err := p.writer.LoadTable(ctx, mapped.targetName, mapped.schema, rows)
 	return mapped.targetName, int64(receipt.Rows), err
-}
-
-func (p *bigQueryCopyPlan) findReferenced(source CopyTable, namespace, collection string) (string, *bigQueryMappedTable, bool) {
-	for key, mapped := range p.tables {
-		if mapped.table.Ref.Name() != collection {
-			continue
-		}
-		wantNamespace := namespace
-		if wantNamespace == "" {
-			wantNamespace = source.Ref.Schema()
-		}
-		if mapped.table.Ref.Schema() == wantNamespace {
-			return key, mapped, true
-		}
-	}
-	return "", nil, false
-}
-
-func mappedField(table *bigQueryMappedTable, sourceName string) (bigQueryMappedField, bool) {
-	for _, field := range table.fields {
-		if field.sourceName == sourceName {
-			return field, true
-		}
-	}
-	return bigQueryMappedField{}, false
 }
 
 func bigQueryIdentifier(source string, maxLength int) (string, error) {
@@ -543,9 +449,17 @@ func floatingSource(value any) (float64, bool) {
 	case float64:
 		return v, true
 	case int:
+		if int64(v) < -(1<<53) || int64(v) > 1<<53 {
+			return 0, false
+		}
 		return float64(v), true
 	case int64:
-		return float64(v), float64(int64(float64(v))) == float64(v)
+		// FLOAT64 carries at most 53 bits of integer precision. Refuse larger
+		// integers conservatively so conversion cannot silently change a value.
+		if v < -(1<<53) || v > 1<<53 {
+			return 0, false
+		}
+		return float64(v), true
 	case string:
 		f, err := strconv.ParseFloat(v, 64)
 		return f, err == nil

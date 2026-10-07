@@ -65,7 +65,8 @@ func TestPostgresToBigQueryProviderNeutralCopyPreservesRows(t *testing.T) {
 	server := newRealPgServer(t)
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	execAll(t, server.scanURL,
-		`INSERT INTO invoice (id, customer_id, total, status) VALUES (31, 1, 1234567890.12, 'paid')`,
+		`ALTER TABLE invoice ALTER COLUMN total TYPE numeric(30,8)`,
+		`INSERT INTO invoice (id, customer_id, total, status) VALUES (31, 1, 12345678901234567890.12345678, 'paid')`,
 		`INSERT INTO audit_log (at, message) VALUES ('2024-10-01 08:30:45', 'source row')`,
 		`CREATE TABLE pg_no_key (payload text, n integer)`,
 		`INSERT INTO pg_no_key VALUES ('duplicate', 7), ('duplicate', 7)`)
@@ -74,7 +75,7 @@ func TestPostgresToBigQueryProviderNeutralCopyPreservesRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	sourceRef = sourceRef.WithFlag("--from")
-	source, err := sourceRef.Open(context.Background())
+	source, err := sourceRef.OpenForCopy(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +102,7 @@ func TestPostgresToBigQueryProviderNeutralCopyPreservesRows(t *testing.T) {
 	}
 	var foundTotal bool
 	for _, row := range plan.ndjsonByTable["public__invoice"] {
-		if row["id"] == "31" && row["total"] == "1234567890.12" && row["status"] == "paid" {
+		if row["id"] == "31" && row["total"] == "12345678901234567890.12345678" && row["status"] == "paid" {
 			foundTotal = true
 		}
 	}

@@ -34,6 +34,21 @@ var ErrProjectMutationOutcomeUncertain = errors.New("project mutation outcome is
 // Cloud store adapters; no browser can supply the actor identity.
 type LocalProjectQueryAdapter struct{}
 
+// ProjectBranch is an observed local Git ref. Head is a commit OID, not a
+// query revision; SaveQuery still checks it against the selected current ref.
+type ProjectBranch struct {
+	Name string `json:"name"`
+	Head string `json:"head"`
+}
+
+// ProjectBranches is a read-only snapshot for selecting the current branch
+// and capturing its head before the first conditional query save.
+type ProjectBranches struct {
+	Branches      []ProjectBranch `json:"branches"`
+	DefaultBranch string          `json:"defaultBranch,omitempty"`
+	CurrentBranch string          `json:"currentBranch"`
+}
+
 var _ dto.ProjectQueryAdapter = LocalProjectQueryAdapter{}
 
 // loadLocalQueryRevision is the storage boundary used by both the read and
@@ -50,6 +65,10 @@ func requireLocalReadPrincipal() error {
 	}
 	return nil
 }
+
+// RequireLocalReadPrincipal lets HTTP reject an unauthenticated branch read
+// before even resolving its request-supplied project identifier.
+func RequireLocalReadPrincipal() error { return requireLocalReadPrincipal() }
 
 // SecureProjectMutationScope binds an operation to the fixed authenticated
 // serve principal. The request body has no actor field.
@@ -75,6 +94,65 @@ func (LocalProjectQueryAdapter) Capabilities(_ context.Context, ref dto.ProjectR
 		return dto.ProjectCapabilities{}, ErrUnknownStoreID
 	}
 	return dto.ProjectCapabilities{QueryRead: true, QuerySave: true}, nil
+}
+
+// LocalProjectBranches lists only local heads of the authenticated served
+// project. Branch switching and creation are separate capabilities and are
+// not implied by this read endpoint.
+func LocalProjectBranches(ctx context.Context, ref dto.ProjectRef) (*ProjectBranches, error) {
+	if err := requireLocalReadPrincipal(); err != nil {
+		return nil, err
+	}
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	if ref.StoreID != LocalStoreID {
+		return nil, ErrUnknownStoreID
+	}
+	projectDir, err := servedProjectDir(ref.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	state, err := localGitState(ctx, projectDir)
+	if err != nil {
+		return nil, err
+	}
+	lock := flock.New(filepath.Join(state.gitDir, "datatug-project-api.lock"))
+	locked, err := lock.TryLockContext(ctx, 25*time.Millisecond)
+	if err != nil {
+		return nil, err
+	}
+	if !locked {
+		return nil, context.DeadlineExceeded
+	}
+	defer func() { _ = lock.Unlock() }()
+	state, err = localGitState(ctx, projectDir)
+	if err != nil {
+		return nil, err
+	}
+	output, err := localGitOutput(ctx, state.root, "for-each-ref", "--count=1001", "--sort=refname", "--format=%(refname:short)%00%(objectname)", "refs/heads")
+	if err != nil {
+		return nil, err
+	}
+	branches := make([]ProjectBranch, 0)
+	if output != "" {
+		for _, line := range strings.Split(output, "\n") {
+			parts := strings.Split(line, "\x00")
+			if len(parts) != 2 || parts[0] == "" || parts[1] == "" || len(branches) == 1000 {
+				return nil, dto.ErrUnsupportedCapability
+			}
+			branches = append(branches, ProjectBranch{Name: parts[0], Head: parts[1]})
+		}
+	}
+	defaultBranch := ""
+	if remoteHead, err := localGitOutput(ctx, state.root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
+		defaultBranch = strings.TrimPrefix(remoteHead, "origin/")
+	}
+	afterRead, err := localGitState(ctx, projectDir)
+	if err != nil || afterRead.branch != state.branch || afterRead.head != state.head {
+		return nil, dto.ErrBranchHeadConflict
+	}
+	return &ProjectBranches{Branches: branches, DefaultBranch: defaultBranch, CurrentBranch: state.branch}, nil
 }
 
 func (LocalProjectQueryAdapter) GetQuery(ctx context.Context, request dto.GetQueryRequest) (*dto.GetQueryResponse, error) {

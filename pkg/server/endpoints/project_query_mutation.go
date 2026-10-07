@@ -73,6 +73,25 @@ func projectCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	writeProjectMutationJSON(w, r, http.StatusOK, result)
 }
 
+func projectBranchesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if err := api.RequireLocalReadPrincipal(); err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
+	ref, err := newProjectRef(r.URL.Query())
+	if err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
+	result, err := api.LocalProjectBranches(r.Context(), ref)
+	if err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
+	writeProjectMutationJSON(w, r, http.StatusOK, result)
+}
+
 func writeProjectMutationJSON(w http.ResponseWriter, r *http.Request, status int, value any) {
 	writeCORSOrigin(w, r)
 	w.Header().Set("Content-Type", "application/json")

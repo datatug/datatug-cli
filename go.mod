@@ -27,7 +27,7 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.93.0
-	github.com/dal-go/dalgo2bigquery v0.3.0
+	github.com/dal-go/dalgo2bigquery v0.3.1
 	github.com/dal-go/dalgo2http v0.2.1
 	github.com/dal-go/dalgo2postgres v0.9.1
 	github.com/dal-go/dalgo2sql v0.29.0

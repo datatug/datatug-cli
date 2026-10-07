@@ -96,7 +96,9 @@ func queriesRoutes(path string, router router, wrap wrapper, writeOnly bool, cap
 	if !writeOnly {
 		route(router, wrap, http.MethodGet, path+"/queries/all_queries", getQueriesHandler)
 		route(router, wrap, http.MethodGet, path+"/queries/get_query", getQueryHandler)
+		route(router, wrap, http.MethodGet, path+"/queries/query_revision", getProjectQueryRevisionHandler)
 	}
+	route(router, wrap, http.MethodPost, path+"/queries/save_query", requireWriteCapability(caps, saveProjectQueryHandler))
 	route(router, wrap, http.MethodPost, path+"/queries/create_query", requireWriteCapability(caps, createQuery))
 	route(router, wrap, http.MethodPut, path+"/queries/update_query", requireWriteCapability(caps, updateQuery))
 	route(router, wrap, http.MethodDelete, path+"/queries/delete_query", requireWriteCapability(caps, deleteQuery))
@@ -120,6 +122,7 @@ func projectsRoutes(path string, router router, wrap wrapper, writeOnly bool, ca
 		route(router, wrap, http.MethodGet, path+"/projects/projects_summary", getProjects)
 		route(router, wrap, http.MethodGet, path+"/projects/project_summary", getProjectSummary)
 		route(router, wrap, http.MethodGet, path+"/projects/project_full", getProjectFull)
+		route(router, wrap, http.MethodGet, path+"/projects/capabilities", projectCapabilitiesHandler)
 	}
 	projectEndpoints := ProjectAgentEndpoints{}
 	route(router, wrap, http.MethodPost, path+"/projects/create_project", requireWriteCapability(caps, projectEndpoints.createProject))

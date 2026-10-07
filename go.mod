@@ -34,10 +34,11 @@ require (
 	github.com/dal-go/dalgo2sqlite v0.4.0
 	github.com/dal-go/record v0.1.4
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.43.0
+	github.com/datatug/datatug-core v0.44.0
 	github.com/datatug/sql2csv v0.0.1
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/go-git/go-git/v5 v5.19.2
+	github.com/gofrs/flock v0.13.1
 	github.com/google/go-github/v92 v92.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
@@ -125,7 +126,6 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
-	github.com/gofrs/flock v0.13.1 // indirect
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect

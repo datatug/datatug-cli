@@ -132,33 +132,26 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 	if field, reason, found := querywriteQueryCredentialReason(&request.Query.QueryDef); found {
 		return nil, validation.NewBadRequestError(validation.NewErrBadRecordFieldValue(field, reason))
 	}
-	state, err := localGitState(ctx, projectDir)
+	digest, err := request.PayloadDigest()
 	if err != nil {
 		return nil, err
 	}
-	lock := flock.New(filepath.Join(state.gitDir, "datatug-project-api.lock"))
-	locked, err := lock.TryLockContext(ctx, 25*time.Millisecond)
+	receiptPath, err := localMutationReceiptPath(scope.ActorID, request.OperationID)
+	if err != nil {
+		return nil, err
+	}
+	// A receipt key is actor + operation ID, never store/project/branch. This
+	// makes an ID reused against a different authorized project a conflict
+	// rather than a fresh mutation. The per-key lock spans repositories.
+	opLock := flock.New(receiptPath + ".lock")
+	locked, err := opLock.TryLockContext(ctx, 25*time.Millisecond)
 	if err != nil {
 		return nil, err
 	}
 	if !locked {
 		return nil, context.DeadlineExceeded
 	}
-	defer func() { _ = lock.Unlock() }()
-	state, err = localGitState(ctx, projectDir)
-	if err != nil {
-		return nil, err
-	}
-	digest, err := request.PayloadDigest()
-	if err != nil {
-		return nil, err
-	}
-	receiptDir := filepath.Join(state.gitDir, "datatug-project-api", "operations")
-	if err := os.MkdirAll(receiptDir, 0o700); err != nil {
-		return nil, err
-	}
-	idHash := sha256.Sum256([]byte(request.OperationID))
-	receiptPath := filepath.Join(receiptDir, hex.EncodeToString(idHash[:])+".json")
+	defer func() { _ = opLock.Unlock() }()
 	var journal localQueryJournal
 	if data, readErr := os.ReadFile(receiptPath); readErr == nil {
 		if err := json.Unmarshal(data, &journal); err != nil {
@@ -174,6 +167,23 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		return &result, nil
 	} else if !errors.Is(readErr, os.ErrNotExist) {
 		return nil, readErr
+	}
+	state, err := localGitState(ctx, projectDir)
+	if err != nil {
+		return nil, err
+	}
+	lock := flock.New(filepath.Join(state.gitDir, "datatug-project-api.lock"))
+	locked, err = lock.TryLockContext(ctx, 25*time.Millisecond)
+	if err != nil {
+		return nil, err
+	}
+	if !locked {
+		return nil, context.DeadlineExceeded
+	}
+	defer func() { _ = lock.Unlock() }()
+	state, err = localGitState(ctx, projectDir)
+	if err != nil {
+		return nil, err
 	}
 	if request.Branch == "" || request.Branch != state.branch || request.ExpectedBranchHead != state.head {
 		return nil, dto.ErrBranchHeadConflict
@@ -253,6 +263,27 @@ type localQueryJournal struct {
 	Complete bool `json:"complete"`
 }
 
+// localMutationReceiptPath is shared by every project mutation kind so one
+// actor cannot reuse an operation ID for a branch, sync, commit or another
+// project and accidentally obtain a second result.
+func localMutationReceiptPath(actorID, operationID string) (string, error) {
+	root := os.Getenv("DATATUG_OPERATION_RECEIPTS_DIR")
+	if root == "" {
+		configDir, err := os.UserConfigDir()
+		if err != nil {
+			return "", err
+		}
+		root = filepath.Join(configDir, "datatug", "operation-receipts")
+	}
+	actorHash := sha256.Sum256([]byte(actorID))
+	idHash := sha256.Sum256([]byte(operationID))
+	dir := filepath.Join(root, hex.EncodeToString(actorHash[:]))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, hex.EncodeToString(idHash[:])+".json"), nil
+}
+
 func writeLocalQueryJournal(path string, record localQueryJournal) error {
 	data, err := json.Marshal(record)
 	if err != nil {
@@ -278,7 +309,17 @@ func writeLocalQueryJournal(path string, record localQueryJournal) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// The pending receipt must be durable before PutQuery can reach its
+	// commit point; syncing the directory makes the rename crash-stable.
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 type gitState struct{ root, gitDir, branch, head string }

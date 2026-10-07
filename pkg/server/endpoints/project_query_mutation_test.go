@@ -15,6 +15,8 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,6 +43,7 @@ func postLocalSave(t *testing.T, request dto.SaveQueryRequest) (*httptest.Respon
 }
 
 func TestLocalSaveQueryStagesPairAndRejectsStaleOrChangedReplay(t *testing.T) {
+	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
 	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
 	branch, head := runGit(t, projectDir, "symbolic-ref", "--short", "HEAD"), runGit(t, projectDir, "rev-parse", "HEAD")
 	request := saveLocalQueryRequest(scope.Project, branch, head)
@@ -89,6 +92,7 @@ func TestLocalSaveQueryStagesPairAndRejectsStaleOrChangedReplay(t *testing.T) {
 }
 
 func TestLocalSaveQueryReadOnlyActorCannotReplay(t *testing.T) {
+	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
 	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
 	branch, head := runGit(t, projectDir, "symbolic-ref", "--short", "HEAD"), runGit(t, projectDir, "rev-parse", "HEAD")
 	request := saveLocalQueryRequest(scope.Project, branch, head)
@@ -107,6 +111,7 @@ func TestLocalSaveQueryReadOnlyActorCannotReplay(t *testing.T) {
 }
 
 func TestLocalSaveQueryRejectsUnsupportedFederationMetadataWithoutWriting(t *testing.T) {
+	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
 	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
 	branch, head := runGit(t, projectDir, "symbolic-ref", "--short", "HEAD"), runGit(t, projectDir, "rev-parse", "HEAD")
 	request := saveLocalQueryRequest(scope.Project, branch, head)
@@ -124,6 +129,7 @@ func TestLocalSaveQueryRejectsUnsupportedFederationMetadataWithoutWriting(t *tes
 }
 
 func TestLocalQueryRevisionReturnsPersistedSourceAndBody(t *testing.T) {
+	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
 	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
 	branch, head := runGit(t, projectDir, "symbolic-ref", "--short", "HEAD"), runGit(t, projectDir, "rev-parse", "HEAD")
 	request := saveLocalQueryRequest(scope.Project, branch, head)
@@ -148,6 +154,7 @@ func TestLocalQueryRevisionReturnsPersistedSourceAndBody(t *testing.T) {
 }
 
 func TestLocalSaveQueryTypeChangeStagesOldSidecarRemoval(t *testing.T) {
+	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
 	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
 	branch, head := runGit(t, projectDir, "symbolic-ref", "--short", "HEAD"), runGit(t, projectDir, "rev-parse", "HEAD")
 	create := saveLocalQueryRequest(scope.Project, branch, head)
@@ -168,6 +175,7 @@ func TestLocalSaveQueryTypeChangeStagesOldSidecarRemoval(t *testing.T) {
 }
 
 func TestLocalSaveQueryRefusesForgedInternalActorScope(t *testing.T) {
+	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
 	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
 	branch, head := runGit(t, projectDir, "symbolic-ref", "--short", "HEAD"), runGit(t, projectDir, "rev-parse", "HEAD")
 	request := saveLocalQueryRequest(scope.Project, branch, head)
@@ -177,4 +185,27 @@ func TestLocalSaveQueryRefusesForgedInternalActorScope(t *testing.T) {
 	_, err = (api.LocalProjectQueryAdapter{}).SaveQuery(context.Background(), actorScope, request)
 	require.Error(t, err)
 	require.NoFileExists(t, filepath.Join(projectDir, "queries", "customer.query.json"))
+}
+
+func TestLocalSaveQueryOperationIDCannotMoveToAnotherServedRepository(t *testing.T) {
+	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
+	paths := map[string]string{"project-one": t.TempDir(), "project-two": t.TempDir()}
+	for _, path := range paths {
+		require.NoError(t, os.WriteFile(filepath.Join(path, "README.md"), []byte("fixture"), 0o600))
+		gitInit(t, path)
+	}
+	session, err := secureread.NewSession(secureread.SessionOptions{As: "admin", NoPolicies: true})
+	require.NoError(t, err)
+	api.ConfigureSecureSession(session, paths, api.Capabilities{AllowWrites: true})
+	storage.NewDatatugStore = func(string) (storage.Store, error) { return filestore.NewStore("files", paths) }
+	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
+	firstDir, secondDir := paths["project-one"], paths["project-two"]
+	first := saveLocalQueryRequest("project-one", runGit(t, firstDir, "symbolic-ref", "--short", "HEAD"), runGit(t, firstDir, "rev-parse", "HEAD"))
+	w, _ := postLocalSave(t, first)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	second := saveLocalQueryRequest("project-two", runGit(t, secondDir, "symbolic-ref", "--short", "HEAD"), runGit(t, secondDir, "rev-parse", "HEAD"))
+	w, _ = postLocalSave(t, second)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "OPERATION_CONFLICT")
+	require.NoFileExists(t, filepath.Join(secondDir, "queries", "customer.query.json"))
 }

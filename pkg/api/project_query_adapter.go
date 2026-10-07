@@ -255,11 +255,12 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		if journal.QueryID != queryID || journal.Result.Revision == "" || journal.Result.BranchHead != state.head || journal.Result.Query.Type != request.Query.Type || len(journal.MetadataBytes) == 0 {
 			return nil, ErrProjectMutationOutcomeUncertain
 		}
+		previousUnchanged := request.IfNoneMatch && current == nil || request.IfMatch != "" && current != nil && string(current.Revision) == journal.PreviousRevision
 		if current != nil && string(current.Revision) == journal.Result.Revision {
 			// Core's revision hashes the exact JSON and body sidecar bytes, so
 			// this is the intended pair already committed before interruption.
 			shouldPut = false
-		} else if !(request.IfNoneMatch && current == nil || request.IfMatch != "" && current != nil && string(current.Revision) == journal.PreviousRevision) {
+		} else if !previousUnchanged {
 			// Foreign bytes replaced the previous or intended pair. Do not
 			// overwrite them or pretend the pending operation completed.
 			return nil, ErrProjectMutationOutcomeUncertain

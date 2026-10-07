@@ -159,7 +159,18 @@ func TestPostgresToBigQueryProviderNeutralCopyPreservesRows(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		first, second := records["1"], records["2"]
+		var first, second map[string]any
+		for _, record := range records {
+			switch fmt.Sprint(record["id"]) {
+			case "1":
+				first = record
+			case "2":
+				second = record
+			}
+		}
+		if first == nil || second == nil {
+			t.Fatalf("native export is missing BYTEA source rows: %#v", records)
+		}
 		if first["payload"] != "AP8AgA==" || first["nullable_payload"] != nil || first["empty_payload"] != "" || first["total"] != "12345678901234567890.12345678" {
 			t.Fatalf("native export changed non-UTF8/empty BYTEA or NUMERIC: %#v", first)
 		}

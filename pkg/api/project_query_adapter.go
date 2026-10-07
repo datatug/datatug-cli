@@ -15,8 +15,10 @@ import (
 	"time"
 
 	"github.com/dal-go/dalgo/access"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/gofrs/flock"
 	"github.com/strongo/validation"
 )
@@ -33,6 +35,21 @@ type LocalProjectQueryAdapter struct{}
 
 var _ dto.ProjectQueryAdapter = LocalProjectQueryAdapter{}
 
+// loadLocalQueryRevision is the storage boundary used by both the read and
+// write paths. A test replaces it to switch Git branches during a read.
+var loadLocalQueryRevision = func(ctx context.Context, store datatug.RevisionedQueriesStore, id string) (*datatug.StoredQuery, error) {
+	return store.LoadQueryRevision(ctx, id)
+}
+
+func requireLocalReadPrincipal() error {
+	secureMu.RLock()
+	defer secureMu.RUnlock()
+	if securityContextID == "" || secureSession.Principal == nil || secureSession.Principal.ID == nil {
+		return secureread.ErrAccessDenied
+	}
+	return nil
+}
+
 // SecureProjectMutationScope binds an operation to the fixed authenticated
 // serve principal. The request body has no actor field.
 func SecureProjectMutationScope(ref dto.ProjectRef, branch, kind string) (dto.OperationScope, error) {
@@ -47,6 +64,9 @@ func SecureProjectMutationScope(ref dto.ProjectRef, branch, kind string) (dto.Op
 }
 
 func (LocalProjectQueryAdapter) Capabilities(_ context.Context, ref dto.ProjectRef) (dto.ProjectCapabilities, error) {
+	if err := requireLocalReadPrincipal(); err != nil {
+		return dto.ProjectCapabilities{}, err
+	}
 	if _, err := servedProjectDir(ref.ProjectID); err != nil {
 		return dto.ProjectCapabilities{}, err
 	}
@@ -57,6 +77,9 @@ func (LocalProjectQueryAdapter) Capabilities(_ context.Context, ref dto.ProjectR
 }
 
 func (LocalProjectQueryAdapter) GetQuery(ctx context.Context, request dto.GetQueryRequest) (*dto.GetQueryResponse, error) {
+	if err := requireLocalReadPrincipal(); err != nil {
+		return nil, err
+	}
 	if err := request.ProjectRef.Validate(); err != nil {
 		return nil, err
 	}
@@ -74,6 +97,19 @@ func (LocalProjectQueryAdapter) GetQuery(ctx context.Context, request dto.GetQue
 	if err != nil {
 		return nil, err
 	}
+	lock := flock.New(filepath.Join(state.gitDir, "datatug-project-api.lock"))
+	locked, err := lock.TryLockContext(ctx, 25*time.Millisecond)
+	if err != nil {
+		return nil, err
+	}
+	if !locked {
+		return nil, context.DeadlineExceeded
+	}
+	defer func() { _ = lock.Unlock() }()
+	state, err = localGitState(ctx, projectDir)
+	if err != nil {
+		return nil, err
+	}
 	if request.Branch == "" || request.Branch != state.branch {
 		return nil, dto.ErrBranchHeadConflict
 	}
@@ -85,9 +121,13 @@ func (LocalProjectQueryAdapter) GetQuery(ctx context.Context, request dto.GetQue
 	if !ok {
 		return nil, dto.ErrUnsupportedCapability
 	}
-	stored, err := revisioned.LoadQueryRevision(ctx, request.ID)
+	stored, err := loadLocalQueryRevision(ctx, revisioned, request.ID)
 	if err != nil {
 		return nil, err
+	}
+	afterRead, err := localGitState(ctx, projectDir)
+	if err != nil || afterRead.branch != state.branch || afterRead.head != state.head {
+		return nil, dto.ErrBranchHeadConflict
 	}
 	query := stored.Query
 	if query.FolderPath == "" {
@@ -153,6 +193,7 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 	}
 	defer func() { _ = opLock.Unlock() }()
 	var journal localQueryJournal
+	pending := false
 	if data, readErr := os.ReadFile(receiptPath); readErr == nil {
 		if err := json.Unmarshal(data, &journal); err != nil {
 			return nil, ErrProjectMutationOutcomeUncertain
@@ -160,11 +201,11 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		if err := journal.OperationReceipt.MatchSaveRetry(scope, request); err != nil {
 			return nil, err
 		}
-		if !journal.Complete {
-			return nil, ErrProjectMutationOutcomeUncertain
+		if journal.Complete {
+			result := journal.Result
+			return &result, nil
 		}
-		result := journal.Result
-		return &result, nil
+		pending = true
 	} else if !errors.Is(readErr, os.ErrNotExist) {
 		return nil, readErr
 	}
@@ -186,6 +227,9 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		return nil, err
 	}
 	if request.Branch == "" || request.Branch != state.branch || request.ExpectedBranchHead != state.head {
+		if pending {
+			return nil, ErrProjectMutationOutcomeUncertain
+		}
 		return nil, dto.ErrBranchHeadConflict
 	}
 	store, err := projectStoreForID(request.StoreID, request.ProjectID)
@@ -201,66 +245,118 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	if request.IfNoneMatch && current != nil || request.IfMatch != "" && (current == nil || string(current.Revision) != request.IfMatch) {
-		return nil, dto.ErrQueryRevisionConflict
-	}
-	if request.IfNoneMatch && request.Query.Capture != nil {
-		return nil, clientCaptureRefusal("save_query cannot create capture provenance")
-	}
-	if current != nil && !reflect.DeepEqual(current.Query.Capture, request.Query.Capture) {
-		return nil, clientCaptureRefusal("save_query cannot alter capture provenance")
-	}
-	journal = localQueryJournal{OperationReceipt: dto.OperationReceipt{Scope: scope, OperationID: request.OperationID, PayloadDigest: digest}}
-	if err := writeLocalQueryJournal(receiptPath, journal); err != nil {
-		return nil, err
-	}
 	query := request.Query
 	if query.FolderPath == datatug.RootSharedFolderName {
 		query.FolderPath = ""
 	}
-	condition := datatug.QueryWriteCondition{IfNoneMatch: request.IfNoneMatch, IfMatch: datatug.QueryRevision(request.IfMatch)}
-	stored, err := revisioned.PutQuery(ctx, &query, condition)
-	if err != nil {
-		var conflict *datatug.QueryRevisionConflictError
-		if errors.As(err, &conflict) {
-			_ = os.Remove(receiptPath)
+	shouldPut := true
+	if pending {
+		if journal.QueryID != queryID || journal.Result.Revision == "" || journal.Result.BranchHead != state.head || journal.Result.Query.Type != request.Query.Type {
+			return nil, ErrProjectMutationOutcomeUncertain
+		}
+		if current != nil && string(current.Revision) == journal.Result.Revision {
+			// Core's revision hashes the exact JSON and body sidecar bytes, so
+			// this is the intended pair already committed before interruption.
+			shouldPut = false
+		} else if !(request.IfNoneMatch && current == nil || request.IfMatch != "" && current != nil && string(current.Revision) == journal.PreviousRevision) {
+			// Foreign bytes replaced the previous or intended pair. Do not
+			// overwrite them or pretend the pending operation completed.
+			return nil, ErrProjectMutationOutcomeUncertain
+		}
+	} else {
+		if request.IfNoneMatch && current != nil || request.IfMatch != "" && (current == nil || string(current.Revision) != request.IfMatch) {
 			return nil, dto.ErrQueryRevisionConflict
 		}
-		if validation.IsBadRecordError(err) || datatug.IsInvalidQueryLocation(err) {
-			_ = os.Remove(receiptPath)
-			return nil, validation.NewBadRequestError(err)
+		if request.IfNoneMatch && request.Query.Capture != nil {
+			return nil, clientCaptureRefusal("save_query cannot create capture provenance")
 		}
-		// A store error can follow its logical commit point. Retain the
-		// pending receipt so a retry cannot silently write a second time.
-		return nil, fmt.Errorf("query save may have committed: %w", ErrProjectMutationOutcomeUncertain)
+		if current != nil && !reflect.DeepEqual(current.Query.Capture, request.Query.Capture) {
+			return nil, clientCaptureRefusal("save_query cannot alter capture provenance")
+		}
+		previewRevision, err := previewLocalQueryRevision(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		journal = localQueryJournal{
+			OperationReceipt: dto.OperationReceipt{
+				Scope: scope, OperationID: request.OperationID, PayloadDigest: digest,
+				Result: dto.SaveQueryResponse{Query: request.Query, Revision: string(previewRevision), BranchHead: state.head},
+			},
+			QueryID: queryID,
+		}
+		if current != nil {
+			journal.PreviousRevision = string(current.Revision)
+			journal.OldType = current.Query.Type
+		}
+		if err := writeLocalQueryJournal(receiptPath, journal); err != nil {
+			return nil, err
+		}
 	}
-	oldType := datatug.QueryType("")
-	if current != nil {
-		oldType = current.Query.Type
+	if shouldPut {
+		condition := datatug.QueryWriteCondition{IfNoneMatch: request.IfNoneMatch, IfMatch: datatug.QueryRevision(request.IfMatch)}
+		stored, err := revisioned.PutQuery(ctx, &query, condition)
+		if err != nil {
+			var conflict *datatug.QueryRevisionConflictError
+			if errors.As(err, &conflict) && !pending {
+				_ = os.Remove(receiptPath)
+				return nil, dto.ErrQueryRevisionConflict
+			}
+			if (validation.IsBadRecordError(err) || datatug.IsInvalidQueryLocation(err)) && !pending {
+				_ = os.Remove(receiptPath)
+				return nil, validation.NewBadRequestError(err)
+			}
+			return nil, fmt.Errorf("query save may have committed: %w", ErrProjectMutationOutcomeUncertain)
+		}
+		if string(stored.Revision) != journal.Result.Revision {
+			return nil, ErrProjectMutationOutcomeUncertain
+		}
 	}
 	beforeStage, err := localGitState(ctx, projectDir)
 	if err != nil || beforeStage.branch != state.branch || beforeStage.head != state.head {
 		return nil, ErrProjectMutationOutcomeUncertain
 	}
-	if err := stageLocalQueryPair(ctx, state.root, projectDir, queryID, query.Type, oldType); err != nil {
+	if err := stageLocalQueryPair(ctx, state.root, projectDir, queryID, query.Type, journal.OldType); err != nil {
 		return nil, fmt.Errorf("query saved but staging failed: %w", ErrProjectMutationOutcomeUncertain)
 	}
 	afterStage, err := localGitState(ctx, projectDir)
 	if err != nil || afterStage.branch != state.branch || afterStage.head != state.head {
 		return nil, ErrProjectMutationOutcomeUncertain
 	}
-	result := dto.SaveQueryResponse{Query: request.Query, Revision: string(stored.Revision), BranchHead: state.head}
-	journal.Result = result
 	journal.Complete = true
 	if err := writeLocalQueryJournal(receiptPath, journal); err != nil {
 		return nil, fmt.Errorf("query saved but receipt failed: %w", ErrProjectMutationOutcomeUncertain)
 	}
+	result := journal.Result
 	return &result, nil
 }
 
 type localQueryJournal struct {
 	dto.OperationReceipt
-	Complete bool `json:"complete"`
+	Complete         bool              `json:"complete"`
+	QueryID          string            `json:"queryId"`
+	PreviousRevision string            `json:"previousRevision,omitempty"`
+	OldType          datatug.QueryType `json:"oldType,omitempty"`
+}
+
+// previewLocalQueryRevision runs the exact Core serializer in a private
+// temporary filestore before the durable intent is written. The resulting
+// revision identifies the exact metadata and body bytes a retry must find;
+// equality of decoded QueryDef values alone would not prove those bytes.
+func previewLocalQueryRevision(ctx context.Context, query datatug.QueryDefWithFolderPath) (datatug.QueryRevision, error) {
+	dir, err := os.MkdirTemp("", "datatug-query-preview-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(dir)
+	store, ok := filestore.NewProjectStore("preview", dir).(datatug.RevisionedQueriesStore)
+	if !ok {
+		return "", dto.ErrUnsupportedCapability
+	}
+	stored, err := store.PutQuery(ctx, &query, datatug.QueryWriteCondition{IfNoneMatch: true})
+	if err != nil {
+		return "", err
+	}
+	return stored.Revision, nil
 }
 
 // localMutationReceiptPath is shared by every project mutation kind so one

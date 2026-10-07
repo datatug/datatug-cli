@@ -250,12 +250,15 @@ func TestProjectStores_AreNotAskedForOutsidePkgAPI(t *testing.T) {
 
 // The file store opens a project folder by constructors of its own (filestore.NewProjectStore,
 // NewSingleProjectStore and NewStore): a way to a project store that does not go through the
-// helper. This package calls one in two places, the scan, which is given a folder and not the ID
-// of a project that is served, and the server packages call none (pkg/server keeps its one
+// helper. This package calls one in the scan, which is given a folder and not the ID
+// of a project that is served, and once in a private temporary preview store
+// used only to compute Core's exact query-pair revision before journaling a
+// local mutation. Neither constructor opens a served project. The server packages call none (pkg/server keeps its one
 // factory of stores in a variable, and the walk does not count a variable as a call).
 func TestFileStoreConstructors_AreCalledByTheScanOnly(t *testing.T) {
 	constructors := []string{"NewProjectStore", "NewSingleProjectStore", "NewStore"}
 	want := []string{
+		"project_query_adapter.go: previewLocalQueryRevision calls NewProjectStore",
 		"scan_driver.go: recordedCatalogDriver calls NewProjectStore",
 		"scan_names.go: recordedDbModel calls NewProjectStore",
 	}

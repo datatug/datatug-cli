@@ -153,6 +153,20 @@ func TestLocalQueryRevisionReturnsPersistedSourceAndBody(t *testing.T) {
 	require.False(t, caps.Branches || caps.BranchMerge || caps.PullCurrent || caps.PushCurrent)
 }
 
+func TestLocalQueryReadRoutesRefuseMissingServingPrincipal(t *testing.T) {
+	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
+	branch := runGit(t, projectDir, "symbolic-ref", "--short", "HEAD")
+	api.ConfigureSecureSession(secureread.Session{}, map[string]string{scope.Project: projectDir}, api.Capabilities{})
+	read := httptest.NewRecorder()
+	getProjectQueryRevisionHandler(read, httptest.NewRequest(http.MethodGet,
+		"/datatug/queries/query_revision?storage=local&project="+scope.Project+"&id=customer&branch="+branch, nil))
+	require.Equal(t, http.StatusForbidden, read.Code, read.Body.String())
+	capabilities := httptest.NewRecorder()
+	projectCapabilitiesHandler(capabilities, httptest.NewRequest(http.MethodGet,
+		"/datatug/projects/capabilities?storage=local&project="+scope.Project, nil))
+	require.Equal(t, http.StatusForbidden, capabilities.Code, capabilities.Body.String())
+}
+
 func TestLocalSaveQueryTypeChangeStagesOldSidecarRemoval(t *testing.T) {
 	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
 	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
@@ -208,4 +222,66 @@ func TestLocalSaveQueryOperationIDCannotMoveToAnotherServedRepository(t *testing
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "OPERATION_CONFLICT")
 	require.NoFileExists(t, filepath.Join(secondDir, "queries", "customer.query.json"))
+}
+
+func TestLocalSaveQueryRetryRecoversPairWrittenBeforeStaging(t *testing.T) {
+	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
+	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
+	branch, head := runGit(t, projectDir, "symbolic-ref", "--short", "HEAD"), runGit(t, projectDir, "rev-parse", "HEAD")
+	request := saveLocalQueryRequest(scope.Project, branch, head)
+	indexLock := filepath.Join(runGit(t, projectDir, "rev-parse", "--absolute-git-dir"), "index.lock")
+	require.NoError(t, os.WriteFile(indexLock, []byte("held by another Git writer"), 0o600))
+	w, _ := postLocalSave(t, request)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "OUTCOME_UNCERTAIN")
+	// Core committed the exact pair; only Git staging was interrupted.
+	require.FileExists(t, filepath.Join(projectDir, "queries", "customer.query.json"))
+	require.FileExists(t, filepath.Join(projectDir, "queries", "customer.query.dtql"))
+	require.NoError(t, os.Remove(indexLock))
+	w, recovered := postLocalSave(t, request)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotEmpty(t, recovered.Revision)
+	require.Equal(t, request.Query.Text, recovered.Query.Text)
+	require.Contains(t, runGit(t, projectDir, "diff", "--cached", "--name-only"), "queries/customer.query.dtql")
+	w, replay := postLocalSave(t, request)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, recovered.Revision, replay.Revision)
+}
+
+func TestLocalSaveQueryRetryRefusesForeignBytesAfterInterruptedStaging(t *testing.T) {
+	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
+	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
+	branch, head := runGit(t, projectDir, "symbolic-ref", "--short", "HEAD"), runGit(t, projectDir, "rev-parse", "HEAD")
+	request := saveLocalQueryRequest(scope.Project, branch, head)
+	indexLock := filepath.Join(runGit(t, projectDir, "rev-parse", "--absolute-git-dir"), "index.lock")
+	require.NoError(t, os.WriteFile(indexLock, []byte("held"), 0o600))
+	w, _ := postLocalSave(t, request)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	require.NoError(t, os.Remove(indexLock))
+	bodyPath := filepath.Join(projectDir, "queries", "customer.query.dtql")
+	const foreign = "SELECT FirstName FROM Customer"
+	require.NoError(t, os.WriteFile(bodyPath, []byte(foreign), 0o600))
+	w, _ = postLocalSave(t, request)
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "OUTCOME_UNCERTAIN")
+	body, err := os.ReadFile(bodyPath)
+	require.NoError(t, err)
+	require.Equal(t, foreign, string(body))
+}
+
+func TestLocalSaveQueryRetryInFolder(t *testing.T) {
+	t.Setenv("DATATUG_OPERATION_RECEIPTS_DIR", t.TempDir())
+	scope, projectDir := realCaptureSetup(t, "admin", []string{"admin"})
+	branch, head := runGit(t, projectDir, "symbolic-ref", "--short", "HEAD"), runGit(t, projectDir, "rev-parse", "HEAD")
+	require.NoError(t, os.MkdirAll(filepath.Join(projectDir, "queries", "invoices"), 0o700))
+	request := saveLocalQueryRequest(scope.Project, branch, head)
+	request.Query.FolderPath = "invoices"
+	request.OperationID = "save-folder-query"
+	w, created := postLocalSave(t, request)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotEmpty(t, created.Revision)
+	require.FileExists(t, filepath.Join(projectDir, "queries", "invoices", "customer.query.json"))
+	w, replay := postLocalSave(t, request)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, created.Revision, replay.Revision)
 }

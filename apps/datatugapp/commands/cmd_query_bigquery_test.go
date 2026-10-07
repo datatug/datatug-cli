@@ -191,7 +191,7 @@ func (h *cliBQHarness) transport(r *http.Request) (*http.Response, error) {
 func (h *cliBQHarness) pilotTransport(r *http.Request) (*http.Response, error) {
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/datasets/world_bank_wdi"):
-		return cliBQResponse(`{"datasetReference":{"projectId":"bigquery-public-data","datasetId":"world_bank_wdi"},"location":"US"}`), nil
+		return cliBQResponse(`{"datasetReference":{"projectId":"bigquery-public-data","datasetId":"world_bank_wdi"},"location":"US","type":"DEFAULT"}`), nil
 	case strings.HasSuffix(r.URL.Path, "/tables/country_summary"):
 		return cliBQResponse(`{"tableReference":{"projectId":"bigquery-public-data","datasetId":"world_bank_wdi","tableId":"country_summary"},"type":"TABLE","schema":{"fields":[{"name":"country_code","type":"STRING","mode":"NULLABLE"},{"name":"short_name","type":"STRING","mode":"NULLABLE"}]}}`), nil
 	case r.Method == "POST":

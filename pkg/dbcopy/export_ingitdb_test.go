@@ -285,7 +285,7 @@ func TestExportInGitDB_RejectsUnrepresentableSQLiteAffinity(t *testing.T) {
 	}
 }
 
-func TestExportInGitDB_RejectsUnsupportedSQLiteBooleanBeforePublishing(t *testing.T) {
+func TestExportInGitDB_RejectsInvalidSQLiteBooleanBeforePublishing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "source.db")
 	raw, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -299,14 +299,17 @@ func TestExportInGitDB_RejectsUnsupportedSQLiteBooleanBeforePublishing(t *testin
 	if _, err := raw.Exec(`CREATE TABLE flags (id INTEGER PRIMARY KEY, enabled BOOLEAN)`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := raw.Exec(`INSERT INTO flags VALUES (1, 2)`); err != nil {
+		t.Fatal(err)
+	}
 	source, err := dalgo2sqlite.NewDatabase(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	destination := filepath.Join(t.TempDir(), "native")
 	_, err = ExportInGitDB(context.Background(), source, destination)
-	if err == nil || !strings.Contains(err.Error(), "enabled") {
-		t.Fatalf("unsupported BOOLEAN was accepted or poorly diagnosed: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "BOOLEAN") {
+		t.Fatalf("invalid BOOLEAN value was accepted or poorly diagnosed: %v", err)
 	}
 	if _, err := os.Stat(destination); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("partial destination published: %v", err)

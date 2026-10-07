@@ -27,14 +27,14 @@ require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.93.0
-	github.com/dal-go/dalgo2bigquery v0.2.0
+	github.com/dal-go/dalgo2bigquery v0.3.0
 	github.com/dal-go/dalgo2http v0.2.1
-	github.com/dal-go/dalgo2postgres v0.8.0
+	github.com/dal-go/dalgo2postgres v0.9.1
 	github.com/dal-go/dalgo2sql v0.29.0
 	github.com/dal-go/dalgo2sqlite v0.4.0
 	github.com/dal-go/record v0.1.4
 	github.com/datatug/cliformat v0.0.3
-	github.com/datatug/datatug-core v0.44.0
+	github.com/datatug/datatug-core v0.45.0
 	github.com/datatug/sql2csv v0.0.1
 	github.com/denisenkom/go-mssqldb v0.12.3
 	github.com/go-git/go-git/v5 v5.19.2

@@ -1,12 +1,16 @@
 package commands
 
 import (
+	"context"
 	"database/sql"
 	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 
+	"github.com/datatug/datatug-cli/pkg/dbcompare"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -97,6 +101,49 @@ func TestPostgresQueryJourneyOrdersNullsByDALgosRule(t *testing.T) {
 	descending := "from: {name: ranked}\norderBy:\n  - field: score\n    desc: true\n  - field: id\nlimit: 3\n"
 	assert.Equal(t, []int{2, 4, 3}, realPgIDs(t, ascending), "ascending with a limit: the NULLs, then the smallest")
 	assert.Equal(t, []int{1, 5, 3}, realPgIDs(t, descending), "descending with a limit: the largest, the NULLs last")
+}
+
+func TestPostgresDatabaseCompareJourneyPreservesExactValuesAndChanges(t *testing.T) {
+	server := newRealPgServer(t)
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	execAll(t, server.scanURL,
+		`CREATE SCHEMA compare_probe`,
+		`CREATE TABLE compare_probe.items (id bigint PRIMARY KEY, amount numeric(38,0), note text, payload bytea, occurred timestamp, active boolean)`,
+		`INSERT INTO compare_probe.items VALUES
+			(1, 1234567890123456789, NULL, decode('00ff00', 'hex'), TIMESTAMP '2026-10-07 12:30:00', TRUE),
+			(2, 0, '', decode('', 'hex'), NULL, FALSE)`,
+		`UPDATE compare_probe.items SET amount = 1 WHERE id = 2`)
+
+	sqlitePath := filepath.Join(t.TempDir(), "compare.sqlite")
+	sqliteDB, err := sql.Open("sqlite3", sqlitePath)
+	require.NoError(t, err)
+	_, err = sqliteDB.Exec(`CREATE TABLE items (id INTEGER PRIMARY KEY, amount NUMERIC(38,0), note TEXT, payload BLOB, occurred TIMESTAMP, active BOOLEAN);
+		INSERT INTO items VALUES (1, 1234567890123456789, NULL, X'00FF00', '2026-10-07 12:30:00', 1);
+		INSERT INTO items VALUES (2, 0, '', X'', NULL, 0);`)
+	require.NoError(t, err)
+	require.NoError(t, sqliteDB.Close())
+	sqliteRef, err := dbcopy.Parse("sqlite://" + sqlitePath)
+	require.NoError(t, err)
+	sqlite, err := sqliteRef.OpenForCopy(context.Background(), "")
+	require.NoError(t, err)
+	defer closeCompareDB(sqlite)
+	ref, err := dbcopy.Parse("env:" + realPgScanVar)
+	require.NoError(t, err)
+	postgres, err := ref.OpenForCopy(context.Background(), "compare_probe")
+	require.NoError(t, err)
+	defer closeCompareDB(postgres)
+
+	report, err := dbcompare.Compare(context.Background(), "dev/sqlite", sqlite, "QA/postgres", postgres, dbcompare.Options{Details: true, DetailLimit: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), report.Summary.Unchanged)
+	require.Equal(t, int64(1), report.Summary.Changed)
+	require.Zero(t, report.Summary.Added+report.Summary.Removed)
+	require.Len(t, report.Relations, 1)
+	require.Equal(t, int64(2), report.Relations[0].LeftRows)
+	require.Equal(t, int64(2), report.Relations[0].RightRows)
+	require.Len(t, report.Relations[0].Details, 1)
+	require.Equal(t, "changed", report.Relations[0].Details[0].Status)
+	require.Contains(t, report.Relations[0].Details[0].Fields, dbcompare.FieldDiff{Name: "amount", Before: "0", After: "1"})
 }
 
 // The checks above are what say that the rows came in DALgo's order and not PostgreSQL's, and they run against a

@@ -106,7 +106,7 @@ Environment prod
         Total decimal
 ```
 
-What else works, and what does not yet, is in [Supported databases](#supported-databases).
+What else works, and what does not yet, is in [Supported databases](#supported-databases). To compare complete database contents across project environments, see [Compare project databases](docs/database-compare.md).
 
 ![datatug-cli-employees-2.png](docs/screenshots/datatug-cli-employees-2.png)
 

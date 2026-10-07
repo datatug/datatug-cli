@@ -203,6 +203,14 @@ func (s *sharedPostgres) ListSchemaViews(ctx context.Context, schema string) ([]
 	return guarded[[]dal.CollectionRef](s.hint)(s.Database.ListSchemaViews(ctx, schema))
 }
 
+func (s *sharedPostgres) ListSourceViews(ctx context.Context) ([]dbschema.SourceViewDef, error) {
+	reader, ok := any(s.Database).(dbschema.SourceViewReader)
+	if !ok {
+		return nil, dal.ErrNotSupported
+	}
+	return guarded[[]dbschema.SourceViewDef](s.hint)(reader.ListSourceViews(ctx))
+}
+
 func (s *sharedPostgres) DescribeCollection(ctx context.Context, ref *dal.CollectionRef) (*dbschema.CollectionDef, error) {
 	return guarded[*dbschema.CollectionDef](s.hint)(s.Database.DescribeCollection(ctx, ref))
 }

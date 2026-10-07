@@ -8,12 +8,15 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	bigquery "github.com/dal-go/dalgo2bigquery"
+	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/bigqueryread"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
@@ -56,6 +59,7 @@ type cliBQHarness struct {
 	paid, requests, pageGets, cancels int
 	failure                           string
 	lastSQL                           string
+	pilot                             bool
 }
 
 func newCliBQHarness(t *testing.T) *cliBQHarness {
@@ -110,10 +114,19 @@ scopes:
 	}
 }
 func (h *cliBQHarness) execute(op string, args ...string) ([]byte, error) {
+	out, _, err := h.executeWithStderr(op, args...)
+	return out, err
+}
+func (h *cliBQHarness) executeWithStderr(op string, args ...string) ([]byte, []byte, error) {
 	h.t.Helper()
 	root := &cobra.Command{Use: "datatug", SilenceErrors: true, SilenceUsage: true}
 	root.AddCommand(queryCommand())
-	all := []string{"query", "bigquery", op, "--file", h.file, "--ledger", h.dir, "--auth", "adc", "--policy", h.policy, "--policies-dir", h.dir + "/policies", "--as", "alice", "--var", "min=\"10\""}
+	all := []string{"query", "bigquery", op, "--file", h.file, "--ledger", h.dir, "--auth", "adc"}
+	if h.pilot {
+		all = append(all, "--operator-pilot", "--no-policies")
+	} else {
+		all = append(all, "--policy", h.policy, "--policies-dir", h.dir+"/policies", "--as", "alice", "--var", "min=\"10\"")
+	}
 	all = append(all, args...)
 	root.SetArgs(all)
 	var out, stderr bytes.Buffer
@@ -121,12 +134,15 @@ func (h *cliBQHarness) execute(op string, args ...string) ([]byte, error) {
 	root.SetErr(&stderr)
 	root.SetContext(context.Background())
 	e := root.Execute()
-	return out.Bytes(), e
+	return out.Bytes(), stderr.Bytes(), e
 }
 func (h *cliBQHarness) transport(r *http.Request) (*http.Response, error) {
 	h.requests++
 	if r.URL.Host != "bigquery.googleapis.com" {
 		h.t.Fatal(r.URL)
+	}
+	if h.pilot {
+		return h.pilotTransport(r)
 	}
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/datasets/ds"):
@@ -172,6 +188,40 @@ func (h *cliBQHarness) transport(r *http.Request) (*http.Response, error) {
 		return nil, errors.New("unexpected")
 	}
 }
+func (h *cliBQHarness) pilotTransport(r *http.Request) (*http.Response, error) {
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/datasets/world_bank_wdi"):
+		return cliBQResponse(`{"datasetReference":{"projectId":"bigquery-public-data","datasetId":"world_bank_wdi"},"location":"US"}`), nil
+	case strings.HasSuffix(r.URL.Path, "/tables/country_summary"):
+		return cliBQResponse(`{"tableReference":{"projectId":"bigquery-public-data","datasetId":"world_bank_wdi","tableId":"country_summary"},"type":"TABLE","schema":{"fields":[{"name":"country_code","type":"STRING","mode":"NULLABLE"},{"name":"short_name","type":"STRING","mode":"NULLABLE"}]}}`), nil
+	case r.Method == "POST":
+		var m map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+			h.t.Fatal(err)
+		}
+		if m["dryRun"] == true {
+			return cliBQResponse(`{"totalBytesProcessed":"100"}`), nil
+		}
+		h.paid++
+		if m["maximumBytesBilled"] != pilotCap || !strings.Contains(r.URL.Path, "/projects/demodb-dev/") {
+			h.t.Fatal(m, r.URL)
+		}
+		if h.failure == "ambiguous" {
+			return nil, io.ErrUnexpectedEOF
+		}
+		if h.failure == "malformed" {
+			return cliBQResponse(`{"jobReference":{"projectId":"demodb-dev","jobId":"j","location":"US"},"jobComplete":true,"schema":{"fields":[{"name":"country_code","type":"STRING","mode":"NULLABLE"},{"name":"short_name","type":"STRING","mode":"NULLABLE"}]},"rows":[{"f":[{},{}]}]}`), nil
+		}
+		return cliBQResponse(`{"jobReference":{"projectId":"demodb-dev","jobId":"j","location":"US"},"jobComplete":true,"schema":{"fields":[{"name":"country_code","type":"STRING","mode":"NULLABLE"},{"name":"short_name","type":"STRING","mode":"NULLABLE"}]},"rows":[{"f":[{"v":"SECRET_ROW_SENTINEL"},{"v":"SECRET_NAME_SENTINEL"}]}],"pageToken":"next"}`), nil
+	case strings.Contains(r.URL.Path, "/queries/j"):
+		h.pageGets++
+		h.t.Fatal("pilot requested a result page")
+	case strings.Contains(r.URL.Path, "/jobs/j"):
+		return cliBQResponse(`{"jobReference":{"projectId":"demodb-dev","jobId":"j","location":"US"},"status":{"state":"DONE"},"statistics":{"query":{"totalBytesProcessed":"100","totalBytesBilled":"0","cacheHit":true}}}`), nil
+	}
+	h.t.Fatal("unexpected pilot HTTP", r.Method, r.URL)
+	return nil, errors.New("unexpected")
+}
 func (h *cliBQHarness) preview() (bigquery.Preview, string) {
 	h.t.Helper()
 	raw, e := h.execute("preview", "--execution-project", "job-project", "--maximum-bytes-billed", "1000", "--page-size", "1")
@@ -192,6 +242,181 @@ func (h *cliBQHarness) run(p bigquery.Preview, path string) (bigquery.Page, erro
 		h.t.Fatal(string(raw))
 	}
 	return page, e
+}
+
+func newCliBQPilotHarness(t *testing.T) *cliBQHarness {
+	h := newCliBQHarness(t)
+	if err := os.Chmod(h.dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	h.pilot = true
+	h.file = h.save("pilot-input.json", bigqueryread.Input{
+		Profile: bigquery.SourceProfile{Version: 1, SourceID: "bigquery-world-bank-wdi", DescriptorDigest: "synthetic-descriptor", LogicalCollection: "country_summary", SourceProject: "bigquery-public-data", DatasetID: "world_bank_wdi", TableID: "country_summary", Location: "US", Schema: []bigquery.Field{{Name: "country_code", Type: "STRING", Mode: "NULLABLE"}, {Name: "short_name", Type: "STRING", Mode: "NULLABLE"}}, PublisherReviewRef: "synthetic-publisher", RightsReviewRef: "synthetic-rights", Use: "connection-test"},
+		Query:   bigqueryread.QueryShape{From: bigqueryread.From{Name: "country_summary"}, Columns: []bigqueryread.Column{{Field: "country_code"}, {Field: "short_name"}}, OrderBy: []bigqueryread.Order{{Field: "country_code"}, {Field: "short_name"}}, Limit: 2},
+	})
+	return h
+}
+func (h *cliBQHarness) pilotPreview() (bigquery.Preview, string, string) {
+	h.t.Helper()
+	var input bigqueryread.Input
+	if err := decodeBigQueryFile(h.file, nil, &input); err != nil {
+		h.t.Fatal(err)
+	}
+	plan, _, _, err := (bigqueryread.Preparer{Input: input, Options: func() (accesspolicies.Options, error) { return accesspolicies.Options{Unrestricted: true}, nil }}).PrepareWithReport(context.Background())
+	if err != nil || validateBigQueryPilotSourcePlan(input.Profile, plan) != nil {
+		h.t.Fatalf("synthetic pilot plan: %v %#v", err, plan)
+	}
+	raw, err := h.execute("preview", "--execution-project", "demodb-dev", "--maximum-bytes-billed", pilotCap, "--session-budget-bytes", pilotCap, "--page-size", "1")
+	if err != nil {
+		h.t.Fatal(err, string(raw))
+	}
+	var preview bigquery.Preview
+	if err := json.Unmarshal(raw, &preview); err != nil {
+		h.t.Fatal(err)
+	}
+	policy := bigQueryPilotPolicy{Format: "datatug-bigquery-operator-pilot/1", ApprovalDigest: preview.ApprovalDigest, RightsReviewRef: "synthetic-rights", ExecutionProject: "demodb-dev", MaximumBytesBilled: pilotCap, SessionBudgetBytes: pilotCap, AllowancePath: filepath.Join(h.dir, "submission.claim")}
+	if validateBigQueryPilot(input.Profile, plan, preview, policy) != nil {
+		h.t.Fatalf("synthetic pilot preview mismatch: plan=%#v preview=%#v", plan, preview)
+	}
+	previewPath, policyPath := h.save("preview-pilot.json", preview), h.save("pilot-policy.json", policy)
+	if _, _, err := readBigQueryPilotPolicy(policyPath); err != nil {
+		h.t.Fatalf("synthetic pilot policy: %v", err)
+	}
+	return preview, previewPath, policyPath
+}
+func TestBigQueryPilotPreflightIdentityOnly(t *testing.T) {
+	h := newCliBQPilotHarness(t)
+	raw, err := h.execute("preflight")
+	if err != nil || h.requests != 0 || h.provider.calls != 1 || strings.Contains(string(raw), "SECRET") || !strings.Contains(string(raw), "verified-google-sub") {
+		t.Fatal(err, h.requests, h.provider.calls, string(raw))
+	}
+}
+func TestBigQueryPilotReceiptOnlyAndSingleSubmission(t *testing.T) {
+	h := newCliBQPilotHarness(t)
+	preview, previewPath, policyPath := h.pilotPreview()
+	if h.paid != 0 || preview.Bounds.MaxRows != 2 || preview.Bounds.MaxPages != 1 {
+		t.Fatal(preview, h.paid)
+	}
+	exportPath := filepath.Join(h.dir, "receipt-pilot.json")
+	raw, stderr, err := h.executeWithStderr("run", "--preview", previewPath, "--approve-digest", preview.ApprovalDigest, "--operator-pilot-policy", policyPath, "--receipt-out", exportPath)
+	if err != nil || h.paid != 1 || h.pageGets != 0 || strings.Contains(string(raw), "SECRET") || strings.Contains(string(stderr), "SECRET") {
+		t.Fatal(err, h.paid, h.pageGets, string(raw), string(stderr))
+	}
+	exported, readErr := os.ReadFile(exportPath)
+	if readErr != nil || strings.Contains(string(exported), "SECRET") {
+		t.Fatal(readErr, string(exported))
+	}
+	var page bigquery.Page
+	if err := json.Unmarshal(raw, &page); err != nil || page.Receipt.Job == nil || len(page.Rows) != 0 || len(page.Schema) != 0 || page.Cursor != "" {
+		t.Fatal(err, string(raw))
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, "submission.claim")); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = h.execute("status", "--receipt", h.save("pilot-receipt.json", page), "--operator-pilot-policy", policyPath)
+	var statusReceipt bigquery.Page
+	if err != nil || json.Unmarshal(raw, &statusReceipt) != nil || statusReceipt.Receipt.BilledBytes == nil || *statusReceipt.Receipt.BilledBytes != "0" || strings.Contains(string(raw), "SECRET") || h.pageGets != 0 {
+		t.Fatal(err, string(raw), h.pageGets)
+	}
+	_, err = h.execute("run", "--preview", previewPath, "--approve-digest", preview.ApprovalDigest, "--operator-pilot-policy", policyPath)
+	if err == nil || h.paid != 1 {
+		t.Fatal("second submission admitted", err, h.paid)
+	}
+	_, err = h.execute("page", "--receipt", h.save("pilot-receipt.json", page), "--operator-pilot-policy", policyPath)
+	if err == nil || h.pageGets != 0 {
+		t.Fatal("pilot fetched rows", err, h.pageGets)
+	}
+}
+func TestBigQueryPilotClaimSurvivesAmbiguousAndMalformedSubmission(t *testing.T) {
+	for _, failure := range []string{"ambiguous", "malformed"} {
+		t.Run(failure, func(t *testing.T) {
+			h := newCliBQPilotHarness(t)
+			preview, previewPath, policyPath := h.pilotPreview()
+			h.failure = failure
+			raw, stderr, err := h.executeWithStderr("run", "--preview", previewPath, "--approve-digest", preview.ApprovalDigest, "--operator-pilot-policy", policyPath)
+			if err == nil || h.paid != 1 || h.pageGets != 0 || strings.Contains(string(raw), "SECRET") || strings.Contains(string(stderr), "SECRET") {
+				t.Fatal(err, h.paid, string(raw), string(stderr))
+			}
+			if _, err := os.Stat(filepath.Join(h.dir, "submission.claim")); err != nil {
+				t.Fatal("submission allowance refunded", err)
+			}
+			_, err = h.execute("run", "--preview", previewPath, "--approve-digest", preview.ApprovalDigest, "--operator-pilot-policy", policyPath)
+			if err == nil || h.paid != 1 {
+				t.Fatal("second submission admitted", err, h.paid)
+			}
+		})
+	}
+}
+func TestBigQueryPilotPolicyChangeAndAtomicClaim(t *testing.T) {
+	h := newCliBQPilotHarness(t)
+	preview, _, path := h.pilotPreview()
+	policy, hash, err := readBigQueryPilotPolicy(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var successes int
+	var lock sync.Mutex
+	var wg sync.WaitGroup
+	for range 12 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if claimBigQueryPilot(path, policy, hash) == nil {
+				lock.Lock()
+				successes++
+				lock.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if successes != 1 {
+		t.Fatal("claim admitted more than once", successes)
+	}
+	if verifyBigQueryPilotClaim(path, bigquery.Receipt{ApprovalDigest: preview.ApprovalDigest}) != nil {
+		t.Fatal("claim not durable")
+	}
+	child := exec.Command(os.Args[0], "-test.run=^TestBigQueryPilotClaimChildProcess$")
+	child.Env = append(os.Environ(), "DATATUG_TEST_PILOT_POLICY="+path)
+	if output, err := child.CombinedOutput(); err != nil {
+		t.Fatalf("new process accepted claimed allowance: %v %s", err, output)
+	}
+	policy.RightsReviewRef = "changed-rights"
+	h.save("pilot-policy.json", policy)
+	if verifyBigQueryPilotClaim(path, bigquery.Receipt{ApprovalDigest: preview.ApprovalDigest}) == nil || claimBigQueryPilot(path, policy, hash) == nil {
+		t.Fatal("changed policy accepted")
+	}
+	if err := os.WriteFile(path, []byte(`{"format":"datatug-bigquery-operator-pilot/1","format":"datatug-bigquery-operator-pilot/1"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := readBigQueryPilotPolicy(path); err == nil {
+		t.Fatal("duplicate policy key accepted")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if verifyBigQueryPilotClaim(path, bigquery.Receipt{ApprovalDigest: preview.ApprovalDigest}) == nil {
+		t.Fatal("missing policy accepted")
+	}
+}
+func TestBigQueryPilotClaimChildProcess(t *testing.T) {
+	path := os.Getenv("DATATUG_TEST_PILOT_POLICY")
+	if path == "" {
+		return
+	}
+	policy, hash, err := readBigQueryPilotPolicy(path)
+	if err != nil || claimBigQueryPilot(path, policy, hash) == nil {
+		t.Fatal("claimed allowance reopened after process restart", err)
+	}
+}
+func TestBigQueryPilotOutputScrubsSentinelOnControlFailure(t *testing.T) {
+	h := newCliBQPilotHarness(t)
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	value := bigQueryControl{Page: bigquery.Page{Rows: [][]bigquery.Cell{{{Value: "SECRET_ROW_SENTINEL"}}}, Schema: []bigquery.Field{{Description: "SECRET_NAME_SENTINEL"}}, Cursor: "SECRET_CURSOR_SENTINEL"}}
+	if err := writeBigQueryPilotResult(cmd, value, "", "", h.dir); err != nil || strings.Contains(out.String(), "SECRET") {
+		t.Fatal(err, out.String())
+	}
 }
 func TestBigQueryCobraProtectedJourney(t *testing.T) {
 	h := newCliBQHarness(t)

@@ -1,6 +1,6 @@
 # DataTug BigQuery CLI composition
 
-This package connects the released `github.com/dal-go/dalgo2bigquery v0.1.1`
+This package connects the released `github.com/dal-go/dalgo2bigquery v0.3.0`
 protocol to the actual `datatug query bigquery` Cobra commands. Fixture tests
 exercise protected preview, approval, one submission and two pages through the
 real command tree. Live Google authentication and paid execution have **not been
@@ -51,6 +51,44 @@ The commands are:
   are exported with meaningful control outcomes, including partial failures. A
   failed snapshot preserves the previous artifact and both errors. Control
   outputs do not read or replay rows, even after execution expiry.
+
+The opt-in **operator-only WDI pilot** adds `--operator-pilot` to `preflight`,
+`preview`, `run`, `status` and `cancel`. `preflight` checks the current user's
+granted BigQuery and `openid` scopes plus same-token UserInfo identity without
+calling BigQuery. Pilot preview accepts only
+`bigquery-public-data.world_bank_wdi.country_summary` in `US`, the two native
+fields `country_code` and `short_name` ordered by both, limit 2, `demodb-dev`,
+page size 1, and both cap and session budget set to `10485760` bytes. It runs a
+dry-run estimate. The pilot does not allow result paging. Pilot run emits only a
+receipt, without delivering the initial response's rows or making a result-page
+request. Control operations likewise emit only the updated receipt.
+
+After reviewing the preview, an operator supplies `--operator-pilot-policy` on
+run and control. This JSON file must be in an operator-owned private directory
+(mode 0700), itself mode 0600 or stricter, and contain exactly:
+
+```json
+{
+  "format": "datatug-bigquery-operator-pilot/1",
+  "approvalDigest": "<exact reviewed preview digest>",
+  "rightsReviewRef": "<accepted exact source-rights review reference>",
+  "executionProject": "demodb-dev",
+  "maximumBytesBilled": "10485760",
+  "sessionBudgetBytes": "10485760",
+  "allowancePath": "<absolute path in same private directory>/submission.claim"
+}
+```
+
+The reviewed source profile must carry that same rights reference and a
+separately reviewed publisher reference. The CLI checks their consistency; it
+cannot establish legal clearance from a reference string. Before `run` can
+submit, it creates and syncs the claim file with exclusive creation. The claim
+stays consumed across process restarts, failed or ambiguous submissions, and
+zero-billed jobs. Changing or deleting the policy fails closed for controls;
+never delete the claim to retry an uncertain submission. Public users must not
+receive `bigquery.jobs.create` on the Sneat-funded execution project. This
+operator pilot has no built-in source-row cache or snapshot output; BigQuery may
+still materialize temporary provider-side results under its own retention rules.
 
 Every operation reuses the same private `--ledger` directory. A new directory
 is a new authorization and budget session, not continuation of an existing job.

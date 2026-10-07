@@ -59,9 +59,9 @@ var bigQueryDeps = bigQueryDependencies{
 
 func queryBigQueryCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "bigquery", Short: "Preview and explicitly run a capped native BigQuery read"}
-	for _, operation := range []string{"connect", "preview", "run", "page", "status", "cancel"} {
+	for _, operation := range []string{"connect", "preflight", "preview", "run", "page", "status", "cancel"} {
 		op := operation
-		child := &cobra.Command{Use: op, Short: map[string]string{"connect": "Explicitly connect Google with separate BigQuery grants", "preview": "Show policy-effective query, verified identity, estimate and approval digest", "run": "Approve an exact preview digest and submit once", "page": "Resume the same job and read its next page", "status": "Observe authoritative status for an existing job", "cancel": "Request cancellation with separately enabled granted permission"}[op], Args: cobra.NoArgs, SilenceUsage: true, RunE: func(c *cobra.Command, _ []string) error { return runBigQueryCommand(c, op) }}
+		child := &cobra.Command{Use: op, Short: map[string]string{"connect": "Explicitly connect Google with separate BigQuery grants", "preflight": "Verify operator identity and granted scopes without a BigQuery request", "preview": "Show policy-effective query, verified identity, estimate and approval digest", "run": "Approve an exact preview digest and submit once", "page": "Resume the same job and read its next page", "status": "Observe authoritative status for an existing job", "cancel": "Request cancellation with separately enabled granted permission"}[op], Args: cobra.NoArgs, SilenceUsage: true, RunE: func(c *cobra.Command, _ []string) error { return runBigQueryCommand(c, op) }}
 		f := child.Flags()
 		f.StringP("file", "f", "", "Bounded JSON source profile and scalar DTQL query; '-' reads stdin")
 		f.String("auth", "", "Explicit credential source: adc (Google-user ADC) or google (existing stored Google OAuth grant)")
@@ -80,6 +80,8 @@ func queryBigQueryCommand() *cobra.Command {
 		f.String("approve-digest", "", "Exact displayed approval digest; required for run")
 		f.Bool("enable-cancellation", false, "Use already granted broader permission to explicitly cancel this job")
 		f.Bool("reconnect", false, "Explicitly rebind an existing job to newly verified same-subject grants")
+		f.Bool("operator-pilot", false, "Opt in to the receipt-only, single-submission WDI operator pilot")
+		f.String("operator-pilot-policy", "", "Absolute private reviewed pilot policy with a stable submission allowance path")
 		f.String(queryAsFlag, "", "DataTug policy principal; independent of verified Google execution identity")
 		f.StringArray(queryRoleFlag, nil, "DataTug policy role (repeatable)")
 		f.StringArray(queryGroupFlag, nil, "DataTug policy group (repeatable)")
@@ -233,8 +235,25 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 	}
 	cancelPermission, _ := f.GetBool("enable-cancellation")
 	reconnect, _ := f.GetBool("reconnect")
+	pilot, _ := f.GetBool("operator-pilot")
+	pilotPolicyPath, _ := f.GetString("operator-pilot-policy")
 	if dir == "" {
 		return Exit("--ledger is required", exitCodeUsage)
+	}
+	if (operation == "preflight" && !pilot) || (pilot && (operation == "connect" || operation == "page")) || (!pilot && pilotPolicyPath != "") {
+		return Exit("operator pilot preflight requires --operator-pilot; connect and page are unavailable in pilot mode", exitCodeUsage)
+	}
+	if operation == "preflight" && cancelPermission {
+		return Exit("identity preflight checks read-only scope; cancellation is separate", exitCodeUsage)
+	}
+	if pilot && operation != "preflight" && operation != "preview" && pilotPolicyPath == "" {
+		return Exit("--operator-pilot-policy is required for pilot run and control", exitCodeUsage)
+	}
+	if pilot && (operation == "preflight" || operation == "preview") && pilotPolicyPath != "" {
+		return Exit("--operator-pilot-policy follows preview", exitCodeUsage)
+	}
+	if pilot && (reconnect || f.Changed("cursor")) {
+		return Exit("operator pilot does not rebind or page a result", exitCodeUsage)
 	}
 	if operation == "cancel" && !cancelPermission {
 		return Exit("cancel requires explicit --enable-cancellation and a verified broader grant", exitCodeUsage)
@@ -259,10 +278,35 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 	if previewOut != "" && (operation != "preview" || !validBigQueryExport(previewOut, dir, "preview-")) {
 		return Exit("--preview-out requires preview-*.json in the private ledger directory", exitCodeUsage)
 	}
-	if receiptOut != "" && (!validBigQueryExport(receiptOut, dir, "receipt-") || operation == "preview" || operation == "connect") {
+	if receiptOut != "" && (!validBigQueryExport(receiptOut, dir, "receipt-") || operation == "preview" || operation == "connect" || operation == "preflight") {
 		return Exit("--receipt-out requires receipt-*.json in the private ledger directory", exitCodeUsage)
 	}
-	write := func(value any) error { return writeBigQueryResult(cmd, value, previewOut, receiptOut, dir) }
+	write := func(value any) error {
+		if pilot {
+			return writeBigQueryPilotResult(cmd, value, previewOut, receiptOut, dir)
+		}
+		return writeBigQueryResult(cmd, value, previewOut, receiptOut, dir)
+	}
+	if operation == "preflight" {
+		if _, err := bigQueryDeps.ledger(dir); err != nil {
+			return bigQueryFailure(err)
+		}
+		provider, err := bigQueryDeps.provider(dir, false, auth)
+		if err != nil {
+			return bigQueryFailure(err)
+		}
+		ctx, stop := context.WithTimeout(cmd.Context(), 15*time.Second)
+		defer stop()
+		identity, _, err := provider.Authorize(ctx, bigQueryDeps.transport)
+		if err != nil || !identity.Read || identity.Principal.Kind != "google-user" || identity.Principal.Subject == "" {
+			return bigQueryFailure(bigqueryread.ErrIdentity)
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+			Principal bigquery.Principal `json:"principal"`
+			ExpiresAt time.Time          `json:"expiresAt"`
+			Read      bool               `json:"read"`
+		}{identity.Principal, identity.ExpiresAt, identity.Read})
+	}
 	if operation == "connect" {
 		if auth != "google" {
 			return Exit("connect uses --auth google; configure user ADC explicitly outside DataTug for --auth adc", exitCodeUsage)
@@ -359,6 +403,12 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 	if err != nil {
 		return recoverError(err)
 	}
+	if pilot && validateBigQueryPilotSourcePlan(input.Profile, plan) != nil {
+		return recoverError(bigqueryread.ErrInput)
+	}
+	if pilot && (operation == "status" || operation == "cancel") && verifyBigQueryPilotClaim(pilotPolicyPath, previous.Receipt) != nil {
+		return recoverError(bigqueryread.ErrInput)
+	}
 	for _, line := range lines {
 		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), bigQueryPolicyDiagnostic(line))
 	}
@@ -393,6 +443,9 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 		if project == "" || cap == "" {
 			return Exit("preview requires --execution-project and --maximum-bytes-billed", exitCodeUsage)
 		}
+		if pilot && (project != "demodb-dev" || cap != pilotCap || budget != pilotCap || f.Lookup("page-size").Value.String() != "1") {
+			return Exit("operator pilot requires demodb-dev, a 10 MiB cap and budget, and page size 1", exitCodeUsage)
+		}
 		ctx, finish := context.WithTimeout(cmd.Context(), 15*time.Second)
 		identity, _, e := provider.Authorize(ctx, bigQueryDeps.transport)
 		finish()
@@ -401,6 +454,9 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 		}
 		bounds := bigquery.DefaultBounds()
 		bounds.PageSize, _ = f.GetInt("page-size")
+		if pilot {
+			bounds.MaxRows, bounds.MaxPages = 2, 1
+		}
 		preview, e = client.Preview(cmd.Context(), plan, bigquery.Execution{JobProject: project, Principal: identity.Principal, MaximumBytesBilled: cap, SessionBudgetBytes: budget}, bounds)
 		if e != nil {
 			return bigQueryFailure(e)
@@ -413,11 +469,27 @@ func runBigQueryCommand(cmd *cobra.Command, operation string) error {
 			return Exit("execution project changed; preview again", exitCodeUsage)
 		}
 		digest, _ := f.GetString("approve-digest")
+		var policy bigQueryPilotPolicy
+		var policyHash string
+		if pilot {
+			policy, policyHash, err = readBigQueryPilotPolicy(pilotPolicyPath)
+			if err != nil || validateBigQueryPilot(input.Profile, plan, preview, policy) != nil {
+				return bigQueryFailure(bigqueryread.ErrInput)
+			}
+		}
 		approval, e := client.Approve(preview, digest)
 		if e != nil {
 			return bigQueryFailure(e)
 		}
+		if pilot {
+			if e := claimBigQueryPilot(pilotPolicyPath, policy, policyHash); e != nil {
+				return bigQueryFailure(e)
+			}
+		}
 		run, e := client.Execute(cmd.Context(), approval)
+		if pilot {
+			return writeBigQueryPilotRun(run, e, write)
+		}
 		return writeBigQueryRun(run, e, write)
 	case "page":
 		run, e := client.Resume(cmd.Context(), previous.Receipt, previous.Cursor)

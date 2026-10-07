@@ -1,6 +1,6 @@
 # DataTug BigQuery CLI composition
 
-This package connects the released `github.com/dal-go/dalgo2bigquery v0.2.0`
+This package connects the released `github.com/dal-go/dalgo2bigquery v0.3.0`
 protocol to the actual `datatug query bigquery` Cobra commands. Fixture tests
 exercise protected preview, approval, one submission and two pages through the
 real command tree. Live Google authentication and paid execution have **not been

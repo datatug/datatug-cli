@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/dal-go/dalgo/dbschema"
 	bqwriter "github.com/dal-go/dalgo2bigquery"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/ingitdb/ingitdb-go/ingitdb"
 )
 
 type postgresBigQueryCaptureSink struct{ writer *bqwriter.LoadWriter }
@@ -69,7 +72,10 @@ func TestPostgresToBigQueryProviderNeutralCopyPreservesRows(t *testing.T) {
 		`INSERT INTO invoice (id, customer_id, total, status) VALUES (31, 1, 12345678901234567890.12345678, 'paid')`,
 		`INSERT INTO audit_log (at, message) VALUES ('2024-10-01 08:30:45', 'source row')`,
 		`CREATE TABLE pg_no_key (payload text, n integer)`,
-		`INSERT INTO pg_no_key VALUES ('duplicate', 7), ('duplicate', 7)`)
+		`INSERT INTO pg_no_key VALUES ('duplicate', 7), ('duplicate', 7)`,
+		`CREATE TABLE binary_payload (id integer PRIMARY KEY, payload bytea, nullable_payload bytea, empty_payload bytea, total numeric(30,8))`,
+		`INSERT INTO binary_payload VALUES (1, decode('00ff0080','hex'), NULL, decode('','hex'), 12345678901234567890.12345678)`,
+		`INSERT INTO binary_payload VALUES (2, NULL, decode('ff00','hex'), NULL, NULL)`)
 	sourceRef, err := dbcopy.Parse(server.scanURL)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +107,7 @@ func TestPostgresToBigQueryProviderNeutralCopyPreservesRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.RowsCopied != 8 || plan.rowsByTable["customer"] != 2 || plan.rowsByTable["customer_names"] != 2 || plan.rowsByTable["invoice"] != 1 || plan.rowsByTable["audit_log"] != 1 || plan.rowsByTable["pg_no_key"] != 2 {
+	if summary.RowsCopied != 10 || plan.rowsByTable["customer"] != 2 || plan.rowsByTable["customer_names"] != 2 || plan.rowsByTable["invoice"] != 1 || plan.rowsByTable["audit_log"] != 1 || plan.rowsByTable["pg_no_key"] != 2 || plan.rowsByTable["binary_payload"] != 2 {
 		t.Fatalf("PostgreSQL copy rows: summary=%#v counts=%#v", summary, plan.rowsByTable)
 	}
 	var foundTotal bool
@@ -125,6 +131,42 @@ func TestPostgresToBigQueryProviderNeutralCopyPreservesRows(t *testing.T) {
 	if got := plan.ndjsonByTable["pg_no_key"]; len(got) != 2 || got[0]["payload"] != "duplicate" || got[1]["payload"] != "duplicate" {
 		t.Fatalf("keyless duplicate PostgreSQL rows were not preserved: %#v", got)
 	}
+	var foundBinary, foundNull bool
+	for _, row := range plan.ndjsonByTable["binary_payload"] {
+		switch row["id"] {
+		case "1":
+			foundBinary = row["payload"] == "AP8AgA==" && row["nullable_payload"] == nil && row["empty_payload"] == "" && row["total"] == "12345678901234567890.12345678"
+		case "2":
+			foundNull = row["payload"] == nil && row["nullable_payload"] == "/wA=" && row["empty_payload"] == nil && row["total"] == nil
+		}
+	}
+	if !foundBinary || !foundNull {
+		t.Fatalf("PostgreSQL BYTEA NULL/empty/binary values or exact NUMERIC were not preserved in BigQuery rows: %#v", plan.ndjsonByTable["binary_payload"])
+	}
+
+	t.Run("native inGitDB export preserves BYTEA and exact NUMERIC", func(t *testing.T) {
+		destination := filepath.Join(t.TempDir(), "native")
+		command := dbExportCommand()
+		command.SetArgs([]string{"--from", server.scanURL, "--to", "ingitdb://" + destination})
+		if err := command.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(filepath.Join(destination, "binary_payload", "records.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		records, err := ingitdb.ParseMapOfRecordsContent(data, ingitdb.RecordFormatJSON)
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, second := records["1"], records["2"]
+		if first["payload"] != "AP8AgA==" || first["nullable_payload"] != nil || first["empty_payload"] != "" || first["total"] != "12345678901234567890.12345678" {
+			t.Fatalf("native export changed non-UTF8/empty BYTEA or NUMERIC: %#v", first)
+		}
+		if second["payload"] != nil || second["nullable_payload"] != "/wA=" || second["empty_payload"] != nil || second["total"] != nil {
+			t.Fatalf("native export changed nullable BYTEA/NUMERIC: %#v", second)
+		}
+	})
 }
 
 type postgresBigQueryCaptureSinkWithPlan struct {

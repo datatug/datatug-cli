@@ -530,14 +530,25 @@ func (r BackendRef) Open(ctx context.Context) (dal.DB, error) {
 }
 
 // OpenForCopy opens a source for a provider-neutral database copy. PostgreSQL
-// copy reads preserve exact NUMERIC text and may target an explicit schema;
-// other sources keep their regular DALgo read behavior.
+// copy reads preserve exact NUMERIC text and raw BYTEA values, and may target
+// an explicit schema; other sources keep their regular DALgo read behavior.
 func (r BackendRef) OpenForCopy(ctx context.Context, postgresSchema string) (dal.DB, error) {
+	return r.openForTransfer(ctx, postgresSchema)
+}
+
+// OpenForExport opens a source for a complete native export. PostgreSQL reads
+// retain exact NUMERIC and BYTEA values; ordinary query opens keep their
+// existing conversions.
+func (r BackendRef) OpenForExport(ctx context.Context) (dal.DB, error) {
+	return r.openForTransfer(ctx, "")
+}
+
+func (r BackendRef) openForTransfer(ctx context.Context, postgresSchema string) (dal.DB, error) {
 	if postgresSchema != "" && r.Scheme != "postgres" {
 		return nil, fmt.Errorf("--from-schema is supported only for PostgreSQL sources")
 	}
 	if r.Scheme == "postgres" {
-		return r.open(ctx, openMode{postgresSchema: postgresSchema, exactNumericValues: true})
+		return r.open(ctx, openMode{postgresSchema: postgresSchema, exactNumericValues: true, preserveBinaryValues: true})
 	}
 	return r.open(ctx, openMode{})
 }
@@ -640,6 +651,7 @@ type openMode struct {
 	forWrite              bool
 	postgresSchema        string
 	exactNumericValues    bool
+	preserveBinaryValues  bool
 }
 
 // open opens the source and turns whatever it returns as an error into one

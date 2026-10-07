@@ -63,7 +63,7 @@ func compareCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:          "compare",
 		Short:        "Compare database schemas and records, or two query result sets",
-		Long:         "Compare complete database contents from one or two environments in a DataTug project, or use the existing agent-backed query-result comparison flags. Database comparison always reports schema changes and fully reads every DALgo table; provider-reported views are compared as schema metadata. --details only limits how many per-record examples are printed. Renamed relations require explicit --table-map entries; keyless relations are compared as row multisets unless --key-map supplies a verified identity. Hosted-pending editions require an explicit --left-source/--right-source binding; their metadata URLs are never opened. BigQuery sources use the separately granted read-only Google identity and the DALgo physical-row API; no BigQuery query job is submitted.",
+		Long:         "Compare complete database contents from one or two environments in a DataTug project, or use the existing agent-backed query-result comparison flags. Database comparison always reports schema changes and fully reads every DALgo table; provider-reported views are compared as schema metadata. PostgreSQL defaults to the public schema unless --left-schema or --right-schema selects another; schema selection is applied to row reads and does not follow search_path. --details only limits how many per-record examples are printed. Renamed relations require explicit --table-map entries; keyless relations are compared as row multisets unless --key-map supplies a verified identity. Hosted-pending editions require an explicit --left-source/--right-source binding; their metadata URLs are never opened. BigQuery sources use the separately granted read-only Google identity and the DALgo physical-row API; no BigQuery query job is submitted.",
 		Example:      "datatug compare local remote --project demo-project --environment dev\ndatatug compare chinook-sqlite chinook-postgresql --project ./demo-project-1 --left-environment dev --right-environment QA --left-source env:DEMO_CHINOOK_SQLITE_URL --right-source env:DEMO_CHINOOK_QA_PG_URL --right-schema chinook --details --limit 20\ndatatug compare source target --project ./project --table-map 'Production.Document=production_document' --key-map 'Production.Document=ProductID,DocumentID'\ndatatug compare --project demo-project --query orders --left env=before --right env=after --key id",
 		Args:         compareArgs,
 		SilenceUsage: true,
@@ -83,13 +83,13 @@ func compareCommand() *cobra.Command {
 	flags.String(compareIncidentFlag, "", "Optional qualified incident <store>/<incident>")
 	flags.String(compareMutationFlag, "", "Required idempotency key when --incident is set")
 	flags.Bool(compareJSONFlag, false, "Print the exact JSON response")
-	flags.String(compareLeftSchemaFlag, "", "PostgreSQL schema to inspect on the left database")
-	flags.String(compareRightSchemaFlag, "", "PostgreSQL schema to inspect on the right database")
+	flags.String(compareLeftSchemaFlag, "", "PostgreSQL schema to inspect and read on the left database (default: public)")
+	flags.String(compareRightSchemaFlag, "", "PostgreSQL schema to inspect and read on the right database (default: public)")
 	flags.Bool(compareDetailsFlag, false, "Print bounded per-record differences after the complete comparison")
 	flags.String(compareLeftEnvFlag, "", "Environment for the left database (defaults to --environment or the project's only environment)")
 	flags.String(compareRightEnvFlag, "", "Environment for the right database (defaults to --environment or the project's only environment)")
-	flags.String(compareLeftSourceFlag, "", "Explicit DALgo source for the left database; use env:VARIABLE for a DSN so credentials stay out of command history")
-	flags.String(compareRightSourceFlag, "", "Explicit DALgo source for the right database; use env:VARIABLE for a DSN so credentials stay out of command history")
+	flags.String(compareLeftSourceFlag, "", "Explicit DALgo source for the left database; use env:VARIABLE to keep the DSN out of DataTug arguments and process listings")
+	flags.String(compareRightSourceFlag, "", "Explicit DALgo source for the right database; use env:VARIABLE to keep the DSN out of DataTug arguments and process listings")
 	flags.StringSlice(compareTableMapFlag, nil, "Map a left relation name to a right relation name: LEFT=RIGHT (repeat for renamed relations)")
 	flags.StringSlice(compareKeyMapFlag, nil, "Database comparison identity: TABLE=column[,column] (repeat per table); otherwise use matching primary keys or keyless multiset comparison")
 	flags.String(compareMappingFileFlag, "", "Project-relative JSON file with explicit relation-name mappings and optional per-table keys")

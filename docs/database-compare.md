@@ -63,4 +63,4 @@ The command supports registered DALgo source schemes and the read-only BigQuery 
 
 Source-specific limitations are reported or rejected rather than converted silently. Exact decimal, integer, binary, boolean, and temporal values are normalized using declared source semantics. An unsupported or incompatible value stops the comparison instead of producing a false equality result.
 
-For PostgreSQL, `--left-schema` and `--right-schema` scope catalog discovery and each row read is schema-qualified. The selected schema therefore wins even when the connection's `search_path` points at a different schema containing a table with the same name.
+For PostgreSQL, `--left-schema` and `--right-schema` scope catalog discovery and each row read is schema-qualified. The CLI defaults each omitted PostgreSQL schema to `public`; the `dbcompare.Compare` API requires callers to pass a schema explicitly. The selected schema therefore wins even when the connection's `search_path` points at a different schema containing a table with the same name.

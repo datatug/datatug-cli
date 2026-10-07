@@ -93,6 +93,8 @@ func runDatabaseCompareCommand(cmd *cobra.Command, leftName, rightName string) e
 		return Exit(fmt.Sprintf("open right database %q: %v", dbcopy.SourceIDDisplay(rightName), dbcopy.RedactText(err.Error())), exitCodeDatabase)
 	}
 	defer closeCompareDB(rightDB)
+	leftSchema = effectiveCompareSchema(leftDB, leftSchema)
+	rightSchema = effectiveCompareSchema(rightDB, rightSchema)
 
 	details, _ := cmd.Flags().GetBool(compareDetailsFlag)
 	limit, _ := cmd.Flags().GetInt(compareLimitFlag)
@@ -119,6 +121,15 @@ func runDatabaseCompareCommand(cmd *cobra.Command, leftName, rightName string) e
 		return nil
 	}
 	return writeDatabaseCompareText(cmd.OutOrStdout(), report, details)
+}
+
+func effectiveCompareSchema(db dal.DB, schema string) string {
+	if strings.TrimSpace(schema) == "" {
+		if adapter := db.Adapter(); adapter != nil && adapter.Name() == "dalgo2postgres" {
+			return "public"
+		}
+	}
+	return schema
 }
 
 func compareReportName(environment, database string) string {

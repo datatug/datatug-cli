@@ -136,6 +136,10 @@ func TestPostgresDatabaseCompareJourneyPreservesExactValuesAndChanges(t *testing
 	postgres, err := ref.OpenForCopy(context.Background(), "compare_probe")
 	require.NoError(t, err)
 	defer closeCompareDB(postgres)
+	require.Equal(t, "public", effectiveCompareSchema(postgres, ""))
+	require.Equal(t, "compare_probe", effectiveCompareSchema(postgres, "compare_probe"))
+	_, err = dbcompare.Compare(context.Background(), "dev/sqlite", sqlite, "QA/postgres", postgres, dbcompare.Options{})
+	require.ErrorContains(t, err, "right PostgreSQL schema must be explicit")
 
 	report, err := dbcompare.Compare(context.Background(), "dev/sqlite", sqlite, "QA/postgres", postgres, dbcompare.Options{
 		Details: true, DetailLimit: 10, RightSchema: "compare_probe",

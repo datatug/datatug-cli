@@ -199,6 +199,12 @@ func Compare(ctx context.Context, leftName string, left dal.DB, rightName string
 	if options.DetailLimit < 0 {
 		return report, errors.New("detail limit cannot be negative")
 	}
+	if adapter := left.Adapter(); adapter != nil && adapter.Name() == "dalgo2postgres" && strings.TrimSpace(options.LeftSchema) == "" {
+		return report, errors.New("left PostgreSQL schema must be explicit to avoid search_path ambiguity")
+	}
+	if adapter := right.Adapter(); adapter != nil && adapter.Name() == "dalgo2postgres" && strings.TrimSpace(options.RightSchema) == "" {
+		return report, errors.New("right PostgreSQL schema must be explicit to avoid search_path ambiguity")
+	}
 	leftInventory, err := inspect(ctx, left, options.LeftSchema)
 	if err != nil {
 		return report, fmt.Errorf("inspect left database %q: %w", leftName, err)
@@ -323,9 +329,6 @@ func inspect(ctx context.Context, db dal.DB, querySchema string) (relationInvent
 	inventory := relationInventory{collections: make(map[string]relation, len(refs)), views: map[string]dbschema.SourceViewDef{}}
 	if adapter := db.Adapter(); adapter != nil {
 		inventory.adapterName = adapter.Name()
-	}
-	if querySchema == "" && inventory.adapterName == "dalgo2postgres" {
-		querySchema = "public"
 	}
 	viewNames := map[string]bool{}
 	if views, ok := dal.As[dbschema.SourceViewReader](db); ok {

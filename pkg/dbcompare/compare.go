@@ -34,6 +34,8 @@ import (
 type Options struct {
 	Details     bool
 	DetailLimit int
+	LeftSchema  string
+	RightSchema string
 	TableMaps   map[string]string
 	KeyMaps     map[string][]string
 }
@@ -197,11 +199,11 @@ func Compare(ctx context.Context, leftName string, left dal.DB, rightName string
 	if options.DetailLimit < 0 {
 		return report, errors.New("detail limit cannot be negative")
 	}
-	leftInventory, err := inspect(ctx, left)
+	leftInventory, err := inspect(ctx, left, options.LeftSchema)
 	if err != nil {
 		return report, fmt.Errorf("inspect left database %q: %w", leftName, err)
 	}
-	rightInventory, err := inspect(ctx, right)
+	rightInventory, err := inspect(ctx, right, options.RightSchema)
 	if err != nil {
 		return report, fmt.Errorf("inspect right database %q: %w", rightName, err)
 	}
@@ -313,7 +315,7 @@ func Compare(ctx context.Context, leftName string, left dal.DB, rightName string
 	return report, nil
 }
 
-func inspect(ctx context.Context, db dal.DB) (relationInventory, error) {
+func inspect(ctx context.Context, db dal.DB, querySchema string) (relationInventory, error) {
 	refs, err := dbschema.ListCollections(ctx, db, nil)
 	if err != nil {
 		return relationInventory{}, fmt.Errorf("list collections: %w", err)
@@ -321,6 +323,9 @@ func inspect(ctx context.Context, db dal.DB) (relationInventory, error) {
 	inventory := relationInventory{collections: make(map[string]relation, len(refs)), views: map[string]dbschema.SourceViewDef{}}
 	if adapter := db.Adapter(); adapter != nil {
 		inventory.adapterName = adapter.Name()
+	}
+	if querySchema == "" && inventory.adapterName == "dalgo2postgres" {
+		querySchema = "public"
 	}
 	viewNames := map[string]bool{}
 	if views, ok := dal.As[dbschema.SourceViewReader](db); ok {
@@ -360,6 +365,13 @@ func inspect(ctx context.Context, db dal.DB) (relationInventory, error) {
 		if definition == nil || definition.Name != ref.Name() {
 			return relationInventory{}, fmt.Errorf("collection %q returned inconsistent schema metadata", name)
 		}
+		queryRef := ref
+		if querySchema != "" && inventory.adapterName == "dalgo2postgres" {
+			// WithSchema scopes PostgreSQL catalog discovery but deliberately does
+			// not change search_path. Qualify the row query with the selected schema
+			// so it cannot read a same-named table from another schema.
+			queryRef = dal.NewQualifiedRootCollectionRef(querySchema, ref.Name(), "")
+		}
 		fieldNames := make(map[string]bool, len(definition.Fields))
 		for _, field := range definition.Fields {
 			fieldName := string(field.Name)
@@ -372,13 +384,13 @@ func inspect(ctx context.Context, db dal.DB) (relationInventory, error) {
 		if indexErr != nil {
 			if errors.Is(indexErr, dal.ErrNotSupported) {
 				inventory.warnings = append(inventory.warnings, fmt.Sprintf("index metadata for %s is unsupported by the source adapter; index differences were not compared", name))
-				inventory.collections[name] = relation{ref: ref, def: *definition}
+				inventory.collections[name] = relation{ref: queryRef, def: *definition}
 				continue
 			}
 			return relationInventory{}, fmt.Errorf("list indexes for %q: %w", name, indexErr)
 		}
 		definition.Indexes = mergeIndexes(definition.Indexes, indexes)
-		inventory.collections[name] = relation{ref: ref, def: *definition, indexesKnown: true}
+		inventory.collections[name] = relation{ref: queryRef, def: *definition, indexesKnown: true}
 	}
 	return inventory, nil
 }

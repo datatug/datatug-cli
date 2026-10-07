@@ -99,7 +99,11 @@ func runDatabaseCompareCommand(cmd *cobra.Command, leftName, rightName string) e
 	if limit < 0 {
 		return Exit("--limit cannot be negative", exitCodeUsage)
 	}
-	report, err := dbcompare.Compare(ctx, compareReportName(leftEnvID, leftName), leftDB, compareReportName(rightEnvID, rightName), rightDB, dbcompare.Options{Details: details, DetailLimit: limit, TableMaps: tableMaps, KeyMaps: keyMaps})
+	report, err := dbcompare.Compare(ctx, compareReportName(leftEnvID, leftName), leftDB, compareReportName(rightEnvID, rightName), rightDB, dbcompare.Options{
+		Details: details, DetailLimit: limit,
+		LeftSchema: leftSchema, RightSchema: rightSchema,
+		TableMaps: tableMaps, KeyMaps: keyMaps,
+	})
 	if err != nil {
 		redacted := dbcopy.RedactErrorWithSecrets(err, leftURL)
 		redacted = dbcopy.RedactErrorWithSecrets(redacted, rightURL)

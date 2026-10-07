@@ -109,9 +109,13 @@ func TestPostgresDatabaseCompareJourneyPreservesExactValuesAndChanges(t *testing
 	execAll(t, server.scanURL,
 		`CREATE SCHEMA compare_probe`,
 		`CREATE TABLE compare_probe.items (id bigint PRIMARY KEY, amount numeric(38,0), note text, payload bytea, occurred timestamp, active boolean)`,
+		`CREATE TABLE public.items (id bigint PRIMARY KEY, amount numeric(38,0), note text, payload bytea, occurred timestamp, active boolean)`,
 		`INSERT INTO compare_probe.items VALUES
 			(1, 1234567890123456789, NULL, decode('00ff00', 'hex'), TIMESTAMP '2026-10-07 12:30:00', TRUE),
 			(2, 0, '', decode('', 'hex'), NULL, FALSE)`,
+		`INSERT INTO public.items VALUES
+			(1, 99, NULL, decode('00ff00', 'hex'), TIMESTAMP '2026-10-07 12:30:00', TRUE),
+			(2, 99, '', decode('', 'hex'), NULL, FALSE)`,
 		`UPDATE compare_probe.items SET amount = 1 WHERE id = 2`)
 
 	sqlitePath := filepath.Join(t.TempDir(), "compare.sqlite")
@@ -133,7 +137,9 @@ func TestPostgresDatabaseCompareJourneyPreservesExactValuesAndChanges(t *testing
 	require.NoError(t, err)
 	defer closeCompareDB(postgres)
 
-	report, err := dbcompare.Compare(context.Background(), "dev/sqlite", sqlite, "QA/postgres", postgres, dbcompare.Options{Details: true, DetailLimit: 10})
+	report, err := dbcompare.Compare(context.Background(), "dev/sqlite", sqlite, "QA/postgres", postgres, dbcompare.Options{
+		Details: true, DetailLimit: 10, RightSchema: "compare_probe",
+	})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), report.Summary.Unchanged)
 	require.Equal(t, int64(1), report.Summary.Changed)

@@ -62,3 +62,5 @@ The file is limited to 4 MiB, rejects unknown fields, and requires a one-to-one 
 The command supports registered DALgo source schemes and the read-only BigQuery source adapter. BigQuery is read through table metadata and physical table-data APIs; this command does not submit a BigQuery query job. BigQuery declared keys and provider indexes are not assumed to exist unless both source adapters expose and validate them. Cross-provider view SQL bodies are not compared as equivalent executable SQL; view inventory and ordered columns are compared separately.
 
 Source-specific limitations are reported or rejected rather than converted silently. Exact decimal, integer, binary, boolean, and temporal values are normalized using declared source semantics. An unsupported or incompatible value stops the comparison instead of producing a false equality result.
+
+For PostgreSQL, `--left-schema` and `--right-schema` scope catalog discovery and each row read is schema-qualified. The selected schema therefore wins even when the connection's `search_path` points at a different schema containing a table with the same name.

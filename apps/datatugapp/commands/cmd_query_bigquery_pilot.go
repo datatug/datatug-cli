@@ -19,11 +19,22 @@ import (
 
 const pilotCap = "10485760"
 
+func bigQueryPilotBounds() bigquery.Bounds {
+	return bigquery.Bounds{
+		PageSize: 1, MaxRows: 2, MaxPages: 1,
+		ResponseBytes: 64 << 10, TotalResponseBytes: 128 << 10,
+		WallMs: 10000, HTTPMs: 5000, Concurrency: 1,
+	}
+}
+
 // This is an operator-authored, private acceptance record. The CLI checks its
 // exact binding; creating this file does not itself constitute a rights review.
 type bigQueryPilotPolicy struct {
 	Format             string `json:"format"`
 	ApprovalDigest     string `json:"approvalDigest"`
+	SourceDigest       string `json:"sourceDigest"`
+	DescriptorDigest   string `json:"descriptorDigest"`
+	PlanDigest         string `json:"planDigest"`
 	RightsReviewRef    string `json:"rightsReviewRef"`
 	ExecutionProject   string `json:"executionProject"`
 	MaximumBytesBilled string `json:"maximumBytesBilled"`
@@ -77,7 +88,7 @@ func readBigQueryPilotPolicy(path string) (bigQueryPilotPolicy, string, error) {
 	if err := d.Decode(new(any)); err != io.EOF {
 		return bigQueryPilotPolicy{}, "", bigqueryread.ErrInput
 	}
-	if policy.Format != "datatug-bigquery-operator-pilot/1" || policy.ApprovalDigest == "" || policy.RightsReviewRef == "" || policy.ExecutionProject != "demodb-dev" || policy.MaximumBytesBilled != pilotCap || policy.SessionBudgetBytes != pilotCap || !filepath.IsAbs(policy.AllowancePath) || filepath.Clean(filepath.Dir(policy.AllowancePath)) != filepath.Clean(filepath.Dir(path)) || filepath.Base(policy.AllowancePath) != "submission.claim" {
+	if policy.Format != "datatug-bigquery-operator-pilot/2" || policy.ApprovalDigest == "" || policy.SourceDigest == "" || policy.DescriptorDigest == "" || policy.PlanDigest == "" || policy.RightsReviewRef == "" || policy.ExecutionProject != "demodb-dev" || policy.MaximumBytesBilled != pilotCap || policy.SessionBudgetBytes != pilotCap || !filepath.IsAbs(policy.AllowancePath) || filepath.Clean(filepath.Dir(policy.AllowancePath)) != filepath.Clean(filepath.Dir(path)) || filepath.Base(policy.AllowancePath) != "submission.claim" {
 		return bigQueryPilotPolicy{}, "", bigqueryread.ErrInput
 	}
 	hash := sha256.Sum256(raw)
@@ -95,10 +106,10 @@ func validateBigQueryPilotSourcePlan(profile bigquery.SourceProfile, plan bigque
 }
 
 func validateBigQueryPilot(profile bigquery.SourceProfile, plan bigquery.ReadPlan, preview bigquery.Preview, policy bigQueryPilotPolicy) error {
-	if validateBigQueryPilotSourcePlan(profile, plan) != nil || profile.RightsReviewRef != policy.RightsReviewRef {
+	if validateBigQueryPilotSourcePlan(profile, plan) != nil || profile.RightsReviewRef != policy.RightsReviewRef || profile.DescriptorDigest != policy.DescriptorDigest || plan.SourceDigest != policy.SourceDigest || plan.Digest != policy.PlanDigest {
 		return bigqueryread.ErrInput
 	}
-	if plan.Digest != preview.Plan.Digest || preview.ApprovalDigest != policy.ApprovalDigest || preview.Execution.JobProject != policy.ExecutionProject || preview.Execution.MaximumBytesBilled != policy.MaximumBytesBilled || preview.Execution.SessionBudgetBytes != policy.SessionBudgetBytes || preview.Plan.Limit != 2 || preview.Bounds.PageSize != 1 || preview.Bounds.MaxRows != 2 || preview.Bounds.MaxPages != 1 || preview.Observation.Location != "US" || preview.Observation.Type != "TABLE" || preview.Observation.Table != (bigquery.TableRef{ProjectID: "bigquery-public-data", DatasetID: "world_bank_wdi", TableID: "country_summary"}) {
+	if plan.Digest != preview.Plan.Digest || plan.SourceDigest != preview.Plan.SourceDigest || preview.ApprovalDigest != policy.ApprovalDigest || preview.Execution.JobProject != policy.ExecutionProject || preview.Execution.MaximumBytesBilled != policy.MaximumBytesBilled || preview.Execution.SessionBudgetBytes != policy.SessionBudgetBytes || preview.Plan.Limit != 2 || preview.Bounds != bigQueryPilotBounds() || preview.Observation.Location != "US" || preview.Observation.Type != "TABLE" || preview.Observation.Table != (bigquery.TableRef{ProjectID: "bigquery-public-data", DatasetID: "world_bank_wdi", TableID: "country_summary"}) {
 		return bigqueryread.ErrInput
 	}
 	return nil

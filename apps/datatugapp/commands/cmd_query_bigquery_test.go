@@ -274,7 +274,7 @@ func (h *cliBQHarness) pilotPreview() (bigquery.Preview, string, string) {
 	if err := json.Unmarshal(raw, &preview); err != nil {
 		h.t.Fatal(err)
 	}
-	policy := bigQueryPilotPolicy{Format: "datatug-bigquery-operator-pilot/1", ApprovalDigest: preview.ApprovalDigest, RightsReviewRef: "synthetic-rights", ExecutionProject: "demodb-dev", MaximumBytesBilled: pilotCap, SessionBudgetBytes: pilotCap, AllowancePath: filepath.Join(h.dir, "submission.claim")}
+	policy := bigQueryPilotPolicy{Format: "datatug-bigquery-operator-pilot/2", ApprovalDigest: preview.ApprovalDigest, SourceDigest: plan.SourceDigest, DescriptorDigest: input.Profile.DescriptorDigest, PlanDigest: plan.Digest, RightsReviewRef: "synthetic-rights", ExecutionProject: "demodb-dev", MaximumBytesBilled: pilotCap, SessionBudgetBytes: pilotCap, AllowancePath: filepath.Join(h.dir, "submission.claim")}
 	if validateBigQueryPilot(input.Profile, plan, preview, policy) != nil {
 		h.t.Fatalf("synthetic pilot preview mismatch: plan=%#v preview=%#v", plan, preview)
 	}
@@ -294,7 +294,7 @@ func TestBigQueryPilotPreflightIdentityOnly(t *testing.T) {
 func TestBigQueryPilotReceiptOnlyAndSingleSubmission(t *testing.T) {
 	h := newCliBQPilotHarness(t)
 	preview, previewPath, policyPath := h.pilotPreview()
-	if h.paid != 0 || preview.Bounds.MaxRows != 2 || preview.Bounds.MaxPages != 1 {
+	if h.paid != 0 || preview.Bounds != bigQueryPilotBounds() {
 		t.Fatal(preview, h.paid)
 	}
 	exportPath := filepath.Join(h.dir, "receipt-pilot.json")
@@ -325,6 +325,60 @@ func TestBigQueryPilotReceiptOnlyAndSingleSubmission(t *testing.T) {
 	_, err = h.execute("page", "--receipt", h.save("pilot-receipt.json", page), "--operator-pilot-policy", policyPath)
 	if err == nil || h.pageGets != 0 {
 		t.Fatal("pilot fetched rows", err, h.pageGets)
+	}
+}
+
+func TestBigQueryPilotRejectsBroaderPreviewBounds(t *testing.T) {
+	h := newCliBQPilotHarness(t)
+	preview, _, policyPath := h.pilotPreview()
+	var input bigqueryread.Input
+	if err := decodeBigQueryFile(h.file, nil, &input); err != nil {
+		t.Fatal(err)
+	}
+	policy, _, err := readBigQueryPilotPolicy(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, broaden := range map[string]func(*bigquery.Bounds){
+		"response bytes":       func(b *bigquery.Bounds) { b.ResponseBytes++ },
+		"total response bytes": func(b *bigquery.Bounds) { b.TotalResponseBytes++ },
+		"wall time":            func(b *bigquery.Bounds) { b.WallMs++ },
+		"HTTP time":            func(b *bigquery.Bounds) { b.HTTPMs++ },
+		"pages":                func(b *bigquery.Bounds) { b.MaxPages++ },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := preview
+			broaden(&changed.Bounds)
+			if validateBigQueryPilot(input.Profile, preview.Plan, changed, policy) == nil {
+				t.Fatal("broader pilot bound accepted")
+			}
+		})
+	}
+}
+func TestBigQueryPilotRejectsChangedOperatorBinding(t *testing.T) {
+	h := newCliBQPilotHarness(t)
+	preview, _, policyPath := h.pilotPreview()
+	var input bigqueryread.Input
+	if err := decodeBigQueryFile(h.file, nil, &input); err != nil {
+		t.Fatal(err)
+	}
+	policy, _, err := readBigQueryPilotPolicy(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*bigQueryPilotPolicy){
+		"source":     func(p *bigQueryPilotPolicy) { p.SourceDigest = "other" },
+		"descriptor": func(p *bigQueryPilotPolicy) { p.DescriptorDigest = "other" },
+		"plan":       func(p *bigQueryPilotPolicy) { p.PlanDigest = "other" },
+		"rights":     func(p *bigQueryPilotPolicy) { p.RightsReviewRef = "other" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := policy
+			change(&changed)
+			if validateBigQueryPilot(input.Profile, preview.Plan, preview, changed) == nil {
+				t.Fatal("changed operator binding accepted")
+			}
+		})
 	}
 }
 func TestBigQueryPilotClaimSurvivesAmbiguousAndMalformedSubmission(t *testing.T) {
@@ -385,7 +439,7 @@ func TestBigQueryPilotPolicyChangeAndAtomicClaim(t *testing.T) {
 	if verifyBigQueryPilotClaim(path, bigquery.Receipt{ApprovalDigest: preview.ApprovalDigest}) == nil || claimBigQueryPilot(path, policy, hash) == nil {
 		t.Fatal("changed policy accepted")
 	}
-	if err := os.WriteFile(path, []byte(`{"format":"datatug-bigquery-operator-pilot/1","format":"datatug-bigquery-operator-pilot/1"}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"format":"datatug-bigquery-operator-pilot/2","format":"datatug-bigquery-operator-pilot/2"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := readBigQueryPilotPolicy(path); err == nil {

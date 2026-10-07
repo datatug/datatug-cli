@@ -59,7 +59,9 @@ calling BigQuery. Pilot preview accepts only
 `bigquery-public-data.world_bank_wdi.country_summary` in `US`, the two native
 fields `country_code` and `short_name` ordered by both, limit 2, `demodb-dev`,
 page size 1, and both cap and session budget set to `10485760` bytes. It runs a
-dry-run estimate. The pilot does not allow result paging. Pilot run emits only a
+dry-run estimate. The pilot also fixes each response at 64 KiB, the total
+response budget at 128 KiB, wall time at 10 seconds and HTTP time at 5 seconds.
+The pilot does not allow result paging. Pilot run emits only a
 receipt, without delivering the initial response's rows or making a result-page
 request. Control operations likewise emit only the updated receipt.
 
@@ -69,8 +71,11 @@ run and control. This JSON file must be in an operator-owned private directory
 
 ```json
 {
-  "format": "datatug-bigquery-operator-pilot/1",
+  "format": "datatug-bigquery-operator-pilot/2",
   "approvalDigest": "<exact reviewed preview digest>",
+  "sourceDigest": "<exact reviewed preview source digest>",
+  "descriptorDigest": "<exact reviewed source profile descriptor digest>",
+  "planDigest": "<exact reviewed preview plan digest>",
   "rightsReviewRef": "<accepted exact source-rights review reference>",
   "executionProject": "demodb-dev",
   "maximumBytesBilled": "10485760",

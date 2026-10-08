@@ -12,7 +12,7 @@ status: Implementing
 
 ## Summary
 
-`datatug show` lists what a [scan](../scan/README.md) wrote into a project: the project's ID, each environment, each source with its driver, each schema, and each table and view with its columns, their types and their place in the primary key. It is the second step of the quick start in the README: scan a database, look at what was scanned. The text is plain, one item to a line, and the same from one run to the next, so that two runs can be compared; `--format json` prints the same as one JSON document.
+`datatug show` lists what a [scan](../scan/README.md) wrote into a project: the project's ID, each environment, each source with its driver, each schema, and each table and view with its columns, their types and their place in the primary key. It is the second step of the quick start in the README: scan a database, look at what was scanned. The text is plain, one item to a line, and the same from one run to the next, so that two runs can be compared; `--format json` prints the same as one JSON document, with the project's title and access added. `--depth` stops the listing at sources or at tables, for a reader that wants the outline and not every column.
 
 ## Synopsis
 
@@ -21,6 +21,7 @@ datatug show --directory <path>
 datatug show --project <id>
 datatug show
 datatug show --directory <path> --format json
+datatug show --directory <path> --format json --depth tables
 ```
 
 ## Problem
@@ -69,7 +70,11 @@ The text MUST be plain: one item to a line, two spaces of indent for each level,
 
 #### REQ: json-format
 
-`--format json` MUST print the same information as one JSON document: `project`; `environments[]` of `id` and `sources[]`; a source has `id`, `driver`, `dsnEnv` (PostgreSQL only), `notScanned` (`true` only for a source that was never scanned), `empty` (`true` only for a source that was scanned and has nothing to list) and `schemas[]` of `name`, `tables[]` and `views[]`; each of those has `name` and `columns[]` of `name`, `type` and `primaryKeyPosition` (the last two left out when there is none). Any other `--format` than `text` and `json` MUST exit `2`.
+`--format json` MUST print the same information as one JSON document, and two keys the text does not carry: `project`; `title` and `access` (those of the project file, each left out when the file holds none); `environments[]` of `id` and `sources[]`; a source has `id`, `driver`, `dsnEnv` (PostgreSQL only), `notScanned` (`true` only for a source that was never scanned), `empty` (`true` only for a source that was scanned and has nothing to list) and `schemas[]` of `name`, `tables[]` and `views[]`; each of those has `name` and `columns[]` of `name`, `type` and `primaryKeyPosition` (the last two left out when there is none). Any other `--format` than `text` and `json` MUST exit `2`.
+
+#### REQ: depth
+
+`--depth` MUST be `sources`, `tables` or `columns` (the default), and applies to both formats. `columns` lists everything, as before the flag existed. `tables` lists each table and each view with no column: in the text a table or a view is its one line, and in JSON it has `name` and no `columns` key. `sources` lists nothing below a source: in the text no schema, table, view or column line, and in JSON a source has no `schemas` key. The `not scanned` and `no tables or views` lines, and `notScanned` and `empty` in JSON, are kept at every depth. Any other `--depth` MUST exit `2`. The order of [REQ: stable-order](#req-stable-order) holds at every depth.
 
 #### REQ: stable-order
 
@@ -86,13 +91,14 @@ All output MUST go to stdout; a failure goes to stderr and exits non-zero (see [
 | `--project` | `-p` | string | Registered project ID. |
 | `--directory` | `-d`, `--dir` | string | Project directory path. |
 | `--format` | none (`show` has no `-f`) | string | `text` (default) or `json`. |
+| `--depth` | none | string | `sources`, `tables` or `columns` (default): how far down the listing goes. |
 
 ## Exit codes
 
 | Exit code | Meaning |
 |---|---|
 | `0` | Project listed, or said to hold no scanned database |
-| `2` | `--project` and `--directory` together; an unsupported `--format`; an address as the folder |
+| `2` | `--project` and `--directory` together; an unsupported `--format` or `--depth`; an address as the folder |
 | `3` | The folder is not a project (or does not exist); `--project` names no registered project |
 | `1` | A file of the project cannot be read (load failure, a source's files, a PostgreSQL descriptor), or a write failed |
 
@@ -131,6 +137,18 @@ A SQLite file whose columns are named with a line break and an escape character,
 **Requirements:** show#req:json-format
 
 `--format json` on that project prints one JSON document with the same project, environments, sources, schemas, tables, views and columns; `--format yaml` exits `2`. (`TestShowFormatJSON`.)
+
+### AC: json-carries-title-and-access
+
+**Requirements:** show#req:json-format
+
+`--format json` on a project whose file holds a title and an access prints both as `title` and `access` beside `project`; on a project file that holds neither, the document has neither key; the text of the same projects is what it was before the keys existed.
+
+### AC: depth-trims-the-listing
+
+**Requirements:** show#req:depth, show#req:stable-order
+
+On the journey project, `--depth tables` lists each table and view with no column (in JSON, no `columns` key), `--depth sources` lists nothing below each source (in JSON, no `schemas` key) while a never-scanned source still says `not scanned`, `--depth columns` and no `--depth` print the same bytes, two runs at each depth are byte-identical, and `--depth rows` exits `2`.
 
 ### AC: postgres-is-named-by-its-variable
 

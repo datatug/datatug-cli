@@ -49,6 +49,7 @@ Pinning the contract surface lets the implementation evolve without breaking use
 | [execute/](execute/README.md) | Execute an SQL query/command (currently exposed under the name `updateUrlConfig`) |
 | [query/](query/README.md) | `query run` — run an ad-hoc DTQL query through the user's access policies (`~/.datatug/policies/`): rows to stdout, applied limitations to stderr |
 | [version/](version/README.md) | CLI version reporting |
+| [board](board/README.md) | List the boards of a project (`list`) |
 | [entity](entity/README.md) | Author and read entities and their fields (`add`, `field add/set/rm`, `list`, `show`) |
 | [incident](incident/README.md) | List, search, inspect, create/update and resolve incidents; attach context, hypotheses and evidence; link recurrence; `watch` streams the event stream for humans, scripts and AI agents |
 | [self-update](self-update/README.md) | datatug self-update, built from github.com/strongo/cli-helpers/selfupdate against datatug's own compiled-in cliinstall catalog entry. |

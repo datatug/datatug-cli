@@ -348,3 +348,82 @@ func TestQueries_FailsWhenStdoutCannotBeWritten(t *testing.T) {
 		})
 	}
 }
+
+func TestQueries_JSONListsParameters(t *testing.T) {
+	t.Chdir(queriesProjectWith(t, map[string]string{
+		"with-params": `{"title":"T","type":"SQL","parameters":[
+			{"id":"year","type":"integer","isRequired":true},
+			{"id":"region"},
+			{"id":"flag","type":"bool","isRequired":false},
+			{"id":"odd","type":7,"isRequired":"yes"}]}`,
+		"no-params":    `{"title":"N"}`,
+		"empty-params": `{"parameters":[]}`,
+	}))
+	out, errOut, err := runQueriesBoth(t, "--format", "json")
+	require.NoError(t, err)
+	assert.Empty(t, errOut)
+	assert.Equal(t, `[
+  {
+    "id": "empty-params"
+  },
+  {
+    "id": "no-params",
+    "title": "N"
+  },
+  {
+    "id": "with-params",
+    "title": "T",
+    "type": "SQL",
+    "parameters": [
+      {
+        "id": "year",
+        "type": "integer",
+        "required": true
+      },
+      {
+        "id": "region"
+      },
+      {
+        "id": "flag",
+        "type": "bool"
+      },
+      {
+        "id": "odd"
+      }
+    ]
+  }
+]
+`, out)
+}
+
+func TestQueries_JSONLeavesOutMalformedParametersAndKeepsTheQuery(t *testing.T) {
+	t.Chdir(queriesProjectWith(t, map[string]string{
+		"bad-entries": `{"title":"A","parameters":["x",5,null,{"type":"integer"},{"id":3},{"id":""},{"id":"ok"}]}`,
+		"not-array":   `{"title":"B","type":"SQL","parameters":{"id":"x"}}`,
+		"null-params": `{"title":"C","parameters":null}`,
+	}))
+	out, errOut, err := runQueriesBoth(t, "--format", "json")
+	require.NoError(t, err)
+	assert.Empty(t, errOut)
+	assert.Equal(t, `[
+  {
+    "id": "bad-entries",
+    "title": "A",
+    "parameters": [
+      {
+        "id": "ok"
+      }
+    ]
+  },
+  {
+    "id": "not-array",
+    "title": "B",
+    "type": "SQL"
+  },
+  {
+    "id": "null-params",
+    "title": "C"
+  }
+]
+`, out)
+}

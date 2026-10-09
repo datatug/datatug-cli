@@ -34,6 +34,15 @@ type queryListItem struct {
 	ID    string `json:"id"`
 	Title string `json:"title,omitempty"`
 	Type  string `json:"type,omitempty"`
+	// Parameters are the declared parameters, in the file's order.
+	Parameters []queryListParameter `json:"parameters,omitempty"`
+}
+
+// queryListParameter is one declared parameter of a query in the --format json array.
+type queryListParameter struct {
+	ID       string `json:"id"`
+	Type     string `json:"type,omitempty"`
+	Required bool   `json:"required,omitempty"`
 }
 
 // queriesCommand returns the CLI command that lists the saved queries of a
@@ -145,12 +154,40 @@ func readQueryListItem(projectDir, id string) (item queryListItem, ok bool) {
 	var def struct {
 		Title string `json:"title"`
 		Type  string `json:"type"`
+		// Decoded leniently: a malformed value must not make the query unreadable.
+		Parameters json.RawMessage `json:"parameters"`
 	}
 	if err = json.Unmarshal(data, &def); err != nil {
 		return item, false
 	}
 	item.Title, item.Type = def.Title, def.Type
+	item.Parameters = readQueryListParameters(def.Parameters)
 	return item, true
+}
+
+// readQueryListParameters returns the parameters of a query file's "parameters"
+// value, leaving out what is malformed: a value that is not an array, and each
+// entry that is not an object with a string id.
+func readQueryListParameters(raw json.RawMessage) []queryListParameter {
+	var entries []json.RawMessage
+	if json.Unmarshal(raw, &entries) != nil {
+		return nil
+	}
+	var params []queryListParameter
+	for _, entry := range entries {
+		var p struct {
+			ID         *string         `json:"id"`
+			Type       json.RawMessage `json:"type"`
+			IsRequired json.RawMessage `json:"isRequired"`
+		}
+		if json.Unmarshal(entry, &p) != nil || p.ID == nil || *p.ID == "" {
+			continue
+		}
+		param := queryListParameter{ID: *p.ID, Required: string(p.IsRequired) == "true"}
+		_ = json.Unmarshal(p.Type, &param.Type) // a type that is not a string is left out
+		params = append(params, param)
+	}
+	return params
 }
 
 // plainQueryID reports whether id, the folders and name of a saved query joined

@@ -70,7 +70,7 @@ The text MUST be plain: one item to a line, two spaces of indent for each level,
 
 #### REQ: json-format
 
-`--format json` MUST print the same information as one JSON document, and two keys the text does not carry: `project`; `title` and `access` (those of the project file, each left out when the file holds none); `environments[]` of `id` and `sources[]`; a source has `id`, `driver`, `dsnEnv` (PostgreSQL only), `notScanned` (`true` only for a source that was never scanned), `empty` (`true` only for a source that was scanned and has nothing to list) and `schemas[]` of `name`, `tables[]` and `views[]`; each of those has `name` and `columns[]` of `name`, `type` and `primaryKeyPosition` (the last two left out when there is none). Any other `--format` than `text` and `json` MUST exit `2`.
+`--format json` MUST print the same information as one JSON document, and two keys the text does not carry: `project`; `title` and `access` (those of the project file, each left out when the file holds none), printed as the file holds them and not validated; `environments[]` of `id` and `sources[]`; a source has `id`, `driver`, `dsnEnv` (PostgreSQL only), `notScanned` (`true` only for a source that was never scanned), `empty` (`true` only for a source that was scanned and has nothing to list) and `schemas[]` of `name`, `tables[]` and `views[]`; each of those has `name` and `columns[]` of `name`, `type` and `primaryKeyPosition` (the last two left out when there is none). Any other `--format` than `text` and `json` MUST exit `2`.
 
 #### REQ: depth
 
@@ -142,13 +142,13 @@ A SQLite file whose columns are named with a line break and an escape character,
 
 **Requirements:** show#req:json-format
 
-`--format json` on a project whose file holds a title and an access prints both as `title` and `access` beside `project`; on a project file that holds neither, the document has neither key; the text of the same projects is what it was before the keys existed.
+`--format json` on a project whose file holds a title and an access prints both as `title` and `access` beside `project`; on a project file that holds neither, the document has neither key; the text of the same projects is what it was before the keys existed. (`TestShowJSONCarriesTitleAndAccess`.)
 
 ### AC: depth-trims-the-listing
 
 **Requirements:** show#req:depth, show#req:stable-order
 
-On the journey project, `--depth tables` lists each table and view with no column (in JSON, no `columns` key), `--depth sources` lists nothing below each source (in JSON, no `schemas` key) while a never-scanned source still says `not scanned`, `--depth columns` and no `--depth` print the same bytes, two runs at each depth are byte-identical, and `--depth rows` exits `2`.
+On the journey project, `--depth tables` lists each table and view with no column (in JSON, no `columns` key), `--depth sources` lists nothing below each source (in JSON, no `schemas` key) while a never-scanned source still says `not scanned`, `--depth columns` and no `--depth` print the same bytes, two runs at each depth are byte-identical, and `--depth rows` exits `2`. (`TestShowDepthTrimsTheText`, `TestShowDepthTrimsTheJSON`, `TestShowDepthKeepsNotScannedAndEmpty`, `TestShowRefusesAnUnknownDepth`.)
 
 ### AC: postgres-is-named-by-its-variable
 

@@ -43,7 +43,7 @@ The resource is `board`, singular, and its action is the explicit verb `list` ([
 
 #### REQ: same-reader-as-serve
 
-The boards MUST be read through the project store (`ProjectStore.LoadBoards`), the reader `serve` uses for the same files, so that both layouts of a board on disk are listed and what `board list` lists and what `serve` finds cannot disagree. A board that the store cannot load MUST exit `1` with a message on stderr that names the board, and nothing on stdout.
+The boards MUST be read through the project store (`ProjectStore.LoadBoards`), the store through which `serve` reads the same files, so that both layouts of a board on disk are listed and what `board list` lists and what `serve` finds cannot disagree. A board that the store cannot load MUST exit `1` with a message on stderr that names the board, and nothing on stdout. This comes before the skipping of [REQ: one-id-per-line](#req-one-id-per-line): a board that cannot be loaded fails the listing whatever its ID.
 
 #### REQ: read-only
 
@@ -53,7 +53,7 @@ The boards MUST be read through the project store (`ProjectStore.LoadBoards`), t
 
 #### REQ: one-id-per-line
 
-In the `text` format (the default) the command MUST print exactly one board ID per line on stdout, ordered by ID, so the output is stable. A board whose ID is not a plain name (letters, digits, `.`, `_` and `-`) is not printed, and one line on stderr says how many boards were skipped. (Mirrors [queries REQ: one-id-per-line](../queries/README.md#req-one-id-per-line).)
+In the `text` format (the default) the command MUST print exactly one board ID per line on stdout, ordered by ID, so the output is stable. A board whose ID is not a plain name (letters, digits, `.`, `_` and `-`) is not printed, and one line on stderr says how many boards were skipped. (Mirrors [queries REQ: one-id-per-line](../queries/README.md#req-one-id-per-line).) Text, not YAML, is the default, as for `queries`.
 
 #### REQ: json-format
 

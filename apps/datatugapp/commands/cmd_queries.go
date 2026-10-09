@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,7 +22,16 @@ const exitCodeNoProject = 3
 var (
 	queriesGetwd = os.Getwd
 	queriesIndex = api.QueryIDIndex
+	// queriesReadFile reads a query file for --format json.
+	queriesReadFile = os.ReadFile
 )
+
+// queryListItem is one object of the --format json array.
+type queryListItem struct {
+	ID    string `json:"id"`
+	Title string `json:"title,omitempty"`
+	Type  string `json:"type,omitempty"`
+}
 
 // queriesCommand returns the CLI command that lists the saved queries of a
 // project, one ID per line (spec/features/cli/queries).
@@ -34,12 +44,17 @@ func queriesCommand() *cobra.Command {
 	}
 	cmd.Flags().StringP("project", "p", "", "project ID or folder")
 	cmd.Flags().StringP("dir", "d", "", "project folder")
+	cmd.Flags().String("format", "text", "output format: text or json")
 	return cmd
 }
 
 func queriesCommandAction(cmd *cobra.Command, _ []string) error {
 	project, _ := cmd.Flags().GetString("project")
 	dir, _ := cmd.Flags().GetString("dir")
+	format, _ := cmd.Flags().GetString("format")
+	if format != "text" && format != "json" {
+		return Exit(fmt.Sprintf("unsupported --format %q: use text or json", format), exitCodeUsage)
+	}
 	switch {
 	case project != "" && dir != "":
 		return Exit("--project and --dir cannot be used together", exitCodeUsage)
@@ -68,12 +83,26 @@ func queriesCommandAction(cmd *cobra.Command, _ []string) error {
 	sort.Strings(ids)
 	out := cmd.OutOrStdout()
 	skipped := 0
+	unreadable := 0
+	items := make([]queryListItem, 0, len(ids))
 	for _, id := range ids {
 		if !plainQueryID(id) {
 			skipped++
 			continue
 		}
+		if format == "json" {
+			item, ok := readQueryListItem(dir, id)
+			if !ok {
+				unreadable++
+			}
+			items = append(items, item)
+			continue
+		}
 		_, _ = fmt.Fprintln(out, id)
+	}
+	if format == "json" {
+		data, _ := json.MarshalIndent(items, "", "  ") // plain strings cannot fail to marshal
+		_, _ = fmt.Fprintln(out, string(data))
 	}
 	if skipped > 0 {
 		noun := "queries"
@@ -82,7 +111,34 @@ func queriesCommandAction(cmd *cobra.Command, _ []string) error {
 		}
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%d saved %s skipped: their IDs are not plain names (letters, digits, '.', '_' and '-', with '/' between folders)\n", skipped, noun)
 	}
+	if unreadable > 0 {
+		noun := "files"
+		if unreadable == 1 {
+			noun = "file"
+		}
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%d query %s could not be read as a query\n", unreadable, noun)
+	}
 	return nil
+}
+
+// readQueryListItem returns the item of the query id, with the title and type
+// of its file. When the file cannot be read as a query the item holds the ID
+// only and ok is false.
+func readQueryListItem(projectDir, id string) (item queryListItem, ok bool) {
+	item = queryListItem{ID: id}
+	data, err := queriesReadFile(filepath.Join(projectDir, storage.QueriesFolder, filepath.FromSlash(id)+"."+storage.QueryFileSuffix+".json"))
+	if err != nil {
+		return item, false
+	}
+	var def struct {
+		Title string `json:"title"`
+		Type  string `json:"type"`
+	}
+	if err = json.Unmarshal(data, &def); err != nil {
+		return item, false
+	}
+	item.Title, item.Type = def.Title, def.Type
+	return item, true
 }
 
 // plainQueryID reports whether id, the folders and name of a saved query joined

@@ -12,12 +12,13 @@ status: Implementing
 
 ## Summary
 
-`datatug queries` lists the named queries stored in a DataTug project (and, in future, manages them — create, rename, delete). The listing is implemented; creating, renaming and deleting queries from the CLI is not. The command used to be a placeholder whose action `panic`ked with `"not implemented"`.
+`datatug queries` lists the named queries stored in a DataTug project (and, in future, manages them — create, rename, delete). The listing is implemented, as one ID per line or, with `--format json`, as one JSON document that also carries each query's title and type; creating, renaming and deleting queries from the CLI is not. The command used to be a placeholder whose action `panic`ked with `"not implemented"`.
 
 ## Synopsis
 
 ```
 datatug queries [--project <id> | --dir <path>]
+datatug queries [--project <id> | --dir <path>] --format json
 ```
 
 ## Problem
@@ -41,11 +42,15 @@ Running `datatug queries` used to crash the binary; it now lists the queries, or
 
 #### REQ: one-id-per-line
 
-The command MUST print exactly one query ID per line on stdout. Order is by ID, so the output is stable. A query whose ID is not made of plain names (letters, digits, `.`, `_` and `-`, with `/` between folders) is not printed: stdout holds only IDs that `query run` can address, and one line on stderr says how many queries were skipped. (Mirrors [datasets REQ: one-id-per-line](../datasets/README.md#req-one-id-per-line) for consistency.)
+In the `text` format (the default) the command MUST print exactly one query ID per line on stdout. Order is by ID, so the output is stable. A query whose ID is not made of plain names (letters, digits, `.`, `_` and `-`, with `/` between folders) is not printed: stdout holds only IDs that `query run` can address, and one line on stderr says how many queries were skipped. (Mirrors [datasets REQ: one-id-per-line](../datasets/README.md#req-one-id-per-line) for consistency.)
 
 #### REQ: empty-project-prints-nothing
 
-If the project contains zero named queries, the command MUST exit `0` and write nothing to stdout.
+If the project contains zero named queries, the command MUST exit `0` and write nothing to stdout in the `text` format, and `[]` in the `json` format.
+
+#### REQ: json-format
+
+`--format json` MUST print one JSON document on stdout: an array, in the order of the `text` format, of one object for each query the `text` format prints. An object has `id` (the ID the `text` format prints), `title` and `type` (those of the query's file, each left out when the file holds none). A query whose ID is not made of plain names is left out and counted on stderr, as in the `text` format. A query whose file cannot be read, is not a regular file (a symbolic link is not followed), or does not hold a JSON object is listed with its `id` only, and one line on stderr says how many could not be read; it is no failure. The listing does not validate a query as the project store does. Any other `--format` than `text` and `json` MUST exit `2`. The `text` format MUST NOT change: it reads no query file.
 
 ### Placeholder behavior
 
@@ -59,15 +64,16 @@ The command MUST NOT call `panic`: not in an empty folder, not in a folder that 
 |---|---|---|---|
 | `--project` | `-p` | string | Project ID. |
 | `--dir` | `-d` | string | Project directory. |
+| `--format` | none | string | `text` (default) or `json`. |
 
 ## Exit codes
 
 | Exit code | Meaning |
 |---|---|
 | `0` | Listing succeeded (or empty) |
-| `2` | `--project` and `--dir` both given |
+| `2` | `--project` and `--dir` both given; an unsupported `--format` |
 | `3` | Project not resolved |
-| `1` | Generic runtime error |
+| `1` | Generic runtime error, or a write to stdout failed |
 
 ## Interaction with Other Features
 
@@ -84,6 +90,12 @@ The command MUST NOT call `panic`: not in an empty folder, not in a folder that 
 **Requirements:** queries#req:one-id-per-line
 
 Against a project with N queries with plain IDs, `datatug queries` exits `0` and prints exactly N lines; a query with a non-plain ID is skipped and counted on stderr.
+
+### AC: json-lists-queries
+
+**Requirements:** queries#req:json-format, queries#req:empty-project-prints-nothing
+
+Against a project with queries in folders, one with a title and a type and one whose file holds neither, `datatug queries --format json` exits `0` and prints one JSON array in ID order whose objects carry `id`, and `title` and `type` only where the file holds them; a query with a non-plain ID is left out and counted on stderr; a query file that is not JSON is listed with its `id` only and counted on stderr; so is a query file that is a symbolic link, whose target is not read; a project with no query prints `[]`; `--format yaml` exits `2`; and `datatug queries` with no `--format` prints what it printed before.
 
 ### AC: no-panic
 

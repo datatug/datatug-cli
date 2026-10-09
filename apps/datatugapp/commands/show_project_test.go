@@ -106,6 +106,7 @@ func TestShowFormatJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &got), stdout)
 	want := map[string]any{
 		"project": "shop-project",
+		"access":  "private", // a scan writes the access of the project file
 		"environments": []any{map[string]any{
 			"id": "local",
 			"sources": []any{map[string]any{
@@ -393,7 +394,7 @@ func TestShowListsNoSourceForAnEnvironmentWithoutCatalogs(t *testing.T) {
 	// In JSON the environment is there and has no source; the list of environments is empty only for a project that has none.
 	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"project":"shop-project","environments":[{"id":"local","sources":[]}]}`, stdout)
+	assert.JSONEq(t, `{"project":"shop-project","access":"private","environments":[{"id":"local","sources":[]}]}`, stdout)
 }
 
 // A source that was scanned and has nothing to list says so on one line, and in JSON, and is not the line
@@ -407,7 +408,7 @@ func TestShowSaysSoForAScannedSourceWithNoTableOrView(t *testing.T) {
 	assert.Equal(t, "Project shop-project\nEnvironment local\n  Source shop (sqlite3)\n    no tables or views\n", stdout)
 	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"project":"shop-project","environments":[{"id":"local","sources":[{"id":"shop","driver":"sqlite3","empty":true,"schemas":[]}]}]}`, stdout)
+	assert.JSONEq(t, `{"project":"shop-project","access":"private","environments":[{"id":"local","sources":[{"id":"shop","driver":"sqlite3","empty":true,"schemas":[]}]}]}`, stdout)
 
 	// A source that is not scanned is said to be that, and not to be empty; a source with tables is neither.
 	stdout, _, err = runShowCommand(t, "-d", demoShapedProject(t))
@@ -708,4 +709,204 @@ func TestReadShowDocumentSkipsAHoleAndNamesTheEnvironmentOfAFailure(t *testing.T
 
 	_, err = readShowDocument(context.Background(), catalogsStore{err: errors.New("open /secret/path: denied")}, project, t.TempDir())
 	assert.EqualError(t, err, `environment "local": its catalogs cannot be read`)
+}
+
+// writeProjectFile replaces the project file of a project folder.
+func writeProjectFile(t *testing.T, folder, content string) {
+	t.Helper()
+	writeProjectFiles(t, folder, map[string]string{"datatug-project.json": content})
+}
+
+// The title and the access of the project file are in the JSON beside the project, each only when the file holds
+// it, and the text never carries them.
+func TestShowJSONCarriesTitleAndAccess(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	text, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+
+	writeProjectFile(t, projectDir, `{"id":"shop-project","title":"Shop \"data\"","access":"public"}`)
+	stdout, _, err := runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(stdout, "{\n  \"project\": \"shop-project\",\n  \"title\": \"Shop \\\"data\\\"\",\n  \"access\": \"public\",\n  \"environments\""), stdout)
+	again, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.Equal(t, text, again, "the text is what it was")
+
+	writeProjectFile(t, projectDir, `{"id":"shop-project"}`)
+	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(stdout, "{\n  \"project\": \"shop-project\",\n  \"environments\""), stdout)
+	assert.NotContains(t, stdout, `"title"`)
+	assert.NotContains(t, stdout, `"access"`)
+	again, _, err = runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.Equal(t, text, again)
+}
+
+const showJourneySQLiteTables = `Project shop-project
+Environment local
+  Source shop (sqlite3)
+    Schema main
+      Table Customer
+      Table order_line
+      View customer_names
+`
+
+const showJourneySQLiteSources = `Project shop-project
+Environment local
+  Source shop (sqlite3)
+`
+
+// --depth stops the listing: tables list each table and view with no column, sources list nothing below a source;
+// columns and no --depth are the same bytes, and two runs at a depth are the same bytes.
+func TestShowDepthTrimsTheText(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	for depth, want := range map[string]string{
+		"columns": showJourneySQLite,
+		"tables":  showJourneySQLiteTables,
+		"sources": showJourneySQLiteSources,
+	} {
+		stdout, stderr, err := runShowCommand(t, "-d", projectDir, "--depth", depth)
+		require.NoError(t, err, depth)
+		assert.Equal(t, want, stdout, depth)
+		assert.Empty(t, stderr)
+		again, _, err := runShowCommand(t, "-d", projectDir, "--depth", depth)
+		require.NoError(t, err)
+		assert.Equal(t, stdout, again, "two runs at depth %s are byte-identical", depth)
+	}
+	plain, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	explicit, _, err := runShowCommand(t, "-d", projectDir, "--depth", "columns")
+	require.NoError(t, err)
+	assert.Equal(t, plain, explicit)
+}
+
+func TestShowDepthTrimsTheJSON(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	plain, _, err := runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	explicit, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "columns")
+	require.NoError(t, err)
+	assert.Equal(t, plain, explicit)
+
+	tables, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "tables")
+	require.NoError(t, err)
+	assert.Equal(t, `{
+  "project": "shop-project",
+  "access": "private",
+  "environments": [
+    {
+      "id": "local",
+      "sources": [
+        {
+          "id": "shop",
+          "driver": "sqlite3",
+          "schemas": [
+            {
+              "name": "main",
+              "tables": [
+                {
+                  "name": "Customer"
+                },
+                {
+                  "name": "order_line"
+                }
+              ],
+              "views": [
+                {
+                  "name": "customer_names"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+`, tables)
+	tablesAgain, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "tables")
+	require.NoError(t, err)
+	assert.Equal(t, tables, tablesAgain)
+
+	sources, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "sources")
+	require.NoError(t, err)
+	assert.Equal(t, `{
+  "project": "shop-project",
+  "access": "private",
+  "environments": [
+    {
+      "id": "local",
+      "sources": [
+        {
+          "id": "shop",
+          "driver": "sqlite3"
+        }
+      ]
+    }
+  ]
+}
+`, sources)
+	sourcesAgain, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "sources")
+	require.NoError(t, err)
+	assert.Equal(t, sources, sourcesAgain)
+}
+
+// notScanned and empty, and their lines, are kept at every depth; a table with no column keeps its empty list at
+// the depth columns only.
+func TestShowDepthKeepsNotScannedAndEmpty(t *testing.T) {
+	projectDir := demoShapedProject(t)
+	for _, depth := range []string{"tables", "sources"} {
+		stdout, _, err := runShowCommand(t, "-d", projectDir, "--depth", depth)
+		require.NoError(t, err)
+		assert.Contains(t, stdout, "  Source geo (ingitdb)\n    not scanned\n", depth)
+		assert.Contains(t, stdout, "  Source orders (sqlite3)\n    not scanned\n", depth)
+		assert.NotContains(t, stdout, "AlbumId")
+
+		stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", depth)
+		require.NoError(t, err)
+		assert.Contains(t, stdout, `"notScanned": true`, depth)
+		assert.Equal(t, depth == "tables", strings.Contains(stdout, `"schemas": []`), "schemas is kept at tables and left out at sources: %s", depth)
+		assert.NotContains(t, stdout, `"columns"`, depth)
+	}
+
+	emptyDir := scannedJourneyProject(t)
+	require.NoError(t, os.RemoveAll(filepath.Join(emptyDir, "dbmodels")))
+	for _, depth := range []string{"tables", "sources"} {
+		stdout, _, err := runShowCommand(t, "-d", emptyDir, "--depth", depth)
+		require.NoError(t, err)
+		assert.Equal(t, "Project shop-project\nEnvironment local\n  Source shop (sqlite3)\n    no tables or views\n", stdout, depth)
+		stdout, _, err = runShowCommand(t, "-d", emptyDir, "--format", "json", "--depth", depth)
+		require.NoError(t, err)
+		assert.Contains(t, stdout, `"empty": true`, depth)
+		assert.Equal(t, depth == "tables", strings.Contains(stdout, `"schemas": []`), depth)
+	}
+
+	// At the depth columns a table with no column keeps "columns": [] and a source with no schema keeps "schemas": [].
+	noColumns := t.TempDir()
+	writeProjectFiles(t, noColumns, map[string]string{
+		"datatug-project.json":                         `{"id":"p"}`,
+		"environments/local/local.env.json":            `{"id":"local"}`,
+		"environments/local/catalogs/c/c.db.json":      `{"driver":"sqlite3","path":"x","dbModel":"m"}`,
+		"dbmodels/m/main/tables/T/main.T.columns.json": `{"columns":[]}`,
+	})
+	stdout, _, err := runShowCommand(t, "-d", noColumns, "--format", "json")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, `"columns": []`)
+	stdout, _, err = runShowCommand(t, "-d", noColumns, "--format", "json", "--depth", "tables")
+	require.NoError(t, err)
+	assert.NotContains(t, stdout, `"columns"`)
+}
+
+func TestShowRefusesAnUnknownDepth(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	for _, depth := range []string{"rows", "", "Tables"} {
+		stdout, stderr, err := runShowCommand(t, "-d", projectDir, "--depth", depth)
+		assert.Equal(t, 2, showExitCodeOf(t, err), depth)
+		assert.ErrorContains(t, err, "unsupported --depth")
+		assert.Empty(t, stdout)
+		assert.Empty(t, stderr)
+	}
+	_, _, err := runShowCommand(t, "-d", t.TempDir(), "--depth", "rows")
+	assert.Equal(t, 2, showExitCodeOf(t, err), "the depth is checked before the project is read")
 }

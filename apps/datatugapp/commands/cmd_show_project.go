@@ -29,6 +29,11 @@ import (
 const (
 	showFormatText = "text"
 	showFormatJSON = "json"
+
+	// The depths of the listing: how far down it goes.
+	showDepthSources = "sources"
+	showDepthTables  = "tables"
+	showDepthColumns = "columns"
 )
 
 func showCommandArgs() *cobra.Command {
@@ -39,7 +44,8 @@ func showCommandArgs() *cobra.Command {
 			"(a PostgreSQL source with the name of the environment variable that holds its URL, never the URL); " +
 			"each schema; each table and view with its columns, their types and their place in the primary key.\n\n" +
 			"The project is the folder of --directory, or the registered project of --project, or else the current folder. " +
-			"The text is stable from one run to the next, so two runs can be compared; --format json prints the same as one JSON document.",
+			"The text is stable from one run to the next, so two runs can be compared; --format json prints the same as one JSON document, which also carries the project's title and access.\n\n" +
+			"--depth stops the listing at sources or at tables.",
 		Args: cobra.NoArgs,
 		RunE: showCommandAction,
 	}
@@ -47,6 +53,7 @@ func showCommandArgs() *cobra.Command {
 	flags.StringP("project", "p", "", "Registered project id/name")
 	flags.StringP("directory", "d", "", "Path to the project directory (alternative to --project; --dir is the same flag)")
 	flags.String("format", showFormatText, "Output format: "+showFormatText+" or "+showFormatJSON)
+	flags.String("depth", showDepthColumns, "How far down the listing goes: "+showDepthSources+", "+showDepthTables+" or "+showDepthColumns)
 	flags.SetNormalizeFunc(func(_ *pflag.FlagSet, name string) pflag.NormalizedName {
 		if name == "dir" {
 			name = "directory"
@@ -69,6 +76,10 @@ func showCommandAction(cmd *cobra.Command, _ []string) error {
 	format, _ := flags.GetString("format")
 	if format != showFormatText && format != showFormatJSON {
 		return Exit(fmt.Sprintf("unsupported --format %q: want %s or %s", format, showFormatText, showFormatJSON), exitCodeUsage)
+	}
+	depth, _ := flags.GetString("depth")
+	if depth != showDepthSources && depth != showDepthTables && depth != showDepthColumns {
+		return Exit(fmt.Sprintf("unsupported --depth %q: want %s, %s or %s", depth, showDepthSources, showDepthTables, showDepthColumns), exitCodeUsage)
 	}
 	if v.ProjectName != "" && v.ProjectDir != "" {
 		return Exit("--project and --directory cannot be used together: give the registered name or the folder", exitCodeUsage)
@@ -106,6 +117,7 @@ func showCommandAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	trimShowDocument(doc, depth)
 	if format == showFormatJSON {
 		return writeShowJSON(cmd.OutOrStdout(), doc)
 	}
@@ -136,6 +148,8 @@ const exitCodeNotFound = 3
 // showDocument is what `datatug show` prints: the project as a scan left it, in the order it is printed.
 type showDocument struct {
 	Project      string            `json:"project"`
+	Title        string            `json:"title,omitempty"`
+	Access       string            `json:"access,omitempty"`
 	Environments []showEnvironment `json:"environments"`
 }
 
@@ -156,8 +170,9 @@ type showSource struct {
 	// Empty is true for a source that was scanned and has no table and no view to list: a database with none,
 	// or a catalog whose model has no files (its dbmodels folder was removed). It is not "notScanned": a scan
 	// did describe the source, and what it described is nothing.
-	Empty   bool         `json:"empty,omitempty"`
-	Schemas []showSchema `json:"schemas"`
+	Empty bool `json:"empty,omitempty"`
+	// Schemas is nil at the depth "sources" (and then has no key in JSON), and empty, never nil, otherwise.
+	Schemas []showSchema `json:"schemas,omitzero"`
 }
 
 type showSchema struct {
@@ -167,8 +182,9 @@ type showSchema struct {
 }
 
 type showRelation struct {
-	Name    string       `json:"name"`
-	Columns []showColumn `json:"columns"`
+	Name string `json:"name"`
+	// Columns is nil at the depths "sources" and "tables" (and then has no key in JSON), and empty, never nil, otherwise.
+	Columns []showColumn `json:"columns,omitzero"`
 }
 
 // showColumn is a column as the scan stored it. PrimaryKeyPosition is its 1-based place in the primary
@@ -208,7 +224,7 @@ func showProjectID(project *datatug.Project, projectDir string) string {
 // what is listed here cannot differ from what they find. A source whose catalog has no dbModel was never
 // scanned and is listed as such. Environments and sources are in the order of their IDs.
 func readShowDocument(ctx context.Context, store datatug.ProjectStore, project *datatug.Project, projectDir string) (*showDocument, error) {
-	doc := &showDocument{Project: showProjectID(project, projectDir), Environments: []showEnvironment{}}
+	doc := &showDocument{Project: showProjectID(project, projectDir), Title: project.Title, Access: project.Access, Environments: []showEnvironment{}}
 	for _, env := range project.Environments {
 		shown := showEnvironment{ID: env.ID, Sources: []showSource{}}
 		catalogs, err := store.LoadEnvDbCatalogs(ctx, env.ID)
@@ -271,6 +287,31 @@ func readShowSource(projectDir, envID string, catalog *datatug.DbCatalog) (showS
 		}
 	}
 	return source, nil
+}
+
+// trimShowDocument cuts the document at the depth: the one place the depth is applied, so that the two writers
+// print what is left. A nil slice is what the writers and the JSON encoder (omitzero) leave out; the flags
+// notScanned and empty are kept at every depth.
+func trimShowDocument(doc *showDocument, depth string) {
+	if depth == showDepthColumns {
+		return
+	}
+	for _, env := range doc.Environments {
+		for i := range env.Sources {
+			source := &env.Sources[i]
+			if depth == showDepthSources {
+				source.Schemas = nil
+				continue
+			}
+			for _, schema := range source.Schemas {
+				for _, relations := range [][]showRelation{schema.Tables, schema.Views} {
+					for j := range relations {
+						relations[j].Columns = nil
+					}
+				}
+			}
+		}
+	}
 }
 
 // showDescriptorVariable is the name of the environment variable that the connection descriptor of a

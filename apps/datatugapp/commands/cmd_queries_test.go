@@ -398,7 +398,7 @@ func TestQueries_JSONListsParameters(t *testing.T) {
 
 func TestQueries_JSONLeavesOutMalformedParametersAndKeepsTheQuery(t *testing.T) {
 	t.Chdir(queriesProjectWith(t, map[string]string{
-		"bad-entries": `{"title":"A","parameters":["x",5,null,{"type":"integer"},{"id":3},{"id":"ok"}]}`,
+		"bad-entries": `{"title":"A","parameters":["x",5,null,{"type":"integer"},{"id":3},{"id":""},{"id":"ok"}]}`,
 		"not-array":   `{"title":"B","type":"SQL","parameters":{"id":"x"}}`,
 		"null-params": `{"title":"C","parameters":null}`,
 	}))

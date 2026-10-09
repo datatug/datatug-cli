@@ -180,7 +180,7 @@ func readQueryListParameters(raw json.RawMessage) []queryListParameter {
 			Type       json.RawMessage `json:"type"`
 			IsRequired json.RawMessage `json:"isRequired"`
 		}
-		if json.Unmarshal(entry, &p) != nil || p.ID == nil {
+		if json.Unmarshal(entry, &p) != nil || p.ID == nil || *p.ID == "" {
 			continue
 		}
 		param := queryListParameter{ID: *p.ID, Required: string(p.IsRequired) == "true"}

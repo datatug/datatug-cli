@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -293,5 +294,57 @@ func TestQueries_TextFormatIsUnchangedAndReadsNoQueryFile(t *testing.T) {
 		out, err := runQueries(t, argv...)
 		require.NoError(t, err)
 		assert.Equal(t, "sales/by-month/2024\nsales/by-region\ntop\n", out)
+	}
+}
+
+func TestQueries_JSONDoesNotReadThroughASymlink(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "outside.json")
+	require.NoError(t, os.WriteFile(outside, []byte(`{"title":"Outside","type":"SECRET"}`), 0o600))
+	dir := queriesProjectWith(t, map[string]string{"good": `{"title":"G"}`})
+	if err := os.Symlink(outside, filepath.Join(dir, "queries", "link.query.json")); err != nil {
+		t.Skipf("symbolic links cannot be created: %v", err)
+	}
+	t.Chdir(dir)
+	out, errOut, err := runQueriesBoth(t, "--format", "json")
+	require.NoError(t, err)
+	assert.NotContains(t, out, "Outside")
+	assert.NotContains(t, out, "SECRET")
+	assert.Equal(t, "[\n  {\n    \"id\": \"good\",\n    \"title\": \"G\"\n  },\n  {\n    \"id\": \"link\"\n  }\n]\n", out)
+	assert.Equal(t, "1 query file could not be read as a query\n", errOut)
+}
+
+func TestQueries_JSONAFileThatCannotBeStatedIsUnreadable(t *testing.T) {
+	t.Chdir(queriesProjectWith(t, map[string]string{"a": `{"title":"A"}`}))
+	cov100fSetVar(t, &queriesLstat, func(string) (os.FileInfo, error) { return nil, errors.New("lstat boom") })
+	cov100fSetVar(t, &queriesReadFile, func(string) ([]byte, error) {
+		t.Fatal("a file that cannot be stated must not be read")
+		return nil, nil
+	})
+	out, errOut, err := runQueriesBoth(t, "--format", "json")
+	require.NoError(t, err)
+	assert.Equal(t, "[\n  {\n    \"id\": \"a\"\n  }\n]\n", out)
+	assert.Equal(t, "1 query file could not be read as a query\n", errOut)
+}
+
+func TestQueries_JSONAFileThatIsNotAnObjectIsUnreadable(t *testing.T) {
+	t.Chdir(queriesProjectWith(t, map[string]string{"arr": `[1,2]`, "str": `"x"`, "nul": `null`, "num": `5`, "trunc": `{"title":`}))
+	out, errOut, err := runQueriesBoth(t, "--format", "json")
+	require.NoError(t, err)
+	assert.Equal(t, "[\n  {\n    \"id\": \"arr\"\n  },\n  {\n    \"id\": \"nul\"\n  },\n  {\n    \"id\": \"num\"\n  },\n  {\n    \"id\": \"str\"\n  },\n  {\n    \"id\": \"trunc\"\n  }\n]\n", out)
+	assert.Equal(t, "5 query files could not be read as a query\n", errOut)
+}
+
+func TestQueries_FailsWhenStdoutCannotBeWritten(t *testing.T) {
+	for _, format := range []string{"text", "json"} {
+		t.Run(format, func(t *testing.T) {
+			root := &cobra.Command{Use: "datatug", SilenceUsage: true, SilenceErrors: true}
+			root.AddCommand(queriesCommand())
+			root.SetOut(failingWriter{})
+			root.SetErr(&bytes.Buffer{})
+			root.SetArgs([]string{"queries", "--format", format, "-d", queriesProject(t, "a")})
+			err := root.Execute()
+			require.ErrorIs(t, err, errWriteFailed)
+			assert.Equal(t, 1, exitCodeOrOne(err))
+		})
 	}
 }

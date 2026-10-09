@@ -44,7 +44,8 @@ func showCommandArgs() *cobra.Command {
 			"(a PostgreSQL source with the name of the environment variable that holds its URL, never the URL); " +
 			"each schema; each table and view with its columns, their types and their place in the primary key.\n\n" +
 			"The project is the folder of --directory, or the registered project of --project, or else the current folder. " +
-			"The text is stable from one run to the next, so two runs can be compared; --format json prints the same as one JSON document.",
+			"The text is stable from one run to the next, so two runs can be compared; --format json prints the same as one JSON document, which also carries the project's title and access.\n\n" +
+			"--depth stops the listing at sources or at tables.",
 		Args: cobra.NoArgs,
 		RunE: showCommandAction,
 	}

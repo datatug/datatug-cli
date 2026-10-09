@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,6 +25,8 @@ var (
 	queriesIndex = api.QueryIDIndex
 	// queriesReadFile reads a query file for --format json.
 	queriesReadFile = os.ReadFile
+	// queriesLstat tells whether a query file is a regular file, without following a link.
+	queriesLstat = os.Lstat
 )
 
 // queryListItem is one object of the --format json array.
@@ -39,7 +42,7 @@ func queriesCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "queries",
 		Short: "Lists the saved queries of a project",
-		Long:  "Prints the ID of every saved query of the project in the current folder (or of --project or --dir), one per line. An ID that is in a folder starts with the folder's name and a slash.",
+		Long:  "Prints the ID of every saved query of the project in the current folder (or of --project or --dir), one per line. An ID that is in a folder starts with the folder's name and a slash. --format json prints one JSON document with each query's id, title and type.",
 		RunE:  queriesCommandAction,
 	}
 	cmd.Flags().StringP("project", "p", "", "project ID or folder")
@@ -81,7 +84,7 @@ func queriesCommandAction(cmd *cobra.Command, _ []string) error {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	out := cmd.OutOrStdout()
+	var out bytes.Buffer
 	skipped := 0
 	unreadable := 0
 	items := make([]queryListItem, 0, len(ids))
@@ -98,11 +101,14 @@ func queriesCommandAction(cmd *cobra.Command, _ []string) error {
 			items = append(items, item)
 			continue
 		}
-		_, _ = fmt.Fprintln(out, id)
+		_, _ = fmt.Fprintln(&out, id)
 	}
 	if format == "json" {
 		data, _ := json.MarshalIndent(items, "", "  ") // plain strings cannot fail to marshal
-		_, _ = fmt.Fprintln(out, string(data))
+		_, _ = fmt.Fprintln(&out, string(data))
+	}
+	if _, err = cmd.OutOrStdout().Write(out.Bytes()); err != nil {
+		return err
 	}
 	if skipped > 0 {
 		noun := "queries"
@@ -126,8 +132,14 @@ func queriesCommandAction(cmd *cobra.Command, _ []string) error {
 // only and ok is false.
 func readQueryListItem(projectDir, id string) (item queryListItem, ok bool) {
 	item = queryListItem{ID: id}
-	data, err := queriesReadFile(filepath.Join(projectDir, storage.QueriesFolder, filepath.FromSlash(id)+"."+storage.QueryFileSuffix+".json"))
-	if err != nil {
+	file := filepath.Join(projectDir, storage.QueriesFolder, filepath.FromSlash(id)+"."+storage.QueryFileSuffix+".json")
+	// A link, a folder or a device is not read: the project store refuses them too.
+	info, err := queriesLstat(file)
+	if err != nil || !info.Mode().IsRegular() {
+		return item, false
+	}
+	data, err := queriesReadFile(file)
+	if err != nil || !bytes.HasPrefix(bytes.TrimSpace(data), []byte("{")) {
 		return item, false
 	}
 	var def struct {

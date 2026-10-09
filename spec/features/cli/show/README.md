@@ -183,7 +183,6 @@ Every command and every output block of the quick start of the README is run by 
 ## Open Questions
 
 - Foreign keys, indexes and referenced-by are not listed: a scan does not store them. A later task adds foreign keys.
-- Should `show` gain `--depth` (environments only, environments and sources, everything) for projects with many tables?
 
 ---
 *This document follows the https://specscore.md/feature-specification*

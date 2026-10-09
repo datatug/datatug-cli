@@ -50,7 +50,7 @@ If the project contains zero named queries, the command MUST exit `0` and write 
 
 #### REQ: json-format
 
-`--format json` MUST print one JSON document on stdout: an array, in the order of the `text` format, of one object for each query the `text` format prints. An object has `id` (the ID the `text` format prints), `title` and `type` (those of the query's file, each left out when the file holds none). A query whose ID is not made of plain names is left out and counted on stderr, as in the `text` format. A query whose file cannot be read, is not a regular file (a symbolic link is not followed), or does not hold a JSON object is listed with its `id` only, and one line on stderr says how many could not be read; it is no failure. The listing does not validate a query as the project store does. Any other `--format` than `text` and `json` MUST exit `2`. The `text` format MUST NOT change: it reads no query file.
+`--format json` MUST print one JSON document on stdout: an array, in the order of the `text` format, of one object for each query the `text` format prints. An object has `id` (the ID the `text` format prints), `title` and `type` (those of the query's file, each left out when the file holds none), and `parameters` (left out when the file declares none): an array, in the file's order, of one object for each declared parameter that has an `id`, with `id`, `type` (left out when the file holds none) and `required` (`true` only when the file says `isRequired`, left out otherwise). A parameter entry that is not an object or has no string `id` is left out. A query whose ID is not made of plain names is left out and counted on stderr, as in the `text` format. A query whose file cannot be read, is not a regular file (a symbolic link is not followed), or does not hold a JSON object is listed with its `id` only, and one line on stderr says how many could not be read; it is no failure. The listing does not validate a query as the project store does. Any other `--format` than `text` and `json` MUST exit `2`. The `text` format MUST NOT change: it reads no query file.
 
 ### Placeholder behavior
 
@@ -96,6 +96,12 @@ Against a project with N queries with plain IDs, `datatug queries` exits `0` and
 **Requirements:** queries#req:json-format, queries#req:empty-project-prints-nothing
 
 Against a project with queries in folders, one with a title and a type and one whose file holds neither, `datatug queries --format json` exits `0` and prints one JSON array in ID order whose objects carry `id`, and `title` and `type` only where the file holds them; a query with a non-plain ID is left out and counted on stderr; a query file that is not JSON is listed with its `id` only and counted on stderr; so is a query file that is a symbolic link, whose target is not read; a project with no query prints `[]`; `--format yaml` exits `2`; and `datatug queries` with no `--format` prints what it printed before.
+
+### AC: json-lists-parameters
+
+**Requirements:** queries#req:json-format
+
+Against a query whose file declares a required integer parameter and an optional one with no type, `datatug queries --format json` prints for it `parameters` of `{"id", "type", "required": true}` and `{"id"}` in the file's order; a query with no parameters has no `parameters` key; a malformed parameter entry is left out and the query is still listed with its title; and the `text` format is unchanged.
 
 ### AC: no-panic
 

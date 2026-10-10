@@ -173,7 +173,7 @@ var dataTugSectionTitleRegex = regexp.MustCompile(`\n##\s*DataTug`)
 // readmeSection is the DataTug section added to the root README.md.
 func readmeSection(projectID string) string {
 	const title = "DataTug - [github.com/datatug/datatug](https://github.com/datatug/datatug)"
-	appLink := fmt.Sprintf("[DataTug.app](https://datatug.app/#%s)", projectID)
+	appLink := fmt.Sprintf("[DataTug.app](https://datatug.app/home#%s)", projectID)
 	msg := fmt.Sprintf("The [/datatug](./datatug) project can be opened and edited in %s.", appLink)
 	return fmt.Sprintf("\n\n## DataTug - %s\n\n%s\n\n", title, msg)
 }

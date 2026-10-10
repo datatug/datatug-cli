@@ -15,9 +15,9 @@ func TestWebUIURLForScreen(t *testing.T) {
 	const origin = "https://datatug.app"
 	for screenPath, want := range map[string]string{
 		"projects": origin + "/my",
-		"viewers":  origin, // no web equivalent yet — root, not a guessed URL
-		"":         origin,
-		"unknown":  origin,
+		"viewers":  origin + "/home", // no web equivalent yet — /home, not a guessed URL
+		"":         origin + "/home",
+		"unknown":  origin + "/home",
 	} {
 		if got := WebUIURLForScreen(origin, screenPath); got != want {
 			t.Errorf("WebUIURLForScreen(%q, %q) = %q, want %q", origin, screenPath, got, want)
@@ -83,8 +83,8 @@ func TestCurrentScreenWebUIURL(t *testing.T) {
 		webUIGetState = func() (*dtstate.DatatugState, error) {
 			return nil, errors.New("no state file")
 		}
-		if got := CurrentScreenWebUIURL(); got != DefaultWebUIOrigin {
-			t.Errorf("CurrentScreenWebUIURL() = %q, want %q", got, DefaultWebUIOrigin)
+		if got, want := CurrentScreenWebUIURL(), DefaultWebUIOrigin+"/home"; got != want {
+			t.Errorf("CurrentScreenWebUIURL() = %q, want %q", got, want)
 		}
 	})
 }

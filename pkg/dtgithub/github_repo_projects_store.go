@@ -180,7 +180,7 @@ func (c *projectCreator) addDatatugSectionToRootReadmeFile(ctx context.Context, 
 
 	getDataTugSectionForReadmeMD := func() string {
 		const dataTugSectionTitleText = "DataTug - [github.com/datatug/datatug](https://github.com/datatug/datatug)"
-		appLink := fmt.Sprintf("[DataTug.app](https://datatug.app/#project=github.com/%s/%s/%s)", c.repoOwner, c.repoName, projPath)
+		appLink := fmt.Sprintf("[DataTug.app](https://datatug.app/home#project=github.com/%s/%s/%s)", c.repoOwner, c.repoName, projPath)
 		msg := fmt.Sprintf("The [/datatug](./datatug) project can be opened and edited in %s.", appLink)
 		return fmt.Sprintf("\n\n## DataTug - %s\n\n%s\n\n", dataTugSectionTitleText, msg)
 	}

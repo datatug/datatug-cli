@@ -340,3 +340,12 @@ func TestSetupRepositoryCreatesAMissingReadme(t *testing.T) {
 		t.Fatal("the README was not created")
 	}
 }
+
+func TestReadmeSectionPointsToAppHome(t *testing.T) {
+	got := readmeSection("my-project-id")
+	wantLink := "[DataTug.app](https://datatug.app/home#my-project-id)"
+	if !contains(got, wantLink) {
+		t.Fatalf("readmeSection() = %q, want containing %q", got, wantLink)
+	}
+}
+

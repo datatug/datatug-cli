@@ -9,6 +9,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
@@ -16,6 +17,15 @@ import (
 // CompareResult diff-output cap and the facts cohort cap. It bounds the two
 // materialized inputs while admitting the normative 847-row replay case.
 const compareInputMaximumRows = 10_000
+
+var (
+	compareSideReceiptValidateHook        = (*apicontract.CompareSideReceipt).Validate
+	compareComputeRunQueryWithOptionsHook = computeRunQueryWithOptions
+	compareSecureExecutorHook             = api.SecureExecutor
+	compareRunSnapshotHook                = func(e *secureread.Executor, ctx context.Context, collection string, snapshot apicontract.Recordset) (secureread.Result, error) {
+		return e.RunSnapshot(ctx, collection, snapshot)
+	}
+)
 
 func executeCompareSide(ctx context.Context, req apicontract.CompareRequest, side apicontract.CompareSideSpec) (compareSideData, error) {
 	switch side.Kind {
@@ -58,7 +68,7 @@ func executeCompareLiveSide(
 	if err := execRequest.Normalize(); err != nil {
 		return compareSideData{}, requestValidationError(err)
 	}
-	result, err := computeRunQueryWithOptions(ctx, execRequest, runQueryOptions{rowLimit: compareInputMaximumRows})
+	result, err := compareComputeRunQueryWithOptionsHook(ctx, execRequest, runQueryOptions{rowLimit: compareInputMaximumRows})
 	if err != nil {
 		return compareSideData{}, err
 	}
@@ -92,7 +102,7 @@ func executeCompareLiveSide(
 		Execution: record.Ref, ExecutedAt: record.ExecutedAt, RowCount: len(comparedRecordset.Rows),
 		Limitations: normalizeLimitations(limitations), Reproducible: reproducible,
 	}
-	if err := receipt.Validate(); err != nil {
+	if err := compareSideReceiptValidateHook(&receipt); err != nil {
 		return compareSideData{}, newContractError(codeInternal, "validate persisted compare receipt", "")
 	}
 	return compareSideData{recordset: comparedRecordset, receipt: receipt, truncated: result.Truncated}, nil
@@ -146,11 +156,11 @@ func loadCompareRecordSide(ctx context.Context, request apicontract.CompareReque
 	if record.ResultComplete == nil || !*record.ResultComplete {
 		return compareSideData{}, newSourceUnavailable("the historical execution cannot prove that its retained rows are complete")
 	}
-	executor, ok := api.SecureExecutor()
+	executor, ok := compareSecureExecutorHook()
 	if !ok {
 		return compareSideData{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
-	filtered, err := executor.RunSnapshot(ctx, record.Provenance.Collection, retained)
+	filtered, err := compareRunSnapshotHook(executor, ctx, record.Provenance.Collection, retained)
 	if err != nil {
 		if isCurrentPolicyDenial(err) {
 			return compareSideData{}, newAccessDenied("current access policy does not permit this recorded evidence")
@@ -168,7 +178,7 @@ func loadCompareRecordSide(ctx context.Context, request apicontract.CompareReque
 		Execution: ref, ExecutedAt: record.ExecutedAt, RowCount: len(filtered.SnapshotRecordset.Rows),
 		Limitations: limitations, Reproducible: true,
 	}
-	if err := receipt.Validate(); err != nil {
+	if err := compareSideReceiptValidateHook(&receipt); err != nil {
 		return compareSideData{}, fmt.Errorf("validate record compare receipt: %w", err)
 	}
 	return compareSideData{recordset: *filtered.SnapshotRecordset, receipt: receipt}, nil

@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/personalqueries"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
@@ -17,6 +19,7 @@ import (
 )
 
 var getQuery = api.GetQuery
+var loadModuleQueriesHook = loadModuleQueries
 
 // getQueriesHandler is GET /datatug/queries/all_queries — restored on top of
 // the current datatug-core v0.27.3 QueryDef/QueriesFolder models (Task 17,
@@ -116,7 +119,8 @@ func parseQueriesRoot(q url.Values) (string, error) {
 	case queriesRootShared, queriesRootPersonal:
 		return root, nil
 	default:
-		return "", fmt.Errorf("%w: must be %q or %q, got %q", ErrInvalidQueriesRoot, queriesRootShared, queriesRootPersonal, root)
+		// The value is not quoted: it is what the client wrote.
+		return "", fmt.Errorf("%w: must be %q or %q", ErrInvalidQueriesRoot, queriesRootShared, queriesRootPersonal)
 	}
 }
 
@@ -132,13 +136,23 @@ func getAllQueries(_ context.Context, ref dto.ProjectRef) (*datatug.QueriesFolde
 	}
 	projectDir, ok := api.ProjectDir(ref.ProjectID)
 	if !ok {
-		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, ref.ProjectID)
+		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, dbcopy.SourceIDDisplay(ref.ProjectID))
 	}
-	queries, canonicalIDs, err := loadModuleQueries(projectDir)
+	queries, canonicalIDs, err := loadModuleQueriesHook(projectDir)
 	if err != nil {
-		return nil, err
+		return nil, queriesNotLoaded(ref.ProjectID, err)
 	}
 	return buildQueriesFolderTree(queries, canonicalIDs, datatug.RootSharedFolderName), nil
+}
+
+// queriesNotLoaded is the answer for the queries of a project that cannot be loaded (listed,
+// read or parsed): one sentence built from the ID of the project, as it may be shown (see
+// dbcopy.SourceIDDisplay), and from nothing the cause said, which quotes the path of a folder
+// of queries. The cause goes to the log of the server.
+func queriesNotLoaded(projectID string, cause error) error {
+	shown := dbcopy.SourceIDDisplay(projectID)
+	log.Printf("queries of project %q could not be loaded: %s", shown, dbcopy.RedactText(cause.Error()))
+	return fmt.Errorf("queries of project %q could not be loaded", shown)
 }
 
 // getPersonalQueries loads the serving principal's own personal root
@@ -179,7 +193,7 @@ func getPersonalQueries(_ context.Context, ref dto.ProjectRef) (*datatug.Queries
 	// opened is 404 for root=personal too (not an empty folder read from
 	// whatever ~/.datatug/projects/<id>/ happens to hold), whoever asks.
 	if _, ok := api.ProjectDir(ref.ProjectID); !ok {
-		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, ref.ProjectID)
+		return nil, fmt.Errorf("%w: unknown project %q", api.ErrQueryNotFound, dbcopy.SourceIDDisplay(ref.ProjectID))
 	}
 	principalID := api.SecurePrincipalID()
 	rootID := datatug.RootUserFolderPrefix + principalID
@@ -196,9 +210,9 @@ func getPersonalQueries(_ context.Context, ref dto.ProjectRef) (*datatug.Queries
 	if err != nil {
 		return nil, err
 	}
-	queries, canonicalIDs, err := loadModuleQueries(personalProjectDir)
+	queries, canonicalIDs, err := loadModuleQueriesHook(personalProjectDir)
 	if err != nil {
-		return nil, err
+		return nil, queriesNotLoaded(ref.ProjectID, err)
 	}
 	return buildQueriesFolderTree(queries, canonicalIDs, rootID), nil
 }

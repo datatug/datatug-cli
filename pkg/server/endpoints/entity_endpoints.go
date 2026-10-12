@@ -38,7 +38,11 @@ func saveEntity(w http.ResponseWriter, r *http.Request) {
 	var ref dto.ProjectItemRef
 	var entity datatug.Entity
 	saveFunc := func(ctx context.Context) (apicore.ResponseDTO, error) {
-		entity.ID = ref.ID
+		// The web client sends the entity, its ID included, in the body and no id in the
+		// query: the ID of the body is kept then, and is the one that is checked.
+		if ref.ID != "" {
+			entity.ID = ref.ID
+		}
 		return entity, api.SaveEntity(ctx, ref.ProjectRef, &entity)
 	}
 	saveProjectItem(w, r, &ref, &entity, saveFunc)

@@ -32,16 +32,16 @@ func (e *Executor) RunSnapshot(ctx context.Context, collection string, recordset
 	if strings.TrimSpace(collection) == "" {
 		return Result{}, fmt.Errorf("snapshot collection is required")
 	}
-	dir, err := os.MkdirTemp("", "datatug-snapshot-policy-")
+	dir, err := osMkdirTemp("", "datatug-snapshot-policy-")
 	if err != nil {
 		return Result{}, fmt.Errorf("create snapshot policy workspace: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := osChmod(dir, 0o700); err != nil {
 		return Result{}, fmt.Errorf("secure snapshot policy workspace: %w", err)
 	}
 	dbPath := filepath.Join(dir, "snapshot.sqlite")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqlOpenSnapshot("sqlite", dbPath)
 	if err != nil {
 		return Result{}, err
 	}
@@ -49,10 +49,10 @@ func (e *Executor) RunSnapshot(ctx context.Context, collection string, recordset
 		_ = db.Close()
 		return Result{}, err
 	}
-	if err := db.Close(); err != nil {
+	if err := dbCloseSnapshot(db); err != nil {
 		return Result{}, err
 	}
-	if err := os.Chmod(dbPath, 0o600); err != nil {
+	if err := osChmod(dbPath, 0o600); err != nil {
 		return Result{}, err
 	}
 	query := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(collection, ""))).SelectColumns()
@@ -60,15 +60,19 @@ func (e *Executor) RunSnapshot(ctx context.Context, collection string, recordset
 	if err != nil {
 		return Result{}, err
 	}
-	typed, err := restoreSnapshotRecordset(recordset, result)
+	typed, statistics, err := restoreSnapshotRecordset(recordset, result)
 	if err != nil {
 		return Result{}, err
 	}
 	result.SnapshotRecordset = &typed
+	// SQLite deliberately normalizes several values while applying policy. The
+	// restored typed rows supply statistics as they are reconstructed, so no
+	// chart-only pass can mistake driver values for source evidence.
+	result.Statistics = statistics
 	return result, nil
 }
 
-func restoreSnapshotRecordset(original apicontract.Recordset, filtered Result) (apicontract.Recordset, error) {
+func restoreSnapshotRecordset(original apicontract.Recordset, filtered Result) (apicontract.Recordset, RecordSetStatistics, error) {
 	allowed := make(map[string]struct{}, len(filtered.Columns))
 	for _, name := range filtered.Columns {
 		allowed[name] = struct{}{}
@@ -83,13 +87,14 @@ func restoreSnapshotRecordset(original apicontract.Recordset, filtered Result) (
 		}
 	}
 	if len(allowed) != 0 {
-		return apicontract.Recordset{}, ErrSnapshotPolicyUnexpressible
+		return apicontract.Recordset{}, RecordSetStatistics{}, ErrSnapshotPolicyUnexpressible
 	}
 	columns := make([]apicontract.Column, len(indices))
 	for i, index := range indices {
 		columns[i] = original.Columns[index]
 	}
 	rows := make([][]apicontract.TypedValue, 0, len(filtered.Rows))
+	statistics := newStatisticsAccumulator()
 	used := make([]bool, len(original.Rows))
 	for _, filteredRow := range filtered.Rows {
 		match := -1
@@ -104,10 +109,10 @@ func restoreSnapshotRecordset(original apicontract.Recordset, filtered Result) (
 			for filteredIndex, index := range indices {
 				actual := filteredRow.Data[columnNames[filteredIndex]]
 				if !snapshotValueMatches(original.Rows[0][index], actual) {
-					return apicontract.Recordset{}, fmt.Errorf("%w: cannot restore %s from %T", ErrSnapshotPolicyUnexpressible, original.Rows[0][index].Type, actual)
+					return apicontract.Recordset{}, RecordSetStatistics{}, fmt.Errorf("%w: cannot restore %s from %T", ErrSnapshotPolicyUnexpressible, original.Rows[0][index].Type, actual)
 				}
 			}
-			return apicontract.Recordset{}, fmt.Errorf("%w: filtered row cannot be matched to original typed evidence", ErrSnapshotPolicyUnexpressible)
+			return apicontract.Recordset{}, RecordSetStatistics{}, fmt.Errorf("%w: filtered row cannot be matched to original typed evidence", ErrSnapshotPolicyUnexpressible)
 		}
 		used[match] = true
 		row := make([]apicontract.TypedValue, len(indices))
@@ -115,12 +120,17 @@ func restoreSnapshotRecordset(original apicontract.Recordset, filtered Result) (
 			row[i] = original.Rows[match][index]
 		}
 		rows = append(rows, row)
+		values := make(map[string]observedValue, len(columnNames))
+		for i, value := range row {
+			values[columnNames[i]] = observedFromTypedValue(value)
+		}
+		statistics.addObservedRow(values)
 	}
 	restored := apicontract.Recordset{Columns: columns, Rows: rows}
-	if err := restored.Validate(); err != nil {
-		return apicontract.Recordset{}, ErrSnapshotPolicyUnexpressible
+	if err := restoredValidate(&restored); err != nil {
+		return apicontract.Recordset{}, RecordSetStatistics{}, ErrSnapshotPolicyUnexpressible
 	}
-	return restored, nil
+	return restored, statistics.finalize(columnNames), nil
 }
 
 func snapshotRowMatches(original []apicontract.TypedValue, indices []int, columns []string, filtered map[string]any) bool {
@@ -202,12 +212,12 @@ func materializeSnapshot(ctx context.Context, db *sql.DB, collection string, rec
 		placeholders[i] = "?"
 	}
 	insert := "INSERT INTO " + quotedCollection + " VALUES(" + strings.Join(placeholders, ",") + ")"
-	tx, err := db.BeginTx(ctx, nil)
+	tx, err := beginTxSnapshot(ctx, db)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	stmt, err := tx.PrepareContext(ctx, insert)
+	stmt, err := prepareContextSnapshot(ctx, tx, insert)
 	if err != nil {
 		return err
 	}
@@ -221,7 +231,7 @@ func materializeSnapshot(ctx context.Context, db *sql.DB, collection string, rec
 			}
 			values[i] = converted
 		}
-		if _, err := stmt.ExecContext(ctx, values...); err != nil {
+		if _, err := stmtExecSnapshot(ctx, stmt, values...); err != nil {
 			return fmt.Errorf("insert snapshot policy row: %w", err)
 		}
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/comparecache"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/incidents"
@@ -18,6 +19,8 @@ import (
 )
 
 const maxCompareBodyBytes = 1 << 20
+
+var compareResultValidateHook = (*apicontract.CompareResult).Validate
 
 type compareSideData struct {
 	recordset apicontract.Recordset
@@ -89,9 +92,6 @@ func computeCompareWith(ctx context.Context, req apicontract.CompareRequest, dep
 		return apicontract.CompareResult{}, requestValidationError(err)
 	}
 	if len(req.Key) == 0 {
-		if req.Left.Kind == apicontract.CompareSideRecord || req.Right.Kind == apicontract.CompareSideRecord {
-			return apicontract.CompareResult{}, newInvalidRequest("key", "an explicit key is required when comparing an execution record")
-		}
 		if deps.resolveKey == nil {
 			return apicontract.CompareResult{}, newInvalidRequest("key", "the live query has no resolvable mapped key")
 		}
@@ -174,7 +174,7 @@ func computeCompareWith(ctx context.Context, req apicontract.CompareRequest, dep
 			return apicontract.CompareResult{}, &compareComputationError{cause: err, left: &leftReceipt, right: &rightReceipt}
 		}
 	}
-	if err := result.Validate(); err != nil {
+	if err := compareResultValidateHook(&result); err != nil {
 		return apicontract.CompareResult{}, fmt.Errorf("validate compare result: %w", err)
 	}
 	return result, nil
@@ -194,7 +194,7 @@ func writeCompareError(w http.ResponseWriter, r *http.Request, err error) {
 		ce = contractErrAccessDenied(err.Error())
 	default:
 		ce = &contractError{Code: codeInternal, Message: unclassifiedErrorMessage, RequestID: newRequestID()}
-		log.Printf("%s: request %s: answered 500 INTERNAL: %v", r.URL.Path, ce.RequestID, err)
+		log.Printf("%s: request %s: answered 500 INTERNAL: %v", r.URL.Path, ce.RequestID, dbcopy.RedactError(err))
 	}
 	response := apicontract.CompareErrorResponse{Error: ce.envelope().Error}
 	if computation != nil {

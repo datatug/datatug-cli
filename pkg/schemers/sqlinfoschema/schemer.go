@@ -51,19 +51,19 @@ func (s InformationSchema) GetDatabase(name string) (database *datatug.DbCatalog
 	log.Printf("%v schemas.", len(database.Schemas))
 	err = parallel.Run(
 		func() error {
-			if err = s.getColumns(name, schemer.SortedTables{Tables: tables}); err != nil {
+			if err := s.getColumns(name, schemer.SortedTables{Tables: tables}); err != nil {
 				return fmt.Errorf("failed to retrieve columns metadata: %w", err)
 			}
 			return nil
 		},
 		func() error {
-			if err = s.getConstraints(name, schemer.SortedTables{Tables: tables}); err != nil {
+			if err := s.getConstraints(name, schemer.SortedTables{Tables: tables}); err != nil {
 				return fmt.Errorf("failed to retrieve constraints metadata: %w", err)
 			}
 			return nil
 		},
 		func() error {
-			if err = s.getIndexes(name, schemer.SortedTables{Tables: tables}); err != nil {
+			if err := s.getIndexes(name, schemer.SortedTables{Tables: tables}); err != nil {
 				return fmt.Errorf("failed to retrieve indexes metadata: %w", err)
 			}
 			return nil
@@ -82,12 +82,12 @@ func (s InformationSchema) getTables(catalog string) (tables []*datatug.Collecti
        TABLE_TYPE
 FROM INFORMATION_SCHEMA.TABLES
 ORDER BY TABLE_SCHEMA, TABLE_NAME`)
-	defer func() {
-		_ = rows.Close()
-	}()
 	if err != nil {
 		return nil, fmt.Errorf("failed to query INFORMATION_SCHEMA.TABLES: %w", err)
 	}
+	defer func() {
+		_ = rows.Close()
+	}()
 	tables = make([]*datatug.CollectionInfo, 0)
 	for rows.Next() {
 		var schema, name, dbType string

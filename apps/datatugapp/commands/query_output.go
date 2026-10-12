@@ -204,14 +204,15 @@ func writeYAMLRows(w io.Writer, columns []string, rows []queryRow) error {
 			mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: name}, &valueNode)
 			return nil
 		}
-		if err := add(keyColumn, row.key); err != nil {
-			return err
-		}
+		names, values := []string{keyColumn}, []any{row.key}
 		for _, column := range columns {
 			if value, ok := row.data[column]; ok {
-				if err := add(column, value); err != nil {
-					return err
-				}
+				names, values = append(names, column), append(values, value)
+			}
+		}
+		for i, name := range names {
+			if err := add(name, values[i]); err != nil {
+				return err
 			}
 		}
 		sequence.Content = append(sequence.Content, mapping)
@@ -237,6 +238,24 @@ func writeCSVRows(w io.Writer, columns []string, rows []queryRow) error {
 		if err := writer.Write(cellValues(row, columns)); err != nil {
 			return err
 		}
+	}
+	writer.Flush()
+	return writer.Error()
+}
+
+func writeCSVHeader(w io.Writer, columns []string) error {
+	writer := csv.NewWriter(w)
+	if err := writer.Write(append([]string{keyColumn}, columns...)); err != nil {
+		return err
+	}
+	writer.Flush()
+	return writer.Error()
+}
+
+func writeCSVDataRow(w io.Writer, columns []string, row queryRow) error {
+	writer := csv.NewWriter(w)
+	if err := writer.Write(cellValues(row, columns)); err != nil {
+		return err
 	}
 	writer.Flush()
 	return writer.Error()

@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/datatug/datatug-core/pkg/storage"
@@ -14,8 +17,12 @@ func validateProjectInput(projectID string) (err error) {
 	if projectID == "" {
 		return validation.NewErrRequestIsMissingRequiredField("projectID")
 	}
-	return nil
+	return ValidateProjectIdentifier("project", projectID)
 }
+
+// projectsNotListed is the answer for a store that cannot list its projects: the cause
+// quotes the path of a project file, and goes to the log.
+const projectsNotListed = "the projects could not be listed"
 
 // GetProjects return all projects
 func GetProjects(ctx context.Context, storeID string) ([]datatug.ProjectBrief, error) {
@@ -23,7 +30,12 @@ func GetProjects(ctx context.Context, storeID string) ([]datatug.ProjectBrief, e
 	if err != nil {
 		return nil, err
 	}
-	return dal.GetProjects(ctx)
+	projects, err := dal.GetProjects(ctx)
+	if err != nil {
+		log.Printf("api: %s: %s", projectsNotListed, dbcopy.RedactText(err.Error()))
+		return nil, errors.New(projectsNotListed)
+	}
+	return projects, nil
 }
 
 // GetProjectSummary returns project summary
@@ -31,30 +43,41 @@ func GetProjectSummary(ctx context.Context, ref dto.ProjectRef) (projSummary *da
 	if ref.ProjectID == "" {
 		return nil, validation.NewErrRequestIsMissingRequiredField("id")
 	}
-	// storage.NewDatatugStore, not storage.GetStore/GetProjectStore: the
-	// latter resolve through a package-private `stores` map or a store
-	// stashed on ctx via storage.ContextWithDatatugStore — datatug serve
-	// (ServeHTTP) wires neither, only storage.NewDatatugStore (the
-	// factory storage/vars.go's own TODO calls out as GetStore's
-	// replacement). GetProjects/ExecuteSelect/RunQuery already go through
-	// NewDatatugStore; project_summary/project_full/create_project did not,
-	// so every one of those requests failed with "no store configured for
-	// id=..." once the request even reached this far (previously masked by
-	// the nil apicore.GetAuthTokenFromHttpRequest panic — see auth_hook.go).
-	store, err := storage.NewDatatugStore(ref.StoreID)
+	if err = ValidateProjectIdentifier("project", ref.ProjectID); err != nil {
+		return nil, err
+	}
+	// projectStoreForID goes through storage.NewDatatugStore, not
+	// storage.GetStore/GetProjectStore: the latter resolve through a
+	// package-private `stores` map or a store stashed on ctx via
+	// storage.ContextWithDatatugStore — datatug serve (ServeHTTP) wires
+	// neither, only storage.NewDatatugStore (the factory storage/vars.go's own
+	// TODO calls out as GetStore's replacement). GetProjects/ExecuteSelect/
+	// RunQuery already go through NewDatatugStore; project_summary/
+	// project_full/create_project did not, so every one of those requests
+	// failed with "no store configured for id=..." once the request even
+	// reached this far (previously masked by the nil
+	// apicore.GetAuthTokenFromHttpRequest panic — see auth_hook.go).
+	project, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	//goland:noinspection GoNilness
-	project := store.GetProjectStore(ref.ProjectID)
 	projectFile, err := project.LoadProjectFile(ctx)
 	if err != nil {
-		return projSummary, fmt.Errorf("failed to load project file: %w", err)
+		return nil, itemNotFound("project", dbcopy.SourceIDDisplay(ref.ProjectID), err)
 	}
 	return &datatug.ProjectSummary{ProjectFile: projectFile}, err
 }
 
-// CreateProject create a new DataTug project using requested store
+// CreateProject create a new DataTug project using requested store.
+//
+// The request is forwarded to the store unchanged, id included: since
+// datatug-core v0.39.0 dto.CreateProjectRequest carries a caller-supplied
+// ID that addresses the project for the rest of its life, and no layer
+// between the caller and the store may derive, fold or replace it. The id's
+// rules live in dto.CreateProjectRequest.Validate (1-64 characters,
+// lower-case ASCII letters, digits, "-" and "_", starting and ending with a
+// letter or a digit); this function only surfaces that error, and never
+// re-implements it.
 func CreateProject(ctx context.Context, request dto.CreateProjectRequest) (*datatug.ProjectSummary, error) {
 	if err := request.Validate(); err != nil {
 		return nil, err
@@ -72,12 +95,17 @@ func CreateProject(ctx context.Context, request dto.CreateProjectRequest) (*data
 
 // GetProjectFull returns full project metadata
 func GetProjectFull(ctx context.Context, ref dto.ProjectRef) (*datatug.Project, error) {
+	if err := ValidateProjectIdentifier("project", ref.ProjectID); err != nil {
+		return nil, err
+	}
 	// See the NewDatatugStore comment in GetProjectSummary above.
-	store, err := storage.NewDatatugStore(ref.StoreID)
+	project, err := projectStoreForID(ref.StoreID, ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	//goland:noinspection GoNilness
-	project := store.GetProjectStore(ref.ProjectID)
-	return project.LoadProject(ctx)
+	loaded, err := project.LoadProject(ctx)
+	if err != nil {
+		return nil, itemNotFound("project", dbcopy.SourceIDDisplay(ref.ProjectID), err)
+	}
+	return loaded, nil
 }

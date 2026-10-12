@@ -20,7 +20,9 @@ const (
 )
 
 // validateScope checks the appendix's Scope invariants (api-contract.md
-// "Scope and identity"): project/environment nonempty, and
+// "Scope and identity"): project/environment nonempty, the environment a plain
+// name (INVALID_REQUEST otherwise: it becomes a folder name in the project store,
+// see api.ValidateIdentifier), and
 // securityContextId present and current (STALE_CONTEXT otherwise — "the
 // server validates it before execution and responds STALE_CONTEXT after
 // principal/policy-session changes"). It does NOT check that project is a
@@ -36,6 +38,12 @@ func validateScope(s apicontract.Scope) error {
 	}
 	if s.SecurityContextID == "" {
 		return newMissingParameter("securityContextId")
+	}
+	// The environment becomes a folder name under the project in the project
+	// store's own lookups, so anything but a plain name is refused before any
+	// route looks one up. The message names the field and the rule, never the value.
+	if api.ValidateIdentifier("environment", s.Environment) != nil {
+		return newInvalidRequest("environment", api.PlainNameRule)
 	}
 	if err := s.Validate(); err != nil {
 		return requestValidationError(err)

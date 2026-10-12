@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -158,8 +159,14 @@ func TestCompareCommandJSONAndHumanUseRealServer(t *testing.T) {
 	})
 }
 
+// compareProjectRuns numbers the projects of TestCompareCommandInfersLiveMappedKeyThroughRealServer.
+var compareProjectRuns atomic.Int64
+
 func TestCompareCommandInfersLiveMappedKeyThroughRealServer(t *testing.T) {
-	const projectID = "shipping"
+	// filestore.SetProjectPath keeps the folder of a project for the life of the process and
+	// panics when a project ID is given another folder, so every run of the test (under
+	// -count) is a project of its own.
+	projectID := fmt.Sprintf("shipping-%d", compareProjectRuns.Add(1))
 	projectDir := t.TempDir()
 	filestore.SetProjectPath(projectID, projectDir)
 	queryDir := filepath.Join(projectDir, "queries")
@@ -217,10 +224,15 @@ func TestCompareCommandInfersLiveMappedKeyThroughRealServer(t *testing.T) {
 	api.ConfigureSecureSession(session, map[string]string{projectID: projectDir}, api.Capabilities{SnapshotPolicies: map[string]api.SnapshotProjectPolicy{
 		projectID: {Sources: map[string]api.SnapshotSourcePolicy{"shipping-rates": {Allow: true}}},
 	}})
+	// The store factory is the one of the process: the next test is given its own back.
+	previousStore := storage.NewDatatugStore
 	storage.NewDatatugStore = func(string) (storage.Store, error) {
 		return filestore.NewStore("files", map[string]string{projectID: projectDir})
 	}
-	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
+	t.Cleanup(func() {
+		storage.NewDatatugStore = previousStore
+		api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{})
+	})
 	require.NoError(t, api.ConfigureExecutionEvidence(map[string]string{projectID: projectDir}, nil, executionstore.Options{PrivateDir: t.TempDir()}))
 	t.Cleanup(func() { require.NoError(t, api.CloseExecutionEvidence()) })
 

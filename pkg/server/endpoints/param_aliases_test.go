@@ -98,7 +98,7 @@ func TestKeepAsIsRoutesAcceptContractAndClientParamNames(t *testing.T) {
 		var got dto.GetServerDatabasesRequest
 		saved := getServerDatabasesFunc
 		defer func() { getServerDatabasesFunc = saved }()
-		getServerDatabasesFunc = func(request dto.GetServerDatabasesRequest) ([]*datatug.DbCatalog, error) {
+		getServerDatabasesFunc = func(_ context.Context, request dto.GetServerDatabasesRequest) ([]*datatug.DbCatalog, error) {
 			got = request
 			return nil, nil
 		}

@@ -11,9 +11,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// renderInitProject is a seam over the project initialisation of
+// renderCommandAction (see datasetInitProject). Always the real
+// initProjectCommand in production.
+var renderInitProject = func(v *renderCommand) error {
+	return v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true})
+}
+
 func renderCommandAction(_ *cobra.Command, _ []string) error {
 	v := &renderCommand{}
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+	if err := renderInitProject(v); err != nil {
 		return err
 	}
 	if v.projectID != "" {
@@ -26,7 +33,7 @@ func renderCommandAction(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("ProjectDir=[%v] not found: %w", v.ProjectDir, err)
 	}
 
-	store, _ := filestore.NewSingleProjectStore(storage.SingleProjectID, v.ProjectDir)
+	store, _ := filestore.NewSingleProjectStore(v.ProjectDir, storage.SingleProjectID)
 	projectStore := store.GetProjectStore(storage.SingleProjectID)
 	datatugProject, err := projectStore.LoadProject(context.Background())
 	if err != nil {

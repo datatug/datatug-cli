@@ -52,7 +52,7 @@ func dbSchemesHelp() string {
 	for i, scheme := range schemes {
 		labeled[i] = scheme + "://"
 	}
-	return strings.Join(labeled, ", ")
+	return strings.Join(labeled, ", ") + ", or " + dbcopy.EnvSourceForm + " naming an environment variable that holds one"
 }
 
 // queryCommand is the `query` resource group; the bare group shows help.
@@ -61,7 +61,7 @@ func queryCommand() *cobra.Command {
 		Use:   "query",
 		Short: "Run queries through your access policies",
 	}
-	cmd.AddCommand(queryRunCommand())
+	cmd.AddCommand(queryRunCommand(), queryBigQueryCommand())
 	return cmd
 }
 
@@ -75,10 +75,18 @@ exactly as a secured application would for the principal named by --as/--role/--
 Result rows go to stdout in the chosen format; the limitations the policies
 applied (row conditions, field allow-lists, the deciding rule) go to stderr.
 
+For saved federated DTQL, --format jsonl and csv stream one flat equality
+join without top-level ordering or aggregation. The joined dimension must
+declare a stable scan order and limit of at most 10000 rows; it is indexed
+in memory while fact rows and HTTP lookups stream in bounded batches.
+CSV additionally requires explicit result columns. Other federated query
+shapes can use json, yaml or grid, which collect the result before output.
+
 Examples:
   datatug query run --db ingitdb://./crm --from customers --as alice
   datatug query run --db sqlite:///tmp/crm.db -f report.dtql.yaml --as alice --role support --format csv
   datatug query run --db ingitdb://./crm --from products --var minPrice=10 --format json
+  datatug query run --db env:SHOP_PG_URL -f report.dtql.yaml --as alice   # SHOP_PG_URL holds the whole connection URL
   datatug query run --project ./demo-project-1 --query customers/customer-invoices --as alice --var CustomerId=5
   datatug query run --project demo-project-1 --query reference/country-facts --env local --var name=Brazil`,
 		SilenceUsage: true,
@@ -172,9 +180,16 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 // Collection.InsecureAllowLoopback) for an HTTP(S) source backed by a
 // loopback httptest.Server, without any project descriptor file ever being
 // able to request that itself — see cmd_query_http_provenance_test.go.
-// Production code always runs with this default, which calls the real,
-// https-only-enforcing BackendRef.Open.
+// Production code always runs with this default. SQLite uses the validated
+// structured-query dialect so grouped DTQL is rendered as native SQL (and
+// literals remain bound parameters), and PostgreSQL opens as a protected read:
+// a read-only session, behind the preview switch; other sources keep their
+// existing open behavior. Both paths retain the HTTPS-only HTTP-source
+// enforcement.
 var openBackend = func(ctx context.Context, backend dbcopy.BackendRef) (dal.DB, error) {
+	if backend.Scheme == "sqlite" || backend.Scheme == "postgres" {
+		return backend.OpenProtected(ctx)
+	}
 	return backend.Open(ctx)
 }
 
@@ -193,6 +208,14 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	backend, err := dbcopy.Parse(o.db)
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
+	}
+	// The flag the source was typed on is what a failure of a PostgreSQL source says its connection string is read
+	// from (an env:NAME source says the variable).
+	backend = backend.WithFlag("--db")
+	// A PostgreSQL source is a preview that is off unless the person turns it on: that is the first
+	// thing they are told, before anything about policies, which turning it on would not change.
+	if err = dbcopy.CheckPostgresRead(backend, 0); err != nil {
+		return Exit(err.Error(), exitCodeDatabase)
 	}
 	loaded, err := accesspolicies.Load(accesspolicies.LoadOptions{Dir: o.policiesDir, Files: o.policies, None: o.noPolicies})
 	if err != nil {
@@ -213,6 +236,11 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// With the preview on, a read of a PostgreSQL source through policies is not available in it: that is
+	// answered before the source is opened.
+	if err = dbcopy.CheckPostgresRead(backend, len(loaded)); err != nil {
+		return Exit(err.Error(), exitCodeUsage)
+	}
 	// This ad-hoc `datatug query run --db http://...` path predates
 	// pkg/httpsource.Open's fail-closed ModeLive default (see Open's own doc
 	// comment) and is documented, tested, offline-friendly terminal UX
@@ -228,7 +256,15 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	ctx = httpsource.ContextWithDispatch(ctx, dalgo2http.ModeLiveThenSnapshot, false, 0)
 	db, err := openBackend(ctx, backend)
 	if err != nil {
-		return Exit(fmt.Sprintf("open %s: %v", o.db, err), exitCodeDatabase)
+		// OpenFailure names the source (its display form: a password given in the
+		// URL never reaches the message, and env:NAME names the variable without
+		// its value) and says what failed in a fixed sentence: a driver's own text
+		// can quote the URL it was given. It already says which source failed, so
+		// nothing is put in front of it. A PostgreSQL source is not named by its
+		// display form (that holds the host and the port): its text is the adapter's
+		// sentence and where the connection string is read from (the --db flag, or
+		// the variable of an env:NAME source).
+		return Exit(backend.OpenFailure(err).Error(), exitCodeDatabase)
 	}
 	stderr := cmd.ErrOrStderr()
 	if len(loaded) == 0 {

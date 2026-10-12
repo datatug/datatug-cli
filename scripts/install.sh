@@ -1,211 +1,90 @@
 #!/bin/sh
-# DataTug CLI installer
-#
-# Usage:
-#   curl -fsSL https://datatug.io/install/get-cli | sh
-#
-# Environment variables:
-#   DATATUG_VERSION      Version tag to install (default: latest)
-#   DATATUG_INSTALL_DIR  Install location (default: /usr/local/bin or ~/.local/bin)
 
+# Install an official DataTug CLI release without a language toolchain.
+# DATATUG_INSTALL_DIR may override the default per-user destination.
+# DATATUG_VERSION may pin a release tag such as v0.32.0.
 set -eu
 
-REPO="datatug/datatug-cli"
-BIN_NAME="datatug"
-# Multi-component releases: when releases are published to a different repo
-# (e.g. synchestra-io/synchestra-releases) and/or tags are prefixed
-# (e.g. "cli-v0.x.y" alongside "servers-v0.x.y"), set these.
-RELEASES_REPO=""
-RELEASE_TAG_PREFIX=""
+repo="https://github.com/datatug/datatug-cli"
+install_dir=${DATATUG_INSTALL_DIR:-"$HOME/.local/bin"}
+version=${DATATUG_VERSION:-}
+destination_tmp=
 
-# Derive defaults
-: "${RELEASES_REPO:=$REPO}"
+fail() {
+  printf 'datatug install: %s\n' "$1" >&2
+  exit 1
+}
 
-log()  { printf '%s\n' "$*"; }
-err()  { printf 'error: %s\n' "$*" >&2; }
-die()  { err "$*"; exit 1; }
+command -v curl >/dev/null 2>&1 || fail "curl is required"
 
-# --- Detect OS -------------------------------------------------------------
-OS="$(uname -s)"
-case "$OS" in
-  Linux*)               OS="linux" ;;
-  Darwin*)              OS="darwin" ;;
-  MINGW*|MSYS*|CYGWIN*) OS="windows" ;;
-  *) die "unsupported OS: $OS" ;;
+case "$(uname -s)" in
+  Darwin) os=darwin ;;
+  Linux) os=linux ;;
+  *) fail "unsupported operating system: $(uname -s)" ;;
 esac
 
-# --- Detect architecture ---------------------------------------------------
-ARCH="$(uname -m)"
-case "$ARCH" in
-  x86_64|amd64)  ARCH="amd64" ;;
-  arm64|aarch64) ARCH="arm64" ;;
-  *) die "unsupported architecture: $ARCH" ;;
+case "$(uname -m)" in
+  x86_64|amd64) arch=amd64 ;;
+  arm64|aarch64) arch=arm64 ;;
+  *) fail "unsupported architecture: $(uname -m)" ;;
 esac
 
-if [ "$OS" = "windows" ] && [ "$ARCH" = "arm64" ]; then
-  die "windows/arm64 is not released; please build from source"
+if [ -z "$version" ]; then
+  latest_url=$(curl -fsSIL -o /dev/null -w '%{url_effective}' "$repo/releases/latest") ||
+    fail "could not resolve the latest release"
+  version=${latest_url##*/}
 fi
 
-# --- Resolve version -------------------------------------------------------
-VERSION="${DATATUG_VERSION:-latest}"
-if [ "$VERSION" = "latest" ]; then
-  if [ -n "$RELEASE_TAG_PREFIX" ]; then
-    # Multi-component releases repo: /releases/latest doesn't know which
-    # prefix we care about — list recent releases and pick the newest with
-    # our prefix.
-    VERSION="$(
-      curl -fsSL "https://api.github.com/repos/${RELEASES_REPO}/releases?per_page=50" \
-        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
-        | grep "^${RELEASE_TAG_PREFIX}" \
-        | head -n1
-    )"
-  else
-    VERSION="$(
-      curl -fsSL "https://api.github.com/repos/${RELEASES_REPO}/releases/latest" \
-        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
-        | head -n1
-    )"
+case "$version" in
+  v[0-9]*) ;;
+  *) fail "release version must be a tag such as v0.32.0" ;;
+esac
+
+asset_version=${version#v}
+archive="datatug_${asset_version}_${os}_${arch}.tar.gz"
+checksums="datatug_${asset_version}_checksums.txt"
+release_url="$repo/releases/download/$version"
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/datatug-install.XXXXXX") ||
+  fail "could not create a temporary directory"
+
+cleanup() {
+  rm -rf "$work_dir"
+  if [ -n "$destination_tmp" ]; then
+    rm -f "$destination_tmp"
   fi
-  [ -n "$VERSION" ] || die "failed to resolve latest release tag from GitHub"
-fi
+}
+trap cleanup EXIT HUP INT TERM
 
-# goreleaser archives are named with the version without the leading "v"
-# (and without the optional release-tag prefix).
-VER_NO_V="${VERSION#${RELEASE_TAG_PREFIX}}"
-VER_NO_V="${VER_NO_V#v}"
+curl -fsSLo "$work_dir/$checksums" "$release_url/$checksums" ||
+  fail "could not download checksums for $version"
+curl -fsSLo "$work_dir/$archive" "$release_url/$archive" ||
+  fail "could not download $archive"
 
-EXT="tar.gz"
-[ "$OS" = "windows" ] && EXT="zip"
+expected=$(awk -v file="$archive" '$2 == file || $2 == "*" file { print $1; exit }' "$work_dir/$checksums")
+[ -n "$expected" ] || fail "$archive is missing from $checksums"
 
-ARCHIVE="${BIN_NAME}_${VER_NO_V}_${OS}_${ARCH}.${EXT}"
-BASE_URL="https://github.com/${RELEASES_REPO}/releases/download/${VERSION}"
-ARCHIVE_URL="${BASE_URL}/${ARCHIVE}"
-CHECKSUMS_URL="${BASE_URL}/${BIN_NAME}_${VER_NO_V}_checksums.txt"
-
-# --- Resolve install directory --------------------------------------------
-if [ -n "${DATATUG_INSTALL_DIR:-}" ]; then
-  INSTALL_DIR="$DATATUG_INSTALL_DIR"
-elif [ "$(id -u 2>/dev/null || echo 1)" = "0" ]; then
-  INSTALL_DIR="/usr/local/bin"
-elif [ -w "/usr/local/bin" ] 2>/dev/null; then
-  INSTALL_DIR="/usr/local/bin"
+if command -v shasum >/dev/null 2>&1; then
+  actual=$(shasum -a 256 "$work_dir/$archive" | awk '{ print $1 }')
+elif command -v sha256sum >/dev/null 2>&1; then
+  actual=$(sha256sum "$work_dir/$archive" | awk '{ print $1 }')
 else
-  INSTALL_DIR="$HOME/.local/bin"
+  fail "shasum or sha256sum is required"
 fi
 
-mkdir -p "$INSTALL_DIR" || die "cannot create $INSTALL_DIR"
+[ "$actual" = "$expected" ] || fail "SHA-256 checksum verification failed"
 
-# --- Download, verify, install --------------------------------------------
-TMP="$(mktemp -d 2>/dev/null || mktemp -d -t "$BIN_NAME")"
-trap 'rm -rf "$TMP"' EXIT INT TERM
+tar -xzf "$work_dir/$archive" -C "$work_dir" || fail "could not extract $archive"
+[ -f "$work_dir/datatug" ] || fail "release archive does not contain datatug"
 
-log "${BIN_NAME} ${VERSION} (${OS}/${ARCH})"
-log "  archive: ${ARCHIVE_URL}"
+mkdir -p "$install_dir" || fail "could not create $install_dir"
+destination_tmp="$install_dir/.datatug.install.$$"
+cp "$work_dir/datatug" "$destination_tmp" || fail "could not copy datatug to $install_dir"
+chmod 755 "$destination_tmp" || fail "could not make datatug executable"
+mv "$destination_tmp" "$install_dir/datatug" || fail "could not install datatug in $install_dir"
+destination_tmp=
 
-curl -fsSL "$ARCHIVE_URL" -o "$TMP/$ARCHIVE" \
-  || die "download failed: $ARCHIVE_URL"
-
-# Verify checksum if we can fetch the manifest and have a sha256 tool.
-if curl -fsSL "$CHECKSUMS_URL" -o "$TMP/checksums.txt" 2>/dev/null; then
-  EXPECTED="$(awk -v f="$ARCHIVE" '$2==f {print $1}' "$TMP/checksums.txt")"
-  if [ -n "$EXPECTED" ]; then
-    if command -v sha256sum >/dev/null 2>&1; then
-      ACTUAL="$(sha256sum "$TMP/$ARCHIVE" | awk '{print $1}')"
-    elif command -v shasum >/dev/null 2>&1; then
-      ACTUAL="$(shasum -a 256 "$TMP/$ARCHIVE" | awk '{print $1}')"
-    else
-      ACTUAL=""
-      log "  checksum: skipped (no sha256sum or shasum available)"
-    fi
-    if [ -n "$ACTUAL" ]; then
-      [ "$ACTUAL" = "$EXPECTED" ] \
-        || die "checksum mismatch for $ARCHIVE (expected $EXPECTED, got $ACTUAL)"
-      log "  checksum: OK"
-    fi
-  fi
-else
-  log "  checksum: skipped (manifest not available)"
-fi
-
-log "  extracting..."
-if [ "$EXT" = "tar.gz" ]; then
-  tar -xzf "$TMP/$ARCHIVE" -C "$TMP"
-else
-  command -v unzip >/dev/null 2>&1 || die "unzip is required to install on windows"
-  (cd "$TMP" && unzip -q "$ARCHIVE")
-fi
-
-SRC="$TMP/$BIN_NAME"
-DST="$INSTALL_DIR/$BIN_NAME"
-if [ "$OS" = "windows" ]; then
-  SRC="${SRC}.exe"
-  DST="${DST}.exe"
-fi
-
-[ -f "$SRC" ] || die "binary not found in archive: $SRC"
-
-cp "$SRC" "$DST"
-chmod +x "$DST"
-
-log "installed ${BIN_NAME} ${VERSION} to ${DST}"
-
-# --- PATH advisory --------------------------------------------------------
-IN_PATH=0
+printf 'Installed datatug %s at %s/datatug\n' "$version" "$install_dir"
 case ":$PATH:" in
-  *":$INSTALL_DIR:"*) IN_PATH=1 ;;
-  *)
-    log ""
-    log "note: ${INSTALL_DIR} is not in your PATH. Add it with:"
-    log "  export PATH=\"${INSTALL_DIR}:\$PATH\""
-    ;;
+  *":$install_dir:"*) ;;
+  *) printf 'Add %s to PATH for this shell: export PATH="%s:$PATH"\n' "$install_dir" "$install_dir" ;;
 esac
-
-# --- Shadow check ----------------------------------------------------------
-# If another ${BIN_NAME} appears earlier on PATH (commonly a stale
-# `go install` build in $GOPATH/bin), it shadows the binary we just
-# installed. Rename it to .backup so the released version takes effect.
-if [ "$IN_PATH" = "1" ]; then
-  SHADOW="$(command -v "$BIN_NAME" 2>/dev/null || true)"
-  if [ -n "$SHADOW" ] && [ "$SHADOW" != "$DST" ]; then
-    BACKUP="${SHADOW}.backup"
-    # If a prior .backup already exists (e.g. user reinstalled via `go install`
-    # after a previous curl-install), suffix with a timestamp so we never
-    # clobber the earlier preserved binary.
-    if [ -e "$BACKUP" ]; then
-      BACKUP="${SHADOW}.backup.$(date +%Y%m%d%H%M%S)"
-    fi
-    log ""
-    log "note: another ${BIN_NAME} is earlier on PATH at ${SHADOW}"
-    log "  it would shadow the version just installed at ${DST}"
-    if mv "$SHADOW" "$BACKUP" 2>/dev/null; then
-      log "  renamed to ${BACKUP}"
-    else
-      log "  unable to rename (insufficient permissions); remove or rename it manually:"
-      log "    mv ${SHADOW} ${BACKUP}"
-    fi
-  else
-    # PATH resolution is fine, but a behind-PATH ${BIN_NAME} elsewhere (e.g.
-    # a stale `go install` binary in $GOPATH/bin that appears after
-    # $INSTALL_DIR in PATH) may have been hashed by the caller's interactive
-    # shell from a previous invocation. We can't clear the parent shell's
-    # hash table from this subshell — print the fix instead.
-    OTHER=""
-    IFS_SAVE="$IFS"
-    IFS=":"
-    for d in $PATH; do
-      [ -n "$d" ] || continue
-      [ "$d/$BIN_NAME" = "$DST" ] && continue
-      if [ -x "$d/$BIN_NAME" ]; then
-        OTHER="$d/$BIN_NAME"
-        break
-      fi
-    done
-    IFS="$IFS_SAVE"
-    if [ -n "$OTHER" ]; then
-      log ""
-      log "note: another ${BIN_NAME} is on PATH at ${OTHER} (behind ${DST})"
-      log "  if your shell still reports an old version, clear its command cache:"
-      log "    hash -r"
-    fi
-  fi
-fi

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -11,7 +10,6 @@ import (
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
-	"github.com/datatug/datatug-core/pkg/storage"
 )
 
 // secureMu guards the package-level state ConfigureSecureSession sets once,
@@ -43,6 +41,11 @@ var (
 type Capabilities struct {
 	AllowWrites    bool
 	AllowOpaqueSQL bool
+	// AllowLiveConnections is `datatug serve --allow-live-connections`: the routes that connect
+	// to a database server that the served project records (dbserver-databases) answer 403
+	// without it. It is off by default: such a connection is made under the identity of the
+	// person who runs the server.
+	AllowLiveConnections bool
 	// HTTPOffline is `datatug serve --http-offline` (Phase 1 Task 14, item
 	// 7): when true, every HTTP-typed saved query's LIVE fetch fails as
 	// SOURCE_UNAVAILABLE without ever touching the network (see
@@ -121,7 +124,7 @@ func SecurePolicyFingerprint() string {
 // credentials or identify another session").
 func newSecurityContextID() string {
 	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
+	if _, err := randRead(buf); err != nil {
 		return "securitycontext-unavailable"
 	}
 	return hex.EncodeToString(buf)
@@ -235,13 +238,22 @@ func ProjectDir(projectID string) (string, bool) {
 	return projectDir(projectID)
 }
 
+// sessionConfigured reports whether ConfigureSecureSession has been given the set of
+// projects this process serves: a nil set is the state of a process that has not been
+// configured (a handler under test, or a command that does not serve), and an empty one is
+// a session that serves no project. Only a configured session can say which projects are
+// not served.
+func sessionConfigured() bool {
+	secureMu.RLock()
+	defer secureMu.RUnlock()
+	return projectDirs != nil
+}
+
 // ProjectStoreFor returns the datatug.ProjectStore for projectID, over the
 // same storeID convention RunQuery/ExecuteSelect already use
-// (storage.NewDatatugStore("")), for resolver calls that need one.
+// (storage.NewDatatugStore("")), for resolver calls that need one. It is
+// projectStoreForID with that store ID: a project this process does not serve is
+// refused whenever a session is configured.
 func ProjectStoreFor(projectID string) (datatug.ProjectStore, error) {
-	store, err := storage.NewDatatugStore("")
-	if err != nil {
-		return nil, err
-	}
-	return store.GetProjectStore(projectID), nil
+	return projectStoreForID("", projectID)
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -109,5 +110,26 @@ func TestConfiguredStoreIDs_ServedProjectSessionResolves(t *testing.T) {
 
 	if _, err := ResolveStoreID("firestore", "served-project"); !errors.Is(err, ErrUnknownStoreID) {
 		t.Errorf("ResolveStoreID(firestore, served-project) = %v, want ErrUnknownStoreID", err)
+	}
+}
+
+// The store and the project a client names are quoted in the refusal only when each is
+// a plain name: a source string can be sent where either belongs.
+func TestResolveStoreID_NamesOnlyPlainNames(t *testing.T) {
+	const secretID = "postgres://alice:s3cretpw@db.example.com/shop"
+	for name, call := range map[string]func() error{
+		"an unknown explicit store": func() error { _, err := resolveStoreID(secretID, secretID, []string{"local"}); return err },
+		"no store configured":       func() error { _, err := resolveStoreID("", secretID, nil); return err },
+		"several stores":            func() error { _, err := resolveStoreID("", secretID, []string{"a", "b"}); return err },
+	} {
+		err := call()
+		if err == nil || strings.Contains(err.Error(), "s3cretpw") || strings.Contains(err.Error(), "alice") || strings.Contains(err.Error(), "db.example.com") {
+			t.Errorf("%s: %v, want a refusal that shows nothing of the source string", name, err)
+		}
+	}
+	// A plain name is still named, so the message stays useful.
+	_, err := resolveStoreID("files", "proj1", []string{"local"})
+	if err == nil || !strings.Contains(err.Error(), `"files" is not configured for project "proj1"`) || !errors.Is(err, ErrUnknownStoreID) {
+		t.Errorf("a plain store and project should be named: %v", err)
 	}
 }

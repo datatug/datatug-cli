@@ -20,11 +20,25 @@ type projectBaseCommand struct {
 	ProjectName string `short:"p" long:"project"  required:"false" description:"GetProjectStore name"`
 	projectID   string
 	store       storage.Store
+
+	// FollowProjectLink is --follow-project-link of a command that writes into the project folder
+	// it was given: it goes on when the last part of that folder is a link.
+	FollowProjectLink bool
 }
 
 type projectCommandOptions struct {
 	projNameRequired, projDirRequired, projNameOrDirRequired bool
+
+	// writesProject is set by a command that writes into the project folder it was given with
+	// -d: it stops when that folder is a link, unless the person said to go on (see
+	// checkProjectFolderLink). A command that only reads does not set it.
+	writesProject bool
 }
+
+// newProjectsStore is a seam over filestore.NewStore, which never fails
+// today but whose error return initProjectCommand must still propagate.
+// Always filestore.NewStore in production.
+var newProjectsStore = filestore.NewStore
 
 func (v *projectBaseCommand) initProjectCommand(o projectCommandOptions) error {
 	if o.projNameRequired && v.ProjectName == "" {
@@ -37,6 +51,11 @@ func (v *projectBaseCommand) initProjectCommand(o projectCommandOptions) error {
 		return errors.New("either project name or project directory is required")
 	}
 	if v.ProjectDir != "" && v.projectID == "" {
+		if o.writesProject {
+			if err := checkProjectFolderLink(v.ProjectDir, v.FollowProjectLink); err != nil {
+				return err
+			}
+		}
 		v.store, v.projectID = filestore.NewSingleProjectStore(v.ProjectDir, v.projectID)
 		return nil
 	}
@@ -60,7 +79,7 @@ func (v *projectBaseCommand) initProjectCommand(o projectCommandOptions) error {
 	}
 
 	pathsByID := getProjPathsByID(config)
-	v.store, err = filestore.NewStore("local_file_store_from_user_config", pathsByID)
+	v.store, err = newProjectsStore("local_file_store_from_user_config", pathsByID)
 	if err != nil {
 		return err
 	}

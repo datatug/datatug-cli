@@ -14,16 +14,16 @@ status: Implemented
 
 ## Summary
 
-`datatug db copy --from <url> --to <url>` is a streaming, cross-engine database-copy primitive. It reads the source schema and table data via the DALgo abstraction and writes them to the target via the same abstraction — auto-creating the target schema on the way. MVP is end-to-end-tested in **both directions** between SQLite (via `dalgo2sqlite`) and inGitDB (via `dalgo2ingitdb`) — i.e. SQLite → inGitDB AND inGitDB → SQLite.
+`datatug db copy --from <url> --to <url>` is a streaming database-copy command built on DALgo source readers and target writers. Registered source URLs are SQLite, inGitDB, PostgreSQL, HTTP(S) DataTug query projects, and OpenVaultDB. Registered targets are SQLite, inGitDB, PostgreSQL, and BigQuery; BigQuery is currently destination-only. Each route still depends on the source and target schema/value capabilities described below.
 
 **Current state — SQLite → inGitDB end-to-end (full Chinook).** The implementation replicates schema (collection definitions, primary keys, indexes) AND row data for the SQLite → inGitDB direction. All 11 Chinook tables replicate cleanly with 15,607 rows copied. Row streaming uses DALgo's `ExecuteQueryToRecordsReader` on the source and `RunReadwriteTransaction` → `InsertMulti` on the target. Per-feature notes:
 
 - `DATETIME` / `NUMERIC(p,s)` SQLite types are recognized as `dbschema.Time` and `dbschema.Decimal` respectively (fixed upstream in `dalgo2sqlite`). `dbschema.Decimal` and `dbschema.Bytes` map to inGitDB's `Float` and `String` column types respectively — lossy carriers documented in `dalgo2ingitdb/type_mapping.go`.
 - Composite-PK tables are copied with each row's target record ID as the `__`-joined `fmt.Sprintf("%v", v)` of every PK column (in the order `DescribeCollection` reports them); for example `PlaylistTrack`'s `(PlaylistId=1, TrackId=3402)` lands at `<projectPath>/PlaylistTrack/$records/1__3402.yaml`.
 - inGitDB → SQLite row streaming works through `dalgo2sql` accepting `map[string]any` Record data alongside the existing struct path (fixed upstream). End-to-end reverse-direction E2E is not yet wired in tests; the building blocks are in place.
-- PostgreSQL is recognized as a URL scheme but deferred from the MVP E2E bar until a PostgreSQL DALgo driver lands `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware`. The `ingitdb://` URL scheme dispatches to the inGitDB driver against a local-filesystem path.
+- PostgreSQL remains preview-gated by `DATATUG_PREVIEW_POSTGRES=1`. A `--from` is read through a read-only session; `--to` is the only place DataTug opens PostgreSQL for writing. The real-server CI journey also exercises PostgreSQL-to-BigQuery source-row encoding through an offline capture sink. The `ingitdb://` URL scheme dispatches to the inGitDB driver against a local-filesystem path.
 
-The verb is a pure primitive: either side can be any DALgo-supported URL. A `--parallel-streams` flag governs per-table parallelism with a safety cap derived from the DALgo `ConcurrencyAware` capability. A non-empty target requires an explicit `--overwrite=recreate` (drop tables and recreate from source schema) or `--overwrite=reload` (truncate tables and reload data, preserving schema).
+The command currently dispatches the registered URL schemes above; it does not accept every DALgo adapter automatically. BigQuery table creation omits source primary and foreign key declarations because BigQuery does not enforce them and this copy path does not independently validate uniqueness or referential integrity across staged rows. The command reports each omitted source constraint. A `--parallel-streams` flag governs per-table parallelism with a safety cap derived from the DALgo `ConcurrencyAware` capability. SQL targets require explicit `--overwrite=recreate` (drop tables and recreate from source schema) or `--overwrite=reload` (truncate tables and reload data, preserving schema) when destination tables already exist. BigQuery always refuses existing tables; choose a new dataset or table names.
 
 ## Contents
 
@@ -38,6 +38,9 @@ datatug db copy --from <source-url> --to <target-url>
                 [--parallel-streams=N]
                 [--overwrite=recreate|reload]
                 [--progress]
+
+datatug db copy --to bigquery://PROJECT/DATASET?location=LOCATION
+                --recover-job-ref '<credential-free JSON reference>'
 ```
 
 ## Problem
@@ -50,7 +53,7 @@ DataTug already scans live databases into versioned project files and exposes th
 
 #### REQ: required-flags
 
-The command MUST accept `--from <url>` and `--to <url>` as REQUIRED flags. Both MUST be supplied; either being absent MUST exit with status `2` (InvalidArgs) and a usage message naming the missing flag.
+For a new transfer, the command MUST accept `--from <url>` and `--to <url>` and exit with status `2` naming either missing flag. For recovery of an uncertain BigQuery load, `--to` and `--recover-job-ref` are required; `--from` is omitted because recovery never reads or resubmits source rows.
 
 #### REQ: optional-flags
 
@@ -70,7 +73,14 @@ The MVP URL parser MUST accept these schemes:
 |---|---|---|---|
 | `sqlite` | `sqlite:///absolute/path.db` or `sqlite://./relative/path.db` | `dalgo2sqlite` (lives in `dal-go/dalgo2sqlite`) | E2E-tested |
 | `ingitdb` | `ingitdb://./path-to-project` (local-filesystem path) | `dalgo2ingitdb` (lives in `ingitdb/ingitdb-cli`) | E2E-tested |
-| `postgres` | `postgres://user:pw@host:port/dbname?sslmode=...` | TBD (no driver currently exposes `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware`) | **Deferred** — scheme recognized; opening MUST exit `1` with a "PostgreSQL backend not yet wired" message until a driver is registered. |
+| `postgres` | `postgres://user:pw@host:port/dbname?sslmode=...` | `dalgo2postgres` (lives in `dal-go/dalgo2postgres`) | **Preview** — while `DATATUG_PREVIEW_POSTGRES` is not `1`, opening MUST exit `4` with one fixed sentence that says PostgreSQL sources are a preview and names the variable, before the URL is read any further and without a connection. A URL on either side whose query sets `host`, `port`, `dbname` or `database` is refused by the URL parser with exit `2` whether the variable is set or not, because `db copy` parses both URLs before it opens anything. With it set, `--from` opens through a read-only session (a `--from` URL that turns `default_transaction_read_only` off is refused, and so is one whose query sets `service` or `servicefile`) and `--to` opens for writing. Not in the MVP E2E bar. |
+| `bigquery` | `bigquery://PROJECT/DATASET?location=LOCATION` | `dalgo2bigquery` load writer | Supported destination; uses local Google Application Default Credentials with BigQuery write scope. The project is the billing project. Location is mandatory. Existing tables are never replaced, and `--overwrite` is rejected. |
+
+#### REQ: bigquery-destination-transfer
+
+BigQuery is a destination for provider-neutral copies from DALgo sources, including SQLite, inGitDB, and preview-gated PostgreSQL. The CLI MUST stage and validate all selected source rows before creating the BigQuery dataset or tables. It MUST preserve physical source rows even when a table has no primary key, and MUST fail before destination mutation when a schema or value has no safe BigQuery representation. The destination writer MUST use explicit schema and location, `CREATE_NEVER`, `WRITE_EMPTY`, `maxBadRecords=0`, and `ignoreUnknownValues=false`; it MUST NOT overwrite existing tables. Credentials come from local Application Default Credentials and MUST NOT be accepted in the URL or printed. BigQuery PK/FK declarations are omitted because they are unenforced and this path does not validate all staged key semantics; each omitted source key is reported as a warning. Source secondary indexes and referential actions are not reproduced and are reported as warnings. Date-only text found in a declared `DATETIME` column is encoded at midnight so the original date remains exact in BigQuery's required date-time representation. BigQuery load jobs are atomic per table, but a multi-table copy is not one transaction: a provider/network failure after target preparation can leave tables already created or loaded.
+
+When a load outcome is uncertain, the command MUST print a credential-free `LoadJobRef` and a recovery invocation. The user MUST NOT rerun the copy while that job is unresolved. `--recover-job-ref` accepts the printed JSON reference with `--to`; recovery MUST poll only that same job and MUST NOT submit rows again. It MUST verify that the reference's project, dataset, and location match `--to` and MUST reject source, filter, overwrite, or progress flags in recovery mode.
 
 #### REQ: ingitdb-url-local-only
 
@@ -88,7 +98,7 @@ The command MUST introspect the source schema via the DALgo `dbschema` package (
 
 #### REQ: source-introspection-failure
 
-If the source URL parses cleanly but the source backend cannot be opened (file missing, connection refused, auth failure), the command MUST exit `4` (connection failure) with stderr naming the source URL and the underlying error.
+If the source URL parses cleanly but the source backend cannot be opened (file missing, connection refused, auth failure), the command MUST exit `4` (connection failure) with stderr naming the source as it is displayed (scheme, host, port and path, never a user name, a password or a query string) and a fixed reason: the file or directory does not exist, permission denied, the attempt timed out or was cancelled, or the connection was refused; for any other cause, a sentence saying the driver could not open the source. The driver's own text MUST NOT be shown, because a driver can quote the connection string, which holds the password. A PostgreSQL side is not named by its display form (that holds the host): the line after `open --from:` or `open --to:` is the sentence the adapter chose for the failure and where the connection string is read from (`the PostgreSQL connection string is read from the --to flag`, or the variable of an `env:NAME` side), the same text a call that fails later gives. (`TestDBCopy_OnlyTheTargetIsOpenedForWriting`.)
 
 If introspection succeeds in opening the source but `ListTables` returns an empty list, the command MUST exit `0` after emitting a single stderr line "source has no tables; nothing to copy". No target writes occur.
 
@@ -100,13 +110,21 @@ The command MUST create target tables (and primary-key declarations) via the DAL
 
 For indexes, the command MUST apply each non-primary index via `ddl.CreateIndex` after the table is created and BEFORE row data is loaded for that table. The order is: `CreateTable` → `CreateIndex` (×N) → row stream. This order is engine-agnostic; per-engine performance hints (e.g. "drop indexes, bulk-load, recreate indexes") are out of scope for MVP.
 
+#### REQ: names-checked-before-writes
+
+For a PostgreSQL target, the command MUST check every source table name and every name in a definition it will write (table, column, primary-key column, index and index column) before the first target change. It MUST use the adapter's rule: a plain identifier of at most 63 UTF-8 bytes after lower-casing. A refused name MUST leave the target unchanged, name its source object, say how to rename or exclude it, and exit `1`.
+
+#### REQ: index-not-recreated
+
+For a PostgreSQL target, an index whose source definition cannot be recreated from column names (for example an expression, condition, operator class or null ordering) MUST be skipped without refusing the copy. The command MUST copy the tables and other indexes and report each skipped index once, naming the index and why it was skipped.
+
 #### REQ: type-mapping-coverage
 
 The MVP type-mapping table MUST cover every column type appearing in the canonical Chinook fixture across both directed pairs of the MVP backends (SQLite ↔ inGitDB). Types outside that closed set MUST fail at schema-creation time (exit `1`) with a per-column error naming the unsupported source type and the target backend. The exact mapping table is plan-time content; this REQ pins the coverage bar. (PostgreSQL pairs are out of MVP scope; when the Postgres driver lands, the type-mapping table extends to the four additional directed pairs.)
 
 #### REQ: recreate-drops-first
 
-When `--overwrite=recreate` is supplied, BEFORE introspecting the source the command MUST drop every source-table-named table that exists on the target via `ddl.DropTable` (`IfExists()`). Indexes on dropped tables are dropped transitively per the DDL surface's contract. Tables on the target that are NOT in the source MUST be left alone. After all relevant drops complete, the command proceeds to introspect-and-create as in REQ:target-schema-via-ddl.
+When `--overwrite=recreate` is supplied, the command MUST drop every source-table-named table that exists on the target via `ddl.DropTable` (`IfExists()`). For a PostgreSQL target, the command MUST first read the source definitions and perform REQ:names-checked-before-writes; for other targets the drops precede source definition reads. Indexes on dropped tables are dropped transitively per the DDL surface's contract. Tables on the target that are NOT in the source MUST be left alone. After all relevant drops complete, the command proceeds to introspect-and-create as in REQ:target-schema-via-ddl.
 
 ### Row streaming
 
@@ -180,7 +198,7 @@ If a copy fails midway (mid-stream insert error, target connection drop, source 
 | Exit code | Meaning |
 |---|---|
 | `0` | All source tables copied successfully (or source had no tables) |
-| `1` | Generic runtime error (mid-copy failure, schema mismatch on reload, non-empty target without overwrite, type-mapping gap) |
+| `1` | Generic runtime error (mid-copy failure, a name refused by a PostgreSQL target, schema mismatch on reload, non-empty target without overwrite, type-mapping gap) |
 | `2` | Invalid flags (missing required, unsupported `--overwrite` value, unknown scheme, remote `ingitdb://`) |
 | `4` | Could not connect to source or target |
 
@@ -197,7 +215,7 @@ If a copy fails midway (mid-stream insert error, target connection drop, source 
 | `dal.Adapter` (source/target) | DALgo `dbschema` introspection + DDL application + row read/write | `dal-go/dalgo` (shipped via dbschema + ddl + concurrency-capability Features) |
 | `dalgo2ingitdb` | inGitDB DALgo driver (read + write + dbschema + DDL coverage; advertises `ConcurrencyAvailable`) | `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` |
 | `dalgo2sqlite` | SQLite DALgo driver (read + write + dbschema + DDL coverage; advertises `NoConcurrency`) | `dal-go/dalgo2sqlite` |
-| PostgreSQL driver | TBD — deferred until a driver implements `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware`. `dalgo2sql` covers data-plane today but not the schema/concurrency capabilities. | `dal-go/dalgo2sql` (data-plane only today) |
+| PostgreSQL driver | `dalgo2postgres` implements `dbschema.SchemaReader` + `ddl.SchemaModifier` + `dal.ConcurrencyAware` over `dalgo2sql`'s data plane. The CLI opens it behind the preview switch (see REQ:supported-schemes). | `dal-go/dalgo2postgres` |
 
 ### Data flow
 
@@ -231,23 +249,23 @@ If a copy fails midway (mid-stream insert error, target connection drop, source 
 - **DALgo `ConcurrencyAware`** — `dal-go/dalgo` — **Implemented**.
 - **`dalgo2ingitdb`** — `ingitdb/ingitdb-cli/pkg/dalgo2ingitdb` — **Ready** (implements `dbschema.SchemaReader`, `ddl.SchemaModifier`, embeds `dal.ConcurrencyAvailable`).
 - **`dalgo2sqlite`** — `dal-go/dalgo2sqlite` — **Ready** (implements `dbschema.SchemaReader`, `ddl.SchemaModifier`, embeds `dal.NoConcurrency`).
-- **PostgreSQL driver** — none of `dalgo2sql` / a hypothetical `dalgo2postgres` currently exposes the three capability interfaces. The `postgres://` scheme is recognized but disabled until a driver lands; see the MVP-status column in REQ:supported-schemes.
+- **PostgreSQL driver** — `dalgo2postgres` exposes the three capability interfaces and the CLI opens it, behind the preview switch `DATATUG_PREVIEW_POSTGRES`; see the MVP-status column in REQ:supported-schemes.
 - **URL parser** — `github.com/xo/dburl` is the existing parser used by `datatug db <url>` (the viewer Feature). The `ingitdb://` scheme MUST be registered with `dburl` (either via `dburl.Register` if available or via a small wrapper in `pkg/dbcopy/url.go`).
 
 ## Testing Strategy
 
-E2E tests against the canonical Chinook fixture. PostgreSQL pairs are deferred until a Postgres DALgo driver implements the three capability interfaces.
+E2E tests against the canonical Chinook fixture. The PostgreSQL pairs are wired behind the preview switch and have no E2E test yet: the tests of the preview stop at the open of the database (with fakes, no server), so the copy engine is not yet run against the PostgreSQL adapter. The real-server journey test of CI takes them, and the preview switch is not removed before they pass.
 
 | Source → Target | E2E test target |
 |---|---|
 | SQLite → inGitDB | yes (MVP minimum) |
 | inGitDB → SQLite | yes (MVP minimum) |
-| SQLite → PostgreSQL | deferred (no driver) |
-| inGitDB → PostgreSQL | deferred (no driver) |
-| PostgreSQL → SQLite | deferred (no driver) |
-| PostgreSQL → inGitDB | deferred (no driver) |
+| SQLite → PostgreSQL | preview, not tested against a server yet |
+| inGitDB → PostgreSQL | preview, not tested against a server yet |
+| PostgreSQL → SQLite | preview, not tested against a server yet |
+| PostgreSQL → inGitDB | preview, not tested against a server yet |
 
-Per the source Idea: "If the primitive ships and only one direction (e.g. SQLite→inGitDB) is wired for E2E, that is still a shippable MVP — the contract is set, additional backends fill in." The two SQLite↔inGitDB directions are the MVP bar; the four PostgreSQL pairs fill in when the Postgres driver lands.
+Per the source Idea: "If the primitive ships and only one direction (e.g. SQLite→inGitDB) is wired for E2E, that is still a shippable MVP — the contract is set, additional backends fill in." The two SQLite↔inGitDB directions are the MVP bar; the four PostgreSQL pairs fill in when the journey test of CI runs them against a real server.
 
 Unit tests cover: URL scheme dispatch (REQ:supported-schemes), the type-mapping table (REQ:type-mapping-coverage), the concurrency-cap rule (REQ:concurrency-cap), the empty-target detection (REQ:empty-target-check), the reload schema-match validator (REQ:reload-schema-match).
 
@@ -351,7 +369,7 @@ From the source Idea:
 
 **Given** a SQLite file path `./does-not-exist.db` that the filesystem does not have
 **When** the user runs `datatug db copy --from sqlite:///./does-not-exist.db --to sqlite:///tmp/out.db`
-**Then** the command exits `4`; stderr names the source URL and the underlying error (e.g. "no such file or directory").
+**Then** the command exits `4`; stderr names the source as it is displayed and says the file does not exist, in a fixed sentence and not in the driver's words.
 
 ### AC: concurrency-cap-warns-on-explicit-request
 
@@ -392,6 +410,24 @@ From the source Idea:
 **Given** a SQLite target at `./out.db` containing two tables: `users` (also in source) and `audit_log` (not in source)
 **When** the user runs `datatug db copy --from sqlite:///./in.db --to sqlite:///./out.db --overwrite=recreate` where `--from` has only the table `users`
 **Then** the command exits `0`; on `./out.db` after copy, `users` exists with source data; `audit_log` is unchanged (table + rows still present).
+
+### AC: postgres-refuses-a-name-before-changing-the-target
+
+**Requirements:** copy#req:names-checked-before-writes
+
+Given a PostgreSQL target with two tables holding rows and a SQLite source whose third table has a name with a space or a name of 64 bytes, `db copy --overwrite=recreate` exits `1`, names that source table and how to rename or exclude it, and leaves both target tables and their rows unchanged. The same rule applies to a refused column, primary-key column or index name in a definition the copy will write. (`TestCopy_ToPostgres_ARefusedNameIsRefusedBeforeAnyStatement`, `TestDBCopy_ToPostgres_ARefusedNameExitsOneAndChangesNothing`, `TestPostgresCopyJourneyRefusesANameAndLeavesTheTargetAsItWas`.)
+
+### AC: postgres-reports-an-index-it-cannot-recreate
+
+**Requirements:** copy#req:index-not-recreated
+
+Given a source with ordinary indexes and an index whose definition uses an expression or condition, a copy to PostgreSQL creates every table and every ordinary index, skips the index it cannot recreate, and reports that index once with a reason. (`TestCopy_ToPostgres_AnIndexTheDriverCannotRecreateIsSkippedAndReported`.)
+
+### AC: other-targets-keep-their-names
+
+**Requirements:** copy#req:names-checked-before-writes
+
+A SQLite or inGitDB target accepts source names under its existing rules, including names a PostgreSQL target refuses. (`TestCopy_ToOtherTargets_TakesTheNamesAPostgresTargetRefuses`.)
 
 ### AC: reload-rejects-schema-mismatch
 

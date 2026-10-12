@@ -2,6 +2,7 @@ package dtlog
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -77,9 +78,11 @@ func TestEnqueue(t *testing.T) {
 	oldInitialized := initialized
 	oldPosthogDistinctID := posthogDistinctID
 	oldQueue := queue
+	oldStarted := started
 
 	ph = mockClient
 	initialized = true
+	started = true
 	posthogDistinctID = "test-distinct-id"
 	mu.Unlock()
 
@@ -89,6 +92,7 @@ func TestEnqueue(t *testing.T) {
 		initialized = oldInitialized
 		posthogDistinctID = oldPosthogDistinctID
 		queue = oldQueue
+		started = oldStarted
 		mu.Unlock()
 	}()
 
@@ -143,14 +147,17 @@ func TestScreenOpened(t *testing.T) {
 	mu.Lock()
 	oldPh := ph
 	oldInitialized := initialized
+	oldStarted := started
 	ph = mockClient
 	initialized = true
+	started = true
 	mu.Unlock()
 
 	defer func() {
 		mu.Lock()
 		ph = oldPh
 		initialized = oldInitialized
+		started = oldStarted
 		mu.Unlock()
 	}()
 
@@ -172,12 +179,15 @@ func TestClose(t *testing.T) {
 	mockClient := &mockPosthogClient{}
 	mu.Lock()
 	oldPh := ph
+	oldStarted := started
 	ph = mockClient
+	started = true
 	mu.Unlock()
 
 	defer func() {
 		mu.Lock()
 		ph = oldPh
+		started = oldStarted
 		mu.Unlock()
 	}()
 
@@ -185,4 +195,98 @@ func TestClose(t *testing.T) {
 
 	assert.True(t, mockClient.closed)
 	assert.Nil(t, ph)
+}
+
+// TestClose_NoopBeforeStart proves Close does nothing when Start was never
+// called: there is nothing to close (cli-install#req:version-json-side-effect-free).
+func TestClose_NoopBeforeStart(t *testing.T) {
+	mockClient := &mockPosthogClient{}
+	mu.Lock()
+	oldPh := ph
+	oldStarted := started
+	ph = mockClient
+	started = false
+	mu.Unlock()
+
+	defer func() {
+		mu.Lock()
+		ph = oldPh
+		started = oldStarted
+		mu.Unlock()
+	}()
+
+	Close()
+
+	assert.False(t, mockClient.closed, "Close must not touch ph before Start")
+	assert.Same(t, mockClient, ph, "Close must leave ph untouched before Start")
+}
+
+// TestEnqueue_NoopBeforeStart proves Enqueue drops (rather than queues
+// forever) a message when Start was never called — the state `version
+// --json` leaves the package in (cli-install#req:version-json-side-effect-free).
+func TestEnqueue_NoopBeforeStart(t *testing.T) {
+	mu.Lock()
+	oldStarted := started
+	oldQueue := queue
+	oldInitialized := initialized
+	started = false
+	queue = nil
+	initialized = false
+	mu.Unlock()
+
+	defer func() {
+		mu.Lock()
+		started = oldStarted
+		queue = oldQueue
+		initialized = oldInitialized
+		mu.Unlock()
+	}()
+
+	Enqueue(posthog.Capture{Event: "must-be-dropped"})
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Empty(t, queue, "Enqueue must not queue before Start has been called")
+}
+
+func TestGetPosthogConfigFilePath(t *testing.T) {
+	path := getPosthogConfigFilePath()
+	assert.NotEmpty(t, path)
+}
+
+func TestGetPostHogClient_WriteConfigError(t *testing.T) {
+	tempDir := t.TempDir()
+	badPath := filepath.Join(tempDir, "non_existent", "config.yaml")
+
+	oldGetPath := getPosthogConfigFilePath
+	getPosthogConfigFilePath = func() string {
+		return badPath
+	}
+	defer func() {
+		getPosthogConfigFilePath = oldGetPath
+	}()
+
+	oldCreate := osCreate
+	osCreate = func(name string) (*os.File, error) {
+		return nil, errors.New("cannot create file")
+	}
+	defer func() {
+		osCreate = oldCreate
+	}()
+
+	oldNewClient := posthogNewWithConfig
+	posthogNewWithConfig = func(apiKey string, config posthog.Config) (posthog.Client, error) {
+		return &mockPosthogClient{}, nil
+	}
+	defer func() {
+		posthogNewWithConfig = oldNewClient
+	}()
+
+	// The key fetch is faked: without this the test made a real request to
+	// raw.githubusercontent.com (the default now panics in a test binary).
+	oldFetch := getPostHogApiKeyFromServerFunc
+	getPostHogApiKeyFromServerFunc = func() (string, error) { return "test-key", nil }
+	defer func() { getPostHogApiKeyFromServerFunc = oldFetch }()
+
+	_ = getPostHogClient()
 }

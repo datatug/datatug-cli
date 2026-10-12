@@ -25,7 +25,7 @@ func (v columnsProvider) GetColumnsReader(_ context.Context, catalog string, fil
 	if tableName == "" {
 		return nil, fmt.Errorf("collection name cannot be empty")
 	}
-	sqlText := fmt.Sprintf("PRAGMA table_info('%s')", tableName)
+	sqlText := pragmaSQL("table_info", tableName)
 	rows, err := db.Query(sqlText)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve columns: %w", err)

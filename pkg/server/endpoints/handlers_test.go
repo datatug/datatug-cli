@@ -304,17 +304,15 @@ func TestCreateFolder(t *testing.T) {
 
 // ---- project endpoints ----
 
+// createProject is not implemented: it answers 501 with a built sentence and reads nothing of the
+// request (see TestRoutes_ARouteThatIsNotImplementedAnswers501WithABuiltSentence).
 func TestCreateProject(t *testing.T) {
-	cap := &handleCapture{}
-	withFakeHandleCapture(t, cap, func() {
-		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodPost, "/?store=s1", `{"title":"test"}`)
-		endpoints := ProjectAgentEndpoints{}
-		endpoints.createProject(w, r)
-		if !cap.workerCalled {
-			t.Error("expected worker to be called")
-		}
-	})
+	w := httptest.NewRecorder()
+	r := makeRequest(http.MethodPost, "/?store=s1", `{"id":"test","title":"test"}`)
+	ProjectAgentEndpoints{}.createProject(w, r)
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("expected 501, got %d", w.Code)
+	}
 }
 
 func TestDeleteProject(t *testing.T) {
@@ -687,14 +685,13 @@ func TestGetRecordsetDefinition(t *testing.T) {
 }
 
 func TestGetRecordsetData(t *testing.T) {
-	// api.GetRecordset panics "not implemented yet" — use recover to cover the handler path
-	cap := &handleCapture{}
-	withFakeHandleCapture(t, cap, func() {
-		defer func() { recover() }() //nolint:errcheck
-		w := httptest.NewRecorder()
-		r := makeRequest(http.MethodGet, "/?storage=s1&project=p1&id=rs1", "")
-		getRecordsetData(w, r)
-	})
+	// api.GetRecordset panics "not implemented yet": the route answers 501 and never calls it.
+	w := httptest.NewRecorder()
+	r := makeRequest(http.MethodGet, "/?storage=s1&project=p1&id=rs1", "")
+	getRecordsetData(w, r)
+	if w.Code != http.StatusNotImplemented {
+		t.Errorf("expected 501, got %d", w.Code)
+	}
 }
 
 func TestAddRowsToRecordset(t *testing.T) {
@@ -722,12 +719,12 @@ func TestAddRowsToRecordset(t *testing.T) {
 		}
 	})
 
-	t.Run("valid request with count warning", func(t *testing.T) {
+	t.Run("valid request with no count", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		body := `[]`
 		r := httptest.NewRequest(http.MethodPost, "/?project=p1&recordset=rs1&data=d1", bytes.NewBufferString(body))
 		addRowsToRecordset(w, r)
-		// count not provided triggers warning, but execution continues
+		// count not provided is 0: execution continues
 	})
 
 	t.Run("valid request with count", func(t *testing.T) {
@@ -894,10 +891,19 @@ func TestExecuteSelectHandler(t *testing.T) {
 		executeSelectHandler(w, r)
 	})
 
-	t.Run("missing proj uses default", func(t *testing.T) {
-		defer func() { recover() }() //nolint:errcheck
+	t.Run("missing proj is left empty, for the request's own answer", func(t *testing.T) {
+		var got api.SelectRequest
+		saved := executeSelectFunc
+		defer func() { executeSelectFunc = saved }()
+		executeSelectFunc = func(_ context.Context, _ string, request api.SelectRequest) (api.QueryResultResponse, error) {
+			got = request
+			return api.QueryResultResponse{}, nil
+		}
 		w := httptest.NewRecorder()
 		r := makeRequest(http.MethodGet, "/exec/select?env=dev&db=mydb", "")
 		executeSelectHandler(w, r)
+		if got.Project != "" || got.Environment != "dev" || got.Database != "mydb" {
+			t.Errorf("got Project=%q Environment=%q Database=%q, want no project and dev/mydb", got.Project, got.Environment, got.Database)
+		}
 	})
 }

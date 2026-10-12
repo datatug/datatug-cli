@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
@@ -89,11 +90,16 @@ func TestCompileWhereForTable_CoercionError(t *testing.T) {
 		Fields: []dbschema.FieldDef{{Name: "age", Type: dbschema.Int}},
 	}
 	group := &PredicateGroup{Conditions: []Predicate{
-		{Field: "age", Operator: OpEqual, Value: "not-an-int"},
+		{Field: "age", Operator: OpEqual, Value: "123"},
 	}}
+	orig := coerceValueSeam
+	t.Cleanup(func() { coerceValueSeam = orig })
+	coerceValueSeam = func(raw string, target dbschema.Type) (any, error) {
+		return nil, errors.New("simulated coerce error")
+	}
 	_, err := CompileWhereForTable("T", group, def)
 	if err == nil {
-		t.Fatal("expected coercion error for non-integer value on Int column")
+		t.Fatal("expected coercion error on line 37-39")
 	}
 }
 

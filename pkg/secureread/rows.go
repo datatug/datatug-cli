@@ -14,28 +14,30 @@ import (
 // apps/datatugapp/commands/query_output.go's collectRows; duplicated here
 // (rather than shared) because that package is internal to the CLI app and
 // this package must not import it, nor be imported by it.
-func collectRows(reader dal.RecordsReader) ([]Row, error) {
+func collectRows(reader dal.RecordsReader) ([]Row, *statisticsAccumulator, error) {
 	if reader == nil {
-		return nil, nil
+		return nil, newStatisticsAccumulator(), nil
 	}
 	defer func() { _ = reader.Close() }()
 	var rows []Row
+	statistics := newStatisticsAccumulator()
 	for {
 		rec, err := reader.Next()
 		if errors.Is(err, dal.ErrNoMoreRecords) || (err == nil && rec == nil) {
-			return rows, nil
+			return rows, statistics, nil
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		row := Row{Key: fmt.Sprint(rec.Key().ID)}
 		if rec.Exists() {
 			data, err := condeval.ToMap(rec.Data())
 			if err != nil {
-				return nil, fmt.Errorf("secureread: record %s: %w", rec.Key(), err)
+				return nil, nil, fmt.Errorf("secureread: record %s: %w", rec.Key(), err)
 			}
 			row.Data = data
 		}
+		statistics.addRow(row.Data)
 		rows = append(rows, row)
 	}
 }

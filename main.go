@@ -5,21 +5,21 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"charm.land/fang/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
-	"github.com/datatug/datatug-cli/apps/global"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
 	_ "github.com/denisenkom/go-mssqldb"
-	"github.com/posthog/posthog-go"
 	"github.com/spf13/cobra"
 	"github.com/strongo/buildinfo"
 	"github.com/strongo/buildinfo/fangcmd"
 	"github.com/strongo/logus"
+	"golang.org/x/term"
 
 	//_ "github.com/jackc/pgx/v5"
 	_ "github.com/mattn/go-sqlite3"
@@ -27,32 +27,65 @@ import (
 
 var osExit = os.Exit
 
+// dtlogEnqueue is a seam over dtlog.Enqueue so tests can prove, without a
+// real PostHog client, exactly which invocations do and do not enqueue a
+// telemetry event — in particular that `version --json` enqueues none
+// (cli-install#req:version-json-side-effect-free in strongo/cli-helpers).
+var dtlogEnqueue = dtlog.Enqueue
+
+// dtlogStart is a seam over dtlog.Start so tests can prove, without a real
+// PostHog client, network request or file write, exactly which invocations
+// start telemetry at all — in particular that `version --json` never does
+// (cli-install#req:version-json-side-effect-free,
+// json-output-side-effect-free): dtlog used to do this unconditionally from
+// a package init(), which meant every invocation, including a bare
+// `version --json` probe, silently fetched a PostHog API key over the
+// network and could write ~/datatug/.posthog.yaml. See dtlog.Start's own
+// doc comment.
+var dtlogStart = dtlog.Start
+
+// dtlogNotice is a seam over dtlog.ShowNoticeOnce, the first-run telemetry
+// notice, so tests can prove when it is and is not printed without writing to
+// the person's home.
+var dtlogNotice = dtlog.ShowNoticeOnce
+
+// stderrIsTerminal says whether stderr is a terminal a person reads. The notice
+// is printed, and recorded as shown, only then: a run with stderr discarded or
+// captured (a script, a service, shell completion) did not tell anyone.
+var stderrIsTerminal = func() bool { return isTerminal(os.Stderr) }
+
+func isTerminal(f *os.File) bool { return term.IsTerminal(int(f.Fd())) }
+
 func main() {
 
-	// Enqueue an event
-	dtlog.Enqueue(posthog.Capture{Event: "DataTug CLI started"})
+	// skipTelemetry is set below, before fang.Execute runs, but declared
+	// here (and read by the deferred closure below) so the defer/recover
+	// registration keeps its original position — first, before anything
+	// that can panic (getCommand returning a nil root, in particular; see
+	// the "getCommand_nil" test). A panic before skipTelemetry is assigned
+	// leaves it false, which only means the unreached "started" event was
+	// never sent either — never a false skip.
+	var skipTelemetry bool
 
 	defer func() {
 		r := recover()
 		if r != nil {
-			if global.App != nil {
-				global.App.Stop() // VERY IMPORTANT: restore terminal
-			}
-			rText := fmt.Sprintf("%v", r)
+			// The terminal is already restored: datatugui.Run quits the Bubble
+			// Tea program, which restores it, before it raises a panic again.
+			// The panic text goes to the log, to telemetry and to stderr, so a
+			// source URL it quotes must not carry its password to any of them.
+			rText := dbcopy.RedactText(fmt.Sprintf("%v", r))
 			ctx := context.Background()
 			logus.Errorf(ctx, "panic: %s", rText)
-			timestamp := time.Now()
-			distinctID := dtlog.DistinctID()
-			dtlog.Enqueue(posthog.NewDefaultException(
-				timestamp,
-				distinctID,
-				"panic",
-				rText,
-			))
-			_, _ = fmt.Fprintln(os.Stderr, "panic:", r)
+			// The report carries the Go type of the panic value and the stack,
+			// never its text: rText stays on stderr and in the log.
+			dtlogEnqueue(dtlog.PanicEvent(r))
+			_, _ = fmt.Fprintln(os.Stderr, "panic:", rText)
 			debug.PrintStack()
 		}
-		dtlog.Enqueue(posthog.Capture{Event: "DataTug CLI exited"})
+		if !skipTelemetry {
+			dtlogEnqueue(dtlog.ExitedEvent())
+		}
 		dtlog.Close()
 		//time.Sleep(10 * time.Millisecond) // Allow some time for event to be sent
 		if r != nil {
@@ -70,6 +103,23 @@ func main() {
 		args = nil
 	}
 	root.SetArgs(args)
+
+	// `version --json` MUST NOT emit telemetry — including the start/exit
+	// events every other invocation gets — so probing an installed datatug
+	// build is safe to repeat
+	// (cli-install#req:version-json-side-effect-free in
+	// strongo/cli-helpers). Resolved through cobra's own command/flag
+	// resolution (root.Find + the matched command's own flag set) rather
+	// than hand-parsed argv matching, so this check can never disagree with
+	// what fang.Execute actually runs below.
+	skipTelemetry = isVersionJSONInvocation(root, args)
+
+	if !skipTelemetry {
+		// The notice comes first: on the run that prints it nothing is sent.
+		dtlogNotice(os.Stderr, stderrIsTerminal())
+		dtlogStart()
+		dtlogEnqueue(dtlog.StartedEvent())
+	}
 
 	if err := fang.Execute(context.Background(), root, fangOpts...); err != nil {
 		// fang.Execute has already printed err (styled, or bare on a
@@ -90,6 +140,50 @@ func main() {
 var getCommand = func() (*cobra.Command, []fang.Option) {
 	root := commands.DatatugCommand()
 	info := buildinfo.Get("datatug")
+	// self-update and install are wired here, where main.go builds the
+	// root, against datatug's own compiled-in cliinstall catalog entry
+	// (cli-install#req:host-identity-from-catalog); commands.DatatugCommand
+	// itself stays version-agnostic so its existing zero-argument tests are
+	// unaffected.
+	root.AddCommand(commands.SelfUpdateCommand(info.Version))
+	root.AddCommand(commands.InstallCommand())
+	root.AddCommand(commands.UpgradeCommand(info.Version))
 	fangOpts := fangcmd.Wire(root, info)
+	// Fang title-cases the first word of styled errors by default, which turns
+	// acronyms such as "AI" into "Ai". Keep the rest of Fang's error rendering
+	// and usage hints while preserving the command's intentional casing.
+	fangOpts = append(fangOpts, fang.WithErrorHandler(preserveErrorTextCase))
 	return root, fangOpts
+}
+
+func preserveErrorTextCase(w io.Writer, styles fang.Styles, err error) {
+	styles.ErrorText = styles.ErrorText.UnsetTransform()
+	// Every error a command returns is printed here: redact it once, so a
+	// password inside a source URL never reaches the terminal whichever
+	// command built the error.
+	redacted := errors.New(dbcopy.RedactText(err.Error()))
+	fang.DefaultErrorHandler(w, styles, redacted)
+}
+
+// isVersionJSONInvocation reports whether args would dispatch root to the
+// buildinfo "version" subcommand (added by fangcmd.Wire, via
+// buildinfo/cobracmd.VersionCommand) with --json set. It uses cobra's own
+// command/flag resolution (root.Find, then the matched command's own flag
+// set) instead of scanning argv by hand, so it can never disagree with
+// what fang.Execute resolves and runs a few lines below — both walk the
+// exact same command tree with the exact same args.
+//
+// Calling cmd.ParseFlags here is safe to repeat: cobra's own Execute below
+// parses the same args into the same flags again, and pflag.FlagSet.Parse
+// is idempotent for identical input.
+func isVersionJSONInvocation(root *cobra.Command, args []string) bool {
+	cmd, flagArgs, err := root.Find(args)
+	if err != nil || cmd == nil || cmd.Name() != "version" {
+		return false
+	}
+	if err := cmd.ParseFlags(flagArgs); err != nil {
+		return false
+	}
+	asJSON, _ := cmd.Flags().GetBool("json")
+	return asJSON
 }

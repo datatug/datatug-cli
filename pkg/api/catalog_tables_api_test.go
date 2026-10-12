@@ -1,13 +1,75 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestGetCatalogSchemaPartialKeepsHealthyRelations(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalogFile(t, dir, "local", "chinook-local", "chinook")
+	writeColumnsFile(t, dir, "chinook", "main", "tables", "Customer", `{"columns":[{"name":"CustomerId","dbType":"INTEGER"}]}`)
+	writeTableDir(t, dir, "chinook", "main", "tables", "Invoice") // no columns file
+	got, err := GetCatalogSchemaPartial(dir, "local", "chinook-local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Relations) != 2 || got.Relations[0].Name != "Customer" || got.Relations[0].Issue != "" || got.Relations[1].Name != "Invoice" || got.Relations[1].Issue == "" {
+		t.Fatalf("partial relations = %+v", got.Relations)
+	}
+	if _, err := GetCatalogSchema(dir, "local", "chinook-local"); err == nil {
+		t.Fatal("strict schema load must still reject the missing columns file")
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "want 1") {
+		t.Fatalf("local file error leaked into public JSON: %s", encoded)
+	}
+}
+
+// A "[" in a table name, or in the path of the project, is a character of a folder
+// name and not a pattern: each table reads its own columns file (t[1] is not t1, and
+// a[b is not a malformed pattern), and the issue of a table with no file is its own.
+func TestGetCatalogSchemaNamesAndPathsWithBrackets(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "project [1]")
+	writeCatalogFile(t, dir, "local", "shop", "shop")
+	writeColumnsFile(t, dir, "shop", "main", "tables", "t[1]", `{"columns":[{"name":"in_brackets"}]}`)
+	writeColumnsFile(t, dir, "shop", "main", "tables", "t1", `{"columns":[{"name":"in_t1"}]}`)
+	writeColumnsFile(t, dir, "shop", "main", "views", "a[b", `{"columns":[{"name":"in_a_open_bracket"}]}`)
+	writeTableDir(t, dir, "shop", "main", "tables", "t2") // no columns file: it must not borrow one from t[1]'s folder
+
+	got, err := GetCatalogSchemaPartial(dir, "local", "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	columnsByRelation := map[string]string{}
+	issueByRelation := map[string]string{}
+	for _, relation := range got.Relations {
+		names := make([]string, len(relation.Columns))
+		for i, column := range relation.Columns {
+			names[i] = column.Name
+		}
+		columnsByRelation[relation.Name] = strings.Join(names, ",")
+		issueByRelation[relation.Name] = relation.Issue
+	}
+	wantColumns := map[string]string{"t[1]": "in_brackets", "t1": "in_t1", "t2": "", "a[b": "in_a_open_bracket"}
+	if !reflect.DeepEqual(columnsByRelation, wantColumns) {
+		t.Fatalf("columns by relation = %v, want %v", columnsByRelation, wantColumns)
+	}
+	for name, issue := range issueByRelation {
+		if (name == "t2") != (issue != "") {
+			t.Fatalf("issue of %q = %q: only t2, which has no columns file, has one", name, issue)
+		}
+	}
+}
 
 // writeCatalogFile reproduces datatug-demo-projects/demo-project-1's own
 // environments/<env>/catalogs/<catalog>/<catalog>.db.json shape
@@ -35,6 +97,15 @@ func writeTableDir(t *testing.T, projectDir, dbModel, schema, kind, name string)
 	dir := filepath.Join(projectDir, "dbmodels", dbModel, schema, kind, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(%s): %v", dir, err)
+	}
+}
+
+func writeColumnsFile(t *testing.T, projectDir, dbModel, schema, kind, name, content string) {
+	t.Helper()
+	writeTableDir(t, projectDir, dbModel, schema, kind, name)
+	path := filepath.Join(projectDir, "dbmodels", dbModel, schema, kind, name, schema+"."+name+".columns.json")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
 	}
 }
 
@@ -84,6 +155,34 @@ func TestGetCatalogTables_NoViews(t *testing.T) {
 	}
 	if len(got.Views) != 0 {
 		t.Errorf("Views = %+v, want empty", got.Views)
+	}
+}
+
+func TestGetCatalogSchemaLoadsStoredColumns(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalogFile(t, dir, "local", "chinook-local", "chinook")
+	writeColumnsFile(t, dir, "chinook", "main", "tables", "Customer", `{"columns":[{"name":"CustomerId","dbType":"INTEGER"},{"name":"City","dbType":"TEXT"}]}`)
+	writeColumnsFile(t, dir, "chinook", "main", "views", "Cities", `{"columns":[{"name":"City","dbType":"TEXT"}]}`)
+
+	got, err := GetCatalogSchema(dir, "local", "chinook-local")
+	if err != nil {
+		t.Fatalf("GetCatalogSchema: %v", err)
+	}
+	want := []CatalogRelation{
+		{Schema: "main", Name: "Cities", DbType: "VIEW", Columns: []CatalogColumn{{Name: "City", DbType: "TEXT"}}},
+		{Schema: "main", Name: "Customer", DbType: "BASE TABLE", Columns: []CatalogColumn{{Name: "CustomerId", DbType: "INTEGER"}, {Name: "City", DbType: "TEXT"}}},
+	}
+	if !reflect.DeepEqual(got.Relations, want) {
+		t.Fatalf("Relations = %+v, want %+v", got.Relations, want)
+	}
+}
+
+func TestGetCatalogSchemaRejectsMissingColumnsFile(t *testing.T) {
+	dir := t.TempDir()
+	writeCatalogFile(t, dir, "local", "chinook-local", "chinook")
+	writeTableDir(t, dir, "chinook", "main", "tables", "Customer")
+	if _, err := GetCatalogSchema(dir, "local", "chinook-local"); err == nil {
+		t.Fatal("expected missing columns file error")
 	}
 }
 

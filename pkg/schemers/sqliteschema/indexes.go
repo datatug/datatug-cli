@@ -16,7 +16,8 @@ func (s schemaProvider) GetIndexes(_ context.Context, _, schema, table string) (
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.Query(fmt.Sprintf("PRAGMA index_list('%s')", table))
+	sqlText := pragmaSQL("index_list", table)
+	rows, err := db.Query(sqlText)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list indexes for %s: %w", table, err)
 	}

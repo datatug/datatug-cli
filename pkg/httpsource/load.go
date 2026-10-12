@@ -2,6 +2,7 @@ package httpsource
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -11,6 +12,11 @@ import (
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
+)
+
+var (
+	osReadFile  = os.ReadFile
+	filepathRel = filepath.Rel
 )
 
 // LoadedQuery is one HTTP-type QueryDef found by LoadHTTPQueries, together
@@ -40,12 +46,17 @@ func LoadHTTPQueries(projectDir string) ([]LoadedQuery, error) {
 	var out []LoadedQuery
 	err := filepath.WalkDir(queriesDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			// A project with no queries folder has no HTTP queries: git keeps no
+			// empty folder, so a project made by scan or init has none once pushed.
+			if path == queriesDir && errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
 		if d.IsDir() || !strings.HasSuffix(d.Name(), suffix) {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := osReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)
 		}
@@ -59,7 +70,7 @@ func LoadHTTPQueries(projectDir string) ([]LoadedQuery, error) {
 		if def.ID == "" {
 			def.ID = strings.TrimSuffix(d.Name(), suffix)
 		}
-		rel, err := filepath.Rel(queriesDir, filepath.Dir(path))
+		rel, err := filepathRel(queriesDir, filepath.Dir(path))
 		if err != nil {
 			return fmt.Errorf("relativize %s: %w", path, err)
 		}
@@ -87,7 +98,7 @@ func urlTemplateFileName(id string) string {
 // trailing newline).
 func LoadURLTemplate(projectDir, folderPath, id string) (string, error) {
 	path := filepath.Join(projectDir, storage.QueriesFolder, folderPath, urlTemplateFileName(id))
-	data, err := os.ReadFile(path)
+	data, err := osReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("httpsource: read URL template for query %q: %w", id, err)
 	}
@@ -106,7 +117,7 @@ func fixturesDir(projectDir string) string {
 // BuildCollection). A missing or unparseable fixture is not an error here:
 // it just means those defaults fall back to their no-sample answer.
 func readFixtureSample(dir, id string) map[string]any {
-	data, err := os.ReadFile(filepath.Join(dir, id+".json"))
+	data, err := osReadFile(filepath.Join(dir, id+".json"))
 	if err != nil {
 		return nil
 	}

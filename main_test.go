@@ -3,15 +3,16 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
 	"testing"
 
 	"charm.land/fang/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
-	"github.com/datatug/datatug-cli/apps/global"
-	"github.com/rivo/tview"
+	"github.com/posthog/posthog-go"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -20,6 +21,60 @@ import (
 // the package-level var can restore it and the default-body test can call it
 // before any reassignment.
 var defaultGetCommand = getCommand
+
+func TestPreserveErrorTextCase(t *testing.T) {
+	var output bytes.Buffer
+	styles := fang.Styles{
+		ErrorText: lipgloss.NewStyle().Transform(func(string) string { return "Ai profile was recased" }),
+	}
+	preserveErrorTextCase(&output, styles, errors.New(`AI profile "deepseek" is invalid`))
+	assert.Contains(t, output.String(), `AI profile "deepseek" is invalid`)
+	assert.NotContains(t, output.String(), "Ai profile")
+}
+
+func TestPreserveErrorTextCaseRedactsSourceURLs(t *testing.T) {
+	var output bytes.Buffer
+	preserveErrorTextCase(&output, fang.Styles{ErrorText: lipgloss.NewStyle()}, errors.New(`open "postgres://alice:s3cr3t-DT01@db.example.com/shop": refused; password=s3cr3t-DT01`))
+	assert.NotContains(t, output.String(), "s3cr3t-DT01")
+	assert.Contains(t, output.String(), "postgres://alice:xxxxx@db.example.com/shop")
+}
+
+func TestMainPanicTextIsRedacted(t *testing.T) {
+	getCommandBackup, osExitBackup, osStderrBackup := getCommand, osExit, os.Stderr
+	enqueueBackup, startBackup := dtlogEnqueue, dtlogStart
+	defer func() {
+		getCommand, osExit, os.Stderr = getCommandBackup, osExitBackup, osStderrBackup
+		dtlogEnqueue, dtlogStart = enqueueBackup, startBackup
+	}()
+	var enqueued []string
+	dtlogEnqueue = func(message posthog.Message) {
+		enqueued = append(enqueued, fmt.Sprintf("%+v", message))
+	}
+	dtlogStart = func() {}
+	getCommand = func() (*cobra.Command, []fang.Option) {
+		panic("lost connection to postgres://alice:s3cr3t-DT01@db.example.com/shop")
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	var exitCode int
+	osExit = func(code int) { exitCode = code }
+
+	main()
+
+	_ = w.Close()
+	var stderr bytes.Buffer
+	_, _ = io.Copy(&stderr, r)
+	assert.Equal(t, 1, exitCode)
+	assert.NotContains(t, stderr.String(), "s3cr3t-DT01")
+	assert.Contains(t, stderr.String(), "postgres://alice:xxxxx@db.example.com/shop")
+	for _, event := range enqueued {
+		assert.NotContains(t, event, "s3cr3t-DT01")
+	}
+	assert.NotEmpty(t, enqueued, "the panic must still be reported")
+}
 
 func TestMainFunc(t *testing.T) {
 	t.Run("getCommand_no_error", func(t *testing.T) {
@@ -59,28 +114,6 @@ func TestMainFunc(t *testing.T) {
 			_, _ = io.Copy(&buf, r)
 			assert.True(t, strings.Contains(buf.String(), "invalid memory address or nil pointer dereference"))
 		}
-	})
-	// Cover the global.App != nil branch: set App to a non-nil Application before
-	// calling main() with a panicking getCommand. tview.NewApplication().Stop() is
-	// safe when screen == nil (returns early without sending on any channel).
-	t.Run("panic_with_app_non_nil", func(t *testing.T) {
-		osExitBackup := osExit
-		appBackup := global.App
-		getCommandBackup := getCommand
-		defer func() {
-			osExit = osExitBackup
-			global.App = appBackup
-			getCommand = getCommandBackup
-		}()
-
-		global.App = tview.NewApplication()
-		getCommand = func() (*cobra.Command, []fang.Option) { return nil, nil }
-		var exitCode int
-		osExit = func(i int) { exitCode = i }
-
-		main()
-
-		assert.Equal(t, 1, exitCode)
 	})
 	// Cover the plain-error branch: getCommand returns a command whose RunE
 	// returns a non-ExitCoder error. main must exit 1 (matching every
@@ -140,5 +173,186 @@ func TestMainFunc(t *testing.T) {
 		cmd, opts := defaultGetCommand()
 		assert.NotNil(t, cmd)
 		assert.NotEmpty(t, opts)
+		for _, name := range []string{
+			"auth", "compare", "config", "console", "dataset", "dataset-data",
+			"datasets", "db", "demo", "entity", "execution", "gcloud", "init",
+			"install", "projects", "queries", "query", "render", "scan", "self-update",
+			"serve", "show", "ui", "updateUrlConfig", "upgrade", "validate", "version",
+		} {
+			found, _, err := cmd.Find([]string{name})
+			assert.NoError(t, err, "command %q must be exposed by datatug --help", name)
+			assert.Equal(t, name, found.Name(), "command %q must be exposed by datatug --help", name)
+		}
 	})
+}
+
+// versionJSONStubRoot builds a minimal root command exposing a "version"
+// subcommand with a bool "--json" flag, standing in for the real root
+// fangcmd.Wire builds (buildinfo/cobracmd.VersionCommand), so these tests
+// don't depend on the full command tree or a real buildinfo.Info.
+func versionJSONStubRoot() *cobra.Command {
+	root := &cobra.Command{Use: "datatug", SilenceUsage: true, SilenceErrors: true}
+	versionCmd := &cobra.Command{
+		Use:  "version",
+		Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error { return nil },
+	}
+	versionCmd.Flags().Bool("json", false, "")
+	root.AddCommand(versionCmd)
+	return root
+}
+
+// TestMain_VersionJSON_NoTelemetryEnqueued proves
+// cli-install#req:version-json-side-effect-free holds at the main.go
+// level: `datatug version --json` must enqueue neither the "CLI started"
+// nor the "CLI exited" PostHog event, while every other invocation still
+// enqueues both, exactly as main.go did before this task added the
+// version --json exemption.
+func TestMain_VersionJSON_NoTelemetryEnqueued(t *testing.T) {
+	getCommandBackup := getCommand
+	dtlogEnqueueBackup := dtlogEnqueue
+	osArgsBackup := os.Args
+	defer func() {
+		getCommand = getCommandBackup
+		dtlogEnqueue = dtlogEnqueueBackup
+		os.Args = osArgsBackup
+	}()
+
+	getCommand = func() (*cobra.Command, []fang.Option) { return versionJSONStubRoot(), nil }
+
+	var enqueued []posthog.Message
+	dtlogEnqueue = func(msg posthog.Message) { enqueued = append(enqueued, msg) }
+
+	os.Args = []string{"datatug", "version", "--json"}
+	main()
+
+	assert.Empty(t, enqueued, "version --json must not enqueue any telemetry event")
+}
+
+// TestMain_OtherCommand_StillEnqueuesTelemetry is the control case for the
+// test above: an ordinary invocation must still enqueue both the "started"
+// and "exited" events, proving the version --json check above is a
+// narrow exemption, not a regression that silenced telemetry generally.
+func TestMain_OtherCommand_StillEnqueuesTelemetry(t *testing.T) {
+	getCommandBackup := getCommand
+	dtlogEnqueueBackup := dtlogEnqueue
+	dtlogStartBackup := dtlogStart
+	osArgsBackup := os.Args
+	defer func() {
+		getCommand = getCommandBackup
+		dtlogEnqueue = dtlogEnqueueBackup
+		dtlogStart = dtlogStartBackup
+		os.Args = osArgsBackup
+	}()
+
+	getCommand = func() (*cobra.Command, []fang.Option) {
+		root := &cobra.Command{
+			Use:           "datatug",
+			SilenceUsage:  true,
+			SilenceErrors: true,
+			RunE:          func(_ *cobra.Command, _ []string) error { return nil },
+		}
+		return root, nil
+	}
+
+	var enqueued []posthog.Message
+	dtlogEnqueue = func(msg posthog.Message) { enqueued = append(enqueued, msg) }
+	dtlogStart = func() {}
+
+	os.Args = []string{"datatug"}
+	main()
+
+	assert.Len(t, enqueued, 2, "a non-version-json invocation must enqueue both the started and exited events")
+}
+
+// TestMain_VersionJSON_NeverStartsTelemetry proves
+// cli-install#req:version-json-side-effect-free/json-output-side-effect-free
+// at the main.go level: `datatug version --json` must never call
+// dtlog.Start — the call that would fetch a PostHog API key over the
+// network and could write ~/datatug/.posthog.yaml (see dtlog.Start's own
+// doc comment and pkg/dtlog's TestStart_NotCalled_NoKeyFetchOrFileWrite for
+// the proof, one layer down, that without Start those side effects truly
+// never happen).
+func TestMain_VersionJSON_NeverStartsTelemetry(t *testing.T) {
+	getCommandBackup := getCommand
+	dtlogStartBackup := dtlogStart
+	osArgsBackup := os.Args
+	defer func() {
+		getCommand = getCommandBackup
+		dtlogStart = dtlogStartBackup
+		os.Args = osArgsBackup
+	}()
+
+	getCommand = func() (*cobra.Command, []fang.Option) { return versionJSONStubRoot(), nil }
+
+	started := false
+	dtlogStart = func() { started = true }
+
+	os.Args = []string{"datatug", "version", "--json"}
+	main()
+
+	assert.False(t, started, "version --json must never call dtlog.Start")
+}
+
+// TestMain_OtherCommand_StartsTelemetry is the control case for the test
+// above: an ordinary invocation must call dtlog.Start, proving the
+// version --json exemption is narrow, not a regression that silenced
+// telemetry startup generally.
+func TestMain_OtherCommand_StartsTelemetry(t *testing.T) {
+	getCommandBackup := getCommand
+	dtlogEnqueueBackup := dtlogEnqueue
+	dtlogStartBackup := dtlogStart
+	osArgsBackup := os.Args
+	defer func() {
+		getCommand = getCommandBackup
+		dtlogEnqueue = dtlogEnqueueBackup
+		dtlogStart = dtlogStartBackup
+		os.Args = osArgsBackup
+	}()
+
+	getCommand = func() (*cobra.Command, []fang.Option) {
+		root := &cobra.Command{
+			Use:           "datatug",
+			SilenceUsage:  true,
+			SilenceErrors: true,
+			RunE:          func(_ *cobra.Command, _ []string) error { return nil },
+		}
+		return root, nil
+	}
+
+	dtlogEnqueue = func(_ posthog.Message) {}
+	started := false
+	dtlogStart = func() { started = true }
+
+	os.Args = []string{"datatug"}
+	main()
+
+	assert.True(t, started, "a non-version-json invocation must call dtlog.Start")
+}
+
+// TestIsVersionJSONInvocation covers isVersionJSONInvocation directly,
+// including the plain "version" (no --json), "--json=false", and
+// unmatched-command branches TestMain_VersionJSON_NoTelemetryEnqueued
+// doesn't reach.
+func TestIsVersionJSONInvocation(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"version --json", []string{"version", "--json"}, true},
+		{"version --json=true", []string{"version", "--json=true"}, true},
+		{"version --json=false", []string{"version", "--json=false"}, false},
+		{"version, no flag", []string{"version"}, false},
+		{"not version", []string{"init"}, false},
+		{"no args", nil, false},
+		{"version, unparseable flag", []string{"version", "--not-a-real-flag"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := versionJSONStubRoot()
+			root.AddCommand(&cobra.Command{Use: "init", RunE: func(_ *cobra.Command, _ []string) error { return nil }})
+			assert.Equal(t, c.want, isVersionJSONInvocation(root, c.args))
+		})
+	}
 }

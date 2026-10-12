@@ -9,13 +9,23 @@ type router interface {
 	HandlerFunc(method, path string, handler http.HandlerFunc)
 }
 
+// registerRoutes registers the route table with router, every route behind the request guard of
+// caps (see RequestGuard): no route of the table is served any other way.
 func registerRoutes(path string, router router, wrapper wrapper, writeOnly bool, caps Capabilities) {
 	if router == nil {
 		panic("router == nil")
 	}
+	registerRoutesOn(path, guardedRouter{router: router, guard: caps.RequestGuard()}, wrapper, writeOnly, caps)
+}
+
+// registerRoutesOn is the route table: the routes, as they are registered with router. It is
+// called with the guarded router of registerRoutes, and with a bare one only by the test that
+// holds the guard to serving every route as it is served without it.
+func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly bool, caps Capabilities) {
 	path = strings.TrimRight(path, "/") + "/datatug"
 	route(router, wrapper, http.MethodGet, path+"/ping", Ping)
 	route(router, wrapper, http.MethodGet, path+"/agent-info", AgentInfo)
+	route(router, wrapper, http.MethodPost, path+"/chat/interpret", chatInterpretHandler)
 	projectsRoutes(path, router, wrapper, writeOnly, caps)
 	foldersRoutes(path, router, wrapper, caps)
 	queriesRoutes(path, router, wrapper, writeOnly, caps)
@@ -86,7 +96,9 @@ func queriesRoutes(path string, router router, wrap wrapper, writeOnly bool, cap
 	if !writeOnly {
 		route(router, wrap, http.MethodGet, path+"/queries/all_queries", getQueriesHandler)
 		route(router, wrap, http.MethodGet, path+"/queries/get_query", getQueryHandler)
+		route(router, wrap, http.MethodGet, path+"/queries/query_revision", getProjectQueryRevisionHandler)
 	}
+	route(router, wrap, http.MethodPost, path+"/queries/save_query", requireWriteCapability(caps, saveProjectQueryHandler))
 	route(router, wrap, http.MethodPost, path+"/queries/create_query", requireWriteCapability(caps, createQuery))
 	route(router, wrap, http.MethodPut, path+"/queries/update_query", requireWriteCapability(caps, updateQuery))
 	route(router, wrap, http.MethodDelete, path+"/queries/delete_query", requireWriteCapability(caps, deleteQuery))
@@ -110,6 +122,8 @@ func projectsRoutes(path string, router router, wrap wrapper, writeOnly bool, ca
 		route(router, wrap, http.MethodGet, path+"/projects/projects_summary", getProjects)
 		route(router, wrap, http.MethodGet, path+"/projects/project_summary", getProjectSummary)
 		route(router, wrap, http.MethodGet, path+"/projects/project_full", getProjectFull)
+		route(router, wrap, http.MethodGet, path+"/projects/capabilities", projectCapabilitiesHandler)
+		route(router, wrap, http.MethodGet, path+"/projects/branches", projectBranchesHandler)
 	}
 	projectEndpoints := ProjectAgentEndpoints{}
 	route(router, wrap, http.MethodPost, path+"/projects/create_project", requireWriteCapability(caps, projectEndpoints.createProject))
@@ -128,7 +142,7 @@ func environmentsRoutes(path string, router router, wrap wrapper, writeOnly bool
 func dbServerRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
 	if !writeOnly {
 		route(router, wrap, http.MethodGet, path+"/dbserver-summary", getDbServerSummary)
-		route(router, wrap, http.MethodGet, path+"/dbserver-databases", getServerDatabases)
+		route(router, wrap, http.MethodGet, path+"/dbserver-databases", requireLiveConnections(caps, getServerDatabases))
 	}
 	route(router, wrap, http.MethodPost, path+"/dbserver-add", requireWriteCapability(caps, addDbServer))
 	route(router, wrap, http.MethodDelete, path+"/dbserver-delete", requireWriteCapability(caps, deleteDbServer))

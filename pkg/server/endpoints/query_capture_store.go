@@ -81,10 +81,12 @@ func (e *captureStoreError) Error() string {
 var errCaptureStoreUnavailable = errors.New("this agent build has no revisioned query store, so queries/capture cannot save; " +
 	"it needs a datatug-core release with RevisionedQueriesStore")
 
+var projectStoreFor = api.ProjectStoreFor
+
 // captureStoreFor resolves projectID's capture store. It is a variable so
 // tests can install a fake.
 var captureStoreFor = func(projectID string) (queryCaptureStore, error) {
-	projStore, err := api.ProjectStoreFor(projectID)
+	projStore, err := projectStoreFor(projectID)
 	if err != nil {
 		return nil, err
 	}

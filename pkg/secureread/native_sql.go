@@ -2,7 +2,6 @@ package secureread
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/dal-go/dalgo/dal"
@@ -58,9 +57,10 @@ var nativeSQLLimitation = Limitation{
 // gives a syntactically valid but policy-forbidden write attempt.
 //
 // Only sqlite:// sources support native SQL today: dalgo2ingitdb executes
-// only dal.StructuredQuery ("only StructuredQuery is supported"), and
-// postgres:// is not wired at all (dbcopy.ErrPostgresNotWired). A source
-// without a SQL-text execution surface fails with ErrNativeSQLUnsupported.
+// only dal.StructuredQuery ("only StructuredQuery is supported"), and a
+// postgres:// source takes structured queries only (its read-only session is
+// for those, not for SQL text). A source without a SQL-text execution surface
+// fails with ErrNativeSQLUnsupported.
 // A future SQL-capable adapter for another scheme should add a read-only
 // dal.DB.RunReadonlyTransaction branch alongside this PRAGMA one, per the
 // brief's "PRAGMA query_only for SQLite; read-only tx elsewhere" design.
@@ -72,6 +72,9 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	if err != nil {
 		return Result{}, err
 	}
+	if ref.Scheme == "postgres" {
+		return Result{}, fmt.Errorf("%w: PostgreSQL sources take structured queries only", ErrNativeSQLUnsupported)
+	}
 	if ref.Scheme != "sqlite" {
 		return Result{}, fmt.Errorf("%w: scheme %q", ErrNativeSQLUnsupported, ref.Scheme)
 	}
@@ -80,12 +83,14 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 	// existence check to surface dbcopy.ErrSourceFileMissing the same way
 	// Open's sqlite branch does — see pkg/server/endpoints/exec_run_query.go
 	// and util_error_handling.go for where that maps to SOURCE_UNAVAILABLE.
-	if err := dbcopy.CheckSourceFile(ref.Path); err != nil {
+	if err := ref.CheckFile(); err != nil {
 		return Result{}, err
 	}
 	db, closeDB, err := openReadOnlySQLite(ctx, ref.Path)
 	if err != nil {
-		return Result{}, err
+		// The driver's own text can quote the DSN: say which source failed and
+		// keep the cause for errors.Is and errors.As (see BackendRef.OpenFailure).
+		return Result{}, ref.OpenFailure(err)
 	}
 	defer closeDB()
 
@@ -109,26 +114,25 @@ func (e *Executor) RunNativeSQL(ctx context.Context, sourceURL, sqlText string, 
 // adapter dalgo2sqlite itself composes) reuses its tested TextQuery
 // execution and row-to-record conversion rather than re-implementing it.
 func openReadOnlySQLite(ctx context.Context, path string) (dal.DB, func(), error) {
-	sqlDB, err := sql.Open("sqlite", path)
+	// The path is handed over as a "file:" URI: a bare path with a "?" in it is read by the
+	// driver as the file before it and its parameters (see dbcopy.SQLiteFileURI).
+	sqlDB, err := sqlOpenNative("sqlite", dbcopy.SQLiteFileURI(path))
 	if err != nil {
-		return nil, nil, fmt.Errorf("secureread: open sqlite %q: %w", path, err)
+		return nil, nil, fmt.Errorf("secureread: open sqlite: %w", err)
 	}
 	sqlDB.SetMaxOpenConns(1) // one physical connection: PRAGMA query_only must stick to the connection every query reuses
 	if pingErr := sqlDB.PingContext(ctx); pingErr != nil {
 		_ = sqlDB.Close()
-		return nil, nil, fmt.Errorf("secureread: open sqlite %q: %w", path, pingErr)
+		return nil, nil, fmt.Errorf("secureread: open sqlite: %w", pingErr)
 	}
-	if _, execErr := sqlDB.ExecContext(ctx, "PRAGMA query_only = ON"); execErr != nil {
+	if execErr := pragmaQueryOnly(ctx, sqlDB); execErr != nil {
 		_ = sqlDB.Close()
-		return nil, nil, fmt.Errorf("secureread: enable read-only session on %q: %w", path, execErr)
+		return nil, nil, fmt.Errorf("secureread: enable read-only session: %w", execErr)
 	}
-	// DbOptions{} deliberately leaves StructuredQueryDialect unset:
-	// dalgo2sql's "sqlite" dialect (opted in elsewhere for protected
-	// structured reads — see dbcopy.BackendRef.OpenProtected's doc comment)
-	// only changes how a dal.StructuredQuery compiles
-	// (getReaderBaseWithDialect), and RunNativeSQL — this connection's only
-	// caller — always executes a dal.TextQuery (see RunNativeSQL above), so
-	// the option would be a no-op here even if set.
-	db := dalgo2sql.NewDatabase(sqlDB, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{})
+	// The sqlite structured-query dialect is set like on every other SQLite
+	// open in this CLI, so no structured read can reach dalgo2sql's legacy
+	// text emitter. RunNativeSQL — this connection's only caller — always
+	// executes a dal.TextQuery, which the dialect does not touch.
+	db := newNativeSQLDatabase(sqlDB, dal.NewSchema(nil, nil), dalgo2sql.DbOptions{StructuredQueryDialect: "sqlite"})
 	return db, func() { _ = sqlDB.Close() }, nil
 }

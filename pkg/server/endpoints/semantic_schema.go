@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -16,6 +17,11 @@ import (
 	"github.com/datatug/datatug-core/pkg/semantic"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
+
+var apiResolveSource = api.ResolveSource
+var recordsetUnmarshalJSON = json.Unmarshal
+var dalAsSchemaReader = dal.As[dbschema.SchemaReader]
+var dbcopyParse = dbcopy.Parse
 
 // recordsetDefinitionPath is the project's declared shape for a
 // non-SQL (inGitDB-backed) collection: recordsets/<source>.recordset.json,
@@ -43,24 +49,63 @@ type resolvedSource struct {
 // matched by any real project — see the PR body's inventory) and its
 // separate environment-blind inGitDB-only fallback.
 func resolveSource(ctx context.Context, projStore datatug.ProjectStore, projectDir, environment, source, collection string) (resolvedSource, error) {
-	resolved, err := api.ResolveSource(ctx, projStore, projectDir, environment, source)
+	resolved, err := apiResolveSource(ctx, projStore, projectDir, environment, source)
 	if err != nil {
 		return resolvedSource{}, newSourceUnavailable(err.Error())
 	}
 	switch resolved.Kind {
 	case api.SourceKindSQL:
-		return resolveSQLSourceURL(ctx, resolved.URL, collection)
+		return resolveSQLSourceURL(ctx, resolved.ID, resolved.URL, collection)
 	case api.SourceKindInGitDB:
+		// The ID of the source is joined into the path of its definition, and it is read out
+		// of a file of the project (the ID of a recordset definition, the model of a catalog),
+		// which may hold anything: only a plain source ID is a name of a file in the folder of
+		// the recordsets.
+		if !dbcopy.IsPlainSourceID(resolved.ID) {
+			return resolvedSource{}, recordsetUnavailable(resolved.ID, errors.New("the ID of the source is not a plain source ID"))
+		}
 		recordsetPath := recordsetDefinitionPath(projectDir, resolved.ID)
 		if !fileExists(recordsetPath) {
-			return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has no recordset definition at %s", source, recordsetPath))
+			return resolvedSource{}, recordsetUnavailable(resolved.ID, fmt.Errorf("%s: %w", recordsetPath, os.ErrNotExist))
 		}
-		return resolveRecordsetSource(resolved.URL, recordsetPath, collection)
+		definition, err := resolveRecordsetSource(resolved.URL, recordsetPath, collection)
+		if err != nil {
+			return resolvedSource{}, recordsetUnavailable(resolved.ID, err)
+		}
+		return definition, nil
 	case api.SourceKindHTTP:
 		return resolveHTTPSource(projectDir, resolved.ID, collection)
 	default:
-		return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has an unsupported kind %q", source, resolved.Kind))
+		return resolvedSource{}, newSourceUnavailable(fmt.Sprintf("source %q has an unsupported kind %q", resolved.ID, resolved.Kind))
 	}
+}
+
+// unavailableOr answers a failure of the source whose ID is sourceID that dbcopy built a sentence for (a source that
+// is refused, whose data file is not there, that cannot be opened, or whose connection was lost) as SOURCE_UNAVAILABLE
+// with the sentence of api.SourceUnavailable, which names the source by its ID and never by the display form that
+// dbcopy's own sentence holds (that is logged), and any other failure as otherwise.
+func unavailableOr(sourceID string, cause, otherwise error) error {
+	if unavailable := api.SourceUnavailable(sourceID, cause); unavailable != nil {
+		return newSourceUnavailable(unavailable.Error())
+	}
+	return otherwise
+}
+
+// sourceUnavailableAnswer answers err, a failure of the source whose ID is sourceID, as SOURCE_UNAVAILABLE with a
+// sentence built from the ID (see api.SourceUnavailable).
+func sourceUnavailableAnswer(sourceID string, err error) *contractError {
+	return newSourceUnavailable(api.SourceUnavailable(sourceID, err).Error())
+}
+
+// recordsetUnavailable is the answer for a source whose recordset definition cannot be used:
+// it is not there, it is not a file, it cannot be read, it cannot be parsed, or the ID of the
+// source is not a name of a file. They are one answer, a sentence built from the source (named
+// when its ID is a plain name) and from nothing the file system said, which quotes a path of
+// the server and says whether it is missing, a file or a folder. The cause goes to the log.
+func recordsetUnavailable(sourceID string, cause error) *contractError {
+	shown := dbcopy.SourceIDDisplay(sourceID)
+	log.Printf("semantic: the recordset definition of source %q cannot be used: %s", shown, dbcopy.RedactText(cause.Error()))
+	return newSourceUnavailable(fmt.Sprintf("source %q has no readable recordset definition", shown))
 }
 
 func fileExists(path string) bool {
@@ -71,26 +116,33 @@ func fileExists(path string) bool {
 // resolveSQLSourceURL is resolveSQLSource's own logic, taking an
 // already-resolved sqlite:// URL (api.ResolvedSource.URL) instead of
 // building one from a bare filesystem path itself.
-func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (resolvedSource, error) {
-	ref, err := dbcopy.Parse(sourceURL)
+func resolveSQLSourceURL(ctx context.Context, sourceID, sourceURL, collection string) (resolvedSource, error) {
+	ref, err := dbcopyParse(sourceURL)
 	if err != nil {
 		return resolvedSource{}, err
 	}
+	// shown is the source in a form safe for an error text: a password inside
+	// a source URL must never reach an error, a log or a client.
+	shown := ref.String()
 	db, err := ref.Open(ctx)
 	if err != nil {
-		if errors.Is(err, dbcopy.ErrSourceFileMissing) {
-			return resolvedSource{}, newSourceUnavailable(err.Error())
-		}
-		return resolvedSource{}, fmt.Errorf("open %s: %w", sourceURL, err)
+		// A source that is refused, whose data file is not there or that cannot be opened is
+		// unavailable. A file source is named in the answer by its ID: Open's own error holds the
+		// display form of the source (the path of a file), and goes to the log. A PostgreSQL source
+		// names no source in its text: the adapter's sentence for the failure and where its
+		// connection string is read from (the variable), no host, port or database; so do its fixed
+		// refusals (dbcopy.ErrPostgresPreview while the preview is off, and the refusal of a URL that
+		// turns the read-only session off). They are answered, and logged, as they are.
+		return resolvedSource{}, unavailableOr(sourceID, err, err)
 	}
-	reader, ok := dal.As[dbschema.SchemaReader](db)
+	reader, ok := dalAsSchemaReader(db)
 	if !ok {
-		return resolvedSource{}, fmt.Errorf("%s does not support schema introspection", sourceURL)
+		return resolvedSource{}, fmt.Errorf("%s does not support schema introspection", shown)
 	}
 	collRef := dal.NewRootCollectionRef(collection, "")
 	def, err := reader.DescribeCollection(ctx, &collRef)
 	if err != nil {
-		return resolvedSource{}, fmt.Errorf("describe %s.%s: %w", sourceURL, collection, err)
+		return resolvedSource{}, unavailableOr(sourceID, err, fmt.Errorf("describe %s.%s: %w", shown, collection, dbcopy.RedactError(err)))
 	}
 	columns := make([]semantic.Column, len(def.Fields))
 	for i, f := range def.Fields {
@@ -107,7 +159,7 @@ func resolveSQLSourceURL(ctx context.Context, sourceURL, collection string) (res
 	var referencedBy datatug.ReferencedBys
 	referrers, err := reader.ListReferrers(ctx, &collRef)
 	if err != nil && !errors.Is(err, dal.ErrNotSupported) {
-		return resolvedSource{}, fmt.Errorf("list referrers for %s.%s: %w", sourceURL, collection, err)
+		return resolvedSource{}, unavailableOr(sourceID, err, fmt.Errorf("list referrers for %s.%s: %w", shown, collection, dbcopy.RedactError(err)))
 	}
 	for _, ref := range referrers {
 		cols := make([]string, len(ref.Fields))
@@ -154,7 +206,7 @@ func resolveRecordsetSource(sourceURL, recordsetPath, collection string) (resolv
 		return resolvedSource{}, fmt.Errorf("read %s: %w", recordsetPath, err)
 	}
 	var def datatug.RecordsetDefinition
-	if err := json.Unmarshal(data, &def); err != nil {
+	if err := recordsetUnmarshalJSON(data, &def); err != nil {
 		return resolvedSource{}, fmt.Errorf("parse %s: %w", recordsetPath, err)
 	}
 	columns := make([]semantic.Column, len(def.Columns))
@@ -169,10 +221,14 @@ func resolveRecordsetSource(sourceURL, recordsetPath, collection string) (resolv
 	}
 	foreignKeys := make(datatug.ForeignKeys, len(def.ForeignKeys))
 	for i, fk := range def.ForeignKeys {
+		var refTable datatug.DBCollectionKey
+		if name := fk.RefTable.Name(); name != "" {
+			refTable = datatug.NewTableKey(name, fk.RefTable.Schema(), fk.RefTable.Catalog(), nil)
+		}
 		foreignKeys[i] = &datatug.ForeignKey{
 			Name:        fk.Name,
 			Columns:     fk.Columns,
-			RefTable:    datatug.NewTableKey(fk.RefTable.Name(), fk.RefTable.Schema(), fk.RefTable.Catalog(), nil),
+			RefTable:    refTable,
 			MatchOption: fk.MatchOption,
 			UpdateRule:  fk.UpdateRule,
 			DeleteRule:  fk.DeleteRule,

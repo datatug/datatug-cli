@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"github.com/datatug/datatug-cli/pkg/auth/device"
 	"github.com/datatug/datatug-cli/pkg/auth/gauth"
 	"github.com/spf13/cobra"
 )
@@ -12,6 +13,11 @@ func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "auth",
 	}
-	cmd.AddCommand(gauth.GoogleAuthCommand())
+	cmd.AddCommand(
+		device.LoginCommand(),
+		device.StatusCommand(),
+		device.LogoutCommand(),
+		gauth.GoogleAuthCommand(),
+	)
 	return cmd
 }

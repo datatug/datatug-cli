@@ -13,6 +13,11 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
+var (
+	jsonMarshal   = json.Marshal
+	jsonUnmarshal = json.Unmarshal
+)
+
 // TableKeyDoc is the JSON/YAML shape a table/mapping-copy reference is
 // authored or rendered as: {name, schema, catalog}. datatug-core v0.17.0's
 // datatug.DBCollectionKey (embedded in datatug.TableKeys, i.e.
@@ -60,13 +65,13 @@ func tableKeyDocsFromKeys(keys datatug.TableKeys) []TableKeyDoc {
 // happen through *datatug.Entity's own JSON tags in datatug-core v0.17.0.
 func UnmarshalEntity(data []byte) (*datatug.Entity, error) {
 	entity := new(datatug.Entity)
-	if err := json.Unmarshal(data, entity); err != nil {
+	if err := jsonUnmarshal(data, entity); err != nil {
 		return nil, err
 	}
 	var tablesDoc struct {
 		Tables []TableKeyDoc `json:"tables,omitempty"`
 	}
-	if err := json.Unmarshal(data, &tablesDoc); err != nil {
+	if err := jsonUnmarshal(data, &tablesDoc); err != nil {
 		return nil, err
 	}
 	entity.Tables = tableKeysFromDocs(tablesDoc.Tables)
@@ -77,16 +82,16 @@ func UnmarshalEntity(data []byte) (*datatug.Entity, error) {
 // (see UnmarshalEntity). Re-marshals through a map, so key order is
 // alphabetical rather than following the struct's field declaration order.
 func MarshalEntity(entity *datatug.Entity) ([]byte, error) {
-	data, err := json.Marshal(entity)
+	data, err := jsonMarshal(entity)
 	if err != nil {
 		return nil, err
 	}
 	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(data, &doc); err != nil {
+	if err := jsonUnmarshal(data, &doc); err != nil {
 		return nil, err
 	}
 	if tables := tableKeyDocsFromKeys(entity.Tables); len(tables) > 0 {
-		tablesJSON, err := json.Marshal(tables)
+		tablesJSON, err := jsonMarshal(tables)
 		if err != nil {
 			return nil, err
 		}

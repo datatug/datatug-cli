@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/storage"
 )
 
@@ -63,11 +66,160 @@ type CatalogTables struct {
 	Views  []CatalogTable `json:"views"`
 }
 
+// CatalogColumn is the compact, model-facing description of one stored
+// database column. It intentionally excludes environment scan bookkeeping:
+// chat needs enough context to construct a query, not the complete dbmodel.
+type CatalogColumn struct {
+	Name   string `json:"name"`
+	DbType string `json:"dbType,omitempty"`
+	// PrimaryKeyPosition is the column's 1-based place in its table's primary
+	// key, read from the columns file's pkPosition; 0 when it is not part of
+	// the key.
+	PrimaryKeyPosition int `json:"pkPosition,omitempty"`
+}
+
+// CatalogRelation describes one stored table or view and its columns.
+type CatalogRelation struct {
+	Schema  string          `json:"schema"`
+	Name    string          `json:"name"`
+	DbType  string          `json:"dbType"`
+	Columns []CatalogColumn `json:"columns"`
+	Issue   string          `json:"-"` // partial explorer load only; never publish raw file errors
+}
+
+// CatalogSchema is the compact stored schema supplied to consumers such as
+// DataTug Chat. DataTug's scanned dbmodel remains the source of truth; this
+// function never introspects the live database independently.
+type CatalogSchema struct {
+	Relations []CatalogRelation `json:"relations"`
+}
+
+type catalogColumnsFile struct {
+	Columns []CatalogColumn `json:"columns"`
+}
+
+// GetCatalogSchema resolves a configured catalog to its scanned dbmodel and
+// loads table/view columns in deterministic order.
+func GetCatalogSchema(projectDir, environmentID, catalogID string) (*CatalogSchema, error) {
+	return getCatalogSchema(projectDir, environmentID, catalogID, false)
+}
+
+// GetCatalogSchemaPartial preserves healthy relations when one relation's
+// stored column file is missing or malformed. Source-level failures still
+// return an error; affected relations carry a local-only Issue instead.
+func GetCatalogSchemaPartial(projectDir, environmentID, catalogID string) (*CatalogSchema, error) {
+	return getCatalogSchema(projectDir, environmentID, catalogID, true)
+}
+
+func getCatalogSchema(projectDir, environmentID, catalogID string, partial bool) (*CatalogSchema, error) {
+	dbModelID, err := catalogDbModel(projectDir, environmentID, catalogID)
+	if err != nil {
+		return nil, err
+	}
+	dbModelDir := filepath.Join(projectDir, storage.DbModelsFolder, dbModelID)
+	var relations []CatalogRelation
+	for _, kind := range []struct {
+		dir    string
+		dbType string
+	}{{"tables", "BASE TABLE"}, {"views", "VIEW"}} {
+		items, err := loadCatalogRelationsWithMode(dbModelDir, kind.dir, kind.dbType, partial)
+		if err != nil {
+			return nil, catalogReadFailed(catalogID, environmentID, err)
+		}
+		relations = append(relations, items...)
+	}
+	sort.Slice(relations, func(i, j int) bool {
+		if relations[i].Schema != relations[j].Schema {
+			return relations[i].Schema < relations[j].Schema
+		}
+		return relations[i].Name < relations[j].Name
+	})
+	if relations == nil {
+		relations = []CatalogRelation{}
+	}
+	return &CatalogSchema{Relations: relations}, nil
+}
+
+func loadCatalogRelationsWithMode(dbModelDir, kind, dbType string, partial bool) ([]CatalogRelation, error) {
+	var out []CatalogRelation
+	schemaDirs, err := os.ReadDir(dbModelDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return out, nil
+		}
+		return nil, fmt.Errorf("list schemas under %s: %w", dbModelDir, err)
+	}
+	for _, schemaDir := range schemaDirs {
+		if !schemaDir.IsDir() {
+			continue
+		}
+		schema := schemaDir.Name()
+		kindDir := filepath.Join(dbModelDir, schema, kind)
+		tableDirs, err := os.ReadDir(kindDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("list %s under %s: %w", kind, kindDir, err)
+		}
+		for _, tableDir := range tableDirs {
+			if !tableDir.IsDir() {
+				continue
+			}
+			name := tableDir.Name()
+			columns, err := readCatalogColumns(kindDir, schema, name)
+			if err != nil && !partial {
+				return nil, err
+			}
+			relation := CatalogRelation{Schema: schema, Name: name, DbType: dbType, Columns: columns}
+			if err != nil {
+				relation.Issue = err.Error()
+			}
+			out = append(out, relation)
+		}
+	}
+	return out, nil
+}
+
+// readCatalogColumns reads the columns file in the folder of one table or view. It
+// lists the folder rather than matching a pattern over a path that holds the name:
+// a name or a project path with a "[" in it (a valid folder name) is not a pattern.
+func readCatalogColumns(kindDir, schema, name string) ([]CatalogColumn, error) {
+	folder := filepath.Join(kindDir, name)
+	entries, err := os.ReadDir(folder)
+	if err != nil {
+		return nil, fmt.Errorf("find columns for %s.%s: %w", schema, name, err)
+	}
+	suffix := "." + storage.ColumnsFileSuffix + ".json"
+	var matches []string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), suffix) {
+			matches = append(matches, filepath.Join(folder, entry.Name()))
+		}
+	}
+	if len(matches) != 1 {
+		return nil, fmt.Errorf("relation %s.%s has %d columns files; want 1", schema, name, len(matches))
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		return nil, fmt.Errorf("read columns for %s.%s: %w", schema, name, err)
+	}
+	var file catalogColumnsFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, fmt.Errorf("parse columns for %s.%s: %w", schema, name, err)
+	}
+	if file.Columns == nil {
+		file.Columns = []CatalogColumn{}
+	}
+	return file.Columns, nil
+}
+
 // catalogDbModelFile is the minimal shape this reads out of
 // environments/<env>/catalogs/<catalog>/<catalog>.db.json — a
-// datatug.DbCatalogBase-shaped file every demo/real project already writes
-// (e.g. datatug-demo-projects' chinook-local.db.json:
-// {"driver":"sqlite3","path":"...","dbModel":"chinook"}). Decoded locally,
+// datatug.DbCatalogBase-shaped file that `datatug scan` writes and every
+// demo project has (e.g. datatug-demo-projects' chinook-local.db.json:
+// {"driver":"sqlite3","path":"...","dbModel":"chinook"}); its fields are in
+// "Project layout written by a scan" of spec/features/cli/scan/README.md. Decoded locally,
 // into only the one field this needs, rather than via
 // datatug.DbCatalogBase itself, so this stays independent of that struct's
 // own (stricter) Validate() rules.
@@ -81,6 +233,9 @@ type catalogDbModelFile struct {
 // Read-only; unlike exec/select or dbserver-databases this touches no live
 // database connection.
 func GetCatalogTables(projectDir, environmentID, catalogID string) (*CatalogTables, error) {
+	if err := ValidateCatalogIdentifiers(environmentID, catalogID); err != nil {
+		return nil, err
+	}
 	dbModelID, err := catalogDbModel(projectDir, environmentID, catalogID)
 	if err != nil {
 		return nil, err
@@ -88,15 +243,17 @@ func GetCatalogTables(projectDir, environmentID, catalogID string) (*CatalogTabl
 	dbModelDir := filepath.Join(projectDir, storage.DbModelsFolder, dbModelID)
 	// "tables"/"views": datatug-core's own TablesFolder/ViewsFolder
 	// constants are commented out (pkg/storage/file_names.go) — these are
-	// the literal directory names datatug-cli's scan/demo tooling already
-	// writes (see datatug-demo-projects/demo-project-1/dbmodels/chinook/main/tables/*).
+	// the literal folder names of the layout `datatug scan` writes
+	// (scan_layout.go) and the demo project has; the layout is written down
+	// once, in "Project layout written by a scan" of
+	// spec/features/cli/scan/README.md.
 	tables, err := listCatalogTables(dbModelDir, "tables", "BASE TABLE")
 	if err != nil {
-		return nil, err
+		return nil, catalogReadFailed(catalogID, environmentID, err)
 	}
 	views, err := listCatalogTables(dbModelDir, "views", "VIEW")
 	if err != nil {
-		return nil, err
+		return nil, catalogReadFailed(catalogID, environmentID, err)
 	}
 	// Never nil (-> JSON `null`) even when empty: the client
 	// (EnvDbPageComponent) reads `.tables.length`/`.views.length`
@@ -111,24 +268,67 @@ func GetCatalogTables(projectDir, environmentID, catalogID string) (*CatalogTabl
 	return &CatalogTables{Tables: tables, Views: views}, nil
 }
 
+// catalogReadFailed is the answer for a catalog whose files cannot be read: the file of the
+// catalog, the folders of its model, the files of its columns. It is one sentence built from
+// the catalog and the environment, each named only when it is a plain name (see
+// dbcopy.SourceIDDisplay), and from nothing the file system said, whatever the failure was: a
+// file error quotes the path it built from the project folder, and says whether the path is a
+// file or a folder. The cause goes to the log of the server, redacted.
+func catalogReadFailed(catalogID, environmentID string, cause error) error {
+	shownCatalog, shownEnvironment := dbcopy.SourceIDDisplay(catalogID), dbcopy.SourceIDDisplay(environmentID)
+	logCatalogFailure("could not be read", catalogID, environmentID, cause)
+	return fmt.Errorf("catalog %q in environment %q could not be read", shownCatalog, shownEnvironment)
+}
+
+// logCatalogFailure logs what went wrong with a catalog, for the log of the server. The cause
+// quotes the path built from the two IDs, so it is logged only when both are plain names: an
+// ID that is not one (a source string, with its password) is no part of a log either.
+func logCatalogFailure(what, catalogID, environmentID string, cause error) {
+	shownCatalog, shownEnvironment := dbcopy.SourceIDDisplay(catalogID), dbcopy.SourceIDDisplay(environmentID)
+	if !dbcopy.IsPlainSourceID(catalogID) || !dbcopy.IsPlainSourceID(environmentID) {
+		log.Printf("api: catalog %q in environment %q %s (the cause quotes a path built from an ID that is not a plain name, and is not logged)", shownCatalog, shownEnvironment, what)
+		return
+	}
+	log.Printf("api: catalog %q in environment %q %s: %s", shownCatalog, shownEnvironment, what, dbcopy.RedactText(cause.Error()))
+}
+
+// catalogNotFound is the answer for a catalog whose file cannot be used: it is not there, it
+// is not a file, it cannot be read or it cannot be parsed. They are one answer, an
+// ErrCatalogNotFound whose sentence is built from the catalog and the environment, each named
+// only when it is a plain name (see dbcopy.SourceIDDisplay), and from nothing the file system
+// said, which quotes the path it built from the project folder and says whether that path is
+// a file or a folder. The cause goes to the log of the server (see logCatalogFailure).
+func catalogNotFound(catalogID, environmentID string, cause error) error {
+	logCatalogFailure("has a file that cannot be used", catalogID, environmentID, cause)
+	return fmt.Errorf("%w: catalog %q in environment %q", ErrCatalogNotFound, dbcopy.SourceIDDisplay(catalogID), dbcopy.SourceIDDisplay(environmentID))
+}
+
+// catalogDbModel reads the dbModel of a catalog. environmentID and catalogID
+// are request path segments, and a source string can be sent where an ID belongs:
+// each message shows an ID only when it is a plain name (see LookupError,
+// dbcopy.SourceIDDisplay), and none carries the file error, which quotes the path
+// the ID was turned into (see catalogNotFound).
 func catalogDbModel(projectDir, environmentID, catalogID string) (string, error) {
 	path := filepath.Join(
 		projectDir, storage.EnvironmentsFolder, environmentID, storage.EnvDbCatalogsFolder, catalogID,
 		storage.JsonFileName(catalogID, storage.DbCatalogFileSuffix),
 	)
-	data, err := os.ReadFile(path)
+	data, err := readCatalogFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("%w: catalog %q in environment %q", ErrCatalogNotFound, catalogID, environmentID)
-		}
-		return "", fmt.Errorf("read catalog file %s: %w", path, err)
+		return "", catalogNotFound(catalogID, environmentID, err)
 	}
 	var file catalogDbModelFile
 	if err := json.Unmarshal(data, &file); err != nil {
-		return "", fmt.Errorf("parse catalog file %s: %w", path, err)
+		return "", catalogNotFound(catalogID, environmentID, err)
 	}
 	if file.DbModel == "" {
-		return "", fmt.Errorf("catalog %q (environment %q) has no dbModel set", catalogID, environmentID)
+		return "", LookupError("catalog %q (environment %q) has no dbModel set", nil, catalogID, environmentID)
+	}
+	// The model is joined into the path of its tables, and is read from a file a project
+	// holds, which may have come from anywhere: only a plain name is used, and the answer
+	// names the catalog and nothing of the model.
+	if !dbcopy.IsPlainSourceID(file.DbModel) {
+		return "", LookupError("catalog %q (environment %q) names a database model that is not a plain name", nil, catalogID, environmentID)
 	}
 	return file.DbModel, nil
 }

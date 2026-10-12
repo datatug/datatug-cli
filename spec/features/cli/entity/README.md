@@ -84,6 +84,10 @@ No `entity` verb MUST overwrite a whole existing entity, and batch *mutation* of
 
 Every mutating `entity` subcommand (`add`, `field add`, `field set`, `field rm`) MUST accept the shared `--git=<none|stage|commit>` flag (default `none`), acting only on the files the command changed. This capability is provided by the cross-repo `mutation-git-integration` work; this Feature consumes it rather than defining it. Per that capability's MVP, only `none` and `stage` are implemented end-to-end; `--git=commit` is parser-accepted but reports not-yet-supported until the capability's commit phase lands — so a Plan MUST NOT schedule `commit` behavior here.
 
+#### REQ: plain-files-in-plain-folders
+
+Every mutating `entity` subcommand (`add`, `field add`, `field set`, `field rm`) MUST write only plain files in plain folders of the project: it does not write through a link. The file of an entity, `entities/<id>/<id>.entity.json`, and the temporary file it is staged in, are reached from the project folder down by looking at each part with `Lstat`; a link, or anything that is not a plain folder or a plain file, in the place of the file or of a folder above it is refused, with an error that names its path inside the project and not where a link leads, nothing outside the project is changed, and nothing the command staged is left behind. The rename that commits a staged file lands only on a path checked the same way. When the last part of the folder given with `--directory` is a link, the command prints the folder it leads to, names `--follow-project-link`, writes nothing and exits non-zero, unless it is given `--follow-project-link`; `list` and `show` read, and are not changed. (`internal/plainfs` is the one walk of the CLI. Pinned by `TestEntityCommandsWriteNothingThroughALink`, `TestEntityCommandsStopAtAProjectFolderThatIsALink` and `TestReadingCommandsDoNotStopAtAProjectFolderThatIsALink`.)
+
 ## Acceptance Criteria
 
 ### AC: add-creates-new (verifies REQ:add-create-only)

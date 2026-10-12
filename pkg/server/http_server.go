@@ -38,7 +38,12 @@ var agentPort int
 // means nothing was written. timeouts_test.go pins the relationship.
 const (
 	requestReadTimeout   = 10 * time.Second
-	responseWriteTimeout = 30 * time.Second
+	responseWriteTimeout = 60 * time.Second
+)
+
+var (
+	filestoreNewStore = filestore.NewStore
+	listenAndServeFn  = func(s *http.Server) error { return s.ListenAndServe() }
 )
 
 type HttpServer struct {
@@ -92,7 +97,7 @@ func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storag
 		}
 	}
 	return func(id string) (v storage.Store, err error) {
-		if v, err = filestore.NewStore("files", pathsByID); err != nil {
+		if v, err = filestoreNewStore("files", pathsByID); err != nil {
 			err = fmt.Errorf("failed to create filestore for storage id=%v: %w", id, err)
 			return
 		}
@@ -109,6 +114,11 @@ func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storag
 // (api.Capabilities's own doc comment) — see cmd_serve.go's --allow-writes/
 // --allow-opaque-sql flags.
 func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int, session secureread.Session, caps api.Capabilities) error {
+	// A server serves the projects of a map, and a nil one is a server that serves none (a
+	// session counts as configured by having a map: see api.ConfigureSecureSession).
+	if pathsByID == nil {
+		pathsByID = map[string]string{}
+	}
 	storage.NewDatatugStore = newDatatugStoreFactory(pathsByID)
 	if err := api.ConfigureExecutionEvidence(pathsByID, caps.IncidentStores, executionstore.Options{
 		PrivateDir: caps.EvidencePrivateDir,
@@ -173,20 +183,22 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	// function is entirely local.
 	security.AddKnownHosts("datatug.app", "app.incidentius.com")
 
-	router := httprouter.New()
-	router.GlobalOPTIONS = http.HandlerFunc(globalOptionsHandler)
-	router.HandlerFunc(http.MethodGet, "/", root)
-	logWrapper := func(handler http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/agent-info" {
-				log.Println(r.Method, r.ContentLength, r.RequestURI)
-			}
-			handler(w, r)
-		}
+	// The routes of the table, the page at "/" and the answer to every OPTIONS request are all
+	// registered behind the one request guard (endpoints.RequestGuard): a request is answered
+	// only when it comes from one of this server's own pages or from a tool on this machine.
+	endpointCaps := endpoints.Capabilities{
+		AllowWrites:          caps.AllowWrites,
+		AllowLiveConnections: caps.AllowLiveConnections,
+		ServedHost:           agentHost,
+		ServedPort:           agentPort,
 	}
-	endpoints.RegisterDatatugHandlersWithCapabilities("", router, endpoints.RegisterAllHandlers, logWrapper, func(r *http.Request) (context.Context, error) {
+	guard := endpointCaps.RequestGuard()
+	router := httprouter.New()
+	router.GlobalOPTIONS = http.HandlerFunc(guard.Wrap(globalOptionsHandler))
+	router.HandlerFunc(http.MethodGet, "/", guard.Wrap(root))
+	endpoints.RegisterDatatugHandlersWithCapabilities("", router, endpoints.RegisterAllHandlers, logRequests, func(r *http.Request) (context.Context, error) {
 		return r.Context(), nil
-	}, apicore.Execute, endpoints.Capabilities{AllowWrites: caps.AllowWrites})
+	}, apicore.Execute, endpointCaps)
 
 	s.s = &http.Server{
 		Addr:           fmt.Sprintf("%v:%v", agentHost, agentPort),
@@ -197,7 +209,7 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	}
 	log.Printf("Serving on: http://%v:%v", agentHost, agentPort)
 
-	return s.s.ListenAndServe()
+	return listenAndServeFn(s.s)
 }
 
 func root(writer http.ResponseWriter, _ *http.Request) {
@@ -232,4 +244,17 @@ func root(writer http.ResponseWriter, _ *http.Request) {
 </body>
 </html>
 `, filestore.GetProjectPath(storage.SingleProjectID))
+}
+
+// logRequests logs the method, the length of the body and the path of every request
+// but the agent-info poll, then runs handler. The query string is not logged: a
+// client can put a source string in it (an environment, a database, a source), and
+// percent-encoding hides its punctuation, not its password.
+func logRequests(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/agent-info" {
+			log.Println(r.Method, r.ContentLength, r.URL.Path)
+		}
+		handler(w, r)
+	}
 }

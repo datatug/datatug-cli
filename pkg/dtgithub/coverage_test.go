@@ -16,7 +16,7 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/dtprojcreator"
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v92/github"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -516,7 +516,13 @@ func TestAddDatatugSection_ReadmeExists_NoSection(t *testing.T) {
 			"encoding": "",
 		})
 	})
+	var updatedContent string
 	mux.HandleFunc("/repos/owner/repo/contents/README.md", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Content []byte `json:"content"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		updatedContent = string(req.Content)
 		// UpdateFile
 		jsonResponse(w, http.StatusOK, map[string]any{
 			"content": map[string]any{"path": "README.md"},
@@ -527,6 +533,7 @@ func TestAddDatatugSection_ReadmeExists_NoSection(t *testing.T) {
 	c := &projectCreator{client: client, repoOwner: "owner", repoName: "repo", branch: "main", report: noopReport}
 	err := c.addDatatugSectionToRootReadmeFile(context.Background(), "mydir")
 	require.NoError(t, err)
+	assert.Contains(t, updatedContent, "[DataTug.app](https://datatug.app/home#project=github.com/owner/repo/mydir)")
 }
 
 func TestAddDatatugSection_ReadmeExists_HasSection(t *testing.T) {
@@ -811,6 +818,25 @@ func TestCreateProject_AddReadmeSectionError(t *testing.T) {
 	err := c.CreateProject(context.Background(), "title", "dir", datatug.PublicProject)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to add DataTug section to repo's root README.md")
+}
+
+func TestCreateProject_CloneRepoError(t *testing.T) {
+	client, mux := setupGHClient(t)
+
+	mux.HandleFunc("/repos/owner/repo", func(w http.ResponseWriter, r *http.Request) {
+		jsonResponse(w, http.StatusOK, repoJSON("repo"))
+	})
+
+	origClone := cloneRepoFunc
+	t.Cleanup(func() { cloneRepoFunc = origClone })
+	cloneRepoFunc = func(c *projectCreator) error {
+		return errors.New("simulated clone error")
+	}
+
+	c := &projectCreator{client: client, repoOwner: "owner", repoName: "repo", branch: "main", report: noopReport}
+	err := c.CreateProject(context.Background(), "title", "dir", datatug.PublicProject)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to clone GitHub repository")
 }
 
 // ---------- CreateNewProject ----------

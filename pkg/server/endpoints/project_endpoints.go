@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/datatug/datatug-cli/pkg/api"
-	"github.com/datatug/datatug-core/pkg/dto"
 	"github.com/sneat-co/sneat-go-core/apicore"
 )
 
@@ -15,20 +14,14 @@ import (
 type ProjectAgentEndpoints struct {
 }
 
-// createProject creates project
+// createProjectNotImplementedSentence is the answer of projects/create_project, which this agent
+// does not implement: the store of the files has no way to create a project.
+const createProjectNotImplementedSentence = "creating a project is not implemented by this agent yet"
+
+// createProject is not implemented: it answers 501 with a built sentence, and reads nothing of the
+// request. (The route stays behind the write capability: see projectsRoutes.)
 func (ProjectAgentEndpoints) createProject(w http.ResponseWriter, r *http.Request) {
-	request := dto.CreateProjectRequest{
-		StoreID: r.URL.Query().Get("store"),
-	}
-	var worker = func(ctx context.Context) (responseDTO apicore.ResponseDTO, err error) {
-		return api.CreateProject(ctx, request)
-	}
-	verifyOptions := VerifyRequest{
-		MinContentLength: int64(len(`{"title":""}`)),
-		MaxContentLength: 1024,
-		AuthRequired:     true,
-	}
-	handle(w, r, &request, verifyOptions, http.StatusOK, getContextFromRequest, worker)
+	writeNotImplemented(w, r, createProjectNotImplementedSentence)
 }
 
 // deleteProject deletes project

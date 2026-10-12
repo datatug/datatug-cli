@@ -350,11 +350,14 @@ func TestRunSubstitutesParamsAndDenies(t *testing.T) {
 	if _, err := Run(context.Background(), stub, unverifiable, Options{Principal: &access.Principal{ID: "alice"}, Policies: loaded}); !errors.Is(err, access.ErrAccessDenied) || stub.query != nil {
 		t.Errorf("unverifiable = %v", err)
 	}
-	// Without field lists the walker is not consulted, so odd nodes reach the session.
+	// Without field lists the walker of this package is not consulted, but dalgo (since v0.89.6, which
+	// authorises every source and every node a structured query reads) refuses a node it cannot read as an
+	// opaque query that no rule allows: the odd node does not reach the session, whatever the policy's lists.
+	stub.query = nil
 	open := writePolicy(t, t.TempDir(), "open.yaml", "open")
 	openLoaded, _ := LoadFile(open)
 	products := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("products", ""))).Where(fakeCondition{}).SelectColumns()
-	if _, err := Run(context.Background(), stub, products, Options{Policies: []Loaded{openLoaded}}); err != nil || stub.query == nil {
-		t.Errorf("unrestricted collection = %v", err)
+	if _, err := Run(context.Background(), stub, products, Options{Policies: []Loaded{openLoaded}}); !errors.Is(err, access.ErrAccessDenied) || stub.query != nil {
+		t.Errorf("unrestricted collection = %v, %v", err, stub.query)
 	}
 }

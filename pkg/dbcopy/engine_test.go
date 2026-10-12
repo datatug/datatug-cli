@@ -297,17 +297,15 @@ func TestCopy_ExcludeSkipsListedTables(t *testing.T) {
 // AC:limit-applies-per-table — Chinook Invoice has 412 rows; --limit
 // Invoice:50 should produce a target collection of exactly 50.
 //
-// Depends on a local-replace of dal-go/dalgo2sql that adds an
-// `emitSQL` shim translating dalgo's `SELECT TOP N` into ANSI/SQLite
-// `LIMIT N` (see go.mod). The proper dialect-aware emission lives
-// under the `dalgo-dialect-aware-sql-emission` sibling Idea — once
-// that lands, the shim disappears. Track: REQ:limit-compiles-to-dalgo-limit.
+// The source is opened through BackendRef.Open, the production path, so the
+// limit compiles with dalgo2sql's sqlite structured-query dialect.
+// Track: REQ:limit-compiles-to-dalgo-limit.
 func TestCopy_LimitNarrowsRowCount(t *testing.T) {
 	t.Parallel()
 
 	chinook, err := filepath.Abs("testdata/chinook.db")
 	assert.NoError(t, err)
-	src, err := dalgo2sqlite.NewDatabase(chinook)
+	src, err := BackendRef{Scheme: "sqlite", Path: chinook}.Open(context.Background())
 	assert.NoError(t, err)
 
 	tgtDir := t.TempDir()
@@ -331,7 +329,7 @@ func TestCopy_WhereSingleCondition(t *testing.T) {
 
 	chinook, err := filepath.Abs("testdata/chinook.db")
 	assert.NoError(t, err)
-	src, err := dalgo2sqlite.NewDatabase(chinook)
+	src, err := BackendRef{Scheme: "sqlite", Path: chinook}.Open(context.Background())
 	assert.NoError(t, err)
 
 	tgtDir := t.TempDir()
@@ -366,7 +364,7 @@ func TestCopy_WhereAndComposition(t *testing.T) {
 
 	chinook, err := filepath.Abs("testdata/chinook.db")
 	assert.NoError(t, err)
-	src, err := dalgo2sqlite.NewDatabase(chinook)
+	src, err := BackendRef{Scheme: "sqlite", Path: chinook}.Open(context.Background())
 	assert.NoError(t, err)
 
 	tgtDir := t.TempDir()

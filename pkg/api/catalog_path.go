@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mitchellh/go-homedir"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 )
 
 // ResolveCatalogPath expands a datatug.DbCatalog.Path field into an absolute
@@ -35,16 +35,22 @@ func ResolveCatalogPath(projectDir, catalogPath string) (string, error) {
 	if catalogPath == "" {
 		return "", errors.New("empty catalog path")
 	}
+	// A URL is not a file or a directory, and joined to the project folder it would
+	// become a relative path that a later message shows whole, credentials and all:
+	// it is refused here, and the message shows nothing of it.
+	if dbcopy.PathHoldsURL(catalogPath) {
+		return "", errors.New("the catalog path is a URL, not a file or a directory (a catalog's path names a local file; keep credentials out of a project)")
+	}
 	expanded := catalogPath
 	switch {
 	case strings.HasPrefix(expanded, "~"):
 		var err error
-		expanded, err = homedir.Expand(expanded)
+		expanded, err = homedirExpand(expanded)
 		if err != nil {
 			return "", fmt.Errorf("expand %q: %w", catalogPath, err)
 		}
 	case strings.HasPrefix(expanded, "${HOME}"), strings.HasPrefix(expanded, "$HOME"):
-		home, err := homedir.Dir()
+		home, err := homedirDir()
 		if err != nil {
 			return "", fmt.Errorf("resolve $HOME for %q: %w", catalogPath, err)
 		}

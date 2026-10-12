@@ -12,9 +12,13 @@ import (
 	"github.com/dal-go/dalgo/dtql"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/querywrite"
 	"github.com/datatug/datatug-core/pkg/datatug"
 )
+
+var captureProjectStoreFor = api.ProjectStoreFor
+var dtqlCollectionHook = dtqlCollection
 
 // Bounds on a captured query. Names become file and directory names in a
 // git-tracked tree; the rest bounds what one capture can put into it.
@@ -208,7 +212,7 @@ func validateCaptureDTQL(text string, params []capturedParameter) (string, error
 	if err != nil {
 		return "", newInvalidRequest(field, "does not parse as DTQL: "+err.Error())
 	}
-	collection := dtqlCollection(query)
+	collection := dtqlCollectionHook(query)
 	if collection == "" {
 		return "", newInvalidRequest(field, "must read one named collection")
 	}
@@ -259,9 +263,11 @@ func dtqlCollection(query dal.StructuredQuery) string {
 // catalog sources, through the same resolver saved-query execution uses
 // (api.EligibleTargets). An unregistered source, a recordset or HTTP
 // source, and an unknown environment are all 400 on query.source; the
-// resolver's own error text (which can name server paths) is not echoed.
+// resolver's own error text (which can name server paths) is not echoed, and the
+// source and the environment are named only when each is a plain name: a client
+// may send a source string for either.
 func checkCaptureSource(ctx context.Context, projectID, projectDir, environment, source string) error {
-	projStore, err := api.ProjectStoreFor(projectID)
+	projStore, err := captureProjectStoreFor(projectID)
 	if err != nil {
 		return captureInternal(err)
 	}
@@ -274,5 +280,5 @@ func checkCaptureSource(ctx context.Context, projectID, projectDir, environment,
 			}
 		}
 	}
-	return newInvalidRequest("query.source", fmt.Sprintf("source %q is not a catalog source of environment %q that a saved query can target", source, environment))
+	return newInvalidRequest("query.source", fmt.Sprintf("source %q is not a catalog source of environment %q that a saved query can target", dbcopy.SourceIDDisplay(source), dbcopy.SourceIDDisplay(environment)))
 }

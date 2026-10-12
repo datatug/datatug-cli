@@ -21,17 +21,9 @@ import (
 	_ "modernc.org/sqlite" // pure-Go sqlite driver: verifying an on-disk demo db file needs no cgo
 )
 
-// The real demo lives in github.com/datatug/datatug-demo-projects (plural) -
-// a full DataTug project (demo-project-1: Customer/Invoice/Country entities,
-// DTQL/SQL/HTTP queries, an admin/support access policy) checked into git,
-// not synthesized. This replaces the old `datatug demo`, which cloned the
-// LEGACY, singular github.com/datatug/datatug-demo-project and then
-// programmatically built a minimal project around a downloaded Chinook
-// SQLite file, only to panic on save (storage.NewDatatugStore was never
-// wired - see datatug/datatug spec/research/2026-09-09-current-state-audit.md).
-// Cloning the real, already-complete project makes both failure modes
-// impossible: there is no legacy clone left to reach, and no project-save
-// call that could hit the unwired store.
+// The canonical demo repository contains one complete DataTug project under
+// demo-project-1. Its singular repository name preserves the original project
+// history, entities, queries and access policy. CLI and TUI use the same clone.
 const (
 	// demoOrgRepo matches the "clone GitHub projects under here" convention
 	// documented on pkg/dtroot (~/datatug/github.com/...) and already used by
@@ -39,7 +31,7 @@ const (
 	// (apps/datatugapp/datatugui/dtproject/datatug_demo_project.go) - cloning
 	// to the same path means the CLI `demo` command and the TUI share one
 	// clone instead of each keeping a separate copy.
-	demoOrgRepo           = "github.com/datatug/datatug-demo-projects"
+	demoOrgRepo           = "github.com/datatug/datatug-demo-project"
 	demoReposGitURL       = "https://" + demoOrgRepo + ".git"
 	demoProjectFolder     = "demo-project-1"
 	demoProjectRegistryID = "demo-project-1"
@@ -54,7 +46,7 @@ func demoCommandArgs() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "demo",
 		Short: "Installs & serves the demo project",
-		Long:  "Clones/refreshes the datatug-demo-projects repo, verifies its SQLite fixture(s), registers demo-project-1, then serves it (equivalent to `serve --project <dir> --as admin --role admin`)",
+		Long:  "Clones/refreshes the datatug-demo-project repo, verifies its SQLite fixture(s), registers demo-project-1, then serves it (equivalent to `serve --project <dir> --as admin --role admin`)",
 		RunE:  demoCommandAction,
 	}
 	cmd.Flags().Bool("reset-db", false, "Re-downloads the demo SQLite fixture file(s) from the internet")
@@ -104,6 +96,10 @@ func defaultCloneOrUpdateRepo(dir, url string) error {
 // that never touches the network.
 var downloadSQLiteSource = defaultDownloadSQLiteSource
 
+// demoSQLiteSourceURL is the URL defaultDownloadSQLiteSource fetches. A package
+// var so tests can point it at a local httptest server.
+var demoSQLiteSourceURL = chinookSQLiteSourceURL
+
 func defaultDownloadSQLiteSource(dests ...string) error {
 	writers := make([]io.Writer, len(dests))
 	files := make([]*os.File, len(dests))
@@ -122,7 +118,7 @@ func defaultDownloadSQLiteSource(dests ...string) error {
 	}()
 
 	log.Println("Downloading SQLite version of Chinook database...")
-	resp, err := http.Get(chinookSQLiteSourceURL)
+	resp, err := http.Get(demoSQLiteSourceURL)
 	if err != nil {
 		return fmt.Errorf("get request failed: %w", err)
 	}
@@ -224,8 +220,12 @@ func verifySQLiteFiles(paths []string) error {
 	return nil
 }
 
+// demoSQLOpen is a seam over sql.Open, whose error return a registered
+// driver never trips. Always sql.Open in production.
+var demoSQLOpen = sql.Open
+
 func verifySQLiteFile(path string) error {
-	db, err := sql.Open("sqlite", path)
+	db, err := demoSQLOpen("sqlite", path)
 	if err != nil {
 		return err
 	}
@@ -271,18 +271,27 @@ func registerDemoProject(id, path string) error {
 // real HTTP server.
 var serveDemoProjectFunc = defaultServeDemoProject
 
+// demoSetFlag and demoServeAction are seams so tests can exercise
+// defaultServeDemoProject without starting a real HTTP server.
+var (
+	demoSetFlag = func(cmd *cobra.Command, name, value string) error {
+		return cmd.Flags().Set(name, value)
+	}
+	demoServeAction = serveCommandAction
+)
+
 func defaultServeDemoProject(demoProjectDir string) error {
 	cmd := serveCommandArgs()
-	if err := cmd.Flags().Set(serveProjectFlag, demoProjectDir); err != nil {
+	if err := demoSetFlag(cmd, serveProjectFlag, demoProjectDir); err != nil {
 		return err
 	}
-	if err := cmd.Flags().Set(serveAsFlag, "admin"); err != nil {
+	if err := demoSetFlag(cmd, serveAsFlag, "admin"); err != nil {
 		return err
 	}
-	if err := cmd.Flags().Set(serveRoleFlag, "admin"); err != nil {
+	if err := demoSetFlag(cmd, serveRoleFlag, "admin"); err != nil {
 		return err
 	}
-	return serveCommandAction(cmd, nil)
+	return demoServeAction(cmd, nil)
 }
 
 func (c demoCommand) Execute() error {

@@ -57361,8 +57361,8 @@ null
 ""
 "import:4b59ea8f6752a5aafe16332fcb7f2cd8"
 "import"
-"github.com/strongo/strongo-tui/pkg/colors"
-"github.com/strongo/strongo-tui/pkg/colors"
+"github.com/tuigoff/tuigoff/pkg/colors"
+"github.com/tuigoff/tuigoff/pkg/colors"
 "apps/datatugapp/datatugui/dtproject/projects_ui.go"
 "go"
 22
@@ -57370,7 +57370,7 @@ null
 1
 44
 ""
-"\"github.com/strongo/strongo-tui/pkg/colors\""
+"\"github.com/tuigoff/tuigoff/pkg/colors\""
 null
 false
 false
@@ -57901,8 +57901,8 @@ null
 ""
 "import:4e9a1b6593c314c9b51e6fc2e8b10a9f"
 "import"
-"github.com/strongo/strongo-tui/pkg/colors"
-"github.com/strongo/strongo-tui/pkg/colors"
+"github.com/tuigoff/tuigoff/pkg/colors"
+"github.com/tuigoff/tuigoff/pkg/colors"
 "apps/datatugapp/datatugui/dtviewers/dbviewer/table_referrers.go"
 "go"
 14
@@ -57910,7 +57910,7 @@ null
 1
 44
 ""
-"\"github.com/strongo/strongo-tui/pkg/colors\""
+"\"github.com/tuigoff/tuigoff/pkg/colors\""
 null
 false
 false
@@ -70761,8 +70761,8 @@ null
 ""
 "import:96832ba1f1717c956548eae04419bd6e"
 "import"
-"github.com/strongo/strongo-tui/pkg/colors"
-"github.com/strongo/strongo-tui/pkg/colors"
+"github.com/tuigoff/tuigoff/pkg/colors"
+"github.com/tuigoff/tuigoff/pkg/colors"
 "apps/datatugapp/datatugui/dtviewers/dbviewer/table_fks.go"
 "go"
 15
@@ -70770,7 +70770,7 @@ null
 1
 44
 ""
-"\"github.com/strongo/strongo-tui/pkg/colors\""
+"\"github.com/tuigoff/tuigoff/pkg/colors\""
 null
 false
 false
@@ -75601,8 +75601,8 @@ null
 ""
 "import:b4f434699cf9b72a51ef9cd9ca9426a3"
 "import"
-"github.com/strongo/strongo-tui/pkg/colors"
-"github.com/strongo/strongo-tui/pkg/colors"
+"github.com/tuigoff/tuigoff/pkg/colors"
+"github.com/tuigoff/tuigoff/pkg/colors"
 "apps/datatugapp/datatugui/dtviewers/dbviewer/tables_box.go"
 "go"
 16
@@ -75610,7 +75610,7 @@ null
 1
 44
 ""
-"\"github.com/strongo/strongo-tui/pkg/colors\""
+"\"github.com/tuigoff/tuigoff/pkg/colors\""
 null
 false
 false
@@ -77621,8 +77621,8 @@ null
 ""
 "import:c1f6a9dafe93049a547bc4e57065cc2c"
 "import"
-"github.com/strongo/strongo-tui/pkg/colors"
-"github.com/strongo/strongo-tui/pkg/colors"
+"github.com/tuigoff/tuigoff/pkg/colors"
+"github.com/tuigoff/tuigoff/pkg/colors"
 "apps/datatugapp/datatugui/dtviewers/dbviewer/table_columns.go"
 "go"
 16
@@ -77630,7 +77630,7 @@ null
 1
 44
 ""
-"\"github.com/strongo/strongo-tui/pkg/colors\""
+"\"github.com/tuigoff/tuigoff/pkg/colors\""
 null
 false
 false

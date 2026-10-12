@@ -194,6 +194,52 @@ func TestQuery_DTQLFromStdin(t *testing.T) {
 	}
 }
 
+func TestQuery_ChinookCustomersByCountry(t *testing.T) {
+	fixture, err := filepath.Abs("../../../pkg/dbcopy/testdata/chinook.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := `from: {name: Customer}
+groupBy:
+  - {field: Country}
+having:
+  op: '>='
+  left: {field: customers}
+  right: {value: 5}
+orderBy:
+  - field: customers
+  - field: Country
+limit: 3
+columns:
+  - {field: Country}
+  - aggregate: {function: count, args: [{star: true}]}
+    as: customers
+`
+	stdout, stderr, code := runQuery(t, query, "--db", "sqlite://"+fixture, "-f", "-", "--format", "json", "--no-policies")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	rows := decodeObjects(t, stdout)
+	want := []struct {
+		country string
+		count   float64
+	}{{"Brazil", 5}, {"France", 5}, {"Canada", 8}}
+	if len(rows) != len(want) {
+		t.Fatalf("country rows = %v, want %d", rows, len(want))
+	}
+	seenKeys := make(map[string]bool, len(rows))
+	for i, expected := range want {
+		if rows[i]["Country"] != expected.country || rows[i]["customers"] != expected.count {
+			t.Errorf("row %d = %v, want %s/%v", i, rows[i], expected.country, expected.count)
+		}
+		key, ok := rows[i]["$key"].(string)
+		if !ok || key == "" || key == "__dalgo_record_id" || seenKeys[key] {
+			t.Errorf("row %d has a missing or duplicate synthetic key: %v", i, rows[i]["$key"])
+		}
+		seenKeys[key] = true
+	}
+}
+
 func TestQuery_UsageErrors(t *testing.T) {
 	url := setupQueryDB(t)
 	cases := map[string][]string{

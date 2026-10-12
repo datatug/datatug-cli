@@ -64,6 +64,7 @@ type Row struct {
 type Result struct {
 	Columns     []string
 	Rows        []Row
+	Statistics  RecordSetStatistics
 	Limitations []Limitation
 	// Collection is the base collection a structured query actually read.
 	// Callers use the executor-derived value for evidence provenance and

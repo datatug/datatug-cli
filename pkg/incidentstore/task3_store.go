@@ -55,6 +55,9 @@ type incidentCatalog struct {
 }
 
 func (s *RepositoryStore) readIncidentCatalog() (incidentCatalog, error) {
+	if s.readCatalog != nil {
+		return s.readCatalog()
+	}
 	fileName := s.join(filepath.FromSlash("incidents/.store/catalog.json"))
 	b, err := s.readFile(fileName)
 	found := true
@@ -107,7 +110,7 @@ func (s *RepositoryStore) readIncidentCatalog() (incidentCatalog, error) {
 // discoverIncidentIDs uses the extra descriptor only to enumerate names. All
 // event content remains behind the DALgo rooted-file capability.
 func (s *RepositoryStore) discoverIncidentIDs() ([]string, error) {
-	dir, err := s.incidentRoot.Open(".")
+	dir, err := s.openIncidentIndex()
 	if err != nil {
 		return nil, fmt.Errorf("open incident directory index: %w", err)
 	}
@@ -217,7 +220,7 @@ func (s *RepositoryStore) Create(ctx context.Context, mutation incidents.CreateM
 				Projects: createdProjects(mutation.PrimaryProject, mutation.Projects), Reporter: mutation.Reporter, CanonicalContext: mutation.CanonicalContext,
 			}),
 		}
-		projection, foldErr := incidents.Fold([]incidents.Event{event}, nil)
+		projection, foldErr := store.fold([]incidents.Event{event}, nil)
 		if foldErr != nil {
 			return foldErr
 		}
@@ -330,7 +333,7 @@ func (s *RepositoryStore) List(ctx context.Context, query incidents.CandidateLis
 			if len(events) == 0 {
 				continue
 			}
-			projection, foldErr := incidents.Fold(events, nil)
+			projection, foldErr := store.fold(events, nil)
 			if foldErr != nil {
 				return foldErr
 			}
@@ -534,10 +537,7 @@ func (s *RepositoryStore) decodeCursor(query incidents.WatchQuery, project *inci
 
 func encodeCursor(storeID, incidentID string, project *incidents.ProjectRef, positions map[string]uint64) incidents.EventCursor {
 	state := eventCursorState{Version: eventCursorVersion, StoreID: storeID, IncidentID: incidentID, Project: project, Positions: positions}
-	b, err := json.Marshal(state)
-	if err != nil {
-		panic(err)
-	}
+	b, _ := json.Marshal(state)
 	return incidents.EventCursor(base64.RawURLEncoding.EncodeToString(b))
 }
 
@@ -656,7 +656,7 @@ func (s *RepositoryStore) watchRefs(query incidents.WatchQuery, project *inciden
 			if loadErr != nil {
 				return nil, loadErr
 			}
-			projection, foldErr := incidents.Fold(events, nil)
+			projection, foldErr := s.fold(events, nil)
 			if foldErr != nil {
 				return nil, foldErr
 			}

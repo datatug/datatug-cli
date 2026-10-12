@@ -10,6 +10,10 @@ import (
 	"unicode/utf8"
 )
 
+var jsonDecoderToken = func(dec *json.Decoder) (json.Token, error) {
+	return dec.Token()
+}
+
 // decodeContractBody strictly decodes a POST body into v: unknown top-level
 // fields are rejected (json.Decoder.DisallowUnknownFields — every rewritten
 // struct's own nested UnmarshalJSON, e.g. TypedValue, already does the
@@ -76,7 +80,7 @@ func walkJSONValue(dec *json.Decoder, target reflect.Type) error {
 		fields, fold := jsonObjectFields(target)
 		seen := make(map[string]string)
 		for dec.More() {
-			keyTok, err := dec.Token()
+			keyTok, err := jsonDecoderToken(dec)
 			if err != nil {
 				return err
 			}

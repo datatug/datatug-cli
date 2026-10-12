@@ -58,6 +58,30 @@ func TestParse_Postgres_Recognized(t *testing.T) {
 	assert.NotEmpty(t, ref.Path)
 }
 
+func TestParse_BigQueryDestinationRequiresProjectDatasetAndLocation(t *testing.T) {
+	t.Parallel()
+	ref, err := Parse("bigquery://demodb/research?location=US")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Scheme != "bigquery" || ref.ProjectID != "demodb" || ref.DatasetID != "research" || ref.Location != "US" {
+		t.Fatalf("parsed destination = %#v", ref)
+	}
+	for _, raw := range []string{
+		"bigquery://demodb/research",
+		"bigquery://demodb/research?location=US&location=EU",
+		"bigquery://demodb/research?location=US&billingProject=other",
+		"bigquery://user@demodb/research?location=US",
+		"bigquery://demodb/research?location=US#fragment",
+		"bigquery://demodb/research/extra?location=US",
+		"bigquery://demodb/research?location=bad%20location",
+	} {
+		if _, err := Parse(raw); err == nil {
+			t.Errorf("Parse(%q) unexpectedly succeeded", raw)
+		}
+	}
+}
+
 // TestParse_UnknownScheme verifies REQ:unknown-scheme-rejected: the error must
 // name the unsupported scheme AND list all supported schemes.
 func TestParse_UnknownScheme(t *testing.T) {
@@ -172,14 +196,14 @@ func TestOpen_HTTP_NoQueriesErrors(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestOpen_Postgres_ReturnsErrPostgresNotWired(t *testing.T) {
+func TestOpen_Postgres_AnswersThePreviewSentenceWhileTheSwitchIsOff(t *testing.T) {
 	t.Parallel()
 	ref, err := Parse("postgres://user@host/db")
 	assert.NoError(t, err)
 	db, openErr := ref.Open(context.Background())
 	assert.Nil(t, db)
-	assert.True(t, errors.Is(openErr, ErrPostgresNotWired),
-		"expected ErrPostgresNotWired, got %v", openErr)
+	assert.True(t, errors.Is(openErr, ErrPostgresPreview),
+		"expected ErrPostgresPreview, got %v", openErr)
 }
 
 // TestOpen_SQLite_OpensChinookFixture exercises the sqlite Open path against

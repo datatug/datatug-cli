@@ -8,13 +8,14 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/dtconfig"
 	"github.com/datatug/datatug-core/pkg/storage/dtprojcreator"
-	"github.com/filetug/filetug/pkg/fsutils"
-	"github.com/google/go-github/v91/github"
+	"github.com/google/go-github/v92/github"
+	"github.com/strongo/cli-helpers/fsutil"
 )
 
 func NewRepoProjectsStore(client *github.Client, branch string) *GithubRepoProjectsStore {
@@ -46,8 +47,10 @@ func (g GithubRepoProjectsStore) CreateNewProject(
 ) (
 	project *datatug.Project, err error,
 ) {
-	ids := strings.Split(projectID, "/")
-	repoOwner, repoName, projectDir := ids[0], ids[1], path.Join(ids[2:]...)
+	repoOwner, repoName, projectDir, err := splitProjectID(projectID)
+	if err != nil {
+		return nil, err
+	}
 	_, _, _ = repoOwner, repoName, title
 
 	pathToProjectFromRepoRoot := path.Join(projectDir)
@@ -58,6 +61,20 @@ func (g GithubRepoProjectsStore) CreateNewProject(
 	}
 
 	return
+}
+
+// ErrMalformedProjectID is the error of a project ID that is not "owner/repo" or "owner/repo/directory".
+var ErrMalformedProjectID = errors.New(`a GitHub project ID is "owner/repo" or "owner/repo/directory"`)
+
+// splitProjectID reads a project ID as owner, repository and the directory of the project in the
+// repository (empty for the root of the repository). The owner and the repository must not be blank, and
+// the directory must stay inside the repository: no part of it is "..".
+func splitProjectID(projectID string) (owner, repo, dir string, err error) {
+	ids := strings.Split(projectID, "/")
+	if len(ids) < 2 || strings.TrimSpace(ids[0]) == "" || strings.TrimSpace(ids[1]) == "" || slices.Contains(ids[2:], "..") {
+		return "", "", "", fmt.Errorf("%w, not %q", ErrMalformedProjectID, projectID)
+	}
+	return ids[0], ids[1], path.Join(ids[2:]...), nil
 }
 
 type projectCreator struct {
@@ -76,6 +93,8 @@ func newProjectCreator(ghClient *github.Client, report datatug.StatusReporter) (
 	}
 }
 
+var cloneRepoFunc = func(c *projectCreator) error { return c.cloneRepo() }
+
 func (c *projectCreator) CreateProject(
 	ctx context.Context,
 	title, pathToProjectFromRepoRoot string,
@@ -86,7 +105,7 @@ func (c *projectCreator) CreateProject(
 		return fmt.Errorf("failed to create GitHub repository '%s/%s': %w", c.repoOwner, c.repoName, err)
 	}
 
-	if err = c.cloneRepo(); err != nil {
+	if err = cloneRepoFunc(c); err != nil {
 		return fmt.Errorf("failed to clone GitHub repository '%s/%s': %w", c.repoOwner, c.repoName, err)
 	}
 
@@ -161,7 +180,7 @@ func (c *projectCreator) addDatatugSectionToRootReadmeFile(ctx context.Context, 
 
 	getDataTugSectionForReadmeMD := func() string {
 		const dataTugSectionTitleText = "DataTug - [github.com/datatug/datatug](https://github.com/datatug/datatug)"
-		appLink := fmt.Sprintf("[DataTug.app](https://datatug.app/#project=github.com/%s/%s/%s)", c.repoOwner, c.repoName, projPath)
+		appLink := fmt.Sprintf("[DataTug.app](https://datatug.app/home#project=github.com/%s/%s/%s)", c.repoOwner, c.repoName, projPath)
 		msg := fmt.Sprintf("The [/datatug](./datatug) project can be opened and edited in %s.", appLink)
 		return fmt.Sprintf("\n\n## DataTug - %s\n\n%s\n\n", dataTugSectionTitleText, msg)
 	}
@@ -226,8 +245,8 @@ func (c *projectCreator) addDatatugSectionToRootReadmeFile(ctx context.Context, 
 //}
 
 func (c *projectCreator) cloneRepo() (err error) {
-	localDir := fsutils.ExpandHome("projectPath")
-	dirExists, _ := fsutils.DirExists(localDir)
+	localDir := fsutil.ExpandHome("projectPath")
+	dirExists, _ := fsutil.DirExists(localDir)
 	if !dirExists {
 		parent := filepath.Dir(localDir)
 		_ = os.MkdirAll(parent, 0o755)
@@ -236,16 +255,6 @@ func (c *projectCreator) cloneRepo() (err error) {
 			cloneUrl = fmt.Sprintf("https://github.com/%s/%s.git", c.repoOwner, c.repoName)
 			_ = cloneUrl
 		}
-		//_, err = git.PlainClone(localDir, false, &git.CloneOptions{
-		//	URL:      cloneUrl,
-		//	Progress: NewTviewProgressWriter(tui, progressView),
-		//})
-		//if err != nil {
-		//	tui.App.QueueUpdateDraw(func() {
-		//		sneatnav.ShowErrorModal(tui, fmt.Errorf("failed to clone repository: %w", err))
-		//	})
-		//	return
-		//}
 	}
 	return nil
 }

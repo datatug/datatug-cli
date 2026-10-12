@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"io"
 	"log"
 	"net/http"
@@ -17,6 +18,8 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
+
+var authorizeProjectQueryWrite = api.AuthorizeProjectQueryWrite
 
 // POST queries/capture - "Save as project query" (hub datatug/datatug
 // executable-knowledge-library REQ:capture-from-exploration, Phase 2 plan
@@ -185,13 +188,13 @@ func computeCaptureQuery(ctx context.Context, req captureQueryRequest) (captureQ
 
 	projectDir, ok := api.ProjectDir(req.Project)
 	if !ok {
-		return captureQueryResponse{}, 0, newNotFound(fmt.Sprintf("unknown project %q", req.Project))
+		return captureQueryResponse{}, 0, newNotFound(fmt.Sprintf("unknown project %q", dbcopy.SourceIDDisplay(req.Project)))
 	}
 	operation := access.Update
 	if condition.IfNoneMatch {
 		operation = access.Insert
 	}
-	if err := api.AuthorizeProjectQueryWrite(ctx, req.Project, queryID, operation); err != nil {
+	if err := authorizeProjectQueryWrite(ctx, req.Project, queryID, operation); err != nil {
 		if errors.Is(err, secureread.ErrAccessDenied) {
 			return captureQueryResponse{}, 0, captureAccessDenied(err)
 		}
@@ -316,7 +319,7 @@ func captureAccessDenied(err error) *contractError {
 		return newAccessDenied(captureAccessDeniedMessage + ": " + denied.Reason)
 	}
 	ce := newAccessDenied(captureAccessDeniedMessage)
-	log.Printf("queries/capture: request %s: answered 403 ACCESS_DENIED: %v", ce.RequestID, err)
+	log.Printf("queries/capture: request %s: answered 403 ACCESS_DENIED: %v", ce.RequestID, dbcopy.RedactError(err))
 	return ce
 }
 
@@ -329,6 +332,6 @@ func captureInternal(err error) *contractError {
 		return newContractError(codeInternal, errCaptureStoreUnavailable.Error(), "")
 	}
 	ce := newContractError(codeInternal, "the query could not be saved; the agent log has the details", "")
-	log.Printf("queries/capture: request %s: %v", ce.RequestID, err)
+	log.Printf("queries/capture: request %s: %v", ce.RequestID, dbcopy.RedactError(err))
 	return ce
 }

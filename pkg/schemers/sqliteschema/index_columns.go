@@ -16,7 +16,8 @@ func (s schemaProvider) GetIndexColumns(_ context.Context, _, schema, table, ind
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.Query(fmt.Sprintf("PRAGMA index_info('%s')", index))
+	sqlText := pragmaSQL("index_info", index)
+	rows, err := db.Query(sqlText)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read columns of index %s: %w", index, err)
 	}

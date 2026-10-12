@@ -7,3 +7,5 @@ spec/tasks/README.md merge=specscore-index
 spec/lessons/README.md merge=specscore-index
 spec/decisions/README.md merge=specscore-index
 spec/decisions/archived/README.md merge=specscore-index
+
+.github/workflows/*.lock.yml linguist-generated=true

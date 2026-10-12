@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -58,6 +59,13 @@ type runQueryOptions struct {
 	rowLimit int
 }
 
+var execRunProjectStoreFor = api.ProjectStoreFor
+var runQueryResponseValidateHook = (*apicontract.Result).Validate
+var executionQueryDocumentHook = executionQueryDocument
+var eligibleTargetsHook = api.EligibleTargets
+var runDTQLHook = (*secureread.Executor).RunDTQL
+var resolveSourceHook = api.ResolveSource
+
 func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (apicontract.Result, error) {
 	return computeRunQueryWithOptions(ctx, req, runQueryOptions{})
 }
@@ -89,13 +97,13 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 
 	projDir, ok := api.ProjectDir(req.Project)
 	if !ok {
-		return apicontract.Result{}, newNotFound(fmt.Sprintf("unknown project %q", req.Project))
+		return apicontract.Result{}, newNotFound(fmt.Sprintf("unknown project %q", dbcopy.SourceIDDisplay(req.Project)))
 	}
-	projStore, err := api.ProjectStoreFor(req.Project)
+	projStore, err := execRunProjectStoreFor(req.Project)
 	if err != nil {
 		return apicontract.Result{}, newInvalidRequest("project", err.Error())
 	}
-	executor, ok := api.SecureExecutor()
+	executor, ok := secureExecutorHook()
 	if !ok {
 		return apicontract.Result{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
@@ -120,7 +128,10 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 			if errors.Is(resolveErr, api.ErrAmbiguousQueryID) {
 				return apicontract.Result{}, newInvalidRequest("queryId", resolveErr.Error())
 			}
-			return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", req.QueryID))
+			// req.QueryID is what a client sent: only folders and a name that are plain
+			// names are quoted. (The two messages below name canonicalID, an ID of
+			// the project's own index.)
+			return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", dbcopy.QueryIDDisplay(req.QueryID)))
 		}
 		req.QueryID = canonicalID
 		if req.Record {
@@ -198,13 +209,13 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	switch {
 	case req.DTQL != "":
 		profile = apicontract.ExecutionProfileProtected
-		result, err = executor.RunDTQL(runCtx, resolved.URL, []byte(req.DTQL), variables)
+		result, err = runDTQLHook(executor, runCtx, resolved.URL, []byte(req.DTQL), variables)
 	case queryDef.Type == datatug.QueryTypeDTQL:
 		var doc string
 		doc, err = executionQueryDocument(req.Project, req.QueryID, queryDef, queryRevision)
 		if err == nil {
 			profile = apicontract.ExecutionProfileProtected
-			result, err = executor.RunDTQL(runCtx, resolved.URL, []byte(doc), variables)
+			result, err = runDTQLHook(executor, runCtx, resolved.URL, []byte(doc), variables)
 		}
 	case queryDef.Type == datatug.QueryTypeSQL:
 		// The opaque-query-grant gate itself lives centrally in
@@ -216,10 +227,10 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		// below as secureread.ErrOpaqueSQLNotGranted, mapped to
 		// UNSUPPORTED_PROTECTED_EXECUTION.
 		var text string
-		text, err = executionQueryDocument(req.Project, req.QueryID, queryDef, queryRevision)
+		text, err = executionQueryDocumentHook(req.Project, req.QueryID, queryDef, queryRevision)
 		if err == nil {
 			profile = apicontract.ExecutionProfileOpaquePrivileged
-			result, err = executor.RunNativeSQL(runCtx, resolved.URL, text, sqlQueryArgs(queryDef, variables)...)
+			result, err = runNativeSQLHook(executor, runCtx, resolved.URL, text, sqlQueryArgs(queryDef, variables)...)
 		}
 	case queryDef.Type == datatug.QueryTypeHTTP:
 		profile = apicontract.ExecutionProfileProtected
@@ -245,7 +256,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 			return apicontract.Result{}, ce
 		}
 		if errors.Is(err, dbcopy.ErrSourceFileMissing) {
-			return apicontract.Result{}, newSourceUnavailable(err.Error())
+			return apicontract.Result{}, sourceUnavailableAnswer(resolved.ID, err)
 		}
 		// dal-go/dalgo2http v0.2.0's Phase 1 HTTP bounds (adopted alongside
 		// this stream): a live response over the adapter's 2 MiB cap fails
@@ -318,6 +329,15 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		if collection != "" && errors.Is(err, dal.ErrNotSupported) {
 			return apicontract.Result{}, newAccessDenied(fmt.Sprintf("query %q: a policy-protected condition or projection cannot be safely enforced on its HTTP source", req.QueryID))
 		}
+		// A source that is refused (the preview of PostgreSQL sources is off, a read of one
+		// through policies), cannot be opened, or lost its connection: the sentence dbcopy
+		// built for it, which holds nothing the person typed, and not the text of err. It is
+		// asked last, after every classification above that is more specific: an HTTP source
+		// whose descriptor is refused when it is opened is an open failure too, and keeps its
+		// own answer, which names only the query and carries the snapshots recorded for it.
+		if unavailable := api.SourceUnavailable(resolved.ID, err); unavailable != nil {
+			return apicontract.Result{}, newSourceUnavailable(unavailable.Error())
+		}
 		return apicontract.Result{}, newInvalidRequest("", err.Error())
 	}
 	if collection == "" {
@@ -346,7 +366,7 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		result.Rows = result.Rows[:limit]
 	}
 
-	recordset, err := toContractRecordset(result)
+	recordset, err := toContractRecordsetHook(result)
 	if err != nil {
 		return apicontract.Result{}, newContractError(codeInternal, err.Error(), "")
 	}
@@ -384,23 +404,33 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 		Truncated: truncated,
 	}
 	if req.Record {
-		ref, recordErr := recordQueryExecution(ctx, req, queryDef, queryRevision, response, executionStarted)
+		ref, recordErr := recordQueryExecutionHook(ctx, req, queryDef, queryRevision, response, executionStarted)
 		if recordErr != nil {
 			return apicontract.Result{}, recordErr
 		}
 		response.Execution = &ref
 	}
-	if err := response.Validate(); err != nil {
+	if err := runQueryResponseValidateHook(&response); err != nil {
 		return apicontract.Result{}, fmt.Errorf("validate query execution response: %w", err)
 	}
 	return response, nil
 }
 
+// executionQueryDocument is the text of a saved query: the revision's own, or the document
+// beside its "<id>.query.json" in the served project. A document that cannot be read fails with a
+// sentence built from the ID of the query (an ID of the project's own index), and what the read
+// said, which quotes the path of the file, goes to the log of the server.
 func executionQueryDocument(projectID, queryID string, queryDef *datatug.QueryDef, queryRevision string) (string, error) {
 	if queryRevision != "" {
 		return queryDef.Text, nil
 	}
-	return api.LoadQueryDocument(projectID, queryID, queryDef.Type)
+	document, err := api.LoadQueryDocument(projectID, queryID, queryDef.Type)
+	if err != nil {
+		answer := fmt.Sprintf("query %q has no readable document", queryID)
+		log.Printf("exec/run_query: %s: %s", answer, dbcopy.RedactText(err.Error()))
+		return "", errors.New(answer)
+	}
+	return document, nil
 }
 
 func validateDefaultBindingOrigins(req apicontract.ExecutionRequest, queryDef *datatug.QueryDef) error {
@@ -442,14 +472,14 @@ func validateDefaultBindingOrigins(req apicontract.ExecutionRequest, queryDef *d
 // newMissingParameter("source") check that used to guard it here.
 func resolveExecutionSource(ctx context.Context, projStore datatug.ProjectStore, projDir string, req apicontract.ExecutionRequest, queryDef *datatug.QueryDef) (api.ResolvedSource, error) {
 	if req.DTQL != "" {
-		resolved, err := api.ResolveSource(ctx, projStore, projDir, req.Environment, req.Source)
+		resolved, err := resolveSourceHook(ctx, projStore, projDir, req.Environment, req.Source)
 		if err != nil {
 			return api.ResolvedSource{}, newSourceUnavailable(err.Error())
 		}
 		return resolved, nil
 	}
 
-	eligible, err := api.EligibleTargets(ctx, projStore, projDir, req.Environment, queryDef)
+	eligible, err := eligibleTargetsHook(ctx, projStore, projDir, req.Environment, queryDef)
 	if err != nil {
 		return api.ResolvedSource{}, newSourceUnavailable(err.Error())
 	}
@@ -460,11 +490,11 @@ func resolveExecutionSource(ctx context.Context, projStore datatug.ProjectStore,
 			}
 		}
 		return api.ResolvedSource{}, newTargetRequired(
-			fmt.Sprintf("source %q is not an authorized target for query %q", req.Source, req.QueryID), targetOptions(candidateTargets(eligible)))
+			fmt.Sprintf("source %q is not an authorized target for query %q", dbcopy.SourceIDDisplay(req.Source), req.QueryID), targetOptions(candidateTargets(eligible)))
 	}
 	switch len(eligible) {
 	case 0:
-		return api.ResolvedSource{}, newSourceUnavailable(fmt.Sprintf("query %q has no eligible source in environment %q", req.QueryID, req.Environment))
+		return api.ResolvedSource{}, newSourceUnavailable(fmt.Sprintf("query %q has no eligible source in environment %q", req.QueryID, dbcopy.SourceIDDisplay(req.Environment)))
 	case 1:
 		return eligible[0], nil
 	default:
@@ -748,3 +778,8 @@ func runHTTPQuery(ctx context.Context, executor *secureread.Executor, sourceURL 
 var runStructuredHTTPQuery = func(ctx context.Context, executor *secureread.Executor, sourceURL string, query dal.Query, variables map[string]any) (secureread.Result, error) {
 	return executor.RunStructured(ctx, sourceURL, query, variables)
 }
+
+var runNativeSQLHook = func(e *secureread.Executor, ctx context.Context, sourceURL, text string, args ...dal.QueryArg) (secureread.Result, error) {
+	return e.RunNativeSQL(ctx, sourceURL, text, args...)
+}
+var recordQueryExecutionHook = recordQueryExecution

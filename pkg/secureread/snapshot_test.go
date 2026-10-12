@@ -149,4 +149,17 @@ func TestRunSnapshotPreservesEveryTypedValueShape(t *testing.T) {
 	if result.SnapshotRecordset == nil || !reflect.DeepEqual(*result.SnapshotRecordset, original) {
 		t.Fatalf("restored = %+v, want %+v", result.SnapshotRecordset, original)
 	}
+	decimal := statisticsColumn(t, result.Statistics, "decimal")
+	date := statisticsColumn(t, result.Statistics, "date")
+	boolean := statisticsColumn(t, result.Statistics, "boolean")
+	if decimal.Types.Decimal != 1 || decimal.Types.Number != 0 || date.Types.Date != 1 || boolean.Types.Boolean != 1 {
+		t.Fatalf("snapshot stats inferred SQLite types: decimal=%+v date=%+v boolean=%+v", decimal.Types, date.Types, boolean.Types)
+	}
+	foundDateDecimal := false
+	for _, sum := range result.Statistics.DateNumericSums {
+		foundDateDecimal = foundDateDecimal || sum.DateColumn == "date" && sum.NumericColumn == "decimal" && len(sum.Buckets) == 1 && sum.Buckets[0].Sum == 7.25
+	}
+	if !foundDateDecimal {
+		t.Fatalf("snapshot date/decimal statistics = %+v", result.Statistics.DateNumericSums)
+	}
 }

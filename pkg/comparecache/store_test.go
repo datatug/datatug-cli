@@ -322,3 +322,37 @@ func TestComparisonCachePageSnapshotIsolatedFromOtherStoreReplacement(t *testing
 	_, err = first.Page(ctx, PageRequest{ComparisonID: ID(ref, ref), State: recordsetcompare.RecordMatched, PolicyFingerprint: "restricted"})
 	require.ErrorIs(t, err, ErrNotFound)
 }
+
+func TestComparisonCacheEvictionRollsBackPartialDeletion(t *testing.T) {
+	for _, reason := range []string{"TTL", "LRU"} {
+		t.Run(reason, func(t *testing.T) {
+			now := time.Now().UTC()
+			store := openTestStore(t, Options{Now: func() time.Time { return now }, TTL: time.Hour})
+			left := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "left"}
+			right := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "right"}
+			compareDemo(t, store, left, right)
+			_, err := store.db.Exec(`CREATE TRIGGER fail_metadata_delete BEFORE DELETE ON comparison_meta BEGIN SELECT RAISE(FAIL, 'injected eviction failure'); END`)
+			require.NoError(t, err)
+			if reason == "TTL" {
+				now = now.Add(2 * time.Hour)
+			} else {
+				store.byteCap = 1
+			}
+			_, err = store.Lookup(context.Background(), ID(left, right))
+			require.ErrorContains(t, err, "injected eviction failure")
+			// A failed metadata delete must roll back the earlier payload
+			// deletion, preserving the pair for a later atomic retry.
+			var rows, metadata int
+			require.NoError(t, store.db.QueryRow(`SELECT COUNT(*) FROM comparison_rows`).Scan(&rows))
+			require.NoError(t, store.db.QueryRow(`SELECT COUNT(*) FROM comparison_meta`).Scan(&metadata))
+			require.Equal(t, 4, rows)
+			require.Equal(t, 1, metadata)
+			_, err = store.db.Exec(`DROP TRIGGER fail_metadata_delete`)
+			require.NoError(t, err)
+			_, err = store.Lookup(context.Background(), ID(left, right))
+			require.ErrorIs(t, err, ErrNotFound)
+			require.NoError(t, store.db.QueryRow(`SELECT COUNT(*) FROM comparison_rows`).Scan(&rows))
+			require.Zero(t, rows)
+		})
+	}
+}

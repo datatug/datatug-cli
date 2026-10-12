@@ -541,38 +541,45 @@ func lookupComparison(ctx context.Context, db metadataQuerier, comparisonID stri
 }
 
 func (s *Store) evictLocked(ctx context.Context) error {
+	// Expiry and LRU delete payloads and metadata atomically, including
+	// against other Store instances sharing the private SQLite file.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin comparison eviction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 	cutoff := s.now().UTC().Add(-s.ttl).UnixNano()
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM comparison_rows WHERE comparison_id IN (
+	if _, err := tx.ExecContext(ctx, `DELETE FROM comparison_rows WHERE comparison_id IN (
 		SELECT comparison_id FROM comparison_meta WHERE created_at_ns < ?
 	)`, cutoff); err != nil {
 		return fmt.Errorf("expire comparison rows: %w", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM comparison_meta WHERE created_at_ns < ?`, cutoff); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM comparison_meta WHERE created_at_ns < ?`, cutoff); err != nil {
 		return fmt.Errorf("expire comparison meta: %w", err)
 	}
 	var total int
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(byte_size), 0) FROM comparison_meta`).Scan(&total); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(byte_size), 0) FROM comparison_meta`).Scan(&total); err != nil {
 		return fmt.Errorf("sum comparison cache bytes: %w", err)
 	}
 	for total > s.byteCap {
 		var id string
 		var size int
-		err := s.db.QueryRowContext(ctx, `SELECT comparison_id, byte_size FROM comparison_meta ORDER BY last_access_at_ns ASC, comparison_id ASC LIMIT 1`).Scan(&id, &size)
+		err := tx.QueryRowContext(ctx, `SELECT comparison_id, byte_size FROM comparison_meta ORDER BY last_access_at_ns ASC, comparison_id ASC LIMIT 1`).Scan(&id, &size)
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil
+			return tx.Commit()
 		}
 		if err != nil {
 			return fmt.Errorf("select comparison cache LRU victim: %w", err)
 		}
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM comparison_rows WHERE comparison_id = ?`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM comparison_rows WHERE comparison_id = ?`, id); err != nil {
 			return fmt.Errorf("evict comparison rows: %w", err)
 		}
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM comparison_meta WHERE comparison_id = ?`, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM comparison_meta WHERE comparison_id = ?`, id); err != nil {
 			return fmt.Errorf("evict comparison meta: %w", err)
 		}
 		total -= size
 	}
-	return nil
+	return tx.Commit()
 }
 
 type rowPayload struct {

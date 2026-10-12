@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/comparecache"
 	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-cli/pkg/server/endpoints"
@@ -127,6 +128,10 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 		return fmt.Errorf("configure execution evidence: %w", err)
 	}
 	defer func() { _ = api.CloseExecutionEvidence() }()
+	if err := api.ConfigureCompareCache(comparecache.Options{PrivateDir: caps.EvidencePrivateDir}); err != nil {
+		api.LogCompareCacheSkip("configure", err)
+	}
+	defer func() { _ = api.CloseCompareCache() }()
 	api.ConfigureSecureSession(session, pathsByID, caps)
 	api.WarnMissingSourceFiles(context.Background(), pathsByID)
 

@@ -435,17 +435,21 @@ func (s *Store) Page(ctx context.Context, req PageRequest) (Page, error) {
 	if err := s.evictLocked(ctx); err != nil {
 		return Page{}, err
 	}
-	meta, err := s.lookupLocked(ctx, req.ComparisonID)
+	// Use one SQLite snapshot for metadata and payloads. A per-Store lock
+	// cannot exclude another server process replacing the same comparison.
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return Page{}, fmt.Errorf("begin comparison page: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	meta, err := lookupComparison(ctx, tx, req.ComparisonID)
 	if err != nil {
 		return Page{}, err
 	}
 	if meta.PolicyFingerprint != req.PolicyFingerprint {
 		return Page{}, ErrNotFound
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT sort_key, payload_json FROM comparison_rows
-		 WHERE comparison_id = ? AND state = ? AND sort_key > ?
-		 ORDER BY sort_key LIMIT ?`,
+	rows, err := tx.QueryContext(ctx, pageRowsSQL,
 		req.ComparisonID, string(req.State), req.After, limit+1,
 	)
 	if err != nil {
@@ -486,6 +490,9 @@ func (s *Store) Page(ctx context.Context, req PageRequest) (Page, error) {
 	if err := rows.Close(); err != nil {
 		return Page{}, fmt.Errorf("close comparison rows: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return Page{}, fmt.Errorf("finish comparison page: %w", err)
+	}
 	now := s.now().UTC().UnixNano()
 	if _, err := s.db.ExecContext(ctx, `UPDATE comparison_meta SET last_access_at_ns = ? WHERE comparison_id = ?`, now, req.ComparisonID); err != nil {
 		return Page{}, fmt.Errorf("touch comparison cache: %w", err)
@@ -493,9 +500,21 @@ func (s *Store) Page(ctx context.Context, req PageRequest) (Page, error) {
 	return page, nil
 }
 
+const pageRowsSQL = `SELECT sort_key, payload_json FROM comparison_rows
+ WHERE comparison_id = ? AND state = ? AND sort_key > ?
+ ORDER BY sort_key LIMIT ?`
+
+type metadataQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 func (s *Store) lookupLocked(ctx context.Context, comparisonID string) (Meta, error) {
+	return lookupComparison(ctx, s.db, comparisonID)
+}
+
+func lookupComparison(ctx context.Context, db metadataQuerier, comparisonID string) (Meta, error) {
 	var queryID, policyFingerprint, leftJSON, rightJSON, columnsJSON, keyJSON string
-	err := s.db.QueryRowContext(ctx,
+	err := db.QueryRowContext(ctx,
 		`SELECT query_id, policy_fingerprint, left_json, right_json, columns_json, key_json FROM comparison_meta WHERE comparison_id = ?`,
 		comparisonID,
 	).Scan(&queryID, &policyFingerprint, &leftJSON, &rightJSON, &columnsJSON, &keyJSON)

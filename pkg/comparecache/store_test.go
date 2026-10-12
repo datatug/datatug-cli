@@ -2,6 +2,7 @@ package comparecache
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -275,5 +276,49 @@ func TestComparisonCachePolicyBinding(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, session.Commit(apicontract.CompareResult{}))
 	_, err = store.Page(context.Background(), PageRequest{ComparisonID: ID(ref, ref), State: recordsetcompare.RecordMatched, PolicyFingerprint: "restricted"})
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestComparisonCachePageSnapshotIsolatedFromOtherStoreReplacement(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	first, err := Open(Options{PrivateDir: dir})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, first.Close()) }()
+	second, err := Open(Options{PrivateDir: dir})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, second.Close()) }()
+	ref := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "shared"}
+	write := func(store *Store, policy, value string) {
+		t.Helper()
+		session, err := store.Begin(ctx, BeginRequest{QueryID: "orders", Left: ref, Right: ref, PolicyFingerprint: policy})
+		require.NoError(t, err)
+		defer session.Abort()
+		require.NoError(t, session.Observer()(recordsetcompare.ComparedRecord{SortKey: "one", State: recordsetcompare.RecordMatched, Row: []apicontract.TypedValue{apicontract.NewStringValue(value)}}))
+		require.NoError(t, session.Commit(apicontract.CompareResult{}))
+	}
+	write(first, "restricted", "public")
+	// These are the exact transaction and queries Page uses. A second Store
+	// commits a permissive replacement after metadata authorization, before
+	// rows are selected; the read transaction must retain the restricted rows.
+	tx, err := first.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	meta, err := lookupComparison(ctx, tx, ID(ref, ref))
+	require.NoError(t, err)
+	require.Equal(t, "restricted", meta.PolicyFingerprint)
+	write(second, "permissive", "secret")
+	rows, err := tx.QueryContext(ctx, pageRowsSQL, ID(ref, ref), string(recordsetcompare.RecordMatched), "", 2)
+	require.NoError(t, err)
+	require.True(t, rows.Next())
+	var sortKey, payload string
+	require.NoError(t, rows.Scan(&sortKey, &payload))
+	require.Contains(t, payload, "public")
+	require.NotContains(t, payload, "secret")
+	require.False(t, rows.Next())
+	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
+	require.NoError(t, tx.Commit())
+	_, err = first.Page(ctx, PageRequest{ComparisonID: ID(ref, ref), State: recordsetcompare.RecordMatched, PolicyFingerprint: "restricted"})
 	require.ErrorIs(t, err, ErrNotFound)
 }

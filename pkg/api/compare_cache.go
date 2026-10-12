@@ -50,6 +50,7 @@ func BeginCompareCache(ctx context.Context, req comparecache.BeginRequest) (*com
 	if store == nil {
 		return nil, nil
 	}
+	req.PolicyFingerprint = SecurePolicyFingerprint()
 	return store.Begin(ctx, req)
 }
 
@@ -70,6 +71,7 @@ func PageCompareCache(ctx context.Context, req comparecache.PageRequest) (compar
 	if store == nil {
 		return comparecache.Page{}, comparecache.ErrNotConfigured
 	}
+	req.PolicyFingerprint = SecurePolicyFingerprint()
 	return store.Page(ctx, req)
 }
 

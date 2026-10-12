@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/executionstore"
@@ -53,7 +52,7 @@ type Store struct {
 	byteCap int
 	ttl     time.Duration
 	now     func() time.Time
-	mu      sync.Mutex
+	mu      chan struct{}
 }
 
 func Open(options Options) (*Store, error) {
@@ -87,6 +86,7 @@ func Open(options Options) (*Store, error) {
 	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS comparison_meta (
 		comparison_id TEXT PRIMARY KEY,
 		query_id TEXT NOT NULL,
+		policy_fingerprint TEXT NOT NULL DEFAULT '',
 		left_json TEXT NOT NULL,
 		right_json TEXT NOT NULL,
 		columns_json TEXT NOT NULL,
@@ -97,6 +97,10 @@ func Open(options Options) (*Store, error) {
 	)`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("create comparison_meta: %w", err)
+	}
+	if err := migratePolicyFingerprint(db); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS comparison_rows (
 		comparison_id TEXT NOT NULL,
@@ -142,8 +146,52 @@ func Open(options Options) (*Store, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Store{db: db, byteCap: byteCap, ttl: ttl, now: now}, nil
+	return &Store{db: db, byteCap: byteCap, ttl: ttl, now: now, mu: make(chan struct{}, 1)}, nil
 }
+
+// Older optional caches predate policy binding; their empty fingerprint fails
+// closed at the API boundary until the comparison is recomputed.
+func migratePolicyFingerprint(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(comparison_meta)`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		found = found || name == "policy_fingerprint"
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !found {
+		_, err = db.Exec(`ALTER TABLE comparison_meta ADD COLUMN policy_fingerprint TEXT NOT NULL DEFAULT ''`)
+	}
+	return err
+}
+
+func (s *Store) lock(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case s.mu <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Store) unlock() { <-s.mu }
 
 func (s *Store) Close() error {
 	if s == nil || s.db == nil {
@@ -153,23 +201,29 @@ func (s *Store) Close() error {
 }
 
 type BeginRequest struct {
-	QueryID string
-	Left    apicontract.ExecutionRef
-	Right   apicontract.ExecutionRef
+	PolicyFingerprint string
+	QueryID           string
+	Left              apicontract.ExecutionRef
+	Right             apicontract.ExecutionRef
 }
 
 type WriteSession struct {
-	store        *Store
-	tx           *sql.Tx
-	comparisonID string
-	queryID      string
-	left         apicontract.ExecutionRef
-	right        apicontract.ExecutionRef
-	bytes        int
-	done         bool
+	store             *Store
+	tx                *sql.Tx
+	comparisonID      string
+	queryID           string
+	left              apicontract.ExecutionRef
+	right             apicontract.ExecutionRef
+	bytes             int
+	done              bool
+	ctx               context.Context
+	policyFingerprint string
 }
 
-func (s *Store) Begin(_ context.Context, req BeginRequest) (*WriteSession, error) {
+func (s *Store) Begin(ctx context.Context, req BeginRequest) (*WriteSession, error) {
+	if s == nil {
+		return nil, ErrNotConfigured
+	}
 	if err := req.Left.Validate(); err != nil {
 		return nil, fmt.Errorf("left execution: %w", err)
 	}
@@ -179,26 +233,28 @@ func (s *Store) Begin(_ context.Context, req BeginRequest) (*WriteSession, error
 	if strings.TrimSpace(req.QueryID) == "" {
 		return nil, errors.New("query id is required")
 	}
-	s.mu.Lock()
-	tx, err := s.db.Begin()
+	if err := s.lock(ctx); err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		s.mu.Unlock()
+		s.unlock()
 		return nil, fmt.Errorf("begin comparison cache write: %w", err)
 	}
 	id := ID(req.Left, req.Right)
-	if _, err := tx.Exec(`DELETE FROM comparison_rows WHERE comparison_id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM comparison_rows WHERE comparison_id = ?`, id); err != nil {
 		_ = tx.Rollback()
-		s.mu.Unlock()
+		s.unlock()
 		return nil, fmt.Errorf("clear comparison rows: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM comparison_meta WHERE comparison_id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM comparison_meta WHERE comparison_id = ?`, id); err != nil {
 		_ = tx.Rollback()
-		s.mu.Unlock()
+		s.unlock()
 		return nil, fmt.Errorf("clear comparison meta: %w", err)
 	}
 	return &WriteSession{
 		store: s, tx: tx, comparisonID: id, queryID: req.QueryID,
-		left: req.Left, right: req.Right,
+		left: req.Left, right: req.Right, ctx: ctx, policyFingerprint: req.PolicyFingerprint,
 	}, nil
 }
 
@@ -214,13 +270,19 @@ func (s *WriteSession) Observer() recordsetcompare.RecordObserver {
 		if err != nil {
 			return err
 		}
-		if _, err := s.tx.Exec(
+		// Include indexed keys and state in the bounded logical storage size.
+		rowBytes := len(payload) + len(record.SortKey) + len(record.State)
+		if rowBytes > s.store.byteCap-s.bytes {
+			s.Abort()
+			return fmt.Errorf("comparison cache exceeds byte cap %d", s.store.byteCap)
+		}
+		if _, err := s.tx.ExecContext(s.ctx,
 			`INSERT INTO comparison_rows (comparison_id, sort_key, state, payload_json) VALUES (?, ?, ?, ?)`,
 			s.comparisonID, record.SortKey, string(record.State), payload,
 		); err != nil {
 			return fmt.Errorf("insert comparison row: %w", err)
 		}
-		s.bytes += len(payload)
+		s.bytes += rowBytes
 		return nil
 	}
 }
@@ -253,13 +315,19 @@ func (s *WriteSession) Commit(result apicontract.CompareResult) error {
 		s.Abort()
 		return fmt.Errorf("marshal right execution: %w", err)
 	}
+	metadataBytes := len(columnsJSON) + len(keyJSON) + len(leftJSON) + len(rightJSON) + len(s.queryID) + len(s.comparisonID) + len(s.policyFingerprint)
+	if metadataBytes > s.store.byteCap-s.bytes {
+		s.Abort()
+		return fmt.Errorf("comparison cache exceeds byte cap %d", s.store.byteCap)
+	}
+	s.bytes += metadataBytes
 	now := s.store.now().UTC().UnixNano()
-	if _, err := s.tx.Exec(
+	if _, err := s.tx.ExecContext(s.ctx,
 		`INSERT INTO comparison_meta (
-			comparison_id, query_id, left_json, right_json, columns_json, key_json,
+			comparison_id, query_id, policy_fingerprint, left_json, right_json, columns_json, key_json,
 			byte_size, created_at_ns, last_access_at_ns
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.comparisonID, s.queryID, string(leftJSON), string(rightJSON),
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.comparisonID, s.queryID, s.policyFingerprint, string(leftJSON), string(rightJSON),
 		string(columnsJSON), string(keyJSON), s.bytes, now, now,
 	); err != nil {
 		s.Abort()
@@ -267,12 +335,12 @@ func (s *WriteSession) Commit(result apicontract.CompareResult) error {
 	}
 	if err := s.tx.Commit(); err != nil {
 		s.done = true
-		s.store.mu.Unlock()
+		s.store.unlock()
 		return fmt.Errorf("commit comparison cache: %w", err)
 	}
 	s.done = true
-	err = s.store.evictLocked()
-	s.store.mu.Unlock()
+	err = s.store.evictLocked(s.ctx)
+	s.store.unlock()
 	return err
 }
 
@@ -282,14 +350,15 @@ func (s *WriteSession) Abort() {
 	}
 	_ = s.tx.Rollback()
 	s.done = true
-	s.store.mu.Unlock()
+	s.store.unlock()
 }
 
 type PageRequest struct {
-	ComparisonID string
-	State        recordsetcompare.RecordState
-	After        string
-	Limit        int
+	PolicyFingerprint string
+	ComparisonID      string
+	State             recordsetcompare.RecordState
+	After             string
+	Limit             int
 }
 
 type CachedDelta struct {
@@ -319,51 +388,30 @@ type Page struct {
 }
 
 type Meta struct {
-	ComparisonID string
-	QueryID      string
-	Left         apicontract.ExecutionRef
-	Right        apicontract.ExecutionRef
-	Columns      []apicontract.Column
-	Key          []string
+	PolicyFingerprint string
+	ComparisonID      string
+	QueryID           string
+	Left              apicontract.ExecutionRef
+	Right             apicontract.ExecutionRef
+	Columns           []apicontract.Column
+	Key               []string
 }
 
-func (s *Store) Lookup(_ context.Context, comparisonID string) (Meta, error) {
+func (s *Store) Lookup(ctx context.Context, comparisonID string) (Meta, error) {
 	if s == nil {
 		return Meta{}, ErrNotConfigured
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.evictLocked(); err != nil {
+	if err := s.lock(ctx); err != nil {
 		return Meta{}, err
 	}
-	var queryID, leftJSON, rightJSON, columnsJSON, keyJSON string
-	err := s.db.QueryRow(
-		`SELECT query_id, left_json, right_json, columns_json, key_json FROM comparison_meta WHERE comparison_id = ?`,
-		comparisonID,
-	).Scan(&queryID, &leftJSON, &rightJSON, &columnsJSON, &keyJSON)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Meta{}, ErrNotFound
+	defer s.unlock()
+	if err := s.evictLocked(ctx); err != nil {
+		return Meta{}, err
 	}
-	if err != nil {
-		return Meta{}, fmt.Errorf("lookup comparison cache: %w", err)
-	}
-	meta := Meta{ComparisonID: comparisonID, QueryID: queryID}
-	if err := json.Unmarshal([]byte(leftJSON), &meta.Left); err != nil {
-		return Meta{}, fmt.Errorf("decode left execution: %w", err)
-	}
-	if err := json.Unmarshal([]byte(rightJSON), &meta.Right); err != nil {
-		return Meta{}, fmt.Errorf("decode right execution: %w", err)
-	}
-	if err := json.Unmarshal([]byte(columnsJSON), &meta.Columns); err != nil {
-		return Meta{}, fmt.Errorf("decode columns: %w", err)
-	}
-	if err := json.Unmarshal([]byte(keyJSON), &meta.Key); err != nil {
-		return Meta{}, fmt.Errorf("decode key: %w", err)
-	}
-	return meta, nil
+	return s.lookupLocked(ctx, comparisonID)
 }
 
-func (s *Store) Page(_ context.Context, req PageRequest) (Page, error) {
+func (s *Store) Page(ctx context.Context, req PageRequest) (Page, error) {
 	if s == nil {
 		return Page{}, ErrNotConfigured
 	}
@@ -380,16 +428,21 @@ func (s *Store) Page(_ context.Context, req PageRequest) (Page, error) {
 	if limit < 1 || limit > apicontract.CompareMaximumLimit {
 		return Page{}, fmt.Errorf("limit must be between 1 and %d", apicontract.CompareMaximumLimit)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.evictLocked(); err != nil {
+	if err := s.lock(ctx); err != nil {
 		return Page{}, err
 	}
-	meta, err := s.lookupLocked(req.ComparisonID)
+	defer s.unlock()
+	if err := s.evictLocked(ctx); err != nil {
+		return Page{}, err
+	}
+	meta, err := s.lookupLocked(ctx, req.ComparisonID)
 	if err != nil {
 		return Page{}, err
 	}
-	rows, err := s.db.Query(
+	if meta.PolicyFingerprint != req.PolicyFingerprint {
+		return Page{}, ErrNotFound
+	}
+	rows, err := s.db.QueryContext(ctx,
 		`SELECT sort_key, payload_json FROM comparison_rows
 		 WHERE comparison_id = ? AND state = ? AND sort_key > ?
 		 ORDER BY sort_key LIMIT ?`,
@@ -415,7 +468,7 @@ func (s *Store) Page(_ context.Context, req PageRequest) (Page, error) {
 			return Page{}, fmt.Errorf("scan comparison row: %w", err)
 		}
 		if len(page.Rows) == limit {
-			page.NextSortKey = sortKey
+			page.NextSortKey = page.Rows[len(page.Rows)-1].SortKey
 			page.Truncated = true
 			break
 		}
@@ -430,26 +483,29 @@ func (s *Store) Page(_ context.Context, req PageRequest) (Page, error) {
 	if err := rows.Err(); err != nil {
 		return Page{}, fmt.Errorf("iterate comparison rows: %w", err)
 	}
+	if err := rows.Close(); err != nil {
+		return Page{}, fmt.Errorf("close comparison rows: %w", err)
+	}
 	now := s.now().UTC().UnixNano()
-	if _, err := s.db.Exec(`UPDATE comparison_meta SET last_access_at_ns = ? WHERE comparison_id = ?`, now, req.ComparisonID); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE comparison_meta SET last_access_at_ns = ? WHERE comparison_id = ?`, now, req.ComparisonID); err != nil {
 		return Page{}, fmt.Errorf("touch comparison cache: %w", err)
 	}
 	return page, nil
 }
 
-func (s *Store) lookupLocked(comparisonID string) (Meta, error) {
-	var queryID, leftJSON, rightJSON, columnsJSON, keyJSON string
-	err := s.db.QueryRow(
-		`SELECT query_id, left_json, right_json, columns_json, key_json FROM comparison_meta WHERE comparison_id = ?`,
+func (s *Store) lookupLocked(ctx context.Context, comparisonID string) (Meta, error) {
+	var queryID, policyFingerprint, leftJSON, rightJSON, columnsJSON, keyJSON string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT query_id, policy_fingerprint, left_json, right_json, columns_json, key_json FROM comparison_meta WHERE comparison_id = ?`,
 		comparisonID,
-	).Scan(&queryID, &leftJSON, &rightJSON, &columnsJSON, &keyJSON)
+	).Scan(&queryID, &policyFingerprint, &leftJSON, &rightJSON, &columnsJSON, &keyJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Meta{}, ErrNotFound
 	}
 	if err != nil {
 		return Meta{}, fmt.Errorf("lookup comparison cache: %w", err)
 	}
-	meta := Meta{ComparisonID: comparisonID, QueryID: queryID}
+	meta := Meta{ComparisonID: comparisonID, QueryID: queryID, PolicyFingerprint: policyFingerprint}
 	if err := json.Unmarshal([]byte(leftJSON), &meta.Left); err != nil {
 		return Meta{}, fmt.Errorf("decode left execution: %w", err)
 	}
@@ -465,34 +521,34 @@ func (s *Store) lookupLocked(comparisonID string) (Meta, error) {
 	return meta, nil
 }
 
-func (s *Store) evictLocked() error {
+func (s *Store) evictLocked(ctx context.Context) error {
 	cutoff := s.now().UTC().Add(-s.ttl).UnixNano()
-	if _, err := s.db.Exec(`DELETE FROM comparison_rows WHERE comparison_id IN (
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM comparison_rows WHERE comparison_id IN (
 		SELECT comparison_id FROM comparison_meta WHERE created_at_ns < ?
 	)`, cutoff); err != nil {
 		return fmt.Errorf("expire comparison rows: %w", err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM comparison_meta WHERE created_at_ns < ?`, cutoff); err != nil {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM comparison_meta WHERE created_at_ns < ?`, cutoff); err != nil {
 		return fmt.Errorf("expire comparison meta: %w", err)
 	}
 	var total int
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(byte_size), 0) FROM comparison_meta`).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(byte_size), 0) FROM comparison_meta`).Scan(&total); err != nil {
 		return fmt.Errorf("sum comparison cache bytes: %w", err)
 	}
 	for total > s.byteCap {
 		var id string
 		var size int
-		err := s.db.QueryRow(`SELECT comparison_id, byte_size FROM comparison_meta ORDER BY last_access_at_ns ASC, comparison_id ASC LIMIT 1`).Scan(&id, &size)
+		err := s.db.QueryRowContext(ctx, `SELECT comparison_id, byte_size FROM comparison_meta ORDER BY last_access_at_ns ASC, comparison_id ASC LIMIT 1`).Scan(&id, &size)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return fmt.Errorf("select comparison cache LRU victim: %w", err)
 		}
-		if _, err := s.db.Exec(`DELETE FROM comparison_rows WHERE comparison_id = ?`, id); err != nil {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM comparison_rows WHERE comparison_id = ?`, id); err != nil {
 			return fmt.Errorf("evict comparison rows: %w", err)
 		}
-		if _, err := s.db.Exec(`DELETE FROM comparison_meta WHERE comparison_id = ?`, id); err != nil {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM comparison_meta WHERE comparison_id = ?`, id); err != nil {
 			return fmt.Errorf("evict comparison meta: %w", err)
 		}
 		total -= size

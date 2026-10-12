@@ -3,6 +3,7 @@ package comparecache
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,4 +191,89 @@ func mustRawPayload(t *testing.T, store *Store, comparisonID, sortKey string) st
 	var raw string
 	require.NoError(t, store.db.QueryRow(query, args...).Scan(&raw))
 	return raw
+}
+
+// More rows than a page exercises both the single-connection early-exit path
+// and the exclusive cursor across every page (including an exact final page).
+func TestComparisonCacheMultiplePagesHaveNoGaps(t *testing.T) {
+	for _, count := range []int{6, 7} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			store := openTestStore(t, Options{})
+			left := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "left-pages"}
+			right := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "right-pages"}
+			set := apicontract.Recordset{Columns: []apicontract.Column{{Name: "id", Type: "string"}}}
+			for i := 0; i < count; i++ {
+				set.Rows = append(set.Rows, []apicontract.TypedValue{apicontract.NewStringValue(fmt.Sprint(i))})
+			}
+			compareWithCache(t, store, left, right, set, set)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			var keys []string
+			after := ""
+			for pages := 0; ; pages++ {
+				require.Less(t, pages, count)
+				page, err := store.Page(ctx, PageRequest{ComparisonID: ID(left, right), State: recordsetcompare.RecordMatched, Limit: 2, After: after})
+				require.NoError(t, err)
+				for _, row := range page.Rows {
+					keys = append(keys, row.Key[0].Str)
+				}
+				if !page.Truncated {
+					require.Empty(t, page.NextSortKey)
+					break
+				}
+				require.Equal(t, page.Rows[len(page.Rows)-1].SortKey, page.NextSortKey)
+				after = page.NextSortKey
+			}
+			expected := make([]string, count)
+			for i := range expected {
+				expected[i] = fmt.Sprint(i)
+			}
+			require.Equal(t, expected, keys)
+		})
+	}
+}
+
+func TestComparisonCacheCancellationWhileWriterHoldsLock(t *testing.T) {
+	store := openTestStore(t, Options{})
+	ref := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "one"}
+	session, err := store.Begin(context.Background(), BeginRequest{QueryID: "orders", Left: ref, Right: ref})
+	require.NoError(t, err)
+	defer session.Abort()
+	for _, operation := range []func(context.Context) error{
+		func(ctx context.Context) error { _, err := store.Lookup(ctx, ID(ref, ref)); return err },
+		func(ctx context.Context) error {
+			_, err := store.Page(ctx, PageRequest{ComparisonID: ID(ref, ref), State: recordsetcompare.RecordMatched})
+			return err
+		},
+		func(ctx context.Context) error {
+			_, err := store.Begin(ctx, BeginRequest{QueryID: "orders", Left: ref, Right: ref})
+			return err
+		},
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		require.ErrorIs(t, operation(ctx), context.DeadlineExceeded)
+		cancel()
+	}
+}
+
+func TestComparisonCacheBoundedWriteRollsBackAndReleasesLock(t *testing.T) {
+	store := openTestStore(t, Options{ByteCap: 32})
+	ref := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "one"}
+	session, err := store.Begin(context.Background(), BeginRequest{QueryID: "orders", Left: ref, Right: ref})
+	require.NoError(t, err)
+	err = session.Observer()(recordsetcompare.ComparedRecord{State: recordsetcompare.RecordMatched, SortKey: "key", Row: []apicontract.TypedValue{apicontract.NewStringValue(strings.Repeat("x", 64))}})
+	require.ErrorContains(t, err, "byte cap")
+	require.Error(t, session.Commit(apicontract.CompareResult{}))
+	_, err = store.Lookup(context.Background(), ID(ref, ref))
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestComparisonCachePolicyBinding(t *testing.T) {
+	store := openTestStore(t, Options{})
+	ref := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "one"}
+	session, err := store.Begin(context.Background(), BeginRequest{QueryID: "orders", Left: ref, Right: ref, PolicyFingerprint: "original"})
+	require.NoError(t, err)
+	require.NoError(t, session.Commit(apicontract.CompareResult{}))
+	_, err = store.Page(context.Background(), PageRequest{ComparisonID: ID(ref, ref), State: recordsetcompare.RecordMatched, PolicyFingerprint: "restricted"})
+	require.ErrorIs(t, err, ErrNotFound)
 }

@@ -66,6 +66,9 @@ func compareRowsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func authorizeCachedComparison(ctx context.Context, meta comparecache.Meta) error {
+	if meta.PolicyFingerprint == "" || meta.PolicyFingerprint != api.SecurePolicyFingerprint() {
+		return newSourceUnavailable("cached comparison policy has changed; recompute the comparison")
+	}
 	request := apicontract.CompareRequest{QueryID: meta.QueryID}
 	left := apicontract.CompareSideSpec{Kind: apicontract.CompareSideRecord, Execution: &meta.Left}
 	if _, err := loadCompareRecordSide(ctx, request, left); err != nil {

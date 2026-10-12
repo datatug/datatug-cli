@@ -150,7 +150,18 @@ func computeCompareWith(ctx context.Context, req apicontract.CompareRequest, dep
 	if cacheErr != nil {
 		api.LogCompareCacheSkip("begin", cacheErr)
 	} else if session != nil {
-		options.Observer = session.Observer()
+		observer := session.Observer()
+		options.Observer = func(record recordsetcompare.ComparedRecord) error {
+			if cacheErr == nil {
+				cacheErr = observer(record)
+				if cacheErr != nil {
+					session.Abort()
+					api.LogCompareCacheSkip("observe", cacheErr)
+				}
+			}
+			// This sidecar must never veto the authoritative comparison.
+			return nil
+		}
 		defer session.Abort()
 	}
 	result, err := recordsetcompare.Compare(left.recordset, right.recordset, left.receipt, right.receipt, options)
@@ -158,7 +169,7 @@ func computeCompareWith(ctx context.Context, req apicontract.CompareRequest, dep
 		leftReceipt, rightReceipt := left.receipt, right.receipt
 		return apicontract.CompareResult{}, &compareComputationError{cause: newInvalidRequest("compare", err.Error()), left: &leftReceipt, right: &rightReceipt}
 	}
-	if session != nil {
+	if session != nil && cacheErr == nil {
 		if commitErr := session.Commit(result); commitErr != nil {
 			api.LogCompareCacheSkip("commit", commitErr)
 		}

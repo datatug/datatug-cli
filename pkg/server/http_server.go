@@ -129,7 +129,7 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	}
 	defer func() { _ = api.CloseExecutionEvidence() }()
 	if err := api.ConfigureCompareCache(comparecache.Options{PrivateDir: caps.EvidencePrivateDir}); err != nil {
-		return fmt.Errorf("configure comparison cache: %w", err)
+		api.LogCompareCacheSkip("configure", err)
 	}
 	defer func() { _ = api.CloseCompareCache() }()
 	api.ConfigureSecureSession(session, pathsByID, caps)

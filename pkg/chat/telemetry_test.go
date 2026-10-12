@@ -418,7 +418,7 @@ func TestDeterministicChatAndCommandReportWithoutAICall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions.ReportCommand(sessions.NewCommandInteractionID(), snapshot.ID, "/sessions", 9, 1, nil, true)
+	sessions.ReportCommand(sessions.NewCommandInteractionID(), snapshot.ID, "/plan", 5, 1, nil, true)
 	sessions.ReportCommand(sessions.NewCommandInteractionID(), snapshot.ID, "/private-secret-command", 23, 1, nil, false)
 	sessions.WaitForTelemetry()
 	reporter.mu.Lock()
@@ -441,7 +441,7 @@ func TestDeterministicChatAndCommandReportWithoutAICall(t *testing.T) {
 	if deterministic == nil || len(deterministic.DetectionSteps) != 1 || deterministic.DetectionSteps[0].Method != "deterministic" || deterministic.ClientContext.ConversationID != snapshot.ID {
 		t.Fatalf("deterministic interaction = %+v", deterministic)
 	}
-	if command == nil || command.Status != "completed" || command.ActionExecutions[0].Status != "succeeded" || unknown == nil || unknown.ActionExecutions[0].Action != "datatug.chat.command.unknown" {
+	if command == nil || command.Status != "completed" || command.ActionExecutions[0].Status != "succeeded" || command.ActionExecutions[0].Action != "datatug.chat.command.plan" || unknown == nil || unknown.ActionExecutions[0].Action != "datatug.chat.command.unknown" {
 		t.Fatalf("command interactions = %+v", reporter.reports)
 	}
 	for _, r := range reporter.reports {

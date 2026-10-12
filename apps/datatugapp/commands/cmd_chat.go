@@ -244,6 +244,12 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		}
 		if plan.V == 1 {
 			notice := fmt.Sprintf("Hosted AI payer: %s (%s), %s; %d of %d questions left until %s", plan.AccountTitle, plan.AccountID, plan.EffectivePlan, *plan.AI.Left, *plan.AI.Limit, plan.AI.ResetsAt)
+			if !plan.AI.Enforced {
+				notice += "; AI allowance is currently observed, not enforced"
+			}
+			if plan.AI.Blocked != nil {
+				notice += "; AI temporarily blocked: " + *plan.AI.Blocked
+			}
 			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), notice)
 			sessionNotices = append(sessionNotices, notice)
 		}

@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/datatug/datatug-cli/pkg/chat"
 	"github.com/strongo/aichat/ai"
 	"github.com/strongo/aichat/ai/cloudproto"
 	"github.com/strongo/aichat/ai/decision"
@@ -446,6 +448,69 @@ func TestPersonalCloudContextAppliesToEveryAIRoute(t *testing.T) {
 			for _, header := range aiHeaders {
 				if header.Get(cloudproto.HeaderProduct) != "datatug" || header.Get(cloudproto.HeaderProject) != planProject || header.Get(cloudproto.HeaderAccount) != "" {
 					t.Fatalf("inconsistent personal AI context: %+v", header)
+				}
+			}
+		})
+	}
+}
+
+// The startup notice must expose restrictions in both terminal output and chat.
+func TestCloudChatStartupShowsPlanRestrictions(t *testing.T) {
+	oldToken, oldConfig, oldNotices := chatSavedTokenSource, chatUserConfigDir, setSessionNotices
+	t.Cleanup(func() { chatSavedTokenSource, chatUserConfigDir, setSessionNotices = oldToken, oldConfig, oldNotices })
+	chatSavedTokenSource = func(context.Context, bool) (oauth2.TokenSource, error) {
+		return oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test-token"}), nil
+	}
+	configDir := t.TempDir()
+	chatUserConfigDir = func() (string, error) { return configDir, nil }
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) { return nil, nil }))
+	for _, tc := range []struct {
+		name, reason string
+		enforced     bool
+	}{
+		{"unverified", "unverified", true},
+		{"unknown reason", "future-server-restriction", true},
+		{"observed restriction", "monthly", false},
+		{"observed allowance", "", false},
+		{"enforced allowance", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var plan cloudPlan
+			if err := json.Unmarshal(contractFixture(t, "plan-response-free.json"), &plan); err != nil {
+				t.Fatal(err)
+			}
+			plan.AI.Enforced = tc.enforced
+			if tc.reason != "" {
+				plan.AI.Blocked = &tc.reason
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v0/datatug/plan" {
+					t.Errorf("unexpected hosted request: %s", r.URL.Path)
+				}
+				_ = json.NewEncoder(w).Encode(plan)
+			}))
+			defer server.Close()
+			var notices []string
+			setSessionNotices = func(_ *chat.ChatUI, lines []string) { notices = append([]string(nil), lines...) }
+			cmd := chatCommand()
+			var stderr bytes.Buffer
+			cmd.SetErr(&stderr)
+			_, err := runChatProject(cmd, chatOptions{project: writeChatRunProjectFixture(t), env: "local", model: "cloud", baseURL: server.URL + "/v0/"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, output := range []string{stderr.String(), strings.Join(notices, "\n")} {
+				if !strings.Contains(output, "Hosted AI payer:") || !strings.Contains(output, "questions left") {
+					t.Fatalf("missing payer/usage: %q", output)
+				}
+				if got := strings.Contains(output, "AI allowance is currently observed, not enforced"); got == tc.enforced {
+					t.Fatalf("wrong enforcement notice: %q", output)
+				}
+				if tc.reason != "" && !strings.Contains(output, "AI temporarily blocked: "+tc.reason) {
+					t.Fatalf("hidden restriction: %q", output)
+				}
+				if tc.reason == "" && strings.Contains(output, "AI temporarily blocked:") {
+					t.Fatalf("invented restriction: %q", output)
 				}
 			}
 		})

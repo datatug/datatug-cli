@@ -135,7 +135,7 @@ func (c *SessionChat) ReportCommand(interactionID, sessionID, command string, us
 		"/new": true, "/sessions": true, "/switch": true, "/rename": true,
 		"/clear": true, "/delete": true, "/bucket": true, "/export": true,
 		"/query": true, "/queries": true, "/http": true, "/connect": true,
-		"/settings": true, "/help": true,
+		"/settings": true, "/help": true, "/plan": true,
 	}
 	action := "datatug.chat.command.unknown"
 	if known[command] {

@@ -348,4 +348,3 @@ func TestReadmeSectionPointsToAppHome(t *testing.T) {
 		t.Fatalf("readmeSection() = %q, want containing %q", got, wantLink)
 	}
 }
-

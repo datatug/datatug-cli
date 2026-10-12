@@ -85,33 +85,45 @@ func TestChatUIStatusBarHTTPDocumentFocusedHint(t *testing.T) {
 	}
 }
 
-// TestChatUIStatusBarWorkspaceFocusedHint is ui.go's u.workspaceFocused
-// hint set, including its tab==1 (Selected) and tab==3 (Bookmarks) variants.
+// TestChatUIStatusBarWorkspaceFocusedHint covers the distinct Explorer and
+// Inspect controls, including Inspect's Alt+I cycling and Bookmarks states.
 func TestChatUIStatusBarWorkspaceFocusedHint(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
+	u.shell.SetLeftPanel(u.explorer)
 	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyRight, Mod: tea.ModShift})
+	u.shell.FocusLeftPanel()
 
 	status := u.statusBar(160)
-	if !strings.Contains(status, "Tab ⇥ tabs") || !strings.Contains(status, "←→ tree") || !strings.Contains(status, "b bookmark") {
-		t.Fatalf("expected default workspace-focused hint set:\n%s", status)
+	if !strings.Contains(status, "type to search") || !strings.Contains(status, "←→ tree") || !strings.Contains(status, "Alt+A Attach to composer") {
+		t.Fatalf("expected Explorer hint set:\n%s", status)
 	}
 
-	u.workspace.tab = 1
+	u.shell.FocusRightPanel()
 	status = u.statusBar(160)
-	if !strings.Contains(status, "1 row") || !strings.Contains(status, "2 column") || !strings.Contains(status, "3 recordset") {
-		t.Fatalf("expected Selected-tab hint set:\n%s", status)
+	if !strings.Contains(status, "Alt+I view") || !strings.Contains(status, "F10 Related") || strings.Contains(status, "←→ tree") {
+		t.Fatalf("expected Inspect hint set:\n%s", status)
+	}
+
+	beforeSubTab := u.workspace.inspectorSubTab
+	u.shell.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
+	if u.workspace.inspectorSubTab != (beforeSubTab+1)%3 {
+		t.Fatalf("Alt+I should cycle the Inspect view: got %d after %d", u.workspace.inspectorSubTab, beforeSubTab)
+	}
+	status = u.statusBar(160)
+	if !strings.Contains(status, "Alt+I view") {
+		t.Fatalf("expected Inspect hint after cycling view:\n%s", status)
 	}
 
 	u.workspace.tab = 3
 	status = u.statusBar(160)
-	if !strings.Contains(status, "↑↓ browse") || !strings.Contains(status, "r rename") {
+	if !strings.Contains(status, "↑↓ bookmarks") || !strings.Contains(status, "Alt+R rename") {
 		t.Fatalf("expected Bookmarks-tab hint set:\n%s", status)
 	}
 
 	u.workspace.bookmarkGridFocused = true
 	status = u.statusBar(160)
-	if !strings.Contains(status, "Tab list") || !strings.Contains(status, "s sort") {
+	if !strings.Contains(status, "↑↓ rows") || !strings.Contains(status, "Alt+A attach") {
 		t.Fatalf("expected bookmark-grid-focused hint set:\n%s", status)
 	}
 	u.workspace.bookmarkGridFocused = false
@@ -123,19 +135,16 @@ func TestChatUIStatusBarWorkspaceFocusedHint(t *testing.T) {
 	}
 }
 
-// TestChatUIStatusBarComposerChipHints is m1 (r5 fix round on #289): ui.go's
-// composer-chip hint set -- shown whenever attachment chips exist and the
-// composer (input zone), not the grid/message/workspace zone, holds focus --
-// on both a wide status line (the full hint set) and a narrow one (ui.go's
-// "FOCUS Chat · Tab chips · Esc clear · Shift+Esc restore · Enter send"
-// compact form, maxWidth < 100).
+// TestChatUIStatusBarComposerChipHints covers attachment controls and the
+// focus-return hint while preserving the composer draft.
 func TestChatUIStatusBarComposerChipHints(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
 	u.snapshot.Workspace.Attachments = []ContextReference{{Kind: "bookmark", ObjectID: "saved"}}
+	u.syncChips()
 
 	wide := u.statusBar(160)
-	for _, want := range []string{"Tab chips", "Backspace remove", "Esc clear text/attachments", "Shift+Esc restore", "Enter send", "F6 workspace"} {
+	for _, want := range []string{"Tab attachments", "Esc previous control", "Enter send", "F6 Explorer"} {
 		if !strings.Contains(wide, want) {
 			t.Fatalf("expected the composer-chip hint set to contain %q:\n%s", want, wide)
 		}
@@ -146,7 +155,7 @@ func TestChatUIStatusBarComposerChipHints(t *testing.T) {
 	// spacing rather than DataTug's old literal " · " join -- check each
 	// compact hint is present instead of one exact joined string.
 	narrow := u.statusBar(80)
-	for _, want := range []string{"FOCUS Chat", "Tab chips", "Esc clear", "Shift+Esc restore", "Enter send"} {
+	for _, want := range []string{"Esc back", "Enter send", "F7 Inspect"} {
 		if !strings.Contains(narrow, want) {
 			t.Fatalf("statusBar(80) = %q, want it to contain the compact composer-chip hint %q", narrow, want)
 		}
@@ -155,15 +164,15 @@ func TestChatUIStatusBarComposerChipHints(t *testing.T) {
 	// Once attachments are gone, the default composer hint set returns even
 	// on a narrow terminal.
 	u.snapshot.Workspace.Attachments = nil
+	u.syncChips()
 	afterClear := u.statusBar(80)
-	if strings.Contains(afterClear, "Tab chips") {
-		t.Fatalf("expected the composer-chip hint set to disappear once attachments are cleared:\n%s", afterClear)
+	if strings.Contains(afterClear, "Tab attachments") {
+		t.Fatalf("expected the attachment hint set to disappear once attachments are cleared:\n%s", afterClear)
 	}
 }
 
-// TestChatUIStatusBarJoinFocusedHint is ui.go's u.joinFocused hint set,
-// overriding the plain grid hint set exactly as ui.go's separate
-// (non-else) `if u.joinFocused` block did.
+// TestChatUIStatusBarJoinFocusedHint keeps bare j in grid search and checks
+// that the explicit Alt+J command opens the secure relationship chooser.
 func TestChatUIStatusBarJoinFocusedHint(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
@@ -193,16 +202,22 @@ func TestChatUIStatusBarJoinFocusedHint(t *testing.T) {
 	}
 
 	before := u.statusBar(160)
-	if !strings.Contains(before, "j JOIN") {
-		t.Fatalf("expected plain grid hint set before entering JOIN mode:\n%s", before)
+	if !strings.Contains(before, "Alt+J JOIN chooser") {
+		t.Fatalf("expected an explicit JOIN chooser hint:\n%s", before)
 	}
 
-	u.shell.Update(tea.KeyPressMsg{Text: "j"})
-	after := u.statusBar(160)
-	if !strings.Contains(after, "JOIN candidates") || !strings.Contains(after, "Space add JOIN") {
-		t.Fatalf("expected JOIN-focused hint set after pressing j:\n%s", after)
+	workspaceRoutingKey(u, "j")
+	if strings.Contains(u.shell.View().Content, "JOIN relationship") {
+		t.Fatal("bare j should not open the JOIN chooser")
 	}
-	if strings.Contains(after, "j JOIN") {
-		t.Fatalf("JOIN-focused hint set should replace, not extend, the grid hint set:\n%s", after)
+	workspaceRoutingKey(u, "esc") // clear the single-character search
+	workspaceRoutingKey(u, "esc") // leave search mode, retaining the grid
+	workspaceRoutingKey(u, "alt+j")
+	view := u.shell.View().Content
+	if !strings.Contains(view, "JOIN relationship") {
+		t.Fatalf("Alt+J did not open the relationship chooser:\n%s", view)
+	}
+	if !strings.Contains(view, "Customer") || !strings.Contains(view, "many-to-one") {
+		t.Fatalf("JOIN chooser did not show the verified relationship candidate:\n%s", view)
 	}
 }

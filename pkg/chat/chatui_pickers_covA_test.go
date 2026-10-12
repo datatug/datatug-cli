@@ -78,7 +78,7 @@ func TestGlobalKeysCtrlRDelegatesToRefresh(t *testing.T) {
 func TestGlobalKeysAltSCyclesTableStyle(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	before := u.tableStyle.Name
-	if cmd, handled := u.globalKeys(tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt}); cmd == nil && !handled {
+	if cmd, handled := u.globalKeys(tea.KeyPressMsg{Code: 'S', Mod: tea.ModAlt}); cmd == nil && !handled {
 		t.Fatalf("Alt+S: cmd=%v handled=%v", cmd, handled)
 	} else if !handled {
 		t.Fatal("Alt+S was not handled")
@@ -90,8 +90,8 @@ func TestGlobalKeysAltSCyclesTableStyle(t *testing.T) {
 	u2, _ := newTestChatUI(t, nil, Turn{})
 	before2 := u2.tableStyle.Name
 	u2.globalKeys(tea.KeyPressMsg{Code: 'ß', Text: "ß"})
-	if u2.tableStyle.Name == before2 {
-		t.Fatal("ß alias did not cycle the table style")
+	if u2.tableStyle.Name != before2 {
+		t.Fatal("bare ß must stay printable text")
 	}
 }
 
@@ -207,7 +207,7 @@ func TestRefreshLastRecordSetPlainResultCannotBeRefreshed(t *testing.T) {
 	if cmd := u.refreshLastRecordSet(); cmd != nil {
 		t.Fatal("a plain RecordSet with no DTQL/HTTPResponseID should not be refreshable")
 	}
-	if !strings.Contains(u.shell.View().Content, "cannot be refreshed here") {
+	if !strings.Contains(flattenView(u.shell.View().Content), "cannot be refreshed here") {
 		t.Fatalf("expected the 'cannot be refreshed' message to appear:\n%s", u.shell.View().Content)
 	}
 }

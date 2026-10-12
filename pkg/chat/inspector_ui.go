@@ -20,6 +20,9 @@ type inspectorColumnMeta struct {
 // the same field name.
 func columnMetaFor(catalog ProjectCatalog, record *RecordSet, name string) inspectorColumnMeta {
 	meta := inspectorColumnMeta{}
+	if record != nil && record.Result.ColumnTypes[name] != "" {
+		return inspectorColumnMeta{dbType: record.Result.ColumnTypes[name]}
+	}
 	var sourceRelations map[string]bool
 	shortName := name
 	if last := strings.LastIndexByte(name, '.'); last >= 0 {

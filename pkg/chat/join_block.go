@@ -36,14 +36,20 @@ type JoinBlock struct {
 	sourceIndex    int
 	candidateIndex int
 	showDetails    bool
+	workspace      bool
 }
 
 // JoinAppliedMsg reports the outcome of applying a join candidate started by
 // JoinBlock.Update on "space" — the ported joinMessage from ui.go.
 type JoinAppliedMsg struct {
-	RecordSetID string
-	CandidateID JoinCandidateID
-	Err         error
+	SessionID                    string
+	Generation                   int
+	RecordSetID                  string
+	CandidateID                  JoinCandidateID
+	Err                          error
+	Captured                     bool
+	Interaction                  uint64
+	OriginFocus, RowKey, EntryID string
 }
 
 // joinGroup is one FK source relation with its candidate target relations —
@@ -100,7 +106,7 @@ func (b *JoinBlock) JoinFocused() bool { return b.joinFocused }
 // bubbling to chatshell's "return focus to composer" default — matching
 // ui.go's updateGrid comment on g.CapturesEsc().
 func (b *JoinBlock) CapturesEsc() bool {
-	return b.joinFocused
+	return b.joinFocused || (b.workspace && b.Grid != nil && b.Grid.CapturesEsc())
 }
 
 // SelfFramed satisfies transcript.SelfFramed: JoinBlock's View already
@@ -136,7 +142,11 @@ func (b *JoinBlock) joinAreaView(focused bool, width int) string {
 	if len(groups) == 0 {
 		return ""
 	}
-	lines := []string{statusStyle().Render("  You can ") + lipgloss.NewStyle().Bold(true).Foreground(theme.FocusColor()).Render("J") + statusStyle().Render("OIN  · press j")}
+	pickerHint := "OIN  · press j"
+	if b.workspace {
+		pickerHint = "OIN  · Alt+J chooser"
+	}
+	lines := []string{statusStyle().Render("  You can ") + lipgloss.NewStyle().Bold(true).Foreground(theme.FocusColor()).Render("J") + statusStyle().Render(pickerHint)}
 	for sourceIndex, group := range groups {
 		source := sanitizeTerminalText(group.source.Relation)
 		if group.source.Alias != "" && !strings.EqualFold(group.source.Alias, group.source.Relation) {
@@ -201,6 +211,13 @@ func (b *JoinBlock) joinAreaView(focused bool, width int) string {
 // Any other key, or no join focus, is delegated to the wrapped grid.
 func (b *JoinBlock) Update(msg tea.Msg) (transcript.Block, tea.Cmd) {
 	keyMsg, isKey := msg.(tea.KeyPressMsg)
+	if b.workspace && isKey && keyMsg.Mod & ^tea.ModShift == 0 && keyMsg.Text != "" {
+		if b.Grid != nil {
+			_, cmd := b.Grid.Update(msg)
+			return b, cmd
+		}
+		return b, nil
+	}
 	if isKey && b.joinFocused {
 		groups := b.joinGroups()
 		if len(groups) == 0 {
@@ -246,7 +263,7 @@ func (b *JoinBlock) Update(msg tea.Msg) (transcript.Block, tea.Cmd) {
 		}
 		return b, nil
 	}
-	if isKey && keyMsg.String() == "j" && len(b.Candidates) > 0 {
+	if !b.workspace && isKey && keyMsg.String() == "j" && len(b.Candidates) > 0 {
 		b.joinFocused = true
 		if b.Grid != nil {
 			b.Grid.SetFocused(false)

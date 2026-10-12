@@ -102,7 +102,7 @@ func flattenView(content string) string {
 	plain := ansi.Strip(content)
 	plain = strings.Map(func(r rune) rune {
 		switch r {
-		case '│', '╭', '╮', '╰', '╯', '┃', '┏', '┓', '┗', '┛', '━':
+		case '▌', '│', '╭', '╮', '╰', '╯', '┃', '┏', '┓', '┗', '┛', '━':
 			return ' '
 		default:
 			return r
@@ -153,7 +153,7 @@ func TestChatUISubmitAsksAndRendersGrid(t *testing.T) {
 	cmd := u.Submit("Show a Prague customer")
 	drainCmd(t, u, cmd)
 
-	view := u.shell.View().Content
+	view := ansi.Strip(u.shell.View().Content)
 	for _, want := range []string{"Found one.", "CustomerId", "City", "Prague"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
@@ -349,23 +349,18 @@ func TestChatUIInlineFKJoinNavigationAndApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	view := ansi.Strip(u.shell.View().Content)
-	if !strings.Contains(view, "You can") || !strings.Contains(view, "JOIN") || !strings.Contains(view, "Customer") {
-		t.Fatalf("inline FK area missing:\n%s", view)
-	}
 	if !u.shell.FocusEntry(u.lastGridEntryID) {
 		t.Fatal("grid could not be focused")
 	}
-	u.shell.Update(tea.KeyPressMsg{Text: "j"})
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !strings.Contains(u.shell.View().Content, "Invoice.CustomerId") {
-		t.Fatal("exact FK details not displayed")
+	u.shell.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModAlt})
+	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "JOIN relationship") || !strings.Contains(view, "Invoice.CustomerId") || !strings.Contains(view, "Customer.CustomerId") {
+		t.Fatalf("exact FK details missing: %s", view)
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	u.shell.Update(tea.KeyPressMsg{Text: "j"})
-	_, cmd := u.shell.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	u.shell.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModAlt})
+	_, cmd := u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("Space did not invoke JOIN application")
+		t.Fatal("advertised Enter did not invoke JOIN")
 	}
 	drainCmd(t, u, cmd)
 	snapshot, err := sessions.Snapshot(ctx)
@@ -412,11 +407,9 @@ func TestChatUIShowsAppliedLimitationsIncludingEmptyResults(t *testing.T) {
 func TestChatUISlashHelpDocumentsGridControls(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/help"))
-	view := flattenView(u.shell.View().Content)
+	view := collectWorkspaceHotkeys(t, u)
 	for _, want := range []string{
-		"1 Table", "2 Charts", "3 Current row", "Tab panes", "Shift+↑↓ select",
-		"j JOINs", "Space row", "c cell", "r range", "a attach", "d dock", "b bookmark", "s sort", "Enter details", "Esc composer",
-		"F3", "F4", "Ctrl+C",
+		"Alt+G Group", "Alt+S Sort", "Alt+Shift+↑↓ loaded sort", "Ctrl+Shift+↑↓ server-sort preview", "Ctrl+Space Actions", "Ctrl+S save query", "Ctrl+E export", "Alt+J JOIN chooser", "F4 composer", "Esc previous control, retain draft", "F3", "Ctrl+C",
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("help missing %q: %s", want, view)
@@ -429,7 +422,7 @@ func TestChatUISlashHelpDocumentsGridControls(t *testing.T) {
 // wording).
 func TestChatUIShowsShiftArrowNavigationHint(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
-	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "Shift+↑↓ navigate") {
+	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "Shift+↑ history") {
 		t.Fatalf("status line missing Shift+Arrow navigation hint:\n%s", view)
 	}
 }
@@ -444,7 +437,7 @@ func TestChatUIStatusHintsFollowFocus(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, turn)
 	u.shell.Update(tea.WindowSizeMsg{Width: 220, Height: 30})
 	inputView := ansi.Strip(u.shell.View().Content)
-	if !strings.Contains(inputView, "Shift+↑↓ navigate") || !strings.Contains(inputView, "Enter send") {
+	if !strings.Contains(inputView, "Shift+↑ history") || !strings.Contains(inputView, "Enter send") {
 		t.Fatalf("input status is not contextual: %s", inputView)
 	}
 	drainCmd(t, u, u.Submit("Show one"))
@@ -452,7 +445,7 @@ func TestChatUIStatusHintsFollowFocus(t *testing.T) {
 		t.Fatal("expected grid focus")
 	}
 	gridView := ansi.Strip(u.shell.View().Content)
-	if !strings.Contains(gridView, "1 Table") || !strings.Contains(gridView, "2 Charts") || !strings.Contains(gridView, "3 Current row") || !strings.Contains(gridView, "↑↓ rows") {
+	if !strings.Contains(gridView, "Table") || !strings.Contains(gridView, "Charts") || !strings.Contains(gridView, "Current row") || !strings.Contains(gridView, "Ctrl+Space Actions") {
 		t.Fatalf("grid status is not contextual: %s", gridView)
 	}
 }
@@ -493,10 +486,9 @@ func TestChatHelpTextRestoresKeyParity(t *testing.T) {
 	// phrase across a wrap boundary; collapse whitespace (including the
 	// wrap newline) to a single space before matching, like the other
 	// chatHelpText assertions below already do.
-	view := flattenView(u.shell.View().Content)
+	view := collectWorkspaceHotkeys(t, u)
 	for _, want := range []string{
-		"F2 mouse select/wheel", "F5 open web chat", "Alt+S table style", "Ctrl+D detach last attachment",
-		"Ctrl+R refresh", "1 Rendered", "2 Raw", "3 Headers",
+		"F2 mouse selection", "F5 web", "Alt+Shift+S table style", "Ctrl+D remove last attachment", "Ctrl+R refresh", "Ctrl+Space Actions",
 		"/connect", "/http", "/query",
 	} {
 		if !strings.Contains(view, want) {
@@ -526,7 +518,7 @@ func TestChatUIStatusBarWrapsOnNarrowWidth(t *testing.T) {
 	// Wrapping must not drop content: every key hint present in the
 	// unwrapped (wide) rendering must still appear somewhere across the
 	// wrapped lines.
-	for _, want := range []string{"F2 select", "Shift+↑↓ navigate", "Enter send", "F6/Shift+→ workspace", "Ctrl+←→ resize", "F3 projects", "F4 sessions", "Ctrl+C quit"} {
+	for _, want := range []string{"F1 Hotkeys", "F4 composer", "F7 Inspect", "Enter send", "Esc back"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("wrapped status bar dropped segment %q:\n%s", want, status)
 		}
@@ -606,4 +598,16 @@ func TestSessionNoticesAreSystemLinesNotMessages(t *testing.T) {
 	if strings.Contains(flattenView(u.shell.View().Content), "engine is ON") {
 		t.Fatalf("cleared notices still shown")
 	}
+}
+
+func collectWorkspaceHotkeys(t *testing.T, u *ChatUI) string {
+	t.Helper()
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF1})
+	var views []string
+	for i := 0; i < 20; i++ {
+		views = append(views, flattenView(u.shell.View().Content))
+		u.shell.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	}
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	return strings.Join(views, " ")
 }

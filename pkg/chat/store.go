@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -207,16 +208,20 @@ var (
 // DefaultChatStorePath keeps snapshots outside the project repository. The
 // hash distinguishes projects without exposing their path in a filename.
 func DefaultChatStorePath(projectDir string) (string, error) {
-	root, err := userHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("find chat home: %w", err)
+	root := os.Getenv("DATATUG_CHAT_STORE_DIR")
+	if root == "" {
+		home, err := userHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("find chat home: %w", err)
+		}
+		root = filepath.Join(home, ".datatug", "chat")
 	}
 	canonical, err := canonicalProjectPath(projectDir)
 	if err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256([]byte(canonical))
-	return filepath.Join(root, ".datatug", "chat", hex.EncodeToString(sum[:12])+".sqlite"), nil
+	return filepath.Join(root, hex.EncodeToString(sum[:12])+".sqlite"), nil
 }
 
 func canonicalProjectPath(projectDir string) (string, error) {
@@ -880,7 +885,7 @@ func (s *SessionStore) loadQueries(ctx context.Context, item *ChatSession) error
 		if err := rows.Scan(&query.ID, &query.OriginMessageID, &query.Title, &query.DTQL, &query.Source, &params, &executed, &query.Error); err != nil {
 			return err
 		}
-		if err := json.Unmarshal([]byte(params), &query.Parameters); err != nil {
+		if err := decodeExactJSON([]byte(params), &query.Parameters); err != nil {
 			return fmt.Errorf("corrupt chat query parameters %q: %w", query.ID, err)
 		}
 		if query.ExecutedAt, err = time.Parse(time.RFC3339Nano, executed); err != nil {
@@ -906,7 +911,7 @@ func (s *SessionStore) loadRecordSets(ctx context.Context, item *ChatSession) er
 			return err
 		}
 		record.SessionID = item.ID
-		if err := json.Unmarshal([]byte(params), &record.Parameters); err != nil {
+		if err := decodeExactJSON([]byte(params), &record.Parameters); err != nil {
 			return fmt.Errorf("corrupt RecordSet parameters %q: %w", record.ID, err)
 		}
 		if record.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
@@ -1148,6 +1153,7 @@ func stamp(t time.Time) string { return t.Format(time.RFC3339Nano) }
 
 type storedResult struct {
 	Columns     []string                        `json:"columns"`
+	ColumnTypes map[string]string               `json:"columnTypes,omitempty"`
 	Rows        []storedRow                     `json:"rows"`
 	Statistics  *secureread.RecordSetStatistics `json:"statistics,omitempty"`
 	Limitations []secureread.Limitation         `json:"limitations,omitempty"`
@@ -1169,7 +1175,7 @@ func encodeResult(result secureread.Result) ([]byte, error) {
 	if statistics.RowCount != len(result.Rows) || (len(statistics.Columns) == 0 && len(result.Columns) > 0) {
 		statisticsCollector = secureread.NewStatisticsCollector()
 	}
-	stored := storedResult{Columns: result.Columns, Statistics: &statistics, Limitations: result.Limitations, Collection: result.Collection, Provenance: result.Provenance, Rows: make([]storedRow, len(result.Rows))}
+	stored := storedResult{Columns: result.Columns, ColumnTypes: result.ColumnTypes, Statistics: &statistics, Limitations: result.Limitations, Collection: result.Collection, Provenance: result.Provenance, Rows: make([]storedRow, len(result.Rows))}
 	for i, row := range result.Rows {
 		stored.Rows[i] = storedRow{Key: row.Key, Data: make(map[string]storedValue, len(row.Data))}
 		for name, value := range row.Data {
@@ -1227,7 +1233,7 @@ func decodeResult(payload []byte) (secureread.Result, error) {
 	if stored.Rows == nil {
 		return secureread.Result{}, errors.New("missing rows")
 	}
-	result := secureread.Result{Columns: stored.Columns, Limitations: stored.Limitations, Collection: stored.Collection, Provenance: stored.Provenance, Rows: make([]secureread.Row, len(stored.Rows))}
+	result := secureread.Result{Columns: stored.Columns, ColumnTypes: stored.ColumnTypes, Limitations: stored.Limitations, Collection: stored.Collection, Provenance: stored.Provenance, Rows: make([]secureread.Row, len(stored.Rows))}
 	var legacyStatistics *secureread.StatisticsCollector
 	if stored.Statistics == nil {
 		legacyStatistics = secureread.NewStatisticsCollector()
@@ -1253,6 +1259,24 @@ func decodeResult(payload []byte) (secureread.Result, error) {
 		result.Statistics = legacyStatistics.Finalize(result.Columns)
 	}
 	return result, nil
+}
+
+// Parameter numbers remain exact across load, bookmark and derived execution.
+// Reject trailing data just as json.Unmarshal does.
+func decodeExactJSON(payload []byte, target any) error {
+	decoder := json.NewDecoder(strings.NewReader(string(payload)))
+	decoder.UseNumber()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("unexpected trailing JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 func decodeValue(value storedValue) (any, error) {

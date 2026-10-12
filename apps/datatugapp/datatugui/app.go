@@ -24,6 +24,10 @@ type Options struct {
 // startMsg opens the start module once the program runs.
 type startMsg struct{}
 
+// WorkspacePresentationMsg opts a legacy page into the containing workspace's
+// neutral selection styling. The outer pane owns the blue focus indicator.
+type WorkspacePresentationMsg struct{}
+
 // crash keeps the panic recovered by an App, shared by its copies.
 type crash struct{ value any }
 

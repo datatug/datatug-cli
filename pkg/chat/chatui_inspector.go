@@ -153,6 +153,9 @@ func (u *ChatUI) selectFromGrid(mode string) {
 // instance without ChatUI tracking focus itself.
 func (u *ChatUI) activeGrid() (*gridState, *RecordSet, bool) {
 	ref := u.shell.FocusedRef()
+	if ref == nil {
+		ref = u.shell.SelectedRef()
+	}
 	if ref == nil || ref.Type != gridRecordSetRefType {
 		return nil, nil, false
 	}
@@ -172,6 +175,9 @@ func (u *ChatUI) activeGrid() (*gridState, *RecordSet, bool) {
 // current, save-as-query, Ctrl+R) that only need the identifier.
 func (u *ChatUI) activeRecordSetID() string {
 	ref := u.shell.FocusedRef()
+	if ref == nil {
+		ref = u.shell.SelectedRef()
+	}
 	if ref == nil || ref.Type != gridRecordSetRefType {
 		return ""
 	}

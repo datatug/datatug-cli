@@ -37,6 +37,9 @@ type lastChatOptions struct {
 var lastChatOptionsPath = defaultLastChatOptionsPath
 
 func defaultLastChatOptionsPath() (string, error) {
+	if dir := os.Getenv("DATATUG_CHAT_PREFERENCES_DIR"); dir != "" {
+		return filepath.Join(dir, "chat-last.json"), nil
+	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err

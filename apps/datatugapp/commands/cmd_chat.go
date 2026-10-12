@@ -1,6 +1,7 @@
 package commands
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"context"
 	"database/sql"
 	"fmt"
@@ -25,6 +26,7 @@ import (
 const defaultChatModel = "gpt-5.6-luna"
 
 type chatOptions struct {
+	workspace       *workspaceStart
 	project         string
 	env             string
 	database        string
@@ -91,7 +93,7 @@ not shown can cost a describe_relation round trip.
 	flags.StringVar(&options.env, "env", "local", "Project environment ID")
 	flags.StringVar(&options.database, "database", "", "Database catalog ID (auto-selected when the environment has one)")
 	flags.StringVar(&options.ai, "ai", "", "Configured AI profile name")
-	flags.StringVar(&options.model, "model", defaultChatModel, "Model name (for example gpt-5.6-luna, claude-haiku, ollama/qwen3:4b, or cloud)")
+	flags.StringVar(&options.model, "model", defaultChatModel, "Model name (for example gpt-5.6-luna, claude-haiku, cloud, or none for local queries)")
 	flags.StringVar(&options.baseURL, "base-url", "", "model API base URL (for cloud, the shared API /v0/ URL)")
 	flags.BoolVar(&options.insecureStorage, "insecure-storage", false, "use the plaintext DataTug auth session created with auth login --insecure-storage (cloud only)")
 	flags.StringVar(&options.thinking, "thinking", "low", "Model reasoning effort: low, medium, or high (provider support varies)")
@@ -267,39 +269,44 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 			provider = cloudUserProvider{cloudClient}
 		} else {
 			var providerErr error
-			provider, providerErr = chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
-			if providerErr != nil {
-				return "", Exit(fmt.Sprintf("configure chat model %q: %v", options.model, providerErr), exitCodeUsage)
+			if options.model != "none" {
+				provider, providerErr = chat.NewLLMProvider(options.model, options.baseURL, options.apiKey)
+			}
+			if providerErr != nil || options.model == "none" {
+				conversation = providerUnavailableConversation{}
+				sessionNotices = append(sessionNotices, "AI provider is not configured. Explorer Open data and New query work locally; configure a provider under Settings → AI for chat.")
 			}
 		}
-		conversationOptions := []chat.Option{chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs)}
-		if cloudClient != nil {
-			conversationOptions = append(conversationOptions, chat.WithHostedModel(options.cloudModel))
-		}
-		// Narrowing applies to the stored-schema context only: the degraded
-		// multi-source context is left exactly as it is.
-		if healthyRelations > 0 && sourceErr == nil {
-			choice, consentPath, consentWarning := readDecisionConsent(projectDir)
-			if consentWarning != "" {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", consentWarning)
-				sessionNotices = append(sessionNotices, "Warning: table narrowing: "+consentWarning)
+		if provider != nil {
+			conversationOptions := []chat.Option{chat.WithThinkingLevel(options.thinking), chat.WithSources(sourceURLs)}
+			if cloudClient != nil {
+				conversationOptions = append(conversationOptions, chat.WithHostedModel(options.cloudModel))
 			}
-			narrower, warnings, notices := chatTableNarrower(projectDir, cloudClient, healthy.Relations, func() []narrowing.Link { return foreignKeys }, consentState{choice, consentPath})
-			for _, notice := range notices {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "table narrowing: %s\n", notice)
-				sessionNotices = append(sessionNotices, "Table narrowing: "+notice)
+			// Narrowing applies to the stored-schema context only: the degraded
+			// multi-source context is left exactly as it is.
+			if healthyRelations > 0 && sourceErr == nil {
+				choice, consentPath, consentWarning := readDecisionConsent(projectDir)
+				if consentWarning != "" {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", consentWarning)
+					sessionNotices = append(sessionNotices, "Warning: table narrowing: "+consentWarning)
+				}
+				narrower, warnings, notices := chatTableNarrower(projectDir, cloudClient, healthy.Relations, func() []narrowing.Link { return foreignKeys }, consentState{choice, consentPath})
+				for _, notice := range notices {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "table narrowing: %s\n", notice)
+					sessionNotices = append(sessionNotices, "Table narrowing: "+notice)
+				}
+				for _, warning := range warnings {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", warning)
+					sessionNotices = append(sessionNotices, "Warning: table narrowing: "+warning)
+				}
+				if narrower != nil {
+					conversationOptions = append(conversationOptions, chat.WithTableNarrowing(narrower))
+				}
 			}
-			for _, warning := range warnings {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: table narrowing: %s\n", warning)
-				sessionNotices = append(sessionNotices, "Warning: table narrowing: "+warning)
+			conversation, err = chat.NewAIConversation(provider, executor, sourceURL, schemaContext, conversationOptions...)
+			if err != nil {
+				return "", Exit(err.Error(), exitCodeUsage)
 			}
-			if narrower != nil {
-				conversationOptions = append(conversationOptions, chat.WithTableNarrowing(narrower))
-			}
-		}
-		conversation, err = chat.NewAIConversation(provider, executor, sourceURL, schemaContext, conversationOptions...)
-		if err != nil {
-			return "", Exit(err.Error(), exitCodeUsage)
 		}
 	}
 	storePath, err := chat.DefaultChatStorePath(projectDir)
@@ -367,7 +374,14 @@ func runChatProject(cmd *cobra.Command, options chatOptions) (string, error) {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: save chat options: %v\n", err)
 	}
 	ui.SetProjectChoices(chatProjectChoices(options.project, projectDir, projectCatalog))
-	if err := ui.Run(); err != nil {
+	if options.workspace != nil {
+		mountExplore(ui, *options.workspace)
+	}
+	var programOptions []tea.ProgramOption
+	if options.workspace != nil {
+		programOptions = options.workspace.programOptions
+	}
+	if err := ui.Run(programOptions...); err != nil {
 		return "", err
 	}
 	return ui.SelectedProject(), nil
@@ -591,13 +605,20 @@ func buildChatProjectCatalog(ctx context.Context, projectDir string, projectStor
 			}
 			columns := make([]string, len(relation.Columns))
 			columnTypes := make(map[string]string, len(relation.Columns))
+			primaryKey := []string{}
+			keyPositions := map[string]int{}
 			for i, column := range relation.Columns {
 				columns[i] = column.Name
 				columnTypes[column.Name] = column.DbType
+				if column.PrimaryKeyPosition > 0 {
+					primaryKey = append(primaryKey, column.Name)
+					keyPositions[column.Name] = column.PrimaryKeyPosition
+				}
 			}
+			sort.SliceStable(primaryKey, func(i, j int) bool { return keyPositions[primaryKey[i]] < keyPositions[primaryKey[j]] })
 			catalog.Objects = append(catalog.Objects, chat.ProjectObject{Reference: chat.ContextReference{
 				Kind: kind, ProjectID: project.ID, SourceID: id, ObjectID: name, Title: relation.Name,
-			}, Columns: columns, ColumnTypes: columnTypes, Issue: relation.Issue})
+			}, Columns: columns, ColumnTypes: columnTypes, PrimaryKey: primaryKey, Issue: relation.Issue})
 		}
 	}
 	queryIDs, err := queryIDIndexFunc(projectDir)
@@ -651,4 +672,12 @@ func projectCatalogHasSource(catalog chat.ProjectCatalog, id string) bool {
 		}
 	}
 	return false
+}
+
+// providerUnavailableConversation keeps the project/session and secure manual
+// executor available while provider credentials are absent or offline is chosen.
+type providerUnavailableConversation struct{}
+
+func (providerUnavailableConversation) AskWithContext(context.Context, string, string) (chat.Turn, error) {
+	return chat.Turn{Text: "Configure an AI provider under Settings → AI for chat. Use Explorer Open data or New query to work with your project locally. No query was executed."}, nil
 }

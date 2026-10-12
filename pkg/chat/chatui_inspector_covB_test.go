@@ -69,7 +69,7 @@ func TestChatUIGridKeyQOpensSaveQueryDialog(t *testing.T) {
 		Result: secureread.Result{Columns: []string{"Id", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1, "Name": "Alpha"}}}},
 	})
 	u.savedQueryService = &savedQueryStub{}
-	u.shell.Update(tea.KeyPressMsg{Text: "q"})
+	gridActionJourney(t, u, "Save query [Ctrl+S]")
 	if !strings.Contains(u.shell.View().Content, "Save as project query") {
 		t.Fatalf("expected the save-query overlay to open:\n%s", u.shell.View().Content)
 	}
@@ -85,11 +85,11 @@ func TestChatUIGridKeySpaceCRSelectAndAAttach(t *testing.T) {
 			Rows:    []secureread.Row{{Data: map[string]any{"Id": 1, "Name": "Alpha"}}, {Data: map[string]any{"Id": 2, "Name": "Beta"}}},
 		},
 	})
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	gridActionJourney(t, u, "Select row")
 	if len(u.snapshot.Workspace.Selections) != 1 {
 		t.Fatalf("expected space to create a row selection: %+v", u.snapshot.Workspace.Selections)
 	}
-	u.shell.Update(tea.KeyPressMsg{Text: "c"})
+	gridActionJourney(t, u, "Select cell")
 	if len(u.snapshot.Workspace.Selections) == 0 {
 		t.Fatalf("expected 'c' to create a cell selection: %+v", u.snapshot.Workspace.Selections)
 	}
@@ -97,14 +97,14 @@ func TestChatUIGridKeySpaceCRSelectAndAAttach(t *testing.T) {
 	if len(selection.Columns) != 1 {
 		t.Fatalf("expected a single-column cell selection: %+v", selection)
 	}
-	u.shell.Update(tea.KeyPressMsg{Text: "r"}) // anchors a range
+	gridActionJourney(t, u, "Select range") // anchors a range
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	u.shell.Update(tea.KeyPressMsg{Text: "r"}) // dispatches the range
+	gridActionJourney(t, u, "Select range") // dispatches the range
 	rangeSelection := u.snapshot.Workspace.Selections[u.snapshot.Workspace.CurrentSelectionID]
 	if len(rangeSelection.Ranges) == 0 {
 		t.Fatalf("expected 'r' twice to create a range selection: %+v", u.snapshot.Workspace.Selections)
 	}
-	u.shell.Update(tea.KeyPressMsg{Text: "a"})
+	gridActionJourney(t, u, "Attach result")
 	if len(u.snapshot.Workspace.Attachments) != 1 {
 		t.Fatalf("expected 'a' to attach the active grid's RecordSet: %+v", u.snapshot.Workspace.Attachments)
 	}
@@ -115,11 +115,11 @@ func TestChatUIGridKeySpaceCRSelectAndAAttach(t *testing.T) {
 // upgrade when a durable selection already matches the active RecordSet.
 func TestChatUIGridKeyDAndBDockAndBookmark(t *testing.T) {
 	u := focusedGridTestUI(t)
-	u.shell.Update(tea.KeyPressMsg{Text: "d"})
+	gridActionJourney(t, u, "Dock result")
 	if len(u.snapshot.Workspace.Docks) != 1 {
 		t.Fatalf("expected 'd' to dock the active grid's RecordSet: %+v", u.snapshot.Workspace.Docks)
 	}
-	u.shell.Update(tea.KeyPressMsg{Text: "b"})
+	gridActionJourney(t, u, "Bookmark result")
 	if len(u.snapshot.Bookmarks) != 1 {
 		t.Fatalf("expected 'b' to bookmark the active grid's RecordSet: %+v", u.snapshot.Bookmarks)
 	}
@@ -127,8 +127,8 @@ func TestChatUIGridKeyDAndBDockAndBookmark(t *testing.T) {
 	// Now select the current row (matching the active RecordSet) and dock
 	// again: dockOrBookmarkActiveGrid should upgrade to the Selection
 	// reference instead of the bare RecordSet one.
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeySpace})
-	u.shell.Update(tea.KeyPressMsg{Text: "d"})
+	gridActionJourney(t, u, "Select row")
+	gridActionJourney(t, u, "Dock result")
 	if len(u.snapshot.Workspace.Docks) != 2 {
 		t.Fatalf("expected a second dock via the selection reference: %+v", u.snapshot.Workspace.Docks)
 	}
@@ -141,11 +141,11 @@ func TestChatUIGridKeyDAndBDockAndBookmark(t *testing.T) {
 // both the "bucket_add" and "bucket_remove" branches.
 func TestChatUIGridKeyBToggleExportBucket(t *testing.T) {
 	u := focusedGridTestUI(t)
-	u.shell.Update(tea.KeyPressMsg{Text: "B"})
+	gridActionJourney(t, u, "Export bucket")
 	if len(u.snapshot.Workspace.ExportBucket) != 1 {
 		t.Fatalf("expected 'B' to add the RecordSet to the export bucket: %+v", u.snapshot.Workspace.ExportBucket)
 	}
-	u.shell.Update(tea.KeyPressMsg{Text: "B"})
+	gridActionJourney(t, u, "Export bucket")
 	if len(u.snapshot.Workspace.ExportBucket) != 0 {
 		t.Fatalf("expected a second 'B' to remove it from the export bucket: %+v", u.snapshot.Workspace.ExportBucket)
 	}
@@ -154,7 +154,7 @@ func TestChatUIGridKeyBToggleExportBucket(t *testing.T) {
 // TestChatUIGridKeyEOpensExportDialog covers handleGridKey's "e" case.
 func TestChatUIGridKeyEOpensExportDialog(t *testing.T) {
 	u := focusedGridTestUI(t)
-	u.shell.Update(tea.KeyPressMsg{Text: "e"})
+	gridActionJourney(t, u, "Export [Ctrl+E]")
 	if u.lastGridRecordSetID == "" {
 		t.Fatal("expected 'e' to record the active RecordSet as lastGridRecordSetID")
 	}

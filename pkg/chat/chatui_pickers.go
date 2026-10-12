@@ -10,21 +10,92 @@ import (
 )
 
 // globalKeys satisfies chatshell.GlobalKeysFunc, checked before chatshell's
-// own key handling. F3 (project picker) and F4 (session picker) are ported
-// from ui.go's "f3"/"f4" cases in Update, now as chatshell Overlays
-// (checklist items #42/#43) instead of a workspace-pane picker view.
+// own key handling. Modal input is captured by the shell before this callback;
+// F4 focuses the composer and /switch opens the session picker.
 func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	u.workspaceInteraction++
+	u.workspaceFeedback = ""
+	if msg.Mod == tea.ModAlt && msg.Code >= '0' && msg.Code <= '9' && (u.shell.WorkspaceFocus() == "transcript" || u.shell.WorkspaceFocus() == "sidebar") {
+		index := int(msg.Code - '1')
+		if msg.Code == '0' {
+			index = 9
+		}
+		u.shell.FocusRightPanel()
+		return u.workspace.focusRelated(index), true
+	}
 	switch msg.String() {
-	case "f4":
-		if u.sessions == nil {
+	case "alt+left":
+		if origin := u.relatedOrigins[u.activeRecordSetID()]; origin != "" {
+			u.shell.FocusEntry(origin)
 			return nil, true
 		}
-		return u.openSessionPicker(), true
+	case "alt+f1", "ctrl+f1":
+		u.toolbarHidden = !u.toolbarHidden
+		return nil, true
+	case "f1":
+		return u.shell.PushOverlay(u.newHotkeysOverlay()), true
+	case "f4":
+		u.shell.FocusComposer()
+		return nil, true
+	case "f8":
+		if u.apiScreen != nil {
+			u.closeAPIOverview()
+		} else {
+			u.apiScreen = &apiPanel{}
+			u.apiReturn = u.shell.ShowTemporaryCenterPanel(u.apiScreen, true)
+		}
+		return nil, true
+	case "f9":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			if _, _, ok := u.activeGrid(); ok {
+				u.shell.ExpandSelected()
+				return nil, true
+			}
+		}
+	case "shift+enter":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			if _, _, ok := u.activeGrid(); ok {
+				u.workspaceFeedback = "Selected-result browser links are not supported yet. F5 opens the web workspace."
+				return nil, true
+			}
+		}
+	case "esc":
+		if u.apiScreen != nil && u.shell.WorkspaceFocus() == "center" {
+			u.closeAPIOverview()
+			return nil, true
+		}
+		if u.webLinkVisible {
+			u.webLinkVisible = false
+			return nil, true
+		}
 	case "f3":
 		if len(u.projectChoices) == 0 {
 			return nil, true
 		}
 		return u.shell.PushOverlay(newProjectPickerOverlay(u, u.projectChoices)), true
+	case "f10":
+		u.shell.FocusRightPanel()
+		return u.workspace.focusRelated(-1), true
+	case "alt+j":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			if _, record, _ := u.activeGrid(); groupedRecord(record) {
+				u.workspaceFeedback = "Grouped output has no entity identity. Return to the original result for JOIN."
+				return nil, true
+			}
+			return u.openJoinPicker(), true
+		}
+	case "ctrl+s":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			return u.openSaveQueryDialog(), true
+		}
+	case "ctrl+e":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			return u.shell.PushOverlay(newExportDialogOverlay(u)), true
+		}
+	case "ctrl+space", "alt+a":
+		if u.shell.WorkspaceFocus() == "transcript" || (msg.String() == "alt+a" && u.shell.WorkspaceFocus() == "sidebar" && u.workspace.tab == 1) {
+			return u.shell.PushOverlay(&gridActionsOverlay{ui: u}), true
+		}
 	case "ctrl+g":
 		// Jump to the most recently appended grid/join block — ui.go's
 		// focusLatestGrid (checklist item #45), via chatshell.Model.FocusEntry
@@ -37,7 +108,19 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "ctrl+r":
 		return u.refreshLastRecordSet(), true
-	case "alt+s", "ß": // macOS Option+S emits ß unless the terminal maps Option to Meta (ui.go's own alias).
+	case "alt+g":
+		return u.openResultOperation(true), true
+	case "alt+s":
+		return u.openResultOperation(false), true
+	case "shift+alt+up", "shift+alt+down", "alt+shift+up", "alt+shift+down", "alt+up", "alt+down":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			return u.quickSortLoaded(msg.Code == tea.KeyDown), true
+		}
+	case "ctrl+shift+up", "ctrl+shift+down":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			return u.quickServerSort(msg.Code == tea.KeyDown), true
+		}
+	case "alt+shift+s", "alt+S":
 		return u.cycleTableStyle(), true
 	case "f5":
 		// ui.go's F5: try to open the actual browser first (M6's web
@@ -58,12 +141,6 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		return func() tea.Msg { return browserOpenResultMsg{url: url, err: open(url)} }, true
-	case "esc":
-		if u.webLinkVisible {
-			u.webLinkVisible = false
-			return nil, true
-		}
-		return nil, false
 	case "f2":
 		// ui.go's F2 mouseCapture toggle, ported onto chatshell's
 		// SetMouseEnabled: on (the default -- see NewChatUI's

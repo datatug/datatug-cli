@@ -73,7 +73,7 @@ func TestChatUIGridSortRetainsSelectedSourceRowForInspector(t *testing.T) {
 	if before := g.sourceIndexAt(g.CurrentIndex()); before != 0 {
 		t.Fatalf("source row before sort = %d, want 0", before)
 	}
-	u.shell.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	gridActionJourney(t, u, "Sort column")
 	if got := g.sourceIndexAt(g.CurrentIndex()); got != 0 || g.CurrentIndex() != 1 || g.sourceIndexAt(2) != 2 {
 		t.Fatalf("sorted selection = source:%d index:%d, want source:0 index:1", got, g.CurrentIndex())
 	}

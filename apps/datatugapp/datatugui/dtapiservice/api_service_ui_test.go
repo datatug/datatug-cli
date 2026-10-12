@@ -20,7 +20,9 @@ func TestModule(t *testing.T) {
 		t.Fatal("root page has no content")
 	}
 	h := navtest.New(t, page)
-	h.RequireContains("Open web UI: https://datatug.app/pwa/#api=localhost:8080")
+	h.RequireContains("API server")
+	h.RequireContains("STOPPED")
+	h.RequireContains("Request volume")
 	h.RequireContains("Web UI & Local API Service Monitor")
 }
 

@@ -636,15 +636,29 @@ func chinookScannedProjectFixture(t *testing.T) (dir, database string) {
 	return dir, "chinook-local"
 }
 
-// TestRunChatProjectNewLLMProviderErrorReported covers runChatProject's
-// chat.NewLLMProvider error branch (cmd_chat.go:141-144): an unrecognized
-// model with no --base-url fails resolveEndpoint's provider-family lookup.
+// An invalid provider still opens the local workspace, with an actionable
+// notice, so opening data and authoring a manual query remain available.
 func TestRunChatProjectNewLLMProviderErrorReported(t *testing.T) {
 	dir, database := chinookScannedProjectFixture(t)
 	cmd := chatCommand()
+	var notices []string
+	previous := setSessionNotices
+	setSessionNotices = func(ui *chat.ChatUI, lines []string) {
+		notices = append(notices, lines...)
+		previous(ui, lines)
+	}
+	t.Cleanup(func() { setSessionNotices = previous })
+	reached := false
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) {
+		reached = true
+		return nil, nil
+	}))
 	options := chatOptions{project: dir, env: "local", database: database, model: "totally-unrecognized-model-xyz", thinking: "low"}
-	if _, err := runChatProject(cmd, options); err == nil || !strings.Contains(err.Error(), "configure chat model") {
-		t.Fatalf("runChatProject error = %v, want a configure-chat-model usage error", err)
+	if _, err := runChatProject(cmd, options); err != nil {
+		t.Fatalf("providerless local workspace failed: %v", err)
+	}
+	if text := strings.Join(notices, "\n"); !reached || !strings.Contains(text, "AI provider is not configured") || !strings.Contains(text, "Open data and New query work locally") || !strings.Contains(text, "Settings → AI") {
+		t.Fatalf("workspace reached=%v, provider recovery notices=%q", reached, text)
 	}
 }
 

@@ -1,12 +1,12 @@
 ---
 format: https://specscore.md/feature-specification
-status: Draft
+status: Implementing
 ---
 
 # Feature: Unified terminal workspace and API observability
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/unified-tui?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/unified-tui?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/unified-tui?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/unified-tui?op=request-change) |
-**Status:** Draft
+**Status:** Implementing
 **Source Ideas:** —
 
 ## Summary
@@ -20,6 +20,8 @@ Separate default-navigation and chat programs make the composer, selected result
 ## Behavior
 
 The [implementation plan](../../plans/unified-tui/README.md) maps every acceptance criterion to work and evidence.
+
+The [implementation checklist](implementation-checklist.md) records the preserved source audit, partial coverage and remaining delivery work.
 
 ### Workspace, focus and identity
 
@@ -39,7 +41,8 @@ Global bindings and visible controls are:
 
 | Key | Action |
 | --- | --- |
-| F1 | Contextual hotkeys dialog, always visibly advertised |
+| F1 | Contextual hotkeys dialog, always visibly advertised (header when toolbar hidden) |
+| Alt+F1 / Ctrl+F1 | Show/hide bottom hotkey toolbar outside dialogs; recover content height, retain operational feedback and visible header F1 |
 | F3 | Project switcher |
 | F4 | Composer |
 | F5 | General web workspace |
@@ -80,7 +83,7 @@ Related lists authoritative relationships with numbered hints, for example `1 Cu
 
 A related preview/navigation reads related records through the secure policy executor and authoritative relationship metadata; it is distinct from JOIN. Both outgoing parent and incoming child relationships must be supported to deliver the Customer and InvoiceLine examples. Empty, denied, incomplete-key and unsupported-source cases are explicit. Preserve the originating result and row target, provide return navigation, and reject late responses after session/result/row/relationship changes or cancellation. Never guess foreign keys or silently apply a JOIN to simulate navigation.
 
-Quick JOIN opens an explicit numbered candidate picker through a modified prefix. Alt+J is the proposed primary pending terminal verification. The user's Ctrl+J proposal is only eligible where the terminal differentiates it from LF/Enter; Enter must never trigger JOIN. Bare `j` searches. Candidate IDs/numbers come from the authoritative join resolver, remain stable while choosing, and support arrows/Enter and Esc cancellation. Applying a chosen candidate uses the existing secure apply path, retains source and parameters, and produces immutable derived-result lineage while retaining the original. Context changes invalidate the picker and in-flight response.
+Quick JOIN opens an explicit numbered candidate picker through a modified prefix. Alt+J is the verified primary binding. Ctrl+J is disabled because the current terminal decoder maps legacy LF to the same event; LF/Enter must never trigger JOIN. Bare `j` searches. Candidate IDs/numbers come from the authoritative join resolver, remain stable while choosing, and support arrows/Enter and Esc cancellation. Applying a chosen candidate uses the existing secure apply path, retains source and parameters, and produces immutable derived-result lineage while retaining the original. Context changes invalidate the picker and in-flight response.
 
 ### Grouping loaded rows or running a derived query
 
@@ -91,7 +94,9 @@ Two explicit actions are always distinguished:
 - **Group loaded ↵**: Enter groups only the displayed result's loaded snapshot locally, with no query or network activity. Show the loaded-row count and any partial/limited scope. Preserve the original RecordSet and make the presentation reversible.
 - **Run on server ⇧↵**: Shift+Enter derives a grouping query and executes it through the policy executor. Show the exact derived query, selected keys and explicit aggregates BEFORE enabling this action; retain source/parameters and create a new immutable result with parent lineage. Unsupported derivation disables the action with a reason; no silent local/server fallback.
 
-**Cancel Esc** discards pending choices. An empty group selection disables both apply actions. Composer Shift+Enter remains newline; the modified Enter action is local to the grouping/sorting dialog context. No unrequested SUM or other aggregate is inferred. The dialog offers explicit aggregates, including Count, or a key-only grouped view; the preview states which is selected and how it treats nulls.
+**Cancel Esc** discards pending choices. An empty group selection disables both apply actions. Composer Shift+Enter remains newline; the modified Enter action is local to the grouping/sorting dialog context. COUNT(*) starts enabled. Authoritative float/decimal measures and integer measures proven to be neither primary nor foreign keys start with SUM; unknown relationship metadata never proves that an integer is a non-key. Grouping keys are excluded from aggregates. Defaults remain visible and editable, and changing keys preserves deliberate overrides when they remain valid.
+
+With a column row selected, S selects SUM for a numeric measure, C selects COUNT(column), M selects MIN then MAX, and X removes its aggregate. COUNT(*) is a separate row and cannot become SUM(*). Focused filter input accepts these letters literally. Unsupported SUM types and AVG show a reason. Visible row hints and the exact server preview show every operation before application.
 
 Local semantics: group keys are ordered tuples of typed values, never joined display strings. Null equals null for grouping, is distinct from missing/unavailable values and from empty string, zero or false. Preserve declared type identity; any numeric normalization must be lossless within that declared type. Composite keys compare every component. Group order follows first occurrence in the loaded snapshot unless explicitly sorted; constituent rows preserve original order. Count counts rows; other explicitly selected aggregates document supported input types/null handling and reject unsupported values rather than guessing. Grouping is a derived presentation of a captured snapshot; incoming pages or changed result versions require an explicit refresh/reapply, never silently changing the grouped scope.
 
@@ -118,7 +123,9 @@ Already aggregated queries under **Original query output** retain their existing
 
 Verification must include data where a loaded subset and all matching source rows differ: for example, load two of six filtered rows containing multiple group keys, then show local grouping/counts over two rows versus Matching source rows grouping over six before the output cap. For sort, include a highest-valued row outside the original loaded/limited subset and prove that server matching-source descending sort can return it while local or Original query output sorting cannot. Preview and actual submitted query must agree about LIMIT and aggregate treatment.
 
-Separate quick ascending and quick descending actions are required for the selected column. Alt+Up / Alt+Down are proposed bindings awaiting terminal/conflict validation. These quick actions apply the same loaded-row sort contract, with visible direction and a route to the full dialog for server execution and multi-column priorities.
+Explicit SUM/COUNT(column)/MIN/MAX server measures use bounded typed aggregation over policy-admitted rows from a direct single-source original. INTEGER/DECIMAL sums remain exact; finite FLOAT sums use sequential IEEE754 arithmetic. Input row/byte budgets are hard errors rather than partial aggregates. Existing inner aggregates/HAVING, joins or unsupported types refuse this exact path; no opaque native SQL or generic float aggregation substitutes for it. The preview identifies this evaluator separately from native server ordering.
+
+Separate quick ascending and quick descending actions are required for the selected column. Alt+Shift+Up / Alt+Shift+Down are the selected loaded-row bindings and follow the same local ordering contract. Ctrl+Shift+Up / Ctrl+Shift+Down opens the selected-column ascending/descending server-sort preview; execution still requires the preview’s explicit Shift+Enter. The full dialog retains server execution and multi-column priorities.
 
 ### API overview
 
@@ -182,7 +189,7 @@ Alt+G supports stable column numbers, filtering, multi-selection and persistent 
 
 ### AC: group-loaded
 
-Enter groups only the captured loaded rows with typed/null/composite semantics, visible scope/count, no network, no inferred aggregates, deterministic order and reversible original result; later pages require explicit reapply.
+Enter groups only the captured loaded rows with typed/null/composite semantics, visible scope/count and editable COUNT/SUM defaults, no network, deterministic order and reversible original result; later pages require explicit reapply. Integer and decimal SUM remain exact, finite floats use documented floating-point semantics, and unsupported values fail explicitly. Automatic integer SUM excludes authoritative primary and foreign keys; grouping keys never silently retain SUM. Row-scoped S/C/M controls do not intercept filter text.
 
 ### AC: group-server
 
@@ -222,7 +229,7 @@ Grid Shift+Enter reports unavailable while composer Shift+Enter inserts newline 
 
 ## Open Questions
 
-- **Terminal key compatibility:** implementation owner validates proposed Enter/Alt+A/Ctrl+N Explorer bindings, Alt+J primary JOIN, optional distinguishable Ctrl+J, and Alt+Up/Down quick sorting before advertising them. Accepted behaviors and visible alternatives remain mandatory; unresolved chords cannot silently replace them or collide with editable input.
+- **Terminal key compatibility:** implementation owner validates proposed Enter/Alt+A/Ctrl+N Explorer bindings, Alt+J primary JOIN (Ctrl+J disabled for the verified LF ambiguity), and Alt+Shift+Up/Down loaded sorting plus Ctrl+Shift+Up/Down server-sort preview before advertising them. Accepted behaviors and visible alternatives remain mandatory; unresolved chords cannot silently replace them or collide with editable input.
 - **Server scope defaults and derivation support:** Tasks 7–8 validate the proposed Matching source rows default for simple queries and Original query output default for aggregated queries, with user-visible scope selection and exact LIMIT/aggregate preview. These are proposed implementation choices, not user-set LIMIT placement. Record supported source/query shapes and explicit refusals; reaggregation of existing aggregates/HAVING needs its own verified mapping.
 - **Deferred follow-ups:** exact selected-result browser addressing and nested Inspect ancestor paths require separate specifications before implementation.
 

@@ -1,11 +1,11 @@
 ---
 format: https://specscore.md/plan-specification
-status: Draft
+status: Executing
 ---
 
 # Plan: Deliver the unified terminal workspace
 
-**Status:** Draft
+**Status:** Executing
 **Source Feature:** unified-tui
 **Date:** 2026-10-12
 **Owner:** alex
@@ -28,7 +28,7 @@ status: Draft
 | Observe requests, including waiting stream | True listener state and request metrics update without extra user action | 9 |
 | Return and use help/session controls | Context retained; visible shortcuts match terminal delivery | 10–11 |
 
-This is a docs-only planning deliverable. The feature and plan remain Draft pending review. All tasks below are planning work items; earlier partial implementation is input to audit, not proof that a task is complete. No source release, production acceptance or selected-result web handoff is claimed by writing or linting this plan.
+The feature and plan passed independent adversarial review and landed in PR #367 at 57d9279. Implementation has begun with shared focus/input/layout and routing regressions (Tasks 2 and 10). Earlier partial source is retained and audited; no task is complete without its required evidence, and no source release or selected-result web handoff is claimed.
 
 ## Approach
 
@@ -58,6 +58,7 @@ Implementation choices include the telemetry bucket/history sizes, exact shared 
 
 ### Task 1: Audit partial work and define compatible component seams
 
+**Id:** task-1
 **Verifies:** unified-tui#ac:preserved-flows, unified-tui#ac:deferred-boundary
 **Status:** planning
 **Owner:** coordinator with shared-TUI and CLI implementation owners
@@ -69,8 +70,9 @@ Compare preserved worktree diffs to freshly fetched origin/main and the complete
 
 ### Task 2: Shared neutral presentation, workspace layout and exclusive focus
 
+**Id:** task-2
 **Verifies:** unified-tui#ac:visual-focus, unified-tui#ac:panel-navigation, unified-tui#ac:result-expansion, unified-tui#ac:preserved-flows
-**Status:** planning
+**Status:** in_progress
 **Owner:** shared-TUI implementation owner in tuigoff, then aichat
 **Depends on:** Task 1
 
@@ -80,6 +82,7 @@ Add opt-in neutral selection, column foreground highlighting, content-facing div
 
 ### Task 3: Integrate default/ui/chat into one workspace
 
+**Id:** task-3
 **Verifies:** unified-tui#ac:workspace-entry, unified-tui#ac:inspector-identity, unified-tui#ac:preserved-flows
 **Status:** planning
 **Owner:** CLI workspace implementation owner
@@ -91,6 +94,7 @@ Host existing Projects/Viewers/Settings and ChatUI in one program with persisten
 
 ### Task 4: Instant search and explicit Explorer actions
 
+**Id:** task-4
 **Verifies:** unified-tui#ac:instant-search, unified-tui#ac:explorer-actions
 **Status:** planning
 **Owner:** CLI workspace owner with shared input owner
@@ -102,6 +106,7 @@ Route first printable input/digits to focused tree/grid search and remove bare w
 
 ### Task 5: Retained Inspect, actions and related-record navigation
 
+**Id:** task-5
 **Verifies:** unified-tui#ac:inspector-identity, unified-tui#ac:related-navigation
 **Status:** planning
 **Owner:** CLI query/inspection implementation owner
@@ -113,17 +118,19 @@ Add F10 Related and Alt+A Actions heading focus with visible hints. Resolve auth
 
 ### Task 6: Explicit quick JOIN picker
 
+**Id:** task-6
 **Verifies:** unified-tui#ac:quick-join
 **Status:** planning
 **Owner:** CLI query implementation owner
 **Depends on:** Tasks 4–5
 
-Use the authoritative candidate resolver and existing secure apply path. Provide stable numbered choices, arrows/Enter and Esc cancellation; retain source/parameters and immutable parent lineage. Alt+J is proposed primary; only expose Ctrl+J where measured terminal events distinguish it from Enter/LF.
+Use the authoritative candidate resolver and existing secure apply path. Provide stable numbered choices, arrows/Enter and Esc cancellation; retain source/parameters and immutable parent lineage. Alt+J is the verified primary. Ctrl+J is disabled: the pinned terminal decoder maps legacy LF to the same Ctrl+J event.
 
-**Evidence:** native key event captures and dispatcher tests for Alt+J/Ctrl+J/Enter; no accidental JOIN on Enter or bare j; ambiguous/denied/multiple candidates, parameter retention, original-result preservation and stale session/selection responses. Cancellation makes no apply call.
+**Evidence:** actual terminal key captures and decoder-to-shell tests for Alt+J and LF/Ctrl+J/Enter; no accidental JOIN on Enter or bare j; ambiguous/denied/multiple candidates, parameter retention, original-result preservation and stale session/selection responses. Cancellation makes no apply call.
 
 ### Task 7: Group by dialog, local snapshots and server derivation
 
+**Id:** task-7
 **Verifies:** unified-tui#ac:group-dialog, unified-tui#ac:group-loaded, unified-tui#ac:group-server
 **Status:** planning
 **Owner:** CLI result-operation owner with shared chooser owner
@@ -131,21 +138,23 @@ Use the authoritative candidate resolver and existing secure apply path. Provide
 
 Build the reusable numbered/filterable multi-select chooser. Alt+G exposes persistent selected keys, explicit aggregates and hinted Group loaded / Run on server / Cancel buttons. Implement typed/null/composite snapshot grouping and reset; implement structural server derivation with preview and source/parameter retention. Capture loaded scope before transformation; changed/paged results require reapply. Implement the feature’s explicit server-scope selector and query preview: proposed Matching source rows default for simple queries moves the original LIMIT to the derived output; Original query output retains it inside a subquery and is the proposed default for existing aggregated queries. Label input counts as unknown when not measured, LIMIT placement and retained/replaced grouping/aggregates/HAVING. Reject unsupported reaggregation/wrapping and invalidate preview after any scope change.
 
-**Evidence:** chooser filtering keeps IDs/selection across hidden matches and literal-digit filter input; zero/one/many keys, null vs missing/empty/zero, composite delimiter collisions, precision and declared types; explicit Count and no inferred sums. Executor/network counters stay zero for local operations. Real fixtures must make scope observable: six filtered source rows with multiple keys, only two loaded, yield local counts over two versus matching-source counts over six before the output cap; original-query-output scope remains bounded as previewed. Cover parameters, aliases, LIMIT and pre-existing aggregation; compare preview to submitted query and prove original/child lineage, policy denials, cancellation and stale-response rejection. Unsupported derivations do not execute. Composer Shift+Enter remains newline.
+**Evidence:** chooser filtering keeps IDs/selection across hidden matches and literal-digit filter input; zero/one/many keys, null vs missing/empty/zero, composite delimiter collisions, precision and declared types. COUNT(*) and eligible SUM start enabled and editable; authoritative PK/FK integer exclusions and unknown-metadata refusals are tested. Row-scoped S/C/M commands preserve literal filter typing, valid overrides survive key changes, and grouping keys cannot retain SUM. Exact integer/decimal and finite float sums use the typed bounded kernel. Executor/network counters stay zero for local operations. Real fixtures must make scope observable: six filtered source rows with multiple keys, only two loaded, yield local counts over two versus matching-source counts over six before the output cap; original-query-output scope remains bounded as previewed. Cover parameters, aliases, LIMIT and pre-existing aggregation; compare preview to submitted query and prove original/child lineage, policy denials, cancellation and stale-response rejection. Unsupported derivations do not execute. Composer Shift+Enter remains newline.
 
 ### Task 8: Sort dialog, stable local order and server ORDER BY
 
+**Id:** task-8
 **Verifies:** unified-tui#ac:sort-dialog, unified-tui#ac:sort-loaded, unified-tui#ac:sort-server
 **Status:** planning
 **Owner:** CLI result-operation owner with shared chooser owner
 **Depends on:** Task 7 for chooser/derivation reuse
 
-Reuse chooser structure with per-column direction and explicit priority controls. Implement reversible loaded-snapshot stable sorting; preview and securely execute supported ORDER BY derivation with the same explicit server scope, LIMIT placement and aggregate-treatment contract. Validate the proposed defaults/support matrix rather than treating one LIMIT placement as mandated. Add distinct quick ascending/descending actions on the selected column; validate proposed Alt+Up/Down conflicts before adoption. Label local and server-native ordering honestly.
+Reuse chooser structure with per-column direction and explicit priority controls. Implement reversible loaded-snapshot stable sorting; preview and securely execute supported ORDER BY derivation with the same explicit server scope, LIMIT placement and aggregate-treatment contract. Validate the proposed defaults/support matrix rather than treating one LIMIT placement as mandated. Add distinct quick ascending/descending actions on the selected column; validate Alt+Shift+Up/Down for loaded sorting and Ctrl+Shift+Up/Down for server-sort preview. The preview never executes until its explicit Shift+Enter. Label local and server-native ordering honestly.
 
 **Evidence:** equal-key stable ties in both directions, mixed directions/priorities, exact numerics, null/missing/type/text/temporal/binary cases, unsupported-type errors and reset to original order. No network for local sort. A server fixture includes a highest-valued row outside the loaded/original limited subset: Matching source rows descending sort returns it; local and Original query output sorts cannot. Real server cases prove the selected scope, aliases/parameters and previewed LIMIT/grouping treatment or explicit refusal, preview equivalence, new immutable lineage and stale/cancel handling. Native chord captures and selected-column visual evidence validate quick actions.
 
 ### Task 9: Actual API telemetry and existing Monitor integration
 
+**Id:** task-9
 **Verifies:** unified-tui#ac:api-observability, unified-tui#ac:api-security-compatibility
 **Status:** planning
 **Owner:** CLI server/telemetry implementation owner
@@ -157,17 +166,19 @@ Instrument BrowserBridge and HTTP listeners outside authorization guards and ren
 
 ### Task 10: Contextual help, visible controls and terminal conflict matrix
 
+**Id:** task-10
 **Verifies:** unified-tui#ac:help-session-shortcuts, unified-tui#ac:deferred-boundary, unified-tui#ac:visual-focus, unified-tui#ac:panel-navigation
-**Status:** planning
+**Status:** in_progress
 **Owner:** CLI interaction/QA owner
 **Depends on:** Tasks 4–9
 
-Generate hints/help from context bindings and expose important clickable actions, session selection and /switch. Verify all accepted function keys, Shift navigation and dialog button hints. Resolve proposed bindings with terminal measurements; record supported terminal/OS/modifier configuration and visible alternatives for intercepted keys. Preserve editable text and the feature’s explicit selection alternative; Shift arrows navigate workspace panels/history outside modals. Verify modal-first dispatch, F1 nesting, blocked modal F4/workspace globals, search clear/exit before expansion restore, and one action per key. Grid Shift+Enter remains unavailable; composer Shift+Enter is newline; F5 remains general workspace.
+Implement per-workspace Alt+F1 toolbar visibility (Ctrl+F1 alias), reclaim its rows while retaining operational alerts and header F1; dialogs keep modal priority. Generate hints/help from context bindings and expose important clickable actions, session selection and /switch. Verify all accepted function keys, Shift navigation and dialog button hints. Resolve proposed bindings with terminal measurements; record supported terminal/OS/modifier configuration and visible alternatives for intercepted keys. Preserve editable text and the feature’s explicit selection alternative; Shift arrows navigate workspace panels/history outside modals. Verify modal-first dispatch, F1 nesting, blocked modal F4/workspace globals, search clear/exit before expansion restore, and one action per key. Grid Shift+Enter remains unavailable; composer Shift+Enter is newline; F5 remains general workspace.
 
 **Evidence:** key matrix for Explorer, grid, composer/editor, Inspect/Related/Actions, search and each modal, including terminal Option/Alt settings and legacy Ctrl+J ambiguity. Combined-state cases include composer + Shift arrows preserving drafts, search + expansion + three Esc presses, modal + search + expansion + four Esc presses, F1 help above a modal, blocked modal F4, and Group/Sort filter focus + Shift+Enter executing only the previewed dialog action. Real terminal mouse and keyboard runs, F1 advertising at narrow widths, focus restore after cancel, session/project changes and unavailable-action explanations. Browser prototype key tests are supplementary only.
 
 ### Task 11: Whole journey, adversarial review, published dependencies and delivery
 
+**Id:** task-11
 **Verifies:** unified-tui#ac:terminal-journey, unified-tui#ac:preserved-flows, unified-tui#ac:deferred-boundary
 **Status:** planning
 **Owner:** QA/reviewer for evidence; parent/coordinator for landing and releases

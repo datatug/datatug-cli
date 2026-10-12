@@ -52,12 +52,12 @@ func TestChatUISelectedTabInspectsFocusedGridRowColumnRecordSet(t *testing.T) {
 	if !strings.Contains(view, "Row 1 of 1") || !strings.Contains(view, "InvoiceId") || !strings.Contains(view, "INTEGER") {
 		t.Fatalf("expected row details with catalog type in view:\n%s", view)
 	}
-	if !strings.Contains(view, "● 1 Current row") {
+	if !strings.Contains(view, "[Current row]") {
 		t.Fatalf("expected sub-tab header to mark row selected:\n%s", view)
 	}
 
 	// "2" switches to current column.
-	u.workspace.updateKey(tea.KeyPressMsg{Code: '2', Text: "2"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
 	if u.workspace.inspectorSubTab != 1 {
 		t.Fatalf("expected inspectorSubTab 1 after pressing 2, got %d", u.workspace.inspectorSubTab)
 	}
@@ -70,7 +70,7 @@ func TestChatUISelectedTabInspectsFocusedGridRowColumnRecordSet(t *testing.T) {
 	}
 
 	// "3" switches to current recordset.
-	u.workspace.updateKey(tea.KeyPressMsg{Code: '3', Text: "3"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
 	if u.workspace.inspectorSubTab != 2 {
 		t.Fatalf("expected inspectorSubTab 2 after pressing 3, got %d", u.workspace.inspectorSubTab)
 	}
@@ -83,7 +83,7 @@ func TestChatUISelectedTabInspectsFocusedGridRowColumnRecordSet(t *testing.T) {
 	}
 
 	// "1" switches back to current row.
-	u.workspace.updateKey(tea.KeyPressMsg{Code: '1', Text: "1"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
 	if u.workspace.inspectorSubTab != 0 {
 		t.Fatalf("expected inspectorSubTab 0 after pressing 1, got %d", u.workspace.inspectorSubTab)
 	}
@@ -120,11 +120,11 @@ func TestChatUISelectedTabUpDownScrollsInspectorOffset(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.tab = 1
 	u.workspace.inspectorOffset = 3
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	if u.workspace.inspectorOffset != 2 {
 		t.Fatalf("expected up/k to decrement inspectorOffset to 2, got %d", u.workspace.inspectorOffset)
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyDown})
 	if u.workspace.inspectorOffset != 3 {
 		t.Fatalf("expected down/j to increment inspectorOffset to 3, got %d", u.workspace.inspectorOffset)
 	}

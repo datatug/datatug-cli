@@ -62,7 +62,10 @@ type Row struct {
 // principal is allowed to see, and the limitations that applied to produce
 // them.
 type Result struct {
-	Columns     []string
+	Columns []string
+	// ColumnTypes is optional executor-owned output metadata. Derived values
+	// have types without asserting physical entity or key provenance.
+	ColumnTypes map[string]string
 	Rows        []Row
 	Statistics  RecordSetStatistics
 	Limitations []Limitation

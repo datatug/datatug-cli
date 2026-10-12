@@ -2,8 +2,12 @@ package accesspolicies
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"math/big"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -160,6 +164,11 @@ func prepareRead(ctx context.Context, query dal.Query, o Options) (context.Conte
 	if len(o.Policies) == 0 && !o.Unrestricted {
 		return ctx, Result{}, ErrNoPolicies
 	}
+	var err error
+	o.Variables, err = ExactVariables(o.Variables)
+	if err != nil {
+		return ctx, Result{}, err
+	}
 	bindings := map[string]any{}
 	for name, value := range o.Variables {
 		bindings[name] = value
@@ -173,7 +182,7 @@ func prepareRead(ctx context.Context, query dal.Query, o Options) (context.Conte
 	if len(o.Variables) > 0 {
 		ctx = access.WithVariables(ctx, o.Variables)
 	}
-	query, err := substituteParams(query, o.Variables)
+	query, err = substituteParams(query, o.Variables)
 	if err != nil {
 		return ctx, Result{}, err
 	}
@@ -195,4 +204,103 @@ func prepareRead(ctx context.Context, query dal.Query, o Options) (context.Conte
 		}
 	}
 	return ctx, result, nil
+}
+
+// ExactVariables adapts persisted JSON numbers to executor numeric values.
+// Fractional JSON values require exact binary representation until the
+// selected executor supports a decimal binding type; never turn them into SQL
+// strings or silently round them. Ordinary driver float values stay floats.
+func ExactVariables(variables map[string]any) (map[string]any, error) {
+	result := make(map[string]any, len(variables))
+	var convert func(any, int) (any, error)
+	convert = func(value any, depth int) (any, error) {
+		if depth > 64 {
+			return nil, fmt.Errorf("parameter nesting exceeds 64 levels")
+		}
+		switch value := value.(type) {
+		case int64:
+			if value <= -9007199254740992 || value >= 9007199254740992 {
+				return nil, fmt.Errorf("integer binding exceeds the executor's exact comparison range")
+			}
+			return value, nil
+		case uint64:
+			if value >= 9007199254740992 {
+				return nil, fmt.Errorf("integer binding exceeds the executor's exact comparison range")
+			}
+			return value, nil
+		case int:
+			return convert(int64(value), depth+1)
+		case uint:
+			return convert(uint64(value), depth+1)
+		case float32:
+			return convert(float64(value), depth+1)
+		case float64:
+			if math.IsNaN(value) || math.IsInf(value, 0) || math.Abs(value) >= 9007199254740992 {
+				return nil, fmt.Errorf("numeric binding exceeds the executor's exact comparison range")
+			}
+			return value, nil
+		case json.Number:
+			if integer, err := value.Int64(); err == nil {
+				return convert(integer, depth+1)
+			}
+			exact, ok := new(big.Rat).SetString(value.String())
+			if !ok || exact.IsInt() {
+				return nil, fmt.Errorf("exact numeric binding is unsupported")
+			}
+			floating, err := value.Float64()
+			if err != nil {
+				return nil, fmt.Errorf("exact numeric binding is unsupported")
+			}
+			actual := new(big.Rat).SetFloat64(floating)
+			if actual == nil || actual.Cmp(exact) != 0 {
+				return nil, fmt.Errorf("exact decimal binding is unsupported")
+			}
+			return floating, nil
+		case []byte:
+			return append([]byte(nil), value...), nil
+		case []any:
+			copyValues := make([]any, len(value))
+			for i, item := range value {
+				var err error
+				copyValues[i], err = convert(item, depth+1)
+				if err != nil {
+					return nil, err
+				}
+			}
+			return copyValues, nil
+		default:
+			rv := reflect.ValueOf(value)
+			if rv.IsValid() {
+				switch rv.Kind() {
+				case reflect.Slice, reflect.Array:
+					values := make([]any, rv.Len())
+					for i := range values {
+						var err error
+						values[i], err = convert(rv.Index(i).Interface(), depth+1)
+						if err != nil {
+							return nil, err
+						}
+					}
+					return values, nil
+				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+					return convert(rv.Int(), depth+1)
+				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+					return convert(rv.Uint(), depth+1)
+				case reflect.Float32, reflect.Float64:
+					return convert(rv.Float(), depth+1)
+				case reflect.Map, reflect.Pointer, reflect.Interface, reflect.Struct:
+					return nil, fmt.Errorf("unsupported parameter container or custom value")
+				}
+			}
+			return value, nil
+		}
+	}
+	for name, value := range variables {
+		converted, err := convert(value, 0)
+		if err != nil {
+			return nil, fmt.Errorf("%w: parameter %q: %w", ErrInvalidQuery, name, err)
+		}
+		result[name] = converted
+	}
+	return result, nil
 }

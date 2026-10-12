@@ -11,7 +11,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
-func TestChatUIF4OpensSessionPickerAndSwitches(t *testing.T) {
+func TestChatUIF4FocusesComposerAndSessionsCommandSwitches(t *testing.T) {
 	ctx := context.Background()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	firstID := u.sessionID
@@ -29,21 +29,19 @@ func TestChatUIF4OpensSessionPickerAndSwitches(t *testing.T) {
 	}
 	u.loadSession(snapshot)
 
-	cmd, consumed := u.globalKeys(tea.KeyPressMsg{Code: tea.KeyF4})
-	if !consumed {
-		t.Fatal("expected F4 to be consumed by globalKeys")
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF4})
+	if u.shell.WorkspaceFocus() != "input" {
+		t.Fatalf("F4 should focus the composer, got %q", u.shell.WorkspaceFocus())
 	}
-	drainCmd(t, u, cmd)
 
+	drainCmd(t, u, u.Submit("/sessions"))
 	view := u.shell.View().Content
-	if !strings.Contains(view, "Sessions") {
-		t.Fatalf("expected session picker overlay in view:\n%s", view)
+	if !strings.Contains(view, "Sessions (use /switch <ID>)") || !strings.Contains(view, second.ID[:8]) {
+		t.Fatalf("/sessions did not list the second session:\n%s", view)
 	}
-	// Move down to the second session and press enter to switch.
-	u.shell.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	drainCmd(t, u, u.Submit("/switch "+second.ID[:8]))
 	if u.sessionID != second.ID {
-		t.Fatalf("expected F4 Enter to switch to the second session, got %s (want %s)", u.sessionID, second.ID)
+		t.Fatalf("/switch from the listed sessions did not select the second session: got %s (want %s)", u.sessionID, second.ID)
 	}
 }
 
@@ -77,7 +75,7 @@ func TestChatUIF3NoOpWithoutChoices(t *testing.T) {
 		t.Fatal("expected F3 to be consumed even with no project choices (no-op)")
 	}
 	view := u.shell.View().Content
-	if strings.Contains(view, "Projects") {
+	if u.shell.ActiveOverlayHints() != nil || u.shell.WorkspaceFocus() != "input" {
 		t.Fatalf("expected no project picker overlay without choices:\n%s", view)
 	}
 }
@@ -150,15 +148,15 @@ func TestChatUIProjectPickerDownThenEnterSelectsSecondChoice(t *testing.T) {
 	}
 }
 
-// TestChatUIAltSCyclesAllTablesAndRestoresSessionStyle is ported from
+// TestChatUIAltShiftSCyclesAllTablesAndRestoresSessionStyle is ported from
 // ui_test.go's TestAltSCyclesAllTablesAndRestoresSessionStyle: same
-// scenario (Alt+S cycles every tracked grid's style, persists it, a new/
+// scenario (Alt+Shift+S cycles every tracked grid's style, persists it, a new/
 // reopened session picks it up), driven through ChatUI's real production
 // wiring instead of u.entries/u.tableStyle/u.styleNotice/u.statusLines.
 // The self-expiring shortcut-hint swap (tableStyleNoticeExpired) has no
 // ChatUI equivalent — see cycleTableStyle's own comment — so this checks
 // the AppendAssistant confirmation it uses instead.
-func TestChatUIAltSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
+func TestChatUIAltShiftSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -177,13 +175,9 @@ func TestChatUIAltSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
 	if len(u.gridsByRecordSetID) != 2 {
 		t.Fatalf("expected 2 grids before cycling style, got %d", len(u.gridsByRecordSetID))
 	}
-	cmd, consumed := u.globalKeys(tea.KeyPressMsg{Code: 's', Mod: tea.ModAlt})
-	if !consumed {
-		t.Fatal("expected Alt+S to be consumed by globalKeys")
-	}
-	drainCmd(t, u, cmd)
+	u.shell.Update(tea.KeyPressMsg{Code: 'S', Mod: tea.ModAlt})
 	if u.tableStyle.Name != grid.StyleSoft.Name {
-		t.Fatalf("style after Alt+S = %s, want Soft", u.tableStyle.Name)
+		t.Fatalf("style after Alt+Shift+S = %s, want Soft", u.tableStyle.Name)
 	}
 	if !strings.Contains(u.shell.View().Content, "Table style: Soft") {
 		t.Fatalf("expected a style-change confirmation in view:\n%s", u.shell.View().Content)
@@ -211,17 +205,17 @@ func TestChatUIAltSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
 	}
 }
 
-// TestChatUIMacOptionSCyclesTableStyle is ported from
-// ui_test.go's TestMacOptionSCyclesTableStyle.
-func TestChatUIMacOptionSCyclesTableStyle(t *testing.T) {
+// TestChatUIMacOptionShiftSCyclesTableStyle is ported from
+// ui_test.go's TestMacOptionSCyclesTableStyle using the current shortcut.
+func TestChatUIMacOptionShiftSCyclesTableStyle(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
-	cmd, consumed := u.globalKeys(tea.KeyPressMsg{Code: 'ß', Text: "ß"})
-	if !consumed {
-		t.Fatal("expected ß (Option+S) to be consumed by globalKeys")
+	u.shell.Update(tea.KeyPressMsg{Code: 'ß', Text: "ß"})
+	if !strings.Contains(u.shell.View().Content, "ß") {
+		t.Fatal("bare ß was not retained as printable composer text")
 	}
-	drainCmd(t, u, cmd)
+	u.shell.Update(tea.KeyPressMsg{Code: 'S', Mod: tea.ModAlt})
 	if u.tableStyle.Name != grid.StyleSoft.Name {
-		t.Fatalf("style after Option+S = %s, want Soft", u.tableStyle.Name)
+		t.Fatalf("style after Option+Shift+S = %s, want Soft", u.tableStyle.Name)
 	}
 	if !strings.Contains(u.shell.View().Content, "Table style: Soft") {
 		t.Fatalf("expected a style-change confirmation in view:\n%s", u.shell.View().Content)

@@ -24,7 +24,7 @@ func TestChatUISlashHTTPGetWithURLSendsDirectly(t *testing.T) {
 		t.Fatal(err)
 	}
 	drainCmd(t, u, cmd)
-	view := u.shell.View().Content
+	view := ansi.Strip(u.shell.View().Content)
 	if !strings.Contains(view, "Ada") {
 		t.Fatalf("expected fetched JSON in view:\n%s", view)
 	}
@@ -117,7 +117,7 @@ func TestHTTPRequestOverlaySubmitsAndPersists(t *testing.T) {
 	if u.pendingHTTPRequest != nil {
 		t.Fatal("expected handleHTTPDone to clear pendingHTTPRequest")
 	}
-	view := u.shell.View().Content
+	view := ansi.Strip(u.shell.View().Content)
 	if !strings.Contains(view, "ok") {
 		t.Fatalf("expected fetched JSON in view:\n%s", view)
 	}
@@ -578,8 +578,7 @@ func TestHTTPDocumentBlockSaveAsQueryForNonTableResponse(t *testing.T) {
 }
 
 // Ported from TestHTTPTableHasRawAndHeadersTabs: a structured HTTP result's
-// grid exposes the same Raw/Headers ExtraViews (native tui/grid numeric-key
-// view switching) as any other DTQL grid.
+// grid exposes Raw/Headers through the advertised result Actions menu.
 func TestChatUIHTTPTableHasRawAndHeadersTabs(t *testing.T) {
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -611,13 +610,17 @@ func TestChatUIHTTPTableHasRawAndHeadersTabs(t *testing.T) {
 	if !u.shell.FocusEntry(u.lastGridEntryID) {
 		t.Fatal("HTTP grid not available")
 	}
-	u.shell.Update(tea.KeyPressMsg{Code: '4', Text: "4"})
+	gridActionJourney(t, u, "Raw response")
 	if !strings.Contains(flattenView(u.shell.View().Content), `"name":"Ada"`) {
 		t.Fatal("raw table response not visible")
 	}
-	u.shell.Update(tea.KeyPressMsg{Code: '5', Text: "5"})
+	gridActionJourney(t, u, "Response headers")
 	view := flattenView(u.shell.View().Content)
-	if !strings.Contains(view, "X-Data-Version") || !strings.Contains(view, "Time to response") {
-		t.Fatal("headers and timing tab not visible")
+	if !strings.Contains(view, "Time to response") {
+		t.Fatalf("headers and timing tab not visible:\n%s", view)
+	}
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
+	if view = flattenView(u.shell.View().Content); !strings.Contains(view, "X-Data-Version") {
+		t.Fatalf("saved response headers are not reachable by scrolling:\n%s", view)
 	}
 }

@@ -122,8 +122,8 @@ func TestRunNativeSQL_NamedArgBindsThroughDriver(t *testing.T) {
 	if got := result.Rows[0].Data["name"]; got != "book" {
 		t.Errorf("name = %v, want book", got)
 	}
-	if got := result.Rows[0].Data["price"]; got != float64(10) {
-		t.Errorf("price = %v (%T), want 10", got, got)
+	if got := result.Rows[0].Data["price"]; got != int64(10) {
+		t.Errorf("price = %v (%T), want int64(10)", got, got)
 	}
 }
 

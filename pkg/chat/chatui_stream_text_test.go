@@ -68,7 +68,7 @@ func TestChatUIStreamedGridTurnDoesNotLeakRawStreamedProse(t *testing.T) {
 	cmd := u.Submit("Find a Prague customer")
 	drainCmd(t, u, cmd)
 
-	view := u.shell.View().Content
+	view := flattenView(u.shell.View().Content)
 	for _, leaked := range []string{"let me pick the right table", "Checking the Customer table for Prague", "<think>", "Here you go"} {
 		if strings.Contains(view, leaked) {
 			t.Errorf("live view leaked stream-time text that the resolved turn dropped: %q in:\n%s", leaked, view)

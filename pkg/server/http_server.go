@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/apimonitor"
 	"log"
+	"net"
 	"net/http"
 	"time"
 
@@ -47,7 +49,8 @@ var (
 )
 
 type HttpServer struct {
-	s *http.Server
+	s       *http.Server
+	monitor *apimonitor.Monitor
 }
 
 func NewHttpServer() HttpServer {
@@ -58,7 +61,11 @@ func (s *HttpServer) Shutdown(ctx context.Context) error {
 	if s.s == nil {
 		return api.CloseExecutionEvidence()
 	}
-	return errors.Join(s.s.Shutdown(ctx), api.CloseExecutionEvidence())
+	err := errors.Join(s.s.Shutdown(ctx), api.CloseExecutionEvidence())
+	if err == nil && s.monitor != nil {
+		s.monitor.Stop(nil)
+	}
+	return err
 }
 
 // newDatatugStoreFactory builds the storage.NewDatatugStore implementation
@@ -113,7 +120,12 @@ func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storag
 // caps gates this process's write/opaque-SQL capabilities closed by default
 // (api.Capabilities's own doc comment) — see cmd_serve.go's --allow-writes/
 // --allow-opaque-sql flags.
-func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int, session secureread.Session, caps api.Capabilities) error {
+func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int, session secureread.Session, caps api.Capabilities) (err error) {
+	s.monitor, err = apimonitor.Default.NewServerChecked("HTTP API")
+	if err != nil {
+		return err
+	}
+	defer func() { s.monitor.Stop(err) }()
 	// A server serves the projects of a map, and a nil one is a server that serves none (a
 	// session counts as configured by having a map: see api.ConfigureSecureSession).
 	if pathsByID == nil {
@@ -205,11 +217,19 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 		ReadTimeout:    requestReadTimeout,
 		WriteTimeout:   responseWriteTimeout,
 		MaxHeaderBytes: 1 << 16,
-		Handler:        router,
+		Handler:        s.monitor.Wrap(router),
+		BaseContext: func(listener net.Listener) context.Context {
+			s.monitor.Live("http://" + listener.Addr().String())
+			return context.Background()
+		},
 	}
 	log.Printf("Serving on: http://%v:%v", agentHost, agentPort)
 
-	return listenAndServeFn(s.s)
+	err = listenAndServeFn(s.s)
+	if errors.Is(err, http.ErrServerClosed) {
+		err = nil
+	}
+	return err
 }
 
 func root(writer http.ResponseWriter, _ *http.Request) {

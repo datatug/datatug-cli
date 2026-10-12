@@ -45,6 +45,7 @@ type ChatUI struct {
 	sessions     *SessionChat
 	catalog      ProjectCatalog
 	modelName    string
+	hostedPlan   func(context.Context) (string, error)
 	tableStyle   grid.Style
 
 	sessionID string
@@ -223,6 +224,12 @@ func NewSessionChatUI(ctx context.Context, sessions *SessionChat, modelName stri
 func (u *ChatUI) SetSessionNotices(lines []string) {
 	u.sessionNotices = append([]string(nil), lines...)
 	u.loadSession(u.snapshot)
+}
+
+// SetHostedPlanLookup makes /plan fetch current server usage for a hosted
+// session. The callback remains outside the generic chat package's protocol.
+func (u *ChatUI) SetHostedPlanLookup(lookup func(context.Context) (string, error)) {
+	u.hostedPlan = lookup
 }
 
 // SetProjectChoices mirrors UI.SetProjectChoices.
@@ -436,7 +443,24 @@ func (u *ChatUI) OnStreamDone(id string, _ error) tea.Cmd {
 	}
 	u.shell.ReplaceBlock(id, finalTurnTextBlock{text: outcome.turn.Text})
 	u.appendTurnResults(outcome.turn)
+	if u.hostedPlan != nil {
+		return func() tea.Msg {
+			output, err := u.hostedPlan(u.ctx)
+			return hostedPlanMsg{output: output, err: err}
+		}
+	}
 	return nil
+}
+
+type hostedPlanMsg struct {
+	output  string
+	err     error
+	command *hostedPlanCommand
+}
+
+type hostedPlanCommand struct {
+	sessionID, interactionID string
+	userChars, userWords     int
 }
 
 // finalTurnTextBlock is a minimal transcript.Block that renders a turn's
@@ -576,6 +600,16 @@ func (u *ChatUI) chatWidth() int {
 // OnMsg satisfies chatshell.MsgHandler.
 func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case hostedPlanMsg:
+		if msg.command != nil && u.sessions != nil {
+			u.sessions.ReportCommand(msg.command.interactionID, msg.command.sessionID, "/plan", msg.command.userChars, msg.command.userWords, msg.err, true)
+		}
+		if msg.err != nil {
+			u.shell.AppendAssistant("Hosted AI usage is temporarily unavailable; use /plan to retry.")
+		} else {
+			u.shell.AppendAssistant(msg.output)
+		}
+		return nil
 	case browserOpenResultMsg:
 		// ui.go's browserOpenResult case: only a failed attempt for the
 		// still-current browserURL reveals the hyperlink fallback. A
@@ -808,6 +842,7 @@ var chatCommands = []chatshell.Command{
 	{Name: "/bucket", Help: "show or clear the export bucket"},
 	{Name: "/export", Help: "export current|bucket <format> <path>"},
 	{Name: "/settings", Help: "show or change result versions to keep"},
+	{Name: "/plan", Help: "refresh hosted plan and AI usage"},
 	// M5 (r1 adversarial review of #289): these were already handled by
 	// runCommand below, but missing from the "/" menu itself -- typing them
 	// out fully worked, but they weren't discoverable by opening "/" and
@@ -887,6 +922,21 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 		}
 	case "/help":
 		u.shell.AppendAssistant(chatHelpText)
+	case "/plan":
+		if argument != "" {
+			err = fmt.Errorf("usage: /plan")
+		} else if u.hostedPlan == nil {
+			err = fmt.Errorf("/plan is available in hosted cloud chat; use datatug plan outside chat")
+		} else {
+			u.activeCommandAsync = true
+			lookup := u.hostedPlan
+			ctx := u.ctx
+			commandInfo := &hostedPlanCommand{sessionID: commandSessionID, interactionID: interactionID, userChars: u.activeCommandChars, userWords: u.activeCommandWords}
+			cmd = func() tea.Msg {
+				output, lookupErr := lookup(ctx)
+				return hostedPlanMsg{output: output, err: lookupErr, command: commandInfo}
+			}
+		}
 	case "/bucket":
 		switch argument {
 		case "clear":
@@ -995,7 +1045,7 @@ func synchronousChatCommand(command string) bool {
 // Grid's "c cell" below. Documenting the old Inspector tab's keys here
 // would describe UI that does not exist; that is a real, separate feature
 // gap (not merely a help-text omission), left open.
-const chatHelpText = "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm • /bucket [clear] • /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path> • /connect • /http [new|GET|POST|PUT|PATCH|DELETE] [url] • /query [search] or /queries [search] • /settings versions <1-100>\n\n" +
+const chatHelpText = "Commands: /new • /sessions • /switch <ID> • /rename <title> • /clear confirm • /delete confirm • /bucket [clear] • /export current|bucket <csv|json|yaml|ingr|dbf|sqlite|xlsx> <path> • /connect • /http [new|GET|POST|PUT|PATCH|DELETE] [url] • /query [search] or /queries [search] • /settings versions <1-100> • /plan\n\n" +
 	"Global: Shift+Enter newline • F2 mouse select/wheel • F5 open web chat • F6/Shift+→ workspace • Shift+← previous • F3 projects • F4 sessions • Alt+S table style • Ctrl+D detach last attachment • Ctrl+←→ resize panes • Ctrl+G latest grid • Ctrl+C quit\n\n" +
 	"Composer: Tab/Shift+Tab select attachment chips • Backspace remove focused chip • Esc clear text, then attachments • Shift+Esc restore both\n\n" +
 	"Workspace: Tab/Shift+Tab switch tabs • ↑↓ navigate • ←→ collapse/expand tree • selection shows details below\n\n" +

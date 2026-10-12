@@ -1,0 +1,23 @@
+{
+  "error": {
+    "code": "quota",
+    "message": "A full sentence for a person: what happened and what to do."
+  },
+  "limit": {
+    "v": 1,
+    "reason": "free_budget",
+    "capped": false,
+    "unit": "questions",
+    "payer": "personal",
+    "accountId": "p7Xk2",
+    "accountTitle": "Alex Example",
+    "plan": "free",
+    "used": 0,
+    "limit": 7,
+    "left": 7,
+    "resetsAt": "2026-04-01T00:00:00Z",
+    "ownKeyWorks": true,
+    "canUpgrade": true,
+    "upgradeUrl": "https://example.com/pricing"
+  }
+}

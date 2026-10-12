@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -110,7 +111,11 @@ func TestCovDRunChatProjectCloud(t *testing.T) {
 	restoreSettings := getChatSettings
 	t.Cleanup(func() { getChatSettings = restoreSettings })
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v0/datatug/plan" {
+			_, _ = w.Write(contractFixture(t, "plan-response-free.json"))
+			return
+		}
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	t.Cleanup(srv.Close)
@@ -135,6 +140,96 @@ func TestCovDRunChatProjectCloud(t *testing.T) {
 		_, err := runChatProject(chatCommand(), chatOptions{project: dir, env: "local", database: database, model: "cloud", baseURL: srv.URL + "/v0/", thinking: "low"})
 		require.NoError(t, err)
 	})
+}
+
+func TestHostedChatPreflightAndRefreshBranches(t *testing.T) {
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) { return nil, nil }))
+	good := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "tok", Expiry: time.Now().Add(time.Hour)})
+	var status, version, hits atomic.Int32
+	status.Store(http.StatusNotFound)
+	version.Store(1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v0/datatug/plan" {
+			t.Errorf("unexpected hosted request before work: %s", r.URL.Path)
+			return
+		}
+		hits.Add(1)
+		currentStatus := int(status.Load())
+		w.WriteHeader(currentStatus)
+		if currentStatus == http.StatusOK {
+			if version.Load() == 2 {
+				_, _ = w.Write([]byte(`{"v":2}`))
+			} else {
+				_, _ = w.Write(contractFixture(t, "plan-response-free.json"))
+			}
+		}
+	}))
+	defer server.Close()
+	options := chatOptions{project: writeChatRunProjectFixture(t), env: "local", model: "cloud", baseURL: server.URL + "/v0/", thinking: "low"}
+	for _, tc := range []struct {
+		name            string
+		status, version int
+		idFailure       bool
+		want            string
+	}{
+		{"absent endpoint", http.StatusNotFound, 1, false, "HTTP 404"},
+		{"installation failure after plan", http.StatusOK, 1, true, "configure cloud chat"},
+		{"unknown version refuses hosted AI", http.StatusOK, 2, false, "current plan version"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			covDCloudSeams(t, good)
+			status.Store(int32(tc.status))
+			version.Store(int32(tc.version))
+			if tc.idFailure {
+				covDSetVar(t, &chatUserConfigDir, func() (string, error) { return "", errors.New("config unavailable") })
+			}
+			before := hits.Load()
+			_, err := runChatProject(chatCommand(), options)
+			if tc.want != "" {
+				require.ErrorContains(t, err, tc.want)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, before+1, hits.Load())
+		})
+	}
+}
+
+func TestHostedChatPlanCommandUsesLiveLookup(t *testing.T) {
+	t.Cleanup(chat.SetRunTeaProgramForTest(func(*tea.Program) (tea.Model, error) { return nil, nil }))
+	good := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "tok", Expiry: time.Now().Add(time.Hour)})
+	covDCloudSeams(t, good)
+	var ui *chat.ChatUI
+	original := newSessionChatUI
+	covDSetVar(t, &newSessionChatUI, func(ctx context.Context, sessions *chat.SessionChat, model string) (*chat.ChatUI, error) {
+		created, err := original(ctx, sessions, model)
+		ui = created
+		return created, err
+	})
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v0/ai/interactions" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		if r.URL.Path != "/v0/datatug/plan" {
+			t.Errorf("unexpected request %s", r.URL.Path)
+			return
+		}
+		hits.Add(1)
+		_, _ = w.Write(contractFixture(t, "plan-response-free.json"))
+	}))
+	defer server.Close()
+	options := chatOptions{project: writeChatRunProjectFixture(t), env: "local", model: "cloud", baseURL: server.URL + "/v0/", thinking: "low"}
+	_, err := runChatProject(chatCommand(), options)
+	require.NoError(t, err)
+	require.NotNil(t, ui)
+	require.Equal(t, int32(1), hits.Load())
+	command := ui.Submit("/plan")
+	require.NotNil(t, command)
+	require.Equal(t, int32(1), hits.Load(), "network work ran in UI update")
+	ui.OnMsg(command())
+	require.Equal(t, int32(2), hits.Load())
 }
 
 func covDInteractionReport() cloudproto.InteractionReport {

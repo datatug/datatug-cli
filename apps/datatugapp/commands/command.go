@@ -66,6 +66,7 @@ func DatatugCommand() *cobra.Command {
 		compareCommand(),
 		incidentCommand(),
 		chatCommand(),
+		planCommand(),
 	)
 	return root
 }

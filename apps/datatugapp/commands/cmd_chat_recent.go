@@ -15,16 +15,21 @@ import (
 // Last-used chat options are local UI preferences, not project configuration.
 // In particular, API keys are never persisted here.
 type lastChatOptions struct {
-	Project  string   `json:"project,omitempty"`
-	Env      string   `json:"env,omitempty"`
-	Database string   `json:"database,omitempty"`
-	AI       string   `json:"ai,omitempty"`
-	Model    string   `json:"model,omitempty"`
-	BaseURL  string   `json:"base_url,omitempty"`
-	Thinking string   `json:"thinking,omitempty"`
-	As       string   `json:"as,omitempty"`
-	Roles    []string `json:"roles,omitempty"`
-	Groups   []string `json:"groups,omitempty"`
+	Project       string   `json:"project,omitempty"`
+	Env           string   `json:"env,omitempty"`
+	Database      string   `json:"database,omitempty"`
+	AI            string   `json:"ai,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	BaseURL       string   `json:"base_url,omitempty"`
+	Thinking      string   `json:"thinking,omitempty"`
+	As            string   `json:"as,omitempty"`
+	Roles         []string `json:"roles,omitempty"`
+	Groups        []string `json:"groups,omitempty"`
+	CloudModel    string   `json:"cloud_model,omitempty"`
+	CloudProject  string   `json:"cloud_project,omitempty"`
+	CloudIdentity string   `json:"cloud_identity,omitempty"`
+	CloudScope    string   `json:"cloud_scope,omitempty"`
+	CloudAPI      string   `json:"cloud_api,omitempty"`
 }
 
 // lastChatOptionsPath is a seam so tests never touch the real user config
@@ -145,6 +150,15 @@ func applyLastChatOptions(cmd *cobra.Command, options *chatOptions) error {
 	if !flags.Changed("group") {
 		options.groups = append([]string(nil), saved.Groups...)
 	}
+	if saved.CloudIdentity != "" {
+		if !flags.Changed("cloud-model") {
+			options.cloudModel = saved.CloudModel
+		}
+		if !flags.Changed("cloud-project") {
+			options.cloudProject = saved.CloudProject
+		}
+		options.cloudIdentity, options.cloudScope, options.cloudAPI = saved.CloudIdentity, saved.CloudScope, saved.CloudAPI
+	}
 	return nil
 }
 
@@ -177,6 +191,11 @@ func saveLastChatOptions(cmd *cobra.Command, options chatOptions) error {
 	}
 	if cmd.Flags().Changed("thinking") {
 		saved.Thinking = options.thinking
+	}
+	if options.model == "cloud" {
+		saved.CloudModel, saved.CloudProject = options.cloudModel, options.cloudProject
+		saved.CloudIdentity, saved.CloudScope = options.cloudIdentity, options.cloudScope
+		saved.CloudAPI = options.cloudAPI
 	}
 	data, err := lastChatMarshal(saved, "", "  ")
 	if err != nil {

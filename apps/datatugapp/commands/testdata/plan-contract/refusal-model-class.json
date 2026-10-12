@@ -1,0 +1,22 @@
+{
+  "error": {
+    "code": "invalid",
+    "message": "A full sentence for a person: what happened and what to do."
+  },
+  "limit": {
+    "v": 1,
+    "reason": "model_class",
+    "capped": false,
+    "unit": "questions",
+    "payer": "personal",
+    "accountId": "p7Xk2",
+    "accountTitle": "Alex Example",
+    "plan": "free",
+    "used": 3,
+    "limit": 7,
+    "left": 4,
+    "ownKeyWorks": true,
+    "canUpgrade": true,
+    "upgradeUrl": "https://example.com/pricing"
+  }
+}

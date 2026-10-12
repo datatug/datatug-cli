@@ -34,49 +34,97 @@ func cloudChatClient(ctx context.Context, options chatOptions) (*cloud.Client, a
 	if options.apiKey != "" {
 		return nil, ai.ClientContext{}, fmt.Errorf("cloud chat uses 'datatug auth login', not an AI profile API key")
 	}
-	baseURL := strings.TrimSpace(options.baseURL)
-	if baseURL == "" {
-		baseURL = defaultAIAPIURL
-	}
-	if err := validateAIAPIURL(baseURL); err != nil {
+	id, err := cloudInstallationID()
+	if err != nil {
 		return nil, ai.ClientContext{}, err
 	}
+	session, err := loadCloudSession(ctx, options)
+	if err != nil {
+		return nil, ai.ClientContext{}, err
+	}
+	return newCloudChatClient(options, session, id), cloudClientContext(id), nil
+}
+
+func cloudChatClientFromSession(options chatOptions, session cloudSession) (*cloud.Client, ai.ClientContext, error) {
+	id, err := cloudInstallationID()
+	if err != nil {
+		return nil, ai.ClientContext{}, err
+	}
+	return newCloudChatClient(options, session, id), cloudClientContext(id), nil
+}
+
+func cloudInstallationID() (string, error) {
 	configDir, err := chatUserConfigDir()
 	if err != nil {
-		return nil, ai.ClientContext{}, fmt.Errorf("resolve DataTug configuration: %w", err)
+		return "", fmt.Errorf("resolve DataTug configuration: %w", err)
 	}
 	id, err := clientctx.InstallationID(filepath.Join(configDir, "datatug", "installation_id"))
 	if err != nil {
-		return nil, ai.ClientContext{}, fmt.Errorf("load DataTug installation ID: %w", err)
+		return "", fmt.Errorf("load DataTug installation ID: %w", err)
 	}
-	tokens, err := chatSavedTokenSource(ctx, options.insecureStorage)
-	if err != nil {
-		return nil, ai.ClientContext{}, fmt.Errorf("load DataTug login: %w", err)
-	}
-	preflightCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	initialToken, err := tokenWithContext(preflightCtx, tokens)
-	if err != nil {
-		return nil, ai.ClientContext{}, fmt.Errorf("DataTug cloud chat requires 'datatug auth login': %w", err)
-	}
-	if initialToken == nil || initialToken.AccessToken == "" {
-		return nil, ai.ClientContext{}, fmt.Errorf("DataTug cloud chat requires 'datatug auth login': stored session is empty")
-	}
-	clientContext := ai.ClientContext{
+	return id, nil
+}
+
+func cloudClientContext(id string) ai.ClientContext {
+	return ai.ClientContext{
 		InstallationID: id,
 		Feature:        "chat",
 		Client:         ai.ClientInfo{Type: "cli", Name: "datatug", Version: buildinfo.Get("datatug").Version},
 		Platform:       ai.PlatformInfo{OS: runtime.GOOS, Arch: runtime.GOARCH},
 	}
-	var tokenMu sync.Mutex
+}
+
+func newCloudChatClient(options chatOptions, session cloudSession, id string) *cloud.Client {
+	clientContext := cloudClientContext(id)
 	client := cloud.New(cloud.Config{
-		BaseURL:       baseURL,
+		BaseURL:       session.baseURL,
 		Product:       "datatug",
+		Project:       options.cloudProject,
 		ClientContext: &clientContext,
-		HTTPClient: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse // bearer tokens never follow a redirect
+		HTTPClient:    session.httpClient,
+		Token:         session.token,
+	})
+	return client
+}
+
+type cloudSession struct {
+	baseURL    string
+	httpClient *http.Client
+	token      func(context.Context) (string, error)
+	identity   string // local preference scope only; never sent as authorization
+}
+
+func loadCloudSession(ctx context.Context, options chatOptions) (cloudSession, error) {
+	if options.apiKey != "" {
+		return cloudSession{}, fmt.Errorf("cloud chat uses 'datatug auth login', not an AI profile API key")
+	}
+	baseURL := strings.TrimSpace(options.baseURL)
+	if baseURL == "" {
+		baseURL = defaultAIAPIURL
+	}
+	if err := validateAIAPIURL(baseURL); err != nil {
+		return cloudSession{}, err
+	}
+	tokens, err := chatSavedTokenSource(ctx, options.insecureStorage)
+	if err != nil {
+		return cloudSession{}, fmt.Errorf("load DataTug login: %w", err)
+	}
+	preflightCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	initialToken, err := tokenWithContext(preflightCtx, tokens)
+	if err != nil {
+		return cloudSession{}, fmt.Errorf("DataTug cloud chat requires 'datatug auth login': %w", err)
+	}
+	if initialToken == nil || initialToken.AccessToken == "" {
+		return cloudSession{}, fmt.Errorf("DataTug cloud chat requires 'datatug auth login': stored session is empty")
+	}
+	var tokenMu sync.Mutex
+	return cloudSession{
+		baseURL: baseURL,
+		httpClient: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
 		}},
-		Token: func(requestCtx context.Context) (string, error) {
+		token: func(requestCtx context.Context) (string, error) {
 			tokenMu.Lock()
 			defer tokenMu.Unlock()
 			token, err := tokenWithContext(requestCtx, tokens)
@@ -88,8 +136,8 @@ func cloudChatClient(ctx context.Context, options chatOptions) (*cloud.Client, a
 			}
 			return token.AccessToken, nil
 		},
-	})
-	return client, clientContext, nil
+		identity: tokenPreferenceScope(initialToken.AccessToken),
+	}, nil
 }
 
 func tokenWithContext(ctx context.Context, source oauth2.TokenSource) (*oauth2.Token, error) {

@@ -26,9 +26,8 @@ const (
 	demoProjectDirEnvVar  = "DATATUG_DEMO_PROJECT_DIR"
 	demoProjectID         = "datatug-demo-project"
 	demoProjectEnv        = "local"
-	// These saved queries target the local Chinook catalog. Addressing that
-	// catalog directly keeps the tests stable when the demo project gains
-	// other catalogs with the same DbModel alias.
+	// Query requests name the authorized catalog target in this environment.
+	// The catalog's DbModel and entity mappings separately use "chinook".
 	demoProjectSource = "chinook-local"
 )
 

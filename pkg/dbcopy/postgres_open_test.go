@@ -59,6 +59,32 @@ func TestOpen_APostgresSourceReachesTheAdapterWithTheSessionDefaults(t *testing.
 	assert.True(t, identifierModeIsExact(fake.extras[0]), "the adapter is given the exact identifier mode, not its default of folded names")
 }
 
+func TestTransferOpensPreserveExactNumericsAndBinaryValuesWithoutChangingOrdinaryReads(t *testing.T) {
+	previewOn(t)
+	fake := &fakeOpener{}
+	stubPostgresOpener(t, fake.open)
+	ref := parseMarked(t)
+
+	ordinary, err := ref.Open(context.Background())
+	require.NoError(t, err)
+	copySource, err := ref.OpenForCopy(context.Background(), "chinook")
+	require.NoError(t, err)
+	exportSource, err := ref.OpenForExport(context.Background())
+	require.NoError(t, err)
+	require.NotSame(t, ordinary, copySource, "schema and transfer read options are part of the cached handle identity")
+	require.NotSame(t, ordinary, exportSource, "transfer read options are part of the cached handle identity")
+	require.Len(t, fake.options, 3)
+	assert.False(t, fake.options[0].ExactNumericValues, "ordinary opens retain the legacy read behavior")
+	assert.False(t, fake.options[0].PreserveBinaryValues, "ordinary opens retain the legacy byte conversion")
+	assert.True(t, fake.options[1].ExactNumericValues, "copy source must preserve exact NUMERIC text")
+	assert.True(t, fake.options[1].PreserveBinaryValues, "copy source must preserve raw BYTEA bytes")
+	assert.True(t, fake.options[2].ExactNumericValues, "export source must preserve exact NUMERIC text")
+	assert.True(t, fake.options[2].PreserveBinaryValues, "export source must preserve raw BYTEA bytes")
+	assert.Len(t, fake.extras[0], 1, "ordinary source gets only exact identifier matching")
+	assert.Len(t, fake.extras[1], 2, "copy source also receives its explicit schema")
+	assert.Len(t, fake.extras[2], 1, "export source uses the configured default schema")
+}
+
 // identifierModeIsExact tells, with no server, whether the options the adapter was given make the identifier mode
 // exact and not the adapter's default (names folded to lower case). The adapter refuses, before it opens any
 // connection, a DbOptions.IdentifierCase that disagrees with the mode an option set; a string it reads as misread is

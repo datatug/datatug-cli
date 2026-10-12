@@ -239,6 +239,7 @@ func withAttachedJoin(ctx context.Context, join func(context.Context, QueryResul
 }
 
 const (
+	toolRunTugQL           = "run_tugql"
 	toolRunDTQL            = "run_dtql"
 	toolWorkspaceAction    = "workspace_action"
 	toolFindBookmarks      = "find_bookmarks"
@@ -367,7 +368,8 @@ func WithHostedModel(model string) Option {
 
 type runDTQLArgs struct {
 	Title    string `json:"title,omitempty" jsonschema:"A short human-readable title for the result, one line, at most 60 characters"`
-	DTQL     string `json:"dtql" jsonschema:"A complete DTQL YAML document to validate and execute"`
+	TugQL    string `json:"tugql,omitempty" jsonschema:"A complete TugQL YAML document to validate and execute"`
+	DTQL     string `json:"dtql,omitempty" jsonschema:"A complete TugQL YAML document (deprecated alias for tugql)"`
 	SourceID string `json:"sourceId,omitempty" jsonschema:"Project source/catalog ID; omit for the active database"`
 }
 
@@ -516,28 +518,33 @@ func (c *AIConversation) joinTool() ai.Tool {
 // values (query/workspace observers etc. are read from ctx, not closed over,
 // so AskWithContext can install fresh ones per call).
 func (c *AIConversation) handlers() map[string]agent.Handler {
+	runQueryHandler := func(ctx context.Context, call ai.ToolCall) (ai.ToolResult, error) {
+		var args runDTQLArgs
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return errorResult(call.ID, "invalid query arguments: "+err.Error()), nil
+		}
+		if args.TugQL != "" && args.DTQL == "" {
+			args.DTQL = args.TugQL
+		}
+		run := c.runDTQL
+		if c.runDTQLOverride != nil {
+			run = c.runDTQLOverride
+		}
+		resp, err := run(ctx, c.executor, c.sourceURL, args)
+		if err != nil {
+			// runDTQL's own real code paths always return a nil error
+			// (failures are reported through resp.Error instead,
+			// captured as a QueryResult); this guard covers a future
+			// runDTQL change or DTQLExecutor implementation that starts
+			// returning an infrastructure-level error -- exercised via
+			// runDTQLOverride, see AIConversation's doc comment on it.
+			return errorResult(call.ID, err.Error()), nil
+		}
+		return jsonResult(call.ID, resp), nil
+	}
 	handlers := map[string]agent.Handler{
-		toolRunDTQL: func(ctx context.Context, call ai.ToolCall) (ai.ToolResult, error) {
-			var args runDTQLArgs
-			if err := json.Unmarshal(call.Arguments, &args); err != nil {
-				return errorResult(call.ID, "invalid run_dtql arguments: "+err.Error()), nil
-			}
-			run := c.runDTQL
-			if c.runDTQLOverride != nil {
-				run = c.runDTQLOverride
-			}
-			resp, err := run(ctx, c.executor, c.sourceURL, args)
-			if err != nil {
-				// runDTQL's own real code paths always return a nil error
-				// (failures are reported through resp.Error instead,
-				// captured as a QueryResult); this guard covers a future
-				// runDTQL change or DTQLExecutor implementation that starts
-				// returning an infrastructure-level error -- exercised via
-				// runDTQLOverride, see AIConversation's doc comment on it.
-				return errorResult(call.ID, err.Error()), nil
-			}
-			return jsonResult(call.ID, resp), nil
-		},
+		toolRunDTQL:  runQueryHandler,
+		toolRunTugQL: runQueryHandler,
 	}
 	handlers[toolDescribeRelation] = func(_ context.Context, call ai.ToolCall) (ai.ToolResult, error) {
 		var args describeRelationArgs
@@ -634,7 +641,11 @@ func (c *AIConversation) runDTQL(ctx context.Context, executor DTQLExecutor, sou
 		c.capture(ctx, QueryResult{Title: title, DTQL: strings.TrimSpace(args.DTQL), Err: err})
 		return runDTQLResponse{Title: title, Error: err.Error()}, nil
 	}
-	doc := strings.TrimSpace(args.DTQL)
+	rawDoc := args.TugQL
+	if rawDoc == "" {
+		rawDoc = args.DTQL
+	}
+	doc := strings.TrimSpace(rawDoc)
 	if doc == "" {
 		err := errors.New("the agent supplied empty DTQL")
 		c.capture(ctx, QueryResult{Title: title, Err: err})

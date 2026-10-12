@@ -275,7 +275,7 @@ func TestAppOpenWebUIWithCtrlW(t *testing.T) {
 	var opened []string
 	openURL = func(url string) error { opened = append(opened, url); return nil }
 	d.press("ctrl+w")
-	if len(opened) != 1 || opened[0] != DefaultWebUIOrigin {
+	if len(opened) != 1 || opened[0] != DefaultWebUIOrigin+"/home" {
 		t.Fatalf("opened = %v", opened)
 	}
 

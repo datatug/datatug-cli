@@ -167,6 +167,13 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 	}
 }
 
+// ResolveCatalogSourceURL maps one resolved project catalog to the DALgo
+// source URL used by trusted CLI reads. The returned URL is an in-memory
+// connection value; callers must not print or persist it.
+func ResolveCatalogSourceURL(catalog datatug.DbCatalog, projDir string) (string, error) {
+	return sourceURLFromCatalog(catalog, projDir)
+}
+
 // LocalSQLiteSourceURL is the "sqlite://" source URL of the SQLite file at path, the
 // path of a catalog as ResolveCatalogPath returns it: a URL that dbcopy.Parse reads
 // back to that path. A file name may hold "%", "#" and "?", which a URL does not

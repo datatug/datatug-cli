@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	demoProjectsRepoID = "datatug-demo-projects"
+	demoProjectsRepoID = "datatug-demo-project"
 	datatugOrg         = "datatug"
 	demoProjectOrigin  = "github.com/" + datatugOrg + "/" + demoProjectsRepoID
 

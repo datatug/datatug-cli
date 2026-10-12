@@ -516,7 +516,13 @@ func TestAddDatatugSection_ReadmeExists_NoSection(t *testing.T) {
 			"encoding": "",
 		})
 	})
+	var updatedContent string
 	mux.HandleFunc("/repos/owner/repo/contents/README.md", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Content []byte `json:"content"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		updatedContent = string(req.Content)
 		// UpdateFile
 		jsonResponse(w, http.StatusOK, map[string]any{
 			"content": map[string]any{"path": "README.md"},
@@ -527,6 +533,7 @@ func TestAddDatatugSection_ReadmeExists_NoSection(t *testing.T) {
 	c := &projectCreator{client: client, repoOwner: "owner", repoName: "repo", branch: "main", report: noopReport}
 	err := c.addDatatugSectionToRootReadmeFile(context.Background(), "mydir")
 	require.NoError(t, err)
+	assert.Contains(t, updatedContent, "[DataTug.app](https://datatug.app/home#project=github.com/owner/repo/mydir)")
 }
 
 func TestAddDatatugSection_ReadmeExists_HasSection(t *testing.T) {

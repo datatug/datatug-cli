@@ -106,11 +106,31 @@ Environment prod
         Total decimal
 ```
 
-What else works, and what does not yet, is in [Supported databases](#supported-databases).
+What else works, and what does not yet, is in [Supported databases](#supported-databases). To compare complete database contents across project environments, see [Compare project databases](docs/database-compare.md).
 
 ![datatug-cli-employees-2.png](docs/screenshots/datatug-cli-employees-2.png)
 
 <!-- dev-approach:v1 -->
+## Export a database to inGitDB
+
+`datatug db export` writes each supported DALgo source collection into a native inGitDB project. SQLite supplies a streaming row reader; other providers may materialize a collection in their query reader. For a local SQLite database:
+
+```bash
+datatug db export --from "sqlite://$PWD/shop.db" --to "ingitdb://$PWD/shop-ingitdb"
+
+# Choose one records format for every exported table (default: json).
+datatug db export --from "sqlite://$PWD/shop.db" --to "ingitdb://$PWD/shop-csv" --records-format csv
+ingitdb validate --path ./shop-ingitdb
+```
+
+The destination directory must not exist. DataTug builds a complete project beside it and publishes the directory only after all collections succeed; a failed export leaves no completed destination. A source without a primary key receives export ordinal record IDs, marked as transport IDs rather than source keys. Those IDs are reproducible for a fixed source snapshot with deterministic provider row order; SQLite's source reader uses rowid order for keyless tables. Decimal values use string transport and binary values use base64; source schema, indexes, foreign-key declarations, and views are retained as descriptive metadata when the provider exposes them.
+
+Source table names that inGitDB cannot use as collection IDs are encoded as `dt_` followed by the source name's UTF-8 bytes in lowercase hex. Names beginning with the reserved `dt_` prefix are encoded too, so the mapping is unambiguous. Ordinary names such as `Album` stay unchanged. `.ingitdb/source-collections.json` maps each native ID back to its exact source name; native foreign-key targets use those IDs while the original source definition retains its SQL names. Query an encoded table by its native ID shown in `ingitdb list collections --path <export-directory>`.
+
+`--records-format` accepts `json`, `jsonl`, `ingr`, `csv`, and `yaml` (also `yml`), case-insensitively. JSON, INGR, and YAML use record-ID-keyed maps; JSONL and CSV carry a separate `$ID` transport key. CSV uses typed JSON-literal cells, preserving null versus empty text, exact integers, and quoted values.
+
+The export uses DataTug's DALgo source URL dispatcher, including local `sqlite://`, native `ingitdb://`, OpenVaultDB HTTP URLs, and `env:NAME` for a URL stored in an environment variable. PostgreSQL URL support remains a preview capability and may reject a source before export. The current native root export requires collections without namespaces, databases, or parent scopes; it reports a clear error for a source it cannot map. Provider capabilities differ; an unreadable collection or value that cannot be represented fails the export explicitly. Source constraint checking, when available, is a preflight check. Native inGitDB does not execute SQL foreign-key actions or other SQL constraints on later writes, and a mutable source can change after the preflight check. For a consistent snapshot, hold a source-side snapshot or read lock during export. Re-exporting an inGitDB project through a provider without physical storage-class metadata retains logical values and source schema but marks constraints unverified; it cannot claim the original SQLite INTEGER-versus-REAL cell classes. The inGitDB DALgo reader does not currently load `source-collections.json`, so a second native-to-native export treats encoded collection IDs as its source names and does not preserve the first source-name mapping.
+
 ## Our approach to development
 
 We build with our own tooling:

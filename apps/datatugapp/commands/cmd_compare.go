@@ -40,13 +40,32 @@ const (
 	compareIncidentFlag     = "incident"
 	compareMutationFlag     = "mutation"
 	compareJSONFlag         = "json"
+	compareLeftSchemaFlag   = "left-schema"
+	compareRightSchemaFlag  = "right-schema"
+	compareDetailsFlag      = "details"
+	compareLeftEnvFlag      = "left-environment"
+	compareRightEnvFlag     = "right-environment"
+	compareLeftSourceFlag   = "left-source"
+	compareRightSourceFlag  = "right-source"
+	compareTableMapFlag     = "table-map"
+	compareKeyMapFlag       = "key-map"
+	compareMappingFileFlag  = "mapping-file"
 )
+
+func compareArgs(_ *cobra.Command, args []string) error {
+	if len(args) == 0 || len(args) == 2 {
+		return nil
+	}
+	return fmt.Errorf("expected either no positional arguments for query comparison or exactly two database names")
+}
 
 func compareCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:          "compare",
-		Short:        "Compare two query result sets through a DataTug agent",
-		Args:         cobra.NoArgs,
+		Short:        "Compare database schemas and records, or two query result sets",
+		Long:         "Compare complete database contents from one or two environments in a DataTug project, or use the existing agent-backed query-result comparison flags. Database comparison always reports schema changes and fully reads every DALgo table; provider-reported views are compared as schema metadata. PostgreSQL defaults to the public schema unless --left-schema or --right-schema selects another; schema selection is applied to row reads and does not follow search_path. --details only limits how many per-record examples are printed. Renamed relations require explicit --table-map entries; keyless relations are compared as row multisets unless --key-map supplies a verified identity. Hosted-pending editions require an explicit --left-source/--right-source binding; their metadata URLs are never opened. BigQuery sources use the separately granted read-only Google identity and the DALgo physical-row API; no BigQuery query job is submitted.",
+		Example:      "datatug compare local remote --project demo-project --environment dev\ndatatug compare chinook-sqlite chinook-postgresql --project ./demo-project-1 --left-environment dev --right-environment QA --left-source env:DEMO_CHINOOK_SQLITE_URL --right-source env:DEMO_CHINOOK_QA_PG_URL --right-schema chinook --details --limit 20\ndatatug compare source target --project ./project --table-map 'Production.Document=production_document' --key-map 'Production.Document=ProductID,DocumentID'\ndatatug compare --project demo-project --query orders --left env=before --right env=after --key id",
+		Args:         compareArgs,
 		SilenceUsage: true,
 		RunE:         runCompareCommand,
 	}
@@ -64,19 +83,39 @@ func compareCommand() *cobra.Command {
 	flags.String(compareIncidentFlag, "", "Optional qualified incident <store>/<incident>")
 	flags.String(compareMutationFlag, "", "Required idempotency key when --incident is set")
 	flags.Bool(compareJSONFlag, false, "Print the exact JSON response")
-	_ = command.MarkFlagRequired(compareQueryFlag)
-	_ = command.MarkFlagRequired(compareLeftFlag)
-	_ = command.MarkFlagRequired(compareRightFlag)
+	flags.String(compareLeftSchemaFlag, "", "PostgreSQL schema to inspect and read on the left database (default: public)")
+	flags.String(compareRightSchemaFlag, "", "PostgreSQL schema to inspect and read on the right database (default: public)")
+	flags.Bool(compareDetailsFlag, false, "Print bounded per-record differences after the complete comparison")
+	flags.String(compareLeftEnvFlag, "", "Environment for the left database (defaults to --environment or the project's only environment)")
+	flags.String(compareRightEnvFlag, "", "Environment for the right database (defaults to --environment or the project's only environment)")
+	flags.String(compareLeftSourceFlag, "", "Explicit DALgo source for the left database; use env:VARIABLE to keep the DSN out of DataTug arguments and process listings")
+	flags.String(compareRightSourceFlag, "", "Explicit DALgo source for the right database; use env:VARIABLE to keep the DSN out of DataTug arguments and process listings")
+	flags.StringSlice(compareTableMapFlag, nil, "Map a left relation name to a right relation name: LEFT=RIGHT (repeat for renamed relations)")
+	flags.StringSlice(compareKeyMapFlag, nil, "Database comparison identity: TABLE=column[,column] (repeat per table); otherwise use matching primary keys or keyless multiset comparison")
+	flags.String(compareMappingFileFlag, "", "Project-relative JSON file with explicit relation-name mappings and optional per-table keys")
 	return command
 }
 
-func runCompareCommand(cmd *cobra.Command, _ []string) error {
+func runCompareCommand(cmd *cobra.Command, args []string) error {
+	if len(args) == 2 {
+		return runDatabaseCompareCommand(cmd, args[0], args[1])
+	}
+	if cmd.Flags().Changed(compareLeftSchemaFlag) || cmd.Flags().Changed(compareRightSchemaFlag) || cmd.Flags().Changed(compareDetailsFlag) ||
+		cmd.Flags().Changed(compareLeftEnvFlag) || cmd.Flags().Changed(compareRightEnvFlag) || cmd.Flags().Changed(compareLeftSourceFlag) ||
+		cmd.Flags().Changed(compareRightSourceFlag) || cmd.Flags().Changed(compareTableMapFlag) || cmd.Flags().Changed(compareKeyMapFlag) ||
+		cmd.Flags().Changed(compareMappingFileFlag) {
+		return Exit("database-specific schema, environment, and detail flags require two positional database names", exitCodeUsage)
+	}
+	queryID, _ := cmd.Flags().GetString(compareQueryFlag)
+	leftText, _ := cmd.Flags().GetString(compareLeftFlag)
+	rightText, _ := cmd.Flags().GetString(compareRightFlag)
+	if queryID == "" || leftText == "" || rightText == "" {
+		return Exit("query comparison requires --query, --left, and --right; database comparison uses `compare <left-db> <right-db> --project <project>`", exitCodeUsage)
+	}
 	client, info, err := newAgentHTTPClient(cmd, compareAgentFlag)
 	if err != nil {
 		return err
 	}
-	leftText, _ := cmd.Flags().GetString(compareLeftFlag)
-	rightText, _ := cmd.Flags().GetString(compareRightFlag)
 	project, _ := cmd.Flags().GetString(compareProjectFlag)
 	if project == "" && (compareSideNeedsProject(leftText) || compareSideNeedsProject(rightText)) {
 		if len(info.Projects) != 1 {
@@ -94,7 +133,6 @@ func runCompareCommand(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return Exit("--right: "+err.Error(), exitCodeUsage)
 	}
-	queryID, _ := cmd.Flags().GetString(compareQueryFlag)
 	key, _ := cmd.Flags().GetStringSlice(compareKeyFlag)
 	distribution, _ := cmd.Flags().GetString(compareDistributionFlag)
 	mutationID, _ := cmd.Flags().GetString(compareMutationFlag)

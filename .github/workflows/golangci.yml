@@ -61,7 +61,7 @@ jobs:
       contents: write
     # Pin the shared workflow exactly so it cannot change underneath this job.
     # v1.20.0 adds the opt-in conventional PR-title gate enabled below.
-    uses: strongo/cicd/.github/workflows/workflow.yml@v1.21.0
+    uses: strongo/cicd/.github/workflows/workflow.yml@v1.21.2
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     with:
@@ -111,7 +111,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: true
       - name: go mod tidy -diff
         run: go mod tidy -diff
@@ -132,7 +132,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: true
       - name: check-hermetic-tests.sh
         env:
@@ -158,12 +158,24 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: true
       - name: Scan a SQLite file with cgo off
         env:
           CGO_ENABLED: '0'
         run: go test -count=1 -run 'TestScanDbCatalog_SQLite3|TestScanJourney|TestQuickStartOfTheREADMEIsTrue' ./pkg/api/ ./apps/datatugapp/commands/
+      - name: Export SQLite to native inGitDB with cgo off
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          go test -count=1 -run TestExportInGitDB_RecordsFormatsRoundTrip ./pkg/dbcopy/
+          go build -o "$RUNNER_TEMP/datatug-export-smoke" .
+          export_parent=$(mktemp -d "$RUNNER_TEMP/datatug-export.XXXXXX")
+          "$RUNNER_TEMP/datatug-export-smoke" db export \
+            --from "sqlite://$PWD/pkg/dbcopy/testdata/chinook.db" \
+            --to "ingitdb://$export_parent/native" --records-format csv
+          test -f "$export_parent/native/Artist/records.csv"
+          test -f "$export_parent/native/Artist/.collection/definition.yaml"
 
   # The PostgreSQL scan (`datatug scan -D postgres --dsn-env NAME`), query
   # (`datatug query run`) and copy (`datatug db copy`) against a real server. Every
@@ -216,7 +228,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           # Must be >= go.mod's `go` directive, same constraint as release.yml.
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: true
       - name: Scan and query a real PostgreSQL server
         env:

@@ -71,7 +71,7 @@ func webUIOrigin() string {
 // screen registry of the CLI↔web parity contract
 // (backstage/docs/roadmaps/datatug-cli-webui-parity.md). Only routes that
 // exist in datatug-apps belong here; screens without a web equivalent yet
-// hand off to the web UI root rather than to a guessed URL.
+// hand off to the web UI home (/home) rather than to a guessed URL.
 var screenPathToWebPath = map[string]string{
 	"projects": "/my", // signed-in home listing the user's data; closest match until a projects route exists
 }
@@ -81,7 +81,7 @@ func WebUIURLForScreen(origin, screenPath string) string {
 	if webPath, ok := screenPathToWebPath[screenPath]; ok {
 		return origin + webPath
 	}
-	return origin
+	return origin + "/home"
 }
 
 // CurrentScreenWebUIURL resolves the web UI URL for the current TUI screen,

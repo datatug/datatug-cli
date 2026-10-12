@@ -398,7 +398,7 @@ func (s *Store) Page(_ context.Context, req PageRequest) (Page, error) {
 	if err != nil {
 		return Page{}, fmt.Errorf("page comparison rows: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	page := Page{
 		ComparisonID: req.ComparisonID,
 		State:        string(req.State),

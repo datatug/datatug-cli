@@ -618,7 +618,7 @@ func TestProjectCardUsesProjectTitle(t *testing.T) {
 	if !strings.Contains(view, "Explorer") || !strings.Contains(view, u.catalog.Title) || !strings.Contains(view, "Inspect") {
 		t.Fatalf("Explorer/Inspect panes do not identify the project:\n%s", view)
 	}
-	if strings.Contains(view, "Project: "+u.catalog.Title) {
+	if strings.Contains(ansi.Strip(u.workspace.View(40, 20, false)), "Project: "+u.catalog.Title) {
 		t.Fatalf("the right Inspect pane duplicated the Explorer's project card:\n%s", view)
 	}
 }
@@ -639,23 +639,23 @@ func TestExplorerSelectionShowsTableAndQueryCards(t *testing.T) {
 			break
 		}
 	}
-	u.shell.Update(uitest.Key("alt+i"))
+	u.explorer.inspectExplorerSelection()
 	view := ansi.Strip(u.shell.View().Content)
 	if !strings.Contains(view, "Table: Customer") || !strings.Contains(view, "CustomerId") || !strings.Contains(view, "INTEGER") {
-		t.Fatalf("Alt+I did not show authoritative table details:\n%s", view)
+		t.Fatalf("Explorer selection did not show authoritative table details:\n%s", view)
 	}
-	u.shell.Update(uitest.Key("esc"))
 	for index, node := range u.explorer.explorerNodes() {
 		if node.label == "Customer purchases by genre" {
 			u.explorer.explorerIndex = index
 			break
 		}
 	}
-	u.shell.Update(uitest.Key("alt+i"))
-	view = ansi.Strip(u.shell.View().Content)
+	u.explorer.inspectExplorerSelection()
+	view = flattenView(u.workspace.View(24, 18, true))
 	if !strings.Contains(view, "Query: Customer purchases by genre") || !strings.Contains(view, "SQL") || !strings.Contains(view, "SELECT GenreName") {
-		t.Fatalf("Alt+I did not show selected query details:\n%s", view)
+		t.Fatalf("Explorer selection did not show query details:\n%s", view)
 	}
+	u.shell.FocusRightPanel()
 	u.shell.Update(uitest.Key("end"))
 	view = ansi.Strip(u.shell.View().Content)
 	if !strings.Contains(view, "FROM purchases") {

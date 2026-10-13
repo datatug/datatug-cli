@@ -46,7 +46,7 @@ func (u *ChatUI) workspaceHints(width int) []string {
 		if !u.HasCatalogExplorer() {
 			return []string{"↑↓ navigate", "Enter open", "F3 projects", "Shift+→ center"}
 		}
-		return []string{"type to search", "←→ tree", "Enter Open data", "Alt+A Attach to composer", "Ctrl+N New query", "Alt+I Details", "Shift+→ center"}
+		return []string{"type to search", "←→ tree", "Enter Open data", "Ctrl+P Actions", "Ctrl+N New query", "F7 Inspect", "Shift+→ center"}
 	case "center":
 		if u.apiScreen != nil {
 			return []string{"↑↓ requests", "PgUp/PgDn page", "End follow", "Esc back", "F5 open web"}
@@ -63,18 +63,18 @@ func (u *ChatUI) workspaceHints(width int) []string {
 			return []string{"Bookmark " + u.workspace.bookmarkMode, "Enter apply", "Esc cancel"}
 		}
 		if u.workspace.bookmarkGridFocused || u.workspace.dockGridFocused {
-			return []string{"↑↓ rows", "←→ columns", "Alt+A attach", "Alt+D dock", "Esc list"}
+			return []string{"↑↓ rows", "←→ columns", "Ctrl+P Actions", "Esc list"}
 		}
 		if u.workspace.tab == 3 {
-			return []string{"↑↓ bookmarks", "Enter result", "Alt+A attach", "Alt+D dock", "Alt+R rename", "Alt+T tags", "Ctrl+F search", "Alt+F filter", "Alt+X delete", "Tab sections"}
+			return []string{"↑↓ bookmarks", "Enter result", "Ctrl+P Actions", "Ctrl+F search"}
 		}
 		if u.workspace.tab == 2 {
-			return []string{"↑↓ docked", "Enter result", "Alt+A attach", "Alt+X undock", "Tab sections"}
+			return []string{"↑↓ docked", "Enter result", "Ctrl+P Actions"}
 		}
 		if u.workspace.relatedFocused {
 			return []string{"Related", "Alt+1..0 open", "↑↓ select", "Enter open", "Esc fields"}
 		}
-		return []string{"F10 Related", "Alt+A Actions", "Alt+I view", "Alt+1..0 open", "↑↓ scroll", "Tab sections", "Shift+← result"}
+		return []string{"F10 Related", "Ctrl+P Actions", "Tab/Shift+Tab Row/Column/Result", "Alt+1..0 open", "↑↓ scroll", "Shift+← result"}
 	case "input":
 		if u.shell.ComposerActionFocused() {
 			return []string{"Enter Select text", "Tab editing", "Esc editing", "Shift+arrows workspace"}
@@ -98,9 +98,9 @@ func (u *ChatUI) workspaceHints(width int) []string {
 						filtered = append(filtered, hint)
 					}
 				}
-				hints = append([]string{"F9 Expand", "Grouped output · no entity identity", "Alt+A Actions", "Alt+G Group", "Alt+S Sort"}, filtered...)
+				hints = append([]string{"F9 Expand", "Grouped output · no entity identity", "Ctrl+P Actions"}, filtered...)
 			} else {
-				hints = append([]string{"F9 Expand", "F10 Related", "Alt+A Actions", "Alt+G Group", "Alt+S Sort", "Alt+Shift+↑/↓ loaded sort", "Ctrl+Shift+↑/↓ server sort preview"}, hints...)
+				hints = append([]string{"F9 Expand", "F10 Related", "Ctrl+P Actions", "Alt+Shift+↑/↓ loaded sort", "Ctrl+Shift+↑/↓ server sort preview"}, hints...)
 			}
 			if u.relatedOrigins[u.activeRecordSetID()] != "" {
 				hints = append(hints, "Alt+← origin")

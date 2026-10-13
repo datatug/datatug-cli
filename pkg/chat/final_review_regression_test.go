@@ -51,9 +51,9 @@ func TestUnifiedWorkspaceDecodedLFNeverEntersInlineJoin(t *testing.T) {
 	}
 	u.shell.Update(uitest.Key("esc"))
 	u.shell.Update(uitest.Key("esc"))
-	u.shell.Update(uitest.Key("alt+j"))
+	uxSearchAction(t, u, "JOIN relationship")
 	if !strings.Contains(flattenView(u.shell.View().Content), "JOIN relationship") {
-		t.Fatalf("explicit Alt+J chooser unavailable: %s", flattenView(u.shell.View().Content))
+		t.Fatalf("explicit Actions JOIN chooser unavailable: %s", flattenView(u.shell.View().Content))
 	}
 }
 
@@ -89,7 +89,7 @@ func TestUnifiedWorkspaceDelayedJoinRetainsNewerContext(t *testing.T) {
 			u.shell.FocusEntry(u.gridsByRecordSetID[originID].entryID)
 			application := &reviewDelayedJoin{started: make(chan struct{}), release: make(chan struct{})}
 			u.sessions.ConfigureJoinApplication(application)
-			u.shell.Update(uitest.Key("alt+j"))
+			uxSearchAction(t, u, "JOIN relationship")
 			_, cmd := u.shell.Update(uitest.Key("enter"))
 			if cmd == nil {
 				t.Fatal("JOIN apply missing")
@@ -282,7 +282,7 @@ func TestUnifiedWorkspaceCompactGroupAndMembersKeepSelectionVisible(t *testing.T
 			u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Many rows", DTQL: "from: {name: Item}\ncolumns: [{field: Category}, {field: Label}]\nlimit: 24\n", Result: secureread.Result{Columns: []string{"Category", "Label"}, Rows: rows}})
 			_, record, _ := u.activeGrid()
 			u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", SourceID: record.Database, ObjectID: "main.Item"}, Columns: []string{"Category", "Label"}, ColumnTypes: map[string]string{"Category": "TEXT", "Label": "TEXT"}}}}
-			u.shell.Update(uitest.Key("alt+g"))
+			uxSearchAction(t, u, "Group loaded")
 			u.shell.Update(uitest.Key("1"))
 			u.shell.Update(uitest.Key("enter"))
 			p, ok := u.shell.CenterPanel().(*localGroupsPanel)

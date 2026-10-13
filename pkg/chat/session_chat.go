@@ -701,6 +701,9 @@ func (c *SessionChat) Switch(ctx context.Context, prefix string) (ChatSession, e
 	if err := activate(ctx, snapshot.ID); err != nil {
 		return ChatSession{}, err
 	}
+	if err := c.store.RestoreArchive(ctx, snapshot.ID); err != nil {
+		return ChatSession{}, err
+	}
 	snapshot, err = c.store.Load(ctx, snapshot.ID)
 	if err == nil {
 		c.activeID = snapshot.ID
@@ -878,6 +881,7 @@ func (c *SessionChat) prepareTurn(ctx context.Context, expectedSessionID, prompt
 		}
 		return result, applied, joinErr
 	})
+	ctx = c.resultColumnsContext(ctx, user.ID)
 	ctx = narrowing.WithHistory(ctx, narrowingHistory(prior))
 	ctx, interactionID, clientContext := c.turnContext(ctx)
 	return preparedTurn{ctx: ctx, user: user, prior: prior, contextText: contextText, joinChoice: joinChoice, interactionID: interactionID, clientContext: clientContext}, cleanup, nil

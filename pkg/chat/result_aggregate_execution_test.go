@@ -23,7 +23,7 @@ func TestUnifiedWorkspaceAggregateDefaultsExecuteReviewedScopeAndReloadTypes(t *
 			}
 			u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 42})
 			u.shell.FocusEntry(u.lastGridEntryID)
-			u.shell.Update(uitest.Key("alt+g"))
+			uxSearchAction(t, u, "Group loaded")
 			u.shell.Update(uitest.Key("2"))
 			_, cmd := u.shell.Update(uitest.Key("enter"))
 			drainCmd(t, u, cmd)
@@ -33,7 +33,7 @@ func TestUnifiedWorkspaceAggregateDefaultsExecuteReviewedScopeAndReloadTypes(t *
 			}
 			_, cmd = u.shell.Update(uitest.Key("esc"))
 			drainCmd(t, u, cmd)
-			u.shell.Update(uitest.Key("alt+g"))
+			uxSearchAction(t, u, "Group loaded")
 			u.shell.Update(uitest.Key("2"))
 			if original {
 				for range 3 {

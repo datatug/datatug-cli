@@ -209,24 +209,25 @@ func TestUnifiedWorkspaceExplorerDetailsScrollAndResetThroughShell(t *testing.T)
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "query", ObjectID: "q", Title: "Saved report"}, QueryType: "DTQL", QueryText: query}}}
 	u.shell.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	u.shell.FocusLeftPanel()
-	u.shell.Update(uitest.Text("Saved report"))
-	u.shell.Update(uitest.Key("enter"))
-	u.shell.Update(uitest.Key("alt+i"))
-	view := ansi.Strip(u.shell.View().Content)
+	for i, node := range u.explorer.explorerNodes() {
+		if node.label == "Saved report" {
+			u.explorer.explorerIndex = i
+			break
+		}
+	}
+	u.explorer.inspectExplorerSelection()
+	u.shell.FocusRightPanel()
+	view := ansi.Strip(u.workspace.View(26, 20, true))
 	if !strings.Contains(view, "first-query-line") || !strings.Contains(view, "Query: Saved report") {
 		t.Fatalf("details not visible: %s", view)
 	}
 	u.shell.Update(uitest.Key("end"))
-	if view = ansi.Strip(u.shell.View().Content); !strings.Contains(view, "last-query-line") {
+	if view = ansi.Strip(u.workspace.View(26, 20, true)); !strings.Contains(view, "last-query-line") {
 		t.Fatalf("details cannot scroll to end: %s", view)
 	}
-	u.shell.Update(uitest.Key("esc"))
-	if u.shell.WorkspaceFocus() != "explorer" {
-		t.Fatal("details did not restore Explorer")
-	}
-	u.shell.Update(uitest.Key("alt+i"))
-	if view = ansi.Strip(u.shell.View().Content); !strings.Contains(view, "first-query-line") || strings.Contains(view, "last-query-line") {
-		t.Fatalf("reopened details retained stale offset: %s", view)
+	u.explorer.inspectExplorerSelection()
+	if view = ansi.Strip(u.workspace.View(26, 20, true)); !strings.Contains(view, "first-query-line") || strings.Contains(view, "last-query-line") {
+		t.Fatalf("reselected details retained stale offset: %s", view)
 	}
 }
 
@@ -243,7 +244,7 @@ func TestUnifiedWorkspaceQuickLoadedSortChordsAndModalOwnership(t *testing.T) {
 	if g.Cell(0, 0) != "2" || g.sourceRowKey() != selected {
 		t.Fatal("AltShiftDown did not sort descending and preserve selected source row")
 	}
-	u.shell.Update(uitest.Key("alt+s"))
+	uxSearchAction(t, u, "Sort loaded")
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModAlt | tea.ModShift})
 	if g.Cell(0, 0) != "2" {
 		t.Fatal("modal arrow escaped into quick sort")
@@ -326,7 +327,7 @@ func TestUnifiedWorkspaceToolbarTogglePreservesContextFeedbackAndModalPriority(t
 			t.Fatal("toggle lost retained state")
 		}
 		first := strings.Split(ansi.Strip(u.shell.View().Content), "\n")[0]
-		if !strings.Contains(first, "F1 Help") || !strings.Contains(first, "API ") {
+		if !strings.Contains(first, "Help [F1]") || !strings.Contains(first, "Server ") {
 			t.Fatalf("compact header lost recovery/status: %s", first)
 		}
 		u.shell.Update(uitest.Key("f1"))
@@ -363,7 +364,7 @@ func TestUnifiedWorkspaceMouseGroupChoicesAndQueryEditorControls(t *testing.T) {
 	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 42})
 	u.shell.FocusEntry(u.lastGridEntryID)
 	before := len(u.snapshot.RecordSets)
-	u.shell.Update(uitest.Key("alt+g"))
+	uxSearchAction(t, u, "Group loaded")
 	clickWorkspaceText(t, u, "[ ] Category")
 	clickWorkspaceText(t, u, "Count rows")
 	clickWorkspaceText(t, u, "Group loaded")
@@ -446,13 +447,13 @@ func TestUnifiedWorkspaceHeaderSessionPickerAndExpandAreClickable(t *testing.T) 
 	}
 	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 42})
 	u.shell.FocusEntry(u.lastGridEntryID)
-	clickWorkspaceText(t, u, "Expand [F9]")
+	u.shell.Update(uitest.Key("f9"))
 	if !u.shell.Expanded() {
-		t.Fatal("header expand click did not expand selected result")
+		t.Fatal("F9 did not expand selected result")
 	}
-	clickWorkspaceText(t, u, "Session: ")
-	if !strings.Contains(ansi.Strip(u.shell.View().Content), "Sessions") {
-		t.Fatalf("header session click did not open session picker: %s", ansi.Strip(u.shell.View().Content))
+	clickWorkspaceText(t, u, "…")
+	if !strings.Contains(ansi.Strip(u.shell.View().Content), "Chats  ↑↓ choose") {
+		t.Fatalf("chat-tab overflow click did not open session picker: %s", ansi.Strip(u.shell.View().Content))
 	}
 	u.shell.Update(uitest.Key("esc"))
 	if !u.shell.Expanded() || u.shell.FocusedEntryID() != u.lastGridEntryID {

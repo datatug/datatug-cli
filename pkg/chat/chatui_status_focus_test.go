@@ -86,7 +86,7 @@ func TestChatUIStatusBarHTTPDocumentFocusedHint(t *testing.T) {
 }
 
 // TestChatUIStatusBarWorkspaceFocusedHint covers the distinct Explorer and
-// Inspect controls, including Inspect's Alt+I cycling and Bookmarks states.
+// Inspect controls, including Tab cycling and Bookmarks states.
 func TestChatUIStatusBarWorkspaceFocusedHint(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
@@ -95,35 +95,35 @@ func TestChatUIStatusBarWorkspaceFocusedHint(t *testing.T) {
 	u.shell.FocusLeftPanel()
 
 	status := u.statusBar(160)
-	if !strings.Contains(status, "type to search") || !strings.Contains(status, "←→ tree") || !strings.Contains(status, "Alt+A Attach to composer") {
+	if !strings.Contains(status, "type to search") || !strings.Contains(status, "←→ tree") || !strings.Contains(status, "Ctrl+P Actions") {
 		t.Fatalf("expected Explorer hint set:\n%s", status)
 	}
 
 	u.shell.FocusRightPanel()
 	status = u.statusBar(160)
-	if !strings.Contains(status, "Alt+I view") || !strings.Contains(status, "F10 Related") || strings.Contains(status, "←→ tree") {
+	if !strings.Contains(status, "Tab/Shift+Tab Row/Column/Result") || !strings.Contains(status, "F10 Related") || strings.Contains(status, "←→ tree") {
 		t.Fatalf("expected Inspect hint set:\n%s", status)
 	}
 
 	beforeSubTab := u.workspace.inspectorSubTab
-	u.shell.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if u.workspace.inspectorSubTab != (beforeSubTab+1)%3 {
-		t.Fatalf("Alt+I should cycle the Inspect view: got %d after %d", u.workspace.inspectorSubTab, beforeSubTab)
+		t.Fatalf("Tab should cycle the Inspect view: got %d after %d", u.workspace.inspectorSubTab, beforeSubTab)
 	}
 	status = u.statusBar(160)
-	if !strings.Contains(status, "Alt+I view") {
+	if !strings.Contains(status, "Tab/Shift+Tab Row/Column/Result") {
 		t.Fatalf("expected Inspect hint after cycling view:\n%s", status)
 	}
 
 	u.workspace.tab = 3
 	status = u.statusBar(160)
-	if !strings.Contains(status, "↑↓ bookmarks") || !strings.Contains(status, "Alt+R rename") {
+	if !strings.Contains(status, "↑↓ bookmarks") || !strings.Contains(status, "Ctrl+P Actions") {
 		t.Fatalf("expected Bookmarks-tab hint set:\n%s", status)
 	}
 
 	u.workspace.bookmarkGridFocused = true
 	status = u.statusBar(160)
-	if !strings.Contains(status, "↑↓ rows") || !strings.Contains(status, "Alt+A attach") {
+	if !strings.Contains(status, "↑↓ rows") || !strings.Contains(status, "Ctrl+P Actions") {
 		t.Fatalf("expected bookmark-grid-focused hint set:\n%s", status)
 	}
 	u.workspace.bookmarkGridFocused = false
@@ -172,7 +172,7 @@ func TestChatUIStatusBarComposerChipHints(t *testing.T) {
 }
 
 // TestChatUIStatusBarJoinFocusedHint keeps bare j in grid search and checks
-// that the explicit Alt+J command opens the secure relationship chooser.
+// that the explicit Actions command opens the secure relationship chooser.
 func TestChatUIStatusBarJoinFocusedHint(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
@@ -202,7 +202,7 @@ func TestChatUIStatusBarJoinFocusedHint(t *testing.T) {
 	}
 
 	before := u.statusBar(160)
-	if !strings.Contains(before, "Alt+J JOIN chooser") {
+	if !strings.Contains(before, "Ctrl+P Actions") {
 		t.Fatalf("expected an explicit JOIN chooser hint:\n%s", before)
 	}
 
@@ -212,10 +212,10 @@ func TestChatUIStatusBarJoinFocusedHint(t *testing.T) {
 	}
 	workspaceRoutingKey(u, "esc") // clear the single-character search
 	workspaceRoutingKey(u, "esc") // leave search mode, retaining the grid
-	workspaceRoutingKey(u, "alt+j")
+	uxSearchAction(t, u, "JOIN relationship")
 	view := u.shell.View().Content
 	if !strings.Contains(view, "JOIN relationship") {
-		t.Fatalf("Alt+J did not open the relationship chooser:\n%s", view)
+		t.Fatalf("Actions did not open the relationship chooser:\n%s", view)
 	}
 	if !strings.Contains(view, "Customer") || !strings.Contains(view, "many-to-one") {
 		t.Fatalf("JOIN chooser did not show the verified relationship candidate:\n%s", view)

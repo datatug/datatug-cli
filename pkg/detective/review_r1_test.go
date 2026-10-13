@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	core "github.com/datatug/datatug-core/pkg/detective"
 	"github.com/datatug/datatug-core/pkg/investigation"
 )
 
@@ -164,7 +165,7 @@ func TestDetectiveUnavailablePoliciesAndSeverityOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 		first := run.Steps[0]
-		if first.ExecutionStatus != "error" || first.ErrorCode != "SOURCE_UNAVAILABLE" || first.EvidenceOutcome != "unknown" || first.Disposition != effectivePolicy(policy) {
+		if first.ExecutionStatus != "error" || first.ErrorCode != "SOURCE_UNAVAILABLE" || first.EvidenceOutcome != "unknown" || first.Disposition != core.EffectivePolicy(policy) {
 			t.Fatalf("%s erased attempted error: %+v", id, first)
 		}
 		if policy == "" || policy == "block" {
@@ -183,7 +184,7 @@ func TestDetectiveUnavailablePoliciesAndSeverityOrder(t *testing.T) {
 		if reversed {
 			a[0], a[1] = a[1], a[0]
 		}
-		outcome, _, severity := aggregate(a)
+		outcome, _, severity := core.AggregateSteps(a)
 		if outcome != "fail" || severity != "critical" {
 			t.Fatalf("order-sensitive severity: %+v => %s/%s", a, outcome, severity)
 		}
@@ -338,7 +339,7 @@ func TestDetectiveScenarioApplicationVersionAndManualProgress(t *testing.T) {
 	if _, err := s.RecordScenarioStep(ctx, c.ID, appID, "confirm", "skipped", "", "alice"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("out-of-order progress: %v", err)
 	}
-	if err := s.SaveRun(ctx, CheckRun{ID: "run-1", Kind: "query-validators", QueryID: "q", CaseID: c.ID, StartedAt: time.Now().UTC(), Actor: "alice"}); err != nil {
+	if err := s.SaveRun(ctx, CheckRun{ID: "run-1", Kind: "query-validators", QueryID: "q", CaseID: c.ID, ExecutionStatus: "completed", Outcome: "unknown", StartedAt: time.Now().UTC(), Actor: "alice"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.appendServerCaseRun(ctx, c.ID, "run-1", "alice"); err != nil {
@@ -375,13 +376,20 @@ func TestDetectiveTypedRangesAndCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
 	check := Check{ID: "cancel", Title: "Cancel", Steps: []Step{{ID: "first", Kind: "query", QueryID: "q", Validators: []Validator{{ID: "one", Kind: "row-count", Scope: "set", Severity: "error", Expected: ptr(investigation.NewIntegerValue("1"))}}}, {ID: "second", Kind: "query", QueryID: "detail"}, {ID: "third", Kind: "query", QueryID: "list"}}}
-	e := engine{checks: map[string]Check{"cancel": check}, runner: func(context.Context, string, string, map[string]apicontract.TypedValueOrSet) (apicontract.Result, error) {
+	s := testStore(t)
+	if _, err := s.SaveCheck(context.Background(), check, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := core.LoadCatalog(context.Background(), "cancel", "", s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := core.EvaluateCheck(ctx, core.RunRequest{ID: "run-cancel", CheckID: "cancel", Environment: "qa", Actor: "alice"}, catalog, func(context.Context, string, string, map[string]apicontract.TypedValueOrSet) (apicontract.Result, error) {
 		calls++
 		cancel()
 		return result([]string{"x"}, [][]Value{{investigation.NewIntegerValue("1")}}), nil
-	}, environment: "qa", cache: map[string]StepResult{}}
-	actual := e.runCheck(ctx, "cancel", nil, 0, map[string]bool{})
-	if calls != 1 || len(actual.Children) != 3 || actual.Children[1].ExecutionStatus != "error" || actual.Children[2].ExecutionStatus != "skipped" {
-		t.Fatalf("cancellation failed between nodes: calls=%d result=%+v", calls, actual)
+	}, nil)
+	if err != nil || calls != 1 || len(run.Steps) != 3 || run.Steps[1].ExecutionStatus != "error" || run.Steps[2].ExecutionStatus != "skipped" {
+		t.Fatalf("cancellation failed between nodes: calls=%d result=%+v err=%v", calls, run, err)
 	}
 }

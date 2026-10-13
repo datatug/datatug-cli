@@ -9,47 +9,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	core "github.com/datatug/datatug-core/pkg/detective"
 	"github.com/gofrs/flock"
-	"github.com/google/uuid"
 )
 
-var ErrConflict = errors.New("definition or case changed; reload before saving")
-var ErrNotFound = errors.New("detective item not found")
-var ErrInvalid = errors.New("invalid detective item")
-var ErrCapacity = errors.New("Detective catalog capacity reached")
-var ErrOutcomeUncertain = errors.New("mutation may have been saved but audit failed; reload before retrying")
+var ErrConflict = core.ErrConflict
+var ErrNotFound = core.ErrNotFound
+var ErrInvalid = core.ErrInvalid
+var ErrCapacity = core.ErrCapacity
+var ErrOutcomeUncertain = core.ErrOutcomeUncertain
 
 const maxItems = 200
 
-// AuditEvent deliberately contains metadata only. No input values or result rows
-// may be added to this generic project event stream.
-type AuditEvent struct {
-	ID                string    `json:"id"`
-	At                time.Time `json:"at"`
-	Actor             string    `json:"actor"`
-	Project           string    `json:"project"`
-	Action            string    `json:"action"`
-	CaseID            string    `json:"caseId,omitempty"`
-	CheckID           string    `json:"checkId,omitempty"`
-	QueryID           string    `json:"queryId,omitempty"`
-	QueryRevision     string    `json:"queryRevision,omitempty"`
-	ResultFingerprint string    `json:"resultFingerprint,omitempty"`
-	ExecutionID       string    `json:"executionId,omitempty"`
-	Source            string    `json:"source,omitempty"`
-	ErrorCode         string    `json:"errorCode,omitempty"`
-	RunID             string    `json:"runId,omitempty"`
-	Environment       string    `json:"environment,omitempty"`
-	Outcome           string    `json:"outcome,omitempty"`
-	RowCount          int       `json:"rowCount,omitempty"`
-	DurationMs        int64     `json:"durationMs,omitempty"`
-}
+type AuditEvent = core.AuditEvent
 
 type AuditStore interface {
 	Append(context.Context, AuditEvent) error
@@ -355,7 +333,7 @@ func (s *LocalStore) StatePage(ctx context.Context, cursor string) (State, error
 	sort.Slice(state.Cases, func(i, j int) bool { return state.Cases[i].UpdatedAt.After(state.Cases[j].UpdatedAt) })
 	sort.Slice(state.Runs, func(i, j int) bool { return state.Runs[i].StartedAt.After(state.Runs[j].StartedAt) })
 	sort.Slice(state.Scenarios, func(i, j int) bool { return state.Scenarios[i].ID < state.Scenarios[j].ID })
-	state.Capabilities = Capabilities{LocalOnly: true, CanRead: true, CanWrite: true, CanRun: true, MaxRows: 500, MaxFanout: maxFanout}
+	state.Capabilities = Capabilities{LocalOnly: true, CanRead: true, CanWrite: true, CanRun: true, MaxRows: 500, MaxFanout: core.MaxFanout}
 	encoded, err := json.Marshal(state)
 	if err != nil {
 		return State{}, err
@@ -548,360 +526,6 @@ func (s *LocalStore) getCase(id string) (Case, error) {
 	return c, nil
 }
 
-func (s *LocalStore) SaveCase(ctx context.Context, c Case, actor, action string) (Case, error) {
-	if !validSlug(c.ID) || strings.TrimSpace(c.Title) == "" {
-		return Case{}, ErrInvalid
-	}
-	err := s.withLock(ctx, func() error {
-		old, err := s.getCase(c.ID)
-		now := time.Now().UTC()
-		if errors.Is(err, ErrNotFound) {
-			if action != "create-case" || c.Version != 0 {
-				return ErrConflict
-			}
-			items, listErr := readItems[Case](s.privateItemDir("cases"))
-			if listErr != nil {
-				return listErr
-			}
-			if len(items) >= maxItems {
-				return ErrCapacity
-			}
-			c.Status = "active"
-			c.Version = 1
-			c.RunRefs = nil
-			c.ScenarioRefs = nil
-			c.ScenarioApplications = nil
-			initialEvidence := c.Evidence[:0]
-			for _, item := range c.Evidence {
-				if item.Kind != "check-run" {
-					initialEvidence = append(initialEvidence, item)
-				}
-			}
-			c.Evidence = initialEvidence
-			c.CreatedAt = now
-			c.Timeline = []CaseEvent{{ID: "created", At: now, Actor: actor, Type: "created"}}
-		} else if err == nil {
-			if action == "create-case" || c.Version != old.Version {
-				return ErrConflict
-			}
-			if !validTransition(old.Status, c.Status, c.ClosureReason) {
-				return ErrInvalid
-			}
-			if old.Status == "active" && c.Status == "closed" && old.ClosureReason != "" && strings.TrimSpace(c.ClosureReason) == strings.TrimSpace(old.ClosureReason) {
-				return ErrInvalid
-			}
-			// The client edits context/findings/links, but cannot replace history
-			// or server-created run links and execution evidence.
-			c.Timeline = append([]CaseEvent(nil), old.Timeline...)
-			c.TimelineOffset = old.TimelineOffset
-			c.ScenarioApplications = append([]ScenarioApplication(nil), old.ScenarioApplications...)
-			c.ScenarioRefs = append([]string(nil), old.ScenarioRefs...)
-			c.RunRefs = append([]string(nil), old.RunRefs...)
-			userEvidence := make([]EvidenceRef, 0, len(c.Evidence)+len(old.Evidence))
-			for _, item := range c.Evidence {
-				if item.Kind != "check-run" {
-					userEvidence = append(userEvidence, item)
-				}
-			}
-			for _, item := range old.Evidence {
-				if item.Kind == "check-run" {
-					userEvidence = append(userEvidence, item)
-				}
-			}
-			if len(userEvidence) == 0 {
-				userEvidence = nil
-			}
-			c.Evidence = userEvidence
-			c.CreatedAt = old.CreatedAt
-			c.Version++
-			if old.Status == "closed" && c.Status == "active" && c.ClosureReason == "" {
-				c.ClosureReason = old.ClosureReason
-			}
-			if old.Status != c.Status {
-				eventType := c.Status
-				if old.Status == "closed" && c.Status == "active" {
-					eventType = "reopened"
-				}
-				c.Timeline = append(c.Timeline, CaseEvent{ID: fmt.Sprintf("lifecycle-%d", c.Version), At: now, Actor: actor, Type: eventType, Message: c.ClosureReason})
-			}
-			changes := []struct {
-				changed bool
-				kind    string
-			}{{!reflect.DeepEqual(old.Context, c.Context), "context-updated"}, {!reflect.DeepEqual(old.Findings, c.Findings), "findings-updated"}, {!reflect.DeepEqual(old.Evidence, c.Evidence), "evidence-updated"}, {!reflect.DeepEqual(old.IncidentRefs, c.IncidentRefs), "incident-links-updated"}, {!reflect.DeepEqual(old.ScenarioRefs, c.ScenarioRefs), "scenario-links-updated"}, {old.Title != c.Title, "title-updated"}}
-			for _, change := range changes {
-				if change.changed {
-					c.Timeline = append(c.Timeline, CaseEvent{ID: fmt.Sprintf("%s-%d", change.kind, c.Version), At: now, Actor: actor, Type: change.kind})
-				}
-			}
-		} else {
-			return err
-		}
-		if c.Context == nil {
-			c.Context = map[string]InputValue{}
-		}
-		for name, value := range c.Context {
-			if !validParameterName(name) {
-				return ErrInvalid
-			}
-			if err := value.Validate(); err != nil {
-				return ErrInvalid
-			}
-		}
-		for _, e := range c.Evidence {
-			if !validSlug(e.ID) || !oneOf(e.Kind, "check-run", "query", "external") || e.Ref == "" {
-				return ErrInvalid
-			}
-		}
-		for _, f := range c.Findings {
-			if !validSlug(f.ID) || f.Text == "" || !oneOf(f.Status, "hypothesis", "confirmed") {
-				return ErrInvalid
-			}
-		}
-		for _, ref := range c.IncidentRefs {
-			if ref == "" || len(ref) > 256 || strings.ContainsAny(ref, "\n\r\x00") {
-				return ErrInvalid
-			}
-		}
-		if len(c.Evidence) > 200 || len(c.Findings) > 200 {
-			return ErrInvalid
-		}
-		c.UpdatedAt = now
-		if err := s.compactCaseTimeline(&c); err != nil {
-			return err
-		}
-		if err := writeItem(s.privateItemDir("cases"), c.ID, c); err != nil {
-			return err
-		}
-		return s.auditMutation(ctx, AuditEvent{ID: fmt.Sprintf("case-%s-%d", c.ID, c.Version), At: now, Actor: actor, Project: s.projectID, Action: action, CaseID: c.ID})
-	})
-	return c, err
-}
-
-// ApplyScenario snapshots reusable guidance on an active Case. It never
-// starts a query or a Check; each step remains a separate manual action.
-func (s *LocalStore) ApplyScenario(ctx context.Context, caseID, scenarioID, actor string) (Case, error) {
-	if !validSlug(caseID) || !validSlug(scenarioID) {
-		return Case{}, ErrInvalid
-	}
-	var c Case
-	err := s.withLock(ctx, func() error {
-		var err error
-		c, err = s.getCase(caseID)
-		if err != nil {
-			return err
-		}
-		if c.Status != "active" || len(c.ScenarioApplications) >= 100 {
-			return ErrInvalid
-		}
-		data, err := safeReadFile(s.definitionDir("scenarios"), scenarioID)
-		if errors.Is(err, os.ErrNotExist) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		var scenario Scenario
-		if err := json.Unmarshal(data, &scenario); err != nil {
-			return err
-		}
-		if scenario.ID != scenarioID {
-			return ErrInvalid
-		}
-		now := time.Now().UTC()
-		application := ScenarioApplication{ID: "application-" + strings.ReplaceAll(uuid.NewString(), "-", ""), ScenarioID: scenarioID, ScenarioVersion: scenario.Version, Snapshot: scenario, AppliedAt: now, AppliedBy: actor}
-		for _, step := range scenario.Steps {
-			application.Steps = append(application.Steps, ScenarioStepReceipt{StepID: step.ID, Status: "pending"})
-		}
-		c.ScenarioApplications = append(c.ScenarioApplications, application)
-		linked := false
-		for _, ref := range c.ScenarioRefs {
-			if ref == scenarioID {
-				linked = true
-				break
-			}
-		}
-		if !linked {
-			c.ScenarioRefs = append(c.ScenarioRefs, scenarioID)
-		}
-		c.Timeline = append(c.Timeline, CaseEvent{ID: "event-" + strings.ReplaceAll(uuid.NewString(), "-", ""), At: now, Actor: actor, Type: "scenario-applied", Ref: application.ID})
-		c.Version++
-		c.UpdatedAt = now
-		if err := s.compactCaseTimeline(&c); err != nil {
-			return err
-		}
-		if err := writeItem(s.privateItemDir("cases"), caseID, c); err != nil {
-			return err
-		}
-		return s.auditMutation(ctx, AuditEvent{ID: application.ID, At: now, Actor: actor, Project: s.projectID, Action: "scenario-applied", CaseID: caseID})
-	})
-	return c, err
-}
-
-// RecordScenarioStep records one reviewed manual step in application order.
-func (s *LocalStore) RecordScenarioStep(ctx context.Context, caseID, applicationID, stepID, status, runID, actor string) (Case, error) {
-	if !validSlug(caseID) || !validSlug(applicationID) || !validSlug(stepID) || !oneOf(status, "completed", "skipped") {
-		return Case{}, ErrInvalid
-	}
-	if status == "completed" && !validSlug(runID) || status == "skipped" && runID != "" {
-		return Case{}, ErrInvalid
-	}
-	var c Case
-	err := s.withLock(ctx, func() error {
-		var err error
-		c, err = s.getCase(caseID)
-		if err != nil {
-			return err
-		}
-		if c.Status != "active" {
-			return ErrInvalid
-		}
-		applicationIndex, stepIndex := -1, -1
-		for i, application := range c.ScenarioApplications {
-			if application.ID == applicationID {
-				applicationIndex = i
-				for j, step := range application.Steps {
-					if step.StepID == stepID {
-						stepIndex = j
-						break
-					}
-				}
-				break
-			}
-		}
-		if applicationIndex < 0 || stepIndex < 0 {
-			return ErrNotFound
-		}
-		application := &c.ScenarioApplications[applicationIndex]
-		if application.Steps[stepIndex].Status != "pending" {
-			return ErrConflict
-		}
-		for _, prior := range application.Steps[:stepIndex] {
-			if prior.Status == "pending" {
-				return ErrInvalid
-			}
-		}
-		if status == "completed" {
-			linked := false
-			for _, ref := range c.RunRefs {
-				if ref == runID {
-					linked = true
-					break
-				}
-			}
-			if !linked {
-				return ErrInvalid
-			}
-			data, err := safeReadFile(s.privateItemDir("runs"), runID)
-			if errors.Is(err, os.ErrNotExist) {
-				return ErrNotFound
-			}
-			if err != nil {
-				return err
-			}
-			var run CheckRun
-			if err := json.Unmarshal(data, &run); err != nil {
-				return err
-			}
-			if run.CaseID != caseID {
-				return ErrInvalid
-			}
-			step := application.Snapshot.Steps[stepIndex]
-			if step.Kind == "check" && (run.Kind != "check" || run.CheckID != step.Ref) || step.Kind == "query" && (run.Kind != "query-validators" || run.QueryID != step.Ref) {
-				return ErrInvalid
-			}
-		}
-		now := time.Now().UTC()
-		receipt := &application.Steps[stepIndex]
-		receipt.Status, receipt.RunID, receipt.At, receipt.Actor = status, runID, now, actor
-		c.Timeline = append(c.Timeline, CaseEvent{ID: "event-" + strings.ReplaceAll(uuid.NewString(), "-", ""), At: now, Actor: actor, Type: "scenario-step-" + status, Ref: applicationID, Message: stepID})
-		c.Version++
-		c.UpdatedAt = now
-		if err := s.compactCaseTimeline(&c); err != nil {
-			return err
-		}
-		if err := writeItem(s.privateItemDir("cases"), caseID, c); err != nil {
-			return err
-		}
-		return s.auditMutation(ctx, AuditEvent{ID: fmt.Sprintf("scenario-step-%s-%d", applicationID, c.Version), At: now, Actor: actor, Project: s.projectID, Action: "scenario-step-" + status, CaseID: caseID, RunID: runID})
-	})
-	return c, err
-}
-
-func (s *LocalStore) AppendCaseEvent(ctx context.Context, id string, event CaseEvent, actor string) (Case, error) {
-	if !oneOf(event.Type, "note", "link-evidence") {
-		return Case{}, ErrInvalid
-	}
-	return s.appendCaseEvent(ctx, id, event, actor, false)
-}
-
-func (s *LocalStore) appendServerCaseRun(ctx context.Context, id, runID, actor string) (Case, error) {
-	return s.appendCaseEvent(ctx, id, CaseEvent{Type: "check-run", Ref: runID}, actor, true)
-}
-
-func (s *LocalStore) appendCaseEvent(ctx context.Context, id string, event CaseEvent, actor string, server bool) (Case, error) {
-	var c Case
-	err := s.withLock(ctx, func() error {
-		var err error
-		c, err = s.getCase(id)
-		if err != nil {
-			return err
-		}
-		if c.Status == "archived" {
-			return ErrInvalid
-		}
-		if server && event.Type != "check-run" || !server && !oneOf(event.Type, "note", "link-evidence") {
-			return ErrInvalid
-		}
-		if event.Type == "note" && (strings.TrimSpace(event.Message) == "" || len(event.Message) > 4096 || event.Ref != "") {
-			return ErrInvalid
-		}
-		if event.Type == "check-run" || event.Type == "link-evidence" {
-			if !validSlug(event.Ref) {
-				return ErrInvalid
-			}
-			data, err := safeReadFile(s.privateItemDir("runs"), event.Ref)
-			if err != nil {
-				return ErrNotFound
-			}
-			var run CheckRun
-			if err := json.Unmarshal(data, &run); err != nil {
-				return err
-			}
-			if event.Type == "check-run" && run.CaseID != id {
-				return ErrInvalid
-			}
-			for _, ref := range c.RunRefs {
-				if ref == event.Ref {
-					return ErrConflict
-				}
-			}
-		}
-		event.ID = "event-" + strings.ReplaceAll(uuid.NewString(), "-", "")
-		for _, e := range c.Timeline {
-			if e.ID == event.ID {
-				return ErrConflict
-			}
-		}
-		event.At = time.Now().UTC()
-		event.Actor = actor
-		c.Timeline = append(c.Timeline, event)
-		if event.Type == "check-run" || event.Type == "link-evidence" {
-			c.RunRefs = append(c.RunRefs, event.Ref)
-			c.Evidence = append(c.Evidence, EvidenceRef{ID: "evidence-" + event.Ref, Kind: "check-run", Ref: event.Ref})
-		}
-		c.Version++
-		c.UpdatedAt = event.At
-		if err := s.compactCaseTimeline(&c); err != nil {
-			return err
-		}
-		if err = writeItem(s.privateItemDir("cases"), id, c); err != nil {
-			return err
-		}
-		return s.auditMutation(ctx, AuditEvent{ID: event.ID, At: event.At, Actor: actor, Project: s.projectID, Action: event.Type, CaseID: id})
-	})
-	return c, err
-}
-
 type caseEventChunk struct {
 	CaseID string      `json:"caseId"`
 	Start  int         `json:"start"`
@@ -1029,76 +653,15 @@ func (s *LocalStore) SaveRun(ctx context.Context, run CheckRun) error {
 		if err := writeItem(s.privateItemDir("runs"), run.ID, run); err != nil {
 			return err
 		}
-		rows, source, queryID, errorCode, revision, fingerprint, executionID := summarizeSteps(run.Steps)
-		return s.auditMutation(ctx, AuditEvent{ID: run.ID, At: run.StartedAt, Actor: run.Actor, Project: s.projectID, Action: "run-" + run.Kind, CheckID: run.CheckID, QueryID: queryID, QueryRevision: revision, ResultFingerprint: fingerprint, ExecutionID: executionID, Source: source, ErrorCode: errorCode, CaseID: run.CaseID, RunID: run.ID, Environment: run.Environment, Outcome: run.Outcome, RowCount: rows, DurationMs: run.DurationMs})
+		audit := core.AuditForRun(run)
+		audit.Project = s.projectID
+		return s.auditMutation(ctx, audit)
 	})
 }
 
-func summarizeSteps(steps []StepResult) (rows int, source, queryID, errorCode, revision, fingerprint, executionID string) {
-	for _, step := range steps {
-		rows += step.RowCount
-		if source == "" {
-			source = step.Source
-		}
-		if queryID == "" {
-			queryID = step.QueryID
-		}
-		if errorCode == "" {
-			errorCode = step.ErrorCode
-		}
-		if revision == "" {
-			revision = step.QueryRevision
-		}
-		if fingerprint == "" {
-			fingerprint = step.ResultFingerprint
-		}
-		if executionID == "" && step.Execution != nil {
-			executionID = step.Execution.ExecutionID
-		}
-		childRows, childSource, childQuery, childCode, childRevision, childFingerprint, childExecutionID := summarizeSteps(step.Children)
-		rows += childRows
-		if source == "" {
-			source = childSource
-		}
-		if queryID == "" {
-			queryID = childQuery
-		}
-		if errorCode == "" {
-			errorCode = childCode
-		}
-		if revision == "" {
-			revision = childRevision
-		}
-		if fingerprint == "" {
-			fingerprint = childFingerprint
-		}
-		if executionID == "" {
-			executionID = childExecutionID
-		}
-	}
-	return
-}
-
 func (s *LocalStore) SaveScenario(ctx context.Context, scenario Scenario, actor string) (Scenario, error) {
-	if !validSlug(scenario.ID) || scenario.Title == "" || len(scenario.Steps) == 0 {
-		return Scenario{}, ErrInvalid
-	}
-	if len(scenario.Steps) > 32 || len(scenario.Inputs) > 64 {
-		return Scenario{}, ErrInvalid
-	}
-	inputNames := map[string]bool{}
-	for _, input := range scenario.Inputs {
-		if !validParameterName(input.Name) || inputNames[input.Name] || !validInputType(input.Type) || !oneOf(input.Cardinality, "scalar", "set", "range") {
-			return Scenario{}, ErrInvalid
-		}
-		inputNames[input.Name] = true
-	}
-	stepIDs := map[string]bool{}
-	for _, step := range scenario.Steps {
-		if !validSlug(step.ID) || stepIDs[step.ID] || !oneOf(step.Kind, "query", "check") || step.Ref == "" || step.Kind == "check" && !validSlug(step.Ref) || step.Kind == "query" && !validQueryRef(step.Ref) {
-			return Scenario{}, ErrInvalid
-		}
-		stepIDs[step.ID] = true
+	if err := core.ValidateScenario(scenario); err != nil {
+		return Scenario{}, err
 	}
 	for i := range scenario.Steps {
 		if scenario.Steps[i].Kind == "query" {
@@ -1146,10 +709,7 @@ func (s *LocalStore) SaveScenario(ctx context.Context, scenario Scenario, actor 
 }
 
 func (s *LocalStore) SaveValidator(ctx context.Context, item PublishedValidator, actor string) (PublishedValidator, error) {
-	if !validSlug(item.ID) || item.Title == "" || item.Validator.ValidatorID != "" || item.Validator.ID == "" {
-		return PublishedValidator{}, ErrInvalid
-	}
-	if err := validateValidator(item.Validator); err != nil {
+	if err := core.ValidatePublishedValidator(item); err != nil {
 		return PublishedValidator{}, err
 	}
 	err := s.withLock(ctx, func() error {
@@ -1213,22 +773,7 @@ func (s *LocalStore) SaveValidator(ctx context.Context, item PublishedValidator,
 	return item, err
 }
 
-func validQueryRef(id string) bool {
-	if id == "" || len(id) > 512 {
-		return false
-	}
-	for _, segment := range strings.Split(id, "/") {
-		if segment == "" || segment == "." || segment == ".." || len(segment) > 128 {
-			return false
-		}
-		for _, r := range segment {
-			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-') {
-				return false
-			}
-		}
-	}
-	return true
-}
+func validQueryRef(id string) bool { return core.ValidQueryRef(id) }
 
 func (s *LocalStore) resolveQueryRef(id string) (string, error) {
 	if !validQueryRef(id) {
@@ -1292,21 +837,14 @@ func queryValidatorFileID(queryID string) string {
 }
 
 func (s *LocalStore) SaveQueryValidators(ctx context.Context, item QueryValidators, actor string) (QueryValidators, error) {
-	if !validQueryRef(item.QueryID) || len(item.Validators) == 0 || len(item.Validators) > 32 {
-		return QueryValidators{}, ErrInvalid
+	if err := core.ValidateQueryValidators(item); err != nil {
+		return QueryValidators{}, err
 	}
 	canonical, err := s.resolveQueryRef(item.QueryID)
 	if err != nil {
 		return QueryValidators{}, err
 	}
 	item.QueryID = canonical
-	seen := map[string]bool{}
-	for _, v := range item.Validators {
-		if err := validateValidator(v); err != nil || seen[v.ID] {
-			return QueryValidators{}, ErrInvalid
-		}
-		seen[v.ID] = true
-	}
 	err = s.withLock(ctx, func() error {
 		data, err := safeReadFile(s.definitionDir("query-validators"), queryValidatorFileID(item.QueryID))
 		if err == nil {
@@ -1407,29 +945,7 @@ func (s *LocalStore) Append(ctx context.Context, event AuditEvent) error {
 	return s.withLock(ctx, func() error { return s.audit.Append(ctx, event) })
 }
 
-func validTransition(old, next, reason string) bool {
-	switch old {
-	case "active":
-		return next == "active" || (next == "closed" && strings.TrimSpace(reason) != "")
-	case "closed":
-		return next == "closed" || next == "active" || next == "archived"
-	case "archived":
-		return next == "archived"
-	}
-	return false
-}
-
-func validSlug(id string) bool {
-	if len(id) == 0 || len(id) > 128 || id[0] < 'a' || id[0] > 'z' {
-		return false
-	}
-	for _, r := range id {
-		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
-			return false
-		}
-	}
-	return true
-}
+func validSlug(id string) bool { return core.ValidSlug(id) }
 
 // The API has already resolved this ID against its served-project map. It is
 // only an audit label here, never a filesystem component; existing project

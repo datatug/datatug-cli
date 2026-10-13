@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -161,7 +162,17 @@ func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	case "record-scenario-step":
 		var c detective.Case
-		c, err = store.RecordScenarioStep(r.Context(), req.CaseID, req.ApplicationID, req.StepID, req.StepStatus, req.RunID, actor)
+		if req.Execution == nil {
+			c, err = store.RecordScenarioStep(r.Context(), req.CaseID, req.ApplicationID, req.StepID, req.StepStatus, req.RunID, actor)
+		} else if req.StepStatus != "completed" || req.RunID != "" {
+			err = detective.ErrInvalid
+		} else {
+			var proof detective.ScenarioQueryProof
+			proof, err = loadDetectiveScenarioQueryProof(r.Context(), req.Project, actor, req.Execution)
+			if err == nil {
+				c, err = store.RecordScenarioQueryStep(r.Context(), req.CaseID, req.ApplicationID, req.StepID, proof, actor)
+			}
+		}
 		if err == nil {
 			response.Case = &c
 		}
@@ -207,7 +218,16 @@ func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		var run detective.CheckRun
-		run, err = store.RunQueryValidators(r.Context(), canonical, req.Environment, req.CaseID, actor, req.Inputs, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project))
+		if req.Execution == nil {
+			run, err = store.RunQueryValidators(r.Context(), canonical, req.Environment, req.CaseID, actor, req.Inputs, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project))
+		} else {
+			var result apicontract.Result
+			var inputs map[string]detective.InputValue
+			result, inputs, err = loadDetectiveExecutionResult(r.Context(), req.Project, canonical, req.Environment, req.Execution, req.Inputs)
+			if err == nil {
+				run, err = store.RunQueryValidatorsForResult(r.Context(), canonical, req.Environment, req.CaseID, actor, inputs, result, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project))
+			}
+		}
 		if err == nil {
 			response.Run = &run
 		}
@@ -215,6 +235,95 @@ func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
 		err = detective.ErrInvalid
 	}
 	writeContractResponse(w, r, detectiveError(err), response)
+}
+
+func loadDetectiveScenarioQueryProof(ctx context.Context, project, actor string, ref *apicontract.ExecutionRef) (detective.ScenarioQueryProof, error) {
+	if ref == nil || ref.Validate() != nil || ref.ProjectID != project {
+		return detective.ScenarioQueryProof{}, newInvalidRequest("execution", "invalid execution reference")
+	}
+	store, err := api.ExecutionEvidenceStoreByID(project, ref.StoreID)
+	if err != nil {
+		return detective.ScenarioQueryProof{}, newNotFound("execution store not found")
+	}
+	record, err := store.Execution(ctx, *ref)
+	if err != nil {
+		return detective.ScenarioQueryProof{}, newNotFound("execution not found")
+	}
+	if record.Ref != *ref || record.Scope.Project != project || record.QueryID == "" || record.Scope.Environment == "" || record.Principal.ID != actor || record.ResultComplete == nil {
+		return detective.ScenarioQueryProof{}, newAccessDenied("execution receipt does not match the current project and principal")
+	}
+	return detective.ScenarioQueryProof{Execution: *ref, QueryID: record.QueryID, Environment: record.Scope.Environment, ExecutionStatus: "completed"}, nil
+}
+
+// A row overlay is safe only when the retained receipt still has the same
+// ordered rows and columns after current policy is reapplied. The client can
+// select the receipt but cannot supply either its rows or its parameters.
+func loadDetectiveExecutionResult(ctx context.Context, project, queryID, environment string, ref *apicontract.ExecutionRef, supplied map[string]detective.InputValue) (apicontract.Result, map[string]detective.InputValue, error) {
+	if ref == nil || ref.Validate() != nil || ref.ProjectID != project || len(supplied) != 0 {
+		return apicontract.Result{}, nil, newInvalidRequest("execution", "invalid execution reference or inputs")
+	}
+	store, err := api.ExecutionEvidenceStoreByID(project, ref.StoreID)
+	if err != nil {
+		return apicontract.Result{}, nil, newNotFound("execution store not found")
+	}
+	record, err := store.Execution(ctx, *ref)
+	if err != nil {
+		return apicontract.Result{}, nil, newNotFound("execution not found")
+	}
+	if record.QueryID != queryID || record.Scope.Project != project || record.Scope.Environment != environment || record.Ref != *ref {
+		return apicontract.Result{}, nil, newInvalidRequest("execution", "execution does not match the requested query and environment")
+	}
+	if record.SnapshotRef == "" {
+		return apicontract.Result{}, nil, newSnapshotExpired("the execution has no retained row snapshot")
+	}
+	snapshot, err := store.Snapshot(ctx, *ref, record.SnapshotRef)
+	retained, err := readableCompareSnapshot(snapshot, err)
+	if err != nil {
+		return apicontract.Result{}, nil, err
+	}
+	if record.ResultComplete == nil || !*record.ResultComplete {
+		return apicontract.Result{}, nil, newSourceUnavailable("the execution cannot prove complete retained rows")
+	}
+	if len(retained.Rows) != record.RowCount {
+		return apicontract.Result{}, nil, newSourceUnavailable("retained rows do not match the execution receipt")
+	}
+	fingerprint, err := apicontract.FingerprintRecordset(retained)
+	if err != nil || fingerprint != record.ResultFingerprint {
+		return apicontract.Result{}, nil, newSourceUnavailable("retained rows do not match the execution fingerprint")
+	}
+	executor, ok := compareSecureExecutorHook()
+	if !ok {
+		return apicontract.Result{}, nil, newContractError(codeInternal, "server has no policy-enforced session configured", "")
+	}
+	filtered, err := compareRunSnapshotHook(executor, ctx, record.Provenance.Collection, retained)
+	if err != nil {
+		if isCurrentPolicyDenial(err) {
+			return apicontract.Result{}, nil, newAccessDenied("current access policy does not permit this recorded evidence")
+		}
+		return apicontract.Result{}, nil, newContractError(codeInternal, "apply current policy to recorded Detective evidence", "")
+	}
+	if filtered.SnapshotRecordset == nil {
+		return apicontract.Result{}, nil, newContractError(codeInternal, "shape filtered Detective snapshot", "")
+	}
+	if !reflect.DeepEqual(retained, *filtered.SnapshotRecordset) {
+		return apicontract.Result{}, nil, newSourceUnavailable("current policy changed the recorded rows or columns")
+	}
+	limitations := append([]apicontract.Limitation(nil), record.Limitations...)
+	limitations = append(limitations, snapshot.Limitations...)
+	limitations = append(limitations, recordedSnapshotRetentionLimitations(record, retained)...)
+	limitations = append(limitations, toContractLimitations(filtered.Limitations)...)
+	inputs := make(map[string]detective.InputValue, len(record.Parameters))
+	for name, value := range record.Parameters {
+		if value.Validate() != nil {
+			return apicontract.Result{}, nil, newSourceUnavailable("recorded query inputs are invalid")
+		}
+		inputs[name] = detective.InputValue{Scalar: value.Scalar, Set: value.Set}
+	}
+	result := apicontract.Result{Recordset: retained, Limitations: normalizeLimitations(limitations), BindingsApplied: record.BindingsApplied, Provenance: record.Provenance, Truncated: snapshot.Truncated, Execution: ref}
+	if result.Recordset.Validate() == nil {
+		return result, inputs, nil
+	}
+	return apicontract.Result{}, nil, newSourceUnavailable("recorded query result is invalid")
 }
 
 func detectiveQueryRunner(project, securityContextID string) detective.QueryRunner {

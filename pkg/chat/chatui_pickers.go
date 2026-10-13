@@ -23,8 +23,7 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 	if u.shell.WorkspaceFocus() == "transcript" {
-		u.workspace.inspectObject = nil
-		u.workspace.inspectGroup = ""
+		u.workspace.clearExplorerInspection()
 	}
 	if u.backendBusy() && msg.String() == "enter" && u.shell.WorkspaceFocus() == "input" && !u.shell.ComposerActionFocused() {
 		text := strings.TrimSpace(u.shell.ComposerText())

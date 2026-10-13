@@ -235,7 +235,9 @@ func TestAppendTurnResultsFallbackForSessionlessEmptyTurn(t *testing.T) {
 	cmd := u.Submit("anything")
 	drainCmd(t, u, cmd)
 	view := u.shell.View().Content
-	if !strings.Contains(view, "I couldn't construct a valid query for that request.") {
+	// The frame consumes the existing edge cells and may wrap the final word.
+	// Both visible fragments must remain; this is a rendered fallback check.
+	if !strings.Contains(view, "I couldn't construct a valid query for that") || !strings.Contains(view, "request.") {
 		t.Fatalf("expected the sessionless fallback text in view:\n%s", view)
 	}
 }

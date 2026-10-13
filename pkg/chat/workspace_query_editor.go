@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/tui/chatshell"
+	"github.com/tuigoff/tuigoff/pkg/theme"
 )
 
 type workspaceQueryDoneMsg struct {
@@ -94,9 +95,9 @@ func (p *workspaceQueryEditor) View(w, h int, focused bool) string {
 			controls[i] = "[" + controls[i] + "]"
 		}
 	}
-	selectionHint := "Tab controls · Enter newline/run action · Esc back"
+	selectionHint := theme.WorkspaceKeyHint("Tab") + " controls · " + theme.WorkspaceKeyHint("Enter") + " newline/run action · " + theme.WorkspaceKeyHint("Esc") + " back"
 	if p.selection != "" {
-		selectionHint = fmt.Sprintf("Selected %d characters · Tab → Copy selected", len([]rune(p.selection)))
+		selectionHint = fmt.Sprintf("Selected %d characters · %s → Copy selected", len([]rune(p.selection)), theme.WorkspaceKeyHint("Tab"))
 	}
 	textView := p.text.View()
 	p.controlY = strings.Count(textView, "\n") + 1
@@ -227,17 +228,17 @@ func (s *queryTextSelection) View(w, h int) string {
 		appendCell(cell, width)
 	}
 	start, end := selectedListWindow(len(lines), caretLine, max(1, h-2))
-	header := "Esc cancel · Select text · arrows extend · A anchor"
+	header := theme.WorkspaceKeyHint("Esc") + " cancel · Select text · " + theme.WorkspaceKeyHint("arrows") + " extend · " + theme.WorkspaceKeyHint("A") + " anchor"
 	if s.copied {
-		header = "Esc cancel · Selection copied · arrows extend · A anchor"
+		header = theme.WorkspaceKeyHint("Esc") + " cancel · Selection copied · " + theme.WorkspaceKeyHint("arrows") + " extend · " + theme.WorkspaceKeyHint("A") + " anchor"
 	}
-	acceptLabel := "Accept ↵"
+	acceptLabel := "Accept " + theme.WorkspaceKeyHint("↵")
 	if s.copyOnAccept {
-		acceptLabel = "Accept & copy ↵"
+		acceptLabel = "Accept & copy " + theme.WorkspaceKeyHint("↵")
 	}
-	labels := []string{"Copy Ctrl+C", acceptLabel, "Cancel Esc"}
+	labels := []string{"Copy " + theme.WorkspaceKeyHint("Ctrl+C"), acceptLabel, "Cancel " + theme.WorkspaceKeyHint("Esc")}
 	if w < 35 {
-		labels = []string{"^C Copy", "↵ OK", "Esc"}
+		labels = []string{theme.WorkspaceKeyHint("^C") + " Copy", theme.WorkspaceKeyHint("↵") + " OK", theme.WorkspaceKeyHint("Esc")}
 	}
 	keys := []string{"ctrl+c", "enter", "esc"}
 	footer, offset := "", 0

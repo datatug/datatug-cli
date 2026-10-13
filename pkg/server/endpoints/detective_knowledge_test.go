@@ -59,3 +59,31 @@ func TestDetectiveKnowledgeRoutesRequireCurrentProjectSession(t *testing.T) {
 		t.Fatalf("stale knowledge action = %d %s", stale.Code, stale.Body.String())
 	}
 }
+
+func TestDetectiveKnowledgeActionRejectsDisabledWritesMalformedBodyAndForeignScope(t *testing.T) {
+	project, private := t.TempDir(), t.TempDir()
+	session := secureread.Session{Principal: &access.Principal{ID: "alice"}, Unrestricted: true}
+	paths := map[string]string{"p": project}
+	api.ConfigureSecureSession(session, paths, api.Capabilities{EvidencePrivateDir: private})
+	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
+	path := "/datatug/detective/knowledge_proposal_action?project=p&securityContextId=" + api.SecurityContextID()
+	request := httptest.NewRecorder()
+	detectiveKnowledgeActionHandler(request, httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(`{"storage":"local","project":"p"}`)))
+	if request.Code != http.StatusForbidden {
+		t.Fatalf("read-only agent accepted private knowledge mutation: %d %s", request.Code, request.Body.String())
+	}
+	api.ConfigureSecureSession(session, paths, api.Capabilities{AllowWrites: true, EvidencePrivateDir: private})
+	path = "/datatug/detective/knowledge_proposal_action?project=p&securityContextId=" + api.SecurityContextID()
+	for _, tc := range []struct{ name, body string }{
+		{name: "malformed JSON", body: `{`},
+		{name: "foreign project", body: `{"storage":"local","project":"other","operationId":"proposal-1","type":"save-draft"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			detectiveKnowledgeActionHandler(response, httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(tc.body)))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("%s accepted: %d %s", tc.name, response.Code, response.Body.String())
+			}
+		})
+	}
+}

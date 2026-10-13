@@ -235,7 +235,7 @@ func (m *Model) updateAIKey(key string) (tea.Model, tea.Cmd) {
 	if m.screen == aiList {
 		switch key {
 		case "n":
-			m.begin("ai-generate", "Ask Detective AI for private proposals", []field{f("Prompt", "", "describe the evidence and desired proposal; no action runs yet"), f("Case ID", m.defaultAICaseID(), "optional existing Case"), f("Expected counts", "", "optional name=count pairs, comma separated")})
+			m.begin("ai-generate", "Ask Detective AI for private proposals", []field{fm("Prompt", "", "describe the evidence and desired proposal; no action runs yet"), f("Case ID", m.defaultAICaseID(), "optional existing Case"), f("Expected counts", "", "optional name=count pairs, comma separated")})
 			return m, nil
 		case "l":
 			if m.aiPage.HasMore {
@@ -283,7 +283,7 @@ func (m *Model) updateAIKey(key string) (tea.Model, tea.Cmd) {
 		switch p.Draft.Kind {
 		case ai.KindQuery:
 			if x := p.Draft.Query; x != nil {
-				fields = append(fields, f("Query ID", x.ID, "saved query ID"), f("Query title", x.Title, ""), f("Query type", x.Type, ""), f("Query text", x.Text, "editable SQL or DTQL"), f("Connection ID", x.ConnectionID, "admitted source"), f("Inputs", formatInputs(x.Inputs), "scalar or set query parameters"), f("Expected revision", x.ExpectedRevision, "empty creates; existing revision edits"))
+				fields = append(fields, f("Query ID", x.ID, "saved query ID"), f("Query title", x.Title, ""), f("Query type", x.Type, ""), fm("Query text", x.Text, "editable SQL or DTQL"), f("Connection ID", x.ConnectionID, "admitted source"), f("Inputs", formatInputs(x.Inputs), "scalar or set query parameters"), f("Expected revision", x.ExpectedRevision, "empty creates; existing revision edits"))
 			}
 		case ai.KindCheck:
 			if x := p.Draft.Check; x != nil {

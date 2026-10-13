@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/detective"
+	ai "github.com/datatug/datatug-core/pkg/detectiveai"
 	"github.com/datatug/datatug-core/pkg/investigation"
 )
 
@@ -47,6 +48,44 @@ func TestNativePasteUpdatesOnlyFocusedEditableText(t *testing.T) {
 	if m.field("ID") != "case-1" {
 		t.Fatalf("in-flight form changed by paste: %q", m.field("ID"))
 	}
+}
+
+func TestNativePastePreservesMultilineAIAndQueryText(t *testing.T) {
+	m := New(&fixtureService{}, "checks")
+	m.begin("ai-generate", "AI intake", []field{fm("Prompt", "", "")})
+	m.Update(tea.PasteMsg{Content: "Find invoice mismatches\nKeep source evidence"})
+	if got := m.field("Prompt"); got != "Find invoice mismatches\nKeep source evidence" {
+		t.Fatalf("AI intake paste changed line boundaries: %q", got)
+	}
+	m.begin("ai-review", "Query review", []field{fm("Query text", "", "")})
+	m.Update(tea.PasteMsg{Content: "SELECT 1 -- explanation\nFROM invoices"})
+	if got := m.field("Query text"); got != "SELECT 1 -- explanation\nFROM invoices" {
+		t.Fatalf("SQL comment swallowed next line: %q", got)
+	}
+	m.begin("new-case", "Single line", []field{f("Title", "", "")})
+	m.Update(tea.PasteMsg{Content: "Invoice\nreconciliation"})
+	if got := m.field("Title"); got != "Invoice reconciliation" {
+		t.Fatalf("single-line paste was not normalized: %q", got)
+	}
+	service := &aiUIFixture{fixtureService: &fixtureService{}}
+	actual := New(service, "detective")
+	actual.screen = aiList
+	actual.updateAIKey("n")
+	if actual.form == nil || !actual.form.fields[0].multiline {
+		t.Fatal("real AI intake is not multiline")
+	}
+	actual.aiPage.Proposals = []ai.Proposal{{ID: "proposal-1", Draft: ai.Draft{Kind: ai.KindQuery, Query: &ai.QueryDraft{ID: "query-1", Text: "SELECT 1"}}}}
+	actual.aiProposalID, actual.screen = "proposal-1", aiDetail
+	actual.updateAIKey("r")
+	for _, field := range actual.form.fields {
+		if field.label == "Query text" {
+			if !field.multiline {
+				t.Fatal("real query review text is not multiline")
+			}
+			return
+		}
+	}
+	t.Fatal("real query review has no editable query text")
 }
 
 func TestUnacceptedNativeEditsCannotMutateCachedCaseOrValidator(t *testing.T) {

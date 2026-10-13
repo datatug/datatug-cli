@@ -51,6 +51,17 @@ func TestDetectiveExistingExecutionUsesReceiptAndSameRows(t *testing.T) {
 	require.Equal(t, ref, *result.Execution)
 	require.Equal(t, rows, result.Recordset)
 	require.Equal(t, input, *inputs["invoice_id"].Scalar)
+	transient := receipt
+	transient.Ref.ExecutionID = "transient-exact-rows"
+	transient.SnapshotRef = ""
+	require.NoError(t, store.PutExecution(ctx, transient))
+	detectiveTransientRows.put(transient.Ref, "alice", rows, time.Now())
+	transientResult, _, err := loadDetectiveExecutionResult(ctx, project, "alice", "list", "qa", &transient.Ref, nil)
+	require.NoError(t, err)
+	require.Equal(t, rows, transientResult.Recordset)
+	require.Empty(t, transient.SnapshotRef, "exact in-session validation must not need durable row storage")
+	_, _, err = loadDetectiveExecutionResult(ctx, project, "bob", "list", "qa", &transient.Ref, nil)
+	require.Error(t, err, "another principal must not read transient rows")
 	_, _, err = loadDetectiveExecutionResult(ctx, project, "alice", "list", "prod", &ref, nil)
 	require.Error(t, err)
 	_, _, err = loadDetectiveExecutionResult(ctx, project, "alice", "list", "qa", &ref, map[string]detective.InputValue{"invoice_id": {Scalar: &input}})
@@ -83,5 +94,33 @@ func TestDetectiveExistingExecutionUsesReceiptAndSameRows(t *testing.T) {
 	bad.ResultFingerprint = strings.Repeat("a", len(fingerprint))
 	require.NoError(t, store.PutExecution(ctx, bad))
 	_, _, err = loadDetectiveExecutionResult(ctx, project, "alice", "list", "qa", &badFingerprintRef, nil)
+	require.Error(t, err)
+}
+
+func TestDetectiveFreshSavedQueryValidatesWithoutDurableSnapshot(t *testing.T) {
+	ctx := context.Background()
+	projectDir, project := writeRunQueryTestProject(t)
+	scope := configureSemanticSessionWithCapabilities(t, projectDir, project, "alice", []string{"admin"}, api.Capabilities{})
+	configureExecutionEvidence(t, project, projectDir)
+	value := apicontract.NewIntegerValue("1")
+	req := apicontract.ExecutionRequest{
+		Project: scope.Project, Environment: scope.Environment, SecurityContextID: scope.SecurityContextID,
+		QueryID: "customers/customer-invoices", Parameters: map[string]apicontract.TypedValueOrSet{"CustomerId": apicontract.ScalarValue(value)},
+		BindingOrigins: []apicontract.BindingOriginEntry{{ParameterID: "CustomerId", Origin: apicontract.BindingOriginManual}},
+		Mode:           apicontract.ProvenanceModeLive, Record: true,
+	}
+	result, err := computeRunQuery(ctx, req)
+	require.NoError(t, err)
+	require.NotNil(t, result.Execution)
+	require.NotEmpty(t, result.Recordset.Rows)
+	store, err := api.ExecutionEvidenceStoreByID(project, result.Execution.StoreID)
+	require.NoError(t, err)
+	record, err := store.Execution(ctx, *result.Execution)
+	require.NoError(t, err)
+	require.Empty(t, record.SnapshotRef)
+	retained, _, err := loadDetectiveExecutionResult(ctx, project, "alice", req.QueryID, req.Environment, result.Execution, nil)
+	require.NoError(t, err)
+	require.Equal(t, result.Recordset, retained.Recordset)
+	_, _, err = loadDetectiveExecutionResult(ctx, project, "bob", req.QueryID, req.Environment, result.Execution, nil)
 	require.Error(t, err)
 }

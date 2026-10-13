@@ -381,7 +381,7 @@ func (s detectiveUIService) RunSavedQuery(ctx context.Context, request detective
 	for name := range request.Inputs {
 		origins = append(origins, apicontract.BindingOriginEntry{ParameterID: name, Origin: apicontract.BindingOriginManual})
 	}
-	req := apicontract.ExecutionRequest{Project: s.project, SecurityContextID: s.securityContextID, QueryID: request.QueryID, Environment: request.Environment, Parameters: request.Inputs, BindingOrigins: origins, Mode: apicontract.ProvenanceModeLive, Record: true, Snapshot: true}
+	req := apicontract.ExecutionRequest{Project: s.project, SecurityContextID: s.securityContextID, QueryID: request.QueryID, Environment: request.Environment, Parameters: request.Inputs, BindingOrigins: origins, Mode: apicontract.ProvenanceModeLive, Record: true}
 	if err := req.Normalize(); err != nil {
 		return detectiveui.SavedQueryResult{}, err
 	}

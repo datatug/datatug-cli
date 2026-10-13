@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/detective"
@@ -246,16 +247,21 @@ func loadDetectiveExecutionResult(ctx context.Context, project, actor, queryID, 
 	if record.QueryID != queryID || record.Scope.Project != project || record.Scope.Environment != environment || record.Ref != *ref || record.Principal.ID != actor {
 		return apicontract.Result{}, nil, newInvalidRequest("execution", "execution does not match the requested query and environment")
 	}
-	if record.SnapshotRef == "" {
-		return apicontract.Result{}, nil, newSnapshotExpired("the execution has no retained row snapshot")
-	}
-	snapshot, err := store.Snapshot(ctx, *ref, record.SnapshotRef)
-	retained, err := readableCompareSnapshot(snapshot, err)
-	if err != nil {
-		return apicontract.Result{}, nil, err
-	}
 	if record.ResultComplete == nil || !*record.ResultComplete {
 		return apicontract.Result{}, nil, newSourceUnavailable("the execution cannot prove complete retained rows")
+	}
+	retained, transient := detectiveTransientRows.get(*ref, actor, time.Now())
+	var snapshot apicontract.SnapshotReadResponse
+	if !transient {
+		if record.SnapshotRef == "" {
+			return apicontract.Result{}, nil, newSnapshotExpired("the execution has no current transient rows or retained row snapshot")
+		}
+		var err error
+		snapshot, err = store.Snapshot(ctx, *ref, record.SnapshotRef)
+		retained, err = readableCompareSnapshot(snapshot, err)
+		if err != nil {
+			return apicontract.Result{}, nil, err
+		}
 	}
 	if len(retained.Rows) != record.RowCount {
 		return apicontract.Result{}, nil, newSourceUnavailable("retained rows do not match the execution receipt")
@@ -282,14 +288,16 @@ func loadDetectiveExecutionResult(ctx context.Context, project, actor, queryID, 
 		return apicontract.Result{}, nil, newSourceUnavailable("current policy changed the recorded rows or columns")
 	}
 	limitations := append([]apicontract.Limitation(nil), record.Limitations...)
-	limitations = append(limitations, snapshot.Limitations...)
-	limitations = append(limitations, recordedSnapshotRetentionLimitations(record, retained)...)
+	if !transient {
+		limitations = append(limitations, snapshot.Limitations...)
+		limitations = append(limitations, recordedSnapshotRetentionLimitations(record, retained)...)
+	}
 	limitations = append(limitations, toContractLimitations(filtered.Limitations)...)
 	inputs, err := recordedDetectiveInputs(record)
 	if err != nil {
 		return apicontract.Result{}, nil, err
 	}
-	result := apicontract.Result{Recordset: retained, Limitations: normalizeLimitations(limitations), BindingsApplied: record.BindingsApplied, Provenance: record.Provenance, Truncated: snapshot.Truncated, Execution: ref}
+	result := apicontract.Result{Recordset: retained, Limitations: normalizeLimitations(limitations), BindingsApplied: record.BindingsApplied, Provenance: record.Provenance, Truncated: !*record.ResultComplete, Execution: ref}
 	if result.Recordset.Validate() == nil {
 		return result, inputs, nil
 	}

@@ -18,6 +18,7 @@ import (
 type field struct {
 	label, value, help string
 	readOnly           bool
+	multiline          bool
 }
 type form struct {
 	kind            string
@@ -36,6 +37,9 @@ type form struct {
 }
 
 func f(label, value, help string) field { return field{label: label, value: value, help: help} }
+func fm(label, value, help string) field {
+	return field{label: label, value: value, help: help, multiline: true}
+}
 func (m *Model) begin(kind, title string, fields []field) {
 	if m.screen != formScreen {
 		m.returnScreen = m.screen

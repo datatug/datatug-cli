@@ -226,7 +226,7 @@ func TestDetectiveLocalHistoryAndSavedQueryReceipt(t *testing.T) {
 	if err != nil || result.Result.Execution == nil || result.Result.Execution.ExecutionID != "query-1" {
 		t.Fatalf("saved query receipt: %#v, %v", result, err)
 	}
-	if sent.Project != "demo" || sent.SecurityContextID != "session-1" || sent.QueryID != "invoices/list" || sent.Environment != "qa" || !sent.Record || !sent.Snapshot || sent.Mode != apicontract.ProvenanceModeLive || len(sent.BindingOrigins) != 1 || sent.BindingOrigins[0].Origin != apicontract.BindingOriginManual {
+	if sent.Project != "demo" || sent.SecurityContextID != "session-1" || sent.QueryID != "invoices/list" || sent.Environment != "qa" || !sent.Record || sent.Snapshot || sent.Mode != apicontract.ProvenanceModeLive || len(sent.BindingOrigins) != 1 || sent.BindingOrigins[0].Origin != apicontract.BindingOriginManual {
 		t.Fatalf("ordinary query missing authoritative receipt request: %#v", sent)
 	}
 }

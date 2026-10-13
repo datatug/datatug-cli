@@ -422,6 +422,13 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	if err := runQueryResponseValidateHook(&response); err != nil {
 		return apicontract.Result{}, fmt.Errorf("validate query execution response: %w", err)
 	}
+	if req.QueryID != "" && response.Execution != nil && !response.Truncated {
+		actor := api.SecurePrincipalID()
+		if actor == "" {
+			actor = "local-owner"
+		}
+		detectiveTransientRows.put(*response.Execution, actor, response.Recordset, time.Now())
+	}
 	return response, nil
 }
 

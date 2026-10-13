@@ -450,25 +450,36 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.busy {
 			return m, nil
 		}
-		value := strings.Map(func(r rune) rune {
-			if r == '\n' || r == '\r' || r == '\t' {
-				return ' '
-			}
-			if unicode.IsControl(r) {
-				return -1
-			}
-			return r
-		}, v.Content)
 		if m.screen == formScreen && m.form != nil && !m.form.fields[m.form.index].readOnly {
-			m.form.fields[m.form.index].value += value
+			focused := &m.form.fields[m.form.index]
+			focused.value += nativePasteText(v.Content, focused.multiline)
 		} else if m.AtCatalog() {
-			m.filter += value
+			m.filter += nativePasteText(v.Content, false)
 			m.index = 0
 			m.rebuild()
 		}
 		return m, nil
 	}
 	return m, nil
+}
+
+func nativePasteText(content string, multiline bool) string {
+	content = strings.ReplaceAll(strings.ReplaceAll(content, "\r\n", "\n"), "\r", "\n")
+	return strings.Map(func(r rune) rune {
+		if r == '\n' {
+			if multiline {
+				return r
+			}
+			return ' '
+		}
+		if r == '\t' {
+			return ' '
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, content)
 }
 func (m *Model) updateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := k.String()

@@ -1,12 +1,12 @@
 ---
 format: https://specscore.md/feature-specification
-status: Implementing
+status: Stable
 ---
 
 # Feature: Polished terminal exploration workspace
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/tui-refinements?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/tui-refinements?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/tui-refinements?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/tui-refinements?op=request-change) |
-**Status:** Implementing
+**Status:** Stable
 **Source Ideas:** —
 
 ## Summary
@@ -155,6 +155,18 @@ Given the existing unified workspace journeys, when refinements ship, then provi
 ### AC: terminal-journey-evidence
 
 Given production CLI built against released shared-library versions without local replaces, when the complete journey is exercised with a real secure SQLite fixture and a real terminal at 140x42, 100x30 and 80x24, then steps 1–8 run without hidden resets/reruns, final items/controls are reachable and terminal restoration succeeds. Retain screenshots/terminal captures and exact command/version/SHA evidence. Run adversarial Astra review of both usability and aesthetics on these real screens, fix or record every finding, then verify changed screens again.
+
+## Implementation evidence
+
+[CLI PR #372](https://github.com/datatug/datatug-cli/pull/372) landed at [`547cf596c8739ec7ca85525249804aa0a44ddcde`](https://github.com/datatug/datatug-cli/commit/547cf596c8739ec7ca85525249804aa0a44ddcde) after exact-head CI passed (7 successful checks, 9 skipped) and shipped as [CLI v0.74.0](https://github.com/datatug/datatug-cli/releases/tag/v0.74.0). Merged-target CI and release checks passed (15 successful, 3 skipped), including published-artifact verification. Shared dependencies are the released [tuigoff v0.7.0](https://github.com/tuigoff/tuigoff/tree/v0.7.0) and [aichat v0.14.0](https://github.com/strongo/aichat/tree/v0.14.0); no local replacement or dependency workspace is needed. WB completed cleanup of both CLI source worktrees, their integration candidate and the provider worktrees.
+
+Astra independently reviewed clean candidate `af41fe569dd7f360b183a923d89cc81f02cfb897`, released module/build metadata, the final source delta and all thirteen final terminal captures. The final verdict was `blockers=0 majors=0 minors=0 land=yes` for source, usability and aesthetics. This verdict is separate from remote CI and release evidence. Full repository tests, vet, build, SpecScore lint and golangci-lint passed with `GOWORK=off`, no query overlay and no local replaces. An independently rerun focused suite exercised production result-column and full-shell session/metadata routing.
+
+Actual PTY journeys verified mint Explorer selection and immediate metadata, filtered no-match recovery with Esc, exact Query provenance and reverse Tab navigation, one two-field preview/run retaining the original four invoice-count groups (including null and missing customers), independent drafts at stable tab positions, and the close/archive/delete chooser. The release-equivalent `CGO_ENABLED=0` binary additionally executed the real SQLite Invoice read and returned all six expected rows. Layouts were captured at 140×42, 100×30 and 80×24; both owned terminal processes restored and exited successfully.
+
+The public darwin/arm64 v0.74.0 archive passed its published SHA-256 checksum (`9e2688b068e235ea471024ac1a8e5f4f60f116425eee8f4e8759576a3416f32f`). Its executable hash was `24b475996773f668fe28957a602b83facff319045e264a67cad106f456e6a77d`; strict code-signature verification and the CLI assessment `spctl --assess --type install` passed with `source=Notarized Developer ID`. The downloaded executable reported version 0.74.0 and exact merge commit `547cf596c8739ec7ca85525249804aa0a44ddcde`, opened the actual terminal workspace, executed another six-row Invoice read and exited 0. The existing direct-install updater independently resolved v0.74.0 in read-only dry-run mode; the user's installed binary was not replaced by this task.
+
+Evidence limits: images are rendered actual ANSI terminal output, not native OS screenshots. Emulator-only background/partial-frame artifacts are excluded. Terminal QA disabled the external AI provider; deterministic provider tests cover the actual terminal instruction/tool execution path without claiming an external-model run. The earlier stable `unified-tui` delivery record remains unchanged. Selected-result browser addressing, nested Inspect ancestor paths and cross-platform web shortcut parity remain follow-ups in that feature's deferred-web contract; web source was not changed.
 
 ## Open Questions
 

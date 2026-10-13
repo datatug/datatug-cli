@@ -95,20 +95,24 @@ type detectiveOperationTracker struct {
 	ids map[string]string
 }
 
+// The local action journal requires a slug beginning with a letter. A raw
+// UUID can begin with a digit, which makes an otherwise valid retry fail.
+func detectiveOperationID(rawUUID string) string { return "operation-" + rawUUID }
+
 func (s detectiveUIService) operation(req detective.ActionRequest) (string, string) {
 	req.SecurityContextID = ""
 	encoded, _ := json.Marshal(req)
 	sum := sha256.Sum256(encoded)
 	key := hex.EncodeToString(sum[:])
 	if s.pending == nil {
-		return key, uuid.NewString()
+		return key, detectiveOperationID(uuid.NewString())
 	}
 	s.pending.mu.Lock()
 	defer s.pending.mu.Unlock()
 	if id := s.pending.ids[key]; id != "" {
 		return key, id
 	}
-	id := uuid.NewString()
+	id := detectiveOperationID(uuid.NewString())
 	s.pending.ids[key] = id
 	return key, id
 }

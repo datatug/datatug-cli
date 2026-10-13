@@ -155,7 +155,7 @@ func TestDetectiveLocalActionRetainsOperationIDAcrossUncertainResponse(t *testin
 	if got, err := service.Action(context.Background(), req); err != nil || got.Case == nil {
 		t.Fatalf("retry = %+v, %v", got, err)
 	}
-	if len(ids) != 2 || ids[0] == "" || ids[0] != ids[1] {
+	if len(ids) != 2 || !detective.ValidSlug(ids[0]) || ids[0] != ids[1] {
 		t.Fatalf("unstable operation IDs: %v", ids)
 	}
 	if _, err := service.Action(context.Background(), req); err != nil {
@@ -163,6 +163,13 @@ func TestDetectiveLocalActionRetainsOperationIDAcrossUncertainResponse(t *testin
 	}
 	if len(ids) != 3 || ids[2] == ids[1] {
 		t.Fatalf("new intent reused completed ID: %v", ids)
+	}
+}
+
+func TestDetectiveLocalOperationIDAcceptsDigitLedUUID(t *testing.T) {
+	id := detectiveOperationID("0fffffff-0000-4000-8000-000000000000")
+	if !detective.ValidSlug(id) {
+		t.Fatalf("digit-led UUID produced invalid local operation ID %q", id)
 	}
 }
 func TestDetectiveCapabilityErrorIsVisible(t *testing.T) {

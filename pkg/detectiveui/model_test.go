@@ -55,6 +55,8 @@ func press(m *Model, s string) tea.Cmd {
 		k.Mod = tea.ModCtrl
 	case "esc":
 		k.Code = tea.KeyEsc
+	case "backspace":
+		k.Code = tea.KeyBackspace
 	case "down":
 		k.Code = tea.KeyDown
 	case "up":

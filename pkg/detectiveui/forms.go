@@ -15,7 +15,10 @@ import (
 	"github.com/google/uuid"
 )
 
-type field struct{ label, value, help string }
+type field struct {
+	label, value, help string
+	readOnly           bool
+}
 type form struct {
 	kind            string
 	title           string
@@ -32,7 +35,7 @@ type form struct {
 	aiProposal      ai.Proposal
 }
 
-func f(label, value, help string) field { return field{label, value, help} }
+func f(label, value, help string) field { return field{label: label, value: value, help: help} }
 func (m *Model) begin(kind, title string, fields []field) {
 	if m.screen != formScreen {
 		m.returnScreen = m.screen
@@ -65,7 +68,11 @@ func (m *Model) formView() string {
 		if i == f.index {
 			mark = "› "
 		}
-		b.WriteString(mark + x.label + ": " + x.value + "\n")
+		label := x.label
+		if x.readOnly {
+			label += " [review]"
+		}
+		b.WriteString(mark + label + ": " + x.value + "\n")
 		if i == f.index && x.help != "" {
 			b.WriteString("    " + x.help + "\n")
 		}
@@ -117,6 +124,9 @@ func (m *Model) updateForm(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.act(*req)
 	case "backspace":
+		if f.fields[f.index].readOnly {
+			return m, nil
+		}
 		x := &f.fields[f.index].value
 		if *x != "" {
 			_, n := utf8.DecodeLastRuneInString(*x)
@@ -124,7 +134,7 @@ func (m *Model) updateForm(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if k.Text != "" && k.Mod & ^tea.ModShift == 0 {
+	if k.Text != "" && k.Mod & ^tea.ModShift == 0 && !f.fields[f.index].readOnly {
 		f.fields[f.index].value += k.Text
 	}
 	return m, nil

@@ -120,10 +120,33 @@ func (m *Model) rebuildAI() {
 	case ai.KindCase:
 		if x := p.Draft.Case; x != nil {
 			m.rows = append(m.rows, row{fmt.Sprintf("Case %s · expected v%d · %s", x.CaseID, x.ExpectedVersion, x.Title), "draft", x.CaseID, 0})
+			m.rows = append(m.rows, row{"Status " + defaultString(x.Status, "unchanged") + " · closure reason " + defaultString(x.ClosureReason, "unchanged"), "draft", x.CaseID, 1})
+			keys := make([]string, 0, len(x.Context))
+			for name := range x.Context {
+				keys = append(keys, name)
+			}
+			sort.Strings(keys)
+			for _, name := range keys {
+				m.rows = append(m.rows, row{"Context " + name + " = " + describeValue(x.Context[name]), "draft", name, 1})
+			}
+			if x.Findings != nil {
+				m.rows = append(m.rows, row{fmt.Sprintf("Replace findings with %d reviewed items", len(x.Findings)), "draft", x.CaseID, 1})
+			}
+			for _, finding := range x.Findings {
+				m.rows = append(m.rows, row{"Finding " + finding.ID + " · " + finding.Status + " · " + finding.Text + " · evidence " + strings.Join(finding.EvidenceRefs, ", "), "draft", finding.ID, 2})
+			}
 		}
 	case ai.KindRun:
 		if x := p.Draft.Run; x != nil {
 			m.rows = append(m.rows, row{"Run Check " + x.CheckID + " · " + x.Environment + " · Case " + x.CaseID, "draft", x.CheckID, 0})
+			keys := make([]string, 0, len(x.Inputs))
+			for name := range x.Inputs {
+				keys = append(keys, name)
+			}
+			sort.Strings(keys)
+			for _, name := range keys {
+				m.rows = append(m.rows, row{"Input " + name + " = " + describeValue(x.Inputs[name]), "draft", name, 1})
+			}
 		}
 	case ai.KindExplain:
 		if x := p.Draft.Explanation; x != nil {
@@ -149,6 +172,64 @@ func aiValueShape(v detective.InputValue) (string, string) {
 		return string(v.Range.Start.Type), "range"
 	}
 	return "string", "scalar"
+}
+
+func aiCaseEditFields(x ai.CaseEdit) []field {
+	fields := []field{
+		f("Case title", x.Title, "empty keeps the current title"),
+		f("Status", x.Status, "empty keeps current status; active, closed or archived"),
+		f("Closure reason", x.ClosureReason, "required when closing a Case"),
+	}
+	keys := make([]string, 0, len(x.Context))
+	for key := range x.Context {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for i, key := range keys {
+		value := x.Context[key]
+		typeName, cardinality := aiValueShape(value)
+		prefix := "Context " + strconv.Itoa(i+1) + " "
+		fields = append(fields, f(prefix+"name", key, "empty omits this proposed context value"), f(prefix+"type", typeName, "string, integer, decimal, boolean, date, datetime"), f(prefix+"cardinality", cardinality, "scalar, set, range"), f(prefix+"value", formatInputValue(value), "review the exact typed cohort"))
+	}
+	findingsAction := "keep"
+	if x.Findings != nil {
+		findingsAction = "replace"
+	}
+	fields = append(fields, f("Findings action", findingsAction, "keep or replace; replace with no items clears findings"))
+	for i, finding := range x.Findings {
+		prefix := "Finding " + strconv.Itoa(i+1) + " "
+		fields = append(fields, f(prefix+"ID", finding.ID, "empty omits this proposed finding"), f(prefix+"status", finding.Status, "hypothesis or confirmed"), f(prefix+"text", finding.Text, "reviewed finding"), f(prefix+"evidence refs", strings.Join(finding.EvidenceRefs, ", "), "authorized evidence IDs, comma separated"))
+	}
+	return fields
+}
+
+func aiConfirmationFields(p ai.Proposal) []field {
+	fields := []field{{label: "Proposal", value: p.ID + " · " + p.Draft.Kind, readOnly: true}}
+	switch p.Draft.Kind {
+	case ai.KindCase:
+		if x := p.Draft.Case; x != nil {
+			fields = append(fields, field{label: "Case", value: fmt.Sprintf("%s · expected v%d", x.CaseID, x.ExpectedVersion), readOnly: true})
+			for _, item := range aiCaseEditFields(*x) {
+				item.readOnly = true
+				fields = append(fields, item)
+			}
+		}
+	case ai.KindRun:
+		if x := p.Draft.Run; x != nil {
+			fields = append(fields, field{label: "Check", value: x.CheckID, readOnly: true}, field{label: "Case", value: x.CaseID, readOnly: true}, field{label: "Environment", value: x.Environment, readOnly: true})
+			keys := make([]string, 0, len(x.Inputs))
+			for key := range x.Inputs {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				fields = append(fields, field{label: "Input " + key, value: describeValue(x.Inputs[key]), readOnly: true})
+			}
+		}
+	default:
+		fields = append(fields, field{label: "Reviewed title", value: p.Draft.Title, readOnly: true})
+	}
+	return append(fields, f("Confirmation", "", "type CONFIRM to authorize this exact reviewed proposal"))
 }
 func (m *Model) updateAIKey(key string) (tea.Model, tea.Cmd) {
 	if m.screen == aiList {
@@ -218,7 +299,7 @@ func (m *Model) updateAIKey(key string) (tea.Model, tea.Cmd) {
 			}
 		case ai.KindCase:
 			if x := p.Draft.Case; x != nil {
-				fields = append(fields, f("Case title", x.Title, ""))
+				fields = append(fields, aiCaseEditFields(*x)...)
 			}
 		case ai.KindRun:
 			if x := p.Draft.Run; x != nil {
@@ -294,7 +375,11 @@ func (m *Model) updateAIKey(key string) (tea.Model, tea.Cmd) {
 			m.feedback = "Review this proposal into a concrete action before confirmation"
 			return m, nil
 		}
-		m.begin("ai-confirm", "Confirm reviewed AI action", []field{f("Confirmation", "", "type CONFIRM to authorize the displayed proposal")})
+		if p.Draft.Kind == ai.KindCase && p.ParentProposalID == "" {
+			m.feedback = "Review the Case title, context, findings and lifecycle before confirmation"
+			return m, nil
+		}
+		m.begin("ai-confirm", "Confirm reviewed AI action", aiConfirmationFields(*p))
 		m.form.aiProposal = *p
 		return m, nil
 	}
@@ -432,6 +517,49 @@ func (m *Model) submitAIForm() (tea.Cmd, bool, error) {
 			}
 			x := *draft.Case
 			x.Title = m.field("Case title")
+			x.Status = m.field("Status")
+			x.ClosureReason = m.field("Closure reason")
+			if draft.Case.Context != nil {
+				x.Context = make(map[string]detective.InputValue, len(draft.Case.Context))
+				for i := 0; i < len(draft.Case.Context); i++ {
+					prefix := "Context " + strconv.Itoa(i+1) + " "
+					name := m.field(prefix + "name")
+					if name == "" {
+						continue
+					}
+					if !detective.ValidParameterName(name) {
+						return nil, true, fmt.Errorf("context %d requires a valid name", i+1)
+					}
+					if _, exists := x.Context[name]; exists {
+						return nil, true, fmt.Errorf("duplicate context name %q", name)
+					}
+					value, err := parseValue(m.field(prefix+"type"), m.field(prefix+"cardinality"), m.field(prefix+"value"))
+					if err != nil {
+						return nil, true, fmt.Errorf("%s: %w", name, err)
+					}
+					x.Context[name] = value
+				}
+			}
+			switch m.field("Findings action") {
+			case "keep":
+				x.Findings = nil
+			case "replace":
+				x.Findings = make([]detective.Finding, 0, len(draft.Case.Findings))
+				for i := 0; i < len(draft.Case.Findings); i++ {
+					prefix := "Finding " + strconv.Itoa(i+1) + " "
+					id := m.field(prefix + "ID")
+					if id == "" {
+						continue
+					}
+					finding := detective.Finding{ID: id, Status: m.field(prefix + "status"), Text: m.field(prefix + "text"), EvidenceRefs: splitCSV(m.field(prefix + "evidence refs"))}
+					if !detective.ValidSlug(finding.ID) || finding.Text == "" || !oneOf(finding.Status, "hypothesis", "confirmed") {
+						return nil, true, fmt.Errorf("finding %d requires a valid ID, status and text", i+1)
+					}
+					x.Findings = append(x.Findings, finding)
+				}
+			default:
+				return nil, true, fmt.Errorf("findings action must be keep or replace")
+			}
 			draft.Case = &x
 		case ai.KindRun:
 			if draft.Run == nil {

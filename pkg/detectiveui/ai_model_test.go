@@ -115,7 +115,7 @@ func TestNativeAIProposalPromptCitationTypedReviewAndExplicitConfirmation(t *tes
 	}
 
 	// A concrete reviewed Case proposal needs a separate explicit confirmation.
-	s.page.Proposals[0] = ai.Proposal{ID: "reviewed-1", Digest: "digest-2", Draft: ai.Draft{Kind: ai.KindCase, Title: "Reviewed Case", Case: &ai.CaseEdit{CaseID: "case-1", ExpectedVersion: 2}}}
+	s.page.Proposals[0] = ai.Proposal{ID: "reviewed-1", ParentProposalID: "proposal-1", Digest: "digest-2", Draft: ai.Draft{Kind: ai.KindCase, Title: "Reviewed Case", Case: &ai.CaseEdit{CaseID: "case-1", ExpectedVersion: 2}}}
 	m.aiPage = s.page
 	m.aiProposalID = "reviewed-1"
 	m.rebuild()
@@ -126,7 +126,7 @@ func TestNativeAIProposalPromptCitationTypedReviewAndExplicitConfirmation(t *tes
 	if cmd := press(m, "ctrl+s"); cmd != nil || m.feedback == "" {
 		t.Fatal("empty confirmation accepted")
 	}
-	m.form.fields[0].value = "CONFIRM"
+	setAIField(m, "Confirmation", "CONFIRM")
 	cmd = press(m, "ctrl+s")
 	if cmd == nil {
 		t.Fatal("explicit confirmation not dispatched")
@@ -202,4 +202,306 @@ func TestNativeAIReviewCorrectsValidatorAndCheckBinding(t *testing.T) {
 	if len(bindings) != 1 || bindings[0].FromColumn != "invoice_id" {
 		t.Fatalf("Check binding not corrected: %+v", bindings)
 	}
+}
+
+func TestNativeAIReviewsCorrectResourceSemantics(t *testing.T) {
+	tests := []struct {
+		name    string
+		draft   ai.Draft
+		prepare func(*Model)
+		assert  func(*testing.T, ai.Draft)
+	}{
+		{
+			name:  "saved query text and typed inputs",
+			draft: ai.Draft{Kind: ai.KindQuery, Title: "Invoice query", Query: &ai.QueryDraft{ID: "invoice-list", Title: "Invoice list", Type: "sql", Text: "select 1"}},
+			prepare: func(m *Model) {
+				setAIField(m, "Query text", "select invoice_id from invoices")
+				setAIField(m, "Inputs", "invoice_ids:integer:set:required")
+			},
+			assert: func(t *testing.T, got ai.Draft) {
+				if got.Query == nil || got.Query.Text != "select invoice_id from invoices" || len(got.Query.Inputs) != 1 || got.Query.Inputs[0].Cardinality != "set" {
+					t.Fatalf("query correction lost: %+v", got.Query)
+				}
+			},
+		},
+		{
+			name:    "check declared inputs",
+			draft:   ai.Draft{Kind: ai.KindCheck, Title: "Invoice check", Check: &detective.Check{ID: "invoice-check", Title: "Invoice check"}},
+			prepare: func(m *Model) { setAIField(m, "Inputs", "invoice_ids:integer:set:required") },
+			assert: func(t *testing.T, got ai.Draft) {
+				if got.Check == nil || len(got.Check.Inputs) != 1 || got.Check.Inputs[0].Name != "invoice_ids" {
+					t.Fatalf("check input correction lost: %+v", got.Check)
+				}
+			},
+		},
+		{
+			name:    "validator field",
+			draft:   ai.Draft{Kind: ai.KindValidator, Title: "Customer present", Validator: &detective.PublishedValidator{ID: "customer-present", Title: "Customer present", Validator: detective.Validator{ID: "customer-present", Kind: "non-null", Scope: "row", Field: "wrong_field", Severity: "error"}}},
+			prepare: func(m *Model) { setAIField(m, "Field", "customer_id") },
+			assert: func(t *testing.T, got ai.Draft) {
+				if got.Validator == nil || got.Validator.Validator.Field != "customer_id" {
+					t.Fatalf("validator correction lost: %+v", got.Validator)
+				}
+			},
+		},
+		{
+			name:    "scenario declared inputs",
+			draft:   ai.Draft{Kind: ai.KindScenario, Title: "Reconcile invoices", Scenario: &detective.Scenario{ID: "reconcile", Title: "Reconcile invoices"}},
+			prepare: func(m *Model) { setAIField(m, "Inputs", "invoice_ids:integer:set:required") },
+			assert: func(t *testing.T, got ai.Draft) {
+				if got.Scenario == nil || len(got.Scenario.Inputs) != 1 || got.Scenario.Inputs[0].Cardinality != "set" {
+					t.Fatalf("scenario input correction lost: %+v", got.Scenario)
+				}
+			},
+		},
+		{
+			name:    "case title",
+			draft:   ai.Draft{Kind: ai.KindCase, Title: "Case edit", Case: &ai.CaseEdit{CaseID: "case-1", ExpectedVersion: 2, Title: "Wrong title"}},
+			prepare: func(m *Model) { setAIField(m, "Case title", "Invoice reconciliation") },
+			assert: func(t *testing.T, got ai.Draft) {
+				if got.Case == nil || got.Case.Title != "Invoice reconciliation" || got.Case.ExpectedVersion != 2 {
+					t.Fatalf("case correction lost version: %+v", got.Case)
+				}
+			},
+		},
+		{
+			name:    "manual run cohort",
+			draft:   ai.Draft{Kind: ai.KindRun, Title: "Run invoice check", Run: &ai.RunDraft{CheckID: "invoice-check", Environment: "qa"}},
+			prepare: func(m *Model) { setAIField(m, "Input invoice_ids", "1,2,3,7") },
+			assert: func(t *testing.T, got ai.Draft) {
+				if got.Run == nil || got.Run.Environment != "qa" || got.Run.Inputs["invoice_ids"].Set == nil || len(got.Run.Inputs["invoice_ids"].Set.Values) != 4 {
+					t.Fatalf("run cohort correction lost: %+v", got.Run)
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			proposal := ai.Proposal{ID: "draft-1", Digest: "digest-1", Draft: tc.draft}
+			service := &aiUIFixture{fixtureService: &fixtureService{state: detective.State{Checks: []detective.Check{{ID: "invoice-check", Inputs: []detective.Input{{Name: "invoice_ids", Type: "integer", Cardinality: "set", Required: true}}}}, Environments: []string{"qa"}, Capabilities: detective.Capabilities{CanRead: true, CanWrite: true, CanRun: true}}}, page: AIPage{Proposals: []ai.Proposal{proposal}}}
+			m := New(service, "detective")
+			m.Update(m.Init()())
+			m.screen, m.aiPage, m.aiProposalID = aiDetail, service.page, proposal.ID
+			m.rebuild()
+			press(m, "r")
+			if m.form == nil || m.form.kind != "ai-draft-review" {
+				t.Fatalf("typed review form missing for %s", tc.name)
+			}
+			tc.prepare(m)
+			cmd := press(m, "ctrl+s")
+			if cmd == nil {
+				t.Fatalf("review was not dispatched: %s", m.feedback)
+			}
+			m.Update(cmd())
+			if service.reviewed.Type != "draft" || service.reviewed.Draft == nil || service.reviewed.Draft.ProposalID != proposal.ID || service.reviewed.Draft.Digest != proposal.Digest {
+				t.Fatalf("review lost proposal identity: %+v", service.reviewed)
+			}
+			tc.assert(t, service.reviewed.Draft.Draft)
+		})
+	}
+}
+
+func setAIField(m *Model, label, value string) {
+	for i := range m.form.fields {
+		if m.form.fields[i].label == label {
+			m.form.fields[i].value = value
+			return
+		}
+	}
+	panic("missing AI review field: " + label)
+}
+
+func TestNativeAIReviewEditsNestedCheckAndScenarioSteps(t *testing.T) {
+	check := detective.Check{ID: "invoice-check", Title: "Invoice check", Steps: []detective.Step{{ID: "detail", Kind: "query", QueryID: "invoice-detail"}}}
+	scenario := detective.Scenario{ID: "invoice-review", Title: "Invoice review", Steps: []detective.ScenarioStep{{ID: "find", Kind: "query", Ref: "old-query"}}}
+	tests := []struct {
+		name, key, rowKind string
+		draft              ai.Draft
+		prepare            func(*Model)
+		assert             func(*testing.T, ai.Draft)
+	}{
+		{
+			name: "add Check step", key: "a", draft: ai.Draft{Kind: ai.KindCheck, Check: &check},
+			prepare: func(m *Model) {
+				setAIField(m, "ID", "crm")
+				setAIField(m, "Kind", "check")
+				setAIField(m, "Ref", "validate-customer")
+			},
+			assert: func(t *testing.T, d ai.Draft) {
+				if d.Check == nil || len(d.Check.Steps) != 2 || d.Check.Steps[1].CheckID != "validate-customer" {
+					t.Fatalf("new nested Check step lost: %+v", d.Check)
+				}
+			},
+		},
+		{
+			name: "add per-row Validator", key: "v", rowKind: "ai-check-step", draft: ai.Draft{Kind: ai.KindCheck, Check: &check},
+			prepare: func(m *Model) {
+				setAIField(m, "ID", "customer-id")
+				setAIField(m, "Field", "customer_id")
+			},
+			assert: func(t *testing.T, d ai.Draft) {
+				if d.Check == nil || len(d.Check.Steps[0].Validators) != 1 || d.Check.Steps[0].Validators[0].Field != "customer_id" {
+					t.Fatalf("local Validator lost: %+v", d.Check)
+				}
+			},
+		},
+		{
+			name: "repair Scenario query reference", key: "e", rowKind: "ai-scenario-step", draft: ai.Draft{Kind: ai.KindScenario, Scenario: &scenario},
+			prepare: func(m *Model) { setAIField(m, "Ref", "invoice-list") },
+			assert: func(t *testing.T, d ai.Draft) {
+				if d.Scenario == nil || len(d.Scenario.Steps) != 1 || d.Scenario.Steps[0].Ref != "invoice-list" {
+					t.Fatalf("Scenario query repair lost: %+v", d.Scenario)
+				}
+			},
+		},
+		{
+			name: "add Scenario Check step", key: "a", draft: ai.Draft{Kind: ai.KindScenario, Scenario: &scenario},
+			prepare: func(m *Model) {
+				setAIField(m, "ID", "verify")
+				setAIField(m, "Ref", "invoice-check")
+			},
+			assert: func(t *testing.T, d ai.Draft) {
+				if d.Scenario == nil || len(d.Scenario.Steps) != 2 || d.Scenario.Steps[1].Ref != "invoice-check" || d.Scenario.Steps[1].Kind != "check" {
+					t.Fatalf("Scenario Check step lost: %+v", d.Scenario)
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			proposal := ai.Proposal{ID: "proposal-1", Digest: "digest-1", Draft: tc.draft}
+			service := &aiUIFixture{fixtureService: &fixtureService{state: detective.State{Capabilities: detective.Capabilities{CanRead: true, CanWrite: true}}}, page: AIPage{Proposals: []ai.Proposal{proposal}}}
+			m := New(service, "checks")
+			m.Update(m.Init()())
+			m.aiPage, m.aiProposalID, m.screen = service.page, proposal.ID, aiDetail
+			m.rebuild()
+			if tc.rowKind != "" {
+				found := false
+				for i, row := range m.rows {
+					if row.kind == tc.rowKind {
+						m.index, found = i, true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("expected selectable %s row", tc.rowKind)
+				}
+			}
+			press(m, tc.key)
+			if m.form == nil {
+				t.Fatal("nested typed editor did not open")
+			}
+			tc.prepare(m)
+			cmd := press(m, "ctrl+s")
+			if cmd == nil {
+				t.Fatalf("nested review not dispatched: %s", m.feedback)
+			}
+			m.Update(cmd())
+			if service.reviewed.Type != "draft" || service.reviewed.Draft == nil {
+				t.Fatalf("nested review lost: %+v", service.reviewed)
+			}
+			tc.assert(t, service.reviewed.Draft.Draft)
+		})
+	}
+}
+
+func TestNativeAICaseSemanticReviewAndReadOnlyConfirmation(t *testing.T) {
+	invoices, err := apicontract.NewTypedValueSet(investigation.NewIntegerValue("1"), investigation.NewIntegerValue("7"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := ai.Proposal{ID: "case-draft", Digest: "digest-1", Draft: ai.Draft{Kind: ai.KindCase, Case: &ai.CaseEdit{CaseID: "case-1", ExpectedVersion: 3, Title: "Invoice mismatch", Context: map[string]detective.InputValue{"invoice_ids": {Set: &invoices}}, Findings: []detective.Finding{{ID: "missing-payment", Text: "Payment missing", Status: "confirmed", EvidenceRefs: []string{"evidence-1"}}}, Status: "closed", ClosureReason: "No payment"}}}
+	service := &aiUIFixture{fixtureService: &fixtureService{state: detective.State{Cases: []detective.Case{{ID: "case-1", Version: 3}}, Capabilities: detective.Capabilities{CanRead: true, CanWrite: true}}}, page: AIPage{Proposals: []ai.Proposal{proposal}}}
+	m := New(service, "detective")
+	m.Update(m.Init()())
+	m.Update(tea.WindowSizeMsg{Width: 48, Height: 12})
+	m.aiPage, m.aiProposalID, m.screen = service.page, proposal.ID, aiDetail
+	m.rebuild()
+	if len(m.rows) < 5 {
+		t.Fatalf("Case semantics not in detail: %+v", m.rows)
+	}
+	press(m, "c")
+	if m.form != nil || !strings.Contains(m.feedback, "Review the Case") {
+		t.Fatal("unreviewed semantic Case edit reached confirmation")
+	}
+	press(m, "r")
+	if m.form == nil || m.form.kind != "ai-draft-review" {
+		t.Fatal("typed Case review unavailable")
+	}
+	setAIField(m, "Context 1 value", "1, 2, 7")
+	setAIField(m, "Finding 1 text", "Payment and CRM records disagree")
+	setAIField(m, "Closure reason", "Confirmed reconciliation gap")
+	cmd := press(m, "ctrl+s")
+	if cmd == nil {
+		t.Fatalf("semantic Case review rejected: %s", m.feedback)
+	}
+	_, refresh := m.Update(cmd())
+	if refresh != nil {
+		m.Update(refresh())
+	}
+	if service.reviewed.Draft == nil || service.reviewed.Draft.Draft.Case == nil {
+		t.Fatalf("reviewed Case missing: %+v", service.reviewed)
+	}
+	caseEdit := service.reviewed.Draft.Draft.Case
+	if len(caseEdit.Context["invoice_ids"].Set.Values) != 3 || caseEdit.Findings[0].Text != "Payment and CRM records disagree" || caseEdit.Status != "closed" || caseEdit.ClosureReason != "Confirmed reconciliation gap" {
+		t.Fatalf("semantic correction lost: %+v", caseEdit)
+	}
+	derived := ai.Proposal{ID: "case-reviewed", ParentProposalID: proposal.ID, Digest: "digest-2", Draft: service.reviewed.Draft.Draft}
+	m.aiPage, m.aiProposalID, m.screen = AIPage{Proposals: []ai.Proposal{derived}}, derived.ID, aiDetail
+	m.rebuild()
+	press(m, "c")
+	if m.form == nil || m.form.kind != "ai-confirm" {
+		t.Fatal("reviewed Case did not reach confirmation")
+	}
+	for _, label := range []string{"Status", "Closure reason", "Context 1 value", "Finding 1 text", "Finding 1 evidence refs"} {
+		found := false
+		for i := range m.form.fields {
+			if m.form.fields[i].label == label && m.form.fields[i].readOnly {
+				m.form.index = i
+				before := m.form.fields[i].value
+				press(m, "x")
+				press(m, "backspace")
+				if m.form.fields[i].value != before {
+					t.Fatalf("confirmation changed reviewed %s", label)
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("confirmation omitted %s", label)
+		}
+	}
+	setAIField(m, "Confirmation", "CONFIRM")
+	if cmd := press(m, "ctrl+s"); cmd == nil {
+		t.Fatalf("reviewed Case confirmation not dispatched: %s", m.feedback)
+	} else {
+		m.Update(cmd())
+	}
+	if service.confirmed.ProposalID != derived.ID || service.confirmed.Digest != derived.Digest {
+		t.Fatalf("wrong Case confirmed: %+v", service.confirmed)
+	}
+}
+
+func TestNativeAIRunConfirmationShowsTypedCohort(t *testing.T) {
+	invoices, err := apicontract.NewTypedValueSet(investigation.NewIntegerValue("1"), investigation.NewIntegerValue("7"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := ai.Proposal{ID: "run-reviewed", Digest: "digest-1", Draft: ai.Draft{Kind: ai.KindRun, Run: &ai.RunDraft{CheckID: "invoice-check", CaseID: "case-1", Environment: "qa", Inputs: map[string]detective.InputValue{"invoice_ids": {Set: &invoices}}}}}
+	service := &aiUIFixture{fixtureService: &fixtureService{state: detective.State{Capabilities: detective.Capabilities{CanRead: true, CanWrite: true, CanRun: true}}}, page: AIPage{Proposals: []ai.Proposal{proposal}}}
+	m := New(service, "checks")
+	m.Update(m.Init()())
+	m.aiPage, m.aiProposalID, m.screen = service.page, proposal.ID, aiDetail
+	m.rebuild()
+	press(m, "c")
+	if m.form == nil || m.form.kind != "ai-confirm" {
+		t.Fatal("run confirmation missing")
+	}
+	for _, item := range m.form.fields {
+		if item.label == "Input invoice_ids" && item.readOnly && strings.Contains(item.value, "7") {
+			return
+		}
+	}
+	t.Fatalf("run confirmation omitted typed cohort: %+v", m.form.fields)
 }

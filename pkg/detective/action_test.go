@@ -148,6 +148,36 @@ func TestOrdinaryActionRejectsUnattestedQueryBeforeAcceptance(t *testing.T) {
 	}
 }
 
+func TestOrdinaryCaseMutationCannotForgeIncidentLink(t *testing.T) {
+	ctx := context.Background()
+	s := testStore(t)
+	forged := Case{ID: "case-1", Title: "Investigation", IncidentRefs: []string{"ops:INC-1"}}
+	_, err := s.ExecuteAction(ctx, "forged-create", "alice", ActionRequest{Type: "create-case", Project: "p", Case: &forged}, nil, nil, nil, nil)
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("generic create admitted unverified incident: %v", err)
+	}
+	forged.IncidentRefs = nil
+	created, err := s.ExecuteAction(ctx, "plain-create", "alice", ActionRequest{Type: "create-case", Project: "p", Case: &forged}, nil, nil, nil, nil)
+	if err != nil || created.Case == nil {
+		t.Fatalf("plain Case create = %+v, %v", created, err)
+	}
+	updated := *created.Case
+	updated.IncidentRefs = []string{"ops:INC-1"}
+	_, err = s.ExecuteAction(ctx, "forged-update", "alice", ActionRequest{Type: "update-case", Project: "p", Case: &updated}, nil, nil, nil, nil)
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("generic update admitted unverified incident: %v", err)
+	}
+	if _, err := s.SaveCase(ctx, updated, "alice", "update-case"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("direct store update admitted unverified incident: %v", err)
+	}
+	if got, err := s.GetCase(ctx, "case-1"); err != nil || len(got.IncidentRefs) != 0 {
+		t.Fatalf("Case retained forged link: %+v, %v", got, err)
+	}
+	if _, err := s.SaveCase(ctx, Case{ID: "case-2", Title: "Forged", IncidentRefs: []string{"ops:INC-2"}}, "alice", "create-case"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("direct store create admitted unverified incident: %v", err)
+	}
+}
+
 func TestOrdinaryActionInterruptedRunIsUncertainAndNeedsNewID(t *testing.T) {
 	ctx := context.Background()
 	s := testStore(t)

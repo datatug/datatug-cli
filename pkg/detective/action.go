@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -662,6 +663,9 @@ func (s *LocalStore) prepareAction(req ActionRequest, actor, id string, proof *S
 			if req.Case == nil {
 				return bad(ErrInvalid)
 			}
+			if len(req.Case.IncidentRefs) != 0 {
+				return bad(ErrInvalid)
+			}
 			if _, e := s.getCase(op.ID); !errors.Is(e, ErrNotFound) {
 				if e == nil {
 					return bad(ErrConflict)
@@ -678,6 +682,9 @@ func (s *LocalStore) prepareAction(req ActionRequest, actor, id string, proof *S
 			next, audit, err = core.CreateCase(*req.Case, actor, at)
 		case "update-case":
 			if req.Case == nil {
+				return bad(ErrInvalid)
+			}
+			if !slices.Equal(old.IncidentRefs, req.Case.IncidentRefs) {
 				return bad(ErrInvalid)
 			}
 			next, audit, err = core.UpdateCase(old, *req.Case, actor, at)

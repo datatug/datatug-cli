@@ -460,17 +460,16 @@ func TestDetectiveCaseEditsHaveTimelineAndPreserveRunRefs(t *testing.T) {
 	c.Context = map[string]InputValue{"order_ids": {Scalar: ptr(investigation.NewIntegerValue("7"))}}
 	c.ScenarioRefs = []string{"invoice-triage"}
 	c.Findings = []Finding{{ID: "finding-1", Text: "Mismatch", Status: "hypothesis"}}
-	c.IncidentRefs = []string{"incident-123"}
 	c.RunRefs = nil // a stale client must not erase server-owned history
 	c.Timeline = nil
 	c, err = s.SaveCase(ctx, c, "alice", "update-case")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.RunRefs) != 1 || c.RunRefs[0] != "run-1" || len(c.Timeline) != 6 || len(c.ScenarioApplications) != 1 {
+	if len(c.RunRefs) != 1 || c.RunRefs[0] != "run-1" || len(c.Timeline) != 5 || len(c.ScenarioApplications) != 1 {
 		t.Fatalf("case history=%+v", c)
 	}
-	for _, kind := range []string{"context-updated", "findings-updated", "incident-links-updated", "scenario-applied"} {
+	for _, kind := range []string{"context-updated", "findings-updated", "scenario-applied"} {
 		found := false
 		for _, event := range c.Timeline {
 			found = found || event.Type == kind

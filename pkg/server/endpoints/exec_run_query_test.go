@@ -324,6 +324,14 @@ func TestDetectivePinnedQueryRejectsEditBetweenAdmissionAndExecution(t *testing.
 	}
 }
 
+func TestDetectivePinnedQueryRequiresRecordedSavedQuery(t *testing.T) {
+	_, err := computeRunQueryWithOptions(context.Background(), apicontract.ExecutionRequest{QueryID: "q"}, runQueryOptions{expectedQueryRevision: "reviewed"})
+	var contract *contractError
+	if !errors.As(err, &contract) || contract.Code != apicontract.ErrCodeInvalidRequest || contract.Field != "queryId" {
+		t.Fatalf("unrecorded revision pin = %v", err)
+	}
+}
+
 // TestExecRunQuery_SnapshotFixture_DecodesAndValidates proves core's
 // mode:snapshot ExecutionRequest shape (mode + snapshotId together) decodes
 // and satisfies Validate() through the real production path (decodeRequestFixture

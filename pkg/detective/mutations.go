@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -27,6 +28,9 @@ func (s *LocalStore) SaveCase(ctx context.Context, item Case, actor, action stri
 			if action != "create-case" {
 				return ErrConflict
 			}
+			if len(item.IncidentRefs) != 0 {
+				return ErrInvalid
+			}
 			items, listErr := readItems[Case](s.privateItemDir("cases"))
 			if listErr != nil {
 				return listErr
@@ -38,6 +42,9 @@ func (s *LocalStore) SaveCase(ctx context.Context, item Case, actor, action stri
 		} else if err == nil {
 			if action != "update-case" {
 				return ErrConflict
+			}
+			if !slices.Equal(old.IncidentRefs, item.IncidentRefs) {
+				return ErrInvalid
 			}
 			saved, audit, err = core.UpdateCase(old, item, actor, at)
 		}

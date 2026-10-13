@@ -589,14 +589,7 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 		req.Type = "update-case"
 		req.Case = &c
 	case "link-incident":
-		c := f.caseItem
-		ref := m.field("Incident ref")
-		if ref == "" {
-			return nil, fmt.Errorf("incident reference required")
-		}
-		c.IncidentRefs = append(c.IncidentRefs, ref)
-		req.Type = "update-case"
-		req.Case = &c
+		return nil, fmt.Errorf("link incidents through the verified Incidentius workflow")
 	case "link-scenario":
 		ref := m.field("Scenario ID")
 		if ref == "" {

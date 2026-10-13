@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
@@ -254,7 +255,11 @@ func TestRecordedSavedQueryUsesPreDispatchRevisionAndDocument(t *testing.T) {
 	req.Project, req.Environment, req.SecurityContextID = scope.Project, scope.Environment, scope.SecurityContextID
 	req.QueryID, req.Record = "customers/customer-invoices", true
 
-	result, err := computeRunQuery(context.Background(), req)
+	admitted, err := detectiveQueryRevisionLookup(projectID)(context.Background(), req.QueryID)
+	if err != nil || admitted == "" {
+		t.Fatalf("admit saved query revision: %q, %v", admitted, err)
+	}
+	result, err := computeRunQueryWithOptions(context.Background(), req, runQueryOptions{expectedQueryRevision: admitted})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,8 +271,8 @@ func TestRecordedSavedQueryUsesPreDispatchRevisionAndDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.QueryRevision == "" {
-		t.Fatal("recorded saved query has no pre-dispatch revision")
+	if record.QueryRevision != admitted {
+		t.Fatalf("recorded revision %q differs from admitted %q", record.QueryRevision, admitted)
 	}
 
 	projectStore, err := api.ProjectStoreFor(projectID)
@@ -286,6 +291,36 @@ func TestRecordedSavedQueryUsesPreDispatchRevisionAndDocument(t *testing.T) {
 	}
 	if document != original {
 		t.Fatalf("revisioned execution document changed after load: %q, want %q", document, original)
+	}
+}
+
+func TestDetectivePinnedQueryRejectsEditBetweenAdmissionAndExecution(t *testing.T) {
+	var req apicontract.ExecutionRequest
+	decodeRequestFixture(t, "execution_request_saved.json", &req)
+	projectDir, projectID := writeRunQueryTestProject(t)
+	scope := configureSemanticSession(t, projectDir, projectID, "alice", []string{"admin"})
+	req.Project, req.Environment, req.SecurityContextID = scope.Project, scope.Environment, scope.SecurityContextID
+	req.QueryID, req.Record = "customers/customer-invoices", true
+	admitted, err := detectiveQueryRevisionLookup(projectID)(context.Background(), req.QueryID)
+	if err != nil || admitted == "" {
+		t.Fatalf("admission revision = %q, %v", admitted, err)
+	}
+	mustWriteFile(t, filepath.Join(projectDir, "queries", "customers", "customer-invoices.query.dtql"), "from:\n  name: Invoice\n")
+	current, err := detectiveQueryRevisionLookup(projectID)(context.Background(), req.QueryID)
+	if err != nil || current == admitted {
+		t.Fatalf("fixture edit did not change query revision: %q, %v", current, err)
+	}
+	called := false
+	original := runDTQLHook
+	runDTQLHook = func(*secureread.Executor, context.Context, string, []byte, map[string]any) (secureread.Result, error) {
+		called = true
+		return secureread.Result{}, nil
+	}
+	t.Cleanup(func() { runDTQLHook = original })
+	_, err = computeRunQueryWithOptions(context.Background(), req, runQueryOptions{expectedQueryRevision: admitted})
+	var contract *contractError
+	if !errors.As(err, &contract) || contract.Code != codeRevisionConflict || called {
+		t.Fatalf("changed query executed or lacked revision conflict: %v, dispatch=%v", err, called)
 	}
 }
 

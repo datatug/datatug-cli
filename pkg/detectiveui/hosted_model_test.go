@@ -40,7 +40,7 @@ func TestScenarioCheckRefreshesCaseBeforeRecordingStep(t *testing.T) {
 	m := New(service, "detective")
 	m.Update(m.Init()())
 	m.pendingApplicationID, m.pendingStepID = "application-1", "inspect"
-	_, refresh := m.Update(actedMsg{response: detective.ActionResponse{Run: &detective.CheckRun{ID: "run-1", CaseID: "case-1", ExecutionStatus: "completed"}}})
+	_, refresh := m.Update(actedMsg{response: detective.ActionResponse{Run: &detective.CheckRun{ID: "run-1", CaseID: "case-1", ExecutionStatus: "completed"}}, caseLinkStatus: "linked"})
 	if refresh == nil || service.stateCalls != 1 || len(service.actions) != 0 {
 		t.Fatal("Scenario step recording started before Case refresh")
 	}
@@ -51,6 +51,33 @@ func TestScenarioCheckRefreshesCaseBeforeRecordingStep(t *testing.T) {
 	m.Update(record())
 	if len(service.actions) != 1 || service.actions[0].Type != "record-scenario-step" || service.actions[0].RunID != "run-1" {
 		t.Fatalf("Scenario step proof missing after refresh: %#v", service.actions)
+	}
+}
+
+func TestScenarioCheckWaitsWhenCompletedRunCannotLinkCase(t *testing.T) {
+	service := &scenarioVersionFixture{}
+	m := New(service, "detective")
+	m.Update(m.Init()())
+	m.pendingApplicationID, m.pendingStepID = "application-1", "inspect"
+	_, refresh := m.Update(actedMsg{response: detective.ActionResponse{Run: &detective.CheckRun{ID: "run-1", CaseID: "case-1", ExecutionStatus: "completed"}}, caseLinkStatus: "case-changed"})
+	if refresh == nil {
+		t.Fatal("completed run should still refresh history")
+	}
+	m.Update(refresh())
+	if len(service.actions) != 0 || m.pendingApplicationID != "" || !strings.Contains(m.feedback, "case-changed") {
+		t.Fatalf("unlinked run incorrectly completed Scenario step: actions=%#v feedback=%q", service.actions, m.feedback)
+	}
+}
+
+func TestHistoricalRunDoesNotInheritPriorCaseLinkStatus(t *testing.T) {
+	m := New(&scenarioVersionFixture{}, "detective")
+	m.state.Runs = []detective.CheckRun{{ID: "older-run", CheckID: "check-1"}}
+	m.lastRunLinkStatus = "case-changed"
+	m.screen = history
+	m.rebuild()
+	press(m, "enter")
+	if m.screen != runDetail || m.runID != "older-run" || m.lastRunLinkStatus != "" {
+		t.Fatalf("historical run inherited unrelated link status: screen=%s run=%s status=%q", m.screen, m.runID, m.lastRunLinkStatus)
 	}
 }
 

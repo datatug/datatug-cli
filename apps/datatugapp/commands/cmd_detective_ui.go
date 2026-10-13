@@ -151,6 +151,10 @@ func (s detectiveUIService) StatePage(ctx context.Context, cursor string) (detec
 	return state, nil
 }
 func (s detectiveUIService) Action(ctx context.Context, req detective.ActionRequest) (detective.ActionResponse, error) {
+	response, _, err := s.ActionWithStatus(ctx, req)
+	return response, err
+}
+func (s detectiveUIService) ActionWithStatus(ctx context.Context, req detective.ActionRequest) (detective.ActionResponse, string, error) {
 	req.Project = s.project
 	req.SecurityContextID = s.securityContextID
 	key, operationID := s.operation(req)
@@ -160,14 +164,17 @@ func (s detectiveUIService) Action(ctx context.Context, req detective.ActionRequ
 	}{operationID, req}
 	raw, status, err := s.client.post(ctx, "/datatug/detective/action?project="+url.QueryEscape(s.project), body)
 	if err != nil {
-		return detective.ActionResponse{}, detectiveUIError(status, err)
+		return detective.ActionResponse{}, "", detectiveUIError(status, err)
 	}
-	var response detective.ActionResponse
+	var response struct {
+		detective.ActionResponse
+		CaseLinkStatus string `json:"caseLinkStatus,omitempty"`
+	}
 	if err = json.Unmarshal(raw, &response); err != nil {
-		return response, fmt.Errorf("decode Detective action response: %w", err)
+		return response.ActionResponse, "", fmt.Errorf("decode Detective action response: %w", err)
 	}
 	s.completeOperation(key)
-	return response, nil
+	return response.ActionResponse, response.CaseLinkStatus, nil
 }
 func (s detectiveUIService) CaseEvents(ctx context.Context, caseID string, before int) (detective.CaseEventsPage, error) {
 	query := url.Values{}

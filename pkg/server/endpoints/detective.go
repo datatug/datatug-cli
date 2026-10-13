@@ -12,6 +12,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/detective"
 	"github.com/datatug/datatug-cli/pkg/executionstore"
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/datatug"
 )
 
 func detectiveRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
@@ -193,11 +194,16 @@ func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractResponse(w, r, detectiveError(err), detective.ActionResponse{})
 		return
 	}
-	response, err := store.ExecuteAction(r.Context(), body.OperationID, actor, req, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project), result, proof)
+	response, err := store.ExecuteAction(r.Context(), body.OperationID, actor, req, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project), result, proof, detectiveQueryRevisionLookup(req.Project))
+	linkStatus := ""
+	if err == nil && (req.Type == "run-check" || req.Type == "run-query-validators") {
+		linkStatus, err = store.ActionLinkStatus(r.Context(), body.OperationID, actor, req)
+	}
 	writeContractResponse(w, r, detectiveError(err), struct {
 		detective.ActionResponse
-		Receipt string `json:"receipt,omitempty"`
-	}{response, body.OperationID})
+		Receipt        string `json:"receipt,omitempty"`
+		CaseLinkStatus string `json:"caseLinkStatus,omitempty"`
+	}{response, body.OperationID, linkStatus})
 }
 
 func loadDetectiveScenarioQueryProof(ctx context.Context, project, actor string, ref *apicontract.ExecutionRef) (detective.ScenarioQueryProof, error) {
@@ -291,12 +297,16 @@ func loadDetectiveExecutionResult(ctx context.Context, project, actor, queryID, 
 
 func detectiveQueryRunner(project, securityContextID string) detective.QueryRunner {
 	return func(ctx context.Context, queryID, environment string, params map[string]apicontract.TypedValueOrSet) (apicontract.Result, error) {
+		revision, admitted := detective.AdmittedQueryRevision(ctx, queryID)
+		if !admitted {
+			return apicontract.Result{}, &detective.QueryFailure{Code: "SOURCE_UNAVAILABLE"}
+		}
 		origins := make([]apicontract.BindingOriginEntry, 0, len(params))
 		for name := range params {
 			origins = append(origins, apicontract.BindingOriginEntry{ParameterID: name, Origin: apicontract.BindingOriginManual})
 		}
 		limit := 500
-		result, runErr := computeRunQuery(ctx, apicontract.ExecutionRequest{Project: project, Environment: environment, SecurityContextID: securityContextID, QueryID: queryID, Parameters: params, BindingOrigins: origins, Mode: apicontract.ProvenanceModeLive, Limit: &limit, Record: true})
+		result, runErr := computeRunQueryWithOptions(ctx, apicontract.ExecutionRequest{Project: project, Environment: environment, SecurityContextID: securityContextID, QueryID: queryID, Parameters: params, BindingOrigins: origins, Mode: apicontract.ProvenanceModeLive, Limit: &limit, Record: true}, runQueryOptions{expectedQueryRevision: revision})
 		if runErr != nil {
 			var contract *contractError
 			if errors.As(runErr, &contract) {
@@ -305,6 +315,32 @@ func detectiveQueryRunner(project, securityContextID string) detective.QueryRunn
 			return apicontract.Result{}, &detective.QueryFailure{Code: "INTERNAL"}
 		}
 		return result, nil
+	}
+}
+
+func detectiveQueryRevisionLookup(project string) detective.QueryRevisionLookup {
+	return func(ctx context.Context, queryID string) (string, error) {
+		projectDir, ok := api.ProjectDir(project)
+		if !ok {
+			return "", newNotFound("project not found")
+		}
+		canonicalID, err := api.ResolveQueryID(projectDir, queryID)
+		if err != nil {
+			return "", newNotFound("saved query not found")
+		}
+		store, err := api.ProjectStoreFor(project)
+		if err != nil {
+			return "", newNotFound("project not found")
+		}
+		revisioned, ok := store.(datatug.RevisionedQueriesStore)
+		if !ok {
+			return "", newContractError(codeInternal, "project store cannot attest query revisions", "")
+		}
+		stored, err := revisioned.LoadQueryRevision(ctx, canonicalID)
+		if err != nil {
+			return "", newNotFound("saved query not found")
+		}
+		return string(stored.Revision), nil
 	}
 }
 

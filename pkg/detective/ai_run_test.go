@@ -11,15 +11,17 @@ import (
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	core "github.com/datatug/datatug-core/pkg/detective"
 	ai "github.com/datatug/datatug-core/pkg/detectiveai"
+	"github.com/datatug/datatug-core/pkg/investigation"
 )
 
 func TestLocalAIConfirmedRunExecutesOnceAndRecoversCaseLink(t *testing.T) {
 	ctx := context.Background()
 	store := testStore(t)
-	if _, err := store.SaveCheck(ctx, Check{ID: "invoice-check", Title: "Invoice", Steps: []Step{{ID: "load", Kind: "query", QueryID: "q"}}}, "alice"); err != nil {
+	if _, err := store.SaveCheck(ctx, Check{ID: "invoice-check", Title: "Invoice", Inputs: []Input{{Name: "invoice_id", Type: investigation.ValueTypeInteger, Cardinality: "scalar", Required: true}}, Steps: []Step{{ID: "load", Kind: "query", QueryID: "q", Bindings: []Binding{{Input: "invoice_id", FromInput: "invoice_id"}}}}}, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SaveCase(ctx, Case{ID: "case-1", Title: "Investigate"}, "alice", "create-case"); err != nil {
+	seven := investigation.NewIntegerValue("7")
+	if _, err := store.SaveCase(ctx, Case{ID: "case-1", Title: "Investigate", Context: map[string]InputValue{"invoice_id": {Scalar: &seven}}}, "alice", "create-case"); err != nil {
 		t.Fatal(err)
 	}
 	scope := ai.Scope{Key: "local:p", Project: "p", Actor: "alice"}
@@ -27,22 +29,40 @@ func TestLocalAIConfirmedRunExecutesOnceAndRecoversCaseLink(t *testing.T) {
 	proposal := ai.Proposal{ID: "reviewed-run", Scope: scope, Draft: ai.Draft{Kind: ai.KindRun, Run: &ai.RunDraft{CheckID: "invoice-check", CaseID: "case-1", Environment: "qa"}}}
 	command := ai.Command{Scope: scope, OperationID: "run-confirm", Proposal: proposal, Binding: core.OperationBinding{Project: scope.Key, Actor: scope.Actor, Action: "ai-confirm-run-check", ResourceID: proposal.ID, PayloadDigest: strings.Repeat("a", 64)}}
 	calls := 0
-	runner := func(_ context.Context, id, env string, _ map[string]apicontract.TypedValueOrSet) (apicontract.Result, error) {
+	lookups := 0
+	lookup := func(_ context.Context, id string) (string, error) {
+		lookups++
+		if id != "q" {
+			t.Fatalf("unexpected AI admitted query %q", id)
+		}
+		return "reviewed-revision", nil
+	}
+	runner := func(ctx context.Context, id, env string, params map[string]apicontract.TypedValueOrSet) (apicontract.Result, error) {
 		calls++
-		if id != "q" || env != "qa" {
-			t.Fatalf("unexpected query %s/%s", id, env)
+		if revision, ok := AdmittedQueryRevision(ctx, id); !ok || revision != "reviewed-revision" {
+			t.Fatalf("AI runner lost admitted revision: %q, %v", revision, ok)
+		}
+		if id != "q" || env != "qa" || params["invoice_id"].Scalar == nil || *params["invoice_id"].Scalar != seven {
+			t.Fatalf("unexpected query %s/%s params=%+v", id, env, params)
 		}
 		return apicontract.Result{}, nil
 	}
-	receipt, err := local.ConfirmRun(ctx, command, runner, nil)
-	if err != nil || calls != 1 || !strings.HasPrefix(receipt.ResourceID, "run-") {
-		t.Fatalf("confirmed run = %+v, calls=%d, err=%v", receipt, calls, err)
+	wrong := investigation.NewIntegerValue("99")
+	badCommand := command
+	badCommand.OperationID = "run-confirm-conflict"
+	badCommand.Proposal.Draft.Run = &ai.RunDraft{CheckID: "invoice-check", CaseID: "case-1", Environment: "qa", Inputs: map[string]core.InputValue{"invoice_id": {Scalar: &wrong}}}
+	if _, err := local.ConfirmRun(ctx, badCommand, runner, nil); !errors.Is(err, ErrInvalid) || calls != 0 {
+		t.Fatalf("AI caller overrode Case cohort: %v calls=%d", err, calls)
+	}
+	receipt, err := local.ConfirmRun(ctx, command, runner, nil, lookup)
+	if err != nil || calls != 1 || lookups != 1 || !strings.HasPrefix(receipt.ResourceID, "run-") {
+		t.Fatalf("confirmed run = %+v, calls=%d lookups=%d, err=%v", receipt, calls, lookups, err)
 	}
 	caseItem, err := store.GetCase(ctx, "case-1")
 	if err != nil || len(caseItem.RunRefs) != 1 || caseItem.RunRefs[0] != receipt.ResourceID {
 		t.Fatalf("Case run link = %+v, %v", caseItem, err)
 	}
-	if retry, err := local.ConfirmRun(ctx, command, runner, nil); err != nil || retry != receipt || calls != 1 {
+	if retry, err := local.ConfirmRun(ctx, command, runner, nil, lookup); err != nil || retry != receipt || calls != 1 || lookups != 1 {
 		t.Fatalf("duplicate execution on replay: %+v %v calls=%d", retry, err, calls)
 	}
 	data, err := safeReadFile(store.privateItemDir("ai-confirm-operations"), command.OperationID)
@@ -52,6 +72,9 @@ func TestLocalAIConfirmedRunExecutesOnceAndRecoversCaseLink(t *testing.T) {
 	var op aiRunOperation
 	if err := json.Unmarshal(data, &op); err != nil {
 		t.Fatal(err)
+	}
+	if op.QueryRevisions["q"] != "reviewed-revision" {
+		t.Fatalf("AI journal lost admitted revision: %+v", op.QueryRevisions)
 	}
 	op.Done = false
 	if err := writeItem(store.privateItemDir("ai-confirm-operations"), command.OperationID, op); err != nil {
@@ -165,5 +188,62 @@ func TestLocalAIConfirmedRunRetainsEvidenceAcrossConcurrentCaseClose(t *testing.
 	}
 	if _, err := local.ConfirmRun(ctx, command, runner, nil); err != nil || calls != 1 {
 		t.Fatalf("replay repeated AI query: %v, calls=%d", err, calls)
+	}
+}
+
+func TestLocalAIConfirmedRunCannotLinkChangedCaseCohort(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	check, err := store.SaveCheck(ctx, Check{ID: "cohort-check", Title: "Invoice", Inputs: []Input{{Name: "invoice_id", Type: investigation.ValueTypeInteger, Cardinality: "scalar", Required: true}}, Steps: []Step{{ID: "load", Kind: "query", QueryID: "q", Bindings: []Binding{{Input: "invoice_id", FromInput: "invoice_id"}}}}}, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seven := investigation.NewIntegerValue("7")
+	caseItem, err := store.SaveCase(ctx, Case{ID: "cohort-case", Title: "Seven", Context: map[string]InputValue{"invoice_id": {Scalar: &seven}}}, "alice", "create-case")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := ai.Scope{Key: "local:p", Project: "p", Actor: "alice"}
+	local := LocalAIStore{Store: store, Scope: scope}
+	proposal := ai.Proposal{ID: "reviewed-cohort-run", Scope: scope, Draft: ai.Draft{Kind: ai.KindRun, Run: &ai.RunDraft{CheckID: check.ID, CaseID: caseItem.ID, Environment: "qa"}}}
+	command := ai.Command{Scope: scope, OperationID: "ai-changed-cohort", Proposal: proposal, Binding: core.OperationBinding{Project: scope.Key, Actor: scope.Actor, Action: "ai-confirm-run-check", ResourceID: proposal.ID, PayloadDigest: strings.Repeat("a", 64)}}
+	calls := 0
+	runner := func(_ context.Context, _ string, _ string, params map[string]apicontract.TypedValueOrSet) (apicontract.Result, error) {
+		calls++
+		if params["invoice_id"].Scalar == nil || *params["invoice_id"].Scalar != seven {
+			t.Fatalf("AI run omitted accepted Case value: %+v", params)
+		}
+		current, err := store.GetCase(ctx, caseItem.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ninetyNine := investigation.NewIntegerValue("99")
+		current.Context = map[string]InputValue{"invoice_id": {Scalar: &ninetyNine}}
+		if _, err := store.SaveCase(ctx, current, "alice", "update-case"); err != nil {
+			t.Fatal(err)
+		}
+		return apicontract.Result{}, nil
+	}
+	receipt, err := local.ConfirmRun(ctx, command, runner, nil)
+	if err != nil || receipt.ResourceID == "" || calls != 1 {
+		t.Fatalf("AI result lost after Case changed: %+v %v calls=%d", receipt, err, calls)
+	}
+	current, err := store.GetCase(ctx, caseItem.ID)
+	if err != nil || len(current.RunRefs) != 0 {
+		t.Fatalf("changed Case linked AI run: %+v %v", current, err)
+	}
+	data, err := safeReadFile(store.privateItemDir("ai-confirm-operations"), command.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var op aiRunOperation
+	if json.Unmarshal(data, &op) != nil || op.CaseLinkStatus != "case-changed" || !op.Done {
+		t.Fatalf("AI partial link status unavailable: %+v", op)
+	}
+	if _, err := store.appendServerCaseRun(ctx, caseItem.ID, receipt.ResourceID, "alice"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("manual link bypassed changed AI cohort: %v", err)
+	}
+	if _, err := local.ConfirmRun(ctx, command, runner, nil); err != nil || calls != 1 {
+		t.Fatalf("AI replay repeated query: %v calls=%d", err, calls)
 	}
 }

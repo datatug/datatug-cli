@@ -220,7 +220,7 @@ func (p localAIPorts) Dispatch(ctx context.Context, command ai.Command) (ai.Rece
 		return p.local.ConfirmQuery(ctx, command)
 	}
 	if command.Proposal.Draft.Kind == ai.KindRun {
-		return p.local.ConfirmRun(ctx, command, detectiveQueryRunner(p.project, p.contextID), detectiveExecutionMetadata(p.project))
+		return p.local.ConfirmRun(ctx, command, detectiveQueryRunner(p.project, p.contextID), detectiveExecutionMetadata(p.project), detectiveQueryRevisionLookup(p.project))
 	}
 	return ai.Receipt{}, ai.ErrUnsupported
 }

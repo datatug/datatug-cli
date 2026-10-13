@@ -15,26 +15,30 @@ import (
 )
 
 type aiRunOperation struct {
-	Kind      string      `json:"kind"`
-	Receipt   ai.Receipt  `json:"receipt"`
-	Draft     ai.RunDraft `json:"draft"`
-	Run       CheckRun    `json:"run,omitempty"`
-	Before    *Case       `json:"before,omitempty"`
-	After     *Case       `json:"after,omitempty"`
-	CaseAudit *AuditEvent `json:"caseAudit,omitempty"`
-	Produced  bool        `json:"produced"`
-	Done      bool        `json:"done"`
+	Kind              string            `json:"kind"`
+	Receipt           ai.Receipt        `json:"receipt"`
+	Draft             ai.RunDraft       `json:"draft"`
+	CaseContextDigest string            `json:"caseContextDigest,omitempty"`
+	QueryRevisions    map[string]string `json:"queryRevisions,omitempty"`
+	CaseLinkStatus    string            `json:"caseLinkStatus,omitempty"`
+	Run               CheckRun          `json:"run,omitempty"`
+	Before            *Case             `json:"before,omitempty"`
+	After             *Case             `json:"after,omitempty"`
+	CaseAudit         *AuditEvent       `json:"caseAudit,omitempty"`
+	Produced          bool              `json:"produced"`
+	Done              bool              `json:"done"`
 }
 
 // ConfirmRun accepts the confirmed intent before any query dispatch. An
 // interrupted network call remains uncertain and is never silently repeated.
 // Once evaluation returns, its exact result is journaled before run/evidence
 // and Case writes, so those writes can be reconciled without re-execution.
-func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner QueryRunner, metadata ExecutionMetadata) (ai.Receipt, error) {
+func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner QueryRunner, metadata ExecutionMetadata, revisions ...QueryRevisionLookup) (ai.Receipt, error) {
 	if s.Store == nil || command.Scope != s.Scope || command.Proposal.Scope != s.Scope || command.Proposal.Draft.Kind != ai.KindRun || command.Proposal.Draft.Run == nil || !validSlug(command.OperationID) || command.Binding.Project != s.Scope.Key || command.Binding.Actor != s.Scope.Actor || command.Binding.Action != "ai-confirm-run-check" || command.Binding.ResourceID != command.Proposal.ID || len(command.Binding.PayloadDigest) != 64 || runner == nil {
 		return ai.Receipt{}, ErrInvalid
 	}
 	draft := *command.Proposal.Draft.Run
+	effectiveInputs := draft.Inputs
 	if !validSlug(draft.CheckID) || draft.Environment == "" || draft.CaseID != "" && !validSlug(draft.CaseID) {
 		return ai.Receipt{}, ErrInvalid
 	}
@@ -70,6 +74,11 @@ func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner
 		return receipt, err
 	}
 	var catalog core.Catalog
+	var admittedRevisions map[string]string
+	var lookup QueryRevisionLookup
+	if len(revisions) > 0 {
+		lookup = revisions[0]
+	}
 	sum := sha256.Sum256([]byte(s.Scope.Key + "\x00" + s.Scope.Actor + "\x00" + command.OperationID))
 	runID := "run-" + hex.EncodeToString(sum[:16])
 	at := time.Now().UTC()
@@ -92,6 +101,8 @@ func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner
 		if err := s.verifyAIBasisLocked(ctx, command.Proposal); err != nil {
 			return err
 		}
+		caseDigest := ""
+		var caseContext map[string]InputValue
 		if draft.CaseID != "" {
 			c, err := s.Store.getCase(draft.CaseID)
 			if err != nil {
@@ -100,8 +111,17 @@ func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner
 			if c.Status != "active" {
 				return ErrInvalid
 			}
+			caseContext = c.Context
+			caseDigest, err = caseContextDigest(c.Context)
+			if err != nil {
+				return err
+			}
 		}
 		catalog, err = core.LoadCatalog(ctx, draft.CheckID, "", catalogSnapshotReader{s.Store})
+		if err != nil {
+			return err
+		}
+		admittedRevisions, err = captureQueryRevisions(ctx, catalog, "", lookup)
 		if err != nil {
 			return err
 		}
@@ -109,16 +129,24 @@ func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner
 		if !ok {
 			return ErrNotFound
 		}
-		if err := core.ValidateInputs(check.Inputs, draft.Inputs); err != nil {
+		if draft.CaseID != "" {
+			effectiveInputs, err = core.BindCaseInputs(check.Inputs, draft.Inputs, caseContext)
+		} else {
+			err = core.ValidateInputs(check.Inputs, draft.Inputs)
+		}
+		if err != nil {
 			return err
 		}
 		accepted = true
-		return writeItem(s.Store.privateItemDir("ai-confirm-operations"), command.OperationID, aiRunOperation{Kind: "run", Receipt: receipt, Draft: draft})
+		return writeItem(s.Store.privateItemDir("ai-confirm-operations"), command.OperationID, aiRunOperation{Kind: "run", Receipt: receipt, Draft: draft, CaseContextDigest: caseDigest, QueryRevisions: admittedRevisions})
 	})
 	if err != nil || !accepted {
 		return ai.Receipt{}, err
 	}
-	run, err := core.EvaluateCheck(ctx, core.RunRequest{ID: runID, CheckID: draft.CheckID, CaseID: draft.CaseID, Environment: draft.Environment, Actor: s.Scope.Actor, Inputs: draft.Inputs}, catalog, runner, metadata)
+	if lookup != nil {
+		ctx = withAdmittedQueryRevisions(ctx, admittedRevisions)
+	}
+	run, err := core.EvaluateCheck(ctx, core.RunRequest{ID: runID, CheckID: draft.CheckID, CaseID: draft.CaseID, Environment: draft.Environment, Actor: s.Scope.Actor, Inputs: effectiveInputs}, catalog, runner, metadata)
 	if err != nil {
 		return ai.Receipt{}, err
 	}
@@ -145,6 +173,11 @@ func (s LocalAIStore) finishAIRun(ctx context.Context, id string, op *aiRunOpera
 	if op.Kind != "run" || !op.Produced || op.Run.ID != op.Receipt.ResourceID || op.Run.Actor != s.Scope.Actor || op.Run.CaseID != op.Draft.CaseID {
 		return ErrInvalid
 	}
+	if op.Draft.CaseID != "" && op.CaseContextDigest != "" {
+		if err := s.Store.saveRunCohortProof(op.Run.ID, op.Draft.CaseID, op.CaseContextDigest); err != nil {
+			return err
+		}
+	}
 	data, err := safeReadFile(s.Store.privateItemDir("runs"), op.Run.ID)
 	if errors.Is(err, os.ErrNotExist) {
 		if err := writeItem(s.Store.privateItemDir("runs"), op.Run.ID, op.Run); err != nil {
@@ -169,24 +202,37 @@ func (s LocalAIStore) finishAIRun(ctx context.Context, id string, op *aiRunOpera
 			return err
 		}
 	}
-	if op.Draft.CaseID != "" && op.After == nil {
+	if op.Draft.CaseID != "" && op.After == nil && op.CaseLinkStatus == "" {
 		before, err := s.Store.getCase(op.Draft.CaseID)
-		if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			op.CaseLinkStatus = "case-unavailable"
+		} else if err != nil {
 			return err
+		} else if before.Status == "archived" {
+			op.CaseLinkStatus = "case-archived"
+		} else if err := s.Store.authorizeCaseRunLink(before, op.Run); err != nil {
+			if !errors.Is(err, ErrInvalid) {
+				return err
+			}
+			op.CaseLinkStatus = "case-changed"
 		}
-		sum := sha256.Sum256([]byte(s.Scope.Key + "\x00" + s.Scope.Actor + "\x00" + id))
-		caseEventID := "event-" + hex.EncodeToString(sum[16:])
-		after, audit, err := core.AttachRun(before, op.Run, caseEventID, s.Scope.Actor, time.Now().UTC())
-		if err != nil {
-			return err
+		if op.CaseLinkStatus == "" {
+			sum := sha256.Sum256([]byte(s.Scope.Key + "\x00" + s.Scope.Actor + "\x00" + id))
+			caseEventID := "event-" + hex.EncodeToString(sum[16:])
+			after, audit, err := core.AttachRun(before, op.Run, caseEventID, s.Scope.Actor, time.Now().UTC())
+			if err != nil {
+				op.CaseLinkStatus = "link-unavailable"
+			} else {
+				if err := s.Store.compactCaseTimeline(&after); err != nil {
+					return err
+				}
+				audit.Project = s.Scope.Project
+				op.Before = &before
+				op.After = &after
+				op.CaseAudit = &audit
+				op.CaseLinkStatus = "linked"
+			}
 		}
-		if err := s.Store.compactCaseTimeline(&after); err != nil {
-			return err
-		}
-		audit.Project = s.Scope.Project
-		op.Before = &before
-		op.After = &after
-		op.CaseAudit = &audit
 		if err := writeItem(s.Store.privateItemDir("ai-confirm-operations"), id, op); err != nil {
 			return err
 		}

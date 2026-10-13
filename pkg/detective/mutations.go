@@ -119,6 +119,9 @@ func (s *LocalStore) RecordScenarioStep(ctx context.Context, caseID, application
 			if err != nil {
 				return err
 			}
+			if err := s.authorizeCaseRunLink(c, loaded); err != nil {
+				return err
+			}
 			run = &loaded
 		}
 		linked := false
@@ -202,6 +205,9 @@ func (s *LocalStore) appendCaseEvent(ctx context.Context, id string, event CaseE
 		if event.Type == "link-evidence" || server {
 			loaded, err := s.getRun(event.Ref)
 			if err != nil {
+				return err
+			}
+			if err := s.authorizeCaseRunLink(c, loaded); err != nil {
 				return err
 			}
 			run = &loaded

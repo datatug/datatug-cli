@@ -204,6 +204,10 @@ func (s *detectiveCloudService) ifMatch(req detective.ActionRequest) int64 {
 	return 0
 }
 func (s *detectiveCloudService) Action(ctx context.Context, req detective.ActionRequest) (detective.ActionResponse, error) {
+	response, _, err := s.ActionWithStatus(ctx, req)
+	return response, err
+}
+func (s *detectiveCloudService) ActionWithStatus(ctx context.Context, req detective.ActionRequest) (detective.ActionResponse, string, error) {
 	req.Project = s.project
 	req.SecurityContextID = ""
 	match := s.ifMatch(req)
@@ -220,13 +224,14 @@ func (s *detectiveCloudService) Action(ctx context.Context, req detective.Action
 	}{"firestore", s.space, operationID, match, req}
 	var result struct {
 		detective.ActionResponse
-		Receipt string `json:"receipt"`
+		Receipt        string `json:"receipt"`
+		CaseLinkStatus string `json:"caseLinkStatus,omitempty"`
 	}
 	err := s.do(ctx, http.MethodPost, "/v0/datatug/detective/action", body, &result)
 	if err == nil && (result.Run == nil || result.Run.ExecutionStatus != "pending") {
 		s.completeOperation(key)
 	}
-	return result.ActionResponse, err
+	return result.ActionResponse, result.CaseLinkStatus, err
 }
 func (s *detectiveCloudService) CaseEvents(ctx context.Context, id string, before int) (detective.CaseEventsPage, error) {
 	v := s.scope()

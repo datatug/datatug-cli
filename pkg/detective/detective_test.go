@@ -442,6 +442,13 @@ func TestDetectiveCaseEditsHaveTimelineAndPreserveRunRefs(t *testing.T) {
 	if err := s.SaveRun(ctx, CheckRun{ID: "run-1", Kind: "check", CaseID: c.ID, StartedAt: time.Now().UTC(), Actor: "alice"}); err != nil {
 		t.Fatal(err)
 	}
+	digest, err := caseContextDigest(c.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.saveRunCohortProof("run-1", c.ID, digest); err != nil {
+		t.Fatal(err)
+	}
 	c, err = s.appendServerCaseRun(ctx, c.ID, "run-1", "alice")
 	if err != nil {
 		t.Fatal(err)

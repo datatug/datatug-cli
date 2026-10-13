@@ -172,6 +172,18 @@ func TestDetectiveLocalOperationIDAcceptsDigitLedUUID(t *testing.T) {
 		t.Fatalf("digit-led UUID produced invalid local operation ID %q", id)
 	}
 }
+
+func TestDetectiveLocalRunReportsCaseLinkFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"run":{"id":"run-1","checkId":"check-1","caseId":"case-1","executionStatus":"completed"},"caseLinkStatus":"case-changed"}`))
+	}))
+	defer server.Close()
+	service := detectiveUIService{client: agentHTTPClient{baseURL: server.URL, client: server.Client()}, project: "demo", securityContextID: "session-1"}
+	response, status, err := service.ActionWithStatus(context.Background(), detective.ActionRequest{Type: "run-check", CheckID: "check-1", CaseID: "case-1", Environment: "qa"})
+	if err != nil || response.Run == nil || status != "case-changed" {
+		t.Fatalf("local Case link status lost: %+v %q %v", response, status, err)
+	}
+}
 func TestDetectiveCapabilityErrorIsVisible(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

@@ -342,6 +342,13 @@ func TestDetectiveScenarioApplicationVersionAndManualProgress(t *testing.T) {
 	if err := s.SaveRun(ctx, CheckRun{ID: "run-1", Kind: "query-validators", QueryID: "q", CaseID: c.ID, ExecutionStatus: "completed", Outcome: "unknown", StartedAt: time.Now().UTC(), Actor: "alice"}); err != nil {
 		t.Fatal(err)
 	}
+	digest, err := caseContextDigest(c.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.saveRunCohortProof("run-1", c.ID, digest); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.appendServerCaseRun(ctx, c.ID, "run-1", "alice"); err != nil {
 		t.Fatal(err)
 	}

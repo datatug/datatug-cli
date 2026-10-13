@@ -23,27 +23,14 @@ func (s *LocalStore) Run(ctx context.Context, checkID, environment, caseID, acto
 	if !validSlug(checkID) || environment == "" || runner == nil {
 		return CheckRun{}, ErrInvalid
 	}
-	catalog, err := s.loadCatalog(ctx, checkID, "", caseID)
-	if err != nil {
-		return CheckRun{}, err
-	}
 	var lookup ExecutionMetadata
 	if len(metadata) > 0 {
 		lookup = metadata[0]
 	}
-	run, err := core.EvaluateCheck(ctx, core.RunRequest{ID: "run-" + strings.ReplaceAll(uuid.NewString(), "-", ""), CheckID: checkID, CaseID: caseID, Environment: environment, Actor: actor, Inputs: inputs}, catalog, runner, lookup)
-	if err != nil {
-		return CheckRun{}, err
-	}
-	if err := s.SaveRun(ctx, run); err != nil {
-		return CheckRun{}, err
-	}
-	if caseID != "" {
-		if _, err = s.appendServerCaseRun(ctx, caseID, run.ID, actor); err != nil {
-			return run, fmt.Errorf("%w: case link was not saved", ErrOutcomeUncertain)
-		}
-	}
-	return run, nil
+	operationID := "legacy-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	req := ActionRequest{Type: "run-check", Project: s.projectID, CheckID: checkID, CaseID: caseID, Environment: environment, Inputs: inputs}
+	response, err := s.ExecuteAction(ctx, operationID, actor, req, runner, lookup, nil, nil)
+	return s.legacyRunResult(ctx, operationID, actor, req, response, err)
 }
 
 func (s *LocalStore) RunQueryValidators(ctx context.Context, queryID, environment, caseID, actor string, inputs map[string]InputValue, runner QueryRunner, metadata ...ExecutionMetadata) (CheckRun, error) {
@@ -60,31 +47,29 @@ func (s *LocalStore) runQueryValidators(ctx context.Context, queryID, environmen
 	if !core.ValidQueryRef(queryID) || environment == "" || runner == nil {
 		return CheckRun{}, ErrInvalid
 	}
-	catalog, err := s.loadCatalog(ctx, "", queryID, caseID)
-	if err != nil {
-		return CheckRun{}, err
-	}
 	var lookup ExecutionMetadata
 	if len(metadata) > 0 {
 		lookup = metadata[0]
 	}
-	req := core.RunRequest{ID: "run-" + strings.ReplaceAll(uuid.NewString(), "-", ""), QueryID: queryID, CaseID: caseID, Environment: environment, Actor: actor, Inputs: inputs}
-	var run CheckRun
-	if result == nil {
-		run, err = core.EvaluateQueryValidators(ctx, req, catalog, runner, lookup)
-	} else {
-		run, err = core.EvaluateQueryValidatorsForResult(ctx, req, catalog, *result, runner, lookup)
+	operationID := "legacy-" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	req := ActionRequest{Type: "run-query-validators", Project: s.projectID, QueryID: queryID, CaseID: caseID, Environment: environment, Inputs: inputs}
+	response, err := s.ExecuteAction(ctx, operationID, actor, req, runner, lookup, result, nil)
+	return s.legacyRunResult(ctx, operationID, actor, req, response, err)
+}
+
+func (s *LocalStore) legacyRunResult(ctx context.Context, operationID, actor string, req ActionRequest, response ActionResponse, err error) (CheckRun, error) {
+	if response.Run == nil {
+		return CheckRun{}, err
 	}
+	if err != nil || req.CaseID == "" {
+		return *response.Run, err
+	}
+	status, err := s.ActionLinkStatus(ctx, operationID, actor, req)
 	if err != nil {
-		return CheckRun{}, err
+		return *response.Run, err
 	}
-	if err := s.SaveRun(ctx, run); err != nil {
-		return CheckRun{}, err
+	if status != "linked" {
+		return *response.Run, fmt.Errorf("%w: completed run %s; Case link %s", ErrOutcomeUncertain, response.Run.ID, status)
 	}
-	if caseID != "" {
-		if _, err = s.appendServerCaseRun(ctx, caseID, run.ID, actor); err != nil {
-			return run, fmt.Errorf("%w: case link was not saved", ErrOutcomeUncertain)
-		}
-	}
-	return run, nil
+	return *response.Run, nil
 }

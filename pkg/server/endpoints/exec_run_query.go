@@ -57,6 +57,9 @@ type runQueryOptions struct {
 	// changing the public ExecutionRequest limit contract. Zero keeps the
 	// public exec/run_query bound.
 	rowLimit int
+	// An internal Detective run must execute the saved definition admitted
+	// with its sealed catalog, even if a concurrent edit changes the query.
+	expectedQueryRevision string
 }
 
 var execRunProjectStoreFor = api.ProjectStoreFor
@@ -71,6 +74,9 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 }
 
 func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRequest, options runQueryOptions) (apicontract.Result, error) {
+	if options.expectedQueryRevision != "" && (!req.Record || req.QueryID == "") {
+		return apicontract.Result{}, newInvalidRequest("queryId", "a pinned query revision requires a recorded saved query")
+	}
 	if err := validateScope(apicontract.Scope{StoreID: req.StoreID, Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}); err != nil {
 		return apicontract.Result{}, err
 	}
@@ -146,6 +152,9 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 			loaded := stored.Query.QueryDef
 			queryDef = &loaded
 			queryRevision = string(stored.Revision)
+			if options.expectedQueryRevision != "" && queryRevision != options.expectedQueryRevision {
+				return apicontract.Result{}, newRevisionConflict("queryId", "saved query changed after Detective run admission")
+			}
 		} else {
 			queryDef, err = projStore.LoadQuery(ctx, req.QueryID)
 			if err != nil {

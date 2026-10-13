@@ -20,6 +20,9 @@ type Service interface {
 	State(context.Context) (detective.State, error)
 	Action(context.Context, detective.ActionRequest) (detective.ActionResponse, error)
 }
+type actionStatusService interface {
+	ActionWithStatus(context.Context, detective.ActionRequest) (detective.ActionResponse, string, error)
+}
 type historyPager interface {
 	StatePage(context.Context, string) (detective.State, error)
 }
@@ -54,8 +57,9 @@ type moreRunsMsg struct {
 	err   error
 }
 type actedMsg struct {
-	response detective.ActionResponse
-	err      error
+	response       detective.ActionResponse
+	err            error
+	caseLinkStatus string
 }
 type eventsMsg struct {
 	page  detective.CaseEventsPage
@@ -121,6 +125,7 @@ type Model struct {
 	width, height                       int
 	busy                                bool
 	feedback                            string
+	lastRunLinkStatus                   string
 	failedOnly                          bool
 	form                                *form
 	rows                                []row
@@ -160,7 +165,14 @@ func (m *Model) load() tea.Cmd {
 }
 func (m *Model) act(req detective.ActionRequest) tea.Cmd {
 	m.busy = true
-	return func() tea.Msg { r, e := m.service.Action(context.Background(), req); return actedMsg{r, e} }
+	return func() tea.Msg {
+		if withStatus, ok := m.service.(actionStatusService); ok {
+			r, status, e := withStatus.ActionWithStatus(context.Background(), req)
+			return actedMsg{response: r, err: e, caseLinkStatus: status}
+		}
+		r, e := m.service.Action(context.Background(), req)
+		return actedMsg{response: r, err: e}
+	}
 }
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch v := msg.(type) {
@@ -175,6 +187,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.state = v.state
 			m.feedback = ""
+			if m.screen == runDetail && m.lastRunLinkStatus != "" {
+				m.feedback = "Case link: " + m.lastRunLinkStatus
+			}
 		}
 		m.rebuild()
 		if m.pendingRunID != "" {
@@ -226,12 +241,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = detail
 		}
 		if v.response.Run != nil {
+			m.lastRunLinkStatus = v.caseLinkStatus
 			m.failedOnly = false
 			m.runID = v.response.Run.ID
 			m.screen = runDetail
 			m.checkID = v.response.Run.CheckID
 			m.caseID = v.response.Run.CaseID
-			if m.pendingApplicationID != "" && v.response.Run.ExecutionStatus == "completed" {
+			if m.pendingApplicationID != "" && v.response.Run.ExecutionStatus == "completed" && (v.caseLinkStatus == "linked" || v.caseLinkStatus == "already-linked") {
 				// Attaching a Case-bound run advances the Case version. Refresh
 				// before recording the Scenario step so hosted ifMatch is current.
 				m.pendingRunID = v.response.Run.ID
@@ -240,7 +256,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.pendingApplicationID != "" {
 				m.pendingApplicationID, m.pendingStepID = "", ""
-				m.feedback = "Scenario step remains pending: Check execution did not complete"
+				m.feedback = "Scenario step remains pending: " + v.caseLinkStatus
+				if v.caseLinkStatus == "" {
+					m.feedback = "Scenario step remains pending: Case link unverified"
+				}
 			}
 		}
 		m.form = nil
@@ -521,6 +540,7 @@ func (m *Model) updateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if key == "enter" && len(m.rows) > 0 {
 			m.runID = m.rows[m.index].id
+			m.lastRunLinkStatus = ""
 			m.failedOnly = false
 			m.screen = runDetail
 			m.index = 0

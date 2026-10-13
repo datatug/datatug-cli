@@ -20,17 +20,54 @@ import (
 // receipt. Its accepted state is durable before any query or LLM network call.
 // An accepted run without a produced result is intentionally uncertain.
 type actionOperation struct {
-	Receipt  core.OperationReceipt `json:"receipt"`
-	Response ActionResponse        `json:"response,omitempty"`
-	Kind     string                `json:"kind"`
-	ID       string                `json:"id,omitempty"`
-	Before   json.RawMessage       `json:"before,omitempty"`
-	After    json.RawMessage       `json:"after,omitempty"`
-	Audit    AuditEvent            `json:"audit,omitempty"`
-	RunAudit *AuditEvent           `json:"runAudit,omitempty"`
-	CaseID   string                `json:"caseId,omitempty"`
-	Produced bool                  `json:"produced"`
-	Done     bool                  `json:"done"`
+	Receipt           core.OperationReceipt `json:"receipt"`
+	Response          ActionResponse        `json:"response,omitempty"`
+	Kind              string                `json:"kind"`
+	ID                string                `json:"id,omitempty"`
+	Before            json.RawMessage       `json:"before,omitempty"`
+	After             json.RawMessage       `json:"after,omitempty"`
+	Audit             AuditEvent            `json:"audit,omitempty"`
+	RunAudit          *AuditEvent           `json:"runAudit,omitempty"`
+	CaseID            string                `json:"caseId,omitempty"`
+	CaseContextDigest string                `json:"caseContextDigest,omitempty"`
+	QueryRevisions    map[string]string     `json:"queryRevisions,omitempty"`
+	CaseLinkStatus    string                `json:"caseLinkStatus,omitempty"`
+	Produced          bool                  `json:"produced"`
+	Done              bool                  `json:"done"`
+}
+
+func caseContextDigest(values map[string]InputValue) (string, error) {
+	if values == nil {
+		values = map[string]InputValue{}
+	}
+	data, err := json.Marshal(values)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// ActionLinkStatus reads only the caller's payload-bound completed operation.
+func (s *LocalStore) ActionLinkStatus(ctx context.Context, id, actor string, req ActionRequest) (string, error) {
+	binding, err := s.ActionBinding(req, actor)
+	if err != nil {
+		return "", err
+	}
+	var status string
+	err = s.withLock(ctx, func() error {
+		data, err := safeReadFile(s.privateItemDir("action-operations"), id)
+		if err != nil {
+			return err
+		}
+		var op actionOperation
+		if json.Unmarshal(data, &op) != nil || core.CheckOperationReplay(op.Receipt, binding) != nil || !op.Done {
+			return ErrConflict
+		}
+		status = op.CaseLinkStatus
+		return nil
+	})
+	return status, err
 }
 
 func actionResourceID(req ActionRequest) string {
@@ -169,7 +206,7 @@ func actionEventID(project, actor, operationID string) string {
 // ExecuteAction owns all ordinary local Detective mutations and manual runs.
 // The caller must authorize the current session, query and execution receipt
 // before entering this method. A missing operation ID is a contract error.
-func (s *LocalStore) ExecuteAction(ctx context.Context, operationID, actor string, req ActionRequest, runner QueryRunner, metadata ExecutionMetadata, result *apicontract.Result, proof *ScenarioQueryProof) (ActionResponse, error) {
+func (s *LocalStore) ExecuteAction(ctx context.Context, operationID, actor string, req ActionRequest, runner QueryRunner, metadata ExecutionMetadata, result *apicontract.Result, proof *ScenarioQueryProof, revisions ...QueryRevisionLookup) (ActionResponse, error) {
 	var empty ActionResponse
 	if !validSlug(operationID) {
 		return empty, ErrInvalid
@@ -209,7 +246,11 @@ func (s *LocalStore) ExecuteAction(ctx context.Context, operationID, actor strin
 		return prior.Response, nil
 	}
 	if req.Type == "run-check" || req.Type == "run-query-validators" {
-		return s.executeRunAction(ctx, operationID, actor, req, binding, runner, metadata, result)
+		var lookup QueryRevisionLookup
+		if len(revisions) > 0 {
+			lookup = revisions[0]
+		}
+		return s.executeRunAction(ctx, operationID, actor, req, binding, runner, metadata, result, lookup)
 	}
 	var op actionOperation
 	err = s.withLock(ctx, func() error {
@@ -265,7 +306,7 @@ func actionResponseVersion(r ActionResponse) int64 {
 	}
 }
 
-func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req ActionRequest, binding core.OperationBinding, runner QueryRunner, metadata ExecutionMetadata, result *apicontract.Result) (ActionResponse, error) {
+func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req ActionRequest, binding core.OperationBinding, runner QueryRunner, metadata ExecutionMetadata, result *apicontract.Result, lookup QueryRevisionLookup) (ActionResponse, error) {
 	var empty ActionResponse
 	if runner == nil || req.Environment == "" || result != nil && req.Type != "run-query-validators" {
 		return empty, ErrInvalid
@@ -276,15 +317,9 @@ func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req
 	} else {
 		queryID = req.QueryID
 	}
-	catalog, err := s.loadCatalog(ctx, checkID, queryID, req.CaseID)
-	if err != nil {
-		return empty, err
-	}
-	if checkID != "" {
-		if err := core.ValidateInputs(catalog.Checks[checkID].Inputs, req.Inputs); err != nil {
-			return empty, err
-		}
-	}
+	var catalog core.Catalog
+	var admittedRevisions map[string]string
+	effectiveInputs := req.Inputs
 	runID := actionRunID(s.projectID, actor, id)
 	accepted, err := core.NewOperationReceipt(id, binding, 0, time.Now().UTC())
 	if err != nil {
@@ -302,12 +337,52 @@ func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req
 		if !errors.Is(e, os.ErrNotExist) {
 			return e
 		}
-		return writeItem(s.privateItemDir("action-operations"), id, actionOperation{Receipt: accepted, Kind: "run", ID: runID})
+		var caseContext map[string]InputValue
+		op := actionOperation{Receipt: accepted, Kind: "run", ID: runID, CaseID: req.CaseID}
+		if req.CaseID != "" {
+			c, err := s.getCase(req.CaseID)
+			if err != nil {
+				return err
+			}
+			if c.Status != "active" {
+				return ErrInvalid
+			}
+			caseContext = c.Context
+			op.CaseContextDigest, err = caseContextDigest(c.Context)
+			if err != nil {
+				return err
+			}
+		}
+		catalog, e = core.LoadCatalog(ctx, checkID, queryID, catalogSnapshotReader{s})
+		if e != nil {
+			return e
+		}
+		op.QueryRevisions, e = captureQueryRevisions(ctx, catalog, queryID, lookup)
+		if e != nil {
+			return e
+		}
+		admittedRevisions = op.QueryRevisions
+		if checkID != "" {
+			if req.CaseID != "" {
+				effectiveInputs, e = core.BindCaseInputs(catalog.Checks[checkID].Inputs, req.Inputs, caseContext)
+			} else {
+				e = core.ValidateInputs(catalog.Checks[checkID].Inputs, req.Inputs)
+			}
+		} else if req.CaseID != "" {
+			e = core.MatchCaseCohort(caseContext, req.Inputs)
+		}
+		if e != nil {
+			return e
+		}
+		return writeItem(s.privateItemDir("action-operations"), id, op)
 	})
 	if err != nil {
 		return empty, err
 	}
-	coreReq := core.RunRequest{ID: runID, CheckID: checkID, QueryID: queryID, CaseID: req.CaseID, Environment: req.Environment, Actor: actor, Inputs: req.Inputs}
+	coreReq := core.RunRequest{ID: runID, CheckID: checkID, QueryID: queryID, CaseID: req.CaseID, Environment: req.Environment, Actor: actor, Inputs: effectiveInputs}
+	if lookup != nil {
+		ctx = withAdmittedQueryRevisions(ctx, admittedRevisions)
+	}
 	var run CheckRun
 	if checkID != "" {
 		run, err = core.EvaluateCheck(ctx, coreReq, catalog, runner, metadata)
@@ -353,29 +428,60 @@ func (s *LocalStore) finishAction(ctx context.Context, id string, op *actionOper
 		if op.Response.Run == nil || op.Response.Run.ID != op.ID || op.RunAudit == nil {
 			return ErrInvalid
 		}
+		if op.CaseID != "" && op.CaseContextDigest != "" {
+			if err := s.saveRunCohortProof(op.ID, op.CaseID, op.CaseContextDigest); err != nil {
+				return err
+			}
+		}
 		if err := s.finishActionFile(s.privateItemDir("runs"), op.ID, nil, op.Response.Run); err != nil {
 			return err
 		}
 		if err := s.appendAuditOnce(ctx, *op.RunAudit); err != nil {
 			return err
 		}
-		if op.CaseID != "" && len(op.After) == 0 {
+		if op.CaseID != "" && len(op.After) == 0 && op.CaseLinkStatus == "" {
 			before, err := s.getCase(op.CaseID)
-			if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				op.CaseLinkStatus = "case-unavailable"
+			} else if err != nil {
 				return err
+			} else if before.Status == "archived" {
+				op.CaseLinkStatus = "case-archived"
+			} else {
+				if op.CaseContextDigest != "" {
+					currentDigest, digestErr := caseContextDigest(before.Context)
+					if digestErr != nil {
+						return digestErr
+					}
+					if currentDigest != op.CaseContextDigest {
+						op.CaseLinkStatus = "case-changed"
+					}
+				}
+				if op.CaseLinkStatus == "" {
+					if err := s.authorizeCaseRunLink(before, *op.Response.Run); err != nil {
+						if !errors.Is(err, ErrInvalid) {
+							return err
+						}
+						op.CaseLinkStatus = "case-changed"
+					}
+				}
+				if op.CaseLinkStatus == "" {
+					after, caseAudit, attachErr := core.AttachRun(before, *op.Response.Run, actionEventID(s.projectID, op.Receipt.Actor, id), op.Receipt.Actor, time.Now().UTC())
+					if attachErr != nil {
+						op.CaseLinkStatus = "link-unavailable"
+					} else {
+						if err := s.compactCaseTimeline(&after); err != nil {
+							return err
+						}
+						op.Before, _ = json.Marshal(before)
+						op.After, _ = json.Marshal(after)
+						caseAudit.Project = s.projectID
+						caseAudit.ID = id + "-case"
+						op.Audit = caseAudit
+						op.CaseLinkStatus = "linked"
+					}
+				}
 			}
-			after, caseAudit, err := core.AttachRun(before, *op.Response.Run, actionEventID(s.projectID, op.Receipt.Actor, id), op.Receipt.Actor, time.Now().UTC())
-			if err != nil {
-				return err
-			}
-			if err := s.compactCaseTimeline(&after); err != nil {
-				return err
-			}
-			op.Before, _ = json.Marshal(before)
-			op.After, _ = json.Marshal(after)
-			caseAudit.Project = s.projectID
-			caseAudit.ID = id + "-case"
-			op.Audit = caseAudit
 			if err := writeItem(s.privateItemDir("action-operations"), id, op); err != nil {
 				return err
 			}
@@ -595,6 +701,9 @@ func (s *LocalStore) prepareAction(req ActionRequest, actor, id string, proof *S
 					if e != nil {
 						return bad(e)
 					}
+					if e := s.authorizeCaseRunLink(old, v); e != nil {
+						return bad(e)
+					}
 					run = &v
 				}
 				linked := false
@@ -614,6 +723,9 @@ func (s *LocalStore) prepareAction(req ActionRequest, actor, id string, proof *S
 			if req.Event.Type == "link-evidence" {
 				v, e := s.getRun(req.Event.Ref)
 				if e != nil {
+					return bad(e)
+				}
+				if e := s.authorizeCaseRunLink(old, v); e != nil {
 					return bad(e)
 				}
 				run = &v

@@ -77,6 +77,19 @@ func detectiveResponse(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}}
 }
 
+func TestHostedDetectiveRunReportsCaseLinkFailure(t *testing.T) {
+	s := &detectiveCloudService{session: cloudSession{baseURL: "https://api.example.test/v0/", httpClient: &http.Client{Transport: detectiveRoundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v0/datatug/detective/action" {
+			t.Fatalf("unexpected route %s", r.URL.Path)
+		}
+		return detectiveResponse(200, `{"run":{"id":"run-1","checkId":"check-1","caseId":"case-1","executionStatus":"completed"},"caseLinkStatus":"case-changed"}`), nil
+	})}, token: func(context.Context) (string, error) { return "scoped-token", nil }}, space: "space-1", project: "project-1"}
+	response, status, err := s.ActionWithStatus(context.Background(), detective.ActionRequest{Type: "run-check", CheckID: "check-1", CaseID: "case-1", Environment: "qa"})
+	if err != nil || response.Run == nil || status != "case-changed" {
+		t.Fatalf("hosted Case link status lost: %+v %q %v", response, status, err)
+	}
+}
+
 func TestHostedDetectiveUsesScopedBearerAndVersion(t *testing.T) {
 	requests := 0
 	s := &detectiveCloudService{session: cloudSession{baseURL: "https://api.example.test/v0/", httpClient: &http.Client{Transport: detectiveRoundTrip(func(r *http.Request) (*http.Response, error) {

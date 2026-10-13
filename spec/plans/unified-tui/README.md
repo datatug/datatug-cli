@@ -1,11 +1,12 @@
 ---
 format: https://specscore.md/plan-specification
-status: Executing
+status: Implemented
 ---
 
 # Plan: Deliver the unified terminal workspace
 
-**Status:** Executing
+**Status:** Implemented
+**Reconciled:** 2026-10-13
 **Source Feature:** unified-tui
 **Date:** 2026-10-12
 **Owner:** alex
@@ -28,31 +29,29 @@ status: Executing
 | Observe requests, including waiting stream | True listener state and request metrics update without extra user action | 9 |
 | Return and use help/session controls | Context retained; visible shortcuts match terminal delivery | 10–11 |
 
-The feature and plan passed independent adversarial review and landed in PR #367 at 57d9279. Implementation has begun with shared focus/input/layout and routing regressions (Tasks 2 and 10). Earlier partial source is retained and audited; no task is complete without its required evidence, and no source release or selected-result web handoff is claimed.
+The feature and plan originally landed in PR #367 at `57d9279`. Implementation and all five follow-up additions shipped in [PR #368](https://github.com/datatug/datatug-cli/pull/368), DataTug CLI v0.73.0; [PR #370](https://github.com/datatug/datatug-cli/pull/370), CLI v0.73.1, delivered the subsequent Actions/Trail mouse-boundary repair. The reconciled baseline is `da34f4e29e346c91d69f8ac30226bb9cd82ba0da`. The [implementation inventory](../../features/unified-tui/implementation-checklist.md) maps all 16 tasks to source, retained tests, private terminal observations, independent reviews and remote delivery. Selected-result browser handoff remains deferred.
 
 ## Approach
 
-Implement opt-in shared TUI components first, then one DataTug workspace composition using the existing secure data/query paths and API Monitor module. Keep result identity separate from focus and local presentation separate from server-derived results. Validate every critical stage plus the whole journey in real terminals with actual requests. Release in dependency order only after independent review and exact-head CI. The parent/coordinator is sole landing owner for each repository and owns review, release and WB cleanup; implementation owners own scoped changes and evidence.
+Shared opt-in components shipped first, followed by DataTug composition through the existing secure data/query paths and API Monitor module. Result identity remains separate from focus, and local presentation remains separate from derived execution. Independent reviews, source-bound terminal observations and exact-target CI accompany the published dependency chain. The coordinator owns landing/release/cleanup; implementation owners supplied scoped changes and evidence.
 
-### Verified architecture baseline
+### Verified released architecture
 
-Fetched origin/main on 2026-10-12 before these assertions:
+Audited against CLI v0.73.1 on 2026-10-13:
 
-| Repository and commit | Evidence and implication |
+| Repository / release | Delivered seams |
 | --- | --- |
-| datatug/datatug-cli `a1a729e2bfab0a2c67ce7da2514376ecb8f3062f` | `apps/datatugapp/commands/cmd_ui.go` composes Projects/Viewers/Settings/API Monitor; `apps/datatugapp/datatugui/app.go` and `pkg/chat/chatui.go` run separate programs. Unify composition rather than nesting programs. |
-| Same CLI commit | `pkg/chat/chatui_inspector.go` uses shell FocusedRef; retained inspection identity must survive focus moving away and older-result selection. `pkg/chat/cell_detail.go` PreviewRelated resolves authoritative outgoing keys through the policy executor; incoming child navigation needs extension. ApplyJoinCandidate is the JOIN path, not plain related navigation. |
-| Same CLI commit | `pkg/dbcopy/url.go` contains the DALgo aggregation execution path. This establishes a server building block, not delivery of interactive local grouping or safe arbitrary query transformation. `apps/datatugapp/datatugui/dtapiservice/api_service_ui.go` is the existing API Monitor module to extend. |
-| strongo/aichat `b61460e406bbb7c0193b34d67f457e81b81d149d` | `tui/chatshell/chatshell.go` exposes a single sidebar/SidePanel contract, transcript/input and focus ring. Introduce compatible opt-in left/right/center/focus composition; retain the old API behavior. `.github/workflows/ci.yml` requires 100% coverage plus a raw zero-statement guard. |
-| tuigoff/tuigoff `53c4c2d3cafde7e6cd4b92f45ff5eba7cefe0881` | `pkg/theme`, `pkg/focus`, `pkg/transcript`, `pkg/grid`, `pkg/gridblock`, `pkg/nav` and `pkg/widgets` provide shared components. Extend reusable presentation/input behavior here rather than duplicating a private design system. |
+| datatug/datatug-cli `da34f4e29e346c91d69f8ac30226bb9cd82ba0da`, v0.73.1 | `apps/datatugapp/commands/workspace.go` mounts Projects/Viewers/Settings into the same workspace as chat. `pkg/chat` retains Inspect/Related/JOIN, local operations, reviewed secure derived execution, scope/running/trail/actions UX and the existing API Monitor. |
+| strongo/aichat `4d793180360c470c63da86d7db6fc5c70d317f60`, v0.13.1 | Compatible opt-in `tui/chatshell` left/right/center composition, exclusive focus, expansion, modal routing, Select text and bounded overlay mouse dispatch. Full coverage and raw zero-count-block CI guard passed. |
+| tuigoff/tuigoff `f766251af479ef8eaf5c6f58f8a55f9d392bad23`, v0.6.0 | Shared theme, focus, transcript, grid/gridblock, navigation and widgets provide neutral presentation and workspace search while preserving non-workspace defaults. Full coverage CI passed. |
 
-Re-fetch and audit any source work before resuming implementation. Existing `datatug-unified-tui` worktrees were interrupted and remain in progress; retain their changes and verify each against this feature. Temporary external GOWORK integration runs do not prove published dependency delivery. The browser prototype is visual/interaction reference only; it does not prove terminal escape sequences, secure SQL execution or HTTP instrumentation.
+CLI go.mod pins these published provider releases with no active replacements; consumer validation used `GOWORK=off`. Both CLI changes are merged and released, and related delivery branches/worktrees/claims were cleaned, including the separately approved telemetry capture. The inventory distinguishes superseded local publication-pending receipts from final target CI/releases. The browser prototype remains visual reference only; no web implementation is claimed.
 
 ### Input and state design constraints
 
-Use action IDs with one context dispatcher, a single focus owner, explicit modal/search modes, and visible bindings generated from the feature routing table. Dialogs capture input; F1 can open contextual help above them, while F4 and other workspace globals cannot act on their underlay. Outside modals, Shift arrows retain workspace navigation even in editors/search; ordinary typing and drafts survive focus transfer. Provide the explicit Select text mode described in the feature instead of silently claiming Shift arrows for editing. Esc consumes one layer per press: modal close, or search clear, search exit, then expansion restore; leaving editor focus retains text. Proposed Explorer/JOIN/quick-sort keys are validated choices, not settled product mandates. Shared opt-in APIs preserve old consumers. Store inspection/expansion targets as session + immutable RecordSet + stable row/column identities, distinct from focus. Version async operations and refuse stale responses. Snapshot local transforms and retain originals; server transforms create immutable child lineage.
+Use action IDs with one context dispatcher, a single focus owner, explicit modal/search modes, and visible bindings generated from the feature routing table. Dialogs capture input; F1 can open contextual help above them, while F4 and other workspace globals cannot act on their underlay. Outside modals, Shift arrows retain workspace navigation even in editors/search; ordinary typing and drafts survive focus transfer. Provide the explicit Select text mode described in the feature instead of silently claiming Shift arrows for editing. Esc consumes one layer per press: modal close, or search clear, search exit, then expansion restore; leaving editor focus retains text. Explorer uses Enter/Alt+A/Ctrl+N; JOIN uses Alt+J with Ctrl+J disabled; loaded quick sort uses Alt+Shift+Up/Down and server preview uses Ctrl+Shift+Up/Down. Tests and actual PTY modifier/LF observations bind these choices, with broader terminal portability limits recorded in the inventory. Shared opt-in APIs preserve old consumers. Store inspection/expansion targets as session + immutable RecordSet + stable row/column identities, distinct from focus. Version async operations and refuse stale responses. Snapshot local transforms and retain originals; server transforms create immutable child lineage.
 
-Implementation choices include the telemetry bucket/history sizes, exact shared API names, and the proposed server scope defaults/support matrix. Both operation dialogs must identify server input scope, LIMIT placement and existing aggregate treatment before execution; Matching source rows versus Original query output is an explicit choice, not an inference from a server round trip. Five-second buckets and 500 logs are candidate bounds; prove the chosen boundaries. Feature-defined local typing/null/tie semantics and preview/refusal behavior remain testable contracts regardless of representation.
+The shipped scope defaults are Matching source rows for unaggregated queries and Original query output for grouped/aggregate/HAVING originals; a default choice still refuses unsupported shapes. Both dialogs identify scope, LIMIT/OFFSET placement, evaluator and aggregate treatment before execution. Exact explicit measures require a direct single-source original without joins/inner aggregation/HAVING and enforce row/byte budgets; recursive original-output evaluation refuses unsafe arithmetic/numeric shapes. API Monitor bounds are 60 five-second buckets, 500 retained requests per instance and 32 registered instances, verified at capacity/eviction boundaries. The feature records the full support/refusal contract. Local typing/null/tie and preview semantics remain unchanged requirements.
 
 ## Tasks
 
@@ -60,11 +59,11 @@ Implementation choices include the telemetry bucket/history sizes, exact shared 
 
 **Id:** task-1
 **Verifies:** unified-tui#ac:preserved-flows, unified-tui#ac:deferred-boundary
-**Status:** planning
+**Status:** complete
 **Owner:** coordinator with shared-TUI and CLI implementation owners
 **Depends on:** none
 
-Compare preserved worktree diffs to freshly fetched origin/main and the complete feature. Inventory API compatibility, old key handlers, secure executors, result identity, server instrumentation and coverage gaps; retain useful changes. Record source SHAs and an implementation checklist without declaring interrupted tasks complete. Agree shared component contracts and input precedence before dependent changes. Keep web source outside scope and reserve grid Shift+Enter as unavailable.
+The source audit retained useful interrupted changes and established compatible provider seams, input precedence, secure execution and result identity. Published source SHAs, the all-task AC inventory and exact-target CI now replace the partial-work chronology. Web source remains outside scope, F5 retains the general workspace, and grid Shift+Enter explains the deferred selected-result handoff.
 
 **Evidence:** diff-to-AC inventory; dependency graph; old-consumer compatibility fixtures; exact current CI policy references; explicit missing implementation list. Confirm general F5 works and no selected-result target is falsely advertised.
 
@@ -72,11 +71,11 @@ Compare preserved worktree diffs to freshly fetched origin/main and the complete
 
 **Id:** task-2
 **Verifies:** unified-tui#ac:visual-focus, unified-tui#ac:panel-navigation, unified-tui#ac:result-expansion, unified-tui#ac:preserved-flows
-**Status:** in_progress
+**Status:** complete
 **Owner:** shared-TUI implementation owner in tuigoff, then aichat
 **Depends on:** Task 1
 
-Add opt-in neutral selection, column foreground highlighting, content-facing dividers, independent side panels and a center composition surface. Implement one focus dispatcher across composer, grids, panels and overlays. Snapshot expansion layout around the same block identity; restore before revealing a requested side. Preserve old shared consumers' defaults and keymaps.
+Shared opt-in neutral selection, column foreground highlighting, content-facing dividers, independent sides and a center surface are delivered. One dispatcher owns composer/grid/panel/overlay input. Expansion snapshots layout around the same block identity and restores it before revealing a requested side. Existing shared consumers retain their defaults and keymaps.
 
 **Evidence:** behavior tests for every side-visibility combination, hidden-owner transfer, modal ownership, composer/grid exclusion, older-result expansion, unchanged block identity, row/column/sort/scroll/chat retention, and zero execution callbacks. Combined-state tests cover modal over searched expanded grid; successive Esc closes only the modal, clears search, exits search, then restores layout. Test F1 above modal and return, blocked F4/globals under modal, and F4 from searched/expanded state with retained context. Character-cell render captures at wide/narrow sizes show neutral selections, blue edge geometry, title and column distinction; resizing leaves no offscreen input owner.
 
@@ -84,11 +83,11 @@ Add opt-in neutral selection, column foreground highlighting, content-facing div
 
 **Id:** task-3
 **Verifies:** unified-tui#ac:workspace-entry, unified-tui#ac:inspector-identity, unified-tui#ac:preserved-flows
-**Status:** planning
+**Status:** complete
 **Owner:** CLI workspace implementation owner
 **Depends on:** Task 2
 
-Host existing Projects/Viewers/Settings and ChatUI in one program with persistent composer; default enters Explore and chat enters composer focus. Retain project/session/provider setup and file-opening flows. Keep selected RecordSet/row state after input focus moves, including older result versions; expose stable/composite primary identity honestly.
+Default/ui and chat now use one workspace/program with persistent composer and retained Projects/Viewers/Settings. Default enters Explore; chat focuses the composer. Setup, project/session/provider and file-opening flows remain available. Inspect retains selected RecordSet/row identity across focus changes and older-result selection; authoritative primary/composite keys are distinguished from unavailable identity.
 
 **Evidence:** process/program-count assertions; empty/project/provider-unconfigured startup tests; setup and file-opening regressions; older-result → Inspect → composer → grid test proves target retention; absent/composite key render cases. Draft input and history survive navigation.
 
@@ -96,11 +95,11 @@ Host existing Projects/Viewers/Settings and ChatUI in one program with persisten
 
 **Id:** task-4
 **Verifies:** unified-tui#ac:instant-search, unified-tui#ac:explorer-actions
-**Status:** planning
+**Status:** complete
 **Owner:** CLI workspace owner with shared input owner
 **Depends on:** Tasks 2–3
 
-Route first printable input/digits to focused tree/grid search and remove bare workspace action bindings. Preserve slash/text in editors and Esc clear-then-exit. Expose Open data, Attach to composer and New query through visible controls using existing secure paths. Validate proposed Enter/Alt+A/Ctrl+N bindings before advertising them.
+Explorer/grid first printable input and digits enter incremental search; editors retain literal text, with one-layer Esc clear/exit. Visible Open data, Attach to composer and New query use existing secure paths. Supported bindings are Enter, Explorer Alt+A and Ctrl+N respectively; Attach/New query do not execute, and draft/context/history are retained.
 
 **Evidence:** table-driven keys include `z r j e q s 1 2 3 /`, Unicode text, editing and modal contexts; first-character inclusion and reversible filtering; non-workspace compatibility tests. Inspect/Related bare digits must not activate actions; verify any optional relation-list filtering stays local to that control. Executor spies and integration fixtures prove Attach/New query make no read/execute call, Open is authorized, and draft/context/history persist. Denied actions surface useful errors.
 
@@ -108,11 +107,11 @@ Route first printable input/digits to focused tree/grid search and remove bare w
 
 **Id:** task-5
 **Verifies:** unified-tui#ac:inspector-identity, unified-tui#ac:related-navigation
-**Status:** planning
+**Status:** complete
 **Owner:** CLI query/inspection implementation owner
 **Depends on:** Tasks 3–4
 
-Add F10 Related and Alt+A Actions heading focus with visible hints. Resolve authoritative outgoing and incoming relationships and stable candidate numbering; implement Alt+1..0 and arrows/Enter previews with return navigation. Extend the secure related executor for incoming child relationships rather than using JOIN as a shortcut. Bind requests to session/result/row/relation and cancellation generation.
+F10 reveals Related; Alt+A exposes Inspect Actions according to focus. Authoritative outgoing/incoming relations retain stable candidate numbers with Alt+1..0 and arrows/Enter alternatives. Secure parent/child reads preserve the origin and return path without a JOIN shortcut. Captured session/result/row/relation identity, generation and cancellation reject stale responses.
 
 **Evidence:** Invoice → Customer and Invoice → InvoiceLine fixtures; >10 relations, composite/missing/null keys, empty/denied/unsupported source; no JOIN invocation; return restores original result. Delayed-response tests change focus, selected older result, row and session to prove correct retention or stale rejection. Bare digits still search in Explorer/grid outside explicit picker mode. In Inspect/Related, bare digits never activate actions; optional relation-list filtering remains scoped to that control.
 
@@ -120,11 +119,11 @@ Add F10 Related and Alt+A Actions heading focus with visible hints. Resolve auth
 
 **Id:** task-6
 **Verifies:** unified-tui#ac:quick-join
-**Status:** planning
+**Status:** complete
 **Owner:** CLI query implementation owner
 **Depends on:** Tasks 4–5
 
-Use the authoritative candidate resolver and existing secure apply path. Provide stable numbered choices, arrows/Enter and Esc cancellation; retain source/parameters and immutable parent lineage. Alt+J is the verified primary. Ctrl+J is disabled: the pinned terminal decoder maps legacy LF to the same Ctrl+J event.
+The explicit authoritative JOIN picker uses stable numbered choices, arrows/Enter and Esc cancellation. Applying preserves source/parameters and immutable parent lineage through the secure apply path. Alt+J is the verified primary binding. Ctrl+J remains disabled because the pinned terminal decoder maps legacy LF to the same event; LF/Enter cannot invoke JOIN.
 
 **Evidence:** actual terminal key captures and decoder-to-shell tests for Alt+J and LF/Ctrl+J/Enter; no accidental JOIN on Enter or bare j; ambiguous/denied/multiple candidates, parameter retention, original-result preservation and stale session/selection responses. Cancellation makes no apply call.
 
@@ -132,11 +131,11 @@ Use the authoritative candidate resolver and existing secure apply path. Provide
 
 **Id:** task-7
 **Verifies:** unified-tui#ac:group-dialog, unified-tui#ac:group-loaded, unified-tui#ac:group-server
-**Status:** planning
+**Status:** complete
 **Owner:** CLI result-operation owner with shared chooser owner
 **Depends on:** Tasks 3–4
 
-Build the reusable numbered/filterable multi-select chooser. Alt+G exposes persistent selected keys, explicit aggregates and hinted Group loaded / Run on server / Cancel buttons. Implement typed/null/composite snapshot grouping and reset; implement structural server derivation with preview and source/parameter retention. Capture loaded scope before transformation; changed/paged results require reapply. Implement the feature’s explicit server-scope selector and query preview: proposed Matching source rows default for simple queries moves the original LIMIT to the derived output; Original query output retains it inside a subquery and is the proposed default for existing aggregated queries. Label input counts as unknown when not measured, LIMIT placement and retained/replaced grouping/aggregates/HAVING. Reject unsupported reaggregation/wrapping and invalidate preview after any scope change.
+The reusable numbered/filterable chooser retains group-key selection, editable COUNT(*)/eligible SUM defaults and explicit aggregate row controls. Loaded grouping uses typed immutable snapshots with constituent navigation and reset. Server grouping requires exact structural preview, source/parameter retention and immutable child lineage. Matching source rows is the unaggregated default; Original query output is the grouped/aggregate/HAVING default. Scope and LIMIT/OFFSET/aggregate/evaluator treatment are explicit, with unsupported reaggregation/wrapping refused. Exact explicit measures admit only authoritative typed direct-source originals, bounded to 10,000 input rows and 16 MiB input/output allocation; unsupported/unsafe shapes fail without partial aggregates.
 
 **Evidence:** chooser filtering keeps IDs/selection across hidden matches and literal-digit filter input; zero/one/many keys, null vs missing/empty/zero, composite delimiter collisions, precision and declared types. COUNT(*) and eligible SUM start enabled and editable; authoritative PK/FK integer exclusions and unknown-metadata refusals are tested. Row-scoped S/C/M commands preserve literal filter typing, valid overrides survive key changes, and grouping keys cannot retain SUM. Exact integer/decimal and finite float sums use the typed bounded kernel. Executor/network counters stay zero for local operations. Real fixtures must make scope observable: six filtered source rows with multiple keys, only two loaded, yield local counts over two versus matching-source counts over six before the output cap; original-query-output scope remains bounded as previewed. Cover parameters, aliases, LIMIT and pre-existing aggregation; compare preview to submitted query and prove original/child lineage, policy denials, cancellation and stale-response rejection. Unsupported derivations do not execute. Composer Shift+Enter remains newline.
 
@@ -144,11 +143,11 @@ Build the reusable numbered/filterable multi-select chooser. Alt+G exposes persi
 
 **Id:** task-8
 **Verifies:** unified-tui#ac:sort-dialog, unified-tui#ac:sort-loaded, unified-tui#ac:sort-server
-**Status:** planning
+**Status:** complete
 **Owner:** CLI result-operation owner with shared chooser owner
 **Depends on:** Task 7 for chooser/derivation reuse
 
-Reuse chooser structure with per-column direction and explicit priority controls. Implement reversible loaded-snapshot stable sorting; preview and securely execute supported ORDER BY derivation with the same explicit server scope, LIMIT placement and aggregate-treatment contract. Validate the proposed defaults/support matrix rather than treating one LIMIT placement as mandated. Add distinct quick ascending/descending actions on the selected column; validate Alt+Shift+Up/Down for loaded sorting and Ctrl+Shift+Up/Down for server-sort preview. The preview never executes until its explicit Shift+Enter. Label local and server-native ordering honestly.
+Sort reuses the chooser with per-column direction and explicit priority. Local loaded-snapshot sorting is stable and reversible. Supported server ORDER BY derivation previews exact scope, LIMIT/OFFSET and aggregate treatment before secure execution; unsupported shapes explain their refusal. Alt+Shift+Up/Down sorts loaded selected-column data; Ctrl+Shift+Up/Down opens the corresponding server preview, which still requires explicit Shift+Enter. Local and native/generic server ordering are labelled honestly.
 
 **Evidence:** equal-key stable ties in both directions, mixed directions/priorities, exact numerics, null/missing/type/text/temporal/binary cases, unsupported-type errors and reset to original order. No network for local sort. A server fixture includes a highest-valued row outside the loaded/original limited subset: Matching source rows descending sort returns it; local and Original query output sorts cannot. Real server cases prove the selected scope, aliases/parameters and previewed LIMIT/grouping treatment or explicit refusal, preview equivalence, new immutable lineage and stale/cancel handling. Native chord captures and selected-column visual evidence validate quick actions.
 
@@ -156,11 +155,11 @@ Reuse chooser structure with per-column direction and explicit priority controls
 
 **Id:** task-9
 **Verifies:** unified-tui#ac:api-observability, unified-tui#ac:api-security-compatibility
-**Status:** planning
+**Status:** complete
 **Owner:** CLI server/telemetry implementation owner
 **Depends on:** Tasks 1 and 3
 
-Instrument BrowserBridge and HTTP listeners outside authorization guards and render the existing API Monitor module. Publish live only on successful bind, track each instance independently, and show truthful base URLs/active requests/volume/durations/bounded logs. Preserve optional response-writer capabilities and accurate actual-status versus failed-outcome distinction. Sanitize before retention and keep only allowed metadata.
+Actual BrowserBridge and HTTP listener lifecycle/request instrumentation wraps authorization guards without weakening them and feeds the existing API Monitor. Live begins after successful bind, with per-instance ownership, real base URLs, active/volume/duration metrics and bounded logs. The writer facade preserves supported optional interfaces and distinguishes actual status from failure outcome. Sanitization precedes retention. Bounds are 60 five-second buckets, 500 request entries per monitor and 32 registered instances; no start/stop UI was added.
 
 **Evidence:** actual loopback requests from the web bridge and normal API, denied requests, occupied-port bind failure, graceful stop, overlapping/old instances, slow/live stream and hijack completion. Assert bucket edge times, eviction and bounded memory at/over chosen capacities. Test Flush/Hijack/Unwrap and unavailable interfaces, panic before/after response headers, cancellation and exactly-once finalization. Secret sentinels in header/body/query/fragment/path must be absent from retained snapshots/rendered telemetry. F8 return preserves workspace identity/layout. No start/stop UI is added.
 
@@ -168,11 +167,11 @@ Instrument BrowserBridge and HTTP listeners outside authorization guards and ren
 
 **Id:** task-10
 **Verifies:** unified-tui#ac:help-session-shortcuts, unified-tui#ac:deferred-boundary, unified-tui#ac:visual-focus, unified-tui#ac:panel-navigation
-**Status:** in_progress
+**Status:** complete
 **Owner:** CLI interaction/QA owner
 **Depends on:** Tasks 4–9
 
-Implement per-workspace Alt+F1 toolbar visibility (Ctrl+F1 alias), reclaim its rows while retaining operational alerts and header F1; dialogs keep modal priority. Generate hints/help from context bindings and expose important clickable actions, session selection and /switch. Verify all accepted function keys, Shift navigation and dialog button hints. Resolve proposed bindings with terminal measurements; record supported terminal/OS/modifier configuration and visible alternatives for intercepted keys. Preserve editable text and the feature’s explicit selection alternative; Shift arrows navigate workspace panels/history outside modals. Verify modal-first dispatch, F1 nesting, blocked modal F4/workspace globals, search clear/exit before expansion restore, and one action per key. Grid Shift+Enter remains unavailable; composer Shift+Enter is newline; F5 remains general workspace.
+Contextual F1, per-workspace Alt+F1/Ctrl+F1 toolbar visibility, clickable controls/session selection, `/switch`, dialog hints and the explicit Select text alternative are delivered. Modal-first routing, nested help, blocked underlay globals, Shift workspace navigation and one-layer Esc retain drafts and source state. Grid Shift+Enter reports unavailable, composer Shift+Enter inserts newline, and F5 remains the general workspace. The inventory names actual PTY/CSI/LF/SGR observations and avoids claiming universal terminal/OS/Option-key parity or native GUI screenshot verification.
 
 **Evidence:** key matrix for Explorer, grid, composer/editor, Inspect/Related/Actions, search and each modal, including terminal Option/Alt settings and legacy Ctrl+J ambiguity. Combined-state cases include composer + Shift arrows preserving drafts, search + expansion + three Esc presses, modal + search + expansion + four Esc presses, F1 help above a modal, blocked modal F4, and Group/Sort filter focus + Shift+Enter executing only the previewed dialog action. Real terminal mouse and keyboard runs, F1 advertising at narrow widths, focus restore after cancel, session/project changes and unavailable-action explanations. Browser prototype key tests are supplementary only.
 
@@ -180,29 +179,29 @@ Implement per-workspace Alt+F1 toolbar visibility (Ctrl+F1 alias), reclaim its r
 
 **Id:** task-11
 **Verifies:** unified-tui#ac:terminal-journey, unified-tui#ac:preserved-flows, unified-tui#ac:deferred-boundary
-**Status:** planning
+**Status:** complete
 **Owner:** QA/reviewer for evidence; parent/coordinator for landing and releases
 **Depends on:** Tasks 2–10
 
-Run the complete journey in a real terminal against deterministic data and actual HTTP/query execution, including null-action startup, waiting live stream updates, default/chat entries, empty setup, older results and failure/cancel routes. Use component tests for isolation and a whole-journey test without manual reload/rerun crutches. Obtain a separate adversarial review of each implementation diff against this feature; rank findings and fix or explicitly decline them with rationale.
+Actual CLI PTY journeys and retained integration tests cover default/chat entry, secure queries/HTTP, navigation, local/server transforms and cancellation. Independent source-bound reviews closed the recorded findings, followed by exact-source/published-pin validation and authoritative target CI. The inventory distinguishes private captures from portable repository evidence.
 
-Satisfy full repository CI at exact source SHAs, including 100% shared-library coverage and aichat's raw zero-statement guard; focused/temp-workspace success is insufficient. The sole landing owner lands and releases **tuigoff → aichat → datatug-cli**, updating consumers to published versions and validating with **GOWORK=off** and no local replacements before each consumer's delivery. Use WB landing verbs per repository, retain remote landing/release receipts and authoritative CI conclusions, and complete branch/worktree cleanup. Preserve unrelated/in-progress work. Mark lifecycle completion through SpecScore only after the relevant evidence and remote delivery exist.
+The coordinator delivered **tuigoff v0.6.0 → aichat v0.13.0 → CLI v0.73.0**, then **aichat v0.13.1 → CLI v0.73.1** for mouse boundaries. Consumer verification used **GOWORK=off** with no active replacements. Final target checks completed with zero failures: tuigoff five (three success, two skipped), aichat four (four success, zero skipped), CLI eighteen (15 success, three skipped). Provider coverage guards and CLI release/artifact/Homebrew checks succeeded. WB delivery and related branch/worktree cleanup receipts are retained, including approved telemetry capture cleanup. Unrelated checkouts were preserved. SpecScore lifecycle reconciliation records this source/evidence audit; prose edits do not change lifecycle statuses.
 
 **Evidence:** terminal recordings/captures and input matrix; actual SQL/HTTP counts proving no local network operation and no expansion rerun; original/derived RecordSet IDs; exact-SHA CI/coverage receipts, adversarial review verdicts and finding resolutions, published dependency versions, release/binary smoke tests, WB remote landing and cleanup receipts. Missing terminal or release evidence leaves the task open.
 
-## Follow-up journey: make exploration state and alternatives visible
+**Follow-up journey: make exploration state and alternatives visible**
 
-Accepted 2026-10-13 after the initial implementation review. The journey is: identify result scope → transform locally → review/run securely with elapsed/cancel → understand aggregate defaults → revisit a retained branch → find an alternative shortcut. Existing feature/plan lifecycle statuses remain unchanged; each task needs focused full-shell evidence, parent real-terminal QA and final Astra review before publication.
+Accepted 2026-10-13 and delivered in CLI v0.73.0: identify result scope → transform locally → review/run securely with elapsed/cancel → understand aggregate defaults → revisit a retained branch → find an alternative shortcut. Tasks 12–16 remain in the same Tasks section for SpecScore rollup. Their full-shell evidence, parent real-terminal QA and final independent review are mapped in the inventory; the v0.73.1 mouse-boundary continuation is recorded there as well.
 
 ### Task 12: Persistent scope on retained result surfaces
 
 **Id:** task-12
 **Verifies:** unified-tui#ac:persistent-result-scope
-**Status:** in_progress
+**Status:** complete
 **Owner:** Sol CLI implementation owner; coordinator sole landing owner
 **Depends on:** Tasks 7–8
 
-Show compact Loaded/Server counts and actual execution times with truthful provenance on results and local group/member panels. Preserve original scope through local/server transitions and make filtered counts distinct.
+Results and local group/member panels retain compact Loaded/Server counts and real execution time with truthful provenance. Matched persisted query ID/source/ExecutedAt or actual HTTP response evidence proves Server scope, including native SQL and empty results; imported snapshots without proof stay Loaded. Original scope survives local/server transitions, and filtered counts remain distinct.
 
 **Evidence:** full-shell secure SQLite local→server journey, retained origin label/state, compact/wide render assertions and coordinator terminal receipt.
 
@@ -210,11 +209,11 @@ Show compact Loaded/Server counts and actual execution times with truthful prove
 
 **Id:** task-13
 **Verifies:** unified-tui#ac:operation-feedback-cancel
-**Status:** in_progress
+**Status:** complete
 **Owner:** Sol CLI implementation owner
 **Depends on:** Tasks 4–9
 
-Track existing async Open/editor/saved query/refresh/Related/JOIN/derived paths. Render real elapsed seconds and visible keyboard/mouse Cancel. Preserve secure context checks before persistence and fence canceled/late completions; cancellation must not synchronously acquire a held session mutex. Retain independent AI-stream Busy ownership.
+Open/editor/saved-query/refresh/Related/JOIN/derived execution uses captured operation identity, real elapsed seconds and visible keyboard/mouse Cancel. Cancellation signals captured context without waiting on a held session mutex, remains visibly pending until completion and fences synchronous backend/session work. Context checks precede persistence; canceled/late completion cannot select canceled output or overwrite newer state. Safe late success reconciles retained instances/trail without destroying drafts. AI-stream Busy ownership remains independent.
 
 **Evidence:** delayed executor full-shell keyboard/mouse cancellation, context-switch/late-response/no-persist assertions, path-specific integration and terminal receipts.
 
@@ -222,11 +221,11 @@ Track existing async Open/editor/saved query/refresh/Related/JOIN/derived paths.
 
 **Id:** task-14
 **Verifies:** unified-tui#ac:aggregate-provenance
-**Status:** in_progress
+**Status:** complete
 **Owner:** Sol CLI implementation owner
 **Depends on:** Task 7
 
-Explain authoritative numeric type suggestions, complete integer non-key proof and exclusions. Render automatic labels only for suggestions; manual row changes and grouping-key edits retain truthful explanations.
+Automatic aggregate suggestions explain authoritative float/decimal typing and complete integer non-PK/non-FK proof. PK/FK/grouping-key/nonnumeric/unknown exclusions are explicit. Automatic and manual labels remain truthful, valid deliberate overrides survive key changes, and filter typing remains literal.
 
 **Evidence:** full-shell float/decimal/integer PK/FK/unknown cases, manual overrides, literal filter, compact explanation rendering.
 
@@ -234,11 +233,11 @@ Explain authoritative numeric type suggestions, complete integer non-key proof a
 
 **Id:** task-15
 **Verifies:** unified-tui#ac:retained-exploration-trail
-**Status:** in_progress
+**Status:** complete
 **Owner:** Sol CLI implementation owner
 **Depends on:** Tasks 5–8
 
-Expose compact durable lineage and session-local group/member nodes with Trail/Back/Forward. Reconcile same-session additions using retained instances; bound missing/cyclic ancestry and make explicit branching replace forward navigation without a query.
+A compact lineage path and Trail/Back/Forward expose durable parents/children and session-local group/member nodes. Ctrl+T and Alt+Left/Right navigate retained instances without queries. Same-session additions reconcile without reconstructing old grids; missing/cyclic ancestry is bounded, repeated local return remains usable, and explicit branching replaces forward navigation.
 
 **Evidence:** multi-generation/branching full-shell navigation, repeated local visits, unchanged row/column/filter/order/scroll and original instance across reconciliation; terminal receipt.
 
@@ -246,17 +245,25 @@ Expose compact durable lineage and session-local group/member nodes with Trail/B
 
 **Id:** task-16
 **Verifies:** unified-tui#ac:shortcut-alternatives-diagnostic
-**Status:** in_progress
+**Status:** complete
 **Owner:** Sol CLI implementation owner
 **Depends on:** Tasks 10, 12–15
 
-Use a context-aware searchable registry dispatching existing actions. Expose Ctrl+P, command alternatives and clickable F1 discovery. Add opt-in bounded received-key diagnostics with safe Esc/Close, known LF ambiguity, no automatic-support claim and no ordinary editor/composer interception.
+A context-aware searchable Actions registry dispatches existing paths, with Ctrl+P, `/actions`, clickable F1 and enabled/disabled reasons. Explicit `/keys` retains at most 32 normalized received events, executes no product command, states LF/Ctrl+J ambiguity and returns safely through Esc/Close without losing draft/caret. Ordinary composer/editor typing is unaffected. Final provider/consumer mouse-boundary repairs restrict activation to actual painted dialog rows and preserve legacy overlay behavior.
 
 **Evidence:** full-shell searchable action/disabled reason/help/mouse routes, Ctrl+C/function-key diagnostic isolation, draft/caret return, compact layouts, parent actual key receipts and final independent review.
 
 ## Open Questions
 
-The feature's proposed shortcut, server-scope default and backend-support questions are owned by Tasks 6–8 and 10; resolve them with recorded terminal/query evidence before claiming their behaviors delivered. Grid-specific browser handoff and nested ancestor paths remain deferred to separate specifications. No unfinished source implementation is promoted to complete by this plan.
+Shortcut choices, server-scope defaults and supported/refused query shapes are resolved for the released baseline in the feature and inventory. Broader terminal/OS/modifier compatibility remains unproven beyond the recorded configurations; no automatic support claim is made. Grid-specific browser handoff and nested ancestor paths remain deferred to separate specifications. Incoming user corrections require their own source/evidence reconciliation rather than weakening existing acceptance criteria.
 
 ---
+
+## Resolution
+
+**Reconciled Executing → Implemented outside the tracked `change-status` flow** (16 task(s) marked complete; this did not walk the legal-transition matrix).
+
+Reconciled after out-of-band delivery: all 16 tasks shipped in CLI v0.73.0 and mouse-boundary follow-up v0.73.1. Audited released source, retained tests, real CLI PTY receipts, independent reviews, exact-head CI, published provider pins and approved cleanup. This corrects stale records; terminal portability and deferred browser/Inspect work remain explicit in the inventory.
+
+Evidence: https://github.com/datatug/datatug-cli/pull/368, https://github.com/datatug/datatug-cli/pull/370, https://github.com/datatug/datatug-cli/releases/tag/v0.73.1, da34f4e29e346c91d69f8ac30226bb9cd82ba0da, spec/features/unified-tui/implementation-checklist.md
 *This document follows the https://specscore.md/plan-specification*

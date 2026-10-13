@@ -36,7 +36,7 @@ func uiCommandArgs() *cobra.Command {
 // Seams over the state file and the terminal program, replaced in tests.
 var (
 	getDatatugState = dtstate.GetDatatugState
-	runApp          = datatugui.Run
+	runApp          = runUnifiedApp
 )
 
 // runUI launches the terminal UI, optionally opening filePath. It is shared

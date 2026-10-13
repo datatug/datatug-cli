@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/tuigoff/tuigoff/pkg/theme"
+	"github.com/tuigoff/tuigoff/pkg/uitest"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
@@ -21,29 +22,22 @@ func TestWorkspacePanelViewShowsTabsAndProjectExplorer(t *testing.T) {
 		{Reference: ContextReference{Kind: "project", ObjectID: "proj1", Title: "Demo"}},
 		{Reference: ContextReference{Kind: "source", SourceID: "src1", Title: "sqlite"}},
 	}}
-	view := u.workspace.View(40, 15, true)
-	// width 40 is exactly wide enough for the full tab strip ("●
-	// Project · Inspect · Docked · Bookmarks" is 40 columns) --
-	// tabStripHeader prefers full labels whenever they fit (founder
-	// 2026-09-25, r9: "full names when wide").
-	if !strings.Contains(view, "Project") || !strings.Contains(view, "Bookmarks") {
-		t.Fatalf("expected tab labels in view:\n%s", view)
+	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+	view := ansi.Strip(u.shell.View().Content)
+	for _, want := range []string{"Explorer", "Inspect", "Docked", "Bookmarks", "Demo", "sqlite"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("three-pane workspace missing %q:\n%s", want, view)
+		}
 	}
-	if !strings.Contains(view, "Demo") {
-		t.Fatalf("expected project explorer content in view:\n%s", view)
+	if u.shell.CenterPanel() != nil {
+		t.Fatal("workspace panes should surround the ordinary transcript, not replace it with a duplicate project view")
 	}
 }
 
 // TestWorkspacePanelInLightThemeUsesLightSurfaceNoHardcodedDarkBackground
-// covers a real regression, founder-flagged verbatim: "project explorer in
-// light theme is black - wrong". panelCard/explorerNodesView/bookmarksView
-// used to hardcode ANSI-256 dark greys (238/235 background, a selected-row
-// "57" background) regardless of tui/theme.Dark; in a light terminal that
-// rendered the whole side panel as a near-black band. They now read
-// theme.SurfaceColors()/FocusSurfaceColors() fresh on every render, so this
-// asserts (a) none of the old literal dark codes reappear and (b) the
-// panel actually carries theme's LIGHT surface background when
-// theme.Dark is false.
+// covers the light palette across the composed Explorer/Inspect workspace.
+// It rejects the old literal ANSI-256 dark colors and verifies the visible
+// panes use the neutral light surface selected by tui/theme.
 func TestWorkspacePanelInLightThemeUsesLightSurfaceNoHardcodedDarkBackground(t *testing.T) {
 	theme.SetDark(false)
 	t.Cleanup(func() { theme.SetDark(true) })
@@ -53,22 +47,20 @@ func TestWorkspacePanelInLightThemeUsesLightSurfaceNoHardcodedDarkBackground(t *
 		{Reference: ContextReference{Kind: "project", ObjectID: "proj1", Title: "Demo"}},
 		{Reference: ContextReference{Kind: "source", SourceID: "src1", Title: "sqlite"}},
 	}}
-	u.workspace.explorerIndex = 1 // select a row so the FocusSurfaceColors-highlighted branch renders too.
-	view := u.workspace.View(40, 15, true)
+	u.explorer.explorerIndex = 1 // select a row so the focused Explorer surface renders too.
+	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
+	view := u.shell.View().Content
 
 	for _, stale := range []string{"48;5;238", "48;5;235", "48;5;57", "38;5;255", "38;5;252", "38;5;229", "38;5;231", "38;5;244"} {
 		if strings.Contains(view, "\x1b["+stale+"m") || strings.Contains(view, "\x1b[1;"+stale+"m") {
 			t.Fatalf("panel view still carries a hardcoded ANSI-256 colour %q, want it to come from tui/theme: %q", stale, view)
 		}
 	}
-	bg, fg := theme.SurfaceColors()
-	probe := lipgloss.NewStyle().Foreground(fg).Background(bg).Render("x")
-	prefix := strings.TrimSuffix(probe, "x\x1b[m")
-	if prefix == "" || prefix == probe {
-		t.Fatalf("could not derive a probe SGR prefix from theme.SurfaceColors(): %q", probe)
-	}
-	if !strings.Contains(view, prefix) {
-		t.Fatalf("expected the light-theme surface fill %q somewhere in the panel view: %q", prefix, view)
+	bg, _ := theme.NeutralSurfaceColors(false)
+	r, g, b, _ := bg.RGBA()
+	lightSurface := fmt.Sprintf("48;2;%d;%d;%d", r>>8, g>>8, b>>8)
+	if !strings.Contains(view, lightSurface) {
+		t.Fatalf("expected the light-theme surface fill %q somewhere in the composed workspace panes: %q", lightSurface, view)
 	}
 }
 
@@ -79,15 +71,15 @@ func TestWorkspacePanelInLightThemeUsesLightSurfaceNoHardcodedDarkBackground(t *
 // h/l's real behaviour).
 func TestWorkspacePanelTabAndShiftTabSwitchTabs(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
-	if u.workspace.tab != 0 {
-		t.Fatalf("expected initial tab 0, got %d", u.workspace.tab)
+	if u.workspace.tab != 1 {
+		t.Fatalf("expected Inspect to be the initial right-pane tab 1, got %d", u.workspace.tab)
 	}
 	u.workspace.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	if u.workspace.tab != 1 {
-		t.Fatalf("expected tab to advance tab to 1, got %d", u.workspace.tab)
+	if u.workspace.tab != 2 {
+		t.Fatalf("expected tab to advance tab to 2, got %d", u.workspace.tab)
 	}
 	u.workspace.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
-	if u.workspace.tab != 0 {
+	if u.workspace.tab != 1 {
 		t.Fatalf("expected shift+tab to return to tab 0, got %d", u.workspace.tab)
 	}
 }
@@ -345,58 +337,63 @@ func TestChatUIWorkspaceSplitAndKeyboardSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
-	view := u.shell.View().Content
-	for _, want := range []string{"Project: Chinook", "● Project", "Inspect", "Docked", "Customer"} {
+	view := ansi.Strip(u.shell.View().Content)
+	for _, want := range []string{"Explorer", "Inspect", "Docked", "Bookmarks", "Chinook local", "Customer"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("split view missing %q", want)
 		}
 	}
-	// F6 focuses the workspace pane (native chatshell toggle).
+	if u.shell.CenterPanel() != nil {
+		t.Fatal("workspace panes should preserve the ordinary transcript in the center")
+	}
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
-	for index, node := range u.workspace.explorerNodes() {
+	view = ansi.Strip(u.shell.View().Content)
+	if strings.Contains(view, "Explorer  [F6]") || !strings.Contains(view, "Inspect  [F7]") {
+		t.Fatal("F6 should hide Explorer while leaving Inspect visible")
+	}
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF7})
+	view = ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(view, "Explorer  [F6]") || strings.Contains(view, "Inspect  [F7]") {
+		t.Fatal("F7 should hide Inspect while leaving Explorer visible")
+	}
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF7})
+	u.shell.FocusLeftPanel()
+	for index, node := range u.explorer.explorerNodes() {
 		if node.objectIndex >= 0 && u.catalog.Objects[node.objectIndex].Reference.Kind == "table" {
-			u.workspace.explorerIndex = index
+			u.explorer.explorerIndex = index
 			break
 		}
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeySpace})
+	u.shell.Update(uitest.Key("alt+a"))
 	if len(u.snapshot.Workspace.Attachments) != 1 || u.snapshot.Workspace.Attachments[0].Kind != "table" {
-		t.Fatalf("project attachment = %+v", u.snapshot.Workspace.Attachments)
+		t.Fatalf("Explorer attach action was not persisted: %+v", u.snapshot.Workspace.Attachments)
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeySpace}) // toggles: attach -> detach
-	if len(u.snapshot.Workspace.Attachments) != 0 {
-		t.Fatalf("second space toggle did not detach: %+v", u.snapshot.Workspace.Attachments)
-	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeySpace}) // attach again
 	if !u.shell.FocusEntry(u.lastGridEntryID) {
 		t.Fatal("grid missing")
 	}
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	gridActionJourney(t, u, "Select row")
 	if len(u.snapshot.Workspace.Selections) != 1 || u.snapshot.Workspace.CurrentSelectionID == "" {
 		t.Fatalf("row selection = %+v", u.snapshot.Workspace)
 	}
 	if len(u.snapshot.Workspace.Attachments) != 1 {
 		t.Fatalf("row selection changed attachments: %+v", u.snapshot.Workspace.Attachments)
 	}
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
-	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeySpace}) // explicitly attach selected rows (tab 1, Selected)
-	if len(u.snapshot.Workspace.Attachments) != 2 {
-		t.Fatalf("selected rows were not attached: %+v", u.snapshot.Workspace.Attachments)
+	u.shell.FocusRightPanel()
+	if len(u.snapshot.Workspace.Selections) != 1 || u.snapshot.Workspace.CurrentSelectionID == "" {
+		t.Fatal("moving focus to Inspect lost the durable row selection")
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
-	if len(u.snapshot.Workspace.Docks) != 1 {
-		t.Fatalf("dock state = %+v", u.snapshot.Workspace.Docks)
-	}
-	if !strings.Contains(u.shell.View().Content, "Inspect") || !strings.Contains(u.shell.View().Content, "Docked") {
-		t.Fatal("workspace disappeared after selection/dock")
+	view = ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(view, "Inspect") || !strings.Contains(view, "Docked") {
+		t.Fatal("right workspace pane disappeared after result selection")
 	}
 }
 
 // TestPanelFocusedLayoutFitsTabStripAndHintsAtWidth130 covers the r10
 // coordinator review, which reported both the tab strip and the hints
-// bar clipped at the terminal edge in a panel-focused layout ("Project ·
-// Inspect · Docked · Bo…" / "Space attac…"). Renders at the SAME
-// panel-focused width/state the round-9 snapshot used (130 cols, panel
+// bar clipped at the terminal edge in a panel-focused layout ("Inspect ·
+// Docked · Bookmarks" / its contextual Related hint). Renders at the SAME
+// panel-focused width/state the round-9 snapshot used (130 cols, Inspect pane
 // visible and FOCUSED via Shift+Right) and asserts: every rendered line
 // is exactly 130 columns wide (no overflow past the terminal edge), the
 // tab strip's full label set is intact (not cut mid-label), and no hint
@@ -414,11 +411,11 @@ func TestPanelFocusedLayoutFitsTabStripAndHintsAtWidth130(t *testing.T) {
 		}
 	}
 	plain := ansi.Strip(content)
-	if !strings.Contains(plain, "Project · Inspect · Docked · Bookmarks") {
-		t.Fatalf("expected the FULL tab strip label set intact, not clipped:\n%s", plain)
+	if !strings.Contains(plain, "[Inspect] · Docked · Bookmarks") {
+		t.Fatalf("expected the right Inspect tab strip intact without a duplicate Explorer tab:\n%s", plain)
 	}
-	if !strings.Contains(plain, "Space attach") {
-		t.Fatalf("expected the full 'Space attach' hint, not truncated:\n%s", plain)
+	if !strings.Contains(plain, "F10 Related") {
+		t.Fatalf("expected the Inspect pane's complete Related hint, not truncated:\n%s", plain)
 	}
 	if strings.Contains(plain, "…") {
 		t.Fatalf("expected no ellipsis truncation anywhere in the panel-focused view:\n%s", plain)
@@ -466,8 +463,9 @@ func TestPanelFocusedLayoutNeverOverflowsTerminalWidth(t *testing.T) {
 	}
 }
 
-func TestWorkspacePanelF6TogglesPanelVisibility(t *testing.T) {
+func TestWorkspacePanelF6AndF7ToggleIndependentPaneVisibility(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
+	u.catalog = workspaceTestCatalog()
 	// 140, not 120: strongo/aichat's chat-look-polish fix gives PanelFrame
 	// content the same left/right inset Card text already had
 	// (panelPaddingCols, 2 columns each side -- previously 0), so the
@@ -475,16 +473,21 @@ func TestWorkspacePanelF6TogglesPanelVisibility(t *testing.T) {
 	// width than before. 120 columns no longer leaves tabStripHeader room
 	// for its full label set ("Bookmarks"); 140 does.
 	u.shell.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
-	// The panel is wide enough here for tabStripHeader's full label set
-	// ("Bookmarks", not the narrow "Marks" abbreviation).
-	before := strings.Contains(u.shell.View().Content, "Bookmarks")
-	if !before {
-		t.Fatalf("expected the workspace pane to render at width 140 before F6:\n%s", u.shell.View().Content)
+	// The full-width workspace should show both independent pane titles.
+	before := ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(before, "Explorer") || !strings.Contains(before, "Inspect") {
+		t.Fatalf("expected both workspace panes before toggles:\n%s", before)
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
-	after := strings.Contains(u.shell.View().Content, "Bookmarks")
-	if after {
-		t.Fatal("expected F6 to hide the workspace pane")
+	after := ansi.Strip(u.shell.View().Content)
+	if strings.Contains(after, "Explorer  [F6]") || !strings.Contains(after, "Inspect  [F7]") {
+		t.Fatal("F6 should hide only the left Explorer pane")
+	}
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF7})
+	after = ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(after, "Explorer  [F6]") || strings.Contains(after, "Inspect  [F7]") {
+		t.Fatal("F7 should hide only the right Inspect pane")
 	}
 }
 
@@ -498,13 +501,13 @@ func TestWorkspacePanelTabStripHeaderShortensOnNarrowWidth(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	header := u.workspace.tabStripHeader(28)
 	flat := ansi.Strip(header)
-	for _, want := range []string{"Proj", "Sel", "Dock", "Marks"} {
+	for _, want := range []string{"Inspect", "Dock", "Marks"} {
 		if !strings.Contains(flat, want) {
 			t.Fatalf("tab %q missing from narrow tab strip: %q", want, flat)
 		}
 	}
-	if strings.Contains(flat, "Project") {
-		t.Fatalf("expected the FULL active-tab label to have been dropped too once even the mixed set doesn't fit: %q", flat)
+	if strings.Contains(flat, "Project") || strings.Contains(flat, "Proj") || strings.Contains(flat, "Sel") {
+		t.Fatalf("right tab strip should not duplicate the left Explorer: %q", flat)
 	}
 	if w := lipgloss.Width(header); w > 28 {
 		t.Fatalf("tabStripHeader(28) width = %d, want <= 28: %q", w, header)
@@ -514,7 +517,7 @@ func TestWorkspacePanelTabStripHeaderShortensOnNarrowWidth(t *testing.T) {
 	// back to short labels (the least-bad option) rather than panicking
 	// or returning something wider.
 	tooNarrow := u.workspace.tabStripHeader(10)
-	if !strings.Contains(ansi.Strip(tooNarrow), "Proj") {
+	if !strings.Contains(ansi.Strip(tooNarrow), "Sel") {
 		t.Fatalf("expected the short-label fallback even when it still doesn't fit width 10: %q", tooNarrow)
 	}
 }
@@ -608,8 +611,9 @@ func TestChatUIDockGridHasNoViewSwitcher(t *testing.T) {
 	}
 }
 
-// Ported from TestWorkspaceInspectorsUseCatalogTypes.
-func TestChatUIWorkspaceInspectorsUseCatalogTypes(t *testing.T) {
+// Catalog source details are reached from the left Explorer with Alt+I. The
+// shell owns scrolling and closing the read-only details overlay.
+func TestChatUIExplorerCatalogDetailsUseTypesAndShellScrolling(t *testing.T) {
 	turn := Turn{Queries: []QueryResult{{
 		Title: "Customers",
 		Result: secureread.Result{
@@ -618,17 +622,57 @@ func TestChatUIWorkspaceInspectorsUseCatalogTypes(t *testing.T) {
 		},
 	}}}
 	u, _ := newTestChatUI(t, nil, turn)
-	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", Title: "Customer"}, Columns: []string{"CustomerId", "City"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}}}}
+	u.catalog = ProjectCatalog{Objects: []ProjectObject{
+		{Reference: ContextReference{Kind: "project", ProjectID: "chinook", ObjectID: "chinook", Title: "Chinook"}},
+		{Reference: ContextReference{Kind: "source", ProjectID: "chinook", SourceID: "sqlite", ObjectID: "sqlite", Title: "SQLite"}},
+		{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", SourceID: "sqlite", Title: "Customer"}, Columns: []string{"CustomerId", "City"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}},
+	}}
 	drainCmd(t, u, u.Submit("Show customers"))
 	if !u.shell.FocusEntry(u.lastGridEntryID) {
 		t.Fatal("grid missing")
 	}
-	u.workspace.tab = 1
-	for _, tc := range []struct{ key, want string }{{"1", "INTEGER"}, {"2", "main.Customer.CustomerId"}, {"3", "main.Customer.City"}} {
-		u.workspace.updateKey(tea.KeyPressMsg{Text: tc.key})
-		if view := ansi.Strip(u.workspace.View(65, 22, true)); !strings.Contains(view, tc.want) {
-			t.Fatalf("inspector %s lacks %q:\n%s", tc.key, tc.want, view)
+	queryText := "SELECT CustomerId\n" + strings.Repeat("-- retained catalog detail\n", 40) + "FROM main.Customer"
+	u.catalog.Objects = append(u.catalog.Objects, ProjectObject{Reference: ContextReference{Kind: "query", SourceID: "sqlite", ObjectID: "q1", Title: "Long query"}, QueryType: "SQL", QueryText: queryText})
+	for index, node := range u.explorer.explorerNodes() {
+		if node.label == "Customer" {
+			u.explorer.explorerIndex = index
+			break
 		}
+	}
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 22})
+	u.shell.FocusLeftPanel()
+	u.shell.Update(uitest.Key("alt+i"))
+	view := ansi.Strip(u.shell.View().Content)
+	for _, want := range []string{"Customer", "CustomerId", "INTEGER", "City", "TEXT"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("read-only Explorer details lack %q:\n%s", want, view)
+		}
+	}
+	if u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatalf("opening catalog details changed the Explorer focus owner: %q", u.shell.WorkspaceFocus())
+	}
+	u.shell.Update(uitest.Key("esc"))
+	if strings.Contains(ansi.Strip(u.shell.View().Content), "Table: Customer") {
+		t.Fatal("Esc should close exactly the catalog details overlay")
+	}
+	for index, node := range u.explorer.explorerNodes() {
+		if node.label == "Long query" {
+			u.explorer.explorerIndex = index
+			break
+		}
+	}
+	u.shell.Update(uitest.Key("alt+i"))
+	u.shell.View()
+	if got := ansi.Strip(u.shell.View().Content); !strings.Contains(got, "SELECT CustomerId") || strings.Contains(got, "FROM main.Customer") {
+		t.Fatalf("catalog query should begin at the first scroll position:\n%s", got)
+	}
+	u.shell.Update(uitest.Key("end"))
+	if got := ansi.Strip(u.shell.View().Content); !strings.Contains(got, "FROM main.Customer") {
+		t.Fatalf("shell End did not scroll catalog details to the last line:\n%s", got)
+	}
+	u.shell.Update(uitest.Key("home"))
+	if got := ansi.Strip(u.shell.View().Content); !strings.Contains(got, "SELECT CustomerId") || strings.Contains(got, "FROM main.Customer") {
+		t.Fatalf("shell Home did not reset catalog details to the first line:\n%s", got)
 	}
 }
 

@@ -25,6 +25,7 @@ require (
 	github.com/NimbleMarkets/ntcharts/v2 v2.2.0
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
+	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/dal-go/dalgo v0.93.0
 	github.com/dal-go/dalgo2bigquery v0.3.1
@@ -57,7 +58,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
-	github.com/strongo/aichat v0.9.0
+	github.com/strongo/aichat v0.13.0
 	github.com/strongo/buildinfo v0.3.0
 	github.com/strongo/cli-helpers v0.26.0
 	github.com/strongo/deviceauth v0.1.0
@@ -65,7 +66,7 @@ require (
 	github.com/strongo/random v0.0.3
 	github.com/strongo/slice v0.3.12
 	github.com/strongo/validation v0.0.15
-	github.com/tuigoff/tuigoff v0.4.0
+	github.com/tuigoff/tuigoff v0.6.0
 	github.com/xo/dburl v0.24.2
 	github.com/xuri/excelize/v2 v2.11.0
 	github.com/zalando/go-keyring v0.2.8
@@ -97,7 +98,6 @@ require (
 	github.com/bits-and-blooms/bitset v1.24.6 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be // indirect
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250603201427-c31516f43444 // indirect
 	github.com/charmbracelet/x/exp/golden v0.0.0-20260330094520-2dce04b6f8a4 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20260813141921-f091cedeaf78 // indirect

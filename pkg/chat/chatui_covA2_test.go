@@ -453,7 +453,7 @@ func TestLoadSessionRendersMarkdownMessageWithoutHTTPResponse(t *testing.T) {
 func TestOnMsgJoinAppliedError(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.OnMsg(JoinAppliedMsg{Err: errors.New("apply failed")})
-	if !strings.Contains(u.shell.View().Content, publicJoinError(errors.New("apply failed"))) {
+	if !strings.Contains(u.shell.View().Content, "I couldn't apply that JOIN.") || !strings.Contains(u.shell.View().Content, "relationship and try again.") {
 		t.Fatalf("expected the public join error in view:\n%s", u.shell.View().Content)
 	}
 }
@@ -514,8 +514,9 @@ func TestRunCommandSwitchAndRenameRequireArgument(t *testing.T) {
 
 func TestRunCommandDeleteRequiresConfirm(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
+	u.shell.Update(tea.WindowSizeMsg{Width: 220, Height: 40})
 	drainCmd(t, u, u.Submit("/delete"))
-	if !strings.Contains(u.shell.View().Content, "type /delete confirm") {
+	if !strings.Contains(flattenView(u.shell.View().Content), "type /delete confirm") {
 		t.Fatalf("expected /delete confirmation prompt:\n%s", u.shell.View().Content)
 	}
 }
@@ -549,9 +550,7 @@ func TestRunCommandBucketClearAndListAndUsage(t *testing.T) {
 	if u.lastGridEntryID == "" || !u.shell.FocusEntry(u.lastGridEntryID) {
 		t.Fatal("grid was not restored")
 	}
-	if _, handled := u.handleGridKey(nil, tea.KeyPressMsg{Code: 'B', Text: "B"}); !handled {
-		t.Fatal("B did not toggle bucket")
-	}
+	gridActionJourney(t, u, "Export bucket")
 	if len(u.snapshot.Workspace.ExportBucket) != 1 || u.snapshot.Workspace.ExportBucket[0] != id {
 		t.Fatalf("bucket did not record the RecordSet: %#v", u.snapshot.Workspace.ExportBucket)
 	}
@@ -738,13 +737,11 @@ func TestStatusBarShowsBucketCountWhenGridFocused(t *testing.T) {
 	if u.lastGridEntryID == "" || !u.shell.FocusEntry(u.lastGridEntryID) {
 		t.Fatal("grid was not restored")
 	}
-	if _, handled := u.handleGridKey(nil, tea.KeyPressMsg{Code: 'B', Text: "B"}); !handled {
-		t.Fatal("B did not toggle bucket")
-	}
+	gridActionJourney(t, u, "Export bucket")
 	if len(u.snapshot.Workspace.ExportBucket) != 1 || u.snapshot.Workspace.ExportBucket[0] != id {
 		t.Fatalf("bucket did not record the RecordSet: %#v", u.snapshot.Workspace.ExportBucket)
 	}
-	if status := u.statusBar(160); !strings.Contains(status, "B bucket:1") {
+	if status := u.statusBar(160); !strings.Contains(status, "Export bucket: 1 (Actions)") {
 		t.Fatalf("expected a bucket-count hint in status:\n%s", status)
 	}
 }
@@ -776,11 +773,11 @@ func TestStatusBarChartsAndCurrentRowViewHints(t *testing.T) {
 func TestStatusBarBusyHintWithSession(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.SetBusy(true)
-	status := u.statusBar(160)
+	status := flattenView(u.shell.View().Content)
 	if !strings.Contains(status, "Thinking…") {
 		t.Fatalf("expected the busy hint:\n%s", status)
 	}
-	if !strings.Contains(status, "session: ") {
+	if !strings.Contains(status, "Session: ") {
 		t.Fatalf("expected the session-title prefix while busy:\n%s", status)
 	}
 }

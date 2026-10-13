@@ -176,7 +176,9 @@ func TestCompareFactsUsesOneNativeSQLiteSetExecutionPerSide(t *testing.T) {
 	collisionRows.Rows[0] = append([]apicontract.TypedValue(nil), collisionRows.Rows[0]...)
 	for index, column := range collisionRows.Columns {
 		if column.Name == "CustomerId" {
-			collisionRows.Rows[0][index] = apicontract.NewNumberValue(7)
+			// Keep the collision fixture consistent with the INTEGER column:
+			// replay must preserve the recorded value's exact numeric type.
+			collisionRows.Rows[0][index] = apicontract.NewIntegerValue("7")
 		}
 	}
 	snapshotRef, stored, err := projectEvidence.PutSnapshot(context.Background(), collisionRecord.Ref, collisionRows, time.Now().UTC())

@@ -52,6 +52,11 @@ func (u *ChatUI) handleGridKey(_ *grid.Model, msg tea.KeyPressMsg) (tea.Cmd, boo
 			sourceRow := g.sourceRowKey()
 			g.Sort(g.SelectedColumn())
 			g.restoreByKey(sourceRow)
+			g.localScope = true
+			g.scopeLabel = fmt.Sprintf("Loaded · %d rows", len(g.Rows()))
+			if _, record, ok := u.activeGrid(); ok && record != nil {
+				u.resultScope(g, *record)
+			}
 			if recordSetID := u.activeRecordSetID(); recordSetID != "" {
 				column, desc := g.SortState()
 				u.syncRecordSetSort(recordSetID, column, desc)
@@ -153,32 +158,51 @@ func (u *ChatUI) selectFromGrid(mode string) {
 // instance without ChatUI tracking focus itself.
 func (u *ChatUI) activeGrid() (*gridState, *RecordSet, bool) {
 	ref := u.shell.FocusedRef()
-	if ref == nil || ref.Type != gridRecordSetRefType {
-		return nil, nil, false
+	if ref == nil {
+		ref = u.shell.SelectedRef()
 	}
-	recordSetID := ref.Keys["recordSetID"]
-	g := u.gridsByRecordSetID[recordSetID]
+	id := ""
+	if ref != nil && ref.Type == gridRecordSetRefType {
+		id = ref.Keys["recordSetID"]
+	}
+	if id == "" {
+		entry := u.shell.FocusedEntryID()
+		if entry != "" {
+			for key, g := range u.gridsByRecordSetID {
+				if g.entryID == entry {
+					id = key
+					break
+				}
+			}
+		} else {
+			id = u.retainedRecordSetID
+		}
+	}
+	g := u.gridsByRecordSetID[id]
 	if g == nil {
 		return nil, nil, false
 	}
-	record, ok := u.snapshot.RecordSets[recordSetID]
+	u.retainedRecordSetID = id
+	record, ok := u.snapshot.RecordSets[id]
 	if !ok {
 		return g, nil, true
 	}
-	return g, &record, true
-}
-
-// activeRecordSetID is activeGrid's RecordSetID alone, for callers (export
-// current, save-as-query, Ctrl+R) that only need the identifier.
-func (u *ChatUI) activeRecordSetID() string {
-	ref := u.shell.FocusedRef()
-	if ref == nil || ref.Type != gridRecordSetRefType {
-		return ""
+	if g.record == nil {
+		g.record = &record
+	} else {
+		*g.record = record
 	}
-	return ref.Keys["recordSetID"]
+	return g, g.record, true
 }
 
-// --- cell detail (checklist #50) ----------------------------------------
+// Empty results have no row EntityRef. Retained result identity also follows
+// the transcript entry, so Trail/Back and composer transfers work for them.
+func (u *ChatUI) activeRecordSetID() string {
+	if _, _, ok := u.activeGrid(); ok {
+		return u.retainedRecordSetID
+	}
+	return ""
+}
 
 // openCellDetail is ui.go's openCellDetail, ported to push a chatshell
 // Overlay instead of setting u.detail: Enter on a focused grid (wired in

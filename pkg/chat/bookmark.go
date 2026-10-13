@@ -397,7 +397,7 @@ func recordSetsForSession(ctx context.Context, q bookmarkSQL, sessionID string) 
 			return nil, err
 		}
 		record.SessionID = sessionID
-		if err := json.Unmarshal([]byte(params), &record.Parameters); err != nil {
+		if err := decodeExactJSON([]byte(params), &record.Parameters); err != nil {
 			return nil, fmt.Errorf("corrupt RecordSet parameters %q: %w", record.ID, err)
 		}
 		if record.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
@@ -447,7 +447,7 @@ func encodeBookmarkSnapshot(snapshot BookmarkSnapshot) ([]byte, error) {
 
 func decodeBookmarkSnapshot(targetKind string, payload []byte) (BookmarkSnapshot, error) {
 	var stored storedBookmarkSnapshot
-	if err := json.Unmarshal(payload, &stored); err != nil {
+	if err := decodeExactJSON(payload, &stored); err != nil {
 		return BookmarkSnapshot{}, err
 	}
 	if len(stored.RecordSet.Result) == 0 {

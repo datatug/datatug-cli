@@ -139,13 +139,10 @@ func TestExecRunQuery_AdhocFixture_DecodesAndExecutes(t *testing.T) {
 		return -1
 	}
 	row := result.Recordset.Rows[0]
-	// The Chinook SQLite driver reports CustomerId as a numeric column
-	// (fromGoValue's float64 branch, typed_value_convert.go), unlike the
-	// fixture's own declared parameter type ("integer") — the recordset
-	// column carries the driver's own observed type, not the request
-	// parameter's declared one, so this checks .Num rather than .Str.
-	if got := row[colIndex("CustomerId")].Num; got != 5 {
-		t.Errorf("CustomerId = %v, want %v", got, 5)
+	// Native SQLite integers retain their exact type through row collection
+	// and wire conversion, independently of the request parameter's type.
+	if got, want := row[colIndex("CustomerId")], apicontract.NewIntegerValue("5"); got != want {
+		t.Errorf("CustomerId = %+v, want %+v", got, want)
 	}
 	if got := row[colIndex("FirstName")].Str; got != "František" {
 		t.Errorf("FirstName = %q, want %q", got, "František")

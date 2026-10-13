@@ -10,8 +10,11 @@ import (
 )
 
 type relatedRecord struct {
-	key    ForeignKey
-	result secureread.Result
+	key      ForeignKey
+	result   secureread.Result
+	incoming bool
+	document string
+	err      error
 }
 
 type relatedPreviewMessage struct {

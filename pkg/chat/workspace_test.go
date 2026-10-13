@@ -13,6 +13,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/ai"
+	"github.com/tuigoff/tuigoff/pkg/uitest"
 )
 
 func workspaceTestCatalog() ProjectCatalog {
@@ -605,22 +606,20 @@ func TestSelectedCellValueStaysOutOfModelRequest(t *testing.T) {
 // u.historyHeight/u.attachmentCloseAt directly, and chatshell's composer has
 // no chip layout at all yet to ask the same questions of.
 //
-// TestProjectCardUsesProjectTitle, TestExplorerSelectionShowsTableAndQueryCards,
-// and TestExplorerArrowsFoldTreeAndTabSwitchesWorkspace port below onto
-// workspacePanel: the Project:/Table:/Query: explorer detail cards
-// (chatui_sidepanel.go's projectExplorer, extended here to name the
-// selected object's kind and show query type/text and typed columns) and
-// the Left/Right-folds-not-switches-tabs / Tab-switches-tabs bindings
-// (chatui_sidepanel.go's updateKey) are new ChatUI behaviour this PR adds,
-// not merely re-pointed assertions.
+// Project identification, selected catalog metadata, and tree navigation are
+// exercised below through the unified shell: Explorer stays in the left pane,
+// Inspect remains independent on the right, and Alt+I opens read-only details.
 
 func TestProjectCardUsesProjectTitle(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
-	u.workspace.explorerIndex = 0 // the project root node, always first.
-	view := ansi.Strip(u.workspace.projectExplorer(50, 15))
-	if !strings.Contains(view, "Project: "+u.catalog.Title) || strings.Contains(view, "Project explorer") {
-		t.Fatalf("project card title is incorrect:\n%s", view)
+	u.shell.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	view := ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(view, "Explorer") || !strings.Contains(view, u.catalog.Title) || !strings.Contains(view, "Inspect") {
+		t.Fatalf("Explorer/Inspect panes do not identify the project:\n%s", view)
+	}
+	if strings.Contains(view, "Project: "+u.catalog.Title) {
+		t.Fatalf("the right Inspect pane duplicated the Explorer's project card:\n%s", view)
 	}
 }
 
@@ -628,107 +627,124 @@ func TestExplorerSelectionShowsTableAndQueryCards(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	u.catalog.Objects[2].ColumnTypes = map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}
-	queryText := "SELECT GenreName\n" + strings.Repeat("-- detail line\n", 12) + "FROM purchases"
+	queryText := "SELECT GenreName\n" + strings.Repeat("-- detail line\n", 40) + "FROM purchases"
 	u.catalog.Objects = append(u.catalog.Objects, ProjectObject{Reference: ContextReference{
 		Kind: "query", SourceID: "chinook-local", ObjectID: "purchases", Title: "Customer purchases by genre",
 	}, QueryType: "SQL", QueryText: queryText})
-	for index, node := range u.workspace.explorerNodes() {
+	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 22})
+	u.shell.FocusLeftPanel()
+	for index, node := range u.explorer.explorerNodes() {
 		if node.label == "Customer" {
-			u.workspace.explorerIndex = index
+			u.explorer.explorerIndex = index
 			break
 		}
 	}
-	view := ansi.Strip(u.workspace.projectExplorer(48, 24))
+	u.shell.Update(uitest.Key("alt+i"))
+	view := ansi.Strip(u.shell.View().Content)
 	if !strings.Contains(view, "Table: Customer") || !strings.Contains(view, "CustomerId") || !strings.Contains(view, "INTEGER") {
-		t.Fatalf("table selection did not show columns card: %q", view)
+		t.Fatalf("Alt+I did not show authoritative table details:\n%s", view)
 	}
-	for index, node := range u.workspace.explorerNodes() {
+	u.shell.Update(uitest.Key("esc"))
+	for index, node := range u.explorer.explorerNodes() {
 		if node.label == "Customer purchases by genre" {
-			u.workspace.explorerIndex = index
+			u.explorer.explorerIndex = index
 			break
 		}
 	}
-	view = ansi.Strip(u.workspace.projectExplorer(48, 24))
+	u.shell.Update(uitest.Key("alt+i"))
+	view = ansi.Strip(u.shell.View().Content)
 	if !strings.Contains(view, "Query: Customer purchases by genre") || !strings.Contains(view, "SQL") || !strings.Contains(view, "SELECT GenreName") {
-		t.Fatalf("query selection did not show query text: %q", view)
+		t.Fatalf("Alt+I did not show selected query details:\n%s", view)
 	}
-	// PgDn's step is height/4 (m2), so the panel needs a real rendered
-	// height on record -- View, like main's workspaceView, sets it as a
-	// side effect; projectExplorer alone (called above) does not.
-	u.workspace.View(48, 24, true)
-	for range 3 {
-		u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyPgDown})
-	}
-	view = ansi.Strip(u.workspace.projectExplorer(48, 24))
+	u.shell.Update(uitest.Key("end"))
+	view = ansi.Strip(u.shell.View().Content)
 	if !strings.Contains(view, "FROM purchases") {
-		t.Fatalf("query detail cannot scroll to end of text: %q", view)
+		t.Fatalf("shell End did not scroll catalog query detail to its final line:\n%s", view)
+	}
+	u.shell.Update(uitest.Key("home"))
+	view = ansi.Strip(u.shell.View().Content)
+	if !strings.Contains(view, "SELECT GenreName") || strings.Contains(view, "FROM purchases") {
+		t.Fatalf("shell Home did not reset catalog query detail to its first line:\n%s", view)
 	}
 }
 
-// TestExplorerHLFoldAndJumpNotTabSwitch covers M10: h/l are the Project
-// explorer's own fold/unfold keys -- like Left/Right -- not a tab switch.
-// On a branch node h folds it (like Left); on a leaf, h instead jumps the
-// cursor up to its nearest shallower branch ancestor (main's ui.go
-// updateWorkspaceKey "left"/"h" case); l unfolds a branch (like Right) and
-// otherwise does nothing.
-func TestExplorerHLFoldAndJumpNotTabSwitch(t *testing.T) {
+// TestExplorerTypingAndArrowNavigation keeps printable h/l available for
+// instant Explorer search while Left/Right own tree navigation.
+func TestExplorerTypingAndArrowNavigation(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
-	u.workspace.focused = true
-	var leafIndex, branchIndex int
-	nodes := u.workspace.explorerNodes()
+	u.shell.SetLeftPanel(u.explorer)
+	u.shell.FocusLeftPanel()
+	var leafIndex, sourceIndex int
+	nodes := u.explorer.explorerNodes()
 	for index, node := range nodes {
 		if node.label == "Customer" {
 			leafIndex = index
 		}
-		// The leaf's nearest shallower branch ancestor is its immediate
-		// "Tables (N)" group node, one level closer than the source branch.
-		if node.id == "group:chinook-local:table" {
-			branchIndex = index
+		if node.id == "source:chinook-local" {
+			sourceIndex = index
 		}
 	}
-	u.workspace.explorerIndex = leafIndex
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
-	if u.workspace.tab != 0 {
-		t.Fatalf("h must not switch tabs: tab=%d", u.workspace.tab)
+	u.shell.Update(uitest.Text("h"))
+	if u.explorer.explorerSearch != "h" || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatalf("the first printable should start Explorer search: search=%q focus=%q", u.explorer.explorerSearch, u.shell.WorkspaceFocus())
 	}
-	if u.workspace.explorerIndex != branchIndex {
-		t.Fatalf("h on a leaf should jump to its nearest shallower branch ancestor: got index %d, want %d", u.workspace.explorerIndex, branchIndex)
+	u.shell.Update(uitest.Text("l"))
+	u.shell.Update(uitest.Text("3"))
+	if u.explorer.explorerSearch != "hl3" || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatalf("printable h/l/digits should extend Explorer search: search=%q focus=%q", u.explorer.explorerSearch, u.shell.WorkspaceFocus())
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
-	if !u.workspace.explorerCollapsed["group:chinook-local:table"] {
-		t.Fatalf("h on a branch should fold it, like Left")
+	u.shell.Update(uitest.Key("esc"))
+	if u.explorer.explorerSearch != "" || !u.explorer.explorerSearchFocused || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatal("the first Esc should clear Explorer search and retain focus")
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
-	if u.workspace.explorerCollapsed["group:chinook-local:table"] || u.workspace.tab != 0 {
-		t.Fatalf("l should unfold the branch, not switch tabs: collapsed=%v tab=%d", u.workspace.explorerCollapsed["group:chinook-local:table"], u.workspace.tab)
+	u.shell.Update(uitest.Key("esc"))
+	if u.explorer.explorerSearchFocused || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatal("the second Esc should leave search without moving focus")
+	}
+	u.explorer.explorerIndex = leafIndex
+	u.shell.Update(uitest.Key("left"))
+	if u.explorer.explorerIndex >= leafIndex || !nodes[u.explorer.explorerIndex].branch {
+		t.Fatalf("Left on a leaf should jump to a shallower branch ancestor: got index %d from leaf %d", u.explorer.explorerIndex, leafIndex)
+	}
+	u.explorer.explorerIndex = sourceIndex
+	foldedID := nodes[sourceIndex].id
+	u.shell.Update(uitest.Key("left"))
+	if !u.explorer.explorerCollapsed[foldedID] {
+		t.Fatalf("Left on a branch should fold it")
+	}
+	u.shell.Update(uitest.Key("right"))
+	if u.explorer.explorerCollapsed[foldedID] || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatalf("Right should unfold the branch and keep Explorer focused: collapsed=%v focus=%q", u.explorer.explorerCollapsed[foldedID], u.shell.WorkspaceFocus())
 	}
 }
 
-func TestExplorerArrowsFoldTreeAndTabSwitchesWorkspace(t *testing.T) {
+func TestExplorerArrowsFoldTreeAndTabKeepsExplorerFocus(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
-	u.workspace.focused = true
-	for index, node := range u.workspace.explorerNodes() {
+	u.shell.SetLeftPanel(u.explorer)
+	u.shell.FocusLeftPanel()
+	for index, node := range u.explorer.explorerNodes() {
 		if node.id == "source:chinook-local" {
-			u.workspace.explorerIndex = index
+			u.explorer.explorerIndex = index
 			break
 		}
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyLeft})
-	if !u.workspace.explorerCollapsed["source:chinook-local"] || u.workspace.tab != 0 {
-		t.Fatalf("Left should collapse source, not switch tab: collapsed=%v tab=%d", u.workspace.explorerCollapsed["source:chinook-local"], u.workspace.tab)
+	u.shell.Update(uitest.Key("left"))
+	if !u.explorer.explorerCollapsed["source:chinook-local"] || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatalf("Left should collapse source and keep Explorer focused: collapsed=%v focus=%q", u.explorer.explorerCollapsed["source:chinook-local"], u.shell.WorkspaceFocus())
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyRight})
-	if u.workspace.explorerCollapsed["source:chinook-local"] || u.workspace.tab != 0 {
-		t.Fatalf("Right should expand source, not switch tab: collapsed=%v tab=%d", u.workspace.explorerCollapsed["source:chinook-local"], u.workspace.tab)
+	u.shell.Update(uitest.Key("right"))
+	if u.explorer.explorerCollapsed["source:chinook-local"] || u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatalf("Right should expand source and keep Explorer focused: collapsed=%v focus=%q", u.explorer.explorerCollapsed["source:chinook-local"], u.shell.WorkspaceFocus())
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyTab})
-	if u.workspace.tab != 1 {
-		t.Fatalf("Tab should switch workspace tab: %d", u.workspace.tab)
+	rightTab := u.workspace.tab
+	u.shell.Update(uitest.Key("tab"))
+	if u.shell.WorkspaceFocus() != "explorer" || u.workspace.tab != rightTab {
+		t.Fatalf("Tab should keep focus in Explorer without changing Inspect tab: focus=%q inspectTab=%d", u.shell.WorkspaceFocus(), u.workspace.tab)
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
-	if u.workspace.tab != 0 {
-		t.Fatalf("Shift+Tab should switch back: %d", u.workspace.tab)
+	u.shell.Update(uitest.Key("shift+tab"))
+	if u.shell.WorkspaceFocus() != "explorer" || u.workspace.tab != rightTab {
+		t.Fatalf("Shift+Tab should retain Explorer focus without changing Inspect tab: focus=%q inspectTab=%d", u.shell.WorkspaceFocus(), u.workspace.tab)
 	}
 }

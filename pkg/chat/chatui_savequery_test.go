@@ -173,7 +173,7 @@ func TestChatUISaveQueryDialogCollectsNameAndTagChips(t *testing.T) {
 	if err := u.SetSavedQueryService(service); err != nil {
 		t.Fatal(err)
 	}
-	u.shell.Update(tea.KeyPressMsg{Text: "q"})
+	gridActionJourney(t, u, "Save query [Ctrl+S]")
 	if !strings.Contains(u.shell.View().Content, "Save as project query") {
 		t.Fatal("save query dialog did not open")
 	}

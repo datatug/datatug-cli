@@ -44,6 +44,8 @@ func (u *ChatUI) runHTTPCommand(argument string) (tea.Cmd, error) {
 // httpDoneMsg reports a background HTTP request's outcome — the ChatUI
 // analogue of http_command.go's httpMessage.
 type httpDoneMsg struct {
+	operationID   uint64
+	uiInteraction uint64
 	sessionID     string
 	interactionID string
 	userChars     int
@@ -124,7 +126,11 @@ func (u *ChatUI) sendHTTPRequest(spec httpRequestSpec) (tea.Cmd, error) {
 	}
 	sessionID := u.sessionID
 	store := u.sessions.store
-	ctx := u.ctx
+	if u.backendBusy() || u.shell.Busy() {
+		return nil, fmt.Errorf("cancel the running operation before starting another")
+	}
+	operationID, ctx := u.beginOperation("HTTP request")
+	uiInteraction := u.workspaceInteraction
 	interactionID := u.activeCommandInteractionID
 	userChars, userWords := u.activeCommandChars, u.activeCommandWords
 	if interactionID == "" {
@@ -135,14 +141,18 @@ func (u *ChatUI) sendHTTPRequest(spec httpRequestSpec) (tea.Cmd, error) {
 	}
 	u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(requestText))
 	busyCmd := startHTTPRequestBusy(u)
+	u.operation.shellBusy = true
 	runCmd := func() tea.Msg {
 		response, query, failure := fetchHTTPRequestResult(ctx, spec, displayURL.String(), settings)
+		if ctx.Err() != nil {
+			return httpDoneMsg{operationID: operationID, sessionID: sessionID, err: ctx.Err()}
+		}
 		origin, err := store.AppendUser(ctx, sessionID, requestText)
 		if err != nil {
-			return httpDoneMsg{sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, requestFailed: failure != "", err: err}
+			return httpDoneMsg{operationID: operationID, uiInteraction: uiInteraction, sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, requestFailed: failure != "", err: err}
 		}
 		snapshot, err := finalizeHTTPRequest(ctx, store, sessionID, origin.ID, displayURL.String(), failure, response, query)
-		return httpDoneMsg{sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, requestFailed: failure != "", snapshot: snapshot, err: err}
+		return httpDoneMsg{operationID: operationID, uiInteraction: uiInteraction, sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, requestFailed: failure != "", snapshot: snapshot, err: err}
 	}
 	if busyCmd != nil {
 		return tea.Batch(busyCmd, runCmd), nil
@@ -160,6 +170,10 @@ func (u *ChatUI) sendHTTPRequest(spec httpRequestSpec) (tea.Cmd, error) {
 // leaves pendingHTTPRequest nil, so it keeps the prior transcript-message
 // behavior unchanged.
 func (u *ChatUI) handleHTTPDone(msg httpDoneMsg) {
+	current := u.operationContextCurrent(msg.operationID)
+	if !u.finishOperation(msg.operationID) {
+		return
+	}
 	u.shell.SetBusy(false)
 	reportErr := msg.err
 	if reportErr == nil && msg.requestFailed {
@@ -171,6 +185,7 @@ func (u *ChatUI) handleHTTPDone(msg httpDoneMsg) {
 	overlay := u.pendingHTTPRequest
 	u.pendingHTTPRequest = nil
 	if msg.err != nil {
+		u.workspaceFeedback = sanitizeTerminalText(conciseError(msg.err))
 		if overlay != nil {
 			overlay.err = conciseError(msg.err)
 			return
@@ -182,6 +197,11 @@ func (u *ChatUI) handleHTTPDone(msg httpDoneMsg) {
 		u.shell.CloseOverlay(overlay)
 	}
 	if msg.sessionID == u.sessionID {
+		if msg.operationID != 0 && (!current || msg.uiInteraction != u.workspaceInteraction) {
+			u.reconcileResults(msg.snapshot, true)
+			u.workspaceFeedback = "Request completed; current workspace retained."
+			return
+		}
 		u.loadSession(msg.snapshot)
 	}
 }
@@ -270,6 +290,21 @@ func (d *httpRequestOverlay) setFocus(next int) {
 }
 
 func (d *httpRequestOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd, bool) {
+	if d.ui.operation != nil {
+		if k, ok := msg.(tea.KeyPressMsg); ok && (k.String() == "ctrl+x" || k.String() == "esc") {
+			d.ui.cancelOperation(true)
+			d.err = "Request canceled; draft retained."
+			return d, nil, false
+		}
+		if m, ok := msg.(tea.MouseClickMsg); ok && m.Button == tea.MouseLeft && m.Y == 0 {
+			header := strings.Split(ansi.Strip(d.ui.shell.View().Content), "\n")[0]
+			if at := strings.Index(header, "Cancel [Ctrl+X]"); at >= 0 && m.X >= ansi.StringWidth(header[:at]) && m.X < ansi.StringWidth(header[:at])+len("Cancel [Ctrl+X]") {
+				d.ui.cancelOperation(true)
+				d.err = "Request canceled; draft retained."
+				return d, nil, false
+			}
+		}
+	}
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return d, nil, false
@@ -538,7 +573,11 @@ func (d *httpRequestOverlay) View(width, height int) string {
 		}
 		return "  " + label
 	}
-	lines := []string{"HTTP request", "", line(0, "Method: "+d.method+"  ←/→ change"), line(1, "URL: "+d.url.View()), line(2, "Headers: ↑/↓ choose · Enter edit · a add · d delete")}
+	heading := "HTTP request"
+	if d.ui.operation != nil {
+		heading = d.ui.operationLabel()
+	}
+	lines := []string{heading, "", line(0, "Method: "+d.method+"  ←/→ change"), line(1, "URL: "+d.url.View()), line(2, "Headers: ↑/↓ choose · Enter edit · a add · d delete")}
 	start := max(0, d.selected-4)
 	if start > 0 {
 		lines = append(lines, fmt.Sprintf("    ↑ %d more headers", start))

@@ -10,21 +10,128 @@ import (
 )
 
 // globalKeys satisfies chatshell.GlobalKeysFunc, checked before chatshell's
-// own key handling. F3 (project picker) and F4 (session picker) are ported
-// from ui.go's "f3"/"f4" cases in Update, now as chatshell Overlays
-// (checklist items #42/#43) instead of a workspace-pane picker view.
+// own key handling. Modal input is captured by the shell before this callback;
+// F4 focuses the composer and /switch opens the session picker.
 func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch msg.String() {
-	case "f4":
-		if u.sessions == nil {
+	u.workspaceInteraction++
+	u.workspaceFeedback = ""
+	if u.backendBusy() && msg.String() == "enter" && u.shell.WorkspaceFocus() == "input" && !u.shell.ComposerActionFocused() {
+		text := strings.TrimSpace(u.shell.ComposerText())
+		// A slash prefix without whitespace completes a command in the shell;
+		// it does not submit it. Keep that editing path, like Shift+Enter and
+		// the Select text action, available while a backend is finishing.
+		if !strings.ContainsAny(u.shell.ComposerText(), " \t\n") {
+			for _, command := range chatCommands {
+				if strings.HasPrefix(command.Name, text) && strings.HasPrefix(text, "/") {
+					return nil, false
+				}
+			}
+		}
+		if text != "/actions" && text != "/keys" && text != "/trail" && text != "/help" {
+			u.sessionFence()
 			return nil, true
 		}
-		return u.openSessionPicker(), true
+	}
+	if msg.Mod == tea.ModAlt && msg.Code >= '0' && msg.Code <= '9' && (u.shell.WorkspaceFocus() == "transcript" || u.shell.WorkspaceFocus() == "sidebar") {
+		index := int(msg.Code - '1')
+		if msg.Code == '0' {
+			index = 9
+		}
+		u.shell.FocusRightPanel()
+		return u.workspace.focusRelated(index), true
+	}
+	switch msg.String() {
+	case "ctrl+p":
+		return u.openWorkspaceActions(), true
+	case "ctrl+t":
+		if u.resultTrailContext() {
+			return u.openTrail(), true
+		}
+	case "ctrl+x":
+		if u.operation != nil {
+			u.cancelOperation(true)
+			return nil, true
+		}
+	case "alt+right":
+		if u.resultTrailContext() {
+			u.trailMove(1)
+			return nil, true
+		}
+	case "alt+left":
+		if u.resultTrailContext() {
+			u.trailMove(-1)
+			return nil, true
+		}
+	case "alt+f1", "ctrl+f1":
+		u.toolbarHidden = !u.toolbarHidden
+		return nil, true
+	case "f1":
+		return u.shell.PushOverlay(u.newHotkeysOverlay()), true
+	case "f4":
+		u.shell.FocusComposer()
+		return nil, true
+	case "f8":
+		if u.apiScreen != nil {
+			u.closeAPIOverview()
+		} else {
+			u.apiScreen = &apiPanel{}
+			u.apiReturn = u.shell.ShowTemporaryCenterPanel(u.apiScreen, true)
+		}
+		return nil, true
+	case "f9":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			if _, _, ok := u.activeGrid(); ok {
+				u.shell.ExpandSelected()
+				return nil, true
+			}
+		}
+	case "shift+enter":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			if _, _, ok := u.activeGrid(); ok {
+				u.workspaceFeedback = "Selected-result browser links are not supported yet. F5 opens the web workspace."
+				return nil, true
+			}
+		}
+	case "esc":
+		if u.apiScreen != nil && u.shell.WorkspaceFocus() == "center" {
+			u.closeAPIOverview()
+			return nil, true
+		}
+		if u.webLinkVisible {
+			u.webLinkVisible = false
+			return nil, true
+		}
 	case "f3":
+		if u.sessionFence() {
+			return nil, true
+		}
 		if len(u.projectChoices) == 0 {
 			return nil, true
 		}
 		return u.shell.PushOverlay(newProjectPickerOverlay(u, u.projectChoices)), true
+	case "f10":
+		u.shell.FocusRightPanel()
+		return u.workspace.focusRelated(-1), true
+	case "alt+j":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			if _, record, _ := u.activeGrid(); groupedRecord(record) {
+				u.workspaceFeedback = "Grouped output has no entity identity. Return to the original result for JOIN."
+				return nil, true
+			}
+			return u.openJoinPicker(), true
+		}
+	case "ctrl+s":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			return u.openSaveQueryDialog(), true
+		}
+	case "ctrl+e":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			return u.shell.PushOverlay(newExportDialogOverlay(u)), true
+		}
+	case "ctrl+space", "alt+a":
+		if u.shell.WorkspaceFocus() == "transcript" || (msg.String() == "alt+a" && u.shell.WorkspaceFocus() == "sidebar" && u.workspace.tab == 1) {
+			return u.shell.PushOverlay(&gridActionsOverlay{ui: u}), true
+		}
 	case "ctrl+g":
 		// Jump to the most recently appended grid/join block — ui.go's
 		// focusLatestGrid (checklist item #45), via chatshell.Model.FocusEntry
@@ -37,7 +144,19 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "ctrl+r":
 		return u.refreshLastRecordSet(), true
-	case "alt+s", "ß": // macOS Option+S emits ß unless the terminal maps Option to Meta (ui.go's own alias).
+	case "alt+g":
+		return u.openResultOperation(true), true
+	case "alt+s":
+		return u.openResultOperation(false), true
+	case "shift+alt+up", "shift+alt+down", "alt+shift+up", "alt+shift+down", "alt+up", "alt+down":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			return u.quickSortLoaded(msg.Code == tea.KeyDown), true
+		}
+	case "ctrl+shift+up", "ctrl+shift+down":
+		if u.shell.WorkspaceFocus() == "transcript" {
+			return u.quickServerSort(msg.Code == tea.KeyDown), true
+		}
+	case "alt+shift+s", "alt+S":
 		return u.cycleTableStyle(), true
 	case "f5":
 		// ui.go's F5: try to open the actual browser first (M6's web
@@ -58,12 +177,6 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		return func() tea.Msg { return browserOpenResultMsg{url: url, err: open(url)} }, true
-	case "esc":
-		if u.webLinkVisible {
-			u.webLinkVisible = false
-			return nil, true
-		}
-		return nil, false
 	case "f2":
 		// ui.go's F2 mouseCapture toggle, ported onto chatshell's
 		// SetMouseEnabled: on (the default -- see NewChatUI's
@@ -92,7 +205,11 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 // Ctrl+R on a focused grid in ui.go including its HTTP-response refresh
 // branch (checklist item — HTTP-response refresh).
 func (u *ChatUI) refreshLastRecordSet() tea.Cmd {
-	if u.sessions == nil || u.sessions.store == nil || u.shell.Busy() {
+	if reason := u.visibleGridReason(); reason != "" {
+		u.workspaceFeedback = reason
+		return nil
+	}
+	if u.sessions == nil || u.sessions.store == nil || u.shell.Busy() || u.backendBusy() {
 		return nil
 	}
 	recordSetID := u.activeRecordSetID()
@@ -113,10 +230,13 @@ func (u *ChatUI) refreshLastRecordSet() tea.Cmd {
 			u.shell.AppendAssistant("Saved SQL and HTTP project results cannot be refreshed here. Run the project query again from /query.")
 			return nil
 		}
+		operationID, opctx := u.beginOperation("Refresh")
+		uiInteraction := u.workspaceInteraction
 		busyCmd := u.shell.SetBusy(true)
+		u.operation.shellBusy = true
 		runCmd := func() tea.Msg {
-			snapshot, err := u.sessions.RefreshRecordSet(ctx, sessionID, recordSetID)
-			return httpDoneMsg{sessionID: sessionID, snapshot: snapshot, err: err}
+			snapshot, err := u.sessions.RefreshRecordSet(opctx, sessionID, recordSetID)
+			return httpDoneMsg{operationID: operationID, uiInteraction: uiInteraction, sessionID: sessionID, snapshot: snapshot, err: err}
 		}
 		// busyCmd is never nil -- chatshell.Model.SetBusy(true) always
 		// returns its spinner.Tick tea.Cmd -- so there is no "run
@@ -146,12 +266,18 @@ func (u *ChatUI) refreshLastRecordSet() tea.Cmd {
 		u.shell.AppendAssistant("Couldn't load HTTP request settings.")
 		return nil
 	}
+	operationID, ctx := u.beginOperation("HTTP refresh")
+	uiInteraction := u.workspaceInteraction
 	busyCmd := u.shell.SetBusy(true)
+	u.operation.shellBusy = true
 	runCmd := func() tea.Msg {
 		response, query, failure := fetchHTTPResult(ctx, previous.URL, previous.URL, settings)
+		if ctx.Err() != nil {
+			return httpDoneMsg{operationID: operationID, sessionID: sessionID, err: ctx.Err()}
+		}
 		origin, err := store.AppendUser(ctx, sessionID, "Refresh: GET "+previous.URL)
 		if err != nil {
-			return httpDoneMsg{sessionID: sessionID, err: err}
+			return httpDoneMsg{operationID: operationID, uiInteraction: uiInteraction, sessionID: sessionID, err: err}
 		}
 		if testAfterRefreshAppendUser != nil {
 			testAfterRefreshAppendUser()
@@ -163,10 +289,10 @@ func (u *ChatUI) refreshLastRecordSet() tea.Cmd {
 			_, err = store.AppendHTTPResponse(ctx, sessionID, origin.ID, response, query)
 		}
 		if err != nil {
-			return httpDoneMsg{sessionID: sessionID, err: fmt.Errorf("save refresh: %w", err)}
+			return httpDoneMsg{operationID: operationID, uiInteraction: uiInteraction, sessionID: sessionID, err: fmt.Errorf("save refresh: %w", err)}
 		}
 		snapshot, err := store.Load(ctx, sessionID)
-		return httpDoneMsg{sessionID: sessionID, snapshot: snapshot, err: err}
+		return httpDoneMsg{operationID: operationID, uiInteraction: uiInteraction, sessionID: sessionID, snapshot: snapshot, err: err}
 	}
 	// busyCmd is never nil -- see the identical comment above.
 	return tea.Batch(busyCmd, runCmd)
@@ -186,6 +312,9 @@ var testAfterRefreshAppendUser func()
 // openSessionPicker loads the session list (ui.go's loadPickerSessions) and
 // pushes the F4 overlay.
 func (u *ChatUI) openSessionPicker() tea.Cmd {
+	if u.sessionFence() {
+		return nil
+	}
 	list, err := u.sessions.List(u.ctx)
 	if err != nil {
 		u.shell.AppendAssistant(err.Error())

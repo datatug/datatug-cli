@@ -24,9 +24,10 @@ type ProjectObject struct {
 	Reference   ContextReference
 	Columns     []string
 	ColumnTypes map[string]string
-	QueryType   string // saved query metadata, shown locally in Project explorer
-	QueryText   string // loaded query document, not included in model context
-	Issue       string // local metadata load error; never included in agent context
+	PrimaryKey  []string // authoritative physical key columns in key order
+	QueryType   string   // saved query metadata, shown locally in Project explorer
+	QueryText   string   // loaded query document, not included in model context
+	Issue       string   // local metadata load error; never included in agent context
 }
 
 type ProjectCatalog struct {

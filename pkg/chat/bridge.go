@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/apimonitor"
 	"net"
 	"net/http"
 	"net/url"
@@ -54,6 +55,7 @@ type browserOpenResultMsg struct {
 // The capability stays in the web URL fragment and is sent in a request header.
 type BrowserBridge struct {
 	server        *http.Server
+	monitor       *apimonitor.Monitor
 	listener      net.Listener
 	URL           string
 	connectionsMu sync.Mutex
@@ -119,8 +121,13 @@ var bridgeSubscribeChanges = func(sessions *SessionChat) (<-chan struct{}, func(
 var bridgeBaseContext = func(net.Listener) context.Context { return context.Background() }
 
 func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
+	monitor, err := apimonitor.Default.NewServerChecked("Browser bridge")
+	if err != nil {
+		return nil, err
+	}
 	secret := make([]byte, 32)
 	if _, err := readRandom(secret); err != nil {
+		monitor.Stop(err)
 		return nil, fmt.Errorf("create chat bridge capability: %w", err)
 	}
 	listener, err := netListenTCP("tcp", "127.0.0.1:3284")
@@ -129,10 +136,11 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 		listener, err = netListenTCP("tcp", "127.0.0.1:0")
 	}
 	if err != nil {
+		monitor.Stop(err)
 		return nil, fmt.Errorf("listen for browser chat: %w", err)
 	}
 	token := hex.EncodeToString(secret)
-	bridge := &BrowserBridge{listener: listener, connections: make(map[*websocket.Conn]struct{})}
+	bridge := &BrowserBridge{monitor: monitor, listener: listener, connections: make(map[*websocket.Conn]struct{})}
 	port := listener.Addr().(*net.TCPAddr).Port
 	path := "/chat"
 	if projectID := sessions.catalog.ID; projectID != "" {
@@ -650,8 +658,15 @@ func StartBrowserBridge(sessions *SessionChat) (*BrowserBridge, error) {
 			}
 		}
 	})
-	bridge.server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, BaseContext: bridgeBaseContext}
-	go func() { _ = bridge.server.Serve(listener) }()
+	bridge.server = &http.Server{Handler: monitor.Wrap(mux), ReadHeaderTimeout: 5 * time.Second, BaseContext: bridgeBaseContext}
+	monitor.Live("http://" + listener.Addr().String())
+	go func() {
+		err := bridge.server.Serve(listener)
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		monitor.Stop(err)
+	}()
 	return bridge, nil
 }
 
@@ -698,5 +713,7 @@ func (b *BrowserBridge) Close() error {
 		_ = connection.Close()
 	}
 	b.connectionsMu.Unlock()
-	return b.server.Close()
+	err := b.server.Close()
+	b.monitor.Stop(nil)
+	return err
 }

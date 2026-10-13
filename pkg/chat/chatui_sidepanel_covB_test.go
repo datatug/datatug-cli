@@ -15,8 +15,8 @@ import (
 // with no other test hitting it directly.
 func TestWorkspacePanelTitleIsWorkspace(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
-	if got := u.workspace.Title(); got != "Workspace" {
-		t.Fatalf("Title() = %q, want %q", got, "Workspace")
+	if got := u.workspace.Title(); got != "Inspect  [F7]" {
+		t.Fatalf("Title() = %q, want %q", got, "Inspect  [F7]")
 	}
 }
 
@@ -525,10 +525,9 @@ func TestWorkspacePanelCurrentColumnDetailsUnavailableSourceAndType(t *testing.T
 	}
 }
 
-// TestWorkspacePanelCurrentColumnDetailsMultipleSourceTables covers
-// currentColumnDetails' "Possible source tables:" branch (meta.objects with
-// more than one candidate).
-func TestWorkspacePanelCurrentColumnDetailsMultipleSourceTables(t *testing.T) {
+// A physical FROM must not acquire provenance from unrelated tables merely
+// because both happen to contain a column with the same name.
+func TestWorkspacePanelCurrentColumnDetailsRejectsUnprovenSourceTables(t *testing.T) {
 	turn := Turn{Queries: []QueryResult{{
 		Title:       "Ambiguous",
 		DTQL:        "from: {name: Widget}\ncolumns: [{field: Id}]\nlimit: 5\n",
@@ -549,8 +548,22 @@ func TestWorkspacePanelCurrentColumnDetailsMultipleSourceTables(t *testing.T) {
 	}
 	u.workspace.tab, u.workspace.inspectorSubTab = 1, 1
 	view := u.workspace.View(80, 20, true)
-	if !strings.Contains(view, "Possible source tables:") {
-		t.Fatalf("expected the ambiguous-source hint:\n%s", view)
+	if !strings.Contains(view, "Source: unavailable") || strings.Contains(view, "Possible source tables:") || strings.Contains(view, "main.WidgetA.Id") || strings.Contains(view, "main.WidgetB.Id") {
+		t.Fatalf("unrelated catalog tables supplied false column provenance:\n%s", view)
+	}
+}
+
+func TestWorkspacePanelCurrentColumnDetailsMultipleCandidatesWithoutRecord(t *testing.T) {
+	u := focusedGridTestUI(t)
+	delete(u.snapshot.RecordSets, u.activeRecordSetID())
+	u.catalog = ProjectCatalog{Objects: []ProjectObject{
+		{Reference: ContextReference{Kind: "table", ObjectID: "main.WidgetA"}, Columns: []string{"Id"}},
+		{Reference: ContextReference{Kind: "table", ObjectID: "main.WidgetB"}, Columns: []string{"Id"}},
+	}}
+	u.workspace.tab, u.workspace.inspectorSubTab = 1, 1
+	view := u.workspace.View(80, 20, true)
+	if !strings.Contains(view, "Possible source tables:") || !strings.Contains(view, "main.WidgetA.Id") || !strings.Contains(view, "main.WidgetB.Id") || !strings.Contains(view, "ambiguous source") {
+		t.Fatalf("missing-record catalog candidates were not visibly ambiguous:\n%s", view)
 	}
 }
 
@@ -823,24 +836,26 @@ func TestWorkspacePanelUpdateKeyDockGridFocusedGuards(t *testing.T) {
 // showing.
 func TestWorkspacePanelExplorerPgUpPgDownAdjustDetailOffset(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
-	u.catalog = workspaceTestCatalog()
-	u.workspace.height = 40
-	for i, node := range u.workspace.explorerNodes() {
-		if node.label == "Customer" {
-			u.workspace.explorerIndex = i
-			break
-		}
+	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "query", ObjectID: "q", Title: "Paged query"}, QueryType: "DTQL", QueryText: "first-query-line\n" + strings.Repeat("middle-query-line\n", 40) + "last-query-line"}}}
+	u.shell.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	u.shell.FocusLeftPanel()
+	u.shell.Update(tea.KeyPressMsg{Code: 'P', Text: "Paged query"})
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	u.shell.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
+	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "first-query-line") {
+		t.Fatalf("details unavailable: %s", view)
 	}
-	if u.workspace.selectedExplorerObject() == nil {
-		t.Fatal("setup: expected the cursor to sit on a selectable object")
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if view := flattenView(u.shell.View().Content); strings.Contains(view, "first-query-line") || !strings.Contains(view, "middle-query-line") {
+		t.Fatalf("PgDown did not page visible query details: %s", view)
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyPgDown})
-	if u.workspace.explorerDetailOffset == 0 {
-		t.Fatal("expected pgdown to advance explorerDetailOffset")
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
+	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "first-query-line") {
+		t.Fatalf("PgUp did not restore first page: %s", view)
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyPgUp})
-	if u.workspace.explorerDetailOffset != 0 {
-		t.Fatalf("expected pgup to return explorerDetailOffset to 0, got %d", u.workspace.explorerDetailOffset)
+	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if u.shell.WorkspaceFocus() != "explorer" {
+		t.Fatal("details did not return to visible Explorer")
 	}
 }
 
@@ -851,7 +866,7 @@ func TestWorkspacePanelExplorerPgUpPgDownAdjustDetailOffset(t *testing.T) {
 func TestWorkspacePanelExplorerHLFoldAndJumpToAncestor(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
-	nodes := u.workspace.explorerNodes()
+	nodes := u.explorer.explorerNodes()
 	var sourceIndex, customerIndex int
 	for i, node := range nodes {
 		if node.label == "Chinook local" {
@@ -862,21 +877,21 @@ func TestWorkspacePanelExplorerHLFoldAndJumpToAncestor(t *testing.T) {
 		}
 	}
 	// h on a leaf jumps to the nearest shallower branch ancestor.
-	u.workspace.explorerIndex = customerIndex
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
-	if u.workspace.explorerIndex >= customerIndex {
-		t.Fatalf("expected h on a leaf to jump up to an ancestor, index=%d", u.workspace.explorerIndex)
+	u.explorer.explorerIndex = customerIndex
+	u.explorer.updateKey(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if u.explorer.explorerIndex >= customerIndex {
+		t.Fatalf("expected h on a leaf to jump up to an ancestor, index=%d", u.explorer.explorerIndex)
 	}
 	// h on a branch node folds it.
-	u.workspace.explorerIndex = sourceIndex
+	u.explorer.explorerIndex = sourceIndex
 	sourceID := nodes[sourceIndex].id
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'h', Text: "h"})
-	if !u.workspace.explorerCollapsed[sourceID] {
+	u.explorer.updateKey(tea.KeyPressMsg{Code: tea.KeyLeft})
+	if !u.explorer.explorerCollapsed[sourceID] {
 		t.Fatal("expected h on a branch node to collapse it")
 	}
 	// l unfolds it again.
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'l', Text: "l"})
-	if u.workspace.explorerCollapsed[sourceID] {
+	u.explorer.updateKey(tea.KeyPressMsg{Code: tea.KeyRight})
+	if u.explorer.explorerCollapsed[sourceID] {
 		t.Fatal("expected l to unfold the branch node")
 	}
 }
@@ -992,13 +1007,13 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 	// performWorkspaceAction below -- recomputes p.tab back to the same
 	// tab instead of resetting it to the default.
 	u.workspace.setTab(1)
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'b', Mod: tea.ModAlt})
 	snapshot, err := sessions.Snapshot(ctx)
 	if err != nil || len(snapshot.Bookmarks) != 1 {
 		t.Fatalf("expected 'b' on Selected tab to create a bookmark: %+v, %v", snapshot.Bookmarks, err)
 	}
 	// tab 1: "d" docks the current selection.
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModAlt})
 	snapshot, err = sessions.Snapshot(ctx)
 	if err != nil || len(snapshot.Workspace.Docks) != 1 {
 		t.Fatalf("expected 'd' on Selected tab to dock the current selection: %+v, %v", snapshot.Workspace.Docks, err)
@@ -1007,13 +1022,13 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 	// tab 2: "b" bookmarks the dock's own reference (non-bookmark kind).
 	u.workspace.setTab(2)
 	u.workspace.dockIndex = 0
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'b', Mod: tea.ModAlt})
 	snapshot, err = sessions.Snapshot(ctx)
 	if err != nil || len(snapshot.Bookmarks) != 2 {
 		t.Fatalf("expected 'b' on Docked tab to create another bookmark: %+v, %v", snapshot.Bookmarks, err)
 	}
 	// tab 2: "x" undocks.
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'x', Mod: tea.ModAlt})
 	snapshot, err = sessions.Snapshot(ctx)
 	if err != nil || len(snapshot.Workspace.Docks) != 0 {
 		t.Fatalf("expected 'x' on Docked tab to undock: %+v, %v", snapshot.Workspace.Docks, err)
@@ -1031,7 +1046,7 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 	}
 	u.workspace.bookmarkIndex = 0
 
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'r', Mod: tea.ModAlt})
 	if u.workspace.bookmarkMode != "rename" {
 		t.Fatalf("expected 'r' to start rename mode, got %q", u.workspace.bookmarkMode)
 	}
@@ -1051,14 +1066,14 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 		t.Fatalf("expected the bookmark to be renamed: %+v", snapshot.Bookmarks)
 	}
 
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 't', Text: "t"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModAlt})
 	if u.workspace.bookmarkMode != "tag_add" {
 		t.Fatalf("expected 't' to start tag_add mode, got %q", u.workspace.bookmarkMode)
 	}
 	u.workspace.bookmarkEditor.SetValue("reporting")
 	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'T', Text: "T"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'T', Mod: tea.ModAlt})
 	if u.workspace.bookmarkMode != "tag_remove" {
 		t.Fatalf("expected 'T' to start tag_remove mode, got %q", u.workspace.bookmarkMode)
 	}
@@ -1074,7 +1089,7 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 		}
 	}
 
-	u.workspace.updateKey(tea.KeyPressMsg{Code: '/', Text: "/"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
 	if u.workspace.bookmarkMode != "search" {
 		t.Fatalf("expected '/' to start search mode, got %q", u.workspace.bookmarkMode)
 	}
@@ -1088,7 +1103,7 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'f', Mod: tea.ModAlt})
 	if u.workspace.bookmarkMode != "tags" {
 		t.Fatalf("expected 'f' to start tags-filter mode, got %q", u.workspace.bookmarkMode)
 	}
@@ -1102,7 +1117,7 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'x', Mod: tea.ModAlt})
 	if u.workspace.bookmarkMode != "delete" {
 		t.Fatalf("expected 'x' to start delete-confirm mode, got %q", u.workspace.bookmarkMode)
 	}
@@ -1133,7 +1148,7 @@ func TestWorkspacePanelXDetachesLastAttachmentWhenNoOtherTargetApplies(t *testin
 		t.Fatal(err)
 	}
 	u.workspace.tab = 0
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'x', Mod: tea.ModAlt})
 	snapshot, err := sessions.Snapshot(ctx)
 	if err != nil || len(snapshot.Workspace.Attachments) != 0 {
 		t.Fatalf("expected 'x' to detach the last attachment: %+v, %v", snapshot.Workspace.Attachments, err)
@@ -1291,17 +1306,17 @@ func TestWorkspacePanelBookmarksViewShowsEditorWhileModeActive(t *testing.T) {
 func TestWorkspacePanelUpDownOnProjectTabMovesExplorerCursor(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
-	u.workspace.tab = 0
-	u.workspace.explorerIndex = 1
-	u.workspace.explorerDetailOffset = 5
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'k', Text: "k"})
-	if u.workspace.explorerIndex != 0 || u.workspace.explorerDetailOffset != 0 {
-		t.Fatalf("expected up/k to move to index 0 and reset detail offset, got index=%d offset=%d", u.workspace.explorerIndex, u.workspace.explorerDetailOffset)
+	u.explorer.tab = 0
+	u.explorer.explorerIndex = 1
+	u.explorer.explorerDetailOffset = 5
+	u.explorer.updateKey(tea.KeyPressMsg{Code: tea.KeyUp})
+	if u.explorer.explorerIndex != 0 || u.explorer.explorerDetailOffset != 0 {
+		t.Fatalf("expected up/k to move to index 0 and reset detail offset, got index=%d offset=%d", u.explorer.explorerIndex, u.explorer.explorerDetailOffset)
 	}
-	u.workspace.explorerDetailOffset = 5
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	if u.workspace.explorerIndex != 1 || u.workspace.explorerDetailOffset != 0 {
-		t.Fatalf("expected down/j to move to index 1 and reset detail offset, got index=%d offset=%d", u.workspace.explorerIndex, u.workspace.explorerDetailOffset)
+	u.explorer.explorerDetailOffset = 5
+	u.explorer.updateKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	if u.explorer.explorerIndex != 1 || u.explorer.explorerDetailOffset != 0 {
+		t.Fatalf("expected down/j to move to index 1 and reset detail offset, got index=%d offset=%d", u.explorer.explorerIndex, u.explorer.explorerDetailOffset)
 	}
 }
 
@@ -1380,7 +1395,7 @@ func TestWorkspacePanelSpaceAndDOnBookmarksTabUseSelectedReference(t *testing.T)
 
 	u.workspace.setTab(3) // docking below flips ActiveTab; restore it first
 	u.workspace.bookmarkIndex = 0
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModAlt})
 	snapshot, err = chatSessions.Snapshot(ctx)
 	if err != nil || len(snapshot.Workspace.Docks) != 1 {
 		t.Fatalf("expected 'd' on Bookmarks tab to dock the selected bookmark: %+v, %v", snapshot.Workspace.Docks, err)

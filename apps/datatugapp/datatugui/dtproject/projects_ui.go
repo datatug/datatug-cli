@@ -61,9 +61,10 @@ func loadProjects() tea.Cmd {
 // projects is the root screen of the module: recent, local and GitHub projects
 // in one tree, with the actions that create or add a project.
 type projects struct {
-	geo    geometry
-	tree   widgets.Tree
-	loaded bool
+	geo              geometry
+	tree             widgets.Tree
+	loaded           bool
+	neutralWorkspace bool
 }
 
 var (
@@ -94,11 +95,20 @@ func (p projects) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 		return p, nil
 	}
 	switch msg := msg.(type) {
+	case datatugui.WorkspacePresentationMsg:
+		if !p.neutralWorkspace {
+			p.neutralWorkspace = true
+			neutralProjectActions(&p.tree)
+		}
+		return p, nil
 	case projectsLoaded:
 		if msg.err != nil {
 			return p, datatugui.ReportError("load projects", msg.err)
 		}
 		p.tree = newProjectsTree(msg)
+		if p.neutralWorkspace {
+			neutralProjectActions(&p.tree)
+		}
 		p.loaded = true
 		p.sync()
 		return p, nil
@@ -122,7 +132,26 @@ func (p projects) View() string {
 	if !p.loaded {
 		return widgets.Fit("Loading projects...", p.geo.w, p.geo.h)
 	}
+	if p.neutralWorkspace {
+		// Blur this rendering copy; keyboard ownership stays with the page.
+		p.tree.Blur()
+	}
 	return p.tree.View()
+}
+
+func neutralProjectActions(tree *widgets.Tree) {
+	var neutralize func([]widgets.TreeNode) []widgets.TreeNode
+	neutralize = func(nodes []widgets.TreeNode) []widgets.TreeNode {
+		nodes = slices.Clone(nodes)
+		for i := range nodes {
+			if _, action := nodes[i].Ref.(projectsAction); action {
+				nodes[i].Color = nil
+			}
+			nodes[i].Children = neutralize(nodes[i].Children)
+		}
+		return nodes
+	}
+	tree.SetRoots(neutralize(tree.Roots())...)
 }
 
 // Title implements nav.Titled.

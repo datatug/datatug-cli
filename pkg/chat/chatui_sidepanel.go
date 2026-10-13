@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -20,7 +21,22 @@ import (
 // actions; every other piece of state below is the pane's own, exactly what
 // used to live directly on *UI.
 type workspacePanel struct {
-	ui *ChatUI
+	explorerSearch        string
+	explorerSearchFocused bool
+	relatedFocused        bool
+	relatedIndex          int
+	relatedLoading        bool
+	relatedSequence       int
+	relatedOperationID    uint64
+	relatedCancel         context.CancelFunc
+	relatedRecordID       string
+	relatedRowKey         string
+	relatedSessionID      string
+	relatedGeneration     int
+	relatedRecords        []relatedRecord
+	relatedError          error
+	relatedOpen           int
+	ui                    *ChatUI
 
 	tab int // 0 Project, 1 Selected, 2 Docked, 3 Bookmarks
 
@@ -83,7 +99,12 @@ func newWorkspacePanel(ui *ChatUI) *workspacePanel {
 }
 
 // Title satisfies chatshell.SidePanel.
-func (p *workspacePanel) Title() string { return "Workspace" }
+func (p *workspacePanel) Title() string {
+	if p == p.ui.explorer {
+		return "Explorer  [F6]"
+	}
+	return "Inspect  [F7]"
+}
 
 // refresh reloads the workspace snapshot-derived state (dock grids,
 // bookmarks) — ported from ui.go's refreshWorkspace/refreshBookmarks. Called
@@ -93,11 +114,19 @@ func (p *workspacePanel) refresh() error {
 		return nil
 	}
 	p.tab = workspaceTabIndex(p.ui.snapshot.Workspace.ActiveTab)
+	if p == p.ui.explorer {
+		p.tab = 0
+	} else if p.tab == 0 {
+		p.tab = 1
+	}
 	p.rebuildDockGrids()
 	return p.refreshBookmarks()
 }
 
 func (p *workspacePanel) refreshBookmarks() error {
+	if p.ui.backendBusy() || p.ui.shell.Busy() {
+		return nil
+	}
 	if p.ui.sessions == nil {
 		return nil
 	}
@@ -150,7 +179,16 @@ func (p *workspacePanel) applyWorkspaceAction(action WorkspaceAction) error {
 }
 
 func (p *workspacePanel) setTab(index int) {
-	p.tab = (index + len(workspaceTabs)) % len(workspaceTabs)
+	if p == p.ui.explorer {
+		index = 0
+	} else if index == 0 {
+		index = 1
+	}
+	if p == p.ui.explorer {
+		p.tab = 0
+	} else {
+		p.tab = 1 + (index-1+3)%3
+	}
 	if p.ui.sessions != nil {
 		_ = p.applyWorkspaceAction(WorkspaceAction{Kind: "set_tab", Title: workspaceTabs[p.tab]})
 	}
@@ -186,6 +224,7 @@ func (p *workspacePanel) ensureBookmarkGrid() *gridState {
 	}
 	result, _ := bookmarkResult(bookmark)
 	p.bookmarkGrid = newMinimalGridState(NewGridModel(result), "", bookmark.Title, p.width)
+	p.bookmarkGrid.SetTitle(fmt.Sprintf("Loaded · %d rows · %s", len(result.Rows), p.bookmarkGrid.baseTitle))
 	p.bookmarkGrid.SetStyle(p.ui.tableStyle)
 	p.bookmarkGrid.SetKeyHandler(p.handleBookmarkGridKey)
 	p.bookmarkGridID = bookmark.ID
@@ -236,6 +275,7 @@ func (p *workspacePanel) rebuildDockGrids() {
 			opts = append(opts, grid.WithInitialSort(columnIndexOf(data.Result.Columns, view.OrderBy), view.Descending))
 		}
 		next[dock.ID] = newProjectedGridState(model, data.RecordSetID, dock.Title, p.width, data.SourceRows, false, opts)
+		next[dock.ID].SetTitle(fmt.Sprintf("Loaded · %d rows · %s", len(model.Rows), next[dock.ID].baseTitle))
 		next[dock.ID].SetStyle(p.ui.tableStyle)
 		next[dock.ID].SetKeyHandler(p.handleDockGridKey)
 	}
@@ -360,7 +400,7 @@ func (p *workspacePanel) selectFromGridState(g *gridState, recordSetID, viewID, 
 
 // --- explorer (Project tab) ------------------------------------------
 
-func (p *workspacePanel) explorerNodes() []explorerNode {
+func (p *workspacePanel) allExplorerNodes() []explorerNode {
 	catalog := p.ui.catalog
 	if len(catalog.Objects) == 0 {
 		return nil
@@ -451,7 +491,16 @@ func (p *workspacePanel) explorerNodes() []explorerNode {
 // as soon as the cursor lands on a non-project object and stays until the
 // cursor moves off it, with no Enter step.
 func (p *workspacePanel) projectExplorer(width, height int) string {
-	projectTitle := "Project: " + p.ui.catalog.Title
+	projectTitle := ""
+	if p != p.ui.explorer {
+		projectTitle = "Project: " + p.ui.catalog.Title
+	}
+	if p == p.ui.explorer {
+		if len(p.ui.catalog.Objects) == 0 {
+			return ansi.Wrap("Choose a project with F3. Browse Projects and Settings in the center Explore pane.", max(1, width), " ")
+		}
+		return p.explorerNodesView(width, max(1, height-4)) + "\nEnter Open data\nAlt+A Attach\nCtrl+N New query\nAlt+I Details"
+	}
 	selected := p.selectedExplorerObject()
 	if selected == nil {
 		return panelCard(projectTitle, p.explorerNodesView(max(1, width-2), max(1, height-2)), width, height)
@@ -503,12 +552,17 @@ func (p *workspacePanel) explorerNodesView(width, height int) string {
 				fold = "▸"
 			}
 		}
-		label := fmt.Sprintf("%s%s %s %s", strings.Repeat("  ", node.depth), fold, marker, sanitizeTerminalText(node.label))
+		indent := strings.Repeat("  ", node.depth)
+		if width < 24 {
+			// Preserve readable object names in compact Explorer panes.
+			indent = strings.Repeat(" ", min(node.depth, 2))
+		}
+		label := fmt.Sprintf("%s%s %s %s", indent, fold, marker, sanitizeTerminalText(node.label))
 		if node.issue {
 			label = lipgloss.NewStyle().Bold(true).Foreground(theme.AccentColor()).Render(ansi.Truncate(label, width, "…"))
 		}
 		if i == p.explorerIndex && p.focused {
-			bg, fg := theme.FocusSurfaceColors()
+			bg, fg := theme.NeutralSurfaceColors(true)
 			label = lipgloss.NewStyle().Bold(true).Foreground(fg).Background(bg).Render(ansi.Truncate(label, width, "…"))
 		}
 		lines = append(lines, label)
@@ -638,13 +692,16 @@ func panelCard(title, body string, width, height int) string {
 // inspector_ui.go's inspectorWorkspaceView numbering, whose case default is
 // "row").
 func (p *workspacePanel) inspectorView(width, height int) string {
-	tabs := []string{"1 Current row", "2 Current column", "3 Current recordset"}
+	if p.relatedFocused {
+		return p.relatedView(width, height)
+	}
+	tabs := []string{"Current row", "Current column", "Current result"}
 	if width < 55 {
-		tabs = []string{"1 Row", "2 Column", "3 Recordset"}
+		tabs = []string{"Row", "Column", "Result"}
 	}
 	for i := range tabs {
 		if i == p.inspectorSubTab {
-			tabs[i] = "● " + tabs[i]
+			tabs[i] = "[" + tabs[i] + "]"
 		}
 	}
 	header := ansi.Truncate(strings.Join(tabs, " · "), width, "…")
@@ -666,16 +723,21 @@ func (p *workspacePanel) inspectorView(width, height int) string {
 // currentRowDetails is inspector_ui.go's (*UI).currentRowDetails, ported to
 // activeGrid (chatui_inspector.go) instead of u.activeInspectorGrid.
 func (p *workspacePanel) currentRowDetails(width int) []string {
+	if groups, ok := p.ui.shell.CenterPanel().(*localGroupsPanel); ok {
+		text := "Local loaded snapshot\n" + groups.title + "\n\nGrouped rows have no database entity identity.\nEnter shows captured constituent rows.\nEsc restores the original result and its retained selection."
+		return strings.Split(ansi.Wrap(text, max(1, width), " "), "\n")
+	}
 	g, record, ok := p.ui.activeGrid()
 	rowIndex := -1
 	if ok && g != nil {
 		rowIndex = g.CurrentIndex()
 	}
 	if !ok || g == nil || rowIndex < 0 || rowIndex >= len(g.Rows()) {
-		return []string{p.selectedDetails(width)}
+		return strings.Split(ansi.Wrap(p.selectedDetails(width), max(1, width), " "), "\n")
 	}
 	rawRow := g.rawRow(rowIndex)
-	lines := []string{fmt.Sprintf("Row %d of %d · %s", rowIndex+1, len(g.Rows()), sanitizeTerminalText(g.baseTitle)), ""}
+	identity := p.ui.inspectionIdentity(g, record)
+	lines := append(strings.Split(ansi.Wrap(identity, max(1, width), " "), "\n"), fmt.Sprintf("Row %d of %d", rowIndex+1, len(g.Rows())), "")
 	nameWidth, numberWidth := 0, 0
 	for i, column := range g.Columns() {
 		nameWidth = max(nameWidth, ansi.StringWidth(column.Name))
@@ -698,6 +760,12 @@ func (p *workspacePanel) currentRowDetails(width int) []string {
 		if typeLabel == "" {
 			typeLabel = "?"
 		}
+		if width < 32 {
+			lines = append(lines, strings.Split(ansi.Wrap(column.Name+" ("+typeLabel+")", max(1, width), " "), "\n")...)
+			lines = append(lines, strings.Split(ansi.Wrap(value, max(1, width), " "), "\n")...)
+			lines = append(lines, "")
+			continue
+		}
 		if column.Numeric {
 			value = strings.Repeat(" ", max(0, numberWidth-ansi.StringWidth(value))) + value
 		}
@@ -709,6 +777,7 @@ func (p *workspacePanel) currentRowDetails(width int) []string {
 	if selection := p.ui.snapshot.Workspace.CurrentSelectionID; selection != "" {
 		lines = append(lines, "Selection", p.selectedDetails(width))
 	}
+	lines = append(lines, "", p.relatedView(width))
 	return lines
 }
 
@@ -743,7 +812,7 @@ func (p *workspacePanel) currentColumnDetails(width int) []string {
 	}
 	var related []string
 	var constraints []string
-	if p.ui.sessions != nil && record != nil {
+	if p.ui.sessions != nil && record != nil && !p.ui.backendBusy() && !p.ui.shell.Busy() {
 		if candidates, err := p.ui.sessions.JoinCandidates(p.ui.ctx, record.ID); err == nil {
 			for _, candidate := range candidates {
 				for _, pair := range candidate.Fields {
@@ -799,7 +868,7 @@ func (p *workspacePanel) currentRecordsetDetails(width int) []string {
 func (p *workspacePanel) selectedDetails(width int) string {
 	selection, ok := p.ui.snapshot.Workspace.Selections[p.ui.snapshot.Workspace.CurrentSelectionID]
 	if !ok {
-		return "No durable selection. Focus a grid and press Space for a row, c for a cell, or r for a range."
+		return "No durable selection. Focus a result, then Alt+A Actions → Select row, cell, or range."
 	}
 	view := p.ui.snapshot.Workspace.Views[selection.ViewID]
 	record, ok := p.ui.snapshot.RecordSets[view.RecordSetID]
@@ -921,7 +990,7 @@ func (p *workspacePanel) bookmarksView(width, height int) string {
 		}
 		label := fmt.Sprintf("%s%s · %d rows · %s%s", marker, sanitizeTerminalText(bookmark.Title), len(result.Rows), bookmark.TargetKind, flags)
 		if i == p.bookmarkIndex && p.focused && !p.bookmarkGridFocused {
-			bg, fg := theme.FocusSurfaceColors()
+			bg, fg := theme.NeutralSurfaceColors(true)
 			label = lipgloss.NewStyle().Bold(true).Foreground(fg).Background(bg).Render(ansi.Truncate(label, width, "…"))
 		}
 		lines = append(lines, label)
@@ -969,15 +1038,21 @@ func (p *workspacePanel) tabStripHeader(width int) string {
 	render := func(labels []string) string {
 		tabs := make([]string, len(labels))
 		for i, label := range labels {
+			if p == p.ui.workspace && i == 0 {
+				continue
+			}
 			if i == p.tab {
 				// theme.FocusColor(), not a fixed "white" literal: a
 				// hardcoded light foreground reads fine on a dark panel
 				// but goes near-invisible on a light one (founder
 				// 2026-09-25: "the '● Proj' tab label is white-on-light").
-				tabs[i] = lipgloss.NewStyle().Bold(true).Foreground(theme.FocusColor()).Render("● " + label)
+				tabs[i] = lipgloss.NewStyle().Bold(true).Render("[" + label + "]")
 			} else {
 				tabs[i] = lipgloss.NewStyle().Foreground(theme.MutedColor()).Render(label)
 			}
+		}
+		if p == p.ui.workspace {
+			tabs = tabs[1:]
 		}
 		return strings.Join(tabs, " · ")
 	}
@@ -999,9 +1074,18 @@ func (p *workspacePanel) tabStripHeader(width int) string {
 
 // View satisfies chatshell.SidePanel.
 func (p *workspacePanel) View(width, height int, focused bool) string {
+	if p == p.ui.workspace && p.tab == 0 {
+		p.tab = 1
+	}
 	p.width, p.height, p.focused = width, height, focused
 	width, height = max(1, width), max(1, height)
 	header := p.tabStripHeader(width)
+	if p == p.ui.explorer {
+		header = "Search /  " + sanitizeTerminalText(p.explorerSearch)
+		if p.explorerSearchFocused {
+			header += "▏"
+		}
+	}
 	var body string
 	switch workspaceTabs[p.tab] {
 	case "Project":
@@ -1038,6 +1122,74 @@ func (p *workspacePanel) Update(msg tea.Msg) (chatshell.SidePanel, tea.Cmd) {
 }
 
 func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
+	if p == p.ui.explorer && msg.String() == "alt+i" {
+		if object := p.selectedExplorerObject(); object != nil {
+			return p.ui.shell.PushOverlay(newCatalogDetailsOverlay(*object))
+		}
+		return nil
+	}
+	if p == p.ui.workspace && msg.String() == "alt+i" {
+		p.tab = 1
+		p.relatedFocused = false
+		p.inspectorSubTab = (p.inspectorSubTab + 1) % 3
+		return nil
+	}
+	if p == p.ui.explorer && (msg.String() == "alt+a" || msg.String() == "ctrl+n") {
+		if object := p.selectedExplorerObject(); object != nil {
+			if msg.String() == "ctrl+n" {
+				return p.ui.openWorkspaceQuery(*object, false)
+			}
+			p.performWorkspaceAction(WorkspaceAction{Kind: "attach", Reference: object.Reference})
+			p.ui.shell.FocusComposer()
+		}
+		return nil
+	}
+	if p.relatedFocused {
+		switch msg.String() {
+		case "esc":
+			p.relatedFocused = false
+			p.cancelRelated()
+		case "up":
+			p.relatedIndex = max(0, p.relatedIndex-1)
+		case "down":
+			p.relatedIndex = min(max(0, len(p.relatedRecords)-1), p.relatedIndex+1)
+		case "enter":
+			return p.openRelated(p.relatedIndex)
+		}
+		return nil
+	}
+	if p == p.ui.explorer && msg.Text != "" && msg.Mod & ^tea.ModShift == 0 && msg.String() != "/" {
+		p.explorerSearchFocused = true
+	}
+
+	if p == p.ui.explorer && p.explorerSearchFocused {
+		switch msg.String() {
+		case "esc":
+			if p.explorerSearch != "" {
+				p.explorerSearch = ""
+			} else {
+				p.explorerSearchFocused = false
+			}
+		case "enter", "down":
+			p.explorerSearchFocused = false
+		case "backspace":
+			r := []rune(p.explorerSearch)
+			if len(r) > 0 {
+				p.explorerSearch = string(r[:len(r)-1])
+			}
+		default:
+			if msg.Text != "" {
+				p.explorerSearch += msg.Text
+			}
+		}
+		p.explorerIndex = 0
+		return nil
+	}
+	if p == p.ui.explorer && msg.String() == "/" {
+		p.explorerSearchFocused = true
+		return nil
+	}
+
 	if p.bookmarkMode != "" {
 		p.updateBookmarkInput(msg)
 		return nil
@@ -1061,8 +1213,20 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return nil
 	}
+	// Plain text outside explicit input/picker modes never activates Inspect
+	// actions. Explorer has already consumed printable input as search above.
+	if p != p.ui.explorer && msg.Mod & ^tea.ModShift == 0 && msg.Text != "" {
+		return nil
+	}
 	nodes := p.explorerNodes()
-	switch msg.String() {
+	key := msg.String()
+	for modified, action := range map[string]string{"alt+a": "a", "alt+b": "b", "alt+d": "d", "alt+r": "r", "alt+t": "t", "alt+shift+t": "T", "alt+T": "T", "ctrl+f": "/", "alt+f": "f", "alt+x": "x"} {
+		if key == modified {
+			key = action
+			break
+		}
+	}
+	switch key {
 	case "pgdown":
 		if p.tab == 0 && p.selectedExplorerObject() != nil {
 			p.explorerDetailOffset += max(1, p.height/4)
@@ -1138,6 +1302,8 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 			if p.explorerIndex >= 0 && p.explorerIndex < len(nodes) {
 				if node := nodes[p.explorerIndex]; node.branch {
 					p.explorerCollapsed[node.id] = !p.explorerCollapsed[node.id]
+				} else if object := p.selectedExplorerObject(); object != nil {
+					return p.ui.openWorkspaceQuery(*object, true)
 				}
 			}
 		} else if p.tab == 2 && len(p.ui.snapshot.Workspace.Docks) > 0 {
@@ -1223,6 +1389,12 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (p *workspacePanel) updateBookmarkInput(msg tea.KeyPressMsg) {
+	if msg.String() == "esc" {
+		p.bookmarkMode = ""
+		p.bookmarkEditor.Blur()
+		p.bookmarkEditor.SetValue("")
+		return
+	}
 	if msg.String() != "enter" {
 		p.bookmarkEditor, _ = p.bookmarkEditor.Update(msg)
 		return
@@ -1262,3 +1434,19 @@ func (p *workspacePanel) updateBookmarkInput(msg tea.KeyPressMsg) {
 }
 
 var _ chatshell.SidePanel = (*workspacePanel)(nil)
+
+// explorerNodes filters the existing tree without changing object identities.
+func (p *workspacePanel) explorerNodes() []explorerNode {
+	nodes := p.allExplorerNodes()
+	query := strings.ToLower(strings.TrimSpace(p.explorerSearch))
+	if query == "" {
+		return nodes
+	}
+	filtered := make([]explorerNode, 0, len(nodes))
+	for _, node := range nodes {
+		if strings.Contains(strings.ToLower(node.label), query) {
+			filtered = append(filtered, node)
+		}
+	}
+	return filtered
+}

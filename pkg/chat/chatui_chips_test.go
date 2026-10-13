@@ -116,21 +116,20 @@ func TestChatUIComposerAttachmentChipsCanBeFocusedClearedAndRestored(t *testing.
 		t.Fatalf("Shift+Esc restore after Backspace should leave composer text untouched:\n%s", ansi.Strip(u.shell.View().Content))
 	}
 
-	// First Esc clears the composer TEXT only, not the chip/attachment.
+	// Workspace Esc retains both the draft and attachments when returning
+	// focus. Explicit removal and its undo keep the durable attachment journey.
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
-	if strings.Contains(ansi.Strip(u.shell.View().Content), "Top 5 rows") || len(u.snapshot.Workspace.Attachments) != 1 {
-		t.Fatalf("first Esc should clear text only: attachments=%+v\n%s", u.snapshot.Workspace.Attachments, ansi.Strip(u.shell.View().Content))
+	if !strings.Contains(ansi.Strip(u.shell.View().Content), "Top 5 rows") || len(u.snapshot.Workspace.Attachments) != 1 {
+		t.Fatal("Esc lost composer draft/context")
 	}
-	// Second Esc (text already empty) detaches every chip.
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	u.shell.FocusComposer()
+	u.shell.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if len(u.snapshot.Workspace.Attachments) != 0 {
-		t.Fatalf("second Esc should clear attachments: %+v", u.snapshot.Workspace.Attachments)
+		t.Fatal("explicit removal failed")
 	}
-	// Shift+Esc restores both the text and the attachment cleared by the
-	// two-step Esc.
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEsc, Mod: tea.ModShift})
 	if !strings.Contains(ansi.Strip(u.shell.View().Content), "Top 5 rows") || len(u.snapshot.Workspace.Attachments) != 1 {
-		t.Fatalf("Shift+Esc did not restore draft and attachment: attachments=%+v\n%s", u.snapshot.Workspace.Attachments, ansi.Strip(u.shell.View().Content))
+		t.Fatal("undo lost draft/context")
 	}
 
 	// A click on the chip's × glyph removes it.

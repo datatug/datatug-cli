@@ -1,6 +1,7 @@
 package chat
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -10,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-cli/pkg/chat/narrowing"
 	"github.com/datatug/datatug-cli/pkg/chat/narrowing/narrowingtest"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -343,10 +343,11 @@ func TestUserSeesTheNarrowingNotice(t *testing.T) {
 		Turn{Text: "second answer"},
 		Turn{Text: "third answer", Narrowing: narrowed("Track")},
 	)
+	u.shell.Update(tea.WindowSizeMsg{Width: 220, Height: 60})
 	for _, prompt := range []string{"one", "two", "three"} {
 		drainCmd(t, u, u.Submit(prompt))
 	}
-	live := ansi.Strip(u.shell.View().Content)
+	live := flattenView(u.shell.View().Content)
 	for _, want := range []string{`Context narrowed to 2 of 11 tables: "Invoice", "Customer".`, `Context narrowed to 1 of 11 tables: "Track".`} {
 		if !strings.Contains(live, want) {
 			t.Fatalf("live view lacks %q:\n%s", want, live)
@@ -361,7 +362,7 @@ func TestUserSeesTheNarrowingNotice(t *testing.T) {
 		t.Fatal(err)
 	}
 	u.loadSession(snapshot)
-	reloaded := ansi.Strip(u.shell.View().Content)
+	reloaded := flattenView(u.shell.View().Content)
 	first, second, third := strings.Index(reloaded, "Invoice\", \"Customer"), strings.Index(reloaded, "two"), strings.Index(reloaded, `tables: "Track"`)
 	answer1, answer3 := strings.Index(reloaded, "first answer"), strings.Index(reloaded, "third answer")
 	if first < 0 || third < 0 || answer1 >= first || first >= second || answer3 >= third {

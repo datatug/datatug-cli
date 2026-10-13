@@ -34,13 +34,17 @@ type gridState struct {
 	rawBody      []byte
 	httpResponse *HTTPResponse
 	versionBadge string
+	scopeLabel   string
+	localScope   bool
+	record       *RecordSet
 	// entryID is the transcript block ID this grid is currently appended
 	// under (set by ChatUI.appendGridResult/loadSession). It lets a caller
 	// that only has a RecordSetID — e.g. OnMsg's bridgeTickMsg case,
 	// restoring focus across a session reload — recover the id
 	// chatshell.Model.FocusEntry needs, without chatshell offering a
 	// focus-by-ref lookup.
-	entryID string
+	entryID       string
+	loadedCapture *loadedResultCapture
 }
 
 // setVersionBadge prefixes ("unchanged"/"changed") or clears the grid's
@@ -247,7 +251,13 @@ func (g *gridState) headersExtraView() grid.ExtraView {
 func viewportScrollUpdate(vp *viewport.Model) func(*grid.Model, tea.KeyPressMsg) (tea.Cmd, bool) {
 	return func(_ *grid.Model, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		switch msg.String() {
-		case "up", "down", "pgup", "pgdown", "home", "end":
+		case "home":
+			vp.GotoTop()
+			return nil, true
+		case "end":
+			vp.GotoBottom()
+			return nil, true
+		case "up", "down", "pgup", "pgdown":
 			var cmd tea.Cmd
 			*vp, cmd = vp.Update(msg)
 			return cmd, true

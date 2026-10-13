@@ -350,6 +350,9 @@ func (c *SessionChat) applyJoinCandidate(ctx context.Context, recordSetID string
 	if query.Err != nil {
 		return RecordSet{}, query.Err
 	}
+	if err := ctx.Err(); err != nil {
+		return RecordSet{}, err
+	}
 	if query.Source == "" {
 		query.Source = c.source
 	}

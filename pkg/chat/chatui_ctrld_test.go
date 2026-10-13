@@ -32,16 +32,27 @@ func TestChatUICtrlDDetachesLastAttachment(t *testing.T) {
 		t.Fatalf("Ctrl+D with no attachments = %+v, want none", u.snapshot.Workspace.Attachments)
 	}
 
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
-	for index, node := range u.workspace.explorerNodes() {
-		if node.objectIndex >= 0 && u.catalog.Objects[node.objectIndex].Reference.Kind == "table" {
-			u.workspace.explorerIndex = index
+	// Navigate the actual Explorer, select the table, and use its explicit
+	// attach-to-composer action before exercising Ctrl+D.
+	u.shell.FocusLeftPanel()
+	selectedTable := false
+	for range 32 {
+		if object := u.explorer.selectedExplorerObject(); object != nil && object.Reference.Kind == "table" {
+			selectedTable = true
 			break
 		}
+		u.shell.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		u.shell.View()
 	}
-	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeySpace}) // attach
+	if !selectedTable {
+		t.Fatal("could not navigate Explorer to a table")
+	}
+	u.shell.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt})
 	if len(u.snapshot.Workspace.Attachments) != 1 {
 		t.Fatalf("attach = %+v, want 1", u.snapshot.Workspace.Attachments)
+	}
+	if u.shell.WorkspaceFocus() != "input" {
+		t.Fatalf("Alt+A should return focus to the composer, got %q", u.shell.WorkspaceFocus())
 	}
 
 	u.shell.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})

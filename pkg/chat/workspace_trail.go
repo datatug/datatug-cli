@@ -318,10 +318,12 @@ func (u *ChatUI) reconcileResults(snapshot ChatSession, skipOwnedPrompt ...bool)
 			}
 			if message.Role == "You" {
 				if len(skipOwnedPrompt) == 0 || !skipOwnedPrompt[0] {
-					u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(message.Text))
+					u.transcriptMessageEntries[message.ID] = u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(message.Text))
 				}
 			} else if response, ok := snapshot.HTTPResponses[message.HTTPResponseID]; ok {
-				u.appendKindedBlock("http", transcriptEntryKindHTTP, &httpDocumentBlock{ui: u, text: response.displayText(), markdown: message.Kind == "markdown", response: &response})
+				block := &httpDocumentBlock{ui: u, text: response.displayText(), markdown: message.Kind == "markdown", response: &response}
+				u.transcriptMessageEntries[message.ID] = u.appendKindedBlock("http", transcriptEntryKindHTTP, block)
+				u.httpBlocksByMessageID[message.ID] = block
 			} else if message.Kind == "markdown" {
 				u.shell.AppendAssistantMarkdown(message.Text)
 			} else {

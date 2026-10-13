@@ -346,8 +346,8 @@ github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81P
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
-github.com/strongo/aichat v0.13.1 h1:RpGMKQPeMwmZoQqLwsME/6zI9BT462q3ELAbrfZPlYY=
-github.com/strongo/aichat v0.13.1/go.mod h1:PUZv/AOFI5BuCKCIB9PWeKLwVVgkZoEXHO5bvf5XDq0=
+github.com/strongo/aichat v0.14.0 h1:5kYAHjTNBHX5abO4eim20I9ZxDNDXzaPwGA5HxvKTRM=
+github.com/strongo/aichat v0.14.0/go.mod h1:xOWiXdcWb/ykkbZvaZyUrbNC7cgqTsNL7cnQTEweVwc=
 github.com/strongo/analytics v0.2.8 h1:h0snZrFba1DDI7H/RcePbq3V8MeuOrZFC8kj5ZJkp/I=
 github.com/strongo/analytics v0.2.8/go.mod h1:/pf7goR1CZtkvZHrJH5sXpJJl6IAefWCx82eSGUZ2V0=
 github.com/strongo/buildinfo v0.3.0 h1:nPbCrSA+7I3bct6mwZ24U6SHfV7TaRafoYzDucwl1Qg=
@@ -370,8 +370,8 @@ github.com/strongo/validation v0.0.15 h1:k5rM/DmRlEXYAlH/n9vlUYku1k7qQWVdg2PRAXS
 github.com/strongo/validation v0.0.15/go.mod h1:EY+//fgQhn6rr0rOvWRJuUCTSk5BIETZL2bL9CIDhbs=
 github.com/tiendc/go-deepcopy v1.7.2 h1:Ut2yYR7W9tWjTQitganoIue4UGxZwCcJy3orjrrIj44=
 github.com/tiendc/go-deepcopy v1.7.2/go.mod h1:4bKjNC2r7boYOkD2IOuZpYjmlDdzjbpTRyCx+goBCJQ=
-github.com/tuigoff/tuigoff v0.6.0 h1:FEpTTZdzLNv3G4Rf78vYL7i8cqOlK0wu5OO5QGUwIcM=
-github.com/tuigoff/tuigoff v0.6.0/go.mod h1:LJaZzBq+VLMspcisfUrhXoHjoC9/g7b6FwNUPbpDz7c=
+github.com/tuigoff/tuigoff v0.7.0 h1:9BlV/peitwg6bHrMCL1CUEdYxyepTd9td0TsZgSG6Qw=
+github.com/tuigoff/tuigoff v0.7.0/go.mod h1:LJaZzBq+VLMspcisfUrhXoHjoC9/g7b6FwNUPbpDz7c=
 github.com/xanzy/ssh-agent v0.3.3 h1:+/15pJfg/RsTxqYcX6fHqOXZwwMP+2VyYWJeWM2qQFM=
 github.com/xanzy/ssh-agent v0.3.3/go.mod h1:6dzNDKs0J9rVPHPhaGCukekBHKqfl+L3KghI1Bc68Uw=
 github.com/xo/dburl v0.24.2 h1:aK6ASamrFjKl76h/UCBecc0BPBi97+IVmw4YWxx0rno=

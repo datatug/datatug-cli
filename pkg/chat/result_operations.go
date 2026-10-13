@@ -518,7 +518,7 @@ func (o *resultOperationOverlay) applyLoaded() tea.Cmd {
 		o.grid.localScope = true
 		o.grid.scopeLabel = fmt.Sprintf("Loaded · %d rows", len(rows))
 		o.ui.resultScope(o.grid, o.record)
-		o.ui.workspaceFeedback = fmt.Sprintf("Sorted %d loaded rows · %s · Alt+S reset / server options", len(rows), strings.Join(o.names(), ", "))
+		o.ui.workspaceFeedback = fmt.Sprintf("Sorted %d loaded rows · %s · Ctrl+P Actions → Sort to reset or review server options", len(rows), strings.Join(o.names(), ", "))
 		return nil
 	}
 	terms := o.aggregateTerms()

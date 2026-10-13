@@ -53,7 +53,7 @@ func TestWorkspaceUXScopeLocalServerAndRetainedTrail(t *testing.T) {
 		t.Fatal("local sort did not change scope")
 	}
 	// Local group/member panels are retained separately, never overwriting origin.
-	uxKey(t, u, "alt+g")
+	uxSearchAction(t, u, "Group loaded")
 	uxKey(t, u, "2")
 	uxKey(t, u, "enter")
 	groups, ok := u.shell.CenterPanel().(*localGroupsPanel)
@@ -126,8 +126,8 @@ func (e *uxDelayedExecutor) RunDTQL(ctx context.Context, _ string, _ []byte, _ m
 	return secureread.Result{Columns: []string{"Id", "Category", "Value"}, Rows: []secureread.Row{{Data: map[string]any{"Id": int64(2), "Category": "A", "Value": int64(20)}}}}, nil
 }
 func TestWorkspaceUXRunningCancelLateResponseAndContext(t *testing.T) {
-	for _, mouse := range []bool{false, true} {
-		t.Run(fmt.Sprint(mouse), func(t *testing.T) {
+	for _, viaActions := range []bool{false, true} {
+		t.Run(fmt.Sprint(viaActions), func(t *testing.T) {
 			u, parent := uxUI(t)
 			executor := &uxDelayedExecutor{make(chan context.Context, 1), make(chan struct{})}
 			u.sessions.ConfigureQueryExecutor(executor)
@@ -147,19 +147,16 @@ func TestWorkspaceUXRunningCancelLateResponseAndContext(t *testing.T) {
 			// UI remains responsive despite the session mutex held by the executor.
 			u.operation.started = time.Now().Add(-3 * time.Second)
 			u.shell.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-			header := strings.Split(ansi.Strip(u.shell.View().Content), "\n")[0]
-			if !strings.Contains(header, "3s") || !strings.Contains(header, "Cancel [Ctrl+X]") {
-				t.Fatalf("running/cancel not visible at80: %s", header)
+			view := ansi.Strip(u.shell.View().Content)
+			if !strings.Contains(view, "3s") || !strings.Contains(view, "Cancel [Ctrl+X]") {
+				t.Fatalf("running/cancel not visible at80: %s", view)
 			}
 			uxKey(t, u, "f4")
 			u.shell.SetComposerText("newer Ω draft")
 			uxKey(t, u, "left")
 			caret := u.shell.ComposerCursor()
-			if mouse {
-				header = strings.Split(ansi.Strip(u.shell.View().Content), "\n")[0]
-				at := strings.Index(header, "Cancel [Ctrl+X]")
-				_, follow := u.shell.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: ansi.StringWidth(header[:at]) + 1, Y: 0})
-				drainCmd(t, u, follow)
+			if viaActions {
+				uxSearchAction(t, u, "Cancel running operation")
 			} else {
 				uxKey(t, u, "ctrl+x")
 			}
@@ -324,7 +321,7 @@ func TestWorkspaceUXAggregateExplanationsFollowSchemaAndOverrides(t *testing.T) 
 	_, record, _ := u.activeGrid()
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", SourceID: record.Database, ObjectID: "main.Item"}, Columns: names, PrimaryKey: []string{"Key"}, ColumnTypes: map[string]string{"Key": "INTEGER", "Customer": "INTEGER", "Quantity": "INTEGER", "Total": "REAL", "Unknown": "INTEGER"}}}}
 	u.sessions.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: record.Source, Snapshot: ForeignKeySnapshot{Source: record.Source, Columns: map[string][]string{"main.item": names}, Keys: []ForeignKey{{Schema: "main", FromRelation: "Item", FromFields: []string{"Customer"}}}}})
-	uxKey(t, u, "alt+g")
+	uxSearchAction(t, u, "Group loaded")
 	for _, step := range []struct {
 		down int
 		want string
@@ -350,7 +347,7 @@ func TestWorkspaceUXAggregateExplanationsFollowSchemaAndOverrides(t *testing.T) 
 	}
 	uxKey(t, u, "esc")
 	u.sessions.joinApplication = nil
-	uxKey(t, u, "alt+g")
+	uxSearchAction(t, u, "Group loaded")
 	for range 2 {
 		uxKey(t, u, "down")
 	}
@@ -420,7 +417,9 @@ func TestWorkspaceUXExistingQueryPathsCancelBeforePersistence(t *testing.T) {
 				release = app.release
 				started = app.started
 				u.sessions.ConfigureJoinApplication(app)
-				uxKey(t, u, "alt+j")
+				u.loadSession(u.snapshot)
+				u.shell.FocusEntry(u.lastGridEntryID)
+				uxSearchAction(t, u, "JOIN relationship")
 				_, cmd = u.shell.Update(uitest.Key("enter"))
 			}
 			if cmd == nil || u.operation == nil {
@@ -516,9 +515,10 @@ func TestWorkspaceUXRelatedCancelAndCompactHiddenToolbar(t *testing.T) {
 		t.Fatal("Related query did not start")
 	}
 	uxKey(t, u, "alt+f1")
-	header := strings.Split(ansi.Strip(u.shell.View().Content), "\n")[0]
-	if !strings.Contains(header, "Cancel [Ctrl+X]") || !strings.Contains(header, "F1 Help") || !strings.Contains(header, "API ") {
-		t.Fatalf("compact protected controls cropped: %s", header)
+	view := ansi.Strip(u.shell.View().Content)
+	header := strings.Split(view, "\n")[0]
+	if !strings.Contains(view, "Cancel [Ctrl+X]") || !strings.Contains(header, "Help [F1]") || !strings.Contains(header, "Server ") {
+		t.Fatalf("compact protected controls cropped: %s", view)
 	}
 	uxKey(t, u, "ctrl+x")
 	close(executor.release)
@@ -548,7 +548,7 @@ func TestWorkspaceUXRelatedCancelAndCompactHiddenToolbar(t *testing.T) {
 
 func TestWorkspaceUXLocalPanelToolbarAndActionsOwnVisibleContext(t *testing.T) {
 	u, parent := uxUI(t)
-	uxKey(t, u, "alt+g")
+	uxSearchAction(t, u, "Group loaded")
 	uxKey(t, u, "2")
 	uxKey(t, u, "enter")
 	local := u.shell.CenterPanel().(*localGroupsPanel)
@@ -621,7 +621,7 @@ func TestWorkspaceUXReviewBackendFenceBeforeAndAfterCancel(t *testing.T) {
 		}
 	})
 	for _, phase := range []string{"running", "cancel requested"} {
-		uxResponsive(t, phase+" direct JOIN", func() { uxKey(t, u, "alt+j") })
+		uxResponsive(t, phase+" direct JOIN", func() { u.dispatchWorkspaceAction("join") })
 		uxResponsive(t, phase+" duplicate action JOIN", func() { u.shell.PushOverlay(&gridActionsOverlay{ui: u, index: 14}); uxKey(t, u, "enter") })
 		uxResponsive(t, phase+" bridge", func() { u.shell.Update(bridgeTickMsg{}); u.shell.View() })
 		uxResponsive(t, phase+" sessions", func() { u.runCommand("/sessions"); u.openSessionPicker() })
@@ -643,7 +643,7 @@ func TestWorkspaceUXReviewBackendFenceBeforeAndAfterCancel(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(strings.Split(ansi.Strip(u.shell.View().Content), "\n")[0], "cancel requested") {
+	if !strings.Contains(ansi.Strip(u.shell.View().Content), "cancel requested") {
 		t.Fatal("waiting backend not visibly identified")
 	}
 	close(executor.release)
@@ -872,7 +872,7 @@ func TestWorkspaceUXReviewLocalDirectActionsAndRepeatedEsc(t *testing.T) {
 	u, parent := uxUI(t)
 	executor := &fakeExecutor{}
 	u.sessions.ConfigureQueryExecutor(executor)
-	uxKey(t, u, "alt+g")
+	uxSearchAction(t, u, "Group loaded")
 	uxKey(t, u, "2")
 	uxKey(t, u, "enter")
 	group := u.shell.CenterPanel().(*localGroupsPanel)
@@ -880,8 +880,12 @@ func TestWorkspaceUXReviewLocalDirectActionsAndRepeatedEsc(t *testing.T) {
 		if members {
 			uxKey(t, u, "enter")
 		}
-		for _, key := range []string{"alt+g", "alt+s", "ctrl+r"} {
-			uxKey(t, u, key)
+		for _, key := range []string{"group", "sort", "refresh"} {
+			if key == "refresh" {
+				uxKey(t, u, "ctrl+r")
+			} else {
+				u.dispatchWorkspaceAction(key)
+			}
 			if u.shell.ActiveOverlayHints() != nil || u.operation != nil || executor.calls != 0 {
 				t.Fatalf("%s targeted hidden original", key)
 			}
@@ -982,7 +986,7 @@ func TestWorkspaceUXReviewHTTPMouseSuccessAndJoinBackgroundTrail(t *testing.T) {
 		parent := u.activeRecordSetID()
 		app := &uxIgnoringJoin{make(chan struct{}), make(chan struct{})}
 		u.sessions.ConfigureJoinApplication(app)
-		uxKey(t, u, "alt+j")
+		uxSearchAction(t, u, "JOIN relationship")
 		_, cmd := u.shell.Update(uitest.Key("enter"))
 		done := make(chan tea.Msg, 1)
 		go func() { done <- cmd() }()

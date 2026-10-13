@@ -12,7 +12,17 @@ import (
 
 func TestWorkspaceActionsMouseRenderedRows(t *testing.T) {
 	u, _ := uxUI(t)
-	for _, selected := range []int{0, 16} {
+	inspectIndex := -1
+	for i, action := range u.workspaceActions() {
+		if action.id == "inspect" {
+			inspectIndex = i
+			break
+		}
+	}
+	if inspectIndex < 1 || u.workspaceActions()[inspectIndex-1].id != "explorer" {
+		t.Fatal("Explorer and Inspect actions unavailable")
+	}
+	for _, selected := range []int{0, inspectIndex} {
 		for _, point := range []struct {
 			name string
 			x, y int
@@ -33,7 +43,7 @@ func TestWorkspaceActionsMouseRenderedRows(t *testing.T) {
 		}
 	}
 	t.Run("visible scrolled action", func(t *testing.T) {
-		o := &workspaceActionsOverlay{ui: u, index: 16}
+		o := &workspaceActionsOverlay{ui: u, index: inspectIndex}
 		view := o.View(40, 5)
 		if !strings.Contains(view, "Toggle Inspect") {
 			t.Fatal(view)
@@ -52,7 +62,7 @@ func TestWorkspaceActionsMouseRenderedRows(t *testing.T) {
 		}
 	})
 	t.Run("visible unselected row", func(t *testing.T) {
-		o := &workspaceActionsOverlay{ui: u, index: 16, message: "old error"}
+		o := &workspaceActionsOverlay{ui: u, index: inspectIndex, message: "old error"}
 		o.View(80, 6)
 		_, cmd, done := o.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 2, Y: 2})
 		if !done || cmd == nil || cmd().(workspaceActionMsg).id != "explorer" || o.message != "" {
@@ -60,17 +70,17 @@ func TestWorkspaceActionsMouseRenderedRows(t *testing.T) {
 		}
 	})
 	t.Run("resize discards old rows", func(t *testing.T) {
-		o := &workspaceActionsOverlay{ui: u, index: 16}
+		o := &workspaceActionsOverlay{ui: u, index: inspectIndex}
 		o.View(80, 15)
 		o.View(20, 5)
 		_, cmd, done := o.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 2, Y: 3})
-		if done || cmd != nil || o.index != 16 {
+		if done || cmd != nil || o.index != inspectIndex {
 			t.Fatal("resized dialog retained a hidden clickable row")
 		}
 	})
 	for _, key := range []string{"down", "up", "x", "backspace"} {
 		t.Run("before redraw/"+key, func(t *testing.T) {
-			o := &workspaceActionsOverlay{ui: u, index: 16}
+			o := &workspaceActionsOverlay{ui: u, index: inspectIndex}
 			o.View(40, 5)
 			o.Update(uitest.Key(key))
 			before := o.index

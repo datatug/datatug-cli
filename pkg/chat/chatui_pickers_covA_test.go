@@ -78,13 +78,12 @@ func TestGlobalKeysCtrlRDelegatesToRefresh(t *testing.T) {
 func TestGlobalKeysAltSCyclesTableStyle(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	before := u.tableStyle.Name
-	if cmd, handled := u.globalKeys(tea.KeyPressMsg{Code: 'S', Mod: tea.ModAlt}); cmd == nil && !handled {
-		t.Fatalf("Alt+S: cmd=%v handled=%v", cmd, handled)
-	} else if !handled {
-		t.Fatal("Alt+S was not handled")
+	if _, handled := u.globalKeys(tea.KeyPressMsg{Code: 'S', Mod: tea.ModAlt}); handled {
+		t.Fatal("Alt+S must not execute a workspace action")
 	}
+	u.dispatchWorkspaceAction("style")
 	if u.tableStyle.Name == before {
-		t.Fatal("Alt+S did not cycle the table style")
+		t.Fatal("Actions did not cycle the table style")
 	}
 	// The macOS Option+S alias (ß) does the same thing.
 	u2, _ := newTestChatUI(t, nil, Turn{})
@@ -314,37 +313,41 @@ func TestSessionPickerOverlayUpdateBranches(t *testing.T) {
 	if o.index != 0 {
 		t.Fatalf("up at index 0 should stay clamped, got %d", o.index)
 	}
-	// "down"/j moves forward, clamped at the end.
+	// Arrow navigation moves forward, clamped at the end.
 	for range len(list) + 2 {
-		o.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+		o.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 	if o.index != len(list)-1 {
 		t.Fatalf("index after over-shooting down = %d, want %d", o.index, len(list)-1)
 	}
-	// "k" moves back up.
-	o.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	// Up moves back; printable j/k remain available for session search.
+	o.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	if o.index != len(list)-2 {
 		t.Fatalf("index after k = %d, want %d", o.index, len(list)-2)
 	}
-	// "esc"/"q" close without acting.
+	// Esc closes without acting.
 	if _, cmd, handled := o.Update(tea.KeyPressMsg{Code: tea.KeyEsc}); cmd != nil || !handled {
 		t.Fatalf("esc: cmd=%v handled=%v", cmd, handled)
 	}
-	if _, cmd, handled := o.Update(tea.KeyPressMsg{Code: 'q', Text: "q"}); cmd != nil || !handled {
-		t.Fatalf("q: cmd=%v handled=%v", cmd, handled)
+	if _, cmd, handled := o.Update(tea.KeyPressMsg{Code: 'q', Text: "q"}); cmd != nil || handled {
+		t.Fatalf("printable q: cmd=%v handled=%v", cmd, handled)
 	}
 	// "n" creates a new session and loads it.
 	firstID := u.sessionID
-	if _, cmd, handled := o.Update(tea.KeyPressMsg{Code: 'n', Text: "n"}); cmd != nil || !handled {
+	if _, cmd, handled := o.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl}); cmd == nil || !handled {
 		t.Fatalf("n: cmd=%v handled=%v", cmd, handled)
+	} else {
+		u.OnMsg(cmd())
 	}
 	if u.sessionID == firstID {
 		t.Fatal("n should have switched to a newly created session")
 	}
 	// "enter" switches to the session at the current index.
 	o2 := &sessionPickerOverlay{ui: u, sessions: list, index: 0}
-	if _, cmd, handled := o2.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd != nil || !handled {
+	if _, cmd, handled := o2.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd == nil || !handled {
 		t.Fatalf("enter: cmd=%v handled=%v", cmd, handled)
+	} else {
+		u.OnMsg(cmd())
 	}
 	if u.sessionID != list[0].ID {
 		t.Fatalf("enter did not switch to the chosen session: got %q, want %q", u.sessionID, list[0].ID)
@@ -358,6 +361,11 @@ func TestSessionPickerOverlayUpdateBranches(t *testing.T) {
 
 func TestSessionPickerOverlayEnterAndNAppendErrorReports(t *testing.T) {
 	u, sessions := newTestChatUI(t, nil, Turn{})
+	second, err := sessions.Create(u.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.loadSession(second)
 	list, err := sessions.List(u.ctx)
 	if err != nil || len(list) == 0 {
 		t.Fatal("expected an existing session")
@@ -365,14 +373,26 @@ func TestSessionPickerOverlayEnterAndNAppendErrorReports(t *testing.T) {
 	if err := sessions.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	o := &sessionPickerOverlay{ui: u, sessions: list, index: 0}
-	o.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !strings.Contains(u.shell.View().Content, "database is closed") {
-		t.Fatalf("expected Switch's error to appear after the store closed:\n%s", u.shell.View().Content)
+	target := 0
+	if list[target].ID == u.sessionID {
+		target = 1
 	}
-	o.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
-	if strings.Count(u.shell.View().Content, "database is closed") < 2 {
-		t.Fatalf("expected Create's error to also appear after the store closed:\n%s", u.shell.View().Content)
+	o := &sessionPickerOverlay{ui: u, sessions: list, index: target}
+	_, cmd, _ := o.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected async switch command")
+	}
+	u.OnMsg(cmd())
+	if !strings.Contains(u.workspaceFeedback, "database is closed") {
+		t.Fatalf("expected Switch's error after the store closed: %q", u.workspaceFeedback)
+	}
+	_, cmd, _ = o.Update(tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("expected async create command")
+	}
+	u.OnMsg(cmd())
+	if !strings.Contains(u.workspaceFeedback, "database is closed") {
+		t.Fatalf("expected Create's error after the store closed: %q", u.workspaceFeedback)
 	}
 }
 

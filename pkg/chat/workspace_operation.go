@@ -75,7 +75,7 @@ func (u *ChatUI) operationLabel() string {
 
 func (u *ChatUI) backendBusy() bool { return len(u.backends) > 0 }
 func (u *ChatUI) sessionFence() bool {
-	if !u.backendBusy() && !u.shell.Busy() {
+	if !u.chatTransition && !u.backendBusy() && !u.shell.Busy() {
 		return false
 	}
 	u.workspaceFeedback = "A server operation is still in flight; Cancel or wait for the source to stop."

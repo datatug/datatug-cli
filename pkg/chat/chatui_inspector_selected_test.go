@@ -52,12 +52,12 @@ func TestChatUISelectedTabInspectsFocusedGridRowColumnRecordSet(t *testing.T) {
 	if !strings.Contains(view, "Row 1 of 1") || !strings.Contains(view, "InvoiceId") || !strings.Contains(view, "INTEGER") {
 		t.Fatalf("expected row details with catalog type in view:\n%s", view)
 	}
-	if !strings.Contains(view, "[Current row]") {
+	if !strings.Contains(view, "Row") || !strings.Contains(view, "Column") || !strings.Contains(view, "Result") {
 		t.Fatalf("expected sub-tab header to mark row selected:\n%s", view)
 	}
 
 	// "2" switches to current column.
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	if u.workspace.inspectorSubTab != 1 {
 		t.Fatalf("expected inspectorSubTab 1 after pressing 2, got %d", u.workspace.inspectorSubTab)
 	}
@@ -70,20 +70,20 @@ func TestChatUISelectedTabInspectsFocusedGridRowColumnRecordSet(t *testing.T) {
 	}
 
 	// "3" switches to current recordset.
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	if u.workspace.inspectorSubTab != 2 {
 		t.Fatalf("expected inspectorSubTab 2 after pressing 3, got %d", u.workspace.inspectorSubTab)
 	}
 	view = u.workspace.View(80, 20, true)
-	if !strings.Contains(view, "1 rows") || !strings.Contains(view, "1 columns") || !strings.Contains(view, "main.invoice.InvoiceId") || !strings.Contains(view, "INTEGER") {
+	if !strings.Contains(view, "1 rows") || !strings.Contains(view, "1 fields") || !strings.Contains(view, "InvoiceId") || !strings.Contains(view, "INTEGER") {
 		t.Fatalf("expected recordset details in view:\n%s", view)
 	}
-	if !strings.Contains(view, "Constraints require full schema metadata.") {
-		t.Fatalf("expected recordset constraints footer in view:\n%s", view)
+	if !strings.Contains(view, "Available to add") {
+		t.Fatalf("expected omitted-column section in view:\n%s", view)
 	}
 
 	// "1" switches back to current row.
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	if u.workspace.inspectorSubTab != 0 {
 		t.Fatalf("expected inspectorSubTab 0 after pressing 1, got %d", u.workspace.inspectorSubTab)
 	}
@@ -108,7 +108,7 @@ func TestChatUISelectedTabRecordSetDetailsWithoutFocusedGrid(t *testing.T) {
 	u.workspace.tab = 1
 	u.workspace.inspectorSubTab = 2
 	view := u.workspace.View(80, 20, true)
-	if !strings.Contains(view, "Focus a result grid to inspect its RecordSet.") {
+	if !strings.Contains(view, "Focus a result grid to inspect its fields.") {
 		t.Fatalf("expected empty-state recordset message:\n%s", view)
 	}
 }

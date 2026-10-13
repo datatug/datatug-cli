@@ -219,7 +219,7 @@ func TestUnifiedWorkspaceHelpAdvertisesReachableGridActions(t *testing.T) {
 			t.Fatalf("grid advertises printable action %q", forbidden)
 		}
 	}
-	for _, want := range []string{"Ctrl+Space", "Ctrl+S", "Ctrl+E", "Alt+J", "type to search"} {
+	for _, want := range []string{"Ctrl+P Actions", "Ctrl+S", "Ctrl+E", "type to search"} {
 		if !strings.Contains(hints, want) {
 			t.Fatalf("missing reachable action %q: %s", want, hints)
 		}
@@ -282,13 +282,13 @@ func TestUnifiedWorkspaceJoinBlockAdvertisesModifiedPicker(t *testing.T) {
 	}
 	b.workspace = true
 	view := uitest.Plain(b.View(100, true))
-	if strings.Contains(view, "press j") || !strings.Contains(view, "Alt+J chooser") {
+	if strings.Contains(view, "press j") || !strings.Contains(view, "Ctrl+P Actions") {
 		t.Fatal("workspace JOIN advertises printable action")
 	}
 }
 
 func TestUnifiedWorkspaceAdvertisedModifiedDialogsDispatch(t *testing.T) {
-	for _, tc := range []struct{ key, want string }{{"ctrl+s", "Save as project query"}, {"ctrl+e", "Export RecordSet"}, {"alt+j", "JOIN relationship"}} {
+	for _, tc := range []struct{ key, want string }{{"ctrl+s", "Save as project query"}, {"ctrl+e", "Export RecordSet"}} {
 		t.Run(tc.key, func(t *testing.T) {
 			u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", DTQL: "from: {name: Widget}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}})
 			u.savedQueryService = &savedQueryStub{}

@@ -133,3 +133,112 @@ func TestNativeCaseAndScenarioFormsPreserveSemanticIntent(t *testing.T) {
 		t.Fatalf("Scenario step = %+v, %v", req, err)
 	}
 }
+
+func TestNativeFormValidationRejectsIncompleteActions(t *testing.T) {
+	for _, entry := range []struct {
+		kind   string
+		fields []field
+	}{
+		{"new-check", []field{f("ID", "check", ""), f("Title", "Check", ""), f("Inputs", "bad", "")}},
+		{"new-check", []field{f("ID", "", ""), f("Title", "Check", "")}},
+		{"first-step", []field{f("ID", "step", ""), f("Kind", "wrong", ""), f("Ref", "q", "")}},
+		{"add-validator", []field{f("ID", "", "")}},
+		{"new-promoted", validatorFields(detective.Validator{ID: "v", Kind: "non-null", Scope: "row", Severity: "error"}, "")},
+		{"new-promoted", []field{f("Catalog ID", "published", ""), f("Title", "Published", ""), f("ID", "", "")}},
+		{"new-case", []field{f("ID", "case", ""), f("Title", "", "")}},
+		{"new-query-validators", []field{f("Query ID", "", "")}},
+		{"first-query-validator", []field{f("ID", "", "")}},
+		{"run-query-validators", []field{f("Environment", "", "")}},
+		{"run-query-validators", []field{f("Environment", "qa", ""), f("Inputs", "invalid", "")}},
+		{"context", []field{f("Name", "", "")}},
+		{"context", []field{f("Name", "invoice_id", ""), f("Type", "integer", ""), f("Cardinality", "scalar", ""), f("Value", "bad", "")}},
+		{"evidence", []field{f("ID", "source", ""), f("Ref", "", "")}},
+		{"finding", []field{f("ID", "finding", ""), f("Text", "", "")}},
+		{"link-scenario", []field{f("Scenario ID", "", "")}},
+		{"link-scenario", []field{f("Scenario ID", "unknown", "")}},
+		{"choose-check", []field{f("Check ID", "", "")}},
+		{"event", []field{f("Message", "", "")}},
+		{"close", []field{f("Reason", "", "")}},
+		{"run", []field{f("Environment", "", "")}},
+		{"new-scenario", []field{f("ID", "scenario", ""), f("Title", "", "")}},
+		{"first-scenario-step", []field{f("ID", "step", ""), f("Kind", "invalid", ""), f("Ref", "q", "")}},
+		{"unsupported", nil},
+	} {
+		t.Run(entry.kind, func(t *testing.T) {
+			m := submissionModel(entry.kind, entry.fields)
+			if _, err := m.submitForm(); err == nil {
+				t.Fatalf("incomplete %s accepted: %+v", entry.kind, entry.fields)
+			}
+		})
+	}
+}
+
+func TestNativeEditAndRunFormsRetainSelectedResources(t *testing.T) {
+	check := detective.Check{ID: "invoice", Title: "Old", Inputs: []detective.Input{{Name: "invoice_id", Type: "integer", Cardinality: "scalar", Required: true}}}
+	m := submissionModel("edit-check", []field{f("ID", "invoice", ""), f("Title", "New", ""), f("Inputs", "invoice_id:integer:scalar:required", "")})
+	m.form.check = check
+	req, err := m.submitForm()
+	if err != nil || req.Type != "save-check" || req.Check.Title != "New" || len(req.Check.Inputs) != 1 {
+		t.Fatalf("Check edit = %+v, %v", req, err)
+	}
+	check.Steps = []detective.Step{{ID: "load", Kind: "query", QueryID: "q", Validators: []detective.Validator{{ID: "nonnull", Kind: "non-null", Scope: "row", Severity: "error", Field: "InvoiceId"}}}}
+	m = submissionModel("edit-validator", validatorFields(detective.Validator{ID: "nonnull", Kind: "non-null", Scope: "row", Severity: "error", Field: "CustomerId"}, ""))
+	m.form.check, m.form.stepIndex, m.form.validatorIndex = check, 0, 0
+	req, err = m.submitForm()
+	if err != nil || req.Check.Steps[0].Validators[0].Field != "CustomerId" {
+		t.Fatalf("Validator semantic edit = %+v, %v", req, err)
+	}
+	m = submissionModel("new-promoted", validatorFields(detective.Validator{ID: "nonnull", Kind: "non-null", Scope: "row", Severity: "error", Field: "InvoiceId"}, "published"))
+	req, err = m.submitForm()
+	if err != nil || req.Validator == nil || req.Validator.ID != "published" {
+		t.Fatalf("new promoted Validator = %+v, %v", req, err)
+	}
+	qv := detective.QueryValidators{QueryID: "q", Validators: []detective.Validator{{ID: "nonnull", Kind: "non-null", Scope: "row", Severity: "error", Field: "InvoiceId"}}}
+	m = submissionModel("edit-query-validator", validatorFields(detective.Validator{ID: "nonnull", Kind: "non-null", Scope: "row", Severity: "error", Field: "CustomerId"}, ""))
+	m.form.queryValidators, m.form.validatorIndex = qv, 0
+	req, err = m.submitForm()
+	if err != nil || req.QueryValidators.Validators[0].Field != "CustomerId" {
+		t.Fatalf("query-local Validator semantic edit = %+v, %v", req, err)
+	}
+	m = submissionModel("choose-check", []field{f("Check ID", "invoice", "")})
+	m.form.caseItem = detective.Case{ID: "case-7"}
+	m.state = detective.State{Checks: []detective.Check{check}, Environments: []string{"qa"}}
+	if req, err := m.submitForm(); err != nil || req != nil || m.form.kind != "run" || m.caseID != "case-7" {
+		t.Fatalf("Case Check selection = %+v, %v, form=%+v", req, err, m.form)
+	}
+	if _, err := m.submitForm(); err == nil || !strings.Contains(err.Error(), "required") {
+		t.Fatalf("required Check input omitted: %v", err)
+	}
+	for i := range m.form.fields {
+		if m.form.fields[i].label == "invoice_id" {
+			m.form.fields[i].value = "7"
+		}
+	}
+	req, err = m.submitForm()
+	if err != nil || req.Type != "run-check" || req.CaseID != "case-7" || req.Inputs["invoice_id"].Scalar == nil {
+		t.Fatalf("typed Case Check run = %+v, %v", req, err)
+	}
+	m.form.fields[1].value = "bad"
+	if _, err := m.submitForm(); err == nil || !strings.Contains(err.Error(), "invoice_id") {
+		t.Fatalf("invalid typed Check input accepted: %v", err)
+	}
+	optional := detective.Check{ID: "optional", Title: "Optional", Inputs: []detective.Input{{Name: "invoice_id", Type: "integer", Cardinality: "scalar"}}}
+	m = submissionModel("run", []field{f("Environment", "qa", ""), f("invoice_id", "", "")})
+	m.form.check = optional
+	req, err = m.submitForm()
+	if err != nil || req.Type != "run-check" || len(req.Inputs) != 0 {
+		t.Fatalf("optional typed input was required: %+v, %v", req, err)
+	}
+	scenario := detective.Scenario{ID: "triage", Title: "Old", Steps: []detective.ScenarioStep{{ID: "first", Kind: "check", Ref: "invoice"}}}
+	m = submissionModel("edit-scenario", []field{f("ID", "triage", ""), f("Title", "Revised", "")})
+	m.form.scenario = scenario
+	req, err = m.submitForm()
+	if err != nil || req.Scenario.Title != "Revised" || len(req.Scenario.Steps) != 1 {
+		t.Fatalf("Scenario edit = %+v, %v", req, err)
+	}
+	m = submissionModel("edit-scenario", []field{f("ID", "other", ""), f("Title", "Revised", "")})
+	m.form.scenario = scenario
+	if _, err := m.submitForm(); err == nil || !strings.Contains(err.Error(), "cannot change") {
+		t.Fatalf("Scenario ID rename accepted: %v", err)
+	}
+}

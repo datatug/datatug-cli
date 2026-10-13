@@ -1,11 +1,13 @@
 package detectiveui
 
 import (
+	"math"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/datatug/datatug-core/pkg/detective"
+	"github.com/datatug/datatug-core/pkg/investigation"
 )
 
 func TestNativeTypedInputAndBindingRoundTrip(t *testing.T) {
@@ -148,6 +150,14 @@ func TestNativeStepAndValidatorSemanticFormParsing(t *testing.T) {
 	}
 	if got := formatExpected(nil); got != "" {
 		t.Fatalf("nil expectation displayed as %q", got)
+	}
+	expected := investigation.NewIntegerValue("7")
+	if got := formatExpected(&expected); got != "7" {
+		t.Fatalf("typed expectation displayed as %q", got)
+	}
+	nonFinite := investigation.NewNumberValue(math.NaN())
+	if got := describeValue(detective.InputValue{Scalar: &nonFinite}); got != "invalid" {
+		t.Fatalf("non-finite value rendered as %q", got)
 	}
 	if got := splitCSV("A, , B,, C"); !reflect.DeepEqual(got, []string{"A", "B", "C"}) {
 		t.Fatalf("CSV input split = %v", got)

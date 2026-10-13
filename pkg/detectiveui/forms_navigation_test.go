@@ -1,11 +1,20 @@
 package detectiveui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/detective"
 )
+
+type executionFixtureService struct{ fixtureService }
+
+func (*executionFixtureService) RunSavedQuery(context.Context, SavedQueryRun) (SavedQueryResult, error) {
+	return SavedQueryResult{Result: apicontract.Result{}}, nil
+}
 
 func TestNativeCatalogFormsAndSmallTerminalFocus(t *testing.T) {
 	m := New(&fixtureService{}, "checks")
@@ -44,10 +53,34 @@ func TestNativeCatalogFormsAndSmallTerminalFocus(t *testing.T) {
 		t.Fatalf("forward focus failed to wrap: %d", m.form.index)
 	}
 	m.form.fields[0].readOnly = true
+	if !strings.Contains(m.formView(), "[review]") {
+		t.Fatal("read-only extracted value lacked review marker")
+	}
 	press(m, "backspace")
 	typeText(m, "X")
 	if got := m.field("One"); got != "α" {
 		t.Fatalf("review-only value changed: %q", got)
+	}
+}
+
+func TestNativeFormEscapeAndValidationFeedback(t *testing.T) {
+	m := New(&fixtureService{}, "detective")
+	m.screen = formScreen
+	m.updateForm(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.screen != cases {
+		t.Fatal("missing form did not return to home")
+	}
+	m.begin("run", "Run", []field{f("Environment", "", "")})
+	m.pendingApplicationID, m.pendingStepID = "application", "step"
+	m.returnScreen = ""
+	press(m, "esc")
+	if m.screen != cases || m.pendingApplicationID != "" || m.pendingStepID != "" {
+		t.Fatalf("run cancellation left pending Scenario step: %+v", m)
+	}
+	m.begin("new-case", "New Case", []field{f("ID", "case", ""), f("Title", "", "")})
+	press(m, "ctrl+s")
+	if !strings.Contains(m.feedback, "title") || m.form == nil {
+		t.Fatalf("invalid Case form silently closed: %q", m.feedback)
 	}
 }
 
@@ -117,5 +150,139 @@ func TestNativeDetailFormsExposeCheckCaseScenarioAndValidatorActions(t *testing.
 		if m.form == nil || m.form.kind != kind {
 			t.Fatalf("query Validator key %s opened %+v", key, m.form)
 		}
+	}
+}
+
+func TestNativeDetailKeysFailClosedWithoutSelectedResourceOrStep(t *testing.T) {
+	m := New(&fixtureService{}, "detective")
+	m.screen = detail
+	for _, parent := range []screen{checks, cases, scenarios, queryValidators} {
+		m.parent = parent
+		if _, cmd := m.detailKey("e"); cmd != nil || m.form != nil {
+			t.Fatalf("missing %s opened an edit form", parent)
+		}
+	}
+	m.screen = checks
+	m.startNew() // ordinary catalog is known; unknown screens must not open a form.
+	m.form = nil
+	m.screen = history
+	m.startNew()
+	if m.form != nil {
+		t.Fatal("history opened a new catalog item")
+	}
+	check := detective.Check{ID: "check", Title: "Check", Steps: []detective.Step{{ID: "load", Kind: "query", QueryID: "q"}}}
+	m.state.Checks = []detective.Check{check}
+	m.parent, m.id, m.screen = checks, "check", detail
+	m.rows = nil
+	if got := m.selectedStep(&check); got != -1 {
+		t.Fatalf("unselected Check step = %d", got)
+	}
+	m.detailKey("e")
+	if m.form == nil || m.form.kind != "edit-check" {
+		t.Fatalf("Check metadata fallback = %+v", m.form)
+	}
+	m.form = nil
+	m.rows = []row{{kind: "check", id: "check"}}
+	m.detailKey("p")
+	if !strings.Contains(m.feedback, "Select a local Validator") {
+		t.Fatalf("promotion without selection = %q", m.feedback)
+	}
+	m.screen = detail
+	m.detailKey("r")
+	if m.form == nil || m.form.kind != "run" {
+		t.Fatalf("Check run form = %+v", m.form)
+	}
+	m.form = nil
+	m.screen = detail
+	m.detailKey("h")
+	if m.screen != history {
+		t.Fatal("Check history was not opened")
+	}
+	m.state.Cases = []detective.Case{{ID: "case", Title: "Case", Status: "closed"}}
+	m.parent, m.id, m.screen = cases, "case", detail
+	m.rows = nil
+	m.detailKey("i")
+	if !strings.Contains(m.feedback, "Incidentius") {
+		t.Fatalf("Incidentius capability absence was hidden: %q", m.feedback)
+	}
+	m.detailKey("enter")
+	if m.screen != detail {
+		t.Fatal("enter without application step changed Case view")
+	}
+	_, cmd := m.detailKey("o")
+	if cmd == nil {
+		t.Fatal("reopen Case did not create an action")
+	}
+	m.Update(cmd())
+	m.screen = detail
+	_, cmd = m.detailKey("z")
+	if cmd == nil {
+		t.Fatal("archive Case did not create an action")
+	}
+	m.screen = detail
+	m.detailKey("h")
+	if m.screen != history {
+		t.Fatal("Case history was not opened")
+	}
+	m.state.QueryValidators = []detective.QueryValidators{{QueryID: "q", Validators: []detective.Validator{{ID: "v"}}}}
+	m.parent, m.id, m.screen = queryValidators, "q", detail
+	m.rows = []row{{kind: "query-validator", id: "q"}}
+	m.detailKey("e")
+	if !strings.Contains(m.feedback, "Select a local Validator") {
+		t.Fatalf("query-local edit without selection = %q", m.feedback)
+	}
+	m.detailKey("p")
+	if !strings.Contains(m.feedback, "Select a local Validator") {
+		t.Fatalf("query-local promotion without selection = %q", m.feedback)
+	}
+	m.detailKey("q")
+	if m.feedback == "" {
+		t.Fatal("exact query validation silently proceeded without execution service")
+	}
+	m.screen = detail
+	m.detailKey("h")
+	if m.screen != history {
+		t.Fatal("query Validator history was not opened")
+	}
+	m.screen = detail
+	m.detailKey("unassigned")
+	if m.screen != detail {
+		t.Fatal("ordinary typing was consumed as a detail command")
+	}
+	m.service = &executionFixtureService{}
+	m.detailKey("q")
+	if m.form == nil || m.form.kind != "query-validators-exact" || m.field("Query ID") != "q" {
+		t.Fatalf("exact saved-query validation form = %+v", m.form)
+	}
+}
+
+func TestNativeCaseRunSelectionAndLifecycleKeepConfirmedContext(t *testing.T) {
+	m := New(&fixtureService{}, "detective")
+	if _, cmd := m.startRun("missing", "case"); cmd != nil || !strings.Contains(m.feedback, "not in catalog") {
+		t.Fatalf("unknown Check opened a run: %q", m.feedback)
+	}
+	check := detective.Check{ID: "invoice", Title: "Invoice", Inputs: []detective.Input{{Name: "invoice_id", Type: "integer", Cardinality: "scalar"}}}
+	m.state.Checks = []detective.Check{check}
+	m.state.Environments = []string{"qa"}
+	m.state.Cases = []detective.Case{{ID: "unrelated", Context: map[string]detective.InputValue{"invoice_id": {}}}, {ID: "case", Context: map[string]detective.InputValue{"invoice_id": {}}}}
+	m.startRun("invoice", "case")
+	if m.form == nil || m.form.kind != "run" || m.field("Environment") != "qa" {
+		t.Fatalf("Case run selection = %+v", m.form)
+	}
+	if m.checkByID("missing") != nil {
+		t.Fatal("missing Check resolved from catalog")
+	}
+	closed := detective.Case{ID: "case", Status: "closed"}
+	_, cmd := m.lifecycle(closed, "active", "re-reviewed")
+	if cmd == nil {
+		t.Fatal("Case lifecycle action absent")
+	}
+	message := cmd()
+	if message == nil {
+		t.Fatal("Case lifecycle produced no response")
+	}
+	actions := m.service.(*fixtureService).actions
+	if len(actions) != 1 || actions[0].Case.Status != "active" || actions[0].Case.ClosureReason != "re-reviewed" {
+		t.Fatalf("Case lifecycle intent = %+v", actions)
 	}
 }

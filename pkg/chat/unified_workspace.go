@@ -251,9 +251,10 @@ func (*hotkeysOverlay) WorkspaceBorderlessCard() bool { return true }
 func (*hotkeysOverlay) BoundedMouseInput() bool       { return true }
 func (o *hotkeysOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd, bool) {
 	if wheel, ok := msg.(tea.MouseWheelMsg); ok {
-		if wheel.Button == tea.MouseWheelUp {
+		switch wheel.Button {
+		case tea.MouseWheelUp:
 			o.scroll(-3)
-		} else if wheel.Button == tea.MouseWheelDown {
+		case tea.MouseWheelDown:
 			o.scroll(3)
 		}
 		return o, nil, false

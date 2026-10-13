@@ -138,8 +138,7 @@ func (p *workspacePanel) inspectStackView(width, height int) string {
 		relatedHeight = min(max(3, height/2), max(1, height-6))
 	}
 	inspectHeight := max(1, height-relatedHeight-5)
-	var inspect string
-	inspect = p.inspectorView(width, inspectHeight)
+	var inspect = p.inspectorView(width, inspectHeight)
 	related := p.relatedView(width, relatedHeight+1)
 	// The stack supplies Related's header, so its body never duplicates it.
 	if _, tail, ok := strings.Cut(related, "\n"); ok {

@@ -38,6 +38,7 @@ func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly boo
 	semanticRoutes(path, router, wrapper, writeOnly)
 	executionRoutes(path, router, wrapper, writeOnly)
 	incidentRoutes(path, router, wrapper, writeOnly, caps)
+	detectiveRoutes(path, router, wrapper, writeOnly, caps)
 
 }
 

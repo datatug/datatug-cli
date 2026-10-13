@@ -64,9 +64,7 @@ func (u *ChatUI) workspaceActions() []workspaceAction {
 		workspaceAction{"inspect-section", "Show Inspect", "F7", ""},
 		workspaceAction{"docked-section", "Show Docked", "Actions", ""},
 		workspaceAction{"bookmarks-section", "Show Bookmarks", "Actions", ""})
-	for _, a := range u.panelContextActions() {
-		actions = append(actions, a)
-	}
+	actions = append(actions, u.panelContextActions()...)
 	if u.backendBusy() {
 		for i := range actions {
 			switch actions[i].id {

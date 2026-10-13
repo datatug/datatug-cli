@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/strongo/aichat/tui/chatshell"
+	"github.com/tuigoff/tuigoff/pkg/theme"
 	"strconv"
 	"strings"
 )
@@ -208,7 +209,7 @@ type workspaceActionsOverlay struct {
 func (*workspaceActionsOverlay) LocalMouseCoordinates() bool { return true }
 func (*workspaceActionsOverlay) BoundedMouseInput() bool     { return true }
 func (*workspaceActionsOverlay) HelpHints() []string {
-	return []string{"Searchable actions · type to filter", "↑↓ select · Enter run", "Esc close · Ctrl+P / /actions reopen"}
+	return []string{"Searchable actions · type to filter", "↑↓ select", "Enter run", "Esc close", "Ctrl+P reopen Actions", "/actions reopen Actions"}
 }
 func (o *workspaceActionsOverlay) matches() []workspaceAction {
 	var rows []workspaceAction
@@ -222,7 +223,7 @@ func (o *workspaceActionsOverlay) matches() []workspaceAction {
 func (o *workspaceActionsOverlay) View(w, h int) string {
 	o.rows = o.matches()
 	o.index = min(o.index, max(0, len(o.rows)-1))
-	lines := []string{"Actions · type to search · ↑↓ choose · Enter run · Esc close", "Search: " + sanitizeTerminalText(o.search)}
+	lines := []string{"Actions · type to search · " + theme.WorkspaceKeyHint("↑↓") + " choose · " + theme.WorkspaceKeyHint("Enter") + " run · " + theme.WorkspaceKeyHint("Esc") + " close", "Search: " + sanitizeTerminalText(o.search)}
 	start, end := selectedListWindow(len(o.rows), o.index, max(1, h-4))
 	o.rowY = start
 	o.rowCount, o.width = min(end-start, max(0, h-2)), max(0, w)
@@ -232,14 +233,14 @@ func (o *workspaceActionsOverlay) View(w, h int) string {
 		if i == o.index {
 			prefix = "› "
 		}
-		label := prefix + a.label + " [" + a.key + "]"
+		label := prefix + a.label + " [" + theme.WorkspaceKeyHint(a.key) + "]"
 		if a.disabled != "" {
 			label += " · unavailable"
 		}
 		lines = append(lines, ansi.Truncate(label, max(1, w), "…"))
 	}
 	if len(o.rows) == 0 {
-		lines = append(lines, "No matching actions. Backspace to edit the search.")
+		lines = append(lines, "No matching actions. "+theme.WorkspaceKeyHint("Backspace")+" to edit the search.")
 	}
 	if len(o.rows) > 0 && o.rows[o.index].disabled != "" {
 		lines = append(lines, ansi.Truncate(o.rows[o.index].disabled, max(1, w), "…"))

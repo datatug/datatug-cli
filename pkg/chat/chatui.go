@@ -236,7 +236,12 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		chatshell.WithCommands(chatCommands),
 		chatshell.WithGlobalKeys(u.globalKeys),
 		chatshell.WithWorkspaceComposerAction("Select text", u.openComposerSelection),
-		chatshell.WithWorkspaceTopBarProvider(u.topBarInfo),
+		chatshell.WithWorkspaceChromeProvider(u.workspaceChrome),
+		chatshell.WithWorkspaceComposerMetadata(func() theme.WorkspaceContext {
+			return theme.WorkspaceContext{Label: "model", Value: sanitizeTerminalText(u.modelName)}
+		}),
+		chatshell.WithWorkspaceChatFrame(),
+		chatshell.WithWorkspacePanelControls(),
 		chatshell.WithWorkspaceSpacing(),
 		chatshell.WithWorkspaceChatTabs(u.chatTabs, u.activateChatTab),
 		chatshell.WithWorkspaceChatTabActions(chatshell.WorkspaceTabAction{Label: "+ New", Action: u.createChatTab}, chatshell.WorkspaceTabAction{Label: "…", Action: u.openSessionPicker}),
@@ -730,17 +735,17 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft && msg.Y == 0 {
 			header := strings.Split(ansi.Strip(u.shell.View().Content), "\n")[0]
-			for _, item := range []struct{ label, key string }{{"Help [F1]", "f1"}, {"Server ", "f8"}, {"Project:", "f3"}} {
+			for _, item := range []struct{ label, key string }{{"F1 Help", "f1"}, {"F8 Server", "f8"}, {"Project:", "f3"}} {
 				if at := strings.Index(header, item.label); at >= 0 {
 					end := at + len(item.label)
 					if item.key == "f3" {
-						if n := strings.Index(header[at:], "[F3]"); n >= 0 {
-							end = at + n + 4
+						if n := strings.Index(header[at:], " F3"); n >= 0 {
+							end = at + n + 3
 						}
 					}
 					if item.key == "f8" {
-						if n := strings.Index(header[at:], "[F8]"); n >= 0 {
-							end = at + n + 4
+						if n := strings.Index(header[at:], "  F1"); n >= 0 {
+							end = at + n
 						}
 					}
 					if msg.X >= ansi.StringWidth(header[:at]) && msg.X < ansi.StringWidth(header[:end]) {
@@ -1358,14 +1363,7 @@ func synchronousChatCommand(command string) bool {
 
 // chatHelpText describes currently dispatched workspace bindings. Planned
 // Dialog and quick-sort controls are routed through the active workspace owner.
-const chatHelpText = "Global: F1 Help • Ctrl+P Actions • Ctrl+F1 toolbar • F2 mouse selection • F3 projects • F4 composer • F5 web • F6 Explorer • F7 Inspect • F8 Server • F9 Expand • F10 Related • Ctrl+C quit\n\n" +
-	"Navigation: Shift+↑↓ history • Shift+← Explorer • Shift+→ Inspect • Esc restore/composer\n\n" +
-	"Explorer and grid: type to search • / search • arrows navigate • Esc clear search, then leave search\n\n" +
-	"Result: Tab/Shift+Tab switch Table, Charts, Current row and Query • Ctrl+P Actions for Group, Sort, JOIN and table style • Alt+Shift+↑↓ loaded sort • Ctrl+Shift+↑↓ server-sort preview • Enter details • Ctrl+Space result actions • Ctrl+S save query • Ctrl+E export • Ctrl+R refresh • Alt+1..0 Related\n\n" +
-	"Related: F10 focus • Alt+1..0 open numbered relationship • arrows select • Enter open • Esc fields\n\n" +
-	"Composer: Enter send • Shift+Enter newline • Tab attachments / Select text action • Backspace remove focused attachment • Ctrl+D remove last attachment • Esc previous control, retain draft\n\n" +
-	"Chats: tabs switch sessions • + New creates • … restores archives • Ctrl+W choose Archive/Delete/Cancel • F12 then A archive directly • F12 then D delete directly • /sessions /switch /new /rename\n\n" +
-	"Commands: /query /queries /http /connect /export /bucket /settings /plan • API: arrows scroll requests, End follow, Esc back"
+var chatHelpText = plainWorkspaceHelp()
 
 // chatExportDoneMsg reports the outcome of a background /export write —
 // the ChatUI analogue of export_ui.go's exportMessage.
@@ -1501,20 +1499,36 @@ func (u *ChatUI) applyWorkspaceAction(action WorkspaceAction) error {
 // read the SidePanel's own state back out generically (chatshell.SidePanel
 // exposes Title()/View()/Update(), not arbitrary product state) — tracked
 // as a follow-up alongside the richer statusBar below.
-// topBarInfo is chatshell.TopBarProvider: CONTENT only (title, context,
-// menu items) -- chatshell renders it through the shared theme.TopBar
-// chrome (strongo/aichat#chat-shared-look), so topBarInfo never touches
-// colour itself.
+// topBarInfo is a compatibility adapter for older embedded clients/tests.
+// The production shell uses workspaceChrome's separately styled fields.
 func (u *ChatUI) topBarInfo(width int) (title, context string, items []theme.MenuItem) {
-	project := sanitizeTerminalText(nonempty(u.catalog.Title, "Choose project"))
-	state := sanitizeTerminalText(strings.ToUpper(apimonitor.Default.Snapshot().State))
-	title = lipgloss.NewStyle().Bold(true).Foreground(theme.Gold).Render("DataTug")
-	items = []theme.MenuItem{{Label: "Server " + state + " [F8]"}, {Label: "Help [F1]"}}
-	rightWidth := ansi.StringWidth(items[0].Label) + 2 + ansi.StringWidth(items[1].Label)
-	fixedWidth := ansi.StringWidth("DataTug ¦ Project:  [F3] ¦ Chat")
-	projectWidth := max(0, width-rightWidth-fixedWidth-1)
-	context = "Project: " + ansi.Truncate(project, projectWidth, "…") + " [F3] ¦ Chat"
+	chrome := u.workspaceChrome(width)
+	title = lipgloss.NewStyle().Bold(true).Foreground(theme.Gold).Render(chrome.Title)
+	context = "Project: " + chrome.Context[0].Value + " F3 ¦ Chat"
+	for _, action := range chrome.Actions {
+		label := action.Key + " " + action.Label
+		if action.Status != "" {
+			label += " " + action.Status
+		}
+		items = append(items, theme.MenuItem{Label: label})
+	}
 	return
+}
+
+func (u *ChatUI) workspaceChrome(width int) theme.WorkspaceChrome {
+	state := sanitizeTerminalText(strings.ToUpper(apimonitor.Default.Snapshot().State))
+	projectWidth := max(0, width-ansi.StringWidth(" DataTug ¦ Project:  F3 ¦ Chat F8 Server "+state+"  F1 Help "))
+	return theme.WorkspaceChrome{
+		Title: "DataTug",
+		Context: []theme.WorkspaceContext{
+			{Label: "Project", Value: ansi.Truncate(sanitizeTerminalText(nonempty(u.catalog.Title, "Choose project")), projectWidth, "…"), Key: "F3"},
+			{Value: "Chat"},
+		},
+		Actions: []theme.WorkspaceChromeAction{
+			{Key: "F8", Label: "Server", Status: state, Active: u.apiScreen != nil},
+			{Key: "F1", Label: "Help"},
+		},
+	}
 }
 
 // statusBar is ui.go's statusLines, ported: the grid-focused hint set
@@ -1563,7 +1577,7 @@ func (u *ChatUI) statusHintsRaw(width int) []string {
 	if !u.shell.MouseEnabled() {
 		mouseHint = "F2 wheel"
 	}
-	segments := []string{"model: " + sanitizeTerminalText(u.modelName), mouseHint, "Shift+↑↓ navigate", "Enter send", "F6/Shift+→ workspace", "Ctrl+←→ resize", "F3 projects", "F4 composer", "Ctrl+C quit"}
+	segments := []string{mouseHint, "Shift+↑↓ navigate", "Enter send", "F6/Shift+→ workspace", "F3 projects", "F4 composer", "Ctrl+C quit"}
 	// m1 (r5 fix round on #289): ui.go's composer-chip hint set -- attachment
 	// chips exist and none of the grid/message/workspace zones hold focus
 	// (i.e. the composer/input zone does), so Tab/Shift+Tab drives the chip
@@ -1647,7 +1661,7 @@ func (u *ChatUI) statusHintsRaw(width int) []string {
 		}
 	}
 	if u.shell.Busy() {
-		segments = []string{"model: " + sanitizeTerminalText(u.modelName), "Thinking…", "Ctrl+C quit"}
+		segments = []string{"Thinking…", "Ctrl+C quit"}
 		if u.sessions != nil {
 			segments = append([]string{"session: " + sanitizeTerminalText(u.snapshot.Title)}, segments...)
 		}
@@ -1708,10 +1722,10 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 		return nil, []string{link + ": " + u.browserURL}
 	}
 	if u.operation != nil || u.backendBusy() {
-		return nil, []string{u.operationLabel(), "F1 Help · Ctrl+P Actions"}
+		return nil, []string{u.operationLabel(), "Ctrl+P Actions"}
 	}
 	if u.shell.Busy() {
-		return nil, []string{"Thinking… · model: " + sanitizeTerminalText(u.modelName)}
+		return nil, []string{"Thinking…"}
 	}
 	if u.toolbarHidden {
 		if u.workspaceFeedback != "" {
@@ -1719,8 +1733,16 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 		}
 		return nil, nil
 	}
+	if u.shell.WorkspaceFocus() == "session-tabs" {
+		for _, text := range u.workspaceHints(width) {
+			if hint, ok := autoHint(text); ok {
+				hints = append(hints, hint)
+			}
+		}
+		return hints, nil
+	}
 	if p, ok := u.shell.CenterPanel().(*localGroupsPanel); ok && u.shell.WorkspaceFocus() == "center" {
-		controls := []string{"F1 Hotkeys", "Ctrl+P Actions", "F4 composer", "Ctrl+T Trail", "Alt+←/→ Back/Forward", "Esc back"}
+		controls := []string{"Ctrl+P Actions", "F4 composer", "Ctrl+T Trail", "Alt+←/→ Back/Forward", "Esc back"}
 		if !p.members {
 			controls = append(controls, "Enter constituent rows")
 		}
@@ -1735,13 +1757,13 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 		return hints, segments
 	}
 	if u.shell.WorkspaceFocus() == "input" && u.shell.ComposerActionFocused() {
-		return nil, append([]string{"F1 Hotkeys"}, u.workspaceHints(width)...)
+		return nil, u.workspaceHints(width)
 	}
 	if width < 100 {
 		if u.shell.WorkspaceFocus() == "sidebar" && (u.workspace.bookmarkMode != "" || u.workspace.bookmarkGridFocused || u.workspace.dockGridFocused) {
-			return nil, append([]string{"F1 Hotkeys"}, u.workspaceHints(width)...)
+			return nil, u.workspaceHints(width)
 		}
-		compact := []string{"F1 Hotkeys", "Ctrl+P Actions", "F4 composer", "F6 Explorer", "F7 Inspect"}
+		compact := []string{"Ctrl+P Actions", "F4 composer", "F6 Explorer", "F7 Inspect", "F11 chats"}
 		switch u.shell.WorkspaceFocus() {
 		case "explorer":
 			compact = append(compact, "Enter Open data", "Ctrl+P Actions", "Ctrl+N New query")
@@ -1774,10 +1796,10 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 	if u.workspaceFeedback != "" && !u.resultTrailContext() {
 		// Feedback must precede ordinary hints so short terminals retain the
 		// explanation. Treat it as wrapping text, not an atomic key/label pair.
-		return nil, append([]string{u.workspaceFeedback, "F1 Hotkeys"}, u.workspaceHints(width)...)
+		return nil, append([]string{u.workspaceFeedback}, u.workspaceHints(width)...)
 	}
 	if u.resultTrailContext() {
-		essentials := []string{"F1 Hotkeys", "Ctrl+P Actions", "F4 composer", "F9 Expand"}
+		essentials := []string{"Ctrl+P Actions", "F4 composer", "F9 Expand"}
 		if g, _, ok := u.activeGrid(); ok {
 			switch g.ActiveView() {
 			case gridViewCharts:
@@ -1815,7 +1837,7 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 		}
 		return hints, segments
 	}
-	for _, s := range append([]string{"F1 Hotkeys", "Ctrl+F1 toolbar", "F4 composer", "F6 Explorer", "F7 Inspect", "F8 Server"}, u.workspaceHints(width)...) {
+	for _, s := range append([]string{"Ctrl+F1 toolbar", "F4 composer", "F6 Explorer", "F7 Inspect", "F11 chats"}, u.workspaceHints(width)...) {
 		if h, ok := autoHint(s); ok {
 			hints = append(hints, h)
 			continue

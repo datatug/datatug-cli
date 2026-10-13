@@ -517,7 +517,7 @@ func TestWorkspaceUXRelatedCancelAndCompactHiddenToolbar(t *testing.T) {
 	uxKey(t, u, "alt+f1")
 	view := ansi.Strip(u.shell.View().Content)
 	header := strings.Split(view, "\n")[0]
-	if !strings.Contains(view, "Cancel [Ctrl+X]") || !strings.Contains(header, "Help [F1]") || !strings.Contains(header, "Server ") {
+	if !strings.Contains(view, "Cancel [Ctrl+X]") || !strings.Contains(header, "F1 Help") || !strings.Contains(header, "F8 Server ") {
 		t.Fatalf("compact protected controls cropped: %s", view)
 	}
 	uxKey(t, u, "ctrl+x")

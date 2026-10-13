@@ -54,6 +54,7 @@ type workspacePanel struct {
 	explorerDetailOffset int
 	inspectObject        *ProjectObject
 	inspectGroup         string
+	inspectGroupObjects  []ProjectObject
 
 	// Selected (inspector).
 	inspectorOffset int
@@ -182,6 +183,9 @@ func (p *workspacePanel) applyWorkspaceAction(action WorkspaceAction) error {
 }
 
 func (p *workspacePanel) setTab(index int) {
+	if p != p.ui.explorer {
+		p.clearExplorerInspection()
+	}
 	if p == p.ui.explorer {
 		index = 0
 	} else if index == 0 {
@@ -514,15 +518,28 @@ func (p *workspacePanel) projectExplorer(width, height int) string {
 	}
 	if p == p.ui.explorer {
 		if len(p.ui.catalog.Objects) == 0 {
-			return ansi.Wrap("Choose a project with F3. Browse Projects and Settings in the center Explore pane.", max(1, width), " ")
+			return ansi.Wrap("Choose a project with "+theme.WorkspaceKeyHint("F3")+". Browse Projects and Settings in the center Explore pane.", max(1, width), " ")
 		}
-		treeHeight := max(1, height-2)
+		hintsHeight := 0
+		if p.focused {
+			hintsHeight = 2
+		}
+		treeHeight := max(1, height-hintsHeight)
 		body := strings.Split(p.explorerNodesView(width, treeHeight), "\n")
 		for len(body) < treeHeight {
 			body = append(body, "")
 		}
-		hint := theme.WorkspacePanelHeader("↑↓ move · ←→ fold", "Esc clear")
-		return strings.Join(body, "\n") + "\n" + hint + "\n" + theme.WorkspacePanelHeader("Enter open", "Ctrl+P Actions")
+		if !p.focused {
+			return strings.Join(body, "\n")
+		}
+		hint := theme.WorkspaceKeyHint("↑↓") + " move · " + theme.WorkspaceKeyHint("←→") + " fold · " + theme.WorkspaceKeyHint("Esc") + " clear"
+		openHint := theme.WorkspaceKeyHint("Enter") + " open"
+		if width < 28 {
+			hint = theme.WorkspaceKeyHint("↑↓") + " move " + theme.WorkspaceKeyHint("←→") + " fold"
+		} else {
+			openHint += " · " + theme.WorkspaceKeyHint("Ctrl+P") + " Actions"
+		}
+		return strings.Join(body, "\n") + "\n" + hint + "\n" + openHint
 	}
 	selected := p.selectedExplorerObject()
 	if selected == nil {
@@ -542,7 +559,7 @@ func (p *workspacePanel) projectExplorer(width, height int) string {
 	end := min(len(detailLines), start+visible)
 	shown := append([]string(nil), detailLines[start:end]...)
 	if len(detailLines) > visible {
-		shown = append(shown, fmt.Sprintf("PgUp/PgDn · lines %d–%d of %d", start+1, end, len(detailLines)))
+		shown = append(shown, fmt.Sprintf("%s · lines %d–%d of %d", theme.WorkspaceKeyHint("PgUp/PgDn"), start+1, end, len(detailLines)))
 	}
 	details := panelCard(title, strings.Join(shown, "\n"), width, detailHeight)
 	return explorer + "\n" + strings.Repeat(" ", width) + "\n" + details
@@ -553,7 +570,7 @@ func (p *workspacePanel) projectExplorer(width, height int) string {
 func (p *workspacePanel) explorerNodesView(width, height int) string {
 	nodes := p.explorerNodes()
 	if len(nodes) == 0 {
-		return "No matches\n\nTry another search.\nEsc clears the filter."
+		return "No matches\n\nTry another search.\n" + theme.WorkspaceKeyHint("Esc") + " clears the filter."
 	}
 	p.explorerIndex = min(p.explorerIndex, len(nodes)-1)
 	lines := make([]string, 0, len(nodes))
@@ -581,11 +598,11 @@ func (p *workspacePanel) explorerNodesView(width, height int) string {
 			indent = strings.Repeat(" ", min(node.depth, 2))
 		}
 		label := fmt.Sprintf("%s%s %s %s", indent, fold, marker, sanitizeTerminalText(node.label))
-		if node.issue {
+		if node.issue && i != p.explorerIndex {
 			label = lipgloss.NewStyle().Bold(true).Foreground(theme.AccentColor()).Render(ansi.Truncate(label, width, "…"))
 		}
 		if i == p.explorerIndex {
-			label = theme.WorkspaceSelectedRow(label, true, width)
+			label = theme.WorkspaceSelectedRowPlain(label, true, width)
 		}
 		lines = append(lines, label)
 	}
@@ -644,11 +661,15 @@ func projectObjectDetails(object ProjectObject, width int) (string, string) {
 		} else {
 			nameWidth := len("Column")
 			for _, column := range object.Columns {
-				nameWidth = max(nameWidth, min(len(column), max(8, width/2)))
+				nameWidth = max(nameWidth, min(ansi.StringWidth(sanitizeTerminalText(column)), max(6, width/2)))
 			}
-			lines = append(lines, fmt.Sprintf("%-*s  Type", nameWidth, "Column"))
+			headerStyle := lipgloss.NewStyle().Bold(true).Underline(true)
+			nameStyle := lipgloss.NewStyle().Bold(true)
+			typeStyle := lipgloss.NewStyle().Faint(true)
+			lines = append(lines, headerStyle.Render(fmt.Sprintf("%-*s  Type", nameWidth, "Column")))
 			for _, column := range object.Columns {
-				lines = append(lines, fmt.Sprintf("%-*s  %s", nameWidth, sanitizeTerminalText(column), sanitizeTerminalText(object.ColumnTypes[column])))
+				name := padAnsiLine(ansi.Truncate(sanitizeTerminalText(column), nameWidth, "…"), nameWidth)
+				lines = append(lines, nameStyle.Render(name)+"  "+typeStyle.Render(sanitizeTerminalText(object.ColumnTypes[column])))
 			}
 		}
 	case "query":
@@ -733,7 +754,7 @@ func (p *workspacePanel) inspectorView(width, height int) string {
 // activeGrid (chatui_inspector.go) instead of u.activeInspectorGrid.
 func (p *workspacePanel) currentRowDetails(width int) []string {
 	if groups, ok := p.ui.shell.CenterPanel().(*localGroupsPanel); ok {
-		text := "Local loaded snapshot\n" + groups.title + "\n\nGrouped rows have no database entity identity.\nEnter shows captured constituent rows.\nEsc restores the original result and its retained selection."
+		text := "Local loaded snapshot\n" + groups.title + "\n\nGrouped rows have no database entity identity.\n" + theme.WorkspaceKeyHint("Enter") + " shows captured constituent rows.\n" + theme.WorkspaceKeyHint("Esc") + " restores the original result and its retained selection."
 		return strings.Split(ansi.Wrap(text, max(1, width), " "), "\n")
 	}
 	g, record, ok := p.ui.activeGrid()
@@ -848,7 +869,7 @@ func (p *workspacePanel) currentRecordsetDetails(width int) []string {
 func (p *workspacePanel) selectedDetails(width int) string {
 	selection, ok := p.ui.snapshot.Workspace.Selections[p.ui.snapshot.Workspace.CurrentSelectionID]
 	if !ok {
-		return "No durable selection. Focus a result, then Ctrl+P Actions → Select row, cell, or range."
+		return "No durable selection. Focus a result, then " + theme.WorkspaceKeyHint("Ctrl+P") + " Actions → Select row, cell, or range."
 	}
 	view := p.ui.snapshot.Workspace.Views[selection.ViewID]
 	record, ok := p.ui.snapshot.RecordSets[view.RecordSetID]
@@ -939,7 +960,7 @@ func (p *workspacePanel) bookmarksView(width, height int) string {
 		case p.bookmarkSearch != "":
 			lines = append(lines, "No bookmarks match this search.")
 		default:
-			lines = append(lines, "No bookmarks yet. Focus a grid or Selection and press b.")
+			lines = append(lines, "No bookmarks yet. Focus a grid, then "+theme.WorkspaceKeyHint("Ctrl+P")+" Actions → Bookmark result.")
 		}
 		return strings.Join(lines, "\n")
 	}
@@ -985,7 +1006,9 @@ func (p *workspacePanel) bookmarksView(width, height int) string {
 	if doc := strings.Join(strings.Fields(sanitizeTerminalText(bookmark.Snapshot.RecordSet.DTQL)), " "); doc != "" {
 		lines = append(lines, "DTQL: "+ansi.Truncate(doc, max(1, width-7), "…"))
 	}
-	lines = append(lines, "", "Enter grid · a attach · d dock · r rename · t add tag · T remove · / search · f tags · x delete")
+	if p.focused {
+		lines = append(lines, "", theme.WorkspaceKeyHint("Enter")+" grid · "+theme.WorkspaceKeyHint("Ctrl+P")+" Actions / search")
+	}
 	if bookmarkGrid := p.ensureBookmarkGrid(); bookmarkGrid != nil {
 		bookmarkGrid.SetWidth(width)
 		bookmarkGrid.SetFocused(p.bookmarkGridFocused)
@@ -1059,14 +1082,33 @@ func (p *workspacePanel) View(width, height int, focused bool) string {
 	}
 	p.width, p.height, p.focused = width, height, focused
 	width, height = max(1, width), max(1, height)
+	// Resolve the target before deciding whether result-only tabs exist.
+	// Returning to a retained grid restores its inspector without rerunning it.
+	if p == p.ui.workspace && p.ui.shell.WorkspaceFocus() == "transcript" {
+		if _, _, ok := p.ui.activeGrid(); ok {
+			p.clearExplorerInspection()
+		}
+	}
+	if p == p.ui.workspace && p.hasExplorerInspection() {
+		return fitPanelBody(p.catalogInspectionView(width, height), width, height)
+	}
 	header := p.tabStripHeader(width)
 	if p == p.ui.workspace && p.tab == 1 {
 		header = theme.WorkspaceTabs([]string{"Row", "Column", "Result"}, p.inspectorSubTab, width, focused && !p.relatedFocused)
 	}
 	if p == p.ui.explorer {
-		header = "Search /  " + sanitizeTerminalText(p.explorerSearch)
+		label := "Filter objects"
+		if p.explorerSearch != "" {
+			label = "Filter: " + sanitizeTerminalText(p.explorerSearch)
+		}
 		if p.explorerSearchFocused {
-			header += "▏"
+			label += "▏"
+		}
+		key := "Ctrl+F"
+		if width > ansi.StringWidth(key)+1 {
+			header = theme.WorkspacePanelHeader(ansi.Truncate(label, width-ansi.StringWidth(key)-1, "…"), key)
+		} else {
+			header = theme.WorkspaceKeyHint(key)
 		}
 	}
 	var body string
@@ -1103,7 +1145,11 @@ func (p *workspacePanel) Update(msg tea.Msg) (chatshell.SidePanel, tea.Cmd) {
 			return p, nil
 		}
 		index := p.explorerOffset + mouse.Y - 1
-		if mouse.Y > 0 && mouse.Y < p.height-2 && index >= 0 && index < len(p.explorerNodes()) {
+		footerRows := 0
+		if p.focused {
+			footerRows = 2
+		}
+		if mouse.Y > 0 && mouse.Y < p.height-footerRows && index >= 0 && index < len(p.explorerNodes()) {
 			p.explorerIndex = index
 			p.explorerSearchFocused = false
 			p.inspectExplorerSelection()
@@ -1124,6 +1170,10 @@ func (p *workspacePanel) Update(msg tea.Msg) (chatshell.SidePanel, tea.Cmd) {
 func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 	if p == p.ui.explorer {
 		defer p.inspectExplorerSelection()
+		if msg.String() == "ctrl+f" {
+			p.explorerSearchFocused = true
+			return nil
+		}
 		if msg.String() == "esc" && p.explorerSearch != "" {
 			searchFocused := p.explorerSearchFocused
 			nodes := p.explorerNodes()
@@ -1148,6 +1198,23 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 			}
 			return nil
 		}
+	}
+	if p != p.ui.explorer && p.hasExplorerInspection() {
+		switch msg.String() {
+		case "up":
+			p.inspectorOffset = max(0, p.inspectorOffset-1)
+		case "down":
+			p.inspectorOffset++
+		case "pgup":
+			p.inspectorOffset = max(0, p.inspectorOffset-max(1, p.height-1))
+		case "pgdown":
+			p.inspectorOffset += max(1, p.height-1)
+		case "home":
+			p.inspectorOffset = 0
+		case "end":
+			p.inspectorOffset = int(^uint(0) >> 1)
+		}
+		return nil
 	}
 	if p.relatedFocused {
 		switch msg.String() {

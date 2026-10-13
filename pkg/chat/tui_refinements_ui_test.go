@@ -115,7 +115,7 @@ func TestChatCloseChooserIsCompactAndTopbarKeepsProjectAccess(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog.Title = strings.Repeat("Long project title ", 12)
 	_, context, right := u.topBarInfo(80)
-	if !strings.Contains(context, "[F3] ¦ Chat") || !strings.Contains(context, "…") || len(right) != 2 {
+	if !strings.Contains(context, " F3 ¦ Chat") || !strings.Contains(context, "…") || len(right) != 2 {
 		t.Fatalf("narrow topbar lost stable navigation: %q %+v", context, right)
 	}
 	chooser := &chatCloseOverlay{ui: u}

@@ -518,7 +518,7 @@ func TestChatUIStatusBarWrapsOnNarrowWidth(t *testing.T) {
 	// Wrapping must not drop content: every key hint present in the
 	// unwrapped (wide) rendering must still appear somewhere across the
 	// wrapped lines.
-	for _, want := range []string{"F1 Hotkeys", "F4 composer", "F7 Inspect", "Enter send", "Esc back"} {
+	for _, want := range []string{"F11 chats", "F4 composer", "F7 Inspect", "Enter send", "Esc back"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("wrapped status bar dropped segment %q:\n%s", want, status)
 		}

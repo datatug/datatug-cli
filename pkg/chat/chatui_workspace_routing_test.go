@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/strongo/aichat/tui/chatshell"
 	"github.com/tuigoff/tuigoff/pkg/uitest"
@@ -128,11 +129,11 @@ func TestUnifiedWorkspaceModalOwnsShiftAndBlocksGlobals(t *testing.T) {
 	for _, key := range []string{"f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10"} {
 		workspaceRoutingKey(u, key)
 	}
-	if d.shifts != 1 || u.apiScreen != nil || u.shell.WorkspaceFocus() != "transcript" || !strings.Contains(u.shell.View().Content, "Close dialog to return to workspace") {
-		t.Fatal("modal routing escaped to workspace")
+	if d.shifts != 1 || u.apiScreen != nil || u.shell.WorkspaceFocus() != "transcript" || !strings.Contains(ansi.Strip(u.shell.View().Content), "Esc close dialog to return to workspace") {
+		t.Fatalf("modal routing escaped to workspace: shifts=%d api=%v focus=%q\n%s", d.shifts, u.apiScreen != nil, u.shell.WorkspaceFocus(), ansi.Strip(u.shell.View().Content))
 	}
 	workspaceRoutingKey(u, "f1")
-	if !strings.Contains(u.shell.View().Content, "Hotkeys") {
+	if !strings.Contains(u.shell.View().Content, "Keyboard help") {
 		t.Fatal("help unavailable over modal")
 	}
 	workspaceRoutingKey(u, "esc")

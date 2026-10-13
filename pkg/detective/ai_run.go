@@ -113,27 +113,6 @@ func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner
 			return ErrConflict
 		}
 		op.Run = run
-		if draft.CaseID != "" {
-			before, err := s.Store.getCase(draft.CaseID)
-			if err != nil {
-				return err
-			}
-			if before.Status != "active" {
-				return ErrConflict
-			}
-			caseEventID := "event-" + hex.EncodeToString(sum[16:])
-			after, audit, err := core.AttachRun(before, run, caseEventID, s.Scope.Actor, time.Now().UTC())
-			if err != nil {
-				return err
-			}
-			if err := s.Store.compactCaseTimeline(&after); err != nil {
-				return err
-			}
-			audit.Project = s.Scope.Project
-			op.Before = &before
-			op.After = &after
-			op.CaseAudit = &audit
-		}
 		op.Produced = true
 		if err := writeItem(s.Store.privateItemDir("ai-confirm-operations"), command.OperationID, op); err != nil {
 			return err
@@ -168,6 +147,28 @@ func (s LocalAIStore) finishAIRun(ctx context.Context, id string, op *aiRunOpera
 	}
 	if !recorded {
 		if err := s.Store.auditMutation(ctx, runAudit); err != nil {
+			return err
+		}
+	}
+	if op.Draft.CaseID != "" && op.After == nil {
+		before, err := s.Store.getCase(op.Draft.CaseID)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256([]byte(s.Scope.Key + "\x00" + s.Scope.Actor + "\x00" + id))
+		caseEventID := "event-" + hex.EncodeToString(sum[16:])
+		after, audit, err := core.AttachRun(before, op.Run, caseEventID, s.Scope.Actor, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		if err := s.Store.compactCaseTimeline(&after); err != nil {
+			return err
+		}
+		audit.Project = s.Scope.Project
+		op.Before = &before
+		op.After = &after
+		op.CaseAudit = &audit
+		if err := writeItem(s.Store.privateItemDir("ai-confirm-operations"), id, op); err != nil {
 			return err
 		}
 	}

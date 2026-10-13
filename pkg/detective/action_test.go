@@ -170,6 +170,68 @@ func TestOrdinaryActionRecoversAuditFailureWithoutRepeatingMutation(t *testing.T
 	}
 }
 
+func TestOrdinaryAuditRecoveryAfterLaterCaseEdit(t *testing.T) {
+	ctx := context.Background()
+	s := testStore(t)
+	create := ActionRequest{Type: "create-case", Project: "p", Case: &Case{ID: "case-audit-late", Title: "Investigate"}}
+	s.audit = failingAudit{}
+	if _, err := s.ExecuteAction(ctx, "create-late-op", "alice", create, nil, nil, nil, nil); !errors.Is(err, ErrOutcomeUncertain) {
+		t.Fatalf("first acknowledgement = %v, want uncertain audit failure", err)
+	}
+	s.audit = localJSONLAudit{path: s.privateDir + "/audit.jsonl"}
+	current, err := s.GetCase(ctx, "case-audit-late")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.Title = "Investigate invoice 7"
+	update := ActionRequest{Type: "update-case", Project: "p", Case: &current}
+	if got, err := s.ExecuteAction(ctx, "edit-after-lost-ack", "alice", update, nil, nil, nil, nil); err != nil || got.Case == nil || got.Case.Version != 2 {
+		t.Fatalf("later Case edit = %+v, %v", got, err)
+	}
+	if got, err := s.ExecuteAction(ctx, "create-late-op", "alice", create, nil, nil, nil, nil); err != nil || got.Case == nil || got.Case.Version != 1 {
+		t.Fatalf("original receipt recovery = %+v, %v", got, err)
+	}
+	latest, err := s.GetCase(ctx, "case-audit-late")
+	if err != nil || latest.Version != 2 || latest.Title != "Investigate invoice 7" {
+		t.Fatalf("recovery overwrote later edit: %+v, %v", latest, err)
+	}
+	if recorded, err := s.auditRecorded(AuditEvent{ID: "create-late-op", Project: "p", Actor: "alice", Action: "create-case"}); err != nil || !recorded {
+		t.Fatalf("original audit never recovered: %v, %v", recorded, err)
+	}
+}
+
+func TestOrdinaryAcceptedRunRetainsEvidenceWhenCaseClosesDuringExecution(t *testing.T) {
+	ctx := context.Background()
+	s := testStore(t)
+	if _, err := s.SaveCheck(ctx, Check{ID: "invoice-check", Title: "Invoice", Steps: []Step{{ID: "load", Kind: "query", QueryID: "q"}}}, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SaveCase(ctx, Case{ID: "case-run-close", Title: "Investigate"}, "alice", "create-case"); err != nil {
+		t.Fatal(err)
+	}
+	runner := func(context.Context, string, string, map[string]apicontract.TypedValueOrSet) (apicontract.Result, error) {
+		current, err := s.GetCase(ctx, "case-run-close")
+		if err != nil {
+			t.Fatal(err)
+		}
+		current.Status = "closed"
+		current.ClosureReason = "Reviewed while query was running"
+		if got, err := s.ExecuteAction(ctx, "close-during-run", "alice", ActionRequest{Type: "update-case", Project: "p", Case: &current}, nil, nil, nil, nil); err != nil || got.Case == nil {
+			t.Fatalf("concurrent close = %+v, %v", got, err)
+		}
+		return apicontract.Result{}, nil
+	}
+	req := ActionRequest{Type: "run-check", Project: "p", CheckID: "invoice-check", CaseID: "case-run-close", Environment: "qa"}
+	got, err := s.ExecuteAction(ctx, "run-during-close", "alice", req, runner, nil, nil, nil)
+	if err != nil || got.Run == nil {
+		t.Fatalf("accepted run lost after Case close = %+v, %v", got, err)
+	}
+	caseItem, err := s.GetCase(ctx, "case-run-close")
+	if err != nil || caseItem.Status != "closed" || len(caseItem.RunRefs) != 1 || caseItem.RunRefs[0] != got.Run.ID {
+		t.Fatalf("closed Case lost run evidence: %+v, %v", caseItem, err)
+	}
+}
+
 func TestOrdinaryActionCatalogReplayAndConflict(t *testing.T) {
 	ctx := context.Background()
 	s := testStore(t)

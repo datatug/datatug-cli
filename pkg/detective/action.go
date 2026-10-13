@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
@@ -63,6 +65,84 @@ func actionResourceID(req ActionRequest) string {
 	return ""
 }
 
+func actionResourceTarget(req ActionRequest) (string, string) {
+	switch req.Type {
+	case "save-check":
+		return "checks", actionResourceID(req)
+	case "save-validator":
+		return "validators", actionResourceID(req)
+	case "save-query-validators":
+		return "query-validators", queryValidatorFileID(actionResourceID(req))
+	case "save-scenario":
+		return "scenarios", actionResourceID(req)
+	case "create-case", "update-case":
+		return "cases", actionResourceID(req)
+	case "apply-scenario", "record-scenario-step", "append-event", "run-check", "run-query-validators":
+		return "cases", req.CaseID
+	}
+	return "", ""
+}
+
+func operationTarget(op actionOperation) (string, string) {
+	if op.Kind == "run" {
+		return "cases", op.CaseID
+	}
+	return op.Kind, op.ID
+}
+
+// A later edit must first finish a prior materialized write and its audit.
+// Otherwise a retry of the earlier operation can be stranded by the newer
+// resource image. The journal is read in bounded directory batches.
+func (s *LocalStore) reconcilePendingActions(ctx context.Context, collection, resourceID, exceptID string) error {
+	if collection == "" || resourceID == "" {
+		return nil
+	}
+	dir := s.privateItemDir("action-operations")
+	if err := ensureDirIfExists(dir); err != nil {
+		return err
+	}
+	f, err := os.Open(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	for {
+		names, err := f.Readdirnames(128)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		for _, name := range names {
+			if !strings.HasSuffix(name, ".json") {
+				continue
+			}
+			id := strings.TrimSuffix(name, ".json")
+			if id == exceptID {
+				continue
+			}
+			data, readErr := safeReadFile(dir, id)
+			if readErr != nil {
+				return readErr
+			}
+			var op actionOperation
+			if json.Unmarshal(data, &op) != nil {
+				return ErrInvalid
+			}
+			kind, targetID := operationTarget(op)
+			if !op.Done && op.Produced && kind == collection && targetID == resourceID {
+				if finishErr := s.finishAction(ctx, id, &op); finishErr != nil {
+					return finishErr
+				}
+			}
+		}
+		if len(names) == 0 {
+			return nil
+		}
+	}
+}
+
 // ActionBinding omits the ephemeral securityContextId; the endpoint verifies
 // the current session and actor before every call, including exact replay.
 func (s *LocalStore) ActionBinding(req ActionRequest, actor string) (core.OperationBinding, error) {
@@ -97,6 +177,10 @@ func (s *LocalStore) ExecuteAction(ctx context.Context, operationID, actor strin
 	}
 	var prior actionOperation
 	err = s.withLock(ctx, func() error {
+		collection, resourceID := actionResourceTarget(req)
+		if e := s.reconcilePendingActions(ctx, collection, resourceID, operationID); e != nil {
+			return e
+		}
 		data, e := safeReadFile(s.privateItemDir("action-operations"), operationID)
 		if errors.Is(e, os.ErrNotExist) {
 			return nil
@@ -245,28 +329,7 @@ func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req
 		audit := core.AuditForRun(run)
 		audit.Project = s.projectID
 		op.RunAudit = &audit
-		if req.CaseID != "" {
-			before, e := s.getCase(req.CaseID)
-			if e != nil {
-				return e
-			}
-			if before.Status != "active" {
-				return ErrConflict
-			}
-			after, caseAudit, e := core.AttachRun(before, run, actionEventID(s.projectID, actor, id), actor, time.Now().UTC())
-			if e != nil {
-				return e
-			}
-			if e := s.compactCaseTimeline(&after); e != nil {
-				return e
-			}
-			op.Before, _ = json.Marshal(before)
-			op.After, _ = json.Marshal(after)
-			op.CaseID = req.CaseID
-			caseAudit.Project = s.projectID
-			caseAudit.ID = id + "-case"
-			op.Audit = caseAudit
-		}
+		op.CaseID = req.CaseID
 		op.Produced = true
 		if e := writeItem(s.privateItemDir("action-operations"), id, op); e != nil {
 			return e
@@ -292,6 +355,27 @@ func (s *LocalStore) finishAction(ctx context.Context, id string, op *actionOper
 		}
 		if err := s.appendAuditOnce(ctx, *op.RunAudit); err != nil {
 			return err
+		}
+		if op.CaseID != "" && len(op.After) == 0 {
+			before, err := s.getCase(op.CaseID)
+			if err != nil {
+				return err
+			}
+			after, caseAudit, err := core.AttachRun(before, *op.Response.Run, actionEventID(s.projectID, op.Receipt.Actor, id), op.Receipt.Actor, time.Now().UTC())
+			if err != nil {
+				return err
+			}
+			if err := s.compactCaseTimeline(&after); err != nil {
+				return err
+			}
+			op.Before, _ = json.Marshal(before)
+			op.After, _ = json.Marshal(after)
+			caseAudit.Project = s.projectID
+			caseAudit.ID = id + "-case"
+			op.Audit = caseAudit
+			if err := writeItem(s.privateItemDir("action-operations"), id, op); err != nil {
+				return err
+			}
 		}
 	}
 	if len(op.After) != 0 {

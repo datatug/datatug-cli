@@ -313,7 +313,7 @@ func setAIField(m *Model, label, value string) {
 
 func TestNativeAIReviewEditsNestedCheckAndScenarioSteps(t *testing.T) {
 	check := detective.Check{ID: "invoice-check", Title: "Invoice check", Steps: []detective.Step{{ID: "detail", Kind: "query", QueryID: "invoice-detail"}}}
-	scenario := detective.Scenario{ID: "invoice-review", Title: "Invoice review", Steps: []detective.ScenarioStep{{ID: "find", Kind: "query", Ref: "old-query"}}}
+	scenario := detective.Scenario{ID: "invoice-review", Title: "Invoice review", Inputs: []detective.Input{{Name: "invoice_ids", Type: investigation.ValueTypeInteger, Cardinality: "set"}, {Name: "window", Type: investigation.ValueTypeDate, Cardinality: "range"}}, Steps: []detective.ScenarioStep{{ID: "find", Kind: "query", Ref: "old-query", Bindings: []detective.Binding{{Input: "ids", FromInput: "invoice_ids"}, {Input: "from_date", FromInput: "window", Part: "start"}, {Input: "to_date", FromInput: "window", Part: "end"}}}}}
 	tests := []struct {
 		name, key, rowKind string
 		draft              ai.Draft
@@ -349,8 +349,19 @@ func TestNativeAIReviewEditsNestedCheckAndScenarioSteps(t *testing.T) {
 			name: "repair Scenario query reference", key: "e", rowKind: "ai-scenario-step", draft: ai.Draft{Kind: ai.KindScenario, Scenario: &scenario},
 			prepare: func(m *Model) { setAIField(m, "Ref", "invoice-list") },
 			assert: func(t *testing.T, d ai.Draft) {
-				if d.Scenario == nil || len(d.Scenario.Steps) != 1 || d.Scenario.Steps[0].Ref != "invoice-list" {
+				if d.Scenario == nil || len(d.Scenario.Steps) != 1 || d.Scenario.Steps[0].Ref != "invoice-list" || formatBindings(d.Scenario.Steps[0].Bindings) != "ids=invoice_ids, from_date=window.start, to_date=window.end" {
 					t.Fatalf("Scenario query repair lost: %+v", d.Scenario)
+				}
+			},
+		},
+		{
+			name: "repair Scenario range binding", key: "e", rowKind: "ai-scenario-step", draft: ai.Draft{Kind: ai.KindScenario, Scenario: &scenario},
+			prepare: func(m *Model) {
+				setAIField(m, "Bindings", "ids=invoice_ids, begins=window.start, ends=window.end")
+			},
+			assert: func(t *testing.T, d ai.Draft) {
+				if d.Scenario == nil || formatBindings(d.Scenario.Steps[0].Bindings) != "ids=invoice_ids, begins=window.start, ends=window.end" {
+					t.Fatalf("Scenario range binding correction lost: %+v", d.Scenario)
 				}
 			},
 		},

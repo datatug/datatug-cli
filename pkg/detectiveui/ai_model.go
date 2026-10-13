@@ -341,7 +341,7 @@ func (m *Model) updateAIKey(key string) (tea.Model, tea.Cmd) {
 		if p.Draft.Kind == ai.KindScenario && p.Draft.Scenario != nil && selected.kind == "ai-scenario-step" {
 			for i, step := range p.Draft.Scenario.Steps {
 				if step.ID == selected.id {
-					m.begin("ai-scenario-step-edit", "Edit reviewed Scenario step", []field{f("ID", step.ID, "stable step ID"), f("Kind", step.Kind, "query or check"), f("Ref", step.Ref, "saved query or Check")})
+					m.begin("ai-scenario-step-edit", "Edit reviewed Scenario step", scenarioStepFields(step))
 					m.form.aiProposal = *p
 					m.form.stepIndex = i
 					return m, nil
@@ -355,7 +355,7 @@ func (m *Model) updateAIKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if p.Draft.Kind == ai.KindScenario && p.Draft.Scenario != nil {
-			m.begin("ai-scenario-step-add", "Add reviewed Scenario step", []field{f("ID", "", "stable step ID"), f("Kind", "check", "query or check"), f("Ref", "", "saved query or Check")})
+			m.begin("ai-scenario-step-add", "Add reviewed Scenario step", scenarioStepFields(detective.ScenarioStep{}))
 			m.form.aiProposal = *p
 			return m, nil
 		}
@@ -663,6 +663,11 @@ func (m *Model) submitAIForm() (tea.Cmd, bool, error) {
 			if !detective.ValidSlug(step.ID) || step.Ref == "" || (step.Kind != "check" && step.Kind != "query") {
 				return nil, true, fmt.Errorf("valid Scenario step ID, kind and ref required")
 			}
+			bindings, err := parseBindings(m.field("Bindings"))
+			if err != nil {
+				return nil, true, err
+			}
+			step.Bindings = bindings
 			if m.form.kind == "ai-scenario-step-edit" {
 				i := m.form.stepIndex
 				if i < 0 || i >= len(item.Steps) {

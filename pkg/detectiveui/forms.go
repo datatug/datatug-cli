@@ -724,6 +724,9 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 			m.form.scenario = s
 			return nil, nil
 		}
+		if err := detective.ValidateScenario(s); err != nil {
+			return nil, fmt.Errorf("Scenario inputs or bindings: %w", err)
+		}
 		req.Type = "save-scenario"
 		req.Scenario = &s
 	case "first-scenario-step", "add-scenario-step", "edit-scenario-step":
@@ -732,6 +735,10 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 		if step.ID == "" || step.Ref == "" || (step.Kind != "check" && step.Kind != "query") {
 			return nil, fmt.Errorf("valid step ID, kind and ref required")
 		}
+		step.Bindings, err = parseBindings(m.field("Bindings"))
+		if err != nil {
+			return nil, err
+		}
 		if f.kind == "edit-scenario-step" {
 			if step.ID != s.Steps[f.stepIndex].ID {
 				return nil, fmt.Errorf("Scenario step ID cannot change")
@@ -739,6 +746,9 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 			s.Steps[f.stepIndex] = step
 		} else {
 			s.Steps = append(s.Steps, step)
+		}
+		if err := detective.ValidateScenario(s); err != nil {
+			return nil, fmt.Errorf("Scenario step or bindings: %w", err)
 		}
 		req.Type = "save-scenario"
 		req.Scenario = &s
@@ -767,7 +777,7 @@ func stepFields(s detective.Step) []field {
 	return []field{f("ID", s.ID, "stable step slug"), f("Kind", defaultString(s.Kind, "query"), "query or check"), f("Ref", ref, "saved query ID or globally reusable Check ID"), f("Bindings", formatBindings(s.Bindings), "child=parent; child=range.start; child=@row-column, comma separated"), f("On unavailable", s.OnUnavailable, "block, fail, warn, skip or empty")}
 }
 func scenarioStepFields(s detective.ScenarioStep) []field {
-	return []field{f("ID", s.ID, "stable step ID"), f("Kind", defaultString(s.Kind, "check"), "check or query"), f("Ref", s.Ref, "saved query or Check catalog ID")}
+	return []field{f("ID", s.ID, "stable step ID"), f("Kind", defaultString(s.Kind, "check"), "check or query"), f("Ref", s.Ref, "saved query or Check catalog ID"), f("Bindings", formatBindings(s.Bindings), "query only: parameter=scenario_input or parameter=range.start/end; comma separated")}
 }
 func validatorFields(v detective.Validator, id string) []field {
 	return []field{f("Catalog ID", id, "only for promoted Validators"), f("Title", id, "only for promoted Validators"), f("ID", v.ID, "local Validator slug"), f("Scope", defaultString(v.Scope, "row"), "row or set"), f("Kind", defaultString(v.Kind, "non-null"), "non-null, equals-fields, row-count, unique, sum-equals, check"), f("Severity", defaultString(v.Severity, "error"), "critical, error, warning, info"), f("Field", v.Field, "field to inspect"), f("Other field", v.OtherField, "comparison field"), f("Expected", formatExpected(v.Expected), "row-count expected integer"), f("Check ID", v.CheckID, "globally reusable Check for kind=check"), f("Bindings", formatBindings(v.Bindings), "child=@row-column for per-row Check"), f("On unavailable", v.OnUnavailable, "block, fail, warn, skip or empty"), f("Promoted ID", v.ValidatorID, "reference an existing reusable Validator instead of defining a local kind")}

@@ -181,6 +181,8 @@ type explorationTrailOverlay struct {
 	ids   []string
 	index int
 	start int
+	// Mouse bounds describe only rows painted by the last View.
+	rowCount, width int
 }
 
 func (u *ChatUI) openTrail() tea.Cmd {
@@ -213,6 +215,7 @@ func (o *explorationTrailOverlay) View(w, h int) string {
 	lines := []string{"Trail · Alt+← Back · Alt+→ Forward · ↑↓ / Enter · Esc"}
 	start, end := selectedListWindow(len(o.ids), o.index, max(1, h-2))
 	o.start = start
+	o.rowCount, o.width = min(end-start, max(0, h-1)), max(0, w)
 	for i := start; i < end; i++ {
 		prefix := "  "
 		if i == o.index {
@@ -226,8 +229,12 @@ func (o *explorationTrailOverlay) View(w, h int) string {
 	return strings.Join(lines, "\n")
 }
 func (*explorationTrailOverlay) LocalMouseCoordinates() bool { return true }
+func (*explorationTrailOverlay) BoundedMouseInput() bool     { return true }
 func (o *explorationTrailOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd, bool) {
-	if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft && click.Y > 0 {
+	if _, ok := msg.(tea.WindowSizeMsg); ok {
+		o.rowCount = 0
+	}
+	if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft && click.X >= 0 && click.X < o.width && click.Y > 0 && click.Y <= o.rowCount {
 		at := o.start + click.Y - 1
 		if at < len(o.ids) {
 			o.index = at
@@ -240,8 +247,10 @@ func (o *explorationTrailOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cm
 			return o, nil, true
 		case "up":
 			o.index = max(0, o.index-1)
+			o.rowCount = 0
 		case "down":
 			o.index = min(max(0, len(o.ids)-1), o.index+1)
+			o.rowCount = 0
 		case "enter":
 			if len(o.ids) > 0 {
 				id := o.ids[o.index]

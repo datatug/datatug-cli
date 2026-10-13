@@ -22,20 +22,21 @@ import (
 )
 
 const (
-	serveHostFlag              = "host"
-	servePortFlag              = "port"
-	serveProjectFlag           = "project"
-	serveAsFlag                = "as"
-	serveRoleFlag              = "role"
-	serveGroupFlag             = "group"
-	serveAllowWritesFlag       = "allow-writes"
-	serveAllowOpaqueSQLFlag    = "allow-opaque-sql"
-	serveAllowLiveConnsFlag    = "allow-live-connections"
-	serveHTTPOfflineFlag       = "http-offline"
-	serveExecTimeoutFlag       = "exec-timeout"
-	serveEvidenceDirFlag       = "evidence-dir"
-	serveSnapshotByteCapFlag   = "snapshot-byte-cap"
-	serveSnapshotRetentionFlag = "snapshot-retention"
+	serveHostFlag               = "host"
+	servePortFlag               = "port"
+	serveProjectFlag            = "project"
+	serveAsFlag                 = "as"
+	serveRoleFlag               = "role"
+	serveGroupFlag              = "group"
+	serveAllowWritesFlag        = "allow-writes"
+	serveAllowOpaqueSQLFlag     = "allow-opaque-sql"
+	serveAllowLiveConnsFlag     = "allow-live-connections"
+	serveHTTPOfflineFlag        = "http-offline"
+	serveExecTimeoutFlag        = "exec-timeout"
+	serveEvidenceDirFlag        = "evidence-dir"
+	serveSnapshotByteCapFlag    = "snapshot-byte-cap"
+	serveSnapshotRetentionFlag  = "snapshot-retention"
+	serveDetectiveAIProfileFlag = "detective-ai-profile"
 )
 
 // ServeCommand executes serve consoleCommand
@@ -47,21 +48,22 @@ const serveOpenBrowserFlag = "open-browser"
 // --as/--role/--group fix the principal every policy-enforced read in this
 // process runs as (REQ:principal-selection) — see resolveServeSession.
 type serveFlags struct {
-	openBrowser       bool
-	host              string
-	port              int
-	projectDir        string
-	as                string
-	roles             []string
-	groups            []string
-	allowWrites       bool
-	allowOpaqueSQL    bool
-	allowLiveConns    bool
-	httpOffline       bool
-	execTimeout       time.Duration
-	evidenceDir       string
-	snapshotByteCap   int
-	snapshotRetention time.Duration
+	openBrowser        bool
+	host               string
+	port               int
+	projectDir         string
+	as                 string
+	roles              []string
+	groups             []string
+	allowWrites        bool
+	allowOpaqueSQL     bool
+	allowLiveConns     bool
+	httpOffline        bool
+	execTimeout        time.Duration
+	evidenceDir        string
+	snapshotByteCap    int
+	snapshotRetention  time.Duration
+	detectiveAIProfile string
 }
 
 func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
@@ -111,6 +113,9 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.snapshotRetention, err = flags.GetDuration(serveSnapshotRetentionFlag); err != nil {
+		return f, err
+	}
+	if f.detectiveAIProfile, err = flags.GetString(serveDetectiveAIProfileFlag); err != nil {
 		return f, err
 	}
 	return f, nil
@@ -260,6 +265,16 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		EvidenceRetention:    firstNonZeroDuration(flags.snapshotRetention, runtimeSettings.Server.SnapshotRetention),
 		SnapshotPolicies:     runtimeSettings.Server.SnapshotPolicies,
 	}
+	if flags.detectiveAIProfile != "" {
+		if config.AI == nil {
+			return Exit("Detective AI profile is not configured", exitCodeUsage)
+		}
+		profile, ok := config.AI.Profiles[flags.detectiveAIProfile]
+		if !ok || strings.TrimSpace(profile.Model) == "" {
+			return Exit("Detective AI profile is unknown or has no model", exitCodeUsage)
+		}
+		caps.DetectiveAIProfile = &profile
+	}
 	if caps.AllowWrites {
 		log.Printf("serve: --allow-writes set; project-mutation routes are enabled")
 	}
@@ -351,5 +366,6 @@ func serveCommandArgs() *cobra.Command {
 	flags.String(serveEvidenceDirFlag, "", "Server-private execution snapshot directory (default $"+executionstore.DirEnv+" or ~/"+executionstore.DefaultDir+")")
 	flags.Int(serveSnapshotByteCapFlag, 0, "Maximum canonical bytes retained per execution snapshot (default 2 MiB)")
 	flags.Duration(serveSnapshotRetentionFlag, 0, "Execution snapshot retention before bytes are expired (default 30 days)")
+	flags.String(serveDetectiveAIProfileFlag, "", "Named AI profile for Detective proposals; credentials remain in its configured environment variable")
 	return cmd
 }

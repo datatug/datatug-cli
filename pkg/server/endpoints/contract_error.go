@@ -216,11 +216,15 @@ func targetOptions(targets []apicontract.CandidateTarget) []apicontract.TargetOp
 }
 
 // httpStatusFor maps code to its exact appendix HTTP status
-// (apicontract.ErrorCode.HTTPStatus()), falling back to 500 for codeInternal
+// (apicontract.ErrorCode.HTTPStatus()). OUTCOME_UNCERTAIN is the local
+// operation journal's explicit 409; otherwise we fall back to 500 for codeInternal
 // and any other code outside the closed set (HTTPStatus returns 0 for an
 // unknown code; the same fallback the deleted provisional package's own
 // StatusFor default case used).
 func httpStatusFor(code apicontract.ErrorCode) int {
+	if code == "OUTCOME_UNCERTAIN" {
+		return http.StatusConflict
+	}
 	if status := code.HTTPStatus(); status != 0 {
 		return status
 	}

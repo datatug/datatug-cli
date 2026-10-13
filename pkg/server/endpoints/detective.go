@@ -18,8 +18,16 @@ func detectiveRoutes(path string, router router, wrap wrapper, writeOnly bool, c
 	if !writeOnly {
 		route(router, wrap, http.MethodGet, path+"/detective/state", detectiveStateHandler)
 		route(router, wrap, http.MethodGet, path+"/detective/case-events", detectiveCaseEventsHandler)
+		route(router, wrap, http.MethodGet, path+"/detective/incidents", detectiveIncidentsHandler)
+		route(router, wrap, http.MethodGet, path+"/detective/knowledge_proposals", detectiveKnowledgeProposalsHandler)
+		route(router, wrap, http.MethodGet, path+"/detective/ai_proposals", detectiveAIProposalsHandler)
 	}
 	route(router, wrap, http.MethodPost, path+"/detective/action", requireWriteCapability(caps, detectiveActionHandler))
+	route(router, wrap, http.MethodPost, path+"/detective/incident-action", requireWriteCapability(caps, detectiveIncidentActionHandler))
+	route(router, wrap, http.MethodPost, path+"/detective/knowledge_proposal_action", requireWriteCapability(caps, detectiveKnowledgeActionHandler))
+	route(router, wrap, http.MethodPost, path+"/detective/ai_proposals", requireWriteCapability(caps, detectiveAIProposalsHandler))
+	route(router, wrap, http.MethodPost, path+"/detective/ai_review", requireWriteCapability(caps, detectiveAIReviewHandler))
+	route(router, wrap, http.MethodPost, path+"/detective/ai_confirm", requireWriteCapability(caps, detectiveAIConfirmHandler))
 }
 
 func detectiveCaseEventsHandler(w http.ResponseWriter, r *http.Request) {
@@ -79,9 +87,30 @@ func detectiveStateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state, err := store.StatePage(r.Context(), r.URL.Query().Get("runsBefore"))
+	if err == nil {
+		state.Environments, err = detectiveEnvironments(r.Context(), r.URL.Query().Get("project"))
+	}
 	state.Capabilities.CanWrite = api.GetCapabilities().AllowWrites
 	state.Capabilities.CanRun = api.GetCapabilities().AllowWrites
 	writeContractResponse(w, r, detectiveError(err), state)
+}
+
+func detectiveEnvironments(ctx context.Context, project string) ([]string, error) {
+	projectStore, err := api.ProjectStoreFor(project)
+	if err != nil {
+		return nil, newNotFound("project not found")
+	}
+	items, err := projectStore.LoadEnvironments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if item != nil {
+			result = append(result, item.ID)
+		}
+	}
+	return result, nil
 }
 
 func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
@@ -90,13 +119,21 @@ func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, newAccessDenied("this agent was started without --allow-writes"))
 		return
 	}
-	var req detective.ActionRequest
-	if err := readIncidentBody(w, r, &req); err != nil {
+	var body struct {
+		OperationID string `json:"operationId"`
+		detective.ActionRequest
+	}
+	if err := readIncidentBody(w, r, &body); err != nil {
 		writeContractError(w, r, err)
 		return
 	}
+	req := body.ActionRequest
 	if req.Project != r.URL.Query().Get("project") {
 		writeContractError(w, r, newInvalidRequest("project", "URL and body project differ"))
+		return
+	}
+	if body.OperationID == "" {
+		writeContractError(w, r, newInvalidRequest("operationId", "operation ID is required for replay-safe Detective actions"))
 		return
 	}
 	store, actor, err := detectiveStore(req.Project, req.SecurityContextID)
@@ -104,107 +141,22 @@ func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, err)
 		return
 	}
-	var response detective.ActionResponse
+	var result *apicontract.Result
+	var proof *detective.ScenarioQueryProof
 	switch req.Type {
-	case "save-check":
-		if req.Check == nil {
-			err = detective.ErrInvalid
-			break
-		}
-		var check detective.Check
-		check, err = store.SaveCheck(r.Context(), *req.Check, actor)
-		if err == nil {
-			response.Check = &check
-		}
-	case "save-validator":
-		if req.Validator == nil {
-			err = detective.ErrInvalid
-			break
-		}
-		var validator detective.PublishedValidator
-		validator, err = store.SaveValidator(r.Context(), *req.Validator, actor)
-		if err == nil {
-			response.Validator = &validator
-		}
 	case "save-query-validators":
-		if req.QueryValidators == nil {
-			err = detective.ErrInvalid
-			break
-		}
-		projectDir, _ := api.ProjectDir(req.Project)
-		canonical, resolveErr := api.ResolveQueryID(projectDir, req.QueryValidators.QueryID)
-		if resolveErr != nil {
-			err = newInvalidRequest("queryId", "saved query is unavailable")
-			break
-		}
-		item := *req.QueryValidators
-		item.QueryID = canonical
-		var saved detective.QueryValidators
-		saved, err = store.SaveQueryValidators(r.Context(), item, actor)
-		if err == nil {
-			response.QueryValidators = &saved
-		}
-	case "save-scenario":
-		if req.Scenario == nil {
-			err = detective.ErrInvalid
-			break
-		}
-		var scenario detective.Scenario
-		scenario, err = store.SaveScenario(r.Context(), *req.Scenario, actor)
-		if err == nil {
-			response.Scenario = &scenario
-		}
-	case "apply-scenario":
-		var c detective.Case
-		c, err = store.ApplyScenario(r.Context(), req.CaseID, req.ScenarioID, actor)
-		if err == nil {
-			response.Case = &c
-		}
-	case "record-scenario-step":
-		var c detective.Case
-		if req.Execution == nil {
-			c, err = store.RecordScenarioStep(r.Context(), req.CaseID, req.ApplicationID, req.StepID, req.StepStatus, req.RunID, actor)
-		} else if req.StepStatus != "completed" || req.RunID != "" {
-			err = detective.ErrInvalid
-		} else {
-			var proof detective.ScenarioQueryProof
-			proof, err = loadDetectiveScenarioQueryProof(r.Context(), req.Project, actor, req.Execution)
-			if err == nil {
-				c, err = store.RecordScenarioQueryStep(r.Context(), req.CaseID, req.ApplicationID, req.StepID, proof, actor)
+		if req.QueryValidators != nil {
+			projectDir, _ := api.ProjectDir(req.Project)
+			canonical, resolveErr := api.ResolveQueryID(projectDir, req.QueryValidators.QueryID)
+			if resolveErr != nil {
+				err = newInvalidRequest("queryId", "saved query is unavailable")
+			} else {
+				req.QueryValidators.QueryID = canonical
 			}
-		}
-		if err == nil {
-			response.Case = &c
-		}
-	case "create-case", "update-case":
-		if req.Case == nil {
-			err = detective.ErrInvalid
-			break
-		}
-		var c detective.Case
-		c, err = store.SaveCase(r.Context(), *req.Case, actor, req.Type)
-		if err == nil {
-			response.Case = &c
-		}
-	case "append-event":
-		if req.Event == nil {
-			err = detective.ErrInvalid
-			break
-		}
-		var c detective.Case
-		c, err = store.AppendCaseEvent(r.Context(), req.CaseID, *req.Event, actor)
-		if err == nil {
-			response.Case = &c
 		}
 	case "run-check":
 		if req.Environment == "" || api.ValidateIdentifier("environment", req.Environment) != nil {
 			err = detective.ErrInvalid
-			break
-		}
-		var run detective.CheckRun
-		run, err = store.Run(r.Context(), req.CheckID, req.Environment, req.CaseID, actor, req.Inputs, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project))
-		if err == nil {
-			response.Run = &run
 		}
 	case "run-query-validators":
 		if req.Environment == "" || api.ValidateIdentifier("environment", req.Environment) != nil {
@@ -217,24 +169,35 @@ func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
 			err = newInvalidRequest("queryId", "saved query is unavailable")
 			break
 		}
-		var run detective.CheckRun
-		if req.Execution == nil {
-			run, err = store.RunQueryValidators(r.Context(), canonical, req.Environment, req.CaseID, actor, req.Inputs, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project))
-		} else {
-			var result apicontract.Result
-			var inputs map[string]detective.InputValue
-			result, inputs, err = loadDetectiveExecutionResult(r.Context(), req.Project, canonical, req.Environment, req.Execution, req.Inputs)
-			if err == nil {
-				run, err = store.RunQueryValidatorsForResult(r.Context(), canonical, req.Environment, req.CaseID, actor, inputs, result, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project))
+		req.QueryID = canonical
+		if req.Execution != nil {
+			var retained apicontract.Result
+			retained, req.Inputs, err = loadDetectiveExecutionResult(r.Context(), req.Project, actor, canonical, req.Environment, req.Execution, req.Inputs)
+			result = &retained
+		}
+	case "record-scenario-step":
+		if req.Execution != nil {
+			if req.StepStatus != "completed" || req.RunID != "" {
+				err = detective.ErrInvalid
+			} else {
+				var verified detective.ScenarioQueryProof
+				verified, err = loadDetectiveScenarioQueryProof(r.Context(), req.Project, actor, req.Execution)
+				if err == nil && (req.QueryID != "" && req.QueryID != verified.QueryID || req.Environment != "" && req.Environment != verified.Environment) {
+					err = newInvalidRequest("execution", "execution does not match the requested query and environment")
+				}
+				proof = &verified
 			}
 		}
-		if err == nil {
-			response.Run = &run
-		}
-	default:
-		err = detective.ErrInvalid
 	}
-	writeContractResponse(w, r, detectiveError(err), response)
+	if err != nil {
+		writeContractResponse(w, r, detectiveError(err), detective.ActionResponse{})
+		return
+	}
+	response, err := store.ExecuteAction(r.Context(), body.OperationID, actor, req, detectiveQueryRunner(req.Project, req.SecurityContextID), detectiveExecutionMetadata(req.Project), result, proof)
+	writeContractResponse(w, r, detectiveError(err), struct {
+		detective.ActionResponse
+		Receipt string `json:"receipt,omitempty"`
+	}{response, body.OperationID})
 }
 
 func loadDetectiveScenarioQueryProof(ctx context.Context, project, actor string, ref *apicontract.ExecutionRef) (detective.ScenarioQueryProof, error) {
@@ -249,7 +212,7 @@ func loadDetectiveScenarioQueryProof(ctx context.Context, project, actor string,
 	if err != nil {
 		return detective.ScenarioQueryProof{}, newNotFound("execution not found")
 	}
-	if record.Ref != *ref || record.Scope.Project != project || record.QueryID == "" || record.Scope.Environment == "" || record.Principal.ID != actor || record.ResultComplete == nil {
+	if record.Ref != *ref || record.Scope.Project != project || record.QueryID == "" || record.Scope.Environment == "" || record.Principal.ID != actor || record.ResultComplete == nil || !*record.ResultComplete {
 		return detective.ScenarioQueryProof{}, newAccessDenied("execution receipt does not match the current project and principal")
 	}
 	return detective.ScenarioQueryProof{Execution: *ref, QueryID: record.QueryID, Environment: record.Scope.Environment, ExecutionStatus: "completed"}, nil
@@ -258,7 +221,7 @@ func loadDetectiveScenarioQueryProof(ctx context.Context, project, actor string,
 // A row overlay is safe only when the retained receipt still has the same
 // ordered rows and columns after current policy is reapplied. The client can
 // select the receipt but cannot supply either its rows or its parameters.
-func loadDetectiveExecutionResult(ctx context.Context, project, queryID, environment string, ref *apicontract.ExecutionRef, supplied map[string]detective.InputValue) (apicontract.Result, map[string]detective.InputValue, error) {
+func loadDetectiveExecutionResult(ctx context.Context, project, actor, queryID, environment string, ref *apicontract.ExecutionRef, supplied map[string]detective.InputValue) (apicontract.Result, map[string]detective.InputValue, error) {
 	if ref == nil || ref.Validate() != nil || ref.ProjectID != project || len(supplied) != 0 {
 		return apicontract.Result{}, nil, newInvalidRequest("execution", "invalid execution reference or inputs")
 	}
@@ -270,7 +233,7 @@ func loadDetectiveExecutionResult(ctx context.Context, project, queryID, environ
 	if err != nil {
 		return apicontract.Result{}, nil, newNotFound("execution not found")
 	}
-	if record.QueryID != queryID || record.Scope.Project != project || record.Scope.Environment != environment || record.Ref != *ref {
+	if record.QueryID != queryID || record.Scope.Project != project || record.Scope.Environment != environment || record.Ref != *ref || record.Principal.ID != actor {
 		return apicontract.Result{}, nil, newInvalidRequest("execution", "execution does not match the requested query and environment")
 	}
 	if record.SnapshotRef == "" {
@@ -376,7 +339,7 @@ func detectiveError(err error) error {
 	case errors.Is(err, detective.ErrCapacity):
 		return newInvalidRequest("body", "Detective catalog capacity reached")
 	case errors.Is(err, detective.ErrOutcomeUncertain):
-		return newInvalidRequest("body", "operation may have been saved; reload and review")
+		return newContractError("OUTCOME_UNCERTAIN", "operation outcome is uncertain; review state and use a new operation ID for another attempt", "operationId")
 	case errors.Is(err, context.DeadlineExceeded):
 		return newInvalidRequest("body", "Detective store is busy; retry")
 	}

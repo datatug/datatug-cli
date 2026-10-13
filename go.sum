@@ -123,6 +123,8 @@ github.com/datatug/cliformat v0.0.3 h1:d9p5vo7r8BH6qSKyTHQ9Al2sT6QHsQTK9KRlihaJd
 github.com/datatug/cliformat v0.0.3/go.mod h1:DwX9tWHiyH+vZtbVEVOyHOEOw1Km9AzhgHoqI0PowAc=
 github.com/datatug/datatug-core v0.49.0 h1:/NVouXC21Uj4b+r01v528ejUhrrN4qRJVV2ovs+Ezqg=
 github.com/datatug/datatug-core v0.49.0/go.mod h1:uwue00AncsED6wCo1P9+G5X4jnf0/5kh7mez50e+p00=
+github.com/datatug/datatug-core v0.50.0 h1:4pf3BGjDtIx0FWGsC1lbjVqII8Bw5nfLojw+fxtFS/E=
+github.com/datatug/datatug-core v0.50.0/go.mod h1:gn4oHcoeZ3A04Uu+Q7Hw4rLs30I7kUZVJ8BZO2lTNHA=
 github.com/datatug/sql2csv v0.0.1 h1:mmQI9gWAqVKtnwwNKPEPamplV0g1+KaTovME7/7+SIY=
 github.com/datatug/sql2csv v0.0.1/go.mod h1:nZwHW70TWPF2PTXyCa4hysB+nVgY/AcF6m/KclO3fvs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

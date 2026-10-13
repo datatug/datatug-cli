@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/detective"
+	ai "github.com/datatug/datatug-core/pkg/detectiveai"
 )
 
 type Service interface {
@@ -39,6 +40,8 @@ const (
 	knowledgeList   screen = "Knowledge"
 	knowledgeDetail screen = "Proposal"
 	exportDetail    screen = "Private Export"
+	aiList          screen = "AI Proposals"
+	aiDetail        screen = "AI Review"
 	formScreen      screen = "Form"
 )
 
@@ -83,6 +86,23 @@ type queryRunMsg struct {
 	validators            bool
 	applicationID, stepID string
 }
+type aiPageMsg struct {
+	page  AIPage
+	err   error
+	older bool
+}
+type aiGeneratedMsg struct {
+	response ai.Response
+	err      error
+}
+type aiReviewedMsg struct {
+	proposal ai.Proposal
+	err      error
+}
+type aiConfirmedMsg struct {
+	receipt ai.Receipt
+	err     error
+}
 
 type Model struct {
 	service                             Service
@@ -111,6 +131,8 @@ type Model struct {
 	knowledge                           KnowledgePage
 	proposalID                          string
 	exported                            *KnowledgeHandoff
+	aiPage                              AIPage
+	aiProposalID                        string
 	queryExecution                      *apicontract.ExecutionRef
 	pendingApplicationID, pendingStepID string
 	pendingRunID                        string
@@ -319,6 +341,53 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.feedback = "Saved query completed with execution receipt " + ref.ExecutionID
 		return m, nil
+	case aiPageMsg:
+		m.busy = false
+		if v.err != nil {
+			m.feedback = v.err.Error()
+			return m, nil
+		}
+		if v.older {
+			m.aiPage.Proposals = append(m.aiPage.Proposals, v.page.Proposals...)
+			m.aiPage.HasMore, m.aiPage.NextCursor = v.page.HasMore, v.page.NextCursor
+		} else {
+			m.aiPage = v.page
+		}
+		m.rebuild()
+		return m, nil
+	case aiGeneratedMsg:
+		m.busy = false
+		if v.err != nil {
+			m.feedback = v.err.Error()
+			return m, nil
+		}
+		m.form = nil
+		m.feedback = fmt.Sprintf("%d private AI proposals ready for review", len(v.response.Proposals))
+		if len(v.response.Proposals) > 0 {
+			m.aiProposalID = v.response.Proposals[0].ID
+			m.screen = aiDetail
+		}
+		return m, m.loadAI(false)
+	case aiReviewedMsg:
+		m.busy = false
+		if v.err != nil {
+			m.feedback = v.err.Error()
+			return m, nil
+		}
+		m.form = nil
+		m.aiProposalID = v.proposal.ID
+		m.screen = aiDetail
+		m.feedback = "Reviewed draft saved privately; inspect before confirming"
+		return m, m.loadAI(false)
+	case aiConfirmedMsg:
+		m.busy = false
+		if v.err != nil {
+			m.feedback = v.err.Error()
+			return m, nil
+		}
+		m.form = nil
+		m.feedback = "Confirmed with receipt " + v.receipt.OperationID
+		return m, m.load()
 	case tea.KeyPressMsg:
 		if v.String() == "ctrl+c" {
 			return m, tea.Quit
@@ -355,6 +424,9 @@ func (m *Model) updateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.openCatalog(queryValidators)
 		return m, nil
 	}
+	if key == "ctrl+a" && m.screen != formScreen {
+		return m.openAI()
+	}
 	if key == "esc" {
 		if m.filter != "" && m.screen != detail && m.screen != runDetail {
 			m.filter = ""
@@ -369,12 +441,14 @@ func (m *Model) updateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.screen = detail
 		case history:
 			m.screen = detail
-		case timeline, incidentList, knowledgeList:
+		case timeline, incidentList, knowledgeList, aiList:
 			m.screen = detail
 		case knowledgeDetail:
 			m.screen = knowledgeList
 		case exportDetail:
 			m.screen = knowledgeDetail
+		case aiDetail:
+			m.screen = aiList
 		default:
 			return m, tea.Quit
 		}
@@ -450,7 +524,7 @@ func (m *Model) updateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.screen == timeline || m.screen == incidentList || m.screen == knowledgeList || m.screen == knowledgeDetail || m.screen == exportDetail {
+	if m.screen == timeline || m.screen == incidentList || m.screen == knowledgeList || m.screen == knowledgeDetail || m.screen == exportDetail || m.screen == aiList || m.screen == aiDetail {
 		return m.updateHostedKey(key)
 	}
 	if m.screen == runDetail {
@@ -556,6 +630,14 @@ func (m *Model) rebuild() {
 		if p := m.exported; p != nil {
 			m.rows = append(m.rows, row{"Private knowledge handoff " + p.ProposalID + " · " + p.Status, "header", p.ProposalID, 0}, row{"Target " + p.Target.System + " · " + p.Target.Repository + "/" + p.Target.ResourceID, "header", p.ProposalID, 0}, row{"Expected revision " + p.Target.ExpectedRevision + " · proposal v" + fmt.Sprint(p.ProposalVersion), "header", p.ProposalID, 0}, row{"Statement " + p.Statement + " · " + p.ClaimStatus, "header", p.ProposalID, 0}, row{"Evidence " + strings.Join(p.EvidenceRefs, ", "), "header", p.ProposalID, 0}, row{"Findings " + strings.Join(p.FindingRefs, ", "), "header", p.ProposalID, 0})
 		}
+	case aiList:
+		for _, proposal := range m.aiPage.Proposals {
+			if match(proposal.Draft.Title + " " + proposal.ID + " " + proposal.Draft.Kind) {
+				m.rows = append(m.rows, row{proposal.ID + "  [" + proposal.Draft.Kind + "] " + proposal.Draft.Title, "ai-proposal", proposal.ID, 0})
+			}
+		}
+	case aiDetail:
+		m.rebuildAI()
 	case runDetail:
 		m.rebuildRun()
 	}
@@ -777,7 +859,13 @@ func (m *Model) hints() string {
 	if m.screen == exportDetail {
 		return "Private portable proposal · Esc proposal"
 	}
-	return "F1 Checks · F2 Detective · F3 Scenarios · F4 Reusable · F5 Query Validators · type to search · Enter open · Ctrl+N new"
+	if m.screen == aiList {
+		return "N ask AI · Enter inspect proposal · L older proposals · Esc Case"
+	}
+	if m.screen == aiDetail {
+		return "R edit draft · E selected step/Validator · A add step · V add Validator · C confirm · Esc proposals"
+	}
+	return "F1 Checks · F2 Detective · F3 Scenarios · F4 Reusable · F5 Query Validators · Ctrl+A AI · type to search"
 }
 func inputSummary(inputs []detective.Input) string {
 	if len(inputs) == 0 {

@@ -96,6 +96,9 @@ func (m *Model) openKnowledge() (tea.Model, tea.Cmd) {
 	return m, m.loadKnowledge(false)
 }
 func (m *Model) updateHostedKey(key string) (tea.Model, tea.Cmd) {
+	if m.screen == aiList || m.screen == aiDetail {
+		return m.updateAIKey(key)
+	}
 	switch m.screen {
 	case timeline:
 		if key == "l" && m.eventsMore {
@@ -288,6 +291,9 @@ func (m *Model) submitHostedForm() (tea.Cmd, bool, error) {
 	if m.form == nil {
 		return nil, false, nil
 	}
+	if cmd, handled, err := m.submitAIForm(); handled {
+		return cmd, handled, err
+	}
 	switch m.form.kind {
 	case "incident-create", "incident-link", "incident-start-case":
 		service, err := m.incidentService()
@@ -342,7 +348,7 @@ func (m *Model) submitHostedForm() (tea.Cmd, bool, error) {
 		a := KnowledgeAction{}
 		if m.form.kind == "knowledge-draft" {
 			a.Type = "save-draft"
-			a.Proposal = &KnowledgeProposal{ID: m.field("ID"), CaseID: m.id, Kind: m.field("Kind"), Title: m.field("Title"), Statement: m.field("Statement"), ClaimStatus: m.field("Claim status"), EvidenceRefs: splitCSV(m.field("Evidence refs")), FindingRefs: splitCSV(m.field("Finding refs")), Status: "draft"}
+			a.Proposal = &KnowledgeProposal{ID: m.field("ID"), CaseID: m.id, Kind: m.field("Kind"), Title: m.field("Title"), Statement: m.field("Statement"), ClaimStatus: m.field("Claim status"), EvidenceRefs: splitCSV(m.field("Evidence refs")), FindingRefs: splitCSV(m.field("Finding refs"))}
 			if a.Proposal.ID == "" || a.Proposal.Title == "" || a.Proposal.Statement == "" || len(a.Proposal.EvidenceRefs) == 0 {
 				return nil, true, fmt.Errorf("proposal ID, title, statement and Case evidence references required")
 			}

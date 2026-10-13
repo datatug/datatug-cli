@@ -6,6 +6,7 @@ import (
 
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/detective"
+	ai "github.com/datatug/datatug-core/pkg/detectiveai"
 	"github.com/datatug/datatug-core/pkg/incidents"
 )
 
@@ -26,11 +27,33 @@ type KnowledgeService interface {
 type QueryExecutionService interface {
 	RunSavedQuery(context.Context, SavedQueryRun) (SavedQueryResult, error)
 }
+type AIService interface {
+	AIProposals(context.Context, string) (AIPage, error)
+	GenerateAI(context.Context, AIGenerate) (ai.Response, error)
+	ReviewAI(context.Context, AIReview) (ai.Proposal, error)
+	ConfirmAI(context.Context, ai.ConfirmRequest) (ai.Receipt, error)
+}
+type AIPage struct {
+	Proposals  []ai.Proposal `json:"proposals"`
+	NextCursor string        `json:"nextCursor,omitempty"`
+	HasMore    bool          `json:"hasMore"`
+}
+type AIGenerate struct {
+	Text           string
+	CaseID         string
+	ExpectedCounts map[string]int
+}
+type AIReview struct {
+	Type    string
+	Draft   *ai.ReviewedDraftRequest
+	Context *ai.ContextReviewRequest
+}
 type HostedService interface {
 	CaseEventsService
 	IncidentService
 	KnowledgeService
 	QueryExecutionService
+	AIService
 }
 
 type IncidentLinks struct {

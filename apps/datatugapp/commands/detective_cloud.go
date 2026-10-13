@@ -16,6 +16,7 @@ import (
 
 	"github.com/datatug/datatug-cli/pkg/detectiveui"
 	"github.com/datatug/datatug-core/pkg/detective"
+	ai "github.com/datatug/datatug-core/pkg/detectiveai"
 	"github.com/google/uuid"
 )
 
@@ -103,7 +104,7 @@ func (s *detectiveCloudService) do(ctx context.Context, method, path string, bod
 	if err != nil {
 		return fmt.Errorf("hosted Detective request: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 4<<20))
 	if err != nil {
 		return err
@@ -300,6 +301,60 @@ func (s *detectiveCloudService) KnowledgeAction(ctx context.Context, a detective
 	if err == nil {
 		s.completeOperation(key)
 	}
+	return out, err
+}
+func (s *detectiveCloudService) AIProposals(ctx context.Context, after string) (detectiveui.AIPage, error) {
+	v := s.scope()
+	if after != "" {
+		v.Set("after", after)
+	}
+	var page detectiveui.AIPage
+	err := s.do(ctx, http.MethodGet, "/v0/datatug/detective/ai_proposals?"+v.Encode(), nil, &page)
+	return page, err
+}
+func (s *detectiveCloudService) GenerateAI(ctx context.Context, a detectiveui.AIGenerate) (ai.Response, error) {
+	var out ai.Response
+	body := map[string]any{"storage": "firestore", "spaceID": s.space, "project": s.project, "text": a.Text}
+	if a.CaseID != "" {
+		body["caseId"] = a.CaseID
+	}
+	if a.ExpectedCounts != nil {
+		body["expectedCounts"] = a.ExpectedCounts
+	}
+	key, operationID := s.operation("ai-generate", body)
+	body["operationId"] = operationID
+	err := s.do(ctx, http.MethodPost, "/v0/datatug/detective/ai_proposals", body, &out)
+	if err == nil {
+		s.completeOperation(key)
+	}
+	return out, err
+}
+func (s *detectiveCloudService) ReviewAI(ctx context.Context, a detectiveui.AIReview) (ai.Proposal, error) {
+	var out ai.Proposal
+	body := map[string]any{"storage": "firestore", "spaceID": s.space, "project": s.project, "type": a.Type}
+	if a.Draft != nil {
+		body["draft"] = a.Draft
+	}
+	if a.Context != nil {
+		body["context"] = a.Context
+	}
+	err := s.do(ctx, http.MethodPost, "/v0/datatug/detective/ai_review", body, &out)
+	return out, err
+}
+func (s *detectiveCloudService) ConfirmAI(ctx context.Context, a ai.ConfirmRequest) (ai.Receipt, error) {
+	var out ai.Receipt
+	body := map[string]any{"storage": "firestore", "spaceID": s.space, "project": s.project, "proposalId": a.ProposalID, "digest": a.Digest}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return out, err
+	}
+	sum := sha256.Sum256(encoded)
+	operationID := hex.EncodeToString(sum[:])
+	if a.OperationID != "" {
+		operationID = a.OperationID
+	}
+	body["operationId"] = operationID
+	err = s.do(ctx, http.MethodPost, "/v0/datatug/detective/ai_confirm", body, &out)
 	return out, err
 }
 func (s *detectiveCloudService) RunSavedQuery(ctx context.Context, a detectiveui.SavedQueryRun) (detectiveui.SavedQueryResult, error) {

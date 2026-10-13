@@ -88,7 +88,33 @@ func NewLocalStore(projectID, projectDir, privateBase string) (*LocalStore, erro
 	if err := ensureAbsentOrRegular(auditPath); err != nil {
 		return nil, err
 	}
-	return &LocalStore{projectDir: project, privateDir: private, projectID: projectID, lock: flock.New(lockPath), audit: localJSONLAudit{path: auditPath}}, nil
+	store := &LocalStore{projectDir: project, privateDir: private, projectID: projectID, lock: flock.New(lockPath), audit: localJSONLAudit{path: auditPath}}
+	// The private directory predates per-project receipts and is keyed by the
+	// physical checkout. Bind it to its first served project ID under the same
+	// lock, including when upgrading an existing directory, so two logical
+	// projects cannot read each other's Cases through one checkout alias.
+	err = store.withLock(context.Background(), func() error {
+		data, err := safeReadFile(private, "scope")
+		if errors.Is(err, os.ErrNotExist) {
+			return writeItem(private, "scope", struct {
+				ProjectID string `json:"projectId"`
+			}{ProjectID: projectID})
+		}
+		if err != nil {
+			return err
+		}
+		var scope struct {
+			ProjectID string `json:"projectId"`
+		}
+		if json.Unmarshal(data, &scope) != nil || scope.ProjectID != projectID {
+			return ErrConflict
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return store, nil
 }
 
 // NewLocalStoreWithAudit replaces the JSONL adapter for a trusted server
@@ -270,7 +296,7 @@ func writeItem(dir, id string, item any) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	if err := tmp.Chmod(0600); err != nil {
 		_ = tmp.Close()
 		return err

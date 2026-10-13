@@ -2,16 +2,21 @@ package commands
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-cli/pkg/detectiveui"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/detective"
+	ai "github.com/datatug/datatug-core/pkg/detectiveai"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +27,8 @@ func detectiveUICommand(name string) *cobra.Command {
 		storage, _ := cmd.Flags().GetString("storage")
 		project, _ := cmd.Flags().GetString("project")
 		var service detectiveui.Service
-		if storage == "cloud" {
+		switch storage {
+		case "cloud":
 			store, _ := cmd.Flags().GetString("store")
 			if store != "firestore" {
 				return fmt.Errorf("hosted Detective currently supports only the firestore store; selected %q", store)
@@ -35,10 +41,10 @@ func detectiveUICommand(name string) *cobra.Command {
 				return err
 			}
 			service = cloud
-		} else if storage == "agent" {
+		case "agent":
 			client, info, err := newAgentHTTPClient(cmd, "agent")
 			if err != nil {
-				return fmt.Errorf("Detective requires a running DataTug agent: %w", err)
+				return fmt.Errorf("detective requires a running DataTug agent: %w", err)
 			}
 			if project == "" {
 				if len(info.Projects) != 1 {
@@ -58,8 +64,8 @@ func detectiveUICommand(name string) *cobra.Command {
 			if info.SecurityContextID == "" {
 				return fmt.Errorf("agent-info did not provide a security context; restart or upgrade the agent")
 			}
-			service = detectiveUIService{client: client, project: project, securityContextID: info.SecurityContextID}
-		} else {
+			service = detectiveUIService{client: client, project: project, securityContextID: info.SecurityContextID, pending: &detectiveOperationTracker{ids: map[string]string{}}}
+		default:
 			return fmt.Errorf("--storage must be agent or cloud")
 		}
 		model := detectiveui.New(service, name)
@@ -81,6 +87,39 @@ var runDetectiveUI = func(p *tea.Program) (tea.Model, error) { return p.Run() }
 type detectiveUIService struct {
 	client                     agentHTTPClient
 	project, securityContextID string
+	pending                    *detectiveOperationTracker
+}
+
+type detectiveOperationTracker struct {
+	mu  sync.Mutex
+	ids map[string]string
+}
+
+func (s detectiveUIService) operation(req detective.ActionRequest) (string, string) {
+	req.SecurityContextID = ""
+	encoded, _ := json.Marshal(req)
+	sum := sha256.Sum256(encoded)
+	key := hex.EncodeToString(sum[:])
+	if s.pending == nil {
+		return key, uuid.NewString()
+	}
+	s.pending.mu.Lock()
+	defer s.pending.mu.Unlock()
+	if id := s.pending.ids[key]; id != "" {
+		return key, id
+	}
+	id := uuid.NewString()
+	s.pending.ids[key] = id
+	return key, id
+}
+
+func (s detectiveUIService) completeOperation(key string) {
+	if s.pending == nil {
+		return
+	}
+	s.pending.mu.Lock()
+	delete(s.pending.ids, key)
+	s.pending.mu.Unlock()
 }
 
 func (s detectiveUIService) path() string {
@@ -110,7 +149,12 @@ func (s detectiveUIService) StatePage(ctx context.Context, cursor string) (detec
 func (s detectiveUIService) Action(ctx context.Context, req detective.ActionRequest) (detective.ActionResponse, error) {
 	req.Project = s.project
 	req.SecurityContextID = s.securityContextID
-	raw, status, err := s.client.post(ctx, "/datatug/detective/action?project="+url.QueryEscape(s.project), req)
+	key, operationID := s.operation(req)
+	body := struct {
+		OperationID string `json:"operationId"`
+		detective.ActionRequest
+	}{operationID, req}
+	raw, status, err := s.client.post(ctx, "/datatug/detective/action?project="+url.QueryEscape(s.project), body)
 	if err != nil {
 		return detective.ActionResponse{}, detectiveUIError(status, err)
 	}
@@ -118,6 +162,7 @@ func (s detectiveUIService) Action(ctx context.Context, req detective.ActionRequ
 	if err = json.Unmarshal(raw, &response); err != nil {
 		return response, fmt.Errorf("decode Detective action response: %w", err)
 	}
+	s.completeOperation(key)
 	return response, nil
 }
 func (s detectiveUIService) CaseEvents(ctx context.Context, caseID string, before int) (detective.CaseEventsPage, error) {
@@ -137,6 +182,182 @@ func (s detectiveUIService) CaseEvents(ctx context.Context, caseID string, befor
 		return page, fmt.Errorf("decode Case events: %w", err)
 	}
 	return page, nil
+}
+func (s detectiveUIService) LinkedIncidents(ctx context.Context, caseID string) (detectiveui.IncidentLinks, error) {
+	query := url.Values{}
+	query.Set("project", s.project)
+	query.Set("securityContextId", s.securityContextID)
+	query.Set("caseId", caseID)
+	raw, status, err := s.client.get(ctx, "/datatug/detective/incidents?"+query.Encode())
+	if err != nil {
+		return detectiveui.IncidentLinks{}, detectiveUIError(status, err)
+	}
+	var links detectiveui.IncidentLinks
+	if err := json.Unmarshal(raw, &links); err != nil {
+		return links, fmt.Errorf("decode linked incidents: %w", err)
+	}
+	return links, nil
+}
+func (s detectiveUIService) IncidentAction(ctx context.Context, action detectiveui.IncidentAction) (detectiveui.IncidentResponse, error) {
+	request := struct {
+		Project           string          `json:"project"`
+		SecurityContextID string          `json:"securityContextId"`
+		OperationID       string          `json:"operationId"`
+		Type              string          `json:"type"`
+		CaseID            string          `json:"caseId,omitempty"`
+		IncidentRef       string          `json:"incidentRef,omitempty"`
+		Environment       string          `json:"environment"`
+		Title             string          `json:"title,omitempty"`
+		Description       string          `json:"description,omitempty"`
+		IfMatch           int64           `json:"ifMatch,omitempty"`
+		Case              *detective.Case `json:"case,omitempty"`
+	}{Project: s.project, SecurityContextID: s.securityContextID, Type: action.Type, CaseID: action.CaseID, IncidentRef: action.IncidentRef, Environment: action.Environment, Title: action.Title, Description: action.Description, IfMatch: action.IfMatch, Case: action.Case}
+	// The same request must keep its mutation identity after an uncertain HTTP
+	// response. The server additionally binds that identity to actor and scope.
+	operationPayload := request
+	operationPayload.SecurityContextID = ""
+	encoded, err := json.Marshal(operationPayload)
+	if err != nil {
+		return detectiveui.IncidentResponse{}, err
+	}
+	sum := sha256.Sum256(encoded)
+	request.OperationID = hex.EncodeToString(sum[:])
+	raw, status, err := s.client.post(ctx, "/datatug/detective/incident-action", request)
+	if err != nil {
+		return detectiveui.IncidentResponse{}, detectiveUIError(status, err)
+	}
+	var response detectiveui.IncidentResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return response, fmt.Errorf("decode Incidentius action: %w", err)
+	}
+	return response, nil
+}
+func (s detectiveUIService) KnowledgeProposals(ctx context.Context, after string) (detectiveui.KnowledgePage, error) {
+	query := url.Values{}
+	query.Set("project", s.project)
+	query.Set("securityContextId", s.securityContextID)
+	if after != "" {
+		query.Set("after", after)
+	}
+	raw, status, err := s.client.get(ctx, "/datatug/detective/knowledge_proposals?"+query.Encode())
+	if err != nil {
+		return detectiveui.KnowledgePage{}, detectiveUIError(status, err)
+	}
+	var page detectiveui.KnowledgePage
+	if err := json.Unmarshal(raw, &page); err != nil {
+		return page, fmt.Errorf("decode knowledge proposals: %w", err)
+	}
+	return page, nil
+}
+func (s detectiveUIService) KnowledgeAction(ctx context.Context, action detectiveui.KnowledgeAction) (detectiveui.KnowledgeResponse, error) {
+	request := struct {
+		Storage     string                         `json:"storage"`
+		Project     string                         `json:"project"`
+		OperationID string                         `json:"operationId"`
+		Type        string                         `json:"type"`
+		IfMatch     int64                          `json:"ifMatch,omitempty"`
+		Proposal    *detectiveui.KnowledgeProposal `json:"proposal,omitempty"`
+		ProposalID  string                         `json:"proposalId,omitempty"`
+		ReviewNote  string                         `json:"reviewNote,omitempty"`
+		Target      *detectiveui.KnowledgeTarget   `json:"target,omitempty"`
+	}{Storage: "local", Project: s.project, Type: action.Type, IfMatch: action.IfMatch, Proposal: action.Proposal, ProposalID: action.ProposalID, ReviewNote: action.ReviewNote, Target: action.Target}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return detectiveui.KnowledgeResponse{}, err
+	}
+	sum := sha256.Sum256(encoded)
+	request.OperationID = hex.EncodeToString(sum[:])
+	query := url.Values{}
+	query.Set("project", s.project)
+	query.Set("securityContextId", s.securityContextID)
+	raw, status, err := s.client.post(ctx, "/datatug/detective/knowledge_proposal_action?"+query.Encode(), request)
+	if err != nil {
+		return detectiveui.KnowledgeResponse{}, detectiveUIError(status, err)
+	}
+	var response detectiveui.KnowledgeResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return response, fmt.Errorf("decode knowledge action: %w", err)
+	}
+	return response, nil
+}
+func (s detectiveUIService) AIProposals(ctx context.Context, after string) (detectiveui.AIPage, error) {
+	query := url.Values{}
+	query.Set("project", s.project)
+	query.Set("securityContextId", s.securityContextID)
+	if after != "" {
+		query.Set("after", after)
+	}
+	raw, status, err := s.client.get(ctx, "/datatug/detective/ai_proposals?"+query.Encode())
+	if err != nil {
+		return detectiveui.AIPage{}, detectiveUIError(status, err)
+	}
+	var page detectiveui.AIPage
+	if err := json.Unmarshal(raw, &page); err != nil {
+		return page, fmt.Errorf("decode AI proposals: %w", err)
+	}
+	return page, nil
+}
+func (s detectiveUIService) GenerateAI(ctx context.Context, request detectiveui.AIGenerate) (ai.Response, error) {
+	intent, err := json.Marshal(request)
+	if err != nil {
+		return ai.Response{}, err
+	}
+	operation := sha256.Sum256(append([]byte(s.project+"\x00"), intent...))
+	body := struct {
+		Project           string         `json:"project"`
+		SecurityContextID string         `json:"securityContextId"`
+		OperationID       string         `json:"operationId"`
+		Text              string         `json:"text"`
+		CaseID            string         `json:"caseId,omitempty"`
+		ExpectedCounts    map[string]int `json:"expectedCounts,omitempty"`
+	}{s.project, s.securityContextID, hex.EncodeToString(operation[:]), request.Text, request.CaseID, request.ExpectedCounts}
+	raw, status, err := s.client.post(ctx, "/datatug/detective/ai_proposals?project="+url.QueryEscape(s.project), body)
+	if err != nil {
+		return ai.Response{}, detectiveUIError(status, err)
+	}
+	var response ai.Response
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return response, fmt.Errorf("decode AI response: %w", err)
+	}
+	return response, nil
+}
+func (s detectiveUIService) ReviewAI(ctx context.Context, review detectiveui.AIReview) (ai.Proposal, error) {
+	body := struct {
+		Project           string                   `json:"project"`
+		SecurityContextID string                   `json:"securityContextId"`
+		Type              string                   `json:"type"`
+		Draft             *ai.ReviewedDraftRequest `json:"draft,omitempty"`
+		Context           *ai.ContextReviewRequest `json:"context,omitempty"`
+	}{s.project, s.securityContextID, review.Type, review.Draft, review.Context}
+	raw, status, err := s.client.post(ctx, "/datatug/detective/ai_review?project="+url.QueryEscape(s.project), body)
+	if err != nil {
+		return ai.Proposal{}, detectiveUIError(status, err)
+	}
+	var proposal ai.Proposal
+	if err := json.Unmarshal(raw, &proposal); err != nil {
+		return proposal, fmt.Errorf("decode reviewed AI proposal: %w", err)
+	}
+	return proposal, nil
+}
+func (s detectiveUIService) ConfirmAI(ctx context.Context, confirm ai.ConfirmRequest) (ai.Receipt, error) {
+	if confirm.OperationID == "" {
+		sum := sha256.Sum256([]byte(s.project + "\x00" + confirm.ProposalID + "\x00" + confirm.Digest))
+		confirm.OperationID = hex.EncodeToString(sum[:])
+	}
+	body := struct {
+		Project           string `json:"project"`
+		SecurityContextID string `json:"securityContextId"`
+		ai.ConfirmRequest
+	}{s.project, s.securityContextID, confirm}
+	raw, status, err := s.client.post(ctx, "/datatug/detective/ai_confirm?project="+url.QueryEscape(s.project), body)
+	if err != nil {
+		return ai.Receipt{}, detectiveUIError(status, err)
+	}
+	var receipt ai.Receipt
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		return receipt, fmt.Errorf("decode AI confirmation receipt: %w", err)
+	}
+	return receipt, nil
 }
 func (s detectiveUIService) RunSavedQuery(ctx context.Context, request detectiveui.SavedQueryRun) (detectiveui.SavedQueryResult, error) {
 	origins := make([]apicontract.BindingOriginEntry, 0, len(request.Inputs))

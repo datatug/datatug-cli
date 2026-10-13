@@ -148,7 +148,7 @@ func (s *LocalStore) RecordScenarioQueryStep(ctx context.Context, caseID, applic
 		if err != nil {
 			return err
 		}
-		audit := AuditEvent{}
+		var audit AuditEvent
 		saved, audit, err = core.RecordScenarioQueryStep(c, applicationID, stepID, proof, actor, time.Now().UTC())
 		if err != nil {
 			return err

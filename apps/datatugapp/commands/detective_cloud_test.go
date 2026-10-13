@@ -12,8 +12,63 @@ import (
 	"github.com/datatug/datatug-cli/pkg/detectiveui"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/detective"
+	ai "github.com/datatug/datatug-core/pkg/detectiveai"
 	"github.com/datatug/datatug-core/pkg/investigation"
 )
+
+func TestHostedAITransportUsesBearerScopeAndStableConfirmation(t *testing.T) {
+	var confirmIDs []string
+	s := &detectiveCloudService{session: cloudSession{baseURL: "https://api.example.test/v0/", httpClient: &http.Client{Transport: detectiveRoundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "Bearer scoped-token" {
+			t.Fatal("missing hosted AI bearer")
+		}
+		if r.URL.Path == "/v0/datatug/detective/ai_proposals" && r.Method == http.MethodGet {
+			if r.URL.Query().Get("storage") != "firestore" || r.URL.Query().Get("spaceID") != "space-1" || r.URL.Query().Get("project") != "project-1" {
+				t.Fatalf("AI list scope: %s", r.URL)
+			}
+			return detectiveResponse(200, `{"proposals":[{"id":"p1"}]}`), nil
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["storage"] != "firestore" || body["spaceID"] != "space-1" || body["project"] != "project-1" || body["operationId"] == "" && r.URL.Path != "/v0/datatug/detective/ai_review" {
+			t.Fatalf("AI mutation scope: %#v", body)
+		}
+		switch r.URL.Path {
+		case "/v0/datatug/detective/ai_proposals":
+			return detectiveResponse(200, `{"proposals":[{"id":"p1"}]}`), nil
+		case "/v0/datatug/detective/ai_review":
+			if body["type"] != "context" || body["context"] == nil {
+				t.Fatalf("AI review body: %#v", body)
+			}
+			return detectiveResponse(200, `{"id":"reviewed"}`), nil
+		case "/v0/datatug/detective/ai_confirm":
+			confirmIDs = append(confirmIDs, body["operationId"].(string))
+			return detectiveResponse(200, `{"operationId":"confirmed","resourceId":"case-1"}`), nil
+		default:
+			t.Fatalf("unexpected AI route: %s", r.URL.Path)
+			return nil, nil
+		}
+	})}, token: func(context.Context) (string, error) { return "scoped-token", nil }}, space: "space-1", project: "project-1"}
+	if page, err := s.AIProposals(context.Background(), ""); err != nil || len(page.Proposals) != 1 {
+		t.Fatalf("hosted AI list: %+v %v", page, err)
+	}
+	if _, err := s.GenerateAI(context.Background(), detectiveui.AIGenerate{Text: "invoice 7", CaseID: "case-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReviewAI(context.Background(), detectiveui.AIReview{Type: "context", Context: &ai.ContextReviewRequest{ProposalID: "p1", CaseID: "case-1", ExpectedVersion: 2}}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := s.ConfirmAI(context.Background(), ai.ConfirmRequest{ProposalID: "reviewed", Digest: "digest"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(confirmIDs) != 2 || confirmIDs[0] == "" || confirmIDs[0] != confirmIDs[1] {
+		t.Fatalf("hosted AI confirm identity changed: %#v", confirmIDs)
+	}
+}
 
 type detectiveRoundTrip func(*http.Request) (*http.Response, error)
 

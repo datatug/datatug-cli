@@ -77,7 +77,7 @@ func (d *detectiveModule) connect() tea.Cmd {
 		if info.SecurityContextID == "" {
 			return detectiveConnected{err: fmt.Errorf("agent-info has no security context")}
 		}
-		return detectiveConnected{service: detectiveUIService{client: client, project: project, securityContextID: info.SecurityContextID}, project: project}
+		return detectiveConnected{service: detectiveUIService{client: client, project: project, securityContextID: info.SecurityContextID, pending: &detectiveOperationTracker{ids: map[string]string{}}}, project: project}
 	}
 }
 func (d *detectiveModule) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
@@ -135,13 +135,14 @@ func (d *detectiveModule) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 				return d, nav.SetFocus(nav.FocusToMenu)
 			case "backspace":
 				var p *string
-				if d.activeField == 0 {
+				switch d.activeField {
+				case 0:
 					p = &d.storage
-				} else if d.activeField == 1 {
+				case 1:
 					p = &d.agentURL
-				} else if d.activeField == 2 {
+				case 2:
 					p = &d.space
-				} else if d.activeField == 3 {
+				case 3:
 					p = &d.project
 				}
 				if p != nil && *p != "" {
@@ -195,7 +196,12 @@ func (d *detectiveModule) View() string {
 	status += "\n" + mark(0) + "Storage (agent/cloud): " + d.storage + "\n" + mark(1) + "Agent URL or cloud API /v0/: " + d.agentURL + "\n" + mark(2) + "Space ID (cloud): " + d.space + "\n" + mark(3) + "Project ID: " + d.project + "\n" + mark(4) + "Insecure auth storage (y/n): " + fmt.Sprint(d.insecure) + "\nCloud project store: firestore\n\nEnter connect · Tab field · Ctrl+U clear · Esc menu"
 	return widgets.Fit(status, max(1, d.width), max(1, d.height))
 }
-func (d *detectiveModule) Title() string                 { return strings.Title(d.mode) }
+func (d *detectiveModule) Title() string {
+	if d.mode == "" {
+		return ""
+	}
+	return strings.ToUpper(d.mode[:1]) + d.mode[1:]
+}
 func (d *detectiveModule) AtEdge(widgets.Direction) bool { return true }
 
 var _ nav.Screen = (*detectiveModule)(nil)

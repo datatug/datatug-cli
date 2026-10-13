@@ -3,6 +3,7 @@ package endpoints
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,10 +16,17 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/detective"
 	"github.com/datatug/datatug-cli/pkg/secureread"
+	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 )
 
 func TestDetectiveStateAndActionSecurityAndRestart(t *testing.T) {
 	project := t.TempDir()
+	previousStore := storage.NewDatatugStore
+	storage.NewDatatugStore = func(string) (storage.Store, error) {
+		return filestore.NewStore("files", map[string]string{"p": project})
+	}
+	t.Cleanup(func() { storage.NewDatatugStore = previousStore })
 	private := filepath.Join(t.TempDir(), "private")
 	api.ConfigureSecureSession(secureread.Session{Principal: &access.Principal{ID: "alice"}}, map[string]string{"p": project}, api.Capabilities{AllowWrites: true, EvidencePrivateDir: private})
 	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
@@ -31,7 +39,16 @@ func TestDetectiveStateAndActionSecurityAndRestart(t *testing.T) {
 	}
 	api.ConfigureSecureSession(secureread.Session{Unrestricted: true}, map[string]string{"p": project}, api.Capabilities{AllowWrites: true, EvidencePrivateDir: private})
 	contextID = api.SecurityContextID()
-	body, _ := json.Marshal(detective.ActionRequest{Type: "create-case", Project: "p", SecurityContextID: contextID, Case: &detective.Case{ID: "case-1", Title: "Investigate"}})
+	legacyBody, _ := json.Marshal(detective.ActionRequest{Type: "create-case", Project: "p", SecurityContextID: contextID, Case: &detective.Case{ID: "case-1", Title: "Investigate"}})
+	response = httptest.NewRecorder()
+	detectiveActionHandler(response, httptest.NewRequest(http.MethodPost, "/datatug/detective/action?project=p", bytes.NewReader(legacyBody)))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("missing operation ID status=%d", response.Code)
+	}
+	body, _ := json.Marshal(struct {
+		OperationID string `json:"operationId"`
+		detective.ActionRequest
+	}{"create-case-1", detective.ActionRequest{Type: "create-case", Project: "p", SecurityContextID: contextID, Case: &detective.Case{ID: "case-1", Title: "Investigate"}}})
 	response = httptest.NewRecorder()
 	detectiveActionHandler(response, httptest.NewRequest(http.MethodPost, "/datatug/detective/action?project=p", bytes.NewReader(body)))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "case-1") {
@@ -49,6 +66,26 @@ func TestDetectiveStateAndActionSecurityAndRestart(t *testing.T) {
 	detectiveStateHandler(response, httptest.NewRequest(http.MethodGet, path, nil))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "case-1") {
 		t.Fatalf("restart state = %d %s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	detectiveActionHandler(response, httptest.NewRequest(http.MethodPost, "/datatug/detective/action?project=p", bytes.NewReader(body)))
+	if response.Code != http.StatusConflict {
+		t.Fatalf("stale action replay status=%d", response.Code)
+	}
+	api.ConfigureSecureSession(secureread.Session{Principal: &access.Principal{ID: "alice"}}, map[string]string{"p": project}, api.Capabilities{AllowWrites: true, EvidencePrivateDir: private})
+	var replay struct {
+		OperationID string `json:"operationId"`
+		detective.ActionRequest
+	}
+	if err := json.Unmarshal(body, &replay); err != nil {
+		t.Fatal(err)
+	}
+	replay.SecurityContextID = api.SecurityContextID()
+	replayBody, _ := json.Marshal(replay)
+	response = httptest.NewRecorder()
+	detectiveActionHandler(response, httptest.NewRequest(http.MethodPost, "/datatug/detective/action?project=p", bytes.NewReader(replayBody)))
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("revoked action replay status=%d", response.Code)
 	}
 	response = httptest.NewRecorder()
 	detectiveStateHandler(response, httptest.NewRequest(http.MethodGet, "/datatug/detective/state?project=p&securityContextId=stale", nil))
@@ -69,9 +106,14 @@ func TestDetectiveScenarioAndCaseEventRoutes(t *testing.T) {
 	api.ConfigureSecureSession(secureread.Session{Unrestricted: true}, map[string]string{"p": project}, api.Capabilities{AllowWrites: true, EvidencePrivateDir: private})
 	t.Cleanup(func() { api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{}) })
 	contextID := api.SecurityContextID()
+	sequence := 0
 	post := func(req detective.ActionRequest) (int, detective.ActionResponse) {
 		req.Project, req.SecurityContextID = "p", contextID
-		body, _ := json.Marshal(req)
+		sequence++
+		body, _ := json.Marshal(struct {
+			OperationID string `json:"operationId"`
+			detective.ActionRequest
+		}{fmt.Sprintf("scenario-action-%d", sequence), req})
 		response := httptest.NewRecorder()
 		detectiveActionHandler(response, httptest.NewRequest(http.MethodPost, "/datatug/detective/action?project=p", bytes.NewReader(body)))
 		var result detective.ActionResponse
@@ -118,5 +160,14 @@ func TestDetectiveWriteCapabilityIsRequired(t *testing.T) {
 	detectiveActionHandler(response, httptest.NewRequest(http.MethodPost, "/datatug/detective/action?project=p", bytes.NewReader(body)))
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("write without capability status=%d", response.Code)
+	}
+}
+
+func TestDetectiveUncertainOperationHasExplicitConflict(t *testing.T) {
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/datatug/detective/action?project=p", nil)
+	writeContractResponse(response, request, detectiveError(detective.ErrOutcomeUncertain), detective.ActionResponse{})
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "OUTCOME_UNCERTAIN") || !strings.Contains(response.Body.String(), "operationId") {
+		t.Fatalf("uncertain action = %d %s", response.Code, response.Body.String())
 	}
 }

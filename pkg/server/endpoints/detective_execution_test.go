@@ -46,22 +46,32 @@ func TestDetectiveExistingExecutionUsesReceiptAndSameRows(t *testing.T) {
 		RowCount:         2, ResultFingerprint: fingerprint, ResultComplete: &complete, SnapshotRef: snapshotRef, Measurements: []apicontract.ScalarMeasurement{},
 	}
 	require.NoError(t, store.PutExecution(ctx, receipt))
-	result, inputs, err := loadDetectiveExecutionResult(ctx, project, "list", "qa", &ref, nil)
+	result, inputs, err := loadDetectiveExecutionResult(ctx, project, "alice", "list", "qa", &ref, nil)
 	require.NoError(t, err)
 	require.Equal(t, ref, *result.Execution)
 	require.Equal(t, rows, result.Recordset)
 	require.Equal(t, input, *inputs["invoice_id"].Scalar)
-	_, _, err = loadDetectiveExecutionResult(ctx, project, "list", "prod", &ref, nil)
+	_, _, err = loadDetectiveExecutionResult(ctx, project, "alice", "list", "prod", &ref, nil)
 	require.Error(t, err)
-	_, _, err = loadDetectiveExecutionResult(ctx, project, "list", "qa", &ref, map[string]detective.InputValue{"invoice_id": {Scalar: &input}})
+	_, _, err = loadDetectiveExecutionResult(ctx, project, "alice", "list", "qa", &ref, map[string]detective.InputValue{"invoice_id": {Scalar: &input}})
 	require.Error(t, err)
-	_, _, err = loadDetectiveExecutionResult(ctx, project, "other", "qa", &ref, nil)
+	_, _, err = loadDetectiveExecutionResult(ctx, project, "alice", "other", "qa", &ref, nil)
+	require.Error(t, err)
+	_, _, err = loadDetectiveExecutionResult(ctx, project, "bob", "list", "qa", &ref, nil)
 	require.Error(t, err)
 	proof, err := loadDetectiveScenarioQueryProof(ctx, project, "alice", &ref)
 	require.NoError(t, err)
 	require.Equal(t, "list", proof.QueryID)
 	require.Equal(t, "completed", proof.ExecutionStatus)
 	_, err = loadDetectiveScenarioQueryProof(ctx, project, "bob", &ref)
+	require.Error(t, err)
+	partial := receipt
+	partial.Ref.ExecutionID = "partial-rows"
+	partial.SnapshotRef = ""
+	incomplete := false
+	partial.ResultComplete = &incomplete
+	require.NoError(t, store.PutExecution(ctx, partial))
+	_, err = loadDetectiveScenarioQueryProof(ctx, project, "alice", &partial.Ref)
 	require.Error(t, err)
 	bad := receipt
 	bad.Ref.ExecutionID = "bad-fingerprint"
@@ -71,6 +81,6 @@ func TestDetectiveExistingExecutionUsesReceiptAndSameRows(t *testing.T) {
 	require.True(t, stored)
 	bad.ResultFingerprint = strings.Repeat("a", len(fingerprint))
 	require.NoError(t, store.PutExecution(ctx, bad))
-	_, _, err = loadDetectiveExecutionResult(ctx, project, "list", "qa", &badFingerprintRef, nil)
+	_, _, err = loadDetectiveExecutionResult(ctx, project, "alice", "list", "qa", &badFingerprintRef, nil)
 	require.Error(t, err)
 }

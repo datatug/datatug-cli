@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/detective"
+	ai "github.com/datatug/datatug-core/pkg/detectiveai"
 	"github.com/datatug/datatug-core/pkg/investigation"
 	"github.com/google/uuid"
 )
@@ -28,6 +29,7 @@ type form struct {
 	stepIndex       int
 	validatorIndex  int
 	proposal        KnowledgeProposal
+	aiProposal      ai.Proposal
 }
 
 func f(label, value, help string) field { return field{label, value, help} }
@@ -51,7 +53,14 @@ func (m *Model) formView() string {
 	f := m.form
 	var b strings.Builder
 	b.WriteString(f.title + "\n\n")
-	for i, x := range f.fields {
+	visible := max(1, m.height-7)
+	start := max(0, f.index-visible+1)
+	if start > 0 {
+		b.WriteString("↑ earlier fields\n")
+	}
+	end := min(len(f.fields), start+visible)
+	for i := start; i < end; i++ {
+		x := f.fields[i]
 		mark := "  "
 		if i == f.index {
 			mark = "› "
@@ -60,6 +69,9 @@ func (m *Model) formView() string {
 		if i == f.index && x.help != "" {
 			b.WriteString("    " + x.help + "\n")
 		}
+	}
+	if end < len(f.fields) {
+		b.WriteString("↓ more fields\n")
 	}
 	return b.String()
 }
@@ -684,11 +696,12 @@ func validatorFields(v detective.Validator, id string) []field {
 }
 func (m *Model) parseStep() (detective.Step, error) {
 	s := detective.Step{ID: m.field("ID"), Kind: m.field("Kind"), OnUnavailable: m.field("On unavailable")}
-	if s.Kind == "query" {
+	switch s.Kind {
+	case "query":
 		s.QueryID = m.field("Ref")
-	} else if s.Kind == "check" {
+	case "check":
 		s.CheckID = m.field("Ref")
-	} else {
+	default:
 		return s, fmt.Errorf("step kind must be query or check")
 	}
 	if s.ID == "" || m.field("Ref") == "" {

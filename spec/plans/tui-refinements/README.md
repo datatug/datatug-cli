@@ -1,11 +1,11 @@
 ---
 format: https://specscore.md/plan-specification
-status: Executing
+status: Implemented
 ---
 
 # Plan: Deliver terminal workspace usability and visual refinements
 
-**Status:** Executing
+**Status:** Implemented
 **Source Feature:** tui-refinements
 **Date:** 2026-10-13
 **Owner:** alex
@@ -73,7 +73,7 @@ The root agent owns publication, merge and cleanup. This CLI lane authors these 
 **Verifies:** tui-refinements#ac:surface-hierarchy, tui-refinements#ac:permanent-help, tui-refinements#ac:top-navigation, tui-refinements#ac:composer-separation, tui-refinements#ac:topbar-edge, tui-refinements#ac:explorer-selection, tui-refinements#ac:result-tabs-query, tui-refinements#ac:inspect-tabs, tui-refinements#ac:chat-session-tabs
 **Status:** complete
 **Implemented-by:** strongo/aichat@f5e0d4102186c4d8fb06d524d5286fed5be2140e
-**Evidence:** Released providers [tuigoff v0.7.0, PR #11](https://github.com/tuigoff/tuigoff/pull/11) and [aichat v0.14.0, PR #28](https://github.com/strongo/aichat/pull/28); exact merge-target checks passed, published source matched the reviewed files, and both provider worktrees were retired through WB. CLI validation against these released pins remains task 8.
+**Evidence:** Released providers [tuigoff v0.7.0, PR #11](https://github.com/tuigoff/tuigoff/pull/11) and [aichat v0.14.0, PR #28](https://github.com/strongo/aichat/pull/28); exact merge-target checks passed, published source matched the reviewed files, and both provider worktrees were retired through WB. Completed CLI validation against these released pins is recorded in task 8.
 **Depends-On:** —
 **Owner:** shared-library lane; root publishes dependencies
 
@@ -83,7 +83,8 @@ Implement the additive seams above. Reserve right top items before truncating le
 
 **Id:** task-2
 **Verifies:** tui-refinements#ac:explorer-selection, tui-refinements#ac:explorer-live-metadata, tui-refinements#ac:explorer-clear-filter, tui-refinements#ac:explorer-empty-layout, tui-refinements#ac:explorer-tree-navigation
-**Status:** in_progress
+**Status:** complete
+**Implemented-by:** 547cf596c8739ec7ca85525249804aa0a44ddcde
 **Depends-On:** 1
 **Owner:** CLI lane
 
@@ -93,8 +94,9 @@ Separate complete catalog tree, collapse state and filtered visible rows. Preser
 
 **Id:** task-3
 **Verifies:** tui-refinements#ac:portable-input, tui-refinements#ac:permanent-help, tui-refinements#ac:top-navigation, tui-refinements#ac:chat-session-direct-close, tui-refinements#ac:retained-workspace-flows
-**Status:** in_progress
-**Note:** CLI keyboard and discoverability implementation underway after approved plan review.
+**Status:** complete
+**Implemented-by:** 547cf596c8739ec7ca85525249804aa0a44ddcde
+**Note:** Implemented in CLI PR #372. Ordinary typing remains literal; context Actions replace unsafe Alt-letter navigation.
 **Depends-On:** 1
 **Owner:** CLI lane
 
@@ -104,7 +106,8 @@ Write one conflict matrix by focus zone and modal/input owner. Remove Alt-letter
 
 **Id:** task-4
 **Verifies:** tui-refinements#ac:result-tabs-query, tui-refinements#ac:inspect-tabs, tui-refinements#ac:right-panel-stack, tui-refinements#ac:omitted-columns, tui-refinements#ac:surface-hierarchy
-**Status:** in_progress
+**Status:** complete
+**Implemented-by:** 547cf596c8739ec7ca85525249804aa0a44ddcde
 **Depends-On:** 1, 2, 3
 **Owner:** CLI lane
 
@@ -114,7 +117,8 @@ Bind Query content to exact immutable execution when appending/restoring cards, 
 
 **Id:** task-5
 **Verifies:** tui-refinements#ac:aggregate-name-enrichment, tui-refinements#ac:column-preview-execution, tui-refinements#ac:useful-ai-projection, tui-refinements#ac:omitted-columns
-**Status:** in_progress
+**Status:** complete
+**Implemented-by:** 85df2a8f2f14bd6477bc72bf5a729a952191604f
 **Depends-On:** —
 **Owner:** query-column lane in its own isolated CLI worktree; root integrates candidate
 
@@ -126,7 +130,8 @@ Fixture: Customer has enforced unique CustomerId and distinct FirstName/LastName
 
 **Id:** task-6
 **Verifies:** tui-refinements#ac:useful-ai-projection, tui-refinements#ac:omitted-columns, tui-refinements#ac:column-preview-execution, tui-refinements#ac:aggregate-name-enrichment
-**Status:** in_progress
+**Status:** complete
+**Implemented-by:** 547cf596c8739ec7ca85525249804aa0a44ddcde
 **Depends-On:** 3, 4, 5
 **Owner:** query-column lane owns overlay/new files and agent.go; CLI lane owns post-integration sidepanel/action wiring
 
@@ -136,7 +141,8 @@ Expose planner-backed omitted fields below returned fields with multi-checkbox s
 
 **Id:** task-7
 **Verifies:** tui-refinements#ac:chat-session-tabs, tui-refinements#ac:chat-session-close, tui-refinements#ac:chat-session-direct-close, tui-refinements#ac:top-navigation, tui-refinements#ac:retained-workspace-flows
-**Status:** in_progress
+**Status:** complete
+**Implemented-by:** 547cf596c8739ec7ca85525249804aa0a44ddcde
 **Depends-On:** 1, 3, 4
 **Owner:** CLI lane
 
@@ -146,8 +152,9 @@ Use SessionChat list/create/switch/rename/delete and existing store scope rather
 
 **Id:** task-8
 **Verifies:** tui-refinements#ac:terminal-journey-evidence, tui-refinements#ac:retained-workspace-flows, tui-refinements#ac:result-tabs-query, tui-refinements#ac:aggregate-name-enrichment, tui-refinements#ac:chat-session-tabs
-**Status:** in_progress
-**Note:** Repository-wide combined-source tests passed; root terminal journeys and Astra final UX/source review underway. Released dependency validation remains pending.
+**Status:** complete
+**Implemented-by:** 547cf596c8739ec7ca85525249804aa0a44ddcde
+**Note:** Completed in CLI v0.74.0. Combined source passed full tests, vet, build, specification lint and golangci-lint against released providers without overlays. Astra final source/UX review passed. PR CI passed with 7 successful and 9 skipped checks; merged-target CI/release passed with 15 successful and 3 skipped checks. Published-artifact checksum/signature/notarization/runtime verification passed. WB retired both CLI source worktrees and their integration candidate; provider worktrees were already retired. The closure record changes no executable source.
 **Depends-On:** 2, 3, 4, 5, 6, 7
 **Owner:** CLI lane for tests/evidence; root for review/publication
 

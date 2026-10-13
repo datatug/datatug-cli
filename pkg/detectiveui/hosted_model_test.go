@@ -15,6 +15,7 @@ import (
 type hostedFixture struct {
 	*fixtureService
 	query           SavedQueryRun
+	incidentAction  IncidentAction
 	knowledgeAction KnowledgeAction
 }
 
@@ -169,7 +170,8 @@ func (s *hostedFixture) CaseEvents(context.Context, string, int) (detective.Case
 func (s *hostedFixture) LinkedIncidents(context.Context, string) (IncidentLinks, error) {
 	return IncidentLinks{CaseID: "case-1"}, nil
 }
-func (s *hostedFixture) IncidentAction(context.Context, IncidentAction) (IncidentResponse, error) {
+func (s *hostedFixture) IncidentAction(_ context.Context, action IncidentAction) (IncidentResponse, error) {
+	s.incidentAction = action
 	return IncidentResponse{}, nil
 }
 func (s *hostedFixture) KnowledgeProposals(context.Context, string) (KnowledgePage, error) {

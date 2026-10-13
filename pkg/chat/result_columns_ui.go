@@ -88,7 +88,9 @@ func (o *resultColumnsOverlay) View(w, h int) string {
 		text := fmt.Sprintf("Add %s\n\n%s\n\nSecure source-bound execution; the original result is retained.\nExact DTQL submitted:\n%s", strings.Join(o.preview.Fields, ", "), o.preview.Proof, o.preview.DTQL)
 		o.viewport.SetWidth(w)
 		o.viewport.SetHeight(max(1, h-4))
-		o.viewport.SetContent(ansi.Wrap(sanitizeTerminalText(text), w, " "))
+		// Keep the reviewed document's newlines and indentation visible while
+		// removing terminal controls. Apply still submits preview.DTQL unchanged.
+		o.viewport.SetContent(ansi.Wrap(strings.ReplaceAll(sanitizeMultilineText(text), "\t", "  "), w, " "))
 		lines := []string{"Review column query", o.viewport.View(), "Run on server ⇧↵ · Esc choices", o.err}
 		o.controlY = 1 + strings.Count(o.viewport.View(), "\n") + 1
 		result := strings.Split(strings.Join(lines, "\n"), "\n")

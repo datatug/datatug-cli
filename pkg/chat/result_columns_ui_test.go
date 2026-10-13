@@ -73,6 +73,45 @@ func TestResultColumnsCheckboxApplyReviewRunAndCancel(t *testing.T) {
 	u.shell.Update(msg)
 }
 
+func TestResultColumnsReviewViewPreservesExactDTQLLayout(t *testing.T) {
+	_, overlay, executor := resultColumnsUIFixture(t)
+	for i, row := range overlay.rows {
+		if row.Name == "Customer.FirstName" || row.Name == "Customer.LastName" {
+			overlay.index = i
+			overlay.Update(uitest.Key("space"))
+		}
+	}
+	overlay.Update(uitest.Key("enter"))
+	if overlay.preview == nil || executor.calls != 0 {
+		t.Fatal("Apply did not open an execution-free review")
+	}
+	document := overlay.preview.DTQL
+	view := ansi.Strip(overlay.View(100, 80))
+	visibleLines := strings.Split(view, "\n")
+	for i, line := range visibleLines {
+		visibleLines[i] = strings.TrimRight(line, " ")
+	}
+	content := strings.Join(visibleLines, "\n")
+	for _, fragment := range []string{
+		"Add Customer.FirstName, Customer.LastName\n\n",
+		"aggregate output.\n\nSecure source-bound execution",
+		"Exact DTQL submitted:\nfrom:\n  name: Invoice\n  alias: i\n  joins:",
+		"\ncolumns:\n  - field: CustomerId\n    source: i",
+	} {
+		if !strings.Contains(content, fragment) {
+			t.Fatalf("review lost line breaks or indentation around %q:\n%s", fragment, view)
+		}
+	}
+	if overlay.preview.DTQL != document || executor.calls != 0 {
+		t.Fatal("rendering changed the submitted document or executed it")
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if ansi.StringWidth(line) > 100 {
+			t.Fatalf("review overflow: %q", line)
+		}
+	}
+}
+
 func TestResultColumnsStalePickerCannotExecuteAndEmptyCancel(t *testing.T) {
 	u, o, e := resultColumnsUIFixture(t)
 	for i, r := range o.rows {

@@ -162,6 +162,33 @@ func TestContextSessionSendRecoversLostACKWithoutProviderRedispatch(t *testing.T
 			} else if err == nil || !strings.Contains(err.Error(), "outcome unknown") || response.Run.State != "accepted" || response.Interpretation != nil {
 				t.Fatalf("accepted unknown %+v %v", response, err)
 			}
+			if !test.commit {
+				shown, showErr := execute("", "show", "session")
+				var snapshot sessioncontext.Snapshot
+				if showErr != nil || json.Unmarshal([]byte(shown), &snapshot) != nil {
+					t.Fatalf("fresh recovery snapshot %s %v", shown, showErr)
+				}
+				resolution := sessioncontext.Command{OpID: "manual-unknown", Action: "reportClientRun", SessionID: "session", RunID: response.Run.ID, Kind: "chat", ExpectedVersion: snapshot.Session.Version, ExpectedRunVersion: response.Run.Version, RunState: "outcome-unknown", ErrorCode: "CLIENT_OUTCOME_UNKNOWN"}
+				encoded, _ := json.Marshal(resolution)
+				for attempt := 0; attempt < 2; attempt++ {
+					if _, resolveErr := execute(string(encoded), "command"); resolveErr != nil || providerCalls != 1 {
+						t.Fatalf("explicit unknown resolution calls=%d err=%v", providerCalls, resolveErr)
+					}
+				}
+				out, err = execute("", "send", "session", "--op", "original-send")
+				if err != nil || json.Unmarshal([]byte(out), &response) != nil || response.Run.State != "outcome-unknown" || response.Run.OutcomeOrigin != "client-outcome-unknown" || providerCalls != 1 {
+					t.Fatalf("resolved recovery %s %v calls=%d", out, err, providerCalls)
+				}
+				late, _ := json.Marshal(transport.report)
+				if _, lateErr := execute(string(late), "command"); lateErr == nil {
+					t.Fatal("late provider report overwrote explicit unknown outcome")
+				}
+				shown, showErr = execute("", "show", "session")
+				snapshot = sessioncontext.Snapshot{}
+				if showErr != nil || json.Unmarshal([]byte(shown), &snapshot) != nil || snapshot.Session.PendingRunCount != 0 {
+					t.Fatalf("unknown resolution left pending run: %s %v", shown, showErr)
+				}
+			}
 		})
 	}
 }

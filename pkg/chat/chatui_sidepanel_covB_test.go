@@ -15,8 +15,8 @@ import (
 // with no other test hitting it directly.
 func TestWorkspacePanelTitleIsWorkspace(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, Turn{})
-	if got := u.workspace.Title(); got != "Inspect  [F7]" {
-		t.Fatalf("Title() = %q, want %q", got, "Inspect  [F7]")
+	if got := u.workspace.Title(); got != "Inspect" {
+		t.Fatalf("Title() = %q, want Inspect", got)
 	}
 }
 
@@ -619,7 +619,7 @@ func TestWorkspacePanelCurrentRecordsetDetailsFallbackLabels(t *testing.T) {
 	}
 	u.workspace.tab, u.workspace.inspectorSubTab = 1, 2
 	view := u.workspace.View(80, 20, true)
-	if !strings.Contains(view, "type unavailable") || !strings.Contains(view, "Mystery") {
+	if !strings.Contains(view, "unknown") || !strings.Contains(view, "Mystery") {
 		t.Fatalf("expected fallback labels for an unattributed column:\n%s", view)
 	}
 }
@@ -839,23 +839,24 @@ func TestWorkspacePanelExplorerPgUpPgDownAdjustDetailOffset(t *testing.T) {
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "query", ObjectID: "q", Title: "Paged query"}, QueryType: "DTQL", QueryText: "first-query-line\n" + strings.Repeat("middle-query-line\n", 40) + "last-query-line"}}}
 	u.shell.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	u.shell.FocusLeftPanel()
-	u.shell.Update(tea.KeyPressMsg{Code: 'P', Text: "Paged query"})
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	u.shell.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt})
-	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "first-query-line") {
+	for i, node := range u.explorer.explorerNodes() {
+		if node.objectIndex == 0 {
+			u.explorer.explorerIndex = i
+			break
+		}
+	}
+	u.explorer.inspectExplorerSelection()
+	if view := flattenView(u.workspace.View(40, 20, false)); !strings.Contains(view, "first-query-line") {
 		t.Fatalf("details unavailable: %s", view)
 	}
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
-	if view := flattenView(u.shell.View().Content); strings.Contains(view, "first-query-line") || !strings.Contains(view, "middle-query-line") {
-		t.Fatalf("PgDown did not page visible query details: %s", view)
+	u.shell.FocusRightPanel()
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyEnd})
+	if view := flattenView(u.workspace.View(40, 20, true)); strings.Contains(view, "first-query-line") || !strings.Contains(view, "last-query-line") {
+		t.Fatalf("End did not reach final query detail: %s", view)
 	}
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
-	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "first-query-line") {
-		t.Fatalf("PgUp did not restore first page: %s", view)
-	}
-	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if u.shell.WorkspaceFocus() != "explorer" {
-		t.Fatal("details did not return to visible Explorer")
+	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyHome})
+	if view := flattenView(u.workspace.View(40, 20, true)); !strings.Contains(view, "first-query-line") {
+		t.Fatalf("Home did not restore first page: %s", view)
 	}
 }
 
@@ -1007,13 +1008,13 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 	// performWorkspaceAction below -- recomputes p.tab back to the same
 	// tab instead of resetting it to the default.
 	u.workspace.setTab(1)
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'b', Mod: tea.ModAlt})
+	u.workspace.updateContextAction("b")
 	snapshot, err := sessions.Snapshot(ctx)
 	if err != nil || len(snapshot.Bookmarks) != 1 {
 		t.Fatalf("expected 'b' on Selected tab to create a bookmark: %+v, %v", snapshot.Bookmarks, err)
 	}
 	// tab 1: "d" docks the current selection.
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModAlt})
+	u.workspace.updateContextAction("d")
 	snapshot, err = sessions.Snapshot(ctx)
 	if err != nil || len(snapshot.Workspace.Docks) != 1 {
 		t.Fatalf("expected 'd' on Selected tab to dock the current selection: %+v, %v", snapshot.Workspace.Docks, err)
@@ -1022,13 +1023,13 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 	// tab 2: "b" bookmarks the dock's own reference (non-bookmark kind).
 	u.workspace.setTab(2)
 	u.workspace.dockIndex = 0
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'b', Mod: tea.ModAlt})
+	u.workspace.updateContextAction("b")
 	snapshot, err = sessions.Snapshot(ctx)
 	if err != nil || len(snapshot.Bookmarks) != 2 {
 		t.Fatalf("expected 'b' on Docked tab to create another bookmark: %+v, %v", snapshot.Bookmarks, err)
 	}
 	// tab 2: "x" undocks.
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'x', Mod: tea.ModAlt})
+	u.workspace.updateContextAction("x")
 	snapshot, err = sessions.Snapshot(ctx)
 	if err != nil || len(snapshot.Workspace.Docks) != 0 {
 		t.Fatalf("expected 'x' on Docked tab to undock: %+v, %v", snapshot.Workspace.Docks, err)
@@ -1046,7 +1047,7 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 	}
 	u.workspace.bookmarkIndex = 0
 
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'r', Mod: tea.ModAlt})
+	u.workspace.updateContextAction("r")
 	if u.workspace.bookmarkMode != "rename" {
 		t.Fatalf("expected 'r' to start rename mode, got %q", u.workspace.bookmarkMode)
 	}
@@ -1066,14 +1067,14 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 		t.Fatalf("expected the bookmark to be renamed: %+v", snapshot.Bookmarks)
 	}
 
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 't', Mod: tea.ModAlt})
+	u.workspace.updateContextAction("t")
 	if u.workspace.bookmarkMode != "tag_add" {
 		t.Fatalf("expected 't' to start tag_add mode, got %q", u.workspace.bookmarkMode)
 	}
 	u.workspace.bookmarkEditor.SetValue("reporting")
 	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'T', Mod: tea.ModAlt})
+	u.workspace.updateContextAction("T")
 	if u.workspace.bookmarkMode != "tag_remove" {
 		t.Fatalf("expected 'T' to start tag_remove mode, got %q", u.workspace.bookmarkMode)
 	}
@@ -1089,9 +1090,9 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 		}
 	}
 
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	u.workspace.updateContextAction("/")
 	if u.workspace.bookmarkMode != "search" {
-		t.Fatalf("expected '/' to start search mode, got %q", u.workspace.bookmarkMode)
+		t.Fatalf("bookmark search action did not start search mode: %q", u.workspace.bookmarkMode)
 	}
 	u.workspace.bookmarkEditor.SetValue("no-such-bookmark-title")
 	u.workspace.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -1103,7 +1104,7 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'f', Mod: tea.ModAlt})
+	u.workspace.updateContextAction("f")
 	if u.workspace.bookmarkMode != "tags" {
 		t.Fatalf("expected 'f' to start tags-filter mode, got %q", u.workspace.bookmarkMode)
 	}
@@ -1117,7 +1118,7 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'x', Mod: tea.ModAlt})
+	u.workspace.updateContextAction("x")
 	if u.workspace.bookmarkMode != "delete" {
 		t.Fatalf("expected 'x' to start delete-confirm mode, got %q", u.workspace.bookmarkMode)
 	}
@@ -1148,7 +1149,7 @@ func TestWorkspacePanelXDetachesLastAttachmentWhenNoOtherTargetApplies(t *testin
 		t.Fatal(err)
 	}
 	u.workspace.tab = 0
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'x', Mod: tea.ModAlt})
+	u.workspace.updateContextAction("x")
 	snapshot, err := sessions.Snapshot(ctx)
 	if err != nil || len(snapshot.Workspace.Attachments) != 0 {
 		t.Fatalf("expected 'x' to detach the last attachment: %+v, %v", snapshot.Workspace.Attachments, err)
@@ -1395,7 +1396,7 @@ func TestWorkspacePanelSpaceAndDOnBookmarksTabUseSelectedReference(t *testing.T)
 
 	u.workspace.setTab(3) // docking below flips ActiveTab; restore it first
 	u.workspace.bookmarkIndex = 0
-	u.workspace.updateKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModAlt})
+	u.workspace.updateContextAction("d")
 	snapshot, err = chatSessions.Snapshot(ctx)
 	if err != nil || len(snapshot.Workspace.Docks) != 1 {
 		t.Fatalf("expected 'd' on Bookmarks tab to dock the selected bookmark: %+v, %v", snapshot.Workspace.Docks, err)

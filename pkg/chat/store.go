@@ -286,6 +286,10 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS session_archives (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, archived_at TEXT NOT NULL)`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("initialize session archives: %w", err)
+	}
 	// ProjectID is an additional bookmark boundary, not a session-scope change.
 	//
 	// Each source enters the identity as dbcopy.SourceScopeIdentity says: where it
@@ -612,8 +616,14 @@ func (s *SessionStore) LatestOrCreate(ctx context.Context) (ChatSession, error) 
 	if err != nil {
 		return ChatSession{}, err
 	}
-	if len(list) > 0 {
-		return s.Load(ctx, list[0].ID)
+	archived, err := s.ArchivedSessionIDs(ctx)
+	if err != nil {
+		return ChatSession{}, err
+	}
+	for _, item := range list {
+		if !archived[item.ID] {
+			return s.Load(ctx, item.ID)
+		}
 	}
 	return s.Create(ctx, "New chat")
 }

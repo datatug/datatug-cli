@@ -50,12 +50,21 @@ type ChatUI struct {
 	hostedPlan   func(context.Context) (string, error)
 	tableStyle   grid.Style
 
-	sessionID           string
-	workspaceGeneration int
-	workspaceContext    context.Context
-	workspaceCancel     context.CancelFunc
-	relatedOrigins      map[string]string
-	snapshot            ChatSession
+	chatViews            map[string]*chatSessionView
+	chatSessions         []ChatSession
+	chatTransition       bool
+	chatCloseAfterSwitch bool
+	chatPrefixUntil      time.Time
+	chatPrefixSessionID  string
+	chatPrefixGeneration int
+	chatPrefixFocus      string
+	chatPrefixInputEpoch uint64
+	sessionID            string
+	workspaceGeneration  int
+	workspaceContext     context.Context
+	workspaceCancel      context.CancelFunc
+	relatedOrigins       map[string]string
+	snapshot             ChatSession
 	// sessionNotices are the start-of-session lines (what the table-narrowing
 	// decision does, and warnings about its configuration). They are shown as
 	// system lines at the top of the transcript, are never stored as messages and
@@ -71,6 +80,7 @@ type ChatUI struct {
 	// lands with GlobalKeys (see the Lane C report's deviations).
 	lastGridRecordSetID string
 	retainedRecordSetID string
+	resultColumnsCache  resultColumnsCache
 	entrySeq            int
 
 	// workspace is the SidePanel — DataTug's workspace pane (checklist #8).
@@ -169,7 +179,9 @@ type ChatUI struct {
 	// branch (r1b item 5a) consults it, via chatshell.Model.FocusedEntryID,
 	// to reproduce ui.go's messageFocused hint set (plain vs HTTP-document)
 	// for a card that isn't a grid. Reset by ClearTranscript/loadSession.
-	transcriptEntryKinds map[string]string
+	transcriptEntryKinds     map[string]string
+	transcriptMessageEntries map[string]string
+	httpBlocksByMessageID    map[string]*httpDocumentBlock
 
 	// removeHTTPRequestSettingOverride is a test-only seam over
 	// u.sessions.store.RemoveHTTPRequestSetting (nil in production): that
@@ -187,8 +199,10 @@ const (
 )
 
 type turnOutcome struct {
-	turn Turn
-	err  error
+	turn       Turn
+	err        error
+	sessionID  string
+	generation int
 }
 
 // NewChatUI constructs the chatshell-based chat screen. ctx must not be nil
@@ -199,15 +213,17 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		ctx = context.Background()
 	}
 	u := &ChatUI{
-		ctx:                     ctx,
-		conversation:            conversation,
-		modelName:               modelName,
-		tableStyle:              grid.StyleLines,
-		pendingTurns:            map[string]turnOutcome{},
-		gridsByRecordSetID:      map[string]*gridState{},
-		joinBlocksByRecordSetID: map[string]*JoinBlock{},
-		transcriptEntryKinds:    map[string]string{},
-		openBrowser:             browser.OpenURL,
+		ctx:                      ctx,
+		conversation:             conversation,
+		modelName:                modelName,
+		tableStyle:               grid.StyleLines,
+		pendingTurns:             map[string]turnOutcome{},
+		gridsByRecordSetID:       map[string]*gridState{},
+		joinBlocksByRecordSetID:  map[string]*JoinBlock{},
+		transcriptEntryKinds:     map[string]string{},
+		transcriptMessageEntries: map[string]string{},
+		httpBlocksByMessageID:    map[string]*httpDocumentBlock{},
+		openBrowser:              browser.OpenURL,
 	}
 	u.workspace = newWorkspacePanel(u)
 	u.workspaceContext, u.workspaceCancel = context.WithCancel(ctx)
@@ -220,7 +236,11 @@ func NewChatUI(ctx context.Context, conversation Conversation, modelName string)
 		chatshell.WithCommands(chatCommands),
 		chatshell.WithGlobalKeys(u.globalKeys),
 		chatshell.WithWorkspaceComposerAction("Select text", u.openComposerSelection),
-		chatshell.WithTopBarProvider(u.topBarInfo),
+		chatshell.WithWorkspaceTopBarProvider(u.topBarInfo),
+		chatshell.WithWorkspaceSpacing(),
+		chatshell.WithWorkspaceChatTabs(u.chatTabs, u.activateChatTab),
+		chatshell.WithWorkspaceChatTabActions(chatshell.WorkspaceTabAction{Label: "+ New", Action: u.createChatTab}, chatshell.WorkspaceTabAction{Label: "…", Action: u.openSessionPicker}),
+		chatshell.WithWorkspaceChatTabClose(u.closeChatTabAt),
 		chatshell.WithHintsProvider(u.statusHints),
 		chatshell.WithStatusBarVisibility(func() bool {
 			return !u.toolbarHidden || u.webLinkVisible || u.workspaceFeedback != "" || (u.shell != nil && u.shell.Busy())
@@ -407,14 +427,19 @@ func (u *ChatUI) appendKindedBlock(prefix, kind string, block transcript.Block) 
 // necessarily, not by an oversight.
 func (u *ChatUI) askCmd(prompt string) tea.Cmd {
 	id := u.nextEntryID("turn")
+	sessionID, generation := u.sessionID, u.workspaceGeneration
 	return u.shell.StartStream(id, func(ctx context.Context) iter.Seq2[ai.Event, error] {
-		return u.askOpenFunc(ctx, id, prompt)
+		return u.askOpenFuncFor(ctx, id, prompt, sessionID, generation)
 	})
 }
 
 func (u *ChatUI) askOpenFunc(ctx context.Context, id, prompt string) iter.Seq2[ai.Event, error] {
+	return u.askOpenFuncFor(ctx, id, prompt, u.sessionID, u.workspaceGeneration)
+}
+
+func (u *ChatUI) askOpenFuncFor(ctx context.Context, id, prompt, sessionID string, generation int) iter.Seq2[ai.Event, error] {
 	if u.sessions != nil {
-		events, resolve := u.sessions.StreamAsk(ctx, prompt)
+		events, resolve := u.sessions.StreamAskActive(ctx, sessionID, prompt)
 		return func(yield func(ai.Event, error) bool) {
 			// thinkFilter hides a <think>...</think> block live, delta by
 			// delta, instead of only once OnStreamDone's ReplaceBlock swaps
@@ -439,7 +464,7 @@ func (u *ChatUI) askOpenFunc(ctx context.Context, id, prompt string) iter.Seq2[a
 			}
 			turn, err := resolve()
 			u.pendingTurnsMu.Lock()
-			u.pendingTurns[id] = turnOutcome{turn: turn, err: err}
+			u.pendingTurns[id] = turnOutcome{turn: turn, err: err, sessionID: sessionID, generation: generation}
 			u.pendingTurnsMu.Unlock()
 		}
 	}
@@ -452,7 +477,7 @@ func (u *ChatUI) askOpenFunc(ctx context.Context, id, prompt string) iter.Seq2[a
 			err = fmt.Errorf("chat UI has no conversation configured")
 		}
 		u.pendingTurnsMu.Lock()
-		u.pendingTurns[id] = turnOutcome{turn: turn, err: err}
+		u.pendingTurns[id] = turnOutcome{turn: turn, err: err, sessionID: sessionID, generation: generation}
 		u.pendingTurnsMu.Unlock()
 		if err != nil {
 			yield(ai.Event{Type: ai.EventError, Error: &ai.Error{Message: err.Error()}}, err)
@@ -485,7 +510,7 @@ func (u *ChatUI) OnStreamDone(id string, _ error) tea.Cmd {
 	outcome, ok := u.pendingTurns[id]
 	delete(u.pendingTurns, id)
 	u.pendingTurnsMu.Unlock()
-	if !ok || outcome.err != nil {
+	if !ok || outcome.err != nil || outcome.sessionID != u.sessionID || outcome.generation != u.workspaceGeneration {
 		return nil
 	}
 	if snapshot, ready := u.snapshotIfReady(); ready && snapshot.ID == u.sessionID {
@@ -597,6 +622,7 @@ func (u *ChatUI) appendGridResult(query QueryResult) {
 		record = RecordSet{ID: query.RecordSetID, Title: query.Title, DTQL: query.DTQL, Result: query.Result, Lineage: query.Lineage}
 	}
 	u.rememberResult(record)
+	styled.bindQuery(record, u.snapshot)
 	u.resultScope(styled, record)
 	styled.SetKeyHandler(u.handleGridKey)
 	block := u.blockForGrid(styled.Model, query.RecordSetID, query.DTQL)
@@ -687,25 +713,48 @@ func (u *ChatUI) chatWidth() int {
 // OnMsg satisfies chatshell.MsgHandler.
 func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
+	case resultColumnsLoadedMsg:
+		if msg.overlay != nil && u.shell.HasOverlay(msg.overlay) && msg.overlay.valid() {
+			_, _, _ = msg.overlay.Update(msg)
+		}
+		return nil
+	case inspectResultColumnsMsg:
+		if msg.sessionID == u.sessionID && msg.generation == u.workspaceGeneration && msg.recordID == u.resultColumnsCache.recordID {
+			u.resultColumnsCache.loading = false
+			u.resultColumnsCache.rows = msg.rows
+			u.resultColumnsCache.err = msg.err
+		}
+		return nil
+	case chatSessionChangedMsg:
+		return u.receiveChatSessionChanged(msg)
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft && msg.Y == 0 {
 			header := strings.Split(ansi.Strip(u.shell.View().Content), "\n")[0]
-			if at := strings.Index(header, "Cancel [Ctrl+X]"); at >= 0 && msg.X >= ansi.StringWidth(header[:at]) && msg.X < ansi.StringWidth(header[:at])+len("Cancel [Ctrl+X]") {
-				u.cancelOperation(true)
-				return nil
-			}
-			if at := strings.Index(header, "Ctrl+P Actions"); at >= 0 && msg.X >= ansi.StringWidth(header[:at]) && msg.X < ansi.StringWidth(header[:at])+len("Ctrl+P Actions") {
-				return u.openWorkspaceActions()
-			}
-			if at := strings.Index(header, "F1 Help"); at >= 0 && msg.X >= ansi.StringWidth(header[:at]) && msg.X < ansi.StringWidth(header[:at])+len("F1 Help") {
-				return u.shell.PushOverlay(u.newHotkeysOverlay())
-			}
-			if at := strings.Index(header, "Session: "); at >= 0 && msg.X >= ansi.StringWidth(header[:at]) && msg.X < ansi.StringWidth(strings.TrimRight(header, " ")) {
-				return u.openSessionPicker()
-			}
-			if at := strings.Index(header, "Expand [F9]"); at >= 0 && msg.X >= ansi.StringWidth(header[:at]) && msg.X < ansi.StringWidth(header[:at])+len("Expand [F9]") {
-				u.shell.ExpandSelected()
-				return nil
+			for _, item := range []struct{ label, key string }{{"Help [F1]", "f1"}, {"Server ", "f8"}, {"Project:", "f3"}} {
+				if at := strings.Index(header, item.label); at >= 0 {
+					end := at + len(item.label)
+					if item.key == "f3" {
+						if n := strings.Index(header[at:], "[F3]"); n >= 0 {
+							end = at + n + 4
+						}
+					}
+					if item.key == "f8" {
+						if n := strings.Index(header[at:], "[F8]"); n >= 0 {
+							end = at + n + 4
+						}
+					}
+					if msg.X >= ansi.StringWidth(header[:at]) && msg.X < ansi.StringWidth(header[:end]) {
+						key := tea.KeyF1
+						if item.key == "f3" {
+							key = tea.KeyF3
+						}
+						if item.key == "f8" {
+							key = tea.KeyF8
+						}
+						cmd, _ := u.globalKeys(tea.KeyPressMsg{Code: key})
+						return cmd
+					}
+				}
 			}
 		}
 		return nil
@@ -875,8 +924,17 @@ func (u *ChatUI) reconcilePendingBridge() {
 // the old UI needed and chatshell now owns.
 func (u *ChatUI) loadSession(session ChatSession) {
 	retained := u.gridsByRecordSetID
-	if session.ID != u.sessionID {
+	changedSession := session.ID != u.sessionID
+	view := u.chatViews[session.ID]
+	if changedSession {
+		u.clearChatPrefix()
 		retained = nil
+		u.shell.SetCenterPanel(nil, false)
+		u.queryEditor = nil
+		u.apiScreen, u.apiReturn = nil, nil
+		if view != nil {
+			retained = view.grids
+		}
 		u.retainedRecordSetID = ""
 		u.trailNodes = nil
 		u.localTrailOrder = nil
@@ -892,19 +950,57 @@ func (u *ChatUI) loadSession(session ChatSession) {
 		u.workspace.cancelRelated()
 	}
 	u.workspaceGeneration++
+	u.resultColumnsCache = resultColumnsCache{}
 	u.workspaceContext, u.workspaceCancel = context.WithCancel(u.ctx)
 	u.relatedOrigins = map[string]string{}
 	u.sessionID = session.ID
 	u.snapshot = session
+	u.refreshChatTabs()
 	u.syncChips()
 	u.shell.RestoreWorkspace()
 	u.shell.ClearTranscript()
+	if changedSession {
+		defer func() {
+			if view == nil {
+				u.shell.RestoreComposerState(chatshell.ComposerState{})
+				u.syncChips()
+				return
+			}
+			u.shell.RestoreComposerState(view.composer)
+			u.syncChips()
+			viewport := view.viewport
+			if g := u.gridsByRecordSetID[view.recordID]; g != nil {
+				viewport.EntryID = g.entryID
+			} else if view.messageID != "" {
+				viewport.EntryID = u.transcriptMessageEntries[view.messageID]
+			}
+			u.shell.RestoreWorkspaceViewport(viewport)
+			u.trailNodes, u.localTrailOrder, u.trailHistory, u.trailPosition = view.trail, view.order, view.history, view.position
+			switch panel := view.center.(type) {
+			case *workspaceQueryEditor:
+				for key, editor := range u.queryEditors {
+					if strings.HasPrefix(key, session.ID+"\x00") && editor == panel {
+						u.queryEditor = panel
+						panel.back = u.shell.ShowTemporaryCenterPanel(panel)
+						if !view.centerFocused {
+							u.shell.FocusComposer()
+						}
+						break
+					}
+				}
+			case *localGroupsPanel:
+				u.shell.SetCenterPanel(panel, view.centerFocused)
+			}
+		}()
+	}
 	for _, line := range u.sessionNotices {
 		u.shell.AppendSystem(line)
 	}
 	u.gridsByRecordSetID = map[string]*gridState{}
 	u.joinBlocksByRecordSetID = map[string]*JoinBlock{}
 	u.transcriptEntryKinds = map[string]string{}
+	u.transcriptMessageEntries = map[string]string{}
+	u.httpBlocksByMessageID = map[string]*httpDocumentBlock{}
 	if u.sessions != nil {
 		if name, err := u.sessions.TableStyle(u.ctx); err == nil {
 			u.tableStyle = grid.ParseStyle(name)
@@ -949,6 +1045,7 @@ func (u *ChatUI) loadSession(session ChatSession) {
 				styled = newGridState(NewGridModel(record.Result), record.ID, record.Title, u.chatWidth(), record.Result.Statistics)
 			}
 			u.rememberResult(record)
+			styled.bindQuery(record, session)
 			if previous, ok := session.RecordSets[record.RefreshParentID]; ok {
 				styled.setVersionBadge(refreshBadge(record.Result, previous.Result))
 			}
@@ -990,7 +1087,7 @@ func (u *ChatUI) loadSession(session ChatSession) {
 			if stored, ok := session.NarrowingFor(message.ID); ok {
 				pendingNotice = stored.Record.Notice()
 			}
-			u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(text))
+			u.transcriptMessageEntries[message.ID] = u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(text))
 		case response != nil:
 			// httpDocumentBlock (checklist item #36/#37) ports ui.go's
 			// httpDocumentView as a real transcript.Block so a saved HTTP
@@ -1004,7 +1101,13 @@ func (u *ChatUI) loadSession(session ChatSession) {
 					versionBadge = "changed"
 				}
 			}
-			u.appendKindedBlock("http", transcriptEntryKindHTTP, &httpDocumentBlock{ui: u, text: text, markdown: message.Kind == "markdown", response: response, versionBadge: versionBadge})
+			block := &httpDocumentBlock{ui: u, text: text, markdown: message.Kind == "markdown", response: response, versionBadge: versionBadge}
+			if view != nil {
+				mode := view.httpModes[message.ID]
+				block.showRaw, block.showHeaders = mode.raw, mode.headers
+			}
+			u.transcriptMessageEntries[message.ID] = u.appendKindedBlock("http", transcriptEntryKindHTTP, block)
+			u.httpBlocksByMessageID[message.ID] = block
 		case message.Kind == "markdown":
 			u.shell.AppendAssistantMarkdown(text)
 		default:
@@ -1107,6 +1210,7 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 	var cmd tea.Cmd
 	switch command {
 	case "/new":
+		u.captureChatView()
 		snapshot, err = u.sessions.Create(u.ctx)
 	case "/sessions":
 		var list []ChatSession
@@ -1126,6 +1230,7 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 		if argument == "" {
 			err = fmt.Errorf("usage: /switch <session ID or prefix>")
 		} else {
+			u.captureChatView()
 			snapshot, err = u.sessions.Switch(u.ctx, argument)
 		}
 	case "/rename":
@@ -1144,7 +1249,9 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 		if argument != "confirm" {
 			err = fmt.Errorf("this deletes this session and its snapshots; type /delete confirm")
 		} else {
-			snapshot, err = u.sessions.Delete(u.ctx)
+			old := u.sessionID
+			snapshot, err = u.sessions.DeleteActive(u.ctx, old)
+			delete(u.chatViews, old)
 		}
 	case "/actions":
 		cmd = u.openWorkspaceActions()
@@ -1251,13 +1358,13 @@ func synchronousChatCommand(command string) bool {
 
 // chatHelpText describes currently dispatched workspace bindings. Planned
 // Dialog and quick-sort controls are routed through the active workspace owner.
-const chatHelpText = "Global: F1 Hotkeys • Alt+F1 toolbar (Ctrl+F1 alias; outside dialogs) • F2 mouse selection • F3 projects • F4 composer • F5 web • F6 Explorer • F7 Inspect • F8 API • F9 Expand • F10 Related • Ctrl+C quit\n\n" +
+const chatHelpText = "Global: F1 Help • Ctrl+P Actions • Ctrl+F1 toolbar • F2 mouse selection • F3 projects • F4 composer • F5 web • F6 Explorer • F7 Inspect • F8 Server • F9 Expand • F10 Related • Ctrl+C quit\n\n" +
 	"Navigation: Shift+↑↓ history • Shift+← Explorer • Shift+→ Inspect • Esc restore/composer\n\n" +
 	"Explorer and grid: type to search • / search • arrows navigate • Esc clear search, then leave search\n\n" +
-	"Result: Alt+G Group • Alt+S Sort • Alt+Shift+↑↓ loaded sort • Ctrl+Shift+↑↓ server-sort preview • Alt+Shift+S table style • Enter details • Ctrl+Space Actions (views, selection, sort, attach, dock, bookmark, bucket) • Ctrl+S save query • Ctrl+E export • Ctrl+R refresh • Alt+J JOIN chooser • Alt+1..0 Related\n\n" +
+	"Result: Tab/Shift+Tab switch Table, Charts, Current row and Query • Ctrl+P Actions for Group, Sort, JOIN and table style • Alt+Shift+↑↓ loaded sort • Ctrl+Shift+↑↓ server-sort preview • Enter details • Ctrl+Space result actions • Ctrl+S save query • Ctrl+E export • Ctrl+R refresh • Alt+1..0 Related\n\n" +
 	"Related: F10 focus • Alt+1..0 open numbered relationship • arrows select • Enter open • Esc fields\n\n" +
 	"Composer: Enter send • Shift+Enter newline • Tab attachments / Select text action • Backspace remove focused attachment • Ctrl+D remove last attachment • Esc previous control, retain draft\n\n" +
-	"Sessions: /sessions /switch /new /rename /clear confirm /delete confirm\n\n" +
+	"Chats: tabs switch sessions • + New creates • … restores archives • Ctrl+W choose Archive/Delete/Cancel • F12 then A archive directly • F12 then D delete directly • /sessions /switch /new /rename\n\n" +
 	"Commands: /query /queries /http /connect /export /bucket /settings /plan • API: arrows scroll requests, End follow, Esc back"
 
 // chatExportDoneMsg reports the outcome of a background /export write —
@@ -1399,40 +1506,15 @@ func (u *ChatUI) applyWorkspaceAction(action WorkspaceAction) error {
 // chrome (strongo/aichat#chat-shared-look), so topBarInfo never touches
 // colour itself.
 func (u *ChatUI) topBarInfo(width int) (title, context string, items []theme.MenuItem) {
-	project := nonempty(u.catalog.Title, "Choose project")
-	session := nonempty(u.snapshot.Title, "New chat")
-	apiState := "API " + strings.ToUpper(apimonitor.Default.Snapshot().State) + " [F8]"
-	items = []theme.MenuItem{{Label: apiState}}
-	if label := u.operationLabel(); label != "" {
-		if width < 100 && u.operation != nil {
-			kind := strings.Fields(strings.TrimPrefix(u.operation.label, "Server "))[0]
-			label = fmt.Sprintf("%s %ds Cancel [Ctrl+X]", kind, max(0, int(time.Since(u.operation.started).Seconds())))
-		}
-		items = append([]theme.MenuItem{{Label: label}}, items...)
-	}
-	helpWidth := 0
-	if u.toolbarHidden {
-		label := "F1 Help · Ctrl+P Actions"
-		if u.operation != nil && width < 100 {
-			label = "F1 Help"
-		}
-		items = append(items, theme.MenuItem{Label: label})
-		helpWidth = ansi.StringWidth(label) + 3
-	}
-	expandWidth := 0
-	if width >= 100 && u.shell != nil && u.shell.WorkspaceFocus() == "transcript" {
-		if _, _, ok := u.activeGrid(); ok {
-			items = append(items, theme.MenuItem{Label: "Expand [F9]"})
-			expandWidth = 14
-		}
-	}
-	remaining := width - ansi.StringWidth(apiState) - ansi.StringWidth(u.operationLabel()) - 23 - helpWidth - expandWidth
-	if remaining > 16 {
-		project = ansi.Truncate(sanitizeTerminalText(project), max(8, (remaining-6)/2), "…")
-		session = ansi.Truncate(sanitizeTerminalText(session), max(8, (remaining-6)/2), "…")
-		items = append(items, theme.MenuItem{Label: project + " [F3]"}, theme.MenuItem{Label: "Session: " + session})
-	}
-	return lipgloss.NewStyle().Bold(true).Foreground(theme.Gold).Render("DataTug"), "", items
+	project := sanitizeTerminalText(nonempty(u.catalog.Title, "Choose project"))
+	state := sanitizeTerminalText(strings.ToUpper(apimonitor.Default.Snapshot().State))
+	title = lipgloss.NewStyle().Bold(true).Foreground(theme.Gold).Render("DataTug")
+	items = []theme.MenuItem{{Label: "Server " + state + " [F8]"}, {Label: "Help [F1]"}}
+	rightWidth := ansi.StringWidth(items[0].Label) + 2 + ansi.StringWidth(items[1].Label)
+	fixedWidth := ansi.StringWidth("DataTug ¦ Project:  [F3] ¦ Chat")
+	projectWidth := max(0, width-rightWidth-fixedWidth-1)
+	context = "Project: " + ansi.Truncate(project, projectWidth, "…") + " [F3] ¦ Chat"
+	return
 }
 
 // statusBar is ui.go's statusLines, ported: the grid-focused hint set
@@ -1507,7 +1589,7 @@ func (u *ChatUI) statusHintsRaw(width int) []string {
 		} else if u.shell.Expanded() {
 			escHint = "Esc restore"
 		}
-		segments = []string{"type to search", "/ search", "Ctrl+Space Actions", "Ctrl+S save query", "Ctrl+E export", "Alt+J JOIN chooser", enterHint, "Tab panes (wide)", "Shift+↑↓ history", "Shift+→ Inspect", escHint}
+		segments = []string{"type to search", "/ search", "Ctrl+P Actions", "Ctrl+S save query", "Ctrl+E export", enterHint, "Tab views", "Shift+↑↓ history", "Shift+→ Inspect", escHint}
 		if recordSetID != "" {
 			if record, ok := u.snapshot.RecordSets[recordSetID]; ok && (record.DTQL != "" || record.HTTPResponseID != "") {
 				segments = append(segments, "Ctrl+R refresh")
@@ -1517,8 +1599,8 @@ func (u *ChatUI) statusHintsRaw(width int) []string {
 			segments = append(segments, fmt.Sprintf("Export bucket: %d (Actions)", count))
 		}
 		switch g.ActiveView() {
-		case gridViewRaw, gridViewHeaders:
-			segments = append(segments, "↑↓ scroll", "PgUp/PgDn page", "Home/End edges", "Alt+A views")
+		case gridViewQuery, gridViewRaw, gridViewHeaders:
+			segments = append(segments, "↑↓ scroll", "PgUp/PgDn page", "Home/End edges", "Ctrl+P views")
 		case gridViewCharts:
 			segments = append(segments, "↑↓ chart candidates")
 		case gridViewCurrentRow:
@@ -1548,14 +1630,16 @@ func (u *ChatUI) statusHintsRaw(width int) []string {
 		// ui.go's u.workspaceFocused, including its tab==1 (Selected/
 		// inspector) and tab==3 (Bookmarks, incl. its own grid-focused/
 		// input-mode sub-states) hint sets.
-		segments = []string{"Shift+← previous", "F6/Esc input", "Tab ⇥ tabs", "←→ tree", "↑↓ navigate", "PgUp/Dn details", "Ctrl+←→ resize", "Space attach", "Enter open", "b bookmark", "d dock", "x detach/undock", mouseHint}
+		segments = []string{"Shift+← previous", "F6/Esc input", "←→ tree", "↑↓ navigate", "Ctrl+←→ resize", "Enter open", "Ctrl+P Actions", mouseHint}
 		switch u.workspace.tab {
 		case 1:
-			segments = []string{"1 row", "2 column", "3 recordset", "Shift+← previous", "Tab ⇥ workspace tabs", "Space attach", "b bookmark", "d dock", mouseHint}
+			segments = []string{"Shift+← previous", "Tab/Shift+Tab Row/Column/Result", "Ctrl+P Actions", mouseHint}
+		case 2:
+			segments = []string{"Shift+← previous", "↑↓ docked", "Enter result", "Ctrl+P Actions", mouseHint}
 		case 3:
-			segments = []string{"Shift+← previous", "F6/Esc input", "Tab ⇥ tabs", "↑↓ browse", "Enter open grid", "a attach", "d dock", "r rename", "t/T tags", "/ search", "f filter", "x delete", mouseHint}
+			segments = []string{"Shift+← previous", "F6/Esc input", "↑↓ browse", "Enter open grid", "Ctrl+P Actions", mouseHint}
 			if u.workspace.bookmarkGridFocused {
-				segments = []string{"Tab list", "↑↓ rows", "←→ columns", "s sort", "a attach", "d dock", "Esc list"}
+				segments = []string{"Tab list", "↑↓ rows", "←→ columns", "Ctrl+P Actions", "Esc list"}
 			}
 			if u.workspace.bookmarkMode != "" {
 				segments = []string{"Bookmark " + u.workspace.bookmarkMode, "Enter apply", "Esc cancel"}
@@ -1623,7 +1707,7 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 		link := lipgloss.NewStyle().Hyperlink(u.browserURL).Render("Open web chat")
 		return nil, []string{link + ": " + u.browserURL}
 	}
-	if u.operation != nil {
+	if u.operation != nil || u.backendBusy() {
 		return nil, []string{u.operationLabel(), "F1 Help · Ctrl+P Actions"}
 	}
 	if u.shell.Busy() {
@@ -1660,16 +1744,16 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 		compact := []string{"F1 Hotkeys", "Ctrl+P Actions", "F4 composer", "F6 Explorer", "F7 Inspect"}
 		switch u.shell.WorkspaceFocus() {
 		case "explorer":
-			compact = append(compact, "Enter Open data", "Alt+A Attach", "Ctrl+N New query")
+			compact = append(compact, "Enter Open data", "Ctrl+P Actions", "Ctrl+N New query")
 		case "sidebar":
-			compact = append(compact, "F10 Related", "Alt+A Actions", "Shift+← result")
+			compact = append(compact, "F10 Related", "Ctrl+P Actions", "Shift+← result")
 		case "input":
 			compact = append(compact, "Enter send", "Esc back")
 		default:
 			if u.apiScreen != nil {
 				compact = append(compact, "↑↓ requests", "Esc back")
 			} else if _, record, ok := u.activeGrid(); ok {
-				compact = append(compact, "F9 Expand", "Alt+A Actions")
+				compact = append(compact, "F9 Expand", "Ctrl+P Actions")
 				if !groupedRecord(record) {
 					compact = append(compact, "F10 Related")
 				}
@@ -1693,23 +1777,20 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 		return nil, append([]string{u.workspaceFeedback, "F1 Hotkeys"}, u.workspaceHints(width)...)
 	}
 	if u.resultTrailContext() {
-		essentials := []string{"F1 Hotkeys", "Ctrl+P / Ctrl+Space Actions", "F4 composer", "F9 Expand"}
+		essentials := []string{"F1 Hotkeys", "Ctrl+P Actions", "F4 composer", "F9 Expand"}
 		if g, _, ok := u.activeGrid(); ok {
 			switch g.ActiveView() {
 			case gridViewCharts:
 				essentials = append(essentials, "↑↓ chart candidates")
 			case gridViewCurrentRow:
 				essentials = append(essentials, "↑↓ inspector")
-			case gridViewRaw, gridViewHeaders:
+			case gridViewQuery, gridViewRaw, gridViewHeaders:
 				essentials = append(essentials, "↑↓ scroll · PgUp/PgDn page")
 			default:
 				essentials = append(essentials, "↑↓ rows · ←→ columns")
 			}
-			if join := u.joinBlocksByRecordSetID[u.activeRecordSetID()]; join != nil && len(join.Candidates) > 0 {
-				essentials = append(essentials, "Alt+J JOIN chooser")
-			}
 		}
-		essentials = append(essentials, "Alt+G Group", "Alt+S Sort", "Ctrl+T Trail", "Alt+←/→ Back/Forward")
+		essentials = append(essentials, "Ctrl+T Trail", "Alt+←/→ Back/Forward")
 		if count := len(u.snapshot.Workspace.ExportBucket); count > 0 {
 			essentials = append(essentials, fmt.Sprintf("Export bucket: %d (Actions)", count))
 		}
@@ -1725,7 +1806,7 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 			// Keep contextual row/view and JOIN feedback ahead of generic operation shortcuts.
 			remove := len(hints) - 1
 			for i := len(hints) - 1; i >= 3; i-- {
-				if hints[i].Key == "Ctrl+T" || hints[i].Key == "Alt+←/→" || hints[i].Key == "Alt+S" || hints[i].Key == "Alt+G" {
+				if hints[i].Key == "Ctrl+T" || hints[i].Key == "Alt+←/→" {
 					remove = i
 					break
 				}
@@ -1734,7 +1815,7 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 		}
 		return hints, segments
 	}
-	for _, s := range append([]string{"F1 Hotkeys", "Alt+F1 toolbar", "F4 composer", "F6 Explorer", "F7 Inspect", "F8 API"}, u.workspaceHints(width)...) {
+	for _, s := range append([]string{"F1 Hotkeys", "Ctrl+F1 toolbar", "F4 composer", "F6 Explorer", "F7 Inspect", "F8 Server"}, u.workspaceHints(width)...) {
 		if h, ok := autoHint(s); ok {
 			hints = append(hints, h)
 			continue

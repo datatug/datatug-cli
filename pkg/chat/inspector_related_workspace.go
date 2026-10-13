@@ -22,7 +22,7 @@ type inspectorRelatedMsg struct {
 }
 
 func (p *workspacePanel) CapturesEsc() bool {
-	return p.explorerSearchFocused || p.relatedFocused || p.bookmarkMode != "" || p.bookmarkGridFocused || p.dockGridFocused
+	return (p == p.ui.explorer && p.explorerSearch != "") || p.explorerSearchFocused || p.relatedFocused || p.bookmarkMode != "" || p.bookmarkGridFocused || p.dockGridFocused
 }
 func (p *workspacePanel) cancelRelated() {
 	if p.relatedCancel != nil {
@@ -176,11 +176,11 @@ type gridActionsOverlay struct {
 	index int
 }
 
-var gridActionLabels = []string{"Table view", "Charts view", "Current row view", "Cell detail", "Select row", "Select cell", "Select range", "Attach result", "Dock result", "Bookmark result", "Export bucket", "Sort column", "Save query [Ctrl+S]", "Export [Ctrl+E]", "Join relationship [Alt+J]"}
+var gridActionLabels = []string{"Table view", "Charts view", "Current row view", "Cell detail", "Select row", "Select cell", "Select range", "Attach result", "Dock result", "Bookmark result", "Export bucket", "Sort column", "Save query [Ctrl+S]", "Export [Ctrl+E]", "Join relationship [Actions JOIN]"}
 
 func (o *gridActionsOverlay) labels() []string {
 	labels := append([]string(nil), gridActionLabels...)
-	labels = append(labels, "Group [Alt+G]", "Sort [Alt+S]", "Table style [Alt+Shift+S]")
+	labels = append(labels, "Query", "Group [Actions Group]", "Sort [Actions Sort]", "Table style [Actions table style]")
 	if g, _, ok := o.ui.activeGrid(); ok && g.httpResponse != nil {
 		labels = append(labels, "Raw response", "Response headers")
 	}
@@ -239,16 +239,18 @@ func (o *gridActionsOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd, bo
 				return o, nil, true
 			}
 			switch labels[o.index] {
-			case "Group [Alt+G]":
+			case "Query":
+				g.ShowView(gridViewQuery)
+			case "Group [Actions Group]":
 				return o, o.ui.openResultOperation(true), true
-			case "Sort [Alt+S]":
+			case "Sort [Actions Sort]":
 				return o, o.ui.openResultOperation(false), true
-			case "Table style [Alt+Shift+S]":
+			case "Table style [Actions table style]":
 				o.ui.cycleTableStyle()
 			case "Raw response":
-				g.ShowView(grid.View(3))
+				g.ShowView(gridViewRaw)
 			case "Response headers":
-				g.ShowView(grid.View(4))
+				g.ShowView(gridViewHeaders)
 			}
 			return o, nil, true
 		}

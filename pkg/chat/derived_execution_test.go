@@ -143,7 +143,7 @@ func TestUnifiedWorkspaceDerivedDialogReviewCancelAndExecuteThroughShell(t *test
 	}
 	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 42})
 	u.shell.FocusEntry(u.lastGridEntryID)
-	u.shell.Update(uitest.Key("alt+s"))
+	uxSearchAction(t, u, "Sort loaded")
 	u.shell.Update(uitest.Text("3"))
 	u.shell.Update(uitest.Text("d"))
 	// D edits the highlighted column; select Value explicitly and move its cursor.

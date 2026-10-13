@@ -2,6 +2,7 @@ package chat
 
 import (
 	"strconv"
+	"strings"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -37,6 +38,7 @@ type gridState struct {
 	scopeLabel   string
 	localScope   bool
 	record       *RecordSet
+	queryText    string
 	// entryID is the transcript block ID this grid is currently appended
 	// under (set by ChatUI.appendGridResult/loadSession). It lets a caller
 	// that only has a RecordSetID — e.g. OnMsg's bridgeTickMsg case,
@@ -69,8 +71,9 @@ func (g *gridState) view() string { return g.View(g.Width(), g.Focused()) }
 const (
 	gridViewCharts     grid.View = 1
 	gridViewCurrentRow grid.View = 2
-	gridViewRaw        grid.View = 3
-	gridViewHeaders    grid.View = 4
+	gridViewQuery      grid.View = 3
+	gridViewRaw        grid.View = 4
+	gridViewHeaders    grid.View = 5
 )
 
 // gridRecordSetRefType tags a grid row's session.EntityRef so ChatUI can
@@ -152,12 +155,15 @@ func newProjectedGridState(model GridModel, recordSetID, title string, width int
 	}
 	if fullChrome {
 		opts = append(opts,
-			grid.WithExtraViews(g.chartsExtraView(), grid.CardView("Current row")),
+			grid.WithExtraViews(g.chartsExtraView(), grid.CardView("Current row"), g.queryExtraView()),
 			grid.WithSplitLayout(chooseGridLayout),
 		)
 	}
 	opts = append(opts, extraOpts...)
 	g.Model = grid.New(cols, rows, opts...)
+	if fullChrome {
+		g.SetTabViewCycling(true)
+	}
 	g.SetWidth(width)
 	return g
 }
@@ -169,7 +175,64 @@ func newProjectedGridState(model GridModel, recordSetID, title string, width int
 func (g *gridState) attachHTTPResponse(body []byte, response *HTTPResponse) {
 	g.rawBody = body
 	g.httpResponse = response
-	g.SetExtraViews(g.chartsExtraView(), grid.CardView("Current row"), g.rawExtraView(), g.headersExtraView())
+	g.SetExtraViews(g.chartsExtraView(), grid.CardView("Current row"), g.queryExtraView(), g.rawExtraView(), g.headersExtraView())
+}
+
+// bindQuery records provenance for this exact immutable result. It never
+// resolves a newer query or executes anything when the tab is opened.
+func (g *gridState) bindQuery(record RecordSet, session ChatSession) {
+	var lines []string
+	if record.ID != "" {
+		lines = append(lines, "Result: "+sanitizeTerminalText(record.ID))
+	}
+	if record.QueryID != "" {
+		lines = append(lines, "Execution: "+sanitizeTerminalText(record.QueryID))
+	}
+	doc := record.DTQL
+	if doc == "" && record.QueryID != "" {
+		for _, q := range session.Queries {
+			if q.ID == record.QueryID {
+				doc = q.DTQL
+				break
+			}
+		}
+	}
+	if doc != "" {
+		lines = append(lines, "", "Executed query", sanitizeMultilineText(doc))
+	} else if record.HTTPResponseID != "" {
+		if response, ok := session.HTTPResponses[record.HTTPResponseID]; ok {
+			lines = append(lines, "", "HTTP "+sanitizeTerminalText(response.Method)+" "+sanitizeTerminalText(response.URL))
+		} else {
+			lines = append(lines, "", "HTTP request provenance unavailable.")
+		}
+	} else {
+		lines = append(lines, "", "No single executable query was retained for this result.")
+	}
+	if record.Lineage != nil {
+		lines = append(lines, "", "Derived from result: "+sanitizeTerminalText(record.Lineage.ParentRecordSetID))
+		if parent, ok := session.RecordSets[record.Lineage.ParentRecordSetID]; ok && parent.DTQL != "" {
+			lines = append(lines, "Parent query", sanitizeMultilineText(parent.DTQL))
+		}
+	}
+	if len(record.Parameters) > 0 {
+		lines = append(lines, "", "Bound parameters are hidden.")
+	}
+	g.queryText = strings.Join(lines, "\n")
+}
+
+func (g *gridState) queryExtraView() grid.ExtraView {
+	vp := viewport.New(viewport.WithWidth(1), viewport.WithHeight(1))
+	vp.SoftWrap = true
+	return grid.ExtraView{Label: "Query", ShortLabel: "Q", Render: func(_ *grid.Model, width, height int) string {
+		vp.SetWidth(max(1, width))
+		vp.SetHeight(max(1, height))
+		text := g.queryText
+		if text == "" {
+			text = "Query provenance unavailable for this result."
+		}
+		vp.SetContent(text)
+		return vp.View()
+	}, Update: viewportScrollUpdate(&vp)}
 }
 
 // chartsExtraView renders DataTug's chart-candidate browser: the currently
@@ -279,7 +342,7 @@ const (
 // wide JSON/text) always take the full pane instead. Ported from
 // recordset_views.go's chooseRecordsetLayout.
 func chooseGridLayout(totalWidth, naturalWidth int, view grid.View) grid.SplitLayout {
-	if view == grid.ViewTable || view == gridViewRaw || view == gridViewHeaders {
+	if view == grid.ViewTable || view == gridViewQuery || view == gridViewRaw || view == gridViewHeaders {
 		return grid.SplitLayout{}
 	}
 	useful := max(minUsefulTableCells, min(maxUsefulTableCells, naturalWidth))

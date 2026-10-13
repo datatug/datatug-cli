@@ -198,7 +198,7 @@ func (o *httpScopeOverlay) View(width, height int) string {
 
 var _ chatshell.Overlay = (*httpScopeOverlay)(nil)
 
-// --- Alt+S table style cycling (checklist #18) ---------------------------
+// --- Table style cycling through Actions ----------------------------------
 
 // cycleTableStyle is ui.go's (*UI).cycleTableStyle, ported: instead of a
 // timed styleNotice field, it appends a transcript status line via

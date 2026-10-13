@@ -125,7 +125,7 @@ func TestUnifiedWorkspaceDerivedTypesSurviveReloadWithoutInventingEntityIdentity
 			t.Fatalf("unavailable entity action advertised: %s", hint)
 		}
 	}
-	u.shell.Update(uitest.Key("alt+j"))
+	u.dispatchWorkspaceAction("join")
 	if u.shell.ActiveOverlayHints() != nil || !strings.Contains(u.workspaceFeedback, "no entity identity") {
 		t.Fatal("grouped JOIN opened a misleading picker")
 	}
@@ -143,7 +143,7 @@ func TestUnifiedWorkspaceGroupedGridDoesNotRenderSourceEntityJoinHints(t *testin
 	u.sessions.ConfigureJoinApplication(ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: &joinExecutorStub{}})
 	u.loadSession(u.snapshot)
 	u.shell.FocusEntry(u.lastGridEntryID)
-	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "Alt+J chooser") || !strings.Contains(view, "Customer") {
+	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "Ctrl+P Actions") || !strings.Contains(view, "Customer") {
 		t.Fatalf("fixture does not render source relationships: %s", view)
 	}
 	query.Title = "Group: Invoices"
@@ -168,7 +168,7 @@ func TestUnifiedWorkspaceGroupedGridDoesNotRenderSourceEntityJoinHints(t *testin
 		u.shell.FocusEntry(u.lastGridEntryID)
 		u.shell.ExpandSelected()
 		view := flattenView(u.shell.View().Content)
-		if strings.Contains(view, "You can JOIN") || strings.Contains(view, "Alt+J chooser") || strings.Contains(view, "Invoice: Customer") {
+		if strings.Contains(view, "You can JOIN") || strings.Contains(view, "Invoice: Customer") {
 			t.Fatalf("reload=%v grouped grid advertised source identity: %s", reload, view)
 		}
 		if !strings.Contains(view, "sum_Total") || !strings.Contains(view, "27.29") {

@@ -352,12 +352,12 @@ func TestChatUIInlineFKJoinNavigationAndApply(t *testing.T) {
 	if !u.shell.FocusEntry(u.lastGridEntryID) {
 		t.Fatal("grid could not be focused")
 	}
-	u.shell.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModAlt})
+	uxSearchAction(t, u, "JOIN relationship")
 	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "JOIN relationship") || !strings.Contains(view, "Invoice.CustomerId") || !strings.Contains(view, "Customer.CustomerId") {
 		t.Fatalf("exact FK details missing: %s", view)
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	u.shell.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModAlt})
+	uxSearchAction(t, u, "JOIN relationship")
 	_, cmd := u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("advertised Enter did not invoke JOIN")
@@ -409,7 +409,7 @@ func TestChatUISlashHelpDocumentsGridControls(t *testing.T) {
 	drainCmd(t, u, u.Submit("/help"))
 	view := collectWorkspaceHotkeys(t, u)
 	for _, want := range []string{
-		"Alt+G Group", "Alt+S Sort", "Alt+Shift+↑↓ loaded sort", "Ctrl+Shift+↑↓ server-sort preview", "Ctrl+Space Actions", "Ctrl+S save query", "Ctrl+E export", "Alt+J JOIN chooser", "F4 composer", "Esc previous control, retain draft", "F3", "Ctrl+C",
+		"Ctrl+P Actions for Group, Sort, JOIN", "Alt+Shift+↑↓ loaded sort", "Ctrl+Shift+↑↓ server-sort preview", "Ctrl+Space result actions", "Ctrl+S save query", "Ctrl+E export", "F4 composer", "Esc previous control, retain draft", "F3", "Ctrl+C",
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("help missing %q: %s", want, view)
@@ -445,7 +445,7 @@ func TestChatUIStatusHintsFollowFocus(t *testing.T) {
 		t.Fatal("expected grid focus")
 	}
 	gridView := ansi.Strip(u.shell.View().Content)
-	if !strings.Contains(gridView, "Table") || !strings.Contains(gridView, "Charts") || !strings.Contains(gridView, "Current row") || !strings.Contains(gridView, "Ctrl+Space Actions") {
+	if !strings.Contains(gridView, "Table") || !strings.Contains(gridView, "Charts") || !strings.Contains(gridView, "Current row") || !strings.Contains(gridView, "Ctrl+P Actions") {
 		t.Fatalf("grid status is not contextual: %s", gridView)
 	}
 }
@@ -488,7 +488,7 @@ func TestChatHelpTextRestoresKeyParity(t *testing.T) {
 	// chatHelpText assertions below already do.
 	view := collectWorkspaceHotkeys(t, u)
 	for _, want := range []string{
-		"F2 mouse selection", "F5 web", "Alt+Shift+S table style", "Ctrl+D remove last attachment", "Ctrl+R refresh", "Ctrl+Space Actions",
+		"F2 mouse selection", "F5 web", "table style", "Ctrl+D remove last attachment", "Ctrl+R refresh", "Ctrl+Space result actions",
 		"/connect", "/http", "/query",
 	} {
 		if !strings.Contains(view, want) {

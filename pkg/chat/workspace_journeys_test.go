@@ -156,7 +156,7 @@ func TestUnifiedWorkspaceExplorerActionsAndEditableQueryPreserveDraft(t *testing
 		drainCmd(t, u, cmd)
 	}
 	u.shell.FocusLeftPanel()
-	u.shell.Update(uitest.Key("alt+a"))
+	uxSearchAction(t, u, "Attach Explorer object")
 	if len(u.snapshot.Workspace.Attachments) != 1 || executor.doc != "" || !strings.Contains(u.shell.View().Content, "retain composer draft") {
 		t.Fatal("Attach must retain composer and execute nothing")
 	}
@@ -238,7 +238,7 @@ func gridActionJourney(t *testing.T, u *ChatUI, label string) {
 	if index < 0 {
 		t.Fatalf("unknown action %s", label)
 	}
-	_, cmd := u.shell.Update(uitest.Key("alt+a"))
+	_, cmd := u.shell.Update(uitest.Key("ctrl+space"))
 	if cmd != nil {
 		drainCmd(t, u, cmd)
 	}
@@ -274,22 +274,16 @@ func TestUnifiedWorkspaceLocalOperationsStableSelectionFilteringAndReset(t *test
 	u.sessions.ConfigureQueryExecutor(executor)
 	g.SelectRow(1)
 	originalKey := g.sourceRowKey()
-	_, cmd := u.shell.Update(uitest.Key("alt+s"))
-	if cmd != nil {
-		drainCmd(t, u, cmd)
-	}
+	uxSearchAction(t, u, "Sort loaded")
 	u.shell.Update(uitest.Text("1"))
-	_, cmd = u.shell.Update(uitest.Key("enter"))
+	_, cmd := u.shell.Update(uitest.Key("enter"))
 	if cmd != nil {
 		drainCmd(t, u, cmd)
 	}
 	if g.Cell(0, 0) != "1" || g.sourceRowKey() != originalKey || executor.doc != "" {
 		t.Fatal("local typed sort lost source selection or executed")
 	}
-	_, cmd = u.shell.Update(uitest.Key("alt+s"))
-	if cmd != nil {
-		drainCmd(t, u, cmd)
-	}
+	uxSearchAction(t, u, "Sort loaded")
 	_, cmd = u.shell.Update(uitest.Key("ctrl+r"))
 	if cmd != nil {
 		drainCmd(t, u, cmd)
@@ -312,10 +306,7 @@ func TestUnifiedWorkspaceLocalOperationsStableSelectionFilteringAndReset(t *test
 	if len(u.snapshot.RecordSets) != 1 || executor.doc != "" {
 		t.Fatal("cancel changed source")
 	}
-	_, cmd = u.shell.Update(uitest.Key("alt+g"))
-	if cmd != nil {
-		drainCmd(t, u, cmd)
-	}
+	uxSearchAction(t, u, "Group loaded")
 	u.shell.Update(uitest.Text("2"))
 	u.shell.Update(uitest.Text("c"))
 	_, cmd = u.shell.Update(uitest.Key("enter"))

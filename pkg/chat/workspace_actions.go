@@ -26,7 +26,7 @@ func (u *ChatUI) workspaceActions() []workspaceAction {
 		entityReason = "Grouped output has no entity identity"
 	}
 	joinReason := entityReason
-	if join := u.joinBlocksByRecordSetID[u.activeRecordSetID()]; join == nil || len(join.Candidates) == 0 {
+	if join := u.joinBlocksByRecordSetID[u.activeRecordSetID()]; !groupedRecord(record) && (join == nil || len(join.Candidates) == 0) {
 		joinReason = "No authoritative JOIN candidates for this result"
 	}
 	if u.backendBusy() {
@@ -37,14 +37,15 @@ func (u *ChatUI) workspaceActions() []workspaceAction {
 		cancelReason = "No running server operation"
 	}
 	actions := []workspaceAction{
-		{"group", "Group loaded / review server", "Alt+G", resultReason},
-		{"sort", "Sort loaded / review server", "Alt+S", resultReason},
+		{"group", "Group loaded / review server", "Actions", resultReason},
+		{"sort", "Sort loaded / review server", "Actions", resultReason},
 		{"loaded-up", "Sort loaded column ascending", "Alt+Shift+↑", resultReason},
 		{"loaded-down", "Sort loaded column descending", "Alt+Shift+↓", resultReason},
 		{"server-up", "Preview server column ascending", "Ctrl+Shift+↑", resultReason},
 		{"server-down", "Preview server column descending", "Ctrl+Shift+↓", resultReason},
-		{"related", "Related records", "F10", entityReason}, {"join", "JOIN relationship", "Alt+J", joinReason},
-		{"result-actions", "Result actions", "Alt+A", resultReason},
+		{"related", "Related records", "F10", entityReason}, {"join", "JOIN relationship", "Actions", joinReason},
+		{"result-actions", "Result actions", "Ctrl+Space", resultReason},
+		{"add-columns", "Add columns…", "Actions", resultReason},
 		{"expand", "Expand result", "F9", resultReason},
 		{"trail", "Exploration trail", "Ctrl+T / /trail", ""},
 		{"back", "Trail back", "Alt+←", u.trailNavigationReason(-1)}, {"forward", "Trail forward", "Alt+→", u.trailNavigationReason(1)},
@@ -53,10 +54,21 @@ func (u *ChatUI) workspaceActions() []workspaceAction {
 		{"inspect", "Toggle Inspect", "F7", ""}, {"api", "API Monitor", "F8", ""},
 		{"keyboard", "Keyboard diagnostic", "/keys", ""}, {"help", "Hotkeys", "F1", ""},
 	}
+	actions = append(actions,
+		workspaceAction{"style", "Cycle table style", "Actions", ""},
+		workspaceAction{"sessions", "Switch / restore archived chat", "Chat …", ""},
+		workspaceAction{"new-chat", "New chat", "Chat + New", ""},
+		workspaceAction{"close-chat", "Close chat: archive or delete", "Ctrl+W", ""},
+		workspaceAction{"archive-chat", "Archive current chat · retain cache", "F12 → A", ""},
+		workspaceAction{"delete-chat", "Delete current chat · remove session cache", "F12 → D", ""},
+		workspaceAction{"inspect-section", "Show Inspect", "F7", ""},
+		workspaceAction{"docked-section", "Show Docked", "Actions", ""},
+		workspaceAction{"bookmarks-section", "Show Bookmarks", "Actions", ""})
+	actions = append(actions, u.panelContextActions()...)
 	if u.backendBusy() {
 		for i := range actions {
 			switch actions[i].id {
-			case "join", "related", "group", "sort", "result-actions":
+			case "join", "related", "group", "sort", "result-actions", "add-columns":
 				actions[i].disabled = "A server operation is still in flight; cancel or wait"
 			}
 		}
@@ -65,7 +77,7 @@ func (u *ChatUI) workspaceActions() []workspaceAction {
 		reason := resultReason
 		if strings.Contains(label, "Join") {
 			reason = entityReason
-			if join := u.joinBlocksByRecordSetID[u.activeRecordSetID()]; join == nil || len(join.Candidates) == 0 {
+			if join := u.joinBlocksByRecordSetID[u.activeRecordSetID()]; !groupedRecord(record) && (join == nil || len(join.Candidates) == 0) {
 				reason = "No authoritative JOIN candidates for this result"
 			}
 		}
@@ -128,10 +140,48 @@ func (u *ChatUI) dispatchWorkspaceAction(id string) tea.Cmd {
 		u.cancelOperation(true)
 		return nil
 	}
+	switch id {
+	case "group":
+		return u.openResultOperation(true)
+	case "sort":
+		return u.openResultOperation(false)
+	case "add-columns":
+		return u.openResultColumns()
+	case "join":
+		return u.openJoinPicker()
+	case "result-actions":
+		return u.shell.PushOverlay(&gridActionsOverlay{ui: u})
+	case "style":
+		return u.cycleTableStyle()
+	case "sessions":
+		return u.openSessionPicker()
+	case "new-chat":
+		return u.createChatTab()
+	case "close-chat":
+		return u.openChatCloseChooser()
+	case "archive-chat":
+		return u.closeChatTab(false)
+	case "delete-chat":
+		return u.closeChatTab(true)
+	case "inspect-section":
+		u.workspace.setTab(1)
+		u.shell.FocusRightPanel()
+		return nil
+	case "docked-section":
+		u.workspace.setTab(2)
+		u.shell.FocusRightPanel()
+		return nil
+	case "bookmarks-section":
+		u.workspace.setTab(3)
+		u.shell.FocusRightPanel()
+		return nil
+	}
+	if strings.HasPrefix(id, "panel:") {
+		return u.panelContextAction(strings.TrimPrefix(id, "panel:"))
+	}
 	keys := map[string]tea.KeyPressMsg{
-		"group": {Code: 'g', Mod: tea.ModAlt}, "sort": {Code: 's', Mod: tea.ModAlt},
-		"related": {Code: tea.KeyF10}, "join": {Code: 'j', Mod: tea.ModAlt},
-		"result-actions": {Code: 'a', Mod: tea.ModAlt}, "expand": {Code: tea.KeyF9},
+		"related":  {Code: tea.KeyF10},
+		"expand":   {Code: tea.KeyF9},
 		"composer": {Code: tea.KeyF4}, "explorer": {Code: tea.KeyF6}, "inspect": {Code: tea.KeyF7}, "api": {Code: tea.KeyF8}, "help": {Code: tea.KeyF1},
 	}
 	if key, ok := keys[id]; ok {
@@ -261,7 +311,7 @@ func (*keyboardCheckOverlay) HelpHints() []string {
 	return []string{"Keyboard diagnostic · press keys to inspect", "Esc close (not captured)", "No commands run; no automatic terminal support claim"}
 }
 func (o *keyboardCheckOverlay) View(w, h int) string {
-	lines := strings.Split(ansi.Wrap("Keyboard diagnostic · Esc close\nPress a shortcut to inspect the received event. No commands run.\nLegacy Enter/LF can decode as Ctrl+J: JOIN uses Alt+J. Received events cannot prove all terminal shortcuts work.\nAlternatives: Ctrl+P / /actions; Enter on a searched action.", max(1, w), " "), "\n")
+	lines := strings.Split(ansi.Wrap("Keyboard diagnostic · Esc close\nPress a shortcut to inspect the received event. No commands run.\nLegacy Enter/LF can decode as Ctrl+J; Tab can decode as Ctrl+I. JOIN is in Ctrl+P Actions. Received events cannot prove all terminal shortcuts work.\nAlternatives: Ctrl+P / /actions; Enter on a searched action.", max(1, w), " "), "\n")
 	room := max(0, h-len(lines)-1)
 	start := max(0, len(o.keys)-room)
 	lines = append(lines, o.keys[start:]...)

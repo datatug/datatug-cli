@@ -1,13 +1,7 @@
 package api
 
 import (
-	"encoding/json"
-	"io"
-	"os"
-	"path/filepath"
-
 	"github.com/datatug/datatug-core/pkg/apicontract"
-	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/sessioncontext"
 )
 
@@ -21,31 +15,8 @@ type SessionContextSubject struct {
 }
 
 func localSessionSampleSubjects(projectDir string, environments []SessionContextEnvironment) []SessionContextSubject {
-	f, err := os.Open(filepath.Join(projectDir, "connections", "demo-db.json"))
+	catalog, err := readLocalConnectionCatalog(projectDir)
 	if err != nil {
-		return nil
-	}
-	defer func() { _ = f.Close() }()
-	body, err := io.ReadAll(io.LimitReader(f, (256<<10)+1))
-	if err != nil || len(body) > 256<<10 {
-		return nil
-	}
-	var catalog struct {
-		Format      string `json:"format"`
-		Connections []struct {
-			ID             string `json:"id"`
-			Dataset        string `json:"dataset"`
-			Storage        string `json:"storage"`
-			Readiness      string `json:"readiness"`
-			Source         string `json:"source"`
-			FixtureSHA256  string `json:"fixtureSha256"`
-			BrowserFixture struct {
-				URL   string `json:"url"`
-				Bytes int64  `json:"bytes"`
-			} `json:"browserFixture"`
-		} `json:"connections"`
-	}
-	if json.Unmarshal(body, &catalog) != nil || catalog.Format != datatug.ConnectionCatalogFormat {
 		return nil
 	}
 	count := 0

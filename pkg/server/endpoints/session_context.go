@@ -39,6 +39,10 @@ func sessionContextHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if _, limitErr := sessionContextPageLimit(q); limitErr != nil {
+		writeSessionContextError(w, r, sessioncontext.ErrInvalid)
+		return
+	}
 	service, principal, caps, err := api.ResolveSessionContext(r.Context(), q.Get("storage"), q.Get("project"))
 	if err != nil {
 		writeSessionContextError(w, r, err)
@@ -139,5 +143,9 @@ func sessionContextPageLimit(q url.Values) (int, error) {
 	if q.Get("limit") == "" {
 		return 100, nil
 	}
-	return strconv.Atoi(q.Get("limit"))
+	limit, err := strconv.Atoi(q.Get("limit"))
+	if err != nil || limit < 1 || limit > 100 {
+		return 0, sessioncontext.ErrInvalid
+	}
+	return limit, nil
 }

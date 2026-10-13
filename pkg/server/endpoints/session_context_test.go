@@ -70,6 +70,11 @@ func TestSessionContextHTTPPrivacyReplayAndRevocation(t *testing.T) {
 		t.Fatalf("capabilities %+v", caps)
 	}
 	query := url.Values{"storage": {"local"}, "project": {"transport-test"}, "databaseId": {caps.DatabaseID}, "projectId": {caps.ProjectID}}
+	for _, path := range []string{"/sessions", "/sessions/s/runs", "/sessions/s/messages", "/sessions/s/entries/e/revisions"} {
+		for _, limit := range []string{"bad", "0", "101"} {
+			request(http.MethodGet, path+"?"+query.Encode()+"&limit="+limit, nil, http.StatusBadRequest)
+		}
+	}
 	request(http.MethodGet, "/operations/unknown?"+query.Encode(), nil, http.StatusNotFound)
 	request(http.MethodGet, "/operations/unknown?"+query.Encode()+"&unsupported=1", nil, http.StatusBadRequest)
 	request(http.MethodPost, "/query?"+query.Encode(), []byte(`{}`), http.StatusBadRequest)

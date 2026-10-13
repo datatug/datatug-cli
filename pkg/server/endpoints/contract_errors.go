@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -18,8 +19,20 @@ import (
 // request with such an origin is refused before any route answers it, see RequestGuard). A
 // request with no Origin gets no header, as curl, which never exercises CORS, does not need one.
 func writeCORSOrigin(w http.ResponseWriter, r *http.Request) {
-	if origin := r.Header.Get("Origin"); origin != "" && IsSupportedOrigin(origin) {
-		w.Header().Set("Access-Control-Allow-Origin", origin)
+	var varied bool
+	for _, line := range w.Header().Values("Vary") {
+		for _, field := range strings.Split(line, ",") {
+			if strings.EqualFold(strings.TrimSpace(field), "Origin") || strings.TrimSpace(field) == "*" {
+				varied = true
+			}
+		}
+	}
+	if !varied {
+		w.Header().Add("Vary", "Origin")
+	}
+	origins := r.Header.Values("Origin")
+	if len(origins) == 1 && IsSupportedOrigin(origins[0]) {
+		w.Header().Set("Access-Control-Allow-Origin", origins[0])
 	}
 }
 

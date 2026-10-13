@@ -38,6 +38,7 @@ func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly boo
 	semanticRoutes(path, router, wrapper, writeOnly)
 	executionRoutes(path, router, wrapper, writeOnly)
 	incidentRoutes(path, router, wrapper, writeOnly, caps)
+	sessionContextRoutes(path, router, wrapper, writeOnly, caps)
 
 }
 
@@ -123,6 +124,7 @@ func projectsRoutes(path string, router router, wrap wrapper, writeOnly bool, ca
 		route(router, wrap, http.MethodGet, path+"/projects/project_summary", getProjectSummary)
 		route(router, wrap, http.MethodGet, path+"/projects/project_full", getProjectFull)
 		route(router, wrap, http.MethodGet, path+"/projects/capabilities", projectCapabilitiesHandler)
+		route(router, wrap, http.MethodGet, path+"/projects/connection_catalog", projectConnectionCatalogHandler)
 		route(router, wrap, http.MethodGet, path+"/projects/branches", projectBranchesHandler)
 	}
 	projectEndpoints := ProjectAgentEndpoints{}

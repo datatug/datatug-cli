@@ -13,7 +13,7 @@ func (s *SessionStore) ArchivedSessionIDs(ctx context.Context) (map[string]bool,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	ids := map[string]bool{}
 	for rows.Next() {
 		var id string
@@ -29,7 +29,7 @@ func (s *SessionStore) Archive(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err := sessionExists(ctx, tx, id, s.scope); err != nil {
 		return err
 	}

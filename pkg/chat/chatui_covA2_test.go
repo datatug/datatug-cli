@@ -777,8 +777,8 @@ func TestStatusBarBusyHintWithSession(t *testing.T) {
 	if !strings.Contains(status, "Thinking…") {
 		t.Fatalf("expected the busy hint:\n%s", status)
 	}
-	if !strings.Contains(status, "Session: ") {
-		t.Fatalf("expected the session-title prefix while busy:\n%s", status)
+	if !strings.Contains(status, "New chat") {
+		t.Fatalf("expected the active chat tab while busy:\n%s", status)
 	}
 }
 

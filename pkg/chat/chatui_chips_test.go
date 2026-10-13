@@ -45,8 +45,10 @@ func chipCloseCoordinates(t *testing.T, content string) (x, y int) {
 	t.Helper()
 	for row, line := range strings.Split(content, "\n") {
 		plain := ansi.Strip(line)
-		if idx := runeIndex(plain, "×"); idx >= 0 {
-			return idx, row
+		if strings.Contains(plain, "Customer") {
+			if idx := runeIndex(plain, "×"); idx >= 0 {
+				return idx, row
+			}
 		}
 	}
 	t.Fatalf("no chip close glyph found in view:\n%s", ansi.Strip(content))
@@ -236,12 +238,12 @@ func TestChatUIComposerNeverWrapsChipsOverflowsInsteadWhenTheyDontFit(t *testing
 	_ = firstLineWithMany // the chip row's own line index while it existed; no delta assertion needed now that chipsHeight is always exactly 0 or 1.
 }
 
-// countChipRows counts the rendered lines carrying at least one chip's
-// close glyph ("×") -- one per wrapped chip row.
+// countChipRows counts this journey's long-labelled attachment rows. Chat
+// tabs also have close glyphs, which are not composer chips.
 func countChipRows(content string) int {
 	rows := 0
 	for _, line := range strings.Split(content, "\n") {
-		if strings.Contains(ansi.Strip(line), "×") {
+		if strings.Contains(ansi.Strip(line), "VeryLongTableName") {
 			rows++
 		}
 	}
@@ -255,7 +257,7 @@ func countChipRows(content string) int {
 // topBarHeight()+historyHeight(). ok is false when no chip row is rendered.
 func firstChipRowLine(content string) (line int, ok bool) {
 	for i, l := range strings.Split(content, "\n") {
-		if strings.Contains(ansi.Strip(l), "×") {
+		if strings.Contains(ansi.Strip(l), "VeryLongTableName") {
 			return i, true
 		}
 	}

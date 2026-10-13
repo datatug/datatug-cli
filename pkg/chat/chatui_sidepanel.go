@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -51,6 +52,8 @@ type workspacePanel struct {
 	// current selection (selectedExplorerObject), not a separate toggle --
 	// matching main's workspaceView/projectWorkspaceCards.
 	explorerDetailOffset int
+	inspectObject        *ProjectObject
+	inspectGroup         string
 
 	// Selected (inspector).
 	inspectorOffset int
@@ -101,9 +104,9 @@ func newWorkspacePanel(ui *ChatUI) *workspacePanel {
 // Title satisfies chatshell.SidePanel.
 func (p *workspacePanel) Title() string {
 	if p == p.ui.explorer {
-		return "Explorer  [F6]"
+		return "Explorer"
 	}
-	return "Inspect  [F7]"
+	return "Inspect"
 }
 
 // refresh reloads the workspace snapshot-derived state (dock grids,
@@ -415,13 +418,12 @@ func (p *workspacePanel) allExplorerNodes() []explorerNode {
 	}
 	rootID := "project:" + catalog.ID
 	nodes = append(nodes, explorerNode{id: rootID, label: catalog.Title, objectIndex: projectIndex, branch: true})
-	if p.explorerCollapsed[rootID] {
-		return nodes
-	}
 	sourceCount := 0
+	knownSources := map[string]bool{}
 	for _, object := range catalog.Objects {
 		if object.Reference.Kind == "source" {
 			sourceCount++
+			knownSources[object.Reference.SourceID] = true
 		}
 	}
 	if sourceCount > 0 {
@@ -440,9 +442,6 @@ func (p *workspacePanel) allExplorerNodes() []explorerNode {
 		}
 		id := "group:" + sourceID + ":" + kind
 		nodes = append(nodes, explorerNode{id: id, label: fmt.Sprintf("%s (%d)", label, len(matches)), depth: depth, objectIndex: -1, branch: true})
-		if p.explorerCollapsed[id] {
-			return
-		}
 		for _, index := range matches {
 			object := catalog.Objects[index]
 			ref := object.Reference
@@ -457,7 +456,7 @@ func (p *workspacePanel) allExplorerNodes() []explorerNode {
 			}
 		}
 	}
-	if sourceCount > 0 && !p.explorerCollapsed["group:databases"] {
+	if sourceCount > 0 {
 		for i, object := range catalog.Objects {
 			if object.Reference.Kind != "source" {
 				continue
@@ -469,15 +468,33 @@ func (p *workspacePanel) allExplorerNodes() []explorerNode {
 				label += " ⚠"
 			}
 			nodes = append(nodes, explorerNode{id: id, label: label, depth: 2, objectIndex: i, branch: true, issue: object.Issue != ""})
-			if p.explorerCollapsed[id] {
-				continue
-			}
 			if issue := object.Issue; issue != "" {
 				nodes = append(nodes, explorerNode{id: id + ":issue", label: "⚠ " + issue, depth: 3, objectIndex: -1, issue: true, issueFor: i})
 			}
 			appendGroup(ref.SourceID, "table", "Tables", 3)
 			appendGroup(ref.SourceID, "project_view", "Views", 3)
 		}
+	}
+	// A compact or partially loaded catalog can contain tables/views before
+	// their source node arrives. Keep those objects navigable instead of
+	// silently dropping them from Explorer.
+	orphans := map[string]bool{}
+	for _, object := range catalog.Objects {
+		ref := object.Reference
+		if (ref.Kind == "table" || ref.Kind == "project_view") && !knownSources[ref.SourceID] {
+			orphans[ref.SourceID] = true
+		}
+	}
+	orphanIDs := make([]string, 0, len(orphans))
+	for id := range orphans {
+		orphanIDs = append(orphanIDs, id)
+	}
+	sort.Strings(orphanIDs)
+	for _, id := range orphanIDs {
+		label := nonempty(id, "Unassigned source")
+		nodes = append(nodes, explorerNode{id: "source:orphan:" + id, label: label, depth: 1, objectIndex: -1, branch: true})
+		appendGroup(id, "table", "Tables", 2)
+		appendGroup(id, "project_view", "Views", 2)
 	}
 	appendGroup("*", "query", "Queries", 1)
 	return nodes
@@ -499,7 +516,13 @@ func (p *workspacePanel) projectExplorer(width, height int) string {
 		if len(p.ui.catalog.Objects) == 0 {
 			return ansi.Wrap("Choose a project with F3. Browse Projects and Settings in the center Explore pane.", max(1, width), " ")
 		}
-		return p.explorerNodesView(width, max(1, height-4)) + "\nEnter Open data\nAlt+A Attach\nCtrl+N New query\nAlt+I Details"
+		treeHeight := max(1, height-2)
+		body := strings.Split(p.explorerNodesView(width, treeHeight), "\n")
+		for len(body) < treeHeight {
+			body = append(body, "")
+		}
+		hint := theme.WorkspacePanelHeader("↑↓ move · ←→ fold", "Esc clear")
+		return strings.Join(body, "\n") + "\n" + hint + "\n" + theme.WorkspacePanelHeader("Enter open", "Ctrl+P Actions")
 	}
 	selected := p.selectedExplorerObject()
 	if selected == nil {
@@ -530,7 +553,7 @@ func (p *workspacePanel) projectExplorer(width, height int) string {
 func (p *workspacePanel) explorerNodesView(width, height int) string {
 	nodes := p.explorerNodes()
 	if len(nodes) == 0 {
-		return "No project objects found."
+		return "No matches\n\nTry another search.\nEsc clears the filter."
 	}
 	p.explorerIndex = min(p.explorerIndex, len(nodes)-1)
 	lines := make([]string, 0, len(nodes))
@@ -561,9 +584,8 @@ func (p *workspacePanel) explorerNodesView(width, height int) string {
 		if node.issue {
 			label = lipgloss.NewStyle().Bold(true).Foreground(theme.AccentColor()).Render(ansi.Truncate(label, width, "…"))
 		}
-		if i == p.explorerIndex && p.focused {
-			bg, fg := theme.NeutralSurfaceColors(true)
-			label = lipgloss.NewStyle().Bold(true).Foreground(fg).Background(bg).Render(ansi.Truncate(label, width, "…"))
+		if i == p.explorerIndex {
+			label = theme.WorkspaceSelectedRow(label, true, width)
 		}
 		lines = append(lines, label)
 	}
@@ -692,19 +714,6 @@ func panelCard(title, body string, width, height int) string {
 // inspector_ui.go's inspectorWorkspaceView numbering, whose case default is
 // "row").
 func (p *workspacePanel) inspectorView(width, height int) string {
-	if p.relatedFocused {
-		return p.relatedView(width, height)
-	}
-	tabs := []string{"Current row", "Current column", "Current result"}
-	if width < 55 {
-		tabs = []string{"Row", "Column", "Result"}
-	}
-	for i := range tabs {
-		if i == p.inspectorSubTab {
-			tabs[i] = "[" + tabs[i] + "]"
-		}
-	}
-	header := ansi.Truncate(strings.Join(tabs, " · "), width, "…")
 	var lines []string
 	switch p.inspectorSubTab {
 	case 1:
@@ -714,10 +723,10 @@ func (p *workspacePanel) inspectorView(width, height int) string {
 	default:
 		lines = p.currentRowDetails(width)
 	}
-	visible := max(1, height-2)
+	visible := max(1, height)
 	p.inspectorOffset = min(p.inspectorOffset, max(0, len(lines)-visible))
 	end := min(len(lines), p.inspectorOffset+visible)
-	return strings.Join(append([]string{header, ""}, lines[p.inspectorOffset:end]...), "\n")
+	return strings.Join(lines[p.inspectorOffset:end], "\n")
 }
 
 // currentRowDetails is inspector_ui.go's (*UI).currentRowDetails, ported to
@@ -738,15 +747,11 @@ func (p *workspacePanel) currentRowDetails(width int) []string {
 	rawRow := g.rawRow(rowIndex)
 	identity := p.ui.inspectionIdentity(g, record)
 	lines := append(strings.Split(ansi.Wrap(identity, max(1, width), " "), "\n"), fmt.Sprintf("Row %d of %d", rowIndex+1, len(g.Rows())), "")
-	nameWidth, numberWidth := 0, 0
-	for i, column := range g.Columns() {
+	nameWidth := 0
+	for _, column := range g.Columns() {
 		nameWidth = max(nameWidth, ansi.StringWidth(column.Name))
-		if column.Numeric {
-			numberWidth = max(numberWidth, ansi.StringWidth(g.Cell(rowIndex, i)))
-		}
 	}
 	nameWidth = min(nameWidth, max(8, width/3))
-	numberWidth = min(numberWidth, 20)
 	for i, column := range g.Columns() {
 		value := g.Cell(rowIndex, i)
 		if value == "" {
@@ -761,23 +766,16 @@ func (p *workspacePanel) currentRowDetails(width int) []string {
 			typeLabel = "?"
 		}
 		if width < 32 {
-			lines = append(lines, strings.Split(ansi.Wrap(column.Name+" ("+typeLabel+")", max(1, width), " "), "\n")...)
-			lines = append(lines, strings.Split(ansi.Wrap(value, max(1, width), " "), "\n")...)
-			lines = append(lines, "")
+			lines = append(lines, strings.Split(ansi.Wrap(column.Name+" ("+typeLabel+")  "+value, max(1, width), " "), "\n")...)
 			continue
 		}
-		if column.Numeric {
-			value = strings.Repeat(" ", max(0, numberWidth-ansi.StringWidth(value))) + value
-		}
 		name := ansi.Truncate(column.Name, nameWidth, "…")
-		name = strings.Repeat(" ", max(0, nameWidth-ansi.StringWidth(name))) + name
-		line := fmt.Sprintf("  %s  %-10s  %s", name, ansi.Truncate(typeLabel, 10, "…"), value)
-		lines = append(lines, ansi.Truncate(line, width, "…"), "")
+		line := fmt.Sprintf("%-*s %-7s %s", nameWidth, name, ansi.Truncate(typeLabel, 7, "…"), value)
+		lines = append(lines, strings.Split(ansi.Wrap(line, width, " "), "\n")...)
 	}
 	if selection := p.ui.snapshot.Workspace.CurrentSelectionID; selection != "" {
 		lines = append(lines, "Selection", p.selectedDetails(width))
 	}
-	lines = append(lines, "", p.relatedView(width))
 	return lines
 }
 
@@ -844,31 +842,13 @@ func (p *workspacePanel) currentColumnDetails(width int) []string {
 // currentRecordsetDetails is inspector_ui.go's
 // (*UI).currentRecordsetDetails, ported to activeGrid.
 func (p *workspacePanel) currentRecordsetDetails(width int) []string {
-	g, record, ok := p.ui.activeGrid()
-	if !ok || g == nil {
-		return []string{"Focus a result grid to inspect its RecordSet."}
-	}
-	lines := []string{g.baseTitle, fmt.Sprintf("%d rows · %d columns", len(g.Rows()), len(g.Columns())), ""}
-	for _, column := range g.Columns() {
-		meta := p.ui.columnMeta(record, column.Name)
-		qualified := meta.qualified
-		if qualified == "" {
-			qualified = column.Name
-		}
-		typeLabel := meta.dbType
-		if typeLabel == "" {
-			typeLabel = "type unavailable"
-		}
-		lines = append(lines, ansi.Truncate("  "+qualified+"  "+typeLabel, width, "…"), "")
-	}
-	lines = append(lines, "Constraints require full schema metadata.")
-	return lines
+	return p.compactResultColumns(width)
 }
 
 func (p *workspacePanel) selectedDetails(width int) string {
 	selection, ok := p.ui.snapshot.Workspace.Selections[p.ui.snapshot.Workspace.CurrentSelectionID]
 	if !ok {
-		return "No durable selection. Focus a result, then Alt+A Actions → Select row, cell, or range."
+		return "No durable selection. Focus a result, then Ctrl+P Actions → Select row, cell, or range."
 	}
 	view := p.ui.snapshot.Workspace.Views[selection.ViewID]
 	record, ok := p.ui.snapshot.RecordSets[view.RecordSetID]
@@ -1080,6 +1060,9 @@ func (p *workspacePanel) View(width, height int, focused bool) string {
 	p.width, p.height, p.focused = width, height, focused
 	width, height = max(1, width), max(1, height)
 	header := p.tabStripHeader(width)
+	if p == p.ui.workspace && p.tab == 1 {
+		header = theme.WorkspaceTabs([]string{"Row", "Column", "Result"}, p.inspectorSubTab, width, focused && !p.relatedFocused)
+	}
 	if p == p.ui.explorer {
 		header = "Search /  " + sanitizeTerminalText(p.explorerSearch)
 		if p.explorerSearchFocused {
@@ -1091,7 +1074,7 @@ func (p *workspacePanel) View(width, height int, focused bool) string {
 	case "Project":
 		body = p.projectExplorer(width, height-1)
 	case "Selected":
-		body = p.inspectorView(width, height-1)
+		body = p.inspectStackView(width, height-1)
 	case "Docked":
 		body = p.dockedView(width)
 	case "Bookmarks":
@@ -1114,35 +1097,57 @@ func (p *workspacePanel) View(width, height int, focused bool) string {
 // today (chatshell forwards non-key messages to SidePanel only once Lane A's
 // message-delivery fix lands; see the Lane C report).
 func (p *workspacePanel) Update(msg tea.Msg) (chatshell.SidePanel, tea.Cmd) {
+	if mouse, ok := msg.(tea.MouseClickMsg); ok && mouse.Button == tea.MouseLeft && p == p.ui.explorer {
+		if mouse.Y == 0 {
+			p.explorerSearchFocused = true
+			return p, nil
+		}
+		index := p.explorerOffset + mouse.Y - 1
+		if mouse.Y > 0 && mouse.Y < p.height-2 && index >= 0 && index < len(p.explorerNodes()) {
+			p.explorerIndex = index
+			p.explorerSearchFocused = false
+			p.inspectExplorerSelection()
+		}
+		return p, nil
+	}
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return p, nil
 	}
-	return p, p.updateKey(key)
+	cmd := p.updateKey(key)
+	if p == p.ui.workspace {
+		return p, tea.Batch(cmd, p.ui.loadInspectResultColumns())
+	}
+	return p, cmd
 }
 
 func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
-	if p == p.ui.explorer && msg.String() == "alt+i" {
-		if object := p.selectedExplorerObject(); object != nil {
-			return p.ui.shell.PushOverlay(newCatalogDetailsOverlay(*object))
+	if p == p.ui.explorer {
+		defer p.inspectExplorerSelection()
+		if msg.String() == "esc" && p.explorerSearch != "" {
+			searchFocused := p.explorerSearchFocused
+			nodes := p.explorerNodes()
+			id := ""
+			if p.explorerIndex >= 0 && p.explorerIndex < len(nodes) {
+				id = nodes[p.explorerIndex].id
+			}
+			p.explorerSearch = ""
+			p.explorerSearchFocused = searchFocused
+			p.explorerIndex, p.explorerOffset = 0, 0
+			for i, node := range p.explorerNodes() {
+				if node.id == id {
+					p.explorerIndex = i
+					break
+				}
+			}
+			return nil
 		}
-		return nil
-	}
-	if p == p.ui.workspace && msg.String() == "alt+i" {
-		p.tab = 1
-		p.relatedFocused = false
-		p.inspectorSubTab = (p.inspectorSubTab + 1) % 3
-		return nil
-	}
-	if p == p.ui.explorer && (msg.String() == "alt+a" || msg.String() == "ctrl+n") {
-		if object := p.selectedExplorerObject(); object != nil {
-			if msg.String() == "ctrl+n" {
+		if msg.String() == "ctrl+n" {
+			if object := p.selectedExplorerObject(); object != nil {
 				return p.ui.openWorkspaceQuery(*object, false)
 			}
-			p.performWorkspaceAction(WorkspaceAction{Kind: "attach", Reference: object.Reference})
-			p.ui.shell.FocusComposer()
+			return nil
 		}
-		return nil
 	}
 	if p.relatedFocused {
 		switch msg.String() {
@@ -1220,11 +1225,8 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	nodes := p.explorerNodes()
 	key := msg.String()
-	for modified, action := range map[string]string{"alt+a": "a", "alt+b": "b", "alt+d": "d", "alt+r": "r", "alt+t": "t", "alt+shift+t": "T", "alt+T": "T", "ctrl+f": "/", "alt+f": "f", "alt+x": "x"} {
-		if key == modified {
-			key = action
-			break
-		}
+	if key == "ctrl+f" {
+		key = "/"
 	}
 	switch key {
 	case "pgdown":
@@ -1241,17 +1243,27 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 			p.inspectorOffset = 0
 		}
 	case "tab":
-		p.setTab(p.tab + 1)
+		if p == p.ui.workspace && p.tab == 1 {
+			p.inspectorSubTab = (p.inspectorSubTab + 1) % 3
+			p.inspectorOffset = 0
+		} else {
+			p.setTab(p.tab + 1)
+		}
 	case "shift+tab":
-		p.setTab(p.tab - 1)
-	case "h", "left":
+		if p == p.ui.workspace && p.tab == 1 {
+			p.inspectorSubTab = (p.inspectorSubTab + 2) % 3
+			p.inspectorOffset = 0
+		} else {
+			p.setTab(p.tab - 1)
+		}
+	case "left":
 		// ui.go's Left/h on the Project explorer: fold the branch node
 		// under the cursor, or -- on a leaf -- jump the cursor up to its
 		// nearest shallower branch ancestor. h/l are the explorer's own
 		// fold/unfold bindings here, not a tab switch (Tab/Shift+Tab own
 		// that).
 		if p.tab == 0 && p.explorerIndex >= 0 && p.explorerIndex < len(nodes) {
-			if node := nodes[p.explorerIndex]; node.branch {
+			if node := nodes[p.explorerIndex]; node.branch && !p.explorerCollapsed[node.id] {
 				p.explorerCollapsed[node.id] = true
 			} else {
 				for i := p.explorerIndex - 1; i >= 0; i-- {
@@ -1262,13 +1274,17 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 				}
 			}
 		}
-	case "l", "right":
+	case "right":
 		if p.tab == 0 && p.explorerIndex >= 0 && p.explorerIndex < len(nodes) {
 			if node := nodes[p.explorerIndex]; node.branch {
-				p.explorerCollapsed[node.id] = false
+				if p.explorerCollapsed[node.id] {
+					p.explorerCollapsed[node.id] = false
+				} else if p.explorerIndex+1 < len(nodes) && nodes[p.explorerIndex+1].depth > node.depth {
+					p.explorerIndex++
+				}
 			}
 		}
-	case "up", "k":
+	case "up":
 		switch p.tab {
 		case 0:
 			p.explorerIndex = max(0, p.explorerIndex-1)
@@ -1281,7 +1297,7 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 			p.bookmarkIndex = max(0, p.bookmarkIndex-1)
 			p.bookmarkGrid = nil
 		}
-	case "down", "j":
+	case "down":
 		switch p.tab {
 		case 0:
 			p.explorerIndex = min(len(nodes)-1, p.explorerIndex+1)
@@ -1293,6 +1309,14 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 		case 3:
 			p.bookmarkIndex = min(len(p.bookmarkItems)-1, p.bookmarkIndex+1)
 			p.bookmarkGrid = nil
+		}
+	case "home":
+		if p.tab == 1 {
+			p.inspectorOffset = 0
+		}
+	case "end":
+		if p.tab == 1 {
+			p.inspectorOffset = int(^uint(0) >> 1)
 		}
 	case "enter":
 		if p.tab == 0 {
@@ -1314,7 +1338,112 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 				bookmarkGrid.SetFocused(true)
 			}
 		}
-	case "space", "a":
+	case "space":
+		return p.updateContextAction("a")
+	}
+
+	return nil
+}
+
+func (p *workspacePanel) updateBookmarkInput(msg tea.KeyPressMsg) {
+	if msg.String() == "esc" {
+		p.bookmarkMode = ""
+		p.bookmarkEditor.Blur()
+		p.bookmarkEditor.SetValue("")
+		return
+	}
+	if msg.String() != "enter" {
+		p.bookmarkEditor, _ = p.bookmarkEditor.Update(msg)
+		return
+	}
+	value := strings.TrimSpace(p.bookmarkEditor.Value())
+	mode := p.bookmarkMode
+	p.bookmarkMode = ""
+	p.bookmarkEditor.Blur()
+	bookmarkID := p.selectedBookmarkID()
+	switch mode {
+	case "rename":
+		p.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_rename", BookmarkID: bookmarkID, Title: value})
+	case "tag_add":
+		p.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_add_tag", BookmarkID: bookmarkID, Tag: value})
+	case "tag_remove":
+		p.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_remove_tag", BookmarkID: bookmarkID, Tag: value})
+	case "delete":
+		if value == "delete" {
+			p.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_delete", BookmarkID: bookmarkID})
+		}
+	case "search":
+		p.bookmarkSearch = value
+		if err := p.refreshBookmarks(); err != nil {
+			p.ui.shell.AppendAssistant(conciseError(err))
+		}
+	case "tags":
+		p.bookmarkTags = nil
+		for _, tag := range strings.Split(value, ",") {
+			if tag = strings.TrimSpace(tag); tag != "" {
+				p.bookmarkTags = append(p.bookmarkTags, tag)
+			}
+		}
+		if err := p.refreshBookmarks(); err != nil {
+			p.ui.shell.AppendAssistant(conciseError(err))
+		}
+	}
+}
+
+var _ chatshell.SidePanel = (*workspacePanel)(nil)
+
+// explorerNodes filters the existing tree without changing object identities.
+func (p *workspacePanel) explorerNodes() []explorerNode {
+	nodes := p.allExplorerNodes()
+	query := strings.ToLower(strings.TrimSpace(p.explorerSearch))
+	visible := make([]explorerNode, 0, len(nodes))
+	if query == "" {
+		collapsedDepth := -1
+		for _, node := range nodes {
+			if collapsedDepth >= 0 && node.depth > collapsedDepth {
+				continue
+			}
+			collapsedDepth = -1
+			visible = append(visible, node)
+			if node.branch && p.explorerCollapsed[node.id] {
+				collapsedDepth = node.depth
+			}
+		}
+		return visible
+	}
+	// Search the complete model. A matching group includes its children;
+	// matching leaves include their ancestors, regardless of collapse state.
+	keep := make([]bool, len(nodes))
+	for i, node := range nodes {
+		if !strings.Contains(strings.ToLower(node.label), query) {
+			continue
+		}
+		keep[i] = true
+		depth := node.depth
+		for j := i - 1; j >= 0; j-- {
+			if nodes[j].depth < depth {
+				keep[j] = true
+				depth = nodes[j].depth
+			}
+		}
+		if node.branch {
+			for j := i + 1; j < len(nodes) && nodes[j].depth > node.depth; j++ {
+				keep[j] = true
+			}
+		}
+	}
+	for i, node := range nodes {
+		if keep[i] {
+			visible = append(visible, node)
+		}
+	}
+	return visible
+}
+
+func (p *workspacePanel) updateContextAction(key string) tea.Cmd {
+	nodes := p.explorerNodes()
+	switch key {
+	case "a":
 		switch p.tab {
 		case 0:
 			if p.explorerIndex >= 0 && p.explorerIndex < len(nodes) && nodes[p.explorerIndex].objectIndex >= 0 {
@@ -1386,67 +1515,4 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 	}
 	return nil
-}
-
-func (p *workspacePanel) updateBookmarkInput(msg tea.KeyPressMsg) {
-	if msg.String() == "esc" {
-		p.bookmarkMode = ""
-		p.bookmarkEditor.Blur()
-		p.bookmarkEditor.SetValue("")
-		return
-	}
-	if msg.String() != "enter" {
-		p.bookmarkEditor, _ = p.bookmarkEditor.Update(msg)
-		return
-	}
-	value := strings.TrimSpace(p.bookmarkEditor.Value())
-	mode := p.bookmarkMode
-	p.bookmarkMode = ""
-	p.bookmarkEditor.Blur()
-	bookmarkID := p.selectedBookmarkID()
-	switch mode {
-	case "rename":
-		p.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_rename", BookmarkID: bookmarkID, Title: value})
-	case "tag_add":
-		p.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_add_tag", BookmarkID: bookmarkID, Tag: value})
-	case "tag_remove":
-		p.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_remove_tag", BookmarkID: bookmarkID, Tag: value})
-	case "delete":
-		if value == "delete" {
-			p.performWorkspaceAction(WorkspaceAction{Kind: "bookmark_delete", BookmarkID: bookmarkID})
-		}
-	case "search":
-		p.bookmarkSearch = value
-		if err := p.refreshBookmarks(); err != nil {
-			p.ui.shell.AppendAssistant(conciseError(err))
-		}
-	case "tags":
-		p.bookmarkTags = nil
-		for _, tag := range strings.Split(value, ",") {
-			if tag = strings.TrimSpace(tag); tag != "" {
-				p.bookmarkTags = append(p.bookmarkTags, tag)
-			}
-		}
-		if err := p.refreshBookmarks(); err != nil {
-			p.ui.shell.AppendAssistant(conciseError(err))
-		}
-	}
-}
-
-var _ chatshell.SidePanel = (*workspacePanel)(nil)
-
-// explorerNodes filters the existing tree without changing object identities.
-func (p *workspacePanel) explorerNodes() []explorerNode {
-	nodes := p.allExplorerNodes()
-	query := strings.ToLower(strings.TrimSpace(p.explorerSearch))
-	if query == "" {
-		return nodes
-	}
-	filtered := make([]explorerNode, 0, len(nodes))
-	for _, node := range nodes {
-		if strings.Contains(strings.ToLower(node.label), query) {
-			filtered = append(filtered, node)
-		}
-	}
-	return filtered
 }

@@ -17,6 +17,7 @@ Features of the `datatug` CLI.
 | [Chat FK JOIN exploration](chat-fk-join-exploration/README.md) | Draft | — | Discover and apply deterministic foreign-key joins from DataTug Chat RecordSets. |
 | [Chat RecordSet charts and adaptive views](chat-recordset-adaptive-charts/README.md) | Draft | — | An immutable Chat RecordSet exposes its table, deterministic chart candidates, and a scrollable current-row inspector. The latter two views share space with the table when the terminal is wide enough and take the main pane when narrow. |
 | [Unified terminal workspace and API observability](unified-tui/README.md) | Stable | — | A single terminal workspace supports Explore, chat, result grids, record inspection and live API observability. The workspace and the five follow-up UX additions shipped in DataTug CLI v0.73.0; dialog mouse-boundary repairs shipped in v0.73.1. This specification retains the accepted behavior and records the verified supported choices. The implementation inventory maps all 16 plan tasks to released source, tests, delivery and evidence limits. |
+| [Polished terminal exploration workspace](tui-refinements/README.md) | Implementing | — | Refine the released terminal workspace through clearer selection, structured metadata, portable shortcuts, consistent tabs, session navigation and useful query columns. |
 
 ## Open Questions
 

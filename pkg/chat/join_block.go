@@ -143,11 +143,11 @@ func (b *JoinBlock) joinAreaView(focused bool, width int) string {
 	if len(groups) == 0 {
 		return ""
 	}
-	pickerHint := "OIN  · press j"
+	pickerHint := "  · press j"
 	if b.workspace {
-		pickerHint = "OIN  · Alt+J chooser"
+		pickerHint = " · Ctrl+P Actions to choose a relationship"
 	}
-	lines := []string{statusStyle().Render("  You can ") + lipgloss.NewStyle().Bold(true).Foreground(theme.FocusColor()).Render("J") + statusStyle().Render(pickerHint)}
+	lines := []string{statusStyle().Render("  You can ") + lipgloss.NewStyle().Bold(true).Foreground(theme.FocusColor()).Render("JOIN") + statusStyle().Render(pickerHint)}
 	for sourceIndex, group := range groups {
 		source := sanitizeTerminalText(group.source.Relation)
 		if group.source.Alias != "" && !strings.EqualFold(group.source.Alias, group.source.Relation) {

@@ -15,6 +15,17 @@ import (
 func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	u.workspaceInteraction++
 	u.workspaceFeedback = ""
+	if cmd, handled := u.sessionPrefixKey(msg); handled {
+		return cmd, true
+	}
+	if u.chatTransition {
+		u.workspaceFeedback = "Closing or switching chat…"
+		return nil, true
+	}
+	if u.shell.WorkspaceFocus() == "transcript" {
+		u.workspace.inspectObject = nil
+		u.workspace.inspectGroup = ""
+	}
 	if u.backendBusy() && msg.String() == "enter" && u.shell.WorkspaceFocus() == "input" && !u.shell.ComposerActionFocused() {
 		text := strings.TrimSpace(u.shell.ComposerText())
 		// A slash prefix without whitespace completes a command in the shell;
@@ -112,14 +123,6 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case "f10":
 		u.shell.FocusRightPanel()
 		return u.workspace.focusRelated(-1), true
-	case "alt+j":
-		if u.shell.WorkspaceFocus() == "transcript" {
-			if _, record, _ := u.activeGrid(); groupedRecord(record) {
-				u.workspaceFeedback = "Grouped output has no entity identity. Return to the original result for JOIN."
-				return nil, true
-			}
-			return u.openJoinPicker(), true
-		}
 	case "ctrl+s":
 		if u.shell.WorkspaceFocus() == "transcript" {
 			return u.openSaveQueryDialog(), true
@@ -128,8 +131,8 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		if u.shell.WorkspaceFocus() == "transcript" {
 			return u.shell.PushOverlay(newExportDialogOverlay(u)), true
 		}
-	case "ctrl+space", "alt+a":
-		if u.shell.WorkspaceFocus() == "transcript" || (msg.String() == "alt+a" && u.shell.WorkspaceFocus() == "sidebar" && u.workspace.tab == 1) {
+	case "ctrl+space":
+		if u.shell.WorkspaceFocus() == "transcript" {
 			return u.shell.PushOverlay(&gridActionsOverlay{ui: u}), true
 		}
 	case "ctrl+g":
@@ -144,10 +147,6 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, true
 	case "ctrl+r":
 		return u.refreshLastRecordSet(), true
-	case "alt+g":
-		return u.openResultOperation(true), true
-	case "alt+s":
-		return u.openResultOperation(false), true
 	case "shift+alt+up", "shift+alt+down", "alt+shift+up", "alt+shift+down", "alt+up", "alt+down":
 		if u.shell.WorkspaceFocus() == "transcript" {
 			return u.quickSortLoaded(msg.Code == tea.KeyDown), true
@@ -156,8 +155,6 @@ func (u *ChatUI) globalKeys(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		if u.shell.WorkspaceFocus() == "transcript" {
 			return u.quickServerSort(msg.Code == tea.KeyDown), true
 		}
-	case "alt+shift+s", "alt+S":
-		return u.cycleTableStyle(), true
 	case "f5":
 		// ui.go's F5: try to open the actual browser first (M6's web
 		// handoff), falling back to showing the hyperlink -- e.g. no GUI
@@ -315,7 +312,15 @@ func (u *ChatUI) openSessionPicker() tea.Cmd {
 	if u.sessionFence() {
 		return nil
 	}
+	if u.sessions == nil {
+		return nil
+	}
 	list, err := u.sessions.List(u.ctx)
+	if err != nil {
+		u.shell.AppendAssistant(err.Error())
+		return nil
+	}
+	archived, err := u.sessions.store.ArchivedSessionIDs(u.ctx)
 	if err != nil {
 		u.shell.AppendAssistant(err.Error())
 		return nil
@@ -327,7 +332,7 @@ func (u *ChatUI) openSessionPicker() tea.Cmd {
 			break
 		}
 	}
-	return u.shell.PushOverlay(&sessionPickerOverlay{ui: u, sessions: list, index: index})
+	return u.shell.PushOverlay(&sessionPickerOverlay{ui: u, sessions: list, archived: archived, index: index})
 }
 
 // sessionPickerOverlay is F4's chatshell.Overlay — ↑↓/j·k choose, Enter
@@ -336,12 +341,15 @@ func (u *ChatUI) openSessionPicker() tea.Cmd {
 type sessionPickerOverlay struct {
 	ui       *ChatUI
 	sessions []ChatSession
+	archived map[string]bool
 	index    int
 }
 
 func (o *sessionPickerOverlay) View(width, height int) string {
-	lines := []string{"Sessions  ↑↓ choose · Enter open · n new · Esc close"}
-	for i, session := range o.sessions {
+	lines := []string{"Chats  ↑↓ choose · Enter open/restore · Ctrl+N new · Esc close"}
+	start, end := selectedListWindow(len(o.sessions), o.index, max(1, height-1))
+	for i := start; i < end; i++ {
+		session := o.sessions[i]
 		marker := "  "
 		if i == o.index {
 			marker = "▸ "
@@ -350,13 +358,14 @@ func (o *sessionPickerOverlay) View(width, height int) string {
 		if len(id) > 8 {
 			id = id[:8]
 		}
-		lines = append(lines, marker+session.Title+"  "+id)
+		label := sanitizeTerminalText(session.Title)
+		if o.archived[session.ID] {
+			label += " [archived]"
+		}
+		lines = append(lines, marker+label+"  "+id)
 	}
 	if len(lines) == 1 {
 		lines = append(lines, "(no sessions)")
-	}
-	for len(lines) < height {
-		lines = append(lines, "")
 	}
 	if len(lines) > height {
 		lines = lines[:height]
@@ -373,33 +382,22 @@ func (o *sessionPickerOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd, 
 		return o, nil, false
 	}
 	switch key.String() {
-	case "up", "k":
+	case "up":
 		if o.index > 0 {
 			o.index--
 		}
-	case "down", "j":
+	case "down":
 		if o.index+1 < len(o.sessions) {
 			o.index++
 		}
 	case "enter":
 		if o.index >= 0 && o.index < len(o.sessions) {
-			session, err := o.ui.sessions.Switch(o.ui.ctx, o.sessions[o.index].ID)
-			if err != nil {
-				o.ui.shell.AppendAssistant(err.Error())
-			} else {
-				o.ui.loadSession(session)
-			}
+			return o, o.ui.switchChat(o.sessions[o.index].ID), true
 		}
 		return o, nil, true
-	case "n":
-		session, err := o.ui.sessions.Create(o.ui.ctx)
-		if err != nil {
-			o.ui.shell.AppendAssistant(err.Error())
-		} else {
-			o.ui.loadSession(session)
-		}
-		return o, nil, true
-	case "esc", "q":
+	case "ctrl+n":
+		return o, o.ui.createChatTab(), true
+	case "esc":
 		return o, nil, true
 	}
 	return o, nil, false

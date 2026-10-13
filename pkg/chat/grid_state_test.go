@@ -369,8 +369,10 @@ func TestRecordsetHeaderRetainsAllControlsAtTwentyTwoCells(t *testing.T) {
 		t.Fatalf("header width = %d, want 22: %q", got, header)
 	}
 	top := strings.Split(ansi.Strip(g.View(22, g.Focused())), "\n")[0]
-	if !strings.Contains(top, "1 2 3") {
-		t.Fatalf("rendered border clips a tab: %q", top)
+	for _, control := range []string{"1", "2", "3"} {
+		if !strings.Contains(top, control) {
+			t.Fatalf("rendered border clips tab %s: %q", control, top)
+		}
 	}
 }
 

@@ -256,9 +256,9 @@ func TestHTTPScopeOverlaySaveError(t *testing.T) {
 func TestChatUICycleTableStyleWithoutSessionStillAnnounces(t *testing.T) {
 	u := NewChatUI(context.Background(), nil, "test")
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	u.shell.Update(tea.KeyPressMsg{Code: 'S', Mod: tea.ModAlt})
+	u.cycleTableStyle()
 	if !strings.Contains(u.shell.View().Content, "Table style:") {
-		t.Fatalf("Alt+Shift+S should announce a style change without a session:\n%s", u.shell.View().Content)
+		t.Fatalf("table style action should announce a change without a session:\n%s", u.shell.View().Content)
 	}
 }
 
@@ -270,9 +270,9 @@ func TestChatUICycleTableStyleStoreErrorAnnouncesFailure(t *testing.T) {
 	if err := sessions.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	u.shell.Update(tea.KeyPressMsg{Code: 'S', Mod: tea.ModAlt})
+	u.cycleTableStyle()
 	if !strings.Contains(u.shell.View().Content, "Couldn't save table style.") {
-		t.Fatalf("Alt+Shift+S should announce the save failure:\n%s", u.shell.View().Content)
+		t.Fatalf("table style action should announce the save failure:\n%s", u.shell.View().Content)
 	}
 	if u.tableStyle.Name != before.Name {
 		t.Fatalf("table style changed despite the save failure: %q -> %q", before.Name, u.tableStyle.Name)

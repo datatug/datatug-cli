@@ -47,12 +47,18 @@ func TestChatUICtrlDDetachesLastAttachment(t *testing.T) {
 	if !selectedTable {
 		t.Fatal("could not navigate Explorer to a table")
 	}
-	u.shell.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt})
+	_, cmd := u.shell.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	drainCmd(t, u, cmd)
+	for _, r := range "Attach Explorer object" {
+		u.shell.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	_, cmd = u.shell.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	drainCmd(t, u, cmd)
 	if len(u.snapshot.Workspace.Attachments) != 1 {
 		t.Fatalf("attach = %+v, want 1", u.snapshot.Workspace.Attachments)
 	}
 	if u.shell.WorkspaceFocus() != "input" {
-		t.Fatalf("Alt+A should return focus to the composer, got %q", u.shell.WorkspaceFocus())
+		t.Fatalf("Attach action should return focus to the composer, got %q", u.shell.WorkspaceFocus())
 	}
 
 	u.shell.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})

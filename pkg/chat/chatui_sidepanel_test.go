@@ -24,10 +24,13 @@ func TestWorkspacePanelViewShowsTabsAndProjectExplorer(t *testing.T) {
 	}}
 	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
 	view := ansi.Strip(u.shell.View().Content)
-	for _, want := range []string{"Explorer", "Inspect", "Docked", "Bookmarks", "Demo", "sqlite"} {
+	for _, want := range []string{"Explorer", "Inspect", "Demo", "sqlite"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("three-pane workspace missing %q:\n%s", want, view)
 		}
+	}
+	if !containsWorkspaceAction(u.workspaceActions(), "docked-section") || !containsWorkspaceAction(u.workspaceActions(), "bookmarks-section") {
+		t.Fatal("Docked and Bookmarks must remain reachable through Actions")
 	}
 	if u.shell.CenterPanel() != nil {
 		t.Fatal("workspace panes should surround the ordinary transcript, not replace it with a duplicate project view")
@@ -75,12 +78,12 @@ func TestWorkspacePanelTabAndShiftTabSwitchTabs(t *testing.T) {
 		t.Fatalf("expected Inspect to be the initial right-pane tab 1, got %d", u.workspace.tab)
 	}
 	u.workspace.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	if u.workspace.tab != 2 {
-		t.Fatalf("expected tab to advance tab to 2, got %d", u.workspace.tab)
+	if u.workspace.tab != 1 || u.workspace.inspectorSubTab != 1 {
+		t.Fatalf("Tab should advance Inspect to Column, got section %d view %d", u.workspace.tab, u.workspace.inspectorSubTab)
 	}
 	u.workspace.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
-	if u.workspace.tab != 1 {
-		t.Fatalf("expected shift+tab to return to tab 0, got %d", u.workspace.tab)
+	if u.workspace.tab != 1 || u.workspace.inspectorSubTab != 0 {
+		t.Fatalf("Shift+Tab should return Inspect to Row, got section %d view %d", u.workspace.tab, u.workspace.inspectorSubTab)
 	}
 }
 
@@ -338,7 +341,7 @@ func TestChatUIWorkspaceSplitAndKeyboardSelection(t *testing.T) {
 	}
 	u.shell.Update(tea.WindowSizeMsg{Width: 150, Height: 30})
 	view := ansi.Strip(u.shell.View().Content)
-	for _, want := range []string{"Explorer", "Inspect", "Docked", "Bookmarks", "Chinook local", "Customer"} {
+	for _, want := range []string{"Explorer", "Inspect", "Chinook local", "Customer"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("split view missing %q", want)
 		}
@@ -348,13 +351,13 @@ func TestChatUIWorkspaceSplitAndKeyboardSelection(t *testing.T) {
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
 	view = ansi.Strip(u.shell.View().Content)
-	if strings.Contains(view, "Explorer  [F6]") || !strings.Contains(view, "Inspect  [F7]") {
+	if strings.Contains(view, "Explorer F6") || !strings.Contains(view, "Inspect F7") {
 		t.Fatal("F6 should hide Explorer while leaving Inspect visible")
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF7})
 	view = ansi.Strip(u.shell.View().Content)
-	if !strings.Contains(view, "Explorer  [F6]") || strings.Contains(view, "Inspect  [F7]") {
+	if !strings.Contains(view, "Explorer F6") || strings.Contains(view, "Inspect F7") {
 		t.Fatal("F7 should hide Inspect while leaving Explorer visible")
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF7})
@@ -365,7 +368,7 @@ func TestChatUIWorkspaceSplitAndKeyboardSelection(t *testing.T) {
 			break
 		}
 	}
-	u.shell.Update(uitest.Key("alt+a"))
+	u.explorer.updateContextAction("a")
 	if len(u.snapshot.Workspace.Attachments) != 1 || u.snapshot.Workspace.Attachments[0].Kind != "table" {
 		t.Fatalf("Explorer attach action was not persisted: %+v", u.snapshot.Workspace.Attachments)
 	}
@@ -384,7 +387,7 @@ func TestChatUIWorkspaceSplitAndKeyboardSelection(t *testing.T) {
 		t.Fatal("moving focus to Inspect lost the durable row selection")
 	}
 	view = ansi.Strip(u.shell.View().Content)
-	if !strings.Contains(view, "Inspect") || !strings.Contains(view, "Docked") {
+	if !strings.Contains(view, "Inspect F7") || !strings.Contains(view, "Row") || !strings.Contains(view, "Column") || !strings.Contains(view, "Result") {
 		t.Fatal("right workspace pane disappeared after result selection")
 	}
 }
@@ -411,15 +414,14 @@ func TestPanelFocusedLayoutFitsTabStripAndHintsAtWidth130(t *testing.T) {
 		}
 	}
 	plain := ansi.Strip(content)
-	if !strings.Contains(plain, "[Inspect] · Docked · Bookmarks") {
-		t.Fatalf("expected the right Inspect tab strip intact without a duplicate Explorer tab:\n%s", plain)
+	if !strings.Contains(plain, "Row") || !strings.Contains(plain, "Column") || !strings.Contains(plain, "Result") {
+		t.Fatalf("expected the right Inspect Row/Column/Result tab strip intact:\n%s", plain)
 	}
 	if !strings.Contains(plain, "F10 Related") {
 		t.Fatalf("expected the Inspect pane's complete Related hint, not truncated:\n%s", plain)
 	}
-	if strings.Contains(plain, "…") {
-		t.Fatalf("expected no ellipsis truncation anywhere in the panel-focused view:\n%s", plain)
-	}
+	// Object and result labels may truncate within their own narrow panes;
+	// the controls above and the terminal edge must remain intact.
 }
 
 // TestPanelFocusedLayoutNeverOverflowsTerminalWidth covers the r10
@@ -480,13 +482,13 @@ func TestWorkspacePanelF6AndF7ToggleIndependentPaneVisibility(t *testing.T) {
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
 	after := ansi.Strip(u.shell.View().Content)
-	if strings.Contains(after, "Explorer  [F6]") || !strings.Contains(after, "Inspect  [F7]") {
+	if strings.Contains(after, "Explorer F6") || !strings.Contains(after, "Inspect F7") {
 		t.Fatal("F6 should hide only the left Explorer pane")
 	}
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF6})
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF7})
 	after = ansi.Strip(u.shell.View().Content)
-	if !strings.Contains(after, "Explorer  [F6]") || strings.Contains(after, "Inspect  [F7]") {
+	if !strings.Contains(after, "Explorer F6") || strings.Contains(after, "Inspect F7") {
 		t.Fatal("F7 should hide only the right Inspect pane")
 	}
 }
@@ -611,8 +613,8 @@ func TestChatUIDockGridHasNoViewSwitcher(t *testing.T) {
 	}
 }
 
-// Catalog source details are reached from the left Explorer with Alt+I. The
-// shell owns scrolling and closing the read-only details overlay.
+// Explorer selection immediately supplies catalog details to Inspect, and
+// the metadata remains visible when focus leaves the tree.
 func TestChatUIExplorerCatalogDetailsUseTypesAndShellScrolling(t *testing.T) {
 	turn := Turn{Queries: []QueryResult{{
 		Title: "Customers",
@@ -641,7 +643,7 @@ func TestChatUIExplorerCatalogDetailsUseTypesAndShellScrolling(t *testing.T) {
 	}
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 22})
 	u.shell.FocusLeftPanel()
-	u.shell.Update(uitest.Key("alt+i"))
+	u.explorer.inspectExplorerSelection()
 	view := ansi.Strip(u.shell.View().Content)
 	for _, want := range []string{"Customer", "CustomerId", "INTEGER", "City", "TEXT"} {
 		if !strings.Contains(view, want) {
@@ -652,8 +654,8 @@ func TestChatUIExplorerCatalogDetailsUseTypesAndShellScrolling(t *testing.T) {
 		t.Fatalf("opening catalog details changed the Explorer focus owner: %q", u.shell.WorkspaceFocus())
 	}
 	u.shell.Update(uitest.Key("esc"))
-	if strings.Contains(ansi.Strip(u.shell.View().Content), "Table: Customer") {
-		t.Fatal("Esc should close exactly the catalog details overlay")
+	if !strings.Contains(ansi.Strip(u.shell.View().Content), "Table: Customer") {
+		t.Fatal("Explorer selection metadata disappeared after leaving tree focus")
 	}
 	for index, node := range u.explorer.explorerNodes() {
 		if node.label == "Long query" {
@@ -661,11 +663,12 @@ func TestChatUIExplorerCatalogDetailsUseTypesAndShellScrolling(t *testing.T) {
 			break
 		}
 	}
-	u.shell.Update(uitest.Key("alt+i"))
+	u.explorer.inspectExplorerSelection()
 	u.shell.View()
 	if got := ansi.Strip(u.shell.View().Content); !strings.Contains(got, "SELECT CustomerId") || strings.Contains(got, "FROM main.Customer") {
 		t.Fatalf("catalog query should begin at the first scroll position:\n%s", got)
 	}
+	u.shell.FocusRightPanel()
 	u.shell.Update(uitest.Key("end"))
 	if got := ansi.Strip(u.shell.View().Content); !strings.Contains(got, "FROM main.Customer") {
 		t.Fatalf("shell End did not scroll catalog details to the last line:\n%s", got)

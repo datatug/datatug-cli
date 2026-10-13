@@ -175,9 +175,9 @@ func TestChatUIAltShiftSCyclesAllTablesAndRestoresSessionStyle(t *testing.T) {
 	if len(u.gridsByRecordSetID) != 2 {
 		t.Fatalf("expected 2 grids before cycling style, got %d", len(u.gridsByRecordSetID))
 	}
-	u.shell.Update(tea.KeyPressMsg{Code: 'S', Mod: tea.ModAlt})
+	u.dispatchWorkspaceAction("style")
 	if u.tableStyle.Name != grid.StyleSoft.Name {
-		t.Fatalf("style after Alt+Shift+S = %s, want Soft", u.tableStyle.Name)
+		t.Fatalf("style after Actions = %s, want Soft", u.tableStyle.Name)
 	}
 	if !strings.Contains(u.shell.View().Content, "Table style: Soft") {
 		t.Fatalf("expected a style-change confirmation in view:\n%s", u.shell.View().Content)
@@ -213,7 +213,7 @@ func TestChatUIMacOptionShiftSCyclesTableStyle(t *testing.T) {
 	if !strings.Contains(u.shell.View().Content, "ß") {
 		t.Fatal("bare ß was not retained as printable composer text")
 	}
-	u.shell.Update(tea.KeyPressMsg{Code: 'S', Mod: tea.ModAlt})
+	u.dispatchWorkspaceAction("style")
 	if u.tableStyle.Name != grid.StyleSoft.Name {
 		t.Fatalf("style after Option+Shift+S = %s, want Soft", u.tableStyle.Name)
 	}

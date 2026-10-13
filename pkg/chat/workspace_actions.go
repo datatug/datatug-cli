@@ -151,9 +151,12 @@ type workspaceActionsOverlay struct {
 	rows    []workspaceAction
 	message string
 	rowY    int
+	// Mouse bounds describe only rows painted by the last View.
+	rowCount, width int
 }
 
 func (*workspaceActionsOverlay) LocalMouseCoordinates() bool { return true }
+func (*workspaceActionsOverlay) BoundedMouseInput() bool     { return true }
 func (*workspaceActionsOverlay) HelpHints() []string {
 	return []string{"Searchable actions · type to filter", "↑↓ select · Enter run", "Esc close · Ctrl+P / /actions reopen"}
 }
@@ -172,6 +175,7 @@ func (o *workspaceActionsOverlay) View(w, h int) string {
 	lines := []string{"Actions · type to search · ↑↓ choose · Enter run · Esc close", "Search: " + sanitizeTerminalText(o.search)}
 	start, end := selectedListWindow(len(o.rows), o.index, max(1, h-4))
 	o.rowY = start
+	o.rowCount, o.width = min(end-start, max(0, h-2)), max(0, w)
 	for i := start; i < end; i++ {
 		a := o.rows[i]
 		prefix := "  "
@@ -184,6 +188,9 @@ func (o *workspaceActionsOverlay) View(w, h int) string {
 		}
 		lines = append(lines, ansi.Truncate(label, max(1, w), "…"))
 	}
+	if len(o.rows) == 0 {
+		lines = append(lines, "No matching actions. Backspace to edit the search.")
+	}
 	if len(o.rows) > 0 && o.rows[o.index].disabled != "" {
 		lines = append(lines, ansi.Truncate(o.rows[o.index].disabled, max(1, w), "…"))
 	}
@@ -193,10 +200,14 @@ func (o *workspaceActionsOverlay) View(w, h int) string {
 	return strings.Join(lines, "\n")
 }
 func (o *workspaceActionsOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd, bool) {
-	if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft && click.Y >= 2 {
+	if _, ok := msg.(tea.WindowSizeMsg); ok {
+		o.rowCount = 0
+	}
+	if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft && click.X >= 0 && click.X < o.width && click.Y >= 2 && click.Y < 2+o.rowCount {
 		at := o.rowY + click.Y - 2
 		if at < len(o.rows) {
 			o.index = at
+			o.message = ""
 			return o.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		}
 	}
@@ -206,14 +217,17 @@ func (o *workspaceActionsOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cm
 			return o, nil, true
 		case "up":
 			o.index = max(0, o.index-1)
+			o.rowCount, o.message = 0, ""
 		case "down":
 			o.index = min(max(0, len(o.matches())-1), o.index+1)
+			o.rowCount, o.message = 0, ""
 		case "backspace":
 			r := []rune(o.search)
 			if len(r) > 0 {
 				o.search = string(r[:len(r)-1])
 			}
 			o.index = 0
+			o.rowCount, o.message = 0, ""
 		case "enter":
 			rows := o.matches()
 			if len(rows) > 0 {
@@ -228,6 +242,7 @@ func (o *workspaceActionsOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cm
 			if k.Text != "" {
 				o.search += k.Text
 				o.index = 0
+				o.rowCount, o.message = 0, ""
 			}
 		}
 	}

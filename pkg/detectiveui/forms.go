@@ -1002,7 +1002,11 @@ func parseNamedValues(raw string) (map[string]detective.InputValue, error) {
 	if strings.TrimSpace(raw) == "" {
 		return out, nil
 	}
-	for _, entry := range strings.Split(raw, ";") {
+	entries, err := splitOutsideQuotes(raw, ';')
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
 			continue
@@ -1018,11 +1022,95 @@ func parseNamedValues(raw string) (map[string]detective.InputValue, error) {
 		if _, exists := out[name]; exists {
 			return nil, fmt.Errorf("duplicate input %q", name)
 		}
-		value, err := parseValue(parts[0], parts[1], parts[2])
+		value, err := parseNamedValue(parts[0], parts[1], parts[2])
 		if err != nil {
 			return nil, fmt.Errorf("input %q: %w", name, err)
 		}
 		out[name] = value
 	}
 	return out, nil
+}
+
+func parseNamedValue(kind, cardinality, raw string) (detective.InputValue, error) {
+	if kind != "string" || cardinality == "range" {
+		return parseValue(kind, cardinality, raw)
+	}
+	var result detective.InputValue
+	if cardinality == "scalar" {
+		text, err := parseQuotedString(raw)
+		if err != nil {
+			return result, err
+		}
+		value := investigation.NewStringValue(text)
+		result.Scalar = &value
+	} else if cardinality == "set" {
+		parts, err := splitOutsideQuotes(raw, ',')
+		if err != nil {
+			return result, err
+		}
+		values := make([]detective.Value, 0, len(parts))
+		for _, part := range parts {
+			if strings.TrimSpace(part) == "" {
+				continue
+			}
+			text, err := parseQuotedString(part)
+			if err != nil {
+				return result, err
+			}
+			values = append(values, investigation.NewStringValue(text))
+		}
+		set, err := apicontract.NewTypedValueSet(values...)
+		if err != nil {
+			return result, err
+		}
+		result.Set = &set
+	} else {
+		return result, fmt.Errorf("cardinality must be scalar, set or range")
+	}
+	return result, result.Validate()
+}
+
+func parseQuotedString(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "\"") {
+		return raw, nil // Existing unquoted input remains available for simple values.
+	}
+	value, err := strconv.Unquote(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid quoted string: %w", err)
+	}
+	return value, nil
+}
+
+func splitOutsideQuotes(raw string, separator byte) ([]string, error) {
+	var parts []string
+	start := 0
+	quoted, escaped := false, false
+	for i := 0; i < len(raw); i++ {
+		switch {
+		case escaped:
+			escaped = false
+		case quoted && raw[i] == '\\':
+			escaped = true
+		case raw[i] == '"' && (quoted || startsQuotedValue(raw, start, i)):
+			quoted = !quoted
+		case raw[i] == separator && !quoted:
+			parts = append(parts, raw[start:i])
+			start = i + 1
+		}
+	}
+	if quoted || escaped {
+		return nil, fmt.Errorf("unterminated quoted input")
+	}
+	return append(parts, raw[start:]), nil
+}
+
+func startsQuotedValue(raw string, start, quote int) bool {
+	for i := quote - 1; i >= start; i-- {
+		if raw[i] == ' ' || raw[i] == '\t' {
+			continue
+		}
+		return raw[i] == ':' || raw[i] == ',' || raw[i] == '='
+	}
+	return true
 }

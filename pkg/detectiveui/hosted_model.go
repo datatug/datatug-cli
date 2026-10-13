@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/detective"
+	"github.com/datatug/datatug-core/pkg/investigation"
 )
 
 func (m *Model) caseEventsService() (CaseEventsService, error) {
@@ -238,7 +239,7 @@ func (m *Model) startScenarioStep(c detective.Case, rowID string) (tea.Model, te
 				return m, nil
 			}
 			m.pendingApplicationID, m.pendingStepID = appID, stepID
-			m.begin("scenario-query-run", "Run saved query for Scenario step", []field{f("Environment", m.defaultEnvironment(), "admitted logical environment"), f("Query ID", step.Ref, "saved query from Scenario"), f("Inputs", inputs, "query_parameter=type:cardinality:value; bound from Case context")})
+			m.begin("scenario-query-run", "Run saved query for Scenario step", []field{f("Environment", m.defaultEnvironment(), "admitted logical environment"), f("Query ID", step.Ref, "saved query from Scenario"), f("Inputs", inputs, "query_parameter=type:cardinality:value; quote strings with punctuation or edge spaces")})
 			return m, nil
 		}
 	}
@@ -266,7 +267,7 @@ func scenarioQueryInputs(c detective.Case, schema []detective.Input, step detect
 		if kind == "" {
 			return fmt.Errorf("Scenario query input %q is empty", name)
 		}
-		entries = append(entries, name+"="+kind+":"+cardinality+":"+formatInputValue(value))
+		entries = append(entries, name+"="+kind+":"+cardinality+":"+formatScenarioQueryValue(value))
 		return nil
 	}
 	for _, binding := range step.Bindings {
@@ -313,6 +314,19 @@ func scenarioQueryInputs(c detective.Case, schema []detective.Input, step detect
 		}
 	}
 	return strings.Join(entries, "; "), nil
+}
+func formatScenarioQueryValue(value detective.InputValue) string {
+	if value.Scalar != nil && value.Scalar.Type == investigation.ValueTypeString {
+		return strconv.Quote(value.Scalar.Str)
+	}
+	if value.Set != nil && len(value.Set.Values) > 0 && value.Set.Values[0].Type == investigation.ValueTypeString {
+		items := make([]string, 0, len(value.Set.Values))
+		for _, member := range value.Set.Values {
+			items = append(items, strconv.Quote(member.Str))
+		}
+		return strings.Join(items, ", ")
+	}
+	return formatInputValue(value)
 }
 func (m *Model) caseContextAsInputs(c detective.Case, schema []detective.Input) string {
 	var entries []string

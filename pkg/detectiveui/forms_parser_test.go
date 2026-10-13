@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/datatug/datatug-core/pkg/apicontract"
 	"github.com/datatug/datatug-core/pkg/detective"
 	"github.com/datatug/datatug-core/pkg/investigation"
 )
@@ -83,6 +84,19 @@ func TestNativeNamedValuesKeepWholeConfirmedCohort(t *testing.T) {
 	for _, raw := range []string{"broken", "=integer:scalar:7", "x=7", "x=integer:scalar:7;x=integer:scalar:9", "x=integer:scalar:bad"} {
 		if _, err := parseNamedValues(raw); err == nil {
 			t.Fatalf("invalid cohort accepted: %q", raw)
+		}
+	}
+}
+
+func TestNativeNamedValuesPreserveQuotedStringBoundaries(t *testing.T) {
+	values, err := parseNamedValues(`label=string:scalar:"  ACME; Inc.  "; names=string:set:"ACME, Inc.", " Beta "; legacy=string:scalar:O"Brien`)
+	wantSet, setErr := apicontract.NewTypedValueSet(investigation.NewStringValue("ACME, Inc."), investigation.NewStringValue(" Beta "))
+	if err != nil || setErr != nil || values["label"].Scalar == nil || values["label"].Scalar.Str != "  ACME; Inc.  " || values["names"].Set == nil || !reflect.DeepEqual(*values["names"].Set, wantSet) || values["legacy"].Scalar == nil || values["legacy"].Scalar.Str != `O"Brien` {
+		t.Fatalf("quoted named values changed: %+v %v", values, err)
+	}
+	for _, raw := range []string{`label=string:scalar:"unclosed`, `label=string:scalar:"bad\q"`, `names=string:set:"one", "two`} {
+		if _, err := parseNamedValues(raw); err == nil {
+			t.Fatalf("malformed quoted input accepted: %q", raw)
 		}
 	}
 }

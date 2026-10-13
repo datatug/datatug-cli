@@ -1,6 +1,7 @@
 package detectiveui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -136,5 +137,41 @@ func TestScenarioQueryRefusesIncompleteAppliedRangeBinding(t *testing.T) {
 	m.startScenarioStep(c, "application-1/inspect")
 	if m.form != nil || m.pendingApplicationID != "" || m.pendingStepID != "" || !strings.Contains(m.feedback, "bindings") {
 		t.Fatalf("incomplete applied range binding opened a run: form=%+v pending=%s/%s feedback=%q", m.form, m.pendingApplicationID, m.pendingStepID, m.feedback)
+	}
+}
+
+func TestScenarioQueryPrefillPreservesQuotedStringValuesThroughExecution(t *testing.T) {
+	company := investigation.NewStringValue("  ACME; Inc.  ")
+	set, err := apicontract.NewTypedValueSet(investigation.NewStringValue("ACME, Inc."), investigation.NewStringValue(" Beta "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := detective.ScenarioStep{ID: "inspect", Kind: "query", Ref: "companies", Bindings: []detective.Binding{{Input: "company_param", FromInput: "company"}, {Input: "names_param", FromInput: "names"}}}
+	c := detective.Case{ID: "case-strings", Context: map[string]detective.InputValue{"company": {Scalar: &company}, "names": {Set: &set}}, ScenarioApplications: []detective.ScenarioApplication{{ID: "application-strings", Snapshot: detective.Scenario{Inputs: []detective.Input{{Name: "company", Type: investigation.ValueTypeString, Cardinality: "scalar"}, {Name: "names", Type: investigation.ValueTypeString, Cardinality: "set"}}, Steps: []detective.ScenarioStep{step}}, Steps: []detective.ScenarioStepReceipt{{StepID: "inspect", Status: "pending"}}}}}
+	service := &hostedFixture{fixtureService: &fixtureService{state: detective.State{Cases: []detective.Case{c}, Environments: []string{"qa"}}}}
+	m := New(service, "detective")
+	m.state, m.id = service.state, c.ID
+	m.startScenarioStep(c, "application-strings/inspect")
+	if m.form == nil || m.form.kind != "scenario-query-run" {
+		t.Fatalf("string Scenario query form did not open: %q", m.feedback)
+	}
+	text := m.field("Inputs")
+	if !strings.Contains(text, `company_param=string:scalar:"  ACME; Inc.  "`) || !strings.Contains(text, `names_param=string:set:`) || !strings.Contains(text, `"ACME, Inc."`) || !strings.Contains(text, `" Beta "`) {
+		t.Fatalf("Scenario form lost quoted string boundaries: %q", text)
+	}
+	parsed, err := parseNamedValues(text)
+	if err != nil || parsed["company_param"].Scalar == nil || parsed["company_param"].Scalar.Str != company.Str || parsed["names_param"].Set == nil || !reflect.DeepEqual(*parsed["names_param"].Set, set) {
+		t.Fatalf("typed string prefill changed before execution: %+v %v", parsed, err)
+	}
+	if err := detective.MatchScenarioQueryCohort(step, c.Context, parsed); err != nil {
+		t.Fatalf("lossless prefill did not satisfy Case cohort: %v", err)
+	}
+	cmd := press(m, "ctrl+s")
+	if cmd == nil {
+		t.Fatalf("string Scenario query was not dispatched: %q", m.feedback)
+	}
+	cmd()
+	if service.query.Inputs["company_param"].Scalar == nil || service.query.Inputs["company_param"].Scalar.Str != company.Str || service.query.Inputs["names_param"].Set == nil || !reflect.DeepEqual(*service.query.Inputs["names_param"].Set, set) {
+		t.Fatalf("query transport changed typed string values: %+v", service.query.Inputs)
 	}
 }

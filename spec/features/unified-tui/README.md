@@ -1,17 +1,19 @@
 ---
 format: https://specscore.md/feature-specification
-status: Implementing
+status: Stable
 ---
 
 # Feature: Unified terminal workspace and API observability
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/unified-tui?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/unified-tui?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/unified-tui?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/unified-tui?op=request-change) |
-**Status:** Implementing
+**Status:** Stable
 **Source Ideas:** —
 
 ## Summary
 
-A single terminal workspace supports Explore, chat, result grids, record inspection and live API observability. This specification records accepted TUI behavior and the remaining implementation work. It does not claim that the interrupted source implementation or the browser prototype delivers these requirements.
+A single terminal workspace supports Explore, chat, result grids, record inspection and live API observability. The workspace and the five follow-up UX additions shipped in DataTug CLI v0.73.0; dialog mouse-boundary repairs shipped in v0.73.1. This specification retains the accepted behavior and records the verified supported choices. The implementation inventory maps all 16 plan tasks to released source, tests, delivery and evidence limits.
+
+The audited release baseline is [datatug-cli `da34f4e`](https://github.com/datatug/datatug-cli/commit/da34f4e29e346c91d69f8ac30226bb9cd82ba0da), with published aichat v0.13.1 and tuigoff v0.6.0 dependencies and no active local replacements. Selected-result browser handoff and nested Inspect ancestor paths remain deferred.
 
 ## Problem
 
@@ -21,7 +23,7 @@ Separate default-navigation and chat programs make the composer, selected result
 
 The [implementation plan](../../plans/unified-tui/README.md) maps every acceptance criterion to work and evidence.
 
-The [implementation checklist](implementation-checklist.md) records the preserved source audit, partial coverage and remaining delivery work.
+The [implementation checklist](implementation-checklist.md) records source/test coverage, published delivery and explicit remaining limitations.
 
 ### Workspace, focus and identity
 
@@ -73,13 +75,13 @@ Thus an expanded grid with a nonempty search requires three Esc presses: clear s
 
 Workspace Shift arrows remain navigation even in editable controls. Text selection uses a visible editor **Select text** action/mode (keyboard reachable via Tab/Enter and mouse where supported); in that explicitly entered modal mode, ordinary arrows extend selection, Enter accepts the selection and returns to editing, and Esc cancels that selection mode without changing the draft. Existing nonconflicting select-all/word-selection shortcuts may remain after terminal verification and must be listed in editor help. No implementation may silently reclaim workspace Shift arrows as text-selection shortcuts.
 
-Selecting a table/view exposes three distinct actions: Open data, Attach to composer, New query. Open uses the existing secure data path and displays a result without erasing chat/history; Attach adds table/view context to the existing composer draft without executing it; New query opens an editable query scoped to that object without silently running it. Current project/session context survives all three. Proposed bindings are Enter to Open, Alt+A to Attach while Explorer owns focus, and Ctrl+N to New query; validate conflicts and terminal delivery before adopting them. These key choices are proposals, while all three visible actions are required.
+Selecting a table/view exposes three distinct actions: Open data, Attach to composer, New query. Open uses the existing secure data path and displays a result without erasing chat/history; Attach adds table/view context to the existing composer draft without executing it; New query opens an editable query scoped to that object without silently running it. Current project/session context survives all three. The supported bindings are Enter to Open, Alt+A to Attach while Explorer owns focus, and Ctrl+N to New query. Full-shell routing tests verify these distinct actions and their execution boundaries; terminal delivery evidence and portability limits are recorded in the inventory.
 
 ### Inspect, Related and quick JOIN
 
 Inspect shows a compact path such as `Invoice / 409` using a stable primary identity when available. Composite primary keys remain distinguishable; a missing key is labelled as unavailable and never replaced by a misleading visual row number. Nested paths such as `Customer / 29 / Invoices / 409`, ancestor navigation and truncation are future work.
 
-Related lists authoritative relationships with numbered hints, for example `1 Customer`, `2 InvoiceLine`; `0` denotes candidate ten. F10 reveals/focuses Related. Alt+1..0 from a selected grid or Inspect opens that corresponding related preview; arrows plus Enter provide the alternative, including candidates beyond ten. Bare digits search in Explorer/grid and never activate a relation in Inspect/Related outside an explicitly opened picker, following the scoped printable-input rule above. The Actions heading visibly advertises Alt+A and focuses the actions section when Inspect owns focus. The same chord's proposed Explorer attachment action is routed solely by focus.
+Related lists authoritative relationships with numbered hints, for example `1 Customer`, `2 InvoiceLine`; `0` denotes candidate ten. F10 reveals/focuses Related. Alt+1..0 from a selected grid or Inspect opens that corresponding related preview; arrows plus Enter provide the alternative, including candidates beyond ten. Bare digits search in Explorer/grid and never activate a relation in Inspect/Related outside an explicitly opened picker, following the scoped printable-input rule above. The Actions heading visibly advertises Alt+A and focuses the actions section when Inspect owns focus. The same chord's Explorer attachment action is routed solely by focus.
 
 A related preview/navigation reads related records through the secure policy executor and authoritative relationship metadata; it is distinct from JOIN. Both outgoing parent and incoming child relationships must be supported to deliver the Customer and InvoiceLine examples. Empty, denied, incomplete-key and unsupported-source cases are explicit. Preserve the originating result and row target, provide return navigation, and reject late responses after session/result/row/relationship changes or cancellation. Never guess foreign keys or silently apply a JOIN to simulate navigation.
 
@@ -112,18 +114,18 @@ Server derivation preserves source and bound parameters and resolves aliases str
 
 Both Group and Sort dialogs show **Loaded snapshot: N rows** separately from **Server input scope**, including whether the server input count is unknown. Before enabling Run on server, show the selected scope, exact derived query, original LIMIT and its resulting placement, existing GROUP BY/aggregates/HAVING and their treatment, plus changed ordering/projection. Any scope or selection change invalidates the old preview; execution must match the current preview. A server round trip alone does not imply that it covers all source rows.
 
-The proposed initial support/default decision is below. It is an implementation proposal to validate in Tasks 7–8, not a user mandate that the original LIMIT must stay in one position. The accepted requirement is explicit, reviewable query modification and re-execution with no silent scope change.
+The shipped defaults and supported derivations are below, verified by structural query tests and secure SQLite full-shell journeys. The accepted requirement remains explicit, reviewable query modification and re-execution with no silent scope change; unsupported shapes refuse execution.
 
-| Server input scope | Meaning and proposed supported derivation |
+| Server input scope | Supported derivation and default |
 | --- | --- |
-| **Matching source rows** | For a structurally supported unaggregated query, retain source, joins, WHERE and parameters, then group/sort matching rows before the original final LIMIT. Grouping derives its selected keys/explicit aggregates; sorting replaces the relevant ORDER BY. Show the original LIMIT as a final output cap after the new operation, so it no longer truncates its input. Proposed default for these simple query shapes because this makes server execution useful beyond the loaded subset. A partial client page is never a server input cap. |
-| **Original query output** | Re-execute the original query as a subquery, including its existing LIMIT, aggregation and HAVING, then apply the new operation to that query's output. Label “Original query output, limited to L” where applicable; this is a server operation over that bounded result, not a claim to all matching source rows. Proposed default for already aggregated queries, and an explicit alternative for supported simple queries. |
+| **Matching source rows** | Default for unaggregated queries. Direct-field structured DTQL retains source, supported joins, WHERE and parameters, then groups/sorts matching rows before the original final LIMIT and OFFSET. Grouping derives selected keys/explicit aggregates; sorting replaces ORDER BY. The original positive LIMIT becomes the output cap; absent LIMIT uses a 500-row cap, and the workspace refuses original/derived caps above 1,000. A partial client page is never a server input cap. Cursors, derived sources, wildcard/computed projections and existing GROUP BY/aggregates/HAVING refuse this scope. Explicit measures have the stricter direct-source bounds below. |
+| **Original query output** | Default when the original has GROUP BY, aggregation or HAVING; an explicit alternative for supported simple queries. Preserve the original projection, LIMIT, OFFSET, grouping, aggregates and HAVING inside a subquery and transform those output rows. The preview identifies the recursive policy-admitted DALgo evaluator, rather than promising native server ordering. This is a bounded operation over original output, with the same output cap rules; a default selection does not guarantee that its shape is executable. |
 
-Already aggregated queries under **Original query output** retain their existing grouping/aggregates/HAVING; an outer grouping groups those returned aggregate rows, not underlying records. The dialog states that distinction. **Matching source rows** is initially unsupported for already aggregated/HAVING queries unless the query owner implements and verifies an explicit reaggregation mapping; disable that choice with a reason, rather than dropping the existing aggregate/HAVING or silently switching scopes. A later supported reaggregation must preview every replaced grouping/aggregate/HAVING clause and require the user to choose that scope. Unavailable aliases/columns, nondeterministic limited inputs and unsupported wrapping likewise need explicit diagnostics. The original immutable query/result remains available whichever derived scope is chosen.
+Supported already aggregated queries under **Original query output** retain their existing grouping/aggregates/HAVING; an outer grouping groups returned aggregate rows, not underlying records. The dialog states that distinction. **Matching source rows** refuses already grouped/aggregated/HAVING queries. Reaggregation would need a separately verified explicit mapping and preview of every replaced clause, with user-selected scope. Original-output execution refuses SUM/AVG and arithmetic shapes whose generic evaluation cannot guarantee exact numbers, unsafe source numerics, unsupported routing/wrapping, and limited/offset inputs without proven unique ordering. Missing/ambiguous aliases and unsupported columns also refuse. The original immutable query/result remains available whichever scope is chosen.
 
 Verification must include data where a loaded subset and all matching source rows differ: for example, load two of six filtered rows containing multiple group keys, then show local grouping/counts over two rows versus Matching source rows grouping over six before the output cap. For sort, include a highest-valued row outside the original loaded/limited subset and prove that server matching-source descending sort can return it while local or Original query output sorting cannot. Preview and actual submitted query must agree about LIMIT and aggregate treatment.
 
-Explicit SUM/COUNT(column)/MIN/MAX server measures use bounded typed aggregation over policy-admitted rows from a direct single-source original. INTEGER/DECIMAL sums remain exact; finite FLOAT sums use sequential IEEE754 arithmetic. Input row/byte budgets are hard errors rather than partial aggregates. Existing inner aggregates/HAVING, joins or unsupported types refuse this exact path; no opaque native SQL or generic float aggregation substitutes for it. The preview identifies this evaluator separately from native server ordering.
+Explicit SUM/COUNT(column)/MIN/MAX server measures use bounded typed aggregation over policy-admitted rows from a direct single-source original. INTEGER/DECIMAL sums remain exact; finite FLOAT sums use sequential IEEE754 arithmetic. The exact path admits at most 10,000 input rows and 16 MiB of input; output retention/allocation also has a 16 MiB bound. These budgets are hard errors rather than partial aggregates. Existing inner aggregates/HAVING, joins or unsupported types refuse this exact path; no opaque native SQL or generic float aggregation substitutes for it. The preview identifies this evaluator separately from native server ordering.
 
 Separate quick ascending and quick descending actions are required for the selected column. Alt+Shift+Up / Alt+Shift+Down are the selected loaded-row bindings and follow the same local ordering contract. Ctrl+Shift+Up / Ctrl+Shift+Down opens the selected-column ascending/descending server-sort preview; execution still requires the preview’s explicit Shift+Enter. The full dialog retains server execution and multi-column priorities.
 
@@ -131,7 +133,7 @@ Separate quick ascending and quick descending actions are required for the selec
 
 Reuse the existing API Monitor screen/module for F8, returning to the retained workspace. A persistent live/stopped/error indicator reports actual listener state. Live begins only after successful bind; show actual base URLs, including the assigned port. Per-instance ownership prevents a stopped, failed or old listener from overwriting another instance's live status.
 
-Show request-volume chart, total/error/active-request metrics and duration summary, plus a bounded scrolling log containing time, method, safe path, status/outcome and duration. Include web-to-CLI traffic, rejected/denied routes, live streams and WebSocket requests; active streams are visible before completion and finalize once. Observe outside authorization guards without weakening authorization. Bind failures and stop/error transitions are truthful. Five-second buckets and 500 retained entries are implementation choices to validate, not product mandates.
+Show request-volume chart, total/error/active-request metrics and duration summary, plus a bounded scrolling log containing time, method, safe path, status/outcome and duration. Include web-to-CLI traffic, rejected/denied routes, live streams and WebSocket requests; active streams are visible before completion and finalize once. Observe outside authorization guards without weakening authorization. Bind failures and stop/error transitions are truthful. The shipped bounds are 60 five-second buckets (a five-minute chart), 500 retained request entries per monitor and 32 registered server instances. Safe paths are bounded to 160 bytes and methods to 16 bytes. Capacity/edge/eviction tests verify these implementation choices; active-request totals remain separate from the retained log.
 
 Retain no headers, bodies, query strings, fragments or capability tokens. Sanitize paths before retention, including token-like path segments; base URLs contain no capabilities. Logs/metrics are bounded process-local telemetry, without exporting sensitive payloads. Preserve Flush, Hijack and ResponseController Unwrap behavior and optional-interface availability. Panics must be recorded as failed outcomes without inventing a successful status or pretending an already-written status changed. Distinguish an error outcome from the HTTP status actually sent. Server start/stop controls are outside this request.
 
@@ -140,6 +142,20 @@ Retain no headers, bodies, query strings, fragments or capability tokens. Saniti
 This feature changes the TUI and shared TUI libraries only. Preserve existing session/provider/project/setup, secure query/HTTP execution, grids/charts, joins, bookmarks and general F5 workspace-browser flows. Shared extensions are compatible and opt-in for consumers outside this workspace.
 
 Selected-grid Shift+Enter browser handoff is deferred. Reserve the gesture with an explicit unavailable explanation; do not open a different result. F5 still opens the general web workspace. A later web change needs an exact sessionID + RecordSetID contract, older-result versions, explicit missing/changed-session errors, and no silent latest-result fallback or rerun. Current host/capability links are not proof of selected-result addressing. Cross-platform hotkey parity and browser/OS conflicts belong to that follow-up; no web source changes are included here.
+
+### Accepted follow-up: scope, waiting, explanation, trail and keyboard alternatives
+
+The 2026-10-13 user request “Do all 5” extends the existing workspace journey. “I open a result and can see whether it represents captured loaded rows or a server execution. I sort/group locally, then review and run a server operation. While it waits I see elapsed seconds and can cancel without losing my newer draft or selecting a canceled result. I understand suggested aggregates from schema evidence. I return through the exploration trail without reloading an earlier grid. If my terminal cannot send a preferred chord, I search for the same action or inspect received keys in an explicit diagnostic.”
+
+Keep scope beside every grid, including retained and local group/member views. Loaded counts refer to the captured input, with grid filtering counts separately reported. Server labels require matched persisted ExecutedQuery ID/source/ExecutedAt (including native SQL and empty results), or actual HTTP response provenance, and use real execution time labelled `run`; `refreshed` is reserved for genuine refresh. Scope must remain visible after the dialog closes, with result identity readable in compact layouts.
+
+Running queries (Open data/editor Run, saved query Run and refresh), Related, JOIN and derived server operations expose elapsed seconds and Cancel. Ctrl+X cancels only a tracked operation; mouse Cancel is visible and reachable. Cancellation signals the captured context without synchronously waiting on the session mutex. A cancellation request remains visibly pending until backend completion is observed; synchronous session actions stay fenced while the source may still be finishing. Late/canceled responses cannot persist or select canceled derived output, clear a newer operation, reset a newer row/editor/composer, or fabricate progress percentages. AI streaming retains its existing Busy/cancel ownership and is not mislabeled as supporting the tracked Ctrl+X action.
+
+Suggested measures say `SUM · automatic`. Float/decimal suggestions explain authoritative numeric type; integer suggestions require complete authoritative non-PK/non-FK proof. PK, FK, grouping-key, nonnumeric and unknown-metadata exclusions are explained without guessing from column names. A deliberate override says `manual choice`; changing grouping keys preserves valid deliberate overrides.
+
+A compact lineage path and Trail control expose retained durable parents/children and session-local grouping/member branches. Ctrl+T opens the trail in result contexts; `/trail` and searchable Actions provide alternatives. Alt+Left/Right navigate Back/Forward, with visible controls. Returning uses the same grid/panel instances, retaining row, column, local order, filter, scroll and draft. Branching after Back replaces forward navigation; missing/cyclic lineage is bounded and visibly honest. Session-local transforms are never presented as durable server lineage.
+
+Ctrl+P and `/actions` open a searchable, context-aware action list; F1 exposes a clickable Actions alternative. The registry dispatches existing secure actions and shows disabled reasons. Literal input remains literal in composer/editor/search. `/keys` or the searched Keyboard diagnostic opens an opt-in, bounded received-event display; keys such as Ctrl+C and function keys do not execute product actions while captured. Esc/mouse Close returns without draft/caret loss. It explains the known legacy LF/Ctrl+J ambiguity and does not claim automatic terminal support detection from environment variables. F1 remains the shell's contextual-help escape above dialogs.
 
 ## Acceptance Criteria
 
@@ -169,7 +185,7 @@ The first printable character/digit starts Explorer/grid filtering, bare former 
 
 ### AC: explorer-actions
 
-Open, Attach and New query are visible, distinct and secure; they respectively display data, attach context without execution, or open editable query without execution, retaining draft/session/history. Proposed keys pass conflict/terminal tests before adoption.
+Open, Attach and New query are visible, distinct and secure; they respectively display data, attach context without execution, or open editable query without execution, retaining draft/session/history. Enter/Alt+A/Ctrl+N use the verified focus-scoped routing and distinct execution boundaries.
 
 ### AC: inspector-identity
 
@@ -193,7 +209,7 @@ Enter groups only the captured loaded rows with typed/null/composite semantics, 
 
 ### AC: group-server
 
-Shift+Enter runs only the previewed valid derived query through policy enforcement, retaining source/parameters and immutable lineage; the preview explicitly states server input scope, LIMIT placement and aggregate treatment under the proposed support matrix, with unsupported transformations rejected; stale/failure/cancel outcomes retain the original.
+Shift+Enter runs only the previewed valid derived query through policy enforcement, retaining source/parameters and immutable lineage; the preview explicitly states server input scope, LIMIT placement and aggregate treatment under the supported scope matrix, with unsupported transformations rejected; stale/failure/cancel outcomes retain the original.
 
 ### AC: sort-dialog
 
@@ -227,20 +243,6 @@ A real supported terminal walks default Explore, composer/query, result search/e
 
 Grid Shift+Enter reports unavailable while composer Shift+Enter inserts newline and F5 opens the general workspace. No web source or unimplemented selected-result URL contract is presented as delivered.
 
-## Accepted follow-up: scope, waiting, explanation, trail and keyboard alternatives
-
-The 2026-10-13 user request “Do all 5” extends the existing workspace journey. “I open a result and can see whether it represents captured loaded rows or a server execution. I sort/group locally, then review and run a server operation. While it waits I see elapsed seconds and can cancel without losing my newer draft or selecting a canceled result. I understand suggested aggregates from schema evidence. I return through the exploration trail without reloading an earlier grid. If my terminal cannot send a preferred chord, I search for the same action or inspect received keys in an explicit diagnostic.”
-
-Keep scope beside every grid, including retained and local group/member views. Loaded counts refer to the captured input, with grid filtering counts separately reported. Server labels require matched persisted ExecutedQuery ID/source/ExecutedAt (including native SQL and empty results), or actual HTTP response provenance, and use real execution time labelled `run`; `refreshed` is reserved for genuine refresh. Scope must remain visible after the dialog closes, with result identity readable in compact layouts.
-
-Running queries (Open data/editor Run, saved query Run and refresh), Related, JOIN and derived server operations expose elapsed seconds and Cancel. Ctrl+X cancels only a tracked operation; mouse Cancel is visible and reachable. Cancellation signals the captured context without synchronously waiting on the session mutex. A cancellation request remains visibly pending until backend completion is observed; synchronous session actions stay fenced while the source may still be finishing. Late/canceled responses cannot persist or select canceled derived output, clear a newer operation, reset a newer row/editor/composer, or fabricate progress percentages. AI streaming retains its existing Busy/cancel ownership and is not mislabeled as supporting the tracked Ctrl+X action.
-
-Suggested measures say `SUM · automatic`. Float/decimal suggestions explain authoritative numeric type; integer suggestions require complete authoritative non-PK/non-FK proof. PK, FK, grouping-key, nonnumeric and unknown-metadata exclusions are explained without guessing from column names. A deliberate override says `manual choice`; changing grouping keys preserves valid deliberate overrides.
-
-A compact lineage path and Trail control expose retained durable parents/children and session-local grouping/member branches. Ctrl+T opens the trail in result contexts; `/trail` and searchable Actions provide alternatives. Alt+Left/Right navigate Back/Forward, with visible controls. Returning uses the same grid/panel instances, retaining row, column, local order, filter, scroll and draft. Branching after Back replaces forward navigation; missing/cyclic lineage is bounded and visibly honest. Session-local transforms are never presented as durable server lineage.
-
-Ctrl+P and `/actions` open a searchable, context-aware action list; F1 exposes a clickable Actions alternative. The registry dispatches existing secure actions and shows disabled reasons. Literal input remains literal in composer/editor/search. `/keys` or the searched Keyboard diagnostic opens an opt-in, bounded received-event display; keys such as Ctrl+C and function keys do not execute product actions while captured. Esc/mouse Close returns without draft/caret loss. It explains the known legacy LF/Ctrl+J ambiguity and does not claim automatic terminal support detection from environment variables. F1 remains the shell's contextual-help escape above dialogs.
-
 ### AC: persistent-result-scope
 
 Given a server result, when I sort/group captured rows and then execute a reviewed server derivation, each resulting grid identifies its true Loaded/Server scope and count after closing dialogs, with real execution timestamps only. Filtering never inflates loaded/source counts, and the original scope/state remains retained at 80×24 and wide sizes.
@@ -263,9 +265,8 @@ Given a terminal with uncertain modified-arrow/function-key delivery, searchable
 
 ## Open Questions
 
-- **Terminal key compatibility:** implementation owner validates proposed Enter/Alt+A/Ctrl+N Explorer bindings, Alt+J primary JOIN (Ctrl+J disabled for the verified LF ambiguity), and Alt+Shift+Up/Down loaded sorting plus Ctrl+Shift+Up/Down server-sort preview before advertising them. Accepted behaviors and visible alternatives remain mandatory; unresolved chords cannot silently replace them or collide with editable input.
-- **Server scope defaults and derivation support:** Tasks 7–8 validate the proposed Matching source rows default for simple queries and Original query output default for aggregated queries, with user-visible scope selection and exact LIMIT/aggregate preview. These are proposed implementation choices, not user-set LIMIT placement. Record supported source/query shapes and explicit refusals; reaggregation of existing aggregates/HAVING needs its own verified mapping.
-- **Deferred follow-ups:** exact selected-result browser addressing and nested Inspect ancestor paths require separate specifications before implementation.
+- **Terminal portability:** current evidence covers actual CLI PTY input/rendering on macOS, including CSI modifiers, legacy LF and SGR mouse events, plus full-shell tests. It does not establish every terminal/OS/Option-key configuration or native GUI screenshot fidelity. Searchable Actions, visible controls and `/keys` expose alternatives without an automatic support claim.
+- **Deferred follow-ups:** exact selected-result browser addressing and nested Inspect ancestor paths require separate specifications before implementation. Broader server derivation/reaggregation support must retain exact preview, policy and refusal guarantees.
 
 ---
 *This document follows the https://specscore.md/feature-specification*

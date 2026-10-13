@@ -56,7 +56,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
-	github.com/strongo/aichat v0.13.0
+	github.com/strongo/aichat v0.13.1
 	github.com/strongo/buildinfo v0.3.0
 	github.com/strongo/cli-helpers v0.26.0
 	github.com/strongo/deviceauth v0.1.0

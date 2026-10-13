@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -198,6 +199,14 @@ func discoverResultColumns(record RecordSet, metadata resultColumnMetadata, admi
 	}
 	rows := resultColumnRows(&record)
 	grouped := len(q.GroupBy()) > 0
+	wildcard := false
+	for _, column := range q.Columns() {
+		wildcard = wildcard || column.Wildcard != nil
+	}
+	generatedProjection := false
+	for _, name := range table.columns {
+		generatedProjection = generatedProjection || (table.generated[name] && columnProjected(q, root, name))
+	}
 	targetEdges := map[string]int{}
 	for _, fk := range metadata.fk.Keys {
 		if relationKey(fk.Schema, fk.FromRelation) == key && (!grouped || (len(fk.FromFields) == 1 && columnGroupHas(q, fk.FromFields[0]) && columnProjected(q, root, fk.FromFields[0]))) {
@@ -209,9 +218,16 @@ func discoverResultColumns(record RecordSet, metadata resultColumnMetadata, admi
 			continue
 		}
 		row := ResultColumnRow{ID: columnCandidateID(record, key, name, ""), Name: name, Source: root.Relation, Type: table.types[name], field: name, Addable: true}
-		if grouped && (table.rowidKey == "" || !columnGroupHas(q, table.rowidKey)) {
+		if grouped {
 			row.Addable = false
-			row.Reason = "Adding this field would change the original groups"
+			// A physical unique key does not prove the evaluator's grouping
+			// equality. In particular, adjacent int64 keys beyond 2^53 can
+			// normalize to one group; adding a label would split that group.
+			row.Reason = "Exact evaluator group equality is unproven; grouped direct fields cannot be added"
+		}
+		if wildcard {
+			row.Addable = false
+			row.Reason = "Explicit wildcards must be expanded before column enrichment"
 		}
 		rows = append(rows, row)
 	}
@@ -240,15 +256,66 @@ func discoverResultColumns(record RecordSet, metadata resultColumnMetadata, admi
 		if reason == "" && grouped && (!columnGroupHas(q, fk.FromFields[0]) || !columnProjected(q, root, fk.FromFields[0])) {
 			reason = "The complete foreign key must be projected and grouped"
 		}
+		if reason == "" && returnedColumnKeyOutOfRange(record, q, fk.FromFields[0]) {
+			reason = "Returned foreign key exceeds the JOIN evaluator's exact integer range"
+		}
+		// These projection shapes are unsupported regardless of relationship
+		// evidence. Keep discovery consistent with what Apply can execute.
+		if generatedProjection {
+			reason = "Original projection contains generated fields unsupported by the JOIN executor; it cannot be reconstructed exactly"
+		}
+		if wildcard {
+			reason = "Explicit wildcards must be expanded before column enrichment"
+		}
 		for _, name := range target.columns {
 			if slices.Contains(fk.ToFields, name) {
 				continue
 			}
 			edge := fk
-			rows = append(rows, ResultColumnRow{ID: columnCandidateID(record, targetKey, name, fk.ConstraintID), Name: fk.ToRelation + "." + name, Source: fk.ToRelation, Type: target.types[name], Addable: reason == "", Reason: reason, field: name, edge: &edge})
+			fieldReason := reason
+			if target.generated[name] && !wildcard {
+				fieldReason = "Generated target fields are unsupported by the JOIN executor"
+			}
+			rows = append(rows, ResultColumnRow{ID: columnCandidateID(record, targetKey, name, fk.ConstraintID), Name: fk.ToRelation + "." + name, Source: fk.ToRelation, Type: target.types[name], Addable: fieldReason == "", Reason: fieldReason, field: name, edge: &edge})
 		}
 	}
 	return rows, nil
+}
+
+// This is an early refusal using already-retained data, never a new scan or a
+// whole-source proof. The secure JOIN executor independently checks every live
+// join key before producing rows, so unsafe values outside a limited result
+// still fail execution without persisting a child.
+func returnedColumnKeyOutOfRange(record RecordSet, q dal.StructuredQuery, name string) bool {
+	output := name
+	for _, column := range q.Columns() {
+		if field, ok := column.Expression.(dal.FieldRef); ok && strings.EqualFold(field.Name(), name) && column.Alias != "" {
+			output = column.Alias
+		}
+	}
+	const maxExactInteger = 9007199254740991
+	for _, row := range record.Result.Rows {
+		switch value := row.Data[output].(type) {
+		case int64:
+			if value < -maxExactInteger || value > maxExactInteger {
+				return true
+			}
+		case int:
+			if int64(value) < -maxExactInteger || int64(value) > maxExactInteger {
+				return true
+			}
+		case float64:
+			if math.Abs(value) > maxExactInteger {
+				return true
+			}
+		case json.Number:
+			integer, err := value.Int64()
+			if err != nil || integer < -maxExactInteger || integer > maxExactInteger {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func planResultColumns(record RecordSet, metadata resultColumnMetadata, admitted map[string]bool, ids []string) (ResultColumnsPreview, error) {
@@ -388,7 +455,7 @@ func planResultColumns(record RecordSet, metadata resultColumnMetadata, admitted
 	}
 	proof := "Direct physical projection; existing clauses and parameters preserved."
 	if len(joined) > 0 {
-		proof = "LEFT JOIN to enforced INTEGER rowid primary key, target-key-left numeric equality; source INTEGER affinity and engine-proven BINARY grouping. At most one target and one label tuple per original group. COUNT, null/missing groups, filters, HAVING, order, offset and limit retained. Grouped output remains aggregate output."
+		proof = "LEFT JOIN to enforced INTEGER rowid primary key, target-key-left numeric equality; source INTEGER affinity and engine-proven BINARY grouping. The secure JOIN evaluator refuses live keys beyond its exact integer range. At most one target and one label tuple per admitted original group. COUNT, null/missing groups, filters, HAVING, order, offset and limit retained. Grouped output remains aggregate output."
 	}
 	// Metadata and bound values participate locally in the fingerprint. Only the
 	// digest crosses the model boundary; bound parameter values never do.

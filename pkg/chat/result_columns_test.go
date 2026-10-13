@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -306,5 +307,189 @@ func TestResultColumnsSimpleProjectionAddsMultipleFields(t *testing.T) {
 	_, q, err := c.executeResultColumns(context.Background(), c.activeID, parent.ID, ids, p.Fingerprint, "")
 	if err != nil || e.calls != 1 || len(q.Result.Columns) != 3 || q.Result.Rows[0].Data["FirstName"] != "Ada" {
 		t.Fatalf("simple projection %+v %v", q, err)
+	}
+}
+
+func TestResultColumnsWildcardCandidatesNeverAdvertiseExecution(t *testing.T) {
+	c, parent, executor, _ := resultColumnsFixture(t, resultColumnsSchema, "from: {name: Invoice}\ncolumns: [{wildcard: {exclude: [InvoiceId]}}]\nlimit: 100\n")
+	rows, err := c.ResultColumns(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Returned {
+			continue
+		}
+		if row.Addable || !strings.Contains(row.Reason, "wildcards") {
+			t.Fatalf("wildcard advertised executable candidate: %+v", row)
+		}
+		if _, err = c.resultColumnsPreview(context.Background(), c.activeID, parent.ID, []string{row.ID}); err == nil {
+			t.Fatal("wildcard plan accepted")
+		}
+	}
+	if executor.calls != 0 {
+		t.Fatal("wildcard discovery executed")
+	}
+}
+
+func TestResultColumnsGroupedLargeRowidDirectRefusesBeforeExecution(t *testing.T) {
+	schema := "CREATE TABLE Customer(CustomerId INTEGER PRIMARY KEY,Name TEXT);INSERT INTO Customer VALUES(9007199254740992,'A'),(9007199254740993,'B');"
+	doc := "from: {name: Customer}\ncolumns: [{field: CustomerId}, {aggregate: {function: COUNT, args: [{star: true}]}, as: N}]\ngroupBy: [{field: CustomerId}]\nlimit: 100\n"
+	c, parent, executor, _ := resultColumnsFixture(t, schema, doc)
+	if len(parent.Result.Rows) != 1 || fmt.Sprint(parent.Result.Rows[0].Data["N"]) != "2" {
+		t.Fatalf("secure evaluator baseline changed: %+v", parent.Result.Rows)
+	}
+	before, _ := json.Marshal(parent)
+	rows, err := c.ResultColumns(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range rows {
+		if row.Name == "Name" {
+			found = true
+			if row.Addable || !strings.Contains(row.Reason, "evaluator") {
+				t.Fatalf("unsafe direct field %+v", row)
+			}
+			if _, err = c.resultColumnsPreview(context.Background(), c.activeID, parent.ID, []string{row.ID}); err == nil {
+				t.Fatal("unsafe direct grouped plan accepted")
+			}
+		}
+	}
+	if !found || executor.calls != 0 {
+		t.Fatal("grouped refusal missing or executed")
+	}
+	snapshot, err := c.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _ := json.Marshal(snapshot.RecordSets[parent.ID])
+	if string(before) != string(after) {
+		t.Fatal("grouped origin changed")
+	}
+}
+
+func TestResultColumnsImplicitGeneratedProjectionRefusesJoin(t *testing.T) {
+	schema := "CREATE TABLE Customer(CustomerId INTEGER PRIMARY KEY,Name TEXT);CREATE TABLE Invoice(InvoiceId INTEGER PRIMARY KEY,CustomerId INTEGER REFERENCES Customer(CustomerId),Display TEXT GENERATED ALWAYS AS ('invoice-'||InvoiceId) VIRTUAL);INSERT INTO Customer VALUES(1,'A');INSERT INTO Invoice(InvoiceId,CustomerId) VALUES(1,1);"
+	c, parent, executor, _ := resultColumnsFixture(t, schema, "from: {name: Invoice}\nlimit: 100\n")
+	before, _ := json.Marshal(parent)
+	rows, err := c.ResultColumns(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(parent.Result.Columns, "Display") || parent.Result.Rows[0].Data["Display"] != "invoice-1" {
+		t.Fatalf("fixture did not return generated field: %+v", parent.Result)
+	}
+	found := false
+	for _, row := range rows {
+		if row.Name == "Customer.Name" {
+			found = true
+			if row.Addable || !strings.Contains(row.Reason, "generated fields") {
+				t.Fatalf("generated source projection advertised an unsafe JOIN: %+v", row)
+			}
+			if _, err = c.resultColumnsPreview(context.Background(), c.activeID, parent.ID, []string{row.ID}); err == nil {
+				t.Fatal("generated source projection planned an unsafe JOIN")
+			}
+		}
+	}
+	if !found || executor.calls != 0 {
+		t.Fatal("generated source projection refusal missing or executed")
+	}
+	snapshot, err := c.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _ := json.Marshal(snapshot.RecordSets[parent.ID])
+	if string(before) != string(after) {
+		t.Fatal("generated source projection changed its original result")
+	}
+}
+
+func TestResultColumnsGroupedLargeForeignKeyRefusesWithoutChild(t *testing.T) {
+	schema := "CREATE TABLE Customer(CustomerId INTEGER PRIMARY KEY,FirstName TEXT,LastName TEXT);CREATE TABLE Invoice(InvoiceId INTEGER PRIMARY KEY,CustomerId INTEGER REFERENCES Customer(CustomerId));INSERT INTO Customer VALUES(9007199254740992,'A','One'),(9007199254740993,'B','Two');INSERT INTO Invoice VALUES(1,9007199254740992),(2,9007199254740993);"
+	c, parent, executor, _ := resultColumnsFixture(t, schema, resultColumnsDocument)
+	before, _ := json.Marshal(parent)
+	rows, err := c.ResultColumns(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parent.Result.Rows) != 1 || fmt.Sprint(parent.Result.Rows[0].Data["InvoiceCount"]) != "2" {
+		t.Fatalf("secure evaluator baseline changed: %+v", parent.Result.Rows)
+	}
+	found := 0
+	for _, row := range rows {
+		if strings.HasPrefix(row.Name, "Customer.") {
+			found++
+			if row.Addable || !strings.Contains(row.Reason, "exact integer range") {
+				t.Fatalf("large FK advertised executable JOIN: %+v", row)
+			}
+			if _, err = c.resultColumnsPreview(context.Background(), c.activeID, parent.ID, []string{row.ID}); err == nil {
+				t.Fatal("large FK planned an unsafe JOIN")
+			}
+		}
+	}
+	if found != 2 || executor.calls != 0 {
+		t.Fatal("large FK discovery executed")
+	}
+	snapshot, err := c.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _ := json.Marshal(snapshot.RecordSets[parent.ID])
+	if string(before) != string(after) || len(snapshot.RecordSets) != 1 {
+		t.Fatal("large grouped FK changed original or persisted child")
+	}
+}
+
+func TestResultColumnsLiveLargeForeignKeySecureExecutorRefuses(t *testing.T) {
+	c, parent, executor, db := resultColumnsFixture(t, resultColumnsSchema, resultColumnsDocument)
+	ids := columnNameIDs(t, c, parent, "Customer.FirstName", "Customer.LastName")
+	preview, err := c.resultColumnsPreview(context.Background(), c.activeID, parent.ID, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := json.Marshal(parent)
+	// The preview's metadata is still valid, but the live data now contains
+	// keys that the secure JOIN evaluator cannot compare exactly.
+	if _, err = db.Exec("UPDATE Invoice SET CustomerId=9007199254740992 WHERE CustomerId=1; UPDATE Customer SET CustomerId=9007199254740992 WHERE CustomerId=1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = c.executeResultColumns(context.Background(), c.activeID, parent.ID, ids, preview.Fingerprint, ""); err == nil || !strings.Contains(err.Error(), "integer exceeds portable safe range") {
+		t.Fatalf("secure executor did not reject the live key: %v", err)
+	}
+	if executor.calls != 1 {
+		t.Fatalf("secure executor was not reached: %d", executor.calls)
+	}
+	snapshot, err := c.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _ := json.Marshal(snapshot.RecordSets[parent.ID])
+	if string(before) != string(after) || len(snapshot.RecordSets) != 1 {
+		t.Fatal("failed secure JOIN changed original or persisted child")
+	}
+}
+
+func TestResultColumnsGeneratedTargetCandidateDisabled(t *testing.T) {
+	schema := "CREATE TABLE Customer(CustomerId INTEGER PRIMARY KEY,Name TEXT,Display TEXT GENERATED ALWAYS AS ('customer-'||CustomerId) STORED);CREATE TABLE Invoice(InvoiceId INTEGER PRIMARY KEY,CustomerId INTEGER REFERENCES Customer(CustomerId));INSERT INTO Customer(CustomerId,Name) VALUES(1,'A');INSERT INTO Invoice VALUES(1,1);"
+	c, parent, executor, _ := resultColumnsFixture(t, schema, "from: {name: Invoice}\ncolumns: [{field: InvoiceId}, {field: CustomerId}]\nlimit: 100\n")
+	rows, err := c.ResultColumns(context.Background(), parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range rows {
+		if row.Name == "Customer.Display" {
+			found = true
+			if row.Addable || !strings.Contains(row.Reason, "Generated target") {
+				t.Fatalf("generated target advertised executable candidate: %+v", row)
+			}
+			if _, err = c.resultColumnsPreview(context.Background(), c.activeID, parent.ID, []string{row.ID}); err == nil {
+				t.Fatal("generated target planned")
+			}
+		}
+	}
+	if !found || executor.calls != 0 {
+		t.Fatal("generated target discovery executed")
 	}
 }

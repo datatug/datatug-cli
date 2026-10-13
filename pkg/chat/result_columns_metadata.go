@@ -14,6 +14,7 @@ type resultColumnTable struct {
 	types       map[string]string
 	rowidKey    string
 	binaryGroup map[string]bool
+	generated   map[string]bool
 }
 
 type resultColumnMetadata struct {
@@ -76,22 +77,28 @@ func loadResultColumnMetadata(ctx context.Context, source string) (resultColumnM
 		if err = db.QueryRowContext(ctx, "SELECT name FROM sqlite_schema WHERE type='table' AND lower(name)=?", table).Scan(&physical); err != nil {
 			return resultColumnMetadata{}, err
 		}
-		t := resultColumnTable{types: map[string]string{}, binaryGroup: map[string]bool{}}
-		rows, queryErr := db.QueryContext(ctx, "PRAGMA table_info("+quoteColumnIdentifier(physical)+")")
+		t := resultColumnTable{types: map[string]string{}, binaryGroup: map[string]bool{}, generated: map[string]bool{}}
+		rows, queryErr := db.QueryContext(ctx, "PRAGMA table_xinfo("+quoteColumnIdentifier(physical)+")")
 		if queryErr != nil {
 			return resultColumnMetadata{}, queryErr
 		}
 		pkCount, pkName, pkType := 0, "", ""
 		for rows.Next() {
-			var cid, notNull, pk int
+			var cid, notNull, pk, hidden int
 			var name, typ string
 			var def any
-			if err = rows.Scan(&cid, &name, &typ, &notNull, &def, &pk); err != nil {
+			if err = rows.Scan(&cid, &name, &typ, &notNull, &def, &pk, &hidden); err != nil {
 				_ = rows.Close()
 				return resultColumnMetadata{}, err
 			}
+			// SELECT * includes generated columns (2/3), but excludes hidden
+			// virtual-table control columns (1). Preserve the actual projection.
+			if hidden == 1 {
+				continue
+			}
 			t.columns = append(t.columns, name)
 			t.types[name] = typ
+			t.generated[name] = hidden == 2 || hidden == 3
 			if pk > 0 {
 				pkCount++
 				pkName, pkType = name, typ

@@ -71,7 +71,9 @@ The root agent owns publication, merge and cleanup. This CLI lane authors these 
 
 **Id:** task-1
 **Verifies:** tui-refinements#ac:surface-hierarchy, tui-refinements#ac:permanent-help, tui-refinements#ac:top-navigation, tui-refinements#ac:composer-separation, tui-refinements#ac:topbar-edge, tui-refinements#ac:explorer-selection, tui-refinements#ac:result-tabs-query, tui-refinements#ac:inspect-tabs, tui-refinements#ac:chat-session-tabs
-**Status:** in_progress
+**Status:** complete
+**Implemented-by:** strongo/aichat@f5e0d4102186c4d8fb06d524d5286fed5be2140e
+**Evidence:** Released providers [tuigoff v0.7.0, PR #11](https://github.com/tuigoff/tuigoff/pull/11) and [aichat v0.14.0, PR #28](https://github.com/strongo/aichat/pull/28); exact merge-target checks passed, published source matched the reviewed files, and both provider worktrees were retired through WB. CLI validation against these released pins remains task 8.
 **Depends-On:** —
 **Owner:** shared-library lane; root publishes dependencies
 

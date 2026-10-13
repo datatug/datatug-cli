@@ -1,182 +1,83 @@
 ---
 name: datatug-release
 description: |
-  Deploy delegate for specstudio:ship. Publishes a datatug-cli release by
-  pushing main, cutting a semver git tag, and dispatching the release.yml
-  GitHub workflow (goreleaser → GitHub Release + Homebrew). Performs the
-  deploy mechanics ship is barred from doing, and reports a single explicit
-  success/failure signal back to ship. Non-interactive; fail-loud; idempotent
-  per commit. Invoked via `ship.delegate.skill: datatug-release`.
+  Deploy delegate for specstudio:ship. Confirms the automatic datatug-cli
+  main release using exact-commit CI and public artifact delivery receipts.
+  Reports explicit success only after publication and native verification.
 ---
 
 # datatug-release
 
-The deploy delegate `specstudio:ship` dispatches to. Ship gates and records;
-**this skill does the actual publishing**: push `main`, cut the version tag, and
-trigger the release workflow. The git tag is the single source of truth for the
-version — goreleaser derives `main.version` from it (`-X main.version={{.Version}}`),
-so there is **no in-repo version file to edit**.
+`specstudio:ship` gates and records lifecycle changes. This delegate verifies the
+public release covering the intended landed code. Root lands through WB;
+`.github/workflows/release.yml` runs automatically on pushes to main. Do not
+manually push main, create a version tag or dispatch `release.yml` here.
 
 ## Contract with ship
 
-- **Invocation:** ship invokes this skill once and passes `ship.delegate.args`
-  verbatim as the bump argument. Ship does not retry or sequence.
-- **Explicit success signal (load-bearing):** this skill MUST end by printing
-  **exactly one** of:
-  - `RELEASE_OK <tag>` — success; ship may transition the Feature → `Stable`.
-  - `RELEASE_FAILED <reason>` — failure; ship leaves the Feature `Implementing`.
-  Anything else is treated by ship as failure. Never print `RELEASE_OK` unless
-  every step below succeeded (or the commit was already released).
-- **Idempotent per commit:** if `HEAD` is already tagged with a `vX.Y.Z` tag,
-  the release for this commit already happened — succeed without re-tagging or
-  re-dispatching. And when HEAD has advanced past the release with only
-  bookkeeping commits, the confirm-only path (see Input) still succeeds without
-  cutting a redundant release. Together these make the multi-Feature case safe:
-  shipping a follow-on Feature just confirms, it does not cut a second release.
+Print exactly one terminal result:
 
-## Input (`args`)
+- `RELEASE_OK <tag>` only after every confirmation below succeeds.
+- `RELEASE_FAILED <specific reason>` if proof is absent, pending or failed.
 
-`args` selects the target version. Accepted forms:
+A tag, accepted workflow, green build or draft release alone is insufficient.
+Failure leaves the Feature Implementing. This delegate does not edit lifecycle
+status or emit `ship.completed`.
 
-- empty / `patch` → patch bump of the latest `v*` tag
-- `minor` → minor bump
-- `major` → major bump
-- an explicit `vX.Y.Z` → use exactly that version (overrides bump logic)
-- `confirm` → confirm-only: never cut a release; verify the latest release already
-  covers HEAD and report success (see Confirm-only below)
+`confirm` means verification only. Existing empty/bump/version arguments,
+including the configured `minor`, are legacy compatibility inputs: they never
+request a tag or a new release. The automatic workflow owns version selection;
+an explicit version must match the release being confirmed or fail. Do not
+change repository configuration merely to trigger another release.
 
-**Confirm-only (auto and explicit).** For a bump-level `args` (`patch`/`minor`/`major`
-or empty), if the latest release tag is an ancestor of HEAD and HEAD adds **no
-releasable changes** over it — everything since the tag is bookkeeping under
-`spec/`, `.specscore/`, or `.claude/` — the delegate treats the release as already
-covering HEAD's code and returns `RELEASE_OK <latest-tag>` **without cutting a new
-release**. This is the multi-Feature case: shipping Feature A cuts the release;
-shipping Feature B, after only spec/status commits advanced HEAD past the tag, just
-confirms. Passing `args: confirm` forces this path and **fails loud** if releasable
-changes exist, so it can never falsely mark a Feature shipped.
+## Confirm the executed automatic release
 
-## Procedure
+1. Verify repository identity and intended remote target SHA through governed WB
+   queries. Locate the public release whose tag covers that code; bind every
+   receipt to the tag and full commit. For bookkeeping after a release, verify
+   the tag is an ancestor and the intervening diff contains only reviewed
+   bookkeeping under `spec/`, `.specscore/` or `.claude/`. Any other path needs
+   separate release-classification verification; never assume `specscore.yaml`
+   is bookkeeping. Confirmation creates no release and installs no update.
+2. Require successful **Go CI for the exact release commit** and successful
+   automatic release/promotion. `release.yml` delegates to strongo/cicd v1.21.2,
+   requires `Go CI`, caps pre-1.0 major bumps and requests notarized macOS builds.
+   Inspect authoritative run/check results; a queued/running job is not success.
+3. Verify the release is public, download its platform archive and checksum file,
+   and match SHA-256 before extracting. `.goreleaser.yaml` verifies
+   `go mod tidy -diff` and builds with `CGO_ENABLED=0`. The release tag supplies
+   the version; ldflags set `github.com/strongo/buildinfo.version`, `.commit` and
+   `.date`, not `main.version`. Check embedded version/commit against the public
+   tag and execute the downloaded native binary's version command.
+4. For macOS, require strict codesign verification and the CLI-appropriate
+   `spctl -a -t install` assessment accepting Notarized Developer ID, together
+   with the workflow's signed-artifact gate. Record the actual platform and
+   assessment; a non-app execute assessment is not a substitute.
+5. Check installed CLI read-only `self-update --check` discovery against the
+   public release. Record current/latest versions and actual verdict; an older
+   installation reporting `update_available` proves discovery, not installation.
+   Reuse existing exact-artifact receipts when their identity remains valid;
+   do not repeat broad tests/builds for bookkeeping-only confirmation.
+6. Retain the public release URL, exact CI/release runs, checksum, buildinfo,
+   native execution/signing and update-discovery receipts, with any terminal
+   limits. Only then print `RELEASE_OK <tag>`. Stop at the first missing/failed
+   condition and print `RELEASE_FAILED <specific reason>` instead.
 
-Run from the repository root. Stop at the first failure and print
-`RELEASE_FAILED <reason>` — do not continue, do not print `RELEASE_OK`.
+## Package distribution is separate
 
-### 1. Preconditions (fail-loud)
+Automatic release skips Homebrew and Winget publication. The separate manual
+`publish-packages.yml` downloads the public release, verifies checksums, publishes
+its Homebrew cask and reads back the public tap. Its source contract and the
+release's cask-install artifact smoke test do not prove the tap was updated for
+that release. Claim manual distribution or local Homebrew installation only
+with its own execution receipt. Do not dispatch that workflow implicitly.
 
-```bash
-test "$(git rev-parse --abbrev-ref HEAD)" = "main"            # must be on main
-test -z "$(git status --porcelain)"                           # clean working tree
-gh auth status >/dev/null 2>&1                                 # gh authenticated
-git remote get-url origin | grep -q 'datatug/datatug-cli'     # correct repo
-git fetch --tags --quiet origin                               # sync remote tags (see note)
-```
+## Executed reference
 
-If any check fails, print `RELEASE_FAILED <which precondition>` and stop.
-
-**Tag sync (load-bearing):** the fetch above brings *remote* tags into the local
-tag list. Without it, bump computation (step 3) reads a stale local view and can
-pick a version that already exists on the remote — a collision the pre-push
-guard would then reject. Always sync before resolving the version.
-
-### 2. Idempotency — already released this commit?
-
-```bash
-existing=$(git tag --points-at HEAD --list 'v*' \
-  | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
-if [ -n "$existing" ]; then
-  echo "RELEASE_OK $existing (HEAD already tagged — already released)"
-  exit 0
-fi
-```
-
-### 3. Resolve the target version from `args`
-
-```bash
-BUMP="${1:-patch}"   # the value of ship.delegate.args (default patch)
-
-# Explicit version always cuts a new release at HEAD.
-if echo "$BUMP" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-  NEW="$BUMP"
-else
-  # Bump level or the literal "confirm". Resolve the latest release tag
-  # (local list already synced with remote in step 1).
-  latest=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
-
-  # --- Confirm-only path -------------------------------------------------
-  # If a release exists, is an ancestor of HEAD, and HEAD adds NO releasable
-  # changes over it (everything since the tag is bookkeeping under spec/,
-  # .specscore/, .claude/), the code at HEAD is already published in `latest`.
-  # Succeed without cutting a redundant release. Side-effect-free: no push,
-  # tag, or dispatch — main is synced later by ship's status-transition commit.
-  if [ -n "$latest" ] && git merge-base --is-ancestor "$latest" HEAD 2>/dev/null; then
-    releasable=$(git diff --name-only "$latest"..HEAD | grep -vE '^(spec/|\.specscore/|\.claude/)' || true)
-    if [ -z "$releasable" ]; then
-      echo "RELEASE_OK $latest (confirm-only: HEAD adds no releasable changes over $latest)"
-      exit 0
-    fi
-    if [ "$BUMP" = "confirm" ]; then
-      echo "RELEASE_FAILED confirm requested but releasable changes exist since $latest:"
-      echo "$releasable"
-      exit 1
-    fi
-  elif [ "$BUMP" = "confirm" ]; then
-    echo "RELEASE_FAILED confirm requested but no release tag is an ancestor of HEAD"
-    exit 1
-  fi
-
-  # --- Cut path ----------------------------------------------------------
-  base=${latest:-v0.0.0}
-  IFS=. read -r MA MI PA <<EOF
-${base#v}
-EOF
-  case "$BUMP" in
-    major) MA=$((MA+1)); MI=0; PA=0 ;;
-    minor) MI=$((MI+1)); PA=0 ;;
-    patch) PA=$((PA+1)) ;;
-    *) echo "RELEASE_FAILED unknown bump '$BUMP' (use major|minor|patch, confirm, or vX.Y.Z)"; exit 1 ;;
-  esac
-  NEW="v$MA.$MI.$PA"
-fi
-
-# Guard: target tag must not already exist anywhere
-git rev-parse -q --verify "refs/tags/$NEW" >/dev/null && { echo "RELEASE_FAILED tag $NEW already exists but not on HEAD"; exit 1; }
-git ls-remote --exit-code --tags origin "$NEW" >/dev/null 2>&1 && { echo "RELEASE_FAILED tag $NEW already exists on origin"; exit 1; }
-```
-
-### 4. Push, tag, dispatch
-
-```bash
-git push origin main                                   || { echo "RELEASE_FAILED push main"; exit 1; }
-git tag -a "$NEW" -m "Release $NEW"                     || { echo "RELEASE_FAILED create tag"; exit 1; }
-git push origin "$NEW"                                  || { echo "RELEASE_FAILED push tag"; exit 1; }
-gh workflow run release.yml --field tag="$NEW"          || { echo "RELEASE_FAILED dispatch workflow"; exit 1; }
-echo "RELEASE_OK $NEW"
-```
-
-`gh workflow run` returning 0 means GitHub accepted the dispatch for tag `$NEW`.
-That is this skill's success boundary: the local responsibility — push the
-commits, cut the tag, trigger the workflow — completed.
-
-## Async caveat (read before relying on `Stable`)
-
-The GitHub release runs **asynchronously** after dispatch; `RELEASE_OK` means
-"release triggered," not "artifacts published." If goreleaser fails later, ship
-will already have flipped the Feature to `Stable`. To make `Stable` mean
-"actually published," replace the final line of step 4 with a blocking watch:
-
-```bash
-sleep 8
-run=$(gh run list --workflow=release.yml --event=workflow_dispatch --limit=1 --json databaseId --jq '.[0].databaseId')
-gh run watch "$run" --exit-status || { echo "RELEASE_FAILED release workflow run $run"; exit 1; }
-echo "RELEASE_OK $NEW"
-```
-
-This is intentionally left as the non-blocking default for the MVP; opt into the
-watch if you want `Stable` gated on the workflow's completion.
-
-## Boundary
-
-This skill owns deploy mechanics (push/tag/dispatch) — the things ship is barred
-from doing. It does **not** gate, transition Feature status, or emit
-`ship.completed`; those belong to ship and run only on this skill's
-`RELEASE_OK`. It releases the whole `datatug` binary at one tag; it does not
-coordinate per-Feature releases.
+DataTug CLI v0.77.0 publicly covers `714a6c161745841075b8c009d61eac88d00167c4`:
+[Go CI](https://github.com/datatug/datatug-cli/actions/runs/38456229628),
+[automatic release](https://github.com/datatug/datatug-cli/actions/runs/38456230052),
+[public assets](https://github.com/datatug/datatug-cli/releases/tag/v0.77.0).
+Root verified downloaded darwin/arm64 checksum, native version/buildinfo,
+strict signing/notarization and read-only update discovery. No update installation
+or separate manual Homebrew publication is claimed by this reference.

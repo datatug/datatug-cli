@@ -1,12 +1,12 @@
 ---
 format: https://specscore.md/feature-specification
-status: Implementing
+status: Stable
 ---
 
 # Feature: Terminal panel polish and predictable inspection
 
 > [SpecScore.**Studio**](https://specscore.studio): | [Explore](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/tui-panel-polish?op=explore) | [Edit](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/tui-panel-polish?op=edit) | [Ask question](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/tui-panel-polish?op=ask) | [Request change](https://specscore.studio/app/github.com/datatug/datatug-cli/spec/features/tui-panel-polish?op=request-change) |
-**Status:** Implementing
+**Status:** Stable
 **Source Ideas:** —
 
 ## Summary
@@ -58,11 +58,19 @@ Given normal or narrow terminals, when rendering header, composer, footer and F1
 
 ### AC: terminal-regression-evidence
 
-Given focused behavioral tests and production terminal journeys at 140x42, 100x30 and 80x24, when the follow-up is reviewed, then evidence states expected versus observed behavior for selection, inspection, search, help, tab/session focus, width changes and composer/grid ownership. Existing security and retained-state tests continue passing. Root owns final Astra review, released-provider verification, WB landing and cleanup.
+Given focused behavioral tests and production terminal journeys at 140x42, 100x30 and 80x24, when the follow-up is reviewed, then evidence states expected versus observed behavior for selection, inspection, search, help, tab/session focus, width changes and composer/grid ownership. Existing security and retained-state tests continue passing. Root owns released-provider verification, WB landing and cleanup. Review records retain the substantive Astra review and subsequent Sol integration/lint reviews; use Sol for light UI reviews and reserve Astra for substantial architecture/code review.
 
 ### AC: frame-content-and-header-actions
 
 Given framed query-editor, center-panel and expanded-result content at 140x42, 100x30 and 80x24, when a visible sentinel occupies the last admitted content cell, then it survives frame composition and its mouse target remains reachable. Project, Server and Help header actions dispatch at their rendered cell coordinates even above the center column; frame borders and tab seams remain inert. The shared provider's geometry and mouse tests bind these behaviors to the production shell, not only a bounded screenshot.
+
+## Delivery evidence
+
+Published as [DataTug CLI v0.77.0](https://github.com/datatug/datatug-cli/releases/tag/v0.77.0), from [PR #377](https://github.com/datatug/datatug-cli/pull/377) at `714a6c161745841075b8c009d61eac88d00167c4`. Released providers are aichat v0.15.0 ([PR #29](https://github.com/strongo/aichat/pull/29)) and tuigoff v0.8.0 ([PR #12](https://github.com/tuigoff/tuigoff/pull/12)). Exact-commit [Go CI](https://github.com/datatug/datatug-cli/actions/runs/38456229628) and [automatic release](https://github.com/datatug/datatug-cli/actions/runs/38456230052) passed, including signed macOS promotion and published-artifact/cask-install smoke checks.
+
+Expected the public darwin/arm64 archive to match its checksum and executable metadata; observed SHA-256 `f1dbe7b4657505675ccfd61152d7fd514f0959e3cc3975dce5b25a5350ad08bb`, native version 0.77.0, exact embedded commit above, CGO disabled and both released provider versions. Strict codesign verification passed; CLI install assessment accepted it as Notarized Developer ID. The installed CLI's read-only self-update check reported current 0.74.0, latest 0.77.0 and `update_available`; no installation was performed.
+
+Expected three Customer rows with metadata and modal-owned Help scrolling/actions in the published binary; root's actual PTY run observed the grid/metadata at 140x42, the borderless card and right-edge scrollbar geometry at 140x42, 100x30 and 80x24, and Home/End, track paging and Actions clicks at 80x24, then clean exit 0. Earlier diagnostic journey receipts remain separate from this public-binary coverage. Native Warp screenshots remain unverified; captures use an ANSI renderer. Thumb dragging remains unsupported. Root receipts: `/private/tmp/datatug-tui-panel-polish/cli-public-delivery-receipt.json`, `cli-target-checks-r2.json`, `release-v0.77.0/` and `qa-public-v0.77.0/`. Substantive Astra r8 review and Sol integration/staticcheck reviews are retained in that evidence tree. Final bookkeeping landing and owned-task cleanup remain root-owned and pending; this delivery record does not claim they already occurred.
 
 ## Open Questions
 

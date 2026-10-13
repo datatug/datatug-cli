@@ -9,8 +9,9 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/datatug/datatug-cli/pkg/detective"
+	"github.com/datatug/datatug-cli/pkg/detectiveui"
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/detective"
 )
 
 func TestDetectiveAgentSessionContract(t *testing.T) {
@@ -66,6 +67,40 @@ func TestDetectiveCapabilityErrorIsVisible(t *testing.T) {
 	_, err := service.State(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "cannot access Detective project assets") {
 		t.Fatalf("missing permission diagnosis: %v", err)
+	}
+}
+
+func TestDetectiveLocalHistoryAndSavedQueryReceipt(t *testing.T) {
+	var sent apicontract.ExecutionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/datatug/detective/case-events":
+			if r.URL.Query().Get("project") != "demo" || r.URL.Query().Get("securityContextId") != "session-1" || r.URL.Query().Get("caseId") != "case-1" || r.URL.Query().Get("before") != "40" {
+				t.Errorf("Case event scope: %s", r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode(detective.CaseEventsPage{CaseID: "case-1", Events: []detective.CaseEvent{{ID: "event-1"}}})
+		case "/datatug/exec/run_query":
+			if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+				t.Error(err)
+			}
+			_ = json.NewEncoder(w).Encode(apicontract.Result{Execution: &apicontract.ExecutionRef{StoreID: "demo", ProjectID: "demo", ExecutionID: "query-1"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	service := detectiveUIService{client: agentHTTPClient{baseURL: server.URL, client: server.Client()}, project: "demo", securityContextID: "session-1"}
+	page, err := service.CaseEvents(context.Background(), "case-1", 40)
+	if err != nil || page.CaseID != "case-1" || len(page.Events) != 1 {
+		t.Fatalf("Case event page: %#v, %v", page, err)
+	}
+	value := apicontract.NewIntegerValue("7")
+	result, err := service.RunSavedQuery(context.Background(), detectiveui.SavedQueryRun{QueryID: "invoices/list", Environment: "qa", Inputs: map[string]apicontract.TypedValueOrSet{"invoice_id": {Scalar: &value}}})
+	if err != nil || result.Result.Execution == nil || result.Result.Execution.ExecutionID != "query-1" {
+		t.Fatalf("saved query receipt: %#v, %v", result, err)
+	}
+	if sent.Project != "demo" || sent.SecurityContextID != "session-1" || sent.QueryID != "invoices/list" || sent.Environment != "qa" || !sent.Record || !sent.Snapshot || sent.Mode != apicontract.ProvenanceModeLive || len(sent.BindingOrigins) != 1 || sent.BindingOrigins[0].Origin != apicontract.BindingOriginManual {
+		t.Fatalf("ordinary query missing authoritative receipt request: %#v", sent)
 	}
 }
 func TestEmbeddedDetectiveConnectionForm(t *testing.T) {

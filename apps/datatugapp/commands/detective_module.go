@@ -21,22 +21,37 @@ type detectiveModule struct {
 	width, height     int
 	focused           bool
 	agentURL, project string
+	storage, space    string
+	insecure          bool
 	activeField       int
 	connecting        bool
 	problem           string
 	model             *detectiveui.Model
 }
 type detectiveConnected struct {
-	service detectiveUIService
+	service detectiveui.Service
+	project string
 	err     error
 }
 
-func newDetectiveModule(mode string) *detectiveModule { return &detectiveModule{mode: mode} }
-func (d *detectiveModule) Init() tea.Cmd              { return d.connect() }
+func newDetectiveModule(mode string) *detectiveModule {
+	return &detectiveModule{mode: mode, storage: "agent"}
+}
+func (d *detectiveModule) Init() tea.Cmd { return d.connect() }
 func (d *detectiveModule) connect() tea.Cmd {
 	d.connecting = true
-	agent, project := d.agentURL, d.project
+	agent, project, storage, space, insecure := d.agentURL, d.project, d.storage, d.space, d.insecure
 	return func() tea.Msg {
+		if storage == "cloud" {
+			service, err := newDetectiveCloudService(context.Background(), agent, space, project, insecure)
+			if err != nil {
+				return detectiveConnected{err: err}
+			}
+			return detectiveConnected{service: service, project: project}
+		}
+		if storage != "agent" {
+			return detectiveConnected{err: fmt.Errorf("storage must be agent or cloud")}
+		}
 		cmd := &cobra.Command{}
 		cmd.SetContext(context.Background())
 		cmd.Flags().String("agent", agent, "")
@@ -62,7 +77,7 @@ func (d *detectiveModule) connect() tea.Cmd {
 		if info.SecurityContextID == "" {
 			return detectiveConnected{err: fmt.Errorf("agent-info has no security context")}
 		}
-		return detectiveConnected{service: detectiveUIService{client: client, project: project, securityContextID: info.SecurityContextID}}
+		return detectiveConnected{service: detectiveUIService{client: client, project: project, securityContextID: info.SecurityContextID}, project: project}
 	}
 }
 func (d *detectiveModule) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
@@ -83,7 +98,7 @@ func (d *detectiveModule) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 			return d, nil
 		}
 		d.problem = ""
-		d.project = v.service.project
+		d.project = v.project
 		d.model = detectiveui.New(v.service, d.mode)
 		d.model.Update(tea.WindowSizeMsg{Width: max(25, d.width), Height: max(8, d.height)})
 		return d, d.model.Init()
@@ -92,11 +107,28 @@ func (d *detectiveModule) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 			return d, nil
 		}
 		if d.model == nil {
+			field := func() *string {
+				switch d.activeField {
+				case 0:
+					return &d.storage
+				case 1:
+					return &d.agentURL
+				case 2:
+					return &d.space
+				case 3:
+					return &d.project
+				}
+				return nil
+			}
 			switch v.String() {
+			case "ctrl+u":
+				if p := field(); p != nil {
+					*p = ""
+				}
 			case "tab", "down":
-				d.activeField = (d.activeField + 1) % 2
+				d.activeField = (d.activeField + 1) % 5
 			case "shift+tab", "up":
-				d.activeField = (d.activeField + 1) % 2
+				d.activeField = (d.activeField + 4) % 5
 			case "enter":
 				return d, d.connect()
 			case "esc":
@@ -104,20 +136,30 @@ func (d *detectiveModule) Update(msg tea.Msg) (nav.Screen, tea.Cmd) {
 			case "backspace":
 				var p *string
 				if d.activeField == 0 {
+					p = &d.storage
+				} else if d.activeField == 1 {
 					p = &d.agentURL
-				} else {
+				} else if d.activeField == 2 {
+					p = &d.space
+				} else if d.activeField == 3 {
 					p = &d.project
 				}
-				if *p != "" {
+				if p != nil && *p != "" {
 					_, n := utf8.DecodeLastRuneInString(*p)
 					*p = (*p)[:len(*p)-n]
 				}
 			default:
 				if v.Text != "" && v.Mod & ^tea.ModShift == 0 {
 					if d.activeField == 0 {
+						d.storage += v.Text
+					} else if d.activeField == 1 {
 						d.agentURL += v.Text
-					} else {
+					} else if d.activeField == 2 {
+						d.space += v.Text
+					} else if d.activeField == 3 {
 						d.project += v.Text
+					} else if d.activeField == 4 && (v.Text == "y" || v.Text == "n") {
+						d.insecure = v.Text == "y"
 					}
 				}
 			}
@@ -137,20 +179,20 @@ func (d *detectiveModule) View() string {
 	if d.model != nil {
 		return widgets.Fit(d.model.View().Content, max(1, d.width), max(1, d.height))
 	}
-	status := "Connect to the DataTug agent to share Checks and Cases with the web UI.\n"
+	status := "Connect to a DataTug agent or authenticated cloud project.\n"
 	if d.connecting {
 		status += "Connecting…\n"
 	}
 	if d.problem != "" {
 		status += "\n" + d.problem + "\n"
 	}
-	markAgent, markProject := "  ", "  "
-	if d.activeField == 0 {
-		markAgent = "› "
-	} else {
-		markProject = "› "
+	mark := func(index int) string {
+		if d.activeField == index {
+			return "› "
+		}
+		return "  "
 	}
-	status += "\n" + markAgent + "Agent URL: " + d.agentURL + "\n" + markProject + "Project ID: " + d.project + "\n\nEnter connect · Tab field · Esc menu"
+	status += "\n" + mark(0) + "Storage (agent/cloud): " + d.storage + "\n" + mark(1) + "Agent URL or cloud API /v0/: " + d.agentURL + "\n" + mark(2) + "Space ID (cloud): " + d.space + "\n" + mark(3) + "Project ID: " + d.project + "\n" + mark(4) + "Insecure auth storage (y/n): " + fmt.Sprint(d.insecure) + "\nCloud project store: firestore\n\nEnter connect · Tab field · Ctrl+U clear · Esc menu"
 	return widgets.Fit(status, max(1, d.width), max(1, d.height))
 }
 func (d *detectiveModule) Title() string                 { return strings.Title(d.mode) }

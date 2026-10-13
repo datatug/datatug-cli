@@ -11,7 +11,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/datatug/datatug-cli/pkg/detective"
+	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/detective"
 )
 
 type Service interface {
@@ -33,6 +34,11 @@ const (
 	detail          screen = "Detail"
 	runDetail       screen = "Run"
 	history         screen = "History"
+	timeline        screen = "Timeline"
+	incidentList    screen = "Incidents"
+	knowledgeList   screen = "Knowledge"
+	knowledgeDetail screen = "Proposal"
+	exportDetail    screen = "Private Export"
 	formScreen      screen = "Form"
 )
 
@@ -48,26 +54,66 @@ type actedMsg struct {
 	response detective.ActionResponse
 	err      error
 }
+type eventsMsg struct {
+	page  detective.CaseEventsPage
+	err   error
+	older bool
+}
+type incidentsMsg struct {
+	links IncidentLinks
+	err   error
+}
+type knowledgeMsg struct {
+	page  KnowledgePage
+	err   error
+	older bool
+}
+type incidentActedMsg struct {
+	result IncidentResponse
+	err    error
+}
+type knowledgeActedMsg struct {
+	result KnowledgeResponse
+	err    error
+}
+type queryRunMsg struct {
+	result                SavedQueryResult
+	err                   error
+	queryID, environment  string
+	validators            bool
+	applicationID, stepID string
+}
 
 type Model struct {
-	service       Service
-	state         detective.State
-	screen        screen
-	home          screen
-	parent        screen
-	id            string
-	checkID       string
-	caseID        string
-	runID         string
-	filter        string
-	index         int
-	offset        int
-	width, height int
-	busy          bool
-	feedback      string
-	failedOnly    bool
-	form          *form
-	rows          []row
+	service                             Service
+	state                               detective.State
+	screen                              screen
+	home                                screen
+	parent                              screen
+	returnScreen                        screen
+	id                                  string
+	checkID                             string
+	caseID                              string
+	runID                               string
+	filter                              string
+	index                               int
+	offset                              int
+	width, height                       int
+	busy                                bool
+	feedback                            string
+	failedOnly                          bool
+	form                                *form
+	rows                                []row
+	events                              []detective.CaseEvent
+	eventsBefore                        int
+	eventsMore                          bool
+	incidents                           IncidentLinks
+	knowledge                           KnowledgePage
+	proposalID                          string
+	exported                            *KnowledgeHandoff
+	queryExecution                      *apicontract.ExecutionRef
+	pendingApplicationID, pendingStepID string
+	pendingRunID                        string
 }
 
 type row struct {
@@ -103,11 +149,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.busy = false
 		if v.err != nil {
 			m.feedback = v.err.Error()
+			m.pendingApplicationID, m.pendingStepID, m.pendingRunID = "", "", ""
 		} else {
 			m.state = v.state
 			m.feedback = ""
 		}
 		m.rebuild()
+		if m.pendingRunID != "" {
+			app, step, runID := m.pendingApplicationID, m.pendingStepID, m.pendingRunID
+			m.pendingApplicationID, m.pendingStepID, m.pendingRunID = "", "", ""
+			return m, m.act(detective.ActionRequest{Type: "record-scenario-step", CaseID: m.caseID, ApplicationID: app, StepID: step, StepStatus: "completed", RunID: runID})
+		}
 		return m, nil
 	case moreRunsMsg:
 		m.busy = false
@@ -127,7 +179,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.feedback = v.err.Error()
 			return m, nil
 		}
-		m.feedback = "Saved in project agent"
+		m.feedback = "Saved in project"
 		if v.response.Check != nil {
 			m.id = v.response.Check.ID
 			m.screen = detail
@@ -157,9 +209,116 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = runDetail
 			m.checkID = v.response.Run.CheckID
 			m.caseID = v.response.Run.CaseID
+			if m.pendingApplicationID != "" && v.response.Run.ExecutionStatus == "completed" {
+				// Attaching a Case-bound run advances the Case version. Refresh
+				// before recording the Scenario step so hosted ifMatch is current.
+				m.pendingRunID = v.response.Run.ID
+				m.form = nil
+				return m, m.load()
+			}
+			if m.pendingApplicationID != "" {
+				m.pendingApplicationID, m.pendingStepID = "", ""
+				m.feedback = "Scenario step remains pending: Check execution did not complete"
+			}
 		}
 		m.form = nil
 		return m, m.load()
+	case eventsMsg:
+		m.busy = false
+		if v.err != nil {
+			m.feedback = v.err.Error()
+			return m, nil
+		}
+		if !v.older {
+			m.events = nil
+		}
+		m.events = append(m.events, v.page.Events...)
+		m.eventsBefore, m.eventsMore = v.page.NextBefore, v.page.HasMore
+		m.rebuild()
+		return m, nil
+	case incidentsMsg:
+		m.busy = false
+		if v.err != nil {
+			m.feedback = v.err.Error()
+			return m, nil
+		}
+		m.incidents = v.links
+		m.rebuild()
+		return m, nil
+	case knowledgeMsg:
+		m.busy = false
+		if v.err != nil {
+			m.feedback = v.err.Error()
+			return m, nil
+		}
+		if !v.older {
+			m.knowledge = v.page
+		} else {
+			m.knowledge.Proposals = append(m.knowledge.Proposals, v.page.Proposals...)
+			m.knowledge.NextCursor = v.page.NextCursor
+			m.knowledge.HasMore = v.page.HasMore
+		}
+		m.rebuild()
+		return m, nil
+	case incidentActedMsg:
+		m.busy = false
+		if v.err != nil {
+			m.feedback = v.err.Error()
+			return m, nil
+		}
+		m.form = nil
+		m.feedback = "Incident " + v.result.Incident.Ref.String() + " linked"
+		if v.result.Case != nil {
+			m.id = v.result.Case.ID
+			m.parent = cases
+			m.screen = detail
+		}
+		return m, m.load()
+	case knowledgeActedMsg:
+		m.busy = false
+		if v.err != nil {
+			m.feedback = v.err.Error()
+			return m, nil
+		}
+		m.form = nil
+		m.feedback = "Knowledge proposal saved privately"
+		if v.result.Proposal != nil {
+			for i := range m.knowledge.Proposals {
+				if m.knowledge.Proposals[i].ID == v.result.Proposal.ID {
+					m.knowledge.Proposals[i] = *v.result.Proposal
+					break
+				}
+			}
+		}
+		if v.result.Export != nil {
+			m.exported = v.result.Export
+			m.screen = exportDetail
+			m.rebuild()
+			return m, nil
+		}
+		m.screen = knowledgeList
+		return m, m.loadKnowledge(false)
+	case queryRunMsg:
+		m.busy = false
+		if v.err != nil {
+			m.feedback = v.err.Error()
+			return m, nil
+		}
+		m.form = nil
+		ref := v.result.Result.Execution
+		if ref == nil {
+			m.feedback = "Hosted query returned no execution receipt"
+			return m, nil
+		}
+		m.queryExecution = ref
+		if v.validators {
+			return m, m.act(detective.ActionRequest{Type: "run-query-validators", QueryID: v.queryID, Environment: v.environment, Execution: ref})
+		}
+		if v.applicationID != "" {
+			return m, m.act(detective.ActionRequest{Type: "record-scenario-step", CaseID: m.id, ApplicationID: v.applicationID, StepID: v.stepID, StepStatus: "completed", QueryID: v.queryID, Environment: v.environment, Execution: ref})
+		}
+		m.feedback = "Saved query completed with execution receipt " + ref.ExecutionID
+		return m, nil
 	case tea.KeyPressMsg:
 		if v.String() == "ctrl+c" {
 			return m, tea.Quit
@@ -210,6 +369,12 @@ func (m *Model) updateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.screen = detail
 		case history:
 			m.screen = detail
+		case timeline, incidentList, knowledgeList:
+			m.screen = detail
+		case knowledgeDetail:
+			m.screen = knowledgeList
+		case exportDetail:
+			m.screen = knowledgeDetail
 		default:
 			return m, tea.Quit
 		}
@@ -284,6 +449,9 @@ func (m *Model) updateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.rebuild()
 		}
 		return m, nil
+	}
+	if m.screen == timeline || m.screen == incidentList || m.screen == knowledgeList || m.screen == knowledgeDetail || m.screen == exportDetail {
+		return m.updateHostedKey(key)
 	}
 	if m.screen == runDetail {
 		if key == "f" {
@@ -361,6 +529,33 @@ func (m *Model) rebuild() {
 				m.rows = append(m.rows, row{fmt.Sprintf("%s  %s  %s/%s  %s", r.ID, r.Environment, r.ExecutionStatus, r.Outcome, r.StartedAt.Format("2006-01-02 15:04")), "run", r.ID, 0})
 			}
 		}
+	case timeline:
+		for _, e := range m.events {
+			m.rows = append(m.rows, row{e.At.Format("2006-01-02 15:04") + "  " + e.Type + "  " + e.Message, "event", e.ID, 0})
+		}
+	case incidentList:
+		for _, incident := range m.incidents.Incidents {
+			m.rows = append(m.rows, row{incident.Ref.String() + "  [" + string(incident.Status) + "] " + incident.Title, "incident", incident.Ref.String(), 0})
+		}
+	case knowledgeList:
+		for _, proposal := range m.knowledge.Proposals {
+			if proposal.CaseID == m.id && match(proposal.Title+" "+proposal.ID) {
+				m.rows = append(m.rows, row{proposal.ID + "  [" + proposal.Status + "] " + proposal.Title, "proposal", proposal.ID, 0})
+			}
+		}
+	case knowledgeDetail:
+		for _, proposal := range m.knowledge.Proposals {
+			if proposal.ID == m.proposalID {
+				m.rows = append(m.rows, row{"Proposal " + proposal.ID + "  [" + proposal.Status + "] " + proposal.Title, "header", proposal.ID, 0}, row{"Kind " + proposal.Kind + "  Case " + proposal.CaseID + " · " + proposal.ClaimStatus, "header", proposal.ID, 0}, row{proposal.Statement, "header", proposal.ID, 0}, row{"Evidence: " + strings.Join(proposal.EvidenceRefs, ", "), "header", proposal.ID, 0}, row{"Findings: " + strings.Join(proposal.FindingRefs, ", "), "header", proposal.ID, 0})
+				for _, handoff := range proposal.Handoffs {
+					m.rows = append(m.rows, row{fmt.Sprintf("Handoff %s · %s/%s · proposal v%d", handoff.Target.System, handoff.Target.Repository, handoff.Target.ResourceID, handoff.ProposalVersion), "handoff", proposal.ID, 0})
+				}
+			}
+		}
+	case exportDetail:
+		if p := m.exported; p != nil {
+			m.rows = append(m.rows, row{"Private knowledge handoff " + p.ProposalID + " · " + p.Status, "header", p.ProposalID, 0}, row{"Target " + p.Target.System + " · " + p.Target.Repository + "/" + p.Target.ResourceID, "header", p.ProposalID, 0}, row{"Expected revision " + p.Target.ExpectedRevision + " · proposal v" + fmt.Sprint(p.ProposalVersion), "header", p.ProposalID, 0}, row{"Statement " + p.Statement + " · " + p.ClaimStatus, "header", p.ProposalID, 0}, row{"Evidence " + strings.Join(p.EvidenceRefs, ", "), "header", p.ProposalID, 0}, row{"Findings " + strings.Join(p.FindingRefs, ", "), "header", p.ProposalID, 0})
+		}
 	case runDetail:
 		m.rebuildRun()
 	}
@@ -412,6 +607,12 @@ func (m *Model) rebuildDetail() {
 		}
 		for _, ref := range c.ScenarioRefs {
 			m.rows = append(m.rows, row{"Scenario " + ref, "scenario", ref, 0})
+		}
+		for _, application := range c.ScenarioApplications {
+			m.rows = append(m.rows, row{fmt.Sprintf("Application %s · %s v%d", application.ID, application.ScenarioID, application.ScenarioVersion), "application", application.ID, 0})
+			for _, step := range application.Steps {
+				m.rows = append(m.rows, row{fmt.Sprintf("%s · %s · evidence %s", step.StepID, step.Status, defaultString(step.EvidenceOutcome, "unknown")), "application-step", application.ID + "/" + step.StepID, 1})
+			}
 		}
 		for _, e := range c.Timeline {
 			m.rows = append(m.rows, row{"Timeline " + e.At.Format("2006-01-02 15:04") + " · " + e.Type + " · " + e.Message, "event", e.ID, 0})
@@ -528,7 +729,7 @@ func (m *Model) View() tea.View {
 		}
 	}
 	if m.busy {
-		b.WriteString("Working with agent…\n")
+		b.WriteString("Working with project…\n")
 	}
 	if m.feedback != "" {
 		b.WriteString("\n" + ansi.Truncate(m.feedback, max(1, m.width-1), "…") + "\n")
@@ -545,11 +746,11 @@ func (m *Model) hints() string {
 		case checks:
 			return "a add step · v validator · p promote · e edit · r run · h history · Esc catalog"
 		case cases:
-			return "c context · e evidence · f finding · l incident · s scenario · r run · t timeline · x close · o reopen · z archive"
+			return "Enter Scenario step · c context · e evidence · f finding · i incidents · k knowledge · g timeline · s apply · r run"
 		case scenarios:
 			return "e edit · a add step · Esc catalog"
 		case queryValidators:
-			return "v add local Validator · p promote selected · r run query Validators · h history · Esc catalog"
+			return "v add Validator · p promote · q run query with exact result · r fresh validation · h history"
 		}
 	}
 	if m.screen == runDetail {
@@ -560,6 +761,21 @@ func (m *Model) hints() string {
 			return "Enter run · L load older runs · Esc back"
 		}
 		return "Enter run · Esc back"
+	}
+	if m.screen == timeline {
+		return "↑↓ events · L older events · Esc Case"
+	}
+	if m.screen == incidentList {
+		return "C create · L link existing · S start independent Case · Esc Case"
+	}
+	if m.screen == knowledgeList {
+		return "N draft · Enter review · L older proposals · Esc Case"
+	}
+	if m.screen == knowledgeDetail {
+		return "R mark reviewed · X reject · E export private record · Esc proposals"
+	}
+	if m.screen == exportDetail {
+		return "Private portable proposal · Esc proposal"
 	}
 	return "F1 Checks · F2 Detective · F3 Scenarios · F4 Reusable · F5 Query Validators · type to search · Enter open · Ctrl+N new"
 }

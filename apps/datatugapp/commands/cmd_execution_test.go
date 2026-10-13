@@ -40,7 +40,8 @@ func TestExecutionCommandUsesRealAgentEndpoints(t *testing.T) {
 		Columns: []apicontract.Column{{Name: "id", Type: "integer"}},
 		Rows:    [][]apicontract.TypedValue{{apicontract.NewIntegerValue("7")}},
 	}
-	snapshotRef, stored, err := store.PutSnapshot(context.Background(), ref, recordset, time.Date(2026, 9, 13, 10, 0, 0, 0, time.UTC))
+	observedAt := time.Now().UTC().Add(-time.Hour)
+	snapshotRef, stored, err := store.PutSnapshot(context.Background(), ref, recordset, observedAt)
 	if err != nil || !stored {
 		t.Fatalf("PutSnapshot: stored=%v err=%v", stored, err)
 	}
@@ -52,8 +53,8 @@ func TestExecutionCommandUsesRealAgentEndpoints(t *testing.T) {
 		Ref: ref, Scope: apicontract.ExecutionRecordScope{StoreID: projectID, Project: projectID, Environment: "prod"},
 		DTQLHash: strings.Repeat("1", 64), Parameters: map[string]apicontract.TypedValueOrSet{}, BindingsApplied: []apicontract.Binding{},
 		Principal: apicontract.ExecutionPrincipal{ID: "alice", Roles: []string{}, Groups: []string{}}, PolicyFingerprint: api.SecurePolicyFingerprint(),
-		ExecutedAt: "2026-09-13T10:00:00Z", Limitations: []apicontract.Limitation{},
-		Provenance:       apicontract.Provenance{Source: "sales", Collection: "orders", Mode: apicontract.ProvenanceModeLive, ObservedAt: "2026-09-13T10:00:00Z", ExecutionProfile: apicontract.ExecutionProfileProtected},
+		ExecutedAt: observedAt.Format(time.RFC3339Nano), Limitations: []apicontract.Limitation{},
+		Provenance:       apicontract.Provenance{Source: "sales", Collection: "orders", Mode: apicontract.ProvenanceModeLive, ObservedAt: observedAt.Format(time.RFC3339Nano), ExecutionProfile: apicontract.ExecutionProfileProtected},
 		AuthorizedFields: []apicontract.FieldAccessRef{{StoreID: projectID, Project: projectID, Environment: "prod", Source: "sales", Collection: "orders", Column: "id"}},
 		RowCount:         1, ResultFingerprint: fingerprint, SnapshotRef: snapshotRef, Measurements: []apicontract.ScalarMeasurement{},
 	}

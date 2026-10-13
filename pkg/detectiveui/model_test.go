@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/datatug/datatug-cli/pkg/detective"
+	"github.com/datatug/datatug-core/pkg/detective"
 	"github.com/datatug/datatug-core/pkg/investigation"
 )
 

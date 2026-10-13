@@ -8,9 +8,10 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/datatug/datatug-cli/pkg/detective"
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	"github.com/datatug/datatug-core/pkg/detective"
 	"github.com/datatug/datatug-core/pkg/investigation"
+	"github.com/google/uuid"
 )
 
 type field struct{ label, value, help string }
@@ -26,10 +27,14 @@ type form struct {
 	queryValidators detective.QueryValidators
 	stepIndex       int
 	validatorIndex  int
+	proposal        KnowledgeProposal
 }
 
 func f(label, value, help string) field { return field{label, value, help} }
 func (m *Model) begin(kind, title string, fields []field) {
+	if m.screen != formScreen {
+		m.returnScreen = m.screen
+	}
 	m.form = &form{kind: kind, title: title, fields: fields, stepIndex: -1, validatorIndex: -1}
 	m.screen = formScreen
 	m.feedback = ""
@@ -66,8 +71,11 @@ func (m *Model) updateForm(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	f := m.form
 	switch k.String() {
 	case "esc":
+		if f.kind == "run" || f.kind == "scenario-query-run" {
+			m.pendingApplicationID, m.pendingStepID = "", ""
+		}
 		m.form = nil
-		m.screen = m.parent
+		m.screen = m.returnScreen
 		if m.screen == "" {
 			m.screen = m.home
 		}
@@ -80,6 +88,13 @@ func (m *Model) updateForm(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		f.index = (f.index + len(f.fields) - 1) % len(f.fields)
 		return m, nil
 	case "ctrl+s":
+		if cmd, handled, err := m.submitHostedForm(); handled {
+			if err != nil {
+				m.feedback = err.Error()
+				return m, nil
+			}
+			return m, cmd
+		}
 		req, err := m.submitForm()
 		if err != nil {
 			m.feedback = err.Error()
@@ -219,9 +234,16 @@ func (m *Model) detailKey(key string) (tea.Model, tea.Cmd) {
 			m.begin("finding", "Add finding", []field{f("ID", "", "stable finding ID"), f("Text", "", "observation or hypothesis"), f("Status", "hypothesis", "hypothesis or confirmed"), f("Evidence refs", "", "comma-separated evidence IDs")})
 			m.form.caseItem = *c
 			return m, nil
-		case "l":
-			m.begin("link-incident", "Link Incidentius incident", []field{f("Incident ref", "", "qualified store/incident ID")})
-			m.form.caseItem = *c
+		case "i":
+			return m.openIncidents()
+		case "k":
+			return m.openKnowledge()
+		case "g":
+			return m.openTimeline()
+		case "enter":
+			if len(m.rows) > 0 && m.rows[m.index].kind == "application-step" {
+				return m.startScenarioStep(*c, m.rows[m.index].id)
+			}
 			return m, nil
 		case "s":
 			m.begin("link-scenario", "Apply reusable Scenario", []field{f("Scenario ID", "", "choose from F3 catalog")})
@@ -270,6 +292,13 @@ func (m *Model) detailKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch key {
+		case "q":
+			if _, err := m.queryExecutionService(); err != nil {
+				m.feedback = err.Error()
+				return m, nil
+			}
+			m.begin("query-validators-exact", "Run saved query and validate its exact result", []field{f("Environment", m.defaultEnvironment(), "admitted logical environment"), f("Query ID", q.QueryID, "saved query ID"), f("Inputs", "", "name=type:cardinality:value; separated by semicolons")})
+			return m, nil
 		case "e":
 			if len(m.rows) == 0 || m.rows[m.index].kind != "validator" {
 				m.feedback = "Select a local Validator to edit"
@@ -337,9 +366,46 @@ func (m *Model) startRun(checkID, caseID string) (tea.Model, tea.Cmd) {
 		m.feedback = "Check not in catalog: " + checkID
 		return m, nil
 	}
-	fields := []field{f("Environment", "", "select a logical environment explicitly; no source inference")}
+	if caseID != "" {
+		for _, item := range m.state.Cases {
+			if item.ID != caseID {
+				continue
+			}
+			for name, value := range item.Context {
+				if value.Set == nil && value.Range == nil {
+					continue
+				}
+				found := false
+				for _, input := range c.Inputs {
+					if input.Name == name {
+						found = true
+						break
+					}
+				}
+				if !found {
+					m.feedback = "Check " + checkID + " has no input for confirmed Case cohort " + name
+					return m, nil
+				}
+			}
+		}
+	}
+	env := ""
+	if len(m.state.Environments) == 1 {
+		env = m.state.Environments[0]
+	}
+	fields := []field{f("Environment", env, "logical environment: "+strings.Join(m.state.Environments, ", "))}
 	for _, in := range c.Inputs {
-		fields = append(fields, f(in.Name, "", string(in.Type)+"/"+in.Cardinality))
+		value := ""
+		if caseID != "" {
+			for _, item := range m.state.Cases {
+				if item.ID == caseID {
+					if contextValue, ok := item.Context[in.Name]; ok {
+						value = formatInputValue(contextValue)
+					}
+				}
+			}
+		}
+		fields = append(fields, f(in.Name, value, string(in.Type)+"/"+in.Cardinality+"; Case context prefilled when available"))
 	}
 	m.begin("run", "Run "+checkID, fields)
 	m.form.check = *c
@@ -510,7 +576,6 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 		req.Type = "update-case"
 		req.Case = &c
 	case "link-scenario":
-		c := f.caseItem
 		ref := m.field("Scenario ID")
 		if ref == "" {
 			return nil, fmt.Errorf("scenario ID required")
@@ -524,9 +589,10 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 		if !found {
 			return nil, fmt.Errorf("scenario not in catalog")
 		}
-		c.ScenarioRefs = append(c.ScenarioRefs, ref)
-		req.Type = "update-case"
-		req.Case = &c
+		req.Type = "apply-scenario"
+		req.CaseID = f.caseItem.ID
+		req.ScenarioID = ref
+		req.ApplicationID = uuid.NewString()
 	case "choose-check":
 		if m.field("Check ID") == "" {
 			return nil, fmt.Errorf("check ID required")

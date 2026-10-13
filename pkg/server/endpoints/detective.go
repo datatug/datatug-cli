@@ -178,11 +178,11 @@ func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	case "record-scenario-step":
 		if req.Execution != nil {
-			if req.StepStatus != "completed" || req.RunID != "" {
+			if req.StepStatus != "completed" || req.RunID != "" || len(req.Inputs) != 0 {
 				err = detective.ErrInvalid
 			} else {
 				var verified detective.ScenarioQueryProof
-				verified, err = loadDetectiveScenarioQueryProof(r.Context(), req.Project, actor, req.Execution)
+				verified, req.Inputs, err = loadDetectiveScenarioQueryProof(r.Context(), req.Project, actor, req.Execution)
 				if err == nil && (req.QueryID != "" && req.QueryID != verified.QueryID || req.Environment != "" && req.Environment != verified.Environment) {
 					err = newInvalidRequest("execution", "execution does not match the requested query and environment")
 				}
@@ -206,22 +206,26 @@ func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
 	}{response, body.OperationID, linkStatus})
 }
 
-func loadDetectiveScenarioQueryProof(ctx context.Context, project, actor string, ref *apicontract.ExecutionRef) (detective.ScenarioQueryProof, error) {
+func loadDetectiveScenarioQueryProof(ctx context.Context, project, actor string, ref *apicontract.ExecutionRef) (detective.ScenarioQueryProof, map[string]detective.InputValue, error) {
 	if ref == nil || ref.Validate() != nil || ref.ProjectID != project {
-		return detective.ScenarioQueryProof{}, newInvalidRequest("execution", "invalid execution reference")
+		return detective.ScenarioQueryProof{}, nil, newInvalidRequest("execution", "invalid execution reference")
 	}
 	store, err := api.ExecutionEvidenceStoreByID(project, ref.StoreID)
 	if err != nil {
-		return detective.ScenarioQueryProof{}, newNotFound("execution store not found")
+		return detective.ScenarioQueryProof{}, nil, newNotFound("execution store not found")
 	}
 	record, err := store.Execution(ctx, *ref)
 	if err != nil {
-		return detective.ScenarioQueryProof{}, newNotFound("execution not found")
+		return detective.ScenarioQueryProof{}, nil, newNotFound("execution not found")
 	}
 	if record.Ref != *ref || record.Scope.Project != project || record.QueryID == "" || record.Scope.Environment == "" || record.Principal.ID != actor || record.ResultComplete == nil || !*record.ResultComplete {
-		return detective.ScenarioQueryProof{}, newAccessDenied("execution receipt does not match the current project and principal")
+		return detective.ScenarioQueryProof{}, nil, newAccessDenied("execution receipt does not match the current project and principal")
 	}
-	return detective.ScenarioQueryProof{Execution: *ref, QueryID: record.QueryID, Environment: record.Scope.Environment, ExecutionStatus: "completed"}, nil
+	inputs, err := recordedDetectiveInputs(record)
+	if err != nil {
+		return detective.ScenarioQueryProof{}, nil, err
+	}
+	return detective.ScenarioQueryProof{Execution: *ref, QueryID: record.QueryID, Environment: record.Scope.Environment, ExecutionStatus: "completed"}, inputs, nil
 }
 
 // A row overlay is safe only when the retained receipt still has the same
@@ -281,18 +285,26 @@ func loadDetectiveExecutionResult(ctx context.Context, project, actor, queryID, 
 	limitations = append(limitations, snapshot.Limitations...)
 	limitations = append(limitations, recordedSnapshotRetentionLimitations(record, retained)...)
 	limitations = append(limitations, toContractLimitations(filtered.Limitations)...)
-	inputs := make(map[string]detective.InputValue, len(record.Parameters))
-	for name, value := range record.Parameters {
-		if value.Validate() != nil {
-			return apicontract.Result{}, nil, newSourceUnavailable("recorded query inputs are invalid")
-		}
-		inputs[name] = detective.InputValue{Scalar: value.Scalar, Set: value.Set}
+	inputs, err := recordedDetectiveInputs(record)
+	if err != nil {
+		return apicontract.Result{}, nil, err
 	}
 	result := apicontract.Result{Recordset: retained, Limitations: normalizeLimitations(limitations), BindingsApplied: record.BindingsApplied, Provenance: record.Provenance, Truncated: snapshot.Truncated, Execution: ref}
 	if result.Recordset.Validate() == nil {
 		return result, inputs, nil
 	}
 	return apicontract.Result{}, nil, newSourceUnavailable("recorded query result is invalid")
+}
+
+func recordedDetectiveInputs(record apicontract.ExecutionRecord) (map[string]detective.InputValue, error) {
+	inputs := make(map[string]detective.InputValue, len(record.Parameters))
+	for name, value := range record.Parameters {
+		if value.Validate() != nil {
+			return nil, newSourceUnavailable("recorded query inputs are invalid")
+		}
+		inputs[name] = detective.InputValue{Scalar: value.Scalar, Set: value.Set}
+	}
+	return inputs, nil
 }
 
 func detectiveQueryRunner(project, securityContextID string) detective.QueryRunner {

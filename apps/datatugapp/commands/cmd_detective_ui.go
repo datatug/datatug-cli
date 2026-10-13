@@ -101,7 +101,12 @@ func detectiveOperationID(rawUUID string) string { return "operation-" + rawUUID
 
 func (s detectiveUIService) operation(req detective.ActionRequest) (string, string) {
 	req.SecurityContextID = ""
-	encoded, _ := json.Marshal(req)
+	return s.operationFor("detective:"+req.Type, req)
+}
+
+func (s detectiveUIService) operationFor(kind string, payload any) (string, string) {
+	encoded, _ := json.Marshal(payload)
+	encoded = append([]byte(kind+"\x00"+s.project+"\x00"), encoded...)
 	sum := sha256.Sum256(encoded)
 	key := hex.EncodeToString(sum[:])
 	if s.pending == nil {
@@ -232,7 +237,7 @@ func (s detectiveUIService) IncidentAction(ctx context.Context, action detective
 		return detectiveui.IncidentResponse{}, err
 	}
 	sum := sha256.Sum256(encoded)
-	request.OperationID = hex.EncodeToString(sum[:])
+	request.OperationID = "operation-" + hex.EncodeToString(sum[:])
 	raw, status, err := s.client.post(ctx, "/datatug/detective/incident-action", request)
 	if err != nil {
 		return detectiveui.IncidentResponse{}, detectiveUIError(status, err)
@@ -277,7 +282,7 @@ func (s detectiveUIService) KnowledgeAction(ctx context.Context, action detectiv
 		return detectiveui.KnowledgeResponse{}, err
 	}
 	sum := sha256.Sum256(encoded)
-	request.OperationID = hex.EncodeToString(sum[:])
+	request.OperationID = "operation-" + hex.EncodeToString(sum[:])
 	query := url.Values{}
 	query.Set("project", s.project)
 	query.Set("securityContextId", s.securityContextID)
@@ -313,7 +318,7 @@ func (s detectiveUIService) GenerateAI(ctx context.Context, request detectiveui.
 	if err != nil {
 		return ai.Response{}, err
 	}
-	operation := sha256.Sum256(append([]byte(s.project+"\x00"), intent...))
+	key, operationID := s.operationFor("ai-generate", intent)
 	body := struct {
 		Project           string         `json:"project"`
 		SecurityContextID string         `json:"securityContextId"`
@@ -321,7 +326,7 @@ func (s detectiveUIService) GenerateAI(ctx context.Context, request detectiveui.
 		Text              string         `json:"text"`
 		CaseID            string         `json:"caseId,omitempty"`
 		ExpectedCounts    map[string]int `json:"expectedCounts,omitempty"`
-	}{s.project, s.securityContextID, hex.EncodeToString(operation[:]), request.Text, request.CaseID, request.ExpectedCounts}
+	}{s.project, s.securityContextID, operationID, request.Text, request.CaseID, request.ExpectedCounts}
 	raw, status, err := s.client.post(ctx, "/datatug/detective/ai_proposals?project="+url.QueryEscape(s.project), body)
 	if err != nil {
 		return ai.Response{}, detectiveUIError(status, err)
@@ -330,6 +335,7 @@ func (s detectiveUIService) GenerateAI(ctx context.Context, request detectiveui.
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return response, fmt.Errorf("decode AI response: %w", err)
 	}
+	s.completeOperation(key)
 	return response, nil
 }
 func (s detectiveUIService) ReviewAI(ctx context.Context, review detectiveui.AIReview) (ai.Proposal, error) {
@@ -353,7 +359,7 @@ func (s detectiveUIService) ReviewAI(ctx context.Context, review detectiveui.AIR
 func (s detectiveUIService) ConfirmAI(ctx context.Context, confirm ai.ConfirmRequest) (ai.Receipt, error) {
 	if confirm.OperationID == "" {
 		sum := sha256.Sum256([]byte(s.project + "\x00" + confirm.ProposalID + "\x00" + confirm.Digest))
-		confirm.OperationID = hex.EncodeToString(sum[:])
+		confirm.OperationID = "operation-" + hex.EncodeToString(sum[:])
 	}
 	body := struct {
 		Project           string `json:"project"`

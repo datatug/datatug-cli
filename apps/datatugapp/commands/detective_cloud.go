@@ -50,7 +50,7 @@ func (s *detectiveCloudService) operation(kind string, payload any) (string, str
 	if id := s.pendingOperations[key]; id != "" {
 		return key, id
 	}
-	id := uuid.NewString()
+	id := detectiveOperationID(uuid.NewString())
 	s.pendingOperations[key] = id
 	return key, id
 }
@@ -354,7 +354,7 @@ func (s *detectiveCloudService) ConfirmAI(ctx context.Context, a ai.ConfirmReque
 		return out, err
 	}
 	sum := sha256.Sum256(encoded)
-	operationID := hex.EncodeToString(sum[:])
+	operationID := "operation-" + hex.EncodeToString(sum[:])
 	if a.OperationID != "" {
 		operationID = a.OperationID
 	}

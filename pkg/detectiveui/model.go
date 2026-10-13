@@ -6,7 +6,9 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -37,6 +39,7 @@ const (
 	queryValidators screen = "Query Validators"
 	detail          screen = "Detail"
 	runDetail       screen = "Run"
+	queryDetail     screen = "Query Result"
 	history         screen = "History"
 	timeline        screen = "Timeline"
 	incidentList    screen = "Incidents"
@@ -139,6 +142,9 @@ type Model struct {
 	aiPage                              AIPage
 	aiProposalID                        string
 	queryExecution                      *apicontract.ExecutionRef
+	queryResult                         *SavedQueryResult
+	queryID, queryEnvironment           string
+	showQueryOnCase                     bool
 	pendingApplicationID, pendingStepID string
 	pendingRunID                        string
 }
@@ -214,6 +220,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.busy = false
 		if v.err != nil {
 			m.feedback = v.err.Error()
+			if m.showQueryOnCase {
+				m.showQueryOnCase = false
+				m.form = nil
+				m.screen = queryDetail
+				m.rebuild()
+			}
 			return m, nil
 		}
 		m.feedback = "Saved in project"
@@ -226,6 +238,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.id = v.response.Case.ID
 			m.screen = detail
 			m.parent = cases
+			if m.showQueryOnCase {
+				m.screen = queryDetail
+				m.showQueryOnCase = false
+			}
 		}
 		if v.response.Scenario != nil {
 			m.id = v.response.Scenario.ID
@@ -359,13 +375,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.queryExecution = ref
+		m.queryResult = &v.result
+		m.queryID, m.queryEnvironment = v.queryID, v.environment
 		if v.validators {
 			return m, m.act(detective.ActionRequest{Type: "run-query-validators", QueryID: v.queryID, Environment: v.environment, Execution: ref})
 		}
 		if v.applicationID != "" {
+			m.showQueryOnCase = true
 			return m, m.act(detective.ActionRequest{Type: "record-scenario-step", CaseID: m.id, ApplicationID: v.applicationID, StepID: v.stepID, StepStatus: "completed", QueryID: v.queryID, Environment: v.environment, Execution: ref})
 		}
 		m.feedback = "Saved query completed with execution receipt " + ref.ExecutionID
+		m.screen = queryDetail
+		m.rebuild()
 		return m, nil
 	case aiPageMsg:
 		m.busy = false
@@ -425,6 +446,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateForm(v)
 		}
 		return m.updateKey(v)
+	case tea.PasteMsg:
+		if m.busy {
+			return m, nil
+		}
+		value := strings.Map(func(r rune) rune {
+			if r == '\n' || r == '\r' || r == '\t' {
+				return ' '
+			}
+			if unicode.IsControl(r) {
+				return -1
+			}
+			return r
+		}, v.Content)
+		if m.screen == formScreen && m.form != nil && !m.form.fields[m.form.index].readOnly {
+			m.form.fields[m.form.index].value += value
+		} else if m.AtCatalog() {
+			m.filter += value
+			m.index = 0
+			m.rebuild()
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -464,6 +506,8 @@ func (m *Model) updateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case detail:
 			m.screen = m.parent
 		case runDetail:
+			m.screen = detail
+		case queryDetail:
 			m.screen = detail
 		case history:
 			m.screen = detail
@@ -562,6 +606,12 @@ func (m *Model) updateKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.rebuild()
 			return m, nil
 		}
+		if key == "enter" && len(m.rows) > 0 {
+			m.feedback = m.rows[m.index].label
+		}
+		return m, nil
+	}
+	if m.screen == queryDetail {
 		if key == "enter" && len(m.rows) > 0 {
 			m.feedback = m.rows[m.index].label
 		}
@@ -667,6 +717,8 @@ func (m *Model) rebuild() {
 		m.rebuildAI()
 	case runDetail:
 		m.rebuildRun()
+	case queryDetail:
+		m.rebuildQueryRows(nil)
 	}
 	if m.index >= len(m.rows) {
 		m.index = max(0, len(m.rows)-1)
@@ -762,11 +814,80 @@ func (m *Model) rebuildRun() {
 			ref = r.QueryID
 		}
 		m.rows = append(m.rows, row{"Run " + r.ID + " · " + ref + " · " + r.Environment, "header", r.ID, 0}, row{fmt.Sprintf("Execution %s · Outcome %s · Severity %s · %d ms · actor %s", r.ExecutionStatus, r.Outcome, r.Severity, r.DurationMs, r.Actor), "header", r.ID, 0})
+		if r.Kind == "query-validators" && r.QueryID == m.queryID && r.Environment == m.queryEnvironment {
+			for i := range r.Steps {
+				step := &r.Steps[i]
+				if step.Kind == "query" && step.QueryID == r.QueryID && m.queryExecution != nil && step.Execution != nil && *step.Execution == *m.queryExecution {
+					m.rebuildQueryRows(step)
+					break
+				}
+			}
+		}
 		for _, s := range r.Steps {
 			m.addStepResult(s, 0)
 		}
 		break
 	}
+}
+
+func (m *Model) rebuildQueryRows(step *detective.StepResult) {
+	if m.queryResult == nil || m.queryResult.Result.Execution == nil || m.queryExecution == nil || *m.queryResult.Result.Execution != *m.queryExecution {
+		return
+	}
+	result := m.queryResult
+	ref := result.Result.Execution
+	m.rows = append(m.rows, row{fmt.Sprintf("Saved query %s · %s · receipt %s", m.queryID, m.queryEnvironment, ref.ExecutionID), "header", ref.ExecutionID, 0})
+	if result.QueryRevision != "" {
+		m.rows = append(m.rows, row{"Query revision " + result.QueryRevision, "header", ref.ExecutionID, 0})
+	}
+	if result.ResultFingerprint != "" {
+		m.rows = append(m.rows, row{"Result fingerprint " + result.ResultFingerprint, "header", ref.ExecutionID, 0})
+	}
+	rowCount := len(result.Result.Recordset.Rows)
+	rowLabel := fmt.Sprintf("%d retained rows", rowCount)
+	if result.Result.Truncated {
+		rowLabel += " · truncated"
+	}
+	m.rows = append(m.rows, row{rowLabel, "header", ref.ExecutionID, 0})
+	for index, cells := range result.Result.Recordset.Rows {
+		parts := make([]string, 0, len(cells))
+		for column, cell := range cells {
+			name := fmt.Sprintf("column %d", column+1)
+			if column < len(result.Result.Recordset.Columns) {
+				name = result.Result.Recordset.Columns[column].Name
+			}
+			parts = append(parts, name+"="+queryCellText(cell))
+		}
+		label := fmt.Sprintf("Row %d · %s", index+1, strings.Join(parts, " · "))
+		if step != nil {
+			for _, validation := range step.Validators {
+				if validation.RowIndex != nil && *validation.RowIndex == index {
+					label += " · Validator " + validation.ValidatorID + " " + validation.Outcome
+				}
+			}
+		}
+		m.rows = append(m.rows, row{label, "query-row", strconv.Itoa(index), 1})
+	}
+}
+
+func queryCellText(value apicontract.TypedValue) string {
+	var shown string
+	switch value.Type {
+	case apicontract.ValueTypeBoolean:
+		shown = strconv.FormatBool(value.Bool)
+	case apicontract.ValueTypeNumber:
+		shown = strconv.FormatFloat(value.Num, 'g', -1, 64)
+	case apicontract.ValueTypeNull:
+		shown = "null"
+	default:
+		shown = value.Str
+	}
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, shown)
 }
 func (m *Model) addStepResult(s detective.StepResult, depth int) {
 	label := fmt.Sprintf("%s %s · %s/%s · %s · rows %d", s.Kind, s.StepID, s.ExecutionStatus, s.Outcome, s.Severity, s.RowCount)
@@ -832,7 +953,7 @@ func (m *Model) View() tea.View {
 		if len(m.rows) == 0 {
 			b.WriteString("No items. Ctrl+N creates one where available.\n")
 		}
-		if m.screen == runDetail && len(m.rows) > 0 {
+		if (m.screen == runDetail || m.screen == queryDetail) && len(m.rows) > 0 {
 			wrapped := strings.Split(ansi.Wrap(m.rows[m.index].label, max(1, m.width-1), " "), "\n")
 			b.WriteString("\n" + strings.Join(wrapped[max(0, len(wrapped)-2):], "\n") + "\n")
 		}
@@ -864,6 +985,9 @@ func (m *Model) hints() string {
 	}
 	if m.screen == runDetail {
 		return "↑↓ inspect nested results · F toggle failures · Enter detail · Esc back"
+	}
+	if m.screen == queryDetail {
+		return "↑↓ inspect retained rows · Enter selected row · Esc back"
 	}
 	if m.screen == history {
 		if m.state.RunsHasMore {

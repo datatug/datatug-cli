@@ -151,7 +151,7 @@ func (m *Model) startNew() (tea.Model, tea.Cmd) {
 		return m, nil
 	case scenarios:
 		m.parent = scenarios
-		m.begin("new-scenario", "New Scenario", []field{f("ID", "", "stable slug"), f("Title", "", "reusable guided investigation"), f("Description", "", "optional")})
+		m.begin("new-scenario", "New Scenario", []field{f("ID", "", "stable slug"), f("Title", "", "reusable guided investigation"), f("Description", "", "optional"), f("Inputs", "", "name:type:scalar|set|range[:required], comma separated")})
 		return m, nil
 	case validators:
 		m.parent = validators
@@ -300,14 +300,36 @@ func (m *Model) detailKey(key string) (tea.Model, tea.Cmd) {
 		}
 		switch key {
 		case "e":
-			m.begin("edit-scenario", "Edit Scenario", []field{f("ID", s.ID, "stable ID"), f("Title", s.Title, ""), f("Description", s.Description, "")})
+			if len(m.rows) > 0 && m.rows[m.index].kind == "scenario-step" {
+				for i, step := range s.Steps {
+					if step.ID == m.rows[m.index].id {
+						m.begin("edit-scenario-step", "Edit Scenario step", scenarioStepFields(step))
+						m.form.scenario = *s
+						m.form.stepIndex = i
+						return m, nil
+					}
+				}
+			}
+			m.begin("edit-scenario", "Edit Scenario", []field{f("ID", s.ID, "stable ID"), f("Title", s.Title, ""), f("Description", s.Description, ""), f("Inputs", formatInputs(s.Inputs), "name:type:cardinality[:required], comma separated")})
 			m.form.scenario = *s
 			return m, nil
 		case "a":
-			m.begin("add-scenario-step", "Add Scenario step", []field{f("ID", "", "stable step ID"), f("Kind", "check", "check or query"), f("Ref", "", "catalog reference")})
+			m.begin("add-scenario-step", "Add Scenario step", scenarioStepFields(detective.ScenarioStep{}))
 			m.form.scenario = *s
 			return m, nil
 		}
+	case validators:
+		v := m.currentValidator()
+		if v == nil {
+			return m, nil
+		}
+		if key == "e" {
+			fields := validatorFields(v.Validator, v.ID)
+			fields[1].value = v.Title
+			m.begin("edit-promoted", "Edit reusable Validator", fields)
+			m.form.validator = *v
+		}
+		return m, nil
 	case queryValidators:
 		q := m.currentQueryValidators()
 		if q == nil {
@@ -443,7 +465,26 @@ func (m *Model) checkByID(id string) *detective.Check {
 	return nil
 }
 func (m *Model) submitForm() (*detective.ActionRequest, error) {
-	f := m.form
+	f := *m.form
+	// Form drafts are read from cached State. Detach every nested map and slice
+	// before building a request so a rejected or canceled action cannot change
+	// the visible catalog while the server still holds the authoritative value.
+	var err error
+	if f.check, err = detachedFormValue(f.check); err != nil {
+		return nil, err
+	}
+	if f.caseItem, err = detachedFormValue(f.caseItem); err != nil {
+		return nil, err
+	}
+	if f.scenario, err = detachedFormValue(f.scenario); err != nil {
+		return nil, err
+	}
+	if f.validator, err = detachedFormValue(f.validator); err != nil {
+		return nil, err
+	}
+	if f.queryValidators, err = detachedFormValue(f.queryValidators); err != nil {
+		return nil, err
+	}
 	req := &detective.ActionRequest{}
 	switch f.kind {
 	case "new-check", "edit-check":
@@ -499,7 +540,7 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 		}
 		req.Type = "save-check"
 		req.Check = &c
-	case "promote-validator", "new-promoted":
+	case "promote-validator", "new-promoted", "edit-promoted":
 		v, err := m.parseValidator()
 		if err != nil {
 			return nil, err
@@ -510,6 +551,9 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 		p.Validator = v
 		if p.ID == "" || p.Title == "" {
 			return nil, fmt.Errorf("catalog ID and title required")
+		}
+		if f.kind == "edit-promoted" && p.ID != f.validator.ID {
+			return nil, fmt.Errorf("reusable Validator ID cannot change")
 		}
 		req.Type = "save-validator"
 		req.Validator = &p
@@ -660,6 +704,11 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 		s.ID = m.field("ID")
 		s.Title = m.field("Title")
 		s.Description = m.field("Description")
+		inputs, err := parseInputs(m.field("Inputs"))
+		if err != nil {
+			return nil, err
+		}
+		s.Inputs = inputs
 		if s.ID == "" || s.Title == "" {
 			return nil, fmt.Errorf("ID and title required")
 		}
@@ -667,19 +716,26 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 			return nil, fmt.Errorf("scenario ID cannot change")
 		}
 		if f.kind == "new-scenario" {
-			m.begin("first-scenario-step", "First Scenario step", []field{field{label: "ID", help: "stable step ID"}, field{label: "Kind", value: "check", help: "check or query"}, field{label: "Ref", help: "catalog reference"}})
+			m.begin("first-scenario-step", "First Scenario step", scenarioStepFields(detective.ScenarioStep{}))
 			m.form.scenario = s
 			return nil, nil
 		}
 		req.Type = "save-scenario"
 		req.Scenario = &s
-	case "first-scenario-step", "add-scenario-step":
+	case "first-scenario-step", "add-scenario-step", "edit-scenario-step":
 		s := f.scenario
 		step := detective.ScenarioStep{ID: m.field("ID"), Kind: m.field("Kind"), Ref: m.field("Ref")}
 		if step.ID == "" || step.Ref == "" || (step.Kind != "check" && step.Kind != "query") {
 			return nil, fmt.Errorf("valid step ID, kind and ref required")
 		}
-		s.Steps = append(s.Steps, step)
+		if f.kind == "edit-scenario-step" {
+			if step.ID != s.Steps[f.stepIndex].ID {
+				return nil, fmt.Errorf("Scenario step ID cannot change")
+			}
+			s.Steps[f.stepIndex] = step
+		} else {
+			s.Steps = append(s.Steps, step)
+		}
 		req.Type = "save-scenario"
 		req.Scenario = &s
 	default:
@@ -687,12 +743,27 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 	}
 	return req, nil
 }
+
+func detachedFormValue[T any](value T) (T, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return value, fmt.Errorf("copy form resource: %w", err)
+	}
+	var detached T
+	if err := json.Unmarshal(data, &detached); err != nil {
+		return value, fmt.Errorf("copy form resource: %w", err)
+	}
+	return detached, nil
+}
 func stepFields(s detective.Step) []field {
 	ref := s.QueryID
 	if s.Kind == "check" {
 		ref = s.CheckID
 	}
 	return []field{f("ID", s.ID, "stable step slug"), f("Kind", defaultString(s.Kind, "query"), "query or check"), f("Ref", ref, "saved query ID or globally reusable Check ID"), f("Bindings", formatBindings(s.Bindings), "child=parent; child=range.start; child=@row-column, comma separated"), f("On unavailable", s.OnUnavailable, "block, fail, warn, skip or empty")}
+}
+func scenarioStepFields(s detective.ScenarioStep) []field {
+	return []field{f("ID", s.ID, "stable step ID"), f("Kind", defaultString(s.Kind, "check"), "check or query"), f("Ref", s.Ref, "saved query or Check catalog ID")}
 }
 func validatorFields(v detective.Validator, id string) []field {
 	return []field{f("Catalog ID", id, "only for promoted Validators"), f("Title", id, "only for promoted Validators"), f("ID", v.ID, "local Validator slug"), f("Scope", defaultString(v.Scope, "row"), "row or set"), f("Kind", defaultString(v.Kind, "non-null"), "non-null, equals-fields, row-count, unique, sum-equals, check"), f("Severity", defaultString(v.Severity, "error"), "critical, error, warning, info"), f("Field", v.Field, "field to inspect"), f("Other field", v.OtherField, "comparison field"), f("Expected", formatExpected(v.Expected), "row-count expected integer"), f("Check ID", v.CheckID, "globally reusable Check for kind=check"), f("Bindings", formatBindings(v.Bindings), "child=@row-column for per-row Check"), f("On unavailable", v.OnUnavailable, "block, fail, warn, skip or empty"), f("Promoted ID", v.ValidatorID, "reference an existing reusable Validator instead of defining a local kind")}

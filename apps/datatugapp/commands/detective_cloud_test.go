@@ -18,6 +18,7 @@ import (
 
 func TestHostedAITransportUsesBearerScopeAndStableConfirmation(t *testing.T) {
 	var confirmIDs []string
+	var generationIDs []string
 	s := &detectiveCloudService{session: cloudSession{baseURL: "https://api.example.test/v0/", httpClient: &http.Client{Transport: detectiveRoundTrip(func(r *http.Request) (*http.Response, error) {
 		if r.Header.Get("Authorization") != "Bearer scoped-token" {
 			t.Fatal("missing hosted AI bearer")
@@ -37,6 +38,7 @@ func TestHostedAITransportUsesBearerScopeAndStableConfirmation(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/v0/datatug/detective/ai_proposals":
+			generationIDs = append(generationIDs, body["operationId"].(string))
 			return detectiveResponse(200, `{"proposals":[{"id":"p1"}]}`), nil
 		case "/v0/datatug/detective/ai_review":
 			if body["type"] != "context" || body["context"] == nil {
@@ -54,8 +56,13 @@ func TestHostedAITransportUsesBearerScopeAndStableConfirmation(t *testing.T) {
 	if page, err := s.AIProposals(context.Background(), ""); err != nil || len(page.Proposals) != 1 {
 		t.Fatalf("hosted AI list: %+v %v", page, err)
 	}
-	if _, err := s.GenerateAI(context.Background(), detectiveui.AIGenerate{Text: "invoice 7", CaseID: "case-1"}); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if _, err := s.GenerateAI(context.Background(), detectiveui.AIGenerate{Text: "invoice 7", CaseID: "case-1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(generationIDs) != 2 || !detective.ValidSlug(generationIDs[0]) || generationIDs[0] == generationIDs[1] {
+		t.Fatalf("successful hosted AI request reused generation: %v", generationIDs)
 	}
 	if _, err := s.ReviewAI(context.Background(), detectiveui.AIReview{Type: "context", Context: &ai.ContextReviewRequest{ProposalID: "p1", CaseID: "case-1", ExpectedVersion: 2}}); err != nil {
 		t.Fatal(err)
@@ -65,7 +72,7 @@ func TestHostedAITransportUsesBearerScopeAndStableConfirmation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(confirmIDs) != 2 || confirmIDs[0] == "" || confirmIDs[0] != confirmIDs[1] {
+	if len(confirmIDs) != 2 || !detective.ValidSlug(confirmIDs[0]) || confirmIDs[0] != confirmIDs[1] {
 		t.Fatalf("hosted AI confirm identity changed: %#v", confirmIDs)
 	}
 }

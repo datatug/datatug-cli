@@ -57,7 +57,7 @@ func TestDetectiveLocalAITransportScopesReviewAndReplay(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	s := detectiveUIService{client: agentHTTPClient{baseURL: server.URL, client: server.Client()}, project: "demo", securityContextID: "session-1"}
+	s := detectiveUIService{client: agentHTTPClient{baseURL: server.URL, client: server.Client()}, project: "demo", securityContextID: "session-1", pending: &detectiveOperationTracker{ids: map[string]string{}}}
 	page, err := s.AIProposals(context.Background(), "")
 	if err != nil || len(page.Proposals) != 1 {
 		t.Fatalf("AI proposals: %+v %v", page, err)
@@ -67,8 +67,8 @@ func TestDetectiveLocalAITransportScopesReviewAndReplay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(generated) != 2 || generated[0]["operationId"] == "" || generated[0]["operationId"] != generated[1]["operationId"] || generated[0]["securityContextId"] != "session-1" || generated[0]["expectedCounts"].(map[string]any)["invoice_ids"] != float64(7) {
-		t.Fatalf("AI generation retry/scope: %#v", generated)
+	if len(generated) != 2 || !detective.ValidSlug(generated[0]["operationId"].(string)) || generated[0]["operationId"] == generated[1]["operationId"] || generated[0]["securityContextId"] != "session-1" || generated[0]["expectedCounts"].(map[string]any)["invoice_ids"] != float64(7) {
+		t.Fatalf("fresh successful AI generation identity/scope: %#v", generated)
 	}
 	if _, err := s.ReviewAI(context.Background(), detectiveui.AIReview{Type: "draft", Draft: &ai.ReviewedDraftRequest{ProposalID: "proposal-1", Digest: "digest", Draft: ai.Draft{Kind: ai.KindCase, Case: &ai.CaseEdit{CaseID: "case-1", ExpectedVersion: 2}}}}); err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestDetectiveLocalAITransportScopesReviewAndReplay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(confirmed) != 2 || confirmed[0]["operationId"] == "" || confirmed[0]["operationId"] != confirmed[1]["operationId"] || confirmed[0]["project"] != "demo" || confirmed[0]["securityContextId"] != "session-1" {
+	if len(confirmed) != 2 || !detective.ValidSlug(confirmed[0]["operationId"].(string)) || confirmed[0]["operationId"] != confirmed[1]["operationId"] || confirmed[0]["project"] != "demo" || confirmed[0]["securityContextId"] != "session-1" {
 		t.Fatalf("AI confirm retry/scope: %#v", confirmed)
 	}
 }
@@ -270,7 +270,7 @@ func TestDetectiveLocalIncidentTransportReusesMutationIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := service.IncidentAction(context.Background(), action)
-	if err != nil || first.Receipt == "" || second.Receipt != first.Receipt || len(ids) != 2 || ids[0] != ids[1] {
+	if err != nil || first.Receipt == "" || second.Receipt != first.Receipt || len(ids) != 2 || ids[0] != ids[1] || !detective.ValidSlug(ids[0]) {
 		t.Fatalf("local Incidentius retry identity: %q, %q, %#v, %v", first.Receipt, second.Receipt, ids, err)
 	}
 }
@@ -314,7 +314,7 @@ func TestDetectiveLocalKnowledgeTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := service.KnowledgeAction(context.Background(), action)
-	if err != nil || first.Receipt == "" || second.Receipt != first.Receipt || len(ids) != 2 || ids[0] != ids[1] {
+	if err != nil || first.Receipt == "" || second.Receipt != first.Receipt || len(ids) != 2 || ids[0] != ids[1] || !detective.ValidSlug(ids[0]) {
 		t.Fatalf("local knowledge retry identity: %q, %q, %#v, %v", first.Receipt, second.Receipt, ids, err)
 	}
 }

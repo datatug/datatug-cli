@@ -59,11 +59,12 @@ func TestDetectiveExistingExecutionUsesReceiptAndSameRows(t *testing.T) {
 	require.Error(t, err)
 	_, _, err = loadDetectiveExecutionResult(ctx, project, "bob", "list", "qa", &ref, nil)
 	require.Error(t, err)
-	proof, err := loadDetectiveScenarioQueryProof(ctx, project, "alice", &ref)
+	proof, proofInputs, err := loadDetectiveScenarioQueryProof(ctx, project, "alice", &ref)
 	require.NoError(t, err)
 	require.Equal(t, "list", proof.QueryID)
 	require.Equal(t, "completed", proof.ExecutionStatus)
-	_, err = loadDetectiveScenarioQueryProof(ctx, project, "bob", &ref)
+	require.Equal(t, input, *proofInputs["invoice_id"].Scalar)
+	_, _, err = loadDetectiveScenarioQueryProof(ctx, project, "bob", &ref)
 	require.Error(t, err)
 	partial := receipt
 	partial.Ref.ExecutionID = "partial-rows"
@@ -71,7 +72,7 @@ func TestDetectiveExistingExecutionUsesReceiptAndSameRows(t *testing.T) {
 	incomplete := false
 	partial.ResultComplete = &incomplete
 	require.NoError(t, store.PutExecution(ctx, partial))
-	_, err = loadDetectiveScenarioQueryProof(ctx, project, "alice", &partial.Ref)
+	_, _, err = loadDetectiveScenarioQueryProof(ctx, project, "alice", &partial.Ref)
 	require.Error(t, err)
 	bad := receipt
 	bad.Ref.ExecutionID = "bad-fingerprint"

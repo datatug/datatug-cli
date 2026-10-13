@@ -327,7 +327,7 @@ func TestUnifiedWorkspaceToolbarTogglePreservesContextFeedbackAndModalPriority(t
 			t.Fatal("toggle lost retained state")
 		}
 		first := strings.Split(ansi.Strip(u.shell.View().Content), "\n")[0]
-		if !strings.Contains(first, "Help [F1]") || !strings.Contains(first, "Server ") {
+		if !strings.Contains(first, "F1 Help") || !strings.Contains(first, "F8 Server ") {
 			t.Fatalf("compact header lost recovery/status: %s", first)
 		}
 		u.shell.Update(uitest.Key("f1"))

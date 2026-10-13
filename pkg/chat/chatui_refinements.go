@@ -28,7 +28,7 @@ type inspectResultColumnsMsg struct {
 // Inspect reads admitted metadata only after the user opens the Result tab.
 // Its keyed response cannot paint a different session or a newer result.
 func (u *ChatUI) loadInspectResultColumns() tea.Cmd {
-	if u.workspace == nil || u.workspace.tab != 1 || u.workspace.inspectorSubTab != 2 || u.sessions == nil {
+	if u.workspace == nil || u.workspace.hasExplorerInspection() || u.workspace.tab != 1 || u.workspace.inspectorSubTab != 2 || u.sessions == nil {
 		return nil
 	}
 	_, record, ok := u.activeGrid()
@@ -56,20 +56,76 @@ func (p *workspacePanel) inspectExplorerSelection() {
 		return
 	}
 	target := p.ui.workspace
-	target.inspectObject = nil
-	target.inspectGroup = ""
+	target.clearExplorerInspection()
+	target.tab = 1
+	target.inspectorOffset = 0
 	nodes := p.explorerNodes()
 	if p.explorerIndex < 0 || p.explorerIndex >= len(nodes) {
+		target.inspectGroup = "No matching objects"
 		return
 	}
 	node := nodes[p.explorerIndex]
-	if node.objectIndex >= 0 && node.objectIndex < len(p.ui.catalog.Objects) {
-		object := p.ui.catalog.Objects[node.objectIndex]
+	index := node.objectIndex
+	if index < 0 && node.issue {
+		index = node.issueFor
+	}
+	if index >= 0 && index < len(p.ui.catalog.Objects) {
+		object := p.ui.catalog.Objects[index]
 		target.inspectObject = &object
 	} else {
 		target.inspectGroup = node.label
+		// Membership comes from the complete admitted tree, never the filtered
+		// or collapsed presentation and never a guessed source-name split.
+		inside := false
+		for _, member := range p.allExplorerNodes() {
+			if member.id == node.id {
+				inside = true
+				continue
+			}
+			if !inside {
+				continue
+			}
+			if member.depth <= node.depth {
+				break
+			}
+			if member.objectIndex >= 0 && member.objectIndex < len(p.ui.catalog.Objects) {
+				target.inspectGroupObjects = append(target.inspectGroupObjects, p.ui.catalog.Objects[member.objectIndex])
+			}
+		}
 	}
-	target.inspectorOffset = 0
+}
+
+func (p *workspacePanel) hasExplorerInspection() bool {
+	return p.inspectObject != nil || p.inspectGroup != ""
+}
+
+func (p *workspacePanel) clearExplorerInspection() {
+	if p.hasExplorerInspection() {
+		p.inspectorOffset = 0
+	}
+	p.inspectObject, p.inspectGroup, p.inspectGroupObjects = nil, "", nil
+}
+
+// catalogInspectionView replaces result-specific tabs, Related and Actions as
+// one viewport. Only catalog metadata is read; there is no execution path.
+func (p *workspacePanel) catalogInspectionView(width, height int) string {
+	var lines []string
+	nameStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.WorkspaceMintColor())
+	if p.inspectObject != nil {
+		title, detail := projectObjectDetails(*p.inspectObject, width)
+		lines = append(lines, strings.Split(ansi.Wrap(nameStyle.Render(sanitizeTerminalText(title)), max(1, width), " "), "\n")...)
+		lines = append(lines, strings.Split(detail, "\n")...)
+	} else {
+		lines = append(lines, nameStyle.Render(sanitizeTerminalText(p.inspectGroup)), "")
+		for _, object := range p.inspectGroupObjects {
+			lines = append(lines, nameStyle.Render(ansi.Truncate(sanitizeTerminalText(object.Reference.Title), max(1, width), "…")))
+		}
+		if len(p.inspectGroupObjects) == 0 && p.inspectGroup != "No matching objects" {
+			lines = append(lines, "No admitted objects.")
+		}
+	}
+	p.inspectorOffset = max(0, min(p.inspectorOffset, max(0, len(lines)-max(1, height))))
+	return strings.Join(lines[p.inspectorOffset:min(len(lines), p.inspectorOffset+max(1, height))], "\n")
 }
 
 func (p *workspacePanel) inspectStackView(width, height int) string {
@@ -83,29 +139,13 @@ func (p *workspacePanel) inspectStackView(width, height int) string {
 	}
 	inspectHeight := max(1, height-relatedHeight-5)
 	var inspect string
-	if p.ui.shell.WorkspaceFocus() == "transcript" {
-		if _, _, ok := p.ui.activeGrid(); ok {
-			p.inspectObject, p.inspectGroup = nil, ""
-		}
-	}
-	if p.inspectObject != nil {
-		title, detail := projectObjectDetails(*p.inspectObject, width)
-		// Object names need to remain readable at the narrow Inspect width.
-		// Wrap the heading before the scroll window clips its lines.
-		lines := strings.Split(ansi.Wrap(sanitizeTerminalText(title), max(1, width), " ")+"\n"+detail, "\n")
-		p.inspectorOffset = min(p.inspectorOffset, max(0, len(lines)-inspectHeight))
-		inspect = strings.Join(lines[p.inspectorOffset:min(len(lines), p.inspectorOffset+inspectHeight)], "\n")
-	} else if p.inspectGroup != "" {
-		inspect = sanitizeTerminalText(p.inspectGroup) + "\nBrowse its objects with ↑↓ and →."
-	} else {
-		inspect = p.inspectorView(width, inspectHeight)
-	}
+	inspect = p.inspectorView(width, inspectHeight)
 	related := p.relatedView(width, relatedHeight+1)
 	// The stack supplies Related's header, so its body never duplicates it.
 	if _, tail, ok := strings.Cut(related, "\n"); ok {
 		related = tail
 	}
-	sections := []string{inspect, "", theme.WorkspacePanelHeader("Related", "F10"), related, "", theme.WorkspacePanelHeader("Actions", "Ctrl+P"), ansi.Truncate("Search actions · Enter to run", width, "…")}
+	sections := []string{inspect, "", theme.WorkspacePanelHeader("Related", "F10"), related, "", theme.WorkspacePanelHeader("Actions", "Ctrl+P"), ansi.Truncate("Search actions · "+theme.WorkspaceKeyHint("Enter")+" to run", width, "…")}
 	if status := p.ui.operationLabel(); status != "" {
 		sections[len(sections)-1] = ansi.Truncate(status, width, "…")
 	}
@@ -176,7 +216,7 @@ func (p *workspacePanel) compactResultColumns(width int) []string {
 	if count == 0 {
 		lines = append(lines, "No omitted fields in admitted metadata.")
 	} else {
-		lines = append(lines, "Ctrl+P Actions → Add columns…")
+		lines = append(lines, theme.WorkspaceKeyHint("Ctrl+P")+" Actions → Add columns…")
 	}
 	return lines
 }

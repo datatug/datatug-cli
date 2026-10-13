@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/tuigoff/tuigoff/pkg/theme"
 )
 
 // Render renders current, real observations. offset is distance from the newest
@@ -37,12 +39,12 @@ func Render(s Snapshot, width, height, offset int) string {
 		}
 		chart.WriteRune(bars[i])
 	}
-	lines = append(lines, chart.String(), fmt.Sprintf("Peak %d requests / 5s", peak), "", "Request log · ↑↓ scroll · End follow · Esc back", "Time      Method  Status  Outcome    Duration  Path")
+	lines = append(lines, chart.String(), fmt.Sprintf("Peak %d requests / 5s", peak), "", "Request log · "+theme.WorkspaceKeyHint("↑↓")+" scroll · "+theme.WorkspaceKeyHint("End")+" follow · "+theme.WorkspaceKeyHint("Esc")+" back", "Time      Method  Status  Outcome    Duration  Path")
 	limit := max(1, height-len(lines))
 	end := max(0, len(s.Requests)-offset)
 	start := max(0, end-limit)
 	if len(s.Requests) == 0 {
-		lines = append(lines, "No requests yet. Open the web workspace with F5 to see API activity.")
+		lines = append(lines, "No requests yet. Open the web workspace with "+theme.WorkspaceKeyHint("F5")+" to see API activity.")
 	}
 	for _, r := range s.Requests[start:end] {
 		status := "—"

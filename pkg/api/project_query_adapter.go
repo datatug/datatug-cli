@@ -93,7 +93,7 @@ func (LocalProjectQueryAdapter) Capabilities(_ context.Context, ref dto.ProjectR
 	if ref.StoreID != LocalStoreID {
 		return dto.ProjectCapabilities{}, ErrUnknownStoreID
 	}
-	return dto.ProjectCapabilities{QueryRead: true, QuerySave: true}, nil
+	return dto.ProjectCapabilities{QueryRead: true, QuerySave: true, SemanticModel: true}, nil
 }
 
 // LocalProjectBranches lists only local heads of the authenticated served

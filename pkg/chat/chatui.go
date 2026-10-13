@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -69,6 +70,7 @@ type ChatUI struct {
 	// recent, grid) used by /export current until Ctrl+G/focus tracking
 	// lands with GlobalKeys (see the Lane C report's deviations).
 	lastGridRecordSetID string
+	retainedRecordSetID string
 	entrySeq            int
 
 	// workspace is the SidePanel — DataTug's workspace pane (checklist #8).
@@ -83,6 +85,15 @@ type ChatUI struct {
 	queryEditors             map[string]*workspaceQueryEditor
 	workspaceInteraction     uint64
 	workspaceMutationPending bool
+	operation                *workspaceOperation
+	operationSequence        uint64
+	backends                 map[uint64]*workspaceOperation
+	bridgeReconcilePending   bool
+	trailNodes               map[string]*explorationNode
+	localTrailOrder          []string
+	localTrailSequence       int
+	trailHistory             []string
+	trailPosition            int
 
 	savedQueryService SavedQueryService
 	savedQueries      []SavedQuery
@@ -326,6 +337,13 @@ func (u *ChatUI) Run(options ...tea.ProgramOption) error {
 // command (ported from ui.go's runSessionCommand), anything else asks the
 // conversation.
 func (u *ChatUI) Submit(text string) tea.Cmd {
+	// Direct handler calls and a dismissed slash-completion menu must use the
+	// same execution fence as ordinary composer submission.
+	if u.backendBusy() && text != "/actions" && text != "/keys" && text != "/trail" && text != "/help" {
+		u.sessionFence()
+		u.shell.SetComposerText(text)
+		return nil
+	}
 	u.shell.ShowTranscript()
 	if len(u.catalog.Objects) > 0 {
 		u.shell.SetLeftPanel(u.explorer)
@@ -470,6 +488,9 @@ func (u *ChatUI) OnStreamDone(id string, _ error) tea.Cmd {
 	if !ok || outcome.err != nil {
 		return nil
 	}
+	if snapshot, ready := u.snapshotIfReady(); ready && snapshot.ID == u.sessionID {
+		u.snapshot = snapshot
+	}
 	u.shell.ReplaceBlock(id, finalTurnTextBlock{text: outcome.turn.Text})
 	u.appendTurnResults(outcome.turn)
 	if u.hostedPlan != nil {
@@ -571,6 +592,12 @@ func (u *ChatUI) appendGridResult(query QueryResult) {
 	if query.RecordSetID != "" {
 		u.gridsByRecordSetID[query.RecordSetID] = styled
 	}
+	record := u.snapshot.RecordSets[query.RecordSetID]
+	if record.ID == "" {
+		record = RecordSet{ID: query.RecordSetID, Title: query.Title, DTQL: query.DTQL, Result: query.Result, Lineage: query.Lineage}
+	}
+	u.rememberResult(record)
+	u.resultScope(styled, record)
 	styled.SetKeyHandler(u.handleGridKey)
 	block := u.blockForGrid(styled.Model, query.RecordSetID, query.DTQL)
 	u.lastGridEntryID = u.appendBlockWithID("grid", block)
@@ -596,6 +623,9 @@ func (u *ChatUI) blockForGrid(gridModel *grid.Model, recordSetID string, documen
 	}
 	if groupedRecord(&record) {
 		delete(u.joinBlocksByRecordSetID, recordSetID)
+		return gridblock.Wrap(gridModel)
+	}
+	if u.backendBusy() {
 		return gridblock.Wrap(gridModel)
 	}
 	candidates, err := u.sessions.JoinCandidates(u.ctx, recordSetID)
@@ -627,11 +657,13 @@ func (u *ChatUI) blockForGrid(gridModel *grid.Model, recordSetID string, documen
 }
 
 func (u *ChatUI) applyJoinCmd(recordSetID string, candidateID JoinCandidateID) tea.Cmd {
-	if u.workspaceMutationPending {
+	if u.workspaceMutationPending || u.backendBusy() {
+		u.workspaceFeedback = "Cancel the running operation before starting another."
 		return nil
 	}
 	u.workspaceMutationPending = true
-	sessionID, generation, ctx := u.sessionID, u.workspaceGeneration, u.workspaceContext
+	sessionID, generation := u.sessionID, u.workspaceGeneration
+	operationID, ctx := u.beginOperation("JOIN")
 	interaction, originFocus := u.workspaceInteraction, u.shell.WorkspaceFocus()
 	rowKey, entryID := "", u.shell.FocusedEntryID()
 	if g := u.gridsByRecordSetID[recordSetID]; g != nil {
@@ -639,7 +671,7 @@ func (u *ChatUI) applyJoinCmd(recordSetID string, candidateID JoinCandidateID) t
 	}
 	return func() tea.Msg {
 		_, err := u.sessions.ApplyJoinCandidateActive(ctx, sessionID, recordSetID, candidateID)
-		return JoinAppliedMsg{SessionID: sessionID, Generation: generation, RecordSetID: recordSetID, CandidateID: candidateID, Err: err, Captured: true, Interaction: interaction, OriginFocus: originFocus, RowKey: rowKey, EntryID: entryID}
+		return JoinAppliedMsg{OperationID: operationID, SessionID: sessionID, Generation: generation, RecordSetID: recordSetID, CandidateID: candidateID, Err: err, Captured: true, Interaction: interaction, OriginFocus: originFocus, RowKey: rowKey, EntryID: entryID}
 	}
 }
 
@@ -658,6 +690,16 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft && msg.Y == 0 {
 			header := strings.Split(ansi.Strip(u.shell.View().Content), "\n")[0]
+			if at := strings.Index(header, "Cancel [Ctrl+X]"); at >= 0 && msg.X >= ansi.StringWidth(header[:at]) && msg.X < ansi.StringWidth(header[:at])+len("Cancel [Ctrl+X]") {
+				u.cancelOperation(true)
+				return nil
+			}
+			if at := strings.Index(header, "Ctrl+P Actions"); at >= 0 && msg.X >= ansi.StringWidth(header[:at]) && msg.X < ansi.StringWidth(header[:at])+len("Ctrl+P Actions") {
+				return u.openWorkspaceActions()
+			}
+			if at := strings.Index(header, "F1 Help"); at >= 0 && msg.X >= ansi.StringWidth(header[:at]) && msg.X < ansi.StringWidth(header[:at])+len("F1 Help") {
+				return u.shell.PushOverlay(u.newHotkeysOverlay())
+			}
 			if at := strings.Index(header, "Session: "); at >= 0 && msg.X >= ansi.StringWidth(header[:at]) && msg.X < ansi.StringWidth(strings.TrimRight(header, " ")) {
 				return u.openSessionPicker()
 			}
@@ -667,6 +709,11 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 			}
 		}
 		return nil
+	case trailVisitMsg:
+		u.visitTrail(msg.id)
+		return nil
+	case workspaceActionMsg:
+		return u.dispatchWorkspaceAction(msg.id)
 	case localPanelBackMsg:
 		if msg.back != nil {
 			msg.back()
@@ -680,12 +727,21 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 		}
 		return nil
 	case workspaceQueryDoneMsg:
+		current := u.operationContextCurrent(msg.operationID)
+		if !u.finishOperation(msg.operationID) {
+			return nil
+		}
 		if msg.sessionID != u.sessionID || msg.generation != u.workspaceGeneration {
 			return nil
 		}
 		u.workspaceMutationPending = false
 		if msg.err != nil {
 			u.workspaceFeedback = msg.err.Error()
+			return nil
+		}
+		if msg.operationID != 0 && (!current || msg.interaction != u.workspaceInteraction) {
+			u.reconcileResults(msg.snapshot)
+			u.workspaceFeedback = "Query completed in session history; current workspace retained."
 			return nil
 		}
 		u.loadSession(msg.snapshot)
@@ -714,19 +770,23 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 		u.shell.SetComposerText(msg.text)
 		return nil
 	case JoinAppliedMsg:
+		contextCurrent := u.operationContextCurrent(msg.OperationID)
+		if !u.finishOperation(msg.OperationID) {
+			return nil
+		}
 		if msg.SessionID != "" && (msg.SessionID != u.sessionID || msg.Generation != u.workspaceGeneration) {
 			return nil
 		}
 		u.workspaceMutationPending = false
 		g, record, ok := u.activeGrid()
-		current := !msg.Captured || (u.shell.ActiveOverlayHints() == nil && msg.Interaction == u.workspaceInteraction && msg.OriginFocus == u.shell.WorkspaceFocus() && msg.EntryID == u.shell.FocusedEntryID() && ok && record.ID == msg.RecordSetID && g.sourceRowKey() == msg.RowKey)
+		current := !msg.Captured || (contextCurrent && u.shell.ActiveOverlayHints() == nil && msg.Interaction == u.workspaceInteraction && msg.OriginFocus == u.shell.WorkspaceFocus() && msg.EntryID == u.shell.FocusedEntryID() && ok && record.ID == msg.RecordSetID && g.sourceRowKey() == msg.RowKey)
 		if !current {
 			// The secure operation may already have persisted its immutable child.
 			// Reconcile durable data without rebuilding blocks or moving a newer
 			// row, editor, composer caret, expansion or panel layout.
 			if msg.Err == nil {
 				if snapshot, err := u.sessions.Snapshot(u.ctx); err == nil {
-					u.snapshot = snapshot
+					u.reconcileResults(snapshot)
 				}
 				u.workspaceFeedback = "JOIN completed in session history; your current workspace is retained."
 			} else {
@@ -773,29 +833,11 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 	case inspectorRelatedMsg:
 		return u.workspace.receiveRelated(msg)
 	case apiTickMsg:
+		u.reconcilePendingBridge()
 		return apiTick()
 	case bridgeTickMsg:
-		// Ported from ui.go's bridgeTickMsg case: the browser bridge (or
-		// anything else) persisted a change to this session out of band —
-		// reload it, same as /switch's u.loadSession(snapshot), unless a
-		// turn is already streaming here (don't yank the transcript out
-		// from under an in-flight local turn). ui.go's refreshSession
-		// restored the focused grid's row/column/sort/scroll state across
-		// a reload; loadSession's fresh gridState instances can't carry
-		// that much, but they can at least keep the same RecordSet
-		// focused (re-picking a fresh entryID for it) instead of silently
-		// dropping focus back to the composer.
-		if u.sessions != nil && !u.shell.Busy() && !u.workspaceMutationPending {
-			if snapshot, err := u.sessions.Snapshot(u.ctx); err == nil && (snapshot.ID != u.sessionID || !snapshot.UpdatedAt.Equal(u.snapshot.UpdatedAt)) {
-				focusedRecordSetID := u.activeRecordSetID()
-				u.loadSession(snapshot)
-				if focusedRecordSetID != "" {
-					if g, ok := u.gridsByRecordSetID[focusedRecordSetID]; ok && g.entryID != "" {
-						u.shell.FocusEntry(g.entryID)
-					}
-				}
-			}
-		}
+		u.bridgeReconcilePending = true
+		u.reconcilePendingBridge()
 		return nil
 	}
 	if u.explorePanel != nil {
@@ -805,12 +847,43 @@ func (u *ChatUI) OnMsg(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
+// Notifications may arrive before their writer releases SessionChat.mu. Keep
+// the latest invalidation until a nonblocking read succeeds; the existing
+// one-second API tick retries without creating another timer or busy loop.
+func (u *ChatUI) reconcilePendingBridge() {
+	if !u.bridgeReconcilePending || u.shell.Busy() || u.workspaceMutationPending || u.backendBusy() {
+		return
+	}
+	snapshot, ready := u.snapshotIfReady()
+	if !ready {
+		return
+	}
+	u.bridgeReconcilePending = false
+	if snapshot.ID == u.sessionID {
+		if !snapshot.UpdatedAt.Equal(u.snapshot.UpdatedAt) {
+			u.reconcileResults(snapshot)
+		}
+	} else {
+		u.loadSession(snapshot)
+	}
+}
+
 // --- session loading ----------------------------------------------------
 
 // loadSession replaces the transcript with session's saved messages/grids —
 // the ChatUI analogue of ui.go's loadSession, minus focus/pane bookkeeping
 // the old UI needed and chatshell now owns.
 func (u *ChatUI) loadSession(session ChatSession) {
+	retained := u.gridsByRecordSetID
+	if session.ID != u.sessionID {
+		retained = nil
+		u.retainedRecordSetID = ""
+		u.trailNodes = nil
+		u.localTrailOrder = nil
+		u.trailHistory = nil
+		u.trailPosition = 0
+	}
+	u.cancelOperation(false)
 	u.workspaceMutationPending = false
 	if u.workspaceCancel != nil {
 		u.workspaceCancel()
@@ -848,6 +921,13 @@ func (u *ChatUI) loadSession(session ChatSession) {
 			u.shell.AppendAssistant(conciseError(err))
 		}
 	}
+	for id, record := range session.RecordSets {
+		u.rememberResult(record)
+		if g := retained[id]; g != nil {
+			g.entryID = ""
+			u.gridsByRecordSetID[id] = g
+		}
+	}
 	hiddenRecords, hiddenHTTP := hiddenRefreshVersions(session, versionsToKeep)
 	// The narrowing notice of a turn follows that turn's messages, as it does live.
 	pendingNotice := ""
@@ -864,12 +944,18 @@ func (u *ChatUI) loadSession(session ChatSession) {
 			if hiddenRecords[message.RecordSetID] || hiddenHTTP[record.HTTPResponseID] {
 				continue
 			}
-			styled := newGridState(NewGridModel(record.Result), record.ID, record.Title, u.chatWidth(), record.Result.Statistics)
+			styled := retained[record.ID]
+			if styled == nil {
+				styled = newGridState(NewGridModel(record.Result), record.ID, record.Title, u.chatWidth(), record.Result.Statistics)
+			}
+			u.rememberResult(record)
 			if previous, ok := session.RecordSets[record.RefreshParentID]; ok {
 				styled.setVersionBadge(refreshBadge(record.Result, previous.Result))
 			}
 			if response, ok := session.HTTPResponses[record.HTTPResponseID]; ok {
-				styled.attachHTTPResponse(response.Body, &response)
+				if styled.httpResponse == nil {
+					styled.attachHTTPResponse(response.Body, &response)
+				}
 				if previous, ok := session.HTTPResponses[response.RefreshParentID]; ok && httpResponseChanged(response, previous) {
 					styled.setVersionBadge("changed")
 				} else if ok {
@@ -880,6 +966,7 @@ func (u *ChatUI) loadSession(session ChatSession) {
 			styled.SetWorkspaceStyle(true)
 			u.lastGridRecordSetID = record.ID
 			u.gridsByRecordSetID[record.ID] = styled
+			u.resultScope(styled, record)
 			styled.SetKeyHandler(u.handleGridKey)
 			u.lastGridEntryID = u.appendBlockWithID("grid", u.blockForGrid(styled.Model, record.ID, record.DTQL))
 			styled.entryID = u.lastGridEntryID
@@ -964,6 +1051,9 @@ func equalColumnsAndRows(a, b secureread.Result) bool {
 // chatui_query_overlay.go, chatui_connect_overlay.go) when invoked bare;
 // given arguments inline they run directly instead.
 var chatCommands = []chatshell.Command{
+	{Name: "/actions", Help: "Search available workspace actions"},
+	{Name: "/keys", Help: "Inspect terminal key delivery"},
+	{Name: "/trail", Help: "Return to retained exploration results"},
 	{Name: "/new", Help: "start a new session"},
 	{Name: "/sessions", Help: "list sessions"},
 	{Name: "/switch", Help: "switch to session <ID>"},
@@ -986,6 +1076,10 @@ var chatCommands = []chatshell.Command{
 }
 
 func (u *ChatUI) runCommand(input string) tea.Cmd {
+	if u.backendBusy() && input != "/actions" && input != "/keys" && input != "/trail" && input != "/help" {
+		u.sessionFence()
+		return nil
+	}
 	parts := strings.SplitN(input, " ", 2)
 	command := parts[0]
 	commandSessionID := u.sessionID
@@ -1052,6 +1146,12 @@ func (u *ChatUI) runCommand(input string) tea.Cmd {
 		} else {
 			snapshot, err = u.sessions.Delete(u.ctx)
 		}
+	case "/actions":
+		cmd = u.openWorkspaceActions()
+	case "/keys":
+		cmd = u.shell.PushOverlay(&keyboardCheckOverlay{})
+	case "/trail":
+		cmd = u.openTrail()
 	case "/help":
 		u.shell.AppendAssistant(chatHelpText)
 	case "/plan":
@@ -1268,6 +1368,9 @@ func (u *ChatUI) exportCommand(argument string) (tea.Cmd, error) {
 var testAfterApplyWorkspaceAction func()
 
 func (u *ChatUI) applyWorkspaceAction(action WorkspaceAction) error {
+	if u.backendBusy() {
+		return fmt.Errorf("wait for the running server operation to stop before changing session context")
+	}
 	if u.sessions == nil {
 		return fmt.Errorf("workspace actions require a durable chat session")
 	}
@@ -1300,10 +1403,21 @@ func (u *ChatUI) topBarInfo(width int) (title, context string, items []theme.Men
 	session := nonempty(u.snapshot.Title, "New chat")
 	apiState := "API " + strings.ToUpper(apimonitor.Default.Snapshot().State) + " [F8]"
 	items = []theme.MenuItem{{Label: apiState}}
+	if label := u.operationLabel(); label != "" {
+		if width < 100 && u.operation != nil {
+			kind := strings.Fields(strings.TrimPrefix(u.operation.label, "Server "))[0]
+			label = fmt.Sprintf("%s %ds Cancel [Ctrl+X]", kind, max(0, int(time.Since(u.operation.started).Seconds())))
+		}
+		items = append([]theme.MenuItem{{Label: label}}, items...)
+	}
 	helpWidth := 0
 	if u.toolbarHidden {
-		items = append(items, theme.MenuItem{Label: "F1 Help · Alt+F1 toolbar"})
-		helpWidth = 26
+		label := "F1 Help · Ctrl+P Actions"
+		if u.operation != nil && width < 100 {
+			label = "F1 Help"
+		}
+		items = append(items, theme.MenuItem{Label: label})
+		helpWidth = ansi.StringWidth(label) + 3
 	}
 	expandWidth := 0
 	if width >= 100 && u.shell != nil && u.shell.WorkspaceFocus() == "transcript" {
@@ -1312,7 +1426,7 @@ func (u *ChatUI) topBarInfo(width int) (title, context string, items []theme.Men
 			expandWidth = 14
 		}
 	}
-	remaining := width - ansi.StringWidth(apiState) - 23 - helpWidth - expandWidth
+	remaining := width - ansi.StringWidth(apiState) - ansi.StringWidth(u.operationLabel()) - 23 - helpWidth - expandWidth
 	if remaining > 16 {
 		project = ansi.Truncate(sanitizeTerminalText(project), max(8, (remaining-6)/2), "…")
 		session = ansi.Truncate(sanitizeTerminalText(session), max(8, (remaining-6)/2), "…")
@@ -1509,6 +1623,9 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 		link := lipgloss.NewStyle().Hyperlink(u.browserURL).Render("Open web chat")
 		return nil, []string{link + ": " + u.browserURL}
 	}
+	if u.operation != nil {
+		return nil, []string{u.operationLabel(), "F1 Help · Ctrl+P Actions"}
+	}
 	if u.shell.Busy() {
 		return nil, []string{"Thinking… · model: " + sanitizeTerminalText(u.modelName)}
 	}
@@ -1518,6 +1635,21 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 		}
 		return nil, nil
 	}
+	if p, ok := u.shell.CenterPanel().(*localGroupsPanel); ok && u.shell.WorkspaceFocus() == "center" {
+		controls := []string{"F1 Hotkeys", "Ctrl+P Actions", "F4 composer", "Ctrl+T Trail", "Alt+←/→ Back/Forward", "Esc back"}
+		if !p.members {
+			controls = append(controls, "Enter constituent rows")
+		}
+		for _, s := range controls {
+			if h, ok := autoHint(s); ok {
+				hints = append(hints, h)
+			}
+		}
+		if u.workspaceFeedback != "" {
+			segments = append(segments, u.workspaceFeedback)
+		}
+		return hints, segments
+	}
 	if u.shell.WorkspaceFocus() == "input" && u.shell.ComposerActionFocused() {
 		return nil, append([]string{"F1 Hotkeys"}, u.workspaceHints(width)...)
 	}
@@ -1525,7 +1657,7 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 		if u.shell.WorkspaceFocus() == "sidebar" && (u.workspace.bookmarkMode != "" || u.workspace.bookmarkGridFocused || u.workspace.dockGridFocused) {
 			return nil, append([]string{"F1 Hotkeys"}, u.workspaceHints(width)...)
 		}
-		compact := []string{"F1 Hotkeys", "F4 composer", "F6 Explorer", "F7 Inspect"}
+		compact := []string{"F1 Hotkeys", "Ctrl+P Actions", "F4 composer", "F6 Explorer", "F7 Inspect"}
 		switch u.shell.WorkspaceFocus() {
 		case "explorer":
 			compact = append(compact, "Enter Open data", "Alt+A Attach", "Ctrl+N New query")
@@ -1555,10 +1687,52 @@ func (u *ChatUI) statusHints(width int) (hints []theme.Hint, segments []string) 
 		}
 		return hints, segments
 	}
-	if u.workspaceFeedback != "" {
+	if u.workspaceFeedback != "" && !u.resultTrailContext() {
 		// Feedback must precede ordinary hints so short terminals retain the
 		// explanation. Treat it as wrapping text, not an atomic key/label pair.
 		return nil, append([]string{u.workspaceFeedback, "F1 Hotkeys"}, u.workspaceHints(width)...)
+	}
+	if u.resultTrailContext() {
+		essentials := []string{"F1 Hotkeys", "Ctrl+P / Ctrl+Space Actions", "F4 composer", "F9 Expand"}
+		if g, _, ok := u.activeGrid(); ok {
+			switch g.ActiveView() {
+			case gridViewCharts:
+				essentials = append(essentials, "↑↓ chart candidates")
+			case gridViewCurrentRow:
+				essentials = append(essentials, "↑↓ inspector")
+			case gridViewRaw, gridViewHeaders:
+				essentials = append(essentials, "↑↓ scroll · PgUp/PgDn page")
+			default:
+				essentials = append(essentials, "↑↓ rows · ←→ columns")
+			}
+			if join := u.joinBlocksByRecordSetID[u.activeRecordSetID()]; join != nil && len(join.Candidates) > 0 {
+				essentials = append(essentials, "Alt+J JOIN chooser")
+			}
+		}
+		essentials = append(essentials, "Alt+G Group", "Alt+S Sort", "Ctrl+T Trail", "Alt+←/→ Back/Forward")
+		if count := len(u.snapshot.Workspace.ExportBucket); count > 0 {
+			essentials = append(essentials, fmt.Sprintf("Export bucket: %d (Actions)", count))
+		}
+		if u.workspaceFeedback != "" {
+			segments = append(segments, u.workspaceFeedback)
+		}
+		for _, s := range essentials {
+			if h, ok := autoHint(s); ok {
+				hints = append(hints, h)
+			}
+		}
+		for len(hints) > 3 && strings.Count(theme.RenderHints(width, hints, segments...), "\n") >= 2 {
+			// Keep contextual row/view and JOIN feedback ahead of generic operation shortcuts.
+			remove := len(hints) - 1
+			for i := len(hints) - 1; i >= 3; i-- {
+				if hints[i].Key == "Ctrl+T" || hints[i].Key == "Alt+←/→" || hints[i].Key == "Alt+S" || hints[i].Key == "Alt+G" {
+					remove = i
+					break
+				}
+			}
+			hints = append(hints[:remove], hints[remove+1:]...)
+		}
+		return hints, segments
 	}
 	for _, s := range append([]string{"F1 Hotkeys", "Alt+F1 toolbar", "F4 composer", "F6 Explorer", "F7 Inspect", "F8 API"}, u.workspaceHints(width)...) {
 		if h, ok := autoHint(s); ok {

@@ -1,10 +1,8 @@
 package chat
 
 import (
-	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -14,10 +12,12 @@ import (
 )
 
 type workspaceQueryDoneMsg struct {
-	sessionID  string
-	generation int
-	snapshot   ChatSession
-	err        error
+	operationID uint64
+	interaction uint64
+	sessionID   string
+	generation  int
+	snapshot    ChatSession
+	err         error
 }
 type workspaceEditorBackMsg struct{ editor *workspaceQueryEditor }
 type workspaceQueryEditor struct {
@@ -59,7 +59,8 @@ func (u *ChatUI) openWorkspaceQuery(object ProjectObject, run bool) tea.Cmd {
 	return p.text.Focus()
 }
 func (u *ChatUI) runWorkspaceQuery(ref ContextReference, document string) tea.Cmd {
-	if u.workspaceMutationPending {
+	if u.workspaceMutationPending || u.backendBusy() || u.shell.Busy() {
+		u.workspaceFeedback = "Cancel the running operation before starting another."
 		return nil
 	}
 	if u.sessions == nil {
@@ -68,11 +69,11 @@ func (u *ChatUI) runWorkspaceQuery(ref ContextReference, document string) tea.Cm
 	}
 	u.workspaceMutationPending = true
 	sessionID, generation, sessions := u.sessionID, u.workspaceGeneration, u.sessions
-	ctx, cancel := context.WithTimeout(u.workspaceContext, 30*time.Second)
+	operationID, ctx := u.beginOperation("Query")
+	interaction := u.workspaceInteraction
 	return func() tea.Msg {
-		defer cancel()
 		snapshot, err := sessions.executeWorkspaceQuery(ctx, sessionID, ref, document)
-		return workspaceQueryDoneMsg{sessionID: sessionID, generation: generation, snapshot: snapshot, err: err}
+		return workspaceQueryDoneMsg{operationID: operationID, interaction: interaction, sessionID: sessionID, generation: generation, snapshot: snapshot, err: err}
 	}
 }
 func (p *workspaceQueryEditor) Title() string {

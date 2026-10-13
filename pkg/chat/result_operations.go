@@ -102,6 +102,9 @@ func (u *ChatUI) openResultOperation(group bool) tea.Cmd {
 }
 
 func (u *ChatUI) newResultOperation(group bool) (*resultOperationOverlay, error) {
+	if reason := u.visibleGridReason(); reason != "" {
+		return nil, fmt.Errorf("%s", reason)
+	}
 	g, record, ok := u.activeGrid()
 	if !ok || record == nil {
 		return nil, fmt.Errorf("select a query result first")
@@ -263,6 +266,10 @@ func (o *resultOperationOverlay) View(w, h int) string {
 			feedback = "Server action opens the exact query for review."
 		}
 	}
+	if o.group && len(o.visibleColumns()) > 0 {
+		column := o.visibleColumns()[min(o.index, len(o.visibleColumns())-1)]
+		bottom = append(bottom, wrap(o.aggregateExplanation(column), 2)...)
+	}
 	bottom = append(bottom, wrap(feedback, 2)...)
 	visible := o.visibleColumns()
 	o.index = min(o.index, max(0, len(visible)-1))
@@ -288,7 +295,7 @@ func (o *resultOperationOverlay) View(w, h int) string {
 			if function := o.aggregateFunction(c); function != "" {
 				label += " · " + function
 				if _, manual := o.aggregates[c]; !manual {
-					label += " (auto)"
+					label += " · automatic"
 				}
 			}
 		}
@@ -508,6 +515,9 @@ func (o *resultOperationOverlay) applyLoaded() tea.Cmd {
 			return nil
 		}
 		o.grid.restoreByKey(key)
+		o.grid.localScope = true
+		o.grid.scopeLabel = fmt.Sprintf("Loaded · %d rows", len(rows))
+		o.ui.resultScope(o.grid, o.record)
 		o.ui.workspaceFeedback = fmt.Sprintf("Sorted %d loaded rows · %s · Alt+S reset / server options", len(rows), strings.Join(o.names(), ", "))
 		return nil
 	}
@@ -551,9 +561,10 @@ func (o *resultOperationOverlay) applyLoaded() tea.Cmd {
 		}
 		rows[i] = grid.Row{Key: strconv.Itoa(i), Values: values}
 	}
-	p := &localGroupsPanel{ui: o.ui, model: grid.New(columns, rows, grid.WithoutFrame(), grid.WithFilterOnType()), capture: o.capture, groups: groups, title: fmt.Sprintf("%s · %d loaded rows → %d groups", o.record.Title, o.capture.snapshot.RowCount(), len(groups))}
+	p := &localGroupsPanel{ui: o.ui, model: grid.New(columns, rows, grid.WithoutFrame(), grid.WithFilterOnType()), capture: o.capture, groups: groups, title: fmt.Sprintf("Loaded · %s · %d loaded rows → %d groups", o.record.Title, o.capture.snapshot.RowCount(), len(groups))}
 	p.model.SetWorkspaceStyle(true)
-	p.back = o.ui.shell.ShowTemporaryCenterPanel(p)
+	o.ui.rememberLocal(p, o.record.ID, "Group by "+strings.Join(o.names(), ", ")+" · Loaded")
+	o.ui.shell.ShowTemporaryCenterPanel(p)
 	return nil
 }
 
@@ -566,6 +577,7 @@ type localGroupsPanel struct {
 	title   string
 	back    func()
 	members bool
+	trailID string
 }
 
 func (p *localGroupsPanel) Title() string     { return "Grouped loaded snapshot" }
@@ -597,10 +609,11 @@ func (p *localGroupsPanel) Update(msg tea.Msg) (chatshell.SidePanel, tea.Cmd) {
 				for at, source := range p.groups[i].RowIndices {
 					rows[at] = p.capture.rows[source]
 				}
-				p.model.SetData(p.capture.columns, rows)
-				p.members = true
-				p.title = fmt.Sprintf("Constituent rows · %d captured rows", len(rows))
-				return p, nil
+				child := &localGroupsPanel{ui: p.ui, model: grid.New(p.capture.columns, rows, grid.WithoutFrame(), grid.WithFilterOnType()), capture: p.capture, members: true, title: fmt.Sprintf("Loaded · %d constituent rows", len(rows))}
+				child.model.SetWorkspaceStyle(true)
+				p.ui.rememberLocal(child, p.trailID, "Constituent rows · Loaded")
+				p.ui.shell.ShowTemporaryCenterPanel(child)
+				return child, nil
 			}
 		}
 	}

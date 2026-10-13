@@ -27,6 +27,7 @@ type workspacePanel struct {
 	relatedIndex          int
 	relatedLoading        bool
 	relatedSequence       int
+	relatedOperationID    uint64
 	relatedCancel         context.CancelFunc
 	relatedRecordID       string
 	relatedRowKey         string
@@ -123,6 +124,9 @@ func (p *workspacePanel) refresh() error {
 }
 
 func (p *workspacePanel) refreshBookmarks() error {
+	if p.ui.backendBusy() || p.ui.shell.Busy() {
+		return nil
+	}
 	if p.ui.sessions == nil {
 		return nil
 	}
@@ -220,6 +224,7 @@ func (p *workspacePanel) ensureBookmarkGrid() *gridState {
 	}
 	result, _ := bookmarkResult(bookmark)
 	p.bookmarkGrid = newMinimalGridState(NewGridModel(result), "", bookmark.Title, p.width)
+	p.bookmarkGrid.SetTitle(fmt.Sprintf("Loaded · %d rows · %s", len(result.Rows), p.bookmarkGrid.baseTitle))
 	p.bookmarkGrid.SetStyle(p.ui.tableStyle)
 	p.bookmarkGrid.SetKeyHandler(p.handleBookmarkGridKey)
 	p.bookmarkGridID = bookmark.ID
@@ -270,6 +275,7 @@ func (p *workspacePanel) rebuildDockGrids() {
 			opts = append(opts, grid.WithInitialSort(columnIndexOf(data.Result.Columns, view.OrderBy), view.Descending))
 		}
 		next[dock.ID] = newProjectedGridState(model, data.RecordSetID, dock.Title, p.width, data.SourceRows, false, opts)
+		next[dock.ID].SetTitle(fmt.Sprintf("Loaded · %d rows · %s", len(model.Rows), next[dock.ID].baseTitle))
 		next[dock.ID].SetStyle(p.ui.tableStyle)
 		next[dock.ID].SetKeyHandler(p.handleDockGridKey)
 	}
@@ -806,7 +812,7 @@ func (p *workspacePanel) currentColumnDetails(width int) []string {
 	}
 	var related []string
 	var constraints []string
-	if p.ui.sessions != nil && record != nil {
+	if p.ui.sessions != nil && record != nil && !p.ui.backendBusy() && !p.ui.shell.Busy() {
 		if candidates, err := p.ui.sessions.JoinCandidates(p.ui.ctx, record.ID); err == nil {
 			for _, candidate := range candidates {
 				for _, pair := range candidate.Fields {

@@ -49,6 +49,9 @@ func (c *SessionChat) RefreshRecordSet(ctx context.Context, sessionID, recordSet
 	if err != nil {
 		return ChatSession{}, fmt.Errorf("query failed: %s", publicQueryError(err, record.Parameters))
 	}
+	if err = ctx.Err(); err != nil {
+		return ChatSession{}, err
+	}
 	origin, err := c.store.AppendUser(ctx, session.ID, "Refresh: "+record.Title)
 	if err != nil {
 		return ChatSession{}, err

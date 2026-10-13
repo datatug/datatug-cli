@@ -143,9 +143,10 @@ func (p *apiPanel) Update(msg tea.Msg) (chatshell.SidePanel, tea.Cmd) {
 }
 
 type hotkeysOverlay struct {
-	ui      *ChatUI
-	offset  int
-	control []string
+	ui                       *ChatUI
+	offset                   int
+	control                  []string
+	actionsStart, actionsEnd int
 }
 
 func (u *ChatUI) newHotkeysOverlay() *hotkeysOverlay {
@@ -158,15 +159,24 @@ func (o *hotkeysOverlay) View(w, h int) string {
 	if len(control) == 0 {
 		control = o.ui.workspaceHints(w)
 	}
-	text := "Hotkeys · F1 / Esc close · ↑↓ / PgUp/PgDn scroll\n\nCurrent control:\n" + strings.Join(control, " · ") + "\n\n" + chatHelpText
+	text := "Hotkeys · Ctrl+P Actions · F1 / Esc close · ↑↓ scroll\n/actions searchable alternatives · /keys keyboard diagnostic · /trail retained results\n\nCurrent control:\n" + strings.Join(control, " · ") + "\n\n" + chatHelpText
+	first := strings.Split(text, "\n")[0]
+	o.actionsStart = strings.Index(first, "Ctrl+P Actions")
+	o.actionsEnd = o.actionsStart + len("Ctrl+P Actions")
 	text = ansi.Wrap(text, max(1, w), " ")
 	lines := strings.Split(text, "\n")
 	start := min(o.offset, max(0, len(lines)-max(1, h)))
 	return strings.Join(lines[start:min(len(lines), start+max(1, h))], "\n")
 }
+func (*hotkeysOverlay) LocalMouseCoordinates() bool { return true }
 func (o *hotkeysOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd, bool) {
+	if m, ok := msg.(tea.MouseClickMsg); ok && m.Button == tea.MouseLeft && o.offset == 0 && m.Y == 0 && m.X >= o.actionsStart && m.X < o.actionsEnd {
+		return o, func() tea.Msg { return workspaceActionMsg{"actions"} }, true
+	}
 	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
+		case "ctrl+p":
+			return o, func() tea.Msg { return workspaceActionMsg{"actions"} }, true
 		case "esc", "f1":
 			return o, nil, true
 		case "up":

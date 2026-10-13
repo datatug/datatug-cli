@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -322,18 +321,18 @@ func (p *resultServerPreviewOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea
 				p.err = "Context or query changed; return to choices and review again."
 				return p, nil, false
 			}
-			if o.ui.workspaceMutationPending {
+			if o.ui.workspaceMutationPending || o.ui.backendBusy() {
 				p.err = "Another result operation is still running."
 				return p, nil, false
 			}
 			o.ui.workspaceMutationPending = true
 			sessionID, generation, parentID, rowKey, entryID := o.sessionID, o.generation, o.record.ID, o.grid.sourceRowKey(), o.grid.entryID
 			sessions, operation, document := o.ui.sessions, o.operation(), p.preview.DTQL
-			ctx, cancel := context.WithTimeout(o.ui.workspaceContext, 30*time.Second)
+			interaction := o.ui.workspaceInteraction
+			operationID, ctx := o.ui.beginOperation("Server " + map[bool]string{true: "Group", false: "Sort"}[o.group])
 			return p, func() tea.Msg {
-				defer cancel()
 				snapshot, query, err := sessions.executeDerivedResult(ctx, sessionID, parentID, operation, document)
-				return workspaceRelatedOpenedMsg{sessionID: sessionID, generation: generation, parentID: parentID, rowKey: rowKey, originEntry: entryID, snapshot: snapshot, query: query, err: err, label: query.Title}
+				return workspaceRelatedOpenedMsg{interaction: interaction, operationID: operationID, sessionID: sessionID, generation: generation, parentID: parentID, rowKey: rowKey, originEntry: entryID, snapshot: snapshot, query: query, err: err, label: query.Title}
 			}, true
 		}
 	}

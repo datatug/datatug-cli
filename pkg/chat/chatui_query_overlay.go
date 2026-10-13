@@ -53,6 +53,8 @@ func (u *ChatUI) selectSavedQuery(query SavedQuery) tea.Cmd {
 // savedQueryDoneMsg reports a background saved-query run's outcome — the
 // ChatUI analogue of saved_queries.go's savedQueryMessage.
 type savedQueryDoneMsg struct {
+	operationID   uint64
+	uiInteraction uint64
 	sessionID     string
 	interactionID string
 	userChars     int
@@ -72,7 +74,13 @@ func (u *ChatUI) runSavedQuery(query SavedQuery, variables map[string]string) te
 	}
 	label := nonempty(query.Title, query.ID)
 	message := "Run query: " + label
-	store, service, ctx, sessionID := u.sessions.store, u.savedQueryService, u.ctx, u.sessionID
+	if u.backendBusy() || u.shell.Busy() {
+		u.workspaceFeedback = "Cancel the running operation before starting another."
+		return nil
+	}
+	store, service, sessionID := u.sessions.store, u.savedQueryService, u.sessionID
+	operationID, ctx := u.beginOperation("Saved query")
+	uiInteraction := u.workspaceInteraction
 	interactionID := u.activeCommandInteractionID
 	userChars, userWords := u.activeCommandChars, u.activeCommandWords
 	if interactionID == "" {
@@ -83,10 +91,11 @@ func (u *ChatUI) runSavedQuery(query SavedQuery, variables map[string]string) te
 	}
 	u.appendKindedBlock("msg", transcriptEntryKindMessage, newUserMessageBlock(message))
 	busyCmd := u.shell.SetBusy(true)
+	u.operation.shellBusy = true
 	runCmd := func() tea.Msg {
 		origin, err := store.AppendUser(ctx, sessionID, message)
 		if err != nil {
-			return savedQueryDoneMsg{sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, err: err}
+			return savedQueryDoneMsg{operationID: operationID, uiInteraction: uiInteraction, sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, err: err}
 		}
 		var result QueryResult
 		var runErr error
@@ -99,6 +108,9 @@ func (u *ChatUI) runSavedQuery(query SavedQuery, variables map[string]string) te
 		} else {
 			result, runErr = service.Run(ctx, query.ID)
 		}
+		if ctx.Err() != nil {
+			return savedQueryDoneMsg{operationID: operationID, sessionID: sessionID, err: ctx.Err()}
+		}
 		if runErr != nil {
 			_, err = store.AppendTurn(ctx, sessionID, origin.ID, "", Turn{Text: "Query failed. Check its parameters and data source."})
 		} else {
@@ -108,10 +120,10 @@ func (u *ChatUI) runSavedQuery(query SavedQuery, variables map[string]string) te
 			_, err = store.AppendQuery(ctx, sessionID, origin.ID, result.Source, result)
 		}
 		if err != nil {
-			return savedQueryDoneMsg{sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, runFailed: runErr != nil, err: err}
+			return savedQueryDoneMsg{operationID: operationID, uiInteraction: uiInteraction, sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, runFailed: runErr != nil, err: err}
 		}
 		snapshot, err := store.Load(ctx, sessionID)
-		return savedQueryDoneMsg{sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, runFailed: runErr != nil, snapshot: snapshot, err: err}
+		return savedQueryDoneMsg{operationID: operationID, uiInteraction: uiInteraction, sessionID: sessionID, interactionID: interactionID, userChars: userChars, userWords: userWords, runFailed: runErr != nil, snapshot: snapshot, err: err}
 	}
 	// busyCmd is never nil here to warrant a guard: SetBusy(true) always
 	// returns m.spinner.Tick (charm.land/bubbles/v2 spinner.Model.Tick), a
@@ -126,6 +138,10 @@ func (u *ChatUI) runSavedQuery(query SavedQuery, variables map[string]string) te
 
 // handleSavedQueryDone is called from OnMsg for a savedQueryDoneMsg.
 func (u *ChatUI) handleSavedQueryDone(msg savedQueryDoneMsg) {
+	current := u.operationContextCurrent(msg.operationID)
+	if !u.finishOperation(msg.operationID) {
+		return
+	}
 	u.shell.SetBusy(false)
 	reportErr := msg.err
 	if reportErr == nil && msg.runFailed {
@@ -139,6 +155,11 @@ func (u *ChatUI) handleSavedQueryDone(msg savedQueryDoneMsg) {
 		return
 	}
 	if msg.sessionID == u.sessionID {
+		if msg.operationID != 0 && (!current || msg.uiInteraction != u.workspaceInteraction) {
+			u.reconcileResults(msg.snapshot, true)
+			u.workspaceFeedback = "Saved query completed; current workspace retained."
+			return
+		}
 		u.loadSession(msg.snapshot)
 	}
 }

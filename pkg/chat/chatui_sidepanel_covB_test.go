@@ -525,10 +525,9 @@ func TestWorkspacePanelCurrentColumnDetailsUnavailableSourceAndType(t *testing.T
 	}
 }
 
-// TestWorkspacePanelCurrentColumnDetailsMultipleSourceTables covers
-// currentColumnDetails' "Possible source tables:" branch (meta.objects with
-// more than one candidate).
-func TestWorkspacePanelCurrentColumnDetailsMultipleSourceTables(t *testing.T) {
+// A physical FROM must not acquire provenance from unrelated tables merely
+// because both happen to contain a column with the same name.
+func TestWorkspacePanelCurrentColumnDetailsRejectsUnprovenSourceTables(t *testing.T) {
 	turn := Turn{Queries: []QueryResult{{
 		Title:       "Ambiguous",
 		DTQL:        "from: {name: Widget}\ncolumns: [{field: Id}]\nlimit: 5\n",
@@ -549,8 +548,22 @@ func TestWorkspacePanelCurrentColumnDetailsMultipleSourceTables(t *testing.T) {
 	}
 	u.workspace.tab, u.workspace.inspectorSubTab = 1, 1
 	view := u.workspace.View(80, 20, true)
-	if !strings.Contains(view, "Possible source tables:") {
-		t.Fatalf("expected the ambiguous-source hint:\n%s", view)
+	if !strings.Contains(view, "Source: unavailable") || strings.Contains(view, "Possible source tables:") || strings.Contains(view, "main.WidgetA.Id") || strings.Contains(view, "main.WidgetB.Id") {
+		t.Fatalf("unrelated catalog tables supplied false column provenance:\n%s", view)
+	}
+}
+
+func TestWorkspacePanelCurrentColumnDetailsMultipleCandidatesWithoutRecord(t *testing.T) {
+	u := focusedGridTestUI(t)
+	delete(u.snapshot.RecordSets, u.activeRecordSetID())
+	u.catalog = ProjectCatalog{Objects: []ProjectObject{
+		{Reference: ContextReference{Kind: "table", ObjectID: "main.WidgetA"}, Columns: []string{"Id"}},
+		{Reference: ContextReference{Kind: "table", ObjectID: "main.WidgetB"}, Columns: []string{"Id"}},
+	}}
+	u.workspace.tab, u.workspace.inspectorSubTab = 1, 1
+	view := u.workspace.View(80, 20, true)
+	if !strings.Contains(view, "Possible source tables:") || !strings.Contains(view, "main.WidgetA.Id") || !strings.Contains(view, "main.WidgetB.Id") || !strings.Contains(view, "ambiguous source") {
+		t.Fatalf("missing-record catalog candidates were not visibly ambiguous:\n%s", view)
 	}
 }
 

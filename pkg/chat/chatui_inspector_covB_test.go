@@ -259,7 +259,7 @@ func TestChatUIActiveGridAndRecordSetIDNoFocusedRef(t *testing.T) {
 // removed from the snapshot still resolves (grid, nil, true).
 func TestChatUIActiveGridRecordSetNotInSnapshot(t *testing.T) {
 	u := focusedGridTestUI(t)
-	delete(u.snapshot.RecordSets, "rs1")
+	delete(u.snapshot.RecordSets, u.activeRecordSetID())
 	g, record, ok := u.activeGrid()
 	if !ok || g == nil || record != nil {
 		t.Fatalf("expected (grid, nil, true) when the RecordSet is missing: g=%v record=%v ok=%v", g, record, ok)

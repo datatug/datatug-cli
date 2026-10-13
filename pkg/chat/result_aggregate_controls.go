@@ -147,3 +147,49 @@ func formatAggregateValue(value any) string {
 		return sanitizeTerminalText(FormatValue(value))
 	}
 }
+
+// Explain suggestions from the same schema evidence used by defaultSumEligible;
+// names such as CustomerId are never treated as proof of a key.
+func (o *resultOperationOverlay) aggregateExplanation(column int) string {
+	if o.selectedAt(column) >= 0 {
+		return "Grouping key · excluded from SUM; remove key selection to aggregate."
+	}
+	if function, manual := o.aggregates[column]; manual {
+		return nonempty(function, "Off") + " · manual choice"
+	}
+	meta := o.ui.columnMeta(&o.record, o.capture.columnNames[column])
+	if o.defaultSumEligible(column) {
+		if numericAggregateKind(meta.dbType) == "integer" {
+			return "SUM · automatic · numeric, non-key integer (complete authoritative PK/FK metadata)"
+		}
+		return "SUM · automatic · authoritative " + numericAggregateKind(meta.dbType) + " type; numeric measure suggestion"
+	}
+	if numericAggregateKind(meta.dbType) == "" {
+		return "No automatic SUM · nonnumeric or unknown schema type; COUNT/MIN/MAX may be selected."
+	}
+	for _, object := range o.ui.catalog.Objects {
+		if object.Reference.SourceID != o.record.Database || !strings.HasPrefix(strings.ToLower(meta.qualified), strings.ToLower(object.Reference.ObjectID)+".") {
+			continue
+		}
+		field := meta.qualified[len(object.Reference.ObjectID)+1:]
+		for _, key := range object.PrimaryKey {
+			if strings.EqualFold(key, field) {
+				return "No automatic SUM · primary key (authoritative schema metadata)."
+			}
+		}
+		if o.ui.sessions != nil {
+			if app, ok := o.ui.sessions.joinApplication.(ForeignKeyJoinApplication); ok {
+				for _, key := range app.Snapshot.Keys {
+					if strings.EqualFold(relationKey(key.Schema, key.FromRelation), object.Reference.ObjectID) {
+						for _, fk := range key.FromFields {
+							if strings.EqualFold(fk, field) {
+								return "No automatic SUM · foreign key (authoritative schema metadata)."
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return "No automatic SUM · non-key status is unknown; explicit numeric SUM remains available."
+}

@@ -42,6 +42,7 @@ type JoinBlock struct {
 // JoinAppliedMsg reports the outcome of applying a join candidate started by
 // JoinBlock.Update on "space" — the ported joinMessage from ui.go.
 type JoinAppliedMsg struct {
+	OperationID                  uint64
 	SessionID                    string
 	Generation                   int
 	RecordSetID                  string

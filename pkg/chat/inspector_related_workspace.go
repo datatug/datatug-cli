@@ -12,6 +12,7 @@ import (
 )
 
 type inspectorRelatedMsg struct {
+	operationID      uint64
 	sequence         int
 	sessionID        string
 	generation       int
@@ -32,6 +33,10 @@ func (p *workspacePanel) cancelRelated() {
 	p.relatedLoading = false
 }
 func (p *workspacePanel) focusRelated(open int) tea.Cmd {
+	if p.ui.workspaceMutationPending || p.ui.backendBusy() {
+		p.ui.workspaceFeedback = "A result operation is running; Cancel [Ctrl+X] first."
+		return nil
+	}
 	p.cancelRelated()
 	p.tab, p.inspectorSubTab = 1, 0
 	p.relatedFocused, p.relatedIndex, p.relatedOpen = true, max(0, open), open
@@ -49,16 +54,22 @@ func (p *workspacePanel) focusRelated(open int) tea.Cmd {
 	sequence, recordID, rowKey := p.relatedSequence, record.ID, g.sourceRowKey()
 	sessionID, generation := p.ui.sessionID, p.ui.workspaceGeneration
 	p.relatedRecordID, p.relatedRowKey, p.relatedSessionID, p.relatedGeneration = recordID, rowKey, sessionID, generation
-	ctx, cancel := context.WithTimeout(p.ui.workspaceContext, 10*time.Second)
+	operationID, operationContext := p.ui.beginOperation("Related")
+	p.relatedOperationID = operationID
+	ctx, cancel := context.WithTimeout(operationContext, 10*time.Second)
 	p.relatedCancel = cancel
 	sessions := p.ui.sessions
 	return func() tea.Msg {
 		defer cancel()
 		records, err := sessions.previewRelationshipsActive(ctx, sessionID, recordID, physical)
-		return inspectorRelatedMsg{sequence: sequence, sessionID: sessionID, generation: generation, recordID: recordID, rowKey: rowKey, related: records, err: err}
+		return inspectorRelatedMsg{operationID: operationID, sequence: sequence, sessionID: sessionID, generation: generation, recordID: recordID, rowKey: rowKey, related: records, err: err}
 	}
 }
 func (p *workspacePanel) receiveRelated(msg inspectorRelatedMsg) tea.Cmd {
+	current := p.ui.operationContextCurrent(msg.operationID)
+	if !p.ui.finishOperation(msg.operationID) {
+		return nil
+	}
 	g, record, ok := p.ui.activeGrid()
 	if msg.sequence != p.relatedSequence || msg.sessionID != p.ui.sessionID || msg.generation != p.ui.workspaceGeneration || !ok || record == nil || record.ID != msg.recordID || g.sourceRowKey() != msg.rowKey {
 		return nil
@@ -67,6 +78,10 @@ func (p *workspacePanel) receiveRelated(msg inspectorRelatedMsg) tea.Cmd {
 	p.relatedRecords = msg.related
 	p.relatedError = msg.err
 	p.relatedIndex = min(p.relatedIndex, max(0, len(msg.related)-1))
+	if !current {
+		p.relatedOpen = -1
+		return nil
+	}
 	if p.relatedOpen >= 0 {
 		index := p.relatedOpen
 		p.relatedOpen = -1
@@ -142,15 +157,17 @@ func (p *workspacePanel) openRelated(index int) tea.Cmd {
 	if !ok || origin == nil {
 		return nil
 	}
-	if u.workspaceMutationPending || origin.ID != p.relatedRecordID || originGrid.sourceRowKey() != p.relatedRowKey || u.sessionID != p.relatedSessionID || u.workspaceGeneration != p.relatedGeneration {
+	if u.workspaceMutationPending || u.backendBusy() || origin.ID != p.relatedRecordID || originGrid.sourceRowKey() != p.relatedRowKey || u.sessionID != p.relatedSessionID || u.workspaceGeneration != p.relatedGeneration {
 		return nil
 	}
 	u.workspaceMutationPending = true
 	sessionID, generation, parentID, rowKey, entryID := u.sessionID, u.workspaceGeneration, origin.ID, originGrid.sourceRowKey(), originGrid.entryID
-	sessions, ctx := u.sessions, u.workspaceContext
+	sessions := u.sessions
+	interaction := u.workspaceInteraction
+	operationID, ctx := u.beginOperation("Open related")
 	return func() tea.Msg {
 		snapshot, query, err := sessions.acceptRelatedPreview(ctx, sessionID, parentID, item)
-		return workspaceRelatedOpenedMsg{sessionID: sessionID, generation: generation, parentID: parentID, rowKey: rowKey, originEntry: entryID, snapshot: snapshot, query: query, err: err}
+		return workspaceRelatedOpenedMsg{interaction: interaction, operationID: operationID, sessionID: sessionID, generation: generation, parentID: parentID, rowKey: rowKey, originEntry: entryID, snapshot: snapshot, query: query, err: err}
 	}
 }
 
@@ -184,6 +201,15 @@ func (o *gridActionsOverlay) View(w, h int) string {
 	return strings.Join(lines, "\n")
 }
 func (o *gridActionsOverlay) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd, bool) {
+	if k, ok := msg.(tea.KeyPressMsg); ok && k.String() == "enter" {
+		if o.ui.sessionFence() {
+			return o, nil, true
+		}
+		if reason := o.ui.visibleGridReason(); reason != "" {
+			o.ui.workspaceFeedback = reason
+			return o, nil, true
+		}
+	}
 	k, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return o, nil, false
@@ -251,6 +277,13 @@ type joinPickerOverlay struct {
 }
 
 func (u *ChatUI) openJoinPicker() tea.Cmd {
+	if u.sessionFence() {
+		return nil
+	}
+	if reason := u.visibleGridReason(); reason != "" {
+		u.workspaceFeedback = reason
+		return nil
+	}
 	if _, record, _ := u.activeGrid(); groupedRecord(record) {
 		u.workspaceFeedback = "Grouped output has no entity identity. Return to the original result for JOIN."
 		return nil

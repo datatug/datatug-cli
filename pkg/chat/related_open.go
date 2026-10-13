@@ -8,6 +8,8 @@ import (
 )
 
 type workspaceRelatedOpenedMsg struct {
+	operationID                   uint64
+	interaction                   uint64
 	sessionID                     string
 	generation                    int
 	parentID, rowKey, originEntry string
@@ -47,7 +49,7 @@ func (c *SessionChat) acceptRelatedPreview(ctx context.Context, sessionID, paren
 	if err != nil {
 		return ChatSession{}, QueryResult{}, err
 	}
-	query, err := c.store.AppendQuery(ctx, sessionID, origin.ID, source, QueryResult{Title: item.target().Relation, Source: source, SourceID: parent.Database, DTQL: item.document, Result: item.result})
+	query, err := c.store.AppendQuery(ctx, sessionID, origin.ID, source, QueryResult{Title: item.target().Relation, Source: source, SourceID: parent.Database, DTQL: item.document, Result: item.result, Lineage: &JoinLineage{ParentRecordSetID: parent.ID}})
 	if err != nil {
 		return ChatSession{}, QueryResult{}, err
 	}
@@ -57,10 +59,21 @@ func (c *SessionChat) acceptRelatedPreview(ctx context.Context, sessionID, paren
 }
 
 func (u *ChatUI) receiveRelatedOpened(msg workspaceRelatedOpenedMsg) tea.Cmd {
+	current := u.operationContextCurrent(msg.operationID)
+	if !u.finishOperation(msg.operationID) {
+		return nil
+	}
 	if msg.sessionID != u.sessionID || msg.generation != u.workspaceGeneration {
 		return nil
 	}
 	u.workspaceMutationPending = false
+	if msg.operationID != 0 && (!current || msg.interaction != u.workspaceInteraction) {
+		if msg.err == nil {
+			u.reconcileResults(msg.snapshot)
+		}
+		u.workspaceFeedback = "Result operation completed; current workspace retained."
+		return nil
+	}
 	g, record, ok := u.activeGrid()
 	if !ok || record == nil || record.ID != msg.parentID || g.sourceRowKey() != msg.rowKey {
 		return nil

@@ -34,6 +34,9 @@ type gridState struct {
 	rawBody      []byte
 	httpResponse *HTTPResponse
 	versionBadge string
+	scopeLabel   string
+	localScope   bool
+	record       *RecordSet
 	// entryID is the transcript block ID this grid is currently appended
 	// under (set by ChatUI.appendGridResult/loadSession). It lets a caller
 	// that only has a RecordSetID — e.g. OnMsg's bridgeTickMsg case,

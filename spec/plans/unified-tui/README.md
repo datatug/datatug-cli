@@ -190,6 +190,70 @@ Satisfy full repository CI at exact source SHAs, including 100% shared-library c
 
 **Evidence:** terminal recordings/captures and input matrix; actual SQL/HTTP counts proving no local network operation and no expansion rerun; original/derived RecordSet IDs; exact-SHA CI/coverage receipts, adversarial review verdicts and finding resolutions, published dependency versions, release/binary smoke tests, WB remote landing and cleanup receipts. Missing terminal or release evidence leaves the task open.
 
+## Follow-up journey: make exploration state and alternatives visible
+
+Accepted 2026-10-13 after the initial implementation review. The journey is: identify result scope → transform locally → review/run securely with elapsed/cancel → understand aggregate defaults → revisit a retained branch → find an alternative shortcut. Existing feature/plan lifecycle statuses remain unchanged; each task needs focused full-shell evidence, parent real-terminal QA and final Astra review before publication.
+
+### Task 12: Persistent scope on retained result surfaces
+
+**Id:** task-12
+**Verifies:** unified-tui#ac:persistent-result-scope
+**Status:** in_progress
+**Owner:** Sol CLI implementation owner; coordinator sole landing owner
+**Depends on:** Tasks 7–8
+
+Show compact Loaded/Server counts and actual execution times with truthful provenance on results and local group/member panels. Preserve original scope through local/server transitions and make filtered counts distinct.
+
+**Evidence:** full-shell secure SQLite local→server journey, retained origin label/state, compact/wide render assertions and coordinator terminal receipt.
+
+### Task 13: Identity-bound running operations and cancellation
+
+**Id:** task-13
+**Verifies:** unified-tui#ac:operation-feedback-cancel
+**Status:** in_progress
+**Owner:** Sol CLI implementation owner
+**Depends on:** Tasks 4–9
+
+Track existing async Open/editor/saved query/refresh/Related/JOIN/derived paths. Render real elapsed seconds and visible keyboard/mouse Cancel. Preserve secure context checks before persistence and fence canceled/late completions; cancellation must not synchronously acquire a held session mutex. Retain independent AI-stream Busy ownership.
+
+**Evidence:** delayed executor full-shell keyboard/mouse cancellation, context-switch/late-response/no-persist assertions, path-specific integration and terminal receipts.
+
+### Task 14: Explain automatic and manual aggregation choices
+
+**Id:** task-14
+**Verifies:** unified-tui#ac:aggregate-provenance
+**Status:** in_progress
+**Owner:** Sol CLI implementation owner
+**Depends on:** Task 7
+
+Explain authoritative numeric type suggestions, complete integer non-key proof and exclusions. Render automatic labels only for suggestions; manual row changes and grouping-key edits retain truthful explanations.
+
+**Evidence:** full-shell float/decimal/integer PK/FK/unknown cases, manual overrides, literal filter, compact explanation rendering.
+
+### Task 15: Navigable retained exploration trail
+
+**Id:** task-15
+**Verifies:** unified-tui#ac:retained-exploration-trail
+**Status:** in_progress
+**Owner:** Sol CLI implementation owner
+**Depends on:** Tasks 5–8
+
+Expose compact durable lineage and session-local group/member nodes with Trail/Back/Forward. Reconcile same-session additions using retained instances; bound missing/cyclic ancestry and make explicit branching replace forward navigation without a query.
+
+**Evidence:** multi-generation/branching full-shell navigation, repeated local visits, unchanged row/column/filter/order/scroll and original instance across reconciliation; terminal receipt.
+
+### Task 16: Searchable actions and explicit keyboard diagnostic
+
+**Id:** task-16
+**Verifies:** unified-tui#ac:shortcut-alternatives-diagnostic
+**Status:** in_progress
+**Owner:** Sol CLI implementation owner
+**Depends on:** Tasks 10, 12–15
+
+Use a context-aware searchable registry dispatching existing actions. Expose Ctrl+P, command alternatives and clickable F1 discovery. Add opt-in bounded received-key diagnostics with safe Esc/Close, known LF ambiguity, no automatic-support claim and no ordinary editor/composer interception.
+
+**Evidence:** full-shell searchable action/disabled reason/help/mouse routes, Ctrl+C/function-key diagnostic isolation, draft/caret return, compact layouts, parent actual key receipts and final independent review.
+
 ## Open Questions
 
 The feature's proposed shortcut, server-scope default and backend-support questions are owned by Tasks 6–8 and 10; resolve them with recorded terminal/query evidence before claiming their behaviors delivered. Grid-specific browser handoff and nested ancestor paths remain deferred to separate specifications. No unfinished source implementation is promoted to complete by this plan.

@@ -20,7 +20,7 @@ import (
 // wiring (Submit -> transcript grid -> FocusEntry -> workspacePanel) instead
 // of u.updateWorkspaceKey/u.workspaceTab.
 func TestChatUISelectedTabInspectsFocusedGridRowColumnRecordSet(t *testing.T) {
-	dtql := "from: {name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n"
+	dtql := "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n"
 	turn := Turn{Queries: []QueryResult{{
 		Title:       "Invoices",
 		DTQL:        dtql,
@@ -33,7 +33,7 @@ func TestChatUISelectedTabInspectsFocusedGridRowColumnRecordSet(t *testing.T) {
 	u, _ := newTestChatUI(t, nil, turn)
 	u.catalog = ProjectCatalog{ID: "proj1", Title: "Demo", Objects: []ProjectObject{
 		{
-			Reference:   ContextReference{Kind: "table", ObjectID: "main.invoice", Title: "Invoice"},
+			Reference:   ContextReference{Kind: "table", SourceID: testScope().Database, ObjectID: "main.invoice", Title: "Invoice"},
 			Columns:     []string{"InvoiceId"},
 			ColumnTypes: map[string]string{"InvoiceId": "INTEGER"},
 		},

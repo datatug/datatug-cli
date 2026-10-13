@@ -227,6 +227,40 @@ A real supported terminal walks default Explore, composer/query, result search/e
 
 Grid Shift+Enter reports unavailable while composer Shift+Enter inserts newline and F5 opens the general workspace. No web source or unimplemented selected-result URL contract is presented as delivered.
 
+## Accepted follow-up: scope, waiting, explanation, trail and keyboard alternatives
+
+The 2026-10-13 user request “Do all 5” extends the existing workspace journey. “I open a result and can see whether it represents captured loaded rows or a server execution. I sort/group locally, then review and run a server operation. While it waits I see elapsed seconds and can cancel without losing my newer draft or selecting a canceled result. I understand suggested aggregates from schema evidence. I return through the exploration trail without reloading an earlier grid. If my terminal cannot send a preferred chord, I search for the same action or inspect received keys in an explicit diagnostic.”
+
+Keep scope beside every grid, including retained and local group/member views. Loaded counts refer to the captured input, with grid filtering counts separately reported. Server labels require matched persisted ExecutedQuery ID/source/ExecutedAt (including native SQL and empty results), or actual HTTP response provenance, and use real execution time labelled `run`; `refreshed` is reserved for genuine refresh. Scope must remain visible after the dialog closes, with result identity readable in compact layouts.
+
+Running queries (Open data/editor Run, saved query Run and refresh), Related, JOIN and derived server operations expose elapsed seconds and Cancel. Ctrl+X cancels only a tracked operation; mouse Cancel is visible and reachable. Cancellation signals the captured context without synchronously waiting on the session mutex. A cancellation request remains visibly pending until backend completion is observed; synchronous session actions stay fenced while the source may still be finishing. Late/canceled responses cannot persist or select canceled derived output, clear a newer operation, reset a newer row/editor/composer, or fabricate progress percentages. AI streaming retains its existing Busy/cancel ownership and is not mislabeled as supporting the tracked Ctrl+X action.
+
+Suggested measures say `SUM · automatic`. Float/decimal suggestions explain authoritative numeric type; integer suggestions require complete authoritative non-PK/non-FK proof. PK, FK, grouping-key, nonnumeric and unknown-metadata exclusions are explained without guessing from column names. A deliberate override says `manual choice`; changing grouping keys preserves valid deliberate overrides.
+
+A compact lineage path and Trail control expose retained durable parents/children and session-local grouping/member branches. Ctrl+T opens the trail in result contexts; `/trail` and searchable Actions provide alternatives. Alt+Left/Right navigate Back/Forward, with visible controls. Returning uses the same grid/panel instances, retaining row, column, local order, filter, scroll and draft. Branching after Back replaces forward navigation; missing/cyclic lineage is bounded and visibly honest. Session-local transforms are never presented as durable server lineage.
+
+Ctrl+P and `/actions` open a searchable, context-aware action list; F1 exposes a clickable Actions alternative. The registry dispatches existing secure actions and shows disabled reasons. Literal input remains literal in composer/editor/search. `/keys` or the searched Keyboard diagnostic opens an opt-in, bounded received-event display; keys such as Ctrl+C and function keys do not execute product actions while captured. Esc/mouse Close returns without draft/caret loss. It explains the known legacy LF/Ctrl+J ambiguity and does not claim automatic terminal support detection from environment variables. F1 remains the shell's contextual-help escape above dialogs.
+
+### AC: persistent-result-scope
+
+Given a server result, when I sort/group captured rows and then execute a reviewed server derivation, each resulting grid identifies its true Loaded/Server scope and count after closing dialogs, with real execution timestamps only. Filtering never inflates loaded/source counts, and the original scope/state remains retained at 80×24 and wide sizes.
+
+### AC: operation-feedback-cancel
+
+Given a slow policy-bound query, refresh, Related, JOIN or server derivation, elapsed seconds and keyboard/mouse Cancel are visible. Cancellation returns control immediately, signals the operation identity/context, and rejects late completion without canceled derived persistence or newer-context reset. Starting/switching contexts cannot let an older completion cancel or clear a newer operation.
+
+### AC: aggregate-provenance
+
+Given authoritative schema and suggested measures, the Group dialog identifies automatic SUM and its evidence, explains PK/FK/unknown/grouping-key exclusions, and changes to a truthful manual label after S/C/M overrides. Filter input remains literal and valid deliberate overrides survive grouping-key changes.
+
+### AC: retained-exploration-trail
+
+Given a result with JOIN/derived children and local grouping/member branches, visible Trail/Back/Forward actions navigate actual retained instances and restore row, column, filter, order and scroll without execution. Branching, repeated visits, reconciliation, missing parents and cyclic lineage do not corrupt return paths or fabricate durable ancestry.
+
+### AC: shortcut-alternatives-diagnostic
+
+Given a terminal with uncertain modified-arrow/function-key delivery, searchable Actions from Ctrl+P, `/actions` or clickable F1 discover the same existing action paths with enabled/disabled reasons. The opt-in diagnostic shows normalized received events without running product commands, preserves draft/caret on Esc/Close, states known LF/Ctrl+J ambiguity honestly, and remains usable at 80×24. Ordinary typing in composer/query editor never opens these surfaces.
+
 ## Open Questions
 
 - **Terminal key compatibility:** implementation owner validates proposed Enter/Alt+A/Ctrl+N Explorer bindings, Alt+J primary JOIN (Ctrl+J disabled for the verified LF ambiguity), and Alt+Shift+Up/Down loaded sorting plus Ctrl+Shift+Up/Down server-sort preview before advertising them. Accepted behaviors and visible alternatives remain mandatory; unresolved chords cannot silently replace them or collide with editable input.

@@ -292,6 +292,7 @@ func TestUnifiedWorkspaceCompactGroupAndMembersKeepSelectionVisible(t *testing.T
 			p.View(40, 7, true)
 			if members {
 				p.Update(uitest.Key("enter"))
+				p = u.shell.CenterPanel().(*localGroupsPanel)
 			}
 			for range 23 {
 				p.View(40, 7, true)

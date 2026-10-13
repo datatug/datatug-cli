@@ -1,6 +1,6 @@
 # Unified TUI implementation inventory
 
-Updated 2026-10-12. In-progress source, focused tests, and separately identified
+Updated 2026-10-13. In-progress source, focused tests, and separately identified
 coordinator terminal receipts. This is not a delivery verdict. The contract is
 [README.md](README.md), with execution in the [plan](../../plans/unified-tui/README.md).
 No task is declared complete by this inventory.
@@ -86,3 +86,28 @@ Current r9 full chat package passes in `/private/tmp/datatug-chat-r9-final.log`;
 ## Final review r2 repair (local evidence)
 
 Astra r2 independently verified the frozen source and binary hashes and closed all five r1 findings. One new minor finding remained: Shift+Tab from the second attachment skipped the first attachment and entered Select text. The bounded r10 shared-shell fix restores the complete forward and reverse text/attachments/action ring. A two-attachment full-shell regression checks both directions, Esc, Unicode draft/caret retention, no accidental submit, command-menu completion and opt-out behavior. The shared-only suite passes at 100% coverage (3,856 raw blocks, zero uncovered); lint is clean. The coordinator's compact real-terminal receipt separately verifies the action's contextual toolbar and mouse Cancel preserving the draft. Final follow-up review, published-dependency validation, authoritative CI and delivery/cleanup remain pending.
+
+## Five UX additions — current local revision
+
+User authorized all five follow-ups on 2026-10-13 for existing PR #368. The admitted CLI baseline is `994c10dcabdcee8876ccb8423b9e39f4ce69ed50`, with published provider pins and `GOWORK=off`; no shared or web source changes are planned. Tasks 12–16 remain in progress. Scope labels, tracked execution/cancel contexts, automatic/manual schema explanations, retained lineage controls, searchable Actions and keyboard diagnostics are implemented locally with focused full-shell evidence. Earlier local/terminal receipts above describe prior source only. This revision has no final readiness or delivery verdict until new test/lint/spec receipts, coordinator PTY QA and Astra review bind the frozen source. The coordinator remains sole publication/landing owner; no new PR or merge is authorized by this implementation handoff.
+
+### Five-addition Astra r1 repair evidence (local, pending re-review)
+
+The independent review in `/private/tmp/datatug-ux-five-astra-r1.md` identified four majors and two minors. All six are repaired in the current local revision:
+
+- Retained backend IDs outlive Cancel until a completion message is observed. Synchronous JOIN, duplicate Actions, session/context/bookmark reads and bridge reload are fenced while a backend can hold the session mutex. Cancel requests cancellation rather than claiming an uncooperative backend has stopped; the header retains elapsed “Stopping / cancel requested” feedback. Bridge/stream snapshots use a nonblocking mutex attempt. The blocked-executor shell regression exercises direct/duplicate JOIN, bridge, session actions and browsing before and after Cancel; loaded Related cannot replace a running refresh.
+- Successful background output reconciles new immutable grids, conversation messages/HTTP documents and trail nodes without rebuilding existing controls. Prior durable message IDs prevent duplication; saved/HTTP prompts already shown by their initiating UI path are not repeated. Actual mouse-only late success is covered for query, derived sort, saved query, refresh and delayed loopback HTTP, with unchanged focus/draft/caret and subsequent Trail access. Delayed JOIN output is also reachable from Trail.
+- Completion validates actual focus, retained result/row/column/horizontal viewport, editor/composer text and caret, center identity and expansion, as well as the keyboard interaction generation. This closes the mouse-only state gap.
+- Direct Group/Sort/Refresh use the visible-owner guard; local grouped/member panels cannot silently target their hidden original. Current-control hints and searchable disabled reasons match that distinction.
+- Local group/member Esc follows stable parent ancestry, so repeated revisits and same-session reconciliation retain a usable return path instead of reusing a consumed temporary callback.
+- The searched legacy Sort column path marks Loaded scope. Scope proof uses matched persisted ExecutedQuery ID/source/ExecutedAt, or actual HTTP response provenance, including native SQL/zero-row results. CreatedAt alone does not prove server execution. Empty grids retain identity by entry ID and a stable RecordSet reference, preserving API expansion/return.
+
+Focused repair and existing unified/bridge/streaming journeys pass in `/private/tmp/datatug-ux-five-sol/repair-focused-final-2.log`; the loaded-related/refresh guard passes in `related-refresh-fence.log`. The last pre-repair full chat package/lint receipts are superseded for readiness by this review repair. Final affected-package tests, lint, fresh manifest-bound Astra review and coordinator real-terminal QA remain pending at this source freeze. No task is marked complete and no publication or cleanup is claimed.
+
+### Five-addition Astra r2 repair evidence (local, pending re-review)
+
+Astra r2 closed all six r1 findings and identified a dropped contended bridge notification and an overly broad composer Enter fence. A bridge invalidation now remains pending through session-lock contention and tracked backend execution/cancellation, and retries on the existing one-second API tick until a snapshot read succeeds. Full-shell tests deliver one notification while the actual session mutex is held, then prove eventual result/trail reconciliation without another notification, duplicate output or changes to retained grid, draft and caret.
+
+Only actual composer submission is fenced: Shift+Enter, the focused Select text action and slash command completion remain usable before and after cancellation while an executor still holds the session mutex. The real blocked-executor regression verifies newline editing, selection/cancel, draft/caret preservation, command completion and rejection of a second submission. The durable snapshot refresh also exposed three older synthetic fixture assumptions: tests now remove the actual durable record ID, supply the matching database/schema catalog, and refuse attribution from unrelated same-named fields. A separate missing-record fixture retains the explicit ambiguous-catalog-candidates journey.
+
+The r2 focused repairs pass in `/private/tmp/datatug-ux-five-sol/repair-r2-focused-final-2.log`. Final full chat package/lint receipts for this source, fresh manifest-bound Astra review and coordinator real-terminal QA remain pending. No shared-provider source, published pins or lifecycle status was changed.

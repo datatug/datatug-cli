@@ -23,11 +23,25 @@ func testStore(t *testing.T) *LocalStore {
 	if err := os.Mkdir(project, 0700); err != nil {
 		t.Fatal(err)
 	}
+	for _, id := range []string{"q", "child-q", "detail", "list", "invoice-list", "invoice-detail", "invoice-lines", "invoice-crm", "limited"} {
+		stubQuery(t, project, id)
+	}
 	s, err := NewLocalStore("p", project, private)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return s
+}
+
+func stubQuery(t *testing.T, project, id string) {
+	t.Helper()
+	dir := filepath.Join(project, "queries")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, id+".query.json"), []byte(`{"id":"`+id+`","type":"DTQL"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDetectiveNestedPerRowAndSetValidators(t *testing.T) {
@@ -86,12 +100,15 @@ func TestDetectiveMissingDependencyAndAmbiguousEnvironment(t *testing.T) {
 	ctx := context.Background()
 	s := testStore(t)
 	c := Check{ID: "root", Title: "Root", Steps: []Step{{ID: "child", Kind: "check", CheckID: "missing", OnUnavailable: "warn"}}}
+	if _, err := s.SaveCheck(ctx, c, "alice"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing definition accepted: %v", err)
+	}
+	c.Steps = []Step{{ID: "query", Kind: "query", QueryID: "q", OnUnavailable: "warn"}}
 	if _, err := s.SaveCheck(ctx, c, "alice"); err != nil {
 		t.Fatal(err)
 	}
 	runner := func(context.Context, string, string, map[string]apicontract.TypedValueOrSet) (apicontract.Result, error) {
-		t.Fatal("query must not run")
-		return apicontract.Result{}, nil
+		return apicontract.Result{}, &QueryFailure{Code: "SOURCE_UNAVAILABLE"}
 	}
 	if _, err := s.Run(ctx, "root", "", "", "alice", nil, runner); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("empty environment err=%v", err)
@@ -100,7 +117,7 @@ func TestDetectiveMissingDependencyAndAmbiguousEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Outcome != "unknown" || run.Steps[0].ExecutionStatus != "error" || run.Steps[0].Severity != "warning" {
+	if run.Outcome != "unknown" || run.Steps[0].ExecutionStatus != "error" || run.Steps[0].Severity != "warning" || run.Steps[0].ErrorCode != "SOURCE_UNAVAILABLE" {
 		t.Fatalf("missing dependency result=%+v", run)
 	}
 }
@@ -171,12 +188,17 @@ func TestDetectiveCaseLifecycleRestartAndRedactedAudit(t *testing.T) {
 func TestDetectiveRejectsDependencyCycleAndPrivateProjectOverlap(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
-	a := Check{ID: "a", Title: "A", Steps: []Step{{ID: "b", Kind: "check", CheckID: "b"}}}
+	a := Check{ID: "a", Title: "A", Steps: []Step{{ID: "q", Kind: "query", QueryID: "q"}}}
 	b := Check{ID: "b", Title: "B", Steps: []Step{{ID: "a", Kind: "check", CheckID: "a"}}}
-	if _, err := s.SaveCheck(ctx, a, "alice"); err != nil {
+	var err error
+	if a, err = s.SaveCheck(ctx, a, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SaveCheck(ctx, b, "alice"); !errors.Is(err, ErrInvalid) {
+	if _, err := s.SaveCheck(ctx, b, "alice"); err != nil {
+		t.Fatal(err)
+	}
+	a.Steps = []Step{{ID: "b", Kind: "check", CheckID: "b"}}
+	if _, err := s.SaveCheck(ctx, a, "alice"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("cycle err=%v", err)
 	}
 	if _, err := NewLocalStore("p", s.projectDir, filepath.Join(s.projectDir, "private")); err == nil {
@@ -261,11 +283,16 @@ func TestDetectiveTenInvoiceNestedWorkloadAndParameterNames(t *testing.T) {
 func TestDetectivePromotedValidatorCycleAndSnapshot(t *testing.T) {
 	ctx := context.Background()
 	s := testStore(t)
+	cycle := PublishedValidator{ID: "catalog", Title: "Reusable", Validator: Validator{ID: "nested", Kind: "non-null", Scope: "row", Severity: "error", Field: "id"}}
+	var err error
+	if cycle, err = s.SaveValidator(ctx, cycle, "alice"); err != nil {
+		t.Fatal(err)
+	}
 	check := Check{ID: "self", Title: "Self", Steps: []Step{{ID: "query", Kind: "query", QueryID: "q", Validators: []Validator{{ID: "published", ValidatorID: "catalog"}}}}}
 	if _, err := s.SaveCheck(ctx, check, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	cycle := PublishedValidator{ID: "catalog", Title: "Recursive", Validator: Validator{ID: "nested", Kind: "check", Scope: "row", Severity: "error", CheckID: "self"}}
+	cycle.Validator = Validator{ID: "nested", Kind: "check", Scope: "row", Severity: "error", CheckID: "self"}
 	if _, err := s.SaveValidator(ctx, cycle, "alice"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("promoted cycle accepted: %v", err)
 	}
@@ -366,6 +393,7 @@ func TestDetectiveAuditIsUsedAndFilesStayInsideRoots(t *testing.T) {
 	if err := os.Mkdir(project, 0700); err != nil {
 		t.Fatal(err)
 	}
+	stubQuery(t, project, "q")
 	s, err := NewLocalStoreWithAudit("9fA2-Project", project, private, failingAudit{})
 	if err != nil {
 		t.Fatal(err)
@@ -411,10 +439,14 @@ func TestDetectiveCaseEditsHaveTimelineAndPreserveRunRefs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveRun(ctx, CheckRun{ID: "run-1", Kind: "check", StartedAt: time.Now().UTC(), Actor: "alice"}); err != nil {
+	if err := s.SaveRun(ctx, CheckRun{ID: "run-1", Kind: "check", CaseID: c.ID, StartedAt: time.Now().UTC(), Actor: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	c, err = s.AppendCaseEvent(ctx, c.ID, CaseEvent{ID: "event-1", Type: "check-run", Ref: "run-1"}, "alice")
+	c, err = s.appendServerCaseRun(ctx, c.ID, "run-1", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err = s.ApplyScenario(ctx, c.ID, "invoice-triage", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,10 +460,10 @@ func TestDetectiveCaseEditsHaveTimelineAndPreserveRunRefs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.RunRefs) != 1 || c.RunRefs[0] != "run-1" || len(c.Timeline) != 6 {
+	if len(c.RunRefs) != 1 || c.RunRefs[0] != "run-1" || len(c.Timeline) != 6 || len(c.ScenarioApplications) != 1 {
 		t.Fatalf("case history=%+v", c)
 	}
-	for _, kind := range []string{"context-updated", "findings-updated", "incident-links-updated", "scenario-links-updated"} {
+	for _, kind := range []string{"context-updated", "findings-updated", "incident-links-updated", "scenario-applied"} {
 		found := false
 		for _, event := range c.Timeline {
 			found = found || event.Type == kind

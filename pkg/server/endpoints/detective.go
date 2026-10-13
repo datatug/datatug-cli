@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -15,8 +16,28 @@ import (
 func detectiveRoutes(path string, router router, wrap wrapper, writeOnly bool, caps Capabilities) {
 	if !writeOnly {
 		route(router, wrap, http.MethodGet, path+"/detective/state", detectiveStateHandler)
+		route(router, wrap, http.MethodGet, path+"/detective/case-events", detectiveCaseEventsHandler)
 	}
 	route(router, wrap, http.MethodPost, path+"/detective/action", requireWriteCapability(caps, detectiveActionHandler))
+}
+
+func detectiveCaseEventsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	store, _, err := detectiveStore(r.URL.Query().Get("project"), r.URL.Query().Get("securityContextId"))
+	if err != nil {
+		writeContractError(w, r, err)
+		return
+	}
+	before := 0
+	if value := r.URL.Query().Get("before"); value != "" {
+		before, err = strconv.Atoi(value)
+		if err != nil {
+			writeContractError(w, r, newInvalidRequest("before", "invalid timeline cursor"))
+			return
+		}
+	}
+	page, err := store.CaseEventsPage(r.Context(), r.URL.Query().Get("caseId"), before)
+	writeContractResponse(w, r, detectiveError(err), page)
 }
 
 func detectiveStore(project, securityContextID string) (*detective.LocalStore, string, error) {
@@ -132,6 +153,18 @@ func detectiveActionHandler(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			response.Scenario = &scenario
 		}
+	case "apply-scenario":
+		var c detective.Case
+		c, err = store.ApplyScenario(r.Context(), req.CaseID, req.ScenarioID, actor)
+		if err == nil {
+			response.Case = &c
+		}
+	case "record-scenario-step":
+		var c detective.Case
+		c, err = store.RecordScenarioStep(r.Context(), req.CaseID, req.ApplicationID, req.StepID, req.StepStatus, req.RunID, actor)
+		if err == nil {
+			response.Case = &c
+		}
 	case "create-case", "update-case":
 		if req.Case == nil {
 			err = detective.ErrInvalid
@@ -231,6 +264,8 @@ func detectiveError(err error) error {
 		return newNotFound("Detective item not found")
 	case errors.Is(err, detective.ErrInvalid):
 		return newInvalidRequest("body", "invalid Detective item or action")
+	case errors.Is(err, detective.ErrCapacity):
+		return newInvalidRequest("body", "Detective catalog capacity reached")
 	case errors.Is(err, detective.ErrOutcomeUncertain):
 		return newInvalidRequest("body", "operation may have been saved; reload and review")
 	case errors.Is(err, context.DeadlineExceeded):

@@ -20,6 +20,7 @@ import (
 const maxDepth = 8
 const maxNodes = 128
 const maxFanout = 100
+const maxRunDuration = 3 * time.Minute
 
 type QueryRunner func(context.Context, string, string, map[string]apicontract.TypedValueOrSet) (apicontract.Result, error)
 
@@ -140,6 +141,9 @@ func validateValidator(v Validator) error {
 	if !oneOf(v.Kind, "non-null", "equals-fields", "row-count", "unique", "sum-equals", "check") {
 		return ErrInvalid
 	}
+	if oneOf(v.Kind, "row-count", "unique", "sum-equals") && v.Scope != "set" || oneOf(v.Kind, "non-null", "equals-fields", "check") && v.Scope != "row" {
+		return ErrInvalid
+	}
 	if v.Kind == "check" {
 		if !validSlug(v.CheckID) || v.Scope != "row" || validateBindings(v.Bindings) != nil {
 			return ErrInvalid
@@ -158,6 +162,81 @@ func validateValidator(v Validator) error {
 	if v.Kind == "row-count" && v.Expected == nil {
 		return ErrInvalid
 	}
+	if v.Kind == "row-count" && v.Expected != nil && v.Expected.Type != investigation.ValueTypeInteger {
+		return ErrInvalid
+	}
+	if v.Kind == "row-count" && v.Expected != nil {
+		if err := v.Expected.Validate(); err != nil {
+			return ErrInvalid
+		}
+		count, ok := new(big.Int).SetString(v.Expected.Str, 10)
+		if !ok || count.Sign() < 0 || !count.IsInt64() {
+			return ErrInvalid
+		}
+	}
+	return nil
+}
+
+func validateChildBindings(parent []Input, child []Input, bindings []Binding, rowSource bool) error {
+	parentInputs := map[string]Input{}
+	for _, input := range parent {
+		parentInputs[input.Name] = input
+	}
+	childInputs := map[string]Input{}
+	for _, input := range child {
+		childInputs[input.Name] = input
+	}
+	bound := map[string]bool{}
+	for _, binding := range bindings {
+		target, ok := childInputs[binding.Input]
+		if !ok || bound[binding.Input] {
+			return ErrInvalid
+		}
+		bound[binding.Input] = true
+		if binding.FromColumn != "" {
+			if !rowSource || target.Cardinality != "scalar" {
+				return ErrInvalid
+			}
+			continue
+		}
+		source, ok := parentInputs[binding.FromInput]
+		if !ok {
+			return ErrInvalid
+		}
+		if binding.Part != "" {
+			if source.Cardinality != "range" || target.Cardinality != "scalar" || source.Type != target.Type {
+				return ErrInvalid
+			}
+		} else if source.Type != target.Type || source.Cardinality != target.Cardinality {
+			return ErrInvalid
+		}
+	}
+	for _, input := range child {
+		if input.Required && !bound[input.Name] {
+			return ErrInvalid
+		}
+	}
+	return nil
+}
+
+func validateLocalBindings(child []Input, bindings []Binding) error {
+	inputs := map[string]Input{}
+	for _, input := range child {
+		inputs[input.Name] = input
+	}
+	bound := map[string]bool{}
+	for _, binding := range bindings {
+		input, ok := inputs[binding.Input]
+		if !ok || bound[binding.Input] || binding.FromColumn != "" && input.Cardinality != "scalar" {
+			return ErrInvalid
+		}
+		bound[binding.Input] = true
+	}
+	for _, input := range child {
+		if input.Required && !bound[input.Name] {
+			return ErrInvalid
+		}
+	}
 	return nil
 }
 
@@ -174,13 +253,36 @@ func validateGraph(graph map[string]Check, catalog map[string]PublishedValidator
 		}
 		c, ok := graph[id]
 		if !ok {
-			return nil
+			return ErrNotFound
 		}
 		visiting[id] = true
 		for _, s := range c.Steps {
 			if s.Kind == "check" {
+				child, ok := graph[s.CheckID]
+				if !ok {
+					return ErrNotFound
+				}
+				if err := validateChildBindings(c.Inputs, child.Inputs, s.Bindings, false); err != nil {
+					return err
+				}
 				if err := visit(s.CheckID, depth+1); err != nil {
 					return err
+				}
+			} else {
+				for _, b := range s.Bindings {
+					if b.FromColumn != "" {
+						return ErrInvalid
+					}
+					found := false
+					for _, in := range c.Inputs {
+						if in.Name == b.FromInput {
+							found = true
+							break
+						}
+					}
+					if !found {
+						return ErrInvalid
+					}
 				}
 			}
 			validators := append([]Validator(nil), s.Validators...)
@@ -189,11 +291,20 @@ func validateGraph(graph map[string]Check, catalog map[string]PublishedValidator
 			}
 			for _, v := range validators {
 				if v.ValidatorID != "" {
-					if promoted, ok := catalog[v.ValidatorID]; ok {
-						v = promoted.Validator
+					promoted, ok := catalog[v.ValidatorID]
+					if !ok {
+						return ErrNotFound
 					}
+					v = promoted.Validator
 				}
 				if v.Kind == "check" {
+					child, ok := graph[v.CheckID]
+					if !ok {
+						return ErrNotFound
+					}
+					if err := validateChildBindings(c.Inputs, child.Inputs, v.Bindings, true); err != nil {
+						return err
+					}
 					if err := visit(v.CheckID, depth+1); err != nil {
 						return err
 					}
@@ -207,6 +318,30 @@ func validateGraph(graph map[string]Check, catalog map[string]PublishedValidator
 	for id := range graph {
 		if err := visit(id, 0); err != nil {
 			return err
+		}
+	}
+	for _, local := range locals {
+		for _, validator := range local.Validators {
+			v := validator
+			if v.ValidatorID != "" {
+				promoted, ok := catalog[v.ValidatorID]
+				if !ok {
+					return ErrNotFound
+				}
+				v = promoted.Validator
+			}
+			if v.Kind == "check" {
+				child, ok := graph[v.CheckID]
+				if !ok {
+					return ErrNotFound
+				}
+				if err := validateLocalBindings(child.Inputs, v.Bindings); err != nil {
+					return err
+				}
+				if err := visit(v.CheckID, 0); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
@@ -224,14 +359,7 @@ type engine struct {
 	metadata        ExecutionMetadata
 }
 
-func (s *LocalStore) Run(ctx context.Context, checkID, environment, caseID, actor string, inputs map[string]InputValue, runner QueryRunner, metadata ...ExecutionMetadata) (CheckRun, error) {
-	if !validSlug(checkID) || environment == "" || runner == nil {
-		return CheckRun{}, ErrInvalid
-	}
-	state, err := s.State(ctx)
-	if err != nil {
-		return CheckRun{}, err
-	}
+func newEngine(state State, environment string, runner QueryRunner, metadata []ExecutionMetadata) engine {
 	e := engine{checks: map[string]Check{}, validators: map[string]PublishedValidator{}, queryValidators: map[string]QueryValidators{}, runner: runner, environment: environment, cache: map[string]StepResult{}}
 	if len(metadata) > 0 {
 		e.metadata = metadata[0]
@@ -244,6 +372,84 @@ func (s *LocalStore) Run(ctx context.Context, checkID, environment, caseID, acto
 	}
 	for _, v := range state.QueryValidators {
 		e.queryValidators[v.QueryID] = v
+	}
+	return e
+}
+
+func (e *engine) snapshot(run *CheckRun, rootCheck, rootQuery string) {
+	seenChecks := map[string]bool{}
+	seenQueries := map[string]bool{}
+	seenValidators := map[string]bool{}
+	var visitCheck func(string)
+	var visitQuery func(string, []Validator)
+	var visitValidators func([]Validator)
+	visitValidators = func(validators []Validator) {
+		for _, v := range validators {
+			if v.ValidatorID != "" {
+				if !seenValidators[v.ValidatorID] {
+					seenValidators[v.ValidatorID] = true
+					run.PublishedValidators = append(run.PublishedValidators, e.validators[v.ValidatorID])
+				}
+				v = e.validators[v.ValidatorID].Validator
+			}
+			if v.Kind == "check" {
+				visitCheck(v.CheckID)
+			}
+		}
+	}
+	visitQuery = func(id string, inline []Validator) {
+		visitValidators(inline)
+		if seenQueries[id] {
+			return
+		}
+		seenQueries[id] = true
+		if local, ok := e.queryValidators[id]; ok {
+			run.QueryValidators = append(run.QueryValidators, local)
+			visitValidators(local.Validators)
+		}
+	}
+	visitCheck = func(id string) {
+		if seenChecks[id] {
+			return
+		}
+		seenChecks[id] = true
+		check := e.checks[id]
+		if id != rootCheck {
+			run.Dependencies = append(run.Dependencies, check)
+		}
+		for _, step := range check.Steps {
+			if step.Kind == "check" {
+				visitCheck(step.CheckID)
+			} else {
+				visitQuery(step.QueryID, step.Validators)
+			}
+		}
+	}
+	if rootCheck != "" {
+		visitCheck(rootCheck)
+	}
+	if rootQuery != "" {
+		visitQuery(rootQuery, nil)
+	}
+	sort.Slice(run.Dependencies, func(i, j int) bool { return run.Dependencies[i].ID < run.Dependencies[j].ID })
+	sort.Slice(run.PublishedValidators, func(i, j int) bool { return run.PublishedValidators[i].ID < run.PublishedValidators[j].ID })
+	sort.Slice(run.QueryValidators, func(i, j int) bool { return run.QueryValidators[i].QueryID < run.QueryValidators[j].QueryID })
+}
+
+func (s *LocalStore) Run(ctx context.Context, checkID, environment, caseID, actor string, inputs map[string]InputValue, runner QueryRunner, metadata ...ExecutionMetadata) (CheckRun, error) {
+	if !validSlug(checkID) || environment == "" || runner == nil {
+		return CheckRun{}, ErrInvalid
+	}
+	state, err := s.State(ctx)
+	if err != nil {
+		return CheckRun{}, err
+	}
+	e := newEngine(state, environment, runner, metadata)
+	if err := validateGraph(e.checks, e.validators, e.queryValidators); err != nil {
+		return CheckRun{}, err
+	}
+	if err := s.ensureQueryRefs(e.checks, e.queryValidators); err != nil {
+		return CheckRun{}, err
 	}
 	root, ok := e.checks[checkID]
 	if !ok {
@@ -269,43 +475,10 @@ func (s *LocalStore) Run(ctx context.Context, checkID, environment, caseID, acto
 	}
 	start := time.Now().UTC()
 	run := CheckRun{ID: "run-" + strings.ReplaceAll(uuid.NewString(), "-", ""), Kind: "check", CheckID: checkID, Definition: root, CaseID: caseID, Environment: environment, InputNames: sortedKeys(inputs), StartedAt: start, Actor: actor}
-	seenChecks := map[string]bool{checkID: true}
-	seenValidators := map[string]bool{}
-	var snapshot func(Check)
-	snapshot = func(c Check) {
-		for _, step := range c.Steps {
-			if step.Kind == "check" && !seenChecks[step.CheckID] {
-				seenChecks[step.CheckID] = true
-				if child, ok := e.checks[step.CheckID]; ok {
-					run.Dependencies = append(run.Dependencies, child)
-					snapshot(child)
-				}
-			}
-			validators := append([]Validator(nil), step.Validators...)
-			if local, ok := e.queryValidators[step.QueryID]; ok {
-				run.QueryValidators = append(run.QueryValidators, local)
-				validators = append(validators, local.Validators...)
-			}
-			for _, v := range validators {
-				if v.ValidatorID != "" && !seenValidators[v.ValidatorID] {
-					seenValidators[v.ValidatorID] = true
-					if item, ok := e.validators[v.ValidatorID]; ok {
-						run.PublishedValidators = append(run.PublishedValidators, item)
-						v = item.Validator
-					}
-				}
-				if v.Kind == "check" && !seenChecks[v.CheckID] {
-					seenChecks[v.CheckID] = true
-					if child, ok := e.checks[v.CheckID]; ok {
-						run.Dependencies = append(run.Dependencies, child)
-						snapshot(child)
-					}
-				}
-			}
-		}
-	}
-	snapshot(root)
-	rootResult := e.runCheck(ctx, checkID, inputs, 0, map[string]bool{})
+	e.snapshot(&run, checkID, "")
+	runCtx, cancel := context.WithTimeout(ctx, maxRunDuration)
+	defer cancel()
+	rootResult := e.runCheck(runCtx, checkID, inputs, 0, map[string]bool{})
 	run.Steps = rootResult.Children
 	run.ExecutionStatus = rootResult.ExecutionStatus
 	run.Outcome = rootResult.Outcome
@@ -317,7 +490,7 @@ func (s *LocalStore) Run(ctx context.Context, checkID, environment, caseID, acto
 		return CheckRun{}, err
 	}
 	if caseID != "" {
-		_, err = s.AppendCaseEvent(ctx, caseID, CaseEvent{ID: "event-" + strings.ReplaceAll(uuid.NewString(), "-", ""), Type: "check-run", Ref: run.ID}, actor)
+		_, err = s.appendServerCaseRun(ctx, caseID, run.ID, actor)
 		if err != nil {
 			return run, fmt.Errorf("%w: case link was not saved", ErrOutcomeUncertain)
 		}
@@ -376,38 +549,39 @@ func (s *LocalStore) RunQueryValidators(ctx context.Context, queryID, environmen
 		bindings = append(bindings, Binding{Input: name, FromInput: name})
 	}
 	start := time.Now().UTC()
-	e := engine{checks: map[string]Check{}, validators: map[string]PublishedValidator{}, queryValidators: map[string]QueryValidators{queryID: local}, runner: runner, environment: environment, cache: map[string]StepResult{}}
-	if len(metadata) > 0 {
-		e.metadata = metadata[0]
+	e := newEngine(state, environment, runner, metadata)
+	if err := validateGraph(e.checks, e.validators, e.queryValidators); err != nil {
+		return CheckRun{}, err
 	}
-	for _, v := range state.Validators {
-		e.validators[v.ID] = v
+	if err := s.ensureQueryRefs(e.checks, e.queryValidators); err != nil {
+		return CheckRun{}, err
 	}
-	for _, c := range state.Checks {
-		e.checks[c.ID] = c
-	}
-	step := e.runQueryStep(ctx, Step{ID: "query", Kind: "query", QueryID: queryID, Bindings: bindings}, inputs, 0, map[string]bool{})
-	run := CheckRun{ID: "run-" + strings.ReplaceAll(uuid.NewString(), "-", ""), Kind: "query-validators", QueryID: queryID, CaseID: caseID, Environment: environment, InputNames: sortedKeys(inputs), QueryValidators: []QueryValidators{local}, StartedAt: start, Actor: actor, Steps: []StepResult{step}, ExecutionStatus: step.ExecutionStatus, Outcome: step.Outcome, Severity: step.Severity, DurationMs: time.Since(start).Milliseconds()}
-	run.CheckInvocations = e.nodes
-	run.QueryExecutions = e.queries
 	for _, v := range local.Validators {
 		if v.ValidatorID != "" {
-			if p, ok := e.validators[v.ValidatorID]; ok {
-				run.PublishedValidators = append(run.PublishedValidators, p)
-				v = p.Validator
-			}
+			v = e.validators[v.ValidatorID].Validator
 		}
 		if v.Kind == "check" {
-			if c, ok := e.checks[v.CheckID]; ok {
-				run.Dependencies = append(run.Dependencies, c)
+			for _, b := range v.Bindings {
+				if b.FromInput != "" {
+					if _, ok := inputs[b.FromInput]; !ok {
+						return CheckRun{}, ErrInvalid
+					}
+				}
 			}
 		}
 	}
+	runCtx, cancel := context.WithTimeout(ctx, maxRunDuration)
+	defer cancel()
+	step := e.runQueryStep(runCtx, Step{ID: "query", Kind: "query", QueryID: queryID, Bindings: bindings}, inputs, 0, map[string]bool{})
+	run := CheckRun{ID: "run-" + strings.ReplaceAll(uuid.NewString(), "-", ""), Kind: "query-validators", QueryID: queryID, CaseID: caseID, Environment: environment, InputNames: sortedKeys(inputs), StartedAt: start, Actor: actor, Steps: []StepResult{step}, ExecutionStatus: step.ExecutionStatus, Outcome: step.Outcome, Severity: step.Severity, DurationMs: time.Since(start).Milliseconds()}
+	e.snapshot(&run, "", queryID)
+	run.CheckInvocations = e.nodes
+	run.QueryExecutions = e.queries
 	if err := s.SaveRun(ctx, run); err != nil {
 		return CheckRun{}, err
 	}
 	if caseID != "" {
-		_, err = s.AppendCaseEvent(ctx, caseID, CaseEvent{ID: "event-" + strings.ReplaceAll(uuid.NewString(), "-", ""), Type: "check-run", Ref: run.ID}, actor)
+		_, err = s.appendServerCaseRun(ctx, caseID, run.ID, actor)
 		if err != nil {
 			return run, fmt.Errorf("%w: case link was not saved", ErrOutcomeUncertain)
 		}
@@ -461,7 +635,13 @@ func validateInputs(schema []Input, values map[string]InputValue) error {
 }
 
 func (e *engine) runCheck(ctx context.Context, id string, inputs map[string]InputValue, depth int, visiting map[string]bool) StepResult {
-	res := StepResult{StepID: id, Kind: "check", CheckID: id, ExecutionStatus: "completed", Outcome: "unknown"}
+	res := StepResult{StepID: id, Kind: "check", CheckID: id, ExecutionStatus: "completed", Outcome: "unknown", EvidenceOutcome: "unknown"}
+	if ctx.Err() != nil {
+		res.ExecutionStatus = "error"
+		res.ErrorCode = "TIMEOUT"
+		res.Message = "check run deadline or cancellation reached"
+		return res
+	}
 	if depth > maxDepth || e.nodes >= maxNodes || visiting[id] {
 		res.ExecutionStatus = "error"
 		res.Message = "check graph bound or cycle reached"
@@ -485,7 +665,7 @@ func (e *engine) runCheck(ctx context.Context, id string, inputs map[string]Inpu
 	e.nodes++
 	visiting[id] = true
 	defer delete(visiting, id)
-	for _, step := range c.Steps {
+	for i, step := range c.Steps {
 		var child StepResult
 		if step.Kind == "check" {
 			mapped, err := mapBindings(step.Bindings, inputs, nil, nil)
@@ -502,17 +682,27 @@ func (e *engine) runCheck(ctx context.Context, id string, inputs map[string]Inpu
 			applyUnavailable(&child, step.OnUnavailable)
 		}
 		res.Children = append(res.Children, child)
-		if child.ExecutionStatus == "error" && step.OnUnavailable == "block" {
+		if child.ExecutionStatus == "error" && effectivePolicy(step.OnUnavailable) == "block" {
+			for _, pending := range c.Steps[i+1:] {
+				res.Children = append(res.Children, StepResult{StepID: pending.ID, Kind: pending.Kind, QueryID: pending.QueryID, CheckID: pending.CheckID, ExecutionStatus: "skipped", Outcome: "unknown", EvidenceOutcome: "unknown", Disposition: "unattempted", Message: "blocked by earlier unavailable step"})
+			}
 			break
 		}
 	}
 	res.Outcome, res.ExecutionStatus, res.Severity = aggregate(res.Children)
+	res.EvidenceOutcome = res.Outcome
 	e.cache[key] = res
 	return res
 }
 
 func (e *engine) runQueryStep(ctx context.Context, step Step, inputs map[string]InputValue, depth int, visiting map[string]bool) StepResult {
-	res := StepResult{StepID: step.ID, Kind: "query", QueryID: step.QueryID, ExecutionStatus: "completed", Outcome: "unknown"}
+	res := StepResult{StepID: step.ID, Kind: "query", QueryID: step.QueryID, ExecutionStatus: "completed", Outcome: "unknown", EvidenceOutcome: "unknown"}
+	if ctx.Err() != nil {
+		res.ExecutionStatus = "error"
+		res.ErrorCode = "TIMEOUT"
+		res.Message = "check run deadline or cancellation reached"
+		return res
+	}
 	mapped, err := mapBindings(step.Bindings, inputs, nil, nil)
 	if err != nil {
 		res.ExecutionStatus = "error"
@@ -543,6 +733,12 @@ func (e *engine) runQueryStep(ctx context.Context, step Step, inputs map[string]
 		}
 		return res
 	}
+	if err := result.Recordset.Validate(); err != nil {
+		res.ExecutionStatus = "error"
+		res.ErrorCode = "INVALID_RECORDSET"
+		res.Message = "saved query returned a malformed recordset"
+		return res
+	}
 	res.Source = result.Provenance.Source
 	res.ObservedAt = result.Provenance.ObservedAt
 	res.ExecutionProfile = result.Provenance.ExecutionProfile
@@ -558,11 +754,12 @@ func (e *engine) runQueryStep(ctx context.Context, step Step, inputs map[string]
 		}
 	}
 	res.RowCount = len(result.Recordset.Rows)
+	res.Limitations = result.Limitations
 	validators := append([]Validator(nil), step.Validators...)
 	if local, ok := e.queryValidators[step.QueryID]; ok {
 		validators = append(validators, local.Validators...)
 	}
-	for _, validator := range validators {
+	for i, validator := range validators {
 		v := validator
 		if v.ValidatorID != "" {
 			published, ok := e.validators[v.ValidatorID]
@@ -572,17 +769,38 @@ func (e *engine) runQueryStep(ctx context.Context, step Step, inputs map[string]
 			}
 			v = published.Validator
 		}
-		res.Validators = append(res.Validators, e.validate(ctx, v, result.Recordset, result.Truncated, inputs, depth, visiting)...)
+		results := e.validate(ctx, v, result.Recordset, result.Truncated, result.Limitations, inputs, depth, visiting)
+		for j := range results {
+			if results[j].EvidenceOutcome == "" {
+				results[j].EvidenceOutcome = results[j].Outcome
+			}
+		}
+		res.Validators = append(res.Validators, results...)
+		blocked := false
+		for _, item := range results {
+			if item.ExecutionStatus == "error" && effectivePolicy(v.OnUnavailable) == "block" {
+				blocked = true
+				break
+			}
+		}
+		if blocked {
+			for _, pending := range validators[i+1:] {
+				res.Validators = append(res.Validators, ValidationResult{ValidatorID: pending.ID, ExecutionStatus: "skipped", Outcome: "unknown", EvidenceOutcome: "unknown", Disposition: "unattempted", Message: "blocked by earlier unavailable validator"})
+			}
+			break
+		}
 	}
 	res.Outcome, res.ExecutionStatus, res.Severity = aggregateValidators(res.Validators)
+	res.EvidenceOutcome = res.Outcome
 	if evidenceMissing {
 		res.Outcome = "unknown"
 		res.ExecutionStatus = "error"
 		res.Message = "execution receipt metadata is unavailable"
 	}
-	if result.Truncated && res.Outcome == "pass" {
+	if incompletePopulation(result.Truncated, result.Limitations) && res.Outcome == "pass" {
 		res.Outcome = "unknown"
-		res.Message = "query result was truncated"
+		res.EvidenceOutcome = "unknown"
+		res.Message = "query result does not include the complete authorized population"
 	}
 	return res
 }
@@ -599,13 +817,32 @@ func validExecutionCode(code string) bool {
 	return true
 }
 
-func (e *engine) validate(ctx context.Context, v Validator, rs apicontract.Recordset, truncated bool, inputs map[string]InputValue, depth int, visiting map[string]bool) []ValidationResult {
-	base := ValidationResult{ValidatorID: v.ID, ExecutionStatus: "completed", Outcome: "pass", Severity: v.Severity}
-	if truncated && v.Scope == "set" {
-		base.Outcome = "unknown"
-		base.Message = "set result is truncated"
-		return []ValidationResult{base}
+func incompletePopulation(truncated bool, limitations []apicontract.Limitation) bool {
+	if truncated {
+		return true
 	}
+	for _, limitation := range limitations {
+		if limitation.RowsFiltered || len(limitation.HiddenColumns) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hiddenField(field string, limitations []apicontract.Limitation) bool {
+	for _, limitation := range limitations {
+		for _, hidden := range limitation.HiddenColumns {
+			if hidden == field {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (e *engine) validate(ctx context.Context, v Validator, rs apicontract.Recordset, truncated bool, limitations []apicontract.Limitation, inputs map[string]InputValue, depth int, visiting map[string]bool) []ValidationResult {
+	base := ValidationResult{ValidatorID: v.ID, ExecutionStatus: "completed", Outcome: "pass", Severity: v.Severity}
+	incomplete := incompletePopulation(truncated, limitations)
 	if v.Kind == "row-count" {
 		if v.Expected == nil || v.Expected.Type != investigation.ValueTypeInteger {
 			base.Outcome = "unknown"
@@ -614,9 +851,13 @@ func (e *engine) validate(ctx context.Context, v Validator, rs apicontract.Recor
 			_, err := fmt.Sscan(v.Expected.Str, &wanted)
 			if err != nil {
 				base.Outcome = "unknown"
-			} else if len(rs.Rows) != wanted {
+			} else if len(rs.Rows) != wanted && (!incomplete || len(rs.Rows) > wanted) {
 				base.Outcome = "fail"
 			}
+		}
+		if incomplete && base.Outcome == "pass" {
+			base.Outcome = "unknown"
+			base.Message = "population was filtered or truncated"
 		}
 		return []ValidationResult{base}
 	}
@@ -625,7 +866,7 @@ func (e *engine) validate(ctx context.Context, v Validator, rs apicontract.Recor
 		indices[c.Name] = i
 	}
 	fieldIndex, ok := indices[v.Field]
-	if v.Kind != "check" && !ok {
+	if v.Kind != "check" && (!ok || hiddenField(v.Field, limitations)) {
 		base.ExecutionStatus = "error"
 		base.Outcome = "unknown"
 		base.Message = "validator field is unavailable"
@@ -633,7 +874,7 @@ func (e *engine) validate(ctx context.Context, v Validator, rs apicontract.Recor
 	}
 	otherIndex := indices[v.OtherField]
 	if (v.Kind == "equals-fields" || v.Kind == "sum-equals") && v.OtherField != "" {
-		if _, ok := indices[v.OtherField]; !ok {
+		if _, ok := indices[v.OtherField]; !ok || hiddenField(v.OtherField, limitations) {
 			base.ExecutionStatus = "error"
 			base.Outcome = "unknown"
 			base.Message = "validator field is unavailable"
@@ -650,6 +891,10 @@ func (e *engine) validate(ctx context.Context, v Validator, rs apicontract.Recor
 			}
 			seen[key] = true
 		}
+		if incomplete && base.Outcome == "pass" {
+			base.Outcome = "unknown"
+			base.Message = "population was filtered or truncated"
+		}
 		return []ValidationResult{base}
 	}
 	if v.Kind == "sum-equals" {
@@ -665,8 +910,12 @@ func (e *engine) validate(ctx context.Context, v Validator, rs apicontract.Recor
 			left.Add(left, a)
 			right.Add(right, b)
 		}
-		if left.Cmp(right) != 0 {
+		if left.Cmp(right) != 0 && !incomplete {
 			base.Outcome = "fail"
+		}
+		if incomplete {
+			base.Outcome = "unknown"
+			base.Message = "population was filtered or truncated"
 		}
 		return []ValidationResult{base}
 	}
@@ -678,6 +927,13 @@ func (e *engine) validate(ctx context.Context, v Validator, rs apicontract.Recor
 		return []ValidationResult{base}
 	}
 	for i, row := range rs.Rows {
+		if ctx.Err() != nil {
+			for j := i; j < len(rs.Rows); j++ {
+				rowIndex := j
+				results = append(results, ValidationResult{ValidatorID: v.ID, RowIndex: &rowIndex, ExecutionStatus: "skipped", Outcome: "unknown", EvidenceOutcome: "unknown", Disposition: "unattempted", Message: "check run deadline or cancellation reached"})
+			}
+			break
+		}
 		item := base
 		item.RowIndex = &i
 		switch v.Kind {
@@ -694,7 +950,9 @@ func (e *engine) validate(ctx context.Context, v Validator, rs apicontract.Recor
 			if err != nil {
 				item.ExecutionStatus = "error"
 				item.Outcome = "unknown"
+				item.EvidenceOutcome = "unknown"
 				item.Message = "row binding is unavailable"
+				applyUnavailableValidation(&item, v.OnUnavailable)
 			} else {
 				child := e.runCheck(ctx, v.CheckID, mapped, depth+1, visiting)
 				item.Children = []StepResult{child}
@@ -702,11 +960,19 @@ func (e *engine) validate(ctx context.Context, v Validator, rs apicontract.Recor
 				item.ExecutionStatus = child.ExecutionStatus
 				item.Severity = higherSeverity(item.Severity, child.Severity)
 				if child.ExecutionStatus == "error" {
+					item.EvidenceOutcome = "unknown"
 					applyUnavailableValidation(&item, v.OnUnavailable)
 				}
 			}
 		}
 		results = append(results, item)
+		if item.ExecutionStatus == "error" && effectivePolicy(v.OnUnavailable) == "block" {
+			for j := i + 1; j < len(rs.Rows); j++ {
+				rowIndex := j
+				results = append(results, ValidationResult{ValidatorID: v.ID, RowIndex: &rowIndex, ExecutionStatus: "skipped", Outcome: "unknown", EvidenceOutcome: "unknown", Disposition: "unattempted", Message: "blocked by earlier unavailable row"})
+			}
+			break
+		}
 	}
 	if len(results) == 0 {
 		base.Outcome = "unknown"
@@ -778,12 +1044,13 @@ func aggregate(children []StepResult) (string, string, string) {
 		if c.ExecutionStatus == "error" {
 			status = "error"
 		}
+		if c.Outcome != "pass" {
+			severity = higherSeverity(severity, c.Severity)
+		}
 		if c.Outcome == "fail" {
 			outcome = "fail"
-			severity = higherSeverity(severity, c.Severity)
 		} else if c.Outcome == "unknown" && outcome != "fail" {
 			outcome = "unknown"
-			severity = higherSeverity(severity, c.Severity)
 		}
 	}
 	return outcome, status, severity
@@ -797,12 +1064,13 @@ func aggregateValidators(children []ValidationResult) (string, string, string) {
 		if c.ExecutionStatus == "error" {
 			status = "error"
 		}
+		if c.Outcome != "pass" {
+			severity = higherSeverity(severity, c.Severity)
+		}
 		if c.Outcome == "fail" {
 			outcome = "fail"
-			severity = higherSeverity(severity, c.Severity)
 		} else if c.Outcome == "unknown" && outcome != "fail" {
 			outcome = "unknown"
-			severity = higherSeverity(severity, c.Severity)
 		}
 	}
 	return outcome, status, severity
@@ -814,25 +1082,37 @@ func higherSeverity(a, b string) string {
 	}
 	return a
 }
+func effectivePolicy(policy string) string {
+	if policy == "" {
+		return "block"
+	}
+	return policy
+}
 func applyUnavailable(r *StepResult, policy string) {
-	if policy == "fail" {
+	r.OnUnavailable = effectivePolicy(policy)
+	r.Disposition = r.OnUnavailable
+	r.EvidenceOutcome = "unknown"
+	switch r.OnUnavailable {
+	case "fail":
 		r.Outcome = "fail"
-	} else if policy == "skip" {
-		r.ExecutionStatus = "skipped"
+	case "warn":
 		r.Outcome = "unknown"
-	} else if policy == "warn" {
-		r.Severity = "warning"
+		r.Severity = higherSeverity(r.Severity, "warning")
+	default:
 		r.Outcome = "unknown"
 	}
 }
 func applyUnavailableValidation(r *ValidationResult, policy string) {
-	if policy == "fail" {
+	r.OnUnavailable = effectivePolicy(policy)
+	r.Disposition = r.OnUnavailable
+	r.EvidenceOutcome = "unknown"
+	switch r.OnUnavailable {
+	case "fail":
 		r.Outcome = "fail"
-	} else if policy == "skip" {
-		r.ExecutionStatus = "skipped"
+	case "warn":
 		r.Outcome = "unknown"
-	} else if policy == "warn" {
-		r.Severity = "warning"
+		r.Severity = higherSeverity(r.Severity, "warning")
+	default:
 		r.Outcome = "unknown"
 	}
 }

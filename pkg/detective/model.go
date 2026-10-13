@@ -51,10 +51,33 @@ func (v InputValue) Validate() error {
 	if v.Range.Type != "range" || v.Range.Start.Type != v.Range.End.Type {
 		return fmt.Errorf("invalid typed range")
 	}
+	if v.Range.Start.Type != investigation.ValueTypeDate && v.Range.Start.Type != investigation.ValueTypeDatetime && v.Range.Start.Type != investigation.ValueTypeInteger && v.Range.Start.Type != investigation.ValueTypeDecimal && v.Range.Start.Type != investigation.ValueTypeNumber {
+		return fmt.Errorf("range requires an ordered type")
+	}
 	if err := v.Range.Start.Validate(); err != nil {
 		return err
 	}
-	return v.Range.End.Validate()
+	if err := v.Range.End.Validate(); err != nil {
+		return err
+	}
+	if v.Range.Start.Type == investigation.ValueTypeDate || v.Range.Start.Type == investigation.ValueTypeDatetime {
+		layout := "2006-01-02"
+		if v.Range.Start.Type == investigation.ValueTypeDatetime {
+			layout = time.RFC3339
+		}
+		start, _ := time.Parse(layout, v.Range.Start.Str)
+		end, _ := time.Parse(layout, v.Range.End.Str)
+		if start.After(end) {
+			return fmt.Errorf("range start is after end")
+		}
+	} else {
+		start, okStart := numeric(v.Range.Start)
+		end, okEnd := numeric(v.Range.End)
+		if !okStart || !okEnd || start.Cmp(end) > 0 {
+			return fmt.Errorf("range start is after end")
+		}
+	}
+	return nil
 }
 
 func (v InputValue) MarshalJSON() ([]byte, error) {
@@ -190,20 +213,47 @@ type CaseEvent struct {
 }
 
 type Case struct {
-	ID            string                `json:"id"`
-	Title         string                `json:"title"`
-	Status        string                `json:"status"` // active | closed | archived
-	Version       int64                 `json:"version"`
-	Context       map[string]InputValue `json:"context"`
-	IncidentRefs  []string              `json:"incidentRefs"`
-	ScenarioRefs  []string              `json:"scenarioRefs"`
-	RunRefs       []string              `json:"runRefs"`
-	Evidence      []EvidenceRef         `json:"evidence"`
-	Findings      []Finding             `json:"findings"`
-	Timeline      []CaseEvent           `json:"timeline"`
-	ClosureReason string                `json:"closureReason,omitempty"`
-	CreatedAt     time.Time             `json:"createdAt"`
-	UpdatedAt     time.Time             `json:"updatedAt"`
+	ID                   string                `json:"id"`
+	Title                string                `json:"title"`
+	Status               string                `json:"status"` // active | closed | archived
+	Version              int64                 `json:"version"`
+	Context              map[string]InputValue `json:"context"`
+	IncidentRefs         []string              `json:"incidentRefs"`
+	ScenarioRefs         []string              `json:"scenarioRefs"`
+	ScenarioApplications []ScenarioApplication `json:"scenarioApplications,omitempty"`
+	RunRefs              []string              `json:"runRefs"`
+	Evidence             []EvidenceRef         `json:"evidence"`
+	Findings             []Finding             `json:"findings"`
+	Timeline             []CaseEvent           `json:"timeline"`
+	TimelineOffset       int                   `json:"timelineOffset,omitempty"`
+	ClosureReason        string                `json:"closureReason,omitempty"`
+	CreatedAt            time.Time             `json:"createdAt"`
+	UpdatedAt            time.Time             `json:"updatedAt"`
+}
+
+type CaseEventsPage struct {
+	CaseID     string      `json:"caseId"`
+	Events     []CaseEvent `json:"events"`
+	NextBefore int         `json:"nextBefore,omitempty"`
+	HasMore    bool        `json:"hasMore"`
+}
+
+type ScenarioStepReceipt struct {
+	StepID string    `json:"stepId"`
+	Status string    `json:"status"` // pending | completed | skipped
+	RunID  string    `json:"runId,omitempty"`
+	At     time.Time `json:"at,omitempty"`
+	Actor  string    `json:"actor,omitempty"`
+}
+
+type ScenarioApplication struct {
+	ID              string                `json:"id"`
+	ScenarioID      string                `json:"scenarioId"`
+	ScenarioVersion int64                 `json:"scenarioVersion"`
+	Snapshot        Scenario              `json:"snapshot"`
+	AppliedAt       time.Time             `json:"appliedAt"`
+	AppliedBy       string                `json:"appliedBy"`
+	Steps           []ScenarioStepReceipt `json:"steps"`
 }
 
 type ScenarioStep struct {
@@ -225,6 +275,9 @@ type ValidationResult struct {
 	ValidatorID     string       `json:"validatorId"`
 	ExecutionStatus string       `json:"executionStatus"`
 	Outcome         string       `json:"outcome"` // pass | fail | unknown
+	EvidenceOutcome string       `json:"evidenceOutcome,omitempty"`
+	OnUnavailable   string       `json:"onUnavailable,omitempty"`
+	Disposition     string       `json:"disposition,omitempty"`
 	Severity        string       `json:"severity"`
 	RowIndex        *int         `json:"rowIndex,omitempty"`
 	Message         string       `json:"message,omitempty"`
@@ -246,6 +299,10 @@ type StepResult struct {
 	CheckID           string                    `json:"checkId,omitempty"`
 	ExecutionStatus   string                    `json:"executionStatus"` // pending | running | completed | error | skipped
 	Outcome           string                    `json:"outcome"`         // pass | fail | unknown
+	EvidenceOutcome   string                    `json:"evidenceOutcome,omitempty"`
+	OnUnavailable     string                    `json:"onUnavailable,omitempty"`
+	Disposition       string                    `json:"disposition,omitempty"`
+	Limitations       []apicontract.Limitation  `json:"limitations,omitempty"`
 	Severity          string                    `json:"severity,omitempty"`
 	RowCount          int                       `json:"rowCount,omitempty"`
 	Message           string                    `json:"message,omitempty"`
@@ -300,7 +357,7 @@ type State struct {
 // ActionRequest is POST /datatug/detective/action. Project and securityContextId
 // are included in the body and must match the URL/session respectively.
 type ActionRequest struct {
-	Type              string                `json:"type"` // save-check | save-validator | save-query-validators | create-case | update-case | append-event | run-check | run-query-validators | save-scenario
+	Type              string                `json:"type"` // save-check | save-validator | save-query-validators | create-case | update-case | append-event | run-check | run-query-validators | save-scenario | apply-scenario | record-scenario-step
 	Project           string                `json:"project"`
 	SecurityContextID string                `json:"securityContextId"`
 	Check             *Check                `json:"check,omitempty"`
@@ -312,6 +369,11 @@ type ActionRequest struct {
 	CheckID           string                `json:"checkId,omitempty"`
 	QueryID           string                `json:"queryId,omitempty"`
 	CaseID            string                `json:"caseId,omitempty"`
+	ScenarioID        string                `json:"scenarioId,omitempty"`
+	ApplicationID     string                `json:"applicationId,omitempty"`
+	StepID            string                `json:"stepId,omitempty"`
+	StepStatus        string                `json:"stepStatus,omitempty"`
+	RunID             string                `json:"runId,omitempty"`
 	Environment       string                `json:"environment,omitempty"`
 	Inputs            map[string]InputValue `json:"inputs,omitempty"`
 }

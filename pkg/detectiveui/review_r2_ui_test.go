@@ -58,13 +58,13 @@ func TestNativePastePreservesMultilineAIAndQueryText(t *testing.T) {
 		t.Fatalf("AI intake paste changed line boundaries: %q", got)
 	}
 	m.begin("ai-review", "Query review", []field{fm("Query text", "", "")})
-	m.Update(tea.PasteMsg{Content: "SELECT 1 -- explanation\nFROM invoices"})
-	if got := m.field("Query text"); got != "SELECT 1 -- explanation\nFROM invoices" {
-		t.Fatalf("SQL comment swallowed next line: %q", got)
+	m.Update(tea.PasteMsg{Content: "SELECT 'a\tb' AS value -- explanation\nFROM invoices"})
+	if got := m.field("Query text"); got != "SELECT 'a\tb' AS value -- explanation\nFROM invoices" {
+		t.Fatalf("SQL paste changed line or tab semantics: %q", got)
 	}
 	m.begin("new-case", "Single line", []field{f("Title", "", "")})
-	m.Update(tea.PasteMsg{Content: "Invoice\nreconciliation"})
-	if got := m.field("Title"); got != "Invoice reconciliation" {
+	m.Update(tea.PasteMsg{Content: "Invoice\nreconciliation\tcase"})
+	if got := m.field("Title"); got != "Invoice reconciliation case" {
 		t.Fatalf("single-line paste was not normalized: %q", got)
 	}
 	service := &aiUIFixture{fixtureService: &fixtureService{}}

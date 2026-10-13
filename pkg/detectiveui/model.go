@@ -473,6 +473,9 @@ func nativePasteText(content string, multiline bool) string {
 			return ' '
 		}
 		if r == '\t' {
+			if multiline {
+				return r
+			}
 			return ' '
 		}
 		if unicode.IsControl(r) {

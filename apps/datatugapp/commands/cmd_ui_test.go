@@ -32,7 +32,7 @@ func TestUIModulesInMenuOrder(t *testing.T) {
 	for _, m := range uiModules() {
 		ids = append(ids, m.ID)
 	}
-	want := []string{datatugui.ScreenProjects, datatugui.ScreenViewers, datatugui.ScreenSettings, datatugui.ScreenAPIMonitor}
+	want := []string{datatugui.ScreenProjects, "detective", "checks", datatugui.ScreenViewers, datatugui.ScreenSettings, datatugui.ScreenAPIMonitor}
 	if !slices.Equal(ids, want) {
 		t.Errorf("modules = %v, want %v", ids, want)
 	}

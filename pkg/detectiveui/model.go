@@ -345,6 +345,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadKnowledge(false)
 	case queryRunMsg:
 		m.busy = false
+		// The message carries its own Scenario identity for successful proof
+		// recording. Release the model's pending identity on every terminal path.
+		m.pendingApplicationID, m.pendingStepID = "", ""
 		if v.err != nil {
 			m.feedback = v.err.Error()
 			return m, nil

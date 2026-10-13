@@ -3,6 +3,7 @@ package detectiveui
 import (
 	tea "charm.land/bubbletea/v2"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -104,6 +105,52 @@ func TestAvailableScenarioCheckKeepsAttributionUntilRun(t *testing.T) {
 	}
 }
 
+func TestFailedScenarioQueryDoesNotAttributeLaterCheckRun(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		msg  queryRunMsg
+	}{
+		{name: "execution failed", msg: queryRunMsg{err: errors.New("source unavailable")}},
+		{name: "receipt missing", msg: queryRunMsg{result: SavedQueryResult{}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &fixtureService{}
+			m := New(service, "detective")
+			m.pendingApplicationID, m.pendingStepID = "application-1", "inspect"
+			m.Update(tc.msg)
+			if m.pendingApplicationID != "" || m.pendingStepID != "" {
+				t.Fatalf("failed Scenario query retained step: %s/%s", m.pendingApplicationID, m.pendingStepID)
+			}
+			_, refresh := m.Update(actedMsg{response: detective.ActionResponse{Run: &detective.CheckRun{ID: "other-run", CheckID: "other-check", CaseID: "case-1", ExecutionStatus: "completed"}}, caseLinkStatus: "linked"})
+			if refresh == nil || m.pendingRunID != "" {
+				t.Fatalf("unrelated run inherited Scenario attribution: %q", m.pendingRunID)
+			}
+			m.Update(refresh())
+			if len(service.actions) != 0 {
+				t.Fatalf("unrelated run recorded Scenario step: %#v", service.actions)
+			}
+		})
+	}
+}
+
+func TestCancelledScenarioQueryDoesNotAttributeLaterCheckRun(t *testing.T) {
+	caseItem := detective.Case{ID: "case-1", Title: "Investigation", Status: "active", ScenarioApplications: []detective.ScenarioApplication{{ID: "application-1", Snapshot: detective.Scenario{Steps: []detective.ScenarioStep{{ID: "inspect", Kind: "query", Ref: "saved-query"}}}, Steps: []detective.ScenarioStepReceipt{{StepID: "inspect", Status: "pending"}}}}}
+	m := New(&hostedFixture{fixtureService: &fixtureService{}}, "detective")
+	m.state.Cases = []detective.Case{caseItem}
+	m.startScenarioStep(caseItem, "application-1/inspect")
+	if m.form == nil || m.form.kind != "scenario-query-run" {
+		t.Fatalf("Scenario query form unavailable: %+v", m.form)
+	}
+	press(m, "esc")
+	if m.pendingApplicationID != "" || m.pendingStepID != "" {
+		t.Fatalf("cancelled Scenario query retained step: %s/%s", m.pendingApplicationID, m.pendingStepID)
+	}
+	_, refresh := m.Update(actedMsg{response: detective.ActionResponse{Run: &detective.CheckRun{ID: "other-run", CheckID: "other-check", CaseID: "case-1", ExecutionStatus: "completed"}}, caseLinkStatus: "linked"})
+	if refresh == nil || m.pendingRunID != "" {
+		t.Fatalf("unrelated run inherited cancelled Scenario step: %q", m.pendingRunID)
+	}
+}
+
 func TestHistoricalRunDoesNotInheritPriorCaseLinkStatus(t *testing.T) {
 	m := New(&scenarioVersionFixture{}, "detective")
 	m.state.Runs = []detective.CheckRun{{ID: "older-run", CheckID: "check-1"}}
@@ -172,6 +219,9 @@ func TestHostedScenarioQueryUsesCaseCohortAndExactReceipt(t *testing.T) {
 	m.Update(next())
 	if len(s.actions) == 0 || s.actions[len(s.actions)-1].Type != "record-scenario-step" || s.actions[len(s.actions)-1].Execution == nil || s.actions[len(s.actions)-1].Execution.ExecutionID != "receipt-1" || s.actions[len(s.actions)-1].CaseID != "case-1" {
 		t.Fatalf("Scenario proof missing: %#v", s.actions)
+	}
+	if m.pendingApplicationID != "" || m.pendingStepID != "" {
+		t.Fatalf("completed Scenario query retained step: %s/%s", m.pendingApplicationID, m.pendingStepID)
 	}
 	if len(s.query.Inputs) != 1 || s.query.Inputs["invoice_ids"].Set == nil || len(s.query.Inputs["invoice_ids"].Set.Values) != 2 {
 		t.Fatalf("query cohort changed: %#v", s.query.Inputs)

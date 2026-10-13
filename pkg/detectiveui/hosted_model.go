@@ -222,7 +222,11 @@ func (m *Model) startScenarioStep(c detective.Case, rowID string) (tea.Model, te
 			}
 			if step.Kind == "check" {
 				m.pendingApplicationID, m.pendingStepID = appID, stepID
-				return m.startRun(step.Ref, c.ID)
+				model, cmd := m.startRun(step.Ref, c.ID)
+				if m.form == nil || m.form.kind != "run" {
+					m.pendingApplicationID, m.pendingStepID = "", ""
+				}
+				return model, cmd
 			}
 			if _, err := m.queryExecutionService(); err != nil {
 				m.feedback = err.Error()

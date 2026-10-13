@@ -69,6 +69,41 @@ func TestScenarioCheckWaitsWhenCompletedRunCannotLinkCase(t *testing.T) {
 	}
 }
 
+func TestUnavailableScenarioCheckDoesNotLeakPendingStepToAnotherRun(t *testing.T) {
+	caseItem := detective.Case{ID: "case-1", Title: "Investigation", Status: "active", ScenarioApplications: []detective.ScenarioApplication{{ID: "application-1", Snapshot: detective.Scenario{Steps: []detective.ScenarioStep{{ID: "inspect", Kind: "check", Ref: "missing-check"}}}, Steps: []detective.ScenarioStepReceipt{{StepID: "inspect", Status: "pending"}}}}}
+	service := &fixtureService{}
+	m := New(service, "detective")
+	m.state.Cases = []detective.Case{caseItem}
+	m.state.Checks = []detective.Check{{ID: "other-check", Title: "Other", Steps: []detective.Step{{ID: "load", Kind: "query", QueryID: "q"}}}}
+	m.startScenarioStep(caseItem, "application-1/inspect")
+	if m.form != nil || !strings.Contains(m.feedback, "not in catalog") || m.pendingApplicationID != "" || m.pendingStepID != "" {
+		t.Fatalf("unavailable Scenario step leaked to later runs: form=%+v pending=%s/%s feedback=%q", m.form, m.pendingApplicationID, m.pendingStepID, m.feedback)
+	}
+	_, next := m.Update(actedMsg{response: detective.ActionResponse{Run: &detective.CheckRun{ID: "unrelated-run", CheckID: "other-check", CaseID: "case-1", ExecutionStatus: "completed"}}, caseLinkStatus: "linked"})
+	if next == nil || m.pendingRunID != "" {
+		t.Fatalf("unrelated run inherited Scenario attribution: pendingRunID=%q", m.pendingRunID)
+	}
+	m.Update(next())
+	if len(service.actions) != 0 {
+		t.Fatalf("unrelated run recorded Scenario step: %#v", service.actions)
+	}
+}
+
+func TestAvailableScenarioCheckKeepsAttributionUntilRun(t *testing.T) {
+	caseItem := detective.Case{ID: "case-1", Title: "Investigation", Status: "active", ScenarioApplications: []detective.ScenarioApplication{{ID: "application-1", Snapshot: detective.Scenario{Steps: []detective.ScenarioStep{{ID: "inspect", Kind: "check", Ref: "available-check"}}}, Steps: []detective.ScenarioStepReceipt{{StepID: "inspect", Status: "pending"}}}}}
+	m := New(&fixtureService{}, "detective")
+	m.state.Cases = []detective.Case{caseItem}
+	m.state.Checks = []detective.Check{{ID: "available-check", Title: "Available", Steps: []detective.Step{{ID: "load", Kind: "query", QueryID: "q"}}}}
+	m.startScenarioStep(caseItem, "application-1/inspect")
+	if m.form == nil || m.form.kind != "run" || m.pendingApplicationID != "application-1" || m.pendingStepID != "inspect" {
+		t.Fatalf("available Check lost Scenario attribution: form=%+v pending=%s/%s", m.form, m.pendingApplicationID, m.pendingStepID)
+	}
+	press(m, "esc")
+	if m.pendingApplicationID != "" || m.pendingStepID != "" {
+		t.Fatalf("cancelled run retained Scenario attribution: %s/%s", m.pendingApplicationID, m.pendingStepID)
+	}
+}
+
 func TestHistoricalRunDoesNotInheritPriorCaseLinkStatus(t *testing.T) {
 	m := New(&scenarioVersionFixture{}, "detective")
 	m.state.Runs = []detective.CheckRun{{ID: "older-run", CheckID: "check-1"}}

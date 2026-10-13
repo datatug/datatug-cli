@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/datatug/datatug-cli/pkg/api"
@@ -66,6 +67,36 @@ func projectCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := localProjectQueries.Capabilities(r.Context(), ref)
+	if err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
+	writeProjectMutationJSON(w, r, http.StatusOK, result)
+}
+
+func projectConnectionCatalogHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if err := api.RequireLocalReadPrincipal(); err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		writeProjectMutationError(w, r, validation.NewBadRequestError(errors.New("invalid catalog selector")))
+		return
+	}
+	for key, values := range q {
+		if len(values) != 1 || (key != "project" && key != "storage") {
+			writeProjectMutationError(w, r, validation.NewBadRequestError(errors.New("invalid catalog selector")))
+			return
+		}
+	}
+	ref, err := newProjectRef(q)
+	if err != nil {
+		writeProjectMutationError(w, r, err)
+		return
+	}
+	result, err := api.LocalProjectConnectionCatalog(r.Context(), ref)
 	if err != nil {
 		writeProjectMutationError(w, r, err)
 		return

@@ -19,7 +19,6 @@ import (
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/julienschmidt/httprouter"
 	"github.com/sneat-co/sneat-go-core/apicore"
-	"github.com/sneat-co/sneat-go-core/security"
 )
 
 var agentHost string
@@ -58,6 +57,7 @@ func NewHttpServer() HttpServer {
 }
 
 func (s *HttpServer) Shutdown(ctx context.Context) error {
+	defer func() { _ = api.CloseSessionContext() }()
 	if s.s == nil {
 		return api.CloseExecutionEvidence()
 	}
@@ -121,6 +121,7 @@ func newDatatugStoreFactory(pathsByID map[string]string) func(id string) (storag
 // (api.Capabilities's own doc comment) — see cmd_serve.go's --allow-writes/
 // --allow-opaque-sql flags.
 func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port int, session secureread.Session, caps api.Capabilities) (err error) {
+	defer func() { _ = api.CloseSessionContext() }()
 	s.monitor, err = apimonitor.Default.NewServerChecked("HTTP API")
 	if err != nil {
 		return err
@@ -166,34 +167,6 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	} else {
 		agentPort = port
 	}
-
-	// security.VerifyOrigin (sneat-go-core, invoked for every request via
-	// httpserver.AccessControlAllowOrigin inside apicore.VerifyRequest)
-	// allow-lists "localhost" at any port unconditionally (IsLocalhostHost
-	// matches the literal hostname regardless of port), but never knew
-	// about the production "https://datatug.app" web UI — cmd_serve.go's
-	// serveAgentURLs prints exactly that URL and expects to reach this
-	// agent directly from the browser, and lane C5 (datatug-apps PR #59,
-	// verified with curl) confirmed it was refused with "bad origin".
-	// Register it once at serve startup; AddKnownHosts is idempotent.
-	//
-	// The other half of that finding — a dev server or UI addressing this
-	// agent via plain http://127.0.0.1:<port> rather than http://localhost —
-	// is NOT fixed by this call: AddKnownHosts's own addKnownOrigins only
-	// ever adds an http:// (non-TLS) origin variant when
-	// security.IsLocalhostHost(host) is true, and that function only
-	// recognizes the literal hostname "localhost" (or *.localhost), never
-	// "127.0.0.1" — so AddKnownHosts("127.0.0.1:<port>") would silently
-	// register only the unused "https://127.0.0.1:<port>" variant. Fixing
-	// the plain-HTTP 127.0.0.1 case for real needs either a sneat-go-core
-	// change (IsLocalhostHost treating 127.0.0.1/::1 as loopback synonyms
-	// of localhost) or a local override of the swappable apicore.VerifyRequest
-	// var — flagged as a follow-up rather than attempted here alongside a
-	// fix that was already outside this stream's numbered task list. The
-	// OPTIONS-preflight half of this same gap (endpoints.IsSupportedOrigin,
-	// datatug-cli's own separate check) IS fixed either way, since that
-	// function is entirely local.
-	security.AddKnownHosts("datatug.app", "app.incidentius.com")
 
 	// The routes of the table, the page at "/" and the answer to every OPTIONS request are all
 	// registered behind the one request guard (endpoints.RequestGuard): a request is answered

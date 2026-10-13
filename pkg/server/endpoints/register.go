@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
+	"github.com/sneat-co/sneat-go-core/apicore"
+	"github.com/sneat-co/sneat-go-core/apicore/verify"
 )
 
 type wrapper = func(f http.HandlerFunc) http.HandlerFunc
@@ -71,7 +73,26 @@ func RegisterDatatugHandlersWithCapabilities(
 	if handler == nil {
 		panic("handler is not provided")
 	}
-	handle = handler
+	handle = withLocalOrigin(handler)
 	getContextFromRequest = contextProvider
 	registerRoutes(pathPrefix, router, wrap, mode == RegisterWriteOnlyHandlers, caps)
+}
+
+// Legacy apicore.Execute has a separate host list. Validate with this agent's
+// one strict origin policy, then delegate every authentication/content check
+// with Origin removed from a clone, preserving the approved response header.
+func withLocalOrigin(next Handler) Handler {
+	return func(w http.ResponseWriter, r *http.Request, dto apicore.RequestDTO, options verify.RequestOptions, status int, contextProvider apicore.ContextProvider, worker apicore.Worker) {
+		origins := r.Header.Values("Origin")
+		if len(origins) > 0 {
+			if len(origins) != 1 || !IsSupportedOrigin(origins[0]) {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			writeCORSOrigin(w, r)
+			r = r.Clone(r.Context())
+			r.Header.Del("Origin")
+		}
+		next(w, r, dto, options, status, contextProvider, worker)
+	}
 }

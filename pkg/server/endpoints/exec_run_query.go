@@ -56,7 +56,8 @@ type runQueryOptions struct {
 	// rowLimit lets an internal caller use its own safety bound without
 	// changing the public ExecutionRequest limit contract. Zero keeps the
 	// public exec/run_query bound.
-	rowLimit int
+	rowLimit              int
+	expectedQueryRevision string
 }
 
 var execRunProjectStoreFor = api.ProjectStoreFor
@@ -142,6 +143,9 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 			stored, loadErr := revisioned.LoadQueryRevision(ctx, req.QueryID)
 			if loadErr != nil {
 				return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", req.QueryID))
+			}
+			if options.expectedQueryRevision != "" && string(stored.Revision) != options.expectedQueryRevision {
+				return apicontract.Result{}, newInvalidRequest("queryId", "query revision changed after input pinning")
 			}
 			loaded := stored.Query.QueryDef
 			queryDef = &loaded

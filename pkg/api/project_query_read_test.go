@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -35,8 +36,13 @@ func TestLocalGetQueryRefusesBranchSwitchDuringStoreRead(t *testing.T) {
 		[]byte(`{"id":"branch-read-test","title":"Branch read test","access":"private","created":{"at":"2026-01-01T00:00:00Z"}}`), 0o600))
 	query := datatug.QueryDefWithFolderPath{}
 	query.ID, query.Title, query.Type, query.Text = "customer", "Customers", datatug.QueryTypeDTQL, "SELECT CustomerId FROM Customer"
+	data, err := os.ReadFile("testdata/query_semantic_model.json")
+	require.NoError(t, err)
+	var semantic datatug.QuerySemanticModel
+	require.NoError(t, json.Unmarshal(data, &semantic))
+	query.SemanticModel = &semantic
 	store := filestore.NewProjectStore(projectID, dir).(datatug.RevisionedQueriesStore)
-	_, err := store.PutQuery(context.Background(), &query, datatug.QueryWriteCondition{IfNoneMatch: true})
+	_, err = store.PutQuery(context.Background(), &query, datatug.QueryWriteCondition{IfNoneMatch: true})
 	require.NoError(t, err)
 	git("add", "-A")
 	git("commit", "-q", "-m", "branch A")
@@ -57,6 +63,12 @@ func TestLocalGetQueryRefusesBranchSwitchDuringStoreRead(t *testing.T) {
 	require.NoError(t, err)
 	ConfigureSecureSession(session, pathsByID, Capabilities{})
 	t.Cleanup(func() { ConfigureSecureSession(secureread.Session{}, nil, Capabilities{}) })
+	capabilities, err := (LocalProjectQueryAdapter{}).Capabilities(context.Background(), dto.ProjectRef{StoreID: LocalStoreID, ProjectID: projectID})
+	require.NoError(t, err)
+	require.True(t, capabilities.SemanticModel)
+	preserved, err := (LocalProjectQueryAdapter{}).GetQuery(context.Background(), dto.GetQueryRequest{ProjectRef: dto.ProjectRef{StoreID: LocalStoreID, ProjectID: projectID}, ID: "customer", Branch: branchA})
+	require.NoError(t, err)
+	require.Equal(t, &semantic, preserved.Query.SemanticModel)
 	previous := loadLocalQueryRevision
 	loadLocalQueryRevision = func(ctx context.Context, revisioned datatug.RevisionedQueriesStore, id string) (*datatug.StoredQuery, error) {
 		git("switch", "-q", "branch-b")

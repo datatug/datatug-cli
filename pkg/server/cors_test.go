@@ -1,7 +1,10 @@
 package server
 
 import (
+	"github.com/datatug/datatug-cli/pkg/api"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -50,17 +53,9 @@ func optionsWithOrigin(t *testing.T, requestURL, origin, method string) *http.Re
 // ServeHTTP now calls security.AddKnownHosts("datatug.app") at startup
 // (http_server.go).
 //
-// The other half of that finding — plain http://127.0.0.1:<port> as an
-// origin, rather than http://localhost:<port> (which already worked
-// unconditionally: security.IsLocalhostHost matches "localhost" at any
-// port) — turned out to need a sneat-go-core change to fix for real
-// (AddKnownHosts's own addKnownOrigins only ever adds the http:// variant
-// when IsLocalhostHost(host) is true, and that function never recognizes
-// "127.0.0.1" as a loopback synonym of "localhost"); see the doc comment on
-// the security.AddKnownHosts call in http_server.go. Not attempted here —
-// flagged as a follow-up instead, since it needs either an upstream fix or
-// a local override of the swappable apicore.VerifyRequest var, a bigger
-// change than this stream's actual numbered task list called for.
+// Local metadata execution now uses the same strict origin predicate as the
+// request guard and newer contract routes. Authentication/content checks remain
+// delegated to apicore.Execute.
 //
 // This exercises /datatug/projects/project_summary rather than
 // /datatug/ping: AccessControlAllowOrigin only runs inside
@@ -143,28 +138,8 @@ func TestServeHTTP_CORS_IncidentiusPreflight(t *testing.T) {
 // must pass this check too before the browser ever sends the real request
 // this file's tests cover.
 
-// TestServeHTTP_CORS_127001_StillRefused pins down, with a real request
-// rather than only a doc comment, the exact gap TestServeHTTP_CORS_DatatugApp
-// and http_server.go's AddKnownHosts comment both already describe: a dev
-// server or UI addressing this agent via plain http://127.0.0.1:<port>
-// still gets refused, even though the OPTIONS-preflight side of the same
-// origin (endpoints.IsSupportedOrigin, see the comment above) already
-// accepts it — so a browser's preflight can succeed while its real request
-// still 403s. S61 item 3 was briefed on the premise that the AddKnownHosts
-// comment falsely claims 127.0.0.1 is allowed; it does not — re-read here
-// character for character, it already says the opposite ("is NOT fixed by
-// this call"), confirmed against PR #205's original, unmodified commit
-// (7859c5b). Nothing needed correcting; this test instead turns the
-// comment's claim into an executable, regression-proof one. Fixing the gap
-// for real needs either an upstream sneat-go-core change
-// (security.IsLocalhostHost treating 127.0.0.1/::1 as loopback synonyms of
-// "localhost") or a local override of the swappable apicore.VerifyRequest
-// var (not just origin-checking: VerifyRequest also does auth-token
-// verification and is not itself swappable at a narrower grain — there is
-// no exported hook between it and security.VerifyOrigin) — out of
-// proportion for this stream, exactly as the existing comments already
-// concluded.
-func TestServeHTTP_CORS_127001_StillRefused(t *testing.T) {
+// IPv4 loopback pages use the agent origin policy for legacy metadata too.
+func TestServeHTTP_CORS_127001_Allowed(t *testing.T) {
 	const projectID = "cors-127001-project"
 	pathsByID := authHookProjectFixture(t, projectID)
 	session, err := secureread.NewSession(secureread.SessionOptions{As: "agent1", NoPolicies: true})
@@ -176,7 +151,43 @@ func TestServeHTTP_CORS_127001_StillRefused(t *testing.T) {
 
 	resp := getWithOrigin(t, summaryURL, "http://127.0.0.1:4200")
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 (http://127.0.0.1:<port> is still refused today — see this test's doc comment)", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200 for admitted IPv4 loopback", resp.StatusCode)
+	}
+}
+
+func TestServeHTTP_CORS_MetadataAndSessionUseSameStrictOrigin(t *testing.T) {
+	const projectID = "origin-parity"
+	paths := authHookProjectFixture(t, projectID)
+	envDir := filepath.Join(paths[projectID], "environments", "local")
+	if err := os.MkdirAll(envDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(envDir, "local.env.json"), []byte(`{"id":"local","dbServers":[{"driver":"sqlite3","catalogs":["source"]}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	session, err := secureread.NewSession(secureread.SessionOptions{As: "agent1", NoPolicies: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := startServeHTTPWithSessionAndCapabilities(t, paths, session, api.Capabilities{EvidencePrivateDir: t.TempDir()})
+	for _, path := range []string{"/datatug/projects/project_summary?id=" + projectID, "/datatug/session-context/capabilities?storage=local&project=" + projectID} {
+		for _, origin := range []string{"http://127.0.0.1:18991", "http://localhost:18991", "http://127.0.0.1:18991/path", "http://127.0.0.1:18991@evil.example", "https://evil.example"} {
+			resp := getWithOrigin(t, base+path, origin)
+			want := http.StatusForbidden
+			if origin == "http://127.0.0.1:18991" || origin == "http://localhost:18991" {
+				want = http.StatusOK
+			}
+			if resp.StatusCode != want {
+				t.Errorf("%s origin=%q status=%d want=%d", path, origin, resp.StatusCode, want)
+			}
+			if want == http.StatusOK && resp.Header.Get("Access-Control-Allow-Origin") != origin {
+				t.Errorf("%s missing approved CORS header", path)
+			}
+			if want == http.StatusForbidden && resp.Header.Get("Access-Control-Allow-Origin") != "" {
+				t.Errorf("%s reflected forbidden origin", path)
+			}
+			_ = resp.Body.Close()
+		}
 	}
 }

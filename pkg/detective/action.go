@@ -700,7 +700,31 @@ func (s *LocalStore) prepareAction(req ActionRequest, actor, id string, proof *S
 			next, audit, err = core.ApplyScenario(old, scenario, "application-"+hex.EncodeToString(sha256Sum(id))[:32], actor, at)
 		case "record-scenario-step":
 			if proof != nil {
-				if err := core.MatchCaseCohort(old.Context, req.Inputs); err != nil {
+				var step *ScenarioStep
+				for _, application := range old.ScenarioApplications {
+					if application.ID != req.ApplicationID {
+						continue
+					}
+					if len(application.Steps) != len(application.Snapshot.Steps) {
+						return bad(ErrInvalid)
+					}
+					for i, receipt := range application.Steps {
+						if receipt.StepID != req.StepID {
+							continue
+						}
+						candidate := &application.Snapshot.Steps[i]
+						if candidate.ID != receipt.StepID {
+							return bad(ErrInvalid)
+						}
+						step = candidate
+						break
+					}
+					break
+				}
+				if step == nil || step.ID != req.StepID || step.Kind != "query" || step.Ref != proof.QueryID {
+					return bad(ErrInvalid)
+				}
+				if err := core.MatchScenarioQueryCohort(*step, old.Context, req.Inputs); err != nil {
 					return bad(err)
 				}
 				next, audit, err = core.RecordScenarioQueryStep(old, req.ApplicationID, req.StepID, *proof, actor, at)

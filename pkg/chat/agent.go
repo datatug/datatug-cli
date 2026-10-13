@@ -458,6 +458,7 @@ func NewAIConversation(provider ai.LLMProvider, executor DTQLExecutor, sourceURL
 		c.tools = []ai.Tool{c.dtqlTool()}
 	} else {
 		c.tools = []ai.Tool{c.dtqlTool(), c.workspaceTool(), c.bookmarkTool(), c.joinTool()}
+		c.tools = append(c.tools, c.resultColumnsTools()...)
 	}
 	return c, nil
 }
@@ -569,6 +570,7 @@ func (c *AIConversation) handlers() map[string]agent.Handler {
 	if c.browserInterpretation {
 		return handlers
 	}
+	c.installResultColumnsHandlers(handlers)
 	handlers[toolWorkspaceAction] = func(ctx context.Context, call ai.ToolCall) (ai.ToolResult, error) {
 		var args WorkspaceAction
 		if err := json.Unmarshal(call.Arguments, &args); err != nil {
@@ -976,8 +978,13 @@ func (l describeLimiter) Stream(ctx context.Context, req ai.ChatRequest) iter.Se
 	return l.LLMProvider.Stream(ctx, req)
 }
 
-func (c *AIConversation) newLoop(narrowed bool) *agent.Loop {
+func (c *AIConversation) newLoop(narrowed bool, columnPlanning ...bool) *agent.Loop {
 	maxSteps := maxModelCallsPerTurn
+	if len(columnPlanning) > 0 && columnPlanning[0] && !c.browserInterpretation {
+		// Query -> metadata -> plan -> fingerprint execution -> final answer.
+		// Only a source-bound terminal turn installs this authorization seam.
+		maxSteps += 2
+	}
 	if narrowed {
 		// Extra model calls for reading omitted relations' definitions.
 		maxSteps += maxDescribeCallsPerTurn
@@ -1080,7 +1087,8 @@ func (c *AIConversation) StreamAskWithContext(ctx context.Context, prompt, prior
 		// The narrowing decision runs before the model is asked, so the model
 		// is only ever shown the selected tables' definitions.
 		system, tools, narrowed := c.narrowTurn(turnCtx, prompt)
-		loop := c.newLoop(narrowed != nil && narrowed.Narrowed)
+		_, columnPlanning := turnCtx.Value(resultColumnsContextKey{}).(resultColumnsCallbacks)
+		loop := c.newLoop(narrowed != nil && narrowed.Narrowed, columnPlanning)
 
 		var text strings.Builder
 		var partial, usage *TokenUsage
@@ -1210,6 +1218,19 @@ func publicQueryError(err error, parameters map[string]any) string {
 
 func buildInstruction(schema string) string {
 	return `You are DataTug Chat. Answer questions about the configured data.
+
+Prefer useful schema-described identity/display fields (such as a person's
+name or a catalog label) beside keys and measures; avoid gratuitously wide
+results. Respect explicit user projections, including "only" requested fields.
+Never invent labels or treat a field-name suffix as identity evidence. Keep
+grouping semantics: do not add unrelated detail fields to GROUP BY.
+For requests such as customers with their invoice count, run the single-source
+grouped query, then use result_columns with its returned recordSetId to discover
+admitted customer display fields. Prepare one plan with the useful opaque
+candidateIds together, and call apply_result_columns with its exact fingerprint.
+This is automatic enrichment within the current query request, not a human
+review. If metadata/equality/permissions are unavailable or ambiguous, explain
+that limitation briefly. Never author JOIN/ON or fabricate candidate IDs.
 
 For a data request, call run_dtql with a short one-line title and a complete DTQL YAML document. Never
 write SQL. Never format query rows as Markdown, ASCII, JSON, or prose; DataTug

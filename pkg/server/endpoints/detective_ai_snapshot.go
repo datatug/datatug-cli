@@ -23,6 +23,10 @@ func detectiveAISnapshot(ctx context.Context, project string, store *detective.L
 	if err != nil {
 		return ai.Snapshot{}, err
 	}
+	return detectiveAISnapshotFromState(ctx, project, state)
+}
+
+func detectiveAISnapshotFromState(ctx context.Context, project string, state detective.State) (ai.Snapshot, error) {
 	environments, err := detectiveEnvironments(ctx, project)
 	if err != nil {
 		return ai.Snapshot{}, err

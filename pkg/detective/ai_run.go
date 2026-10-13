@@ -41,6 +41,9 @@ func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner
 	var receipt ai.Receipt
 	var accepted bool
 	err := s.Store.withLock(ctx, func() error {
+		if err := s.Store.reconcilePendingActions(ctx, "cases", draft.CaseID, command.OperationID); err != nil {
+			return err
+		}
 		data, err := safeReadFile(s.Store.privateItemDir("ai-confirm-operations"), command.OperationID)
 		if err == nil {
 			var prior aiRunOperation
@@ -66,22 +69,15 @@ func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner
 	if err != nil || receipt.OperationID != "" {
 		return receipt, err
 	}
-	catalog, err := s.Store.loadCatalog(ctx, draft.CheckID, "", draft.CaseID)
-	if err != nil {
-		return ai.Receipt{}, err
-	}
-	check, ok := catalog.Checks[draft.CheckID]
-	if !ok {
-		return ai.Receipt{}, ErrNotFound
-	}
-	if err := core.ValidateInputs(check.Inputs, draft.Inputs); err != nil {
-		return ai.Receipt{}, err
-	}
+	var catalog core.Catalog
 	sum := sha256.Sum256([]byte(s.Scope.Key + "\x00" + s.Scope.Actor + "\x00" + command.OperationID))
 	runID := "run-" + hex.EncodeToString(sum[:16])
 	at := time.Now().UTC()
 	receipt = ai.Receipt{OperationID: command.OperationID, ScopeKey: s.Scope.Key, Project: s.Scope.Project, Actor: s.Scope.Actor, ProposalID: command.Proposal.ID, PayloadDigest: command.Binding.PayloadDigest, ResourceID: runID, At: at}
 	err = s.Store.withLock(ctx, func() error {
+		if err := s.Store.reconcilePendingActions(ctx, "cases", draft.CaseID, command.OperationID); err != nil {
+			return err
+		}
 		data, err := safeReadFile(s.Store.privateItemDir("ai-confirm-operations"), command.OperationID)
 		if err == nil {
 			var prior aiRunOperation
@@ -91,6 +87,29 @@ func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner
 			return ErrOutcomeUncertain
 		}
 		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := s.verifyAIBasisLocked(ctx, command.Proposal); err != nil {
+			return err
+		}
+		if draft.CaseID != "" {
+			c, err := s.Store.getCase(draft.CaseID)
+			if err != nil {
+				return err
+			}
+			if c.Status != "active" {
+				return ErrInvalid
+			}
+		}
+		catalog, err = core.LoadCatalog(ctx, draft.CheckID, "", catalogSnapshotReader{s.Store})
+		if err != nil {
+			return err
+		}
+		check, ok := catalog.Checks[draft.CheckID]
+		if !ok {
+			return ErrNotFound
+		}
+		if err := core.ValidateInputs(check.Inputs, draft.Inputs); err != nil {
 			return err
 		}
 		accepted = true

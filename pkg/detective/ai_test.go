@@ -180,3 +180,36 @@ func TestLocalAIConfirmCaseMergesReviewedContextAndRecovers(t *testing.T) {
 		t.Fatalf("audit duplication: %s, %v", audit, err)
 	}
 }
+
+func TestAICaseAuditRecoveredBeforeOrdinaryCaseEdit(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	created, err := store.SaveCase(ctx, Case{ID: "cross-journal-case", Title: "Initial"}, "alice", "create-case")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := ai.Scope{Key: "local:p", Project: "p", Actor: "alice"}
+	local := LocalAIStore{Store: store, Scope: scope}
+	proposal := ai.Proposal{ID: "reviewed-cross", Scope: scope, Draft: ai.Draft{Kind: ai.KindCase, Case: &ai.CaseEdit{CaseID: created.ID, ExpectedVersion: created.Version, Title: "AI edit"}}}
+	command := ai.Command{Scope: scope, OperationID: "ai-cross", Proposal: proposal, Binding: core.OperationBinding{Project: scope.Key, Actor: scope.Actor, Action: "ai-confirm-edit-case", ResourceID: proposal.ID, PayloadDigest: strings.Repeat("a", 64)}}
+	store.audit = failingAudit{}
+	if _, err := local.ConfirmCase(ctx, command); !errors.Is(err, ErrOutcomeUncertain) {
+		t.Fatalf("audit interruption: %v", err)
+	}
+	current, err := store.GetCase(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.Title = "Ordinary edit"
+	store.audit = localJSONLAudit{path: store.privateDir + "/audit.jsonl"}
+	response, err := store.ExecuteAction(ctx, "ordinary-after-ai", "alice", ActionRequest{Type: "update-case", Project: "p", Case: &current}, nil, nil, nil, nil)
+	if err != nil || response.Case == nil || response.Case.Version != 3 {
+		t.Fatalf("ordinary edit: %+v %v", response, err)
+	}
+	if receipt, found, err := local.AIReceipt(ctx, command.OperationID); err != nil || !found || receipt.OperationID != command.OperationID {
+		t.Fatalf("AI replay: %+v %v %v", receipt, found, err)
+	}
+	if recorded, err := store.auditRecorded(AuditEvent{ID: command.OperationID, Project: "p", Actor: "alice", Action: "ai-confirm-edit-case"}); err != nil || !recorded {
+		t.Fatalf("earlier AI audit: %v %v", recorded, err)
+	}
+}

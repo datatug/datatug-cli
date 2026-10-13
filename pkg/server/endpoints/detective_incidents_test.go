@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
+	core "github.com/datatug/datatug-core/pkg/detective"
 	"github.com/datatug/datatug-core/pkg/incidents"
 	"github.com/datatug/datatug-core/pkg/investigation"
 	"github.com/datatug/datatug-core/pkg/storage"
@@ -133,6 +135,41 @@ func TestDetectiveIncidentBridgeCreatesAndReplaysWithIndependentScope(t *testing
 	detectiveIncidentsHandler(read, httptest.NewRequest(http.MethodGet, path, nil))
 	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), "Shared invoice issue") {
 		t.Fatalf("linked dedicated read = %d %s", read.Code, read.Body.String())
+	}
+	// Simulate a Case edit after incident admission but before external create.
+	// The completed external create must have a recoverable identity on replay.
+	pending := detectiveIncidentAction{Type: "create", OperationID: "create-pending", CaseID: "case-1", IfMatch: linked.Case.Version, Environment: "qa", Title: "Concurrent issue"}
+	binding, err := core.BindOperation("p", "alice", "incident:create", pending.CaseID, struct {
+		IfMatch     int64
+		IncidentRef string
+		Environment string
+		Title       string
+		Description string
+		Case        *detective.Case
+	}{pending.IfMatch, pending.IncidentRef, pending.Environment, pending.Title, pending.Description, pending.Case})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := local.BeginIncidentOperation(t.Context(), pending.OperationID, binding, pending.CaseID, pending.IfMatch, false); err != nil {
+		t.Fatal(err)
+	}
+	concurrent := *linked.Case
+	concurrent.Title = "Edited during incident creation"
+	latest, err := local.SaveCase(t.Context(), concurrent, "alice", "update-case")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, partial, body := post(pending)
+	if code != http.StatusOK || partial.CaseLinkStatus != "link-pending" || partial.LinkPendingReason != "case-changed" || partial.Case != nil || partial.Incident.Ref.String() == "" {
+		t.Fatalf("partial create = %d %s", code, body)
+	}
+	code, repeated, body := post(pending)
+	if code != http.StatusOK || repeated.CaseLinkStatus != "link-pending" || repeated.Incident.Ref != partial.Incident.Ref {
+		t.Fatalf("partial replay = %d %s", code, body)
+	}
+	code, recoveredLink, body := post(detectiveIncidentAction{Type: "link", OperationID: "link-pending", CaseID: pending.CaseID, IfMatch: latest.Version, Environment: "qa", IncidentRef: partial.Incident.Ref.String()})
+	if code != http.StatusOK || recoveredLink.Case == nil || !slices.Contains(recoveredLink.Case.IncidentRefs, partial.Incident.Ref.String()) {
+		t.Fatalf("partial recovery = %d %s", code, body)
 	}
 	startAction := detectiveIncidentAction{Type: "start-case", OperationID: "dedicated-start-1", IfMatch: 0, Environment: "qa", IncidentRef: authorized.Projection.Ref.String(), Case: &detective.Case{ID: "case-2", Title: "Follow up"}}
 	code, started, body := post(startAction)

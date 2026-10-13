@@ -16,11 +16,38 @@ import (
 // resume with the same mutation ID and cannot be replayed with new content.
 type IncidentOperation struct {
 	Receipt core.OperationReceipt `json:"receipt"`
-	Done    bool                  `json:"done"`
-	Case    *Case                 `json:"case,omitempty"`
-	Context map[string]InputValue `json:"context,omitempty"`
-	Audit   *AuditEvent           `json:"audit,omitempty"`
-	Before  int64                 `json:"before"`
+	// CreatedRef records the external create before attempting the Case CAS. A
+	// stale Case version can then be recovered with a separate authorized link.
+	CreatedRef string                `json:"createdRef,omitempty"`
+	Done       bool                  `json:"done"`
+	Case       *Case                 `json:"case,omitempty"`
+	Context    map[string]InputValue `json:"context,omitempty"`
+	Audit      *AuditEvent           `json:"audit,omitempty"`
+	Before     int64                 `json:"before"`
+}
+
+func (s *LocalStore) RecordIncidentCreated(ctx context.Context, id string, binding core.OperationBinding, ref string) error {
+	if !validSlug(id) || ref == "" || binding.Action != "incident:create" {
+		return ErrInvalid
+	}
+	return s.withLock(ctx, func() error {
+		data, err := safeReadFile(s.privateItemDir("incident-operations"), id)
+		if err != nil {
+			return err
+		}
+		var intent IncidentOperation
+		if json.Unmarshal(data, &intent) != nil || core.CheckOperationReplay(intent.Receipt, binding) != nil {
+			return ErrConflict
+		}
+		if intent.CreatedRef != "" {
+			if intent.CreatedRef != ref {
+				return ErrConflict
+			}
+			return nil
+		}
+		intent.CreatedRef = ref
+		return writeItem(s.privateItemDir("incident-operations"), id, intent)
+	})
 }
 
 func (s *LocalStore) GetCase(ctx context.Context, id string) (Case, error) {
@@ -40,6 +67,9 @@ func (s *LocalStore) BeginIncidentOperation(ctx context.Context, id string, bind
 	var intent IncidentOperation
 	created := false
 	err := s.withLock(ctx, func() error {
+		if err := s.reconcilePendingActions(ctx, "cases", caseID, id); err != nil {
+			return err
+		}
 		data, err := safeReadFile(s.privateItemDir("incident-operations"), id)
 		if err == nil {
 			if json.Unmarshal(data, &intent) != nil || core.CheckOperationReplay(intent.Receipt, binding) != nil {
@@ -105,6 +135,9 @@ func (s *LocalStore) CompleteIncidentOperation(ctx context.Context, id string, b
 			}
 			saved = *intent.Case
 			return nil
+		}
+		if binding.Action == "incident:create" && intent.CreatedRef != incidentRef {
+			return ErrConflict
 		}
 		if intent.Case != nil {
 			if intent.Case.ID != caseID || !containsIncidentRef(intent.Case.IncidentRefs, incidentRef) {

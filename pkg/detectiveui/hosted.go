@@ -66,9 +66,11 @@ type IncidentAction struct {
 	Case                                                       *detective.Case
 }
 type IncidentResponse struct {
-	Incident incidents.IncidentView `json:"incident"`
-	Case     *detective.Case        `json:"case,omitempty"`
-	Receipt  string                 `json:"receipt"`
+	Incident          incidents.IncidentView `json:"incident"`
+	Case              *detective.Case        `json:"case,omitempty"`
+	Receipt           string                 `json:"receipt"`
+	CaseLinkStatus    string                 `json:"caseLinkStatus,omitempty"`
+	LinkPendingReason string                 `json:"linkPendingReason,omitempty"`
 }
 type KnowledgeProposal struct {
 	ID           string             `json:"id"`

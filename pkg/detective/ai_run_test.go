@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -62,6 +63,69 @@ func TestLocalAIConfirmedRunExecutesOnceAndRecoversCaseLink(t *testing.T) {
 	command.Binding.PayloadDigest = strings.Repeat("b", 64)
 	if _, err := local.ConfirmRun(ctx, command, runner, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed run replay = %v", err)
+	}
+}
+
+func TestLocalAIConfirmedRunRejectsChangedBasisAndPinsAcceptedCatalog(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	check, err := store.SaveCheck(ctx, Check{ID: "basis-check", Title: "Reviewed", Steps: []Step{{ID: "load", Kind: "query", QueryID: "q"}}}, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := ai.Scope{Key: "local:p", Project: "p", Actor: "alice"}
+	local := LocalAIStore{Store: store, Scope: scope, BasisVerifier: func(_ context.Context, basis ai.Snapshot, state State) error {
+		if basis.CatalogRevision != "reviewed" || len(state.Checks) != 1 || state.Checks[0].Version != 1 {
+			return ai.ErrStale
+		}
+		return nil
+	}}
+	proposal := ai.Proposal{ID: "basis-run", Scope: scope, Basis: ai.Snapshot{CatalogRevision: "reviewed"}, Draft: ai.Draft{Kind: ai.KindRun, Run: &ai.RunDraft{CheckID: check.ID, Environment: "qa"}}}
+	command := ai.Command{Scope: scope, OperationID: "basis-run-op", Proposal: proposal, Binding: core.OperationBinding{Project: scope.Key, Actor: scope.Actor, Action: "ai-confirm-run-check", ResourceID: proposal.ID, PayloadDigest: strings.Repeat("a", 64)}}
+	changed := check
+	changed.Title = "Changed after review"
+	changed, err = store.SaveCheck(ctx, changed, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	runner := func(_ context.Context, queryID, _ string, _ map[string]apicontract.TypedValueOrSet) (apicontract.Result, error) {
+		calls++
+		if queryID != "q" {
+			t.Fatalf("unreviewed query executed: %s", queryID)
+		}
+		return apicontract.Result{}, nil
+	}
+	if _, err := local.ConfirmRun(ctx, command, runner, nil); !errors.Is(err, ai.ErrStale) || calls != 0 {
+		t.Fatalf("stale dispatch: %v calls=%d", err, calls)
+	}
+	if _, err := safeReadFile(store.privateItemDir("ai-confirm-operations"), command.OperationID); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale run accepted: %v", err)
+	}
+	local.BasisVerifier = func(_ context.Context, basis ai.Snapshot, state State) error {
+		if basis.CatalogRevision != "current" || len(state.Checks) != 1 || state.Checks[0].Version != changed.Version {
+			return ai.ErrStale
+		}
+		return nil
+	}
+	command.Proposal.Basis.CatalogRevision = "current"
+	command.OperationID = "pinned-run-op"
+	draft := *command.Proposal.Draft.Run
+	command.Proposal.Draft.Run = &draft
+	runner = func(_ context.Context, queryID, _ string, _ map[string]apicontract.TypedValueOrSet) (apicontract.Result, error) {
+		calls++
+		if queryID != "q" {
+			t.Fatalf("accepted catalog changed under run: %s", queryID)
+		}
+		newer := changed
+		newer.Steps[0].QueryID = "child-q"
+		if _, err := store.SaveCheck(ctx, newer, "alice"); err != nil {
+			t.Fatal(err)
+		}
+		return apicontract.Result{}, nil
+	}
+	if _, err := local.ConfirmRun(ctx, command, runner, nil); err != nil || calls != 1 {
+		t.Fatalf("accepted sealed run: %v calls=%d", err, calls)
 	}
 }
 

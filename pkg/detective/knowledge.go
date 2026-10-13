@@ -69,6 +69,9 @@ func (s *LocalStore) KnowledgeAction(ctx context.Context, request knowledge.Acti
 		return response, ErrInvalid
 	}
 	err = s.withLock(ctx, func() error {
+		if err := s.reconcilePendingActions(ctx, "knowledge-proposals", id, request.OperationID); err != nil {
+			return err
+		}
 		operationData, err := safeReadFile(s.privateItemDir("knowledge-operations"), request.OperationID)
 		if err == nil {
 			var operation knowledgeOperation

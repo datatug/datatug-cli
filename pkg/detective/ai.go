@@ -21,6 +21,23 @@ import (
 type LocalAIStore struct {
 	Store *LocalStore
 	Scope ai.Scope
+	// BasisVerifier rebuilds the authorized snapshot from a State captured
+	// under the local mutation lock, immediately before durable admission.
+	BasisVerifier func(context.Context, ai.Snapshot, State) error
+}
+
+func (s LocalAIStore) verifyAIBasisLocked(ctx context.Context, proposal ai.Proposal) error {
+	if proposal.Basis.CatalogRevision == "" {
+		return nil // Low-level legacy callers never claim a reviewed snapshot.
+	}
+	if s.BasisVerifier == nil {
+		return ai.ErrUnauthorized
+	}
+	state, err := s.Store.statePageLocked("")
+	if err != nil {
+		return err
+	}
+	return s.BasisVerifier(ctx, proposal.Basis, state)
 }
 
 type localAISource struct {

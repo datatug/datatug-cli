@@ -37,6 +37,24 @@ func (s LocalAIStore) ConfirmCatalog(ctx context.Context, command ai.Command) (a
 	}
 	var receipt ai.Receipt
 	err := s.Store.withLock(ctx, func() error {
+		resourceID := ""
+		switch kind {
+		case ai.KindCheck:
+			if command.Proposal.Draft.Check != nil {
+				resourceID = command.Proposal.Draft.Check.ID
+			}
+		case ai.KindValidator:
+			if command.Proposal.Draft.Validator != nil {
+				resourceID = command.Proposal.Draft.Validator.ID
+			}
+		case ai.KindScenario:
+			if command.Proposal.Draft.Scenario != nil {
+				resourceID = command.Proposal.Draft.Scenario.ID
+			}
+		}
+		if err := s.Store.reconcilePendingActions(ctx, aiCatalogCollection(kind), resourceID, command.OperationID); err != nil {
+			return err
+		}
 		data, err := safeReadFile(s.Store.privateItemDir("ai-confirm-operations"), command.OperationID)
 		if err == nil {
 			var prior aiCatalogOperation
@@ -52,6 +70,9 @@ func (s LocalAIStore) ConfirmCatalog(ctx context.Context, command ai.Command) (a
 			return nil
 		}
 		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := s.verifyAIBasisLocked(ctx, command.Proposal); err != nil {
 			return err
 		}
 		resourceID, before, after, audit, err := s.prepareAICatalog(command)

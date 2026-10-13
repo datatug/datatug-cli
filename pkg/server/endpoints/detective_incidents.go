@@ -2,6 +2,7 @@ package endpoints
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -29,9 +30,11 @@ type detectiveIncidentAction struct {
 	Case              *detective.Case `json:"case,omitempty"`
 }
 type detectiveIncidentResponse struct {
-	Incident incidents.IncidentView `json:"incident"`
-	Case     *detective.Case        `json:"case,omitempty"`
-	Receipt  string                 `json:"receipt"`
+	Incident          incidents.IncidentView `json:"incident"`
+	Case              *detective.Case        `json:"case,omitempty"`
+	Receipt           string                 `json:"receipt"`
+	CaseLinkStatus    string                 `json:"caseLinkStatus,omitempty"`
+	LinkPendingReason string                 `json:"linkPendingReason,omitempty"`
 }
 type detectiveIncidentLinks struct {
 	CaseID    string                   `json:"caseId"`
@@ -242,7 +245,7 @@ func detectiveIncidentActionHandler(w http.ResponseWriter, r *http.Request) {
 				var view incidents.IncidentView
 				view, err = detectiveIncidentView(r, store, item, scope)
 				if err == nil {
-					writeContractResponse(w, r, nil, detectiveIncidentResponse{Incident: view, Case: intent.Case, Receipt: request.OperationID})
+					writeContractResponse(w, r, nil, detectiveIncidentResponse{Incident: view, Case: intent.Case, Receipt: request.OperationID, CaseLinkStatus: "linked"})
 					return
 				}
 			}
@@ -272,6 +275,10 @@ func detectiveIncidentActionHandler(w http.ResponseWriter, r *http.Request) {
 			writeContractError(w, r, err)
 			return
 		}
+		if err = local.RecordIncidentCreated(r.Context(), request.OperationID, binding, item.Ref.String()); err != nil {
+			writeContractError(w, r, detectiveError(err))
+			return
+		}
 	}
 	var candidate *detective.Case
 	if request.Type == "start-case" {
@@ -285,10 +292,24 @@ func detectiveIncidentActionHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	saved, err := local.CompleteIncidentOperation(r.Context(), request.OperationID, binding, caseID, item.Ref.String(), actor, request.IfMatch, candidate)
 	if err != nil {
+		if request.Type == "create" && (errors.Is(err, detective.ErrConflict) || errors.Is(err, detective.ErrNotFound) || errors.Is(err, detective.ErrInvalid)) {
+			// The Incidentius create has an authorized, durable identity. Report
+			// the partial result so the caller can fetch the latest Case version
+			// and link it with a new, separately authorized operation.
+			reason := "case-unavailable"
+			if latest, loadErr := local.GetCase(r.Context(), caseID); loadErr == nil {
+				reason = "case-changed"
+				if latest.Status == "archived" {
+					reason = "case-archived"
+				}
+			}
+			writeContractResponse(w, r, nil, detectiveIncidentResponse{Incident: view, Receipt: request.OperationID, CaseLinkStatus: "link-pending", LinkPendingReason: reason})
+			return
+		}
 		writeContractError(w, r, detectiveError(err))
 		return
 	}
-	writeContractResponse(w, r, nil, detectiveIncidentResponse{Incident: view, Case: &saved, Receipt: request.OperationID})
+	writeContractResponse(w, r, nil, detectiveIncidentResponse{Incident: view, Case: &saved, Receipt: request.OperationID, CaseLinkStatus: "linked"})
 }
 
 func detectiveCaseFacts(values map[string]detective.InputValue, scope incidents.ProjectRef) (incidents.CanonicalContext, error) {

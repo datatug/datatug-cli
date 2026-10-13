@@ -323,34 +323,40 @@ func (s *LocalStore) StatePage(ctx context.Context, cursor string) (State, error
 	var state State
 	err := s.withLock(ctx, func() error {
 		var err error
-		if state.Checks, err = readItems[Check](s.definitionDir("checks")); err != nil {
-			return err
-		}
-		if state.Validators, err = readItems[PublishedValidator](s.definitionDir("validators")); err != nil {
-			return err
-		}
-		if state.QueryValidators, err = readItems[QueryValidators](s.definitionDir("query-validators")); err != nil {
-			return err
-		}
-		if state.Scenarios, err = readItems[Scenario](s.definitionDir("scenarios")); err != nil {
-			return err
-		}
-		if state.Cases, err = readItems[Case](s.privateItemDir("cases")); err != nil {
-			return err
-		}
-		for i := range state.Cases {
-			if len(state.Cases[i].Timeline) > 50 {
-				trim := len(state.Cases[i].Timeline) - 50
-				state.Cases[i].TimelineOffset += trim
-				state.Cases[i].Timeline = append([]CaseEvent(nil), state.Cases[i].Timeline[trim:]...)
-			}
-		}
-		if state.Runs, state.RunsHasMore, state.RunsNextCursor, err = readRunPage(s.privateItemDir("runs"), cursor); err != nil {
-			return err
-		}
-		return nil
+		state, err = s.statePageLocked(cursor)
+		return err
 	})
-	if err != nil {
+	return state, err
+}
+
+// statePageLocked reads one coherent local Detective image. Callers must hold
+// the project lock; AI dispatch uses it to recheck reviewed basis at admission.
+func (s *LocalStore) statePageLocked(cursor string) (State, error) {
+	var state State
+	var err error
+	if state.Checks, err = readItems[Check](s.definitionDir("checks")); err != nil {
+		return State{}, err
+	}
+	if state.Validators, err = readItems[PublishedValidator](s.definitionDir("validators")); err != nil {
+		return State{}, err
+	}
+	if state.QueryValidators, err = readItems[QueryValidators](s.definitionDir("query-validators")); err != nil {
+		return State{}, err
+	}
+	if state.Scenarios, err = readItems[Scenario](s.definitionDir("scenarios")); err != nil {
+		return State{}, err
+	}
+	if state.Cases, err = readItems[Case](s.privateItemDir("cases")); err != nil {
+		return State{}, err
+	}
+	for i := range state.Cases {
+		if len(state.Cases[i].Timeline) > 50 {
+			trim := len(state.Cases[i].Timeline) - 50
+			state.Cases[i].TimelineOffset += trim
+			state.Cases[i].Timeline = append([]CaseEvent(nil), state.Cases[i].Timeline[trim:]...)
+		}
+	}
+	if state.Runs, state.RunsHasMore, state.RunsNextCursor, err = readRunPage(s.privateItemDir("runs"), cursor); err != nil {
 		return State{}, err
 	}
 	sort.Slice(state.Checks, func(i, j int) bool { return state.Checks[i].ID < state.Checks[j].ID })
@@ -476,6 +482,9 @@ func (s *LocalStore) SaveCheck(ctx context.Context, check Check, actor string) (
 		}
 	}
 	err := s.withLock(ctx, func() error {
+		if err := s.reconcilePendingActions(ctx, "checks", check.ID, ""); err != nil {
+			return err
+		}
 		old, err := s.getCheck(check.ID)
 		if err == nil {
 			if check.Version != old.Version {
@@ -701,6 +710,9 @@ func (s *LocalStore) SaveScenario(ctx context.Context, scenario Scenario, actor 
 		}
 	}
 	err := s.withLock(ctx, func() error {
+		if err := s.reconcilePendingActions(ctx, "scenarios", scenario.ID, ""); err != nil {
+			return err
+		}
 		data, err := safeReadFile(s.definitionDir("scenarios"), scenario.ID)
 		if err == nil {
 			var old Scenario
@@ -739,6 +751,9 @@ func (s *LocalStore) SaveValidator(ctx context.Context, item PublishedValidator,
 		return PublishedValidator{}, err
 	}
 	err := s.withLock(ctx, func() error {
+		if err := s.reconcilePendingActions(ctx, "validators", item.ID, ""); err != nil {
+			return err
+		}
 		data, err := safeReadFile(s.definitionDir("validators"), item.ID)
 		if err == nil {
 			var old PublishedValidator
@@ -872,6 +887,9 @@ func (s *LocalStore) SaveQueryValidators(ctx context.Context, item QueryValidato
 	}
 	item.QueryID = canonical
 	err = s.withLock(ctx, func() error {
+		if err := s.reconcilePendingActions(ctx, "query-validators", queryValidatorFileID(item.QueryID), ""); err != nil {
+			return err
+		}
 		data, err := safeReadFile(s.definitionDir("query-validators"), queryValidatorFileID(item.QueryID))
 		if err == nil {
 			var old QueryValidators

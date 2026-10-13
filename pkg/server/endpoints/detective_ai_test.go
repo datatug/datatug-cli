@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"iter"
 	"net/http"
 	"net/http/httptest"
@@ -199,5 +200,26 @@ func TestDetectiveAIContextReviewConfirmAndReplay(t *testing.T) {
 	replay := post("ai_confirm", confirm, detectiveAIConfirmHandler)
 	if replay.Code != http.StatusOK || replay.Body.String() != confirmed.Body.String() || provider.calls != 2 {
 		t.Fatalf("exact replay = %d %s; model calls=%d", replay.Code, replay.Body.String(), provider.calls)
+	}
+	// Core's earlier Current check is insufficient when another resource
+	// changes before Dispatch. The local admission lock must reject that basis.
+	scope := localAIScope("p", "alice")
+	ports := newLocalAIPorts(local, scope, "p", contextID)
+	basis, err := ports.Current(t.Context(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := local.SaveCase(t.Context(), detective.Case{ID: "other-case", Title: "Changed after review"}, "alice", "create-case"); err != nil {
+		t.Fatal(err)
+	}
+	edit := aiCore.CaseEdit{CaseID: old.ID, ExpectedVersion: caseAfter.Version, Title: "Would otherwise apply"}
+	proposal := aiCore.Proposal{ID: "stale-admission", Scope: scope, Basis: basis, Draft: aiCore.Draft{Kind: aiCore.KindCase, Case: &edit}}
+	command := aiCore.Command{Scope: scope, OperationID: "stale-admission-op", Proposal: proposal, Binding: coreDetective.OperationBinding{Project: scope.Key, Actor: scope.Actor, Action: "ai-confirm-edit-case", ResourceID: proposal.ID, PayloadDigest: strings.Repeat("a", 64)}}
+	if _, err := ports.Dispatch(t.Context(), command); !errors.Is(err, aiCore.ErrStale) {
+		t.Fatalf("stale reviewed basis reached mutation: %v", err)
+	}
+	unchanged, err := local.GetCase(t.Context(), old.ID)
+	if err != nil || unchanged.Version != caseAfter.Version || unchanged.Title != caseAfter.Title {
+		t.Fatalf("stale dispatch mutated Case: %+v %v", unchanged, err)
 	}
 }

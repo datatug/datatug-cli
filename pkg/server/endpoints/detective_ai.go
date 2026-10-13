@@ -150,6 +150,31 @@ type localAIPorts struct {
 	project, contextID string
 }
 
+func newLocalAIPorts(store *detective.LocalStore, scope ai.Scope, project, contextID string) localAIPorts {
+	p := localAIPorts{local: detective.LocalAIStore{Store: store, Scope: scope}, project: project, contextID: contextID}
+	p.local.BasisVerifier = p.verifyBasis
+	return p
+}
+
+func (p localAIPorts) verifyBasis(ctx context.Context, basis ai.Snapshot, state detective.State) error {
+	actor := api.SecurePrincipalID()
+	if actor == "" {
+		actor = "local-owner"
+	}
+	_, projectExists := api.ProjectDir(p.project)
+	if !api.ValidateSecurityContext(p.contextID) || !api.SecureSessionUnrestricted() || actor != p.local.Scope.Actor || !projectExists || !api.GetCapabilities().AllowWrites {
+		return ai.ErrUnauthorized
+	}
+	current, err := detectiveAISnapshotFromState(ctx, p.project, state)
+	if err != nil {
+		return err
+	}
+	if current.CatalogRevision != basis.CatalogRevision {
+		return ai.ErrStale
+	}
+	return nil
+}
+
 func (p localAIPorts) Save(ctx context.Context, proposal ai.Proposal) error {
 	return p.local.Save(ctx, proposal)
 }
@@ -221,7 +246,7 @@ func detectiveAIReviewHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	scope := localAIScope(request.Project, actor)
-	ports := localAIPorts{local: detective.LocalAIStore{Store: store, Scope: scope}, project: request.Project, contextID: request.SecurityContextID}
+	ports := newLocalAIPorts(store, scope, request.Project, request.SecurityContextID)
 	var proposal ai.Proposal
 	if request.Draft != nil {
 		proposal, err = ai.PrepareReviewedDraft(r.Context(), scope, *request.Draft, ports, time.Now().UTC(), nil)
@@ -252,7 +277,7 @@ func detectiveAIConfirmHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	scope := localAIScope(request.Project, actor)
-	ports := localAIPorts{local: detective.LocalAIStore{Store: store, Scope: scope}, project: request.Project, contextID: request.SecurityContextID}
+	ports := newLocalAIPorts(store, scope, request.Project, request.SecurityContextID)
 	receipt, err := ai.Confirm(r.Context(), scope, request.ConfirmRequest, ports, time.Now().UTC())
 	writeContractResponse(w, r, aiContractError(err), receipt)
 }

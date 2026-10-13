@@ -48,6 +48,9 @@ func (s LocalAIStore) ConfirmQuery(ctx context.Context, command ai.Command) (ai.
 		if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
+		if err := s.verifyAIBasisLocked(ctx, command.Proposal); err != nil {
+			return err
+		}
 		request, err := s.aiQueryRequest(ctx, command)
 		if err != nil {
 			return err

@@ -17,6 +17,9 @@ import (
 func (s *LocalStore) SaveCase(ctx context.Context, item Case, actor, action string) (Case, error) {
 	var saved Case
 	err := s.withLock(ctx, func() error {
+		if err := s.reconcilePendingActions(ctx, "cases", item.ID, ""); err != nil {
+			return err
+		}
 		old, err := s.getCase(item.ID)
 		at := time.Now().UTC()
 		var audit AuditEvent
@@ -59,6 +62,9 @@ func (s *LocalStore) ApplyScenario(ctx context.Context, caseID, scenarioID, acto
 	}
 	var saved Case
 	err := s.withLock(ctx, func() error {
+		if err := s.reconcilePendingActions(ctx, "cases", caseID, ""); err != nil {
+			return err
+		}
 		c, err := s.getCase(caseID)
 		if err != nil {
 			return err
@@ -100,6 +106,9 @@ func (s *LocalStore) RecordScenarioStep(ctx context.Context, caseID, application
 	}
 	var saved Case
 	err := s.withLock(ctx, func() error {
+		if err := s.reconcilePendingActions(ctx, "cases", caseID, ""); err != nil {
+			return err
+		}
 		c, err := s.getCase(caseID)
 		if err != nil {
 			return err
@@ -144,6 +153,9 @@ func (s *LocalStore) RecordScenarioQueryStep(ctx context.Context, caseID, applic
 	}
 	var saved Case
 	err := s.withLock(ctx, func() error {
+		if err := s.reconcilePendingActions(ctx, "cases", caseID, ""); err != nil {
+			return err
+		}
 		c, err := s.getCase(caseID)
 		if err != nil {
 			return err
@@ -179,6 +191,9 @@ func (s *LocalStore) appendCaseEvent(ctx context.Context, id string, event CaseE
 	}
 	var saved Case
 	err := s.withLock(ctx, func() error {
+		if err := s.reconcilePendingActions(ctx, "cases", id, ""); err != nil {
+			return err
+		}
 		c, err := s.getCase(id)
 		if err != nil {
 			return err

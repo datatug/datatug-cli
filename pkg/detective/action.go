@@ -97,6 +97,9 @@ func (s *LocalStore) reconcilePendingActions(ctx context.Context, collection, re
 	if collection == "" || resourceID == "" {
 		return nil
 	}
+	if err := s.reconcilePendingOther(ctx, collection, resourceID); err != nil {
+		return err
+	}
 	dir := s.privateItemDir("action-operations")
 	if err := ensureDirIfExists(dir); err != nil {
 		return err

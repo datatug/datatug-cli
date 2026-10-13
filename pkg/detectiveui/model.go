@@ -289,6 +289,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.form = nil
+		if v.result.CaseLinkStatus == "link-pending" {
+			m.feedback = "Incident " + v.result.Incident.Ref.String() + " created; Case changed. Link it to the latest Case."
+			return m, nil
+		}
 		m.feedback = "Incident " + v.result.Incident.Ref.String() + " linked"
 		if v.result.Case != nil {
 			m.id = v.result.Case.ID

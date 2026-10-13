@@ -108,6 +108,9 @@ func (s LocalAIStore) ConfirmCase(ctx context.Context, command ai.Command) (ai.R
 	}
 	var receipt ai.Receipt
 	err := s.Store.withLock(ctx, func() error {
+		if err := s.Store.reconcilePendingActions(ctx, "cases", command.Proposal.Draft.Case.CaseID, command.OperationID); err != nil {
+			return err
+		}
 		data, err := safeReadFile(s.Store.privateItemDir("ai-confirm-operations"), command.OperationID)
 		if err == nil {
 			var prior aiCaseOperation
@@ -123,6 +126,9 @@ func (s LocalAIStore) ConfirmCase(ctx context.Context, command ai.Command) (ai.R
 			return nil
 		}
 		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := s.verifyAIBasisLocked(ctx, command.Proposal); err != nil {
 			return err
 		}
 		edit := command.Proposal.Draft.Case

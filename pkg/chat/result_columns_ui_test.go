@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -108,6 +109,38 @@ func TestResultColumnsReviewViewPreservesExactDTQLLayout(t *testing.T) {
 	for _, line := range strings.Split(view, "\n") {
 		if ansi.StringWidth(line) > 100 {
 			t.Fatalf("review overflow: %q", line)
+		}
+	}
+}
+
+func TestResultColumnsOverlayHelpFollowsCurrentStep(t *testing.T) {
+	_, overlay, _ := resultColumnsUIFixture(t)
+	choices := overlay.HelpHints()
+	for _, hint := range []string{"↑↓ choose", "Space checkbox", "Enter Apply and review", "Esc cancel"} {
+		if !slices.Contains(choices, hint) {
+			t.Fatalf("choice help missing %q: %v", hint, choices)
+		}
+	}
+	for i, row := range overlay.rows {
+		if row.Addable {
+			overlay.index = i
+			overlay.Update(uitest.Key("space"))
+			break
+		}
+	}
+	overlay.Update(uitest.Key("enter"))
+	if overlay.preview == nil {
+		t.Fatal("Apply did not open review")
+	}
+	review := overlay.HelpHints()
+	for _, hint := range []string{"↑↓ / PgUp/PgDn scroll", "Shift+Enter Run reviewed query", "Esc choices"} {
+		if !slices.Contains(review, hint) {
+			t.Fatalf("review help missing %q: %v", hint, review)
+		}
+	}
+	for _, hint := range []string{"↑↓ choose", "Space checkbox", "Enter Apply and review"} {
+		if slices.Contains(review, hint) {
+			t.Fatalf("review help advertises inactive control %q: %v", hint, review)
 		}
 	}
 }

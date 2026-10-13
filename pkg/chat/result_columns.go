@@ -455,7 +455,11 @@ func planResultColumns(record RecordSet, metadata resultColumnMetadata, admitted
 	}
 	proof := "Direct physical projection; existing clauses and parameters preserved."
 	if len(joined) > 0 {
-		proof = "LEFT JOIN to enforced INTEGER rowid primary key, target-key-left numeric equality; source INTEGER affinity and engine-proven BINARY grouping. The secure JOIN evaluator refuses live keys beyond its exact integer range. At most one target and one label tuple per admitted original group. COUNT, null/missing groups, filters, HAVING, order, offset and limit retained. Grouped output remains aggregate output."
+		if len(q.GroupBy()) == 0 {
+			proof = "LEFT JOIN to enforced INTEGER rowid primary key, target-key-left numeric equality; source INTEGER affinity and engine-proven BINARY key semantics. The secure JOIN evaluator refuses live keys beyond its exact integer range. At most one target row per original source row. Existing projection, filters, order, offset, limit and parameters retained."
+		} else {
+			proof = "LEFT JOIN to enforced INTEGER rowid primary key, target-key-left numeric equality; source INTEGER affinity and engine-proven BINARY grouping. The secure JOIN evaluator refuses live keys beyond its exact integer range. At most one target and one label tuple per admitted original group. COUNT, null/missing groups, filters, HAVING, order, offset and limit retained. Grouped output remains aggregate output."
+		}
 	}
 	// Metadata and bound values participate locally in the fingerprint. Only the
 	// digest crosses the model boundary; bound parameter values never do.

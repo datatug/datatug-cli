@@ -36,7 +36,13 @@ type resultColumnsOverlay struct {
 func (*resultColumnsOverlay) LocalMouseCoordinates() bool { return true }
 func (*resultColumnsOverlay) BoundedMouseInput() bool     { return true }
 func (o *resultColumnsOverlay) HelpHints() []string {
-	return []string{"Add omitted columns", "↑↓ choose", "Space checkbox", "Enter Apply and review", "Shift+Enter Run reviewed query", "Esc back / cancel"}
+	if o.preview != nil {
+		return []string{"Review column query", "↑↓ / PgUp/PgDn scroll", "Shift+Enter Run reviewed query", "Esc choices"}
+	}
+	if o.loading {
+		return []string{"Loading omitted columns", "Esc cancel"}
+	}
+	return []string{"Add omitted columns", "↑↓ choose", "Space checkbox", "Enter Apply and review", "Esc cancel"}
 }
 
 func (u *ChatUI) openResultColumns() tea.Cmd {

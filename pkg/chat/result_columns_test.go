@@ -493,3 +493,42 @@ func TestResultColumnsGeneratedTargetCandidateDisabled(t *testing.T) {
 		t.Fatal("generated target discovery executed")
 	}
 }
+
+func TestResultColumnsProofMatchesGroupedAndPlainQueries(t *testing.T) {
+	for _, tt := range []struct {
+		name, document string
+		grouped        bool
+	}{
+		{"plain", "from: {name: Invoice}\nlimit: 100\n", false},
+		{"grouped", resultColumnsDocument, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c, parent, executor, _ := resultColumnsFixture(t, resultColumnsSchema, tt.document)
+			ids := columnNameIDs(t, c, parent, "Customer.FirstName", "Customer.LastName")
+			preview, err := c.resultColumnsPreview(context.Background(), c.activeID, parent.ID, ids)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(preview.Proof, "LEFT JOIN to enforced INTEGER rowid primary key") || !strings.Contains(preview.Proof, "secure JOIN evaluator refuses live keys") {
+				t.Fatalf("missing relationship proof: %s", preview.Proof)
+			}
+			if tt.grouped {
+				if !strings.Contains(preview.Proof, "COUNT") || !strings.Contains(preview.Proof, "Grouped output remains aggregate output") {
+					t.Fatalf("grouped proof lost aggregate claim: %s", preview.Proof)
+				}
+			} else {
+				if !strings.Contains(preview.Proof, "At most one target row per original source row") || !strings.Contains(preview.Proof, "Existing projection, filters, order, offset, limit and parameters retained") {
+					t.Fatalf("plain proof lost row preservation claim: %s", preview.Proof)
+				}
+				for _, claim := range []string{"COUNT", "group", "aggregate output"} {
+					if strings.Contains(strings.ToLower(preview.Proof), strings.ToLower(claim)) {
+						t.Fatalf("plain proof claims grouped behavior %q: %s", claim, preview.Proof)
+					}
+				}
+			}
+			if executor.calls != 0 {
+				t.Fatal("proof planning executed a query")
+			}
+		})
+	}
+}

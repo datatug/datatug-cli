@@ -55,3 +55,23 @@ func TestAnswers_NameAnOriginOnlyWhenItIsOnTheList(t *testing.T) {
 		assert.Empty(t, w.Header().Values("Access-Control-Allow-Origin"), "%s: a request with no Origin", name)
 	}
 }
+
+func TestCORSOriginPreservesVaryAndRejectsAmbiguousOrigin(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Origin", "http://localhost:4200")
+	w := httptest.NewRecorder()
+	w.Header().Set("Vary", "Accept-Encoding")
+	writeCORSOrigin(w, r)
+	writeCORSOrigin(w, r)
+	assert.Equal(t, []string{"Accept-Encoding", "Origin"}, w.Header().Values("Vary"))
+	assert.Equal(t, "http://localhost:4200", w.Header().Get("Access-Control-Allow-Origin"))
+	r.Header.Add("Origin", "https://foreign.example")
+	w = httptest.NewRecorder()
+	writeCORSOrigin(w, r)
+	assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "Origin", w.Header().Get("Vary"))
+	w = httptest.NewRecorder()
+	w.Header().Set("Vary", "*")
+	writeCORSOrigin(w, r)
+	assert.Equal(t, []string{"*"}, w.Header().Values("Vary"))
+}

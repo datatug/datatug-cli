@@ -1,11 +1,11 @@
 ---
 format: https://specscore.md/plan-specification
-status: Executing
+status: Implemented
 ---
 
 # Plan: Polish terminal panels and chat controls
 
-**Status:** Executing
+**Status:** Implemented
 **Source Feature:** tui-panel-polish
 **Date:** 2026-10-13
 **Owner:** CLI-lane
@@ -25,7 +25,9 @@ The user opens a clear header, searches Explorer, selects Tables and then a tabl
 
 **Id:** task-1
 **Verifies:** tui-panel-polish#ac:focused-panel-controls, tui-panel-polish#ac:chat-frame-and-tabs, tui-panel-polish#ac:chrome-and-help, tui-panel-polish#ac:frame-content-and-header-actions
-**Status:** in_progress
+**Status:** complete
+**Implemented-by:** 714a6c161745841075b8c009d61eac88d00167c4
+**Evidence:** https://github.com/strongo/aichat/pull/29, https://github.com/tuigoff/tuigoff/pull/12, https://github.com/datatug/datatug-cli/pull/377
 **Owner:** shared lane; root releases phase
 
 Audit event owners and implement opt-in frame/chrome/composer providers plus independent side preferences. The frame persists for an empty chat with no sessions or tab provider; cover this with geometry tests. Ctrl+F searches Explorer; Ctrl+Shift+Left/Right resizes focused side; F11 focuses session tabs. Preserve Shift arrows, Ctrl+Shift+Up/Down sort, existing session chords and text editing ownership. Confirm one-row focused footer geometry and marker reuse before CLI wiring.
@@ -34,7 +36,9 @@ Audit event owners and implement opt-in frame/chrome/composer providers plus ind
 
 **Id:** task-2
 **Verifies:** tui-panel-polish#ac:stable-explorer, tui-panel-polish#ac:catalog-inspection, tui-panel-polish#ac:focused-panel-controls
-**Status:** in_progress
+**Status:** complete
+**Implemented-by:** 714a6c161745841075b8c009d61eac88d00167c4
+**Evidence:** https://github.com/datatug/datatug-cli/pull/377, https://github.com/datatug/datatug-cli/releases/tag/v0.77.0
 **Depends-On:** 1
 **Owner:** CLI lane
 
@@ -44,7 +48,9 @@ Remove selected-only row prefix; retain green styling. Store exact group identit
 
 **Id:** task-3
 **Verifies:** tui-panel-polish#ac:chat-frame-and-tabs, tui-panel-polish#ac:chrome-and-help
-**Status:** in_progress
+**Status:** complete
+**Implemented-by:** 714a6c161745841075b8c009d61eac88d00167c4
+**Evidence:** https://github.com/datatug/datatug-cli/pull/377, https://github.com/datatug/datatug-cli/releases/tag/v0.77.0
 **Depends-On:** 1
 **Owner:** CLI lane
 
@@ -54,11 +60,19 @@ Wire typed header and composer metadata, frame and shared footer. Remove duplica
 
 **Id:** task-4
 **Verifies:** tui-panel-polish#ac:terminal-regression-evidence, tui-panel-polish#ac:catalog-inspection, tui-panel-polish#ac:chat-frame-and-tabs, tui-panel-polish#ac:focused-panel-controls, tui-panel-polish#ac:chrome-and-help, tui-panel-polish#ac:frame-content-and-header-actions
-**Status:** in_progress
+**Status:** complete
+**Implemented-by:** 714a6c161745841075b8c009d61eac88d00167c4
+**Evidence:** https://github.com/datatug/datatug-cli/actions/runs/38456229628, https://github.com/datatug/datatug-cli/actions/runs/38456230052, https://github.com/datatug/datatug-cli/releases/tag/v0.77.0
 **Depends-On:** 2, 3
 **Owner:** CLI lane focused tests; root PTY, final review and landing
 
-Run focused regressions and package checks through WB. Root builds production CLI with released providers, walks the complete selection/search/group/table/result/resize/help/session journey in real terminals at 140x42, 100x30 and 80x24, records expected versus observed screenshots and obtains Astra final source/UX review. Fix or explicitly decline findings, recheck affected journeys and land through WB with exact remote and cleanup receipts. No agent starts daemons, ports or own merge/release operations.
+Run focused regressions and package checks through WB. Root builds production CLI with released providers, walks the complete selection/search/group/table/result/resize/help/session journey in real terminals at 140x42, 100x30 and 80x24, records expected versus observed screenshots and records substantive source/UX review plus focused review of subsequent deltas. Retain the completed Astra review as history; use Sol for light UI reviews and reserve Astra for substantial architecture/code review. Fix or explicitly decline findings, recheck affected journeys and land through WB with exact remote and cleanup receipts. Implementation lanes do not start independent services or perform their own landing/release operations. Root owns bounded diagnostic child processes, any embedded test server and their teardown.
+
+## Delivery record
+
+Tasks are implemented by [CLI PR #377](https://github.com/datatug/datatug-cli/pull/377), landed at `714a6c161745841075b8c009d61eac88d00167c4` and publicly released as [DataTug CLI v0.77.0](https://github.com/datatug/datatug-cli/releases/tag/v0.77.0). Shared contracts shipped in aichat v0.15.0 (PR #29) and tuigoff v0.8.0 (PR #12). The feature's delivery evidence binds exact Go CI/release runs, downloaded checksum, native executable/buildinfo/signing, installed CLI read-only update discovery and published-binary PTY journeys to that release. No self-update installation was performed.
+
+Expected first/middle/last Help reachability, accurate Actions targets and three Customer rows/metadata; the public-binary PTY observed Help card/background/right-edge scrollbar geometry at all three required sizes, navigation/track paging/Actions clicks at 80x24, and the grid/metadata at 140x42, followed by a clean exit. Earlier diagnostic journey receipts remain separate. Original Astra r8 review, released-pin acknowledgment and Sol integration/lint reviews remain historical receipts. Native Warp rendering remains unverified; thumb dragging and browser parity are outside this delivery. Root's public-delivery/check receipts and `qa-public-v0.77.0/` captures are under `/private/tmp/datatug-tui-panel-polish/`. Final bookkeeping landing and remaining owned-task cleanup are pending root execution; task completion records implementation/delivery, not completed cleanup.
 
 ## Open Questions
 

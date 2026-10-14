@@ -87,9 +87,9 @@ func TestCompileWhereForTable_ParseOperatorError(t *testing.T) {
 	}
 }
 
+// Not parallel: mutates package-level coerceValueSeam.
 // TestCompileWhereForTable_CoercionError covers the coerce-failure branch (line 37-39).
 func TestCompileWhereForTable_CoercionError(t *testing.T) {
-	// Not parallel: mutates package-level coerceValueSeam.
 	def := &dbschema.CollectionDef{
 		Name:   "T",
 		Fields: []dbschema.FieldDef{{Name: "age", Type: dbschema.Int}},

@@ -40,7 +40,14 @@ type CopySinkPlan interface {
 
 type copyPlanWarnings interface{ Warnings() []string }
 
-var removeCopyStagingDir = os.RemoveAll
+var (
+	copyMkdirTemp        = os.MkdirTemp
+	copyOpenFile         = os.OpenFile
+	copyOpen             = os.Open
+	copyCloseFile        = func(f *os.File) error { return f.Close() }
+	copyWriterFlush      = func(w *bufio.Writer) error { return w.Flush() }
+	removeCopyStagingDir = os.RemoveAll
+)
 
 // ErrStagingCleanup means temporary source rows may remain on local disk.
 var ErrStagingCleanup = errors.New("transfer staging cleanup failed; temporary source files may remain")
@@ -91,7 +98,7 @@ func CopyToSink(ctx context.Context, source dal.DB, sink CopySink, opts CopyOpts
 		summary.Warnings = append(summary.Warnings, warningPlan.Warnings()...)
 	}
 
-	stageDir, err := os.MkdirTemp("", "datatug-db-copy-")
+	stageDir, err := copyMkdirTemp("", "datatug-db-copy-")
 	if err != nil {
 		return summary, fmt.Errorf("create transfer staging directory: %w", err)
 	}
@@ -108,7 +115,7 @@ func CopyToSink(ctx context.Context, source dal.DB, sink CopySink, opts CopyOpts
 	staged := make(map[string]string, len(tables))
 	for _, table := range tables {
 		path := filepath.Join(stageDir, fmt.Sprintf("table-%03d.ndjson", len(staged)))
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		file, err := copyOpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			return summary, fmt.Errorf("stage source collection %q: %w", table.Ref.Path(), err)
 		}
@@ -118,8 +125,8 @@ func CopyToSink(ctx context.Context, source dal.DB, sink CopySink, opts CopyOpts
 		if !opts.SchemaOnly {
 			rows, copyErr = stageCopyRows(ctx, source, table, plan, opts, writer)
 		}
-		flushErr := writer.Flush()
-		closeErr := file.Close()
+		flushErr := copyWriterFlush(writer)
+		closeErr := copyCloseFile(file)
 		if copyErr != nil {
 			return summary, copyErr
 		}
@@ -145,12 +152,12 @@ func CopyToSink(ctx context.Context, source dal.DB, sink CopySink, opts CopyOpts
 	}
 	for _, table := range tables {
 		path := staged[table.Ref.Path()]
-		file, err := os.Open(path)
+		file, err := copyOpen(path)
 		if err != nil {
 			return summary, fmt.Errorf("open staged collection %q: %w", table.Ref.Path(), err)
 		}
 		targetName, rows, loadErr := plan.LoadTable(ctx, table, file)
-		closeErr := file.Close()
+		closeErr := copyCloseFile(file)
 		if loadErr != nil {
 			return summary, fmt.Errorf("load target collection %q: %w", table.Ref.Path(), loadErr)
 		}
@@ -188,7 +195,8 @@ func stageCopyRows(ctx context.Context, source dal.DB, table CopyTable, plan Cop
 
 	if opts.Filters == nil || !opts.Filters.HasRowFilters() {
 		if sourceRows, ok := dal.As[dbschema.SourceRowsReader](source); ok {
-			cursor, err := sourceRows.OpenSourceRows(ctx, &table.Ref)
+			var cursor dbschema.SourceRowCursor
+			cursor, err = sourceRows.OpenSourceRows(ctx, &table.Ref)
 			if err != nil {
 				return rows, fmt.Errorf("open physical rows for %q: %w", table.Ref.Path(), err)
 			}
@@ -198,18 +206,20 @@ func stageCopyRows(ctx context.Context, source dal.DB, table CopyTable, plan Cop
 				}
 			}()
 			for {
-				row, err := cursor.Next()
+				var row dbschema.SourceRow
+				row, err = cursor.Next()
 				if errors.Is(err, io.EOF) {
+					err = nil
 					break
 				}
 				if err != nil {
 					return rows, fmt.Errorf("read physical row from %q: %w", table.Ref.Path(), err)
 				}
-				if err := encode(row); err != nil {
+				if err = encode(row); err != nil {
 					return rows, err
 				}
 			}
-			return rows, nil
+			return rows, err
 		}
 	}
 

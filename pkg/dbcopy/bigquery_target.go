@@ -18,6 +18,8 @@ import (
 	bqwriter "github.com/dal-go/dalgo2bigquery"
 )
 
+var bqJSONMarshal = json.Marshal
+
 type BigQueryCopySink struct{ Writer *bqwriter.LoadWriter }
 
 type bigQueryMappedField struct {
@@ -141,7 +143,7 @@ func (p *bigQueryCopyPlan) EncodeRow(table CopyTable, source dbschema.SourceRow)
 		}
 		row[field.target.Name] = encoded
 	}
-	data, err := json.Marshal(row)
+	data, err := bqJSONMarshal(row)
 	if err != nil {
 		return nil, fmt.Errorf("encode row JSON: %w", err)
 	}

@@ -725,7 +725,7 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 			return nil, nil
 		}
 		if err := detective.ValidateScenario(s); err != nil {
-			return nil, fmt.Errorf("Scenario inputs or bindings: %w", err)
+			return nil, fmt.Errorf("scenario inputs or bindings: %w", err)
 		}
 		req.Type = "save-scenario"
 		req.Scenario = &s
@@ -741,14 +741,14 @@ func (m *Model) submitForm() (*detective.ActionRequest, error) {
 		}
 		if f.kind == "edit-scenario-step" {
 			if step.ID != s.Steps[f.stepIndex].ID {
-				return nil, fmt.Errorf("Scenario step ID cannot change")
+				return nil, fmt.Errorf("scenario step ID cannot change")
 			}
 			s.Steps[f.stepIndex] = step
 		} else {
 			s.Steps = append(s.Steps, step)
 		}
 		if err := detective.ValidateScenario(s); err != nil {
-			return nil, fmt.Errorf("Scenario step or bindings: %w", err)
+			return nil, fmt.Errorf("scenario step or bindings: %w", err)
 		}
 		req.Type = "save-scenario"
 		req.Scenario = &s

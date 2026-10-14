@@ -28,6 +28,7 @@ func joinSnapshot() ForeignKeySnapshot {
 }
 
 func TestAttachedCustomerJoinsFreshInvoiceQueryWithoutAnIntermediateGrid(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	executor := &joinExecutorStub{}
 	chat := &SessionChat{source: "sqlite:///fixture.db", joinApplication: ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: executor}}
@@ -55,6 +56,7 @@ func TestAttachedCustomerJoinsFreshInvoiceQueryWithoutAnIntermediateGrid(t *test
 }
 
 func TestAttachedJoinDoesNotChangeAggregateOrImplicitOneToManyQuery(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	executor := &joinExecutorStub{}
 	chat := &SessionChat{source: "sqlite:///fixture.db", joinApplication: ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: executor}}
@@ -94,6 +96,7 @@ func TestAttachedJoinDoesNotChangeAggregateOrImplicitOneToManyQuery(t *testing.T
 }
 
 func TestAttachedJoinAsksWhenRelationshipsAmbiguous(t *testing.T) {
+	t.Parallel()
 	snapshot := ForeignKeySnapshot{Source: "sqlite:///fixture.db", Columns: map[string][]string{
 		"main.order": {"OrderId", "BillingAddressId", "ShippingAddressId"}, "main.address": {"AddressId", "City"},
 	}, Keys: []ForeignKey{
@@ -129,6 +132,7 @@ func (a ambiguousAttachedJoinAgent) AskWithContext(ctx context.Context, _, _ str
 }
 
 func TestAmbiguousAttachedJoinBecomesClarificationNotFailedQuery(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -155,6 +159,7 @@ func TestAmbiguousAttachedJoinBecomesClarificationNotFailedQuery(t *testing.T) {
 }
 
 func TestChinookInvoiceCustomerJoinThroughDALgo(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {
@@ -246,6 +251,7 @@ func TestChinookInvoiceCustomerJoinThroughDALgo(t *testing.T) {
 }
 
 func TestChinookFreshAttachedCustomerUsesLeftJoinThroughDALgo(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {
@@ -274,6 +280,7 @@ func TestChinookFreshAttachedCustomerUsesLeftJoinThroughDALgo(t *testing.T) {
 }
 
 func TestDiscoverJoinCandidatesKeepsCompositeAndSelfDirections(t *testing.T) {
+	t.Parallel()
 	candidates, err := DiscoverJoinCandidates([]byte("from:\n  schema: main\n  name: Employee\n  alias: e\n  joins:\n    - from: {schema: main, name: Invoice, alias: i}\n      on: [{left: {field: EmployeeId, source: e}, op: '==', right: {field: CustomerId, source: i}}]\n"), joinSnapshot())
 	if err != nil {
 		t.Fatal(err)
@@ -303,6 +310,7 @@ func TestDiscoverJoinCandidatesKeepsCompositeAndSelfDirections(t *testing.T) {
 }
 
 func TestJoinCandidatesSuppressOnlyExactActiveInstanceEdge(t *testing.T) {
+	t.Parallel()
 	query := []byte(`from:
   name: Invoice
   alias: purchase
@@ -337,6 +345,7 @@ limit: 5
 }
 
 func TestCompositeJoinSuppressionIgnoresPredicateOrder(t *testing.T) {
+	t.Parallel()
 	query := []byte(`from:
   name: Order
   alias: o
@@ -358,6 +367,7 @@ func TestCompositeJoinSuppressionIgnoresPredicateOrder(t *testing.T) {
 }
 
 func TestDeriveJoinDTQLUsesCollisionSafeAliasAndPreservesLimit(t *testing.T) {
+	t.Parallel()
 	parent := []byte("from: {schema: main, name: Invoice, alias: Customer}\nlimit: 7\n")
 	candidates, err := DiscoverJoinCandidates(parent, joinSnapshot())
 	if err != nil || len(candidates) != 1 {
@@ -379,6 +389,7 @@ func TestDeriveJoinDTQLUsesCollisionSafeAliasAndPreservesLimit(t *testing.T) {
 }
 
 func TestDeriveJoinDTQLQualifiesAndExpandsProjection(t *testing.T) {
+	t.Parallel()
 	parent := []byte(`from: {name: Invoice}
 columns:
   - wildcard: {exclude: [Total]}
@@ -408,6 +419,7 @@ limit: 10
 }
 
 func TestDeriveJoinDTQLRefusesAggregateWithoutGuessing(t *testing.T) {
+	t.Parallel()
 	parent := []byte(`from: {name: Invoice}
 columns:
   - aggregate: {function: COUNT, args: [{star: true}]}
@@ -424,6 +436,7 @@ limit: 10
 }
 
 func TestDeriveJoinDTQLRefusesImplicitMultiRelationWildcard(t *testing.T) {
+	t.Parallel()
 	snapshot := joinSnapshot()
 	snapshot.Keys = append(snapshot.Keys, ForeignKey{ConstraintID: "fk_customer_employee", Schema: "main", FromRelation: "Customer", FromFields: []string{"EmployeeId"}, ToSchema: "main", ToRelation: "Employee", ToFields: []string{"EmployeeId"}})
 	doc := []byte(`from:
@@ -450,6 +463,7 @@ limit: 5
 }
 
 func TestDuplicateIdenticalForeignKeysKeepUnappliedCandidate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	snapshot := joinSnapshot()
 	snapshot.Keys = append(snapshot.Keys, ForeignKey{ConstraintID: "fk_invoice_customer_duplicate", Schema: "main", FromRelation: "Invoice", FromFields: []string{"CustomerId"}, ToSchema: "main", ToRelation: "Customer", ToFields: []string{"CustomerId"}})
@@ -480,6 +494,7 @@ func TestDuplicateIdenticalForeignKeysKeepUnappliedCandidate(t *testing.T) {
 }
 
 func TestRestrictedBaseDoesNotAdvertiseUnexecutableJoin(t *testing.T) {
+	t.Parallel()
 	parent := RecordSet{ID: "base", Source: "sqlite:///fixture.db", DTQL: "from: {name: Invoice}\nlimit: 5\n"}
 	executor := &joinExecutorStub{}
 	app := ForeignKeyJoinApplication{Source: parent.Source, Snapshot: joinSnapshot(), Executor: executor, Secure: true,
@@ -507,6 +522,7 @@ func (s *joinExecutorStub) RunDTQL(_ context.Context, _ string, doc []byte, _ ma
 }
 
 func TestSessionChatApplyJoinCandidatePersistsLineage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()

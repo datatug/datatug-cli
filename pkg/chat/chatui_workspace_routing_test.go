@@ -17,6 +17,7 @@ func workspaceRoutingKey(u *ChatUI, key string) {
 }
 
 func TestUnifiedWorkspaceAPIReturnPreservesExpandedResult(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	g, record, ok := u.activeGrid()
 	if !ok {
@@ -40,6 +41,7 @@ func TestUnifiedWorkspaceAPIReturnPreservesExpandedResult(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceGridSearchEscKeepsExpansionUntilThirdPress(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	g, _, _ := u.activeGrid()
 	workspaceRoutingKey(u, "f9")
@@ -59,6 +61,7 @@ func TestUnifiedWorkspaceGridSearchEscKeepsExpansionUntilThirdPress(t *testing.T
 }
 
 func TestUnifiedWorkspaceExplorerSearchAndComposerDraft(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.FocusLeftPanel()
 	u.shell.Update(uitest.Text("z1ß"))
@@ -89,6 +92,7 @@ func TestUnifiedWorkspaceExplorerSearchAndComposerDraft(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceInspectPlainDigitsNeverActivate(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	u.shell.FocusRightPanel()
 	u.workspace.tab = 1
@@ -121,6 +125,7 @@ func (d *workspaceRoutingDialog) Update(msg tea.Msg) (chatshell.Overlay, tea.Cmd
 }
 
 func TestUnifiedWorkspaceModalOwnsShiftAndBlocksGlobals(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	d := &workspaceRoutingDialog{}
 	u.shell.PushOverlay(d)
@@ -147,6 +152,7 @@ func TestUnifiedWorkspaceModalOwnsShiftAndBlocksGlobals(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceActionMenuKeepsReplacementDialog(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		index int
@@ -174,6 +180,7 @@ func TestUnifiedWorkspaceActionMenuKeepsReplacementDialog(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceAPIEscapeFromComposerReturnsToAPI(t *testing.T) {
+	t.Parallel()
 	for _, expanded := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ordinary", true: "expanded"}[expanded], func(t *testing.T) {
 			u := focusedGridTestUI(t)
@@ -200,6 +207,7 @@ func TestUnifiedWorkspaceAPIEscapeFromComposerReturnsToAPI(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceF10FromComposerRetainsResultAndDraft(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	g, _, _ := u.activeGrid()
 	id := u.activeRecordSetID()
@@ -213,6 +221,7 @@ func TestUnifiedWorkspaceF10FromComposerRetainsResultAndDraft(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceHelpAdvertisesReachableGridActions(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	hints := strings.Join(u.workspaceHints(150), " · ")
 	for _, forbidden := range []string{"1 Table", "2 Charts", "3 Current row", "j JOIN", "e export", "q save", "B bucket"} {
@@ -244,6 +253,7 @@ func TestUnifiedWorkspaceHelpAdvertisesReachableGridActions(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceDeferredGridBrowserFeedbackIsVisible(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	g, _, _ := u.activeGrid()
 	id, entry, count := u.activeRecordSetID(), u.lastGridEntryID, len(u.snapshot.RecordSets)
@@ -259,6 +269,7 @@ func TestUnifiedWorkspaceDeferredGridBrowserFeedbackIsVisible(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceGridHintsFollowSearchAndExpansionLayers(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	workspaceRoutingKey(u, "f9")
 	if !strings.Contains(strings.Join(u.workspaceHints(150), " · "), "Esc restore") {
@@ -277,6 +288,7 @@ func TestUnifiedWorkspaceGridHintsFollowSearchAndExpansionLayers(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceJoinBlockAdvertisesModifiedPicker(t *testing.T) {
+	t.Parallel()
 	b := newTestJoinBlock()
 	if !strings.Contains(uitest.Plain(b.View(100, true)), "press j") {
 		t.Fatal("legacy JOIN shortcut changed")
@@ -289,6 +301,7 @@ func TestUnifiedWorkspaceJoinBlockAdvertisesModifiedPicker(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceAdvertisedModifiedDialogsDispatch(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ key, want string }{{"ctrl+s", "Save as project query"}, {"ctrl+e", "Export RecordSet"}} {
 		t.Run(tc.key, func(t *testing.T) {
 			u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Widgets", DTQL: "from: {name: Widget}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}})

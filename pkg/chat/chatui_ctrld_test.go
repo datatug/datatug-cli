@@ -12,6 +12,7 @@ import (
 // recently attached workspace item, and had no chatshell equivalent after
 // the ChatUI cutover. globalKeys (chatui_pickers.go) now restores it.
 func TestChatUICtrlDDetachesLastAttachment(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())

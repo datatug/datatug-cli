@@ -26,6 +26,7 @@ func reviewJoinUI(t *testing.T) *ChatUI {
 }
 
 func TestUnifiedWorkspaceDecodedLFNeverEntersInlineJoin(t *testing.T) {
+	t.Parallel()
 	u := reviewJoinUI(t)
 	id := u.activeRecordSetID()
 	events := make(chan uv.Event, 4)
@@ -72,6 +73,7 @@ func (a *reviewDelayedJoin) Apply(ctx context.Context, r RecordSet, _ JoinCandid
 	return QueryResult{Title: "Joined", DTQL: r.DTQL, Result: r.Result}, nil
 }
 func TestUnifiedWorkspaceDelayedJoinRetainsNewerContext(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"result", "row", "composer", "editor", "modal"} {
 		t.Run(change, func(t *testing.T) {
 			u := reviewJoinUI(t)
@@ -147,6 +149,7 @@ func TestUnifiedWorkspaceDelayedJoinRetainsNewerContext(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceLongRelationshipListsFollowSelection(t *testing.T) {
+	t.Parallel()
 	u := reviewJoinUI(t)
 	candidates := make([]JoinCandidate, 24)
 	for i := range candidates {
@@ -195,6 +198,7 @@ func TestUnifiedWorkspaceLongRelationshipListsFollowSelection(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceComposerSelectTextPreservesDraftAndCaret(t *testing.T) {
+	t.Parallel()
 	u := reviewJoinUI(t)
 	u.shell.Update(uitest.Key("f4"))
 	u.shell.SetComposerText("before 世界 after")
@@ -256,6 +260,7 @@ func TestUnifiedWorkspaceComposerSelectTextPreservesDraftAndCaret(t *testing.T) 
 }
 
 func TestUnifiedWorkspaceSelectionViewportTracksLongUnicodeCaret(t *testing.T) {
+	t.Parallel()
 	text := []rune(strings.Repeat("世界 abc\n", 30) + "最後")
 	s := &queryTextSelection{text: text, anchor: len(text) - 2, cursor: len(text), copyOnAccept: true}
 	view := ansi.Strip(s.View(20, 7))
@@ -269,6 +274,7 @@ func TestUnifiedWorkspaceSelectionViewportTracksLongUnicodeCaret(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceCompactGroupAndMembersKeepSelectionVisible(t *testing.T) {
+	t.Parallel()
 	for _, members := range []bool{false, true} {
 		t.Run(fmt.Sprint(members), func(t *testing.T) {
 			rows := make([]secureread.Row, 24)

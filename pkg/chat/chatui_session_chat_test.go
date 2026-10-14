@@ -15,6 +15,7 @@ import (
 )
 
 func TestChatUIEmptyToolResultRestoresAsGrid(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())

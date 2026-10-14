@@ -18,6 +18,7 @@ import (
 )
 
 func TestUnifiedWorkspaceBrowserFallbackAndBusyVisibleAtBothWidths(t *testing.T) {
+	t.Parallel()
 	for _, width := range []int{80, 150} {
 		u, _ := newTestChatUI(t, nil, Turn{})
 		u.shell.Update(tea.WindowSizeMsg{Width: width, Height: 30})
@@ -44,6 +45,7 @@ func TestUnifiedWorkspaceBrowserFallbackAndBusyVisibleAtBothWidths(t *testing.T)
 }
 
 func TestUnifiedWorkspaceBookmarkEscCancelsOneLayerWithoutMutation(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	session, ref := bookmarkableSelection(t, sessions.store)
 	if _, err := sessions.store.CreateBookmark(u.ctx, session.ID, ref, "Saved invoice selection"); err != nil {
@@ -76,6 +78,7 @@ func TestUnifiedWorkspaceBookmarkEscCancelsOneLayerWithoutMutation(t *testing.T)
 }
 
 func TestUnifiedWorkspaceMixedSQLiteNumbersSurviveStoreReloadAndLocalOperations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "mixed.sqlite")
 	db, err := sql.Open("sqlite", path)
@@ -171,6 +174,7 @@ func TestUnifiedWorkspaceMixedSQLiteNumbersSurviveStoreReloadAndLocalOperations(
 }
 
 func TestUnifiedWorkspaceUnsafePersistedNumericParametersRefuseWithoutAppending(t *testing.T) {
+	t.Parallel()
 	sessions, parent := derivedFixture(t)
 	for _, value := range []any{json.Number("9007199254740993"), int64(9007199254740993), json.Number("0.10000000000000000001")} {
 		parent.Parameters = map[string]any{"minimum": value}
@@ -204,6 +208,7 @@ func TestUnifiedWorkspaceUnsafePersistedNumericParametersRefuseWithoutAppending(
 }
 
 func TestUnifiedWorkspaceExplorerDetailsScrollAndResetThroughShell(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	query := "first-query-line\n" + strings.Repeat("middle-query-line\n", 35) + "last-query-line"
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "query", ObjectID: "q", Title: "Saved report"}, QueryType: "DTQL", QueryText: query}}}
@@ -232,6 +237,7 @@ func TestUnifiedWorkspaceExplorerDetailsScrollAndResetThroughShell(t *testing.T)
 }
 
 func TestUnifiedWorkspaceQuickLoadedSortChordsAndModalOwnership(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Items", DTQL: "from: {schema: main, name: Item}\nlimit: 2\n", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 2}}, {Data: map[string]any{"Id": 1}}}}})
 	g, record, _ := u.activeGrid()
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Item", SourceID: record.Database}, Columns: []string{"Id"}, ColumnTypes: map[string]string{"Id": "INTEGER"}}}}
@@ -252,6 +258,7 @@ func TestUnifiedWorkspaceQuickLoadedSortChordsAndModalOwnership(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceModalHelpReturnsToRetainedGroupChoices(t *testing.T) {
+	t.Parallel()
 	sessions, _ := derivedFixture(t)
 	u, err := NewSessionChatUI(context.Background(), sessions, "none")
 	if err != nil {
@@ -278,6 +285,7 @@ func TestUnifiedWorkspaceModalHelpReturnsToRetainedGroupChoices(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceQuickServerSortOpensExactPreviewWithoutExecution(t *testing.T) {
+	t.Parallel()
 	sessions, _ := derivedFixture(t)
 	u, err := NewSessionChatUI(context.Background(), sessions, "none")
 	if err != nil {
@@ -314,6 +322,7 @@ func clickWorkspaceText(t *testing.T, u *ChatUI, label string) tea.Cmd {
 }
 
 func TestUnifiedWorkspaceToolbarTogglePreservesContextFeedbackAndModalPriority(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Items", Result: secureread.Result{Columns: []string{"Id"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1}}}}})
 	u.shell.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	u.shell.FocusComposer()
@@ -356,6 +365,7 @@ func TestUnifiedWorkspaceToolbarTogglePreservesContextFeedbackAndModalPriority(t
 }
 
 func TestUnifiedWorkspaceMouseGroupChoicesAndQueryEditorControls(t *testing.T) {
+	t.Parallel()
 	sessions, _ := derivedFixture(t)
 	u, err := NewSessionChatUI(context.Background(), sessions, "none")
 	if err != nil {
@@ -395,6 +405,7 @@ func TestUnifiedWorkspaceMouseGroupChoicesAndQueryEditorControls(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceOriginalOutputRefusesInexactArithmeticBeforeChildPersistence(t *testing.T) {
+	t.Parallel()
 	sessions, _ := derivedFixture(t)
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", strings.TrimPrefix(sessions.source, "sqlite://"))
@@ -440,6 +451,7 @@ func TestUnifiedWorkspaceOriginalOutputRefusesInexactArithmeticBeforeChildPersis
 }
 
 func TestUnifiedWorkspaceHeaderSessionPickerAndExpandAreClickable(t *testing.T) {
+	t.Parallel()
 	sessions, _ := derivedFixture(t)
 	u, err := NewSessionChatUI(context.Background(), sessions, "none")
 	if err != nil {

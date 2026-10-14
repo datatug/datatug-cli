@@ -11,6 +11,7 @@ import (
 )
 
 func TestUnifiedWorkspaceAutomaticAggregatesUseAuthoritativeKeysAndExactLoadedValues(t *testing.T) {
+	t.Parallel()
 	names := []string{"RowKey", "CustomerId", "Quantity", "Amount", "Total", "Category"}
 	document := "from: {schema: main, name: Item}\ncolumns: [{field: RowKey}, {field: CustomerId}, {field: Quantity}, {field: Amount}, {field: Total}, {field: Category}]\nlimit: 2\n"
 	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Items", DTQL: document, Result: secureread.Result{Columns: names, Rows: []secureread.Row{
@@ -87,6 +88,7 @@ func TestUnifiedWorkspaceAutomaticAggregatesUseAuthoritativeKeysAndExactLoadedVa
 }
 
 func TestUnifiedWorkspaceUnknownForeignKeysDoNotInferIntegerSums(t *testing.T) {
+	t.Parallel()
 	sessions, _ := derivedFixture(t)
 	u, err := NewSessionChatUI(t.Context(), sessions, "none")
 	if err != nil {
@@ -109,6 +111,7 @@ func TestUnifiedWorkspaceUnknownForeignKeysDoNotInferIntegerSums(t *testing.T) {
 }
 
 func TestUnifiedWorkspaceDerivedTypesSurviveReloadWithoutInventingEntityIdentity(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{Title: "Grouped invoices", DTQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: CustomerId}, {aggregate: {function: sum, args: [{field: Total}]}, as: sum_Total}]\ngroupBy: [{field: CustomerId}]\n", Result: secureread.Result{
 		Columns: []string{"CustomerId", "sum_Total"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER", "sum_Total": "DECIMAL"},
 		Rows: []secureread.Row{{Data: map[string]any{"CustomerId": int64(29), "sum_Total": json.Number("0.3")}}},
@@ -136,6 +139,7 @@ func TestUnifiedWorkspaceDerivedTypesSurviveReloadWithoutInventingEntityIdentity
 }
 
 func TestUnifiedWorkspaceGroupedGridDoesNotRenderSourceEntityJoinHints(t *testing.T) {
+	t.Parallel()
 	query := QueryResult{Title: "Invoices", DTQL: "from: {schema: main, name: Invoice}\ncolumns: [{field: CustomerId}, {field: Total}]\nlimit: 5\n", Result: secureread.Result{
 		Columns: []string{"CustomerId", "Total"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": int64(1), "Total": 27.29}}},
 	}}

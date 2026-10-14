@@ -10,6 +10,7 @@ import (
 )
 
 func TestHTTPSettingsCLIWideButProjectIsolated(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "private")
 	first := openTestStore(t, filepath.Join(dir, "first.sqlite"), testScope())
@@ -32,6 +33,7 @@ func TestHTTPSettingsCLIWideButProjectIsolated(t *testing.T) {
 }
 
 func TestHTTPRequestSettingsScopesAndRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -71,6 +73,7 @@ func TestHTTPRequestSettingsScopesAndRestart(t *testing.T) {
 }
 
 func TestHTTPConfiguredHeadersCookiesAndRedirectIsolation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var crossOriginAuthorization, crossOriginCookie string
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {

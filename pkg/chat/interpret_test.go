@@ -13,6 +13,7 @@ import (
 )
 
 func TestInterpretUsesAgentToolWithoutExecutingRows(t *testing.T) {
+	t.Parallel()
 	doc := "from: {schema: main, name: Invoice}\nlimit: 20\n"
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": doc})}, usage: &ai.Usage{InputTokens: 120, OutputTokens: 30}},
@@ -42,6 +43,7 @@ func TestInterpretUsesAgentToolWithoutExecutingRows(t *testing.T) {
 // after the first (failed) attempt, so a model that needed one correction
 // could never succeed at all over the browser bridge.
 func TestInterpretCorrectsInvalidDTQLOnce(t *testing.T) {
+	t.Parallel()
 	corrected := "from: {schema: main, name: Invoice}\nlimit: 20\n"
 	llm := &scriptedProvider{steps: []scriptedStep{
 		// Invalid DTQL: dtql.Deserialize fails, so this is a tool-level
@@ -62,6 +64,7 @@ func TestInterpretCorrectsInvalidDTQLOnce(t *testing.T) {
 }
 
 func TestInterpretRejectsMissingDTQLAction(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{{text: "SELECT * FROM Invoice"}}}
 	_, err := interpretWithProviderDetailed(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)
 	if err == nil || !strings.Contains(err.Error(), "valid DTQL action") {
@@ -70,6 +73,7 @@ func TestInterpretRejectsMissingDTQLAction(t *testing.T) {
 }
 
 func TestInterpretSanitizesProviderFailure(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{{err: &ai.Error{Code: ai.ErrCodeUpstream, Message: "secret-test-key from provider"}}}}
 	_, err := interpretWithProviderDetailed(context.Background(), InterpretRequest{Question: "Invoices", Schema: "main.Invoice: InvoiceId"}, llm)
 	if err == nil || strings.Contains(err.Error(), "secret-test-key") || !strings.Contains(err.Error(), "provider request failed") {
@@ -78,6 +82,7 @@ func TestInterpretSanitizesProviderFailure(t *testing.T) {
 }
 
 func TestInterpretRejectsUnsafeURL(t *testing.T) {
+	t.Parallel()
 	for _, base := range []string{
 		"http://api.deepseek.com", "https://api.deepseek.com?key=secret", "https://user:secret@api.deepseek.com",
 		"http://192.168.1.2:8989", "https://192.168.1.2:8989", "https://internal.example.com", "https://api.deepseek.com.evil.example",
@@ -102,6 +107,7 @@ func TestInterpretRejectsUnsafeURL(t *testing.T) {
 // Validate()'s field-by-field guards directly, one field at a time from an
 // otherwise-valid request.
 func TestInterpretRequestValidateRejectsEachField(t *testing.T) {
+	t.Parallel()
 	valid := func() InterpretRequest {
 		return InterpretRequest{
 			Question: "Last 20 invoices",
@@ -139,6 +145,7 @@ func TestInterpretRequestValidateRejectsEachField(t *testing.T) {
 // Validate() short-circuit, ahead of building a provider or running an
 // agent turn at all.
 func TestInterpretDetailedRejectsInvalidRequest(t *testing.T) {
+	t.Parallel()
 	_, err := InterpretDetailed(context.Background(), InterpretRequest{})
 	if err == nil {
 		t.Fatal("InterpretDetailed accepted an empty, invalid request")
@@ -154,6 +161,7 @@ func TestInterpretDetailedRejectsInvalidRequest(t *testing.T) {
 // trigger downstream -- sourceURL and the executor are both hardcoded
 // non-empty).
 func TestInterpretWithProviderNilProviderReturnsSanitizedError(t *testing.T) {
+	t.Parallel()
 	_, err := interpretWithProviderDetailed(context.Background(), InterpretRequest{Question: "Q", Schema: "S"}, nil)
 	if err == nil || err.Error() != "could not initialize chat agent" {
 		t.Fatalf("err = %v, want the sanitized init error", err)
@@ -161,6 +169,7 @@ func TestInterpretWithProviderNilProviderReturnsSanitizedError(t *testing.T) {
 }
 
 func TestInterpretRespectsSelectedProtocol(t *testing.T) {
+	t.Parallel()
 	if got := providerBaseURL(InterpretProvider{Protocol: "anthropic-messages", BaseURL: "https://api.anthropic.com/v1"}); got != "https://api.anthropic.com" {
 		t.Fatalf("Anthropic SDK base URL = %q", got)
 	}
@@ -188,6 +197,7 @@ func TestInterpretRespectsSelectedProtocol(t *testing.T) {
 }
 
 func TestInterpretProviderHTTPContracts(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, protocol, baseSuffix, path, keyHeader string
 	}{
@@ -234,6 +244,7 @@ func sseWrite(w http.ResponseWriter, data string) {
 }
 
 func TestInterpretDeepSeekCompatibleToolCall(t *testing.T) {
+	t.Parallel()
 	const doc = "from: {schema: main, name: Invoice}\nlimit: 20\n"
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

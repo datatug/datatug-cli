@@ -18,6 +18,7 @@ import (
 
 // 1. refresh.go:72: hiddenRefreshVersions with keep < 1
 func TestRefreshHiddenVersionsCoverageRemaining(t *testing.T) {
+	t.Parallel()
 	session := ChatSession{
 		ID: "s1",
 		RecordSets: map[string]RecordSet{
@@ -32,6 +33,7 @@ func TestRefreshHiddenVersionsCoverageRemaining(t *testing.T) {
 
 // 2. store.go:641: loadWorkspace error when DB query fails (e.g. closed DB)
 func TestStoreWorkspaceLoadError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session := ChatSession{ID: "s1"}
@@ -44,6 +46,7 @@ func TestStoreWorkspaceLoadError(t *testing.T) {
 
 // 3. saved_query_lookup.go uncovered branches
 func TestSavedQueryLookupCoverageRemaining(t *testing.T) {
+	t.Parallel()
 	// DiscoverSavedQueryLookup with empty args
 	if got := DiscoverSavedQueryLookup(ForeignKeySnapshot{}, "", ""); got != nil {
 		t.Fatalf("expected nil, got %v", got)
@@ -229,6 +232,7 @@ where:
 
 // 4. session_chat_settings.go
 func TestSessionChatSettingsCoverageRemaining(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 
@@ -259,6 +263,7 @@ func TestSessionChatSettingsCoverageRemaining(t *testing.T) {
 
 // 5. session_chat_http.go
 func TestSessionChatHTTPCoverageRemaining(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 
@@ -414,6 +419,7 @@ func (p plainSavedQueryService) Run(ctx context.Context, id string) (QueryResult
 }
 
 func TestSessionChatQueriesAndActionsCoverageRemaining(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 
@@ -668,6 +674,7 @@ func TestSessionChatQueriesAndActionsCoverageRemaining(t *testing.T) {
 
 // 7. Ask and StreamAsk error persistence (lines 907 and 1030)
 func TestSessionChatAskAndStreamAskAppendError(t *testing.T) {
+	// Not parallel: mutates package-level txCommitFn seam.
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 
@@ -714,6 +721,7 @@ func TestSessionChatAskAndStreamAskAppendError(t *testing.T) {
 }
 
 func TestRefreshRecordSetBranches(t *testing.T) {
+	// Not parallel: mutates package-level txCommitFn seam.
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	// queryExecutor nil
@@ -792,6 +800,7 @@ func TestRefreshRecordSetBranches(t *testing.T) {
 }
 
 func TestSessionChatMoreBranches(t *testing.T) {
+	// Not parallel: mutates package-level execContextFn and txCommitFn seams.
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 
@@ -861,6 +870,7 @@ func TestSessionChatMoreBranches(t *testing.T) {
 }
 
 func TestGridFullCoverage(t *testing.T) {
+	t.Parallel()
 	// sanitizeMultilineText with control characters <= 0x1f
 	s := sanitizeMultilineText("hello\x01world")
 	if !strings.Contains(s, "hello world") {
@@ -896,6 +906,7 @@ func TestGridFullCoverage(t *testing.T) {
 }
 
 func TestChartsAndRenderChartFullCoverage(t *testing.T) {
+	t.Parallel()
 	// renderChart width < 24 || height < 4
 	if got := renderChart(ChartSpec{}, 20, 2); got != "Chart needs a wider pane." {
 		t.Fatalf("unexpected message: %q", got)
@@ -959,6 +970,7 @@ func TestChartsAndRenderChartFullCoverage(t *testing.T) {
 }
 
 func TestAttachedJoinFullCoverage(t *testing.T) {
+	t.Parallel()
 	// splitAttachedRelation without dot
 	schema, rel := splitAttachedRelation("customers")
 	if schema != "" || rel != "customers" {
@@ -1024,6 +1036,7 @@ func TestAttachedJoinFullCoverage(t *testing.T) {
 }
 
 func TestRecordSetUIFullCoverage(t *testing.T) {
+	t.Parallel()
 	resp := HTTPResponse{
 		StatusCode:     http.StatusOK,
 		Method:         "GET",
@@ -1041,6 +1054,7 @@ func TestRecordSetUIFullCoverage(t *testing.T) {
 }
 
 func TestBookmarkProjectionOutOfRange(t *testing.T) {
+	t.Parallel()
 	record := RecordSet{
 		Result: secureread.Result{
 			Columns: []string{"id"},
@@ -1057,6 +1071,7 @@ func TestBookmarkProjectionOutOfRange(t *testing.T) {
 }
 
 func TestBrowserCellDetailFullCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 
@@ -1100,6 +1115,7 @@ func TestBrowserCellDetailFullCoverage(t *testing.T) {
 }
 
 func TestChatUIAndComponentsCoverage(t *testing.T) {
+	t.Parallel()
 	// join_block default key
 	b := newTestJoinBlock()
 	b.joinFocused = true

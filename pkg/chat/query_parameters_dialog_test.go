@@ -3,6 +3,7 @@ package chat
 import "testing"
 
 func TestLookupValueDecodesByteSliceToString(t *testing.T) {
+	t.Parallel()
 	if got := lookupValue([]byte("hello")); got != "hello" {
 		t.Fatalf("lookupValue([]byte) = %#v, want string", got)
 	}
@@ -15,6 +16,7 @@ func TestLookupValueDecodesByteSliceToString(t *testing.T) {
 }
 
 func TestLookupValueTokenEncodesComparableScalars(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		value any
@@ -37,6 +39,7 @@ func TestLookupValueTokenEncodesComparableScalars(t *testing.T) {
 }
 
 func TestLookupValueTokenRejectsUnsupportedTypes(t *testing.T) {
+	t.Parallel()
 	for _, value := range []any{
 		map[string]any{"a": 1},
 		[]any{1, 2},

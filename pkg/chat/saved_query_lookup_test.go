@@ -25,6 +25,7 @@ func (s parameterLookupStub) LookupParameter(context.Context, string, string) (*
 }
 
 func TestSavedQueryFKLookupDiscovery(t *testing.T) {
+	t.Parallel()
 	snapshot := joinSnapshot()
 	plan := DiscoverSavedQueryLookup(snapshot, "Invoice", "CustomerId")
 	if plan == nil || plan.Relation != "Customer" || plan.Key != "CustomerId" || !strings.Contains(string(plan.Document()), "limit: 100") {
@@ -38,6 +39,7 @@ func TestSavedQueryFKLookupDiscovery(t *testing.T) {
 }
 
 func TestSavedQueryFKLookupReferencedMetaAndDTQLBinding(t *testing.T) {
+	t.Parallel()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +70,7 @@ func TestSavedQueryFKLookupReferencedMetaAndDTQLBinding(t *testing.T) {
 }
 
 func TestSavedQueryMultiFKBindingRequiresDeclarationAndOperator(t *testing.T) {
+	t.Parallel()
 	snapshot := joinSnapshot()
 	for _, op := range []string{"In", "NotIn"} {
 		doc := []byte("from: {name: Invoice}\nwhere: {op: " + op + ", left: {field: CustomerId}, right: {param: CustomerIds}}\n")
@@ -88,6 +91,7 @@ func TestSavedQueryMultiFKBindingRequiresDeclarationAndOperator(t *testing.T) {
 }
 
 func TestSavedQueryMultiFKInExecutesChinook(t *testing.T) {
+	t.Parallel()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -110,6 +114,7 @@ func TestSavedQueryMultiFKInExecutesChinook(t *testing.T) {
 }
 
 func TestSavedQueryMultiFKNotInExecutesChinook(t *testing.T) {
+	t.Parallel()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {
 		t.Fatal(err)

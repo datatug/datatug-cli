@@ -19,6 +19,7 @@ import (
 )
 
 func TestTelemetryFullCoverage(t *testing.T) {
+	// Not parallel: mutates package-level newUUID seam.
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
@@ -78,6 +79,7 @@ func TestTelemetryFullCoverage(t *testing.T) {
 }
 
 func TestWorkspaceFullCoverage(t *testing.T) {
+	t.Parallel()
 	catalog := workspaceTestCatalog()
 	session := ChatSession{
 		Workspace: WorkspaceState{
@@ -299,6 +301,7 @@ func TestWorkspaceFullCoverage(t *testing.T) {
 }
 
 func TestStoreFullCoverage(t *testing.T) {
+	// Not parallel: mutates package-level store and filesystem seams.
 	ctx := context.Background()
 
 	// 1. DefaultChatStorePath error branches
@@ -866,6 +869,7 @@ func (m mockRowsAffectedErrorResult) RowsAffected() (int64, error) {
 }
 
 func TestStoreRemaining100Coverage(t *testing.T) {
+	// Not parallel: mutates package-level store and SQLite seams.
 	ctx := context.Background()
 
 	// 1. OpenSessionStore osLstat & osOpenFile error branches

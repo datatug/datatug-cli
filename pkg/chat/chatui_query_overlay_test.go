@@ -9,6 +9,7 @@ import (
 )
 
 func TestChatUISlashQuerySingleMatchRunsDirectly(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Title: "Prague customers", Type: "DTQL"}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -25,6 +26,7 @@ func TestChatUISlashQuerySingleMatchRunsDirectly(t *testing.T) {
 }
 
 func TestChatUISlashQueryMultipleMatchesLists(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "a", Title: "Prague A"}, {ID: "b", Title: "Prague B"}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -41,6 +43,7 @@ func TestChatUISlashQueryMultipleMatchesLists(t *testing.T) {
 }
 
 func TestChatUISlashQueryNoMatchReportsError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -54,6 +57,7 @@ func TestChatUISlashQueryNoMatchReportsError(t *testing.T) {
 }
 
 func TestChatUIQueryWithParametersOpensOverlay(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Title: "Customers by city", Parameters: []SavedQueryParameter{{ID: "city", Title: "City", Required: true}}}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -67,6 +71,7 @@ func TestChatUIQueryWithParametersOpensOverlay(t *testing.T) {
 }
 
 func TestQueryParametersOverlayRequiredFieldBlocksRun(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Parameters: []SavedQueryParameter{{ID: "city", Required: true}}}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -84,6 +89,7 @@ func TestQueryParametersOverlayRequiredFieldBlocksRun(t *testing.T) {
 }
 
 func TestQueryParametersOverlayRunsWithVariables(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Title: "By city", Parameters: []SavedQueryParameter{{ID: "city", Required: true}}}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -103,6 +109,7 @@ func TestQueryParametersOverlayRunsWithVariables(t *testing.T) {
 }
 
 func TestQueryParametersOverlayEscCloses(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newQueryParametersOverlay(u, SavedQuery{ID: "x"})
 	_, _, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -112,6 +119,7 @@ func TestQueryParametersOverlayEscCloses(t *testing.T) {
 }
 
 func TestChatUISavedQueryRunFailureReportsError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Title: "Broken"}}, runErr: errors.New("boom")}
 	if err := u.SetSavedQueryService(service); err != nil {

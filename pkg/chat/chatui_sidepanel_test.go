@@ -17,6 +17,7 @@ import (
 )
 
 func TestWorkspacePanelViewShowsTabsAndProjectExplorer(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = ProjectCatalog{ID: "proj1", Title: "Demo", Objects: []ProjectObject{
 		{Reference: ContextReference{Kind: "project", ObjectID: "proj1", Title: "Demo"}},
@@ -42,6 +43,7 @@ func TestWorkspacePanelViewShowsTabsAndProjectExplorer(t *testing.T) {
 // It rejects the old literal ANSI-256 dark colors and verifies the visible
 // panes use the neutral light surface selected by tui/theme.
 func TestWorkspacePanelInLightThemeUsesLightSurfaceNoHardcodedDarkBackground(t *testing.T) {
+	t.Parallel()
 	theme.SetDark(false)
 	t.Cleanup(func() { theme.SetDark(true) })
 
@@ -73,6 +75,7 @@ func TestWorkspacePanelInLightThemeUsesLightSurfaceNoHardcodedDarkBackground(t *
 // belong here (see TestExplorerArrowsFoldTreeAndTabSwitchesWorkspace for
 // h/l's real behaviour).
 func TestWorkspacePanelTabAndShiftTabSwitchTabs(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if u.workspace.tab != 1 {
 		t.Fatalf("expected Inspect to be the initial right-pane tab 1, got %d", u.workspace.tab)
@@ -88,6 +91,7 @@ func TestWorkspacePanelTabAndShiftTabSwitchTabs(t *testing.T) {
 }
 
 func TestWorkspacePanelBookmarksTabListsBookmarks(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("Show invoices"))
 	// Focus a grid-less selection path isn't wired yet; exercise the
@@ -101,6 +105,7 @@ func TestWorkspacePanelBookmarksTabListsBookmarks(t *testing.T) {
 }
 
 func TestWorkspacePanelDockedTabEmptyState(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.tab = 2
 	view := u.workspace.View(40, 15, true)
@@ -110,6 +115,7 @@ func TestWorkspacePanelDockedTabEmptyState(t *testing.T) {
 }
 
 func TestWorkspacePanelSelectedTabEmptyState(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.tab = 1
 	view := u.workspace.View(40, 15, true)
@@ -125,6 +131,7 @@ func TestWorkspacePanelSelectedTabEmptyState(t *testing.T) {
 // driven through workspacePanel directly (u.workspace.setTab/updateKey)
 // instead of u.focusWorkspace/u.setWorkspaceTab/u.updateWorkspaceKey.
 func TestChatUIBookmarkWorkspaceTabOpensStructuredGrid(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	catalog := ProjectCatalog{ID: testScope().ProjectID, Title: "Demo"}
@@ -161,6 +168,7 @@ func TestChatUIBookmarkWorkspaceTabOpensStructuredGrid(t *testing.T) {
 // TestChatUIEmptyBookmarkedGridNavigation is ported from the legacy UI's
 // bookmark_phase4_test.go (TestEmptyBookmarkedGridNavigation).
 func TestChatUIEmptyBookmarkedGridNavigation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	scope := testScope()
 	store := openTestStore(t, testStorePath(t), scope)
@@ -205,6 +213,7 @@ func TestChatUIEmptyBookmarkedGridNavigation(t *testing.T) {
 
 // Ported from TestProjectExplorerShowsSourceIssueInPlace.
 func TestChatUIProjectExplorerShowsSourceIssueInPlace(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	u.catalog.Objects[1].Issue = "Schema unavailable: relation main.Customer has no columns file"
@@ -242,6 +251,7 @@ func TestChatUIProjectExplorerShowsSourceIssueInPlace(t *testing.T) {
 
 // Ported from TestProjectExplorerIssueDetailsRemainVisibleInLongTree.
 func TestChatUIProjectExplorerIssueDetailsRemainVisibleInLongTree(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	u.catalog.Objects[1].Issue = "Schema unavailable: relation main.Customer has no columns file"
@@ -278,6 +288,7 @@ func TestChatUIProjectExplorerIssueDetailsRemainVisibleInLongTree(t *testing.T) 
 
 // Ported from TestExplorerGroupsObjectsByDeclaredSourceAndCollapses.
 func TestChatUIExplorerGroupsObjectsByDeclaredSourceAndCollapses(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	u.catalog.Objects = append(u.catalog.Objects,
@@ -327,6 +338,7 @@ func TestChatUIExplorerGroupsObjectsByDeclaredSourceAndCollapses(t *testing.T) {
 // detach the same table reference), which is a supported, already-wired
 // input path to the identical WorkspaceAction{Kind: "detach"}.
 func TestChatUIWorkspaceSplitAndKeyboardSelection(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -402,6 +414,7 @@ func TestChatUIWorkspaceSplitAndKeyboardSelection(t *testing.T) {
 // tab strip's full label set is intact (not cut mid-label), and no hint
 // segment/pair is truncated with an ellipsis.
 func TestPanelFocusedLayoutFitsTabStripAndHintsAtWidth130(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{Text: "ok"})
 	u.shell.Update(tea.WindowSizeMsg{Width: 130, Height: 32})
 	drainCmd(t, u, u.Submit("hello"))
@@ -438,6 +451,7 @@ func TestPanelFocusedLayoutFitsTabStripAndHintsAtWidth130(t *testing.T) {
 // uses for wrapping/truncation decisions) rather than a byte or rune
 // count that could disagree with it.
 func TestPanelFocusedLayoutNeverOverflowsTerminalWidth(t *testing.T) {
+	t.Parallel()
 	for _, dims := range []struct{ w, h int }{{110, 32}, {80, 24}} {
 		t.Run(fmt.Sprintf("%dx%d", dims.w, dims.h), func(t *testing.T) {
 			catalog := ProjectCatalog{ID: "chinook", Title: "Chinook"}
@@ -466,6 +480,7 @@ func TestPanelFocusedLayoutNeverOverflowsTerminalWidth(t *testing.T) {
 }
 
 func TestWorkspacePanelF6AndF7ToggleIndependentPaneVisibility(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	// 140, not 120: strongo/aichat's chat-look-polish fix gives PanelFrame
@@ -500,6 +515,7 @@ func TestWorkspacePanelF6AndF7ToggleIndependentPaneVisibility(t *testing.T) {
 // silently dropping the other three tabs. tabStripHeader must instead fall
 // back to short labels for every tab, so all four remain visible.
 func TestWorkspacePanelTabStripHeaderShortensOnNarrowWidth(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	header := u.workspace.tabStripHeader(28)
 	flat := ansi.Strip(header)
@@ -526,6 +542,7 @@ func TestWorkspacePanelTabStripHeaderShortensOnNarrowWidth(t *testing.T) {
 
 // Ported from TestDockedGridSortAndCellSelectionUseSourceCoordinates.
 func TestChatUIDockedGridSortAndCellSelectionUseSourceCoordinates(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -580,6 +597,7 @@ func TestChatUIDockedGridSortAndCellSelectionUseSourceCoordinates(t *testing.T) 
 // grid never had a view switcher in main (no Charts/Current-row views to
 // jump to with "2"/"3") — it already shows a narrow, purpose-built row set.
 func TestChatUIDockGridHasNoViewSwitcher(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -616,6 +634,7 @@ func TestChatUIDockGridHasNoViewSwitcher(t *testing.T) {
 // Explorer selection immediately supplies catalog details to Inspect, and
 // the metadata remains visible when focus leaves the tree.
 func TestChatUIExplorerCatalogDetailsUseTypesAndShellScrolling(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{
 		Title: "Customers",
 		Result: secureread.Result{
@@ -681,6 +700,7 @@ func TestChatUIExplorerCatalogDetailsUseTypesAndShellScrolling(t *testing.T) {
 
 // Ported from TestInspectorDoesNotAttributeDerivedOutputByDisplayName.
 func TestChatUIInspectorDoesNotAttributeDerivedOutputByDisplayName(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "fake-model")
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", SourceID: "chinook"}, Columns: []string{"CustomerId", "City"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER", "City": "TEXT"}}}}
 	record := RecordSet{Database: "chinook", DTQL: "from: {name: Customer}\ncolumns:\n  - aggregate: {function: COUNT, args: [{star: true}]}\n    as: CustomerId\nlimit: 10\n"}

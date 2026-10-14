@@ -86,7 +86,7 @@ func (a ForeignKeyJoinApplication) PreviewRelationships(ctx context.Context, rec
 		if target.Schema != "" && !strings.EqualFold(target.Schema, "main") {
 			collection = dal.NewQualifiedRootCollectionRef(target.Schema, target.Relation, "")
 		}
-		doc, err := dtql.Serialize(dal.From(collection).NewQuery().Where(conditions...).Limit(5).SelectColumns())
+		doc, err := dtqlSerialize(dal.From(collection).NewQuery().Where(conditions...).Limit(5).SelectColumns())
 		if err != nil {
 			item.err = fmt.Errorf("relationship query is unsupported")
 			continue

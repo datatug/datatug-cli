@@ -14,6 +14,7 @@ import (
 )
 
 func TestFriendlyAgentErrorDoesNotExposeProviderPayload(t *testing.T) {
+	t.Parallel()
 	if got := friendlyAgentError(fmt.Errorf("chat: agent turn: %w", context.DeadlineExceeded)); got != "The AI request timed out. Please try again." {
 		t.Fatalf("timeout message = %q", got)
 	}
@@ -36,6 +37,7 @@ func (s *contextualStub) AskWithContext(_ context.Context, _, prior string) (Tur
 }
 
 func TestSessionChatRebuildsContextAfterRestartAndSwitch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -110,6 +112,7 @@ func TestSessionChatRebuildsContextAfterRestartAndSwitch(t *testing.T) {
 }
 
 func TestSwitchIsRestoredAsMostRecentlyActiveSession(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -171,6 +174,7 @@ func (m *blockingFinalLLM) Stream(_ context.Context, _ ai.ChatRequest) iter.Seq2
 }
 
 func TestSuccessfulQueryIsDurableBeforeModelFinishes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	llm := &blockingFinalLLM{entered: make(chan struct{}), release: make(chan struct{})}
@@ -212,6 +216,7 @@ func TestSuccessfulQueryIsDurableBeforeModelFinishes(t *testing.T) {
 }
 
 func TestRepeatedSuccessfulDTQLExecutionsHaveDistinctSnapshots(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	doc := "from: {name: Customer}\nlimit: 1"
@@ -241,6 +246,7 @@ func TestRepeatedSuccessfulDTQLExecutionsHaveDistinctSnapshots(t *testing.T) {
 }
 
 func TestSessionContextHasHardSizeLimit(t *testing.T) {
+	t.Parallel()
 	large := strings.Repeat("x", 40000)
 	record := RecordSet{ID: "rs", DTQL: large, Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": large}}}}}
 	session := ChatSession{RecordSets: map[string]RecordSet{"rs": record}, Messages: []ChatMessage{{Role: "You", Kind: "text", Text: large}, {Kind: "grid", RecordSetID: "rs"}}}
@@ -256,6 +262,7 @@ func TestSessionContextHasHardSizeLimit(t *testing.T) {
 // the final Turn returned by the drain func -- matches what SessionChat.Ask
 // would have committed for the same scripted turn.
 func TestSessionChatStreamAskPersistsSameAsAsk(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -313,6 +320,7 @@ func TestSessionChatStreamAskPersistsSameAsAsk(t *testing.T) {
 // works through StreamAsk, replaying its buffered Turn as one synthetic
 // EventTextDelta + EventCompleted pair.
 func TestSessionChatStreamAskFallsBackForNonStreamingAgent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()

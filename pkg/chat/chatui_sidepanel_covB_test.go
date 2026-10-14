@@ -14,6 +14,7 @@ import (
 // TestWorkspacePanelTitleIsWorkspace covers Title(), a trivial one-liner
 // with no other test hitting it directly.
 func TestWorkspacePanelTitleIsWorkspace(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if got := u.workspace.Title(); got != "Inspect" {
 		t.Fatalf("Title() = %q, want Inspect", got)
@@ -24,6 +25,7 @@ func TestWorkspacePanelTitleIsWorkspace(t *testing.T) {
 // and refreshBookmarks' nil-ui.sessions early returns -- a ChatUI built
 // without a durable session.
 func TestWorkspacePanelRefreshAndBookmarksNoOpWithoutSessions(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "fake-model")
 	if err := u.workspace.refresh(); err != nil {
 		t.Fatalf("refresh() without sessions = %v, want nil", err)
@@ -38,6 +40,7 @@ func TestWorkspacePanelRefreshAndBookmarksNoOpWithoutSessions(t *testing.T) {
 // makes FindBookmarks/normalizedTags fail, and refreshBookmarks must return
 // that error rather than swallow it.
 func TestWorkspacePanelRefreshBookmarksPropagatesFindError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.bookmarkTags = []string{"   "}
 	if err := u.workspace.refreshBookmarks(); err == nil {
@@ -49,6 +52,7 @@ func TestWorkspacePanelRefreshBookmarksPropagatesFindError(t *testing.T) {
 // selectedBookmarkReference's empty-ContextReference fallback when the
 // cursor sits outside the (empty) bookmark list.
 func TestWorkspacePanelSelectedBookmarkReferenceOutOfRange(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.bookmarkIndex = 5
 	if ref := u.workspace.selectedBookmarkReference(); ref != (ContextReference{}) {
@@ -62,6 +66,7 @@ func TestWorkspacePanelSelectedBookmarkReferenceOutOfRange(t *testing.T) {
 // performWorkspaceAction must surface that as a transcript error rather
 // than panic.
 func TestWorkspacePanelPerformAndApplyWorkspaceActionReportErrorWithoutSessions(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "fake-model")
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	if err := u.workspace.applyWorkspaceAction(WorkspaceAction{Kind: "attach"}); err == nil {
@@ -76,6 +81,7 @@ func TestWorkspacePanelPerformAndApplyWorkspaceActionReportErrorWithoutSessions(
 // TestWorkspacePanelStartBookmarkInputSetsUpEditor covers startBookmarkInput
 // directly -- mode, placeholder, cleared value and focus.
 func TestWorkspacePanelStartBookmarkInputSetsUpEditor(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.bookmarkEditor.SetValue("stale")
 	u.workspace.startBookmarkInput("rename", "Bookmark title")
@@ -96,6 +102,7 @@ func TestWorkspacePanelStartBookmarkInputSetsUpEditor(t *testing.T) {
 // TestWorkspacePanelEnsureBookmarkGridOutOfRange covers ensureBookmarkGrid's
 // nil return when bookmarkIndex is out of range.
 func TestWorkspacePanelEnsureBookmarkGridOutOfRange(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.bookmarkIndex = -1
 	if g := u.workspace.ensureBookmarkGrid(); g != nil {
@@ -106,6 +113,7 @@ func TestWorkspacePanelEnsureBookmarkGridOutOfRange(t *testing.T) {
 // TestWorkspacePanelHandleBookmarkGridKeyNilGrid covers
 // handleBookmarkGridKey's nil-bookmarkGrid early return.
 func TestWorkspacePanelHandleBookmarkGridKeyNilGrid(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if _, handled := u.workspace.handleBookmarkGridKey(nil, tea.KeyPressMsg{Code: 'a', Text: "a"}); handled {
 		t.Fatal("expected handleBookmarkGridKey to report unhandled with no grid")
@@ -118,6 +126,7 @@ func TestWorkspacePanelHandleBookmarkGridKeyNilGrid(t *testing.T) {
 // TestChatUIBookmarkWorkspaceTabOpensStructuredGrid didn't reach ("a"
 // attach and Enter-focus are already covered there).
 func TestWorkspacePanelBookmarkGridKeysTabSortDock(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	catalog := ProjectCatalog{ID: testScope().ProjectID, Title: "Demo"}
@@ -170,6 +179,7 @@ func TestWorkspacePanelBookmarkGridKeysTabSortDock(t *testing.T) {
 // TestWorkspacePanelRebuildDockGridsInitializesNilMap covers
 // rebuildDockGrids' nil-dockGrids-map initialization branch.
 func TestWorkspacePanelRebuildDockGridsInitializesNilMap(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.dockGrids = nil
 	u.workspace.rebuildDockGrids()
@@ -186,6 +196,7 @@ func TestWorkspacePanelRebuildDockGridsInitializesNilMap(t *testing.T) {
 // TestChatUIDockGridHasNoViewSwitcher already cover the Selection-backed
 // dock's "c" and view-sorted "s" paths.
 func TestWorkspacePanelHandleDockGridKeyGuardsAndCases(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -275,6 +286,7 @@ func TestWorkspacePanelHandleDockGridKeyGuardsAndCases(t *testing.T) {
 // early returns: dockIndex out of range, and gridDataForReference failing
 // (a dock whose Reference no longer resolves).
 func TestWorkspacePanelSelectFromDockGridGuards(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.dockIndex = -1
 	u.workspace.selectFromDockGrid("row") // no panic, no-op
@@ -300,6 +312,7 @@ func (u *ChatUI) ui2Dock(t *testing.T) {
 // dispatched on the second) -- the existing docked-grid tests only reach
 // "row" and "cell" mode.
 func TestWorkspacePanelSelectFromGridStateRangeModeAndGuards(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -350,6 +363,7 @@ func TestWorkspacePanelSelectFromGridStateRangeModeAndGuards(t *testing.T) {
 // TestWorkspacePanelProjectExplorerCollapsedRoot covers explorerNodes' early
 // return once the project root itself is collapsed.
 func TestWorkspacePanelProjectExplorerCollapsedRoot(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	rootID := "project:" + u.catalog.ID
@@ -364,6 +378,7 @@ func TestWorkspacePanelProjectExplorerCollapsedRoot(t *testing.T) {
 // explorerNodesView's offset-follow-the-cursor branches (moving past the
 // bottom, then above the top of the viewport).
 func TestWorkspacePanelExplorerNodesViewScrollsWithCursor(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	for i := 0; i < 30; i++ {
@@ -392,6 +407,7 @@ func TestWorkspacePanelExplorerNodesViewScrollsWithCursor(t *testing.T) {
 // selectedExplorerObject's "project" kind exclusion: the cursor sitting on
 // the root node itself reports no selectable object.
 func TestWorkspacePanelSelectedExplorerObjectExcludesProjectRoot(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	u.workspace.explorerIndex = 0 // the project root node
@@ -405,6 +421,7 @@ func TestWorkspacePanelSelectedExplorerObjectExcludesProjectRoot(t *testing.T) {
 // SourceID and no QueryText, a "source" kind, and the default
 // (unrecognized kind) branch.
 func TestProjectObjectDetailsQueryAndSourceAndDefaultKinds(t *testing.T) {
+	t.Parallel()
 	title, detail := projectObjectDetails(ProjectObject{
 		Reference: ContextReference{Kind: "query", Title: "Unbound query"},
 		QueryType: "DTQL",
@@ -429,6 +446,7 @@ func TestProjectObjectDetailsQueryAndSourceAndDefaultKinds(t *testing.T) {
 // TestProjectObjectDetailsTableWithNoColumns covers the table/view branch's
 // "No column metadata available." fallback.
 func TestProjectObjectDetailsTableWithNoColumns(t *testing.T) {
+	t.Parallel()
 	_, detail := projectObjectDetails(ProjectObject{Reference: ContextReference{Kind: "table", Title: "Empty"}}, 60)
 	if !strings.Contains(detail, "No column metadata available.") {
 		t.Fatalf("expected the no-columns fallback: %q", detail)
@@ -438,6 +456,7 @@ func TestProjectObjectDetailsTableWithNoColumns(t *testing.T) {
 // TestProjectObjectDetailsProjectViewKind covers projectObjectDetails'
 // "project_view" branch -- distinct from "table", it titles as "View:".
 func TestProjectObjectDetailsProjectViewKind(t *testing.T) {
+	t.Parallel()
 	title, _ := projectObjectDetails(ProjectObject{
 		Reference: ContextReference{Kind: "project_view", Title: "ActiveCustomers"},
 		Columns:   []string{"CustomerId"},
@@ -452,6 +471,7 @@ func TestProjectObjectDetailsProjectViewKind(t *testing.T) {
 // row details additionally show the durable current-selection summary when
 // one exists.
 func TestWorkspacePanelCurrentRowDetailsAppendsSelectionFooter(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -489,6 +509,7 @@ func TestWorkspacePanelCurrentRowDetailsAppendsSelectionFooter(t *testing.T) {
 // rawRow[i]==nil fallback ever runs) -- matching how a sparse cell-range
 // selection or a genuinely unset field reaches secureread.Row.Data.
 func TestWorkspacePanelCurrentRowDetailsNullAndUnknownType(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{Title: "Widgets", RecordSetID: "rs1", Result: secureread.Result{
 		Columns: []string{"Name"},
 		Rows:    []secureread.Row{{Data: map[string]any{}}},
@@ -509,6 +530,7 @@ func TestWorkspacePanelCurrentRowDetailsNullAndUnknownType(t *testing.T) {
 // currentColumnDetails' "Source: unavailable"/"Type: not available in
 // catalog" fallbacks for a column with no catalog attribution.
 func TestWorkspacePanelCurrentColumnDetailsUnavailableSourceAndType(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{Title: "Widgets", RecordSetID: "rs1", Result: secureread.Result{
 		Columns: []string{"Mystery"},
 		Rows:    []secureread.Row{{Data: map[string]any{"Mystery": 1}}},
@@ -528,6 +550,7 @@ func TestWorkspacePanelCurrentColumnDetailsUnavailableSourceAndType(t *testing.T
 // A physical FROM must not acquire provenance from unrelated tables merely
 // because both happen to contain a column with the same name.
 func TestWorkspacePanelCurrentColumnDetailsRejectsUnprovenSourceTables(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{
 		Title:       "Ambiguous",
 		DTQL:        "from: {name: Widget}\ncolumns: [{field: Id}]\nlimit: 5\n",
@@ -554,6 +577,7 @@ func TestWorkspacePanelCurrentColumnDetailsRejectsUnprovenSourceTables(t *testin
 }
 
 func TestWorkspacePanelCurrentColumnDetailsMultipleCandidatesWithoutRecord(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	delete(u.snapshot.RecordSets, u.activeRecordSetID())
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{
@@ -571,6 +595,7 @@ func TestWorkspacePanelCurrentColumnDetailsMultipleCandidatesWithoutRecord(t *te
 // currentColumnDetails' related-tables/FK-constraint branch: a configured
 // join application whose candidates match the focused column.
 func TestWorkspacePanelCurrentColumnDetailsRelatedJoinCandidate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
@@ -608,6 +633,7 @@ func TestWorkspacePanelCurrentColumnDetailsRelatedJoinCandidate(t *testing.T) {
 // currentRecordsetDetails' "type unavailable" fallback for a column with no
 // catalog type, alongside its qualified-name fallback (column.Name).
 func TestWorkspacePanelCurrentRecordsetDetailsFallbackLabels(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{Title: "Widgets", RecordSetID: "rs1", Result: secureread.Result{
 		Columns: []string{"Mystery"},
 		Rows:    []secureread.Row{{Data: map[string]any{"Mystery": 1}}},
@@ -628,6 +654,7 @@ func TestWorkspacePanelCurrentRecordsetDetailsFallbackLabels(t *testing.T) {
 // "no longer available" branch: a Selection whose View points at a
 // RecordSet that has since been removed from the snapshot.
 func TestWorkspacePanelSelectedDetailsMissingRecordSet(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.snapshot.Workspace.CurrentSelectionID = "sel1"
 	u.snapshot.Workspace.Selections = map[string]Selection{"sel1": {ID: "sel1", ViewID: "view1", Title: "Gone"}}
@@ -642,6 +669,7 @@ func TestWorkspacePanelSelectedDetailsMissingRecordSet(t *testing.T) {
 // listing (excluding the selected column itself) followed by the selected
 // columns' own values.
 func TestWorkspacePanelSelectedDetailsSingleRowShowsFKIDColumnsAndValues(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.snapshot.Workspace.CurrentSelectionID = "sel1"
 	u.snapshot.Workspace.Selections = map[string]Selection{"sel1": {
@@ -663,6 +691,7 @@ func TestWorkspacePanelSelectedDetailsSingleRowShowsFKIDColumnsAndValues(t *test
 // TestWorkspacePanelSelectedDetailsMultiRowElides covers selectedDetails'
 // multi-row branch, including its "…" elision past 8 rows.
 func TestWorkspacePanelSelectedDetailsMultiRowElides(t *testing.T) {
+	t.Parallel()
 	rows := make([]secureread.Row, 10)
 	selRows := make([]int, 10)
 	for i := range rows {
@@ -688,6 +717,7 @@ func TestWorkspacePanelSelectedDetailsMultiRowElides(t *testing.T) {
 // out-of-range dockIndex branch (the listing renders without a detail
 // grid below it).
 func TestWorkspacePanelDockedViewIndexOutOfRange(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.snapshot.Workspace.Docks = []Dock{{ID: "d1", Title: "First"}}
 	u.workspace.dockIndex = 5
@@ -700,6 +730,7 @@ func TestWorkspacePanelDockedViewIndexOutOfRange(t *testing.T) {
 // TestWorkspacePanelBookmarksViewSearchAndTagFilters covers bookmarksView's
 // search/tag-filter header line and its no-match empty states.
 func TestWorkspacePanelBookmarksViewSearchAndTagFilters(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.tab = 3
 	u.workspace.bookmarkSearch = "widgets"
@@ -721,6 +752,7 @@ func TestWorkspacePanelBookmarksViewSearchAndTagFilters(t *testing.T) {
 // TestWorkspacePanelBookmarksViewShowsAttachedAndDockedFlags covers
 // bookmarksView's per-row "attached"/"docked" flag rendering.
 func TestWorkspacePanelBookmarksViewShowsAttachedAndDockedFlags(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	catalog := ProjectCatalog{ID: testScope().ProjectID, Title: "Demo"}
@@ -758,6 +790,7 @@ func TestWorkspacePanelBookmarksViewShowsAttachedAndDockedFlags(t *testing.T) {
 // keeps emitting its full listing/tags/DTQL/help/grid content, so a small
 // height here reliably overflows View's own line budget.
 func TestWorkspacePanelViewTruncatesOverflowLines(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	catalog := ProjectCatalog{ID: testScope().ProjectID, Title: "Demo"}
@@ -784,6 +817,7 @@ func TestWorkspacePanelViewTruncatesOverflowLines(t *testing.T) {
 // TestWorkspacePanelUpdateIgnoresNonKeyMessages covers Update's non-key
 // message no-op branch.
 func TestWorkspacePanelUpdateIgnoresNonKeyMessages(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	tab := u.workspace.tab
 	panel, cmd := u.workspace.Update(tea.WindowSizeMsg{Width: 10, Height: 10})
@@ -800,6 +834,7 @@ func TestWorkspacePanelUpdateIgnoresNonKeyMessages(t *testing.T) {
 // longer resolve a grid (bookmark list emptied out from under it): it must
 // clear bookmarkGridFocused instead of panicking on a nil grid.
 func TestWorkspacePanelUpdateKeyBookmarkGridFocusedNilGridRecovers(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.tab = 3
 	u.workspace.bookmarkGridFocused = true
@@ -815,6 +850,7 @@ func TestWorkspacePanelUpdateKeyBookmarkGridFocusedNilGridRecovers(t *testing.T)
 // no tracked grid -- both must return without a command instead of
 // panicking.
 func TestWorkspacePanelUpdateKeyDockGridFocusedGuards(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.tab = 2
 	u.workspace.dockGridFocused = true
@@ -835,6 +871,7 @@ func TestWorkspacePanelUpdateKeyDockGridFocusedGuards(t *testing.T) {
 // pgdown/pgup handling of explorerDetailOffset while a details card is
 // showing.
 func TestWorkspacePanelExplorerPgUpPgDownAdjustDetailOffset(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "query", ObjectID: "q", Title: "Paged query"}, QueryType: "DTQL", QueryText: "first-query-line\n" + strings.Repeat("middle-query-line\n", 40) + "last-query-line"}}}
 	u.shell.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -865,6 +902,7 @@ func TestWorkspacePanelExplorerPgUpPgDownAdjustDetailOffset(t *testing.T) {
 // leaf) jumping the cursor up to its nearest shallower branch ancestor.
 // "l"/"right" unfolds a branch node again.
 func TestWorkspacePanelExplorerHLFoldAndJumpToAncestor(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	nodes := u.explorer.explorerNodes()
@@ -902,6 +940,7 @@ func TestWorkspacePanelExplorerHLFoldAndJumpToAncestor(t *testing.T) {
 // TestWorkspacePanelExplorerHLFoldAndJumpToAncestor and
 // TestChatUISelectedTabUpDownScrollsInspectorOffset already cover tabs 0/1.
 func TestWorkspacePanelUpDownAcrossAllTabs(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.snapshot.Workspace.Docks = []Dock{{ID: "d1"}, {ID: "d2"}}
 	u.workspace.tab = 2
@@ -936,6 +975,7 @@ func TestWorkspacePanelUpDownAcrossAllTabs(t *testing.T) {
 // TestChatUIWorkspaceSplitAndKeyboardSelection and
 // TestChatUIBookmarkWorkspaceTabOpensStructuredGrid.
 func TestWorkspacePanelSpaceTogglesAttachmentOnSelectedAndDockedTabs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -984,6 +1024,7 @@ func TestWorkspacePanelSpaceTogglesAttachmentOnSelectedAndDockedTabs(t *testing.
 // "b"/"d"/"x"/"r"/"t"/"T"/"/"/"f" branches on tab 1 (Selected -> b/d) and
 // tab 3 (Bookmarks -> the rest), plus the tab-2 dock "b"/"x" branches.
 func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -1134,6 +1175,7 @@ func TestWorkspacePanelBookmarkKeysBDockRenameTagsSearch(t *testing.T) {
 // updateKey's "x" fallback branch: outside tab 2/3 with an existing
 // attachment, it detaches the last one.
 func TestWorkspacePanelXDetachesLastAttachmentWhenNoOtherTargetApplies(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -1160,6 +1202,7 @@ func TestWorkspacePanelXDetachesLastAttachmentWhenNoOtherTargetApplies(t *testin
 // updateBookmarkInput's non-Enter branch: ordinary key input is forwarded
 // to the textinput.Model.
 func TestWorkspacePanelUpdateBookmarkInputTypesIntoEditor(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.startBookmarkInput("rename", "Bookmark title")
 	u.workspace.updateBookmarkInput(tea.KeyPressMsg{Text: "x"})
@@ -1173,6 +1216,7 @@ func TestWorkspacePanelUpdateBookmarkInputTypesIntoEditor(t *testing.T) {
 // resolves (gridDataForReference fails) and isn't already cached is simply
 // skipped, not turned into a nil/panic-prone entry.
 func TestWorkspacePanelRebuildDockGridsSkipsUnresolvedReference(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.snapshot.Workspace.Docks = []Dock{{ID: "ghost", Reference: ContextReference{Kind: "recordset", ObjectID: "missing"}}}
 	u.workspace.dockGrids = map[string]*gridState{}
@@ -1187,6 +1231,7 @@ func TestWorkspacePanelRebuildDockGridsSkipsUnresolvedReference(t *testing.T) {
 // an out-of-range SelectedColumn) plus its default fallthrough
 // (return nil, false for an unhandled key).
 func TestWorkspacePanelHandleDockGridKeySortGuardsAndDefault(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -1234,6 +1279,7 @@ func TestWorkspacePanelHandleDockGridKeySortGuardsAndDefault(t *testing.T) {
 // selectFromGridState's "sourceRow < 0" guard: an empty grid's
 // CurrentIndex/sourceIndexAt resolves to no source row at all.
 func TestWorkspacePanelSelectFromGridStateNoSourceRow(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	empty := newMinimalGridState(NewGridModel(secureread.Result{}), "rs1", "Empty", 40)
 	u.workspace.selectFromGridState(empty, "rs1", "", "row") // no panic, no dispatch
@@ -1243,6 +1289,7 @@ func TestWorkspacePanelSelectFromGridStateNoSourceRow(t *testing.T) {
 // explorerNodesView's "attached" marker branch: a node whose object is
 // currently attached renders "●".
 func TestWorkspacePanelExplorerNodesViewShowsAttachedMarker(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	tableRef := u.catalog.Objects[2].Reference // the "Customer" table
@@ -1256,6 +1303,7 @@ func TestWorkspacePanelExplorerNodesViewShowsAttachedMarker(t *testing.T) {
 // TestWorkspacePanelExplorerNodesViewShowsCollapsedFold covers
 // explorerNodesView's collapsed-branch fold indicator ("▸" instead of "▾").
 func TestWorkspacePanelExplorerNodesViewShowsCollapsedFold(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	u.workspace.explorerCollapsed["group:databases"] = true
@@ -1270,6 +1318,7 @@ func TestWorkspacePanelExplorerNodesViewShowsCollapsedFold(t *testing.T) {
 // distinct from a source-level issue) -- its "⚠" label suffix and synthetic
 // ":issue" detail node.
 func TestWorkspacePanelExplorerNodesShowIssueOnBoundTable(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	u.catalog.Objects[2].Issue = "Schema unavailable: missing columns"
@@ -1291,6 +1340,7 @@ func TestWorkspacePanelExplorerNodesShowIssueOnBoundTable(t *testing.T) {
 // bookmarksView's "p.bookmarkMode != ”" branch: the bookmark editor
 // renders inline once a mode (rename/tag/search/...) is active.
 func TestWorkspacePanelBookmarksViewShowsEditorWhileModeActive(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.tab = 3
 	u.workspace.startBookmarkInput("search", "Search bookmarks")
@@ -1305,6 +1355,7 @@ func TestWorkspacePanelBookmarksViewShowsEditorWhileModeActive(t *testing.T) {
 // TestWorkspacePanelUpDownAcrossAllTabs only covers tabs 2/3, and
 // TestWorkspacePanelExplorerHLFoldAndJumpToAncestor only h/l.
 func TestWorkspacePanelUpDownOnProjectTabMovesExplorerCursor(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	u.explorer.tab = 0
@@ -1324,6 +1375,7 @@ func TestWorkspacePanelUpDownOnProjectTabMovesExplorerCursor(t *testing.T) {
 // TestWorkspacePanelEnterOnProjectTabTogglesBranchFold covers updateKey's
 // "enter" (tab 0) branch-fold-toggle case.
 func TestWorkspacePanelEnterOnProjectTabTogglesBranchFold(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	nodes := u.workspace.explorerNodes()
@@ -1350,6 +1402,7 @@ func TestWorkspacePanelEnterOnProjectTabTogglesBranchFold(t *testing.T) {
 // TestWorkspacePanelEnterOnDockedTabFocusesDockGrid covers updateKey's
 // "enter" (tab 2, with Docks present) dockGridFocused branch.
 func TestWorkspacePanelEnterOnDockedTabFocusesDockGrid(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.snapshot.Workspace.Docks = []Dock{{ID: "d1", Title: "First"}}
 	u.workspace.tab = 2
@@ -1363,6 +1416,7 @@ func TestWorkspacePanelEnterOnDockedTabFocusesDockGrid(t *testing.T) {
 // updateKey's "space"/"a" (tab 3) attach branch and "d" (tab 3) dock branch
 // via a real selected bookmark reference.
 func TestWorkspacePanelSpaceAndDOnBookmarksTabUseSelectedReference(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	catalog := ProjectCatalog{ID: testScope().ProjectID, Title: "Demo"}
@@ -1408,6 +1462,7 @@ func TestWorkspacePanelSpaceAndDOnBookmarksTabUseSelectedReference(t *testing.T)
 // (empty-after-trim) tag makes refreshBookmarks fail, and the failure must
 // reach the transcript via conciseError rather than be swallowed.
 func TestWorkspacePanelUpdateBookmarkInputSearchAndTagsReportErrors(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.bookmarkTags = []string{"   "} // makes refreshBookmarks fail
 	u.workspace.startBookmarkInput("search", "Search bookmarks")
@@ -1443,6 +1498,7 @@ func TestWorkspacePanelUpdateBookmarkInputSearchAndTagsReportErrors(t *testing.T
 // on it must report no selectable object via the same guard a genuinely
 // out-of-range index would hit.
 func TestWorkspacePanelSelectedExplorerObjectOnGroupNodeReturnsNil(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = workspaceTestCatalog()
 	nodes := u.workspace.explorerNodes()

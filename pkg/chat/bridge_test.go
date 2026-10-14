@@ -29,6 +29,7 @@ import (
 )
 
 func TestBridgeHTTPUsesConfiguredHeadersAndCookies(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -111,6 +112,7 @@ func TestBridgeHTTPUsesConfiguredHeadersAndCookies(t *testing.T) {
 }
 
 func TestBrowserExportBufferRejectsOversizedWrite(t *testing.T) {
+	t.Parallel()
 	var output browserExportBuffer
 	if _, err := output.Write(bytes.Repeat([]byte{'x'}, 16<<20)); err != nil {
 		t.Fatal(err)
@@ -124,6 +126,7 @@ func TestBrowserExportBufferRejectsOversizedWrite(t *testing.T) {
 // crypto/rand.Read error branch via the readRandom seam: the OS entropy
 // source failing is not reproducible for real, so this overrides the var.
 func TestStartBrowserBridgeRandomFailure(t *testing.T) {
+	// Not parallel: mutates package-level readRandom seam.
 	restore := readRandom
 	t.Cleanup(func() { readRandom = restore })
 	injected := errors.New("injected rand failure")
@@ -141,6 +144,7 @@ func TestStartBrowserBridgeRandomFailure(t *testing.T) {
 }
 
 func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -282,6 +286,7 @@ func TestBridgeBrowserClearDeleteAndExport(t *testing.T) {
 // forced to fail too via the netListenTCP seam -- an OS-assigned port
 // itself failing is not reproducible for real.
 func TestStartBrowserBridgeBothListenCallsFail(t *testing.T) {
+	// Not parallel: mutates package-level netListenTCP seam.
 	occupied, err := net.Listen("tcp", "127.0.0.1:3284")
 	if err != nil {
 		t.Skipf("port 3284 unavailable for the test setup: %v", err)
@@ -325,6 +330,7 @@ func bridgeToken(t *testing.T, bridgeURL string) (address, token string) {
 }
 
 func TestBridgeWorkspaceSharesStateAndRejectsStaleSession(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -485,6 +491,7 @@ func TestBridgeWorkspaceSharesStateAndRejectsStaleSession(t *testing.T) {
 // undocumented, per the founder directive that new code seams for
 // coverage instead of leaving branches untested.
 func TestBridgeMessagesHandlerAskActiveStoreErrorSurfaces(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -553,6 +560,7 @@ func dialBridgeEvents(t *testing.T, bridge *BrowserBridge) *websocket.Conn {
 // handler's background connection goroutine, which is what this test
 // originally did) is both ineffective and a genuine data race.
 func TestBridgeEventsHandlerInitialWriteJSONFailure(t *testing.T) {
+	// Not parallel: mutates package-level wsWriteJSON seam.
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -593,6 +601,7 @@ func TestBridgeEventsHandlerInitialWriteJSONFailure(t *testing.T) {
 // first (post-Upgrade) write through for real via `restore` and only fails
 // the second write, the one triggered by a later SessionChat.notifyChanged.
 func TestBridgeEventsHandlerChangesWriteJSONFailure(t *testing.T) {
+	// Not parallel: mutates package-level wsWriteJSON seam.
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -644,6 +653,7 @@ func TestBridgeEventsHandlerChangesWriteJSONFailure(t *testing.T) {
 // instead exercise the disconnected case -- forces the server to notice
 // via r.Context() rather than a client-initiated close.
 func TestBridgeEventsHandlerContextDoneReturns(t *testing.T) {
+	// Not parallel: mutates package-level bridgeBaseContext seam.
 	base, cancel := context.WithCancel(context.Background())
 	restore := bridgeBaseContext
 	t.Cleanup(func() { bridgeBaseContext = restore })
@@ -689,6 +699,7 @@ func TestBridgeEventsHandlerContextDoneReturns(t *testing.T) {
 // the real SubscribeChanges/stop() pairing can never do from outside this
 // one handler invocation.
 func TestBridgeEventsHandlerChangesChannelClosedEarlyReturns(t *testing.T) {
+	// Not parallel: mutates package-level bridgeSubscribeChanges seam.
 	fakeChanges := make(chan struct{})
 	restore := bridgeSubscribeChanges
 	t.Cleanup(func() { bridgeSubscribeChanges = restore })

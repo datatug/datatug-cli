@@ -9,7 +9,7 @@ import (
 // Archives preserve durable session data while closing its terminal tab.
 // List deliberately retains its old all-session semantics for other consumers.
 func (s *SessionStore) ArchivedSessionIDs(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT a.session_id FROM session_archives a JOIN sessions s ON s.id=a.session_id WHERE s.scope=?`, s.scope)
+	rows, err := dbQueryContextFn(s.db, ctx, `SELECT a.session_id FROM session_archives a JOIN sessions s ON s.id=a.session_id WHERE s.scope=?`, s.scope)
 	if err != nil {
 		return nil, err
 	}

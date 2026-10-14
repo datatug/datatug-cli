@@ -41,6 +41,7 @@ func (s *savedQueryEncodeFailureStub) Run(context.Context, string) (QueryResult,
 // result cell makes store.AppendQuery's own encodeResult step fail for
 // real, no override seam required.
 func TestRunSavedQueryAppendQueryEncodeErrorSurfaces(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryEncodeFailureStub{queries: []SavedQuery{{ID: "x", Title: "Broken numbers"}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -66,6 +67,7 @@ func TestRunSavedQueryAppendQueryEncodeErrorSurfaces(t *testing.T) {
 // `lines = lines[:height]` truncation branch: more picker rows than the
 // available height.
 func TestSavedQueryPickerOverlayViewTruncatesToHeight(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	var queries []SavedQuery
 	for i := 0; i < 5; i++ {
@@ -88,6 +90,7 @@ func TestSavedQueryPickerOverlayViewTruncatesToHeight(t *testing.T) {
 // `o.index--` branch (an index > 0 to move back from), which the existing
 // boundary test never reaches since it only presses up while already at 0.
 func TestSavedQueryPickerOverlayUpMovesIndexBack(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	o := &savedQueryPickerOverlay{ui: u, queries: []SavedQuery{{ID: "a"}, {ID: "b"}}, index: 1}
 	o.Update(tea.KeyPressMsg{Code: tea.KeyUp})
@@ -103,6 +106,7 @@ func TestSavedQueryPickerOverlayUpMovesIndexBack(t *testing.T) {
 // stale lookup result (e.g. the user tabbed to a different parameter while
 // the lookup was in flight) must not be applied.
 func TestQueryParametersOverlayLookupMsgMismatchedFocusIgnored(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "city"}}})
 	_, cmd, done := d.Update(parameterLookupMsg{overlay: d, focus: 0, parameterID: "not-city", result: &SavedQueryLookup{Key: "City"}})
@@ -114,6 +118,7 @@ func TestQueryParametersOverlayLookupMsgMismatchedFocusIgnored(t *testing.T) {
 // TestQueryParametersOverlayNonKeyNonLookupMsgIgnored covers Update's own
 // "not a key press" fallback for any other message type.
 func TestQueryParametersOverlayNonKeyNonLookupMsgIgnored(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newQueryParametersOverlay(u, SavedQuery{ID: "x"})
 	_, cmd, done := d.Update(tea.WindowSizeMsg{Width: 10, Height: 10})
@@ -127,6 +132,7 @@ func TestQueryParametersOverlayNonKeyNonLookupMsgIgnored(t *testing.T) {
 // require an FK lookup (no Entity/Field) just advances focus instead of
 // running or opening a lookup.
 func TestQueryParametersOverlayEnterOnNonLookupParameterMovesFocus(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "a"}, {ID: "b"}}})
 	_, cmd, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -144,6 +150,7 @@ func TestQueryParametersOverlayEnterOnNonLookupParameterMovesFocus(t *testing.T)
 // and d.focus < len(d.inputs) is false, so it must fall through as a no-op
 // rather than route into an input's own Update.
 func TestQueryParametersOverlayUnhandledKeyOnRunIsNoop(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "a"}}})
 	d.focus = len(d.inputs)
@@ -156,6 +163,7 @@ func TestQueryParametersOverlayUnhandledKeyOnRunIsNoop(t *testing.T) {
 // TestQueryParametersOverlayViewHighlightsRunAndShowsError covers View's
 // Run-row focus highlight (d.focus == len(d.inputs)) and its error line.
 func TestQueryParametersOverlayViewHighlightsRunAndShowsError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newQueryParametersOverlay(u, SavedQuery{ID: "x", Title: "T", Parameters: []SavedQueryParameter{{ID: "a"}}})
 	d.focus = len(d.inputs)
@@ -181,6 +189,7 @@ func twoRowLookupResult(key string) secureread.Result {
 // TestParameterLookupOverlayEscCloses covers the "esc" case, distinct from
 // ctrl+c (which quits rather than closing).
 func TestParameterLookupOverlayEscCloses(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "city"}}})
 	p := newParameterLookupOverlay(parent, 0, &SavedQueryLookup{Key: "City"})
@@ -193,6 +202,7 @@ func TestParameterLookupOverlayEscCloses(t *testing.T) {
 // TestParameterLookupOverlayNonKeyMsgIgnored covers Update's own "not a key
 // press" fallback.
 func TestParameterLookupOverlayNonKeyMsgIgnored(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "city"}}})
 	p := newParameterLookupOverlay(parent, 0, &SavedQueryLookup{Key: "City"})
@@ -205,6 +215,7 @@ func TestParameterLookupOverlayNonKeyMsgIgnored(t *testing.T) {
 // TestParameterLookupOverlayUpDownNavigatesRows covers the "up"/"down"
 // case's delta assignment and SelectRow call with a real, non-empty grid.
 func TestParameterLookupOverlayUpDownNavigatesRows(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "city"}}})
 	lookup := &SavedQueryLookup{Key: "City", Result: twoRowLookupResult("City")}
@@ -228,6 +239,7 @@ func TestParameterLookupOverlayUpDownNavigatesRows(t *testing.T) {
 // keyColumn<0 guard -- a malformed/renamed SavedQueryLookupService response
 // a real integration could produce.
 func TestParameterLookupOverlayMultiMissingKeyColumnIsSafeNoop(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "city", Multi: true}}})
 	lookup := &SavedQueryLookup{Key: "Missing", Multi: true, Result: twoRowLookupResult("City")}
@@ -246,6 +258,7 @@ func TestParameterLookupOverlayMultiMissingKeyColumnIsSafeNoop(t *testing.T) {
 // key cell (a real value a numeric aggregate/division column can produce)
 // fails lookupValueToken even though it is a float64.
 func TestParameterLookupOverlayMultiSpaceUnencodableKeyShowsError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "n", Multi: true}}})
 	lookup := &SavedQueryLookup{Key: "N", Multi: true, Result: secureread.Result{Columns: []string{"N"}, Rows: []secureread.Row{{Data: map[string]any{"N": math.NaN()}}}}}
@@ -263,6 +276,7 @@ func TestParameterLookupOverlayMultiSpaceUnencodableKeyShowsError(t *testing.T) 
 // case's deselect branch (`delete(p.selected, token)`): pressing space
 // twice on the same row selects then deselects it.
 func TestParameterLookupOverlayMultiSpaceTogglesSelection(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "city", Multi: true}}})
 	lookup := &SavedQueryLookup{Key: "City", Multi: true, Result: twoRowLookupResult("City")}
@@ -283,6 +297,7 @@ func TestParameterLookupOverlayMultiSpaceTogglesSelection(t *testing.T) {
 // p.key]) fails for it while building the values slice from p.result.Rows,
 // which must not abort collecting the legitimately-selected row's value.
 func TestParameterLookupOverlayMultiEnterSkipsUnencodableRow(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "n", Multi: true}}})
 	lookup := &SavedQueryLookup{Key: "N", Multi: true, Result: secureread.Result{
@@ -313,6 +328,7 @@ func TestParameterLookupOverlayMultiEnterSkipsUnencodableRow(t *testing.T) {
 // in Columns but absent from a particular row's Data (a sparse/NULL cell)
 // leaves the raw value nil.
 func TestParameterLookupOverlaySingleEnterNilValueIsNoop(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "city"}}})
 	lookup := &SavedQueryLookup{Key: "City", Result: secureread.Result{Columns: []string{"City"}, Rows: []secureread.Row{{Data: map[string]any{}}}}}
@@ -329,6 +345,7 @@ func TestParameterLookupOverlaySingleEnterNilValueIsNoop(t *testing.T) {
 // deleted dead branch this replaced), a single-select value is marshaled
 // directly from the raw grid cell, so a NaN cell genuinely fails here.
 func TestParameterLookupOverlaySingleEnterUnencodableValueShowsError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "n"}}})
 	lookup := &SavedQueryLookup{Key: "N", Result: secureread.Result{Columns: []string{"N"}, Rows: []secureread.Row{{Data: map[string]any{"N": math.NaN()}}}}}
@@ -345,6 +362,7 @@ func TestParameterLookupOverlaySingleEnterUnencodableValueShowsError(t *testing.
 // TestParameterLookupOverlayViewMultiHelpAndError covers View's multi-mode
 // help text branch and its error line.
 func TestParameterLookupOverlayViewMultiHelpAndError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "city", Multi: true}}})
 	lookup := &SavedQueryLookup{Key: "City", Multi: true, Result: twoRowLookupResult("City")}

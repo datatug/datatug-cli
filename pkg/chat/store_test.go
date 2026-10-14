@@ -37,6 +37,7 @@ func testStorePath(t *testing.T) string {
 }
 
 func TestSessionStoreLifecycleAndIsolation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -95,6 +96,7 @@ func TestSessionStoreLifecycleAndIsolation(t *testing.T) {
 }
 
 func TestSessionStoreSeparatesReconfiguredSources(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	original := testScope()
@@ -135,6 +137,7 @@ func TestSessionStoreSeparatesReconfiguredSources(t *testing.T) {
 }
 
 func TestLegacyChatScopeMigratesOnlyMatchingSource(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	scope := testScope()
@@ -184,6 +187,7 @@ func TestLegacyChatScopeMigratesOnlyMatchingSource(t *testing.T) {
 }
 
 func TestRecordSetSnapshotRestoresTypedRowsWithoutQueryRerun(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -251,6 +255,7 @@ func TestRecordSetSnapshotRestoresTypedRowsWithoutQueryRerun(t *testing.T) {
 }
 
 func TestResultCodecPersistsStatisticsAndDerivesLegacyStatistics(t *testing.T) {
+	t.Parallel()
 	result := secureread.Result{
 		Columns: []string{"day", "total", "status"},
 		Rows: []secureread.Row{
@@ -290,6 +295,7 @@ func TestResultCodecPersistsStatisticsAndDerivesLegacyStatistics(t *testing.T) {
 }
 
 func TestResultCodecDerivesStatisticsForManualResultsWhileEncodingRows(t *testing.T) {
+	t.Parallel()
 	result := secureread.Result{
 		Columns: []string{"InvoiceDate", "Total"},
 		Rows:    []secureread.Row{{Data: map[string]any{"InvoiceDate": "2013-12-22", "Total": 1.99}}},
@@ -308,6 +314,7 @@ func TestResultCodecDerivesStatisticsForManualResultsWhileEncodingRows(t *testin
 }
 
 func TestResultCodecMarksOverflowedDateNumericSumsIncomplete(t *testing.T) {
+	t.Parallel()
 	result := secureread.Result{Columns: []string{"Timestamp", "Total"}, Rows: []secureread.Row{
 		{Data: map[string]any{"Timestamp": time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC), "Total": math.MaxFloat64}},
 		{Data: map[string]any{"Timestamp": time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC), "Total": math.MaxFloat64}},
@@ -326,6 +333,7 @@ func TestResultCodecMarksOverflowedDateNumericSumsIncomplete(t *testing.T) {
 }
 
 func TestStoreEmptyResultAndRecoveryErrors(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -360,6 +368,7 @@ func TestStoreEmptyResultAndRecoveryErrors(t *testing.T) {
 }
 
 func TestStoreRestoresRealEmptyResultShape(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session, err := store.Create(ctx, "Empty from DALgo")
@@ -384,6 +393,7 @@ func TestStoreRestoresRealEmptyResultShape(t *testing.T) {
 }
 
 func TestStoreAccessScopeAndPrivateFile(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	admin := openTestStore(t, path, testScope())
@@ -408,6 +418,7 @@ func TestStoreAccessScopeAndPrivateFile(t *testing.T) {
 }
 
 func TestInterruptedTurnRollsBackQueryAndSnapshot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session, err := store.Create(ctx, "Interrupted")
@@ -432,6 +443,7 @@ func TestInterruptedTurnRollsBackQueryAndSnapshot(t *testing.T) {
 }
 
 func TestCorruptSnapshotPayloadIsReported(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session, err := store.Create(ctx, "Corrupt")
@@ -486,6 +498,7 @@ func bookmarkableSelection(t *testing.T, store *SessionStore) (ChatSession, Cont
 }
 
 func TestBookmarkMigrationFromV2IsAtomicAndIdempotent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -521,6 +534,7 @@ func TestBookmarkMigrationFromV2IsAtomicAndIdempotent(t *testing.T) {
 }
 
 func TestTableStylePreferenceMigratesFromV5AndSpansSessions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -566,6 +580,7 @@ func TestTableStylePreferenceMigratesFromV5AndSpansSessions(t *testing.T) {
 }
 
 func TestJoinLineageMigrationFromV4AddsAppliedEdges(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -608,6 +623,7 @@ func TestJoinLineageMigrationFromV4AddsAppliedEdges(t *testing.T) {
 }
 
 func TestV6PreferencesMigrateWithDefaultResultVersions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -633,6 +649,7 @@ func TestV6PreferencesMigrateWithDefaultResultVersions(t *testing.T) {
 }
 
 func TestBookmarkSelectionSurvivesOriginDeletionAndRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -683,6 +700,7 @@ func TestBookmarkSelectionSurvivesOriginDeletionAndRestart(t *testing.T) {
 }
 
 func TestBookmarkTagsAndProjectScopeIsolation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -728,6 +746,7 @@ func TestBookmarkTagsAndProjectScopeIsolation(t *testing.T) {
 }
 
 func TestBookmarkDeleteBlocksPersistedReferencesAndSaveValidatesThem(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	origin, ref := bookmarkableSelection(t, store)
@@ -758,6 +777,7 @@ func TestBookmarkDeleteBlocksPersistedReferencesAndSaveValidatesThem(t *testing.
 }
 
 func TestV8HTTPResponsesMigrateRequestMethod(t *testing.T) {
+	t.Parallel()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
 	if err := store.Close(); err != nil {

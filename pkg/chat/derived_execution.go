@@ -32,7 +32,7 @@ type exactAggregateDTQLExecutor interface {
 }
 
 func exactAggregateColumns(catalog ProjectCatalog, record RecordSet) ([]resultops.Column, error) {
-	query, err := dtql.Deserialize([]byte(record.DTQL))
+	query, err := dtqlDeserialize([]byte(record.DTQL))
 	if err != nil {
 		return nil, fmt.Errorf("original query is unavailable")
 	}
@@ -127,7 +127,7 @@ func deriveResultPreview(catalog ProjectCatalog, record RecordSet, operation der
 	if err != nil {
 		return preview, err
 	}
-	derived, err := dtql.Deserialize([]byte(preview.DTQL))
+	derived, err := dtqlDeserialize([]byte(preview.DTQL))
 	if err != nil || derived.Limit() < 1 || derived.Limit() > maxRows {
 		return queryops.Preview{}, fmt.Errorf("derived query exceeds the bounded execution budget")
 	}
@@ -246,7 +246,7 @@ func (o *resultOperationOverlay) serverPreview() (queryops.Preview, error) {
 	}
 	preview, err := deriveResultPreview(o.ui.catalog, o.record, o.operation())
 	if err == nil && o.originalOutput && (!o.group || len(o.aggregateTerms()) <= 0) {
-		query, parseErr := dtql.Deserialize([]byte(preview.DTQL))
+		query, parseErr := dtqlDeserialize([]byte(preview.DTQL))
 		if parseErr != nil {
 			return queryops.Preview{}, parseErr
 		}

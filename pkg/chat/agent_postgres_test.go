@@ -49,6 +49,7 @@ scopes:
 // says: with the preview off the sentence about the preview, with it on and a policy in the session the sentence about
 // policy-enforced reads, and in both cases the opener is never called.
 func TestRunDTQL_APostgresSourceIsAnsweredBeforeItIsOpened(t *testing.T) {
+	// Not parallel: mutates environment variables and dbcopy Postgres opener.
 	var opens atomic.Int32
 	restore := dbcopy.SetPostgresOpenerForTest(func(string, dal.Schema, dalgo2sql.DbOptions, ...dalgo2postgres.Option) (*dalgo2postgres.Database, error) {
 		opens.Add(1)
@@ -90,6 +91,7 @@ func TestRunDTQL_APostgresSourceIsAnsweredBeforeItIsOpened(t *testing.T) {
 // The opener of this test binary is the one that stops the run, which the init above cannot show: the test opens a
 // PostgreSQL source with the preview on, and nothing stands in.
 func TestTheOpenerOfThisTestBinaryIsTheOneThatStopsTheRun(t *testing.T) {
+	// Not parallel: mutates environment variables.
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	ref, err := dbcopy.Parse("postgres://alice:" + chatPostgresPassword + "@127.0.0.1:1/shop")
 	if err != nil {
@@ -106,6 +108,7 @@ func TestTheOpenerOfThisTestBinaryIsTheOneThatStopsTheRun(t *testing.T) {
 
 // The switch of the developer's shell does not reach a test: the init above clears it.
 func TestThePreviewSwitchIsOffUnlessATestTurnsItOn(t *testing.T) {
+	t.Parallel()
 	if err := dbcopy.CheckPostgresPreview(); err != dbcopy.ErrPostgresPreview { //nolint:errorlint // the sentinel itself
 		t.Fatalf("CheckPostgresPreview() = %v, want the preview sentence", err)
 	}
@@ -115,6 +118,7 @@ func TestThePreviewSwitchIsOffUnlessATestTurnsItOn(t *testing.T) {
 // (the server was restarted, the password was changed) fails the read with the text pgx writes, which names the user and
 // holds the password. What the chat answers, which goes to the message, the model and the store, is one fixed sentence.
 func TestRunDTQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.T) {
+	// Not parallel: mutates environment variables, dbcopy Postgres opener, and standard logger.
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	const user = "USERMARKER-dt02-chat"
 	// The stand-in is built here, on the goroutine of the test: the opener runs on another one, where a failure of
@@ -158,6 +162,7 @@ func TestRunDTQL_AReadThatLosesItsConnectionAnswersOneFixedSentence(t *testing.T
 // string is read from (and not the fallback hint of a source given as a literal URL), with the adapter's sentence and
 // nothing of the URL the variable holds.
 func TestRunDTQL_AnEnvSourceThatCannotBeReachedNamesTheVariable(t *testing.T) {
+	// Not parallel: mutates environment variables and dbcopy Postgres opener.
 	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	const variable = "DATATUG_CHAT_SHOP_PG_URL"
 	t.Setenv(variable, "postgres://alice:"+chatPostgresPassword+"@db.example.com:5433/shop")

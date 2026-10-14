@@ -12,6 +12,7 @@ import (
 )
 
 func TestResultVersionPreferencePersistsAndLimitsVisibleHistory(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -42,6 +43,7 @@ func TestResultVersionPreferencePersistsAndLimitsVisibleHistory(t *testing.T) {
 }
 
 func TestHTTPChangeIndicatorIncludesStatusAndContentType(t *testing.T) {
+	t.Parallel()
 	previous := HTTPResponse{StatusCode: 200, ContentType: "text/plain", Body: []byte("same")}
 	if httpResponseChanged(previous, previous) {
 		t.Fatal("identical response should be unchanged")
@@ -59,6 +61,7 @@ func TestHTTPChangeIndicatorIncludesStatusAndContentType(t *testing.T) {
 }
 
 func TestRefreshRecordSetUsesSavedDTQLAndPreservesPrevious(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
@@ -94,6 +97,7 @@ func TestRefreshRecordSetUsesSavedDTQLAndPreservesPrevious(t *testing.T) {
 }
 
 func TestHTTPHeadersAndTimingsSurviveRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Data-Version", "v2")
@@ -135,6 +139,7 @@ func TestHTTPHeadersAndTimingsSurviveRestart(t *testing.T) {
 }
 
 func TestHTTPRedirectTraceIsPersistedWithoutQuerySecrets(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/start" {

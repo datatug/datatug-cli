@@ -29,6 +29,7 @@ import (
 )
 
 func TestChatUISavedQueryErrorDoesNotPersistParameterValue(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Title: "Private query", Type: "DTQL"}}, runErr: errors.New("invalid --var CustomerId=secret123")}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -43,6 +44,7 @@ func TestChatUISavedQueryErrorDoesNotPersistParameterValue(t *testing.T) {
 }
 
 func TestChatUISaveQueryFailureHidesErrorDetails(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{saveErr: errors.New("private-token-123")}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -73,6 +75,7 @@ func TestChatUISaveQueryFailureHidesErrorDetails(t *testing.T) {
 }
 
 func TestChatUISaveQueryRejectsParameterizedResultBeforeOpeningDraft(t *testing.T) {
+	t.Parallel()
 	// See TestChatUISaveQueryDialogCollectsNameAndTagChips's comment: DTQL/
 	// Parameters are set on the already-persisted RecordSet after focusing
 	// it for real, rather than through the scripted Turn.
@@ -100,6 +103,7 @@ func TestChatUISaveQueryRejectsParameterizedResultBeforeOpeningDraft(t *testing.
 }
 
 func TestChatUISavedQueryAutocompleteAliasesFilterAndExecute(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{
 		{ID: "customers/prague", Title: "Prague customers", Type: "DTQL", Tags: []string{"city"}},
@@ -144,6 +148,7 @@ func TestChatUISavedQueryAutocompleteAliasesFilterAndExecute(t *testing.T) {
 }
 
 func TestChatUISaveQueryDialogCollectsNameAndTagChips(t *testing.T) {
+	t.Parallel()
 	// The Turn deliberately carries no DTQL/Database: those come from a
 	// real agent tool call in production, which contextualStub doesn't
 	// simulate, and setting them here caused the scripted turn's
@@ -196,6 +201,7 @@ func TestChatUISaveQueryDialogCollectsNameAndTagChips(t *testing.T) {
 }
 
 func TestChatUIParameterizedSavedQueryPromptsThenRunsWithValues(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "customers/invoices", Title: "Customer invoices", Type: "DTQL", Parameters: []SavedQueryParameter{{ID: "CustomerId", Type: "integer", Required: true}}}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -225,6 +231,7 @@ func TestChatUIParameterizedSavedQueryPromptsThenRunsWithValues(t *testing.T) {
 }
 
 func TestChatUIHTTPSavedQueryUsesProjectRunner(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "api/people", Title: "People API", Type: "HTTP"}}}
 	if err := u.SetSavedQueryService(service); err != nil {

@@ -64,6 +64,7 @@ func focusedGridStoreBackedTestUI(t *testing.T, query QueryResult) *ChatUI {
 
 // TestChatUIGridKeyQOpensSaveQueryDialog covers handleGridKey's "q" case.
 func TestChatUIGridKeyQOpensSaveQueryDialog(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title: "Widgets", DTQL: "from: {name: Widget}\nlimit: 2\n",
 		Result: secureread.Result{Columns: []string{"Id", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"Id": 1, "Name": "Alpha"}}}},
@@ -78,6 +79,7 @@ func TestChatUIGridKeyQOpensSaveQueryDialog(t *testing.T) {
 // TestChatUIGridKeySpaceCRSelectAndAAttach covers handleGridKey's "space"/
 // "c"/"r"/"a" cases through the real transcript grid.
 func TestChatUIGridKeySpaceCRSelectAndAAttach(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title: "Widgets",
 		Result: secureread.Result{
@@ -114,6 +116,7 @@ func TestChatUIGridKeySpaceCRSelectAndAAttach(t *testing.T) {
 // cases (dockOrBookmarkActiveGrid), including its Selection-reference
 // upgrade when a durable selection already matches the active RecordSet.
 func TestChatUIGridKeyDAndBDockAndBookmark(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	gridActionJourney(t, u, "Dock result")
 	if len(u.snapshot.Workspace.Docks) != 1 {
@@ -140,6 +143,7 @@ func TestChatUIGridKeyDAndBDockAndBookmark(t *testing.T) {
 // TestChatUIGridKeyBToggleExportBucket covers handleGridKey's "B" case,
 // both the "bucket_add" and "bucket_remove" branches.
 func TestChatUIGridKeyBToggleExportBucket(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	gridActionJourney(t, u, "Export bucket")
 	if len(u.snapshot.Workspace.ExportBucket) != 1 {
@@ -153,6 +157,7 @@ func TestChatUIGridKeyBToggleExportBucket(t *testing.T) {
 
 // TestChatUIGridKeyEOpensExportDialog covers handleGridKey's "e" case.
 func TestChatUIGridKeyEOpensExportDialog(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	gridActionJourney(t, u, "Export [Ctrl+E]")
 	if u.lastGridRecordSetID == "" {
@@ -166,6 +171,7 @@ func TestChatUIGridKeyEOpensExportDialog(t *testing.T) {
 // TestChatUIGridKeyAWithNoActiveGridIsANoOp covers handleGridKey's "a"
 // case guard when activeGrid resolves to nothing (no grid focused).
 func TestChatUIGridKeyAWithNoActiveGridIsANoOp(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	_, handled := u.handleGridKey(nil, tea.KeyPressMsg{Text: "a"})
 	if !handled {
@@ -180,6 +186,7 @@ func TestChatUIGridKeyAWithNoActiveGridIsANoOp(t *testing.T) {
 // own early-return guards directly: no active grid, and an empty
 // RecordSetID.
 func TestChatUIDockOrBookmarkActiveGridGuards(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.dockOrBookmarkActiveGrid("dock") // no active grid: no-op, no panic
 	if len(u.snapshot.Workspace.Docks) != 0 {
@@ -191,6 +198,7 @@ func TestChatUIDockOrBookmarkActiveGridGuards(t *testing.T) {
 // syncRecordSetSort's docked-grid propagation branch and its own guard
 // (a dock whose Reference isn't a matching "recordset" kind is skipped).
 func TestChatUISyncRecordSetSortAppliesToDockedGridsToo(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	// The catalog's ID must match the store's scope ProjectID
@@ -245,6 +253,7 @@ func TestChatUISyncRecordSetSortAppliesToDockedGridsToo(t *testing.T) {
 // TestChatUIActiveGridAndRecordSetIDNoFocusedRef covers activeGrid's and
 // activeRecordSetID's "no focused ref"/"wrong ref type" guards.
 func TestChatUIActiveGridAndRecordSetIDNoFocusedRef(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if g, record, ok := u.activeGrid(); ok || g != nil || record != nil {
 		t.Fatalf("expected activeGrid() to report nothing with no focus: g=%v record=%v ok=%v", g, record, ok)
@@ -258,6 +267,7 @@ func TestChatUIActiveGridAndRecordSetIDNoFocusedRef(t *testing.T) {
 // "record not found" branch: a tracked grid whose RecordSet has since been
 // removed from the snapshot still resolves (grid, nil, true).
 func TestChatUIActiveGridRecordSetNotInSnapshot(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	delete(u.snapshot.RecordSets, u.activeRecordSetID())
 	g, record, ok := u.activeGrid()
@@ -270,6 +280,7 @@ func TestChatUIActiveGridRecordSetNotInSnapshot(t *testing.T) {
 // active grid, and a selected column out of range (an empty grid has
 // none).
 func TestChatUIOpenCellDetailGuards(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if cmd := u.openCellDetail(); cmd != nil {
 		t.Fatal("expected openCellDetail to no-op with no active grid")
@@ -292,6 +303,7 @@ func TestChatUIOpenCellDetailGuards(t *testing.T) {
 // already covers the full async preview path with a configured
 // application.
 func TestChatUIOpenCellDetailWithoutJoinApplicationSkipsPreview(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	// PushOverlay pushes synchronously and returns a nil tea.Cmd (nothing
 	// async to schedule for the overlay itself); it's u.pendingDetail that
@@ -308,6 +320,7 @@ func TestChatUIOpenCellDetailWithoutJoinApplicationSkipsPreview(t *testing.T) {
 // is always empty), but u.sessions.joinApplication isn't a
 // ForeignKeyJoinApplication at all (the type assertion's "ok" is false).
 func TestChatUIOpenCellDetailQualifiedColumnButNoJoinApplicationSkipsPreview(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
@@ -348,6 +361,7 @@ func TestChatUIOpenCellDetailQualifiedColumnButNoJoinApplicationSkipsPreview(t *
 // branches -- TestChatUIEnterOpensAndClosesCellDetail only exercises the
 // "no related FK records" empty state.
 func TestCellDetailOverlayViewShowsLoadingRelatedErrorAndRelatedRecords(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{
 		// A non-matching object first exercises the View's own object-scan
@@ -397,6 +411,7 @@ func TestCellDetailOverlayViewShowsLoadingRelatedErrorAndRelatedRecords(t *testi
 // TestCellDetailOverlayUpdateScrollsAndCopies covers cellDetailOverlay's
 // Update up/down offset and "y" copy branches, plus its non-key no-op.
 func TestCellDetailOverlayUpdateScrollsAndCopies(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := &cellDetail{title: "T", column: "C", value: "v", offset: 3}
 	o := &cellDetailOverlay{ui: u, detail: d}
@@ -428,6 +443,7 @@ func TestCellDetailOverlayUpdateScrollsAndCopies(t *testing.T) {
 // TestChatUIOpenSaveQueryDialogGuardsAndBranches covers openSaveQueryDialog's
 // full guard/branch surface directly.
 func TestChatUIOpenSaveQueryDialogGuardsAndBranches(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.savedQueryService = &savedQueryStub{}
 
@@ -458,6 +474,7 @@ func TestChatUIOpenSaveQueryDialogGuardsAndBranches(t *testing.T) {
 // HTTPResponseID branches: a missing response, a response whose request
 // had URL parameters, a non-GET method, and the success path.
 func TestChatUIOpenSaveQueryDialogHTTPBranches(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	server := "https://example.com/data?token=x"
 	store := openTestStore(t, testStorePath(t), testScope())
@@ -498,6 +515,7 @@ func TestChatUIOpenSaveQueryDialogHTTPBranches(t *testing.T) {
 // TestChatUIOpenSaveQueryDialogHTTPNonGETMethod covers openSaveQueryDialog's
 // non-GET-method HTTP branch.
 func TestChatUIOpenSaveQueryDialogHTTPNonGETMethod(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	server := "https://example.com/data"
 	store := openTestStore(t, testStorePath(t), testScope())
@@ -535,6 +553,7 @@ func TestChatUIOpenSaveQueryDialogHTTPNonGETMethod(t *testing.T) {
 // TestChatUIOpenSaveQueryDialogDTQLWithParametersIsRejected covers
 // openSaveQueryDialog's DTQL-parameterized-result branch.
 func TestChatUIOpenSaveQueryDialogDTQLWithParametersIsRejected(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title: "Filtered", DTQL: "from: {name: Customer}\nlimit: {parameter: n}\n",
 		Parameters: map[string]any{"n": nil},
@@ -553,6 +572,7 @@ func TestChatUIOpenSaveQueryDialogDTQLWithParametersIsRejected(t *testing.T) {
 // openSaveQueryDialog's final "request.Type == ”" fallback: a RecordSet
 // with neither an HTTPResponseID nor a DTQL.
 func TestChatUIOpenSaveQueryDialogUnsavableRecordSetFallsBack(t *testing.T) {
+	t.Parallel()
 	u := focusedGridStoreBackedTestUI(t, QueryResult{
 		Title:  "Bare",
 		Result: secureread.Result{Columns: []string{"X"}, Rows: []secureread.Row{{Data: map[string]any{"X": 1}}}},
@@ -569,6 +589,7 @@ func TestChatUIOpenSaveQueryDialogUnsavableRecordSetFallsBack(t *testing.T) {
 // TestChatUIOpenSaveQueryDialogForHTTPResponseBranches covers
 // openSaveQueryDialogForHTTPResponse's full guard/branch surface.
 func TestChatUIOpenSaveQueryDialogForHTTPResponseBranches(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.savedQueryService = &savedQueryStub{}
 
@@ -607,6 +628,7 @@ func TestChatUIOpenSaveQueryDialogForHTTPResponseBranches(t *testing.T) {
 // TestSaveQueryOverlayAddTagGuardsAndDuplicate covers addTag's own
 // blank-input and duplicate-tag guards.
 func TestSaveQueryOverlayAddTagGuardsAndDuplicate(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	o := newSaveQueryOverlay(u, SavedQuerySaveRequest{Title: "Q"})
 	o.values[1] = "   "
@@ -625,6 +647,7 @@ func TestSaveQueryOverlayAddTagGuardsAndDuplicate(t *testing.T) {
 // TestSaveQueryOverlaySaveGuardsAndAsync covers save()'s no-writer/
 // empty-title guards and its async in-flight branch.
 func TestSaveQueryOverlaySaveGuardsAndAsync(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.savedQueryService = struct{ SavedQueryService }{} // not a SavedQueryWriter
 	o := newSaveQueryOverlay(u, SavedQuerySaveRequest{Title: "Q"})
@@ -659,6 +682,7 @@ func TestSaveQueryOverlaySaveGuardsAndAsync(t *testing.T) {
 // branch surface: failure with/without a pending overlay, and a success
 // whose reloadSavedQueries call itself fails.
 func TestChatUIHandleSaveQueryDoneBranches(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	o := newSaveQueryOverlay(u, SavedQuerySaveRequest{Title: "Q"})
 	u.pendingSaveQuery = o
@@ -689,6 +713,7 @@ func TestChatUIHandleSaveQueryDoneBranches(t *testing.T) {
 // handleSaveQueryDone's success path end to end, including CloseOverlay
 // and the final "Saved project query" message.
 func TestChatUIHandleSaveQueryDoneSuccessReportsTitle(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -706,6 +731,7 @@ func TestChatUIHandleSaveQueryDoneSuccessReportsTitle(t *testing.T) {
 // TestSaveQueryOverlayViewShowsTagChipsAndError covers View's tag-chips
 // and error-line branches.
 func TestSaveQueryOverlayViewShowsTagChipsAndError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	o := newSaveQueryOverlay(u, SavedQuerySaveRequest{Title: "Q", Type: "DTQL"})
 	o.tags = []string{"reporting", "weekly"}
@@ -724,6 +750,7 @@ func TestSaveQueryOverlayViewShowsTagChipsAndError(t *testing.T) {
 // tag value)/2 (save), and ctrl+s both with a pending tag value and
 // without.
 func TestSaveQueryOverlayUpdateFullSurface(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.savedQueryService = &savedQueryStub{}
 
@@ -817,6 +844,7 @@ func TestSaveQueryOverlayUpdateFullSurface(t *testing.T) {
 // TestEditLineOnKeyBranches covers editLineOnKey's backspace (non-empty and
 // already-empty), ctrl+u and plain-character branches directly.
 func TestEditLineOnKeyBranches(t *testing.T) {
+	t.Parallel()
 	if got := editLineOnKey("abc", tea.KeyPressMsg{Code: tea.KeyBackspace}); got != "ab" {
 		t.Fatalf("backspace on non-empty = %q, want %q", got, "ab")
 	}
@@ -838,6 +866,7 @@ func TestEditLineOnKeyBranches(t *testing.T) {
 // TestChatUISelectFromGridNoActiveGridIsANoOp covers selectFromGrid's own
 // guard directly (no active grid).
 func TestChatUISelectFromGridNoActiveGridIsANoOp(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.selectFromGrid("row") // no panic, no-op
 }
@@ -846,6 +875,7 @@ func TestChatUISelectFromGridNoActiveGridIsANoOp(t *testing.T) {
 // branch: a focused ref whose RecordSetID isn't (or is no longer) tracked
 // in gridsByRecordSetID.
 func TestChatUIActiveGridUntrackedRefIsANoOp(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	delete(u.gridsByRecordSetID, u.lastGridRecordSetID)
 	if g, record, ok := u.activeGrid(); ok || g != nil || record != nil {
@@ -857,6 +887,7 @@ func TestChatUIActiveGridUntrackedRefIsANoOp(t *testing.T) {
 // syncRecordSetSort's apply closure's own "g == nil" guard: a dock whose
 // RecordSet matches but has no built gridState yet.
 func TestChatUISyncRecordSetSortSkipsUnbuiltDockedGrid(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -886,6 +917,7 @@ func TestChatUISyncRecordSetSortSkipsUnbuiltDockedGrid(t *testing.T) {
 // case TestChatUIOpenCellDetailGuards already covers): a grid whose
 // current display row has no matching raw row at all.
 func TestChatUIOpenCellDetailNoRawRowIsANoOp(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	g := u.gridsByRecordSetID[u.lastGridRecordSetID]
 	g.raw = nil // CurrentIndex()'s row no longer has a raw counterpart
@@ -898,6 +930,7 @@ func TestChatUIOpenCellDetailNoRawRowIsANoOp(t *testing.T) {
 // HTTP success branch (request.Type/Text set to "HTTP"/response.URL) --
 // every other HTTP-branch test here exercises a rejection instead.
 func TestChatUIOpenSaveQueryDialogHTTPSuccess(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	server := "https://example.com/data"
 	store := openTestStore(t, testStorePath(t), testScope())
@@ -940,6 +973,7 @@ func TestChatUIOpenSaveQueryDialogHTTPSuccess(t *testing.T) {
 // ForeignKeyJoinApplication plus a qualified column produces a loading
 // cellDetail that resolves to related records once the fetch command runs.
 func TestChatUIOpenCellDetailFetchesRelatedRecordsAsync(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")

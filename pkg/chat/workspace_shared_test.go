@@ -29,6 +29,7 @@ func gridDataTestSession() ChatSession {
 }
 
 func TestGridDataForReferenceBookmarkNotFound(t *testing.T) {
+	t.Parallel()
 	session := gridDataTestSession()
 	if _, ok := gridDataForReference(session, ContextReference{Kind: "bookmark", ObjectID: "missing"}); ok {
 		t.Fatal("expected a missing bookmark to report not-found")
@@ -36,6 +37,7 @@ func TestGridDataForReferenceBookmarkNotFound(t *testing.T) {
 }
 
 func TestGridDataForReferenceRecordSet(t *testing.T) {
+	t.Parallel()
 	session := gridDataTestSession()
 	data, ok := gridDataForReference(session, ContextReference{Kind: "recordset", ObjectID: "rs1"})
 	if !ok || data.RecordSetID != "rs1" || len(data.Result.Rows) != 2 || len(data.SourceRows) != 2 {
@@ -47,6 +49,7 @@ func TestGridDataForReferenceRecordSet(t *testing.T) {
 }
 
 func TestGridDataForReferenceRecordSetNotFound(t *testing.T) {
+	t.Parallel()
 	session := gridDataTestSession()
 	if _, ok := gridDataForReference(session, ContextReference{Kind: "recordset", ObjectID: "missing"}); ok {
 		t.Fatal("expected a missing RecordSet to report not-found")
@@ -54,6 +57,7 @@ func TestGridDataForReferenceRecordSetNotFound(t *testing.T) {
 }
 
 func TestGridDataForReferenceView(t *testing.T) {
+	t.Parallel()
 	session := gridDataTestSession()
 	data, ok := gridDataForReference(session, ContextReference{Kind: "view", ObjectID: "view1"})
 	if !ok || data.RecordSetID != "rs1" || data.ViewID != "view1" || len(data.Result.Rows) != 2 {
@@ -62,6 +66,7 @@ func TestGridDataForReferenceView(t *testing.T) {
 }
 
 func TestGridDataForReferenceViewNotFound(t *testing.T) {
+	t.Parallel()
 	session := gridDataTestSession()
 	if _, ok := gridDataForReference(session, ContextReference{Kind: "view", ObjectID: "missing"}); ok {
 		t.Fatal("expected a missing view to report not-found")
@@ -69,6 +74,7 @@ func TestGridDataForReferenceViewNotFound(t *testing.T) {
 }
 
 func TestGridDataForReferenceSelection(t *testing.T) {
+	t.Parallel()
 	session := gridDataTestSession()
 	data, ok := gridDataForReference(session, ContextReference{Kind: "selection", ObjectID: "sel1"})
 	if !ok || data.RecordSetID != "rs1" || len(data.Result.Rows) != 1 {
@@ -77,6 +83,7 @@ func TestGridDataForReferenceSelection(t *testing.T) {
 }
 
 func TestGridDataForReferenceSelectionNotFound(t *testing.T) {
+	t.Parallel()
 	session := gridDataTestSession()
 	if _, ok := gridDataForReference(session, ContextReference{Kind: "selection", ObjectID: "missing"}); ok {
 		t.Fatal("expected a missing selection to report not-found")
@@ -84,6 +91,7 @@ func TestGridDataForReferenceSelectionNotFound(t *testing.T) {
 }
 
 func TestGridDataForReferenceSelectionWithOrphanedView(t *testing.T) {
+	t.Parallel()
 	session := gridDataTestSession()
 	if _, ok := gridDataForReference(session, ContextReference{Kind: "selection", ObjectID: "sel-orphan-view"}); ok {
 		t.Fatal("expected a selection referencing a missing view to report not-found")
@@ -91,6 +99,7 @@ func TestGridDataForReferenceSelectionWithOrphanedView(t *testing.T) {
 }
 
 func TestGridDataForReferenceRecordSetMissingUnderViewFallsThrough(t *testing.T) {
+	t.Parallel()
 	session := gridDataTestSession()
 	session.Workspace.Views["orphan"] = RecordSetView{ID: "orphan", RecordSetID: "missing-recordset"}
 	if _, ok := gridDataForReference(session, ContextReference{Kind: "view", ObjectID: "orphan"}); ok {
@@ -99,6 +108,7 @@ func TestGridDataForReferenceRecordSetMissingUnderViewFallsThrough(t *testing.T)
 }
 
 func TestGridDataForReferenceUnknownKind(t *testing.T) {
+	t.Parallel()
 	session := gridDataTestSession()
 	if _, ok := gridDataForReference(session, ContextReference{Kind: "unknown", ObjectID: "x"}); ok {
 		t.Fatal("expected an unrecognized reference kind to report not-found")

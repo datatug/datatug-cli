@@ -11,6 +11,7 @@ import (
 )
 
 func TestChatUICurrentHTTPOriginPicksLatestResponse(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	ctx := context.Background()
 	user, err := sessions.store.AppendUser(ctx, sessions.activeID, "fetch")
@@ -36,6 +37,7 @@ func TestChatUICurrentHTTPOriginPicksLatestResponse(t *testing.T) {
 }
 
 func TestChatUICurrentHTTPOriginEmptyWithoutResponses(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if got := u.currentHTTPOrigin(); got != "" {
 		t.Fatalf("currentHTTPOrigin = %q, want empty with no HTTP responses", got)
@@ -43,6 +45,7 @@ func TestChatUICurrentHTTPOriginEmptyWithoutResponses(t *testing.T) {
 }
 
 func TestChatUIHTTPSettingsCommandRequiresActiveSession(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "test")
 	if _, err := u.httpSettingsCommand("header", "X=1"); err == nil {
 		t.Fatal("expected an error without an active chat session")
@@ -50,6 +53,7 @@ func TestChatUIHTTPSettingsCommandRequiresActiveSession(t *testing.T) {
 }
 
 func TestChatUIHTTPSettingsCommandListsCookies(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/http cookie https://api.example.test session=abc"))
 	u.shell.Update(tea.KeyPressMsg{Text: "1"})
@@ -61,6 +65,7 @@ func TestChatUIHTTPSettingsCommandListsCookies(t *testing.T) {
 }
 
 func TestChatUIHTTPSettingsCommandCookieListingWithoutOriginWarns(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/http cookie"))
 	if !strings.Contains(u.shell.View().Content, "No current origin") {
@@ -69,6 +74,7 @@ func TestChatUIHTTPSettingsCommandCookieListingWithoutOriginWarns(t *testing.T) 
 }
 
 func TestChatUIHTTPSettingsCommandRemoveValidatesNameAndScope(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if _, err := u.httpSettingsCommand("header", "remove"); err == nil {
 		t.Fatal("expected an error for an empty/invalid remove name")
@@ -83,6 +89,7 @@ func TestChatUIHTTPSettingsCommandRemoveValidatesNameAndScope(t *testing.T) {
 // validateHTTPSetting's later origin check, this one fires before the
 // remainder of the argument (the name=value part) is even looked at.
 func TestChatUIHTTPSettingsCommandExplicitOriginParseError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if _, err := u.httpSettingsCommand("header", "https:// X=1"); err == nil {
 		t.Fatal("expected an error for an unparsable explicit origin")
@@ -94,6 +101,7 @@ func TestChatUIHTTPSettingsCommandExplicitOriginParseError(t *testing.T) {
 // from the plain name=value usage error a bare "remove" with no argument
 // hits, since "remove" alone doesn't even match the "remove " prefix).
 func TestChatUIHTTPSettingsCommandRemoveInvalidNameCharacters(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	_, err := u.httpSettingsCommand("header", "remove @@@")
 	if err == nil || !strings.Contains(err.Error(), "remove <name>") {
@@ -106,6 +114,7 @@ func TestChatUIHTTPSettingsCommandRemoveInvalidNameCharacters(t *testing.T) {
 // underlying store first -- the same real SQL error path a disk failure
 // would hit.
 func TestChatUIHTTPSettingsCommandRemoveLoadErrorSurfaces(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	if err := sessions.store.Close(); err != nil {
 		t.Fatal(err)
@@ -120,6 +129,7 @@ func TestChatUIHTTPSettingsCommandRemoveLoadErrorSurfaces(t *testing.T) {
 // listHTTPSettings' own HTTPRequestSettings load error (the empty-argument
 // "/http header" path), forced the same way.
 func TestChatUIHTTPSettingsCommandListLoadErrorSurfaces(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	if err := sessions.store.Close(); err != nil {
 		t.Fatal(err)
@@ -135,6 +145,7 @@ func TestChatUIHTTPSettingsCommandListLoadErrorSurfaces(t *testing.T) {
 // HeaderScopes/HeaderOrigins) -- the header-kind round trip above doesn't
 // exercise it.
 func TestChatUIHTTPSettingsCommandRemoveCookieRoundTrip(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/http cookie https://api.example.test session=abc"))
 	u.shell.Update(tea.KeyPressMsg{Text: "1"})
@@ -154,6 +165,7 @@ func TestChatUIHTTPSettingsCommandRemoveCookieRoundTrip(t *testing.T) {
 // made to fail independently of its own successful load in a test fixture
 // (both use the same settingsDB connection).
 func TestChatUIHTTPSettingsCommandRemoveDeleteErrorSurfaces(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/http header https://api.example.test X-Test=value"))
 	u.shell.Update(tea.KeyPressMsg{Text: "1"})
@@ -167,6 +179,7 @@ func TestChatUIHTTPSettingsCommandRemoveDeleteErrorSurfaces(t *testing.T) {
 }
 
 func TestChatUIHTTPSettingsCommandRemoveHeaderRoundTrip(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/http header https://api.example.test X-Test=value"))
 	u.shell.Update(tea.KeyPressMsg{Text: "1"})
@@ -183,6 +196,7 @@ func TestChatUIHTTPSettingsCommandRemoveHeaderRoundTrip(t *testing.T) {
 }
 
 func TestChatUIHTTPSettingsCommandInvalidNameValueSyntax(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if _, err := u.httpSettingsCommand("header", "not-a-name-value-pair"); err == nil {
 		t.Fatal("expected a usage error for a malformed name=value argument")
@@ -190,6 +204,7 @@ func TestChatUIHTTPSettingsCommandInvalidNameValueSyntax(t *testing.T) {
 }
 
 func TestChatUIHTTPSettingsCommandRejectsInvalidSetting(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	// "Host" is a reserved header validateHTTPSetting always rejects.
 	if _, err := u.httpSettingsCommand("header", "Host=example.test"); err == nil {
@@ -198,6 +213,7 @@ func TestChatUIHTTPSettingsCommandRejectsInvalidSetting(t *testing.T) {
 }
 
 func TestHTTPScopeOverlayEscCancels(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	o := &httpScopeOverlay{ui: u, draft: httpSettingDraft{kind: "header", name: "X-Test", value: "v"}}
 	_, cmd, done := o.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -209,6 +225,7 @@ func TestHTTPScopeOverlayEscCancels(t *testing.T) {
 // TestHTTPScopeOverlayIgnoresUnhandledKeys covers Update's fallback return
 // for a key that isn't "1", "2" or "esc".
 func TestHTTPScopeOverlayIgnoresUnhandledKeys(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	o := &httpScopeOverlay{ui: u, draft: httpSettingDraft{kind: "header", name: "X-Test", value: "v"}}
 	next, cmd, done := o.Update(tea.KeyPressMsg{Text: "x"})
@@ -218,6 +235,7 @@ func TestHTTPScopeOverlayIgnoresUnhandledKeys(t *testing.T) {
 }
 
 func TestHTTPScopeOverlayIgnoresNonKeyMessages(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	o := &httpScopeOverlay{ui: u, draft: httpSettingDraft{kind: "header", name: "X-Test", value: "v"}}
 	next, cmd, done := o.Update(tea.WindowSizeMsg{Width: 10, Height: 10})
@@ -227,6 +245,7 @@ func TestHTTPScopeOverlayIgnoresNonKeyMessages(t *testing.T) {
 }
 
 func TestHTTPScopeOverlayViewRendersErrorAndProjectTarget(t *testing.T) {
+	t.Parallel()
 	o := &httpScopeOverlay{draft: httpSettingDraft{kind: "cookie", name: "session", origin: "https://api.example.test"}, err: "boom"}
 	view := o.View(60, 20)
 	if !strings.Contains(view, "boom") || !strings.Contains(view, "https://api.example.test") {
@@ -242,6 +261,7 @@ func TestHTTPScopeOverlayViewRendersErrorAndProjectTarget(t *testing.T) {
 // closing the underlying store first -- the same real SQL error path a
 // disk failure would hit, without a mock.
 func TestHTTPScopeOverlaySaveError(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	if err := sessions.store.Close(); err != nil {
 		t.Fatal(err)
@@ -254,6 +274,7 @@ func TestHTTPScopeOverlaySaveError(t *testing.T) {
 }
 
 func TestChatUICycleTableStyleWithoutSessionStillAnnounces(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "test")
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	u.cycleTableStyle()
@@ -265,6 +286,7 @@ func TestChatUICycleTableStyleWithoutSessionStillAnnounces(t *testing.T) {
 // TestChatUICycleTableStyleStoreErrorAnnouncesFailure covers cycleTableStyle's
 // own SetTableStyle error branch, forced by closing the underlying store.
 func TestChatUICycleTableStyleStoreErrorAnnouncesFailure(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	before := u.tableStyle
 	if err := sessions.store.Close(); err != nil {
@@ -280,6 +302,7 @@ func TestChatUICycleTableStyleStoreErrorAnnouncesFailure(t *testing.T) {
 }
 
 func TestChatUIApplyTableStyleToGridsRestylesEveryTrackedGrid(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	g := newGridState(GridModel{}, "rs1", "Grid", 80)
 	u.gridsByRecordSetID["rs1"] = g

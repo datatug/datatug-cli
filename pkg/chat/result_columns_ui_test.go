@@ -34,6 +34,7 @@ func resultColumnsUIFixture(t *testing.T) (*ChatUI, *resultColumnsOverlay, *colu
 }
 
 func TestResultColumnsCheckboxApplyReviewRunAndCancel(t *testing.T) {
+	t.Parallel()
 	u, o, e := resultColumnsUIFixture(t)
 	for i, r := range o.rows {
 		if r.Name == "Customer.FirstName" || r.Name == "Customer.LastName" {
@@ -75,6 +76,7 @@ func TestResultColumnsCheckboxApplyReviewRunAndCancel(t *testing.T) {
 }
 
 func TestResultColumnsReviewViewPreservesExactDTQLLayout(t *testing.T) {
+	t.Parallel()
 	_, overlay, executor := resultColumnsUIFixture(t)
 	for i, row := range overlay.rows {
 		if row.Name == "Customer.FirstName" || row.Name == "Customer.LastName" {
@@ -114,6 +116,7 @@ func TestResultColumnsReviewViewPreservesExactDTQLLayout(t *testing.T) {
 }
 
 func TestResultColumnsOverlayHelpFollowsCurrentStep(t *testing.T) {
+	t.Parallel()
 	_, overlay, _ := resultColumnsUIFixture(t)
 	choices := overlay.HelpHints()
 	for _, hint := range []string{"↑↓ choose", "Space checkbox", "Enter Apply and review", "Esc cancel"} {
@@ -146,6 +149,7 @@ func TestResultColumnsOverlayHelpFollowsCurrentStep(t *testing.T) {
 }
 
 func TestResultColumnsStalePickerCannotExecuteAndEmptyCancel(t *testing.T) {
+	t.Parallel()
 	u, o, e := resultColumnsUIFixture(t)
 	for i, r := range o.rows {
 		if r.Addable {
@@ -171,6 +175,7 @@ func TestResultColumnsStalePickerCannotExecuteAndEmptyCancel(t *testing.T) {
 }
 
 func TestResultColumnsOpenLoadsOnlyMetadataAndFitsSmallViewport(t *testing.T) {
+	t.Parallel()
 	u, _, e := resultColumnsUIFixture(t)
 	cmd := u.openResultColumns()
 	if cmd == nil {

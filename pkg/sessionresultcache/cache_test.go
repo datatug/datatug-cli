@@ -99,8 +99,8 @@ func TestPrivateDisplayCacheRejectsGitAndRedirectedDirectory(t *testing.T) {
 	}
 }
 
+// Not parallel: uses t.Setenv for DirEnv and HOME.
 func TestNewDefaultAndErrorBranches(t *testing.T) {
-	// Not parallel: uses t.Setenv for DirEnv and HOME.
 	customDir := filepath.Join(t.TempDir(), "custom-results")
 	t.Setenv(DirEnv, customDir)
 	if _, err := NewDefault(); err != nil {

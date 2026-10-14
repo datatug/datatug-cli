@@ -24,12 +24,20 @@ type resultColumnMetadata struct {
 
 func quoteColumnIdentifier(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 
+var (
+	resultColCheckSourceFile = dbcopy.CheckSourceFile
+	resultColOpenDB          = sql.Open
+	resultColQueryContext    = (*sql.DB).QueryContext
+	resultColQueryRowContext = (*sql.DB).QueryRowContext
+	resultColRowsErr         = (*sql.Rows).Err
+)
+
 // SQLite compiles EXPLAIN without executing the underlying read. KeyInfo is
 // evidence from the engine, rather than a guessed interpretation of CREATE SQL.
 // Unknown bytecode forms fail closed. NOT INDEXED prevents an index's explicit
 // COLLATE override from being mistaken for the column's GROUP BY equality.
 func sqliteBinaryGrouping(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
-	rows, err := db.QueryContext(ctx, "EXPLAIN SELECT "+quoteColumnIdentifier(column)+" FROM "+quoteColumnIdentifier(table)+" NOT INDEXED GROUP BY "+quoteColumnIdentifier(column))
+	rows, err := resultColQueryContext(db, ctx, "EXPLAIN SELECT "+quoteColumnIdentifier(column)+" FROM "+quoteColumnIdentifier(table)+" NOT INDEXED GROUP BY "+quoteColumnIdentifier(column))
 	if err != nil {
 		return false, err
 	}
@@ -49,7 +57,7 @@ func sqliteBinaryGrouping(ctx context.Context, db *sql.DB, table, column string)
 			proved = true
 		}
 	}
-	return proved, rows.Err()
+	return proved, resultColRowsErr(rows)
 }
 
 func loadResultColumnMetadata(ctx context.Context, source string) (resultColumnMetadata, error) {
@@ -57,10 +65,10 @@ func loadResultColumnMetadata(ctx context.Context, source string) (resultColumnM
 	if err != nil || parsed.Scheme != "sqlite" {
 		return resultColumnMetadata{}, fmt.Errorf("complete column metadata is available only for a local SQLite source")
 	}
-	if err = dbcopy.CheckSourceFile(parsed.Path); err != nil {
+	if err = resultColCheckSourceFile(parsed.Path); err != nil {
 		return resultColumnMetadata{}, fmt.Errorf("column metadata source is unavailable")
 	}
-	db, err := sql.Open("sqlite", dbcopy.SQLiteFileURIMode(parsed.Path, dbcopy.SQLiteReadOnly))
+	db, err := resultColOpenDB("sqlite", dbcopy.SQLiteFileURIMode(parsed.Path, dbcopy.SQLiteReadOnly))
 	if err != nil {
 		return resultColumnMetadata{}, err
 	}
@@ -74,11 +82,11 @@ func loadResultColumnMetadata(ctx context.Context, source string) (resultColumnM
 		table := strings.TrimPrefix(key, "main.")
 		// Use the engine's exact physical spelling, not the lowercased map key.
 		var physical string
-		if err = db.QueryRowContext(ctx, "SELECT name FROM sqlite_schema WHERE type='table' AND lower(name)=?", table).Scan(&physical); err != nil {
+		if err = resultColQueryRowContext(db, ctx, "SELECT name FROM sqlite_schema WHERE type='table' AND lower(name)=?", table).Scan(&physical); err != nil {
 			return resultColumnMetadata{}, err
 		}
 		t := resultColumnTable{types: map[string]string{}, binaryGroup: map[string]bool{}, generated: map[string]bool{}}
-		rows, queryErr := db.QueryContext(ctx, "PRAGMA table_xinfo("+quoteColumnIdentifier(physical)+")")
+		rows, queryErr := resultColQueryContext(db, ctx, "PRAGMA table_xinfo("+quoteColumnIdentifier(physical)+")")
 		if queryErr != nil {
 			return resultColumnMetadata{}, queryErr
 		}
@@ -104,14 +112,14 @@ func loadResultColumnMetadata(ctx context.Context, source string) (resultColumnM
 				pkName, pkType = name, typ
 			}
 		}
-		if err = rows.Err(); err != nil {
+		if err = resultColRowsErr(rows); err != nil {
 			_ = rows.Close()
 			return resultColumnMetadata{}, err
 		}
 		_ = rows.Close()
 		// A single exact INTEGER PK without a separate PK index is a rowid
 		// alias. This also rejects WITHOUT ROWID and INTEGER PRIMARY KEY DESC.
-		indexes, indexErr := db.QueryContext(ctx, "PRAGMA index_list("+quoteColumnIdentifier(physical)+")")
+		indexes, indexErr := resultColQueryContext(db, ctx, "PRAGMA index_list("+quoteColumnIdentifier(physical)+")")
 		if indexErr != nil {
 			return resultColumnMetadata{}, indexErr
 		}
@@ -125,14 +133,14 @@ func loadResultColumnMetadata(ctx context.Context, source string) (resultColumnM
 			}
 			pkIndex = pkIndex || origin == "pk"
 		}
-		if err = indexes.Err(); err != nil {
+		if err = resultColRowsErr(indexes); err != nil {
 			_ = indexes.Close()
 			return resultColumnMetadata{}, err
 		}
 		_ = indexes.Close()
 		var tableType string
 		var wr int
-		if err = db.QueryRowContext(ctx, "SELECT type, wr FROM pragma_table_list WHERE schema='main' AND name=?", physical).Scan(&tableType, &wr); err != nil {
+		if err = resultColQueryRowContext(db, ctx, "SELECT type, wr FROM pragma_table_list WHERE schema='main' AND name=?", physical).Scan(&tableType, &wr); err != nil {
 			return resultColumnMetadata{}, err
 		}
 		if pkCount == 1 && strings.EqualFold(pkType, "INTEGER") && !pkIndex && tableType == "table" && wr == 0 {

@@ -17,6 +17,7 @@ import (
 // handleGridKey's "enter" case -> cellDetailOverlay) instead of
 // u.updateGrid/u.detail/u.gridFocused.
 func TestChatUIEnterOpensAndClosesCellDetail(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{Title: "Invoices", RecordSetID: "rs1", Result: secureread.Result{
 		Columns: []string{"InvoiceId", "CustomerId"},
 		Rows:    []secureread.Row{{Data: map[string]any{"InvoiceId": 7, "CustomerId": 1}}},
@@ -53,6 +54,7 @@ func TestChatUIEnterOpensAndClosesCellDetail(t *testing.T) {
 // leaves the display cursor at position 0), so this is real, DataTug-owned
 // behavior, not native grid mechanics.
 func TestChatUIGridSortRetainsSelectedSourceRowForInspector(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{RecordSetID: "recordset", Result: secureread.Result{
 		Columns: []string{"Name"},
 		Rows: []secureread.Row{

@@ -41,6 +41,7 @@ func (d dummyCondition) Validate() error        { return nil }
 func (d dummyCondition) String() string         { return "" }
 
 func TestRemaining_SessionChatHTTP_ActiveIDMismatch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 
@@ -65,6 +66,7 @@ func TestRemaining_SessionChatHTTP_ActiveIDMismatch(t *testing.T) {
 }
 
 func TestRemaining_SessionChatBranches(t *testing.T) {
+	// Not parallel: mutates package-level dbQueryContextFn and execContextFn seams.
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 
@@ -132,6 +134,7 @@ func TestRemaining_SessionChatBranches(t *testing.T) {
 }
 
 func TestRemaining_GridAndCharts(t *testing.T) {
+	t.Parallel()
 	// grid.go:146 formatGridValue with date column and non-string/non-byte value
 	if got := formatGridValue("order_date", 12345); got != "12345" {
 		t.Fatalf("expected 12345, got %q", got)
@@ -163,6 +166,7 @@ func TestRemaining_GridAndCharts(t *testing.T) {
 }
 
 func TestRemaining_ChatUIExportAndChips(t *testing.T) {
+	t.Parallel()
 	// chatui.go:1044 startExportCommand with activeCommandInteractionID != ""
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
@@ -194,6 +198,7 @@ func TestRemaining_ChatUIExportAndChips(t *testing.T) {
 }
 
 func TestRemaining_BrowserCellDetail(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	chat, store := newTestSessionChat(t)
 	chat.catalog = ProjectCatalog{
@@ -242,6 +247,7 @@ func TestRemaining_BrowserCellDetail(t *testing.T) {
 }
 
 func TestRemaining_HTTPSettings(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -297,6 +303,7 @@ func TestRemaining_HTTPSettings(t *testing.T) {
 }
 
 func TestRemaining_HTTPStore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -380,6 +387,7 @@ func TestRemaining_HTTPStore(t *testing.T) {
 }
 
 func TestRemaining_ExportFullCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// ExportRecordSets empty or nil
@@ -426,6 +434,7 @@ func (f *failingWriter) Write(p []byte) (n int, err error) {
 }
 
 func TestRemaining_BookmarkFullCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -486,6 +495,7 @@ func TestRemaining_BookmarkFullCoverage(t *testing.T) {
 }
 
 func TestRemaining_JoinFullCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// Qualify join expression branches
@@ -530,6 +540,7 @@ func TestRemaining_JoinFullCoverage(t *testing.T) {
 }
 
 func TestRemaining_BridgeFullCoverage(t *testing.T) {
+	t.Parallel()
 	chat, _ := newTestSessionChat(t)
 	bridge, err := StartBrowserBridge(chat)
 	if err != nil {
@@ -709,6 +720,7 @@ func TestRemaining_BridgeFullCoverage(t *testing.T) {
 }
 
 func TestRemaining_JoinDeepCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// LoadSQLiteForeignKeySnapshot with memory DB
@@ -765,6 +777,7 @@ func TestRemaining_JoinDeepCoverage(t *testing.T) {
 }
 
 func TestRemaining_ExportDeepCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// ParseExportFormat
@@ -831,6 +844,7 @@ func TestRemaining_ExportDeepCoverage(t *testing.T) {
 }
 
 func TestRemaining_BookmarkDeepCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()

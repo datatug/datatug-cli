@@ -39,6 +39,7 @@ func (w *failWriter) Write(p []byte) (n int, err error) {
 }
 
 func TestFinalRound_ChartsAndSorting(t *testing.T) {
+	t.Parallel()
 	candidates := []ChartCandidate{
 		{Score: 10, Spec: ChartSpec{Title: "B", Kind: "bar", Dimension: "d1"}},
 		{Score: 10, Spec: ChartSpec{Title: "A", Kind: "bar", Dimension: "d1"}},
@@ -56,6 +57,7 @@ func TestFinalRound_ChartsAndSorting(t *testing.T) {
 }
 
 func TestFinalRound_AttachedJoinAndSessionChat(t *testing.T) {
+	// Not parallel: mutates package-level execContextFn seam.
 	ctx := context.Background()
 
 	// 1. AttachedJoin with failing Candidates
@@ -143,6 +145,7 @@ func (m *mockJoinAppWithError) ApplyAttached(ctx context.Context, record RecordS
 }
 
 func TestFinalRound_HTTPSettings(t *testing.T) {
+	// Not parallel: mutates package-level osLstat, settingsDBExec, and sqlOpenStore seams.
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -197,6 +200,7 @@ func TestFinalRound_HTTPSettings(t *testing.T) {
 }
 
 func TestFinalRound_HTTPStore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -302,6 +306,7 @@ func TestFinalRound_HTTPStore(t *testing.T) {
 }
 
 func TestFinalRound_BridgeEndpoints(t *testing.T) {
+	// Not parallel: mutates package-level netListenTCP seam.
 	chat, _ := newTestSessionChat(t)
 	bridge, err := StartBrowserBridge(chat)
 	if err != nil {
@@ -441,6 +446,7 @@ func TestFinalRound_BridgeEndpoints(t *testing.T) {
 }
 
 func TestFinalRound_ExportDetails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// 1. exportFlat error on CSV header write
@@ -498,6 +504,7 @@ func TestFinalRound_ExportDetails(t *testing.T) {
 }
 
 func TestFinalRound_BookmarkFullBranches(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -565,6 +572,7 @@ func TestFinalRound_BookmarkFullBranches(t *testing.T) {
 }
 
 func TestFinalRound_JoinCompleteBranches(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// 1. activeJoinPairs branches:

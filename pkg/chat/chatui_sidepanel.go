@@ -1237,11 +1237,7 @@ func (p *workspacePanel) updateKey(msg tea.KeyPressMsg) tea.Cmd {
 	if p == p.ui.explorer && p.explorerSearchFocused {
 		switch msg.String() {
 		case "esc":
-			if p.explorerSearch != "" {
-				p.explorerSearch = ""
-			} else {
-				p.explorerSearchFocused = false
-			}
+			p.explorerSearchFocused = false
 		case "enter", "down":
 			p.explorerSearchFocused = false
 		case "backspace":

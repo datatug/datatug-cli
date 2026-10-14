@@ -18,6 +18,7 @@ import (
 // cases that only a direct call (or a programmatically built spec, as the
 // HTTP request form produces) can reach.
 func TestSendHTTPRequestValidationGuards(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 
 	if _, err := u.sendHTTPRequest(httpRequestSpec{Method: "TRACE", URL: "https://example.com"}); err == nil {
@@ -47,6 +48,7 @@ func TestSendHTTPRequestValidationGuards(t *testing.T) {
 // the store before the command runs makes AppendUser fail, and the
 // resulting httpDoneMsg must carry that error through handleHTTPDone.
 func TestSendHTTPRequestBackgroundAppendUserFailureReportsError(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -85,6 +87,7 @@ func TestSendHTTPRequestBackgroundAppendUserFailureReportsError(t *testing.T) {
 // TestHTTPRequestOverlayNonKeyMessageIsNoOp covers Update's non-tea.KeyPressMsg
 // early return.
 func TestHTTPRequestOverlayNonKeyMessageIsNoOp(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet})
 	overlay, cmd, done := d.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -95,6 +98,7 @@ func TestHTTPRequestOverlayNonKeyMessageIsNoOp(t *testing.T) {
 
 // TestHTTPRequestOverlayCtrlCQuits covers Update's "ctrl+c" branch.
 func TestHTTPRequestOverlayCtrlCQuits(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet})
 	_, cmd, done := d.Update(tea.KeyPressMsg{Text: "ctrl+c"})
@@ -108,6 +112,7 @@ func TestHTTPRequestOverlayCtrlCQuits(t *testing.T) {
 // submit -> save -> back to method), exercising setFocus's url/headerName/
 // headerValue/body Focus() branches and loadDefaults' tab-from-URL trigger.
 func TestHTTPRequestOverlayTabCyclesEveryFocusStop(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet, URL: "https://example.com/data"})
 	d.focus = 0
@@ -132,6 +137,7 @@ func TestHTTPRequestOverlayTabCyclesEveryFocusStop(t *testing.T) {
 // TestHTTPRequestOverlayShiftEnterInsertsNewlineInBody covers Update's
 // "shift+enter" branch while the body field is focused.
 func TestHTTPRequestOverlayShiftEnterInsertsNewlineInBody(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodPost})
 	d.focus = 5
@@ -150,6 +156,7 @@ func TestHTTPRequestOverlayShiftEnterInsertsNewlineInBody(t *testing.T) {
 // TestHTTPRequestOverlayLeftRightCyclesMethod covers Update's "left"/"right"
 // method-cycling branch, including wrapping in both directions.
 func TestHTTPRequestOverlayLeftRightCyclesMethod(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet})
 	d.focus = 0
@@ -180,6 +187,7 @@ func TestHTTPRequestOverlayLeftRightCyclesMethod(t *testing.T) {
 // TestHTTPRequestOverlayUpDownSelectsHeader covers Update's "up"/"down"
 // header-selection branch.
 func TestHTTPRequestOverlayUpDownSelectsHeader(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet})
 	d.headers = []httpHeaderField{{name: "A", value: "1"}, {name: "B", value: "2"}, {name: "C", value: "3"}}
@@ -210,6 +218,7 @@ func TestHTTPRequestOverlayUpDownSelectsHeader(t *testing.T) {
 // tests, which drive it via SetValue + commitHeader rather than the key
 // itself).
 func TestHTTPRequestOverlayAKeyStartsAddingAHeader(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet})
 	d.headerName.SetValue("stale")
@@ -229,6 +238,7 @@ func TestHTTPRequestOverlayAKeyStartsAddingAHeader(t *testing.T) {
 // not Enter, but exercises the same commitHeader path enter->4 also
 // reaches).
 func TestHTTPRequestOverlayEnterAtEveryFocusStop(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet, URL: "https://example.com"})
 
@@ -268,6 +278,7 @@ func TestHTTPRequestOverlayEnterAtEveryFocusStop(t *testing.T) {
 // per-focus key-routing switch (url/headerName/headerValue/body Update)
 // for an ordinary character key.
 func TestHTTPRequestOverlayTypingRoutesToFocusedField(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet})
 
@@ -301,6 +312,7 @@ func TestHTTPRequestOverlayTypingRoutesToFocusedField(t *testing.T) {
 // and a duplicate header name (case-insensitive) that isn't the one being
 // edited.
 func TestHTTPRequestOverlayCommitHeaderValidationAndDuplicateGuards(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet})
 
@@ -327,6 +339,7 @@ func TestHTTPRequestOverlayCommitHeaderValidationAndDuplicateGuards(t *testing.T
 // branches are already covered by
 // TestChatUIHTTPFormSaveOpensProjectQueryDialogOnlyForSupportedRequest.
 func TestHTTPRequestOverlaySaveAsProjectQueryGuards(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet, URL: "not-a-url"})
 	if _, _, done := d.saveAsProjectQuery(); done {
@@ -350,6 +363,7 @@ func TestHTTPRequestOverlaySaveAsProjectQueryGuards(t *testing.T) {
 // (no-op, loadedOrigin already set), and its header-merge sort with two+
 // configured headers (exercising the sort.Slice comparator).
 func TestHTTPRequestOverlayLoadDefaultsGuardsAndSort(t *testing.T) {
+	t.Parallel()
 	sessionless := NewChatUI(context.Background(), nil, "fake-model")
 	d := newHTTPRequestOverlay(sessionless, httpRequestSpec{Method: http.MethodGet, URL: "https://example.com"})
 	d.loadDefaults() // no-op: no sessions
@@ -390,6 +404,7 @@ func TestHTTPRequestOverlayLoadDefaultsGuardsAndSort(t *testing.T) {
 // TestHTTPRequestOverlaySpecGuards covers spec()'s own two error branches
 // directly: an invalid URL, and a GET/HEAD request with a non-empty body.
 func TestHTTPRequestOverlaySpecGuards(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet, URL: "not-a-url"})
 	if _, err := d.spec(); err == nil {
@@ -408,6 +423,7 @@ func TestHTTPRequestOverlaySpecGuards(t *testing.T) {
 // TestHTTPRequestOverlayInvalidURLBlocksSubmit, which drives it through
 // Update's Enter routing).
 func TestHTTPRequestOverlaySubmitInvalidSpecKeepsOverlayOpenWithError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet, URL: "not-a-url"})
 	overlay, cmd, done := d.submit()
@@ -423,6 +439,7 @@ func TestHTTPRequestOverlaySubmitInvalidSpecKeepsOverlayOpenWithError(t *testing
 // "N more headers" above/below hints when the selected header sits deep in
 // a long list.
 func TestHTTPRequestOverlayViewShowsMoreHeadersScrollHints(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet})
 	for i := 0; i < 12; i++ {
@@ -437,6 +454,7 @@ func TestHTTPRequestOverlayViewShowsMoreHeadersScrollHints(t *testing.T) {
 
 // TestHTTPRequestOverlayViewShowsErrorLine covers View's err-line branch.
 func TestHTTPRequestOverlayViewShowsErrorLine(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet})
 	d.err = "Something went wrong."
@@ -452,6 +470,7 @@ func TestHTTPRequestOverlayViewShowsErrorLine(t *testing.T) {
 // failure text is appended as a plain Turn rather than a structured
 // HTTPResponse.
 func TestChatUIHTTPCommandFetchFailureShowsMessageInsteadOfStructuredResponse(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	deadURL := server.URL
 	server.Close() // now guaranteed unreachable: connection refused
@@ -481,6 +500,7 @@ func TestChatUIHTTPCommandFetchFailureShowsMessageInsteadOfStructuredResponse(t 
 // the store before the (synchronous) call means the settings lookup itself
 // fails, distinct from a background runCmd failure.
 func TestSendHTTPRequestSettingsLoadFailureReportsError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
@@ -504,6 +524,7 @@ func TestSendHTTPRequestSettingsLoadFailureReportsError(t *testing.T) {
 // sort inside loadDefaults): construction-time configured headers (the
 // default User-Agent plus one project-scope extra) are sorted by name.
 func TestNewHTTPRequestOverlaySortsConstructionTimeConfiguredHeaders(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	if err := store.SetHTTPRequestSetting(ctx, "project", "header", "https://api.example.test", "X-Aardvark", "z"); err != nil {
@@ -527,6 +548,7 @@ func TestNewHTTPRequestOverlaySortsConstructionTimeConfiguredHeaders(t *testing.
 // spec.Headers-merge loop: manual headers passed in the spec appear
 // alongside any store-configured ones.
 func TestNewHTTPRequestOverlayIncludesSpecHeaders(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet, URL: "https://example.com", Headers: map[string]string{"X-Manual": "v"}})
 	found := false
@@ -545,6 +567,7 @@ func TestNewHTTPRequestOverlayIncludesSpecHeaders(t *testing.T) {
 // TestHTTPRequestOverlaySubmitInvalidSpecKeepsOverlayOpenWithError, which
 // calls submit() directly).
 func TestHTTPRequestOverlayCtrlEnterSubmitsViaUpdate(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -566,6 +589,7 @@ func TestHTTPRequestOverlayCtrlEnterSubmitsViaUpdate(t *testing.T) {
 // distinct from the direct-call coverage in
 // TestHTTPRequestOverlayCommitHeaderValidationAndDuplicateGuards).
 func TestHTTPRequestOverlayEnterOnExistingHeaderOpensItForEdit(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet})
 	d.headers = []httpHeaderField{{name: "X-Test", value: "old"}}
@@ -586,6 +610,7 @@ func TestHTTPRequestOverlayEnterOnExistingHeaderOpensItForEdit(t *testing.T) {
 // saveAsProjectQuery's per-header rejection branch for a GET, no-body
 // request whose headers aren't exactly the default User-Agent: DataTug.
 func TestHTTPRequestOverlaySaveAsProjectQueryRejectsNonDefaultHeader(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.savedQueryService = &savedQueryStub{}
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet, URL: "https://example.com/data", Headers: map[string]string{"X-Custom": "v"}})
@@ -602,6 +627,7 @@ func TestHTTPRequestOverlaySaveAsProjectQueryRejectsNonDefaultHeader(t *testing.
 // the same name (case-insensitively) as a store-configured one is not
 // duplicated.
 func TestHTTPRequestOverlayLoadDefaultsDedupsAgainstManualHeader(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	if err := store.SetHTTPRequestSetting(ctx, "project", "header", "https://api.example.test", "X-Manual", "configured-value"); err != nil {
@@ -639,6 +665,7 @@ func TestHTTPRequestOverlayLoadDefaultsDedupsAgainstManualHeader(t *testing.T) {
 // sendHTTPRequest-error branch: a spec that passes spec()'s own validation
 // but fails sendHTTPRequest's own checks (no active session).
 func TestHTTPRequestOverlaySubmitSendFailureKeepsOverlayOpen(t *testing.T) {
+	t.Parallel()
 	sessionless := NewChatUI(context.Background(), nil, "fake-model")
 	d := newHTTPRequestOverlay(sessionless, httpRequestSpec{Method: http.MethodGet, URL: "https://example.com/data"})
 	overlay, cmd, done := d.submit()
@@ -654,6 +681,7 @@ func TestHTTPRequestOverlaySubmitSendFailureKeepsOverlayOpen(t *testing.T) {
 // loadDefaults' own HTTPRequestSettings-error branch: a closed store makes
 // the (synchronous) settings lookup fail.
 func TestHTTPRequestOverlayLoadDefaultsSettingsFailureSetsError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
@@ -681,6 +709,7 @@ func TestHTTPRequestOverlayLoadDefaultsSettingsFailureSetsError(t *testing.T) {
 // production, so this path is only reachable by overriding the seam
 // directly, as here.
 func TestSendHTTPRequestNilBusyCmdReturnsBareRunCmd(t *testing.T) {
+	// Not parallel: mutates package-level startHTTPRequestBusy seam.
 	u, _ := newTestChatUI(t, nil, Turn{})
 	original := startHTTPRequestBusy
 	startHTTPRequestBusy = func(*ChatUI) tea.Cmd { return nil }
@@ -702,6 +731,7 @@ func TestSendHTTPRequestNilBusyCmdReturnsBareRunCmd(t *testing.T) {
 // TestSendHTTPRequestBackgroundAppendUserFailureReportsError, which fails
 // at AppendUser itself.
 func TestSendHTTPRequestFinalizeFailureAfterAppendUserReportsError(t *testing.T) {
+	// Not parallel: mutates package-level finalizeHTTPRequest seam.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -732,6 +762,7 @@ func TestSendHTTPRequestFinalizeFailureAfterAppendUserReportsError(t *testing.T)
 // finalizeHTTPRequest's own real (non-overridden) error branch directly:
 // a closed store makes AppendHTTPResponse fail.
 func TestFinalizeHTTPRequestDefaultImplementationPropagatesStoreError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")

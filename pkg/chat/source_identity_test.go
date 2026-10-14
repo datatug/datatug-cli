@@ -58,6 +58,7 @@ var previousScopeGoldens = []struct {
 var goldenEnv = map[string]string{"DT0C_GOLDEN_PG": "postgres://alice:s3cret@db-a.example.com:5432/shop"}
 
 func TestPreviousScope_IsTheHashTheStoreWroteOnMain(t *testing.T) {
+	// Not parallel: mutates environment variables.
 	for _, tc := range previousScopeGoldens {
 		for name, value := range tc.env {
 			t.Setenv(name, value)
@@ -71,6 +72,7 @@ func TestPreviousScope_IsTheHashTheStoreWroteOnMain(t *testing.T) {
 // An env source keeps main's identity under a rotated password and moves with
 // the database the variable points at: previousScope hashes what main hashed.
 func TestPreviousScope_FollowsWhereAnEnvSourcePoints(t *testing.T) {
+	// Not parallel: mutates environment variables.
 	sources := map[string]string{"shop": "env:DT0C_GOLDEN_PG"}
 	t.Setenv("DT0C_GOLDEN_PG", "postgres://alice:s3cret@db-a.example.com:5432/shop")
 	original := previousScope(identityScope(sources))
@@ -88,6 +90,7 @@ func TestPreviousScope_FollowsWhereAnEnvSourcePoints(t *testing.T) {
 // bookmarks and its preferences after the upgrade, whatever the display form of
 // the sources cut off.
 func TestOpenSessionStore_MovesWhatThePreviousScopeIdentityHeld(t *testing.T) {
+	// Not parallel: mutates environment variables.
 	ctx := context.Background()
 	for _, tc := range previousScopeGoldens {
 		t.Run(tc.name, func(t *testing.T) {
@@ -148,6 +151,7 @@ func TestOpenSessionStore_MovesWhatThePreviousScopeIdentityHeld(t *testing.T) {
 // query used the selected source; the source they stored is the one main wrote,
 // which for a path with a "#" is the whole path.
 func TestOpenSessionStore_ReopensAPhaseTwoSessionOfADirectoryWithAHash(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	scope := identityScope(map[string]string{"db": hashSource})
@@ -178,6 +182,7 @@ func TestOpenSessionStore_ReopensAPhaseTwoSessionOfADirectoryWithAHash(t *testin
 }
 
 func TestMoveChatScope_ErrorsAreReportedAndNothingIsHalfMoved(t *testing.T) {
+	// Not parallel: mutates package-level dbBeginFn and txExecFn seams.
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -236,6 +241,7 @@ func TestMoveChatScope_ErrorsAreReportedAndNothingIsHalfMoved(t *testing.T) {
 }
 
 func TestOpenSessionStore_ReportsAScopeMoveThatFails(t *testing.T) {
+	// Not parallel: mutates package-level txExecFn seam.
 	origExec := txExecFn
 	t.Cleanup(func() { txExecFn = origExec })
 	txExecFn = func(tx *sql.Tx, query string, args ...any) (sql.Result, error) {
@@ -281,6 +287,7 @@ func TestStoredSourceNames(t *testing.T) {
 // A result stored from a project whose directory holds a "#" is refreshed: the
 // stored source is the display form, and the live source is found by its ID.
 func TestRefreshRecordSet_FindsTheLiveSourceByIDWhenTheStoredOneIsItsDisplayForm(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	live := hashSource
 	scope := testScope()
@@ -341,6 +348,7 @@ func TestRefreshRecordSet_FindsTheLiveSourceByIDWhenTheStoredOneIsItsDisplayForm
 // The JOIN and cell-detail actions compare a stored result with the live source
 // of their own: the display form of it names the same source.
 func TestJoinActionsRecogniseAStoredResultByTheDisplayFormOfTheLiveSource(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	live := "sqlite:///fixture.db?mode=ro&token=s3cret"
 	snapshot := joinSnapshot()

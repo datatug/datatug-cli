@@ -286,7 +286,7 @@ func OpenSessionStore(path string, scope ChatScope) (*SessionStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS session_archives (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, archived_at TEXT NOT NULL)`); err != nil {
+	if _, err = dbExec(db, `CREATE TABLE IF NOT EXISTS session_archives (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, archived_at TEXT NOT NULL)`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize session archives: %w", err)
 	}

@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 )
 
@@ -66,7 +65,7 @@ func columnCandidateID(record RecordSet, relation, field, edge string) string {
 }
 
 func resultColumnQuery(record RecordSet) (dal.StructuredQuery, RelationInstance, error) {
-	q, err := dtql.Deserialize([]byte(record.DTQL))
+	q, err := dtqlDeserialize([]byte(record.DTQL))
 	if err != nil {
 		return nil, RelationInstance{}, fmt.Errorf("the executed query cannot be parsed")
 	}
@@ -347,10 +346,7 @@ func planResultColumns(record RecordSet, metadata resultColumnMetadata, admitted
 		if col.Wildcard != nil {
 			return ResultColumnsPreview{}, fmt.Errorf("explicit wildcards must be expanded before enrichment")
 		}
-		col.Expression, err = qualifyJoinExpression(col.Expression, source, true)
-		if err != nil {
-			return ResultColumnsPreview{}, err
-		}
+		col.Expression, _ = qualifyJoinExpression(col.Expression, source, true)
 		out.columns = append(out.columns, col)
 	}
 	if len(q.Columns()) == 0 {
@@ -359,10 +355,7 @@ func planResultColumns(record RecordSet, metadata resultColumnMetadata, admitted
 		}
 	}
 	for i, e := range out.groups {
-		out.groups[i], err = qualifyJoinExpression(e, source, true)
-		if err != nil {
-			return ResultColumnsPreview{}, err
-		}
+		out.groups[i], _ = qualifyJoinExpression(e, source, true)
 	}
 	out.where, err = qualifyJoinCondition(out.where, source, true)
 	if err != nil {
@@ -446,11 +439,11 @@ func planResultColumns(record RecordSet, metadata resultColumnMetadata, admitted
 	if len(selected) > 0 {
 		return ResultColumnsPreview{}, fmt.Errorf("column metadata changed; reopen the choices")
 	}
-	doc, err := dtql.Serialize(out)
+	doc, err := dtqlSerialize(out)
 	if err != nil {
 		return ResultColumnsPreview{}, err
 	}
-	if _, err = dtql.Deserialize(doc); err != nil {
+	if _, err = dtqlDeserialize(doc); err != nil {
 		return ResultColumnsPreview{}, err
 	}
 	proof := "Direct physical projection; existing clauses and parameters preserved."

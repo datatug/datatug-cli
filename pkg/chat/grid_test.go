@@ -11,6 +11,7 @@ import (
 )
 
 func TestNormalizeGridTitle(t *testing.T) {
+	t.Parallel()
 	if got := normalizeGridTitle("  latest\n  orders "); got != "latest orders" {
 		t.Fatalf("normalized title = %q", got)
 	}
@@ -29,6 +30,7 @@ func TestNormalizeGridTitle(t *testing.T) {
 }
 
 func TestNewGridModelPreservesStructureAndFormatsValues(t *testing.T) {
+	t.Parallel()
 	when := time.Date(2026, 9, 20, 12, 30, 0, 0, time.UTC)
 	result := secureread.Result{
 		Columns: []string{"id", "name", "amount", "when", "empty", "blob"},
@@ -55,6 +57,7 @@ func TestNewGridModelPreservesStructureAndFormatsValues(t *testing.T) {
 }
 
 func TestNewGridModelCompactsMidnightValuesInDateColumns(t *testing.T) {
+	t.Parallel()
 	midnight := time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
 	noon := time.Date(2026, 9, 20, 12, 30, 0, 0, time.UTC)
 	grid := NewGridModel(secureread.Result{
@@ -75,6 +78,7 @@ func TestNewGridModelCompactsMidnightValuesInDateColumns(t *testing.T) {
 }
 
 func TestGridModelSanitizesDisplayTextButPreservesRawValues(t *testing.T) {
+	t.Parallel()
 	rawHeader := "\x1b]0;title\aCustomer\u202e"
 	rawCell := "\x1b[31m東京\x1b[0m\n\u202evisible"
 	rawBytes := []byte("Cafe\t\u200d\U0001f469")

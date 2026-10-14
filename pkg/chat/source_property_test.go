@@ -19,6 +19,7 @@ import (
 // from the display form's cut), no secret of four or more characters is in any
 // file the store wrote or in the source it reads back.
 func TestProperty_ChatStoreNeverPersistsASourceSecret(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	cases := sourcecases.CommandCases()

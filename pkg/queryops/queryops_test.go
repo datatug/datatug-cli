@@ -32,6 +32,7 @@ func parsePreview(t *testing.T, preview Preview) dal.StructuredQuery {
 }
 
 func TestDeriveMatchingSourceGroupKeepsSourceFilterParametersAndBoundsOutput(t *testing.T) {
+	t.Parallel()
 	preview, err := DeriveGroup(simpleQuery, []string{"category"}, true, MatchingSource)
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +66,7 @@ func TestDeriveMatchingSourceGroupKeepsSourceFilterParametersAndBoundsOutput(t *
 }
 
 func TestDeriveMatchingSourceSortCanReachRowsOutsideOriginalLimit(t *testing.T) {
+	t.Parallel()
 	preview, err := DeriveSort(simpleQuery, []SortTerm{{Column: "total", Descending: true}}, MatchingSource)
 	if err != nil {
 		t.Fatal(err)
@@ -85,6 +87,7 @@ func TestDeriveMatchingSourceSortCanReachRowsOutsideOriginalLimit(t *testing.T) 
 }
 
 func TestOriginalOutputRetainsInnerLimitAndSortsOnlyItsOutput(t *testing.T) {
+	t.Parallel()
 	preview, err := DeriveSort(simpleQuery, []SortTerm{{Column: "total", Descending: true}}, OriginalOutput)
 	if err != nil {
 		t.Fatal(err)
@@ -114,6 +117,7 @@ columns: [{field: category, source: s, as: category}, {aggregate: {function: cou
 `
 
 func TestOriginalOutputGroupRetainsExistingAggregationHavingAndLimit(t *testing.T) {
+	t.Parallel()
 	preview, err := DeriveGroup(aggregatedQuery, []string{"category"}, true, OriginalOutput)
 	if err != nil {
 		t.Fatal(err)
@@ -139,6 +143,7 @@ func TestOriginalOutputGroupRetainsExistingAggregationHavingAndLimit(t *testing.
 }
 
 func TestDerivationRejectsAmbiguousUnknownUnsafeAndUnsupportedColumns(t *testing.T) {
+	t.Parallel()
 	ambiguous := `from: {name: T}
 columns: [{field: id, as: key}, {field: name, as: key}]
 `
@@ -169,6 +174,7 @@ columns: [{field: id, source: d, as: id}]
 }
 
 func TestMatchingSourceRefusesExistingAggregationAndCountAliasCollision(t *testing.T) {
+	t.Parallel()
 	if _, err := DeriveGroup(aggregatedQuery, []string{"category"}, true, MatchingSource); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("existing aggregate accepted: %v", err)
 	}
@@ -187,6 +193,7 @@ columns: [{field: count, as: COUNT}]
 }
 
 func TestPreviewLimitIsAlwaysBounded(t *testing.T) {
+	t.Parallel()
 	noLimit := strings.Replace(simpleQuery, "limit: 2\n", "", 1)
 	preview, err := DeriveSort(noLimit, []SortTerm{{Column: "total"}}, MatchingSource)
 	if err != nil {
@@ -208,6 +215,7 @@ func TestPreviewLimitIsAlwaysBounded(t *testing.T) {
 }
 
 func TestMatchingSourceRetainsJoinTreeAndJoinPredicates(t *testing.T) {
+	t.Parallel()
 	queryText := `from: {name: Customer, alias: c, joins: [{from: {name: Invoice, alias: i}, on: [{left: {field: CustomerId, source: c}, op: '==', right: {field: CustomerId, source: i}}]}]}
 where: {op: '==', left: {field: Country, source: c}, right: {param: Country}}
 limit: 4
@@ -230,6 +238,7 @@ columns: [{field: Name, source: c, as: customer}, {field: Total, source: i, as: 
 }
 
 func TestOriginalOutputGroupWithoutCountIsKeyOnly(t *testing.T) {
+	t.Parallel()
 	preview, err := DeriveGroup(simpleQuery, []string{"category"}, false, OriginalOutput)
 	if err != nil {
 		t.Fatal(err)
@@ -240,5 +249,91 @@ func TestOriginalOutputGroupWithoutCountIsKeyOnly(t *testing.T) {
 	}
 	if strings.Contains(preview.DTQL, "aggregate:") {
 		t.Fatalf("unexpected inferred aggregate:\n%s", preview.DTQL)
+	}
+}
+
+func TestQueryOpsRemainingValidationAndErrorBranches(t *testing.T) {
+	t.Parallel()
+	// Empty terms in DeriveSort.
+	if _, err := DeriveSort(simpleQuery, nil, MatchingSource); !errors.Is(err, ErrInvalidColumn) {
+		t.Fatalf("expected ErrInvalidColumn for empty terms, got %v", err)
+	}
+	// Empty DTQL in DeriveSort.
+	if _, err := DeriveSort("   ", []SortTerm{{Column: "total"}}, MatchingSource); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported for empty DTQL, got %v", err)
+	}
+	// Unknown scope in DeriveSort.
+	if _, err := DeriveSort(simpleQuery, []SortTerm{{Column: "total"}}, Scope(99)); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported for unknown scope, got %v", err)
+	}
+	// Duplicate sort selection.
+	if _, err := DeriveSort(simpleQuery, []SortTerm{{Column: "total"}, {Column: "total"}}, MatchingSource); !errors.Is(err, ErrInvalidColumn) {
+		t.Fatalf("expected ErrInvalidColumn for duplicate sort column, got %v", err)
+	}
+	// MatchingSource validation failure in DeriveSort.
+	if _, err := DeriveSort(aggregatedQuery, []SortTerm{{Column: "category"}}, MatchingSource); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported for aggregated query in MatchingSource sort, got %v", err)
+	}
+	// serializePreview failure on nil query.
+	if _, err := serializePreview(nil, nil, MatchingSource); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported from serializePreview(nil), got %v", err)
+	}
+	// projectedColumns edge cases: empty columns, nil expression, computed without alias.
+	emptyColsQuery := dal.From(dal.NewRootCollectionRef("T", "")).NewQuery().SelectColumns()
+	if _, err := projectedColumns(emptyColsQuery); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported for empty columns, got %v", err)
+	}
+	nilExprQuery := dal.From(dal.NewRootCollectionRef("T", "")).NewQuery().SelectColumns(dal.Column{Alias: "a"})
+	if _, err := projectedColumns(nilExprQuery); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported for nil column expression, got %v", err)
+	}
+	computedNoAlias := dal.From(dal.NewRootCollectionRef("T", "")).NewQuery().SelectColumns(dal.Column{Expression: dal.Constant{Value: "x"}})
+	if _, err := projectedColumns(computedNoAlias); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported for computed column without alias, got %v", err)
+	}
+	// validateMatchingSource edge cases: StartFrom, negative offset, wildcard, non-field expression.
+	startFromQuery := dal.From(dal.NewRootCollectionRef("T", "")).NewQuery().StartFrom("cursor").SelectColumns(dal.Column{Alias: "id", Expression: dal.Field("id")})
+	if err := validateMatchingSource(startFromQuery); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported for StartFrom query, got %v", err)
+	}
+	negOffsetQuery := dal.From(dal.NewRootCollectionRef("T", "")).NewQuery().Offset(-1).SelectColumns(dal.Column{Alias: "id", Expression: dal.Field("id")})
+	if err := validateMatchingSource(negOffsetQuery); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported for negative offset, got %v", err)
+	}
+	wildcardQuery := dal.From(dal.NewRootCollectionRef("T", "")).NewQuery().SelectColumns(dal.Column{Wildcard: &dal.WildcardProjection{}})
+	if err := validateMatchingSource(wildcardQuery); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported for wildcard column in validateMatchingSource, got %v", err)
+	}
+	constExprQuery := dal.From(dal.NewRootCollectionRef("T", "")).NewQuery().SelectColumns(dal.Column{Alias: "c", Expression: dal.Constant{Value: 1}})
+	if err := validateMatchingSource(constExprQuery); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported for non-FieldRef column in validateMatchingSource, got %v", err)
+	}
+	// Cover wildcard in projectedColumns
+	wildcardProjQ := dal.From(dal.NewRootCollectionRef("T", "")).NewQuery().SelectColumns(dal.Column{Wildcard: &dal.WildcardProjection{}})
+	if _, err := projectedColumns(wildcardProjQ); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported for wildcard in projectedColumns, got %v", err)
+	}
+
+	// Cover derived source in validateMatchingSource
+	subQ := dal.From(dal.NewRootCollectionRef("Sub", "")).NewQuery().SelectColumns(dal.Column{Alias: "id", Expression: dal.Field("id")})
+	derivedQ := dal.From(dal.NewQuerySource(subQ, "sq")).NewQuery().SelectColumns(dal.Column{Alias: "id", Expression: dal.Field("id")})
+	if err := validateMatchingSource(derivedQ); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("expected ErrUnsupported for derived source in validateMatchingSource, got %v", err)
+	}
+
+	// Cover nil and derived join in containsDerivedSource
+	if !containsDerivedSource(nil) {
+		t.Fatal("expected containsDerivedSource(nil) == true")
+	}
+	derivedChild := dal.From(dal.NewQuerySource(subQ, "sq"))
+	fromWithDerivedJoin := dal.From(dal.NewRootCollectionRef("Main", "")).Join(dal.NewNestedJoinedSource(derivedChild, dal.JoinLeft, dal.NewComparison(dal.Field("Main.id"), dal.Equal, dal.Field("sq.id"))))
+	if !containsDerivedSource(fromWithDerivedJoin) {
+		t.Fatal("expected containsDerivedSource(fromWithDerivedJoin) == true")
+	}
+
+	// Cover join with nil From() in containsDerivedSource
+	baseJoin := dal.From(dal.NewRootCollectionRef("Main", "")).Join(dal.NewJoinedSource(dal.NewRootCollectionRef("Other", "o"), dal.JoinInner, dal.NewComparison(dal.Field("Main.id"), dal.Equal, dal.Field("o.id"))))
+	if containsDerivedSource(baseJoin) {
+		t.Fatal("expected containsDerivedSource(baseJoin) == false")
 	}
 }

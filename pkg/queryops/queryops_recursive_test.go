@@ -91,6 +91,7 @@ func fieldStrings(rows []map[string]any, field string) []string {
 }
 
 func TestRecursiveSQLiteGroupingAndSortingRespectScopePredicatesAndOffset(t *testing.T) {
+	t.Parallel()
 	db := newRecursiveSQLite(t)
 	allSix := strings.Replace(recursiveSalesQuery, "limit: 2", "limit: 6", 1)
 	matchedRows := executeRecursivePreview(t, db, Preview{DTQL: allSix, Scope: MatchingSource})
@@ -161,6 +162,7 @@ func TestRecursiveSQLiteGroupingAndSortingRespectScopePredicatesAndOffset(t *tes
 }
 
 func TestRecursiveSQLiteOriginalOutputGroupingKeepsHavingAndAggregation(t *testing.T) {
+	t.Parallel()
 	db := newRecursiveSQLite(t)
 	aggregated := `from: {name: Sales, alias: s, joins: [{from: {name: Parents, alias: p}, on: [{left: {field: parentId, source: s}, op: '==', right: {field: id, source: p}}]}]}
 where: {and: [{op: '<=', left: {field: id, source: s}, right: {value: 9}}, {op: '==', left: {field: active, source: p}, right: {value: 1}}]}

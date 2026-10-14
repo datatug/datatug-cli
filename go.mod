@@ -2,8 +2,6 @@ module github.com/datatug/datatug-cli
 
 go 1.27.0
 
-//replace github.com/datatug/datatug-core => ../datatug-core
-
 // All sibling deps now ship the upstream changes db-copy depends on
 // at tagged versions:
 //   - dal-go/dalgo2sql v0.6.2       (ANSI/SQLite LIMIT N emission via

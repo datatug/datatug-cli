@@ -10,6 +10,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/incidentstore"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/dtconfig"
 )
 
 // secureMu guards the package-level state ConfigureSecureSession sets once,
@@ -68,6 +69,9 @@ type Capabilities struct {
 	EvidenceByteCap    int
 	EvidenceRetention  time.Duration
 	SnapshotPolicies   map[string]SnapshotProjectPolicy
+	// DetectiveAIProfile is operator-selected at serve startup. It contains
+	// only an environment-variable name for the credential, never a key.
+	DetectiveAIProfile *dtconfig.AIProfile
 }
 
 // ConfigureSecureSession wires the fixed secureread.Session `datatug serve`

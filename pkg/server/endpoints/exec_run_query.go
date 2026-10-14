@@ -56,7 +56,9 @@ type runQueryOptions struct {
 	// rowLimit lets an internal caller use its own safety bound without
 	// changing the public ExecutionRequest limit contract. Zero keeps the
 	// public exec/run_query bound.
-	rowLimit              int
+	rowLimit int
+	// An internal Detective run must execute the saved definition admitted
+	// with its sealed catalog, even if a concurrent edit changes the query.
 	expectedQueryRevision string
 }
 
@@ -72,6 +74,9 @@ func computeRunQuery(ctx context.Context, req apicontract.ExecutionRequest) (api
 }
 
 func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRequest, options runQueryOptions) (apicontract.Result, error) {
+	if options.expectedQueryRevision != "" && (!req.Record || req.QueryID == "") {
+		return apicontract.Result{}, newInvalidRequest("queryId", "a pinned query revision requires a recorded saved query")
+	}
 	if err := validateScope(apicontract.Scope{StoreID: req.StoreID, Project: req.Project, Environment: req.Environment, SecurityContextID: req.SecurityContextID}); err != nil {
 		return apicontract.Result{}, err
 	}
@@ -144,12 +149,12 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 			if loadErr != nil {
 				return apicontract.Result{}, newNotFound(fmt.Sprintf("query %q not found", req.QueryID))
 			}
-			if options.expectedQueryRevision != "" && string(stored.Revision) != options.expectedQueryRevision {
-				return apicontract.Result{}, newInvalidRequest("queryId", "query revision changed after input pinning")
-			}
 			loaded := stored.Query.QueryDef
 			queryDef = &loaded
 			queryRevision = string(stored.Revision)
+			if options.expectedQueryRevision != "" && queryRevision != options.expectedQueryRevision {
+				return apicontract.Result{}, newRevisionConflict("queryId", "saved query changed after Detective run admission")
+			}
 		} else {
 			queryDef, err = projStore.LoadQuery(ctx, req.QueryID)
 			if err != nil {
@@ -416,6 +421,13 @@ func computeRunQueryWithOptions(ctx context.Context, req apicontract.ExecutionRe
 	}
 	if err := runQueryResponseValidateHook(&response); err != nil {
 		return apicontract.Result{}, fmt.Errorf("validate query execution response: %w", err)
+	}
+	if req.QueryID != "" && response.Execution != nil && !response.Truncated {
+		actor := api.SecurePrincipalID()
+		if actor == "" {
+			actor = "local-owner"
+		}
+		detectiveTransientRows.put(*response.Execution, actor, response.Recordset, time.Now())
 	}
 	return response, nil
 }

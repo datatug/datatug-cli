@@ -74,6 +74,8 @@ func openFile(filePath string) (nav.Page, error) {
 func uiModules() []datatugui.Module {
 	return []datatugui.Module{
 		dtproject.Module(),
+		detectiveModuleEntry("detective"),
+		detectiveModuleEntry("checks"),
 		dtviewers.Module(
 			dbviewer.Viewer(),
 			gcloudui.Viewer(),

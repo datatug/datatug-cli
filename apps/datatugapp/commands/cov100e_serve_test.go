@@ -85,6 +85,7 @@ func TestCov100eReadServeFlags_EachFlagMissing(t *testing.T) {
 		{serveEvidenceDirFlag, func(c *cobra.Command) { c.Flags().String(serveEvidenceDirFlag, "", "") }},
 		{serveSnapshotByteCapFlag, func(c *cobra.Command) { c.Flags().Int(serveSnapshotByteCapFlag, 0, "") }},
 		{serveSnapshotRetentionFlag, func(c *cobra.Command) { c.Flags().Duration(serveSnapshotRetentionFlag, 0, "") }},
+		{serveDetectiveAIProfileFlag, func(c *cobra.Command) { c.Flags().String(serveDetectiveAIProfileFlag, "", "") }},
 	}
 	for k := range defs {
 		cmd := &cobra.Command{Use: "x"}

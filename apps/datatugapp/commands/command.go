@@ -67,6 +67,8 @@ func DatatugCommand() *cobra.Command {
 		incidentCommand(),
 		sessionCommand(),
 		chatCommand(),
+		detectiveUICommand("checks"),
+		detectiveUICommand("detective"),
 		planCommand(),
 	)
 	return root

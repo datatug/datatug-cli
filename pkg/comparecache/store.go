@@ -55,35 +55,62 @@ type Store struct {
 	mu      chan struct{}
 }
 
+var (
+	resolvePrivateDir = executionstore.ResolvePrivateDir
+	statFile          = os.Stat
+	chmod             = os.Chmod
+	sqlOpen           = sql.Open
+	dbExec            = func(db *sql.DB, query string) (sql.Result, error) { return db.Exec(query) }
+	jsonMarshal       = json.Marshal
+	txCommit          = func(tx *sql.Tx) error { return tx.Commit() }
+	dbBeginTx         = func(db *sql.DB, ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+		return db.BeginTx(ctx, opts)
+	}
+	txExecContext = func(tx *sql.Tx, ctx context.Context, query string, args ...any) (sql.Result, error) {
+		return tx.ExecContext(ctx, query, args...)
+	}
+	dbExecContext = func(db *sql.DB, ctx context.Context, query string, args ...any) (sql.Result, error) {
+		return db.ExecContext(ctx, query, args...)
+	}
+	rowsErrHook        = func(rows *sql.Rows) error { return rows.Err() }
+	rowsCloseHook      = func(rows *sql.Rows) error { return rows.Close() }
+	pragmaTableInfoSQL = `PRAGMA table_info(comparison_meta)`
+	pageRowsSQL        = `SELECT sort_key, payload_json FROM comparison_rows
+ WHERE comparison_id = ? AND state = ? AND sort_key > ?
+ ORDER BY sort_key LIMIT ?`
+	sumBytesSQL     = `SELECT COALESCE(SUM(byte_size), 0) FROM comparison_meta`
+	selectVictimSQL = `SELECT comparison_id, byte_size FROM comparison_meta ORDER BY last_access_at_ns ASC, comparison_id ASC LIMIT 1`
+)
+
 func Open(options Options) (*Store, error) {
-	privateDir, err := executionstore.ResolvePrivateDir(options.PrivateDir)
+	privateDir, err := resolvePrivateDir(options.PrivateDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve comparison cache directory: %w", err)
 	}
 	if err := os.MkdirAll(privateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create comparison cache directory: %w", err)
 	}
-	if err := os.Chmod(privateDir, 0o700); err != nil {
+	if err := chmod(privateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("secure comparison cache directory: %w", err)
 	}
 	path := filepath.Join(privateDir, fileName)
-	if _, err := os.Stat(path); err == nil {
-		if err := os.Chmod(path, 0o600); err != nil {
+	if _, err := statFile(path); err == nil {
+		if err := chmod(path, 0o600); err != nil {
 			return nil, fmt.Errorf("secure comparison cache file: %w", err)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("stat comparison cache file: %w", err)
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sqlOpen("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open comparison cache: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	if _, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000`); err != nil {
+	if _, err = dbExec(db, `PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("configure comparison cache: %w", err)
 	}
-	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS comparison_meta (
+	if _, err = dbExec(db, `CREATE TABLE IF NOT EXISTS comparison_meta (
 		comparison_id TEXT PRIMARY KEY,
 		query_id TEXT NOT NULL,
 		policy_fingerprint TEXT NOT NULL DEFAULT '',
@@ -102,7 +129,7 @@ func Open(options Options) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS comparison_rows (
+	if _, err = dbExec(db, `CREATE TABLE IF NOT EXISTS comparison_rows (
 		comparison_id TEXT NOT NULL,
 		sort_key TEXT NOT NULL,
 		state TEXT NOT NULL,
@@ -112,17 +139,17 @@ func Open(options Options) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("create comparison_rows: %w", err)
 	}
-	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS comparison_rows_id_sort
+	if _, err = dbExec(db, `CREATE INDEX IF NOT EXISTS comparison_rows_id_sort
 		ON comparison_rows (comparison_id, sort_key)`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("create comparison_rows sort index: %w", err)
 	}
-	if _, err = db.Exec(`CREATE INDEX IF NOT EXISTS comparison_rows_id_state_sort
+	if _, err = dbExec(db, `CREATE INDEX IF NOT EXISTS comparison_rows_id_state_sort
 		ON comparison_rows (comparison_id, state, sort_key)`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("create comparison_rows state index: %w", err)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := chmod(path, 0o600); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("secure comparison cache file: %w", err)
 	}
@@ -152,7 +179,7 @@ func Open(options Options) (*Store, error) {
 // Older optional caches predate policy binding; their empty fingerprint fails
 // closed at the API boundary until the comparison is recomputed.
 func migratePolicyFingerprint(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(comparison_meta)`)
+	rows, err := db.Query(pragmaTableInfoSQL)
 	if err != nil {
 		return err
 	}
@@ -167,10 +194,10 @@ func migratePolicyFingerprint(db *sql.DB) error {
 		}
 		found = found || name == "policy_fingerprint"
 	}
-	if err := rows.Err(); err != nil {
+	if err := rowsErrHook(rows); err != nil {
 		return err
 	}
-	if err := rows.Close(); err != nil {
+	if err := rowsCloseHook(rows); err != nil {
 		return err
 	}
 	if !found {
@@ -236,18 +263,18 @@ func (s *Store) Begin(ctx context.Context, req BeginRequest) (*WriteSession, err
 	if err := s.lock(ctx); err != nil {
 		return nil, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := dbBeginTx(s.db, ctx, nil)
 	if err != nil {
 		s.unlock()
 		return nil, fmt.Errorf("begin comparison cache write: %w", err)
 	}
 	id := ID(req.Left, req.Right)
-	if _, err := tx.ExecContext(ctx, `DELETE FROM comparison_rows WHERE comparison_id = ?`, id); err != nil {
+	if _, err := txExecContext(tx, ctx, `DELETE FROM comparison_rows WHERE comparison_id = ?`, id); err != nil {
 		_ = tx.Rollback()
 		s.unlock()
 		return nil, fmt.Errorf("clear comparison rows: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM comparison_meta WHERE comparison_id = ?`, id); err != nil {
+	if _, err := txExecContext(tx, ctx, `DELETE FROM comparison_meta WHERE comparison_id = ?`, id); err != nil {
 		_ = tx.Rollback()
 		s.unlock()
 		return nil, fmt.Errorf("clear comparison meta: %w", err)
@@ -276,7 +303,7 @@ func (s *WriteSession) Observer() recordsetcompare.RecordObserver {
 			s.Abort()
 			return fmt.Errorf("comparison cache exceeds byte cap %d", s.store.byteCap)
 		}
-		if _, err := s.tx.ExecContext(s.ctx,
+		if _, err := txExecContext(s.tx, s.ctx,
 			`INSERT INTO comparison_rows (comparison_id, sort_key, state, payload_json) VALUES (?, ?, ?, ?)`,
 			s.comparisonID, record.SortKey, string(record.State), payload,
 		); err != nil {
@@ -295,22 +322,22 @@ func (s *WriteSession) Commit(result apicontract.CompareResult) error {
 		s.Abort()
 		return fmt.Errorf("comparison cache row bytes %d exceed cap %d", s.bytes, s.store.byteCap)
 	}
-	columnsJSON, err := json.Marshal(result.Columns)
+	columnsJSON, err := jsonMarshal(result.Columns)
 	if err != nil {
 		s.Abort()
 		return fmt.Errorf("marshal comparison columns: %w", err)
 	}
-	keyJSON, err := json.Marshal(result.Key)
+	keyJSON, err := jsonMarshal(result.Key)
 	if err != nil {
 		s.Abort()
 		return fmt.Errorf("marshal comparison key: %w", err)
 	}
-	leftJSON, err := json.Marshal(s.left)
+	leftJSON, err := jsonMarshal(s.left)
 	if err != nil {
 		s.Abort()
 		return fmt.Errorf("marshal left execution: %w", err)
 	}
-	rightJSON, err := json.Marshal(s.right)
+	rightJSON, err := jsonMarshal(s.right)
 	if err != nil {
 		s.Abort()
 		return fmt.Errorf("marshal right execution: %w", err)
@@ -322,7 +349,7 @@ func (s *WriteSession) Commit(result apicontract.CompareResult) error {
 	}
 	s.bytes += metadataBytes
 	now := s.store.now().UTC().UnixNano()
-	if _, err := s.tx.ExecContext(s.ctx,
+	if _, err := txExecContext(s.tx, s.ctx,
 		`INSERT INTO comparison_meta (
 			comparison_id, query_id, policy_fingerprint, left_json, right_json, columns_json, key_json,
 			byte_size, created_at_ns, last_access_at_ns
@@ -333,7 +360,7 @@ func (s *WriteSession) Commit(result apicontract.CompareResult) error {
 		s.Abort()
 		return fmt.Errorf("insert comparison meta: %w", err)
 	}
-	if err := s.tx.Commit(); err != nil {
+	if err := txCommit(s.tx); err != nil {
 		s.done = true
 		s.store.unlock()
 		return fmt.Errorf("commit comparison cache: %w", err)
@@ -437,7 +464,7 @@ func (s *Store) Page(ctx context.Context, req PageRequest) (Page, error) {
 	}
 	// Use one SQLite snapshot for metadata and payloads. A per-Store lock
 	// cannot exclude another server process replacing the same comparison.
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := dbBeginTx(s.db, ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return Page{}, fmt.Errorf("begin comparison page: %w", err)
 	}
@@ -484,25 +511,21 @@ func (s *Store) Page(ctx context.Context, req PageRequest) (Page, error) {
 			SortKey: sortKey, Key: payload.Key, Row: payload.Row, Deltas: payload.Deltas,
 		})
 	}
-	if err := rows.Err(); err != nil {
+	if err := rowsErrHook(rows); err != nil {
 		return Page{}, fmt.Errorf("iterate comparison rows: %w", err)
 	}
-	if err := rows.Close(); err != nil {
+	if err := rowsCloseHook(rows); err != nil {
 		return Page{}, fmt.Errorf("close comparison rows: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := txCommit(tx); err != nil {
 		return Page{}, fmt.Errorf("finish comparison page: %w", err)
 	}
 	now := s.now().UTC().UnixNano()
-	if _, err := s.db.ExecContext(ctx, `UPDATE comparison_meta SET last_access_at_ns = ? WHERE comparison_id = ?`, now, req.ComparisonID); err != nil {
+	if _, err := dbExecContext(s.db, ctx, `UPDATE comparison_meta SET last_access_at_ns = ? WHERE comparison_id = ?`, now, req.ComparisonID); err != nil {
 		return Page{}, fmt.Errorf("touch comparison cache: %w", err)
 	}
 	return page, nil
 }
-
-const pageRowsSQL = `SELECT sort_key, payload_json FROM comparison_rows
- WHERE comparison_id = ? AND state = ? AND sort_key > ?
- ORDER BY sort_key LIMIT ?`
 
 type metadataQuerier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
@@ -543,43 +566,43 @@ func lookupComparison(ctx context.Context, db metadataQuerier, comparisonID stri
 func (s *Store) evictLocked(ctx context.Context) error {
 	// Expiry and LRU delete payloads and metadata atomically, including
 	// against other Store instances sharing the private SQLite file.
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := dbBeginTx(s.db, ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin comparison eviction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	cutoff := s.now().UTC().Add(-s.ttl).UnixNano()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM comparison_rows WHERE comparison_id IN (
+	if _, err := txExecContext(tx, ctx, `DELETE FROM comparison_rows WHERE comparison_id IN (
 		SELECT comparison_id FROM comparison_meta WHERE created_at_ns < ?
 	)`, cutoff); err != nil {
 		return fmt.Errorf("expire comparison rows: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM comparison_meta WHERE created_at_ns < ?`, cutoff); err != nil {
+	if _, err := txExecContext(tx, ctx, `DELETE FROM comparison_meta WHERE created_at_ns < ?`, cutoff); err != nil {
 		return fmt.Errorf("expire comparison meta: %w", err)
 	}
 	var total int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(byte_size), 0) FROM comparison_meta`).Scan(&total); err != nil {
+	if err := tx.QueryRowContext(ctx, sumBytesSQL).Scan(&total); err != nil {
 		return fmt.Errorf("sum comparison cache bytes: %w", err)
 	}
 	for total > s.byteCap {
 		var id string
 		var size int
-		err := tx.QueryRowContext(ctx, `SELECT comparison_id, byte_size FROM comparison_meta ORDER BY last_access_at_ns ASC, comparison_id ASC LIMIT 1`).Scan(&id, &size)
+		err := tx.QueryRowContext(ctx, selectVictimSQL).Scan(&id, &size)
 		if errors.Is(err, sql.ErrNoRows) {
-			return tx.Commit()
+			return txCommit(tx)
 		}
 		if err != nil {
 			return fmt.Errorf("select comparison cache LRU victim: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM comparison_rows WHERE comparison_id = ?`, id); err != nil {
+		if _, err := txExecContext(tx, ctx, `DELETE FROM comparison_rows WHERE comparison_id = ?`, id); err != nil {
 			return fmt.Errorf("evict comparison rows: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM comparison_meta WHERE comparison_id = ?`, id); err != nil {
+		if _, err := txExecContext(tx, ctx, `DELETE FROM comparison_meta WHERE comparison_id = ?`, id); err != nil {
 			return fmt.Errorf("evict comparison meta: %w", err)
 		}
 		total -= size
 	}
-	return tx.Commit()
+	return txCommit(tx)
 }
 
 type rowPayload struct {
@@ -596,7 +619,7 @@ func marshalRowPayload(record recordsetcompare.ComparedRecord) (string, error) {
 			payload.Deltas[i] = CachedDelta{Column: delta.Column, Value: delta.Value, Absent: delta.Absent}
 		}
 	}
-	body, err := json.Marshal(payload)
+	body, err := jsonMarshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("marshal comparison row: %w", err)
 	}

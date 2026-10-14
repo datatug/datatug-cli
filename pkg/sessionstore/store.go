@@ -40,20 +40,15 @@ func ResolvePrivateDirectory(root string) (string, error) {
 		return "", sessioncontext.ErrInvalid
 	}
 	absolute, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
+	if err == nil {
+		absolute, err = privatePath(absolute)
 	}
-	if err = privatePath(absolute); err != nil {
-		return "", err
-	}
-	absolute, err = resolvedPrivatePath(absolute)
-	if err != nil {
-		return "", err
-	}
-	return absolute, nil
+	return absolute, err
 }
 
-func resolvedPrivatePath(path string) (string, error) {
+// privatePath rejects Git repositories and resolves existing symlink ancestors
+// before checking so a symlink cannot redirect private context into a checkout.
+func privatePath(path string) (string, error) {
 	ancestor := path
 	for {
 		if _, err := os.Lstat(ancestor); err == nil {
@@ -61,57 +56,27 @@ func resolvedPrivatePath(path string) (string, error) {
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return "", err
 		}
-		parent := filepath.Dir(ancestor)
-		if parent == ancestor {
-			return "", sessioncontext.ErrInvalid
-		}
-		ancestor = parent
+		ancestor = filepath.Dir(ancestor)
 	}
 	resolved, err := filepath.EvalSymlinks(ancestor)
 	if err != nil {
 		return "", err
-	}
-	relative, err := filepath.Rel(ancestor, path)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(resolved, relative), nil
-}
-
-// privatePath rejects Git repositories and resolves existing symlink ancestors
-// before checking so a symlink cannot redirect private context into a checkout.
-func privatePath(path string) error {
-	ancestor := path
-	for {
-		if _, err := os.Lstat(ancestor); err == nil {
-			break
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		parent := filepath.Dir(ancestor)
-		if parent == ancestor {
-			return sessioncontext.ErrUnavailable
-		}
-		ancestor = parent
-	}
-	resolved, err := filepath.EvalSymlinks(ancestor)
-	if err != nil {
-		return err
 	}
 	for current := resolved; ; current = filepath.Dir(current) {
 		if _, err := os.Lstat(filepath.Join(current, ".git")); err == nil {
-			return errors.New("session context must be stored outside Git repositories")
+			return "", errors.New("session context must be stored outside Git repositories")
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
+			return "", err
 		}
 		if filepath.Dir(current) == current {
 			break
 		}
 	}
 	if info, err := os.Lstat(path); err == nil && (info.Mode()&os.ModeSymlink != 0 || !info.IsDir()) {
-		return sessioncontext.ErrInvalid
+		return "", sessioncontext.ErrInvalid
 	}
-	return nil
+	relative, _ := filepath.Rel(ancestor, path)
+	return filepath.Join(resolved, relative), nil
 }
 
 func secureFile(path string) error {
@@ -123,23 +88,26 @@ func secureFile(path string) error {
 		return err
 	}
 	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return sessioncontext.ErrInvalid
 	}
 	return os.Chmod(path, 0600)
 }
 
+func openSecuredSQLite(database string) (*sql.DB, error) {
+	if err := secureFile(database); err != nil {
+		return nil, err
+	}
+	return sql.Open("sqlite", database)
+}
+
 func (m *Manager) Repository(project, projectDir string) (*sessioncontext.DALRepository, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	absolute, err := filepath.Abs(projectDir)
-	if err != nil {
-		return nil, err
+	resolved, err := filepath.Abs(projectDir)
+	if err == nil {
+		resolved, err = filepath.EvalSymlinks(resolved)
 	}
-	resolved, err := filepath.EvalSymlinks(absolute)
 	if err != nil {
 		return nil, err
 	}
@@ -152,23 +120,16 @@ func (m *Manager) Repository(project, projectDir string) (*sessioncontext.DALRep
 		return sessioncontext.NewDALRepository(existing, nil)
 	}
 	dir := filepath.Join(m.root, id)
-	if err = privatePath(dir); err != nil {
-		return nil, err
+	if _, err = privatePath(dir); err == nil {
+		if err = os.MkdirAll(dir, 0700); err == nil {
+			err = os.Chmod(dir, 0700)
+		}
 	}
-	if err = os.MkdirAll(dir, 0700); err != nil {
-		return nil, err
-	}
-	if err = os.Chmod(dir, 0700); err != nil {
-		return nil, err
-	}
-	if err = privatePath(dir); err != nil {
+	if err != nil {
 		return nil, err
 	}
 	database := filepath.Join(dir, "sessions.sqlite")
-	if err = secureFile(database); err != nil {
-		return nil, err
-	}
-	db, err := sql.Open("sqlite", database)
+	db, err := openSecuredSQLite(database)
 	if err != nil {
 		return nil, err
 	}
@@ -178,19 +139,16 @@ func (m *Manager) Repository(project, projectDir string) (*sessioncontext.DALRep
 			return nil, err
 		}
 	}
-	if err = db.Close(); err != nil {
-		return nil, err
-	}
+	_ = db.Close()
 	quoted, _ := json.Marshal(database)
 	manifest := "database:\n  id: " + id + "\n  schema_mode: strict\nstorage:\n  engine: sqlite\n  path: " + string(quoted) + "\nschemas:\n" + sessioncontext.ManifestCollectionsYAML()
 	manifestPath := filepath.Join(dir, "session-context.ovdb.yaml")
-	if err = secureFile(manifestPath); err != nil {
-		return nil, err
+	var mounted *core.Database
+	if err = secureFile(manifestPath); err == nil {
+		if err = os.WriteFile(manifestPath, []byte(manifest), 0600); err == nil {
+			mounted, err = mount.File(manifestPath)
+		}
 	}
-	if err = os.WriteFile(manifestPath, []byte(manifest), 0600); err != nil {
-		return nil, err
-	}
-	mounted, err := mount.File(manifestPath)
 	if err != nil {
 		return nil, err
 	}

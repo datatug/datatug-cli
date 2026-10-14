@@ -15,6 +15,7 @@ import (
 )
 
 func TestPrivateOVDBSessionRestartConflictReplay(t *testing.T) {
+	t.Parallel()
 	root, project := t.TempDir(), t.TempDir()
 	scope := sessioncontext.Scope{EnvironmentID: "uat", IdentityDomain: "uat-orders"}
 	allow := true
@@ -25,6 +26,10 @@ func TestPrivateOVDBSessionRestartConflictReplay(t *testing.T) {
 		}
 		r, err := m.Repository("p", project)
 		if err != nil {
+			t.Fatal(err)
+		}
+		// Second call to m.Repository exercises the cached mount fast-path.
+		if _, err := m.Repository("p", project); err != nil {
 			t.Fatal(err)
 		}
 		s, err := sessioncontext.NewService(r, func(_ context.Context, a sessioncontext.Access) error {
@@ -96,6 +101,7 @@ func TestPrivateOVDBSessionRestartConflictReplay(t *testing.T) {
 }
 
 func TestPrivateOVDBRejectsGitAndSymlinkTargets(t *testing.T) {
+	t.Parallel()
 	git := t.TempDir()
 	if err := os.Mkdir(filepath.Join(git, ".git"), 0700); err != nil {
 		t.Fatal(err)
@@ -122,5 +128,141 @@ func TestPrivateOVDBRejectsGitAndSymlinkTargets(t *testing.T) {
 	defer func() { _ = m.Close() }()
 	if _, err = m.Repository("p", project); err == nil {
 		t.Fatal("accepted symlinked private storage inside served project")
+	}
+}
+
+func TestSessionStoreErrorBranches(t *testing.T) {
+	t.Parallel()
+	// Empty root rejected.
+	if _, err := ResolvePrivateDirectory(""); !errors.Is(err, sessioncontext.ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for empty root, got %v", err)
+	}
+
+	// Ancestor is a regular file -> os.Lstat(ancestor) returns ENOTDIR (non-ErrNotExist).
+	tmp := t.TempDir()
+	regFile := filepath.Join(tmp, "regular-file")
+	if err := os.WriteFile(regFile, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolvePrivateDirectory(filepath.Join(regFile, "child")); err == nil {
+		t.Fatal("expected error when ancestor is a regular file")
+	}
+
+	// Path itself is a regular file -> os.Lstat(current/.git) returns ENOTDIR.
+	if _, err := ResolvePrivateDirectory(regFile); err == nil {
+		t.Fatal("expected error when path is a regular file")
+	}
+
+	// Dangling symlink -> os.Lstat succeeds, EvalSymlinks fails.
+	dangling := filepath.Join(tmp, "dangling")
+	if err := os.Symlink(filepath.Join(tmp, "does-not-exist"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolvePrivateDirectory(dangling); err == nil {
+		t.Fatal("expected error for dangling symlink")
+	}
+
+	// Symlink to valid directory -> rejected by info.Mode()&os.ModeSymlink != 0.
+	validDir := filepath.Join(tmp, "valid-dir")
+	if err := os.MkdirAll(validDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	dirSymlink := filepath.Join(tmp, "dir-symlink")
+	if err := os.Symlink(validDir, dirSymlink); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolvePrivateDirectory(dirSymlink); !errors.Is(err, sessioncontext.ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for symlink directory, got %v", err)
+	}
+
+	// secureFile error branches: non-ErrExist and directory target.
+	if err := secureFile(filepath.Join(tmp, "no-such-dir", "file")); err == nil {
+		t.Fatal("expected error from secureFile when parent dir does not exist")
+	}
+	if err := secureFile(validDir); !errors.Is(err, sessioncontext.ErrInvalid) {
+		t.Fatalf("expected ErrInvalid when secureFile target is directory, got %v", err)
+	}
+
+	// Repository with nonexistent projectDir.
+	root := filepath.Join(tmp, "store-root")
+	m, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = m.Close() }()
+	if _, err := m.Repository("p", filepath.Join(tmp, "missing-project")); err == nil {
+		t.Fatal("expected error for missing projectDir")
+	}
+
+	// Compute session dir id for validDir.
+	projectDir := validDir
+	resolvedProject, err := filepath.EvalSymlinks(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pre-create sessions.sqlite as a directory so openSecuredSQLite fails.
+	m2Root := filepath.Join(tmp, "store-root-2")
+	m2, err := New(m2Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Trigger privatePath(dir) failure by placing .git in m2Root.
+	if err := os.MkdirAll(filepath.Join(m2Root, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m2.Repository("p", resolvedProject); err == nil {
+		t.Fatal("expected error when .git is added to manager root")
+	}
+	if err := os.RemoveAll(filepath.Join(m2Root, ".git")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Trigger database secureFile failure by pre-creating sessions.sqlite as a directory.
+	// First open once on a throwaway manager to learn the session id directory name.
+	probeRoot := filepath.Join(tmp, "probe-root")
+	probeMgr, err := New(probeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := probeMgr.Repository("p", resolvedProject); err != nil {
+		t.Fatal(err)
+	}
+	_ = probeMgr.Close()
+	entries, err := os.ReadDir(probeRoot)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("expected 1 session dir, got %v %v", entries, err)
+	}
+	sessionID := entries[0].Name()
+
+	// Pre-create sessions.sqlite as a directory.
+	dbAsDir := filepath.Join(m2Root, sessionID, "sessions.sqlite")
+	if err := os.MkdirAll(dbAsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m2.Repository("p", resolvedProject); !errors.Is(err, sessioncontext.ErrInvalid) {
+		t.Fatalf("expected ErrInvalid when sessions.sqlite is a directory, got %v", err)
+	}
+	if err := os.RemoveAll(dbAsDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create sessions.sqlite with invalid non-SQLite bytes so db.Exec fails.
+	if err := os.WriteFile(dbAsDir, []byte("not a valid sqlite database header"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m2.Repository("p", resolvedProject); err == nil {
+		t.Fatal("expected error when sessions.sqlite is corrupted")
+	}
+	if err := os.Remove(dbAsDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create session-context.ovdb.yaml as a directory so secureFile(manifestPath) fails.
+	manifestAsDir := filepath.Join(m2Root, sessionID, "session-context.ovdb.yaml")
+	if err := os.MkdirAll(manifestAsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m2.Repository("p", resolvedProject); !errors.Is(err, sessioncontext.ErrInvalid) {
+		t.Fatalf("expected ErrInvalid when manifestPath is a directory, got %v", err)
 	}
 }

@@ -99,7 +99,7 @@ homebrew_casks:
     ids:
       - tarball
     description: "DataTug – Context-aware data viewer & collaborative query manager for effortless exploration of related data — CLI + Web UI"
-    homepage: https://github.com/datatug/datatug-cli
+    homepage: https://datatug.io
     license: Apache-2.0
 
     repository:

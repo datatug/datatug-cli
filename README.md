@@ -5,7 +5,7 @@
         <td><img src="https://github.com/datatug/.github/raw/main/datatug-logo-3.2.png"></td>
         <td>
             <p>
-                DataTug is an open-source, CLI-first data exploration platform with a Web UI, designed to help you explore, query, and
+                DataTug is a CLI-first data exploration platform with a Web UI, designed to help you explore, query, and
                 connect data across multiple sources without losing context. It automatically surfaces related data — even across
                 different systems — so you can move naturally between datasets, queries, and results.
             </p>
@@ -313,8 +313,7 @@ variable of yours, and a project never holds it.
 
 No, we won't.
 
-The project is **free and open source**, and the code of this CLI is at https://github.com/datatug/datatug-cli. You are
-welcome to check - we do not look into your data.
+DataTug is **free for personal use** and built on open standards and protocols (including TugQL, OpenVaultDB, and ModelSpec). The CLI runs locally and we do not look into your data.
 
 The CLI does send a small amount of anonymous usage telemetry, which you can switch off: see [Telemetry](#telemetry).
 

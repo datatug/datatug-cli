@@ -60,11 +60,11 @@ func (c sessionCLI) cacheDashboardDisplay(ctx context.Context, runID string, res
 	if err != nil {
 		return err
 	}
-	cache, err := sessionresultcache.NewDefault()
+	cache, err := sessionResultCacheNewDefault()
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(result)
+	payload, err := sessionResultMarshal(result)
 	if err != nil {
 		return err
 	}
@@ -99,3 +99,8 @@ func sessionResultCommand() *cobra.Command {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(response)
 	}}
 }
+
+var (
+	sessionResultCacheNewDefault = sessionresultcache.NewDefault
+	sessionResultMarshal         = json.Marshal
+)

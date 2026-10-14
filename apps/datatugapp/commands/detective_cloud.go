@@ -20,6 +20,8 @@ import (
 	"github.com/google/uuid"
 )
 
+var detectiveCloudMarshal = json.Marshal
+
 // detectiveCloudService pins every request to one verified hosted project.
 // The server authenticates the bearer and independently authorizes the Space,
 // project, source, environment and linked resource for each operation.
@@ -81,7 +83,7 @@ func (s *detectiveCloudService) scope() url.Values {
 func (s *detectiveCloudService) do(ctx context.Context, method, path string, body, out any) error {
 	var payload io.Reader
 	if body != nil {
-		encoded, err := json.Marshal(body)
+		encoded, err := detectiveCloudMarshal(body)
 		if err != nil {
 			return err
 		}
@@ -349,7 +351,7 @@ func (s *detectiveCloudService) ReviewAI(ctx context.Context, a detectiveui.AIRe
 func (s *detectiveCloudService) ConfirmAI(ctx context.Context, a ai.ConfirmRequest) (ai.Receipt, error) {
 	var out ai.Receipt
 	body := map[string]any{"storage": "firestore", "spaceID": s.space, "project": s.project, "proposalId": a.ProposalID, "digest": a.Digest}
-	encoded, err := json.Marshal(body)
+	encoded, err := detectiveCloudMarshal(body)
 	if err != nil {
 		return out, err
 	}

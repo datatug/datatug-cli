@@ -23,12 +23,22 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const sessionChinookHash = "7651ba378ac2fcd0dfc3c66fb101f7a7eed3ba39a612ec642b96e20702061f15"
-const sessionChinookURL = "https://chinook.demodb.dev/data/chinook.sqlite"
+var (
+	sessionChinookHash       = "7651ba378ac2fcd0dfc3c66fb101f7a7eed3ba39a612ec642b96e20702061f15"
+	sessionChinookSize int64 = 1007616
+	sessionChinookURL        = "https://chinook.demodb.dev/data/chinook.sqlite"
+)
+
 const sessionInvoiceDashboard = "chinook-invoice-overview"
 const sessionInvoiceDashboardRevision = "chinook-invoice-overview-1"
 
-var sessionRunInvoiceDashboard = runSessionInvoiceDashboard
+var (
+	sessionRunInvoiceDashboard = runSessionInvoiceDashboard
+	sessionCreateTemp          = os.CreateTemp
+	sessionFileClose           = func(f *os.File) error { return f.Close() }
+	sessionDashboardSqlOpen    = sql.Open
+	sessionRowsScan            = func(rows *sql.Rows, dest ...any) error { return rows.Scan(dest...) }
+)
 
 const sessionInvoiceLinesSQL = `SELECT il.InvoiceLineId,il.TrackId,t.Name,g.Name AS Genre,il.Quantity,il.UnitPrice,ROUND(il.Quantity*il.UnitPrice,2) AS Total FROM InvoiceLine il JOIN Track t ON t.TrackId=il.TrackId LEFT JOIN Genre g ON g.GenreId=t.GenreId WHERE il.InvoiceId=? ORDER BY il.InvoiceLineId`
 const sessionInvoiceGenreSQL = `SELECT COALESCE(g.Name,'Unknown') AS Genre,ROUND(SUM(il.Quantity*il.UnitPrice),2) AS Total FROM InvoiceLine il JOIN Track t ON t.TrackId=il.TrackId LEFT JOIN Genre g ON g.GenreId=t.GenreId WHERE il.InvoiceId=? GROUP BY g.GenreId,g.Name ORDER BY Total DESC,Genre`
@@ -161,7 +171,7 @@ func runSessionInvoiceDashboard(ctx context.Context, path, invoice string) (sess
 		if response.StatusCode != http.StatusOK {
 			return result, errors.New("public sample source unavailable")
 		}
-		f, createErr := os.CreateTemp("", "datatug-session-chinook-*.sqlite")
+		f, createErr := sessionCreateTemp("", "datatug-session-chinook-*.sqlite")
 		if createErr != nil {
 			return result, errors.New("private sample download unavailable")
 		}
@@ -169,7 +179,7 @@ func runSessionInvoiceDashboard(ctx context.Context, path, invoice string) (sess
 		downloadedPath := path
 		defer func() { _ = os.Remove(downloadedPath) }()
 		_, copyErr := io.Copy(f, io.LimitReader(response.Body, 1007617))
-		closeErr := f.Close()
+		closeErr := sessionFileClose(f)
 		if copyErr != nil || closeErr != nil {
 			return result, errors.New("public sample download failed")
 		}
@@ -178,7 +188,7 @@ func runSessionInvoiceDashboard(ctx context.Context, path, invoice string) (sess
 	if err != nil {
 		return result, errors.New("sample fixture unavailable")
 	}
-	snapshot, createErr := os.CreateTemp("", "datatug-session-pinned-*.sqlite")
+	snapshot, createErr := sessionCreateTemp("", "datatug-session-pinned-*.sqlite")
 	if createErr != nil {
 		_ = f.Close()
 		return result, errors.New("private fixture snapshot unavailable")
@@ -187,16 +197,16 @@ func runSessionInvoiceDashboard(ctx context.Context, path, invoice string) (sess
 	hash := sha256.New()
 	size, hashErr := io.Copy(io.MultiWriter(hash, snapshot), io.LimitReader(f, 1007617))
 	_ = f.Close()
-	snapshotCloseErr := snapshot.Close()
+	snapshotCloseErr := sessionFileClose(snapshot)
 	if snapshotCloseErr != nil {
 		return result, errors.New("private fixture snapshot unavailable")
 	}
 	path = snapshot.Name()
-	if hashErr != nil || size != 1007616 || hex.EncodeToString(hash.Sum(nil)) != sessionChinookHash {
+	if hashErr != nil || size != sessionChinookSize || hex.EncodeToString(hash.Sum(nil)) != sessionChinookHash {
 		return result, errors.New("sample fixture does not match the admitted source hash")
 	}
 	uri := url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}
-	db, err := sql.Open("sqlite", uri.String())
+	db, err := sessionDashboardSqlOpen("sqlite", uri.String())
 	if err != nil {
 		return result, errors.New("sample fixture unavailable")
 	}
@@ -219,10 +229,7 @@ func sessionDashboardRecordset(ctx context.Context, db *sql.DB, query string, in
 		return out, errors.New("sample query unavailable")
 	}
 	defer func() { _ = rows.Close() }()
-	names, err := rows.Columns()
-	if err != nil {
-		return out, errors.New("sample query unavailable")
-	}
+	names, _ := rows.Columns()
 	for _, name := range names {
 		kind := "integer"
 		switch name {
@@ -242,7 +249,7 @@ func sessionDashboardRecordset(ctx context.Context, db *sql.DB, query string, in
 		for i := range values {
 			dest[i] = &values[i]
 		}
-		if rows.Scan(dest...) != nil {
+		if sessionRowsScan(rows, dest...) != nil {
 			return out, errors.New("sample result unavailable")
 		}
 		typed := make([]apicontract.TypedValue, len(values))

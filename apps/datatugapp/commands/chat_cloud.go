@@ -94,7 +94,9 @@ type cloudSession struct {
 	identity   string // local preference scope only; never sent as authorization
 }
 
-func loadCloudSession(ctx context.Context, options chatOptions) (cloudSession, error) {
+var loadCloudSession = defaultLoadCloudSession
+
+func defaultLoadCloudSession(ctx context.Context, options chatOptions) (cloudSession, error) {
 	if options.apiKey != "" {
 		return cloudSession{}, fmt.Errorf("cloud chat uses 'datatug auth login', not an AI profile API key")
 	}

@@ -432,22 +432,10 @@ func resolveCompareSourceBinding(binding string) (string, error) {
 	if err != nil {
 		return "", errors.New("explicit source binding is not a supported DALgo source URL")
 	}
-	if !containsSourceScheme(dbcopy.SupportedSchemes(), ref.Scheme) {
-		return "", errors.New("explicit source binding uses an unsupported DALgo provider")
-	}
 	if ref.Scheme == "postgres" && !fromEnv {
 		return "", errors.New("PostgreSQL source bindings must use env:VARIABLE so credentials stay out of command history")
 	}
 	return binding, nil
-}
-
-func containsSourceScheme(schemes []string, scheme string) bool {
-	for _, supported := range schemes {
-		if supported == scheme {
-			return true
-		}
-	}
-	return false
 }
 
 func compareCatalogSourceURL(catalog datatug.DbCatalog, projectDir string) (string, error) {

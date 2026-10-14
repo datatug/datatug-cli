@@ -19,6 +19,8 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
+var bqGoogleDefaultClient = google.DefaultClient
+
 // dbCopyCommand wires `datatug db copy --from <url> --to <url>` per
 // spec/features/cli/db/copy/README.md.
 func dbCopyCommand() *cobra.Command {
@@ -72,7 +74,7 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 		if ref.ProjectID != target.ProjectID || ref.DatasetID != target.DatasetID || ref.Location != target.Location {
 			return Exit("--recover-job-ref destination does not match --to", 2)
 		}
-		client, err := google.DefaultClient(ctx, bqwriter.BigqueryScope)
+		client, err := bqGoogleDefaultClient(ctx, bqwriter.BigqueryScope)
 		if err != nil {
 			return Exit("open Google credentials from the local application default credentials", 4)
 		}
@@ -145,7 +147,7 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 		return Exit(fmt.Sprintf("open --to: %v", err), 4)
 	}
 
-	summary, err := dbcopy.Copy(ctx, src, tgt, opts)
+	summary, err := dbCopyRunner(ctx, src, tgt, opts)
 	if errors.Is(err, dbcopy.ErrSourceHasNoTables) {
 		if srcRef.Scheme == "postgres" {
 			schema := fromSchema
@@ -183,7 +185,7 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 }
 
 func dbCopyToBigQuery(ctx context.Context, source dal.DB, sourceRef dbcopy.BackendRef, sourceSchema string, target dbcopy.BackendRef, opts dbcopy.CopyOpts, errWriter io.Writer) error {
-	client, err := google.DefaultClient(ctx, bqwriter.BigqueryScope)
+	client, err := bqGoogleDefaultClient(ctx, bqwriter.BigqueryScope)
 	if err != nil {
 		return Exit("open Google credentials from the local application default credentials", 4)
 	}
@@ -194,7 +196,7 @@ func dbCopyToBigQuery(ctx context.Context, source dal.DB, sourceRef dbcopy.Backe
 	if err != nil {
 		return Exit("configure BigQuery destination", 2)
 	}
-	summary, err := dbcopy.CopyToSink(ctx, source, dbcopy.BigQueryCopySink{Writer: writer}, opts)
+	summary, err := dbCopyToSinkRunner(ctx, source, dbcopy.BigQueryCopySink{Writer: writer}, opts)
 	if errors.Is(err, dbcopy.ErrSourceHasNoTables) {
 		if sourceRef.Scheme == "postgres" {
 			if sourceSchema == "" {
@@ -274,8 +276,14 @@ func dbCopyRecoverBigQuery(ctx context.Context, target dbcopy.BackendRef, ref bq
 	return nil
 }
 
+var (
+	dbCopyRunner       = dbcopy.Copy
+	dbCopyToSinkRunner = dbcopy.CopyToSink
+	bqRecoveryMarshal  = json.Marshal
+)
+
 func bigQueryRecoveryHint(target dbcopy.BackendRef, ref bqwriter.LoadJobRef) string {
-	data, err := json.Marshal(ref)
+	data, err := bqRecoveryMarshal(ref)
 	if err != nil {
 		return "BigQuery load outcome is uncertain; do not rerun the copy until the existing load job has been checked."
 	}

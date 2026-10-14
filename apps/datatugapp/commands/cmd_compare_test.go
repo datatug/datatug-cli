@@ -81,7 +81,7 @@ func TestCompareCommandJSONAndHumanUseRealServer(t *testing.T) {
 			Columns: []apicontract.Column{{Name: "id", Type: "integer"}, {Name: "status", Type: "string"}},
 			Rows:    rows,
 		}
-		executedAt := time.Date(2026, 9, 14, 8, 0, 0, 0, time.UTC)
+		executedAt := time.Now().UTC().Add(-time.Hour)
 		snapshotRef, stored, err := store.PutSnapshot(context.Background(), ref, recordset, executedAt)
 		require.NoError(t, err)
 		require.True(t, stored)

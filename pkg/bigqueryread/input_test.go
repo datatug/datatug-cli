@@ -7,6 +7,7 @@ import (
 )
 
 func TestPolicyArrayAdapterPreservesASTAndRejectsExpressionElements(t *testing.T) {
+	t.Parallel()
 	makeQuery := func(value any) dal.StructuredQuery {
 		return dal.NewQueryBuilder(dal.From(dal.NewCollectionRef("sample", "", nil))).Limit(3).Where(
 			dal.NewComparison(dal.NewFieldRef("", "n"), dal.In, dal.Array{Value: value}),

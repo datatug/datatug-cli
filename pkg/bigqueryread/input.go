@@ -15,7 +15,11 @@ import (
 
 const MaxInputBytes = 256 << 10
 
-var ErrInput = errors.New("invalid BigQuery input: expected bounded typed JSON")
+var (
+	ErrInput        = errors.New("invalid BigQuery input: expected bounded typed JSON")
+	jsonMarshal     = json.Marshal
+	dtqlDeserialize = dtql.Deserialize
+)
 
 // Input is an explicit scalar DTQL query and reviewed native source profile.
 // QueryShape intentionally excludes SQL, joins, subqueries, aliases and offsets.
@@ -130,11 +134,11 @@ func (in Input) DALQuery() (dal.Query, error) {
 	if err := visit(in.Query.Where, 0); err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(in.Query)
+	raw, err := jsonMarshal(in.Query)
 	if err != nil {
 		return nil, ErrInput
 	}
-	q, err := dtql.Deserialize(raw)
+	q, err := dtqlDeserialize(raw)
 	if err != nil {
 		return nil, ErrInput
 	}

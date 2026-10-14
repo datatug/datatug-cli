@@ -26,7 +26,14 @@ import (
 const readScope = "https://www.googleapis.com/auth/bigquery.readonly"
 const fullScope = "https://www.googleapis.com/auth/bigquery"
 
-var findADC = google.FindDefaultCredentials
+var (
+	findADC                   = google.FindDefaultCredentials
+	randRead                  = rand.Read
+	osOpenFile                = os.OpenFile
+	osOpen                    = os.Open
+	osSameFile                = os.SameFile
+	httpNewRequestWithContext = http.NewRequestWithContext
+)
 
 var ErrIdentity = errors.New("google execution identity or granted scopes unavailable; explicitly sign in with Google BigQuery read-only and openid scopes, then preview again")
 
@@ -84,10 +91,10 @@ func sessionNonce(dir string) (string, error) {
 	}
 	name := filepath.Join(dir, "authorization-session")
 	seed := make([]byte, 32)
-	if _, err := rand.Read(seed); err != nil {
+	if _, err := randRead(seed); err != nil {
 		return "", ErrIdentity
 	}
-	f, err := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	f, err := osOpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err == nil {
 		_, err = f.Write([]byte(hex.EncodeToString(seed)))
 		if err == nil {
@@ -104,13 +111,13 @@ func sessionNonce(dir string) (string, error) {
 	if err != nil || !before.Mode().IsRegular() || (runtime.GOOS != "windows" && before.Mode().Perm()&0077 != 0) {
 		return "", ErrIdentity
 	}
-	f, err = os.Open(name)
+	f, err = osOpen(name)
 	if err != nil {
 		return "", ErrIdentity
 	}
 	defer func() { _ = f.Close() }()
 	after, err := f.Stat()
-	if err != nil || !os.SameFile(before, after) {
+	if err != nil || !osSameFile(before, after) {
 		return "", ErrIdentity
 	}
 	raw, err := io.ReadAll(io.LimitReader(f, 65))
@@ -178,7 +185,7 @@ func (p *GoogleProvider) authorizeToken(ctx context.Context, token *oauth2.Token
 	if !read || !has("openid") {
 		return bigquery.Identity{}, nil, ErrIdentity
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://openidconnect.googleapis.com/v1/userinfo", nil)
+	req, err := httpNewRequestWithContext(ctx, http.MethodGet, "https://openidconnect.googleapis.com/v1/userinfo", nil)
 	if err != nil {
 		return bigquery.Identity{}, nil, ErrIdentity
 	}

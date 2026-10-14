@@ -88,7 +88,7 @@ notarize:
 release:
   github:
     owner: datatug
-    name: datatug-cli
+    name: datatug
 
 # Homebrew cask (ecosystem standard; `brews:` is deprecated — see strongo/cicd
 # README "Packaging conventions"). GoReleaser auto-installs the `datatug` binary

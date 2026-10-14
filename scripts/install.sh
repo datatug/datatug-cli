@@ -5,7 +5,7 @@
 # DATATUG_VERSION may pin a release tag such as v0.32.0.
 set -eu
 
-repo="https://github.com/datatug/datatug-cli"
+repo="https://github.com/datatug/datatug"
 install_dir=${DATATUG_INSTALL_DIR:-"$HOME/.local/bin"}
 version=${DATATUG_VERSION:-}
 destination_tmp=

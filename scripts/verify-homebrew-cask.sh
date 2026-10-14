@@ -50,10 +50,8 @@ if [[ $# -ne 1 ]]; then
 fi
 
 tag="$1"
-repo="${GITHUB_REPOSITORY:-}"
-if [[ -z "$repo" ]]; then
-  finish 2 "GITHUB_REPOSITORY is not set, so the Homebrew tap was not compared with $tag."
-fi
+repo="${GITHUB_REPOSITORY:-datatug/datatug-cli}"
+release_repo="${RELEASE_REPO:-datatug/datatug}"
 gh="${GH:-gh}"
 attempts="${ATTEMPTS:-5}"
 interval="${INTERVAL:-30}"
@@ -71,7 +69,14 @@ detail=""
 for ((attempt = 1; attempt <= attempts; attempt++)); do
   # gh refuses to overwrite a file from an earlier attempt.
   rm -f "$work"/*
-  if "$gh" release download "$tag" --repo "$repo" --pattern '*_checksums.txt' --dir "$work" &&
+  downloaded=0
+  for candidate in "$release_repo" "$repo"; do
+    if "$gh" release download "$tag" --repo "$candidate" --pattern '*_checksums.txt' --dir "$work" 2>/dev/null; then
+      downloaded=1
+      break
+    fi
+  done
+  if [[ $downloaded -eq 1 ]] &&
     "$gh" api -H 'Accept: application/vnd.github.raw' "repos/$tap/contents/Casks/datatug.rb" >"$work/datatug.rb"; then
     checksums="$(find "$work" -name '*_checksums.txt' | head -n 1)"
     status=0

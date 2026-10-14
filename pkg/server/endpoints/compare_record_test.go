@@ -27,7 +27,7 @@ func TestLoadCompareRecordSideCompletenessAndInputBound(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, api.CloseExecutionEvidence()) })
 	store, err := api.ExecutionEvidenceStoreByID(projectID, projectID)
 	require.NoError(t, err)
-	executedAt := time.Date(2026, 9, 14, 8, 0, 0, 0, time.UTC)
+	executedAt := time.Now().UTC().Add(-time.Hour)
 	rows := func(count int) apicontract.Recordset {
 		recordset := apicontract.Recordset{
 			Columns: []apicontract.Column{{Name: "id", Type: string(apicontract.ValueTypeInteger)}},

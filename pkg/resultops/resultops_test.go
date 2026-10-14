@@ -25,6 +25,7 @@ func mustCapture(t *testing.T, columns []Column, rows ...Row) Snapshot {
 func cells(values ...Cell) Row { return Row{Cells: values} }
 
 func TestGroupByDistinguishesMissingNullAndTypedEmptyValues(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t,
 		[]Column{{Name: "text", Type: "TEXT"}, {Name: "integer", Type: "BIGINT"}, {Name: "boolean", Type: "BOOLEAN"}},
 		cells(missing(), missing(), present(false)),
@@ -56,6 +57,7 @@ func TestGroupByDistinguishesMissingNullAndTypedEmptyValues(t *testing.T) {
 }
 
 func TestGroupByCompositeTupleCannotCollideOnDisplayDelimiter(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t,
 		[]Column{{Name: "first", Type: "TEXT"}, {Name: "second", Type: "TEXT"}},
 		cells(present("a|b"), present("c")),
@@ -75,6 +77,7 @@ func TestGroupByCompositeTupleCannotCollideOnDisplayDelimiter(t *testing.T) {
 }
 
 func TestGroupByNormalizesExactIntegersDecimalsFloatsAndInstants(t *testing.T) {
+	t.Parallel()
 	instantA := time.Date(2024, 5, 1, 10, 0, 0, 123, time.FixedZone("A", 0))
 	instantB := time.Date(2024, 5, 1, 12, 0, 0, 123, time.FixedZone("B", 2*60*60))
 	snapshot := mustCapture(t,
@@ -95,6 +98,7 @@ func TestGroupByNormalizesExactIntegersDecimalsFloatsAndInstants(t *testing.T) {
 }
 
 func TestSortUsesExactDeclaredTypeAndStableMultiColumnPriority(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t,
 		[]Column{{Name: "rank", Type: "INTEGER"}, {Name: "name", Type: "TEXT"}},
 		cells(present(json.Number("1")), present("beta")),
@@ -115,6 +119,7 @@ func TestSortUsesExactDeclaredTypeAndStableMultiColumnPriority(t *testing.T) {
 }
 
 func TestSortOrdersMissingNullAndValuesThenReversesForDescending(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t,
 		[]Column{{Name: "n", Type: "INTEGER"}},
 		cells(present(json.Number("2"))),
@@ -136,6 +141,7 @@ func TestSortOrdersMissingNullAndValuesThenReversesForDescending(t *testing.T) {
 }
 
 func TestSortComparesUnicodeBooleanTemporalAndBinaryValues(t *testing.T) {
+	t.Parallel()
 	sameInstant := time.Date(2022, 1, 2, 0, 0, 0, 0, time.FixedZone("west", -5*60*60))
 	snapshot := mustCapture(t,
 		[]Column{{Name: "text", Type: "TEXT"}, {Name: "bool", Type: "BOOLEAN"}, {Name: "instant", Type: "TIMESTAMP"}, {Name: "bytes", Type: "BLOB"}},
@@ -159,6 +165,7 @@ func TestSortComparesUnicodeBooleanTemporalAndBinaryValues(t *testing.T) {
 }
 
 func TestSortPreservesBigIntegerAndDecimalPrecision(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t,
 		[]Column{{Name: "big", Type: "BIGINT"}, {Name: "decimal", Type: "DECIMAL"}},
 		cells(present(json.Number("9007199254740993")), present(json.Number("1.0000000000000000002"))),
@@ -179,6 +186,7 @@ func TestSortPreservesBigIntegerAndDecimalPrecision(t *testing.T) {
 }
 
 func TestSortPreservesFloatPrecisionAndComparesTemporalInstants(t *testing.T) {
+	t.Parallel()
 	base := time.Date(2024, 6, 1, 10, 0, 0, 0, time.FixedZone("offset", 3*60*60))
 	snapshot := mustCapture(t,
 		[]Column{{Name: "float", Type: "DOUBLE"}, {Name: "at", Type: "TIMESTAMP WITH TIME ZONE"}},
@@ -197,6 +205,7 @@ func TestSortPreservesFloatPrecisionAndComparesTemporalInstants(t *testing.T) {
 }
 
 func TestCaptureAndResultsDoNotShareMutableInput(t *testing.T) {
+	t.Parallel()
 	binaryValue := []byte{1, 2, 3}
 	inputMap := map[string]any{"nested": []any{"before"}}
 	snapshot := mustCapture(t,
@@ -224,6 +233,7 @@ func TestCaptureAndResultsDoNotShareMutableInput(t *testing.T) {
 }
 
 func TestInvalidTypesAndShapesFailWithoutStringCoercion(t *testing.T) {
+	t.Parallel()
 	if _, err := Capture([]Column{{Name: "a", Type: "TEXT"}}, []Row{cells(present("x"), present("extra"))}); err == nil {
 		t.Fatal("accepted a row with the wrong cell count")
 	}
@@ -253,6 +263,7 @@ func TestInvalidTypesAndShapesFailWithoutStringCoercion(t *testing.T) {
 }
 
 func TestMetadataAccessAndSelectionValidation(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t, []Column{{Name: "key", Type: "TEXT"}}, cells(present("value")))
 	if snapshot.RowCount() != 1 || !reflect.DeepEqual(snapshot.Columns(), []Column{{Name: "key", Type: "TEXT"}}) {
 		t.Fatal("snapshot metadata or row count is incorrect")
@@ -282,6 +293,7 @@ func TestMetadataAccessAndSelectionValidation(t *testing.T) {
 }
 
 func TestExactNumericHelpersAcceptTypedRepresentations(t *testing.T) {
+	t.Parallel()
 	integers := []any{int(-2), int8(-2), int16(-2), int32(-2), int64(-2), uint(2), uint8(2), uint16(2), uint32(2), uint64(2), json.Number("2"), big.NewInt(2), *big.NewInt(2)}
 	for _, value := range integers {
 		if _, err := exactInteger(value); err != nil {
@@ -311,6 +323,7 @@ func TestExactNumericHelpersAcceptTypedRepresentations(t *testing.T) {
 }
 
 func TestCaptureRejectsUnsafeCyclesAndMutablePointerShapes(t *testing.T) {
+	t.Parallel()
 	cyclic := map[string]any{}
 	cyclic["self"] = cyclic
 	for _, value := range []any{cyclic, map[int]string{1: "x"}, new(int), struct{ N int }{N: 1}} {
@@ -321,6 +334,7 @@ func TestCaptureRejectsUnsafeCyclesAndMutablePointerShapes(t *testing.T) {
 }
 
 func TestDeepCopySupportsTypedSlicesArraysAndNilCollections(t *testing.T) {
+	t.Parallel()
 	array := [2]string{"a", "b"}
 	values := []any{
 		array,
@@ -342,6 +356,7 @@ func TestDeepCopySupportsTypedSlicesArraysAndNilCollections(t *testing.T) {
 }
 
 func TestInvalidTypedCellsReturnExplicitErrors(t *testing.T) {
+	t.Parallel()
 	invalid := []struct {
 		kind  valueType
 		value any
@@ -368,6 +383,7 @@ func TestInvalidTypedCellsReturnExplicitErrors(t *testing.T) {
 }
 
 func TestEmptyTextAndPrefixOrderingUseUnicodeCodePoints(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t, []Column{{Name: "text", Type: "VARCHAR(12)"}},
 		cells(present("aa")), cells(present("")), cells(present("a")))
 	order, err := snapshot.Sort([]SortKey{{Column: "text"}})
@@ -377,6 +393,7 @@ func TestEmptyTextAndPrefixOrderingUseUnicodeCodePoints(t *testing.T) {
 }
 
 func TestSortSupportsExactArbitraryPrecisionValues(t *testing.T) {
+	t.Parallel()
 	large := new(big.Int).Lsh(big.NewInt(1), 200)
 	copyOfLarge := new(big.Int).Set(large)
 	snapshot := mustCapture(t,
@@ -391,6 +408,7 @@ func TestSortSupportsExactArbitraryPrecisionValues(t *testing.T) {
 }
 
 func TestFloatJSONNumberRejectsLossyRoundingAndUnderflow(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"9007199254740993", "1e-10000", "0.1", "1e99999999999999999999", strings.Repeat("1", maxDecimalTextLength+1)} {
 		if _, ok := numericFloat(json.Number(raw)); ok {
 			t.Errorf("accepted inexact/out-of-range floating text %q", raw)
@@ -412,6 +430,7 @@ func TestFloatJSONNumberRejectsLossyRoundingAndUnderflow(t *testing.T) {
 }
 
 func TestDeclaredTypeParametersAndSuffixesAreValidated(t *testing.T) {
+	t.Parallel()
 	valid := []string{"VARCHAR(12)", "CHARACTER(1)", "DECIMAL(10, 2)", "NUMERIC(10)", "FLOAT(24)", "TIMESTAMP(6) WITH TIME ZONE", "TIMESTAMP WITHOUT TIME ZONE"}
 	for _, typ := range valid {
 		if _, err := declaredType(typ); err != nil {
@@ -431,6 +450,7 @@ func TestDeclaredTypeParametersAndSuffixesAreValidated(t *testing.T) {
 }
 
 func TestGroupByAggregatesKeepsIntegerAndDecimalSumsExact(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t,
 		[]Column{{Name: "bucket", Type: "TEXT"}, {Name: "n", Type: "BIGINT"}, {Name: "d", Type: "DECIMAL(12,4)"}},
 		cells(present("a"), present(json.Number("9007199254740993")), present(json.Number("0.1"))),
@@ -469,6 +489,7 @@ func TestGroupByAggregatesKeepsIntegerAndDecimalSumsExact(t *testing.T) {
 }
 
 func TestGroupByAggregatesNullCountsAndOptionalRowCount(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t,
 		[]Column{{Name: "bucket", Type: "TEXT"}, {Name: "n", Type: "INTEGER"}, {Name: "label", Type: "TEXT"}},
 		cells(present("a"), present(nil), present(nil)),
@@ -502,6 +523,7 @@ func TestGroupByAggregatesNullCountsAndOptionalRowCount(t *testing.T) {
 }
 
 func TestGroupByAggregatesRejectsMissingAndInvalidTerms(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t,
 		[]Column{{Name: "bucket", Type: "TEXT"}, {Name: "n", Type: "INTEGER"}, {Name: "label", Type: "TEXT"}},
 		cells(present("a"), missing(), present("x")),
@@ -531,6 +553,7 @@ func TestGroupByAggregatesRejectsMissingAndInvalidTerms(t *testing.T) {
 }
 
 func TestGroupByAggregatesRejectsFloatingSumOverflow(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t,
 		[]Column{{Name: "bucket", Type: "TEXT"}, {Name: "f", Type: "DOUBLE"}},
 		cells(present("a"), present(math.MaxFloat64)),
@@ -542,6 +565,7 @@ func TestGroupByAggregatesRejectsFloatingSumOverflow(t *testing.T) {
 }
 
 func TestGroupByAggregatesUsesSourceOrderForFloatingSum(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t,
 		[]Column{{Name: "bucket", Type: "TEXT"}, {Name: "f", Type: "DOUBLE"}},
 		cells(present("a"), present(1e16)),
@@ -558,6 +582,7 @@ func TestGroupByAggregatesUsesSourceOrderForFloatingSum(t *testing.T) {
 }
 
 func TestGroupByAggregatesIntegerMinMaxUseExactIntegerValues(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t,
 		[]Column{{Name: "bucket", Type: "TEXT"}, {Name: "n", Type: "BIGINT"}},
 		cells(present("a"), present(json.Number("9007199254740993"))),
@@ -578,6 +603,7 @@ func TestGroupByAggregatesIntegerMinMaxUseExactIntegerValues(t *testing.T) {
 }
 
 func TestDecimalPrecisionBudgetAcceptsBoundariesAndRejectsUnboundedExponents(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"1e1000", "1e-1000", strings.Repeat("9", maxNumericDigits)} {
 		if _, err := parseDecimal(raw); err != nil {
 			t.Errorf("parseDecimal(%q at boundary): %v", abbreviatedNumber(raw), err)
@@ -599,6 +625,7 @@ func TestDecimalPrecisionBudgetAcceptsBoundariesAndRejectsUnboundedExponents(t *
 }
 
 func TestDecimalPrecisionBudgetAppliesThroughSnapshotOperations(t *testing.T) {
+	t.Parallel()
 	columns := []Column{{Name: "bucket", Type: "TEXT"}, {Name: "amount", Type: "DECIMAL(1000,0)"}}
 	for _, operation := range []struct {
 		name string
@@ -619,6 +646,7 @@ func TestDecimalPrecisionBudgetAppliesThroughSnapshotOperations(t *testing.T) {
 }
 
 func TestDecimalExponentBoundarySurvivesAggregateCloningAndRepeatCalls(t *testing.T) {
+	t.Parallel()
 	snapshot := mustCapture(t,
 		[]Column{{Name: "bucket", Type: "TEXT"}, {Name: "amount", Type: "DECIMAL"}},
 		cells(present("a"), present(json.Number("1e1000"))),
@@ -654,6 +682,7 @@ func TestDecimalExponentBoundarySurvivesAggregateCloningAndRepeatCalls(t *testin
 }
 
 func TestNumericPrecisionBudgetBoundsIntegerAndNativeBigValuesBeforeCaptureCopy(t *testing.T) {
+	t.Parallel()
 	maxIntegerText := strings.Repeat("9", maxNumericDigits)
 	if _, err := parseInteger(maxIntegerText); err != nil {
 		t.Fatalf("1000-digit integer text rejected: %v", err)

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dal-go/dalgo/condeval"
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dtql"
 	"github.com/dal-go/record"
@@ -38,11 +37,11 @@ func (e *Executor) RunRecursiveDTQL(ctx context.Context, sourceURL string, docum
 	defer closeSource()
 	var limitations []Limitation
 	leaf := singleSourceSecuredLeaf{securedLeaf: securedLeaf{db: db, session: e.session, variables: variables, limitations: &limitations}, guardAggregation: recursiveAggregation(query)}
-	reader, err := dal.ExecuteRecursiveQuery(ctx, leaf, query)
+	reader, err := dalExecuteRecursiveQuery(ctx, leaf, query)
 	if err != nil {
 		return Result{}, err
 	}
-	rows, statistics, err := collectRows(reader)
+	rows, statistics, err := collectRowsFn(reader)
 	if err != nil {
 		return Result{}, err
 	}
@@ -65,7 +64,7 @@ func bindRecursiveParameters(query dal.StructuredQuery, variables map[string]any
 		return nil, err
 	}
 	if len(parameters) > 0 {
-		where, err := condeval.Substitute(query.Where(), func(name string) (any, bool) { value, ok := variables[name]; return value, ok })
+		where, err := condevalSubstitute(query.Where(), func(name string) (any, bool) { value, ok := variables[name]; return value, ok })
 		if err != nil {
 			return nil, err
 		}

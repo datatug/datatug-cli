@@ -3,9 +3,16 @@ package secureread
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"math/big"
 	"os"
 
+	"github.com/dal-go/dalgo/condeval"
+	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dtql"
 	"github.com/dal-go/dalgo2sql"
+	"github.com/datatug/datatug-cli/pkg/accesspolicies"
+	"github.com/datatug/datatug-cli/pkg/resultops"
 	"github.com/datatug/datatug-core/pkg/apicontract"
 )
 
@@ -35,4 +42,13 @@ var (
 		_, err := db.ExecContext(ctx, "PRAGMA query_only = ON")
 		return err
 	}
+	dtqlSerialize                = dtql.Serialize
+	resultopsCapture             = resultops.Capture
+	accesspoliciesRun            = accesspolicies.Run
+	condevalSubstitute           = condeval.Substitute
+	exactAggregateRatFloatString = func(r *big.Rat, prec int) string { return r.FloatString(prec) }
+	exactAggregateJSONMarshal    = json.Marshal
+	outputSort                   = func(s resultops.Snapshot, order []resultops.SortKey) ([]int, error) { return s.Sort(order) }
+	dalExecuteRecursiveQuery     = dal.ExecuteRecursiveQuery
+	dtqlDeserialize              = dtql.Deserialize
 )

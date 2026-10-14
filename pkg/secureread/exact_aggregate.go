@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/dal-go/dalgo/dal"
-	"github.com/dal-go/dalgo/dtql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
 	"github.com/datatug/datatug-cli/pkg/queryops"
@@ -19,7 +18,8 @@ import (
 )
 
 const exactAggregateMaxRows = 10000
-const exactAggregateMaxBytes = 16 << 20
+
+var exactAggregateMaxBytes = 16 << 20
 
 // ExactAggregateResult carries authoritative types for derived aliases. The
 // caller must persist these with Result; catalog field-name inference is not
@@ -82,11 +82,11 @@ func prepareExactAggregate(originalDocument, document []byte, columns []resultop
 		return p, fmt.Errorf("aggregate plan exceeds metadata budget")
 	}
 	var err error
-	p.original, err = dtql.Deserialize(originalDocument)
+	p.original, err = dtqlDeserialize(originalDocument)
 	if err != nil {
 		return p, fmt.Errorf("original aggregate input: %w", err)
 	}
-	p.query, err = dtql.Deserialize(document)
+	p.query, err = dtqlDeserialize(document)
 	if err != nil {
 		return p, fmt.Errorf("aggregate preview: %w", err)
 	}
@@ -234,7 +234,7 @@ func prepareExactAggregate(originalDocument, document []byte, columns []resultop
 	if err != nil {
 		return p, err
 	}
-	actual, err := dtql.Serialize(aggregateUnordered{q})
+	actual, err := dtqlSerialize(aggregateUnordered{q})
 	if err != nil {
 		return p, err
 	}
@@ -276,7 +276,7 @@ func (e *Executor) executeExactAggregate(ctx context.Context, db dal.DB, p exact
 		}
 		sourceQuery = builder.SelectColumns(scanColumns...)
 	}
-	secured, err := accesspolicies.Run(ctx, db, sourceQuery, accesspolicies.Options{Principal: e.session.Principal, Variables: variables, Policies: e.session.Policies, Unrestricted: e.session.Unrestricted})
+	secured, err := accesspoliciesRun(ctx, db, sourceQuery, accesspolicies.Options{Principal: e.session.Principal, Variables: variables, Policies: e.session.Policies, Unrestricted: e.session.Unrestricted})
 	if err != nil {
 		return ExactAggregateResult{}, err
 	}
@@ -288,7 +288,7 @@ func (e *Executor) executeExactAggregate(ctx context.Context, db dal.DB, p exact
 	if err != nil {
 		return ExactAggregateResult{}, err
 	}
-	snapshot, err := resultops.Capture(p.inputs, rows)
+	snapshot, err := resultopsCapture(p.inputs, rows)
 	if err != nil {
 		return ExactAggregateResult{}, err
 	}
@@ -311,13 +311,13 @@ func (e *Executor) executeExactAggregate(ctx context.Context, db dal.DB, p exact
 		cells = append(cells, group.Aggregates...)
 		outputRows[i] = resultops.Row{Cells: cells}
 	}
-	output, err := resultops.Capture(p.outputs, outputRows)
+	output, err := resultopsCapture(p.outputs, outputRows)
 	if err != nil {
 		return ExactAggregateResult{}, err
 	}
 	order := output.OriginalOrder()
 	if len(p.order) > 0 {
-		order, err = output.Sort(p.order)
+		order, err = outputSort(output, p.order)
 		if err != nil {
 			return ExactAggregateResult{}, err
 		}
@@ -353,7 +353,7 @@ func (e *Executor) executeExactAggregate(ctx context.Context, db dal.DB, p exact
 			}
 			data[column.Name] = value
 		}
-		encoded, err := json.Marshal(data)
+		encoded, err := exactAggregateJSONMarshal(data)
 		if err != nil {
 			return ExactAggregateResult{}, err
 		}
@@ -398,7 +398,7 @@ func captureExactAggregateRows(ctx context.Context, reader dal.RecordsReader, p 
 		if err != nil {
 			return nil, err
 		}
-		encoded, err := json.Marshal(data)
+		encoded, err := exactAggregateJSONMarshal(data)
 		if err != nil {
 			return nil, err
 		}
@@ -465,7 +465,7 @@ func exactAggregateJSONValue(value any) (any, error) {
 		if b > scale {
 			scale = b
 		}
-		text := value.FloatString(scale)
+		text := exactAggregateRatFloatString(value, scale)
 		if strings.Contains(text, ".") {
 			text = strings.TrimRight(strings.TrimRight(text, "0"), ".")
 		}

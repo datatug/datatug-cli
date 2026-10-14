@@ -23,6 +23,7 @@ func TestLoadCompareRecordSideCompletenessAndInputBound(t *testing.T) {
 	require.NoError(t, api.ConfigureExecutionEvidence(map[string]string{projectID: projectDir}, nil, executionstore.Options{
 		PrivateDir: t.TempDir(),
 		ByteCap:    8 << 20,
+		Retention:  365 * 24 * time.Hour,
 	}))
 	t.Cleanup(func() { require.NoError(t, api.CloseExecutionEvidence()) })
 	store, err := api.ExecutionEvidenceStoreByID(projectID, projectID)

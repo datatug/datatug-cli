@@ -92,11 +92,7 @@ func sessionContextHandler(w http.ResponseWriter, r *http.Request) {
 				Revisions []sessioncontext.EntryRevision `json:"revisions"`
 			}{input, revisions}
 		case id == "":
-			limit, parseErr := sessionContextPageLimit(q)
-			if q.Get("limit") != "" && parseErr != nil {
-				writeSessionContextError(w, r, sessioncontext.ErrInvalid)
-				return
-			}
+			limit, _ := sessionContextPageLimit(q)
 			result, err = service.ListSessions(r.Context(), principal, q.Get("cursor"), limit)
 		case strings.Contains(r.URL.Path, "/operations/"):
 			result, err = service.ReadOperation(r.Context(), principal, id)

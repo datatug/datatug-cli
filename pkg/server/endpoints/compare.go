@@ -20,7 +20,22 @@ import (
 
 const maxCompareBodyBytes = 1 << 20
 
-var compareResultValidateHook = (*apicontract.CompareResult).Validate
+type compareCacheSession interface {
+	Observer() recordsetcompare.RecordObserver
+	Commit(result apicontract.CompareResult) error
+	Abort()
+}
+
+var (
+	compareResultValidateHook = (*apicontract.CompareResult).Validate
+	apiBeginCompareCache      = func(ctx context.Context, req comparecache.BeginRequest) (compareCacheSession, error) {
+		s, err := api.BeginCompareCache(ctx, req)
+		if err != nil || s == nil {
+			return nil, err
+		}
+		return s, nil
+	}
+)
 
 type compareSideData struct {
 	recordset apicontract.Recordset
@@ -144,7 +159,7 @@ func computeCompareWith(ctx context.Context, req apicontract.CompareRequest, dep
 	options := recordsetcompare.Options{
 		Key: append([]string(nil), req.Key...), DistributionColumn: req.DistributionColumn, Limit: limit,
 	}
-	session, cacheErr := api.BeginCompareCache(ctx, comparecache.BeginRequest{
+	session, cacheErr := apiBeginCompareCache(ctx, comparecache.BeginRequest{
 		QueryID: req.QueryID, Left: left.receipt.Execution, Right: right.receipt.Execution,
 	})
 	if cacheErr != nil {

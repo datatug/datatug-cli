@@ -43,8 +43,9 @@ const (
 )
 
 var (
-	filestoreNewStore = filestore.NewStore
-	listenAndServeFn  = func(s *http.Server) error { return s.ListenAndServe() }
+	filestoreNewStore       = filestore.NewStore
+	listenAndServeFn        = func(s *http.Server) error { return s.ListenAndServe() }
+	configureCompareCacheFn = api.ConfigureCompareCache
 )
 
 type HttpServer struct {
@@ -141,7 +142,7 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 		return fmt.Errorf("configure execution evidence: %w", err)
 	}
 	defer func() { _ = api.CloseExecutionEvidence() }()
-	if err := api.ConfigureCompareCache(comparecache.Options{PrivateDir: caps.EvidencePrivateDir}); err != nil {
+	if err := configureCompareCacheFn(comparecache.Options{PrivateDir: caps.EvidencePrivateDir}); err != nil {
 		api.LogCompareCacheSkip("configure", err)
 	}
 	defer func() { _ = api.CloseCompareCache() }()

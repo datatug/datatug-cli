@@ -113,12 +113,12 @@ func LocalProjectBranches(ctx context.Context, ref dto.ProjectRef) (*ProjectBran
 	if err != nil {
 		return nil, err
 	}
-	state, err := localGitState(ctx, projectDir)
+	state, err := localGitStateSeam(ctx, projectDir)
 	if err != nil {
 		return nil, err
 	}
 	lock := flock.New(filepath.Join(state.gitDir, "datatug-project-api.lock"))
-	locked, err := lock.TryLockContext(ctx, 25*time.Millisecond)
+	locked, err := flockTryLockContextSeam(lock, ctx, 25*time.Millisecond)
 	if err != nil {
 		return nil, err
 	}
@@ -126,11 +126,11 @@ func LocalProjectBranches(ctx context.Context, ref dto.ProjectRef) (*ProjectBran
 		return nil, context.DeadlineExceeded
 	}
 	defer func() { _ = lock.Unlock() }()
-	state, err = localGitState(ctx, projectDir)
+	state, err = localGitStateSeam(ctx, projectDir)
 	if err != nil {
 		return nil, err
 	}
-	output, err := localGitOutput(ctx, state.root, "for-each-ref", "--count=1001", "--sort=refname", "--format=%(refname:short)%00%(objectname)", "refs/heads")
+	output, err := localGitOutputSeam(ctx, state.root, "for-each-ref", "--count=1001", "--sort=refname", "--format=%(refname:short)%00%(objectname)", "refs/heads")
 	if err != nil {
 		return nil, err
 	}
@@ -145,10 +145,10 @@ func LocalProjectBranches(ctx context.Context, ref dto.ProjectRef) (*ProjectBran
 		}
 	}
 	defaultBranch := ""
-	if remoteHead, err := localGitOutput(ctx, state.root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
+	if remoteHead, err := localGitOutputSeam(ctx, state.root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
 		defaultBranch = strings.TrimPrefix(remoteHead, "origin/")
 	}
-	afterRead, err := localGitState(ctx, projectDir)
+	afterRead, err := localGitStateSeam(ctx, projectDir)
 	if err != nil || afterRead.branch != state.branch || afterRead.head != state.head {
 		return nil, dto.ErrBranchHeadConflict
 	}
@@ -172,12 +172,12 @@ func (LocalProjectQueryAdapter) GetQuery(ctx context.Context, request dto.GetQue
 	if err != nil {
 		return nil, err
 	}
-	state, err := localGitState(ctx, projectDir)
+	state, err := localGitStateSeam(ctx, projectDir)
 	if err != nil {
 		return nil, err
 	}
 	lock := flock.New(filepath.Join(state.gitDir, "datatug-project-api.lock"))
-	locked, err := lock.TryLockContext(ctx, 25*time.Millisecond)
+	locked, err := flockTryLockContextSeam(lock, ctx, 25*time.Millisecond)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +185,7 @@ func (LocalProjectQueryAdapter) GetQuery(ctx context.Context, request dto.GetQue
 		return nil, context.DeadlineExceeded
 	}
 	defer func() { _ = lock.Unlock() }()
-	state, err = localGitState(ctx, projectDir)
+	state, err = localGitStateSeam(ctx, projectDir)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +204,7 @@ func (LocalProjectQueryAdapter) GetQuery(ctx context.Context, request dto.GetQue
 	if err != nil {
 		return nil, err
 	}
-	afterRead, err := localGitState(ctx, projectDir)
+	afterRead, err := localGitStateSeam(ctx, projectDir)
 	if err != nil || afterRead.branch != state.branch || afterRead.head != state.head {
 		return nil, dto.ErrBranchHeadConflict
 	}
@@ -251,7 +251,7 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 	if field, reason, found := querywriteQueryCredentialReason(&request.Query.QueryDef); found {
 		return nil, validation.NewBadRequestError(validation.NewErrBadRecordFieldValue(field, reason))
 	}
-	digest, err := request.PayloadDigest()
+	digest, err := saveQueryPayloadDigestSeam(request)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +263,7 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 	// makes an ID reused against a different authorized project a conflict
 	// rather than a fresh mutation. The per-key lock spans repositories.
 	opLock := flock.New(receiptPath + ".lock")
-	locked, err := opLock.TryLockContext(ctx, 25*time.Millisecond)
+	locked, err := flockTryLockContextSeam(opLock, ctx, 25*time.Millisecond)
 	if err != nil {
 		return nil, err
 	}
@@ -288,12 +288,12 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 	} else if !errors.Is(readErr, os.ErrNotExist) {
 		return nil, readErr
 	}
-	state, err := localGitState(ctx, projectDir)
+	state, err := localGitStateSeam(ctx, projectDir)
 	if err != nil {
 		return nil, err
 	}
 	lock := flock.New(filepath.Join(state.gitDir, "datatug-project-api.lock"))
-	locked, err = lock.TryLockContext(ctx, 25*time.Millisecond)
+	locked, err = flockTryLockContextSeam(lock, ctx, 25*time.Millisecond)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +301,7 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		return nil, context.DeadlineExceeded
 	}
 	defer func() { _ = lock.Unlock() }()
-	state, err = localGitState(ctx, projectDir)
+	state, err = localGitStateSeam(ctx, projectDir)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +353,7 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 		if current != nil && !reflect.DeepEqual(current.Query.Capture, request.Query.Capture) {
 			return nil, clientCaptureRefusal("save_query cannot alter capture provenance")
 		}
-		preview, err := previewLocalQueryRevision(ctx, query)
+		preview, err := previewLocalQueryRevisionSeam(ctx, query)
 		if err != nil {
 			return nil, err
 		}
@@ -368,7 +368,7 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 			journal.PreviousRevision = string(current.Revision)
 			journal.OldType = current.Query.Type
 		}
-		if err := writeLocalQueryJournal(receiptPath, journal); err != nil {
+		if err := writeLocalQueryJournalSeam(receiptPath, journal); err != nil {
 			return nil, err
 		}
 	}
@@ -391,7 +391,7 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 			return nil, ErrProjectMutationOutcomeUncertain
 		}
 	}
-	beforeStage, err := localGitState(ctx, projectDir)
+	beforeStage, err := localGitStateSeam(ctx, projectDir)
 	if err != nil || beforeStage.branch != state.branch || beforeStage.head != state.head {
 		return nil, ErrProjectMutationOutcomeUncertain
 	}
@@ -405,12 +405,12 @@ func (LocalProjectQueryAdapter) SaveQuery(ctx context.Context, scope dto.Operati
 	if err != nil || string(stagedPair.Revision) != journal.Result.Revision {
 		return nil, ErrProjectMutationOutcomeUncertain
 	}
-	afterStage, err := localGitState(ctx, projectDir)
+	afterStage, err := localGitStateSeam(ctx, projectDir)
 	if err != nil || afterStage.branch != state.branch || afterStage.head != state.head {
 		return nil, ErrProjectMutationOutcomeUncertain
 	}
 	journal.Complete = true
-	if err := writeLocalQueryJournal(receiptPath, journal); err != nil {
+	if err := writeLocalQueryJournalSeam(receiptPath, journal); err != nil {
 		return nil, fmt.Errorf("query saved but receipt failed: %w", ErrProjectMutationOutcomeUncertain)
 	}
 	result := journal.Result
@@ -438,25 +438,22 @@ type localQueryPreview struct {
 }
 
 func previewLocalQueryRevision(ctx context.Context, query datatug.QueryDefWithFolderPath) (localQueryPreview, error) {
-	dir, err := os.MkdirTemp("", "datatug-query-preview-*")
+	dir, err := osMkdirTemp("", "datatug-query-preview-*")
 	if err != nil {
 		return localQueryPreview{}, err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	store, ok := filestore.NewProjectStore("preview", dir).(datatug.RevisionedQueriesStore)
-	if !ok {
-		return localQueryPreview{}, dto.ErrUnsupportedCapability
-	}
+	store := filestore.NewProjectStore("preview", dir).(datatug.RevisionedQueriesStore)
 	stored, err := store.PutQuery(ctx, &query, datatug.QueryWriteCondition{IfNoneMatch: true})
 	if err != nil {
 		return localQueryPreview{}, err
 	}
 	base := filepath.Join(dir, "queries", filepath.FromSlash(query.FolderPath), query.ID+".query")
-	metadata, err := os.ReadFile(base + ".json")
+	metadata, err := osReadFile(base + ".json")
 	if err != nil {
 		return localQueryPreview{}, err
 	}
-	body, err := os.ReadFile(base + "." + strings.ToLower(string(query.Type)))
+	body, err := osReadFile(base + "." + strings.ToLower(string(query.Type)))
 	if err != nil {
 		return localQueryPreview{}, err
 	}
@@ -469,7 +466,7 @@ func previewLocalQueryRevision(ctx context.Context, query datatug.QueryDefWithFo
 func localMutationReceiptPath(actorID, operationID string) (string, error) {
 	root := os.Getenv("DATATUG_OPERATION_RECEIPTS_DIR")
 	if root == "" {
-		configDir, err := os.UserConfigDir()
+		configDir, err := osUserConfigDir()
 		if err != nil {
 			return "", err
 		}
@@ -485,60 +482,60 @@ func localMutationReceiptPath(actorID, operationID string) (string, error) {
 }
 
 func writeLocalQueryJournal(path string, record localQueryJournal) error {
-	data, err := json.Marshal(record)
+	data, err := jsonMarshal(record)
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".receipt-*")
+	tmp, err := osCreateTemp(filepath.Dir(path), ".receipt-*")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
+	if err := fileChmod(tmp, 0o600); err != nil {
+		_ = fileClose(tmp)
 		return err
 	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
+	if _, err := fileWrite(tmp, data); err != nil {
+		_ = fileClose(tmp)
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
+	if err := fileSync(tmp); err != nil {
+		_ = fileClose(tmp)
 		return err
 	}
-	if err := tmp.Close(); err != nil {
+	if err := fileClose(tmp); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
+	if err := osRename(tmp.Name(), path); err != nil {
 		return err
 	}
 	// The pending receipt must be durable before PutQuery can reach its
 	// commit point; syncing the directory makes the rename crash-stable.
-	dir, err := os.Open(filepath.Dir(path))
+	dir, err := osOpenDir(filepath.Dir(path))
 	if err != nil {
 		return err
 	}
-	syncErr := dir.Sync()
-	closeErr := dir.Close()
+	syncErr := fileSync(dir)
+	closeErr := fileClose(dir)
 	return errors.Join(syncErr, closeErr)
 }
 
 type gitState struct{ root, gitDir, branch, head string }
 
 func localGitState(ctx context.Context, projectDir string) (gitState, error) {
-	root, err := localGitOutput(ctx, projectDir, "rev-parse", "--show-toplevel")
+	root, err := localGitOutputSeam(ctx, projectDir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return gitState{}, dto.ErrUnsupportedCapability
 	}
-	gitDir, err := localGitOutput(ctx, projectDir, "rev-parse", "--absolute-git-dir")
+	gitDir, err := localGitOutputSeam(ctx, projectDir, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		return gitState{}, dto.ErrUnsupportedCapability
 	}
-	branch, err := localGitOutput(ctx, projectDir, "symbolic-ref", "--quiet", "--short", "HEAD")
+	branch, err := localGitOutputSeam(ctx, projectDir, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
 		return gitState{}, dto.ErrUnsupportedCapability
 	}
-	head, err := localGitOutput(ctx, projectDir, "rev-parse", "HEAD")
+	head, err := localGitOutputSeam(ctx, projectDir, "rev-parse", "HEAD")
 	if err != nil {
 		return gitState{}, dto.ErrInitializationRequired
 	}
@@ -567,11 +564,11 @@ func localGitInput(ctx context.Context, dir string, input []byte, args ...string
 func stageLocalQueryPair(ctx context.Context, root, projectDir, queryID string, newType, oldType datatug.QueryType, metadata, body []byte) error {
 	// macOS may hand serve a /var/... path while Git canonicalizes it to
 	// /private/var/.... Resolve both before checking containment.
-	root, err := filepath.EvalSymlinks(root)
+	root, err := filepathEvalSymlinks(root)
 	if err != nil {
 		return err
 	}
-	projectDir, err = filepath.EvalSymlinks(projectDir)
+	projectDir, err = filepathEvalSymlinks(projectDir)
 	if err != nil {
 		return err
 	}
@@ -583,28 +580,28 @@ func stageLocalQueryPair(ctx context.Context, root, projectDir, queryID string, 
 	paths := []string{base + ".json", base + "." + strings.ToLower(string(newType))}
 	var expectedOIDs [2]string
 	for i, content := range [][]byte{metadata, body} {
-		blobOID, err := localGitInput(ctx, root, content, "hash-object", "-w", "--stdin")
+		blobOID, err := localGitInputSeam(ctx, root, content, "hash-object", "-w", "--stdin")
 		if err != nil {
 			return err
 		}
 		expectedOIDs[i] = blobOID
-		if _, err := localGitOutput(ctx, root, "update-index", "--add", "--cacheinfo", "100644", blobOID, paths[i]); err != nil {
+		if _, err := localGitOutputSeam(ctx, root, "update-index", "--add", "--cacheinfo", "100644", blobOID, paths[i]); err != nil {
 			return err
 		}
 	}
 	if oldType != "" && oldType != newType {
 		oldPath := base + "." + strings.ToLower(string(oldType))
-		if _, err := localGitOutput(ctx, root, "ls-files", "--error-unmatch", "--", ":(literal)"+oldPath); err == nil {
-			if _, err := localGitOutput(ctx, root, "update-index", "--force-remove", "--", oldPath); err != nil {
+		if _, err := localGitOutputSeam(ctx, root, "ls-files", "--error-unmatch", "--", ":(literal)"+oldPath); err == nil {
+			if _, err := localGitOutputSeam(ctx, root, "update-index", "--force-remove", "--", oldPath); err != nil {
 				return err
 			}
-			if _, err := localGitOutput(ctx, root, "ls-files", "--error-unmatch", "--", ":(literal)"+oldPath); err == nil {
+			if _, err := localGitOutputSeam(ctx, root, "ls-files", "--error-unmatch", "--", ":(literal)"+oldPath); err == nil {
 				return ErrProjectMutationOutcomeUncertain
 			}
 		}
 	}
 	for i, path := range paths {
-		stagedOID, err := localGitOutput(ctx, root, "rev-parse", ":"+path)
+		stagedOID, err := localGitOutputSeam(ctx, root, "rev-parse", ":"+path)
 		if err != nil || stagedOID != expectedOIDs[i] {
 			return ErrProjectMutationOutcomeUncertain
 		}

@@ -32,6 +32,11 @@ type LocalCatalogConnection struct {
 	} `json:"browserFixture,omitempty"`
 }
 
+var (
+	servedProjectDirCatalog = servedProjectDir
+	ioReadAllCatalog        = io.ReadAll
+)
+
 func LocalProjectConnectionCatalog(_ context.Context, ref dto.ProjectRef) (*LocalConnectionCatalog, error) {
 	if err := requireLocalReadPrincipal(); err != nil {
 		return nil, err
@@ -42,7 +47,7 @@ func LocalProjectConnectionCatalog(_ context.Context, ref dto.ProjectRef) (*Loca
 	if ref.StoreID != LocalStoreID {
 		return nil, ErrUnknownStoreID
 	}
-	dir, err := servedProjectDir(ref.ProjectID)
+	dir, err := servedProjectDirCatalog(ref.ProjectID)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +69,7 @@ func readLocalConnectionCatalog(dir string) (*LocalConnectionCatalog, error) {
 	if err != nil || !info.Mode().IsRegular() || info.Size() > 256<<10 {
 		return nil, errConnectionCatalogUnavailable
 	}
-	body, err := io.ReadAll(io.LimitReader(f, (256<<10)+1))
+	body, err := ioReadAllCatalog(io.LimitReader(f, (256<<10)+1))
 	if err != nil || len(body) > 256<<10 {
 		return nil, errConnectionCatalogUnavailable
 	}

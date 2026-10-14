@@ -32,6 +32,12 @@ var contextManager struct {
 	manager *sessionstore.Manager
 }
 
+var (
+	filepathEvalSymlinks     = filepath.EvalSymlinks
+	sessionstoreNew          = sessionstore.New
+	sessionContextProjectDir = ProjectDir
+)
+
 func CloseSessionContext() error {
 	contextManager.Lock()
 	defer contextManager.Unlock()
@@ -54,7 +60,7 @@ func ResolveSessionContext(ctx context.Context, storage, project string) (*sessi
 	if actor == "" {
 		return nil, sessioncontext.Principal{}, caps, sessioncontext.ErrForbidden
 	}
-	dir, ok := ProjectDir(project)
+	dir, ok := sessionContextProjectDir(project)
 	if !ok {
 		return nil, sessioncontext.Principal{}, caps, sessioncontext.ErrForbidden
 	}
@@ -66,7 +72,7 @@ func ResolveSessionContext(ctx context.Context, storage, project string) (*sessi
 	if err != nil {
 		return nil, sessioncontext.Principal{}, caps, sessioncontext.ErrUnavailable
 	}
-	identityDir, pathErr := filepath.EvalSymlinks(dir)
+	identityDir, pathErr := filepathEvalSymlinks(dir)
 	if pathErr != nil {
 		return nil, sessioncontext.Principal{}, caps, sessioncontext.ErrUnavailable
 	}
@@ -102,7 +108,7 @@ func ResolveSessionContext(ctx context.Context, storage, project string) (*sessi
 		var root string
 		root, err = executionstore.ResolvePrivateDir(GetCapabilities().EvidencePrivateDir)
 		if err == nil {
-			contextManager.manager, err = sessionstore.New(filepath.Join(root, "session-context"))
+			contextManager.manager, err = sessionstoreNew(filepath.Join(root, "session-context"))
 		}
 	}
 	manager := contextManager.manager

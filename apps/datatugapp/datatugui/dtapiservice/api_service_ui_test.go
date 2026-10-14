@@ -11,6 +11,7 @@ import (
 )
 
 func TestModule(t *testing.T) {
+	t.Parallel()
 	m := Module()
 	if m.ID != datatugui.ScreenAPIMonitor || m.Text != "API Monitor" || m.Shortcut != 'w' {
 		t.Fatalf("unexpected module: %+v", m)
@@ -27,11 +28,15 @@ func TestModule(t *testing.T) {
 }
 
 func TestMonitorScreen(t *testing.T) {
+	t.Parallel()
 	var s nav.Screen = newMonitor()
 	if cmd := s.Init(); cmd != nil {
 		t.Fatal("Init must not start work")
 	}
 	s, _ = s.Update(tea.WindowSizeMsg{Width: 60, Height: 5})
+	s, _ = s.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	s, _ = s.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	s, _ = s.Update(tea.KeyPressMsg{Code: tea.KeyEnd})
 	s, _ = s.Update(nav.ScreenFocusMsg{Focused: true})
 	if s.(nav.Titled).Title() != screenTitle {
 		t.Fatalf("title = %q", s.(nav.Titled).Title())

@@ -36,6 +36,7 @@ const FSProbeDirEnv = "DATATUG_FS_PROBE_DIR"
 // the canonical form merging what the file system keeps apart - is the safe
 // one and is only counted.
 func TestCanonicalQueryID_AgreesWithTheFileSystem(t *testing.T) {
+	t.Parallel()
 	dir := os.Getenv(FSProbeDirEnv)
 	if dir == "" {
 		t.Skipf("%s is not set", FSProbeDirEnv)

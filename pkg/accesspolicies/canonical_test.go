@@ -7,6 +7,7 @@ import (
 )
 
 func TestCanonicalQueryID(t *testing.T) {
+	t.Parallel()
 	const nfc, nfd = "café", "café"
 	sameQuery := [][]string{
 		{"revenue", "Revenue", "REVENUE", "rEvEnUe"},

@@ -248,14 +248,14 @@ func (m *Model) startScenarioStep(c detective.Case, rowID string) (tea.Model, te
 }
 func scenarioQueryInputs(c detective.Case, schema []detective.Input, step detective.ScenarioStep) (string, error) {
 	if err := detective.ValidateScenario(detective.Scenario{ID: "binding-preview", Title: "Binding preview", Inputs: schema, Steps: []detective.ScenarioStep{step}}); err != nil {
-		return "", fmt.Errorf("Scenario query bindings: %w", err)
+		return "", fmt.Errorf("scenario query bindings: %w", err)
 	}
 	var entries []string
 	boundSources := make(map[string]bool, len(step.Bindings))
 	seenTargets := make(map[string]bool, len(step.Bindings))
 	appendValue := func(name string, value detective.InputValue) error {
 		if err := value.Validate(); err != nil || value.Range != nil {
-			return fmt.Errorf("Scenario query input %q has an invalid bound value", name)
+			return fmt.Errorf("scenario query input %q has an invalid bound value", name)
 		}
 		kind, cardinality := "", "scalar"
 		if value.Scalar != nil {
@@ -265,14 +265,14 @@ func scenarioQueryInputs(c detective.Case, schema []detective.Input, step detect
 			cardinality = "set"
 		}
 		if kind == "" {
-			return fmt.Errorf("Scenario query input %q is empty", name)
+			return fmt.Errorf("scenario query input %q is empty", name)
 		}
 		entries = append(entries, name+"="+kind+":"+cardinality+":"+formatScenarioQueryValue(value))
 		return nil
 	}
 	for _, binding := range step.Bindings {
 		if binding.Input == "" || binding.FromInput == "" || binding.FromColumn != "" || seenTargets[binding.Input] {
-			return "", fmt.Errorf("Scenario query has invalid input bindings")
+			return "", fmt.Errorf("scenario query has invalid input bindings")
 		}
 		seenTargets[binding.Input] = true
 		boundSources[binding.FromInput] = true
@@ -288,11 +288,11 @@ func scenarioQueryInputs(c detective.Case, schema []detective.Input, step detect
 			case "end":
 				endpoint = value.Range.End
 			default:
-				return "", fmt.Errorf("Scenario range binding %q needs start or end", binding.Input)
+				return "", fmt.Errorf("scenario range binding %q needs start or end", binding.Input)
 			}
 			value = detective.InputValue{Scalar: &endpoint}
 		} else if binding.Part != "" {
-			return "", fmt.Errorf("Scenario binding %q selects an endpoint of a non-range input", binding.Input)
+			return "", fmt.Errorf("scenario binding %q selects an endpoint of a non-range input", binding.Input)
 		}
 		if err := appendValue(binding.Input, value); err != nil {
 			return "", err
@@ -307,7 +307,7 @@ func scenarioQueryInputs(c detective.Case, schema []detective.Input, step detect
 			continue
 		}
 		if value.Range != nil {
-			return "", fmt.Errorf("Scenario range input %q needs start and end query bindings", input.Name)
+			return "", fmt.Errorf("scenario range input %q needs start and end query bindings", input.Name)
 		}
 		if err := appendValue(input.Name, value); err != nil {
 			return "", err

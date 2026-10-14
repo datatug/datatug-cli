@@ -96,11 +96,11 @@ jobs:
       - name: Publish release to datatug/datatug
         env:
           GH_SOURCE_TOKEN: ${{ github.token }}
-          GH_TARGET_TOKEN: ${{ secrets.DATATUG_RELEASE_TOKEN || secrets.HOMEBREW_TAP_GITHUB_TOKEN || secrets.GORELEASER_GITHUB_TOKEN }}
+          GH_TARGET_TOKEN: ${{ secrets.DATATUG_RELEASE_TOKEN || secrets.GORELEASER_GITHUB_TOKEN }}
           TAG: ${{ needs.release.outputs.tag }}
         run: |
           if [[ -z "${GH_TARGET_TOKEN:-}" ]]; then
-            echo "::error::No token found for publishing to datatug/datatug. Set DATATUG_RELEASE_TOKEN or HOMEBREW_TAP_GITHUB_TOKEN with write access to datatug/datatug."
+            echo "::error::No token found for publishing to datatug/datatug. Set DATATUG_RELEASE_TOKEN or GORELEASER_GITHUB_TOKEN with write access to datatug/datatug."
             exit 1
           fi
           bash scripts/publish-datatug-release.sh "$TAG" "datatug/datatug-cli" "datatug/datatug"

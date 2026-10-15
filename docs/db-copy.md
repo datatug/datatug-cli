@@ -144,6 +144,7 @@ side could not be opened.
 
 ## Documented differences after a round trip
 
+* A SQLite primary key column that was declared without `NOT NULL` comes back `NOT NULL` (PostgreSQL requires it; a column that holds NULL refuses the copy before anything is written).
 * `serial` becomes an identity column; `integer` / `smallint` identity and key columns come back as
   `bigint` (SQLite integers are 64-bit); `char(n)` comes back as `varchar(n)` (SQLite does not pad).
 * A column of mixed storage classes (an integer and a text in one untyped column) comes back as text.

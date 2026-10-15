@@ -836,12 +836,16 @@ func TestStreamNext_EdgeCases(t *testing.T) {
 	require.Error(t, err)
 	store.readCatalog = nil
 
-	// Line 604: stream closed while waiting
-	go func() {
-		time.Sleep(50 * time.Millisecond)
+	// Line 604: stream closed while waiting. Close the stream from inside the
+	// backlog read, i.e. after Next's top-of-loop closed check and before its
+	// wait select, so the select deterministically observes the close (no
+	// goroutine or sleep, which made this branch's coverage timing-dependent).
+	store.readCatalog = func() (incidentCatalog, error) {
 		_ = stream.Close()
-	}()
+		return incidentCatalog{}, nil
+	}
 	_, err = stream.Next(ctx)
+	store.readCatalog = nil
 	require.ErrorIs(t, err, io.EOF)
 }
 

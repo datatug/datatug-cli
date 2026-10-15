@@ -47,6 +47,9 @@ func ReadSQLite(ctx context.Context, db Queryer) (*Catalog, error) {
 
 	tableSQL := map[string]string{}
 	for _, o := range objects {
+		if o.typ != "table" && o.sql != "" {
+			cat.Objects = append(cat.Objects, RawObject{Type: o.typ, Name: o.name, Table: o.tbl, SQL: o.sql})
+		}
 		switch o.typ {
 		case "table":
 			if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(o.sql)), "CREATE VIRTUAL") {
@@ -63,6 +66,7 @@ func ReadSQLite(ctx context.Context, db Queryer) (*Catalog, error) {
 	}
 
 	for _, t := range cat.Tables {
+		t.CreateSQL = tableSQL[t.Name]
 		if err := readSQLiteTable(ctx, db, cat, t, tableSQL[t.Name], withoutRowid[t.Name], strict[t.Name]); err != nil {
 			return nil, fmt.Errorf("read table %q: %w", t.Name, err)
 		}

@@ -36,6 +36,10 @@ func dbCopyCommand() *cobra.Command {
 	flags.String("from", "", "Source URL (sqlite://, ingitdb://, postgres:// read-only, http(s):// DataTug project, openvaultdb://). Required.")
 	flags.String("from-schema", "", "PostgreSQL source schema to read; defaults to public.")
 	flags.String("to", "", "Target DALgo URL (sqlite://, ingitdb://, postgres://: the only way DataTug opens PostgreSQL for writing; bigquery://PROJECT/DATASET?location=LOCATION). Required.")
+	flags.String("to-schema", "", "PostgreSQL target schema (SQLite <-> PostgreSQL copies); defaults to public. Created when missing.")
+	flags.Bool("json", false, "SQLite <-> PostgreSQL copies: print a machine-readable summary (tables, rows, created keys and indexes, warnings, exit code) on stdout.")
+	flags.Bool("dry-run", false, "SQLite <-> PostgreSQL copies: print the plan (DDL, row counts, every warning) and change nothing; the target is not opened.")
+	flags.Bool("fail-on-warning", false, "SQLite <-> PostgreSQL copies: exit 3 when anything could not be carried exactly (the copy itself is still made).")
 	flags.String("recover-job-ref", "", "Recover the same uncertain BigQuery load job using the credential-free JSON reference printed by an interrupted `db copy`; requires --to and does not resubmit source rows.")
 	flags.String("overwrite", "", "Conflict policy when target already contains source-named collections. One of: recreate, reload.")
 	flags.Int("parallel-streams", 0, "Maximum number of source tables copied concurrently. Capped to 1 when either driver advertises no concurrency.")
@@ -113,6 +117,16 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	}
 	if tgtRef.Scheme == "bigquery" && overwrite != "" {
 		return Exit("BigQuery destinations never replace existing tables; omit --overwrite and choose a new dataset or table names", 2)
+	}
+
+	// SQLite <-> PostgreSQL keeps keys, indexes, constraints and exact values: its own engine.
+	if faithfulEligible(srcRef, tgtRef) {
+		return dbCopyFaithful(cmd, srcRef, tgtRef, fromSchema, overwrite)
+	}
+	for _, name := range []string{"json", "dry-run", "fail-on-warning", "to-schema"} {
+		if cmd.Flags().Changed(name) {
+			return Exit(fmt.Sprintf("--%s is supported only for SQLite <-> PostgreSQL copies", name), 2)
+		}
 	}
 
 	// Open both backends (REQ:exit-codes — 4 for connection failures). The source is opened as a
@@ -225,7 +239,7 @@ func dbCopyToBigQuery(ctx context.Context, source dal.DB, sourceRef dbcopy.Backe
 }
 
 func copyOnlyFlagChanged(cmd *cobra.Command) bool {
-	for _, name := range []string{"from-schema", "overwrite", "parallel-streams", "progress", "include", "exclude", "where", "limit", "filter-config"} {
+	for _, name := range []string{"from-schema", "to-schema", "json", "dry-run", "fail-on-warning", "overwrite", "parallel-streams", "progress", "include", "exclude", "where", "limit", "filter-config"} {
 		if cmd.Flags().Changed(name) {
 			return true
 		}

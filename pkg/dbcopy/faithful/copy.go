@@ -116,8 +116,8 @@ func Copy(ctx context.Context, from, to Endpoint, opts Options) (*Report, error)
 		rep.Status, rep.ExitCode, rep.Error = "failed", code, err.Error()
 		return rep, err
 	}
-	if from.Engine == to.Engine {
-		return fail(2, fmt.Errorf("faithful copy is between SQLite and PostgreSQL; %s to %s is not handled here", from.Engine, to.Engine))
+	if from.Engine == to.Engine && from.Engine != SQLite {
+		return fail(2, fmt.Errorf("faithful copy is between SQLite and PostgreSQL, and SQLite to SQLite; %s to %s is not handled here", from.Engine, to.Engine))
 	}
 
 	// Read the source.
@@ -152,8 +152,10 @@ func Copy(ctx context.Context, from, to Endpoint, opts Options) (*Report, error)
 
 	// Plan.
 	var plan *Plan
-	switch from.Engine {
-	case SQLite:
+	switch {
+	case from.Engine == SQLite && to.Engine == SQLite:
+		plan = PlanSQLiteToSQLite(cat)
+	case from.Engine == SQLite:
 		stats, serr := scanSQLiteStats(ctx, from.DB, cat)
 		if serr != nil {
 			return fail(1, fmt.Errorf("scan source values: %w", serr))
@@ -167,7 +169,7 @@ func Copy(ctx context.Context, from, to Endpoint, opts Options) (*Report, error)
 			}
 		}
 		plan = PlanSQLiteToPG(cat, stats, to.schema())
-	case Postgres:
+	default:
 		plan = PlanPGToSQLite(cat, checkCompiles)
 	}
 	plan.Warnings = append(plan.Warnings, extra...)
@@ -177,6 +179,9 @@ func Copy(ctx context.Context, from, to Endpoint, opts Options) (*Report, error)
 		}
 	}
 	create, post := buildStatements(plan, to.Engine)
+	if from.Engine == SQLite && to.Engine == SQLite {
+		create, post = sameEngineStatements(cat, plan)
+	}
 	rep.fill(plan)
 	if opts.DryRun {
 		for _, s := range create {

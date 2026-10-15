@@ -175,6 +175,8 @@ type Table struct {
 	FKs     []ForeignKey
 	// Rows is the row count read from the source.
 	Rows int64
+	// CreateSQL is the CREATE TABLE statement of a SQLite table, as stored.
+	CreateSQL string
 }
 
 // Column returns the column called name, or nil.
@@ -194,6 +196,13 @@ type Catalog struct {
 	Tables []*Table
 	// Skipped names objects the reader saw and cannot carry, as warnings.
 	Notes []Warning
+	// Objects are the stored definitions of the views, triggers and indexes of a SQLite database, in creation order.
+	Objects []RawObject
+}
+
+// RawObject is a SQLite schema object as sqlite_master stores it.
+type RawObject struct {
+	Type, Name, Table, SQL string
 }
 
 // Table returns the table called name, or nil.

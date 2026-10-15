@@ -119,3 +119,34 @@ func TestRoundTripPGSQLitePG(t *testing.T) {
 		})
 	}
 }
+
+func TestSQLiteToSQLiteIsExact(t *testing.T) {
+	for name, path := range demoDatabases(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			src := openSQLite(t, path)
+			dst := newSQLite(t)
+			rep, err := Copy(ctx, src, dst, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, w := range rep.Warnings {
+				t.Logf("  warn %s", w)
+			}
+			diffs, err := Verify(ctx, src, dst)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, d := range diffs {
+				t.Errorf("diff: %s", d)
+			}
+			// Every object of sqlite_master is there, too (views, triggers, indexes).
+			var a, b int
+			_ = src.DB.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite\_%' ESCAPE '\'`).Scan(&a)
+			_ = dst.DB.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite\_%' ESCAPE '\'`).Scan(&b)
+			if a != b {
+				t.Errorf("sqlite_master objects: %d != %d", a, b)
+			}
+		})
+	}
+}

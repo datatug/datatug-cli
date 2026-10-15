@@ -85,6 +85,11 @@ func semanticRoutes(path string, router router, wrap wrapper, writeOnly bool) {
 	route(router, wrap, http.MethodPost, path+"/semantic/related", semanticRelatedHandler)
 	route(router, wrap, http.MethodPost, path+"/semantic/related/rows", semanticRelatedRowsHandler)
 	route(router, wrap, http.MethodPost, path+"/queries/applicable", semanticApplicableHandler)
+	// records/lookup: one record by the typed values of its declared primary key (POST, so a
+	// key is never copied into a URL or an access log), read through the same policy path.
+	route(router, wrap, http.MethodPost, path+"/records/lookup", recordsLookupHandler)
+	// records/schema: the live schema of one table of a registered, not scanned source.
+	route(router, wrap, http.MethodPost, path+"/records/schema", recordsSchemaHandler)
 }
 
 // foldersRoutes: both routes mutate the project's query-folder tree and are

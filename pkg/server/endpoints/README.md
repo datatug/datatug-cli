@@ -31,6 +31,38 @@ the loopback names, and no other name: the host a client reaches it by has to be
 The live connection to a database server is a capability that is off by default (see
 `GET /dbserver-databases` below): `datatug serve --allow-live-connections`.
 
+## Record lookup
+
+`POST /datatug/records/lookup` reads at most one row of a table of a registered source by its primary key,
+through the same policy-enforced executor as every other read (a denied principal gets `403 ACCESS_DENIED`
+and no data). It is not registered in write-only mode and needs no write capability.
+
+Request: `{"project","env","source","schema","table","key":{"<pkCol>":<value>}}`. `schema` may be `""`;
+no other field may be left out; unknown fields are refused. `project`, `env` and `source` are plain
+names and the source is looked up in the registry of the environment (there is no default source);
+`schema` and `table` hold no `://`, path separator or control character. A refused field is a `400`
+that does not echo its value, and nothing is looked up.
+
+`key` names exactly the declared primary-key columns of the table, read live from the source (a source
+that was never scanned works), with a string, or a number or string that is an exact integer literal for
+an integer column (an optional `-` and digits, no `+`, space, leading zero, fraction or exponent; it must
+fit int64). An integer is read from its literal text, never through a float, so `9007199254740993` opens
+that record and not its neighbour. Values are bound as query parameters; identifiers come from the live
+schema only. A key that does not fit (unknown, non-key, missing or extra column, `null`, object, array,
+boolean, wrong type, a key type that is not integer or string, a table with no primary key) is
+`400 INVALID_REQUEST` with `field: "key"` and a message that does not quote the request, and no query is
+issued.
+
+Response `200`: the contract `Result` of `semantic/related/rows` and `exec/run_query`
+(`recordset` with one row of typed values, `limitations`, `provenance`). Errors are the contract envelope:
+`NOT_FOUND` with `field` `project`, `source`, `table` or `key` (record not found), `400
+INVALID_REQUEST` / `MISSING_PARAMETER`, `ACCESS_DENIED`, `SOURCE_UNAVAILABLE`, `TIMEOUT`. The body, the
+key and the row are never logged.
+
+`POST /datatug/records/schema` takes the same body without `key` and answers
+`{"source","schema","table","columns":[{"name","type"}],"primaryKey":[...],"referencedBy":[...]}`.
+It reads no row.
+
 ## Endpoints
 
 | Method | Path | Description |
@@ -38,6 +70,8 @@ The live connection to a database server is a capability that is off by default 
 |  **Executor** |
 | POST   | /exec/execute | Executes a batch of commands |
 | GET | /exec/select | Executes a single non mutating SELECT command |
+| POST | /records/lookup | One record by the typed values of its declared primary key; read-only, see [Record lookup](#record-lookup) |
+| POST | /records/schema | The live schema (columns and types, primary key, referencing tables) of one table of a registered source, read from the source and not from a scan |
 |  **Entities** |
 | GET | /entities/all_entities | |
 | GET | /entities/entity | |

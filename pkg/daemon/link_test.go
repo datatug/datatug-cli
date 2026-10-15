@@ -112,3 +112,22 @@ func TestStatusUISupportIsPending(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildLinkCodeIsFirstInTheFragment(t *testing.T) {
+	const prefix = "https://ui.test/store/http-127.0.0.1:8989/project/p/env/e/db/d/table/t"
+	for name, c := range map[string]struct {
+		mod func(*LinkRequest)
+		url string
+	}{
+		"metadata": {func(*LinkRequest) {}, prefix + "?schema=#code=v1.1.2.3"},
+		"records":  {func(r *LinkRequest) { r.Records = true }, prefix + "/records?limit=50&schema=#code=v1.1.2.3"},
+		"record":   {func(r *LinkRequest) { r.Record = `{"id":5}` }, prefix + "/record?schema=#code=v1.1.2.3&pk=%7B%22id%22%3A5%7D"},
+	} {
+		req := LinkRequest{Project: "p", Env: "e", DB: "d", Table: "t", Code: "v1.1.2.3"}
+		c.mod(&req)
+		got, err := BuildLink(linkStatus(), req)
+		if err != nil || got.URL != c.url {
+			t.Errorf("%s: %q %v", name, got.URL, err)
+		}
+	}
+}

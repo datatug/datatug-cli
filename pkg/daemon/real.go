@@ -7,11 +7,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/datatug/datatug-cli/pkg/dtroot"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 )
 
 // DirEnv overrides the state directory (default ~/datatug/daemon).
@@ -19,10 +18,7 @@ const DirEnv = "DATATUG_DAEMON_DIR"
 
 // NewManager returns the Manager wired to the real OS.
 func NewManager() *Manager {
-	dir := os.Getenv(DirEnv)
-	if dir == "" {
-		dir = filepath.Join(dtroot.Path(), "daemon")
-	}
+	dir := agentaccess.StateDir()
 	return &Manager{
 		Dir: dir, Exe: os.Executable, Probe: probeAgent, Dial: dialLoopback, PortFree: portFree,
 		Alive: processAlive, Owns: processOwns, Terminate: terminateProcess, Spawn: spawnDetached,
@@ -35,7 +31,9 @@ var probeClient = &http.Client{Timeout: 400 * time.Millisecond}
 // probeAgent says whether a DataTug agent API answers on 127.0.0.1:port, and
 // its version. Anything else (a refused connection, another service) is "no".
 func probeAgent(port int) (string, bool) {
-	resp, err := probeClient.Get(fmt.Sprintf("http://%s:%d/datatug/agent-info", Host, port))
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s:%d/datatug/agent-info", Host, port), nil)
+	agentaccess.Apply(req) // an agent that needs its token answers 401 to a probe without it
+	resp, err := probeClient.Do(req)
 	if err != nil {
 		return "", false
 	}

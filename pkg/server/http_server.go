@@ -180,10 +180,17 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 		AllowLiveConnections: caps.AllowLiveConnections,
 		ServedHost:           agentHost,
 		ServedPort:           agentPort,
+		Access:               caps.Access,
 	}
 	guard := endpointCaps.RequestGuard()
 	router := httprouter.New()
 	router.GlobalOPTIONS = http.HandlerFunc(guard.Wrap(globalOptionsHandler))
+	// What the router answers by itself (unknown path, wrong method) is behind the guard too, so
+	// an unauthenticated caller cannot tell which routes exist.
+	router.NotFound = http.HandlerFunc(guard.Wrap(http.NotFound))
+	router.MethodNotAllowed = http.HandlerFunc(guard.Wrap(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+	}))
 	router.HandlerFunc(http.MethodGet, "/", guard.Wrap(root))
 	endpoints.RegisterDatatugHandlersWithCapabilities("", router, endpoints.RegisterAllHandlers, logRequests, func(r *http.Request) (context.Context, error) {
 		return r.Context(), nil

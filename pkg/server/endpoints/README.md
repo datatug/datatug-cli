@@ -14,8 +14,13 @@ request; see `RequestGuard` in `request_guard.go`):
 - the `Host` of the request is one that the server was started for: `localhost`, `127.0.0.1`
   or `::1`, or the host given with `--host`, on the port that the server listens on;
 - the `Origin` of the request, when it has one, is on the list of the `OPTIONS` handler
-  (`IsSupportedOrigin`: `localhost` and `127.0.0.1` pages, `https://datatug.app` and its
-  subdomains, `https://app.incidentius.com`);
+  (`IsSupportedOrigin`: exactly `https://datatug.app`, and the host `datatug.localhost` over
+  `http` or `https` with no port or a numeric one, for local UI development; nothing else, no
+  flag adds one);
+- unless the server was built without an access secret (tests only), the request carries the
+  session token (`Authorization: Bearer`), except a preflight and `POST /datatug/session/exchange`,
+  which trades the one-time code of a link for the token (see `pkg/agentaccess`); a request without
+  it is a `401`;
 - the `Sec-Fetch-Site` of the request, when it has one, is `same-origin`, `same-site` or `none`,
   or its `Origin` is on the list.
 

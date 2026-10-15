@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/hex"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"sync"
 	"time"
 
@@ -40,6 +41,10 @@ var (
 // such grant". Both default false: Phase 1's read journey is safe-by-default
 // unless an operator explicitly opts a serve process into either capability.
 type Capabilities struct {
+	// Access, when set, is the agent's shared-token access: every route but a preflight and the
+	// exchange of a one-time code requires its session token (pkg/agentaccess). `datatug serve`
+	// always sets it.
+	Access         *agentaccess.Access
 	AllowWrites    bool
 	AllowOpaqueSQL bool
 	// AllowLiveConnections is `datatug serve --allow-live-connections`: the routes that connect

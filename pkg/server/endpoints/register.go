@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"github.com/julienschmidt/httprouter"
 	"github.com/sneat-co/sneat-go-core/apicore"
 	"github.com/sneat-co/sneat-go-core/apicore/verify"
@@ -41,6 +42,9 @@ type Capabilities struct {
 	// RequestGuard). A ServedPort of 0 accepts any port.
 	ServedHost string
 	ServedPort int
+	// Access, when set, is the agent's shared-token access (pkg/agentaccess): every route but a
+	// preflight and the exchange of a one-time code requires its session token.
+	Access *agentaccess.Access
 }
 
 // RegisterDatatugHandlers registers datatug HTTP handlers with every write

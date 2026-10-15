@@ -83,14 +83,11 @@ func TestServeHTTP_CORS_DatatugApp(t *testing.T) {
 		}
 	})
 
-	t.Run("https://app.incidentius.com is allowed", func(t *testing.T) {
+	t.Run("https://app.incidentius.com is no longer admitted", func(t *testing.T) {
 		resp := getWithOrigin(t, summaryURL, "https://app.incidentius.com")
 		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("status = %d, want 200", resp.StatusCode)
-		}
-		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "https://app.incidentius.com" {
-			t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "https://app.incidentius.com")
+		if resp.StatusCode != http.StatusForbidden || resp.Header.Get("Access-Control-Allow-Origin") != "" {
+			t.Fatalf("status = %d, want 403 and no CORS header", resp.StatusCode)
 		}
 	})
 
@@ -106,22 +103,32 @@ func TestServeHTTP_CORS_DatatugApp(t *testing.T) {
 func TestServeHTTP_CORS_IncidentiusPreflight(t *testing.T) {
 	baseURL := startServeHTTPWithSession(t, nil, unrestrictedTestSession(t))
 
-	t.Run("exact production origin is allowed", func(t *testing.T) {
-		resp := optionsWithOrigin(t, baseURL+"/datatug/queries/create_query", "https://app.incidentius.com", http.MethodPost)
+	t.Run("the development UI host is allowed, with the private-network answer", func(t *testing.T) {
+		resp := optionsWithOrigin(t, baseURL+"/datatug/queries/create_query", "http://datatug.localhost:4200", http.MethodPost)
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusNoContent {
 			t.Fatalf("status = %d, want 204", resp.StatusCode)
 		}
-		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "https://app.incidentius.com" {
-			t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "https://app.incidentius.com")
+		if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "http://datatug.localhost:4200" {
+			t.Errorf("Access-Control-Allow-Origin = %q", got)
 		}
 		if got := resp.Header.Get("Access-Control-Allow-Methods"); got != http.MethodPost {
 			t.Errorf("Access-Control-Allow-Methods = %q, want %q", got, http.MethodPost)
 		}
 	})
 
+	t.Run("the old origins are refused", func(t *testing.T) {
+		for _, origin := range []string{"https://app.incidentius.com", "http://localhost:4200", "http://127.0.0.1:9", "https://x.datatug.app"} {
+			resp := optionsWithOrigin(t, baseURL+"/datatug/queries/create_query", origin, http.MethodPost)
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Errorf("%s: status = %d, want 403", origin, resp.StatusCode)
+			}
+		}
+	})
+
 	t.Run("near miss is refused", func(t *testing.T) {
-		resp := optionsWithOrigin(t, baseURL+"/datatug/queries/create_query", "https://app.incidentius.com:443", http.MethodPost)
+		resp := optionsWithOrigin(t, baseURL+"/datatug/queries/create_query", "https://datatug.app:443", http.MethodPost)
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusForbidden {
 			t.Fatalf("status = %d, want 403", resp.StatusCode)
@@ -149,7 +156,7 @@ func TestServeHTTP_CORS_127001_Allowed(t *testing.T) {
 	baseURL := startServeHTTPWithSession(t, pathsByID, session)
 	summaryURL := baseURL + "/datatug/projects/project_summary?id=" + projectID
 
-	resp := getWithOrigin(t, summaryURL, "http://127.0.0.1:4200")
+	resp := getWithOrigin(t, summaryURL, "http://datatug.localhost:4200")
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200 for admitted IPv4 loopback", resp.StatusCode)
@@ -172,10 +179,10 @@ func TestServeHTTP_CORS_MetadataAndSessionUseSameStrictOrigin(t *testing.T) {
 	}
 	base := startServeHTTPWithSessionAndCapabilities(t, paths, session, api.Capabilities{EvidencePrivateDir: t.TempDir()})
 	for _, path := range []string{"/datatug/projects/project_summary?id=" + projectID, "/datatug/session-context/capabilities?storage=local&project=" + projectID} {
-		for _, origin := range []string{"http://127.0.0.1:18991", "http://localhost:18991", "http://127.0.0.1:18991/path", "http://127.0.0.1:18991@evil.example", "https://evil.example"} {
+		for _, origin := range []string{"http://datatug.localhost:18991", "http://localhost:18991", "http://127.0.0.1:18991", "http://datatug.localhost:18991/path", "http://datatug.localhost:18991@evil.example", "https://evil.example"} {
 			resp := getWithOrigin(t, base+path, origin)
 			want := http.StatusForbidden
-			if origin == "http://127.0.0.1:18991" || origin == "http://localhost:18991" {
+			if origin == "http://datatug.localhost:18991" {
 				want = http.StatusOK
 			}
 			if resp.StatusCode != want {

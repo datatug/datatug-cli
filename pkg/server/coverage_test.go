@@ -46,7 +46,7 @@ func TestGlobalOptionsHandler_MissingHeaders(t *testing.T) {
 
 	// Missing access control request method
 	req = httptest.NewRequest(http.MethodOptions, "/test", nil)
-	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Origin", "http://datatug.localhost:3000")
 	rec = httptest.NewRecorder()
 	globalOptionsHandler(rec, req)
 	if rec.Code != http.StatusBadRequest {

@@ -87,7 +87,7 @@ func NewPostgresScanParams(lookupEnv func(string) (string, bool), dsnEnv, enviro
 		catalog:        catalog,
 		ref:            ref,
 		target:         target,
-		descriptorPath: path.Join(postgresDescriptorFolder, environment, catalog+".json"),
+		descriptorPath: PostgresDescriptorPath(environment, catalog),
 	}, nil
 }
 
@@ -156,11 +156,31 @@ func (p *PostgresScanParams) SourceRef() dbcopy.BackendRef { return p.ref }
 // descriptor this write made is removed, with the folders it made, and a descriptor
 // that was there before is put back as it was.
 func (p *PostgresScanParams) WriteDescriptor(projectDir string) (undo func() error, err error) {
+	return writeDescriptorFile(projectDir, p.descriptorPath, p.dsnEnv)
+}
+
+// PostgresDescriptorPath is the project-relative path of the connection descriptor of catalog
+// in environment: connections/<env>/<catalog>.json, with "/" separators.
+func PostgresDescriptorPath(environment, catalog string) string {
+	return path.Join(postgresDescriptorFolder, environment, catalog+".json")
+}
+
+// WritePostgresDescriptor writes the connection descriptor of catalog in environment into
+// projectDir, as a PostgreSQL scan does (see PostgresScanParams.WriteDescriptor, whose rules
+// hold): a plain file that names the environment variable dsnEnv and nothing else. It returns
+// the function that takes the write back.
+func WritePostgresDescriptor(projectDir, environment, catalog, dsnEnv string) (undo func() error, err error) {
+	return writeDescriptorFile(projectDir, PostgresDescriptorPath(environment, catalog), dsnEnv)
+}
+
+// writeDescriptorFile writes the descriptor of dsnEnv at descriptorPath (project-relative, "/"
+// separated) under projectDir; see PostgresScanParams.WriteDescriptor for the rules.
+func writeDescriptorFile(projectDir, descriptorPath, dsnEnv string) (undo func() error, err error) {
 	// A struct of one string cannot fail to marshal.
-	data, _ := json.MarshalIndent(dbcopy.PostgresDescriptor{DSNEnv: p.dsnEnv}, "", "  ")
+	data, _ := json.MarshalIndent(dbcopy.PostgresDescriptor{DSNEnv: dsnEnv}, "", "  ")
 	content := append(data, '\n')
 	tree := scanTree(projectDir)
-	file := filepath.Join(projectDir, filepath.FromSlash(p.descriptorPath))
+	file := filepath.Join(projectDir, filepath.FromSlash(descriptorPath))
 	// The folders first: they are looked at with Lstat, so the descriptor is never read
 	// through a link in front of it. A descriptor that is there has its folders there, so
 	// when nothing has to be written nothing was made.

@@ -153,6 +153,13 @@ func isLocalScheme(scheme string) bool {
 // because it names a variable and holds no value. A string that is not led by a
 // known scheme yields UnparsableSource.
 func SourceDisplay(raw string) string {
+	if IsDatatugRef(raw) {
+		// A reference to a source of a project holds only names: it is shown as it is when it is well formed.
+		if ref, err := ParseDatatugRef(raw); err == nil {
+			return ref.String()
+		}
+		return UnparsableSource
+	}
 	if name, isEnv := strings.CutPrefix(raw, envPrefix); isEnv {
 		if ValidEnvName(name) {
 			return raw

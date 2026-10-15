@@ -19,11 +19,13 @@ A read-only, non-interactive set of `datatug db` commands that report everything
 
 ```
 datatug db table  <name> --db <url|path> [--schema <schema>] [--counts] [--format json|text]
+datatug db table  <name> --db datatug://<project>/<db>[?env=<ENV>] [--schema <schema>] [--counts] [--format json|text]
 datatug db column <table> <column> --db <url|path> [--schema <schema>] [--format json|text]
+datatug db column <table> <column> --db datatug://<project>/<db>[?env=<ENV>] [--schema <schema>] [--format json|text]
 datatug db objects --db <url|path> [--kind index|trigger|view|materialized-view|sequence|routine] [--schema <schema>] [--format json|text]
 ```
 
-`--db` takes every form `db schema` takes (URL, `env:NAME`, plain SQLite path, with `detectedFrom`).
+`--db` takes every form `db schema` takes (URL, `env:NAME`, plain SQLite path, with `detectedFrom`). `--db` also takes a `datatug://<project>/<db>[?env=<ENV>]` reference to a source of a registered project, with the grammar, resolution and errors of [`db schema` REQ: project-reference](../schema/README.md#req-project-reference) (`detectedFrom` is `project`); `db objects` does not yet.
 
 ## Problem
 
@@ -97,6 +99,12 @@ A column object has: `name`, `ordinal` (1-based definition order), `type` (the d
 Each phase lands on its own: phase 1 is `db table` and `db column` with the facts the matrix marks 1; phase 2 adds the constraint, collation, generated and comment facts; phase 3 adds `db objects` and the remaining object kinds. A fact a phase does not yet report is named in `unsupported`.
 
 ## Acceptance Criteria
+
+### AC: project-reference
+
+**Requirements:** db/schema#req:project-reference, db/metadata#req:common-envelope
+
+`datatug db table Album --db datatug://shop/chinook` and `db column Album Title --db datatug://shop/chinook` print `detectedFrom` `project` and `target` `datatug://shop/chinook`, no path, and fail with the exit codes of the reference (`3` not found, `2` ambiguous or unresolvable).
 
 ### AC: table-lists-keys-and-indexes
 

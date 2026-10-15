@@ -130,41 +130,52 @@ func sourceURLFromCatalog(catalog datatug.DbCatalog, projDir string) (string, er
 		// project file and no message ever holds the URL. The descriptor must be a
 		// file inside the project folder (ResolveDescriptorPath): a project file is
 		// not trusted to point a reader at any other file of the machine.
-		if catalog.Path == "" {
-			return "", fmt.Errorf("catalog %q has no connection descriptor path configured for its postgres driver", catalog.ID)
-		}
-		path, err := ResolveDescriptorPath(projDir, catalog.Path)
+		source, err := postgresDescriptorSource(catalog, projDir)
 		if err != nil {
-			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
-		}
-		descriptor, err := dbcopy.ReadPostgresDescriptor(path)
-		if err != nil {
-			// A descriptor that is not there, is a folder or cannot be read fails with the
-			// text of the operating system, which quotes the path of the file in the served
-			// project: the answer for a client is built from the ID of the catalog.
-			var pathErr *fs.PathError
-			if errors.As(err, &pathErr) {
-				return "", sourceLookupFailed("catalog %q: the PostgreSQL connection descriptor cannot be read", "catalog %q", err, catalog.ID)
-			}
-			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+			return "", err
 		}
 		// The variable must hold a postgres URL: a catalog labelled postgres whose
 		// variable held a sqlite or http source would otherwise be opened as that
 		// engine while policy naming still used the postgres label. Resolving it
 		// also refuses a variable that is not set. No error names the value, only
 		// the variable and the scheme.
-		source := descriptor.SourceURL()
 		ref, err := dbcopyParse(source)
 		if err != nil {
 			return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
 		}
 		if ref.Scheme != DriverPostgres {
-			return "", fmt.Errorf("catalog %q: environment variable %s must hold a postgres:// URL, not a %s source", catalog.ID, descriptor.DSNEnv, ref.Scheme)
+			return "", fmt.Errorf("catalog %q: environment variable %s must hold a postgres:// URL, not a %s source", catalog.ID, strings.TrimPrefix(source, "env:"), ref.Scheme)
 		}
 		return source, nil
 	default:
 		return "", fmt.Errorf("database driver %q is not supported for policy-enforced reads (want sqlite3, ingitdb, openvaultdb or postgres)", catalog.Driver)
 	}
+}
+
+// postgresDescriptorSource is the source "env:NAME" that the connection descriptor of a PostgreSQL
+// catalog names: the catalog's path is a descriptor inside the project folder (ResolveDescriptorPath),
+// a project file that names an environment variable and nothing else. The variable is not read, so
+// the source is returned for a variable that is not set (opening it says so).
+func postgresDescriptorSource(catalog datatug.DbCatalog, projDir string) (string, error) {
+	if catalog.Path == "" {
+		return "", fmt.Errorf("catalog %q has no connection descriptor path configured for its postgres driver", catalog.ID)
+	}
+	path, err := ResolveDescriptorPath(projDir, catalog.Path)
+	if err != nil {
+		return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+	}
+	descriptor, err := dbcopy.ReadPostgresDescriptor(path)
+	if err != nil {
+		// A descriptor that is not there, is a folder or cannot be read fails with the
+		// text of the operating system, which quotes the path of the file in the served
+		// project: the answer for a client is built from the ID of the catalog.
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			return "", sourceLookupFailed("catalog %q: the PostgreSQL connection descriptor cannot be read", "catalog %q", err, catalog.ID)
+		}
+		return "", fmt.Errorf("catalog %q: %w", catalog.ID, err)
+	}
+	return descriptor.SourceURL(), nil
 }
 
 // ResolveCatalogSourceURL maps one resolved project catalog to the DALgo

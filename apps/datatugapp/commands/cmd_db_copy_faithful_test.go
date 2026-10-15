@@ -128,7 +128,7 @@ func TestDBCopyFaithful_Refusals(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 2, exitCodeOf(t, err))
 	_, err2 := os.Stat(path)
-	assert.NoError(t, err2, "the target of the empty-source copy was created")
+	assert.True(t, os.IsNotExist(err2), "a failed copy leaves no new file")
 }
 
 // A target path that is a URL pasted after sqlite:// is not created as a file.
@@ -157,4 +157,20 @@ func openSQLiteForTest(t *testing.T, path string) *sql.DB {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	return db
+}
+
+// A SQLite file that a failed copy created is removed again; one that was there before is left alone.
+func TestDBCopyFaithful_AFailedCopyLeavesNoNewFile(t *testing.T) {
+	source := sqliteFixture(t, `CREATE TABLE p (id INTEGER PRIMARY KEY)`)
+	target := filepath.Join(t.TempDir(), "t.sqlite")
+	_, _, err := runCopy(t, "db", "copy", "--from", source, "--to", "sqlite://"+target, "--include", "nope")
+	require.Error(t, err)
+	_, statErr := os.Stat(target)
+	assert.True(t, os.IsNotExist(statErr), "the failed copy left %s", target)
+
+	require.NoError(t, os.WriteFile(target, nil, 0o600))
+	_, _, err = runCopy(t, "db", "copy", "--from", source, "--to", "sqlite://"+target, "--include", "nope")
+	require.Error(t, err)
+	_, statErr = os.Stat(target)
+	assert.NoError(t, statErr, "a file that was there is not removed")
 }

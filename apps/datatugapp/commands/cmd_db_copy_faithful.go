@@ -53,11 +53,22 @@ func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSc
 		opts.Progress = errWriter
 	}
 
+	failed := false
 	redact := func(err error) string {
 		out := dbcopy.RedactErrorWithSecrets(dbcopy.RedactErrorWithSecrets(err, srcRef.Path), tgtRef.Path)
 		return out.Error()
 	}
+	// A SQLite file that this command created is removed again when the copy fails: no empty file is left behind.
+	createdFile := ""
+	defer func() {
+		if createdFile != "" && failed {
+			for _, suffix := range []string{"", "-journal", "-wal", "-shm"} {
+				_ = os.Remove(createdFile + suffix)
+			}
+		}
+	}()
 	finish := func(rep *faithful.Report, code int, msg string) error {
+		failed = code != 0 && code != exitCodeWarnings
 		if rep != nil {
 			switch code {
 			case 0:
@@ -88,6 +99,11 @@ func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSc
 	from := faithful.Endpoint{Engine: faithful.Engine(srcRef.SQLEngine()), DB: src, Display: srcRef.Display(), Schema: fromSchema}
 	to := faithful.Endpoint{Engine: faithful.Engine(tgtRef.SQLEngine()), Display: tgtRef.Display(), Schema: toSchema}
 	if !dryRun {
+		if tgtRef.Scheme == "sqlite" {
+			if _, statErr := os.Stat(tgtRef.Path); statErr != nil {
+				createdFile = tgtRef.Path
+			}
+		}
 		tgt, err := tgtRef.OpenSQL(ctx, true)
 		if err != nil {
 			return finish(nil, 4, fmt.Sprintf("open --to: %v", err))

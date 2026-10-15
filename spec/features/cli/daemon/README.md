@@ -54,7 +54,17 @@ When the daemon is not running and could not be started, the wrapper MUST print 
 
 #### REQ: url
 
-`datatug daemon url --project <id> --env <env> --db <db> --table <name> [--view] [--schema <s>] [--records [--limit N] | --record <pk-json>] [--format json|text]` (or `--db datatug://<project>/<db>[?env=<ENV>]` in place of `--project`, `--env` and `--db <id>`; giving both is exit `2`) MUST print the web UI deep link of `deep-link-contract` and MUST NOT start the daemon. JSON fields: `url`, `kind` (`table-metadata`, `table-records`, `record`), `running`, `uiSupport` (`available` or `pending`). `--records` and `--record` are mutually exclusive (exit `2`). Any identifier containing `://` or `@`, and any path identifier equal to `.` or `..`, MUST be refused with exit `2` so a connection URL can never reach a link or climb the path; `--db` is a plain source id or exactly a `datatug://` reference, any other scheme or a path is exit `2`. A reference with no `?env=` takes the one environment of the project registry on disk that lists the source (several: exit `2` naming them; none: exit `3`), with no network and no database connection; `datatug:///<db>` (no project) is exit `2`. A link longer than 2048 characters, a key value that is null, an object, an array, a boolean, a non-integer number (the error names the kind, never the value; the record lookup binds strings and exact integers only) or a string over 256 characters, are exit `2`. Every link's fragment starts with `code=<one-time code>` minted locally from the daemon's access key (see [serve](../serve/README.md) `origins-and-token`); a daemon that left no key gets a link without one. `running` is decided from the record, the pid and a TCP connect, without an HTTP request, so a check never resets the idle timer; a datatug API this CLI did not start (`external`) costs one `agent-info` request.
+`datatug daemon url --project <id> --env <env> --db <db> --table <name> [--view] [--schema <s>] [--records [--limit N] | --record <pk-json>] [--format json|text]` (or `--db datatug://<project>/<db>[?env=<ENV>]` in place of `--project`, `--env` and `--db <id>`; giving both is exit `2`) MUST print the web UI deep link of `deep-link-contract` and MUST NOT start the daemon. JSON fields: `url`, `kind` (`table-metadata`, `table-records`, `record`), `running`, `uiSupport` (`available` or `pending`), `warnings` (always present, `[]` when none; see `url-validates-metadata`). `--records` and `--record` are mutually exclusive (exit `2`). Any identifier containing `://` or `@`, and any path identifier equal to `.` or `..`, MUST be refused with exit `2` so a connection URL can never reach a link or climb the path; `--db` is a plain source id or exactly a `datatug://` reference, any other scheme or a path is exit `2`. A reference with no `?env=` takes the one environment of the project registry on disk that lists the source (several: exit `2` naming them; none: exit `3`), with no network and no database connection; `datatug:///<db>` (no project) is exit `2`. A link longer than 2048 characters, a key value that is null, an object, an array, a boolean, a non-integer number (the error names the kind, never the value; the record lookup binds strings and exact integers only) or a string over 256 characters, are exit `2`. Every link's fragment starts with `code=<one-time code>` minted locally from the daemon's access key (see [serve](../serve/README.md) `origins-and-token`); a daemon that left no key gets a link without one. `running` is decided from the record, the pid and a TCP connect, without an HTTP request, so a check never resets the idle timer; a datatug API this CLI did not start (`external`) costs one `agent-info` request.
+
+#### REQ: url-validates-metadata
+
+`daemon url` MUST check the link against the project's scanned metadata (the same files `datatug show` lists, read from the registered project folder; no network and no database connection) when the project holds it for the source and environment:
+
+- a `--table` that is neither a table nor a view of the source is exit `3` ("the table or view is not in the project's scanned metadata"; the name is never echoed);
+- `--view` MUST match the object's kind: `--view` for a table, and a plain `--table` for a view, are exit `2` (the message names the kind only);
+- `--record` keys MUST be exactly the table's primary-key column names: a key that is not one is exit `2` ("not a primary-key column"), a primary-key column that is missing is exit `2` ("missing primary-key column"); no value is ever echoed. A view has no primary key.
+
+When `--schema` is empty the relation of any schema with that name matches. When the project holds no metadata for the source (never scanned, an unregistered project, an unknown environment or source, or files that cannot be read) the link is built as before and `warnings` is `["table metadata not scanned: link not validated"]`; nothing goes to stderr. With the text format the warning is not printed.
 
 ### Ownership and lifetime
 
@@ -137,6 +147,12 @@ The spawned command line has `--host 127.0.0.1`, `--idle-timeout 2h` and none of
 **Requirements:** daemon#req:url, daemon#req:deep-link-contract, daemon#req:no-secrets
 
 `daemon url` returns the three shapes above (key in the fragment, `schema` always present), refuses `://`, `@`, `.` and `..` in identifiers, and flags all three kinds `pending`.
+
+### AC: link-validated
+
+**Requirements:** daemon#req:url-validates-metadata
+
+Against a scanned project, `daemon url` refuses an unknown table (exit 3), `--view` on a table or no `--view` on a view, and a `--record` whose keys are not exactly the primary key (exit 2); for a never-scanned source it still prints the link with the `warnings` entry.
 
 ## Follow-up (UI repository, datatug/datatug-apps — not done here)
 

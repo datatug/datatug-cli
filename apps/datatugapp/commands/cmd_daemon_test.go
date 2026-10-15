@@ -344,3 +344,68 @@ func TestDaemonURLMintsTheCodeLocally(t *testing.T) {
 		t.Fatal("daemon url started the daemon")
 	}
 }
+
+// scannedShop registers the project that a scan of the journey database wrote (environment local,
+// source shop: tables Customer and order_line, view customer_names).
+func scannedShop(t *testing.T) {
+	t.Helper()
+	dir, _ := scannedJourneyProjectWithDB(t)
+	registerProjectForTest(t, "shop", dir)
+}
+
+func TestDaemonURLValidatesAgainstScannedMetadata(t *testing.T) {
+	useDaemonFake(t, &daemonFake{})
+	t.Setenv(daemon.UIBaseEnv, "")
+	scannedShop(t)
+	base := []string{"url", "--db", "datatug://shop/shop"}
+	run := func(args ...string) (string, error) {
+		return runDaemon(t, append(append([]string{}, base...), args...)...)
+	}
+
+	for _, args := range [][]string{
+		{"--table", "Customer"},
+		{"--table", "order_line", "--records"},
+		{"--table", "customer_names", "--view"},
+		{"--table", "order_line", "--record", `{"line_no":1,"order_id":2}`},
+	} {
+		out, err := run(args...)
+		var link daemon.Link
+		if err != nil || json.Unmarshal([]byte(out), &link) != nil || link.Warnings == nil || len(link.Warnings) != 0 || !strings.Contains(out, `"warnings": []`) {
+			t.Fatalf("%v: %s %v", args, out, err)
+		}
+	}
+	cases := map[string]struct {
+		args []string
+		code int
+		msg  string
+	}{
+		"unknown table":      {[]string{"--table", "ghost"}, exitCodeNotFound, "not in the project's scanned metadata"},
+		"view flag on table": {[]string{"--table", "Customer", "--view"}, exitCodeUsage, "the object is a table"},
+		"table flag on view": {[]string{"--table", "customer_names"}, exitCodeUsage, "the object is a view"},
+		"missing pk":         {[]string{"--table", "order_line", "--record", `{"order_id":1}`}, exitCodeUsage, "missing primary-key column"},
+		"not a pk":           {[]string{"--table", "Customer", "--record", `{"CustomerId":1,"FirstName":"s3cret"}`}, exitCodeUsage, "not a primary-key column"},
+	}
+	for name, c := range cases {
+		out, err := run(c.args...)
+		if err == nil || exitCodeOf(t, err) != c.code || !strings.Contains(err.Error(), c.msg) || out != "" || strings.Contains(err.Error(), "s3cret") || strings.Contains(err.Error(), "ghost") {
+			t.Errorf("%s: %q %v", name, out, err)
+		}
+	}
+}
+
+func TestDaemonURLWarnsWhenTheSourceIsNotScanned(t *testing.T) {
+	useDaemonFake(t, &daemonFake{})
+	registeredSQLiteSource(t) // listed, never scanned
+	for name, args := range map[string][]string{
+		"never scanned":   {"--db", "datatug://shop/shop?env=local"},
+		"unknown project": {"--project", "nope", "--env", "local", "--db", "shop"},
+		"unknown env":     {"--db", "datatug://shop/shop?env=nowhere"},
+		"unsafe env":      {"--project", "shop", "--env", "a/b", "--db", "shop"},
+	} {
+		out, err := runDaemon(t, append([]string{"url", "--table", "Anything"}, args...)...)
+		var link daemon.Link
+		if err != nil || json.Unmarshal([]byte(out), &link) != nil || len(link.Warnings) != 1 || link.Warnings[0] != daemon.WarningNotScanned {
+			t.Errorf("%s: %s %v", name, out, err)
+		}
+	}
+}

@@ -240,21 +240,24 @@ func (m *Model) startScenarioStep(c detective.Case, rowID string) (tea.Model, te
 			}
 			m.pendingApplicationID, m.pendingStepID = appID, stepID
 			m.begin("scenario-query-run", "Run saved query for Scenario step", []field{f("Environment", m.defaultEnvironment(), "admitted logical environment"), f("Query ID", step.Ref, "saved query from Scenario"), f("Inputs", inputs, "query_parameter=type:cardinality:value; quote strings with punctuation or edge spaces")})
-			return m, nil
 		}
 	}
 	m.feedback = "Scenario application step is unavailable"
 	return m, nil
 }
+
+var validateScenario = detective.ValidateScenario
+var validateInputValue = func(v detective.InputValue) error { return v.Validate() }
+
 func scenarioQueryInputs(c detective.Case, schema []detective.Input, step detective.ScenarioStep) (string, error) {
-	if err := detective.ValidateScenario(detective.Scenario{ID: "binding-preview", Title: "Binding preview", Inputs: schema, Steps: []detective.ScenarioStep{step}}); err != nil {
+	if err := validateScenario(detective.Scenario{ID: "binding-preview", Title: "Binding preview", Inputs: schema, Steps: []detective.ScenarioStep{step}}); err != nil {
 		return "", fmt.Errorf("scenario query bindings: %w", err)
 	}
 	var entries []string
 	boundSources := make(map[string]bool, len(step.Bindings))
 	seenTargets := make(map[string]bool, len(step.Bindings))
 	appendValue := func(name string, value detective.InputValue) error {
-		if err := value.Validate(); err != nil || value.Range != nil {
+		if err := validateInputValue(value); err != nil || value.Range != nil {
 			return fmt.Errorf("scenario query input %q has an invalid bound value", name)
 		}
 		kind, cardinality := "", "scalar"

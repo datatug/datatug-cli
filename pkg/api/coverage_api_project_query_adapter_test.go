@@ -692,8 +692,10 @@ func TestCoverageFinish100_ProjectQueryAdapter_Helpers(t *testing.T) {
 	err = stageLocalQueryPair(ctx, st.root, dir, "prev_q", datatug.QueryTypeSQL, "", preview.metadata, preview.body)
 	assert.Error(t, err)
 
+	calledCount := 0
 	filepathEvalSymlinks = func(p string) (string, error) {
-		if p == dir {
+		calledCount++
+		if calledCount == 2 {
 			return "", errors.New("eval dir err")
 		}
 		return origEval(p)

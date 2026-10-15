@@ -51,6 +51,9 @@ var (
 type HttpServer struct {
 	s       *http.Server
 	monitor *apimonitor.Monitor
+	// IdleTimeout, when positive, makes ServeHTTP return nil after that long
+	// without a request. Zero (the default) serves until stopped.
+	IdleTimeout time.Duration
 }
 
 func NewHttpServer() HttpServer {
@@ -186,12 +189,18 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 		return r.Context(), nil
 	}, apicore.Execute, endpointCaps)
 
+	handler := s.monitor.Wrap(router)
+	var idle *idleWatcher
+	if s.IdleTimeout > 0 {
+		idle = newIdleWatcher(s.IdleTimeout, time.Now)
+		handler = idle.wrap(handler)
+	}
 	s.s = &http.Server{
 		Addr:           fmt.Sprintf("%v:%v", agentHost, agentPort),
 		ReadTimeout:    requestReadTimeout,
 		WriteTimeout:   responseWriteTimeout,
 		MaxHeaderBytes: 1 << 16,
-		Handler:        s.monitor.Wrap(router),
+		Handler:        handler,
 		BaseContext: func(listener net.Listener) context.Context {
 			s.monitor.Live("http://" + listener.Addr().String())
 			return context.Background()
@@ -199,6 +208,19 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	}
 	log.Printf("Serving on: http://%v:%v", agentHost, agentPort)
 
+	if idle != nil {
+		done := make(chan struct{})
+		defer close(done)
+		ticker := time.NewTicker(idleCheckInterval)
+		defer ticker.Stop()
+		srv := s.s
+		go idle.watch(done, ticker.C, func() {
+			log.Printf("serve: no request for %s; shutting down", s.IdleTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(ctx)
+		})
+	}
 	err = listenAndServeFn(s.s)
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil

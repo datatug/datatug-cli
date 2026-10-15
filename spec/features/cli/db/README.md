@@ -25,6 +25,7 @@ datatug db <url>
 | Directory | Description |
 |---|---|
 | [copy/](copy/README.md) | `datatug db copy --from <url> --to <url>` — cross-engine database copy primitive. |
+| [metadata/](metadata/README.md) | `datatug db table`, `db column`, `db objects` — read-only metadata of one table, column or the other object kinds. |
 | [schema/](schema/README.md) | `datatug db schema --db <url>` — read-only listing of a database's tables and views. |
 
 ## Problem

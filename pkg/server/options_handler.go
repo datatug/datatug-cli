@@ -34,6 +34,11 @@ func globalOptionsHandler(w http.ResponseWriter, r *http.Request) {
 	responseHeader := w.Header()
 	responseHeader.Set("Access-Control-Allow-Origin", origin)
 	responseHeader.Set("Access-Control-Allow-Methods", accessControlRequestMethod)
+	if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+		// A hosted page reaching this loopback agent asks to be let in (Private Network Access);
+		// the origin was checked above, so only a listed one is told yes.
+		responseHeader.Set("Access-Control-Allow-Private-Network", "true")
+	}
 	accessControlRequestHeaders := r.Header.Get("Access-Control-Request-Headers")
 	if accessControlRequestHeaders != "" {
 		responseHeader.Set("Access-Control-Allow-Headers", accessControlRequestHeaders)

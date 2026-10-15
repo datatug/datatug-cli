@@ -3,6 +3,7 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"log"
 	"os"
 	"path/filepath"
@@ -37,6 +38,7 @@ const (
 	serveSnapshotByteCapFlag    = "snapshot-byte-cap"
 	serveSnapshotRetentionFlag  = "snapshot-retention"
 	serveDetectiveAIProfileFlag = "detective-ai-profile"
+	serveIdleTimeoutFlag        = "idle-timeout"
 )
 
 // ServeCommand executes serve consoleCommand
@@ -64,6 +66,7 @@ type serveFlags struct {
 	snapshotByteCap    int
 	snapshotRetention  time.Duration
 	detectiveAIProfile string
+	idleTimeout        time.Duration
 }
 
 func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
@@ -116,6 +119,9 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.detectiveAIProfile, err = flags.GetString(serveDetectiveAIProfileFlag); err != nil {
+		return f, err
+	}
+	if f.idleTimeout, err = flags.GetDuration(serveIdleTimeoutFlag); err != nil {
 		return f, err
 	}
 	return f, nil
@@ -196,6 +202,8 @@ func resolveServeSession(projectDir string, flags serveFlags) (secureread.Sessio
 var (
 	serveOpenURL   = browser.OpenURL
 	serveStartHTTP = (*server.HttpServer).ServeHTTP
+	serveStateDir  = agentaccess.StateDir
+	serveWriteKey  = agentaccess.WriteKey
 )
 
 func serveCommandAction(cmd *cobra.Command, _ []string) error {
@@ -244,6 +252,24 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 
 	agentURL, url := serveAgentURLs(bannerAddr(host, flags.host), port)
 
+	// Every route but a preflight and the exchange of a one-time code needs the session token.
+	// The secret lives in the state directory (mode 0600) for the CLI's own clients and for
+	// `datatug daemon url`, which mints codes from it; the link below carries one.
+	secret, err := agentaccess.NewSecret()
+	if err == nil {
+		err = serveWriteKey(serveStateDir(), port, secret)
+	}
+	if err != nil {
+		return Exit("cannot create the access key of this agent", exitCodeDatabase)
+	}
+	defer agentaccess.RemoveKey(serveStateDir(), port)
+	code, _ := agentaccess.MintCode(secret, time.Now()) // NewSecret just drew from the same source
+	if flags.idleTimeout == 0 {
+		// A hand-started server prints a link that opens. The daemon (--idle-timeout) writes its
+		// output to daemon.log, which never holds a code: `datatug daemon url` mints its links.
+		url += "#code=" + code
+	}
+
 	// Founder ruling 2026-09-09: serve never opens a browser by default; it
 	// prints the link and opens a browser only with --open-browser.
 	fmt.Printf("DataTug agent API: %s/datatug\nDataTug web UI for this agent: %s\n", agentURL, url)
@@ -253,7 +279,9 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	httpServer := server.NewHttpServer()
+	httpServer.IdleTimeout = flags.idleTimeout
 	caps := api.Capabilities{
+		Access:               agentaccess.New(secret),
 		AllowWrites:          flags.allowWrites,
 		AllowOpaqueSQL:       flags.allowOpaqueSQL,
 		AllowLiveConnections: flags.allowLiveConns,
@@ -367,5 +395,6 @@ func serveCommandArgs() *cobra.Command {
 	flags.Int(serveSnapshotByteCapFlag, 0, "Maximum canonical bytes retained per execution snapshot (default 2 MiB)")
 	flags.Duration(serveSnapshotRetentionFlag, 0, "Execution snapshot retention before bytes are expired (default 30 days)")
 	flags.String(serveDetectiveAIProfileFlag, "", "Named AI profile for Detective proposals; credentials remain in its configured environment variable")
+	flags.Duration(serveIdleTimeoutFlag, 0, "Exit gracefully after this long with no HTTP request (0 serves until stopped); datatug daemon uses 2h")
 	return cmd
 }

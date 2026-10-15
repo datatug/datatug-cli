@@ -52,6 +52,7 @@ Pinning the contract surface lets the implementation evolve without breaking use
 | [board](board/README.md) | List the boards of a project (`list`) |
 | [entity](entity/README.md) | Author and read entities and their fields (`add`, `field add/set/rm`, `list`, `show`) |
 | [incident](incident/README.md) | List, search, inspect, create/update and resolve incidents; attach context, hypotheses and evidence; link recurrence; `watch` streams the event stream for humans, scripts and AI agents |
+| [daemon](daemon/README.md) | `daemon status\|start\|stop\|url` and the global `--client` flag: an owned, read-only local `serve` for AI-agent mods and their web-UI deep links |
 | [self-update](self-update/README.md) | datatug self-update, built from github.com/strongo/cli-helpers/selfupdate against datatug's own compiled-in cliinstall catalog entry. |
 | [install](install/README.md) | datatug install, built from github.com/strongo/cli-helpers/cliinstall against the same catalog entry — lists and installs the fleet CLIs relevant to datatug (ingitdb, ovdb, specscore). |
 

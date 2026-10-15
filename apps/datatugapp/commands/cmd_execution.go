@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"io"
 	"net/http"
 	"net/url"
@@ -175,6 +176,7 @@ func (c executionClient) get(ctx context.Context, path string, target any) ([]by
 	if err != nil {
 		return nil, err
 	}
+	agentaccess.Apply(request)
 	response, err := c.client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("DataTug agent request: %w", err)

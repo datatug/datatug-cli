@@ -26,7 +26,7 @@ Policy authors have no way to see what a DALgo access policy will do to a real q
 ## Synopsis
 
 ```
-datatug query run --db <url> (-f <dtql-file>|--from <collection> [--limit <n>] [--offset <n>]) \
+datatug query run --db <url|datatug://<project>/<db>[?env=<ENV>]> (-f <dtql-file>|--from <collection> [--limit <n>] [--offset <n>]) \
   [--format grid|json|jsonl|yaml|csv] \
   [--as <user-id>] [--role <role>]... [--group <group>]... [--var <name>=<value>]... \
   [--policy <file>]... [--policies-dir <dir>] [--no-policies] [-q|--quiet]
@@ -53,6 +53,10 @@ datatug query run --db <url> (-f <dtql-file>|--from <collection> [--limit <n>] [
 #### REQ: db-url
 
 `--db <url>` MUST be required and MUST accept the same URL schemes as `db copy` (`sqlite://`, `ingitdb://`, `postgres://`). A missing or unparsable URL MUST exit 2. A database that cannot be opened MUST exit 4. A PostgreSQL source that cannot be reached, whether at the open or in the middle of the read, MUST exit 4 with one line on stderr: the sentence the adapter chose for the failure, then where the connection string is read from, by the name of the variable (`the PostgreSQL connection string is read from the environment variable NAME` for an `env:NAME` source) or of the flag (`from the --db flag` for a URL), and nothing of the connection: no host, port, database, user, password, text of a driver or path of the machine. (`TestQuery_APostgresSourceIsOpenedReadOnlyAndItsFailuresAreClassified`, `TestQuery_AReadThatLosesItsConnectionShowsOneFixedSentence`.) A query on a PostgreSQL source orders NULLs first when ascending and last when descending, as every other source does, including over a column whose not-null constraint is not validated (PostgreSQL 18), where an `orderBy` with a `limit` returns the same rows as on a column with no such constraint; the job `Journey (PostgreSQL <major>)` runs it against a real server of each major version, 17 and 18. (`TestPostgresQueryJourneyOrdersNullsByDALgosRule`.)
+
+#### REQ: db-project-reference
+
+`--db` MUST also accept `datatug://<project>/<db>[?env=<ENV>]` (or `datatug:///<db>` for the current project), a reference to a database that is a source of a registered project: the grammar, the resolution (one function shared with `db schema`, `db table`, `db column`, `db copy` and `db export`), the exit codes (`3` for a project, environment or database that is not there; `2` for a malformed reference, a database several environments list, or a source that cannot be opened) and the rule that no path, URL or variable value is shown are those of [`db schema` REQ: project-reference](../db/schema/README.md#req-project-reference). The query is otherwise an ad-hoc one: `-f` or `--from`, policies and `--no-policies` apply as for any `--db`; the saved-query form (`--project` with `--query`) is unchanged and is mutually exclusive with `--db`. A PostgreSQL source resolved this way keeps the PostgreSQL rules of [REQ: db-url](#req-db-url).
 
 ### Policies
 
@@ -133,6 +137,12 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 **Given** no `--db` flag
 **When** the user runs `datatug query run --from products`
 **Then** the command exits 2 saying `--db` is required.
+
+### AC: db-project-reference (verifies REQ:db-project-reference)
+
+**Given** a registered project `shop` whose environment `local` lists the SQLite source `crm`
+**When** the user runs `datatug query run --db datatug://shop/crm --from customers --no-policies`
+**Then** the rows of `customers` are printed, as for `--db sqlite://<that file>`, and neither stdout nor stderr holds the path of the file; `--db datatug://nope/crm` exits 3.
 
 ### AC: db-scheme-unsupported (verifies REQ:db-url)
 

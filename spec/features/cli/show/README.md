@@ -70,7 +70,11 @@ The text MUST be plain: one item to a line, two spaces of indent for each level,
 
 #### REQ: json-format
 
-`--format json` MUST print the same information as one JSON document, and two keys the text does not carry: `project`; `title` and `access` (those of the project file, each left out when the file holds none), printed as the file holds them and not validated; `environments[]` of `id` and `sources[]`; a source has `id`, `driver`, `dsnEnv` (PostgreSQL only), `notScanned` (`true` only for a source that was never scanned), `empty` (`true` only for a source that was scanned and has nothing to list) and `schemas[]` of `name`, `tables[]` and `views[]`; each of those has `name` and `columns[]` of `name`, `type`, `primaryKeyPosition` and `nullable` (`type` and `primaryKeyPosition` left out when there is none; `nullable` per [REQ: nullable](#req-nullable)); a table also has `foreignKeys[]` ([REQ: foreign-keys](#req-foreign-keys)). Any other `--format` than `text` and `json` MUST exit `2`.
+`--format json` MUST print the same information as one JSON document, and two keys the text does not carry: `project`; `title` and `access` (those of the project file, each left out when the file holds none), printed as the file holds them and not validated; `environments[]` of `id` and `sources[]`; a source has `id`, `driver`, `dsnEnv` (PostgreSQL only), `path` ([REQ: sqlite-path](#req-sqlite-path); SQLite only), `notScanned` (`true` only for a source that was never scanned), `empty` (`true` only for a source that was scanned and has nothing to list) and `schemas[]` of `name`, `tables[]` and `views[]`; each of those has `name` and `columns[]` of `name`, `type`, `primaryKeyPosition` and `nullable` (`type` and `primaryKeyPosition` left out when there is none; `nullable` per [REQ: nullable](#req-nullable)); a table also has `foreignKeys[]` ([REQ: foreign-keys](#req-foreign-keys)). Any other `--format` than `text` and `json` MUST exit `2`.
+
+#### REQ: sqlite-path
+
+A SQLite source (driver `sqlite3`) MUST carry `path` in the JSON: the file its catalog's path resolves to, exactly as `ResolveCatalogPath` resolves it (the stored path is relative to the project folder, `~/…`, or absolute; the printed one is absolute), so that a caller sees which file the source is and can compare it with a database it holds (`datatug db add` compares the same file). It is never a URL: a catalog path that is a URL, or that does not resolve, leaves `path` out (and the source is listed as before). `path` is additive, is not printed by the text format (which is unchanged), and a source of another driver has none. The key is left out, never an empty string, when the path is not known.
 
 #### REQ: foreign-keys
 
@@ -116,6 +120,7 @@ All output MUST go to stdout; a failure goes to stderr and exits non-zero (see [
 |---|---|
 | [CLI](../README.md) | Parent. |
 | [init](../init/README.md) | A freshly made project is listed by `show`, with the sentence that says nothing has been scanned into it. |
+| [db add](../db/add/README.md) | `show` lists a source `db add` registered (`notScanned` until a scan describes it), with its `path` or `dsnEnv`. |
 | [scan](../scan/README.md) | `show` lists what the latest scan wrote, from the files of its [layout](../scan/README.md#project-layout-written-by-a-scan). The README's quick start runs `scan` and `show` as a test. |
 | [terminal UI](../ui/README.md) | The project the UI's create screen makes has its project file at the root of the folder, so that `show`, `scan`, `serve` and chat read it (issue 263). The screen refuses a folder that already holds a project file, and an ID that is registered, and writes nothing then: a scan's project file is never replaced. |
 | [validate](../validate/README.md) | `show` does NOT validate: a project that cannot be validated is still listed. |
@@ -163,6 +168,12 @@ A SQLite file whose columns are named with a line break and an escape character,
 **Requirements:** show#req:json-format
 
 `--format json` on a project whose file holds a title and an access prints both as `title` and `access` beside `project`; on a project file that holds neither, the document has neither key; the text of the same projects is what it was before the keys existed. (`TestShowJSONCarriesTitleAndAccess`.)
+
+### AC: sqlite-source-carries-its-path
+
+**Requirements:** show#req:sqlite-path
+
+`show --format json` of a project with a SQLite source lists `path` as the absolute file the catalog's path resolves to (a path stored `~/…` or relative to the project is printed absolute); a PostgreSQL source has `dsnEnv` and no `path`; the text output is unchanged.
 
 ### AC: depth-trims-the-listing
 

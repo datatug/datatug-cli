@@ -42,7 +42,14 @@ func TestCovDDBCopyActionBranches(t *testing.T) {
 	t.Run("open --to fails", func(t *testing.T) {
 		_, _, err := runCopy(t, "db", "copy",
 			"--from", "sqlite://"+chinook,
-			"--to", "sqlite://"+filepath.Join(t.TempDir(), "missing.db"))
+			"--to", "sqlite://"+filepath.Join(t.TempDir(), "no", "such", "dir", "x.db"))
+		// A target file is created, folders included: this one is in the way of a regular file.
+		require.NoError(t, err)
+		blocker := filepath.Join(t.TempDir(), "file")
+		require.NoError(t, os.WriteFile(blocker, nil, 0o600))
+		_, _, err = runCopy(t, "db", "copy",
+			"--from", "sqlite://"+chinook,
+			"--to", "sqlite://"+filepath.Join(blocker, "x.db"))
 		require.Error(t, err)
 		assert.Equal(t, 4, covDExitCode(t, err))
 		assert.Contains(t, err.Error(), "open --to")

@@ -356,7 +356,8 @@ func TestDBCopySeamBranches(t *testing.T) {
 	cmdWarn.SetContext(context.Background())
 	cmdWarn.SetErr(&errBuf)
 	require.NoError(t, cmdWarn.Flags().Set("from", "sqlite://"+srcFile))
-	require.NoError(t, cmdWarn.Flags().Set("to", "sqlite://"+dstFile))
+	// An inGitDB target keeps this on the DALgo path: SQLite to SQLite is the faithful copy now.
+	require.NoError(t, cmdWarn.Flags().Set("to", "ingitdb://"+t.TempDir()))
 	err = dbCopyAction(cmdWarn, nil)
 	require.NoError(t, err)
 	require.Contains(t, errBuf.String(), "db copy warning: copy-warning-msg")
@@ -377,7 +378,7 @@ func TestDBCopySeamBranches(t *testing.T) {
 	cmdPGSchema := dbCopyCommand()
 	cmdPGSchema.SetContext(context.Background())
 	require.NoError(t, cmdPGSchema.Flags().Set("from", "env:SRC_PG"))
-	require.NoError(t, cmdPGSchema.Flags().Set("to", "sqlite://"+dstFile))
+	require.NoError(t, cmdPGSchema.Flags().Set("to", "ingitdb://"+t.TempDir())) // the DALgo path: PostgreSQL to SQLite is the faithful copy
 	require.NoError(t, cmdPGSchema.Flags().Set("from-schema", "custom"))
 	err = dbCopyAction(cmdPGSchema, nil)
 	require.Error(t, err)
@@ -387,7 +388,7 @@ func TestDBCopySeamBranches(t *testing.T) {
 	cmdPGNoSchema := dbCopyCommand()
 	cmdPGNoSchema.SetContext(context.Background())
 	require.NoError(t, cmdPGNoSchema.Flags().Set("from", "env:SRC_PG"))
-	require.NoError(t, cmdPGNoSchema.Flags().Set("to", "sqlite://"+dstFile))
+	require.NoError(t, cmdPGNoSchema.Flags().Set("to", "ingitdb://"+t.TempDir()))
 	err = dbCopyAction(cmdPGNoSchema, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `PostgreSQL source schema "public" has no tables`)

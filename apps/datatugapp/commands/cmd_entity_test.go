@@ -686,7 +686,7 @@ func TestEntityAdd_GitStage_ScopedToWrittenFiles(t *testing.T) {
 	require.NoError(t, exec.Command("git", "-C", dir, "commit", "-m", "baseline").Run())
 
 	// Unrelated unstaged change to the existing tracked file.
-	require.NoError(t, os.WriteFile(otherPath, []byte("v2\n"), 0644))
+	require.NoError(t, os.WriteFile(otherPath, []byte("v2 changed\n"), 0644))
 
 	stdin := "id: User\nfields:\n  - id: id\n    type: string\n"
 	_, _, err := runEntityStdin(t, stdin, "entity", "add", "-d", dir, "--git", "stage")

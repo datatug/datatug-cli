@@ -296,10 +296,7 @@ func defaultSchema(provider, fallback string) string {
 }
 
 func outgoingKey(provider, schema string, key dbschema.ForeignKeyDef) keyRef {
-	referencedSchema := key.ReferencedNamespace
-	if referencedSchema == "" {
-		referencedSchema = defaultSchema(provider, schema)
-	}
+	referencedSchema := refSchemaOf(provider, schema, key.ReferencedNamespace)
 	return keyRef{
 		Name: key.Name, Columns: namesOf(key.Fields), ReferencedSchema: referencedSchema,
 		ReferencedTable: key.ReferencedCollection, ReferencedColumns: namesOf(key.ReferencedFields),

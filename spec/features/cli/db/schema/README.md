@@ -69,6 +69,10 @@ With `--columns` every table and view MUST carry `columns`: an array of `{name, 
 
 With `--counts` every table (never a view) MUST carry `rowCount`, the number of its rows from one native `COUNT(*)`. A table that cannot be counted (the source does not run COUNT natively, or the count fails) reports `rowCount: null`; the command MUST NOT read the table's rows to count them. Without the flag `rowCount` is absent.
 
+#### REQ: foreign-keys-with-columns
+
+With `--columns` every table whose definition could be read MUST also carry `foreignKeys`, its outgoing keys named as `datatug show` names them: `[{"name", "columns": [...], "refTable": {"schema", "name"}, "refColumns": [...]}]`; a table with no keys has an empty list. A view, and a table whose definition could not be read, carries no `foreignKeys` key. Without `--columns` the key is absent.
+
 ### Output
 
 #### REQ: json-shape
@@ -182,6 +186,12 @@ A SQLite file named `chinook` (no extension) is detected with `detectedFrom` `fi
 **Requirements:** db/schema#req:columns-flag
 
 `--columns` on Chinook lists `Album.Title` as type `NVARCHAR(160)`, `nullable` false, and `Album.AlbumId` with `primaryKeyPosition` 1; without the flag no `columns` key appears.
+
+### AC: foreign-keys-listed
+
+**Requirements:** db/schema#req:foreign-keys-with-columns
+
+`datatug db schema --db <chinook> --columns` lists for `InvoiceLine` a key on `InvoiceId` to `refTable` `{schema: main, name: Invoice}`; a table with no key has `foreignKeys: []`; a view has no `foreignKeys` key.
 
 ### AC: counts-listed
 

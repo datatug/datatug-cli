@@ -93,6 +93,7 @@ func (p *columnJourneyProvider) Stream(_ context.Context, req ai.ChatRequest) it
 }
 
 func TestResultColumnsActualTerminalAgentJourneyAndExplicitProjection(t *testing.T) {
+	t.Parallel()
 	for _, explicit := range []bool{false, true} {
 		t.Run(map[bool]string{true: "explicit", false: "useful"}[explicit], func(t *testing.T) {
 			c, _, executor, _ := resultColumnsFixture(t, resultColumnsSchema, resultColumnsDocument)
@@ -136,6 +137,7 @@ func TestResultColumnsActualTerminalAgentJourneyAndExplicitProjection(t *testing
 }
 
 func TestResultColumnsAgentCannotUseHistoricalOrInventedPlan(t *testing.T) {
+	t.Parallel()
 	c, parent, e, _ := resultColumnsFixture(t, resultColumnsSchema, resultColumnsDocument)
 	ctx := c.resultColumnsContext(context.Background(), "another-origin")
 	callbacks := ctx.Value(resultColumnsContextKey{}).(resultColumnsCallbacks)
@@ -148,6 +150,7 @@ func TestResultColumnsAgentCannotUseHistoricalOrInventedPlan(t *testing.T) {
 }
 
 func TestResultColumnsNarrowedActualRequestRetainsToolsAndGuidance(t *testing.T) {
+	t.Parallel()
 	request, _ := askNarrowed(t, narrowingQuestion, WithTableNarrowing(chinookNarrower(t, narrowingScorer(narrowingMusicSales))))
 	if !strings.Contains(request.System, "Respect explicit user projections") || !strings.Contains(request.System, "result_columns") {
 		t.Fatal("narrowed prompt dropped guidance")

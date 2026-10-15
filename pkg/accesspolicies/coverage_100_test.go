@@ -2,19 +2,24 @@ package accesspolicies
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/recordset"
+	"github.com/dal-go/record"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// Not parallel: modifies global canonicalRoundFunc
 func TestCanonicalQueryID_Unstable(t *testing.T) {
 	orig := canonicalRoundFunc
 	defer func() { canonicalRoundFunc = orig }()
@@ -27,6 +32,7 @@ func TestCanonicalQueryID_Unstable(t *testing.T) {
 	assert.Equal(t, unstableCanonicalID, res)
 }
 
+// Not parallel: modifies global userHomeDir
 func TestResolveDir_And_Load_UserHomeDirError(t *testing.T) {
 	origHome := userHomeDir
 	defer func() { userHomeDir = origHome }()
@@ -41,6 +47,7 @@ func TestResolveDir_And_Load_UserHomeDirError(t *testing.T) {
 }
 
 func TestLoad_LoadDirOtherError(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	badFile := filepath.Join(tmpDir, "broken.yaml")
 	require.NoError(t, os.WriteFile(badFile, []byte(": bad yaml"), 0644))
@@ -52,6 +59,7 @@ func TestLoad_LoadDirOtherError(t *testing.T) {
 }
 
 func TestFingerprint_Variants(t *testing.T) {
+	t.Parallel()
 	fp1 := Fingerprint(nil, true, nil)
 	assert.NotEmpty(t, fp1)
 
@@ -71,6 +79,7 @@ func TestFingerprint_Variants(t *testing.T) {
 }
 
 func TestBaseResource_Variants(t *testing.T) {
+	t.Parallel()
 	col := dal.NewCollectionRef("users", "", nil)
 	r1 := BaseResource(dal.From(&col).NewQuery().SelectIntoRecordset())
 	assert.Equal(t, "/users", r1.String())
@@ -102,12 +111,14 @@ type mockRecordsetSource struct {
 }
 
 func TestBindingsFor_Duplicate(t *testing.T) {
+	t.Parallel()
 	bindings := map[string]any{"v": 123}
 	res := bindingsFor("$v > 0 && $v < 10", bindings)
 	assert.Equal(t, []string{"v=123"}, res)
 }
 
 func TestFieldLists_EmptyAndTerminal(t *testing.T) {
+	t.Parallel()
 	res := fieldLists(&access.WriteResidual{
 		Alternatives: []access.WriteAlternative{
 			{Fields: nil},
@@ -120,6 +131,7 @@ func TestFieldLists_EmptyAndTerminal(t *testing.T) {
 }
 
 func TestFields_PointerTypes_And_Errors(t *testing.T) {
+	t.Parallel()
 	f := dal.NewFieldRef("", "f1")
 	fID := dal.NewFieldRef("", "ID")
 	q := dal.From(dal.NewCollectionRef("users", "", nil)).NewQuery().
@@ -146,6 +158,7 @@ func TestFields_PointerTypes_And_Errors(t *testing.T) {
 }
 
 func TestFields_Errors(t *testing.T) {
+	t.Parallel()
 	badExp := mockBadExpression{}
 	err := walkComparison(dal.Comparison{Left: badExp}, func(e dal.Expression) error {
 		if _, ok := e.(mockBadExpression); ok {
@@ -205,6 +218,7 @@ func (m mockQueryWrapper) GroupBy() []dal.Expression {
 	return m.StructuredQuery.GroupBy()
 }
 
+// Not parallel: modifies global canonicalRoundFunc
 func TestProjectWrites_EdgeCases(t *testing.T) {
 	refusal := nestedScopeRefusal("rule1", "/path", "seg", 2)
 	assert.Contains(t, refusal, "a record id")
@@ -232,6 +246,7 @@ func TestProjectWrites_EdgeCases(t *testing.T) {
 }
 
 func TestWalkParams_PointerTypes(t *testing.T) {
+	t.Parallel()
 	p := dal.NewParam("param1")
 	comp := dal.Comparison{Left: p, Operator: dal.Equal, Right: p}
 	var visited []string
@@ -251,6 +266,7 @@ func TestWalkParams_PointerTypes(t *testing.T) {
 }
 
 func TestAuthorizeWrite_DeniedWithoutExplanation(t *testing.T) {
+	t.Parallel()
 	mockP := mockDenyNoExplanationPolicy{}
 	loaded := Loaded{
 		Policy: mockP,
@@ -307,4 +323,164 @@ func TestPrepareProjectWrites_CodecErrors(t *testing.T) {
 	c3 := &mockAccessCodec{failOnDecodeCall: 3}
 	res3 := prepareProjectWrites(yamlData, c3)
 	assert.Contains(t, res3.refusal, "mock decode error")
+}
+
+func TestPrepareRecordset_And_ExactVariables(t *testing.T) {
+	t.Parallel()
+
+	q := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("T", ""))).SelectColumns()
+	// PrepareRecordset tests
+	_, err := PrepareRecordset(context.Background(), q, Options{Unrestricted: true}, nil)
+	assert.ErrorIs(t, err, ErrInvalidQuery)
+
+	_, err = PrepareRecordset(context.Background(), q, Options{Unrestricted: true}, func(query dal.Query) error {
+		return errors.New("guard fail")
+	})
+	assert.EqualError(t, err, "guard fail")
+
+	// prepareRead fails (no policies and not unrestricted)
+	_, err = PrepareRecordset(context.Background(), q, Options{}, func(query dal.Query) error { return nil })
+	assert.ErrorIs(t, err, ErrNoPolicies)
+
+	res, err := PrepareRecordset(context.Background(), q, Options{Unrestricted: true}, func(query dal.Query) error { return nil })
+	assert.NoError(t, err)
+	assert.NotNil(t, res.Query)
+
+	tmp := t.TempDir()
+	pPath := filepath.Join(tmp, "allow.yaml")
+	policyDoc := `apiVersion: dalgo.io/access/v1
+kind: AccessPolicy
+metadata:
+  name: allow
+default: deny
+scopes:
+  - path: /T
+    rules:
+      - id: allow-all
+        effect: allow
+        operations: [query]
+`
+	require.NoError(t, os.WriteFile(pPath, []byte(policyDoc), 0600))
+	loaded, err := LoadFile(pPath)
+	require.NoError(t, err)
+	res, err = PrepareRecordset(context.Background(), q, Options{Policies: []Loaded{loaded}}, func(query dal.Query) error { return nil })
+	assert.NoError(t, err)
+	assert.NotNil(t, res.Query)
+
+	callCount := 0
+	_, err = PrepareRecordset(context.Background(), q, Options{Unrestricted: true}, func(q dal.Query) error {
+		callCount++
+		if callCount > 1 {
+			return errors.New("fail on capture")
+		}
+		return nil
+	})
+	assert.EqualError(t, err, "fail on capture")
+
+	rc := &recordsetCapture{}
+	assert.ErrorIs(t, rc.Get(context.Background(), nil), dal.ErrNotSupported)
+	assert.ErrorIs(t, rc.GetMulti(context.Background(), nil), dal.ErrNotSupported)
+	_, err = rc.Exists(context.Background(), nil)
+	assert.ErrorIs(t, err, dal.ErrNotSupported)
+	_, err = rc.ExecuteQueryToRecordsReader(context.Background(), nil)
+	assert.ErrorIs(t, err, dal.ErrNotSupported)
+
+	// ExactVariables tests
+	// depth > 64
+	var deeplyNested any = 1
+	for i := 0; i < 70; i++ {
+		deeplyNested = []any{deeplyNested}
+	}
+	_, err = ExactVariables(map[string]any{"deep": deeplyNested})
+	assert.ErrorContains(t, err, "exceeds 64 levels")
+
+	// uint64 valid and invalid
+	v, err := ExactVariables(map[string]any{"u64": uint64(123)})
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(123), v["u64"])
+
+	_, err = ExactVariables(map[string]any{"u64_bad": uint64(9007199254740992)})
+	assert.ErrorContains(t, err, "exceeds the executor's exact comparison range")
+
+	// uint valid
+	_, err = ExactVariables(map[string]any{"u": uint(123)})
+	assert.NoError(t, err)
+
+	// float32 & float64 valid
+	_, err = ExactVariables(map[string]any{"f32": float32(1.5), "f64": float64(2.5)})
+	assert.NoError(t, err)
+
+	// json.Number: invalid, float exact (0.5), float non-exact (0.1)
+	_, err = ExactVariables(map[string]any{"bad_num": json.Number("not_a_num")})
+	assert.ErrorContains(t, err, "exact numeric binding is unsupported")
+
+	v, err = ExactVariables(map[string]any{"exact_float": json.Number("0.5")})
+	assert.NoError(t, err)
+	assert.Equal(t, 0.5, v["exact_float"])
+
+	_, err = ExactVariables(map[string]any{"inexact_float": json.Number("0.1")})
+	assert.ErrorContains(t, err, "exact decimal binding is unsupported")
+
+	// []byte
+	bytesVal := []byte("hello")
+	v, err = ExactVariables(map[string]any{"b": bytesVal})
+	assert.NoError(t, err)
+	assert.Equal(t, bytesVal, v["b"])
+
+	// []any valid and error
+	_, err = ExactVariables(map[string]any{"arr": []any{int(1), "two"}})
+	assert.NoError(t, err)
+
+	_, err = ExactVariables(map[string]any{"arr_err": []any{struct{}{}}})
+	assert.Error(t, err)
+
+	// reflect types: int8, uint8, float, struct/map
+	type MyInt8 int8
+	type MyUint8 uint8
+	type MyFloat float32
+	_, err = ExactVariables(map[string]any{
+		"mi8":  MyInt8(8),
+		"mu8":  MyUint8(8),
+		"mf":   MyFloat(1.25),
+		"str":  "text",
+		"bool": true,
+	})
+	assert.NoError(t, err)
+
+	// array error
+	_, err = ExactVariables(map[string]any{"bad_arr": [1]struct{}{{}}})
+	assert.Error(t, err)
+
+	// map / struct error
+	_, err = ExactVariables(map[string]any{"map": map[string]int{"a": 1}})
+	assert.ErrorContains(t, err, "unsupported parameter container")
+
+	// json.Number with float overflow
+	huge := "1" + strings.Repeat("0", 400) + ".5"
+	_, err = ExactVariables(map[string]any{"huge": json.Number(huge)})
+	assert.ErrorContains(t, err, "exact numeric binding is unsupported")
+
+	// Test capture.calls != 1 via wrapRecordsetSession
+	origWrap := wrapRecordsetSession
+	defer func() { wrapRecordsetSession = origWrap }()
+	wrapRecordsetSession = func(s dal.ReadSession) dal.ReadSession {
+		return &stubNoopRecordsetSession{}
+	}
+	_, err = PrepareRecordset(context.Background(), q, Options{Unrestricted: true}, func(query dal.Query) error { return nil })
+	wrapRecordsetSession = origWrap
+	assert.ErrorContains(t, err, "policy capture did not yield exactly one query")
+}
+
+type stubNoopRecordsetSession struct{}
+
+func (stubNoopRecordsetSession) Get(context.Context, record.Record) error        { return nil }
+func (stubNoopRecordsetSession) GetMulti(context.Context, []record.Record) error { return nil }
+func (stubNoopRecordsetSession) Exists(context.Context, *record.Key) (bool, error) {
+	return false, nil
+}
+func (stubNoopRecordsetSession) ExecuteQueryToRecordsReader(context.Context, dal.Query) (dal.RecordsReader, error) {
+	return nil, nil
+}
+func (stubNoopRecordsetSession) ExecuteQueryToRecordsetReader(context.Context, dal.Query, ...recordset.Option) (dal.RecordsetReader, error) {
+	return nil, nil
 }

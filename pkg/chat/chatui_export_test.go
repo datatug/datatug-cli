@@ -15,6 +15,7 @@ import (
 )
 
 func TestChatUIBucketAndExportCommandOnChatUI(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())

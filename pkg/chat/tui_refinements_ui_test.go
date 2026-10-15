@@ -16,6 +16,7 @@ import (
 // This uses the public SessionChat turn path. The provider sees the tools only
 // when prepareTurn attaches the session-bound result-column callbacks.
 func TestResultColumnsPrepareTurnProviderJourney(t *testing.T) {
+	t.Parallel()
 	for _, explicit := range []bool{false, true} {
 		t.Run(map[bool]string{false: "useful", true: "explicit"}[explicit], func(t *testing.T) {
 			chat, _, executor, _ := resultColumnsFixture(t, resultColumnsSchema, resultColumnsDocument)
@@ -45,6 +46,7 @@ func TestResultColumnsPrepareTurnProviderJourney(t *testing.T) {
 }
 
 func TestAddColumnsActionLoadsMetadataThroughShell(t *testing.T) {
+	t.Parallel()
 	chat, _, executor, _ := resultColumnsFixture(t, resultColumnsSchema, resultColumnsDocument)
 	u, err := NewSessionChatUI(t.Context(), chat, "test")
 	if err != nil {
@@ -76,6 +78,7 @@ func TestAddColumnsActionLoadsMetadataThroughShell(t *testing.T) {
 }
 
 func TestInspectFollowsExplorerThenReturnsToFocusedResult(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{Title: "Invoices", RecordSetID: "rs-invoices", DTQL: "from: {name: Invoice}\nlimit: 5", Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 7}}}}}}}
 	u, _ := newTestChatUI(t, nil, turn)
 	u.catalog = ProjectCatalog{Objects: []ProjectObject{{Reference: ContextReference{Kind: "table", SourceID: "main", ObjectID: "main.Invoice", Title: "Invoice"}, Columns: []string{"InvoiceId"}, ColumnTypes: map[string]string{"InvoiceId": "INTEGER"}}}}
@@ -112,6 +115,7 @@ func containsWorkspaceAction(actions []workspaceAction, id string) bool {
 }
 
 func TestChatCloseChooserIsCompactAndTopbarKeepsProjectAccess(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog.Title = strings.Repeat("Long project title ", 12)
 	_, context, right := u.topBarInfo(80)
@@ -125,6 +129,7 @@ func TestChatCloseChooserIsCompactAndTopbarKeepsProjectAccess(t *testing.T) {
 }
 
 func TestChatSwitchRetainsHTTPFocusAndViewMode(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	ctx, first := context.Background(), u.sessionID
 	user, err := sessions.store.AppendUser(ctx, first, "fetch document")
@@ -171,6 +176,7 @@ func TestChatSwitchRetainsHTTPFocusAndViewMode(t *testing.T) {
 }
 
 func TestChatSwitchRetainsComposerFocusOverRememberedGrid(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{Title: "Customers", DTQL: "from: {name: Customer}\nlimit: 5", Result: secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 1}}}}}}}
 	u, _ := newTestChatUI(t, nil, turn)
 	first := u.sessionID
@@ -188,6 +194,7 @@ func TestChatSwitchRetainsComposerFocusOverRememberedGrid(t *testing.T) {
 }
 
 func TestChatSwitchKeepsQueryEditorInItsOwnSession(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	first := u.sessionID
 	object := ProjectObject{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", Title: "Customer"}, Columns: []string{"CustomerId"}}
@@ -213,6 +220,7 @@ func TestChatSwitchKeepsQueryEditorInItsOwnSession(t *testing.T) {
 }
 
 func TestDeletingChatPurgesItsQueryEditor(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	old := u.sessionID
 	object := ProjectObject{Reference: ContextReference{Kind: "table", ObjectID: "main.Customer", Title: "Customer"}, Columns: []string{"CustomerId"}}
@@ -230,6 +238,7 @@ func TestDeletingChatPurgesItsQueryEditor(t *testing.T) {
 }
 
 func TestChatDeletePrefixDoesNotFollowNewSession(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	old := u.sessionID
@@ -261,6 +270,7 @@ func TestChatDeletePrefixDoesNotFollowNewSession(t *testing.T) {
 }
 
 func TestChatDeletePrefixRequiresNextInputEvent(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	id := u.sessionID
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF12})
@@ -276,6 +286,7 @@ func TestChatDeletePrefixRequiresNextInputEvent(t *testing.T) {
 }
 
 func TestResultQueryTabKeepsExactResultProvenance(t *testing.T) {
+	t.Parallel()
 	result := secureread.Result{Columns: []string{"CustomerId"}, Rows: []secureread.Row{{Data: map[string]any{"CustomerId": 7}}}}
 	g := newGridState(NewGridModel(result), "first", "First", 90)
 	g.SetFocused(true)
@@ -312,6 +323,7 @@ func TestResultQueryTabKeepsExactResultProvenance(t *testing.T) {
 }
 
 func TestChatTabsArchiveRestoreDeleteAndKeepDrafts(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil)
 	first := u.sessionID
 	u.shell.SetComposerText("draft for first chat")
@@ -362,6 +374,7 @@ func TestChatTabsArchiveRestoreDeleteAndKeepDrafts(t *testing.T) {
 }
 
 func TestChatTabOrderStaysStableAcrossMouseKeysAndRestore(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil)
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	first := u.sessionID
@@ -491,6 +504,7 @@ func TestChatTabOrderStaysStableAcrossMouseKeysAndRestore(t *testing.T) {
 }
 
 func TestLateTurnCannotPopulateAnotherChat(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil)
 	first, generation := u.sessionID, u.workspaceGeneration
 	u.pendingTurns["old-turn"] = turnOutcome{turn: Turn{Text: "stale answer"}, sessionID: first, generation: generation}
@@ -505,6 +519,7 @@ func TestLateTurnCannotPopulateAnotherChat(t *testing.T) {
 }
 
 func TestExplorerFilterShowsQueriesDescendantsAndClearsFromTree(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil)
 	executor := &fakeExecutor{}
 	sessions.ConfigureQueryExecutor(executor)

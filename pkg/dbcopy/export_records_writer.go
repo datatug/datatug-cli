@@ -63,8 +63,12 @@ type exportRecordsWriter struct {
 	count    int64
 }
 
+var exportRecordsWriterNewBuffered = func(out io.Writer) *bufio.Writer {
+	return bufio.NewWriterSize(out, 256*1024)
+}
+
 func newExportRecordsWriter(out io.Writer, format ingitdb.RecordFormat, collection string, fields []dbschema.FieldDef) (*exportRecordsWriter, error) {
-	w := &exportRecordsWriter{format: format, buffered: bufio.NewWriterSize(out, 256*1024), fields: fields}
+	w := &exportRecordsWriter{format: format, buffered: exportRecordsWriterNewBuffered(out), fields: fields}
 	switch format {
 	case ingitdb.RecordFormatJSON:
 		if _, err := w.buffered.WriteString("{\n"); err != nil {

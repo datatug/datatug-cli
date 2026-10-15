@@ -94,19 +94,9 @@ func DeriveSort(originalDTQL string, terms []SortTerm, scope Scope) (Preview, er
 			}
 		}
 		builder.OrderBy(orders...).Offset(query.Offset()).Limit(boundedLimit(query.Limit()))
-		outputNames, err := allOutputNames(query)
-		if err != nil {
-			return Preview{}, err
-		}
-		return serializePreview(builder.SelectColumns(columns...), outputNames, scope)
+		return serializePreview(builder.SelectColumns(columns...), allOutputNames(query), scope)
 	}
-	if scope != OriginalOutput {
-		return Preview{}, fmt.Errorf("%w: unknown scope %d", ErrUnsupported, scope)
-	}
-	all, err := allOutputNames(query)
-	if err != nil {
-		return Preview{}, err
-	}
+	all := allOutputNames(query)
 	builder := dal.From(dal.NewQuerySource(query, "original")).NewQuery()
 	columns := make([]dal.Column, len(all))
 	for i, name := range all {
@@ -130,30 +120,24 @@ func parseOriginal(raw string) (dal.StructuredQuery, error) {
 		return nil, fmt.Errorf("%w: empty DTQL", ErrUnsupported)
 	}
 	query, err := dtql.Deserialize([]byte(raw))
-	if err != nil {
+	if err != nil || query.From() == nil || dal.ValidateJoinTree(query.From()) != nil {
 		return nil, fmt.Errorf("%w: invalid original DTQL: %v", ErrUnsupported, err)
-	}
-	if query.From() == nil {
-		return nil, fmt.Errorf("%w: original query has no source", ErrUnsupported)
-	}
-	if err := dal.ValidateJoinTree(query.From()); err != nil {
-		return nil, fmt.Errorf("%w: invalid source tree: %v", ErrUnsupported, err)
 	}
 	return query, nil
 }
 
 func serializePreview(query dal.StructuredQuery, columns []string, scope Scope) (Preview, error) {
 	encoded, err := dtql.Serialize(query)
-	if err != nil {
-		return Preview{}, fmt.Errorf("%w: derived query cannot be represented as DTQL: %v", ErrUnsupported, err)
+	var parsed dal.StructuredQuery
+	if err == nil {
+		parsed, err = dtql.Deserialize(encoded)
 	}
-	parsed, err := dtql.Deserialize(encoded)
-	if err != nil {
-		return Preview{}, fmt.Errorf("%w: derived preview failed validation: %v", ErrUnsupported, err)
+	var roundTrip []byte
+	if err == nil {
+		roundTrip, err = dtql.Serialize(parsed)
 	}
-	roundTrip, err := dtql.Serialize(parsed)
 	if err != nil || !bytes.Equal(encoded, roundTrip) {
-		return Preview{}, fmt.Errorf("%w: derived preview is not an exact canonical round-trip", ErrUnsupported)
+		return Preview{}, fmt.Errorf("%w: derived query cannot be represented as DTQL: %v", ErrUnsupported, err)
 	}
 	return Preview{DTQL: string(encoded), OutputColumns: append([]string(nil), columns...), Scope: scope}, nil
 }
@@ -224,16 +208,13 @@ func projectedColumns(query dal.StructuredQuery) ([]projectedColumn, error) {
 	return result, nil
 }
 
-func allOutputNames(query dal.StructuredQuery) ([]string, error) {
-	columns, err := projectedColumns(query)
-	if err != nil {
-		return nil, err
-	}
+func allOutputNames(query dal.StructuredQuery) []string {
+	columns, _ := projectedColumns(query)
 	result := make([]string, len(columns))
 	for i, column := range columns {
 		result[i] = column.name
 	}
-	return result, nil
+	return result
 }
 
 func validateMatchingSource(query dal.StructuredQuery) error {
@@ -262,12 +243,6 @@ func validateMatchingSource(query dal.StructuredQuery) error {
 
 func containsDerivedSource(from dal.FromSource) bool {
 	if from == nil {
-		return true
-	}
-	if _, ok := from.Base().(dal.QuerySource); ok {
-		return true
-	}
-	if _, ok := from.Base().(*dal.QuerySource); ok {
 		return true
 	}
 	if _, ok := from.Base().(dal.CollectionRef); !ok {

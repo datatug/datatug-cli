@@ -61,6 +61,7 @@ func pressJoinKey(t *testing.T, b *JoinBlock, key string) tea.Cmd {
 }
 
 func TestJoinBlockFocusable(t *testing.T) {
+	t.Parallel()
 	b := newTestJoinBlock()
 	if !b.Focusable() {
 		t.Fatal("JoinBlock must be focusable")
@@ -68,6 +69,7 @@ func TestJoinBlockFocusable(t *testing.T) {
 }
 
 func TestJoinBlockViewShowsPressJHint(t *testing.T) {
+	t.Parallel()
 	b := newTestJoinBlock()
 	view := b.View(80, true)
 	if !strings.Contains(view, "press j") {
@@ -79,6 +81,7 @@ func TestJoinBlockViewShowsPressJHint(t *testing.T) {
 }
 
 func TestJoinBlockJTogglesFocusAndDefocusesGrid(t *testing.T) {
+	t.Parallel()
 	b := newTestJoinBlock()
 	b.Grid.SetFocused(true)
 	pressJoinKey(t, b, "j")
@@ -94,6 +97,7 @@ func TestJoinBlockJTogglesFocusAndDefocusesGrid(t *testing.T) {
 }
 
 func TestJoinBlockNavigatesCandidatesWithArrows(t *testing.T) {
+	t.Parallel()
 	b := newTestJoinBlock()
 	pressJoinKey(t, b, "j")
 	if b.candidateIndex != 0 {
@@ -114,6 +118,7 @@ func TestJoinBlockNavigatesCandidatesWithArrows(t *testing.T) {
 }
 
 func TestJoinBlockEnterTogglesDetails(t *testing.T) {
+	t.Parallel()
 	b := newTestJoinBlock()
 	pressJoinKey(t, b, "j")
 	updated, _ := b.Update(joinTestKeys["enter"])
@@ -128,6 +133,7 @@ func TestJoinBlockEnterTogglesDetails(t *testing.T) {
 }
 
 func TestJoinBlockSpaceAppliesSelectedCandidate(t *testing.T) {
+	t.Parallel()
 	b := newTestJoinBlock()
 	var gotRecordSetID string
 	var gotCandidateID JoinCandidateID
@@ -156,6 +162,7 @@ func TestJoinBlockSpaceAppliesSelectedCandidate(t *testing.T) {
 }
 
 func TestJoinBlockTabAndEscReturnFocusToGrid(t *testing.T) {
+	t.Parallel()
 	b := newTestJoinBlock()
 	pressJoinKey(t, b, "j")
 	updated, _ := b.Update(joinTestKeys["tab"])
@@ -177,6 +184,7 @@ func TestJoinBlockTabAndEscReturnFocusToGrid(t *testing.T) {
 }
 
 func TestJoinBlockDelegatesKeysToGridOutsideJoinMode(t *testing.T) {
+	t.Parallel()
 	b := newTestJoinBlock()
 	// "s" sorts the grid (tui/grid native binding) and is not a join key, so
 	// it must reach the wrapped grid untouched.
@@ -224,6 +232,7 @@ func multiGroupJoinCandidates() []JoinCandidate {
 // one-to-many "→*" label -- testJoinCandidates' single group with distinct
 // target names never exercises any of them.
 func TestJoinBlockJoinAreaViewRendersAliasDisambiguationAndCardinality(t *testing.T) {
+	t.Parallel()
 	g := grid.New([]grid.Column{{Name: "InvoiceId"}}, []grid.Row{{Values: []any{1}}})
 	b := &JoinBlock{Grid: g, RecordSetID: "rs1", Candidates: multiGroupJoinCandidates()}
 	view := b.View(120, true)
@@ -244,6 +253,7 @@ func TestJoinBlockJoinAreaViewRendersAliasDisambiguationAndCardinality(t *testin
 // exercise a plain left/right pair, not the multi-group up/down movement or
 // either direction's boundary no-op.
 func TestJoinBlockUpDownAndLeftRightNavigateGroupsAndCandidates(t *testing.T) {
+	t.Parallel()
 	g := grid.New([]grid.Column{{Name: "InvoiceId"}}, []grid.Row{{Values: []any{1}}})
 	b := &JoinBlock{Grid: g, RecordSetID: "rs1", Candidates: multiGroupJoinCandidates()}
 	updated, _ := b.Update(joinTestKeys["j"])
@@ -300,6 +310,7 @@ func TestJoinBlockUpDownAndLeftRightNavigateGroupsAndCandidates(t *testing.T) {
 // TestJoinBlockSelectedJoinOutOfRangeIndices covers selectedJoin's own
 // bounds guards directly.
 func TestJoinBlockSelectedJoinOutOfRangeIndices(t *testing.T) {
+	t.Parallel()
 	b := newTestJoinBlock()
 	b.sourceIndex = 99
 	if _, ok := b.selectedJoin(); ok {
@@ -315,6 +326,7 @@ func TestJoinBlockSelectedJoinOutOfRangeIndices(t *testing.T) {
 // TestJoinBlockCurrentAndViewWithoutGrid cover Current() and View()'s own
 // Grid==nil branches.
 func TestJoinBlockCurrentAndViewWithoutGrid(t *testing.T) {
+	t.Parallel()
 	b := &JoinBlock{RecordSetID: "rs1", Candidates: testJoinCandidates()}
 	if ref := b.Current(); ref != nil {
 		t.Fatalf("Current() with no Grid = %v, want nil", ref)
@@ -330,6 +342,7 @@ func TestJoinBlockCurrentAndViewWithoutGrid(t *testing.T) {
 // narrow width forces it past the plain lipgloss.Width(highlighted)<=width
 // case into the ansi.Truncate one.
 func TestJoinBlockJoinAreaViewTruncatesOverwideHighlightedLine(t *testing.T) {
+	t.Parallel()
 	g := grid.New([]grid.Column{{Name: "InvoiceId"}}, []grid.Row{{Values: []any{1}}})
 	b := &JoinBlock{Grid: g, RecordSetID: "rs1", Candidates: multiGroupJoinCandidates()}
 	updated, _ := b.Update(joinTestKeys["j"])
@@ -346,6 +359,7 @@ func TestJoinBlockJoinAreaViewTruncatesOverwideHighlightedLine(t *testing.T) {
 // only happen if a caller sets joinFocused directly, or Candidates changes
 // out from under an already-focused block).
 func TestJoinBlockUpdateWithJoinFocusedButNoCandidates(t *testing.T) {
+	t.Parallel()
 	g := grid.New([]grid.Column{{Name: "InvoiceId"}}, []grid.Row{{Values: []any{1}}})
 	b := &JoinBlock{Grid: g, RecordSetID: "rs1", joinFocused: true}
 	updated, cmd := b.Update(tea.KeyPressMsg{Code: tea.KeyDown})
@@ -358,6 +372,7 @@ func TestJoinBlockUpdateWithJoinFocusedButNoCandidates(t *testing.T) {
 // TestJoinBlockSpaceWithNilApplyIsNoop covers Update's "space" branch's own
 // Apply==nil guard.
 func TestJoinBlockSpaceWithNilApplyIsNoop(t *testing.T) {
+	t.Parallel()
 	b := newTestJoinBlock() // Apply is left nil
 	updated, _ := b.Update(joinTestKeys["j"])
 	b = updated.(*JoinBlock)
@@ -371,6 +386,7 @@ func TestJoinBlockSpaceWithNilApplyIsNoop(t *testing.T) {
 // trailing Grid==nil guard, on the delegate-to-grid path (not the earlier
 // Current()/View() nil-Grid guards).
 func TestJoinBlockUpdateDelegatesToNilGridOutsideJoinMode(t *testing.T) {
+	t.Parallel()
 	b := &JoinBlock{RecordSetID: "rs1", Candidates: testJoinCandidates()}
 	updated, cmd := b.Update(joinTestKeys["s"])
 	if got, ok := updated.(*JoinBlock); !ok || got != b || cmd != nil {
@@ -379,6 +395,7 @@ func TestJoinBlockUpdateDelegatesToNilGridOutsideJoinMode(t *testing.T) {
 }
 
 func TestJoinBlockNoCandidatesNeverEntersJoinMode(t *testing.T) {
+	t.Parallel()
 	g := grid.New([]grid.Column{{Name: "InvoiceId"}}, []grid.Row{{Values: []any{1}}})
 	b := &JoinBlock{Grid: g, RecordSetID: "rs1"}
 	pressJoinKey(t, b, "j")

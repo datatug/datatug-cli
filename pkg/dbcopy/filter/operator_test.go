@@ -8,6 +8,7 @@ import (
 )
 
 func TestParseOperator(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		token   string
 		want    dal.Operator
@@ -48,6 +49,7 @@ func TestParseOperator(t *testing.T) {
 }
 
 func TestParseOperator_UnknownLists_All_Supported(t *testing.T) {
+	t.Parallel()
 	_, err := ParseOperator("like")
 	if err == nil {
 		t.Fatal("expected error")

@@ -12,6 +12,7 @@ import (
 )
 
 func TestChatUISlashHTTPGetWithURLSendsDirectly(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"name":"Ada"}]`))
@@ -31,6 +32,7 @@ func TestChatUISlashHTTPGetWithURLSendsDirectly(t *testing.T) {
 }
 
 func TestChatUISlashHTTPNoArgsOpensDialog(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/http"))
 	view := u.shell.View().Content
@@ -43,6 +45,7 @@ func TestChatUISlashHTTPNoArgsOpensDialog(t *testing.T) {
 // header/cookie settings item: "/http header" (no further argument) lists
 // currently configured headers, matching ui.go's httpSettingsCommand.
 func TestChatUISlashHTTPHeaderListsSettings(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/http header"))
 	view := u.shell.View().Content
@@ -55,6 +58,7 @@ func TestChatUISlashHTTPHeaderListsSettings(t *testing.T) {
 // "/http header name=value" should push the CLI/project scope-choice
 // Overlay (ui.go's httpScopeOverlay) rather than mutating state directly.
 func TestChatUISlashHTTPHeaderSetPushesScopeOverlay(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	cmd, err := u.runHTTPCommand("header https://example.com X-Test=value")
 	if err != nil {
@@ -68,6 +72,7 @@ func TestChatUISlashHTTPHeaderSetPushesScopeOverlay(t *testing.T) {
 }
 
 func TestHTTPRequestOverlayEscCloses(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet})
 	_, _, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -77,6 +82,7 @@ func TestHTTPRequestOverlayEscCloses(t *testing.T) {
 }
 
 func TestHTTPRequestOverlayInvalidURLBlocksSubmit(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet})
 	d.url.SetValue("not-a-url")
@@ -91,6 +97,7 @@ func TestHTTPRequestOverlayInvalidURLBlocksSubmit(t *testing.T) {
 }
 
 func TestHTTPRequestOverlaySubmitsAndPersists(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"ok":true}]`))
@@ -130,6 +137,7 @@ func TestHTTPRequestOverlaySubmitsAndPersists(t *testing.T) {
 // the draft and posting a generic transcript message the way a request
 // sent without a dialog still does (see the table's other case).
 func TestChatUIHandleHTTPDoneKeepsOverlayOpenWithDraftOnFailure(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet, URL: "https://example.com/data"})
 	u.pendingHTTPRequest = d
@@ -158,6 +166,7 @@ func TestChatUIHandleHTTPDoneKeepsOverlayOpenWithDraftOnFailure(t *testing.T) {
 
 // Ported from TestHTTPCommandPersistsStructuredResponseWithoutQuerySecret.
 func TestChatUIHTTPCommandPersistsStructuredResponseWithoutQuerySecret(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Query().Get("token") != "secret" {
@@ -202,6 +211,7 @@ func TestChatUIHTTPCommandPersistsStructuredResponseWithoutQuerySecret(t *testin
 
 // Ported from TestHTTPCommandRejectsUnsupportedURL.
 func TestChatUIHTTPCommandRejectsUnsupportedURL(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	for _, argument := range []string{"get file:///etc/passwd", "get https://user:pass@example.com/data", "trace https://example.com", "get not-a-url"} {
 		if _, err := u.runHTTPCommand(argument); err == nil {
@@ -212,6 +222,7 @@ func TestChatUIHTTPCommandRejectsUnsupportedURL(t *testing.T) {
 
 // Ported from TestHTTPPostFormSendsBodyAndEditedHeadersAndPersistsMethod.
 func TestChatUIHTTPPostFormSendsBodyAndEditedHeadersAndPersistsMethod(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost || request.Header.Get("X-Test") != "edited" || request.Header.Get("Authorization") != "Bearer secret" {
@@ -283,6 +294,7 @@ func TestChatUIHTTPPostFormSendsBodyAndEditedHeadersAndPersistsMethod(t *testing
 
 // Ported from TestHTTPFormHeaderEditAndDelete.
 func TestChatUIHTTPFormHeaderEditAndDelete(t *testing.T) {
+	t.Parallel()
 	// A session-less ChatUI, matching the legacy test's NewUI(ctx, nil,
 	// "test"): newHTTPRequestOverlay only loads store-configured headers
 	// (which always include a default User-Agent) when u.sessions != nil.
@@ -312,6 +324,7 @@ func TestChatUIHTTPFormHeaderEditAndDelete(t *testing.T) {
 // so this asserts through the rendered view, like
 // TestChatUISlashHTTPNoArgsOpensDialog already does for the no-args case.
 func TestChatUIHTTPCommandsOpenPrefilledForm(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct{ command, method, target string }{
 		{"", "GET", ""},
 		{"new", "GET", ""},
@@ -340,6 +353,7 @@ func TestChatUIHTTPCommandsOpenPrefilledForm(t *testing.T) {
 // wired (chatui_http_overlay.go's saveAsProjectQuery, pushing ChatUI's
 // saveQueryOverlay), closing the earlier "not yet available" gap.
 func TestChatUIHTTPFormSaveOpensProjectQueryDialogOnlyForSupportedRequest(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.savedQueryService = &savedQueryStub{}
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodPost, URL: "https://example.com/items"})
@@ -365,6 +379,7 @@ func TestChatUIHTTPFormSaveOpensProjectQueryDialogOnlyForSupportedRequest(t *tes
 
 // Ported from TestHTTPFormRendersSubmitAndSaveActions.
 func TestChatUIHTTPFormRendersSubmitAndSaveActions(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.Update(tea.WindowSizeMsg{Width: 90, Height: 28})
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodPatch, URL: "https://example.com/items/1"})
@@ -381,6 +396,7 @@ func TestChatUIHTTPFormRendersSubmitAndSaveActions(t *testing.T) {
 
 // Ported from TestHTTPFormMasksConfiguredAndEditedHeaderValues.
 func TestChatUIHTTPFormMasksConfiguredAndEditedHeaderValues(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "test")
 	d := newHTTPRequestOverlay(u, httpRequestSpec{Method: http.MethodGet, URL: "https://example.test/data"})
 	d.headers = append(d.headers, httpHeaderField{name: "X-Password", value: "configured-private", configured: true})
@@ -400,6 +416,7 @@ func TestChatUIHTTPFormMasksConfiguredAndEditedHeaderValues(t *testing.T) {
 
 // Ported from TestHTTPFormLoadsConfiguredHeadersAfterURLInput.
 func TestChatUIHTTPFormLoadsConfiguredHeadersAfterURLInput(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -438,6 +455,7 @@ func TestChatUIHTTPFormLoadsConfiguredHeadersAfterURLInput(t *testing.T) {
 
 // Ported from TestHTTPMarkdownRendersAndRawToggleSurvivesRestore.
 func TestChatUIHTTPMarkdownRendersAndRawToggleSurvivesRestore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		w.Header().Set("Content-Type", "text/markdown")
@@ -480,6 +498,7 @@ func TestChatUIHTTPMarkdownRendersAndRawToggleSurvivesRestore(t *testing.T) {
 // driven directly against httpDocumentBlock.Update/View instead of
 // u.focusStop/u.entries[index].showRaw/showHeaders.
 func TestHTTPDocumentBlockRawHeaderToggle(t *testing.T) {
+	t.Parallel()
 	body := "# Project notes\n\n**Important** details"
 	response := &HTTPResponse{Method: "GET", StatusCode: 200, ContentType: "text/markdown", Headers: map[string][]string{"Content-Type": {"text/markdown"}}, Body: []byte(body)}
 	b := &httpDocumentBlock{text: body, markdown: true, response: response}
@@ -528,6 +547,7 @@ func TestHTTPDocumentBlockRawHeaderToggle(t *testing.T) {
 // block generically instead of showing an empty header when response is
 // nil.
 func TestHTTPDocumentBlockTitleFallsBackWithoutResponse(t *testing.T) {
+	t.Parallel()
 	b := &httpDocumentBlock{text: "hello"}
 	if got := b.Title(); got != "HTTP response" {
 		t.Fatalf("Title() = %q, want %q", got, "HTTP response")
@@ -543,6 +563,7 @@ func TestHTTPDocumentBlockTitleFallsBackWithoutResponse(t *testing.T) {
 // versionBadge prefix, set when a saved HTTP response was re-fetched and
 // differs from the version last shown (see runHTTPRefresh).
 func TestHTTPDocumentBlockShowsVersionBadgeAheadOfSummary(t *testing.T) {
+	t.Parallel()
 	response := &HTTPResponse{Method: "GET", StatusCode: 200, ContentType: "text/plain", Body: []byte("hello")}
 	b := &httpDocumentBlock{text: "hello", response: response, versionBadge: "v2"}
 	view := ansi.Strip(b.View(80, false))
@@ -559,6 +580,7 @@ func TestHTTPDocumentBlockShowsVersionBadgeAheadOfSummary(t *testing.T) {
 // never turned into rows). httpDocumentBlock (the ChatUI transcript.Block a
 // non-table HTTP response renders as) had no "q" case at all before this.
 func TestHTTPDocumentBlockSaveAsQueryForNonTableResponse(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -580,6 +602,7 @@ func TestHTTPDocumentBlockSaveAsQueryForNonTableResponse(t *testing.T) {
 // Ported from TestHTTPTableHasRawAndHeadersTabs: a structured HTTP result's
 // grid exposes Raw/Headers through the advertised result Actions menu.
 func TestChatUIHTTPTableHasRawAndHeadersTabs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

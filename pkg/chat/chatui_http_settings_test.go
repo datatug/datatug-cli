@@ -15,6 +15,7 @@ import (
 )
 
 func TestChatUIHTTPRequestSettingsPromptAndMaskedListing(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")

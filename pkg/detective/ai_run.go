@@ -29,6 +29,12 @@ type aiRunOperation struct {
 	Done              bool              `json:"done"`
 }
 
+var (
+	confirmRunInterlock func()
+	loadCatalog         = core.LoadCatalog
+	evaluateCheck       = core.EvaluateCheck
+)
+
 // ConfirmRun accepts the confirmed intent before any query dispatch. An
 // interrupted network call remains uncertain and is never silently repeated.
 // Once evaluation returns, its exact result is journaled before run/evidence
@@ -72,6 +78,9 @@ func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner
 	})
 	if err != nil || receipt.OperationID != "" {
 		return receipt, err
+	}
+	if confirmRunInterlock != nil {
+		confirmRunInterlock()
 	}
 	var catalog core.Catalog
 	var admittedRevisions map[string]string
@@ -117,7 +126,7 @@ func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner
 				return err
 			}
 		}
-		catalog, err = core.LoadCatalog(ctx, draft.CheckID, "", catalogSnapshotReader{s.Store})
+		catalog, err = loadCatalog(ctx, draft.CheckID, "", catalogSnapshotReader{s.Store})
 		if err != nil {
 			return err
 		}
@@ -146,7 +155,7 @@ func (s LocalAIStore) ConfirmRun(ctx context.Context, command ai.Command, runner
 	if lookup != nil {
 		ctx = withAdmittedQueryRevisions(ctx, admittedRevisions)
 	}
-	run, err := core.EvaluateCheck(ctx, core.RunRequest{ID: runID, CheckID: draft.CheckID, CaseID: draft.CaseID, Environment: draft.Environment, Actor: s.Scope.Actor, Inputs: effectiveInputs}, catalog, runner, metadata)
+	run, err := evaluateCheck(ctx, core.RunRequest{ID: runID, CheckID: draft.CheckID, CaseID: draft.CaseID, Environment: draft.Environment, Actor: s.Scope.Actor, Inputs: effectiveInputs}, catalog, runner, metadata)
 	if err != nil {
 		return ai.Receipt{}, err
 	}

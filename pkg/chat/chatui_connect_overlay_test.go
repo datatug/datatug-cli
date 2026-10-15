@@ -8,6 +8,7 @@ import (
 )
 
 func TestChatUISlashConnectOpensPreview(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/connect"))
 	view := u.shell.View().Content
@@ -17,6 +18,7 @@ func TestChatUISlashConnectOpensPreview(t *testing.T) {
 }
 
 func TestConnectOverlayEnterCloses(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	o := &connectOverlay{ui: u}
 	_, _, done := o.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -26,6 +28,7 @@ func TestConnectOverlayEnterCloses(t *testing.T) {
 }
 
 func TestConnectOverlayIgnoresOtherKeysAndNonKeyMessages(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	o := &connectOverlay{ui: u}
 	next, cmd, done := o.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
@@ -39,6 +42,7 @@ func TestConnectOverlayIgnoresOtherKeysAndNonKeyMessages(t *testing.T) {
 }
 
 func TestChatUISlashConnectRejectsArguments(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/connect extra"))
 	view := u.shell.View().Content

@@ -12,6 +12,7 @@ import (
 )
 
 func TestPrivateDisplayCacheRestartIsolationAndTamper(t *testing.T) {
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), "display")
 	cache, err := New(root)
 	if err != nil {
@@ -81,6 +82,7 @@ func TestPrivateDisplayCacheRestartIsolationAndTamper(t *testing.T) {
 }
 
 func TestPrivateDisplayCacheRejectsGitAndRedirectedDirectory(t *testing.T) {
+	t.Parallel()
 	project := t.TempDir()
 	if err := os.Mkdir(filepath.Join(project, ".git"), 0700); err != nil {
 		t.Fatal(err)
@@ -94,5 +96,137 @@ func TestPrivateDisplayCacheRejectsGitAndRedirectedDirectory(t *testing.T) {
 	}
 	if _, err := New(filepath.Join(link, "results")); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("redirected Git cache accepted: %v", err)
+	}
+}
+
+// Not parallel: uses t.Setenv for DirEnv and HOME.
+func TestNewDefaultAndErrorBranches(t *testing.T) {
+	customDir := filepath.Join(t.TempDir(), "custom-results")
+	t.Setenv(DirEnv, customDir)
+	if _, err := NewDefault(); err != nil {
+		t.Fatalf("NewDefault with DirEnv: %v", err)
+	}
+
+	homeDir := t.TempDir()
+	t.Setenv(DirEnv, "")
+	t.Setenv("HOME", homeDir)
+	if _, err := NewDefault(); err != nil {
+		t.Fatalf("NewDefault with HOME: %v", err)
+	}
+
+	t.Setenv("HOME", "")
+	if _, err := NewDefault(); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("NewDefault without HOME: %v", err)
+	}
+
+	binding := Binding{
+		Authority:        "https://example.test|github|project|space",
+		Actor:            "alice",
+		DatabaseID:       "database",
+		ProjectID:        "project",
+		SessionID:        "session",
+		RunID:            "run",
+		InputSnapshotID:  "input",
+		Scope:            sessioncontext.Scope{EnvironmentID: "local", IdentityDomain: "domain"},
+		DefinitionDigest: strings.Repeat("a", 64),
+	}
+
+	root := filepath.Join(t.TempDir(), "cache")
+	cache, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Invalid binding in Put and Get.
+	if err := cache.Put(Binding{}, json.RawMessage(`{}`)); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable for empty binding in Put, got %v", err)
+	}
+	if _, err := cache.Get(Binding{}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable for empty binding in Get, got %v", err)
+	}
+
+	// Invalid JSON in Put.
+	if err := cache.Put(binding, json.RawMessage(`{invalid`)); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable for invalid JSON in Put, got %v", err)
+	}
+
+	// Put when target path is a directory (causes os.Rename to fail).
+	targetPath, err := cache.path(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(targetPath, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.Put(binding, json.RawMessage(`{}`)); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable when target path is a directory, got %v", err)
+	}
+	if err := os.Remove(targetPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Get when file is write-only (os.Lstat passes Perm()&0077 == 0, os.Open fails).
+	if err := os.WriteFile(targetPath, []byte(`{}`), 0200); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.Get(binding); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable when file cannot be opened for read, got %v", err)
+	}
+	_ = os.Chmod(targetPath, 0600)
+
+	// Get when file exceeds MaxBytes.
+	if err := os.WriteFile(targetPath, make([]byte, MaxBytes+2), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.Get(binding); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable when file exceeds MaxBytes, got %v", err)
+	}
+
+	// MkdirAll failure when parent directory is read-only (0500).
+	roParent := filepath.Join(t.TempDir(), "ro-parent")
+	if err := os.MkdirAll(roParent, 0500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(roParent, 0700) })
+	roCache, err := New(filepath.Join(roParent, "sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := roCache.Put(binding, json.RawMessage(`{}`)); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable when MkdirAll fails on 0500 parent, got %v", err)
+	}
+
+	// ResolvePrivateDirectory failure when parent is a regular file.
+	badRootParent := filepath.Join(t.TempDir(), "file-parent")
+	badCache, err := New(filepath.Join(badRootParent, "sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(badRootParent, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := badCache.Put(binding, json.RawMessage(`{}`)); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable when ResolvePrivateDirectory fails, got %v", err)
+	}
+	if _, err := badCache.Get(binding); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable when ResolvePrivateDirectory fails in Get, got %v", err)
+	}
+
+	// ResolvePrivateDirectory failure in Put (e.g. .git created in root).
+	gitRoot := filepath.Join(t.TempDir(), "git-root")
+	gitCache, err := New(gitRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(gitRoot, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitCache.Put(binding, json.RawMessage(`{}`)); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable when .git exists in Put, got %v", err)
+	}
+
+	// syncDirectory on missing directory.
+	if err := syncDirectory(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("expected error from syncDirectory on missing path")
 	}
 }

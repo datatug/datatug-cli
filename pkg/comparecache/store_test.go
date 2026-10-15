@@ -17,6 +17,7 @@ import (
 )
 
 func TestComparisonCachePagesMatchingRowsAndRollsBackObserverFailure(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{ByteCap: 1 << 20, TTL: time.Hour})
 	left := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "left-1"}
 	right := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "right-1"}
@@ -57,6 +58,7 @@ func TestComparisonCachePagesMatchingRowsAndRollsBackObserverFailure(t *testing.
 }
 
 func TestComparisonCacheObserverErrorRollsBackUnpublishedRows(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{})
 	left := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "left-2"}
 	right := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "right-2"}
@@ -74,6 +76,7 @@ func TestComparisonCacheObserverErrorRollsBackUnpublishedRows(t *testing.T) {
 }
 
 func TestComparisonCacheExpiresByTTLAndEvictsLRU(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 14, 10, 0, 0, 0, time.UTC)
 	dir := t.TempDir()
 	store, err := Open(Options{PrivateDir: dir, ByteCap: 1 << 20, TTL: time.Hour, Now: func() time.Time { return now }})
@@ -116,6 +119,7 @@ func TestComparisonCacheExpiresByTTLAndEvictsLRU(t *testing.T) {
 }
 
 func TestComparisonCacheStoresMinifiedJSONText(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{})
 	left := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "left-json"}
 	right := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "right-json"}
@@ -197,6 +201,7 @@ func mustRawPayload(t *testing.T, store *Store, comparisonID, sortKey string) st
 // More rows than a page exercises both the single-connection early-exit path
 // and the exclusive cursor across every page (including an exact final page).
 func TestComparisonCacheMultiplePagesHaveNoGaps(t *testing.T) {
+	t.Parallel()
 	for _, count := range []int{6, 7} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
 			store := openTestStore(t, Options{})
@@ -235,6 +240,7 @@ func TestComparisonCacheMultiplePagesHaveNoGaps(t *testing.T) {
 }
 
 func TestComparisonCacheCancellationWhileWriterHoldsLock(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{})
 	ref := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "one"}
 	session, err := store.Begin(context.Background(), BeginRequest{QueryID: "orders", Left: ref, Right: ref})
@@ -258,6 +264,7 @@ func TestComparisonCacheCancellationWhileWriterHoldsLock(t *testing.T) {
 }
 
 func TestComparisonCacheBoundedWriteRollsBackAndReleasesLock(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{ByteCap: 32})
 	ref := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "one"}
 	session, err := store.Begin(context.Background(), BeginRequest{QueryID: "orders", Left: ref, Right: ref})
@@ -270,6 +277,7 @@ func TestComparisonCacheBoundedWriteRollsBackAndReleasesLock(t *testing.T) {
 }
 
 func TestComparisonCachePolicyBinding(t *testing.T) {
+	t.Parallel()
 	store := openTestStore(t, Options{})
 	ref := apicontract.ExecutionRef{StoreID: "ops", ProjectID: "billing", ExecutionID: "one"}
 	session, err := store.Begin(context.Background(), BeginRequest{QueryID: "orders", Left: ref, Right: ref, PolicyFingerprint: "original"})
@@ -280,6 +288,7 @@ func TestComparisonCachePolicyBinding(t *testing.T) {
 }
 
 func TestComparisonCachePageSnapshotIsolatedFromOtherStoreReplacement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	first, err := Open(Options{PrivateDir: dir})
@@ -324,6 +333,7 @@ func TestComparisonCachePageSnapshotIsolatedFromOtherStoreReplacement(t *testing
 }
 
 func TestComparisonCacheEvictionRollsBackPartialDeletion(t *testing.T) {
+	t.Parallel()
 	for _, reason := range []string{"TTL", "LRU"} {
 		t.Run(reason, func(t *testing.T) {
 			now := time.Now().UTC()

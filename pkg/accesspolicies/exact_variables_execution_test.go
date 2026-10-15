@@ -9,6 +9,7 @@ import (
 )
 
 func TestExactNumericBindingsRefuseUnsafeScalarAndTypedListsBeforeExecution(t *testing.T) {
+	t.Parallel()
 	query := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("items", ""))).Where(dal.WhereField("Id", dal.In, dal.NewParam("ids"))).SelectColumns()
 	for _, value := range []any{int64(9007199254740993), float32(9007199254740992), []int64{9007199254740993}, []json.Number{"9007199254740993"}, [1]uint64{9007199254740993}, json.Number("0.10000000000000000001")} {
 		session := &stubSession{}

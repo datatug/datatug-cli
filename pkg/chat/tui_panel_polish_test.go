@@ -11,6 +11,7 @@ import (
 )
 
 func TestPanelPolishExplorerSelectionDoesNotMoveLabels(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil)
 	u.catalog = workspaceTestCatalog()
 	p := u.explorer
@@ -26,6 +27,7 @@ func TestPanelPolishExplorerSelectionDoesNotMoveLabels(t *testing.T) {
 }
 
 func TestPanelPolishTablesInspectExactFullGroupAndReplaceResult(t *testing.T) {
+	t.Parallel()
 	u := focusedGridTestUI(t)
 	executor := &fakeExecutor{}
 	u.sessions.ConfigureQueryExecutor(executor)
@@ -85,6 +87,7 @@ func TestPanelPolishTablesInspectExactFullGroupAndReplaceResult(t *testing.T) {
 }
 
 func TestPanelPolishExplorerSearchAndFocusedHints(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil)
 	u.catalog = workspaceTestCatalog()
 	p := u.explorer
@@ -104,6 +107,7 @@ func TestPanelPolishExplorerSearchAndFocusedHints(t *testing.T) {
 }
 
 func TestPanelPolishHelpActionsMouseFollowsWrappedAndScrolledText(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil)
 	o := u.newHotkeysOverlay()
 	for _, width := range []int{80, 24, 12} {
@@ -129,6 +133,7 @@ func TestPanelPolishHelpActionsMouseFollowsWrappedAndScrolledText(t *testing.T) 
 }
 
 func TestPanelPolishBorderlessHelpActionsAndModalReturnAtTerminalSizes(t *testing.T) {
+	t.Parallel()
 	for _, size := range [][2]int{{140, 42}, {100, 30}, {80, 24}} {
 		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
 			u, _ := newTestChatUI(t, nil)
@@ -195,6 +200,7 @@ func TestPanelPolishBorderlessHelpActionsAndModalReturnAtTerminalSizes(t *testin
 }
 
 func TestPanelPolishHelpScrollbarPositionsAndMouseOwnership(t *testing.T) {
+	t.Parallel()
 	for _, size := range [][2]int{{140, 42}, {100, 30}, {80, 24}} {
 		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
 			u, _ := newTestChatUI(t, nil)
@@ -316,6 +322,7 @@ func TestPanelPolishHelpScrollbarPositionsAndMouseOwnership(t *testing.T) {
 }
 
 func TestPanelPolishTabFocusHintsPreserveDraft(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil)
 	u.shell.SetComposerText("keep draft")
 	u.shell.Update(tea.KeyPressMsg{Code: tea.KeyF11})
@@ -343,6 +350,7 @@ func TestPanelPolishTabFocusHintsPreserveDraft(t *testing.T) {
 }
 
 func TestPanelPolishInlineKeysRetainDistinctStyleAndEditorOwnership(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil)
 	u.catalog = workspaceTestCatalog()
 	u.explorer.explorerSearch = "missing-table"
@@ -386,6 +394,7 @@ func TestPanelPolishInlineKeysRetainDistinctStyleAndEditorOwnership(t *testing.T
 }
 
 func TestPanelPolishHelpColumnsAndNarrowWrap(t *testing.T) {
+	t.Parallel()
 	rows := []workspaceHelpRow{{"Tab/Shift+Tab", "switch result views without executing a query"}, {"F12 then A", "archive directly"}}
 	for _, width := range []int{2, 12, 32, 80} {
 		for _, row := range rows {

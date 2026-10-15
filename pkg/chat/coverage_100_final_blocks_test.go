@@ -63,6 +63,7 @@ func (m mockBookmarkSQL) QueryContext(ctx context.Context, query string, args ..
 }
 
 func TestFinalBlocks_Export(t *testing.T) {
+	// Not parallel: mutates package-level export seams.
 	ctx := context.Background()
 	rs := RecordSet{
 		Title: "TestRS",
@@ -256,6 +257,7 @@ func TestFinalBlocks_Export(t *testing.T) {
 }
 
 func TestFinalBlocks_Bookmark(t *testing.T) {
+	// Not parallel: mutates package-level bookmark store seams.
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sess, err := store.Create(ctx, "Bookmark Session")
@@ -678,6 +680,7 @@ func TestFinalBlocks_Bookmark(t *testing.T) {
 }
 
 func TestFinalBlocks_Join(t *testing.T) {
+	// Not parallel: mutates package-level join and DTQL seams.
 	ctx := context.Background()
 
 	// 1. Candidates: Refresh error

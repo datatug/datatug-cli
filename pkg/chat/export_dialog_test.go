@@ -3,6 +3,7 @@ package chat
 import "testing"
 
 func TestExportFileStem(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string

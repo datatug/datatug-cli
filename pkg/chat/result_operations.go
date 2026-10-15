@@ -16,6 +16,8 @@ import (
 	"github.com/tuigoff/tuigoff/pkg/grid"
 )
 
+var resultopsCapture = resultops.Capture
+
 // Captures belong to a grid instance, so a refreshed result never silently
 // extends an already selected loaded scope.
 type loadedResultCapture struct {
@@ -57,7 +59,7 @@ func (u *ChatUI) captureLoaded(g *gridState, record *RecordSet) (*loadedResultCa
 			values[i].Cells[c] = resultops.Cell{Present: present, Value: value}
 		}
 	}
-	snapshot, err := resultops.Capture(metadata, values)
+	snapshot, err := resultopsCapture(metadata, values)
 	if err != nil {
 		return nil, err
 	}

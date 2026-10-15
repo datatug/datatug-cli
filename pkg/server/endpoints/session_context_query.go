@@ -1,6 +1,7 @@
 package endpoints
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,26 @@ import (
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/sessioncontext"
 )
+
+type sessionContextService interface {
+	ReadOperation(ctx context.Context, p sessioncontext.Principal, id string) (sessioncontext.Receipt, error)
+	ReadRun(ctx context.Context, p sessioncontext.Principal, id string) (sessioncontext.Run, error)
+	ReadInput(ctx context.Context, p sessioncontext.Principal, id string) (sessioncontext.InputSnapshot, []sessioncontext.EntryRevision, error)
+	Execute(ctx context.Context, p sessioncontext.Principal, c sessioncontext.Command) (sessioncontext.CommandResult, error)
+	GetSnapshot(ctx context.Context, p sessioncontext.Principal, id string) (sessioncontext.Snapshot, error)
+	ReadEntryRevision(ctx context.Context, p sessioncontext.Principal, sessionID, entryID, revisionID string) (sessioncontext.EntryRevision, error)
+}
+
+var sessionQueryResolveSessionContext = func(ctx context.Context, storage, project string) (sessionContextService, sessioncontext.Principal, api.SessionContextCapabilities, error) {
+	s, p, c, err := api.ResolveSessionContext(ctx, storage, project)
+	if err != nil {
+		return nil, p, c, err
+	}
+	return s, p, c, nil
+}
+
+var sessionQueryComputeRunQuery = computeRunQueryWithOptions
+var sessionQueryProjectStoreFor = api.ProjectStoreFor
 
 type sessionQueryBinding struct {
 	EntryID     string `json:"entryId"`
@@ -43,7 +64,7 @@ func sessionContextQueryHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	service, p, caps, err := api.ResolveSessionContext(r.Context(), q.Get("storage"), q.Get("project"))
+	service, p, caps, err := sessionQueryResolveSessionContext(r.Context(), q.Get("storage"), q.Get("project"))
 	if err != nil {
 		writeSessionContextError(w, r, err)
 		return
@@ -112,7 +133,7 @@ func sessionContextQueryHandler(w http.ResponseWriter, r *http.Request) {
 		writeSessionContextError(w, r, lookupErr)
 		return
 	}
-	store, err := api.ProjectStoreFor(p.ProjectID)
+	store, err := sessionQueryProjectStoreFor(p.ProjectID)
 	if err != nil {
 		writeSessionContextError(w, r, sessioncontext.ErrUnavailable)
 		return
@@ -213,7 +234,7 @@ func sessionContextQueryHandler(w http.ResponseWriter, r *http.Request) {
 		execution.Parameters[binding.ParameterID] = apicontract.ScalarValue(request.Command.ResolvedParameters[binding.ParameterID])
 		execution.BindingOrigins = append(execution.BindingOrigins, apicontract.BindingOriginEntry{ParameterID: binding.ParameterID, Origin: apicontract.BindingOriginContext, FactID: binding.EntryID})
 	}
-	result, executionErr := computeRunQueryWithOptions(r.Context(), execution, runQueryOptions{expectedQueryRevision: string(query.Revision)})
+	result, executionErr := sessionQueryComputeRunQuery(r.Context(), execution, runQueryOptions{expectedQueryRevision: string(query.Revision)})
 	completionDigest := sha256.Sum256([]byte(request.Command.OpID))
 	completion := sessioncontext.Command{OpID: "complete-" + hex.EncodeToString(completionDigest[:]), Action: "completeRun", SessionID: request.Command.SessionID, RunID: request.Command.RunID, ExpectedRunVersion: 1, RunState: "completed"}
 	if executionErr != nil {

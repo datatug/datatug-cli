@@ -27,6 +27,7 @@ func tokenWithScopes(token, scope string, expiry time.Time) *oauth2.Token {
 	return (&oauth2.Token{AccessToken: token, TokenType: "Bearer", Expiry: expiry}).WithExtra(map[string]any{"scope": scope})
 }
 func TestGoogleVerifiedIdentityGrantAndGeneration(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	token := "first-token-fixture"
 	scope := readScope + " openid"
@@ -91,6 +92,7 @@ func TestGoogleVerifiedIdentityGrantAndGeneration(t *testing.T) {
 	}
 }
 func TestGoogleProviderRefusesMissingExpiredAndMalformedIdentity(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	for _, name := range []string{"missing-scope", "expired", "missing-openid", "broad-cloud-only", "missing-sub", "duplicate-sub", "redirect", "overflow", "revoked"} {
 		t.Run(name, func(t *testing.T) {
@@ -131,6 +133,8 @@ func TestGoogleProviderRefusesMissingExpiredAndMalformedIdentity(t *testing.T) {
 		})
 	}
 }
+
+// Not parallel: mutates findADC
 func TestADCExplicitUserCredentialSelection(t *testing.T) {
 	now := time.Now()
 	saved := findADC
@@ -161,6 +165,7 @@ func TestADCExplicitUserCredentialSelection(t *testing.T) {
 	}
 }
 func TestPrivateAuthorizationSessionNonce(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "session")
 	if _, e := bigquery.NewFileLedger(dir); e != nil {
 		t.Fatal(e)
@@ -195,6 +200,7 @@ func TestPrivateAuthorizationSessionNonce(t *testing.T) {
 }
 
 func TestGoogleTransportUsesFrozenVerifiedToken(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	supplied := tokenWithScopes("verified-token", readScope+" openid", now.Add(time.Hour))
 	sourceCalls := 0

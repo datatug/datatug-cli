@@ -10,6 +10,10 @@ import (
 	"github.com/dal-go/record"
 )
 
+var wrapRecordsetSession = func(s dal.ReadSession) dal.ReadSession {
+	return s
+}
+
 // PrepareRecordset captures the policy-effective query without executing a leaf.
 // guard must visit the entire original AST before parameter substitution and the
 // SecureReadSession recursive route, then the effective AST before compilation.
@@ -29,6 +33,7 @@ func PrepareRecordset(ctx context.Context, query dal.Query, o Options, guard fun
 	if len(o.Policies) > 0 {
 		session = access.SecureReadSession(capture, Policies(o.Policies)...)
 	}
+	session = wrapRecordsetSession(session)
 	_, err = session.ExecuteQueryToRecordsetReader(ctx, result.Query)
 	if err != nil {
 		return result, err

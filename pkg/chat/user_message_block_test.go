@@ -18,6 +18,7 @@ import (
 // it (padding, background, the focus/selection accent) is theme.Card's
 // job now, exercised by strongo/aichat's own theme tests, not here.
 func TestUserMessageViewReturnsPlainSanitizedText(t *testing.T) {
+	t.Parallel()
 	if got := userMessageView("hello", 40, false); got != "hello" {
 		t.Fatalf("userMessageView() = %q, want the sanitized text unchanged", got)
 	}
@@ -37,6 +38,7 @@ func TestUserMessageViewReturnsPlainSanitizedText(t *testing.T) {
 // transcript wraps it in gets the same accent a plain, non-Block user
 // message does.
 func TestUserMessageBlockReportsRoleUser(t *testing.T) {
+	t.Parallel()
 	b := newUserMessageBlock("hi")
 	if got := b.Role(); got != theme.RoleUser {
 		t.Fatalf("userMessageBlock.Role() = %q, want %q", got, theme.RoleUser)
@@ -53,6 +55,7 @@ func TestUserMessageBlockReportsRoleUser(t *testing.T) {
 // message itself is chatshell's own focus-ring mechanics (Shift+↑↓), not
 // re-tested here — see grid_state_test.go/chatui_test.go for the pattern.
 func TestChatUIEnterOnFocusedUserMessageLoadsComposer(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	id := u.nextEntryID("user")
 	if !u.shell.AppendBlockWithID(id, newUserMessageBlock("earlier question")) {

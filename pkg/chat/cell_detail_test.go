@@ -16,6 +16,7 @@ import (
 // ChatUI's cellDetailOverlay in chatui_inspector_test.go.
 
 func TestPreviewRelatedUsesDTQLAndStructuredResult(t *testing.T) {
+	t.Parallel()
 	executor := &joinExecutorStub{}
 	application := ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: executor}
 	record := RecordSet{Source: application.Source}
@@ -34,6 +35,7 @@ func TestPreviewRelatedUsesDTQLAndStructuredResult(t *testing.T) {
 // TestCopyValueFormatsThroughFormatValue covers cellDetail.copyValue's own
 // (trivial but uncovered) delegation to FormatValue.
 func TestCopyValueFormatsThroughFormatValue(t *testing.T) {
+	t.Parallel()
 	d := &cellDetail{value: int64(42)}
 	if got, want := d.copyValue(), FormatValue(int64(42)); got != want {
 		t.Fatalf("copyValue() = %q, want %q", got, want)
@@ -41,6 +43,7 @@ func TestCopyValueFormatsThroughFormatValue(t *testing.T) {
 }
 
 func TestPreviewRelatedSourceMismatchIsANoOp(t *testing.T) {
+	t.Parallel()
 	application := ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: &joinExecutorStub{}}
 	preview, err := application.PreviewRelated(context.Background(), RecordSet{Source: "sqlite:///other.db"}, "main.Invoice.CustomerId", map[string]any{"main.invoice.customerid": 7})
 	if err != nil || preview != nil {
@@ -49,6 +52,7 @@ func TestPreviewRelatedSourceMismatchIsANoOp(t *testing.T) {
 }
 
 func TestPreviewRelatedPropagatesSnapshotError(t *testing.T) {
+	t.Parallel()
 	// ForeignKeyJoinApplication.snapshot errors when its own static Snapshot
 	// wasn't loaded for this Source and no Refresh callback is set (join.go).
 	application := ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: ForeignKeySnapshot{Source: "sqlite:///different.db"}, Executor: &joinExecutorStub{}}
@@ -62,6 +66,7 @@ func TestPreviewRelatedPropagatesSnapshotError(t *testing.T) {
 // branches: a denied target is skipped, and Secure with no CanReadTarget
 // callback at all denies every target (fail closed).
 func TestPreviewRelatedRespectsCanReadTarget(t *testing.T) {
+	t.Parallel()
 	row := map[string]any{"main.invoice.customerid": 7}
 
 	t.Run("CanReadTarget denies the target", func(t *testing.T) {
@@ -90,6 +95,7 @@ func TestPreviewRelatedRespectsCanReadTarget(t *testing.T) {
 // passthrough (dtql.Serialize itself has no realistic failure mode here --
 // the query is always built from the same fixed shape).
 func TestPreviewRelatedPropagatesExecutorError(t *testing.T) {
+	t.Parallel()
 	executor := &fakeExecutor{err: errors.New("query failed")}
 	application := ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: executor}
 	_, err := application.PreviewRelated(context.Background(), RecordSet{Source: application.Source}, "main.Invoice.CustomerId", map[string]any{"main.invoice.customerid": 7})
@@ -102,6 +108,7 @@ func TestPreviewRelatedPropagatesExecutorError(t *testing.T) {
 // found==false branch: the selected column's prefix names a real FK's
 // schema/relation, but the field itself isn't one of that FK's FromFields.
 func TestPreviewRelatedSkipsFieldThatDoesNotMatchAnyForeignKey(t *testing.T) {
+	t.Parallel()
 	executor := &joinExecutorStub{}
 	application := ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: executor}
 	preview, err := application.PreviewRelated(context.Background(), RecordSet{Source: application.Source}, "main.Invoice.InvoiceDate", map[string]any{"main.invoice.invoicedate": "2024-01-01"})
@@ -115,6 +122,7 @@ func TestPreviewRelatedSkipsFieldThatDoesNotMatchAnyForeignKey(t *testing.T) {
 // joinSnapshot() targets "main", so this needs its own snapshot with a
 // differently-schema'd target.
 func TestPreviewRelatedQualifiesNonMainSchemaTarget(t *testing.T) {
+	t.Parallel()
 	snapshot := ForeignKeySnapshot{Source: "sqlite:///fixture.db", Columns: map[string][]string{
 		"main.invoice":  {"InvoiceId", "CustomerId"},
 		"lookup.status": {"StatusId"},
@@ -133,6 +141,7 @@ func TestPreviewRelatedQualifiesNonMainSchemaTarget(t *testing.T) {
 }
 
 func TestPreviewRelatedPropagatesSerializeError(t *testing.T) {
+	// Not parallel: mutates package-level serializePreviewQuery seam.
 	restore := serializePreviewQuery
 	t.Cleanup(func() { serializePreviewQuery = restore })
 	serializeErr := errors.New("serialize failed")
@@ -145,6 +154,7 @@ func TestPreviewRelatedPropagatesSerializeError(t *testing.T) {
 }
 
 func TestPreviewRelatedRequiresCompleteCompositeKey(t *testing.T) {
+	t.Parallel()
 	executor := &joinExecutorStub{}
 	application := ForeignKeyJoinApplication{Source: "sqlite:///fixture.db", Snapshot: joinSnapshot(), Executor: executor}
 	preview, err := application.PreviewRelated(context.Background(), RecordSet{Source: application.Source}, "main.Order.Country", map[string]any{"main.order.country": "US"})
@@ -157,6 +167,7 @@ func TestPreviewRelatedRequiresCompleteCompositeKey(t *testing.T) {
 }
 
 func TestChinookRelatedCustomerPreview(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path, err := filepath.Abs(filepath.Join("..", "dbcopy", "testdata", "chinook.db"))
 	if err != nil {

@@ -62,6 +62,7 @@ func writePolicy(t *testing.T, dir, name, policyName string) string {
 	return path
 }
 
+// Not parallel: modifies environment variables
 func TestResolveDir(t *testing.T) {
 	if dir, explicit, err := ResolveDir("/explicit"); err != nil || dir != "/explicit" || !explicit {
 		t.Errorf("explicit = %q, %v, %v", dir, explicit, err)
@@ -79,6 +80,7 @@ func TestResolveDir(t *testing.T) {
 }
 
 func TestLoadDirOrderAndFiltering(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writePolicy(t, dir, "20-extra.yml", "extra")
 	writePolicy(t, dir, "10-global.yaml", "global")
@@ -110,6 +112,7 @@ func TestLoadDirOrderAndFiltering(t *testing.T) {
 	}
 }
 
+// Not parallel: modifies environment variables
 func TestLoadRules(t *testing.T) {
 	t.Setenv(DirEnv, "")
 	dir := t.TempDir()
@@ -150,6 +153,7 @@ func TestLoadRules(t *testing.T) {
 }
 
 func TestLoadFileErrors(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	bad := filepath.Join(dir, "bad.yaml")
 	if err := os.WriteFile(bad, []byte("kind: Nonsense\n"), 0o600); err != nil {
@@ -170,6 +174,7 @@ func TestLoadFileErrors(t *testing.T) {
 }
 
 func TestParseVariables(t *testing.T) {
+	t.Parallel()
 	variables, err := ParseVariables([]string{"minPrice=10", "open=true", "name=alice", "empty=", "list=[eu, uk]", "text=[unclosed", "id='007'", "now=2026-01-01"})
 	if err != nil {
 		t.Fatal(err)
@@ -190,6 +195,7 @@ func customersQuery() dal.StructuredQuery {
 }
 
 func TestExplainAndLine(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	global := writePolicy(t, dir, "global.yaml", "global")
 	loaded, err := LoadDir(dir)
@@ -241,6 +247,7 @@ type opaqueQuery struct{ dal.Query }
 func (opaqueQuery) String() string { return "SELECT 1" }
 
 func TestHiddenReferences(t *testing.T) {
+	t.Parallel()
 	lines := []Line{{FieldLists: [][]string{{"id", "name", "address.*", "public_*", "*_at"}}}, {}}
 	allowed := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("customers", ""))).
 		Where(dal.WhereField("name", dal.Equal, dal.Constant{Value: "x"}), dal.NewGroupCondition(dal.Or, dal.WhereField("address.city", dal.Equal, dal.Constant{Value: "y"}), dal.WhereField("public_bio", dal.In, dal.Array{Value: []string{"z"}})), dal.WhereField("id", dal.Equal, dal.NewParam("id"))).
@@ -293,6 +300,7 @@ func (s *stubSession) ExecuteQueryToRecordsReader(_ context.Context, query dal.Q
 }
 
 func TestRunSubstitutesParamsAndDenies(t *testing.T) {
+	t.Parallel()
 	stub := &stubSession{}
 	priced := dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef("products", ""))).Where(dal.WhereField("price", dal.GreaterOrEqual, dal.NewParam("minPrice"))).SelectColumns()
 	unrestricted := Options{Unrestricted: true}

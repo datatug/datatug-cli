@@ -17,6 +17,7 @@ import (
 )
 
 func TestCloudChatCorrelatesServerCallAndClientInteraction(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -84,6 +85,7 @@ func TestCloudChatCorrelatesServerCallAndClientInteraction(t *testing.T) {
 }
 
 func TestCloudChatKeepsQuestionIDsWithoutTelemetry(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -129,6 +131,7 @@ func TestCloudChatKeepsQuestionIDsWithoutTelemetry(t *testing.T) {
 }
 
 func TestCloudQuestionIDSurvivesScoreToolFollowupAndNextTurn(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -190,6 +193,7 @@ func TestCloudQuestionIDSurvivesScoreToolFollowupAndNextTurn(t *testing.T) {
 }
 
 func TestCloudQuestionIDSurvivesTransportRetry(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -226,6 +230,7 @@ func TestCloudQuestionIDSurvivesTransportRetry(t *testing.T) {
 }
 
 func TestCurrentPromptAndPriorContextStaySeparate(t *testing.T) {
+	t.Parallel()
 	agent := &AIConversation{instruction: "system"}
 	req := agent.buildRequest(context.Background(), "Which city?", "Previous question: show customers\nPrevious answer: three customers")
 	if len(req.Messages) != 1 || req.Messages[0].Text != "Which city?" {
@@ -260,6 +265,7 @@ func (r *recordingInteractionReporter) snapshot() []cloudproto.InteractionReport
 }
 
 func TestChatUICommandReportsObservedOutcome(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		command string
@@ -294,6 +300,7 @@ func TestChatUICommandReportsObservedOutcome(t *testing.T) {
 }
 
 func TestChatUIAsyncCommandReportsCompletion(t *testing.T) {
+	t.Parallel()
 	t.Run("saved query succeeds", func(t *testing.T) {
 		u, sessions := newTestChatUI(t, nil)
 		reporter := &recordingInteractionReporter{}
@@ -344,6 +351,7 @@ func TestChatUIAsyncCommandReportsCompletion(t *testing.T) {
 }
 
 func TestTelemetryDeliveryFailureDoesNotFailChat(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -365,6 +373,7 @@ func TestTelemetryDeliveryFailureDoesNotFailChat(t *testing.T) {
 }
 
 func TestProviderFailureAndCancellationAreObservable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -401,6 +410,7 @@ func TestProviderFailureAndCancellationAreObservable(t *testing.T) {
 }
 
 func TestDeterministicChatAndCommandReportWithoutAICall(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()

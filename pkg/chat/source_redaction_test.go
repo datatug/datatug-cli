@@ -33,6 +33,7 @@ func storeBytes(t *testing.T, path string) string {
 }
 
 func TestFriendlyQueryErrorRedactsSourceURLs(t *testing.T) {
+	t.Parallel()
 	err := errors.New(`dial "postgres://alice:` + redactionSecret + `@db.example.com/shop" failed; password=` + redactionSecret)
 	got := friendlyQueryError(err)
 	if strings.Contains(got, redactionSecret) || !strings.Contains(got, "postgres://alice:xxxxx@db.example.com/shop") {
@@ -47,6 +48,7 @@ func TestFriendlyQueryErrorRedactsSourceURLs(t *testing.T) {
 }
 
 func TestChatStoreNeverPersistsASourcePassword(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	literal := "postgres://alice:" + redactionSecret + "@db.example.com:5432/shop?sslmode=require"
@@ -89,6 +91,7 @@ func TestChatStoreNeverPersistsASourcePassword(t *testing.T) {
 }
 
 func TestChatScopeIdentityIgnoresSourcePasswords(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	scopeWith := func(password string) ChatScope {
@@ -115,6 +118,7 @@ func TestChatScopeIdentityIgnoresSourcePasswords(t *testing.T) {
 }
 
 func TestChatStoreKeepsAnEnvSourceVerbatim(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	scope := testScope()

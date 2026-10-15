@@ -533,7 +533,7 @@ func writeBigQueryRun(run *bigquery.Run, operationError error, write func(any) e
 	}
 	page := bigquery.Page{}
 	if operationError == nil {
-		page, operationError = run.NextPage()
+		page, operationError = bqNextPage(run)
 		if errors.Is(operationError, dal.ErrNoMoreRecords) {
 			operationError = nil
 		}
@@ -605,7 +605,7 @@ func writeBigQueryExport(path string, value any, dir string) error {
 		_, err = f.Write(raw)
 	}
 	if err == nil {
-		err = f.Sync()
+		err = bqExportSync(f)
 	}
 	closeErr := f.Close()
 	if err != nil || closeErr != nil {
@@ -616,3 +616,8 @@ func writeBigQueryExport(path string, value any, dir string) error {
 	}
 	return nil
 }
+
+var (
+	bqExportSync = func(f *os.File) error { return f.Sync() }
+	bqNextPage   = func(r *bigquery.Run) (bigquery.Page, error) { return r.NextPage() }
+)

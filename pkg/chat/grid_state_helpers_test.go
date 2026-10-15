@@ -25,6 +25,7 @@ func gridStateTestFixture(t *testing.T) *gridState {
 // badge=="" branch (SetTitle(baseTitle)), distinct from the badge-set path
 // other tests already exercise.
 func TestSetVersionBadgeClearsToBaseTitle(t *testing.T) {
+	t.Parallel()
 	g := gridStateTestFixture(t)
 	g.setVersionBadge("changed")
 	if !strings.Contains(g.Title(), "changed") {
@@ -42,6 +43,7 @@ func TestSetVersionBadgeClearsToBaseTitle(t *testing.T) {
 // only exercises "down" (via CurrentView switching, never actually
 // rendering the Charts view or pressing "up").
 func TestChartsExtraViewRendersCandidateAndCyclesUpDown(t *testing.T) {
+	t.Parallel()
 	g := gridStateTestFixture(t)
 	g.charts = []ChartCandidate{
 		{Spec: ChartSpec{Kind: ChartBar, Title: "First chart", Points: []ChartPoint{{Label: "a", Value: 1}}}, Reason: "grouped by First"},
@@ -76,6 +78,7 @@ func TestChartsExtraViewRendersCandidateAndCyclesUpDown(t *testing.T) {
 // TestChartsExtraViewRenderWithNoCandidates covers the "no chart
 // candidates" empty-state Render branch.
 func TestChartsExtraViewRenderWithNoCandidates(t *testing.T) {
+	t.Parallel()
 	g := gridStateTestFixture(t)
 	rendered := g.chartsExtraView().Render(g.Model, 60, 12)
 	if !strings.Contains(rendered, "No chart candidates") {
@@ -88,6 +91,7 @@ func TestChartsExtraViewRenderWithNoCandidates(t *testing.T) {
 // to it, but neither test renders and scrolls one far enough to prove the
 // Update wiring itself).
 func TestViewportScrollUpdateHandlesScrollKeys(t *testing.T) {
+	t.Parallel()
 	vp := viewport.New(viewport.WithWidth(10), viewport.WithHeight(2))
 	vp.SetContent("one\ntwo\nthree\nfour\nfive")
 	handler := viewportScrollUpdate(&vp)
@@ -103,6 +107,7 @@ func TestViewportScrollUpdateHandlesScrollKeys(t *testing.T) {
 // rawRow/sourceIndexAt's guard branches: no current row, an empty key, an
 // out-of-range column/row, and a non-numeric row Key.
 func TestGridStateSourceRowHelpers(t *testing.T) {
+	t.Parallel()
 	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"A"}}), "", "Empty", contentWidth(80))
 	if got := g.sourceRowKey(); got != "" {
 		t.Fatalf("sourceRowKey() on an empty grid = %q, want empty", got)

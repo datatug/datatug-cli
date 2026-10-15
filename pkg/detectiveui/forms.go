@@ -468,25 +468,34 @@ func (m *Model) checkByID(id string) *detective.Check {
 	}
 	return nil
 }
+
+var (
+	detachedCheck           = detachedFormValue[detective.Check]
+	detachedCase            = detachedFormValue[detective.Case]
+	detachedScenario        = detachedFormValue[detective.Scenario]
+	detachedValidator       = detachedFormValue[detective.PublishedValidator]
+	detachedQueryValidators = detachedFormValue[detective.QueryValidators]
+)
+
 func (m *Model) submitForm() (*detective.ActionRequest, error) {
 	f := *m.form
 	// Form drafts are read from cached State. Detach every nested map and slice
 	// before building a request so a rejected or canceled action cannot change
 	// the visible catalog while the server still holds the authoritative value.
 	var err error
-	if f.check, err = detachedFormValue(f.check); err != nil {
+	if f.check, err = detachedCheck(f.check); err != nil {
 		return nil, err
 	}
-	if f.caseItem, err = detachedFormValue(f.caseItem); err != nil {
+	if f.caseItem, err = detachedCase(f.caseItem); err != nil {
 		return nil, err
 	}
-	if f.scenario, err = detachedFormValue(f.scenario); err != nil {
+	if f.scenario, err = detachedScenario(f.scenario); err != nil {
 		return nil, err
 	}
-	if f.validator, err = detachedFormValue(f.validator); err != nil {
+	if f.validator, err = detachedValidator(f.validator); err != nil {
 		return nil, err
 	}
-	if f.queryValidators, err = detachedFormValue(f.queryValidators); err != nil {
+	if f.queryValidators, err = detachedQueryValidators(f.queryValidators); err != nil {
 		return nil, err
 	}
 	req := &detective.ActionRequest{}

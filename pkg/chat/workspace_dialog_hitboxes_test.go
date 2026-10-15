@@ -11,6 +11,7 @@ import (
 )
 
 func TestWorkspaceActionsMouseRenderedRows(t *testing.T) {
+	t.Parallel()
 	u, _ := uxUI(t)
 	inspectIndex := -1
 	for i, action := range u.workspaceActions() {
@@ -100,6 +101,7 @@ func TestWorkspaceActionsMouseRenderedRows(t *testing.T) {
 }
 
 func TestWorkspaceTrailMouseRenderedRows(t *testing.T) {
+	t.Parallel()
 	u, _ := uxUI(t)
 	ids := make([]string, 10)
 	for i := range ids {
@@ -163,6 +165,7 @@ func TestWorkspaceTrailMouseRenderedRows(t *testing.T) {
 }
 
 func TestWorkspaceActionsEmptyMatchesAndMessageRecovery(t *testing.T) {
+	t.Parallel()
 	u, _ := uxUI(t)
 	o := &workspaceActionsOverlay{ui: u, search: "cancel"}
 	o.View(80, 12)
@@ -195,6 +198,7 @@ func TestWorkspaceActionsEmptyMatchesAndMessageRecovery(t *testing.T) {
 }
 
 func TestWorkspaceDialogsShellEntryAndBlankClicks(t *testing.T) {
+	t.Parallel()
 	u, parent := uxUI(t)
 	uxKey(t, u, "ctrl+p")
 	view := ansi.Strip(u.shell.View().Content)
@@ -216,6 +220,7 @@ func TestWorkspaceDialogsShellEntryAndBlankClicks(t *testing.T) {
 }
 
 func TestWorkspaceDialogsClippedRowsAndPendingResize(t *testing.T) {
+	t.Parallel()
 	u, parent := uxUI(t)
 	for _, size := range []struct{ w, h int }{{40, 0}, {40, 1}, {40, 2}, {0, 5}, {-1, 5}} {
 		t.Run(fmt.Sprintf("%dx%d", size.w, size.h), func(t *testing.T) {
@@ -263,6 +268,7 @@ func TestWorkspaceDialogsClippedRowsAndPendingResize(t *testing.T) {
 }
 
 func TestWorkspaceDialogsShellFrameRejectsClicks(t *testing.T) {
+	t.Parallel()
 	for _, dialog := range []string{"actions", "trail"} {
 		for _, target := range []string{"right border", "right padding", "content"} {
 			t.Run(dialog+"/"+target, func(t *testing.T) {

@@ -40,6 +40,7 @@ func newTestChatUI(t *testing.T, agent ContextualConversation, turns ...Turn) (*
 }
 
 func TestChatUIPlanCommandRefreshesHostedUsage(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil)
 	// Direct-provider chat has no hosted plan lookup.
 	drainCmd(t, u, u.Submit("/plan"))
@@ -73,6 +74,7 @@ func TestChatUIPlanCommandRefreshesHostedUsage(t *testing.T) {
 }
 
 func TestChatUIRefreshesHostedUsageAfterSuccessfulTurn(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{Text: "answer"})
 	var calls int
 	u.SetHostedPlanLookup(func(context.Context) (string, error) {
@@ -145,6 +147,7 @@ func drainCmd(t *testing.T, u *ChatUI, cmd tea.Cmd) {
 }
 
 func TestChatUISubmitAsksAndRendersGrid(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Text: "Found one.", Queries: []QueryResult{{Title: "Customers", RecordSetID: "rs1", Result: secureread.Result{
 		Columns: []string{"CustomerId", "City"},
 		Rows:    []secureread.Row{{Data: map[string]any{"CustomerId": 1, "City": "Prague"}}},
@@ -162,6 +165,7 @@ func TestChatUISubmitAsksAndRendersGrid(t *testing.T) {
 }
 
 func TestChatUISubmitWithNoQueriesAppendsFallbackText(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	cmd := u.Submit("nonsense")
 	drainCmd(t, u, cmd)
@@ -177,6 +181,7 @@ func TestChatUISubmitWithNoQueriesAppendsFallbackText(t *testing.T) {
 }
 
 func TestChatUISlashNewStartsFreshSession(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	firstID := u.sessionID
 	cmd := u.Submit("/new")
@@ -194,6 +199,7 @@ func TestChatUISlashNewStartsFreshSession(t *testing.T) {
 }
 
 func TestChatUISlashClearRequiresConfirm(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	cmd := u.Submit("/clear")
 	drainCmd(t, u, cmd)
@@ -204,6 +210,7 @@ func TestChatUISlashClearRequiresConfirm(t *testing.T) {
 }
 
 func TestChatUISlashHelpListsCommands(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	cmd := u.Submit("/help")
 	drainCmd(t, u, cmd)
@@ -214,6 +221,7 @@ func TestChatUISlashHelpListsCommands(t *testing.T) {
 }
 
 func TestChatUIUnknownCommandReportsError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	cmd := u.Submit("/bogus")
 	drainCmd(t, u, cmd)
@@ -224,6 +232,7 @@ func TestChatUIUnknownCommandReportsError(t *testing.T) {
 }
 
 func TestChatUIJoinCandidatesWireIntoJoinBlock(t *testing.T) {
+	t.Parallel()
 	// A RecordSet with FK-join candidates renders as a JoinBlock (not a bare
 	// grid.Model) — checklist item #3 wired end to end. Ported from
 	// ui.go's TestUIInlineFKJoinNavigationAndApply setup: a real persisted
@@ -261,6 +270,7 @@ func TestChatUIJoinCandidatesWireIntoJoinBlock(t *testing.T) {
 }
 
 func TestChatUITopBarAndStatusBarShowProjectAndSession(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.catalog = ProjectCatalog{Title: "Demo"}
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -274,6 +284,7 @@ func TestChatUITopBarAndStatusBarShowProjectAndSession(t *testing.T) {
 }
 
 func TestChatUIMarkdownHTTPResponseRendersFormatted(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	ctx := context.Background()
 	user, err := sessions.store.AppendUser(ctx, sessions.activeID, "/http get https://example.com/doc.md")
@@ -296,6 +307,7 @@ func TestChatUIMarkdownHTTPResponseRendersFormatted(t *testing.T) {
 }
 
 func TestChatUIAskUsesStreamAsk(t *testing.T) {
+	t.Parallel()
 	// StreamAsk shares SessionChat.Ask's persistence path (query/workspace/
 	// bookmark observers via ctx, AppendUser, a final AppendTurn) — verify a
 	// turn asked through ChatUI.Submit lands in the durable session, not
@@ -325,6 +337,7 @@ func TestChatUIAskUsesStreamAsk(t *testing.T) {
 // and re-renders as the joined grid), which unit tests of the pieces don't
 // cover.
 func TestChatUIInlineFKJoinNavigationAndApply(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -378,6 +391,7 @@ func TestChatUIInlineFKJoinNavigationAndApply(t *testing.T) {
 // TestChatUIShowsAppliedLimitationsIncludingEmptyResults is ported from
 // ui_test.go's TestUIShowsAppliedLimitationsIncludingEmptyResults.
 func TestChatUIShowsAppliedLimitationsIncludingEmptyResults(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{Result: secureread.Result{
 		Columns: []string{"CustomerId"},
 		Limitations: []secureread.Limitation{
@@ -405,6 +419,7 @@ func TestChatUIShowsAppliedLimitationsIncludingEmptyResults(t *testing.T) {
 // not just the session-management commands
 // TestChatUISlashHelpListsCommands already checks.
 func TestChatUISlashHelpDocumentsGridControls(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/help"))
 	view := collectWorkspaceHotkeys(t, u)
@@ -421,6 +436,7 @@ func TestChatUISlashHelpDocumentsGridControls(t *testing.T) {
 // TestUIShowsShiftArrowNavigationHint (adapted to ChatUI's own status-bar
 // wording).
 func TestChatUIShowsShiftArrowNavigationHint(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if view := flattenView(u.shell.View().Content); !strings.Contains(view, "Shift+↑ history") {
 		t.Fatalf("status line missing Shift+Arrow navigation hint:\n%s", view)
@@ -431,6 +447,7 @@ func TestChatUIShowsShiftArrowNavigationHint(t *testing.T) {
 // TestUIStatusHintsFollowFocus: the composer-focused status differs from
 // the grid-focused status (statusBar, chatui.go).
 func TestChatUIStatusHintsFollowFocus(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{Result: secureread.Result{
 		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
 	}}}}
@@ -455,6 +472,7 @@ func TestChatUIStatusHintsFollowFocus(t *testing.T) {
 // already handled by runCommand but missing from chatCommands, so the "/"
 // menu never showed them even though typing them out fully worked.
 func TestChatCommandsListsConnectHTTPQueryQueries(t *testing.T) {
+	t.Parallel()
 	for _, want := range []string{"/connect", "/http", "/query", "/queries"} {
 		found := false
 		for _, c := range chatCommands {
@@ -477,6 +495,7 @@ func TestChatCommandsListsConnectHTTPQueryQueries(t *testing.T) {
 // "4 Raw/5 Headers" wording, and does not assert an "Inspector:" section,
 // since that whole workspace tab was never ported to ChatUI.
 func TestChatHelpTextRestoresKeyParity(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	cmd := u.Submit("/help")
 	drainCmd(t, u, cmd)
@@ -503,6 +522,7 @@ func TestChatHelpTextRestoresKeyParity(t *testing.T) {
 // dropping everything past the cut. wrapStatusSegments (ported from ui.go)
 // now wraps onto additional lines instead.
 func TestChatUIStatusBarWrapsOnNarrowWidth(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.Update(tea.WindowSizeMsg{Width: 30, Height: 20})
 	status := u.statusBar(30)
@@ -530,6 +550,7 @@ func TestChatUIStatusBarWrapsOnNarrowWidth(t *testing.T) {
 // session title, not " │ ", so the first status row aligns with the
 // composer's left edge like the rows below it.
 func TestSessionStatusSegmentDropsEmptyTitles(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil)
 	u.catalog = ProjectCatalog{}
 	u.snapshot.Title = "New chat"
@@ -558,6 +579,7 @@ func TestSessionStatusSegmentDropsEmptyTitles(t *testing.T) {
 // unable to word-wrap even when it doesn't fit): an empty key means it was
 // never a Hint, just a plain segment.
 func TestAutoHintRejectsEmptyKey(t *testing.T) {
+	t.Parallel()
 	if _, ok := autoHint(" │ New chat │ rs:0 │ context:0"); ok {
 		t.Fatal("autoHint(\" │ New chat │ rs:0 │ context:0\") = ok, want false (empty key)")
 	}
@@ -576,6 +598,7 @@ func TestAutoHintRejectsEmptyKey(t *testing.T) {
 // Session notices are system lines at the top of the transcript: shown, kept
 // across a rebuilt transcript, and never a stored message.
 func TestSessionNoticesAreSystemLinesNotMessages(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil)
 	u.SetSessionNotices([]string{"Table narrowing: the cloud decision engine is ON", "Warning: table narrowing: bad rule"})
 	view := flattenView(u.shell.View().Content)

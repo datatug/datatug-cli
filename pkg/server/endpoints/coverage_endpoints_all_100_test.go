@@ -36,6 +36,16 @@ type errReader struct{}
 func (errReader) Read([]byte) (int, error) { return 0, errors.New("read error") }
 
 func TestCoverageFinish100_Compare(t *testing.T) {
+	session, err := secureread.NewSession(secureread.SessionOptions{As: "alice", NoPolicies: true})
+	require.NoError(t, err)
+	dir := t.TempDir()
+	api.ConfigureSecureSession(session, map[string]string{"p": dir}, api.Capabilities{AllowWrites: true})
+	defer api.ConfigureSecureSession(secureread.Session{}, nil, api.Capabilities{})
+
+	origStore := storage.NewDatatugStore
+	storage.NewDatatugStore = func(string) (storage.Store, error) { return filestore.NewStore("files", map[string]string{"p": dir}) }
+	defer func() { storage.NewDatatugStore = origStore }()
+
 	handler := compareHandler(Capabilities{})
 
 	// 1. GET method
@@ -68,15 +78,15 @@ func TestCoverageFinish100_Compare(t *testing.T) {
 		"securityContextId": %q,
 		"queryId": "nonexistent_query",
 		"key": ["id"],
-		"left": {"kind":"scope","storeId":"s","project":"p","environment":"e"},
-		"right": {"kind":"scope","storeId":"s","project":"p","environment":"e"}
+		"left": {"kind":"scope","storeId":"local","project":"p","environment":"e"},
+		"right": {"kind":"scope","storeId":"local","project":"p","environment":"e"}
 	}`, api.SecurityContextID())))
 	compareHandler(Capabilities{AllowWrites: true})(wFail, rFail)
 	assert.Equal(t, http.StatusNotFound, wFail.Code)
 
 	// 6. computeCompareWith with req.Left.Kind == CompareSideRecord and no key
 	ctx := context.Background()
-	_, err := computeCompareWith(ctx, apicontract.CompareRequest{
+	_, err = computeCompareWith(ctx, apicontract.CompareRequest{
 		SecurityContextID: api.SecurityContextID(),
 		QueryID:           "q1",
 		Left:              apicontract.CompareSideSpec{Kind: apicontract.CompareSideRecord, Execution: &apicontract.ExecutionRef{StoreID: "s", ProjectID: "p", ExecutionID: "ex1"}},

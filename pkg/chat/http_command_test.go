@@ -10,6 +10,7 @@ import (
 )
 
 func TestFormatHTTPBodyTablesAndText(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, media, path, body, column string
 		rows, columns                   int
@@ -37,6 +38,7 @@ func TestFormatHTTPBodyTablesAndText(t *testing.T) {
 // "could not tabulate/parse" and unknown-format branches, none of which the
 // happy-path table above exercises.
 func TestFormatHTTPBodyInvalidAndUntabularBodies(t *testing.T) {
+	t.Parallel()
 	if _, text, kind := formatHTTPBody([]byte("{not json"), "application/json", "/x"); !strings.Contains(text, "Invalid JSON") || kind != "JSON" {
 		t.Fatalf("invalid JSON = %q, %q", text, kind)
 	}
@@ -68,6 +70,7 @@ func TestFormatHTTPBodyInvalidAndUntabularBodies(t *testing.T) {
 // and tabularJSON falls through to the generic array-of-objects scan over
 // the same rows value.
 func TestTabularJSONColumnsPresentButRowsNotArrays(t *testing.T) {
+	t.Parallel()
 	result, text, kind := formatHTTPBody([]byte(`{"columns":["a","b"],"rows":[{"a":1}]}`), "application/json", "/x")
 	if text != "" || len(result.Rows) != 1 || !containsString(result.Columns, "a") || kind != "JSON" {
 		t.Fatalf("non-array rows with valid columns = %#v, %q, %q", result, text, kind)
@@ -79,6 +82,7 @@ func TestTabularJSONColumnsPresentButRowsNotArrays(t *testing.T) {
 // matrix (falls through to generic row scanning), and a non-object item in
 // the generic array form.
 func TestTabularJSONBranches(t *testing.T) {
+	t.Parallel()
 	result, text, _ := formatHTTPBody([]byte(`{"data":[{"id":1},{"id":2}]}`), "application/json", "/x")
 	if text != "" || len(result.Rows) != 2 || !containsString(result.Columns, "id") {
 		t.Fatalf("data-wrapped JSON = %#v, %q", result, text)
@@ -104,6 +108,7 @@ func TestTabularJSONBranches(t *testing.T) {
 // with non-string keys (a string-keyed mapping decodes straight into
 // map[string]any), which formatHTTPBody's own YAML test cases never use.
 func TestNormalizeYAMLConvertsNonStringKeyedMaps(t *testing.T) {
+	t.Parallel()
 	input := map[any]any{1: "a", 2: []any{map[any]any{3: "nested"}}}
 	got := normalizeYAML(input)
 	converted, ok := got.(map[string]any)
@@ -128,6 +133,7 @@ func TestNormalizeYAMLConvertsNonStringKeyedMaps(t *testing.T) {
 // re-encode branch -- formatHTTPBody's own tests only ever produce integer
 // json.Number values and scalar leaf values.
 func TestNormalizeHTTPValueBranches(t *testing.T) {
+	t.Parallel()
 	if got := normalizeHTTPValue(json.Number("3.14")); got != 3.14 {
 		t.Fatalf("normalizeHTTPValue(3.14) = %v (%T), want the float64", got, got)
 	}
@@ -144,6 +150,7 @@ func TestNormalizeHTTPValueBranches(t *testing.T) {
 
 // TestSanitizedHTTPURLNilSource covers sanitizedHTTPURL's own nil guard.
 func TestSanitizedHTTPURLNilSource(t *testing.T) {
+	t.Parallel()
 	if got := sanitizedHTTPURL(nil); got != "" {
 		t.Fatalf("sanitizedHTTPURL(nil) = %q, want empty", got)
 	}
@@ -152,6 +159,7 @@ func TestSanitizedHTTPURLNilSource(t *testing.T) {
 // TestSafeResponseHeadersRedactsUnparsableLocation covers safeResponseHeaders'
 // own url.Parse-error branch for Location/Content-Location.
 func TestSafeResponseHeadersRedactsUnparsableLocation(t *testing.T) {
+	t.Parallel()
 	safe := safeResponseHeaders(http.Header{"Location": {"http://[::1"}})
 	if len(safe["Location"]) != 1 || safe["Location"][0] != "[redacted]" {
 		t.Fatalf("safe[Location] = %v, want a single [redacted] entry", safe["Location"])
@@ -161,6 +169,7 @@ func TestSafeResponseHeadersRedactsUnparsableLocation(t *testing.T) {
 // TestHTTPResponseDisplayTextEmptyBody covers displayText's own
 // empty-response fallback.
 func TestHTTPResponseDisplayTextEmptyBody(t *testing.T) {
+	t.Parallel()
 	response := HTTPResponse{ContentType: "text/plain"}
 	if got := response.displayText(); got != "(empty response)" {
 		t.Fatalf("displayText() = %q, want the empty-response placeholder", got)
@@ -170,6 +179,7 @@ func TestHTTPResponseDisplayTextEmptyBody(t *testing.T) {
 // TestBoundedTextTruncatesLongContent covers boundedText's own truncation
 // branch.
 func TestBoundedTextTruncatesLongContent(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("x", 20000)
 	got := boundedText([]byte(long))
 	if !strings.HasSuffix(got, "\n… (truncated)") || len(got) >= len(long) {
@@ -180,6 +190,7 @@ func TestBoundedTextTruncatesLongContent(t *testing.T) {
 // TestFetchHTTPRequestResultNetworkErrors covers fetchHTTPRequestResult's
 // own request-construction and network-failure error strings.
 func TestFetchHTTPRequestResultNetworkErrors(t *testing.T) {
+	t.Parallel()
 	// An invalid method name (contains a space) fails http.NewRequestWithContext.
 	_, _, failure := fetchHTTPRequestResult(context.Background(), httpRequestSpec{Method: "BAD METHOD", URL: "http://example.test"}, "http://example.test")
 	if !strings.Contains(failure, "invalid request") {
@@ -196,6 +207,7 @@ func TestFetchHTTPRequestResultNetworkErrors(t *testing.T) {
 // TestFetchHTTPRequestResultRejectsOversizedResponse covers
 // fetchHTTPRequestResult's own maxHTTPResponseBytes guard.
 func TestFetchHTTPRequestResultRejectsOversizedResponse(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		chunk := make([]byte, 1<<20)
 		for written := 0; written <= maxHTTPResponseBytes; written += len(chunk) {
@@ -215,6 +227,7 @@ func TestFetchHTTPRequestResultRejectsOversizedResponse(t *testing.T) {
 // connection -- net/http.Client's Response.Body then reports
 // io.ErrUnexpectedEOF on read.
 func TestFetchHTTPRequestResultReadErrorSurfaces(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hj, ok := w.(http.Hijacker)
 		if !ok {
@@ -239,6 +252,7 @@ func TestFetchHTTPRequestResultReadErrorSurfaces(t *testing.T) {
 // CheckRedirect's own non-GET/HEAD branch (http.ErrUseLastResponse): a POST
 // redirected by the server must not be followed.
 func TestFetchHTTPRequestResultNonGetRedirectStopsAtFirstHop(t *testing.T) {
+	t.Parallel()
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("redirect target should not be reached for a POST")
 	}))
@@ -256,6 +270,7 @@ func TestFetchHTTPRequestResultNonGetRedirectStopsAtFirstHop(t *testing.T) {
 // TestFetchHTTPRequestResultRejectsUnsafeRedirect covers CheckRedirect's own
 // unsafe-redirect branch (too many hops).
 func TestFetchHTTPRequestResultRejectsUnsafeRedirect(t *testing.T) {
+	t.Parallel()
 	var server *httptest.Server
 	hops := 0
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -295,6 +310,7 @@ func containsString(items []string, want string) bool {
 // chatui_http_overlay_test.go.
 
 func TestHTTPRedirectDoesNotForwardQueryInReferer(t *testing.T) {
+	t.Parallel()
 	var receivedReferer string
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedReferer = r.Header.Get("Referer")
@@ -312,6 +328,7 @@ func TestHTTPRedirectDoesNotForwardQueryInReferer(t *testing.T) {
 }
 
 func TestSafeResponseHeadersRedactsUnknownRequestAndResponseValues(t *testing.T) {
+	t.Parallel()
 	for _, headers := range []http.Header{
 		{"X-Password": {"private"}, "X-Credential": {"hidden"}, "Content-Type": {"application/json"}},
 		{"X-Vendor-Access": {"private"}, "X-Trace": {"hidden"}, "Location": {"https://example.test/next?password=private"}},

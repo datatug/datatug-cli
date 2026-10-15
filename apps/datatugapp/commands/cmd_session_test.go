@@ -307,6 +307,17 @@ func TestContextSessionTerminalDurableComposerAndDashboard(t *testing.T) {
 	t.Run("PinnedChinookFixture", func(t *testing.T) {
 		fixture := os.Getenv("DATATUG_TEST_CHINOOK_FIXTURE")
 		if fixture == "" {
+			for _, candidate := range []string{
+				"/Users/alex/projects/demo-db/chinook/artifacts/data/chinook.sqlite",
+				"../../../../../../projects/demo-db/chinook/artifacts/data/chinook.sqlite",
+			} {
+				if _, err := os.Stat(candidate); err == nil {
+					fixture = candidate
+					break
+				}
+			}
+		}
+		if fixture == "" {
 			t.Skip("DATATUG_TEST_CHINOOK_FIXTURE is required for the real pinned fixture journey")
 		}
 		originalDashboard := sessionRunInvoiceDashboard

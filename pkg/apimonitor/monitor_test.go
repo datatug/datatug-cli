@@ -884,3 +884,334 @@ func TestCapabilityDiscoveryRefusesUnresolvedDeepUnwrapChain(t *testing.T) {
 		t.Fatalf("deep Flush error = %v", err)
 	}
 }
+
+type flushErrorOnlyCap struct{ c *optionalCalls }
+
+func (v flushErrorOnlyCap) FlushError() error { v.c.flush++; return nil }
+
+func writerWithAll32Bits(bits int, base *testResponseWriter, calls *optionalCalls) http.ResponseWriter {
+	switch bits {
+	case 0:
+		return base
+	case 1:
+		return struct {
+			*testResponseWriter
+			flushCap
+		}{base, flushCap{calls}}
+	case 2:
+		return struct {
+			*testResponseWriter
+			flushErrorOnlyCap
+		}{base, flushErrorOnlyCap{calls}}
+	case 3:
+		return struct {
+			*testResponseWriter
+			flushCap
+			flushErrorOnlyCap
+		}{base, flushCap{calls}, flushErrorOnlyCap{calls}}
+	case 4:
+		return struct {
+			*testResponseWriter
+			hijackCap
+		}{base, hijackCap{calls}}
+	case 5:
+		return struct {
+			*testResponseWriter
+			flushCap
+			hijackCap
+		}{base, flushCap{calls}, hijackCap{calls}}
+	case 6:
+		return struct {
+			*testResponseWriter
+			flushErrorOnlyCap
+			hijackCap
+		}{base, flushErrorOnlyCap{calls}, hijackCap{calls}}
+	case 7:
+		return struct {
+			*testResponseWriter
+			flushCap
+			flushErrorOnlyCap
+			hijackCap
+		}{base, flushCap{calls}, flushErrorOnlyCap{calls}, hijackCap{calls}}
+	case 8:
+		return struct {
+			*testResponseWriter
+			pushCap
+		}{base, pushCap{calls}}
+	case 9:
+		return struct {
+			*testResponseWriter
+			flushCap
+			pushCap
+		}{base, flushCap{calls}, pushCap{calls}}
+	case 10:
+		return struct {
+			*testResponseWriter
+			flushErrorOnlyCap
+			pushCap
+		}{base, flushErrorOnlyCap{calls}, pushCap{calls}}
+	case 11:
+		return struct {
+			*testResponseWriter
+			flushCap
+			flushErrorOnlyCap
+			pushCap
+		}{base, flushCap{calls}, flushErrorOnlyCap{calls}, pushCap{calls}}
+	case 12:
+		return struct {
+			*testResponseWriter
+			hijackCap
+			pushCap
+		}{base, hijackCap{calls}, pushCap{calls}}
+	case 13:
+		return struct {
+			*testResponseWriter
+			flushCap
+			hijackCap
+			pushCap
+		}{base, flushCap{calls}, hijackCap{calls}, pushCap{calls}}
+	case 14:
+		return struct {
+			*testResponseWriter
+			flushErrorOnlyCap
+			hijackCap
+			pushCap
+		}{base, flushErrorOnlyCap{calls}, hijackCap{calls}, pushCap{calls}}
+	case 15:
+		return struct {
+			*testResponseWriter
+			flushCap
+			flushErrorOnlyCap
+			hijackCap
+			pushCap
+		}{base, flushCap{calls}, flushErrorOnlyCap{calls}, hijackCap{calls}, pushCap{calls}}
+	case 16:
+		return struct {
+			*testResponseWriter
+			readerFromCap
+		}{base, readerFromCap{calls}}
+	case 17:
+		return struct {
+			*testResponseWriter
+			flushCap
+			readerFromCap
+		}{base, flushCap{calls}, readerFromCap{calls}}
+	case 18:
+		return struct {
+			*testResponseWriter
+			flushErrorOnlyCap
+			readerFromCap
+		}{base, flushErrorOnlyCap{calls}, readerFromCap{calls}}
+	case 19:
+		return struct {
+			*testResponseWriter
+			flushCap
+			flushErrorOnlyCap
+			readerFromCap
+		}{base, flushCap{calls}, flushErrorOnlyCap{calls}, readerFromCap{calls}}
+	case 20:
+		return struct {
+			*testResponseWriter
+			hijackCap
+			readerFromCap
+		}{base, hijackCap{calls}, readerFromCap{calls}}
+	case 21:
+		return struct {
+			*testResponseWriter
+			flushCap
+			hijackCap
+			readerFromCap
+		}{base, flushCap{calls}, hijackCap{calls}, readerFromCap{calls}}
+	case 22:
+		return struct {
+			*testResponseWriter
+			flushErrorOnlyCap
+			hijackCap
+			readerFromCap
+		}{base, flushErrorOnlyCap{calls}, hijackCap{calls}, readerFromCap{calls}}
+	case 23:
+		return struct {
+			*testResponseWriter
+			flushCap
+			flushErrorOnlyCap
+			hijackCap
+			readerFromCap
+		}{base, flushCap{calls}, flushErrorOnlyCap{calls}, hijackCap{calls}, readerFromCap{calls}}
+	case 24:
+		return struct {
+			*testResponseWriter
+			pushCap
+			readerFromCap
+		}{base, pushCap{calls}, readerFromCap{calls}}
+	case 25:
+		return struct {
+			*testResponseWriter
+			flushCap
+			pushCap
+			readerFromCap
+		}{base, flushCap{calls}, pushCap{calls}, readerFromCap{calls}}
+	case 26:
+		return struct {
+			*testResponseWriter
+			flushErrorOnlyCap
+			pushCap
+			readerFromCap
+		}{base, flushErrorOnlyCap{calls}, pushCap{calls}, readerFromCap{calls}}
+	case 27:
+		return struct {
+			*testResponseWriter
+			flushCap
+			flushErrorOnlyCap
+			pushCap
+			readerFromCap
+		}{base, flushCap{calls}, flushErrorOnlyCap{calls}, pushCap{calls}, readerFromCap{calls}}
+	case 28:
+		return struct {
+			*testResponseWriter
+			hijackCap
+			pushCap
+			readerFromCap
+		}{base, hijackCap{calls}, pushCap{calls}, readerFromCap{calls}}
+	case 29:
+		return struct {
+			*testResponseWriter
+			flushCap
+			hijackCap
+			pushCap
+			readerFromCap
+		}{base, flushCap{calls}, hijackCap{calls}, pushCap{calls}, readerFromCap{calls}}
+	case 30:
+		return struct {
+			*testResponseWriter
+			flushErrorOnlyCap
+			hijackCap
+			pushCap
+			readerFromCap
+		}{base, flushErrorOnlyCap{calls}, hijackCap{calls}, pushCap{calls}, readerFromCap{calls}}
+	default:
+		return struct {
+			*testResponseWriter
+			flushCap
+			flushErrorOnlyCap
+			hijackCap
+			pushCap
+			readerFromCap
+		}{base, flushCap{calls}, flushErrorOnlyCap{calls}, hijackCap{calls}, pushCap{calls}, readerFromCap{calls}}
+	}
+}
+
+func TestAll32WrapBitCombinationsAndEdgeCases(t *testing.T) {
+	for bits := 0; bits < 32; bits++ {
+		leaf := newTestResponseWriter()
+		calls := &optionalCalls{unwrapTarget: leaf}
+		orig := writerWithAll32Bits(bits, leaf, calls)
+		wrapped := (&response{ResponseWriter: orig}).wrap()
+		if wrapped == nil {
+			t.Fatalf("bits %d returned nil", bits)
+		}
+	}
+
+	// visitResponseWriters with nil
+	if got := visitResponseWriters(nil, func(http.ResponseWriter) bool { return true }); got != capabilityAbsent {
+		t.Fatalf("expected capabilityAbsent for nil, got %v", got)
+	}
+
+	// Unadmitted monitor Live and Stop, and admitted Stop with non-ErrServerClosed error
+	unadmitted := New("unadmitted")
+	unadmitted.admitted = false
+	unadmitted.Live("http://127.0.0.1:8080")
+	unadmitted.Stop(errors.New("boom"))
+	if unadmitted.Snapshot().State != "stopped" {
+		t.Fatalf("unadmitted monitor state changed: %+v", unadmitted.Snapshot())
+	}
+
+	errMon := New("err-mon")
+	errMon.Live("http://127.0.0.1:8080")
+	errMon.Stop(errors.New("unexpected listener failure"))
+	if errMon.Snapshot().State != "error" || errMon.Snapshot().Error == "" {
+		t.Fatalf("expected error state, got %+v", errMon.Snapshot())
+	}
+
+	// boundedText with control chars and truncation
+	if got := boundedText("ab\x00cd\nefghij", 5); got != "abcde" {
+		t.Fatalf("boundedText = %q", got)
+	}
+
+	// safeBaseURL edge cases: invalid port, IPv4 no port, IPv6 no port
+	if got := safeBaseURL("http://127.0.0.1:99999"); got != "local API" {
+		t.Fatalf("safeBaseURL invalid port = %q", got)
+	}
+	if got := safeBaseURL("http://127.0.0.1"); got != "http://127.0.0.1" {
+		t.Fatalf("safeBaseURL IPv4 no port = %q", got)
+	}
+	if got := safeBaseURL("http://[::1]"); got != "http://[::1]" {
+		t.Fatalf("safeBaseURL IPv6 no port = %q", got)
+	}
+
+	// safePath edge cases: nil request, empty path, pattern with invalid identifier
+	if got := safePath(nil); got != "/" {
+		t.Fatalf("safePath(nil) = %q", got)
+	}
+	emptyPathReq := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
+	emptyPathReq.URL.Path = ""
+	if got := safePath(emptyPathReq); got != "/…" {
+		t.Fatalf("safePath empty = %q", got)
+	}
+	badVarReq := httptest.NewRequest(http.MethodGet, "http://localhost/api/x", nil)
+	badVarReq.Pattern = "GET /api/{bad-name!}"
+	if got := safePath(badVarReq); got != "/api/:id" {
+		t.Fatalf("safePath bad var = %q", got)
+	}
+	tooLongVarReq := httptest.NewRequest(http.MethodGet, "http://localhost/api/x", nil)
+	tooLongVarReq.Pattern = "GET /api/{abcdefghijklmnopqrstuvwxyz}"
+	if got := safePath(tooLongVarReq); got != "/api/:id" {
+		t.Fatalf("safePath too long var = %q", got)
+	}
+
+	// Registry Snapshot with error server, multiple live servers, and > MaxRequests
+	reg := &Registry{}
+	sErr := reg.NewServer("s-err")
+	sErr.Stop(errors.New("crash"))
+	if snap := reg.Snapshot(); snap.State != "error" || snap.Error == "" {
+		t.Fatalf("expected error snapshot from registry, got %+v", snap)
+	}
+	sLive1 := reg.NewServer("s-live-1")
+	sLive1.now = func() time.Time { return time.Unix(200, 0) }
+	sLive1.Live("http://127.0.0.1:8001")
+	sLive2 := reg.NewServer("s-live-2")
+	sLive2.now = func() time.Time { return time.Unix(100, 0) }
+	sLive2.Live("http://127.0.0.1:8002")
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/api/health", nil)
+	for i := 0; i < 300; i++ {
+		st1 := sLive1.begin(req)
+		st1.complete(200, "completed")
+		st2 := sLive2.begin(req)
+		st2.complete(200, "completed")
+	}
+	regSnap := reg.Snapshot()
+	if !regSnap.Started.Equal(time.Unix(100, 0)) || len(regSnap.Requests) != MaxRequests {
+		t.Fatalf("registry aggregate snapshot = started %v, requests %d", regSnap.Started, len(regSnap.Requests))
+	}
+
+	// Render with Error, active request, and height truncation
+	viewSnap := Snapshot{
+		State:   "error",
+		BaseURL: "http://127.0.0.1:8001",
+		Error:   "Server error message",
+		Total:   2,
+		Active:  1,
+		Buckets: []Bucket{{At: time.Unix(100, 0), Count: 3}},
+		Requests: []Request{
+			{ID: 1, At: time.Unix(100, 0), Method: "GET", Path: "/api/health", Status: 0, Outcome: "active", Active: true},
+			{ID: 2, At: time.Unix(101, 0), Method: "GET", Path: "/api/health", Status: 200, Outcome: "completed", Duration: 10 * time.Millisecond},
+		},
+	}
+	rendered := Render(viewSnap, 80, 30, 0)
+	if !strings.Contains(rendered, "Server error message") || !strings.Contains(rendered, "open") {
+		t.Fatalf("Render missing error or active request: %s", rendered)
+	}
+	shortRendered := Render(viewSnap, 80, 3, 0)
+	if strings.Count(shortRendered, "\n") != 2 {
+		t.Fatalf("short Render did not truncate to height 3: %s", shortRendered)
+	}
+}

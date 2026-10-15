@@ -17,6 +17,7 @@ import (
 // open. Such a policy still loads and serves reads, but every project
 // query write is refused under it, naming the rule.
 func TestAuthorizeWrite_FolderScopedRulesFailClosed(t *testing.T) {
+	t.Parallel()
 	const header = `apiVersion: dalgo.io/access/v1
 kind: AccessPolicy
 metadata:
@@ -100,6 +101,7 @@ bindings:
 // a query. It fails closed like any other rule that cannot apply, naming
 // the rule and the segment that lands wrong.
 func TestAuthorizeWrite_NestedScopesThatCannotMatchFailClosed(t *testing.T) {
+	t.Parallel()
 	const header = `apiVersion: dalgo.io/access/v1
 kind: AccessPolicy
 metadata:
@@ -166,6 +168,7 @@ scopes:
 // trailing "/**": it trims it, so the rule matches the one query whose
 // whole id is that segment, never the queries in a folder of that name.
 func TestAuthorizeWrite_FolderDenyRefusalIsAccurate(t *testing.T) {
+	t.Parallel()
 	doc := `apiVersion: dalgo.io/access/v1
 kind: AccessPolicy
 metadata:
@@ -203,6 +206,7 @@ scopes:
 // The path shapes that do name queries are not refused: each one's deny
 // applies to reports/revenue through the rule itself.
 func TestAuthorizeWrite_QueryPathShapesThatWork(t *testing.T) {
+	t.Parallel()
 	for _, pattern := range []string{
 		"/datatug_projects/**",
 		"/datatug_projects/demo/queries",
@@ -221,6 +225,7 @@ func TestAuthorizeWrite_QueryPathShapesThatWork(t *testing.T) {
 }
 
 func TestDisplayPathAndRuleNames(t *testing.T) {
+	t.Parallel()
 	segments := []pathSegment{{value: ProjectsCollection}, {value: "demo", isID: true}, {value: ProjectQueriesCollection}, {value: "a/b", isID: true}}
 	if got := displayPath(segments, true); got != "/datatug_projects/demo/queries/a%2Fb/**" {
 		t.Errorf("displayPath = %q", got)

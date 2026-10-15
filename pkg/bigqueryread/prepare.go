@@ -19,6 +19,11 @@ func (p Preparer) Prepare(ctx context.Context) (bigquery.ReadPlan, string, error
 	return plan, fingerprint, err
 }
 
+var (
+	bigqueryCompile = bigquery.Compile
+	driverQueryHook = driverQuery
+)
+
 func (p Preparer) PrepareWithReport(ctx context.Context) (bigquery.ReadPlan, string, []accesspolicies.Line, error) {
 	q, err := p.Input.DALQuery()
 	if err != nil {
@@ -33,10 +38,10 @@ func (p Preparer) PrepareWithReport(ctx context.Context) (bigquery.ReadPlan, str
 		return bigquery.ReadPlan{}, "", nil, err
 	}
 	// A policy residual must also satisfy the released compiler, including types.
-	compiledQuery, err := driverQuery(result.Query, false)
+	compiledQuery, err := driverQueryHook(result.Query, false)
 	if err != nil {
 		return bigquery.ReadPlan{}, "", nil, err
 	}
-	plan, err := bigquery.Compile(p.Input.Profile, compiledQuery)
+	plan, err := bigqueryCompile(p.Input.Profile, compiledQuery)
 	return plan, accesspolicies.Fingerprint(o.Policies, o.Unrestricted, o.Principal), result.Lines, err
 }

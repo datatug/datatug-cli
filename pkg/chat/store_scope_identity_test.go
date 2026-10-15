@@ -11,6 +11,7 @@ import (
 // database while the name stays. The scope identity must follow the database,
 // or record sets read from the old one would open under the new one.
 func TestSessionStoreScopeFollowsWhereAnEnvSourcePoints(t *testing.T) {
+	// Not parallel: mutates environment variables.
 	ctx := context.Background()
 	path := testStorePath(t)
 	scope := ChatScope{
@@ -72,6 +73,7 @@ func TestSessionStoreScopeFollowsWhereAnEnvSourcePoints(t *testing.T) {
 }
 
 func TestSessionStoreScopeOfAnUnsetEnvSourceIsItsOwn(t *testing.T) {
+	// Not parallel: mutates environment variables.
 	path := testStorePath(t)
 	scope := ChatScope{
 		ProjectID: "shop-project", Environment: "prod", Database: "shop", AccessFingerprint: "admin-policy-v1",
@@ -93,6 +95,7 @@ func TestSessionStoreScopeOfAnUnsetEnvSourceIsItsOwn(t *testing.T) {
 // directories whose names differ after a "#", are two scopes and do not see each
 // other's stored results.
 func TestSessionStoreScopeSeparatesWhatTheDisplayFormWouldMerge(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	scopeOf := func(source string) ChatScope {
 		return ChatScope{ProjectID: "shop-project", Environment: "prod", Database: "shop", AccessFingerprint: "admin-policy-v1", Sources: map[string]string{"shop": source}}

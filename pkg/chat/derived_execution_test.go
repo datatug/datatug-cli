@@ -59,6 +59,7 @@ func derivedFixture(t *testing.T) (*SessionChat, RecordSet) {
 }
 
 func TestUnifiedWorkspaceDerivedServerScopesExecuteExactPreviewAndLineage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	sessions, parent := derivedFixture(t)
 	group := derivedOperation{Group: true, Columns: []string{"Category"}, Count: true, Scope: queryops.MatchingSource}
@@ -136,6 +137,7 @@ func TestUnifiedWorkspaceDerivedServerScopesExecuteExactPreviewAndLineage(t *tes
 }
 
 func TestUnifiedWorkspaceDerivedDialogReviewCancelAndExecuteThroughShell(t *testing.T) {
+	t.Parallel()
 	sessions, parent := derivedFixture(t)
 	u, err := NewSessionChatUI(context.Background(), sessions, "none")
 	if err != nil {

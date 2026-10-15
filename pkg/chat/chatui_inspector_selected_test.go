@@ -20,6 +20,7 @@ import (
 // wiring (Submit -> transcript grid -> FocusEntry -> workspacePanel) instead
 // of u.updateWorkspaceKey/u.workspaceTab.
 func TestChatUISelectedTabInspectsFocusedGridRowColumnRecordSet(t *testing.T) {
+	t.Parallel()
 	dtql := "from: {schema: main, name: Invoice}\ncolumns: [{field: InvoiceId}]\nlimit: 5\n"
 	turn := Turn{Queries: []QueryResult{{
 		Title:       "Invoices",
@@ -92,6 +93,7 @@ func TestChatUISelectedTabInspectsFocusedGridRowColumnRecordSet(t *testing.T) {
 // TestChatUISelectedTabColumnDetailsWithoutFocusedGrid is the empty-state
 // half of currentColumnDetails, ui.go's "Focus a result grid..." message.
 func TestChatUISelectedTabColumnDetailsWithoutFocusedGrid(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.tab = 1
 	u.workspace.inspectorSubTab = 1
@@ -104,6 +106,7 @@ func TestChatUISelectedTabColumnDetailsWithoutFocusedGrid(t *testing.T) {
 // TestChatUISelectedTabRecordSetDetailsWithoutFocusedGrid is the empty-state
 // half of currentRecordsetDetails.
 func TestChatUISelectedTabRecordSetDetailsWithoutFocusedGrid(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.tab = 1
 	u.workspace.inspectorSubTab = 2
@@ -117,6 +120,7 @@ func TestChatUISelectedTabRecordSetDetailsWithoutFocusedGrid(t *testing.T) {
 // u.inspectorOffset up/down handling (updateWorkspaceKey's "up"/"down"
 // case 1), ported onto workspacePanel.inspectorOffset.
 func TestChatUISelectedTabUpDownScrollsInspectorOffset(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.tab = 1
 	u.workspace.inspectorOffset = 3
@@ -134,6 +138,7 @@ func TestChatUISelectedTabUpDownScrollsInspectorOffset(t *testing.T) {
 // currentRowDetails' fallback when no grid is focused (or its cursor is out
 // of range): ui.go returned u.selectedDetails instead.
 func TestChatUISelectedTabRowDetailsFallsBackToSelectedDetails(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.workspace.tab = 1
 	view := u.workspace.View(80, 20, true)

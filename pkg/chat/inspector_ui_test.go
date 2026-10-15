@@ -35,6 +35,7 @@ func columnMetaForTestCatalog() ProjectCatalog {
 // (e.g. currentRecordsetDetails without a focused RecordSet's DTQL parsed):
 // every table/project_view object is scanned directly by column name.
 func TestColumnMetaForNilRecordScansWholeCatalog(t *testing.T) {
+	t.Parallel()
 	catalog := ProjectCatalog{Objects: []ProjectObject{
 		{Reference: ContextReference{Kind: "table", ObjectID: "main.invoice"}, Columns: []string{"InvoiceId"}, ColumnTypes: map[string]string{"InvoiceId": "INTEGER"}},
 	}}
@@ -45,6 +46,7 @@ func TestColumnMetaForNilRecordScansWholeCatalog(t *testing.T) {
 }
 
 func TestColumnMetaForEmptyDTQLReturnsEmptyMeta(t *testing.T) {
+	t.Parallel()
 	record := &RecordSet{DTQL: ""}
 	meta := columnMetaFor(columnMetaForTestCatalog(), record, "InvoiceId")
 	if !metaIsZero(meta) {
@@ -53,6 +55,7 @@ func TestColumnMetaForEmptyDTQLReturnsEmptyMeta(t *testing.T) {
 }
 
 func TestColumnMetaForInvalidDTQLReturnsEmptyMeta(t *testing.T) {
+	t.Parallel()
 	record := &RecordSet{DTQL: "not: [valid, dtql"}
 	meta := columnMetaFor(columnMetaForTestCatalog(), record, "InvoiceId")
 	if !metaIsZero(meta) {
@@ -61,6 +64,7 @@ func TestColumnMetaForInvalidDTQLReturnsEmptyMeta(t *testing.T) {
 }
 
 func TestColumnMetaForWildcardExcludedColumnIsUnattributed(t *testing.T) {
+	t.Parallel()
 	record := &RecordSet{DTQL: "from: {name: Invoice}\ncolumns:\n  - wildcard: {exclude: [InvoiceId]}\n"}
 	meta := columnMetaFor(columnMetaForTestCatalog(), record, "InvoiceId")
 	if !metaIsZero(meta) {
@@ -82,6 +86,7 @@ func TestColumnMetaForWildcardExcludedColumnIsUnattributed(t *testing.T) {
 // query's own output alias) is matched against the catalog by its short
 // (unqualified) column name.
 func TestColumnMetaForNameWithSchemaPrefixUsesShortNameForCatalogLookup(t *testing.T) {
+	t.Parallel()
 	catalog := ProjectCatalog{Objects: []ProjectObject{
 		{Reference: ContextReference{Kind: "table", ObjectID: "main.invoice"}, Columns: []string{"InvoiceId"}, ColumnTypes: map[string]string{"InvoiceId": "INTEGER"}},
 	}}
@@ -97,6 +102,7 @@ func TestColumnMetaForNameWithSchemaPrefixUsesShortNameForCatalogLookup(t *testi
 // queried column) must be skipped even though record.Database doesn't rule
 // it out on its own.
 func TestColumnMetaForNonMatchingRelationCatalogObjectIsSkipped(t *testing.T) {
+	t.Parallel()
 	catalog := ProjectCatalog{Objects: []ProjectObject{
 		{Reference: ContextReference{Kind: "table", ObjectID: "main.invoice"}, Columns: []string{"InvoiceId"}, ColumnTypes: map[string]string{"InvoiceId": "INTEGER"}},
 		{Reference: ContextReference{Kind: "table", ObjectID: "main.other"}, Columns: []string{"InvoiceId"}, ColumnTypes: map[string]string{"InvoiceId": "TEXT"}},
@@ -109,6 +115,7 @@ func TestColumnMetaForNonMatchingRelationCatalogObjectIsSkipped(t *testing.T) {
 }
 
 func TestColumnMetaForWildcardResolvesCatalogColumn(t *testing.T) {
+	t.Parallel()
 	record := &RecordSet{DTQL: "from: {name: invoice}\ncolumns:\n  - wildcard: {source: invoice, exclude: [Nonexistent]}\n", Database: "db1"}
 	meta := columnMetaFor(columnMetaForTestCatalog(), record, "InvoiceId")
 	if meta.qualified != "main.invoice.InvoiceId" || meta.dbType != "INTEGER" {
@@ -117,6 +124,7 @@ func TestColumnMetaForWildcardResolvesCatalogColumn(t *testing.T) {
 }
 
 func TestColumnMetaForDerivedValueSameNameIsUnattributed(t *testing.T) {
+	t.Parallel()
 	// A non-FieldRef projection (an aggregate) aliased to the exact queried
 	// name is a derived value: columnMetaFor must not attribute it to a
 	// same-named physical column.
@@ -128,6 +136,7 @@ func TestColumnMetaForDerivedValueSameNameIsUnattributed(t *testing.T) {
 }
 
 func TestColumnMetaForNoColumnMatchesNameIsUnattributed(t *testing.T) {
+	t.Parallel()
 	record := &RecordSet{DTQL: "from: {name: Invoice}\ncolumns: [{field: CustomerId}]\nlimit: 5\n"}
 	meta := columnMetaFor(columnMetaForTestCatalog(), record, "InvoiceId")
 	if !metaIsZero(meta) {
@@ -136,6 +145,7 @@ func TestColumnMetaForNoColumnMatchesNameIsUnattributed(t *testing.T) {
 }
 
 func TestColumnMetaForDuplicateOutputNamesIsUnattributed(t *testing.T) {
+	t.Parallel()
 	// Two FieldRef projections both aliased to "X": columnMetaFor must
 	// refuse to attribute rather than guess.
 	record := &RecordSet{DTQL: "from: {name: Invoice}\ncolumns:\n  - field: InvoiceId\n    as: X\n  - field: CustomerId\n    as: X\nlimit: 5\n"}
@@ -151,6 +161,7 @@ func TestColumnMetaForDuplicateOutputNamesIsUnattributed(t *testing.T) {
 // them) but live under different sources -- only record.Database narrows
 // it to one.
 func TestColumnMetaForRecordDatabaseFiltersCatalogObjects(t *testing.T) {
+	t.Parallel()
 	catalog := ProjectCatalog{Objects: []ProjectObject{
 		{Reference: ContextReference{Kind: "table", ObjectID: "main.invoice", SourceID: "db1"}, Columns: []string{"InvoiceId"}, ColumnTypes: map[string]string{"InvoiceId": "INTEGER"}},
 		{Reference: ContextReference{Kind: "table", ObjectID: "main.invoice", SourceID: "db2"}, Columns: []string{"InvoiceId"}, ColumnTypes: map[string]string{"InvoiceId": "TEXT"}},
@@ -170,6 +181,7 @@ func TestColumnMetaForRecordDatabaseFiltersCatalogObjects(t *testing.T) {
 // TestColumnMetaForDerivedValueSameNameIsUnattributed's projection.Alias ==
 // name case just above.
 func TestColumnMetaForNonFieldProjectionWithDifferentAliasIsSkipped(t *testing.T) {
+	t.Parallel()
 	record := &RecordSet{DTQL: "from: {name: Invoice}\ncolumns:\n  - as: Total\n    binary: {op: '+', left: {field: InvoiceId}, right: {value: 1}}\n  - field: InvoiceId\nlimit: 5\n"}
 	meta := columnMetaFor(columnMetaForTestCatalog(), record, "InvoiceId")
 	if meta.qualified != "main.invoice.InvoiceId" || meta.dbType != "INTEGER" {
@@ -183,6 +195,7 @@ func TestColumnMetaForNonFieldProjectionWithDifferentAliasIsSkipped(t *testing.T
 // explicit source names no real FROM relation leaves matched true but
 // sourceRelations empty.
 func TestColumnMetaForFieldSourceResolvesToNoRelationIsUnattributed(t *testing.T) {
+	t.Parallel()
 	record := &RecordSet{DTQL: "from: {name: Invoice}\ncolumns:\n  - field: CustomerId\n    source: doesnotexist\n    as: InvoiceId\nlimit: 5\n"}
 	meta := columnMetaFor(columnMetaForTestCatalog(), record, "InvoiceId")
 	if !metaIsZero(meta) {
@@ -207,6 +220,7 @@ func TestColumnMetaForFieldSourceResolvesToNoRelationIsUnattributed(t *testing.T
 // "ambiguous source" instead of leaving the column unattributed, which is
 // main's real behavior for a joined query with no explicit column list.
 func TestColumnMetaForUnqualifiedFieldInJoinedQueryIsUnattributed(t *testing.T) {
+	t.Parallel()
 	catalog := ProjectCatalog{Objects: []ProjectObject{
 		{Reference: ContextReference{Kind: "table", ObjectID: "main.invoice"}, Columns: []string{"InvoiceId", "CustomerId"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER"}},
 		{Reference: ContextReference{Kind: "table", ObjectID: "main.customer"}, Columns: []string{"CustomerId", "FirstName"}, ColumnTypes: map[string]string{"CustomerId": "INTEGER"}},
@@ -219,6 +233,7 @@ func TestColumnMetaForUnqualifiedFieldInJoinedQueryIsUnattributed(t *testing.T) 
 }
 
 func TestColumnMetaForAmbiguousMultipleMatchesReportsAmbiguousSource(t *testing.T) {
+	t.Parallel()
 	// Both "main.invoice" and "second.invoice" carry an InvoiceId column;
 	// a nil record (no DTQL-derived sourceRelations filter) scans the whole
 	// catalog and must find both.

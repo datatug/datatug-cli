@@ -23,6 +23,7 @@ import (
 )
 
 func TestFinalStretch_SessionChatDeleteOnlySessionCreateFail(t *testing.T) {
+	// Not parallel: mutates package-level execContextFn seam.
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 
@@ -42,6 +43,7 @@ func TestFinalStretch_SessionChatDeleteOnlySessionCreateFail(t *testing.T) {
 }
 
 func TestFinalStretch_HTTPSettingsErrors(t *testing.T) {
+	// Not parallel: mutates package-level osOpenFile seam.
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -78,6 +80,7 @@ func TestFinalStretch_HTTPSettingsErrors(t *testing.T) {
 }
 
 func TestFinalStretch_HTTPStoreErrors(t *testing.T) {
+	// Not parallel: mutates package-level store transaction seams.
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sess, err := store.Create(ctx, "HTTP Store Session")
@@ -147,6 +150,7 @@ func TestFinalStretch_HTTPStoreErrors(t *testing.T) {
 }
 
 func TestFinalStretch_BridgeEndpoints(t *testing.T) {
+	// Not parallel: mutates package-level dbQueryContextFn and maxBrowserExportBytes seams.
 	ctx := context.Background()
 	chat, _ := newTestSessionChat(t)
 	bridge, err := StartBrowserBridge(chat)
@@ -292,6 +296,7 @@ func (f *failingSavedQueryService) RunDTQLWithVariables(ctx context.Context, id 
 }
 
 func TestFinalStretch_ExportErrors(t *testing.T) {
+	// Not parallel: mutates package-level file and SQLite export seams.
 	ctx := context.Background()
 
 	rs := RecordSet{
@@ -464,6 +469,7 @@ func TestFinalStretch_ExportErrors(t *testing.T) {
 }
 
 func TestFinalStretch_BookmarkAndJoin(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	_, err := store.Create(ctx, "Bookmark Session")

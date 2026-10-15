@@ -9,6 +9,7 @@ import (
 )
 
 func TestCompileWhereForTable_SingleCondition(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Name: "Customer",
 		Fields: []dbschema.FieldDef{
@@ -36,6 +37,7 @@ func TestCompileWhereForTable_SingleCondition(t *testing.T) {
 
 // TestCompileWhereForTable_NilAndEmpty covers the early-return on line 20.
 func TestCompileWhereForTable_NilAndEmpty(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{Name: "T", Fields: []dbschema.FieldDef{{Name: "f", Type: dbschema.String}}}
 	t.Run("nil group returns nil", func(t *testing.T) {
 		conds, err := CompileWhereForTable("T", nil, def)
@@ -53,6 +55,7 @@ func TestCompileWhereForTable_NilAndEmpty(t *testing.T) {
 
 // TestCompileWhereForTable_ValidateError covers the validate-failure branch (line 26-28).
 func TestCompileWhereForTable_ValidateError(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Name:   "T",
 		Fields: []dbschema.FieldDef{{Name: "age", Type: dbschema.Int}},
@@ -70,6 +73,7 @@ func TestCompileWhereForTable_ValidateError(t *testing.T) {
 // ValidateWhereAgainstSchema only checks field existence and value coercion, not the operator,
 // so an invalid operator token passes validation but fails ParseOperator.
 func TestCompileWhereForTable_ParseOperatorError(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Name:   "T",
 		Fields: []dbschema.FieldDef{{Name: "name", Type: dbschema.String}},
@@ -83,6 +87,7 @@ func TestCompileWhereForTable_ParseOperatorError(t *testing.T) {
 	}
 }
 
+// Not parallel: mutates package-level coerceValueSeam.
 // TestCompileWhereForTable_CoercionError covers the coerce-failure branch (line 37-39).
 func TestCompileWhereForTable_CoercionError(t *testing.T) {
 	def := &dbschema.CollectionDef{
@@ -104,6 +109,7 @@ func TestCompileWhereForTable_CoercionError(t *testing.T) {
 }
 
 func TestCompileWhereForTable_AndComposition(t *testing.T) {
+	t.Parallel()
 	def := &dbschema.CollectionDef{
 		Name: "Customer",
 		Fields: []dbschema.FieldDef{

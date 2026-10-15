@@ -13,6 +13,7 @@ import (
 )
 
 func TestChatUISlashExportNoArgsOpensDialog(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/export"))
 	view := u.shell.View().Content
@@ -22,6 +23,7 @@ func TestChatUISlashExportNoArgsOpensDialog(t *testing.T) {
 }
 
 func TestExportDialogOverlayEscCloses(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	_, _, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -31,6 +33,7 @@ func TestExportDialogOverlayEscCloses(t *testing.T) {
 }
 
 func TestExportDialogOverlayWritesCurrentRecordSet(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	// exportCommand only reads ChatUI's own bookkeeping (lastGridRecordSetID,
 	// snapshot.RecordSets), set directly here rather than round-tripping
@@ -72,6 +75,7 @@ func TestExportDialogOverlayWritesCurrentRecordSet(t *testing.T) {
 // (TestExportDialogValidationAndCancel): an unsafe file name is rejected in
 // place, and Esc still closes the (still-open) dialog.
 func TestExportDialogOverlayValidationAndCancel(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	d.focus = 5
@@ -90,6 +94,7 @@ func TestExportDialogOverlayValidationAndCancel(t *testing.T) {
 // Ported from the legacy UI's export_dialog_test.go
 // (TestExportDialogDirectoryPicker).
 func TestExportDialogOverlayDirectoryPicker(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	d.dir.SetValue(t.TempDir())
@@ -113,6 +118,7 @@ func TestExportDialogOverlayDirectoryPicker(t *testing.T) {
 // default filename — newExportDialogOverlay reads RecordSet.Title, not the
 // grid's badge-decorated Title().
 func TestExportDialogOverlayDefaultNameExcludesVersionBadge(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.lastGridRecordSetID = "record-1"
 	u.snapshot.RecordSets = map[string]RecordSet{"record-1": exportFixture("Invoices")}
@@ -130,6 +136,7 @@ func TestExportDialogOverlayDefaultNameExcludesVersionBadge(t *testing.T) {
 // TestExportDialogOverlayDefaultsToBucketScopeWhenNoGridFocused covers
 // newExportDialogOverlay's ExportBucket-default-name branch.
 func TestExportDialogOverlayDefaultsToBucketScopeWhenNoGridFocused(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.snapshot.Workspace.ExportBucket = []string{"rs1"}
 	d := newExportDialogOverlay(u)
@@ -142,6 +149,7 @@ func TestExportDialogOverlayDefaultsToBucketScopeWhenNoGridFocused(t *testing.T)
 // Tab/Shift+Tab's focus cycling (including wraparound) and focusInput's
 // dir/name Focus() calls.
 func TestExportDialogOverlayTabCyclesFocusAndFocusesTextInputs(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	next, _, done := d.Update(tea.KeyPressMsg{Code: tea.KeyTab})
@@ -163,6 +171,7 @@ func TestExportDialogOverlayTabCyclesFocusAndFocusesTextInputs(t *testing.T) {
 // TestExportDialogOverlayCtrlCQuits covers the Ctrl+C branches in both the
 // normal and directory-picker Update paths.
 func TestExportDialogOverlayCtrlCQuits(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	_, cmd, done := d.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
@@ -186,6 +195,7 @@ func TestExportDialogOverlayCtrlCQuits(t *testing.T) {
 // TestExportDialogOverlayLeftRightCycleScopeAndFormat covers left/right on
 // the scope (focus 0) and format (focus 1) fields, including wraparound.
 func TestExportDialogOverlayLeftRightCycleScopeAndFormat(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	d.focus = 0
@@ -215,6 +225,7 @@ func TestExportDialogOverlayLeftRightCycleScopeAndFormat(t *testing.T) {
 // case 0/1/2/3 focus-advance branch (distinct from the format/dir/name
 // typing paths).
 func TestExportDialogOverlayEnterStepsThroughLeadingFields(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	for want := 1; want <= 3; want++ {
@@ -230,6 +241,7 @@ func TestExportDialogOverlayEnterStepsThroughLeadingFields(t *testing.T) {
 // validation branches: an empty file name, a directory that fails to
 // stat/isn't a directory, and an empty directory value.
 func TestExportDialogOverlaySaveValidationErrors(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 
 	d := newExportDialogOverlay(u)
@@ -269,6 +281,7 @@ func TestExportDialogOverlaySaveValidationErrors(t *testing.T) {
 // textinput.Update passthrough (focus 2/3, not matched by any of the
 // special-cased keys above).
 func TestExportDialogOverlayTextInputsAcceptTyping(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	d.focus = 2
@@ -292,6 +305,7 @@ func TestExportDialogOverlayTextInputsAcceptTyping(t *testing.T) {
 // os.Stat/IsDir guard inside the picker's Update case): it must not close
 // the picker or change d.dir.
 func TestExportDialogOverlayPickerEnterOnFileDoesNotSelect(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	dir := t.TempDir()
 	file := filepath.Join(dir, "not-a-dir.txt")
@@ -320,6 +334,7 @@ func TestExportDialogOverlayPickerEnterOnFileDoesNotSelect(t *testing.T) {
 // Esc branch (distinct from the outer dialog's Esc, which closes the whole
 // overlay).
 func TestExportDialogOverlayPickerEscCloses(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	d.dir.SetValue(t.TempDir())
@@ -339,6 +354,7 @@ func TestExportDialogOverlayPickerEscCloses(t *testing.T) {
 // TestExportDialogOverlayViewRendersPickerAndError covers View's picker and
 // error-message rendering branches.
 func TestExportDialogOverlayViewRendersPickerAndError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	d.err = "boom"
@@ -360,6 +376,7 @@ func TestExportDialogOverlayViewRendersPickerAndError(t *testing.T) {
 // positive Enter branch: Path pointing at an existing directory selects it
 // and closes the picker, unlike the file-Path case above.
 func TestExportDialogOverlayPickerEnterOnDirectorySelectsIt(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "sub")
@@ -386,6 +403,7 @@ func TestExportDialogOverlayPickerEnterOnDirectorySelectsIt(t *testing.T) {
 // TestExportDialogOverlayUpdateIgnoresNonKeyMsg covers Update's early
 // non-key-message return.
 func TestExportDialogOverlayUpdateIgnoresNonKeyMsg(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	next, cmd, done := d.Update(tea.WindowSizeMsg{})
@@ -399,6 +417,7 @@ func TestExportDialogOverlayUpdateIgnoresNonKeyMsg(t *testing.T) {
 // (Scope, here) is a no-op rather than falling through to the dir/name
 // text-input Update.
 func TestExportDialogOverlayUnhandledKeyAtLeadingFocusIsNoop(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	d.focus = 0
@@ -411,6 +430,7 @@ func TestExportDialogOverlayUnhandledKeyAtLeadingFocusIsNoop(t *testing.T) {
 // TestExportDialogOverlayBucketScopeSubmit covers the bucket-scope branch of
 // the Export step (scope defaults to the "current" keyword otherwise).
 func TestExportDialogOverlayBucketScopeSubmit(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.snapshot.RecordSets = map[string]RecordSet{"rs1": exportFixture("Invoices")}
 	u.snapshot.Workspace.ExportBucket = []string{"rs1"}
@@ -433,6 +453,7 @@ func TestExportDialogOverlayBucketScopeSubmit(t *testing.T) {
 // exportCommand-returned-error branch: "current" scope with no focused
 // RecordSet fails synchronously, before any write command runs.
 func TestExportDialogOverlayExportCommandErrorSetsMessage(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newExportDialogOverlay(u)
 	d.dir.SetValue(t.TempDir())
@@ -450,6 +471,7 @@ func TestExportDialogOverlayExportCommandErrorSetsMessage(t *testing.T) {
 // newExportDialogOverlay's os.Getwd error fallback via the exportDialogGetwd
 // seam.
 func TestNewExportDialogOverlayFallsBackToDotWhenGetwdFails(t *testing.T) {
+	// Not parallel: mutates package-level exportDialogGetwd seam.
 	original := exportDialogGetwd
 	exportDialogGetwd = func() (string, error) { return "", errors.New("getwd unavailable") }
 	defer func() { exportDialogGetwd = original }()

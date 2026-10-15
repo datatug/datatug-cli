@@ -35,6 +35,7 @@ func (f *fakeExecutor) RunDTQL(_ context.Context, source string, doc []byte, par
 }
 
 func TestRunDTQLBindsAttachedSelectionLocally(t *testing.T) {
+	t.Parallel()
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"InvoiceId"}}}
 	conversation := &AIConversation{sources: map[string]string{"chinook-local": "sqlite:///chinook.db"}}
 	ctx := withSelectionParameters(context.Background(), func() map[string]any {
@@ -61,6 +62,7 @@ func TestRunDTQLBindsAttachedSelectionLocally(t *testing.T) {
 }
 
 func TestRunDTQLReturnsPersistedRecordSetReference(t *testing.T) {
+	t.Parallel()
 	executor := &fakeExecutor{result: secureread.Result{Columns: []string{"CustomerId"}}}
 	conversation := &AIConversation{}
 	ctx := withQueryObserver(context.Background(), func(query QueryResult) (QueryResult, error) {
@@ -74,6 +76,7 @@ func TestRunDTQLReturnsPersistedRecordSetReference(t *testing.T) {
 }
 
 func TestJoinedQueryDoesNotReportSuccessWhenPersistenceFails(t *testing.T) {
+	t.Parallel()
 	conversation := &AIConversation{}
 	ctx := withAttachedJoin(context.Background(), func(_ context.Context, base QueryResult) (QueryResult, bool, error) {
 		base.DTQL = "from: {name: Invoice, joins: [{from: {name: Customer}, type: LEFT, on: [{left: {field: CustomerId, source: Invoice}, op: '==', right: {field: CustomerId, source: Customer}}]}]}\nlimit: 5"
@@ -88,6 +91,7 @@ func TestJoinedQueryDoesNotReportSuccessWhenPersistenceFails(t *testing.T) {
 }
 
 func TestRunDTQLRefusesModelAuthoredJoin(t *testing.T) {
+	t.Parallel()
 	executor := &fakeExecutor{}
 	conversation := &AIConversation{}
 	doc := `from:
@@ -105,6 +109,7 @@ limit: 5
 }
 
 func TestAgentJoinToolUsesSameApplicationOperation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -173,6 +178,7 @@ func TestAgentJoinToolUsesSameApplicationOperation(t *testing.T) {
 }
 
 func TestAgentJoinTargetAmbiguityCannotBeGuessed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	defer func() { _ = store.Close() }()
@@ -235,6 +241,7 @@ func TestAgentJoinTargetAmbiguityCannotBeGuessed(t *testing.T) {
 }
 
 func TestQueryToolDoesNotReturnLocallyBoundValuesInErrors(t *testing.T) {
+	t.Parallel()
 	const secret = "Paris-private-selected-value"
 	conversation := &AIConversation{}
 	executor := &fakeExecutor{err: errors.New("driver rejected parameter " + secret)}
@@ -249,6 +256,7 @@ func TestQueryToolDoesNotReturnLocallyBoundValuesInErrors(t *testing.T) {
 }
 
 func TestAgentWorkspaceToolUsesSameApplicationAction(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -308,6 +316,7 @@ type scriptedProvider struct {
 // Customer, attached over Invoice via a many-to-one FK) is transparently
 // widened into one joined RecordSet instead of executing the base query.
 func TestAgentQueryAutomaticallyJoinsAttachedCustomerIntoOneRecordSet(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	catalog := workspaceTestCatalog()
@@ -348,6 +357,7 @@ func TestAgentQueryAutomaticallyJoinsAttachedCustomerIntoOneRecordSet(t *testing
 // retry with the nudge prompt before the loop gives up, and that retry
 // succeeds into a structured run_dtql query.
 func TestAgentRetriesEmptyModelTurnBeforeGivingUpOnQuery(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{},
 		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{
@@ -438,6 +448,7 @@ func mustJSON(v any) []byte {
 }
 
 func TestAIConversation_PreservesToolResultWhenFinalModelCallFails(t *testing.T) {
+	t.Parallel()
 	doc := "from: {name: Customer}\nlimit: 1\n"
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": doc})}, usage: &ai.Usage{InputTokens: 10, OutputTokens: 5}},
@@ -465,6 +476,7 @@ func TestAIConversation_PreservesToolResultWhenFinalModelCallFails(t *testing.T)
 }
 
 func TestAIConversation_AggregatesMixedUsageTotals(t *testing.T) {
+	t.Parallel()
 	doc := "from: {name: Customer}\nlimit: 1\n"
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": doc})}, usage: &ai.Usage{InputTokens: 10, OutputTokens: 5}},
@@ -484,6 +496,7 @@ func TestAIConversation_AggregatesMixedUsageTotals(t *testing.T) {
 }
 
 func TestAIConversation_BoundsRepeatedToolCalls(t *testing.T) {
+	t.Parallel()
 	doc := "from: {name: Customer}\nlimit: 1\n"
 	step := func(id string) scriptedStep {
 		return scriptedStep{toolCalls: []ai.ToolCall{toolCall(id, toolRunDTQL, map[string]any{"dtql": doc})}}
@@ -510,6 +523,7 @@ func TestAIConversation_BoundsRepeatedToolCalls(t *testing.T) {
 }
 
 func TestAIConversation_AppliesThinkingLevelToRequests(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{{text: "Unsupported."}}}
 	conversation, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///fixture.db", "- Customer", WithThinkingLevel("low"))
 	if err != nil {
@@ -527,6 +541,7 @@ func TestAIConversation_AppliesThinkingLevelToRequests(t *testing.T) {
 }
 
 func TestAIConversation_AppliesHostedModelToEveryRequest(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{{text: "first"}, {text: "second"}}}
 	conversation, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///fixture.db", "- Customer", WithHostedModel("opaque-hosted-model"))
 	if err != nil {
@@ -543,6 +558,7 @@ func TestAIConversation_AppliesHostedModelToEveryRequest(t *testing.T) {
 }
 
 func TestAIConversationRebuildsEachTurnFromExplicitContext(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{{text: "First answer"}, {text: "Second answer"}}}
 	conversation, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///fixture.db", "- Customer")
 	if err != nil {
@@ -567,6 +583,7 @@ func TestAIConversationRebuildsEachTurnFromExplicitContext(t *testing.T) {
 }
 
 func TestAIConversation_ModelToolResponseRunsDTQL(t *testing.T) {
+	t.Parallel()
 	doc := "from:\n  name: Customer\nlimit: 2\n"
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"title": "Customers", "dtql": doc})}},
@@ -599,6 +616,7 @@ func TestAIConversation_ModelToolResponseRunsDTQL(t *testing.T) {
 }
 
 func TestAIConversation_ReturnsPlainText(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{text: "That request needs a join, which this PoC does not support."},
 	}}
@@ -627,6 +645,7 @@ func TestAIConversation_ReturnsPlainText(t *testing.T) {
 // so the turn's assembled text must still come out with the reasoning
 // removed and only the real answer left.
 func TestAIConversation_TextResponseFiltersThinkTags(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{text: "<think>internal reasoning about the join</think>That request needs a join, which this PoC does not support."},
 	}}
@@ -655,6 +674,7 @@ func TestAIConversation_TextResponseFiltersThinkTags(t *testing.T) {
 // "<think>"/"</think>" tag text itself mid-tag, which a naive
 // per-delta regexp/strings.Contains check would miss.
 func TestThinkTagStreamFilterHidesReasoningAcrossChunkBoundaries(t *testing.T) {
+	t.Parallel()
 	t.Run("whole block in one delta", func(t *testing.T) {
 		var f thinkTagStreamFilter
 		got := f.Filter("Before <think>secret</think> after")
@@ -701,6 +721,7 @@ func TestThinkTagStreamFilterHidesReasoningAcrossChunkBoundaries(t *testing.T) {
 }
 
 func TestRunDTQLTool_EmptyAndExecutionErrorsStayStructured(t *testing.T) {
+	t.Parallel()
 	conversation := &AIConversation{}
 	executor := &fakeExecutor{err: errors.New("column foo does not exist")}
 
@@ -726,6 +747,7 @@ func TestRunDTQLTool_EmptyAndExecutionErrorsStayStructured(t *testing.T) {
 }
 
 func TestRunDTQLTool_RealValidationExecutionAndEmptyResult(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "chat.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -812,6 +834,7 @@ columns:
 }
 
 func TestNewAIConversationRejectsMissingDependencies(t *testing.T) {
+	t.Parallel()
 	executor := &fakeExecutor{}
 	if _, err := NewAIConversation(nil, executor, "sqlite:///x", "schema"); err == nil {
 		t.Fatal("expected missing model error")
@@ -825,6 +848,7 @@ func TestNewAIConversationRejectsMissingDependencies(t *testing.T) {
 }
 
 func TestFinalQueriesHidesCorrectedFailures(t *testing.T) {
+	t.Parallel()
 	failure := QueryResult{Err: errors.New("bad table")}
 	success := QueryResult{Result: secureread.Result{Columns: []string{"id"}}}
 	got := finalQueries([]QueryResult{failure, success})
@@ -845,6 +869,7 @@ func TestFinalQueriesHidesCorrectedFailures(t *testing.T) {
 // non-nil-receiver branch (the nil-receiver -> nil result branch is already
 // covered by every streaming test whose turn carries no usage).
 func TestTokenUsageToAIRoundTripsNonNilReceiver(t *testing.T) {
+	t.Parallel()
 	usage := &TokenUsage{InputTokens: 12, OutputTokens: 34}
 	got := usage.toAI()
 	if got == nil || got.InputTokens != 12 || got.OutputTokens != 34 {
@@ -860,6 +885,7 @@ func TestTokenUsageToAIRoundTripsNonNilReceiver(t *testing.T) {
 // tokenUsageFrom(nil)==nil short-circuit (a partial ai.EventUsage that
 // carries no Usage payload must not clobber an existing running total).
 func TestAddTokenUsageIgnoresNilEventUsage(t *testing.T) {
+	t.Parallel()
 	dst := &TokenUsage{InputTokens: 5}
 	if got := addTokenUsage(dst, nil, "openai"); got != dst {
 		t.Fatalf("addTokenUsage(dst, nil, ...) = %+v, want the original dst unchanged", got)
@@ -870,6 +896,7 @@ func TestAddTokenUsageIgnoresNilEventUsage(t *testing.T) {
 // own json.Unmarshal error branch directly (a model that emits an
 // arguments payload the schema didn't produce).
 func TestAgentHandlersRejectMalformedToolArguments(t *testing.T) {
+	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
@@ -893,6 +920,7 @@ func TestAgentHandlersRejectMalformedToolArguments(t *testing.T) {
 // real code paths always return a nil error, so this branch is exercised
 // through the runDTQLOverride test seam instead.
 func TestAgentRunDTQLHandlerInfrastructureErrorReported(t *testing.T) {
+	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
@@ -916,6 +944,7 @@ func TestAgentRunDTQLHandlerInfrastructureErrorReported(t *testing.T) {
 // bookmarkFinderKey guard and the finder-returned-error branch -- distinct
 // from the malformed-arguments case above.
 func TestAgentFindBookmarksHandlerWithoutFinderInContext(t *testing.T) {
+	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
@@ -931,6 +960,7 @@ func TestAgentFindBookmarksHandlerWithoutFinderInContext(t *testing.T) {
 }
 
 func TestAgentFindBookmarksHandlerFinderError(t *testing.T) {
+	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
@@ -953,6 +983,7 @@ func TestAgentFindBookmarksHandlerFinderError(t *testing.T) {
 // of this package's own tool-response structs but defensive against a
 // future one).
 func TestJSONResultEncodeErrorReturnsErrorToolResult(t *testing.T) {
+	t.Parallel()
 	result := jsonResult("1", make(chan int))
 	if !result.IsError || !strings.Contains(result.Content, "encode tool result") {
 		t.Fatalf("result = %+v, want an encode error", result)
@@ -962,6 +993,7 @@ func TestJSONResultEncodeErrorReturnsErrorToolResult(t *testing.T) {
 // TestRunDTQLSourceUnavailablePrefix covers runDTQL's own "unavailable://"
 // sourceURL guard directly.
 func TestRunDTQLSourceUnavailablePrefix(t *testing.T) {
+	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
@@ -979,6 +1011,7 @@ func TestRunDTQLSourceUnavailablePrefix(t *testing.T) {
 // branch's own joinErr path -- TestAgentQueryAutomaticallyJoinsAttachedCustomerIntoOneRecordSet
 // only exercises the "applied" success path.
 func TestRunDTQLAttachedJoinObserverError(t *testing.T) {
+	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
@@ -999,6 +1032,7 @@ func TestRunDTQLAttachedJoinObserverError(t *testing.T) {
 // branches directly: missing RecordSetID/CandidateID, no join observer in
 // context, and the actionCalls>3 rate limit.
 func TestRunJoinCandidateGuardBranches(t *testing.T) {
+	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
@@ -1035,6 +1069,7 @@ func TestRunJoinCandidateGuardBranches(t *testing.T) {
 // TestPublicJoinError covers every publicJoinError message-classification
 // branch directly, plus the nil-error short-circuit.
 func TestPublicJoinError(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		err  error
 		want string
@@ -1071,6 +1106,7 @@ func TestPublicJoinError(t *testing.T) {
 // runDTQL always validates first), an alias node, and a param reference
 // nested inside a sequence.
 func TestReferencedSelectionParameters(t *testing.T) {
+	t.Parallel()
 	if got := referencedSelectionParameters("from: {name: Invoice}\nlimit: 5\n", nil); got != nil {
 		t.Fatalf("no available selections: got %v, want nil", got)
 	}
@@ -1094,6 +1130,7 @@ func TestReferencedSelectionParameters(t *testing.T) {
 // TestRunWorkspaceActionObserverError covers runWorkspaceAction's own
 // observer-returned-error branch.
 func TestRunWorkspaceActionObserverError(t *testing.T) {
+	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
@@ -1112,6 +1149,7 @@ func TestRunWorkspaceActionObserverError(t *testing.T) {
 // actionCalls>3 rate limit (TestAgentWorkspaceToolUsesSameApplicationAction
 // only exercises the happy path).
 func TestRunWorkspaceActionGuardBranches(t *testing.T) {
+	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
@@ -1145,6 +1183,7 @@ func TestRunWorkspaceActionGuardBranches(t *testing.T) {
 // only exercises "select", and none of the others go through the real
 // application observer in any other test.
 func TestRunWorkspaceActionSummaryPerKind(t *testing.T) {
+	t.Parallel()
 	for kind, want := range map[string]string{
 		"select":              "Selected Target.",
 		"dock":                "Docked Target.",
@@ -1181,6 +1220,7 @@ func TestRunWorkspaceActionSummaryPerKind(t *testing.T) {
 // reached by driving StreamAskWithContext alone, since Ask/AskWithContext
 // never delegates that specific check to it.
 func TestAskWithContextRejectsEmptyPrompt(t *testing.T) {
+	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
@@ -1191,6 +1231,7 @@ func TestAskWithContextRejectsEmptyPrompt(t *testing.T) {
 }
 
 func TestStreamAskWithContextRejectsEmptyPrompt(t *testing.T) {
+	t.Parallel()
 	conversation, err := NewAIConversation(&scriptedProvider{}, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
 		t.Fatal(err)
@@ -1210,6 +1251,7 @@ func TestStreamAskWithContextRejectsEmptyPrompt(t *testing.T) {
 // first event must not leave the turn's provider call still pending, and
 // LastStreamTurn must still reflect whatever was captured before the break.
 func TestStreamAskWithContextStopsWhenConsumerBreaksEarly(t *testing.T) {
+	t.Parallel()
 	llm := &scriptedProvider{steps: []scriptedStep{{text: "Hello there"}}}
 	conversation, err := NewAIConversation(llm, &fakeExecutor{}, "sqlite:///x", "schema")
 	if err != nil {
@@ -1234,6 +1276,7 @@ func TestStreamAskWithContextStopsWhenConsumerBreaksEarly(t *testing.T) {
 // scriptedProvider's own "script exhausted" error) if the loop didn't stop
 // ranging over loop.Run right after the first successful run_dtql.
 func TestInterpretBreaksLoopAfterFirstSuccessfulQuery(t *testing.T) {
+	t.Parallel()
 	doc := "from: {name: Invoice}\nlimit: 5\n"
 	llm := &scriptedProvider{steps: []scriptedStep{
 		{toolCalls: []ai.ToolCall{toolCall("1", toolRunDTQL, map[string]any{"dtql": doc})}},
@@ -1253,6 +1296,7 @@ func TestInterpretBreaksLoopAfterFirstSuccessfulQuery(t *testing.T) {
 // TestFriendlyQueryError covers friendlyQueryError's nil-error and
 // message-truncation branches directly.
 func TestFriendlyQueryError(t *testing.T) {
+	t.Parallel()
 	if got := friendlyQueryError(nil); got != "" {
 		t.Fatalf("friendlyQueryError(nil) = %q, want empty", got)
 	}

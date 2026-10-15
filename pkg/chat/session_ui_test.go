@@ -15,6 +15,7 @@ import (
 // persisted grid on NewSessionChatUI), driven through ChatUI's public
 // Submit/drainCmd round trip and shell.View().Content instead of u.entries.
 func TestChatUISessionRestoresGridAndManagesSessions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := testStorePath(t)
 	store := openTestStore(t, path, testScope())
@@ -89,6 +90,7 @@ func TestChatUISessionRestoresGridAndManagesSessions(t *testing.T) {
 }
 
 func TestChatUISessionSubmissionPersistsThenRendersFromSnapshot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	agent := &contextualStub{turns: []Turn{{Queries: []QueryResult{{Title: "Invoices", DTQL: "from: {name: Invoice}\nlimit: 1", Result: secureread.Result{Columns: []string{"InvoiceId"}, Rows: []secureread.Row{{Data: map[string]any{"InvoiceId": 412}}}}}}}}}

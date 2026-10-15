@@ -19,6 +19,7 @@ func (a extraTextAggregate) String() string {
 }
 
 func TestQualifyJoinExpression_RefusesAggregateWithExtraText(t *testing.T) {
+	t.Parallel()
 	base := dal.NewAggregate("first", false, dal.NewFieldRef("", "name"))
 	stub := extraTextAggregate{AggregateFunc: base, extra: " ORDER BY salary"}
 	for name, expression := range map[string]dal.Expression{
@@ -42,6 +43,7 @@ func TestQualifyJoinExpression_RefusesAggregateWithExtraText(t *testing.T) {
 }
 
 func TestQualifyJoinExpression_KeepsPlainAggregates(t *testing.T) {
+	t.Parallel()
 	field := dal.NewFieldRef("", "x")
 	qualified := dal.NewFieldRef("src", "x")
 	for name, tc := range map[string]struct{ input, want dal.Expression }{

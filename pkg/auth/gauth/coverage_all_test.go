@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -191,4 +192,43 @@ func TestDefaultClosures(t *testing.T) {
 	crm, err := newCRMServiceFn(context.Background(), http.DefaultClient)
 	require.NoError(t, err)
 	require.NotNil(t, crm)
+
+	// 6. browserCommandRun default closure with harmless true command
+	cmd := exec.Command("true")
+	require.NoError(t, browserCommandRun(cmd))
+}
+
+func TestLaunchAuthBrowserAndWebEdgeCases(t *testing.T) {
+	origGOOS := browserGOOS
+	origRun := browserCommandRun
+	origTesting := isTesting
+	origRand := authRandRead
+	t.Cleanup(func() {
+		browserGOOS = origGOOS
+		browserCommandRun = origRun
+		isTesting = origTesting
+		authRandRead = origRand
+	})
+
+	browserCommandRun = func(c *exec.Cmd) error {
+		return nil
+	}
+	for _, goos := range []string{"darwin", "windows", "linux"} {
+		browserGOOS = goos
+		require.NoError(t, launchAuthBrowser(context.Background(), "http://localhost:8080/oauth2callback"))
+	}
+
+	isTesting = func() bool { return false }
+	t.Setenv("DATATUG_NO_BROWSER", "")
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := getTokenFromWeb(canceledCtx, &oauth2.Config{RedirectURL: "http://localhost:8080/oauth2callback"})
+	require.ErrorIs(t, err, errAuthFlow)
+
+	authRandRead = func([]byte) (int, error) {
+		return 0, errors.New("rand failure")
+	}
+	_, err = getTokenFromWeb(context.Background(), &oauth2.Config{RedirectURL: "http://localhost:8080/oauth2callback"})
+	require.ErrorIs(t, err, errAuthFlow)
 }

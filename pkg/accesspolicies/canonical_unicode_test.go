@@ -38,6 +38,7 @@ func everyScalarValue(visit func(r rune)) {
 // id could canonicalize to two different strings and split one file's
 // decisions.
 func TestCanonicalQueryID_IsAFixedPointForEveryScalarValue(t *testing.T) {
+	t.Parallel()
 	unstable, notFixed := 0, 0
 	everyScalarValue(func(r rune) {
 		id := string(r)
@@ -78,6 +79,7 @@ func canonicalProbeRunes() []rune {
 // of the idempotence check: combining marks reorder, folding expands, and
 // the result still has to be a fixed point.
 func TestCanonicalQueryID_IsAFixedPointForRandomStrings(t *testing.T) {
+	t.Parallel()
 	pool := canonicalProbeRunes()
 	random := rand.New(rand.NewSource(20260911))
 	for i := 0; i < 200000; i++ {
@@ -114,6 +116,7 @@ func TestCanonicalQueryID_IsAFixedPointForRandomStrings(t *testing.T) {
 // Splitting any of those pairs would be a bypass: the two spellings are one
 // file, so a rule on one must decide the other.
 func TestCanonicalQueryID_IsCoarserThanEveryFileSystemTable(t *testing.T) {
+	t.Parallel()
 	fold := cases.Fold()
 	upper, lower, title := cases.Upper(language.Und), cases.Lower(language.Und), cases.Title(language.Und)
 	split := 0
@@ -178,6 +181,7 @@ func TestCanonicalQueryID_IsCoarserThanEveryFileSystemTable(t *testing.T) {
 // TestCanonicalQueryID_KnownFamilies pins the families the review and the
 // verify pass found, and the ones a reader will look for.
 func TestCanonicalQueryID_KnownFamilies(t *testing.T) {
+	t.Parallel()
 	const nfc, nfd = "café", "café"
 	sameQuery := [][]string{
 		{"revenue", "Revenue", "REVENUE", "rEvEnUe"},
@@ -224,6 +228,7 @@ func TestCanonicalQueryID_KnownFamilies(t *testing.T) {
 // An id that somehow did not converge shares one decision with every other
 // such id, rather than a spelling of its own.
 func TestCanonicalQueryID_UnstableIsItselfAFixedPoint(t *testing.T) {
+	t.Parallel()
 	if got := CanonicalQueryID(unstableCanonicalID); got != unstableCanonicalID {
 		t.Errorf("CanonicalQueryID(%q) = %q, want it unchanged", unstableCanonicalID, got)
 	}

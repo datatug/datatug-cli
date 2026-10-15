@@ -37,7 +37,12 @@ type actionOperation struct {
 	Done              bool                  `json:"done"`
 }
 
-func caseContextDigest(values map[string]InputValue) (string, error) {
+var caseContextDigest = defaultCaseContextDigest
+var actionNewOperationReceipt = core.NewOperationReceipt
+var actionReaddirnames = (*os.File).Readdirnames
+var actionSafeReadFile = safeReadFile
+
+func defaultCaseContextDigest(values map[string]InputValue) (string, error) {
 	if values == nil {
 		values = map[string]InputValue{}
 	}
@@ -93,6 +98,7 @@ func actionResourceID(req ActionRequest) string {
 		if req.Case != nil {
 			return req.Case.ID
 		}
+		return req.CaseID
 	case "run-check":
 		return req.CheckID
 	case "run-query-validators":
@@ -135,7 +141,7 @@ func (s *LocalStore) reconcilePendingActions(ctx context.Context, collection, re
 	if collection == "" || resourceID == "" {
 		return nil
 	}
-	if err := s.reconcilePendingOther(ctx, collection, resourceID); err != nil {
+	if err := s.reconcilePendingOther(ctx, collection, resourceID, exceptID); err != nil {
 		return err
 	}
 	dir := s.privateItemDir("action-operations")
@@ -151,7 +157,7 @@ func (s *LocalStore) reconcilePendingActions(ctx context.Context, collection, re
 	}
 	defer func() { _ = f.Close() }()
 	for {
-		names, err := f.Readdirnames(128)
+		names, err := actionReaddirnames(f, 128)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
@@ -255,7 +261,7 @@ func (s *LocalStore) ExecuteAction(ctx context.Context, operationID, actor strin
 	}
 	var op actionOperation
 	err = s.withLock(ctx, func() error {
-		data, e := safeReadFile(s.privateItemDir("action-operations"), operationID)
+		data, e := actionSafeReadFile(s.privateItemDir("action-operations"), operationID)
 		if e == nil {
 			if json.Unmarshal(data, &op) != nil || core.CheckOperationReplay(op.Receipt, binding) != nil {
 				return ErrConflict
@@ -274,7 +280,7 @@ func (s *LocalStore) ExecuteAction(ctx context.Context, operationID, actor strin
 			return prepErr
 		}
 		version := actionResponseVersion(op.Response)
-		op.Receipt, prepErr = core.NewOperationReceipt(operationID, binding, version, time.Now().UTC())
+		op.Receipt, prepErr = actionNewOperationReceipt(operationID, binding, version, time.Now().UTC())
 		if prepErr != nil {
 			return prepErr
 		}
@@ -322,7 +328,7 @@ func (s *LocalStore) executeRunAction(ctx context.Context, id, actor string, req
 	var admittedRevisions map[string]string
 	effectiveInputs := req.Inputs
 	runID := actionRunID(s.projectID, actor, id)
-	accepted, err := core.NewOperationReceipt(id, binding, 0, time.Now().UTC())
+	accepted, err := actionNewOperationReceipt(id, binding, 0, time.Now().UTC())
 	if err != nil {
 		return empty, err
 	}

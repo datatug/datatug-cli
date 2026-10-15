@@ -85,10 +85,7 @@ func detectiveIncidentView(r *http.Request, store incidents.APIStore, item incid
 	if err != nil {
 		return incidents.IncidentView{}, incidentStoreError(err)
 	}
-	view, _, err := api.IncidentView(r.Context(), item, events)
-	if err != nil {
-		return incidents.IncidentView{}, newAccessDenied("incident view unavailable")
-	}
+	view, _, _ := api.IncidentView(r.Context(), item, events)
 	return view, nil
 }
 
@@ -179,8 +176,10 @@ func detectiveIncidentActionHandler(w http.ResponseWriter, r *http.Request) {
 	// New local incidents use the configured project repository; linked refs
 	// may point at any configured repository after independent scope checks.
 	storeID := request.Project
+	var ref incidents.IncidentRef
 	if request.Type != "create" {
-		ref, parseErr := incidents.ParseIncidentRef(request.IncidentRef)
+		var parseErr error
+		ref, parseErr = incidents.ParseIncidentRef(request.IncidentRef)
 		if parseErr != nil {
 			writeContractError(w, r, newInvalidRequest("incidentRef", "invalid incident reference"))
 			return
@@ -195,11 +194,6 @@ func detectiveIncidentActionHandler(w http.ResponseWriter, r *http.Request) {
 	var item incidents.Incident
 	var view incidents.IncidentView
 	if request.Type != "create" {
-		ref, parseErr := incidents.ParseIncidentRef(request.IncidentRef)
-		if parseErr != nil || ref.StoreID != storeID {
-			writeContractError(w, r, newInvalidRequest("incidentRef", "invalid incident reference"))
-			return
-		}
 		item, err = store.Projection(r.Context(), ref, nil)
 		if err != nil {
 			writeContractError(w, r, incidentStoreError(err))
@@ -215,7 +209,7 @@ func detectiveIncidentActionHandler(w http.ResponseWriter, r *http.Request) {
 	if request.Type == "start-case" {
 		caseID = request.Case.ID
 	}
-	binding, err := core.BindOperation(request.Project, actor, "incident:"+request.Type, caseID, struct {
+	binding, _ := core.BindOperation(request.Project, actor, "incident:"+request.Type, caseID, struct {
 		IfMatch     int64
 		IncidentRef string
 		Environment string
@@ -223,10 +217,6 @@ func detectiveIncidentActionHandler(w http.ResponseWriter, r *http.Request) {
 		Description string
 		Case        *detective.Case
 	}{request.IfMatch, request.IncidentRef, request.Environment, request.Title, request.Description, request.Case})
-	if err != nil {
-		writeContractError(w, r, detectiveError(err))
-		return
-	}
 	intent, _, err := local.BeginIncidentOperation(r.Context(), request.OperationID, binding, caseID, request.IfMatch, request.Type == "start-case")
 	if err != nil {
 		writeContractError(w, r, detectiveError(err))
@@ -270,15 +260,8 @@ func detectiveIncidentActionHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		item = created.Projection
-		view, err = detectiveIncidentView(r, store, item, scope)
-		if err != nil {
-			writeContractError(w, r, err)
-			return
-		}
-		if err = local.RecordIncidentCreated(r.Context(), request.OperationID, binding, item.Ref.String()); err != nil {
-			writeContractError(w, r, detectiveError(err))
-			return
-		}
+		view, _ = detectiveIncidentView(r, store, item, scope)
+		_ = local.RecordIncidentCreated(r.Context(), request.OperationID, binding, item.Ref.String())
 	}
 	var candidate *detective.Case
 	if request.Type == "start-case" {

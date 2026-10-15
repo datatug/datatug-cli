@@ -32,6 +32,7 @@ import (
 // as they arrive), which is exactly the live-view/reload mismatch this test
 // guards against.
 func TestChatUIStreamedGridTurnDoesNotLeakRawStreamedProse(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	executor := &fakeExecutor{result: secureread.Result{

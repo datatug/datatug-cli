@@ -29,6 +29,7 @@ func (s *savedQueryNoRunnerStub) Run(_ context.Context, id string) (QueryResult,
 // nil-service branch (chatui_query_overlay.go:26-29), reached only by
 // calling it directly before SetSavedQueryService has ever run.
 func TestReloadSavedQueriesNoServiceClearsList(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.savedQueries = []SavedQuery{{ID: "stale"}}
 	if err := u.reloadSavedQueries(); err != nil {
@@ -43,6 +44,7 @@ func TestReloadSavedQueriesNoServiceClearsList(t *testing.T) {
 // service.List error branch (chatui_query_overlay.go:30-33), reached via
 // SetSavedQueryService.
 func TestReloadSavedQueriesPropagatesListError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{listErr: errors.New("boom")}
 	if err := u.SetSavedQueryService(service); err == nil {
@@ -53,6 +55,7 @@ func TestReloadSavedQueriesPropagatesListError(t *testing.T) {
 // TestRunQueryCommandPropagatesReloadError covers runQueryCommand's own
 // reloadSavedQueries error branch (chatui_query_overlay.go:124-126).
 func TestRunQueryCommandPropagatesReloadError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Title: "Prague"}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -69,6 +72,7 @@ func TestRunQueryCommandPropagatesReloadError(t *testing.T) {
 // reached with an empty argument (e.g. bare "/query"), goes to the picker
 // overlay instead of running directly.
 func TestRunQueryCommandSingleMatchWithEmptyArgumentOpensPicker(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Title: "Prague"}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -93,6 +97,7 @@ func TestRunQueryCommandSingleMatchWithEmptyArgumentOpensPicker(t *testing.T) {
 // unavailable guard (chatui_query_overlay.go:59-62) when called without
 // SetSavedQueryService ever having been called.
 func TestRunSavedQueryGuardsMissingService(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if cmd := u.runSavedQuery(SavedQuery{ID: "x"}, nil); cmd != nil {
 		t.Fatal("expected a nil command when no saved-query service is configured")
@@ -106,6 +111,7 @@ func TestRunSavedQueryGuardsMissingService(t *testing.T) {
 // error branch (chatui_query_overlay.go:70-72) by closing the store before
 // running.
 func TestRunSavedQueryAppendUserErrorSurfaces(t *testing.T) {
+	t.Parallel()
 	u, chat := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "x", Title: "Prague"}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -126,6 +132,7 @@ func TestRunSavedQueryAppendUserErrorSurfaces(t *testing.T) {
 // (chatui_query_overlay.go:78-80) when variables are supplied but the
 // service doesn't implement SavedQueryParameterizedRunner.
 func TestRunSavedQueryUnsupportedParameterizedRunner(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryNoRunnerStub{queries: []SavedQuery{{ID: "x", Title: "Prague"}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -147,6 +154,7 @@ func TestRunSavedQueryUnsupportedParameterizedRunner(t *testing.T) {
 // saved-query run that completes after the user has since switched sessions
 // must not clobber the now-current session's view.
 func TestHandleSavedQueryDoneIgnoresStaleSession(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	before := u.sessionID
 	u.handleSavedQueryDone(savedQueryDoneMsg{sessionID: "some-other-session", snapshot: ChatSession{ID: "some-other-session"}})
@@ -158,6 +166,7 @@ func TestHandleSavedQueryDoneIgnoresStaleSession(t *testing.T) {
 // --- savedQueryPickerOverlay ------------------------------------------------
 
 func TestSavedQueryPickerOverlayNonKeyMsgIgnored(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	o := &savedQueryPickerOverlay{ui: u, queries: []SavedQuery{{ID: "a"}}}
 	_, cmd, done := o.Update(tea.WindowSizeMsg{Width: 10, Height: 10})
@@ -167,6 +176,7 @@ func TestSavedQueryPickerOverlayNonKeyMsgIgnored(t *testing.T) {
 }
 
 func TestSavedQueryPickerOverlayUpDownBoundaries(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	o := &savedQueryPickerOverlay{ui: u, queries: []SavedQuery{{ID: "a"}, {ID: "b"}}}
 	o.Update(tea.KeyPressMsg{Code: 'k'}) // up at index 0: no-op
@@ -184,6 +194,7 @@ func TestSavedQueryPickerOverlayUpDownBoundaries(t *testing.T) {
 }
 
 func TestSavedQueryPickerOverlayEnterAndEscClose(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{queries: []SavedQuery{{ID: "a", Title: "A"}}}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -215,6 +226,7 @@ func TestSavedQueryPickerOverlayEnterAndEscClose(t *testing.T) {
 // --- queryParametersOverlay --------------------------------------------------
 
 func TestQueryParametersOverlayCtrlCQuits(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newQueryParametersOverlay(u, SavedQuery{ID: "x"})
 	_, cmd, done := d.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
@@ -224,6 +236,7 @@ func TestQueryParametersOverlayCtrlCQuits(t *testing.T) {
 }
 
 func TestQueryParametersOverlayTabWrapsAroundToRun(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	d := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "a"}}})
 	d.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // focus -> "Run" (index 1)
@@ -241,6 +254,7 @@ func TestQueryParametersOverlayTabWrapsAroundToRun(t *testing.T) {
 }
 
 func TestQueryParametersOverlayLoadLookupUnavailable(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	service := &savedQueryStub{}
 	if err := u.SetSavedQueryService(service); err != nil {
@@ -263,6 +277,7 @@ func singleRowLookupResult() secureread.Result {
 }
 
 func TestParameterLookupOverlayCtrlCQuits(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "city"}}})
 	p := newParameterLookupOverlay(parent, 0, &SavedQueryLookup{Key: "City"})
@@ -273,6 +288,7 @@ func TestParameterLookupOverlayCtrlCQuits(t *testing.T) {
 }
 
 func TestParameterLookupOverlayUpDownAndSpaceWithEmptyGrid(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "city"}}})
 	p := newParameterLookupOverlay(parent, 0, &SavedQueryLookup{Key: "City"})
@@ -288,6 +304,7 @@ func TestParameterLookupOverlayUpDownAndSpaceWithEmptyGrid(t *testing.T) {
 }
 
 func TestParameterLookupOverlaySpaceOnSingleValueIsNoop(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "city"}}})
 	lookup := &SavedQueryLookup{Key: "City", Multi: false, Result: singleRowLookupResult()}
@@ -299,6 +316,7 @@ func TestParameterLookupOverlaySpaceOnSingleValueIsNoop(t *testing.T) {
 }
 
 func TestParameterLookupOverlayEnterMultiWithNoSelectionShowsError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	parent := newQueryParametersOverlay(u, SavedQuery{ID: "x", Parameters: []SavedQueryParameter{{ID: "city"}}})
 	lookup := &SavedQueryLookup{Key: "City", Multi: true, Result: singleRowLookupResult()}

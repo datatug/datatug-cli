@@ -8,6 +8,7 @@ import (
 )
 
 func TestUnifiedWorkspaceBridgeMonitorStartupFailures(t *testing.T) {
+	// Not parallel: mutates package-level readRandom seam.
 	previous, random := apimonitor.Default, readRandom
 	t.Cleanup(func() { apimonitor.Default, readRandom = previous, random })
 	apimonitor.Default = &apimonitor.Registry{}

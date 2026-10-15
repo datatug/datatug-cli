@@ -21,6 +21,7 @@ import (
 
 var openBrowser = launchAuthBrowser
 var isTesting = testing.Testing
+var authRandRead = rand.Read
 var authListen = net.Listen
 var authServerServe = func(srv *http.Server, listener net.Listener) error { return srv.Serve(listener) }
 var srvShutdown = func(ctx context.Context, srv *http.Server) error { return srv.Shutdown(ctx) }
@@ -66,7 +67,7 @@ func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token,
 		return nil, errAuthFlow
 	}
 	seed := make([]byte, 32)
-	if _, err = rand.Read(seed); err != nil {
+	if _, err = authRandRead(seed); err != nil {
 		return nil, errAuthFlow
 	}
 	state := base64.RawURLEncoding.EncodeToString(seed)

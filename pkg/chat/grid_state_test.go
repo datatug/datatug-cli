@@ -21,6 +21,7 @@ import (
 // are unchanged.
 
 func TestGridKeepsFocusAndCursorAcrossHorizontalNavigation(t *testing.T) {
+	t.Parallel()
 	g := newGridState(NewGridModel(secureread.Result{
 		Columns: []string{"First", "Second"},
 		Rows: []secureread.Row{
@@ -40,6 +41,7 @@ func TestGridKeepsFocusAndCursorAcrossHorizontalNavigation(t *testing.T) {
 }
 
 func TestGridTitleFooterAndScrollbarAreStructuredPresentation(t *testing.T) {
+	t.Parallel()
 	rows := make([]secureread.Row, 20)
 	for i := range rows {
 		rows[i] = secureread.Row{Data: map[string]any{"ID": i + 1}}
@@ -59,6 +61,7 @@ func TestGridTitleFooterAndScrollbarAreStructuredPresentation(t *testing.T) {
 }
 
 func TestResultTitleAppearsOnceInCardBorder(t *testing.T) {
+	t.Parallel()
 	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "", "Customers", 80)
 	view := ansi.Strip(g.View(80, g.Focused()))
 	if strings.Count(strings.Split(view, "\n")[0], "Customers") != 1 || strings.Count(view, "Customers") != 1 {
@@ -72,6 +75,7 @@ func TestResultTitleAppearsOnceInCardBorder(t *testing.T) {
 }
 
 func TestFocusedRecordSetTitleAndFooterAreReadable(t *testing.T) {
+	t.Parallel()
 	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "", "Invoices", 80)
 	g.SetFocused(true)
 	lines := strings.Split(g.View(80, g.Focused()), "\n")
@@ -88,6 +92,7 @@ func TestFocusedRecordSetTitleAndFooterAreReadable(t *testing.T) {
 }
 
 func TestGridScrollbarTracksCursorBeforePageScrolls(t *testing.T) {
+	t.Parallel()
 	rows := make([]secureread.Row, 20)
 	for i := range rows {
 		rows[i] = secureread.Row{Data: map[string]any{"ID": i}}
@@ -105,6 +110,7 @@ func TestGridScrollbarTracksCursorBeforePageScrolls(t *testing.T) {
 }
 
 func TestGridWithoutScrollingUsesPlainRightBorder(t *testing.T) {
+	t.Parallel()
 	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}}}), "", "Rows", 60)
 	view := ansi.Strip(g.view())
 	if strings.ContainsAny(view, "▏▐") {
@@ -138,6 +144,7 @@ func escapeBefore(s, marker string) string {
 // (strongo/aichat#chat-shared-look) instead of a colour local to this
 // preset.
 func TestTableStylePresetsChangeHeaderAndDividerColors(t *testing.T) {
+	t.Parallel()
 	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID", "Name"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1, "Name": "Alex"}}}}), "", "Rows", 60)
 	if g.Style().Name != grid.StyleLines.Name {
 		t.Fatal("new table did not default to Lines")
@@ -166,6 +173,7 @@ func TestTableStylePresetsChangeHeaderAndDividerColors(t *testing.T) {
 }
 
 func TestGridScrollbarUsesTopMiddleAndShortFinalPages(t *testing.T) {
+	t.Parallel()
 	rows := make([]secureread.Row, 25)
 	for i := range rows {
 		rows[i] = secureread.Row{Data: map[string]any{"ID": i + 1}}
@@ -193,6 +201,7 @@ func TestGridScrollbarUsesTopMiddleAndShortFinalPages(t *testing.T) {
 }
 
 func TestGridEnterIsReservedAndSSorts(t *testing.T) {
+	t.Parallel()
 	g := newGridState(NewGridModel(secureread.Result{
 		Columns: []string{"Name"},
 		Rows: []secureread.Row{
@@ -212,6 +221,7 @@ func TestGridEnterIsReservedAndSSorts(t *testing.T) {
 }
 
 func TestGridUsesBubbleTablePaginationAndDoesNotWrapAtBoundaries(t *testing.T) {
+	t.Parallel()
 	rows := make([]secureread.Row, 25)
 	for i := range rows {
 		rows[i] = secureread.Row{Data: map[string]any{"ID": i + 1}}
@@ -244,6 +254,7 @@ func TestGridUsesBubbleTablePaginationAndDoesNotWrapAtBoundaries(t *testing.T) {
 }
 
 func TestGridHorizontalSelectionUsesBubbleTableOverflow(t *testing.T) {
+	t.Parallel()
 	// contentWidth(26) is 24, giving bubble-table an exact 22-cell table:
 	// after the left overflow marker, columns 2-4 fit only because the final
 	// source column has no trailing divider.
@@ -286,6 +297,7 @@ func TestGridHorizontalSelectionUsesBubbleTableOverflow(t *testing.T) {
 }
 
 func TestGridNarrowMarkerOnlyViewReportsNoVisibleColumns(t *testing.T) {
+	t.Parallel()
 	model := GridModel{
 		Columns: []GridColumn{{Name: "First"}, {Name: "Second"}},
 		Rows:    [][]string{{"one", "two"}},
@@ -301,6 +313,7 @@ func TestGridNarrowMarkerOnlyViewReportsNoVisibleColumns(t *testing.T) {
 }
 
 func TestGridNarrowViewCanRevealSelectedFinalColumn(t *testing.T) {
+	t.Parallel()
 	model := GridModel{
 		Columns: []GridColumn{{Name: "First"}, {Name: "Second"}},
 		Rows:    [][]string{{"one", "two"}},
@@ -325,6 +338,7 @@ func TestGridNarrowViewCanRevealSelectedFinalColumn(t *testing.T) {
 }
 
 func TestGridResizePreservesFocusRowAndHorizontalWindow(t *testing.T) {
+	t.Parallel()
 	g := newGridState(NewGridModel(secureread.Result{
 		Columns: []string{"First", "Second", "Third", "Fourth"},
 		Rows:    []secureread.Row{{Data: map[string]any{"First": "one", "Second": "two", "Third": "three", "Fourth": "four"}}, {Data: map[string]any{"First": "a", "Second": "b", "Third": "c", "Fourth": "d"}}},
@@ -345,6 +359,7 @@ func TestGridResizePreservesFocusRowAndHorizontalWindow(t *testing.T) {
 }
 
 func TestRecordsetHeaderRetainsViewControlsForLongTitles(t *testing.T) {
+	t.Parallel()
 	g := newGridState(GridModel{}, "", strings.Repeat("very long generated title ", 8), 70)
 	header := ansi.Strip(g.HeaderLine(70))
 	for _, want := range []string{"1 Table", "2 Charts", "3 Current row"} {
@@ -358,6 +373,7 @@ func TestRecordsetHeaderRetainsViewControlsForLongTitles(t *testing.T) {
 }
 
 func TestRecordsetHeaderRetainsAllControlsAtTwentyTwoCells(t *testing.T) {
+	t.Parallel()
 	g := newGridState(GridModel{}, "", strings.Repeat("generated title ", 8), 22)
 	header := ansi.Strip(g.HeaderLine(22))
 	for _, want := range []string{"1", "2", "3"} {
@@ -377,6 +393,7 @@ func TestRecordsetHeaderRetainsAllControlsAtTwentyTwoCells(t *testing.T) {
 }
 
 func TestCurrentRowInspectorScrollsAndResetsForAnotherSourceRow(t *testing.T) {
+	t.Parallel()
 	result := secureread.Result{}
 	for index := 0; index < 18; index++ {
 		name := fmt.Sprintf("Field%02d", index)
@@ -412,6 +429,7 @@ func TestCurrentRowInspectorScrollsAndResetsForAnotherSourceRow(t *testing.T) {
 }
 
 func TestEmptyRecordsetCanBeFocusedAndShowsSecondaryEmptyStates(t *testing.T) {
+	t.Parallel()
 	g := newGridState(NewGridModel(secureread.Result{Columns: []string{"ID"}}), "", "Empty", contentWidth(80))
 	g.SetFocused(true)
 	g.Update(tea.KeyPressMsg{Text: "2"})
@@ -439,6 +457,7 @@ func TestEmptyRecordsetCanBeFocusedAndShowsSecondaryEmptyStates(t *testing.T) {
 // the title and the selected column's header carry visibly different
 // ANSI styling.
 func TestGridTitleAndSelectedColumnUseDifferentColors(t *testing.T) {
+	t.Parallel()
 	g := newGridState(NewGridModel(secureread.Result{
 		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
 	}), "", "Distinct Title", contentWidth(80))
@@ -483,6 +502,7 @@ func lastAnsiEscape(s string) string {
 }
 
 func TestGridBorderChangesWithFocus(t *testing.T) {
+	t.Parallel()
 	g := newGridState(NewGridModel(secureread.Result{
 		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
 	}), "", "Rows", contentWidth(80))
@@ -513,6 +533,7 @@ func TestGridBorderChangesWithFocus(t *testing.T) {
 // GridModel.Rows leaves its display string at "") must show as "—" in the
 // Current row view, via grid.Absent, not an ambiguous blank line.
 func TestCurrentRowShowsAbsentMarkerNotBlankForSparseCells(t *testing.T) {
+	t.Parallel()
 	model := GridModel{
 		Columns: []GridColumn{{Name: "First"}, {Name: "Second"}},
 		Rows:    [][]string{{"one", ""}}, // Second is sparse/absent for this row
@@ -529,6 +550,7 @@ func TestCurrentRowShowsAbsentMarkerNotBlankForSparseCells(t *testing.T) {
 }
 
 func TestRecordsetViewsRouteFocusAcrossSplitAndNarrowLayouts(t *testing.T) {
+	t.Parallel()
 	g := newGridState(NewGridModel(secureread.Result{
 		Columns: []string{"ID", "Country"},
 		Rows:    []secureread.Row{{Data: map[string]any{"ID": 1, "Country": "Ireland"}}},
@@ -567,6 +589,7 @@ func TestRecordsetViewsRouteFocusAcrossSplitAndNarrowLayouts(t *testing.T) {
 }
 
 func TestUIWidthSweepKeepsRenderedLinesWithinTerminal(t *testing.T) {
+	t.Parallel()
 	for width := 1; width <= 80; width++ {
 		g := newGridState(NewGridModel(secureread.Result{
 			Columns: []string{"First", "Second", "Third"},

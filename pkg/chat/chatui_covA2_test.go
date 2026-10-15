@@ -38,6 +38,7 @@ func (s *conversationOnlyStub) Ask(context.Context, string) (Turn, error) { retu
 // sessions==nil branch when no Conversation is configured at all (chatui.go
 // "chat UI has no conversation configured").
 func TestAskOpenFuncSessionlessNoConversationYieldsError(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "model")
 	seq := u.askOpenFunc(context.Background(), "id1", "hi")
 	var events []ai.Event
@@ -62,6 +63,7 @@ func TestAskOpenFuncSessionlessNoConversationYieldsError(t *testing.T) {
 // TestAskOpenFuncSessionlessConversationSuccess covers the sessionless
 // success path: a non-empty Turn.Text yields a text delta then Completed.
 func TestAskOpenFuncSessionlessConversationSuccess(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), &conversationOnlyStub{turn: Turn{Text: "hello"}}, "model")
 	seq := u.askOpenFunc(context.Background(), "id2", "hi")
 	var types []ai.EventType
@@ -78,6 +80,7 @@ func TestAskOpenFuncSessionlessConversationSuccess(t *testing.T) {
 // return }" branch after the text delta: a consumer that stops ranging must
 // never see EventCompleted.
 func TestAskOpenFuncSessionlessConsumerStopsEarly(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), &conversationOnlyStub{turn: Turn{Text: "hello"}}, "model")
 	seq := u.askOpenFunc(context.Background(), "id3", "hi")
 	count := 0
@@ -93,6 +96,7 @@ func TestAskOpenFuncSessionlessConsumerStopsEarly(t *testing.T) {
 // TestAskOpenFuncSessionlessEmptyTurnSkipsTextDelta covers turn.Text=="" in
 // the sessionless success path: only EventCompleted is yielded.
 func TestAskOpenFuncSessionlessEmptyTurnSkipsTextDelta(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), &conversationOnlyStub{turn: Turn{}}, "model")
 	seq := u.askOpenFunc(context.Background(), "id4", "hi")
 	var types []ai.EventType
@@ -135,6 +139,7 @@ func (s *streamingStub) LastStreamTurn() Turn { return s.last }
 // <think>...</think> block filters down to empty text and must not reach
 // yield at all.
 func TestAskOpenFuncSkipsFullyStrippedThinkDelta(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	stub := &streamingStub{
@@ -169,6 +174,7 @@ func TestAskOpenFuncSkipsFullyStrippedThinkDelta(t *testing.T) {
 // TestAskOpenFuncSessionsConsumerStopsEarly covers the sessions!=nil
 // "if !yield(event, err) { break }" branch.
 func TestAskOpenFuncSessionsConsumerStopsEarly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	stub := &streamingStub{
@@ -203,6 +209,7 @@ func TestAskOpenFuncSessionsConsumerStopsEarly(t *testing.T) {
 // with no pending outcome (never started, or already drained) must not
 // panic and must return a nil Cmd.
 func TestOnStreamDoneUnknownIDIsNoop(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "model")
 	if cmd := u.OnStreamDone("missing", nil); cmd != nil {
 		t.Fatal("expected nil Cmd for an unknown stream id")
@@ -212,6 +219,7 @@ func TestOnStreamDoneUnknownIDIsNoop(t *testing.T) {
 // TestOnStreamDoneErroredOutcomeIsNoop covers OnStreamDone's
 // "outcome.err != nil" branch.
 func TestOnStreamDoneErroredOutcomeIsNoop(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), nil, "model")
 	u.pendingTurns["bad"] = turnOutcome{err: errors.New("boom")}
 	if cmd := u.OnStreamDone("bad", nil); cmd != nil {
@@ -230,6 +238,7 @@ func TestOnStreamDoneErroredOutcomeIsNoop(t *testing.T) {
 // exercised (the sessions!=nil path never produces such a Turn, since
 // finalizeTurn already substitutes fallback text upstream).
 func TestAppendTurnResultsFallbackForSessionlessEmptyTurn(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), &conversationOnlyStub{turn: Turn{}}, "model")
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	cmd := u.Submit("anything")
@@ -245,6 +254,7 @@ func TestAppendTurnResultsFallbackForSessionlessEmptyTurn(t *testing.T) {
 // TestAppendTurnResultsReportsQueryError covers appendTurnResults' "query.Err
 // != nil" branch.
 func TestAppendTurnResultsReportsQueryError(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{Err: errors.New("query blew up")}}}
 	u, _ := newTestChatUI(t, nil, turn)
 	drainCmd(t, u, u.Submit("ask"))
@@ -258,6 +268,7 @@ func TestAppendTurnResultsReportsQueryError(t *testing.T) {
 // "u.sessions == nil" early return (a conversation-only ChatUI never has FK
 // join candidates to offer).
 func TestBlockForGridSessionlessReturnsBareGrid(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{RecordSetID: "rs1", Result: secureread.Result{
 		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
 	}}}}
@@ -282,6 +293,7 @@ func (erroringJoinApplication) Apply(context.Context, RecordSet, JoinCandidateID
 }
 
 func TestBlockForGridJoinCandidatesErrorReturnsBareGrid(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
@@ -323,6 +335,7 @@ func (multiCandidateJoinApplication) Apply(context.Context, RecordSet, JoinCandi
 }
 
 func TestBlockForGridSortsMultipleCandidates(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
@@ -371,6 +384,7 @@ func TestBlockForGridSortsMultipleCandidates(t *testing.T) {
 // TestNewSessionChatUIPropagatesSnapshotError covers NewSessionChatUI's
 // "if err != nil { return nil, err }" branch.
 func TestNewSessionChatUIPropagatesSnapshotError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
@@ -390,6 +404,7 @@ func TestNewSessionChatUIPropagatesSnapshotError(t *testing.T) {
 // TestLoadSessionShowsPersistedLimitations covers loadSession's grid-message
 // "formatLimitations" branch on a reload (not a live turn).
 func TestLoadSessionShowsPersistedLimitations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
@@ -425,6 +440,7 @@ func TestLoadSessionShowsPersistedLimitations(t *testing.T) {
 // loadSession's "message.Kind == \"markdown\"" branch for a message that
 // carries no attached HTTPResponse (Turn.TextFormat == "markdown").
 func TestLoadSessionRendersMarkdownMessageWithoutHTTPResponse(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///fixture.db")
@@ -453,6 +469,7 @@ func TestLoadSessionRendersMarkdownMessageWithoutHTTPResponse(t *testing.T) {
 // --- OnMsg -----------------------------------------------------------------
 
 func TestOnMsgJoinAppliedError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.OnMsg(JoinAppliedMsg{Err: errors.New("apply failed")})
 	if !strings.Contains(u.shell.View().Content, "I couldn't apply that JOIN.") || !strings.Contains(u.shell.View().Content, "relationship and try again.") {
@@ -461,6 +478,7 @@ func TestOnMsgJoinAppliedError(t *testing.T) {
 }
 
 func TestOnMsgChatExportDoneError(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.OnMsg(chatExportDoneMsg{err: errors.New("disk full")})
 	if !strings.Contains(u.shell.View().Content, "export failed: disk full") {
@@ -469,6 +487,7 @@ func TestOnMsgChatExportDoneError(t *testing.T) {
 }
 
 func TestOnMsgRelatedPreviewMessageAppliesToMatchingPendingDetail(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.pendingDetail = &cellDetail{sequence: 7, loading: true}
 	related := []relatedRecord{{}}
@@ -483,6 +502,7 @@ func TestOnMsgRelatedPreviewMessageAppliesToMatchingPendingDetail(t *testing.T) 
 }
 
 func TestOnMsgRelatedPreviewMessageIgnoresStaleSequence(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.pendingDetail = &cellDetail{sequence: 9, loading: true}
 	u.OnMsg(relatedPreviewMessage{sequence: 1, err: errors.New("stale")})
@@ -494,6 +514,7 @@ func TestOnMsgRelatedPreviewMessageIgnoresStaleSequence(t *testing.T) {
 // --- runCommand -------------------------------------------------------------
 
 func TestRunCommandSessionlessRequiresDurableSession(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(context.Background(), &conversationOnlyStub{}, "model")
 	u.shell.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	drainCmd(t, u, u.Submit("/new"))
@@ -503,6 +524,7 @@ func TestRunCommandSessionlessRequiresDurableSession(t *testing.T) {
 }
 
 func TestRunCommandSwitchAndRenameRequireArgument(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/switch"))
 	if !strings.Contains(u.shell.View().Content, "usage: /switch") {
@@ -515,6 +537,7 @@ func TestRunCommandSwitchAndRenameRequireArgument(t *testing.T) {
 }
 
 func TestRunCommandDeleteRequiresConfirm(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.Update(tea.WindowSizeMsg{Width: 220, Height: 40})
 	drainCmd(t, u, u.Submit("/delete"))
@@ -524,6 +547,7 @@ func TestRunCommandDeleteRequiresConfirm(t *testing.T) {
 }
 
 func TestRunCommandBucketClearAndListAndUsage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -571,6 +595,7 @@ func TestRunCommandBucketClearAndListAndUsage(t *testing.T) {
 }
 
 func TestRunCommandExportWithArguments(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -601,6 +626,7 @@ func mustSnapshot(t *testing.T, chat *SessionChat) ChatSession {
 }
 
 func TestRunCommandConnectRejectsArgument(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/connect bogus"))
 	if !strings.Contains(u.shell.View().Content, "usage: /connect") {
@@ -609,6 +635,7 @@ func TestRunCommandConnectRejectsArgument(t *testing.T) {
 }
 
 func TestRunCommandSettingsShowAndSet(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/settings"))
 	if !strings.Contains(u.shell.View().Content, "Result versions to keep:") {
@@ -625,6 +652,7 @@ func TestRunCommandSettingsShowAndSet(t *testing.T) {
 }
 
 func TestRunCommandSettingsInvalidArgument(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	drainCmd(t, u, u.Submit("/settings versions abc"))
 	if !strings.Contains(u.shell.View().Content, "usage: /settings versions <1-100>") {
@@ -639,6 +667,7 @@ func TestRunCommandSettingsInvalidArgument(t *testing.T) {
 // --- exportCommand -----------------------------------------------------
 
 func TestExportCommandUsageErrors(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	cases := []string{"current", "current csv", "current csv  "}
 	for _, argument := range cases {
@@ -649,6 +678,7 @@ func TestExportCommandUsageErrors(t *testing.T) {
 }
 
 func TestExportCommandInvalidFormat(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if _, err := u.exportCommand("current bogus /tmp/x"); err == nil {
 		t.Fatal("expected an error for an unknown export format")
@@ -656,6 +686,7 @@ func TestExportCommandInvalidFormat(t *testing.T) {
 }
 
 func TestExportCommandCurrentWithoutGridResult(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if _, err := u.exportCommand("current csv " + t.TempDir() + "/x.csv"); err == nil {
 		t.Fatal("expected an error exporting 'current' before any query ran")
@@ -663,6 +694,7 @@ func TestExportCommandCurrentWithoutGridResult(t *testing.T) {
 }
 
 func TestExportCommandCurrentRecordUnavailable(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.lastGridRecordSetID = "does-not-exist"
 	if _, err := u.exportCommand("current csv " + t.TempDir() + "/x.csv"); err == nil {
@@ -671,6 +703,7 @@ func TestExportCommandCurrentRecordUnavailable(t *testing.T) {
 }
 
 func TestExportCommandBucketRecordUnavailable(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.snapshot.Workspace.ExportBucket = []string{"missing"}
 	if _, err := u.exportCommand("bucket csv " + t.TempDir() + "/x.csv"); err == nil {
@@ -679,6 +712,7 @@ func TestExportCommandBucketRecordUnavailable(t *testing.T) {
 }
 
 func TestExportCommandEmptyBucket(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	if _, err := u.exportCommand("bucket csv " + t.TempDir() + "/x.csv"); err == nil || !strings.Contains(err.Error(), "export bucket is empty") {
 		t.Fatalf("err = %v, want an empty-bucket error", err)
@@ -686,6 +720,7 @@ func TestExportCommandEmptyBucket(t *testing.T) {
 }
 
 func TestExportCommandUnknownScope(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.lastGridRecordSetID = "rs"
 	u.snapshot.RecordSets = map[string]RecordSet{"rs": {ID: "rs"}}
@@ -695,6 +730,7 @@ func TestExportCommandUnknownScope(t *testing.T) {
 }
 
 func TestExportCommandExtensionMismatch(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.lastGridRecordSetID = "rs"
 	u.snapshot.RecordSets = map[string]RecordSet{"rs": {ID: "rs", Result: secureread.Result{Columns: []string{"a"}}}}
@@ -704,6 +740,7 @@ func TestExportCommandExtensionMismatch(t *testing.T) {
 }
 
 func TestExportCommandExpandsHomeDirectory(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.lastGridRecordSetID = "rs"
 	u.snapshot.RecordSets = map[string]RecordSet{"rs": {ID: "rs", Result: secureread.Result{Columns: []string{"a"}}}}
@@ -724,6 +761,7 @@ func TestExportCommandExpandsHomeDirectory(t *testing.T) {
 // --- statusBar --------------------------------------------------------
 
 func TestStatusBarShowsBucketCountWhenGridFocused(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	chat, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db", workspaceTestCatalog())
@@ -749,6 +787,7 @@ func TestStatusBarShowsBucketCountWhenGridFocused(t *testing.T) {
 }
 
 func TestStatusBarChartsAndCurrentRowViewHints(t *testing.T) {
+	t.Parallel()
 	turn := Turn{Queries: []QueryResult{{RecordSetID: "rs1", Result: secureread.Result{
 		Columns: []string{"ID"}, Rows: []secureread.Row{{Data: map[string]any{"ID": 1}}},
 	}}}}
@@ -773,6 +812,7 @@ func TestStatusBarChartsAndCurrentRowViewHints(t *testing.T) {
 }
 
 func TestStatusBarBusyHintWithSession(t *testing.T) {
+	t.Parallel()
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.shell.SetBusy(true)
 	status := flattenView(u.shell.View().Content)
@@ -787,6 +827,7 @@ func TestStatusBarBusyHintWithSession(t *testing.T) {
 // --- refreshLastRecordSet / Ctrl+R -------------------------------------
 
 func TestRefreshLastRecordSetRequestHasQueryDeclines(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"name":"Ada"}]`))
@@ -816,6 +857,7 @@ func TestRefreshLastRecordSetRequestHasQueryDeclines(t *testing.T) {
 }
 
 func TestRefreshLastRecordSetMissingHTTPResponseReturnsNil(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
@@ -845,6 +887,7 @@ func TestRefreshLastRecordSetMissingHTTPResponseReturnsNil(t *testing.T) {
 }
 
 func TestRefreshLastRecordSetInvalidSavedURLDeclines(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
@@ -879,6 +922,7 @@ func TestRefreshLastRecordSetInvalidSavedURLDeclines(t *testing.T) {
 }
 
 func TestRefreshLastRecordSetSettingsLookupError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
@@ -916,6 +960,7 @@ func TestRefreshLastRecordSetSettingsLookupError(t *testing.T) {
 // validation, including the settings lookup, already succeeded) but BEFORE
 // the closure actually runs.
 func TestRefreshLastRecordSetAppendUserFailureReportsError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
@@ -953,6 +998,7 @@ func TestRefreshLastRecordSetAppendUserFailureReportsError(t *testing.T) {
 // closure's "failure != \"\"" branch: an unroutable saved URL makes
 // fetchHTTPResult report a failure string instead of a response.
 func TestRefreshLastRecordSetFetchFailureAppendsFailureTurn(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
@@ -1000,6 +1046,7 @@ func TestRefreshLastRecordSetFetchFailureAppendsFailureTurn(t *testing.T) {
 // of leaving them permanently uncovered.
 
 func TestEqualColumnsAndRowsDetectsColumnNameMismatch(t *testing.T) {
+	t.Parallel()
 	a := secureread.Result{Columns: []string{"a", "b"}, Rows: []secureread.Row{{Data: map[string]any{"a": 1}}}}
 	b := secureread.Result{Columns: []string{"a", "c"}, Rows: []secureread.Row{{Data: map[string]any{"a": 1}}}}
 	if equalColumnsAndRows(a, b) {
@@ -1011,6 +1058,7 @@ func TestEqualColumnsAndRowsDetectsColumnNameMismatch(t *testing.T) {
 }
 
 func TestExportCommandHomeDirLookupError(t *testing.T) {
+	// Not parallel: mutates HOME environment variable.
 	u, _ := newTestChatUI(t, nil, Turn{})
 	u.lastGridRecordSetID = "rs"
 	u.snapshot.RecordSets = map[string]RecordSet{"rs": {ID: "rs", Result: secureread.Result{Columns: []string{"a"}}}}
@@ -1024,6 +1072,7 @@ func TestExportCommandHomeDirLookupError(t *testing.T) {
 // "if err := u.workspace.refresh(); err != nil" branch: a canceled context
 // makes SessionChat.FindBookmarks (called from workspacePanel.refresh) fail.
 func TestLoadSessionWorkspaceRefreshErrorIsReported(t *testing.T) {
+	t.Parallel()
 	u, sessions := newTestChatUI(t, nil, Turn{})
 	snapshot, err := sessions.Snapshot(context.Background())
 	if err != nil {
@@ -1042,6 +1091,7 @@ func TestLoadSessionWorkspaceRefreshErrorIsReported(t *testing.T) {
 // HTTP-document versionBadge branches (both "changed" and "unchanged")
 // on a session reload.
 func TestLoadSessionHTTPDocumentVersionBadges(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	session, err := store.Create(ctx, "Docs")
@@ -1115,6 +1165,7 @@ func TestLoadSessionHTTPDocumentVersionBadges(t *testing.T) {
 // (chatui.go): it runs right after ApplyWorkspaceAction succeeds and, here,
 // closes the store's db out from under the subsequent Snapshot call.
 func TestApplyWorkspaceActionSnapshotErrorIsReported(t *testing.T) {
+	// Not parallel: mutates package-level testAfterApplyWorkspaceAction seam.
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
@@ -1145,6 +1196,7 @@ func TestApplyWorkspaceActionSnapshotErrorIsReported(t *testing.T) {
 // after AppendUser succeeds) is the deterministic seam: closing the store's
 // db there fails the very next write without racing it.
 func TestRefreshLastRecordSetSaveFailureAfterAppendUser(t *testing.T) {
+	// Not parallel: mutates package-level testAfterRefreshAppendUser seam.
 	ctx := context.Background()
 	store := openTestStore(t, testStorePath(t), testScope())
 	sessions, err := NewSessionChat(ctx, store, &contextualStub{}, "sqlite:///chinook.db")
@@ -1201,6 +1253,7 @@ func TestRefreshLastRecordSetSaveFailureAfterAppendUser(t *testing.T) {
 // comment says NewUI historically passed context.Background(), but a nil
 // caller must not panic downstream).
 func TestNewChatUINilContextDefaultsToBackground(t *testing.T) {
+	t.Parallel()
 	u := NewChatUI(nil, nil, "model") //nolint:staticcheck // exercising the nil-ctx fallback deliberately
 	if u.ctx == nil {
 		t.Fatal("expected NewChatUI to default a nil ctx to context.Background()")

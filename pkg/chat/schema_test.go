@@ -8,6 +8,7 @@ import (
 )
 
 func TestFormatSchemaContext(t *testing.T) {
+	t.Parallel()
 	schema := &api.CatalogSchema{Relations: []api.CatalogRelation{{
 		Schema: "main", Name: "Customer", DbType: "BASE TABLE",
 		Columns: []api.CatalogColumn{{Name: "CustomerId", DbType: "INTEGER"}, {Name: "City", DbType: "TEXT"}},

@@ -1136,7 +1136,7 @@ func TestCoverage100_Store_DeepBranches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer roFile.Close()
+	defer func() { _ = roFile.Close() }()
 	writeItemCreateTemp = func(string, string) (tempFile, error) {
 		return roFile, nil
 	}

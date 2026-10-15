@@ -1142,7 +1142,7 @@ func TestSessionDashboardRecordsetTypesAndLimits(t *testing.T) {
 
 	db, err := sql.Open("sqlite", ":memory:")
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// 1. Invalid query
 	_, err = sessionDashboardRecordset(ctx, db, "SELECT * FROM nonexistent_table WHERE id=?", 1)

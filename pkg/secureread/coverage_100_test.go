@@ -159,8 +159,8 @@ func TestCoverage100_Recursive_SuccessAndLeafReader(t *testing.T) {
 	}
 
 	// 5. recursiveAggregation checks
-	if !recursiveAggregation(subQuery) {
-		// subQuery has no agg
+	if recursiveAggregation(subQuery) {
+		t.Fatal("expected subQuery to not have recursive aggregation")
 	}
 	aggSubDoc := "from: {query: {from: {name: Item}, columns: [{field: Category}], groupBy: [{field: Category}], as: sub}}\ncolumns: [{field: Category}]\n"
 	aggSubQ, _ := dtql.Deserialize([]byte(aggSubDoc))

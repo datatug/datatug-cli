@@ -82,11 +82,11 @@ func TestDBCopyFlagsAndRecoverAction(t *testing.T) {
 		cmd := dbCopyCommand()
 		switch flagName {
 		case "parallel-streams":
-			cmd.Flags().Set(flagName, "2")
+			_ = cmd.Flags().Set(flagName, "2")
 		case "progress":
-			cmd.Flags().Set(flagName, "true")
+			_ = cmd.Flags().Set(flagName, "true")
 		default:
-			cmd.Flags().Set(flagName, "val")
+			_ = cmd.Flags().Set(flagName, "val")
 		}
 		require.True(t, copyOnlyFlagChanged(cmd), "flag %s should be recognized as copy-only", flagName)
 	}
@@ -186,22 +186,22 @@ func TestDBCopyDirectivesAndValidation(t *testing.T) {
 
 	// buildDirectivesFromFlags: --filter-config mixed with other filter flag
 	cmd := dbCopyCommand()
-	cmd.Flags().Set("filter-config", "config.yaml")
-	cmd.Flags().Set("include", "table1")
+	_ = cmd.Flags().Set("filter-config", "config.yaml")
+	_ = cmd.Flags().Set("include", "table1")
 	_, err = buildDirectivesFromFlags(cmd)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "mutually exclusive")
 
 	// buildDirectivesFromFlags: --filter-config non-existent
 	cmd = dbCopyCommand()
-	cmd.Flags().Set("filter-config", "non_existent_config.yaml")
+	_ = cmd.Flags().Set("filter-config", "non_existent_config.yaml")
 	_, err = buildDirectivesFromFlags(cmd)
 	require.Error(t, err)
 
 	// buildDirectivesFromFlags: valid where and limit
 	cmd = dbCopyCommand()
-	cmd.Flags().Set("where", "users:age:>:21")
-	cmd.Flags().Set("limit", "users:10")
+	_ = cmd.Flags().Set("where", "users:age:>:21")
+	_ = cmd.Flags().Set("limit", "users:10")
 	d, err := buildDirectivesFromFlags(cmd)
 	require.NoError(t, err)
 	require.NotNil(t, d.Where["users"])
@@ -209,13 +209,13 @@ func TestDBCopyDirectivesAndValidation(t *testing.T) {
 
 	// buildDirectivesFromFlags: invalid where
 	cmd = dbCopyCommand()
-	cmd.Flags().Set("where", "bad_where_format")
+	_ = cmd.Flags().Set("where", "bad_where_format")
 	_, err = buildDirectivesFromFlags(cmd)
 	require.Error(t, err)
 
 	// buildDirectivesFromFlags: invalid limit
 	cmd = dbCopyCommand()
-	cmd.Flags().Set("limit", "bad_limit_format")
+	_ = cmd.Flags().Set("limit", "bad_limit_format")
 	_, err = buildDirectivesFromFlags(cmd)
 	require.Error(t, err)
 

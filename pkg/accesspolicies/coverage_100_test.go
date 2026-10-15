@@ -403,11 +403,11 @@ scopes:
 	assert.ErrorContains(t, err, "exceeds the executor's exact comparison range")
 
 	// uint valid
-	v, err = ExactVariables(map[string]any{"u": uint(123)})
+	_, err = ExactVariables(map[string]any{"u": uint(123)})
 	assert.NoError(t, err)
 
 	// float32 & float64 valid
-	v, err = ExactVariables(map[string]any{"f32": float32(1.5), "f64": float64(2.5)})
+	_, err = ExactVariables(map[string]any{"f32": float32(1.5), "f64": float64(2.5)})
 	assert.NoError(t, err)
 
 	// json.Number: invalid, float exact (0.5), float non-exact (0.1)
@@ -428,7 +428,7 @@ scopes:
 	assert.Equal(t, bytesVal, v["b"])
 
 	// []any valid and error
-	v, err = ExactVariables(map[string]any{"arr": []any{int(1), "two"}})
+	_, err = ExactVariables(map[string]any{"arr": []any{int(1), "two"}})
 	assert.NoError(t, err)
 
 	_, err = ExactVariables(map[string]any{"arr_err": []any{struct{}{}}})
@@ -438,7 +438,7 @@ scopes:
 	type MyInt8 int8
 	type MyUint8 uint8
 	type MyFloat float32
-	v, err = ExactVariables(map[string]any{
+	_, err = ExactVariables(map[string]any{
 		"mi8":  MyInt8(8),
 		"mu8":  MyUint8(8),
 		"mf":   MyFloat(1.25),

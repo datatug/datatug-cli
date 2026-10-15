@@ -229,7 +229,7 @@ func TestCoverageFinish100_ProjectQueryAdapter_GetQuery(t *testing.T) {
 	defer ConfigureSecureSession(secureread.Session{}, nil, Capabilities{})
 
 	branch := git("symbolic-ref", "--short", "HEAD")
-	head := git("rev-parse", "HEAD")
+	var head string
 
 	// Store setup
 	filestore.SetProjectPath(pID, dir)
@@ -395,7 +395,7 @@ func TestCoverageFinish100_ProjectQueryAdapter_SaveQuery(t *testing.T) {
 
 	// 2. Bad store ID
 	badStoreReq := req
-	badStoreReq.ProjectRef.StoreID = "bad"
+	badStoreReq.StoreID = "bad"
 	_, err = adapter.SaveQuery(ctx, scope, badStoreReq)
 	assert.ErrorIs(t, err, ErrUnknownStoreID)
 

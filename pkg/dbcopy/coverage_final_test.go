@@ -68,24 +68,6 @@ func TestBigQueryTarget_PreflightAndEncodeRow_FinalCov(t *testing.T) {
 	require.True(t, len(encoded) > 0 && encoded[len(encoded)-1] == '\n')
 }
 
-type limitFailingWriter struct {
-	limit int
-	wrote int
-}
-
-func (w *limitFailingWriter) Write(p []byte) (int, error) {
-	remaining := w.limit - w.wrote
-	if remaining <= 0 {
-		return 0, errors.New("limit exceeded")
-	}
-	if len(p) > remaining {
-		w.wrote += remaining
-		return remaining, errors.New("limit exceeded")
-	}
-	w.wrote += len(p)
-	return len(p), nil
-}
-
 // Not parallel: mutates exportRecordsWriterNewBuffered.
 func TestExportRecordsWriter_WriteByteFail_FinalCov(t *testing.T) {
 	row := map[string]any{"key": "val"}
@@ -126,7 +108,7 @@ func TestExportStorageClasses_FinalCov(t *testing.T) {
 	w2 := newStorageClassWriter(tmpDir)
 	f2, err := os.Create(filepath.Join(tmpDir, "sync_fail.jsonl"))
 	require.NoError(t, err)
-	defer f2.Close()
+	defer func() { _ = f2.Close() }()
 	w2.file = f2
 	w2.buffer = bufio.NewWriter(f2)
 	err = w2.finishFile()
@@ -141,7 +123,7 @@ func TestExportStorageClasses_FinalCov(t *testing.T) {
 	w3 := newStorageClassWriter(tmpDir)
 	f3, err := os.Create(filepath.Join(tmpDir, "close_fail.jsonl"))
 	require.NoError(t, err)
-	defer f3.Close()
+	defer func() { _ = f3.Close() }()
 	w3.file = f3
 	w3.buffer = bufio.NewWriter(f3)
 	err = w3.finishFile()
@@ -151,7 +133,7 @@ func TestExportStorageClasses_FinalCov(t *testing.T) {
 	w4 := newStorageClassWriter(tmpDir)
 	f4, err := os.Create(filepath.Join(tmpDir, "rotate_fail.jsonl"))
 	require.NoError(t, err)
-	defer f4.Close()
+	defer func() { _ = f4.Close() }()
 	w4.file = f4
 	w4.buffer = bufio.NewWriter(f4)
 	err = w4.rotate()
@@ -161,7 +143,7 @@ func TestExportStorageClasses_FinalCov(t *testing.T) {
 	w5 := newStorageClassWriter(tmpDir)
 	f5, err := os.Create(filepath.Join(tmpDir, "close_finish_fail.jsonl"))
 	require.NoError(t, err)
-	defer f5.Close()
+	defer func() { _ = f5.Close() }()
 	w5.file = f5
 	w5.buffer = bufio.NewWriter(f5)
 	_, err = w5.Close()

@@ -165,14 +165,14 @@ func TestCoverage100_RelatedRecords(t *testing.T) {
 		}
 		return nil
 	}
-	res, err = app.PreviewRelationships(ctx, rec, map[string]any{"main.users.id": int64(1)})
+	_, err = app.PreviewRelationships(ctx, rec, map[string]any{"main.users.id": int64(1)})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Missing or null row field
 	app.CanReadTarget = func(ctx context.Context, target RelationInstance) error { return nil }
-	res, err = app.PreviewRelationships(ctx, rec, map[string]any{})
+	_, err = app.PreviewRelationships(ctx, rec, map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func TestCoverage100_ResultColumnsMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	_, err = db.Exec(`
 		CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT COLLATE NOCASE, notes TEXT);

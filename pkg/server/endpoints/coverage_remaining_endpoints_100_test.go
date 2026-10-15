@@ -918,7 +918,6 @@ func TestCoverageRemaining100_DetectiveIncidentsSuite(t *testing.T) {
 	scope := incidents.ProjectRef{StoreID: "local", ProjectID: "p", Environment: "qa"}
 
 	// 2. detectiveIncidentView store.Events error -> line 86
-	type errEventsStore struct{ incidents.APIStore }
 	rReq := httptest.NewRequest(http.MethodGet, "/test", nil)
 	incItem := incidents.Incident{
 		Ref:      incidents.IncidentRef{StoreID: "ops", IncidentID: "inc1"},

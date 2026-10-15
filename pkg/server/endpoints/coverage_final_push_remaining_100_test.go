@@ -541,7 +541,7 @@ func TestCoverage100_DetectiveIncidentsBranches(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, wLinkArchived.Code)
 
 	// detectiveIncidentActionHandler start-case with invalid incident context -> line 271
-	scopeFact := investigation.ProjectScope{StoreID: scope.StoreID, ProjectID: scope.ProjectID, Environment: scope.Environment}
+	scopeFact := investigation.ProjectScope(scope)
 	badIncMut, err := opsStore.Create(ctx, incidents.CreateMutation{
 		MutationID: "mut-bad-facts", StoreID: "ops", UID: "inc-bad-facts", Title: "Bad Facts Inc", Description: "Desc", At: time.Now(),
 		Reporter:       incidents.Actor{Kind: incidents.ActorHuman, ID: "alice", Via: incidents.ActorViaAPI},

@@ -52,7 +52,7 @@ func TestBigQueryExitCodeAndFileLimit(t *testing.T) {
 func TestBigQueryPolicyOptionsAndFailures(t *testing.T) {
 	t.Parallel()
 	cmd := queryBigQueryCommand()
-	cmd.Flags().Set("var", "invalid_no_equal_sign")
+	_ = cmd.Flags().Set("var", "invalid_no_equal_sign")
 	_, err := bigQueryPolicyOptions(cmd)
 	require.Error(t, err)
 

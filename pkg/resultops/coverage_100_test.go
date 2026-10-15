@@ -3,6 +3,7 @@ package resultops
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"math/big"
 	"strings"
 	"testing"
@@ -151,7 +152,7 @@ func TestResultops_Encoding_Normalization_And_Comparison(t *testing.T) {
 	assert.Nil(t, cellOut.Value)
 
 	// line 631: normalizeValue float -0.0
-	negZero, err := normalizeValue(typeFloat, float64(-0.0))
+	negZero, err := normalizeValue(typeFloat, math.Copysign(0, -1))
 	assert.NoError(t, err)
 	assert.Equal(t, float64(0), negZero)
 

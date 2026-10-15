@@ -131,7 +131,7 @@ func TestExplorePaneViewsAndUpdates(t *testing.T) {
 	require.False(t, pane.contentFocused)
 
 	// Non-key message delegates to app
-	cmd = step(tea.WindowSizeMsg{Width: 80, Height: 24})
+	_ = step(tea.WindowSizeMsg{Width: 80, Height: 24})
 	require.NotNil(t, pane)
 }
 

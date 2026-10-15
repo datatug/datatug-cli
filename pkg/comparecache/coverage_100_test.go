@@ -169,7 +169,7 @@ func TestMigratePolicyFingerprint_EdgeCases(t *testing.T) {
 	dir := t.TempDir()
 	db, err := sql.Open("sqlite", filepath.Join(dir, "test.db"))
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Closed DB
 	closedDB, _ := sql.Open("sqlite", filepath.Join(dir, "closed.db"))

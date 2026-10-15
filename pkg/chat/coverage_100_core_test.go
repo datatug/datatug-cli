@@ -555,7 +555,7 @@ func TestCoverageChatUIPickersGlobalKeysAndArchivedView(t *testing.T) {
 	}
 
 	// F1 pushes hotkeys overlay
-	cmd, handled = u.globalKeys(tea.KeyPressMsg{Code: tea.KeyF1})
+	_, handled = u.globalKeys(tea.KeyPressMsg{Code: tea.KeyF1})
 	if !handled {
 		t.Fatal("expected F1 to be handled")
 	}

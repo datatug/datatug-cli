@@ -39,12 +39,6 @@ func (m mockINGRWriter) WriteRecords(recordsDelimiter int, r ...ingr.Record) (in
 }
 func (m mockINGRWriter) Close() error { return m.closeErr }
 
-type mockPlainDB struct {
-	dal.DB
-}
-
-func (m mockPlainDB) Adapter() dal.Adapter { return mockAdapter{name: "dalgo2sqlite"} }
-
 type failingWriter struct {
 	err error
 }
@@ -209,18 +203,22 @@ func TestBigQueryTarget_Coverage100(t *testing.T) {
 	now := time.Now().Truncate(time.Microsecond)
 	str, ok = temporalSourceText("DATE", now)
 	require.True(t, ok)
+	require.NotEmpty(t, str)
 	str, ok = temporalSourceText("TIME", now)
 	require.True(t, ok)
+	require.NotEmpty(t, str)
 	// non-microsecond nanoseconds
 	notMicro := now.Add(123 * time.Nanosecond)
 	_, ok = temporalSourceText("TIME", notMicro)
 	require.False(t, ok)
 	str, ok = temporalSourceText("DATETIME", now)
 	require.True(t, ok)
+	require.NotEmpty(t, str)
 	_, ok = temporalSourceText("DATETIME", notMicro)
 	require.False(t, ok)
 	str, ok = temporalSourceText("TIMESTAMP", now)
 	require.True(t, ok)
+	require.NotEmpty(t, str)
 	_, ok = temporalSourceText("TIMESTAMP", notMicro)
 	require.False(t, ok)
 

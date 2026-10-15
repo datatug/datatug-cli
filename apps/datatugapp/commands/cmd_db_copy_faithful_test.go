@@ -98,15 +98,31 @@ func TestDBCopyFaithful_Refusals(t *testing.T) {
 	target := "sqlite://" + path
 
 	for name, args := range map[string][]string{
-		"where is not supported": {"--where", "p:id:=:1"},
-		"limit is not supported": {"--limit", "p:1"},
-		"to-schema on sqlite":    {"--to-schema", "x"},
-		"unknown table":          {"--include", "nope"},
-		"reload":                 {"--overwrite", "reload"},
+		"to-schema on sqlite":          {"--to-schema", "x"},
+		"unknown table":                {"--include", "nope"},
+		"a where that is malformed":    {"--where", "p:id:="},
+		"a where on an unknown table":  {"--where", "nope:id:=:1"},
+		"a where on an unknown field":  {"--where", "p:nope:=:1"},
+		"a where with a bad value":     {"--where", "p:id:=:x"},
+		"a where with a bad operator":  {"--where", "p:id:<>:1"},
+		"a limit that is not a number": {"--limit", "p:x"},
+		"a limit on an unknown table":  {"--limit", "nope:1"},
+		"parallel streams below one":   {"--parallel-streams", "-1"},
+		"include and exclude":          {"--include", "p", "--exclude", "p"},
 	} {
-		_, _, err := runCopy(t, append([]string{"db", "copy", "--from", source, "--to", target}, args...)...)
+		stdout, _, err := runCopy(t, append([]string{"db", "copy", "--from", source, "--to", target, "--json"}, args...)...)
 		require.Error(t, err, name)
 		assert.Equal(t, 2, exitCodeOf(t, err), name)
+		// --json prints an error object for a failure that comes before any copy, too.
+		var report struct {
+			Status   string
+			ExitCode int
+			Error    string
+		}
+		require.NoError(t, json.Unmarshal(stdout.Bytes(), &report), name)
+		assert.Equal(t, "failed", report.Status, name)
+		assert.Equal(t, 2, report.ExitCode, name)
+		assert.NotEmpty(t, report.Error, name)
 	}
 
 	// The same file on both sides.
@@ -145,12 +161,16 @@ func TestDBCopyFaithful_APathThatLooksLikeAURLIsNotCreated(t *testing.T) {
 func TestDBCopyFaithful_PostgresWithThePreviewOffIsRefused(t *testing.T) {
 	t.Setenv(dbcopy.PostgresPreviewEnv, "")
 	source := sqliteFixture(t, `CREATE TABLE p (id INTEGER PRIMARY KEY)`)
+	// A dry run opens no target, but a PostgreSQL target is a preview all the same.
+	for _, extra := range [][]string{{"--dry-run", "--json"}, {}} {
+		_, _, err := runCopy(t, append([]string{"db", "copy", "--from", source, "--to", "postgres://u:pw@127.0.0.1:1/db"}, extra...)...)
+		require.Error(t, err)
+		assert.Equal(t, 4, exitCodeOf(t, err))
+		assert.Equal(t, "open --to: "+dbcopy.ErrPostgresPreview.Error(), err.Error())
+	}
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
 	_, _, err := runCopy(t, "db", "copy", "--from", source, "--to", "postgres://u:pw@127.0.0.1:1/db", "--dry-run", "--json")
-	require.NoError(t, err, "a dry run does not open the target")
-	_, _, err = runCopy(t, "db", "copy", "--from", source, "--to", "postgres://u:pw@127.0.0.1:1/db")
-	require.Error(t, err)
-	assert.Equal(t, 4, exitCodeOf(t, err))
-	assert.Equal(t, "open --to: "+dbcopy.ErrPostgresPreview.Error(), err.Error())
+	require.NoError(t, err, "with the switch on, a dry run does not open the target")
 }
 
 func openSQLiteForTest(t *testing.T, path string) *sql.DB {
@@ -193,6 +213,9 @@ func (emptyPGConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error)
 }
 func (emptyPGConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
 	return emptyPGRows{}, nil
+}
+func (emptyPGConn) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return driver.RowsAffected(0), nil
 }
 
 type emptyPGTx struct{}

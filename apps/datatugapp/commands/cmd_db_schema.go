@@ -11,6 +11,7 @@ import (
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/schemers/dalgoschema"
 	"github.com/spf13/cobra"
 )
 
@@ -31,13 +32,42 @@ type schemaEntry struct {
 	Schema string `json:"schema"`
 	Name   string `json:"name"`
 	Kind   string `json:"kind"`
+	// Columns is set by --columns; a pointer to a nil slice is a table whose
+	// columns could not be read and prints as null.
+	Columns *[]schemaColumn `json:"columns,omitempty"`
+	// RowCount is set by --counts, for tables only; a table that cannot be
+	// counted prints null.
+	RowCount *rowCount `json:"rowCount,omitempty"`
+
+	ref         dal.CollectionRef
+	viewColumns []string
+}
+
+// schemaColumn is one column of a table or view.
+type schemaColumn struct {
+	Name               string  `json:"name"`
+	Type               string  `json:"type"`
+	Nullable           bool    `json:"nullable"`
+	PrimaryKeyPosition int     `json:"primaryKeyPosition,omitempty"`
+	Default            *string `json:"default,omitempty"`
+}
+
+// rowCount is a count that prints as null when the count is unknown.
+type rowCount struct{ n *int }
+
+func (c rowCount) MarshalJSON() ([]byte, error) {
+	if c.n == nil {
+		return []byte("null"), nil
+	}
+	return json.Marshal(*c.n)
 }
 
 // schemaListing is the JSON document `db schema` prints.
 type schemaListing struct {
-	Provider string        `json:"provider"`
-	Target   string        `json:"target"`
-	Tables   []schemaEntry `json:"tables"`
+	Provider     string        `json:"provider"`
+	Target       string        `json:"target"`
+	DetectedFrom string        `json:"detectedFrom"`
+	Tables       []schemaEntry `json:"tables"`
 }
 
 // postgresSchemaReader is what a PostgreSQL source offers beyond dbschema: its
@@ -69,6 +99,8 @@ func dbSchemaCommand() *cobra.Command {
 	}
 	cmd.Flags().String("db", "", "Database URL: "+dbSchemesHelp())
 	cmd.Flags().String("format", "json", "Output format: json or text")
+	cmd.Flags().Bool("columns", false, "Also list each table's and view's columns (name, declared type, nullability, primary key position, default)")
+	cmd.Flags().Bool("counts", false, "Also count the rows of each table (can be slow on large tables); a table that cannot be counted reports null")
 	return cmd
 }
 
@@ -78,7 +110,13 @@ func dbSchemaAction(cmd *cobra.Command, _ []string) error {
 	if format != "json" && format != "text" {
 		return Exit(fmt.Sprintf("unsupported --format %q: want one of json, text", format), exitCodeUsage)
 	}
-	ref, err := dbcopy.Parse(dbArg)
+	withColumns, _ := cmd.Flags().GetBool("columns")
+	withCounts, _ := cmd.Flags().GetBool("counts")
+	source, detectedFrom, err := resolveSchemaSource(dbArg)
+	if err != nil {
+		return Exit(err.Error(), exitCodeUsage)
+	}
+	ref, err := dbcopy.Parse(source)
 	if err != nil {
 		return Exit(err.Error(), exitCodeUsage)
 	}
@@ -101,7 +139,13 @@ func dbSchemaAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return Exit(dbcopy.RedactErrorWithSecrets(dbcopy.RedactErrorWithSecrets(err, ref.Path), dbArg).Error(), exitCodeDatabase)
 	}
-	listing := schemaListing{Provider: ref.Scheme, Target: schemaTarget(ref), Tables: entries}
+	if withColumns {
+		addSchemaColumns(ctx, db, entries)
+	}
+	if withCounts {
+		addSchemaCounts(ctx, db, ref.Scheme, entries)
+	}
+	listing := schemaListing{Provider: ref.Scheme, Target: schemaTarget(ref), DetectedFrom: detectedFrom, Tables: entries}
 	return writeSchemaListing(cmd.OutOrStdout(), format, listing)
 }
 
@@ -146,7 +190,7 @@ func sqliteEntries(ctx context.Context, db dal.DB) ([]schemaEntry, error) {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}
 	for _, ref := range refs {
-		entries = append(entries, schemaEntry{Schema: sqliteSchemaName, Name: ref.Name(), Kind: schemaKindTable})
+		entries = append(entries, schemaEntry{Schema: sqliteSchemaName, Name: ref.Name(), Kind: schemaKindTable, ref: ref})
 	}
 	if reader, ok := dal.As[dbschema.SourceViewReader](db); ok {
 		views, viewErr := reader.ListSourceViews(ctx)
@@ -154,7 +198,7 @@ func sqliteEntries(ctx context.Context, db dal.DB) ([]schemaEntry, error) {
 			return nil, fmt.Errorf("list views: %w", viewErr)
 		}
 		for _, view := range views {
-			entries = append(entries, schemaEntry{Schema: sqliteSchemaName, Name: view.Name, Kind: schemaKindView})
+			entries = append(entries, schemaEntry{Schema: sqliteSchemaName, Name: view.Name, Kind: schemaKindView, viewColumns: view.Columns})
 		}
 	}
 	return entries, nil
@@ -188,7 +232,7 @@ func postgresEntries(ctx context.Context, db dal.DB) ([]schemaEntry, error) {
 			if isView[ref.Name()] {
 				kind = schemaKindView
 			}
-			entries = append(entries, schemaEntry{Schema: schema, Name: ref.Name(), Kind: kind})
+			entries = append(entries, schemaEntry{Schema: schema, Name: ref.Name(), Kind: kind, ref: ref})
 		}
 	}
 	return entries, nil
@@ -219,4 +263,84 @@ func writeSchemaListing(w io.Writer, format string, listing schemaListing) error
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(listing)
+}
+
+// addSchemaColumns reads the columns of every entry. A table whose columns
+// cannot be read gets null; a view of a source that describes only tables
+// (SQLite) gets the column names its catalog lists, with no type.
+func addSchemaColumns(ctx context.Context, db dal.DB, entries []schemaEntry) {
+	for i := range entries {
+		entry := &entries[i]
+		var columns []schemaColumn
+		if entry.Kind == schemaKindView && entry.viewColumns != nil {
+			columns = viewColumns(entry.viewColumns)
+		} else if def, err := dbschema.DescribeCollection(ctx, db, &entry.ref); err == nil {
+			columns = columnsOf(def)
+		}
+		entry.Columns = &columns
+	}
+}
+
+func viewColumns(names []string) []schemaColumn {
+	columns := make([]schemaColumn, 0, len(names))
+	for _, name := range names {
+		columns = append(columns, schemaColumn{Name: name, Nullable: true})
+	}
+	return columns
+}
+
+// columnsOf builds the columns of def. The declared type, the default and the
+// primary key position come from the provider's own catalog text when it
+// keeps one (SourceDefinition), and from the portable definition otherwise.
+func columnsOf(def *dbschema.CollectionDef) []schemaColumn {
+	source := map[string]dbschema.SourceColumnDef{}
+	if def.SourceDefinition != nil {
+		for _, column := range def.SourceDefinition.Columns {
+			source[column.Name] = column
+		}
+	}
+	columns := make([]schemaColumn, 0, len(def.Fields))
+	for _, field := range def.Fields {
+		column := schemaColumn{Name: string(field.Name), Type: field.Type.String(), Nullable: field.Nullable}
+		for position, name := range def.PrimaryKey {
+			if name == field.Name {
+				column.PrimaryKeyPosition = position + 1
+			}
+		}
+		if declared, ok := source[column.Name]; ok {
+			column.Type = declared.DeclaredType
+			column.Default = declared.DefaultSQL
+			if declared.PrimaryKeyPosition > 0 {
+				column.PrimaryKeyPosition = declared.PrimaryKeyPosition
+			}
+		}
+		columns = append(columns, column)
+	}
+	return columns
+}
+
+// addSchemaCounts counts the rows of every table with the native COUNT(*) of
+// the source; a source that cannot run it natively, or a table whose count
+// fails, reports null rather than reading the table here.
+func addSchemaCounts(ctx context.Context, db dal.DB, provider string, entries []schemaEntry) {
+	counter := dalgoschema.NewNativeCounter(db)
+	if provider == "sqlite" {
+		// SQLite runs COUNT(*) itself, but its adapter does not declare it.
+		counter = dalgoschema.NewNativeCounterWithCapabilities(db, dal.QueryCapabilities{Aggregate: dal.AggregateCapabilities{Count: true}})
+	}
+	for i := range entries {
+		entry := &entries[i]
+		if entry.Kind != schemaKindTable {
+			continue
+		}
+		schema := entry.Schema
+		if provider == "sqlite" {
+			schema = ""
+		}
+		n, err := counter.CountRecords(ctx, schema, entry.Name)
+		if err != nil {
+			n = nil
+		}
+		entry.RowCount = &rowCount{n: n}
+	}
 }

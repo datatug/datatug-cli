@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -540,5 +541,91 @@ func TestQueryOutputHelpers(t *testing.T) {
 	out.Reset()
 	if err := writeQueryRows(&out, "csv", []string{"a"}, rows, prov); err != nil || strings.Contains(out.String(), "provenance") {
 		t.Errorf("csv must not gain a provenance column: %q, %v", out.String(), err)
+	}
+}
+
+func TestQuery_LimitCapsRowsOfFrom(t *testing.T) {
+	url := setupQueryDB(t)
+	stdout, stderr, code := runQuery(t, "", "--db", url, "--from", "products", "--limit", "2", "--format", "json", "--no-policies")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if objects := decodeObjects(t, stdout); len(objects) != 2 {
+		t.Fatalf("--limit 2 returned %d rows", len(objects))
+	}
+}
+
+func TestQuery_LimitRefusals(t *testing.T) {
+	url := setupQueryDB(t)
+	for name, argv := range map[string][]string{
+		"negative":  {"--db", url, "--from", "products", "--limit", "-1"},
+		"with file": {"--db", url, "-f", "-", "--limit", "2"},
+	} {
+		if _, _, code := runQuery(t, "", argv...); code != exitCodeUsage {
+			t.Errorf("%s: exit %d, want %d", name, code, exitCodeUsage)
+		}
+	}
+}
+
+func sqlitePagingDB(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "pages.sqlite")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, stmt := range []string{
+		`CREATE TABLE keyed (id INTEGER PRIMARY KEY, name TEXT)`,
+		`INSERT INTO keyed VALUES (5,'e'),(3,'c'),(1,'a'),(4,'d'),(2,'b')`,
+		`CREATE TABLE loose (name TEXT)`,
+		`INSERT INTO loose VALUES ('a'),('b'),('c'),('d')`,
+		`CREATE VIEW names AS SELECT name FROM keyed`,
+	} {
+		if _, err = db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return "sqlite://" + path
+}
+
+func pagedNames(t *testing.T, url, table string, argv ...string) []string {
+	t.Helper()
+	args := append([]string{"--db", url, "--from", table, "--no-policies", "--format", "json"}, argv...)
+	stdout, stderr, code := runQuery(t, "", args...)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	var names []string
+	for _, object := range decodeObjects(t, stdout) {
+		names = append(names, object["name"].(string))
+	}
+	return names
+}
+
+func TestQuery_OffsetPagesByPrimaryKeyAndRowid(t *testing.T) {
+	url := sqlitePagingDB(t)
+	for table, want := range map[string]string{"keyed": "c d", "loose": "c d"} {
+		got := strings.Join(pagedNames(t, url, table, "--limit", "2", "--offset", "2"), " ")
+		if got != want {
+			t.Errorf("%s page = %q, want %q", table, got, want)
+		}
+	}
+	if got := strings.Join(pagedNames(t, url, "keyed", "--offset", "4"), " "); got != "e" {
+		t.Errorf("offset only = %q", got)
+	}
+	if got := strings.Join(pagedNames(t, url, "names", "--limit", "5"), " "); len(strings.Fields(got)) != 5 {
+		t.Errorf("a view is paged without ordering, got %q", got)
+	}
+}
+
+func TestQuery_OffsetOnSourceWithoutDescription(t *testing.T) {
+	url := setupQueryDB(t)
+	stdout, stderr, code := runQuery(t, "", "--db", url, "--from", "products", "--offset", "1", "--no-policies", "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if objects := decodeObjects(t, stdout); len(objects) != 2 {
+		t.Fatalf("offset 1 of 3 rows returned %d", len(objects))
 	}
 }

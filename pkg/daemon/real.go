@@ -95,6 +95,9 @@ var (
 		"LOCALAPPDATA": true, "PROGRAMDATA": true, "COMSPEC": true, "PATHEXT": true,
 		"DATATUG_DAEMON_DIR": true, "DATATUG_EVIDENCE_DIR": true,
 		"DATATUG_POLICIES_DIR": true, "DATATUG_PERSONAL_DIR": true,
+		"DATATUG_SESSION_RESULTS_DIR": true, "DATATUG_CHAT_STORE_DIR": true, "DATATUG_CHAT_PREFERENCES_DIR": true,
+		// The telemetry opt-outs: the child is the same binary and must honour them.
+		"DATATUG_TELEMETRY": true, "DO_NOT_TRACK": true, "CI": true,
 	}
 	childEnvPrefixes = []string{"LC_", "XDG_"}
 )

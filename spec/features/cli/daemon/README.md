@@ -72,7 +72,7 @@ The daemon MUST be started in its own process group with stdin from the null dev
 
 #### REQ: scrubbed-environment
 
-The daemon MUST be started with an allow-listed environment only: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`/`TMP`/`TEMP`, `TZ`, `TERM`, `LANG`, `LANGUAGE`, `LC_*`, `XDG_*`, the Windows system variables, and the non-secret directory settings `DATATUG_DAEMON_DIR`, `DATATUG_EVIDENCE_DIR`, `DATATUG_POLICIES_DIR`, `DATATUG_PERSONAL_DIR`. Everything else (`DATATUG_OPEN_DB`, tokens, passwords) MUST NOT reach the long-lived process.
+The daemon MUST be started with an allow-listed environment only: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`/`TMP`/`TEMP`, `TZ`, `TERM`, `LANG`, `LANGUAGE`, `LC_*`, `XDG_*`, the Windows system variables, and the non-secret directory settings `DATATUG_DAEMON_DIR`, `DATATUG_EVIDENCE_DIR`, `DATATUG_POLICIES_DIR`, `DATATUG_PERSONAL_DIR`, `DATATUG_SESSION_RESULTS_DIR`, `DATATUG_CHAT_STORE_DIR`, `DATATUG_CHAT_PREFERENCES_DIR`, and the telemetry opt-outs `DATATUG_TELEMETRY`, `DO_NOT_TRACK`, `CI` (the child is the same binary and MUST honour them). Everything else (`DATATUG_OPEN_DB`, tokens, passwords) MUST NOT reach the long-lived process. A consequence: the AI profile key of `--detective-ai-profile` (read from a named variable) is not available to the daemon, which never starts it with that flag.
 
 #### REQ: localhost-read-only
 

@@ -144,8 +144,9 @@ func TestNewManager(t *testing.T) {
 
 func TestScrubbedEnv(t *testing.T) {
 	got := scrubbedEnv([]string{"PATH=/bin", "path=/lower", "LC_ALL=C", "XDG_CONFIG_HOME=/x", "DATATUG_OPEN_DB=postgres://u:pw@h/d",
-		"DATATUG_TOKEN=t", "AWS_SECRET_ACCESS_KEY=k", "DATATUG_POLICIES_DIR=/p", "NOEQUALS"})
-	want := "PATH=/bin path=/lower LC_ALL=C XDG_CONFIG_HOME=/x DATATUG_POLICIES_DIR=/p"
+		"DATATUG_TOKEN=t", "AWS_SECRET_ACCESS_KEY=k", "DATATUG_POLICIES_DIR=/p", "NOEQUALS",
+		"DATATUG_TELEMETRY=0", "DO_NOT_TRACK=1", "CI=true", "DATATUG_CHAT_STORE_DIR=/c"})
+	want := "PATH=/bin path=/lower LC_ALL=C XDG_CONFIG_HOME=/x DATATUG_POLICIES_DIR=/p DATATUG_TELEMETRY=0 DO_NOT_TRACK=1 CI=true DATATUG_CHAT_STORE_DIR=/c"
 	if strings.Join(got, " ") != want {
 		t.Fatalf("got %v", got)
 	}

@@ -27,7 +27,8 @@ func dbCopyCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "copy",
 		Short: "Copy a database from one DALgo URL to another.",
-		Long: "Copies source collections and rows through DALgo adapters. A BigQuery destination uses the authenticated Google identity configured on this machine and requires an explicit dataset location. Existing BigQuery tables are never replaced. For a complete, atomic native inGitDB export, use `datatug db export`.\n\n" +
+		Long: "Between SQLite and PostgreSQL (and SQLite to SQLite) the copy is faithful: tables, columns, declared types, primary keys, foreign keys with their actions, unique constraints, indexes, check constraints, defaults and auto-increment counters are carried, and every value is copied exactly (a date stays the text it was). Anything an engine cannot carry - views across engines, triggers, expression indexes, collations, a check the target does not accept - is never dropped silently: it is listed as a warning, with --json as a machine-readable summary, and with --fail-on-warning as exit code 3. --dry-run prints the plan and changes nothing. A missing SQLite target file is created. The source is read as one snapshot and the target is written in one transaction: the copy either completes or leaves the target as it was. --where, --limit, --include and --exclude copy some rows or tables, and --overwrite=reload empties the target tables and loads them again (keeping their schema) in the same transaction. A value is never changed silently (a DECIMAL_TEXT is numeric, and the values numeric spells differently are counted in a warning; --decimals=text keeps the text): a column whose values do not fit the type its declaration suggests is carried in a type that holds them, and says so. See docs/db-copy.md.\n\n" +
+			"Other pairs copy source collections and rows through DALgo adapters. A BigQuery destination uses the authenticated Google identity configured on this machine and requires an explicit dataset location. Existing BigQuery tables are never replaced. For a complete, atomic native inGitDB export, use `datatug db export`.\n\n" +
 			"PostgreSQL (postgres://) is a preview: it opens only while " + dbcopy.PostgresPreviewEnv + "=1. A PostgreSQL --from is read through a read-only session, " +
 			"and a --from URL that turns the session's default_transaction_read_only off is refused. --to is the only place a PostgreSQL database is opened for writing.",
 		RunE: dbCopyAction,
@@ -36,6 +37,11 @@ func dbCopyCommand() *cobra.Command {
 	flags.String("from", "", "Source URL (sqlite://, ingitdb://, postgres:// read-only, http(s):// DataTug project, openvaultdb://). Required.")
 	flags.String("from-schema", "", "PostgreSQL source schema to read; defaults to public.")
 	flags.String("to", "", "Target DALgo URL (sqlite://, ingitdb://, postgres://: the only way DataTug opens PostgreSQL for writing; bigquery://PROJECT/DATASET?location=LOCATION). Required.")
+	flags.String("to-schema", "", "PostgreSQL target schema (SQLite <-> PostgreSQL copies); defaults to public. Created when missing.")
+	flags.Bool("json", false, "SQLite <-> PostgreSQL copies: print a machine-readable summary (tables, rows, created keys and indexes, warnings, exit code) on stdout.")
+	flags.Bool("dry-run", false, "SQLite <-> PostgreSQL copies: print the plan (DDL, row counts, every warning) and change nothing; the target is not opened.")
+	flags.Bool("fail-on-warning", false, "SQLite <-> PostgreSQL copies: exit 3 when anything could not be carried exactly (the copy itself is still made).")
+	flags.String("decimals", "numeric", "SQLite -> PostgreSQL copies: how a DECIMAL_TEXT column whose texts numeric would spell differently (.0000, -0.00, 1.5 for 1.50) is carried: numeric (default; the new spelling is a warning that counts the values) or text (byte-exact).")
 	flags.String("recover-job-ref", "", "Recover the same uncertain BigQuery load job using the credential-free JSON reference printed by an interrupted `db copy`; requires --to and does not resubmit source rows.")
 	flags.String("overwrite", "", "Conflict policy when target already contains source-named collections. One of: recreate, reload.")
 	flags.Int("parallel-streams", 0, "Maximum number of source tables copied concurrently. Capped to 1 when either driver advertises no concurrency.")
@@ -113,6 +119,16 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	}
 	if tgtRef.Scheme == "bigquery" && overwrite != "" {
 		return Exit("BigQuery destinations never replace existing tables; omit --overwrite and choose a new dataset or table names", 2)
+	}
+
+	// SQLite <-> PostgreSQL keeps keys, indexes, constraints and exact values: its own engine.
+	if faithfulEligible(srcRef, tgtRef) {
+		return dbCopyFaithful(cmd, srcRef, tgtRef, fromSchema, overwrite)
+	}
+	for _, name := range []string{"json", "dry-run", "fail-on-warning", "to-schema", "decimals"} {
+		if cmd.Flags().Changed(name) {
+			return Exit(fmt.Sprintf("--%s is supported only for SQLite <-> PostgreSQL copies", name), 2)
+		}
 	}
 
 	// Open both backends (REQ:exit-codes — 4 for connection failures). The source is opened as a
@@ -225,7 +241,7 @@ func dbCopyToBigQuery(ctx context.Context, source dal.DB, sourceRef dbcopy.Backe
 }
 
 func copyOnlyFlagChanged(cmd *cobra.Command) bool {
-	for _, name := range []string{"from-schema", "overwrite", "parallel-streams", "progress", "include", "exclude", "where", "limit", "filter-config"} {
+	for _, name := range []string{"from-schema", "to-schema", "json", "dry-run", "fail-on-warning", "overwrite", "parallel-streams", "progress", "decimals", "include", "exclude", "where", "limit", "filter-config"} {
 		if cmd.Flags().Changed(name) {
 			return true
 		}

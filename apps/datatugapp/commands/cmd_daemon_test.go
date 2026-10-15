@@ -53,7 +53,7 @@ func useDaemonFake(t *testing.T, f *daemonFake) {
 
 func daemonRoot() *cobra.Command {
 	root := &cobra.Command{Use: "datatug", SilenceUsage: true, SilenceErrors: true}
-	addFromFlag(root)
+	addClientFlag(root)
 	root.AddCommand(daemonCommand())
 	return root
 }
@@ -90,7 +90,7 @@ func TestDaemonStatus(t *testing.T) {
 func TestDaemonStart(t *testing.T) {
 	f := &daemonFake{}
 	useDaemonFake(t, f)
-	out, err := runDaemon(t, "start", "--from", "claude-mod")
+	out, err := runDaemon(t, "start", "--client", "claude-mod")
 	if err != nil || f.spawned != 1 || !strings.Contains(out, `"running": true`) || !strings.Contains(out, `"startedBy": "claude-mod"`) {
 		t.Fatalf("%s %v", out, err)
 	}
@@ -105,7 +105,7 @@ func TestDaemonStart(t *testing.T) {
 
 func TestDaemonStartCallerDefaultsToCLI(t *testing.T) {
 	useDaemonFake(t, &daemonFake{})
-	t.Setenv(FromEnv, "")
+	t.Setenv(ClientEnv, "")
 	out, err := runDaemon(t, "start")
 	if err != nil || !strings.Contains(out, `"startedBy": "cli"`) {
 		t.Fatalf("%s %v", out, err)

@@ -36,7 +36,7 @@ func DatatugCommand() *cobra.Command {
 			return runUI("")
 		},
 	}
-	addFromFlag(root)
+	addClientFlag(root)
 	root.Flags().BoolP(apps.TUIFlagName, apps.TUIFlagShorthand, false, apps.TUIFlagUsage)
 
 	root.AddCommand(

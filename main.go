@@ -122,7 +122,7 @@ func main() {
 	}
 
 	err := fang.Execute(context.Background(), root, fangOpts...)
-	// --from <caller>: after the command's own work (success or failure), make sure the
+	// --client <caller>: after the command's own work (success or failure), make sure the
 	// local API daemon runs. Stderr only; never the command's stdout or exit code.
 	ensureDaemon(root, args, os.Stderr)
 	if err != nil {
@@ -141,7 +141,7 @@ func main() {
 	}
 }
 
-// ensureDaemon is a seam over the --from wrapper (spec/features/cli/daemon).
+// ensureDaemon is a seam over the --client wrapper (spec/features/cli/daemon).
 var ensureDaemon = commands.EnsureDaemonForCaller
 
 var getCommand = func() (*cobra.Command, []fang.Option) {

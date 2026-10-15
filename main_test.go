@@ -357,9 +357,9 @@ func TestIsVersionJSONInvocation(t *testing.T) {
 	}
 }
 
-// TestMain_EnsuresDaemonAfterTheCommand pins the --from wrapper's place in main:
+// TestMain_EnsuresDaemonAfterTheCommand pins the --client wrapper's place in main:
 // it runs after the command's own work, also when that work failed, and does
-// not change the exit code (spec/features/cli/daemon#req:from-ensures-daemon).
+// not change the exit code (spec/features/cli/daemon#req:client-ensures-daemon).
 func TestMain_EnsuresDaemonAfterTheCommand(t *testing.T) {
 	getCommandBackup, ensureBackup, osExitBackup := getCommand, ensureDaemon, osExit
 	dtlogEnqueueBackup, dtlogStartBackup := dtlogEnqueue, dtlogStart

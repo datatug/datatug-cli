@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +35,7 @@ func useDaemonFake(t *testing.T, f *daemonFake) {
 			Dir:       dir,
 			Exe:       func() (string, error) { return "/bin/datatug", nil },
 			Probe:     func(int) (string, bool) { return "v9", f.up },
+			Dial:      func(int) bool { return f.up },
 			PortFree:  func(int) bool { return true },
 			Alive:     func(int) bool { return f.up },
 			Owns:      func(int, int) bool { return true },
@@ -169,16 +172,16 @@ func TestDaemonURL(t *testing.T) {
 	out, err := runDaemon(t, args...)
 	var link daemon.Link
 	if err != nil || json.Unmarshal([]byte(out), &link) != nil ||
-		link.URL != "https://datatug.app/store/http-127.0.0.1:8989/project/demo/env/dev/db/Chinook/table/Album" ||
+		link.URL != "https://datatug.app/store/http-127.0.0.1:8989/project/demo/env/dev/db/Chinook/table/Album?schema=" ||
 		link.Kind != daemon.KindTableMetadata || link.Running {
 		t.Fatalf("%s %v", out, err)
 	}
 	out, err = runDaemon(t, append(args, "--records", "--limit", "10", "--format", "text")...)
-	if err != nil || strings.TrimSpace(out) != "https://datatug.app/store/http-127.0.0.1:8989/project/demo/env/dev/db/Chinook/table/Album/records?limit=10" {
+	if err != nil || strings.TrimSpace(out) != "https://datatug.app/store/http-127.0.0.1:8989/project/demo/env/dev/db/Chinook/table/Album/records?limit=10&schema=" {
 		t.Fatalf("%q %v", out, err)
 	}
 	out, err = runDaemon(t, append(args, "--record", `{"AlbumId":1}`, "--view", "--schema", "main")...)
-	if err != nil || !strings.Contains(out, `/view/Album/record?pk=`) || !strings.Contains(out, `"uiSupport": "pending"`) {
+	if err != nil || !strings.Contains(out, `/view/Album/record?schema=main#pk=`) || !strings.Contains(out, `"uiSupport": "pending"`) {
 		t.Fatalf("%s %v", out, err)
 	}
 	if _, err = runDaemon(t, "url", "--project", "demo"); exitCodeOf(t, err) != exitCodeUsage {
@@ -226,5 +229,83 @@ func TestServeIdleTimeoutReachesServer(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	if err := cmd.Execute(); err != nil || got != 2*time.Hour {
 		t.Fatalf("idle = %v, err = %v", got, err)
+	}
+}
+
+func TestDaemonURLByReference(t *testing.T) {
+	useDaemonFake(t, &daemonFake{})
+	t.Setenv(daemon.UIBaseEnv, "")
+	registeredSQLiteSource(t)
+	const prefix = "https://datatug.app/store/http-127.0.0.1:8989/project/shop/env/local/db/shop/table/Customer"
+	for _, ref := range []string{"datatug://shop/shop", "datatug://shop/shop?env=local"} {
+		out, err := runDaemon(t, "url", "--db", ref, "--table", "Customer", "--format", "text")
+		if err != nil || strings.TrimSpace(out) != prefix+"?schema=" {
+			t.Fatalf("%s: %q %v", ref, out, err)
+		}
+	}
+	out, err := runDaemon(t, "url", "--db", "datatug://shop/shop", "--table", "Customer", "--record", `{"CustomerId":9007199254740993}`, "--format", "text")
+	if err != nil || strings.TrimSpace(out) != prefix+"/record?schema=#pk=%7B%22CustomerId%22%3A%229007199254740993%22%7D" {
+		t.Fatalf("%q %v", out, err)
+	}
+}
+
+func TestDaemonURLReferenceRefusals(t *testing.T) {
+	useDaemonFake(t, &daemonFake{})
+	dbPath := registeredSQLiteSource(t)
+	_, _, err := runDbAdd(t, "--project", "shop", "--db", dbPath, "--env", "dev", "--name", "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]struct {
+		args []string
+		code int
+		msg  string
+	}{
+		"both forms":        {[]string{"--db", "datatug://shop/shop?env=dev", "--project", "shop"}, exitCodeUsage, "not both"},
+		"both forms by env": {[]string{"--db", "datatug://shop/shop?env=dev", "--env", "dev"}, exitCodeUsage, "not both"},
+		"no project":        {[]string{"--db", "datatug:///shop"}, exitCodeUsage, "names no project"},
+		"malformed":         {[]string{"--db", "datatug://shop/"}, exitCodeUsage, "datatug://<project>/<db>"},
+		"ambiguous env":     {[]string{"--db", "datatug://shop/shop"}, exitCodeUsage, "dev, local"},
+		"unknown project":   {[]string{"--db", "datatug://nope/shop"}, exitCodeNotFound, "unknown project"},
+		"unknown source":    {[]string{"--db", "datatug://shop/ghost"}, exitCodeNotFound, "not listed in any environment"},
+		"other scheme":      {[]string{"--project", "p", "--env", "e", "--db", "postgres://u:s3cret@h/d"}, exitCodeUsage, "never a connection URL"},
+		"sqlite scheme":     {[]string{"--project", "p", "--env", "e", "--db", "sqlite:///tmp/x.db"}, exitCodeUsage, "never a connection URL"},
+		"a path":            {[]string{"--project", "p", "--env", "e", "--db", "/home/user/secret-dir/x.db"}, exitCodeUsage, "never a connection URL"},
+		"dot dot":           {[]string{"--project", "p", "--env", "e", "--db", ".."}, exitCodeUsage, ""},
+	}
+	for name, c := range cases {
+		out, err := runDaemon(t, append([]string{"url", "--table", "Customer"}, c.args...)...)
+		if err == nil || exitCodeOf(t, err) != c.code || !strings.Contains(err.Error(), c.msg) {
+			t.Errorf("%s: %q %v", name, out, err)
+		}
+		if out != "" || strings.Contains(err.Error(), "s3cret") || strings.Contains(err.Error(), "secret-dir") {
+			t.Errorf("%s: leaked: %q %v", name, out, err)
+		}
+	}
+}
+
+func TestDaemonURLNeverStartsTheDaemon(t *testing.T) {
+	f := &daemonFake{}
+	useDaemonFake(t, f)
+	if _, err := runDaemon(t, "url", "--project", "p", "--env", "e", "--db", "d", "--table", "t"); err != nil || f.spawned != 0 {
+		t.Fatalf("%v %d", err, f.spawned)
+	}
+}
+
+func TestDaemonURLReferenceStoreFailure(t *testing.T) {
+	useDaemonFake(t, &daemonFake{})
+	registeredSQLiteSource(t)
+	// the project's environments cannot be read
+	dir := t.TempDir()
+	registerProjectForTest(t, "broken", dir)
+	if err := os.WriteFile(filepath.Join(dir, "datatug-project.json"), []byte(`{"id":"broken","access":"private","created":{"at":"2026-01-01T00:00:00Z"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "environments"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runDaemon(t, "url", "--db", "datatug://broken/shop", "--table", "t")
+	if err == nil || exitCodeOf(t, err) != exitCodeDatabase {
+		t.Fatalf("%v", err)
 	}
 }

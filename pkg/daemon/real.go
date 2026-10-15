@@ -24,7 +24,7 @@ func NewManager() *Manager {
 		dir = filepath.Join(dtroot.Path(), "daemon")
 	}
 	return &Manager{
-		Dir: dir, Exe: os.Executable, Probe: probeAgent, PortFree: portFree,
+		Dir: dir, Exe: os.Executable, Probe: probeAgent, Dial: dialLoopback, PortFree: portFree,
 		Alive: processAlive, Owns: processOwns, Terminate: terminateProcess, Spawn: spawnDetached,
 		Now: time.Now, Sleep: time.Sleep, StartWait: 5 * time.Second, Poll: 100 * time.Millisecond,
 	}
@@ -51,6 +51,16 @@ func probeAgent(port int) (string, bool) {
 		return "", false
 	}
 	return *doc.Version, true
+}
+
+// dialLoopback says whether a TCP connection to 127.0.0.1:port is accepted. Nothing is written.
+func dialLoopback(port int) bool {
+	c, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", Host, port), 400*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
 }
 
 func portFree(port int) bool {

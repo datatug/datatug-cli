@@ -41,6 +41,7 @@ type schemaEntry struct {
 
 	ref         dal.CollectionRef
 	viewColumns []string
+	definition  string
 }
 
 // schemaColumn is one column of a table or view.
@@ -104,28 +105,39 @@ func dbSchemaCommand() *cobra.Command {
 	return cmd
 }
 
-func dbSchemaAction(cmd *cobra.Command, _ []string) error {
+// schemaSession is an opened source of one `db` metadata command.
+type schemaSession struct {
+	ctx          context.Context
+	ref          dbcopy.BackendRef
+	db           dal.DB
+	dbArg        string
+	format       string
+	detectedFrom string
+}
+
+// openSchemaSession reads --db and --format of cmd and opens the source
+// read-only: it is the one place a metadata command resolves, checks and opens
+// its source.
+func openSchemaSession(cmd *cobra.Command, command string) (*schemaSession, error) {
 	dbArg, _ := cmd.Flags().GetString("db")
 	format, _ := cmd.Flags().GetString("format")
 	if format != "json" && format != "text" {
-		return Exit(fmt.Sprintf("unsupported --format %q: want one of json, text", format), exitCodeUsage)
+		return nil, Exit(fmt.Sprintf("unsupported --format %q: want one of json, text", format), exitCodeUsage)
 	}
-	withColumns, _ := cmd.Flags().GetBool("columns")
-	withCounts, _ := cmd.Flags().GetBool("counts")
 	source, detectedFrom, err := resolveSchemaSource(dbArg)
 	if err != nil {
-		return Exit(err.Error(), exitCodeUsage)
+		return nil, Exit(err.Error(), exitCodeUsage)
 	}
 	ref, err := dbcopy.Parse(source)
 	if err != nil {
-		return Exit(err.Error(), exitCodeUsage)
+		return nil, Exit(err.Error(), exitCodeUsage)
 	}
 	ref = ref.WithFlag("--db")
 	if !isSchemaProvider(ref.Scheme) {
-		return Exit(fmt.Sprintf("unsupported provider %q for db schema: supported providers are %s", ref.Scheme, strings.Join(schemaProviders, ", ")), exitCodeUsage)
+		return nil, Exit(fmt.Sprintf("unsupported provider %q for %s: supported providers are %s", ref.Scheme, command, strings.Join(schemaProviders, ", ")), exitCodeUsage)
 	}
 	if err = dbcopy.CheckPostgresRead(ref, 0); err != nil {
-		return Exit(err.Error(), exitCodeDatabase)
+		return nil, Exit(err.Error(), exitCodeDatabase)
 	}
 	ctx := cmd.Context()
 	if ctx == nil {
@@ -133,20 +145,36 @@ func dbSchemaAction(cmd *cobra.Command, _ []string) error {
 	}
 	db, err := openSchemaSource(ctx, ref)
 	if err != nil {
-		return Exit(ref.OpenFailure(err).Error(), exitCodeDatabase)
+		return nil, Exit(ref.OpenFailure(err).Error(), exitCodeDatabase)
 	}
-	entries, err := listSchemaEntries(ctx, ref.Scheme, db)
+	return &schemaSession{ctx: ctx, ref: ref, db: db, dbArg: dbArg, format: format, detectedFrom: detectedFrom}, nil
+}
+
+// failure is the exit error for a read of the opened source that failed; the
+// text never holds the connection string or what a driver echoed of it.
+func (s *schemaSession) failure(err error) error {
+	return Exit(dbcopy.RedactErrorWithSecrets(dbcopy.RedactErrorWithSecrets(err, s.ref.Path), s.dbArg).Error(), exitCodeDatabase)
+}
+
+func dbSchemaAction(cmd *cobra.Command, _ []string) error {
+	session, err := openSchemaSession(cmd, "db schema")
 	if err != nil {
-		return Exit(dbcopy.RedactErrorWithSecrets(dbcopy.RedactErrorWithSecrets(err, ref.Path), dbArg).Error(), exitCodeDatabase)
+		return err
+	}
+	withColumns, _ := cmd.Flags().GetBool("columns")
+	withCounts, _ := cmd.Flags().GetBool("counts")
+	entries, err := listSchemaEntries(session.ctx, session.ref.Scheme, session.db)
+	if err != nil {
+		return session.failure(err)
 	}
 	if withColumns {
-		addSchemaColumns(ctx, db, entries)
+		addSchemaColumns(session.ctx, session.db, entries)
 	}
 	if withCounts {
-		addSchemaCounts(ctx, db, ref.Scheme, entries)
+		addSchemaCounts(session.ctx, session.db, session.ref.Scheme, entries)
 	}
-	listing := schemaListing{Provider: ref.Scheme, Target: schemaTarget(ref), DetectedFrom: detectedFrom, Tables: entries}
-	return writeSchemaListing(cmd.OutOrStdout(), format, listing)
+	listing := schemaListing{Provider: session.ref.Scheme, Target: schemaTarget(session.ref), DetectedFrom: session.detectedFrom, Tables: entries}
+	return writeSchemaListing(cmd.OutOrStdout(), session.format, listing)
 }
 
 func isSchemaProvider(scheme string) bool {
@@ -198,7 +226,7 @@ func sqliteEntries(ctx context.Context, db dal.DB) ([]schemaEntry, error) {
 			return nil, fmt.Errorf("list views: %w", viewErr)
 		}
 		for _, view := range views {
-			entries = append(entries, schemaEntry{Schema: sqliteSchemaName, Name: view.Name, Kind: schemaKindView, viewColumns: view.Columns})
+			entries = append(entries, schemaEntry{Schema: sqliteSchemaName, Name: view.Name, Kind: schemaKindView, viewColumns: view.Columns, definition: view.CreateSQL})
 		}
 	}
 	return entries, nil

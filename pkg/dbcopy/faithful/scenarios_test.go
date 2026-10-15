@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -87,11 +88,32 @@ func (e *scenarioEnv) lite() Endpoint { return chaosSQLite(e.t, e.plan) }
 func (e *scenarioEnv) fixture(statements ...string) Endpoint {
 	e.t.Helper()
 	path := filepath.Join(e.t.TempDir(), "fixture.sqlite")
-	plain := openSQLite(e.t, path)
-	execAll(e.t, plain.DB, statements...)
-	_ = plain.DB.Close()
+	key := strings.Join(statements, "\x00")
+	fixtureCache.Lock()
+	image, ok := fixtureCache.m[key]
+	fixtureCache.Unlock()
+	if !ok {
+		plain := openSQLite(e.t, path)
+		execAll(e.t, plain.DB, statements...)
+		_ = plain.DB.Close()
+		var err error
+		if image, err = os.ReadFile(path); err != nil {
+			e.t.Fatal(err)
+		}
+		fixtureCache.Lock()
+		fixtureCache.m[key] = image
+		fixtureCache.Unlock()
+	} else if err := os.WriteFile(path, image, 0o600); err != nil {
+		e.t.Fatal(err)
+	}
 	return chaosSQLiteAt(e.t, path, e.plan)
 }
+
+// fixtureCache keeps the bytes of every fixture database so that the chaos sweep builds each once.
+var fixtureCache = struct {
+	sync.Mutex
+	m map[string][]byte
+}{m: map[string][]byte{}}
 
 // quiet runs statements and ignores failures: under a fault plan they are expected.
 func quiet(db *sql.DB, statements ...string) {
@@ -535,6 +557,9 @@ func TestChaosSweep(t *testing.T) {
 			}
 			for k := 1; k <= n; k++ {
 				for mode := faultMode(0); mode < faultModes; mode++ {
+					if mode != faultError && !base.queries[k] {
+						continue // a row fault only differs from an error on a call that returns rows
+					}
 					plan := &faultPlan{failAt: k, mode: mode}
 					runScenario(t, s, plan, false)
 				}

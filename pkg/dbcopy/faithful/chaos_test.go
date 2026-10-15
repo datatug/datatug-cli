@@ -39,6 +39,8 @@ type faultPlan struct {
 	calls  int
 	failAt int // 0: never
 	mode   faultMode
+	// queries holds the numbers of the calls that return rows: the only ones the row faults touch.
+	queries map[int]bool
 }
 
 type faultMode int
@@ -59,6 +61,19 @@ func (p *faultPlan) next() (faultMode, bool) {
 	defer p.mu.Unlock()
 	p.calls++
 	return p.mode, p.failAt != 0 && p.calls == p.failAt
+}
+
+// markQuery notes that the call just counted returns rows.
+func (p *faultPlan) markQuery() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.queries == nil {
+		p.queries = map[int]bool{}
+	}
+	p.queries[p.calls] = true
 }
 
 func (p *faultPlan) total() int {
@@ -137,6 +152,7 @@ func (c *chaosConn) ExecContext(ctx context.Context, q string, args []driver.Nam
 
 func (c *chaosConn) QueryContext(ctx context.Context, q string, args []driver.NamedValue) (driver.Rows, error) {
 	mode, fail := c.plan.next()
+	c.plan.markQuery()
 	if fail && mode == faultError {
 		return nil, errInjected
 	}
@@ -564,7 +580,7 @@ func chaosSQLite(t testing.TB, plan *faultPlan) Endpoint {
 func chaosSQLiteAt(t testing.TB, path string, plan *faultPlan) Endpoint {
 	t.Helper()
 	db := sql.OpenDB(chaosConnector{open: func(context.Context) (driver.Conn, error) {
-		return (&sqlite.Driver{}).Open("file:" + filepath.ToSlash(path) + "?mode=rwc")
+		return (&sqlite.Driver{}).Open("file:" + filepath.ToSlash(path) + "?mode=rwc&_pragma=synchronous(OFF)")
 	}, plan: plan})
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })

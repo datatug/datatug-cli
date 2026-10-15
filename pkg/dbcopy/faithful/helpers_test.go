@@ -66,7 +66,7 @@ func newPGDatabase(t testing.TB) Endpoint {
 // newSQLiteFile opens (creating it) the SQLite file at path.
 func openSQLite(t testing.TB, path string) Endpoint {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=rwc")
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=rwc&_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatal(err)
 	}

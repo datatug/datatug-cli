@@ -23,6 +23,9 @@ import (
 // touch the process environment. Always os.LookupEnv in production.
 var dbAddLookupEnv = os.LookupEnv
 
+// defaultEnvironmentID is the environment `db add` picks, without --env, in a project of several.
+const defaultEnvironmentID = "local"
+
 // dbAddResult is the JSON document `db add` prints. The field order is the order of the keys.
 type dbAddResult struct {
 	Added  bool   `json:"added"`
@@ -54,7 +57,7 @@ func dbAddCommand() *cobra.Command {
 	flags := cmd.Flags()
 	flags.StringP("project", "p", "", "Registered project id/name to add the source to (required)")
 	flags.String("db", "", "The database: a SQLite file path or sqlite:// URL, or env:NAME for a PostgreSQL URL held in an environment variable (required)")
-	flags.String("env", "", "Environment of the project the source belongs to: a plain name; made when the project has none of that id (default: the project's only environment)")
+	flags.String("env", "", "Environment of the project the source belongs to: a plain name; made when the project has none of that id (default: the project's only environment, or \"local\" when it has several)")
 	flags.String("name", "", "Id of the source: a plain name (default for a SQLite file: its file name without the extension; required for env:NAME)")
 	flags.String("format", "json", "Output format: json or text (json carries dbRef, the --db value that addresses the source)")
 	return cmd
@@ -208,8 +211,9 @@ func defaultSourceName(source dbAddSource) (string, error) {
 	return name, nil
 }
 
-// onlyEnvironmentOf is the id of the one environment the project has, the default of --env; with
-// none, or more than one, --env is required.
+// onlyEnvironmentOf is the default of --env: the id of the one environment the project has, or, when
+// it has several, the one whose id is "local"; with none, or several and no "local", --env is required.
+// It never makes an environment.
 func onlyEnvironmentOf(ctx context.Context, store datatug.ProjectStore) (string, error) {
 	envs, err := store.LoadEnvironments(ctx)
 	if err != nil {
@@ -223,6 +227,9 @@ func onlyEnvironmentOf(ctx context.Context, store datatug.ProjectStore) (string,
 	}
 	shown := make([]string, len(envs))
 	for i, env := range envs {
+		if env.GetID() == defaultEnvironmentID {
+			return defaultEnvironmentID, nil
+		}
 		shown[i] = dbcopy.SourceIDDisplay(env.GetID())
 	}
 	return "", Exit(fmt.Sprintf("--env is required: the project has %d environments (%s)", len(envs), strings.Join(shown, ", ")), exitCodeUsage)

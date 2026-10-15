@@ -25,6 +25,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/gorilla/websocket"
 )
@@ -575,13 +576,13 @@ func TestChatUIBrowserBridgeContinuesWhileDialogsAreOpen(t *testing.T) {
 			// The header line reflects live apimonitor.Default state which
 			// may change concurrently under parallel test execution; compare
 			// the rest of the view to verify the overlay was not disturbed.
-			beforeOverlay := before
-			if idx := strings.Index(before, "\n"); idx >= 0 {
-				beforeOverlay = before[idx+1:]
+			beforeOverlay := ansi.Strip(before)
+			if idx := strings.Index(beforeOverlay, "\n"); idx >= 0 {
+				beforeOverlay = beforeOverlay[idx+1:]
 			}
-			afterOverlay := after
-			if idx := strings.Index(after, "\n"); idx >= 0 {
-				afterOverlay = after[idx+1:]
+			afterOverlay := ansi.Strip(after)
+			if idx := strings.Index(afterOverlay, "\n"); idx >= 0 {
+				afterOverlay = afterOverlay[idx+1:]
 			}
 			if afterOverlay != beforeOverlay {
 				t.Fatalf("bridge tick changed the open %s dialog's view:\nbefore:\n%s\nafter:\n%s", names[i], before, after)

@@ -274,8 +274,9 @@ func (m *Manager) Stop() error {
 		}
 		return nil
 	}
-	if _, up := m.Probe(rec.Port); !up || !m.Alive(rec.PID) || !m.Owns(rec.PID, rec.Port) {
-		// Stale record, or a reused pid that is not our `serve`: never signalled.
+	if !m.Alive(rec.PID) || !m.Owns(rec.PID, rec.Port) {
+		// Stale record, or a reused pid that is not our `serve`: never signalled. A server
+		// that is ours but no longer answers is still stopped below.
 		m.removeRecord()
 		return nil
 	}

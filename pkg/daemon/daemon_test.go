@@ -293,11 +293,12 @@ func TestStop(t *testing.T) {
 			t.Fatalf("%v %v", err, f.termCalls)
 		}
 	})
-	t.Run("stale record is removed without signalling", func(t *testing.T) {
+	t.Run("hung server of ours is still stopped", func(t *testing.T) {
 		f := newFake(t)
 		f.writeRec(t, 77, 8991)
-		f.alive[77] = true // pid alive but nothing answers: a reused pid
-		if err := f.Stop(); err != nil || len(f.termCalls) != 0 || f.hasRecord() {
+		f.alive[77] = true // alive, ours, but the port does not answer
+		f.onSleep = func() { f.alive[77] = false }
+		if err := f.Stop(); err != nil || len(f.termCalls) != 1 || f.hasRecord() {
 			t.Fatalf("%v %v", err, f.termCalls)
 		}
 	})

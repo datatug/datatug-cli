@@ -168,7 +168,10 @@ func canonicalNumber(literal string) (any, bool) {
 	if len(literal) > maxNumberLiteral {
 		return nil, false
 	}
-	r, _ := new(big.Rat).SetString(literal) // the literal is a json.Number the decoder accepted
+	if i := strings.IndexAny(literal, "eE"); i >= 0 && len(strings.TrimLeft(literal[i+1:], "+-0")) > 3 {
+		return nil, false // an exponent beyond 999 is no key
+	}
+	r, _ := new(big.Rat).SetString(literal) // a valid json.Number with an exponent below 1000 always parses
 	if r.IsInt() {
 		n := r.Num()
 		if new(big.Int).Abs(n).Cmp(big.NewInt(maxSafeInteger)) > 0 {

@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	// FromFlag and FromEnv name the global caller flag and its environment fallback.
-	FromFlag = "from"
-	FromEnv  = "DATATUG_FROM"
+	// ClientFlag and ClientEnv name the global caller flag and its environment fallback.
+	ClientFlag = "client"
+	ClientEnv  = "DATATUG_CLIENT"
 
 	daemonFormatJSON = "json"
 	daemonFormatText = "text"
@@ -34,7 +34,7 @@ func daemonCommand() *cobra.Command {
 		Long: "datatug daemon owns one `datatug serve` process bound to 127.0.0.1, started read-only\n" +
 			"(no --allow-writes, --allow-live-connections or --allow-opaque-sql) and exiting after " + daemon.IdleTimeout.String() + " with no request.\n" +
 			"State (pidfile, record, log) lives in ~/datatug/daemon; `datatug daemon stop` stops it.\n" +
-			"Any command run with --from claude-mod (or DATATUG_FROM) ensures it is running afterwards.",
+			"Any command run with --client claude-mod (or DATATUG_CLIENT) ensures it is running afterwards.",
 	}
 	cmd.AddCommand(daemonStatusCommand(), daemonStartCommand(), daemonStopCommand(), daemonURLCommand())
 	return cmd

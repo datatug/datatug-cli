@@ -12,27 +12,27 @@ status: Implementing
 
 ## Summary
 
-`datatug daemon` owns one local, read-only `datatug serve` process that AI-agent mods (the Claude Code DataTug dev panel) use so their cards can link to the DataTug web UI. A global `--from <caller>` flag (or `DATATUG_FROM`) makes any command ensure that process is running after the command's own work, without ever changing the command's stdout. `datatug daemon status|start|stop|url` are the explicit primitives; the flag is a thin wrapper over `daemon start`.
+`datatug daemon` owns one local, read-only `datatug serve` process that AI-agent mods (the Claude Code DataTug dev panel) use so their cards can link to the DataTug web UI. A global `--client <caller>` flag (or `DATATUG_CLIENT`) makes any command ensure that process is running after the command's own work, without ever changing the command's stdout. `datatug daemon status|start|stop|url` are the explicit primitives; the flag is a thin wrapper over `daemon start`.
 
 ## Problem
 
-The web UI reads project data only through the local agent API (`datatug serve`, default port 8989). A mod that wants a card to open "this table" in the web UI needs that API running and needs the exact URL, but a mod must not read project files, build URLs itself, or leave unowned background state on the machine. Founder, 2026-10-15: "When Ai agent start to use datatug for mod purpose datatug cli should start datatug daemon/service to serve API endpoints to serve web ui requests as we'll have link from cards to open cards in web ui. [...] we probably should pass some parameter like --from=claude-mod or something like that and if supplied check if daemon is started and if not try to start. If not able to start we should show a warning."
+The web UI reads project data only through the local agent API (`datatug serve`, default port 8989). A mod that wants a card to open "this table" in the web UI needs that API running and needs the exact URL, but a mod must not read project files, build URLs itself, or leave unowned background state on the machine. Founder, 2026-10-15: "When Ai agent start to use datatug for mod purpose datatug cli should start datatug daemon/service to serve API endpoints to serve web ui requests as we'll have link from cards to open cards in web ui. [...] we probably should pass some parameter like --client=claude-mod or something like that and if supplied check if daemon is started and if not try to start. If not able to start we should show a warning."
 
 ## Behavior
 
 ### Caller flag
 
-#### REQ: from-flag
+#### REQ: client-flag
 
-The root command MUST accept a persistent `--from <caller>` flag, valid on every command. When the flag is absent, `DATATUG_FROM` supplies the value; the flag wins when both are set. Known callers are `claude-mod` and `codex-mod`. An unknown non-empty value MUST print one warning line to stderr naming the value and MUST NOT start anything.
+The root command MUST accept a persistent `--client <caller>` flag, valid on every command. When the flag is absent, `DATATUG_CLIENT` supplies the value; the flag wins when both are set. Known callers are `claude-mod` and `codex-mod`. An unknown non-empty value MUST print one warning line to stderr naming the value and MUST NOT start anything.
 
-#### REQ: from-ensures-daemon
+#### REQ: client-ensures-daemon
 
-When a known caller is set, after the command's own work (success or failure) the CLI MUST behave as `datatug daemon start --from <caller>` with its output discarded, except for the failure warning of `warning-on-failure`. It MUST NOT run for `daemon`, `serve`, `version`, `help`, `completion` or `self-update`/`install`/`upgrade`, so `daemon stop` is never undone and the foreground server never spawns a second one.
+When a known caller is set, after the command's own work (success or failure) the CLI MUST behave as `datatug daemon start --client <caller>` with its output discarded, except for the failure warning of `warning-on-failure`. It MUST NOT run for `daemon`, `serve`, `version`, `help`, `completion` or `self-update`/`install`/`upgrade`, so `daemon stop` is never undone and the foreground server never spawns a second one.
 
 #### REQ: stdout-untouched
 
-The `--from` wrapper MUST NOT write to stdout and MUST NOT change the command's exit code. All wrapper output goes to stderr.
+The `--client` wrapper MUST NOT write to stdout and MUST NOT change the command's exit code. All wrapper output goes to stderr.
 
 #### REQ: warning-on-failure
 
@@ -46,7 +46,7 @@ When the daemon is not running and could not be started, the wrapper MUST print 
 
 #### REQ: start
 
-`datatug daemon start [--from <caller>] [--format json|text]` MUST ensure the daemon is running: reuse a running one, otherwise start one, then print the `status` object. It MUST exit `0` when running and `4` when it could not be started (the status object, with `error`, is still printed).
+`datatug daemon start [--client <caller>] [--format json|text]` MUST ensure the daemon is running: reuse a running one, otherwise start one, then print the `status` object. It MUST exit `0` when running and `4` when it could not be started (the status object, with `error`, is still printed).
 
 #### REQ: stop
 
@@ -104,9 +104,9 @@ The web UI address of an agent is `<uiBase>` = `https://datatug.app/store/http-<
 
 ### AC: wrapper-keeps-stdout
 
-**Requirements:** daemon#req:from-ensures-daemon, daemon#req:stdout-untouched, daemon#req:warning-on-failure
+**Requirements:** daemon#req:client-ensures-daemon, daemon#req:stdout-untouched, daemon#req:warning-on-failure
 
-`datatug <cmd> --from=claude-mod` prints byte-identical stdout and the same exit code as without the flag; a failed start adds exactly one `datatug: warning:` line on stderr.
+`datatug <cmd> --client=claude-mod` prints byte-identical stdout and the same exit code as without the flag; a failed start adds exactly one `datatug: warning:` line on stderr.
 
 ### AC: start-is-owned-and-stoppable
 
@@ -137,6 +137,10 @@ The spawned command line has `--host 127.0.0.1`, `--idle-timeout 2h` and none of
 1. Add child routes `records` and `record` under `table/:tableType` and `view/:tableType` in `datatug-routing-proj-env-db.ts`, reading `limit` and `pk` query params.
 2. Flip `uiSupport` to `available` in `pkg/daemon` once shipped.
 3. Confirm `https://datatug.app` can call a plain-HTTP `127.0.0.1` agent (CORS allow-list in the request guard) from a browser page.
+
+## Decisions
+
+- **Flag name `--client` / `DATATUG_CLIENT` (settled, founder 2026-10-15: "--client is a good name - approved").** The founder first suggested `--from`, but `--from` is already a command-local flag on `query run` (table), `db copy` and `db export` (source URL), where it would shadow a persistent root flag and make the caller id read as a table name. No command registers `client`.
 
 ## Open Questions
 

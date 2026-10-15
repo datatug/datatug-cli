@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -667,7 +669,7 @@ func TestDetectiveUICommandBranches(t *testing.T) {
 	require.Error(t, err)
 
 	// Exercise default runDetectiveUI
-	_, err = origRunUI(tea.NewProgram(quitProgramModel{}, tea.WithoutRenderer()))
+	_, err = origRunUI(tea.NewProgram(quitProgramModel{}, tea.WithInput(strings.NewReader("")), tea.WithOutput(io.Discard), tea.WithoutSignals(), tea.WithoutRenderer()))
 	require.NoError(t, err)
 
 	// Storage agent: agent error

@@ -73,9 +73,10 @@ type LinkRequest struct {
 	// Code is the one-time code of the agent (agentaccess.MintCode), put first in the fragment of
 	// every link; "" when the agent has none to give.
 	Code string
-	// Metadata is the scanned relations of the source (nil when the project holds none): the link is
-	// checked against it, and carries a warning when there is nothing to check against.
-	Metadata *Metadata
+	// Metadata reads the scanned relations named Table (nil when the project holds none): the link is
+	// checked against them, and carries a warning when there is nothing to check against. It runs
+	// last, after every check of the request itself; a nil function is no metadata.
+	Metadata func() *Metadata
 }
 
 // Link is the deep link of one card.
@@ -144,11 +145,6 @@ func BuildLink(st Status, req LinkRequest) (Link, error) {
 	default:
 		u += "?" + schema
 	}
-	if req.Metadata == nil {
-		out.Warnings = append(out.Warnings, WarningNotScanned)
-	} else if err := req.Metadata.check(req, keys); err != nil {
-		return Link{}, err
-	}
 	if req.Code != "" {
 		fragment = append([]string{"code=" + encodeComponent(req.Code)}, fragment...)
 	}
@@ -157,6 +153,19 @@ func BuildLink(st Status, req LinkRequest) (Link, error) {
 	}
 	if len(u) > MaxLinkLength {
 		return Link{}, UsageError{fmt.Sprintf("the link would be longer than %d characters", MaxLinkLength)}
+	}
+	var meta *Metadata
+	if req.Metadata != nil {
+		meta = req.Metadata()
+	}
+	if meta == nil {
+		out.Warnings = append(out.Warnings, WarningNotScanned)
+	} else {
+		w, err := meta.check(req, keys)
+		if err != nil {
+			return Link{}, err
+		}
+		out.Warnings = append(out.Warnings, w...)
 	}
 	out.URL, out.UISupport = u, uiSupport[out.Kind]
 	return out, nil

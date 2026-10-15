@@ -383,6 +383,7 @@ func TestDaemonURLValidatesAgainstScannedMetadata(t *testing.T) {
 		"view flag on table": {[]string{"--table", "Customer", "--view"}, exitCodeUsage, "the object is a table"},
 		"table flag on view": {[]string{"--table", "customer_names"}, exitCodeUsage, "the object is a view"},
 		"missing pk":         {[]string{"--table", "order_line", "--record", `{"order_id":1}`}, exitCodeUsage, "missing primary-key column"},
+		"record on a view":   {[]string{"--table", "customer_names", "--view", "--record", `{"CustomerId":1}`}, exitCodeUsage, "a view has no primary key"},
 		"not a pk":           {[]string{"--table", "Customer", "--record", `{"CustomerId":1,"FirstName":"s3cret"}`}, exitCodeUsage, "not a primary-key column"},
 	}
 	for name, c := range cases {
@@ -408,4 +409,38 @@ func TestDaemonURLWarnsWhenTheSourceIsNotScanned(t *testing.T) {
 			t.Errorf("%s: %s %v", name, out, err)
 		}
 	}
+}
+
+func TestDaemonURLScanThatHoldsNothingUsableIsNotScanned(t *testing.T) {
+	useDaemonFake(t, &daemonFake{})
+	dir, _ := scannedJourneyProjectWithDB(t)
+	registerProjectForTest(t, "emptyshop", dir)
+	args := []string{"url", "--db", "datatug://emptyshop/shop", "--table", "Customer"}
+	warned := func(name string) {
+		t.Helper()
+		out, err := runDaemon(t, args...)
+		var link daemon.Link
+		if err != nil || json.Unmarshal([]byte(out), &link) != nil || len(link.Warnings) != 1 || link.Warnings[0] != daemon.WarningNotScanned {
+			t.Fatalf("%s: %s %v", name, out, err)
+		}
+	}
+	cols, err := filepath.Glob(filepath.Join(dir, "dbmodels", "*", "main", "tables", "Customer", "*.columns.json"))
+	if err != nil || len(cols) != 1 {
+		t.Fatalf("%v %v", cols, err)
+	}
+	if err = os.WriteFile(cols[0], []byte("not json"), 0o644); err != nil { // unreadable: not scanned
+		t.Fatal(err)
+	}
+	warned("unreadable columns file")
+	if err = os.WriteFile(cols[0], make([]byte, api.MaxColumnsFileSize+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	warned("columns file over the cap")
+	models, _ := filepath.Glob(filepath.Join(dir, "dbmodels", "*"))
+	for _, m := range models {
+		if err = os.RemoveAll(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	warned("no model folder")
 }

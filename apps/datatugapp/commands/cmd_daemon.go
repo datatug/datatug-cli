@@ -152,7 +152,7 @@ func daemonURLCommand() *cobra.Command {
 			}
 			st := newDaemonManager().Status()
 			req.Code = linkCode(st)
-			req.Metadata = linkMetadata(req)
+			req.Metadata = func() *daemon.Metadata { return linkMetadata(req) }
 			link, err := daemon.BuildLink(st, req)
 			var notFound daemon.NotFoundError
 			if errors.As(err, &notFound) {
@@ -225,10 +225,11 @@ func resolveLinkDB(ctx context.Context, req daemon.LinkRequest) (daemon.LinkRequ
 	return req, Exit((&api.AmbiguousSourceError{Environments: holding}).Error(), exitCodeUsage)
 }
 
-// linkMetadata reads the scanned tables and views of the request's source from the project on disk
-// (the same files `show` lists), with no network and no database connection. nil when the project
-// holds none for it: an unknown project, source or environment, a source never scanned, or files
-// that cannot be read. Nothing of the failure is reported (a text of it would quote a path).
+// linkMetadata reads the scanned relations named like the request's table from the project on disk
+// (the files `show` lists, but only the columns file of that name), with no network and no database
+// connection. nil when the project holds none for it: an unknown project, source or environment, a
+// source never scanned or with no relation at all, or files that cannot be read (or are too large).
+// Nothing of the failure is reported (a text of it would quote a path).
 func linkMetadata(req daemon.LinkRequest) *daemon.Metadata {
 	if api.ValidateCatalogIdentifiers(req.Env, req.DB) != nil {
 		return nil
@@ -237,12 +238,12 @@ func linkMetadata(req daemon.LinkRequest) *daemon.Metadata {
 	if err != nil {
 		return nil
 	}
-	schema, err := api.GetCatalogSchema(base.ProjectDir, req.Env, req.DB)
-	if err != nil {
+	found, scanned, err := api.FindCatalogRelations(base.ProjectDir, req.Env, req.DB, req.Table)
+	if err != nil || !scanned {
 		return nil
 	}
-	meta := &daemon.Metadata{Relations: make([]daemon.Relation, 0, len(schema.Relations))}
-	for _, r := range schema.Relations {
+	meta := &daemon.Metadata{Relations: make([]daemon.Relation, 0, len(found))}
+	for _, r := range found {
 		rel := daemon.Relation{Schema: r.Schema, Name: r.Name, View: r.DbType == "VIEW"}
 		keyed := make([]api.CatalogColumn, 0, len(r.Columns))
 		for _, c := range r.Columns {

@@ -58,13 +58,17 @@ When the daemon is not running and could not be started, the wrapper MUST print 
 
 #### REQ: url-validates-metadata
 
-`daemon url` MUST check the link against the project's scanned metadata (the same files `datatug show` lists, read from the registered project folder; no network and no database connection) when the project holds it for the source and environment:
+`daemon url` MUST check the link against the project's scanned metadata (the same files `datatug show` lists, read from the registered project folder; no network and no database connection) when the project holds it for the source and environment. Every cheap check of the request itself (required flags, `--record` JSON and key kinds, `--limit`, the 2048-character bound) comes first, so such a refusal is exit `2` whatever the project holds and the project is not read; only then is the metadata read, and only the columns file of the one table asked for (not every table). Then:
 
 - a `--table` that is neither a table nor a view of the source is exit `3` ("the table or view is not in the project's scanned metadata"; the name is never echoed);
-- `--view` MUST match the object's kind: `--view` for a table, and a plain `--table` for a view, are exit `2` (the message names the kind only);
-- `--record` keys MUST be exactly the table's primary-key column names: a key that is not one is exit `2` ("not a primary-key column"), a primary-key column that is missing is exit `2` ("missing primary-key column"); no value is ever echoed. A view has no primary key.
+- with no `--schema`, a name that several schemas hold is exit `2` ("ambiguous: several schemas hold that name, give --schema"); `--schema` matches exactly (SQLite's one schema is `main`; an empty `--schema` matches the only schema that holds the name);
+- `--view` MUST match the object's kind: `--view` for a table, and a plain `--table` for a view, are exit `2` (the message names the kind only). The scan keeps tables and views only, so a materialized view is not distinguished (it is whatever the scan filed it as);
+- `--record` on a view is exit `2` ("a view has no primary key");
+- `--record` keys MUST be exactly the table's primary-key column names: a key that is not one is exit `2` ("not a primary-key column"), a primary-key column that is missing is exit `2` ("missing primary-key column"); no value is ever echoed. When the scan holds no primary-key information of the table (no `pkPosition` at all) the key is not checked and `warnings` gets `"primary key not in scanned metadata: key not validated"`.
 
-When `--schema` is empty the relation of any schema with that name matches. When the project holds no metadata for the source (never scanned, an unregistered project, an unknown environment or source, or files that cannot be read) the link is built as before and `warnings` is `["table metadata not scanned: link not validated"]`; nothing goes to stderr. With the text format the warning is not printed.
+Names (table, schema, key columns) are compared exactly and case-sensitively, as `datatug db schema` prints them; `--table customer` does not match `Customer`.
+
+When the project holds no usable metadata for the source (never scanned, a scan with no table and no view at all, a model folder that is missing, an unregistered project, an unknown environment or source, or a table's columns file that is unreadable, not a regular file (links are never followed) or larger than 4 MiB) the link is built as before and `warnings` is `["table metadata not scanned: link not validated"]`; the exit code is `0` and nothing goes to stderr. With the text format the warnings are not printed.
 
 ### Ownership and lifetime
 
@@ -152,7 +156,7 @@ The spawned command line has `--host 127.0.0.1`, `--idle-timeout 2h` and none of
 
 **Requirements:** daemon#req:url-validates-metadata
 
-Against a scanned project, `daemon url` refuses an unknown table (exit 3), `--view` on a table or no `--view` on a view, and a `--record` whose keys are not exactly the primary key (exit 2); for a never-scanned source it still prints the link with the `warnings` entry.
+Against a scanned project, `daemon url` refuses an unknown table (exit 3), `--view` on a table or no `--view` on a view, and a `--record` whose keys are not exactly the primary key (exit 2), and an ambiguous schema (exit 2); for a never-scanned or empty source it still prints the link with the `warnings` entry.
 
 ## Follow-up (UI repository, datatug/datatug-apps — not done here)
 

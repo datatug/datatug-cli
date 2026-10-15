@@ -152,7 +152,7 @@ Help wanted to [get test coverage to 100%](https://github.com/datatug/datatug-cl
 ### macOS / Linux — curl
 
 ```bash
-(p=$(mktemp) && trap 'rm -f "$p"' EXIT && curl -fsSL https://datatug.io/install/get-cli -o "$p" && sh "$p")
+(p=$(mktemp) && trap 'rm -f "$p"' EXIT && curl -fsSL https://datatug.app/install/get-cli -o "$p" && sh "$p")
 ```
 
 Environment overrides: `DATATUG_VERSION` (default: latest release), `DATATUG_INSTALL_DIR` (default: `~/.local/bin`).
@@ -160,7 +160,7 @@ Environment overrides: `DATATUG_VERSION` (default: latest release), `DATATUG_INS
 ### Windows — PowerShell
 
 ```powershell
-$p=Join-Path $env:TEMP ("datatug-"+[guid]::NewGuid()+".ps1"); try { irm https://datatug.io/install/get-cli.ps1 -OutFile $p -EA Stop; & $p } finally { Remove-Item $p -EA SilentlyContinue }
+$p=Join-Path $env:TEMP ("datatug-"+[guid]::NewGuid()+".ps1"); try { irm https://datatug.app/install/get-cli.ps1 -OutFile $p -EA Stop; & $p } finally { Remove-Item $p -EA SilentlyContinue }
 ```
 
 Environment overrides: `DATATUG_VERSION`, `DATATUG_INSTALL_DIR` (default: `%LOCALAPPDATA%\DataTug\bin`). Current Windows releases support amd64.

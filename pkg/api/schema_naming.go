@@ -2,7 +2,7 @@ package api
 
 import "strings"
 
-// defaultSchemaForDriver returns the schema name a driver resolves an
+// DefaultSchemaForDriver returns the schema name a driver resolves an
 // unqualified table/collection name to (SQLite's single implicit database
 // is always named "main"; PostgreSQL's default search_path entry is
 // "public"), or "" for a driver with no such convention (e.g. ingitdb, which
@@ -10,7 +10,7 @@ import "strings"
 // Driver field (see resolveSourceURL) rather than assumed unconditionally,
 // so a caller never strips a qualifier for a source where it would not
 // actually be the implicit default.
-func defaultSchemaForDriver(driver string) string {
+func DefaultSchemaForDriver(driver string) string {
 	switch strings.ToLower(driver) {
 	case "sqlite3", "sqlite":
 		return "main"
@@ -52,7 +52,7 @@ func defaultSchemaForDriver(driver string) string {
 // provably the same table; an unmatched path still denies exactly as
 // before.
 func PolicyCollectionName(name, driver string) string {
-	schema := defaultSchemaForDriver(driver)
+	schema := DefaultSchemaForDriver(driver)
 	if schema == "" {
 		return name
 	}

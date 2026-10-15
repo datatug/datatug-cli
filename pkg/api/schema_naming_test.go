@@ -34,3 +34,13 @@ func TestPolicyCollectionName(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultSchemaForDriver(t *testing.T) {
+	for driver, want := range map[string]string{
+		"sqlite3": "main", "SQLite": "main", "postgres": "public", "PGX": "public", "postgresql": "public", "ingitdb": "", "": "",
+	} {
+		if got := DefaultSchemaForDriver(driver); got != want {
+			t.Errorf("%q: got %q, want %q", driver, got, want)
+		}
+	}
+}

@@ -116,22 +116,22 @@ func TestShowFormatJSON(t *testing.T) {
 					"name": "main",
 					"tables": []any{
 						map[string]any{"name": "Customer", "columns": []any{
-							map[string]any{"name": "CustomerId", "type": "INTEGER", "primaryKeyPosition": float64(1)},
-							map[string]any{"name": "FirstName", "type": "TEXT"},
-							map[string]any{"name": "LastName", "type": "TEXT"},
+							map[string]any{"name": "CustomerId", "type": "INTEGER", "primaryKeyPosition": float64(1), "nullable": true},
+							map[string]any{"name": "FirstName", "type": "TEXT", "nullable": false},
+							map[string]any{"name": "LastName", "type": "TEXT", "nullable": true},
 						}},
 						map[string]any{"name": "order_line", "columns": []any{
-							map[string]any{"name": "order_id", "type": "INTEGER", "primaryKeyPosition": float64(2)},
-							map[string]any{"name": "line_no", "type": "INTEGER", "primaryKeyPosition": float64(1)},
-							map[string]any{"name": "customer_id", "type": "INTEGER"},
-							map[string]any{"name": "sku", "type": "TEXT"},
-							map[string]any{"name": "qty", "type": "INTEGER"},
+							map[string]any{"name": "order_id", "type": "INTEGER", "primaryKeyPosition": float64(2), "nullable": false},
+							map[string]any{"name": "line_no", "type": "INTEGER", "primaryKeyPosition": float64(1), "nullable": false},
+							map[string]any{"name": "customer_id", "type": "INTEGER", "nullable": true},
+							map[string]any{"name": "sku", "type": "TEXT", "nullable": true},
+							map[string]any{"name": "qty", "type": "INTEGER", "nullable": true},
 						}},
 					},
 					"views": []any{
 						map[string]any{"name": "customer_names", "columns": []any{
-							map[string]any{"name": "CustomerId", "type": "INTEGER"},
-							map[string]any{"name": "full_name"},
+							map[string]any{"name": "CustomerId", "type": "INTEGER", "nullable": true},
+							map[string]any{"name": "full_name", "nullable": true},
 						}},
 					},
 				}},
@@ -909,4 +909,134 @@ func TestShowRefusesAnUnknownDepth(t *testing.T) {
 	}
 	_, _, err := runShowCommand(t, "-d", t.TempDir(), "--depth", "rows")
 	assert.Equal(t, 2, showExitCodeOf(t, err), "the depth is checked before the project is read")
+}
+
+const journeyRefsFile = `{
+	"version": 1,
+	"foreignKeys": [
+		{
+			"name": "FK_order_line_Customer",
+			"table": {"schema": "main", "name": "order_line"},
+			"columns": ["customer_id"],
+			"refTable": {"schema": "main", "name": "Customer"},
+			"refColumns": ["CustomerId"]
+		},
+		{
+			"name": "FK_a b",
+			"table": {"schema": "main", "name": "order_line"},
+			"columns": ["customer_id", "sku"],
+			"refTable": {"name": "Other"},
+			"refColumns": ["x", "y"]
+		}
+	]
+}
+`
+
+// A table lists the foreign keys its model's foreign keys file holds, below its columns; a table with none
+// and a view list none; the depth "tables" lists none.
+func TestShowListsTheForeignKeysOfATable(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	writeProjectFiles(t, projectDir, map[string]string{"dbmodels/shop/shop.refs.json": journeyRefsFile})
+
+	stdout, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.Contains(t, stdout, `        qty INTEGER
+        ForeignKey "FK_a b" (customer_id, sku) -> Other (x, y)
+        ForeignKey FK_order_line_Customer (customer_id) -> main.Customer (CustomerId)
+      View customer_names
+`)
+	assert.Equal(t, 2, strings.Count(stdout, "ForeignKey "))
+
+	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	var doc showDocument
+	require.NoError(t, json.Unmarshal([]byte(stdout), &doc), stdout)
+	schema := doc.Environments[0].Sources[0].Schemas[0]
+	assert.Empty(t, schema.Tables[0].ForeignKeys, "Customer holds no key")
+	assert.Empty(t, schema.Views[0].ForeignKeys)
+	assert.Equal(t, []showForeignKey{
+		{Name: "FK_a b", Columns: []string{"customer_id", "sku"}, RefTable: showTableRef{Name: "Other"}, RefColumns: []string{"x", "y"}},
+		{Name: "FK_order_line_Customer", Columns: []string{"customer_id"}, RefTable: showTableRef{Schema: "main", Name: "Customer"}, RefColumns: []string{"CustomerId"}},
+	}, schema.Tables[1].ForeignKeys)
+	assert.Contains(t, stdout, `                      "refTable": {
+                        "schema": "main",
+                        "name": "Customer"
+                      },`)
+	assert.Equal(t, 1, strings.Count(stdout, `"foreignKeys"`), "only the table that holds keys has the member")
+
+	for _, depth := range []string{"tables", "sources"} {
+		stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", depth)
+		require.NoError(t, err)
+		assert.NotContains(t, stdout, "foreignKeys", depth)
+		stdout, _, err = runShowCommand(t, "-d", projectDir, "--depth", depth)
+		require.NoError(t, err)
+		assert.NotContains(t, stdout, "ForeignKey", depth)
+	}
+}
+
+// A model with no foreign keys file lists no key: the same bytes as before the requirement.
+func TestShowListsNoForeignKeysWithoutTheFile(t *testing.T) {
+	stdout, _, err := runShowCommand(t, "-d", scannedJourneyProject(t))
+	require.NoError(t, err)
+	assert.Equal(t, showJourneySQLite, stdout)
+}
+
+// A foreign keys file that cannot be read is a failure that names the source and the environment, and no path.
+func TestShowFailsWhenTheForeignKeysFileCannotBeRead(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	writeProjectFiles(t, projectDir, map[string]string{"dbmodels/shop/shop.refs.json": `{"version": 99, "foreignKeys": []}`})
+	stdout, _, err := runShowCommand(t, "-d", projectDir)
+	assert.Equal(t, 1, showExitCodeOf(t, err))
+	assert.EqualError(t, err, `source "shop" in environment "local": its foreign keys file cannot be read`)
+	assert.Empty(t, stdout)
+}
+
+// A column carries nullable where the driver reports it (SQLite), and no key where it does not (the
+// catalogs of the shape of the demo, of drivers that say nothing); the text does not change.
+func TestShowReportsNullabilityForTheDriversThatKnowIt(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "n.db")
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE t (id INTEGER NOT NULL, note TEXT)`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	projectDir := filepath.Join(t.TempDir(), "n-project")
+	_, err = runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "n", "--env", "local")
+	require.NoError(t, err)
+
+	stdout, _, err := runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	var doc showDocument
+	require.NoError(t, json.Unmarshal([]byte(stdout), &doc), stdout)
+	columns := doc.Environments[0].Sources[0].Schemas[0].Tables[0].Columns
+	require.Len(t, columns, 2)
+	require.NotNil(t, columns[0].Nullable)
+	require.NotNil(t, columns[1].Nullable)
+	assert.False(t, *columns[0].Nullable, "NOT NULL")
+	assert.True(t, *columns[1].Nullable)
+	assert.Contains(t, stdout, `"nullable": false`)
+
+	text, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.NotContains(t, text, "nullable")
+
+	// a driver that does not report it: the columns file holds false, which is not a fact
+	other := demoShapedProject(t)
+	writeProjectFiles(t, other, map[string]string{
+		"environments/local/catalogs/geo/geo.db.json": `{"driver":"ingitdb","path":"data/geo","dbModel":"chinook"}`,
+	})
+	stdout, _, err = runShowCommand(t, "-d", other, "--format", "json")
+	require.NoError(t, err)
+	var otherDoc showDocument
+	require.NoError(t, json.Unmarshal([]byte(stdout), &otherDoc), stdout)
+	var geo *showSource
+	for i, source := range otherDoc.Environments[1].Sources {
+		if source.ID == "geo" {
+			geo = &otherDoc.Environments[1].Sources[i]
+		}
+	}
+	require.NotNil(t, geo)
+	require.NotEmpty(t, geo.Schemas)
+	assert.Nil(t, geo.Schemas[0].Tables[0].Columns[0].Nullable)
+	assert.Equal(t, 4, strings.Count(stdout, `"nullable"`), "only the two sqlite3 catalogs (two columns each) carry it")
 }

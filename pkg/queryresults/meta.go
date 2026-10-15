@@ -19,8 +19,15 @@ const (
 	PolicyExplicit   = "explicit"
 	PolicyProject    = "project"
 
-	UnavailableTooLarge = "too-large"
-	UnavailableTooMany  = "too-many"
+	UnavailableTooLarge      = "too-large"
+	UnavailableTooMany       = "too-many"
+	UnavailableNativeSQL     = "native-sql"
+	UnavailableNoRelMetadata = "no-relationship-metadata"
+	UnavailableUnreadable    = "schema-unreadable"
+
+	// MaxParticipants and MaxRelated bound those lists of meta.json.
+	MaxParticipants = 32
+	MaxRelated      = 200
 )
 
 // Meta is meta.json: everything needed to draw a result except its rows. It
@@ -39,6 +46,10 @@ type Meta struct {
 	Rows       Rows        `json:"rows"`
 	Provenance *Provenance `json:"provenance"`
 	Columns    []Column    `json:"columns"`
+	// Participants are the query's source occurrences and Related the tables
+	// that can be joined to them.
+	Participants []Participant `json:"participants"`
+	Related      []Related     `json:"related"`
 	// Unavailable names, per part, why it is missing or cut short.
 	Unavailable Unavailable `json:"unavailable"`
 }
@@ -78,19 +89,122 @@ type Provenance struct {
 	ObservedAt string `json:"observedAt"`
 }
 
-// Column describes one column of data.json.
+// Column describes one column of data.json. The declared facts come from the
+// database's schema, never from the values; they are null where unknown.
 type Column struct {
-	Name          string   `json:"name"`
-	Type          string   `json:"type"`
-	Encoding      string   `json:"encoding,omitempty"`
-	CutCells      int      `json:"cutCells,omitempty"`
-	ObservedTypes []string `json:"observedTypes,omitempty"`
+	Name          string        `json:"name"`
+	Type          string        `json:"type"`
+	DeclaredType  *string       `json:"declaredType"`
+	Nullable      *bool         `json:"nullable"`
+	PK            *int          `json:"pk"`
+	Source        *ColumnSource `json:"source"`
+	ForeignKeys   []ColumnFK    `json:"foreignKeys"`
+	Encoding      string        `json:"encoding,omitempty"`
+	CutCells      int           `json:"cutCells,omitempty"`
+	ObservedTypes []string      `json:"observedTypes,omitempty"`
+}
+
+// ColumnFacts are the schema facts of a column that is a direct reference to
+// one source's field.
+type ColumnFacts struct {
+	DeclaredType string
+	// ContractType is the declared type in the contract's closed set, or "".
+	ContractType string
+	Nullable     bool
+	PK           int // 1-based position in the primary key, 0 when not in it
+	Source       ColumnSource
+	ForeignKeys  []ColumnFK
+}
+
+// ColumnSource is the source field a column reads.
+type ColumnSource struct {
+	Instance string `json:"instance"`
+	Schema   string `json:"schema"`
+	Relation string `json:"relation"`
+	Column   string `json:"column"`
+}
+
+// ColumnFK is a foreign key a column takes part in.
+type ColumnFK struct {
+	RefSchema   string `json:"refSchema"`
+	RefRelation string `json:"refRelation"`
+	RefColumn   string `json:"refColumn"`
+}
+
+// Participant is one source occurrence of the query.
+type Participant struct {
+	Instance string           `json:"instance"`
+	Schema   string           `json:"schema"`
+	Relation string           `json:"relation"`
+	Alias    string           `json:"alias"`
+	DB       *string          `json:"db,omitempty"`
+	Kind     string           `json:"kind"`
+	Role     string           `json:"role"`
+	Join     *ParticipantJoin `json:"join,omitempty"`
+}
+
+// ParticipantJoin is how a participant is joined.
+type ParticipantJoin struct {
+	Type string     `json:"type"`
+	On   []JoinPair `json:"on"`
+}
+
+// JoinPair is one equality of a join: alias.field on each side.
+type JoinPair struct {
+	Left  string `json:"left"`
+	Right string `json:"right"`
+}
+
+// Related is one table that can be joined to a participant by a foreign key.
+type Related struct {
+	CandidateID  string         `json:"candidateId"`
+	FromInstance string         `json:"fromInstance"`
+	Target       RelatedTarget  `json:"target"`
+	ConstraintID string         `json:"constraintId"`
+	Direction    string         `json:"direction"`
+	Cardinality  string         `json:"cardinality"`
+	Fields       []RelatedField `json:"fields"`
+	Evidence     string         `json:"evidence"`
+}
+
+// RelatedTarget is the table a related candidate joins.
+type RelatedTarget struct {
+	Schema   string `json:"schema"`
+	Relation string `json:"relation"`
+	Kind     string `json:"kind"`
+}
+
+// RelatedField pairs a field of the participant with one of the target.
+type RelatedField struct {
+	SourceField string `json:"sourceField"`
+	TargetField string `json:"targetField"`
 }
 
 // Unavailable holds a reason code per part of the metadata that is missing.
 type Unavailable struct {
-	Query   string `json:"query,omitempty"`
-	Columns string `json:"columns,omitempty"`
+	Query         string `json:"query,omitempty"`
+	Columns       string `json:"columns,omitempty"`
+	Participants  string `json:"participants,omitempty"`
+	Related       string `json:"related,omitempty"`
+	DeclaredTypes string `json:"declaredTypes,omitempty"`
+}
+
+// Describe sets the declared facts of each column found in facts.
+func (m *Meta) Describe(facts map[string]ColumnFacts) {
+	for i := range m.Columns {
+		fact, ok := facts[m.Columns[i].Name]
+		if !ok {
+			continue
+		}
+		column := &m.Columns[i]
+		declared, nullable, source := fact.DeclaredType, fact.Nullable, fact.Source
+		column.DeclaredType, column.Nullable, column.Source = &declared, &nullable, &source
+		if fact.PK > 0 {
+			pk := fact.PK
+			column.PK = &pk
+		}
+		column.ForeignKeys = append([]ColumnFK{}, fact.ForeignKeys...)
+	}
 }
 
 // NewMeta starts the meta.json of id written now.
@@ -114,10 +228,26 @@ func NewMeta(id, cliVersion string, data Data) Meta {
 // "too-large"), at most MaxMetaColumns columns, and the whole within
 // MaxMetaBytes (else the column descriptions are dropped).
 func (m Meta) Encode() []byte {
+	// Both are measured as they are encoded, escapes included.
+	text, _ := json.Marshal(m.Query.DTQL)
 	parameters, _ := json.Marshal(m.Query.Parameters)
-	if len(m.Query.DTQL)+len(parameters) > MaxQueryBytes {
+	if len(text)+len(parameters) > MaxQueryBytes {
 		m.Query.DTQL, m.Query.Parameters = "", nil
 		m.Unavailable.Query = UnavailableTooLarge
+	}
+	if m.Participants == nil {
+		m.Participants = []Participant{}
+	}
+	if m.Related == nil {
+		m.Related = []Related{}
+	}
+	if len(m.Participants) > MaxParticipants {
+		m.Participants = m.Participants[:MaxParticipants]
+		m.Unavailable.Participants = UnavailableTooMany
+	}
+	if len(m.Related) > MaxRelated {
+		m.Related = m.Related[:MaxRelated]
+		m.Unavailable.Related = UnavailableTooMany
 	}
 	if len(m.Columns) > MaxMetaColumns {
 		m.Columns = m.Columns[:MaxMetaColumns]
@@ -125,8 +255,8 @@ func (m Meta) Encode() []byte {
 	}
 	encoded, _ := json.Marshal(m)
 	if len(encoded) > MaxMetaBytes {
-		m.Columns = []Column{}
-		m.Unavailable.Columns = UnavailableTooMany
+		m.Columns, m.Participants, m.Related = []Column{}, []Participant{}, []Related{}
+		m.Unavailable.Columns, m.Unavailable.Participants, m.Unavailable.Related = UnavailableTooMany, UnavailableTooMany, UnavailableTooMany
 		encoded, _ = json.Marshal(m)
 	}
 	return encoded

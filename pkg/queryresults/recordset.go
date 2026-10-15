@@ -117,9 +117,10 @@ type Data struct {
 // Build encodes data.json for id with the columns given ($key is put first).
 // A column's type is its one observed kind; a column of several kinds is a
 // string column with each cell written as its text, and it records the kinds
-// in ObservedTypes. Rows are dropped from the end while the file would exceed
+// in ObservedTypes. A column with a declared contract type takes it when every
+// value casts to it. Rows are dropped from the end while the file would exceed
 // MaxDataBytes.
-func (c *Collector) Build(id string, columns []string) Data {
+func (c *Collector) Build(id string, columns []string, declared map[string]string) Data {
 	names := append([]string{KeyColumn}, columns...)
 	cellAt := func(row collectedRow, i int) cell {
 		if i == 0 {
@@ -132,7 +133,12 @@ func (c *Collector) Build(id string, columns []string) Data {
 	}
 	types := make([]string, len(names))
 	observed := make([][]string, len(names))
+	casts := make([]bool, len(names))
 	for i := range names {
+		if want := declared[names[i]]; want != "" && c.castsTo(i, want, cellAt) {
+			types[i], casts[i] = want, true
+			continue
+		}
 		kinds := map[string]bool{}
 		for _, row := range c.rows {
 			if value := cellAt(row, i).value; value.Type != apicontract.ValueTypeNull {
@@ -153,6 +159,9 @@ func (c *Collector) Build(id string, columns []string) Data {
 		values := make([]apicontract.TypedValue, len(names))
 		for i := range names {
 			values[i] = cellAt(row, i).value
+			if casts[i] {
+				values[i], _ = castValue(values[i], types[i])
+			}
 			if observed[i] != nil {
 				values[i] = asText(values[i])
 			}
@@ -220,6 +229,51 @@ type dataFile struct {
 type dataRecordset struct {
 	Columns []apicontract.Column `json:"columns"`
 	Rows    json.RawMessage      `json:"rows"`
+}
+
+// castsTo reports whether every value of column i casts to the contract type.
+func (c *Collector) castsTo(i int, want string, cellAt func(collectedRow, int) cell) bool {
+	for _, row := range c.rows {
+		if _, ok := castValue(cellAt(row, i).value, want); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// castValue converts value to the contract type want without losing
+// information; null casts to every type.
+func castValue(value apicontract.TypedValue, want string) (apicontract.TypedValue, bool) {
+	kind := string(value.Type)
+	switch {
+	case value.Type == apicontract.ValueTypeNull || kind == want:
+		return value, true
+	case want == string(apicontract.ValueTypeDecimal) && value.Type == apicontract.ValueTypeInteger:
+		decimal := apicontract.NewDecimalValue(value.Str)
+		return decimal, decimal.Validate() == nil
+	case want == string(apicontract.ValueTypeDecimal) && value.Type == apicontract.ValueTypeNumber:
+		decimal := apicontract.NewDecimalValue(strconv.FormatFloat(value.Num, 'f', -1, 64))
+		return decimal, decimal.Validate() == nil
+	case want == string(apicontract.ValueTypeNumber) && value.Type == apicontract.ValueTypeInteger:
+		f, err := strconv.ParseFloat(value.Str, 64)
+		return apicontract.NewNumberValue(f), err == nil && math.Abs(f) < 1<<53
+	case want == string(apicontract.ValueTypeInteger) && value.Type == apicontract.ValueTypeNumber:
+		return apicontract.NewIntegerValue(strconv.FormatFloat(value.Num, 'f', 0, 64)), value.Num == math.Trunc(value.Num) && math.Abs(value.Num) < 1<<53
+	case want == string(apicontract.ValueTypeDatetime) && value.Type == apicontract.ValueTypeString:
+		for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999", "2006-01-02T15:04:05.999999999", "2006-01-02"} {
+			if t, err := time.Parse(layout, value.Str); err == nil {
+				return apicontract.NewDatetimeValue(t.UTC().Format(time.RFC3339Nano)), true
+			}
+		}
+		return value, false
+	case want == string(apicontract.ValueTypeDate) && value.Type == apicontract.ValueTypeString:
+		date := apicontract.NewDateValue(value.Str)
+		return date, date.Validate() == nil
+	case want == string(apicontract.ValueTypeString):
+		return asText(value), true
+	default:
+		return value, false
+	}
 }
 
 func encodedSize(c cell) int {

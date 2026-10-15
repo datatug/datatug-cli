@@ -56,6 +56,15 @@ The reusable core lives in `pkg/accesspolicies` (discovery, decoding, variable p
 
 `pkg/queryresults` (store, collector, `meta.json` types), `--result-id`/`--result-rows` on both forms of `query run`, the path-free locator and failure lines, and `query results locate|check|prune|rm`; the Git checks moved from `pkg/executionstore` to `pkg/gitpath`.
 
+### Task 5: Result sources, related tables and declared column facts
+
+**Id:** task-5
+**Verifies:** cli/query#ac:result-sources-and-related
+**Depends-On:** 4
+**Status:** complete
+
+`pkg/joinmeta` (relation instances, and the foreign-key snapshot read through `dbschema` for every engine, shared with the chat, whose SQLite-only gate is gone), and the `meta.json` builder for ad-hoc, saved DTQL, federated, native SQL and HTTP results.
+
 ## Open Questions
 
 None at this time.

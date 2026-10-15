@@ -23,6 +23,7 @@ required_tests=(
 	TestPostgresDatabaseCompareJourneyPreservesExactValuesAndChanges
 	TestPostgresCopyJourneyRefusesANameAndLeavesTheTargetAsItWas
 	TestPostgresToBigQueryProviderNeutralCopyPreservesRows
+	TestPostgresResultMetaMatchesSQLite
 )
 
 # check reads the verbose output of `go test` in file $1 and prints each problem. It

@@ -251,8 +251,21 @@ func TestPostgresCopyIsIndependentOfTheServersOutputSettings(t *testing.T) {
 	fixture(plain)
 	fixture(odd)
 	odd = pgSetDatabase(t, odd, `datestyle = 'SQL, DMY'`, `intervalstyle = 'sql_standard'`, `extra_float_digits = -3`, `timezone = 'Asia/Tokyo'`, `statement_timeout = '1ms'`)
-	if got := pgText(t, odd.DB, `SELECT dt::text FROM fl WHERE id = 1`); got != "02/01/2020" {
-		t.Fatalf("the settings are not in force: %s", got)
+	// The check is made with the timeout lifted for this one transaction: 1ms is too short for a slow runner.
+	var inForce string
+	if tx, err := odd.DB.Begin(); err != nil {
+		t.Fatal(err)
+	} else {
+		if _, err := tx.Exec(`SET LOCAL statement_timeout = 0`); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.QueryRow(`SELECT dt::text FROM fl WHERE id = 1`).Scan(&inForce); err != nil {
+			t.Fatal(err)
+		}
+		_ = tx.Rollback()
+	}
+	if inForce != "02/01/2020" {
+		t.Fatalf("the settings are not in force: %s", inForce)
 	}
 	a, b := newSQLite(t), newSQLite(t)
 	repA := mustCopy(t, plain, a, Options{})

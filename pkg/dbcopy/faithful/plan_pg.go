@@ -73,6 +73,9 @@ func PlanSQLiteToPG(cat *Catalog, stats map[string][]*colStats, schema string) *
 			if ch.note != "" {
 				p.warn(WarnTypeWidened, obj, "%s", ch.note)
 			}
+			if ch.normalized > 0 {
+				p.warn(WarnValuesNormalized, obj, "%d text value(s) were rewritten to the canonical spelling of a number (%s)", ch.normalized, ch.example)
+			}
 			tc := &TargetColumn{Src: c, Name: c.Name, Type: ch.typ, Cast: ch.cast, enc: ch.enc, NotNull: c.NotNull || inPK[c.Name], readExpr: sqliteReadExpr(c)}
 			m := &Marker{Src: string(SQLite), Type: c.SourceType}
 			switch c.Identity {

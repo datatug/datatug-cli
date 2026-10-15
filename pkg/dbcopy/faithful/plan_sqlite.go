@@ -7,18 +7,15 @@ import (
 )
 
 var (
-	pgCast = regexp.MustCompile(`::(?:character varying|character|bpchar|text|name|integer|bigint|smallint|numeric|double precision|real|boolean|date|timestamp without time zone|timestamp with time zone|timestamp|time without time zone|bytea)(?:\(\d+(?:,\s*\d+)?\))?(?:\[\])?`)
-	pgAny  = regexp.MustCompile(`(?s)(\([^()]*\)|"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)\s*=\s*ANY\s*\(\s*(?:\(\s*ARRAY\[(.*?)\]\s*\)|ARRAY\[(.*?)\])\s*\)`)
+	pgCast     = regexp.MustCompile(`::(?:character varying|character|bpchar|text|name|integer|bigint|smallint|numeric|double precision|real|boolean|date|timestamp without time zone|timestamp with time zone|timestamp|time without time zone|bytea)(?:\(\d+(?:,\s*\d+)?\))?(?:\[\])?`)
+	pgAnyStart = regexp.MustCompile(`(?is)\s*=\s*ANY\s*\(\s*(?:\(\s*ARRAY\[(.*?)\]\s*\)|ARRAY\[(.*?)\])\s*\)`)
 )
 
 // pgExprToSQLite rewrites the parts of a PostgreSQL expression that SQLite spells differently. The
 // result is a candidate: it is compiled by SQLite before it is used.
 func pgExprToSQLite(expr string) string {
 	e := pgCast.ReplaceAllString(expr, "")
-	e = pgAny.ReplaceAllStringFunc(e, func(m string) string {
-		sub := pgAny.FindStringSubmatch(m)
-		return sub[1] + " IN (" + sub[2] + sub[3] + ")"
-	})
+	e = anyToIn(e)
 	e = pgRegexMatch.ReplaceAllStringFunc(e, func(m string) string {
 		sub := pgRegexMatch.FindStringSubmatch(m)
 		if glob, ok := regexToGlob(strings.ReplaceAll(sub[2], "''", "'")); ok {
@@ -371,4 +368,63 @@ func sqliteIndexSQL(table string, ix Index) string {
 		s += " WHERE " + ix.Where
 	}
 	return s
+}
+
+// anyToIn rewrites "<operand> = ANY (ARRAY[a, b])" to "<operand> IN (a, b)". The operand is read
+// backwards from the "= ANY": a name, a quoted name, or a call with balanced parentheses.
+func anyToIn(e string) string {
+	for {
+		loc := pgAnyStart.FindStringSubmatchIndex(e)
+		if loc == nil {
+			return e
+		}
+		start := operandStart(e, loc[0])
+		list := ""
+		if loc[2] >= 0 {
+			list = e[loc[2]:loc[3]]
+		} else {
+			list = e[loc[4]:loc[5]]
+		}
+		e = e[:start] + e[start:loc[0]] + " IN (" + list + ")" + e[loc[1]:]
+	}
+}
+
+// operandStart is the index where the operand that ends at end begins.
+func operandStart(e string, end int) int {
+	i := end
+	for i > 0 && (e[i-1] == ' ' || e[i-1] == '\t' || e[i-1] == '\n') {
+		i--
+	}
+	if i == 0 {
+		return 0
+	}
+	switch c := e[i-1]; {
+	case c == ')':
+		depth := 0
+		for j := i - 1; j >= 0; j-- {
+			switch e[j] {
+			case ')':
+				depth++
+			case '(':
+				depth--
+				if depth == 0 {
+					k := j
+					for k > 0 && isWordByte(e[k-1]) {
+						k--
+					}
+					return k
+				}
+			}
+		}
+		return 0
+	case c == '"':
+		if j := strings.LastIndexByte(e[:i-1], '"'); j >= 0 {
+			return j
+		}
+	}
+	j := i
+	for j > 0 && isWordByte(e[j-1]) {
+		j--
+	}
+	return j
 }

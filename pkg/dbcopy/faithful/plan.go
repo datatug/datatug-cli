@@ -147,6 +147,9 @@ type pgChoice struct {
 	enc  encoder
 	kind Kind
 	note string // non-empty: the declared type could not be carried and this says why
+	// normalized says that some text values are written differently by the target (example: ".0000 -> 0.0000").
+	normalized int64
+	example    string
 }
 
 func chooseSQLiteToPG(c *Column, st *colStats) pgChoice {
@@ -177,9 +180,9 @@ func chooseSQLiteToPG(c *Column, st *colStats) pgChoice {
 	case declDecimal:
 		if st.only("int", "real", "text") && st.decOK == st.ints+st.reals+st.texts {
 			if st.decFit == st.decOK {
-				return pgChoice{typ: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), cast: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), enc: encDecimal, kind: KindDecimal}
+				return pgChoice{typ: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), cast: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), enc: encDecimal, kind: KindDecimal, normalized: st.decNormalized, example: st.decNormalExample}
 			}
-			return widen(pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal}, "some values do not fit that precision and scale exactly")
+			return widen(pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal, normalized: st.decNormalized, example: st.decNormalExample}, "some values do not fit that precision and scale exactly")
 		}
 	case declBareNumeric:
 		if st.only("int", "real", "text") && st.decOK == st.ints+st.reals+st.texts {

@@ -24,6 +24,8 @@ type colStats struct {
 	decOK                               int64 // values that are a well formed decimal number
 	decFit                              int64 // ... that also fit the declared precision and scale
 	jsonOK, uuidOK                      int64
+	decNormalized                       int64 // decimal texts that PostgreSQL writes differently (.5 -> 0.5)
+	decNormalExample                    string
 }
 
 var (
@@ -99,6 +101,14 @@ func (s *colStats) decimal(text string, isText bool) {
 		return
 	}
 	s.decOK++
+	if isText {
+		if canon := canonicalDecimalText(text); canon != text {
+			s.decNormalized++
+			if s.decNormalExample == "" {
+				s.decNormalExample = text + " -> " + canon
+			}
+		}
+	}
 	if s.decl.p < 0 {
 		s.decFit++
 		return
@@ -146,3 +156,21 @@ func (s *colStats) allNull() bool { return s.n == s.nulls }
 var reDefNumber = regexp.MustCompile(`^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$`)
 
 var reUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// canonicalDecimalText writes a decimal text the way PostgreSQL's numeric does: no plus sign, one
+// leading zero, no extra leading zeros, the digits after the point as they are.
+func canonicalDecimalText(t string) string {
+	sign := ""
+	if strings.HasPrefix(t, "-") {
+		sign, t = "-", t[1:]
+	}
+	intPart, frac, hasFrac := strings.Cut(t, ".")
+	intPart = strings.TrimLeft(intPart, "0")
+	if intPart == "" {
+		intPart = "0"
+	}
+	if hasFrac {
+		return sign + intPart + "." + frac
+	}
+	return sign + intPart
+}

@@ -147,7 +147,11 @@ func normDefault(d string) string {
 	if strings.Contains(u, "CURRENT_TIMESTAMP") || strings.Contains(u, "NOW()") {
 		return "<current timestamp>"
 	}
-	return strings.Join(strings.Fields(d), " ")
+	d = strings.Join(strings.Fields(d), " ")
+	if len(d) > 2 && d[0] == '\'' && d[len(d)-1] == '\'' && reDefNumber.MatchString(d[1:len(d)-1]) {
+		return d[1 : len(d)-1] // a quoted number and the number are one default
+	}
+	return d
 }
 
 func colNames(t *Table) string {

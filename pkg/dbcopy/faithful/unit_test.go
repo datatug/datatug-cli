@@ -595,11 +595,55 @@ func TestDryRunNeedsNoTarget(t *testing.T) {
 	}
 	longIdx := newSQLite(t)
 	execAll(t, longIdx.DB, `CREATE TABLE t (a INTEGER PRIMARY KEY)`, `CREATE INDEX `+strings.Repeat("i", 64)+` ON t (a)`)
-	if _, err := Copy(context.Background(), longIdx, Endpoint{Engine: Postgres}, Options{DryRun: true}); err == nil {
-		t.Error("long index name")
+	rep, err = Copy(context.Background(), longIdx, Endpoint{Engine: Postgres}, Options{DryRun: true})
+	if err != nil || !hasWarning(rep, WarnIndexRenamed, strings.Repeat("i", 64)) {
+		t.Errorf("a long index name is shortened and said: %v %v", err, rep.Warnings)
+	}
+	longKey := newSQLite(t)
+	execAll(t, longKey.DB, `CREATE TABLE t (a INTEGER, CONSTRAINT `+strings.Repeat("k", 70)+` PRIMARY KEY (a), CONSTRAINT `+strings.Repeat("u", 70)+` UNIQUE (a))`)
+	rep, err = Copy(context.Background(), longKey, Endpoint{Engine: Postgres}, Options{DryRun: true})
+	if err != nil || !hasWarning(rep, WarnConstraintNameLost, strings.Repeat("k", 70)) || !hasWarning(rep, WarnConstraintNameLost, strings.Repeat("u", 70)) {
+		t.Errorf("long constraint names are dropped and said: %v %v", err, rep.Warnings)
+	}
+	if truncateUTF8("ééé", 3) != "é" {
+		t.Error("truncateUTF8")
 	}
 	nul := &Plan{Tables: []*TargetTable{{Name: "a\x00b"}}}
 	if validatePGNames(nul) == nil {
 		t.Error("NUL in a name")
+	}
+}
+
+func TestAnyToIn(t *testing.T) {
+	cases := map[string]string{
+		`(upper(rtrim("Gender")) = ANY (ARRAY['M', 'F']))`:       `(upper(rtrim("Gender")) IN ('M', 'F'))`,
+		`(("x" IS NULL) OR ("Class" = ANY (ARRAY['L', 'H'])))`:   `(("x" IS NULL) OR ("Class" IN ('L', 'H')))`,
+		`(a = ANY (ARRAY['1']) AND b = ANY ((ARRAY['2', '3'])))`: `(a IN ('1') AND b IN ('2', '3'))`,
+		`(= ANY (ARRAY['1']))`:                                   `( IN ('1'))`,
+	}
+	for in, want := range cases {
+		if got := anyToIn(in); got != want {
+			t.Errorf("%s\n got %s\nwant %s", in, got, want)
+		}
+	}
+	if operandStart("  ", 2) != 0 || operandStart("a)", 2) != 0 {
+		t.Error("operandStart")
+	}
+}
+
+func TestNormalizedDecimalsAreSaid(t *testing.T) {
+	src := newSQLite(t)
+	execAll(t, src.DB, `CREATE TABLE t (id INTEGER PRIMARY KEY, c DECIMAL_TEXT(10,4))`, `INSERT INTO t VALUES (1, '.0000'), (2, '12.5000')`)
+	rep, err := Copy(context.Background(), src, Endpoint{Engine: Postgres}, Options{DryRun: true})
+	if err != nil || !hasWarning(rep, WarnValuesNormalized, "t.c") {
+		t.Fatalf("%v %v", err, rep.Warnings)
+	}
+	for _, in := range []string{"007.5", "-0.5", "-.5", "3"} {
+		if got := canonicalDecimalText(in); strings.HasPrefix(got, "+") || strings.HasPrefix(got, "00") {
+			t.Errorf("%s -> %s", in, got)
+		}
+	}
+	if canonicalDecimalText("-.5") != "-0.5" || canonicalDecimalText("3") != "3" {
+		t.Error("canonicalDecimalText")
 	}
 }

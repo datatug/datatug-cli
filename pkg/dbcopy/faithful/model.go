@@ -235,6 +235,8 @@ const (
 	WarnCommentNotCarried    = "comment-not-carried"
 	WarnObjectNotCarried     = "object-not-carried"
 	WarnConstraintNameLost   = "constraint-name-not-carried"
+	WarnIndexRenamed         = "index-renamed"
+	WarnValuesNormalized     = "values-normalized"
 	WarnForeignKeyViolations = "fk-violations-in-source"
 	WarnNarrowedOnReturn     = "type-narrowed"
 )

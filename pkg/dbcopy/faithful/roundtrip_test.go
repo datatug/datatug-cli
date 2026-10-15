@@ -2,9 +2,11 @@ package faithful
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -35,7 +37,7 @@ func TestRoundTripSQLitePGSQLite(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Logf("to pg: %+v", rep.Totals)
+			t.Logf("RESULT leg=sqlite>pg db=%s %s warnings=%s", name, totalsLine(rep.Totals), warningKinds(rep.Warnings))
 			for _, w := range rep.Warnings {
 				t.Logf("  warn %s", w)
 			}
@@ -51,11 +53,33 @@ func TestRoundTripSQLitePGSQLite(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Logf("RESULT leg=sqlite>pg>sqlite db=%s %s warnings=%s diffs=%d", name, totalsLine(rep2.Totals), warningKinds(rep2.Warnings), len(diffs))
 			for _, d := range diffs {
+				if explainedBy(rep, d) {
+					continue
+				}
 				t.Errorf("diff: %s", d)
 			}
 		})
 	}
+}
+
+// explainedBy says whether the warnings of the first leg announced the difference d: a column that
+// was widened or whose text was rewritten, an index whose name was shortened.
+func explainedBy(rep *Report, d Diff) bool {
+	for _, w := range rep.Warnings {
+		switch w.Kind {
+		case WarnTypeWidened, WarnValuesNormalized:
+			if d.Object == w.Object {
+				return true
+			}
+		case WarnIndexRenamed:
+			if d.Aspect == "indexes" && strings.HasPrefix(w.Object, d.Object+".") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // TestRoundTripPGSQLitePG starts from PostgreSQL copies of the demo databases loaded by
@@ -96,7 +120,7 @@ func TestRoundTripPGSQLitePG(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Logf("to sqlite: %+v", rep.Totals)
+			t.Logf("RESULT leg=pg>sqlite db=%s %s warnings=%s", name, totalsLine(rep.Totals), warningKinds(rep.Warnings))
 			for _, w := range rep.Warnings {
 				t.Logf("  warn %s", w)
 			}
@@ -113,11 +137,29 @@ func TestRoundTripPGSQLitePG(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Logf("RESULT leg=pg>sqlite>pg db=%s %s warnings=%s diffs=%d", name, totalsLine(rep2.Totals), warningKinds(rep2.Warnings), len(diffs))
 			for _, d := range diffs {
 				t.Errorf("diff: %s", d)
 			}
 		})
 	}
+}
+
+func totalsLine(t Totals) string {
+	return fmt.Sprintf("tables=%d rows=%d pk=%d fk=%d idx=%d uq=%d ck=%d", t.Tables, t.Rows, t.PrimaryKeys, t.ForeignKeys, t.Indexes, t.UniqueConstraints, t.CheckConstraints)
+}
+
+func warningKinds(ws []Warning) string {
+	counts := map[string]int{}
+	for _, w := range ws {
+		counts[w.Kind]++
+	}
+	var kinds []string
+	for k, n := range counts {
+		kinds = append(kinds, fmt.Sprintf("%s:%d", k, n))
+	}
+	sort.Strings(kinds)
+	return strings.Join(kinds, ",")
 }
 
 func TestSQLiteToSQLiteIsExact(t *testing.T) {

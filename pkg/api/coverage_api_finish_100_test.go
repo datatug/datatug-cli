@@ -390,6 +390,11 @@ func TestCoverageFinish100_SessionContext(t *testing.T) {
 	assert.Equal(t, "chinook-sqlite", caps.Environments[0].QuerySources[0].ConnectionID)
 	assert.Equal(t, "chinook", caps.Environments[0].QuerySources[0].DatabaseID)
 
+	_, _, defaultCaps, defaultErr := ResolveSessionContext(ctx, "", pID)
+	require.NoError(t, defaultErr)
+	require.NotNil(t, defaultCaps.OperationScope)
+	assert.Equal(t, "local", defaultCaps.OperationScope.Storage)
+
 	// Exercise access check callback of session service via ListSessions
 	// 1. Wrong actor
 	badActorPrincipal := principal

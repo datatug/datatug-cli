@@ -51,6 +51,10 @@ func TestNativeRuntimeConstructionFailsClosedAtEveryOwnerBoundary(t *testing.T) 
 				if e != nil || store == nil || service == nil || owner == nil {
 					t.Fatal(e)
 				}
+				legacyStore, actor, legacyErr := detectiveStore("project", api.SecurityContextID())
+				if legacyErr != nil || legacyStore == nil || actor != "alice" {
+					t.Fatal("legacy recovery did not install native admission", actor, legacyErr)
+				}
 			} else if e == nil || store != nil || service != nil || owner != nil {
 				t.Fatal("partial runtime admitted", e)
 			}

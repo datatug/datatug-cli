@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -142,5 +143,52 @@ func TestProjectPathCreationAndRaceFailures(t *testing.T) {
 	}
 	if _, err = ProjectPath(project, base); !errors.Is(err, failed) {
 		t.Fatal(err)
+	}
+}
+
+// Exercise the physical-identity fallback on case-sensitive filesystems too.
+// SameFile compares actual FileInfo; only lookup spelling is fault-injected.
+func TestPhysicalDirectoryRejectsAlternateIdentitySpellingPortably(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(root, "Canonical")
+	if err = os.Mkdir(canonical, 0700); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 1 {
+		t.Fatal(err)
+	}
+	oldEval, oldStat, oldRead := physicalEvalSymlinks, physicalStat, physicalReadDir
+	t.Cleanup(func() { physicalEvalSymlinks, physicalStat, physicalReadDir = oldEval, oldStat, oldRead })
+	alias := filepath.Join(root, "ALTERNATE")
+	physicalEvalSymlinks = func(string) (string, error) { return alias, nil }
+	physicalStat = func(path string) (os.FileInfo, error) {
+		if path == alias {
+			return oldStat(canonical)
+		}
+		return oldStat(path)
+	}
+	physicalReadDir = func(path string) ([]os.DirEntry, error) {
+		if path == root {
+			return entries, nil
+		}
+		return oldRead(path)
+	}
+	if _, err = PhysicalDirectory(alias); err == nil || !strings.Contains(err.Error(), "canonical directory spelling") {
+		t.Fatal("alternate identity spelling split admission", err)
+	}
+	// A directory disappearing from enumeration is also refused, not admitted
+	// through an invented canonical pathname.
+	physicalReadDir = func(path string) ([]os.DirEntry, error) {
+		if path == root {
+			return nil, nil
+		}
+		return oldRead(path)
+	}
+	if _, err = PhysicalDirectory(alias); err == nil {
+		t.Fatal("unresolvable physical spelling admitted")
 	}
 }

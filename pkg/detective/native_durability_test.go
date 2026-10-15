@@ -88,3 +88,31 @@ func TestNativeStoreRejectsPhysicalCaseAliasesWithoutMovingJournals(t *testing.T
 		t.Fatal("alias rejection erased canonical state", err)
 	}
 }
+
+func TestNativeStoreRefusesDirectoriesRemovedDuringPhysicalAdmission(t *testing.T) {
+	for _, kind := range []string{"project", "private"} {
+		t.Run(kind, func(t *testing.T) {
+			project, private := t.TempDir(), t.TempDir()
+			oldEval := storeEvalSymlinks
+			t.Cleanup(func() { storeEvalSymlinks = oldEval })
+			calls := 0
+			storeEvalSymlinks = func(path string) (string, error) {
+				resolved, err := oldEval(path)
+				calls++
+				if err == nil && calls == 2 {
+					target := project
+					if kind == "private" {
+						target = private
+					}
+					if removeErr := os.Remove(target); removeErr != nil {
+						t.Fatal(removeErr)
+					}
+				}
+				return resolved, err
+			}
+			if store, err := NewLocalStore("p", project, private); err == nil || store != nil {
+				t.Fatal("vanished directory admitted", store, err)
+			}
+		})
+	}
+}

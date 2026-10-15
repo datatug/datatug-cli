@@ -73,8 +73,16 @@ func TestDatatugCatalogEntry_MatchesGoReleaserConfig(t *testing.T) {
 	if gr.ProjectName != entry.ID {
 		t.Errorf("goreleaser project_name = %q, want catalog id %q", gr.ProjectName, entry.ID)
 	}
-	if got, want := gr.Release.GitHub.Owner+"/"+gr.Release.GitHub.Name, entry.Repository; got != want {
-		t.Errorf("goreleaser release.github = %q, want catalog Repository %q", got, want)
+	// GoReleaser publishes to the source repository, the only one the release
+	// job's GITHUB_TOKEN can write to; the catalog Repository is the public hub
+	// repository that release.yml's publish-datatug-release job copies the
+	// promoted release to.
+	const wantSourceRepo = "datatug/datatug-cli"
+	if got := gr.Release.GitHub.Owner + "/" + gr.Release.GitHub.Name; got != wantSourceRepo {
+		t.Errorf("goreleaser release.github = %q, want source repository %q (a hub-repo target fails with 403 in CI)", got, wantSourceRepo)
+	}
+	if entry.Repository != "datatug/datatug" {
+		t.Errorf("catalog Repository = %q, want hub repository %q", entry.Repository, "datatug/datatug")
 	}
 	if entry.TagPrefix != "" {
 		t.Errorf("catalog TagPrefix = %q, want empty: datatug publishes one product per repository", entry.TagPrefix)

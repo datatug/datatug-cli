@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dbschema"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/secureread"
 	"github.com/datatug/datatug-core/pkg/apicontract"
@@ -168,7 +169,7 @@ func resolveRecordsTable(ctx context.Context, req recordsTableRequest) (resolved
 		return resolvedSource{}, "", nil, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
 	if err := executor.Authorize(ctx, authorizeQuery(collection), nil); err != nil {
-		if errors.Is(err, secureread.ErrAccessDenied) || isAccessDenied(err) {
+		if errors.Is(err, secureread.ErrAccessDenied) {
 			return resolvedSource{}, "", nil, contractErrAccessDenied("access denied by policy")
 		}
 		log.Printf("records: the access decision failed")
@@ -221,7 +222,7 @@ func computeRecordsLookup(ctx context.Context, req recordsLookupRequest) (apicon
 		switch {
 		case errors.Is(err, context.DeadlineExceeded):
 			return apicontract.Result{}, newTimeout("the record lookup timed out")
-		case isAccessDenied(err):
+		case errors.Is(err, secureread.ErrAccessDenied):
 			return apicontract.Result{}, contractErrAccessDenied("access denied by policy")
 		}
 		if unavailable := api.SourceUnavailable(req.Source, err); unavailable != nil {
@@ -462,6 +463,24 @@ type recordsSchemaResponse struct {
 	Columns      []recordsSchemaColumn `json:"columns"`
 	PrimaryKey   []string              `json:"primaryKey"`
 	ReferencedBy []string              `json:"referencedBy"`
+	ForeignKeys  []recordsForeignKey   `json:"foreignKeys"`
+}
+
+// recordsForeignKey is an outgoing foreign key of a table, as the live schema of the source declares
+// it: the columns of the table and the table and columns they reference, in matching positions.
+// RefColumns always has one entry per column (a key that cannot say so is left out).
+type recordsForeignKey struct {
+	Name       string            `json:"name"`
+	Columns    []string          `json:"columns"`
+	RefTable   recordsForeignRef `json:"refTable"`
+	RefColumns []string          `json:"refColumns"`
+}
+
+// recordsForeignRef names the referenced table: its schema is the one of the table asked about
+// unless the key points into another schema.
+type recordsForeignRef struct {
+	Schema string `json:"schema"`
+	Name   string `json:"name"`
 }
 
 // recordsSchemaHandler is POST /datatug/records/schema: the live schema (columns with their types,
@@ -478,14 +497,16 @@ func recordsSchemaHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, err)
 		return
 	}
-	resolved, _, _, err := resolveRecordsTable(r.Context(), req)
+	resolved, _, executor, err := resolveRecordsTable(r.Context(), req)
 	if err != nil {
 		writeContractError(w, r, err)
 		return
 	}
+	driver := driverOfURL(resolved.URL)
 	resp := recordsSchemaResponse{
 		Source: req.Source, Schema: req.Schema, Table: req.Table,
 		Columns: []recordsSchemaColumn{}, PrimaryKey: []string{}, ReferencedBy: []string{},
+		ForeignKeys: []recordsForeignKey{},
 	}
 	for _, c := range resolved.Columns {
 		resp.Columns = append(resp.Columns, recordsSchemaColumn{Name: c.Name, Type: c.Type})
@@ -494,7 +515,61 @@ func recordsSchemaHandler(w http.ResponseWriter, r *http.Request) {
 		resp.PrimaryKey = append(resp.PrimaryKey, pk.Columns...)
 	}
 	for _, ref := range resolved.Schema.ReferencedBy {
-		resp.ReferencedBy = append(resp.ReferencedBy, ref.Name())
+		if readableTable(r.Context(), executor, driver, req.Schema, ref.Name()) {
+			resp.ReferencedBy = append(resp.ReferencedBy, ref.Name())
+		}
 	}
+	resp.ForeignKeys = append(resp.ForeignKeys, readableForeignKeys(r.Context(), executor, driver, req.Schema, resolved.ForeignKeys)...)
 	writeContractResponse(w, r, nil, resp)
+}
+
+// defaultSchemaName is the name of the default schema of a driver ("" when it has none): the shared
+// helper of the api package, so aliases and case resolve the same way everywhere.
+func defaultSchemaName(driver string) string { return api.DefaultSchemaForDriver(driver) }
+
+// readableTable reports whether the principal may read the table of schema: the same access decision
+// the route makes on the table asked about. A table in another schema than the default one is not
+// readable through these routes, and any failure of the decision hides the table.
+func readableTable(ctx context.Context, executor *secureread.Executor, driver, schema, table string) bool {
+	collection, supported := lookupCollectionName(schema, table, driver)
+	return supported && executor.Authorize(ctx, authorizeQuery(collection), nil) == nil
+}
+
+// readableForeignKeys is the outgoing foreign keys of a table of schema (the schema as named in the
+// request) as the answer lists them. A key whose referenced table the principal may not read is left
+// out (an allowed table never reveals the name or columns of a denied one), and so is a key whose
+// columns do not line up with the referenced columns (a driver that reports a partial target). The
+// default schema of the driver is named, never left empty, when the driver has one.
+func readableForeignKeys(ctx context.Context, executor *secureread.Executor, driver, schema string, keys []dbschema.ForeignKeyDef) []recordsForeignKey {
+	out := []recordsForeignKey{}
+	for _, fk := range keys {
+		if len(fk.Fields) != len(fk.ReferencedFields) {
+			continue
+		}
+		refSchema := fk.ReferencedNamespace
+		if refSchema == "" {
+			refSchema = schema
+		}
+		if refSchema == "" {
+			refSchema = defaultSchemaName(driver)
+		}
+		if !readableTable(ctx, executor, driver, refSchema, fk.ReferencedCollection) {
+			continue
+		}
+		out = append(out, recordsForeignKey{
+			Name: fk.Name, Columns: fieldNames(fk.Fields),
+			RefTable:   recordsForeignRef{Schema: refSchema, Name: fk.ReferencedCollection},
+			RefColumns: fieldNames(fk.ReferencedFields),
+		})
+	}
+	return out
+}
+
+// fieldNames is names as strings; never nil, so a JSON array is always an array.
+func fieldNames(names []dal.FieldName) []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = string(n)
+	}
+	return out
 }

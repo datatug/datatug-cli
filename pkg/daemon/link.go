@@ -174,27 +174,36 @@ const maxNumberLiteral = 40
 // canonicalNumber is one spelling per number: an integer inside the exactly representable
 // JavaScript range is its plain digits (1E3 and 1.0 are 1000 and 1, -0 is 0), an integer outside it
 // is a string of its exact digits (so the UI never rounds it to a neighbour), any other number is
-// its shortest float form. A literal that is not finite is not a key.
-func canonicalNumber(literal string) (any, bool) {
+// its shortest float form (decimal reports that case: the record lookup takes no such key, see
+// canonicalPK). A literal that is not finite is not a key.
+func canonicalNumber(literal string) (v any, ok, decimal bool) {
 	if len(literal) > maxNumberLiteral {
-		return nil, false
+		return nil, false, false
 	}
 	if i := strings.IndexAny(literal, "eE"); i >= 0 && len(strings.TrimLeft(literal[i+1:], "+-0")) > 3 {
-		return nil, false // an exponent beyond 999 is no key
+		return nil, false, false // an exponent beyond 999 is no key
 	}
 	r, _ := new(big.Rat).SetString(literal) // a valid json.Number with an exponent below 1000 always parses
 	if r.IsInt() {
 		n := r.Num()
 		if new(big.Int).Abs(n).Cmp(big.NewInt(maxSafeInteger)) > 0 {
-			return n.String(), true
+			return n.String(), true, false
 		}
-		return json.Number(n.String()), true
+		return json.Number(n.String()), true, false
 	}
 	f, _ := r.Float64()
 	if f == 0 || math.IsInf(f, 0) { // not representable
-		return nil, false
+		return nil, false, false
 	}
-	return json.Number(strconv.FormatFloat(f, 'g', -1, 64)), true
+	return json.Number(strconv.FormatFloat(f, 'g', -1, 64)), true, true
+}
+
+// unsupportedKeyKind is the refusal of a key value kind that POST /datatug/records/lookup cannot
+// take (it binds strings and exact integers only: a float is never compared for equality and the
+// structured SQLite read binds no boolean), so a link is never made for a record the lookup would
+// refuse. It names the kind, never the value.
+func unsupportedKeyKind(kind string) string {
+	return "--record: a key value of kind " + kind + " is not supported; a primary key is looked up by strings and integers only"
 }
 
 // canonicalPK checks that v is a non-empty JSON object of scalar key values
@@ -213,9 +222,12 @@ func canonicalPK(v string) (string, error) {
 	for k, val := range obj {
 		switch x := val.(type) {
 		case json.Number:
-			n, ok := canonicalNumber(x.String())
+			n, ok, decimal := canonicalNumber(x.String())
 			if !ok {
 				return "", bad
+			}
+			if decimal {
+				return "", UsageError{unsupportedKeyKind("decimal number")}
 			}
 			obj[k] = n
 		case string:
@@ -223,6 +235,7 @@ func canonicalPK(v string) (string, error) {
 				return "", UsageError{fmt.Sprintf("a key value must be at most %d characters", maxKeyValueLength)}
 			}
 		case bool:
+			return "", UsageError{unsupportedKeyKind("boolean")}
 		default: // null, object, array
 			return "", bad
 		}

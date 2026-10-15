@@ -398,8 +398,8 @@ func operandStart(e string, end int) int {
 	if i == 0 {
 		return 0
 	}
-	switch c := e[i-1]; {
-	case c == ')':
+	switch e[i-1] {
+	case ')':
 		depth := 0
 		for j := i - 1; j >= 0; j-- {
 			switch e[j] {
@@ -417,7 +417,7 @@ func operandStart(e string, end int) int {
 			}
 		}
 		return 0
-	case c == '"':
+	case '"':
 		if j := strings.LastIndexByte(e[:i-1], '"'); j >= 0 {
 			return j
 		}

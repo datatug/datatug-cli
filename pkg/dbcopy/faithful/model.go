@@ -118,8 +118,6 @@ type Column struct {
 	Generated string
 	// SequenceStart is the next value of an identity / autoincrement counter, 0 when unknown.
 	SequenceStart int64
-	// ReadSQL is the select expression that reads the column (set by the reader).
-	readExpr string
 }
 
 // ForeignKey is a foreign key constraint.

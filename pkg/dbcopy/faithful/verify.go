@@ -237,9 +237,9 @@ func tableDigest(ctx context.Context, e Endpoint, t *Table, only string) (string
 	}
 	var from, order string
 	if e.Engine == SQLite {
-		from, order = quoteIdent(t.Name), "rowid"
+		from = quoteIdent(t.Name)
 	} else {
-		from, order = qualified(e.schema(), t.Name), "ctid"
+		from = qualified(e.schema(), t.Name)
 	}
 	if len(t.PK) > 0 {
 		order = quoteList(t.PK)
@@ -295,7 +295,7 @@ func tableDigest(ctx context.Context, e Endpoint, t *Table, only string) (string
 				h.Write(buf[:])
 				h.Write(x)
 			default:
-				h.Write([]byte(fmt.Sprintf("?%v", x)))
+				_, _ = fmt.Fprintf(h, "?%v", x)
 			}
 		}
 		n++

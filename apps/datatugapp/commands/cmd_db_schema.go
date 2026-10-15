@@ -321,7 +321,9 @@ func addSchemaColumns(ctx context.Context, db dal.DB, provider string, entries [
 			columns = viewColumns(entry.viewColumns)
 		} else if def, err := dbschema.DescribeCollection(ctx, db, &entry.ref); err == nil {
 			columns = columnsOf(def)
-			entry.ForeignKeys = schemaForeignKeys(provider, entry.Schema, def)
+			if entry.Kind == schemaKindTable {
+				entry.ForeignKeys = schemaForeignKeys(provider, entry.Schema, def)
+			}
 		}
 		entry.Columns = &columns
 	}

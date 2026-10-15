@@ -191,7 +191,7 @@ A SQLite file named `chinook` (no extension) is detected with `detectedFrom` `fi
 
 **Requirements:** db/schema#req:foreign-keys-with-columns
 
-`datatug db schema --db <chinook> --columns` lists for `InvoiceLine` a key on `InvoiceId` to `refTable` `{schema: main, name: Invoice}`; a table with no key has `foreignKeys: []`; a view has no `foreignKeys` key.
+`datatug db schema --db <chinook> --columns` lists for `InvoiceLine` a key on `InvoiceId` to `refTable` `{schema: main, name: Invoice}` (any fixture with a table that references another behaves alike); a table with no key has `foreignKeys: []`; a view has no `foreignKeys` key.
 
 ### AC: counts-listed
 

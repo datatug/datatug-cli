@@ -658,3 +658,22 @@ func TestAddSchemaColumnsUnreadableTableHasNoForeignKeys(t *testing.T) {
 		t.Fatal("foreign keys of a table that could not be read")
 	}
 }
+
+func TestAddSchemaColumnsDescribedViewHasNoForeignKeys(t *testing.T) {
+	// A PostgreSQL view is described like a table; it still holds no keys.
+	db := fakeCatalog{defs: map[string]*dbschema.CollectionDef{
+		"public.v": {Name: "v", Fields: []dbschema.FieldDef{{Name: "id", Type: dbschema.Int}}},
+		"public.t": {Name: "t", Fields: []dbschema.FieldDef{{Name: "id", Type: dbschema.Int}}},
+	}}
+	entries := []schemaEntry{
+		{Schema: "public", Name: "v", Kind: schemaKindView, ref: dal.NewQualifiedRootCollectionRef("public", "v", "")},
+		{Schema: "public", Name: "t", Kind: schemaKindTable, ref: dal.NewQualifiedRootCollectionRef("public", "t", "")},
+	}
+	addSchemaColumns(context.Background(), db, "postgres", entries)
+	if entries[0].Columns == nil || entries[0].ForeignKeys != nil {
+		t.Fatalf("view: columns=%v foreignKeys=%v", entries[0].Columns, entries[0].ForeignKeys)
+	}
+	if entries[1].ForeignKeys == nil || len(*entries[1].ForeignKeys) != 0 {
+		t.Fatalf("table: %v", entries[1].ForeignKeys)
+	}
+}

@@ -11,10 +11,10 @@ import (
 var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 	"sqlite_values_to_pg": func(t *testing.T, e *scenarioEnv) {
 		c := e.copies
-		if len(c) != 4 || len(e.diffs) != 2 {
+		if len(c) != 5 || len(e.diffs) != 2 {
 			t.Fatalf("copies %d", len(c))
 		}
-		for i := 0; i < 4; i++ {
+		for i := 0; i < 5; i++ {
 			if c[i].err != nil {
 				t.Fatalf("copy %d: %v", i+1, c[i].err)
 			}
@@ -22,19 +22,26 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 		rep := c[0].rep
 		for obj, why := range map[string]string{
 			"vals.f4w": "not held exactly by a 4-byte real", "vals.jbw": "jsonb would rewrite 2 of its values", "vals.tzw": "offsets other than +00",
-			"vals.dtn": "numeric would write 1 of its text values differently (-0.00 -> 0.00)", "vals.nul": "returns its values as BLOBs", "vals.wide": "do not fit that precision",
+			"vals.nul": "returns its values as BLOBs", "vals.wide": "do not fit that precision",
 		} {
 			if w := findWarning(rep, WarnTypeWidened, obj); w == nil || !strings.Contains(w.Message, why) {
 				t.Errorf("%s: %v", obj, w)
 			}
 		}
-		for _, obj := range []string{"vals.f4", "vals.jb", "vals.tz", "vals.dt", "vals.b", "vals.s"} {
+		if !hasWarningText(rep, "vals.dtn", "1 text value(s) are written in numeric's spelling (-0.00 -> 0.00)") || findWarning(rep, WarnTypeWidened, "vals.dtn") != nil ||
+			!hasWarningText(rep, "vals.dt", "text default '0.00' of a decimal text column became the numeric default 0.00") {
+			t.Errorf("decimal texts are numeric and the new spelling is counted: %v", rep.Warnings)
+		}
+		if w := findWarning(c[4].rep, WarnTypeWidened, "vals.dtn"); w == nil || !strings.Contains(w.Message, "--decimals=text") || hasWarning(c[4].rep, WarnValuesNormalized, "vals.dtn") {
+			t.Errorf("--decimals=text keeps the text: %v", c[4].rep.Warnings)
+		}
+		for _, obj := range []string{"vals.f4", "vals.jb", "vals.tz", "vals.b", "vals.s"} {
 			if w := findWarning(rep, WarnTypeWidened, obj); w != nil {
 				t.Errorf("%s keeps its type: %v", obj, w)
 			}
 		}
-		// The way back: every value is what it was but the column that held a NUL byte, which says so.
-		if len(e.diffs[0]) != 1 || e.diffs[0][0].Object != "vals.nul" {
+		// The way back: every value is what it was but the column that held a NUL byte and the decimal text, which say so.
+		if len(e.diffs[0]) != 2 || e.diffs[0][0].Object != "vals.dtn" || e.diffs[0][1].Object != "vals.nul" {
 			t.Errorf("sqlite -> postgres -> sqlite: %v", e.diffs[0])
 		}
 		if len(e.diffs[1]) != 0 {

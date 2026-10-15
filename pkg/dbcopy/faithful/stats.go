@@ -37,10 +37,10 @@ var (
 	reTS   = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?$`)
 	reTSTZ = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?[+-]\d{2}(:\d{2})?$`)
 	// reTSTZUTC is the one spelling PostgreSQL writes back for an instant when the session is on UTC.
-	reTSTZUTC = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?\+00$`)
-	reTime    = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?$`)
-	reDec     = regexp.MustCompile(`^-?(\d+(\.\d+)?|\.\d+)$`)
-	reDecEx   = regexp.MustCompile(`^-?(\d+)(?:\.(\d+))?$`)
+	reTSTZUTC  = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?\+00$`)
+	reTime     = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?$`)
+	reDec      = regexp.MustCompile(`^-?(\d+(\.\d+)?|\.\d+)$`)
+	reDecParts = regexp.MustCompile(`^(-?\d*)(?:\.(\d*))?$`)
 )
 
 func newStats(d declInfo) *colStats { return &colStats{decl: d} }
@@ -116,41 +116,47 @@ func (s *colStats) add(v any) {
 	}
 }
 
-// decimal checks a value as a decimal number: text must have exactly the declared scale.
+// decimal checks a value as a decimal number. For the declared precision and scale: a value fits when
+// its integer digits fit and it has no more decimals than the scale (a rounding would change it). A
+// text that fits but that numeric would spell differently (a leading dot or zeros, a negative zero,
+// fewer decimals than the scale) is counted in decNormalized, with the first one as an example.
 func (s *colStats) decimal(text string, isText bool) {
 	if !reDec.MatchString(text) {
 		return
 	}
 	s.decOK++
-	if isText {
-		if canon := canonicalDecimalText(text); canon != text {
-			s.decNormalized++
-			if s.decNormalExample == "" {
-				s.decNormalExample = text + " -> " + canon
-			}
+	canon := canonicalDecimalText(text)
+	m := reDecParts.FindStringSubmatch(text)
+	intDigits, frac := strings.TrimLeft(strings.TrimPrefix(m[1], "-"), "0"), m[2]
+	scaled := s.decl.p >= 0
+	if scaled && (len(intDigits) > s.decl.p-s.decl.s || len(frac) > s.decl.s) {
+		if isText {
+			s.noteSpelling(text, canon, text != canon)
 		}
-	}
-	if s.decl.p < 0 {
-		s.decFit++
-		return
-	}
-	m := reDecEx.FindStringSubmatch(text)
-	if m == nil {
-		return
-	}
-	intDigits := strings.TrimLeft(m[1], "0")
-	frac := m[2]
-	if isText {
-		if len(frac) != s.decl.s || (len(m[1]) > 1 && m[1][0] == '0') {
-			return
-		}
-	} else if len(frac) > s.decl.s {
-		return
-	}
-	if len(intDigits) > s.decl.p-s.decl.s {
 		return
 	}
 	s.decFit++
+	if !isText {
+		return
+	}
+	spelled := canon
+	if scaled && s.decl.s > len(frac) {
+		if !strings.Contains(spelled, ".") {
+			spelled += "."
+		}
+		spelled += strings.Repeat("0", s.decl.s-len(frac))
+	}
+	s.noteSpelling(text, spelled, spelled != text)
+}
+
+func (s *colStats) noteSpelling(text, spelled string, differs bool) {
+	if !differs {
+		return
+	}
+	s.decNormalized++
+	if s.decNormalExample == "" {
+		s.decNormalExample = text + " -> " + spelled
+	}
 }
 
 func (s *colStats) only(classes ...string) bool {

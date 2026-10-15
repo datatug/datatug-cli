@@ -38,6 +38,7 @@ required_tests=(
 	TestPostgresSourceIsReadAsOneSnapshot
 	TestPostgresJSONBRecognizerAgreesWithTheServer
 	TestPostgresRealHoldsWhatF32ExactAccepts
+	TestPostgresDecimalsTextKeepsTheText
 )
 
 # check reads the verbose output of `go test` in file $1 and prints each problem. It

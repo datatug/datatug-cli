@@ -159,9 +159,12 @@ type pgChoice struct {
 	enc  encoder
 	kind Kind
 	note string // non-empty: the declared type could not be carried and this says why
+	// normalized is how many text values the target spells differently (decimal text), example the first one.
+	normalized int64
+	example    string
 }
 
-func chooseSQLiteToPG(c *Column, st *colStats) pgChoice {
+func chooseSQLiteToPG(c *Column, st *colStats, decimalsText bool) pgChoice {
 	d := st.decl
 	declared := strings.TrimSpace(c.SourceType)
 	widen := func(ch pgChoice, why string) pgChoice {
@@ -190,20 +193,20 @@ func chooseSQLiteToPG(c *Column, st *colStats) pgChoice {
 		}
 	case declDecimal:
 		if st.only("int", "real", "text") && st.decOK == st.ints+st.reals+st.texts {
-			if d.text && st.decNormalized > 0 {
-				return widen(pgChoice{typ: "text", enc: encText, kind: KindText}, fmt.Sprintf("numeric would write %d of its text values differently (%s)", st.decNormalized, st.decNormalExample))
+			if d.text && decimalsText && st.decNormalized > 0 {
+				return widen(pgChoice{typ: "text", enc: encText, kind: KindText}, fmt.Sprintf("--decimals=text and numeric would write %d of its text values differently (%s)", st.decNormalized, st.decNormalExample))
 			}
 			if st.decFit == st.decOK {
-				return pgChoice{typ: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), cast: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), enc: encDecimal, kind: KindDecimal}
+				return pgChoice{typ: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), cast: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), enc: encDecimal, kind: KindDecimal, normalized: st.decNormalized, example: st.decNormalExample}
 			}
-			return widen(pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal}, "some values do not fit that precision and scale exactly")
+			return widen(pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal, normalized: st.decNormalized, example: st.decNormalExample}, "some values do not fit that precision and scale exactly")
 		}
 	case declBareNumeric:
 		if st.only("int", "real", "text") && st.decOK == st.ints+st.reals+st.texts {
-			if d.text && st.decNormalized > 0 {
-				return widen(pgChoice{typ: "text", enc: encText, kind: KindText}, fmt.Sprintf("numeric would write %d of its text values differently (%s)", st.decNormalized, st.decNormalExample))
+			if d.text && decimalsText && st.decNormalized > 0 {
+				return widen(pgChoice{typ: "text", enc: encText, kind: KindText}, fmt.Sprintf("--decimals=text and numeric would write %d of its text values differently (%s)", st.decNormalized, st.decNormalExample))
 			}
-			return pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal}
+			return pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal, normalized: st.decNormalized, example: st.decNormalExample}
 		}
 	case declBool:
 		if st.only("int") && st.nonBool == 0 {

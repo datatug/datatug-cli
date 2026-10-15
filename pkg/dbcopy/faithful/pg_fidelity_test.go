@@ -124,7 +124,7 @@ func TestPostgresExactValuesRoundTrip(t *testing.T) {
 		t.Errorf("empty blob: %q", got)
 	}
 	for col, typ := range map[string]string{"f4": "real", "f4w": "double precision", "jb": "jsonb", "jbw": "json", "tz": "timestamp with time zone", "tzw": "text",
-		"dt": "numeric(10,2)", "dtn": "text", "wide": "numeric"} {
+		"dt": "numeric(10,2)", "dtn": "numeric(10,2)", "wide": "numeric"} {
 		if got := pgText(t, pg.DB, `SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid = 'vals'::regclass AND attname = $1`, col); got != typ {
 			t.Errorf("%s is %s, want %s", col, got, typ)
 		}
@@ -133,7 +133,7 @@ func TestPostgresExactValuesRoundTrip(t *testing.T) {
 		`SELECT f4w::text FROM vals WHERE id = 1`: "16777217",
 		`SELECT jbw::text FROM vals WHERE id = 2`: `{"a":1,"a":2}`,
 		`SELECT tzw FROM vals WHERE id = 1`:       "2020-01-01 10:00:00+02",
-		`SELECT dtn FROM vals WHERE id = 1`:       "-0.00",
+		`SELECT dtn::text FROM vals WHERE id = 1`: "0.00",
 		`SELECT jb::text FROM vals WHERE id = 1`:  `{"a": 1, "bb": [1, 2]}`,
 		`SELECT tz::text FROM vals WHERE id = 2`:  "2020-01-01 10:00:00.5+00",
 		`SELECT big FROM vals WHERE id = 1`:       "9007199254740993",
@@ -147,14 +147,14 @@ func TestPostgresExactValuesRoundTrip(t *testing.T) {
 	if got := pgText(t, pg.DB, `SELECT last_value || ',' || is_called FROM `+pgText(t, pg.DB, `SELECT pg_get_serial_sequence('"public"."vals"', 'id')`)); got != "101,false" {
 		t.Errorf("the sequence is at its next value, not called: %s", got)
 	}
-	if countKind(rep, WarnTypeWidened) != 7 {
+	if countKind(rep, WarnTypeWidened) != 6 || !hasWarningText(rep, "vals.dtn", "1 text value(s) are written in numeric's spelling (-0.00 -> 0.00)") {
 		t.Errorf("type-widened: %v", rep.Warnings)
 	}
 
 	// And back: every value, with its storage class, as SQL text says it.
 	back := newSQLite(t)
 	mustCopy(t, pg, back, Options{})
-	cols := []string{"b", "f4", "f4w", "jb", "jbw", "tz", "tzw", "dt", "dtn", "plain", "wide", "s", "big", "mix"}
+	cols := []string{"b", "f4", "f4w", "jb", "jbw", "tz", "tzw", "dt", "plain", "wide", "s", "big", "mix"}
 	if want, got := sqliteSignature(t, src.DB, "vals", cols...), sqliteSignature(t, back.DB, "vals", cols...); got != want {
 		t.Errorf("values changed on the way:\n got %s\nwant %s", got, want)
 	}
@@ -165,7 +165,11 @@ func TestPostgresExactValuesRoundTrip(t *testing.T) {
 	if got := sqliteSignature(t, back.DB, "vals", "nul"); !strings.Contains(got, "blob:") {
 		t.Errorf("nul: %s", got)
 	}
-	wantVerifyClean(t, src, back, "vals.nul")
+	// The decimal text is numeric's spelling on the way back, and said so: -0.00 is 0.00.
+	if got := sqliteSignature(t, back.DB, "vals", "dtn"); !strings.HasPrefix(got, "text:'0.00'\ntext:'0.10'") {
+		t.Errorf("dtn: %s", got)
+	}
+	wantVerifyClean(t, src, back, "vals.nul", "vals.dtn")
 	checkWithTheIndependentChecker(t, src, back)
 	// The text default is the text it was: a new row gets '0.00', not '0.0'.
 	execAll(t, back.DB, `INSERT INTO vals (id) VALUES (50)`)
@@ -199,14 +203,16 @@ func checkWithTheIndependentChecker(t *testing.T, a, b Endpoint) {
 		}
 		paths = append(paths, "sqlite:"+p)
 	}
-	// The column that holds a NUL byte is the one announced difference; the checker is run without it.
+	// The column that holds a NUL byte and the decimal text are the announced differences; the checker is run without them.
 	for _, p := range paths {
 		db, err := sql.Open("sqlite", strings.TrimPrefix(p, "sqlite:"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.Exec(`ALTER TABLE vals DROP COLUMN nul`); err != nil {
-			t.Fatal(err)
+		for _, col := range []string{"nul", "dtn"} { // the two announced differences
+			if _, err := db.Exec(`ALTER TABLE vals DROP COLUMN ` + col); err != nil {
+				t.Fatal(err)
+			}
 		}
 		_ = db.Close()
 	}
@@ -590,4 +596,41 @@ func randomJSON(rnd *rand.Rand, depth int) string {
 	}
 	sep := []string{", ", ","}[rnd.Intn(2)]
 	return "{" + strings.Join(parts, sep) + "}"
+}
+
+// --decimals=text keeps a DECIMAL_TEXT that numeric would spell differently as the text it is; the default
+// is numeric, and the new spelling is a warning that counts.
+func TestPostgresDecimalsTextKeepsTheText(t *testing.T) {
+	src := newSQLite(t)
+	execAll(t, src.DB, `CREATE TABLE m (id INTEGER PRIMARY KEY, price DECIMAL_TEXT(19,4) NOT NULL DEFAULT '0.0000')`,
+		`INSERT INTO m VALUES (1, '.0000'), (2, '-0.0000'), (3, '12.5000'), (4, '7.5')`)
+	numeric, text := newPGDatabase(t), newPGDatabase(t)
+	rep := mustCopy(t, src, numeric, Options{})
+	if got := pgText(t, numeric.DB, `SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid = 'm'::regclass AND attname = 'price'`); got != "numeric(19,4)" {
+		t.Errorf("default: %s", got)
+	}
+	if got := pgText(t, numeric.DB, `SELECT string_agg(price::text, ',' ORDER BY id) FROM m`); got != "0.0000,0.0000,12.5000,7.5000" {
+		t.Errorf("numeric spelling: %s", got)
+	}
+	if !hasWarningText(rep, "m.price", "3 text value(s) are written in numeric's spelling (.0000 -> 0.0000)") || !hasWarningText(rep, "m.price", "text default '0.0000'") {
+		t.Errorf("%v", rep.Warnings)
+	}
+	// A new row of the copy gets the default it had, in the spelling of the column.
+	execAll(t, numeric.DB, `INSERT INTO m (id) VALUES (9)`)
+	if got := pgText(t, numeric.DB, `SELECT price::text FROM m WHERE id = 9`); got != "0.0000" {
+		t.Errorf("default: %s", got)
+	}
+
+	rep = mustCopy(t, src, text, Options{DecimalsText: true})
+	if got := pgText(t, text.DB, `SELECT string_agg(price, ',' ORDER BY id) FROM m`); got != ".0000,-0.0000,12.5000,7.5" {
+		t.Errorf("text spelling: %s", got)
+	}
+	if hasWarning(rep, WarnValuesNormalized, "m.price") || !hasWarning(rep, WarnTypeWidened, "m.price") {
+		t.Errorf("%v", rep.Warnings)
+	}
+	back := newSQLite(t)
+	mustCopy(t, text, back, Options{})
+	if want, got := sqliteSignature(t, src.DB, "m", "price"), sqliteSignature(t, back.DB, "m", "price"); got != want {
+		t.Errorf("--decimals=text round trip:\n got %s\nwant %s", got, want)
+	}
 }

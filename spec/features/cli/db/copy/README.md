@@ -42,6 +42,7 @@ datatug db copy --from <source-url> --to <target-url>
                 [--progress]
                 [--from-schema=NAME] [--to-schema=NAME]   # PostgreSQL sides
                 [--json] [--dry-run] [--fail-on-warning]  # SQLite / PostgreSQL copies
+                [--decimals=numeric|text]                 # SQLite -> PostgreSQL
 
 datatug db copy --to bigquery://PROJECT/DATASET?location=LOCATION
                 --recover-job-ref '<credential-free JSON reference>'
@@ -66,7 +67,7 @@ The command MUST accept the following optional flags:
 - `--parallel-streams <N>` — positive integer; default `runtime.NumCPU() - 1` (minimum `1`). Governs per-table parallelism, subject to the cap-to-1 rule in REQ:concurrency-cap.
 - `--overwrite <recreate|reload>` — value MUST be exactly one of `recreate` or `reload`. A bare `--overwrite` (with no value) MUST be rejected with exit `2`. Omitting the flag means "require empty target" per REQ:empty-target-check.
 - `--progress` — boolean; when present, enables per-table progress lines on stderr (see REQ:progress-reporting). Default off (silent).
-- `--from-schema <name>`, `--to-schema <name>`, `--json`, `--dry-run` and `--fail-on-warning` apply to SQLite and PostgreSQL copies only (see REQ:faithful-reporting); any other pair MUST reject them with exit `2`.
+- `--from-schema <name>`, `--to-schema <name>`, `--json`, `--dry-run`, `--fail-on-warning` and `--decimals <numeric|text>` apply to SQLite and PostgreSQL copies only (see REQ:faithful-reporting); any other pair MUST reject them with exit `2`.
 
 ### URL scheme dispatch
 
@@ -234,7 +235,7 @@ Whatever an engine cannot carry MUST be reported, per object, as a warning with 
 
 #### REQ: faithful-exact-values
 
-A copy MUST NOT change a value without saying so. A column whose values do not fit the type its declaration maps to (a `FLOAT4` holding a double a 4-byte real cannot hold, a `JSONB_TEXT` that jsonb would write differently, a `TIMESTAMPTZ` text with an offset other than `+00`, a `DECIMAL_TEXT` that numeric would write differently, a text holding a NUL byte) MUST be carried in a type that holds every value, with a `type-widened` warning that names the column and the reason. A value that the target engine cannot hold (NaN, a negative zero in SQLite) MUST be counted in a `values-normalized` warning. An empty blob is an empty blob, never NULL. The text a PostgreSQL source prints (dates, intervals, floats) MUST NOT depend on the settings of the server: the session pins `DateStyle`, `IntervalStyle`, `extra_float_digits` and the time zone, and removes the statement timeout.
+A copy MUST NOT change a value without saying so. A column whose values do not fit the type its declaration maps to (a `FLOAT4` holding a double a 4-byte real cannot hold, a `JSONB_TEXT` that jsonb would write differently, a `TIMESTAMPTZ` text with an offset other than `+00`, a text holding a NUL byte) MUST be carried in a type that holds every value, with a `type-widened` warning that names the column and the reason. A value that the target engine cannot hold (NaN, a negative zero in SQLite) MUST be counted in a `values-normalized` warning. A `DECIMAL_TEXT` column is carried as `numeric`; the texts that numeric spells differently (a leading dot or zeros, a negative zero, fewer decimals than the scale) MUST be counted per column in a `values-normalized` warning with the first one as an example, and a text default MUST be reported as the numeric default it became; `--decimals=text` keeps such a column as `text` with a `type-widened` warning (founder decision 2026-10-15: numeric by default, exactness opt-in). An empty blob is an empty blob, never NULL. The text a PostgreSQL source prints (dates, intervals, floats) MUST NOT depend on the settings of the server: the session pins `DateStyle`, `IntervalStyle`, `extra_float_digits` and the time zone, and removes the statement timeout.
 
 #### REQ: faithful-snapshot
 
@@ -549,7 +550,7 @@ A SQLite or inGitDB target accepts source names under its existing rules, includ
 
 **Given** a SQLite database holding an empty blob, a number a 4-byte real cannot hold, json that jsonb would rewrite, a `TIMESTAMPTZ` text with offset `+02`, a decimal text `-0.00` with the default `'0.00'`, and an AUTOINCREMENT counter at 100
 **When** the user copies it to PostgreSQL and back to a new SQLite file
-**Then** both copies exit `0`; every column reads back with the same storage class and value, the default is still the text `'0.00'`, the counter is still 100, and the widened columns are named in `type-widened` warnings.
+**Then** both copies exit `0`; every column reads back with the same storage class and value but the decimal text, the default is still the text `'0.00'`, the counter is still 100, and the widened columns are named in `type-widened` warnings.
 
 ### AC: faithful-reload-is-one-transaction
 

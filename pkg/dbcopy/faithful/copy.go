@@ -31,9 +31,12 @@ type Options struct {
 	Overwrite        string
 	Include, Exclude []string
 	// Filters is the --where / --limit of each table, by source table name.
-	Filters  map[string]RowFilter
-	DryRun   bool
-	Progress io.Writer
+	Filters map[string]RowFilter
+	// DecimalsText keeps a DECIMAL_TEXT column whose texts numeric would spell differently as text
+	// (--decimals=text); by default such a column is numeric and the change of spelling is a warning.
+	DecimalsText bool
+	DryRun       bool
+	Progress     io.Writer
 }
 
 // ReloadMismatchError says a table the copy would reload has a schema the source rows do not fit.
@@ -229,7 +232,7 @@ func Copy(ctx context.Context, from, to Endpoint, opts Options) (*Report, error)
 				}
 			}
 		}
-		plan = PlanSQLiteToPG(cat, stats, to.schema())
+		plan = PlanSQLiteToPG(cat, stats, to.schema(), opts.DecimalsText)
 	default:
 		plan = PlanPGToSQLite(cat, checkCompiles)
 	}

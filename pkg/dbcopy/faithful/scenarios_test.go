@@ -381,6 +381,8 @@ var scenarios = []scenario{
 		e.verify(pg, pg2)
 		// A copy that is run again replaces what it wrote, in one transaction.
 		e.copy(src, pg, Options{Overwrite: "reload"})
+		// --decimals=text keeps the decimal texts as they are.
+		e.copy(src, pg, Options{Overwrite: "recreate", DecimalsText: true})
 	}},
 	{name: "pg_values", pgs: 2, run: func(e *scenarioEnv) {
 		pg := e.pg()

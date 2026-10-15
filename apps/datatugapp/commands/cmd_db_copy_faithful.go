@@ -79,6 +79,7 @@ func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSc
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	failOnWarning, _ := cmd.Flags().GetBool("fail-on-warning")
 	toSchema, _ := cmd.Flags().GetString("to-schema")
+	decimals, _ := cmd.Flags().GetString("decimals")
 
 	failed := false
 	// A SQLite file that this command created (and the folders made for it) is removed again when the
@@ -123,6 +124,9 @@ func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSc
 		return nil
 	}
 
+	if decimals != "numeric" && decimals != "text" {
+		return finish(nil, 2, fmt.Sprintf("invalid --decimals value %q: valid values are numeric, text", decimals))
+	}
 	if toSchema != "" && tgtRef.Scheme != "postgres" {
 		return finish(nil, 2, "--to-schema is supported only for PostgreSQL targets")
 	}
@@ -145,7 +149,7 @@ func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSc
 			return finish(nil, 2, "--from and --to are the same SQLite file")
 		}
 	}
-	opts := faithful.Options{Overwrite: overwrite, DryRun: dryRun, Filters: rowFilters(directives)}
+	opts := faithful.Options{Overwrite: overwrite, DryRun: dryRun, Filters: rowFilters(directives), DecimalsText: decimals == "text"}
 	opts.Include, opts.Exclude = directives.IncludeTables, directives.ExcludeTables
 	if progress, _ := cmd.Flags().GetBool("progress"); progress {
 		opts.Progress = errWriter

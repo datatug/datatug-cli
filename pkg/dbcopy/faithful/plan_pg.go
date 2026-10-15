@@ -49,7 +49,7 @@ func sqliteExprToPG(expr string) string {
 
 // PlanSQLiteToPG decides how every table, column and constraint of a SQLite catalog is created on
 // PostgreSQL. stats holds the pre-scan of every column, by table.
-func PlanSQLiteToPG(cat *Catalog, stats map[string][]*colStats, schema string) *Plan {
+func PlanSQLiteToPG(cat *Catalog, stats map[string][]*colStats, schema string, decimalsText bool) *Plan {
 	p := &Plan{From: SQLite, To: Postgres, Schema: schema}
 	p.Warnings = append(p.Warnings, cat.Notes...)
 	for _, t := range cat.Tables {
@@ -69,9 +69,12 @@ func PlanSQLiteToPG(cat *Catalog, stats map[string][]*colStats, schema string) *
 		}
 		for i, c := range t.Columns {
 			obj := t.Name + "." + c.Name
-			ch := chooseSQLiteToPG(c, stats[t.Name][i])
+			ch := chooseSQLiteToPG(c, stats[t.Name][i], decimalsText)
 			if ch.note != "" {
 				p.warn(WarnTypeWidened, obj, "%s", ch.note)
+			}
+			if ch.normalized > 0 {
+				p.warn(WarnValuesNormalized, obj, "%d text value(s) are written in numeric's spelling (%s); --decimals=text keeps the text", ch.normalized, ch.example)
 			}
 			tc := &TargetColumn{Src: c, Name: c.Name, Type: ch.typ, Kind: ch.kind, Cast: ch.cast, enc: ch.enc, NotNull: c.NotNull || inPK[c.Name], readExpr: sqliteReadExpr(c)}
 			m := &Marker{Src: string(SQLite), Type: c.SourceType}
@@ -89,6 +92,9 @@ func PlanSQLiteToPG(cat *Catalog, stats map[string][]*colStats, schema string) *
 			if c.Default != "" && tc.Identity == IdentityNone {
 				if d, ok := sqliteDefaultToPG(c.Default, ch.typ, ch.kind); ok {
 					tc.Default = d
+					if ch.kind == KindDecimal && parseDecl(c.SourceType).text {
+						p.warn(WarnDefaultTranslated, obj, "text default %s of a decimal text column became the numeric default %s; new rows get the same number, and it is written back as text", c.Default, d)
+					}
 					if ch.kind == KindText && strings.HasPrefix(strings.ToUpper(strings.Trim(c.Default, "() ")), "CURRENT_") {
 						p.warn(WarnDefaultTranslated, obj, "default %s on a text column is written with to_char(... AT TIME ZONE 'UTC') in the same text format: PostgreSQL has no text-valued CURRENT_ default", c.Default)
 					}

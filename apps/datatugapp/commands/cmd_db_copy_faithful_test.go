@@ -109,6 +109,7 @@ func TestDBCopyFaithful_Refusals(t *testing.T) {
 		"a limit on an unknown table":  {"--limit", "nope:1"},
 		"parallel streams below one":   {"--parallel-streams", "-1"},
 		"include and exclude":          {"--include", "p", "--exclude", "p"},
+		"decimals that is not a mode":  {"--decimals", "x"},
 	} {
 		stdout, _, err := runCopy(t, append([]string{"db", "copy", "--from", source, "--to", target, "--json"}, args...)...)
 		require.Error(t, err, name)
@@ -142,9 +143,11 @@ func TestDBCopyFaithful_Refusals(t *testing.T) {
 	assert.Equal(t, 4, exitCodeOf(t, err))
 
 	// The faithful flags are refused where they do not apply.
-	_, _, err = runCopy(t, "db", "copy", "--from", source, "--to", "ingitdb://"+t.TempDir(), "--dry-run")
-	require.Error(t, err)
-	assert.Equal(t, 2, exitCodeOf(t, err))
+	for _, flag := range [][]string{{"--dry-run"}, {"--decimals", "text"}} {
+		_, _, err = runCopy(t, append([]string{"db", "copy", "--from", source, "--to", "ingitdb://" + t.TempDir()}, flag...)...)
+		require.Error(t, err)
+		assert.Equal(t, 2, exitCodeOf(t, err))
+	}
 	_, err2 := os.Stat(path)
 	assert.True(t, os.IsNotExist(err2), "a failed copy leaves no new file")
 }

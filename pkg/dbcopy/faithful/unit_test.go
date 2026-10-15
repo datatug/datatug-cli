@@ -63,7 +63,8 @@ func TestChooseSQLiteToPG(t *testing.T) {
 		{"NUMERIC(5,2)", []any{1.25, int64(3), "4.50"}, "numeric(5,2)", false},
 		{"NUMERIC(5,2)", []any{1.255}, "numeric", true},
 		{"NUMERIC(5,2)", []any{int64(12345)}, "numeric", true},
-		{"DECIMAL_TEXT(5,2)", []any{"4.5"}, "numeric", true},
+		{"DECIMAL_TEXT(5,2)", []any{"4.5"}, "numeric(5,2)", false},
+		{"DECIMAL_TEXT(5,2)", []any{"4.567"}, "numeric", true},
 		{"NUMERIC(5,2)", []any{"abc"}, "text", true},
 		{"NUMERIC", []any{1.5, int64(2), "3.25"}, "numeric", false},
 		{"BOOLEAN", []any{int64(0), int64(1)}, "boolean", false},
@@ -91,7 +92,7 @@ func TestChooseSQLiteToPG(t *testing.T) {
 		{"GEOMETRY", []any{"x"}, "text", true},
 	}
 	for _, c := range cases {
-		ch := chooseSQLiteToPG(col(c.decl), stat(c.decl, c.vals...))
+		ch := chooseSQLiteToPG(col(c.decl), stat(c.decl, c.vals...), false)
 		if ch.typ != c.typ || (ch.note != "") != c.widens {
 			t.Errorf("%s %v: %s (note %q), want %s widened=%v", c.decl, c.vals, ch.typ, ch.note, c.typ, c.widens)
 		}
@@ -633,10 +634,26 @@ func TestAnyToIn(t *testing.T) {
 
 func TestNormalizedDecimalsAreSaid(t *testing.T) {
 	src := newSQLite(t)
-	execAll(t, src.DB, `CREATE TABLE t (id INTEGER PRIMARY KEY, c DECIMAL_TEXT(10,4), bare DECIMAL_TEXT)`, `INSERT INTO t VALUES (1, '.0000', '-0'), (2, '12.5000', '1')`)
+	execAll(t, src.DB, `CREATE TABLE t (id INTEGER PRIMARY KEY, c DECIMAL_TEXT(10,4), bare DECIMAL_TEXT, d DECIMAL_TEXT(5,2) DEFAULT '0.00', e DECIMAL_TEXT(5,2))`,
+		`INSERT INTO t VALUES (1, '.0000', '-0', '1.5', '-0.00'), (2, '12.5000', '1', '2.00', '007.50'), (3, '0.1000', NULL, NULL, '-.5')`)
+	// By default such a column is numeric and the new spelling is said, counted, with an example.
 	rep, err := Copy(context.Background(), src, Endpoint{Engine: Postgres}, Options{DryRun: true})
-	// A decimal text that numeric would write differently stays text.
-	if err != nil || !hasWarning(rep, WarnTypeWidened, "t.c") || !hasWarning(rep, WarnTypeWidened, "t.bare") {
+	if err != nil || hasWarning(rep, WarnTypeWidened, "t.c") || !strings.Contains(strings.Join(rep.Plan, "\n"), `"c" numeric(10,4)`) {
+		t.Fatalf("%v %v", err, rep.Warnings)
+	}
+	for obj, want := range map[string]string{"t.c": "1 text value(s) are written in numeric's spelling (.0000 -> 0.0000)", "t.bare": "(-0 -> 0)",
+		"t.d": "1 text value(s)", "t.e": "3 text value(s) are written in numeric's spelling (-0.00 -> 0.00)"} {
+		if !hasWarningText(rep, obj, want) {
+			t.Errorf("%s: want %q in %v", obj, want, rep.Warnings)
+		}
+	}
+	if !hasWarningText(rep, "t.d", "text default '0.00' of a decimal text column became the numeric default 0.00") {
+		t.Errorf("the default is said: %v", rep.Warnings)
+	}
+	// --decimals=text keeps the text.
+	rep, err = Copy(context.Background(), src, Endpoint{Engine: Postgres}, Options{DryRun: true, DecimalsText: true})
+	if err != nil || !hasWarning(rep, WarnTypeWidened, "t.c") || !hasWarning(rep, WarnTypeWidened, "t.bare") || hasWarning(rep, WarnValuesNormalized, "t.c") ||
+		!strings.Contains(strings.Join(rep.Plan, "\n"), `"c" text`) {
 		t.Fatalf("%v %v", err, rep.Warnings)
 	}
 	for _, in := range []string{"007.5", "-0.5", "-.5", "3"} {

@@ -116,22 +116,22 @@ func TestShowFormatJSON(t *testing.T) {
 					"name": "main",
 					"tables": []any{
 						map[string]any{"name": "Customer", "columns": []any{
-							map[string]any{"name": "CustomerId", "type": "INTEGER", "primaryKeyPosition": float64(1)},
-							map[string]any{"name": "FirstName", "type": "TEXT"},
-							map[string]any{"name": "LastName", "type": "TEXT"},
+							map[string]any{"name": "CustomerId", "type": "INTEGER", "primaryKeyPosition": float64(1), "nullable": true},
+							map[string]any{"name": "FirstName", "type": "TEXT", "nullable": false},
+							map[string]any{"name": "LastName", "type": "TEXT", "nullable": true},
 						}},
 						map[string]any{"name": "order_line", "columns": []any{
-							map[string]any{"name": "order_id", "type": "INTEGER", "primaryKeyPosition": float64(2)},
-							map[string]any{"name": "line_no", "type": "INTEGER", "primaryKeyPosition": float64(1)},
-							map[string]any{"name": "customer_id", "type": "INTEGER"},
-							map[string]any{"name": "sku", "type": "TEXT"},
-							map[string]any{"name": "qty", "type": "INTEGER"},
+							map[string]any{"name": "order_id", "type": "INTEGER", "primaryKeyPosition": float64(2), "nullable": false},
+							map[string]any{"name": "line_no", "type": "INTEGER", "primaryKeyPosition": float64(1), "nullable": false},
+							map[string]any{"name": "customer_id", "type": "INTEGER", "nullable": true},
+							map[string]any{"name": "sku", "type": "TEXT", "nullable": true},
+							map[string]any{"name": "qty", "type": "INTEGER", "nullable": true},
 						}},
 					},
 					"views": []any{
 						map[string]any{"name": "customer_names", "columns": []any{
-							map[string]any{"name": "CustomerId", "type": "INTEGER"},
-							map[string]any{"name": "full_name"},
+							map[string]any{"name": "CustomerId", "type": "INTEGER", "nullable": true},
+							map[string]any{"name": "full_name", "nullable": true},
 						}},
 					},
 				}},
@@ -989,4 +989,54 @@ func TestShowFailsWhenTheForeignKeysFileCannotBeRead(t *testing.T) {
 	assert.Equal(t, 1, showExitCodeOf(t, err))
 	assert.EqualError(t, err, `source "shop" in environment "local": its foreign keys file cannot be read`)
 	assert.Empty(t, stdout)
+}
+
+// A column carries nullable where the driver reports it (SQLite), and no key where it does not (the
+// catalogs of the shape of the demo, of drivers that say nothing); the text does not change.
+func TestShowReportsNullabilityForTheDriversThatKnowIt(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "n.db")
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE t (id INTEGER NOT NULL, note TEXT)`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	projectDir := filepath.Join(t.TempDir(), "n-project")
+	_, err = runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "n", "--env", "local")
+	require.NoError(t, err)
+
+	stdout, _, err := runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	var doc showDocument
+	require.NoError(t, json.Unmarshal([]byte(stdout), &doc), stdout)
+	columns := doc.Environments[0].Sources[0].Schemas[0].Tables[0].Columns
+	require.Len(t, columns, 2)
+	require.NotNil(t, columns[0].Nullable)
+	require.NotNil(t, columns[1].Nullable)
+	assert.False(t, *columns[0].Nullable, "NOT NULL")
+	assert.True(t, *columns[1].Nullable)
+	assert.Contains(t, stdout, `"nullable": false`)
+
+	text, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.NotContains(t, text, "nullable")
+
+	// a driver that does not report it: the columns file holds false, which is not a fact
+	other := demoShapedProject(t)
+	writeProjectFiles(t, other, map[string]string{
+		"environments/local/catalogs/geo/geo.db.json": `{"driver":"ingitdb","path":"data/geo","dbModel":"chinook"}`,
+	})
+	stdout, _, err = runShowCommand(t, "-d", other, "--format", "json")
+	require.NoError(t, err)
+	var otherDoc showDocument
+	require.NoError(t, json.Unmarshal([]byte(stdout), &otherDoc), stdout)
+	var geo *showSource
+	for i, source := range otherDoc.Environments[1].Sources {
+		if source.ID == "geo" {
+			geo = &otherDoc.Environments[1].Sources[i]
+		}
+	}
+	require.NotNil(t, geo)
+	require.NotEmpty(t, geo.Schemas)
+	assert.Nil(t, geo.Schemas[0].Tables[0].Columns[0].Nullable)
+	assert.Equal(t, 4, strings.Count(stdout, `"nullable"`), "only the two sqlite3 catalogs (two columns each) carry it")
 }

@@ -76,6 +76,9 @@ type CatalogColumn struct {
 	// key, read from the columns file's pkPosition; 0 when it is not part of
 	// the key.
 	PrimaryKeyPosition int `json:"pkPosition,omitempty"`
+	// IsNullable is the columns file's isNullable. The file cannot say "not reported" (a driver that does not
+	// report nullability writes false), so a reader that shows it must know the driver reports it.
+	IsNullable bool `json:"isNullable,omitempty"`
 }
 
 // CatalogRelation describes one stored table or view and its columns.

@@ -21,6 +21,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
+	"github.com/datatug/datatug-core/pkg/dbconnection"
 	"github.com/datatug/datatug-core/pkg/storage"
 	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/spf13/cobra"
@@ -211,7 +212,13 @@ type showColumn struct {
 	Name               string `json:"name"`
 	Type               string `json:"type,omitempty"`
 	PrimaryKeyPosition int    `json:"primaryKeyPosition,omitempty"`
+	// Nullable is nil (and has no key in JSON) for a source whose driver does not report nullability.
+	Nullable *bool `json:"nullable,omitempty"`
 }
+
+// showNullabilityDrivers are the drivers whose scan reports nullability, so that isNullable of the columns
+// file is a fact and not the false of a driver that said nothing.
+var showNullabilityDrivers = map[string]bool{dbconnection.DriverSQLite3: true, "sqlserver": true, api.DriverPostgres: true}
 
 // showUnknownDriver is what is printed in place of a driver that is not a plain name: the catalog file is
 // read from a project that may have come from anywhere, and a driver there can hold anything (a URL with a
@@ -301,6 +308,10 @@ func readShowSource(projectDir, envID string, catalog *datatug.DbCatalog) (showS
 		shown := showRelation{Name: relation.Name, Columns: make([]showColumn, len(relation.Columns))}
 		for i, column := range relation.Columns {
 			shown.Columns[i] = showColumn{Name: column.Name, Type: column.DbType, PrimaryKeyPosition: column.PrimaryKeyPosition}
+			if showNullabilityDrivers[catalog.Driver] {
+				nullable := column.IsNullable
+				shown.Columns[i].Nullable = &nullable
+			}
 		}
 		current := &source.Schemas[len(source.Schemas)-1]
 		if relation.DbType == "VIEW" {

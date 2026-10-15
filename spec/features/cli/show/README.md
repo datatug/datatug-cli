@@ -70,11 +70,15 @@ The text MUST be plain: one item to a line, two spaces of indent for each level,
 
 #### REQ: json-format
 
-`--format json` MUST print the same information as one JSON document, and two keys the text does not carry: `project`; `title` and `access` (those of the project file, each left out when the file holds none), printed as the file holds them and not validated; `environments[]` of `id` and `sources[]`; a source has `id`, `driver`, `dsnEnv` (PostgreSQL only), `notScanned` (`true` only for a source that was never scanned), `empty` (`true` only for a source that was scanned and has nothing to list) and `schemas[]` of `name`, `tables[]` and `views[]`; each of those has `name` and `columns[]` of `name`, `type` and `primaryKeyPosition` (the last two left out when there is none); a table also has `foreignKeys[]` ([REQ: foreign-keys](#req-foreign-keys)). Any other `--format` than `text` and `json` MUST exit `2`.
+`--format json` MUST print the same information as one JSON document, and two keys the text does not carry: `project`; `title` and `access` (those of the project file, each left out when the file holds none), printed as the file holds them and not validated; `environments[]` of `id` and `sources[]`; a source has `id`, `driver`, `dsnEnv` (PostgreSQL only), `notScanned` (`true` only for a source that was never scanned), `empty` (`true` only for a source that was scanned and has nothing to list) and `schemas[]` of `name`, `tables[]` and `views[]`; each of those has `name` and `columns[]` of `name`, `type`, `primaryKeyPosition` and `nullable` (`type` and `primaryKeyPosition` left out when there is none; `nullable` per [REQ: nullable](#req-nullable)); a table also has `foreignKeys[]` ([REQ: foreign-keys](#req-foreign-keys)). Any other `--format` than `text` and `json` MUST exit `2`.
 
 #### REQ: foreign-keys
 
 Each table MUST list the foreign keys it holds (the outgoing side; a consumer derives "referenced by" from the other tables). In JSON, `foreignKeys[]` of `name`, `columns[]`, `refTable` (`schema` and `name`) and `refColumns[]`, in the order of the file ([`<model>.refs.json`](https://github.com/datatug/datatug-core/tree/main/spec/features/model-foreign-keys-file): by name within a table), and no `foreignKeys` key for a table that holds none or for a view. In the text, one line for each key below the columns of its table: `ForeignKey <name> (<columns>) -> <schema>.<table> (<refcolumns>)`, with the names printed as [REQ: plain-text](#req-plain-text) says. The keys MUST be read through `filestore.LoadModelForeignKeys` of datatug-core, the loader of the file, from the model of the source (`dbModel` of its catalog); `show` reads no project file for them itself. A model with no such file has no foreign keys, and is no failure. A file that cannot be read (not valid, or of a version this release does not know) MUST exit `1` with one sentence that names the source and the environment, and says nothing that the file system said. `--depth tables` and `--depth sources` list no foreign key, as they list no column. A scan does not write the file today ([scan](../scan/README.md)): a project holds it when it was made by another tool, such as the public demo project.
+
+#### REQ: nullable
+
+A column in JSON MUST carry `nullable` (`true` or `false`, from `isNullable` of the columns file the scan wrote) for a source whose driver reports it when it scans: `sqlite3` (the `notnull` of the table's pragma), `sqlserver` and `postgres` (`IS_NULLABLE`; a primary-key column of PostgreSQL is not nullable). For a source of any other driver the file cannot tell "not nullable" from "not reported", so `nullable` MUST be left out: it is never guessed. The text does not show it, and no other output changes.
 
 #### REQ: depth
 
@@ -129,6 +133,12 @@ Given a SQLite file with a table with a one-column key, a table with a composite
 **Requirements:** show#req:foreign-keys, show#req:depth
 
 On a project whose model holds a `<model>.refs.json` with a key of table `Invoice` to `Customer` (as the public demo project's `chinook` does), `datatug show --format json --depth columns` gives the table `Invoice` a `foreignKeys` entry of `name`, `columns`, `refTable` and `refColumns`, and no other table or view has the key; the text lists the key as a `ForeignKey` line below the columns of its table; `--depth tables` lists neither. A project with no such file lists the same as before the requirement, and a file that cannot be read exits `1` naming the source and the environment and no path. (`TestShowListsTheForeignKeysOfATable`, `TestShowListsNoForeignKeysWithoutTheFile`, `TestShowFailsWhenTheForeignKeysFileCannotBeRead`.)
+
+### AC: nullable-is-reported-where-the-driver-knows
+
+**Requirements:** show#req:nullable
+
+On a SQLite file with a `NOT NULL` column and a nullable one, scanned and shown with `--format json`, the columns carry `nullable: false` and `nullable: true`; on a source of a driver that does not report nullability (the demo-shaped project's `ingitdb` and unlisted catalogs) the columns have no `nullable` key; the text is unchanged. (`TestShowReportsNullabilityForTheDriversThatKnowIt`.)
 
 ### AC: sources-are-listed-as-chat-lists-them
 

@@ -14,7 +14,11 @@ import (
 // reconcilePendingOther is called with the project lock held before a newer
 // mutation may replace a materialized resource image. This preserves the
 // earlier operation's audit and exact retry across all Detective entry paths.
-func (s *LocalStore) reconcilePendingOther(ctx context.Context, collection, resourceID string) error {
+func (s *LocalStore) reconcilePendingOther(ctx context.Context, collection, resourceID string, exceptIDs ...string) error {
+	exceptID := ""
+	if len(exceptIDs) > 0 {
+		exceptID = exceptIDs[0]
+	}
 	if err := s.visitJournal("ai-confirm-operations", func(id string, data []byte) error {
 		var header struct {
 			Kind string `json:"kind"`
@@ -55,7 +59,7 @@ func (s *LocalStore) reconcilePendingOther(ctx context.Context, collection, reso
 		default:
 			return ErrInvalid
 		}
-	}); err != nil {
+	}, exceptID); err != nil {
 		return err
 	}
 	if collection == "cases" {
@@ -68,7 +72,7 @@ func (s *LocalStore) reconcilePendingOther(ctx context.Context, collection, reso
 				return nil
 			}
 			return s.finishIncidentOperation(ctx, id, &op)
-		}); err != nil {
+		}, exceptID); err != nil {
 			return err
 		}
 	}
@@ -82,7 +86,7 @@ func (s *LocalStore) reconcilePendingOther(ctx context.Context, collection, reso
 				return nil
 			}
 			return s.finishKnowledgeOperation(ctx, id, &op)
-		})
+		}, exceptID)
 	}
 	return nil
 }
@@ -91,7 +95,13 @@ func (s *LocalStore) recoveryAI(receipt ai.Receipt) LocalAIStore {
 	return LocalAIStore{Store: s, Scope: ai.Scope{Key: receipt.ScopeKey, Project: receipt.Project, Actor: receipt.Actor}}
 }
 
-func (s *LocalStore) visitJournal(kind string, visit func(string, []byte) error) error {
+var journalReaddirnames = (*os.File).Readdirnames
+
+func (s *LocalStore) visitJournal(kind string, visit func(string, []byte) error, exceptIDs ...string) error {
+	exceptID := ""
+	if len(exceptIDs) > 0 {
+		exceptID = exceptIDs[0]
+	}
 	dir := s.privateItemDir(kind)
 	if err := ensureDirIfExists(dir); err != nil {
 		return err
@@ -105,7 +115,7 @@ func (s *LocalStore) visitJournal(kind string, visit func(string, []byte) error)
 	}
 	defer func() { _ = f.Close() }()
 	for {
-		names, err := f.Readdirnames(128)
+		names, err := journalReaddirnames(f, 128)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
@@ -114,6 +124,9 @@ func (s *LocalStore) visitJournal(kind string, visit func(string, []byte) error)
 				continue
 			}
 			id := strings.TrimSuffix(name, ".json")
+			if id == exceptID {
+				continue
+			}
 			data, readErr := safeReadFile(dir, id)
 			if readErr != nil {
 				return readErr

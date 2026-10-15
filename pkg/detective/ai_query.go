@@ -25,6 +25,12 @@ type aiQueryOperation struct {
 	Done    bool                 `json:"done"`
 }
 
+var (
+	localProjectBranches       = api.LocalProjectBranches
+	secureProjectMutationScope = api.SecureProjectMutationScope
+	saveProjectQuery           = (api.LocalProjectQueryAdapter{}).SaveQuery
+)
+
 func (s LocalAIStore) ConfirmQuery(ctx context.Context, command ai.Command) (ai.Receipt, error) {
 	if s.Store == nil || command.Scope != s.Scope || command.Proposal.Scope != s.Scope || command.Proposal.Draft.Kind != ai.KindQuery || command.Proposal.Draft.Query == nil || !validSlug(command.OperationID) || command.Binding.Project != s.Scope.Key || command.Binding.Actor != s.Scope.Actor || command.Binding.Action != "ai-confirm-draft-query" || command.Binding.ResourceID != command.Proposal.ID || len(command.Binding.PayloadDigest) != 64 {
 		return ai.Receipt{}, ErrInvalid
@@ -72,7 +78,7 @@ func (s LocalAIStore) aiQueryRequest(ctx context.Context, command ai.Command) (d
 		return dto.SaveQueryRequest{}, ErrInvalid
 	}
 	ref := dto.ProjectRef{StoreID: api.LocalStoreID, ProjectID: s.Scope.Project}
-	branches, err := api.LocalProjectBranches(ctx, ref)
+	branches, err := localProjectBranches(ctx, ref)
 	if err != nil {
 		return dto.SaveQueryRequest{}, err
 	}
@@ -112,14 +118,14 @@ func (s LocalAIStore) finishAIQuery(ctx context.Context, id string, op *aiQueryO
 	if op.Kind != "query" || op.Request.ProjectID != s.Scope.Project || op.Request.StoreID != api.LocalStoreID || op.Request.OperationID != id || op.Receipt.OperationID != id {
 		return ErrInvalid
 	}
-	scope, err := api.SecureProjectMutationScope(op.Request.ProjectRef, op.Request.Branch, "save-query")
+	scope, err := secureProjectMutationScope(op.Request.ProjectRef, op.Request.Branch, "save-query")
 	if err != nil {
 		return err
 	}
 	if scope.ActorID != s.Scope.Actor {
 		return ErrConflict
 	}
-	result, err := (api.LocalProjectQueryAdapter{}).SaveQuery(ctx, scope, op.Request)
+	result, err := saveProjectQuery(ctx, scope, op.Request)
 	if err != nil {
 		return err
 	}

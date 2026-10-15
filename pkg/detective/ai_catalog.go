@@ -21,6 +21,8 @@ type aiCatalogOperation struct {
 	Done    bool            `json:"done"`
 }
 
+var aiCatalogJSONMarshal = json.Marshal
+
 // ConfirmCatalog journals the already-reviewed shared Core draft, the exact
 // previous definition and an audit intent before replacing a project file.
 // A crash between any two writes can be reconciled by the same operation ID.
@@ -290,7 +292,7 @@ func (s LocalAIStore) prepareAICatalog(command ai.Command) (string, json.RawMess
 	if !validSlug(resourceID) || version < 1 {
 		return bad(ErrInvalid)
 	}
-	encoded, err := json.Marshal(value)
+	encoded, err := aiCatalogJSONMarshal(value)
 	if err != nil {
 		return bad(err)
 	}

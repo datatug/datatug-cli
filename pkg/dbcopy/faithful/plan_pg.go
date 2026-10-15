@@ -95,6 +95,9 @@ func PlanSQLiteToPG(cat *Catalog, stats map[string][]*colStats, schema string, d
 					if ch.kind == KindDecimal && parseDecl(c.SourceType).text {
 						p.warn(WarnDefaultTranslated, obj, "text default %s of a decimal text column became the numeric default %s; new rows get the same number, and it is written back as text", c.Default, d)
 					}
+					if ch.kind == KindText && reDefNumber.MatchString(strings.Trim(c.Default, "() ")) {
+						p.warn(WarnDefaultTranslated, obj, "numeric default %s of a text column: SQLite inserts the text of the number as it spells it (0.00 gives '0.0'); it is written as the text '%s'", c.Default, strings.Trim(c.Default, "() "))
+					}
 					if ch.kind == KindText && strings.HasPrefix(strings.ToUpper(strings.Trim(c.Default, "() ")), "CURRENT_") {
 						p.warn(WarnDefaultTranslated, obj, "default %s on a text column is written with to_char(... AT TIME ZONE 'UTC') in the same text format: PostgreSQL has no text-valued CURRENT_ default", c.Default)
 					}

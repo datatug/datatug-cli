@@ -28,6 +28,14 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 				t.Errorf("%s: %v", obj, w)
 			}
 		}
+		for _, obj := range []string{"times.tm", "times.tz", "times.tz2"} {
+			if w := findWarning(rep, WarnTypeWidened, obj); w == nil || !strings.Contains(w.Message, "carried as text") {
+				t.Errorf("%s: a leap second, an hour 24 and a day that is not there stay text: %v", obj, w)
+			}
+		}
+		if !hasWarningText(rep, "tnum.t", "numeric default 0.00 of a text column") {
+			t.Errorf("a numeric default of a text column is said: %v", rep.Warnings)
+		}
 		if !hasWarningText(rep, "vals.dtn", "1 text value(s) are written in numeric's spelling (-0.00 -> 0.00)") || findWarning(rep, WarnTypeWidened, "vals.dtn") != nil ||
 			!hasWarningText(rep, "vals.dt", "text default '0.00' of a decimal text column became the numeric default 0.00") {
 			t.Errorf("decimal texts are numeric and the new spelling is counted: %v", rep.Warnings)
@@ -41,14 +49,14 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 			}
 		}
 		// The way back: every value is what it was but the column that held a NUL byte and the decimal text, which say so.
-		if len(e.diffs[0]) != 2 || e.diffs[0][0].Object != "vals.dtn" || e.diffs[0][1].Object != "vals.nul" {
+		if len(e.diffs[0]) != 3 || e.diffs[0][0].Object != "tnum.t" || e.diffs[0][1].Object != "vals.dtn" || e.diffs[0][2].Object != "vals.nul" {
 			t.Errorf("sqlite -> postgres -> sqlite: %v", e.diffs[0])
 		}
 		if len(e.diffs[1]) != 0 {
 			t.Errorf("postgres -> sqlite -> postgres: %v", e.diffs[1])
 		}
 		// The reload wrote the same rows again.
-		if c[3].err != nil || c[3].rep.Totals.Rows != 3 {
+		if c[3].err != nil || c[3].rep.Totals.Rows != 9 {
 			t.Errorf("reload: %v", c[3].err)
 		}
 	},
@@ -59,10 +67,11 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 		}
 		rep := c[0].rep
 		for obj, want := range map[string][]string{
-			"fl.r":      {"1 NaN value(s) became NULL", "1 negative zero value(s) became 0"},
-			"fl.d":      {"1 negative zero value(s) became 0"},
-			"fl.c":      {"blank-padded"},
-			"sq_new.id": {"starts at 100 and steps by 5", "next value (100)"},
+			"fl.r":        {"1 NaN value(s) became NULL", "1 negative zero value(s) became 0"},
+			"fl.d":        {"1 negative zero value(s) became 0"},
+			"fl.c":        {"blank-padded"},
+			"sq_clash.id": {"counter of the source was at 1 but a row has id 2"},
+			"sq_new.id":   {"starts at 100 and steps by 5", "next value of the source is 100, the target counts on from 100"},
 		} {
 			for _, w := range want {
 				if !hasWarningText(rep, obj, w) {
@@ -82,7 +91,7 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 	},
 	"filters_and_reload": func(t *testing.T, e *scenarioEnv) {
 		c := e.copies
-		if len(c) != 17 {
+		if len(c) != 18 {
 			t.Fatalf("copies %d", len(c))
 		}
 		if c[0].err != nil || !hasWarning(c[0].rep, WarnFKNotValidated, "child(parent_id)") {
@@ -114,16 +123,19 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 		if c[12].err != nil {
 			t.Errorf("a target with an extra column that has a default is reloaded: %v", c[12].err)
 		}
-		if c[13].err == nil || !strings.Contains(c[13].err.Error(), `"keyless" on the target is not a table`) {
-			t.Errorf("a view in the way: %v", c[13].err)
+		if c[13].err != nil || !hasWarning(c[13].rep, WarnFKNotValidated, "child(parent_id)") {
+			t.Errorf("a reload that leaves a parent out: %v %v", c[13].err, c[13].rep.Warnings)
+		}
+		if c[14].err == nil || !strings.Contains(c[14].err.Error(), `"keyless" on the target is not a table`) {
+			t.Errorf("a view in the way: %v", c[14].err)
 		}
 		// From PostgreSQL: where and limit are read through the server.
-		if c[14].err != nil || c[14].rep.Totals.Rows == 0 {
-			t.Errorf("filtered from postgres: %v", c[14].err)
+		if c[15].err != nil || c[15].rep.Totals.Rows == 0 {
+			t.Errorf("filtered from postgres: %v", c[15].err)
 		}
 		var mm *ReloadMismatchError
-		if c[15].err != nil || !errors.As(c[16].err, &mm) || !strings.Contains(c[16].err.Error(), `column "uid" is missing`) {
-			t.Errorf("reload into sqlite: %v / %v", c[15].err, c[16].err)
+		if c[16].err != nil || !errors.As(c[17].err, &mm) || !strings.Contains(c[17].err.Error(), `column "uid" is missing`) {
+			t.Errorf("reload into sqlite: %v / %v", c[16].err, c[17].err)
 		}
 	},
 	"sqlite_to_sqlite": func(t *testing.T, e *scenarioEnv) {

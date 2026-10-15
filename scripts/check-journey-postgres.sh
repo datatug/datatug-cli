@@ -39,6 +39,8 @@ required_tests=(
 	TestPostgresJSONBRecognizerAgreesWithTheServer
 	TestPostgresRealHoldsWhatF32ExactAccepts
 	TestPostgresDecimalsTextKeepsTheText
+	TestPostgresReloadSurvivesKeyCyclesAndOrphans
+	TestPostgresStandardConformingStringsOffDoesNotRewriteTheDDL
 )
 
 # check reads the verbose output of `go test` in file $1 and prints each problem. It

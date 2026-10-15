@@ -82,7 +82,7 @@
  },
  {
   "kind": "exec",
-  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true), set_config('standard_conforming_strings', 'on', true), set_config('escape_string_warning', 'off', true)",
   "affected": 1
  },
  {
@@ -99,7 +99,7 @@
    [
     {
      "t": "i",
-     "v": 49507
+     "v": 63147
     },
     {
      "t": "s",
@@ -121,7 +121,7 @@
    [
     {
      "t": "i",
-     "v": 49465
+     "v": 63105
     },
     {
      "t": "s",
@@ -143,7 +143,7 @@
    [
     {
      "t": "i",
-     "v": 49497
+     "v": 63137
     },
     {
      "t": "s",
@@ -165,7 +165,7 @@
    [
     {
      "t": "i",
-     "v": 49474
+     "v": 63114
     },
     {
      "t": "s",
@@ -187,7 +187,7 @@
    [
     {
      "t": "i",
-     "v": 49500
+     "v": 63140
     },
     {
      "t": "s",
@@ -209,7 +209,7 @@
    [
     {
      "t": "i",
-     "v": 49489
+     "v": 63129
     },
     {
      "t": "s",
@@ -231,7 +231,7 @@
    [
     {
      "t": "i",
-     "v": 49492
+     "v": 63132
     },
     {
      "t": "s",
@@ -253,7 +253,7 @@
    [
     {
      "t": "i",
-     "v": 49524
+     "v": 63164
     },
     {
      "t": "s",
@@ -2407,7 +2407,7 @@
  },
  {
   "kind": "exec",
-  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true), set_config('standard_conforming_strings', 'on', true), set_config('escape_string_warning', 'off', true)",
   "affected": 1
  },
  {
@@ -2424,7 +2424,7 @@
    [
     {
      "t": "i",
-     "v": 49460
+     "v": 63100
     },
     {
      "t": "s",
@@ -2691,7 +2691,7 @@
  },
  {
   "kind": "exec",
-  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true), set_config('standard_conforming_strings', 'on', true), set_config('escape_string_warning', 'off', true)",
   "affected": 1
  },
  {

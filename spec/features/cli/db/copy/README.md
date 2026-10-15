@@ -235,7 +235,7 @@ Whatever an engine cannot carry MUST be reported, per object, as a warning with 
 
 #### REQ: faithful-exact-values
 
-A copy MUST NOT change a value without saying so. A column whose values do not fit the type its declaration maps to (a `FLOAT4` holding a double a 4-byte real cannot hold, a `JSONB_TEXT` that jsonb would write differently, a `TIMESTAMPTZ` text with an offset other than `+00`, a text holding a NUL byte) MUST be carried in a type that holds every value, with a `type-widened` warning that names the column and the reason. A value that the target engine cannot hold (NaN, a negative zero in SQLite) MUST be counted in a `values-normalized` warning. A `DECIMAL_TEXT` column is carried as `numeric`; the texts that numeric spells differently (a leading dot or zeros, a negative zero, fewer decimals than the scale) MUST be counted per column in a `values-normalized` warning with the first one as an example, and a text default MUST be reported as the numeric default it became; `--decimals=text` keeps such a column as `text` with a `type-widened` warning (founder decision 2026-10-15: numeric by default, exactness opt-in). An empty blob is an empty blob, never NULL. The text a PostgreSQL source prints (dates, intervals, floats) MUST NOT depend on the settings of the server: the session pins `DateStyle`, `IntervalStyle`, `extra_float_digits` and the time zone, and removes the statement timeout.
+A copy MUST NOT change a value without saying so. A column whose values do not fit the type its declaration maps to (a `FLOAT4` holding a double a 4-byte real cannot hold, a `JSONB_TEXT` that jsonb would write differently, a `TIMESTAMPTZ` text with an offset other than `+00`, a text holding a NUL byte) MUST be carried in a type that holds every value, with a `type-widened` warning that names the column and the reason. A value that the target engine cannot hold (NaN, a negative zero in SQLite) MUST be counted in a `values-normalized` warning. A `DECIMAL_TEXT` column is carried as `numeric`; the texts that numeric spells differently (a leading dot or zeros, a negative zero, fewer decimals than the scale) MUST be counted per column in a `values-normalized` warning with the first one as an example, and a text default MUST be reported as the numeric default it became; `--decimals=text` keeps such a column as `text` with a `type-widened` warning (founder decision 2026-10-15: numeric by default, exactness opt-in). An empty blob is an empty blob, never NULL. The text a PostgreSQL source prints (dates, intervals, floats) MUST NOT depend on the settings of the server: the session pins `DateStyle`, `IntervalStyle`, `extra_float_digits`, the time zone and `standard_conforming_strings`, and removes the statement timeout. A `TIME` or `TIMESTAMPTZ` text that PostgreSQL would refuse or write as another instant (a leap second `23:59:60`, an hour `24`, a day that is not there) makes the column `text`; a value in a SQLite column of numeric affinity is never passed through a double when it is an integer.
 
 #### REQ: faithful-snapshot
 
@@ -247,7 +247,7 @@ The target MUST be written in one transaction. Indexes, checks and foreign keys 
 
 #### REQ: faithful-reload
 
-`--overwrite=reload` MUST empty the target tables of the copy (PostgreSQL: one `TRUNCATE … RESTART IDENTITY`; SQLite: `DELETE`) and load the source rows into them in the same transaction as the load, keeping the schema of the target. Before anything is written each target table MUST be checked as REQ:reload-schema-match says (extra target columns are allowed when they can be left to their defaults; the key must be the same; a column must be of a kind the source values fit); a mismatch exits `1` and changes nothing. On PostgreSQL the tables are loaded parents first so that the foreign keys of the target hold. A table that is not on the target is created. Views and triggers of a SQLite source are replaced by the source's.
+`--overwrite=reload` MUST empty the target tables of the copy (PostgreSQL: one `TRUNCATE … RESTART IDENTITY`; SQLite: `DELETE`) and load the source rows into them in the same transaction as the load, keeping the schema of the target. Before anything is written each target table MUST be checked as REQ:reload-schema-match says (extra target columns are allowed when they can be left to their defaults; the key must be the same; a column must be of a kind the source values fit); a mismatch exits `1` and changes nothing. On PostgreSQL the foreign keys among the reloaded tables are dropped before the rows are emptied and added again after the load (so the order of the tables, a cycle of keys, and a key created NOT VALID cannot stop the reload); a key that the loaded rows violate (23503) is created NOT VALID and reported as REQ:faithful-filters says, a key the rows satisfy is validated again. A table that is not on the target is created. Views and triggers of a SQLite source are replaced by the source's.
 
 #### REQ: faithful-filters
 
@@ -556,9 +556,9 @@ A SQLite or inGitDB target accepts source names under its existing rules, includ
 
 **Requirements:** copy#req:faithful-reload, copy#req:faithful-atomic
 
-**Given** a target that holds the tables of the source, one with an extra column that has a default, and a source row that the target's foreign key refuses
+**Given** a target that holds the tables of the source, one with an extra column that has a default and a CHECK of its own, and a source row that the CHECK refuses
 **When** the user runs `datatug db copy --overwrite=reload`
-**Then** the command exits `1` naming the key, and every target table holds the rows it held before.
+**Then** the command exits `1` naming the check, and every target table holds the rows it held before and keeps its foreign keys. A source row that only lacks a parent is no failure: the key is created NOT VALID and reported.
 
 ### AC: faithful-filters-are-pushed-down
 

@@ -131,7 +131,8 @@ func filterTables(cat *Catalog, include, exclude []string, warnings *[]Warning) 
 // of the database or the role, and a copy must not be cut by a statement timeout.
 const sessionSettings = `SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true),
   set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true),
-  set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)`
+  set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true),
+  set_config('standard_conforming_strings', 'on', true), set_config('escape_string_warning', 'off', true)`
 
 type sessionExecer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -445,6 +446,15 @@ type executor struct {
 	opts     Options
 	rep      *Report
 	filtered bool
+	// reloadFKs are the foreign keys of the target between tables that are reloaded: they are dropped
+	// before the rows are emptied and added again after the load, so that the order of the tables, a
+	// cycle of keys, or a key that was created NOT VALID cannot stop the reload.
+	reloadFKs []reloadFK
+}
+
+type reloadFK struct {
+	table string
+	fk    ForeignKey
 }
 
 type execer interface {
@@ -551,8 +561,8 @@ func (x *executor) run(create []createStmt, post []postStmt) error {
 
 	// Data.
 	order := x.plan.Tables
-	if x.opts.Overwrite == "reload" && x.to.Engine == Postgres {
-		order = parentsFirst(order)
+	if err := x.dropReloadFKs(q); err != nil {
+		return err
 	}
 	if err := x.truncate(q, order); err != nil {
 		return err
@@ -577,7 +587,10 @@ func (x *executor) run(create []createStmt, post []postStmt) error {
 		return err
 	}
 
-	// Constraints and indexes that follow the data.
+	// Constraints and indexes that follow the data (the keys among the reloaded tables come back first).
+	if err := x.readdReloadFKs(q); err != nil {
+		return err
+	}
 	for _, s := range post {
 		if x.reloaded(s.table) {
 			continue
@@ -633,6 +646,9 @@ func (x *executor) warnLosses(t *TargetTable) {
 		if c.loss.nan > 0 {
 			x.plan.warn(WarnValuesNormalized, obj, "%d NaN value(s) became NULL: SQLite has no NaN", c.loss.nan)
 		}
+		if c.loss.rounded > 0 {
+			x.plan.warn(WarnValuesNormalized, obj, "%d value(s) have more digits than a SQLite number holds and were rounded: the declared type has numeric affinity", c.loss.rounded)
+		}
 		if c.loss.negZero > 0 {
 			x.plan.warn(WarnValuesNormalized, obj, "%d negative zero value(s) became 0: SQLite does not keep the sign of a zero", c.loss.negZero)
 		}
@@ -668,39 +684,6 @@ func (x *executor) truncate(q execer, order []*TargetTable) error {
 	return nil
 }
 
-// parentsFirst orders tables so that a table comes after the tables its foreign keys reference (a
-// reloaded table keeps its foreign keys, so a child cannot be loaded before its parent). Tables in a
-// cycle keep their order.
-func parentsFirst(tables []*TargetTable) []*TargetTable {
-	in := map[string]*TargetTable{}
-	for _, t := range tables {
-		in[t.Name] = t
-	}
-	done := map[string]bool{}
-	var out []*TargetTable
-	var visit func(t *TargetTable, path map[string]bool)
-	visit = func(t *TargetTable, path map[string]bool) {
-		if done[t.Name] || path[t.Name] {
-			return
-		}
-		path[t.Name] = true
-		for _, fk := range t.FKs {
-			if p := in[fk.RefTable]; p != nil && p != t {
-				visit(p, path)
-			}
-		}
-		delete(path, t.Name)
-		if !done[t.Name] {
-			done[t.Name] = true
-			out = append(out, t)
-		}
-	}
-	for _, t := range tables {
-		visit(t, map[string]bool{})
-	}
-	return out
-}
-
 // prepareReload checks that every existing table fits the rows that will be loaded into it, and marks
 // it as reloaded. A target column may be extra (it keeps its default); a source column that the target
 // lacks, another key, or a column of a kind the values do not fit, is an error before anything is written.
@@ -714,6 +697,10 @@ func (x *executor) prepareReload(q execer, existing []string) error {
 	}
 	if err != nil {
 		return fmt.Errorf("read target schema: %w", err)
+	}
+	reloading := map[string]bool{}
+	for _, n := range existing {
+		reloading[n] = true
 	}
 	for _, n := range existing {
 		var pt *TargetTable
@@ -731,11 +718,38 @@ func (x *executor) prepareReload(q execer, existing []string) error {
 		}
 		pt.Reload = true
 		if x.to.Engine == Postgres {
+			for _, fk := range tt.FKs {
+				if reloading[fk.RefTable] {
+					x.reloadFKs = append(x.reloadFKs, reloadFK{n, fk})
+				}
+			}
 			for _, c := range pt.Columns {
 				if tc := tt.Column(c.Name); tc != nil && (c.Cast != "" || tc.Special != "") {
 					c.Cast = tc.SourceType
 				}
 			}
+		}
+	}
+	return nil
+}
+
+func (x *executor) dropReloadFKs(q execer) error {
+	for _, r := range x.reloadFKs {
+		if _, err := q.ExecContext(x.ctx, "ALTER TABLE "+qualified(x.to.schema(), r.table)+" DROP CONSTRAINT "+quoteIdent(r.fk.Name)); err != nil {
+			return fmt.Errorf("drop foreign key %s of %q for the reload: %w", r.fk.Name, r.table, err)
+		}
+	}
+	return nil
+}
+
+func (x *executor) readdReloadFKs(q execer) error {
+	for _, r := range x.reloadFKs {
+		fk := r.fk
+		fk.NotValid = false
+		err := x.applyPost(q, postStmt{sql: pgFKSQL(x.to.schema(), r.table, fk, false), alt: pgFKSQL(x.to.schema(), r.table, fk, true),
+			kind: WarnFKNotCarried, altKind: WarnFKNotValidated, obj: r.table + "(" + strings.Join(fk.Columns, ",") + ")"})
+		if err != nil {
+			return err
 		}
 	}
 	return nil
@@ -934,10 +948,6 @@ func (x *executor) insert(q execer, t *TargetTable, batch [][]any) error {
 					ph += "::text::" + c.Cast
 				}
 				b.WriteString(ph)
-			} else if blob, ok := row[i].([]byte); ok && len(blob) == 0 {
-				// The driver binds an empty blob as NULL: it is written as the literal it is.
-				b.WriteString("X''")
-				continue
 			} else {
 				b.WriteString("?")
 			}
@@ -964,6 +974,9 @@ func (x *executor) counters(q execer) error {
 			}
 			next := c.Src.SequenceStart
 			if maxID.Valid && maxID.Int64+1 > next {
+				if next > 0 {
+					x.plan.warn(WarnIdentityNotCarried, t.Name+"."+c.Name, "the counter of the source was at %d but a row has id %d: the counter of the target starts at %d", next, maxID.Int64, maxID.Int64+1)
+				}
 				next = maxID.Int64 + 1
 			}
 			if next < 1 {

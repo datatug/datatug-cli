@@ -84,7 +84,7 @@
  },
  {
   "kind": "exec",
-  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true), set_config('standard_conforming_strings', 'on', true), set_config('escape_string_warning', 'off', true)",
   "affected": 1
  },
  {
@@ -101,7 +101,7 @@
    [
     {
      "t": "i",
-     "v": 49321
+     "v": 62961
     },
     {
      "t": "s",
@@ -123,7 +123,7 @@
    [
     {
      "t": "i",
-     "v": 49341
+     "v": 62981
     },
     {
      "t": "s",
@@ -145,7 +145,7 @@
    [
     {
      "t": "i",
-     "v": 49387
+     "v": 63027
     },
     {
      "t": "s",
@@ -167,7 +167,7 @@
    [
     {
      "t": "i",
-     "v": 49383
+     "v": 63023
     },
     {
      "t": "s",
@@ -189,7 +189,7 @@
    [
     {
      "t": "i",
-     "v": 49359
+     "v": 62999
     },
     {
      "t": "s",
@@ -211,7 +211,7 @@
    [
     {
      "t": "i",
-     "v": 49370
+     "v": 63010
     },
     {
      "t": "s",
@@ -3391,11 +3391,11 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:02:09"
+     "v": "2026-10-15 11:37:17"
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:02:09.325807+00"
+     "v": "2026-10-15 11:37:17.77498+00"
     }
    ],
    [
@@ -3461,11 +3461,11 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:02:09"
+     "v": "2026-10-15 11:37:17"
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:02:09.325807+00"
+     "v": "2026-10-15 11:37:17.77498+00"
     }
    ]
   ]
@@ -3615,7 +3615,7 @@
  },
  {
   "kind": "exec",
-  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true), set_config('standard_conforming_strings', 'on', true), set_config('escape_string_warning', 'off', true)",
   "affected": 1
  },
  {
@@ -3632,7 +3632,7 @@
    [
     {
      "t": "i",
-     "v": 49321
+     "v": 62961
     },
     {
      "t": "s",
@@ -3654,7 +3654,7 @@
    [
     {
      "t": "i",
-     "v": 49341
+     "v": 62981
     },
     {
      "t": "s",
@@ -3676,7 +3676,7 @@
    [
     {
      "t": "i",
-     "v": 49387
+     "v": 63027
     },
     {
      "t": "s",
@@ -3698,7 +3698,7 @@
    [
     {
      "t": "i",
-     "v": 49383
+     "v": 63023
     },
     {
      "t": "s",
@@ -3720,7 +3720,7 @@
    [
     {
      "t": "i",
-     "v": 49359
+     "v": 62999
     },
     {
      "t": "s",
@@ -3742,7 +3742,7 @@
    [
     {
      "t": "i",
-     "v": 49370
+     "v": 63010
     },
     {
      "t": "s",
@@ -6922,11 +6922,11 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:02:09"
+     "v": "2026-10-15 11:37:17"
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:02:09.325807+00"
+     "v": "2026-10-15 11:37:17.77498+00"
     }
    ],
    [
@@ -6992,11 +6992,11 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:02:09"
+     "v": "2026-10-15 11:37:17"
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:02:09.325807+00"
+     "v": "2026-10-15 11:37:17.77498+00"
     }
    ]
   ]
@@ -7095,7 +7095,7 @@
    [
     {
      "t": "i",
-     "v": 49321
+     "v": 62961
     },
     {
      "t": "s",
@@ -7117,7 +7117,7 @@
    [
     {
      "t": "i",
-     "v": 49341
+     "v": 62981
     },
     {
      "t": "s",
@@ -7139,7 +7139,7 @@
    [
     {
      "t": "i",
-     "v": 49387
+     "v": 63027
     },
     {
      "t": "s",
@@ -7161,7 +7161,7 @@
    [
     {
      "t": "i",
-     "v": 49383
+     "v": 63023
     },
     {
      "t": "s",
@@ -7183,7 +7183,7 @@
    [
     {
      "t": "i",
-     "v": 49359
+     "v": 62999
     },
     {
      "t": "s",
@@ -7205,7 +7205,7 @@
    [
     {
      "t": "i",
-     "v": 49370
+     "v": 63010
     },
     {
      "t": "s",
@@ -10385,11 +10385,11 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:02:09"
+     "v": "2026-10-15 11:37:17"
     },
     {
      "t": "s",
-     "v": "2026-10-15 12:02:09.325807+01"
+     "v": "2026-10-15 12:37:17.77498+01"
     }
    ],
    [
@@ -10455,11 +10455,11 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:02:09"
+     "v": "2026-10-15 11:37:17"
     },
     {
      "t": "s",
-     "v": "2026-10-15 12:02:09.325807+01"
+     "v": "2026-10-15 12:37:17.77498+01"
     }
    ]
   ]

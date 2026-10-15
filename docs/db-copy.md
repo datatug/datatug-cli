@@ -53,6 +53,7 @@ Every item is a warning with a `kind`, the object it is about and a message.
 | `index-not-carried` | Indexes on expressions, non-btree indexes, indexes with `INCLUDE`, partial indexes whose predicate the target does not accept; an index the target refused. |
 | `check-not-carried` | A check constraint the target does not accept (the regular expression `~ '^[A-Z]{3}$'` has no SQLite equivalent). |
 | `type-widened` | A column whose values do not fit its declared type (a `DATETIME` holding `2016-07-04`, a `NUMERIC(5,2)` holding `1.255`, a `FLOAT4` holding `16777217`, a `JSONB_TEXT` that jsonb would write differently, a `TIMESTAMPTZ` with offset `+02`, a `TEXT` holding a NUL byte, a column of mixed storage classes). It is carried in a type that holds every value (`text`, `double precision`, `json`, `bytea`, `numeric`), the declared type is recorded on the column, and the values are unchanged. A text with a NUL byte makes the whole column `bytea`, and a copy back to SQLite returns BLOBs. |
+| `values-normalized` | (PostgreSQL -> SQLite) a numeric of more than 15 significant digits written into a column of numeric affinity is rounded by SQLite: counted. An integer numeric is bound as an integer and never passes through a double. |
 | `values-normalized` | A `DECIMAL_TEXT` written in numeric's spelling (`.0000` -> `0.0000`, `-0.00` -> `0.00`, `1.5` -> `1.50` in `numeric(p,2)`): the count and the first example per column (`--decimals=text` keeps the text). A value the target cannot hold: PostgreSQL NaN becomes NULL in SQLite and a negative zero becomes 0 (counted per column); a `char(n)` is copied with PostgreSQL's blank padding. |
 | `default-translated` | A text default of a `DECIMAL_TEXT` column becomes the numeric default (`'0.00'` -> `0.00`; the same number, written back as text). A `CURRENT_TIMESTAMP` / `CURRENT_DATE` / `CURRENT_TIME` default of a text column is written with `to_char(... AT TIME ZONE 'UTC')` in the same text format. |
 | `type-approximated` | A PostgreSQL type SQLite cannot hold (arrays, enums, ranges, ...): carried as its text form. |
@@ -85,7 +86,7 @@ back restores it.
 | `BOOLEAN` | `boolean` | values 0 / 1 |
 | `DATE` | `date` | text `YYYY-MM-DD` |
 | `DATETIME`, `TIMESTAMP` | `timestamp` | text `YYYY-MM-DD HH:MM:SS[.ffffff]` without trailing fractional zeros |
-| `TIMESTAMPTZ` / `TIME` | `timestamptz` / `time` | text in PostgreSQL's output form; for `TIMESTAMPTZ` the offset is `+00` (any other offset would be rewritten to UTC: `text`) |
+| `TIMESTAMPTZ` / `TIME` | `timestamptz` / `time` | text in PostgreSQL's output form and a time that exists (`23:59:60`, hour `24`, `2021-02-30` stay `text`); for `TIMESTAMPTZ` the offset is `+00` (any other offset would be rewritten to UTC: `text`) |
 | `CHAR(n)`, `VARCHAR(n)`, `NVARCHAR(n)` | `varchar(n)` | no value longer than n |
 | `TEXT`, `CLOB`, `STRING` | `text` | text without NUL |
 | `BLOB` | `bytea` | blobs |
@@ -143,8 +144,11 @@ replaces their rows: PostgreSQL `TRUNCATE ... RESTART IDENTITY` (SQLite `DELETE`
 the one transaction, so a failure leaves the old rows. Before anything is written each target table is
 checked: the source columns must exist, the primary key must be the same, a column must be of a kind
 the values fit, and an extra target column must be nullable or have a default; otherwise exit 1 and
-nothing changes. PostgreSQL tables are loaded parents first, so the foreign keys of the target hold
-(a cycle of keys needs `DEFERRABLE` keys). A source table the target lacks is created. Views and
+nothing changes. On PostgreSQL the foreign keys among the reloaded tables are dropped before the rows
+are emptied and added again after the load, so the order of the tables, a cycle of keys and a key
+that was created `NOT VALID` cannot stop a reload; a key the loaded rows violate (a filter left a
+parent out, the source has orphans) is created `NOT VALID` again and reported, a key they satisfy is
+validated. A source table the target lacks is created. Views and
 triggers of a SQLite source are replaced by the source's.
 
 ## Filters
@@ -180,6 +184,8 @@ comes before any copy (a bad flag, a side that cannot be opened) prints the same
 (nothing changed), 2 usage, 3 warnings with `--fail-on-warning`, 4 a side could not be opened.
 
 ## Documented differences after a round trip
+
+Equivalent catalog spellings that are not warned one by one (the meaning is the same): a regex `CHECK` written `\-` comes back `-`; a cast `::integer` comes back `::bigint`; `NULLS LAST` on a descending index comes back plain `DESC`; a PostgreSQL unique *index* comes back as a UNIQUE constraint; `serial` / `integer` identity comes back as a `bigint` identity; `GENERATED ALWAYS` identity comes back `BY DEFAULT`; the numeric default of a text column in SQLite (`DEFAULT 0.00` inserts `'0.0'`) is written as the text `'0.00'` and is warned.
 
 * A SQLite primary key column that was declared without `NOT NULL` comes back `NOT NULL` (PostgreSQL requires it; a column that holds NULL refuses the copy before anything is written). An `INTEGER PRIMARY KEY` comes back `NOT NULL`, and a `DEFAULT NULL` comes back without its default (the same thing).
 * A long index or constraint name (over 63 bytes) is shortened or left to PostgreSQL's own name, with a warning; a table or column name over 63 bytes refuses the copy.

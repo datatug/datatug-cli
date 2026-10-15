@@ -10,7 +10,7 @@ func PlanSQLiteToSQLite(cat *Catalog) *Plan {
 	for _, n := range cat.Notes {
 		// Views, triggers and indexes of a SQLite source are carried as they are stored.
 		if n.Kind == WarnViewNotCarried || n.Kind == WarnTriggerNotCarried || n.Kind == WarnIndexNotCarried ||
-			n.Kind == WarnCollationNotCarried || n.Kind == WarnStorageOption || n.Kind == WarnFKNotValidated {
+			n.Kind == WarnCollationNotCarried || n.Kind == WarnGeneratedColumn || n.Kind == WarnStorageOption || n.Kind == WarnFKNotValidated {
 			continue
 		}
 		p.Warnings = append(p.Warnings, n)

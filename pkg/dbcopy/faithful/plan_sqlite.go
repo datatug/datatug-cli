@@ -139,7 +139,42 @@ func sqliteTextAffinity(decl string) bool {
 }
 
 // lossCount counts the values of a column that the target cannot hold as they are.
-type lossCount struct{ nan, negZero int64 }
+type lossCount struct{ nan, negZero, rounded int64 }
+
+var reIntegral = regexp.MustCompile(`^(-?\d+)(\.0*)?$`)
+
+// decimalToNumericAffinity carries a PostgreSQL numeric (as its text) into a SQLite column of numeric
+// affinity without letting it pass through a double when it is an integer: SQLite converts a text such as
+// 1234567890123456789.00 through a double and writes 1234567890123456768. An integral value that fits an
+// int64 is bound as an integer, any other as a double; a value a double does not hold exactly is counted.
+func decimalToNumericAffinity(loss *lossCount) encoder {
+	return func(v any) (any, error) {
+		x, ok := v.(string)
+		switch {
+		case v == nil:
+			return nil, nil
+		case !ok:
+			return nil, errType(v, "a decimal")
+		case !reDec.MatchString(x):
+			return x, nil // NaN, Infinity: the text stays
+		}
+		if m := reIntegral.FindStringSubmatch(x); m != nil {
+			if n, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+				return n, nil
+			}
+		}
+		f, _ := strconv.ParseFloat(x, 64)
+		exact := strconv.FormatFloat(f, 'f', -1, 64)
+		want := canonicalDecimalText(x)
+		if strings.Contains(want, ".") {
+			want = strings.TrimRight(strings.TrimRight(want, "0"), ".")
+		}
+		if exact != want {
+			loss.rounded++
+		}
+		return f, nil
+	}
+}
 
 // floatToSQLite carries a PostgreSQL float (a float64, or the text of a real) to SQLite and counts the
 // values SQLite cannot hold: NaN becomes NULL and a negative zero becomes 0.
@@ -301,6 +336,10 @@ func PlanPGToSQLite(cat *Catalog, checkOK func(cols []string, expr string) error
 			if c.Kind == KindFloat {
 				tc.loss = &lossCount{}
 				tc.enc = floatToSQLite(tc.loss)
+			}
+			if c.Kind == KindDecimal && !sqliteTextAffinity(decl) {
+				tc.loss = &lossCount{}
+				tc.enc = decimalToNumericAffinity(tc.loss)
 			}
 			if c.Fixed {
 				p.warn(WarnValuesNormalized, obj, "char(%d) values are blank-padded by PostgreSQL and are copied with their padding", c.Length)

@@ -390,8 +390,12 @@ WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1`
 		return fmt.Errorf("read the definition of the sequence %s: %w", qn, err)
 	}
 	if start != 1 || step != 1 {
+		source := last // what the source gives next: one step after the last value, or the start
+		if called {
+			source = last + step
+		}
 		cat.Notes = append(cat.Notes, Warning{WarnIdentityNotCarried, t.Name + "." + c.Name,
-			fmt.Sprintf("the sequence starts at %d and steps by %d; the next value (%d) is carried, the start and the step are not (an auto-number column of the target counts up by 1)", start, step, c.SequenceStart)})
+			fmt.Sprintf("the sequence starts at %d and steps by %d; the next value of the source is %d, the target counts on from %d in steps of 1 (the start and the step are not carried)", start, step, source, c.SequenceStart)})
 	}
 	return nil
 }

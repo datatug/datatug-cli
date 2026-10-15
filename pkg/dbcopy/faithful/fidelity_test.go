@@ -334,31 +334,6 @@ func TestReloadFailureLeavesTheTargetAsItWas(t *testing.T) {
 	}
 }
 
-func TestParentsFirst(t *testing.T) {
-	mk := func(name string, refs ...string) *TargetTable {
-		tt := &TargetTable{Name: name}
-		for _, r := range refs {
-			tt.FKs = append(tt.FKs, ForeignKey{RefTable: r})
-		}
-		return tt
-	}
-	names := func(ts []*TargetTable) string {
-		var n []string
-		for _, t := range ts {
-			n = append(n, t.Name)
-		}
-		return strings.Join(n, ",")
-	}
-	got := names(parentsFirst([]*TargetTable{mk("a", "b", "c"), mk("b", "c"), mk("c"), mk("d", "d"), mk("e", "gone")}))
-	if got != "c,b,a,d,e" {
-		t.Errorf("%s", got)
-	}
-	// A cycle keeps the order it came in.
-	if got := names(parentsFirst([]*TargetTable{mk("x", "y"), mk("y", "x")})); got != "y,x" && got != "x,y" {
-		t.Errorf("%s", got)
-	}
-}
-
 func TestReloadKindFits(t *testing.T) {
 	col := func(kind Kind, typ string) *TargetColumn { return &TargetColumn{Kind: kind, Type: typ} }
 	for _, tc := range []struct {
@@ -506,5 +481,57 @@ func TestFailedStatementsAreToleratedOnlyForTheirOwnReasons(t *testing.T) {
 	x = &executor{ctx: context.Background(), to: Endpoint{Engine: Postgres}, plan: &Plan{}}
 	if err := x.applyPost(&stubExecer{fail: map[string]error{"COMMENT": pgErr("42601", "syntax")}}, postStmt{sql: "COMMENT ON x", obj: "c"}); err == nil {
 		t.Error("a required statement failed")
+	}
+}
+
+// numeric(p,s) never rounds or truncates: a text that fits is counted when numeric spells it differently, a text
+// with more decimals than s or more integer digits than p-s makes the column a plain numeric (widened).
+func TestDecimalTextSpellingIsCountedAndNeverRounded(t *testing.T) {
+	for _, tc := range []struct {
+		value      string
+		normalized int64
+		typ        string
+	}{
+		{"1.50", 0, "numeric(5,2)"}, {"-0.00", 1, "numeric(5,2)"}, {"-0", 1, "numeric(5,2)"}, {"-.0", 1, "numeric(5,2)"}, {".5", 1, "numeric(5,2)"},
+		{"-.5", 1, "numeric(5,2)"}, {"007.50", 1, "numeric(5,2)"}, {"1.5", 1, "numeric(5,2)"}, {"2", 1, "numeric(5,2)"}, {"999.99", 0, "numeric(5,2)"},
+		{"1.234", 0, "numeric"}, {"12345.00", 0, "numeric"}, {"1000.00", 0, "numeric"},
+	} {
+		ch := chooseSQLiteToPG(&Column{Name: "c", SourceType: "DECIMAL_TEXT(5,2)"}, stat("DECIMAL_TEXT(5,2)", tc.value), false)
+		if ch.typ != tc.typ || ch.normalized != tc.normalized {
+			t.Errorf("%s: %s, %d spelled differently; want %s, %d", tc.value, ch.typ, ch.normalized, tc.typ, tc.normalized)
+		}
+		if tc.normalized > 0 && !strings.HasPrefix(ch.example, tc.value+" -> ") {
+			t.Errorf("%s: example %q", tc.value, ch.example)
+		}
+	}
+	// The numeric the return trip writes into a column of numeric affinity does not pass through a double.
+	loss := &lossCount{}
+	enc := decimalToNumericAffinity(loss)
+	for in, want := range map[string]any{"1234567890123456789.00": int64(1234567890123456789), "9223372036854775807": int64(9223372036854775807), "-5.0": int64(-5), "1.5": 1.5, "NaN": "NaN", "0.10": 0.1} {
+		got, err := enc(in)
+		if err != nil || got != want {
+			t.Errorf("%s -> %v (%T) %v, want %v", in, got, got, err, want)
+		}
+	}
+	if v, _ := enc(nil); v != nil || loss.rounded != 0 {
+		t.Errorf("%v %d", v, loss.rounded)
+	}
+	if _, err := enc(5); err == nil {
+		t.Error("not a decimal")
+	}
+	if got, _ := enc("92233720368547758070.5"); got.(float64) < 9e19 || loss.rounded != 1 {
+		t.Errorf("a value no double holds is counted: %v %d", got, loss.rounded)
+	}
+}
+
+func TestRoundedValuesAndVirtualTablesAreSaid(t *testing.T) {
+	x := &executor{plan: &Plan{}}
+	x.warnLosses(&TargetTable{Name: "t", Columns: []*TargetColumn{{Name: "d", loss: &lossCount{rounded: 2}}}})
+	if !hasWarningText(&Report{Warnings: x.plan.Warnings}, "t.d", "2 value(s) have more digits than a SQLite number holds") {
+		t.Errorf("%v", x.plan.Warnings)
+	}
+	p := PlanSQLiteToSQLite(&Catalog{Notes: []Warning{{Kind: WarnObjectNotCarried, Object: "ft", Message: "virtual table"}, {Kind: WarnGeneratedColumn, Object: "t.g"}}})
+	if len(p.Warnings) != 1 || p.Warnings[0].Object != "ft" {
+		t.Errorf("a virtual table is said, a generated column of verbatim DDL is not: %v", p.Warnings)
 	}
 }

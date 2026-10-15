@@ -147,7 +147,7 @@ func TestPostgresExactValuesRoundTrip(t *testing.T) {
 	if got := pgText(t, pg.DB, `SELECT last_value || ',' || is_called FROM `+pgText(t, pg.DB, `SELECT pg_get_serial_sequence('"public"."vals"', 'id')`)); got != "101,false" {
 		t.Errorf("the sequence is at its next value, not called: %s", got)
 	}
-	if countKind(rep, WarnTypeWidened) != 6 || !hasWarningText(rep, "vals.dtn", "1 text value(s) are written in numeric's spelling (-0.00 -> 0.00)") {
+	if countKind(rep, WarnTypeWidened) != 9 || !hasWarningText(rep, "vals.dtn", "1 text value(s) are written in numeric's spelling (-0.00 -> 0.00)") {
 		t.Errorf("type-widened: %v", rep.Warnings)
 	}
 
@@ -161,6 +161,19 @@ func TestPostgresExactValuesRoundTrip(t *testing.T) {
 	if want, got := sqliteSignature(t, src.DB, "emptys", "b", "u", "t"), sqliteSignature(t, back.DB, "emptys", "b", "u", "t"); got != want || !strings.Contains(want, "blob:X''") {
 		t.Errorf("empty blobs:\n got %s\nwant %s", got, want)
 	}
+	// A big integer in a DECIMAL(25,2) column does not pass through a double on the way back, and a leap second
+	// or an hour 24 is text that stays text.
+	if want, got := sqliteSignature(t, src.DB, "tnum", "big", "t"), sqliteSignature(t, back.DB, "tnum", "big", "t"); got != want || !strings.Contains(want, "integer:1234567890123456789") || !strings.Contains(want, "integer:9223372036854775807") {
+		t.Errorf("big integers:\n got %s\nwant %s", got, want)
+	}
+	if want, got := sqliteSignature(t, src.DB, "times", "tm", "tz", "tz2"), sqliteSignature(t, back.DB, "times", "tm", "tz", "tz2"); got != want || !strings.Contains(want, "23:59:60") {
+		t.Errorf("times:\n got %s\nwant %s", got, want)
+	}
+	for col, typ := range map[string]string{"tm": "text", "tz": "text", "tz2": "text"} {
+		if got := pgText(t, pg.DB, `SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE attrelid = 'times'::regclass AND attname = $1`, col); got != typ {
+			t.Errorf("times.%s is %s, want %s", col, got, typ)
+		}
+	}
 	// The text NUL is the one thing said instead: a column that holds it is bytea on PostgreSQL and BLOBs come back.
 	if got := sqliteSignature(t, back.DB, "vals", "nul"); !strings.Contains(got, "blob:") {
 		t.Errorf("nul: %s", got)
@@ -169,7 +182,7 @@ func TestPostgresExactValuesRoundTrip(t *testing.T) {
 	if got := sqliteSignature(t, back.DB, "vals", "dtn"); !strings.HasPrefix(got, "text:'0.00'\ntext:'0.10'") {
 		t.Errorf("dtn: %s", got)
 	}
-	wantVerifyClean(t, src, back, "vals.nul", "vals.dtn")
+	wantVerifyClean(t, src, back, "vals.nul", "vals.dtn", "tnum.t")
 	checkWithTheIndependentChecker(t, src, back)
 	// The text default is the text it was: a new row gets '0.00', not '0.0'.
 	execAll(t, back.DB, `INSERT INTO vals (id) VALUES (50)`)
@@ -209,8 +222,9 @@ func checkWithTheIndependentChecker(t *testing.T, a, b Endpoint) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, col := range []string{"nul", "dtn"} { // the two announced differences
-			if _, err := db.Exec(`ALTER TABLE vals DROP COLUMN ` + col); err != nil {
+		for _, drop := range []string{"vals.nul", "vals.dtn", "tnum.t"} { // the announced differences
+			table, col, _ := strings.Cut(drop, ".")
+			if _, err := db.Exec(`ALTER TABLE ` + table + ` DROP COLUMN ` + col); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -381,16 +395,21 @@ func TestPostgresReloadIsOneTransaction(t *testing.T) {
 		t.Errorf("counter: %s", got)
 	}
 
-	// A row the target's key refuses stops the reload and leaves everything as it was.
-	execAll(t, src.DB, `PRAGMA foreign_keys = OFF`, `INSERT INTO a_child VALUES (9, 99, 'orphan')`)
+	// A row the target refuses (a check of its own) stops the reload and leaves everything as it was.
+	execAll(t, pg.DB, `ALTER TABLE a_child ADD CONSTRAINT v_ok CHECK (v <> 'bad')`)
+	execAll(t, src.DB, `INSERT INTO a_child VALUES (9, 1, 'bad')`)
 	rep, err := Copy(context.Background(), src, pg, Options{Overwrite: "reload"})
-	if err == nil || !strings.Contains(err.Error(), "foreign key") || rep.ExitCode != 1 {
-		t.Fatalf("an orphan: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "v_ok") || rep.ExitCode != 1 {
+		t.Fatalf("a refused row: %v", err)
 	}
 	if got := pgText(t, pg.DB, `SELECT count(*) FROM a_child`); got != "2" {
 		t.Errorf("a failed reload leaves the rows: %s", got)
 	}
+	if got := pgText(t, pg.DB, `SELECT count(*) FROM pg_constraint WHERE conrelid = 'a_child'::regclass AND contype = 'f'`); got != "1" {
+		t.Errorf("a failed reload leaves the key: %s", got)
+	}
 	execAll(t, src.DB, `DELETE FROM a_child WHERE id = 9`)
+	execAll(t, pg.DB, `ALTER TABLE a_child DROP CONSTRAINT v_ok`)
 	// A table that does not fit is refused before anything is written.
 	execAll(t, pg.DB, `ALTER TABLE a_child ALTER COLUMN v TYPE integer USING NULL`)
 	_, err = Copy(context.Background(), src, pg, Options{Overwrite: "reload"})
@@ -632,5 +651,60 @@ func TestPostgresDecimalsTextKeepsTheText(t *testing.T) {
 	mustCopy(t, text, back, Options{})
 	if want, got := sqliteSignature(t, src.DB, "m", "price"), sqliteSignature(t, back.DB, "m", "price"); got != want {
 		t.Errorf("--decimals=text round trip:\n got %s\nwant %s", got, want)
+	}
+}
+
+// A reload keeps working when the keys among the reloaded tables are a cycle, or were created NOT VALID because
+// of orphan rows (a NOT VALID key still checks every insert); an orphan is a warning, not a failure.
+func TestPostgresReloadSurvivesKeyCyclesAndOrphans(t *testing.T) {
+	src := newSQLite(t)
+	execAll(t, src.DB, `CREATE TABLE cyc_a (id INTEGER PRIMARY KEY, b_id INTEGER REFERENCES cyc_b(id))`, `CREATE TABLE cyc_b (id INTEGER PRIMARY KEY, a_id INTEGER REFERENCES cyc_a(id))`,
+		`CREATE TABLE kid (id INTEGER PRIMARY KEY, p INTEGER REFERENCES parent(id))`, `CREATE TABLE parent (id INTEGER PRIMARY KEY)`,
+		`INSERT INTO cyc_a VALUES (1, 1)`, `INSERT INTO cyc_b VALUES (1, 1)`, `INSERT INTO parent VALUES (1), (2)`, `INSERT INTO kid VALUES (1, 1), (2, 99)`)
+	pg := newPGDatabase(t)
+	rep := mustCopy(t, src, pg, Options{})
+	if !hasWarning(rep, WarnFKNotValidated, "kid(p)") {
+		t.Fatalf("the orphan: %v", rep.Warnings)
+	}
+	execAll(t, src.DB, `INSERT INTO cyc_a VALUES (2, 1)`, `INSERT INTO cyc_b VALUES (2, 2)`, `INSERT INTO kid VALUES (3, 98)`)
+	rep = mustCopy(t, src, pg, Options{Overwrite: "reload"})
+	if got := pgText(t, pg.DB, `SELECT (SELECT count(*) FROM cyc_a) || ',' || (SELECT count(*) FROM cyc_b) || ',' || (SELECT count(*) FROM kid)`); got != "2,2,3" {
+		t.Errorf("rows: %s", got)
+	}
+	if !hasWarning(rep, WarnFKNotValidated, "kid(p)") {
+		t.Errorf("the orphan is still said: %v", rep.Warnings)
+	}
+	// The orphans go: the next reload validates the key again.
+	execAll(t, src.DB, `DELETE FROM kid WHERE id IN (2, 3)`)
+	rep = mustCopy(t, src, pg, Options{Overwrite: "reload"})
+	if len(rep.Warnings) != 0 {
+		t.Errorf("%v", rep.Warnings)
+	}
+	if got := pgText(t, pg.DB, `SELECT string_agg(convalidated::text, ',') FROM pg_constraint WHERE contype = 'f' AND conrelid::regclass::text IN ('kid', 'cyc_a', 'cyc_b')`); got != "true,true,true" {
+		t.Errorf("keys: %s", got)
+	}
+	// A filter that leaves the parent out is a warning on reload too (REQ:faithful-filters).
+	rep = mustCopy(t, src, pg, Options{Overwrite: "reload", Filters: map[string]RowFilter{"parent": {Where: []Cond{{"id", "=", "2"}}}}})
+	if !hasWarningText(rep, "kid(p)", "--where / --limit left the parent out") {
+		t.Errorf("%v", rep.Warnings)
+	}
+}
+
+// standard_conforming_strings = off makes PostgreSQL read a backslash in a literal as an escape: the DDL of a
+// copy must not depend on it.
+func TestPostgresStandardConformingStringsOffDoesNotRewriteTheDDL(t *testing.T) {
+	src := newSQLite(t)
+	execAll(t, src.DB, `CREATE TABLE s (id INTEGER PRIMARY KEY, v TEXT DEFAULT 'a\b', CHECK (v <> 'x\y'))`, `CREATE INDEX s_v ON s (v) WHERE v <> 'p\q'`, `INSERT INTO s (id) VALUES (1)`)
+	pg := pgSetDatabase(t, newPGDatabase(t), `standard_conforming_strings = off`)
+	if got := pgText(t, pg.DB, `SELECT length('a\b')`); got != "2" {
+		t.Fatalf("the setting is not in force (a backslash is read as an escape): %s", got)
+	}
+	rep := mustCopy(t, src, pg, Options{})
+	execAll(t, pg.DB, `INSERT INTO s (id) VALUES (2)`)
+	if got := pgText(t, pg.DB, `SELECT string_agg(encode(convert_to(v, 'UTF8'), 'hex'), ',' ORDER BY id) FROM s`); got != "615c62,615c62" {
+		t.Errorf("the default is a, backslash, b: %s (%v)", got, rep.Warnings)
+	}
+	if _, err := pg.DB.Exec(`INSERT INTO s (id, v) VALUES (3, E'x\\y')`); err == nil {
+		t.Error("the check keeps its backslash: x, backslash, y must be refused")
 	}
 }

@@ -96,12 +96,17 @@ func (s *colStats) add(v any) {
 				s.tsOK++
 			}
 		case reTSTZ.MatchString(x):
-			s.tstzAny++
-			if reTSTZUTC.MatchString(x) {
-				s.tstzOK++
+			// A leap second, an hour 24 or a day that is not there is a text PostgreSQL would refuse or write as another instant.
+			if _, err := time.Parse("2006-01-02 15:04:05.999999", x[:strings.LastIndexAny(x, "+-")]); err == nil {
+				s.tstzAny++
+				if reTSTZUTC.MatchString(x) {
+					s.tstzOK++
+				}
 			}
 		case reTime.MatchString(x):
-			s.timeOK++
+			if _, err := time.Parse("15:04:05.999999", x); err == nil {
+				s.timeOK++
+			}
 		}
 		if json.Valid([]byte(x)) {
 			s.jsonOK++

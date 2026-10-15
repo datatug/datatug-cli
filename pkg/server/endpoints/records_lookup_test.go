@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -384,6 +385,19 @@ func TestComputeRecordsLookup_Seams(t *testing.T) {
 	t.Run("source unavailable", func(t *testing.T) {
 		assertCode(t, run(dbcopy.ErrSourceFileMissing), apicontract.ErrCodeSourceUnavailable)
 	})
+	t.Run("text that only says access denied is not a policy denial", func(t *testing.T) {
+		var buf bytes.Buffer
+		log.SetOutput(&buf)
+		defer log.SetOutput(testLogOutput)
+		err := run(errors.New("sqlite: bound boolean read failed: access denied for secret-value"))
+		assertCode(t, err, codeInternal)
+		if strings.Contains(err.Error(), "secret-value") || strings.Contains(buf.String(), "secret-value") {
+			t.Fatalf("leak: %v / %s", err, buf.String())
+		}
+	})
+	t.Run("wrapped policy denial", func(t *testing.T) {
+		assertCode(t, run(fmt.Errorf("read: %w", secureread.ErrAccessDenied)), apicontract.ErrCodeAccessDenied)
+	})
 	t.Run("other failure", func(t *testing.T) { assertCode(t, run(errors.New("boom")), codeInternal) })
 	t.Run("record encoding failure", func(t *testing.T) {
 		prev := toContractRecordsetHook
@@ -727,7 +741,7 @@ func TestRecordsSchema_ForeignKeysAreFilteredByThePolicy(t *testing.T) {
 	if len(got) != 2 || got[0].Name != "allowed" || got[0].RefTable.Schema != "main" || got[1].RefTable.Schema != "main" {
 		t.Fatalf("got %+v", got)
 	}
-	if defaultSchemaName("postgres") != "public" || defaultSchemaName("") != "" {
+	if defaultSchemaName("postgres") != "public" || defaultSchemaName("") != "" || defaultSchemaName("SQLite") != "main" || defaultSchemaName("PGX") != "public" {
 		t.Fatal("default schema names")
 	}
 	// referencedBy: Customer is read by bob, the tables that reference it are not.

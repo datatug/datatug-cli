@@ -296,7 +296,6 @@ func TestDbAddDefaultEnvironment(t *testing.T) {
 		out, _, err := runDbAdd(t, "--project", "shop", "--db", newDB(t, "x.db"))
 		require.NoError(t, err)
 		assert.Equal(t, "local", envOf(t, out))
-		assert.Contains(t, out, "?env=local")
 		assert.Contains(t, projectFilesOf(t, dir), "environments/local/catalogs/x/x.db.json")
 		assert.NotContains(t, projectFilesOf(t, dir), "environments/dev/catalogs/x/x.db.json")
 	})

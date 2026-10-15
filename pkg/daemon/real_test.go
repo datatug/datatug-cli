@@ -127,3 +127,23 @@ func TestNewManager(t *testing.T) {
 		t.Fatal(m.Dir)
 	}
 }
+
+func TestProcessOwns(t *testing.T) {
+	// The test binary is not a `serve --port N`; a helper started as one is.
+	if processOwns(os.Getpid(), 8989) {
+		t.Fatal("the test process is not a daemon")
+	}
+	t.Setenv("DAEMON_TEST_HELPER", "1")
+	exe, _ := os.Executable()
+	pid, exited, err := spawnDetached(exe, []string{"serve", "--host", "127.0.0.1", "--port", "8995"}, filepath.Join(t.TempDir(), "l.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = terminateProcess(pid); <-exited }()
+	if !processOwns(pid, 8995) || processOwns(pid, 8996) {
+		t.Fatal("must match exactly the recorded port")
+	}
+	if processOwns(999999, 8995) {
+		t.Fatal("a missing pid is not ours")
+	}
+}

@@ -74,11 +74,13 @@ type Status struct {
 // Manager holds the state directory and every seam over the OS, so tests drive
 // the whole lifecycle without a real process or port.
 type Manager struct {
-	Dir       string
-	Exe       func() (string, error)
-	Probe     func(port int) (version string, ok bool)
-	PortFree  func(port int) bool
-	Alive     func(pid int) bool
+	Dir      string
+	Exe      func() (string, error)
+	Probe    func(port int) (version string, ok bool)
+	PortFree func(port int) bool
+	Alive    func(pid int) bool
+	// Owns says whether pid is a `datatug serve` on port (guards against a reused pid).
+	Owns      func(pid, port int) bool
 	Terminate func(pid int) error
 	// Spawn starts the detached server and returns its pid and a channel closed when it exits.
 	Spawn func(exe string, args []string, logPath string) (pid int, exited <-chan struct{}, err error)
@@ -157,8 +159,15 @@ func (m *Manager) Start(caller string) (Status, error) {
 	if st := m.Status(); st.Running {
 		return st, nil
 	}
-	m.removeRecord()
 	fallback := m.statusOf(DefaultPort)
+	if rec, ok := m.readRecord(); ok && m.Alive(rec.PID) && m.Owns(rec.PID, rec.Port) {
+		// Our server is alive but did not answer in time: wait for it, never start a second one.
+		if st, up := m.waitRunning(); up {
+			return st, nil
+		}
+		return fail(fallback, ErrPhraseTimeout)
+	}
+	m.removeRecord()
 	if err := os.MkdirAll(m.Dir, 0o700); err != nil {
 		return fail(fallback, ErrPhraseState)
 	}
@@ -265,8 +274,8 @@ func (m *Manager) Stop() error {
 		}
 		return nil
 	}
-	if _, up := m.Probe(rec.Port); !up || !m.Alive(rec.PID) {
-		// Stale record (or a reused pid, which does not answer as a datatug API).
+	if _, up := m.Probe(rec.Port); !up || !m.Alive(rec.PID) || !m.Owns(rec.PID, rec.Port) {
+		// Stale record, or a reused pid that is not our `serve`: never signalled.
 		m.removeRecord()
 		return nil
 	}

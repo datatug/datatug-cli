@@ -29,3 +29,7 @@ func terminateProcess(pid int) error {
 	}
 	return p.Kill()
 }
+
+// processOwns cannot read another process's command line here; the probe of the
+// recorded port is the only check.
+func processOwns(int, int) bool { return true }

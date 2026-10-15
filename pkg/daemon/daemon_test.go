@@ -22,6 +22,7 @@ type fake struct {
 	exeErr    error
 	termErr   error
 	termCalls []int
+	notOurs   bool
 	onSleep   func()
 	now       time.Time
 }
@@ -38,6 +39,7 @@ func newFake(t *testing.T) *fake {
 		Probe:    func(port int) (string, bool) { return "v9", f.up[port] },
 		PortFree: func(port int) bool { return f.free[port] },
 		Alive:    func(pid int) bool { return f.alive[pid] },
+		Owns:     func(int, int) bool { return !f.notOurs },
 		Terminate: func(pid int) error {
 			f.termCalls = append(f.termCalls, pid)
 			return f.termErr
@@ -299,6 +301,14 @@ func TestStop(t *testing.T) {
 			t.Fatalf("%v %v", err, f.termCalls)
 		}
 	})
+	t.Run("reused pid is never signalled", func(t *testing.T) {
+		f := newFake(t)
+		f.writeRec(t, 77, 8991)
+		f.up[8991], f.alive[77], f.notOurs = true, true, true
+		if err := f.Stop(); err != nil || len(f.termCalls) != 0 || f.hasRecord() {
+			t.Fatalf("%v %v", err, f.termCalls)
+		}
+	})
 	t.Run("dead pid", func(t *testing.T) {
 		f := newFake(t)
 		f.writeRec(t, 77, 8991)
@@ -354,4 +364,27 @@ func TestWriteRecordFailures(t *testing.T) {
 			t.Errorf("%s blocked: want an error", blocked)
 		}
 	}
+}
+
+func TestStartNeverOrphansASlowLiveDaemon(t *testing.T) {
+	t.Run("answers while waiting", func(t *testing.T) {
+		f := newFake(t)
+		f.writeRec(t, 77, 8991)
+		f.alive[77] = true
+		f.onSleep = func() { f.up[8991] = true }
+		st, err := f.Start("x")
+		if err != nil || !st.Running || len(f.spawned) != 0 || !f.hasRecord() {
+			t.Fatalf("%+v %v", st, err)
+		}
+	})
+	t.Run("never answers", func(t *testing.T) {
+		f := newFake(t)
+		f.writeRec(t, 77, 8991)
+		f.alive[77] = true
+		_, err := f.Start("x")
+		assertNotRunning(t, err, ErrPhraseTimeout)
+		if len(f.spawned) != 0 || !f.hasRecord() {
+			t.Fatal("record kept, nothing spawned")
+		}
+	})
 }

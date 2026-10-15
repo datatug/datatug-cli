@@ -24,7 +24,7 @@ func NewManager() *Manager {
 	}
 	return &Manager{
 		Dir: dir, Exe: os.Executable, Probe: probeAgent, PortFree: portFree,
-		Alive: processAlive, Terminate: terminateProcess, Spawn: spawnDetached,
+		Alive: processAlive, Owns: processOwns, Terminate: terminateProcess, Spawn: spawnDetached,
 		Now: time.Now, Sleep: time.Sleep, StartWait: 5 * time.Second, Poll: 100 * time.Millisecond,
 	}
 }

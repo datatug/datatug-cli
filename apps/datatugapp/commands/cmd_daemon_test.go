@@ -35,6 +35,7 @@ func useDaemonFake(t *testing.T, f *daemonFake) {
 			Probe:     func(int) (string, bool) { return "v9", f.up },
 			PortFree:  func(int) bool { return true },
 			Alive:     func(int) bool { return f.up },
+			Owns:      func(int, int) bool { return true },
 			Terminate: func(int) error { return f.termErr },
 			Spawn: func(string, []string, string) (int, <-chan struct{}, error) {
 				f.spawned++

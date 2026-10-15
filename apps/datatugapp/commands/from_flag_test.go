@@ -16,6 +16,7 @@ func fromRoot() *cobra.Command {
 		root.AddCommand(&cobra.Command{Use: name, Run: noop})
 	}
 	root.AddCommand(daemonCommand())
+	root.Flags().Bool("version", false, "")
 	for _, c := range root.Commands() {
 		c.InitDefaultHelpFlag()
 	}
@@ -83,6 +84,7 @@ func TestEnsureDaemonForCaller(t *testing.T) {
 		{"version", "--from", "claude-mod"},
 		{"show", "--help", "--from", "claude-mod"},
 		{"show", "--bogus", "--from", "claude-mod"},
+		{"--version", "--from", "claude-mod"},
 	} {
 		t.Run("skips "+strings.Join(args, " "), func(t *testing.T) {
 			f := &daemonFake{}

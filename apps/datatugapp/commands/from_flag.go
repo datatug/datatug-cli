@@ -49,6 +49,9 @@ func EnsureDaemonForCaller(root *cobra.Command, args []string, stderr io.Writer)
 	if noDaemonCommands[top.Name()] {
 		return
 	}
+	if v := cmd.Flags().Lookup("version"); v != nil && v.Value.String() == "true" {
+		return
+	}
 	if help := cmd.Flags().Lookup("help"); help != nil && help.Value.String() == "true" {
 		return
 	}

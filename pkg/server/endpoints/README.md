@@ -53,6 +53,17 @@ boolean, wrong type, a key type that is not integer or string, a table with no p
 `400 INVALID_REQUEST` with `field: "key"` and a message that does not quote the request, and no query is
 issued.
 
+The access decision (the session's policies, on the collection) is made before the source is opened or
+its schema read, on both routes: a principal the policy refuses gets one `403 ACCESS_DENIED` whether the
+table exists or not and whatever the key looks like. Only the default schema of the driver (or no schema)
+names a table; any other `schema` is `404 NOT_FOUND` with `field: "schema"`, so the queried object is
+always the object the policy decided on. A key column that appears twice in `key` is a bad key.
+
+An integer key above 2^53 - 1 reads up to 64 candidates (SQLite compares numbers as floats) and keeps the
+row whose key is exactly equal. If none is exact and the candidates cannot be compared (a key column the
+policy masks, or returned as a float or bytes) or the 64 are all used (keys above about 2^60), the answer is
+`500 INTERNAL`, never `404` and never a neighbour.
+
 Response `200`: the contract `Result` of `semantic/related/rows` and `exec/run_query`
 (`recordset` with one row of typed values, `limitations`, `provenance`). Errors are the contract envelope:
 `NOT_FOUND` with `field` `project`, `source`, `table` or `key` (record not found), `400

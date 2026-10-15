@@ -29,11 +29,12 @@ const recordsLookupMaxText = 256
 // bad-key answers: each says what is wrong with the key and never quotes a column name or a value
 // of the request.
 const (
-	badKeyShape   = "key must be an object of the primary-key columns of the table and their values"
-	badKeyNoPK    = "the table has no declared primary key to look a record up by"
-	badKeyColumns = "key must name exactly the primary-key columns of the table"
-	badKeyValue   = "a key value must be a string or an integer of the declared type of its column"
-	badKeyType    = "a primary-key column of this type cannot be looked up"
+	badKeyShape     = "key must be an object of the primary-key columns of the table and their values"
+	badKeyNoPK      = "the table has no declared primary key to look a record up by"
+	badKeyColumns   = "key must name exactly the primary-key columns of the table"
+	badKeyValue     = "a key value must be a string or an integer of the declared type of its column"
+	badKeyDuplicate = "key names a column twice"
+	badKeyType      = "a primary-key column of this type cannot be looked up"
 )
 
 // recordsLookupRequest is the body of POST /datatug/records/lookup. No field is a connection
@@ -142,32 +143,49 @@ func plainSchemaObjectName(s string) bool {
 // resolveRecordsTable validates the project and the source against the registry (there is no
 // default source) and reads the live schema of the table from the source itself, so a source that
 // was never scanned works. It returns the collection name the table is read through.
-func resolveRecordsTable(ctx context.Context, req recordsTableRequest) (resolvedSource, string, error) {
+func resolveRecordsTable(ctx context.Context, req recordsTableRequest) (resolvedSource, string, *secureread.Executor, error) {
 	projectDir, ok := relatedProjectDir(req.Project)
 	if !ok {
-		return resolvedSource{}, "", newContractError(apicontract.ErrCodeNotFound, "unknown project", "project")
+		return resolvedSource{}, "", nil, newContractError(apicontract.ErrCodeNotFound, "unknown project", "project")
 	}
 	projStore, err := relatedProjectStoreFor(req.Project)
 	if err != nil {
-		return resolvedSource{}, "", newInvalidRequest("project", "the project store cannot be opened")
+		return resolvedSource{}, "", nil, newInvalidRequest("project", "the project store cannot be opened")
 	}
 	registered, err := apiResolveSource(ctx, projStore, projectDir, req.Env, req.Source)
 	if err != nil {
 		if errors.Is(err, api.ErrSourceUnavailable) {
-			return resolvedSource{}, "", newContractError(apicontract.ErrCodeNotFound, "unknown source in this environment", "source")
+			return resolvedSource{}, "", nil, newContractError(apicontract.ErrCodeNotFound, "unknown source in this environment", "source")
 		}
-		return resolvedSource{}, "", newSourceUnavailable("the source cannot be read")
+		return resolvedSource{}, "", nil, newSourceUnavailable("the source cannot be read")
 	}
-	collection := lookupCollectionName(req.Schema, req.Table, driverOfURL(registered.URL))
+	collection, supported := lookupCollectionName(req.Schema, req.Table, driverOfURL(registered.URL))
+	// The access decision is made on the collection before the source is opened or its schema is
+	// read, so a principal the policy refuses gets one answer whether the table is there or not and
+	// whatever the key looks like: nothing of the schema is told before the decision.
+	executor, ok := secureExecutorHook()
+	if !ok {
+		return resolvedSource{}, "", nil, newContractError(codeInternal, "server has no policy-enforced session configured", "")
+	}
+	if err := executor.Authorize(ctx, authorizeQuery(collection), nil); err != nil {
+		if errors.Is(err, secureread.ErrAccessDenied) || isAccessDenied(err) {
+			return resolvedSource{}, "", nil, contractErrAccessDenied("access denied by policy")
+		}
+		log.Printf("records: the access decision failed")
+		return resolvedSource{}, "", nil, newContractError(codeInternal, unclassifiedErrorMessage, "")
+	}
+	if !supported {
+		return resolvedSource{}, "", nil, newContractError(apicontract.ErrCodeNotFound, "unknown schema", "schema")
+	}
 	resolved, err := resolveSource(ctx, projStore, projectDir, req.Env, req.Source, collection)
 	if err != nil {
-		return resolvedSource{}, "", recordsLookupSchemaError(err)
+		return resolvedSource{}, "", nil, recordsLookupSchemaError(err)
 	}
-	return resolved, collection, nil
+	return resolved, collection, executor, nil
 }
 
 func computeRecordsLookup(ctx context.Context, req recordsLookupRequest) (apicontract.Result, error) {
-	resolved, collection, err := resolveRecordsTable(ctx, req.recordsTableRequest)
+	resolved, collection, executor, err := resolveRecordsTable(ctx, req.recordsTableRequest)
 	if err != nil {
 		return apicontract.Result{}, err
 	}
@@ -184,10 +202,6 @@ func computeRecordsLookup(ctx context.Context, req recordsLookupRequest) (apicon
 		return apicontract.Result{}, err
 	}
 
-	executor, ok := secureExecutorHook()
-	if !ok {
-		return apicontract.Result{}, newContractError(codeInternal, "server has no policy-enforced session configured", "")
-	}
 	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(collection, "")))
 	for i, column := range pk.Columns {
 		builder = builder.WhereField(column, dal.Equal, values[i])
@@ -218,12 +232,15 @@ func computeRecordsLookup(ctx context.Context, req recordsLookupRequest) (apicon
 		return apicontract.Result{}, newContractError(codeInternal, unclassifiedErrorMessage, "")
 	}
 	candidates := len(result.Rows)
+	unverifiable := false
 	if exact {
-		result.Rows = exactKeyRows(result.Rows, pk.Columns, values)
+		result.Rows, unverifiable = exactKeyRows(result.Rows, pk.Columns, values)
 	}
 	if len(result.Rows) == 0 {
-		if candidates >= limit && exact {
-			// The bucket is wider than the candidates read: not "no such record", and never a neighbour.
+		if exact && (unverifiable || candidates >= limit) {
+			// Either the candidates cannot be compared exactly (a key column the policy masks, or
+			// one returned as a float or bytes) or the bucket is wider than the candidates read:
+			// not "no such record", and never a neighbour.
 			return apicontract.Result{}, newContractError(codeInternal, "the key cannot be resolved exactly on this source", "")
 		}
 		return apicontract.Result{}, newContractError(apicontract.ErrCodeNotFound, "no record has this key", "key")
@@ -249,7 +266,7 @@ func computeRecordsLookup(ctx context.Context, req recordsLookupRequest) (apicon
 
 // recordsLookupExactCandidates is how many rows an integer key above 2^53 - 1 reads to find the
 // exact one among the rows the engine takes for equal.
-const recordsLookupExactCandidates = 64
+const recordsLookupExactCandidates = 64 // bounded; a wider bucket (keys above about 2^60) answers 500, never a wrong record
 
 // maxExactFloatInteger is the largest integer a float64 (and a JavaScript number) holds exactly.
 const maxExactFloatInteger = 1<<53 - 1
@@ -264,14 +281,21 @@ func keyNeedsExactMatch(values []any) bool {
 	return false
 }
 
-// exactKeyRows keeps the rows whose primary-key columns are exactly the bound values. A row that
-// does not hold a key column (a column the policy hides) or holds it as another type is dropped.
-func exactKeyRows(rows []secureread.Row, columns []string, values []any) []secureread.Row {
-	var kept []secureread.Row
+// exactKeyRows keeps the rows whose primary-key columns are exactly the bound values. unverifiable
+// reports that a row could not be compared, because it does not hold a key column (the policy hides
+// or masks it) or holds it as a type that is not an exact integer or string (a float, bytes): such
+// a row is dropped and the caller must not answer "not found" for it.
+func exactKeyRows(rows []secureread.Row, columns []string, values []any) (kept []secureread.Row, unverifiable bool) {
 	for _, row := range rows {
 		match := true
 		for i, column := range columns {
-			if row.Data[column] != values[i] {
+			got, present := row.Data[column]
+			switch got.(type) {
+			case int64, string:
+			default:
+				unverifiable = true
+			}
+			if !present || got != values[i] {
 				match = false
 			}
 		}
@@ -279,7 +303,7 @@ func exactKeyRows(rows []secureread.Row, columns []string, values []any) []secur
 			kept = append(kept, row)
 		}
 	}
-	return kept
+	return kept, unverifiable
 }
 
 // recordsLookupSchemaError turns a failure to read the live schema of the table into the answer:
@@ -305,13 +329,21 @@ func driverOfURL(u string) string {
 	return ""
 }
 
-// lookupCollectionName is the collection a lookup reads: the table, qualified by the schema of the
-// request unless it is the default schema of the driver (the form the access policy names).
-func lookupCollectionName(schema, table, driver string) string {
+// lookupCollectionName is the collection a lookup reads and the access policy names: the table.
+// Only the default schema of the driver (or no schema) names a table; any other schema is not
+// supported, so the object that is queried is always the object the policy decided on. supported
+// is false for another schema, and the name returned is then the qualified one, for the decision.
+func lookupCollectionName(schema, table, driver string) (name string, supported bool) {
 	if schema == "" {
-		return table
+		return table, true
 	}
-	return api.PolicyCollectionName(schema+"."+table, driver)
+	name = api.PolicyCollectionName(schema+"."+table, driver)
+	return name, name == table
+}
+
+// authorizeQuery is the query the access decision on a collection is made for.
+func authorizeQuery(collection string) dal.Query {
+	return dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(collection, ""))).SelectIntoRecord(nil)
 }
 
 // bindRecordKey checks key against the primary-key columns pkColumns of the table and their
@@ -327,6 +359,9 @@ func bindRecordKey(key json.RawMessage, pkColumns []string, types map[string]str
 	var given map[string]any
 	if err := dec.Decode(&given); err != nil || given == nil {
 		return nil, newInvalidRequest("key", badKeyShape)
+	}
+	if keyNamesAColumnTwice(key) {
+		return nil, newInvalidRequest("key", badKeyDuplicate)
 	}
 	if len(given) != len(pkColumns) {
 		return nil, newInvalidRequest("key", badKeyColumns)
@@ -344,6 +379,26 @@ func bindRecordKey(key json.RawMessage, pkColumns []string, types map[string]str
 		values[i] = v
 	}
 	return values, nil
+}
+
+// keyNamesAColumnTwice reports a JSON object key that names a column twice, which a map decode
+// would answer with the last value. key is valid JSON already (it decoded into a map), so the
+// tokens cannot fail.
+func keyNamesAColumnTwice(key json.RawMessage) bool {
+	dec := json.NewDecoder(bytes.NewReader(key))
+	_, _ = dec.Token() // the opening brace
+	seen := map[string]bool{}
+	for dec.More() {
+		name, _ := dec.Token()
+		column, _ := name.(string)
+		if seen[column] {
+			return true
+		}
+		seen[column] = true
+		var skip json.RawMessage
+		_ = dec.Decode(&skip)
+	}
+	return false
 }
 
 func bindKeyValue(raw any, declared string) (any, error) {
@@ -423,7 +478,7 @@ func recordsSchemaHandler(w http.ResponseWriter, r *http.Request) {
 		writeContractError(w, r, err)
 		return
 	}
-	resolved, _, err := resolveRecordsTable(r.Context(), req)
+	resolved, _, _, err := resolveRecordsTable(r.Context(), req)
 	if err != nil {
 		writeContractError(w, r, err)
 		return

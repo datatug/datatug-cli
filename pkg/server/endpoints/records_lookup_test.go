@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
@@ -162,6 +164,11 @@ func TestRecordsLookup_Table(t *testing.T) {
 		{"table without a primary key", lookupBody(project, "chinook", "", "Loose", `{"A":1}`), want{400, "INVALID_REQUEST", "key", 0, ""}},
 		{"unsupported key type", lookupBody(project, "chinook", "", "Flt", `{"F":1}`), want{400, "INVALID_REQUEST", "key", 0, ""}},
 
+		{"duplicate key column", lookupBody(project, "chinook", "", "Genre", `{"GenreId":1,"GenreId":2}`), want{400, "INVALID_REQUEST", "key", 0, ""}},
+		{"unicode digits", lookupBody(project, "chinook", "", "Genre", `{"GenreId":"١"}`), want{400, "INVALID_REQUEST", "key", 0, ""}},
+		{"minus zero number", lookupBody(project, "chinook", "", "Genre", `{"GenreId":-0}`), want{400, "INVALID_REQUEST", "key", 0, ""}},
+		{"plus number", lookupBody(project, "chinook", "", "Genre", `{"GenreId":+1}`), want{400, "INVALID_REQUEST", "body", 0, ""}},
+		{"other schema", lookupBody(project, "chinook", "archive", "Genre", `{"GenreId":1}`), want{404, "NOT_FOUND", "schema", 0, ""}},
 		{"unknown table", lookupBody(project, "chinook", "", "NoSuchTable", `{"A":1}`), want{404, "NOT_FOUND", "table", 0, ""}},
 		{"unknown project", lookupBody("no-such-project", "chinook", "", "Genre", `{"GenreId":1}`), want{404, "NOT_FOUND", "project", 0, ""}},
 		{"unknown source", lookupBody(project, "no-such-db", "", "Genre", `{"GenreId":1}`), want{404, "NOT_FOUND", "source", 0, ""}},
@@ -409,8 +416,9 @@ func TestRecordsLookup_ExactBucket(t *testing.T) {
 	}{
 		{"no exact row, bucket not full", rows(2, 9007199254740992), apicontract.ErrCodeNotFound},
 		{"no exact row, bucket full", rows(recordsLookupExactCandidates, 9007199254740992), codeInternal},
-		{"key column hidden from the row", []secureread.Row{{Data: map[string]any{"Label": "x"}}}, apicontract.ErrCodeNotFound},
-		{"key column as a float", []secureread.Row{{Data: map[string]any{"Id": float64(9007199254740992)}}}, apicontract.ErrCodeNotFound},
+		{"key column hidden from the row", []secureread.Row{{Data: map[string]any{"Label": "x"}}}, codeInternal},
+		{"key column as a float", []secureread.Row{{Data: map[string]any{"Id": float64(9007199254740992)}}}, codeInternal},
+		{"key column as bytes", []secureread.Row{{Data: map[string]any{"Id": []byte("9007199254740993")}}}, codeInternal},
 	} {
 		runStructuredRelatedHook = func(*secureread.Executor, context.Context, string, dal.StructuredQuery, map[string]any) (secureread.Result, error) {
 			return secureread.Result{Columns: []string{"Id", "Label"}, Rows: tc.rows}, nil
@@ -452,14 +460,21 @@ func TestDriverAndCollectionNames(t *testing.T) {
 			t.Errorf("driverOfURL(%q) = %q, want %q", url, got, want)
 		}
 	}
-	if got := lookupCollectionName("main", "T", "sqlite3"); got != "T" {
-		t.Errorf("default schema: %q", got)
-	}
-	if got := lookupCollectionName("archive", "T", "sqlite3"); got != "archive.T" {
-		t.Errorf("other schema: %q", got)
-	}
-	if got := lookupCollectionName("", "T", ""); got != "T" {
-		t.Errorf("no schema: %q", got)
+	for _, tc := range []struct {
+		schema, table, driver, name string
+		supported                   bool
+	}{
+		{"main", "T", "sqlite3", "T", true},
+		{"public", "T", "postgres", "T", true},
+		{"archive", "T", "sqlite3", "archive.T", false},
+		{"other", "T", "postgres", "other.T", false},
+		{"x", "T", "", "x.T", false},
+		{"", "T", "", "T", true},
+	} {
+		name, ok := lookupCollectionName(tc.schema, tc.table, tc.driver)
+		if name != tc.name || ok != tc.supported {
+			t.Errorf("lookupCollectionName(%q,%q,%q) = %q,%v", tc.schema, tc.table, tc.driver, name, ok)
+		}
 	}
 }
 
@@ -510,4 +525,104 @@ func TestRecordsSchema(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("oversized body: %d", w.Code)
 	}
+}
+
+// A denied principal gets one answer, whether the table is there or not, whatever the key looks
+// like, on both routes; an allowed principal still sees an unknown table as unknown.
+func TestRecordsRoutes_DeniedPrincipalGetsOneAnswer(t *testing.T) {
+	project := lookupFixture(t, "bob", []string{"support"})
+	spy := spyQueries(t)
+	normalise := func(raw string) string {
+		var v map[string]map[string]any
+		if err := json.Unmarshal([]byte(raw), &v); err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+		delete(v["error"], "requestId")
+		out, _ := json.Marshal(v)
+		return string(out)
+	}
+	base := `{"project":"` + project + `","env":"local","source":"chinook"`
+	var answers []string
+	for _, table := range []string{"Invoice", "NoSuchTable", "Loose", "Big", "PlaylistTrack"} {
+		for _, key := range []string{`{"InvoiceId":1}`, `{}`, `null`, `[1]`, `{"Nope":"x"}`, `{"InvoiceId":"1 OR 1=1"}`, `{"A":1,"A":2}`} {
+			a := doLookup(t, base+`,"table":"`+table+`","key":`+key+`}`)
+			if a.status != http.StatusForbidden || a.errBody.Error.Code != "ACCESS_DENIED" {
+				t.Fatalf("lookup %s %s: %d %s", table, key, a.status, a.raw)
+			}
+			answers = append(answers, normalise(a.raw))
+		}
+		code, raw := doSchema(t, base+`,"table":"`+table+`"}`)
+		if code != http.StatusForbidden {
+			t.Fatalf("schema %s: %d %s", table, code, raw)
+		}
+		answers = append(answers, normalise(raw))
+	}
+	for _, a := range answers {
+		if a != answers[0] {
+			t.Fatalf("answers differ: %s vs %s", a, answers[0])
+		}
+	}
+	if spy.calls != 0 {
+		t.Fatalf("a denied principal caused %d queries", spy.calls)
+	}
+	// The allowed table: the schema is readable, an unknown table is not found.
+	if code, raw := doSchema(t, base+`,"table":"Customer"}`); code != 200 {
+		t.Fatalf("Customer schema: %d %s", code, raw)
+	}
+	if a := doLookup(t, base+`,"table":"Customer","key":{"CustomerId":5}}`); a.status != 200 {
+		t.Fatalf("Customer lookup: %d %s", a.status, a.raw)
+	}
+}
+
+func TestRecordsLookup_AccessDecisionFailureIsGeneric(t *testing.T) {
+	project := lookupFixture(t, "alice", []string{"admin"})
+	prev := secureExecutorHook
+	defer func() { secureExecutorHook = prev }()
+	secureExecutorHook = func() (*secureread.Executor, bool) {
+		return secureread.NewExecutor(secureread.Session{}), true // no policy and not unrestricted
+	}
+	a := doLookup(t, lookupBody(project, "chinook", "", "Genre", `{"GenreId":1}`))
+	if a.status != http.StatusInternalServerError {
+		t.Fatalf("status %d: %s", a.status, a.raw)
+	}
+}
+
+// Every request that opens the source to read its schema closes it, and concurrent requests are
+// independent.
+func TestRecordsLookup_ClosesSchemaHandlesAndIsConcurrencySafe(t *testing.T) {
+	project := lookupFixture(t, "alice", []string{"admin"})
+	var mu sync.Mutex
+	closed := 0
+	prev := closeSchemaDB
+	closeSchemaDB = func(db dal.DB) {
+		mu.Lock()
+		closed++
+		mu.Unlock()
+		prev(db)
+	}
+	defer func() { closeSchemaDB = prev }()
+	var wg sync.WaitGroup
+	const n = 24
+	results := make([]int, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id := 1 + i%2
+			w := httptest.NewRecorder()
+			recordsLookupHandler(w, httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(lookupBody(project, "chinook", "", "Big", `{"Id":`+strconv.Itoa(id)+`}`))))
+			results[i] = w.Code
+		}()
+	}
+	wg.Wait()
+	for i, code := range results {
+		if code != 200 {
+			t.Fatalf("request %d: %d", i, code)
+		}
+	}
+	if closed != n {
+		t.Fatalf("closed %d handles for %d requests", closed, n)
+	}
+	// A backend with no Close is left alone.
+	prev(nil)
 }

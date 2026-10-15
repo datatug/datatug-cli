@@ -35,6 +35,9 @@ type schemaEntry struct {
 	// Columns is set by --columns; a pointer to a nil slice is a table whose
 	// columns could not be read and prints as null.
 	Columns *[]schemaColumn `json:"columns,omitempty"`
+	// ForeignKeys is set by --columns, for tables whose definition could be read
+	// (never for a view): the outgoing keys, an empty list for a table with none.
+	ForeignKeys *[]schemaForeignKey `json:"foreignKeys,omitempty"`
 	// RowCount is set by --counts, for tables only; a table that cannot be
 	// counted prints null.
 	RowCount *rowCount `json:"rowCount,omitempty"`
@@ -42,6 +45,20 @@ type schemaEntry struct {
 	ref         dal.CollectionRef
 	viewColumns []string
 	definition  string
+}
+
+// schemaForeignKey is an outgoing foreign key, named as `datatug show` names it.
+type schemaForeignKey struct {
+	Name       string         `json:"name"`
+	Columns    []string       `json:"columns"`
+	RefTable   schemaTableRef `json:"refTable"`
+	RefColumns []string       `json:"refColumns"`
+}
+
+// schemaTableRef names the referenced table.
+type schemaTableRef struct {
+	Schema string `json:"schema,omitempty"`
+	Name   string `json:"name"`
 }
 
 // schemaColumn is one column of a table or view.
@@ -168,7 +185,7 @@ func dbSchemaAction(cmd *cobra.Command, _ []string) error {
 		return session.failure(err)
 	}
 	if withColumns {
-		addSchemaColumns(session.ctx, session.db, entries)
+		addSchemaColumns(session.ctx, session.db, session.ref.Scheme, entries)
 	}
 	if withCounts {
 		addSchemaCounts(session.ctx, session.db, session.ref.Scheme, entries)
@@ -296,7 +313,7 @@ func writeSchemaListing(w io.Writer, format string, listing schemaListing) error
 // addSchemaColumns reads the columns of every entry. A table whose columns
 // cannot be read gets null; a view of a source that describes only tables
 // (SQLite) gets the column names its catalog lists, with no type.
-func addSchemaColumns(ctx context.Context, db dal.DB, entries []schemaEntry) {
+func addSchemaColumns(ctx context.Context, db dal.DB, provider string, entries []schemaEntry) {
 	for i := range entries {
 		entry := &entries[i]
 		var columns []schemaColumn
@@ -304,6 +321,9 @@ func addSchemaColumns(ctx context.Context, db dal.DB, entries []schemaEntry) {
 			columns = viewColumns(entry.viewColumns)
 		} else if def, err := dbschema.DescribeCollection(ctx, db, &entry.ref); err == nil {
 			columns = columnsOf(def)
+			if entry.Kind == schemaKindTable {
+				entry.ForeignKeys = schemaForeignKeys(provider, entry.Schema, def)
+			}
 		}
 		entry.Columns = &columns
 	}
@@ -371,4 +391,25 @@ func addSchemaCounts(ctx context.Context, db dal.DB, provider string, entries []
 		}
 		entry.RowCount = &rowCount{n: n}
 	}
+}
+
+// schemaForeignKeys lists the outgoing foreign keys of def.
+func schemaForeignKeys(provider, schema string, def *dbschema.CollectionDef) *[]schemaForeignKey {
+	keys := []schemaForeignKey{}
+	for _, key := range def.ForeignKeys {
+		keys = append(keys, schemaForeignKey{
+			Name: key.Name, Columns: namesOf(key.Fields), RefColumns: namesOf(key.ReferencedFields),
+			RefTable: schemaTableRef{Schema: refSchemaOf(provider, schema, key.ReferencedNamespace), Name: key.ReferencedCollection},
+		})
+	}
+	return &keys
+}
+
+// refSchemaOf is the schema a foreign key points into: the one it names, else
+// the schema of the table that holds it (main in SQLite).
+func refSchemaOf(provider, schema, named string) string {
+	if named != "" {
+		return named
+	}
+	return defaultSchema(provider, schema)
 }

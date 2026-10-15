@@ -206,3 +206,22 @@ func TestNewNativeCounter_ReadsTheCapabilitiesTheDatabaseAdvertises(t *testing.T
 	assert.Nil(t, count)
 	assert.Empty(t, silent.queries)
 }
+
+func TestNewNativeCounterWithCapabilities_CountsForAnAdapterThatDoesNotDeclareIt(t *testing.T) {
+	n := 7
+	executor := &fakeExecutor{reader: &fakeRecordsReader{records: []record.Record{countRecord(int64(n))}}}
+	count, err := NewNativeCounterWithCapabilities(executorDB{executor: executor}, nativeCount).CountRecords(context.Background(), "", "Order")
+	require.NoError(t, err)
+	require.NotNil(t, count)
+	assert.Equal(t, n, *count)
+}
+
+// executorDB is a dal.DB whose queries go to a fakeExecutor.
+type executorDB struct {
+	dal.DB
+	executor *fakeExecutor
+}
+
+func (d executorDB) ExecuteQueryToRecordsReader(ctx context.Context, query dal.Query) (dal.RecordsReader, error) {
+	return d.executor.ExecuteQueryToRecordsReader(ctx, query)
+}

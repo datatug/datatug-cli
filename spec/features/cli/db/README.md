@@ -25,6 +25,7 @@ datatug db <url>
 | Directory | Description |
 |---|---|
 | [copy/](copy/README.md) | `datatug db copy --from <url> --to <url>` — cross-engine database copy primitive. |
+| [schema/](schema/README.md) | `datatug db schema --db <url>` — read-only listing of a database's tables and views. |
 
 ## Problem
 
@@ -110,6 +111,7 @@ The connection opened by `datatug db` MUST be read-only. Verifiable by attemptin
 | Subcommand | Status | Description |
 |---|---|---|
 | [`db copy`](copy/README.md) | Approved | `datatug db copy --from <url> --to <url>` — cross-engine database copy primitive. |
+| [`db schema`](schema/README.md) | Approved | `datatug db schema --db <url>` — read-only table and view listing. |
 
 ## Open Questions
 

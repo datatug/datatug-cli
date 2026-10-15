@@ -2753,6 +2753,7 @@ func TestSessionRemainingCoverage100(t *testing.T) {
 				ID:                 runID,
 				Kind:               "dashboard",
 				ExecutionAuthority: "client",
+				State:              "accepted",
 				DefinitionID:       sessionInvoiceDashboard,
 				DefinitionRevision: sessionInvoiceDashboardRevision,
 				InputSnapshotID:    "in1",
@@ -2785,6 +2786,81 @@ func TestSessionRemainingCoverage100(t *testing.T) {
 	cmdDashHappy.SetArgs([]string{"--agent", srvDashHappy.URL, "--project", "p1", "dashboard", "s1"})
 	require.NoError(t, cmdDashHappy.ExecuteContext(context.Background()))
 	require.Contains(t, dashHappyOut.String(), `"available"`)
+
+	var dashOutput struct {
+		RunID string `json:"runId"`
+	}
+	require.NoError(t, json.Unmarshal(dashHappyOut.Bytes(), &dashOutput))
+
+	// cmd_session_result.go:79-99: sessionResultCommand cache hit
+	cmdResultHappy := sessionCommand()
+	var resultHappyOut bytes.Buffer
+	cmdResultHappy.SetOut(&resultHappyOut)
+	cmdResultHappy.SetArgs([]string{"--agent", srvDashHappy.URL, "--project", "p1", "result", dashOutput.RunID})
+	require.NoError(t, cmdResultHappy.ExecuteContext(context.Background()))
+	require.Contains(t, resultHappyOut.String(), `"availability":"available"`)
+
+	// sessionResultCommand cache miss
+	cmdResultMiss := sessionCommand()
+	var resultMissOut bytes.Buffer
+	cmdResultMiss.SetOut(&resultMissOut)
+	cmdResultMiss.SetArgs([]string{"--agent", srvDashHappy.URL, "--project", "p1", "result", "other-run"})
+	require.NoError(t, cmdResultMiss.ExecuteContext(context.Background()))
+	require.Contains(t, resultMissOut.String(), `"availability":"unavailable"`)
+
+	// cmd_session_dashboard.go:132 report error
+	srvDashReportErr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/capabilities") {
+			_ = json.NewEncoder(w).Encode(dashCaps)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/datatug/session-context/operations/") {
+			http.NotFound(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/datatug/session-context/inputs/") {
+			_ = json.NewEncoder(w).Encode(struct {
+				Input     sessioncontext.InputSnapshot   `json:"input"`
+				Revisions []sessioncontext.EntryRevision `json:"revisions"`
+			}{
+				Input: sessioncontext.InputSnapshot{
+					ID:                 "in1",
+					SessionID:          "s1",
+					Scope:              dashScope,
+					DefinitionDigest:   strings.Repeat("a", 64),
+					ResolvedParameters: map[string]apicontract.TypedValue{"InvoiceId": invVal},
+				},
+				Revisions: []sessioncontext.EntryRevision{invRev},
+			})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/commands") {
+			var cmd sessioncontext.Command
+			_ = json.NewDecoder(r.Body).Decode(&cmd)
+			if cmd.Action == "reportDashboard" {
+				http.Error(w, "lost report ack", http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(sessioncontext.CommandResult{
+				Receipt: sessioncontext.Receipt{OpID: cmd.OpID, ResourceID: cmd.SessionID},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(sessioncontext.Snapshot{
+			Session: sessioncontext.Session{ID: "s1", Version: 1, Owner: "alice", DatabaseID: "d1", ProjectID: "p1"},
+			ContextSet: sessioncontext.AppliedContextSet{
+				Enabled: true,
+				Slots:   []sessioncontext.AppliedSlot{{Scope: dashScope, BagID: "b1", Entries: []sessioncontext.EntryRef{{EntryID: "e1", RevisionID: "r1"}}}},
+			},
+			Revisions: []sessioncontext.EntryRevision{invRev},
+		})
+	}))
+	t.Cleanup(srvDashReportErr.Close)
+	cmdDashReportErr := sessionCommand()
+	cmdDashReportErr.SetArgs([]string{"--agent", srvDashReportErr.URL, "--project", "p1", "dashboard", "s1"})
+	reportAckErr := cmdDashReportErr.ExecuteContext(context.Background())
+	require.Error(t, reportAckErr)
+	require.Contains(t, reportAckErr.Error(), "dashboard outcome report acknowledgement unavailable")
 
 	// Lines 147-213: runSessionInvoiceDashboard branches
 	// Line 148: invoice <= 0
@@ -3264,6 +3340,12 @@ INSERT INTO Genre VALUES (1, 'Rock');`)
 	_, err = runSessionInvoiceDashboard(context.Background(), miniDB2Path, "1")
 	require.Error(t, err)
 	sessionRowsScan = oldRowsScanDash
+
+	// cmd_session_dashboard.go:222 successful dashboard result
+	dashRes, err := runSessionInvoiceDashboard(context.Background(), miniDB2Path, "1")
+	require.NoError(t, err)
+	require.Equal(t, "client-reported", dashRes.OutcomeOrigin)
+
 	sessionChinookHash = oldHash
 	sessionChinookSize = oldSize
 

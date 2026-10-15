@@ -50,12 +50,19 @@ func showExitCodeOf(t *testing.T, err error) int {
 // shop-project, and returns the folder.
 func scannedJourneyProject(t *testing.T) string {
 	t.Helper()
+	dir, _ := scannedJourneyProjectWithDB(t)
+	return dir
+}
+
+// scannedJourneyProjectWithDB is scannedJourneyProject that also returns the database file the scan read.
+func scannedJourneyProjectWithDB(t *testing.T) (string, string) {
+	t.Helper()
 	projectDir := filepath.Join(t.TempDir(), "shop-project")
 	dbPath := filepath.Join(t.TempDir(), "shop.db")
 	writeJourneyDB(t, dbPath)
 	_, err := runScanCommand(t, "-d", projectDir, "-D", "sqlite3", "--path", dbPath, "--db", "shop", "--env", "local")
 	require.NoError(t, err)
-	return projectDir
+	return projectDir, dbPath
 }
 
 const showJourneySQLite = `Project shop-project
@@ -98,7 +105,7 @@ func TestShowListsWhatAScanWrote(t *testing.T) {
 
 // --format json is the same document as one JSON value.
 func TestShowFormatJSON(t *testing.T) {
-	projectDir := scannedJourneyProject(t)
+	projectDir, dbPath := scannedJourneyProjectWithDB(t)
 
 	stdout, _, err := runShowCommand(t, "-d", projectDir, "--format", "json")
 	require.NoError(t, err)
@@ -112,6 +119,7 @@ func TestShowFormatJSON(t *testing.T) {
 			"sources": []any{map[string]any{
 				"id":     "shop",
 				"driver": "sqlite3",
+				"path":   dbPath,
 				"schemas": []any{map[string]any{
 					"name": "main",
 					"tables": []any{
@@ -401,14 +409,15 @@ func TestShowListsNoSourceForAnEnvironmentWithoutCatalogs(t *testing.T) {
 // of a source that was never scanned: the model of its catalog has no file (its folder was removed), as it
 // has none for a database with no table.
 func TestShowSaysSoForAScannedSourceWithNoTableOrView(t *testing.T) {
-	projectDir := scannedJourneyProject(t)
+	projectDir, dbPath := scannedJourneyProjectWithDB(t)
 	require.NoError(t, os.RemoveAll(filepath.Join(projectDir, "dbmodels")))
 	stdout, _, err := runShowCommand(t, "-d", projectDir)
 	require.NoError(t, err)
 	assert.Equal(t, "Project shop-project\nEnvironment local\n  Source shop (sqlite3)\n    no tables or views\n", stdout)
 	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"project":"shop-project","access":"private","environments":[{"id":"local","sources":[{"id":"shop","driver":"sqlite3","empty":true,"schemas":[]}]}]}`, stdout)
+	pathJSON, _ := json.Marshal(dbPath)
+	assert.JSONEq(t, `{"project":"shop-project","access":"private","environments":[{"id":"local","sources":[{"id":"shop","driver":"sqlite3","path":`+string(pathJSON)+`,"empty":true,"schemas":[]}]}]}`, stdout)
 
 	// A source that is not scanned is said to be that, and not to be empty; a source with tables is neither.
 	stdout, _, err = runShowCommand(t, "-d", demoShapedProject(t))
@@ -545,7 +554,8 @@ Environment local
 	require.Len(t, doc.Environments, 2)
 	require.Len(t, doc.Environments[1].Sources, 4)
 	orders := doc.Environments[1].Sources[2]
-	assert.Equal(t, showSource{ID: "orders", Driver: "sqlite3", NotScanned: true, Schemas: []showSchema{}}, orders)
+	assert.True(t, filepath.IsAbs(orders.Path), "a SQLite source carries the file its path resolves to")
+	assert.Equal(t, showSource{ID: "orders", Driver: "sqlite3", Path: orders.Path, NotScanned: true, Schemas: []showSchema{}}, orders)
 	assert.Contains(t, stdout, `"notScanned": true`)
 	assert.Contains(t, stdout, `"schemas": []`)
 }
@@ -782,7 +792,15 @@ func TestShowDepthTrimsTheText(t *testing.T) {
 }
 
 func TestShowDepthTrimsTheJSON(t *testing.T) {
-	projectDir := scannedJourneyProject(t)
+	projectDir, dbPath := scannedJourneyProjectWithDB(t)
+	pathLine := func(expected string) string {
+		quoted, _ := json.Marshal(dbPath)
+		line := "          \"path\": " + string(quoted)
+		if strings.Contains(expected, "\"driver\": \"sqlite3\",\n") {
+			return strings.Replace(expected, "\"driver\": \"sqlite3\",\n", "\"driver\": \"sqlite3\",\n"+line+",\n", 1)
+		}
+		return strings.Replace(expected, "\"driver\": \"sqlite3\"\n", "\"driver\": \"sqlite3\",\n"+line+"\n", 1)
+	}
 	plain, _, err := runShowCommand(t, "-d", projectDir, "--format", "json")
 	require.NoError(t, err)
 	explicit, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "columns")
@@ -791,7 +809,7 @@ func TestShowDepthTrimsTheJSON(t *testing.T) {
 
 	tables, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "tables")
 	require.NoError(t, err)
-	assert.Equal(t, `{
+	assert.Equal(t, pathLine(`{
   "project": "shop-project",
   "access": "private",
   "environments": [
@@ -824,14 +842,14 @@ func TestShowDepthTrimsTheJSON(t *testing.T) {
     }
   ]
 }
-`, tables)
+`), tables)
 	tablesAgain, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "tables")
 	require.NoError(t, err)
 	assert.Equal(t, tables, tablesAgain)
 
 	sources, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "sources")
 	require.NoError(t, err)
-	assert.Equal(t, `{
+	assert.Equal(t, pathLine(`{
   "project": "shop-project",
   "access": "private",
   "environments": [
@@ -846,7 +864,7 @@ func TestShowDepthTrimsTheJSON(t *testing.T) {
     }
   ]
 }
-`, sources)
+`), sources)
 	sourcesAgain, _, err := runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", "sources")
 	require.NoError(t, err)
 	assert.Equal(t, sources, sourcesAgain)

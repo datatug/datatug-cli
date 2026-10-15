@@ -90,13 +90,14 @@ Examples:
   datatug query run --db sqlite:///tmp/crm.db -f report.dtql.yaml --as alice --role support --format csv
   datatug query run --db ingitdb://./crm --from products --var minPrice=10 --format json
   datatug query run --db env:SHOP_PG_URL -f report.dtql.yaml --as alice   # SHOP_PG_URL holds the whole connection URL
+  datatug query run --db datatug://shop/crm --from customers --no-policies   # crm is a source of the registered project shop
   datatug query run --project ./demo-project-1 --query customers/customer-invoices --as alice --var CustomerId=5
   datatug query run --project demo-project-1 --query reference/country-facts --env local --var name=Brazil`,
 		SilenceUsage: true,
 		RunE:         queryRunCommandAction,
 	}
 	flags := cmd.Flags()
-	flags.String(queryDBFlag, "", "Database URL ("+dbSchemesHelp()+")")
+	flags.String(queryDBFlag, "", "Database URL ("+dbSchemesHelp()+"), or datatug://<project>/<db>[?env=<ENV>] for a database that is a source of a registered project (datatug:///<db> for the current project)")
 	flags.StringP(queryFileFlag, "f", "", "DTQL query document (YAML or JSON); '-' reads stdin")
 	flags.String(queryFromFlag, "", "Select every row and field of this root collection (alternative to -f)")
 	flags.String(queryProjectFlag, "", "Project directory or registered project ID (alternative to --db; runs a saved --query by ID)")
@@ -220,9 +221,9 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	backend, err := dbcopy.Parse(o.db)
+	backend, _, err := parseSourceArg(cmd.Context(), o.db)
 	if err != nil {
-		return Exit(err.Error(), exitCodeUsage)
+		return keepExit(err, func(err error) error { return Exit(err.Error(), exitCodeUsage) })
 	}
 	// The flag the source was typed on is what a failure of a PostgreSQL source says its connection string is read
 	// from (an env:NAME source says the variable).

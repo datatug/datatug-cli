@@ -69,7 +69,6 @@ func dbSchemaCommand() *cobra.Command {
 	}
 	cmd.Flags().String("db", "", "Database URL: "+dbSchemesHelp())
 	cmd.Flags().String("format", "json", "Output format: json or text")
-	_ = cmd.MarkFlagRequired("db")
 	return cmd
 }
 

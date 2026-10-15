@@ -136,8 +136,9 @@ func TestDBSchemaUsageErrors(t *testing.T) {
 }
 
 func TestDBSchemaMissingDBFlag(t *testing.T) {
-	if _, err := runDBSchema(t); err == nil {
-		t.Fatal("missing --db accepted")
+	_, err := runDBSchema(t)
+	if err == nil || exitCodeOf(t, err) != exitCodeUsage {
+		t.Fatalf("want exit %d, got %v", exitCodeUsage, err)
 	}
 }
 

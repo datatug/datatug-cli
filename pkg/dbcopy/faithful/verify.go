@@ -97,15 +97,38 @@ func Verify(ctx context.Context, left, right Endpoint) ([]Diff, error) {
 		add(n, "unique constraints", uniqSet(lt), uniqSet(rt))
 		add(n, "indexes", idxSet(lt), idxSet(rt))
 		add(n, "checks", checkSet(lt), checkSet(rt))
-		ld, err := tableDigest(ctx, left, lt)
+		ld, err := tableDigest(ctx, left, lt, "")
 		if err != nil {
 			return nil, err
 		}
-		rd, err := tableDigest(ctx, right, rt)
+		rd, err := tableDigest(ctx, right, rt, "")
 		if err != nil {
 			return nil, err
 		}
-		add(n, "data digest", ld, rd)
+		if ld != rd {
+			// Name the columns whose values differ.
+			named := false
+			for _, c := range lt.Columns {
+				if rt.Column(c.Name) == nil {
+					continue
+				}
+				lcd, err := tableDigest(ctx, left, lt, c.Name)
+				if err != nil {
+					return nil, err
+				}
+				rcd, err := tableDigest(ctx, right, rt, c.Name)
+				if err != nil {
+					return nil, err
+				}
+				if lcd != rcd {
+					diffs = append(diffs, Diff{n + "." + c.Name, "data digest", lcd, rcd})
+					named = true
+				}
+			}
+			if !named {
+				diffs = append(diffs, Diff{n, "data digest", ld, rd})
+			}
+		}
 	}
 	return diffs, nil
 }
@@ -196,13 +219,16 @@ func checkSet(t *Table) string { return fmt.Sprint(len(t.Checks)) }
 
 // tableDigest hashes every row of a table in primary key order. SQLite values carry their storage
 // class; PostgreSQL values are compared by their text form.
-func tableDigest(ctx context.Context, e Endpoint, t *Table) (string, error) {
-	exprs := make([]string, len(t.Columns))
-	for i, c := range t.Columns {
+func tableDigest(ctx context.Context, e Endpoint, t *Table, only string) (string, error) {
+	var exprs []string
+	for _, c := range t.Columns {
+		if only != "" && c.Name != only {
+			continue
+		}
 		if e.Engine == SQLite {
-			exprs[i] = sqliteReadExpr(c)
+			exprs = append(exprs, sqliteReadExpr(c))
 		} else {
-			exprs[i] = quoteIdent(c.Name) + "::text"
+			exprs = append(exprs, quoteIdent(c.Name)+"::text")
 		}
 	}
 	var from, order string
@@ -213,13 +239,17 @@ func tableDigest(ctx context.Context, e Endpoint, t *Table) (string, error) {
 	}
 	if len(t.PK) > 0 {
 		order = quoteList(t.PK)
-	} else if e.Engine == SQLite || e.Engine == Postgres {
-		// A table with no key has no stable order: order by every column's text.
-		parts := make([]string, len(exprs))
-		for i, x := range exprs {
-			parts[i] = x
+	} else {
+		// A table with no key has no stable order: order by every column.
+		var all []string
+		for _, c := range t.Columns {
+			if e.Engine == SQLite {
+				all = append(all, sqliteReadExpr(c))
+			} else {
+				all = append(all, quoteIdent(c.Name)+"::text")
+			}
 		}
-		order = strings.Join(parts, ", ")
+		order = strings.Join(all, ", ")
 	}
 	rows, err := e.DB.QueryContext(ctx, "SELECT "+strings.Join(exprs, ", ")+" FROM "+from+" ORDER BY "+order)
 	if err != nil {

@@ -263,34 +263,47 @@ func nameUniques(t *Table, createSQL string) {
 
 var fkClause = regexp.MustCompile(`(?is)FOREIGN\s+KEY\s*\(([^)]*)\)\s*REFERENCES`)
 
-// fkDeferrable finds the foreign key clauses of a CREATE TABLE statement that are DEFERRABLE; the
-// value says whether they are INITIALLY DEFERRED.
+// splitTopLevel splits the body of a CREATE TABLE statement (the text inside its outer parentheses)
+// at the commas of depth zero.
+func splitTopLevel(sql string) []string {
+	open := strings.IndexByte(sql, '(')
+	if open < 0 {
+		return nil
+	}
+	end := matchParen(sql, open)
+	if end < 0 {
+		return nil
+	}
+	body := sql[open+1 : end]
+	var parts []string
+	last := 0
+	walkSQL(body, func(i, depth int) bool {
+		if body[i] == ',' && depth == 0 {
+			parts = append(parts, body[last:i])
+			last = i + 1
+		}
+		return true
+	})
+	return append(parts, body[last:])
+}
+
+var inlineReferences = regexp.MustCompile(`(?is)^\s*("(?:[^"]|"")+"|\[[^\]]+\]|` + "`[^`]+`" + `|\w+)\s+.*?\bREFERENCES\b(.*)$`)
+
+// fkDeferrable finds the foreign keys of a CREATE TABLE statement that are DEFERRABLE, by the
+// columns they are on; the value says whether they are INITIALLY DEFERRED.
 func fkDeferrable(sql string) map[string]bool {
 	out := map[string]bool{}
-	for _, loc := range fkClause.FindAllStringSubmatchIndex(sql, -1) {
-		cols := strings.Join(splitIdentList(sql[loc[2]:loc[3]]), "\x00")
-		// The clause runs to the next comma at its own depth, or the end of the table.
-		end := len(sql)
-		depth := 0
-		for i := loc[1]; i < len(sql); i++ {
-			switch sql[i] {
-			case '(':
-				depth++
-			case ')':
-				depth--
-				if depth < 0 {
-					end = i
-				}
-			case ',':
-				if depth == 0 {
-					end = i
-				}
-			}
-			if end != len(sql) {
-				break
-			}
+	for _, part := range splitTopLevel(sql) {
+		var cols, clause string
+		if m := fkClause.FindStringSubmatchIndex(part); m != nil {
+			cols = strings.Join(splitIdentList(part[m[2]:m[3]]), "\x00")
+			clause = part[m[1]:]
+		} else if m := inlineReferences.FindStringSubmatch(part); m != nil && !strings.HasPrefix(strings.ToUpper(strings.TrimSpace(part)), "CONSTRAINT") {
+			cols = unquoteIdent(m[1])
+			clause = m[2]
+		} else {
+			continue
 		}
-		clause := sql[loc[1]:end]
 		if deferrableWord.MatchString(notDeferrable.ReplaceAllString(clause, "")) {
 			out[cols] = strings.Contains(strings.ToUpper(clause), "INITIALLY DEFERRED")
 		}

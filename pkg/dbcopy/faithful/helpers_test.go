@@ -119,3 +119,5 @@ func simpleProtocol(t testing.TB, e Endpoint) *sql.DB {
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
+
+func sqlNull() sql.NullString { return sql.NullString{} }

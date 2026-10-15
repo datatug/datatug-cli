@@ -462,6 +462,24 @@ type recordsSchemaResponse struct {
 	Columns      []recordsSchemaColumn `json:"columns"`
 	PrimaryKey   []string              `json:"primaryKey"`
 	ReferencedBy []string              `json:"referencedBy"`
+	ForeignKeys  []recordsForeignKey   `json:"foreignKeys"`
+}
+
+// recordsForeignKey is an outgoing foreign key of a table, as the live schema of the source declares
+// it: the columns of the table and the table and columns they reference, in matching positions.
+// RefColumns is empty when the database does not expose the implicit target columns.
+type recordsForeignKey struct {
+	Name       string            `json:"name"`
+	Columns    []string          `json:"columns"`
+	RefTable   recordsForeignRef `json:"refTable"`
+	RefColumns []string          `json:"refColumns"`
+}
+
+// recordsForeignRef names the referenced table: its schema is the one of the table asked about
+// unless the key points into another schema.
+type recordsForeignRef struct {
+	Schema string `json:"schema"`
+	Name   string `json:"name"`
 }
 
 // recordsSchemaHandler is POST /datatug/records/schema: the live schema (columns with their types,
@@ -486,6 +504,7 @@ func recordsSchemaHandler(w http.ResponseWriter, r *http.Request) {
 	resp := recordsSchemaResponse{
 		Source: req.Source, Schema: req.Schema, Table: req.Table,
 		Columns: []recordsSchemaColumn{}, PrimaryKey: []string{}, ReferencedBy: []string{},
+		ForeignKeys: []recordsForeignKey{},
 	}
 	for _, c := range resolved.Columns {
 		resp.Columns = append(resp.Columns, recordsSchemaColumn{Name: c.Name, Type: c.Type})
@@ -496,5 +515,25 @@ func recordsSchemaHandler(w http.ResponseWriter, r *http.Request) {
 	for _, ref := range resolved.Schema.ReferencedBy {
 		resp.ReferencedBy = append(resp.ReferencedBy, ref.Name())
 	}
+	for _, fk := range resolved.ForeignKeys {
+		refSchema := fk.ReferencedNamespace
+		if refSchema == "" {
+			refSchema = req.Schema
+		}
+		resp.ForeignKeys = append(resp.ForeignKeys, recordsForeignKey{
+			Name: fk.Name, Columns: fieldNames(fk.Fields),
+			RefTable:   recordsForeignRef{Schema: refSchema, Name: fk.ReferencedCollection},
+			RefColumns: fieldNames(fk.ReferencedFields),
+		})
+	}
 	writeContractResponse(w, r, nil, resp)
+}
+
+// fieldNames is names as strings; never nil, so a JSON array is always an array.
+func fieldNames(names []dal.FieldName) []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = string(n)
+	}
+	return out
 }

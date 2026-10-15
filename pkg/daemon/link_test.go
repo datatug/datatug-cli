@@ -30,7 +30,6 @@ func TestBuildLink(t *testing.T) {
 		{"integer at 2^53-1 stays a number", func(r *LinkRequest) { r.Record = `{"id":9007199254740991}` }, prefix + "table/Album/record?schema=#pk=%7B%22id%22%3A9007199254740991%7D", KindRecord},
 		{"exponent integer is plain digits", func(r *LinkRequest) { r.Record = `{"a":1E3,"b":1.0,"c":-0}` }, prefix + "table/Album/record?schema=#pk=%7B%22a%22%3A1000%2C%22b%22%3A1%2C%22c%22%3A0%7D", KindRecord},
 		{"big exponent integer is a string", func(r *LinkRequest) { r.Record = `{"a":1e20,"b":9007199254740993.0}` }, prefix + "table/Album/record?schema=#pk=%7B%22a%22%3A%22100000000000000000000%22%2C%22b%22%3A%229007199254740993%22%7D", KindRecord},
-		{"float and bool stay typed", func(r *LinkRequest) { r.Record = `{"f":1.5,"b":true}` }, prefix + "table/Album/record?schema=#pk=%7B%22b%22%3Atrue%2C%22f%22%3A1.5%7D", KindRecord},
 		{"email-like key is percent-encoded and html is not escaped", func(r *LinkRequest) { r.Record = `{"e":"a@b.c <x> é"}` }, prefix + "table/Album/record?schema=#pk=%7B%22e%22%3A%22a%40b.c%20%3Cx%3E%20%C3%A9%22%7D", KindRecord},
 	}
 	for _, c := range cases {
@@ -72,6 +71,9 @@ func TestBuildLinkUsageErrors(t *testing.T) {
 		"non-empty JSON object    ":      func(r *LinkRequest) { r.Record = `{"a":{"b":1}}` },
 		"at most 256 characters":         func(r *LinkRequest) { r.Record = `{"a":"` + strings.Repeat("x", 257) + `"}` },
 		"must not be . or ..":            func(r *LinkRequest) { r.Project = ".." },
+		"kind boolean":                   func(r *LinkRequest) { r.Record = `{"b":true}` },
+		"kind decimal number":            func(r *LinkRequest) { r.Record = `{"f":1.5}` },
+		"kind decimal number ":           func(r *LinkRequest) { r.Record = `{"a":1,"f":1e-5}` },
 		"must not be . or .. ":           func(r *LinkRequest) { r.Env = "." },
 		"must not be . or ..  ":          func(r *LinkRequest) { r.DB = ".." },
 		"must not be . or ..   ":         func(r *LinkRequest) { r.Table = ".." },
@@ -129,5 +131,20 @@ func TestBuildLinkCodeIsFirstInTheFragment(t *testing.T) {
 		if err != nil || got.URL != c.url {
 			t.Errorf("%s: %q %v", name, got.URL, err)
 		}
+	}
+}
+
+// A key value kind the record lookup cannot take is refused naming the kind and never the value.
+func TestBuildLinkRefusesUnsupportedKeyKindsValueFree(t *testing.T) {
+	for record, kind := range map[string]string{`{"b":true}`: "boolean", `{"f":0.123456}`: "decimal number"} {
+		_, err := BuildLink(linkStatus(), LinkRequest{Project: "p", Env: "e", DB: "d", Table: "t", Record: record})
+		var ue UsageError
+		if !errors.As(err, &ue) || !strings.Contains(err.Error(), "kind "+kind) || strings.Contains(err.Error(), "0.123456") || strings.Contains(err.Error(), "true") {
+			t.Errorf("%s: err = %v", record, err)
+		}
+	}
+	// Integers, however spelled, are still links.
+	if _, err := BuildLink(linkStatus(), LinkRequest{Project: "p", Env: "e", DB: "d", Table: "t", Record: `{"a":1.0,"b":"x"}`}); err != nil {
+		t.Fatal(err)
 	}
 }

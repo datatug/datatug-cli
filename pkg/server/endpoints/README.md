@@ -76,8 +76,20 @@ INVALID_REQUEST` / `MISSING_PARAMETER`, `ACCESS_DENIED`, `SOURCE_UNAVAILABLE`, `
 key and the row are never logged.
 
 `POST /datatug/records/schema` takes the same body without `key` and answers
-`{"source","schema","table","columns":[{"name","type"}],"primaryKey":[...],"referencedBy":[...]}`.
-It reads no row.
+`{"source","schema","table","columns":[{"name","type"}],"primaryKey":[...],"referencedBy":[...],"foreignKeys":[...]}`.
+It reads no row. `foreignKeys` lists the outgoing foreign keys of the table, read live from the source's own
+catalog by its driver (`pragma_foreign_key_list` for SQLite, `pg_catalog` for PostgreSQL; identifiers come from
+the schema only and nothing of the request is interpolated): `{"name","columns":[...],"refTable":{"schema","name"},
+"refColumns":[...]}`, with `columns` and `refColumns` in matching positions (composite keys keep their order).
+`refTable.schema` is the schema of the table asked about unless the key points into another schema.
+`refColumns` is empty when the database does not expose the implicit target (a SQLite key to a table's
+primary key without naming columns reports that primary key). A table with no foreign key, or a source that
+reports none, answers `[]`, never `null`. Both routes make the same access decision first, so a denied
+principal gets the identical `403` and learns nothing of the schema; `referencedBy` is unchanged.
+
+A key value that is a boolean or a non-integer number is a `400` bad-key on the lookup: the lookup binds strings
+and exact integers only (a float is never compared for equality, and the structured SQLite read binds no boolean).
+`datatug daemon url --record` refuses those kinds with exit `2` for the same reason.
 
 ## Endpoints
 

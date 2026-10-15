@@ -93,6 +93,10 @@ Failure to launch the browser MUST log a warning to stdout and MUST NOT abort se
 
 On signal receipt, the HTTP server MUST perform a graceful shutdown: stop accepting new connections, allow in-flight requests up to a short bounded timeout, then exit `0`. The current implementation has a TODO for graceful shutdown — remediation is tracked under Outstanding Questions.
 
+#### REQ: idle-timeout
+
+`--idle-timeout <duration>` MUST make the server shut down gracefully and exit `0` once that long has passed with no HTTP request. The default `0` serves until stopped. It is how [`datatug daemon`](../daemon/README.md) bounds the lifetime of the server it owns.
+
 ### Execution evidence storage
 
 #### REQ: execution-receipts-follow-incident-routing
@@ -142,6 +146,7 @@ The URL the agent navigates the browser to MUST embed the agent's listening addr
 | `--evidence-dir` |  | string | `$DATATUG_EVIDENCE_DIR` or `~/.datatug/evidence` | Private SQLite snapshot directory. |
 | `--snapshot-byte-cap` |  | int | `2097152` | Maximum canonical bytes retained for one snapshot. |
 | `--snapshot-retention` |  | duration | `720h` | Retention before snapshot bytes expire. |
+| `--idle-timeout` |  | duration | `0` | Exit after this long with no HTTP request (`0` = never). |
 
 ## Exit codes
 

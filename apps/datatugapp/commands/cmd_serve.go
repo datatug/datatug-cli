@@ -37,6 +37,7 @@ const (
 	serveSnapshotByteCapFlag    = "snapshot-byte-cap"
 	serveSnapshotRetentionFlag  = "snapshot-retention"
 	serveDetectiveAIProfileFlag = "detective-ai-profile"
+	serveIdleTimeoutFlag        = "idle-timeout"
 )
 
 // ServeCommand executes serve consoleCommand
@@ -64,6 +65,7 @@ type serveFlags struct {
 	snapshotByteCap    int
 	snapshotRetention  time.Duration
 	detectiveAIProfile string
+	idleTimeout        time.Duration
 }
 
 func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
@@ -116,6 +118,9 @@ func readServeFlags(cmd *cobra.Command) (serveFlags, error) {
 		return f, err
 	}
 	if f.detectiveAIProfile, err = flags.GetString(serveDetectiveAIProfileFlag); err != nil {
+		return f, err
+	}
+	if f.idleTimeout, err = flags.GetDuration(serveIdleTimeoutFlag); err != nil {
 		return f, err
 	}
 	return f, nil
@@ -253,6 +258,7 @@ func serveCommandAction(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	httpServer := server.NewHttpServer()
+	httpServer.IdleTimeout = flags.idleTimeout
 	caps := api.Capabilities{
 		AllowWrites:          flags.allowWrites,
 		AllowOpaqueSQL:       flags.allowOpaqueSQL,
@@ -367,5 +373,6 @@ func serveCommandArgs() *cobra.Command {
 	flags.Int(serveSnapshotByteCapFlag, 0, "Maximum canonical bytes retained per execution snapshot (default 2 MiB)")
 	flags.Duration(serveSnapshotRetentionFlag, 0, "Execution snapshot retention before bytes are expired (default 30 days)")
 	flags.String(serveDetectiveAIProfileFlag, "", "Named AI profile for Detective proposals; credentials remain in its configured environment variable")
+	flags.Duration(serveIdleTimeoutFlag, 0, "Exit gracefully after this long with no HTTP request (0 serves until stopped); datatug daemon uses 2h")
 	return cmd
 }

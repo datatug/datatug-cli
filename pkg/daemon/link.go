@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
 	"math/big"
 	"os"
-	"regexp"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Link kinds, as printed by `daemon url`.
@@ -154,31 +157,55 @@ func encodeComponent(s string) string {
 	return b.String()
 }
 
-var integerLiteral = regexp.MustCompile(`^-?[0-9]+$`)
+// maxNumberLiteral bounds a key number's text, so an exponent cannot make an enormous integer.
+const maxNumberLiteral = 40
+
+// canonicalNumber is one spelling per number: an integer inside the exactly representable
+// JavaScript range is its plain digits (1E3 and 1.0 are 1000 and 1, -0 is 0), an integer outside it
+// is a string of its exact digits (so the UI never rounds it to a neighbour), any other number is
+// its shortest float form. A literal that is not finite is not a key.
+func canonicalNumber(literal string) (any, bool) {
+	if len(literal) > maxNumberLiteral {
+		return nil, false
+	}
+	r, _ := new(big.Rat).SetString(literal) // the literal is a json.Number the decoder accepted
+	if r.IsInt() {
+		n := r.Num()
+		if new(big.Int).Abs(n).Cmp(big.NewInt(maxSafeInteger)) > 0 {
+			return n.String(), true
+		}
+		return json.Number(n.String()), true
+	}
+	f, _ := r.Float64()
+	if f == 0 || math.IsInf(f, 0) { // not representable
+		return nil, false
+	}
+	return json.Number(strconv.FormatFloat(f, 'g', -1, 64)), true
+}
 
 // canonicalPK checks that v is a non-empty JSON object of scalar key values
-// and re-encodes it with sorted keys so one record always has one link. An
-// integer outside the range JavaScript holds exactly (absolute value above
-// 2^53 - 1) becomes a string, so the UI never rounds it to a neighbour.
+// and re-encodes it with sorted keys so one record always has one link (see canonicalNumber).
 func canonicalPK(v string) (string, error) {
 	bad := UsageError{"--record must be a non-empty JSON object of primary-key column to value"}
 	dec := json.NewDecoder(bytes.NewReader([]byte(v)))
 	dec.UseNumber()
 	var obj map[string]any
-	if err := dec.Decode(&obj); err != nil || len(obj) == 0 || dec.More() {
+	if err := dec.Decode(&obj); err != nil || len(obj) == 0 {
+		return "", bad
+	}
+	if _, err := dec.Token(); err != io.EOF {
 		return "", bad
 	}
 	for k, val := range obj {
 		switch x := val.(type) {
 		case json.Number:
-			if integerLiteral.MatchString(x.String()) {
-				n, ok := new(big.Int).SetString(x.String(), 10)
-				if ok && new(big.Int).Abs(n).Cmp(big.NewInt(maxSafeInteger)) > 0 {
-					obj[k] = x.String()
-				}
+			n, ok := canonicalNumber(x.String())
+			if !ok {
+				return "", bad
 			}
+			obj[k] = n
 		case string:
-			if len(x) > maxKeyValueLength {
+			if utf8.RuneCountInString(x) > maxKeyValueLength {
 				return "", UsageError{fmt.Sprintf("a key value must be at most %d characters", maxKeyValueLength)}
 			}
 		case bool:

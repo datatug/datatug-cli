@@ -137,11 +137,12 @@ func (m *Manager) statusOf(port int) Status {
 
 // Status reports the daemon without starting or stopping anything, and without sending an HTTP
 // request to a server this CLI started (a request would reset its idle timer): the record, the pid
-// and a TCP connect decide. A datatug API this CLI did not start (no record of it) is the one
+// and a TCP connect decide (no process-command check, which can fail in a sandbox and, on Windows,
+// is an HTTP probe). A datatug API this CLI did not start (no record of it) is the one
 // case that costs a single agent-info request, because a TCP connect cannot tell it from a
 // foreign listener on the port.
 func (m *Manager) Status() Status {
-	if rec, ok := m.readRecord(); ok && m.Alive(rec.PID) && m.Owns(rec.PID, rec.Port) && m.Dial(rec.Port) {
+	if rec, ok := m.readRecord(); ok && m.Alive(rec.PID) && m.Dial(rec.Port) {
 		st := m.statusOf(rec.Port)
 		st.Running, st.PID, st.StartedBy, st.Version = true, rec.PID, rec.StartedBy, rec.Version
 		st.StartedAt = rec.StartedAt.UTC().Format(time.RFC3339)

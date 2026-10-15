@@ -75,18 +75,25 @@ func TestPortFree(t *testing.T) {
 }
 
 func TestSpawnAliveTerminate(t *testing.T) {
-	t.Setenv("DAEMON_TEST_HELPER", "1")
 	logPath := filepath.Join(t.TempDir(), "daemon.log")
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("DATATUG_OPEN_DB", "postgres://u:SECRETPW@h/db")
+	t.Setenv("DATATUG_EVIDENCE_DIR", "/ev")
 	pid, exited, err := spawnDetached(exe, []string{"serve"}, logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !processAlive(pid) {
 		t.Fatal("spawned process must be alive")
+	}
+	for i := 0; i < 100; i++ { // let the helper report its environment first
+		if b, _ := os.ReadFile(logPath); strings.Contains(string(b), "PATH=") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	if err = terminateProcess(pid); err != nil {
 		t.Fatal(err)
@@ -99,8 +106,15 @@ func TestSpawnAliveTerminate(t *testing.T) {
 	if processAlive(pid) {
 		t.Fatal("terminated process must be gone")
 	}
-	if _, err = os.Stat(logPath); err != nil {
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
 		t.Fatal("log file must exist")
+	}
+	if strings.Contains(string(logged), "SECRETPW") || strings.Contains(string(logged), "DATATUG_OPEN_DB") {
+		t.Fatalf("child inherited a secret:\n%s", logged)
+	}
+	if !strings.Contains(string(logged), "DATATUG_EVIDENCE_DIR=/ev") || !strings.Contains(string(logged), "PATH=") {
+		t.Fatalf("child lost an allow-listed variable:\n%s", logged)
 	}
 	if !processAlive(1) { // not ours: EPERM still means alive
 		t.Fatal("pid 1 is alive")
@@ -128,12 +142,20 @@ func TestNewManager(t *testing.T) {
 	}
 }
 
+func TestScrubbedEnv(t *testing.T) {
+	got := scrubbedEnv([]string{"PATH=/bin", "path=/lower", "LC_ALL=C", "XDG_CONFIG_HOME=/x", "DATATUG_OPEN_DB=postgres://u:pw@h/d",
+		"DATATUG_TOKEN=t", "AWS_SECRET_ACCESS_KEY=k", "DATATUG_POLICIES_DIR=/p", "NOEQUALS"})
+	want := "PATH=/bin path=/lower LC_ALL=C XDG_CONFIG_HOME=/x DATATUG_POLICIES_DIR=/p"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("got %v", got)
+	}
+}
+
 func TestProcessOwns(t *testing.T) {
 	// The test binary is not a `serve --port N`; a helper started as one is.
 	if processOwns(os.Getpid(), 8989) {
 		t.Fatal("the test process is not a daemon")
 	}
-	t.Setenv("DAEMON_TEST_HELPER", "1")
 	exe, _ := os.Executable()
 	pid, exited, err := spawnDetached(exe, []string{"serve", "--host", "127.0.0.1", "--port", "8995"}, filepath.Join(t.TempDir(), "l.log"))
 	if err != nil {

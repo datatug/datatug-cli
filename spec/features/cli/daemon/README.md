@@ -24,7 +24,7 @@ The web UI reads project data only through the local agent API (`datatug serve`,
 
 #### REQ: client-flag
 
-The root command MUST accept a persistent `--client <caller>` flag, valid on every command. When the flag is absent, `DATATUG_CLIENT` supplies the value; the flag wins when both are set. Known callers are `claude-mod` and `codex-mod`. An unknown non-empty value MUST print one warning line to stderr naming the value and MUST NOT start anything.
+The root command MUST accept a persistent `--client <caller>` flag, valid on every command. When the flag is absent, `DATATUG_CLIENT` supplies the value; the flag wins when both are set. Known callers are `claude-mod` and `codex-mod`. An unknown non-empty value MUST print one warning line to stderr that does NOT repeat the value (it may be a connection URL typed into the wrong flag) and MUST NOT start anything.
 
 #### REQ: client-ensures-daemon
 
@@ -69,6 +69,10 @@ The daemon is started with `serve --idle-timeout 2h` ([serve#req:idle-timeout](.
 #### REQ: detached
 
 The daemon MUST be started in its own process group with stdin from the null device and stdout and stderr appended to `daemon.log`, so it survives the command that started it.
+
+#### REQ: scrubbed-environment
+
+The daemon MUST be started with an allow-listed environment only: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`/`TMP`/`TEMP`, `TZ`, `TERM`, `LANG`, `LANGUAGE`, `LC_*`, `XDG_*`, the Windows system variables, and the non-secret directory settings `DATATUG_DAEMON_DIR`, `DATATUG_EVIDENCE_DIR`, `DATATUG_POLICIES_DIR`, `DATATUG_PERSONAL_DIR`. Everything else (`DATATUG_OPEN_DB`, tokens, passwords) MUST NOT reach the long-lived process.
 
 #### REQ: localhost-read-only
 
@@ -122,7 +126,7 @@ With a non-datatug listener on 8989, `daemon start` binds the next free port and
 
 ### AC: read-only-localhost
 
-**Requirements:** daemon#req:localhost-read-only, daemon#req:idle-lifetime
+**Requirements:** daemon#req:localhost-read-only, daemon#req:idle-lifetime, daemon#req:scrubbed-environment
 
 The spawned command line has `--host 127.0.0.1`, `--idle-timeout 2h` and none of the `--allow-*` flags.
 

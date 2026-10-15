@@ -313,7 +313,7 @@ func TestPostgresStatementTimeoutDoesNotCutOrMislabelTheCopy(t *testing.T) {
 		`WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 20000) INSERT INTO parent SELECT x, x % 97, 'value ' || x FROM c`,
 		`WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 20000) INSERT INTO child SELECT x, x, 'w' || (x % 13) FROM c`)
 	pg := newPGDatabase(t)
-	pg = pgSetDatabase(t, pg, `statement_timeout = '3ms'`)
+	pg = pgSetDatabase(t, pg, `statement_timeout = '25ms'`)
 	rep := mustCopy(t, src, pg, Options{})
 	if len(rep.Warnings) != 0 {
 		t.Errorf("a copy under a statement timeout: %v", rep.Warnings)

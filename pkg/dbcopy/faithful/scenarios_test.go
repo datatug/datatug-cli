@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -455,8 +456,9 @@ var scenarios = []scenario{
 		e.copy(src, pg, Options{Overwrite: "reload", Filters: map[string]RowFilter{"Parent": {Where: []Cond{{"id", "=", "2"}}}}})
 		quiet(pg.DB, `DROP TABLE "public".keyless`, `CREATE VIEW "public".keyless AS SELECT 1 AS x`)
 		e.copy(src, pg, Options{Overwrite: "reload"})
-
-		// The same from a PostgreSQL source: where and limit read through the server.
+	}},
+	{name: "filters_from_pg", pgs: 1, run: func(e *scenarioEnv) {
+		// From a PostgreSQL source: where and limit read through the server.
 		pgsrc := e.pg()
 		quiet(pgsrc.DB, pgFixtureStatements...)
 		lite := e.lite()
@@ -555,15 +557,33 @@ func TestChaosSweep(t *testing.T) {
 			if n == 0 {
 				t.Fatal("the scenario made no call")
 			}
+			// The runs are independent, so they share the cores: the largest scenario would otherwise be
+			// one core's work while the others sit idle.
+			type run struct {
+				k    int
+				mode faultMode
+			}
+			jobs := make(chan run)
+			var wg sync.WaitGroup
+			for w := 0; w < runtime.GOMAXPROCS(0); w++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for r := range jobs {
+						runScenario(t, s, &faultPlan{failAt: r.k, mode: r.mode}, false)
+					}
+				}()
+			}
 			for k := 1; k <= n; k++ {
 				for mode := faultMode(0); mode < faultModes; mode++ {
 					if mode != faultError && !base.queries[k] {
 						continue // a row fault only differs from an error on a call that returns rows
 					}
-					plan := &faultPlan{failAt: k, mode: mode}
-					runScenario(t, s, plan, false)
+					jobs <- run{k, mode}
 				}
 			}
+			close(jobs)
+			wg.Wait()
 			t.Logf("%s: %d calls x %d ways", s.name, n, faultModes)
 		})
 	}

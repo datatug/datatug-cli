@@ -91,7 +91,7 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 	},
 	"filters_and_reload": func(t *testing.T, e *scenarioEnv) {
 		c := e.copies
-		if len(c) != 18 {
+		if len(c) != 15 {
 			t.Fatalf("copies %d", len(c))
 		}
 		if c[0].err != nil || !hasWarning(c[0].rep, WarnFKNotValidated, "child(parent_id)") {
@@ -129,13 +129,19 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 		if c[14].err == nil || !strings.Contains(c[14].err.Error(), `"keyless" on the target is not a table`) {
 			t.Errorf("a view in the way: %v", c[14].err)
 		}
+	},
+	"filters_from_pg": func(t *testing.T, e *scenarioEnv) {
+		c := e.copies
+		if len(c) != 3 {
+			t.Fatalf("copies %d", len(c))
+		}
 		// From PostgreSQL: where and limit are read through the server.
-		if c[15].err != nil || c[15].rep.Totals.Rows == 0 {
-			t.Errorf("filtered from postgres: %v", c[15].err)
+		if c[0].err != nil || c[0].rep.Totals.Rows == 0 {
+			t.Errorf("filtered from postgres: %v", c[0].err)
 		}
 		var mm *ReloadMismatchError
-		if c[16].err != nil || !errors.As(c[17].err, &mm) || !strings.Contains(c[17].err.Error(), `column "uid" is missing`) {
-			t.Errorf("reload into sqlite: %v / %v", c[16].err, c[17].err)
+		if c[1].err != nil || !errors.As(c[2].err, &mm) || !strings.Contains(c[2].err.Error(), `column "uid" is missing`) {
+			t.Errorf("reload into sqlite: %v / %v", c[1].err, c[2].err)
 		}
 	},
 	"sqlite_to_sqlite": func(t *testing.T, e *scenarioEnv) {

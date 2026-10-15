@@ -150,3 +150,12 @@ side could not be opened.
 * A column of mixed storage classes (an integer and a text in one untyped column) comes back as text.
 * A `CURRENT_TIMESTAMP` default of a PostgreSQL `text` column becomes SQLite's UTC text form.
 * Everything listed in the warnings of the first leg.
+
+## Proving a copy
+
+`faithful.Verify` (package `pkg/dbcopy/faithful`) compares two databases of one engine: declared
+types, nullability, defaults, keys, foreign keys, unique sets, indexes, check counts, row counts and
+a digest of every row. The round-trip tests (`go test ./pkg/dbcopy/faithful -run TestRoundTrip`) run
+SQLite -> PostgreSQL -> SQLite and PostgreSQL -> SQLite -> PostgreSQL on the demo databases when
+`DATATUG_TEST_POSTGRES_URL` (a local server), `DATATUG_DEMO_SQLITE` (`name=path,...`) and
+`DATATUG_PG_SAMPLES_DIR` are set; `datatug compare` over the copies is the second check.

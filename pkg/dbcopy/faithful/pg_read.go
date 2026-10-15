@@ -21,11 +21,8 @@ func splitSep(s sql.NullString) []string {
 
 var pgActions = map[string]string{"a": "NO ACTION", "r": "RESTRICT", "c": "CASCADE", "n": "SET NULL", "d": "SET DEFAULT"}
 
-// ReadPostgres reads the catalog of one PostgreSQL schema.
+// ReadPostgres reads the catalog of one PostgreSQL schema (the caller says which: Endpoint.Schema defaults to public).
 func ReadPostgres(ctx context.Context, db Queryer, schema string) (*Catalog, error) {
-	if schema == "" {
-		schema = "public"
-	}
 	cat := &Catalog{Engine: Postgres, Schema: schema}
 	rows, err := db.QueryContext(ctx, `
 SELECT c.oid::bigint, c.relname, c.relkind::text, c.relispartition, c.relrowsecurity

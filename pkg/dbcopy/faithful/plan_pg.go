@@ -83,8 +83,6 @@ func PlanSQLiteToPG(cat *Catalog, stats map[string][]*colStats, schema string) *
 				if ch.kind == KindInt {
 					tc.Identity = IdentityGenerated
 					m.Identity = map[Identity]string{IdentityRowid: "rowid", IdentityAutoincrement: "autoincrement"}[c.Identity]
-				} else {
-					p.warn(WarnIdentityNotCarried, obj, "auto-numbered key column was carried as %s, which cannot be auto-numbered", ch.typ)
 				}
 			}
 			if ch.note != "" {
@@ -106,9 +104,6 @@ func PlanSQLiteToPG(cat *Catalog, stats map[string][]*colStats, schema string) *
 }
 
 func (tc *TargetColumn) markerComment() string {
-	if tc.Marker == nil {
-		return ""
-	}
 	b, _ := json.Marshal(tc.Marker)
 	return markerPrefix + string(b)
 }

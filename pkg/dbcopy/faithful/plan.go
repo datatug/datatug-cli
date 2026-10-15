@@ -246,9 +246,6 @@ func chooseSQLiteToPG(c *Column, st *colStats) pgChoice {
 	default:
 		ch.note = fmt.Sprintf("declared %q but its values are not all of that type: carried as %s", declared, ch.typ)
 	}
-	if ch.note != "" && st.allNull() && d.class != declUnknown {
-		ch.note = fmt.Sprintf("declared %q, which holds no values to check: carried as %s", declared, ch.typ)
-	}
 	return ch
 }
 

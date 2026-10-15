@@ -164,10 +164,9 @@ func Copy(ctx context.Context, from, to Endpoint, opts Options) (*Report, error)
 			return fail(1, fmt.Errorf("scan source values: %w", serr))
 		}
 		for _, t := range cat.Tables {
-			for _, n := range t.PK {
-				idx := indexOfColumn(t, n)
-				if idx >= 0 && stats[t.Name][idx].nulls > 0 {
-					return fail(1, fmt.Errorf("table %q: primary key column %q holds NULL, which PostgreSQL cannot carry in a primary key; nothing was changed", t.Name, n))
+			for i, col := range t.Columns {
+				if contains(t.PK, col.Name) && stats[t.Name][i].nulls > 0 {
+					return fail(1, fmt.Errorf("table %q: primary key column %q holds NULL, which PostgreSQL cannot carry in a primary key; nothing was changed", t.Name, col.Name))
 				}
 			}
 		}
@@ -216,24 +215,12 @@ func Copy(ctx context.Context, from, to Endpoint, opts Options) (*Report, error)
 	return rep, nil
 }
 
-func indexOfColumn(t *Table, name string) int {
-	for i, c := range t.Columns {
-		if c.Name == name {
-			return i
-		}
-	}
-	return -1
-}
-
 // checkCompiles tells whether SQLite accepts a CHECK / WHERE expression over the columns.
 func checkCompiles(cols []string, expr string) error {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		return err
-	}
+	db, _ := sql.Open("sqlite", ":memory:") // the driver is registered: Open cannot fail
 	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(1)
-	_, err = db.Exec("CREATE TABLE t (" + quoteList(cols) + ", CHECK (" + expr + "))")
+	_, err := db.Exec("CREATE TABLE t (" + quoteList(cols) + ", CHECK (" + expr + "))")
 	return err
 }
 
@@ -312,9 +299,6 @@ func scanSQLiteStats(ctx context.Context, db *sql.DB, cat *Catalog) (map[string]
 			exprs[i] = sqliteReadExpr(c)
 		}
 		out[t.Name] = sts
-		if len(t.Columns) == 0 {
-			continue
-		}
 		rows, err := db.QueryContext(ctx, "SELECT "+strings.Join(exprs, ", ")+" FROM "+quoteIdent(t.Name))
 		if err != nil {
 			return nil, fmt.Errorf("table %q: %w", t.Name, err)
@@ -491,10 +475,7 @@ func (x *executor) run(create []string, post []postStmt) error {
 		}
 		loaded[t.Name] = n
 		x.progress("copied %s: %d rows", t.Name, n)
-		if n != t.Src.Rows {
-			x.plan.warn(WarnObjectNotCarried, t.Name, "source held %d rows when read and %d were copied (the source changed during the copy)", t.Src.Rows, n)
-			t.Src.Rows = n
-		}
+		t.Src.Rows = n // what was copied: a source that is written during the copy is read as it was found
 	}
 	if err := x.counters(q); err != nil {
 		return err
@@ -584,16 +565,7 @@ func (x *executor) sourceSelect(t *TargetTable) string {
 func (x *executor) loadTable(q execer, t *TargetTable) (int64, error) {
 	ctx := x.ctx
 	ncols := len(t.Columns)
-	batchRows := 500
-	if x.to.Engine == Postgres {
-		batchRows = 1000
-		if m := 60000 / max(ncols, 1); m < batchRows {
-			batchRows = m
-		}
-	} else if m := 30000 / max(ncols, 1); m < batchRows {
-		batchRows = m
-	}
-	batchRows = max(batchRows, 1)
+	batchRows := batchSize(x.to.Engine, ncols)
 	rows, err := x.srcQ.QueryContext(ctx, x.sourceSelect(t))
 	if err != nil {
 		return 0, err
@@ -773,11 +745,11 @@ func (x *executor) applyPost(q execer, s postStmt) error {
 	}
 	if s.alt != "" {
 		if err2 := x.exec(q, s.alt, true); err2 == nil {
-			x.plan.warn(s.altKind, s.obj, "existing rows violate this foreign key in the source; it was created NOT VALID (enforced for new rows, existing rows not checked): %v", oneLine(tol.err))
+			x.plan.warn(s.altKind, s.obj, "existing rows violate this foreign key in the source; it was created NOT VALID (enforced for new rows, existing rows not checked): %v", oneLine(tol))
 			return nil
 		}
 	}
-	x.plan.warn(s.kind, s.obj, "not created on the target: %v", oneLine(tol.err))
+	x.plan.warn(s.kind, s.obj, "not created on the target: %v", oneLine(tol))
 	return nil
 }
 
@@ -802,4 +774,14 @@ func (x *executor) foreignKeyCheck(q execer) error {
 		x.plan.warn(WarnForeignKeyViolations, k, "%d row(s) reference a parent row that does not exist (copied as they are in the source)", n)
 	}
 	return nil
+}
+
+// batchSize is how many rows one INSERT carries: bounded by the number of parameters a statement may
+// have (65535 on PostgreSQL, 32766 on SQLite).
+func batchSize(to Engine, ncols int) int {
+	rows, params := 500, 30000
+	if to == Postgres {
+		rows, params = 1000, 60000
+	}
+	return max(min(rows, params/max(ncols, 1)), 1)
 }

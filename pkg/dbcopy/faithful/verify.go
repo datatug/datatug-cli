@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"fmt"
+	"hash"
 	"math"
 	"sort"
 	"strings"
@@ -266,37 +267,13 @@ func tableDigest(ctx context.Context, e Endpoint, t *Table, only string) (string
 	for i := range vals {
 		ptrs[i] = &vals[i]
 	}
-	var buf [8]byte
 	var n int64
 	for rows.Next() {
 		if err := rows.Scan(ptrs...); err != nil {
 			return "", err
 		}
 		for _, v := range vals {
-			switch x := v.(type) {
-			case nil:
-				h.Write([]byte{0})
-			case int64:
-				h.Write([]byte{1})
-				binary.LittleEndian.PutUint64(buf[:], uint64(x))
-				h.Write(buf[:])
-			case float64:
-				h.Write([]byte{2})
-				binary.LittleEndian.PutUint64(buf[:], math.Float64bits(x))
-				h.Write(buf[:])
-			case string:
-				h.Write([]byte{3})
-				binary.LittleEndian.PutUint64(buf[:], uint64(len(x)))
-				h.Write(buf[:])
-				h.Write([]byte(x))
-			case []byte:
-				h.Write([]byte{4})
-				binary.LittleEndian.PutUint64(buf[:], uint64(len(x)))
-				h.Write(buf[:])
-				h.Write(x)
-			default:
-				_, _ = fmt.Fprintf(h, "?%v", x)
-			}
+			hashValue(h, v)
 		}
 		n++
 	}
@@ -307,3 +284,32 @@ func tableDigest(ctx context.Context, e Endpoint, t *Table, only string) (string
 }
 
 var _ = sql.ErrNoRows
+
+// hashValue feeds one value, with its storage class, to h.
+func hashValue(h hash.Hash, v any) {
+	var buf [8]byte
+	switch x := v.(type) {
+	case nil:
+		h.Write([]byte{0})
+	case int64:
+		h.Write([]byte{1})
+		binary.LittleEndian.PutUint64(buf[:], uint64(x))
+		h.Write(buf[:])
+	case float64:
+		h.Write([]byte{2})
+		binary.LittleEndian.PutUint64(buf[:], math.Float64bits(x))
+		h.Write(buf[:])
+	case string:
+		h.Write([]byte{3})
+		binary.LittleEndian.PutUint64(buf[:], uint64(len(x)))
+		h.Write(buf[:])
+		h.Write([]byte(x))
+	case []byte:
+		h.Write([]byte{4})
+		binary.LittleEndian.PutUint64(buf[:], uint64(len(x)))
+		h.Write(buf[:])
+		h.Write(x)
+	default:
+		_, _ = fmt.Fprintf(h, "?%v", x)
+	}
+}

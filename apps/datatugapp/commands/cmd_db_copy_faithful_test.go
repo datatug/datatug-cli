@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -113,10 +116,9 @@ func TestDBCopyFaithful_Refusals(t *testing.T) {
 
 	// An empty source.
 	empty := sqliteFixture(t, `CREATE TABLE x (a)`, `DROP TABLE x`)
-	_, _, err = runCopy(t, "db", "copy", "--from", empty, "--to", target)
-	require.Error(t, err)
-	assert.Equal(t, 1, exitCodeOf(t, err))
-	assert.Contains(t, err.Error(), "no tables")
+	_, stderr, err := runCopy(t, "db", "copy", "--from", empty, "--to", target)
+	require.NoError(t, err, "an empty source is a note, not a failure")
+	assert.Contains(t, stderr.String(), "source has no tables; nothing to copy")
 
 	// A source that is not there.
 	_, _, err = runCopy(t, "db", "copy", "--from", "sqlite://"+filepath.Join(t.TempDir(), "missing.sqlite"), "--to", target)
@@ -173,4 +175,48 @@ func TestDBCopyFaithful_AFailedCopyLeavesNoNewFile(t *testing.T) {
 	require.Error(t, err)
 	_, statErr = os.Stat(target)
 	assert.NoError(t, statErr, "a file that was there is not removed")
+}
+
+// emptyPG is a PostgreSQL source with no server and no table: every query answers with no row.
+type emptyPGConnector struct{}
+
+func (emptyPGConnector) Connect(context.Context) (driver.Conn, error) { return emptyPGConn{}, nil }
+func (emptyPGConnector) Driver() driver.Driver                        { return nil }
+
+type emptyPGConn struct{}
+
+func (emptyPGConn) Prepare(string) (driver.Stmt, error) { return nil, io.ErrUnexpectedEOF }
+func (emptyPGConn) Close() error                        { return nil }
+func (emptyPGConn) Begin() (driver.Tx, error)           { return emptyPGTx{}, nil }
+func (emptyPGConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
+	return emptyPGTx{}, nil
+}
+func (emptyPGConn) QueryContext(context.Context, string, []driver.NamedValue) (driver.Rows, error) {
+	return emptyPGRows{}, nil
+}
+
+type emptyPGTx struct{}
+
+func (emptyPGTx) Commit() error   { return nil }
+func (emptyPGTx) Rollback() error { return nil }
+
+type emptyPGRows struct{}
+
+func (emptyPGRows) Columns() []string         { return []string{"a", "b", "c", "d", "e"} }
+func (emptyPGRows) Close() error              { return nil }
+func (emptyPGRows) Next([]driver.Value) error { return io.EOF }
+
+func TestDBCopyFaithful_APostgresSourceWithNoTables(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	t.Cleanup(dbcopy.SetSQLOpenerForTest(func(string, string) (*sql.DB, error) { return sql.OpenDB(emptyPGConnector{}), nil }))
+	target := "sqlite://" + filepath.Join(t.TempDir(), "t.sqlite")
+
+	_, _, err := runCopy(t, "db", "copy", "--from", "postgres://u:pw@127.0.0.1:1/db", "--to", target)
+	require.Error(t, err)
+	assert.Equal(t, 1, exitCodeOf(t, err))
+	assert.Contains(t, err.Error(), `PostgreSQL source schema "public" has no tables`)
+
+	_, _, err = runCopy(t, "db", "copy", "--from", "postgres://u:pw@127.0.0.1:1/db", "--from-schema", "sales", "--to", target)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `PostgreSQL source schema "sales" has no tables`)
 }

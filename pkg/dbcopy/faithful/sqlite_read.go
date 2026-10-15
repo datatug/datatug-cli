@@ -118,9 +118,6 @@ func readSQLiteTable(ctx context.Context, db Queryer, cat *Catalog, t *Table, cr
 			_ = cols.Close()
 			return err
 		}
-		if hidden == 1 {
-			continue
-		}
 		c := &Column{Name: name, SourceType: typ, NotNull: notnull != 0, Precision: -1, Scale: -1}
 		if dflt.Valid && !strings.EqualFold(strings.TrimSpace(dflt.String), "NULL") {
 			c.Default = dflt.String
@@ -206,9 +203,6 @@ func readSQLiteTable(ctx context.Context, db Queryer, cat *Catalog, t *Table, cr
 		if d, ok := deferrable[strings.Join(t.FKs[i].Columns, "\x00")]; ok {
 			t.FKs[i].Deferrable, t.FKs[i].Deferred = true, d
 		}
-	}
-	if deferrableWord.MatchString(notDeferrable.ReplaceAllString(createSQL, "")) && len(deferrable) == 0 {
-		cat.Notes = append(cat.Notes, Warning{WarnFKNotValidated, t.Name, "a DEFERRABLE clause was found that could not be matched to a foreign key; foreign keys are created as immediate"})
 	}
 
 	// Indexes and unique constraints.
@@ -305,9 +299,5 @@ func readSQLiteTable(ctx context.Context, db Queryer, cat *Catalog, t *Table, cr
 }
 
 func normAction(a string) string {
-	a = strings.ToUpper(strings.TrimSpace(a))
-	if a == "" {
-		return "NO ACTION"
-	}
-	return a
+	return strings.ToUpper(strings.TrimSpace(a))
 }

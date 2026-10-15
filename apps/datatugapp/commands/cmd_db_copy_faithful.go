@@ -126,7 +126,10 @@ func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSc
 				}
 				return finish(rep, 1, fmt.Sprintf("PostgreSQL source schema %q has no tables; specify another schema with --from-schema", schema))
 			}
-			return finish(rep, 1, "source has no tables; nothing to copy")
+			// REQ:source-introspection-failure: exit 0 with a note on stderr.
+			_, _ = fmt.Fprintln(errWriter, "source has no tables; nothing to copy")
+			failed = true // nothing was copied: a target file made for it is removed
+			return nil
 		}
 		return finish(rep, code, redact(err))
 	}

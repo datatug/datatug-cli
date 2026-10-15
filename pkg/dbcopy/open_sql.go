@@ -13,6 +13,19 @@ import (
 	_ "modernc.org/sqlite"             // registers the "sqlite" database/sql driver
 )
 
+// openSQLHandle opens a database/sql handle: sql.Open, a seam for the tests of the packages that reach a
+// PostgreSQL database through OpenSQL without a server.
+var openSQLHandle = sql.Open
+
+// SetSQLOpenerForTest replaces how OpenSQL opens a handle and returns the function that puts it back.
+//
+// NEVER call this from production code.
+func SetSQLOpenerForTest(open func(driverName, dsn string) (*sql.DB, error)) (restore func()) {
+	previous := openSQLHandle
+	openSQLHandle = open
+	return func() { openSQLHandle = previous }
+}
+
 // SQLEngine reports the faithful-copy engine of this source: "sqlite", "postgres" or "" for a
 // scheme the faithful SQLite/PostgreSQL copy does not handle.
 func (r BackendRef) SQLEngine() string {
@@ -67,7 +80,7 @@ func (r BackendRef) openSQL(ctx context.Context, forWrite bool) (*sql.DB, error)
 		} else if err := r.CheckFile(); err != nil {
 			return nil, err
 		}
-		db, err := sql.Open("sqlite", SQLiteFileURIMode(r.Path, mode))
+		db, err := openSQLHandle("sqlite", SQLiteFileURIMode(r.Path, mode))
 		if err != nil {
 			return nil, err
 		}
@@ -84,7 +97,7 @@ func (r BackendRef) openSQL(ctx context.Context, forWrite bool) (*sql.DB, error)
 		if err != nil {
 			return nil, err
 		}
-		db, err := sql.Open("pgx", connection)
+		db, err := openSQLHandle("pgx", connection)
 		if err != nil {
 			return nil, errPostgresOpenFailed
 		}

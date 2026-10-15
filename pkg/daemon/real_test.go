@@ -170,3 +170,19 @@ func TestProcessOwns(t *testing.T) {
 		t.Fatal("a missing pid is not ours")
 	}
 }
+
+func TestDialLoopbackSendsNoRequest(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	port := portOf(t, srv)
+	if !dialLoopback(port) {
+		t.Fatal("a listening port must dial")
+	}
+	srv.Close()
+	if dialLoopback(port) {
+		t.Fatal("a closed port must not dial")
+	}
+	if requests != 0 {
+		t.Fatalf("dial must not send an HTTP request, got %d", requests)
+	}
+}

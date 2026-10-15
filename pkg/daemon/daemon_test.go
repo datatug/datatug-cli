@@ -25,6 +25,7 @@ type fake struct {
 	notOurs   bool
 	onSleep   func()
 	now       time.Time
+	probes    int // HTTP requests the Manager sent
 }
 
 func newFake(t *testing.T) *fake {
@@ -36,7 +37,8 @@ func newFake(t *testing.T) *fake {
 	f.Manager = &Manager{
 		Dir:      filepath.Join(t.TempDir(), "daemon"),
 		Exe:      func() (string, error) { return "/bin/datatug", f.exeErr },
-		Probe:    func(port int) (string, bool) { return "v9", f.up[port] },
+		Probe:    func(port int) (string, bool) { f.probes++; return "v9", f.up[port] },
+		Dial:     func(port int) bool { return f.up[port] },
 		PortFree: func(port int) bool { return f.free[port] },
 		Alive:    func(pid int) bool { return f.alive[pid] },
 		Owns:     func(int, int) bool { return !f.notOurs },
@@ -70,7 +72,7 @@ func (f *fake) writeRec(t *testing.T, pid, port int) {
 	if err := os.MkdirAll(f.Dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.writeRecord(Record{PID: pid, Port: port, StartedBy: "claude-mod", StartedAt: f.now}); err != nil {
+	if err := f.writeRecord(Record{PID: pid, Port: port, StartedBy: "claude-mod", StartedAt: f.now, Version: "v9"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -93,6 +95,9 @@ func TestStatusOwned(t *testing.T) {
 	f.writeRec(t, 77, 8991)
 	f.up[8991], f.alive[77] = true, true
 	st := f.Status()
+	if f.probes != 0 {
+		t.Fatalf("a daemon this CLI started is checked without an HTTP request (it would reset its idle timer): %d", f.probes)
+	}
 	if !st.Running || st.PID != 77 || st.Port != 8991 || st.StartedBy != "claude-mod" || st.URL != "http://127.0.0.1:8991" || st.Version != "v9" || st.StartedAt == "" {
 		t.Fatalf("%+v", st)
 	}
@@ -103,6 +108,9 @@ func TestStatusStaleRecordAndExternal(t *testing.T) {
 	f.writeRec(t, 77, 8991) // process gone
 	f.up[8989] = true
 	st := f.Status()
+	if f.probes != 1 {
+		t.Fatalf("an external server costs exactly one agent-info request: %d", f.probes)
+	}
 	if !st.Running || st.StartedBy != "external" || st.PID != 0 || st.Port != DefaultPort {
 		t.Fatalf("%+v", st)
 	}

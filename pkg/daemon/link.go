@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/url"
+	"math/big"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -28,12 +29,22 @@ const (
 )
 
 // uiSupport is flipped to available per kind once datatug-apps ships the route
-// (spec/features/cli/daemon, Follow-up).
+// (spec/features/cli/daemon, Follow-up). All three kinds are pending: the UI
+// opens none of them with the shape below yet.
 var uiSupport = map[string]string{
-	KindTableMetadata: UISupportAvailable,
+	KindTableMetadata: UISupportPending,
 	KindTableRecords:  UISupportPending,
 	KindRecord:        UISupportPending,
 }
+
+const (
+	// MaxLinkLength bounds a link: the mod SDK draws at most this many characters.
+	MaxLinkLength = 2048
+	// maxKeyValueLength bounds one primary-key string value.
+	maxKeyValueLength = 256
+	// maxSafeInteger is 2^53 - 1: the largest integer a JavaScript number holds exactly.
+	maxSafeInteger = 1<<53 - 1
+)
 
 // UsageError is a bad `daemon url` input (exit code 2).
 type UsageError struct{ Msg string }
@@ -67,7 +78,9 @@ type Link struct {
 }
 
 // BuildLink builds the deep link of contract deep-link-contract for the agent
-// reported by st. It never reaches the network.
+// reported by st: identity in the path, view parameters (limit, schema) in the
+// query, the record key in the fragment so it is never sent to the web host.
+// It never reaches the network.
 func BuildLink(st Status, req LinkRequest) (Link, error) {
 	if req.Records && req.Record != "" {
 		return Link{}, UsageError{"--records and --record are mutually exclusive"}
@@ -82,13 +95,18 @@ func BuildLink(st Status, req LinkRequest) (Link, error) {
 			return Link{}, UsageError{"identifiers must be ids and names, never connection URLs"}
 		}
 	}
+	for _, v := range []string{req.Project, req.Env, req.DB, req.Table} {
+		if v == "." || v == ".." {
+			return Link{}, UsageError{"identifiers must not be . or .."}
+		}
+	}
 	kind := "table"
 	if req.View {
 		kind = "view"
 	}
 	u := fmt.Sprintf("%s/project/%s/env/%s/db/%s/%s/%s", st.UIBase,
-		url.PathEscape(req.Project), url.PathEscape(req.Env), url.PathEscape(req.DB), kind, url.PathEscape(req.Table))
-	query := url.Values{}
+		encodeComponent(req.Project), encodeComponent(req.Env), encodeComponent(req.DB), kind, encodeComponent(req.Table))
+	schema := "schema=" + encodeComponent(req.Schema)
 	out := Link{Kind: KindTableMetadata, Running: st.Running}
 	switch {
 	case req.Records:
@@ -99,37 +117,78 @@ func BuildLink(st Status, req LinkRequest) (Link, error) {
 		if limit < 1 || limit > MaxLimit {
 			return Link{}, UsageError{fmt.Sprintf("--limit must be between 1 and %d", MaxLimit)}
 		}
-		u += "/records"
-		query.Set("limit", fmt.Sprint(limit))
+		u += fmt.Sprintf("/records?limit=%d&%s", limit, schema)
 		out.Kind = KindTableRecords
 	case req.Record != "":
 		pk, err := canonicalPK(req.Record)
 		if err != nil {
 			return Link{}, err
 		}
-		u += "/record"
-		query.Set("pk", pk)
+		u += "/record?" + schema + "#pk=" + encodeComponent(pk)
 		out.Kind = KindRecord
+	default:
+		u += "?" + schema
 	}
-	if req.Schema != "" {
-		query.Set("schema", req.Schema)
-	}
-	if len(query) > 0 {
-		u += "?" + query.Encode()
+	if len(u) > MaxLinkLength {
+		return Link{}, UsageError{fmt.Sprintf("the link would be longer than %d characters", MaxLinkLength)}
 	}
 	out.URL, out.UISupport = u, uiSupport[out.Kind]
 	return out, nil
 }
 
-// canonicalPK checks that v is a non-empty JSON object and re-encodes it with
-// sorted keys so one record always has one link.
+// encodeComponent is JavaScript's encodeURIComponent: every byte but letters,
+// digits and - _ . ! ~ * ' ( ) is percent-encoded (a space is %20, never +).
+func encodeComponent(s string) string {
+	const hex = "0123456789ABCDEF"
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("-_.!~*'()", c) >= 0 {
+			b.WriteByte(c)
+			continue
+		}
+		b.WriteByte('%')
+		b.WriteByte(hex[c>>4])
+		b.WriteByte(hex[c&15])
+	}
+	return b.String()
+}
+
+var integerLiteral = regexp.MustCompile(`^-?[0-9]+$`)
+
+// canonicalPK checks that v is a non-empty JSON object of scalar key values
+// and re-encodes it with sorted keys so one record always has one link. An
+// integer outside the range JavaScript holds exactly (absolute value above
+// 2^53 - 1) becomes a string, so the UI never rounds it to a neighbour.
 func canonicalPK(v string) (string, error) {
+	bad := UsageError{"--record must be a non-empty JSON object of primary-key column to value"}
 	dec := json.NewDecoder(bytes.NewReader([]byte(v)))
 	dec.UseNumber()
 	var obj map[string]any
 	if err := dec.Decode(&obj); err != nil || len(obj) == 0 || dec.More() {
-		return "", UsageError{"--record must be a non-empty JSON object of primary-key column to value"}
+		return "", bad
 	}
-	out, _ := json.Marshal(obj) // a decoded map always encodes
-	return string(out), nil
+	for k, val := range obj {
+		switch x := val.(type) {
+		case json.Number:
+			if integerLiteral.MatchString(x.String()) {
+				n, ok := new(big.Int).SetString(x.String(), 10)
+				if ok && new(big.Int).Abs(n).Cmp(big.NewInt(maxSafeInteger)) > 0 {
+					obj[k] = x.String()
+				}
+			}
+		case string:
+			if len(x) > maxKeyValueLength {
+				return "", UsageError{fmt.Sprintf("a key value must be at most %d characters", maxKeyValueLength)}
+			}
+		case bool:
+		default: // null, object, array
+			return "", bad
+		}
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(obj) // a decoded map always encodes
+	return strings.TrimSuffix(buf.String(), "\n"), nil
 }

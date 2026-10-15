@@ -46,6 +46,9 @@ type resolvedSource struct {
 	URL     string
 	Columns []semantic.Column
 	Schema  semantic.TableSchema
+	// ForeignKeys are the outgoing foreign keys of the table as the live schema of the source
+	// reports them (nil for a source that has none or cannot report them).
+	ForeignKeys []dbschema.ForeignKeyDef
 }
 
 // resolveSource resolves (environment, source, collection) to a
@@ -186,7 +189,7 @@ func resolveSQLSourceURL(ctx context.Context, sourceID, sourceURL, collection st
 			}},
 		})
 	}
-	// ForeignKeys (this collection's own OUTGOING foreign keys) is left
+	// semantic.TableSchema.ForeignKeys (this collection's own OUTGOING foreign keys) is left
 	// empty: dbschema.ConstraintDef (Tier 1) reports that a "foreign-key"
 	// constraint exists by name only, with no referenced-table/columns —
 	// there is nothing here to build a valid semantic.Lookup target from.
@@ -201,6 +204,7 @@ func resolveSQLSourceURL(ctx context.Context, sourceID, sourceURL, collection st
 			PrimaryKey:   primaryKey,
 			ReferencedBy: referencedBy,
 		},
+		ForeignKeys: def.ForeignKeys,
 	}, nil
 }
 

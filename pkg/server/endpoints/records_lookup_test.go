@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dbschema"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -40,6 +41,10 @@ func lookupFixture(t *testing.T, as string, roles []string) (projectID string) {
 		`INSERT INTO Tag VALUES ('1 OR 1=1','sneaky'),('x','plain')`,
 		`CREATE TABLE Loose (A INTEGER, B TEXT)`,
 		`INSERT INTO Loose VALUES (1,'a')`,
+		`CREATE TABLE Par (A INTEGER NOT NULL, B TEXT NOT NULL, PRIMARY KEY (A, B))`,
+		`CREATE TABLE Child (Id INTEGER NOT NULL PRIMARY KEY, PA INTEGER, PB TEXT, Ref INTEGER REFERENCES Big(Id), FOREIGN KEY (PA, PB) REFERENCES Par(A, B))`,
+		`CREATE TABLE Flag (Active BOOLEAN NOT NULL PRIMARY KEY, Note TEXT)`,
+		`INSERT INTO Flag VALUES (1,'yes'),(0,'no')`,
 		`CREATE TABLE Flt (F REAL NOT NULL PRIMARY KEY, Note TEXT)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
@@ -162,6 +167,9 @@ func TestRecordsLookup_Table(t *testing.T) {
 		{"key is an array", lookupBody(project, "chinook", "", "Genre", `[1]`), want{400, "INVALID_REQUEST", "key", 0, ""}},
 		{"key is a scalar", lookupBody(project, "chinook", "", "Genre", `1`), want{400, "INVALID_REQUEST", "key", 0, ""}},
 		{"table without a primary key", lookupBody(project, "chinook", "", "Loose", `{"A":1}`), want{400, "INVALID_REQUEST", "key", 0, ""}},
+		{"boolean key for a boolean column is refused (the structured SQLite read binds no boolean)", lookupBody(project, "chinook", "", "Flag", `{"Active":true}`), want{400, "INVALID_REQUEST", "key", 0, ""}},
+		{"integer for boolean column", lookupBody(project, "chinook", "", "Flag", `{"Active":1}`), want{400, "INVALID_REQUEST", "key", 0, ""}},
+		{"float key is refused (no exact float equality)", lookupBody(project, "chinook", "", "Flt", `{"F":0.5}`), want{400, "INVALID_REQUEST", "key", 0, ""}},
 		{"unsupported key type", lookupBody(project, "chinook", "", "Flt", `{"F":1}`), want{400, "INVALID_REQUEST", "key", 0, ""}},
 
 		{"duplicate key column", lookupBody(project, "chinook", "", "Genre", `{"GenreId":1,"GenreId":2}`), want{400, "INVALID_REQUEST", "key", 0, ""}},
@@ -625,4 +633,119 @@ func TestRecordsLookup_ClosesSchemaHandlesAndIsConcurrencySafe(t *testing.T) {
 	}
 	// A backend with no Close is left alone.
 	prev(nil)
+}
+
+// The outgoing foreign keys of the live schema: a composite key and a single-column key, an empty
+// array (never null) for a table with none, and the same answer for a source that was never scanned.
+func TestRecordsSchema_ForeignKeys(t *testing.T) {
+	project := lookupFixture(t, "alice", []string{"admin"})
+	get := func(table string) (recordsSchemaResponse, string) {
+		code, raw := doSchema(t, `{"project":"`+project+`","env":"local","source":"chinook","table":"`+table+`"}`)
+		var got recordsSchemaResponse
+		if err := json.Unmarshal([]byte(raw), &got); err != nil || code != http.StatusOK {
+			t.Fatalf("%s: %d %s %v", table, code, raw, err)
+		}
+		return got, raw
+	}
+	child, _ := get("Child")
+	byColumns := map[string]recordsForeignKey{}
+	for _, fk := range child.ForeignKeys {
+		byColumns[strings.Join(fk.Columns, ",")] = fk
+	}
+	composite, single := byColumns["PA,PB"], byColumns["Ref"]
+	if len(child.ForeignKeys) != 2 || composite.Name == "" ||
+		composite.RefTable.Name != "Par" || strings.Join(composite.RefColumns, ",") != "A,B" ||
+		single.RefTable.Name != "Big" || strings.Join(single.RefColumns, ",") != "Id" {
+		t.Fatalf("foreign keys = %+v", child.ForeignKeys)
+	}
+	// referencedBy is unchanged.
+	if par, _ := get("Par"); len(par.ReferencedBy) == 0 || len(par.ForeignKeys) != 0 {
+		t.Fatalf("Par = %+v", par)
+	}
+	_, raw := get("Loose")
+	if !strings.Contains(raw, `"foreignKeys":[]`) {
+		t.Fatalf("a table with no foreign key must answer an empty array: %s", raw)
+	}
+	// No schema in the request: the default schema of the driver is named.
+	if composite.RefTable.Schema != "main" {
+		t.Fatalf("refTable schema = %q", composite.RefTable.Schema)
+	}
+	// The schema qualifier of the table is the schema of the referenced table.
+	code, raw := doSchema(t, `{"project":"`+project+`","env":"local","source":"chinook","schema":"main","table":"Child"}`)
+	if code != 200 || !strings.Contains(raw, `"refTable":{"schema":"main","name":"Par"}`) {
+		t.Fatalf("%d %s", code, raw)
+	}
+}
+
+// A denied principal gets the same 403 for a table with foreign keys, one without, and an unknown one.
+func TestRecordsSchema_ForeignKeysDeniedPrincipal(t *testing.T) {
+	project := lookupFixture(t, "bob", []string{"support"})
+	spy := spyQueries(t)
+	var first string
+	for _, table := range []string{"Child", "Loose", "NoSuchTable"} {
+		code, raw := doSchema(t, `{"project":"`+project+`","env":"local","source":"chinook","table":"`+table+`"}`)
+		var v map[string]map[string]any
+		if err := json.Unmarshal([]byte(raw), &v); err != nil || code != http.StatusForbidden {
+			t.Fatalf("%s: %d %s", table, code, raw)
+		}
+		delete(v["error"], "requestId")
+		norm, _ := json.Marshal(v)
+		if first == "" {
+			first = string(norm)
+		} else if string(norm) != first {
+			t.Fatalf("answers differ: %s vs %s", norm, first)
+		}
+		if strings.Contains(raw, "Par") || strings.Contains(raw, "foreignKeys") {
+			t.Fatalf("a denied answer leaks schema: %s", raw)
+		}
+	}
+	if spy.calls != 0 {
+		t.Fatalf("%d queries", spy.calls)
+	}
+}
+
+// An allowed table never reveals a denied one: foreign keys and referencedBy entries to a table the
+// principal may not read are left out, and a key whose columns do not line up is left out.
+func TestRecordsSchema_ForeignKeysAreFilteredByThePolicy(t *testing.T) {
+	project := lookupFixture(t, "bob", []string{"support"}) // may read Customer only
+	executor, ok := secureExecutorHook()
+	if !ok {
+		t.Fatal("no executor")
+	}
+	ctx := context.Background()
+	fk := func(name, ns, target string, from, to []dal.FieldName) dbschema.ForeignKeyDef {
+		return dbschema.ForeignKeyDef{Name: name, Fields: from, ReferencedCollection: target, ReferencedNamespace: ns, ReferencedFields: to}
+	}
+	one := []dal.FieldName{"a"}
+	got := readableForeignKeys(ctx, executor, "sqlite3", "", []dbschema.ForeignKeyDef{
+		fk("allowed", "", "Customer", one, one),
+		fk("denied parent", "", "Par", one, one),
+		fk("other schema", "archive", "Customer", one, one),
+		fk("partial target", "", "Customer", []dal.FieldName{"a", "b"}, one),
+		fk("explicit default schema", "main", "Customer", one, one),
+	})
+	if len(got) != 2 || got[0].Name != "allowed" || got[0].RefTable.Schema != "main" || got[1].RefTable.Schema != "main" {
+		t.Fatalf("got %+v", got)
+	}
+	if defaultSchemaName("postgres") != "public" || defaultSchemaName("") != "" {
+		t.Fatal("default schema names")
+	}
+	// referencedBy: Customer is read by bob, the tables that reference it are not.
+	code, raw := doSchema(t, `{"project":"`+project+`","env":"local","source":"chinook","table":"Customer"}`)
+	var customer recordsSchemaResponse
+	if err := json.Unmarshal([]byte(raw), &customer); err != nil || code != 200 {
+		t.Fatalf("%d %s %v", code, raw, err)
+	}
+	if len(customer.ReferencedBy) != 0 {
+		t.Fatalf("referencedBy leaks denied tables: %v", customer.ReferencedBy)
+	}
+}
+
+func TestRecordsSchema_AdminSeesReferencedBy(t *testing.T) {
+	admin := lookupFixture(t, "alice", []string{"admin"})
+	_, raw := doSchema(t, `{"project":"`+admin+`","env":"local","source":"chinook","table":"Customer"}`)
+	var customer recordsSchemaResponse
+	if err := json.Unmarshal([]byte(raw), &customer); err != nil || len(customer.ReferencedBy) == 0 {
+		t.Fatalf("admin referencedBy: %s %v", raw, err)
+	}
 }

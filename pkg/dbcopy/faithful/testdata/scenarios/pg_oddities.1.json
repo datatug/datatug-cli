@@ -1,0 +1,2711 @@
+[
+ {
+  "kind": "exec",
+  "sql": "CREATE SCHEMA other"
+ },
+ {
+  "kind": "exec",
+  "sql": "CREATE TABLE other.o (id int PRIMARY KEY)"
+ },
+ {
+  "kind": "exec",
+  "sql": "CREATE TABLE base (id int PRIMARY KEY, grp int, r int4range, EXCLUDE USING gist (r WITH \u0026\u0026))"
+ },
+ {
+  "kind": "exec",
+  "sql": "CREATE TABLE kid (id int PRIMARY KEY, base_id int, o_id int, FOREIGN KEY (base_id) REFERENCES base(id) MATCH FULL, FOREIGN KEY (o_id) REFERENCES other.o(id))"
+ },
+ {
+  "kind": "exec",
+  "sql": "CREATE TABLE parted (id int, day date) PARTITION BY RANGE (day)"
+ },
+ {
+  "kind": "exec",
+  "sql": "CREATE TABLE parted_2020 PARTITION OF parted FOR VALUES FROM ('2020-01-01') TO ('2021-01-01')"
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE base ENABLE ROW LEVEL SECURITY"
+ },
+ {
+  "kind": "exec",
+  "sql": "CREATE FOREIGN DATA WRAPPER dummy_fdw"
+ },
+ {
+  "kind": "exec",
+  "sql": "CREATE SERVER dummy_srv FOREIGN DATA WRAPPER dummy_fdw"
+ },
+ {
+  "kind": "exec",
+  "sql": "CREATE FOREIGN TABLE ft (a int) SERVER dummy_srv"
+ },
+ {
+  "kind": "exec",
+  "sql": "CREATE TABLE marked (id int PRIMARY KEY, v text)"
+ },
+ {
+  "kind": "exec",
+  "sql": "COMMENT ON COLUMN marked.v IS 'datatug:{\"src\":\"sqlite\",\"type\":\"NVARCHAR(10)\"}'"
+ },
+ {
+  "kind": "exec",
+  "sql": "CREATE TABLE badmarked (id int PRIMARY KEY, v text)"
+ },
+ {
+  "kind": "exec",
+  "sql": "COMMENT ON COLUMN badmarked.v IS 'datatug:not json'"
+ },
+ {
+  "kind": "exec",
+  "sql": "CREATE UNIQUE INDEX sqlite_autoindex_marked_1 ON marked (v)"
+ },
+ {
+  "kind": "exec",
+  "sql": "ALTER TABLE marked ADD COLUMN d2 uuid DEFAULT gen_random_uuid()"
+ },
+ {
+  "kind": "exec",
+  "sql": "CREATE TABLE seqs (id serial PRIMARY KEY, v text)"
+ },
+ {
+  "kind": "exec",
+  "sql": "INSERT INTO seqs (v) VALUES ('a')",
+  "affected": 1
+ },
+ {
+  "kind": "exec",
+  "sql": "INSERT INTO base VALUES (1, 1, '[1,3)')",
+  "affected": 1
+ },
+ {
+  "kind": "begin"
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true), set_config('standard_conforming_strings', 'on', true), set_config('escape_string_warning', 'off', true)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.oid::bigint, c.relname, c.relkind::text, c.relispartition, c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') ORDER BY c.relname",
+  "cols": [
+   "oid",
+   "relname",
+   "relkind",
+   "relispartition",
+   "relrowsecurity"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 66158
+    },
+    {
+     "t": "s",
+     "v": "badmarked"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 66116
+    },
+    {
+     "t": "s",
+     "v": "base"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 66148
+    },
+    {
+     "t": "s",
+     "v": "ft"
+    },
+    {
+     "t": "s",
+     "v": "f"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 66125
+    },
+    {
+     "t": "s",
+     "v": "kid"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 66151
+    },
+    {
+     "t": "s",
+     "v": "marked"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 66140
+    },
+    {
+     "t": "s",
+     "v": "parted"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 66143
+    },
+    {
+     "t": "s",
+     "v": "parted_2020"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 66175
+    },
+    {
+     "t": "s",
+     "v": "seqs"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "v"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:not json"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "badmarked_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (id)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "badmarked_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"badmarked\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 0
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "grp"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 3
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "s",
+     "v": "int4range"
+    },
+    {
+     "t": "s",
+     "v": "int4range"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "s",
+     "v": "R"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "base_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (id)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "base_r_excl"
+    },
+    {
+     "t": "s",
+     "v": "x"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "EXCLUDE USING gist (r WITH \u0026\u0026)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "base_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "base_r_excl"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "gist"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"base\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "base_id"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 3
+    },
+    {
+     "t": "s",
+     "v": "o_id"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "kid_base_id_fkey"
+    },
+    {
+     "t": "s",
+     "v": "f"
+    },
+    {
+     "t": "s",
+     "v": "base_id"
+    },
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "base"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "a"
+    },
+    {
+     "t": "s",
+     "v": "a"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (base_id) REFERENCES base(id) MATCH FULL"
+    },
+    {
+     "t": "s",
+     "v": "f"
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "kid_o_id_fkey"
+    },
+    {
+     "t": "s",
+     "v": "f"
+    },
+    {
+     "t": "s",
+     "v": "o_id"
+    },
+    {
+     "t": "s",
+     "v": "other"
+    },
+    {
+     "t": "s",
+     "v": "o"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "a"
+    },
+    {
+     "t": "s",
+     "v": "a"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "FOREIGN KEY (o_id) REFERENCES other.o(id)"
+    },
+    {
+     "t": "s",
+     "v": "s"
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "kid_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (id)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "kid_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"kid\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 0
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "v"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": "datatug:{\"src\":\"sqlite\",\"type\":\"NVARCHAR(10)\"}"
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 3
+    },
+    {
+     "t": "s",
+     "v": "d2"
+    },
+    {
+     "t": "s",
+     "v": "uuid"
+    },
+    {
+     "t": "s",
+     "v": "uuid"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "U"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": "gen_random_uuid()"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "marked_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (id)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "marked_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ],
+   [
+    {
+     "t": "s",
+     "v": "sqlite_autoindex_marked_1"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "v"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"marked\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 0
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "day"
+    },
+    {
+     "t": "s",
+     "v": "date"
+    },
+    {
+     "t": "s",
+     "v": "date"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "D"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"parted\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 0
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "nextval('seqs_id_seq'::regclass)"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ],
+   [
+    {
+     "t": "i",
+     "v": 2
+    },
+    {
+     "t": "s",
+     "v": "v"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "text"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "S"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "cols": [
+   "nspname",
+   "relname"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "public"
+    },
+    {
+     "t": "s",
+     "v": "seqs_id_seq"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"seqs_id_seq\"",
+  "cols": [
+   "last_value",
+   "is_called"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "seqs_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (id)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "seqs_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"public\".\"seqs\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT \"id\", \"v\" FROM \"public\".\"badmarked\" ORDER BY \"id\"",
+  "cols": [
+   "id",
+   "v"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT \"id\", \"grp\", \"r\"::text FROM \"public\".\"base\" ORDER BY \"id\"",
+  "cols": [
+   "id",
+   "grp",
+   "r"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "[1,3)"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT \"id\", \"base_id\", \"o_id\" FROM \"public\".\"kid\" ORDER BY \"id\"",
+  "cols": [
+   "id",
+   "base_id",
+   "o_id"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT \"id\", \"v\", \"d2\"::text FROM \"public\".\"marked\" ORDER BY \"id\"",
+  "cols": [
+   "id",
+   "v",
+   "d2"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT \"id\", \"day\"::text FROM \"public\".\"parted\" ORDER BY ctid",
+  "cols": [
+   "id",
+   "day"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT \"id\", \"v\" FROM \"public\".\"seqs\" ORDER BY \"id\"",
+  "cols": [
+   "id",
+   "v"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "a"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "rollback"
+ },
+ {
+  "kind": "begin"
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true), set_config('standard_conforming_strings', 'on', true), set_config('escape_string_warning', 'off', true)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.oid::bigint, c.relname, c.relkind::text, c.relispartition, c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') ORDER BY c.relname",
+  "cols": [
+   "oid",
+   "relname",
+   "relkind",
+   "relispartition",
+   "relrowsecurity"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 66111
+    },
+    {
+     "t": "s",
+     "v": "o"
+    },
+    {
+     "t": "s",
+     "v": "r"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), tt.typname, tt.typtype::text, tt.typcategory::text, a.attnotnull, COALESCE(pg_get_expr(d.adbin, d.adrelid), ''), a.attidentity::text, a.attgenerated::text, COALESCE(col_description(a.attrelid, a.attnum), ''), (a.attcollation \u003c\u003e 0 AND a.attcollation \u003c\u003e tt.typcollation) FROM pg_attribute a JOIN pg_type tt ON tt.oid = a.atttypid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid = $1 AND a.attnum \u003e 0 AND NOT a.attisdropped ORDER BY a.attnum",
+  "cols": [
+   "attnum",
+   "attname",
+   "format_type",
+   "typname",
+   "typtype",
+   "typcategory",
+   "attnotnull",
+   "coalesce",
+   "attidentity",
+   "attgenerated",
+   "coalesce",
+   "?column?"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "integer"
+    },
+    {
+     "t": "s",
+     "v": "int4"
+    },
+    {
+     "t": "s",
+     "v": "b"
+    },
+    {
+     "t": "s",
+     "v": "N"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.conname, c.contype::text, (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n), COALESCE(rn.nspname, ''), COALESCE(rc.relname, ''), (SELECT string_agg(a.attname, E'\\037' ORDER BY k.ord) FROM unnest(c.confkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = k.n), c.confupdtype::text, c.confdeltype::text, c.condeferrable, c.condeferred, c.convalidated, pg_get_constraintdef(c.oid), c.confmatchtype::text FROM pg_constraint c LEFT JOIN pg_class rc ON rc.oid = c.confrelid LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace WHERE c.conrelid = $1 ORDER BY c.conname",
+  "cols": [
+   "conname",
+   "contype",
+   "string_agg",
+   "coalesce",
+   "coalesce",
+   "string_agg",
+   "confupdtype",
+   "confdeltype",
+   "condeferrable",
+   "condeferred",
+   "convalidated",
+   "pg_get_constraintdef",
+   "confmatchtype"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "o_pkey"
+    },
+    {
+     "t": "s",
+     "v": "p"
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "n"
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "s",
+     "v": " "
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "PRIMARY KEY (id)"
+    },
+    {
+     "t": "s",
+     "v": " "
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT ic.relname, i.indisunique, am.amname, i.indpred IS NOT NULL, COALESCE(pg_get_expr(i.indpred, i.indrelid), ''), i.indnkeyatts, i.indnatts, (SELECT string_agg(CASE WHEN k.n = 0 THEN '' ELSE a.attname END, E'\\037' ORDER BY k.ord) FROM unnest(i.indkey::int2[]) WITH ORDINALITY k(n, ord) LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n), array_to_string(i.indoption::int2[], ','), i.indexprs IS NOT NULL, EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid AND c.contype IN ('p','u','x')) FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid JOIN pg_am am ON am.oid = ic.relam WHERE i.indrelid = $1 ORDER BY ic.relname",
+  "cols": [
+   "relname",
+   "indisunique",
+   "amname",
+   "?column?",
+   "coalesce",
+   "indnkeyatts",
+   "indnatts",
+   "string_agg",
+   "array_to_string",
+   "?column?",
+   "exists"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "o_pkey"
+    },
+    {
+     "t": "b",
+     "v": true
+    },
+    {
+     "t": "s",
+     "v": "btree"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "s",
+     "v": ""
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "s",
+     "v": "id"
+    },
+    {
+     "t": "s",
+     "v": "0"
+    },
+    {
+     "t": "b",
+     "v": false
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT tgname FROM pg_trigger WHERE tgrelid = $1 AND NOT tgisinternal",
+  "cols": [
+   "tgname"
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT count(*) FROM \"other\".\"o\"",
+  "cols": [
+   "count"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 0
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT \"id\" FROM \"other\".\"o\" ORDER BY \"id\"",
+  "cols": [
+   "id"
+  ]
+ },
+ {
+  "kind": "rollback"
+ },
+ {
+  "kind": "begin"
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true), set_config('standard_conforming_strings', 'on', true), set_config('escape_string_warning', 'off', true)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT c.oid::bigint, c.relname, c.relkind::text, c.relispartition, c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') ORDER BY c.relname",
+  "cols": [
+   "oid",
+   "relname",
+   "relkind",
+   "relispartition",
+   "relrowsecurity"
+  ]
+ },
+ {
+  "kind": "rollback"
+ }
+]

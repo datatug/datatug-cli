@@ -54,27 +54,23 @@ func TestPostgresCopyJourneyRefusesANameAndLeavesTheTargetAsItWas(t *testing.T) 
 		`CREATE INDEX dt_copy_second_label ON dt_copy_second (label)`,
 		`INSERT INTO dt_copy_second VALUES (1, 'new uno')`,
 	}
-	for name, third := range map[string]string{
-		"a table with a space in its name": "dt_copy_third table",
-		"a table with a name of 64 bytes":  "dt_copy_" + strings.Repeat("x", 56),
-	} {
-		t.Run(name, func(t *testing.T) {
-			require.Len(t, third, map[bool]int{true: 19, false: 64}[strings.Contains(third, " ")])
-			source := sqliteFixture(t, append(append([]string{}, clean...),
-				`CREATE TABLE "`+third+`" (id INTEGER PRIMARY KEY, label TEXT)`)...)
+	t.Run("a table with a name of 64 bytes is refused", func(t *testing.T) {
+		third := "dt_copy_" + strings.Repeat("x", 56)
+		require.Len(t, third, 64)
+		source := sqliteFixture(t, append(append([]string{}, clean...),
+			`CREATE TABLE "`+third+`" (id INTEGER PRIMARY KEY, label TEXT)`)...)
 
-			_, _, err := runCopy(t, "db", "copy", "--from", source, "--to", server.scanURL, "--overwrite", "recreate")
+		_, _, err := runCopy(t, "db", "copy", "--from", source, "--to", server.scanURL, "--overwrite", "recreate")
 
-			require.Error(t, err, "the copy is refused")
-			var coder ExitCoder
-			require.ErrorAs(t, err, &coder)
-			assert.Equal(t, 1, coder.ExitCode())
-			assert.Contains(t, err.Error(), `table "`+third+`"`)
-			assert.Contains(t, err.Error(), "nothing in the target was changed")
-			assert.Equal(t, []string{"one", "two"}, pgLabels(t, server.scanURL, "dt_copy_first"), "the first table is still there with its rows")
-			assert.Equal(t, []string{"uno", "dos", "tres"}, pgLabels(t, server.scanURL, "dt_copy_second"), "the second table is still there with its rows")
-		})
-	}
+		require.Error(t, err, "the copy is refused")
+		var coder ExitCoder
+		require.ErrorAs(t, err, &coder)
+		assert.Equal(t, 1, coder.ExitCode())
+		assert.Contains(t, err.Error(), `table "`+third+`"`)
+		assert.Contains(t, err.Error(), "nothing was changed")
+		assert.Equal(t, []string{"one", "two"}, pgLabels(t, server.scanURL, "dt_copy_first"), "the first table is still there with its rows")
+		assert.Equal(t, []string{"uno", "dos", "tres"}, pgLabels(t, server.scanURL, "dt_copy_second"), "the second table is still there with its rows")
+	})
 
 	t.Run("a clean fixture is copied", func(t *testing.T) {
 		source := sqliteFixture(t, clean...)
@@ -82,9 +78,19 @@ func TestPostgresCopyJourneyRefusesANameAndLeavesTheTargetAsItWas(t *testing.T) 
 		_, stderr, err := runCopy(t, "db", "copy", "--from", source, "--to", server.scanURL, "--overwrite", "recreate")
 
 		require.NoError(t, err)
-		assert.Contains(t, stderr.String(), "db copy: replicated schema for 2/2 collections")
-		assert.NotContains(t, stderr.String(), "was not copied")
+		assert.Contains(t, stderr.String(), "db copy: copied 2 tables, 4 rows")
 		assert.Equal(t, []string{"new one", "new two", "new three"}, pgLabels(t, server.scanURL, "dt_copy_first"))
 		assert.Equal(t, []string{"new uno"}, pgLabels(t, server.scanURL, "dt_copy_second"))
+	})
+
+	t.Run("a table with a space in its name is quoted and copied", func(t *testing.T) {
+		source := sqliteFixture(t,
+			`CREATE TABLE "dt_copy space" (id INTEGER PRIMARY KEY, label TEXT)`,
+			`INSERT INTO "dt_copy space" VALUES (1, 'spaced')`)
+
+		_, _, err := runCopy(t, "db", "copy", "--from", source, "--to", server.scanURL, "--overwrite", "recreate")
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"spaced"}, pgLabels(t, server.scanURL, `"dt_copy space"`))
 	})
 }

@@ -56,8 +56,8 @@ type indexInfo struct {
 	Name       string   `json:"name"`
 	Columns    []string `json:"columns"`
 	Unique     bool     `json:"unique"`
-	Partial    bool     `json:"partial,omitempty"`
-	Expression bool     `json:"expression,omitempty"`
+	Partial    *bool    `json:"partial,omitempty"`
+	Expression *bool    `json:"expression,omitempty"`
 	Origin     string   `json:"origin,omitempty"`
 	Definition string   `json:"definition,omitempty"`
 }
@@ -70,36 +70,36 @@ type constraintInfo struct {
 
 // columnDetail is one column in full.
 type columnDetail struct {
-	Name               string        `json:"name"`
-	Ordinal            int           `json:"ordinal"`
-	Type               string        `json:"type"`
-	Length             *int          `json:"length,omitempty"`
-	Precision          *int          `json:"precision,omitempty"`
-	Scale              *int          `json:"scale,omitempty"`
-	Family             string        `json:"family"`
-	Nullable           bool          `json:"nullable"`
-	Default            *string       `json:"default,omitempty"`
-	PrimaryKeyPosition int           `json:"primaryKeyPosition,omitempty"`
-	AutoIncrement      bool          `json:"autoIncrement"`
-	ForeignKeys        []keyRef      `json:"foreignKeys"`
-	ReferencedBy       []incomingKey `json:"referencedBy"`
+	Name               string         `json:"name"`
+	Ordinal            int            `json:"ordinal"`
+	Type               string         `json:"type,omitempty"`
+	Length             *int           `json:"length,omitempty"`
+	Precision          *int           `json:"precision,omitempty"`
+	Scale              *int           `json:"scale,omitempty"`
+	Family             string         `json:"family,omitempty"`
+	Nullable           *bool          `json:"nullable,omitempty"`
+	Default            *string        `json:"default,omitempty"`
+	PrimaryKeyPosition int            `json:"primaryKeyPosition,omitempty"`
+	AutoIncrement      *bool          `json:"autoIncrement,omitempty"`
+	ForeignKeys        *[]keyRef      `json:"foreignKeys,omitempty"`
+	ReferencedBy       *[]incomingKey `json:"referencedBy,omitempty"`
 }
 
 // tableDetail is the output of `db table`.
 type tableDetail struct {
 	schemaEnvelope
-	Schema       string           `json:"schema"`
-	Name         string           `json:"name"`
-	Kind         string           `json:"kind"`
-	Definition   string           `json:"definition,omitempty"`
-	RowCount     *rowCount        `json:"rowCount,omitempty"`
-	Columns      []columnDetail   `json:"columns"`
-	PrimaryKey   []string         `json:"primaryKey"`
-	ForeignKeys  []keyRef         `json:"foreignKeys"`
-	ReferencedBy []incomingKey    `json:"referencedBy"`
-	Indexes      []indexInfo      `json:"indexes"`
-	Constraints  []constraintInfo `json:"constraints"`
-	Unsupported  []string         `json:"unsupported"`
+	Schema       string            `json:"schema"`
+	Name         string            `json:"name"`
+	Kind         string            `json:"kind"`
+	Definition   string            `json:"definition,omitempty"`
+	RowCount     *rowCount         `json:"rowCount,omitempty"`
+	Columns      []columnDetail    `json:"columns"`
+	PrimaryKey   *[]string         `json:"primaryKey,omitempty"`
+	ForeignKeys  *[]keyRef         `json:"foreignKeys,omitempty"`
+	ReferencedBy *[]incomingKey    `json:"referencedBy,omitempty"`
+	Indexes      *[]indexInfo      `json:"indexes,omitempty"`
+	Constraints  *[]constraintInfo `json:"constraints,omitempty"`
+	Unsupported  []string          `json:"unsupported"`
 }
 
 // columnOutput is the output of `db column`.
@@ -165,11 +165,22 @@ func dbColumnAction(cmd *cobra.Command, args []string) error {
 	}
 	for _, column := range detail.Columns {
 		if column.Name == args[1] {
-			out := columnOutput{schemaEnvelope: detail.schemaEnvelope, Schema: detail.Schema, Table: detail.Name, Column: column, Unsupported: columnUnsupported}
+			out := columnOutput{schemaEnvelope: detail.schemaEnvelope, Schema: detail.Schema, Table: detail.Name, Column: column, Unsupported: columnUnsupportedOf(detail)}
 			return writeJSONOrText(cmd.OutOrStdout(), session.format, out, func(w io.Writer) { writeColumnText(w, out) })
 		}
 	}
 	return Exit(fmt.Sprintf("column %q not found in %s.%s", args[1], detail.Schema, detail.Name), exitCodeUsage)
+}
+
+// columnUnsupportedOf are the column-level entries of the table's list.
+func columnUnsupportedOf(detail tableDetail) []string {
+	var out []string
+	for _, name := range detail.Unsupported {
+		if strings.HasPrefix(name, "columns.") {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // openSchemaObject opens the source and finds the table or view the command
@@ -212,19 +223,30 @@ func findSchemaEntry(entries []schemaEntry, schema, name string) (schemaEntry, e
 	return schemaEntry{}, Exit(fmt.Sprintf("%q exists in several schemas (%s): pass --schema", name, strings.Join(schemas, ", ")), exitCodeUsage)
 }
 
-// describeTable reads one table or view in full.
+// viewUnsupported are the facts a SQLite view does not give: its catalog lists
+// column names and the SQL, nothing else.
+var viewUnsupported = []string{
+	"primaryKey", "foreignKeys", "referencedBy", "indexes", "constraints",
+	"columns.type", "columns.family", "columns.nullable", "columns.default", "columns.autoIncrement",
+	"columns.primaryKeyPosition", "columns.foreignKeys", "columns.referencedBy",
+}
+
+func addressOf[T any](value T) *T { return &value }
+
+// describeTable reads one table or view in full. A fact the source could not
+// answer is left out of the result and named in Unsupported, never emptied.
 func describeTable(session *schemaSession, entry schemaEntry) (tableDetail, error) {
 	detail := tableDetail{
 		schemaEnvelope: schemaEnvelope{Provider: session.ref.Scheme, Target: schemaTarget(session.ref), DetectedFrom: session.detectedFrom},
 		Schema:         entry.Schema, Name: entry.Name, Kind: entry.Kind, Definition: entry.definition,
-		PrimaryKey: []string{}, ForeignKeys: []keyRef{}, ReferencedBy: []incomingKey{}, Indexes: []indexInfo{}, Constraints: []constraintInfo{},
+		Columns:     []columnDetail{},
 		Unsupported: append(append([]string{}, tableUnsupported...), columnUnsupported...),
 	}
 	if entry.Kind == schemaKindView && entry.viewColumns != nil {
 		for i, name := range entry.viewColumns {
-			detail.Columns = append(detail.Columns, columnDetail{Name: name, Ordinal: i + 1, Family: familyOther, Nullable: true, ForeignKeys: []keyRef{}, ReferencedBy: []incomingKey{}})
+			detail.Columns = append(detail.Columns, columnDetail{Name: name, Ordinal: i + 1})
 		}
-		detail.Unsupported = append(detail.Unsupported, "primaryKey", "foreignKeys", "referencedBy", "indexes", "constraints", "columns.type", "columns.default")
+		detail.Unsupported = append(detail.Unsupported, viewUnsupported...)
 		return detail, nil
 	}
 	def, err := dbschema.DescribeCollection(session.ctx, session.db, &entry.ref)
@@ -232,22 +254,28 @@ func describeTable(session *schemaSession, entry schemaEntry) (tableDetail, erro
 		return detail, err
 	}
 	provider := session.ref.Scheme
-	for _, name := range def.PrimaryKey {
-		detail.PrimaryKey = append(detail.PrimaryKey, string(name))
-	}
+	primaryKey := namesOf(def.PrimaryKey)
+	foreignKeys := []keyRef{}
 	for _, key := range def.ForeignKeys {
-		detail.ForeignKeys = append(detail.ForeignKeys, outgoingKey(provider, entry.Schema, key))
+		foreignKeys = append(foreignKeys, outgoingKey(provider, entry.Schema, key))
 	}
-	detail.ReferencedBy = incomingKeys(session, entry)
-	detail.Indexes = indexesOf(def)
+	detail.PrimaryKey, detail.ForeignKeys, detail.Indexes = &primaryKey, &foreignKeys, addressOf(indexesOf(def))
+	incoming, known := incomingKeys(session, entry)
+	if known {
+		detail.ReferencedBy = &incoming
+	} else {
+		detail.Unsupported = append(detail.Unsupported, "referencedBy", "columns.referencedBy")
+	}
 	if constraints, constraintErr := dbschema.ListConstraints(session.ctx, session.db, &entry.ref); constraintErr == nil {
+		listed := []constraintInfo{}
 		for _, constraint := range constraints {
-			detail.Constraints = append(detail.Constraints, constraintInfo{Name: constraint.Name, Type: constraint.Type})
+			listed = append(listed, constraintInfo{Name: constraint.Name, Type: constraint.Type})
 		}
+		detail.Constraints = &listed
 	} else {
 		detail.Unsupported = append(detail.Unsupported, "constraints")
 	}
-	detail.Columns = columnDetails(def, detail.ForeignKeys, detail.ReferencedBy)
+	detail.Columns = columnDetails(def, foreignKeys, incoming, known)
 	return detail, nil
 }
 
@@ -279,13 +307,14 @@ func outgoingKey(provider, schema string, key dbschema.ForeignKeyDef) keyRef {
 	}
 }
 
-// incomingKeys lists the foreign keys of other tables that reference entry.
-// A source that cannot list its referrers reports none.
-func incomingKeys(session *schemaSession, entry schemaEntry) []incomingKey {
+// incomingKeys lists the foreign keys of other tables that reference entry. It
+// reports false when the source cannot say (it cannot list its referrers, or
+// cannot describe one of them), so that "none" is never printed for "unknown".
+func incomingKeys(session *schemaSession, entry schemaEntry) ([]incomingKey, bool) {
 	keys := []incomingKey{}
 	referrers, err := dbschema.ListReferrers(session.ctx, session.db, &entry.ref)
 	if err != nil {
-		return keys
+		return nil, false
 	}
 	provider := session.ref.Scheme
 	for _, referrer := range referrers {
@@ -293,23 +322,19 @@ func incomingKeys(session *schemaSession, entry schemaEntry) []incomingKey {
 		if schema == "" {
 			schema = defaultSchema(provider, entry.Schema)
 		}
-		table := referrer.Collection.Name()
 		collection := referrer.Collection
 		def, describeErr := dbschema.DescribeCollection(session.ctx, session.db, &collection)
-		matched := false
-		if describeErr == nil {
-			for _, key := range def.ForeignKeys {
-				if key.ReferencedCollection == entry.Name {
-					matched = true
-					keys = append(keys, incomingKey{Name: key.Name, Schema: schema, Table: table, Columns: namesOf(key.Fields), ReferencedColumns: namesOf(key.ReferencedFields)})
-				}
+		if describeErr != nil {
+			return nil, false
+		}
+		for _, key := range def.ForeignKeys {
+			namespace := key.ReferencedNamespace
+			if key.ReferencedCollection == entry.Name && (namespace == "" || namespace == defaultSchema(provider, entry.Schema)) {
+				keys = append(keys, incomingKey{Name: key.Name, Schema: schema, Table: referrer.Collection.Name(), Columns: namesOf(key.Fields), ReferencedColumns: namesOf(key.ReferencedFields)})
 			}
 		}
-		if !matched {
-			keys = append(keys, incomingKey{Schema: schema, Table: table, Columns: namesOf(referrer.Fields), ReferencedColumns: []string{}})
-		}
 	}
-	return keys
+	return keys, true
 }
 
 // indexesOf lists the indexes of def, from the provider's own catalog when it
@@ -319,13 +344,13 @@ func indexesOf(def *dbschema.CollectionDef) []indexInfo {
 	indexes := []indexInfo{}
 	if def.SourceDefinition != nil && len(def.SourceDefinition.Indexes) > 0 {
 		for _, index := range def.SourceDefinition.Indexes {
-			info := indexInfo{Name: index.Name, Columns: []string{}, Unique: index.Unique, Partial: index.Partial, Origin: index.Origin, Definition: index.CreateSQL}
+			info := indexInfo{Name: index.Name, Columns: []string{}, Unique: index.Unique, Partial: addressOf(index.Partial), Expression: addressOf(false), Origin: index.Origin, Definition: index.CreateSQL}
 			for _, term := range index.Columns {
 				if !term.Key {
 					continue
 				}
 				if term.Name == nil {
-					info.Expression = true
+					info.Expression = addressOf(true)
 					continue
 				}
 				info.Columns = append(info.Columns, *term.Name)
@@ -343,7 +368,7 @@ func indexesOf(def *dbschema.CollectionDef) []indexInfo {
 var typeArguments = regexp.MustCompile(`\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)`)
 
 // columnDetails builds the columns of def in definition order.
-func columnDetails(def *dbschema.CollectionDef, outgoing []keyRef, incoming []incomingKey) []columnDetail {
+func columnDetails(def *dbschema.CollectionDef, outgoing []keyRef, incoming []incomingKey, incomingKnown bool) []columnDetail {
 	source := map[string]dbschema.SourceColumnDef{}
 	if def.SourceDefinition != nil {
 		for _, column := range def.SourceDefinition.Columns {
@@ -353,9 +378,9 @@ func columnDetails(def *dbschema.CollectionDef, outgoing []keyRef, incoming []in
 	columns := make([]columnDetail, 0, len(def.Fields))
 	for i, field := range def.Fields {
 		column := columnDetail{
-			Name: string(field.Name), Ordinal: i + 1, Type: field.Type.String(), Nullable: field.Nullable, AutoIncrement: field.AutoIncrement,
-			ForeignKeys: []keyRef{}, ReferencedBy: []incomingKey{},
+			Name: string(field.Name), Ordinal: i + 1, Type: field.Type.String(), Nullable: addressOf(field.Nullable), AutoIncrement: addressOf(field.AutoIncrement),
 		}
+		columnOut, columnIn := []keyRef{}, []incomingKey{}
 		for position, name := range def.PrimaryKey {
 			if name == field.Name {
 				column.PrimaryKeyPosition = position + 1
@@ -372,13 +397,18 @@ func columnDetails(def *dbschema.CollectionDef, outgoing []keyRef, incoming []in
 		column.Length, column.Precision, column.Scale = typeSizes(column.Type, column.Family)
 		for _, key := range outgoing {
 			if containsString(key.Columns, column.Name) {
-				column.ForeignKeys = append(column.ForeignKeys, key)
+				columnOut = append(columnOut, key)
 			}
 		}
 		for _, key := range incoming {
-			if containsString(key.ReferencedColumns, column.Name) {
-				column.ReferencedBy = append(column.ReferencedBy, key)
+			// A key that names no referenced column references the primary key.
+			if containsString(key.ReferencedColumns, column.Name) || (len(key.ReferencedColumns) == 0 && column.PrimaryKeyPosition > 0) {
+				columnIn = append(columnIn, key)
 			}
+		}
+		column.ForeignKeys = &columnOut
+		if incomingKnown {
+			column.ReferencedBy = &columnIn
 		}
 		columns = append(columns, column)
 	}
@@ -396,7 +426,7 @@ func containsString(list []string, value string) bool {
 
 // typeSizes reads the length, precision and scale out of a declared type:
 // NVARCHAR(160) has a length, NUMERIC(5,2) a precision and a scale, and a
-// single number on a numeric type is its precision.
+// single number on a numeric or date type is its precision (TIMESTAMP(6)).
 func typeSizes(declared, family string) (length, precision, scale *int) {
 	match := typeArguments.FindStringSubmatch(declared)
 	if match == nil {
@@ -407,7 +437,7 @@ func typeSizes(declared, family string) (length, precision, scale *int) {
 		second, _ := strconv.Atoi(match[2])
 		return nil, &first, &second
 	}
-	if family == familyNumeric {
+	if family == familyNumeric || family == familyDate {
 		return nil, &first, nil
 	}
 	return &first, nil, nil
@@ -461,9 +491,12 @@ func writeJSONOrText(w io.Writer, format string, value any, text func(io.Writer)
 }
 
 func columnLine(column columnDetail) string {
-	null := "NOT NULL"
-	if column.Nullable {
-		null = "NULL"
+	null := "?"
+	if column.Nullable != nil {
+		null = "NOT NULL"
+		if *column.Nullable {
+			null = "NULL"
+		}
 	}
 	line := fmt.Sprintf("%d\t%s\t%s\t%s\t%s", column.Ordinal, column.Name, column.Type, column.Family, null)
 	if column.PrimaryKeyPosition > 0 {
@@ -477,14 +510,16 @@ func writeTableText(w io.Writer, detail tableDetail) {
 	for _, column := range detail.Columns {
 		_, _ = fmt.Fprintln(w, columnLine(column))
 	}
-	_, _ = fmt.Fprintf(w, "primary key: %s\n", strings.Join(detail.PrimaryKey, ", "))
-	for _, key := range detail.ForeignKeys {
+	if detail.PrimaryKey != nil {
+		_, _ = fmt.Fprintf(w, "primary key: %s\n", strings.Join(*detail.PrimaryKey, ", "))
+	}
+	for _, key := range derefSlice(detail.ForeignKeys) {
 		_, _ = fmt.Fprintf(w, "foreign key: (%s) -> %s.%s (%s)\n", strings.Join(key.Columns, ", "), key.ReferencedSchema, key.ReferencedTable, strings.Join(key.ReferencedColumns, ", "))
 	}
-	for _, key := range detail.ReferencedBy {
+	for _, key := range derefSlice(detail.ReferencedBy) {
 		_, _ = fmt.Fprintf(w, "referenced by: %s.%s (%s)\n", key.Schema, key.Table, strings.Join(key.Columns, ", "))
 	}
-	for _, index := range detail.Indexes {
+	for _, index := range derefSlice(detail.Indexes) {
 		_, _ = fmt.Fprintf(w, "index: %s (%s) unique=%t\n", index.Name, strings.Join(index.Columns, ", "), index.Unique)
 	}
 	if detail.RowCount != nil {
@@ -501,4 +536,11 @@ func rowCountText(count rowCount) string {
 
 func writeColumnText(w io.Writer, out columnOutput) {
 	_, _ = fmt.Fprintf(w, "provider: %s\ntarget: %s\n%s.%s\n%s\n", out.Provider, out.Target, out.Schema, out.Table, columnLine(out.Column))
+}
+
+func derefSlice[T any](list *[]T) []T {
+	if list == nil {
+		return nil
+	}
+	return *list
 }

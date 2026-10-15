@@ -39,7 +39,7 @@ Every command prints one JSON object (default) beginning `{"provider", "target",
 
 #### REQ: unsupported-marker
 
-A fact the provider cannot answer MUST NOT be guessed or silently omitted. Each object carries `unsupported`, an array of the field names (`"comment"`, `"size"`, `"triggers"`, ...) that this provider/release does not report, so that a missing key means "not supported" and an empty array means "none".
+A fact the provider cannot answer MUST NOT be guessed or silently omitted. Each object carries `unsupported`, an array of the field names (`"comment"`, `"size"`, `"triggers"`, ...) that this provider/release does not report, so that a key that is absent means "not supported" and an empty array means "none". A fact the provider could not answer (for example the referrers of a table) is absent and named, never printed as an empty value.
 
 #### REQ: no-internal-keys
 
@@ -53,7 +53,7 @@ A table, view or column that does not exist MUST exit `2` with a one-line error 
 
 #### REQ: table-fields
 
-`db table` prints, in addition to the envelope: `schema`, `name`, `kind` (`table`, `view`, `materialized-view`), `columns` (every column object of REQ column-fields, in definition order), `primaryKey` (ordered column names), `foreignKeys` (outgoing: `{name, columns, referencedSchema, referencedTable, referencedColumns, onUpdate, onDelete}`), `referencedBy` (incoming: `{schema, table, columns}` the referencing columns), `indexes` (`{name, columns, unique, partial, definition}`), `constraints` (`{name, type}` as the provider lists them), `definition` (the SQL of a view, when the provider keeps it), and `rowCount` with `--counts` (native COUNT only; `null` when it cannot be counted, as in `db schema`).
+`db table` prints, in addition to the envelope: `schema`, `name`, `kind` (`table`, `view`, `materialized-view`), `columns` (every column object of REQ column-fields, in definition order), `primaryKey` (ordered column names), `foreignKeys` (outgoing: `{name, columns, referencedSchema, referencedTable, referencedColumns, onUpdate, onDelete}`), `referencedBy` (incoming: `{schema, table, columns}` the referencing columns), `indexes` (`{name, columns, unique, partial, definition}`), `constraints` (`{name, type}` as the provider lists them), `definition` (the SQL of a view, when the provider keeps it), and `rowCount` with `--counts` (tables only, never a view; native COUNT only, `null` when a table cannot be counted, as in `db schema`).
 
 #### REQ: table-extras
 
@@ -137,7 +137,7 @@ No output of these commands contains `$key` or `__dalgo_record_id`.
 ## Known provider limits
 
 - The SQLite adapter refuses to describe a table that has a column of a type it does not recognise (for example `JSON`): `db table` and `db column` exit `4` for such a table, and `db schema --columns` reports `columns: null` for it. The fix belongs to the adapter.
-- A SQLite view reports column names only (no type, nullability or key facts); they are named in `unsupported`.
+- A SQLite view reports its definition and column names and ordinals only; every other fact is absent and named in `unsupported` (`columns.type`, `columns.nullable`, `primaryKey`, ...).
 
 ## Open Questions
 

@@ -316,7 +316,6 @@ func catalogFixture() fakeCatalog {
 		referrers: map[string][]dbschema.Referrer{
 			"public.customers": {
 				{Collection: dal.NewQualifiedRootCollectionRef("public", "orders", ""), Fields: []dal.FieldName{"customer"}},
-				{Collection: dal.NewQualifiedRootCollectionRef("public", "gone", ""), Fields: []dal.FieldName{"c"}},
 				{Collection: dal.NewQualifiedRootCollectionRef("sales", "orders", ""), Fields: []dal.FieldName{"id"}},
 			},
 		},
@@ -350,14 +349,12 @@ func TestDBTablePostgresLikeCatalog(t *testing.T) {
 	}
 	customers := metadataJSON(t, dbTableCommand(), "customers", "--db", catalogURL)
 	incoming := customers["referencedBy"].([]any)
-	if len(incoming) != 4 {
+	if len(incoming) != 2 || incoming[0].(map[string]any)["name"] != "orders_customer_fk" || incoming[1].(map[string]any)["name"] != "x" {
 		t.Fatalf("referencedBy = %v", incoming)
 	}
-	if incoming[2].(map[string]any)["table"] != "gone" || incoming[3].(map[string]any)["schema"] != "sales" {
-		t.Fatalf("fallback referrers = %v", incoming)
-	}
-	if strings.Contains(strings.Join(anyStrings(customers["unsupported"]), ","), "constraints") && !strings.Contains(strings.Join(anyStrings(customers["unsupported"]), ","), "uniqueConstraints") {
-		t.Fatal("unexpected unsupported")
+	// A key without referenced columns references the primary key.
+	if got := columnNamed(t, customers, "id")["referencedBy"].([]any); len(got) != 2 {
+		t.Fatalf("column referencedBy = %v", got)
 	}
 }
 
@@ -391,8 +388,18 @@ func TestDBTableCatalogWithoutConstraintsOrReferrers(t *testing.T) {
 	catalog.referrersErr = errors.New("not supported")
 	useCatalog(t, catalog)
 	doc := metadataJSON(t, dbTableCommand(), "customers", "--db", catalogURL, "--schema", "public")
-	if !strings.Contains(strings.Join(anyStrings(doc["unsupported"]), ","), "constraints") || len(doc["referencedBy"].([]any)) != 0 {
+	unsupported := strings.Join(anyStrings(doc["unsupported"]), ",")
+	if !strings.Contains(unsupported, "constraints") || !strings.Contains(unsupported, "referencedBy") {
 		t.Fatalf("doc = %v", doc)
+	}
+	if _, has := doc["referencedBy"]; has {
+		t.Fatal("referencedBy printed although the source could not say")
+	}
+	if _, has := doc["constraints"]; has {
+		t.Fatal("constraints printed although the source could not say")
+	}
+	if _, has := columnNamed(t, doc, "id")["referencedBy"]; has {
+		t.Fatal("column referencedBy printed although the source could not say")
 	}
 }
 
@@ -434,5 +441,48 @@ func TestDBColumnDescribeFailure(t *testing.T) {
 	_, err := runMetadata(t, dbColumnCommand(), "customers", "id", "--db", catalogURL, "--schema", "public")
 	if err == nil || exitCodeOf(t, err) != exitCodeDatabase {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestDBTableCatalogUndescribableReferrerMarksReferencedBy(t *testing.T) {
+	catalog := catalogFixture()
+	catalog.referrers = map[string][]dbschema.Referrer{
+		"public.customers": {{Collection: dal.NewQualifiedRootCollectionRef("public", "gone", ""), Fields: []dal.FieldName{"c"}}},
+	}
+	useCatalog(t, catalog)
+	doc := metadataJSON(t, dbTableCommand(), "customers", "--db", catalogURL, "--schema", "public")
+	if _, has := doc["referencedBy"]; has || !strings.Contains(strings.Join(anyStrings(doc["unsupported"]), ","), "referencedBy") {
+		t.Fatalf("doc = %v", doc)
+	}
+}
+
+func TestDBTableCatalogOtherSchemaKeyIsNotMisattributed(t *testing.T) {
+	catalog := catalogFixture()
+	catalog.defs["sales.orders"] = &dbschema.CollectionDef{
+		Name: "orders", Fields: []dbschema.FieldDef{{Name: "customer", Type: dbschema.Int}},
+		ForeignKeys: []dbschema.ForeignKeyDef{{Name: "other", Fields: []dal.FieldName{"customer"}, ReferencedCollection: "customers", ReferencedNamespace: "sales", ReferencedFields: []dal.FieldName{"id"}}},
+	}
+	useCatalog(t, catalog)
+	doc := metadataJSON(t, dbTableCommand(), "customers", "--db", catalogURL, "--schema", "public")
+	for _, raw := range doc["referencedBy"].([]any) {
+		if raw.(map[string]any)["name"] == "other" {
+			t.Fatalf("a key into schema sales was attributed to public: %v", raw)
+		}
+	}
+}
+
+func TestDBColumnOfViewCarriesViewMarkers(t *testing.T) {
+	doc := metadataJSON(t, dbColumnCommand(), "AlbumTitles", "Title", "--db", sqliteShop(t))
+	column := doc["column"].(map[string]any)
+	for _, absent := range []string{"type", "nullable", "family", "autoIncrement", "foreignKeys", "referencedBy"} {
+		if _, has := column[absent]; has {
+			t.Errorf("view column prints %s", absent)
+		}
+	}
+	unsupported := strings.Join(anyStrings(doc["unsupported"]), ",")
+	for _, marker := range []string{"columns.type", "columns.nullable", "columns.autoIncrement"} {
+		if !strings.Contains(unsupported, marker) {
+			t.Errorf("missing marker %s in %s", marker, unsupported)
+		}
 	}
 }

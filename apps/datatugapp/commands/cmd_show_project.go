@@ -89,26 +89,14 @@ func showCommandAction(cmd *cobra.Command, _ []string) error {
 	if v.ProjectName == "" && v.ProjectDir == "" {
 		v.ProjectDir = "." // the folder it runs in
 	}
-	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
-		// A person who has registered no project has no settings file: no project of that name either.
-		if errors.Is(err, ErrUnknownProjectName) || (v.ProjectName != "" && errors.Is(err, fs.ErrNotExist)) {
-			return Exit(fmt.Sprintf("unknown project %q: it is not in the list of `datatug projects`", v.ProjectName), exitCodeNotFound)
-		}
+	base, err := openProjectForRead(v.ProjectName, v.ProjectDir)
+	if err != nil {
 		return err
 	}
-	if strings.Contains(v.ProjectDir, "://") {
-		return Exit(fmt.Sprintf("%q is an address, not a folder on this machine: show reads a project from a folder", v.ProjectDir), exitCodeUsage)
-	}
+	v.projectBaseCommand = *base
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	// A folder with no project file is not a project (and a project that lacks one of its other files is a
-	// project that cannot be loaded, which is another failure). A path that is a file, not a folder, has no
-	// project file in it either.
-	_, err := os.Stat(filepath.Join(v.ProjectDir, storage.ProjectSummaryFileName))
-	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-		return Exit(notAProjectSentence(v.ProjectDir), exitCodeNotFound)
 	}
 	projectStore := v.store.GetProjectStore(v.projectID)
 	project, err := projectStore.LoadProject(ctx)
@@ -124,6 +112,33 @@ func showCommandAction(cmd *cobra.Command, _ []string) error {
 		return writeShowJSON(cmd.OutOrStdout(), doc)
 	}
 	return writeShowText(cmd.OutOrStdout(), doc)
+}
+
+// openProjectForRead resolves the project a command that only reads it works on: the registered
+// project name, or else the folder dir. It is the one place `show` and the commands that take
+// --project resolve it: a name that is not among the registered projects, and a folder with no
+// project file in it, are exit 3 (not found); a project that lives at an address is exit 2.
+func openProjectForRead(name, dir string) (*projectBaseCommand, error) {
+	v := &projectBaseCommand{}
+	v.ProjectName, v.ProjectDir = name, dir
+	if err := v.initProjectCommand(projectCommandOptions{projNameOrDirRequired: true}); err != nil {
+		// A person who has registered no project has no settings file: no project of that name either.
+		if errors.Is(err, ErrUnknownProjectName) || (v.ProjectName != "" && errors.Is(err, fs.ErrNotExist)) {
+			return nil, Exit(fmt.Sprintf("unknown project %q: it is not in the list of `datatug projects`", v.ProjectName), exitCodeNotFound)
+		}
+		return nil, err
+	}
+	if strings.Contains(v.ProjectDir, "://") {
+		return nil, Exit(fmt.Sprintf("%q is an address, not a folder on this machine: a project is read from a folder", v.ProjectDir), exitCodeUsage)
+	}
+	// A folder with no project file is not a project (and a project that lacks one of its other files is a
+	// project that cannot be loaded, which is another failure). A path that is a file, not a folder, has no
+	// project file in it either.
+	_, err := os.Stat(filepath.Join(v.ProjectDir, storage.ProjectSummaryFileName))
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return nil, Exit(notAProjectSentence(v.ProjectDir), exitCodeNotFound)
+	}
+	return v, nil
 }
 
 // notAProjectSentence is the one sentence of a folder that holds no project: it names the folder and the command
@@ -166,6 +181,10 @@ type showSource struct {
 	ID     string `json:"id"`
 	Driver string `json:"driver"`
 	DSNEnv string `json:"dsnEnv,omitempty"`
+	// Path is, for a SQLite source, the file its catalog's path resolves to (api.ResolveCatalogPath), the file
+	// `db add` compares a database with. It is left out for a source of another driver, and for a SQLite source
+	// whose path does not resolve (a URL, which is never shown).
+	Path string `json:"path,omitempty"`
 	// NotScanned is true for a source the project records and no scan has described (its catalog has no
 	// dbModel): it has no schemas to list.
 	NotScanned bool `json:"notScanned,omitempty"`
@@ -284,6 +303,11 @@ func readShowSource(projectDir, envID string, catalog *datatug.DbCatalog) (showS
 		var err error
 		if source.DSNEnv, err = showDescriptorVariable(projectDir, catalog.Path); err != nil {
 			return showSource{}, fmt.Errorf("source %q in environment %q: %s", dbcopy.SourceIDDisplay(catalog.ID), dbcopy.SourceIDDisplay(envID), err.Error())
+		}
+	}
+	if catalog.Driver == dbconnection.DriverSQLite3 || catalog.Driver == "sqlite" {
+		if path, err := api.ResolveCatalogPath(projectDir, catalog.Path); err == nil {
+			source.Path = path
 		}
 	}
 	if catalog.DbModel == "" {

@@ -237,7 +237,7 @@ func addressOf[T any](value T) *T { return &value }
 // answer is left out of the result and named in Unsupported, never emptied.
 func describeTable(session *schemaSession, entry schemaEntry) (tableDetail, error) {
 	detail := tableDetail{
-		schemaEnvelope: schemaEnvelope{Provider: session.ref.Scheme, Target: schemaTarget(session.ref), DetectedFrom: session.detectedFrom},
+		schemaEnvelope: schemaEnvelope{Provider: session.ref.Scheme, Target: session.target, DetectedFrom: session.detectedFrom},
 		Schema:         entry.Schema, Name: entry.Name, Kind: entry.Kind, Definition: entry.definition,
 		Columns:     []columnDetail{},
 		Unsupported: append(append([]string{}, tableUnsupported...), columnUnsupported...),

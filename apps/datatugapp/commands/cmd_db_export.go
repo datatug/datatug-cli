@@ -36,13 +36,15 @@ func dbExportAction(cmd *cobra.Command, _ []string) error {
 	from, _ := cmd.Flags().GetString("from")
 	to, _ := cmd.Flags().GetString("to")
 	recordsFormat, _ := cmd.Flags().GetString("records-format")
-	srcRef, err := dbcopy.Parse(from)
+	srcRef, _, err := parseSourceArg(cmd.Context(), from)
 	if err != nil {
-		return Exit(fmt.Sprintf("--from: %v", dbcopy.RedactErrorWithSecrets(err, from)), 2)
+		return keepExit(err, func(err error) error {
+			return Exit(fmt.Sprintf("--from: %v", dbcopy.RedactErrorWithSecrets(err, from)), 2)
+		})
 	}
-	tgtRef, err := dbcopy.Parse(to)
+	tgtRef, _, err := parseSourceArg(cmd.Context(), to)
 	if err != nil {
-		return Exit(fmt.Sprintf("--to: %v", dbcopy.RedactErrorWithSecrets(err, to)), 2)
+		return keepExit(err, func(err error) error { return Exit(fmt.Sprintf("--to: %v", dbcopy.RedactErrorWithSecrets(err, to)), 2) })
 	}
 	if tgtRef.Scheme != "ingitdb" {
 		return Exit("--to must be an ingitdb:// local directory", 2)

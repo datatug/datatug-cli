@@ -130,10 +130,12 @@ type schemaSession struct {
 	dbArg        string
 	format       string
 	detectedFrom string
+	// target is what the output calls the source: its URL without credentials, or the datatug:// reference.
+	target string
 }
 
-// openSchemaSession reads --db and --format of cmd and opens the source
-// read-only: it is the one place a metadata command resolves, checks and opens
+// openSchemaSession reads --db (a URL, env:NAME, a path or a datatug:// reference) and --format of cmd and
+// opens the source read-only: it is the one place a metadata command resolves, checks and opens
 // its source.
 func openSchemaSession(cmd *cobra.Command, command string) (*schemaSession, error) {
 	dbArg, _ := cmd.Flags().GetString("db")
@@ -145,9 +147,20 @@ func openSchemaSession(cmd *cobra.Command, command string) (*schemaSession, erro
 	if err != nil {
 		return nil, Exit(err.Error(), exitCodeUsage)
 	}
-	ref, err := dbcopy.Parse(source)
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ref, fromProject, err := parseSourceArg(ctx, source)
 	if err != nil {
-		return nil, Exit(err.Error(), exitCodeUsage)
+		return nil, keepExit(err, func(err error) error { return Exit(err.Error(), exitCodeUsage) })
+	}
+	target := schemaTarget(ref)
+	if fromProject {
+		// The reference is what the source is called: it holds no path, URL or credential.
+		detectedFrom = detectedFromProject
+		reference, _ := dbcopy.ParseDatatugRef(source)
+		target = reference.String()
 	}
 	ref = ref.WithFlag("--db")
 	if !isSchemaProvider(ref.Scheme) {
@@ -156,15 +169,11 @@ func openSchemaSession(cmd *cobra.Command, command string) (*schemaSession, erro
 	if err = dbcopy.CheckPostgresRead(ref, 0); err != nil {
 		return nil, Exit(err.Error(), exitCodeDatabase)
 	}
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	db, err := openSchemaSource(ctx, ref)
 	if err != nil {
 		return nil, Exit(ref.OpenFailure(err).Error(), exitCodeDatabase)
 	}
-	return &schemaSession{ctx: ctx, ref: ref, db: db, dbArg: dbArg, format: format, detectedFrom: detectedFrom}, nil
+	return &schemaSession{ctx: ctx, ref: ref, db: db, dbArg: dbArg, format: format, detectedFrom: detectedFrom, target: target}, nil
 }
 
 // failure is the exit error for a read of the opened source that failed; the
@@ -190,7 +199,7 @@ func dbSchemaAction(cmd *cobra.Command, _ []string) error {
 	if withCounts {
 		addSchemaCounts(session.ctx, session.db, session.ref.Scheme, entries)
 	}
-	listing := schemaListing{Provider: session.ref.Scheme, Target: schemaTarget(session.ref), DetectedFrom: session.detectedFrom, Tables: entries}
+	listing := schemaListing{Provider: session.ref.Scheme, Target: session.target, DetectedFrom: session.detectedFrom, Tables: entries}
 	return writeSchemaListing(cmd.OutOrStdout(), session.format, listing)
 }
 

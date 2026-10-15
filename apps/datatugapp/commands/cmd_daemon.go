@@ -3,12 +3,15 @@ package commands
 // specscore: feature/cli/daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 
+	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/daemon"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/spf13/cobra"
 )
 
@@ -141,6 +144,9 @@ func daemonURLCommand() *cobra.Command {
 			req.Records, _ = f.GetBool("records")
 			req.Limit, _ = f.GetInt("limit")
 			req.Record, _ = f.GetString("record")
+			if req, err = resolveLinkDB(cmd.Context(), req); err != nil {
+				return err
+			}
 			link, err := daemon.BuildLink(newDaemonManager().Status(), req)
 			if err != nil {
 				return Exit(err.Error(), exitCodeUsage)
@@ -155,7 +161,7 @@ func daemonURLCommand() *cobra.Command {
 	f := cmd.Flags()
 	f.String("project", "", "Project id")
 	f.String("env", "", "Environment id")
-	f.String("db", "", "Database (catalog) id as the project names it, never a connection URL")
+	f.String("db", "", "Database (catalog) id as the project names it, or a datatug://<project>/<db>[?env=<ENV>] reference (instead of --project and --env); never a connection URL")
 	f.String("table", "", "Table or view name")
 	f.String("schema", "", "Schema of the table (PostgreSQL)")
 	f.Bool("view", false, "The object is a view")
@@ -164,6 +170,50 @@ func daemonURLCommand() *cobra.Command {
 	f.String("record", "", "Link to one record: its primary key as a JSON object")
 	addFormatFlag(cmd)
 	return cmd
+}
+
+// resolveLinkDB turns a datatug://<project>/<db>[?env=<ENV>] --db into the project, environment
+// and source id of the link. The reference replaces --project and --env (giving both is exit 2); a
+// missing environment is read from the project's registry on disk (the one environment that lists
+// the source), with no network and no database connection. Any other --db must be a plain source
+// id: a connection URL or a path is exit 2 and is never echoed.
+func resolveLinkDB(ctx context.Context, req daemon.LinkRequest) (daemon.LinkRequest, error) {
+	if !dbcopy.IsDatatugRef(req.DB) {
+		if req.DB != "" && !dbcopy.IsPlainSourceID(req.DB) {
+			return req, Exit("--db must be a source id or a datatug://<project>/<db> reference, never a connection URL or a path", exitCodeUsage)
+		}
+		return req, nil
+	}
+	if req.Project != "" || req.Env != "" {
+		return req, Exit("give --db datatug://... or --project, --env and --db <id>, not both", exitCodeUsage)
+	}
+	ref, err := dbcopy.ParseDatatugRef(req.DB)
+	if err != nil {
+		return req, Exit(err.Error(), exitCodeUsage)
+	}
+	if ref.Project == "" {
+		return req, Exit("the reference names no project: write datatug://<project>/<db>", exitCodeUsage)
+	}
+	req.Project, req.DB, req.Env = ref.Project, ref.DB, ref.Env
+	if req.Env != "" {
+		return req, nil
+	}
+	base, err := openProjectForRead(ref.Project, "")
+	if err != nil {
+		return req, err
+	}
+	holding, err := api.EnvironmentsListingSource(ctx, base.store.GetProjectStore(base.projectID), ref.DB)
+	if err != nil {
+		return req, Exit(err.Error(), exitCodeDatabase)
+	}
+	switch len(holding) {
+	case 0:
+		return req, Exit(fmt.Sprintf("source %q is not listed in any environment of the project", dbcopy.SourceIDDisplay(ref.DB)), exitCodeNotFound)
+	case 1:
+		req.Env = holding[0]
+		return req, nil
+	}
+	return req, Exit((&api.AmbiguousSourceError{Environments: holding}).Error(), exitCodeUsage)
 }
 
 func writeJSON(w io.Writer, v any) error {

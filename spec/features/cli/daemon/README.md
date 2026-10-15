@@ -54,7 +54,7 @@ When the daemon is not running and could not be started, the wrapper MUST print 
 
 #### REQ: url
 
-`datatug daemon url --project <id> --env <env> --db <db> --table <name> [--view] [--schema <s>] [--records [--limit N] | --record <pk-json>] [--format json|text]` MUST print the web UI deep link of `deep-link-contract` and MUST NOT start the daemon. JSON fields: `url`, `kind` (`table-metadata`, `table-records`, `record`), `running`, `uiSupport` (`available` or `pending`). `--records` and `--record` are mutually exclusive (exit `2`). Any identifier containing `://` or `@` MUST be refused with exit `2` so a connection URL can never reach a link.
+`datatug daemon url --project <id> --env <env> --db <db> --table <name> [--view] [--schema <s>] [--records [--limit N] | --record <pk-json>] [--format json|text]` (or `--db datatug://<project>/<db>[?env=<ENV>]` in place of `--project`, `--env` and `--db <id>`; giving both is exit `2`) MUST print the web UI deep link of `deep-link-contract` and MUST NOT start the daemon. JSON fields: `url`, `kind` (`table-metadata`, `table-records`, `record`), `running`, `uiSupport` (`available` or `pending`). `--records` and `--record` are mutually exclusive (exit `2`). Any identifier containing `://` or `@`, and any path identifier equal to `.` or `..`, MUST be refused with exit `2` so a connection URL can never reach a link or climb the path; `--db` is a plain source id or exactly a `datatug://` reference, any other scheme or a path is exit `2`. A reference with no `?env=` takes the one environment of the project registry on disk that lists the source (several: exit `2` naming them; none: exit `3`), with no network and no database connection; `datatug:///<db>` (no project) is exit `2`. A link longer than 2048 characters, a key value that is null, an object, an array or a string over 256 characters, are exit `2`. `running` is decided from the record, the pid and a TCP connect, without an HTTP request, so a check never resets the idle timer; a datatug API this CLI did not start (`external`) costs one `agent-info` request.
 
 ### Ownership and lifetime
 
@@ -64,7 +64,7 @@ The state directory is `~/datatug/daemon/` (`$DATATUG_DAEMON_DIR` overrides it).
 
 #### REQ: idle-lifetime
 
-The daemon is started with `serve --idle-timeout 2h` ([serve#req:idle-timeout](../serve/README.md)): the server MUST shut down gracefully (exit `0`) after that long with no HTTP request, and removes nothing else. Every `status` or `start` probe is a request, so an active agent keeps it alive. `datatug serve --idle-timeout` defaults to `0` (never), so a hand-started server is unaffected.
+The daemon is started with `serve --idle-timeout 2h` ([serve#req:idle-timeout](../serve/README.md)): the server MUST shut down gracefully (exit `0`) after that long with no HTTP request, and removes nothing else. `status` and `url` decide `running` from the record, the pid and a TCP connect and send no HTTP request to a daemon this CLI started, so they do not keep it alive; only a real request does (an external datatug API on the preferred port costs one `agent-info` request). `datatug serve --idle-timeout` defaults to `0` (never), so a hand-started server is unaffected.
 
 #### REQ: detached
 
@@ -98,11 +98,13 @@ The web UI address of an agent is `<uiBase>` = `https://datatug.app/store/http-<
 
 | Card | URL |
 |---|---|
-| Table metadata | `<uiBase>/project/<project>/env/<env>/db/<db>/table/<table>[?schema=<s>]` (`view/<name>` for a view) |
-| Table records (top N) | `<uiBase>/project/<project>/env/<env>/db/<db>/table/<table>/records?limit=<N>` |
-| Single record | `<uiBase>/project/<project>/env/<env>/db/<db>/table/<table>/record?pk=<url-encoded JSON object column→value>` |
+| Table metadata | `<uiBase>/project/<project>/env/<env>/db/<db>/table/<table>?schema=<s>` (`view/<name>` for a view; `schema` is always present, empty for a schemaless source) |
+| Table records (top N) | `<uiBase>/project/<project>/env/<env>/db/<db>/table/<table>/records?limit=<N>&schema=<s>` |
+| Single record | `<uiBase>/project/<project>/env/<env>/db/<db>/table/<table>/record?schema=<s>#pk=<encodeURIComponent of a JSON object column→value>` |
 
-`DATATUG_UI_BASE` MAY replace `https://datatug.app` (self-hosted or local build). The metadata route exists in the UI today (`env/:environmentId` → `db/:dbCatalogId` → `table|view/:tableType`, datatug-apps `datatug-routing-proj-env*.ts`); the `records` and `record` child routes do not, so `url` reports `uiSupport` `pending` for them until the UI ships them.
+The key is in the URL fragment so it is never sent to the web host. It is one JSON object with sorted keys and typed values; an integer above 2^53 − 1 in absolute value is written as a string so the UI never rounds it. The fragment is encoded like JavaScript's `encodeURIComponent`.
+
+`DATATUG_UI_BASE` MAY replace `https://datatug.app` (self-hosted or local build). The metadata route exists in the UI today (`env/:environmentId` → `db/:dbCatalogId` → `table|view/:tableType`, datatug-apps `datatug-routing-proj-env*.ts`); the `records` and `record` child routes do not, and the page does not yet read `schema` as authoritative, so `url` reports `uiSupport` `pending` for all three kinds until the UI ships the routes.
 
 ## Acceptance Criteria
 
@@ -134,11 +136,11 @@ The spawned command line has `--host 127.0.0.1`, `--idle-timeout 2h` and none of
 
 **Requirements:** daemon#req:url, daemon#req:deep-link-contract, daemon#req:no-secrets
 
-`daemon url` returns the three shapes above, refuses `://` and `@` in identifiers, and flags records links `pending`.
+`daemon url` returns the three shapes above (key in the fragment, `schema` always present), refuses `://`, `@`, `.` and `..` in identifiers, and flags all three kinds `pending`.
 
 ## Follow-up (UI repository, datatug/datatug-apps — not done here)
 
-1. Add child routes `records` and `record` under `table/:tableType` and `view/:tableType` in `datatug-routing-proj-env-db.ts`, reading `limit` and `pk` query params.
+1. Add child routes `records` and `record` under `table/:tableType` and `view/:tableType` in `datatug-routing-proj-env-db.ts`, reading `limit` and `schema` (query) and `pk` (fragment).
 2. Flip `uiSupport` to `available` in `pkg/daemon` once shipped.
 3. Confirm `https://datatug.app` can call a plain-HTTP `127.0.0.1` agent (CORS allow-list in the request guard) from a browser page.
 

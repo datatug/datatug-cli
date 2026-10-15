@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/datatug/datatug-cli/pkg/dtroot"
@@ -70,6 +71,7 @@ func spawnDetached(exe string, args []string, logPath string) (int, <-chan struc
 	}
 	defer func() { _ = log.Close() }()
 	cmd := exec.Command(exe, args...)
+	cmd.Env = scrubbedEnv(os.Environ())
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = detachedAttr()
 	if err = cmd.Start(); err != nil {
@@ -78,4 +80,40 @@ func spawnDetached(exe string, args []string, logPath string) (int, <-chan struc
 	exited := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(exited) }()
 	return cmd.Process.Pid, exited, nil
+}
+
+// childEnvNames and childEnvPrefixes are the only variables the detached server
+// inherits: what a process needs to run, plus the non-secret directory settings
+// serve reads. Everything else (DATATUG_OPEN_DB, tokens, passwords) stays with
+// the caller; the server lives for hours and its environment is visible to ps.
+var (
+	childEnvNames = map[string]bool{
+		"PATH": true, "HOME": true, "USER": true, "LOGNAME": true, "SHELL": true,
+		"TMPDIR": true, "TMP": true, "TEMP": true, "TZ": true, "TERM": true,
+		"LANG": true, "LANGUAGE": true,
+		"SYSTEMROOT": true, "WINDIR": true, "USERPROFILE": true, "APPDATA": true,
+		"LOCALAPPDATA": true, "PROGRAMDATA": true, "COMSPEC": true, "PATHEXT": true,
+		"DATATUG_DAEMON_DIR": true, "DATATUG_EVIDENCE_DIR": true,
+		"DATATUG_POLICIES_DIR": true, "DATATUG_PERSONAL_DIR": true,
+		"DATATUG_SESSION_RESULTS_DIR": true, "DATATUG_CHAT_STORE_DIR": true, "DATATUG_CHAT_PREFERENCES_DIR": true,
+		// The telemetry opt-outs: the child is the same binary and must honour them.
+		"DATATUG_TELEMETRY": true, "DO_NOT_TRACK": true, "CI": true,
+	}
+	childEnvPrefixes = []string{"LC_", "XDG_"}
+)
+
+func scrubbedEnv(environ []string) []string {
+	var out []string
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		upper := strings.ToUpper(name)
+		keep := childEnvNames[upper]
+		for _, prefix := range childEnvPrefixes {
+			keep = keep || strings.HasPrefix(upper, prefix)
+		}
+		if keep {
+			out = append(out, kv)
+		}
+	}
+	return out
 }

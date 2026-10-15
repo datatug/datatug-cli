@@ -58,7 +58,7 @@ func TestEnsureDaemonForCaller(t *testing.T) {
 		if got := ensure(t, "show"); got != "" || f.spawned != 1 {
 			t.Fatalf("%q %d", got, f.spawned)
 		}
-		if got := ensure(t, "show", "--client", "other"); !strings.Contains(got, `unknown --client value "other"`) {
+		if got := ensure(t, "show", "--client", "other"); !strings.Contains(got, "unknown --client value ignored") || strings.Contains(got, "other") {
 			t.Fatalf("flag must win over env: %q", got)
 		}
 	})
@@ -143,4 +143,38 @@ func TestClientFlagCollidesWithNoCommand(t *testing.T) {
 			t.Errorf("%v must keep its own --from flag (err %v)", path, err)
 		}
 	}
+}
+
+// A command's own --from (a table, a source URL) is never read as the caller, and no
+// flag value is ever echoed into a warning.
+func TestCommandOwnFromFlagIsNotTheCaller(t *testing.T) {
+	const secretURL = "postgres://u:SECRETPW@127.0.0.1:1/db"
+	t.Run("db copy --from <credentialed URL>", func(t *testing.T) {
+		t.Setenv(ClientEnv, "")
+		f := &daemonFake{}
+		useDaemonFake(t, f)
+		var stderr bytes.Buffer
+		EnsureDaemonForCaller(DatatugCommand(), []string{"db", "copy", "--from", secretURL, "--to", "sqlite:///tmp/x.db"}, &stderr)
+		if strings.Contains(stderr.String(), "SECRETPW") || stderr.Len() != 0 || f.spawned != 0 {
+			t.Fatalf("stderr %q spawned %d", stderr.String(), f.spawned)
+		}
+	})
+	t.Run("a credentialed URL as the unknown --client is not echoed", func(t *testing.T) {
+		useDaemonFake(t, &daemonFake{})
+		var stderr bytes.Buffer
+		EnsureDaemonForCaller(DatatugCommand(), []string{"show", "--client", secretURL}, &stderr)
+		if strings.Contains(stderr.String(), "SECRETPW") || !strings.Contains(stderr.String(), "unknown --client value ignored") {
+			t.Fatalf("stderr %q", stderr.String())
+		}
+	})
+	t.Run("query run --from T still ensures the daemon for DATATUG_CLIENT", func(t *testing.T) {
+		t.Setenv(ClientEnv, "claude-mod")
+		f := &daemonFake{}
+		useDaemonFake(t, f)
+		var stderr bytes.Buffer
+		EnsureDaemonForCaller(DatatugCommand(), []string{"query", "run", "--db", "sqlite:///tmp/x.db", "--from", "customers"}, &stderr)
+		if stderr.Len() != 0 || f.spawned != 1 {
+			t.Fatalf("stderr %q spawned %d", stderr.String(), f.spawned)
+		}
+	})
 }

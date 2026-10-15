@@ -60,7 +60,8 @@ func EnsureDaemonForCaller(root *cobra.Command, args []string, stderr io.Writer)
 	case caller == "":
 		return
 	case !knownCallers[caller]:
-		_, _ = fmt.Fprintf(stderr, "datatug: warning: unknown --client value %q ignored\n", caller)
+		// The value is never echoed: a mistyped flag value can be a connection URL.
+		_, _ = fmt.Fprintln(stderr, "datatug: warning: unknown --client value ignored (known: claude-mod, codex-mod)")
 		return
 	}
 	m := newDaemonManager()

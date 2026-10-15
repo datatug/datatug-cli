@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -10,9 +11,13 @@ import (
 
 // TestMain keeps these tests off the real home (see internal/hermetictest). The
 // same binary doubles as the detached "server" the spawn tests start: with
-// DAEMON_TEST_HELPER set it only sleeps.
+// its first argument is serve it only reports its environment and sleeps.
 func TestMain(m *testing.M) {
-	if os.Getenv("DAEMON_TEST_HELPER") != "" {
+	if len(os.Args) > 1 && os.Args[1] == "serve" {
+		// Helper mode: report the environment this process was given, then idle.
+		for _, kv := range os.Environ() {
+			fmt.Println(kv)
+		}
 		time.Sleep(time.Minute)
 		os.Exit(0)
 	}

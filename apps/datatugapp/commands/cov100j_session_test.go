@@ -2808,6 +2808,19 @@ func TestSessionRemainingCoverage100(t *testing.T) {
 	require.NoError(t, cmdResultMiss.ExecuteContext(context.Background()))
 	require.Contains(t, resultMissOut.String(), `"availability":"unavailable"`)
 
+	// cmd_session_result.go:81 dashboardCacheBinding error
+	srvResultBindingErr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/capabilities") {
+			_ = json.NewEncoder(w).Encode(dashCaps)
+			return
+		}
+		http.Error(w, "binding fail", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srvResultBindingErr.Close)
+	cmdResultBindingErr := sessionCommand()
+	cmdResultBindingErr.SetArgs([]string{"--agent", srvResultBindingErr.URL, "--project", "p1", "result", "fail-run"})
+	require.Error(t, cmdResultBindingErr.ExecuteContext(context.Background()))
+
 	// cmd_session_dashboard.go:132 report error
 	srvDashReportErr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/capabilities") {

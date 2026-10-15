@@ -25,6 +25,9 @@ func registerRoutesOn(path string, router router, wrapper wrapper, writeOnly boo
 	path = strings.TrimRight(path, "/") + "/datatug"
 	route(router, wrapper, http.MethodGet, path+"/ping", Ping)
 	route(router, wrapper, http.MethodGet, path+"/agent-info", AgentInfo)
+	if caps.Access != nil {
+		route(router, wrapper, http.MethodPost, path+"/session/exchange", exchangeHandler(caps.Access))
+	}
 	route(router, wrapper, http.MethodPost, path+"/chat/interpret", chatInterpretHandler)
 	projectsRoutes(path, router, wrapper, writeOnly, caps)
 	foldersRoutes(path, router, wrapper, caps)

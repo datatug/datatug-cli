@@ -34,9 +34,9 @@ func TestLocalConnectionCatalogIsAuthorizedFixedBoundedMetadata(t *testing.T) {
 		t.Helper()
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "http://localhost/datatug/projects/connection_catalog?"+query, nil)
-		r.Header.Set("Origin", "http://localhost:4200")
+		r.Header.Set("Origin", "http://datatug.localhost:4200")
 		router.ServeHTTP(w, r)
-		if w.Code != want || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Access-Control-Allow-Origin") != "http://localhost:4200" {
+		if w.Code != want || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Access-Control-Allow-Origin") != "http://datatug.localhost:4200" {
 			t.Fatalf("status=%d headers=%v body=%s", w.Code, w.Header(), w.Body.String())
 		}
 		if strings.Contains(w.Body.String(), "private-value") || strings.Contains(w.Body.String(), dir) {

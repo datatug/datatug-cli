@@ -70,6 +70,9 @@ type LinkRequest struct {
 	Records                         bool
 	Limit                           int
 	Record                          string // primary key as a JSON object
+	// Code is the one-time code of the agent (agentaccess.MintCode), put first in the fragment of
+	// every link; "" when the agent has none to give.
+	Code string
 }
 
 // Link is the deep link of one card.
@@ -110,6 +113,7 @@ func BuildLink(st Status, req LinkRequest) (Link, error) {
 	u := fmt.Sprintf("%s/project/%s/env/%s/db/%s/%s/%s", st.UIBase,
 		encodeComponent(req.Project), encodeComponent(req.Env), encodeComponent(req.DB), kind, encodeComponent(req.Table))
 	schema := "schema=" + encodeComponent(req.Schema)
+	var fragment []string
 	out := Link{Kind: KindTableMetadata, Running: st.Running}
 	switch {
 	case req.Records:
@@ -127,10 +131,17 @@ func BuildLink(st Status, req LinkRequest) (Link, error) {
 		if err != nil {
 			return Link{}, err
 		}
-		u += "/record?" + schema + "#pk=" + encodeComponent(pk)
+		u += "/record?" + schema
+		fragment = append(fragment, "pk="+encodeComponent(pk))
 		out.Kind = KindRecord
 	default:
 		u += "?" + schema
+	}
+	if req.Code != "" {
+		fragment = append([]string{"code=" + encodeComponent(req.Code)}, fragment...)
+	}
+	if len(fragment) > 0 {
+		u += "#" + strings.Join(fragment, "&")
 	}
 	if len(u) > MaxLinkLength {
 		return Link{}, UsageError{fmt.Sprintf("the link would be longer than %d characters", MaxLinkLength)}

@@ -100,7 +100,7 @@ func TestCoverageRemaining100_SessionContextLimitInvalid(t *testing.T) {
 	// Get capabilities first to fetch databaseId and projectId
 	wCap := httptest.NewRecorder()
 	rCap := httptest.NewRequest(http.MethodGet, "http://localhost/datatug/session-context/capabilities?storage=local&project=transport-test", nil)
-	rCap.Header.Set("Origin", "http://localhost:4200")
+	rCap.Header.Set("Origin", "http://datatug.localhost:4200")
 	router.ServeHTTP(wCap, rCap)
 	assert.Equal(t, http.StatusOK, wCap.Code)
 
@@ -117,7 +117,7 @@ func TestCoverageRemaining100_SessionContextLimitInvalid(t *testing.T) {
 
 	wBadLimit := httptest.NewRecorder()
 	rBadLimit := httptest.NewRequest(http.MethodGet, "http://localhost/datatug/session-context/sessions?"+baseQ.Encode(), nil)
-	rBadLimit.Header.Set("Origin", "http://localhost:4200")
+	rBadLimit.Header.Set("Origin", "http://datatug.localhost:4200")
 	router.ServeHTTP(wBadLimit, rBadLimit)
 	assert.Equal(t, http.StatusBadRequest, wBadLimit.Code)
 }

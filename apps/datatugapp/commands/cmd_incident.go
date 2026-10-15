@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"io"
 	"net/http"
 	"net/url"
@@ -406,6 +407,7 @@ func (c incidentCLI) do(ctx context.Context, method, path string, body io.Reader
 	if err != nil {
 		return nil, err
 	}
+	agentaccess.Apply(request)
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
@@ -434,6 +436,7 @@ func (c incidentCLI) stream(ctx context.Context, path string, stdout, stderr io.
 	if err != nil {
 		return err
 	}
+	agentaccess.Apply(request)
 	httpClient := *c.client.client
 	httpClient.Timeout = 0
 	response, err := httpClient.Do(request)

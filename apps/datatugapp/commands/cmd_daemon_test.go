@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/daemon"
 	"github.com/datatug/datatug-cli/pkg/secureread"
@@ -307,5 +308,39 @@ func TestDaemonURLReferenceStoreFailure(t *testing.T) {
 	_, err := runDaemon(t, "url", "--db", "datatug://broken/shop", "--table", "t")
 	if err == nil || exitCodeOf(t, err) != exitCodeDatabase {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestDaemonURLMintsTheCodeLocally(t *testing.T) {
+	f := &daemonFake{up: true}
+	useDaemonFake(t, f)
+	dir := t.TempDir()
+	t.Setenv(agentaccess.DirEnv, dir)
+	args := []string{"url", "--project", "p", "--env", "e", "--db", "d", "--table", "t", "--format", "text"}
+	// running but no key (an agent that predates the token): a link without a code
+	out, err := runDaemon(t, args...)
+	if err != nil || strings.Contains(out, "code=") {
+		t.Fatalf("%q %v", out, err)
+	}
+	secret, _ := agentaccess.NewSecret()
+	if err = agentaccess.WriteKey(dir, daemon.DefaultPort, secret); err != nil {
+		t.Fatal(err)
+	}
+	out, err = runDaemon(t, append(args, "--record", `{"id":1}`)...)
+	_, frag, _ := strings.Cut(strings.TrimSpace(out), "#")
+	if err != nil || !strings.HasPrefix(frag, "code=") || !strings.Contains(frag, "&pk=") || strings.Contains(strings.Split(out, "#")[0], "code") {
+		t.Fatalf("%q %v", out, err)
+	}
+	code := strings.TrimPrefix(strings.SplitN(frag, "&", 2)[0], "code=")
+	if _, err = agentaccess.New(secret).Exchange(code); err != nil {
+		t.Fatalf("the minted code does not exchange: %v", err)
+	}
+	// not running: no code, whatever a stale key says
+	f.up = false
+	if out, err = runDaemon(t, args...); err != nil || strings.Contains(out, "code=") {
+		t.Fatalf("%q %v", out, err)
+	}
+	if f.spawned != 0 {
+		t.Fatal("daemon url started the daemon")
 	}
 }

@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/daemon"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
@@ -147,7 +149,9 @@ func daemonURLCommand() *cobra.Command {
 			if req, err = resolveLinkDB(cmd.Context(), req); err != nil {
 				return err
 			}
-			link, err := daemon.BuildLink(newDaemonManager().Status(), req)
+			st := newDaemonManager().Status()
+			req.Code = linkCode(st)
+			link, err := daemon.BuildLink(st, req)
 			if err != nil {
 				return Exit(err.Error(), exitCodeUsage)
 			}
@@ -214,6 +218,21 @@ func resolveLinkDB(ctx context.Context, req daemon.LinkRequest) (daemon.LinkRequ
 		return req, nil
 	}
 	return req, Exit((&api.AmbiguousSourceError{Environments: holding}).Error(), exitCodeUsage)
+}
+
+// linkCode mints the one-time code of the link from the access key that the agent on st's port left
+// in the state directory: locally, with no HTTP request, and without starting anything. "" when
+// the agent is not running or left no key (an agent that predates the token needs none).
+func linkCode(st daemon.Status) string {
+	if !st.Running {
+		return ""
+	}
+	secret, err := agentaccess.ReadKey(agentaccess.StateDir(), st.Port)
+	if err != nil {
+		return ""
+	}
+	code, _ := agentaccess.MintCode(secret, time.Now()) // "" when there is no entropy: no code
+	return code
 }
 
 func writeJSON(w io.Writer, v any) error {

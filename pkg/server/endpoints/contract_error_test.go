@@ -23,20 +23,20 @@ func TestWriteContractResponse_CORSOriginOnSuccessAndError(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r.Header.Set("Origin", "http://localhost:4200")
+		r.Header.Set("Origin", "http://datatug.localhost:4200")
 		writeContractResponse(w, r, nil, map[string]string{"ok": "true"})
-		if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:4200" {
-			t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "http://localhost:4200")
+		if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://datatug.localhost:4200" {
+			t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "http://datatug.localhost:4200")
 		}
 	})
 
 	t.Run("error", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r.Header.Set("Origin", "http://localhost:4200")
+		r.Header.Set("Origin", "http://datatug.localhost:4200")
 		writeContractResponse(w, r, newNotFound("unknown project"), nil)
-		if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:4200" {
-			t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "http://localhost:4200")
+		if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://datatug.localhost:4200" {
+			t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, "http://datatug.localhost:4200")
 		}
 	})
 

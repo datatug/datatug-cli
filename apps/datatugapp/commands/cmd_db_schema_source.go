@@ -16,6 +16,8 @@ const (
 	detectedFromScheme = "scheme"
 	detectedFromName   = "file name"
 	detectedFromData   = "file content"
+	// detectedFromProject is a database that is a source of a project (a datatug:// reference).
+	detectedFromProject = "project"
 )
 
 // sqliteMagic is the first 16 bytes of every SQLite database file.

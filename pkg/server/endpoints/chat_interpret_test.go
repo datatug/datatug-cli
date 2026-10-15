@@ -16,8 +16,8 @@ func TestChatInterpretRejectsUnsafeRequests(t *testing.T) {
 		status             int
 	}{
 		{"bad origin", "https://example.com", body, http.StatusForbidden},
-		{"missing key", "http://localhost:4200", strings.Replace(body, "secret-test-key", "", 1), http.StatusBadRequest},
-		{"unknown field", "http://localhost:4200", strings.Replace(body, `"question":`, `"unexpected":1,"question":`, 1), http.StatusBadRequest},
+		{"missing key", "http://datatug.localhost:4200", strings.Replace(body, "secret-test-key", "", 1), http.StatusBadRequest},
+		{"unknown field", "http://datatug.localhost:4200", strings.Replace(body, `"question":`, `"unexpected":1,"question":`, 1), http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, "/datatug/chat/interpret", strings.NewReader(tc.data))
@@ -115,7 +115,7 @@ func TestChatInterpretReturnsProviderUsage(t *testing.T) {
 	defer provider.Close()
 	body := fmt.Sprintf(`{"question":"Show last 100 orders","schema":"main.Invoice: InvoiceId","provider":{"protocol":"openai-chat","baseUrl":%q,"model":"deepseek-flash","apiKey":"test-key"}}`, provider.URL)
 	r := httptest.NewRequest(http.MethodPost, "/datatug/chat/interpret", strings.NewReader(body))
-	r.Header.Set("Origin", "http://localhost:4305")
+	r.Header.Set("Origin", "http://datatug.localhost:4305")
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	chatInterpretHandler(w, r)
@@ -132,7 +132,7 @@ func TestChatInterpretReturnsProviderUsage(t *testing.T) {
 	}
 	if w.Code != http.StatusOK || response.DTQL != doc || response.Usage.InputTokens != 121 ||
 		response.Usage.OutputTokens != 24 || response.Usage.TotalTokens != 145 ||
-		w.Header().Get("Access-Control-Allow-Origin") != "http://localhost:4305" {
+		w.Header().Get("Access-Control-Allow-Origin") != "http://datatug.localhost:4305" {
 		t.Fatalf("status=%d, response=%+v", w.Code, response)
 	}
 }

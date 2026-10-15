@@ -209,29 +209,7 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 		return fmt.Errorf("new db catalog is invalid: %w", err)
 	}
 	// Update environment
-	{
-		if environment := project.Environments.GetByID(envID); environment == nil {
-			environment = &datatug.Environment{
-				ProjectItem: datatug.ProjectItem{
-					ProjItemBrief: datatug.ProjItemBrief{ID: envID},
-				},
-				DbServers: datatug.EnvDbServers{
-					{
-						ServerRef: dbServerRef,
-						Catalogs:  []string{dbCatalog.ID},
-					},
-				},
-			}
-			project.Environments = append(project.Environments, environment)
-		} else if envDbServer := environment.DbServers.GetByServerRef(dbServerRef); envDbServer == nil {
-			environment.DbServers = append(environment.DbServers, &datatug.EnvDbServer{
-				ServerRef: dbServerRef,
-				Catalogs:  []string{dbCatalog.ID},
-			})
-		} else if i := slice.Index(envDbServer.Catalogs, dbCatalog.ID); i < 0 {
-			envDbServer.Catalogs = append(envDbServer.Catalogs, dbCatalog.ID)
-		}
-	}
+	addCatalogToEnvironments(&project.Environments, envID, dbServerRef, dbCatalog.ID)
 	// Update DB server
 	{
 		ctx := context.Background()
@@ -274,6 +252,39 @@ func updateProjectWithDbCatalog(project *datatug.Project, envID string, dbServer
 		}
 	}
 	return nil
+}
+
+// addCatalogToEnvironments records, in the environment envID of envs, that the server dbServerRef
+// holds the catalog catalogID: the environment is made when envs has none of that id, the server
+// is added when the environment does not list it, and the catalog is added to the server when it
+// does not list it. It is how the environment file of a scan, and of `db add`, lists a database.
+func addCatalogToEnvironments(envs *datatug.Environments, envID string, dbServerRef datatug.ServerRef, catalogID string) {
+	environment := envs.GetByID(envID)
+	if environment == nil {
+		*envs = append(*envs, &datatug.Environment{
+			ProjectItem: datatug.ProjectItem{
+				ProjItemBrief: datatug.ProjItemBrief{ID: envID},
+			},
+			DbServers: datatug.EnvDbServers{
+				{
+					ServerRef: dbServerRef,
+					Catalogs:  []string{catalogID},
+				},
+			},
+		})
+		return
+	}
+	envDbServer := environment.DbServers.GetByServerRef(dbServerRef)
+	if envDbServer == nil {
+		environment.DbServers = append(environment.DbServers, &datatug.EnvDbServer{
+			ServerRef: dbServerRef,
+			Catalogs:  []string{catalogID},
+		})
+		return
+	}
+	if slice.Index(envDbServer.Catalogs, catalogID) < 0 {
+		envDbServer.Catalogs = append(envDbServer.Catalogs, catalogID)
+	}
 }
 
 func newProjectWithDatabase(projectID, environment string, dbServer datatug.ServerRef, dbCatalog *datatug.DbCatalog) (project *datatug.Project, err error) {

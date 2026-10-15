@@ -93,6 +93,14 @@ Failure to launch the browser MUST log a warning to stdout and MUST NOT abort se
 
 On signal receipt, the HTTP server MUST perform a graceful shutdown: stop accepting new connections, allow in-flight requests up to a short bounded timeout, then exit `0`. The current implementation has a TODO for graceful shutdown — remediation is tracked under Outstanding Questions.
 
+#### REQ: idle-timeout
+
+`--idle-timeout <duration>` MUST make the server shut down gracefully and exit `0` once that long has passed with no HTTP request. The default `0` serves until stopped. It is how [`datatug daemon`](../daemon/README.md) bounds the lifetime of the server it owns.
+
+#### REQ: origins-and-token
+
+The server admits exactly two browser origins: `https://datatug.app` and the host `datatug.localhost` (`http` or `https`, no port or a numeric one); `localhost:*`, `127.0.0.1:*`, `*.datatug.app` and `app.incidentius.com` are refused, and no flag or variable adds one. Every route but a CORS preflight (answered by origin only, with `Access-Control-Allow-Private-Network: true` when the preflight asks and the origin is listed) and `POST /datatug/session/exchange` requires the session token, `Authorization: Bearer <token>`. At start the server creates a random secret and keeps it in `~/datatug/daemon/access-<port>.key` (`$DATATUG_DAEMON_DIR`, mode `0600`), removed when it exits; the CLI's own clients (`incident`, `execution`, `compare`, `query` lookups) and `datatug daemon url` read it from there. A one-time code, `v1.<expiry>.<nonce>.<signature>`, valid 10 minutes and accepted once, is minted from the secret locally; the web UI reads it from the link's URL fragment, posts `{"code": ...}` to the exchange route and receives `{"token": ...}`, then sends the token on every request. A hand-started `datatug serve` prints its web UI link with `#code=<code>`; a server started with `--idle-timeout` (the daemon) prints none into its log. **Consequences:** local web UI development runs at `http://datatug.localhost:<port>` (no longer `localhost:4200`), a page of another product's UI loses access, and a client of the agent that is not one of the CLI's own (curl, a script) must send the token from the key file.
+
 ### Execution evidence storage
 
 #### REQ: execution-receipts-follow-incident-routing
@@ -142,6 +150,7 @@ The URL the agent navigates the browser to MUST embed the agent's listening addr
 | `--evidence-dir` |  | string | `$DATATUG_EVIDENCE_DIR` or `~/.datatug/evidence` | Private SQLite snapshot directory. |
 | `--snapshot-byte-cap` |  | int | `2097152` | Maximum canonical bytes retained for one snapshot. |
 | `--snapshot-retention` |  | duration | `720h` | Retention before snapshot bytes expire. |
+| `--idle-timeout` |  | duration | `0` | Exit after this long with no HTTP request (`0` = never). |
 
 ## Exit codes
 

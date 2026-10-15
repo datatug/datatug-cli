@@ -51,6 +51,9 @@ var (
 type HttpServer struct {
 	s       *http.Server
 	monitor *apimonitor.Monitor
+	// IdleTimeout, when positive, makes ServeHTTP return nil after that long
+	// without a request. Zero (the default) serves until stopped.
+	IdleTimeout time.Duration
 }
 
 func NewHttpServer() HttpServer {
@@ -177,21 +180,34 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 		AllowLiveConnections: caps.AllowLiveConnections,
 		ServedHost:           agentHost,
 		ServedPort:           agentPort,
+		Access:               caps.Access,
 	}
 	guard := endpointCaps.RequestGuard()
 	router := httprouter.New()
 	router.GlobalOPTIONS = http.HandlerFunc(guard.Wrap(globalOptionsHandler))
+	// What the router answers by itself (unknown path, wrong method) is behind the guard too, so
+	// an unauthenticated caller cannot tell which routes exist.
+	router.NotFound = http.HandlerFunc(guard.Wrap(http.NotFound))
+	router.MethodNotAllowed = http.HandlerFunc(guard.Wrap(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+	}))
 	router.HandlerFunc(http.MethodGet, "/", guard.Wrap(root))
 	endpoints.RegisterDatatugHandlersWithCapabilities("", router, endpoints.RegisterAllHandlers, logRequests, func(r *http.Request) (context.Context, error) {
 		return r.Context(), nil
 	}, apicore.Execute, endpointCaps)
 
+	handler := s.monitor.Wrap(router)
+	var idle *idleWatcher
+	if s.IdleTimeout > 0 {
+		idle = newIdleWatcher(s.IdleTimeout, time.Now)
+		handler = idle.wrap(handler)
+	}
 	s.s = &http.Server{
 		Addr:           fmt.Sprintf("%v:%v", agentHost, agentPort),
 		ReadTimeout:    requestReadTimeout,
 		WriteTimeout:   responseWriteTimeout,
 		MaxHeaderBytes: 1 << 16,
-		Handler:        s.monitor.Wrap(router),
+		Handler:        handler,
 		BaseContext: func(listener net.Listener) context.Context {
 			s.monitor.Live("http://" + listener.Addr().String())
 			return context.Background()
@@ -199,6 +215,19 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 	}
 	log.Printf("Serving on: http://%v:%v", agentHost, agentPort)
 
+	if idle != nil {
+		done := make(chan struct{})
+		defer close(done)
+		ticker := time.NewTicker(idleCheckInterval)
+		defer ticker.Stop()
+		srv := s.s
+		go idle.watch(done, ticker.C, func() {
+			log.Printf("serve: no request for %s; shutting down", s.IdleTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(ctx)
+		})
+	}
 	err = listenAndServeFn(s.s)
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil

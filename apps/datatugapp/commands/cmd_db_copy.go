@@ -104,13 +104,13 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 
 	// Parse both URLs first (REQ:unknown-scheme-rejected, REQ:ingitdb-url-local-only,
 	// REQ:required-flags) — fail with exit 2 before any connection attempt.
-	srcRef, err := dbcopy.Parse(fromURL)
+	srcRef, _, err := parseSourceArg(ctx, fromURL)
 	if err != nil {
-		return Exit(fmt.Sprintf("--from: %v", err), 2)
+		return keepExit(err, func(err error) error { return Exit(fmt.Sprintf("--from: %v", err), 2) })
 	}
-	tgtRef, err := dbcopy.Parse(toURL)
+	tgtRef, _, err := parseSourceArg(ctx, toURL)
 	if err != nil {
-		return Exit(fmt.Sprintf("--to: %v", err), 2)
+		return keepExit(err, func(err error) error { return Exit(fmt.Sprintf("--to: %v", err), 2) })
 	}
 	// A failure of a PostgreSQL side says which flag its connection string is read from (or its variable).
 	srcRef, tgtRef = srcRef.WithFlag("--from"), tgtRef.WithFlag("--to")

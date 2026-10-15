@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
 	"io"
 	"net/http"
 	"net/url"
@@ -103,6 +104,7 @@ func (c sessionCLI) request(ctx context.Context, method, suffix string, body any
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
+	agentaccess.Apply(req) // a local agent needs its session token; a hosted token set above is kept
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

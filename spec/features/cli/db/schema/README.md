@@ -19,9 +19,10 @@ status: Approved
 
 ```
 datatug db schema --db <url|path> [--format json|text] [--columns] [--counts]
+datatug db schema --db datatug://<project>/<db>[?env=<ENV>] [--format json|text] [--columns] [--counts]
 ```
 
-`--db` takes the same forms as [`datatug query run --db`](../../query/README.md): `sqlite://`, `postgres://`, `ingitdb://`, `http(s)://`, `openvaultdb://`, `bigquery://`, or `env:NAME` naming an environment variable that holds the whole URL. A plain file path (no scheme) is accepted too and detected as SQLite.
+`--db` takes the same forms as [`datatug query run --db`](../../query/README.md): `sqlite://`, `postgres://`, `ingitdb://`, `http(s)://`, `openvaultdb://`, `bigquery://`, or `env:NAME` naming an environment variable that holds the whole URL. A plain file path (no scheme) is accepted too and detected as SQLite. `--db datatug://<project>/<db>[?env=<ENV>]` names a database that is a source of a registered project (see [REQ: project-reference](#req-project-reference)).
 
 ## Problem
 
@@ -55,9 +56,22 @@ A source whose scheme parses but is not `sqlite` or `postgres` MUST exit non-zer
 
 A `--db` value that is not in URL form (no `scheme:` prefix of two or more characters, not `env:NAME`) MUST be treated as a file path: a leading `~/` is expanded to the home directory and a relative path is resolved against the current directory. The path is a SQLite database when its extension (case-insensitive) is `.sqlite`, `.sqlite3`, `.db`, `.db3`, `.s3db` or `.sl3`, or, failing that, when the file starts with the 16 bytes `SQLite format 3\0`. Anything else MUST exit `2` with a one-line error. A path holding `?`, `#`, `@` or `%` MUST be refused with a one-line error, because the SQLite URL parser would read it as part of a URL.
 
+#### REQ: project-reference
+
+`--db` MUST accept a reference to a database that is a source of a registered DataTug project (one `datatug show --depth sources` lists, added by [`db add`](../add/README.md) or by a scan), so that a caller addresses a database by the id the project gives it and never by a path or a URL. The grammar is
+
+```
+datatug://<project>/<db>[?env=<ENV>]
+datatug:///<db>[?env=<ENV>]
+```
+
+`<project>` is the id of a registered project, resolved as [`show --project`](../../show/README.md) resolves it (through the same code); `<db>` is the source id (the catalog id); `<ENV>` is an environment of the project. Each is a plain name (letters, digits, `.`, `_`, `-`); `env` is the only query parameter; anything else (user information, a fragment, another parameter, more path) is refused with a fixed sentence that quotes none of the reference. An empty `<project>` (`datatug:///<db>`) is the project of the working folder when it holds a project file, else the one registered project; with neither, the command exits `2` saying the reference names no project. `?env=` may be left out when the database id is listed by exactly one environment of the project; when several list it the command MUST exit `2` with a message that lists their ids and nothing else.
+
+The reference is resolved by ONE function of the CLI (`parseSourceArg`, used by `db schema`, `db table`, `db column`, [`query run`](../../query/README.md#req-db-project-reference), `db copy` and `db export`) from the project's catalog and connection descriptor through the resolver `chat` and `serve` use (`pkg/api`), never by the command reading a project file: the source is the `sqlite://` URL of the file the catalog's path resolves to (`ResolveCatalogPath`) for a SQLite source, or `env:<dsnEnv>` for a PostgreSQL source, which is then parsed, checked and opened exactly as a `--db` value is (the variable need not be set when the reference is resolved; opening a source whose variable is not set says so, naming the variable). The reference is what the source is called: `target` of the output is the reference, and no message holds the path, a URL or the value of a variable (a PostgreSQL source's failure names the variable, as it does for `env:NAME`). Exit codes: `3` for a project, an environment or a database that is not there; `2` for a reference that is not well formed, one that names no project, a database id several environments list, a source whose driver is not `sqlite3` or `postgres` (fixed message naming the database and no path), or whose path or connection descriptor does not resolve (a catalog with no descriptor, a descriptor outside the project, a descriptor that cannot be read, a path that is a URL).
+
 #### REQ: detected-from
 
-The JSON output MUST carry `detectedFrom`: `scheme` for a URL or `env:NAME` source, `file name` when the extension decided, `file content` when the header did.
+The JSON output MUST carry `detectedFrom`: `scheme` for a URL or `env:NAME` source, `file name` when the extension decided, `file content` when the header did, `project` when the source was named by a `datatug://` reference.
 
 ### Columns and counts
 
@@ -68,6 +82,10 @@ With `--columns` every table and view MUST carry `columns`: an array of `{name, 
 #### REQ: counts-flag
 
 With `--counts` every table (never a view) MUST carry `rowCount`, the number of its rows from one native `COUNT(*)`. A table that cannot be counted (the source does not run COUNT natively, or the count fails) reports `rowCount: null`; the command MUST NOT read the table's rows to count them. Without the flag `rowCount` is absent.
+
+#### REQ: foreign-keys-with-columns
+
+With `--columns` every table whose definition could be read MUST also carry `foreignKeys`, its outgoing keys named as `datatug show` names them: `[{"name", "columns": [...], "refTable": {"schema", "name"}, "refColumns": [...]}]`; a table with no keys has an empty list. A view, and a table whose definition could not be read, carries no `foreignKeys` key. Without `--columns` the key is absent.
 
 ### Output
 
@@ -101,7 +119,7 @@ The command MUST NOT modify the database. SQLite and PostgreSQL are opened throu
 
 | Flag | Type | Required | Description |
 |---|---|---|---|
-| `--db` | string | yes | Source URL, `env:NAME` or a SQLite file path. |
+| `--db` | string | yes | Source URL, `env:NAME`, a SQLite file path, or a `datatug://<project>/<db>[?env=<ENV>]` reference to a source of a registered project. |
 | `--format` | string | no | `json` (default) or `text`. |
 | `--columns` | bool | no | List columns of every table and view. |
 | `--counts` | bool | no | Count the rows of every table. |
@@ -111,7 +129,8 @@ The command MUST NOT modify the database. SQLite and PostgreSQL are opened throu
 | Exit code | Meaning |
 |---|---|
 | `0` | Listing printed |
-| `2` | Missing/unparseable `--db`, unknown `--format`, unsupported provider |
+| `2` | Missing/unparseable `--db` (a `datatug://` reference that is malformed, names no project, or a database several environments list included), unknown `--format`, unsupported provider, a source of the project that cannot be resolved |
+| `3` | The referenced project is not registered, or the environment or the database is not in it |
 | `4` | The database could not be opened or read |
 
 ## Interaction with Other Features
@@ -177,11 +196,29 @@ For a PostgreSQL source, tables and views of every user schema are listed with t
 
 A SQLite file named `chinook` (no extension) is detected with `detectedFrom` `file content`; a text file exits `2` with a one-line error.
 
+### AC: project-reference
+
+**Requirements:** db/schema#req:project-reference, db/schema#req:detected-from
+
+For a project `shop` whose environment `local` lists the SQLite source `crm` (added by `db add` or scanned), `datatug db schema --db datatug://shop/crm` prints the same tables as `--db <that file>`, with `detectedFrom` `project` and `target` `datatug://shop/crm`; the output holds no path. `datatug:///crm` is the same in a project folder, or with one registered project. For a PostgreSQL source it opens `env:<dsnEnv>`.
+
+### AC: project-reference-errors
+
+**Requirements:** db/schema#req:project-reference
+
+`datatug://nope/crm`, `datatug://shop/nope` and `datatug://shop/crm?env=nope` exit `3`; `datatug://shop` and `datatug://u:secret@shop/crm` exit `2` without repeating the reference; a database listed by environments `dev` and `local` without `?env=` exits `2` with `dev, local` and nothing else; a source of driver `sqlserver`, or a PostgreSQL source whose descriptor is missing, exits `2`.
+
 ### AC: columns-listed
 
 **Requirements:** db/schema#req:columns-flag
 
 `--columns` on Chinook lists `Album.Title` as type `NVARCHAR(160)`, `nullable` false, and `Album.AlbumId` with `primaryKeyPosition` 1; without the flag no `columns` key appears.
+
+### AC: foreign-keys-listed
+
+**Requirements:** db/schema#req:foreign-keys-with-columns
+
+`datatug db schema --db <chinook> --columns` lists for `InvoiceLine` a key on `InvoiceId` to `refTable` `{schema: main, name: Invoice}` (any fixture with a table that references another behaves alike); a table with no key has `foreignKeys: []`; a view has no `foreignKeys` key.
 
 ### AC: counts-listed
 

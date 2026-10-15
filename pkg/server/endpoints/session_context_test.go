@@ -48,9 +48,9 @@ func TestSessionContextHTTPPrivacyReplayAndRevocation(t *testing.T) {
 	request := func(method, suffix string, body []byte, want int) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(method, "http://localhost/datatug/session-context"+suffix, bytes.NewReader(body))
-		r.Header.Set("Origin", "http://localhost:4200")
+		r.Header.Set("Origin", "http://datatug.localhost:4200")
 		router.ServeHTTP(w, r)
-		if w.Header().Get("Access-Control-Allow-Origin") != "http://localhost:4200" || w.Header().Get("Vary") != "Origin" {
+		if w.Header().Get("Access-Control-Allow-Origin") != "http://datatug.localhost:4200" || w.Header().Get("Vary") != "Origin" {
 			t.Fatalf("browser response lacks admitted CORS on status %d: %v", w.Code, w.Header())
 		}
 		if w.Code != want {
@@ -78,7 +78,7 @@ func TestSessionContextHTTPPrivacyReplayAndRevocation(t *testing.T) {
 	request(http.MethodGet, "/operations/unknown?"+query.Encode(), nil, http.StatusNotFound)
 	request(http.MethodGet, "/operations/unknown?"+query.Encode()+"&unsupported=1", nil, http.StatusBadRequest)
 	request(http.MethodPost, "/query?"+query.Encode(), []byte(`{}`), http.StatusBadRequest)
-	for _, origin := range []string{"https://foreign.example", "http://localhost:4200/path", "http://localhost:4200@foreign.example"} {
+	for _, origin := range []string{"https://foreign.example", "http://datatug.localhost:4200/path", "http://datatug.localhost:4200@foreign.example"} {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "http://localhost/datatug/session-context/operations/unknown?"+query.Encode(), nil)
 		r.Header.Set("Origin", origin)

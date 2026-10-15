@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -22,6 +23,13 @@ var apiResolveSource = api.ResolveSource
 var recordsetUnmarshalJSON = json.Unmarshal
 var dalAsSchemaReader = dal.As[dbschema.SchemaReader]
 var dbcopyParse = dbcopy.Parse
+
+// closeSchemaDB releases a source opened to read a schema (a no-op for a backend with no Close).
+var closeSchemaDB = func(db dal.DB) {
+	if closer, ok := db.(io.Closer); ok {
+		_ = closer.Close()
+	}
+}
 
 // recordsetDefinitionPath is the project's declared shape for a
 // non-SQL (inGitDB-backed) collection: recordsets/<source>.recordset.json,
@@ -125,6 +133,10 @@ func resolveSQLSourceURL(ctx context.Context, sourceID, sourceURL, collection st
 	// a source URL must never reach an error, a log or a client.
 	shown := ref.String()
 	db, err := ref.Open(ctx)
+	if err == nil {
+		// The handle is only used to describe the collection: it is closed with the request.
+		defer closeSchemaDB(db)
+	}
 	if err != nil {
 		// A source that is refused, whose data file is not there or that cannot be opened is
 		// unavailable. A file source is named in the answer by its ID: Open's own error holds the

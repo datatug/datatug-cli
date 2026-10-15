@@ -35,12 +35,30 @@ type schemaEntry struct {
 	// Columns is set by --columns; a pointer to a nil slice is a table whose
 	// columns could not be read and prints as null.
 	Columns *[]schemaColumn `json:"columns,omitempty"`
+	// ForeignKeys is set by --columns, for tables whose definition could be read
+	// (never for a view): the outgoing keys, an empty list for a table with none.
+	ForeignKeys *[]schemaForeignKey `json:"foreignKeys,omitempty"`
 	// RowCount is set by --counts, for tables only; a table that cannot be
 	// counted prints null.
 	RowCount *rowCount `json:"rowCount,omitempty"`
 
 	ref         dal.CollectionRef
 	viewColumns []string
+	definition  string
+}
+
+// schemaForeignKey is an outgoing foreign key, named as `datatug show` names it.
+type schemaForeignKey struct {
+	Name       string         `json:"name"`
+	Columns    []string       `json:"columns"`
+	RefTable   schemaTableRef `json:"refTable"`
+	RefColumns []string       `json:"refColumns"`
+}
+
+// schemaTableRef names the referenced table.
+type schemaTableRef struct {
+	Schema string `json:"schema,omitempty"`
+	Name   string `json:"name"`
 }
 
 // schemaColumn is one column of a table or view.
@@ -104,49 +122,85 @@ func dbSchemaCommand() *cobra.Command {
 	return cmd
 }
 
-func dbSchemaAction(cmd *cobra.Command, _ []string) error {
+// schemaSession is an opened source of one `db` metadata command.
+type schemaSession struct {
+	ctx          context.Context
+	ref          dbcopy.BackendRef
+	db           dal.DB
+	dbArg        string
+	format       string
+	detectedFrom string
+	// target is what the output calls the source: its URL without credentials, or the datatug:// reference.
+	target string
+}
+
+// openSchemaSession reads --db (a URL, env:NAME, a path or a datatug:// reference) and --format of cmd and
+// opens the source read-only: it is the one place a metadata command resolves, checks and opens
+// its source.
+func openSchemaSession(cmd *cobra.Command, command string) (*schemaSession, error) {
 	dbArg, _ := cmd.Flags().GetString("db")
 	format, _ := cmd.Flags().GetString("format")
 	if format != "json" && format != "text" {
-		return Exit(fmt.Sprintf("unsupported --format %q: want one of json, text", format), exitCodeUsage)
+		return nil, Exit(fmt.Sprintf("unsupported --format %q: want one of json, text", format), exitCodeUsage)
 	}
-	withColumns, _ := cmd.Flags().GetBool("columns")
-	withCounts, _ := cmd.Flags().GetBool("counts")
 	source, detectedFrom, err := resolveSchemaSource(dbArg)
 	if err != nil {
-		return Exit(err.Error(), exitCodeUsage)
-	}
-	ref, err := dbcopy.Parse(source)
-	if err != nil {
-		return Exit(err.Error(), exitCodeUsage)
-	}
-	ref = ref.WithFlag("--db")
-	if !isSchemaProvider(ref.Scheme) {
-		return Exit(fmt.Sprintf("unsupported provider %q for db schema: supported providers are %s", ref.Scheme, strings.Join(schemaProviders, ", ")), exitCodeUsage)
-	}
-	if err = dbcopy.CheckPostgresRead(ref, 0); err != nil {
-		return Exit(err.Error(), exitCodeDatabase)
+		return nil, Exit(err.Error(), exitCodeUsage)
 	}
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ref, fromProject, err := parseSourceArg(ctx, source)
+	if err != nil {
+		return nil, keepExit(err, func(err error) error { return Exit(err.Error(), exitCodeUsage) })
+	}
+	target := schemaTarget(ref)
+	if fromProject {
+		// The reference is what the source is called: it holds no path, URL or credential.
+		detectedFrom = detectedFromProject
+		reference, _ := dbcopy.ParseDatatugRef(source)
+		target = reference.String()
+	}
+	ref = ref.WithFlag("--db")
+	if !isSchemaProvider(ref.Scheme) {
+		return nil, Exit(fmt.Sprintf("unsupported provider %q for %s: supported providers are %s", ref.Scheme, command, strings.Join(schemaProviders, ", ")), exitCodeUsage)
+	}
+	if err = dbcopy.CheckPostgresRead(ref, 0); err != nil {
+		return nil, Exit(err.Error(), exitCodeDatabase)
+	}
 	db, err := openSchemaSource(ctx, ref)
 	if err != nil {
-		return Exit(ref.OpenFailure(err).Error(), exitCodeDatabase)
+		return nil, Exit(ref.OpenFailure(err).Error(), exitCodeDatabase)
 	}
-	entries, err := listSchemaEntries(ctx, ref.Scheme, db)
+	return &schemaSession{ctx: ctx, ref: ref, db: db, dbArg: dbArg, format: format, detectedFrom: detectedFrom, target: target}, nil
+}
+
+// failure is the exit error for a read of the opened source that failed; the
+// text never holds the connection string or what a driver echoed of it.
+func (s *schemaSession) failure(err error) error {
+	return Exit(dbcopy.RedactErrorWithSecrets(dbcopy.RedactErrorWithSecrets(err, s.ref.Path), s.dbArg).Error(), exitCodeDatabase)
+}
+
+func dbSchemaAction(cmd *cobra.Command, _ []string) error {
+	session, err := openSchemaSession(cmd, "db schema")
 	if err != nil {
-		return Exit(dbcopy.RedactErrorWithSecrets(dbcopy.RedactErrorWithSecrets(err, ref.Path), dbArg).Error(), exitCodeDatabase)
+		return err
+	}
+	withColumns, _ := cmd.Flags().GetBool("columns")
+	withCounts, _ := cmd.Flags().GetBool("counts")
+	entries, err := listSchemaEntries(session.ctx, session.ref.Scheme, session.db)
+	if err != nil {
+		return session.failure(err)
 	}
 	if withColumns {
-		addSchemaColumns(ctx, db, entries)
+		addSchemaColumns(session.ctx, session.db, session.ref.Scheme, entries)
 	}
 	if withCounts {
-		addSchemaCounts(ctx, db, ref.Scheme, entries)
+		addSchemaCounts(session.ctx, session.db, session.ref.Scheme, entries)
 	}
-	listing := schemaListing{Provider: ref.Scheme, Target: schemaTarget(ref), DetectedFrom: detectedFrom, Tables: entries}
-	return writeSchemaListing(cmd.OutOrStdout(), format, listing)
+	listing := schemaListing{Provider: session.ref.Scheme, Target: session.target, DetectedFrom: session.detectedFrom, Tables: entries}
+	return writeSchemaListing(cmd.OutOrStdout(), session.format, listing)
 }
 
 func isSchemaProvider(scheme string) bool {
@@ -198,7 +252,7 @@ func sqliteEntries(ctx context.Context, db dal.DB) ([]schemaEntry, error) {
 			return nil, fmt.Errorf("list views: %w", viewErr)
 		}
 		for _, view := range views {
-			entries = append(entries, schemaEntry{Schema: sqliteSchemaName, Name: view.Name, Kind: schemaKindView, viewColumns: view.Columns})
+			entries = append(entries, schemaEntry{Schema: sqliteSchemaName, Name: view.Name, Kind: schemaKindView, viewColumns: view.Columns, definition: view.CreateSQL})
 		}
 	}
 	return entries, nil
@@ -268,7 +322,7 @@ func writeSchemaListing(w io.Writer, format string, listing schemaListing) error
 // addSchemaColumns reads the columns of every entry. A table whose columns
 // cannot be read gets null; a view of a source that describes only tables
 // (SQLite) gets the column names its catalog lists, with no type.
-func addSchemaColumns(ctx context.Context, db dal.DB, entries []schemaEntry) {
+func addSchemaColumns(ctx context.Context, db dal.DB, provider string, entries []schemaEntry) {
 	for i := range entries {
 		entry := &entries[i]
 		var columns []schemaColumn
@@ -276,6 +330,9 @@ func addSchemaColumns(ctx context.Context, db dal.DB, entries []schemaEntry) {
 			columns = viewColumns(entry.viewColumns)
 		} else if def, err := dbschema.DescribeCollection(ctx, db, &entry.ref); err == nil {
 			columns = columnsOf(def)
+			if entry.Kind == schemaKindTable {
+				entry.ForeignKeys = schemaForeignKeys(provider, entry.Schema, def)
+			}
 		}
 		entry.Columns = &columns
 	}
@@ -343,4 +400,25 @@ func addSchemaCounts(ctx context.Context, db dal.DB, provider string, entries []
 		}
 		entry.RowCount = &rowCount{n: n}
 	}
+}
+
+// schemaForeignKeys lists the outgoing foreign keys of def.
+func schemaForeignKeys(provider, schema string, def *dbschema.CollectionDef) *[]schemaForeignKey {
+	keys := []schemaForeignKey{}
+	for _, key := range def.ForeignKeys {
+		keys = append(keys, schemaForeignKey{
+			Name: key.Name, Columns: namesOf(key.Fields), RefColumns: namesOf(key.ReferencedFields),
+			RefTable: schemaTableRef{Schema: refSchemaOf(provider, schema, key.ReferencedNamespace), Name: key.ReferencedCollection},
+		})
+	}
+	return &keys
+}
+
+// refSchemaOf is the schema a foreign key points into: the one it names, else
+// the schema of the table that holds it (main in SQLite).
+func refSchemaOf(provider, schema, named string) string {
+	if named != "" {
+		return named
+	}
+	return defaultSchema(provider, schema)
 }

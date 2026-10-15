@@ -1,0 +1,251 @@
+package commands
+
+// specscore: feature/cli/daemon
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"time"
+
+	"github.com/datatug/datatug-cli/pkg/agentaccess"
+	"github.com/datatug/datatug-cli/pkg/api"
+	"github.com/datatug/datatug-cli/pkg/daemon"
+	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/spf13/cobra"
+)
+
+const (
+	// ClientFlag and ClientEnv name the global caller flag and its environment fallback.
+	ClientFlag = "client"
+	ClientEnv  = "DATATUG_CLIENT"
+
+	daemonFormatJSON = "json"
+	daemonFormatText = "text"
+	// callerCLI is recorded as startedBy when `daemon start` is run without a caller.
+	callerCLI = "cli"
+)
+
+// newDaemonManager is the seam tests replace; it defaults to the real OS.
+var newDaemonManager = daemon.NewManager
+
+// daemonCommand wires `datatug daemon status|start|stop|url`.
+func daemonCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "daemon",
+		Short: "Own the local read-only API server that AI-agent mods link their cards to",
+		Long: "datatug daemon owns one `datatug serve` process bound to 127.0.0.1, started read-only\n" +
+			"(no --allow-writes, --allow-live-connections or --allow-opaque-sql) and exiting after " + daemon.IdleTimeout.String() + " with no request.\n" +
+			"State (pidfile, record, log) lives in ~/datatug/daemon; `datatug daemon stop` stops it.\n" +
+			"Any command run with --client claude-mod (or DATATUG_CLIENT) ensures it is running afterwards.",
+	}
+	cmd.AddCommand(daemonStatusCommand(), daemonStartCommand(), daemonStopCommand(), daemonURLCommand())
+	return cmd
+}
+
+func addFormatFlag(cmd *cobra.Command) {
+	cmd.Flags().String("format", daemonFormatJSON, "Output format: json or text")
+}
+
+func daemonFormat(cmd *cobra.Command) (string, error) {
+	format, _ := cmd.Flags().GetString("format")
+	if format != daemonFormatJSON && format != daemonFormatText {
+		return "", Exit(fmt.Sprintf("unknown --format %q: use json or text", format), exitCodeUsage)
+	}
+	return format, nil
+}
+
+func daemonStatusCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Report whether the daemon runs, its URL, pid, owner and log (never starts it)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := daemonFormat(cmd)
+			if err != nil {
+				return err
+			}
+			return printDaemonStatus(cmd.OutOrStdout(), format, newDaemonManager().Status())
+		},
+	}
+	addFormatFlag(cmd)
+	return cmd
+}
+
+func daemonStartCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "start",
+		Short: "Ensure the daemon runs: reuse it or start it (exit 4 when it cannot be started)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := daemonFormat(cmd)
+			if err != nil {
+				return err
+			}
+			caller := callerOf(cmd)
+			if caller == "" {
+				caller = callerCLI
+			}
+			st, startErr := newDaemonManager().Start(caller)
+			if err = printDaemonStatus(cmd.OutOrStdout(), format, st); err != nil {
+				return err
+			}
+			if startErr != nil {
+				return Exit(startErr.Error(), exitCodeDatabase)
+			}
+			return nil
+		},
+	}
+	addFormatFlag(cmd)
+	return cmd
+}
+
+func daemonStopCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the daemon this CLI started (never a server it did not start)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := daemonFormat(cmd)
+			if err != nil {
+				return err
+			}
+			m := newDaemonManager()
+			if err = m.Stop(); errors.Is(err, daemon.ErrNotOwned) {
+				return Exit(err.Error(), exitCodeNotFound)
+			} else if err != nil {
+				return Exit(err.Error(), exitCodeDatabase)
+			}
+			return printDaemonStatus(cmd.OutOrStdout(), format, m.Status())
+		},
+	}
+	addFormatFlag(cmd)
+	return cmd
+}
+
+func daemonURLCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "url",
+		Short: "Print the web UI link of a table, its top records or one record (never starts the daemon)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := daemonFormat(cmd)
+			if err != nil {
+				return err
+			}
+			f := cmd.Flags()
+			var req daemon.LinkRequest
+			req.Project, _ = f.GetString("project")
+			req.Env, _ = f.GetString("env")
+			req.DB, _ = f.GetString("db")
+			req.Table, _ = f.GetString("table")
+			req.Schema, _ = f.GetString("schema")
+			req.View, _ = f.GetBool("view")
+			req.Records, _ = f.GetBool("records")
+			req.Limit, _ = f.GetInt("limit")
+			req.Record, _ = f.GetString("record")
+			if req, err = resolveLinkDB(cmd.Context(), req); err != nil {
+				return err
+			}
+			st := newDaemonManager().Status()
+			req.Code = linkCode(st)
+			link, err := daemon.BuildLink(st, req)
+			if err != nil {
+				return Exit(err.Error(), exitCodeUsage)
+			}
+			if format == daemonFormatText {
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), link.URL)
+				return err
+			}
+			return writeJSON(cmd.OutOrStdout(), link)
+		},
+	}
+	f := cmd.Flags()
+	f.String("project", "", "Project id")
+	f.String("env", "", "Environment id")
+	f.String("db", "", "Database (catalog) id as the project names it, or a datatug://<project>/<db>[?env=<ENV>] reference (instead of --project and --env); never a connection URL")
+	f.String("table", "", "Table or view name")
+	f.String("schema", "", "Schema of the table (PostgreSQL)")
+	f.Bool("view", false, "The object is a view")
+	f.Bool("records", false, "Link to the top records of the table")
+	f.Int("limit", 0, "With --records: how many rows (default 50, at most 1000)")
+	f.String("record", "", "Link to one record: its primary key as a JSON object")
+	addFormatFlag(cmd)
+	return cmd
+}
+
+// resolveLinkDB turns a datatug://<project>/<db>[?env=<ENV>] --db into the project, environment
+// and source id of the link. The reference replaces --project and --env (giving both is exit 2); a
+// missing environment is read from the project's registry on disk (the one environment that lists
+// the source), with no network and no database connection. Any other --db must be a plain source
+// id: a connection URL or a path is exit 2 and is never echoed.
+func resolveLinkDB(ctx context.Context, req daemon.LinkRequest) (daemon.LinkRequest, error) {
+	if !dbcopy.IsDatatugRef(req.DB) {
+		if req.DB != "" && !dbcopy.IsPlainSourceID(req.DB) {
+			return req, Exit("--db must be a source id or a datatug://<project>/<db> reference, never a connection URL or a path", exitCodeUsage)
+		}
+		return req, nil
+	}
+	if req.Project != "" || req.Env != "" {
+		return req, Exit("give --db datatug://... or --project, --env and --db <id>, not both", exitCodeUsage)
+	}
+	ref, err := dbcopy.ParseDatatugRef(req.DB)
+	if err != nil {
+		return req, Exit(err.Error(), exitCodeUsage)
+	}
+	if ref.Project == "" {
+		return req, Exit("the reference names no project: write datatug://<project>/<db>", exitCodeUsage)
+	}
+	req.Project, req.DB, req.Env = ref.Project, ref.DB, ref.Env
+	if req.Env != "" {
+		return req, nil
+	}
+	base, err := openProjectForRead(ref.Project, "")
+	if err != nil {
+		return req, err
+	}
+	holding, err := api.EnvironmentsListingSource(ctx, base.store.GetProjectStore(base.projectID), ref.DB)
+	if err != nil {
+		return req, Exit(err.Error(), exitCodeDatabase)
+	}
+	switch len(holding) {
+	case 0:
+		return req, Exit(fmt.Sprintf("source %q is not listed in any environment of the project", dbcopy.SourceIDDisplay(ref.DB)), exitCodeNotFound)
+	case 1:
+		req.Env = holding[0]
+		return req, nil
+	}
+	return req, Exit((&api.AmbiguousSourceError{Environments: holding}).Error(), exitCodeUsage)
+}
+
+// linkCode mints the one-time code of the link from the access key that the agent on st's port left
+// in the state directory: locally, with no HTTP request, and without starting anything. "" when
+// the agent is not running or left no key (an agent that predates the token needs none).
+func linkCode(st daemon.Status) string {
+	if !st.Running {
+		return ""
+	}
+	secret, err := agentaccess.ReadKey(agentaccess.StateDir(), st.Port)
+	if err != nil {
+		return ""
+	}
+	code, _ := agentaccess.MintCode(secret, time.Now()) // "" when there is no entropy: no code
+	return code
+}
+
+func writeJSON(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
+}
+
+func printDaemonStatus(w io.Writer, format string, st daemon.Status) error {
+	if format == daemonFormatJSON {
+		return writeJSON(w, st)
+	}
+	_, err := fmt.Fprintf(w, "running: %t\nurl: %s\nuiBase: %s\npid: %d\nstartedBy: %s\nstartedAt: %s\nversion: %s\nlogFile: %s\nidleTimeout: %s\nerror: %s\n",
+		st.Running, st.URL, st.UIBase, st.PID, st.StartedBy, st.StartedAt, st.Version, st.LogFile, st.IdleTimeout, st.Error)
+	return err
+}

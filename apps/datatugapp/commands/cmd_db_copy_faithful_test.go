@@ -246,3 +246,27 @@ func TestDBCopyFaithful_APostgresSourceWithNoTables(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `PostgreSQL source schema "sales" has no tables`)
 }
+
+// --decimals reaches the copy: with text a DECIMAL_TEXT whose values numeric would spell differently stays text.
+func TestDBCopyFaithful_DecimalsFlagReachesTheCopy(t *testing.T) {
+	t.Setenv(dbcopy.PostgresPreviewEnv, "1")
+	source := sqliteFixture(t, `CREATE TABLE n (id INTEGER PRIMARY KEY, v DECIMAL_TEXT(10,2))`, `INSERT INTO n VALUES (1, '.5'), (2, '1.50')`)
+	warnings := func(extra ...string) string {
+		stdout, _, err := runCopy(t, append([]string{"db", "copy", "--from", source, "--to", "postgres://u:pw@127.0.0.1:1/db", "--dry-run", "--json"}, extra...)...)
+		require.NoError(t, err)
+		return stdout.String()
+	}
+	assert.Contains(t, warnings(), `"values-normalized"`)
+	assert.NotContains(t, warnings(), `"type-widened"`)
+	withText := warnings("--decimals", "text")
+	assert.Contains(t, withText, `"type-widened"`)
+	assert.NotContains(t, withText, `"values-normalized"`)
+}
+
+func TestDBCopyFaithful_DecimalsTextIsRefusedWhereItDoesNotApply(t *testing.T) {
+	source := sqliteFixture(t, `CREATE TABLE n (id INTEGER PRIMARY KEY, v DECIMAL_TEXT(10,2))`)
+	_, _, err := runCopy(t, "db", "copy", "--from", source, "--to", "sqlite://"+filepath.Join(t.TempDir(), "t.sqlite"), "--decimals", "text")
+	require.Error(t, err)
+	assert.Equal(t, 2, exitCodeOf(t, err))
+	assert.Contains(t, err.Error(), "SQLite to PostgreSQL")
+}

@@ -358,6 +358,11 @@ func PlanPGToSQLite(cat *Catalog, checkOK func(cols []string, expr string) error
 			if c.Default != "" && tc.Identity == IdentityNone {
 				if d, ok := pgDefaultToSQLite(c.Default, c.Kind, sqliteTextAffinity(decl)); ok {
 					tc.Default = d
+					if c.Kind == KindDecimal && c.Scale > 0 && sqliteTextAffinity(decl) {
+						if lit := strings.Trim(d, "'"); reDefNumber.MatchString(lit) && fracDigits(lit) < c.Scale {
+							p.warn(WarnDefaultTranslated, obj, "numeric default %s: PostgreSQL inserts it with %d decimals; SQLite inserts the text '%s' as it is written", c.Default, c.Scale, lit)
+						}
+					}
 				} else {
 					p.warn(WarnDefaultNotCarried, obj, "default expression %s cannot be translated to SQLite and is not carried", c.Default)
 				}
@@ -522,4 +527,10 @@ func operandStart(e string, end int) int {
 		j--
 	}
 	return j
+}
+
+// fracDigits is how many digits a number literal has after its point (an exponent counts as none).
+func fracDigits(lit string) int {
+	_, f, _ := strings.Cut(lit, ".")
+	return len(f)
 }

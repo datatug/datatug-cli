@@ -63,128 +63,6 @@
   "affected": 2
  },
  {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"fl\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 4
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"fl\" ALTER COLUMN \"id\" RESTART WITH 5"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"sq_called\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 13
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"sq_called\" ALTER COLUMN \"id\" RESTART WITH 14"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"sq_clash\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 2
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"sq_clash\" ALTER COLUMN \"id\" RESTART WITH 3"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"sq_loose\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "n"
-    }
-   ]
-  ]
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"sq_new\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "n"
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"sq_new\" ALTER COLUMN \"id\" RESTART WITH 100"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"sq_plain\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "n"
-    }
-   ]
-  ]
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"sq_used\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 2
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"sq_used\" ALTER COLUMN \"id\" RESTART WITH 3"
- },
- {
   "kind": "exec",
   "sql": "COMMENT ON COLUMN \"public\".\"fl\".\"id\" IS 'datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"autoincrement\"}'"
  },
@@ -362,6 +240,133 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"fl\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 4
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"sq_called\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 13
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"sq_clash\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"sq_loose\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "n"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"sq_new\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "n"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"sq_plain\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "n"
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"sq_used\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
   "kind": "commit"
  },
  {
@@ -378,7 +383,7 @@
    [
     {
      "t": "i",
-     "v": 63388
+     "v": 66382
     },
     {
      "t": "s",
@@ -400,7 +405,7 @@
    [
     {
      "t": "i",
-     "v": 63396
+     "v": 66390
     },
     {
      "t": "s",
@@ -422,7 +427,7 @@
    [
     {
      "t": "i",
-     "v": 63402
+     "v": 66396
     },
     {
      "t": "s",
@@ -444,7 +449,7 @@
    [
     {
      "t": "i",
-     "v": 63408
+     "v": 66402
     },
     {
      "t": "s",
@@ -466,7 +471,7 @@
    [
     {
      "t": "i",
-     "v": 63416
+     "v": 66410
     },
     {
      "t": "s",
@@ -488,7 +493,7 @@
    [
     {
      "t": "i",
-     "v": 63424
+     "v": 66418
     },
     {
      "t": "s",
@@ -510,7 +515,7 @@
    [
     {
      "t": "i",
-     "v": 63430
+     "v": 66424
     },
     {
      "t": "s",

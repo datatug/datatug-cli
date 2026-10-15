@@ -131,6 +131,7 @@ type ForeignKey struct {
 	Deferrable bool
 	Deferred   bool
 	NotValid   bool
+	Match      string // "FULL" when the key is MATCH FULL (PostgreSQL), else ""
 }
 
 // Unique is a UNIQUE constraint.

@@ -51,44 +51,6 @@
   "affected": 2
  },
  {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"dept\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 2
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"dept\" ALTER COLUMN \"id\" RESTART WITH 3"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"emp\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 3
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"emp\" ALTER COLUMN \"id\" RESTART WITH 4"
- },
- {
   "kind": "exec",
   "sql": "COMMENT ON COLUMN \"public\".\"dept\".\"id\" IS 'datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"autoincrement\"}'"
  },
@@ -349,6 +311,46 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"dept\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"emp\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
   "kind": "commit"
  },
  {
@@ -365,7 +367,7 @@
    [
     {
      "t": "i",
-     "v": 63042
+     "v": 66055
     },
     {
      "t": "s",
@@ -387,7 +389,7 @@
    [
     {
      "t": "i",
-     "v": 63058
+     "v": 66071
     },
     {
      "t": "s",
@@ -409,7 +411,7 @@
    [
     {
      "t": "i",
-     "v": 63065
+     "v": 66078
     },
     {
      "t": "s",
@@ -431,7 +433,7 @@
    [
     {
      "t": "i",
-     "v": 63070
+     "v": 66083
     },
     {
      "t": "s",
@@ -3306,11 +3308,11 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:37:17"
+     "v": "2026-10-15 14:10:03"
     },
     {
      "t": "s",
-     "v": "2026-10-15 12:37:17.77498+01"
+     "v": "2026-10-15 15:10:03.025468+01"
     }
    ],
    [
@@ -3376,11 +3378,11 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:37:17"
+     "v": "2026-10-15 14:10:03"
     },
     {
      "t": "s",
-     "v": "2026-10-15 12:37:17.77498+01"
+     "v": "2026-10-15 15:10:03.025468+01"
     }
    ]
   ]

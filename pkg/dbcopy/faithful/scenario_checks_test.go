@@ -91,7 +91,7 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 	},
 	"filters_and_reload": func(t *testing.T, e *scenarioEnv) {
 		c := e.copies
-		if len(c) != 15 {
+		if len(c) != 16 {
 			t.Fatalf("copies %d", len(c))
 		}
 		if c[0].err != nil || !hasWarning(c[0].rep, WarnFKNotValidated, "child(parent_id)") {
@@ -128,6 +128,9 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 		}
 		if c[14].err == nil || !strings.Contains(c[14].err.Error(), `"keyless" on the target is not a table`) {
 			t.Errorf("a view in the way: %v", c[14].err)
+		}
+		if c[15].rep == nil || hasWarningText(c[15].rep, "child", "not part of this copy") {
+			t.Errorf("the key to a table that is not part of the copy is on the target: %v", c[15].rep)
 		}
 	},
 	"filters_from_pg": func(t *testing.T, e *scenarioEnv) {

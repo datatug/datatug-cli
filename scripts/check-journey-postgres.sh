@@ -41,6 +41,13 @@ required_tests=(
 	TestPostgresDecimalsTextKeepsTheText
 	TestPostgresReloadSurvivesKeyCyclesAndOrphans
 	TestPostgresStandardConformingStringsOffDoesNotRewriteTheDDL
+	TestPostgresReloadKeepsTheDefinitionOfEveryKey
+	TestPostgresDecimalDefaultsThatDoNotFit
+	TestPostgresYearZeroWidensTheColumn
+	TestPostgresNormalizedCountIsForTheTypeTheColumnGets
+	TestPostgresReloadOfATableWithAnIdentityAndADeferredKey
+	TestPostgresReloadOfAChildWhoseParentIsNotReloaded
+	TestPostgresStatementTimeoutDoesNotCutASlowReload
 )
 
 # check reads the verbose output of `go test` in file $1 and prints each problem. It

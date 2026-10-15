@@ -64,101 +64,6 @@
   "affected": 2
  },
  {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"p\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 2
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"copy_target\".\"p\" ALTER COLUMN \"id\" RESTART WITH 3"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"c\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 1
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"copy_target\".\"c\" ALTER COLUMN \"id\" RESTART WITH 2"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"nonkey\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 1
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"copy_target\".\"nonkey\" ALTER COLUMN \"id\" RESTART WITH 2"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"badthings\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 1
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"copy_target\".\"badthings\" ALTER COLUMN \"id\" RESTART WITH 2"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"types\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 2
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"copy_target\".\"types\" ALTER COLUMN \"id\" RESTART WITH 3"
- },
- {
   "kind": "exec",
   "sql": "COMMENT ON COLUMN \"copy_target\".\"p\".\"id\" IS 'datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"rowid\"}'"
  },
@@ -380,6 +285,106 @@
     }
    ]
   ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"p\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"c\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"nonkey\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"badthings\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"types\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
  },
  {
   "kind": "commit"

@@ -168,7 +168,7 @@ func colNames(t *Table) string {
 func fkSet(t *Table) string {
 	var s []string
 	for _, fk := range t.FKs {
-		s = append(s, fmt.Sprintf("(%s)->%s(%s) upd=%s del=%s", strings.Join(fk.Columns, ","), fk.RefTable, strings.Join(fk.RefColumns, ","), fk.OnUpdate, fk.OnDelete))
+		s = append(s, fmt.Sprintf("(%s)->%s(%s) upd=%s del=%s deferrable=%t deferred=%t match=%s notvalid=%t", strings.Join(fk.Columns, ","), fk.RefTable, strings.Join(fk.RefColumns, ","), fk.OnUpdate, fk.OnDelete, fk.Deferrable, fk.Deferred, fk.Match, fk.NotValid))
 	}
 	sort.Strings(s)
 	return strings.Join(s, "; ")
@@ -222,6 +222,7 @@ func idxSet(t *Table) string {
 	return strings.Join(s, "; ")
 }
 
+// checkSet compares the checks by number: the text of an expression is the engine's own, and a name an engine gives to an unnamed check is not a difference.
 func checkSet(t *Table) string { return fmt.Sprint(len(t.Checks)) }
 
 // tableDigest hashes every row of a table in primary key order. SQLite values carry their storage

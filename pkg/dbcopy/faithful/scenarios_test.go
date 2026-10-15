@@ -442,7 +442,7 @@ var scenarios = []scenario{
 		e.copy(src, pg, Options{DryRun: true, Filters: map[string]RowFilter{"child": {Where: []Cond{{"seq", "in", "1,x"}}}}})
 		// Reload empties the tables and loads them again, and refuses a table that does not fit.
 		e.copy(src, pg, Options{Overwrite: "reload"})
-		quiet(pg.DB, `ALTER TABLE "public".child DROP COLUMN label`)
+		quiet(pg.DB, `ALTER TABLE "public".child DROP COLUMN label`, `COMMENT ON CONSTRAINT fk_parent ON "public".child IS 'the key that matters'`)
 		e.copy(src, pg, Options{Overwrite: "reload"})
 		quiet(pg.DB, `ALTER TABLE "public".child ADD COLUMN label text`, `ALTER TABLE "public".keyless ALTER COLUMN y TYPE text`)
 		e.copy(src, pg, Options{Overwrite: "reload"})
@@ -456,6 +456,8 @@ var scenarios = []scenario{
 		e.copy(src, pg, Options{Overwrite: "reload", Filters: map[string]RowFilter{"Parent": {Where: []Cond{{"id", "=", "2"}}}}})
 		quiet(pg.DB, `DROP TABLE "public".keyless`, `CREATE VIEW "public".keyless AS SELECT 1 AS x`)
 		e.copy(src, pg, Options{Overwrite: "reload"})
+		// A table is reloaded alone: its key to a table that is not part of the copy stays on the target and is not said to be missing.
+		e.copy(src, pg, Options{Overwrite: "reload", Include: []string{"child"}})
 	}},
 	{name: "filters_from_pg", pgs: 1, run: func(e *scenarioEnv) {
 		// From a PostgreSQL source: where and limit read through the server.
@@ -570,7 +572,13 @@ func TestChaosSweep(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					for r := range jobs {
-						runScenario(t, s, &faultPlan{failAt: r.k, mode: r.mode}, false)
+						// Each run has a goroutine of its own: a t.Fatal inside it ends that run only, not the worker.
+						done := make(chan struct{})
+						go func() {
+							defer close(done)
+							runScenario(t, s, &faultPlan{failAt: r.k, mode: r.mode}, false)
+						}()
+						<-done
 					}
 				}()
 			}

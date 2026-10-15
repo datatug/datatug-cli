@@ -3,6 +3,7 @@ package faithful
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 )
@@ -171,6 +172,7 @@ func chooseSQLiteToPG(c *Column, st *colStats, decimalsText bool) pgChoice {
 		ch.note = fmt.Sprintf("declared %q but %s: carried as %s", declared, why, ch.typ)
 		return ch
 	}
+	norm, ex := st.spellings()
 	switch d.class {
 	case declInt:
 		if st.only("int") {
@@ -193,20 +195,24 @@ func chooseSQLiteToPG(c *Column, st *colStats, decimalsText bool) pgChoice {
 		}
 	case declDecimal:
 		if st.only("int", "real", "text") && st.decOK == st.ints+st.reals+st.texts {
-			if d.text && decimalsText && st.decNormalized > 0 {
-				return widen(pgChoice{typ: "text", enc: encText, kind: KindText}, fmt.Sprintf("--decimals=text and numeric would write %d of its text values differently (%s)", st.decNormalized, st.decNormalExample))
+			if d.text && decimalsText && norm > 0 {
+				return widen(pgChoice{typ: "text", enc: encText, kind: KindText}, fmt.Sprintf("--decimals=text and numeric would write %d of its text values differently (%s)", norm, ex))
 			}
+			if st.decFit == st.decOK && defaultFitsDecimal(c.Default, d) {
+				return pgChoice{typ: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), cast: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), enc: encDecimal, kind: KindDecimal, normalized: norm, example: ex}
+			}
+			why := "some values do not fit that precision and scale exactly"
 			if st.decFit == st.decOK {
-				return pgChoice{typ: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), cast: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), enc: encDecimal, kind: KindDecimal, normalized: st.decNormalized, example: st.decNormalExample}
+				why = fmt.Sprintf("its default %s does not fit that precision and scale exactly (PostgreSQL would round it or refuse it)", strings.TrimSpace(c.Default))
 			}
-			return widen(pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal, normalized: st.decNormalized, example: st.decNormalExample}, "some values do not fit that precision and scale exactly")
+			return widen(pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal, normalized: norm, example: ex}, why)
 		}
 	case declBareNumeric:
 		if st.only("int", "real", "text") && st.decOK == st.ints+st.reals+st.texts {
-			if d.text && decimalsText && st.decNormalized > 0 {
-				return widen(pgChoice{typ: "text", enc: encText, kind: KindText}, fmt.Sprintf("--decimals=text and numeric would write %d of its text values differently (%s)", st.decNormalized, st.decNormalExample))
+			if d.text && decimalsText && norm > 0 {
+				return widen(pgChoice{typ: "text", enc: encText, kind: KindText}, fmt.Sprintf("--decimals=text and numeric would write %d of its text values differently (%s)", norm, ex))
 			}
-			return pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal, normalized: st.decNormalized, example: st.decNormalExample}
+			return pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal, normalized: norm, example: ex}
 		}
 	case declBool:
 		if st.only("int") && st.nonBool == 0 {
@@ -357,4 +363,30 @@ func sqliteDefaultToPG(expr, pgType string, kind Kind) (string, bool) {
 	}
 	_ = pgType
 	return "", false
+}
+
+// defaultFitsDecimal tells whether the default of a DECIMAL(p,s) column, when it is a number or the
+// text of one, is held exactly by numeric(p,s): PostgreSQL rounds a default that has more decimals and
+// refuses one that has too many digits, where SQLite inserts the number as it is.
+func defaultFitsDecimal(def string, d declInfo) bool {
+	if d.p < 0 {
+		return true
+	}
+	e := strings.TrimSpace(def)
+	for len(e) >= 2 && e[0] == '(' && e[len(e)-1] == ')' && matchParen(e, 0) == len(e)-1 {
+		e = strings.TrimSpace(e[1 : len(e)-1])
+	}
+	if len(e) >= 2 && e[0] == '\'' && e[len(e)-1] == '\'' {
+		e = e[1 : len(e)-1]
+	}
+	if !reDefNumber.MatchString(e) {
+		return true
+	}
+	r, _ := new(big.Rat).SetString(e) // reDefNumber is a form Rat reads
+	scaled := new(big.Rat).Mul(r, new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(d.s)), nil)))
+	if !scaled.IsInt() {
+		return false
+	}
+	limit := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(d.p)), nil)
+	return new(big.Int).Abs(scaled.Num()).Cmp(limit) < 0
 }

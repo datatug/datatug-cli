@@ -247,7 +247,7 @@ The target MUST be written in one transaction. Indexes, checks and foreign keys 
 
 #### REQ: faithful-reload
 
-`--overwrite=reload` MUST empty the target tables of the copy (PostgreSQL: one `TRUNCATE … RESTART IDENTITY`; SQLite: `DELETE`) and load the source rows into them in the same transaction as the load, keeping the schema of the target. Before anything is written each target table MUST be checked as REQ:reload-schema-match says (extra target columns are allowed when they can be left to their defaults; the key must be the same; a column must be of a kind the source values fit); a mismatch exits `1` and changes nothing. On PostgreSQL the foreign keys among the reloaded tables are dropped before the rows are emptied and added again after the load (so the order of the tables, a cycle of keys, and a key created NOT VALID cannot stop the reload); a key that the loaded rows violate (23503) is created NOT VALID and reported as REQ:faithful-filters says, a key the rows satisfy is validated again. A table that is not on the target is created. Views and triggers of a SQLite source are replaced by the source's.
+`--overwrite=reload` MUST empty the target tables of the copy (PostgreSQL: one `TRUNCATE … RESTART IDENTITY`; SQLite: `DELETE`) and load the source rows into them in the same transaction as the load, keeping the schema of the target. Before anything is written each target table MUST be checked as REQ:reload-schema-match says (extra target columns are allowed when they can be left to their defaults; the key must be the same; a column must be of a kind the source values fit); a mismatch exits `1` and changes nothing. On PostgreSQL the foreign keys among the reloaded tables are dropped before the rows are emptied and added again after the load (so the order of the tables, a cycle of keys, and a key created NOT VALID cannot stop the reload); a key that the loaded rows violate (23503) is created NOT VALID and reported as REQ:faithful-filters says, a key the rows satisfy is validated again; a key comes back with the definition the server had given it (match type, SET NULL column list, deferral, enforcement, comment). A key to a table that is not reloaded stays enforced, so a source row without its parent fails the reload (nothing changes). A table that is not on the target is created. Views and triggers of a SQLite source are replaced by the source's.
 
 #### REQ: faithful-filters
 
@@ -558,7 +558,7 @@ A SQLite or inGitDB target accepts source names under its existing rules, includ
 
 **Given** a target that holds the tables of the source, one with an extra column that has a default and a CHECK of its own, and a source row that the CHECK refuses
 **When** the user runs `datatug db copy --overwrite=reload`
-**Then** the command exits `1` naming the check, and every target table holds the rows it held before and keeps its foreign keys. A source row that only lacks a parent is no failure: the key is created NOT VALID and reported.
+**Then** the command exits `1` naming the check, and every target table holds the rows it held before and keeps its foreign keys. A source row that only lacks a parent is no failure when the parent table is reloaded too: the key is created NOT VALID and reported; when the parent is not part of the reload the key of the target stays enforced and the reload fails with nothing changed.
 
 ### AC: faithful-filters-are-pushed-down
 

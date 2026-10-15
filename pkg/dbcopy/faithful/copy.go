@@ -272,6 +272,7 @@ func Copy(ctx context.Context, from, to Endpoint, opts Options) (*Report, error)
 
 	x := &executor{ctx: ctx, plan: plan, to: to, from: from, srcQ: srcQ, opts: opts, rep: rep, filtered: len(filters) > 0}
 	if err := x.run(create, post); err != nil {
+		rep.fill(plan) // the warnings the run took back are not said
 		return fail(1, err)
 	}
 	rep.fill(plan)
@@ -452,9 +453,11 @@ type executor struct {
 	reloadFKs []reloadFK
 }
 
+// reloadFK is a foreign key of the target as the server defines it: it is added back with exactly
+// that definition (match type, SET NULL column list, deferral, enforcement) and comment.
 type reloadFK struct {
-	table string
-	fk    ForeignKey
+	table, name, def, comment, obj string
+	notEnforced                    bool
 }
 
 type execer interface {
@@ -583,10 +586,6 @@ func (x *executor) run(create []createStmt, post []postStmt) error {
 		x.warnLosses(t)
 		x.progress("copied %s: %d rows in %s", t.Name, n, time.Since(start).Round(time.Millisecond))
 	}
-	if err := x.counters(q); err != nil {
-		return err
-	}
-
 	// Constraints and indexes that follow the data (the keys among the reloaded tables come back first).
 	if err := x.readdReloadFKs(q); err != nil {
 		return err
@@ -619,6 +618,10 @@ func (x *executor) run(create []createStmt, post []postStmt) error {
 		if n != t.Copied {
 			return fmt.Errorf("table %q: %d rows were written and %d are in the target", t.Name, t.Copied, n)
 		}
+	}
+	// The counters last: setval is not undone by a rollback, so nothing that can fail comes after it.
+	if err := x.counters(q); err != nil {
+		return err
 	}
 	return commit()
 }
@@ -718,11 +721,12 @@ func (x *executor) prepareReload(q execer, existing []string) error {
 		}
 		pt.Reload = true
 		if x.to.Engine == Postgres {
-			for _, fk := range tt.FKs {
-				if reloading[fk.RefTable] {
-					x.reloadFKs = append(x.reloadFKs, reloadFK{n, fk})
-				}
+			x.dropFalseNotCarried(n, tt)
+			fks, err := x.readReloadFKs(q, n, reloading)
+			if err != nil {
+				return err
 			}
+			x.reloadFKs = append(x.reloadFKs, fks...)
 			for _, c := range pt.Columns {
 				if tc := tt.Column(c.Name); tc != nil && (c.Cast != "" || tc.Special != "") {
 					c.Cast = tc.SourceType
@@ -733,23 +737,74 @@ func (x *executor) prepareReload(q execer, existing []string) error {
 	return nil
 }
 
+// readReloadFKs reads, from the server, the foreign keys of a table that point at a table that is
+// reloaded too: their definitions are replayed after the load, so that nothing about them changes.
+func (x *executor) readReloadFKs(q execer, table string, reloading map[string]bool) ([]reloadFK, error) {
+	rows, err := q.QueryContext(x.ctx, `
+SELECT c.conname, rc.relname, pg_get_constraintdef(c.oid), COALESCE(to_jsonb(c)->>'conenforced', 'true') = 'true',
+  COALESCE(obj_description(c.oid, 'pg_constraint'), ''),
+  (SELECT string_agg(a.attname, ',' ORDER BY k.ord) FROM unnest(c.conkey) WITH ORDINALITY k(n, ord) JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n)
+FROM pg_constraint c
+JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace
+JOIN pg_class rc ON rc.oid = c.confrelid JOIN pg_namespace rn ON rn.oid = rc.relnamespace
+WHERE c.contype = 'f' AND n.nspname = $1 AND t.relname = $2 AND rn.nspname = $1 ORDER BY c.conname`, x.to.schema(), table)
+	if err != nil {
+		return nil, fmt.Errorf("read the foreign keys of %q: %w", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []reloadFK
+	for rows.Next() {
+		var r reloadFK
+		var ref, cols string
+		var enforced bool
+		if err := rows.Scan(&r.name, &ref, &r.def, &enforced, &r.comment, &cols); err != nil {
+			return nil, err
+		}
+		if !reloading[ref] {
+			continue
+		}
+		r.table, r.notEnforced, r.obj = table, !enforced, table+"("+cols+")"
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func (x *executor) dropReloadFKs(q execer) error {
 	for _, r := range x.reloadFKs {
-		if _, err := q.ExecContext(x.ctx, "ALTER TABLE "+qualified(x.to.schema(), r.table)+" DROP CONSTRAINT "+quoteIdent(r.fk.Name)); err != nil {
-			return fmt.Errorf("drop foreign key %s of %q for the reload: %w", r.fk.Name, r.table, err)
+		if _, err := q.ExecContext(x.ctx, "ALTER TABLE "+qualified(x.to.schema(), r.table)+" DROP CONSTRAINT "+quoteIdent(r.name)); err != nil {
+			return fmt.Errorf("drop foreign key %s of %q for the reload: %w", r.name, r.table, err)
 		}
 	}
 	return nil
 }
 
+// readdReloadFKs adds the keys back as the server defined them. Rows that violate a key are loaded
+// all the same (the source has them): the key then comes back NOT VALID and says so. Any other failure
+// stops the reload, which is rolled back: a key is never dropped silently.
 func (x *executor) readdReloadFKs(q execer) error {
 	for _, r := range x.reloadFKs {
-		fk := r.fk
-		fk.NotValid = false
-		err := x.applyPost(q, postStmt{sql: pgFKSQL(x.to.schema(), r.table, fk, false), alt: pgFKSQL(x.to.schema(), r.table, fk, true),
-			kind: WarnFKNotCarried, altKind: WarnFKNotValidated, obj: r.table + "(" + strings.Join(fk.Columns, ",") + ")"})
-		if err != nil {
-			return err
+		base := strings.TrimSuffix(r.def, " NOT VALID")
+		add := "ALTER TABLE " + qualified(x.to.schema(), r.table) + " ADD CONSTRAINT " + quoteIdent(r.name) + " " + base
+		err := x.exec(q, add, true)
+		var tol *tolerated
+		switch {
+		case err == nil:
+		case errors.As(err, &tol) && tol.code == foreignKeyViolation && !r.notEnforced:
+			if _, err := q.ExecContext(x.ctx, add+" NOT VALID"); err != nil {
+				return fmt.Errorf("add foreign key %s of %q back: %w", r.name, r.table, err)
+			}
+			why := "existing rows violate this foreign key in the source"
+			if x.filtered {
+				why = "rows reference a parent row that is not on the target (the source has such rows, or --where / --limit left the parent out)"
+			}
+			x.plan.warn(WarnFKNotValidated, r.obj, "%s: it was created NOT VALID (enforced for new rows, existing rows not checked): %v", why, oneLine(tol))
+		default:
+			return fmt.Errorf("add foreign key %s of %q back: %w", r.name, r.table, err)
+		}
+		if r.comment != "" {
+			if _, err := q.ExecContext(x.ctx, "COMMENT ON CONSTRAINT "+quoteIdent(r.name)+" ON "+qualified(x.to.schema(), r.table)+" IS "+quoteLiteral(r.comment)); err != nil {
+				return fmt.Errorf("comment foreign key %s of %q: %w", r.name, r.table, err)
+			}
 		}
 	}
 	return nil
@@ -983,7 +1038,8 @@ func (x *executor) counters(q execer) error {
 				continue
 			}
 			if x.to.Engine == Postgres {
-				if _, err := q.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s RESTART WITH %d", qn, quoteIdent(c.Name), next)); err != nil {
+				// setval, not ALTER ... RESTART WITH: that one is refused while a deferred key of the table has pending checks (55006).
+				if _, err := q.ExecContext(ctx, "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)", qn, c.Name, next); err != nil {
 					return fmt.Errorf("set the counter of %s.%s: %w", t.Name, c.Name, err)
 				}
 			} else if c.Identity == IdentityAutoincrement && next > 1 {
@@ -1113,4 +1169,25 @@ func batchSize(to Engine, ncols int) int {
 		rows, params = 1000, 60000
 	}
 	return max(min(rows, params/max(ncols, 1)), 1)
+}
+
+// dropFalseNotCarried removes the warnings that say a key of a reloaded table is not carried because its
+// parent is not part of the copy, for the keys the target has: a reload keeps the schema of the target, and
+// that key is still there (and still enforced against the rows that are loaded).
+func (x *executor) dropFalseNotCarried(table string, tt *Table) {
+	kept := x.plan.Warnings[:0]
+	for _, w := range x.plan.Warnings {
+		drop := false
+		if w.Kind == WarnFKNotCarried && w.Object == table && strings.Contains(w.Message, "which is not part of this copy") {
+			for _, fk := range tt.FKs {
+				if strings.Contains(w.Message, fmt.Sprintf("references %q,", fk.RefTable)) {
+					drop = true
+				}
+			}
+		}
+		if !drop {
+			kept = append(kept, w)
+		}
+	}
+	x.plan.Warnings = kept
 }

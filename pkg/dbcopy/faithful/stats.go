@@ -30,6 +30,8 @@ type colStats struct {
 	jsonOK, uuidOK                      int64
 	decNormalized                       int64 // decimal texts that PostgreSQL writes differently (.5 -> 0.5)
 	decNormalExample                    string
+	decBare                             int64 // ... that a numeric without a scale writes differently
+	decBareExample                      string
 }
 
 var (
@@ -88,16 +90,16 @@ func (s *colStats) add(v any) {
 		}
 		switch {
 		case reDate.MatchString(x):
-			if _, err := time.Parse("2006-01-02", x); err == nil {
+			if _, err := time.Parse("2006-01-02", x); err == nil && yearInPG(x) {
 				s.dateOK++
 			}
 		case reTS.MatchString(x):
-			if _, err := time.Parse("2006-01-02 15:04:05.999999", x); err == nil {
+			if _, err := time.Parse("2006-01-02 15:04:05.999999", x); err == nil && yearInPG(x) {
 				s.tsOK++
 			}
 		case reTSTZ.MatchString(x):
 			// A leap second, an hour 24 or a day that is not there is a text PostgreSQL would refuse or write as another instant.
-			if _, err := time.Parse("2006-01-02 15:04:05.999999", x[:strings.LastIndexAny(x, "+-")]); err == nil {
+			if _, err := time.Parse("2006-01-02 15:04:05.999999", x[:strings.LastIndexAny(x, "+-")]); err == nil && yearInPG(x) {
 				s.tstzAny++
 				if reTSTZUTC.MatchString(x) {
 					s.tstzOK++
@@ -133,11 +135,15 @@ func (s *colStats) decimal(text string, isText bool) {
 	canon := canonicalDecimalText(text)
 	m := reDecParts.FindStringSubmatch(text)
 	intDigits, frac := strings.TrimLeft(strings.TrimPrefix(m[1], "-"), "0"), m[2]
+	if isText && text != canon {
+		// numeric without a scale spells the number this way (no padding to a scale).
+		s.decBare++
+		if s.decBareExample == "" {
+			s.decBareExample = text + " -> " + canon
+		}
+	}
 	scaled := s.decl.p >= 0
 	if scaled && (len(intDigits) > s.decl.p-s.decl.s || len(frac) > s.decl.s) {
-		if isText {
-			s.noteSpelling(text, canon, text != canon)
-		}
 		return
 	}
 	s.decFit++
@@ -151,18 +157,26 @@ func (s *colStats) decimal(text string, isText bool) {
 		}
 		spelled += strings.Repeat("0", s.decl.s-len(frac))
 	}
-	s.noteSpelling(text, spelled, spelled != text)
+	if spelled != text {
+		s.decNormalized++
+		if s.decNormalExample == "" {
+			s.decNormalExample = text + " -> " + spelled
+		}
+	}
 }
 
-func (s *colStats) noteSpelling(text, spelled string, differs bool) {
-	if !differs {
-		return
+// spellings is how many text values the numeric type that the column gets writes differently, and the
+// first one: numeric(p,s) pads to the scale when every value fits it; a plain numeric, which a column
+// whose values do not all fit becomes, does not pad.
+func (s *colStats) spellings() (int64, string) {
+	if s.decFit == s.decOK {
+		return s.decNormalized, s.decNormalExample
 	}
-	s.decNormalized++
-	if s.decNormalExample == "" {
-		s.decNormalExample = text + " -> " + spelled
-	}
+	return s.decBare, s.decBareExample
 }
+
+// yearInPG is false for year 0000, which Go parses and PostgreSQL refuses (it has no year 0).
+func yearInPG(x string) bool { return !strings.HasPrefix(x, "0000") }
 
 func (s *colStats) only(classes ...string) bool {
 	has := map[string]int64{"int": s.ints, "real": s.reals, "text": s.texts, "blob": s.blobs}

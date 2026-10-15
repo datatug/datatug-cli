@@ -191,7 +191,7 @@ WHERE c.conrelid = $1 ORDER BY c.conname`, oid)
 				cat.Notes = append(cat.Notes, Warning{WarnFKNotCarried, obj, "MATCH FULL is not carried; the foreign key is carried with the default match"})
 			}
 			t.FKs = append(t.FKs, ForeignKey{Name: name, Columns: splitSep(colsText), RefTable: refTable, RefColumns: splitSep(refCols),
-				OnUpdate: pgActions[upd], OnDelete: pgActions[del], Deferrable: deferrable, Deferred: deferred, NotValid: !validated})
+				OnUpdate: pgActions[upd], OnDelete: pgActions[del], Deferrable: deferrable, Deferred: deferred, NotValid: !validated, Match: map[bool]string{true: "FULL"}[match == "f"]})
 		case "c":
 			t.Checks = append(t.Checks, Check{Name: name, Expr: pgCheckExpr(def)})
 		case "x":

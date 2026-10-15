@@ -127,6 +127,9 @@ func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSc
 	if decimals != "numeric" && decimals != "text" {
 		return finish(nil, 2, fmt.Sprintf("invalid --decimals value %q: valid values are numeric, text", decimals))
 	}
+	if decimals == "text" && (srcRef.Scheme != "sqlite" || tgtRef.Scheme != "postgres") {
+		return finish(nil, 2, "--decimals=text applies to SQLite to PostgreSQL copies only: no other copy turns a DECIMAL_TEXT into a PostgreSQL type")
+	}
 	if toSchema != "" && tgtRef.Scheme != "postgres" {
 		return finish(nil, 2, "--to-schema is supported only for PostgreSQL targets")
 	}

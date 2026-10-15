@@ -148,8 +148,43 @@ nothing changes. On PostgreSQL the foreign keys among the reloaded tables are dr
 are emptied and added again after the load, so the order of the tables, a cycle of keys and a key
 that was created `NOT VALID` cannot stop a reload; a key the loaded rows violate (a filter left a
 parent out, the source has orphans) is created `NOT VALID` again and reported, a key they satisfy is
-validated. A source table the target lacks is created. Views and
+validated. Each of those keys comes back with the definition the server had given it (match type, the
+`SET NULL (columns)` list, deferral, enforcement, comment): the reload reads `pg_get_constraintdef`
+before it drops the key and replays that text; a key that cannot be added back for any reason other
+than the loaded rows fails the reload, which is rolled back. A key to a table that is *not* reloaded
+(`--include child`) is not touched and stays enforced: a source row without its parent is then a
+failure of the reload (23503, nothing changes), not a `NOT VALID` key. The counters of auto-numbered
+columns are set with `setval` last in the transaction (a rollback does not undo a `setval`, so nothing
+that can fail comes after it). A source table the target lacks is created. Views and
 triggers of a SQLite source are replaced by the source's.
+
+Reload takes `ACCESS EXCLUSIVE` locks (`TRUNCATE`, the dropped keys) and waits as long as another
+transaction holds a lock on those tables: it has no timeout of its own. A `REPEATABLE READ` snapshot
+that another session opened before the reload sees the reloaded tables as empty afterwards (`TRUNCATE`
+is not MVCC-safe). A column that an earlier copy created as text because of `--decimals=text` is
+refused by a reload that is run without the flag (its values are text, numeric would not hold them as
+they are).
+
+## Values that are not carried exactly, and why
+
+* A `DECIMAL(p,s)` column whose *default* does not fit `numeric(p,s)` (`1.005` into scale 2, `12345`
+  into `(3,1)`) is carried as plain `numeric`, so that new rows get the number SQLite inserts; the
+  warning says it is the default. A text default of a `DECIMAL_TEXT` that numeric pads (`'1.5'` into
+  scale 2) says what new rows get (`1.50`), and a PostgreSQL `numeric(10,3) DEFAULT 1.5` copied to
+  SQLite says that PostgreSQL stores `1.500` where SQLite inserts the text `1.5`.
+* A date, timestamp or timestamptz in year `0000` is carried as text: PostgreSQL has no year 0.
+* `+-Infinity` of a REAL in a DECIMAL column makes that column text (PostgreSQL 14+ `numeric` could
+  hold them; this copy does not rely on it); a PostgreSQL `numeric` `NaN` / `Infinity` comes back to
+  SQLite as text, and is warned.
+* `--decimals=text` applies to SQLite to PostgreSQL copies only; any other copy refuses it (exit 2).
+* The values-normalized count of a `DECIMAL_TEXT` is the count for the type the column gets:
+  `numeric(p,s)` pads to the scale; a column some value of which does not fit it is a plain `numeric`,
+  which does not.
+* Catalog respellings that mean the same thing (`bpchar` and `char`, `int4` and `integer`, the way
+  an engine prints a default or a check expression) are not warned: `db copy` compares what a column
+  holds and the structure, not the text of the DDL.
+* `Verify` compares checks by count, and does not compare comments or the position of a sequence:
+  each engine writes its own names and counters.
 
 ## Filters
 

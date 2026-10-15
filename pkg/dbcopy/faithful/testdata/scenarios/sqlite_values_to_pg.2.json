@@ -42,63 +42,6 @@
   "affected": 3
  },
  {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"times\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 2
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"times\" ALTER COLUMN \"id\" RESTART WITH 3"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"tnum\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 4
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"tnum\" ALTER COLUMN \"id\" RESTART WITH 5"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"vals\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 3
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"vals\" ALTER COLUMN \"id\" RESTART WITH 101"
- },
- {
   "kind": "exec",
   "sql": "COMMENT ON COLUMN \"public\".\"times\".\"id\" IS 'datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"rowid\"}'"
  },
@@ -236,6 +179,66 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"times\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"tnum\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 4
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"vals\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
   "kind": "commit"
  },
  {
@@ -252,7 +255,7 @@
    [
     {
      "t": "i",
-     "v": 63255
+     "v": 66258
     },
     {
      "t": "s",
@@ -274,7 +277,7 @@
    [
     {
      "t": "i",
-     "v": 63263
+     "v": 66266
     },
     {
      "t": "s",
@@ -296,7 +299,7 @@
    [
     {
      "t": "i",
-     "v": 63272
+     "v": 66275
     },
     {
      "t": "s",

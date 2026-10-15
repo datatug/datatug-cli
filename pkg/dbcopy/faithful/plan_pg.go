@@ -93,7 +93,12 @@ func PlanSQLiteToPG(cat *Catalog, stats map[string][]*colStats, schema string, d
 				if d, ok := sqliteDefaultToPG(c.Default, ch.typ, ch.kind); ok {
 					tc.Default = d
 					if ch.kind == KindDecimal && parseDecl(c.SourceType).text {
-						p.warn(WarnDefaultTranslated, obj, "text default %s of a decimal text column became the numeric default %s; new rows get the same number, and it is written back as text", c.Default, d)
+						spelled := decimalDefaultSpelling(c.Default, ch.typ)
+						if spelled == strings.Trim(strings.Trim(c.Default, "() "), "'") {
+							p.warn(WarnDefaultTranslated, obj, "text default %s of a decimal text column became the numeric default %s; new rows get the same number, and it is written back as text", c.Default, d)
+						} else {
+							p.warn(WarnDefaultTranslated, obj, "text default %s of a decimal text column became the numeric default %s; new rows get the number %s (SQLite inserts the text as written), and it is written back as text", c.Default, d, spelled)
+						}
 					}
 					if ch.kind == KindText && reDefNumber.MatchString(strings.Trim(c.Default, "() ")) {
 						p.warn(WarnDefaultTranslated, obj, "numeric default %s of a text column: SQLite inserts the text of the number as it spells it (0.00 gives '0.0'); it is written as the text '%s'", c.Default, strings.Trim(c.Default, "() "))
@@ -213,3 +218,23 @@ func pgCommentSQL(schema, table string, tc *TargetColumn) string {
 // sqliteReadExpr reads a SQLite column without the driver's help: a unary plus has the value of its
 // operand and no declared type, so the driver does not turn a DATE or DATETIME text into a time.
 func sqliteReadExpr(c *Column) string { return "+" + quoteIdent(c.Name) }
+
+// decimalDefaultSpelling is how numeric(p,s) spells a default number: padded to the scale.
+func decimalDefaultSpelling(def, pgType string) string {
+	e := strings.Trim(strings.Trim(strings.TrimSpace(def), "() "), "'")
+	if !reDec.MatchString(e) {
+		return e
+	}
+	spelled := canonicalDecimalText(e)
+	var p, s int
+	if n, _ := fmt.Sscanf(pgType, "numeric(%d,%d)", &p, &s); n == 2 {
+		_, frac, _ := strings.Cut(spelled, ".")
+		if s > len(frac) {
+			if !strings.Contains(spelled, ".") {
+				spelled += "."
+			}
+			spelled += strings.Repeat("0", s-len(frac))
+		}
+	}
+	return spelled
+}

@@ -55,58 +55,6 @@
   "affected": 3
  },
  {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"Parent\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 2
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"Parent\" ALTER COLUMN \"id\" RESTART WITH 11"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"n\") FROM \"public\".\"grandchild\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 3
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"grandchild\" ALTER COLUMN \"n\" RESTART WITH 4"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"emptyauto\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "n"
-    }
-   ]
-  ]
- },
- {
   "kind": "exec",
   "sql": "COMMENT ON COLUMN \"public\".\"Parent\".\"id\" IS 'datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"autoincrement\"}'"
  },
@@ -353,6 +301,60 @@
     {
      "t": "i",
      "v": 0
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"Parent\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"n\") FROM \"public\".\"grandchild\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"emptyauto\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "n"
     }
    ]
   ]
@@ -487,58 +489,6 @@
   "affected": 3
  },
  {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"Parent\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 2
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"Parent\" ALTER COLUMN \"id\" RESTART WITH 11"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"n\") FROM \"public\".\"grandchild\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 3
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"grandchild\" ALTER COLUMN \"n\" RESTART WITH 4"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"emptyauto\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "n"
-    }
-   ]
-  ]
- },
- {
   "kind": "exec",
   "sql": "COMMENT ON COLUMN \"public\".\"Parent\".\"id\" IS 'datatug:{\"src\":\"sqlite\",\"type\":\"INTEGER\",\"identity\":\"autoincrement\"}'"
  },
@@ -767,6 +717,60 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"Parent\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"n\") FROM \"public\".\"grandchild\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"emptyauto\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "n"
+    }
+   ]
+  ]
+ },
+ {
   "kind": "commit"
  },
  {
@@ -859,58 +863,6 @@
   "kind": "exec",
   "sql": "INSERT INTO \"public\".\"keyless\" (\"x\", \"y\") VALUES ($1, $2), ($3, $4), ($5, $6)",
   "affected": 3
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"Parent\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 2
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"Parent\" ALTER COLUMN \"id\" RESTART WITH 11"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"n\") FROM \"public\".\"grandchild\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "i",
-     "v": 3
-    }
-   ]
-  ]
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"public\".\"grandchild\" ALTER COLUMN \"n\" RESTART WITH 4"
- },
- {
-  "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"emptyauto\"",
-  "cols": [
-   "max"
-  ],
-  "rows": [
-   [
-    {
-     "t": "n"
-    }
-   ]
-  ]
  },
  {
   "kind": "exec",
@@ -1164,6 +1116,60 @@
   ]
  },
  {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"Parent\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 2
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"n\") FROM \"public\".\"grandchild\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 3
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
+  "affected": 1
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT max(\"id\") FROM \"public\".\"emptyauto\"",
+  "cols": [
+   "max"
+  ],
+  "rows": [
+   [
+    {
+     "t": "n"
+    }
+   ]
+  ]
+ },
+ {
   "kind": "commit"
  },
  {
@@ -1188,7 +1194,7 @@
    [
     {
      "t": "i",
-     "v": 62852
+     "v": 65869
     },
     {
      "t": "s",
@@ -1210,7 +1216,7 @@
    [
     {
      "t": "i",
-     "v": 62865
+     "v": 65882
     },
     {
      "t": "s",
@@ -1232,7 +1238,7 @@
    [
     {
      "t": "i",
-     "v": 62884
+     "v": 65901
     },
     {
      "t": "s",
@@ -1254,7 +1260,7 @@
    [
     {
      "t": "i",
-     "v": 62873
+     "v": 65890
     },
     {
      "t": "s",
@@ -1276,7 +1282,7 @@
    [
     {
      "t": "i",
-     "v": 62878
+     "v": 65895
     },
     {
      "t": "s",
@@ -4070,7 +4076,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:37:17"
+     "v": "2026-10-15 14:10:02"
     },
     {
      "t": "i",
@@ -4135,7 +4141,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:37:17"
+     "v": "2026-10-15 14:10:02"
     },
     {
      "t": "i",
@@ -4310,7 +4316,7 @@
    [
     {
      "t": "i",
-     "v": 62852
+     "v": 65869
     },
     {
      "t": "s",
@@ -4332,7 +4338,7 @@
    [
     {
      "t": "i",
-     "v": 62865
+     "v": 65882
     },
     {
      "t": "s",
@@ -4354,7 +4360,7 @@
    [
     {
      "t": "i",
-     "v": 62884
+     "v": 65901
     },
     {
      "t": "s",
@@ -4376,7 +4382,7 @@
    [
     {
      "t": "i",
-     "v": 62873
+     "v": 65890
     },
     {
      "t": "s",
@@ -4398,7 +4404,7 @@
    [
     {
      "t": "i",
-     "v": 62878
+     "v": 65895
     },
     {
      "t": "s",
@@ -7192,7 +7198,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:37:17"
+     "v": "2026-10-15 14:10:02"
     },
     {
      "t": "s",
@@ -7257,7 +7263,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 11:37:17"
+     "v": "2026-10-15 14:10:02"
     },
     {
      "t": "s",

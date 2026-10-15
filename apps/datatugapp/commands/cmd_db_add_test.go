@@ -265,21 +265,65 @@ func writeText(t *testing.T, name string) string {
 	return path
 }
 
-func TestDbAddEnvironmentIsRequiredWhenThereAreSeveral(t *testing.T) {
-	dir := addProject(t)
-	one := filepath.Join(t.TempDir(), "one.db")
-	two := filepath.Join(t.TempDir(), "two.db")
-	require.NoError(t, os.WriteFile(one, []byte("x"), 0o644))
-	require.NoError(t, os.WriteFile(two, []byte("x"), 0o644))
-	for _, env := range []string{"local", "dev"} {
-		_, _, err := runDbAdd(t, "--project", "shop", "--db", one, "--env", env)
-		require.NoError(t, err)
+func TestDbAddDefaultEnvironment(t *testing.T) {
+	newDB := func(t *testing.T, name string) string {
+		path := filepath.Join(t.TempDir(), name)
+		require.NoError(t, os.WriteFile(path, []byte("x"), 0o644))
+		return path
 	}
-	before := projectFilesOf(t, dir)
-	_, _, err := runDbAdd(t, "--project", "shop", "--db", two)
-	assert.Equal(t, 2, exitCodeOf(t, err))
-	assert.ErrorContains(t, err, "--env is required: the project has 2 environments (dev, local)")
-	assert.Equal(t, before, projectFilesOf(t, dir))
+	envOf := func(t *testing.T, stdout string) string {
+		var result dbAddResult
+		require.NoError(t, json.Unmarshal([]byte(stdout), &result))
+		return result.Env
+	}
+	seed := func(t *testing.T, envs ...string) string {
+		dir := addProject(t)
+		for _, env := range envs {
+			_, _, err := runDbAdd(t, "--project", "shop", "--db", newDB(t, "seed.db"), "--name", "seed-"+env, "--env", env)
+			require.NoError(t, err)
+		}
+		return dir
+	}
+
+	t.Run("one environment", func(t *testing.T) {
+		seed(t, "prod")
+		out, _, err := runDbAdd(t, "--project", "shop", "--db", newDB(t, "x.db"))
+		require.NoError(t, err)
+		assert.Equal(t, "prod", envOf(t, out))
+	})
+	t.Run("several with local", func(t *testing.T) {
+		dir := seed(t, "dev", "local", "prod")
+		out, _, err := runDbAdd(t, "--project", "shop", "--db", newDB(t, "x.db"))
+		require.NoError(t, err)
+		assert.Equal(t, "local", envOf(t, out))
+		assert.Contains(t, out, "?env=local")
+		assert.Contains(t, projectFilesOf(t, dir), "environments/local/catalogs/x/x.db.json")
+		assert.NotContains(t, projectFilesOf(t, dir), "environments/dev/catalogs/x/x.db.json")
+	})
+	t.Run("several without local", func(t *testing.T) {
+		dir := seed(t, "prod", "dev")
+		before := projectFilesOf(t, dir)
+		_, _, err := runDbAdd(t, "--project", "shop", "--db", newDB(t, "x.db"))
+		assert.Equal(t, 2, exitCodeOf(t, err))
+		assert.EqualError(t, err, "--env is required: the project has 2 environments (dev, prod)")
+		assert.Equal(t, before, projectFilesOf(t, dir))
+	})
+	t.Run("none", func(t *testing.T) {
+		dir := addProject(t)
+		_, _, err := runDbAdd(t, "--project", "shop", "--db", newDB(t, "x.db"))
+		assert.Equal(t, 2, exitCodeOf(t, err))
+		assert.ErrorContains(t, err, "the project has no environment yet")
+		assert.Len(t, projectFilesOf(t, dir), 1)
+	})
+	t.Run("explicit env is unchanged", func(t *testing.T) {
+		seed(t, "dev", "local")
+		out, _, err := runDbAdd(t, "--project", "shop", "--db", newDB(t, "x.db"), "--env", "dev")
+		require.NoError(t, err)
+		assert.Equal(t, "dev", envOf(t, out))
+		out, _, err = runDbAdd(t, "--project", "shop", "--db", newDB(t, "y.db"), "--env", "staging")
+		require.NoError(t, err)
+		assert.Equal(t, "staging", envOf(t, out))
+	})
 }
 
 func TestDbAddFailuresOfTheProjectFiles(t *testing.T) {

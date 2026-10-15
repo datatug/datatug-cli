@@ -23,6 +23,31 @@ required_tests=(
 	TestPostgresDatabaseCompareJourneyPreservesExactValuesAndChanges
 	TestPostgresCopyJourneyRefusesANameAndLeavesTheTargetAsItWas
 	TestPostgresToBigQueryProviderNeutralCopyPreservesRows
+	TestPostgresRoundTripJourney
+	TestPostgresOriginJourney
+	TestPostgresCopyFailureLeavesTheTargetAsItWas
+	TestPostgresViolatedForeignKeyIsCreatedNotValid
+	TestPostgresTargetSchema
+	TestPostgresExactValuesRoundTrip
+	TestPostgresCopyIsIndependentOfTheServersOutputSettings
+	TestPostgresStatementTimeoutDoesNotCutOrMislabelTheCopy
+	TestPostgresFailedStatementsAreSaidWithTheirOwnReason
+	TestPostgresSequencesKeepTheirPosition
+	TestPostgresReloadIsOneTransaction
+	TestPostgresFilteredCopies
+	TestPostgresSourceIsReadAsOneSnapshot
+	TestPostgresJSONBRecognizerAgreesWithTheServer
+	TestPostgresRealHoldsWhatF32ExactAccepts
+	TestPostgresDecimalsTextKeepsTheText
+	TestPostgresReloadSurvivesKeyCyclesAndOrphans
+	TestPostgresStandardConformingStringsOffDoesNotRewriteTheDDL
+	TestPostgresReloadKeepsTheDefinitionOfEveryKey
+	TestPostgresDecimalDefaultsThatDoNotFit
+	TestPostgresYearZeroWidensTheColumn
+	TestPostgresNormalizedCountIsForTheTypeTheColumnGets
+	TestPostgresReloadOfATableWithAnIdentityAndADeferredKey
+	TestPostgresReloadOfAChildWhoseParentIsNotReloaded
+	TestPostgresStatementTimeoutDoesNotCutASlowReload
 	TestPostgresResultMetaMatchesSQLite
 )
 
@@ -56,7 +81,7 @@ trap 'rm -f "$output"' EXIT
 
 run_pattern="^($(IFS='|'; echo "${required_tests[*]}"))\$"
 status=0
-go test -count=1 -v -run "$run_pattern" ./apps/datatugapp/commands/ 2>&1 | tee "$output" || status=$?
+go test -count=1 -v -run "$run_pattern" ./apps/datatugapp/commands/ ./pkg/dbcopy/faithful/ 2>&1 | tee "$output" || status=$?
 if [ "$status" -ne 0 ]; then
 	echo "check-journey-postgres: go test failed (exit $status)" >&2
 	exit "$status"

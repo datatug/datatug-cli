@@ -114,6 +114,8 @@ All filtering (table include/exclude, row WHERE, row LIMIT) MUST be applied at t
 
 For MVP, the implementation MUST support push-down for all three filter axes on both source backends in the parent Feature's E2E pair: `sqlite` (via `dalgo2sqlite`) and `ingitdb` (via `dalgo2ingitdb`). If a future backend's driver lacks coverage for an axis, the command MUST exit `1` BEFORE any write, with stderr naming the source backend and the unsupported axis. (Pull-down fallback is explicitly deferred per the Out of Scope section.)
 
+**SQLite and PostgreSQL sources (2026-10-15).** A copy between SQLite and PostgreSQL, or between two SQLite files, is done by the [faithful engine](../README.md#sqlite-and-postgresql-copies), which applies all three axes in the source `SELECT` (`WHERE <field> <op> ?` with bound values, `ORDER BY` the primary key, `LIMIT n`); it does not go through `dal.StructuredQuery`. The vocabulary, the coercion and the exit codes of this Feature are unchanged (the same validators run), with two clarifications: a value of `in` is a comma list and every element is checked against the column type on its own, and a filtered copy that leaves a foreign key without its parent rows is reported (`fk-not-validated` / `fk-violations-in-source`, naming the filter) instead of failing.
+
 ### Config-file forwarding
 
 #### REQ: filter-config-flag

@@ -422,3 +422,18 @@ func TestResolveProjectSourceURLWithoutAnEnvironment(t *testing.T) {
 	_, err = EnvironmentsListingSource(ctx, &failingStore{ProjectStore: store, loadEnvironments: true}, "x")
 	assert.EqualError(t, err, "the environments of the project cannot be read")
 }
+
+func TestSourceEnvironments(t *testing.T) {
+	dir, store := sourceProject(t)
+	ctx := context.Background()
+	_, err := AddProjectSource(ctx, store, dir, ProjectSourceRequest{Environment: "local", ID: "shop", SQLitePath: sourceFile(t, "shop.sqlite")})
+	require.NoError(t, err)
+	envs, err := SourceEnvironments(ctx, store, "shop")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"local"}, envs)
+	envs, err = SourceEnvironments(ctx, store, "nope")
+	require.NoError(t, err)
+	assert.Empty(t, envs)
+	_, err = SourceEnvironments(ctx, &failingStore{ProjectStore: store, loadEnvironments: true}, "shop")
+	assert.Error(t, err)
+}

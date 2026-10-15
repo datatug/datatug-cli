@@ -241,6 +241,16 @@ func ResolveProjectSourceURL(ctx context.Context, store datatug.ProjectStore, pr
 	return source, nil
 }
 
+// SourceEnvironments is the ids of the environments of the project that list the source sourceID,
+// in order: the environment ResolveProjectSourceURL picks when it is given none is the only one.
+func SourceEnvironments(ctx context.Context, store datatug.ProjectStore, sourceID string) ([]string, error) {
+	envs, err := store.LoadEnvironments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return environmentsListing(ctx, store, envs, sourceID), nil
+}
+
 // environmentsListing is the ids of the environments of envs that list the source sourceID, in order.
 func environmentsListing(ctx context.Context, store datatug.ProjectStore, envs datatug.Environments, sourceID string) (holding []string) {
 	for _, env := range envs {

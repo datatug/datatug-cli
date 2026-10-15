@@ -126,6 +126,13 @@ func runSavedQueryCommand(cmd *cobra.Command, o queryOptions) error {
 		_, _ = fmt.Fprintln(stderr, provenanceLine(*result.Provenance))
 		provenance = newQueryProvenance(*result.Provenance)
 	}
+	if o.sink != nil {
+		o.sink.describeSaved(ctx, projStore, projectDir, o, canonicalID, queryDef, variables)
+		if result.Provenance != nil {
+			o.sink.meta.Provenance = resultProvenance(*result.Provenance)
+		}
+		return o.sink.writeSecureRows(cmd.OutOrStdout(), result.Columns, result.Rows)
+	}
 	if err := writeQueryRows(cmd.OutOrStdout(), o.format, result.Columns, secureRowsToQueryRows(result.Rows), provenance); err != nil {
 		return Exit(err.Error(), 1)
 	}

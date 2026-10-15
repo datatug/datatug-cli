@@ -542,3 +542,26 @@ func TestQueryOutputHelpers(t *testing.T) {
 		t.Errorf("csv must not gain a provenance column: %q, %v", out.String(), err)
 	}
 }
+
+func TestQuery_LimitCapsRowsOfFrom(t *testing.T) {
+	url := setupQueryDB(t)
+	stdout, stderr, code := runQuery(t, "", "--db", url, "--from", "products", "--limit", "2", "--format", "json", "--no-policies")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if objects := decodeObjects(t, stdout); len(objects) != 2 {
+		t.Fatalf("--limit 2 returned %d rows", len(objects))
+	}
+}
+
+func TestQuery_LimitRefusals(t *testing.T) {
+	url := setupQueryDB(t)
+	for name, argv := range map[string][]string{
+		"negative":  {"--db", url, "--from", "products", "--limit", "-1"},
+		"with file": {"--db", url, "-f", "-", "--limit", "2"},
+	} {
+		if _, _, code := runQuery(t, "", argv...); code != exitCodeUsage {
+			t.Errorf("%s: exit %d, want %d", name, code, exitCodeUsage)
+		}
+	}
+}

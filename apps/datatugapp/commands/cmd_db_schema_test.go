@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -61,7 +62,7 @@ func TestDBSchemaSQLiteJSONViaEnv(t *testing.T) {
 	if err = json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("not JSON: %v\n%s", err, out)
 	}
-	want := []schemaEntry{
+	want := [][3]string{
 		{"main", "Album", "table"},
 		{"main", "Zebra", "table"},
 		{"main", "AlbumTitles", "view"},
@@ -70,7 +71,7 @@ func TestDBSchemaSQLiteJSONViaEnv(t *testing.T) {
 		t.Fatalf("unexpected listing: %+v", got)
 	}
 	for i := range want {
-		if got.Tables[i] != want[i] {
+		if got.Tables[i].Schema != want[i][0] || got.Tables[i].Name != want[i][1] || got.Tables[i].Kind != want[i][2] {
 			t.Fatalf("entry %d = %+v, want %+v", i, got.Tables[i], want[i])
 		}
 	}
@@ -381,5 +382,247 @@ func TestDBSchemaIsRegisteredUnderDB(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatal("db schema is not registered")
+	}
+}
+
+func runDBSchemaJSON(t *testing.T, args ...string) map[string]any {
+	t.Helper()
+	out, err := runDBSchema(t, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err = json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, out)
+	}
+	return doc
+}
+
+func tablesByName(t *testing.T, doc map[string]any) map[string]map[string]any {
+	t.Helper()
+	byName := map[string]map[string]any{}
+	for _, raw := range doc["tables"].([]any) {
+		entry := raw.(map[string]any)
+		byName[entry["name"].(string)] = entry
+	}
+	return byName
+}
+
+func TestDBSchemaColumnsAndCountsOnSQLite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shop.sqlite")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE Album (AlbumId INTEGER NOT NULL PRIMARY KEY, Title NVARCHAR(160) NOT NULL, Price NUMERIC(5,2) DEFAULT 9.99, Note TEXT)`,
+		`INSERT INTO Album (AlbumId, Title) VALUES (1, 'a'), (2, 'b')`,
+		`CREATE VIEW AlbumTitles AS SELECT Title FROM Album`,
+	} {
+		if _, err = db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = db.Close()
+
+	plain := tablesByName(t, runDBSchemaJSON(t, "--db", "sqlite://"+path))
+	if _, has := plain["Album"]["columns"]; has {
+		t.Fatal("columns present without --columns")
+	}
+	if _, has := plain["Album"]["rowCount"]; has {
+		t.Fatal("rowCount present without --counts")
+	}
+
+	doc := runDBSchemaJSON(t, "--db", "sqlite://"+path, "--columns", "--counts")
+	tables := tablesByName(t, doc)
+	if tables["Album"]["rowCount"] != float64(2) {
+		t.Fatalf("rowCount = %v", tables["Album"]["rowCount"])
+	}
+	if _, has := tables["AlbumTitles"]["rowCount"]; has {
+		t.Fatal("a view carries rowCount")
+	}
+	columns := tables["Album"]["columns"].([]any)
+	first := columns[0].(map[string]any)
+	if first["name"] != "AlbumId" || first["type"] != "INTEGER" || first["nullable"] != false || first["primaryKeyPosition"] != float64(1) {
+		t.Fatalf("first column = %v", first)
+	}
+	title := columns[1].(map[string]any)
+	if title["type"] != "NVARCHAR(160)" || title["nullable"] != false {
+		t.Fatalf("title = %v", title)
+	}
+	price := columns[2].(map[string]any)
+	if price["type"] != "NUMERIC(5,2)" || price["default"] != "9.99" || price["nullable"] != true {
+		t.Fatalf("price = %v", price)
+	}
+	view := tables["AlbumTitles"]["columns"].([]any)
+	if len(view) != 1 || view[0].(map[string]any)["name"] != "Title" || view[0].(map[string]any)["type"] != "" {
+		t.Fatalf("view columns = %v", view)
+	}
+}
+
+func TestSchemaColumnsFallBackToPortableDefinition(t *testing.T) {
+	def := &dbschema.CollectionDef{
+		Name:       "t",
+		Fields:     []dbschema.FieldDef{{Name: "id", Type: dbschema.Int, Nullable: false}, {Name: "n", Type: dbschema.String, Nullable: true}},
+		PrimaryKey: []dal.FieldName{"id"},
+	}
+	columns := columnsOf(def)
+	if len(columns) != 2 || columns[0].Type != dbschema.Int.String() || columns[0].PrimaryKeyPosition != 1 || columns[1].PrimaryKeyPosition != 0 || !columns[1].Nullable {
+		t.Fatalf("columns = %+v", columns)
+	}
+}
+
+func TestAddSchemaColumnsUnreadableTableIsNull(t *testing.T) {
+	entries := []schemaEntry{{Name: "x", Kind: schemaKindTable}}
+	addSchemaColumns(context.Background(), nopDB{}, entries)
+	out, err := json.Marshal(entries[0])
+	if err != nil || !strings.Contains(string(out), `"columns":null`) {
+		t.Fatalf("got %s, %v", out, err)
+	}
+}
+
+func TestAddSchemaCountsUncountableIsNull(t *testing.T) {
+	entries := []schemaEntry{{Schema: "public", Name: "x", Kind: schemaKindTable}, {Schema: "public", Name: "v", Kind: schemaKindView}}
+	addSchemaCounts(context.Background(), nopDB{}, "postgres", entries)
+	out, err := json.Marshal(entries[0])
+	if err != nil || !strings.Contains(string(out), `"rowCount":null`) {
+		t.Fatalf("got %s, %v", out, err)
+	}
+	if entries[1].RowCount != nil {
+		t.Fatal("a view was counted")
+	}
+}
+
+func TestDBSchemaPathDetection(t *testing.T) {
+	dir := t.TempDir()
+	good := sqliteWithViews(t)
+	noExt := filepath.Join(dir, "chinook")
+	data, err := os.ReadFile(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(noExt, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	upper := filepath.Join(dir, "SHOP.DB3")
+	if err = os.WriteFile(upper, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	byName := runDBSchemaJSON(t, "--db", good)
+	if byName["detectedFrom"] != "file name" || byName["provider"] != "sqlite" {
+		t.Fatalf("by name: %v", byName)
+	}
+	if runDBSchemaJSON(t, "--db", upper)["detectedFrom"] != "file name" {
+		t.Fatal("extension is not case-insensitive")
+	}
+	if runDBSchemaJSON(t, "--db", noExt)["detectedFrom"] != "file content" {
+		t.Fatal("header not detected")
+	}
+	if runDBSchemaJSON(t, "--db", "sqlite://"+good)["detectedFrom"] != "scheme" {
+		t.Fatal("scheme not reported")
+	}
+}
+
+func TestResolveSchemaSourceRelativeAndHome(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	source, from, err := resolveSchemaSource("shop.sqlite")
+	resolved, _ := filepath.EvalSymlinks(dir)
+	if err != nil || from != detectedFromName || !strings.HasSuffix(source, filepath.Join(filepath.Base(resolved), "shop.sqlite")) || !strings.HasPrefix(source, "sqlite://") {
+		t.Fatalf("relative: %q %q %v", source, from, err)
+	}
+	original := userHomeDir
+	t.Cleanup(func() { userHomeDir = original })
+	userHomeDir = func() (string, error) { return "/home/tester", nil }
+	for _, arg := range []string{"~/data/x.sqlite"} {
+		source, _, err = resolveSchemaSource(arg)
+		if err != nil || source != "sqlite:///home/tester/data/x.sqlite" {
+			t.Fatalf("home: %q %v", source, err)
+		}
+	}
+	userHomeDir = func() (string, error) { return "", errors.New("no home") }
+	if _, _, err = resolveSchemaSource("~/x.sqlite"); err == nil {
+		t.Fatal("home error swallowed")
+	}
+}
+
+func TestResolveSchemaSourcePassesURLsAndEmptyThrough(t *testing.T) {
+	for _, arg := range []string{"", "env:SOME_VAR", "postgres://h/d", "sqlite:rel.db"} {
+		source, from, err := resolveSchemaSource(arg)
+		if err != nil || source != arg || from != detectedFromScheme {
+			t.Fatalf("%q: %q %q %v", arg, source, from, err)
+		}
+	}
+}
+
+func TestResolveSchemaSourceRefusals(t *testing.T) {
+	dir := t.TempDir()
+	text := filepath.Join(dir, "notes.txt")
+	short := filepath.Join(dir, "short")
+	if err := os.WriteFile(text, []byte("hello, this is a text file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(short, []byte("SQLite"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, arg := range []string{text, short, filepath.Join(dir, "missing"), dir} {
+		if _, _, err := resolveSchemaSource(arg); err == nil || !strings.Contains(err.Error(), "not a recognised database file") || strings.Contains(err.Error(), "\n") {
+			t.Fatalf("%q: %v", arg, err)
+		}
+	}
+	for _, name := range []string{"a?b.sqlite", "a#b.sqlite", "a@b.sqlite", "a%41.sqlite"} {
+		if _, _, err := resolveSchemaSource(filepath.Join(dir, name)); err == nil || !strings.Contains(err.Error(), "path not supported") {
+			t.Fatalf("%q: %v", name, err)
+		}
+	}
+}
+
+func TestDBSchemaUnrecognisedFileExitsUsage(t *testing.T) {
+	text := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(text, []byte("plain text"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := runDBSchema(t, "--db", text)
+	if err == nil || exitCodeOf(t, err) != exitCodeUsage {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRowCountMarshal(t *testing.T) {
+	n := 3
+	for in, want := range map[rowCount]string{{n: &n}: "3", {}: "null"} {
+		out, err := json.Marshal(in)
+		if err != nil || string(out) != want {
+			t.Fatalf("got %s, %v", out, err)
+		}
+	}
+}
+
+// failingCountDB declares a native COUNT and fails every query.
+type failingCountDB struct{ dal.DB }
+
+func (failingCountDB) QueryCapabilities() dal.QueryCapabilities {
+	return dal.QueryCapabilities{Aggregate: dal.AggregateCapabilities{Count: true}}
+}
+
+func (failingCountDB) ExecuteQueryToRecordsReader(context.Context, dal.Query) (dal.RecordsReader, error) {
+	return nil, errors.New("permission denied")
+}
+
+func TestAddSchemaCountsFailedCountIsNull(t *testing.T) {
+	entries := []schemaEntry{{Schema: "public", Name: "x", Kind: schemaKindTable}}
+	addSchemaCounts(context.Background(), failingCountDB{}, "postgres", entries)
+	if entries[0].RowCount == nil || entries[0].RowCount.n != nil {
+		t.Fatalf("got %+v", entries[0].RowCount)
+	}
+}
+
+func TestResolveSchemaSourceUnresolvableWorkingDirectory(t *testing.T) {
+	original := absolutePath
+	t.Cleanup(func() { absolutePath = original })
+	absolutePath = func(string) (string, error) { return "", errors.New("no working directory") }
+	if _, _, err := resolveSchemaSource("shop.sqlite"); err == nil || !strings.Contains(err.Error(), "cannot resolve") {
+		t.Fatalf("got %v", err)
 	}
 }

@@ -23,6 +23,7 @@ const (
 	queryDBFlag          = "db"
 	queryFileFlag        = "file"
 	queryFromFlag        = "from"
+	queryLimitFlag       = "limit"
 	queryFormatFlag      = "format"
 	queryAsFlag          = "as"
 	queryRoleFlag        = "role"
@@ -99,6 +100,7 @@ Examples:
 	flags.String(queryProjectFlag, "", "Project directory or registered project ID (alternative to --db; runs a saved --query by ID)")
 	flags.String(queryQueryFlag, "", "Saved query ID to run, e.g. customers/customer-invoices (requires --project)")
 	flags.String(queryEnvFlag, "", "Environment ID the saved query runs against (default: the project's only environment)")
+	flags.Int(queryLimitFlag, 0, "Read at most this many rows (only with --from; a -f query states its own limit)")
 	flags.String(queryFormatFlag, "grid", "Output format: "+strings.Join(queryFormats, ", "))
 	flags.String(queryAsFlag, "", "Principal user ID; also sets $currentUser")
 	flags.StringArray(queryRoleFlag, nil, "Principal role (repeatable)")
@@ -115,6 +117,7 @@ type queryOptions struct {
 	db          string
 	file        string
 	from        string
+	limit       int
 	format      string
 	as          string
 	roles       []string
@@ -135,6 +138,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 	o.db, _ = flags.GetString(queryDBFlag)
 	o.file, _ = flags.GetString(queryFileFlag)
 	o.from, _ = flags.GetString(queryFromFlag)
+	o.limit, _ = flags.GetInt(queryLimitFlag)
 	o.format, _ = flags.GetString(queryFormatFlag)
 	o.as, _ = flags.GetString(queryAsFlag)
 	o.roles, _ = flags.GetStringArray(queryRoleFlag)
@@ -163,6 +167,12 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 		return o, Exit("one of -f/--file or --from is required", exitCodeUsage)
 	case !savedQueryMode && o.file != "" && o.from != "":
 		return o, Exit("-f/--file and --from are mutually exclusive", exitCodeUsage)
+	}
+	switch {
+	case o.limit < 0:
+		return o, Exit("--limit must be zero or more", exitCodeUsage)
+	case o.limit > 0 && o.from == "":
+		return o, Exit("--limit works with --from; a -f query or a saved query states its own limit", exitCodeUsage)
 	}
 	valid := false
 	for _, format := range queryFormats {
@@ -333,7 +343,11 @@ func queryFailure(err error) error {
 
 func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, error) {
 	if o.from != "" {
-		return dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(o.from, ""))).SelectColumns(), nil
+		var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(o.from, "")))
+		if o.limit > 0 {
+			builder = builder.Limit(o.limit)
+		}
+		return builder.SelectColumns(), nil
 	}
 	var (
 		content []byte

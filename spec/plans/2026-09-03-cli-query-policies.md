@@ -41,7 +41,7 @@ The reusable core lives in `pkg/accesspolicies` (discovery, decoding, variable p
 ### Task 3: Query command
 
 **Id:** task-3
-**Verifies:** cli/query#ac:query-from-collection, cli/query#ac:query-file-stdin, cli/query#ac:input-mutually-exclusive, cli/query#ac:query-param-substituted, cli/query#ac:db-url-required, cli/query#ac:db-scheme-unsupported, cli/query#ac:rows-filtered-by-principal, cli/query#ac:fields-hidden, cli/query#ac:no-policies-warns, cli/query#ac:quiet-suppresses-report, cli/query#ac:denied-exit-5, cli/query#ac:formats, cli/query#ac:header-follows-request-order, cli/query#ac:numbers-plain, cli/query#ac:db-unopenable-exit-4
+**Verifies:** cli/query#ac:query-from-collection, cli/query#ac:query-file-stdin, cli/query#ac:input-mutually-exclusive, cli/query#ac:query-param-substituted, cli/query#ac:db-url-required, cli/query#ac:db-scheme-unsupported, cli/query#ac:rows-filtered-by-principal, cli/query#ac:fields-hidden, cli/query#ac:no-policies-warns, cli/query#ac:quiet-suppresses-report, cli/query#ac:denied-exit-5, cli/query#ac:formats, cli/query#ac:header-follows-request-order, cli/query#ac:numbers-plain, cli/query#ac:db-unopenable-exit-4, cli/query#ac:limit-caps-rows
 **Depends-On:** 2
 **Status:** complete
 

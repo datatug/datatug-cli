@@ -26,7 +26,7 @@ Policy authors have no way to see what a DALgo access policy will do to a real q
 ## Synopsis
 
 ```
-datatug query run --db <url> (-f <dtql-file>|--from <collection>) \
+datatug query run --db <url> (-f <dtql-file>|--from <collection> [--limit <n>]) \
   [--format grid|json|jsonl|yaml|csv] \
   [--as <user-id>] [--role <role>]... [--group <group>]... [--var <name>=<value>]... \
   [--policy <file>]... [--policies-dir <dir>] [--no-policies] [-q|--quiet]
@@ -41,6 +41,10 @@ datatug query run --db <url> (-f <dtql-file>|--from <collection>) \
 #### REQ: query-input
 
 `query run` MUST accept the query either as a DTQL document (`-f <path>`, YAML or JSON; `-f -` reads stdin) or as `--from <collection>`, which selects every row and every field of one root collection. Exactly one of the two MUST be given; otherwise the command MUST exit 2 with a usage error. Parameters in the query document (`param:` nodes on the right-hand side of a `where` comparison) MUST be substituted from `--var` before execution; an unresolved query parameter MUST exit 2 naming `$name`. A parameter anywhere else (columns, the left-hand side, `orderBy`, `groupBy`, `having`) is not supported and MUST exit 2 naming it.
+
+#### REQ: limit-flag
+
+`--limit <n>` MUST read at most `n` rows of a `--from` query (`n` > 0). With `-f` or a saved query it MUST exit 2, because those state their own limit; a negative value MUST exit 2. `0`, the default, means no limit.
 
 #### REQ: db-url
 
@@ -89,6 +93,12 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 **Given** an inGitDB database with a `products` collection of three records
 **When** the user runs `datatug query run --db ingitdb://<dir> --from products --format json --no-policies`
 **Then** stdout is a JSON array of three objects each carrying `$key` and the record's fields, and the exit code is 0.
+
+### AC: limit-caps-rows (verifies REQ:limit-flag)
+
+**Given** a collection of three or more rows
+**When** the user runs `datatug query run --db <url> --from <collection> --limit 2 --no-policies --format jsonl`
+**Then** stdout holds exactly two rows; with `-f`, `--limit` exits 2.
 
 ### AC: query-file-stdin (verifies REQ:query-input)
 

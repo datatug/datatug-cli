@@ -33,6 +33,13 @@ func NewNativeCounter(db dal.DB) RecordsCounter {
 	return newNativeCounter(db, capabilities)
 }
 
+// NewNativeCounterWithCapabilities is NewNativeCounter for a database whose
+// adapter runs COUNT(*) natively without declaring it (dalgo2sqlite): the
+// caller states the capabilities instead of the adapter.
+func NewNativeCounterWithCapabilities(db dal.DB, capabilities dal.QueryCapabilities) RecordsCounter {
+	return newNativeCounter(db, capabilities)
+}
+
 func newNativeCounter(executor dal.QueryExecutor, capabilities dal.QueryCapabilities) RecordsCounter {
 	return &nativeCounter{executor: executor, capabilities: capabilities}
 }

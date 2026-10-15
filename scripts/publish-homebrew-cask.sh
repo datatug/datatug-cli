@@ -38,27 +38,27 @@ cask "datatug" do
   on_macos do
     on_arm do
       sha256 "$darwin_arm64"
-      url "https://github.com/datatug/datatug-cli/releases/download/v#{version}/datatug_#{version}_darwin_arm64.tar.gz"
+      url "https://github.com/datatug/datatug/releases/download/v#{version}/datatug_#{version}_darwin_arm64.tar.gz"
     end
     on_intel do
       sha256 "$darwin_amd64"
-      url "https://github.com/datatug/datatug-cli/releases/download/v#{version}/datatug_#{version}_darwin_amd64.tar.gz"
+      url "https://github.com/datatug/datatug/releases/download/v#{version}/datatug_#{version}_darwin_amd64.tar.gz"
     end
   end
   on_linux do
     on_arm do
       sha256 "$linux_arm64"
-      url "https://github.com/datatug/datatug-cli/releases/download/v#{version}/datatug_#{version}_linux_arm64.tar.gz"
+      url "https://github.com/datatug/datatug/releases/download/v#{version}/datatug_#{version}_linux_arm64.tar.gz"
     end
     on_intel do
       sha256 "$linux_amd64"
-      url "https://github.com/datatug/datatug-cli/releases/download/v#{version}/datatug_#{version}_linux_amd64.tar.gz"
+      url "https://github.com/datatug/datatug/releases/download/v#{version}/datatug_#{version}_linux_amd64.tar.gz"
     end
   end
 
   name "datatug"
   desc "DataTug – Context-aware data viewer & collaborative query manager for effortless exploration of related data — CLI + Web UI"
-  homepage "https://github.com/datatug/datatug-cli"
+  homepage "https://datatug.io"
 
   livecheck do
     skip "Published manually from verified release artifacts."

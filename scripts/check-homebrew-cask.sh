@@ -60,4 +60,9 @@ if [[ -n "$checksums" ]]; then
   done
 fi
 
+if grep -q "datatug/datatug-cli" "$cask"; then
+  echo "the tap's cask still points to datatug/datatug-cli instead of datatug/datatug" >&2
+  exit 1
+fi
+
 echo "the tap's cask is current: version $want"

@@ -72,7 +72,7 @@ cli-install#req:catalog-identity-single-source), never from hand-written
 identity values, so its self-update and every other fleet CLI's
 `install datatug` resolve releases identically. The entry declares:
 
-- Repository `datatug/datatug-cli`, no tag prefix.
+- Repository `datatug/datatug`, no tag prefix.
 - The default GoReleaser asset and checksums naming (no override), matching
   `.goreleaser.yaml`'s `archives[].name_template`
   (`{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}`) and

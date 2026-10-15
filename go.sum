@@ -350,8 +350,8 @@ github.com/strongo/analytics v0.2.8 h1:h0snZrFba1DDI7H/RcePbq3V8MeuOrZFC8kj5ZJkp
 github.com/strongo/analytics v0.2.8/go.mod h1:/pf7goR1CZtkvZHrJH5sXpJJl6IAefWCx82eSGUZ2V0=
 github.com/strongo/buildinfo v0.3.0 h1:nPbCrSA+7I3bct6mwZ24U6SHfV7TaRafoYzDucwl1Qg=
 github.com/strongo/buildinfo v0.3.0/go.mod h1:JpxZ3Jku81LJC1RNIqCNYwguDzLk90eemxUXx4JnSlA=
-github.com/strongo/cli-helpers v0.26.0 h1:3Br0rElQyYGv1iQX0qk+Uo0YKp6q/vtLYeH5EWwmnuA=
-github.com/strongo/cli-helpers v0.26.0/go.mod h1:2eUFIkQELgeWLeYz9g3hKer+Kcf+3vnAzHMOPDE7ItA=
+github.com/strongo/cli-helpers v0.27.1 h1:mdvCeYCkS5zah5eKmPHxUiWEPOfUYtvV+uVjSSTvmSU=
+github.com/strongo/cli-helpers v0.27.1/go.mod h1:2eUFIkQELgeWLeYz9g3hKer+Kcf+3vnAzHMOPDE7ItA=
 github.com/strongo/decimal v0.1.2 h1:/LHdX9zJTUPpEM2cuQhnwCWNWLCUwG0BJMyOetpryY8=
 github.com/strongo/decimal v0.1.2/go.mod h1:uKFgetJbR2uT026stdbK54ELXTH9h0vZOPPOp7DAODk=
 github.com/strongo/deviceauth v0.1.0 h1:wl+VrsRkDGQqYrqnm0IiCmPGldnBLdzzA1nfNwgDdis=

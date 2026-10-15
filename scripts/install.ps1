@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 # Install an official DataTug CLI release without a language toolchain.
 # DATATUG_INSTALL_DIR may override the default per-user destination.
 # DATATUG_VERSION may pin a release tag such as v0.32.0.
-$Repo = "https://github.com/datatug/datatug-cli"
+$Repo = "https://github.com/datatug/datatug"
 $InstallDir = if ($env:DATATUG_INSTALL_DIR) {
     $env:DATATUG_INSTALL_DIR
 } else {
@@ -29,7 +29,7 @@ try {
 
     if (-not $Version) {
         try {
-            $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/datatug/datatug-cli/releases/latest"
+            $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/datatug/datatug/releases/latest"
             $Version = $Release.tag_name
         } catch {
             Fail "could not resolve the latest release: $($_.Exception.Message)"

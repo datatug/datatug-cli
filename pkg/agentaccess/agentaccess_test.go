@@ -44,10 +44,33 @@ func TestKeyRoundTripAndMode(t *testing.T) {
 	if err = WriteKey(filepath.Join(dir, "access-1.key", "x"), 1, secret); err == nil {
 		t.Fatal("an unwritable directory must fail")
 	}
-	_ = os.MkdirAll(KeyPath(dir, 2)+".tmp", 0o700)
+	_ = os.MkdirAll(filepath.Join(KeyPath(dir, 2)+".tmp", "x"), 0o700)
 	if err = WriteKey(dir, 2, secret); err == nil {
 		t.Fatal("an unwritable key file must fail")
 	}
+	// a stale or planted tmp file (a link, say) is replaced, never written through
+	target := filepath.Join(t.TempDir(), "victim")
+	_ = os.Symlink(target, KeyPath(dir, 3)+".tmp")
+	if err = WriteKey(dir, 3, secret); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = os.Stat(target); err == nil {
+		t.Fatal("the key was written through a link")
+	}
+	// a group-readable key and a group-writable directory are refused
+	if err = os.Chmod(KeyPath(dir, 3), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ReadKey(dir, 3); err == nil {
+		t.Fatal("a key readable by others must not read")
+	}
+	if err = os.Chmod(dir, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	if err = WriteKey(dir, 4, secret); err == nil {
+		t.Fatal("a shared directory must be refused")
+	}
+	_ = os.Chmod(dir, 0o700)
 }
 
 func TestStateDir(t *testing.T) {
@@ -175,5 +198,15 @@ func TestRandomnessFailure(t *testing.T) {
 	}
 	if _, err := MintCode(nil, time.Now()); err == nil {
 		t.Fatal("MintCode must fail")
+	}
+}
+
+func TestPrivateModeIgnoredOnWindows(t *testing.T) {
+	orig := goos
+	defer func() { goos = orig }()
+	goos = "windows"
+	info, err := os.Stat(t.TempDir())
+	if err != nil || !privateMode(info) {
+		t.Fatal(err)
 	}
 }

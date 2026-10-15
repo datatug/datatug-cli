@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,17 +75,43 @@ func NewSecret() ([]byte, error) {
 	return secret, nil
 }
 
-// WriteKey stores secret for the agent on port, readable by the current user only.
+// WriteKey stores secret for the agent on port, readable by the current user only. The state
+// directory must not be writable by anyone else (another user could plant a link or a file), and
+// the file is created fresh, never through an existing file or link.
 func WriteKey(dir string, port int, secret []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	if info, err := os.Stat(dir); err != nil || !privateMode(info) {
+		return errors.New("the state directory is not private to this user")
+	}
 	path := KeyPath(dir, port)
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(hex.EncodeToString(secret)+"\n"), 0o600); err != nil {
+	_ = os.Remove(tmp)
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
 		return err
 	}
+	// A short or failed write leaves a file that ReadKey refuses as not valid.
+	_, _ = f.WriteString(hex.EncodeToString(secret) + "\n")
+	_ = f.Close()
 	return os.Rename(tmp, path)
+}
+
+// goos is the platform; tests replace it.
+var goos = runtime.GOOS
+
+// privateMode reports whether info has no group or other write bit for a directory, and no group
+// or other bit at all for a file. Modes mean nothing on Windows, where the ACL of the user's
+// directory applies.
+func privateMode(info os.FileInfo) bool {
+	if goos == "windows" {
+		return true
+	}
+	if info.IsDir() {
+		return info.Mode().Perm()&0o022 == 0
+	}
+	return info.Mode().Perm()&0o077 == 0
 }
 
 // RemoveKey deletes the key of the agent on port.
@@ -92,10 +119,14 @@ func RemoveKey(dir string, port int) { _ = os.Remove(KeyPath(dir, port)) }
 
 // ReadKey reads the secret of the agent on port.
 func ReadKey(dir string, port int) ([]byte, error) {
-	data, err := os.ReadFile(KeyPath(dir, port))
+	info, err := os.Stat(KeyPath(dir, port))
 	if err != nil {
 		return nil, err
 	}
+	if !privateMode(info) {
+		return nil, errors.New("the access key file is readable by others")
+	}
+	data, _ := os.ReadFile(KeyPath(dir, port)) // unreadable: empty, and not a valid key
 	secret, err := hex.DecodeString(strings.TrimSpace(string(data)))
 	if err != nil || len(secret) != secretBytes {
 		return nil, errors.New("the access key file is not valid")

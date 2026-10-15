@@ -63,6 +63,7 @@ func TestTokenExempt(t *testing.T) {
 	assert.True(t, tokenExempt(httptest.NewRequest(http.MethodPost, agentaccess.ExchangePath, nil)))
 	assert.False(t, tokenExempt(httptest.NewRequest(http.MethodGet, agentaccess.ExchangePath, nil)))
 	assert.False(t, tokenExempt(httptest.NewRequest(http.MethodPost, "/datatug/exec/run_query", nil)))
+	assert.False(t, tokenExempt(httptest.NewRequest(http.MethodPost, "/x"+agentaccess.ExchangePath, nil)), "equality, not a suffix")
 }
 
 func TestExchangeHandler(t *testing.T) {

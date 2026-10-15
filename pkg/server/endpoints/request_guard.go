@@ -85,7 +85,7 @@ const tokenRequiredMessage = "this agent needs the session token of its link: op
 // by origin only) and the exchange of a one-time code, which is how a page gets the token.
 func tokenExempt(r *http.Request) bool {
 	return r.Method == http.MethodOptions ||
-		(r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, agentaccess.ExchangePath))
+		(r.Method == http.MethodPost && r.URL.Path == agentaccess.ExchangePath)
 }
 
 // guardedRouter is the router that every route of the table is registered with: each handler is

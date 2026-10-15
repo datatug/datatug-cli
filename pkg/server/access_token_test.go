@@ -55,6 +55,18 @@ func TestServeHTTP_TokenAndOneTimeCode(t *testing.T) {
 	}
 
 	// any other route refuses a request without the token, and the page may read the refusal
+	// what the router answers by itself is behind the token too: no route can be probed for
+	for _, path := range []string{"/datatug/nope", "/datatug/session/exchange"} {
+		if status, _, _ := do(t, http.MethodGet, base+path, origin, "", ""); status != http.StatusUnauthorized {
+			t.Errorf("%s without a token: %d", path, status)
+		}
+	}
+	if status, _, _ := do(t, http.MethodGet, base+"/datatug/nope", origin, agentaccess.SessionToken(secret), ""); status != http.StatusNotFound {
+		t.Errorf("an unknown path with the token: %d", status)
+	}
+	if status, _, _ := do(t, http.MethodGet, base+"/datatug/session/exchange", origin, agentaccess.SessionToken(secret), ""); status != http.StatusMethodNotAllowed {
+		t.Errorf("the wrong method with the token: %d", status)
+	}
 	for _, path := range []string{"/datatug/agent-info", "/datatug/ping", "/", "/datatug/exec/select"} {
 		status, body, header := do(t, http.MethodGet, base+path, origin, "", "")
 		if status != http.StatusUnauthorized || header.Get("Access-Control-Allow-Origin") != origin {

@@ -169,7 +169,7 @@ func resolveRecordsTable(ctx context.Context, req recordsTableRequest) (resolved
 		return resolvedSource{}, "", nil, newContractError(codeInternal, "server has no policy-enforced session configured", "")
 	}
 	if err := executor.Authorize(ctx, authorizeQuery(collection), nil); err != nil {
-		if errors.Is(err, secureread.ErrAccessDenied) || isAccessDenied(err) {
+		if errors.Is(err, secureread.ErrAccessDenied) {
 			return resolvedSource{}, "", nil, contractErrAccessDenied("access denied by policy")
 		}
 		log.Printf("records: the access decision failed")
@@ -222,7 +222,7 @@ func computeRecordsLookup(ctx context.Context, req recordsLookupRequest) (apicon
 		switch {
 		case errors.Is(err, context.DeadlineExceeded):
 			return apicontract.Result{}, newTimeout("the record lookup timed out")
-		case isAccessDenied(err):
+		case errors.Is(err, secureread.ErrAccessDenied):
 			return apicontract.Result{}, contractErrAccessDenied("access denied by policy")
 		}
 		if unavailable := api.SourceUnavailable(req.Source, err); unavailable != nil {
@@ -523,16 +523,9 @@ func recordsSchemaHandler(w http.ResponseWriter, r *http.Request) {
 	writeContractResponse(w, r, nil, resp)
 }
 
-// defaultSchemaName is the name of the default schema of a driver ("" when it has none).
-func defaultSchemaName(driver string) string {
-	switch driver {
-	case "sqlite3":
-		return "main"
-	case "postgres":
-		return "public"
-	}
-	return ""
-}
+// defaultSchemaName is the name of the default schema of a driver ("" when it has none): the shared
+// helper of the api package, so aliases and case resolve the same way everywhere.
+func defaultSchemaName(driver string) string { return api.DefaultSchemaForDriver(driver) }
 
 // readableTable reports whether the principal may read the table of schema: the same access decision
 // the route makes on the table asked about. A table in another schema than the default one is not

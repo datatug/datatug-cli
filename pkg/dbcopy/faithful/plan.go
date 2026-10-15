@@ -19,9 +19,13 @@ type TargetColumn struct {
 	Default  string // default expression in the target dialect, "" for none
 	Identity Identity
 	Marker   *Marker
+	// Kind is the logical kind the column is written as.
+	Kind Kind
 	// Cast is the PostgreSQL type a text parameter is cast to on insert ("" for a parameter of the column's own type).
 	Cast string
 	enc  encoder
+	// loss counts the values of the column the target cannot hold (PostgreSQL to SQLite floats); nil for the others.
+	loss *lossCount
 	// readExpr is the select expression of the source.
 	readExpr string
 }
@@ -37,6 +41,14 @@ type TargetTable struct {
 	Indexes []Index
 	Checks  []Check
 	FKs     []ForeignKey
+	// Copied is the number of rows written, set when the table has been loaded.
+	Copied int64
+	// Filter is the --where / --limit of the table, nil for none.
+	Filter *compiledFilter
+	// Loaded says the table's rows have been written (Copied is then the number).
+	Loaded bool
+	// Reload says the table exists on the target and keeps its schema: it is emptied and loaded again.
+	Reload bool
 }
 
 // Plan is the whole copy as it will be written.
@@ -147,9 +159,6 @@ type pgChoice struct {
 	enc  encoder
 	kind Kind
 	note string // non-empty: the declared type could not be carried and this says why
-	// normalized says that some text values are written differently by the target (example: ".0000 -> 0.0000").
-	normalized int64
-	example    string
 }
 
 func chooseSQLiteToPG(c *Column, st *colStats) pgChoice {
@@ -170,22 +179,30 @@ func chooseSQLiteToPG(c *Column, st *colStats) pgChoice {
 			return pgChoice{typ: typ, enc: encInt, kind: KindInt}
 		}
 	case declFloat:
-		if st.only("int", "real") {
-			typ := "double precision"
-			if d.width == 4 {
-				typ = "real"
+		if st.only("int", "real") && st.intInexact == 0 {
+			switch {
+			case d.width == 4 && st.f32Bad == 0:
+				return pgChoice{typ: "real", enc: encFloat, kind: KindFloat}
+			case d.width == 4:
+				return widen(pgChoice{typ: "double precision", enc: encFloat, kind: KindFloat}, fmt.Sprintf("%d value(s) are not held exactly by a 4-byte real", st.f32Bad))
 			}
-			return pgChoice{typ: typ, enc: encFloat, kind: KindFloat}
+			return pgChoice{typ: "double precision", enc: encFloat, kind: KindFloat}
 		}
 	case declDecimal:
 		if st.only("int", "real", "text") && st.decOK == st.ints+st.reals+st.texts {
-			if st.decFit == st.decOK {
-				return pgChoice{typ: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), cast: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), enc: encDecimal, kind: KindDecimal, normalized: st.decNormalized, example: st.decNormalExample}
+			if d.text && st.decNormalized > 0 {
+				return widen(pgChoice{typ: "text", enc: encText, kind: KindText}, fmt.Sprintf("numeric would write %d of its text values differently (%s)", st.decNormalized, st.decNormalExample))
 			}
-			return widen(pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal, normalized: st.decNormalized, example: st.decNormalExample}, "some values do not fit that precision and scale exactly")
+			if st.decFit == st.decOK {
+				return pgChoice{typ: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), cast: fmt.Sprintf("numeric(%d,%d)", d.p, d.s), enc: encDecimal, kind: KindDecimal}
+			}
+			return widen(pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal}, "some values do not fit that precision and scale exactly")
 		}
 	case declBareNumeric:
 		if st.only("int", "real", "text") && st.decOK == st.ints+st.reals+st.texts {
+			if d.text && st.decNormalized > 0 {
+				return widen(pgChoice{typ: "text", enc: encText, kind: KindText}, fmt.Sprintf("numeric would write %d of its text values differently (%s)", st.decNormalized, st.decNormalExample))
+			}
 			return pgChoice{typ: "numeric", cast: "numeric", enc: encDecimal, kind: KindDecimal}
 		}
 	case declBool:
@@ -204,6 +221,9 @@ func chooseSQLiteToPG(c *Column, st *colStats) pgChoice {
 		if st.only("text") && st.tstzOK == st.texts {
 			return pgChoice{typ: "timestamptz", cast: "timestamptz", enc: encPass, kind: KindTimestampTZ}
 		}
+		if st.only("text") && st.textWithNUL == 0 && st.tstzAny == st.texts {
+			return widen(pgChoice{typ: "text", enc: encText, kind: KindText}, "its values carry offsets other than +00, which timestamptz would rewrite to UTC")
+		}
 	case declTime:
 		if st.only("text") && st.timeOK == st.texts {
 			return pgChoice{typ: "time", cast: "time", enc: encPass, kind: KindTime}
@@ -215,6 +235,9 @@ func chooseSQLiteToPG(c *Column, st *colStats) pgChoice {
 				ok = st.uuidOK
 			}
 			if ok == st.texts {
+				if d.special == "jsonb" && st.jsonbOK != st.texts {
+					return widen(pgChoice{typ: "json", cast: "json", enc: encPass, kind: KindText}, fmt.Sprintf("jsonb would rewrite %d of its values (key order, spacing, duplicate keys or number spelling)", st.texts-st.jsonbOK))
+				}
 				return pgChoice{typ: d.special, cast: d.special, enc: encPass, kind: KindText}
 			}
 		}
@@ -245,6 +268,9 @@ func chooseSQLiteToPG(c *Column, st *colStats) pgChoice {
 		ch.note = fmt.Sprintf("declared %q, which has no PostgreSQL equivalent: carried as %s", declared, ch.typ)
 	default:
 		ch.note = fmt.Sprintf("declared %q but its values are not all of that type: carried as %s", declared, ch.typ)
+	}
+	if st.textWithNUL > 0 && ch.typ == "bytea" {
+		ch.note += "; text that holds a NUL byte cannot be stored in a PostgreSQL text column, so the whole column is bytea and a copy back to SQLite returns its values as BLOBs"
 	}
 	return ch
 }

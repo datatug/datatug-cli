@@ -57,8 +57,12 @@ func TestSQLScanningWithQuotes(t *testing.T) {
 }
 
 func TestVerifyHelpers(t *testing.T) {
-	if normDefault("'12.50'") != "12.50" || normDefault("'abc'") != "'abc'" || normDefault(" now() ") != "<current timestamp>" {
+	if normDefault("'12.50'", "NUMERIC(5,2)") != "12.50" || normDefault("'abc'", "TEXT") != "'abc'" || normDefault(" now() ", "") != "<current timestamp>" {
 		t.Error("normDefault")
+	}
+	// In a column of text affinity a quoted number and the number are two defaults.
+	if normDefault("'0.00'", "DECIMAL_TEXT(10,2)") == normDefault("0.00", "DECIMAL_TEXT(10,2)") {
+		t.Error("normDefault hides the text default '0.00' behind the number 0.00")
 	}
 	tb := &Table{Indexes: []Index{{Name: "i", Unique: true, Columns: []IndexColumn{{Name: "a", Desc: true}}}, {Name: "j", Unique: true, Columns: []IndexColumn{{Name: "b"}}}}}
 	if uniqSet(tb) != "(b)" || !strings.Contains(idxSet(tb), "a DESC") || !hasDesc(tb.Indexes[0]) {
@@ -156,5 +160,37 @@ func TestLoadTableReportsAnEncoderFailure(t *testing.T) {
 func TestTolerated(t *testing.T) {
 	if (&tolerated{err: errInjected}).Error() != errInjected.Error() {
 		t.Error("tolerated")
+	}
+}
+
+// A table that gives other rows than the snapshot counted at its start is an error, whatever the cause.
+func TestSnapshotRowCountMismatch(t *testing.T) {
+	b, err := os.ReadFile(scenarioFile("pg_origin", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []callRec
+	if err := json.Unmarshal(b, &calls); err != nil {
+		t.Fatal(err)
+	}
+	changed := false
+	for i := range calls {
+		if calls[i].Kind == "query" && strings.HasPrefix(calls[i].SQL, `SELECT count(*) FROM "public"."dept"`) {
+			calls[i].Rows = [][]cell{{{T: "i", V: json.RawMessage("999")}}}
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		t.Fatal("no count in the recording")
+	}
+	state := &replayState{calls: calls}
+	db := sql.OpenDB(chaosConnector{open: func(context.Context) (driver.Conn, error) { return &replayConn{state: state}, nil }})
+	db.SetMaxOpenConns(1)
+	defer func() { _ = db.Close() }()
+	quiet(db, pgFixtureStatements...)
+	_, err = Copy(context.Background(), Endpoint{Engine: Postgres, DB: db, Schema: "public"}, newSQLite(t), Options{})
+	if err == nil || !strings.Contains(err.Error(), "the source held 999 rows in the snapshot and 2 were read") {
+		t.Errorf("want a snapshot mismatch, got %v", err)
 	}
 }

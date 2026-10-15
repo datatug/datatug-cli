@@ -73,10 +73,7 @@ func PlanSQLiteToPG(cat *Catalog, stats map[string][]*colStats, schema string) *
 			if ch.note != "" {
 				p.warn(WarnTypeWidened, obj, "%s", ch.note)
 			}
-			if ch.normalized > 0 {
-				p.warn(WarnValuesNormalized, obj, "%d text value(s) were rewritten to the canonical spelling of a number (%s)", ch.normalized, ch.example)
-			}
-			tc := &TargetColumn{Src: c, Name: c.Name, Type: ch.typ, Cast: ch.cast, enc: ch.enc, NotNull: c.NotNull || inPK[c.Name], readExpr: sqliteReadExpr(c)}
+			tc := &TargetColumn{Src: c, Name: c.Name, Type: ch.typ, Kind: ch.kind, Cast: ch.cast, enc: ch.enc, NotNull: c.NotNull || inPK[c.Name], readExpr: sqliteReadExpr(c)}
 			m := &Marker{Src: string(SQLite), Type: c.SourceType}
 			switch c.Identity {
 			case IdentityRowid, IdentityAutoincrement:
@@ -92,6 +89,9 @@ func PlanSQLiteToPG(cat *Catalog, stats map[string][]*colStats, schema string) *
 			if c.Default != "" && tc.Identity == IdentityNone {
 				if d, ok := sqliteDefaultToPG(c.Default, ch.typ, ch.kind); ok {
 					tc.Default = d
+					if ch.kind == KindText && strings.HasPrefix(strings.ToUpper(strings.Trim(c.Default, "() ")), "CURRENT_") {
+						p.warn(WarnDefaultTranslated, obj, "default %s on a text column is written with to_char(... AT TIME ZONE 'UTC') in the same text format: PostgreSQL has no text-valued CURRENT_ default", c.Default)
+					}
 				} else {
 					p.warn(WarnDefaultNotCarried, obj, "default expression %s cannot be translated to PostgreSQL and is not carried", c.Default)
 				}

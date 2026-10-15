@@ -81,6 +81,11 @@
   "kind": "begin"
  },
  {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "affected": 1
+ },
+ {
   "kind": "query",
   "sql": "SELECT c.oid::bigint, c.relname, c.relkind::text, c.relispartition, c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') ORDER BY c.relname",
   "cols": [
@@ -94,7 +99,7 @@
    [
     {
      "t": "i",
-     "v": 63219
+     "v": 18754
     },
     {
      "t": "s",
@@ -116,7 +121,7 @@
    [
     {
      "t": "i",
-     "v": 63177
+     "v": 18712
     },
     {
      "t": "s",
@@ -138,7 +143,7 @@
    [
     {
      "t": "i",
-     "v": 63209
+     "v": 18744
     },
     {
      "t": "s",
@@ -160,7 +165,7 @@
    [
     {
      "t": "i",
-     "v": 63186
+     "v": 18721
     },
     {
      "t": "s",
@@ -182,7 +187,7 @@
    [
     {
      "t": "i",
-     "v": 63212
+     "v": 18747
     },
     {
      "t": "s",
@@ -204,7 +209,7 @@
    [
     {
      "t": "i",
-     "v": 63201
+     "v": 18736
     },
     {
      "t": "s",
@@ -226,7 +231,7 @@
    [
     {
      "t": "i",
-     "v": 63204
+     "v": 18739
     },
     {
      "t": "s",
@@ -248,7 +253,7 @@
    [
     {
      "t": "i",
-     "v": 63236
+     "v": 18771
     },
     {
      "t": "s",
@@ -2096,12 +2101,17 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
   "cols": [
+   "nspname",
    "relname"
   ],
   "rows": [
    [
+    {
+     "t": "s",
+     "v": "public"
+    },
     {
      "t": "s",
      "v": "seqs_id_seq"
@@ -2111,12 +2121,37 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT last_value FROM pg_sequences WHERE schemaname = $1 AND sequencename = $2",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"seqs_id_seq\"",
   "cols": [
-   "last_value"
+   "last_value",
+   "is_called"
   ],
   "rows": [
    [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": true
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
     {
      "t": "i",
      "v": 1
@@ -2371,6 +2406,11 @@
   "kind": "begin"
  },
  {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "affected": 1
+ },
+ {
   "kind": "query",
   "sql": "SELECT c.oid::bigint, c.relname, c.relkind::text, c.relispartition, c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') ORDER BY c.relname",
   "cols": [
@@ -2384,7 +2424,7 @@
    [
     {
      "t": "i",
-     "v": 63172
+     "v": 18707
     },
     {
      "t": "s",
@@ -2648,6 +2688,11 @@
  },
  {
   "kind": "begin"
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "affected": 1
  },
  {
   "kind": "query",

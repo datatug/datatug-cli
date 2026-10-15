@@ -34,17 +34,24 @@ func PlanSQLiteToSQLite(cat *Catalog) *Plan {
 
 // sameEngineStatements are the stored statements of a SQLite source: tables first, then what hangs
 // on them, in the order the source created them.
-func sameEngineStatements(cat *Catalog, p *Plan) (create []string, post []postStmt) {
+func sameEngineStatements(cat *Catalog, p *Plan) (create []createStmt, post []postStmt) {
 	kept := map[string]bool{}
 	for _, t := range p.Tables {
 		kept[t.Name] = true
-		create = append(create, strings.TrimSpace(t.Src.CreateSQL))
+		create = append(create, createStmt{t.Name, strings.TrimSpace(t.Src.CreateSQL)})
 	}
 	for _, o := range cat.Objects {
 		if o.Type != "view" && !kept[o.Table] {
 			continue
 		}
-		post = append(post, postStmt{sql: o.SQL, kind: map[string]string{"index": WarnIndexNotCarried, "view": WarnViewNotCarried, "trigger": WarnTriggerNotCarried}[o.Type], obj: o.Name})
+		owner, replace := o.Table, ""
+		switch o.Type {
+		case "view":
+			owner, replace = "", "DROP VIEW IF EXISTS "+quoteIdent(o.Name)
+		case "trigger":
+			replace = "DROP TRIGGER IF EXISTS " + quoteIdent(o.Name)
+		}
+		post = append(post, postStmt{table: owner, replace: replace, sql: o.SQL, kind: map[string]string{"index": WarnIndexNotCarried, "view": WarnViewNotCarried, "trigger": WarnTriggerNotCarried}[o.Type], obj: o.Name})
 	}
 	return
 }

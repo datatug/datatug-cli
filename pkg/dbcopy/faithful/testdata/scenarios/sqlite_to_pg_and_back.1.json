@@ -3,6 +3,11 @@
   "kind": "begin"
  },
  {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "affected": 1
+ },
+ {
   "kind": "query",
   "sql": "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') AND c.relname = ANY($2) ORDER BY 1",
   "cols": [
@@ -359,6 +364,11 @@
   "kind": "begin"
  },
  {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "affected": 1
+ },
+ {
   "kind": "query",
   "sql": "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') AND c.relname = ANY($2) ORDER BY 1",
   "cols": [
@@ -402,6 +412,11 @@
  },
  {
   "kind": "begin"
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "affected": 1
  },
  {
   "kind": "query",
@@ -756,6 +771,11 @@
  },
  {
   "kind": "begin"
+ },
+ {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "affected": 1
  },
  {
   "kind": "query",
@@ -1150,6 +1170,11 @@
   "kind": "begin"
  },
  {
+  "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "affected": 1
+ },
+ {
   "kind": "query",
   "sql": "SELECT c.oid::bigint, c.relname, c.relkind::text, c.relispartition, c.relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') ORDER BY c.relname",
   "cols": [
@@ -1163,7 +1188,7 @@
    [
     {
      "t": "i",
-     "v": 62924
+     "v": 18459
     },
     {
      "t": "s",
@@ -1185,7 +1210,7 @@
    [
     {
      "t": "i",
-     "v": 62937
+     "v": 18472
     },
     {
      "t": "s",
@@ -1207,7 +1232,7 @@
    [
     {
      "t": "i",
-     "v": 62956
+     "v": 18491
     },
     {
      "t": "s",
@@ -1229,7 +1254,7 @@
    [
     {
      "t": "i",
-     "v": 62945
+     "v": 18480
     },
     {
      "t": "s",
@@ -1251,7 +1276,7 @@
    [
     {
      "t": "i",
-     "v": 62950
+     "v": 18485
     },
     {
      "t": "s",
@@ -2144,12 +2169,17 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
   "cols": [
+   "nspname",
    "relname"
   ],
   "rows": [
    [
+    {
+     "t": "s",
+     "v": "public"
+    },
     {
      "t": "s",
      "v": "Parent_id_seq"
@@ -2159,14 +2189,40 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT last_value FROM pg_sequences WHERE schemaname = $1 AND sequencename = $2",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"Parent_id_seq\"",
   "cols": [
-   "last_value"
+   "last_value",
+   "is_called"
   ],
   "rows": [
    [
     {
-     "t": "n"
+     "t": "i",
+     "v": 11
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
     }
    ]
   ]
@@ -3086,12 +3142,17 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
   "cols": [
+   "nspname",
    "relname"
   ],
   "rows": [
    [
+    {
+     "t": "s",
+     "v": "public"
+    },
     {
      "t": "s",
      "v": "emptyauto_id_seq"
@@ -3101,14 +3162,40 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT last_value FROM pg_sequences WHERE schemaname = $1 AND sequencename = $2",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"emptyauto_id_seq\"",
   "cols": [
-   "last_value"
+   "last_value",
+   "is_called"
   ],
   "rows": [
    [
     {
-     "t": "n"
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
     }
    ]
   ]
@@ -3446,12 +3533,17 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
   "cols": [
+   "nspname",
    "relname"
   ],
   "rows": [
    [
+    {
+     "t": "s",
+     "v": "public"
+    },
     {
      "t": "s",
      "v": "grandchild_n_seq"
@@ -3461,14 +3553,40 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT last_value FROM pg_sequences WHERE schemaname = $1 AND sequencename = $2",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"grandchild_n_seq\"",
   "cols": [
-   "last_value"
+   "last_value",
+   "is_called"
   ],
   "rows": [
    [
     {
-     "t": "n"
+     "t": "i",
+     "v": 4
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
     }
    ]
   ]
@@ -3952,7 +4070,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 08:40:11"
+     "v": "2026-10-15 09:57:58"
     },
     {
      "t": "i",
@@ -4017,7 +4135,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 08:40:11"
+     "v": "2026-10-15 09:57:58"
     },
     {
      "t": "i",
@@ -4192,7 +4310,7 @@
    [
     {
      "t": "i",
-     "v": 62924
+     "v": 18459
     },
     {
      "t": "s",
@@ -4214,7 +4332,7 @@
    [
     {
      "t": "i",
-     "v": 62937
+     "v": 18472
     },
     {
      "t": "s",
@@ -4236,7 +4354,7 @@
    [
     {
      "t": "i",
-     "v": 62956
+     "v": 18491
     },
     {
      "t": "s",
@@ -4258,7 +4376,7 @@
    [
     {
      "t": "i",
-     "v": 62945
+     "v": 18480
     },
     {
      "t": "s",
@@ -4280,7 +4398,7 @@
    [
     {
      "t": "i",
-     "v": 62950
+     "v": 18485
     },
     {
      "t": "s",
@@ -5173,12 +5291,17 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
   "cols": [
+   "nspname",
    "relname"
   ],
   "rows": [
    [
+    {
+     "t": "s",
+     "v": "public"
+    },
     {
      "t": "s",
      "v": "Parent_id_seq"
@@ -5188,14 +5311,40 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT last_value FROM pg_sequences WHERE schemaname = $1 AND sequencename = $2",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"Parent_id_seq\"",
   "cols": [
-   "last_value"
+   "last_value",
+   "is_called"
   ],
   "rows": [
    [
     {
-     "t": "n"
+     "t": "i",
+     "v": 11
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
     }
    ]
   ]
@@ -6115,12 +6264,17 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
   "cols": [
+   "nspname",
    "relname"
   ],
   "rows": [
    [
+    {
+     "t": "s",
+     "v": "public"
+    },
     {
      "t": "s",
      "v": "emptyauto_id_seq"
@@ -6130,14 +6284,40 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT last_value FROM pg_sequences WHERE schemaname = $1 AND sequencename = $2",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"emptyauto_id_seq\"",
   "cols": [
-   "last_value"
+   "last_value",
+   "is_called"
   ],
   "rows": [
    [
     {
-     "t": "n"
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
     }
    ]
   ]
@@ -6475,12 +6655,17 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
+  "sql": "SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1",
   "cols": [
+   "nspname",
    "relname"
   ],
   "rows": [
    [
+    {
+     "t": "s",
+     "v": "public"
+    },
     {
      "t": "s",
      "v": "grandchild_n_seq"
@@ -6490,14 +6675,40 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT last_value FROM pg_sequences WHERE schemaname = $1 AND sequencename = $2",
+  "sql": "SELECT last_value, is_called FROM \"public\".\"grandchild_n_seq\"",
   "cols": [
-   "last_value"
+   "last_value",
+   "is_called"
   ],
   "rows": [
    [
     {
-     "t": "n"
+     "t": "i",
+     "v": 4
+    },
+    {
+     "t": "b",
+     "v": false
+    }
+   ]
+  ]
+ },
+ {
+  "kind": "query",
+  "sql": "SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2",
+  "cols": [
+   "seqstart",
+   "seqincrement"
+  ],
+  "rows": [
+   [
+    {
+     "t": "i",
+     "v": 1
+    },
+    {
+     "t": "i",
+     "v": 1
     }
    ]
   ]
@@ -6981,7 +7192,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 08:40:11"
+     "v": "2026-10-15 09:57:58"
     },
     {
      "t": "s",
@@ -7046,7 +7257,7 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 08:40:11"
+     "v": "2026-10-15 09:57:58"
     },
     {
      "t": "s",

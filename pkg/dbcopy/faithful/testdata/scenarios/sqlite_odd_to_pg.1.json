@@ -4,6 +4,11 @@
  },
  {
   "kind": "exec",
+  "sql": "SELECT set_config('datestyle', 'ISO, MDY', true), set_config('intervalstyle', 'postgres', true), set_config('extra_float_digits', '3', true), set_config('timezone', 'UTC', true), set_config('statement_timeout', '0', true), set_config('idle_in_transaction_session_timeout', '0', true)",
+  "affected": 1
+ },
+ {
+  "kind": "exec",
   "sql": "CREATE SCHEMA IF NOT EXISTS \"copy_target\""
  },
  {
@@ -240,7 +245,8 @@
  {
   "kind": "exec",
   "sql": "CREATE INDEX \"badidx\" ON \"copy_target\".\"badthings\" (\"id\") WHERE typeof(x) = 'text'",
-  "err": "ERROR: function typeof(text) does not exist (SQLSTATE 42883)"
+  "err": "ERROR: function typeof(text) does not exist (SQLSTATE 42883)",
+  "code": "42883"
  },
  {
   "kind": "exec",
@@ -253,7 +259,8 @@
  {
   "kind": "exec",
   "sql": "ALTER TABLE \"copy_target\".\"badthings\" ADD CHECK (typeof(x) = 'text')",
-  "err": "ERROR: function typeof(text) does not exist (SQLSTATE 42883)"
+  "err": "ERROR: function typeof(text) does not exist (SQLSTATE 42883)",
+  "code": "42883"
  },
  {
   "kind": "exec",
@@ -266,7 +273,8 @@
  {
   "kind": "exec",
   "sql": "ALTER TABLE \"copy_target\".\"c\" ADD FOREIGN KEY (\"p\") REFERENCES \"copy_target\".\"p\" (\"id\")",
-  "err": "ERROR: insert or update on table \"c\" violates foreign key constraint \"c_p_fkey\" (SQLSTATE 23503)"
+  "err": "ERROR: insert or update on table \"c\" violates foreign key constraint \"c_p_fkey\" (SQLSTATE 23503)",
+  "code": "23503"
  },
  {
   "kind": "exec",
@@ -291,20 +299,8 @@
  {
   "kind": "exec",
   "sql": "ALTER TABLE \"copy_target\".\"nonkey\" ADD FOREIGN KEY (\"ref\") REFERENCES \"copy_target\".\"p\" (\"u\")",
-  "err": "ERROR: there is no unique constraint matching given keys for referenced table \"p\" (SQLSTATE 42830)"
- },
- {
-  "kind": "exec",
-  "sql": "ROLLBACK TO SAVEPOINT dt_try"
- },
- {
-  "kind": "exec",
-  "sql": "SAVEPOINT dt_try"
- },
- {
-  "kind": "exec",
-  "sql": "ALTER TABLE \"copy_target\".\"nonkey\" ADD FOREIGN KEY (\"ref\") REFERENCES \"copy_target\".\"p\" (\"u\") NOT VALID",
-  "err": "ERROR: there is no unique constraint matching given keys for referenced table \"p\" (SQLSTATE 42830)"
+  "err": "ERROR: there is no unique constraint matching given keys for referenced table \"p\" (SQLSTATE 42830)",
+  "code": "42830"
  },
  {
   "kind": "exec",

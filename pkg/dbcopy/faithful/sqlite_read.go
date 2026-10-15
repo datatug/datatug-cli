@@ -72,17 +72,29 @@ func ReadSQLite(ctx context.Context, db Queryer) (*Catalog, error) {
 		}
 	}
 	// The position of each AUTOINCREMENT counter.
-	if sq, err := db.QueryContext(ctx, `SELECT name, seq FROM sqlite_sequence`); err == nil {
+	sq, err := db.QueryContext(ctx, `SELECT name, seq FROM sqlite_sequence`)
+	switch {
+	case err != nil && strings.Contains(err.Error(), "no such table"):
+		// No table of the database is AUTOINCREMENT: there is no counter table.
+	case err != nil:
+		return nil, fmt.Errorf("read sqlite_sequence: %w", err)
+	default:
 		for sq.Next() {
 			var name string
 			var seq int64
-			if sq.Scan(&name, &seq) == nil {
-				if t := cat.Table(name); t != nil && len(t.PK) == 1 {
-					if c := t.Column(t.PK[0]); c != nil {
-						c.SequenceStart = seq + 1
-					}
+			if err := sq.Scan(&name, &seq); err != nil {
+				_ = sq.Close()
+				return nil, fmt.Errorf("read sqlite_sequence: %w", err)
+			}
+			if t := cat.Table(name); t != nil && len(t.PK) == 1 {
+				if c := t.Column(t.PK[0]); c != nil {
+					c.SequenceStart = seq + 1
 				}
 			}
+		}
+		if err := sq.Err(); err != nil {
+			_ = sq.Close()
+			return nil, fmt.Errorf("read sqlite_sequence: %w", err)
 		}
 		_ = sq.Close()
 	}

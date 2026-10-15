@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 	"modernc.org/sqlite"
 )
@@ -198,12 +199,34 @@ type cell struct {
 }
 
 type callRec struct {
-	Kind     string   `json:"kind"` // exec query begin commit rollback
-	SQL      string   `json:"sql,omitempty"`
-	Cols     []string `json:"cols,omitempty"`
-	Rows     [][]cell `json:"rows,omitempty"`
-	Err      string   `json:"err,omitempty"`
-	Affected int64    `json:"affected,omitempty"`
+	Kind string   `json:"kind"` // exec query begin commit rollback
+	SQL  string   `json:"sql,omitempty"`
+	Cols []string `json:"cols,omitempty"`
+	Rows [][]cell `json:"rows,omitempty"`
+	Err  string   `json:"err,omitempty"`
+	// Code is the SQLSTATE of a failure the server reported.
+	Code     string `json:"code,omitempty"`
+	Affected int64  `json:"affected,omitempty"`
+}
+
+// errCode is the SQLSTATE of a PostgreSQL error, "" for any other.
+func errCode(err error) string {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) {
+		return pe.Code
+	}
+	return ""
+}
+
+// replayError is the error a recorded failure comes back as: it reads as it did and carries its SQLSTATE.
+type replayError struct{ rec callRec }
+
+func (e *replayError) Error() string { return e.rec.Err }
+func (e *replayError) Unwrap() error {
+	if e.rec.Code == "" {
+		return nil
+	}
+	return &pgconn.PgError{Code: e.rec.Code, Message: e.rec.Err}
 }
 
 func normSQL(s string) string { return strings.Join(strings.Fields(s), " ") }
@@ -297,7 +320,7 @@ func (c *recordingConn) BeginTx(ctx context.Context, opts driver.TxOptions) (dri
 	tx, err := c.inner.(driver.ConnBeginTx).BeginTx(ctx, opts)
 	rec := callRec{Kind: "begin"}
 	if err != nil {
-		rec.Err = err.Error()
+		rec.Err, rec.Code = err.Error(), errCode(err)
 	}
 	c.rec.add(rec)
 	if err != nil {
@@ -310,7 +333,7 @@ func (c *recordingConn) ExecContext(ctx context.Context, q string, args []driver
 	res, err := c.inner.(driver.ExecerContext).ExecContext(ctx, q, args)
 	rec := callRec{Kind: "exec", SQL: normSQL(q)}
 	if err != nil {
-		rec.Err = err.Error()
+		rec.Err, rec.Code = err.Error(), errCode(err)
 	} else if n, nerr := res.RowsAffected(); nerr == nil {
 		rec.Affected = n
 	}
@@ -322,7 +345,7 @@ func (c *recordingConn) QueryContext(ctx context.Context, q string, args []drive
 	rows, err := c.inner.(driver.QueryerContext).QueryContext(ctx, q, args)
 	rec := callRec{Kind: "query", SQL: normSQL(q)}
 	if err != nil {
-		rec.Err = err.Error()
+		rec.Err, rec.Code = err.Error(), errCode(err)
 		c.rec.add(rec)
 		return nil, err
 	}
@@ -331,7 +354,7 @@ func (c *recordingConn) QueryContext(ctx context.Context, q string, args []drive
 		dest := make([]driver.Value, len(rec.Cols))
 		if nerr := rows.Next(dest); nerr != nil {
 			if !errors.Is(nerr, io.EOF) {
-				rec.Err = nerr.Error()
+				rec.Err, rec.Code = nerr.Error(), errCode(nerr)
 			}
 			break
 		}
@@ -355,7 +378,7 @@ func (t *recordingTx) Commit() error {
 	err := t.inner.Commit()
 	rec := callRec{Kind: "commit"}
 	if err != nil {
-		rec.Err = err.Error()
+		rec.Err, rec.Code = err.Error(), errCode(err)
 	}
 	t.rec.add(rec)
 	return err
@@ -391,7 +414,7 @@ func (s *replayState) take(kind, q string) (callRec, error) {
 		return callRec{}, errors.New("replay: " + msg)
 	}
 	if rec.Err != "" && kind != "query" {
-		return rec, errors.New(rec.Err)
+		return rec, &replayError{rec}
 	}
 	return rec, nil
 }
@@ -429,7 +452,7 @@ func (c *replayConn) QueryContext(_ context.Context, q string, _ []driver.NamedV
 		return nil, err
 	}
 	if rec.Err != "" && len(rec.Cols) == 0 {
-		return nil, errors.New(rec.Err)
+		return nil, &replayError{rec}
 	}
 	return &replayRows{rec: rec}, nil
 }
@@ -457,7 +480,7 @@ func (r *replayRows) Close() error      { return nil }
 func (r *replayRows) Next(dest []driver.Value) error {
 	if r.i >= len(r.rec.Rows) {
 		if r.rec.Err != "" {
-			return errors.New(r.rec.Err)
+			return &replayError{r.rec}
 		}
 		return io.EOF
 	}

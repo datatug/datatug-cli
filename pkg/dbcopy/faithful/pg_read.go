@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -146,16 +147,8 @@ ORDER BY a.attnum`, oid)
 			c.Default = ""
 		}
 		if c.Identity == IdentityGenerated {
-			var seq sql.NullString
-			var last sql.NullInt64
-			err := db.QueryRowContext(ctx, `
-SELECT s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S'
-WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1`, oid, attnums[c.Name]).Scan(&seq)
-			if err == nil && seq.Valid {
-				_ = db.QueryRowContext(ctx, `SELECT last_value FROM pg_sequences WHERE schemaname = $1 AND sequencename = $2`, cat.Schema, seq.String).Scan(&last)
-				if last.Valid {
-					c.SequenceStart = last.Int64 + 1
-				}
+			if err := readSequence(ctx, db, cat, t, c, oid, attnums[c.Name]); err != nil {
+				return err
 			}
 		}
 	}
@@ -365,4 +358,40 @@ func classifyPGType(c *Column, formatted, typname, typtype, typcat string) {
 		c.Kind = KindOther
 	}
 	_ = typname
+}
+
+// readSequence finds the sequence behind an identity / serial column and reads the value it gives next.
+// A sequence that was never called has not handed out its start value yet (is_called is false), and
+// pg_sequences.last_value is NULL for it: the sequence relation itself says where it is.
+func readSequence(ctx context.Context, db Queryer, cat *Catalog, t *Table, c *Column, tableOID int64, attnum int) error {
+	var seqSchema, seq sql.NullString
+	err := db.QueryRowContext(ctx, `
+SELECT sn.nspname, s.relname FROM pg_depend d JOIN pg_class s ON s.oid = d.objid AND s.relkind = 'S' JOIN pg_namespace sn ON sn.oid = s.relnamespace
+WHERE d.refobjid = $1 AND d.refobjsubid = $2 AND d.deptype IN ('a','i') LIMIT 1`, tableOID, attnum).Scan(&seqSchema, &seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // no sequence behind the column: nothing to carry
+	}
+	if err != nil {
+		return fmt.Errorf("find the sequence of %s.%s: %w", t.Name, c.Name, err)
+	}
+	qn := quoteIdent(seqSchema.String) + "." + quoteIdent(seq.String)
+	var last int64
+	var called bool
+	if err := db.QueryRowContext(ctx, `SELECT last_value, is_called FROM `+qn).Scan(&last, &called); err != nil {
+		return fmt.Errorf("read the sequence %s: %w", qn, err)
+	}
+	c.SequenceStart = last
+	if called {
+		c.SequenceStart = last + 1
+	}
+	var start, step int64
+	if err := db.QueryRowContext(ctx, `SELECT seqstart, seqincrement FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2`,
+		seqSchema.String, seq.String).Scan(&start, &step); err != nil {
+		return fmt.Errorf("read the definition of the sequence %s: %w", qn, err)
+	}
+	if start != 1 || step != 1 {
+		cat.Notes = append(cat.Notes, Warning{WarnIdentityNotCarried, t.Name + "." + c.Name,
+			fmt.Sprintf("the sequence starts at %d and steps by %d; the next value (%d) is carried, the start and the step are not (an auto-number column of the target counts up by 1)", start, step, c.SequenceStart)})
+	}
+	return nil
 }

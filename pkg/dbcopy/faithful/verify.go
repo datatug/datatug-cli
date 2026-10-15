@@ -85,7 +85,7 @@ func Verify(ctx context.Context, left, right Endpoint) ([]Diff, error) {
 			obj := n + "." + c.Name
 			add(obj, "declared type", strings.ToLower(c.SourceType), strings.ToLower(rcol.SourceType))
 			add(obj, "not null", fmt.Sprint(c.NotNull || contains(lt.PK, c.Name)), fmt.Sprint(rcol.NotNull || contains(rt.PK, c.Name)))
-			add(obj, "default", normDefault(c.Default), normDefault(rcol.Default))
+			add(obj, "default", normDefault(c.Default, c.SourceType), normDefault(rcol.Default, rcol.SourceType))
 			add(obj, "identity", fmt.Sprint(c.Identity != IdentityNone), fmt.Sprint(rcol.Identity != IdentityNone))
 		}
 		for _, c := range rt.Columns {
@@ -143,14 +143,16 @@ func contains(l []string, s string) bool {
 	return false
 }
 
-func normDefault(d string) string {
+func normDefault(d, decl string) string {
 	u := strings.ToUpper(d)
 	if strings.Contains(u, "CURRENT_TIMESTAMP") || strings.Contains(u, "NOW()") {
 		return "<current timestamp>"
 	}
 	d = strings.Join(strings.Fields(d), " ")
-	if len(d) > 2 && d[0] == '\'' && d[len(d)-1] == '\'' && reDefNumber.MatchString(d[1:len(d)-1]) {
-		return d[1 : len(d)-1] // a quoted number and the number are one default
+	if len(d) > 2 && d[0] == '\'' && d[len(d)-1] == '\'' && reDefNumber.MatchString(d[1:len(d)-1]) && !sqliteTextAffinity(decl) {
+		// A quoted number and the number are one default in a column of numeric affinity; in a column
+		// of text affinity '0.00' and 0.00 are two defaults (the second one is the text '0.0').
+		return d[1 : len(d)-1]
 	}
 	return d
 }
@@ -225,16 +227,17 @@ func checkSet(t *Table) string { return fmt.Sprint(len(t.Checks)) }
 // tableDigest hashes every row of a table in primary key order. SQLite values carry their storage
 // class; PostgreSQL values are compared by their text form.
 func tableDigest(ctx context.Context, e Endpoint, t *Table, only string) (string, error) {
-	var exprs []string
+	var exprs, names []string
 	for _, c := range t.Columns {
 		if only != "" && c.Name != only {
 			continue
 		}
-		if e.Engine == SQLite {
-			exprs = append(exprs, sqliteReadExpr(c))
-		} else {
-			exprs = append(exprs, quoteIdent(c.Name)+"::text")
-		}
+		names = append(names, c.Name)
+		exprs = append(exprs, quoteIdent(c.Name)+"::text")
+	}
+	list := strings.Join(exprs, ", ")
+	if e.Engine == SQLite {
+		list = sqliteSelectList(names)
 	}
 	var from, order string
 	if e.Engine == SQLite {
@@ -256,23 +259,31 @@ func tableDigest(ctx context.Context, e Endpoint, t *Table, only string) (string
 		}
 		order = strings.Join(all, ", ")
 	}
-	rows, err := e.DB.QueryContext(ctx, "SELECT "+strings.Join(exprs, ", ")+" FROM "+from+" ORDER BY "+order)
+	rows, err := e.DB.QueryContext(ctx, "SELECT "+list+" FROM "+from+" ORDER BY "+order)
 	if err != nil {
 		return "", fmt.Errorf("digest %s: %w", t.Name, err)
 	}
 	defer func() { _ = rows.Close() }()
 	h := sha256.New()
-	vals := make([]any, len(exprs))
-	ptrs := make([]any, len(exprs))
-	for i := range vals {
-		ptrs[i] = &vals[i]
+	var vals, ptrs []any
+	width := len(names)
+	if e.Engine == SQLite {
+		vals, ptrs = sqliteRowBuffer(width)
+	} else {
+		vals, ptrs = make([]any, width), make([]any, width)
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
 	}
 	var n int64
 	for rows.Next() {
 		if err := rows.Scan(ptrs...); err != nil {
 			return "", err
 		}
-		for _, v := range vals {
+		if e.Engine == SQLite {
+			fixEmptyBlobs(vals)
+		}
+		for _, v := range vals[:width] {
 			hashValue(h, v)
 		}
 		n++

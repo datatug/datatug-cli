@@ -195,11 +195,11 @@ func TestDefaultTranslation(t *testing.T) {
 		{"((CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text))::time without time zone", "CURRENT_TIME", true},
 		{"nextval('s'::regclass)", "", false}, {"gen_random_uuid()", "", false},
 	}
-	if got, ok := pgDefaultToSQLite("CURRENT_DATE", KindDate); got != "CURRENT_DATE" || !ok {
+	if got, ok := pgDefaultToSQLite("CURRENT_DATE", KindDate, false); got != "CURRENT_DATE" || !ok {
 		t.Errorf("CURRENT_DATE on a date: %q %v", got, ok)
 	}
 	for _, c := range toSQLite {
-		got, ok := pgDefaultToSQLite(c.in, KindText)
+		got, ok := pgDefaultToSQLite(c.in, KindText, false)
 		if got != c.want || ok != c.ok {
 			t.Errorf("toSQLite %q: %q %v, want %q %v", c.in, got, ok, c.want, c.ok)
 		}
@@ -499,8 +499,8 @@ func TestCopyRefusals(t *testing.T) {
 	if rep, err := Copy(ctx, a, b, Options{Exclude: []string{"t"}}); !errors.Is(err, ErrNoTables) || rep == nil {
 		t.Errorf("everything excluded: %v", err)
 	}
-	if rep, err := Copy(ctx, a, b, Options{Overwrite: "reload"}); err == nil || rep.ExitCode != 2 {
-		t.Errorf("reload: %v", err)
+	if rep, err := Copy(ctx, a, b, Options{Overwrite: "merge"}); err == nil || rep.ExitCode != 2 {
+		t.Errorf("merge: %v", err)
 	}
 	var progress bytes.Buffer
 	rep, err := Copy(ctx, a, b, Options{Progress: &progress})
@@ -633,9 +633,10 @@ func TestAnyToIn(t *testing.T) {
 
 func TestNormalizedDecimalsAreSaid(t *testing.T) {
 	src := newSQLite(t)
-	execAll(t, src.DB, `CREATE TABLE t (id INTEGER PRIMARY KEY, c DECIMAL_TEXT(10,4))`, `INSERT INTO t VALUES (1, '.0000'), (2, '12.5000')`)
+	execAll(t, src.DB, `CREATE TABLE t (id INTEGER PRIMARY KEY, c DECIMAL_TEXT(10,4), bare DECIMAL_TEXT)`, `INSERT INTO t VALUES (1, '.0000', '-0'), (2, '12.5000', '1')`)
 	rep, err := Copy(context.Background(), src, Endpoint{Engine: Postgres}, Options{DryRun: true})
-	if err != nil || !hasWarning(rep, WarnValuesNormalized, "t.c") {
+	// A decimal text that numeric would write differently stays text.
+	if err != nil || !hasWarning(rep, WarnTypeWidened, "t.c") || !hasWarning(rep, WarnTypeWidened, "t.bare") {
 		t.Fatalf("%v %v", err, rep.Warnings)
 	}
 	for _, in := range []string{"007.5", "-0.5", "-.5", "3"} {

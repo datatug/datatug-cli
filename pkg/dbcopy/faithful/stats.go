@@ -20,7 +20,11 @@ type colStats struct {
 	maxLen                              int
 	textWithNUL                         int64
 	nonBool                             int64 // integer values that are not 0 or 1
-	dateOK, tsOK, tstzOK, timeOK        int64 // text values in the canonical form of the type
+	dateOK, tsOK, tstzOK, timeOK        int64 // text values in the canonical form of the type (tstzOK: ends in +00)
+	tstzAny                             int64 // timestamptz texts with any offset
+	jsonbOK                             int64 // json texts that jsonb writes back unchanged
+	f32Bad                              int64 // numbers that a 4-byte real does not hold exactly
+	intInexact                          int64 // integers a double precision does not hold exactly
 	decOK                               int64 // values that are a well formed decimal number
 	decFit                              int64 // ... that also fit the declared precision and scale
 	jsonOK, uuidOK                      int64
@@ -29,12 +33,14 @@ type colStats struct {
 }
 
 var (
-	reDate  = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
-	reTS    = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?$`)
-	reTSTZ  = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?[+-]\d{2}(:\d{2})?$`)
-	reTime  = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?$`)
-	reDec   = regexp.MustCompile(`^-?(\d+(\.\d+)?|\.\d+)$`)
-	reDecEx = regexp.MustCompile(`^-?(\d+)(?:\.(\d+))?$`)
+	reDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	reTS   = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?$`)
+	reTSTZ = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?[+-]\d{2}(:\d{2})?$`)
+	// reTSTZUTC is the one spelling PostgreSQL writes back for an instant when the session is on UTC.
+	reTSTZUTC = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?\+00$`)
+	reTime    = regexp.MustCompile(`^\d{2}:\d{2}:\d{2}(\.\d{0,5}[1-9])?$`)
+	reDec     = regexp.MustCompile(`^-?(\d+(\.\d+)?|\.\d+)$`)
+	reDecEx   = regexp.MustCompile(`^-?(\d+)(?:\.(\d+))?$`)
 )
 
 func newStats(d declInfo) *colStats { return &colStats{decl: d} }
@@ -54,11 +60,20 @@ func (s *colStats) add(v any) {
 		if x != 0 && x != 1 {
 			s.nonBool++
 		}
+		if x > 1<<53 || x < -(1<<53) {
+			s.intInexact++
+		}
+		if !f32Exact(float64(x)) {
+			s.f32Bad++
+		}
 		s.decimal(strconv.FormatInt(x, 10), false)
 	case float64:
 		s.reals++
 		if math.IsNaN(x) || math.IsInf(x, 0) {
 			return
+		}
+		if !f32Exact(x) {
+			s.f32Bad++
 		}
 		s.decimal(strconv.FormatFloat(x, 'f', -1, 64), false)
 	case []byte:
@@ -81,12 +96,18 @@ func (s *colStats) add(v any) {
 				s.tsOK++
 			}
 		case reTSTZ.MatchString(x):
-			s.tstzOK++
+			s.tstzAny++
+			if reTSTZUTC.MatchString(x) {
+				s.tstzOK++
+			}
 		case reTime.MatchString(x):
 			s.timeOK++
 		}
 		if json.Valid([]byte(x)) {
 			s.jsonOK++
+			if jsonbUnchanged(x) {
+				s.jsonbOK++
+			}
 		}
 		if reUUID.MatchString(x) {
 			s.uuidOK++
@@ -169,8 +190,27 @@ func canonicalDecimalText(t string) string {
 	if intPart == "" {
 		intPart = "0"
 	}
+	out := intPart
 	if hasFrac {
-		return sign + intPart + "." + frac
+		out += "." + frac
 	}
-	return sign + intPart
+	if strings.Trim(out, "0.") == "" {
+		sign = "" // PostgreSQL's numeric has no negative zero
+	}
+	return sign + out
+}
+
+// f32Exact tells whether a 4-byte real holds x as the decimal it is written with: the shortest
+// decimal that identifies float32(x) is the shortest decimal that identifies x. That is the case for
+// every value PostgreSQL's real prints (1.1, 16777216) and fails for a double that a real would
+// change (0.30000000000000004, 16777217).
+func f32Exact(x float64) bool {
+	if math.IsInf(x, 0) || math.IsNaN(x) {
+		return true
+	}
+	f := float32(x)
+	if math.IsInf(float64(f), 0) {
+		return false
+	}
+	return strconv.FormatFloat(float64(f), 'g', -1, 32) == strconv.FormatFloat(x, 'g', -1, 64)
 }

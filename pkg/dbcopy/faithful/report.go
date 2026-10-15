@@ -80,7 +80,11 @@ func (r *Report) fill(p *Plan) {
 	r.Tables = nil
 	r.Totals = Totals{}
 	for _, tt := range p.Tables {
-		tr := TableReport{Name: tt.Name, Rows: tt.Src.Rows, Columns: len(tt.Columns), PrimaryKey: tt.PK,
+		rows := tt.Src.Rows
+		if tt.Loaded {
+			rows = tt.Copied
+		}
+		tr := TableReport{Name: tt.Name, Rows: rows, Columns: len(tt.Columns), PrimaryKey: tt.PK,
 			ForeignKeys: len(tt.FKs), Indexes: len(tt.Indexes), UniqueConstraints: len(tt.Uniques), CheckConstraints: len(tt.Checks)}
 		r.Tables = append(r.Tables, tr)
 		r.Totals.Tables++

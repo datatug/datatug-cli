@@ -28,6 +28,16 @@ required_tests=(
 	TestPostgresCopyFailureLeavesTheTargetAsItWas
 	TestPostgresViolatedForeignKeyIsCreatedNotValid
 	TestPostgresTargetSchema
+	TestPostgresExactValuesRoundTrip
+	TestPostgresCopyIsIndependentOfTheServersOutputSettings
+	TestPostgresStatementTimeoutDoesNotCutOrMislabelTheCopy
+	TestPostgresFailedStatementsAreSaidWithTheirOwnReason
+	TestPostgresSequencesKeepTheirPosition
+	TestPostgresReloadIsOneTransaction
+	TestPostgresFilteredCopies
+	TestPostgresSourceIsReadAsOneSnapshot
+	TestPostgresJSONBRecognizerAgreesWithTheServer
+	TestPostgresRealHoldsWhatF32ExactAccepts
 )
 
 # check reads the verbose output of `go test` in file $1 and prints each problem. It

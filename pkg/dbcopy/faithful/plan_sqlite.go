@@ -2,7 +2,9 @@ package faithful
 
 import (
 	"fmt"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -70,7 +72,7 @@ func regexToGlob(p string) (string, bool) {
 var pgNowDefault = regexp.MustCompile(`(?i)^(now\(\)|CURRENT_TIMESTAMP(\(\d*\))?|transaction_timestamp\(\))$`)
 
 // pgDefaultToSQLite translates a PostgreSQL default expression; ok is false when it cannot.
-func pgDefaultToSQLite(expr string, kind Kind) (string, bool) {
+func pgDefaultToSQLite(expr string, kind Kind, textAffinity bool) (string, bool) {
 	e := strings.TrimSpace(expr)
 	if strings.Contains(e, "to_char(") && strings.Contains(strings.ToUpper(e), "CURRENT_TIMESTAMP") {
 		switch {
@@ -110,6 +112,10 @@ func pgDefaultToSQLite(expr string, kind Kind) (string, bool) {
 	}
 	switch {
 	case reDefNumber.MatchString(e):
+		if textAffinity {
+			// A column of text affinity turns a numeric default into the text of the number (0.00 -> '0.0').
+			return quoteLiteral(e), true
+		}
 		return e, true
 	case strings.EqualFold(e, "true"):
 		return "1", true
@@ -121,6 +127,49 @@ func pgDefaultToSQLite(expr string, kind Kind) (string, bool) {
 		return e, true
 	}
 	return "", false
+}
+
+// sqliteTextAffinity tells whether SQLite gives a column of this declared type text affinity.
+func sqliteTextAffinity(decl string) bool {
+	u := strings.ToUpper(decl)
+	if strings.Contains(u, "INT") {
+		return false
+	}
+	return strings.Contains(u, "CHAR") || strings.Contains(u, "CLOB") || strings.Contains(u, "TEXT")
+}
+
+// lossCount counts the values of a column that the target cannot hold as they are.
+type lossCount struct{ nan, negZero int64 }
+
+// floatToSQLite carries a PostgreSQL float (a float64, or the text of a real) to SQLite and counts the
+// values SQLite cannot hold: NaN becomes NULL and a negative zero becomes 0.
+func floatToSQLite(loss *lossCount) encoder {
+	return func(v any) (any, error) {
+		var f float64
+		switch x := v.(type) {
+		case nil:
+			return nil, nil
+		case float64:
+			f = x
+		case string:
+			pf, err := strconv.ParseFloat(x, 64)
+			if err != nil {
+				return nil, errType(v, "a number")
+			}
+			f = pf
+		default:
+			return nil, errType(v, "a number")
+		}
+		switch {
+		case math.IsNaN(f):
+			loss.nan++
+			return nil, nil
+		case f == 0 && math.Signbit(f):
+			loss.negZero++
+			return float64(0), nil
+		}
+		return f, nil
+	}
 }
 
 // pgToSQLiteDecl is the declared type a PostgreSQL column gets in SQLite. A column an earlier copy
@@ -245,9 +294,16 @@ func PlanPGToSQLite(cat *Catalog, checkOK func(cols []string, expr string) error
 			if c.Comment != "" {
 				p.warn(WarnCommentNotCarried, obj, "column comment is not carried (SQLite has no comments)")
 			}
-			tc := &TargetColumn{Src: c, Name: c.Name, Type: decl, NotNull: c.NotNull, readExpr: pgReadExpr(c), enc: encPass}
+			tc := &TargetColumn{Src: c, Name: c.Name, Type: decl, Kind: c.Kind, NotNull: c.NotNull, readExpr: pgReadExpr(c), enc: encPass}
 			if c.Kind == KindBool {
 				tc.enc = encBoolToInt
+			}
+			if c.Kind == KindFloat {
+				tc.loss = &lossCount{}
+				tc.enc = floatToSQLite(tc.loss)
+			}
+			if c.Fixed {
+				p.warn(WarnValuesNormalized, obj, "char(%d) values are blank-padded by PostgreSQL and are copied with their padding", c.Length)
 			}
 			if c.Identity == IdentityGenerated {
 				if len(t.PK) == 1 && t.PK[0] == c.Name && c.Kind == KindInt {
@@ -261,7 +317,7 @@ func PlanPGToSQLite(cat *Catalog, checkOK func(cols []string, expr string) error
 				}
 			}
 			if c.Default != "" && tc.Identity == IdentityNone {
-				if d, ok := pgDefaultToSQLite(c.Default, c.Kind); ok {
+				if d, ok := pgDefaultToSQLite(c.Default, c.Kind, sqliteTextAffinity(decl)); ok {
 					tc.Default = d
 				} else {
 					p.warn(WarnDefaultNotCarried, obj, "default expression %s cannot be translated to SQLite and is not carried", c.Default)

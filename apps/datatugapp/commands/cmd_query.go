@@ -11,6 +11,7 @@ import (
 
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"
+	"github.com/dal-go/dalgo/dbschema"
 	"github.com/dal-go/dalgo/dtql"
 	"github.com/dal-go/dalgo2http"
 	"github.com/datatug/datatug-cli/pkg/accesspolicies"
@@ -24,6 +25,7 @@ const (
 	queryFileFlag        = "file"
 	queryFromFlag        = "from"
 	queryLimitFlag       = "limit"
+	queryOffsetFlag      = "offset"
 	queryFormatFlag      = "format"
 	queryAsFlag          = "as"
 	queryRoleFlag        = "role"
@@ -101,6 +103,7 @@ Examples:
 	flags.String(queryQueryFlag, "", "Saved query ID to run, e.g. customers/customer-invoices (requires --project)")
 	flags.String(queryEnvFlag, "", "Environment ID the saved query runs against (default: the project's only environment)")
 	flags.Int(queryLimitFlag, 0, "Read at most this many rows (only with --from; a -f query states its own limit)")
+	flags.Int(queryOffsetFlag, 0, "Skip this many rows first (only with --from); rows are ordered by primary key, or by rowid in SQLite, so pages are stable")
 	flags.String(queryFormatFlag, "grid", "Output format: "+strings.Join(queryFormats, ", "))
 	flags.String(queryAsFlag, "", "Principal user ID; also sets $currentUser")
 	flags.StringArray(queryRoleFlag, nil, "Principal role (repeatable)")
@@ -118,6 +121,7 @@ type queryOptions struct {
 	file        string
 	from        string
 	limit       int
+	offset      int
 	format      string
 	as          string
 	roles       []string
@@ -139,6 +143,7 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 	o.file, _ = flags.GetString(queryFileFlag)
 	o.from, _ = flags.GetString(queryFromFlag)
 	o.limit, _ = flags.GetInt(queryLimitFlag)
+	o.offset, _ = flags.GetInt(queryOffsetFlag)
 	o.format, _ = flags.GetString(queryFormatFlag)
 	o.as, _ = flags.GetString(queryAsFlag)
 	o.roles, _ = flags.GetStringArray(queryRoleFlag)
@@ -169,10 +174,10 @@ func readQueryOptions(cmd *cobra.Command) (queryOptions, error) {
 		return o, Exit("-f/--file and --from are mutually exclusive", exitCodeUsage)
 	}
 	switch {
-	case o.limit < 0:
-		return o, Exit("--limit must be zero or more", exitCodeUsage)
-	case o.limit > 0 && o.from == "":
-		return o, Exit("--limit works with --from; a -f query or a saved query states its own limit", exitCodeUsage)
+	case o.limit < 0 || o.offset < 0:
+		return o, Exit("--limit and --offset must be zero or more", exitCodeUsage)
+	case (o.limit > 0 || o.offset > 0) && o.from == "":
+		return o, Exit("--limit and --offset work with --from; a -f query or a saved query states its own", exitCodeUsage)
 	}
 	valid := false
 	for _, format := range queryFormats {
@@ -276,6 +281,9 @@ func queryRunCommandAction(cmd *cobra.Command, _ []string) error {
 		// the variable of an env:NAME source).
 		return Exit(backend.OpenFailure(err).Error(), exitCodeDatabase)
 	}
+	if o.from != "" && (o.limit > 0 || o.offset > 0) {
+		query = fromQuery(o, pagingOrder(ctx, db, backend.Scheme, o.from))
+	}
 	stderr := cmd.ErrOrStderr()
 	if len(loaded) == 0 {
 		_, _ = fmt.Fprintln(stderr, "access: running without access policies")
@@ -343,11 +351,7 @@ func queryFailure(err error) error {
 
 func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, error) {
 	if o.from != "" {
-		var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(o.from, "")))
-		if o.limit > 0 {
-			builder = builder.Limit(o.limit)
-		}
-		return builder.SelectColumns(), nil
+		return fromQuery(o, nil), nil
 	}
 	var (
 		content []byte
@@ -369,4 +373,39 @@ func buildQuery(o queryOptions, stdin io.Reader) (dal.Query, error) {
 		return nil, Exit(fmt.Sprintf("query %s: %v", o.file, err), exitCodeUsage)
 	}
 	return query, nil
+}
+
+// fromQuery selects every row of the --from collection, paged by --limit and
+// --offset and ordered by order (nil leaves the source's own order).
+func fromQuery(o queryOptions, order []dal.OrderExpression) dal.Query {
+	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(dal.NewRootCollectionRef(o.from, "")))
+	if len(order) > 0 {
+		builder = builder.OrderBy(order...)
+	}
+	if o.offset > 0 {
+		builder = builder.Offset(o.offset)
+	}
+	if o.limit > 0 {
+		builder = builder.Limit(o.limit)
+	}
+	return builder.SelectColumns()
+}
+
+// pagingOrder is the order a paged --from read uses so that pages do not
+// move: the primary key of the table when it has one, else rowid for a SQLite
+// table; any other source, and a SQLite view, keeps its own order.
+func pagingOrder(ctx context.Context, db dal.DB, scheme, collection string) []dal.OrderExpression {
+	ref := dal.NewRootCollectionRef(collection, "")
+	def, err := dbschema.DescribeCollection(ctx, db, &ref)
+	if err != nil {
+		return nil
+	}
+	var order []dal.OrderExpression
+	for _, name := range def.PrimaryKey {
+		order = append(order, dal.AscendingField(string(name)))
+	}
+	if len(order) == 0 && scheme == "sqlite" {
+		order = append(order, dal.AscendingField("rowid"))
+	}
+	return order
 }

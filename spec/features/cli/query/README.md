@@ -26,7 +26,7 @@ Policy authors have no way to see what a DALgo access policy will do to a real q
 ## Synopsis
 
 ```
-datatug query run --db <url> (-f <dtql-file>|--from <collection> [--limit <n>]) \
+datatug query run --db <url> (-f <dtql-file>|--from <collection> [--limit <n>] [--offset <n>]) \
   [--format grid|json|jsonl|yaml|csv] \
   [--as <user-id>] [--role <role>]... [--group <group>]... [--var <name>=<value>]... \
   [--policy <file>]... [--policies-dir <dir>] [--no-policies] [-q|--quiet]
@@ -45,6 +45,10 @@ datatug query run --db <url> (-f <dtql-file>|--from <collection> [--limit <n>]) 
 #### REQ: limit-flag
 
 `--limit <n>` MUST read at most `n` rows of a `--from` query (`n` > 0). With `-f` or a saved query it MUST exit 2, because those state their own limit; a negative value MUST exit 2. `0`, the default, means no limit.
+
+#### REQ: offset-flag
+
+`--offset <n>` MUST skip the first `n` rows of a `--from` query, with the same refusals as `--limit` (`-f` or saved query: exit 2; negative: exit 2). When `--limit` or `--offset` is given, rows MUST be ordered so that pages do not move: by the table's primary key columns (in key order) when it has one, otherwise by `rowid` for a SQLite table. A SQLite view and every other source (no primary key reported, or no way to describe it) keep the order the source gives, which is not guaranteed stable; callers paging such a source cannot rely on it.
 
 #### REQ: db-url
 
@@ -99,6 +103,12 @@ Exit codes: 0 success; 2 usage or invalid input (flags, undecodable query or pol
 **Given** a collection of three or more rows
 **When** the user runs `datatug query run --db <url> --from <collection> --limit 2 --no-policies --format jsonl`
 **Then** stdout holds exactly two rows; with `-f`, `--limit` exits 2.
+
+### AC: offset-pages-rows (verifies REQ:offset-flag)
+
+**Given** a SQLite table of five rows with primary key `id`
+**When** the user runs `--from t --limit 2 --offset 2 --no-policies --format jsonl`
+**Then** stdout holds the rows with `id` 3 and 4, in that order; a table with no primary key pages by `rowid`.
 
 ### AC: query-file-stdin (verifies REQ:query-input)
 

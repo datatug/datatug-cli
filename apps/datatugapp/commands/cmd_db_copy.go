@@ -27,7 +27,8 @@ func dbCopyCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "copy",
 		Short: "Copy a database from one DALgo URL to another.",
-		Long: "Copies source collections and rows through DALgo adapters. A BigQuery destination uses the authenticated Google identity configured on this machine and requires an explicit dataset location. Existing BigQuery tables are never replaced. For a complete, atomic native inGitDB export, use `datatug db export`.\n\n" +
+		Long: "Between SQLite and PostgreSQL (and SQLite to SQLite) the copy is faithful: tables, columns, declared types, primary keys, foreign keys with their actions, unique constraints, indexes, check constraints, defaults and auto-increment counters are carried, and every value is copied exactly (a date stays the text it was). Anything an engine cannot carry - views across engines, triggers, expression indexes, collations, a check the target does not accept - is never dropped silently: it is listed as a warning, with --json as a machine-readable summary, and with --fail-on-warning as exit code 3. --dry-run prints the plan and changes nothing. A missing SQLite target file is created. The copy is one transaction: it either completes or leaves the target as it was. See docs/db-copy.md.\n\n" +
+			"Other pairs copy source collections and rows through DALgo adapters. A BigQuery destination uses the authenticated Google identity configured on this machine and requires an explicit dataset location. Existing BigQuery tables are never replaced. For a complete, atomic native inGitDB export, use `datatug db export`.\n\n" +
 			"PostgreSQL (postgres://) is a preview: it opens only while " + dbcopy.PostgresPreviewEnv + "=1. A PostgreSQL --from is read through a read-only session, " +
 			"and a --from URL that turns the session's default_transaction_read_only off is refused. --to is the only place a PostgreSQL database is opened for writing.",
 		RunE: dbCopyAction,

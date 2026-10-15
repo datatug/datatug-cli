@@ -59,14 +59,18 @@ func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSc
 	}
 	finish := func(rep *faithful.Report, code int, msg string) error {
 		if rep != nil {
-			if code != 0 {
+			switch code {
+			case 0:
+			case exitCodeWarnings:
+				rep.ExitCode = code // the copy is made: the status stays "ok-with-warnings"
+			default:
 				rep.Status, rep.ExitCode, rep.Error = "failed", code, msg
 			}
 			if asJSON {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
 				_ = enc.Encode(rep)
-			} else if code == 0 {
+			} else if code == 0 || code == exitCodeWarnings {
 				rep.WriteText(errWriter)
 			}
 		}
@@ -111,14 +115,7 @@ func dbCopyFaithful(cmd *cobra.Command, srcRef, tgtRef dbcopy.BackendRef, fromSc
 		return finish(rep, code, redact(err))
 	}
 	if failOnWarning && len(rep.Warnings) > 0 {
-		if asJSON {
-			rep.ExitCode = exitCodeWarnings
-		}
-		_ = finish(rep, 0, "")
-		if !asJSON {
-			return Exit(fmt.Sprintf("%d warning(s) and --fail-on-warning is set", len(rep.Warnings)), exitCodeWarnings)
-		}
-		return Exit(fmt.Sprintf("%d warning(s) and --fail-on-warning is set", len(rep.Warnings)), exitCodeWarnings)
+		return finish(rep, exitCodeWarnings, fmt.Sprintf("%d warning(s) and --fail-on-warning is set", len(rep.Warnings)))
 	}
 	return finish(rep, 0, "")
 }

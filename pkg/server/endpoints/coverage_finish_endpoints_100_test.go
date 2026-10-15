@@ -163,8 +163,8 @@ func TestCoverageFinish100_WithLocalOrigin(t *testing.T) {
 	// 2. Multiple Origin headers -> 403
 	called = false
 	rMultiOrigin := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rMultiOrigin.Header.Add("Origin", "http://localhost:3000")
-	rMultiOrigin.Header.Add("Origin", "http://localhost:4000")
+	rMultiOrigin.Header.Add("Origin", "http://datatug.localhost:3000")
+	rMultiOrigin.Header.Add("Origin", "http://datatug.localhost:4000")
 	wMultiOrigin := httptest.NewRecorder()
 	handler(wMultiOrigin, rMultiOrigin, nil, nil, 0, nil, nil)
 	assert.False(t, called)
@@ -182,7 +182,7 @@ func TestCoverageFinish100_WithLocalOrigin(t *testing.T) {
 	// 4. Valid supported Origin -> 200, origin deleted on request passed to next
 	called = false
 	rGoodOrigin := httptest.NewRequest(http.MethodGet, "/test", nil)
-	rGoodOrigin.Header.Set("Origin", "http://localhost:3000")
+	rGoodOrigin.Header.Set("Origin", "http://datatug.localhost:3000")
 	wGoodOrigin := httptest.NewRecorder()
 	handler(wGoodOrigin, rGoodOrigin, nil, nil, 0, nil, nil)
 	assert.True(t, called)
@@ -571,7 +571,7 @@ func TestCoverageFinish100_SessionContextSuite(t *testing.T) {
 	// Get capabilities first to fetch databaseId and projectId
 	wCap := httptest.NewRecorder()
 	rCap := httptest.NewRequest(http.MethodGet, "http://localhost/datatug/session-context/capabilities?storage=local&project=transport-test", nil)
-	rCap.Header.Set("Origin", "http://localhost:4200")
+	rCap.Header.Set("Origin", "http://datatug.localhost:4200")
 	router.ServeHTTP(wCap, rCap)
 	assert.Equal(t, http.StatusOK, wCap.Code)
 
@@ -588,7 +588,7 @@ func TestCoverageFinish100_SessionContextSuite(t *testing.T) {
 	// Query parse error -> 400
 	wParseErr := httptest.NewRecorder()
 	rParseErr := httptest.NewRequest(http.MethodGet, "http://localhost/datatug/session-context/sessions?%zz", nil)
-	rParseErr.Header.Set("Origin", "http://localhost:4200")
+	rParseErr.Header.Set("Origin", "http://datatug.localhost:4200")
 	router.ServeHTTP(wParseErr, rParseErr)
 	assert.Equal(t, http.StatusBadRequest, wParseErr.Code)
 
@@ -596,7 +596,7 @@ func TestCoverageFinish100_SessionContextSuite(t *testing.T) {
 	badDbQ := url.Values{"storage": {"local"}, "project": {"transport-test"}, "databaseId": {"wrong"}, "projectId": {caps.ProjectID}}
 	wBadDb := httptest.NewRecorder()
 	rBadDb := httptest.NewRequest(http.MethodGet, "http://localhost/datatug/session-context/sessions?"+badDbQ.Encode(), nil)
-	rBadDb.Header.Set("Origin", "http://localhost:4200")
+	rBadDb.Header.Set("Origin", "http://datatug.localhost:4200")
 	router.ServeHTTP(wBadDb, rBadDb)
 	assert.Equal(t, http.StatusForbidden, wBadDb.Code)
 
@@ -615,7 +615,7 @@ func TestCoverageFinish100_SessionContextSuite(t *testing.T) {
 	for _, sub := range subpaths {
 		wSub := httptest.NewRecorder()
 		rSub := httptest.NewRequest(http.MethodGet, "http://localhost/datatug/session-context"+sub, nil)
-		rSub.Header.Set("Origin", "http://localhost:4200")
+		rSub.Header.Set("Origin", "http://datatug.localhost:4200")
 		router.ServeHTTP(wSub, rSub)
 		// We expect either 200, 404, or another structured response (never a 500 router panic)
 		assert.NotEqual(t, http.StatusInternalServerError, wSub.Code)
@@ -625,28 +625,28 @@ func TestCoverageFinish100_SessionContextSuite(t *testing.T) {
 	// Parse error -> 400
 	wQueryParse := httptest.NewRecorder()
 	rQueryParse := httptest.NewRequest(http.MethodPost, "http://localhost/datatug/session-context/query?%zz", nil)
-	rQueryParse.Header.Set("Origin", "http://localhost:4200")
+	rQueryParse.Header.Set("Origin", "http://datatug.localhost:4200")
 	router.ServeHTTP(wQueryParse, rQueryParse)
 	assert.Equal(t, http.StatusBadRequest, wQueryParse.Code)
 
 	// Bad key -> 400
 	wQueryBadKey := httptest.NewRecorder()
 	rQueryBadKey := httptest.NewRequest(http.MethodPost, "http://localhost/datatug/session-context/query?badkey=1", nil)
-	rQueryBadKey.Header.Set("Origin", "http://localhost:4200")
+	rQueryBadKey.Header.Set("Origin", "http://datatug.localhost:4200")
 	router.ServeHTTP(wQueryBadKey, rQueryBadKey)
 	assert.Equal(t, http.StatusBadRequest, wQueryBadKey.Code)
 
 	// DatabaseID mismatch -> 403
 	wQueryBadDb := httptest.NewRecorder()
 	rQueryBadDb := httptest.NewRequest(http.MethodPost, "http://localhost/datatug/session-context/query?"+badDbQ.Encode(), nil)
-	rQueryBadDb.Header.Set("Origin", "http://localhost:4200")
+	rQueryBadDb.Header.Set("Origin", "http://datatug.localhost:4200")
 	router.ServeHTTP(wQueryBadDb, rQueryBadDb)
 	assert.Equal(t, http.StatusForbidden, wQueryBadDb.Code)
 
 	// Bad body -> 400
 	wQueryBadBody := httptest.NewRecorder()
 	rQueryBadBody := httptest.NewRequest(http.MethodPost, "http://localhost/datatug/session-context/query?"+baseQ.Encode(), strings.NewReader("bad-json"))
-	rQueryBadBody.Header.Set("Origin", "http://localhost:4200")
+	rQueryBadBody.Header.Set("Origin", "http://datatug.localhost:4200")
 	router.ServeHTTP(wQueryBadBody, rQueryBadBody)
 	assert.Equal(t, http.StatusBadRequest, wQueryBadBody.Code)
 
@@ -663,7 +663,7 @@ func TestCoverageFinish100_SessionContextSuite(t *testing.T) {
 	bodyUnadmitted, _ := json.Marshal(unadmittedCmd)
 	wQueryUnadmitted := httptest.NewRecorder()
 	rQueryUnadmitted := httptest.NewRequest(http.MethodPost, "http://localhost/datatug/session-context/query?"+baseQ.Encode(), strings.NewReader(string(bodyUnadmitted)))
-	rQueryUnadmitted.Header.Set("Origin", "http://localhost:4200")
+	rQueryUnadmitted.Header.Set("Origin", "http://datatug.localhost:4200")
 	router.ServeHTTP(wQueryUnadmitted, rQueryUnadmitted)
 	assert.Equal(t, http.StatusForbidden, wQueryUnadmitted.Code)
 }

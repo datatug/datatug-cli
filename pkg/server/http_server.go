@@ -180,6 +180,7 @@ func (s *HttpServer) ServeHTTP(pathsByID map[string]string, host string, port in
 		AllowLiveConnections: caps.AllowLiveConnections,
 		ServedHost:           agentHost,
 		ServedPort:           agentPort,
+		Access:               caps.Access,
 	}
 	guard := endpointCaps.RequestGuard()
 	router := httprouter.New()

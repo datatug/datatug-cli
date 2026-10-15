@@ -22,6 +22,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-core/pkg/datatug"
 	"github.com/datatug/datatug-core/pkg/storage"
+	"github.com/datatug/datatug-core/pkg/storage/filestore"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -185,6 +186,23 @@ type showRelation struct {
 	Name string `json:"name"`
 	// Columns is nil at the depths "sources" and "tables" (and then has no key in JSON), and empty, never nil, otherwise.
 	Columns []showColumn `json:"columns,omitzero"`
+	// ForeignKeys are the keys a table holds (never a view), in the order of the foreign keys file. It is nil
+	// at the depths "sources" and "tables", and for a table that holds none (and then has no key in JSON).
+	ForeignKeys []showForeignKey `json:"foreignKeys,omitzero"`
+}
+
+// showForeignKey is a foreign key as the project's foreign keys file holds it.
+type showForeignKey struct {
+	Name       string       `json:"name"`
+	Columns    []string     `json:"columns"`
+	RefTable   showTableRef `json:"refTable"`
+	RefColumns []string     `json:"refColumns"`
+}
+
+// showTableRef names the referenced table; the schema is left out for a source that reports none.
+type showTableRef struct {
+	Schema string `json:"schema,omitempty"`
+	Name   string `json:"name"`
 }
 
 // showColumn is a column as the scan stored it. PrimaryKeyPosition is its 1-based place in the primary
@@ -269,6 +287,11 @@ func readShowSource(projectDir, envID string, catalog *datatug.DbCatalog) (showS
 	if err != nil {
 		return showSource{}, err
 	}
+	foreignKeys, err := loadShowForeignKeys(projectDir, catalog.DbModel)
+	if err != nil {
+		// The loader's text names a file of the project: the answer names the source and the environment only.
+		return showSource{}, fmt.Errorf("source %q in environment %q: its foreign keys file cannot be read", dbcopy.SourceIDDisplay(catalog.ID), dbcopy.SourceIDDisplay(envID))
+	}
 	source.Empty = len(schema.Relations) == 0
 	// The relations are in the order of their schema and name: the relations of one schema are together.
 	for _, relation := range schema.Relations {
@@ -283,10 +306,35 @@ func readShowSource(projectDir, envID string, catalog *datatug.DbCatalog) (showS
 		if relation.DbType == "VIEW" {
 			current.Views = append(current.Views, shown)
 		} else {
+			shown.ForeignKeys = foreignKeys[showTableKey{relation.Schema, relation.Name}]
 			current.Tables = append(current.Tables, shown)
 		}
 	}
 	return source, nil
+}
+
+type showTableKey struct{ schema, name string }
+
+// loadShowForeignKeys reads the foreign keys of a model through datatug-core's loader of the foreign keys file
+// (the one reader of it), by the table that holds them. A model with no file has none.
+func loadShowForeignKeys(projectDir, modelID string) (map[showTableKey][]showForeignKey, error) {
+	tables, err := filestore.LoadModelForeignKeys(projectDir, modelID)
+	if err != nil {
+		return nil, err
+	}
+	byTable := make(map[showTableKey][]showForeignKey, len(tables))
+	for _, table := range tables {
+		key := showTableKey{table.Table.Schema(), table.Table.Name()}
+		for _, fk := range table.ForeignKeys {
+			byTable[key] = append(byTable[key], showForeignKey{
+				Name:       fk.Name,
+				Columns:    fk.Columns,
+				RefTable:   showTableRef{Schema: fk.RefTable.Schema(), Name: fk.RefTable.Name()},
+				RefColumns: fk.RefColumns,
+			})
+		}
+	}
+	return byTable, nil
 }
 
 // trimShowDocument cuts the document at the depth: the one place the depth is applied, so that the two writers
@@ -307,6 +355,7 @@ func trimShowDocument(doc *showDocument, depth string) {
 				for _, relations := range [][]showRelation{schema.Tables, schema.Views} {
 					for j := range relations {
 						relations[j].Columns = nil
+						relations[j].ForeignKeys = nil
 					}
 				}
 			}
@@ -398,6 +447,7 @@ func writeShowText(w io.Writer, doc *showDocument) error {
 					for _, relation := range kind.relations {
 						line(3, "%s %s", kind.label, showText(relation.Name))
 						writeShowColumns(line, relation)
+						writeShowForeignKeys(line, relation)
 					}
 				}
 			}
@@ -434,6 +484,24 @@ func writeShowColumns(line func(depth int, format string, args ...any), relation
 		default:
 			line(4, "%s %s pk %d", name, dbType, column.PrimaryKeyPosition)
 		}
+	}
+}
+
+// writeShowForeignKeys prints the foreign keys of a table below its columns, one line each.
+func writeShowForeignKeys(line func(depth int, format string, args ...any), relation showRelation) {
+	names := func(names []string) string {
+		shown := make([]string, len(names))
+		for i, name := range names {
+			shown[i] = showText(name)
+		}
+		return strings.Join(shown, ", ")
+	}
+	for _, fk := range relation.ForeignKeys {
+		target := showText(fk.RefTable.Name)
+		if fk.RefTable.Schema != "" {
+			target = showText(fk.RefTable.Schema) + "." + target
+		}
+		line(4, "ForeignKey %s (%s) -> %s (%s)", showText(fk.Name), names(fk.Columns), target, names(fk.RefColumns))
 	}
 }
 

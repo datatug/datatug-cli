@@ -70,11 +70,15 @@ The text MUST be plain: one item to a line, two spaces of indent for each level,
 
 #### REQ: json-format
 
-`--format json` MUST print the same information as one JSON document, and two keys the text does not carry: `project`; `title` and `access` (those of the project file, each left out when the file holds none), printed as the file holds them and not validated; `environments[]` of `id` and `sources[]`; a source has `id`, `driver`, `dsnEnv` (PostgreSQL only), `notScanned` (`true` only for a source that was never scanned), `empty` (`true` only for a source that was scanned and has nothing to list) and `schemas[]` of `name`, `tables[]` and `views[]`; each of those has `name` and `columns[]` of `name`, `type` and `primaryKeyPosition` (the last two left out when there is none). Any other `--format` than `text` and `json` MUST exit `2`.
+`--format json` MUST print the same information as one JSON document, and two keys the text does not carry: `project`; `title` and `access` (those of the project file, each left out when the file holds none), printed as the file holds them and not validated; `environments[]` of `id` and `sources[]`; a source has `id`, `driver`, `dsnEnv` (PostgreSQL only), `notScanned` (`true` only for a source that was never scanned), `empty` (`true` only for a source that was scanned and has nothing to list) and `schemas[]` of `name`, `tables[]` and `views[]`; each of those has `name` and `columns[]` of `name`, `type` and `primaryKeyPosition` (the last two left out when there is none); a table also has `foreignKeys[]` ([REQ: foreign-keys](#req-foreign-keys)). Any other `--format` than `text` and `json` MUST exit `2`.
+
+#### REQ: foreign-keys
+
+Each table MUST list the foreign keys it holds (the outgoing side; a consumer derives "referenced by" from the other tables). In JSON, `foreignKeys[]` of `name`, `columns[]`, `refTable` (`schema` and `name`) and `refColumns[]`, in the order of the file ([`<model>.refs.json`](https://github.com/datatug/datatug-core/tree/main/spec/features/model-foreign-keys-file): by name within a table), and no `foreignKeys` key for a table that holds none or for a view. In the text, one line for each key below the columns of its table: `ForeignKey <name> (<columns>) -> <schema>.<table> (<refcolumns>)`, with the names printed as [REQ: plain-text](#req-plain-text) says. The keys MUST be read through `filestore.LoadModelForeignKeys` of datatug-core, the loader of the file, from the model of the source (`dbModel` of its catalog); `show` reads no project file for them itself. A model with no such file has no foreign keys, and is no failure. A file that cannot be read (not valid, or of a version this release does not know) MUST exit `1` with one sentence that names the source and the environment, and says nothing that the file system said. `--depth tables` and `--depth sources` list no foreign key, as they list no column. A scan does not write the file today ([scan](../scan/README.md)): a project holds it when it was made by another tool, such as the public demo project.
 
 #### REQ: depth
 
-`--depth` MUST be `sources`, `tables` or `columns` (the default), and applies to both formats. `columns` lists everything, as before the flag existed. `tables` lists each table and each view with no column: in the text a table or a view is its one line, and in JSON it has `name` and no `columns` key. `sources` lists nothing below a source: in the text no schema, table, view or column line, and in JSON a source has no `schemas` key. The `not scanned` and `no tables or views` lines, and `notScanned` and `empty` in JSON, are kept at every depth. Any other `--depth` MUST exit `2`. The order of [REQ: stable-order](#req-stable-order) holds at every depth.
+`--depth` MUST be `sources`, `tables` or `columns` (the default), and applies to both formats. `columns` lists everything, as before the flag existed. `tables` lists each table and each view with no column and no foreign key: in the text a table or a view is its one line, and in JSON it has `name` and no `columns` or `foreignKeys` key. `sources` lists nothing below a source: in the text no schema, table, view or column line, and in JSON a source has no `schemas` key. The `not scanned` and `no tables or views` lines, and `notScanned` and `empty` in JSON, are kept at every depth. Any other `--depth` MUST exit `2`. The order of [REQ: stable-order](#req-stable-order) holds at every depth.
 
 #### REQ: stable-order
 
@@ -119,6 +123,12 @@ All output MUST go to stdout; a failure goes to stderr and exits non-zero (see [
 **Requirements:** show#req:lists-what-a-scan-wrote, show#req:same-reader-as-chat, show#req:plain-text, show#req:stable-order
 
 Given a SQLite file with a table with a one-column key, a table with a composite key whose order is not the order of its columns, and a view, `datatug scan` into a folder and then `datatug show -d <folder>` exits `0` and writes the text of the journey database: the project, the environment, the source with its driver, the schema, the tables and the view with their columns, types and key positions, every line within 80 columns and no tab. (The quick start of the README shows the same kind of text for its own database, and is run by [AC: quick-start-is-true](#ac-quick-start-is-true).) Two runs are byte-identical. (`TestShowListsWhatAScanWrote`, `TestShowListsEnvironmentsAndSourcesInOrder`.)
+
+### AC: foreign-keys-are-listed
+
+**Requirements:** show#req:foreign-keys, show#req:depth
+
+On a project whose model holds a `<model>.refs.json` with a key of table `Invoice` to `Customer` (as the public demo project's `chinook` does), `datatug show --format json --depth columns` gives the table `Invoice` a `foreignKeys` entry of `name`, `columns`, `refTable` and `refColumns`, and no other table or view has the key; the text lists the key as a `ForeignKey` line below the columns of its table; `--depth tables` lists neither. A project with no such file lists the same as before the requirement, and a file that cannot be read exits `1` naming the source and the environment and no path. (`TestShowListsTheForeignKeysOfATable`, `TestShowListsNoForeignKeysWithoutTheFile`, `TestShowFailsWhenTheForeignKeysFileCannotBeRead`.)
 
 ### AC: sources-are-listed-as-chat-lists-them
 
@@ -182,7 +192,7 @@ Every command and every output block of the quick start of the README is run by 
 
 ## Open Questions
 
-- Foreign keys, indexes and referenced-by are not listed: a scan does not store them. A later task adds foreign keys.
+- Indexes and referenced-by are not listed (referenced-by is derived by the reader from the foreign keys of all tables). A scan does not yet write the foreign keys file, so `show` lists keys only for a project that holds one.
 
 ---
 *This document follows the https://specscore.md/feature-specification*

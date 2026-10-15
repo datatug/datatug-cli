@@ -910,3 +910,83 @@ func TestShowRefusesAnUnknownDepth(t *testing.T) {
 	_, _, err := runShowCommand(t, "-d", t.TempDir(), "--depth", "rows")
 	assert.Equal(t, 2, showExitCodeOf(t, err), "the depth is checked before the project is read")
 }
+
+const journeyRefsFile = `{
+	"version": 1,
+	"foreignKeys": [
+		{
+			"name": "FK_order_line_Customer",
+			"table": {"schema": "main", "name": "order_line"},
+			"columns": ["customer_id"],
+			"refTable": {"schema": "main", "name": "Customer"},
+			"refColumns": ["CustomerId"]
+		},
+		{
+			"name": "FK_a b",
+			"table": {"schema": "main", "name": "order_line"},
+			"columns": ["customer_id", "sku"],
+			"refTable": {"name": "Other"},
+			"refColumns": ["x", "y"]
+		}
+	]
+}
+`
+
+// A table lists the foreign keys its model's foreign keys file holds, below its columns; a table with none
+// and a view list none; the depth "tables" lists none.
+func TestShowListsTheForeignKeysOfATable(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	writeProjectFiles(t, projectDir, map[string]string{"dbmodels/shop/shop.refs.json": journeyRefsFile})
+
+	stdout, _, err := runShowCommand(t, "-d", projectDir)
+	require.NoError(t, err)
+	assert.Contains(t, stdout, `        qty INTEGER
+        ForeignKey "FK_a b" (customer_id, sku) -> Other (x, y)
+        ForeignKey FK_order_line_Customer (customer_id) -> main.Customer (CustomerId)
+      View customer_names
+`)
+	assert.Equal(t, 2, strings.Count(stdout, "ForeignKey "))
+
+	stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json")
+	require.NoError(t, err)
+	var doc showDocument
+	require.NoError(t, json.Unmarshal([]byte(stdout), &doc), stdout)
+	schema := doc.Environments[0].Sources[0].Schemas[0]
+	assert.Empty(t, schema.Tables[0].ForeignKeys, "Customer holds no key")
+	assert.Empty(t, schema.Views[0].ForeignKeys)
+	assert.Equal(t, []showForeignKey{
+		{Name: "FK_a b", Columns: []string{"customer_id", "sku"}, RefTable: showTableRef{Name: "Other"}, RefColumns: []string{"x", "y"}},
+		{Name: "FK_order_line_Customer", Columns: []string{"customer_id"}, RefTable: showTableRef{Schema: "main", Name: "Customer"}, RefColumns: []string{"CustomerId"}},
+	}, schema.Tables[1].ForeignKeys)
+	assert.Contains(t, stdout, `                      "refTable": {
+                        "schema": "main",
+                        "name": "Customer"
+                      },`)
+	assert.Equal(t, 1, strings.Count(stdout, `"foreignKeys"`), "only the table that holds keys has the member")
+
+	for _, depth := range []string{"tables", "sources"} {
+		stdout, _, err = runShowCommand(t, "-d", projectDir, "--format", "json", "--depth", depth)
+		require.NoError(t, err)
+		assert.NotContains(t, stdout, "foreignKeys", depth)
+		stdout, _, err = runShowCommand(t, "-d", projectDir, "--depth", depth)
+		require.NoError(t, err)
+		assert.NotContains(t, stdout, "ForeignKey", depth)
+	}
+}
+
+// A model with no foreign keys file lists no key: the same bytes as before the requirement.
+func TestShowListsNoForeignKeysWithoutTheFile(t *testing.T) {
+	stdout, _, err := runShowCommand(t, "-d", scannedJourneyProject(t))
+	require.NoError(t, err)
+	assert.Equal(t, showJourneySQLite, stdout)
+}
+
+// A foreign keys file that cannot be read is a failure that names the source and the environment, and no path.
+func TestShowFailsWhenTheForeignKeysFileCannotBeRead(t *testing.T) {
+	projectDir := scannedJourneyProject(t)
+	writeProjectFiles(t, projectDir, map[string]string{"dbmodels/shop/shop.refs.json": `{"version": 99, "foreignKeys": []}`})
+	stdout, _, err := runShowCommand(t, "-d", projectDir)
+	assert.Equal(t, 1, showExitCodeOf(t, err))
+	assert.EqualError(t, err, `source "shop" in environment "local": its foreign keys file cannot be read`)
+	assert.Empty(t, stdout)
+}

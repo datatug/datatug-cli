@@ -11,7 +11,7 @@ var testID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`).MatchString
 func TestBuildResultLink(t *testing.T) {
 	st := Status{UIBase: "https://datatug.app/store/http-127.0.0.1:8989", Running: true}
 	link, err := BuildResultLink(st, ResultLinkRequest{ID: "t4", View: "sources", Row: 3, Exists: true, Code: "c d"}, testID)
-	if err != nil || link.URL != st.UIBase+"/result/t4?view=sources&row=3#code=c%20d" || link.Kind != KindQueryResult || !link.Running || link.UISupport != UISupportPending || !link.ResultExists || link.Contract != ContractVersion || link.Warnings == nil {
+	if err != nil || link.URL != st.UIBase+"/result/t4?view=sources&row=3#code=c%20d" || link.Kind != KindQueryResult || !link.Running || link.UISupport != UISupportAvailable || !link.ResultExists || link.Contract != ContractVersion || link.Warnings == nil {
 		t.Fatalf("%+v %v", link, err)
 	}
 	link, err = BuildResultLink(st, ResultLinkRequest{ID: "t4", Exists: true}, testID)
@@ -36,7 +36,7 @@ func TestBuildResultLink(t *testing.T) {
 	if _, err := BuildResultLink(long, ResultLinkRequest{ID: "t4", Exists: true}, testID); err == nil {
 		t.Fatal("an over-long link was built")
 	}
-	if uiSupport[KindQueryResult] != UISupportPending {
-		t.Fatal("query-result is pending until the web route ships")
+	if uiSupport[KindQueryResult] != UISupportAvailable {
+		t.Fatal("query-result is available: the web route is deployed")
 	}
 }

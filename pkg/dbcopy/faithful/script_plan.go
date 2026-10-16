@@ -75,7 +75,7 @@ func PlanSQLiteTo(ctx context.Context, d Dialect, db Queryer, cat *Catalog, stat
 			} else if n == 0 {
 				continue
 			} else {
-				p.warn(WarnForeignKeyViolations, t.Name+"("+strings.Join(fk.Columns, ",")+")", "%d row(s) have no parent in %s: the key is not created, because MySQL would refuse it", n, fk.RefTable)
+				p.warn(WarnForeignKeyViolations, t.Name+"("+strings.Join(fk.Columns, ",")+")", "%d row(s) have no parent in %s: the key is not created, because %s would refuse it", n, fk.RefTable, dialectLabel(d))
 			}
 			if skipFK[t.Name] == nil {
 				skipFK[t.Name] = map[int]bool{}
@@ -132,6 +132,9 @@ func PlanSQLiteTo(ctx context.Context, d Dialect, db Queryer, cat *Catalog, stat
 		return nil, err
 	}
 	checkNames := map[string]bool{} // check names are unique in the whole schema
+	for _, n := range extraObjectNames(d, p) {
+		checkNames[foldFor(d, n)] = true
+	}
 	for _, t := range p.Tables {
 		for _, c := range t.Columns {
 			if c.Choice.Normalized > 0 {
@@ -195,9 +198,14 @@ func planNames(d Dialect, p *ScriptPlan, cat *Catalog) (*namePlan, error) {
 	np := &namePlan{tables: map[string]string{}, cols: map[string]map[string]string{}}
 	byFold := map[string][]string{}
 	usedTables := map[string]bool{}
+	foldedTables := map[string]bool{}
 	for _, t := range cat.Tables {
 		name := t.Name
-		if why := d.StorableName(name); why != "" {
+		why := d.StorableName(name)
+		if why == "" && foldsTableNames(d) && foldedTables[foldFor(d, name)] {
+			why = fmt.Sprintf("it differs only by case from another table, and %s compares table names without case", dialectLabel(d))
+		}
+		if why != "" {
 			name = safeName(d, name)
 			p.warn(WarnNameRenamed, t.Name, "table name cannot be stored (%s): created as %q", why, name)
 		}
@@ -205,7 +213,8 @@ func planNames(d Dialect, p *ScriptPlan, cat *Catalog) (*namePlan, error) {
 			return nil, fmt.Errorf("table name %q is taken twice after renaming", name)
 		}
 		usedTables[name] = true
-		if name == MySQLMarkerTable {
+		foldedTables[foldFor(d, name)] = true
+		if foldFor(d, name) == foldFor(d, MySQLMarkerTable) {
 			return nil, fmt.Errorf("table %q is the name the script uses for its completion marker; rename the table first", name)
 		}
 		np.tables[t.Name] = name
@@ -216,17 +225,17 @@ func planNames(d Dialect, p *ScriptPlan, cat *Catalog) (*namePlan, error) {
 		for _, c := range t.Columns {
 			cn := c.Name
 			why := d.StorableName(cn)
-			if why == "" && used[foldName(cn)] {
-				why = "it differs only by case from another column of the table, and MySQL compares column names without case"
+			if why == "" && used[foldFor(d, cn)] {
+				why = fmt.Sprintf("it differs only by %s from another column of the table, and %s compares column names without %s", foldDescription(d), dialectLabel(d), foldDescription(d))
 			}
 			if why != "" {
 				cn = safeName(d, cn)
 				p.warn(WarnNameRenamed, t.Name+"."+c.Name, "column name cannot be stored (%s): created as %q", why, cn)
 			}
-			if used[foldName(cn)] {
+			if used[foldFor(d, cn)] {
 				return nil, fmt.Errorf("column name %q of table %q is taken twice after renaming", cn, t.Name)
 			}
-			used[foldName(cn)] = true
+			used[foldFor(d, cn)] = true
 			cols[c.Name] = cn
 		}
 		np.cols[t.Name] = cols
@@ -267,36 +276,36 @@ func buildScriptTable(d Dialect, p *ScriptPlan, t *Table, np *namePlan, stats []
 	st.PK = mapCols(t.PK)
 	for _, n := range st.PK {
 		if s := st.Col(n).Stats; s.nulls > 0 {
-			return nil, fmt.Errorf("primary key column %s.%s holds %d NULL value(s) (SQLite allows it); MySQL cannot carry it", t.Name, n, s.nulls)
+			return nil, fmt.Errorf("primary key column %s.%s holds %d NULL value(s) (SQLite allows it); %s cannot carry it", t.Name, n, s.nulls, dialectLabel(d))
 		}
 	}
 	used := map[string]bool{"primary": true}
 	for _, u := range t.Uniques {
 		nu := Unique{Columns: mapCols(u.Columns)}
 		if u.Name != "" {
-			if why := d.StorableName(u.Name); why != "" || used[foldName(u.Name)] {
+			if why := d.StorableName(u.Name); why != "" || used[foldFor(d, u.Name)] {
 				p.warn(WarnConstraintNameLost, t.Name+"."+u.Name, "unique constraint name is not carried (%s)", firstNonEmpty(why, "the name is taken by another key of the table"))
 			} else {
 				nu.Name = u.Name
-				used[foldName(u.Name)] = true
+				used[foldFor(d, u.Name)] = true
 			}
 		}
 		st.Uniques = append(st.Uniques, nu)
 	}
 	for _, ix := range t.Indexes {
 		if ix.Where != "" {
-			p.warn(WarnIndexNotCarried, t.Name+"."+ix.Name, "partial index (WHERE %s) is not carried: MySQL has no partial indexes", ix.Where)
+			p.warn(WarnIndexNotCarried, t.Name+"."+ix.Name, "partial index (WHERE %s) is not carried: %s", ix.Where, partialIndexNote(d))
 			continue
 		}
 		ni := Index{Name: ix.Name, Unique: ix.Unique}
 		for _, c := range ix.Columns {
 			ni.Columns = append(ni.Columns, IndexColumn{Name: cmap[c.Name], Desc: c.Desc})
 		}
-		if why := d.StorableName(ix.Name); why != "" || used[foldName(ix.Name)] {
+		if why := d.StorableName(ix.Name); why != "" || used[foldFor(d, ix.Name)] {
 			ni.Name = safeName(d, ix.Name)
 			p.warn(WarnIndexRenamed, t.Name+"."+ix.Name, "index name cannot be used (%s): created as %q", firstNonEmpty(why, "the name is taken by another key of the table"), ni.Name)
 		}
-		used[foldName(ni.Name)] = true
+		used[foldFor(d, ni.Name)] = true
 		st.Indexes = append(st.Indexes, ni)
 	}
 	for i, fk := range t.FKs {
@@ -346,7 +355,7 @@ func translateDefaults(d Dialect, p *ScriptPlan, t *ScriptTable) {
 		}
 		def, note, ok := d.Default(c.Src.Default, c.Choice)
 		if !ok {
-			p.warn(WarnDefaultNotCarried, t.Name+"."+c.Name, "default expression %s cannot be translated to MySQL and is not carried", c.Src.Default)
+			p.warn(WarnDefaultNotCarried, t.Name+"."+c.Name, "default expression %s cannot be translated to %s and is not carried", c.Src.Default, dialectLabel(d))
 			continue
 		}
 		c.Default = def
@@ -377,11 +386,11 @@ func translateChecks(d Dialect, p *ScriptPlan, t *ScriptTable, usedNames map[str
 		}
 		nc := Check{Expr: expr}
 		if ck.Name != "" {
-			if why := d.StorableName(ck.Name); why != "" || usedNames[foldName(ck.Name)] {
+			if why := d.StorableName(ck.Name); why != "" || usedNames[foldFor(d, ck.Name)] {
 				p.warn(WarnConstraintNameLost, obj, "check constraint name is not carried (%s)", firstNonEmpty(why, "the name is taken by another constraint of the schema"))
 			} else {
 				nc.Name = ck.Name
-				usedNames[foldName(ck.Name)] = true
+				usedNames[foldFor(d, ck.Name)] = true
 			}
 		}
 		t.Checks = append(t.Checks, nc)
@@ -398,12 +407,12 @@ func dedupeFKNames(d Dialect, p *ScriptPlan) {
 			if fk.Name == "" {
 				continue
 			}
-			if why := d.StorableName(fk.Name); why != "" || used[fkFoldName(fk.Name)] {
-				p.warn(WarnConstraintNameLost, t.Name+"."+fk.Name, "foreign key name is not carried (%s): MySQL names the key itself", firstNonEmpty(why, "the name is taken by another constraint of the schema"))
+			if why := d.StorableName(fk.Name); why != "" || used[fkFoldFor(d, fk.Name)] {
+				p.warn(WarnConstraintNameLost, t.Name+"."+fk.Name, "foreign key name is not carried (%s): %s names the key itself", firstNonEmpty(why, "the name is taken by another constraint of the schema"), dialectLabel(d))
 				fk.Name = ""
 				continue
 			}
-			used[fkFoldName(fk.Name)] = true
+			used[fkFoldFor(d, fk.Name)] = true
 		}
 	}
 }

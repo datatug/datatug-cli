@@ -15,9 +15,11 @@ import (
 type ScriptStats struct {
 	*colStats
 	MaxBytes      int
+	MaxU16        int // the longest text in UTF-16 code units, the length SQL Server counts
 	MaxBlob       int
 	BadUTF8       int64 // text values that are not valid UTF-8
 	NonFinite     int64 // infinite floats
+	Denormal      int64 // floats below the smallest normal double, which SQL Server flushes to zero
 	LowYear       int64 // dates and timestamps before year 1000
 	MaxFsp        int   // most decimals of a timestamp or time text
 	MaxIntDigits  int   // most integer digits of a value that is a decimal number
@@ -53,6 +55,9 @@ func (s *ScriptStats) add(v any) {
 			s.NonFinite++
 			return
 		}
+		if x != 0 && math.Abs(x) < 2.2250738585072014e-308 {
+			s.Denormal++
+		}
 		s.digits(strconv.FormatFloat(x, 'f', -1, 64))
 		if s.RealExample == "" {
 			s.RealExample = strconv.FormatFloat(x, 'f', -1, 64)
@@ -61,6 +66,7 @@ func (s *ScriptStats) add(v any) {
 		s.MaxBlob = max(s.MaxBlob, len(x))
 	case string:
 		s.MaxBytes = max(s.MaxBytes, len(x))
+		s.MaxU16 = max(s.MaxU16, utf16Len(x))
 		if x == "" {
 			s.Empty++
 		}
@@ -92,6 +98,19 @@ func (s *ScriptStats) add(v any) {
 func (s *ScriptStats) textLength(text string) {
 	s.maxLen = max(s.maxLen, utf8.RuneCountInString(text))
 	s.MaxBytes = max(s.MaxBytes, len(text))
+	s.MaxU16 = max(s.MaxU16, utf16Len(text))
+}
+
+// utf16Len is the length of a text in UTF-16 code units: a character outside the Basic Multilingual Plane is two.
+func utf16Len(x string) int {
+	n := 0
+	for _, r := range x {
+		n++
+		if r > 0xFFFF {
+			n++
+		}
+	}
+	return n
 }
 
 func (s *ScriptStats) spelling(x string) {

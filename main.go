@@ -14,7 +14,7 @@ import (
 	"github.com/datatug/datatug-cli/apps/datatugapp/commands"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
 	"github.com/datatug/datatug-cli/pkg/dtlog"
-	_ "github.com/denisenkom/go-mssqldb"
+	_ "github.com/microsoft/go-mssqldb"
 	"github.com/spf13/cobra"
 	"github.com/strongo/buildinfo"
 	"github.com/strongo/buildinfo/fangcmd"

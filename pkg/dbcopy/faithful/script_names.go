@@ -28,5 +28,23 @@ func safeName(d Dialect, orig string) string {
 		b.WriteRune(r)
 		n++
 	}
-	return b.String() + "_" + nameHash(orig)
+	out := b.String() + "_" + nameHash(orig)
+	if d.StorableName(out) == "" {
+		return out
+	}
+	// A character pair (a sqlcmd variable) or a length counted in units, which the test of one character at a
+	// time cannot see: keep only plain letters and digits.
+	var plain strings.Builder
+	n = 0
+	for _, r := range orig {
+		if n >= limit/2 {
+			break
+		}
+		if r > 0x7f || !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			r = '_'
+		}
+		plain.WriteRune(r)
+		n++
+	}
+	return plain.String() + "_" + nameHash(orig)
 }

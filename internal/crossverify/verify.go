@@ -15,14 +15,25 @@ import (
 
 func newHash() hash.Hash { return sha256.New() }
 
+// engine is the engine of the input (MySQL when none was resolved).
+func (in Input) engine() targetEngine {
+	if in.eng.quote != nil {
+		return in.eng
+	}
+	return mysqlEngine
+}
+
 // Input is what to compare: the plan the exporter makes for the SQLite source, the source, and the database
 // the script was loaded into.
 type Input struct {
 	Plan   *faithful.ScriptPlan
 	Source *sql.DB
 	Target *sql.DB
-	// Schema is the MySQL database; the connection's current database when empty.
+	// Schema is the MySQL database (the SQL Server schema); the connection's current one when empty.
 	Schema string
+	// Engine is the engine that loaded the script: EngineMySQL (the default) or EngineMSSQL.
+	Engine string
+	eng    targetEngine
 	// SourceSHA256 is the hash of the SQLite file, checked against the marker row; "" skips that check.
 	SourceSHA256 string
 }
@@ -40,7 +51,12 @@ type Result struct {
 // auto-increment, default), primary keys, foreign keys, unique keys and indexes (the indexes MySQL creates
 // itself for a foreign key excluded), check constraints, row counts, the completion marker, and every value.
 func Verify(ctx context.Context, in Input) (*Result, error) {
-	cat, err := ReadMySQL(ctx, in.Target, in.Schema)
+	eng, err := engineByName(in.Engine)
+	if err != nil {
+		return nil, err
+	}
+	in.eng = eng
+	cat, err := eng.read(ctx, in.Target, in.Schema)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +66,7 @@ func Verify(ctx context.Context, in Input) (*Result, error) {
 			res.Diffs = append(res.Diffs, faithful.Diff{Object: obj, Aspect: aspect, Left: want, Right: got})
 		}
 	}
-	checkNames(in.Plan, add)
+	checkNames(in.Plan, eng, add)
 	planned := map[string]bool{}
 	for _, t := range in.Plan.Tables {
 		planned[t.Name] = true
@@ -64,7 +80,7 @@ func Verify(ctx context.Context, in Input) (*Result, error) {
 	for _, n := range actualNames {
 		add(n, "table", "absent", "present")
 	}
-	if err := verifyMarker(ctx, in, cat, add); err != nil {
+	if err := verifyMarker(ctx, in, eng, cat, add); err != nil {
 		return nil, err
 	}
 	for _, t := range in.Plan.Tables {
@@ -74,10 +90,15 @@ func Verify(ctx context.Context, in Input) (*Result, error) {
 			continue
 		}
 		res.Tables++
-		compareCatalog(ctx, in, t, mt, add)
+		compareCatalog(ctx, in, eng, t, mt, add)
 		n, values, err := compareData(ctx, in, t, add)
 		if err != nil {
 			return nil, fmt.Errorf("table %q: %w", t.Name, err)
+		}
+		if eng.extra != nil {
+			if err := eng.extra(ctx, in, t, add); err != nil {
+				return nil, fmt.Errorf("table %q: %w", t.Name, err)
+			}
 		}
 		res.Rows += n
 		res.Values += values
@@ -85,14 +106,14 @@ func Verify(ctx context.Context, in Input) (*Result, error) {
 	return res, nil
 }
 
-func verifyMarker(ctx context.Context, in Input, cat *MySQLCatalog, add func(obj, aspect, want, got string)) error {
+func verifyMarker(ctx context.Context, in Input, eng targetEngine, cat *MySQLCatalog, add func(obj, aspect, want, got string)) error {
 	if cat.Table(faithful.MySQLMarkerTable) == nil {
 		add(faithful.MySQLMarkerTable, "table", "present", "missing")
 		return nil
 	}
 	var sha string
 	var tables, rows int64
-	err := in.Target.QueryRowContext(ctx, "SELECT `source_sha256`, `tables_count`, `rows_count` FROM `"+faithful.MySQLMarkerTable+"`").Scan(&sha, &tables, &rows)
+	err := in.Target.QueryRowContext(ctx, eng.markerSQL).Scan(&sha, &tables, &rows)
 	if err == sql.ErrNoRows {
 		add(faithful.MySQLMarkerTable, "completion marker", "one row", "no row: the load did not finish")
 		return nil
@@ -112,7 +133,7 @@ func verifyMarker(ctx context.Context, in Input, cat *MySQLCatalog, add func(obj
 	return nil
 }
 
-func compareCatalog(ctx context.Context, in Input, t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, want, got string)) {
+func compareCatalog(ctx context.Context, in Input, eng targetEngine, t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, want, got string)) {
 	want := make([]string, len(t.Columns))
 	for i, c := range t.Columns {
 		want[i] = c.Name
@@ -136,13 +157,18 @@ func compareCatalog(ctx context.Context, in Input, t *faithful.ScriptTable, mt *
 		add(obj, "nullable", fmt.Sprint(!c.NotNull), fmt.Sprint(mc.Nullable))
 		add(obj, "auto_increment", fmt.Sprint(c.AutoInc), fmt.Sprint(mc.AutoIncrement))
 		add(obj, "has default", fmt.Sprint(c.Default != ""), fmt.Sprint(mc.HasDefault))
-		compareDefault(ctx, in, c, mc, add)
+		if eng.compareText {
+			compareDefault(ctx, in, c, mc, add)
+		}
 	}
 	add(t.Name, "primary key", strings.Join(t.PK, ","), strings.Join(mt.PK, ","))
-	compareIndexes(t, mt, add)
+	compareIndexes(eng, t, mt, add)
 	compareFKs(t, mt, add)
 	add(t.Name, "check constraints", fmt.Sprint(len(t.Checks)), fmt.Sprint(mt.Checks))
-	compareChecks(in, t, mt, add)
+	if eng.compareText {
+		compareChecks(in, t, mt, add)
+	}
+	add(t.Name, "untrusted constraints", "", strings.Join(mt.Untrusted, ", "))
 }
 
 func indexSig(unique bool, cols []string) string {
@@ -153,11 +179,19 @@ func indexSig(unique bool, cols []string) string {
 	return u + "(" + strings.Join(cols, ",") + ")"
 }
 
+// filteredSig marks the signature of an index with a WHERE clause.
+func filteredSig(sig string, filtered bool) string {
+	if filtered {
+		return sig + " where"
+	}
+	return sig
+}
+
 // compareIndexes matches the planned unique keys and indexes with MySQL's. A key the plan names is
 // matched by name and columns; an unnamed unique key by its columns. An index of MySQL that nothing
 // planned and whose columns are the columns of a foreign key is the index MySQL creates for the key
 // itself: it is modelled here and left out.
-func compareIndexes(t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, want, got string)) {
+func compareIndexes(eng targetEngine, t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, want, got string)) {
 	type exp struct {
 		name, sig string
 	}
@@ -173,7 +207,7 @@ func compareIndexes(t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, 
 				cols[i] += " DESC"
 			}
 		}
-		expect = append(expect, exp{ix.Name, indexSig(ix.Unique, cols)})
+		expect = append(expect, exp{ix.Name, filteredSig(indexSig(ix.Unique, cols), ix.Where != "")})
 	}
 	used := make([]bool, len(mt.Indexes))
 	actualSig := func(ix MyIndex) string {
@@ -187,7 +221,7 @@ func compareIndexes(t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, 
 				cols[i] += fmt.Sprintf("(%d)", c.Prefix)
 			}
 		}
-		return indexSig(ix.Unique, cols)
+		return filteredSig(indexSig(ix.Unique, cols), ix.Filtered)
 	}
 	for _, e := range expect {
 		found := false
@@ -206,7 +240,7 @@ func compareIndexes(t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, 
 		if used[i] {
 			continue
 		}
-		if implicitFKIndex(t, ix) {
+		if eng.implicitIndex(t, ix) {
 			continue
 		}
 		add(t.Name+"."+ix.Name, "index", "absent", actualSig(ix))
@@ -272,7 +306,7 @@ func compareFKs(t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, want
 // checkNames checks that a table or column keeps the exact name it has in SQLite unless a name-renamed warning
 // says it was renamed, and that every such warning is for a name that was in fact changed: a rename is never
 // silent and a warning is never idle.
-func checkNames(p *faithful.ScriptPlan, add func(obj, aspect, want, got string)) {
+func checkNames(p *faithful.ScriptPlan, eng targetEngine, add func(obj, aspect, want, got string)) {
 	warned := map[string]bool{}
 	for _, w := range p.Warnings {
 		if w.Kind == faithful.WarnNameRenamed {
@@ -286,8 +320,8 @@ func checkNames(p *faithful.ScriptPlan, add func(obj, aspect, want, got string))
 			if !warned[t.Src.Name] {
 				add(t.Src.Name, "name", "kept or a name-renamed warning", "renamed to "+t.Name+" without a warning")
 			}
-			if why := unstorableName(t.Src.Name); why == "" {
-				add(t.Src.Name, "rename justified", "a name MySQL cannot store", "renamed to "+t.Name+" though MySQL can store it")
+			if why := eng.unstorable(t.Src.Name); why == "" && !eng.tableTwin(p, t) {
+				add(t.Src.Name, "rename justified", "a name "+eng.label+" cannot store", "renamed to "+t.Name+" though "+eng.label+" can store it")
 			}
 		}
 		for _, c := range t.Columns {
@@ -296,8 +330,8 @@ func checkNames(p *faithful.ScriptPlan, add func(obj, aspect, want, got string))
 				if !warned[t.Src.Name+"."+c.Src.Name] {
 					add(t.Src.Name+"."+c.Src.Name, "name", "kept or a name-renamed warning", "renamed to "+c.Name+" without a warning")
 				}
-				if unstorableName(c.Src.Name) == "" && !hasCaseTwin(t, c) {
-					add(t.Src.Name+"."+c.Src.Name, "rename justified", "a name MySQL cannot store, or a case twin among the columns", "renamed to "+c.Name+" though MySQL can store it")
+				if eng.unstorable(c.Src.Name) == "" && !eng.columnTwin(t, c) {
+					add(t.Src.Name+"."+c.Src.Name, "rename justified", "a name "+eng.label+" cannot store, or a twin among the columns", "renamed to "+c.Name+" though "+eng.label+" can store it")
 				}
 			}
 		}
@@ -332,6 +366,62 @@ func unstorableName(name string) string {
 func hasCaseTwin(t *faithful.ScriptTable, c *faithful.ScriptColumn) bool {
 	for _, o := range t.Columns {
 		if o != c && faithful.MySQLNameFold(o.Src.Name) == faithful.MySQLNameFold(c.Src.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+// noTableTwin: MySQL keeps two tables whose names differ by case apart (on a case-sensitive server), so a
+// rename of a table is never justified by a twin.
+func noTableTwin(*faithful.ScriptPlan, *faithful.ScriptTable) bool { return false }
+
+// unstorableMSSQL is why SQL Server cannot store a name, by rules written here and not taken from the exporter:
+// empty, only spaces, not valid UTF-8, longer than 128 UTF-16 code units, holding "$(", a control or line-break
+// character or a byte-order mark. "" for a name it can store.
+func unstorableMSSQL(name string) string {
+	switch {
+	case name == "":
+		return "empty"
+	case !utf8.ValidString(name):
+		return "not valid UTF-8"
+	case strings.TrimRight(name, " ") == "":
+		return "only spaces"
+	case strings.Contains(name, "$("):
+		return "holds $("
+	}
+	units := 0
+	for _, r := range name {
+		units++
+		if r > 0xFFFF {
+			units++
+		}
+		if r < 0x20 || r == 0x7f || r >= 0x80 && r <= 0x9f || r == 0x2028 || r == 0x2029 || r == 0xFEFF || r == 0xFFFE || r == 0xFFFF {
+			return "a character it cannot hold"
+		}
+	}
+	if units > 128 {
+		return "longer than 128 characters"
+	}
+	return ""
+}
+
+func mssqlFold(name string) string { return strings.ToLower(strings.TrimRight(name, " ")) }
+
+// mssqlTableTwin is true when another table has the name SQL Server's default collation would merge with this
+// one: the table is renamed, which is justified.
+func mssqlTableTwin(p *faithful.ScriptPlan, t *faithful.ScriptTable) bool {
+	for _, o := range p.Tables {
+		if o != t && mssqlFold(o.Src.Name) == mssqlFold(t.Src.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+func mssqlColumnTwin(t *faithful.ScriptTable, c *faithful.ScriptColumn) bool {
+	for _, o := range t.Columns {
+		if o != c && mssqlFold(o.Src.Name) == mssqlFold(c.Src.Name) {
 			return true
 		}
 	}

@@ -13,8 +13,8 @@ import (
 
 	"database/sql/driver"
 
-	_ "github.com/denisenkom/go-mssqldb"
 	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/microsoft/go-mssqldb"
 
 	"github.com/dal-go/dalgo/access"
 	"github.com/dal-go/dalgo/dal"

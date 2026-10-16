@@ -9,6 +9,19 @@ import (
 	"strings"
 )
 
+// ScriptUsageError is a request the user can fix by changing it (a table that does not exist, a header value
+// the script cannot carry): the command exits with 2, not 1.
+type ScriptUsageError struct{ Err error }
+
+func (e *ScriptUsageError) Error() string { return e.Err.Error() }
+func (e *ScriptUsageError) Unwrap() error { return e.Err }
+
+// headerValidator is implemented by a dialect that can refuse a header up front: the script must not load
+// every row and then fail on its last statement.
+type headerValidator interface {
+	ValidateHeader(h Header) error
+}
+
 // WriteScript streams the script of a plan: the header, the session settings, every table, its rows (in a total
 // order, so the bytes are the same on every run), the counters of the auto-numbered columns, then indexes,
 // checks and foreign keys (keys follow the data), and last the marker row. The rows are read from src one
@@ -74,7 +87,7 @@ func writeRows(ctx context.Context, bw *bufio.Writer, src Queryer, p *ScriptPlan
 	for i, c := range t.Columns {
 		names[i] = c.Src.Name
 	}
-	rows, err := src.QueryContext(ctx, "SELECT "+sqliteSelectList(names)+" FROM "+quoteIdent(t.Src.Name)+" ORDER BY "+t.OrderBy)
+	rows, err := src.QueryContext(ctx, "SELECT "+scriptSelectList(t)+" FROM "+quoteIdent(t.Src.Name)+" ORDER BY "+t.OrderBy)
 	if err != nil {
 		return 0, err
 	}
@@ -159,6 +172,11 @@ func ExportScript(ctx context.Context, req ScriptRequest, w io.Writer) (*Report,
 	if err != nil {
 		return nil, err
 	}
+	if v, ok := d.(headerValidator); ok {
+		if err := v.ValidateHeader(req.Header); err != nil {
+			return nil, &ScriptUsageError{err}
+		}
+	}
 	tx, err := req.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
@@ -169,7 +187,7 @@ func ExportScript(ctx context.Context, req ScriptRequest, w io.Writer) (*Report,
 		return nil, err
 	}
 	if err := filterTables(cat, req.Include, req.Exclude, &cat.Notes); err != nil {
-		return nil, err
+		return nil, &ScriptUsageError{err}
 	}
 	stats, err := scanScriptStats(ctx, tx, cat)
 	if err != nil {

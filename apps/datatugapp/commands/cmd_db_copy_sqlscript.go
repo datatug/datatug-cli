@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -64,10 +65,18 @@ func parseSQLScriptTarget(raw string) (sqlScriptTarget, error) {
 	if t.path == "" {
 		return t, errors.New("the file path is missing, as in sqlscript:///tmp/out.sql?dialect=mysql")
 	}
-	q := u.Query()
-	for k := range q {
+	// ParseQuery, not u.Query(): Query drops what it cannot parse, so a ";" in an attribution would make it vanish
+	// from the header and the licence line with it.
+	q, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return t, fmt.Errorf("the query is not valid (%v); write a \";\" inside a value as %%3B and a \"&\" as %%26", err)
+	}
+	for k, vs := range q {
 		if !sqlScriptQuery[k] {
 			return t, fmt.Errorf("unknown parameter %q (known: dialect, name, edition, license, attribution)", k)
+		}
+		if len(vs) > 1 {
+			return t, fmt.Errorf("parameter %q is given %d times; give it once", k, len(vs))
 		}
 	}
 	t.dialect = q.Get("dialect")
@@ -141,11 +150,11 @@ func dbCopySQLScript(cmd *cobra.Command, fromURL, toURL, overwrite string) error
 	if srcRef.Scheme != "sqlite" {
 		return fail(2, "a sqlscript destination is written from a sqlite:// source, not %s://", srcRef.Scheme)
 	}
-	if _, statErr := os.Stat(target.path); statErr == nil && overwrite != "recreate" && !dryRun {
-		return fail(1, "%s already exists; use --overwrite=recreate to replace it", filepath.Base(target.path))
-	}
 	if same, err := sameFile(srcRef.Path, target.path); err == nil && same {
 		return fail(2, "--from and --to are the same file")
+	}
+	if _, statErr := os.Stat(target.path); statErr == nil && overwrite != "recreate" && !dryRun {
+		return fail(1, "%s already exists; use --overwrite=recreate to replace it", filepath.Base(target.path))
 	}
 	sum, err := fileSHA256(srcRef.Path)
 	if err != nil {
@@ -165,7 +174,12 @@ func dbCopySQLScript(cmd *cobra.Command, fromURL, toURL, overwrite string) error
 		Include: directives.IncludeTables, Exclude: directives.ExcludeTables}
 	rep, err := writeSQLScript(ctx, req, target.path, overwrite == "recreate")
 	if err != nil {
-		return fail(1, "%s", dbcopy.RedactErrorWithSecrets(err, srcRef.Path).Error())
+		code := 1
+		var usage *faithful.ScriptUsageError
+		if errors.As(err, &usage) {
+			code = 2 // the request can be fixed: a table that does not exist, a name the script cannot carry
+		}
+		return fail(code, "%s", dbcopy.RedactErrorWithSecrets(err, srcRef.Path).Error())
 	}
 	code := 0
 	if failOnWarning && len(rep.Warnings) > 0 {
@@ -185,8 +199,18 @@ func dbCopySQLScript(cmd *cobra.Command, fromURL, toURL, overwrite string) error
 	return nil
 }
 
+// linkFile puts the finished temporary file in place without replacing anything; a test replaces it to play a
+// file system without hard links.
+var linkFile = os.Link
+
 // writeSQLScript writes the script to a temporary file beside path and puts it in place when it is complete, so
 // a failed export leaves no half-written script.
+//
+// The file gets the mode of a new file under the user's umask (0666 minus the umask: 0644 with the usual 022), and
+// a file that is replaced keeps its own mode. Without --overwrite=recreate the file is put in place with a hard
+// link, which fails when the name is taken; on a file system with no hard links (FAT, exFAT, some network
+// shares) it is created exclusively (O_EXCL) and the script is copied into it, and a copy that fails is removed
+// again. Either way nothing that was there is replaced.
 func writeSQLScript(ctx context.Context, req faithful.ScriptRequest, path string, replace bool) (*faithful.Report, error) {
 	if req.DryRun {
 		return faithful.ExportScript(ctx, req, io.Discard)
@@ -194,7 +218,7 @@ func writeSQLScript(ctx context.Context, req faithful.ScriptRequest, path string
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create the folder of the script: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".datatug-sqlscript-*")
+	tmp, err := createExclusive(filepath.Dir(path), ".datatug-sqlscript-")
 	if err != nil {
 		return nil, err
 	}
@@ -206,14 +230,65 @@ func writeSQLScript(ctx context.Context, req faithful.ScriptRequest, path string
 	if err != nil {
 		return nil, err
 	}
-	_ = os.Chmod(tmp.Name(), 0o644) // a script is for reading; a failure leaves the owner-only mode CreateTemp gave
 	if replace {
+		if info, statErr := os.Stat(path); statErr == nil && info.Mode().IsRegular() {
+			_ = os.Chmod(tmp.Name(), info.Mode().Perm()) // the replaced file's mode is kept
+		}
 		err = os.Rename(tmp.Name(), path)
 	} else {
-		err = os.Link(tmp.Name(), path) // fails when the file appeared meanwhile
+		err = putInPlace(tmp.Name(), path)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("write %s: %w", filepath.Base(path), err)
 	}
 	return rep, nil
+}
+
+// randomBytes fills b with random bytes; a test replaces it to make the name of a temporary file impossible.
+var randomBytes = func(b []byte) error { _, err := rand.Read(b); return err }
+
+// createExclusive creates a new file in dir under a name that starts with prefix, with the mode of a new file
+// under the umask (what a plain create gives; os.CreateTemp would force 0600). A name that is taken is an
+// error: a six-byte random name does not meet one.
+func createExclusive(dir, prefix string) (*os.File, error) {
+	var rnd [6]byte
+	if err := randomBytes(rnd[:]); err != nil {
+		return nil, err
+	}
+	return os.OpenFile(filepath.Join(dir, prefix+hex.EncodeToString(rnd[:])), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
+}
+
+// copyContents copies the script into its destination; a test replaces it to fail the copy or to move a file onto the
+// destination in the middle of it.
+var copyContents = io.Copy
+
+// putInPlace gives the finished file at from the name to, failing when to exists.
+func putInPlace(from, to string) error {
+	err := linkFile(from, to)
+	if err == nil || errors.Is(err, os.ErrExist) {
+		return err
+	}
+	// No hard links here: create the destination exclusively and copy the script into it.
+	src, openErr := os.Open(from)
+	if openErr != nil {
+		return openErr
+	}
+	defer func() { _ = src.Close() }()
+	dst, createErr := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
+	if createErr != nil {
+		return createErr
+	}
+	_, copyErr := copyContents(dst, src)
+	made, statErr := dst.Stat()
+	if closeErr := dst.Close(); copyErr == nil {
+		copyErr = closeErr
+	}
+	if copyErr != nil {
+		// Remove the file this call made, and only that one: if somebody renamed another file onto the name
+		// meanwhile, it stays.
+		if now, err := os.Lstat(to); err == nil && statErr == nil && os.SameFile(made, now) {
+			_ = os.Remove(to)
+		}
+	}
+	return copyErr
 }

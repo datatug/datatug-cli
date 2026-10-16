@@ -141,13 +141,15 @@ func (d mysqlDialect) Header(p *ScriptPlan, h Header) []string {
 	raw("")
 	raw("Requires MySQL 8.0.16 or later (CHECK constraints are enforced from there). Verified on MySQL 8.4 LTS.")
 	raw("Load it into an EMPTY database with the mysql client; the script stops at the first error:")
-	raw("  mysql --default-character-set=utf8mb4 --skip-commands --database <name> < <file>.sql")
+	raw("  mysql --default-character-set=utf8mb4 --skip-commands --skip-system-command --database <name> < <file>.sql")
 	raw("(--skip-commands needs mysql 8.4.6 or later; without it the client still reads this file as plain statements,")
 	raw("because no data in it can start a line.) Do not load it with the \"source\" command of an untrusted file.")
+	raw("A blob is written in hex, twice its size: one value over about 8 MB is more than the client's default max_allowed_packet of 16 MB; add --max-allowed-packet=1G.")
 	raw("MySQL commits DDL, so a failed load is not rolled back: drop the database or the tables listed below and load again.")
 	raw("The first statement creates the table " + MySQLMarkerTable + " and fails when it exists; the last one fills it: a row there means the load completed.")
 	raw("DROP TABLE " + MySQLMarkerTable + " removes the marker once you no longer need it.")
 	raw("Text comparison in MySQL is case- and accent-insensitive by default, unlike SQLite's exact comparison: keys that differ only by case or accents in SQLite are duplicates here and stop the load.")
+	raw("The export warns about the key values it finds that collide that way (key-values-collide); it cannot find every kind of collision MySQL's collation makes.")
 	tables := make([]string, len(p.Tables))
 	for i, t := range p.Tables {
 		tables[i] = t.Name
@@ -171,6 +173,40 @@ func (d mysqlDialect) Prelude(p *ScriptPlan, h Header) []string {
 	}
 }
 
+// Widths of the columns of the marker table.
+const (
+	markerDatasetLen = 255
+	markerEditionLen = 255
+	markerVersionLen = 64
+)
+
+// markerVersion is the version as the marker's VARCHAR(64) holds it; the header comment has it whole.
+func markerVersion(v string) string {
+	if utf8.RuneCountInString(v) <= markerVersionLen {
+		return v
+	}
+	return string([]rune(v)[:markerVersionLen])
+}
+
+// ValidateHeader refuses a dataset name or edition the marker row cannot hold. The row is the last statement of the
+// script: left alone, a value that is too long fails it after every row is loaded.
+func (mysqlDialect) ValidateHeader(h Header) error {
+	for _, f := range []struct {
+		what, value string
+		limit       int
+	}{{"name", h.Name, markerDatasetLen}, {"edition", h.Edition, markerEditionLen}} {
+		switch n := utf8.RuneCountInString(f.value); {
+		case !utf8.ValidString(f.value):
+			return fmt.Errorf("the %s is not valid UTF-8, which the marker table of the script cannot hold", f.what)
+		case strings.IndexByte(f.value, 0) >= 0:
+			return fmt.Errorf("the %s holds a NUL character, which the marker table of the script cannot hold", f.what)
+		case n > f.limit:
+			return fmt.Errorf("the %s is %d characters and the marker table of the script holds at most %d (the script would load every row and then fail on its last statement); shorten it", f.what, n, f.limit)
+		}
+	}
+	return nil
+}
+
 func (d mysqlDialect) Epilogue(p *ScriptPlan, h Header) []string {
 	var rows int64
 	for _, t := range p.Tables {
@@ -179,7 +215,7 @@ func (d mysqlDialect) Epilogue(p *ScriptPlan, h Header) []string {
 	name := h.Name
 	return []string{
 		fmt.Sprintf("INSERT INTO %s VALUES (%s, %s, %s, %s, %d, %d);", d.QuoteIdent(MySQLMarkerTable),
-			mysqlTextLiteral(name), mysqlTextLiteral(h.Edition), mysqlTextLiteral(h.SourceSHA256), mysqlTextLiteral(h.Version), len(p.Tables), rows),
+			mysqlTextLiteral(name), mysqlTextLiteral(h.Edition), mysqlTextLiteral(h.SourceSHA256), mysqlTextLiteral(markerVersion(h.Version)), len(p.Tables), rows),
 		"-- end of script",
 	}
 }

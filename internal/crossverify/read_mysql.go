@@ -20,6 +20,15 @@ type MyColumn struct {
 	Nullable      bool
 	AutoIncrement bool
 	HasDefault    bool
+	// Default is COLUMN_DEFAULT as the server prints it: the value of a literal default, the text of an
+	// expression default (Generated).
+	Default   string
+	Generated bool
+}
+
+// MyCheck is a check constraint: its name and the clause as the server prints it (CHECK_CLAUSE).
+type MyCheck struct {
+	Name, Clause string
 }
 
 // MyIndexColumn is one key part of an index.
@@ -55,6 +64,8 @@ type MyTable struct {
 	Indexes []MyIndex // without the primary key
 	FKs     []MyFK
 	Checks  int
+	// CheckClauses are the check constraints, ordered by name.
+	CheckClauses []MyCheck
 }
 
 // MySQLCatalog is the catalog of one MySQL database.
@@ -143,7 +154,8 @@ func ReadMySQL(ctx context.Context, db Queryer, schema string) (*MySQLCatalog, e
 		}
 		extra := strings.ToLower(text(v[4]))
 		t.Columns = append(t.Columns, MyColumn{Name: text(v[1]), Type: strings.ToLower(text(v[2])), Nullable: text(v[3]) == "YES",
-			AutoIncrement: strings.Contains(extra, "auto_increment"), HasDefault: v[5] != nil || strings.Contains(extra, "default_generated")})
+			AutoIncrement: strings.Contains(extra, "auto_increment"), HasDefault: v[5] != nil || strings.Contains(extra, "default_generated"),
+			Default: text(v[5]), Generated: strings.Contains(extra, "default_generated")})
 	})
 	if err := wrap("columns", err); err != nil {
 		return nil, err
@@ -185,9 +197,12 @@ WHERE k.TABLE_SCHEMA = ? AND k.REFERENCED_TABLE_NAME IS NOT NULL ORDER BY k.TABL
 	if err := wrap("foreign keys", err); err != nil {
 		return nil, err
 	}
-	err = query(ctx, db, 1, `SELECT TABLE_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE TABLE_SCHEMA = ? AND CONSTRAINT_TYPE = 'CHECK'`, []any{schema}, func(v []any) {
+	err = query(ctx, db, 3, `SELECT tc.TABLE_NAME, tc.CONSTRAINT_NAME, cc.CHECK_CLAUSE FROM information_schema.TABLE_CONSTRAINTS tc
+JOIN information_schema.CHECK_CONSTRAINTS cc ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
+WHERE tc.TABLE_SCHEMA = ? AND tc.CONSTRAINT_TYPE = 'CHECK' ORDER BY tc.TABLE_NAME, tc.CONSTRAINT_NAME`, []any{schema}, func(v []any) {
 		if t := byName[text(v[0])]; t != nil {
 			t.Checks++
+			t.CheckClauses = append(t.CheckClauses, MyCheck{Name: text(v[1]), Clause: text(v[2])})
 		}
 	})
 	if err := wrap("check constraints", err); err != nil {

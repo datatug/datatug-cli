@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy/faithful"
@@ -37,27 +38,49 @@ func eachRow(rows *sql.Rows, width int, visit func(vals []any) error) error {
 }
 
 // sourceRows reads the SQLite side. A column is read as +"c" so the driver gives the value with its storage
-// class and no declared type, and an empty blob, which the driver reads as NULL, is told apart by a flag.
+// class and no declared type, and an empty blob, which the driver reads as NULL, is told apart by a flag. A
+// REAL that the plan carries in a text or bytes column is read as CAST("c" AS TEXT): the text SQLite itself makes
+// of it (1.0, 1.0e+21, Inf, -0.0), which is what the script must hold, not a spelling this package or the
+// writer could choose.
 func sourceRows(in Input, t *faithful.ScriptTable) rowSource {
 	return func(ctx context.Context, visit func([]string) error) error {
 		n := len(t.Columns)
-		exprs := make([]string, 0, 2*n)
+		exprs := make([]string, 0, 3*n)
 		for _, c := range t.Columns {
-			exprs = append(exprs, "+"+quoteSQLite(c.Src.Name))
+			q := quoteSQLite(c.Src.Name)
+			if c.Choice.Family == "text" || c.Choice.Family == "bytes" {
+				exprs = append(exprs, "CASE WHEN typeof("+q+") = 'real' THEN CAST("+q+" AS TEXT) ELSE +"+q+" END")
+			} else {
+				exprs = append(exprs, "+"+q)
+			}
 		}
 		for _, c := range t.Columns {
 			q := quoteSQLite(c.Src.Name)
 			exprs = append(exprs, "(typeof("+q+") = 'blob' AND length("+q+") = 0)")
+		}
+		// the REAL itself, for a column read as text, to check that the text reads back as the number
+		for _, c := range t.Columns {
+			q := quoteSQLite(c.Src.Name)
+			if c.Choice.Family == "text" || c.Choice.Family == "bytes" {
+				exprs = append(exprs, "CASE WHEN typeof("+q+") = 'real' THEN "+q+" END")
+			} else {
+				exprs = append(exprs, "NULL")
+			}
 		}
 		rows, err := in.Source.QueryContext(ctx, "SELECT "+strings.Join(exprs, ", ")+" FROM "+quoteSQLite(t.Src.Name)+" ORDER BY "+t.OrderBy)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = rows.Close() }()
-		return eachRow(rows, 2*n, func(vals []any) error {
+		return eachRow(rows, 3*n, func(vals []any) error {
 			forms := make([]string, n)
 			for i, c := range t.Columns {
 				v := vals[i]
+				if real, ok := vals[2*n+i].(float64); ok {
+					if err := readsBack(v, real); err != nil {
+						return fmt.Errorf("source column %q: %w", c.Src.Name, err)
+					}
+				}
 				if flag, _ := vals[n+i].(int64); flag != 0 {
 					v = []byte{}
 				}
@@ -187,4 +210,18 @@ func describeMismatch(ctx context.Context, t *faithful.ScriptTable, src, dst row
 		return fmt.Sprintf("%d rows, first rows the %s lacks: %s", n, lacks, strings.Join(ex, " | "))
 	}
 	return describe("source", src, dstMap, srcN, "target"), describe("target", dst, srcMap, dstN, "source")
+}
+
+// readsBack checks that SQLite's text of a REAL reads back as that number (the sign of a zero aside): a lossy
+// CAST, such as the 15 digits of an old SQLite, would otherwise be trusted on both sides of the comparison.
+func readsBack(text any, real float64) error {
+	s, ok := text.(string)
+	if !ok {
+		return fmt.Errorf("the REAL %v was read as %T, not as text", real, text)
+	}
+	back, err := strconv.ParseFloat(s, 64)
+	if err != nil || back != real {
+		return fmt.Errorf("SQLite's text %q of the REAL %v does not read back as that number", s, real)
+	}
+	return nil
 }

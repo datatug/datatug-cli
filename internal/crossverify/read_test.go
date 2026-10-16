@@ -20,7 +20,7 @@ func TestReadMySQLCatalog(t *testing.T) {
 		"INSERT INTO information_schema.STATISTICS VALUES ('db', 'ghost', 'PRIMARY', 0, 1, 'c', 'A', NULL)",
 		"INSERT INTO information_schema.KEY_COLUMN_USAGE VALUES ('db', 'ghost', 'k', 'c', 'parent', 'id', 1, 'db')",
 		"INSERT INTO information_schema.REFERENTIAL_CONSTRAINTS VALUES ('db', 'k', 'ghost', 'NO ACTION', 'NO ACTION')",
-		"INSERT INTO information_schema.TABLE_CONSTRAINTS VALUES ('db', 'ghost', 'CHECK', 'c')",
+		"INSERT INTO information_schema.TABLE_CONSTRAINTS VALUES ('db', 'ghost', 'CHECK', 'c', 'db')",
 	} {
 		if _, err := dst.Exec(q); err != nil {
 			t.Fatal(err)
@@ -69,7 +69,7 @@ func TestReadMySQLFailures(t *testing.T) {
 		}
 		return sqlmock.NewRows(names)
 	}
-	widths := []int{1, 6, 7, 8, 1}
+	widths := []int{1, 6, 7, 8, 3}
 	for i, step := range steps {
 		for _, mode := range []string{"query", "scan", "rows"} {
 			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))

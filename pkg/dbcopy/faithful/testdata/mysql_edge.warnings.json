@@ -10,6 +10,11 @@
     "message": "column name cannot be stored (the name is empty): created as \"_e3b0c442\""
   },
   {
+    "kind": "values-normalized",
+    "object": "Order Details.Unit Price",
+    "message": "2 REAL value(s) are written as the exact decimal of their shortest spelling, for example 9.99: SQLite stores a binary float, DECIMAL(10,2) an exact decimal"
+  },
+  {
     "kind": "key-type-bounded",
     "object": "Production.Product.Color",
     "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 4"
@@ -60,6 +65,11 @@
     "message": "a key column is carried as VARCHAR(255) (declared \"TEXT\"): MySQL cannot index an unbounded type; its longest value is 5"
   },
   {
+    "kind": "constraint-name-not-carried",
+    "object": "ck_c2.shared_name",
+    "message": "check constraint name is not carried (the name is taken by another constraint of the schema)"
+  },
+  {
     "kind": "fk-action-not-carried",
     "object": "comp_child(a,b)",
     "message": "DEFERRABLE is not supported by MySQL: the key is checked at once"
@@ -80,6 +90,11 @@
     "message": "default expression x'01' cannot be translated to MySQL and is not carried"
   },
   {
+    "kind": "values-normalized",
+    "object": "defaults_t.dec",
+    "message": "1 REAL value(s) are written as the exact decimal of their shortest spelling, for example 0.1: SQLite stores a binary float, DECIMAL(5,2) an exact decimal"
+  },
+  {
     "kind": "default-not-carried",
     "object": "defaults_t.expr",
     "message": "default expression 1+2 cannot be translated to MySQL and is not carried"
@@ -93,6 +108,16 @@
     "kind": "default-translated",
     "object": "defaults_t.ts",
     "message": "default CURRENT_TIMESTAMP on a text column is written as a UTC expression in the same text format"
+  },
+  {
+    "kind": "constraint-name-not-carried",
+    "object": "fk_c2.fk_ä",
+    "message": "foreign key name is not carried (the name is taken by another constraint of the schema): MySQL names the key itself"
+  },
+  {
+    "kind": "constraint-name-not-carried",
+    "object": "fk_c4.fk_ß",
+    "message": "foreign key name is not carried (the name is taken by another constraint of the schema): MySQL names the key itself"
   },
   {
     "kind": "fk-not-carried",
@@ -225,6 +250,16 @@
     "message": "partial index (WHERE a IS NOT NULL) is not carried: MySQL has no partial indexes"
   },
   {
+    "kind": "type-widened",
+    "object": "reals_as_text.v",
+    "message": "has no declared type: carried as TEXT from its values; MySQL has no infinity"
+  },
+  {
+    "kind": "type-widened",
+    "object": "reals_as_text.w",
+    "message": "has no declared type: carried as BLOB from its values; MySQL has no infinity"
+  },
+  {
     "kind": "name-renamed",
     "object": "trailing ",
     "message": "table name cannot be stored (MySQL does not accept a name that ends in a space): created as \"trailing _b1635c0a\""
@@ -250,6 +285,11 @@
     "message": "declared \"NUMERIC(4,1)\" but some values do not fit that precision and scale exactly, or its default does not: carried as DECIMAL(3,2)"
   },
   {
+    "kind": "values-normalized",
+    "object": "type_changes.mixed_n",
+    "message": "1 REAL and 1 INTEGER value(s) share one DECIMAL(3,2) column: SQLite keeps them apart (5 and 5.0), DECIMAL(3,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 1.25"
+  },
+  {
     "kind": "type-widened",
     "object": "type_changes.nodecl",
     "message": "has no declared type: carried as TEXT from its values"
@@ -263,6 +303,21 @@
     "kind": "type-widened",
     "object": "types_edge.big_b",
     "message": "declared \"BLOB\" but its values are not all of that type: carried as BLOB"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_bare",
+    "message": "2 REAL and 1 INTEGER value(s) share one DECIMAL(3,2) column: SQLite keeps them apart (5 and 5.0), DECIMAL(3,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 1.25"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_fixed",
+    "message": "2 REAL and 1 INTEGER value(s) share one DECIMAL(10,2) column: SQLite keeps them apart (5 and 5.0), DECIMAL(10,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 12.5"
+  },
+  {
+    "kind": "values-normalized",
+    "object": "types_edge.d_money",
+    "message": "1 REAL and 1 INTEGER value(s) share one DECIMAL(2,1) column: SQLite keeps them apart (5 and 5.0), DECIMAL(2,1) does not; each REAL is written as the exact decimal of its shortest spelling, for example 3.5"
   },
   {
     "kind": "values-normalized",
@@ -347,7 +402,7 @@
   {
     "kind": "name-renamed",
     "object": "ünïcode_日本語_😀.ünï",
-    "message": "column name cannot be stored (it differs only by case or accents from another column of the table, and MySQL compares column names without them): created as \"ünï_e975a529\""
+    "message": "column name cannot be stored (it differs only by case from another column of the table, and MySQL compares column names without case): created as \"ünï_e975a529\""
   },
   {
     "kind": "name-renamed",

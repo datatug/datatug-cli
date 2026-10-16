@@ -269,7 +269,7 @@ that could not be carried is a warning, as for any other `db copy` (`--json`, `-
 
 ```sh
 datatug db copy --from sqlite://./chinook.sqlite --to 'sqlscript:///tmp/chinook.mysql.sql?dialect=mysql&license=MIT'
-mysql --default-character-set=utf8mb4 --skip-commands --database chinook < /tmp/chinook.mysql.sql
+mysql --default-character-set=utf8mb4 --skip-commands --skip-system-command --database chinook < /tmp/chinook.mysql.sql
 ```
 
 The destination is a path in the URL (`sqlscript:///abs/path.sql`, or `sqlscript:rel/path.sql`) and its query:
@@ -277,15 +277,26 @@ The destination is a path in the URL (`sqlscript:///abs/path.sql`, or `sqlscript
 | Parameter | Meaning |
 |---|---|
 | `dialect` | Required. `mysql` is implemented; `mssql`, `oracle`, `postgres` and `sqlite` are planned and refused with the list of the implemented ones. |
-| `name` | Dataset name in the header and in the completion marker (default: the SQLite file name without its extension). |
-| `edition` | A label for the header, such as `DemoDB contract edition, identical to the SQLite/CSV/JSON`. |
+| `name` | Dataset name in the header and in the completion marker (default: the SQLite file name without its extension). At most 255 characters. |
+| `edition` | A label for the header, such as `DemoDB contract edition, identical to the SQLite/CSV/JSON`. At most 255 characters. |
 | `license`, `attribution` | Licence and attribution lines of the header (a demo database's `manifest.json` `source.license`). |
+
+The query is parsed strictly (`net/url.ParseQuery`): a value is never dropped silently. A `;` or a stray `&` inside a value
+(`attribution=Data by X; converted by Y`) is an error (exit 2), because a parser that ignores what it cannot read would
+lose the attribution a licence requires from the header: write `%3B` for `;` and `%26` for `&`. A parameter given twice is
+refused (exit 2), `dialect` included. A `name` or `edition` that is too long, not valid UTF-8 or that holds a NUL is refused
+up front (exit 2): the marker row is the last statement of the script, and one that cannot hold it would fail after every row
+was loaded. The datatug version in the marker is cut to the marker's 64 characters (the header comment has it whole).
 
 Flags: `--include`, `--exclude`, `--dry-run`, `--json`, `--fail-on-warning` work as for any copy (a key into a table that
 is not written is not created, with a warning). The source must be `sqlite://`. A script file is never replaced silently:
-an existing file is refused (exit 1) unless `--overwrite=recreate` is given (`reload` does not apply). The script is
+an existing file is refused (exit 1) unless `--overwrite=recreate` is given (`reload` does not apply); `--from` and
+`--to` naming one file is exit 2, and a table named by `--include` or `--exclude` that the source lacks is exit 2. The script is
 written to a temporary file beside the destination and put in place only when it is complete, so a failure leaves
-nothing. `--where`, `--limit`, `--filter-config`, `--from-schema`, `--to-schema`, `--decimals`, `--parallel-streams`
+nothing. A new file has the mode of any new file under your umask (0644 with the usual 022); a file replaced with
+`--overwrite=recreate` keeps its mode. It is put in place with a hard link, which fails when the name is taken; on a file
+system without hard links (FAT, exFAT, some network shares) the destination is created exclusively (`O_EXCL`) and the script
+is copied into it, and a failed copy removes the file it made, so nothing that was there is ever replaced. `--where`, `--limit`, `--filter-config`, `--from-schema`, `--to-schema`, `--decimals`, `--parallel-streams`
 and `--progress` are refused with exit 2: a script holds every row of the tables it writes.
 
 ### What the script is
@@ -296,7 +307,9 @@ and `--progress` are refused with exit 2: a script holds every row of the tables
   paragraph separator or a backslash is written as `_utf8mb4 X'..'` (a backslash because the mysql client reads
   `\` as an escape inside every quoted string, whatever the server's SQL mode), a blob as `X'..'`, floats as exponent
   literals (`1.5e+00`). So a value such as `"\nGO"`, `"\n\! cmd"` or `"\nsource x"` cannot become a client command.
-  The header recommends `--skip-commands` (mysql 8.4.6 and later) on top of that.
+  The header recommends `--skip-commands` (mysql 8.4.6 and later) and `--skip-system-command` on top of that, and says that a
+  blob is written in hex (twice its size), so one value over about 8 MB needs `--max-allowed-packet=1G`: the client's
+  default is 16 MB.
 * A header of comments: the label, dataset, datatug version and the SHA-256 of the SQLite file, licence and attribution,
   the minimum MySQL version (8.0.16, where CHECK constraints are enforced; verified on MySQL 8.4 LTS), how to load it
   safely, the tables, and every warning.
@@ -318,7 +331,8 @@ and `--progress` are refused with exit 2: a script holds every row of the tables
 |---|---|---|
 | `INTEGER`, `INT`... / `INT2` / `INT4` | `BIGINT` / `SMALLINT` / `INT` | wider when a value does not fit (`type-widened`); an `INTEGER PRIMARY KEY` is `AUTO_INCREMENT`, its counter is moved past the highest id and `sqlite_sequence` |
 | `REAL`, `FLOAT`, `DOUBLE` | `DOUBLE` | an infinite value makes the column `TEXT` (MySQL has none) |
-| `NUMERIC(p,s)`, `DECIMAL(p,s)`, `DECIMAL_TEXT(p,s)` | `DECIMAL(p,s)` | when every value fits; otherwise (and for a bare `NUMERIC`/`DECIMAL`/`MONEY`) `DECIMAL(P,S)` computed from the values; beyond 65 digits or 30 decimals `TEXT`. A text that DECIMAL spells differently (`.0000` becomes `0.0000`) is counted in `values-normalized` |
+| a REAL in a column carried as `TEXT` or bytes | the text **SQLite itself** makes of it | `CAST(x AS TEXT)`: `1.0`, `1.0e+21`, `Inf`, `-Inf`, the digits of the SQLite version (`0.3` or `0.30000000000000004`); never Go's `1`, `1e+21`, `+Inf`. The exporter reads such a column as `CASE WHEN typeof(c) = 'real' THEN CAST(c AS TEXT) ELSE c END`, so the spelling is the engine's, not this program's. The length of a bounded type (a key column) counts that text and the decimal text of an INTEGER |
+| `NUMERIC(p,s)`, `DECIMAL(p,s)`, `DECIMAL_TEXT(p,s)` | `DECIMAL(p,s)` | when every value fits; otherwise (and for a bare `NUMERIC`/`DECIMAL`/`MONEY`) `DECIMAL(P,S)` computed from the values; beyond 65 digits or 30 decimals `TEXT`. A text that DECIMAL spells differently (`.0000` becomes `0.0000`) is counted in `values-normalized`, and so are the REAL values of a DECIMAL column (SQLite keeps a binary float, and an INTEGER 5 and a REAL 5.0 apart; DECIMAL holds exact decimals: Chinook's money, Northwind's and Pubs' prices, Sakila's `payment.amount`). The values are numerically the same; the warning says the storage differs |
 | `BOOLEAN` | `TINYINT(1)` | |
 | `DATE` / `DATETIME`, `TIMESTAMP` / `TIME` | `DATE` / `DATETIME(f)` / `TIME(f)` | `f` is the longest fraction; a value that is not in MySQL's form, before year 1000 or a date in a `DATETIME` column becomes `TEXT` |
 | `TIMESTAMPTZ`, `JSON_TEXT`, `UUID_TEXT` | `TEXT` | MySQL has no such type; `type-widened` |
@@ -343,8 +357,11 @@ Every table, column and index name is kept **byte for byte** as one backtick-quo
 only reason to change one, and every change is a counted `name-renamed` (`index-renamed` for an index) warning: an empty
 name, a name that ends in a space, a name longer than 64 characters, a name with a control or line-break character (a
 script line must never carry one), a name with a character outside the Basic Multilingual Plane (MySQL **silently stores it
-as `?`**, so two such names would meet), and a column that differs from another of its table only by case or accents
-(MySQL compares column names without them). The new name is the old one with each unusable character replaced by `_`,
+as `?`**, so two such names would meet), and a column that differs from another of its table **by case** (`Ä` and `ä`; SQLite
+already refuses `a` and `A`). MySQL 8.4 compares the names of columns and indexes without case but **with every accent**:
+`e`, `é`, `ünï` and `uni` are four columns and are all kept (the journey creates them on a real server), and `ß` and `ẞ` are
+two. MySQL's case table is older than Go's: it was read off a real 8.4.11 server (670 characters, `mysql_fold.go`), so a
+pair Go would fold and MySQL does not (`ß`/`ẞ`) is not renamed. The new name is the old one with each unusable character replaced by `_`,
 cut to fit, and ended by `_` and 8 hex digits of the SHA-256 of the original, so it is the same on every run. Two table names that differ only by case load on a
 server with case-sensitive table names (`lower_case_table_names=0`, the Linux default) and fail on macOS and Windows
 defaults: a `name-case-collision` warning says so. An index name that is `PRIMARY` or taken by another key of the table is
@@ -374,6 +391,12 @@ is carried when MySQL can use it (unique in the schema for a foreign key or chec
 
 Text comparison in MySQL is case- and accent-insensitive by default. A key that differs only by case or accents in
 SQLite is a duplicate there and **stops the load** (the script does not hide it). The demo databases have no such key.
+The export looks for them: for every primary key, unique key and unique index with a text column it reads the rows once and
+warns, `key-values-collide` (a counted kind, with the number of rows and the first pair), when two rows have keys that are
+equal after folding case, accents and `ß`, `æ`, `œ` (the key values with `NULL` never collide). It is a conservative scan of what
+a person meets (`Smith` and `SMITH`, `José` and `Jose`), not MySQL's collation: ignorable characters, compatibility forms and
+Han variants are not folded, a decimal spelled two ways or an INTEGER and its text in one column are not looked for, so a
+key it passes can still collide; the header says so.
 `lower_case_table_names` (see above) and MariaDB are not tested here.
 
 ### How it is proved
@@ -387,13 +410,21 @@ text keys), for a fuzz fixture of 4,000 rows of hostile text, bytes and names, a
 table, and runs the cross-engine verifier. The verifier (`internal/crossverify`, an internal package, deliberately not a
 command: its long-term home is an extension of `datatug compare` once compare's known defects are fixed) reads the
 MySQL catalog and compares it with the plan the exporter makes for the same SQLite file: tables, columns (type,
-nullability, auto-increment, default), primary key, foreign keys (columns, parent, actions), unique keys and indexes
-(**the indexes MySQL creates for a foreign key by itself are modelled and left out**), check constraints, the completion
+nullability, auto-increment, **default by value**), primary key, foreign keys (columns, parent, actions), unique keys and indexes
+(**the indexes MySQL creates for a foreign key by itself are modelled and left out**: a plain index on the key's columns named
+as MySQL names it, the constraint's name or the first column's), check constraints (**their expressions**), the completion
 marker, that no name was renamed without a warning, row counts, and **every value** read through the Go MySQL driver in
 its binary protocol (int64, the 64 bits of a float, a DECIMAL as an exact rational, bytes as bytes). The canonical form of
 each value in each family is written at the top of `internal/crossverify/canon.go`: a REAL of a `NUMERIC(10,2)` column
 is read as its shortest decimal (`FormatFloat(x, 'f', -1, 64)`), an INTEGER or REAL in a `NUMERIC` column compares as the
 same number, a date or time only as text in the column's own format with the fraction's trailing zeros removed.
+A **default** is compared by what it means: SQLite evaluates the default expression itself (`SELECT <expr>`), the value is put
+in the canonical form of the column's family, and MySQL's `COLUMN_DEFAULT` is parsed into the same form (a `CURRENT_*` default
+must read the clock in UTC in the column's own form). A **check** is compared with what SQLite's expression requires of the
+clause in `information_schema.CHECK_CONSTRAINTS`, never with the plan's own translation (a translator that loses a `COLLATE` would
+lose it from the plan and from the script alike): every comparison, `IN` or `BETWEEN` of a text column is `COLLATE utf8mb4_bin`,
+every `GLOB` is a `REGEXP_LIKE`, and every string literal of the expression is still in the clause. A REAL in a text column is
+compared with `CAST(x AS TEXT)` read from SQLite, not with a spelling chosen by the verifier or the writer.
 Unit tests (100% statement coverage of all new code) include golden scripts, a determinism test, a property test that no
 literal holds a raw control character and every literal reads back as its text, and an emulated MySQL for the verifier.
 

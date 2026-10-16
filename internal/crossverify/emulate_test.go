@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -106,8 +108,6 @@ func emulateValue(ch faithful.Choice, v any) any {
 		return []byte(x)
 	case int64:
 		return []byte(fmt.Sprint(x))
-	case float64:
-		return []byte(fmt.Sprint(x))
 	}
 	return v
 }
@@ -141,7 +141,8 @@ func emulate(t testing.TB, src *sql.DB, p *faithful.ScriptPlan) *sql.DB {
 		`CREATE TABLE information_schema.STATISTICS (TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME, COLLATION, SUB_PART)`,
 		`CREATE TABLE information_schema.KEY_COLUMN_USAGE (TABLE_SCHEMA, TABLE_NAME, CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME, ORDINAL_POSITION, CONSTRAINT_SCHEMA)`,
 		`CREATE TABLE information_schema.REFERENTIAL_CONSTRAINTS (CONSTRAINT_SCHEMA, CONSTRAINT_NAME, TABLE_NAME, UPDATE_RULE, DELETE_RULE)`,
-		`CREATE TABLE information_schema.TABLE_CONSTRAINTS (TABLE_SCHEMA, TABLE_NAME, CONSTRAINT_TYPE, CONSTRAINT_NAME)`,
+		`CREATE TABLE information_schema.TABLE_CONSTRAINTS (TABLE_SCHEMA, TABLE_NAME, CONSTRAINT_TYPE, CONSTRAINT_NAME, CONSTRAINT_SCHEMA)`,
+		`CREATE TABLE information_schema.CHECK_CONSTRAINTS (CONSTRAINT_SCHEMA, CONSTRAINT_NAME, CHECK_CLAUSE)`,
 	} {
 		x(ddl)
 	}
@@ -164,7 +165,11 @@ func emulate(t testing.TB, src *sql.DB, p *faithful.ScriptPlan) *sql.DB {
 			}
 			var def any
 			if c.Default != "" {
-				def, extra = "x", strings.TrimSpace(extra+" DEFAULT_GENERATED")
+				value, generated := emulateDefault(c.Default)
+				def = value
+				if generated {
+					extra = strings.TrimSpace(extra + " DEFAULT_GENERATED")
+				}
 			}
 			null := "YES"
 			if c.NotNull {
@@ -175,7 +180,12 @@ func emulate(t testing.TB, src *sql.DB, p *faithful.ScriptPlan) *sql.DB {
 		x("CREATE TABLE `" + tb.Name + "` (" + strings.Join(names, ", ") + ")")
 		var sel []string
 		for _, c := range tb.Columns {
-			sel = append(sel, `+"`+strings.ReplaceAll(c.Src.Name, `"`, `""`)+`"`)
+			q := `"` + strings.ReplaceAll(c.Src.Name, `"`, `""`) + `"`
+			if c.Choice.Family == "text" || c.Choice.Family == "bytes" {
+				sel = append(sel, "CASE WHEN typeof("+q+") = 'real' THEN CAST("+q+" AS TEXT) ELSE +"+q+" END")
+			} else {
+				sel = append(sel, "+"+q)
+			}
 		}
 		rs, err := src.Query("SELECT " + strings.Join(sel, ", ") + ` FROM "` + tb.Src.Name + `" ORDER BY ` + tb.OrderBy)
 		if err != nil {
@@ -250,12 +260,67 @@ func emulate(t testing.TB, src *sql.DB, p *faithful.ScriptPlan) *sql.DB {
 			}
 			x(`INSERT INTO information_schema.REFERENTIAL_CONSTRAINTS VALUES ('db', ?, ?, ?, ?)`, name, tb.Name, upd, del)
 			if (len(f.Columns) != 1 || !covered[f.Columns[0]]) && (len(tb.PK) == 0 || tb.PK[0] != f.Columns[0] || len(f.Columns) > len(tb.PK)) {
-				stat(f.Columns[0], 1, f.Columns...) // the index MySQL creates for a key without one
+				// the index MySQL creates for a key without one: named as the constraint when the key is named, as its first column otherwise
+				index := f.Columns[0]
+				if f.Name != "" {
+					index = f.Name
+				}
+				stat(index, 1, f.Columns...)
 			}
 		}
-		for i := range tb.Checks {
-			x(`INSERT INTO information_schema.TABLE_CONSTRAINTS VALUES ('db', ?, 'CHECK', ?)`, tb.Name, fmt.Sprintf("chk_%d", i))
+		unnamed := 0
+		for _, ck := range tb.Checks {
+			name := ck.Name
+			if name == "" {
+				unnamed++
+				name = fmt.Sprintf("%s_chk_%d", tb.Name, unnamed)
+			}
+			x(`INSERT INTO information_schema.TABLE_CONSTRAINTS VALUES ('db', ?, 'CHECK', ?, 'db')`, tb.Name, name)
+			x(`INSERT INTO information_schema.CHECK_CONSTRAINTS VALUES ('db', ?, ?)`, name, emulateClause(ck.Expr))
 		}
 	}
 	return db
+}
+
+var (
+	reHexLiteral = regexp.MustCompile(`^_utf8mb4 X'([0-9A-Fa-f]*)'$`)
+	reStringLit  = regexp.MustCompile(`'((?:[^']|'')*)'`)
+)
+
+// emulateDefault is COLUMN_DEFAULT and whether the default is an expression, as MySQL reports the default the plan
+// wrote: a literal as its value, an expression as its text with the string in the form _utf8mb4\'text\'.
+func emulateDefault(def string) (string, bool) {
+	if strings.HasPrefix(def, "(") {
+		inner := strings.TrimSuffix(strings.TrimPrefix(def, "("), ")")
+		if m := reHexLiteral.FindStringSubmatch(inner); m != nil {
+			b, _ := hex.DecodeString(m[1])
+			return `_utf8mb4\'` + string(b) + `\'`, true
+		}
+		if strings.HasPrefix(inner, "'") {
+			return `_utf8mb4\'` + strings.ReplaceAll(inner[1:len(inner)-1], "''", "'") + `\'`, true
+		}
+		return strings.ToLower(reStringLit.ReplaceAllString(inner, `_utf8mb4\'$1\'`)), true
+	}
+	if m := reHexLiteral.FindStringSubmatch(def); m != nil {
+		b, _ := hex.DecodeString(m[1])
+		return string(b), false
+	}
+	if strings.HasPrefix(def, "'") {
+		return strings.ReplaceAll(def[1:len(def)-1], "''", "'"), false
+	}
+	return def, false
+}
+
+// emulateClause is CHECK_CLAUSE for an expression the plan wrote: parenthesised, strings as _utf8mb4\'text\'.
+func emulateClause(expr string) string {
+	// keywords and names in lower case as MySQL prints them, the strings as they are
+	var b strings.Builder
+	last := 0
+	for _, m := range reStringLit.FindAllStringSubmatchIndex(expr, -1) {
+		b.WriteString(strings.ToLower(expr[last:m[0]]))
+		b.WriteString(`_utf8mb4\'` + expr[m[2]:m[3]] + `\'`)
+		last = m[1]
+	}
+	b.WriteString(strings.ToLower(expr[last:]))
+	return "(" + b.String() + ")"
 }

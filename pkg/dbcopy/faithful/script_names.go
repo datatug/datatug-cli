@@ -4,22 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
-	"unicode"
-
-	"golang.org/x/text/unicode/norm"
 )
-
-// foldName is a name as MySQL compares column and index names: without case and without accents.
-func foldName(s string) string {
-	var b strings.Builder
-	for _, r := range norm.NFD.String(s) {
-		if unicode.Is(unicode.Mn, r) {
-			continue
-		}
-		b.WriteRune(unicode.ToLower(r))
-	}
-	return b.String()
-}
 
 func nameHash(orig string) string {
 	sum := sha256.Sum256([]byte(orig))

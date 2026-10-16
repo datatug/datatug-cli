@@ -153,11 +153,12 @@ func TestVerifyImplicitForeignKeyIndexesAreModelled(t *testing.T) {
 		diff bool
 	}{
 		{"the index of a key", "INSERT INTO information_schema.STATISTICS VALUES ('db', 'child', 'parent_id', 1, 1, 'parent_id', 'A', NULL)", false},
+		{"the index of a key under another name", "INSERT INTO information_schema.STATISTICS VALUES ('db', 'child', 'other_name', 1, 1, 'parent_id', 'A', NULL)", true},
 		{"a longer index", "INSERT INTO information_schema.STATISTICS VALUES ('db', 'child', 'longer', 1, 1, 'parent_id', 'A', NULL), ('db', 'child', 'longer', 1, 2, 'a', 'A', NULL)", true},
-		{"another column", "INSERT INTO information_schema.STATISTICS VALUES ('db', 'child', 'other', 1, 1, 'a', 'A', NULL)", true},
+		{"another column", "INSERT INTO information_schema.STATISTICS VALUES ('db', 'child', 'parent_id', 1, 1, 'a', 'A', NULL)", true},
 		{"a unique index", "INSERT INTO information_schema.STATISTICS VALUES ('db', 'child', 'u', 0, 1, 'parent_id', 'A', NULL)", true},
-		{"a descending index", "INSERT INTO information_schema.STATISTICS VALUES ('db', 'child', 'd', 1, 1, 'parent_id', 'D', NULL)", true},
-		{"a prefix index", "INSERT INTO information_schema.STATISTICS VALUES ('db', 'child', 'p', 1, 1, 'parent_id', 'A', 3)", true},
+		{"a descending index", "INSERT INTO information_schema.STATISTICS VALUES ('db', 'child', 'parent_id', 1, 1, 'parent_id', 'D', NULL)", true},
+		{"a prefix index", "INSERT INTO information_schema.STATISTICS VALUES ('db', 'child', 'parent_id', 1, 1, 'parent_id', 'A', 3)", true},
 	}
 	for _, c := range cases {
 		src := openSource(t, sourceStatements...)
@@ -214,5 +215,59 @@ func TestVerifyFailures(t *testing.T) {
 				t.Errorf("%v, want it to mention %q", err, c.want)
 			}
 		})
+	}
+}
+
+// A name is renamed only when MySQL cannot store it: a column that differs from another by accents alone is no
+// reason, and a rename without such a reason is a difference even when the plan and the load agree on it.
+func TestVerifyRenamesNeedAReason(t *testing.T) {
+	src := openSource(t, `CREATE TABLE acc (id INTEGER PRIMARY KEY, e, "é", "Ä", "ä", "x y ")`, `CREATE TABLE "plain" (id INTEGER PRIMARY KEY)`)
+	p := plan(t, src)
+	dst := emulate(t, src, p)
+	good, err := Verify(context.Background(), Input{Plan: p, Source: src, Target: dst, Schema: "db"})
+	if err != nil || len(good.Diffs) != 0 {
+		t.Fatalf("%v %v", err, good.Diffs)
+	}
+	renamed := 0
+	for _, c := range p.Table("acc").Columns {
+		if c.Name != c.Src.Name {
+			renamed++
+		}
+	}
+	if renamed != 2 { // "ä" (case twin of "Ä") and "x y " (a trailing space)
+		t.Fatalf("renamed %d columns", renamed)
+	}
+	// The mutation: the plan also renames "é", with its warning, as a fold of accents would.
+	var e *faithful.ScriptColumn
+	for _, c := range p.Table("acc").Columns {
+		if c.Src.Name == "é" {
+			e = c
+		}
+	}
+	e.Name = "é_12345678"
+	p.Warnings = append(p.Warnings, faithful.Warning{Kind: faithful.WarnNameRenamed, Object: "acc.é", Message: "mutation"})
+	p.Table("plain").Name = "plain_x"
+	p.Warnings = append(p.Warnings, faithful.Warning{Kind: faithful.WarnNameRenamed, Object: "plain", Message: "mutation"})
+	dst = emulate(t, src, p) // the load agrees with the plan: only the reason for the renames is missing
+	res, err := Verify(context.Background(), Input{Plan: p, Source: src, Target: dst, Schema: "db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, d := range res.Diffs {
+		if d.Aspect == "rename justified" {
+			found[d.Object] = true
+		}
+	}
+	if !found["acc.é"] || !found["plain"] || len(found) != 2 {
+		t.Errorf("%v", res.Diffs)
+	}
+}
+
+func TestUnstorableName(t *testing.T) {
+	for name, bad := range map[string]bool{"": true, "a\xffb": true, "a ": true, strings.Repeat("é", 65): true, "😀": true, "a\nb": true, "a\x7fb": true, "a\u0085b": true, "a\u2028b": true, "é": false, "Order Details": false, strings.Repeat("é", 64): false} {
+		if got := unstorableName(name) != ""; got != bad {
+			t.Errorf("unstorableName(%q) = %v", name, got)
+		}
 	}
 }

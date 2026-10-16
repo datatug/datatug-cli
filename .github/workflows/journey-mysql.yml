@@ -10,9 +10,12 @@ name: Journey (MySQL)
 on:
   pull_request:
     paths:
+      - 'pkg/dbcopy/*.go'
       - 'pkg/dbcopy/faithful/**'
       - 'internal/crossverify/**'
       - 'apps/datatugapp/commands/cmd_db_copy*.go'
+      - 'go.mod'
+      - 'go.sum'
       - 'scripts/check-journey-mysql.sh'
       - 'scripts/journey-datasets.txt'
       - '.github/workflows/journey-mysql.yml'
@@ -20,9 +23,12 @@ on:
     branches:
       - main
     paths:
+      - 'pkg/dbcopy/*.go'
       - 'pkg/dbcopy/faithful/**'
       - 'internal/crossverify/**'
       - 'apps/datatugapp/commands/cmd_db_copy*.go'
+      - 'go.mod'
+      - 'go.sum'
       - 'scripts/check-journey-mysql.sh'
       - 'scripts/journey-datasets.txt'
       - '.github/workflows/journey-mysql.yml'

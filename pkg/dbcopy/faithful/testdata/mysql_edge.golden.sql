@@ -6,18 +6,21 @@
 --
 -- Requires MySQL 8.0.16 or later (CHECK constraints are enforced from there). Verified on MySQL 8.4 LTS.
 -- Load it into an EMPTY database with the mysql client; the script stops at the first error:
---   mysql --default-character-set=utf8mb4 --skip-commands --database <name> < <file>.sql
+--   mysql --default-character-set=utf8mb4 --skip-commands --skip-system-command --database <name> < <file>.sql
 -- (--skip-commands needs mysql 8.4.6 or later; without it the client still reads this file as plain statements,
 -- because no data in it can start a line.) Do not load it with the "source" command of an untrusted file.
+-- A blob is written in hex, twice its size: one value over about 8 MB is more than the client's default max_allowed_packet of 16 MB; add --max-allowed-packet=1G.
 -- MySQL commits DDL, so a failed load is not rolled back: drop the database or the tables listed below and load again.
 -- The first statement creates the table _demodb_import and fails when it exists; the last one fills it: a row there means the load completed.
 -- DROP TABLE _demodb_import removes the marker once you no longer need it.
 -- Text comparison in MySQL is case- and accent-insensitive by default, unlike SQLite's exact comparison: keys that differ only by case or accents in SQLite are duplicates here and stop the load.
--- Tables (46): Order Details, Production.Product, back`tick, trailing _b1635c0a, line_break_697affca, _e3b0c442, Ünï_t, ünï_t, select, ünïcode_日本語___30d7c467, a-very-long-table-name-that-is-more-than-sixty-four-cha_e4c1d4c0, back\slash/and;--/*x*/'q', ix_names, types_edge, hostile, hostile_nul, hostile_utf8, binary_edge, parent_txt, child_txt, parent_int, child_int, child_named, tree, co...
+-- The export warns about the key values it finds that collide that way (key-values-collide); it cannot find every kind of collision MySQL's collation makes.
+-- Tables (57): Order Details, Production.Product, back`tick, trailing _b1635c0a, line_break_697affca, _e3b0c442, Ünï_t, ünï_t, select, ünïcode_日本語___30d7c467, accents, reals_as_text, fk_parent, fk_c1, fk_c2, fk_c3, fk_c4, ck_c1, ck_c2, ck_c3, ck_c4, a-very-long-table-name-that-is-more-than-sixty-four-cha_e4c1d4c0, back\slash/and;--/*x*/'q', ix_names, types_edge, hostile, hostile_nul, hos...
 --
--- 71 thing(s) are not carried exactly:
+-- 82 thing(s) are not carried exactly:
 -- [name-renamed] : table name cannot be stored (the name is empty): created as "_e3b0c442"
 -- [name-renamed] .: column name cannot be stored (the name is empty): created as "_e3b0c442"
+-- [values-normalized] Order Details.Unit Price: 2 REAL value(s) are written as the exact decimal of their shortest spelling, for example 9.99: SQLite stores a binary float, DECIMAL(10,2) an exact decimal
 -- [key-type-bounded] Production.Product.Color: a key column is carried as VARCHAR(255) (declared "TEXT"): MySQL cannot index an unbounded type; its longest value is 4
 -- [key-type-bounded] Production.Product.Name.Full: a key column is carried as VARCHAR(255) (declared "TEXT"): MySQL cannot index an unbounded type; its longest value is 6
 -- [key-type-bounded] a-very-long-table-name-that-is-more-than-sixty-four-cha_e4c1d4c0.v: a key column is carried as VARCHAR(255) (declared "TEXT"): MySQL cannot index an unbounded type; its longest value is 1
@@ -28,13 +31,17 @@
 -- [check-not-carried] checks_t.check #5: check constraint "typeof(bad) = 'text'" is not carried: the function typeof has no MySQL equivalent the translator knows
 -- [type-widened] child_int.pid2: declared "INT2" and carried as SMALLINT, but it joins the columns of its foreign keys, which MySQL requires to have one type: carried as BIGINT
 -- [key-type-bounded] child_txt.code: a key column is carried as VARCHAR(255) (declared "TEXT"): MySQL cannot index an unbounded type; its longest value is 5
+-- [constraint-name-not-carried] ck_c2.shared_name: check constraint name is not carried (the name is taken by another constraint of the schema)
 -- [fk-action-not-carried] comp_child(a,b): DEFERRABLE is not supported by MySQL: the key is checked at once
 -- [key-type-bounded] comp_child.b: a key column is carried as VARCHAR(255) (declared "TEXT"): MySQL cannot index an unbounded type; its longest value is 1
 -- [key-type-bounded] comp_parent.b: a key column is carried as VARCHAR(255) (declared "TEXT"): MySQL cannot index an unbounded type; its longest value is 1
 -- [default-not-carried] defaults_t.blobd: default expression x'01' cannot be translated to MySQL and is not carried
+-- [values-normalized] defaults_t.dec: 1 REAL value(s) are written as the exact decimal of their shortest spelling, for example 0.1: SQLite stores a binary float, DECIMAL(5,2) an exact decimal
 -- [default-not-carried] defaults_t.expr: default expression 1+2 cannot be translated to MySQL and is not carried
 -- [default-translated] defaults_t.tdec: text default '0.00' of a decimal text column became the numeric default 0.00
 -- [default-translated] defaults_t.ts: default CURRENT_TIMESTAMP on a text column is written as a UTC expression in the same text format
+-- [constraint-name-not-carried] fk_c2.fk_ä: foreign key name is not carried (the name is taken by another constraint of the schema): MySQL names the key itself
+-- [constraint-name-not-carried] fk_c4.fk_ß: foreign key name is not carried (the name is taken by another constraint of the schema): MySQL names the key itself
 -- [fk-not-carried] fk_missing_parent: foreign key (x) references "not_a_table", which is not part of this copy
 -- [fk-not-carried] fk_nonunique_child(v): the referenced columns (v) of fk_nonunique are no primary key or unique key, which MySQL requires
 -- [fk-violations-in-source] fk_orphans(p): 1 row(s) have no parent in parent_int: the key is not created, because MySQL would refuse it
@@ -61,14 +68,20 @@
 -- [type-widened] parent_int.id: declared "INT4" and carried as INT, but it joins the columns of its foreign keys, which MySQL requires to have one type: carried as BIGINT
 -- [key-type-bounded] parent_txt.code: a key column is carried as VARCHAR(255) (declared "VARCHAR(5)"): MySQL cannot index an unbounded type; its longest value is 5
 -- [index-not-carried] partial_ix.partial_ix_a: partial index (WHERE a IS NOT NULL) is not carried: MySQL has no partial indexes
+-- [type-widened] reals_as_text.v: has no declared type: carried as TEXT from its values; MySQL has no infinity
+-- [type-widened] reals_as_text.w: has no declared type: carried as BLOB from its values; MySQL has no infinity
 -- [name-renamed] trailing : table name cannot be stored (MySQL does not accept a name that ends in a space): created as "trailing _b1635c0a"
 -- [name-renamed] trailing .c : column name cannot be stored (MySQL does not accept a name that ends in a space): created as "c _677021e9"
 -- [key-type-bounded] tree.name: a key column is carried as VARCHAR(255) (declared "TEXT"): MySQL cannot index an unbounded type; its longest value is 4
 -- [type-widened] type_changes.decl_char: declared "CHAR(3)" but some values are longer than that: carried as TEXT
 -- [type-widened] type_changes.mixed_n: declared "NUMERIC(4,1)" but some values do not fit that precision and scale exactly, or its default does not: carried as DECIMAL(3,2)
+-- [values-normalized] type_changes.mixed_n: 1 REAL and 1 INTEGER value(s) share one DECIMAL(3,2) column: SQLite keeps them apart (5 and 5.0), DECIMAL(3,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 1.25
 -- [type-widened] type_changes.nodecl: has no declared type: carried as TEXT from its values
 -- [type-widened] type_changes.small: declared "INT2" but its values do not fit SMALLINT: carried as BIGINT
 -- [type-widened] types_edge.big_b: declared "BLOB" but its values are not all of that type: carried as BLOB
+-- [values-normalized] types_edge.d_bare: 2 REAL and 1 INTEGER value(s) share one DECIMAL(3,2) column: SQLite keeps them apart (5 and 5.0), DECIMAL(3,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 1.25
+-- [values-normalized] types_edge.d_fixed: 2 REAL and 1 INTEGER value(s) share one DECIMAL(10,2) column: SQLite keeps them apart (5 and 5.0), DECIMAL(10,2) does not; each REAL is written as the exact decimal of its shortest spelling, for example 12.5
+-- [values-normalized] types_edge.d_money: 1 REAL and 1 INTEGER value(s) share one DECIMAL(2,1) column: SQLite keeps them apart (5 and 5.0), DECIMAL(2,1) does not; each REAL is written as the exact decimal of its shortest spelling, for example 3.5
 -- [values-normalized] types_edge.d_text: 3 text value(s) are written in the spelling of DECIMAL(12,4) (.0000 -> 0.0000)
 -- [type-widened] types_edge.dt_dateonly: declared "DATETIME" but its values are not all of that type: carried as TEXT
 -- [type-widened] types_edge.js: declared "JSON_TEXT" but MySQL has no such type: carried as TEXT
@@ -85,7 +98,7 @@
 -- [key-type-bounded] without_rowid_t.k: a key column is carried as VARCHAR(255) (declared "TEXT"): MySQL cannot index an unbounded type; its longest value is 2
 -- [name-case-collision] Ünï_t / ünï_t: these table names differ only by case: the script loads on a server with case-sensitive table names (lower_case_table_names=0, the Linux default) and fails on one with case-insensitive names (macOS and Windows)
 -- [name-renamed] ünïcode_日本語_😀: table name cannot be stored (the name holds U+1F600, outside the Basic Multilingual Plane, which MySQL silently stores as '?'): created as "ünïcode_日本語___30d7c467"
--- [name-renamed] ünïcode_日本語_😀.ünï: column name cannot be stored (it differs only by case or accents from another column of the table, and MySQL compares column names without them): created as "ünï_e975a529"
+-- [name-renamed] ünïcode_日本語_😀.ünï: column name cannot be stored (it differs only by case from another column of the table, and MySQL compares column names without case): created as "ünï_e975a529"
 -- [name-renamed] ünïcode_日本語_😀.😀: column name cannot be stored (the name holds U+1F600, outside the Basic Multilingual Plane, which MySQL silently stores as '?'): created as "__f0443a34"
 
 SET NAMES utf8mb4;
@@ -155,6 +168,50 @@ CREATE TABLE `ünïcode_日本語___30d7c467` (
   `ñ` BIGINT NOT NULL AUTO_INCREMENT,
   `__f0443a34` TEXT,
   PRIMARY KEY (`ñ`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `accents` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `e` VARCHAR(10),
+  `é` VARCHAR(10),
+  `uni` TEXT,
+  `ünï` TEXT,
+  `ß` TEXT,
+  `ẞ` TEXT,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `reals_as_text` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `v` TEXT,
+  `w` BLOB,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `fk_parent` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `fk_c1` (
+  `pid` BIGINT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `fk_c2` (
+  `pid` BIGINT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `fk_c3` (
+  `pid` BIGINT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `fk_c4` (
+  `pid` BIGINT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `ck_c1` (
+  `n` BIGINT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `ck_c2` (
+  `n` BIGINT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `ck_c3` (
+  `n` BIGINT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+CREATE TABLE `ck_c4` (
+  `pid` BIGINT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE `a-very-long-table-name-that-is-more-than-sixty-four-cha_e4c1d4c0` (
   `a-very-long-column-name-that-is-more-than-sixty-four-ch_1c966960` BIGINT NOT NULL AUTO_INCREMENT,
@@ -438,6 +495,27 @@ INSERT INTO `ünïcode_日本語___30d7c467` (`Ünï`, `ünï_e975a529`, `ñ`, `
 ('A','a',1,'smile');
 COMMIT;
 START TRANSACTION;
+INSERT INTO `accents` (`id`, `e`, `é`, `uni`, `ünï`, `ß`, `ẞ`) VALUES
+(1,'e','é','uni','ünï','ss','SS');
+COMMIT;
+START TRANSACTION;
+INSERT INTO `reals_as_text` (`id`, `v`, `w`) VALUES
+(1,'1.0',X'312e30'),
+(2,'1.0e+21',X'312e30652b3231'),
+(3,'Inf',X'496e66'),
+(4,'-Inf',X'2d496e66'),
+(5,'0.30000000000000004',X'302e3330303030303030303030303030303034'),
+(6,'4.9406564584124654e-324',X'342e39343036353634353834313234363534652d333234'),
+(7,'text',X'ff'),
+(8,'12345678901234',X'37'),
+(9,'0.0',X'302e30'),
+(10,'100.0',X'3130302e30');
+COMMIT;
+START TRANSACTION;
+INSERT INTO `fk_parent` (`id`) VALUES
+(1);
+COMMIT;
+START TRANSACTION;
 INSERT INTO `a-very-long-table-name-that-is-more-than-sixty-four-cha_e4c1d4c0` (`a-very-long-column-name-that-is-more-than-sixty-four-ch_1c966960`, `v`) VALUES
 (1,'v');
 COMMIT;
@@ -633,7 +711,7 @@ INSERT INTO `ts_default_frac` (`id`, `t3`) VALUES
 COMMIT;
 START TRANSACTION;
 INSERT INTO `inf_t` (`id`, `v`) VALUES
-(1,'+Inf'),
+(1,'Inf'),
 (2,'-Inf'),
 (3,'1.5');
 COMMIT;
@@ -645,17 +723,27 @@ COMMIT;
 ALTER TABLE `Production.Product` AUTO_INCREMENT = 3;
 ALTER TABLE `autoinc_gap` AUTO_INCREMENT = 4;
 CREATE INDEX `Production.Product.IX_Color` ON `Production.Product` (`Color` DESC, `Name.Full`);
+CREATE INDEX `accents_ee` ON `accents` (`é`, `e`);
 CREATE INDEX `an-index-name-that-is-more-than-sixty-four-characters-l_9e93f86c` ON `a-very-long-table-name-that-is-more-than-sixty-four-cha_e4c1d4c0` (`v`);
 CREATE INDEX `IX_É` ON `ix_names` (`a`, `b`);
 CREATE INDEX `PRIMARY_bc9a6688` ON `ix_names` (`b`);
 CREATE INDEX `ix _0dd940ed` ON `ix_names` (`a`);
 CREATE INDEX `ix_é_655309af` ON `ix_names` (`b`, `a`);
 CREATE UNIQUE INDEX `uniq_t_b` ON `uniq_t` (`b` DESC);
+ALTER TABLE `ck_c1` ADD CONSTRAINT `shared_name` CHECK (`n` > 0);
+ALTER TABLE `ck_c2` ADD CHECK (`n` > 1);
+ALTER TABLE `ck_c3` ADD CONSTRAINT `ck_ä` CHECK (`n` > 0);
+ALTER TABLE `ck_c3` ADD CONSTRAINT `ck_a` CHECK (`n` > 1);
 ALTER TABLE `checks_t` ADD CHECK (`g` COLLATE utf8mb4_bin IN ( 'M' , 'F' ));
 ALTER TABLE `checks_t` ADD CHECK (REGEXP_LIKE(`code`, '^[A-Z][A-Z].*$', 'cn'));
 ALTER TABLE `checks_t` ADD CONSTRAINT `n_positive` CHECK (`n` >= 0);
 ALTER TABLE `checks_t` ADD CHECK (CHAR_LENGTH( `s` ) < 10 AND `s` COLLATE utf8mb4_bin <> '');
 ALTER TABLE `checks_t` ADD CHECK (`n` < 1000 OR `g` IS NULL);
+ALTER TABLE `fk_c1` ADD CONSTRAINT `fk_a` FOREIGN KEY (`pid`) REFERENCES `fk_parent` (`id`);
+ALTER TABLE `fk_c2` ADD FOREIGN KEY (`pid`) REFERENCES `fk_parent` (`id`);
+ALTER TABLE `fk_c3` ADD CONSTRAINT `fk_s` FOREIGN KEY (`pid`) REFERENCES `fk_parent` (`id`);
+ALTER TABLE `fk_c4` ADD FOREIGN KEY (`pid`) REFERENCES `fk_parent` (`id`);
+ALTER TABLE `ck_c4` ADD CONSTRAINT `shared_name` FOREIGN KEY (`pid`) REFERENCES `fk_parent` (`id`);
 ALTER TABLE `child_txt` ADD FOREIGN KEY (`code`) REFERENCES `parent_txt` (`code`) ON UPDATE CASCADE ON DELETE SET NULL;
 ALTER TABLE `child_int` ADD FOREIGN KEY (`pid2`) REFERENCES `parent_int` (`id`);
 ALTER TABLE `child_int` ADD FOREIGN KEY (`pid`) REFERENCES `parent_int` (`id`) ON DELETE CASCADE;
@@ -663,5 +751,5 @@ ALTER TABLE `child_named` ADD CONSTRAINT `fk_child_named` FOREIGN KEY (`pid`) RE
 ALTER TABLE `tree` ADD FOREIGN KEY (`parent`) REFERENCES `tree` (`id`) ON DELETE RESTRICT;
 ALTER TABLE `comp_child` ADD FOREIGN KEY (`a`, `b`) REFERENCES `comp_parent` (`a`, `b`);
 ALTER TABLE `fk_setnull_notnull` ADD FOREIGN KEY (`p`) REFERENCES `parent_int` (`id`);
-INSERT INTO `_demodb_import` VALUES ('fixture', 'DemoDB contract edition', 'abababababababababababababababababababababababababababababababab', 'v0.0.0-test', 46, 109);
+INSERT INTO `_demodb_import` VALUES ('fixture', 'DemoDB contract edition', 'abababababababababababababababababababababababababababababababab', 'v0.0.0-test', 57, 121);
 -- end of script

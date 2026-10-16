@@ -8,6 +8,7 @@ import (
 	"hash"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/datatug/datatug-cli/pkg/dbcopy/faithful"
 )
@@ -73,7 +74,7 @@ func Verify(ctx context.Context, in Input) (*Result, error) {
 			continue
 		}
 		res.Tables++
-		compareCatalog(t, mt, add)
+		compareCatalog(ctx, in, t, mt, add)
 		n, values, err := compareData(ctx, in, t, add)
 		if err != nil {
 			return nil, fmt.Errorf("table %q: %w", t.Name, err)
@@ -111,7 +112,7 @@ func verifyMarker(ctx context.Context, in Input, cat *MySQLCatalog, add func(obj
 	return nil
 }
 
-func compareCatalog(t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, want, got string)) {
+func compareCatalog(ctx context.Context, in Input, t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, want, got string)) {
 	want := make([]string, len(t.Columns))
 	for i, c := range t.Columns {
 		want[i] = c.Name
@@ -135,11 +136,13 @@ func compareCatalog(t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, 
 		add(obj, "nullable", fmt.Sprint(!c.NotNull), fmt.Sprint(mc.Nullable))
 		add(obj, "auto_increment", fmt.Sprint(c.AutoInc), fmt.Sprint(mc.AutoIncrement))
 		add(obj, "has default", fmt.Sprint(c.Default != ""), fmt.Sprint(mc.HasDefault))
+		compareDefault(ctx, in, c, mc, add)
 	}
 	add(t.Name, "primary key", strings.Join(t.PK, ","), strings.Join(mt.PK, ","))
 	compareIndexes(t, mt, add)
 	compareFKs(t, mt, add)
 	add(t.Name, "check constraints", fmt.Sprint(len(t.Checks)), fmt.Sprint(mt.Checks))
+	compareChecks(in, t, mt, add)
 }
 
 func indexSig(unique bool, cols []string) string {
@@ -211,13 +214,21 @@ func compareIndexes(t *faithful.ScriptTable, mt *MyTable, add func(obj, aspect, 
 }
 
 // implicitFKIndex is true for the plain index MySQL creates for a foreign key that has no index of its own: a
-// non-unique index on exactly the columns of one of the table's foreign keys.
+// non-unique index on exactly the columns of one of the table's foreign keys, named as MySQL names it (the
+// constraint's name when the key has one, the name of its first column when it has none).
 func implicitFKIndex(t *faithful.ScriptTable, ix MyIndex) bool {
 	if ix.Unique {
 		return false
 	}
 	for _, fk := range t.FKs {
 		if len(fk.Columns) != len(ix.Columns) {
+			continue
+		}
+		name := fk.Name
+		if name == "" {
+			name = fk.Columns[0]
+		}
+		if ix.Name != name {
 			continue
 		}
 		same := true
@@ -275,6 +286,9 @@ func checkNames(p *faithful.ScriptPlan, add func(obj, aspect, want, got string))
 			if !warned[t.Src.Name] {
 				add(t.Src.Name, "name", "kept or a name-renamed warning", "renamed to "+t.Name+" without a warning")
 			}
+			if why := unstorableName(t.Src.Name); why == "" {
+				add(t.Src.Name, "rename justified", "a name MySQL cannot store", "renamed to "+t.Name+" though MySQL can store it")
+			}
 		}
 		for _, c := range t.Columns {
 			if c.Src.Name != c.Name {
@@ -282,8 +296,44 @@ func checkNames(p *faithful.ScriptPlan, add func(obj, aspect, want, got string))
 				if !warned[t.Src.Name+"."+c.Src.Name] {
 					add(t.Src.Name+"."+c.Src.Name, "name", "kept or a name-renamed warning", "renamed to "+c.Name+" without a warning")
 				}
+				if unstorableName(c.Src.Name) == "" && !hasCaseTwin(t, c) {
+					add(t.Src.Name+"."+c.Src.Name, "rename justified", "a name MySQL cannot store, or a case twin among the columns", "renamed to "+c.Name+" though MySQL can store it")
+				}
 			}
 		}
 	}
 	add("name-renamed warnings", "count", fmt.Sprint(changed), fmt.Sprint(len(warned)))
+}
+
+// unstorableName is why MySQL cannot store a name, by rules written here and not taken from the exporter: empty, ends
+// in a space, longer than 64 characters, outside the Basic Multilingual Plane, a control or line-break character, not
+// valid UTF-8. "" for a name it can store.
+func unstorableName(name string) string {
+	switch {
+	case name == "":
+		return "empty"
+	case !utf8.ValidString(name):
+		return "not valid UTF-8"
+	case strings.HasSuffix(name, " "):
+		return "ends in a space"
+	case utf8.RuneCountInString(name) > 64:
+		return "longer than 64 characters"
+	}
+	for _, r := range name {
+		if r > 0xFFFF || r < 0x20 || r == 0x7f || r >= 0x80 && r <= 0x9f || r == 0x2028 || r == 0x2029 {
+			return "a character it cannot hold"
+		}
+	}
+	return ""
+}
+
+// hasCaseTwin is true when another column of the table is the same name up to the case MySQL folds (its table, not
+// Unicode's: ß and ẞ, ς and σ are no twins there). Accents alone make no twin: MySQL keeps e and é apart.
+func hasCaseTwin(t *faithful.ScriptTable, c *faithful.ScriptColumn) bool {
+	for _, o := range t.Columns {
+		if o != c && faithful.MySQLNameFold(o.Src.Name) == faithful.MySQLNameFold(c.Src.Name) {
+			return true
+		}
+	}
+	return false
 }

@@ -46,14 +46,17 @@ func (d mysqlDialect) StorableName(name string) string {
 }
 
 // unlineSafe is true for a character that must not appear raw in a script: a control character, a line
-// or paragraph separator, or a backslash (the mysql client reads a backslash as an escape in every string).
+// or paragraph separator, or the replacement character an invalid byte becomes. (A backslash is not one: the
+// mysql client reads it as an escape in every string, so mysqlTextLiteral writes a text that holds one as hex.)
 func unlineSafe(r rune) bool {
 	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || r == 0x2028 || r == 0x2029 || r == utf8.RuneError
 }
 
 // ---- literals ----
 
-// Literal is the one place where a value becomes SQL text for MySQL. No literal holds a raw CR or LF,
+// Literal is the one place where a value becomes SQL text for MySQL. A REAL of the source never reaches a text or a
+// bytes column as a float64: the reader gives the text SQLite makes of it (see scriptSelectList), so Literal has no
+// spelling of its own for one and refuses it. No literal holds a raw CR or LF,
 // whatever the value is, so no data byte can start a script line; a text with any character the
 // mysql client or the session SQL mode could read differently is written as a hex literal.
 func (mysqlDialect) Literal(ch Choice, v any) (string, error) {
@@ -93,15 +96,15 @@ func (mysqlDialect) Literal(ch Choice, v any) (string, error) {
 			return mysqlTextLiteral(x), nil
 		case int64:
 			return "'" + strconv.FormatInt(x, 10) + "'", nil
-		case float64:
-			return "'" + strconv.FormatFloat(x, 'g', -1, 64) + "'", nil
 		case []byte:
 			if utf8.Valid(x) {
 				return mysqlTextLiteral(string(x)), nil
 			}
 		}
 	case "bytes":
-		return "X'" + hex.EncodeToString(valueBytes(v)) + "'", nil
+		if b, ok := valueBytes(v); ok {
+			return "X'" + hex.EncodeToString(b) + "'", nil
+		}
 	}
 	return "", fmt.Errorf("value %v (%T) cannot be written as a %s", v, v, ch.Type)
 }
@@ -109,18 +112,16 @@ func (mysqlDialect) Literal(ch Choice, v any) (string, error) {
 var reTemporalText = regexp.MustCompile(`^[0-9][0-9:. -]*$`)
 
 // valueBytes is a value as the bytes of a column that carries bytes.
-func valueBytes(v any) []byte {
+func valueBytes(v any) ([]byte, bool) {
 	switch x := v.(type) {
 	case []byte:
-		return x
+		return x, true
 	case string:
-		return []byte(x)
+		return []byte(x), true
 	case int64:
-		return []byte(strconv.FormatInt(x, 10))
-	case float64:
-		return []byte(strconv.FormatFloat(x, 'g', -1, 64))
+		return []byte(strconv.FormatInt(x, 10)), true
 	}
-	return nil
+	return nil, false
 }
 
 // mysqlTextLiteral writes valid UTF-8 text without a NUL as a string literal, or as a hex literal when it holds

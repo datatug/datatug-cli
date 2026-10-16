@@ -113,7 +113,7 @@ What else works, and what does not yet, is in [Supported databases](#supported-d
 <!-- dev-approach:v1 -->
 ## Export a database to inGitDB
 
-`datatug db export` writes each supported DALgo source collection into a native inGitDB project. SQLite supplies a streaming row reader; other providers may materialize a collection in their query reader. For a local SQLite database:
+`datatug db export` (a shortcut for `datatug db copy --to ingitdb://<folder>`; see [docs/db-copy.md](docs/db-copy.md#local-backup-to-a-folder-db-export-and---to-ingitdb)) writes each supported DALgo source collection into a native inGitDB project, a local backup. `--to` may be a plain folder path; without it the folder is `./<database name>.ingitdb`. `--include`, `--exclude`, `--where`, `--limit`, `--dry-run`, `--json` and `--fail-on-warning` work as for `db copy`. Cloud or remote backup is not this command (see `db copy --to` and the planned `backup` family). SQLite supplies a streaming row reader; other providers may materialize a collection in their query reader. For a local SQLite database:
 
 ```bash
 datatug db export --from "sqlite://$PWD/shop.db" --to "ingitdb://$PWD/shop-ingitdb"

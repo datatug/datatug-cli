@@ -271,17 +271,19 @@ for ds in $datasets; do
 			sql_root <<<"drop user j_lost cascade;" >/dev/null
 		done
 		echo "    objects: a load that lost a foreign key, an index or a check (an error, or a skipped overlong line) gets no marker row"
-		# A wrapped CHECK over negative numbers holds them as written: -297 is accepted and 297 refused (a line cut after a minus is a
+		# A wrapped CHECK over negative numbers holds them as written: -k is accepted and k refused for every k of the list (a line cut after a minus is a
 		# continuation line for SQL*Plus, which drops the hyphen and would have made the list positive; the verifier compares
 		# only the number of checks, so the constraint is probed).
 		for w in 1 2 3 4 5 6 7 8 9; do
-			neg_ok=$(printf 'insert into "neg_in%s" values (10, -297);\ncommit;\n' "$w" | sql_as j_fixture 2>&1 || true)
-			neg_bad=$(printf 'insert into "neg_in%s" values (11, 297);\n' "$w" | sql_as j_fixture 2>&1 || true)
-			case $neg_ok in *ORA-*) echo "negative check: -297 was refused by neg_in$w: $neg_ok" >&2; failures=$((failures + 1)); continue 2 ;; esac
-			case $neg_bad in *ORA-02290*) ;; *) echo "negative check: 297 was accepted by the list of negative numbers of neg_in$w" >&2; failures=$((failures + 1)); continue 2 ;; esac
+			# every negative number of the list is accepted and its positive is refused (the cut can fall after any of them)
+			neg_out=$({ printf 'whenever sqlerror continue\n'; for k in $(seq 1 329); do printf 'insert into "neg_in%s" values (%d, -%d);\n' "$w" $((1000 + k)) "$k"; done
+				for k in $(seq 1 329); do printf 'insert into "neg_in%s" values (%d, %d);\n' "$w" $((2000 + k)) "$k"; done; } | sql_as j_fixture 2>&1 || true)
+			refused=$(printf '%s\n' "$neg_out" | grep -c 'ORA-02290' || true)
+			errors=$(printf '%s\n' "$neg_out" | grep -c 'ORA-' || true)
+			[ "$refused" = 329 ] && [ "$errors" = 329 ] || { echo "negative check: neg_in$w refused $refused of the 329 positive numbers (and $errors errors in all): its list of negative numbers lost a sign" >&2; failures=$((failures + 1)); continue 2; }
 			awk -v t="\"neg_in$w\"" 'index($0, "ALTER TABLE " t " ADD CHECK") == 1 { on = 1 } on { n++ } on && /;$/ { on = 0 } END { exit !(n > 1) }' "$script" || { echo "negative check: the list of neg_in$w was not wrapped, so the probe proves nothing" >&2; failures=$((failures + 1)); continue 2; }
 		done
-		echo "    negative check: nine wrapped IN lists of negative numbers keep their signs (-297 accepted, 297 refused)"
+		echo "    negative check: nine wrapped IN lists of negative numbers keep their signs (every negative number accepted, every positive one refused)"
 		;;
 	fuzz)
 		# Positive controls: the hazards are real.

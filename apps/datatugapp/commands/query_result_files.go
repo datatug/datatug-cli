@@ -119,6 +119,7 @@ func (s *resultSink) describeAdHoc(ctx context.Context, o queryOptions, backend 
 	if o.from != "" {
 		s.meta.Query.Kind, s.meta.Query.From = queryresults.QueryKindFrom, o.from
 	}
+	s.meta.SetEditor(queryText, queryresults.LanguageDTQL)
 }
 
 // describeSaved records the database and the query of a saved-query run.
@@ -127,10 +128,13 @@ func (s *resultSink) describeSaved(ctx context.Context, store datatug.ProjectSto
 	s.meta.DB = savedQueryDB(ctx, store, projectDir, o.project, o.env, queryDef)
 	switch queryDef.Type {
 	case datatug.QueryTypeSQL:
+		s.meta.SetEditor(queryDef.Text, queryresults.LanguageSQL)
 		s.describe = func([]string) resultDescription { return describeNativeSQL(result.ColumnTypes) }
 	case datatug.QueryTypeHTTP:
+		s.meta.SetEditor("", queryresults.LanguageHTTP)
 		s.describe = func([]string) resultDescription { return describeHTTP(result.Collection) }
 	default:
+		s.meta.SetEditor(queryDef.Text, queryresults.LanguageDTQL)
 		sources := savedDTQLSources(ctx, store, projectDir, o.env, queryDef)
 		s.describe = func(columns []string) resultDescription {
 			return describeDTQL(ctx, queryDef.Text, columns, sources)

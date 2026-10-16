@@ -146,3 +146,35 @@ func TestResultHandlerStoreFailureAndWriteOnly(t *testing.T) {
 		assert.False(t, strings.Contains(route.path, "/results/"))
 	}
 }
+
+// The answer carries query and, once annotated, prompt as plain text; a
+// result without them answers without a prompt.
+func TestResultRouteQueryAndPrompt(t *testing.T) {
+	quietLog(t)
+	root := resultsStore(t, "v")
+	caps, secret := accessCaps(t)
+	router := httprouter.New()
+	registerRoutes("", router, nil, false, caps)
+	get := func() map[string]json.RawMessage {
+		t.Helper()
+		r := guardRequest(http.MethodGet, "/datatug/results/t1", "127.0.0.1:8989", "https://datatug.app", "")
+		r.Header.Set("Authorization", "Bearer "+agentaccess.SessionToken(secret))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, r)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var body map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		return body
+	}
+	body := get()
+	_, hasPrompt := body["prompt"]
+	assert.False(t, hasPrompt, "no prompt before annotate")
+	assert.Contains(t, string(body["query"]), `"kind"`)
+
+	store, err := queryresults.Open(root)
+	require.NoError(t, err)
+	require.NoError(t, store.Annotate("t1", "what did I ask <b>", false, time.Now()))
+	body = get()
+	assert.JSONEq(t, `"what did I ask <b>"`, string(body["prompt"]))
+	assert.Contains(t, string(body["meta"]), `"prompt":{`)
+}

@@ -114,3 +114,44 @@ func TestMetaDescribeAndListBounds(t *testing.T) {
 		t.Fatal("escaped query text is not measured")
 	}
 }
+
+func TestSetEditor(t *testing.T) {
+	ref := "datatug://p/main?env=local"
+	meta := Meta{DB: DB{Ref: &ref}, Query: Query{Kind: QueryKindDTQL, Parameters: map[string]apicontract.TypedValueOrSet{
+		"b": apicontract.ScalarValue(apicontract.NewIntegerValue("2")),
+		"a": apicontract.ScalarValue(apicontract.NewIntegerValue("1")),
+	}}}
+	meta.SetEditor("from:\n  name: T\n", LanguageDTQL)
+	q := meta.Query
+	if q.Text != "from:\n  name: T\n" || q.Language != "dtql" || q.DBRef != ref || len(q.Params) != 2 || q.Params[0].Name != "a" || q.Params[1].Name != "b" {
+		t.Fatalf("editor fields %+v", q)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(meta.Encode(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	query := decoded["query"].(map[string]any)
+	params := query["params"].([]any)
+	first := params[0].(map[string]any)
+	if query["text"] == nil || query["language"] != "dtql" || query["dbRef"] != ref || first["name"] != "a" || first["value"].(map[string]any)["type"] != "integer" {
+		t.Fatalf("encoded query %v", query)
+	}
+
+	// no project source, no parameters, no text: the fields are absent
+	meta = Meta{Query: Query{Kind: QueryKindSaved}}
+	meta.SetEditor("", LanguageHTTP)
+	_ = json.Unmarshal(meta.Encode(), &decoded)
+	query = decoded["query"].(map[string]any)
+	if _, has := query["dbRef"]; has || query["params"] != nil || query["text"] != nil || query["language"] != "http" {
+		t.Fatalf("encoded query %v", query)
+	}
+
+	// the editor text counts toward the query bound and is dropped with the rest
+	meta = Meta{}
+	meta.SetEditor(strings.Repeat("x", MaxQueryBytes), LanguageSQL)
+	_ = json.Unmarshal(meta.Encode(), &decoded)
+	query = decoded["query"].(map[string]any)
+	if query["text"] != nil || decoded["unavailable"].(map[string]any)["query"] != UnavailableTooLarge {
+		t.Fatalf("too-large editor text %v", query)
+	}
+}

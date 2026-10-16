@@ -31,6 +31,10 @@ const (
 	MaxMetaBytes = 1 << 20
 	// MaxQueryBytes bounds query.dtql and query.parameters together.
 	MaxQueryBytes = 256 << 10
+	// MaxPromptBytes bounds the prompt text; MaxPromptJSONBytes is the room
+	// meta.json keeps free for it once escaped.
+	MaxPromptBytes     = 8 << 10
+	MaxPromptJSONBytes = 6*MaxPromptBytes + 256
 	// MaxMetaColumns is how many columns meta.json describes.
 	MaxMetaColumns = 400
 

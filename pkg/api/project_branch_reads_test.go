@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,12 +83,19 @@ func TestQualifiedProjectReadRejectsHeadChangeAndBusyLock(t *testing.T) {
 	require.ErrorIs(t, err, dto.ErrBranchHeadConflict)
 
 	originalLock := flockTryLockContextSeam
+	originalGitState := localGitStateSeam
+	localGitStateSeam = func(context.Context, string) (gitState, error) {
+		return gitState{root: dir, gitDir: dir, branch: branch, head: "head"}, nil
+	}
 	lockAttempts := 0
 	flockTryLockContextSeam = func(*flock.Flock, context.Context, time.Duration) (bool, error) {
 		lockAttempts++
 		return false, nil
 	}
-	t.Cleanup(func() { flockTryLockContextSeam = originalLock })
+	t.Cleanup(func() {
+		flockTryLockContextSeam = originalLock
+		localGitStateSeam = originalGitState
+	})
 	lockCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	_, err = withCurrentBranchRead(lockCtx, ref, branch, func(*qualifiedProjectReader) (any, error) {
@@ -272,5 +281,493 @@ func TestQualifiedEnvironmentStoredIDMatchesPathOrIsAbsent(t *testing.T) {
 			require.Len(t, got, 1)
 			require.Equal(t, "env", got[0].ID)
 		})
+	}
+}
+
+func TestQualifiedReaderFileAndDirectoryBoundaries(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "boards"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "valid.json"), []byte(`{"ok":true}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "oversized.json"), []byte("12345"), 0o600))
+	reader, err := openQualifiedProjectReader(dir)
+	require.NoError(t, err)
+	defer reader.close()
+
+	if _, err := reader.readFileLimit("../outside", 10); err == nil {
+		t.Fatal("parent traversal was accepted")
+	}
+	if _, err := reader.readFileLimit("missing.json", 10); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing file error = %v", err)
+	}
+	if _, err := reader.readFileLimit("boards", 10); err == nil {
+		t.Fatal("directory was accepted as a document")
+	}
+	if _, err := reader.readFileLimit("oversized.json", 4); err == nil {
+		t.Fatal("oversized file was accepted")
+	}
+	reader.bytes = maxQualifiedReadBytes - 5
+	if _, err := reader.readFileLimit("valid.json", 20); err == nil {
+		t.Fatal("read exceeded the remaining aggregate byte budget")
+	}
+	reader.bytes = maxQualifiedReadBytes + 1
+	if _, err := reader.readFileLimit("valid.json", 20); err == nil {
+		t.Fatal("aggregate byte limit underflow was accepted")
+	}
+	reader.bytes = 0
+	if _, err := reader.readJSON("valid.json", new(map[string]any)); err != nil {
+		t.Fatalf("readJSON valid document: %v", err)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "invalid.json"), []byte("{"), 0o600))
+	if _, err := reader.readJSON("invalid.json", new(map[string]any)); err == nil {
+		t.Fatal("malformed JSON was accepted")
+	}
+	entries, err := reader.dirEntries("absent")
+	require.NoError(t, err)
+	require.Empty(t, entries)
+	if _, err := reader.dirEntries("../outside"); err == nil {
+		t.Fatal("directory traversal was accepted")
+	}
+	entries, err = reader.dirEntries(".")
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
+	if _, err := openQualifiedProjectReader(filepath.Join(dir, "not-created")); err == nil {
+		t.Fatal("opening a missing project root succeeded")
+	}
+}
+
+func TestQualifiedReaderEntityAndBoardLayouts(t *testing.T) {
+	dir := t.TempDir()
+	reader, err := openQualifiedProjectReader(dir)
+	require.NoError(t, err)
+	defer reader.close()
+
+	entitiesDir := filepath.Join(dir, "entities")
+	require.NoError(t, os.MkdirAll(filepath.Join(entitiesDir, "folder-only"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(entitiesDir, "customer.entity.json"), []byte(`{"id":"customer","title":"Customer"}`), 0o600))
+	entity, err := reader.readQualifiedEntity("customer")
+	require.NoError(t, err)
+	require.Equal(t, "Customer", entity.Title)
+	entities, err := readQualifiedEntities(reader)
+	require.NoError(t, err)
+	require.Len(t, entities, 1)
+	require.True(t, isDirectoryEntry(mustQualifiedEntries(t, reader, storage.EntitiesFolder), "folder-only"))
+	require.False(t, isDirectoryEntry(mustQualifiedEntries(t, reader, storage.EntitiesFolder), "customer.entity.json"))
+	require.False(t, isDirectoryEntry(mustQualifiedEntries(t, reader, storage.EntitiesFolder), "not-present"))
+	ids := itemIDs(mustQualifiedEntries(t, reader, storage.EntitiesFolder), storage.EntityFileSuffix)
+	require.Equal(t, []string{"customer", "folder-only"}, sortedIDs(ids))
+	if _, err := reader.readQualifiedEntity("missing"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing entity error = %v", err)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(entitiesDir, "broken.entity.json"), []byte(`{"fields":"wrong type"}`), 0o600))
+	if _, err := reader.readQualifiedEntity("broken"); err == nil {
+		t.Fatal("entity with an invalid model field type was accepted")
+	}
+
+	boardsDir := filepath.Join(dir, "boards")
+	require.NoError(t, os.MkdirAll(boardsDir, 0o755))
+	if _, err := reader.readQualifiedBoard("sales"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing board error = %v", err)
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(boardsDir, "sales.board.json"), []byte("{"), 0o600))
+	if _, err := reader.readQualifiedBoard("sales"); err == nil {
+		t.Fatal("malformed board JSON was accepted")
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(boardsDir, "sales.board.json"), []byte(`{"id":"sales","title":"Flat"}`), 0o600))
+	nested := filepath.Join(boardsDir, "sales", "board.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(nested), 0o755))
+	require.NoError(t, os.WriteFile(nested, []byte(`{"id":"sales","title":"Nested"}`), 0o600))
+	if _, err := reader.readQualifiedBoard("sales"); err == nil || !strings.Contains(err.Error(), "different content") {
+		t.Fatalf("conflicting board layouts error = %v", err)
+	}
+	if _, err := reader.readQualifiedBoard("../sales"); err == nil {
+		t.Fatal("invalid board ID was accepted")
+	}
+	require.NoError(t, os.RemoveAll(filepath.Join(boardsDir, "sales")))
+	require.NoError(t, os.WriteFile(filepath.Join(boardsDir, "sales.board.json"), []byte(`{"id":"sales","title":7}`), 0o600))
+	if _, err := reader.readQualifiedBoard("sales"); err == nil {
+		t.Fatal("board with an invalid model field type was accepted")
+	}
+	require.NoError(t, os.Remove(filepath.Join(boardsDir, "sales.board.json")))
+	require.NoError(t, os.Mkdir(filepath.Join(boardsDir, "empty-folder"), 0o755))
+	boards, err := readQualifiedBoards(reader)
+	require.NoError(t, err)
+	require.Empty(t, boards)
+	nestedError := filepath.Join(boardsDir, "invalid", "board.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(nestedError), 0o755))
+	require.NoError(t, os.WriteFile(nestedError, []byte(`{"id":"invalid","title":7}`), 0o600))
+	if _, err := reader.readQualifiedBoard("invalid"); err == nil {
+		t.Fatal("invalid nested board model was accepted")
+	}
+}
+
+func mustQualifiedEntries(t *testing.T, reader *qualifiedProjectReader, dir string) []os.DirEntry {
+	t.Helper()
+	entries, err := reader.dirEntries(dir)
+	require.NoError(t, err)
+	return entries
+}
+
+func sortedIDs(ids []string) []string {
+	// The helper is used only in assertions and keeps ordering explicit.
+	for i := 0; i < len(ids); i++ {
+		for j := i + 1; j < len(ids); j++ {
+			if ids[j] < ids[i] {
+				ids[i], ids[j] = ids[j], ids[i]
+			}
+		}
+	}
+	return ids
+}
+
+func TestQualifiedProjectEntitiesAndSummary(t *testing.T) {
+	const projectID = "qualified-read-summary"
+	dir, git := setupTestGitProject(t, projectID)
+	configureBranchReadTest(t, projectID, dir)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "datatug-project.json"), []byte(`{"title":"Qualified project"}`), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "entities"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "entities", "customer.entity.json"), []byte(`{"id":"customer","title":"Customer"}`), 0o600))
+	git("add", "-A")
+	git("commit", "-q", "-m", "project summary")
+	branch := git("symbolic-ref", "--short", "HEAD")
+	ref := dto.ProjectRef{StoreID: LocalStoreID, ProjectID: projectID}
+	entities, err := LocalProjectEntities(context.Background(), ref, branch)
+	require.NoError(t, err)
+	require.Equal(t, []datatug.ProjEntityBrief{{ProjItemBrief: datatug.ProjItemBrief{ID: "customer", Title: "Customer"}}}, entities)
+	summary, err := LocalProjectSummary(context.Background(), ref, branch)
+	require.NoError(t, err)
+	require.Equal(t, "Qualified project", summary.Title)
+	require.Len(t, summary.Entities, 1)
+	require.Equal(t, "customer", summary.Entities[0].ID)
+}
+
+func TestQualifiedEnvironmentPresentationRejectsInvalidMetadata(t *testing.T) {
+	for _, body := range []string{
+		"[1]",
+		`{"presentation":[]}`,
+		`{"presentation":{"label":7}}`,
+		`{"presentation":{"unknown":"value"}}`,
+		`{"presentation":{"label":"` + strings.Repeat("x", 257) + `"}}`,
+		`{"presentation":{"icon":"unsupported"}}`,
+		`{"presentation":{"tone":"unsupported"}}`,
+	} {
+		if _, err := parseEnvironmentPresentation([]byte(body)); err == nil {
+			t.Errorf("accepted invalid environment metadata %q", body)
+		}
+	}
+	if _, err := parseEnvironmentPresentation([]byte("{")); err == nil {
+		t.Fatal("accepted malformed environment JSON")
+	}
+	if got, err := parseEnvironmentPresentation(nil); err != nil || got != nil {
+		t.Fatalf("empty presentation = %#v, %v", got, err)
+	}
+	for _, icon := range []string{"globe-outline", "desktop-outline", "flask-outline", "cloud-outline", "shield-checkmark-outline", "warning-outline"} {
+		if !allowedEnvironmentIcon(icon) {
+			t.Errorf("supported icon %q was rejected", icon)
+		}
+	}
+	if allowedEnvironmentIcon("unsupported") {
+		t.Fatal("unsupported icon was accepted")
+	}
+}
+
+func TestQualifiedReaderDualLayoutsAndLegacyEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	reader, err := openQualifiedProjectReader(dir)
+	require.NoError(t, err)
+	defer reader.close()
+
+	entityDir := filepath.Join(dir, "entities")
+	require.NoError(t, os.MkdirAll(filepath.Join(entityDir, "customer"), 0o755))
+	nested := filepath.Join(entityDir, "customer", "customer.entity.json")
+	flat := filepath.Join(entityDir, "customer.entity.json")
+	require.NoError(t, os.WriteFile(nested, []byte(`{"id":"customer","title":"Customer"}`), 0o600))
+	require.NoError(t, os.WriteFile(flat, []byte("["), 0o600))
+	if _, err := readQualifiedEntityDocument(reader, "customer"); err == nil {
+		t.Fatal("malformed dual-layout entity was accepted")
+	}
+	require.NoError(t, os.WriteFile(flat, []byte(`{"id":"customer","title":"Customer"}`), 0o600))
+	require.NoError(t, os.WriteFile(nested, []byte(`{"id":"another-entity","title":"Customer"}`), 0o600))
+	if _, err := readQualifiedEntityDocument(reader, "customer"); err == nil {
+		t.Fatal("entity document with a mismatched ID was accepted")
+	}
+	require.NoError(t, os.WriteFile(nested, []byte(`{"id":"customer","title":"Customer"}`), 0o600))
+	require.NoError(t, os.WriteFile(flat, []byte(`{"id":"other","title":"Customer"}`), 0o600))
+	if _, err := readQualifiedEntityDocument(reader, "customer"); err == nil {
+		t.Fatal("mismatched flat entity ID was accepted")
+	}
+	require.NoError(t, os.WriteFile(flat, []byte(`{"id":"customer","title":"Customer"}`), 0o600))
+	if _, err := readQualifiedEntityDocument(reader, "customer"); err != nil {
+		t.Fatalf("matching entity layouts: %v", err)
+	}
+	require.NoError(t, os.WriteFile(nested, []byte(`{"title":"Customer"}`), 0o600))
+	require.NoError(t, os.WriteFile(flat, []byte(`{"title":"Customer"}`), 0o600))
+	if _, err := readQualifiedEntityDocument(reader, "customer"); err != nil {
+		t.Fatalf("matching layouts with path-derived IDs: %v", err)
+	}
+	if sameJSONFields(map[string]json.RawMessage{"x": []byte("{")}, map[string]json.RawMessage{}) {
+		t.Fatal("invalid raw JSON fields compared equal")
+	}
+
+	envDir := filepath.Join(dir, "environments", "legacy")
+	require.NoError(t, os.MkdirAll(envDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(envDir, "environment-summary.json"), []byte(`{"id":"legacy","title":"Legacy","dbServers":[{"id":"server"}]}`), 0o600))
+	environments, err := readQualifiedEnvironments(reader)
+	require.NoError(t, err)
+	require.Len(t, environments, 1)
+	require.Equal(t, "Legacy", environments[0].env.Title)
+	require.Len(t, environments[0].env.DbServers, 1)
+
+	invalidEnvDir := filepath.Join(dir, "environments", "broken")
+	require.NoError(t, os.MkdirAll(invalidEnvDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(invalidEnvDir, "broken.env.json"), []byte("{"), 0o600))
+	if _, err := readQualifiedEnvironments(reader); err == nil {
+		t.Fatal("malformed environment document was accepted")
+	}
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "environments", "broken")))
+	require.NoError(t, os.WriteFile(filepath.Join(envDir, "legacy.env.json"), []byte(`{"id":"legacy","title":7}`), 0o600))
+	if _, _, err := readQualifiedEnvironment(reader, "legacy"); err == nil {
+		t.Fatal("environment with an invalid model field type was accepted")
+	}
+	require.NoError(t, os.Remove(filepath.Join(envDir, "legacy.env.json")))
+	require.NoError(t, os.WriteFile(filepath.Join(envDir, "environment-summary.json"), []byte(`{"id":"legacy","title":"Legacy","dbServers":"bad"}`), 0o600))
+	if _, _, err := readQualifiedEnvironment(reader, "legacy"); err == nil {
+		t.Fatal("legacy summary with invalid server data was accepted")
+	}
+	require.NoError(t, os.Remove(filepath.Join(envDir, "environment-summary.json")))
+	require.NoError(t, os.WriteFile(filepath.Join(envDir, "environment-summary.json"), []byte(`{"id":"legacy","title":"`+strings.Repeat("x", maxEnvironmentDocumentBytes)+`"}`), 0o600))
+	if _, _, err := readQualifiedEnvironment(reader, "legacy"); err == nil {
+		t.Fatal("oversized legacy environment was accepted")
+	}
+
+	for _, item := range []struct{ path, link string }{
+		{path: filepath.Join(dir, "entities", "escape"), link: filepath.Join(dir, "entities", "escape", "escape.entity.json")},
+		{path: filepath.Join(dir, "boards", "escape"), link: filepath.Join(dir, "boards", "escape", "board.json")},
+	} {
+		outside := filepath.Join(t.TempDir(), "outside.json")
+		require.NoError(t, os.WriteFile(outside, []byte(`{"id":"escape"}`), 0o600))
+		require.NoError(t, os.MkdirAll(item.path, 0o755))
+		if err := os.Symlink(outside, item.link); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		if strings.Contains(item.path, "entities") {
+			if _, err := readQualifiedEntityDocument(reader, "escape"); err == nil {
+				t.Fatal("entity symlink escape was accepted")
+			}
+		} else if _, err := reader.readQualifiedBoard("escape"); err == nil {
+			t.Fatal("board symlink escape was accepted")
+		}
+	}
+	flatOutside := filepath.Join(t.TempDir(), "outside.entity.json")
+	require.NoError(t, os.WriteFile(flatOutside, []byte(`{"id":"escape"}`), 0o600))
+	if err := os.Symlink(flatOutside, filepath.Join(dir, "entities", "flat-escape.entity.json")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := readQualifiedEntityDocument(reader, "flat-escape"); err == nil {
+		t.Fatal("flat entity symlink escape was accepted")
+	}
+
+	oversizedReaderDir := t.TempDir()
+	oversizedReader, err := openQualifiedProjectReader(oversizedReaderDir)
+	require.NoError(t, err)
+	defer oversizedReader.close()
+	prodDir := filepath.Join(oversizedReaderDir, "environments", "prod")
+	require.NoError(t, os.MkdirAll(prodDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(prodDir, "prod.env.json"), []byte(`{"id":"prod","title":"`+strings.Repeat("x", maxEnvironmentDocumentBytes)+`"}`), 0o600))
+	if _, _, err := readQualifiedEnvironment(oversizedReader, "prod"); err == nil {
+		t.Fatal("oversized current environment document was accepted")
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(prodDir, "prod.env.json"), []byte(`{"id":"prod","presentation":{"icon":"unsupported"}}`), 0o600))
+	if _, err := readQualifiedEnvironments(oversizedReader); err == nil {
+		t.Fatal("invalid environment presentation was accepted by the list reader")
+	}
+}
+
+func TestQualifiedProjectDirectoryAndAssetCountLimits(t *testing.T) {
+	dir := t.TempDir()
+	for _, folder := range []string{"boards", "entities", "environments"} {
+		base := filepath.Join(dir, folder)
+		require.NoError(t, os.MkdirAll(base, 0o755))
+		for i := 0; i <= maxQualifiedProjectItems; i++ {
+			require.NoError(t, os.Mkdir(filepath.Join(base, fmt.Sprintf("item-%04d", i)), 0o755))
+		}
+	}
+	reader, err := openQualifiedProjectReader(dir)
+	require.NoError(t, err)
+	defer reader.close()
+	if _, err := readQualifiedBoards(reader); err == nil || !strings.Contains(err.Error(), "board list exceeds") {
+		t.Fatalf("board count limit error = %v", err)
+	}
+	if _, err := readQualifiedEntities(reader); err == nil || !strings.Contains(err.Error(), "entity list exceeds") {
+		t.Fatalf("entity count limit error = %v", err)
+	}
+	if _, err := readQualifiedEnvironments(reader); err == nil || !strings.Contains(err.Error(), "environment list exceeds") {
+		t.Fatalf("environment count limit error = %v", err)
+	}
+	tooMany := filepath.Join(dir, "too-many")
+	require.NoError(t, os.Mkdir(tooMany, 0o755))
+	for i := 0; i <= maxQualifiedDirEntries; i++ {
+		require.NoError(t, os.WriteFile(filepath.Join(tooMany, fmt.Sprintf("item-%05d", i)), nil, 0o600))
+	}
+	if _, err := reader.dirEntries("too-many"); err == nil || !strings.Contains(err.Error(), "directory exceeds") {
+		t.Fatalf("directory entry limit error = %v", err)
+	}
+	if _, err := readQualifiedLimited(bytes.NewReader([]byte("too large")), 2); err == nil {
+		t.Fatal("limited reader accepted too many bytes")
+	}
+	if _, err := readQualifiedLimited(errorReader{}, 4); err == nil {
+		t.Fatal("limited reader ignored a source read error")
+	}
+}
+
+type errorReader struct{}
+
+func (errorReader) Read([]byte) (int, error) { return 0, errors.New("read failure") }
+
+func TestQualifiedBranchReadGuardFailures(t *testing.T) {
+	const projectID = "qualified-read-guard-errors"
+	dir, git := setupTestGitProject(t, projectID)
+	configureBranchReadTest(t, projectID, dir)
+	branch := git("symbolic-ref", "--short", "HEAD")
+	ref := dto.ProjectRef{StoreID: LocalStoreID, ProjectID: projectID}
+	if _, err := withCurrentBranchRead(context.Background(), dto.ProjectRef{}, branch, func(*qualifiedProjectReader) (any, error) { return nil, nil }); err == nil {
+		t.Fatal("invalid project ref was accepted")
+	}
+	if _, err := withCurrentBranchRead(context.Background(), dto.ProjectRef{StoreID: "remote", ProjectID: projectID}, branch, func(*qualifiedProjectReader) (any, error) { return nil, nil }); err == nil {
+		t.Fatal("non-local store was accepted")
+	}
+	if _, err := withCurrentBranchRead(context.Background(), ref, "", func(*qualifiedProjectReader) (any, error) { return nil, nil }); err == nil {
+		t.Fatal("missing branch was accepted")
+	}
+	if _, err := withCurrentBranchRead(context.Background(), dto.ProjectRef{StoreID: LocalStoreID, ProjectID: "unknown-qualified-project"}, branch, func(*qualifiedProjectReader) (any, error) { return nil, nil }); err == nil {
+		t.Fatal("unserved project was accepted")
+	}
+
+	previousGitState := localGitStateSeam
+	localGitStateSeam = func(context.Context, string) (gitState, error) {
+		return gitState{}, errors.New("git state unavailable")
+	}
+	_, err := withCurrentBranchRead(context.Background(), ref, branch, func(*qualifiedProjectReader) (any, error) { return nil, nil })
+	require.ErrorContains(t, err, "git state unavailable")
+
+	localGitStateSeam = previousGitState
+	previousLock := flockTryLockContextSeam
+	flockTryLockContextSeam = func(*flock.Flock, context.Context, time.Duration) (bool, error) {
+		return false, errors.New("lock backend unavailable")
+	}
+	_, err = withCurrentBranchRead(context.Background(), ref, branch, func(*qualifiedProjectReader) (any, error) { return nil, nil })
+	require.ErrorContains(t, err, "lock backend unavailable")
+
+	flockTryLockContextSeam = previousLock
+	gitCallsBeforeLockError := 0
+	localGitStateSeam = func(ctx context.Context, projectDir string) (gitState, error) {
+		gitCallsBeforeLockError++
+		if gitCallsBeforeLockError == 2 {
+			return gitState{}, errors.New("locked git state unavailable")
+		}
+		return previousGitState(ctx, projectDir)
+	}
+	_, err = withCurrentBranchRead(context.Background(), ref, branch, func(*qualifiedProjectReader) (any, error) { return nil, nil })
+	require.ErrorContains(t, err, "locked git state unavailable")
+	require.Equal(t, 2, gitCallsBeforeLockError)
+	localGitStateSeam = previousGitState
+	gitCalls := 0
+	localGitStateSeam = func(ctx context.Context, projectDir string) (gitState, error) {
+		gitCalls++
+		if gitCalls == 3 {
+			return gitState{}, errors.New("post-read git state unavailable")
+		}
+		return previousGitState(ctx, projectDir)
+	}
+	_, err = withCurrentBranchRead(context.Background(), ref, branch, func(*qualifiedProjectReader) (any, error) { return "read", nil })
+	require.ErrorIs(t, err, dto.ErrBranchHeadConflict)
+	require.Equal(t, 3, gitCalls)
+
+	localGitStateSeam = previousGitState
+	_, err = withCurrentBranchRead(context.Background(), ref, branch, func(*qualifiedProjectReader) (any, error) { return nil, errors.New("document read failed") })
+	require.ErrorContains(t, err, "document read failed")
+	_, err = withCurrentBranchRead(context.Background(), ref, branch, func(*qualifiedProjectReader) (any, error) { return make(chan int), nil })
+	require.ErrorContains(t, err, "unsupported type")
+	previousOpenReader := openQualifiedProjectReaderSeam
+	openQualifiedProjectReaderSeam = func(string) (*qualifiedProjectReader, error) { return nil, errors.New("root open failed") }
+	_, err = withCurrentBranchRead(context.Background(), ref, branch, func(*qualifiedProjectReader) (any, error) {
+		t.Fatal("callback ran after root open failure")
+		return nil, nil
+	})
+	require.ErrorContains(t, err, "root open failed")
+	t.Cleanup(func() {
+		localGitStateSeam = previousGitState
+		flockTryLockContextSeam = previousLock
+		openQualifiedProjectReaderSeam = previousOpenReader
+	})
+}
+
+func TestQualifiedAssetListErrorsAreClosed(t *testing.T) {
+	const projectID = "qualified-read-list-errors"
+	dir, git := setupTestGitProject(t, projectID)
+	configureBranchReadTest(t, projectID, dir)
+	branch := git("symbolic-ref", "--short", "HEAD")
+	ref := dto.ProjectRef{StoreID: LocalStoreID, ProjectID: projectID}
+	write := func(relative, body string) {
+		t.Helper()
+		file := filepath.Join(dir, relative)
+		require.NoError(t, os.MkdirAll(filepath.Dir(file), 0o755))
+		require.NoError(t, os.WriteFile(file, []byte(body), 0o600))
+	}
+	write("boards/bad name.board.json", `{}`)
+	if _, err := LocalProjectBoards(context.Background(), ref, branch); err == nil {
+		t.Fatal("invalid board ID in list was accepted")
+	}
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "boards")))
+	write("boards", "not a directory")
+	if _, err := LocalProjectBoards(context.Background(), ref, branch); err == nil {
+		t.Fatal("non-directory boards path was accepted")
+	}
+	require.NoError(t, os.Remove(filepath.Join(dir, "boards")))
+	write("entities/bad name.entity.json", `{}`)
+	if _, err := LocalProjectEntities(context.Background(), ref, branch); err == nil {
+		t.Fatal("invalid entity ID in list was accepted")
+	}
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "entities")))
+	write("entities", "not a directory")
+	if _, err := LocalProjectEntities(context.Background(), ref, branch); err == nil {
+		t.Fatal("non-directory entities path was accepted")
+	}
+	require.NoError(t, os.Remove(filepath.Join(dir, "entities")))
+	write("entities/customer.entity.json", "{")
+	if _, err := LocalProjectEntities(context.Background(), ref, branch); err == nil {
+		t.Fatal("malformed entity document was accepted")
+	}
+	write("datatug-project.json", "{")
+	if _, err := LocalProjectSummary(context.Background(), ref, branch); err == nil {
+		t.Fatal("malformed project summary document was accepted")
+	}
+	require.NoError(t, os.Remove(filepath.Join(dir, "datatug-project.json")))
+	if _, err := LocalProjectSummary(context.Background(), ref, branch); err == nil {
+		t.Fatal("missing project summary document was accepted")
+	}
+	write("datatug-project.json", `{"title":"ok"}`)
+	write("environments", "not a directory")
+	if _, err := LocalProjectEnvironments(context.Background(), ref, branch); err == nil {
+		t.Fatal("non-directory environments path was accepted")
+	}
+	require.NoError(t, os.Remove(filepath.Join(dir, "environments")))
+	write("environments/not valid/environment-summary.json", `{}`)
+	if _, err := LocalProjectEnvironments(context.Background(), ref, branch); err == nil {
+		t.Fatal("invalid environment ID was accepted")
+	}
+
+	// An invalid entity also makes the overview fail closed rather than
+	// returning a partial summary.
+	require.NoError(t, os.RemoveAll(filepath.Join(dir, "environments")))
+	write("datatug-project.json", `{"title":"ok"}`)
+	write("entities/broken.entity.json", "{")
+	if _, err := LocalProjectSummary(context.Background(), ref, branch); err == nil {
+		t.Fatal("summary with an unreadable entity was accepted")
+	}
+	if _, err := LocalProjectBoard(context.Background(), dto.ProjectItemRef{ProjectRef: ref, ID: "bad id"}, branch); err == nil {
+		t.Fatal("invalid board detail ID was accepted")
+	}
+	if _, err := LocalProjectEntity(context.Background(), dto.ProjectItemRef{ProjectRef: ref, ID: "bad id"}, branch); err == nil {
+		t.Fatal("invalid entity detail ID was accepted")
 	}
 }

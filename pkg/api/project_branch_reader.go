@@ -63,11 +63,19 @@ func (r *qualifiedProjectReader) readFileLimit(name string, maxBytes int) ([]byt
 	if remaining < limit {
 		limit = remaining
 	}
-	body, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
+	body, err := readQualifiedLimited(f, limit)
+	if err != nil {
+		return nil, err
+	}
+	r.bytes += len(body)
+	return body, nil
+}
+
+func readQualifiedLimited(source io.Reader, limit int) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(source, int64(limit)+1))
 	if err != nil || len(body) > limit {
 		return nil, fmt.Errorf("qualified project read exceeds %d bytes", maxQualifiedReadBytes)
 	}
-	r.bytes += len(body)
 	return body, nil
 }
 

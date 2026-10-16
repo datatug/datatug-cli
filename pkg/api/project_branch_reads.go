@@ -61,7 +61,7 @@ func withCurrentBranchRead(ctx context.Context, ref dto.ProjectRef, branch strin
 	if branch != state.branch {
 		return nil, fmt.Errorf("%w: selected branch %q is not checked out; local reads require the current branch %q", dto.ErrBranchHeadConflict, branch, state.branch)
 	}
-	reader, err := openQualifiedProjectReader(projectDir)
+	reader, err := openQualifiedProjectReaderSeam(projectDir)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +83,8 @@ func withCurrentBranchRead(ctx context.Context, ref dto.ProjectRef, branch strin
 	}
 	return value, nil
 }
+
+var openQualifiedProjectReaderSeam = openQualifiedProjectReader
 
 // LocalProjectBoards returns board briefs from the selected current branch.
 func LocalProjectBoards(ctx context.Context, ref dto.ProjectRef, branch string) ([]datatug.ProjBoardBrief, error) {
@@ -260,9 +262,6 @@ func LocalProjectEnvironments(ctx context.Context, ref dto.ProjectRef, branch st
 		briefs := make([]LocalEnvironmentBrief, 0, len(environments))
 		for _, environment := range environments {
 			env := environment.env
-			if err := ValidateIdentifier("environment", env.ID); err != nil {
-				return nil, err
-			}
 			title := env.Title
 			if title == "" {
 				title = env.ID

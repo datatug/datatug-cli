@@ -276,11 +276,11 @@ for ds in $datasets; do
 		# only the number of checks, so the constraint is probed).
 		for w in 1 2 3 4 5 6 7 8 9; do
 			# every negative number of the list is accepted and its positive is refused (the cut can fall after any of them)
-			neg_out=$({ printf 'whenever sqlerror continue\n'; for k in $(seq 1 329); do printf 'insert into "neg_in%s" values (%d, -%d);\n' "$w" $((1000 + k)) "$k"; done
-				for k in $(seq 1 329); do printf 'insert into "neg_in%s" values (%d, %d);\n' "$w" $((2000 + k)) "$k"; done; } | sql_as j_fixture 2>&1 || true)
-			refused=$(printf '%s\n' "$neg_out" | grep -c 'ORA-02290' || true)
-			errors=$(printf '%s\n' "$neg_out" | grep -c 'ORA-' || true)
-			[ "$refused" = 329 ] && [ "$errors" = 329 ] || { echo "negative check: neg_in$w refused $refused of the 329 positive numbers (and $errors errors in all): its list of negative numbers lost a sign" >&2; failures=$((failures + 1)); continue 2; }
+			neg_out=$({ printf 'whenever sqlerror continue\n'; for k in $(seq 1 329); do printf 'insert into "neg_in%s" values (%d, -%d);\n' "$w" $((1000 + k)) "$k"; done; } | sql_as j_fixture 2>&1 || true)
+			pos_out=$({ printf 'whenever sqlerror continue\n'; for k in $(seq 1 329); do printf 'insert into "neg_in%s" values (%d, %d);\n' "$w" $((2000 + k)) "$k"; done; } | sql_as j_fixture 2>&1 || true)
+			lost=$(printf '%s\n' "$neg_out" | grep -c 'ORA-' || true)
+			refused=$(printf '%s\n' "$pos_out" | grep -c 'ORA-02290' || true)
+			[ "$lost" = 0 ] && [ "$refused" = 329 ] || { echo "negative check: neg_in$w refused $lost of its 329 negative numbers and $refused of the 329 positive ones: its list lost a sign" >&2; failures=$((failures + 1)); continue 2; }
 			awk -v t="\"neg_in$w\"" 'index($0, "ALTER TABLE " t " ADD CHECK") == 1 { on = 1 } on { n++ } on && /;$/ { on = 0 } END { exit !(n > 1) }' "$script" || { echo "negative check: the list of neg_in$w was not wrapped, so the probe proves nothing" >&2; failures=$((failures + 1)); continue 2; }
 		done
 		echo "    negative check: nine wrapped IN lists of negative numbers keep their signs (every negative number accepted, every positive one refused)"

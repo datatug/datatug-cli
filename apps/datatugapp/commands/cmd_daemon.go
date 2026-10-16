@@ -95,6 +95,9 @@ func daemonStartCommand() *cobra.Command {
 				return err
 			}
 			if startErr != nil {
+				if st.StartError == daemon.StartPolicyPrincipalRequired {
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr(), policyPrincipalWarning)
+				}
 				return Exit(startErr.Error(), exitCodeDatabase)
 			}
 			return nil

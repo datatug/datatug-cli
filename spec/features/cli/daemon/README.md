@@ -42,11 +42,11 @@ When the daemon is not running and could not be started, the wrapper MUST print 
 
 #### REQ: status
 
-`datatug daemon status [--format json|text]` MUST NOT start or stop anything. JSON (the default) is one object on stdout with: `running` (bool), `url` (agent API base, e.g. `http://127.0.0.1:8989`, empty when not running), `uiBase` (web UI address of this agent), `port`, `pid`, `startedBy` (caller id, `"external"` for a datatug API this CLI did not start, empty when not running), `startedAt` (RFC 3339), `version`, `logFile`, `idleTimeout` and `error` (fixed phrase, only when the last start failed). Exit code is `0` whether or not it runs.
+`datatug daemon status [--format json|text]` MUST NOT start or stop anything. JSON (the default) is one object on stdout with: `running` (bool), `url` (agent API base, e.g. `http://127.0.0.1:8989`, empty when not running), `uiBase` (web UI address of this agent), `port`, `pid`, `startedBy` (caller id, `"external"` for a datatug API this CLI did not start, empty when not running), `startedAt` (RFC 3339), `version`, `logFile`, `idleTimeout` and `error` (fixed phrase, only when the last start failed) and `startError` (stable machine-readable reason, omitted when empty; the one value today is `policy-principal-required`: a policy set exists, `serve` would refuse to start without `--as`/`--role`/`--group`, and the daemon names none; `start` decides this before spawning, with the same policies-folder rule as `serve`, reading nothing beyond whether a valid set exists). Exit code is `0` whether or not it runs.
 
 #### REQ: start
 
-`datatug daemon start [--client <caller>] [--format json|text]` MUST ensure the daemon is running: reuse a running one, otherwise start one, then print the `status` object. It MUST exit `0` when running and `4` when it could not be started (the status object, with `error`, is still printed).
+`datatug daemon start [--client <caller>] [--format json|text]` MUST ensure the daemon is running: reuse a running one, otherwise start one, then print the `status` object. It MUST exit `0` when running and `4` when it could not be started (the status object, with `error` and, when named, `startError`, is still printed). On `policy-principal-required`, `daemon start` and the `--client` auto-start print one stderr line saying a policy set exists but no principal was named for the daemon and to run `datatug serve --as <principal>` or remove the policy set; it never names the policy path or contents.
 
 #### REQ: stop
 
@@ -186,4 +186,4 @@ For a stored result, `daemon url --result <id> --view=sources --row 2` prints `<
 
 ## Open Questions
 
-- A policy set under `~/.datatug/policies/` makes `serve` refuse to start without `--as`; the daemon then fails with its log pointing at that. Should `daemon start` accept `--as/--role/--group` passthrough?
+- How does the daemon obtain a principal when a policy set exists (`--as`/`--role`/`--group` on `daemon start`, remembered in `daemon.json`)? Today it names none, so `start` fails with `startError: policy-principal-required`. Recommendation: `daemon start --as/--role/--group`, persisted in `daemon.json` and passed through to `serve`, with the `--client` wrapper reusing the recorded one.

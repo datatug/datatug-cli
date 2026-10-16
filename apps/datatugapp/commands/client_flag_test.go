@@ -78,6 +78,13 @@ func TestEnsureDaemonForCaller(t *testing.T) {
 			t.Fatalf("%q", got)
 		}
 	})
+	t.Run("policy set without a principal is one clear warning", func(t *testing.T) {
+		useDaemonPolicySet(t, true)
+		got := ensure(t, "show", "--client", "claude-mod")
+		if got != policyPrincipalWarning+"\n" || strings.Contains(got, "daemon.log") {
+			t.Fatalf("%q", got)
+		}
+	})
 	for _, args := range [][]string{
 		{"daemon", "stop", "--client", "claude-mod"},
 		{"serve", "--client", "claude-mod"},

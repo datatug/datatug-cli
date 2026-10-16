@@ -45,11 +45,24 @@ func TestDaemonURLOfAResult(t *testing.T) {
 		{"url", "--result", "t4", "--records"},
 		{"url", "--result", "t4", "--format", "x"},
 		{"url", "--result", "t4", "--row", "0"},
+		{"url", "--result", "t4", "--result-view", "chart"},
+		{"url", "--result", "t4", "--result-view", "table", "--view=sources"},
+		{"url", "--result", "t4", "--result-view", "table", "--view"},
+		{"url", "--result-view", "sources"},
 		{"url", "--project", "p", "--env", "e", "--db", "d", "--table", "t", "--row", "5"},
 		{"url", "--project", "p", "--env", "e", "--db", "d", "--table", "t", "--view=sources"},
 	} {
 		_, err := runDaemon(t, argv...)
 		assert.Equal(t, exitCodeUsage, exitCodeOf(t, err), strings.Join(argv, " "))
+	}
+	// --result-view takes a space-separated value, alone or beside the same --view=<x>
+	for _, argv := range [][]string{
+		{"url", "--result", "t4", "--result-view", "sources", "--row", "2"},
+		{"url", "--result", "t4", "--result-view=sources", "--view=sources", "--row", "2"},
+	} {
+		out, err = runDaemon(t, argv...)
+		require.NoError(t, err, strings.Join(argv, " "))
+		assert.Contains(t, out, "/result/t4?view=sources&row=2")
 	}
 	// a table link still takes a bare --view, and --view=true
 	out, err = runDaemon(t, "url", "--project", "p", "--env", "e", "--db", "d", "--table", "t", "--view=true")

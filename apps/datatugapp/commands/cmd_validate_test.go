@@ -138,3 +138,47 @@ func TestValidateProject_RealDemoProject(t *testing.T) {
 		t.Fatalf("validateProject(%s): %v", dir, err)
 	}
 }
+
+// TestValidateCommand_ShowcaseBoard keeps the published CLI validator aligned
+// with the saved chart and nested-tab board contract. The fixture is the
+// showcase board at datatug-demo-project origin/main 11d88a220354.
+func TestValidateCommand_ShowcaseBoard(t *testing.T) {
+	dir := t.TempDir()
+	initCmd := initCommand()
+	initCmd.SetArgs([]string{"showcase-fixture", dir})
+	if err := initCmd.Execute(); err != nil {
+		t.Fatalf("init project: %v", err)
+	}
+
+	board, err := os.ReadFile(filepath.Join("testdata", "visual-showcase-board.json"))
+	if err != nil {
+		t.Fatalf("read saved showcase board: %v", err)
+	}
+	boardDir := filepath.Join(dir, "boards", "showcase")
+	if err := os.MkdirAll(boardDir, 0o755); err != nil {
+		t.Fatalf("create board directory: %v", err)
+	}
+	boardPath := filepath.Join(boardDir, "board.json")
+	if err := os.WriteFile(boardPath, board, 0o600); err != nil {
+		t.Fatalf("write saved showcase board: %v", err)
+	}
+
+	cmd := testCommandArgs()
+	cmd.SetArgs([]string{"-d=" + dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("datatug validate rejected the saved showcase board: %v", err)
+	}
+
+	invalidBoard := strings.Replace(string(board), `"type": "bar-race"`, `"type": "invalid-chart"`, 1)
+	if invalidBoard == string(board) {
+		t.Fatal("saved showcase board no longer contains the race chart under test")
+	}
+	if err := os.WriteFile(boardPath, []byte(invalidBoard), 0o600); err != nil {
+		t.Fatalf("write invalid chart board: %v", err)
+	}
+	cmd = testCommandArgs()
+	cmd.SetArgs([]string{"-d=" + dir})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("datatug validate accepted an invalid chart type")
+	}
+}

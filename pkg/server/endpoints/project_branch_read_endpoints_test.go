@@ -86,7 +86,41 @@ func TestQualifiedProjectReadEndpointsMatchWebWire(t *testing.T) {
 	feature := "feature"
 	featureQuery := cloneValues(selectors)
 	featureQuery.Set("branch", feature)
-	require.Equal(t, http.StatusConflict, query("/datatug/boards/all_boards", featureQuery, getBoards).Code)
+	for _, route := range []struct {
+		path    string
+		values  url.Values
+		handler http.HandlerFunc
+	}{
+		{"/datatug/boards/all_boards", featureQuery, getBoards},
+		{"/datatug/boards/board", withID(selectors, "sales"), getBoard},
+		{"/datatug/entities/all_entities", featureQuery, getEntities},
+		{"/datatug/entities/entity", withID(selectors, "qualified-customer"), getEntity},
+		{"/datatug/environments/all_environments", featureQuery, getEnvironments},
+		{"/datatug/projects/project_summary", withID(selectors, scope.Project), getProjectSummary},
+	} {
+		selected := cloneValues(route.values)
+		selected.Set("branch", feature)
+		require.Equal(t, http.StatusConflict, query(route.path, selected, route.handler).Code, route.path)
+	}
+	for _, route := range []struct {
+		path    string
+		values  url.Values
+		handler http.HandlerFunc
+	}{
+		{"/datatug/boards/all_boards", selectors, getBoards},
+		{"/datatug/boards/board", withID(selectors, "sales"), getBoard},
+		{"/datatug/entities/all_entities", selectors, getEntities},
+		{"/datatug/entities/entity", withID(selectors, "qualified-customer"), getEntity},
+		{"/datatug/environments/all_environments", selectors, getEnvironments},
+		{"/datatug/projects/project_summary", withID(selectors, scope.Project), getProjectSummary},
+	} {
+		invalid := cloneValues(route.values)
+		invalid.Set("storage", "missing-store")
+		require.Equal(t, http.StatusBadRequest, query(route.path, invalid, route.handler).Code, route.path)
+	}
+	catalogMismatch := cloneValues(selectors)
+	catalogMismatch.Set("branch", feature)
+	require.Equal(t, http.StatusConflict, query("/datatug/projects/connection_catalog", catalogMismatch, projectConnectionCatalogHandler).Code)
 	missingBoardID := cloneValues(selectors)
 	require.Equal(t, http.StatusBadRequest, query("/datatug/boards/board", missingBoardID, getBoard).Code)
 	missingEntityID := cloneValues(selectors)
@@ -94,8 +128,14 @@ func TestQualifiedProjectReadEndpointsMatchWebWire(t *testing.T) {
 	api.ConfigureSecureSession(secureread.Session{}, map[string]string{scope.Project: projectDir}, api.Capabilities{})
 	deniedBoard := query("/datatug/boards/board", boardQuery, getBoard)
 	require.Equal(t, http.StatusForbidden, deniedBoard.Code, deniedBoard.Body.String())
+	deniedEntities := query("/datatug/entities/all_entities", selectors, getEntities)
+	require.Equal(t, http.StatusForbidden, deniedEntities.Code, deniedEntities.Body.String())
+	deniedEntity := query("/datatug/entities/entity", entityQuery, getEntity)
+	require.Equal(t, http.StatusForbidden, deniedEntity.Code, deniedEntity.Body.String())
 	deniedEnvironments := query("/datatug/environments/all_environments", selectors, getEnvironments)
 	require.Equal(t, http.StatusForbidden, deniedEnvironments.Code, deniedEnvironments.Body.String())
+	deniedSummary := query("/datatug/projects/project_summary", summaryQuery, getProjectSummary)
+	require.Equal(t, http.StatusForbidden, deniedSummary.Code, deniedSummary.Body.String())
 }
 
 func cloneValues(source url.Values) url.Values {
@@ -103,5 +143,11 @@ func cloneValues(source url.Values) url.Values {
 	for key, values := range source {
 		result[key] = append([]string(nil), values...)
 	}
+	return result
+}
+
+func withID(source url.Values, id string) url.Values {
+	result := cloneValues(source)
+	result.Set("id", id)
 	return result
 }

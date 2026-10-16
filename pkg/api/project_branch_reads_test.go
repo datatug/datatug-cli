@@ -33,6 +33,30 @@ func configureBranchReadTest(t *testing.T, projectID, dir string) {
 	t.Cleanup(func() { ConfigureSecureSession(secureread.Session{}, nil, Capabilities{}) })
 }
 
+func TestQualifiedProjectConnectionCatalogReadsSelectedBranchAndFailsClosed(t *testing.T) {
+	const projectID = "qualified-connection-catalog"
+	dir, git := setupTestGitProject(t, projectID)
+	configureBranchReadTest(t, projectID, dir)
+	branch := git("symbolic-ref", "--short", "HEAD")
+	path := filepath.Join(dir, "connections", "demo-db.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	valid := `{"format":"datatug-demo-connections/v1","connections":[{"id":"chinook-sqlite","dataset":"chinook","storage":"sqlite","readiness":"public-api","source":"https://demodb.dev/ovdb/v1/databases/chinook","fixtureSha256":"7651ba378ac2fcd0dfc3c66fb101f7a7eed3ba39a612ec642b96e20702061f15","browserFixture":{"url":"https://chinook.demodb.dev/data/chinook.sqlite","bytes":1007616}}]}`
+	require.NoError(t, os.WriteFile(path, []byte(valid), 0o600))
+	got, err := LocalProjectConnectionCatalogForBranch(context.Background(), dto.ProjectRef{StoreID: LocalStoreID, ProjectID: projectID}, branch)
+	require.NoError(t, err)
+	require.Equal(t, "datatug-demo-connections/v1", got.Format)
+	require.Len(t, got.Connections, 1)
+	require.Equal(t, "chinook-sqlite", got.Connections[0].ID)
+
+	require.NoError(t, os.Remove(path))
+	_, err = LocalProjectConnectionCatalogForBranch(context.Background(), dto.ProjectRef{StoreID: LocalStoreID, ProjectID: projectID}, branch)
+	require.Error(t, err)
+
+	require.NoError(t, os.WriteFile(path, []byte(`{"format":"unknown"}`), 0o600))
+	_, err = LocalProjectConnectionCatalogForBranch(context.Background(), dto.ProjectRef{StoreID: LocalStoreID, ProjectID: projectID}, branch)
+	require.Error(t, err)
+}
+
 func TestQualifiedProjectReadsUseOnlySelectedCurrentBranch(t *testing.T) {
 	const projectID = "qualified-read-branch"
 	dir, git := setupTestGitProject(t, projectID)

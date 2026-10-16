@@ -144,6 +144,9 @@ func daemonURLCommand() *cobra.Command {
 			if f.Changed("result") {
 				return writeResultLink(cmd, format)
 			}
+			if f.Changed("result-view") {
+				return Exit("--result-view is the view of a result page: it goes with --result", exitCodeUsage)
+			}
 			if f.Changed("row") {
 				return Exit("--row is the position of a row of a result: it goes with --result", exitCodeUsage)
 			}
@@ -190,6 +193,7 @@ func daemonURLCommand() *cobra.Command {
 	f.String("view", "", "The object is a view (bare --view); with --result, the view of the result page: --view=table|record|columns|sources|related")
 	f.Lookup("view").NoOptDefVal = "true"
 	f.String("result", "", "Link to a stored query result (the id of `query run --result-id`) instead of a table")
+	f.String("result-view", "", "With --result: the view of the result page, as a normal value: --result-view table|record|columns|sources|related (the same as --view=<name>)")
 	f.Int("row", 0, "With --result: the position of the row to show (1-based)")
 	f.Bool("records", false, "Link to the top records of the table")
 	f.Int("limit", 0, "With --records: how many rows (default 50, at most 1000)")
@@ -213,7 +217,7 @@ func tableViewFlag(cmd *cobra.Command) (bool, error) {
 // resultLinkExclusive are the flags of a table link, refused with --result.
 var resultLinkExclusive = []string{"project", "env", "db", "table", "schema", "records", "limit", "record"}
 
-// writeResultLink is `daemon url --result <id> [--view=<view>] [--row <n>]`.
+// writeResultLink is `daemon url --result <id> [--result-view <view> | --view=<view>] [--row <n>]`.
 // Like every `daemon url`, it never starts the daemon and sends no request;
 // whether the result is there is read from the store on disk.
 func writeResultLink(cmd *cobra.Command, format string) error {
@@ -226,6 +230,12 @@ func writeResultLink(cmd *cobra.Command, format string) error {
 	var req daemon.ResultLinkRequest
 	req.ID, _ = f.GetString("result")
 	req.View, _ = f.GetString("view")
+	if resultView, _ := f.GetString("result-view"); resultView != "" {
+		if f.Changed("view") && req.View != resultView {
+			return Exit("--result-view and --view name different views: give one of them", exitCodeUsage)
+		}
+		req.View = resultView
+	}
 	req.Row, _ = f.GetInt("row")
 	if f.Changed("row") && req.Row == 0 {
 		return Exit(fmt.Sprintf("--row must be between 1 and %d", daemon.MaxResultRow), exitCodeUsage)

@@ -78,6 +78,9 @@ type resultSink struct {
 	result  *queryresults.Result
 	meta    queryresults.Meta
 	written bool
+	// describe reads the schema facts of the result once its columns are
+	// known; nil describes nothing.
+	describe func(columns []string) resultDescription
 }
 
 func openResultSink(o queryOptions) (*resultSink, error) {
@@ -100,7 +103,14 @@ func (s *resultSink) discardUnlessWritten() {
 }
 
 // describeAdHoc records the database and the query of an ad-hoc run.
-func (s *resultSink) describeAdHoc(ctx context.Context, o queryOptions, backend dbcopy.BackendRef, queryText string, variables map[string]any) {
+func (s *resultSink) describeAdHoc(ctx context.Context, o queryOptions, backend dbcopy.BackendRef, db dal.DB, queryText string, variables map[string]any) {
+	s.describe = func(columns []string) resultDescription {
+		return describeDTQL(ctx, queryText, columns, dtqlSources{
+			open: func(context.Context, string) (dal.DB, string, func(), error) {
+				return db, backend.Scheme, func() {}, nil
+			},
+		})
+	}
 	s.meta.DB = queryresults.DB{Driver: backend.Scheme}
 	if ref, ok := fullDatatugRef(ctx, o.db); ok {
 		s.meta.DB = projectDB(ref, backend.Scheme)
@@ -112,9 +122,61 @@ func (s *resultSink) describeAdHoc(ctx context.Context, o queryOptions, backend 
 }
 
 // describeSaved records the database and the query of a saved-query run.
-func (s *resultSink) describeSaved(ctx context.Context, store datatug.ProjectStore, projectDir string, o queryOptions, queryID string, queryDef *datatug.QueryDef, variables map[string]any) {
+func (s *resultSink) describeSaved(ctx context.Context, store datatug.ProjectStore, projectDir string, o queryOptions, queryID string, queryDef *datatug.QueryDef, variables map[string]any, result secureread.Result) {
 	s.meta.Query = queryresults.Query{Kind: queryresults.QueryKindSaved, SavedQueryID: queryID, SavedQueryType: strings.ToLower(string(queryDef.Type)), Parameters: typedParameters(variables), Policy: queryresults.PolicyProject}
 	s.meta.DB = savedQueryDB(ctx, store, projectDir, o.project, o.env, queryDef)
+	switch queryDef.Type {
+	case datatug.QueryTypeSQL:
+		s.describe = func([]string) resultDescription { return describeNativeSQL(result.ColumnTypes) }
+	case datatug.QueryTypeHTTP:
+		s.describe = func([]string) resultDescription { return describeHTTP(result.Collection) }
+	default:
+		sources := savedDTQLSources(ctx, store, projectDir, o.env, queryDef)
+		s.describe = func(columns []string) resultDescription {
+			return describeDTQL(ctx, queryDef.Text, columns, sources)
+		}
+	}
+}
+
+// savedDTQLSources opens the databases of a saved DTQL query: each named
+// database of a federated query, else the one it runs on.
+func savedDTQLSources(ctx context.Context, store datatug.ProjectStore, projectDir, envFlag string, queryDef *datatug.QueryDef) dtqlSources {
+	envID, _ := resolveQueryEnvironment(ctx, store, envFlag)
+	projectID := registeredProjectID(projectDir)
+	return dtqlSources{
+		open: func(ctx context.Context, database string) (dal.DB, string, func(), error) {
+			var source string
+			var err error
+			if database == "" {
+				source, err = resolveSQLOrDTQLSourceURL(ctx, store, projectDir, envFlag, queryDef)
+			} else {
+				source, err = resolveQuerySourceURL(ctx, store, projectDir, envID, database)
+			}
+			if err != nil {
+				return nil, "", nil, err
+			}
+			backend, err := chatParseSource(source)
+			if err != nil {
+				return nil, "", nil, err
+			}
+			db, err := openBackend(ctx, backend)
+			if err != nil {
+				return nil, backend.Scheme, nil, err
+			}
+			return db, backend.Scheme, func() {
+				if closer, ok := db.(io.Closer); ok {
+					_ = closer.Close()
+				}
+			}, nil
+		},
+		ref: func(database string) *string {
+			if projectID == "" || envID == "" {
+				return nil
+			}
+			text := dbcopy.DatatugRef{Project: projectID, DB: database, Env: envID}.String()
+			return &text
+		},
+	}
 }
 
 // collectAndWrite reads at most --result-rows + 1 records and writes the files.
@@ -146,9 +208,16 @@ func (s *resultSink) writeSecureRows(stdout io.Writer, columns []string, rows []
 }
 
 func (s *resultSink) write(stdout io.Writer, collector *queryresults.Collector, columns []string) error {
-	data := collector.Build(s.id, columns)
+	description := resultDescription{}
+	if s.describe != nil {
+		description = s.describe(columns)
+	}
+	data := collector.Build(s.id, columns, description.declared)
 	meta := queryresults.NewMeta(s.id, cliVersion(), data)
 	meta.DB, meta.Query, meta.Provenance = s.meta.DB, s.meta.Query, s.meta.Provenance
+	meta.Describe(description.facts)
+	meta.Participants, meta.Related = description.participants, description.related
+	meta.Unavailable.Participants, meta.Unavailable.Related, meta.Unavailable.DeclaredTypes = description.unavailable.Participants, description.unavailable.Related, description.unavailable.DeclaredTypes
 	if err := s.result.Write(data.Bytes, meta.Encode()); err != nil {
 		return storeExit(err)
 	}

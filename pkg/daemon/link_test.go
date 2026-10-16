@@ -40,7 +40,7 @@ func TestBuildLink(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.URL != c.url || got.Kind != c.kind || got.UISupport != UISupportPending || !got.Running {
+			if got.URL != c.url || got.Kind != c.kind || got.UISupport != UISupportAvailable || !got.Running {
 				t.Fatalf("got %+v, want url %s kind %s", got, c.url, c.kind)
 			}
 		})
@@ -107,9 +107,20 @@ func TestEncodeComponent(t *testing.T) {
 	}
 }
 
-func TestStatusUISupportIsPending(t *testing.T) {
+// The three table kinds are available; a query result is pending until the
+// web UI serves its result/<id> route.
+func TestStatusUISupportIsAvailable(t *testing.T) {
+	if len(uiSupport) != 4 {
+		t.Fatalf("uiSupport covers %d kinds, want 4", len(uiSupport))
+	}
 	for kind, v := range uiSupport {
-		if v != UISupportPending {
+		if kind == KindQueryResult {
+			if v != UISupportPending {
+				t.Errorf("%s: %s", kind, v)
+			}
+			continue
+		}
+		if v != UISupportAvailable {
 			t.Errorf("%s: %s", kind, v)
 		}
 	}

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -99,5 +100,16 @@ func TestBuildLinkScannedSourceWithoutTheNameRefusesIt(t *testing.T) {
 	_, err := BuildLink(linkStatus(), LinkRequest{Project: "p", Env: "e", DB: "d", Table: "t", Metadata: loaded(&Metadata{})})
 	if !errors.As(err, new(NotFoundError)) {
 		t.Fatal(err)
+	}
+}
+
+func TestLinkCarriesTheContractVersion(t *testing.T) {
+	got, err := BuildLink(linkStatus(), LinkRequest{Project: "p", Env: "e", DB: "d", Table: "t"})
+	if err != nil || got.Contract != 1 || ContractVersion != 1 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	b, _ := json.Marshal(got)
+	if !strings.Contains(string(b), `"contract":1`) {
+		t.Fatal(string(b))
 	}
 }

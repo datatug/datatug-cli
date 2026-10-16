@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -394,6 +395,41 @@ func TestStartNeverOrphansASlowLiveDaemon(t *testing.T) {
 		assertNotRunning(t, err, ErrPhraseTimeout)
 		if len(f.spawned) != 0 || !f.hasRecord() {
 			t.Fatal("record kept, nothing spawned")
+		}
+	})
+}
+
+func TestStartPolicyPrincipalRequired(t *testing.T) {
+	t.Run("named reason before any spawn", func(t *testing.T) {
+		f := newFake(t)
+		f.PolicySetPresent = func() bool { return true }
+		st, err := f.Start("x")
+		assertNotRunning(t, err, ErrPhrasePolicyPrincipal)
+		if st.StartError != StartPolicyPrincipalRequired || st.Error != ErrPhrasePolicyPrincipal || st.Running {
+			t.Fatalf("%+v", st)
+		}
+		if len(f.spawned) != 0 || f.hasRecord() {
+			t.Fatal("must not spawn or record")
+		}
+		data, _ := json.Marshal(st)
+		if !strings.Contains(string(data), `"startError":"policy-principal-required"`) {
+			t.Fatalf("%s", data)
+		}
+	})
+	t.Run("no policy set behaves as before", func(t *testing.T) {
+		f := newFake(t)
+		f.PolicySetPresent = func() bool { return false }
+		f.spawnErr = errors.New("boom")
+		st, err := f.Start("x")
+		assertNotRunning(t, err, ErrPhraseSpawn)
+		if st.StartError != "" {
+			t.Fatalf("%+v", st)
+		}
+	})
+	t.Run("startError is omitted when empty", func(t *testing.T) {
+		data, _ := json.Marshal(Status{})
+		if strings.Contains(string(data), "startError") || strings.Contains(string(data), `"error"`) {
+			t.Fatalf("%s", data)
 		}
 	})
 }

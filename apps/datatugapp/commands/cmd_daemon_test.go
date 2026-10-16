@@ -174,7 +174,7 @@ func TestDaemonURL(t *testing.T) {
 	var link daemon.Link
 	if err != nil || json.Unmarshal([]byte(out), &link) != nil ||
 		link.URL != "https://datatug.app/store/http-127.0.0.1:8989/project/demo/env/dev/db/Chinook/table/Album?schema=" ||
-		link.Kind != daemon.KindTableMetadata || link.Running {
+		link.Kind != daemon.KindTableMetadata || link.Running || link.Contract != 1 || !strings.Contains(out, `"contract": 1`) {
 		t.Fatalf("%s %v", out, err)
 	}
 	out, err = runDaemon(t, append(args, "--records", "--limit", "10", "--format", "text")...)
@@ -182,7 +182,7 @@ func TestDaemonURL(t *testing.T) {
 		t.Fatalf("%q %v", out, err)
 	}
 	out, err = runDaemon(t, append(args, "--record", `{"AlbumId":1}`, "--view", "--schema", "main")...)
-	if err != nil || !strings.Contains(out, `/view/Album/record?schema=main#pk=`) || !strings.Contains(out, `"uiSupport": "pending"`) {
+	if err != nil || !strings.Contains(out, `/view/Album/record?schema=main#pk=`) || !strings.Contains(out, `"uiSupport": "available"`) {
 		t.Fatalf("%s %v", out, err)
 	}
 	if _, err = runDaemon(t, "url", "--project", "demo"); exitCodeOf(t, err) != exitCodeUsage {
@@ -443,4 +443,70 @@ func TestDaemonURLScanThatHoldsNothingUsableIsNotScanned(t *testing.T) {
 		}
 	}
 	warned("no model folder")
+}
+
+// useDaemonPolicySet makes the fake manager see a policy set.
+func useDaemonPolicySet(t *testing.T, present bool) {
+	t.Helper()
+	orig := newDaemonManager
+	t.Cleanup(func() { newDaemonManager = orig })
+	newDaemonManager = func() *daemon.Manager {
+		m := daemonManagerWithoutPolicy(t)
+		m.PolicySetPresent = func() bool { return present }
+		return m
+	}
+}
+
+func daemonManagerWithoutPolicy(t *testing.T) *daemon.Manager {
+	t.Helper()
+	return &daemon.Manager{
+		Dir:       t.TempDir(),
+		Exe:       func() (string, error) { return "/bin/datatug", nil },
+		Probe:     func(int) (string, bool) { return "", false },
+		Dial:      func(int) bool { return false },
+		PortFree:  func(int) bool { return true },
+		Alive:     func(int) bool { return false },
+		Owns:      func(int, int) bool { return true },
+		Terminate: func(int) error { return nil },
+		Spawn: func(string, []string, string) (int, <-chan struct{}, error) {
+			return 0, nil, errors.New("must not spawn")
+		},
+		Now: time.Now, Sleep: func(time.Duration) {}, StartWait: time.Millisecond, Poll: time.Millisecond,
+	}
+}
+
+func TestDaemonStartPolicyPrincipalRequired(t *testing.T) {
+	useDaemonPolicySet(t, true)
+	root := daemonRoot()
+	var out, errOut bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs([]string{"daemon", "start"})
+	err := root.Execute()
+	if exitCodeOf(t, err) != exitCodeDatabase {
+		t.Fatalf("exit: %v", err)
+	}
+	var raw map[string]any
+	if jsonErr := json.Unmarshal(out.Bytes(), &raw); jsonErr != nil {
+		t.Fatal(jsonErr)
+	}
+	if raw["startError"] != "policy-principal-required" || raw["error"] != daemon.ErrPhrasePolicyPrincipal {
+		t.Fatalf("%s", out.String())
+	}
+	if got := errOut.String(); got != policyPrincipalWarning+"\n" || strings.Contains(got, "policies") && strings.Contains(got, "/") {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestDaemonStartWithoutPolicySetKeepsStatusShape(t *testing.T) {
+	useDaemonPolicySet(t, false)
+	root := daemonRoot()
+	var out, errOut bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&errOut)
+	root.SetArgs([]string{"daemon", "start"})
+	err := root.Execute()
+	if exitCodeOf(t, err) != exitCodeDatabase || strings.Contains(out.String(), "startError") || strings.Contains(errOut.String(), "policy set") {
+		t.Fatalf("%v %s %s", err, out.String(), errOut.String())
+	}
 }

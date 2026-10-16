@@ -31,13 +31,15 @@ const (
 	MaxLimit     = 1000
 )
 
-// uiSupport is flipped to available per kind once datatug-apps ships the route
-// (spec/features/cli/daemon, Follow-up). All three kinds are pending: the UI
-// opens none of them with the shape below yet.
+// uiSupport is per kind. The three table kinds are available: the deployed web
+// UI serves the table and the view route of each (datatug-apps
+// datatug-routing-proj-env-db.ts), so a kind is never half available. A query
+// result is pending until the UI serves its result/<id> route.
 var uiSupport = map[string]string{
-	KindTableMetadata: UISupportPending,
-	KindTableRecords:  UISupportPending,
-	KindRecord:        UISupportPending,
+	KindTableMetadata: UISupportAvailable,
+	KindTableRecords:  UISupportAvailable,
+	KindRecord:        UISupportAvailable,
+	KindQueryResult:   UISupportPending,
 }
 
 const (
@@ -79,8 +81,12 @@ type LinkRequest struct {
 	Metadata func() *Metadata
 }
 
+// ContractVersion is the shape version of the `daemon url` JSON: bumped on any incompatible change.
+const ContractVersion = 1
+
 // Link is the deep link of one card.
 type Link struct {
+	Contract  int    `json:"contract"`
 	URL       string `json:"url"`
 	Kind      string `json:"kind"`
 	Running   bool   `json:"running"`
@@ -120,7 +126,7 @@ func BuildLink(st Status, req LinkRequest) (Link, error) {
 		encodeComponent(req.Project), encodeComponent(req.Env), encodeComponent(req.DB), kind, encodeComponent(req.Table))
 	schema := "schema=" + encodeComponent(req.Schema)
 	var fragment []string
-	out := Link{Kind: KindTableMetadata, Running: st.Running, Warnings: []string{}}
+	out := Link{Contract: ContractVersion, Kind: KindTableMetadata, Running: st.Running, Warnings: []string{}}
 	var keys []string
 	switch {
 	case req.Records:

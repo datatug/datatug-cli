@@ -78,3 +78,39 @@ func TestLines(t *testing.T) {
 		t.Fatalf("locate %q", got)
 	}
 }
+
+func TestMetaDescribeAndListBounds(t *testing.T) {
+	meta := NewMeta("t", "v", Data{Columns: []Column{{Name: KeyColumn, Type: "string"}, {Name: "id", Type: "integer"}, {Name: "n", Type: "string"}}})
+	meta.Describe(map[string]ColumnFacts{
+		"id": {DeclaredType: "int", PK: 1, Source: ColumnSource{Instance: "root", Schema: "main", Relation: "T", Column: "id"}, ForeignKeys: []ColumnFK{{RefSchema: "main", RefRelation: "U", RefColumn: "id"}}},
+		"n":  {DeclaredType: "string", Nullable: true, Source: ColumnSource{Instance: "root", Relation: "T", Column: "n"}},
+	})
+	if meta.Columns[0].DeclaredType != nil || meta.Columns[0].ForeignKeys != nil {
+		t.Fatal("an undescribed column stays null")
+	}
+	if *meta.Columns[1].PK != 1 || *meta.Columns[1].DeclaredType != "int" || len(meta.Columns[1].ForeignKeys) != 1 {
+		t.Fatalf("described %+v", meta.Columns[1])
+	}
+	if meta.Columns[2].PK != nil || !*meta.Columns[2].Nullable || meta.Columns[2].ForeignKeys == nil {
+		t.Fatalf("described %+v", meta.Columns[2])
+	}
+	var decoded map[string]any
+	_ = json.Unmarshal(meta.Encode(), &decoded)
+	if len(decoded["participants"].([]any)) != 0 || len(decoded["related"].([]any)) != 0 {
+		t.Fatal("empty lists are written as []")
+	}
+	meta.Participants = make([]Participant, MaxParticipants+1)
+	meta.Related = make([]Related, MaxRelated+1)
+	_ = json.Unmarshal(meta.Encode(), &decoded)
+	unavailable := decoded["unavailable"].(map[string]any)
+	if len(decoded["participants"].([]any)) != MaxParticipants || len(decoded["related"].([]any)) != MaxRelated || unavailable["participants"] != UnavailableTooMany || unavailable["related"] != UnavailableTooMany {
+		t.Fatalf("bounds %v", unavailable)
+	}
+	// a query text that grows when escaped is measured as written
+	meta.Participants, meta.Related = nil, nil
+	meta.Query.DTQL = strings.Repeat("<", MaxQueryBytes/3)
+	_ = json.Unmarshal(meta.Encode(), &decoded)
+	if decoded["unavailable"].(map[string]any)["query"] != UnavailableTooLarge {
+		t.Fatal("escaped query text is not measured")
+	}
+}

@@ -27,7 +27,9 @@ The command currently dispatches the registered URL schemes above; it does not a
 
 **Between SQLite and PostgreSQL (and SQLite to SQLite) the copy is faithful** (amended 2026-10-15, see [SQLite and PostgreSQL copies](#sqlite-and-postgresql-copies)): tables, columns with their declared types, primary keys, foreign keys with their actions, unique constraints, indexes, check constraints, defaults, auto-number counters and every value are carried, in one transaction on a snapshot of the source; whatever an engine cannot carry is a warning, never a silent loss. The other pairs keep the DALgo path described below.
 
-**SQL script destination** (added 2026-10-16, founder direction: not a second command): `--to 'sqlscript:///path/out.sql?dialect=mysql'` writes a deterministic MySQL script from a SQLite `--from` instead of copying into a database, with the same warnings, `--json`, `--dry-run`, `--fail-on-warning`, `--include` and `--exclude` (see [SQL script destinations](#sql-script-destinations)). `datatug db export` is unchanged.
+**SQL script destination** (added 2026-10-16, founder direction: not a second command): `--to 'sqlscript:///path/out.sql?dialect=mysql'` writes a deterministic MySQL script from a SQLite `--from` instead of copying into a database, with the same warnings, `--json`, `--dry-run`, `--fail-on-warning`, `--include` and `--exclude` (see [SQL script destinations](#sql-script-destinations)).
+
+**Native inGitDB destination and `datatug db export`** (added 2026-10-16, founder decision): `datatug db export` is a shortcut for `datatug db copy --to ingitdb://<folder>`: one engine, with a plain folder path and a default folder name added (see [Native inGitDB destination](#native-ingitdb-destination-and-datatug-db-export)).
 
 ## Contents
 
@@ -288,6 +290,38 @@ Types MUST be chosen from the declared type and every value, as for PostgreSQL: 
 
 Each dialect MUST be proved by loading its script with the engine's own client in a container of a digest-pinned image and comparing the result with the SQLite source (tables, columns, keys, indexes without the ones the engine creates for itself, row counts, every value through the engine's Go driver). The journey workflow MUST NOT be a required check and MUST NOT be added to the required `Go CI` workflow.
 
+### Native inGitDB destination and `datatug db export`
+
+Added 2026-10-16 (founder decision: `export` is an ergonomic local backup, not a second implementation). The engine is `dbcopy.ExportInGitDBReport` (`pkg/dbcopy/export_ingitdb.go`, `export_report.go`); the commands are `apps/datatugapp/commands/cmd_db_copy_ingitdb.go` (the shared run) and `cmd_db_export.go` (the shortcut).
+
+#### REQ: ingitdb-new-destination
+
+A `--to ingitdb://<folder>` whose folder does not exist MUST write a complete native inGitDB project: every collection of the source (or those the filters select), in a staging folder beside the destination that becomes the destination only after every collection succeeded, so a failed copy leaves no destination and no staging folder. A `--to ingitdb://<folder>` that exists is copied into as before (the generic engine).
+
+#### REQ: ingitdb-records-format
+
+The destination URL MAY carry `?records-format=json|jsonl|ingr|csv|yaml` (default `json`), which sets the records file format of every collection. Any other query key together with it MUST be refused with exit `2`. The option on a destination that already exists MUST be refused with exit `2`. `export --records-format` is the same option; both given and different MUST be refused with exit `2`.
+
+#### REQ: ingitdb-flags
+
+`--include`, `--exclude`, `--where`, `--limit`, `--filter-config`, `--from-schema`, `--dry-run`, `--json` and `--fail-on-warning` MUST work for a new native destination as for the other destinations, with the same report (`command`, `status`, `from`, `to`, `tables`, `totals`, `warnings`, `exitCode`). `--overwrite`, `--to-schema`, `--decimals`, `--parallel-streams`, `--progress` and `--recover-job-ref` MUST be refused with exit `2` and the reason, before the source is opened (with `--json` the refusal is a `failed` report). `--dry-run` MUST read and check every row and write nothing: no destination, no staging folder in the destination's parent, and the same counts a real run reports.
+
+#### REQ: ingitdb-warnings
+
+Nothing MAY be dropped silently. A foreign key whose target collection `--include`/`--exclude` leaves out MUST be left out of the project and reported as a `foreign-key-dropped` warning; a kept foreign key whose target has its rows narrowed by `--where` or `--limit` MUST be reported as a `filtered-parent` warning. `--fail-on-warning` MUST exit `3` after the project is published. A `--where` or `--limit` that names a collection the project does not hold MUST fail with exit `1` before anything is written.
+
+#### REQ: export-is-a-shortcut
+
+`datatug db export --from <url> [--to <folder|ingitdb://folder>]` MUST behave as `datatug db copy --from <url> --to ingitdb://<folder>` for a folder that does not exist, with these differences only: the report's `command` is `db export`; a folder that exists is refused with exit `1`; a source with no collection to write is exit `1` (copy: a note and exit `0`); `--to` may be a plain path, relative or absolute (the shell expands `~`), where a value that starts with a scheme and a colon is a URL; and without `--to` the folder is `./<name>.ingitdb`. An invocation `export --to ingitdb://<folder> [--records-format F]` MUST write the same bytes, print the same line on stderr (`db export: exported N collections and M rows to <destination>`) and exit with the same code as it did before it became a shortcut.
+
+#### REQ: export-default-folder
+
+The default folder name MUST be derived from `--from` only and be the same on every run: the SQLite file name without its extension, the PostgreSQL database name (never the host, the user, the password or the query), or the file or folder name of an inGitDB, HTTP project or OpenVaultDB source; every character that is not a letter, a digit, `.`, `_` or `-` is written `_`, the ends are stripped of `.`, `_` and `-`, and the name is cut to 100 characters. When no name is left (an in-memory SQLite, a PostgreSQL URL with no database, an unsupported source) the command MUST exit `2` and say that `--to` is required. The folder is created in the working folder and, like any destination, MUST NOT exist.
+
+#### REQ: export-local-only
+
+`export` and the native destination write a local folder. A backup to the cloud or to another server MUST NOT be added to them: it is `db copy --to <destination>` where `copy` reaches one, or the planned `backup` command family.
+
 ## Architecture
 
 ### Components
@@ -369,7 +403,7 @@ Inherited from the source Idea, reinforced at Feature-spec time:
 - **Conflict resolution on a non-empty target beyond `--overwrite=recreate|reload`** — no `--overwrite=merge`, no row-level upsert. MVP requires the user to choose drop-and-rebuild or truncate-and-reload.
 - **All DALgo backends** — only SQLite, inGitDB, and PostgreSQL are E2E-tested. Other DALgo backends (e.g. Datastore, Firestore) MAY work through the abstraction but are not guaranteed by this Feature.
 - **Schema diffing / migration** — target schema is auto-created from source. There is no contract for reconciling an existing target schema with the source schema beyond the strict REQ:reload-schema-match rule.
-- **`datatug db export` folded into `copy --to ingitdb://`** — follow-up (2026-10-16): the SQL script became a destination of `db copy`, which leaves `db export` as the one place with its own command for a destination `copy` also reaches. Folding it is a separate change; `export` is unchanged.
+- **Cloud or remote backup** — `db export` writes a local folder only. A backup to a bucket, another server or a schedule belongs to the planned `backup` command family, or to `copy --to` for a destination `copy` already reaches (PostgreSQL, BigQuery, a SQLite file).
 - **A public comparison command for the script journey** — no: `internal/crossverify` stays internal; its long-term home is a `datatug compare` extension once compare's known defects are fixed.
 - **A bespoke dump-file format** — inGitDB serves as the canonical inspectable, versionable intermediate. `db copy --to ingitdb://./snap` followed by `db copy --from ingitdb://./snap --to <other>` is the "dump and load" workflow.
 - **Resumability after partial failure** — per REQ:partial-failure-leaves-state, the user reruns with `--overwrite`. There is no checkpoint/resume protocol.
@@ -636,6 +670,38 @@ A SQLite or inGitDB target accepts source names under its existing rules, includ
 **Given** the edge-case fixture, the fuzz fixture and the six pinned demo databases
 **When** `scripts/check-journey-mysql.sh` loads each script into MySQL 8.4 and runs the verifier
 **Then** every dataset passes with no difference, and a second load of a script stops at the marker table.
+
+### AC: export-is-a-shortcut-over-copy
+
+**Requirements:** copy#req:export-is-a-shortcut, copy#req:ingitdb-new-destination, copy#req:ingitdb-flags
+
+**Given** a SQLite file `shop.db`
+**When** the user runs `datatug db export --from sqlite://shop.db --json`, `datatug db export --from sqlite://shop.db --to backup --json` and `datatug db copy --from sqlite://shop.db --to ingitdb://backup2 --json` (each with `--include`, `--where` and `--limit` variations)
+**Then** the three folders have the same bytes, the three reports are the same except `command` and `to`, `shop.ingitdb` is the first folder, and `--dry-run` writes none.
+
+### AC: export-old-invocation-is-byte-identical
+
+**Requirements:** copy#req:export-is-a-shortcut
+
+**Given** `chinook.db` and the binary built before `export` became a shortcut
+**When** `datatug db export --from sqlite://chinook.db --to ingitdb://DIR --records-format F` runs for each of the five formats
+**Then** the tree of every run has the digest the earlier binary produced (checked in `cmd_db_export_shortcut_test.go`), stderr ends with the same `db export: exported 11 collections and 15607 rows to ingitdb://DIR` line, and a second run into `DIR` exits `1` with `destination already exists`.
+
+### AC: export-default-folder-is-safe
+
+**Requirements:** copy#req:export-default-folder
+
+**Given** `postgres://alice:secret@db.internal/shop?sslmode=disable`, `sqlite://:memory:` and `sqlite:///data/my shop.db`
+**When** the user runs `datatug db export --from <url>` without `--to`
+**Then** the folders are `shop.ingitdb` and `my_shop.ingitdb` (no host, user or secret in either), and the in-memory source exits `2` saying `--to` is required.
+
+### AC: ingitdb-warns-about-what-it-drops
+
+**Requirements:** copy#req:ingitdb-warnings
+
+**Given** a table `c` with a foreign key to `p`
+**When** the user exports with `--include c`, and again with `--fail-on-warning`
+**Then** the project holds `c` without the key, stderr and `--json` report a `foreign-key-dropped` warning, and the second run exits `3` with the project published.
 
 ## Open Questions
 

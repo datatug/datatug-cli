@@ -32,8 +32,8 @@ func TestDBExportFailureRedactsResolvedEnvSourcePassword(t *testing.T) {
 	t.Setenv("EXPORT_SOURCE_URL", "postgres://alice:"+secret+"@example.invalid/shop")
 	originalOpen, originalExport := openExportSource, runNativeExport
 	t.Cleanup(func() { openExportSource, runNativeExport = originalOpen, originalExport })
-	openExportSource = func(context.Context, dbcopy.BackendRef) (dal.DB, error) { return nil, nil }
-	runNativeExport = func(context.Context, dal.DB, string, ...dbcopy.ExportOptions) (map[string]int64, error) {
+	openExportSource = func(context.Context, dbcopy.BackendRef, string) (dal.DB, error) { return nil, nil }
+	runNativeExport = func(context.Context, dal.DB, string, ...dbcopy.ExportOptions) (*dbcopy.ExportResult, error) {
 		return nil, errors.New("describe collection: provider echoed " + secret)
 	}
 	command := dbExportCommand()

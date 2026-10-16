@@ -28,7 +28,7 @@ func dbCopyCommand() *cobra.Command {
 		Use:   "copy",
 		Short: "Copy a database from one DALgo URL to another.",
 		Long: "Between SQLite and PostgreSQL (and SQLite to SQLite) the copy is faithful: tables, columns, declared types, primary keys, foreign keys with their actions, unique constraints, indexes, check constraints, defaults and auto-increment counters are carried, and every value is copied exactly (a date stays the text it was). Anything an engine cannot carry - views across engines, triggers, expression indexes, collations, a check the target does not accept - is never dropped silently: it is listed as a warning, with --json as a machine-readable summary, and with --fail-on-warning as exit code 3. --dry-run prints the plan and changes nothing. A missing SQLite target file is created. The source is read as one snapshot and the target is written in one transaction: the copy either completes or leaves the target as it was. --where, --limit, --include and --exclude copy some rows or tables, and --overwrite=reload empties the target tables and loads them again (keeping their schema) in the same transaction. A value is never changed silently (a DECIMAL_TEXT is numeric, and the values numeric spells differently are counted in a warning; --decimals=text keeps the text): a column whose values do not fit the type its declaration suggests is carried in a type that holds them, and says so. See docs/db-copy.md.\n\n" +
-			"Other pairs copy source collections and rows through DALgo adapters. A BigQuery destination uses the authenticated Google identity configured on this machine and requires an explicit dataset location. Existing BigQuery tables are never replaced. For a complete, atomic native inGitDB export, use `datatug db export`.\n\n" +
+			"Other pairs copy source collections and rows through DALgo adapters. A BigQuery destination uses the authenticated Google identity configured on this machine and requires an explicit dataset location. Existing BigQuery tables are never replaced. An ingitdb:// destination that does not exist yet is written as a complete native inGitDB project, staged and published only after every collection succeeded (also available as `datatug db export`); it takes ?records-format=json|jsonl|ingr|csv|yaml, --include, --exclude, --where, --limit, --dry-run, --json and --fail-on-warning. An ingitdb:// destination that exists is copied into.\n\n" +
 			"A sqlscript:///PATH.sql?dialect=mysql destination (a SQLite --from only) writes a deterministic MySQL 8 script instead of copying into a database: the same tables, keys, indexes, checks, defaults and values, every value written as a safe literal, and the same warnings, --json report, --dry-run, --fail-on-warning, --include and --exclude; it refuses to replace an existing file unless --overwrite=recreate. See docs/db-copy.md.\n\n" +
 			"PostgreSQL (postgres://) is a preview: it opens only while " + dbcopy.PostgresPreviewEnv + "=1. A PostgreSQL --from is read through a read-only session, " +
 			"and a --from URL that turns the session's default_transaction_read_only off is refused. --to is the only place a PostgreSQL database is opened for writing.",
@@ -108,6 +108,12 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 		return dbCopySQLScript(cmd, fromURL, toURL, overwrite)
 	}
 
+	// An ingitdb:// destination may carry ?records-format=... (used when it is a new project).
+	toURL, recordsFormat, optionsErr := splitInGitDBOptions(toURL)
+	if optionsErr != nil {
+		return Exit(fmt.Sprintf("--to: %v", optionsErr), 2)
+	}
+
 	// Parse both URLs first (REQ:unknown-scheme-rejected, REQ:ingitdb-url-local-only,
 	// REQ:required-flags) — fail with exit 2 before any connection attempt.
 	srcRef, _, err := parseSourceArg(ctx, fromURL)
@@ -125,6 +131,15 @@ func dbCopyAction(cmd *cobra.Command, _ []string) error {
 	}
 	if tgtRef.Scheme == "bigquery" && overwrite != "" {
 		return Exit("BigQuery destinations never replace existing tables; omit --overwrite and choose a new dataset or table names", 2)
+	}
+
+	// An ingitdb:// destination that does not exist yet is a new native inGitDB project: the engine of
+	// `datatug db export` (staged, then published whole). One that exists is copied into below.
+	if isNewInGitDBTarget(tgtRef) {
+		return dbCopyToNewInGitDB(cmd, fromURL, srcRef, tgtRef, fromSchema, recordsFormat)
+	}
+	if recordsFormat != "" {
+		return Exit("?records-format applies only to an ingitdb:// destination that does not exist yet: it makes a new native project", 2)
 	}
 
 	// SQLite <-> PostgreSQL keeps keys, indexes, constraints and exact values: its own engine.

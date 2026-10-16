@@ -21,6 +21,7 @@ import (
 
 	"github.com/dal-go/dalgo/dal"
 	"github.com/dal-go/dalgo/dbschema"
+	"github.com/datatug/datatug-cli/pkg/dbcopy/filter"
 	"github.com/ingitdb/dalgo2ingitdb"
 	"github.com/ingitdb/ingitdb-go/ingitdb"
 	"github.com/ingitdb/ingitdb-go/ingitdb/datavalidator"
@@ -42,23 +43,60 @@ type exportTable struct {
 // source provider: SourceRowsReader streams, while a generic query reader may
 // materialize its collection before returning rows.
 func ExportInGitDB(ctx context.Context, source dal.DB, destination string, options ...ExportOptions) (map[string]int64, error) {
+	result, err := ExportInGitDBReport(ctx, source, destination, options...)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int64, len(result.Tables))
+	for _, table := range result.Tables {
+		counts[table.Name] = table.Rows
+	}
+	return counts, nil
+}
+
+// ExportInGitDBReport is ExportInGitDB that also reports what it did: the
+// tables and rows written (or, with DryRun, that would be written) and every
+// warning. It is the one native inGitDB destination of `datatug db copy` and
+// `datatug db export`.
+func ExportInGitDBReport(ctx context.Context, source dal.DB, destination string, options ...ExportOptions) (*ExportResult, error) {
 	format := ingitdb.RecordFormatJSON
 	if len(options) > 1 {
 		return nil, fmt.Errorf("only one export options value is supported")
 	}
+	var opts ExportOptions
 	if len(options) == 1 {
 		var err error
-		format, err = normalizeExportFormat(options[0].RecordsFormat)
+		opts = options[0]
+		format, err = normalizeExportFormat(opts.RecordsFormat)
 		if err != nil {
 			return nil, err
 		}
 	}
+	result := &ExportResult{}
 	refs, err := dbschema.ListCollections(ctx, source, nil)
 	if err != nil {
 		return nil, fmt.Errorf("list source collections: %w", err)
 	}
 	if len(refs) == 0 {
 		return nil, ErrSourceHasNoTables
+	}
+	allNames := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		allNames[ref.Name()] = true
+	}
+	refs, err = filter.ApplyTableFilter(refs, opts.Filters)
+	if err != nil {
+		return nil, err
+	}
+	if len(refs) == 0 {
+		return nil, ErrNoCollectionsSelected
+	}
+	selected := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		selected[ref.Name()] = true
+	}
+	if err := checkFilterTables(opts.Filters, selected); err != nil {
+		return nil, err
 	}
 	defs := make([]exportTable, 0, len(refs))
 	seenNames := map[string]bool{}
@@ -115,6 +153,7 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 				}
 			}
 		}
+		def.ForeignKeys = dropUnselectedForeignKeys(def, selected, allNames, result)
 		if _, err := dalgo2ingitdb.ExportCollectionDefinition(*def); err != nil {
 			return nil, fmt.Errorf("map source collection %q: %w", ref.Name(), err)
 		}
@@ -123,6 +162,7 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 	if err := validateExportRelationships(defs); err != nil {
 		return nil, err
 	}
+	warnFilteredParents(defs, opts.Filters, result)
 	constraintsChecked := false
 	if checker, ok := dal.As[dbschema.SourceConstraintChecker](source); ok {
 		if err := checker.CheckSourceConstraints(ctx); err != nil {
@@ -139,8 +179,12 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
+	// A dry run builds the whole project to check every row, and throws it away: it stays
+	// where nothing is published and the destination's folder is not touched.
 	parent := filepath.Dir(path)
-	if _, err := os.Stat(parent); err != nil {
+	if opts.DryRun {
+		parent = os.TempDir()
+	} else if _, err := os.Stat(parent); err != nil {
 		return nil, fmt.Errorf("destination parent: %w", err)
 	}
 	stage, err := exportOSMkdirTemp(parent, ".datatug-export-*")
@@ -155,18 +199,17 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 		return nil, err
 	}
 	registry := map[string]string{}
-	counts := map[string]int64{}
 	for _, table := range defs {
 		def := table.def
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		count, err := exportCollection(ctx, source, stage, table.ref, def, table.nativeID, sourceIDs, constraintsChecked, format)
+		count, err := exportCollection(ctx, source, stage, table.ref, def, table.nativeID, sourceIDs, constraintsChecked, format, opts.Filters)
 		if err != nil {
 			return nil, fmt.Errorf("export %q: %w", def.Name, err)
 		}
 		registry[table.nativeID] = table.nativeID
-		counts[def.Name] = count
+		result.Tables = append(result.Tables, exportTableReport(def, count))
 	}
 	if err := exportOSMkdirAll(filepath.Join(stage, ".ingitdb"), 0o755); err != nil {
 		return nil, err
@@ -216,10 +259,13 @@ func ExportInGitDB(ctx context.Context, source dal.DB, destination string, optio
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if opts.DryRun {
+		return result, nil
+	}
 	if err := exportPublishExclusive(stage, path); err != nil {
 		return nil, fmt.Errorf("publish export: %w", err)
 	}
-	return counts, nil
+	return result, nil
 }
 
 func reserveExportCollectionDirs(stage string, tables []exportTable, mkdir func(string, os.FileMode) error) error {
@@ -339,7 +385,7 @@ func safeINGRHeaderName(name string) error {
 	return nil
 }
 
-func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.CollectionRef, def dbschema.CollectionDef, nativeID string, sourceIDs map[string]string, constraintsChecked bool, format ingitdb.RecordFormat) (int64, error) {
+func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.CollectionRef, def dbschema.CollectionDef, nativeID string, sourceIDs map[string]string, constraintsChecked bool, format ingitdb.RecordFormat, filters *filter.Directives) (int64, error) {
 	colDef, err := dalgo2ingitdb.ExportCollectionDefinition(def)
 	if err != nil {
 		return 0, err
@@ -393,6 +439,10 @@ func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.
 		return 0, err
 	}
 	var builder dal.IQueryBuilder = dal.NewQueryBuilder(dal.From(ref))
+	builder, rowFilter, err := applyExportRowFilters(builder, source, def, filters)
+	if err != nil {
+		return 0, err
+	}
 	order := def.PrimaryKey
 	if len(order) == 0 {
 		for _, field := range def.Fields {
@@ -403,7 +453,7 @@ func exportCollection(ctx context.Context, source dal.DB, stage string, ref dal.
 		builder = builder.OrderBy(dal.AscendingField(string(field)))
 	}
 	var next func() (dbschema.SourceRow, error)
-	if native, ok := dal.As[dbschema.SourceRowsReader](source); ok {
+	if native, ok := dal.As[dbschema.SourceRowsReader](source); ok && !rowFilter {
 		cursor, err := native.OpenSourceRows(ctx, &ref)
 		if err != nil {
 			return 0, fmt.Errorf("open source rows: %w", err)

@@ -1241,7 +1241,7 @@ func TestExportInGitDB_Coverage100(t *testing.T) {
 		}},
 		Fields: []dbschema.FieldDef{{Name: "id", Type: dbschema.Int}},
 	}
-	_, err = exportCollection(context.Background(), nil, stage, dal.NewRootCollectionRef("items", ""), defFK, "items", map[string]string{}, true, ingitdb.RecordFormatJSON)
+	_, err = exportCollection(context.Background(), nil, stage, dal.NewRootCollectionRef("items", ""), defFK, "items", map[string]string{}, true, ingitdb.RecordFormatJSON, nil)
 	require.ErrorContains(t, err, "source foreign key targets missing collection")
 
 	// exportCollection: dalgo2ingitdb.ExportCollectionDefinition error
@@ -1249,7 +1249,7 @@ func TestExportInGitDB_Coverage100(t *testing.T) {
 		Name:   "bad",
 		Fields: []dbschema.FieldDef{{Name: "id", Type: dbschema.Type(120)}},
 	}
-	_, err = exportCollection(context.Background(), nil, stage, dal.NewRootCollectionRef("bad", ""), defBadType, "bad", map[string]string{}, true, ingitdb.RecordFormatJSON)
+	_, err = exportCollection(context.Background(), nil, stage, dal.NewRootCollectionRef("bad", ""), defBadType, "bad", map[string]string{}, true, ingitdb.RecordFormatJSON, nil)
 	require.Error(t, err)
 
 	// ExportInGitDB options > 1

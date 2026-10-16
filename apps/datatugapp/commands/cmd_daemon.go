@@ -15,6 +15,7 @@ import (
 	"github.com/datatug/datatug-cli/pkg/api"
 	"github.com/datatug/datatug-cli/pkg/daemon"
 	"github.com/datatug/datatug-cli/pkg/dbcopy"
+	"github.com/datatug/datatug-cli/pkg/queryresults"
 	"github.com/spf13/cobra"
 )
 
@@ -140,13 +141,23 @@ func daemonURLCommand() *cobra.Command {
 				return err
 			}
 			f := cmd.Flags()
+			if f.Changed("result") {
+				return writeResultLink(cmd, format)
+			}
+			if f.Changed("row") {
+				return Exit("--row is the position of a row of a result: it goes with --result", exitCodeUsage)
+			}
+			view, err := tableViewFlag(cmd)
+			if err != nil {
+				return err
+			}
 			var req daemon.LinkRequest
 			req.Project, _ = f.GetString("project")
 			req.Env, _ = f.GetString("env")
 			req.DB, _ = f.GetString("db")
 			req.Table, _ = f.GetString("table")
 			req.Schema, _ = f.GetString("schema")
-			req.View, _ = f.GetBool("view")
+			req.View = view
 			req.Records, _ = f.GetBool("records")
 			req.Limit, _ = f.GetInt("limit")
 			req.Record, _ = f.GetString("record")
@@ -176,12 +187,68 @@ func daemonURLCommand() *cobra.Command {
 	f.String("db", "", "Database (catalog) id as the project names it, or a datatug://<project>/<db>[?env=<ENV>] reference (instead of --project and --env); never a connection URL")
 	f.String("table", "", "Table or view name")
 	f.String("schema", "", "Schema of the table (PostgreSQL)")
-	f.Bool("view", false, "The object is a view")
+	f.String("view", "", "The object is a view (bare --view); with --result, the view of the result page: --view=table|record|columns|sources|related")
+	f.Lookup("view").NoOptDefVal = "true"
+	f.String("result", "", "Link to a stored query result (the id of `query run --result-id`) instead of a table")
+	f.Int("row", 0, "With --result: the position of the row to show (1-based)")
 	f.Bool("records", false, "Link to the top records of the table")
 	f.Int("limit", 0, "With --records: how many rows (default 50, at most 1000)")
 	f.String("record", "", "Link to one record: its primary key as a JSON object")
 	addFormatFlag(cmd)
 	return cmd
+}
+
+// tableViewFlag is --view of a table link: bare (or =true) for a view.
+func tableViewFlag(cmd *cobra.Command) (bool, error) {
+	switch view, _ := cmd.Flags().GetString("view"); view {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	default:
+		return false, Exit("--view takes no value for a table link; a view name such as --view=sources goes with --result", exitCodeUsage)
+	}
+}
+
+// resultLinkExclusive are the flags of a table link, refused with --result.
+var resultLinkExclusive = []string{"project", "env", "db", "table", "schema", "records", "limit", "record"}
+
+// writeResultLink is `daemon url --result <id> [--view=<view>] [--row <n>]`.
+// Like every `daemon url`, it never starts the daemon and sends no request;
+// whether the result is there is read from the store on disk.
+func writeResultLink(cmd *cobra.Command, format string) error {
+	f := cmd.Flags()
+	for _, name := range resultLinkExclusive {
+		if f.Changed(name) {
+			return Exit("--result names a whole result: --"+name+" is not taken with it", exitCodeUsage)
+		}
+	}
+	var req daemon.ResultLinkRequest
+	req.ID, _ = f.GetString("result")
+	req.View, _ = f.GetString("view")
+	req.Row, _ = f.GetInt("row")
+	if f.Changed("row") && req.Row == 0 {
+		return Exit(fmt.Sprintf("--row must be between 1 and %d", daemon.MaxResultRow), exitCodeUsage)
+	}
+	if queryresults.ValidID(req.ID) {
+		if store, err := openResultsStore(); err == nil {
+			_, err = store.Locate(req.ID)
+			req.Exists = err == nil
+		}
+	}
+	st := newDaemonManager().Status()
+	if req.Exists {
+		req.Code = linkCode(st)
+	}
+	link, err := daemon.BuildResultLink(st, req, queryresults.ValidID)
+	if err != nil {
+		return Exit(err.Error(), exitCodeUsage)
+	}
+	if format == daemonFormatText {
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), link.URL)
+		return err
+	}
+	return writeJSON(cmd.OutOrStdout(), link)
 }
 
 // resolveLinkDB turns a datatug://<project>/<db>[?env=<ENV>] --db into the project, environment

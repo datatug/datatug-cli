@@ -38,6 +38,7 @@ var uiSupport = map[string]string{
 	KindTableMetadata: UISupportPending,
 	KindTableRecords:  UISupportPending,
 	KindRecord:        UISupportPending,
+	KindQueryResult:   UISupportPending,
 }
 
 const (

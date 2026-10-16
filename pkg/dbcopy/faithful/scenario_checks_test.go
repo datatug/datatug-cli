@@ -133,6 +133,24 @@ var scenarioChecks = map[string]func(t *testing.T, e *scenarioEnv){
 			t.Errorf("the key to a table that is not part of the copy is on the target: %v", c[15].rep)
 		}
 	},
+	"sequence_counters": func(t *testing.T, e *scenarioEnv) {
+		c := e.copies
+		if len(c) != 7 {
+			t.Fatalf("copies %d", len(c))
+		}
+		// The replay answers with what was recorded and refuses any call that was not made then: a counter that
+		// the copy sets when it must not (setval of a sequence that is past the rows) fails the replay.
+		for i, want := range map[int]string{2: "exactly one sequence", 5: "is beyond the maximum 3", 6: "counts down"} {
+			if c[i].err != nil || !hasWarningText(c[i].rep, "a.id", want) {
+				t.Errorf("copy %d: %v %v", i+1, c[i].err, c[i].rep.Warnings)
+			}
+		}
+		for _, i := range []int{1, 3, 4} {
+			if c[i].err != nil || hasWarning(c[i].rep, WarnIdentityNotCarried, "a.id") {
+				t.Errorf("copy %d moves or keeps the counter without a word: %v %v", i+1, c[i].err, c[i].rep.Warnings)
+			}
+		}
+	},
 	"filters_from_pg": func(t *testing.T, e *scenarioEnv) {
 		c := e.copies
 		if len(c) != 3 {

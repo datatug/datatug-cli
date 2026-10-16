@@ -312,43 +312,93 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"dept\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"public\".\"dept\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 2
+    },
+    {
+     "t": "s",
+     "v": "public.dept_id_seq"
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, public.dept_id_seq s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set3"
+    },
+    {
+     "t": "s",
+     "v": "3"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"public\".\"emp\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"public\".\"emp\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 3
+    },
+    {
+     "t": "s",
+     "v": "public.emp_id_seq"
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, public.emp_id_seq s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set4"
+    },
+    {
+     "t": "s",
+     "v": "4"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "commit"
@@ -367,7 +417,7 @@
    [
     {
      "t": "i",
-     "v": 66055
+     "v": 51073
     },
     {
      "t": "s",
@@ -389,7 +439,7 @@
    [
     {
      "t": "i",
-     "v": 66071
+     "v": 51089
     },
     {
      "t": "s",
@@ -411,7 +461,7 @@
    [
     {
      "t": "i",
-     "v": 66078
+     "v": 51096
     },
     {
      "t": "s",
@@ -433,7 +483,7 @@
    [
     {
      "t": "i",
-     "v": 66083
+     "v": 51101
     },
     {
      "t": "s",
@@ -3308,11 +3358,11 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 14:10:03"
+     "v": "2026-10-16 01:45:14"
     },
     {
      "t": "s",
-     "v": "2026-10-15 15:10:03.025468+01"
+     "v": "2026-10-16 02:45:14.482025+01"
     }
    ],
    [
@@ -3378,11 +3428,11 @@
     },
     {
      "t": "s",
-     "v": "2026-10-15 14:10:03"
+     "v": "2026-10-16 01:45:14"
     },
     {
      "t": "s",
-     "v": "2026-10-15 15:10:03.025468+01"
+     "v": "2026-10-16 02:45:14.482025+01"
     }
    ]
   ]

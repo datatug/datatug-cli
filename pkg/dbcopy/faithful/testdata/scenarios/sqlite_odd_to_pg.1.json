@@ -288,103 +288,228 @@
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"p\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"copy_target\".\"p\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 2
+    },
+    {
+     "t": "s",
+     "v": "copy_target.p_id_seq"
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, copy_target.p_id_seq s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set3"
+    },
+    {
+     "t": "s",
+     "v": "3"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"c\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"copy_target\".\"c\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 1
+    },
+    {
+     "t": "s",
+     "v": "copy_target.c_id_seq"
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, copy_target.c_id_seq s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set2"
+    },
+    {
+     "t": "s",
+     "v": "2"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"nonkey\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"copy_target\".\"nonkey\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 1
+    },
+    {
+     "t": "s",
+     "v": "copy_target.nonkey_id_seq"
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, copy_target.nonkey_id_seq s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set2"
+    },
+    {
+     "t": "s",
+     "v": "2"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"badthings\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"copy_target\".\"badthings\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 1
+    },
+    {
+     "t": "s",
+     "v": "copy_target.badthings_id_seq"
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, copy_target.badthings_id_seq s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set2"
+    },
+    {
+     "t": "s",
+     "v": "2"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "query",
-  "sql": "SELECT max(\"id\") FROM \"copy_target\".\"types\"",
+  "sql": "SELECT max(\"id\"), ( WITH s AS ( SELECT d.refobjid::regclass::text AS name FROM pg_attrdef ad JOIN pg_depend d ON d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid AND d.refclassid = 'pg_class'::regclass JOIN pg_class sc ON sc.oid = d.refobjid AND sc.relkind = 'S' WHERE ad.adrelid = $1::text::regclass AND ad.adnum = (SELECT attnum FROM pg_attribute WHERE attrelid = $1::text::regclass AND attname = $2)) SELECT CASE (SELECT count(*) FROM s) WHEN 0 THEN pg_get_serial_sequence($1, $2) WHEN 1 THEN (SELECT min(name) FROM s) END) FROM \"copy_target\".\"types\"",
   "cols": [
-   "max"
+   "max",
+   "case"
   ],
   "rows": [
    [
     {
      "t": "i",
      "v": 2
+    },
+    {
+     "t": "s",
+     "v": "copy_target.types_id_seq"
     }
    ]
   ]
  },
  {
-  "kind": "exec",
-  "sql": "SELECT setval(pg_get_serial_sequence($1, $2), $3, false)",
-  "affected": 1
+  "kind": "query",
+  "sql": "SELECT CASE WHEN p.seqincrement \u003c 0 THEN 'down' WHEN GREATEST(c.cur, $2::numeric) \u003e p.seqmax THEN 'max' WHEN c.cur \u003e= $2::numeric THEN 'past' ELSE 'set' || setval($1::text::regclass, $2::bigint, false)::text END, GREATEST(c.cur, $2::numeric)::text, p.seqmax::text FROM pg_sequence p, copy_target.types_id_seq s, LATERAL (SELECT CASE WHEN s.is_called THEN s.last_value::numeric + p.seqincrement ELSE s.last_value::numeric END AS cur) c WHERE p.seqrelid = $1::text::regclass",
+  "cols": [
+   "case",
+   "greatest",
+   "seqmax"
+  ],
+  "rows": [
+   [
+    {
+     "t": "s",
+     "v": "set3"
+    },
+    {
+     "t": "s",
+     "v": "3"
+    },
+    {
+     "t": "s",
+     "v": "9223372036854775807"
+    }
+   ]
+  ]
  },
  {
   "kind": "commit"
